@@ -19,14 +19,14 @@
 
     <section class="center">
       <a class="back" href="index.html">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M15 18l-6-6 6-6" stroke="#86e1e1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M15 18l-6-6 6-6" stroke="#86e1e1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
         Wróć do portalu
       </a>
 
       <div class="gameWrap" id="gameWrap">
         <div class="fsExitOverlay">
-          <button id="overlayExit" class="fsBtn" title="Exit full screen">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M9 9H4V4m11 0h5v5M9 15H4v5m11 0h5v-5" stroke="#fbbf24" stroke-width="2" stroke-linecap="round"/></svg>
+          <button id="overlayExit" type="button" class="fsBtn" title="Exit full screen">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M9 9H4V4m11 0h5v5M9 15H4v5m11 0h5v-5" stroke="#fbbf24" stroke-width="2" stroke-linecap="round"/></svg>
             Exit full screen
           </button>
         </div>
@@ -40,16 +40,16 @@
         </div>
 
         <div class="controls-row" style="margin-bottom:8px;">
-          <button id="playBtn">Zagraj (−1 żeton)</button>
-          <button id="buyBtn">Kup żetony (+10)</button>
-          <button id="resetBtn">Reset</button>
+          <button id="playBtn" type="button">Zagraj (−1 żeton)</button>
+          <button id="buyBtn" type="button">Kup żetony (+10)</button>
+          <button id="resetBtn" type="button">Reset</button>
         </div>
 
         <canvas id="game"></canvas>
 
         <div class="controls-row">
-          <button id="leftBtn">← Lewo</button>
-          <button id="rightBtn">Prawo →</button>
+          <button id="leftBtn" type="button">← Lewo</button>
+          <button id="rightBtn" type="button">Prawo →</button>
         </div>
 
         <div style="margin-top:6px;"><span id="status" style="color:#9fb0d0;" aria-live="polite"></span></div>
@@ -59,16 +59,16 @@
         <h1>Łap koty — Arcade</h1>
         <div class="actions">
           <button type="button" class="btnIcon" aria-label="Like">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M12 21s-7-4.35-7-10a4 4 0 0 1 7-2.65A4 4 0 0 1 19 11c0 5.65-7 10-7 10z" stroke="#a78bfa" stroke-width="2"/></svg>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 21s-7-4.35-7-10a4 4 0 0 1 7-2.65A4 4 0 0 1 19 11c0 5.65-7 10-7 10z" stroke="#a78bfa" stroke-width="2"/></svg>
           </button>
           <button type="button" class="btnIcon" aria-label="Share">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7M16 6l-4-4-4 4M12 2v14" stroke="#6ee7e7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7M16 6l-4-4-4 4M12 2v14" stroke="#6ee7e7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
           </button>
           <button type="button" class="btnIcon" id="btnEnterFs" title="Full screen" aria-label="Full screen">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M8 3H3v5M16 3h5v5M8 21H3v-5M21 21h-5v-5" stroke="#9fb0d0" stroke-width="2" stroke-linecap="round"/></svg>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M8 3H3v5M16 3h5v5M8 21H3v-5M21 21h-5v-5" stroke="#9fb0d0" stroke-width="2" stroke-linecap="round"/></svg>
           </button>
           <button type="button" class="btnIcon" id="btnExitFs" title="Exit full screen" aria-label="Exit full screen" style="display:none;">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M9 9H4V4m11 0h5v5M9 15H4v5m11 0h5v-5" stroke="#fbbf24" stroke-width="2" stroke-linecap="round"/></svg>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M9 9H4V4m11 0h5v5M9 15H4v5m11 0h5v-5" stroke="#fbbf24" stroke-width="2" stroke-linecap="round"/></svg>
           </button>
         </div>
       </div>
