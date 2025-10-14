@@ -1,0 +1,34 @@
+:root{
+  --bg:#0b1020; --panel:#0f1430; --border:#1f2550; --muted:#9fb0d0; --accent:#6ee7e7; --accent-2:#a78bfa;
+}
+*{box-sizing:border-box}
+body{margin:0; background:linear-gradient(180deg, #0b1020 0%, #090d19 100%); color:#e8eeff; font-family:Poppins, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;}
+.layout{ display:grid; grid-template-columns: 72px 1fr 280px; gap:14px; padding:14px; min-height:100vh; }
+@media (max-width: 1100px){ .layout{ grid-template-columns: 64px 1fr 220px; } }
+@media (max-width: 860px){ .layout{ grid-template-columns: 56px 1fr; } .right{ display:none; } }
+.left{ background:#111735; border:1px solid var(--border); border-radius:16px; padding:10px; display:flex; flex-direction:column; align-items:center; gap:8px; }
+.icon{ width:36px; height:36px; border-radius:12px; border:1px dashed var(--border); background:transparent; }
+.center{ display:flex; flex-direction:column; gap:12px; }
+.gameWrap{ background:#111735; border:1px solid var(--border); border-radius:16px; padding:12px; position:relative; }
+.gameWrap.fsActive{ border-radius:0; border:none; padding:10px; }
+.stats{ display:grid; grid-template-columns: repeat(5, 1fr); gap:8px; margin-bottom:8px; }
+@media (max-width: 560px){ .stats{ grid-template-columns: repeat(3, 1fr);} }
+@media (max-width: 380px){ .stats{ grid-template-columns: repeat(2, 1fr);} }
+.stat{ background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:10px 12px; display:flex; align-items:center; justify-content:space-between; }
+.controls-row{ display:flex; gap:8px; margin-top:8px;}
+.controls-row button{ flex:1; background:transparent; color:#86e1e1; border:1px solid var(--border); border-radius:10px; padding:10px; }
+canvas#game{ width:100%; height:auto; aspect-ratio:460/320; background:#0b1220; border:1px solid var(--border); border-radius:14px; display:block; touch-action:none; }
+.right{ background:#111735; border:1px solid var(--border); border-radius:16px; padding:12px; display:flex; flex-direction:column; gap:10px; }
+.tile{ height:76px; border-radius:12px; border:1px dashed var(--border); background:transparent; }
+.titleBar{ display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+.titleBar h1{ margin:0; font-size:20px; }
+.actions{ display:flex; gap:10px; margin-left:auto; }
+.btnIcon{ width:40px; height:40px; border-radius:12px; display:grid; place-items:center; border:1px solid var(--border); background:transparent; color:#cdd6ff; text-decoration:none; }
+.meta{ color:var(--muted); font-size:13px; margin-top:6px; }
+@keyframes pulse { 0%{transform:scale(1)} 25%{transform:scale(1.15)} 100%{transform:scale(1)} }
+.pulse{ animation:pulse 200ms ease-out; }
+.back{ display:inline-flex; align-items:center; gap:8px; text-decoration:none; color:#dfe7ff; border:1px solid var(--border); padding:8px 10px; border-radius:10px; margin-bottom:6px; }
+
+.fsExitOverlay{ position:absolute; top:12px; right:12px; z-index:5; display:none; }
+.gameWrap.fsActive .fsExitOverlay{ display:block; }
+.fsBtn{ background:rgba(15,20,48,.7); border:1px solid var(--border); color:#fbbf24; border-radius:10px; padding:8px 10px; display:inline-flex; gap:8px; align-items:center; cursor:pointer; }
