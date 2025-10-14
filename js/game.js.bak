@@ -1,12 +1,10 @@
-// Game page composed from small services (no bundler)
+// Game page script extracted from HTML and wired to CONFIG
 (function(){
-  const { CONFIG, StorageService, AudioService, FullscreenService, InputController, CatsRules } = window;
   const gameWrap = document.getElementById('gameWrap');
   const btnEnterFs = document.getElementById('btnEnterFs');
   const btnExitFs = document.getElementById('btnExitFs');
   const overlayExit = document.getElementById('overlayExit');
   const canvas = document.getElementById('game');
-  const ctx = canvas.getContext('2d');
 
   function isFullscreenActive(){
     return document.fullscreenElement === gameWrap || document.webkitFullscreenElement === gameWrap;
@@ -51,9 +49,11 @@
   window.addEventListener('resize', ()=>{ fitCanvasToViewport(); });
 
   // === Game ===
-  const storage = StorageService(CONFIG);
-  const audio = AudioService();
-  let state = storage.load();
+  const DEFAULT_STATE = window.CONFIG.DEFAULT_STATE;
+  const KEY = window.CONFIG.STORAGE_KEY;
+  function loadState(){ try { return { ...DEFAULT_STATE, ...JSON.parse(localStorage.getItem(KEY) || "{}") }; } catch { return { ...DEFAULT_STATE }; } }
+  function saveState(s){ localStorage.setItem(KEY, JSON.stringify(s)); }
+  let state = loadState();
 
   const tokensEl = document.getElementById("tokens");
   const timeLeftEl = document.getElementById("timeLeft");
@@ -102,8 +102,15 @@
   const canvasWidth = () => canvas.getBoundingClientRect().width;
   const canvasHeight = () => canvas.getBoundingClientRect().width * (1/window.CONFIG.ASPECT_RATIO);
 
-  const currentLevel = () => CatsRules.currentLevel(score);
-  function levelParams(lv){ return CatsRules.levelParams(lv, window.CONFIG.LEVEL); }
+  const currentLevel = () => 1 + Math.floor(score / 5);
+  function levelParams(lv){
+    const base = window.CONFIG.LEVEL.baseFall;
+    const per = window.CONFIG.LEVEL.fallPerLevel;
+    const spawnEvery = Math.max(window.CONFIG.LEVEL.spawnEveryMin, window.CONFIG.LEVEL.spawnEveryBase - lv*4);
+    let maxCats = 1;
+    for (const rule of window.CONFIG.LEVEL.maxCatsAt){ if (lv >= rule.level) { maxCats = rule.cats; break; } }
+    return {fallBase: base + lv*per, maxCats, spawnEvery};
+  }
   const fmtTime = (ms)=> (Math.max(0, ms)/1000).toFixed(1)+"s";
   function renderHud(){ tokensEl.textContent=state.tokens; timeLeftEl.textContent=fmtTime(msLeft); lastScoreEl.textContent=state.lastScore; highScoreEl.textContent=state.highScore; levelEl.textContent=level; playBtn.disabled=state.tokens<=0||running; statusEl.textContent=running?("Punkty: "+score):"Gotowy"; }
   function spawnCat(){ const {fallBase}=levelParams(level); const r=window.CONFIG.CAT.radius; cats.push({x:Math.random()*(canvasWidth()-2*r)+r, y:-r-5, r, vy:fallBase+Math.random()*2}); }
@@ -120,7 +127,7 @@
     for(const e of effects){ ctx.globalAlpha=Math.max(0,e.life/60); ctx.font="bold 16px system-ui"; ctx.textAlign="center"; ctx.fillStyle=e.color; ctx.fillText(e.text,e.x,e.y); ctx.globalAlpha=1; }
     ctx.fillStyle="#9fb0d0"; ctx.font="12px system-ui"; ctx.fillText(running?"Łap koty! ← → / dotknij":"Naciśnij Zagraj",10,18);
   }
-  function endGame(){ running=false; state.lastScore=score; if(score>state.highScore) state.highScore=score; storage.save(state); renderHud(); }
+  function endGame(){ running=false; state.lastScore=score; if(score>state.highScore) state.highScore=score; saveState(state); renderHud(); }
   function update(dt){
     if(!running) return;
     const W=canvasWidth(), H=canvasHeight(), Y=window.CONFIG.PADDLE.baselineOffset;
@@ -135,9 +142,9 @@
       const withinX=(c.x+c.r)>=paddle.x && (c.x-c.r)<=paddle.x+paddle.w;
       const withinY=(c.y+c.r)>=(H-Y) && (c.y-c.r)<=(H-Y+paddle.h);
       if(withinX && withinY){ score+=1; msLeft+=1000; timeLeftEl.classList.remove("pulse"); void timeLeftEl.offsetWidth; timeLeftEl.classList.add("pulse");
-        pushEffect(c.x, Math.max(20,c.y-8), "+1", "#facc15"); audio.meow(); cats.splice(i,1); continue; }
+        pushEffect(c.x, Math.max(20,c.y-8), "+1", "#facc15"); meow(); cats.splice(i,1); continue; }
       if(c.y-c.r>H){ msLeft=Math.max(0, msLeft-1000); timeLeftEl.classList.remove("pulse"); void timeLeftEl.offsetWidth; timeLeftEl.classList.add("pulse");
-          pushEffect(c.x, H-30, "-1", "#f87171"); audio.hiss(); cats.splice(i,1); if(msLeft<=0){ endGame(); return; } }
+        pushEffect(c.x, H-30, "-1", "#f87171"); hiss(); cats.splice(i,1); if(msLeft<=0){ endGame(); return; } }
     }
     for(let i=effects.length-1;i>=0;i--){ const e=effects[i]; e.y+=e.vy; e.life-=1; if(e.life<=0) effects.splice(i,1); }
     renderHud();
@@ -145,9 +152,9 @@
   let last=0; function loop(ts){ if(!last) last=ts; const dt=ts-last; last=ts; update(dt); draw(); requestAnimationFrame(loop); }
   requestAnimationFrame(loop);
 
-  function startGame(){ if(running||state.tokens<=0) return; audio.ensure(); state.tokens-=1; storage.save(state); running=true; score=0; level=1; cats=[]; spawnCooldown=0; msLeft=15000; renderHud(); }
-  const buy=()=>{ if(running) return; state.tokens+=10; storage.save(state); renderHud(); };
-  const resetDemo=()=>{ if(running) return; state={...window.CONFIG.DEFAULT_STATE}; storage.save(state); renderHud(); };
+  function startGame(){ if(running||state.tokens<=0) return; ensureAudio(); state.tokens-=1; saveState(state); running=true; score=0; level=1; cats=[]; spawnCooldown=0; msLeft=15000; renderHud(); }
+  const buy=()=>{ if(running) return; state.tokens+=10; saveState(state); renderHud(); };
+  const resetDemo=()=>{ if(running) return; state={...DEFAULT_STATE}; saveState(state); renderHud(); };
 
   window.addEventListener('keydown', e=>{ if(e.key==='ArrowLeft') paddle.left=true; if(e.key==='ArrowRight') paddle.right=true; });
   window.addEventListener('keyup', e=>{ if(e.key==='ArrowLeft') paddle.left=false; if(e.key==='ArrowRight') paddle.right=false; });
@@ -172,3 +179,5 @@
 
   (function(){ syncFsButtons(); renderHud(); draw(); })();
 })();
+
+
