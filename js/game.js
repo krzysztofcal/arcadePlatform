@@ -83,7 +83,7 @@
     for(const e of effects){ ctx.globalAlpha=Math.max(0,e.life/60); ctx.font="bold 16px system-ui"; ctx.textAlign="center"; ctx.fillStyle=e.color; ctx.fillText(e.text,e.x,e.y); ctx.globalAlpha=1; }
     ctx.fillStyle="#9fb0d0"; ctx.font="12px system-ui"; ctx.fillText(running?"Łap koty! ← → / dotknij":"Naciśnij Zagraj",10,18);
   }
-  function endGame(){ running=false; state.lastScore=score; if(score>state.highScore) state.highScore=score; storage.save(state); renderHud(); }
+  function endGame(){ running=false; paused=false; state.lastScore=score; if(score>state.highScore) state.highScore=score; storage.save(state); setPauseUI && setPauseUI(); renderHud(); }
   function update(dt){
     if(!running || paused) return;
     const W=canvasWidth(), H=canvasHeight(), Y=window.CONFIG.PADDLE.baselineOffset;
@@ -108,7 +108,7 @@
   let last=0; function loop(ts){ if(!last) last=ts; const dt=ts-last; last=ts; update(dt); draw(); requestAnimationFrame(loop); }
   requestAnimationFrame(loop);
 
-  function startGame(){ if(running||state.tokens<=0) return; audio.ensure(); state.tokens-=1; storage.save(state); running=true; paused=false; score=0; level=1; cats=[]; spawnCooldown=0; msLeft=15000; renderHud(); }
+  function startGame(){ if(running||state.tokens<=0) return; audio.ensure(); state.tokens-=1; storage.save(state); running=true; paused=false; score=0; level=1; cats=[]; spawnCooldown=0; msLeft=15000; setPauseUI && setPauseUI(); renderHud(); }
   const buy=()=>{ if(running) return; state.tokens+=10; storage.save(state); renderHud(); };
   const resetDemo=()=>{ if(running) return; state={...window.CONFIG.DEFAULT_STATE}; storage.save(state); renderHud(); };
 
