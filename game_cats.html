@@ -53,7 +53,7 @@
     </aside>
 
     <section class="center">
-      <a class="back" href="arcade_portal_v2.html">
+      <a class="back" href="index.html">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M15 18l-6-6 6-6" stroke="#86e1e1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
         Wróć do portalu
       </a>
@@ -290,6 +290,35 @@
     resetBtn.addEventListener('click', resetDemo);
 
     (function(){ syncFsButtons(); renderHud(); draw(); })();
+  </script>
+  <script>
+    (function(){
+      try {
+        // Polish UI text fixes (encoding-safe)
+        document.title = "\u0141ap koty \u2014 Strona gry (Fullscreen FIX)";
+        var back = document.querySelector('.back');
+        if (back) {
+          // Replace trailing text node after the icon
+          var nodes = Array.prototype.slice.call(back.childNodes);
+          var textNode = nodes.find(function(n){ return n.nodeType === 3; });
+          if (textNode) textNode.nodeValue = " Wróć do portalu";
+        }
+        var stats = document.querySelectorAll('.stats .stat span');
+        if (stats && stats[0]) stats[0].textContent = "\u017Betony"; // Żetony
+        var playBtnEl = document.getElementById('playBtn');
+        if (playBtnEl) playBtnEl.textContent = "Zagraj (\u22121 \u017Ceton)"; // −1 żeton
+        var buyBtnEl = document.getElementById('buyBtn');
+        if (buyBtnEl) buyBtnEl.textContent = "Kup \u017Cetony (+10)"; // Żetony
+        var leftBtnEl = document.getElementById('leftBtn');
+        if (leftBtnEl) leftBtnEl.textContent = "\u2190 Lewo"; // ←
+        var rightBtnEl = document.getElementById('rightBtn');
+        if (rightBtnEl) rightBtnEl.textContent = "Prawo \u2192"; // →
+        var h1 = document.querySelector('.titleBar h1');
+        if (h1) h1.textContent = "\u0141ap koty \u2014 Arcade"; // Łap koty — Arcade
+        var meta = document.querySelector('.meta');
+        if (meta) meta.textContent = "Pe\u0142ny ekran wykorzystuje Fullscreen API. U\u017Cyj przycisku w pasku lub \u017C\u00F3\u0142tego przycisku w prawym g\u00F3rnym rogu w trybie pe\u0142nego ekranu. Esc te\u017C dzia\u0142a.";
+      } catch (e) { /* ignore */ }
+    })();
   </script>
 </body>
 </html>
