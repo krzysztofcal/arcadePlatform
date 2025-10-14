@@ -148,6 +148,15 @@
     onTogglePause: togglePause
   });
 
+  // Redundant direct bindings as a safety net (in case controller wiring fails)
+  try {
+    playBtn && playBtn.addEventListener('click', startGame);
+    buyBtn && buyBtn.addEventListener('click', buy);
+    resetBtn && resetBtn.addEventListener('click', resetDemo);
+    btnMute && btnMute.addEventListener('click', toggleMute);
+    btnPause && btnPause.addEventListener('click', togglePause);
+  } catch {}
+
   window.addEventListener('visibilitychange', ()=>{ if (document.hidden && running) { paused = true; setPauseUI(); } });
   (function(){ if (audio.setMuted) audio.setMuted(!!state.muted); setMuteUI(); setPauseUI(); fs.syncButtons(); renderHud(); draw(); })();
 })();
