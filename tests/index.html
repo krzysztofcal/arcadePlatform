@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Arcade Platform Tests</title>
+  <style>
+    body{font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; padding:16px;}
+    #test-output{ margin-top: 12px; }
+  </style>
+  <script src="../js/config.js"></script>
+  <script src="harness.js"></script>
+  <!-- Modules under test -->
+  <script src="../js/features/cats/CatsRules.js"></script>
+  <script src="../js/core/StorageService.js"></script>
+  <!-- Tests -->
+  <script src="catsRules.test.js"></script>
+  <script src="storageService.test.js"></script>
+</head>
+<body>
+  <h1>Arcade Platform Tests</h1>
+  <div id="test-output"></div>
+  <script>window.__renderResults();</script>
+</body>
+</html>
+
