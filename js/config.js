@@ -3,7 +3,7 @@ window.CONFIG = {
   ASPECT_RATIO: 460/320,
   FULLSCREEN_RESERVED: 200,
   STORAGE_KEY: "arcade_cats_smooth_state_page_fs_fix",
-  DEFAULT_STATE: { tokens: 10, lastScore: 0, highScore: 0 },
+  DEFAULT_STATE: { tokens: 10, lastScore: 0, highScore: 0, muted: false },
   PADDLE: { width: 110, height: 14, speed: 6, baselineOffset: 24 },
   CAT: { radius: 11 },
   LEVEL: {
@@ -19,4 +19,3 @@ window.CONFIG = {
     ]
   }
 };
-

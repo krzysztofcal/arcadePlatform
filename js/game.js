@@ -37,10 +37,12 @@
   const statusEl = document.getElementById("status");
   const leftBtn = document.getElementById("leftBtn");
   const rightBtn = document.getElementById("rightBtn");
+  const btnMute = document.getElementById("btnMute");
+  const btnPause = document.getElementById("btnPause");
 
   // Audio handled via AudioService
 
-  let running=false, score=0, msLeft=15000, level=1;
+  let running=false, paused=false, score=0, msLeft=15000, level=1;
   let paddle={x:0, w:window.CONFIG.PADDLE.width, h:window.CONFIG.PADDLE.height, speed:window.CONFIG.PADDLE.speed, left:false, right:false};
   let cats=[], spawnCooldown=0, effects=[];
 
@@ -83,7 +85,7 @@
   }
   function endGame(){ running=false; state.lastScore=score; if(score>state.highScore) state.highScore=score; storage.save(state); renderHud(); }
   function update(dt){
-    if(!running) return;
+    if(!running || paused) return;
     const W=canvasWidth(), H=canvasHeight(), Y=window.CONFIG.PADDLE.baselineOffset;
     msLeft -= dt; if(msLeft<=0){ msLeft=0; endGame(); return; }
     const newLevel=currentLevel(); if(newLevel!==level) level=newLevel;
@@ -106,9 +108,33 @@
   let last=0; function loop(ts){ if(!last) last=ts; const dt=ts-last; last=ts; update(dt); draw(); requestAnimationFrame(loop); }
   requestAnimationFrame(loop);
 
-  function startGame(){ if(running||state.tokens<=0) return; audio.ensure(); state.tokens-=1; storage.save(state); running=true; score=0; level=1; cats=[]; spawnCooldown=0; msLeft=15000; renderHud(); }
+  function startGame(){ if(running||state.tokens<=0) return; audio.ensure(); state.tokens-=1; storage.save(state); running=true; paused=false; score=0; level=1; cats=[]; spawnCooldown=0; msLeft=15000; renderHud(); }
   const buy=()=>{ if(running) return; state.tokens+=10; storage.save(state); renderHud(); };
   const resetDemo=()=>{ if(running) return; state={...window.CONFIG.DEFAULT_STATE}; storage.save(state); renderHud(); };
+
+  function setMuteUI(){
+    if (!btnMute) return;
+    const muted = audio.isMuted ? audio.isMuted() : !!state.muted;
+    btnMute.setAttribute('aria-pressed', muted ? 'true' : 'false');
+    btnMute.title = muted ? 'Unmute' : 'Mute';
+    btnMute.textContent = muted ? '🔈' : '🔇';
+  }
+  function toggleMute(){
+    if (audio.setMuted) {
+      audio.setMuted(!(audio.isMuted && audio.isMuted()));
+    }
+    state.muted = audio.isMuted ? audio.isMuted() : !state.muted;
+    storage.save(state);
+    setMuteUI();
+  }
+  function setPauseUI(){
+    if (!btnPause) return;
+    btnPause.setAttribute('aria-pressed', paused ? 'true' : 'false');
+    btnPause.title = paused ? 'Resume' : 'Pause';
+    btnPause.textContent = paused ? '▶' : '⏸';
+    btnPause.disabled = !running;
+  }
+  function togglePause(){ if (!running) return; paused = !paused; setPauseUI(); renderHud(); }
 
   // Use InputController for all inputs
   InputController({
@@ -116,8 +142,12 @@
     widthProvider: () => canvas.getBoundingClientRect().width,
     onStart: startGame,
     onBuy: buy,
-    onReset: resetDemo
+    onReset: resetDemo,
+    btnMute, btnPause,
+    onToggleMute: toggleMute,
+    onTogglePause: togglePause
   });
 
-  (function(){ fs.syncButtons(); renderHud(); draw(); })();
+  window.addEventListener('visibilitychange', ()=>{ if (document.hidden && running) { paused = true; setPauseUI(); } });
+  (function(){ if (audio.setMuted) audio.setMuted(!!state.muted); setMuteUI(); setPauseUI(); fs.syncButtons(); renderHud(); draw(); })();
 })();

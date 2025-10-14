@@ -1,6 +1,6 @@
 (function(){
   function InputController(opts){
-    const { canvas, paddle, leftBtn, rightBtn, onStart, onBuy, onReset, playBtn, buyBtn, resetBtn, widthProvider } = opts;
+    const { canvas, paddle, leftBtn, rightBtn, onStart, onBuy, onReset, playBtn, buyBtn, resetBtn, widthProvider, btnMute, btnPause, onToggleMute, onTogglePause } = opts;
     function clientToCanvasX(clientX){ const r=canvas.getBoundingClientRect(); return (clientX-r.left); }
     function setPaddleByPointerX(clientX){ const cx=clientToCanvasX(clientX); paddle.x=Math.max(0, Math.min(widthProvider()-paddle.w, cx-paddle.w/2)); }
     window.addEventListener('keydown', e=>{ if(e.key==='ArrowLeft') paddle.left=true; if(e.key==='ArrowRight') paddle.right=true; });
@@ -19,8 +19,15 @@
     playBtn.addEventListener('click', onStart);
     buyBtn.addEventListener('click', onBuy);
     resetBtn.addEventListener('click', onReset);
+
+    if (btnMute && onToggleMute) btnMute.addEventListener('click', onToggleMute);
+    if (btnPause && onTogglePause) btnPause.addEventListener('click', onTogglePause);
+
+    window.addEventListener('keydown', e=>{
+      if (e.code === 'Space') { e.preventDefault(); if (onTogglePause) onTogglePause(); }
+      if (e.code === 'KeyM') { if (onToggleMute) onToggleMute(); }
+    });
     return { };
   }
   window.InputController = InputController;
 })();
-
