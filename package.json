@@ -1,0 +1,13 @@
+{
+  "name": "arcade-platform",
+  "private": true,
+  "version": "0.0.0",
+  "scripts": {
+    "test": "playwright test",
+    "test:install": "playwright install --with-deps"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.46.0"
+  }
+}
+
