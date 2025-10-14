@@ -8,47 +8,18 @@
   const canvas = document.getElementById('game');
   const ctx = canvas.getContext('2d');
 
-  function isFullscreenActive(){
-    return document.fullscreenElement === gameWrap || document.webkitFullscreenElement === gameWrap;
-  }
-  function enterFullscreen() {
-    if (gameWrap.requestFullscreen) gameWrap.requestFullscreen();
-    else if (gameWrap.webkitRequestFullscreen) gameWrap.webkitRequestFullscreen();
-  }
-  function exitFullscreen() {
-    if (document.exitFullscreen) document.exitFullscreen();
-    else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
-  }
-  btnEnterFs.addEventListener('click', (e)=>{ e.preventDefault(); enterFullscreen(); });
-  btnExitFs.addEventListener('click', (e)=>{ e.preventDefault(); exitFullscreen(); });
-  overlayExit.addEventListener('click', (e)=>{ e.preventDefault(); exitFullscreen(); });
-
-  function syncFsButtons() {
-    const isFs = isFullscreenActive();
-    btnEnterFs.style.display = isFs ? 'none' : '';
-    btnExitFs.style.display = isFs ? '' : 'none';
-    gameWrap.classList.toggle('fsActive', isFs);
-    fitCanvasToViewport();
-  }
-  document.addEventListener('fullscreenchange', syncFsButtons);
-  document.addEventListener('webkitfullscreenchange', syncFsButtons);
-
-  function fitCanvasToViewport(){
-    if (!isFullscreenActive()) {
-      canvas.style.width = '100%';
-      requestAnimationFrame(resizeCanvas);
-      return;
-    }
-    const aspect = window.CONFIG.ASPECT_RATIO;
-    const wrapRect = gameWrap.getBoundingClientRect();
-    const reserved = window.CONFIG.FULLSCREEN_RESERVED;
-    const maxW = wrapRect.width - 20;
-    const maxHforCanvas = Math.max(200, (window.innerHeight - reserved));
-    const fitWidth = Math.min(maxW, Math.floor(maxHforCanvas * aspect));
-    canvas.style.width = fitWidth + 'px';
-    requestAnimationFrame(resizeCanvas);
-  }
-  window.addEventListener('resize', ()=>{ fitCanvasToViewport(); });
+  // Fullscreen service integration
+  const fs = FullscreenService({
+    wrap: gameWrap,
+    btnEnter: btnEnterFs,
+    btnExit: btnExitFs,
+    overlayExit,
+    canvas,
+    aspect: window.CONFIG.ASPECT_RATIO,
+    reserved: window.CONFIG.FULLSCREEN_RESERVED,
+    onResizeRequest: resizeCanvas
+  });
+  fs.init();
 
   // === Game ===
   const storage = StorageService(CONFIG);
@@ -139,26 +110,14 @@
   const buy=()=>{ if(running) return; state.tokens+=10; storage.save(state); renderHud(); };
   const resetDemo=()=>{ if(running) return; state={...window.CONFIG.DEFAULT_STATE}; storage.save(state); renderHud(); };
 
-  window.addEventListener('keydown', e=>{ if(e.key==='ArrowLeft') paddle.left=true; if(e.key==='ArrowRight') paddle.right=true; });
-  window.addEventListener('keyup', e=>{ if(e.key==='ArrowLeft') paddle.left=false; if(e.key==='ArrowRight') paddle.right=false; });
-  function clientToCanvasX(clientX){ const r=canvas.getBoundingClientRect(); return (clientX-r.left); }
-  function setPaddleByPointerX(clientX){ const cx=clientToCanvasX(clientX); paddle.x=Math.max(0, Math.min(canvasWidth()-paddle.w, cx-paddle.w/2)); }
-  canvas.addEventListener('pointerdown', e=>{ setPaddleByPointerX(e.clientX); e.preventDefault(); }, {passive:false});
-  canvas.addEventListener('pointermove', e=>{ if(e.buttons) setPaddleByPointerX(e.clientX); e.preventDefault(); }, {passive:false});
+  // Use InputController for all inputs
+  InputController({
+    canvas, paddle, leftBtn, rightBtn, playBtn, buyBtn, resetBtn,
+    widthProvider: () => canvas.getBoundingClientRect().width,
+    onStart: startGame,
+    onBuy: buy,
+    onReset: resetDemo
+  });
 
-  let btnInterval=null;
-  function pressDir(dir){ if(btnInterval) clearInterval(btnInterval); if(dir==='left'){ paddle.left=true; paddle.right=false; } if(dir==='right'){ paddle.right=true; paddle.left=false; } btnInterval=setInterval(()=>{},50); }
-  function releaseDir(){ if(btnInterval) clearInterval(btnInterval); paddle.left=false; paddle.right=false; }
-  leftBtn.addEventListener('pointerdown',()=>pressDir('left'));
-  rightBtn.addEventListener('pointerdown',()=>pressDir('right'));
-  leftBtn.addEventListener('pointerup',releaseDir);
-  rightBtn.addEventListener('pointerup',releaseDir);
-  leftBtn.addEventListener('pointerleave',releaseDir);
-  rightBtn.addEventListener('pointerleave',releaseDir);
-
-  playBtn.addEventListener('click', startGame);
-  buyBtn.addEventListener('click', buy);
-  resetBtn.addEventListener('click', resetDemo);
-
-  (function(){ syncFsButtons(); renderHud(); draw(); })();
+  (function(){ fs.syncButtons(); renderHud(); draw(); })();
 })();
