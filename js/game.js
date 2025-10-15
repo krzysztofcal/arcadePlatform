@@ -58,18 +58,44 @@
     ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
   }
   new ResizeObserver(()=>{ requestAnimationFrame(resizeCanvas); }).observe(canvas);
-  window.addEventListener('resize', ()=>requestAnimationFrame(resizeCanvas));
+  window.addEventListener('resize', ()=>{ fitCanvasStandard(); requestAnimationFrame(resizeCanvas); });
   document.addEventListener('fullscreenchange', ()=>requestAnimationFrame(resizeCanvas));
   document.addEventListener('webkitfullscreenchange', ()=>requestAnimationFrame(resizeCanvas));
   resizeCanvas();
   const canvasWidth = () => canvas.getBoundingClientRect().width;
   const canvasHeight = () => canvas.getBoundingClientRect().width * (1/window.CONFIG.ASPECT_RATIO);
+  // Fit canvas even when not in fullscreen so UI remains visible on small screens
+  function __measureReservedPx(){
+    let total = 0; try {
+      const wrap = document.getElementById('gameWrap');
+      const pad = getComputedStyle(wrap);
+      total += (parseFloat(pad.paddingTop)||0) + (parseFloat(pad.paddingBottom)||0);
+      wrap.querySelectorAll('.stats, .controls-row').forEach(el=>{ const r=el.getBoundingClientRect(); total += r.height; });
+      const status = wrap.querySelector('#status'); if (status){ total += status.getBoundingClientRect().height; }
+      total += 20; // small buffer
+    } catch {}
+    return Math.max(100, Math.min(window.innerHeight * 0.7, total));
+  }
+  function fitCanvasStandard(){
+    if (fs && fs.isActive && fs.isActive()) return; // fullscreen will manage
+    const wrapRect = gameWrap.getBoundingClientRect();
+    const maxW = Math.max(160, wrapRect.width - 20);
+    const availH = Math.max(160, window.innerHeight - __measureReservedPx());
+    const fitW = Math.min(maxW, Math.floor(availH * window.CONFIG.ASPECT_RATIO));
+    if (fitW > 0) { canvas.style.width = fitW + 'px'; requestAnimationFrame(resizeCanvas); }
+  }
 
   const currentLevel = () => CatsRules.currentLevel(score);
   function levelParams(lv){ return CatsRules.levelParams(lv, window.CONFIG.LEVEL); }
   const fmtTime = (ms)=> (Math.max(0, ms)/1000).toFixed(1)+"s";
   function renderHud(){ tokensEl.textContent=state.tokens; timeLeftEl.textContent=fmtTime(msLeft); lastScoreEl.textContent=state.lastScore; highScoreEl.textContent=state.highScore; levelEl.textContent=level; playBtn.disabled=state.tokens<=0||running; statusEl.textContent=running?("Punkty: "+score):"Gotowy"; }
-  function spawnCat(){ const {fallBase}=levelParams(level); const r=window.CONFIG.CAT.radius; cats.push({x:Math.random()*(canvasWidth()-2*r)+r, y:-r-5, r, vy:fallBase+Math.random()*2}); }
+  function spawnCat(){
+    const {fallBase}=levelParams(level);
+    const r=window.CONFIG.CAT.radius;
+    const H = canvasHeight();
+    const scale = Math.max(0.6, Math.min(2.0, H/320));
+    cats.push({ x:Math.random()*(canvasWidth()-2*r)+r, y:-r-5, r, vy:(fallBase+Math.random()*2)*scale });
+  }
   function pushEffect(x,y,text,color){ effects.push({x,y,text,color,vy:-0.6,life:60}); }
 
   function draw(){
@@ -158,5 +184,5 @@
   } catch {}
 
   window.addEventListener('visibilitychange', ()=>{ if (document.hidden && running) { paused = true; setPauseUI(); } });
-  (function(){ if (audio.setMuted) audio.setMuted(!!state.muted); setMuteUI(); setPauseUI(); fs.syncButtons(); renderHud(); draw(); })();
+  (function(){ if (audio.setMuted) audio.setMuted(!!state.muted); setMuteUI(); setPauseUI(); fs.syncButtons(); fitCanvasStandard(); renderHud(); draw(); })();
 })();
