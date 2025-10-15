@@ -39,10 +39,17 @@
   const rightBtn = document.getElementById("rightBtn");
   const btnMute = document.getElementById("btnMute");
   const btnPause = document.getElementById("btnPause");
+  const centerOverlay = document.getElementById('centerOverlay');
+  const bigStartBtn = document.getElementById('bigStartBtn');
+  const gameOverOverlay = document.getElementById('gameOverOverlay');
+  const statsPoints = document.getElementById('statsPoints');
+  const statsLevel = document.getElementById('statsLevel');
+  const statsTime = document.getElementById('statsTime');
+  const replayBtn = document.getElementById('replayBtn');
 
   // Audio handled via AudioService
 
-  let running=false, paused=false, score=0, msLeft=15000, level=1;
+  let running=false, paused=false, score=0, msLeft=15000, level=1, startTs=0;
   let paddle={x:0, w:window.CONFIG.PADDLE.width, h:window.CONFIG.PADDLE.height, speed:window.CONFIG.PADDLE.speed, left:false, right:false};
   let cats=[], spawnCooldown=0, effects=[];
 
@@ -109,7 +116,16 @@
     for(const e of effects){ ctx.globalAlpha=Math.max(0,e.life/60); ctx.font="bold 16px system-ui"; ctx.textAlign="center"; ctx.fillStyle=e.color; ctx.fillText(e.text,e.x,e.y); ctx.globalAlpha=1; }
     ctx.fillStyle="#9fb0d0"; ctx.font="12px system-ui"; ctx.fillText(running?"Łap koty! ← → / dotknij":"Naciśnij Zagraj",10,18);
   }
-  function endGame(){ running=false; paused=false; state.lastScore=score; if(score>state.highScore) state.highScore=score; storage.save(state); setPauseUI && setPauseUI(); renderHud(); }
+  function endGame(){
+    running=false; paused=false; state.lastScore=score; if(score>state.highScore) state.highScore=score; storage.save(state);
+    setPauseUI && setPauseUI(); renderHud();
+    // Show game over overlay with stats
+    if (statsPoints) statsPoints.textContent = String(score);
+    if (statsLevel) statsLevel.textContent = String(level);
+    if (statsTime){ const secs = Math.max(0, (performance.now()-startTs)/1000); statsTime.textContent = secs.toFixed(1)+"s"; }
+    if (gameOverOverlay) gameOverOverlay.classList.remove('hidden');
+    if (centerOverlay) centerOverlay.classList.add('hidden');
+  }
   function update(dt){
     if(!running || paused) return;
     const W=canvasWidth(), H=canvasHeight(), Y=window.CONFIG.PADDLE.baselineOffset;
@@ -134,7 +150,13 @@
   let last=0; function loop(ts){ if(!last) last=ts; const dt=ts-last; last=ts; update(dt); draw(); requestAnimationFrame(loop); }
   requestAnimationFrame(loop);
 
-  function startGame(){ if(running||state.tokens<=0) return; audio.ensure(); state.tokens-=1; storage.save(state); running=true; paused=false; score=0; level=1; cats=[]; spawnCooldown=0; msLeft=15000; setPauseUI && setPauseUI(); renderHud(); }
+  function startGame(){
+    if(running||state.tokens<=0) return; audio.ensure(); state.tokens-=1; storage.save(state);
+    running=true; paused=false; score=0; level=1; cats=[]; spawnCooldown=0; msLeft=15000; startTs = performance.now(); setPauseUI && setPauseUI();
+    if (centerOverlay) centerOverlay.classList.add('hidden');
+    if (gameOverOverlay) gameOverOverlay.classList.add('hidden');
+    renderHud();
+  }
   const buy=()=>{ if(running) return; state.tokens+=10; storage.save(state); renderHud(); };
   const resetDemo=()=>{ if(running) return; state={...window.CONFIG.DEFAULT_STATE}; storage.save(state); renderHud(); };
 
@@ -181,8 +203,16 @@
     resetBtn && resetBtn.addEventListener('click', resetDemo);
     btnMute && btnMute.addEventListener('click', toggleMute);
     btnPause && btnPause.addEventListener('click', togglePause);
+    bigStartBtn && bigStartBtn.addEventListener('click', startGame);
+    replayBtn && replayBtn.addEventListener('click', startGame);
   } catch {}
 
   window.addEventListener('visibilitychange', ()=>{ if (document.hidden && running) { paused = true; setPauseUI(); } });
-  (function(){ if (audio.setMuted) audio.setMuted(!!state.muted); setMuteUI(); setPauseUI(); fs.syncButtons(); fitCanvasStandard(); renderHud(); draw(); })();
+  (function(){
+    if (audio.setMuted) audio.setMuted(!!state.muted);
+    setMuteUI(); setPauseUI(); fs.syncButtons(); fitCanvasStandard(); renderHud(); draw();
+    // Show center start overlay on load
+    if (centerOverlay) centerOverlay.classList.remove('hidden');
+    if (gameOverOverlay) gameOverOverlay.classList.add('hidden');
+  })();
 })();

@@ -32,6 +32,26 @@
           </button>
         </div>
 
+        <!-- Center start overlay -->
+        <div class="centerOverlay" id="centerOverlay">
+          <div>
+            <button id="bigStartBtn" class="bigStartBtn" type="button">Zagraj teraz</button>
+          </div>
+        </div>
+
+        <!-- Game over overlay -->
+        <div class="gameOverOverlay hidden" id="gameOverOverlay">
+          <div class="statsPanel">
+            <h2>Koniec gry</h2>
+            <div class="row"><span>Punkty</span><span class="val" id="statsPoints">-</span></div>
+            <div class="row"><span>Poziom</span><span class="val" id="statsLevel">-</span></div>
+            <div class="row"><span>Czas gry</span><span class="val" id="statsTime">-</span></div>
+            <div class="actions">
+              <button id="replayBtn" type="button">Zagraj ponownie</button>
+            </div>
+          </div>
+        </div>
+
         <div class="stats">
           <div class="stat"><span>Żetony</span><strong id="tokens">-</strong></div>
           <div class="stat"><span>Czas</span><strong id="timeLeft">-</strong></div>
