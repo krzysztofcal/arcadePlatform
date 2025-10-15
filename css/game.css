@@ -11,6 +11,13 @@ body{margin:0; background:linear-gradient(180deg, #0b1020 0%, #090d19 100%); col
 .center{ display:flex; flex-direction:column; gap:12px; }
 .gameWrap{ background:#111735; border:1px solid var(--border); border-radius:16px; padding:12px; position:relative; }
 .gameWrap.fsActive{ border-radius:0; border:none; padding:10px; }
+.gameWrap.fsActive{
+  /* Respect iOS safe-area insets in fullscreen */
+  padding-top: calc(10px + env(safe-area-inset-top));
+  padding-right: calc(10px + env(safe-area-inset-right));
+  padding-bottom: calc(10px + env(safe-area-inset-bottom));
+  padding-left: calc(10px + env(safe-area-inset-left));
+}
 .stats{ display:grid; grid-template-columns: repeat(5, 1fr); gap:8px; margin-bottom:8px; }
 @media (max-width: 560px){ .stats{ grid-template-columns: repeat(3, 1fr);} }
 @media (max-width: 380px){ .stats{ grid-template-columns: repeat(2, 1fr);} }
