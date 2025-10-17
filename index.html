@@ -9,6 +9,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="css/portal.css">
+  <script src="js/i18n.js" defer></script>
 </head>
 <body>
   <div class="shell">
@@ -30,6 +31,22 @@
       <section class="grid" id="gamesGrid"></section>
     </main>
   </div>
+
+  <footer class="site-footer" role="contentinfo">
+    <nav class="footer-nav" aria-label="Footer">
+      <a class="ft-link" data-i18n="about" data-href-en="about.en.html" data-href-pl="about.pl.html" href="about.en.html">About</a>
+      <span class="sep">•</span>
+      <a class="ft-link" data-i18n="terms" data-href-en="legal/terms.en.html" data-href-pl="legal/terms.pl.html" href="legal/terms.en.html">Terms</a>
+      <span class="sep">•</span>
+      <a class="ft-link" data-i18n="privacy" data-href-en="legal/privacy.en.html" data-href-pl="legal/privacy.pl.html" href="legal/privacy.en.html">Privacy</a>
+      <span class="sep">•</span>
+      <a class="ft-link" data-i18n="contact" href="#">Contact</a>
+    </nav>
+    <div class="lang-switch" aria-label="Language">
+      <button type="button" class="lang-btn" data-lang="pl" aria-pressed="false">PL</button>
+      <button type="button" class="lang-btn" data-lang="en" aria-pressed="false">EN</button>
+    </div>
+  </footer>
   <script src="js/games.js" defer></script>`r`n  <script src="js/portal.js" defer></script>`r`n  <script>
     (function(){
       try {

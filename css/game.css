@@ -59,3 +59,13 @@ button:focus-visible, a:focus-visible{ outline:2px solid var(--accent); outline-
 
 /* Utility */
 .visually-hidden{ position:absolute !important; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
+
+/* Footer */
+.site-footer{ margin:24px 16px; padding:12px 0; border-top:1px solid var(--border); display:flex; gap:12px; align-items:center; justify-content:space-between; color:#9fb0d0; }
+.footer-nav{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+.footer-nav .ft-link{ color:#9fb0d0; text-decoration:none; }
+.footer-nav .ft-link:hover{ text-decoration:underline; }
+.footer-nav .sep{ opacity:.5; }
+.lang-switch{ display:flex; gap:6px; }
+.lang-btn{ background:transparent; border:1px solid var(--border); color:#cdd6ff; padding:6px 10px; border-radius:8px; cursor:pointer; }
+.lang-btn[aria-pressed="true"]{ background:rgba(110,231,231,.12); color:#e8eeff; }
