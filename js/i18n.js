@@ -5,7 +5,12 @@
     terms: { en: 'Terms', pl: 'Regulamin' },
     privacy: { en: 'Privacy', pl: 'Prywatność' },
     contact: { en: 'Contact', pl: 'Kontakt' },
+    playChip: { en: 'PLAY', pl: 'GRAJ' },
+    searchPlaceholder: { en: 'Search games (inactive in MVP)', pl: 'Szukaj gier (nieaktywne w MVP)' },
+    searchAria: { en: 'Search games', pl: 'Szukaj gier' }
   };
+
+  let currentLang = 'en';
 
   function detectLang(){
     const params = new URLSearchParams(location.search);
@@ -25,6 +30,7 @@
     } catch {}
   }
   function applyLang(lang){
+    currentLang = lang;
     // Update footer texts
     document.querySelectorAll('[data-i18n]').forEach(el=>{
       const key = el.getAttribute('data-i18n');
@@ -36,10 +42,22 @@
       const href = el.getAttribute(lang === 'pl' ? 'data-href-pl' : 'data-href-en');
       if (href) el.setAttribute('href', href + location.search);
     });
+    // Inputs: placeholder and aria-label
+    document.querySelectorAll('[data-i18n-placeholder]').forEach(el=>{
+      const k = el.getAttribute('data-i18n-placeholder');
+      const v = dict[k] && dict[k][lang];
+      if (v) el.setAttribute('placeholder', v);
+    });
+    document.querySelectorAll('[data-i18n-aria]').forEach(el=>{
+      const k = el.getAttribute('data-i18n-aria');
+      const v = dict[k] && dict[k][lang];
+      if (v) el.setAttribute('aria-label', v);
+    });
     // Toggle pressed state
     document.querySelectorAll('.lang-btn').forEach(btn=>{
       btn.setAttribute('aria-pressed', btn.getAttribute('data-lang') === lang ? 'true' : 'false');
     });
+    try { document.dispatchEvent(new CustomEvent('langchange', { detail: { lang } })); } catch {}
   }
 
   function init(){
@@ -55,5 +73,10 @@
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
-})();
 
+  window.I18N = {
+    t: (key)=> (dict[key] && dict[key][currentLang]) || '',
+    getLang: ()=> currentLang,
+    setLang: (l)=>{ persistLang(l); applyLang(l); }
+  };
+})();
