@@ -12,18 +12,50 @@
   <script src="js/i18n.js" defer></script>
 </head>
 <body>
+  <div class="topbar">
+    <button class="hamburger" id="sbToggle" aria-label="Toggle navigation" aria-expanded="false">
+      <span></span><span></span><span></span>
+    </button>
+    <div class="brand"><div class="logo" aria-hidden="true"></div><h1>Arcade Hub</h1></div>
+    <div class="search">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M21 21l-3.9-3.9M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15z" stroke="#86e1e1" stroke-width="2" stroke-linecap="round"/></svg>
+      <input type="search" data-i18n-aria="searchAria" data-i18n-placeholder="searchPlaceholder" aria-label="Search games" placeholder="Search games (inactive in MVP)" />
+    </div>
+    <span class="chip">MVP</span>
+  </div>
   <div class="layout">
-    <aside class="left">
-      <div class="icon"></div><div class="icon"></div><div class="icon"></div>
-      <div class="icon"></div><div class="icon"></div><div class="icon"></div>
-      <div class="icon"></div>
+    <aside class="sidebar collapsed" id="sidebar" aria-label="Main navigation">
+      <nav class="sb-nav">
+        <ul class="sb-list">
+          <li class="sb-item">
+            <a href="index.html" class="sb-link sb-home" aria-label="Home" tabindex="0">
+              <span class="sb-ico" aria-hidden="true">
+                <svg class="sb-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 10.5 12 4l9 6.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1v-9.5Z"/></svg>
+              </span>
+              <span class="sb-label">Home</span>
+            </a>
+          </li>
+          <li class="sb-item">
+            <a href="#" class="sb-link" aria-label="Recently played" tabindex="0">
+              <span class="sb-ico" aria-hidden="true"></span>
+              <span class="sb-label">Recently played</span>
+            </a>
+          </li>
+          <li class="sb-item">
+            <a href="#" class="sb-link" aria-label="Popular" tabindex="0">
+              <span class="sb-ico" aria-hidden="true"></span>
+              <span class="sb-label">Popular</span>
+            </a>
+          </li>
+        </ul>
+      </nav>
     </aside>
 
     <section class="center">
-      <a class="back" href="index.html">
+      <!--
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M15 18l-6-6 6-6" stroke="#86e1e1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
         Wróć do portalu
-      </a>
+      -->
 
       <div class="gameWrap" id="gameWrap">
         <div class="fsExitOverlay">
@@ -113,6 +145,7 @@
   <script src="js/core/InputController.js" defer></script>
   <script src="js/features/cats/CatsRules.js" defer></script>
   <script src="js/game.js" defer></script>
+  <script src="js/sidebar.js" defer></script>
   <footer class="site-footer" role="contentinfo">
     <nav class="footer-nav" aria-label="Footer">
       <a class="ft-link" data-i18n="about" data-href-en="about.en.html" data-href-pl="about.pl.html" href="about.en.html">About</a>
