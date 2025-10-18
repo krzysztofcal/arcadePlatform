@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "games": [
+    {
+      "id": "cats-arcade",
+      "slug": "catch-cats",
+      "title": { "en": "Catch Cats — Arcade", "pl": "Łap koty — Arcade" },
+      "description": { "en": "Catch cats and score points!", "pl": "Łap koty i zdobywaj punkty!" },
+      "thumb": "img/games/catch-cats.jpg",
+      "tags": ["arcade", "casual", "skill"],
+      "device": ["mobile", "desktop"],
+      "orientation": "portrait",
+      "source": { "type": "self", "page": "game_cats.html" },
+      "monetization": { "ads": true, "interstitial": "onStart", "rewarded": true, "tokensCost": 0 },
+      "controls": ["touch"],
+      "status": "ready",
+      "featured": true
+    },
+    {
+      "id": "placeholder-2",
+      "slug": "coming-soon-2",
+      "title": { "en": "Game 2", "pl": "Gra 2" },
+      "description": { "en": "Under construction", "pl": "W przygotowaniu" },
+      "thumb": "img/games/placeholder-2.jpg",
+      "tags": ["coming-soon"],
+      "device": ["mobile", "desktop"],
+      "orientation": "any",
+      "source": { "type": "placeholder" },
+      "monetization": { "ads": false, "interstitial": "never", "rewarded": false, "tokensCost": 0 },
+      "controls": ["touch"],
+      "status": "wip",
+      "featured": false
+    }
+  ]
+}
+
