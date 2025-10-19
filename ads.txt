@@ -45,3 +45,4 @@ openx.com, 540274407, RESELLER, 6a698e2ec38604c6
 smaato.com, 1100047713, RESELLER, 07bcf65f187117b4
 smartadserver.com, 4342, RESELLER
 smartadserver.com, 4012, RESELLER
+google.com, pub-4054734235779751, DIRECT, f08c47fec0942fa0
