@@ -44,6 +44,8 @@ body{margin:0; background:linear-gradient(180deg, #0b1020 0%, #090d19 100%); col
 .controls-row{ display:flex; gap:8px; margin-top:8px;}
 .controls-row button{ flex:1; background:transparent; color:#86e1e1; border:1px solid var(--border); border-radius:10px; padding:10px; }
 canvas#game{ width:100%; height:auto; aspect-ratio:460/320; background:#0b1220; border:1px solid var(--border); border-radius:14px; display:block; touch-action:none; }
+.frameBox{ position:relative; width:100%; aspect-ratio: var(--frame-aspect, 16/9); background:#0b1220; border:1px solid var(--border); border-radius:14px; overflow:hidden; }
+.frameIframe{ position:absolute; inset:0; width:100%; height:100%; border:0; display:block; }
 .center{ display:flex; flex-direction:column; gap:12px; }
 /* Make game area span full viewport width on mobile */
 @media (max-width: 860px){

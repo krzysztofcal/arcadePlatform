@@ -16,7 +16,10 @@
   function playableHref(item){
     if (!item || !item.source) return null;
     if (item.source.type === 'self' && item.source.page) return item.source.page;
-    if (item.source.type === 'distributor' && item.source.embedUrl) return item.source.embedUrl;
+    if (item.source.type === 'distributor'){
+      // Route distributor games through local frame page to keep header/CMP
+      return `game.html?slug=${encodeURIComponent(item.slug || item.id || '')}`;
+    }
     return null;
   }
 
