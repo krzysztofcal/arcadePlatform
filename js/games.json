@@ -5,12 +5,12 @@
                       "id":  "cats-arcade",
                       "slug":  "catch-cats",
                       "title":  {
-                                    "en":  "Catch Cats â€” Arcade",
-                                    "pl":  "Åap koty â€” Arcade"
+                                    "en":  "Catch Cats — Arcade",
+                                    "pl":  "Łap koty — Arcade"
                                 },
                       "description":  {
                                           "en":  "Catch cats and score points!",
-                                          "pl":  "Åap koty i zdobywaj punkty!"
+                                          "pl":  "Łap koty i zdobywaj punkty!"
                                       },
                       "thumb":  "img/games/catch-cats.jpg",
                       "tags":  [
@@ -368,3 +368,4 @@
                   }
               ]
 }
+

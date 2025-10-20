@@ -42,12 +42,13 @@
   function cardPlaceholder(item, lang){
     const el = document.createElement('article');
     el.className = 'card';
-    const desc = descriptionOf(item, lang) || (lang==='pl'?'W przygotowaniu':'Under construction');
+    const desc = descriptionOf(item, lang) || '';
+    const ucText = (lang==='pl'?'W przygotowaniu':'Under construction');
     el.innerHTML = `
       <div class="thumb"></div>
       <div class="title">${titleOf(item, lang)}</div>
-      <div class="subtitle">${desc}</div>
-      <div class="uc">${desc}</div>
+      <div class="subtitle">${desc || ucText}</div>
+      <div class="uc">${ucText}</div>
     `;
     return el;
   }
