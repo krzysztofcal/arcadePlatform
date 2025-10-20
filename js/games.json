@@ -50,7 +50,7 @@
                                           "en":  "Under construction",
                                           "pl":  "W przygotowaniu"
                                       },
-                      "thumb":  "img/games/placeholder-2.jpg",
+                      "thumb":  "img/games/placeholder.svg",
                       "tags":  [
                                    "coming-soon"
                                ],
@@ -75,7 +75,7 @@
                       "featured":  false
                   },
                   {
-                      "thumb":  "img/games/bubble-shooter.webp",
+                      "thumb":  "img/games/placeholder.svg",
                       "slug":  "bubble-shooter",
                       "id":  "gd-bubble-shooter",
                       "tags":  [
@@ -100,7 +100,7 @@
                       "orientation":  "portrait"
                   },
                   {
-                      "thumb":  "img/games/2048-classic.webp",
+                      "thumb":  "img/games/placeholder.svg",
                       "slug":  "2048-classic",
                       "id":  "gd-2048-classic",
                       "tags":  [
@@ -125,7 +125,7 @@
                       "orientation":  "portrait"
                   },
                   {
-                      "thumb":  "img/games/solitaire-klondike.webp",
+                      "thumb":  "img/games/placeholder.svg",
                       "slug":  "solitaire-klondike",
                       "id":  "gd-solitaire-klondike",
                       "tags":  [
@@ -149,7 +149,7 @@
                       "orientation":  "portrait"
                   },
                   {
-                      "thumb":  "img/games/sudoku.webp",
+                      "thumb":  "img/games/placeholder.svg",
                       "slug":  "sudoku",
                       "id":  "gd-sudoku",
                       "tags":  [
@@ -173,7 +173,7 @@
                       "orientation":  "portrait"
                   },
                   {
-                      "thumb":  "img/games/mahjong-tiles.webp",
+                      "thumb":  "img/games/placeholder.svg",
                       "slug":  "mahjong-tiles",
                       "id":  "gd-mahjong-tiles",
                       "tags":  [
@@ -197,7 +197,7 @@
                       "orientation":  "landscape"
                   },
                   {
-                      "thumb":  "img/games/endless-runner.webp",
+                      "thumb":  "img/games/placeholder.svg",
                       "slug":  "endless-runner",
                       "id":  "gd-endless-runner",
                       "tags":  [
@@ -222,7 +222,7 @@
                       "orientation":  "portrait"
                   },
                   {
-                      "thumb":  "img/games/street-basketball.webp",
+                      "thumb":  "img/games/placeholder.svg",
                       "slug":  "street-basketball",
                       "id":  "gd-street-basketball",
                       "tags":  [
@@ -246,7 +246,7 @@
                       "orientation":  "portrait"
                   },
                   {
-                      "thumb":  "img/games/penalty-kicks.webp",
+                      "thumb":  "img/games/placeholder.svg",
                       "slug":  "penalty-kicks",
                       "id":  "gd-penalty-kicks",
                       "tags":  [
@@ -270,7 +270,7 @@
                       "orientation":  "portrait"
                   },
                   {
-                      "thumb":  "img/games/parking-challenge.webp",
+                      "thumb":  "img/games/placeholder.svg",
                       "slug":  "parking-challenge",
                       "id":  "gd-parking-challenge",
                       "tags":  [
@@ -294,7 +294,7 @@
                       "orientation":  "portrait"
                   },
                   {
-                      "thumb":  "img/games/word-search.webp",
+                      "thumb":  "img/games/placeholder.svg",
                       "slug":  "word-search",
                       "id":  "gd-word-search",
                       "tags":  [
@@ -318,7 +318,7 @@
                       "orientation":  "portrait"
                   },
                   {
-                      "thumb":  "img/games/match-3-jewels.webp",
+                      "thumb":  "img/games/placeholder.svg",
                       "slug":  "match-3-jewels",
                       "id":  "gd-match-3-jewels",
                       "tags":  [
@@ -343,7 +343,7 @@
                       "orientation":  "portrait"
                   },
                   {
-                      "thumb":  "img/games/dart-challenge.webp",
+                      "thumb":  "img/games/placeholder.svg",
                       "slug":  "dart-challenge",
                       "id":  "gd-dart-challenge",
                       "tags":  [
@@ -368,4 +368,3 @@
                   }
               ]
 }
-
