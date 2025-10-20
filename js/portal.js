@@ -56,6 +56,12 @@
   function renderList(list){
     const lang = getLang();
     grid.innerHTML = '';
+    // Insert a CLS-safe ad placeholder card at the top of the grid
+    const ad = document.createElement('article');
+    ad.className = 'card ad-card';
+    ad.setAttribute('aria-label', 'Advertisement');
+    ad.innerHTML = '<span class="ad-badge">Ad</span><div class="ad-box">Ad placeholder</div>';
+    grid.appendChild(ad);
     for (const item of list){
       const href = playableHref(item);
       const node = href ? cardPlayable(item, lang) : cardPlaceholder(item, lang);
