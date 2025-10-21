@@ -10,6 +10,7 @@
   const btnExit = document.getElementById('btnExitFs');
 
   const analytics = window.Analytics;
+  const catalog = window.ArcadeCatalog;
   let currentSlug = '';
   let pendingFsAction = null;
   let lastFsState = false;
@@ -86,10 +87,35 @@
     try { document.exitFullscreen && document.exitFullscreen(); } catch {}
   }
 
+  function normalizeList(rawList){
+    if (catalog && typeof catalog.normalizeGameList === 'function'){
+      return catalog.normalizeGameList(rawList);
+    }
+    return Array.isArray(rawList) ? rawList.filter(Boolean) : [];
+  }
+
   async function loadCatalog(){
-    const res = await fetch('js/games.json', { cache: 'no-cache' });
-    const data = await res.json();
-    return Array.isArray(data?.games) ? data.games : (Array.isArray(data) ? data : []);
+    try {
+      const res = await fetch('js/games.json', { cache: 'no-cache' });
+      if (!res.ok) throw new Error('Failed to load games.json');
+      const data = await res.json();
+      if (data && Array.isArray(data.games)) return normalizeList(data.games);
+      if (Array.isArray(data)) return normalizeList(data);
+    } catch (e) {
+      if (Array.isArray(window.GAMES)){
+        return normalizeList(window.GAMES.map(g => ({
+          id: g.id || g.slug || 'game-'+Math.random().toString(36).slice(2),
+          slug: g.slug || (g.id || ''),
+          title: g.title,
+          description: g.subtitle ? g.subtitle : { en: '', pl: '' },
+          thumbnail: g.thumb,
+          orientation: g.orientation,
+          source: g.href ? { type: 'self', page: g.href } : { type: 'placeholder' }
+        })));
+      }
+      console.error(e);
+    }
+    return [];
   }
 
   function waitForConsent(timeoutMs){
