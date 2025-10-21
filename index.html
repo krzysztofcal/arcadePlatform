@@ -9,6 +9,25 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="css/portal.css">
+  <!-- Google Funding Choices (CMP) tag: loads TCF v2.2 banner -->
+  <script async src="https://fundingchoicesmessages.google.com/i/pub-4054734235779751?ers=1"></script>
+  <script>
+    (function(){
+      function signal(){
+        if(!window.frames['googlefcPresent']){
+          if(document.body){
+            var i=document.createElement('iframe');
+            i.style='width:0;height:0;border:0;display:none';
+            i.name='googlefcPresent';
+            document.body.appendChild(i);
+          } else {
+            setTimeout(signal,500);
+          }
+        }
+      }
+      signal();
+    })();
+  </script>
   <script src="js/cmp.js" defer></script>
   <script src="js/i18n.js" defer></script>
   <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-4054734235779751" crossorigin="anonymous"></script>
