@@ -49,26 +49,7 @@
   </script>
   <script src="js/cmp.js" defer></script>
   <script src="js/i18n.js" defer></script>
-  <script>
-  function loadAds() {
-    var s1 = document.createElement('script');
-    s1.async = true;
-    s1.src = "https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-4054734235779751";
-    s1.crossOrigin = "anonymous";
-    document.head.appendChild(s1);
-
-    var s2 = document.createElement('script');
-    s2.async = true;
-    s2.src = "https://securepubads.g.doubleclick.net/tag/js/gpt.js";
-    document.head.appendChild(s2);
-
-    window.googletag = window.googletag || {cmd: []};
-    googletag.cmd.push(function () {
-      googletag.pubads().enableSingleRequest();
-      googletag.enableServices();
-    });
-  }
-  </script>
+  <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-4054734235779751" crossorigin="anonymous"></script>
 </head>
 <body>
   <div class="topbar">
