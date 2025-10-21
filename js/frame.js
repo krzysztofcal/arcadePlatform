@@ -12,6 +12,18 @@
   function qsParam(name){ return new URLSearchParams(location.search).get(name); }
   function getLang(){ return (window.I18N && window.I18N.getLang && window.I18N.getLang()) || 'en'; }
 
+  function sanitizeSameOriginUrl(urlString){
+    if (!urlString) return null;
+    try {
+      const url = new URL(urlString, location.href);
+      if (!['http:', 'https:'].includes(url.protocol)) return null;
+      if (url.origin !== location.origin) return null;
+      return url;
+    } catch (e) {
+      return null;
+    }
+  }
+
   function setDocTitle(text){ try { document.title = text ? (text + ' — Arcade') : 'Arcade — Game'; } catch {}
     if (titleEl) titleEl.textContent = text || 'Game';
   }
@@ -86,7 +98,8 @@
     const iframe = document.createElement('iframe');
     iframe.className = 'frameIframe';
     iframe.allowFullscreen = true;
-    iframe.setAttribute('allow', 'fullscreen; autoplay; clipboard-read; clipboard-write');
+    iframe.setAttribute('allow', 'fullscreen; autoplay');
+    iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin');
     iframe.referrerPolicy = 'no-referrer-when-downgrade';
     iframe.src = url;
     frameBox.appendChild(iframe);
@@ -111,9 +124,13 @@
 
     // If self-hosted, redirect to dedicated page
     if (game.source && game.source.type === 'self' && game.source.page){
-      const url = new URL(game.source.page, location.href);
-      url.searchParams.set('lang', lang);
-      location.replace(url.toString());
+      const safeUrl = sanitizeSameOriginUrl(game.source.page);
+      if (!safeUrl){
+        if (metaEl) metaEl.textContent = 'Invalid launch URL.';
+        return;
+      }
+      safeUrl.searchParams.set('lang', lang);
+      location.replace(safeUrl.toString());
       return;
     }
 

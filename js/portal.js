@@ -13,29 +13,64 @@
     return (item.description && (item.description[lang] || item.description.en)) || '';
   }
 
-  function playableHref(item){
+  function sanitizeSelfPage(page){
+    if (!page) return null;
+    try {
+      const url = new URL(page, location.href);
+      if (!['http:', 'https:'].includes(url.protocol)) return null;
+      if (url.origin !== location.origin) return null;
+      return url;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function playableHref(item, lang){
     if (!item || !item.source) return null;
-    if (item.source.type === 'self' && item.source.page) return item.source.page;
+    if (item.source.type === 'self' && item.source.page){
+      const url = sanitizeSelfPage(item.source.page);
+      if (!url) return null;
+      url.searchParams.set('lang', lang);
+      return url.toString();
+    }
     if (item.source.type === 'distributor'){
       // Route distributor games through local frame page to keep header/CMP
-      return `game.html?slug=${encodeURIComponent(item.slug || item.id || '')}`;
+      try {
+        const url = new URL('game.html', location.href);
+        url.searchParams.set('slug', item.slug || item.id || '');
+        url.searchParams.set('lang', lang);
+        return url.toString();
+      } catch (e) {
+        return null;
+      }
     }
     return null;
   }
 
-  function cardPlayable(item, lang){
+  function cardPlayable(item, lang, href){
     const a = document.createElement('a');
     a.className = 'card';
-    const href = playableHref(item);
-    const url = new URL(href, location.href);
-    url.searchParams.set('lang', lang);
-    a.href = url.toString();
-    a.innerHTML = `
-      <div class="thumb"></div>
-      <span class="label">${t('playChip')}</span>
-      <div class="title">${titleOf(item, lang)}</div>
-      <div class="subtitle">${descriptionOf(item, lang)}</div>
-    `;
+    a.href = href;
+
+    const thumb = document.createElement('div');
+    thumb.className = 'thumb';
+    a.appendChild(thumb);
+
+    const label = document.createElement('span');
+    label.className = 'label';
+    label.textContent = t('playChip');
+    a.appendChild(label);
+
+    const title = document.createElement('div');
+    title.className = 'title';
+    title.textContent = titleOf(item, lang);
+    a.appendChild(title);
+
+    const subtitle = document.createElement('div');
+    subtitle.className = 'subtitle';
+    subtitle.textContent = descriptionOf(item, lang);
+    a.appendChild(subtitle);
+
     return a;
   }
 
@@ -44,12 +79,25 @@
     el.className = 'card';
     const desc = descriptionOf(item, lang) || '';
     const ucText = (lang==='pl'?'W przygotowaniu':'Under construction');
-    el.innerHTML = `
-      <div class="thumb"></div>
-      <div class="title">${titleOf(item, lang)}</div>
-      <div class="subtitle">${desc || ucText}</div>
-      <div class="uc">${ucText}</div>
-    `;
+    const thumb = document.createElement('div');
+    thumb.className = 'thumb';
+    el.appendChild(thumb);
+
+    const title = document.createElement('div');
+    title.className = 'title';
+    title.textContent = titleOf(item, lang);
+    el.appendChild(title);
+
+    const subtitle = document.createElement('div');
+    subtitle.className = 'subtitle';
+    subtitle.textContent = desc || ucText;
+    el.appendChild(subtitle);
+
+    const uc = document.createElement('div');
+    uc.className = 'uc';
+    uc.textContent = ucText;
+    el.appendChild(uc);
+
     return el;
   }
 
@@ -63,9 +111,12 @@
     promo.innerHTML = '<span class="slot-badge">Promo</span><div class="slot-box">Reserved slot</div>';
     grid.appendChild(promo);
     for (const item of list){
-      const href = playableHref(item);
-      const node = href ? cardPlayable(item, lang) : cardPlaceholder(item, lang);
-      grid.appendChild(node);
+      const href = playableHref(item, lang);
+      if (href){
+        grid.appendChild(cardPlayable(item, lang, href));
+      } else {
+        grid.appendChild(cardPlaceholder(item, lang));
+      }
     }
   }
 
