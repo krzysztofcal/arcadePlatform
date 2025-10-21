@@ -7,6 +7,10 @@
   const overlayExit = document.getElementById('overlayExit');
   const canvas = document.getElementById('game');
   const ctx = canvas.getContext('2d');
+  const analytics = window.Analytics;
+  const slug = 'cats-arcade';
+  const pageId = 'game_cats';
+  const getLang = ()=> (window.I18N && window.I18N.getLang && window.I18N.getLang()) || 'en';
 
   // Fullscreen service integration
   const fs = FullscreenService({
@@ -17,9 +21,14 @@
     canvas,
     aspect: window.CONFIG.ASPECT_RATIO,
     reserved: window.CONFIG.FULLSCREEN_RESERVED,
-    onResizeRequest: resizeCanvas
+    onResizeRequest: resizeCanvas,
+    analyticsContext: { slug, page: pageId }
   });
   fs.init();
+
+  if (analytics && analytics.viewGame){
+    analytics.viewGame({ slug, page: pageId, lang: getLang(), source: 'self' });
+  }
 
   // === Game ===
   const storage = StorageService(CONFIG);
@@ -156,6 +165,9 @@
     if (centerOverlay) centerOverlay.classList.add('hidden');
     if (gameOverOverlay) gameOverOverlay.classList.add('hidden');
     renderHud();
+    if (analytics && analytics.startGame){
+      analytics.startGame({ slug, page: pageId, mode: 'self', lang: getLang(), tokens_remaining: state.tokens });
+    }
   }
   const buy=()=>{ if(running) return; state.tokens+=10; storage.save(state); renderHud(); };
   const resetDemo=()=>{ if(running) return; state={...window.CONFIG.DEFAULT_STATE}; storage.save(state); renderHud(); };
