@@ -109,7 +109,7 @@ button:focus-visible, a:focus-visible{ outline:2px solid var(--accent); outline-
   .sidebar.collapsed:hover .sb-label{ max-width:0; opacity:1; }
 }
 
-/* CLS-safe ad slot for game frame */
-.ad-slot{ height:100px; border:1px dashed var(--border); border-radius:12px; display:flex; align-items:center; justify-content:center; color:#9fb0d0; background:rgba(11,16,32,.35); margin-bottom:10px; }
-@media (min-width: 700px){ .ad-slot{ height:250px; } }
-.ad-slot .ad-badge{ position:absolute; margin-top:-36px; align-self:flex-start; right:12px; font:700 10px/1 Poppins, sans-serif; color:#9fb0d0; background:rgba(15,20,48,.7); border:1px solid var(--border); padding:4px 6px; border-radius:999px; }
+/* CLS-safe promo slot for game frame (avoid 'ad' in names) */
+.slot-fixed{ height:100px; border:1px dashed var(--border); border-radius:12px; display:flex; align-items:center; justify-content:center; color:#9fb0d0; background:rgba(11,16,32,.35); margin-bottom:10px; position:relative; }
+@media (min-width: 700px){ .slot-fixed{ height:250px; } }
+.slot-fixed .slot-badge{ position:absolute; top:8px; right:12px; font:700 10px/1 Poppins, sans-serif; color:#9fb0d0; background:rgba(15,20,48,.7); border:1px solid var(--border); padding:4px 6px; border-radius:999px; }
