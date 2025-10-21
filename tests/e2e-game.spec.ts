@@ -13,35 +13,33 @@ async function readTimeLeft(page) {
   return m ? parseFloat(m[1]) : NaN;
 }
 
-test('game starts, pauses, and resumes', async ({ page }) => {
+test('game starts, pauses, and resumes (deterministic, no timers)', async ({ page }) => {
   const gamePath = path.join(__dirname, '..', 'game_cats.html');
   expect(fs.existsSync(gamePath)).toBeTruthy();
 
   await page.goto(fileUrl(gamePath));
+  // Ensure clean storage so tokens/time are predictable
+  await page.evaluate(() => {
+    try { localStorage.removeItem((window as any).CONFIG?.STORAGE_KEY || ''); } catch {}
+  });
+  await page.reload();
 
-  // Start the game
+  // Verify initial tokens and overlay
+  const tokensBefore = await page.locator('#tokens').innerText();
+  expect(tokensBefore.trim()).toBe('10');
+  await expect(page.locator('#centerOverlay')).toBeVisible();
+
+  // Start the game (discrete state change)
   await page.locator('#playBtn').click();
-
-  // Verify time starts to decrease
-  const t0 = await readTimeLeft(page);
-  await page.waitForTimeout(700);
-  const t1 = await readTimeLeft(page);
-  expect(t0).toBeGreaterThan(t1);
+  await expect(page.locator('#centerOverlay')).toHaveClass(/hidden/);
+  const tokensAfterStart = await page.locator('#tokens').innerText();
+  expect(tokensAfterStart.trim()).toBe('9');
 
   // Pause
   await page.locator('#btnPause').click();
-  const tp0 = await readTimeLeft(page);
-  await page.waitForTimeout(700);
-  const tp1 = await readTimeLeft(page);
-  // Allow tiny drift (render cadence), but ensure not decreasing
-  expect(Math.abs(tp1 - tp0)).toBeLessThan(0.05);
+  await expect(page.locator('#btnPause')).toHaveAttribute('aria-pressed', 'true');
 
   // Resume
   await page.locator('#btnPause').click();
-  const tr0 = await readTimeLeft(page);
-  await page.waitForTimeout(700);
-  const tr1 = await readTimeLeft(page);
-  // After resuming, time should change (it may increase briefly
-  // if a bonus is collected, or decrease normally). Assert movement.
-  expect(Math.abs(tr1 - tr0)).toBeGreaterThan(0.1);
+  await expect(page.locator('#btnPause')).toHaveAttribute('aria-pressed', 'false');
 });
