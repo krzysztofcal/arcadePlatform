@@ -60,7 +60,18 @@
     const promo = document.createElement('article');
     promo.className = 'card slot-card';
     promo.setAttribute('aria-label', 'Promotional');
-    promo.innerHTML = '<span class="slot-badge">Promo</span><div class="slot-box">Reserved slot</div>';
+    promo.innerHTML = `
+      <span class="slot-badge">Promo</span>
+      <div id="slot-box" style="display:block;min-width:300px;min-height:250px;position:relative;z-index:3;">
+        <ins class="adsbygoogle"
+             style="display:block;width:100%;min-height:250px;"
+             data-ad-client="ca-pub-4054734235779751"
+             data-ad-slot="7016895177"
+             data-ad-format="auto"
+             data-full-width-responsive="true"></ins>
+      </div>
+      <script>(function(){ try{ if (window.adsbygoogle && Array.isArray(window.adsbygoogle)) { (adsbygoogle = window.adsbygoogle || []).push({}); } }catch(e){} })();<\/script>
+    `;
     grid.appendChild(promo);
     for (const item of list){
       const href = playableHref(item);
