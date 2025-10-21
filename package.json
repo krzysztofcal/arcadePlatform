@@ -3,6 +3,7 @@
   "private": true,
   "version": "0.0.0",
   "scripts": {
+    "lint:games": "node scripts/validate-games.js",
     "test": "playwright test",
     "test:install": "playwright install --with-deps"
   },

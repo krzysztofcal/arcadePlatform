@@ -43,8 +43,14 @@ body{margin:0; background:linear-gradient(180deg, #0b1020 0%, #0a0d1a 100%); col
 .card{ position:relative; overflow:hidden; border-radius:18px; background:linear-gradient(160deg, var(--card) 0%, #0f1430 100%); border:1px solid var(--border); min-height:160px; cursor:pointer; display:flex; flex-direction:column; justify-content:flex-end; text-decoration:none; color:inherit;}
 .card:hover{ outline:2px solid rgba(110,231,231,.2);} 
 .card:focus-visible{ outline:2px solid var(--accent); outline-offset: 3px; }
-.card .thumb{ position:absolute; inset:0; opacity:.75; background: radial-gradient(120% 120% at 0% 0%, rgba(110,231,231,.15) 0%, transparent 50%), radial-gradient(120% 120% at 100% 0%, rgba(167,139,250,.15) 0%, transparent 55%); }
-.card .thumb{ position:absolute; inset:0; opacity:.75; background: radial-gradient(120% 120% at 0% 0%, rgba(110,231,231,.15) 0%, transparent 50%), radial-gradient(120% 120% at 100% 0%, rgba(167,139,250,.15) 0%, transparent 55%); }
+.card .thumb{ position:absolute; inset:0; opacity:.75; background:
+  radial-gradient(120% 120% at 0% 0%, rgba(110,231,231,.15) 0%, transparent 50%),
+  radial-gradient(120% 120% at 100% 0%, rgba(167,139,250,.15) 0%, transparent 55%),
+  var(--thumb-image, none);
+  background-size: cover, cover, cover;
+  background-repeat: no-repeat, no-repeat, no-repeat;
+  background-position: center, center, center;
+}
 .card .label{ position:absolute; top:10px; left:10px; background:rgba(110,231,231,.14); color:var(--accent); border:1px solid var(--border); font:800 11px/1 Poppins, sans-serif; padding:6px 8px; border-radius:999px; letter-spacing:.4px; }
 .card .title{ position:relative; padding:14px; font-weight:700; letter-spacing:.2px; color:#edf3ff; text-shadow:0 2px 10px rgba(0,0,0,.35); }
 .card .subtitle{ position:relative; padding:0 14px 14px; color:var(--muted); font-size:13px; }
