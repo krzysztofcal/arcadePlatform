@@ -12,7 +12,9 @@
         "en": "Catch cats and score points!",
         "pl": "Łap koty i zdobywaj punkty!"
       },
-      "category": [],
+      "category": [
+        "Arcade"
+      ],
       "tags": [
         "arcade",
         "casual",
@@ -36,7 +38,9 @@
         "en": "Under construction",
         "pl": "W przygotowaniu"
       },
-      "category": [],
+      "category": [
+        "Arcade"
+      ],
       "tags": [
         "coming-soon"
       ],
@@ -57,7 +61,10 @@
         "en": "Match and pop bubbles to clear the board.",
         "pl": "Match and pop bubbles to clear the board."
       },
-      "category": [],
+      "category": [
+        "Puzzle",
+        "Shooter"
+      ],
       "tags": [
         "arcade",
         "match3",
@@ -80,7 +87,9 @@
         "en": "Swipe tiles to reach 2048.",
         "pl": "Swipe tiles to reach 2048."
       },
-      "category": [],
+      "category": [
+        "Puzzle"
+      ],
       "tags": [
         "puzzle",
         "logic",
@@ -103,7 +112,9 @@
         "en": "Classic Klondike patience.",
         "pl": "Classic Klondike patience."
       },
-      "category": [],
+      "category": [
+        "Puzzle"
+      ],
       "tags": [
         "cards",
         "casual"
@@ -125,7 +136,9 @@
         "en": "Fill the grid with 1–9 without repeats.",
         "pl": "Fill the grid with 1–9 without repeats."
       },
-      "category": [],
+      "category": [
+        "Puzzle"
+      ],
       "tags": [
         "puzzle",
         "logic"
@@ -147,7 +160,9 @@
         "en": "Match open pairs of identical tiles.",
         "pl": "Match open pairs of identical tiles."
       },
-      "category": [],
+      "category": [
+        "Puzzle"
+      ],
       "tags": [
         "board",
         "puzzle"
@@ -169,7 +184,9 @@
         "en": "Dodge obstacles and collect coins.",
         "pl": "Dodge obstacles and collect coins."
       },
-      "category": [],
+      "category": [
+        "Arcade"
+      ],
       "tags": [
         "runner",
         "reflex",
@@ -192,7 +209,9 @@
         "en": "Swipe to shoot hoops and beat the timer.",
         "pl": "Swipe to shoot hoops and beat the timer."
       },
-      "category": [],
+      "category": [
+        "Arcade"
+      ],
       "tags": [
         "sports",
         "arcade"
@@ -214,7 +233,9 @@
         "en": "Aim and score from the spot.",
         "pl": "Aim and score from the spot."
       },
-      "category": [],
+      "category": [
+        "Arcade"
+      ],
       "tags": [
         "sports",
         "football"
@@ -236,7 +257,9 @@
         "en": "Park without crashing in tricky levels.",
         "pl": "Park without crashing in tricky levels."
       },
-      "category": [],
+      "category": [
+        "Racing"
+      ],
       "tags": [
         "driving",
         "logic"
@@ -258,7 +281,9 @@
         "en": "Find hidden words in the grid.",
         "pl": "Find hidden words in the grid."
       },
-      "category": [],
+      "category": [
+        "Puzzle"
+      ],
       "tags": [
         "word",
         "puzzle"
@@ -280,7 +305,9 @@
         "en": "Swap gems to create lines and combos.",
         "pl": "Swap gems to create lines and combos."
       },
-      "category": [],
+      "category": [
+        "Puzzle"
+      ],
       "tags": [
         "match3",
         "arcade",
@@ -303,7 +330,9 @@
         "en": "Aim carefully and hit the target.",
         "pl": "Aim carefully and hit the target."
       },
-      "category": [],
+      "category": [
+        "Shooter"
+      ],
       "tags": [
         "sports",
         "skill"
