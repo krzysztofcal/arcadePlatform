@@ -9,6 +9,17 @@
   const btnEnter = document.getElementById('btnEnterFs');
   const btnExit = document.getElementById('btnExitFs');
 
+  const analytics = window.Analytics;
+  let currentSlug = '';
+  let pendingFsAction = null;
+  let lastFsState = false;
+
+  function track(method, payload){
+    if (analytics && typeof analytics[method] === 'function'){
+      analytics[method](payload);
+    }
+  }
+
   function qsParam(name){ return new URLSearchParams(location.search).get(name); }
   function getLang(){ return (window.I18N && window.I18N.getLang && window.I18N.getLang()) || 'en'; }
 
@@ -49,14 +60,31 @@
   }
 
   function onFsChange(){
-    const fsActive = document.fullscreenElement && frameWrap.contains(document.fullscreenElement);
+    const fsActive = !!(document.fullscreenElement && frameWrap.contains(document.fullscreenElement));
     frameWrap.classList.toggle('fsActive', !!fsActive);
     btnEnter.style.display = fsActive ? 'none' : '';
     btnExit.style.display = fsActive ? '' : 'none';
+    if (lastFsState !== fsActive){
+      track('fullscreenToggle', {
+        state: fsActive ? 'enter' : 'exit',
+        slug: currentSlug || undefined,
+        page: 'game',
+        trigger: pendingFsAction && pendingFsAction.trigger ? pendingFsAction.trigger : 'system',
+        requested: pendingFsAction && pendingFsAction.requested ? pendingFsAction.requested : undefined
+      });
+      lastFsState = fsActive;
+    }
+    pendingFsAction = null;
   }
 
-  function enterFs(){ try { frameWrap.requestFullscreen && frameWrap.requestFullscreen(); } catch {} }
-  function exitFs(){ try { document.exitFullscreen && document.exitFullscreen(); } catch {} }
+  function enterFs(){
+    pendingFsAction = { trigger: 'button', requested: 'enter' };
+    try { frameWrap.requestFullscreen && frameWrap.requestFullscreen(); } catch {}
+  }
+  function exitFs(){
+    pendingFsAction = { trigger: 'button', requested: 'exit' };
+    try { document.exitFullscreen && document.exitFullscreen(); } catch {}
+  }
 
   async function loadCatalog(){
     const res = await fetch('js/games.json', { cache: 'no-cache' });
@@ -105,10 +133,17 @@
     frameBox.appendChild(iframe);
     // Aspect ratio via CSS variable
     frameBox.style.setProperty('--frame-aspect', aspectFor(orientation));
+    track('startGame', {
+      slug: currentSlug || undefined,
+      page: 'game',
+      mode: 'iframe',
+      embed_url: url
+    });
   }
 
   async function init(){
     const slug = qsParam('slug');
+    currentSlug = slug || '';
     const list = await loadCatalog();
     const lang = getLang();
     const game = list.find(g => (g.slug === slug));
@@ -118,6 +153,12 @@
     const desc = (game.description && (game.description[lang] || game.description.en)) || '';
     setDocTitle(title);
     if (metaEl) metaEl.textContent = desc;
+    track('viewGame', {
+      slug: slug || undefined,
+      lang,
+      title,
+      source: game.source && game.source.type || undefined
+    });
 
     updateRotateOverlay(game.orientation || 'any');
     addEventListener('resize', () => updateRotateOverlay(game.orientation || 'any'));
@@ -145,6 +186,11 @@
     btnEnter.addEventListener('click', enterFs);
     btnExit.addEventListener('click', exitFs);
     document.addEventListener('fullscreenchange', onFsChange);
+    track('adImpression', {
+      slot: 'game_top',
+      page: 'game',
+      slug: slug || undefined
+    });
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();

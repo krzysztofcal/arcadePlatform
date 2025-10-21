@@ -3,6 +3,9 @@
   const grid = document.getElementById('gamesGrid');
   if (!grid) return;
 
+  const analytics = window.Analytics;
+  let promoTracked = false;
+
   function getLang(){ return (window.I18N && window.I18N.getLang && window.I18N.getLang()) || 'en'; }
   function t(key){ return (window.I18N && window.I18N.t && window.I18N.t(key)) || key; }
 
@@ -101,7 +104,15 @@
     return el;
   }
 
-  function renderList(list){
+  function trackAdImpression(){
+    if (promoTracked) return;
+    promoTracked = true;
+    if (analytics && analytics.adImpression){
+      analytics.adImpression({ slot: 'portal_promo', page: 'index' });
+    }
+  }
+
+  function renderList(list, reason){
     const lang = getLang();
     grid.innerHTML = '';
     // Insert a CLS-safe ad placeholder card at the top of the grid
@@ -110,6 +121,7 @@
     promo.setAttribute('aria-label', 'Promotional');
     promo.innerHTML = '<span class="slot-badge">Promo</span><div class="slot-box">Reserved slot</div>';
     grid.appendChild(promo);
+    trackAdImpression();
     for (const item of list){
       const href = playableHref(item, lang);
       if (href){
@@ -117,6 +129,9 @@
       } else {
         grid.appendChild(cardPlaceholder(item, lang));
       }
+    }
+    if (analytics && analytics.viewGameList){
+      analytics.viewGameList({ game_count: list.length, lang, reason: reason || 'refresh' });
     }
   }
 
@@ -146,8 +161,8 @@
 
   async function init(){
     const list = await loadGames();
-    renderList(list);
-    document.addEventListener('langchange', ()=> renderList(list));
+    renderList(list, 'initial');
+    document.addEventListener('langchange', ()=> renderList(list, 'langchange'));
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();

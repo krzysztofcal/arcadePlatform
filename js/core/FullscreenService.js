@@ -1,9 +1,37 @@
 (function(){
   function FullscreenService(opts){
-    const { wrap, btnEnter, btnExit, overlayExit, canvas, aspect, reserved, onResizeRequest } = opts;
+    const { wrap, btnEnter, btnExit, overlayExit, canvas, aspect, reserved, onResizeRequest, analyticsContext } = opts;
+    const analytics = window.Analytics;
+    let pendingAction = null;
+    let lastState = false;
+
+    function contextPayload(){
+      if (!analyticsContext) return {};
+      if (typeof analyticsContext === 'string') return { context: analyticsContext };
+      try { return { ...analyticsContext }; } catch (_) { return {}; }
+    }
+
+    function emit(state){
+      if (!(analytics && analytics.fullscreenToggle)) return;
+      const payload = { state: state ? 'enter' : 'exit', ...contextPayload() };
+      if (pendingAction){
+        if (pendingAction.trigger) payload.trigger = pendingAction.trigger;
+        if (pendingAction.requested) payload.requested = pendingAction.requested;
+      } else {
+        payload.trigger = 'system';
+      }
+      analytics.fullscreenToggle(payload);
+    }
+
     function isActive(){ return document.fullscreenElement === wrap || document.webkitFullscreenElement === wrap; }
-    function enter(){ if (wrap.requestFullscreen) wrap.requestFullscreen(); else if (wrap.webkitRequestFullscreen) wrap.webkitRequestFullscreen(); }
-    function exit(){ if (document.exitFullscreen) document.exitFullscreen(); else if (document.webkitExitFullscreen) document.webkitExitFullscreen(); }
+    function enter(){
+      pendingAction = { trigger: 'button', requested: 'enter' };
+      if (wrap.requestFullscreen) wrap.requestFullscreen(); else if (wrap.webkitRequestFullscreen) wrap.webkitRequestFullscreen();
+    }
+    function exit(){
+      pendingAction = { trigger: 'button', requested: 'exit' };
+      if (document.exitFullscreen) document.exitFullscreen(); else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+    }
     function computeReserved(){
       // If caller passed a number, honor it; otherwise measure DOM siblings
       if (typeof reserved === 'number' && isFinite(reserved)) return reserved;
@@ -42,6 +70,11 @@
       btnExit.style.display = isFs ? '' : 'none';
       wrap.classList.toggle('fsActive', isFs);
       fit();
+      if (lastState !== isFs){
+        emit(isFs);
+        lastState = isFs;
+      }
+      pendingAction = null;
     }
     function init(){
       btnEnter.addEventListener('click', e=>{ e.preventDefault(); enter(); });

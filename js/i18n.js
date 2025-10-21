@@ -11,6 +11,8 @@
   };
 
   let currentLang = 'en';
+  let initialized = false;
+  const analytics = window.Analytics;
 
   function detectLang(){
     const params = new URLSearchParams(location.search);
@@ -29,7 +31,7 @@
       localStorage.setItem('lang', lang);
     } catch {}
   }
-  function applyLang(lang){
+  function applyLang(lang, source){
     currentLang = lang;
     // Update footer texts
     document.querySelectorAll('[data-i18n]').forEach(el=>{
@@ -57,17 +59,21 @@
     document.querySelectorAll('.lang-btn').forEach(btn=>{
       btn.setAttribute('aria-pressed', btn.getAttribute('data-lang') === lang ? 'true' : 'false');
     });
+    if (initialized && analytics && analytics.langChange){
+      analytics.langChange({ lang, source: source || 'ui' });
+    }
     try { document.dispatchEvent(new CustomEvent('langchange', { detail: { lang } })); } catch {}
   }
 
   function init(){
     const lang = detectLang();
-    applyLang(lang);
+    applyLang(lang, 'auto');
+    initialized = true;
     // Wire buttons
     document.querySelectorAll('.lang-btn').forEach(btn=>{
       btn.addEventListener('click', ()=>{
         const l = btn.getAttribute('data-lang');
-        persistLang(l); applyLang(l);
+        persistLang(l); applyLang(l, 'button');
       });
     });
   }
@@ -77,6 +83,6 @@
   window.I18N = {
     t: (key)=> (dict[key] && dict[key][currentLang]) || '',
     getLang: ()=> currentLang,
-    setLang: (l)=>{ persistLang(l); applyLang(l); }
+    setLang: (l)=>{ persistLang(l); applyLang(l, 'api'); }
   };
 })();
