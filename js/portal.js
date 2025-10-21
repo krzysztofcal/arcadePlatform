@@ -3,6 +3,13 @@
   const grid = document.getElementById('gamesGrid');
   if (!grid) return;
 
+  const categoryBar = document.getElementById('categoryBar');
+  const CATEGORY_ITEMS = ['New/All', 'Arcade', 'Puzzle', 'Shooter', 'Racing'];
+  const CATEGORY_DEFAULT = CATEGORY_ITEMS[0];
+  const categoryButtons = new Map();
+  let activeCategory = CATEGORY_DEFAULT;
+  let allGames = [];
+
   const analytics = window.Analytics;
   const catalog = window.ArcadeCatalog;
   let promoTracked = false;
@@ -143,7 +150,7 @@
     }
   }
 
-  function renderList(list, reason){
+  function renderList(list, reason, category){
     const lang = getLang();
     grid.innerHTML = '';
     // Insert a CLS-safe ad placeholder card at the top of the grid
@@ -162,7 +169,102 @@
       }
     }
     if (analytics && analytics.viewGameList){
-      analytics.viewGameList({ game_count: list.length, lang, reason: reason || 'refresh' });
+      analytics.viewGameList({
+        game_count: list.length,
+        lang,
+        reason: reason || 'refresh',
+        category: category || CATEGORY_DEFAULT
+      });
+    }
+  }
+
+  function normalizeCategory(raw){
+    if (!raw || typeof raw !== 'string') return CATEGORY_DEFAULT;
+    const match = CATEGORY_ITEMS.find(name => name.toLowerCase() === raw.trim().toLowerCase());
+    return match || CATEGORY_DEFAULT;
+  }
+
+  function filterByCategory(list, category){
+    if (!Array.isArray(list)) return [];
+    if (!category || category === CATEGORY_DEFAULT) return list;
+    return list.filter(item => item && Array.isArray(item.category) && item.category.includes(category));
+  }
+
+  function updateCategoryButtons(){
+    if (!categoryButtons.size) return;
+    categoryButtons.forEach((button, name) => {
+      const isActive = name === activeCategory;
+      button.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+      if (isActive){
+        button.classList.add('is-active');
+      } else {
+        button.classList.remove('is-active');
+      }
+    });
+  }
+
+  function updateUrl(category){
+    try {
+      const params = new URLSearchParams(window.location.search);
+      if (category && category !== CATEGORY_DEFAULT){
+        params.set('category', category);
+      } else {
+        params.delete('category');
+      }
+      const query = params.toString();
+      const newUrl = `${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash}`;
+      window.history.replaceState(null, '', newUrl);
+    } catch (err) {
+      if (typeof console !== 'undefined' && console && console.debug){
+        console.debug('Failed to update category in URL', err);
+      }
+    }
+  }
+
+  function currentCategoryList(){
+    return filterByCategory(allGames, activeCategory);
+  }
+
+  function rerender(reason){
+    renderList(currentCategoryList(), reason, activeCategory);
+  }
+
+  function handleCategorySelect(name){
+    const normalized = normalizeCategory(name);
+    if (normalized === activeCategory) return;
+    activeCategory = normalized;
+    updateCategoryButtons();
+    updateUrl(activeCategory);
+    rerender('category');
+    if (analytics && typeof analytics.event === 'function'){
+      analytics.event('select_content', { category: activeCategory });
+    }
+  }
+
+  function buildCategoryBar(){
+    if (!categoryBar) return;
+    categoryBar.setAttribute('role', 'toolbar');
+    categoryBar.innerHTML = '';
+    categoryButtons.clear();
+    CATEGORY_ITEMS.forEach(name => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'category-button';
+      button.textContent = name;
+      button.setAttribute('aria-pressed', 'false');
+      button.dataset.category = name;
+      button.addEventListener('click', () => handleCategorySelect(name));
+      categoryButtons.set(name, button);
+      categoryBar.appendChild(button);
+    });
+  }
+
+  function getInitialCategory(){
+    try {
+      const params = new URLSearchParams(window.location.search);
+      return normalizeCategory(params.get('category'));
+    } catch (err) {
+      return CATEGORY_DEFAULT;
     }
   }
 
@@ -193,9 +295,13 @@
   }
 
   async function init(){
-    const list = await loadGames();
-    renderList(list, 'initial');
-    document.addEventListener('langchange', ()=> renderList(list, 'langchange'));
+    allGames = await loadGames();
+    buildCategoryBar();
+    activeCategory = getInitialCategory();
+    updateCategoryButtons();
+    updateUrl(activeCategory);
+    rerender('initial');
+    document.addEventListener('langchange', ()=> rerender('langchange'));
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
