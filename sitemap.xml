@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <!-- Portal home -->
+  <url>
+    <loc>https://play.kcswh.pl/</loc>
+    <changefreq>daily</changefreq>
+    <priority>0.9</priority>
+  </url>
+
+  <!-- Game pages (frame) -->
+  <url><loc>https://play.kcswh.pl/game.html?slug=catch-cats</loc><changefreq>weekly</changefreq><priority>0.7</priority></url>
+  <url><loc>https://play.kcswh.pl/game.html?slug=coming-soon-2</loc><changefreq>weekly</changefreq><priority>0.4</priority></url>
+  <url><loc>https://play.kcswh.pl/game.html?slug=bubble-shooter</loc><changefreq>weekly</changefreq><priority>0.6</priority></url>
+  <url><loc>https://play.kcswh.pl/game.html?slug=2048-classic</loc><changefreq>weekly</changefreq><priority>0.6</priority></url>
+  <url><loc>https://play.kcswh.pl/game.html?slug=solitaire-klondike</loc><changefreq>weekly</changefreq><priority>0.6</priority></url>
+  <url><loc>https://play.kcswh.pl/game.html?slug=sudoku</loc><changefreq>weekly</changefreq><priority>0.6</priority></url>
+  <url><loc>https://play.kcswh.pl/game.html?slug=mahjong-tiles</loc><changefreq>weekly</changefreq><priority>0.6</priority></url>
+  <url><loc>https://play.kcswh.pl/game.html?slug=endless-runner</loc><changefreq>weekly</changefreq><priority>0.6</priority></url>
+  <url><loc>https://play.kcswh.pl/game.html?slug=street-basketball</loc><changefreq>weekly</changefreq><priority>0.6</priority></url>
+  <url><loc>https://play.kcswh.pl/game.html?slug=penalty-kicks</loc><changefreq>weekly</changefreq><priority>0.6</priority></url>
+  <url><loc>https://play.kcswh.pl/game.html?slug=parking-challenge</loc><changefreq>weekly</changefreq><priority>0.6</priority></url>
+  <url><loc>https://play.kcswh.pl/game.html?slug=word-search</loc><changefreq>weekly</changefreq><priority>0.6</priority></url>
+  <url><loc>https://play.kcswh.pl/game.html?slug=match-3-jewels</loc><changefreq>weekly</changefreq><priority>0.6</priority></url>
+  <url><loc>https://play.kcswh.pl/game.html?slug=dart-challenge</loc><changefreq>weekly</changefreq><priority>0.6</priority></url>
+
+  <!-- Legal and info pages -->
+  <url><loc>https://play.kcswh.pl/about.en.html</loc><changefreq>yearly</changefreq><priority>0.3</priority></url>
+  <url><loc>https://play.kcswh.pl/about.pl.html</loc><changefreq>yearly</changefreq><priority>0.3</priority></url>
+  <url><loc>https://play.kcswh.pl/legal/terms.en.html</loc><changefreq>yearly</changefreq><priority>0.2</priority></url>
+  <url><loc>https://play.kcswh.pl/legal/terms.pl.html</loc><changefreq>yearly</changefreq><priority>0.2</priority></url>
+  <url><loc>https://play.kcswh.pl/legal/privacy.en.html</loc><changefreq>yearly</changefreq><priority>0.2</priority></url>
+  <url><loc>https://play.kcswh.pl/legal/privacy.pl.html</loc><changefreq>yearly</changefreq><priority>0.2</priority></url>
+</urlset>
+
