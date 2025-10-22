@@ -6,12 +6,12 @@
       "thumbnail": "img/games/placeholder.svg",
       "slug": "catch-cats",
       "title": {
-        "en": "Catch Cats â€” Arcade",
-        "pl": "Åap koty â€” Arcade"
+        "en": "Catch Cats — Arcade",
+        "pl": "Łap koty — Arcade"
       },
       "description": {
         "en": "Catch cats and score points!",
-        "pl": "Åap koty i zdobywaj punkty!"
+        "pl": "Łap koty i zdobywaj punkty!"
       },
       "category": [
         "Arcade"
@@ -299,8 +299,8 @@
       "id": "gd-match-3-jewels",
       "slug": "match-3-jewels",
       "title": {
-        "en": "Matchâ€‘3 Jewels",
-        "pl": "Matchâ€‘3 Jewels"
+        "en": "Match‑3 Jewels",
+        "pl": "Match‑3 Jewels"
       },
       "description": {
         "en": "Swap gems to create lines and combos.",
@@ -347,5 +347,7 @@
   ]
 }
 
+
+
 
 
