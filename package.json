@@ -4,8 +4,9 @@
   "version": "0.0.0",
   "scripts": {
     "lint:games": "node scripts/validate-games.js",
+    "pretest": "playwright install",
     "test": "playwright test",
-    "test:install": "playwright install --with-deps"
+    "test:install": "playwright install"
   },
   "devDependencies": {
     "@playwright/test": "^1.46.0"
