@@ -10,7 +10,9 @@ const dataPath = path.join(projectRoot, 'js', 'games.json');
 
 function readJson(filePath){
   try {
-    return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    const raw = fs.readFileSync(filePath, 'utf8');
+    const text = raw.replace(/^\uFEFF/, ''); // strip UTF-8 BOM if present
+    return JSON.parse(text);
   } catch (err) {
     throw new Error(`Failed to read ${filePath}: ${err.message}`);
   }
