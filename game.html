@@ -4,7 +4,18 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#0b1020">
-  <title>Arcade — Game</title>
+  <title>Arcade Hub — Game</title>
+  <meta name="description" content="Discover and play hand-picked arcade games on Arcade Hub.">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Arcade Hub — Game">
+  <meta property="og:description" content="Discover and play hand-picked arcade games on Arcade Hub.">
+  <meta property="og:image" content="img/og/portal-1200x630.svg">
+  <meta property="og:url" content="https://arcadehub.example/game.html">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Arcade Hub — Game">
+  <meta name="twitter:description" content="Discover and play hand-picked arcade games on Arcade Hub.">
+  <meta name="twitter:image" content="img/og/portal-1200x630.svg">
+  <link rel="canonical" href="https://arcadehub.example/game.html">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;800&display=swap" rel="stylesheet">
@@ -64,6 +75,7 @@
     </aside>
 
     <section class="center">
+      <a class="back" href="index.html">← Back to games</a>
       <div class="slot-fixed" id="slotGameTop" aria-label="Promotional"><span class="slot-badge">Promo</span>Reserved slot</div>
       <div class="titleBar">
         <h1 id="gameTitle">Loading…</h1>
@@ -76,6 +88,17 @@
           </button>
         </div>
       </div>
+
+      <section class="gameIntro" id="gameIntro" aria-label="Game summary">
+        <div class="heroCover" id="gameCoverWrap" hidden>
+          <img id="gameCover" alt="" loading="lazy" decoding="async" />
+        </div>
+        <div class="heroMeta">
+          <p id="gameDescription" class="heroDescription">Loading game details…</p>
+          <div class="pillRow" id="gameCategories" aria-label="Categories"></div>
+          <div class="pillRow" id="gameTags" aria-label="Tags"></div>
+        </div>
+      </section>
 
       <div class="gameWrap" id="frameWrap">
         <div class="centerOverlay" id="consentOverlay">
@@ -96,6 +119,13 @@
       </div>
 
       <div class="meta" id="gameMeta"></div>
+
+      <section class="similarSection" id="similarSection" aria-label="Similar games" hidden>
+        <div class="similarHeader">
+          <h2>Similar games</h2>
+        </div>
+        <div class="similarList" id="similarList"></div>
+      </section>
     </section>
 
     <aside class="right" style="display:none;"></aside>

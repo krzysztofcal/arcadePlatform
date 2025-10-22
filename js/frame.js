@@ -8,12 +8,45 @@
   const rotateOverlay = document.getElementById('rotateOverlay');
   const btnEnter = document.getElementById('btnEnterFs');
   const btnExit = document.getElementById('btnExitFs');
+  const introSection = document.getElementById('gameIntro');
+  const coverWrap = document.getElementById('gameCoverWrap');
+  const coverEl = document.getElementById('gameCover');
+  const descriptionEl = document.getElementById('gameDescription');
+  const categoriesEl = document.getElementById('gameCategories');
+  const tagsEl = document.getElementById('gameTags');
+  const similarSection = document.getElementById('similarSection');
+  const similarList = document.getElementById('similarList');
+  const canonicalLink = document.querySelector('link[rel="canonical"]');
 
   const analytics = window.Analytics;
   const catalog = window.ArcadeCatalog;
   let currentSlug = '';
   let pendingFsAction = null;
   let lastFsState = false;
+
+  const SITE_NAME = 'Arcade Hub';
+  const DEFAULT_PAGE_TITLE = SITE_NAME + ' — Game';
+  const DEFAULT_DESCRIPTION = 'Discover and play hand-picked arcade games on Arcade Hub.';
+  const FALLBACK_BASE = 'https://arcadehub.example/game.html';
+
+  const metaSelectors = {
+    description: 'meta[name="description"]',
+    ogTitle: 'meta[property="og:title"]',
+    ogDescription: 'meta[property="og:description"]',
+    ogUrl: 'meta[property="og:url"]',
+    twitterTitle: 'meta[name="twitter:title"]',
+    twitterDescription: 'meta[name="twitter:description"]'
+  };
+  const metaDefaults = {};
+  const metaElements = {};
+  Object.keys(metaSelectors).forEach(key => {
+    const el = document.querySelector(metaSelectors[key]);
+    if (el){
+      metaElements[key] = el;
+      metaDefaults[key] = el.getAttribute('content') || '';
+    }
+  });
+  const canonicalDefault = canonicalLink ? canonicalLink.getAttribute('href') : '';
 
   function track(method, payload){
     if (analytics && typeof analytics[method] === 'function'){
@@ -23,6 +56,18 @@
 
   function qsParam(name){ return new URLSearchParams(location.search).get(name); }
   function getLang(){ return (window.I18N && window.I18N.getLang && window.I18N.getLang()) || 'en'; }
+
+  function updateMeta(key, value){
+    const el = metaElements[key];
+    if (!el) return;
+    const fallback = metaDefaults[key] || '';
+    el.setAttribute('content', value || fallback);
+  }
+
+  function updateCanonical(url){
+    if (!canonicalLink) return;
+    canonicalLink.setAttribute('href', url || canonicalDefault || FALLBACK_BASE);
+  }
 
   function sanitizeSameOriginUrl(urlString){
     if (!urlString) return null;
@@ -36,8 +81,36 @@
     }
   }
 
-  function setDocTitle(text){ try { document.title = text ? (text + ' — Arcade') : 'Arcade — Game'; } catch {}
+  function setDocTitle(text){ try { document.title = text ? (text + ' — ' + SITE_NAME) : DEFAULT_PAGE_TITLE; } catch {}
     if (titleEl) titleEl.textContent = text || 'Game';
+  }
+
+  function computeShareUrl(slug){
+    if (slug){
+      try {
+        const url = new URL(location.href);
+        url.searchParams.set('slug', slug);
+        return url.toString();
+      } catch {}
+      return FALLBACK_BASE + '?slug=' + encodeURIComponent(slug);
+    }
+    try { return new URL(location.href).toString(); } catch {}
+    return FALLBACK_BASE;
+  }
+
+  function updateMetaTags(params){
+    const title = params && params.title ? params.title : '';
+    const description = params && params.description ? params.description : DEFAULT_DESCRIPTION;
+    const slug = params && params.slug ? params.slug : '';
+    const shareTitle = title ? (title + ' — ' + SITE_NAME) : DEFAULT_PAGE_TITLE;
+    const shareUrl = computeShareUrl(slug);
+    updateMeta('description', description);
+    updateMeta('ogTitle', shareTitle);
+    updateMeta('ogDescription', description);
+    updateMeta('ogUrl', shareUrl);
+    updateMeta('twitterTitle', shareTitle);
+    updateMeta('twitterDescription', description);
+    updateCanonical(shareUrl);
   }
 
   function aspectFor(orientation){
@@ -46,6 +119,7 @@
   }
 
   function updateRotateOverlay(orientation){
+    if (!rotateOverlay) return;
     if (!orientation || orientation === 'any'){
       rotateOverlay.classList.add('hidden');
       return;
@@ -167,18 +241,203 @@
     });
   }
 
+  function renderPills(target, values, type){
+    if (!target) return;
+    target.innerHTML = '';
+    const items = Array.isArray(values) ? values.filter(Boolean) : [];
+    if (!items.length){
+      target.hidden = true;
+      target.style.display = 'none';
+      return;
+    }
+    target.hidden = false;
+    target.style.display = '';
+    items.forEach(item => {
+      const span = document.createElement('span');
+      span.className = 'pill' + (type === 'tag' ? ' tag' : '');
+      span.textContent = item;
+      target.appendChild(span);
+    });
+  }
+
+  function renderHero(game, title, description){
+    if (descriptionEl){
+      descriptionEl.textContent = description || DEFAULT_DESCRIPTION;
+    }
+    if (coverWrap){
+      const thumb = game && game.thumbnail;
+      if (thumb && coverEl){
+        coverEl.src = thumb;
+        coverEl.alt = title ? (title + ' cover art') : 'Game cover art';
+        coverWrap.hidden = false;
+        coverWrap.style.display = '';
+      } else {
+        if (coverEl){
+          coverEl.removeAttribute('src');
+          coverEl.alt = '';
+        }
+        coverWrap.hidden = true;
+        coverWrap.style.display = 'none';
+      }
+    }
+    renderPills(categoriesEl, game && game.category, 'category');
+    renderPills(tagsEl, game && game.tags, 'tag');
+    if (introSection){
+      introSection.hidden = false;
+      introSection.style.display = '';
+    }
+  }
+
+  function renderMetaBar(game){
+    if (!metaEl) return;
+    if (!game){
+      metaEl.textContent = '';
+      return;
+    }
+    const bits = [];
+    if (Array.isArray(game.category) && game.category.length){
+      bits.push('Category: ' + game.category.join(', '));
+    }
+    if (Array.isArray(game.tags) && game.tags.length){
+      bits.push('Tags: ' + game.tags.join(', '));
+    }
+    if (game.orientation && game.orientation !== 'any'){
+      bits.push('Best on ' + game.orientation + ' screens');
+    }
+    metaEl.textContent = bits.join(' • ');
+  }
+
+  function scoreSimilar(base, candidate){
+    if (!base || !candidate) return 0;
+    const baseCats = new Set((base.category || []).map(c => c && c.toLowerCase()));
+    const baseTags = new Set((base.tags || []).map(t => t && t.toLowerCase()));
+    let score = 0;
+    (candidate.category || []).forEach(cat => {
+      if (cat && baseCats.has(cat.toLowerCase())) score += 2;
+    });
+    (candidate.tags || []).forEach(tag => {
+      if (tag && baseTags.has(tag.toLowerCase())) score += 1;
+    });
+    if (candidate.orientation && base.orientation && candidate.orientation === base.orientation) score += 0.5;
+    return score;
+  }
+
+  function renderSimilarGames(game, list, lang){
+    if (!similarSection || !similarList){
+      return;
+    }
+    similarList.innerHTML = '';
+    const others = Array.isArray(list) ? list.filter(g => g && g.slug !== game.slug) : [];
+    if (!others.length){
+      similarSection.hidden = true;
+      return;
+    }
+    let ranked = others.map(g => ({ game: g, score: scoreSimilar(game, g) }))
+      .filter(entry => entry.score > 0);
+    if (!ranked.length){
+      ranked = others.map(g => ({ game: g, score: 0 }));
+    }
+    ranked.sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      const aTitle = (a.game.title && (a.game.title[lang] || a.game.title.en)) || a.game.slug || '';
+      const bTitle = (b.game.title && (b.game.title[lang] || b.game.title.en)) || b.game.slug || '';
+      return aTitle.localeCompare(bTitle);
+    });
+    const picks = ranked.slice(0, 4).map(entry => entry.game);
+    if (!picks.length){
+      similarSection.hidden = true;
+      return;
+    }
+    picks.forEach(g => {
+      const card = document.createElement('a');
+      card.className = 'similarCard';
+      const slug = g.slug || g.id || '';
+      card.href = slug ? ('game.html?slug=' + encodeURIComponent(slug)) : '#';
+      const title = (g.title && (g.title[lang] || g.title.en)) || slug || 'Game';
+      card.setAttribute('aria-label', 'Open ' + title);
+      if (g.thumbnail){
+        const img = document.createElement('img');
+        img.className = 'similarThumb';
+        img.src = g.thumbnail;
+        img.alt = title + ' cover art';
+        img.loading = 'lazy';
+        img.decoding = 'async';
+        card.appendChild(img);
+      } else {
+        const placeholder = document.createElement('div');
+        placeholder.className = 'similarThumb';
+        placeholder.setAttribute('aria-hidden', 'true');
+        card.appendChild(placeholder);
+      }
+      const body = document.createElement('div');
+      body.className = 'similarBody';
+      const heading = document.createElement('h3');
+      heading.textContent = title;
+      body.appendChild(heading);
+      const metaWrap = document.createElement('div');
+      metaWrap.className = 'similarMeta';
+      const metaItems = (g.category && g.category.length ? g.category : (g.tags || [])).slice(0, 2);
+      metaItems.forEach(item => {
+        const span = document.createElement('span');
+        span.className = 'metaChip';
+        span.textContent = item;
+        metaWrap.appendChild(span);
+      });
+      if (metaWrap.childElementCount){
+        body.appendChild(metaWrap);
+      }
+      card.appendChild(body);
+      similarList.appendChild(card);
+    });
+    similarSection.hidden = false;
+  }
+
+  function showNotFound(message, titleText){
+    const text = message || 'Game not found.';
+    const heading = titleText || 'Game not found';
+    setDocTitle(heading);
+    updateMetaTags({ title: heading, description: text, slug: currentSlug });
+    if (descriptionEl) descriptionEl.textContent = text;
+    if (introSection){
+      introSection.hidden = true;
+      introSection.style.display = 'none';
+    }
+    if (metaEl) metaEl.textContent = text;
+    if (frameWrap) frameWrap.classList.add('empty');
+    if (frameBox) frameBox.innerHTML = '<div class="emptyState">' + text + '</div>';
+    if (consentOverlay) consentOverlay.classList.add('hidden');
+    if (rotateOverlay) rotateOverlay.classList.add('hidden');
+    if (btnEnter) btnEnter.style.display = 'none';
+    if (btnExit) btnExit.style.display = 'none';
+    if (similarSection) similarSection.hidden = true;
+    if (similarList) similarList.innerHTML = '';
+  }
+
   async function init(){
     const slug = qsParam('slug');
     currentSlug = slug || '';
     const list = await loadCatalog();
     const lang = getLang();
     const game = list.find(g => (g.slug === slug));
-    if (!game){ setDocTitle('Game not found'); if (metaEl) metaEl.textContent = 'Game not found.'; return; }
+    if (!slug || !game){
+      showNotFound(slug ? 'Game not found.' : 'Choose a game from the catalog to start playing.', slug ? 'Game not found' : 'No game selected');
+      return;
+    }
 
     const title = (game.title && (game.title[lang] || game.title.en)) || 'Game';
     const desc = (game.description && (game.description[lang] || game.description.en)) || '';
+    if (frameWrap) frameWrap.classList.remove('empty');
+    if (frameBox && frameBox.querySelector('.emptyState')) frameBox.innerHTML = '';
+    if (btnEnter) btnEnter.style.display = '';
+    if (btnExit) btnExit.style.display = 'none';
     setDocTitle(title);
-    if (metaEl) metaEl.textContent = desc;
+    updateMetaTags({ title, description: desc || DEFAULT_DESCRIPTION, slug });
+    renderHero(game, title, desc);
+    renderMetaBar(game);
+    renderSimilarGames(game, list, lang);
+    if (metaEl && !metaEl.textContent){
+      metaEl.textContent = desc || 'More details coming soon.';
+    }
     track('viewGame', {
       slug: slug || undefined,
       lang,

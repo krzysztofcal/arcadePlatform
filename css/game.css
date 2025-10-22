@@ -58,6 +58,7 @@ canvas#game{ width:100%; height:auto; aspect-ratio:460/320; background:#0b1220; 
 @media (max-width: 860px){
   .gameWrap{ width:100vw; margin-left:calc(50% - 50vw); margin-right:calc(50% - 50vw); border-left:none; border-right:none; border-radius:0; }
 }
+.gameWrap.empty{ display:flex; align-items:center; justify-content:center; min-height:180px; }
 .right{ background:#111735; border:1px solid var(--border); border-radius:16px; padding:12px; display:flex; flex-direction:column; gap:10px; }
 .tile{ height:76px; border-radius:12px; border:1px dashed var(--border); background:transparent; }
 .titleBar{ display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
@@ -65,7 +66,27 @@ canvas#game{ width:100%; height:auto; aspect-ratio:460/320; background:#0b1220; 
 .actions{ display:flex; gap:10px; margin-left:auto; }
 .btnIcon{ width:40px; height:40px; border-radius:12px; display:grid; place-items:center; border:1px solid var(--border); background:transparent; color:#cdd6ff; text-decoration:none; }
 .btnIcon:focus-visible{ outline:2px solid var(--accent); outline-offset:2px; }
+.gameIntro{ display:flex; gap:20px; align-items:flex-start; background:#111735; border:1px solid var(--border); border-radius:16px; padding:16px; margin-top:4px; }
+.heroCover{ width:220px; min-width:200px; aspect-ratio:3/2; border-radius:14px; overflow:hidden; background:rgba(15,20,48,.8); border:1px solid var(--border); display:flex; align-items:center; justify-content:center; }
+.heroCover img{ width:100%; height:100%; object-fit:cover; display:block; }
+.heroMeta{ flex:1; display:flex; flex-direction:column; gap:12px; }
+.heroDescription{ margin:0; font-size:14px; line-height:1.6; color:#dfe7ff; }
+.pillRow{ display:flex; flex-wrap:wrap; gap:8px; }
+.pill{ display:inline-flex; align-items:center; border:1px solid var(--border); border-radius:999px; padding:6px 12px; font:600 12px/1 Poppins, sans-serif; color:#9fb0d0; background:rgba(110,231,231,.08); }
+.pill.tag{ background:rgba(167,139,250,.1); color:#cdd6ff; }
+.pill.empty{ display:none; }
 .meta{ color:var(--muted); font-size:13px; margin-top:6px; }
+.similarSection{ margin-top:12px; background:#111735; border:1px solid var(--border); border-radius:16px; padding:16px; display:flex; flex-direction:column; gap:12px; }
+.similarSection h2{ margin:0; font-size:18px; color:#e8eeff; }
+.similarList{ display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:12px; }
+.similarCard{ display:flex; flex-direction:column; border:1px solid var(--border); border-radius:14px; overflow:hidden; text-decoration:none; color:#dfe7ff; background:linear-gradient(160deg, rgba(17,23,53,.95) 0%, rgba(11,16,32,.95) 100%); transition:transform .18s ease, box-shadow .18s ease; }
+.similarCard:hover{ transform:translateY(-2px); box-shadow:0 10px 24px rgba(0,0,0,.35); }
+.similarThumb{ width:100%; height:120px; object-fit:cover; display:block; background:#090d19; }
+.similarBody{ padding:12px; display:flex; flex-direction:column; gap:6px; }
+.similarBody h3{ margin:0; font-size:15px; color:#f1f5ff; }
+.similarMeta{ display:flex; flex-wrap:wrap; gap:6px; }
+.metaChip{ padding:4px 8px; border-radius:999px; border:1px solid var(--border); font:600 11px/1 Poppins, sans-serif; color:#9fb0d0; background:rgba(110,231,231,.08); }
+.emptyState{ padding:18px; text-align:center; color:#9fb0d0; }
 @keyframes pulse { 0%{transform:scale(1)} 25%{transform:scale(1.15)} 100%{transform:scale(1)} }
 .pulse{ animation:pulse 200ms ease-out; }
 .back{ display:inline-flex; align-items:center; gap:8px; text-decoration:none; color:#dfe7ff; border:1px solid var(--border); padding:8px 10px; border-radius:10px; margin-bottom:6px; }
@@ -114,6 +135,13 @@ button:focus-visible, a:focus-visible{ outline:2px solid var(--accent); outline-
   .sidebar{ display:block; position:fixed; left:16px; top:calc(var(--topbar-h) + 8px); bottom:72px; height:auto; max-height:calc(100vh - var(--topbar-h) - 72px - 16px); z-index:60; transform:translateX(-120%); width:220px; }
   .sidebar.expanded{ transform:translateX(0); }
   .sidebar.collapsed:hover .sb-label{ max-width:0; opacity:1; }
+}
+
+@media (max-width: 900px){
+  .gameIntro{ flex-direction:column; align-items:center; text-align:center; }
+  .heroCover{ width:min(320px, 80%); min-width:auto; }
+  .heroMeta{ align-items:center; }
+  .pillRow{ justify-content:center; }
 }
 
 /* CLS-safe promo slot for game frame (avoid 'ad' in names) */
