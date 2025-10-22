@@ -21,7 +21,7 @@
         "casual",
         "skill"
       ],
-      "thumbnail": "img/games/catch-cats.jpg",
+      
       "source": {
         "type": "self",
         "page": "game_cats.html"
