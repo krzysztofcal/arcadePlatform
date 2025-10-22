@@ -1,17 +1,55 @@
-﻿{
-  "version": 2,
-  "games": [
-    {
-      "id": "cats-arcade",
-      "thumbnail": "img/games/placeholder.svg",
-      "slug": "catch-cats",
-      "title": {
-        "en": "Catch Cats — Arcade",
-        "pl": "Łap koty — Arcade"
-      },
-      "description": {
-        "en": "Catch cats and score points!",
-        "pl": "Łap koty i zdobywaj punkty!"
+    {
+      "slug": "catch-cats",
+      "title": {
+        "en": "Catch Cats — Arcade",
+        "pl": "Łap koty — Arcade"
+      },
+      "description": {
+        "en": "Catch cats and score points!",
+        "pl": "Łap koty i zdobywaj punkty!"
+      },
+      "category": [
+        "Arcade"
+      ],
+      "tags": [
+        "arcade",
+        "casual",
+        "skill"
+      ],
+
+      "source": {
+        "type": "self",
+        "page": "game_cats.html"
+      },
+      "orientation": "portrait"
+    },
+    {
+      "id": "trex-runner",
+      "thumbnail": "img/games/trex-runner.svg",
+      "slug": "trex-runner",
+      "title": {
+        "en": "Chrome Dino Run",
+        "pl": "Chrome Dino Run"
+      },
+      "description": {
+        "en": "Jump over cacti in the classic endless runner.",
+        "pl": "Skacz nad kaktusami w klasycznym endless runnerze."
+      },
+      "category": [
+        "Arcade"
+      ],
+      "tags": [
+        "arcade",
+        "endless",
+        "runner"
+      ],
+      "source": {
+        "type": "self",
+        "page": "game_trex.html"
+      },
+      "orientation": "landscape"
+    },
+
       },
       "category": [
         "Arcade"

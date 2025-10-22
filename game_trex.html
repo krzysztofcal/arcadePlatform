@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0b1020">
+  <title>Chrome Dino Run — Strona gry</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/game.css">
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-JRP62LCXYK"></script>
+  <script src="js/analytics.js" defer></script>
+  <!-- Google Funding Choices (CMP) tag: loads TCF v2.2 banner -->
+  <script async src="https://fundingchoicesmessages.google.com/i/pub-4054734235779751?ers=1"></script>
+  <script>
+    (function(){
+      function signal(){
+        if(!window.frames['googlefcPresent']){
+          if(document.body){
+            var i=document.createElement('iframe');
+            i.style='width:0;height:0;border:0;display:none';
+            i.name='googlefcPresent';
+            document.body.appendChild(i);
+          } else {
+            setTimeout(signal,500);
+          }
+        }
+      }
+      signal();
+    })();
+  </script>
+  <script src="js/cmp.js" defer></script>
+  <script src="js/i18n.js" defer></script>
+  <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-4054734235779751" crossorigin="anonymous"></script>
+</head>
+<body>
+  <div class="topbar">
+    <button class="hamburger" id="sbToggle" aria-label="Toggle navigation" aria-expanded="false">
+      <span></span><span></span><span></span>
+    </button>
+    <div class="brand"><div class="logo" aria-hidden="true"></div><h1>Arcade Hub</h1></div>
+    <div class="search">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M21 21l-3.9-3.9M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15z" stroke="#86e1e1" stroke-width="2" stroke-linecap="round"/></svg>
+      <input type="search" data-i18n-aria="searchAria" data-i18n-placeholder="searchPlaceholder" aria-label="Search games" placeholder="Search games (inactive in MVP)" />
+    </div>
+    <span class="chip">MVP</span>
+  </div>
+  <div class="layout">
+    <aside class="sidebar collapsed" id="sidebar" aria-label="Main navigation">
+      <nav class="sb-nav">
+        <ul class="sb-list">
+          <li class="sb-item">
+            <a href="index.html" class="sb-link sb-home" aria-label="Home" tabindex="0">
+              <span class="sb-ico" aria-hidden="true">
+                <svg class="sb-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 10.5 12 4l9 6.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1v-9.5Z"/></svg>
+              </span>
+              <span class="sb-label">Home</span>
+            </a>
+          </li>
+          <li class="sb-item">
+            <a href="#" class="sb-link" aria-label="Recently played" tabindex="0">
+              <span class="sb-ico" aria-hidden="true"></span>
+              <span class="sb-label">Recently played</span>
+            </a>
+          </li>
+          <li class="sb-item">
+            <a href="#" class="sb-link" aria-label="Popular" tabindex="0">
+              <span class="sb-ico" aria-hidden="true"></span>
+              <span class="sb-label">Popular</span>
+            </a>
+          </li>
+        </ul>
+      </nav>
+    </aside>
+
+    <section class="center">
+      <div class="gameWrap" id="gameWrap">
+        <div class="fsExitOverlay">
+          <button id="overlayExit" type="button" class="fsBtn" title="Exit full screen">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M9 9H4V4m11 0h5v5M9 15H4v5m11 0h5v-5" stroke="#fbbf24" stroke-width="2" stroke-linecap="round"/></svg>
+            Exit full screen
+          </button>
+        </div>
+
+        <div class="centerOverlay" id="centerOverlay">
+          <div>
+            <button id="bigStartBtn" class="bigStartBtn" type="button">Zagraj teraz</button>
+          </div>
+        </div>
+
+        <div class="gameOverOverlay hidden" id="gameOverOverlay">
+          <div class="statsPanel">
+            <h2>Koniec gry</h2>
+            <div class="row"><span>Wynik</span><span class="val" id="finalScore">-</span></div>
+            <div class="row"><span>Rekord</span><span class="val" id="finalHigh">-</span></div>
+            <div class="actions">
+              <button id="replayBtn" type="button">Zagraj ponownie</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="stats">
+          <div class="stat"><span>Wynik</span><strong id="score">0</strong></div>
+          <div class="stat"><span>Rekord</span><strong id="highScore">0</strong></div>
+          <div class="stat"><span>Prędkość</span><strong id="speed">0</strong></div>
+        </div>
+
+        <canvas id="trexCanvas"></canvas>
+
+        <div style="margin-top:6px;"><span id="status" style="color:#9fb0d0;" aria-live="polite">Ready</span></div>
+      </div>
+
+      <div class="titleBar">
+        <h1>Chrome Dino Run</h1>
+        <div class="actions">
+          <button type="button" class="btnIcon" id="btnLike" aria-label="Like" aria-pressed="false">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 21s-7-4.35-7-10a4 4 0 0 1 7-2.65A4 4 0 0 1 19 11c0 5.65-7 10-7 10z" stroke="#a78bfa" stroke-width="2"/></svg>
+          </button>
+          <button type="button" class="btnIcon" id="btnShare" aria-label="Share">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7M16 6l-4-4-4 4M12 2v14" stroke="#6ee7e7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+          <button type="button" class="btnIcon" id="btnMute" title="Mute" aria-label="Mute">🔇</button>
+          <button type="button" class="btnIcon" id="btnPause" title="Pause/Resume" aria-label="Pause/Resume" disabled>⏸</button>
+          <button type="button" class="btnIcon" id="btnEnterFs" title="Full screen" aria-label="Full screen">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M8 3H3v5M16 3h5v5M8 21H3v-5M21 21h-5v-5" stroke="#9fb0d0" stroke-width="2" stroke-linecap="round"/></svg>
+          </button>
+          <button type="button" class="btnIcon" id="btnExitFs" title="Exit full screen" aria-label="Exit full screen" style="display:none;">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M9 9H4V4m11 0h5v5M9 15H4v5m11 0h5v-5" stroke="#fbbf24" stroke-width="2" stroke-linecap="round"/></svg>
+          </button>
+        </div>
+      </div>
+      <div class="meta">Steruj klawiszami ↑/Spacja, by skakać. Pauza: P. Unikaj przeszkód, zdobywaj punkty!</div>
+    </section>
+
+    <aside class="right">
+      <div class="tile"></div><div class="tile"></div><div class="tile"></div>
+      <div class="tile"></div><div class="tile"></div><div class="tile"></div>
+      <div class="tile"></div><div class="tile"></div>
+    </aside>
+  </div>
+
+  <footer class="site-footer" role="contentinfo">
+    <nav class="footer-nav" aria-label="Footer">
+      <a class="ft-link" data-i18n="about" data-href-en="about.en.html" data-href-pl="about.pl.html" href="about.en.html">About</a>
+      <span class="sep">•</span>
+      <a class="ft-link" data-i18n="terms" data-href-en="legal/terms.en.html" data-href-pl="legal/terms.pl.html" href="legal/terms.en.html">Terms</a>
+      <span class="sep">•</span>
+      <a class="ft-link" data-i18n="privacy" data-href-en="legal/privacy.en.html" data-href-pl="legal/privacy.pl.html" href="legal/privacy.en.html">Privacy</a>
+      <span class="sep">•</span>
+      <a class="ft-link" data-i18n="contact" href="mailto:contact@kcswh.pl">Contact</a>
+    </nav>
+    <div class="lang-switch" aria-label="Language">
+      <button type="button" class="lang-btn" data-lang="pl" aria-pressed="false">PL</button>
+      <button type="button" class="lang-btn" data-lang="en" aria-pressed="false">EN</button>
+    </div>
+  </footer>
+
+  <script src="js/sidebar.js" defer></script>
+  <script src="js/core/FullscreenService.js" defer></script>
+  <script src="js/features/trex/TrexRunner.js" defer></script>
+  <script src="js/game_trex.js" defer></script>
+</body>
+</html>

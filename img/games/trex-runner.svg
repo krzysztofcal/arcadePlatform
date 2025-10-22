@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 120" role="img" aria-labelledby="title desc">
+  <title id="title">Chrome Dino Run illustration</title>
+  <desc id="desc">Minimal illustration of a dinosaur running next to a cactus.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#111733"/>
+      <stop offset="1" stop-color="#1b2547"/>
+    </linearGradient>
+    <linearGradient id="dino" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f8fafc"/>
+      <stop offset="1" stop-color="#cbd5f5"/>
+    </linearGradient>
+    <linearGradient id="ground" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#29355b"/>
+      <stop offset="1" stop-color="#1f2a44"/>
+    </linearGradient>
+  </defs>
+  <rect width="160" height="120" rx="18" ry="18" fill="url(#bg)"/>
+  <rect x="12" y="88" width="136" height="6" fill="url(#ground)" opacity="0.9"/>
+  <g transform="translate(40 38)">
+    <path d="M0 40h40v-26h12v-12h-52z" fill="url(#dino)"/>
+    <rect x="28" y="12" width="8" height="8" fill="#0f172a" rx="2"/>
+    <rect x="6" y="36" width="12" height="16" fill="#e2e8ff" rx="2"/>
+    <rect x="32" y="34" width="12" height="18" fill="#d7def9" rx="2"/>
+    <rect x="20" y="30" width="10" height="10" fill="#d7def9" rx="2"/>
+  </g>
+  <g transform="translate(110 44)">
+    <rect x="8" y="8" width="12" height="36" rx="4" fill="#6ee7e7"/>
+    <rect x="0" y="18" width="12" height="24" rx="4" fill="#86efef"/>
+  </g>
+  <g fill="#243252" opacity="0.6">
+    <circle cx="34" cy="30" r="6"/>
+    <circle cx="60" cy="22" r="4"/>
+    <circle cx="120" cy="18" r="5"/>
+  </g>
+</svg>
