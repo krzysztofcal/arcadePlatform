@@ -112,25 +112,15 @@
       }
     }
 
-    sanitizeSelfPage(page){
-      if (!isNonEmptyString(page)) return null;
-      try {
-        const url = new URL(page, this.window.location.href);
-        if (!['http:', 'https:'].includes(url.protocol)) return null;
-        if (url.origin !== this.window.location.origin) return null;
-        return url;
-      } catch (err) {
-        return null;
-      }
-    }
-
     playableHref(item, lang){
       if (!item || !item.source) return null;
       if (item.source.type === 'self' && item.source.page){
-        const url = this.sanitizeSelfPage(item.source.page);
-        if (!url) return null;
-        url.searchParams.set('lang', lang);
-        return url.toString();
+        try {
+          const url = new URL('play.html', this.window.location.href);
+          url.searchParams.set('id', item.id || item.slug || '');
+          url.searchParams.set('lang', lang);
+          return url.toString();
+        } catch (err){ return null; }
       }
       if (item.source.type === 'distributor'){
         try {
