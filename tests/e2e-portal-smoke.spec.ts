@@ -1,52 +1,49 @@
 import { test, expect } from '@playwright/test';
 import path from 'path';
-import fs from 'fs';
+import { pathToFileURL } from 'url';
 
-function fileUrl(p: string) {
-  const abs = path.resolve(p).replace(/\\/g, '/');
-  return 'file://' + abs;
-}
+const stubGames = [
+  {
+    id: 'cat-catcher',
+    slug: 'cat-catcher',
+    title: { en: 'Catch Cats', pl: 'Łap koty' },
+    description: {
+      en: 'Snag as many mischievous cats as you can!',
+      pl: 'Złap jak najwięcej psotnych kotów!'
+    },
+    category: ['Arcade'],
+    source: { type: 'distributor' },
+    thumbnail: 'https://example.com/cat.png'
+  },
+  {
+    id: 'puzzle-bubble',
+    slug: 'puzzle-bubble',
+    title: { en: 'Bubble Solver', pl: 'Bańkowy łamigłówka' },
+    description: {
+      en: 'Group colors to clear the board.',
+      pl: 'Łącz kolory, aby wyczyścić planszę.'
+    },
+    category: ['Puzzle'],
+    source: { type: 'distributor' },
+    thumbnail: 'https://example.com/puzzle.png'
+  }
+];
 
 test.describe('portal smoke tests', () => {
   const indexPath = path.join(__dirname, '..', 'index.html');
-  const gamesCatalogPath = path.join(__dirname, '..', 'js', 'games.json');
 
   test.beforeEach(async ({ page }) => {
-    expect(fs.existsSync(indexPath)).toBeTruthy();
-    expect(fs.existsSync(gamesCatalogPath)).toBeTruthy();
-
-    const catalogJson = fs.readFileSync(gamesCatalogPath, 'utf-8');
-
-    await page.addInitScript(({ payload }) => {
-      const catalogPayload = payload;
-      const originalFetch = window.fetch.bind(window);
-
-      window.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
-        let requestUrl = '';
-        if (typeof input === 'string') {
-          requestUrl = input;
-        } else if (input instanceof Request) {
-          requestUrl = input.url;
-        } else if (input && typeof (input as URL).toString === 'function') {
-          requestUrl = (input as URL).toString();
-        }
-
-        if (requestUrl.includes('js/games.json')) {
-          return Promise.resolve(
-            new Response(catalogPayload, {
-              status: 200,
-              headers: { 'Content-Type': 'application/json' }
-            })
-          );
-        }
-
-        return originalFetch(input, init);
-      };
-    }, { payload: catalogJson });
+    await page.route('**/js/games.json', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ version: 1, games: stubGames })
+      });
+    });
   });
 
   test('renders categories and game cards', async ({ page }) => {
-    await page.goto(fileUrl(indexPath));
+    await page.goto(pathToFileURL(indexPath).toString());
 
     await page.waitForSelector('#gamesGrid .card');
 
@@ -63,18 +60,18 @@ test.describe('portal smoke tests', () => {
     const activeText = await page.locator('#categoryBar .category-button[aria-pressed="true"]').innerText();
     expect(activeText).toBe(defaultCategories[0]);
 
-    const cardCount = await page.locator('#gamesGrid .card').count();
-    expect(cardCount).toBeGreaterThan(1);
+    const cards = page.locator('#gamesGrid .card');
+    await expect(cards).toHaveCount(stubGames.length + 1);
 
     const firstCardClass = (await page.locator('#gamesGrid .card').first().getAttribute('class')) || '';
     expect(firstCardClass).toContain('slot-card');
 
     const titles = await page.locator('#gamesGrid .card .title').allTextContents();
-    expect(titles.some((t) => t.toLowerCase().includes('catch cats'))).toBeTruthy();
+    expect(titles).toEqual(expect.arrayContaining(['Catch Cats', 'Bubble Solver']));
   });
 
   test('category selection updates grid and persists via URL', async ({ page }) => {
-    await page.goto(fileUrl(indexPath));
+    await page.goto(pathToFileURL(indexPath).toString());
     await page.waitForSelector('#gamesGrid .card');
 
     const puzzleButton = page.locator('#categoryBar .category-button', { hasText: 'Puzzle' });
@@ -84,9 +81,9 @@ test.describe('portal smoke tests', () => {
     const urlAfterClick = new URL(page.url());
     expect(urlAfterClick.searchParams.get('category')).toBe('Puzzle');
 
-    const titles = await page.locator('#gamesGrid .card .title').allTextContents();
-    expect(titles.some((t) => /bubble|2048|solitaire/i.test(t))).toBeTruthy();
-    expect(titles.some((t) => /catch cats/i.test(t))).toBeFalsy();
+    const puzzleTitles = await page.locator('#gamesGrid .card .title').allTextContents();
+    expect(puzzleTitles).toEqual(['Bubble Solver']);
+    expect(puzzleTitles).not.toContain('Catch Cats');
 
     await page.reload();
     await page.waitForSelector('#gamesGrid .card');
@@ -96,7 +93,7 @@ test.describe('portal smoke tests', () => {
   });
 
   test('language switch updates localized content', async ({ page }) => {
-    await page.goto(fileUrl(indexPath));
+    await page.goto(pathToFileURL(indexPath).toString());
     await page.waitForSelector('.lang-btn');
 
     const searchInput = page.locator('.search input[type="search"]');
@@ -120,7 +117,7 @@ test.describe('portal smoke tests', () => {
   });
 
   test('sidebar toggle updates aria-expanded and classes', async ({ page }) => {
-    await page.goto(fileUrl(indexPath));
+    await page.goto(pathToFileURL(indexPath).toString());
     await page.waitForSelector('#sidebar');
 
     const sidebar = page.locator('#sidebar');
