@@ -9,9 +9,40 @@ function fileUrl(p: string) {
 
 test.describe('portal smoke tests', () => {
   const indexPath = path.join(__dirname, '..', 'index.html');
+  const gamesCatalogPath = path.join(__dirname, '..', 'js', 'games.json');
 
-  test.beforeEach(() => {
+  test.beforeEach(async ({ page }) => {
     expect(fs.existsSync(indexPath)).toBeTruthy();
+    expect(fs.existsSync(gamesCatalogPath)).toBeTruthy();
+
+    const catalogJson = fs.readFileSync(gamesCatalogPath, 'utf-8');
+
+    await page.addInitScript(({ payload }) => {
+      const catalogPayload = payload;
+      const originalFetch = window.fetch.bind(window);
+
+      window.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
+        let requestUrl = '';
+        if (typeof input === 'string') {
+          requestUrl = input;
+        } else if (input instanceof Request) {
+          requestUrl = input.url;
+        } else if (input && typeof (input as URL).toString === 'function') {
+          requestUrl = (input as URL).toString();
+        }
+
+        if (requestUrl.includes('js/games.json')) {
+          return Promise.resolve(
+            new Response(catalogPayload, {
+              status: 200,
+              headers: { 'Content-Type': 'application/json' }
+            })
+          );
+        }
+
+        return originalFetch(input, init);
+      };
+    }, { payload: catalogJson });
   });
 
   test('renders categories and game cards', async ({ page }) => {
