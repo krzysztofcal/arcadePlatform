@@ -17,7 +17,7 @@
     lastTime: 0,
     speed: INITIAL_SPEED,
     spawnTimer: 0,
-    spawnInterval: 1.2,
+    spawnInterval: 1.6,
     score: 0,
     hiScore: Number(localStorage.getItem('trex-hi') || '0'),
     dino: { x: 60, y: GROUND_Y, width: 44, height: 48, vy: 0, isJumping: false },
@@ -36,7 +36,7 @@
   }
 
   function reset(){
-    state.running=false; state.lastTime=0; state.speed=INITIAL_SPEED; state.spawnTimer=0; state.spawnInterval=1.2; state.score=0;
+    state.running=false; state.lastTime=0; state.speed=INITIAL_SPEED; state.spawnTimer=0; state.spawnInterval=1.6; state.score=0;
     state.dino.y=GROUND_Y; state.dino.vy=0; state.dino.isJumping=false; state.obstacles.length=0; state.clouds.length=0;
     spawnCloud(); spawnCloud(); render(); updateScoreboard();
   }
@@ -44,13 +44,29 @@
   function jump(){ if(!state.running) start(); if(state.dino.isJumping) return; state.dino.isJumping=true; state.dino.vy=JUMP_VELOCITY; }
   function loop(ts){ if(!state.running) return; const dt=Math.min((ts-state.lastTime)/1000,0.035); state.lastTime=ts; update(dt); render(); requestAnimationFrame(loop); }
   function update(dt){
-    state.speed += dt*12; state.spawnTimer += dt; if(state.spawnTimer>state.spawnInterval){ state.spawnTimer=0; state.spawnInterval=Math.max(0.6,1.1-state.speed/800); spawnObstacle(); }
+    state.speed += dt*12; state.spawnTimer += dt; if(state.spawnTimer>state.spawnInterval){ state.spawnTimer=0; state.spawnInterval=Math.max(1.0,1.8-state.speed/900); spawnObstacle(); }
     const d=state.dino; d.vy+=GRAVITY*dt; d.y+=d.vy*dt; if(d.y>=GROUND_Y){ d.y=GROUND_Y; d.vy=0; d.isJumping=false; }
     state.obstacles.forEach(ob=> ob.x -= state.speed*dt); state.obstacles = state.obstacles.filter(ob=> ob.x+ob.width>-10);
     state.clouds.forEach(c=> c.x -= c.speed*dt); if(state.clouds.length<3) spawnCloud(); state.clouds = state.clouds.filter(c=> c.x+c.width>0);
     detectCollision(); state.score += dt*12; if(Math.floor(state.score)%100===0){ state.speed+=5; } updateScoreboard();
   }
-  function detectCollision(){ const d=state.dino; for(const ob of state.obstacles){ if(d.x<ob.x+ob.width && d.x+d.width>ob.x && d.y<ob.y+ob.height && d.y+d.height>ob.y){ gameOver(); break; } } }
+  function detectCollision(){
+    const d = state.dino;
+    const dLeft = d.x;
+    const dRight = d.x + d.width;
+    const dBottom = d.y;
+    const dTop = d.y - d.height;
+    for(const ob of state.obstacles){
+      const oLeft = ob.x;
+      const oRight = ob.x + ob.width;
+      const oTop = ob.y;
+      const oBottom = ob.y + ob.height;
+      if(dLeft < oRight && dRight > oLeft && dTop < oBottom && dBottom > oTop){
+        gameOver();
+        break;
+      }
+    }
+  }
   function gameOver(){ state.running=false; if(state.score>state.hiScore){ state.hiScore=Math.floor(state.score); localStorage.setItem('trex-hi', state.hiScore.toString()); } updateScoreboard(); drawGameOver(); }
   function drawGameOver(){ ctx.save(); ctx.fillStyle='rgba(0,0,0,.5)'; ctx.fillRect(0,0,canvas.width,canvas.height); ctx.fillStyle='#f5f6fb'; ctx.font='24px "Courier New", monospace'; ctx.textAlign='center'; ctx.fillText('Game Over', WORLD_WIDTH/2, WORLD_HEIGHT/2-10); ctx.font='16px "Courier New", monospace'; ctx.fillText('Press restart or jump to try again', WORLD_WIDTH/2, WORLD_HEIGHT/2+14); ctx.restore(); }
   function spawnObstacle(){ const h=40+Math.random()*40,w=20+Math.random()*20; state.obstacles.push({x:WORLD_WIDTH+Math.random()*60, y:GROUND_Y+2-h, width:w, height:h}); }
