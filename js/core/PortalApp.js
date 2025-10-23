@@ -112,15 +112,23 @@
       }
     }
 
+    sanitizeSelfPage(page){
+      if (!isNonEmptyString(page)) return null;
+      try {
+        const url = new URL(page, this.window.location.href);
+        if (!['http:', 'https:'].includes(url.protocol)) return null;
+        if (url.origin !== this.window.location.origin) return null;
+        return url;
+      } catch (err){ return null; }
+    }
+
     playableHref(item, lang){
       if (!item || !item.source) return null;
       if (item.source.type === 'self' && item.source.page){
-        try {
-          const url = new URL(item.source.page, this.window.location.href);
-          if (url.origin !== this.window.location.origin) return null;
-          url.searchParams.set('lang', lang);
-          return url.toString();
-        } catch (err){ return null; }
+        const url = this.sanitizeSelfPage(item.source.page);
+        if (!url) return null;
+        url.searchParams.set('lang', lang);
+        return url.toString();
       }
       if (item.source.type === 'distributor'){
         try {
@@ -128,9 +136,7 @@
           url.searchParams.set('slug', item.slug || item.id || '');
           url.searchParams.set('lang', lang);
           return url.toString();
-        } catch (err) {
-          return null;
-        }
+        } catch (err){ return null; }
       }
       return null;
     }

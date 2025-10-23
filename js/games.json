@@ -364,7 +364,7 @@
                                ],
                       "thumbnail":  "img/games/placeholder.svg",
                       "source":  {
-                                     "page":  "/games/t-rex/index.html",
+                                     "page":  "game_trex.html",
                                      "type":  "self"
                                  },
                       "orientation":  "landscape"
