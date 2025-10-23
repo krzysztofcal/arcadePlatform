@@ -1,4 +1,4 @@
-(function(global){
+﻿(function(global){
   'use strict';
 
   const DEFAULT_CATEGORIES = Object.freeze(['New/All', 'Arcade', 'Puzzle', 'Shooter', 'Racing']);
@@ -116,8 +116,8 @@
       if (!item || !item.source) return null;
       if (item.source.type === 'self' && item.source.page){
         try {
-          const url = new URL('play.html', this.window.location.href);
-          url.searchParams.set('id', item.id || item.slug || '');
+          const url = new URL(item.source.page, this.window.location.href);
+          if (url.origin !== this.window.location.origin) return null;
           url.searchParams.set('lang', lang);
           return url.toString();
         } catch (err){ return null; }
@@ -363,3 +363,4 @@
   PortalApp.DEFAULT_CATEGORIES = DEFAULT_CATEGORIES;
   global.PortalApp = PortalApp;
 })(window);
+
