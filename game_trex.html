@@ -10,6 +10,14 @@
   <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="css/game.css">
   <script src="js/i18n.js" defer></script>
+  <style>
+    .stats .stat strong{ font-family:'Courier New', Courier, monospace; }
+    #gameWrap{ display:flex; flex-direction:column; gap:12px; align-items:center; }
+    #gameWrap .controls-row{ justify-content:flex-end; width:100%; }
+    canvas#game{ width:min(100%,600px); height:auto; aspect-ratio:3 / 1; max-height:200px; background:linear-gradient(#1b2336,#0f111a 70%); border-radius:12px; border:2px solid rgba(255,255,255,0.05); }
+    @media (max-width:700px){ canvas#game{ width:100%; } }
+  </style>
+
 </head>
 <body>
   <div class="topbar">
