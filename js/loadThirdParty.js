@@ -9,6 +9,7 @@
   var analyticsLoaded = false;
   var adsScriptRequested = false;
   var tcfListenerAttached = false;
+  var fundingFrameEnsured = false;
 
   function getHead(){
     return document.head || document.getElementsByTagName('head')[0];
@@ -25,9 +26,37 @@
     return s;
   }
 
+  function ensureFundingChoicesFrame(){
+    function createFrame(){
+      if (window.frames && window.frames['googlefcPresent']) {
+        fundingFrameEnsured = true;
+        return true;
+      }
+      var body = document.body;
+      if (!body) return false;
+      var iframe = document.createElement('iframe');
+      iframe.style.cssText = 'width:0;height:0;border:0;display:none';
+      iframe.name = 'googlefcPresent';
+      body.appendChild(iframe);
+      fundingFrameEnsured = true;
+      return true;
+    }
+
+    if (fundingFrameEnsured && window.frames && window.frames['googlefcPresent']) return;
+    if (createFrame()) return;
+
+    var attempts = 0;
+    (function retry(){
+      if (createFrame()) return;
+      if (attempts++ >= 10) return;
+      setTimeout(retry, 250);
+    })();
+  }
+
   function requestCmp(){
     if (cmpRequested || location.protocol === 'file:') return;
     cmpRequested = true;
+    ensureFundingChoicesFrame();
     injectScript(CMP_SRC);
   }
 
@@ -80,6 +109,45 @@
     }
   }
 
+  function showConsentUi(){
+    ensureFundingChoicesFrame();
+    try {
+      if (typeof window.__tcfapi === 'function') {
+        window.__tcfapi('displayConsentUi', 2, function(){}, null);
+        return true;
+      }
+    } catch (_) {}
+    return false;
+  }
+
+  function showConsentUiWithRetry(){
+    if (showConsentUi()) return;
+    var attempts = 0;
+    var maxAttempts = 20;
+    (function retry(){
+      if (showConsentUi()) return;
+      if (attempts++ >= maxAttempts) return;
+      setTimeout(retry, 250);
+    })();
+  }
+
+  function attachConsentLinks(){
+    if (typeof document === 'undefined') return;
+    var links = document.querySelectorAll('#manageCookies, .manage-cookies');
+    if (!links || !links.length) return;
+    links.forEach(function(link){
+      if (link.dataset && link.dataset.consentBound === '1') return;
+      if (!link.dataset && link.getAttribute('data-consent-bound') === '1') return;
+      if (link.dataset) link.dataset.consentBound = '1';
+      else link.setAttribute('data-consent-bound', '1');
+      link.addEventListener('click', function(event){
+        if (event) event.preventDefault();
+        openConsentManager();
+        return false;
+      });
+    });
+  }
+
   function setupTcfListener(){
     if (tcfListenerAttached) return;
     tcfListenerAttached = true;
@@ -111,17 +179,31 @@
 
   function onReady(){
     if (location.protocol === 'file:') return;
+    ensureFundingChoicesFrame();
     requestCmp();
     setupTcfListener();
+    attachConsentLinks();
   }
 
   window.loadThirdPartyScripts = function(){
+    ensureFundingChoicesFrame();
     requestCmp();
     setupTcfListener();
     loadAnalyticsAndAds();
   };
 
-  window.loadConsentManager = requestCmp;
+  window.loadConsentManager = function(){
+    ensureFundingChoicesFrame();
+    requestCmp();
+  };
+  function openConsentManager(){
+    ensureFundingChoicesFrame();
+    requestCmp();
+    setupTcfListener();
+    showConsentUiWithRetry();
+  }
+
+  window.showConsentManager = openConsentManager;
   window.renderGoogleAds = renderPendingAds;
 
   if (document.readyState === 'loading') {
