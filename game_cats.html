@@ -5,33 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#0b1020">
   <title>Łap koty — Strona gry (Fullscreen FIX)</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;800&display=swap">
   <link rel="stylesheet" href="css/game.css">
-  <script>
-    (function () {
-      if (location.protocol === 'file:') return;
-      var head = document.head || document.getElementsByTagName('head')[0];
-      function injectScript(src, opts){
-        var s = document.createElement('script');
-        s.src = src;
-        s.async = true;
-        if (opts && opts.crossOrigin) s.crossOrigin = opts.crossOrigin;
-        head.appendChild(s);
-      }
-      function injectLink(rel, href, opts){
-        var l = document.createElement('link');
-        l.rel = rel;
-        l.href = href;
-        if (opts && opts.crossOrigin) l.crossOrigin = opts.crossOrigin;
-        head.appendChild(l);
-      }
-      injectLink('preconnect', 'https://fonts.googleapis.com');
-      injectLink('preconnect', 'https://fonts.gstatic.com', { crossOrigin: 'anonymous' });
-      injectLink('stylesheet', 'https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;800&display=swap');
-      injectScript('https://www.googletagmanager.com/gtag/js?id=G-JRP62LCXYK');
-      injectScript('https://fundingchoicesmessages.google.com/i/pub-4054734235779751?ers=1');
-      injectScript('https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-4054734235779751', { crossOrigin: 'anonymous' });
-    })();
-  </script>
   <script src="js/analytics.js" defer></script>
   <!-- Google Funding Choices (CMP) tag: loads TCF v2.2 banner -->
   <script>
@@ -189,6 +166,7 @@
   <script src="js/features/cats/CatsRules.js" defer></script>
   <script src="js/game.js" defer></script>
   <script src="js/sidebar.js" defer></script>
+  <script src="js/loadThirdParty.js"></script>
   <footer class="site-footer" role="contentinfo">
     <nav class="footer-nav" aria-label="Footer">
       <a class="ft-link" data-i18n="about" data-href-en="about.en.html" data-href-pl="about.pl.html" href="about.en.html">About</a>
