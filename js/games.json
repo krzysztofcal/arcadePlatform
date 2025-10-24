@@ -351,8 +351,8 @@
                                     "pl":  "T-Rex Biegacz"
                                 },
                       "description":  {
-                                          "en":  "Jump over cacti in this classic offline runner.",
-                                          "pl":  "Skacz nad kaktusami w klasycznym runnerze."
+                                          "en":  "Dash through the desert and leap over cacti in this offline classic.",
+                                          "pl":  "Pędź przez pustynię i przeskakuj kaktusy w tym klasycznym runnerze offline."
                                       },
                       "category":  [
                                        "Arcade"
@@ -360,12 +360,13 @@
                       "tags":  [
                                    "runner",
                                    "endless",
-                                   "classic"
+                                   "retro",
+                                   "dinosaur"
                                ],
-                      "thumbnail":  "img/games/placeholder.svg",
+                      "thumbnail":  "img/games/trex-runner.svg",
                       "source":  {
-                                     "page":  "game_trex.html",
-                                     "type":  "self"
+                                     "type":  "self",
+                                     "page":  "game_trex.html"
                                  },
                       "orientation":  "landscape"
                   }
