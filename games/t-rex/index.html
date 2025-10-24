@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>T-Rex Runner</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <main class="game-shell">
+    <header class="hud">
+      <h1>T-Rex Runner</h1>
+      <div class="scoreboard">
+        <span id="score">00000</span>
+        <span id="hi-score">HI 00000</span>
+      </div>
+    </header>
+    <canvas id="game" width="600" height="200" role="img" aria-label="Side scrolling runner game"></canvas>
+    <div class="controls">
+      <p>Press <kbd>space</kbd>, <kbd>↑</kbd> or tap to jump.</p>
+      <button id="restart" type="button">Restart</button>
+    </div>
+  </main>
+  <script src="main.js"></script>
+</body>
+</html>
+

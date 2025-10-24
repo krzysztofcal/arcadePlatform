@@ -1,4 +1,4 @@
-(function(global){
+﻿(function(global){
   'use strict';
 
   const DEFAULT_CATEGORIES = Object.freeze(['New/All', 'Arcade', 'Puzzle', 'Shooter', 'Racing']);
@@ -119,9 +119,7 @@
         if (!['http:', 'https:'].includes(url.protocol)) return null;
         if (url.origin !== this.window.location.origin) return null;
         return url;
-      } catch (err) {
-        return null;
-      }
+      } catch (err){ return null; }
     }
 
     playableHref(item, lang){
@@ -138,9 +136,7 @@
           url.searchParams.set('slug', item.slug || item.id || '');
           url.searchParams.set('lang', lang);
           return url.toString();
-        } catch (err) {
-          return null;
-        }
+        } catch (err){ return null; }
       }
       return null;
     }
@@ -373,3 +369,4 @@
   PortalApp.DEFAULT_CATEGORIES = DEFAULT_CATEGORIES;
   global.PortalApp = PortalApp;
 })(window);
+

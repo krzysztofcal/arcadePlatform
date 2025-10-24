@@ -1,353 +1,373 @@
-﻿{
-  "version": 2,
-  "games": [
-    {
-      "id": "cats-arcade",
-      "thumbnail": "img/games/placeholder.svg",
-      "slug": "catch-cats",
-      "title": {
-        "en": "Catch Cats — Arcade",
-        "pl": "Łap koty — Arcade"
-      },
-      "description": {
-        "en": "Catch cats and score points!",
-        "pl": "Łap koty i zdobywaj punkty!"
-      },
-      "category": [
-        "Arcade"
-      ],
-      "tags": [
-        "arcade",
-        "casual",
-        "skill"
-      ],
-      
-      "source": {
-        "type": "self",
-        "page": "game_cats.html"
-      },
-      "orientation": "portrait"
-    },
-    {
-      "id": "placeholder-2",
-      "slug": "coming-soon-2",
-      "title": {
-        "en": "Game 2",
-        "pl": "Gra 2"
-      },
-      "description": {
-        "en": "Under construction",
-        "pl": "W przygotowaniu"
-      },
-      "category": [
-        "Arcade"
-      ],
-      "tags": [
-        "coming-soon"
-      ],
-      "thumbnail": "img/games/placeholder.svg",
-      "source": {
-        "type": "placeholder"
-      },
-      "orientation": "any"
-    },
-    {
-      "id": "gd-bubble-shooter",
-      "slug": "bubble-shooter",
-      "title": {
-        "en": "Bubble Shooter",
-        "pl": "Bubble Shooter"
-      },
-      "description": {
-        "en": "Match and pop bubbles to clear the board.",
-        "pl": "Match and pop bubbles to clear the board."
-      },
-      "category": [
-        "Puzzle",
-        "Shooter"
-      ],
-      "tags": [
-        "arcade",
-        "match3",
-        "casual"
-      ],
-      "thumbnail": "img/games/placeholder.svg",
-      "source": {
-        "type": "placeholder"
-      },
-      "orientation": "portrait"
-    },
-    {
-      "id": "gd-2048-classic",
-      "slug": "2048-classic",
-      "title": {
-        "en": "2048 Classic",
-        "pl": "2048 Classic"
-      },
-      "description": {
-        "en": "Swipe tiles to reach 2048.",
-        "pl": "Swipe tiles to reach 2048."
-      },
-      "category": [
-        "Puzzle"
-      ],
-      "tags": [
-        "puzzle",
-        "logic",
-        "casual"
-      ],
-      "thumbnail": "img/games/placeholder.svg",
-      "source": {
-        "type": "placeholder"
-      },
-      "orientation": "portrait"
-    },
-    {
-      "id": "gd-solitaire-klondike",
-      "slug": "solitaire-klondike",
-      "title": {
-        "en": "Solitaire Klondike",
-        "pl": "Solitaire Klondike"
-      },
-      "description": {
-        "en": "Classic Klondike patience.",
-        "pl": "Classic Klondike patience."
-      },
-      "category": [
-        "Puzzle"
-      ],
-      "tags": [
-        "cards",
-        "casual"
-      ],
-      "thumbnail": "img/games/placeholder.svg",
-      "source": {
-        "type": "placeholder"
-      },
-      "orientation": "portrait"
-    },
-    {
-      "id": "gd-sudoku",
-      "slug": "sudoku",
-      "title": {
-        "en": "Sudoku",
-        "pl": "Sudoku"
-      },
-      "description": {
-        "en": "Fill the grid with 1â€“9 without repeats.",
-        "pl": "Fill the grid with 1â€“9 without repeats."
-      },
-      "category": [
-        "Puzzle"
-      ],
-      "tags": [
-        "puzzle",
-        "logic"
-      ],
-      "thumbnail": "img/games/placeholder.svg",
-      "source": {
-        "type": "placeholder"
-      },
-      "orientation": "portrait"
-    },
-    {
-      "id": "gd-mahjong-tiles",
-      "slug": "mahjong-tiles",
-      "title": {
-        "en": "Mahjong Tiles",
-        "pl": "Mahjong Tiles"
-      },
-      "description": {
-        "en": "Match open pairs of identical tiles.",
-        "pl": "Match open pairs of identical tiles."
-      },
-      "category": [
-        "Puzzle"
-      ],
-      "tags": [
-        "board",
-        "puzzle"
-      ],
-      "thumbnail": "img/games/placeholder.svg",
-      "source": {
-        "type": "placeholder"
-      },
-      "orientation": "landscape"
-    },
-    {
-      "id": "gd-endless-runner",
-      "slug": "endless-runner",
-      "title": {
-        "en": "Endless Runner",
-        "pl": "Endless Runner"
-      },
-      "description": {
-        "en": "Dodge obstacles and collect coins.",
-        "pl": "Dodge obstacles and collect coins."
-      },
-      "category": [
-        "Arcade"
-      ],
-      "tags": [
-        "runner",
-        "reflex",
-        "arcade"
-      ],
-      "thumbnail": "img/games/placeholder.svg",
-      "source": {
-        "type": "placeholder"
-      },
-      "orientation": "portrait"
-    },
-    {
-      "id": "gd-street-basketball",
-      "slug": "street-basketball",
-      "title": {
-        "en": "Street Basketball",
-        "pl": "Street Basketball"
-      },
-      "description": {
-        "en": "Swipe to shoot hoops and beat the timer.",
-        "pl": "Swipe to shoot hoops and beat the timer."
-      },
-      "category": [
-        "Arcade"
-      ],
-      "tags": [
-        "sports",
-        "arcade"
-      ],
-      "thumbnail": "img/games/placeholder.svg",
-      "source": {
-        "type": "placeholder"
-      },
-      "orientation": "portrait"
-    },
-    {
-      "id": "gd-penalty-kicks",
-      "slug": "penalty-kicks",
-      "title": {
-        "en": "Penalty Kicks",
-        "pl": "Penalty Kicks"
-      },
-      "description": {
-        "en": "Aim and score from the spot.",
-        "pl": "Aim and score from the spot."
-      },
-      "category": [
-        "Arcade"
-      ],
-      "tags": [
-        "sports",
-        "football"
-      ],
-      "thumbnail": "img/games/placeholder.svg",
-      "source": {
-        "type": "placeholder"
-      },
-      "orientation": "portrait"
-    },
-    {
-      "id": "gd-parking-challenge",
-      "slug": "parking-challenge",
-      "title": {
-        "en": "Parking Challenge",
-        "pl": "Parking Challenge"
-      },
-      "description": {
-        "en": "Park without crashing in tricky levels.",
-        "pl": "Park without crashing in tricky levels."
-      },
-      "category": [
-        "Racing"
-      ],
-      "tags": [
-        "driving",
-        "logic"
-      ],
-      "thumbnail": "img/games/placeholder.svg",
-      "source": {
-        "type": "placeholder"
-      },
-      "orientation": "portrait"
-    },
-    {
-      "id": "gd-word-search",
-      "slug": "word-search",
-      "title": {
-        "en": "Word Search",
-        "pl": "Word Search"
-      },
-      "description": {
-        "en": "Find hidden words in the grid.",
-        "pl": "Find hidden words in the grid."
-      },
-      "category": [
-        "Puzzle"
-      ],
-      "tags": [
-        "word",
-        "puzzle"
-      ],
-      "thumbnail": "img/games/placeholder.svg",
-      "source": {
-        "type": "placeholder"
-      },
-      "orientation": "portrait"
-    },
-    {
-      "id": "gd-match-3-jewels",
-      "slug": "match-3-jewels",
-      "title": {
-        "en": "Match‑3 Jewels",
-        "pl": "Match‑3 Jewels"
-      },
-      "description": {
-        "en": "Swap gems to create lines and combos.",
-        "pl": "Swap gems to create lines and combos."
-      },
-      "category": [
-        "Puzzle"
-      ],
-      "tags": [
-        "match3",
-        "arcade",
-        "casual"
-      ],
-      "thumbnail": "img/games/placeholder.svg",
-      "source": {
-        "type": "placeholder"
-      },
-      "orientation": "portrait"
-    },
-    {
-      "id": "gd-dart-challenge",
-      "slug": "dart-challenge",
-      "title": {
-        "en": "Dart Challenge",
-        "pl": "Dart Challenge"
-      },
-      "description": {
-        "en": "Aim carefully and hit the target.",
-        "pl": "Aim carefully and hit the target."
-      },
-      "category": [
-        "Shooter"
-      ],
-      "tags": [
-        "sports",
-        "skill"
-      ],
-      "thumbnail": "img/games/placeholder.svg",
-      "source": {
-        "type": "placeholder"
-      },
-      "orientation": "portrait"
-    }
-  ]
-}
-
-
-
-
-
+﻿{
+    "version":  2,
+    "games":  [
+                  {
+                      "id":  "cats-arcade",
+                      "thumbnail":  "img/games/placeholder.svg",
+                      "slug":  "catch-cats",
+                      "title":  {
+                                    "en":  "Catch Cats — Arcade",
+                                    "pl":  "Łap koty — Arcade"
+                                },
+                      "description":  {
+                                          "en":  "Catch cats and score points!",
+                                          "pl":  "Łap koty i zdobywaj punkty!"
+                                      },
+                      "category":  [
+                                       "Arcade"
+                                   ],
+                      "tags":  [
+                                   "arcade",
+                                   "casual",
+                                   "skill"
+                               ],
+                      "source":  {
+                                     "type":  "self",
+                                     "page":  "game_cats.html"
+                                 },
+                      "orientation":  "portrait"
+                  },
+                  {
+                      "id":  "placeholder-2",
+                      "slug":  "coming-soon-2",
+                      "title":  {
+                                    "en":  "Game 2",
+                                    "pl":  "Gra 2"
+                                },
+                      "description":  {
+                                          "en":  "Under construction",
+                                          "pl":  "W przygotowaniu"
+                                      },
+                      "category":  [
+                                       "Arcade"
+                                   ],
+                      "tags":  [
+                                   "coming-soon"
+                               ],
+                      "thumbnail":  "img/games/placeholder.svg",
+                      "source":  {
+                                     "type":  "placeholder"
+                                 },
+                      "orientation":  "any"
+                  },
+                  {
+                      "id":  "gd-bubble-shooter",
+                      "slug":  "bubble-shooter",
+                      "title":  {
+                                    "en":  "Bubble Shooter",
+                                    "pl":  "Bubble Shooter"
+                                },
+                      "description":  {
+                                          "en":  "Match and pop bubbles to clear the board.",
+                                          "pl":  "Match and pop bubbles to clear the board."
+                                      },
+                      "category":  [
+                                       "Puzzle",
+                                       "Shooter"
+                                   ],
+                      "tags":  [
+                                   "arcade",
+                                   "match3",
+                                   "casual"
+                               ],
+                      "thumbnail":  "img/games/placeholder.svg",
+                      "source":  {
+                                     "type":  "placeholder"
+                                 },
+                      "orientation":  "portrait"
+                  },
+                  {
+                      "id":  "gd-2048-classic",
+                      "slug":  "2048-classic",
+                      "title":  {
+                                    "en":  "2048 Classic",
+                                    "pl":  "2048 Classic"
+                                },
+                      "description":  {
+                                          "en":  "Swipe tiles to reach 2048.",
+                                          "pl":  "Swipe tiles to reach 2048."
+                                      },
+                      "category":  [
+                                       "Puzzle"
+                                   ],
+                      "tags":  [
+                                   "puzzle",
+                                   "logic",
+                                   "casual"
+                               ],
+                      "thumbnail":  "img/games/placeholder.svg",
+                      "source":  {
+                                     "type":  "placeholder"
+                                 },
+                      "orientation":  "portrait"
+                  },
+                  {
+                      "id":  "gd-solitaire-klondike",
+                      "slug":  "solitaire-klondike",
+                      "title":  {
+                                    "en":  "Solitaire Klondike",
+                                    "pl":  "Solitaire Klondike"
+                                },
+                      "description":  {
+                                          "en":  "Classic Klondike patience.",
+                                          "pl":  "Classic Klondike patience."
+                                      },
+                      "category":  [
+                                       "Puzzle"
+                                   ],
+                      "tags":  [
+                                   "cards",
+                                   "casual"
+                               ],
+                      "thumbnail":  "img/games/placeholder.svg",
+                      "source":  {
+                                     "type":  "placeholder"
+                                 },
+                      "orientation":  "portrait"
+                  },
+                  {
+                      "id":  "gd-sudoku",
+                      "slug":  "sudoku",
+                      "title":  {
+                                    "en":  "Sudoku",
+                                    "pl":  "Sudoku"
+                                },
+                      "description":  {
+                                          "en":  "Fill the grid with 1â€“9 without repeats.",
+                                          "pl":  "Fill the grid with 1â€“9 without repeats."
+                                      },
+                      "category":  [
+                                       "Puzzle"
+                                   ],
+                      "tags":  [
+                                   "puzzle",
+                                   "logic"
+                               ],
+                      "thumbnail":  "img/games/placeholder.svg",
+                      "source":  {
+                                     "type":  "placeholder"
+                                 },
+                      "orientation":  "portrait"
+                  },
+                  {
+                      "id":  "gd-mahjong-tiles",
+                      "slug":  "mahjong-tiles",
+                      "title":  {
+                                    "en":  "Mahjong Tiles",
+                                    "pl":  "Mahjong Tiles"
+                                },
+                      "description":  {
+                                          "en":  "Match open pairs of identical tiles.",
+                                          "pl":  "Match open pairs of identical tiles."
+                                      },
+                      "category":  [
+                                       "Puzzle"
+                                   ],
+                      "tags":  [
+                                   "board",
+                                   "puzzle"
+                               ],
+                      "thumbnail":  "img/games/placeholder.svg",
+                      "source":  {
+                                     "type":  "placeholder"
+                                 },
+                      "orientation":  "landscape"
+                  },
+                  {
+                      "id":  "gd-endless-runner",
+                      "slug":  "endless-runner",
+                      "title":  {
+                                    "en":  "Endless Runner",
+                                    "pl":  "Endless Runner"
+                                },
+                      "description":  {
+                                          "en":  "Dodge obstacles and collect coins.",
+                                          "pl":  "Dodge obstacles and collect coins."
+                                      },
+                      "category":  [
+                                       "Arcade"
+                                   ],
+                      "tags":  [
+                                   "runner",
+                                   "reflex",
+                                   "arcade"
+                               ],
+                      "thumbnail":  "img/games/placeholder.svg",
+                      "source":  {
+                                     "type":  "placeholder"
+                                 },
+                      "orientation":  "portrait"
+                  },
+                  {
+                      "id":  "gd-street-basketball",
+                      "slug":  "street-basketball",
+                      "title":  {
+                                    "en":  "Street Basketball",
+                                    "pl":  "Street Basketball"
+                                },
+                      "description":  {
+                                          "en":  "Swipe to shoot hoops and beat the timer.",
+                                          "pl":  "Swipe to shoot hoops and beat the timer."
+                                      },
+                      "category":  [
+                                       "Arcade"
+                                   ],
+                      "tags":  [
+                                   "sports",
+                                   "arcade"
+                               ],
+                      "thumbnail":  "img/games/placeholder.svg",
+                      "source":  {
+                                     "type":  "placeholder"
+                                 },
+                      "orientation":  "portrait"
+                  },
+                  {
+                      "id":  "gd-penalty-kicks",
+                      "slug":  "penalty-kicks",
+                      "title":  {
+                                    "en":  "Penalty Kicks",
+                                    "pl":  "Penalty Kicks"
+                                },
+                      "description":  {
+                                          "en":  "Aim and score from the spot.",
+                                          "pl":  "Aim and score from the spot."
+                                      },
+                      "category":  [
+                                       "Arcade"
+                                   ],
+                      "tags":  [
+                                   "sports",
+                                   "football"
+                               ],
+                      "thumbnail":  "img/games/placeholder.svg",
+                      "source":  {
+                                     "type":  "placeholder"
+                                 },
+                      "orientation":  "portrait"
+                  },
+                  {
+                      "id":  "gd-parking-challenge",
+                      "slug":  "parking-challenge",
+                      "title":  {
+                                    "en":  "Parking Challenge",
+                                    "pl":  "Parking Challenge"
+                                },
+                      "description":  {
+                                          "en":  "Park without crashing in tricky levels.",
+                                          "pl":  "Park without crashing in tricky levels."
+                                      },
+                      "category":  [
+                                       "Racing"
+                                   ],
+                      "tags":  [
+                                   "driving",
+                                   "logic"
+                               ],
+                      "thumbnail":  "img/games/placeholder.svg",
+                      "source":  {
+                                     "type":  "placeholder"
+                                 },
+                      "orientation":  "portrait"
+                  },
+                  {
+                      "id":  "gd-word-search",
+                      "slug":  "word-search",
+                      "title":  {
+                                    "en":  "Word Search",
+                                    "pl":  "Word Search"
+                                },
+                      "description":  {
+                                          "en":  "Find hidden words in the grid.",
+                                          "pl":  "Find hidden words in the grid."
+                                      },
+                      "category":  [
+                                       "Puzzle"
+                                   ],
+                      "tags":  [
+                                   "word",
+                                   "puzzle"
+                               ],
+                      "thumbnail":  "img/games/placeholder.svg",
+                      "source":  {
+                                     "type":  "placeholder"
+                                 },
+                      "orientation":  "portrait"
+                  },
+                  {
+                      "id":  "gd-match-3-jewels",
+                      "slug":  "match-3-jewels",
+                      "title":  {
+                                    "en":  "Match‑3 Jewels",
+                                    "pl":  "Match‑3 Jewels"
+                                },
+                      "description":  {
+                                          "en":  "Swap gems to create lines and combos.",
+                                          "pl":  "Swap gems to create lines and combos."
+                                      },
+                      "category":  [
+                                       "Puzzle"
+                                   ],
+                      "tags":  [
+                                   "match3",
+                                   "arcade",
+                                   "casual"
+                               ],
+                      "thumbnail":  "img/games/placeholder.svg",
+                      "source":  {
+                                     "type":  "placeholder"
+                                 },
+                      "orientation":  "portrait"
+                  },
+                  {
+                      "id":  "gd-dart-challenge",
+                      "slug":  "dart-challenge",
+                      "title":  {
+                                    "en":  "Dart Challenge",
+                                    "pl":  "Dart Challenge"
+                                },
+                      "description":  {
+                                          "en":  "Aim carefully and hit the target.",
+                                          "pl":  "Aim carefully and hit the target."
+                                      },
+                      "category":  [
+                                       "Shooter"
+                                   ],
+                      "tags":  [
+                                   "sports",
+                                   "skill"
+                               ],
+                      "thumbnail":  "img/games/placeholder.svg",
+                      "source":  {
+                                     "type":  "placeholder"
+                                 },
+                      "orientation":  "portrait"
+                  },
+                  {
+                      "id":  "t-rex",
+                      "slug":  "t-rex-runner",
+                      "title":  {
+                                    "en":  "T-Rex Runner",
+                                    "pl":  "T-Rex Biegacz"
+                                },
+                      "description":  {
+                                          "en":  "Jump over cacti in this classic offline runner.",
+                                          "pl":  "Skacz nad kaktusami w klasycznym runnerze."
+                                      },
+                      "category":  [
+                                       "Arcade"
+                                   ],
+                      "tags":  [
+                                   "runner",
+                                   "endless",
+                                   "classic"
+                               ],
+                      "thumbnail":  "img/games/placeholder.svg",
+                      "source":  {
+                                     "page":  "game_trex.html",
+                                     "type":  "self"
+                                 },
+                      "orientation":  "landscape"
+                  }
+              ]
+}
