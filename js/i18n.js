@@ -2,9 +2,25 @@
 (function(){
   const dict = {
     about: { en: 'About', pl: 'O serwisie' },
+    licenses: { en: 'Licenses', pl: 'Licencje' },
     terms: { en: 'Terms', pl: 'Regulamin' },
     privacy: { en: 'Privacy', pl: 'Prywatność' },
     contact: { en: 'Contact', pl: 'Kontakt' },
+    licensesTitle: { en: 'Game Licenses & Credits', pl: 'Licencje i podziękowania' },
+    licensesIntro1: {
+      en: 'Some games on this website are open-source and used under their respective licenses.',
+      pl: 'Niektóre gry w tym serwisie są open source i udostępniane na swoich licencjach.'
+    },
+    licensesIntro2: {
+      en: 'All rights belong to their original authors.',
+      pl: 'Wszystkie prawa należą do ich pierwotnych autorów.'
+    },
+    licensesIntro3: {
+      en: 'Below are details for included projects.',
+      pl: 'Poniżej znajdziesz szczegóły wykorzystanych projektów.'
+    },
+    licensesTrexBy: { en: 'Original project by', pl: 'Oryginalny projekt:' },
+    licensesTrexLicense: { en: 'Licensed under the MIT License.', pl: 'Na licencji MIT.' },
     playChip: { en: 'PLAY', pl: 'GRAJ' },
     searchPlaceholder: { en: 'Search games (inactive in MVP)', pl: 'Szukaj gier (nieaktywne w MVP)' },
     searchAria: { en: 'Search games', pl: 'Szukaj gier' }

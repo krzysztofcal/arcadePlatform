@@ -8,6 +8,12 @@
   <style>
     #game-frame { width: 100%; height: 80vh; border: 0; }
     main { max-width: 1200px; margin: 0 auto; padding: 1rem; }
+    .credits {
+      margin-top: 0.75rem;
+      font-size: 0.875rem;
+      color: #9fb0d0;
+      text-align: center;
+    }
   </style>
 </head>
 <body>
@@ -16,6 +22,7 @@
     <h1 id="title"></h1>
     <p id="desc"></p>
     <iframe id="game-frame" allowfullscreen></iframe>
+    <p id="credits" class="credits" hidden></p>
   </main>
   <script>
     (async () => {
@@ -35,6 +42,33 @@
       document.title = title || 'Play';
       document.getElementById('title').textContent = title || '';
       document.getElementById('desc').textContent = description;
+
+      const creditsEl = document.getElementById('credits');
+      if (creditsEl) {
+        const idValue = (game.id || '').toLowerCase();
+        const slugValue = (game.slug || '').toLowerCase();
+        const isTRex = idValue === 't-rex' || slugValue === 't-rex-runner';
+        if (isTRex) {
+          const renderTrexCredits = (lang) => {
+            const lookup = {
+              pl: '„T-Rex Runner” © wayou — licencja MIT. Źródło: <a href="https://github.com/wayou/t-rex-runner" target="_blank" rel="noopener">GitHub</a>',
+              en: '“T-Rex Runner” © wayou — MIT License. Source: <a href="https://github.com/wayou/t-rex-runner" target="_blank" rel="noopener">GitHub</a>'
+            };
+            const next = lookup[lang] || lookup.en;
+            creditsEl.innerHTML = next;
+            creditsEl.hidden = false;
+          };
+          const currentLang = (window.I18N && typeof window.I18N.getLang === 'function') ? window.I18N.getLang() : 'en';
+          renderTrexCredits(currentLang);
+          document.addEventListener('langchange', (ev) => {
+            const lang = (ev && ev.detail && ev.detail.lang) || (window.I18N && window.I18N.getLang && window.I18N.getLang()) || 'en';
+            renderTrexCredits(lang);
+          });
+        } else {
+          creditsEl.hidden = true;
+          creditsEl.textContent = '';
+        }
+      }
 
       let target = '';
       if (typeof game.url === 'string' && game.url.trim()) {
