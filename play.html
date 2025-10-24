@@ -49,8 +49,21 @@
         const slugValue = (game.slug || '').toLowerCase();
         const isTRex = idValue === 't-rex' || slugValue === 't-rex-runner';
         if (isTRex) {
-          creditsEl.innerHTML = '“T-Rex Runner” © wayou — MIT License. Source: <a href="https://github.com/wayou/t-rex-runner" target="_blank" rel="noopener">GitHub</a>';
-          creditsEl.hidden = false;
+          const renderTrexCredits = (lang) => {
+            const lookup = {
+              pl: '„T-Rex Runner” © wayou — licencja MIT. Źródło: <a href="https://github.com/wayou/t-rex-runner" target="_blank" rel="noopener">GitHub</a>',
+              en: '“T-Rex Runner” © wayou — MIT License. Source: <a href="https://github.com/wayou/t-rex-runner" target="_blank" rel="noopener">GitHub</a>'
+            };
+            const next = lookup[lang] || lookup.en;
+            creditsEl.innerHTML = next;
+            creditsEl.hidden = false;
+          };
+          const currentLang = (window.I18N && typeof window.I18N.getLang === 'function') ? window.I18N.getLang() : 'en';
+          renderTrexCredits(currentLang);
+          document.addEventListener('langchange', (ev) => {
+            const lang = (ev && ev.detail && ev.detail.lang) || (window.I18N && window.I18N.getLang && window.I18N.getLang()) || 'en';
+            renderTrexCredits(lang);
+          });
         } else {
           creditsEl.hidden = true;
           creditsEl.textContent = '';
