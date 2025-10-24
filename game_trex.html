@@ -15,6 +15,8 @@
     #gameWrap{ display:flex; flex-direction:column; gap:12px; align-items:center; }
     #gameWrap .controls-row{ justify-content:flex-end; width:100%; }
     canvas#game{ width:min(100%,600px); height:auto; aspect-ratio:3 / 1; max-height:200px; background:linear-gradient(#1b2336,#0f111a 70%); border-radius:12px; border:2px solid rgba(255,255,255,0.05); }
+    #gameWrap .game-credit{ font-size:0.85rem; color:rgba(255,255,255,0.7); text-align:center; }
+    #gameWrap .game-credit a{ color:inherit; text-decoration:underline; }
     @media (max-width:700px){ canvas#game{ width:100%; } }
   </style>
 
@@ -60,6 +62,8 @@
         </div>
 
         <canvas id="game"></canvas>
+
+        <p class="game-credit">T-Rex Runner © <a href="https://github.com/wayou/t-rex-runner" target="_blank" rel="noopener">wayou</a> — MIT License</p>
       </div>
 
       <div class="titleBar">
