@@ -10,6 +10,8 @@
   var adsScriptRequested = false;
   var tcfListenerAttached = false;
   var fundingFrameEnsured = false;
+  var consentDelegationBound = false;
+  var consentFailureNotified = false;
 
   function getHead(){
     return document.head || document.getElementsByTagName('head')[0];
@@ -120,32 +122,51 @@
     return false;
   }
 
-  function showConsentUiWithRetry(){
-    if (showConsentUi()) return;
+  function showConsentUiWithRetry(onFailure){
     var attempts = 0;
     var maxAttempts = 20;
+
     (function retry(){
       if (showConsentUi()) return;
-      if (attempts++ >= maxAttempts) return;
+      if (attempts++ >= maxAttempts){
+        if (typeof onFailure === 'function') onFailure();
+        return;
+      }
       setTimeout(retry, 250);
     })();
   }
 
+  function matchesSelector(node, selector){
+    if (!node || !selector) return false;
+    var fn = node.matches || node.msMatchesSelector || node.webkitMatchesSelector || node.mozMatchesSelector;
+    if (!fn) return false;
+    try { return fn.call(node, selector); } catch (_) { return false; }
+    return false;
+  }
+
+  function findManageLink(node){
+    var current = node;
+    while (current && current !== document){
+      if (matchesSelector(current, '#manageCookies, .manage-cookies')) return current;
+      current = current.parentElement;
+    }
+    return null;
+  }
+
+  function bindConsentDelegation(){
+    if (consentDelegationBound || typeof document === 'undefined') return;
+    consentDelegationBound = true;
+    document.addEventListener('click', function(event){
+      var target = event && event.target ? findManageLink(event.target) : null;
+      if (!target) return;
+      if (event) event.preventDefault();
+      openConsentManager();
+    });
+  }
+
   function attachConsentLinks(){
     if (typeof document === 'undefined') return;
-    var links = document.querySelectorAll('#manageCookies, .manage-cookies');
-    if (!links || !links.length) return;
-    links.forEach(function(link){
-      if (link.dataset && link.dataset.consentBound === '1') return;
-      if (!link.dataset && link.getAttribute('data-consent-bound') === '1') return;
-      if (link.dataset) link.dataset.consentBound = '1';
-      else link.setAttribute('data-consent-bound', '1');
-      link.addEventListener('click', function(event){
-        if (event) event.preventDefault();
-        openConsentManager();
-        return false;
-      });
-    });
+    bindConsentDelegation();
   }
 
   function setupTcfListener(){
@@ -199,11 +220,40 @@
     ensureFundingChoicesFrame();
     requestCmp();
   };
+  function showConsentFallback(){
+    if (consentFailureNotified) return;
+    consentFailureNotified = true;
+    console.warn('Consent manager could not be loaded. Check network or content blockers.');
+    if (typeof document === 'undefined'){
+      try { alert('Consent manager is unavailable. Please check your connection and try again.'); } catch (_) {}
+      return;
+    }
+    try {
+      var body = document.body || document.getElementsByTagName('body')[0];
+      if (!body) throw new Error('Missing body');
+      var existing = document.getElementById('consent-fallback-message');
+      if (existing) return;
+      var note = document.createElement('div');
+      note.id = 'consent-fallback-message';
+      note.setAttribute('role', 'alert');
+      note.textContent = 'Consent manager is unavailable. Please check your connection or disable content blockers.';
+      note.style.cssText = 'position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:#111827;color:#f9fafb;padding:12px 16px;border-radius:999px;font-size:14px;box-shadow:0 10px 25px rgba(0,0,0,0.35);z-index:2147483647;max-width:90vw;text-align:center;';
+      body.appendChild(note);
+      setTimeout(function(){
+        try { body.removeChild(note); } catch (_) {}
+      }, 8000);
+    } catch (_) {
+      try { alert('Consent manager is unavailable. Please check your connection and try again.'); } catch (__) {}
+    }
+  }
+
   function openConsentManager(){
     ensureFundingChoicesFrame();
     requestCmp();
     setupTcfListener();
-    showConsentUiWithRetry();
+    if (!showConsentUi()){
+      showConsentUiWithRetry(showConsentFallback);
+    }
   }
 
   window.showConsentManager = openConsentManager;

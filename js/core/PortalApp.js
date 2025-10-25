@@ -2,6 +2,9 @@
   'use strict';
 
   const DEFAULT_CATEGORIES = Object.freeze(['New/All', 'Arcade', 'Puzzle', 'Shooter', 'Racing']);
+  const SHARED_GAME_UTILS = global.GameUtils && typeof global.GameUtils === 'object'
+    ? global.GameUtils
+    : null;
 
   function isNonEmptyString(value){
     return typeof value === 'string' && value.trim().length > 0;
@@ -50,6 +53,7 @@
         : 'js/games.json';
       this.window = options.win || global;
       this.document = options.doc || global.document;
+      this.gameUtils = SHARED_GAME_UTILS;
       this.onLangChange = () => this.renderCurrentList('langchange');
     }
 
@@ -91,6 +95,41 @@
       return block[lang] || block.en || '';
     }
 
+    isPlayable(item){
+      if (this.gameUtils && typeof this.gameUtils.isPlayable === 'function'){
+        return this.gameUtils.isPlayable(item, this.window.location.href);
+      }
+      if (!item || !item.source) return false;
+      if (item.source.type === 'placeholder') return false;
+      if (isNonEmptyString(item.source.page)){
+        return !!this.sanitizeSelfPage(item.source.page);
+      }
+      if (item.source.type === 'distributor'){
+        const embed = item.source.embedUrl || item.source.url;
+        if (!isNonEmptyString(embed)) return false;
+        try {
+          const parsed = new URL(embed, this.window.location.href);
+          return ['http:', 'https:'].includes(parsed.protocol);
+        } catch (err) {
+          return false;
+        }
+      }
+      return false;
+    }
+
+    sortGames(list){
+      if (!Array.isArray(list)) return [];
+      const lang = this.getLang();
+      return list.slice().sort((a, b) => {
+        const aPlayable = this.isPlayable(a);
+        const bPlayable = this.isPlayable(b);
+        if (aPlayable !== bPlayable) return aPlayable ? -1 : 1;
+        const titleA = this.resolveTitle(a, lang).toLowerCase();
+        const titleB = this.resolveTitle(b, lang).toLowerCase();
+        return titleA.localeCompare(titleB);
+      });
+    }
+
     safeImageUrl(url){
       if (!isNonEmptyString(url)) return null;
       try {
@@ -113,6 +152,9 @@
     }
 
     sanitizeSelfPage(page){
+      if (this.gameUtils && typeof this.gameUtils.sanitizeSelfPage === 'function'){
+        return this.gameUtils.sanitizeSelfPage(page, this.window.location.href);
+      }
       if (!isNonEmptyString(page)) return null;
       try {
         const url = new URL(page, this.window.location.href);
@@ -218,9 +260,10 @@
     renderList(list, reason, category){
       if (!this.grid) return;
       const lang = this.getLang();
+      const sortedList = this.sortGames(list);
       const fragment = this.document.createDocumentFragment();
       fragment.appendChild(this.createPromoCard());
-      for (const item of list){
+      for (const item of sortedList){
         const href = this.playableHref(item, lang);
         fragment.appendChild(href ? this.createPlayableCard(item, lang, href) : this.createPlaceholderCard(item, lang));
       }
@@ -229,7 +272,7 @@
       this.trackAdImpression();
       if (this.analytics && typeof this.analytics.viewGameList === 'function'){
         this.analytics.viewGameList({
-          game_count: list.length,
+          game_count: sortedList.length,
           lang,
           reason: reason || 'refresh',
           category: category || this.defaultCategory

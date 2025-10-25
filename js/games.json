@@ -51,6 +51,31 @@
                       "orientation":  "any"
                   },
                   {
+                      "id":  "gd-2048-classic",
+                      "slug":  "2048-classic",
+                      "title":  {
+                                    "en":  "2048 Classic",
+                                    "pl":  "2048 Classic"
+                                },
+                      "description":  {
+                                          "en":  "Under construction",
+                                          "pl":  "W przygotowaniu"
+                                      },
+                      "category":  [
+                                       "Puzzle"
+                                   ],
+                      "tags":  [
+                                   "puzzle",
+                                   "logic",
+                                   "casual"
+                               ],
+                      "thumbnail":  "img/games/placeholder.svg",
+                      "source":  {
+                                     "type":  "placeholder"
+                                 },
+                      "orientation":  "portrait"
+                  },
+                  {
                       "id":  "gd-bubble-shooter",
                       "slug":  "bubble-shooter",
                       "title":  {
@@ -58,8 +83,8 @@
                                     "pl":  "Bubble Shooter"
                                 },
                       "description":  {
-                                          "en":  "Match and pop bubbles to clear the board.",
-                                          "pl":  "Match and pop bubbles to clear the board."
+                                          "en":  "Under construction",
+                                          "pl":  "W przygotowaniu"
                                       },
                       "category":  [
                                        "Puzzle",
@@ -68,32 +93,6 @@
                       "tags":  [
                                    "arcade",
                                    "match3",
-                                   "casual"
-                               ],
-                      "thumbnail":  "img/games/placeholder.svg",
-                      "source":  {
-                                     "type":  "distributor",
-                                    "embedUrl":  "https://html5.gamedistribution.com/rvvASZ9z/"
-                                 },
-                      "orientation":  "portrait"
-                  },
-                  {
-                      "id":  "gd-2048-classic",
-                      "slug":  "2048-classic",
-                      "title":  {
-                                    "en":  "2048 Classic",
-                                    "pl":  "2048 Classic"
-                                },
-                      "description":  {
-                                          "en":  "Swipe tiles to reach 2048.",
-                                          "pl":  "Swipe tiles to reach 2048."
-                                      },
-                      "category":  [
-                                       "Puzzle"
-                                   ],
-                      "tags":  [
-                                   "puzzle",
-                                   "logic",
                                    "casual"
                                ],
                       "thumbnail":  "img/games/placeholder.svg",
