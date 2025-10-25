@@ -183,6 +183,9 @@
     requestCmp();
     setupTcfListener();
     attachConsentLinks();
+    try {
+      document.addEventListener('langchange', attachConsentLinks);
+    } catch (_) {}
   }
 
   window.loadThirdPartyScripts = function(){
@@ -204,6 +207,7 @@
   }
 
   window.showConsentManager = openConsentManager;
+  window.openConsentManager = openConsentManager;
   window.renderGoogleAds = renderPendingAds;
 
   if (document.readyState === 'loading') {
