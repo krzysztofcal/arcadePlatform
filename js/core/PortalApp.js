@@ -124,16 +124,18 @@
 
     playableHref(item, lang){
       if (!item || !item.source) return null;
-      if (item.source.type === 'self' && item.source.page){
+      const slug = item.slug || item.id || '';
+      if (item.source.page){
         const url = this.sanitizeSelfPage(item.source.page);
         if (!url) return null;
         url.searchParams.set('lang', lang);
+        if (slug) url.searchParams.set('slug', slug);
         return url.toString();
       }
       if (item.source.type === 'distributor'){
         try {
           const url = new URL('game.html', this.window.location.href);
-          url.searchParams.set('slug', item.slug || item.id || '');
+          url.searchParams.set('slug', slug);
           url.searchParams.set('lang', lang);
           return url.toString();
         } catch (err){ return null; }
