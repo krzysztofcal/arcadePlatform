@@ -16,8 +16,16 @@
     <p>This is a simple arcade portal (MVP). More games and features are coming soon.</p>
     <p>Contact: <a href="#" class="ft-link">email</a></p>
     <p><a href="#" class="ft-link manage-cookies" data-i18n="manageCookies">Manage cookies</a></p>
-    <p><a href="index.html?lang=en" class="ft-link">Back to portal</a></p>
+    <p><a id="backLink" href="index.html?lang=en" class="ft-link">Back to portal</a></p>
   </main>
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const origin = params.get('origin');
+    const backLink = document.getElementById('backLink');
+    if (origin === 'landing') {
+      backLink.href = 'https://kcswh.pl/';
+    }
+  </script>
   <script src="js/loadThirdParty.js"></script>
 </body>
 </html>

@@ -16,8 +16,16 @@
     <p>To prosty portal arcade (MVP). Więcej gier i funkcji już wkrótce.</p>
     <p>Kontakt: <a href="#" class="ft-link">email</a></p>
     <p><a href="#" class="ft-link manage-cookies" data-i18n="manageCookies">Zarządzaj cookies</a></p>
-    <p><a href="index.html?lang=pl" class="ft-link">Wróć do portalu</a></p>
+    <p><a id="backLink" href="index.html?lang=pl" class="ft-link">Wróć do portalu</a></p>
   </main>
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const origin = params.get('origin');
+    const backLink = document.getElementById('backLink');
+    if (origin === 'landing') {
+      backLink.href = 'https://kcswh.pl/';
+    }
+  </script>
   <script src="js/loadThirdParty.js"></script>
 </body>
 </html>
