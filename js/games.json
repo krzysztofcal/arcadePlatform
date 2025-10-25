@@ -51,32 +51,6 @@
                       "orientation":  "any"
                   },
                   {
-                      "id":  "gd-bubble-shooter",
-                      "slug":  "bubble-shooter",
-                      "title":  {
-                                    "en":  "Bubble Shooter",
-                                    "pl":  "Bubble Shooter"
-                                },
-                      "description":  {
-                                          "en":  "Under construction",
-                                          "pl":  "W przygotowaniu"
-                                      },
-                      "category":  [
-                                       "Puzzle",
-                                       "Shooter"
-                                   ],
-                      "tags":  [
-                                   "arcade",
-                                   "match3",
-                                   "casual"
-                               ],
-                      "thumbnail":  "img/games/placeholder.svg",
-                      "source":  {
-                                     "type":  "placeholder"
-                                 },
-                      "orientation":  "portrait"
-                  },
-                  {
                       "id":  "gd-2048-classic",
                       "slug":  "2048-classic",
                       "title":  {
@@ -99,6 +73,32 @@
                       "source":  {
                                      "type":  "distributor",
                                      "embedUrl":  "https://html5.gamedistribution.com/8a3597d904f94ac5b8cd7ea1e247e790/?gd_sdk_referrer_url=https%3A%2F%2Farcadehub.example%2F"
+                                 },
+                      "orientation":  "portrait"
+                  },
+                  {
+                      "id":  "gd-bubble-shooter",
+                      "slug":  "bubble-shooter",
+                      "title":  {
+                                    "en":  "Bubble Shooter",
+                                    "pl":  "Bubble Shooter"
+                                },
+                      "description":  {
+                                          "en":  "Under construction",
+                                          "pl":  "W przygotowaniu"
+                                      },
+                      "category":  [
+                                       "Puzzle",
+                                       "Shooter"
+                                   ],
+                      "tags":  [
+                                   "arcade",
+                                   "match3",
+                                   "casual"
+                               ],
+                      "thumbnail":  "img/games/placeholder.svg",
+                      "source":  {
+                                     "type":  "placeholder"
                                  },
                       "orientation":  "portrait"
                   },
