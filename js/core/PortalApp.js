@@ -91,6 +91,19 @@
       return block[lang] || block.en || '';
     }
 
+    sortGames(list){
+      if (!Array.isArray(list)) return [];
+      const lang = this.getLang();
+      return list.slice().sort((a, b) => {
+        const aPlayable = a && a.source && a.source.type !== 'placeholder';
+        const bPlayable = b && b.source && b.source.type !== 'placeholder';
+        if (aPlayable !== bPlayable) return aPlayable ? -1 : 1;
+        const titleA = this.resolveTitle(a, lang).toLowerCase();
+        const titleB = this.resolveTitle(b, lang).toLowerCase();
+        return titleA.localeCompare(titleB);
+      });
+    }
+
     safeImageUrl(url){
       if (!isNonEmptyString(url)) return null;
       try {
@@ -218,9 +231,10 @@
     renderList(list, reason, category){
       if (!this.grid) return;
       const lang = this.getLang();
+      const sortedList = this.sortGames(list);
       const fragment = this.document.createDocumentFragment();
       fragment.appendChild(this.createPromoCard());
-      for (const item of list){
+      for (const item of sortedList){
         const href = this.playableHref(item, lang);
         fragment.appendChild(href ? this.createPlayableCard(item, lang, href) : this.createPlaceholderCard(item, lang));
       }
@@ -229,7 +243,7 @@
       this.trackAdImpression();
       if (this.analytics && typeof this.analytics.viewGameList === 'function'){
         this.analytics.viewGameList({
-          game_count: list.length,
+          game_count: sortedList.length,
           lang,
           reason: reason || 'refresh',
           category: category || this.defaultCategory
