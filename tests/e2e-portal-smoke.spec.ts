@@ -21,6 +21,21 @@ function getLocalizedTitles(game: any): string[] {
   return titles.filter(Boolean);
 }
 
+function isPlayableGame(game: any): boolean {
+  if (!game || typeof game !== 'object') return false;
+  const source = game.source;
+  if (!source || typeof source !== 'object') return false;
+  if (source.type === 'placeholder') return false;
+  if (typeof source.page === 'string' && source.page.trim().length > 0) {
+    return true;
+  }
+  if (source.type === 'distributor') {
+    const embed = typeof source.embedUrl === 'string' ? source.embedUrl : source.url;
+    return typeof embed === 'string' && embed.trim().length > 0;
+  }
+  return false;
+}
+
 const catalog = loadCatalog();
 const arcadeGame = catalog.games.find((game: any) => Array.isArray(game?.category) && game.category.includes('Arcade'));
 const puzzleGame = catalog.games.find((game: any) => Array.isArray(game?.category) && game.category.includes('Puzzle'));
@@ -33,6 +48,8 @@ const arcadeTitles = getLocalizedTitles(arcadeGame);
 const puzzleTitles = getLocalizedTitles(puzzleGame);
 const arcadeSlug = arcadeGame.slug || arcadeGame.id;
 const puzzleSlug = puzzleGame.slug || puzzleGame.id;
+const puzzleIsPlayable = isPlayableGame(puzzleGame);
+const puzzleTitleForSelector = puzzleTitles[0] || puzzleSlug;
 
 if (!arcadeSlug || !puzzleSlug) {
   throw new Error('Missing slug identifiers for test fixtures');
@@ -83,7 +100,15 @@ test.describe('portal smoke tests', () => {
     await puzzleButton.click();
     await expect(puzzleButton).toHaveAttribute('aria-pressed', 'true');
 
-    await page.waitForSelector(`#gamesGrid a.card[href*="slug=${puzzleSlugParam}"]`);
+    if (puzzleIsPlayable) {
+      await page.waitForSelector(`#gamesGrid a.card[href*="slug=${puzzleSlugParam}"]`);
+    } else if (puzzleTitleForSelector) {
+      await expect(
+        page.locator('#gamesGrid .card .title', {
+          hasText: puzzleTitleForSelector,
+        })
+      ).toBeVisible();
+    }
 
     const puzzleVisibleTitles = await page.locator('#gamesGrid .card .title').allTextContents();
     const hasPuzzleTitle = puzzleVisibleTitles.some((title) =>
@@ -92,13 +117,24 @@ test.describe('portal smoke tests', () => {
     expect(hasPuzzleTitle).toBeTruthy();
 
     await expect(page.locator(`#gamesGrid a.card[href*="slug=${arcadeSlugParam}"]`)).toHaveCount(0);
+    if (!puzzleIsPlayable && puzzleTitleForSelector) {
+      await expect(page.locator(`#gamesGrid a.card[href*="slug=${puzzleSlugParam}"]`)).toHaveCount(0);
+    }
 
     const urlAfterClick = new URL(page.url());
     expect(urlAfterClick.searchParams.get('category')).toBe(puzzleCategory);
 
     await page.reload();
     await page.waitForSelector('#categoryBar .category-button[aria-pressed="true"]');
-    await page.waitForSelector(`#gamesGrid a.card[href*="slug=${puzzleSlugParam}"]`);
+    if (puzzleIsPlayable) {
+      await page.waitForSelector(`#gamesGrid a.card[href*="slug=${puzzleSlugParam}"]`);
+    } else if (puzzleTitleForSelector) {
+      await expect(
+        page.locator('#gamesGrid .card .title', {
+          hasText: puzzleTitleForSelector,
+        })
+      ).toBeVisible();
+    }
 
     const activeAfterReload = await page.locator('#categoryBar .category-button[aria-pressed="true"]').innerText();
     expect(activeAfterReload).toBe(puzzleCategory);
