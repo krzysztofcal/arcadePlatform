@@ -91,12 +91,31 @@
       return block[lang] || block.en || '';
     }
 
+    isPlayable(item){
+      if (!item || !item.source) return false;
+      if (item.source.type === 'placeholder') return false;
+      if (isNonEmptyString(item.source.page)){
+        return !!this.sanitizeSelfPage(item.source.page);
+      }
+      if (item.source.type === 'distributor'){
+        const embed = item.source.embedUrl || item.source.url;
+        if (!isNonEmptyString(embed)) return false;
+        try {
+          const parsed = new URL(embed, this.window.location.href);
+          return ['http:', 'https:'].includes(parsed.protocol);
+        } catch (err) {
+          return false;
+        }
+      }
+      return false;
+    }
+
     sortGames(list){
       if (!Array.isArray(list)) return [];
       const lang = this.getLang();
       return list.slice().sort((a, b) => {
-        const aPlayable = a && a.source && a.source.type !== 'placeholder';
-        const bPlayable = b && b.source && b.source.type !== 'placeholder';
+        const aPlayable = this.isPlayable(a);
+        const bPlayable = this.isPlayable(b);
         if (aPlayable !== bPlayable) return aPlayable ? -1 : 1;
         const titleA = this.resolveTitle(a, lang).toLowerCase();
         const titleB = this.resolveTitle(b, lang).toLowerCase();

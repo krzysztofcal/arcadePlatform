@@ -84,8 +84,8 @@
                                     "pl":  "2048 Classic"
                                 },
                       "description":  {
-                                          "en":  "Swipe tiles to reach 2048.",
-                                          "pl":  "Swipe tiles to reach 2048."
+                                          "en":  "Swipe tiles to combine numbers and reach 2048.",
+                                          "pl":  "Łącz liczby, aby osiągnąć 2048."
                                       },
                       "category":  [
                                        "Puzzle"
@@ -97,7 +97,8 @@
                                ],
                       "thumbnail":  "img/games/placeholder.svg",
                       "source":  {
-                                     "type":  "placeholder"
+                                     "type":  "distributor",
+                                     "embedUrl":  "https://html5.gamedistribution.com/8a3597d904f94ac5b8cd7ea1e247e790/?gd_sdk_referrer_url=https%3A%2F%2Farcadehub.example%2F"
                                  },
                       "orientation":  "portrait"
                   },
