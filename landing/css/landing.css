@@ -122,6 +122,44 @@ button:focus-visible {
   line-height: 1.45;
 }
 
+.about-card {
+  gap: 16px;
+  min-height: auto;
+}
+
+.about-card h1 {
+  font-size: 28px;
+  margin: 0 0 8px;
+}
+
+.about-card h2 {
+  font-size: 20px;
+  margin: 12px 0 6px;
+}
+
+.about-card p {
+  margin: 0;
+  line-height: 1.6;
+}
+
+.about-card section {
+  margin-top: 4px;
+}
+
+.about-card a {
+  color: inherit;
+  text-decoration: underline;
+}
+
+.about-back {
+  font-weight: 600;
+}
+
+.about-back:hover,
+.about-back:focus-visible {
+  text-decoration: none;
+}
+
 .ad-slot {
   margin: 24px 0 32px;
   border-radius: var(--radius);
