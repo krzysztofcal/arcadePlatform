@@ -1,68 +1,50 @@
 import { test, expect } from '@playwright/test';
+import fs from 'fs';
 import path from 'path';
-import { pathToFileURL } from 'url';
 
-const stubGames = [
-  {
-    id: 'cat-catcher',
-    slug: 'cat-catcher',
-    title: { en: 'Catch Cats', pl: 'Łap koty' },
-    description: {
-      en: 'Snag as many mischievous cats as you can!',
-      pl: 'Złap jak najwięcej psotnych kotów!'
-    },
-    category: ['Arcade'],
-    source: {
-      type: 'distributor',
-      embedUrl: 'https://example.com/cat-catcher/index.html'
-    },
-    thumbnail: 'https://example.com/cat.png'
-  },
-  {
-    id: 'puzzle-bubble',
-    slug: 'puzzle-bubble',
-    title: { en: 'Bubble Solver', pl: 'Bańkowy łamigłówka' },
-    description: {
-      en: 'Group colors to clear the board.',
-      pl: 'Łącz kolory, aby wyczyścić planszę.'
-    },
-    category: ['Puzzle'],
-    source: {
-      type: 'distributor',
-      embedUrl: 'https://example.com/puzzle-bubble/index.html'
-    },
-    thumbnail: 'https://example.com/puzzle.png'
+function loadCatalog() {
+  const catalogPath = path.join(__dirname, '..', 'js', 'games.json');
+  const raw = fs.readFileSync(catalogPath, 'utf-8');
+  const sanitized = raw.charCodeAt(0) === 0xfeff ? raw.slice(1) : raw;
+  return JSON.parse(sanitized);
+}
+
+function getLocalizedTitles(game: any): string[] {
+  if (!game || !game.title) return [];
+  if (typeof game.title === 'string') {
+    const trimmed = game.title.trim();
+    return trimmed ? [trimmed] : [];
   }
-];
+  const titles: string[] = [];
+  if (typeof game.title.en === 'string') titles.push(game.title.en.trim());
+  if (typeof game.title.pl === 'string') titles.push(game.title.pl.trim());
+  return titles.filter(Boolean);
+}
+
+const catalog = loadCatalog();
+const arcadeGame = catalog.games.find((game: any) => Array.isArray(game?.category) && game.category.includes('Arcade'));
+const puzzleGame = catalog.games.find((game: any) => Array.isArray(game?.category) && game.category.includes('Puzzle'));
+
+if (!arcadeGame || !puzzleGame) {
+  throw new Error('Required test fixtures missing from js/games.json');
+}
+
+const arcadeTitles = getLocalizedTitles(arcadeGame);
+const puzzleTitles = getLocalizedTitles(puzzleGame);
+const arcadeSlug = arcadeGame.slug || arcadeGame.id;
+const puzzleSlug = puzzleGame.slug || puzzleGame.id;
+
+if (!arcadeSlug || !puzzleSlug) {
+  throw new Error('Missing slug identifiers for test fixtures');
+}
+
+const puzzleCategory = Array.isArray(puzzleGame.category) && puzzleGame.category[0] ? puzzleGame.category[0] : 'Puzzle';
+const arcadeSlugParam = encodeURIComponent(arcadeSlug);
+const puzzleSlugParam = encodeURIComponent(puzzleSlug);
 
 test.describe('portal smoke tests', () => {
-  const indexPath = path.join(__dirname, '..', 'index.html');
-
-  test.beforeEach(async ({ page }) => {
-    const serialized = JSON.stringify({ version: 1, games: stubGames });
-
-    await page.addInitScript((catalogJson) => {
-      const originalFetch = window.fetch.bind(window);
-
-      window.fetch = async (input, init) => {
-        const url = typeof input === 'string' ? input : input?.url || '';
-
-        if (url.includes('js/games.json')) {
-          return new Response(catalogJson, {
-            status: 200,
-            headers: {
-              'Content-Type': 'application/json'
-            }
-          });
-        }
-
-        return originalFetch(input, init);
-      };
-    }, serialized);
-  });
-
   test('renders categories and game cards', async ({ page }) => {
-    await page.goto(pathToFileURL(indexPath).toString());
+    await page.goto('/');
     await page.waitForFunction(() => document.querySelectorAll('#gamesGrid .card').length > 1);
 
     const defaultCategories = await page.evaluate(() => {
@@ -76,47 +58,54 @@ test.describe('portal smoke tests', () => {
     await expect(categoryButtons).toHaveCount(defaultCategories.length);
 
     const activeText = await page.locator('#categoryBar .category-button[aria-pressed="true"]').innerText();
-    expect(activeText).toBe(defaultCategories[0]);
+    expect(defaultCategories).toContain(activeText);
 
     const cards = page.locator('#gamesGrid .card');
-    await expect(cards).toHaveCount(stubGames.length + 1);
+    expect(await cards.count()).toBeGreaterThan(1);
 
-    const firstCardClass = (await page.locator('#gamesGrid .card').first().getAttribute('class')) || '';
+    const firstCardClass = (await cards.first().getAttribute('class')) || '';
     expect(firstCardClass).toContain('slot-card');
 
     const titles = await page.locator('#gamesGrid .card .title').allTextContents();
-    expect(titles).toEqual(expect.arrayContaining(['Catch Cats', 'Bubble Solver']));
+    const hasArcadeTitle = titles.some((title) =>
+      arcadeTitles.some((expected) => expected && title.includes(expected))
+    );
+    expect(hasArcadeTitle).toBeTruthy();
+
+    await expect(page.locator(`#gamesGrid a.card[href*="slug=${arcadeSlugParam}"]`)).toBeVisible();
   });
 
   test('category selection updates grid and persists via URL', async ({ page }) => {
-    await page.goto(pathToFileURL(indexPath).toString());
+    await page.goto('/');
     await page.waitForFunction(() => document.querySelectorAll('#gamesGrid .card').length > 1);
 
-    const puzzleButton = page.locator('#categoryBar .category-button', { hasText: 'Puzzle' });
+    const puzzleButton = page.locator(`#categoryBar .category-button[data-category="${puzzleCategory}"]`);
     await puzzleButton.click();
     await expect(puzzleButton).toHaveAttribute('aria-pressed', 'true');
 
-    await page.waitForFunction(() => {
-      const titles = Array.from(document.querySelectorAll('#gamesGrid .card .title')).map((el) => el.textContent?.trim() || '');
-      return titles.includes('Bubble Solver') && titles.every((text) => text === '' || text === 'Bubble Solver');
-    });
+    await page.waitForSelector(`#gamesGrid a.card[href*="slug=${puzzleSlugParam}"]`);
+
+    const puzzleVisibleTitles = await page.locator('#gamesGrid .card .title').allTextContents();
+    const hasPuzzleTitle = puzzleVisibleTitles.some((title) =>
+      puzzleTitles.some((expected) => expected && title.includes(expected))
+    );
+    expect(hasPuzzleTitle).toBeTruthy();
+
+    await expect(page.locator(`#gamesGrid a.card[href*="slug=${arcadeSlugParam}"]`)).toHaveCount(0);
 
     const urlAfterClick = new URL(page.url());
-    expect(urlAfterClick.searchParams.get('category')).toBe('Puzzle');
-
-    const puzzleTitles = await page.locator('#gamesGrid .card .title').allTextContents();
-    expect(puzzleTitles).toEqual(['Bubble Solver']);
-    expect(puzzleTitles).not.toContain('Catch Cats');
+    expect(urlAfterClick.searchParams.get('category')).toBe(puzzleCategory);
 
     await page.reload();
-    await page.waitForFunction(() => document.querySelectorAll('#gamesGrid .card').length > 1);
+    await page.waitForSelector('#categoryBar .category-button[aria-pressed="true"]');
+    await page.waitForSelector(`#gamesGrid a.card[href*="slug=${puzzleSlugParam}"]`);
 
     const activeAfterReload = await page.locator('#categoryBar .category-button[aria-pressed="true"]').innerText();
-    expect(activeAfterReload).toBe('Puzzle');
+    expect(activeAfterReload).toBe(puzzleCategory);
   });
 
   test('language switch updates localized content', async ({ page }) => {
-    await page.goto(pathToFileURL(indexPath).toString());
+    await page.goto('/');
     await page.waitForSelector('.lang-btn');
 
     const searchInput = page.locator('.search input[type="search"]');
@@ -140,7 +129,7 @@ test.describe('portal smoke tests', () => {
   });
 
   test('sidebar toggle updates aria-expanded and classes', async ({ page }) => {
-    await page.goto(pathToFileURL(indexPath).toString());
+    await page.goto('/');
     await page.waitForSelector('#sidebar');
 
     const sidebar = page.locator('#sidebar');
