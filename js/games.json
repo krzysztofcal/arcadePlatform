@@ -72,7 +72,8 @@
                                ],
                       "thumbnail":  "img/games/placeholder.svg",
                       "source":  {
-                                     "type":  "placeholder"
+                                     "type":  "distributor",
+                                    "embedUrl":  "https://html5.gamedistribution.com/rvvASZ9z/"
                                  },
                       "orientation":  "portrait"
                   },

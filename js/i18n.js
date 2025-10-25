@@ -6,6 +6,7 @@
     terms: { en: 'Terms', pl: 'Regulamin' },
     privacy: { en: 'Privacy', pl: 'Prywatność' },
     contact: { en: 'Contact', pl: 'Kontakt' },
+    manageCookies: { en: 'Manage cookies', pl: 'Zarządzaj cookies' },
     licensesTitle: { en: 'Game Licenses & Credits', pl: 'Licencje i podziękowania' },
     licensesIntro1: {
       en: 'Some games on this website are open-source and used under their respective licenses.',
