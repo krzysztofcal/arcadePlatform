@@ -72,7 +72,8 @@
                                ],
                       "thumbnail":  "img/games/placeholder.svg",
                       "source":  {
-                                     "type":  "placeholder"
+                                     "type":  "distributor",
+                                     "embedUrl":  "https://example.com/bubble-shooter"
                                  },
                       "orientation":  "portrait"
                   },
