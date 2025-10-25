@@ -1,11 +1,75 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>KCSWH Landing</title>
-  <meta name="google-site-verification" content="ca-pub-4054734235779751">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>KCSWH — Arcade Hub</title>
+
+  <!-- AdSense site-verification tag for kcswh.pl -->
+  <meta name="google-site-verification" content="googlebdd18151904782dc.html">
+
+  <!-- Preconnect for fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;800&display=swap"
+        onload="this.onload=null;this.rel='stylesheet'">
+  <noscript>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;800&display=swap">
+  </noscript>
+
+  <link rel="stylesheet" href="./css/landing.css">
 </head>
 <body>
-  <h1>Hello from KCSWH landing!</h1>
+  <header class="header" role="banner">
+    <div class="brand">
+      <span class="brand-badge" aria-hidden="true"></span>
+      <span>Arcade Hub</span>
+    </div>
+    <nav class="nav" aria-label="Primary">
+      <a href="https://play.kcswh.pl/about.html">About</a>
+      <a class="manage-cookies" href="#">Manage cookies</a>
+    </nav>
+  </header>
+
+  <main class="main">
+    <section class="ad-slot" aria-label="Advertisement">
+      <ins class="adsbygoogle"
+           style="display:block"
+           data-ad-client="ca-pub-4054734235779751"
+           data-ad-slot="6777117794"
+           data-ad-format="auto"
+           data-full-width-responsive="true"></ins>
+    </section>
+
+    <section class="grid" aria-label="Navigation">
+      <a class="tile" href="https://play.kcswh.pl/">
+        <div class="title">Play</div>
+        <div class="desc">Jump into the games hub</div>
+      </a>
+      <a class="tile" href="https://play.kcswh.pl/about.html">
+        <div class="title">About</div>
+        <div class="desc">Credits, privacy, contact</div>
+      </a>
+      <a class="tile" href="mailto:hello@kcswh.pl">
+        <div class="title">Contact</div>
+        <div class="desc">Get in touch</div>
+      </a>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="links">
+      <a href="https://play.kcswh.pl/about.html">About</a>
+      <a class="manage-cookies" href="#">Manage cookies</a>
+      <a href="https://play.kcswh.pl/legal/privacy.en.html">Privacy</a>
+      <a href="https://play.kcswh.pl/legal/terms.en.html">Terms</a>
+    </div>
+    <div>© <span id="year"></span> KCSWH</div>
+  </footer>
+
+  <script>
+    document.getElementById('year').textContent = new Date().getFullYear();
+  </script>
+  <script src="./js/loadThirdParty.js" defer></script>
 </body>
 </html>
