@@ -10,6 +10,7 @@
   var adsScriptRequested = false;
   var tcfListenerAttached = false;
   var fundingFrameEnsured = false;
+  var consentDelegationBound = false;
 
   function getHead(){
     return document.head || document.getElementsByTagName('head')[0];
@@ -131,8 +132,37 @@
     })();
   }
 
+  function matchesSelector(node, selector){
+    if (!node || !selector) return false;
+    var fn = node.matches || node.msMatchesSelector || node.webkitMatchesSelector || node.mozMatchesSelector;
+    if (!fn) return false;
+    try { return fn.call(node, selector); } catch (_) { return false; }
+    return false;
+  }
+
+  function findManageLink(node){
+    var current = node;
+    while (current && current !== document){
+      if (matchesSelector(current, '#manageCookies, .manage-cookies')) return current;
+      current = current.parentElement;
+    }
+    return null;
+  }
+
+  function bindConsentDelegation(){
+    if (consentDelegationBound || typeof document === 'undefined') return;
+    consentDelegationBound = true;
+    document.addEventListener('click', function(event){
+      var target = event && event.target ? findManageLink(event.target) : null;
+      if (!target) return;
+      if (event) event.preventDefault();
+      openConsentManager();
+    });
+  }
+
   function attachConsentLinks(){
     if (typeof document === 'undefined') return;
+    bindConsentDelegation();
     var links = document.querySelectorAll('#manageCookies, .manage-cookies');
     if (!links || !links.length) return;
     links.forEach(function(link){

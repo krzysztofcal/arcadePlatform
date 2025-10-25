@@ -98,6 +98,14 @@
     return FALLBACK_BASE;
   }
 
+  function isPlayable(game){
+    if (!game || !game.source) return false;
+    if (game.source.type === 'placeholder') return false;
+    if (game.source.page) return true;
+    if (game.source.type === 'distributor' && (game.source.embedUrl || game.source.url)) return true;
+    return false;
+  }
+
   function updateMetaTags(params){
     const title = params && params.title ? params.title : '';
     const description = params && params.description ? params.description : DEFAULT_DESCRIPTION;
@@ -327,7 +335,7 @@
       return;
     }
     similarList.innerHTML = '';
-    const others = Array.isArray(list) ? list.filter(g => g && g.slug !== game.slug) : [];
+    const others = Array.isArray(list) ? list.filter(g => g && g.slug !== game.slug && isPlayable(g)) : [];
     if (!others.length){
       similarSection.hidden = true;
       return;
@@ -352,7 +360,30 @@
       const card = document.createElement('a');
       card.className = 'similarCard';
       const slug = g.slug || g.id || '';
-      card.href = slug ? ('game.html?slug=' + encodeURIComponent(slug)) : '#';
+      let href = '#';
+      if (g.source && g.source.page){
+        const safe = sanitizeSameOriginUrl(g.source.page);
+        if (safe){
+          try {
+            safe.searchParams.set('lang', lang);
+            if (slug) safe.searchParams.set('slug', slug);
+            href = safe.toString();
+          } catch (_){
+            href = safe.toString();
+          }
+        }
+      } else if (slug) {
+        try {
+          const url = new URL('game.html', location.href);
+          url.searchParams.set('slug', slug);
+          url.searchParams.set('lang', lang);
+          href = url.toString();
+        } catch (_){
+          href = 'game.html?slug=' + encodeURIComponent(slug) + '&lang=' + encodeURIComponent(lang);
+        }
+      }
+      if (href === '#') return;
+      card.href = href;
       const title = (g.title && (g.title[lang] || g.title.en)) || slug || 'Game';
       card.setAttribute('aria-label', 'Open ' + title);
       if (g.thumbnail){
