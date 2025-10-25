@@ -2,6 +2,9 @@
   'use strict';
 
   const DEFAULT_CATEGORIES = Object.freeze(['New/All', 'Arcade', 'Puzzle', 'Shooter', 'Racing']);
+  const SHARED_GAME_UTILS = global.GameUtils && typeof global.GameUtils === 'object'
+    ? global.GameUtils
+    : null;
 
   function isNonEmptyString(value){
     return typeof value === 'string' && value.trim().length > 0;
@@ -50,6 +53,7 @@
         : 'js/games.json';
       this.window = options.win || global;
       this.document = options.doc || global.document;
+      this.gameUtils = SHARED_GAME_UTILS;
       this.onLangChange = () => this.renderCurrentList('langchange');
     }
 
@@ -92,6 +96,9 @@
     }
 
     isPlayable(item){
+      if (this.gameUtils && typeof this.gameUtils.isPlayable === 'function'){
+        return this.gameUtils.isPlayable(item, this.window.location.href);
+      }
       if (!item || !item.source) return false;
       if (item.source.type === 'placeholder') return false;
       if (isNonEmptyString(item.source.page)){
@@ -145,6 +152,9 @@
     }
 
     sanitizeSelfPage(page){
+      if (this.gameUtils && typeof this.gameUtils.sanitizeSelfPage === 'function'){
+        return this.gameUtils.sanitizeSelfPage(page, this.window.location.href);
+      }
       if (!isNonEmptyString(page)) return null;
       try {
         const url = new URL(page, this.window.location.href);

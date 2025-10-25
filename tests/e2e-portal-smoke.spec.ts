@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 import fs from 'fs';
 import path from 'path';
+import { isPlayable } from '../js/core/game-utils.js';
 
 function loadCatalog() {
   const catalogPath = path.join(__dirname, '..', 'js', 'games.json');
@@ -21,21 +22,6 @@ function getLocalizedTitles(game: any): string[] {
   return titles.filter(Boolean);
 }
 
-function isPlayableGame(game: any): boolean {
-  if (!game || typeof game !== 'object') return false;
-  const source = game.source;
-  if (!source || typeof source !== 'object') return false;
-  if (source.type === 'placeholder') return false;
-  if (typeof source.page === 'string' && source.page.trim().length > 0) {
-    return true;
-  }
-  if (source.type === 'distributor') {
-    const embed = typeof source.embedUrl === 'string' ? source.embedUrl : source.url;
-    return typeof embed === 'string' && embed.trim().length > 0;
-  }
-  return false;
-}
-
 const catalog = loadCatalog();
 const arcadeGame = catalog.games.find((game: any) => Array.isArray(game?.category) && game.category.includes('Arcade'));
 const puzzleGame = catalog.games.find((game: any) => Array.isArray(game?.category) && game.category.includes('Puzzle'));
@@ -48,7 +34,7 @@ const arcadeTitles = getLocalizedTitles(arcadeGame);
 const puzzleTitles = getLocalizedTitles(puzzleGame);
 const arcadeSlug = arcadeGame.slug || arcadeGame.id;
 const puzzleSlug = puzzleGame.slug || puzzleGame.id;
-const puzzleIsPlayable = isPlayableGame(puzzleGame);
+const puzzleIsPlayable = isPlayable(puzzleGame);
 const puzzleTitleForSelector = puzzleTitles[0] || puzzleSlug;
 
 if (!arcadeSlug || !puzzleSlug) {

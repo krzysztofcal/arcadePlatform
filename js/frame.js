@@ -20,6 +20,9 @@
 
   const analytics = window.Analytics;
   const catalog = window.ArcadeCatalog;
+  const gameUtils = window.GameUtils && typeof window.GameUtils === 'object'
+    ? window.GameUtils
+    : null;
   let currentSlug = '';
   let pendingFsAction = null;
   let lastFsState = false;
@@ -70,6 +73,9 @@
   }
 
   function sanitizeSameOriginUrl(urlString){
+    if (gameUtils && typeof gameUtils.sanitizeSelfPage === 'function'){
+      return gameUtils.sanitizeSelfPage(urlString, location.href);
+    }
     if (!urlString) return null;
     try {
       const url = new URL(urlString, location.href);
@@ -99,6 +105,9 @@
   }
 
   function isPlayable(game){
+    if (gameUtils && typeof gameUtils.isPlayable === 'function'){
+      return gameUtils.isPlayable(game, location.href);
+    }
     if (!game || !game.source) return false;
     if (game.source.type === 'placeholder') return false;
     if (game.source.page) return true;
