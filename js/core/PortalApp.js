@@ -381,8 +381,10 @@
 
     async init(){
       let catalogError = false;
+
       try {
-        this.allGames = await this.loadGames(); // single source of truth
+        // Single source of truth: js/games.json
+        this.allGames = await this.loadGames(); // uses { cache: 'no-cache' } inside
       } catch (err) {
         catalogError = true;
         console.error(err);
@@ -392,15 +394,13 @@
         }
       }
 
-      // keep page usable even if catalog failed
+      // Keep shell usable even if catalog failed
       this.buildCategoryBar();
       if (catalogError) return;
 
       this.activeCategory = this.getInitialCategory();
       this.updateCategoryButtons();
       this.updateUrl(this.activeCategory);
-      this.renderCurrentList('initial');
-      this.document.addEventListener('langchange', this.onLangChange);
     }
   }
 

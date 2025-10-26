@@ -472,11 +472,6 @@
       return;
     }
 
-    if (!Array.isArray(list) || !list.length){
-      showCatalogError();
-      return;
-    }
-
     const lang = getLang();
     const game = list.find(g => g.slug === slug);
 
