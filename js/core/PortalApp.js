@@ -380,11 +380,11 @@
     }
 
     async init(){
-      let catalogError = false;
+      let catalogLoaded = false;
       try {
         this.allGames = await this.loadGames();
+        catalogLoaded = true;
       } catch (err) {
-        catalogError = true;
         if (global.console && typeof global.console.error === 'function'){
           global.console.error(err);
         }
@@ -394,7 +394,7 @@
         this.allGames = [];
       }
       this.buildCategoryBar();
-      if (catalogError){
+      if (!catalogLoaded){
         return;
       }
       this.activeCategory = this.getInitialCategory();
