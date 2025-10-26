@@ -4,26 +4,20 @@
       "id": "trex",
       "slug": "trex",
       "title": { "en": "T-Rex Runner", "pl": "T-Rex Biegacz" },
-      "description": {
-        "en": "Run and jump over cacti in this classic offline Chrome dino game.",
-        "pl": "Biegnij i przeskakuj kaktusy w klasycznej grze z dinozaurem."
-      },
+      "description": { "en": "Jump over cacti!", "pl": "Skacz nad kaktusami!" },
       "category": ["Arcade"],
       "thumbnail": "img/trex-thumb.jpg",
-      "tags": ["runner", "offline", "classic"],
+      "tags": ["runner", "classic"],
       "source": { "type": "self", "page": "games/trex/index.html" }
     },
     {
       "id": "cats",
       "slug": "cats",
       "title": { "en": "Catch the Cats", "pl": "Złap koty" },
-      "description": {
-        "en": "Catch the falling cats before they hit the floor!",
-        "pl": "Złap spadające koty, zanim uderzą o ziemię!"
-      },
-      "category": ["Casual"],
+      "description": { "en": "Catch the falling cats!", "pl": "Złap spadające koty!" },
+      "category": ["Puzzle"],
       "thumbnail": "img/cats-thumb.jpg",
-      "tags": ["reflex", "cute", "casual"],
+      "tags": ["reflex", "casual"],
       "source": { "type": "self", "page": "games/cats/index.html" }
     }
   ]
