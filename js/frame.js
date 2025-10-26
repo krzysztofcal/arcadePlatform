@@ -186,12 +186,17 @@
   }
 
   async function loadCatalog(){
-    const res = await fetch('js/games.json', { cache: 'no-cache' });
-    if (!res.ok) throw new Error('Failed to load games.json');
-    const data = await res.json();
-    if (data && Array.isArray(data.games)) return normalizeList(data.games);
-    if (Array.isArray(data)) return normalizeList(data);
-    throw new Error('Unexpected games catalog format');
+    try {
+      const res = await fetch('js/games.json', { cache: 'no-cache' });
+      if (!res.ok) throw new Error('Failed to load games.json');
+      const data = await res.json();
+      if (data && Array.isArray(data.games)) return normalizeList(data.games);
+      if (Array.isArray(data)) return normalizeList(data);
+      throw new Error('Unexpected games catalog format');
+    } catch (e) {
+      console.error(e);
+      return [];
+    }
   }
 
   function waitForConsent(timeoutMs){

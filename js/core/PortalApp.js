@@ -380,23 +380,25 @@
     }
 
     async init(){
-      let catalogLoaded = false;
+      let catalogError = false;
       try {
         this.allGames = await this.loadGames();
-        catalogLoaded = true;
       } catch (err) {
+        catalogError = true;
         if (global.console && typeof global.console.error === 'function'){
           global.console.error(err);
         }
+        this.allGames = [];
         if (this.grid){
           this.grid.innerHTML = '<div class="meta">Catalog error. Please try again later.</div>';
         }
-        this.allGames = [];
       }
+
       this.buildCategoryBar();
-      if (!catalogLoaded){
+      if (catalogError){
         return;
       }
+
       this.activeCategory = this.getInitialCategory();
       this.updateCategoryButtons();
       this.updateUrl(this.activeCategory);
