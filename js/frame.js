@@ -186,16 +186,12 @@
   }
 
   async function loadCatalog(){
-    try {
-      const res = await fetch('js/games.json', { cache: 'no-cache' });
-      if (!res.ok) throw new Error('Failed to load games.json');
-      const data = await res.json();
-      if (data && Array.isArray(data.games)) return normalizeList(data.games);
-      if (Array.isArray(data)) return normalizeList(data);
-    } catch (e) {
-      console.error(e);
-    }
-    return [];
+    const res = await fetch('js/games.json', { cache: 'no-cache' });
+    if (!res.ok) throw new Error('Failed to load games.json');
+    const data = await res.json();
+    if (data && Array.isArray(data.games)) return normalizeList(data.games);
+    if (Array.isArray(data)) return normalizeList(data);
+    throw new Error('Unexpected games catalog format');
   }
 
   function waitForConsent(timeoutMs){
@@ -421,9 +417,11 @@
     similarSection.hidden = false;
   }
 
-  function showNotFound(message, titleText){
+  function showEmptyState(titleText, message, options){
     const text = message || 'Game not found.';
     const heading = titleText || 'Game not found';
+    const linkHref = options && options.linkHref ? options.linkHref : '';
+    const linkLabel = options && options.linkLabel ? options.linkLabel : 'Browse games';
     setDocTitle(heading);
     updateMetaTags({ title: heading, description: text, slug: currentSlug });
     if (descriptionEl) descriptionEl.textContent = text;
@@ -433,7 +431,14 @@
     }
     if (metaEl) metaEl.textContent = text;
     if (frameWrap) frameWrap.classList.add('empty');
-    if (frameBox) frameBox.innerHTML = '<div class="emptyState">' + text + '</div>';
+    if (frameBox){
+      let inner = '<div class="emptyState"><p>' + text + '</p>';
+      if (linkHref){
+        inner += '<p><a class="emptyStateLink" href="' + linkHref + '">' + linkLabel + '</a></p>';
+      }
+      inner += '</div>';
+      frameBox.innerHTML = inner;
+    }
     if (consentOverlay) consentOverlay.classList.add('hidden');
     if (rotateOverlay) rotateOverlay.classList.add('hidden');
     if (btnEnter) btnEnter.style.display = 'none';
@@ -442,14 +447,32 @@
     if (similarList) similarList.innerHTML = '';
   }
 
+  function showCatalogError(){
+    showEmptyState('Catalog error', 'Catalog error. Please try again later.', {
+      linkHref: 'index.html',
+      linkLabel: 'Return to home'
+    });
+  }
+
   async function init(){
     const slug = qsParam('slug');
     currentSlug = slug || '';
-    const list = await loadCatalog();
+    let list;
+    try {
+      list = await loadCatalog();
+    } catch (err) {
+      console.error(err);
+      showCatalogError();
+      return;
+    }
     const lang = getLang();
     const game = list.find(g => (g.slug === slug));
     if (!slug || !game){
-      showNotFound(slug ? 'Game not found.' : 'Choose a game from the catalog to start playing.', slug ? 'Game not found' : 'No game selected');
+      showEmptyState(
+        slug ? 'Game not found' : 'No game selected',
+        slug ? 'Game not found.' : 'Choose a game from the catalog to start playing.',
+        { linkHref: 'index.html', linkLabel: 'Browse games' }
+      );
       return;
     }
 

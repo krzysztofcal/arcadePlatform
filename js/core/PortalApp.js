@@ -369,26 +369,34 @@
     }
 
     async loadGames(){
-      try {
-        const res = await this.fetchImpl(this.gamesEndpoint, { cache: 'no-cache' });
-        if (!res || (typeof res.ok === 'boolean' && !res.ok)){
-          throw new Error('Failed to load games catalog');
-        }
-        const data = typeof res.json === 'function' ? await res.json() : null;
-        if (data && Array.isArray(data.games)) return this.normalizeList(data.games);
-        if (Array.isArray(data)) return this.normalizeList(data);
-        throw new Error('Unexpected games catalog format');
-      } catch (err) {
-        if (global.console && typeof global.console.error === 'function'){
-          global.console.error(err);
-        }
+      const res = await this.fetchImpl(this.gamesEndpoint, { cache: 'no-cache' });
+      if (!res || (typeof res.ok === 'boolean' && !res.ok)){
+        throw new Error('Failed to load games catalog');
       }
-      return [];
+      const data = typeof res.json === 'function' ? await res.json() : null;
+      if (data && Array.isArray(data.games)) return this.normalizeList(data.games);
+      if (Array.isArray(data)) return this.normalizeList(data);
+      throw new Error('Unexpected games catalog format');
     }
 
     async init(){
-      this.allGames = await this.loadGames();
+      let catalogError = false;
+      try {
+        this.allGames = await this.loadGames();
+      } catch (err) {
+        catalogError = true;
+        if (global.console && typeof global.console.error === 'function'){
+          global.console.error(err);
+        }
+        if (this.grid){
+          this.grid.innerHTML = '<div class="meta">Catalog error. Please try again later.</div>';
+        }
+        this.allGames = [];
+      }
       this.buildCategoryBar();
+      if (catalogError){
+        return;
+      }
       this.activeCategory = this.getInitialCategory();
       this.updateCategoryButtons();
       this.updateUrl(this.activeCategory);
