@@ -185,20 +185,19 @@
     return Array.isArray(rawList) ? rawList.filter(Boolean) : [];
   }
 
-  async function loadCatalog(){
-    try {
-      const res = await fetch('js/games.json', { cache: 'no-cache' });
-      if (!res.ok) throw new Error('Failed to load games.json');
-      const data = await res.json();
-      if (data && Array.isArray(data.games)) return normalizeList(data.games);
-      if (Array.isArray(data)) return normalizeList(data);
-      throw new Error('Unexpected games catalog format');
-    } catch (e) {
-      console.error(e);
-      return [];
-    }
+async function loadCatalog(){
+  try {
+    const res = await fetch('js/games.json', { cache: 'no-cache' });
+    if (!res.ok) throw new Error('Failed to load games.json');
+    const data = await res.json();
+    if (data && Array.isArray(data.games)) return normalizeList(data.games);
+    if (Array.isArray(data)) return normalizeList(data);
+    throw new Error('Unexpected games catalog format');
+  } catch (e) {
+    console.error(e);
+    return [];
   }
-
+}
   function waitForConsent(timeoutMs){
     return new Promise(resolve => {
       const start = Date.now();
@@ -459,31 +458,33 @@
     });
   }
 
-  async function init(){
-    const slug = qsParam('slug') || '';
-    currentSlug = slug;
+async function init(){
+  const slug = qsParam('slug') || '';
+  currentSlug = slug;
 
-    let list;
-    try {
-      list = await loadCatalog();
-    } catch (err) {
-      console.error(err);
-      showCatalogError();
-      return;
-    }
+  let list;
+  try {
+    list = await loadCatalog();
+  } catch (err) {
+    console.error(err);
+    showCatalogError();
+    return;
+  }
 
-    const lang = getLang();
-    const game = list.find(g => g.slug === slug);
+  const lang = getLang();
+  const game = list.find(g => g.slug === slug);
 
-    if (!slug || !game){
-      showEmptyState(
-        slug ? 'Game not found' : 'No game selected',
-        slug ? 'Game not found.' : 'Choose a game from the catalog to start playing.',
-        { linkHref: 'index.html', linkLabel: 'Browse games' }
-      );
-      return;
-    }
+  if (!slug || !game){
+    showEmptyState(
+      slug ? 'Game not found' : 'No game selected',
+      slug ? 'Game not found.' : 'Choose a game from the catalog to start playing.',
+      { linkHref: 'index.html', linkLabel: 'Browse games' }
+    );
+    return;
+  }
 
+  // ↓ keep your existing render/meta/iframe logic below this line
+}
     // ↓ keep your existing render/meta/iframe logic below this line
     const title = (game.title && (game.title[lang] || game.title.en)) || 'Game';
     const desc = (game.description && (game.description[lang] || game.description.en)) || '';

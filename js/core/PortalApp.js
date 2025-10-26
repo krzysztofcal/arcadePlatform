@@ -379,21 +379,29 @@
       throw new Error('Unexpected games catalog format');
     }
 
-    async init(){
-      let catalogError = false;
+async init(){
+  let catalogError = false;
 
-      try {
-        // Single source of truth: js/games.json
-        this.allGames = await this.loadGames(); // uses { cache: 'no-cache' } inside
-      } catch (err) {
-        catalogError = true;
-        console.error(err);
-        this.allGames = [];
-        if (this.grid){
-          this.grid.innerHTML = '<div class="meta">Catalog error. Please try again later.</div>';
-        }
-      }
+  try {
+    // Single source of truth: js/games.json
+    this.allGames = await this.loadGames(); // uses { cache: 'no-cache' } inside
+  } catch (err) {
+    catalogError = true;
+    console.error(err);
+    this.allGames = [];
+    if (this.grid){
+      this.grid.innerHTML = '<div class="meta">Catalog error. Please try again later.</div>';
+    }
+  }
 
+  // Keep shell usable even if catalog failed
+  this.buildCategoryBar();
+  if (catalogError) return;
+
+  this.activeCategory = this.getInitialCategory();
+  this.updateCategoryButtons();
+  this.updateUrl(this.activeCategory);
+}
       // Always build category bar so the page remains usable
       this.buildCategoryBar();
       if (catalogError) return;
