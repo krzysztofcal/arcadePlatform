@@ -1,66 +1,77 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Arcade platform games catalog v2",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://example.com/schemas/games.schema.json",
+  "title": "Arcade Platform Games Catalog",
   "type": "object",
-  "required": ["version", "games"],
+  "required": ["games"],
+  "additionalProperties": false,
   "properties": {
-    "version": { "const": 2 },
     "games": {
       "type": "array",
-      "items": { "$ref": "#/$defs/game" }
+      "items": { "$ref": "#/$defs/game" },
+      "minItems": 1,
+      "uniqueItems": true
     }
   },
-  "additionalProperties": false,
   "$defs": {
-    "localizedString": {
+    "localizedText": {
       "type": "object",
       "required": ["en", "pl"],
+      "additionalProperties": false,
       "properties": {
         "en": { "type": "string", "minLength": 1 },
         "pl": { "type": "string", "minLength": 1 }
-      },
-      "additionalProperties": false
-    },
-    "stringArray": {
-      "type": "array",
-      "items": { "type": "string", "minLength": 1 }
+      }
     },
     "source": {
       "type": "object",
       "required": ["type"],
+      "additionalProperties": false,
       "properties": {
-        "type": { "enum": ["self", "distributor", "placeholder"] },
+        "type": {
+          "type": "string",
+          "enum": ["self", "distributor", "placeholder"]
+        },
         "page": { "type": "string", "minLength": 1 },
-        "embedUrl": { "type": "string", "minLength": 1 },
+        "embedUrl": { "type": "string", "format": "uri" },
         "distributor": { "type": "string", "minLength": 1 }
       },
-      "additionalProperties": false,
-      "allOf": [
-        {
-          "if": { "properties": { "type": { "const": "self" } } },
-          "then": { "required": ["page"] }
-        },
-        {
-          "if": { "properties": { "type": { "const": "distributor" } } },
-          "then": { "required": ["embedUrl"] }
-        }
+      "anyOf": [
+        { "required": ["page"] },
+        { "required": ["embedUrl"] }
       ]
     },
     "game": {
       "type": "object",
-      "required": ["id", "slug", "title", "source"],
+      "required": [
+        "id",
+        "slug",
+        "title",
+        "description",
+        "category",
+        "thumbnail",
+        "tags",
+        "source"
+      ],
+      "additionalProperties": false,
       "properties": {
         "id": { "type": "string", "minLength": 1 },
         "slug": { "type": "string", "minLength": 1 },
-        "title": { "$ref": "#/$defs/localizedString" },
-        "description": { "$ref": "#/$defs/localizedString" },
-        "category": { "$ref": "#/$defs/stringArray" },
-        "tags": { "$ref": "#/$defs/stringArray" },
+        "title": { "$ref": "#/$defs/localizedText" },
+        "description": { "$ref": "#/$defs/localizedText" },
+        "category": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "minItems": 1
+        },
         "thumbnail": { "type": "string", "minLength": 1 },
-        "orientation": { "enum": ["portrait", "landscape", "any"] },
+        "tags": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "minItems": 1
+        },
         "source": { "$ref": "#/$defs/source" }
-      },
-      "additionalProperties": false
+      }
     }
   }
 }
