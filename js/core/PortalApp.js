@@ -394,7 +394,7 @@
         }
       }
 
-      // Keep shell usable even if catalog failed
+      // Always build category bar so the page remains usable
       this.buildCategoryBar();
       if (catalogError) return;
 

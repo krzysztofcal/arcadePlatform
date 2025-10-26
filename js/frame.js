@@ -484,6 +484,7 @@
       return;
     }
 
+    // ↓ keep your existing render/meta/iframe logic below this line
     const title = (game.title && (game.title[lang] || game.title.en)) || 'Game';
     const desc = (game.description && (game.description[lang] || game.description.en)) || '';
     if (frameWrap) frameWrap.classList.remove('empty');
