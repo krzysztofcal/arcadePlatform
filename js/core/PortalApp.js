@@ -382,7 +382,7 @@
     async init(){
       let catalogError = false;
       try {
-        this.allGames = await this.loadGames();
+        this.allGames = await this.loadGames(); // single source of truth
       } catch (err) {
         catalogError = true;
         console.error(err);
@@ -392,10 +392,9 @@
         }
       }
 
+      // keep page usable even if catalog failed
       this.buildCategoryBar();
-      if (catalogError){
-        return;
-      }
+      if (catalogError) return;
 
       this.activeCategory = this.getInitialCategory();
       this.updateCategoryButtons();

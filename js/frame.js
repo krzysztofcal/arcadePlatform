@@ -460,15 +460,26 @@
   }
 
   async function init(){
-    const slug = qsParam('slug');
-    currentSlug = slug || '';
-    const list = await loadCatalog();
+    const slug = qsParam('slug') || '';
+    currentSlug = slug;
+
+    let list;
+    try {
+      list = await loadCatalog();
+    } catch (err) {
+      console.error(err);
+      showCatalogError();
+      return;
+    }
+
     if (!Array.isArray(list) || !list.length){
       showCatalogError();
       return;
     }
+
     const lang = getLang();
-    const game = list.find(g => (g.slug === slug));
+    const game = list.find(g => g.slug === slug);
+
     if (!slug || !game){
       showEmptyState(
         slug ? 'Game not found' : 'No game selected',
