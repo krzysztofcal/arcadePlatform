@@ -193,17 +193,6 @@
       if (data && Array.isArray(data.games)) return normalizeList(data.games);
       if (Array.isArray(data)) return normalizeList(data);
     } catch (e) {
-      if (Array.isArray(window.GAMES)){
-        return normalizeList(window.GAMES.map(g => ({
-          id: g.id || g.slug || 'game-'+Math.random().toString(36).slice(2),
-          slug: g.slug || (g.id || ''),
-          title: g.title,
-          description: g.subtitle ? g.subtitle : { en: '', pl: '' },
-          thumbnail: g.thumb,
-          orientation: g.orientation,
-          source: g.href ? { type: 'self', page: g.href } : { type: 'placeholder' }
-        })));
-      }
       console.error(e);
     }
     return [];

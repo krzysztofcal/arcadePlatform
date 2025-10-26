@@ -377,22 +377,8 @@
         const data = typeof res.json === 'function' ? await res.json() : null;
         if (data && Array.isArray(data.games)) return this.normalizeList(data.games);
         if (Array.isArray(data)) return this.normalizeList(data);
+        throw new Error('Unexpected games catalog format');
       } catch (err) {
-        if (Array.isArray(global.GAMES)){
-          const legacy = global.GAMES.map(g => ({
-            id: g.id || g.slug || `game-${Math.random().toString(36).slice(2)}`,
-            slug: g.slug || g.id || '',
-            title: asLocaleBlock(g.title),
-            description: asLocaleBlock(g.subtitle),
-            thumbnail: g.thumb,
-            orientation: g.orientation,
-            category: Array.isArray(g.category) ? g.category.slice() : [],
-            source: g.href
-              ? { type: 'self', page: g.href }
-              : { type: 'placeholder' }
-          }));
-          return this.normalizeList(legacy);
-        }
         if (global.console && typeof global.console.error === 'function'){
           global.console.error(err);
         }
