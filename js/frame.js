@@ -462,11 +462,8 @@
   async function init(){
     const slug = qsParam('slug');
     currentSlug = slug || '';
-    let list;
-    try {
-      list = await loadCatalog();
-    } catch (err) {
-      console.error(err);
+    const list = await loadCatalog();
+    if (!Array.isArray(list) || !list.length){
       showCatalogError();
       return;
     }
