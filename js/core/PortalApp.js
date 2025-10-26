@@ -385,9 +385,7 @@
         this.allGames = await this.loadGames();
       } catch (err) {
         catalogError = true;
-        if (global.console && typeof global.console.error === 'function'){
-          global.console.error(err);
-        }
+        console.error(err);
         this.allGames = [];
         if (this.grid){
           this.grid.innerHTML = '<div class="meta">Catalog error. Please try again later.</div>';
