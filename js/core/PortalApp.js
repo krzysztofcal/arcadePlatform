@@ -1,7 +1,7 @@
 ﻿(function(global){
   'use strict';
 
-  const DEFAULT_CATEGORIES = Object.freeze(['New/All', 'Arcade', 'Puzzle', 'Shooter', 'Racing']);
+  const DEFAULT_CATEGORIES = Object.freeze(['All', 'Arcade', 'Puzzle', 'Shooter', 'Racing']);
   const SHARED_GAME_UTILS = global.GameUtils && typeof global.GameUtils === 'object'
     ? global.GameUtils
     : null;
@@ -420,16 +420,6 @@ async init(){
     this.renderList(this.allGames, 'init', this.activeCategory);
   }
 }
-
-      // Always build category bar so the page remains usable
-      this.buildCategoryBar();
-      if (catalogError) return;
-
-      this.activeCategory = this.getInitialCategory();
-      this.updateCategoryButtons();
-      this.updateUrl(this.activeCategory);
-    }
-  }
 
   PortalApp.DEFAULT_CATEGORIES = DEFAULT_CATEGORIES;
   global.PortalApp = PortalApp;
