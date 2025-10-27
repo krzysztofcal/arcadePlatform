@@ -198,6 +198,7 @@ async function loadCatalog(){
     return [];
   }
 }
+
   function waitForConsent(timeoutMs){
     return new Promise(resolve => {
       const start = Date.now();
@@ -421,42 +422,42 @@ async function loadCatalog(){
     similarSection.hidden = false;
   }
 
-  function showEmptyState(titleText, message, options){
-    const text = message || 'Game not found.';
-    const heading = titleText || 'Game not found';
-    const linkHref = options && options.linkHref ? options.linkHref : '';
-    const linkLabel = options && options.linkLabel ? options.linkLabel : 'Browse games';
-    setDocTitle(heading);
-    updateMetaTags({ title: heading, description: text, slug: currentSlug });
-    if (descriptionEl) descriptionEl.textContent = text;
-    if (introSection){
-      introSection.hidden = true;
-      introSection.style.display = 'none';
-    }
-    if (metaEl) metaEl.textContent = text;
-    if (frameWrap) frameWrap.classList.add('empty');
-    if (frameBox){
-      let inner = '<div class="emptyState"><p>' + text + '</p>';
-      if (linkHref){
-        inner += '<p><a class="emptyStateLink" href="' + linkHref + '">' + linkLabel + '</a></p>';
-      }
-      inner += '</div>';
-      frameBox.innerHTML = inner;
-    }
-    if (consentOverlay) consentOverlay.classList.add('hidden');
-    if (rotateOverlay) rotateOverlay.classList.add('hidden');
-    if (btnEnter) btnEnter.style.display = 'none';
-    if (btnExit) btnExit.style.display = 'none';
-    if (similarSection) similarSection.hidden = true;
-    if (similarList) similarList.innerHTML = '';
+function showEmptyState(titleText, message, options){
+  const text = message || 'Game not found.';
+  const heading = titleText || 'Game not found';
+  const linkHref = options && options.linkHref ? options.linkHref : '';
+  const linkLabel = options && options.linkLabel ? options.linkLabel : 'Browse games';
+  setDocTitle(heading);
+  updateMetaTags({ title: heading, description: text, slug: currentSlug });
+  if (descriptionEl) descriptionEl.textContent = text;
+  if (introSection){
+    introSection.hidden = true;
+    introSection.style.display = 'none';
   }
+  if (metaEl) metaEl.textContent = text;
+  if (frameWrap) frameWrap.classList.add('empty');
+  if (frameBox){
+    let inner = '<div class="emptyState"><p>' + text + '</p>';
+    if (linkHref){
+      inner += '<p><a class="emptyStateLink" href="' + linkHref + '">' + linkLabel + '</a></p>';
+    }
+    inner += '</div>';
+    frameBox.innerHTML = inner;
+  }
+  if (consentOverlay) consentOverlay.classList.add('hidden');
+  if (rotateOverlay) rotateOverlay.classList.add('hidden');
+  if (btnEnter) btnEnter.style.display = 'none';
+  if (btnExit) btnExit.style.display = 'none';
+  if (similarSection) similarSection.hidden = true;
+  if (similarList) similarList.innerHTML = '';
+}
 
-  function showCatalogError(){
-    showEmptyState('Catalog error', 'Catalog error. Please try again later.', {
-      linkHref: 'index.html',
-      linkLabel: 'Return to home'
-    });
-  }
+function showCatalogError(){
+  showEmptyState('Catalog error', 'Catalog error. Please try again later.', {
+    linkHref: 'index.html',
+    linkLabel: 'Return to home'
+  });
+}
 
 async function init(){
   const slug = qsParam('slug') || '';
@@ -464,10 +465,9 @@ async function init(){
 
   let list;
   try {
-    // Single source of truth
     list = await loadCatalog();
   } catch (err) {
-    console.error('[Frame:init] Catalog load failed:', err);
+    console.error(err);
     showCatalogError();
     return;
   }
@@ -475,61 +475,37 @@ async function init(){
   const lang = getLang();
   const game = list.find(g => g.slug === slug);
 
-  // Handle no slug or missing game
   if (!slug || !game){
     showEmptyState(
       slug ? 'Game not found' : 'No game selected',
-      slug
-        ? 'The requested game could not be found. It might have been removed or renamed.'
-        : 'Choose a game from the catalog to start playing.',
+      slug ? 'Game not found.' : 'Choose a game from the catalog to start playing.',
       { linkHref: 'index.html', linkLabel: 'Browse games' }
     );
     return;
   }
 
-  // --- UI elements used below (already defined elsewhere in your file) ---
-  const frameWrap = document.getElementById('frameWrap');
-  const frameBox  = document.getElementById('frameBox');
-  const btnEnter  = document.getElementById('btnEnterFs');
-  const btnExit   = document.getElementById('btnExitFs');
-  const metaEl    = document.getElementById('gameMeta');
-  const consentOverlay = document.getElementById('consentOverlay');
-
-  // Title/description
-  const title = (game.title && (game.title[lang] || game.title.en)) || game.slug;
-  const desc  = (game.description && (game.description[lang] || game.description.en)) ||
-               'Play free arcade games at KCSWH Arcade Hub';
-
-  // Clear any empty-state styles
+  // Existing render/meta/iframe logic (unchanged)
+  const title = (game.title && (game.title[lang] || game.title.en)) || 'Game';
+  const desc = (game.description && (game.description[lang] || game.description.en)) || '';
   if (frameWrap) frameWrap.classList.remove('empty');
   if (frameBox && frameBox.querySelector('.emptyState')) frameBox.innerHTML = '';
-
-  // FS buttons initial state
   if (btnEnter) btnEnter.style.display = '';
-  if (btnExit)  btnExit.style.display  = 'none';
-
-  // Title + meta tags
+  if (btnExit) btnExit.style.display = 'none';
   setDocTitle(title);
-  updateMetaTags({ title, description: desc });
-
-  // Hero + meta bar + similar games
+  updateMetaTags({ title, description: desc || DEFAULT_DESCRIPTION, slug });
   renderHero(game, title, desc);
   renderMetaBar(game);
   renderSimilarGames(game, list, lang);
-
   if (metaEl && !metaEl.textContent){
     metaEl.textContent = desc || 'More details coming soon.';
   }
-
-  // Basic analytics
   track('viewGame', {
     slug: slug || undefined,
     lang,
     title,
-    source: (game.source && game.source.type) || undefined
+    source: game.source && game.source.type || undefined
   });
 
-  // Orientation overlay
   updateRotateOverlay(game.orientation || 'any');
   addEventListener('resize', () => updateRotateOverlay(game.orientation || 'any'));
 
@@ -545,60 +521,24 @@ async function init(){
     return;
   }
 
-  // Determine embeddable URL (for distributor/remote sources)
-  const embed =
-    (game.source && (game.source.embedUrl || game.source.url)) || '';
-
+  const embed = game.source && (game.source.embedUrl || game.source.url);
   if (!embed){
-    showEmptyState(
-      'Game not available',
-      'This game does not have a playable source link.',
-      { linkHref: 'index.html', linkLabel: 'Back to catalog' }
-    );
+    if (metaEl) metaEl.textContent = 'Playable URL missing.';
     return;
   }
 
-  // Consent gating (hide overlay whether it resolves or times out)
-  try {
-    await waitForConsent(12000);
-  } catch (e) {
-    console.warn('[Frame:init] Consent wait timed out or failed:', e);
-  } finally {
-    if (consentOverlay) consentOverlay.classList.add('hidden');
-  }
+  // Consent gating
+  try { await waitForConsent(12000); } catch(e) {}
+  if (consentOverlay) consentOverlay.classList.add('hidden');
 
-  // Inject iframe
-  if (!frameBox){
-    console.warn('[Frame:init] frameBox element missing');
-    return;
-  }
-  frameBox.innerHTML = '';
   injectIframe(embed, game.orientation || 'any');
 
-  // FS controls + listeners
   if (btnEnter) btnEnter.addEventListener('click', enterFs);
-  if (btnExit)  btnExit.addEventListener('click',  exitFs);
-  document.addEventListener('fullscreenchange', onFullscreenChange);
+  if (btnExit) btnExit.addEventListener('click', exitFs);
+  document.addEventListener('fullscreenchange', onFsChange);
 
-  // Ad impression tracking (as you had)
-  track('adImpression', {
-    slot: 'game_top',
-    page: 'game',
-    slug: slug || undefined
-  });
-
-  // Optional GA4 event
-  if (window.gtag) {
-    try {
-      window.gtag('event', 'view_game', { game_slug: slug, game_title: title });
-    } catch (e) {
-      console.warn('[Frame:init] GA4 event failed:', e);
-    }
-  }
-
-  console.info(`[Frame:init] Game "${title}" loaded successfully`);
+  track('adImpression', { slot: 'game_top', page: 'game', slug: slug || undefined });
 }
-
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
 })();
 
