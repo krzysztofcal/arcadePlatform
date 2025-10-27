@@ -397,12 +397,12 @@ async init(){
     catalogError = true;
     console.error(err);
     this.allGames = [];
-    if (this.grid){
+    if (this.grid) {
       this.grid.innerHTML = '<div class="meta">Catalog error. Please try again later.</div>';
     }
   }
 
-  // Keep shell usable even if catalog failed
+  // Always build category bar so the page remains usable
   this.buildCategoryBar();
   if (catalogError) return;
 
@@ -410,16 +410,17 @@ async init(){
   this.updateCategoryButtons();
   this.updateUrl(this.activeCategory);
 
-  // Ensure the homepage grid renders immediately (tests depend on this)
+  // ✅ Ensure homepage grid renders immediately
   if (typeof this.renderForCategory === 'function') {
-    this.renderForCategory(this.activeCategory);
+    this.renderForCategory(this.activeCategory, 'init');
   } else if (typeof this.applyCategory === 'function') {
     this.applyCategory(this.activeCategory);
   } else {
     // fallback: render everything
-    this.renderList(this.allGames);
+    this.renderList(this.allGames, 'init', this.activeCategory);
   }
 }
+
       // Always build category bar so the page remains usable
       this.buildCategoryBar();
       if (catalogError) return;
