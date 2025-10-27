@@ -409,8 +409,16 @@ async init(){
   this.activeCategory = this.getInitialCategory();
   this.updateCategoryButtons();
   this.updateUrl(this.activeCategory);
-// Initial render so the grid is populated on first load (tests depend on this)
-  this.renderForCategory(this.activeCategory);
+
+  // Ensure the homepage grid renders immediately (tests depend on this)
+  if (typeof this.renderForCategory === 'function') {
+    this.renderForCategory(this.activeCategory);
+  } else if (typeof this.applyCategory === 'function') {
+    this.applyCategory(this.activeCategory);
+  } else {
+    // fallback: render everything
+    this.renderList(this.allGames);
+  }
 }
       // Always build category bar so the page remains usable
       this.buildCategoryBar();
