@@ -8,7 +8,7 @@
       "category": ["Arcade"],
       "thumbnail": "img/trex-thumb.jpg",
       "tags": ["runner", "classic"],
-      "source": { "type": "self", "page": "games/trex/index.html" }
+      "source": { "type": "self", "page": "game_trex.html" }
     },
     {
       "id": "cats",
@@ -18,7 +18,7 @@
       "category": ["Puzzle"],
       "thumbnail": "img/cats-thumb.jpg",
       "tags": ["reflex", "casual"],
-      "source": { "type": "self", "page": "games/cats/index.html" }
+      "source": { "type": "self", "page": "game_cats.html" }
     }
   ]
 }
