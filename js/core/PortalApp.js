@@ -379,6 +379,14 @@
       throw new Error('Unexpected games catalog format');
     }
 
+renderForCategory(category){
+  const list =
+    category && category !== 'All'
+      ? this.allGames.filter(g => Array.isArray(g.category) && g.category.includes(category))
+      : this.allGames.slice();
+  this.renderList(list);
+}
+
 async init(){
   let catalogError = false;
 
@@ -401,6 +409,8 @@ async init(){
   this.activeCategory = this.getInitialCategory();
   this.updateCategoryButtons();
   this.updateUrl(this.activeCategory);
+// Initial render so the grid is populated on first load (tests depend on this)
+  this.renderForCategory(this.activeCategory);
 }
       // Always build category bar so the page remains usable
       this.buildCategoryBar();
