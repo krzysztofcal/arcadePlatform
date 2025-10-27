@@ -379,12 +379,12 @@
       throw new Error('Unexpected games catalog format');
     }
 
-renderForCategory(category){
+renderForCategory(category, reason){
   const list =
     category && category !== 'All'
       ? this.allGames.filter(g => Array.isArray(g.category) && g.category.includes(category))
       : this.allGames.slice();
-  this.renderList(list);
+  this.renderList(list, reason || 'category', category || this.defaultCategory);
 }
 
 async init(){
@@ -410,7 +410,7 @@ async init(){
   this.updateCategoryButtons();
   this.updateUrl(this.activeCategory);
 
-  // ✅ Ensure homepage grid renders immediately
+  // Ensure homepage grid renders immediately
   if (typeof this.renderForCategory === 'function') {
     this.renderForCategory(this.activeCategory, 'init');
   } else if (typeof this.applyCategory === 'function') {
@@ -420,8 +420,33 @@ async init(){
     this.renderList(this.allGames, 'init', this.activeCategory);
   }
 }
+} // <-- closes class PortalApp
 
-  PortalApp.DEFAULT_CATEGORIES = DEFAULT_CATEGORIES;
-  global.PortalApp = PortalApp;
+// Expose on window (tests read window.PortalApp)
+PortalApp.DEFAULT_CATEGORIES = DEFAULT_CATEGORIES;
+global.PortalApp = PortalApp;
+
+// --- Auto-boot on pages that have #gamesGrid (CI/homepage) ---
+(function autoBoot(){
+  try {
+    if (typeof document === 'undefined') return;
+    if (window.__portalApp) return;
+
+    const grid = document.getElementById('gamesGrid');
+    if (!grid) return; // not the homepage
+
+    const app = new PortalApp({
+      grid,
+      categoryBar: document.getElementById('categoryBar'),
+      fetchImpl: (...args) => fetch(...args),
+      gamesEndpoint: 'js/games.json'
+    });
+
+    window.__portalApp = app;
+    app.init();
+  } catch (e) {
+    console.error('[PortalApp] auto-boot failed:', e);
+  }
+})();
+
 })(window);
-
