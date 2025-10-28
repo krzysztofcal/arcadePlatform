@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160" role="img" aria-labelledby="title desc">
+  <title id="title">Pacman arcade thumbnail</title>
+  <desc id="desc">Pacman chasing pellets with a ghost.</desc>
+  <rect width="160" height="160" rx="22" fill="#0a0f2d" />
+  <rect x="24" y="24" width="112" height="112" rx="16" fill="none" stroke="#1f7cff" stroke-width="10" />
+  <path d="M80 64 a24 24 0 1 0 0 48 l24 -24 z" fill="#ffd54f" />
+  <circle cx="90" cy="92" r="5" fill="#0a0f2d" />
+  <circle cx="52" cy="88" r="6" fill="#ffd54f" opacity="0.4" />
+  <circle cx="40" cy="88" r="6" fill="#ffd54f" opacity="0.25" />
+  <g transform="translate(96 56)">
+    <rect width="36" height="44" rx="14" ry="14" fill="#ff5c8d" />
+    <path d="M0 40 L6 46 L12 40 L18 46 L24 40 L30 46 L36 40" fill="#ff5c8d" />
+    <circle cx="11" cy="22" r="5" fill="#fff" />
+    <circle cx="25" cy="22" r="5" fill="#fff" />
+    <circle cx="13" cy="22" r="2.5" fill="#0a0f2d" />
+    <circle cx="27" cy="22" r="2.5" fill="#0a0f2d" />
+  </g>
+</svg>
