@@ -33,6 +33,12 @@ const player = {
   level: 1,
 };
 
+function reportScore(){
+  if (typeof window.reportScoreToPortal === "function") {
+    try { window.reportScoreToPortal("tetris", player.score); } catch (_error) {}
+  }
+}
+
 let lastTime = 0;
 let dropCounter = 0;
 let dropInterval = 800;
@@ -357,6 +363,7 @@ function updateScore() {
   scoreEl.textContent = player.score;
   linesEl.textContent = player.lines;
   levelEl.textContent = player.level;
+  reportScore();
 }
 
 function resetGame() {

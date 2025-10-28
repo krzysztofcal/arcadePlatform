@@ -82,6 +82,15 @@
     }
   }
 
+  function personalBestBonus(oldScore, newScore){
+    if (!Number.isFinite(newScore) || !Number.isFinite(oldScore)){
+      if (!Number.isFinite(newScore)) return 0;
+      oldScore = 0;
+    }
+    if (newScore <= oldScore) return 0;
+    return Math.max(0, Math.min(100, newScore - oldScore));
+  }
+
   class PointsService{
     constructor(options){
       const opts = Object.assign({}, DEFAULTS, options || {});
@@ -209,7 +218,8 @@
         lastDayKey: null,
         lastLoginBonusKey: null,
         streak: { count: 0, lastKey: null },
-        games: {}
+        games: {},
+        bestByGame: {}
       };
     }
 
@@ -221,6 +231,7 @@
       merged.level = this._computeLevel(merged.totalXp || 0);
       if (!merged.streak) merged.streak = { count: 0, lastKey: null };
       if (!merged.games) merged.games = {};
+      if (!merged.bestByGame || typeof merged.bestByGame !== 'object') merged.bestByGame = {};
       return merged;
     }
 
@@ -442,6 +453,8 @@
       if (rawScore <= baseline){
         record.bestScore = Math.max(Number(record.bestScore) || 0, rawScore);
         this.state.games[slug] = record;
+        if (!this.state.bestByGame) this.state.bestByGame = {};
+        this.state.bestByGame[slug] = Math.max(Number(this.state.bestByGame[slug]) || 0, rawScore);
         this._persist();
         return 0;
       }
@@ -458,6 +471,8 @@
       record.lastPersonalBestDelta = delta;
       record.lastPersonalBestAward = amount;
       this.state.games[slug] = record;
+      if (!this.state.bestByGame) this.state.bestByGame = {};
+      this.state.bestByGame[slug] = Math.max(Number(this.state.bestByGame[slug]) || 0, rawScore);
       return this._awardXp(amount, {
         reason: 'personal_best',
         bypassSession: true,
@@ -469,6 +484,48 @@
           amount
         }
       });
+    }
+
+    recordScore(gameId, score){
+      if (!Number.isFinite(score)) return 0;
+      const slug = String(gameId || 'game');
+      if (!this.state.bestByGame || typeof this.state.bestByGame !== 'object'){
+        this.state.bestByGame = {};
+      }
+      if (!this.state.games || typeof this.state.games !== 'object'){
+        this.state.games = {};
+      }
+      const mapBest = this.state.bestByGame;
+      const record = this.state.games[slug] || {};
+      const knownBestCandidates = [
+        Number(mapBest[slug]),
+        Number(record.bestScore),
+        Number(record.bestAwardedScore)
+      ].filter(value => Number.isFinite(value) && value >= 0);
+      const previousBest = knownBestCandidates.length ? Math.max.apply(null, knownBestCandidates) : 0;
+      if (score <= previousBest){
+        record.bestScore = Math.max(Number(record.bestScore) || 0, score);
+        mapBest[slug] = Math.max(previousBest, score);
+        this.state.games[slug] = record;
+        this._persist();
+        this._emitUpdate();
+        return 0;
+      }
+
+      const suggested = personalBestBonus(previousBest, score);
+      const awarded = this.awardPersonalBest(slug, {
+        score,
+        previousBest,
+        amount: suggested
+      });
+      mapBest[slug] = Math.max(previousBest, score);
+      this.state.games[slug] = this.state.games[slug] || {};
+      this.state.games[slug].bestScore = Math.max(Number(this.state.games[slug].bestScore) || 0, score);
+      if (!awarded){
+        this._persist();
+        this._emitUpdate();
+      }
+      return awarded;
     }
   }
 
@@ -493,13 +550,22 @@
     let watchElement = opts.watchFocusElement || null;
     const win = doc.defaultView || (typeof window !== 'undefined' ? window : null);
 
-    const markActivity = () => { lastActivity = now(); };
+    let paused = false;
+
+    const markActivity = () => {
+      lastActivity = now();
+      paused = false;
+    };
     const activityHandler = () => { markActivity(); };
-    const blurHandler = () => { lastActivity = 0; };
+    const blurHandler = () => {
+      lastActivity = 0;
+      paused = true;
+    };
     const visibilityHandler = () => {
       if (doc.visibilityState === 'hidden'){
         lastActivity = 0;
         elapsed = 0;
+        paused = true;
       } else {
         markActivity();
       }
@@ -516,6 +582,7 @@
 
     const timer = setInterval(() => {
       if (destroyed) return;
+      if (paused) return;
       const current = now();
       try {
         if (watchElement && doc.activeElement === watchElement){
@@ -558,6 +625,21 @@
         if (watchElement){
           markActivity();
         }
+      },
+      setPaused(flag){
+        if (destroyed) return;
+        const nextPaused = !!flag;
+        if (nextPaused){
+          paused = true;
+          elapsed = 0;
+        } else {
+          paused = false;
+          markActivity();
+        }
+      },
+      nudge(){
+        if (destroyed) return;
+        markActivity();
       }
     };
   }
@@ -568,6 +650,9 @@
     }
     const service = new PointsService();
     global.__portalPointsService = service;
+    try {
+      if (typeof window !== 'undefined'){ window.pointsService = service; }
+    } catch (_){ /* noop */ }
     return service;
   }
 
@@ -706,6 +791,13 @@
     } else {
       setupBadge();
     }
+    document.addEventListener('visibilitychange', () => {
+      if (typeof window === 'undefined') return;
+      const tracker = window.activityTracker;
+      if (tracker && typeof tracker.setPaused === 'function'){
+        try { tracker.setPaused(document.hidden); } catch (_){ }
+      }
+    });
   }
 
   global.Points = Object.assign({}, global.Points, {
@@ -720,6 +812,46 @@
       return service.awardPersonalBest(slug, details);
     }
   });
+
+  // --- Game -> Portal bridge: receive activity + score updates from games in iframe ---
+  (function initGameMessageBridge(){
+    if (typeof window === 'undefined') return;
+    const allowedOrigin = window.location && window.location.origin ? window.location.origin : null;
+    window.addEventListener('message', (e) => {
+      if (!e || !e.data || typeof e.data !== 'object') return;
+      if (allowedOrigin && e.origin !== allowedOrigin) return;
+      const { type } = e.data;
+
+      if (type === 'game-active'){
+        const tracker = window.activityTracker;
+        if (tracker && typeof tracker.nudge === 'function'){
+          try { tracker.nudge(); } catch (_){ }
+        }
+        return;
+      }
+
+      if (type === 'game-score'){
+        const { gameId, score } = e.data;
+        if (typeof score === 'number'){
+          let svc = window.pointsService;
+          if (!svc && global.Points && typeof global.Points.getDefaultService === 'function'){
+            try { svc = global.Points.getDefaultService(); } catch (_){ svc = null; }
+            if (svc){
+              try { window.pointsService = svc; } catch (_){ }
+            }
+          }
+          if (svc && typeof svc.recordScore === 'function'){
+            try { svc.recordScore(gameId || 'game', score); } catch (_){ }
+          }
+        }
+        const tracker = window.activityTracker;
+        if (tracker && typeof tracker.nudge === 'function'){
+          try { tracker.nudge(); } catch (_){ }
+        }
+        return;
+      }
+    }, { passive: true });
+  })();
 
 })(typeof window !== 'undefined' ? window : (typeof globalThis !== 'undefined' ? globalThis : this));
 

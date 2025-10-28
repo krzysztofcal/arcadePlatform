@@ -33,6 +33,9 @@
   function cleanupPointsSession(){
     if (activityTracker && typeof activityTracker.stop === 'function'){
       try { activityTracker.stop(); } catch (_){ /* noop */ }
+      if (typeof window !== 'undefined' && window.activityTracker === activityTracker){
+        try { window.activityTracker = null; } catch (_){ }
+      }
       activityTracker = null;
     }
     if (pointsService && typeof pointsService.endSession === 'function'){
@@ -546,6 +549,9 @@ async function init(){
   if (pointsModule && typeof pointsModule.getDefaultService === 'function'){
     try {
       pointsService = pointsModule.getDefaultService();
+      if (typeof window !== 'undefined'){
+        try { window.pointsService = pointsService; } catch (_){ }
+      }
     } catch (_){ pointsService = null; }
   }
   if (pointsService && typeof pointsService.startSession === 'function'){
@@ -561,6 +567,9 @@ async function init(){
           try { pointsService.tick(ticks); } catch (_){ }
         }
       }, { tickSeconds: 15 });
+      if (typeof window !== 'undefined'){
+        try { window.activityTracker = activityTracker; } catch (_){ }
+      }
     } catch (_){ activityTracker = null; }
   }
 

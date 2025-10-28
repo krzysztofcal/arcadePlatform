@@ -15,7 +15,7 @@
     <script src="../../js/topbar.js" defer></script>
     <script src="../../js/points.js" defer></script>
   </head>
-  <body data-game-slug="2048">
+  <body data-game-slug="2048" data-game-id="2048">
     <div class="topbar">
       <div class="topbar-left">
         <button class="hamburger" id="sbToggle" aria-label="Toggle navigation" aria-expanded="false">
@@ -123,5 +123,43 @@
     <script src="../game-shell.js" defer></script>
     <script src="script.js"></script>
     <script src="../../js/loadThirdParty.js"></script>
+    <script>
+      (function(){
+        const allowedOrigin = location.origin;
+
+        function notifyActive(){
+          try { parent.postMessage({ type: 'game-active' }, allowedOrigin); } catch (_error) {}
+        }
+
+        addEventListener('keydown', notifyActive, { passive: true });
+        addEventListener('pointerdown', notifyActive, { passive: true });
+        setInterval(notifyActive, 5000);
+
+        window.reportScoreToPortal = function(gameId, score){
+          try { parent.postMessage({ type: 'game-score', gameId, score }, allowedOrigin); } catch (_error) {}
+        };
+
+        const scoreEl = document.querySelector('#score, .score, .js-score, .score-container');
+        const gameId = document.body.dataset.gameId || document.title || 'game';
+        if (scoreEl && 'MutationObserver' in window){
+          let last = -Infinity;
+          const parseScore = () => {
+            const raw = (scoreEl.textContent || '').replace(/\D+/g, '');
+            const value = parseInt(raw, 10);
+            return Number.isFinite(value) ? value : 0;
+          };
+          const push = () => {
+            const score = parseScore();
+            if (score > last){
+              last = score;
+              window.reportScoreToPortal(gameId, score);
+            }
+          };
+          const observer = new MutationObserver(push);
+          observer.observe(scoreEl, { childList: true, characterData: true, subtree: true });
+          push();
+        }
+      })();
+    </script>
   </body>
 </html>

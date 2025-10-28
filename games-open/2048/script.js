@@ -28,6 +28,9 @@ function initBoard() {
 
 function updateScore() {
   scoreEl.textContent = score;
+  if (typeof window.reportScoreToPortal === "function") {
+    try { window.reportScoreToPortal("2048", score); } catch (_error) {}
+  }
   if (score > best) {
     const prevBest = best;
     best = score;
