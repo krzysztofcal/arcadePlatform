@@ -1,7 +1,7 @@
 ﻿(function(global){
   'use strict';
 
-  const DEFAULT_CATEGORIES = Object.freeze(['New/All', 'Arcade', 'Puzzle', 'Shooter', 'Racing']);
+  const DEFAULT_CATEGORIES = Object.freeze(['All', 'Arcade', 'Puzzle', 'Shooter', 'Racing']);
   const SHARED_GAME_UTILS = global.GameUtils && typeof global.GameUtils === 'object'
     ? global.GameUtils
     : null;
@@ -369,49 +369,54 @@
     }
 
     async loadGames(){
-      try {
-        const res = await this.fetchImpl(this.gamesEndpoint, { cache: 'no-cache' });
-        if (!res || (typeof res.ok === 'boolean' && !res.ok)){
-          throw new Error('Failed to load games catalog');
-        }
-        const data = typeof res.json === 'function' ? await res.json() : null;
-        if (data && Array.isArray(data.games)) return this.normalizeList(data.games);
-        if (Array.isArray(data)) return this.normalizeList(data);
-      } catch (err) {
-        if (Array.isArray(global.GAMES)){
-          const legacy = global.GAMES.map(g => ({
-            id: g.id || g.slug || `game-${Math.random().toString(36).slice(2)}`,
-            slug: g.slug || g.id || '',
-            title: asLocaleBlock(g.title),
-            description: asLocaleBlock(g.subtitle),
-            thumbnail: g.thumb,
-            orientation: g.orientation,
-            category: Array.isArray(g.category) ? g.category.slice() : [],
-            source: g.href
-              ? { type: 'self', page: g.href }
-              : { type: 'placeholder' }
-          }));
-          return this.normalizeList(legacy);
-        }
-        if (global.console && typeof global.console.error === 'function'){
-          global.console.error(err);
-        }
+      const res = await this.fetchImpl(this.gamesEndpoint, { cache: 'no-cache' });
+      if (!res || (typeof res.ok === 'boolean' && !res.ok)){
+        throw new Error('Failed to load games catalog');
       }
-      return [];
+      const data = typeof res.json === 'function' ? await res.json() : null;
+      if (data && Array.isArray(data.games)) return this.normalizeList(data.games);
+      if (Array.isArray(data)) return this.normalizeList(data);
+      throw new Error('Unexpected games catalog format');
+    }
+
+renderForCategory(category, reason){
+      const target = category || this.defaultCategory;
+      const list = this.filterByCategory(this.allGames, target);
+      this.renderList(list, reason || 'category', target);
     }
 
     async init(){
-      this.allGames = await this.loadGames();
+      let catalogError = false;
+
+      try {
+        // Single source of truth: js/games.json
+        this.allGames = await this.loadGames(); // { cache: 'no-cache' } inside
+      } catch (err) {
+        catalogError = true;
+        console.error(err);
+        this.allGames = [];
+        if (this.grid){
+          this.grid.innerHTML = '<div class="meta">Catalog error. Please try again later.</div>';
+        }
+      }
+
+      // Build the category bar even if the catalog failed (keeps UI usable)
       this.buildCategoryBar();
+      if (catalogError) return;
+
       this.activeCategory = this.getInitialCategory();
       this.updateCategoryButtons();
       this.updateUrl(this.activeCategory);
-      this.renderCurrentList('initial');
+
+      // Ensure homepage grid renders immediately
+      this.renderForCategory(this.activeCategory, 'init');
+
+      // Re-render on language change
       this.document.addEventListener('langchange', this.onLangChange);
     }
   }
 
+  // Expose on window (tests read window.PortalApp and DEFAULT_CATEGORIES)
   PortalApp.DEFAULT_CATEGORIES = DEFAULT_CATEGORIES;
   global.PortalApp = PortalApp;
 })(window);
-

@@ -53,7 +53,7 @@ body{margin:0; background:linear-gradient(180deg, #0b1020 0%, #0a0d1a 100%); col
 .card .thumb{ position:absolute; inset:0; opacity:.75; background:
   radial-gradient(120% 120% at 0% 0%, rgba(110,231,231,.15) 0%, transparent 50%),
   radial-gradient(120% 120% at 100% 0%, rgba(167,139,250,.15) 0%, transparent 55%),
-  var(--thumb-image, none);
+  var(--thumb-image, url('../img/games/placeholder.svg'));
   background-size: cover, cover, cover;
   background-repeat: no-repeat, no-repeat, no-repeat;
   background-position: center, center, center;

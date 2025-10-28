@@ -185,29 +185,19 @@
     return Array.isArray(rawList) ? rawList.filter(Boolean) : [];
   }
 
-  async function loadCatalog(){
-    try {
-      const res = await fetch('js/games.json', { cache: 'no-cache' });
-      if (!res.ok) throw new Error('Failed to load games.json');
-      const data = await res.json();
-      if (data && Array.isArray(data.games)) return normalizeList(data.games);
-      if (Array.isArray(data)) return normalizeList(data);
-    } catch (e) {
-      if (Array.isArray(window.GAMES)){
-        return normalizeList(window.GAMES.map(g => ({
-          id: g.id || g.slug || 'game-'+Math.random().toString(36).slice(2),
-          slug: g.slug || (g.id || ''),
-          title: g.title,
-          description: g.subtitle ? g.subtitle : { en: '', pl: '' },
-          thumbnail: g.thumb,
-          orientation: g.orientation,
-          source: g.href ? { type: 'self', page: g.href } : { type: 'placeholder' }
-        })));
-      }
-      console.error(e);
-    }
+async function loadCatalog(){
+  try {
+    const res = await fetch('js/games.json', { cache: 'no-cache' });
+    if (!res.ok) throw new Error('Failed to load games.json');
+    const data = await res.json();
+    if (data && Array.isArray(data.games)) return normalizeList(data.games);
+    if (Array.isArray(data)) return normalizeList(data);
+    throw new Error('Unexpected games catalog format');
+  } catch (e) {
+    console.error(e);
     return [];
   }
+}
 
   function waitForConsent(timeoutMs){
     return new Promise(resolve => {
@@ -432,92 +422,123 @@
     similarSection.hidden = false;
   }
 
-  function showNotFound(message, titleText){
-    const text = message || 'Game not found.';
-    const heading = titleText || 'Game not found';
-    setDocTitle(heading);
-    updateMetaTags({ title: heading, description: text, slug: currentSlug });
-    if (descriptionEl) descriptionEl.textContent = text;
-    if (introSection){
-      introSection.hidden = true;
-      introSection.style.display = 'none';
+function showEmptyState(titleText, message, options){
+  const text = message || 'Game not found.';
+  const heading = titleText || 'Game not found';
+  const linkHref = options && options.linkHref ? options.linkHref : '';
+  const linkLabel = options && options.linkLabel ? options.linkLabel : 'Browse games';
+  setDocTitle(heading);
+  updateMetaTags({ title: heading, description: text, slug: currentSlug });
+  if (descriptionEl) descriptionEl.textContent = text;
+  if (introSection){
+    introSection.hidden = true;
+    introSection.style.display = 'none';
+  }
+  if (metaEl) metaEl.textContent = text;
+  if (frameWrap) frameWrap.classList.add('empty');
+  if (frameBox){
+    let inner = '<div class="emptyState"><p>' + text + '</p>';
+    if (linkHref){
+      inner += '<p><a class="emptyStateLink" href="' + linkHref + '">' + linkLabel + '</a></p>';
     }
-    if (metaEl) metaEl.textContent = text;
-    if (frameWrap) frameWrap.classList.add('empty');
-    if (frameBox) frameBox.innerHTML = '<div class="emptyState">' + text + '</div>';
-    if (consentOverlay) consentOverlay.classList.add('hidden');
-    if (rotateOverlay) rotateOverlay.classList.add('hidden');
-    if (btnEnter) btnEnter.style.display = 'none';
-    if (btnExit) btnExit.style.display = 'none';
-    if (similarSection) similarSection.hidden = true;
-    if (similarList) similarList.innerHTML = '';
+    inner += '</div>';
+    frameBox.innerHTML = inner;
+  }
+  if (consentOverlay) consentOverlay.classList.add('hidden');
+  if (rotateOverlay) rotateOverlay.classList.add('hidden');
+  if (btnEnter) btnEnter.style.display = 'none';
+  if (btnExit) btnExit.style.display = 'none';
+  if (similarSection) similarSection.hidden = true;
+  if (similarList) similarList.innerHTML = '';
+}
+
+function showCatalogError(){
+  showEmptyState('Catalog error', 'Catalog error. Please try again later.', {
+    linkHref: 'index.html',
+    linkLabel: 'Return to home'
+  });
+}
+
+async function init(){
+  const slug = qsParam('slug') || '';
+  currentSlug = slug;
+
+  let list;
+  try {
+    list = await loadCatalog();
+  } catch (err) {
+    console.error(err);
+    showCatalogError();
+    return;
   }
 
-  async function init(){
-    const slug = qsParam('slug');
-    currentSlug = slug || '';
-    const list = await loadCatalog();
-    const lang = getLang();
-    const game = list.find(g => (g.slug === slug));
-    if (!slug || !game){
-      showNotFound(slug ? 'Game not found.' : 'Choose a game from the catalog to start playing.', slug ? 'Game not found' : 'No game selected');
-      return;
-    }
+  const lang = getLang();
+  const game = list.find(g => g.slug === slug);
 
-    const title = (game.title && (game.title[lang] || game.title.en)) || 'Game';
-    const desc = (game.description && (game.description[lang] || game.description.en)) || '';
-    if (frameWrap) frameWrap.classList.remove('empty');
-    if (frameBox && frameBox.querySelector('.emptyState')) frameBox.innerHTML = '';
-    if (btnEnter) btnEnter.style.display = '';
-    if (btnExit) btnExit.style.display = 'none';
-    setDocTitle(title);
-    updateMetaTags({ title, description: desc || DEFAULT_DESCRIPTION, slug });
-    renderHero(game, title, desc);
-    renderMetaBar(game);
-    renderSimilarGames(game, list, lang);
-    if (metaEl && !metaEl.textContent){
-      metaEl.textContent = desc || 'More details coming soon.';
-    }
-    track('viewGame', {
-      slug: slug || undefined,
-      lang,
-      title,
-      source: game.source && game.source.type || undefined
-    });
-
-    updateRotateOverlay(game.orientation || 'any');
-    addEventListener('resize', () => updateRotateOverlay(game.orientation || 'any'));
-
-    // If self-hosted, redirect to dedicated page
-    if (game.source && game.source.type === 'self' && game.source.page){
-      const safeUrl = sanitizeSameOriginUrl(game.source.page);
-      if (!safeUrl){
-        if (metaEl) metaEl.textContent = 'Invalid launch URL.';
-        return;
-      }
-      safeUrl.searchParams.set('lang', lang);
-      location.replace(safeUrl.toString());
-      return;
-    }
-
-    const embed = game.source && (game.source.embedUrl || game.source.url);
-    if (!embed){ if (metaEl) metaEl.textContent = 'Playable link missing.'; return; }
-
-    // Consent gating
-    try { const r = await waitForConsent(12000); } catch {}
-    consentOverlay.classList.add('hidden');
-    injectIframe(embed, game.orientation || 'any');
-
-    btnEnter.addEventListener('click', enterFs);
-    btnExit.addEventListener('click', exitFs);
-    document.addEventListener('fullscreenchange', onFsChange);
-    track('adImpression', {
-      slot: 'game_top',
-      page: 'game',
-      slug: slug || undefined
-    });
+  if (!slug || !game){
+    showEmptyState(
+      slug ? 'Game not found' : 'No game selected',
+      slug ? 'Game not found.' : 'Choose a game from the catalog to start playing.',
+      { linkHref: 'index.html', linkLabel: 'Browse games' }
+    );
+    return;
   }
 
+  // Existing render/meta/iframe logic (unchanged)
+  const title = (game.title && (game.title[lang] || game.title.en)) || 'Game';
+  const desc = (game.description && (game.description[lang] || game.description.en)) || '';
+  if (frameWrap) frameWrap.classList.remove('empty');
+  if (frameBox && frameBox.querySelector('.emptyState')) frameBox.innerHTML = '';
+  if (btnEnter) btnEnter.style.display = '';
+  if (btnExit) btnExit.style.display = 'none';
+  setDocTitle(title);
+  updateMetaTags({ title, description: desc || DEFAULT_DESCRIPTION, slug });
+  renderHero(game, title, desc);
+  renderMetaBar(game);
+  renderSimilarGames(game, list, lang);
+  if (metaEl && !metaEl.textContent){
+    metaEl.textContent = desc || 'More details coming soon.';
+  }
+  track('viewGame', {
+    slug: slug || undefined,
+    lang,
+    title,
+    source: game.source && game.source.type || undefined
+  });
+
+  updateRotateOverlay(game.orientation || 'any');
+  addEventListener('resize', () => updateRotateOverlay(game.orientation || 'any'));
+
+  // If self-hosted, redirect to dedicated page
+  if (game.source && game.source.type === 'self' && game.source.page){
+    const safeUrl = sanitizeSameOriginUrl(game.source.page);
+    if (!safeUrl){
+      if (metaEl) metaEl.textContent = 'Invalid launch URL.';
+      return;
+    }
+    safeUrl.searchParams.set('lang', lang);
+    location.replace(safeUrl.toString());
+    return;
+  }
+
+  const embed = game.source && (game.source.embedUrl || game.source.url);
+  if (!embed){
+    if (metaEl) metaEl.textContent = 'Playable URL missing.';
+    return;
+  }
+
+  // Consent gating
+  try { await waitForConsent(12000); } catch(e) {}
+  if (consentOverlay) consentOverlay.classList.add('hidden');
+
+  injectIframe(embed, game.orientation || 'any');
+
+  if (btnEnter) btnEnter.addEventListener('click', enterFs);
+  if (btnExit) btnExit.addEventListener('click', exitFs);
+  document.addEventListener('fullscreenchange', onFsChange);
+
+  track('adImpression', { slot: 'game_top', page: 'game', slug: slug || undefined });
+}
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
 })();
 
