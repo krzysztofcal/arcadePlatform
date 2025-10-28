@@ -1,75 +1,37 @@
-:root {
-  color-scheme: light dark;
-  --bg: #0f172a;
-  --panel: #1e293b;
-  --text: #e2e8f0;
-  --accent: #38bdf8;
-  font-family: "Inter", system-ui, sans-serif;
-}
-
-body {
-  margin: 0;
-  background: radial-gradient(circle at top, #1d4ed8, #0f172a 55%);
-  min-height: 100vh;
+.playfield {
   display: grid;
-  place-items: center;
-  color: var(--text);
-}
-
-main {
-  display: flex;
-  gap: 2rem;
-  padding: 2rem;
-  background: rgba(15, 23, 42, 0.7);
-  border-radius: 1.5rem;
-  box-shadow: 0 20px 60px rgba(15, 23, 42, 0.5);
+  justify-items: center;
+  gap: 0.75rem;
 }
 
 canvas {
-  border-radius: 1rem;
-  background: rgba(15, 23, 42, 0.85);
-  box-shadow: inset 0 0 0 3px rgba(56, 189, 248, 0.35);
+  width: min(92vw, 300px);
+  height: calc(min(92vw, 300px) * 2);
+  background: linear-gradient(180deg, rgba(8, 12, 26, 0.88), rgba(4, 6, 18, 0.92));
+  border-radius: 18px;
+  border: 1px solid rgba(110, 231, 231, 0.18);
+  touch-action: none;
 }
 
-aside {
-  max-width: 200px;
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
+#stateOverlay[hidden] {
+  display: none;
 }
 
-h1 {
-  margin: 0;
-  font-size: clamp(2rem, 3vw, 2.5rem);
+.dpad button[data-action="rotate"] {
+  font-size: 1.25rem;
 }
 
-.score {
-  margin: 0;
-  font-size: 1.1rem;
+.dpad button[data-action="hard"] {
+  font-size: 1.3rem;
 }
 
-#restart {
-  padding: 0.75rem 1.25rem;
-  background: var(--accent);
-  border: none;
-  border-radius: 999px;
-  color: #0f172a;
-  font-weight: 700;
-  cursor: pointer;
+.notice {
+  text-align: center;
 }
 
-.hint {
-  font-size: 0.9rem;
-  opacity: 0.8;
-}
-
-@media (max-width: 720px) {
-  main {
-    flex-direction: column;
-    align-items: center;
-  }
-  aside {
-    align-items: center;
-    text-align: center;
+@media (max-width: 520px) {
+  .scoreboard {
+    width: 100%;
+    justify-content: space-between;
   }
 }

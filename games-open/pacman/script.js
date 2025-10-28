@@ -1,4 +1,4 @@
-const canvas = document.getElementById("maze");
+const canvas = document.getElementById("board");
 const ctx = canvas.getContext("2d");
 const tileSize = 16;
 const cols = 28;
@@ -33,13 +33,21 @@ const level = [
   "############################",
 ];
 
+const scoreEl = document.getElementById("score");
+const livesEl = document.getElementById("lives");
+const startBtn = document.getElementById("start");
+const pauseBtn = document.getElementById("pause");
+const resetBtn = document.getElementById("reset");
+const overlay = document.getElementById("gameOverlay");
+const pacpad = document.getElementById("pacpad");
+
 const pellets = new Set();
 const energizers = new Set();
 const initialPellets = [];
 const initialEnergizers = [];
 const walls = [];
 const ghosts = [];
-let pelletTotal = 0;
+const ghostDefaults = [];
 
 const pacman = {
   tileX: 13,
@@ -51,28 +59,116 @@ const pacman = {
   lives: 3,
 };
 
-const ghostDefaults = [];
 let pacmanSpawn = { x: pacman.tileX, y: pacman.tileY };
-
-parseLevel();
-
-const scoreEl = document.getElementById("score");
-const livesEl = document.getElementById("lives");
-const startBtn = document.getElementById("start");
-
 let score = 0;
 let running = false;
+let paused = false;
 let lastTime = 0;
+let pelletTotal = 0;
+let touchStart = null;
 
+parseLevel();
 resetGame();
+showOverlay("Ready!", "Press start to play");
 
 startBtn.addEventListener("click", () => {
-  resetGame();
-  running = true;
+  if (!running) {
+    running = true;
+    paused = false;
+    hideOverlay();
+  } else if (paused) {
+    paused = false;
+    hideOverlay();
+  }
 });
 
-document.addEventListener("keydown", handleKey);
-requestAnimationFrame(loop);
+pauseBtn.addEventListener("click", () => {
+  if (!running) return;
+  paused = !paused;
+  if (paused) {
+    showOverlay("Paused", "Tap start to resume");
+  } else {
+    hideOverlay();
+  }
+});
+
+resetBtn.addEventListener("click", () => {
+  resetGame();
+  running = false;
+  paused = false;
+  showOverlay("Reset", "Press start to play");
+});
+
+pacpad.addEventListener("pointerdown", (event) => {
+  const dir = event.target.dataset.dir;
+  if (!dir) return;
+  event.preventDefault();
+  setDirection(dir);
+});
+
+canvas.addEventListener("touchstart", (event) => {
+  if (event.touches.length !== 1) return;
+  touchStart = {
+    x: event.touches[0].clientX,
+    y: event.touches[0].clientY,
+  };
+}, { passive: true });
+
+canvas.addEventListener("touchmove", (event) => {
+  if (event.touches.length !== 1) return;
+  event.preventDefault();
+}, { passive: false });
+
+canvas.addEventListener("touchend", (event) => {
+  if (!touchStart || event.changedTouches.length !== 1) return;
+  const dx = event.changedTouches[0].clientX - touchStart.x;
+  const dy = event.changedTouches[0].clientY - touchStart.y;
+  const absX = Math.abs(dx);
+  const absY = Math.abs(dy);
+  if (Math.max(absX, absY) > 18) {
+    if (absX > absY) {
+      setDirection(dx > 0 ? "right" : "left");
+    } else {
+      setDirection(dy > 0 ? "down" : "up");
+    }
+  }
+  touchStart = null;
+});
+
+document.addEventListener("keydown", (event) => {
+  const map = {
+    ArrowUp: "up",
+    ArrowDown: "down",
+    ArrowLeft: "left",
+    ArrowRight: "right",
+    w: "up",
+    s: "down",
+    a: "left",
+    d: "right",
+  };
+  const dir = map[event.key];
+  if (dir) {
+    event.preventDefault();
+    setDirection(dir);
+  }
+});
+
+function setDirection(name) {
+  const mapping = {
+    up: { x: 0, y: -1 },
+    down: { x: 0, y: 1 },
+    left: { x: -1, y: 0 },
+    right: { x: 1, y: 0 },
+  };
+  const dir = mapping[name];
+  if (!dir) return;
+  pacman.nextDir = dir;
+  if (!running) {
+    running = true;
+    paused = false;
+    hideOverlay();
+  }
+}
 
 function parseLevel() {
   for (let y = 0; y < rows; y++) {
@@ -83,11 +179,9 @@ function parseLevel() {
         walls[y][x] = true;
       } else {
         walls[y][x] = false;
-        if (char === ".") {
-          initialPellets.push({ x, y });
-        } else if (char === "o") {
-          initialEnergizers.push({ x, y });
-        } else if (char === "P") {
+        if (char === ".") initialPellets.push({ x, y });
+        else if (char === "o") initialEnergizers.push({ x, y });
+        else if (char === "P") {
           pacman.tileX = x;
           pacman.tileY = y;
           pacmanSpawn = { x, y };
@@ -106,7 +200,6 @@ function parseLevel() {
       dir: { x: 0, y: 0 },
       progress: 0,
       speed: 4 + index * 0.5,
-      scatter: false,
       frightened: 0,
       color: ["#f97316", "#22d3ee", "#f472b6", "#4ade80"][index % 4],
     });
@@ -119,12 +212,11 @@ function resetPellets() {
   energizers.clear();
   initialPellets.forEach(({ x, y }) => pellets.add(`${x},${y}`));
   initialEnergizers.forEach(({ x, y }) => energizers.add(`${x},${y}`));
+  pelletTotal = pellets.size + energizers.size;
 }
 
 function resetGame() {
   score = 0;
-  resetPellets();
-  pelletTotal = pellets.size + energizers.size;
   pacman.lives = 3;
   pacman.dir = { x: 0, y: 0 };
   pacman.nextDir = { x: 0, y: 0 };
@@ -139,38 +231,9 @@ function resetGame() {
     ghost.progress = 0;
     ghost.frightened = 0;
   });
+  resetPellets();
   scoreEl.textContent = score;
   livesEl.textContent = pacman.lives;
-}
-
-function handleKey(event) {
-  const map = {
-    ArrowUp: { x: 0, y: -1 },
-    ArrowDown: { x: 0, y: 1 },
-    ArrowLeft: { x: -1, y: 0 },
-    ArrowRight: { x: 1, y: 0 },
-    w: { x: 0, y: -1 },
-    s: { x: 0, y: 1 },
-    a: { x: -1, y: 0 },
-    d: { x: 1, y: 0 },
-  };
-  const dir = map[event.key];
-  if (dir) {
-    pacman.nextDir = dir;
-    if (!running) {
-      running = true;
-    }
-  }
-}
-
-function loop(time) {
-  const delta = (time - lastTime) / 1000;
-  lastTime = time;
-  if (running) {
-    update(delta);
-  }
-  draw();
-  requestAnimationFrame(loop);
 }
 
 function update(delta) {
@@ -179,7 +242,7 @@ function update(delta) {
   ghosts.forEach(checkCollision);
   if (!pelletTotal) {
     running = false;
-    showMessage("You win!");
+    showOverlay("You win!", "Press reset to play again");
   }
 }
 
@@ -211,15 +274,14 @@ function moveGhost(ghost, delta) {
       { x: 0, y: 1 },
       { x: 0, y: -1 },
     ]).filter((dir) => {
-      if (ghost.dir && dir.x === -ghost.dir.x && dir.y === -ghost.dir.y) {
-        return false;
-      }
+      if (ghost.dir && dir.x === -ghost.dir.x && dir.y === -ghost.dir.y) return false;
       return canMove(ghost.tileX, ghost.tileY, dir);
     });
     ghost.dir = options[0] || { x: -ghost.dir.x, y: -ghost.dir.y } || { x: 0, y: 0 };
   }
   if (ghost.dir.x === 0 && ghost.dir.y === 0) return;
-  ghost.progress += ghost.speed * delta;
+
+  ghost.progress += (ghost.frightened > 0 ? ghost.speed * 0.6 : ghost.speed) * delta;
   if (ghost.progress >= 1) {
     ghost.tileX = wrap(ghost.tileX + ghost.dir.x, cols);
     ghost.tileY = wrap(ghost.tileY + ghost.dir.y, rows);
@@ -267,6 +329,7 @@ function checkCollision(ghost) {
       ghost.tileY = spawn.y;
       ghost.progress = 0;
       ghost.dir = { x: 0, y: 0 };
+      ghost.frightened = 0;
     } else {
       loseLife();
     }
@@ -279,7 +342,7 @@ function loseLife() {
   livesEl.textContent = pacman.lives;
   if (pacman.lives <= 0) {
     running = false;
-    showMessage("Game Over");
+    showOverlay("Game over", "Press reset to try again");
     return;
   }
   pacman.tileX = pacmanSpawn.x;
@@ -317,7 +380,7 @@ function drawMaze() {
   for (let y = 0; y < rows; y++) {
     for (let x = 0; x < cols; x++) {
       if (walls[y][x]) {
-        ctx.fillStyle = "rgba(30, 64, 175, 0.4)";
+        ctx.fillStyle = "rgba(30, 64, 175, 0.35)";
         ctx.fillRect(x * tileSize, y * tileSize, tileSize, tileSize);
         ctx.strokeRect(x * tileSize + 2, y * tileSize + 2, tileSize - 4, tileSize - 4);
       }
@@ -347,7 +410,7 @@ function drawPacman() {
   const y = (pacman.tileY + pacman.dir.y * pacman.progress) * tileSize + tileSize / 2;
   ctx.fillStyle = "#fde047";
   const angle = Math.atan2(pacman.dir.y, pacman.dir.x);
-  const mouth = pacman.dir.x === 0 && pacman.dir.y === 0 ? 0 : 0.25;
+  const mouth = pacman.dir.x === 0 && pacman.dir.y === 0 ? 0.2 : 0.28;
   ctx.beginPath();
   ctx.moveTo(x, y);
   ctx.arc(x, y, tileSize / 2 - 1, angle + mouth, angle - mouth + Math.PI * 2, false);
@@ -376,11 +439,23 @@ function shuffle(array) {
   return array;
 }
 
-function showMessage(text) {
-  ctx.fillStyle = "rgba(2, 6, 23, 0.75)";
-  ctx.fillRect(40, canvas.height / 2 - 30, canvas.width - 80, 60);
-  ctx.fillStyle = "#f1f5f9";
-  ctx.textAlign = "center";
-  ctx.font = "20px 'Press Start 2P', monospace";
-  ctx.fillText(text, canvas.width / 2, canvas.height / 2 + 8);
+function showOverlay(title, subtitle = "") {
+  overlay.hidden = false;
+  overlay.innerHTML = `<div>${title}</div>${subtitle ? `<div style="font-size:1rem; margin-top:0.5rem; color: rgba(203,213,255,0.7);">${subtitle}</div>` : ""}`;
 }
+
+function hideOverlay() {
+  overlay.hidden = true;
+}
+
+function loop(time) {
+  const delta = (time - lastTime) / 1000;
+  lastTime = time;
+  if (running && !paused) {
+    update(delta);
+  }
+  draw();
+  requestAnimationFrame(loop);
+}
+
+requestAnimationFrame(loop);

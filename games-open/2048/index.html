@@ -1,24 +1,58 @@
 <!DOCTYPE html>
 <html lang="en">
   <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>2048</title>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>2048 — Arcade Hub</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@500;600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="../game-shell.css" />
     <link rel="stylesheet" href="style.css" />
   </head>
   <body>
-    <div class="game">
-      <header>
-        <h1>2048</h1>
-        <div class="scores">
-          <div class="score" id="score">0</div>
-          <div class="score best" id="best">0</div>
+    <main class="game-shell">
+      <header class="hud">
+        <div class="hud-title">
+          <h1>2048</h1>
+          <p>Join identical tiles to reach the 2048 tile.</p>
+        </div>
+        <div class="scoreboard">
+          <div class="score-card">
+            <span>Score</span>
+            <strong id="score">0</strong>
+          </div>
+          <div class="score-card">
+            <span>Best</span>
+            <strong id="best">0</strong>
+          </div>
+        </div>
+        <div class="primary-actions">
+          <button class="button" type="button" id="new-game">New game</button>
         </div>
       </header>
-      <div class="board" id="board"></div>
-      <button id="new-game">New Game</button>
-      <p class="hint">Use arrow keys or swipe to move the tiles.</p>
-    </div>
+
+      <section class="board-wrap">
+        <div class="board" id="board" role="grid" aria-label="2048 board"></div>
+        <div class="mobile-hint">Swipe or use the controls to move tiles.</div>
+      </section>
+
+      <section class="controls">
+        <div class="dpad" aria-hidden="false">
+          <button type="button" data-dir="" aria-hidden="true"></button>
+          <button type="button" data-dir="up" aria-label="Move up">↑</button>
+          <button type="button" data-dir="" aria-hidden="true"></button>
+          <button type="button" data-dir="left" aria-label="Move left">←</button>
+          <button type="button" data-dir="down" aria-label="Move down">↓</button>
+          <button type="button" data-dir="right" aria-label="Move right">→</button>
+          <button type="button" data-dir="" aria-hidden="true"></button>
+          <button type="button" data-dir="" aria-hidden="true"></button>
+          <button type="button" data-dir="" aria-hidden="true"></button>
+        </div>
+      </section>
+
+      <p class="notice">Tip: combine tiles quickly to build momentum. The board is optimised for touch, keyboard, and screen readers.</p>
+    </main>
     <script src="script.js"></script>
   </body>
 </html>
