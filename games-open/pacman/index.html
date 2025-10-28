@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Pacman — Arcade Hub</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@500;600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="../game-shell.css" />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <main class="game-shell">
+      <header class="hud">
+        <div class="hud-title">
+          <h1>Pacman</h1>
+          <p>Eat all dots, avoid ghosts, and chase high scores.</p>
+        </div>
+        <div class="scoreboard">
+          <div class="score-card">
+            <span>Score</span>
+            <strong id="score">0</strong>
+          </div>
+          <div class="score-card">
+            <span>Lives</span>
+            <strong id="lives">3</strong>
+          </div>
+        </div>
+        <div class="primary-actions">
+          <button class="button" type="button" id="start">Start</button>
+          <button class="button secondary" type="button" id="pause">Pause</button>
+          <button class="button secondary" type="button" id="reset">Reset</button>
+        </div>
+      </header>
+
+      <section class="playfield">
+        <div class="canvas-frame">
+          <canvas id="board" width="448" height="416" role="img" aria-label="Pacman maze"></canvas>
+          <div class="overlay-banner" id="gameOverlay" hidden></div>
+        </div>
+        <p class="mobile-hint">Swipe or use the D-pad to guide Pacman.</p>
+      </section>
+
+      <section class="controls">
+        <div class="dpad" id="pacpad">
+          <button type="button" data-dir="" aria-hidden="true"></button>
+          <button type="button" data-dir="up" aria-label="Move up">↑</button>
+          <button type="button" data-dir="" aria-hidden="true"></button>
+          <button type="button" data-dir="left" aria-label="Move left">←</button>
+          <button type="button" data-dir="down" aria-label="Move down">↓</button>
+          <button type="button" data-dir="right" aria-label="Move right">→</button>
+          <button type="button" data-dir="" aria-hidden="true"></button>
+          <button type="button" data-dir="" aria-hidden="true"></button>
+          <button type="button" data-dir="" aria-hidden="true"></button>
+        </div>
+      </section>
+
+      <p class="notice">Keyboard: arrows or WASD. Eat energizers to turn the chase around.</p>
+    </main>
+    <script src="script.js"></script>
+  </body>
+</html>

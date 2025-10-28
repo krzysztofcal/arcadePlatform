@@ -1,0 +1,37 @@
+.playfield {
+  display: grid;
+  justify-items: center;
+  gap: 0.75rem;
+}
+
+canvas {
+  width: min(92vw, 300px);
+  height: calc(min(92vw, 300px) * 2);
+  background: linear-gradient(180deg, rgba(8, 12, 26, 0.88), rgba(4, 6, 18, 0.92));
+  border-radius: 18px;
+  border: 1px solid rgba(110, 231, 231, 0.18);
+  touch-action: none;
+}
+
+#stateOverlay[hidden] {
+  display: none;
+}
+
+.dpad button[data-action="rotate"] {
+  font-size: 1.25rem;
+}
+
+.dpad button[data-action="hard"] {
+  font-size: 1.3rem;
+}
+
+.notice {
+  text-align: center;
+}
+
+@media (max-width: 520px) {
+  .scoreboard {
+    width: 100%;
+    justify-content: space-between;
+  }
+}

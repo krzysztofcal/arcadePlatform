@@ -1,0 +1,36 @@
+.playfield {
+  display: grid;
+  justify-items: center;
+  gap: 0.75rem;
+}
+
+canvas {
+  width: min(94vw, 448px);
+  height: calc(min(94vw, 448px) * 0.928);
+  background: #000;
+  border-radius: 18px;
+  border: 1px solid rgba(110, 231, 231, 0.18);
+  touch-action: none;
+}
+
+#gameOverlay[hidden] {
+  display: none;
+}
+
+.notice {
+  text-align: center;
+}
+
+.dpad button[data-dir="up"],
+.dpad button[data-dir="down"],
+.dpad button[data-dir="left"],
+.dpad button[data-dir="right"] {
+  font-size: 1.2rem;
+}
+
+@media (max-width: 520px) {
+  .scoreboard {
+    width: 100%;
+    justify-content: space-between;
+  }
+}
