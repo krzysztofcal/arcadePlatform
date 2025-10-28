@@ -90,7 +90,7 @@
       this.storageKey = opts.storageKey || STORAGE_KEY;
       this.state = this._loadState();
       this.currentSession = null;
-      this.listeners = { update: new Set(), levelup: new Set() };
+      this.listeners = { update: new Set(), levelup: new Set(), award: new Set() };
       this._boundStorageListener = null;
 
       this._ensureDayState(now());
@@ -159,7 +159,10 @@
         const info = this.state.games[slug] || {};
         if (info.lastFirstBonusKey !== today){
           info.lastFirstBonusKey = today;
-          this._awardXp(this.options.firstPlayBonus, { reason: 'first_play' });
+          this._awardXp(this.options.firstPlayBonus, {
+            reason: 'first_play',
+            metadata: { slug }
+          });
         }
         info.lastPlayedAt = new Date(ts).toISOString();
         this.state.games[slug] = info;
@@ -174,7 +177,10 @@
       const ticks = Number.isFinite(multiplier) && multiplier > 0 ? Math.floor(multiplier) : 1;
       if (!ticks) return 0;
       this._ensureDayState(now());
-      return this._awardXp(ticks * this.options.tickXp, { reason: 'activity' });
+      return this._awardXp(ticks * this.options.tickXp, {
+        reason: 'activity',
+        metadata: { ticks }
+      });
     }
 
     endSession(){
@@ -255,7 +261,11 @@
       this.state.lastLoginBonusKey = today;
       const streakCount = Math.max(1, Math.min(MAX_STREAK, (this.state.streak && this.state.streak.count) || 1));
       const amount = this.options.dailyBonusBase * streakCount;
-      const granted = this._awardXp(amount, { reason: 'daily', bypassSession: true });
+      const granted = this._awardXp(amount, {
+        reason: 'daily_bonus',
+        bypassSession: true,
+        metadata: { streakCount }
+      });
       this._persist();
       this._emitUpdate();
       return granted;
@@ -284,8 +294,17 @@
       if (!opts.bypassSession && this.currentSession){
         this.currentSession.earned = (this.currentSession.earned || 0) + allowed;
       }
+      const detail = {
+        amount: allowed,
+        reason: opts.reason || 'bonus',
+        metadata: opts.metadata || null,
+        totalXp: this.state.totalXp,
+        level: this.state.level,
+        xpToday: this.state.xpToday
+      };
       this._persist();
       this._emitUpdate();
+      this._emit('award', detail);
       if (this.state.level > prevLevel){
         this._handleLevelUp(this.state.level, allowed);
       }
@@ -397,6 +416,59 @@
         }
       } catch (_){ /* ignore */ }
     }
+
+    awardBonus(amount, metadata){
+      return this._awardXp(amount, {
+        reason: metadata && metadata.reason ? metadata.reason : 'bonus',
+        metadata
+      });
+    }
+
+    awardPersonalBest(slug, details){
+      if (!slug) return 0;
+      const info = details || {};
+      const rawScore = Number(info.score);
+      if (!Number.isFinite(rawScore) || rawScore <= 0){
+        return 0;
+      }
+      const previous = Number(info.previousBest);
+      if (!this.state.games) this.state.games = {};
+      const record = this.state.games[slug] || {};
+      const lastAwarded = Number(record.bestAwardedScore);
+      const baseline = Math.max(0,
+        Number.isFinite(previous) ? previous : 0,
+        Number.isFinite(lastAwarded) ? lastAwarded : 0
+      );
+      if (rawScore <= baseline){
+        record.bestScore = Math.max(Number(record.bestScore) || 0, rawScore);
+        this.state.games[slug] = record;
+        this._persist();
+        return 0;
+      }
+      const delta = rawScore - baseline;
+      let amount = Number(info.amount);
+      if (!Number.isFinite(amount) || amount <= 0){
+        const base = Math.max(18, Math.min(90, Math.round(Math.sqrt(rawScore)) + 12));
+        const deltaBonus = Math.min(80, Math.floor(delta / 8));
+        amount = Math.max(25, Math.min(150, base + deltaBonus));
+      }
+      record.bestScore = Math.max(Number(record.bestScore) || 0, rawScore);
+      record.bestAwardedScore = rawScore;
+      record.bestAwardedAt = new Date().toISOString();
+      record.lastPersonalBestDelta = delta;
+      record.lastPersonalBestAward = amount;
+      this.state.games[slug] = record;
+      return this._awardXp(amount, {
+        reason: 'personal_best',
+        metadata: {
+          slug,
+          score: rawScore,
+          previousBest: baseline,
+          delta,
+          amount
+        }
+      });
+    }
   }
 
   function createActivityTracker(targetDocument, onTick, options){
@@ -504,7 +576,20 @@
     const doc = element.ownerDocument || (typeof document !== 'undefined' ? document : null);
     const win = doc ? (doc.defaultView || (typeof window !== 'undefined' ? window : null)) : (typeof window !== 'undefined' ? window : null);
     const animationClass = 'xp-badge--bump';
+    const reduceMotion = win && typeof win.matchMedia === 'function' && win.matchMedia('(prefers-reduced-motion: reduce)').matches;
     let lastTotal = null;
+    let firstUpdate = true;
+    let labelSpan = element.querySelector('.xp-badge__label');
+    if (!labelSpan && doc){
+      labelSpan = doc.createElement('span');
+      labelSpan.className = 'xp-badge__label';
+      labelSpan.textContent = element.textContent || '';
+      element.textContent = '';
+      element.appendChild(labelSpan);
+    }
+    element.setAttribute('aria-busy', 'true');
+    const floatsEnabled = !reduceMotion;
+
     const ensureAnimationClassRemoved = () => {
       try { element.classList.remove(animationClass); } catch (_){ /* noop */ }
     };
@@ -514,16 +599,39 @@
       void element.offsetWidth;
       element.classList.add(animationClass);
     };
+    const spawnFloat = (text, variant) => {
+      if (!floatsEnabled || !doc) return;
+      const float = doc.createElement('span');
+      float.className = 'xp-float' + (variant ? ' ' + variant : '');
+      float.textContent = text;
+      element.appendChild(float);
+      requestAnimationFrame(() => {
+        try { float.classList.add('xp-float--visible'); } catch (_){ }
+      });
+      setTimeout(() => {
+        try { float.classList.add('xp-float--fading'); } catch (_){ }
+      }, 900);
+      setTimeout(() => {
+        try { float.remove(); } catch (_){ }
+      }, 1500);
+    };
     const update = () => {
       const snap = service.getSnapshot();
       const label = 'Lv ' + snap.level + ' • ' + snap.totalXp + ' XP';
-      if (element.textContent !== label){
-        element.textContent = label;
+      if (labelSpan){
+        if (labelSpan.textContent !== label){
+          labelSpan.textContent = label;
+        }
       } else {
         element.textContent = label;
       }
-      if (lastTotal !== null && snap.totalXp > lastTotal){
+      if (lastTotal !== null && snap.totalXp > lastTotal && !reduceMotion){
         bump();
+      }
+      if (firstUpdate){
+        firstUpdate = false;
+        element.classList.remove('xp-badge--loading');
+        element.setAttribute('aria-busy', 'false');
       }
       lastTotal = snap.totalXp;
     };
@@ -546,7 +654,17 @@
 
     update();
     const offUpdate = service.on('update', update);
-    const offLevel = service.on('levelup', update);
+    const handleLevel = () => {
+      update();
+      spawnFloat('+1', 'xp-float--level');
+    };
+    const offLevel = service.on('levelup', handleLevel);
+    const handleAward = (detail) => {
+      if (!detail || !detail.amount) return;
+      if (detail.reason !== 'personal_best') return;
+      spawnFloat('+' + detail.amount + ' XP', 'xp-float--bonus');
+    };
+    const offAward = service.on('award', handleAward);
     if (doc && typeof doc.addEventListener === 'function'){
       doc.addEventListener('visibilitychange', handleVisibility);
     }
@@ -559,6 +677,7 @@
     element.__pointsDetach = function(){
       offUpdate();
       offLevel();
+      offAward();
       if (doc && typeof doc.removeEventListener === 'function'){
         doc.removeEventListener('visibilitychange', handleVisibility);
       }
@@ -593,7 +712,12 @@
     PointsApiAdapter,
     createActivityTracker,
     getDefaultService,
-    bindPointsBadge
+    bindPointsBadge,
+    grantPersonalBest(slug, details){
+      const service = getDefaultService();
+      if (!service || typeof service.awardPersonalBest !== 'function') return 0;
+      return service.awardPersonalBest(slug, details);
+    }
   });
 
 })(typeof window !== 'undefined' ? window : (typeof globalThis !== 'undefined' ? globalThis : this));

@@ -9,6 +9,8 @@ const controls = document.querySelectorAll('.dpad button[data-dir]');
 let board = [];
 let score = 0;
 let best = Number(localStorage.getItem("ah-2048-best")) || 0;
+const BEST_AWARDED_KEY = "ah-2048-best-awarded";
+let lastAwardedBest = Number(localStorage.getItem(BEST_AWARDED_KEY)) || 0;
 let overlayEl = null;
 let touchStart = null;
 
@@ -27,10 +29,37 @@ function initBoard() {
 function updateScore() {
   scoreEl.textContent = score;
   if (score > best) {
+    const prevBest = best;
     best = score;
     localStorage.setItem("ah-2048-best", best);
+    maybeGrantPersonalBest(prevBest);
   }
   bestEl.textContent = best;
+}
+
+function maybeGrantPersonalBest(previousBest) {
+  const baseline = Math.max(previousBest || 0, lastAwardedBest || 0);
+  if (best <= baseline) return;
+  let granted = 0;
+  const points = window.Points;
+  if (points && typeof points.grantPersonalBest === "function") {
+    try {
+      granted = points.grantPersonalBest("2048", {
+        score: best,
+        previousBest: baseline
+      }) || 0;
+    } catch (_error) {
+      granted = 0;
+    }
+  }
+  if (granted > 0) {
+    lastAwardedBest = best;
+    try {
+      localStorage.setItem(BEST_AWARDED_KEY, String(best));
+    } catch (_error) {
+      /* ignore */
+    }
+  }
 }
 
 function randomEmptyCell() {
