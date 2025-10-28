@@ -16,7 +16,7 @@
       "title": { "en": "Catch the Cats", "pl": "Złap koty" },
       "description": { "en": "Catch the falling cats!", "pl": "Złap spadające koty!" },
       "category": ["Puzzle"],
-      "thumbnail": "img/games/placeholder.svg",
+      "thumbnail": "img/games/catch-the-cats.svg",
       "tags": ["reflex", "casual"],
       "source": { "type": "self", "page": "game_cats.html" }
     },
@@ -26,7 +26,7 @@
       "title": { "en": "2048", "pl": "2048" },
       "description": { "en": "Join tiles to reach 2048.", "pl": "Łącz kafelki, aby osiągnąć 2048." },
       "category": ["Puzzle"],
-      "thumbnail": "img/games/placeholder.svg",
+      "thumbnail": "img/games/2048-tile.svg",
       "tags": ["puzzle", "logic", "classic"],
       "source": { "type": "self", "page": "games-open/2048/index.html" }
     },
@@ -36,7 +36,7 @@
       "title": { "en": "Tetris", "pl": "Tetris" },
       "description": { "en": "Stack falling blocks to clear lines.", "pl": "Układaj spadające klocki i czyść linie." },
       "category": ["Puzzle"],
-      "thumbnail": "img/games/placeholder.svg",
+      "thumbnail": "img/games/tetris-blocks.svg",
       "tags": ["puzzle", "retro", "classic"],
       "source": { "type": "self", "page": "games-open/tetris/index.html" }
     },
@@ -46,7 +46,7 @@
       "title": { "en": "Pacman", "pl": "Pacman" },
       "description": { "en": "Eat dots, avoid ghosts, clear the maze.", "pl": "Zjadaj kropki, unikaj duchów, wyczyść labirynt." },
       "category": ["Arcade"],
-      "thumbnail": "img/games/placeholder.svg",
+      "thumbnail": "img/games/pacman-maze.svg",
       "tags": ["arcade", "retro", "classic"],
       "source": { "type": "self", "page": "games-open/pacman/index.html" }
     }

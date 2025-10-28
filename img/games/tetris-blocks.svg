@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160" role="img" aria-labelledby="title desc">
+  <title id="title">Tetris puzzle thumbnail</title>
+  <desc id="desc">Colorful falling tetromino blocks.</desc>
+  <rect width="160" height="160" rx="20" fill="#101b37" />
+  <g stroke="#0b1320" stroke-width="4" stroke-linejoin="round">
+    <rect x="28" y="24" width="40" height="40" fill="#ff6f61" rx="6" />
+    <rect x="28" y="64" width="40" height="40" fill="#ff6f61" rx="6" />
+    <rect x="28" y="104" width="40" height="40" fill="#ff6f61" rx="6" />
+    <rect x="68" y="104" width="40" height="40" fill="#ffd15c" rx="6" />
+    <rect x="108" y="104" width="40" height="40" fill="#1abc9c" rx="6" />
+    <rect x="68" y="24" width="40" height="40" fill="#4a89dc" rx="6" />
+    <rect x="108" y="24" width="40" height="40" fill="#ac92ec" rx="6" />
+    <rect x="108" y="64" width="40" height="40" fill="#ac92ec" rx="6" />
+  </g>
+  <path d="M112 68 l12 -12 l12 12" fill="none" stroke="#ffe082" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" />
+</svg>

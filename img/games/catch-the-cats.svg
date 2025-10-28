@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160" role="img" aria-labelledby="title desc">
+  <title id="title">Catch the Cats thumbnail</title>
+  <desc id="desc">Stylized cat face with playful stars.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0%" x2="0%" y1="0%" y2="100%">
+      <stop offset="0%" stop-color="#ffce54" />
+      <stop offset="100%" stop-color="#f6a623" />
+    </linearGradient>
+  </defs>
+  <rect x="0" y="0" width="160" height="160" rx="24" fill="url(#bg)" />
+  <path d="M40 64 L28 28 Q58 42 64 24 Q70 42 100 28 L88 64" fill="#5c4b51" />
+  <path d="M120 64 L132 28 Q102 42 96 24 Q90 42 60 28 L72 64" fill="#5c4b51" />
+  <path d="M40 64 Q80 40 120 64 Q128 120 80 132 Q32 120 40 64" fill="#6e5961" />
+  <circle cx="56" cy="92" r="10" fill="#2f2f2f" />
+  <circle cx="104" cy="92" r="10" fill="#2f2f2f" />
+  <path d="M80 108 L76 116 L84 116 Z" fill="#2f2f2f" />
+  <path d="M80 116 Q90 124 100 116" stroke="#2f2f2f" stroke-width="6" stroke-linecap="round" fill="none" />
+  <path d="M80 116 Q70 124 60 116" stroke="#2f2f2f" stroke-width="6" stroke-linecap="round" fill="none" />
+  <circle cx="36" cy="112" r="6" fill="#fff" opacity="0.8" />
+  <circle cx="126" cy="70" r="5" fill="#fff" opacity="0.8" />
+  <circle cx="110" cy="126" r="7" fill="#fff" opacity="0.6" />
+</svg>
