@@ -37,6 +37,12 @@ body{margin:0; background:linear-gradient(180deg, #0b1020 0%, #0a0d1a 100%); col
 .category-bar .category-button[aria-pressed="true"],
 .category-bar .category-button.is-active{background:rgba(110,231,231,.18); color:#e8eeff; border-color:rgba(110,231,231,.6); box-shadow:0 0 12px rgba(110,231,231,.18);}
 .grid{display:grid; grid-template-columns: repeat(4, 1fr); gap:16px;}
+.grid::after{
+  content:"";
+  display:block;
+  height:calc(var(--footer-h) + 32px + env(safe-area-inset-bottom, 0px));
+  grid-column:1 / -1;
+}
 .ad-slot{ margin:24px 0; }
 .ad-slot ins.adsbygoogle{ display:block; }
 @media (max-width: 1100px){ .grid{ grid-template-columns: repeat(3, 1fr);} }
