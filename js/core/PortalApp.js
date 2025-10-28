@@ -57,6 +57,39 @@
       this.onLangChange = () => this.renderCurrentList('langchange');
     }
 
+    showLoadingSkeleton(count = 6){
+      if (!this.grid) return;
+      this.grid.classList.add('is-loading');
+      this.grid.setAttribute('aria-busy', 'true');
+      const frag = this.document.createDocumentFragment();
+      for (let i = 0; i < count; i++){
+        const card = this.document.createElement('article');
+        card.className = 'card skeleton-card';
+        const thumb = this.document.createElement('div');
+        thumb.className = 'skeleton-thumb';
+        const l1 = this.document.createElement('div');
+        l1.className = 'skeleton-line lg';
+        const l2 = this.document.createElement('div');
+        l2.className = 'skeleton-line';
+        const l3 = this.document.createElement('div');
+        l3.className = 'skeleton-line sm';
+        card.appendChild(thumb);
+        card.appendChild(l1);
+        card.appendChild(l2);
+        card.appendChild(l3);
+        frag.appendChild(card);
+      }
+      this.grid.innerHTML = '';
+      this.grid.appendChild(frag);
+    }
+
+    clearLoadingSkeleton(){
+      if (!this.grid) return;
+      this.grid.classList.remove('is-loading');
+      this.grid.removeAttribute('aria-busy');
+      this.grid.innerHTML = '';
+    }
+
     getLang(){
       if (this.i18n && typeof this.i18n.getLang === 'function'){
         try {
@@ -259,6 +292,8 @@
 
     renderList(list, reason, category){
       if (!this.grid) return;
+      this.grid.classList.remove('is-loading');
+      this.grid.removeAttribute('aria-busy');
       const lang = this.getLang();
       const sortedList = this.sortGames(list);
       const fragment = this.document.createDocumentFragment();
@@ -388,6 +423,8 @@ renderForCategory(category, reason){
     async init(){
       let catalogError = false;
 
+      this.showLoadingSkeleton(8);
+
       try {
         // Single source of truth: js/games.json
         this.allGames = await this.loadGames(); // { cache: 'no-cache' } inside
@@ -395,18 +432,23 @@ renderForCategory(category, reason){
         catalogError = true;
         console.error(err);
         this.allGames = [];
-        if (this.grid){
-          this.grid.innerHTML = '<div class="meta">Catalog error. Please try again later.</div>';
-        }
       }
 
       // Build the category bar even if the catalog failed (keeps UI usable)
       this.buildCategoryBar();
-      if (catalogError) return;
+      if (catalogError){
+        this.clearLoadingSkeleton();
+        if (this.grid){
+          this.grid.innerHTML = '<div class="meta">Catalog error. Please try again later.</div>';
+        }
+        return;
+      }
 
       this.activeCategory = this.getInitialCategory();
       this.updateCategoryButtons();
       this.updateUrl(this.activeCategory);
+
+      this.clearLoadingSkeleton();
 
       // Ensure homepage grid renders immediately
       this.renderForCategory(this.activeCategory, 'init');
