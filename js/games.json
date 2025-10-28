@@ -6,7 +6,7 @@
       "title": { "en": "T-Rex Runner", "pl": "T-Rex Biegacz" },
       "description": { "en": "Jump over cacti!", "pl": "Skacz nad kaktusami!" },
       "category": ["Arcade"],
-      "thumbnail": "img/trex-thumb.jpg",
+      "thumbnail": "img/games/trex-runner.svg",
       "tags": ["runner", "classic"],
       "source": { "type": "self", "page": "game_trex.html" }
     },
@@ -16,7 +16,7 @@
       "title": { "en": "Catch the Cats", "pl": "Złap koty" },
       "description": { "en": "Catch the falling cats!", "pl": "Złap spadające koty!" },
       "category": ["Puzzle"],
-      "thumbnail": "img/cats-thumb.jpg",
+      "thumbnail": "img/games/placeholder.svg",
       "tags": ["reflex", "casual"],
       "source": { "type": "self", "page": "game_cats.html" }
     }
