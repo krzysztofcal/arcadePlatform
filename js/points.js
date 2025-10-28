@@ -460,6 +460,7 @@
       this.state.games[slug] = record;
       return this._awardXp(amount, {
         reason: 'personal_best',
+        bypassSession: true,
         metadata: {
           slug,
           score: rawScore,
