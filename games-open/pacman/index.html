@@ -14,7 +14,7 @@
     <script src="../../js/i18n.js" defer></script>
     <script src="../../js/points.js" defer></script>
   </head>
-  <body>
+  <body data-game-slug="pacman">
     <div class="topbar">
       <div class="topbar-left">
         <button class="hamburger" id="sbToggle" aria-label="Toggle navigation" aria-expanded="false">
@@ -50,7 +50,7 @@
 
       <section class="center">
         <div class="gameWrap game-shell-host">
-          <main class="game-shell">
+          <main class="game-shell" data-track-focus>
             <header class="hud">
               <div class="hud-title">
                 <h1>Pacman</h1>
@@ -124,6 +124,7 @@
     </footer>
 
     <script src="../../js/sidebar.js" defer></script>
+    <script src="../game-shell.js" defer></script>
     <script src="script.js"></script>
     <script src="../../js/loadThirdParty.js"></script>
   </body>
