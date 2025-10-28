@@ -104,7 +104,18 @@ canvas#game{ width:100%; height:auto; aspect-ratio:460/320; background:#0b1220; 
 .search-box:focus-within{ border-color:rgba(110,231,231,.45); box-shadow:0 0 0 2px rgba(110,231,231,.18); }
 .search-box input{ width:180px; background:transparent; border:0; color:#dfe7ff; outline:none; font:600 14px Poppins, sans-serif; transition:width .3s ease, opacity .3s ease; }
 .search-box input:focus{ width:320px; }
-.xp-badge{ font:600 13px/1 Poppins, sans-serif; color:var(--accent); background:rgba(110,231,231,.08); border:1px solid rgba(110,231,231,.35); border-radius:999px; padding:8px 14px; display:inline-flex; align-items:center; gap:6px; }
+.xp-badge{ font:600 13px/1 Poppins, sans-serif; color:var(--accent); background:rgba(110,231,231,.08); border:1px solid rgba(110,231,231,.35); border-radius:999px; padding:8px 14px; display:inline-flex; align-items:center; gap:6px; transition:transform .2s ease; }
+.xp-badge--bump{ animation:xp-badge-bump .58s cubic-bezier(.25,1.5,.5,1); }
+@keyframes xp-badge-bump{
+  0%{ transform:scale(1); }
+  28%{ transform:scale(1.1); }
+  52%{ transform:scale(.95); }
+  100%{ transform:scale(1); }
+}
+@media (prefers-reduced-motion: reduce){
+  .xp-badge{ transition:none; }
+  .xp-badge--bump{ animation:none; }
+}
 .chip{font:600 12px/1 Poppins, sans-serif; color:var(--accent); background:#0f2440; border:1px solid var(--border); padding:8px 10px; border-radius:999px;}
 
 .fsExitOverlay{ position:absolute; top:12px; right:12px; z-index:5; display:none; }

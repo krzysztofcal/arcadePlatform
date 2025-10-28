@@ -91,6 +91,7 @@
       this.state = this._loadState();
       this.currentSession = null;
       this.listeners = { update: new Set(), levelup: new Set() };
+      this._boundStorageListener = null;
 
       this._ensureDayState(now());
       if (opts.autoDailyBonus !== false){
@@ -98,6 +99,8 @@
       } else {
         this._emitUpdate();
       }
+
+      this._bindStorageListener();
     }
 
     on(event, handler){
@@ -190,8 +193,8 @@
       }
     }
 
-    _loadState(){
-      const empty = {
+    _createEmptyState(){
+      return {
         version: 1,
         userId: generateId(),
         totalXp: 0,
@@ -202,9 +205,10 @@
         streak: { count: 0, lastKey: null },
         games: {}
       };
-      const stored = this.adapter && typeof this.adapter.loadState === 'function'
-        ? this.adapter.loadState()
-        : null;
+    }
+
+    _normalizeState(stored){
+      const empty = this._createEmptyState();
       if (!stored) return empty;
       const merged = Object.assign({}, empty, stored);
       if (!merged.userId) merged.userId = generateId();
@@ -212,6 +216,13 @@
       if (!merged.streak) merged.streak = { count: 0, lastKey: null };
       if (!merged.games) merged.games = {};
       return merged;
+    }
+
+    _loadState(){
+      const stored = this.adapter && typeof this.adapter.loadState === 'function'
+        ? this.adapter.loadState()
+        : null;
+      return this._normalizeState(stored);
     }
 
     _ensureDayState(ts){
@@ -296,6 +307,45 @@
       if (this.options.showToasts !== false){
         this._showLevelToast(detail);
       }
+    }
+
+    reloadFromStorage(){
+      const stored = this.adapter && typeof this.adapter.loadState === 'function'
+        ? this.adapter.loadState()
+        : null;
+      if (!stored) return false;
+      const normalized = this._normalizeState(stored);
+      const prevTotal = (this.state && this.state.totalXp) || 0;
+      const prevToday = (this.state && this.state.xpToday) || 0;
+      const prevLevel = (this.state && this.state.level) || 1;
+      this.state = normalized;
+      this._ensureDayState(now());
+      if (this.options.autoDailyBonus !== false){
+        this._maybeAwardDailyBonus();
+      } else {
+        this._emitUpdate();
+      }
+      const snap = this.getSnapshot();
+      return snap.totalXp !== prevTotal || snap.xpToday !== prevToday || snap.level !== prevLevel;
+    }
+
+    _bindStorageListener(){
+      const win = typeof window !== 'undefined' ? window : (typeof globalThis !== 'undefined' ? globalThis : null);
+      if (!win || typeof win.addEventListener !== 'function' || typeof win.removeEventListener !== 'function'){
+        return;
+      }
+      if (this._boundStorageListener){
+        try { win.removeEventListener('storage', this._boundStorageListener); } catch (_){ /* noop */ }
+      }
+      this._boundStorageListener = (event) => {
+        if (!event) return;
+        if (event.key && event.key !== this.storageKey) return;
+        if (event.storageArea && typeof global.localStorage !== 'undefined' && event.storageArea !== global.localStorage) return;
+        this.reloadFromStorage();
+      };
+      try {
+        win.addEventListener('storage', this._boundStorageListener);
+      } catch (_){ /* noop */ }
     }
 
     _showLevelToast(detail){
@@ -451,13 +501,74 @@
   function bindPointsBadge(element){
     if (!element) return null;
     const service = getDefaultService();
-    const update = () => { element.textContent = service.getBadgeLabel(); };
+    const doc = element.ownerDocument || (typeof document !== 'undefined' ? document : null);
+    const win = doc ? (doc.defaultView || (typeof window !== 'undefined' ? window : null)) : (typeof window !== 'undefined' ? window : null);
+    const animationClass = 'xp-badge--bump';
+    let lastTotal = null;
+    const ensureAnimationClassRemoved = () => {
+      try { element.classList.remove(animationClass); } catch (_){ /* noop */ }
+    };
+    const bump = () => {
+      if (!element || typeof element.classList === 'undefined') return;
+      ensureAnimationClassRemoved();
+      void element.offsetWidth;
+      element.classList.add(animationClass);
+    };
+    const update = () => {
+      const snap = service.getSnapshot();
+      const label = 'Lv ' + snap.level + ' • ' + snap.totalXp + ' XP';
+      if (element.textContent !== label){
+        element.textContent = label;
+      } else {
+        element.textContent = label;
+      }
+      if (lastTotal !== null && snap.totalXp > lastTotal){
+        bump();
+      }
+      lastTotal = snap.totalXp;
+    };
+    const refreshFromStorage = () => {
+      if (service && typeof service.reloadFromStorage === 'function'){
+        const changed = service.reloadFromStorage();
+        if (!changed){
+          update();
+        }
+      } else {
+        update();
+      }
+    };
+    const handleVisibility = () => {
+      if (!doc || doc.visibilityState !== 'visible') return;
+      refreshFromStorage();
+    };
+    const handlePageShow = () => { refreshFromStorage(); };
+    const handleAnimationEnd = () => { ensureAnimationClassRemoved(); };
+
     update();
     const offUpdate = service.on('update', update);
     const offLevel = service.on('levelup', update);
+    if (doc && typeof doc.addEventListener === 'function'){
+      doc.addEventListener('visibilitychange', handleVisibility);
+    }
+    if (win && typeof win.addEventListener === 'function'){
+      win.addEventListener('pageshow', handlePageShow);
+    }
+    if (typeof element.addEventListener === 'function'){
+      element.addEventListener('animationend', handleAnimationEnd);
+    }
     element.__pointsDetach = function(){
       offUpdate();
       offLevel();
+      if (doc && typeof doc.removeEventListener === 'function'){
+        doc.removeEventListener('visibilitychange', handleVisibility);
+      }
+      if (win && typeof win.removeEventListener === 'function'){
+        win.removeEventListener('pageshow', handlePageShow);
+      }
+      if (typeof element.removeEventListener === 'function'){
+        element.removeEventListener('animationend', handleAnimationEnd);
+      }
+      ensureAnimationClassRemoved();
     };
     return service;
   }
