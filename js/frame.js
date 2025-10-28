@@ -26,6 +26,19 @@
   let currentSlug = '';
   let pendingFsAction = null;
   let lastFsState = false;
+  const pointsModule = window.Points && typeof window.Points === 'object' ? window.Points : null;
+  let pointsService = null;
+  let activityTracker = null;
+
+  function cleanupPointsSession(){
+    if (activityTracker && typeof activityTracker.stop === 'function'){
+      try { activityTracker.stop(); } catch (_){ /* noop */ }
+      activityTracker = null;
+    }
+    if (pointsService && typeof pointsService.endSession === 'function'){
+      try { pointsService.endSession(); } catch (_){ /* noop */ }
+    }
+  }
 
   const SITE_NAME = 'Arcade Hub';
   const DEFAULT_PAGE_TITLE = SITE_NAME + ' — Game';
@@ -527,6 +540,27 @@ async function init(){
     return;
   }
 
+  if (pointsModule && typeof pointsModule.getDefaultService === 'function'){
+    try {
+      pointsService = pointsModule.getDefaultService();
+    } catch (_){ pointsService = null; }
+  }
+  if (pointsService && typeof pointsService.startSession === 'function'){
+    try { pointsService.startSession(slug); } catch (_){ }
+  }
+  if (pointsModule && typeof pointsModule.createActivityTracker === 'function' && pointsService){
+    if (activityTracker && typeof activityTracker.stop === 'function'){
+      try { activityTracker.stop(); } catch (_){ }
+    }
+    try {
+      activityTracker = pointsModule.createActivityTracker(document, ticks => {
+        if (pointsService && typeof pointsService.tick === 'function'){
+          try { pointsService.tick(ticks); } catch (_){ }
+        }
+      }, { tickSeconds: 15 });
+    } catch (_){ activityTracker = null; }
+  }
+
   // Consent gating
   try { await waitForConsent(12000); } catch(e) {}
   if (consentOverlay) consentOverlay.classList.add('hidden');
@@ -539,6 +573,9 @@ async function init(){
 
   track('adImpression', { slot: 'game_top', page: 'game', slug: slug || undefined });
 }
+  function onUnload(){ cleanupPointsSession(); }
+  window.addEventListener('beforeunload', onUnload);
+  window.addEventListener('pagehide', onUnload);
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
 })();
 
