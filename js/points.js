@@ -352,23 +352,55 @@
   function createActivityTracker(targetDocument, onTick, options){
     const doc = targetDocument || (typeof document !== 'undefined' ? document : null);
     if (!doc || typeof onTick !== 'function'){
-      return { stop: function(){} };
+      return { stop: function(){}, setWatchElement: function(){} };
     }
     const opts = options || {};
-    const tickSeconds = opts.tickSeconds || DEFAULTS.tickSeconds;
-    const idleTimeout = opts.idleTimeout || 30000;
-    const sampleMs = opts.sampleMs || 1000;
+    const tickSeconds = (typeof opts.tickSeconds === 'number' && opts.tickSeconds > 0)
+      ? opts.tickSeconds
+      : DEFAULTS.tickSeconds;
+    const idleTimeout = (typeof opts.idleTimeout === 'number' && opts.idleTimeout > 0)
+      ? opts.idleTimeout
+      : 30000;
+    const sampleMs = (typeof opts.sampleMs === 'number' && opts.sampleMs > 0)
+      ? opts.sampleMs
+      : 1000;
     let destroyed = false;
     let elapsed = 0;
     let lastActivity = now();
-    const activityHandler = () => { lastActivity = now(); };
+    let watchElement = opts.watchFocusElement || null;
+    const win = doc.defaultView || (typeof window !== 'undefined' ? window : null);
+
+    const markActivity = () => { lastActivity = now(); };
+    const activityHandler = () => { markActivity(); };
+    const blurHandler = () => { lastActivity = 0; };
+    const visibilityHandler = () => {
+      if (doc.visibilityState === 'hidden'){
+        lastActivity = 0;
+        elapsed = 0;
+      } else {
+        markActivity();
+      }
+    };
     const events = ['pointerdown', 'pointermove', 'pointerup', 'touchstart', 'touchmove', 'keydown'];
     events.forEach(evt => {
       try { doc.addEventListener(evt, activityHandler, { passive: true }); } catch (_){ doc.addEventListener(evt, activityHandler); }
     });
+    try { doc.addEventListener('visibilitychange', visibilityHandler); } catch (_){ }
+    if (win && typeof win.addEventListener === 'function'){
+      try { win.addEventListener('focus', markActivity, true); } catch (_){ }
+      try { win.addEventListener('blur', blurHandler, true); } catch (_){ }
+    }
+
     const timer = setInterval(() => {
       if (destroyed) return;
       const current = now();
+      try {
+        if (watchElement && doc.activeElement === watchElement){
+          if (!doc.hasFocus || doc.hasFocus()){
+            lastActivity = current;
+          }
+        }
+      } catch (_){ }
       if (current - lastActivity > idleTimeout){
         elapsed = 0;
         return;
@@ -377,7 +409,9 @@
       if (elapsed >= tickSeconds){
         const ticks = Math.floor(elapsed / tickSeconds);
         elapsed -= ticks * tickSeconds;
-        try { onTick(ticks); } catch (_){ /* noop */ }
+        if (ticks > 0){
+          try { onTick(ticks); } catch (_){ /* noop */ }
+        }
       }
     }, sampleMs);
     return {
@@ -388,6 +422,19 @@
         events.forEach(evt => {
           try { doc.removeEventListener(evt, activityHandler); } catch (_){ }
         });
+        try { doc.removeEventListener('visibilitychange', visibilityHandler); } catch (_){ }
+        if (win && typeof win.removeEventListener === 'function'){
+          try { win.removeEventListener('focus', markActivity, true); } catch (_){ }
+          try { win.removeEventListener('blur', blurHandler, true); } catch (_){ }
+        }
+        watchElement = null;
+      },
+      setWatchElement(element){
+        if (destroyed) return;
+        watchElement = element || null;
+        if (watchElement){
+          markActivity();
+        }
       }
     };
   }

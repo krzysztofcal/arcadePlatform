@@ -251,6 +251,9 @@ async function loadCatalog(){
     iframe.referrerPolicy = 'no-referrer-when-downgrade';
     iframe.src = url;
     frameBox.appendChild(iframe);
+    if (activityTracker && typeof activityTracker.setWatchElement === 'function'){
+      try { activityTracker.setWatchElement(iframe); } catch (_){ }
+    }
     // Aspect ratio via CSS variable
     frameBox.style.setProperty('--frame-aspect', aspectFor(orientation));
     track('startGame', {
