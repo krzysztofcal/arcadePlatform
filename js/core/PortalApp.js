@@ -438,9 +438,6 @@ renderForCategory(category, reason){
       this.buildCategoryBar();
       if (catalogError){
         this.clearLoadingSkeleton();
-        if (this.grid){
-          this.grid.innerHTML = '<div class="meta">Catalog error. Please try again later.</div>';
-        }
         return;
       }
 
