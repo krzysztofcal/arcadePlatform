@@ -9,10 +9,14 @@
     return function cleanup(){
       if (cleaned) return;
       cleaned = true;
-      if (state.tracker && typeof state.tracker.stop === 'function'){
-        try { state.tracker.stop(); } catch (_){ /* noop */ }
-        state.tracker = null;
+      const trackerRef = state.tracker;
+      if (trackerRef && typeof trackerRef.stop === 'function'){
+        try { trackerRef.stop(); } catch (_){ /* noop */ }
       }
+      if (typeof window !== 'undefined' && trackerRef && window.activityTracker === trackerRef){
+        try { window.activityTracker = null; } catch (_){ /* noop */ }
+      }
+      state.tracker = null;
       if (state.service && typeof state.service.endSession === 'function'){
         try { state.service.endSession(); } catch (_){ /* noop */ }
       }
@@ -49,18 +53,19 @@
 
       if (typeof points.createActivityTracker === 'function'){
         try {
-          state.tracker = points.createActivityTracker(doc, ticks => {
+          const tickSeconds = (service && service.options && service.options.tickSeconds) || 15;
+          if (typeof window !== 'undefined' && window.activityTracker && typeof window.activityTracker.stop === 'function'){
+            try { window.activityTracker.stop(); } catch (_){ /* noop */ }
+          }
+          state.tracker = points.createActivityTracker(doc, seconds => {
             if (!state.service || typeof state.service.tick !== 'function') return;
+            const ticks = seconds && tickSeconds ? Math.max(1, Math.round(seconds / tickSeconds)) : 1;
             try { state.service.tick(ticks); } catch (_){ /* noop */ }
-          });
+          }, { tickSeconds });
+          if (typeof window !== 'undefined'){
+            try { window.activityTracker = state.tracker; } catch (_){ /* noop */ }
+          }
         } catch (_){ state.tracker = null; }
-      }
-
-      if (state.tracker && typeof state.tracker.setWatchElement === 'function'){
-        const focusTarget = doc.querySelector('[data-track-focus]') || doc.querySelector('.game-shell');
-        if (focusTarget){
-          try { state.tracker.setWatchElement(focusTarget); } catch (_){ /* noop */ }
-        }
       }
     }
 

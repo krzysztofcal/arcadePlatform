@@ -532,114 +532,58 @@
   function createActivityTracker(targetDocument, onTick, options){
     const doc = targetDocument || (typeof document !== 'undefined' ? document : null);
     if (!doc || typeof onTick !== 'function'){
-      return { stop: function(){}, setWatchElement: function(){} };
+      return { stop() {}, nudge() {}, setPaused() {} };
     }
-    const opts = options || {};
-    const tickSeconds = (typeof opts.tickSeconds === 'number' && opts.tickSeconds > 0)
-      ? opts.tickSeconds
-      : DEFAULTS.tickSeconds;
-    const idleTimeout = (typeof opts.idleTimeout === 'number' && opts.idleTimeout > 0)
-      ? opts.idleTimeout
-      : 30000;
-    const sampleMs = (typeof opts.sampleMs === 'number' && opts.sampleMs > 0)
-      ? opts.sampleMs
-      : 1000;
+
+    const DEFAULTS = { tickSeconds: 10, idleTimeout: 30000, sampleMs: 1000 };
+    const opts = Object.assign({}, DEFAULTS, options || {});
+
     let destroyed = false;
-    let elapsed = 0;
-    let lastActivity = now();
-    let watchElement = opts.watchFocusElement || null;
-    const win = doc.defaultView || (typeof window !== 'undefined' ? window : null);
-
     let paused = false;
+    let lastActivity = Date.now();
+    let accumSeconds = 0;
 
-    const markActivity = () => {
-      lastActivity = now();
-      paused = false;
-    };
-    const activityHandler = () => { markActivity(); };
-    const blurHandler = () => {
-      lastActivity = 0;
-      paused = true;
-    };
-    const visibilityHandler = () => {
-      if (doc.visibilityState === 'hidden'){
-        lastActivity = 0;
-        elapsed = 0;
-        paused = true;
-      } else {
-        markActivity();
-      }
-    };
-    const events = ['pointerdown', 'pointermove', 'pointerup', 'touchstart', 'touchmove', 'keydown'];
-    events.forEach(evt => {
-      try { doc.addEventListener(evt, activityHandler, { passive: true }); } catch (_){ doc.addEventListener(evt, activityHandler); }
+    const markActive = () => { lastActivity = Date.now(); };
+
+    const sampleEvents = [
+      'pointerdown','pointermove','pointerup',
+      'touchstart','touchmove',
+      'keydown'
+    ];
+
+    sampleEvents.forEach(evt => {
+      try { doc.addEventListener(evt, markActive, { passive: true }); }
+      catch (_){ doc.addEventListener(evt, markActive); }
     });
-    try { doc.addEventListener('visibilitychange', visibilityHandler); } catch (_){ }
-    if (win && typeof win.addEventListener === 'function'){
-      try { win.addEventListener('focus', markActivity, true); } catch (_){ }
-      try { win.addEventListener('blur', blurHandler, true); } catch (_){ }
-    }
 
-    const timer = setInterval(() => {
-      if (destroyed) return;
-      if (paused) return;
-      const current = now();
-      try {
-        if (watchElement && doc.activeElement === watchElement){
-          if (!doc.hasFocus || doc.hasFocus()){
-            lastActivity = current;
-          }
-        }
-      } catch (_){ }
-      if (current - lastActivity > idleTimeout){
-        elapsed = 0;
+    const onVisibility = () => { paused = !!doc.hidden; };
+    doc.addEventListener('visibilitychange', onVisibility, { passive: true });
+
+    const tickTimer = setInterval(() => {
+      if (destroyed || paused) return;
+
+      const idleFor = Date.now() - lastActivity;
+      if (idleFor > opts.idleTimeout){
+        accumSeconds = 0;
         return;
       }
-      elapsed += sampleMs / 1000;
-      if (elapsed >= tickSeconds){
-        const ticks = Math.floor(elapsed / tickSeconds);
-        elapsed -= ticks * tickSeconds;
-        if (ticks > 0){
-          try { onTick(ticks); } catch (_){ /* noop */ }
-        }
+
+      accumSeconds += opts.sampleMs / 1000;
+      if (accumSeconds >= opts.tickSeconds){
+        accumSeconds = 0;
+        try { onTick(opts.tickSeconds); } catch (_){ }
       }
-    }, sampleMs);
+    }, opts.sampleMs);
+
     return {
+      nudge(){ markActive(); },
+      setPaused(p){ paused = !!p; },
       stop(){
         if (destroyed) return;
         destroyed = true;
-        clearInterval(timer);
-        events.forEach(evt => {
-          try { doc.removeEventListener(evt, activityHandler); } catch (_){ }
-        });
-        try { doc.removeEventListener('visibilitychange', visibilityHandler); } catch (_){ }
-        if (win && typeof win.removeEventListener === 'function'){
-          try { win.removeEventListener('focus', markActivity, true); } catch (_){ }
-          try { win.removeEventListener('blur', blurHandler, true); } catch (_){ }
-        }
-        watchElement = null;
-      },
-      setWatchElement(element){
-        if (destroyed) return;
-        watchElement = element || null;
-        if (watchElement){
-          markActivity();
-        }
-      },
-      setPaused(flag){
-        if (destroyed) return;
-        const nextPaused = !!flag;
-        if (nextPaused){
-          paused = true;
-          elapsed = 0;
-        } else {
-          paused = false;
-          markActivity();
-        }
-      },
-      nudge(){
-        if (destroyed) return;
-        markActivity();
+        clearInterval(tickTimer);
+        doc.removeEventListener('visibilitychange', onVisibility);
+        sampleEvents.forEach(evt => doc.removeEventListener(evt, markActive));
       }
     };
   }
@@ -654,6 +598,26 @@
       if (typeof window !== 'undefined'){ window.pointsService = service; }
     } catch (_){ /* noop */ }
     return service;
+  }
+
+  const xpRenderSubscribers = new Set();
+  let __xpRenderScheduled = false;
+  let __xpRenderLastState = null;
+
+  function scheduleRenderXp(state){
+    __xpRenderLastState = state;
+    if (__xpRenderScheduled) return;
+    __xpRenderScheduled = true;
+    const raf = typeof global.requestAnimationFrame === 'function'
+      ? global.requestAnimationFrame.bind(global)
+      : function(cb){ return global.setTimeout(cb, 16); };
+    raf(() => {
+      __xpRenderScheduled = false;
+      const snapshot = __xpRenderLastState;
+      xpRenderSubscribers.forEach(fn => {
+        try { fn(snapshot); } catch (_){ /* noop */ }
+      });
+    });
   }
 
   function bindPointsBadge(element){
@@ -701,8 +665,12 @@
         try { float.remove(); } catch (_){ }
       }, 1500);
     };
-    const update = () => {
-      const snap = service.getSnapshot();
+    const render = (snap) => {
+      if (!snap){
+        try { snap = service.getSnapshot(); }
+        catch (_){ snap = null; }
+      }
+      if (!snap) return;
       const label = 'Lv ' + snap.level + ' • ' + snap.totalXp + ' XP';
       if (labelSpan){
         if (labelSpan.textContent !== label){
@@ -721,14 +689,16 @@
       }
       lastTotal = snap.totalXp;
     };
+    xpRenderSubscribers.add(render);
+
     const refreshFromStorage = () => {
       if (service && typeof service.reloadFromStorage === 'function'){
         const changed = service.reloadFromStorage();
         if (!changed){
-          update();
+          scheduleRenderXp(service.getSnapshot());
         }
       } else {
-        update();
+        scheduleRenderXp(service.getSnapshot());
       }
     };
     const handleVisibility = () => {
@@ -738,16 +708,19 @@
     const handlePageShow = () => { refreshFromStorage(); };
     const handleAnimationEnd = () => { ensureAnimationClassRemoved(); };
 
-    update();
-    const offUpdate = service.on('update', update);
-    const handleLevel = () => {
-      update();
+    scheduleRenderXp(service.getSnapshot());
+    const offUpdate = service.on('update', (snap) => {
+      scheduleRenderXp(snap || service.getSnapshot());
+    });
+    const handleLevel = (detail) => {
+      scheduleRenderXp(service.getSnapshot());
       spawnFloat('+1', 'xp-float--level');
     };
     const offLevel = service.on('levelup', handleLevel);
     const handleAward = (detail) => {
       if (!detail || !detail.amount) return;
       if (detail.reason !== 'personal_best') return;
+      scheduleRenderXp(service.getSnapshot());
       spawnFloat('+' + detail.amount + ' XP', 'xp-float--bonus');
     };
     const offAward = service.on('award', handleAward);
@@ -774,6 +747,7 @@
         element.removeEventListener('animationend', handleAnimationEnd);
       }
       ensureAnimationClassRemoved();
+      xpRenderSubscribers.delete(render);
     };
     return service;
   }
@@ -798,6 +772,19 @@
         try { tracker.setPaused(document.hidden); } catch (_){ }
       }
     });
+  }
+
+  if (typeof window !== 'undefined'){
+    try {
+      window.addEventListener('beforeunload', () => {
+        try {
+          const tracker = window.activityTracker;
+          if (tracker && typeof tracker.stop === 'function'){
+            tracker.stop();
+          }
+        } catch (_){ }
+      }, { once: true });
+    } catch (_){ }
   }
 
   global.Points = Object.assign({}, global.Points, {

@@ -254,9 +254,6 @@ async function loadCatalog(){
     iframe.referrerPolicy = 'no-referrer-when-downgrade';
     iframe.src = url;
     frameBox.appendChild(iframe);
-    if (activityTracker && typeof activityTracker.setWatchElement === 'function'){
-      try { activityTracker.setWatchElement(iframe); } catch (_){ }
-    }
     // Aspect ratio via CSS variable
     frameBox.style.setProperty('--frame-aspect', aspectFor(orientation));
     track('startGame', {
@@ -558,15 +555,19 @@ async function init(){
     try { pointsService.startSession(slug); } catch (_){ }
   }
   if (pointsModule && typeof pointsModule.createActivityTracker === 'function' && pointsService){
+    const tickSeconds = 15;
+    if (typeof window !== 'undefined' && window.activityTracker && window.activityTracker !== activityTracker && typeof window.activityTracker.stop === 'function'){
+      try { window.activityTracker.stop(); } catch (_){ }
+    }
     if (activityTracker && typeof activityTracker.stop === 'function'){
       try { activityTracker.stop(); } catch (_){ }
     }
     try {
-      activityTracker = pointsModule.createActivityTracker(document, ticks => {
-        if (pointsService && typeof pointsService.tick === 'function'){
-          try { pointsService.tick(ticks); } catch (_){ }
-        }
-      }, { tickSeconds: 15 });
+      activityTracker = pointsModule.createActivityTracker(document, seconds => {
+        if (!pointsService || typeof pointsService.tick !== 'function') return;
+        const ticks = seconds && tickSeconds ? Math.max(1, Math.round(seconds / tickSeconds)) : 1;
+        try { pointsService.tick(ticks); } catch (_){ }
+      }, { tickSeconds });
       if (typeof window !== 'undefined'){
         try { window.activityTracker = activityTracker; } catch (_){ }
       }
