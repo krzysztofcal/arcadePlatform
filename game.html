@@ -140,6 +140,21 @@
   <script src="js/core/catalog.js" defer></script>
   <script src="js/core/game-utils.js" defer></script>
   <script src="js/frame.js" defer></script>
+  <script>
+    // Listen for iframe activity heartbeats and reset the tracker idle timer
+    window.addEventListener('message', function(e){
+      if (e && e.data && e.data.type === 'gameActivity'){
+        try {
+          if (typeof activityTracker !== 'undefined' && activityTracker){
+            activityTracker.lastActivity = Date.now();
+            if (typeof activityTracker.ping === 'function'){
+              activityTracker.ping();
+            }
+          }
+        } catch (_){ /* noop */ }
+      }
+    });
+  </script>
   <script src="js/loadThirdParty.js"></script>
 </body>
 </html>

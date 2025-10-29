@@ -549,10 +549,10 @@
 
     let destroyed = false;
     let paused = false;
-    let lastActivity = Date.now();
+    let lastActivity = now();
     let accumSeconds = 0;
 
-    const markActive = () => { lastActivity = Date.now(); };
+    const markActive = () => { lastActivity = now(); };
 
     const sampleEvents = [
       'pointerdown','pointermove','pointerup',
@@ -586,7 +586,7 @@
     const tickTimer = setInterval(() => {
       if (destroyed || paused) return;
 
-      const idleFor = Date.now() - lastActivity;
+      const idleFor = now() - lastActivity;
       if (idleFor > opts.idleTimeout){
         accumSeconds = 0;
         return;
@@ -599,7 +599,7 @@
       }
     }, opts.sampleMs);
 
-    return {
+    const tracker = {
       nudge(){ markActive(); },
       setPaused(p){ paused = !!p; },
       ping(){ markActive(); },
@@ -612,8 +612,28 @@
         if (win && typeof win.removeEventListener === 'function'){
           try { win.removeEventListener('message', msgHandler); } catch (_){ /* noop */ }
         }
+      },
+      destroy(){
+        this.stop();
       }
     };
+
+    try {
+      Object.defineProperty(tracker, 'lastActivity', {
+        get(){ return lastActivity; },
+        set(value){
+          if (Number.isFinite(value)){
+            lastActivity = Number(value);
+          } else {
+            markActive();
+          }
+        }
+      });
+    } catch (_){
+      tracker.lastActivity = lastActivity;
+    }
+
+    return tracker;
   }
 
   function getDefaultService(){
