@@ -543,7 +543,9 @@
     const allowedOrigins = Array.isArray(opts.allowedOrigins) && opts.allowedOrigins.length
       ? opts.allowedOrigins.filter(Boolean)
       : defaultOrigin;
-    const legacyTypes = Array.isArray(opts.legacyMessageTypes) ? opts.legacyMessageTypes.filter(Boolean) : ['game-active'];
+    const legacyTypes = Array.isArray(opts.legacyMessageTypes)
+      ? opts.legacyMessageTypes.filter(Boolean)
+      : ['game-active', 'gameActivity'];
 
     let destroyed = false;
     let paused = false;
@@ -568,7 +570,7 @@
 
     const msgHandler = (e) => {
       if (!e) return;
-      if (allowedOrigins && allowedOrigins.length && !allowedOrigins.includes(e.origin)) return;
+      if (allowedOrigins && allowedOrigins.length && !(allowedOrigins.includes('*') || allowedOrigins.includes(e.origin))) return;
       const data = e.data;
       if (!data || typeof data !== 'object') return;
       const type = data.type;
@@ -600,6 +602,7 @@
     return {
       nudge(){ markActive(); },
       setPaused(p){ paused = !!p; },
+      ping(){ markActive(); },
       stop(){
         if (destroyed) return;
         destroyed = true;

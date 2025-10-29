@@ -244,6 +244,38 @@ async function loadCatalog(){
     });
   }
 
+  const IFRAME_ACTIVITY_BRIDGE_ID = '__kcswhActivityBridge';
+  const IFRAME_ACTIVITY_BRIDGE_SCRIPT = "(function(){" +
+    "if (window.__kcswhActivityBridge) return;" +
+    "window.__kcswhActivityBridge = true;" +
+    "var TYPE='kcswh:activity';" +
+    "var TARGET='*';" +
+    "var last=Date.now();" +
+    "var ACTIVE_WINDOW=5000;" +
+    "var HEARTBEAT=4000;" +
+    "var send=function(){ try { parent.postMessage({ type: TYPE }, TARGET); } catch (_){} };" +
+    "var onActive=function(){ last=Date.now(); send(); };" +
+    "['pointerdown','pointermove','pointerup','touchstart','touchmove','keydown'].forEach(function(evt){ try { document.addEventListener(evt,onActive,{ passive:true }); } catch(_){ document.addEventListener(evt,onActive); } });" +
+    "var beat=function(){ if (Date.now() - last <= ACTIVE_WINDOW) send(); };" +
+    "var timer=setInterval(beat, HEARTBEAT);" +
+    "document.addEventListener('visibilitychange', function(){ if (document.hidden){ if (timer){ clearInterval(timer); timer=null; } } else if (!timer){ last=Date.now(); send(); timer=setInterval(beat, HEARTBEAT); } }, { passive:true });" +
+    "send();" +
+  "})();";
+
+  function injectActivityBridgeIntoIframe(iframe){
+    if (!iframe) return;
+    try {
+      const doc = iframe.contentDocument;
+      if (!doc || !doc.documentElement) return;
+      if (doc.getElementById(IFRAME_ACTIVITY_BRIDGE_ID)) return;
+      const script = doc.createElement('script');
+      script.id = IFRAME_ACTIVITY_BRIDGE_ID;
+      script.type = 'text/javascript';
+      script.text = IFRAME_ACTIVITY_BRIDGE_SCRIPT;
+      doc.documentElement.appendChild(script);
+    } catch (_){ /* noop */ }
+  }
+
   function injectIframe(url, orientation){
     frameBox.innerHTML = '';
     const iframe = document.createElement('iframe');
@@ -268,8 +300,9 @@ async function loadCatalog(){
       try { window.postMessage({ type: 'kcswh:activity' }, postTarget); } catch (_){ }
       try {
         const trackerRef = window.activityTracker;
-        if (trackerRef && typeof trackerRef.nudge === 'function'){
-          trackerRef.nudge();
+        if (trackerRef){
+          if (typeof trackerRef.nudge === 'function'){ trackerRef.nudge(); }
+          if (typeof trackerRef.ping === 'function'){ trackerRef.ping(); }
         }
       } catch (_){ }
     };
@@ -284,8 +317,12 @@ async function loadCatalog(){
     try {
       attachIframeActivityListeners();
       if (typeof iframe.addEventListener === 'function'){
-        iframe.addEventListener('load', attachIframeActivityListeners, { once: true });
+        iframe.addEventListener('load', () => {
+          attachIframeActivityListeners();
+          injectActivityBridgeIntoIframe(iframe);
+        });
       }
+      injectActivityBridgeIntoIframe(iframe);
     } catch (_){ }
     // Aspect ratio via CSS variable
     frameBox.style.setProperty('--frame-aspect', aspectFor(orientation));
