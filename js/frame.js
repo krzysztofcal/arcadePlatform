@@ -254,6 +254,39 @@ async function loadCatalog(){
     iframe.referrerPolicy = 'no-referrer-when-downgrade';
     iframe.src = url;
     frameBox.appendChild(iframe);
+    const postTarget = (function(){
+      try {
+        if (typeof window !== 'undefined' && window.location && window.location.origin){
+          return window.location.origin;
+        }
+      } catch (_){ }
+      return '*';
+    })();
+    const iframeEvents = ['pointerover', 'pointermove', 'touchstart', 'focus'];
+    let listenersAttached = false;
+    const onIframeActivity = () => {
+      try { window.postMessage({ type: 'kcswh:activity' }, postTarget); } catch (_){ }
+      try {
+        const trackerRef = window.activityTracker;
+        if (trackerRef && typeof trackerRef.nudge === 'function'){
+          trackerRef.nudge();
+        }
+      } catch (_){ }
+    };
+    const attachIframeActivityListeners = () => {
+      if (listenersAttached) return;
+      listenersAttached = true;
+      iframeEvents.forEach(evt => {
+        try { iframe.addEventListener(evt, onIframeActivity, { passive: true }); }
+        catch (_){ iframe.addEventListener(evt, onIframeActivity); }
+      });
+    };
+    try {
+      attachIframeActivityListeners();
+      if (typeof iframe.addEventListener === 'function'){
+        iframe.addEventListener('load', attachIframeActivityListeners, { once: true });
+      }
+    } catch (_){ }
     // Aspect ratio via CSS variable
     frameBox.style.setProperty('--frame-aspect', aspectFor(orientation));
     track('startGame', {
@@ -556,6 +589,13 @@ async function init(){
   }
   if (pointsModule && typeof pointsModule.createActivityTracker === 'function' && pointsService){
     const tickSeconds = 15;
+    const messageType = 'kcswh:activity';
+    const allowedOrigins = [];
+    try {
+      if (typeof window !== 'undefined' && window.location && window.location.origin){
+        allowedOrigins.push(window.location.origin);
+      }
+    } catch (_){ /* noop */ }
     if (typeof window !== 'undefined' && window.activityTracker && window.activityTracker !== activityTracker && typeof window.activityTracker.stop === 'function'){
       try { window.activityTracker.stop(); } catch (_){ }
     }
@@ -567,7 +607,7 @@ async function init(){
         if (!pointsService || typeof pointsService.tick !== 'function') return;
         const ticks = seconds && tickSeconds ? Math.max(1, Math.round(seconds / tickSeconds)) : 1;
         try { pointsService.tick(ticks); } catch (_){ }
-      }, { tickSeconds });
+      }, { tickSeconds, messageType, allowedOrigins });
       if (typeof window !== 'undefined'){
         try { window.activityTracker = activityTracker; } catch (_){ }
       }

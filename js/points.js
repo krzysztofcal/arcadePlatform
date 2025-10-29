@@ -535,8 +535,15 @@
       return { stop() {}, nudge() {}, setPaused() {} };
     }
 
-    const DEFAULTS = { tickSeconds: 10, idleTimeout: 30000, sampleMs: 1000 };
+    const DEFAULTS = { tickSeconds: 10, idleTimeout: 30000, sampleMs: 1000, messageType: 'kcswh:activity' };
     const opts = Object.assign({}, DEFAULTS, options || {});
+
+    const win = doc.defaultView || (typeof window !== 'undefined' ? window : null);
+    const defaultOrigin = win && win.location && win.location.origin ? [win.location.origin] : null;
+    const allowedOrigins = Array.isArray(opts.allowedOrigins) && opts.allowedOrigins.length
+      ? opts.allowedOrigins.filter(Boolean)
+      : defaultOrigin;
+    const legacyTypes = Array.isArray(opts.legacyMessageTypes) ? opts.legacyMessageTypes.filter(Boolean) : ['game-active'];
 
     let destroyed = false;
     let paused = false;
@@ -558,6 +565,21 @@
 
     const onVisibility = () => { paused = !!doc.hidden; };
     doc.addEventListener('visibilitychange', onVisibility, { passive: true });
+
+    const msgHandler = (e) => {
+      if (!e) return;
+      if (allowedOrigins && allowedOrigins.length && !allowedOrigins.includes(e.origin)) return;
+      const data = e.data;
+      if (!data || typeof data !== 'object') return;
+      const type = data.type;
+      if (type === opts.messageType || type === 'kcswh/activity' || (legacyTypes && legacyTypes.indexOf(type) !== -1)){
+        markActive();
+      }
+    };
+    if (win && typeof win.addEventListener === 'function'){
+      try { win.addEventListener('message', msgHandler, { passive: true }); }
+      catch (_){ win.addEventListener('message', msgHandler); }
+    }
 
     const tickTimer = setInterval(() => {
       if (destroyed || paused) return;
@@ -584,6 +606,9 @@
         clearInterval(tickTimer);
         doc.removeEventListener('visibilitychange', onVisibility);
         sampleEvents.forEach(evt => doc.removeEventListener(evt, markActive));
+        if (win && typeof win.removeEventListener === 'function'){
+          try { win.removeEventListener('message', msgHandler); } catch (_){ /* noop */ }
+        }
       }
     };
   }
@@ -809,7 +834,7 @@
       if (allowedOrigin && e.origin !== allowedOrigin) return;
       const { type } = e.data;
 
-      if (type === 'game-active'){
+      if (type === 'kcswh:activity' || type === 'game-active'){
         const tracker = window.activityTracker;
         if (tracker && typeof tracker.nudge === 'function'){
           try { tracker.nudge(); } catch (_){ }

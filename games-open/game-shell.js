@@ -57,11 +57,18 @@
           if (typeof window !== 'undefined' && window.activityTracker && typeof window.activityTracker.stop === 'function'){
             try { window.activityTracker.stop(); } catch (_){ /* noop */ }
           }
+          const messageType = 'kcswh:activity';
+          const allowedOrigins = [];
+          try {
+            if (typeof window !== 'undefined' && window.location && window.location.origin){
+              allowedOrigins.push(window.location.origin);
+            }
+          } catch (_){ /* noop */ }
           state.tracker = points.createActivityTracker(doc, seconds => {
             if (!state.service || typeof state.service.tick !== 'function') return;
             const ticks = seconds && tickSeconds ? Math.max(1, Math.round(seconds / tickSeconds)) : 1;
             try { state.service.tick(ticks); } catch (_){ /* noop */ }
-          }, { tickSeconds });
+          }, { tickSeconds, messageType, allowedOrigins });
           if (typeof window !== 'undefined'){
             try { window.activityTracker = state.tracker; } catch (_){ /* noop */ }
           }
