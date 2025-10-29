@@ -71,6 +71,17 @@ parseLevel();
 resetGame();
 showOverlay("Ready!", "Press start to play");
 
+function reportScore(){
+  if (typeof window.reportScoreToPortal === "function") {
+    try { window.reportScoreToPortal("pacman", score); } catch (_error) {}
+  }
+}
+
+function updateScoreDisplay(){
+  scoreEl.textContent = score;
+  reportScore();
+}
+
 startBtn.addEventListener("click", () => {
   if (!running) {
     running = true;
@@ -232,7 +243,7 @@ function resetGame() {
     ghost.frightened = 0;
   });
   resetPellets();
-  scoreEl.textContent = score;
+  updateScoreDisplay();
   livesEl.textContent = pacman.lives;
 }
 
@@ -311,7 +322,7 @@ function eatPellet(x, y) {
     score += 50;
     ghosts.forEach((ghost) => (ghost.frightened = 6));
   }
-  scoreEl.textContent = score;
+  updateScoreDisplay();
 }
 
 function checkCollision(ghost) {
@@ -333,7 +344,7 @@ function checkCollision(ghost) {
     } else {
       loseLife();
     }
-    scoreEl.textContent = score;
+    updateScoreDisplay();
   }
 }
 
