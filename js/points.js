@@ -556,6 +556,8 @@
     const DEFAULTS = { tickSeconds: 30, idleTimeout: 30000, sampleMs: 1000, messageType: 'kcswh:activity' };
     const opts = Object.assign({}, DEFAULTS, options || {});
     opts.tickSeconds = Math.max(1, Number(opts.tickSeconds) || DEFAULTS.tickSeconds);
+    opts.sampleMs = Math.max(100, Number(opts.sampleMs) || DEFAULTS.sampleMs);
+    opts.idleTimeout = Math.max(opts.sampleMs, Number(opts.idleTimeout) || DEFAULTS.idleTimeout);
 
     const win = doc.defaultView || (typeof window !== 'undefined' ? window : null);
     const defaultOrigin = win && win.location && win.location.origin ? [win.location.origin] : null;
@@ -570,6 +572,8 @@
     let paused = false;
     let lastActivity = now();
     let accumSeconds = 0;
+    const activeGraceMs = Math.max(opts.sampleMs, Math.min(opts.idleTimeout, Number(opts.activeGraceMs) || 5000));
+    let lastSample = now();
 
     const markActive = () => { lastActivity = now(); };
 
@@ -584,7 +588,15 @@
       catch (_){ doc.addEventListener(evt, markActive); }
     });
 
-    const onVisibility = () => { paused = !!doc.hidden; };
+    const onVisibility = () => {
+      paused = !!doc.hidden;
+      if (paused){
+        accumSeconds = 0;
+      } else {
+        markActive();
+        lastSample = now();
+      }
+    };
     doc.addEventListener('visibilitychange', onVisibility, { passive: true });
 
     const msgHandler = (e) => {
@@ -605,13 +617,17 @@
     const tickTimer = setInterval(() => {
       if (destroyed || paused) return;
 
-      const idleFor = now() - lastActivity;
-      if (idleFor > opts.idleTimeout){
+      const nowTs = now();
+      const delta = Math.max(0, nowTs - lastSample);
+      lastSample = nowTs;
+
+      const idleFor = nowTs - lastActivity;
+      if (idleFor > opts.idleTimeout || idleFor > activeGraceMs){
         accumSeconds = 0;
         return;
       }
 
-      accumSeconds += opts.sampleMs / 1000;
+      accumSeconds += delta / 1000;
       while (accumSeconds >= opts.tickSeconds){
         accumSeconds -= opts.tickSeconds;
         try { onTick(opts.tickSeconds); } catch (_){ }
@@ -620,7 +636,15 @@
 
     const tracker = {
       nudge(){ markActive(); },
-      setPaused(p){ paused = !!p; },
+      setPaused(p){
+        paused = !!p;
+        if (paused){
+          accumSeconds = 0;
+        } else {
+          markActive();
+          lastSample = now();
+        }
+      },
       ping(){ markActive(); },
       stop(){
         if (destroyed) return;
@@ -630,12 +654,33 @@
         sampleEvents.forEach(evt => doc.removeEventListener(evt, markActive));
         if (win && typeof win.removeEventListener === 'function'){
           try { win.removeEventListener('message', msgHandler); } catch (_){ /* noop */ }
+          try { win.removeEventListener('blur', onWindowBlur); } catch (_){ /* noop */ }
+          try { win.removeEventListener('focus', onWindowFocus); } catch (_){ /* noop */ }
         }
       },
       destroy(){
         this.stop();
       }
     };
+
+    const onWindowBlur = () => {
+      paused = true;
+      accumSeconds = 0;
+      lastActivity = 0;
+    };
+
+    const onWindowFocus = () => {
+      paused = !!doc.hidden;
+      markActive();
+      lastSample = now();
+    };
+
+    if (win && typeof win.addEventListener === 'function'){
+      try { win.addEventListener('blur', onWindowBlur, { passive: true }); }
+      catch (_){ win.addEventListener('blur', onWindowBlur); }
+      try { win.addEventListener('focus', onWindowFocus, { passive: true }); }
+      catch (_){ win.addEventListener('focus', onWindowFocus); }
+    }
 
     try {
       Object.defineProperty(tracker, 'lastActivity', {
