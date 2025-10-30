@@ -100,6 +100,7 @@
       this.state = this._loadState();
       this.currentSession = null;
       this.listeners = { update: new Set(), levelup: new Set(), award: new Set() };
+      this._activitySeconds = 0;
       this._boundStorageListener = null;
 
       this._ensureDayState(now());
@@ -161,6 +162,7 @@
         startedAt: new Date(ts).toISOString(),
         earned: 0
       };
+      this._activitySeconds = 0;
       const today = this.state.lastDayKey;
 
       if (slug){
@@ -182,19 +184,35 @@
       this._emitUpdate();
     }
 
-    tick(multiplier){
-      const ticks = Number.isFinite(multiplier) && multiplier > 0 ? Math.floor(multiplier) : 1;
-      if (!ticks) return 0;
+    tick(activeSeconds){
+      const secondsPerTick = Math.max(1, Number(this.options.tickSeconds) || 30);
+      const seconds = Number(activeSeconds);
+      if (!Number.isFinite(seconds) || seconds <= 0){
+        return 0;
+      }
+
+      this._activitySeconds = (Number(this._activitySeconds) || 0) + seconds;
+      const ticks = Math.floor(this._activitySeconds / secondsPerTick);
+      if (!ticks){
+        return 0;
+      }
+
+      this._activitySeconds -= ticks * secondsPerTick;
       this._ensureDayState(now());
       return this._awardXp(ticks * this.options.tickXp, {
         reason: 'activity',
-        metadata: { ticks }
+        metadata: {
+          ticks,
+          secondsAwarded: ticks * secondsPerTick,
+          reportedSeconds: seconds
+        }
       });
     }
 
     endSession(){
       const session = this.currentSession;
       this.currentSession = null;
+      this._activitySeconds = 0;
       this._persist();
       if (!session) return;
       if (this.adapter && typeof this.adapter.syncToServer === 'function'){
@@ -537,6 +555,7 @@
 
     const DEFAULTS = { tickSeconds: 30, idleTimeout: 30000, sampleMs: 1000, messageType: 'kcswh:activity' };
     const opts = Object.assign({}, DEFAULTS, options || {});
+    opts.tickSeconds = Math.max(1, Number(opts.tickSeconds) || DEFAULTS.tickSeconds);
 
     const win = doc.defaultView || (typeof window !== 'undefined' ? window : null);
     const defaultOrigin = win && win.location && win.location.origin ? [win.location.origin] : null;
@@ -593,8 +612,8 @@
       }
 
       accumSeconds += opts.sampleMs / 1000;
-      if (accumSeconds >= opts.tickSeconds){
-        accumSeconds = 0;
+      while (accumSeconds >= opts.tickSeconds){
+        accumSeconds -= opts.tickSeconds;
         try { onTick(opts.tickSeconds); } catch (_){ }
       }
     }, opts.sampleMs);

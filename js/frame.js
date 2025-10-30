@@ -642,8 +642,8 @@ async function init(){
     try {
       activityTracker = pointsModule.createActivityTracker(document, seconds => {
         if (!pointsService || typeof pointsService.tick !== 'function') return;
-        const ticks = seconds && tickSeconds ? Math.max(1, Math.round(seconds / tickSeconds)) : 1;
-        try { pointsService.tick(ticks); } catch (_){ }
+        const reported = Number.isFinite(seconds) && seconds > 0 ? seconds : tickSeconds;
+        try { pointsService.tick(reported); } catch (_){ }
       }, { tickSeconds, messageType, allowedOrigins });
       if (typeof window !== 'undefined'){
         try { window.activityTracker = activityTracker; } catch (_){ }

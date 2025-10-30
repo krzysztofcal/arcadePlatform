@@ -66,8 +66,8 @@
           } catch (_){ /* noop */ }
           state.tracker = points.createActivityTracker(doc, seconds => {
             if (!state.service || typeof state.service.tick !== 'function') return;
-            const ticks = seconds && tickSeconds ? Math.max(1, Math.round(seconds / tickSeconds)) : 1;
-            try { state.service.tick(ticks); } catch (_){ /* noop */ }
+            const reported = Number.isFinite(seconds) && seconds > 0 ? seconds : tickSeconds;
+            try { state.service.tick(reported); } catch (_){ /* noop */ }
           }, { tickSeconds, messageType, allowedOrigins });
           if (typeof window !== 'undefined'){
             try { window.activityTracker = state.tracker; } catch (_){ /* noop */ }
