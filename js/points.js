@@ -4,10 +4,10 @@
   const STORAGE_KEY = 'portal.points.v1';
   const MAX_STREAK = 7;
   const DEFAULTS = {
-    tickSeconds: 15,
+    tickSeconds: 30,
     tickXp: 5,
-    sessionCap: 200,
-    dailyCap: 600,
+    sessionCap: Number.POSITIVE_INFINITY,
+    dailyCap: Number.POSITIVE_INFINITY,
     dailyBonusBase: 10,
     firstPlayBonus: 15,
     autoDailyBonus: true,
@@ -535,7 +535,7 @@
       return { stop() {}, nudge() {}, setPaused() {} };
     }
 
-    const DEFAULTS = { tickSeconds: 10, idleTimeout: 30000, sampleMs: 1000, messageType: 'kcswh:activity' };
+    const DEFAULTS = { tickSeconds: 30, idleTimeout: 30000, sampleMs: 1000, messageType: 'kcswh:activity' };
     const opts = Object.assign({}, DEFAULTS, options || {});
 
     const win = doc.defaultView || (typeof window !== 'undefined' ? window : null);

@@ -625,7 +625,7 @@ async function init(){
     try { pointsService.startSession(slug); } catch (_){ }
   }
   if (pointsModule && typeof pointsModule.createActivityTracker === 'function' && pointsService){
-    const tickSeconds = 15;
+    const tickSeconds = (pointsService && pointsService.options && pointsService.options.tickSeconds) || 30;
     const messageType = 'kcswh:activity';
     const allowedOrigins = [];
     try {
