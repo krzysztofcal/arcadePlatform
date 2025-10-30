@@ -20,8 +20,9 @@
       en: 'Below are details for included projects.',
       pl: 'Poniżej znajdziesz szczegóły wykorzystanych projektów.'
     },
-    licensesTrexBy: { en: 'Original project by', pl: 'Oryginalny projekt:' },
-    licensesTrexLicense: { en: 'Licensed under the MIT License.', pl: 'Na licencji MIT.' },
+    licensesOriginalBy: { en: 'Original project by', pl: 'Oryginalny projekt:' },
+    licensesLicenseMIT: { en: 'Licensed under the MIT License.', pl: 'Na licencji MIT.' },
+    licensesSource: { en: 'Source:', pl: 'Źródło:' },
     playChip: { en: 'PLAY', pl: 'GRAJ' },
     searchPlaceholder: { en: 'Search games (inactive in MVP)', pl: 'Szukaj gier (nieaktywne w MVP)' },
     searchAria: { en: 'Search games', pl: 'Szukaj gier' }

@@ -21,6 +21,18 @@ canvas {
   text-align: center;
 }
 
+.game-credit {
+  margin-top: 1rem;
+  font-size: 0.85rem;
+  text-align: center;
+  color: rgba(203, 213, 255, 0.78);
+}
+
+.game-credit a {
+  color: inherit;
+  text-decoration: underline;
+}
+
 .dpad button[data-dir="up"],
 .dpad button[data-dir="down"],
 .dpad button[data-dir="left"],

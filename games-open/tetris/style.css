@@ -29,6 +29,18 @@ canvas {
   text-align: center;
 }
 
+.game-credit {
+  margin-top: 1rem;
+  font-size: 0.85rem;
+  text-align: center;
+  color: rgba(203, 213, 255, 0.78);
+}
+
+.game-credit a {
+  color: inherit;
+  text-decoration: underline;
+}
+
 @media (max-width: 520px) {
   .scoreboard {
     width: 100%;
