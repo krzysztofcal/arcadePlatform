@@ -1,4 +1,3 @@
-<<'EOF'
 // Minimal Upstash REST client (no extra deps).
 const BASE = process.env.UPSTASH_REDIS_REST_URL;
 const TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN;
@@ -8,7 +7,7 @@ if (!BASE || !TOKEN) {
   console.warn("[store-upstash] Missing UPSTASH env; functions will fail until set.");
 }
 
-// Path-style GET commands for simple ops
+// Path-style commands for simple ops
 async function call(cmd, ...args) {
   const url = `${BASE}/${cmd}/${args.map(encodeURIComponent).join("/")}`;
   const res = await fetch(url, {
@@ -42,6 +41,3 @@ export const store = {
     return data.result;
   },
 };
-EOF
-
-
