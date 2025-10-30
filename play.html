@@ -47,22 +47,50 @@
       if (creditsEl) {
         const idValue = (game.id || '').toLowerCase();
         const slugValue = (game.slug || '').toLowerCase();
-        const isTRex = idValue === 't-rex' || slugValue === 't-rex-runner';
-        if (isTRex) {
-          const renderTrexCredits = (lang) => {
-            const lookup = {
-              pl: '„T-Rex Runner” © wayou — licencja MIT. Źródło: <a href="https://github.com/wayou/t-rex-runner" target="_blank" rel="noopener">GitHub</a>',
-              en: '“T-Rex Runner” © wayou — MIT License. Source: <a href="https://github.com/wayou/t-rex-runner" target="_blank" rel="noopener">GitHub</a>'
-            };
-            const next = lookup[lang] || lookup.en;
-            creditsEl.innerHTML = next;
-            creditsEl.hidden = false;
+        const creditMap = new Map();
+        const registerCredits = (keys, entry) => {
+          (Array.isArray(keys) ? keys : [keys]).forEach((key) => {
+            if (typeof key === 'string' && key.trim()) {
+              creditMap.set(key.trim().toLowerCase(), entry);
+            }
+          });
+        };
+
+        registerCredits(['t-rex', 'trex', 't-rex-runner'], {
+          pl: '„T-Rex Runner” © wayou — licencja MIT. Źródło: <a href="https://github.com/wayou/t-rex-runner" target="_blank" rel="noopener noreferrer">GitHub</a>',
+          en: '“T-Rex Runner” © wayou — MIT License. Source: <a href="https://github.com/wayou/t-rex-runner" target="_blank" rel="noopener noreferrer">GitHub</a>'
+        });
+        registerCredits(['2048', 'open-2048'], {
+          pl: '„2048” autorstwa Gabriele Cirulli — licencja MIT. Źródło: <a href="https://github.com/gabrielecirulli/2048" target="_blank" rel="noopener noreferrer">GitHub</a>',
+          en: '“2048” by Gabriele Cirulli — MIT License. Source: <a href="https://github.com/gabrielecirulli/2048" target="_blank" rel="noopener noreferrer">GitHub</a>'
+        });
+        registerCredits(['pacman', 'open-pacman'], {
+          pl: '„Pacman” autorstwa Dale Harvey — licencja MIT. Źródło: <a href="https://github.com/daleharvey/pacman" target="_blank" rel="noopener noreferrer">GitHub</a>',
+          en: '“Pacman” by Dale Harvey — MIT License. Source: <a href="https://github.com/daleharvey/pacman" target="_blank" rel="noopener noreferrer">GitHub</a>'
+        });
+        registerCredits(['tetris', 'open-tetris'], {
+          pl: '„Canvas Tetris” autorstwa Dionysis Zindros — licencja MIT. Źródło: <a href="https://github.com/dionyziz/canvas-tetris" target="_blank" rel="noopener noreferrer">GitHub</a>',
+          en: '“Canvas Tetris” by Dionysis Zindros — MIT License. Source: <a href="https://github.com/dionyziz/canvas-tetris" target="_blank" rel="noopener noreferrer">GitHub</a>'
+        });
+
+        const lookupKey = [idValue, slugValue].find((value) => value && creditMap.has(value)) || null;
+        if (lookupKey) {
+          const renderCredits = (lang) => {
+            const entry = creditMap.get(lookupKey) || {};
+            const next = entry[lang] || entry.en || '';
+            if (next) {
+              creditsEl.innerHTML = next;
+              creditsEl.hidden = false;
+            } else {
+              creditsEl.hidden = true;
+              creditsEl.textContent = '';
+            }
           };
           const currentLang = (window.I18N && typeof window.I18N.getLang === 'function') ? window.I18N.getLang() : 'en';
-          renderTrexCredits(currentLang);
+          renderCredits(currentLang);
           document.addEventListener('langchange', (ev) => {
             const lang = (ev && ev.detail && ev.detail.lang) || (window.I18N && window.I18N.getLang && window.I18N.getLang()) || 'en';
-            renderTrexCredits(lang);
+            renderCredits(lang);
           });
         } else {
           creditsEl.hidden = true;

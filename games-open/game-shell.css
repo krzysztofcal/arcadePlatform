@@ -180,6 +180,18 @@
   font-size: 0.9rem;
 }
 
+.game-credit {
+  margin-top: 1rem;
+  font-size: 0.85rem;
+  text-align: center;
+  color: rgba(203, 213, 255, 0.78);
+}
+
+.game-credit a {
+  color: inherit;
+  text-decoration: underline;
+}
+
 .overlay-banner {
   position: absolute;
   inset: 0;
