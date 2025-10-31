@@ -11,6 +11,7 @@ let score = 0;
 let best = Number(localStorage.getItem("ah-2048-best")) || 0;
 const BEST_AWARDED_KEY = "ah-2048-best-awarded";
 let lastAwardedBest = Number(localStorage.getItem(BEST_AWARDED_KEY)) || 0;
+let pendingBestGrant = null;
 let overlayEl = null;
 let touchStart = null;
 
@@ -43,25 +44,40 @@ function updateScore() {
 function maybeGrantPersonalBest(previousBest) {
   const baseline = Math.max(previousBest || 0, lastAwardedBest || 0);
   if (best <= baseline) return;
-  let granted = 0;
-  const points = window.Points;
-  if (points && typeof points.grantPersonalBest === "function") {
-    try {
-      granted = points.grantPersonalBest("2048", {
-        score: best,
-        previousBest: baseline
-      }) || 0;
-    } catch (_error) {
-      granted = 0;
+  if (pendingBestGrant && best <= pendingBestGrant) return;
+  pendingBestGrant = best;
+
+  const finalize = (granted) => {
+    pendingBestGrant = null;
+    if (!Number.isFinite(granted) || granted <= 0) {
+      return;
     }
-  }
-  if (granted > 0) {
     lastAwardedBest = best;
     try {
       localStorage.setItem(BEST_AWARDED_KEY, String(best));
     } catch (_error) {
       /* ignore */
     }
+  };
+
+  const points = window.Points;
+  if (!points || typeof points.grantPersonalBest !== "function") {
+    finalize(0);
+    return;
+  }
+
+  try {
+    const result = points.grantPersonalBest("2048", {
+      score: best,
+      previousBest: baseline
+    });
+    if (result && typeof result.then === "function") {
+      result.then((value) => finalize(Number(value) || 0)).catch(() => finalize(0));
+    } else {
+      finalize(Number(result) || 0);
+    }
+  } catch (_error) {
+    finalize(0);
   }
 }
 
