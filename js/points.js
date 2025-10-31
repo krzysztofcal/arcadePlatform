@@ -553,9 +553,16 @@
       this.state.games[slug] = record;
       if (!this.state.bestByGame) this.state.bestByGame = {};
       this.state.bestByGame[slug] = Math.max(Number(this.state.bestByGame[slug]) || 0, rawScore);
-      this._persist();
-      this._emitUpdate();
-      return 0;
+      return this._applyServerAward(amount, {
+        reason: 'personalBest',
+        metadata: {
+          gameId: slug,
+          score: rawScore,
+          previousBest: baseline,
+          delta,
+          suggestedAmount: Number(details && details.amount) || null
+        }
+      });
     }
 
     recordScore(gameId, score){
