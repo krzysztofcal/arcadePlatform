@@ -1,61 +1,32 @@
+// Minimal client for the Netlify XP function.
+// Exposes window.XPClient.postWindow({ gameId, windowStart, windowEnd, visibilitySeconds, inputEvents })
 (function () {
   const FN_URL = "/.netlify/functions/award-xp";
-  const USER_KEY = "kcswh:userId";
-  const SESSION_KEY = "kcswh:sessionId";
 
-  function ensureIds() {
+  function ids() {
     try {
-      const ls = window.localStorage;
-      let userId = ls.getItem(USER_KEY);
-      let sessionId = ls.getItem(SESSION_KEY);
-      if (!userId) {
-        userId = (crypto.randomUUID?.() || Math.random().toString(36).slice(2));
-        ls.setItem(USER_KEY, userId);
-      }
-      if (!sessionId) {
-        sessionId = (crypto.randomUUID?.() || Math.random().toString(36).slice(2));
-        ls.setItem(SESSION_KEY, sessionId);
-      }
+      const ls = localStorage;
+      let userId = ls.getItem("kcswh:userId");
+      let sessionId = ls.getItem("kcswh:sessionId");
+      if (!userId) { userId = (crypto.randomUUID?.() || Math.random().toString(36).slice(2)); ls.setItem("kcswh:userId", userId); }
+      if (!sessionId) { sessionId = (crypto.randomUUID?.() || Math.random().toString(36).slice(2)); ls.setItem("kcswh:sessionId", sessionId); }
       return { userId, sessionId };
-    } catch (_) {
-      const fallback = Math.random().toString(36).slice(2);
-      return { userId: `anon-${fallback}`, sessionId: `sess-${Date.now()}` };
+    } catch {
+      return { userId: "anon", sessionId: "s_"+Date.now() };
     }
   }
 
-  async function postWindow(payload) {
-    const { userId, sessionId } = ensureIds();
-    const body = Object.assign({}, payload, { userId, sessionId });
+  async function postWindow({ gameId, windowStart, windowEnd, visibilitySeconds, inputEvents }) {
+    const { userId, sessionId } = ids();
     const res = await fetch(FN_URL, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-      cache: "no-store",
+      body: JSON.stringify({ userId, gameId, sessionId, windowStart, windowEnd, visibilitySeconds, inputEvents }),
       credentials: "omit",
+      cache: "no-store",
     });
-    if (!res.ok) {
-      const text = await res.text().catch(() => "");
-      throw new Error(`XP request failed (${res.status}) ${text}`.trim());
-    }
     return res.json();
   }
 
-  async function fetchStatus() {
-    const { userId, sessionId } = ensureIds();
-    const body = { userId, sessionId, gameId: "status", statusOnly: true };
-    const res = await fetch(FN_URL, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-      cache: "no-store",
-      credentials: "omit",
-    });
-    if (!res.ok) {
-      const text = await res.text().catch(() => "");
-      throw new Error(`XP status failed (${res.status}) ${text}`.trim());
-    }
-    return res.json();
-  }
-
-  window.XPClient = { postWindow, fetchStatus };
+  window.XPClient = { postWindow };
 })();
