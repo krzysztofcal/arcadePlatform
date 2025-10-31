@@ -53,7 +53,7 @@
 
       if (typeof points.createActivityTracker === 'function'){
         try {
-          const tickSeconds = (service && service.options && service.options.tickSeconds) || 15;
+          const tickSeconds = (service && service.options && service.options.tickSeconds) || 30;
           if (typeof window !== 'undefined' && window.activityTracker && typeof window.activityTracker.stop === 'function'){
             try { window.activityTracker.stop(); } catch (_){ /* noop */ }
           }
@@ -64,11 +64,22 @@
               allowedOrigins.push(window.location.origin);
             }
           } catch (_){ /* noop */ }
-          state.tracker = points.createActivityTracker(doc, seconds => {
+          state.tracker = points.createActivityTracker(doc, detail => {
             if (!state.service || typeof state.service.tick !== 'function') return;
-            const ticks = seconds && tickSeconds ? Math.max(1, Math.round(seconds / tickSeconds)) : 1;
-            try { state.service.tick(ticks); } catch (_){ /* noop */ }
-          }, { tickSeconds, messageType, allowedOrigins });
+            const payload = typeof detail === 'number'
+              ? {
+                  windowStart: Date.now() - tickSeconds * 1000,
+                  windowEnd: Date.now(),
+                  seconds: tickSeconds,
+                  visibilitySeconds: tickSeconds,
+                  inputEvents: 1
+                }
+              : Object.assign({}, detail);
+            if (!payload.gameId){ payload.gameId = slug || null; }
+            if (!Number.isFinite(payload.visibilitySeconds)){ payload.visibilitySeconds = Math.round(payload.seconds || tickSeconds); }
+            if (!Number.isFinite(payload.inputEvents)){ payload.inputEvents = 0; }
+            try { state.service.tick(payload); } catch (_){ /* noop */ }
+          }, { tickSeconds, chunkMs: tickSeconds * 1000, messageType, allowedOrigins });
           if (typeof window !== 'undefined'){
             try { window.activityTracker = state.tracker; } catch (_){ /* noop */ }
           }
