@@ -15,6 +15,7 @@ const CORS_ALLOW = (process.env.XP_CORS_ALLOW ?? "")
 
 const LAST_OK_TTL_SEC = 2 * 24 * 3600;  // keep lastOk ~2 days
 const IDEM_TTL_SEC = 24 * 3600;
+const LOCK_TTL_MS = Number(process.env.XP_LOCK_TTL_MS ?? 3_000);
 
 const json = (statusCode, obj, origin) => ({
   statusCode,
@@ -42,6 +43,7 @@ const hash = (s) => crypto.createHash("sha256").update(s).digest("hex");
 const keyIdem  = (u, s, g, start, end) => `${KEY_NS}:idemp:${hash(`${u}|${s}|${g}|${start}|${end}`)}`;
 const keyDaily = (u, day = dayKey()) => `${KEY_NS}:daily:${u}:${day}`;
 const keyLast  = (u, g) => `${KEY_NS}:lastok:${u}:${g}`; // NEW: last accepted end timestamp
+const keyLock  = (u, g) => `${KEY_NS}:lock:${u}:${g}`;
 
 export async function handler(event) {
   const origin = event.headers?.origin;
@@ -81,12 +83,14 @@ export async function handler(event) {
   const dailyKeyK = keyDaily(userId, today);
   const lastKeyK  = keyLast(userId, gameId);
   const idemK     = keyIdem(userId, sessionId, gameId, windowStart, windowEnd);
+  const lockKeyK  = keyLock(userId, gameId);
 
   // Atomic script: idempotency → cap → spacing (≥ CHUNK_MS since lastOk) → INCRBY → set lastOk(end) → set idem
   const script = `
     local daily = KEYS[1]
     local lastk = KEYS[2]
     local idem  = KEYS[3]
+    local lockk = KEYS[4]
     local now     = tonumber(ARGV[1])
     local chunk   = tonumber(ARGV[2])
     local step    = tonumber(ARGV[3])
@@ -94,22 +98,36 @@ export async function handler(event) {
     local idemTtl = tonumber(ARGV[5])
     local endTs   = tonumber(ARGV[6])
     local lastTtl = tonumber(ARGV[7])
+    local lockTtl = tonumber(ARGV[8])
+
+    local locked = redis.call('SET', lockk, tostring(now), 'NX', 'PX', lockTtl)
+    if not locked then
+      local current = tonumber(redis.call('GET', daily) or '0')
+      return {0, current, 4}  -- someone else holds the lock
+    end
+
+    local function release()
+      redis.call('DEL', lockk)
+    end
 
     -- Idempotent?
     if redis.call('GET', idem) then
       local t = tonumber(redis.call('GET', daily) or '0')
+      release()
       return {0, t, 1}    -- idempotent
     end
 
     local current = tonumber(redis.call('GET', daily) or '0')
     if current >= cap then
       redis.call('SETEX', idem, idemTtl, '1')
+      release()
       return {0, current, 2}  -- capped
     end
 
     local lastOk = tonumber(redis.call('GET', lastk) or '0')
     if (endTs - lastOk) < chunk then
       -- too soon since last accepted window end
+      release()
       return {0, current, 3}
     end
 
@@ -120,12 +138,13 @@ export async function handler(event) {
     local newtotal = tonumber(redis.call('INCRBY', daily, grant))
     redis.call('SETEX', lastk, lastTtl, tostring(endTs))
     redis.call('SETEX', idem, idemTtl, '1')
+    release()
     return {grant, newtotal, 0} -- ok
   `;
 
   const res = await store.eval(
     script,
-    [dailyKeyK, lastKeyK, idemK],
+    [dailyKeyK, lastKeyK, idemK, lockKeyK],
     [
       String(now),
       String(CHUNK_MS),
@@ -134,17 +153,19 @@ export async function handler(event) {
       String(IDEM_TTL_SEC),
       String(windowEnd),
       String(LAST_OK_TTL_SEC),
+      String(LOCK_TTL_MS),
     ]
   );
 
   const granted = Number(res?.[0]) || 0;
   const total   = Number(res?.[1]) || 0;
-  const status  = Number(res?.[2]) || 0; // 0=ok,1=idempotent,2=capped,3=too_soon
+  const status  = Number(res?.[2]) || 0; // 0=ok,1=idempotent,2=capped,3=too_soon,4=locked
 
   const payload = { ok: true, awarded: granted, totalToday: total, cap: DAILY_CAP };
   if (status === 1) payload.idempotent = true;
   if (status === 2) payload.capped = true;
   if (status === 3) payload.tooSoon = true;
+  if (status === 4) payload.locked = true;
 
   return json(200, payload, origin);
 }

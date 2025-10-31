@@ -625,7 +625,7 @@ async function init(){
     try { pointsService.startSession(slug); } catch (_){ }
   }
   if (pointsModule && typeof pointsModule.createActivityTracker === 'function' && pointsService){
-    const tickSeconds = 15;
+    const tickSeconds = (pointsService && pointsService.options && pointsService.options.tickSeconds) || 30;
     const messageType = 'kcswh:activity';
     const allowedOrigins = [];
     try {
@@ -640,11 +640,22 @@ async function init(){
       try { activityTracker.stop(); } catch (_){ }
     }
     try {
-      activityTracker = pointsModule.createActivityTracker(document, seconds => {
+      activityTracker = pointsModule.createActivityTracker(document, detail => {
         if (!pointsService || typeof pointsService.tick !== 'function') return;
-        const ticks = seconds && tickSeconds ? Math.max(1, Math.round(seconds / tickSeconds)) : 1;
-        try { pointsService.tick(ticks); } catch (_){ }
-      }, { tickSeconds, messageType, allowedOrigins });
+        const payload = typeof detail === 'number'
+          ? {
+              windowStart: Date.now() - tickSeconds * 1000,
+              windowEnd: Date.now(),
+              seconds: tickSeconds,
+              visibilitySeconds: tickSeconds,
+              inputEvents: 1
+            }
+          : Object.assign({}, detail);
+        if (!payload.gameId){ payload.gameId = slug || null; }
+        if (!Number.isFinite(payload.visibilitySeconds)){ payload.visibilitySeconds = Math.round(payload.seconds || tickSeconds); }
+        if (!Number.isFinite(payload.inputEvents)){ payload.inputEvents = 0; }
+        try { pointsService.tick(payload); } catch (_){ }
+      }, { tickSeconds, chunkMs: tickSeconds * 1000, messageType, allowedOrigins });
       if (typeof window !== 'undefined'){
         try { window.activityTracker = activityTracker; } catch (_){ }
       }

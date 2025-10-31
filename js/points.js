@@ -4,13 +4,9 @@
   const STORAGE_KEY = 'portal.points.v1';
   const MAX_STREAK = 7;
   const DEFAULTS = {
-    tickSeconds: 15,
-    tickXp: 5,
-    sessionCap: 200,
+    tickSeconds: 30,
     dailyCap: 600,
-    dailyBonusBase: 10,
-    firstPlayBonus: 15,
-    autoDailyBonus: true,
+    autoDailyBonus: false,
     showToasts: true
   };
 
@@ -101,6 +97,8 @@
       this.currentSession = null;
       this.listeners = { update: new Set(), levelup: new Set(), award: new Set() };
       this._boundStorageListener = null;
+      this._xpQueue = Promise.resolve();
+      this._xpClient = null;
 
       this._ensureDayState(now());
       if (opts.autoDailyBonus !== false){
@@ -140,6 +138,7 @@
         totalXp,
         xpToday: this.state.xpToday || 0,
         level,
+        dailyCap: this.state.dailyCap || this.options.dailyCap || 0,
         nextLevelXp,
         xpToNext,
         xpIntoLevel,
@@ -157,39 +156,28 @@
       const ts = now();
       this._ensureDayState(ts);
       this.currentSession = {
+        id: generateId(),
         slug: slug || null,
         startedAt: new Date(ts).toISOString(),
         earned: 0
       };
-      const today = this.state.lastDayKey;
-
       if (slug){
-        if (!this.state.games) this.state.games = {};
-        const info = this.state.games[slug] || {};
-        if (info.lastFirstBonusKey !== today){
-          info.lastFirstBonusKey = today;
-          this._awardXp(this.options.firstPlayBonus, {
-            reason: 'first_play',
-            metadata: { slug }
-          });
-        }
+        if (!this.state.games || typeof this.state.games !== 'object'){ this.state.games = {}; }
+        const info = Object.assign({}, this.state.games[slug]);
         info.lastPlayedAt = new Date(ts).toISOString();
         this.state.games[slug] = info;
       }
-
-      this._maybeAwardDailyBonus();
       this._persist();
       this._emitUpdate();
     }
 
-    tick(multiplier){
-      const ticks = Number.isFinite(multiplier) && multiplier > 0 ? Math.floor(multiplier) : 1;
-      if (!ticks) return 0;
-      this._ensureDayState(now());
-      return this._awardXp(ticks * this.options.tickXp, {
-        reason: 'activity',
-        metadata: { ticks }
-      });
+    tick(detail){
+      if (!detail) return 0;
+      if (typeof detail === 'number'){ return 0; }
+      try {
+        this._queueWindow(detail);
+      } catch (_){ }
+      return 0;
     }
 
     endSession(){
@@ -219,7 +207,8 @@
         lastLoginBonusKey: null,
         streak: { count: 0, lastKey: null },
         games: {},
-        bestByGame: {}
+        bestByGame: {},
+        dailyCap: this.options.dailyCap || 0
       };
     }
 
@@ -232,6 +221,7 @@
       if (!merged.streak) merged.streak = { count: 0, lastKey: null };
       if (!merged.games) merged.games = {};
       if (!merged.bestByGame || typeof merged.bestByGame !== 'object') merged.bestByGame = {};
+      if (!Number.isFinite(merged.dailyCap)) merged.dailyCap = this.options.dailyCap || 0;
       return merged;
     }
 
@@ -270,56 +260,148 @@
         return 0;
       }
       this.state.lastLoginBonusKey = today;
-      const streakCount = Math.max(1, Math.min(MAX_STREAK, (this.state.streak && this.state.streak.count) || 1));
-      const amount = this.options.dailyBonusBase * streakCount;
-      const granted = this._awardXp(amount, {
-        reason: 'daily_bonus',
-        bypassSession: true,
-        metadata: { streakCount }
-      });
       this._persist();
       this._emitUpdate();
-      return granted;
+      return 0;
     }
 
-    _awardXp(amount, options){
-      const opts = options || {};
-      if (!amount || amount <= 0) return 0;
-      if (!this.state) return 0;
-
-      const dayRemaining = Math.max(0, this.options.dailyCap - (this.state.xpToday || 0));
-      let sessionRemaining = dayRemaining;
-      if (!opts.bypassSession && this.currentSession){
-        sessionRemaining = Math.min(sessionRemaining, Math.max(0, this.options.sessionCap - (this.currentSession.earned || 0)));
+    _queueWindow(detail){
+      if (!detail || typeof detail !== 'object') return;
+      if (!this._xpQueue){
+        this._xpQueue = Promise.resolve();
       }
-      const allowed = Math.max(0, Math.min(amount, dayRemaining, sessionRemaining));
-      if (!allowed){
-        this._emitUpdate();
+      const payload = Object.assign({}, detail);
+      this._xpQueue = this._xpQueue
+        .then(() => this._sendWindow(payload))
+        .catch(() => {});
+    }
+
+    async _sendWindow(detail){
+      const client = this._getXpClient();
+      if (!client || typeof client.postWindow !== 'function'){
+        const attempt = Number(detail && detail.__retry) || 0;
+        if (attempt >= 5){ return 0; }
+        if (detail){ detail.__retry = attempt + 1; }
+        await new Promise(resolve => setTimeout(resolve, 500));
+        return this._sendWindow(detail);
+      }
+      if (detail){ delete detail.__retry; }
+
+      const slug = detail.gameId || (this.currentSession && this.currentSession.slug) || 'unknown';
+      const windowStart = Number(detail.windowStart);
+      const windowEnd = Number(detail.windowEnd);
+      const visibilitySeconds = Math.max(0, Math.floor(Number(detail.visibilitySeconds) || 0));
+      const inputEvents = Math.max(0, Math.floor(Number(detail.inputEvents) || 0));
+
+      if (!Number.isFinite(windowStart) || !Number.isFinite(windowEnd) || windowEnd <= windowStart){
         return 0;
       }
-      const prevLevel = this.state.level || this._computeLevel(this.state.totalXp || 0);
-      this.state.totalXp = (this.state.totalXp || 0) + allowed;
-      this.state.xpToday = (this.state.xpToday || 0) + allowed;
-      this.state.level = this._computeLevel(this.state.totalXp);
-      this.state.updatedAt = new Date().toISOString();
-      if (!opts.bypassSession && this.currentSession){
-        this.currentSession.earned = (this.currentSession.earned || 0) + allowed;
+
+      let response;
+      try {
+        response = await client.postWindow({
+          gameId: slug,
+          windowStart,
+          windowEnd,
+          visibilitySeconds,
+          inputEvents
+        });
+      } catch (_){
+        return 0;
       }
+
+      if (!response || typeof response !== 'object'){ return 0; }
+
+      if (Number.isFinite(response.cap)){ this.state.dailyCap = Number(response.cap); }
+      if (Number.isFinite(response.totalToday)){ this.state.xpToday = Number(response.totalToday); }
+      this.state.lastServerSyncAt = new Date().toISOString();
+
+      const granted = Number(response.awarded) || 0;
+      return this._applyServerAward(granted, {
+        reason: 'activity',
+        metadata: {
+          windowStart,
+          windowEnd,
+          visibilitySeconds,
+          inputEvents,
+          status: response.status,
+          flags: {
+            idempotent: !!response.idempotent,
+            capped: !!response.capped,
+            tooSoon: !!response.tooSoon,
+            locked: !!response.locked
+          }
+        }
+      }, response);
+    }
+
+    _applyServerAward(amount, context, response){
+      if (!this.state) return 0;
+      const granted = Number(amount) || 0;
+      const prevLevel = this.state.level || this._computeLevel(this.state.totalXp || 0);
+
+      if (granted > 0){
+        this.state.totalXp = (this.state.totalXp || 0) + granted;
+        if (this.currentSession){
+          this.currentSession.earned = (this.currentSession.earned || 0) + granted;
+        }
+      }
+
+      if (!Number.isFinite(this.state.xpToday)){ this.state.xpToday = 0; }
+      if (response && Number.isFinite(response.totalToday)){
+        this.state.xpToday = Number(response.totalToday);
+      } else if (granted > 0){
+        this.state.xpToday = (this.state.xpToday || 0) + granted;
+      }
+
+      if (response && Number.isFinite(response.cap)){
+        this.state.dailyCap = Number(response.cap);
+      }
+
+      this.state.level = this._computeLevel(this.state.totalXp || 0);
+      this.state.updatedAt = new Date().toISOString();
+
+      this._persist();
+      this._emitUpdate();
+
+      if (granted <= 0){
+        return 0;
+      }
+
       const detail = {
-        amount: allowed,
-        reason: opts.reason || 'bonus',
-        metadata: opts.metadata || null,
+        amount: granted,
+        reason: (context && context.reason) || 'activity',
+        metadata: (context && context.metadata) || null,
         totalXp: this.state.totalXp,
         level: this.state.level,
         xpToday: this.state.xpToday
       };
-      this._persist();
-      this._emitUpdate();
       this._emit('award', detail);
       if (this.state.level > prevLevel){
-        this._handleLevelUp(this.state.level, allowed);
+        this._handleLevelUp(this.state.level, granted);
       }
-      return allowed;
+      return granted;
+    }
+
+    _getXpClient(){
+      if (this._xpClient && typeof this._xpClient.postWindow === 'function'){
+        return this._xpClient;
+      }
+      if (this.options && this.options.xpClient && typeof this.options.xpClient.postWindow === 'function'){
+        this._xpClient = this.options.xpClient;
+        return this._xpClient;
+      }
+      if (global && global.XPClient && typeof global.XPClient.postWindow === 'function'){
+        this._xpClient = global.XPClient;
+        return this._xpClient;
+      }
+      try {
+        if (typeof window !== 'undefined' && window.XPClient && typeof window.XPClient.postWindow === 'function'){
+          this._xpClient = window.XPClient;
+          return this._xpClient;
+        }
+      } catch (_){ }
+      return null;
     }
 
     _computeLevel(totalXp){
@@ -429,10 +511,8 @@
     }
 
     awardBonus(amount, metadata){
-      return this._awardXp(amount, {
-        reason: metadata && metadata.reason ? metadata.reason : 'bonus',
-        metadata
-      });
+      this._emitUpdate();
+      return 0;
     }
 
     awardPersonalBest(slug, details){
@@ -473,17 +553,9 @@
       this.state.games[slug] = record;
       if (!this.state.bestByGame) this.state.bestByGame = {};
       this.state.bestByGame[slug] = Math.max(Number(this.state.bestByGame[slug]) || 0, rawScore);
-      return this._awardXp(amount, {
-        reason: 'personal_best',
-        bypassSession: true,
-        metadata: {
-          slug,
-          score: rawScore,
-          previousBest: baseline,
-          delta,
-          amount
-        }
-      });
+      this._persist();
+      this._emitUpdate();
+      return 0;
     }
 
     recordScore(gameId, score){
@@ -535,7 +607,7 @@
       return { stop() {}, nudge() {}, setPaused() {} };
     }
 
-    const DEFAULTS = { tickSeconds: 10, idleTimeout: 30000, sampleMs: 1000, messageType: 'kcswh:activity' };
+    const DEFAULTS = { tickSeconds: 10, chunkMs: 30000, idleTimeout: 30000, sampleMs: 1000, messageType: 'kcswh:activity' };
     const opts = Object.assign({}, DEFAULTS, options || {});
 
     const win = doc.defaultView || (typeof window !== 'undefined' ? window : null);
@@ -550,22 +622,41 @@
     let destroyed = false;
     let paused = false;
     let lastActivity = now();
-    let accumSeconds = 0;
+    let lastSample = now();
+    let windowStart = lastSample;
+    let activeMs = 0;
+    let visibilityMs = 0;
+    let inputEvents = 0;
+
+    const chunkMs = Math.max(1000, Number(opts.chunkMs) || Math.max(1000, Number(opts.tickSeconds || 0) * 1000));
+    const sampleMs = Math.max(250, Number(opts.sampleMs) || 1000);
+    const idleTimeout = Math.max(chunkMs, Number(opts.idleTimeout) || 30000);
 
     const markActive = () => { lastActivity = now(); };
+    const countInput = () => { inputEvents++; markActive(); };
 
-    const sampleEvents = [
+    const activeEvents = [
       'pointerdown','pointermove','pointerup',
-      'touchstart','touchmove',
+      'touchstart','touchmove','touchend',
       'keydown'
     ];
+    const inputEventsList = ['pointerdown','touchstart','mousedown','keydown'];
 
-    sampleEvents.forEach(evt => {
+    activeEvents.forEach(evt => {
       try { doc.addEventListener(evt, markActive, { passive: true }); }
       catch (_){ doc.addEventListener(evt, markActive); }
     });
+    inputEventsList.forEach(evt => {
+      try { doc.addEventListener(evt, countInput, { passive: true }); }
+      catch (_){ doc.addEventListener(evt, countInput); }
+    });
 
-    const onVisibility = () => { paused = !!doc.hidden; };
+    const onVisibility = () => {
+      paused = !!doc.hidden;
+      if (!paused){
+        markActive();
+      }
+    };
     doc.addEventListener('visibilitychange', onVisibility, { passive: true });
 
     const msgHandler = (e) => {
@@ -584,31 +675,64 @@
     }
 
     const tickTimer = setInterval(() => {
-      if (destroyed || paused) return;
+      if (destroyed) return;
 
-      const idleFor = now() - lastActivity;
-      if (idleFor > opts.idleTimeout){
-        accumSeconds = 0;
+      const nowTs = now();
+      const delta = Math.max(0, nowTs - lastSample);
+      lastSample = nowTs;
+
+      if (paused){
+        windowStart = nowTs;
+        activeMs = 0;
+        visibilityMs = 0;
+        inputEvents = 0;
         return;
       }
 
-      accumSeconds += opts.sampleMs / 1000;
-      if (accumSeconds >= opts.tickSeconds){
-        accumSeconds = 0;
-        try { onTick(opts.tickSeconds); } catch (_){ }
+      if (!doc.hidden){
+        visibilityMs += delta;
       }
-    }, opts.sampleMs);
+
+      const idleFor = nowTs - lastActivity;
+      const isActive = !doc.hidden && idleFor <= idleTimeout;
+
+      if (isActive){
+        activeMs += delta;
+      }
+
+      if (activeMs >= chunkMs){
+        const detail = {
+          windowStart,
+          windowEnd: nowTs,
+          seconds: chunkMs / 1000,
+          visibilitySeconds: Math.round(visibilityMs / 1000),
+          inputEvents
+        };
+        try { onTick(detail); } catch (_){ }
+        windowStart = nowTs;
+        activeMs = 0;
+        visibilityMs = 0;
+        inputEvents = 0;
+        markActive();
+      }
+    }, sampleMs);
 
     const tracker = {
-      nudge(){ markActive(); },
-      setPaused(p){ paused = !!p; },
+      nudge(){ countInput(); },
+      setPaused(p){
+        paused = !!p;
+        if (!paused){
+          markActive();
+        }
+      },
       ping(){ markActive(); },
       stop(){
         if (destroyed) return;
         destroyed = true;
         clearInterval(tickTimer);
         doc.removeEventListener('visibilitychange', onVisibility);
-        sampleEvents.forEach(evt => doc.removeEventListener(evt, markActive));
+        activeEvents.forEach(evt => doc.removeEventListener(evt, markActive));
+        inputEventsList.forEach(evt => doc.removeEventListener(evt, countInput));
         if (win && typeof win.removeEventListener === 'function'){
           try { win.removeEventListener('message', msgHandler); } catch (_){ /* noop */ }
         }
