@@ -100,8 +100,9 @@ export async function handler(event) {
     local lastTtl = tonumber(ARGV[7])
     local lockTtl = tonumber(ARGV[8])
 
-    local locked = redis.call('SET', lockk, tostring(now), 'NX', 'PX', lockTtl)
-    if not locked then
+    -- Acquire lock with NX so only one invocation enters the critical section.
+    local locked = redis.call('SET', lockk, tostring(now), 'PX', lockTtl, 'NX')
+    if locked ~= 'OK' then
       local current = tonumber(redis.call('GET', daily) or '0')
       return {0, current, 4}  -- someone else holds the lock
     end
