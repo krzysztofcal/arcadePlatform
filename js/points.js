@@ -7,6 +7,10 @@
     showToasts: true,
     endpoint: '/.netlify/functions/xp-session'
   };
+  const CLIENT_INFO = {
+    app: 'arcade-hub-web',
+    version: 2
+  };
 
   function now(){ return Date.now ? Date.now() : new Date().getTime(); }
 
@@ -25,6 +29,10 @@
   function safeParse(json){
     if (!json) return null;
     try { return JSON.parse(json); } catch (_){ return null; }
+  }
+
+  function normalizeKeyName(name){
+    return String(name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
   }
 
   class PointsApiAdapter{
@@ -120,6 +128,10 @@
         endpoint: opts.endpoint || DEFAULTS.endpoint,
         fetch: opts.fetch
       });
+      this.tickSeconds = Number.isFinite(opts.tickSeconds) && opts.tickSeconds > 0
+        ? Number(opts.tickSeconds)
+        : DEFAULTS.tickSeconds;
+      this.clientInfo = Object.assign({}, CLIENT_INFO, opts.clientInfo || {});
       this.state = this._loadState();
       this.currentSession = null;
       this.listeners = { update: new Set(), levelup: new Set(), award: new Set() };
@@ -184,7 +196,9 @@
 
     startSession(slug){
       const startedAt = new Date().toISOString();
+      const sessionId = generateId();
       this.currentSession = {
+        id: sessionId,
         slug: slug || null,
         startedAt
       };
@@ -198,18 +212,25 @@
       }
       this._persist();
       this._emitUpdate();
-      this._queueSync('session_start', { slug: slug || null, startedAt }, { reason: 'session_start', silent: true });
+      this._queueSync('session_start', { slug: slug || null, startedAt, sessionId }, { reason: 'session_start', silent: true });
     }
 
     tick(multiplier){
       const ticks = Number.isFinite(multiplier) && multiplier > 0 ? Math.floor(multiplier) : 1;
       if (!ticks) return;
+      const seconds = ticks * this.tickSeconds;
+      const session = this.currentSession;
       const payload = {
         ticks,
-        slug: this.currentSession && this.currentSession.slug ? this.currentSession.slug : null,
-        startedAt: this.currentSession && this.currentSession.startedAt ? this.currentSession.startedAt : null,
-        timestamp: new Date().toISOString()
+        slug: session && session.slug ? session.slug : null,
+        startedAt: session && session.startedAt ? session.startedAt : null,
+        sessionId: session && session.id ? session.id : null,
+        timestamp: new Date().toISOString(),
+        tickSeconds: this.tickSeconds
       };
+      if (Number.isFinite(seconds) && seconds > 0){
+        payload.seconds = seconds;
+      }
       this._queueSync('activity', payload, { reason: 'activity' });
     }
 
@@ -221,8 +242,9 @@
       this._queueSync('session_end', {
         slug: session.slug || null,
         startedAt: session.startedAt || null,
-        endedAt: new Date().toISOString()
-      }, { reason: 'session_end', silent: true });
+        endedAt: new Date().toISOString(),
+        sessionId: session.id || null
+      }, { reason: 'session_end', silent: true, session });
     }
 
     awardBonus(amount, metadata){
@@ -234,6 +256,9 @@
         amount: value,
         metadata: metadata || null
       };
+      if (this.currentSession && this.currentSession.id){
+        payload.sessionId = this.currentSession.id;
+      }
       return this._queueSync('bonus', payload, { reason: 'bonus' })
         .then(result => this._extractAwardAmount(result))
         .catch(() => 0);
@@ -276,6 +301,9 @@
         previousBest: baseline,
         suggestedAward: Number.isFinite(suggested) ? suggested : null
       };
+      if (this.currentSession && this.currentSession.id){
+        payload.sessionId = this.currentSession.id;
+      }
       return this._queueSync('personal_best', payload, { reason: 'personal_best' })
         .then(result => this._extractAwardAmount(result))
         .catch(() => 0);
@@ -292,7 +320,11 @@
         this.state.bestByGame[slug] = score;
         this._persist();
       }
-      this._queueSync('score', { slug, score }, { reason: 'score', silent: true });
+      const payload = { slug, score };
+      if (this.currentSession && this.currentSession.id){
+        payload.sessionId = this.currentSession.id;
+      }
+      this._queueSync('score', payload, { reason: 'score', silent: true });
     }
 
     refreshFromServer(){
@@ -348,26 +380,69 @@
     }
 
     _queueSync(eventType, payload, meta){
-      const request = this._buildRequest(eventType, payload);
+      const metaOptions = meta ? Object.assign({}, meta) : {};
+      const request = this._buildRequest(eventType, payload, metaOptions);
       if (!request){
         return Promise.resolve(null);
       }
-      const task = () => this._sendRequest(request, meta || {});
+      const task = () => this._sendRequest(request, metaOptions);
       this._syncQueue = this._syncQueue.then(task, task);
       return this._syncQueue;
     }
 
-    _buildRequest(eventType, payload){
+    _buildRequest(eventType, payload, meta){
       const type = eventType || 'activity';
+      const session = meta && meta.session ? meta.session : this.currentSession;
+      const sessionId = session && session.id ? session.id : null;
+      const requestPayload = Object.assign({}, payload || {});
+      if (sessionId && !requestPayload.sessionId){
+        requestPayload.sessionId = sessionId;
+      }
+      if (!requestPayload.slug && session && session.slug){
+        requestPayload.slug = session.slug;
+      }
+      if (!requestPayload.startedAt && session && session.startedAt){
+        requestPayload.startedAt = session.startedAt;
+      }
       return {
         version: 1,
         event: type,
         type,
+        eventType: type,
+        action: type,
+        kind: type,
         userId: this.state.userId,
+        sessionId,
+        session: sessionId ? {
+          id: sessionId,
+          slug: session && session.slug ? session.slug : null,
+          startedAt: session && session.startedAt ? session.startedAt : null
+        } : null,
+        client: this._buildClientDescriptor(),
         timestamp: new Date().toISOString(),
-        payload: payload || {},
+        payload: requestPayload,
         snapshot: this._buildClientSnapshot()
       };
+    }
+
+    _buildClientDescriptor(){
+      const descriptor = Object.assign({}, this.clientInfo || {});
+      if (!descriptor.app){
+        descriptor.app = CLIENT_INFO.app;
+      }
+      if (typeof descriptor.version === 'undefined'){
+        descriptor.version = CLIENT_INFO.version;
+      }
+      descriptor.sentAt = new Date().toISOString();
+      if (typeof navigator !== 'undefined'){
+        if (!descriptor.locale && navigator.language){
+          descriptor.locale = navigator.language;
+        }
+        if (!descriptor.userAgent && navigator.userAgent){
+          descriptor.userAgent = navigator.userAgent;
+        }
+      }
+      return descriptor;
     }
 
     _buildClientSnapshot(){
@@ -392,15 +467,165 @@
 
     _extractSnapshot(response){
       if (!response || typeof response !== 'object') return null;
-      const pick = (candidate) => (candidate && typeof candidate === 'object') ? candidate : null;
-      const direct = pick(response.snapshot)
-        || pick(response.state)
-        || pick(response.data)
-        || pick(response.result);
-      if (direct) return direct;
-      if ('totalXp' in response || 'level' in response || 'xpToday' in response || 'streak' in response || 'games' in response || 'bestByGame' in response){
-        return response;
+      const visited = new WeakSet();
+      const queue = [response];
+      while (queue.length){
+        const candidate = queue.shift();
+        const normalized = this._normalizeSnapshotCandidate(candidate, visited);
+        if (normalized){
+          return normalized;
+        }
+        const children = this._collectSnapshotChildren(candidate, visited);
+        if (children && children.length){
+          Array.prototype.push.apply(queue, children);
+        }
       }
+      return null;
+    }
+
+    _collectSnapshotChildren(candidate, visited){
+      if (!candidate || typeof candidate !== 'object') return [];
+      const tracker = visited || new WeakSet();
+      if (Array.isArray(candidate)){
+        const items = [];
+        candidate.forEach((entry) => {
+          if (!entry || typeof entry !== 'object') return;
+          if (tracker.has(entry)) return;
+          items.push(entry);
+        });
+        return items;
+      }
+      const keys = ['snapshot', 'state', 'data', 'result', 'points', 'xp', 'body', 'detail', 'summary', 'payload'];
+      const children = [];
+      keys.forEach((key) => {
+        if (!Object.prototype.hasOwnProperty.call(candidate, key)) return;
+        const value = candidate[key];
+        if (!value || typeof value !== 'object') return;
+        if (tracker.has(value)) return;
+        children.push(value);
+      });
+      return children;
+    }
+
+    _normalizeSnapshotCandidate(candidate, visited){
+      if (!candidate || typeof candidate !== 'object') return null;
+      const tracker = visited || new WeakSet();
+      if (tracker.has(candidate)) return null;
+      tracker.add(candidate);
+
+      if (Array.isArray(candidate)){
+        for (let i = 0; i < candidate.length; i += 1){
+          const normalized = this._normalizeSnapshotCandidate(candidate[i], tracker);
+          if (normalized) return normalized;
+        }
+        return null;
+      }
+
+      const keys = Object.keys(candidate);
+      const normalizedKeys = {};
+      keys.forEach((key) => {
+        const normalized = normalizeKeyName(key);
+        if (!normalizedKeys[normalized]){
+          normalizedKeys[normalized] = key;
+        }
+      });
+
+      const readKey = (aliases) => {
+        for (let i = 0; i < aliases.length; i += 1){
+          const alias = aliases[i];
+          const normalized = normalizeKeyName(alias);
+          const actual = normalizedKeys[normalized];
+          if (actual && Object.prototype.hasOwnProperty.call(candidate, actual)){
+            return candidate[actual];
+          }
+        }
+        return undefined;
+      };
+
+      const result = {};
+      let mutated = false;
+
+      const assignNumber = (target, aliases) => {
+        const raw = readKey(aliases);
+        if (raw === undefined || raw === null) return;
+        if (typeof raw === 'object') return;
+        const value = Number(raw);
+        if (Number.isFinite(value)){
+          result[target] = value;
+          mutated = true;
+        }
+      };
+
+      const assignString = (target, aliases) => {
+        const raw = readKey(aliases);
+        if (raw === undefined || raw === null) return;
+        if (typeof raw === 'object') return;
+        const value = String(raw);
+        if (value){
+          result[target] = value;
+          mutated = true;
+        }
+      };
+
+      const assignObject = (target, aliases) => {
+        const raw = readKey(aliases);
+        if (!raw || typeof raw !== 'object') return;
+        result[target] = raw;
+        mutated = true;
+      };
+
+      assignString('userId', ['userId', 'userid', 'user_id', 'id']);
+      assignNumber('totalXp', ['totalXp', 'totalxp', 'total_xp', 'xptotal', 'total']);
+      assignNumber('xpToday', ['xpToday', 'xp_today', 'todayXp', 'today', 'dailyxp', 'xpdaily']);
+      assignNumber('level', ['level', 'lvl', 'currentLevel']);
+      assignString('lastDayKey', ['lastDayKey', 'last_day_key', 'dayKey']);
+      assignString('updatedAt', ['updatedAt', 'updated_at', 'lastUpdated']);
+      assignObject('streak', ['streak', 'streakInfo']);
+      assignObject('games', ['games', 'gameStats']);
+      assignObject('bestByGame', ['bestByGame', 'best_by_game', 'bestScores']);
+
+      if (Object.prototype.hasOwnProperty.call(candidate, 'xpDelta')){
+        const deltaValue = Number(candidate.xpDelta);
+        if (Number.isFinite(deltaValue)){
+          result.xpDelta = deltaValue;
+          mutated = true;
+        }
+      } else if (Object.prototype.hasOwnProperty.call(candidate, 'xpdelta')){
+        const deltaValue = Number(candidate.xpdelta);
+        if (Number.isFinite(deltaValue)){
+          result.xpDelta = deltaValue;
+          mutated = true;
+        }
+      }
+
+      const hasDirectSnapshotFields = (
+        Object.prototype.hasOwnProperty.call(candidate, 'totalXp')
+        || Object.prototype.hasOwnProperty.call(candidate, 'xpToday')
+        || Object.prototype.hasOwnProperty.call(candidate, 'level')
+        || Object.prototype.hasOwnProperty.call(candidate, 'streak')
+        || Object.prototype.hasOwnProperty.call(candidate, 'games')
+        || Object.prototype.hasOwnProperty.call(candidate, 'bestByGame')
+      );
+
+      if (hasDirectSnapshotFields || mutated){
+        return Object.assign({}, candidate, result);
+      }
+
+      const nestedKeys = ['xp', 'points', 'totals', 'summary', 'stats', 'progress'];
+      for (let i = 0; i < nestedKeys.length; i += 1){
+        const alias = nestedKeys[i];
+        const normalized = normalizeKeyName(alias);
+        const actual = normalizedKeys[normalized];
+        if (!actual) continue;
+        const nested = candidate[actual];
+        if (!nested || typeof nested !== 'object') continue;
+        if (tracker.has(nested)) continue;
+        const normalizedNested = this._normalizeSnapshotCandidate(nested, tracker);
+        if (normalizedNested){
+          return normalizedNested;
+        }
+      }
+
       return null;
     }
 
@@ -414,13 +639,22 @@
       const prevSnapshot = this.getSnapshot();
       const snapshot = this._extractSnapshot(response);
       let changed = false;
+      let fallbackApplied = false;
       if (snapshot){
         changed = this._applySnapshot(snapshot) || changed;
+      } else {
+        const fallbackDelta = this._extractFallbackDelta(response);
+        if (fallbackDelta > 0){
+          if (this._applyXpDeltaFallback(fallbackDelta)){
+            changed = true;
+            fallbackApplied = true;
+          }
+        }
       }
       if (changed){
         this._persist();
         this._emitUpdate();
-      } else if (snapshot){
+      } else if (snapshot || fallbackApplied){
         this._persist();
         this._emitUpdate();
       }
@@ -578,6 +812,108 @@
       return awards;
     }
 
+    _extractFallbackDelta(response){
+      const fromAwards = this._extractAwardAmount(response);
+      const loose = this._extractLooseXpDelta(response);
+      const validAwards = Number.isFinite(fromAwards) && fromAwards > 0 ? fromAwards : 0;
+      const validLoose = Number.isFinite(loose) && loose > 0 ? loose : 0;
+      if (validAwards && validLoose){
+        return Math.max(validAwards, validLoose);
+      }
+      if (validAwards) return validAwards;
+      if (validLoose) return validLoose;
+      return 0;
+    }
+
+    _extractLooseXpDelta(response, visited){
+      if (!response || typeof response !== 'object') return 0;
+      const tracker = visited || new WeakSet();
+      if (tracker.has(response)) return 0;
+      tracker.add(response);
+
+      if (Array.isArray(response)){
+        return response.reduce((sum, entry) => sum + this._extractLooseXpDelta(entry, tracker), 0);
+      }
+
+      const keys = Object.keys(response);
+      const normalizedKeys = {};
+      keys.forEach((key) => {
+        const normalized = normalizeKeyName(key);
+        if (!normalizedKeys[normalized]){
+          normalizedKeys[normalized] = key;
+        }
+      });
+
+      const readKey = (aliases) => {
+        for (let i = 0; i < aliases.length; i += 1){
+          const alias = aliases[i];
+          const normalized = normalizeKeyName(alias);
+          const actual = normalizedKeys[normalized];
+          if (actual && Object.prototype.hasOwnProperty.call(response, actual)){
+            return response[actual];
+          }
+        }
+        return undefined;
+      };
+
+      const candidates = ['xpDelta', 'xpGain', 'xpAward', 'xpChange', 'xpAdded', 'xpIncrement', 'xpAmount', 'awardedXp'];
+      for (let i = 0; i < candidates.length; i += 1){
+        const raw = readKey([candidates[i]]);
+        if (raw === undefined || raw === null) continue;
+        if (typeof raw === 'object') continue;
+        const value = Number(raw);
+        if (Number.isFinite(value) && value > 0){
+          return value;
+        }
+      }
+
+      const nestedKeys = ['result', 'data', 'detail', 'payload', 'body', 'response'];
+      let nestedTotal = 0;
+      for (let i = 0; i < nestedKeys.length; i += 1){
+        const alias = nestedKeys[i];
+        const normalized = normalizeKeyName(alias);
+        const actual = normalizedKeys[normalized];
+        if (!actual) continue;
+        const nested = response[actual];
+        if (!nested || typeof nested !== 'object') continue;
+        nestedTotal += this._extractLooseXpDelta(nested, tracker);
+      }
+      return nestedTotal;
+    }
+
+    _applyXpDeltaFallback(amount){
+      const delta = Number(amount);
+      if (!Number.isFinite(delta) || delta <= 0) return false;
+      let changed = false;
+      const currentTotal = Number(this.state.totalXp);
+      const safeTotal = Number.isFinite(currentTotal) ? currentTotal : 0;
+      const nextTotal = Math.max(0, safeTotal + delta);
+      if (nextTotal !== this.state.totalXp){
+        this.state.totalXp = nextTotal;
+        changed = true;
+      }
+      const currentToday = Number(this.state.xpToday);
+      const safeToday = Number.isFinite(currentToday) ? currentToday : 0;
+      const nextToday = Math.max(0, safeToday + delta);
+      if (nextToday !== this.state.xpToday){
+        this.state.xpToday = nextToday;
+        changed = true;
+      }
+      const computedLevel = this._computeLevel(nextTotal);
+      if (computedLevel !== this.state.level){
+        this.state.level = computedLevel;
+        changed = true;
+      }
+      if (changed){
+        try {
+          this.state.updatedAt = new Date().toISOString();
+        } catch (_){
+          this.state.updatedAt = null;
+        }
+      }
+      return changed;
+    }
+
     _extractAwardAmount(result){
       if (!result) return 0;
       if (result && typeof result === 'object' && result.response && result !== result.response){
@@ -610,6 +946,12 @@
       const delta = Number(result && result.xpDelta);
       if (Number.isFinite(delta) && delta > 0){
         amounts.push(delta);
+      }
+      if (!amounts.length){
+        const loose = this._extractLooseXpDelta(result);
+        if (Number.isFinite(loose) && loose > 0){
+          amounts.push(loose);
+        }
       }
       return amounts.length ? amounts.reduce((sum, value) => sum + value, 0) : 0;
     }
