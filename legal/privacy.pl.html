@@ -71,19 +71,7 @@
   <footer style="margin-top:24px;">
     <a href="#" id="manageCookies">Zarządzaj cookies</a>
   </footer>
-  <script>
-    document.addEventListener('click', function(e){
-      if (e.target && (e.target.id === 'manageCookies' || e.target.getAttribute('href') === '#manageCookies')) {
-        e.preventDefault();
-        if (window.Cookiebot && typeof Cookiebot.renew === 'function') {
-          Cookiebot.renew();  // reopen consent dialog
-        } else {
-          alert('Consent manager not loaded yet.');
-        }
-      }
-    });
-  </script>
-  <script src="../js/loadThirdParty.js"></script>
+  <script src="../js/cookiebot-manager.js" defer></script>
 </body>
 </html>
 

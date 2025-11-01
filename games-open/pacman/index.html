@@ -146,19 +146,7 @@
     <script src="../../js/sidebar.js" defer></script>
     <script src="../game-shell.js" defer></script>
     <script src="script.js"></script>
-    <script src="../../js/loadThirdParty.js"></script>
-    <script>
-      document.addEventListener('click', function(e){
-        if (e.target && (e.target.id === 'manageCookies' || e.target.getAttribute('href') === '#manageCookies')) {
-          e.preventDefault();
-          if (window.Cookiebot && typeof Cookiebot.renew === 'function') {
-            Cookiebot.renew();  // reopen consent dialog
-          } else {
-            alert('Consent manager not loaded yet.');
-          }
-        }
-      });
-    </script>
+    <script src="../../js/cookiebot-manager.js" defer></script>
     <script>
       (function(){
         const allowedOrigin = location.origin;
