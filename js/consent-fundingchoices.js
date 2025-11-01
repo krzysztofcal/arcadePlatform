@@ -3,10 +3,34 @@
 // Uses: pub-4054734235779751, GA4: G-JRP62LCXYK
 
 (function initConsent() {
+  function ensureGtagStub() {
+    var w = window;
+    var dl = w.dataLayer = w.dataLayer || [];
+    var existing = w.gtag;
+    var queued = [];
+
+    if (typeof existing === 'function' && Array.isArray(existing.q)) {
+      queued = existing.q.slice();
+    }
+
+    function pushToDataLayer() {
+      dl.push(arguments);
+    }
+
+    w.gtag = pushToDataLayer;
+
+    if (queued.length) {
+      for (var i = 0; i < queued.length; i++) {
+        dl.push(queued[i]);
+      }
+    }
+
+    return w.gtag;
+  }
+
   // 0) Consent Mode v2 defaults — must run before any Google tag
   (function setConsentDefaults() {
-    var w = window;
-    var gtag = w.gtag = w.gtag || function(){ (gtag.q = gtag.q || []).push(arguments); };
+    var gtag = ensureGtagStub();
     gtag('consent', 'default', {
       ad_storage: 'denied',
       analytics_storage: 'denied',
@@ -42,10 +66,9 @@
     s.src = 'https://www.googletagmanager.com/gtag/js?id=' + encodeURIComponent(ga4id);
     document.head.appendChild(s);
 
-    window.dataLayer = window.dataLayer || [];
-    window.gtag = window.gtag || function(){ dataLayer.push(arguments); };
-    window.gtag('js', new Date());
-    window.gtag('config', ga4id);
+    var gtag = ensureGtagStub();
+    gtag('js', new Date());
+    gtag('config', ga4id);
   }
 
   // 3) Hook Funding Choices callback to load GA only after consent mode data is ready
