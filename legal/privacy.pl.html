@@ -8,6 +8,21 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="../css/portal.css">
+  <script id="Cookiebot"
+          src="https://consent.cookiebot.com/uc.js"
+          data-cbid="c76249cb-52a7-4dba-adbf-da79fe8a6276"
+          data-blockingmode="auto"
+          type="text/javascript">
+  </script>
+  <!-- GA4 (blocked until Statistics consent) -->
+  <script type="text/plain" data-cookieconsent="statistics"
+          src="https://www.googletagmanager.com/gtag/js?id=G-JRP62LCXYK"></script>
+  <script type="text/plain" data-cookieconsent="statistics">
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){ dataLayer.push(arguments); }
+    gtag('js', new Date());
+    gtag('config', 'G-JRP62LCXYK');
+  </script>
   <script src="../js/analytics.js" defer></script>
 </head>
 <body style="padding:16px; font-family:Poppins, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; color:#e8eeff; background:#0b1020;">
@@ -27,7 +42,7 @@
 
     <h2>Reklama i pliki cookies</h2>
     <p>Korzystamy z usług podmiotów trzecich, w tym Google. Google i partnerzy mogą wykorzystywać cookies reklamowe do wyświetlania reklam na podstawie Twoich wizyt na tej i innych stronach. Zasady Google: <a class="ft-link" href="https://policies.google.com/technologies/partner-sites" target="_blank" rel="noopener">Partner Sites</a>.</p>
-    <p>Preferencje możesz zmienić w dowolnym momencie przez odnośnik <a class="ft-link" data-i18n="manageCookies" href="#" id="manageCookies">Zarządzaj cookies</a>, a także w ustawieniach reklam Google: <a class="ft-link" href="https://adssettings.google.com/" target="_blank" rel="noopener">adssettings.google.com</a> oraz <a class="ft-link" href="https://www.youronlinechoices.eu/" target="_blank" rel="noopener">youronlinechoices.eu</a>.</p>
+    <p>Preferencje możesz zmienić w dowolnym momencie przez odnośnik <a class="ft-link" data-i18n="manageCookies" href="#manageCookies">Zarządzaj cookies</a>, a także w ustawieniach reklam Google: <a class="ft-link" href="https://adssettings.google.com/" target="_blank" rel="noopener">adssettings.google.com</a> oraz <a class="ft-link" href="https://www.youronlinechoices.eu/" target="_blank" rel="noopener">youronlinechoices.eu</a>.</p>
 
     <h2>Osadzone gry i podmioty trzecie</h2>
     <p>Część gier pochodzi od partnerów zewnętrznych (np. GameDistribution/Azerion) i ładuje się w ramce (iframe). Podmioty te mogą działać jako niezależni administratorzy w zakresie swoich usług. Zapoznaj się z ich politykami prywatności.</p>
@@ -40,7 +55,7 @@
 
     <h2>Twoje prawa i wybory</h2>
     <ul>
-      <li>Skorzystaj z opcji <a class="ft-link manage-cookies" data-i18n="manageCookies" href="#" id="manageCookies">Zarządzaj cookies</a>, aby ponownie wybrać zgody.</li>
+      <li>Skorzystaj z opcji <a class="ft-link manage-cookies" data-i18n="manageCookies" href="#manageCookies">Zarządzaj cookies</a>, aby ponownie wybrać zgody.</li>
       <li>Ustawienia przeglądarki mogą blokować/usuwać cookies.</li>
       <li>Masz prawa dostępu, sprostowania i usunięcia danych – napisz na <a class="ft-link" href="mailto:contact@kcswh.pl">contact@kcswh.pl</a>.</li>
     </ul>
@@ -53,6 +68,21 @@
 
     <p style="margin-top:16px;"><a class="ft-link" href="../index.html?lang=pl">Wróć do portalu</a></p>
   </main>
+  <footer style="margin-top:24px;">
+    <a href="#" id="manageCookies">Zarządzaj cookies</a>
+  </footer>
+  <script>
+    document.addEventListener('click', function(e){
+      if (e.target && (e.target.id === 'manageCookies' || e.target.getAttribute('href') === '#manageCookies')) {
+        e.preventDefault();
+        if (window.Cookiebot && typeof Cookiebot.renew === 'function') {
+          Cookiebot.renew();  // reopen consent dialog
+        } else {
+          alert('Consent manager not loaded yet.');
+        }
+      }
+    });
+  </script>
   <script src="../js/loadThirdParty.js"></script>
 </body>
 </html>

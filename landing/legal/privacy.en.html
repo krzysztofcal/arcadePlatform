@@ -11,6 +11,21 @@
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;800&display=swap">
   </noscript>
   <link rel="stylesheet" href="../css/landing.css">
+  <script id="Cookiebot"
+          src="https://consent.cookiebot.com/uc.js"
+          data-cbid="c76249cb-52a7-4dba-adbf-da79fe8a6276"
+          data-blockingmode="auto"
+          type="text/javascript">
+  </script>
+  <!-- GA4 (blocked until Statistics consent) -->
+  <script type="text/plain" data-cookieconsent="statistics"
+          src="https://www.googletagmanager.com/gtag/js?id=G-JRP62LCXYK"></script>
+  <script type="text/plain" data-cookieconsent="statistics">
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){ dataLayer.push(arguments); }
+    gtag('js', new Date());
+    gtag('config', 'G-JRP62LCXYK');
+  </script>
 </head>
 <body>
   <header class="header" role="banner">
@@ -20,7 +35,7 @@
     </div>
     <nav class="nav" aria-label="Primary">
       <a href="../index.html">Home</a>
-      <a class="manage-cookies" href="#">Manage cookies</a>
+      <a class="manage-cookies" href="#manageCookies">Manage cookies</a>
     </nav>
   </header>
 
@@ -117,7 +132,7 @@
       <a href="../index.html">Home</a>
       <a href="./privacy.en.html">Privacy</a>
       <a href="./privacy.pl.html">Polski</a>
-      <a class="manage-cookies" href="#">Manage cookies</a>
+      <a class="manage-cookies" id="manageCookies" href="#">Manage cookies</a>
       <a href="mailto:contact@kcswh.pl">Contact</a>
     </div>
     <div>© <span id="year"></span> KCSWH</div>
@@ -125,6 +140,18 @@
 
   <script>
     document.getElementById('year').textContent = new Date().getFullYear();
+  </script>
+  <script>
+    document.addEventListener('click', function(e){
+      if (e.target && (e.target.id === 'manageCookies' || e.target.getAttribute('href') === '#manageCookies')) {
+        e.preventDefault();
+        if (window.Cookiebot && typeof Cookiebot.renew === 'function') {
+          Cookiebot.renew();  // reopen consent dialog
+        } else {
+          alert('Consent manager not loaded yet.');
+        }
+      }
+    });
   </script>
   <script src="../js/loadThirdParty.js" defer></script>
 </body>

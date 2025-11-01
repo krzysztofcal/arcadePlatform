@@ -11,6 +11,21 @@
     <link rel="stylesheet" href="../../css/game.css" />
     <link rel="stylesheet" href="../game-shell.css" />
     <link rel="stylesheet" href="style.css" />
+    <script id="Cookiebot"
+            src="https://consent.cookiebot.com/uc.js"
+            data-cbid="c76249cb-52a7-4dba-adbf-da79fe8a6276"
+            data-blockingmode="auto"
+            type="text/javascript">
+    </script>
+    <!-- GA4 (blocked until Statistics consent) -->
+    <script type="text/plain" data-cookieconsent="statistics"
+            src="https://www.googletagmanager.com/gtag/js?id=G-JRP62LCXYK"></script>
+    <script type="text/plain" data-cookieconsent="statistics">
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){ dataLayer.push(arguments); }
+      gtag('js', new Date());
+      gtag('config', 'G-JRP62LCXYK');
+    </script>
     <script src="../../js/i18n.js" defer></script>
     <script src="../../js/topbar.js" defer></script>
     <script src="../../js/xpClient.js" defer></script>
@@ -115,7 +130,7 @@
         <span class="sep">•</span>
         <a class="ft-link" data-i18n="contact" href="mailto:contact@kcswh.pl">Contact</a>
         <span class="sep">•</span>
-        <a class="ft-link manage-cookies" data-i18n="manageCookies" href="#">Manage cookies</a>
+        <a class="ft-link manage-cookies" data-i18n="manageCookies" id="manageCookies" href="#">Manage cookies</a>
       </nav>
       <div class="lang-switch" aria-label="Language">
         <button type="button" class="lang-btn" data-lang="pl" aria-pressed="false">PL</button>
@@ -127,6 +142,18 @@
     <script src="../game-shell.js" defer></script>
     <script src="script.js"></script>
     <script src="../../js/loadThirdParty.js"></script>
+    <script>
+      document.addEventListener('click', function(e){
+        if (e.target && (e.target.id === 'manageCookies' || e.target.getAttribute('href') === '#manageCookies')) {
+          e.preventDefault();
+          if (window.Cookiebot && typeof Cookiebot.renew === 'function') {
+            Cookiebot.renew();  // reopen consent dialog
+          } else {
+            alert('Consent manager not loaded yet.');
+          }
+        }
+      });
+    </script>
     <script>
       (function(){
         const allowedOrigin = location.origin;
