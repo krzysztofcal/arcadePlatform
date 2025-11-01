@@ -26,22 +26,6 @@
   let currentSlug = '';
   let pendingFsAction = null;
   let lastFsState = false;
-  const pointsModule = window.Points && typeof window.Points === 'object' ? window.Points : null;
-  let pointsService = null;
-  let activityTracker = null;
-
-  function cleanupPointsSession(){
-    if (activityTracker && typeof activityTracker.stop === 'function'){
-      try { activityTracker.stop(); } catch (_){ /* noop */ }
-      if (typeof window !== 'undefined' && window.activityTracker === activityTracker){
-        try { window.activityTracker = null; } catch (_){ }
-      }
-      activityTracker = null;
-    }
-    if (pointsService && typeof pointsService.endSession === 'function'){
-      try { pointsService.endSession(); } catch (_){ /* noop */ }
-    }
-  }
 
   const SITE_NAME = 'Arcade Hub';
   const DEFAULT_PAGE_TITLE = SITE_NAME + ' — Game';
@@ -298,13 +282,6 @@ async function loadCatalog(){
     let listenersAttached = false;
     const onIframeActivity = () => {
       try { window.postMessage({ type: 'kcswh:activity' }, postTarget); } catch (_){ }
-      try {
-        const trackerRef = window.activityTracker;
-        if (trackerRef){
-          if (typeof trackerRef.nudge === 'function'){ trackerRef.nudge(); }
-          if (typeof trackerRef.ping === 'function'){ trackerRef.ping(); }
-        }
-      } catch (_){ }
     };
     const attachIframeActivityListeners = () => {
       if (listenersAttached) return;
@@ -613,53 +590,11 @@ async function init(){
     return;
   }
 
-  if (pointsModule && typeof pointsModule.getDefaultService === 'function'){
-    try {
-      pointsService = pointsModule.getDefaultService();
-      if (typeof window !== 'undefined'){
-        try { window.pointsService = pointsService; } catch (_){ }
-      }
-    } catch (_){ pointsService = null; }
-  }
-  if (pointsService && typeof pointsService.startSession === 'function'){
-    try { pointsService.startSession(slug); } catch (_){ }
-  }
-  if (pointsModule && typeof pointsModule.createActivityTracker === 'function' && pointsService){
-    const tickSeconds = (pointsService && pointsService.options && pointsService.options.tickSeconds) || 30;
-    const messageType = 'kcswh:activity';
-    const allowedOrigins = [];
-    try {
-      if (typeof window !== 'undefined' && window.location && window.location.origin){
-        allowedOrigins.push(window.location.origin);
-      }
-    } catch (_){ /* noop */ }
-    if (typeof window !== 'undefined' && window.activityTracker && window.activityTracker !== activityTracker && typeof window.activityTracker.stop === 'function'){
-      try { window.activityTracker.stop(); } catch (_){ }
+  if (window.XP){
+    try { window.XP.stopSession({ flush: true }); } catch (_){ /* noop */ }
+    if (typeof window.XP.startSession === 'function'){
+      try { window.XP.startSession(slug); } catch (_){ /* noop */ }
     }
-    if (activityTracker && typeof activityTracker.stop === 'function'){
-      try { activityTracker.stop(); } catch (_){ }
-    }
-    try {
-      activityTracker = pointsModule.createActivityTracker(document, detail => {
-        if (!pointsService || typeof pointsService.tick !== 'function') return;
-        const payload = typeof detail === 'number'
-          ? {
-              windowStart: Date.now() - tickSeconds * 1000,
-              windowEnd: Date.now(),
-              seconds: tickSeconds,
-              visibilitySeconds: tickSeconds,
-              inputEvents: 1
-            }
-          : Object.assign({}, detail);
-        if (!payload.gameId){ payload.gameId = slug || null; }
-        if (!Number.isFinite(payload.visibilitySeconds)){ payload.visibilitySeconds = Math.round(payload.seconds || tickSeconds); }
-        if (!Number.isFinite(payload.inputEvents)){ payload.inputEvents = 0; }
-        try { pointsService.tick(payload); } catch (_){ }
-      }, { tickSeconds, chunkMs: tickSeconds * 1000, messageType, allowedOrigins });
-      if (typeof window !== 'undefined'){
-        try { window.activityTracker = activityTracker; } catch (_){ }
-      }
-    } catch (_){ activityTracker = null; }
   }
 
   // Consent gating
@@ -674,9 +609,15 @@ async function init(){
 
   track('adImpression', { slot: 'game_top', page: 'game', slug: slug || undefined });
 }
-  function onUnload(){ cleanupPointsSession(); }
-  window.addEventListener('beforeunload', onUnload);
-  window.addEventListener('pagehide', onUnload);
+  if (typeof window !== 'undefined'){
+    const cleanup = () => {
+      if (window.XP && typeof window.XP.stopSession === 'function'){
+        try { window.XP.stopSession({ flush: true }); } catch (_){ /* noop */ }
+      }
+    };
+    window.addEventListener('beforeunload', cleanup);
+    window.addEventListener('pagehide', cleanup);
+  }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
 })();
 

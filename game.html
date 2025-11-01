@@ -36,7 +36,9 @@
       </div>
     </div>
     <div class="topbar-right">
-      <span id="xpBadge" class="xp-badge xp-badge--loading" aria-live="polite" aria-busy="true"><span class="xp-badge__label">Syncing XP…</span></span>
+      <span id="xpBadge" class="xp-badge xp-badge--loading" aria-live="polite" aria-busy="true">
+        <span class="xp-badge__label">Syncing XP…</span>
+      </span>
       <span class="chip">MVP</span>
     </div>
   </div>
@@ -136,26 +138,11 @@
 
   <script src="js/topbar.js" defer></script>
   <script src="js/xpClient.js" defer></script>
-  <script src="js/points.js" defer></script>
+  <script src="js/xp.js" defer></script>
   <script src="js/sidebar.js" defer></script>
   <script src="js/core/catalog.js" defer></script>
   <script src="js/core/game-utils.js" defer></script>
   <script src="js/frame.js" defer></script>
-  <script>
-    // Listen for iframe activity heartbeats and reset the tracker idle timer
-    window.addEventListener('message', function(e){
-      if (e && e.data && e.data.type === 'gameActivity'){
-        try {
-          if (typeof activityTracker !== 'undefined' && activityTracker){
-            activityTracker.lastActivity = Date.now();
-            if (typeof activityTracker.ping === 'function'){
-              activityTracker.ping();
-            }
-          }
-        } catch (_){ /* noop */ }
-      }
-    });
-  </script>
   <script src="js/loadThirdParty.js"></script>
 </body>
 </html>

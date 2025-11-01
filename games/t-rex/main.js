@@ -41,7 +41,7 @@
     spawnCloud(); spawnCloud(); render(); updateScoreboard();
   }
   function start(){ if(state.running) return; state.running=true; state.lastTime=performance.now(); requestAnimationFrame(loop); }
-  function jump(){ if(!state.running) start(); if(state.dino.isJumping) return; state.dino.isJumping=true; state.dino.vy=JUMP_VELOCITY; }
+  function jump(){ nudgeXP(); if(!state.running) start(); if(state.dino.isJumping) return; state.dino.isJumping=true; state.dino.vy=JUMP_VELOCITY; }
   function loop(ts){ if(!state.running) return; const dt=Math.min((ts-state.lastTime)/1000,0.035); state.lastTime=ts; update(dt); render(); requestAnimationFrame(loop); }
   function update(dt){
     state.speed += dt*12; state.spawnTimer += dt; if(state.spawnTimer>state.spawnInterval){ state.spawnTimer=0; state.spawnInterval=Math.max(1.0,1.8-state.speed/900); spawnObstacle(); }
@@ -77,14 +77,31 @@
   function drawCactus(x,y,w,h){ const seg=Math.max(10,w*0.4); ctx.save(); ctx.translate(x,y); drawRoundedRect(0,0,w,h,w*0.2); ctx.fillRect(w/2-seg/2,h*0.25,seg,h*0.35); ctx.fillRect(w*0.1,h*0.4,seg*0.7,h*0.2); ctx.fillRect(w-seg*0.7-w*0.1,h*0.55,seg*0.7,h*0.2); ctx.restore(); }
   function drawRoundedRect(x,y,w,h,r){ const rr=Math.min(r,w/2,h/2); ctx.beginPath(); ctx.moveTo(x+rr,y); ctx.lineTo(x+w-rr,y); ctx.quadraticCurveTo(x+w,y,x+w,y+rr); ctx.lineTo(x+w,y+h-rr); ctx.quadraticCurveTo(x+w,y+h,x+w-rr,y+h); ctx.lineTo(x+rr,y+h); ctx.quadraticCurveTo(x,y+h,x,y+h-rr); ctx.lineTo(x,y+rr); ctx.quadraticCurveTo(x,y,x+rr,y); ctx.closePath(); ctx.fill(); }
   function drawEllipse(cx,cy,rx,ry){ ctx.beginPath(); ctx.ellipse(cx,cy,rx,ry,0,0,Math.PI*2); ctx.fill(); }
-  function handleKeydown(e){ if(e.repeat) return; if(e.code==='Space'||e.code==='ArrowUp'||e.code==='KeyW'){ e.preventDefault(); if(!state.running){ reset(); } jump(); } else if(e.code==='Enter'){ e.preventDefault(); reset(); start(); } }
+  function handleKeydown(e){ if(e.repeat) return; if(e.code==='Space'||e.code==='ArrowUp'||e.code==='KeyW'){ e.preventDefault(); if(!state.running){ reset(); } jump(); } else if(e.code==='Enter'){ e.preventDefault(); reset(); start(); nudgeXP(); } }
   function handlePointer(e){ e.preventDefault(); if(!state.running){ reset(); } jump(); }
-  restartBtn.addEventListener('click', ()=>{ reset(); start(); });
+  restartBtn.addEventListener('click', ()=>{ nudgeXP(); reset(); start(); });
   window.addEventListener('keydown', handleKeydown);
   window.addEventListener('resize', () => { setupCanvas(); render(); });
   canvas.addEventListener('pointerdown', handlePointer);
   canvas.addEventListener('touchstart', handlePointer, { passive:false });
   setupCanvas();
   reset();
+  if (typeof window !== 'undefined'){
+    const stop = () => {
+      if (window.XP && typeof window.XP.stopSession === 'function'){
+        try { window.XP.stopSession({ flush: true }); } catch (_){}
+      }
+    };
+    window.addEventListener('beforeunload', stop);
+    window.addEventListener('pagehide', stop);
+  }
 })();
 
+  if (window.XP && typeof window.XP.startSession === 'function'){
+    try { window.XP.startSession('t-rex'); } catch (_){}
+  }
+  function nudgeXP(){
+    if (window.XP && typeof window.XP.nudge === 'function'){
+      try { window.XP.nudge(); } catch (_){}
+    }
+  }

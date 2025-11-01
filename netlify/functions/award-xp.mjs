@@ -2,11 +2,11 @@ import crypto from "node:crypto";
 import { store } from "./_shared/store-upstash.mjs";
 
 const DAILY_CAP = Number(process.env.XP_DAILY_CAP ?? 600);          // set to 3000 in Netlify
-const CHUNK_MS = Number(process.env.XP_CHUNK_MS ?? 30_000);         // 30s
-const POINTS_PER_PERIOD = Number(process.env.XP_POINTS_PER_PERIOD ?? 10);
+const DEFAULT_CHUNK_MS = Number(process.env.XP_CHUNK_MS ?? 10_000); // 10s default
+const DEFAULT_POINTS_PER_PERIOD = Number(process.env.XP_POINTS_PER_PERIOD ?? 1);
 const DRIFT_MS = Number(process.env.XP_DRIFT_MS ?? 2_000);
-const MIN_VISIBILITY_S = Number(process.env.XP_MIN_VISIBILITY_S ?? 20);
-const MIN_INPUTS = Number(process.env.XP_MIN_INPUTS ?? 1);
+const BASE_MIN_VISIBILITY_S = Number(process.env.XP_MIN_VISIBILITY_S ?? 6);
+const BASE_MIN_INPUTS = Number(process.env.XP_MIN_INPUTS ?? 1);
 const KEY_NS = process.env.XP_KEY_NS ?? "kcswh:xp:v1";
 const CORS_ALLOW = (process.env.XP_CORS_ALLOW ?? "")
   .split(",")
@@ -45,6 +45,8 @@ const keyDaily = (u, day = dayKey()) => `${KEY_NS}:daily:${u}:${day}`;
 const keyLast  = (u, g) => `${KEY_NS}:lastok:${u}:${g}`; // NEW: last accepted end timestamp
 const keyLock  = (u, g) => `${KEY_NS}:lock:${u}:${g}`;
 
+const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
+
 export async function handler(event) {
   const origin = event.headers?.origin;
   if (event.httpMethod === "OPTIONS") return { statusCode: 204, headers: corsHeaders(origin) };
@@ -68,13 +70,24 @@ export async function handler(event) {
     return json(400, { error: "missing_fields" }, origin);
   }
 
+  const requestedChunkMs = Number(body.chunkMs);
+  const chunkMs = Number.isFinite(requestedChunkMs)
+    ? clamp(requestedChunkMs, 5_000, DEFAULT_CHUNK_MS)
+    : DEFAULT_CHUNK_MS;
+  const requestedStep = Number(body.pointsPerPeriod);
+  const pointsPerPeriod = Number.isFinite(requestedStep)
+    ? clamp(requestedStep, 1, DEFAULT_POINTS_PER_PERIOD)
+    : DEFAULT_POINTS_PER_PERIOD;
+  const minVisibility = Math.max(BASE_MIN_VISIBILITY_S, Math.round((chunkMs / 1000) * 0.6));
+  const minInputs = Math.max(BASE_MIN_INPUTS, 1);
+
   // Basic window validity (defensive)
   const now = Date.now();
   const elapsed = windowEnd - windowStart;
-  if (windowEnd > now + DRIFT_MS || elapsed < (CHUNK_MS - DRIFT_MS)) {
+  if (windowEnd > now + DRIFT_MS || elapsed < (chunkMs - DRIFT_MS)) {
     return json(422, { ok: false, error: "invalid_window", elapsed }, origin);
   }
-  if ((visibilitySeconds ?? 0) < MIN_VISIBILITY_S || (inputEvents ?? 0) < MIN_INPUTS) {
+  if ((visibilitySeconds ?? 0) < minVisibility || (inputEvents ?? 0) < minInputs) {
     return json(200, { ok: true, awarded: 0, reason: "insufficient-activity" }, origin);
   }
 
@@ -148,8 +161,8 @@ export async function handler(event) {
     [dailyKeyK, lastKeyK, idemK, lockKeyK],
     [
       String(now),
-      String(CHUNK_MS),
-      String(POINTS_PER_PERIOD),
+      String(chunkMs),
+      String(pointsPerPeriod),
       String(DAILY_CAP),
       String(IDEM_TTL_SEC),
       String(windowEnd),

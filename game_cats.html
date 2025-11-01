@@ -13,7 +13,7 @@
   <script src="js/i18n.js" defer></script>
   <script src="js/topbar.js" defer></script>
   <script src="js/xpClient.js" defer></script>
-  <script src="js/points.js" defer></script>
+  <script src="js/xp.js" defer></script>
 </head>
 <body data-game-slug="cats">
   <div class="topbar">
@@ -28,7 +28,9 @@
       </div>
     </div>
     <div class="topbar-right">
-      <span id="xpBadge" class="xp-badge xp-badge--loading" aria-live="polite" aria-busy="true"><span class="xp-badge__label">Syncing XP…</span></span>
+      <span id="xpBadge" class="xp-badge xp-badge--loading" aria-live="polite" aria-busy="true">
+        <span class="xp-badge__label">Syncing XP…</span>
+      </span>
       <span class="chip">MVP</span>
     </div>
   </div>
@@ -156,7 +158,6 @@
   <script src="js/game.js" defer></script>
   <script src="js/sidebar.js" defer></script>
   <script src="js/loadThirdParty.js"></script>
-  <script src="games-open/game-shell.js" defer></script>
   <footer class="site-footer" role="contentinfo">
     <nav class="footer-nav" aria-label="Footer">
       <a class="ft-link" data-i18n="about" data-href-en="about.en.html" data-href-pl="about.pl.html" href="about.en.html">About</a>

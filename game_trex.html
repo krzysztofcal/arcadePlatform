@@ -12,7 +12,7 @@
   <script src="js/i18n.js" defer></script>
   <script src="js/topbar.js" defer></script>
   <script src="js/xpClient.js" defer></script>
-  <script src="js/points.js" defer></script>
+  <script src="js/xp.js" defer></script>
   <style>
     .stats .stat strong{ font-family:'Courier New', Courier, monospace; }
     #gameWrap{ display:flex; flex-direction:column; gap:12px; align-items:center; }
@@ -37,7 +37,9 @@
       </div>
     </div>
     <div class="topbar-right">
-      <span id="xpBadge" class="xp-badge xp-badge--loading" aria-live="polite" aria-busy="true"><span class="xp-badge__label">Syncing XP…</span></span>
+      <span id="xpBadge" class="xp-badge xp-badge--loading" aria-live="polite" aria-busy="true">
+        <span class="xp-badge__label">Syncing XP…</span>
+      </span>
       <span class="chip">MVP</span>
     </div>
   </div>
