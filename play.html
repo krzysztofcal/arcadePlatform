@@ -150,6 +150,18 @@
       window.addEventListener('pagehide', stopXp);
     })();
   </script>
+  <!-- XP message listener: convert child activity -> XP.nudge() -->
+<script>
+  window.addEventListener("message", (ev) => {
+    if (!ev.data || typeof ev.data !== "object") return;
+    if (ev.data.type === "kcswh:activity") {
+      if (window.XP && typeof window.XP.nudge === "function") {
+        try { window.XP.nudge(); } catch (_) {}
+      }
+    }
+  }, { passive: true });
+</script>
+
 </body>
 </html>
 
