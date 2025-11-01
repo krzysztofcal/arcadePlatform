@@ -1,92 +1,46 @@
-(function(){
-  'use strict';
-  if (typeof window === 'undefined' || typeof document === 'undefined') return;
-
-  const doc = document;
-
-  function cleanupFactory(state){
-    let cleaned = false;
-    return function cleanup(){
-      if (cleaned) return;
-      cleaned = true;
-      const trackerRef = state.tracker;
-      if (trackerRef && typeof trackerRef.stop === 'function'){
-        try { trackerRef.stop(); } catch (_){ /* noop */ }
-      }
-      if (typeof window !== 'undefined' && trackerRef && window.activityTracker === trackerRef){
-        try { window.activityTracker = null; } catch (_){ /* noop */ }
-      }
-      state.tracker = null;
-      if (state.service && typeof state.service.endSession === 'function'){
-        try { state.service.endSession(); } catch (_){ /* noop */ }
-      }
-      state.service = null;
-    };
+(function () {
+  function nudge() {
+    if (window.XP && typeof window.XP.nudge === "function") {
+      try { window.XP.nudge(); } catch (_) { /* noop */ }
+    }
   }
 
-  function init(){
-    const body = doc.body;
-    if (!body) return;
-    const slug = body.getAttribute('data-game-slug');
-    if (!slug) return;
-
-    const state = { service: null, tracker: null };
-    const cleanup = cleanupFactory(state);
-
-    function trySetup(attempt){
-      const points = window.Points;
-      if (!points || typeof points.getDefaultService !== 'function'){
-        if (attempt < 10){
-          window.setTimeout(() => trySetup(attempt + 1), 100);
-        }
-        return;
-      }
-
-      let service = null;
-      try {
-        service = points.getDefaultService();
-      } catch (_){ /* noop */ }
-      if (!service) return;
-      state.service = service;
-
-      try { service.startSession(slug); } catch (_){ /* noop */ }
-
-      if (typeof points.createActivityTracker === 'function'){
-        try {
-          const tickSeconds = (service && service.options && service.options.tickSeconds) || 15;
-          if (typeof window !== 'undefined' && window.activityTracker && typeof window.activityTracker.stop === 'function'){
-            try { window.activityTracker.stop(); } catch (_){ /* noop */ }
-          }
-          const messageType = 'kcswh:activity';
-          const allowedOrigins = [];
-          try {
-            if (typeof window !== 'undefined' && window.location && window.location.origin){
-              allowedOrigins.push(window.location.origin);
-            }
-          } catch (_){ /* noop */ }
-          state.tracker = points.createActivityTracker(doc, seconds => {
-            if (!state.service || typeof state.service.tick !== 'function') return;
-            const ticks = seconds && tickSeconds ? Math.max(1, Math.round(seconds / tickSeconds)) : 1;
-            try { state.service.tick(ticks); } catch (_){ /* noop */ }
-          }, { tickSeconds, messageType, allowedOrigins });
-          if (typeof window !== 'undefined'){
-            try { window.activityTracker = state.tracker; } catch (_){ /* noop */ }
-          }
-        } catch (_){ state.tracker = null; }
-      }
+  function start(slug) {
+    if (!window.XP) return;
+    try { window.XP.stopSession({ flush: true }); } catch (_) { /* noop */ }
+    if (typeof window.XP.startSession === "function") {
+      try { window.XP.startSession(slug); } catch (_) { /* noop */ }
     }
-
-    const start = () => trySetup(0);
-
-    if (doc.readyState === 'loading'){
-      doc.addEventListener('DOMContentLoaded', start, { once: true });
-    } else {
-      start();
-    }
-
-    window.addEventListener('beforeunload', cleanup);
-    window.addEventListener('pagehide', cleanup);
   }
 
-  init();
+  function stop() {
+    if (window.XP && typeof window.XP.stopSession === "function") {
+      try { window.XP.stopSession({ flush: true }); } catch (_) { /* noop */ }
+    }
+  }
+
+  function init() {
+    if (typeof document === "undefined") return;
+    const slug = document.body?.dataset?.gameSlug || document.body?.dataset?.gameId || "game";
+    start(slug);
+
+    const passive = { passive: true };
+    window.addEventListener("keydown", nudge, passive);
+    window.addEventListener("pointerdown", nudge, passive);
+    window.addEventListener("touchstart", nudge, passive);
+
+    window.addEventListener("beforeunload", stop);
+    window.addEventListener("pagehide", stop);
+
+    // ensure XP tick timer stays aligned when tab becomes active
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden) nudge();
+    });
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", init, { once: true });
+  } else {
+    init();
+  }
 })();

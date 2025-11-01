@@ -15,6 +15,8 @@
       text-align: center;
     }
   </style>
+  <script src="/js/xpClient.js" defer></script>
+  <script src="/js/xp.js" defer></script>
 </head>
 <body>
   <header><a href="/">← Back</a></header>
@@ -42,6 +44,14 @@
       document.title = title || 'Play';
       document.getElementById('title').textContent = title || '';
       document.getElementById('desc').textContent = description;
+
+      const xpId = game.id || game.slug || id;
+      if (window.XP){
+        try { window.XP.stopSession({ flush: true }); } catch (_){}
+        if (typeof window.XP.startSession === 'function'){
+          try { window.XP.startSession(xpId); } catch (_){}
+        }
+      }
 
       const creditsEl = document.getElementById('credits');
       if (creditsEl) {
@@ -106,13 +116,52 @@
       }
       const iframe = document.getElementById('game-frame');
       if (target) {
+        const injectBridge = () => {
+          const scriptId = '__kcswhActivityBridge';
+          const scriptText = "(function(){if(window.__kcswhActivityBridge)return;window.__kcswhActivityBridge=true;var TYPE='kcswh:activity';var TARGET='*';var last=Date.now();var ACTIVE=5000;var HEARTBEAT=4000;var send=function(){try{parent.postMessage({type:TYPE},TARGET);}catch(_){}};var on=function(){last=Date.now();send();};['pointerdown','pointermove','pointerup','touchstart','touchmove','keydown'].forEach(function(evt){try{document.addEventListener(evt,on,{passive:true});}catch(_){document.addEventListener(evt,on);}});var beat=function(){if(Date.now()-last<=ACTIVE)send();};var timer=setInterval(beat,HEARTBEAT);document.addEventListener('visibilitychange',function(){if(document.hidden){if(timer){clearInterval(timer);timer=null;}}else if(!timer){last=Date.now();send();timer=setInterval(beat,HEARTBEAT);}}, {passive:true});send();})();";
+          try {
+            const doc = iframe.contentDocument;
+            if (!doc || !doc.documentElement || doc.getElementById(scriptId)) return;
+            const script = doc.createElement('script');
+            script.id = scriptId;
+            script.type = 'text/javascript';
+            script.text = scriptText;
+            doc.documentElement.appendChild(script);
+          } catch (_){}
+        };
+        iframe.addEventListener('load', injectBridge);
+        iframe.addEventListener('pointerdown', () => {
+          if (window.XP && typeof window.XP.nudge === 'function') {
+            try { window.XP.nudge(); } catch (_){}
+          }
+        }, { passive: true });
         iframe.src = target;
       } else {
         document.body.innerHTML = 'Playable URL missing.';
         return;
       }
+
+      const stopXp = () => {
+        if (window.XP && typeof window.XP.stopSession === 'function'){
+          try { window.XP.stopSession({ flush: true }); } catch (_){}
+        }
+      };
+      window.addEventListener('beforeunload', stopXp);
+      window.addEventListener('pagehide', stopXp);
     })();
   </script>
+  <!-- XP message listener: convert child activity -> XP.nudge() -->
+<script>
+  window.addEventListener("message", (ev) => {
+    if (!ev.data || typeof ev.data !== "object") return;
+    if (ev.data.type === "kcswh:activity") {
+      if (window.XP && typeof window.XP.nudge === "function") {
+        try { window.XP.nudge(); } catch (_) {}
+      }
+    }
+  }, { passive: true });
+</script>
+
 </body>
 </html>
 

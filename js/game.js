@@ -12,6 +12,18 @@
   const pageId = 'game_cats';
   const getLang = ()=> (window.I18N && window.I18N.getLang && window.I18N.getLang()) || 'en';
 
+  if (window.XP){
+    try { window.XP.stopSession({ flush: true }); } catch (_){}
+    if (typeof window.XP.startSession === 'function'){
+      try { window.XP.startSession(slug); } catch (_){}
+    }
+  }
+  function xpNudge(){
+    if (window.XP && typeof window.XP.nudge === 'function'){
+      try { window.XP.nudge(); } catch (_){}
+    }
+  }
+
   // Fullscreen service integration
   const fs = FullscreenService({
     wrap: gameWrap,
@@ -160,6 +172,7 @@
   requestAnimationFrame(loop);
 
   function startGame(){
+    xpNudge();
     if(running||state.tokens<=0) return; audio.ensure(); state.tokens-=1; storage.save(state);
     running=true; paused=false; score=0; level=1; cats=[]; spawnCooldown=0; msLeft=15000; startTs = performance.now(); setPauseUI && setPauseUI();
     if (centerOverlay) centerOverlay.classList.add('hidden');
@@ -169,8 +182,8 @@
       analytics.startGame({ slug, page: pageId, mode: 'self', lang: getLang(), tokens_remaining: state.tokens });
     }
   }
-  const buy=()=>{ if(running) return; state.tokens+=10; storage.save(state); renderHud(); };
-  const resetDemo=()=>{ if(running) return; state={...window.CONFIG.DEFAULT_STATE}; storage.save(state); renderHud(); };
+  const buy=()=>{ xpNudge(); if(running) return; state.tokens+=10; storage.save(state); renderHud(); };
+  const resetDemo=()=>{ xpNudge(); if(running) return; state={...window.CONFIG.DEFAULT_STATE}; storage.save(state); renderHud(); };
 
   function setMuteUI(){
     if (!btnMute) return;
@@ -180,6 +193,7 @@
     btnMute.textContent = muted ? '🔈' : '🔇';
   }
   function toggleMute(){
+    xpNudge();
     if (audio.setMuted) {
       audio.setMuted(!(audio.isMuted && audio.isMuted()));
     }
@@ -194,7 +208,7 @@
     btnPause.textContent = paused ? '▶' : '⏸';
     btnPause.disabled = !running;
   }
-  function togglePause(){ if (!running) return; paused = !paused; setPauseUI(); renderHud(); }
+  function togglePause(){ xpNudge(); if (!running) return; paused = !paused; setPauseUI(); renderHud(); }
 
   // Use InputController for all inputs
   InputController({
@@ -205,7 +219,8 @@
     onReset: resetDemo,
     btnMute, btnPause,
     onToggleMute: toggleMute,
-    onTogglePause: togglePause
+    onTogglePause: togglePause,
+    onActivity: xpNudge
   });
 
   // Redundant direct bindings as a safety net (in case controller wiring fails)
@@ -213,8 +228,6 @@
     playBtn && playBtn.addEventListener('click', startGame);
     buyBtn && buyBtn.addEventListener('click', buy);
     resetBtn && resetBtn.addEventListener('click', resetDemo);
-    btnMute && btnMute.addEventListener('click', toggleMute);
-    btnPause && btnPause.addEventListener('click', togglePause);
     bigStartBtn && bigStartBtn.addEventListener('click', startGame);
     replayBtn && replayBtn.addEventListener('click', startGame);
   } catch {}
@@ -227,4 +240,13 @@
     if (centerOverlay) centerOverlay.classList.remove('hidden');
     if (gameOverOverlay) gameOverOverlay.classList.add('hidden');
   })();
+  if (typeof window !== 'undefined'){
+    const stop = () => {
+      if (window.XP && typeof window.XP.stopSession === 'function'){
+        try { window.XP.stopSession({ flush: true }); } catch (_){}
+      }
+    };
+    window.addEventListener('beforeunload', stop);
+    window.addEventListener('pagehide', stop);
+  }
 })();
