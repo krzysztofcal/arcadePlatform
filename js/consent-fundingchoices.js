@@ -106,17 +106,66 @@
 
   // 4) “Manage cookies” link — reopen CMP via TCF API
   (function wireManageCookies() {
+    function tryShowWithGooglefc() {
+      if (window.googlefc && typeof window.googlefc.showConsentDialog === 'function') {
+        window.googlefc.showConsentDialog('CONSENT_DIALOG');
+        return true;
+      }
+      return false;
+    }
+
+    function alertUnavailable() {
+      alert('Consent manager is unavailable. Please check your connection or disable content blockers.');
+    }
+
+    function openConsentManager() {
+      var fallbackTimer = null;
+      var opened = false;
+
+      function resolve(success) {
+        if (fallbackTimer) {
+          clearTimeout(fallbackTimer);
+          fallbackTimer = null;
+        }
+        if (!success && !opened) {
+          opened = tryShowWithGooglefc();
+          if (!opened) alertUnavailable();
+        }
+      }
+
+      if (typeof window.__tcfapi === 'function') {
+        try {
+          fallbackTimer = setTimeout(function () {
+            if (!opened) {
+              opened = tryShowWithGooglefc();
+              if (!opened) alertUnavailable();
+            }
+          }, 1500);
+
+          window.__tcfapi('displayConsentUi', 2, function (_, success) {
+            resolve(success);
+          });
+          return;
+        } catch (err) {
+          if (fallbackTimer) {
+            clearTimeout(fallbackTimer);
+            fallbackTimer = null;
+          }
+        }
+      }
+
+      if (!tryShowWithGooglefc()) {
+        alertUnavailable();
+      }
+    }
+
     // Delegate to handle late-rendered footers
     document.addEventListener('click', function (e) {
       var t = e.target;
       if (!t) return;
       if (t.id === 'manageCookies' || t.matches('[data-manage-cookies]')) {
         e.preventDefault();
-        if (typeof window.__tcfapi === 'function') {
-          window.__tcfapi('displayConsentUi', 2, function(){});
-        } else {
-          alert('Consent manager not loaded yet.');
-        }
+        openConsentManager();
       }
     }, true);
   })();
