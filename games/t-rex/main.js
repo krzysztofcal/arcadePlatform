@@ -109,3 +109,12 @@
       try { window.XP.nudge(); } catch (_){}
     }
   }
+
+// --- BFCache resume hook (idempotent) ---
+if (typeof window !== 'undefined') {
+  window.addEventListener('pageshow', (event) => {
+    if (event && event.persisted && window.XP && typeof window.XP.resumeSession === 'function') {
+      try { window.XP.resumeSession(); } catch (_) {}
+    }
+  });
+}
