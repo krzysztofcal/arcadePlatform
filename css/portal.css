@@ -34,7 +34,7 @@ body{margin:0; background:linear-gradient(180deg, #0b1020 0%, #0a0d1a 100%); col
 .search-box:focus-within{ border-color:rgba(110,231,231,.45); box-shadow:0 0 0 2px rgba(110,231,231,.18); }
 .search-box input{ width:180px; background:transparent; border:0; color:#dfe7ff; outline:none; font:600 14px Poppins, sans-serif; transition:width .3s ease, opacity .3s ease; }
 .search-box input:focus{ width:320px; }
-.xp-badge{ font:600 13px/1 Poppins, sans-serif; color:var(--accent); background:rgba(110,231,231,.1); border:1px solid rgba(110,231,231,.35); border-radius:999px; padding:8px 14px; display:inline-flex; align-items:center; gap:6px; transition:transform .2s ease, background .2s ease; position:relative; overflow:visible; }
+.xp-badge{ font:600 13px/1 Poppins, sans-serif; color:var(--accent); background:rgba(110,231,231,.1); border:1px solid rgba(110,231,231,.35); border-radius:999px; padding:8px 14px; display:inline-flex; align-items:center; gap:6px; transition:transform .2s ease, background .2s ease; position:relative; overflow:visible; text-decoration:none; cursor:pointer; }
 .xp-badge__label{ display:inline-flex; align-items:center; gap:6px; }
 .xp-badge--loading{ color:rgba(182,200,242,.96); background:rgba(148,163,184,.18); border-color:rgba(148,163,184,.35); }
 .xp-badge--loading::after{ content:""; width:12px; height:12px; border-radius:50%; border:2px solid currentColor; border-top-color:transparent; margin-left:4px; animation:xp-badge-spin .75s linear infinite; }
