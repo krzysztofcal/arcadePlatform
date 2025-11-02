@@ -5,6 +5,21 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>T-Rex Runner</title>
   <link rel="stylesheet" href="style.css" />
+  <script id="Cookiebot"
+          src="https://consent.cookiebot.com/uc.js"
+          data-cbid="c76249cb-52a7-4dba-adbf-da79fe8a6276"
+          data-blockingmode="auto"
+          type="text/javascript">
+  </script>
+  <!-- GA4 (blocked until Statistics consent) -->
+  <script type="text/plain" data-cookieconsent="statistics"
+          src="https://www.googletagmanager.com/gtag/js?id=G-JRP62LCXYK"></script>
+  <script type="text/plain" data-cookieconsent="statistics">
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){ dataLayer.push(arguments); }
+    gtag('js', new Date());
+    gtag('config', 'G-JRP62LCXYK');
+  </script>
 </head>
 <body>
   <main class="game-shell">
@@ -21,6 +36,10 @@
       <button id="restart" type="button">Restart</button>
     </div>
   </main>
+  <footer class="footer">
+    <a href="#" id="manageCookies">Manage cookies</a>
+  </footer>
+  <script src="../../js/cookiebot-manager.js" defer></script>
   <script src="main.js"></script>
 </body>
 </html>
