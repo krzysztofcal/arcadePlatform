@@ -29,12 +29,7 @@
     window.addEventListener("pointerdown", nudge, passive);
     window.addEventListener("touchstart", nudge, passive);
 
-    const handlePageHide = (event) => {
-      if (event && event.persisted) return;
-      stop();
-    };
     window.addEventListener("beforeunload", stop);
-    window.addEventListener("pagehide", handlePageHide);
 
     // ensure XP tick timer stays aligned when tab becomes active
     document.addEventListener("visibilitychange", () => {
@@ -49,12 +44,3 @@
   }
 })();
 
-// --- BFCache resume hook (idempotent) ---
-if (typeof window !== 'undefined') {
-  window.addEventListener('pageshow', (event) => {
-    // If we’re restored from Back/Forward Cache, bring XP timers/session back
-    if (event && event.persisted && window.XP && typeof window.XP.resumeSession === 'function') {
-      try { window.XP.resumeSession(); } catch (_){ /* noop */ }
-    }
-  });
-}
