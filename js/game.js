@@ -246,18 +246,11 @@
         try { window.XP.stopSession({ flush: true }); } catch (_){}
       }
     };
-    window.addEventListener('beforeunload', stop);
     window.addEventListener('pagehide', (event) => {
       if (!event || !event.persisted) stop();
     });
-    window.addEventListener('pageshow', (event) => {
-      if (event && event.persisted && window.XP && typeof window.XP.resumeSession === 'function'){
-        try { window.XP.resumeSession(); } catch (_){ /* noop */ }
-      }
-    });
   }
 })();
-window.addEventListener('beforeunload', stop);
 // --- bfcache handling: stop only on real unload; resume on pageshow ---
 (function () {
   // Stop on pagehide only if the page is not being placed into bfcache
@@ -288,3 +281,4 @@ window.addEventListener('beforeunload', stop);
     } catch (_) { /* noop */ }
   });
 })();
+window.addEventListener('beforeunload', stop);

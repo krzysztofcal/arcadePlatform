@@ -615,20 +615,13 @@ async function init(){
         try { window.XP.stopSession({ flush: true }); } catch (_){ /* noop */ }
       }
     };
-    window.addEventListener('beforeunload', cleanup);
     window.addEventListener('pagehide', (event) => {
       if (!event || !event.persisted) cleanup();
-    });
-    window.addEventListener('pageshow', (event) => {
-      if (event && event.persisted && window.XP && typeof window.XP.resumeSession === 'function'){
-        try { window.XP.resumeSession(); } catch (_){ /* noop */ }
-      }
     });
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
 })();
 
-window.addEventListener('beforeunload', cleanup);
 // --- bfcache handling for frame.js ---
 (function () {
   window.addEventListener('pagehide', function (e) {
@@ -657,3 +650,4 @@ window.addEventListener('beforeunload', cleanup);
     } catch (_) { /* noop */ }
   });
 })();
+window.addEventListener('beforeunload', cleanup);
