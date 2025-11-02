@@ -90,20 +90,3 @@ document.addEventListener('DOMContentLoaded', function () {
   });
 
 })();
-// Ensure the XP badge never stays stuck on "Syncing XP…"
-(function () {
-  var clearedOnce = false;
-  function badge(){ return document.getElementById('xpBadge') || document.querySelector('.xp-badge'); }
-  function setLoading(on){
-    var b = badge(); if(!b) return;
-    b.classList.toggle('xp-badge--loading', !!on);
-    b.setAttribute('aria-busy', on ? 'true' : 'false');
-  }
-  document.addEventListener('DOMContentLoaded', function(){
-    setTimeout(function(){ if(!clearedOnce) setLoading(false); }, 3000);
-  });
-  window.addEventListener('xp:tick', function(){
-    if(!clearedOnce){ setLoading(false); clearedOnce = true; }
-  });
-  window.XPUI = window.XPUI || {}; window.XPUI.setBadgeLoading = setLoading;
-})();
