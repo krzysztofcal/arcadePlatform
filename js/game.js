@@ -264,3 +264,13 @@ if (typeof window !== 'undefined') {
     }
   });
 }
+// --- visibility resume hook (idempotent) ---
+if (typeof window !== 'undefined' && !window.__xpVisibilityHook) {
+  window.__xpVisibilityHook = true;
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && window.XP) {
+      try { window.XP.nudge && window.XP.nudge(); } catch (_) {}
+      try { window.XP.resumeSession && window.XP.resumeSession(); } catch (_) {}
+    }
+  });
+}

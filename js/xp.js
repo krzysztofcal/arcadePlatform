@@ -310,3 +310,64 @@
     refreshStatus,
   });
 })(typeof window !== "undefined" ? window : this, typeof document !== "undefined" ? document : undefined);
+// --- XP resume polyfill (idempotent) ---
+(function () {
+  if (typeof window === 'undefined') return;
+  if (!window.XP) return;
+  if (window.XP.__xpResumeWired) return; // already wired
+
+  window.XP.__xpResumeWired = true;
+
+  // Wrap start/stop to track running state and last gameId
+  var _origStart = typeof window.XP.startSession === 'function' ? window.XP.startSession.bind(window.XP) : null;
+  var _origStop  = typeof window.XP.stopSession  === 'function' ? window.XP.stopSession.bind(window.XP)  : null;
+
+  // Track flags on the XP object (no dependency on internal state)
+  window.XP.__running = false;
+  window.XP.__lastGameId = null;
+
+  if (_origStart) {
+    window.XP.startSession = function (gameId) {
+      try {
+        if (gameId) window.XP.__lastGameId = gameId;
+        var ret = _origStart.apply(this, arguments);
+        window.XP.__running = true;
+        return ret;
+      } catch (_) {}
+    };
+  }
+
+  if (_origStop) {
+    window.XP.stopSession = function () {
+      try {
+        var ret = _origStop.apply(this, arguments);
+        window.XP.__running = false;
+        return ret;
+      } catch (_) {
+        window.XP.__running = false;
+      }
+    };
+  }
+
+  // Public probe
+  if (typeof window.XP.isRunning !== 'function') {
+    window.XP.isRunning = function () { return !!window.XP.__running; };
+  }
+
+  // Provide resumeSession if missing — restarts the ticker by calling startSession
+  if (typeof window.XP.resumeSession !== 'function') {
+    window.XP.resumeSession = function () {
+      try {
+        if (window.XP.isRunning && window.XP.isRunning()) {
+          // already running; give a tiny prod so UI/timers align
+          try { window.XP.nudge && window.XP.nudge(); } catch (_) {}
+          return;
+        }
+        var gid = window.XP.__lastGameId || undefined; // fall back to last seen gameId
+        if (typeof window.XP.startSession === 'function') {
+          return window.XP.startSession(gid, { resume: true });
+        }
+      } catch (_) {}
+    };
+  }
+})();
