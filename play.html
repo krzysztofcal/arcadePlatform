@@ -18,6 +18,67 @@
   <script src="/js/xpClient.js" defer></script>
   <script src="/js/xp.js" defer></script>
 </head>
+<!-- XP service client -->
+<script src="/js/xpClient.js"></script>
+
+<script>
+// Sends one XP window to the server every 30s of real active play.
+(function () {
+  const CHUNK_MS = 30_000;
+  const ACTIVE_WINDOW_MS = 5_000; // after any input, treat as active for 5s
+
+  // Derive gameId (query ?id=..., else filename)
+  const params = new URLSearchParams(location.search);
+  const gameId = params.get("id") || location.pathname.split("/").pop() || "unknown";
+
+  let lastTick = Date.now();
+  let activeUntil = 0;
+  let accMs = 0;
+  let visibilitySeconds = 0;
+  let inputEvents = 0;
+  let windowStart = Date.now();
+
+  function nudge() { activeUntil = Date.now() + ACTIVE_WINDOW_MS; inputEvents++; }
+  ["keydown","pointerdown","touchstart","mousedown"].forEach(evt =>
+    window.addEventListener(evt, nudge, { passive: true })
+  );
+  document.addEventListener("visibilitychange", () => { lastTick = Date.now(); });
+
+  async function loop() {
+    const now = Date.now();
+    const delta = Math.max(0, now - lastTick);
+    lastTick = now;
+
+    const active = !document.hidden && now <= activeUntil;
+    if (active) {
+      accMs += delta;
+      visibilitySeconds += delta / 1000;
+    }
+
+    if (accMs >= CHUNK_MS) {
+      const windowEnd = now;
+      try {
+        const data = await window.XPClient.postWindow({
+          gameId,
+          windowStart,
+          windowEnd,
+          visibilitySeconds: Math.round(visibilitySeconds),
+          inputEvents
+        });
+        // OPTIONAL: if you have HUD helpers, update from server truth:
+        // window.updateXpBadge?.(data.totalToday, data.cap);
+      } catch (_) { /* ignore, try next window */ }
+      // prepare next 30s window
+      accMs -= CHUNK_MS;
+      visibilitySeconds = 0;
+      inputEvents = 0;
+      windowStart = now;
+    }
+  }
+  const timer = setInterval(loop, 1000);
+  window.addEventListener("beforeunload", () => clearInterval(timer));
+})();
+</script>
 <body>
   <header><a href="/">← Back</a></header>
   <main>
