@@ -44,6 +44,7 @@ const keyIdem  = (u, s, g, start, end) => `${KEY_NS}:idemp:${hash(`${u}|${s}|${g
 const keyDaily = (u, day = dayKey()) => `${KEY_NS}:daily:${u}:${day}`;
 const keyLast  = (u, g) => `${KEY_NS}:lastok:${u}:${g}`; // NEW: last accepted end timestamp
 const keyLock  = (u, g) => `${KEY_NS}:lock:${u}:${g}`;
+const keyTotal = (u) => `${KEY_NS}:total:${u}`;
 
 const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
 
@@ -66,7 +67,27 @@ export async function handler(event) {
     inputEvents,
   } = body;
 
-  if (!userId || !gameId || !sessionId || !Number.isFinite(windowStart) || !Number.isFinite(windowEnd)) {
+  if (!userId || !sessionId) {
+    return json(400, { error: "missing_fields" }, origin);
+  }
+
+  if (body.statusOnly) {
+    const todayKeyK = keyDaily(userId, dayKey());
+    const totalKeyK = keyTotal(userId);
+    const [todayRaw, totalRaw] = await Promise.all([
+      store.get(todayKeyK),
+      store.get(totalKeyK),
+    ]);
+    const payload = {
+      ok: true,
+      totalToday: Number(todayRaw) || 0,
+      cap: DAILY_CAP,
+      totalLifetime: Number(totalRaw) || 0,
+    };
+    return json(200, payload, origin);
+  }
+
+  if (!gameId || !Number.isFinite(windowStart) || !Number.isFinite(windowEnd)) {
     return json(400, { error: "missing_fields" }, origin);
   }
 
@@ -97,6 +118,7 @@ export async function handler(event) {
   const lastKeyK  = keyLast(userId, gameId);
   const idemK     = keyIdem(userId, sessionId, gameId, windowStart, windowEnd);
   const lockKeyK  = keyLock(userId, gameId);
+  const totalKeyK = keyTotal(userId);
 
   // Atomic script: idempotency → cap → spacing (≥ CHUNK_MS since lastOk) → INCRBY → set lastOk(end) → set idem
   const script = `
@@ -104,6 +126,7 @@ export async function handler(event) {
     local lastk = KEYS[2]
     local idem  = KEYS[3]
     local lockk = KEYS[4]
+    local total = KEYS[5]
     local now     = tonumber(ARGV[1])
     local chunk   = tonumber(ARGV[2])
     local step    = tonumber(ARGV[3])
@@ -115,9 +138,13 @@ export async function handler(event) {
 
     -- Acquire lock with NX so only one invocation enters the critical section.
     local locked = redis.call('SET', lockk, tostring(now), 'PX', lockTtl, 'NX')
+    local function getLifetime()
+      return tonumber(redis.call('GET', total) or '0')
+    end
+
     if locked ~= 'OK' then
       local current = tonumber(redis.call('GET', daily) or '0')
-      return {0, current, 4}  -- someone else holds the lock
+      return {0, current, 4, getLifetime()}  -- someone else holds the lock
     end
 
     local function release()
@@ -127,22 +154,25 @@ export async function handler(event) {
     -- Idempotent?
     if redis.call('GET', idem) then
       local t = tonumber(redis.call('GET', daily) or '0')
+      local lifetime = getLifetime()
       release()
-      return {0, t, 1}    -- idempotent
+      return {0, t, 1, lifetime}    -- idempotent
     end
 
     local current = tonumber(redis.call('GET', daily) or '0')
     if current >= cap then
       redis.call('SETEX', idem, idemTtl, '1')
+      local lifetime = getLifetime()
       release()
-      return {0, current, 2}  -- capped
+      return {0, current, 2, lifetime}  -- capped
     end
 
     local lastOk = tonumber(redis.call('GET', lastk) or '0')
     if (endTs - lastOk) < chunk then
       -- too soon since last accepted window end
+      local lifetime = getLifetime()
       release()
-      return {0, current, 3}
+      return {0, current, 3, lifetime}
     end
 
     local remaining = cap - current
@@ -150,15 +180,16 @@ export async function handler(event) {
     if grant > remaining then grant = remaining end
 
     local newtotal = tonumber(redis.call('INCRBY', daily, grant))
+    local lifetime = tonumber(redis.call('INCRBY', total, grant))
     redis.call('SETEX', lastk, lastTtl, tostring(endTs))
     redis.call('SETEX', idem, idemTtl, '1')
     release()
-    return {grant, newtotal, 0} -- ok
+    return {grant, newtotal, 0, lifetime} -- ok
   `;
 
   const res = await store.eval(
     script,
-    [dailyKeyK, lastKeyK, idemK, lockKeyK],
+    [dailyKeyK, lastKeyK, idemK, lockKeyK, totalKeyK],
     [
       String(now),
       String(chunkMs),
@@ -174,8 +205,9 @@ export async function handler(event) {
   const granted = Number(res?.[0]) || 0;
   const total   = Number(res?.[1]) || 0;
   const status  = Number(res?.[2]) || 0; // 0=ok,1=idempotent,2=capped,3=too_soon,4=locked
+  const lifetime = Number(res?.[3]) || 0;
 
-  const payload = { ok: true, awarded: granted, totalToday: total, cap: DAILY_CAP };
+  const payload = { ok: true, awarded: granted, totalToday: total, cap: DAILY_CAP, totalLifetime: lifetime };
   if (status === 1) payload.idempotent = true;
   if (status === 2) payload.capped = true;
   if (status === 3) payload.tooSoon = true;

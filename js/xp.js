@@ -3,10 +3,14 @@
   const ACTIVE_WINDOW_MS = 5_000;
   const CACHE_KEY = "kcswh:xp:last";
 
+  const LEVEL_BASE_XP = 100;
+  const LEVEL_MULTIPLIER = 1.1;
+
   const state = {
     badge: null,
     labelEl: null,
     totalToday: null,
+    totalLifetime: null,
     cap: null,
     running: false,
     gameId: null,
@@ -19,7 +23,25 @@
     timerId: null,
     pending: null,
     lastResultTs: 0,
+    snapshot: null,
   };
+
+  function computeLevel(totalXp) {
+    const total = Math.max(0, Number(totalXp) || 0);
+    let level = 1;
+    let requirement = LEVEL_BASE_XP;
+    let accumulated = 0;
+    while (total >= accumulated + requirement) {
+      accumulated += requirement;
+      level += 1;
+      requirement = Math.max(1, Math.ceil(requirement * LEVEL_MULTIPLIER));
+    }
+    const xpIntoLevel = total - accumulated;
+    const xpForNextLevel = requirement;
+    const xpToNextLevel = Math.max(0, xpForNextLevel - xpIntoLevel);
+    const progress = xpForNextLevel > 0 ? xpIntoLevel / xpForNextLevel : 0;
+    return { level, totalXp: total, xpIntoLevel, xpForNextLevel, xpToNextLevel, progress };
+  }
 
   function loadCache() {
     try {
@@ -29,6 +51,7 @@
       if (!parsed || typeof parsed !== "object") return;
       if (typeof parsed.totalToday === "number") state.totalToday = parsed.totalToday;
       if (typeof parsed.cap === "number") state.cap = parsed.cap;
+      if (typeof parsed.totalLifetime === "number") state.totalLifetime = parsed.totalLifetime;
       state.lastResultTs = parsed.ts || 0;
     } catch (_) { /* ignore */ }
   }
@@ -38,6 +61,7 @@
       const payload = {
         totalToday: state.totalToday,
         cap: state.cap,
+        totalLifetime: state.totalLifetime,
         ts: Date.now(),
       };
       window.localStorage.setItem(CACHE_KEY, JSON.stringify(payload));
@@ -69,8 +93,12 @@
     if (state.totalToday == null) {
       state.totalToday = 0;
     }
-    const capText = state.cap ? ` / ${state.cap}` : "";
-    state.labelEl.textContent = `XP ${state.totalToday}${capText}`;
+    if (state.totalLifetime == null) {
+      state.totalLifetime = 0;
+    }
+    state.snapshot = computeLevel(state.totalLifetime);
+    const totalText = state.snapshot.totalXp.toLocaleString();
+    state.labelEl.textContent = `Lvl ${state.snapshot.level}, ${totalText} XP`;
     setBadgeLoading(false);
   }
 
@@ -93,6 +121,7 @@
         state.badge.classList.remove("xp-badge--bump");
       }
     });
+    maybeRefreshStatus();
   }
 
   function handleResponse(data) {
@@ -101,9 +130,11 @@
       const previous = state.totalToday;
       state.totalToday = data.totalToday;
       if (data.cap != null) state.cap = data.cap;
+      if (typeof data.totalLifetime === "number") state.totalLifetime = data.totalLifetime;
       if (data.awarded && data.awarded > 0 && typeof previous === "number") {
         bumpBadge();
       }
+      state.lastResultTs = Date.now();
       saveCache();
       updateBadge();
     }
@@ -207,8 +238,44 @@
   function setTotals(total, cap) {
     state.totalToday = typeof total === "number" ? total : state.totalToday;
     state.cap = typeof cap === "number" ? cap : state.cap;
+    if (arguments.length >= 3 && typeof arguments[2] === "number") {
+      state.totalLifetime = arguments[2];
+    }
     saveCache();
     updateBadge();
+  }
+
+  function getSnapshot() {
+    if (!state.snapshot) {
+      state.snapshot = computeLevel(state.totalLifetime || 0);
+    }
+    return {
+      totalToday: typeof state.totalToday === "number" ? state.totalToday : 0,
+      cap: state.cap != null ? state.cap : null,
+      totalXp: state.snapshot.totalXp,
+      level: state.snapshot.level,
+      xpIntoLevel: state.snapshot.xpIntoLevel,
+      xpForNextLevel: state.snapshot.xpForNextLevel,
+      xpToNextLevel: state.snapshot.xpToNextLevel,
+      progress: state.snapshot.progress,
+      lastSync: state.lastResultTs || 0,
+    };
+  }
+
+  function refreshStatus() {
+    if (!window.XPClient || typeof window.XPClient.fetchStatus !== "function") return Promise.resolve(null);
+    setBadgeLoading(true);
+    return window.XPClient.fetchStatus()
+      .then((data) => { handleResponse(data); return data; })
+      .catch((err) => { handleError(err); throw err; });
+  }
+
+  function maybeRefreshStatus() {
+    const now = Date.now();
+    const staleMs = 60_000;
+    if (!state.lastResultTs || (now - state.lastResultTs) > staleMs) {
+      refreshStatus().catch(() => {});
+    }
   }
 
   function init() {
@@ -239,5 +306,7 @@
     stopSession,
     nudge,
     setTotals,
+    getSnapshot,
+    refreshStatus,
   });
 })(typeof window !== "undefined" ? window : this, typeof document !== "undefined" ? document : undefined);

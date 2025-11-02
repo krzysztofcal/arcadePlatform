@@ -40,5 +40,22 @@
     return res.json();
   }
 
-  window.XPClient = { postWindow };
+  async function fetchStatus() {
+    const { userId, sessionId } = ensureIds();
+    const body = { userId, sessionId, gameId: "status", statusOnly: true };
+    const res = await fetch(FN_URL, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+      cache: "no-store",
+      credentials: "omit",
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`XP status failed (${res.status}) ${text}`.trim());
+    }
+    return res.json();
+  }
+
+  window.XPClient = { postWindow, fetchStatus };
 })();

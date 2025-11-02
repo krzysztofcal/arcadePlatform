@@ -47,7 +47,7 @@ function createMemoryStore() {
       return ttl > 0 ? Math.ceil(ttl / 1000) : -2;
     },
     async eval(_script, keys = [], argv = []) {
-      const [dailyKey, lastKey, idemKey, lockKey] = keys;
+      const [dailyKey, lastKey, idemKey, lockKey, totalKey] = keys;
       const now = Number(argv[0]);
       const chunk = Number(argv[1]);
       const step = Number(argv[2]);
@@ -60,7 +60,8 @@ function createMemoryStore() {
       const lockEntry = sweep(lockKey);
       if (lockEntry) {
         const current = Number(getValue(dailyKey) ?? "0");
-        return [0, current, 4];
+        const lifetime = Number(getValue(totalKey) ?? "0");
+        return [0, current, 4, lifetime];
       }
       setValue(lockKey, now, lockTtl);
 
@@ -69,18 +70,21 @@ function createMemoryStore() {
       try {
         if (getValue(idemKey) != null) {
           const current = Number(getValue(dailyKey) ?? "0");
-          return [0, current, 1];
+          const lifetime = Number(getValue(totalKey) ?? "0");
+          return [0, current, 1, lifetime];
         }
 
         let current = Number(getValue(dailyKey) ?? "0");
         if (current >= cap) {
           setValue(idemKey, "1", idemTtl);
-          return [0, current, 2];
+          const lifetime = Number(getValue(totalKey) ?? "0");
+          return [0, current, 2, lifetime];
         }
 
         const lastOk = Number(getValue(lastKey) ?? "0");
         if ((endTs - lastOk) < chunk) {
-          return [0, current, 3];
+          const lifetime = Number(getValue(totalKey) ?? "0");
+          return [0, current, 3, lifetime];
         }
 
         const remaining = cap - current;
@@ -89,7 +93,9 @@ function createMemoryStore() {
         setValue(dailyKey, newTotal, null);
         setValue(lastKey, endTs, lastTtl);
         setValue(idemKey, "1", idemTtl);
-        return [grant, newTotal, 0];
+        const lifetime = Number(getValue(totalKey) ?? "0") + grant;
+        setValue(totalKey, lifetime, null);
+        return [grant, newTotal, 0, lifetime];
       } finally {
         release();
       }
