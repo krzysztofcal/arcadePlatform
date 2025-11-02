@@ -274,5 +274,17 @@ window.addEventListener('beforeunload', stop);
       try { if (window.XP && typeof window.XP.resumeSession === 'function') window.XP.resumeSession(); } catch (_) {}
     }
   };
-  window.addEventListener('pageshow', handlePageShow);
+})();
+// --- ensure XP resumes when restored from bfcache or back/forward nav ---
+(function () {
+  window.addEventListener('pageshow', function (event) {
+    try {
+      var fromBFCache = (event && event.persisted) ||
+        (performance && performance.getEntriesByType &&
+         ((performance.getEntriesByType('navigation')[0] || {}).type === 'back_forward'));
+      if (fromBFCache && window.XP && typeof window.XP.resumeSession === 'function') {
+        window.XP.resumeSession();
+      }
+    } catch (_) { /* noop */ }
+  });
 })();
