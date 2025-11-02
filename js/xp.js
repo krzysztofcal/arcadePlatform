@@ -230,6 +230,16 @@
     state.activeUntil = 0;
   }
 
+  function resumeSession() {
+    if (!state.running) return;
+    if (state.timerId) {
+      window.clearInterval(state.timerId);
+      state.timerId = null;
+    }
+    state.lastTick = Date.now();
+    state.timerId = window.setInterval(tick, 1000);
+  }
+
   function nudge() {
     state.activeUntil = Date.now() + ACTIVE_WINDOW_MS;
     state.inputEvents += 1;
@@ -304,6 +314,7 @@
   window.XP = Object.assign({}, window.XP || {}, {
     startSession,
     stopSession,
+    resumeSession,
     nudge,
     setTotals,
     getSnapshot,

@@ -615,12 +615,15 @@ async function init(){
         try { window.XP.stopSession({ flush: true }); } catch (_){ /* noop */ }
       }
     };
-    const handlePageHide = (event) => {
-      if (event && event.persisted) return;
-      cleanup();
-    };
     window.addEventListener('beforeunload', cleanup);
-    window.addEventListener('pagehide', handlePageHide);
+    window.addEventListener('pagehide', (event) => {
+      if (!event || !event.persisted) cleanup();
+    });
+    window.addEventListener('pageshow', (event) => {
+      if (event && event.persisted && window.XP && typeof window.XP.resumeSession === 'function'){
+        try { window.XP.resumeSession(); } catch (_){ /* noop */ }
+      }
+    });
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
 })();
