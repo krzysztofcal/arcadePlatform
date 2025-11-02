@@ -114,7 +114,8 @@
       <span class="sep">•</span>
       <a class="ft-link" data-i18n="contact" href="mailto:contact@kcswh.pl">Contact</a>
       <span class="sep">•</span>
-      <a class="ft-link manage-cookies" data-i18n="manageCookies" id="manageCookies" href="#">Manage cookies</a>
+<a class="ft-link manage-cookies" data-i18n="manageCookies"
+   id="manageCookies" href="#" data-cookieconsent="ignore">Manage cookies</a>
     </nav>
     <div class="lang-switch" aria-label="Language">
       <button type="button" class="lang-btn" data-lang="pl" aria-pressed="false">PL</button>
@@ -168,6 +169,35 @@
         document.body.appendChild(link);
       } catch(e) {}
     })();
+  </script>
+  <script>
+  (function () {
+    function openConsent() {
+      if (window.Cookiebot && typeof Cookiebot.renew === 'function') {
+        Cookiebot.renew();
+      } else if (window.Cookiebot && typeof Cookiebot.show === 'function') {
+        Cookiebot.show();
+      } else {
+        alert('Menedżer zgód nie został jeszcze załadowany.');
+      }
+    }
+    function wire(el) {
+      if (!el) return;
+      el.addEventListener('click', function (e) {
+        e.preventDefault();
+        openConsent();
+      });
+      el.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openConsent(); }
+      });
+    }
+    function init() {
+      document.querySelectorAll('#manageCookies, [data-manage-cookies]').forEach(wire);
+    }
+    document.readyState === 'loading'
+      ? document.addEventListener('DOMContentLoaded', init)
+      : init();
+  })();
   </script>
 </body>
 </html>
