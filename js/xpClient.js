@@ -30,13 +30,3 @@
 
   window.XPClient = { postWindow };
 })();
-// Fallback: never leave badge stuck in "loading" if status fetch fails early.
-document.addEventListener('DOMContentLoaded', function () {
-  try {
-    var badge = document.getElementById('xpBadge') || document.querySelector('.xp-badge');
-    if (badge) {
-      badge.classList.remove('xp-badge--loading');
-      badge.setAttribute('aria-busy', 'false');
-    }
-  } catch (_) {}
-});
