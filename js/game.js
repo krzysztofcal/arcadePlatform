@@ -246,7 +246,11 @@
         try { window.XP.stopSession({ flush: true }); } catch (_){}
       }
     };
+    const handlePageHide = (event) => {
+      if (event && event.persisted) return;
+      stop();
+    };
     window.addEventListener('beforeunload', stop);
-    window.addEventListener('pagehide', stop);
+    window.addEventListener('pagehide', handlePageHide);
   }
 })();

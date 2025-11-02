@@ -146,8 +146,12 @@
           try { window.XP.stopSession({ flush: true }); } catch (_){}
         }
       };
+      const handlePageHide = (event) => {
+        if (event && event.persisted) return;
+        stopXp();
+      };
       window.addEventListener('beforeunload', stopXp);
-      window.addEventListener('pagehide', stopXp);
+      window.addEventListener('pagehide', handlePageHide);
     })();
   </script>
   <!-- XP message listener: convert child activity -> XP.nudge() -->

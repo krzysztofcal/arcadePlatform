@@ -3,7 +3,7 @@ import { store } from "./_shared/store-upstash.mjs";
 
 const DAILY_CAP = Number(process.env.XP_DAILY_CAP ?? 600);          // set to 3000 in Netlify
 const DEFAULT_CHUNK_MS = Number(process.env.XP_CHUNK_MS ?? 10_000); // 10s default
-const DEFAULT_POINTS_PER_PERIOD = Number(process.env.XP_POINTS_PER_PERIOD ?? 1);
+const DEFAULT_POINTS_PER_PERIOD = Number(process.env.XP_POINTS_PER_PERIOD ?? 10);
 const DRIFT_MS = Number(process.env.XP_DRIFT_MS ?? 2_000);
 const BASE_MIN_VISIBILITY_S = Number(process.env.XP_MIN_VISIBILITY_S ?? 6);
 const BASE_MIN_INPUTS = Number(process.env.XP_MIN_INPUTS ?? 1);

@@ -29,8 +29,12 @@
     window.addEventListener("pointerdown", nudge, passive);
     window.addEventListener("touchstart", nudge, passive);
 
+    const handlePageHide = (event) => {
+      if (event && event.persisted) return;
+      stop();
+    };
     window.addEventListener("beforeunload", stop);
-    window.addEventListener("pagehide", stop);
+    window.addEventListener("pagehide", handlePageHide);
 
     // ensure XP tick timer stays aligned when tab becomes active
     document.addEventListener("visibilitychange", () => {

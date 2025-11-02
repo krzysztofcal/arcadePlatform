@@ -163,7 +163,7 @@
       visibilitySeconds: visibility,
       inputEvents: inputs,
       chunkMs: CHUNK_MS,
-      pointsPerPeriod: 1
+      pointsPerPeriod: 10
     };
     state.windowStart = now;
     state.activeMs = 0;

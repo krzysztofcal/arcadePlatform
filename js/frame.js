@@ -615,8 +615,12 @@ async function init(){
         try { window.XP.stopSession({ flush: true }); } catch (_){ /* noop */ }
       }
     };
+    const handlePageHide = (event) => {
+      if (event && event.persisted) return;
+      cleanup();
+    };
     window.addEventListener('beforeunload', cleanup);
-    window.addEventListener('pagehide', cleanup);
+    window.addEventListener('pagehide', handlePageHide);
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
 })();
