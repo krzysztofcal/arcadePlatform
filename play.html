@@ -17,6 +17,7 @@
   </style>
   <script src="/js/xpClient.js" defer></script>
   <script src="/js/xp.js" defer></script>
+  <script src="/js/lifecycle-helper.js" defer></script>
 </head>
 <body>
   <header><a href="/">← Back</a></header>
@@ -146,12 +147,7 @@
           try { window.XP.stopSession({ flush: true }); } catch (_){}
         }
       };
-      const handlePageHide = (event) => {
-        if (event && event.persisted) return;
-        stopXp();
-      };
       window.addEventListener('beforeunload', stopXp);
-      window.addEventListener('pagehide', handlePageHide);
     })();
   </script>
   <!-- XP message listener: convert child activity -> XP.nudge() -->
@@ -166,16 +162,6 @@
   }, { passive: true });
 </script>
 
-<!-- BFCache resume hook -->
-<script>
-if (typeof window !== "undefined") {
-  window.addEventListener("pageshow", (event) => {
-    if (event && event.persisted && window.XP && typeof window.XP.resumeSession === "function") {
-      try { window.XP.resumeSession(); } catch (_) {}
-    }
-  });
-}
-</script>
 </body>
 </html>
 
