@@ -92,12 +92,7 @@
         try { window.XP.stopSession({ flush: true }); } catch (_){}
       }
     };
-    const handlePageHide = (event) => {
-      if (event && event.persisted) return;
-      stop();
-    };
     window.addEventListener('beforeunload', stop);
-    window.addEventListener('pagehide', handlePageHide);
   }
 })();
 
@@ -110,11 +105,3 @@
     }
   }
 
-// --- BFCache resume hook (idempotent) ---
-if (typeof window !== 'undefined') {
-  window.addEventListener('pageshow', (event) => {
-    if (event && event.persisted && window.XP && typeof window.XP.resumeSession === 'function') {
-      try { window.XP.resumeSession(); } catch (_) {}
-    }
-  });
-}

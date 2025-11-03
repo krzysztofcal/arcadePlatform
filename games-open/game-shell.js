@@ -31,10 +31,6 @@
 
     window.addEventListener("beforeunload", stop);
 
-    // ensure XP tick timer stays aligned when tab becomes active
-    document.addEventListener("visibilitychange", () => {
-      if (!document.hidden) nudge();
-    });
   }
 
   if (document.readyState === "loading") {

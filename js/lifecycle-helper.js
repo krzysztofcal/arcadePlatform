@@ -3,6 +3,7 @@
   if (typeof window === "undefined") return;
   if (window.__lifecycleWired) return;
   window.__lifecycleWired = true;
+  if (!window.__lifecycleLogged) { window.__lifecycleLogged = true; console.info('[xp] lifecycle wired'); }
 
   let running = false;
   let retryTimer = null;
