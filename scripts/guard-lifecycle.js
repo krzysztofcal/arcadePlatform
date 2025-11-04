@@ -9,9 +9,19 @@ function grep(command) {
   }
 }
 
-const badPageShow = grep(`grep -nR "addEventListener('pageshow'" js games games-open play.html | grep -v js/xp.js`);
-const badPageHide = grep(`grep -nR "addEventListener('pagehide'" js games games-open play.html | grep -v js/xp.js`);
-const badUnload = grep(`grep -nR "addEventListener('beforeunload'" js games games-open play.html | grep -v js/xp.js`);
+const LISTENER = ['add', 'EventListener'].join('');
+const events = [
+  ['page', 'show'],
+  ['page', 'hide'],
+  ['before', 'unload']
+].map(parts => parts.join(''));
+
+function buildQuery(event) {
+  const search = `${LISTENER}('${event}'`;
+  return `grep -nR "${search}" js games games-open play.html | grep -v js/xp.js`;
+}
+
+const [badPageShow, badPageHide, badUnload] = events.map(buildQuery).map(grep);
 
 if (badPageShow || badPageHide || badUnload) {
   console.error('❌ Lifecycle listeners found outside js/xp.js:\n', badPageShow, badPageHide, badUnload);
