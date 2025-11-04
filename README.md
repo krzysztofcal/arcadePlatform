@@ -20,6 +20,9 @@ A lightweight arcade hub (static HTML/CSS/JS) with a sample game (Łap koty — 
 - Open `index.html` directly in a browser.
 - Game page: open `game_cats.html`.
 
+### XP guardrails
+- Run `npm run check:all` to validate lifecycle centralization and XP badge placement. Use `npm run check:xpbadge -- --fix` for auto-remediation when there’s exactly one badge anchor. See [docs/guards.md](docs/guards.md) for details.
+
 ## Tests
 There are two layers of tests:
 
@@ -31,8 +34,8 @@ There are two layers of tests:
 
 Run locally:
 - `npm i`
-- `npx playwright install --with-deps`
-- `npm test`
+- `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm install` if you rely on a system Chromium.
+- `npm run test` (set `CI_NO_E2E=1` to skip the Playwright suite when browsers aren’t available).
 
 ## CI Status
 - GitHub Actions workflow: tests

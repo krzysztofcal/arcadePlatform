@@ -86,14 +86,6 @@
   canvas.addEventListener('touchstart', handlePointer, { passive:false });
   setupCanvas();
   reset();
-  if (typeof window !== 'undefined'){
-    const stop = () => {
-      if (window.XP && typeof window.XP.stopSession === 'function'){
-        try { window.XP.stopSession({ flush: true }); } catch (_){}
-      }
-    };
-    window.addEventListener('beforeunload', stop);
-  }
 })();
 
   if (window.XP && typeof window.XP.startSession === 'function'){

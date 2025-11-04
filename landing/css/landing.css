@@ -69,6 +69,12 @@ button:focus-visible {
   align-items: center;
 }
 
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
 .nav a {
   font-weight: 600;
   font-size: 15px;

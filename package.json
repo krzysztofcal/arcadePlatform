@@ -3,13 +3,25 @@
   "private": true,
   "version": "0.0.0",
   "scripts": {
+    "check:lifecycle": "node scripts/check-lifecycle.js",
+    "check:xpbadge": "node scripts/check-xpbadge.js",
+    "check:all": "node scripts/check-lifecycle.js && node scripts/check-xpbadge.js",
     "lint:games": "node scripts/validate-games.js",
-    "pretest": "node scripts/prepare-playwright.js",
-    "test": "node scripts/run-e2e.js",
-    "test:install": "node scripts/prepare-playwright.js"
+    "prepare": "husky install",
+    "test": "npm run check:all && npm run test:unit && npm run test:e2e",
+    "test:unit": "npm run lint:games",
+    "test:e2e": "node scripts/run-e2e.js"
   },
   "devDependencies": {
-    "@playwright/test": "^1.46.0"
+    "@playwright/test": "^1.46.0",
+    "husky": "^9.0.11",
+    "lint-staged": "^15.2.7"
+  },
+  "lint-staged": {
+    "**/*.js": "node scripts/check-lifecycle.js --files",
+    "**/*.html": [
+      "node scripts/check-xpbadge.js --fix --files",
+      "node scripts/check-lifecycle.js --files"
+    ]
   }
 }
-

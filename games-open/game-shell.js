@@ -13,12 +13,6 @@
     }
   }
 
-  function stop() {
-    if (window.XP && typeof window.XP.stopSession === "function") {
-      try { window.XP.stopSession({ flush: true }); } catch (_) { /* noop */ }
-    }
-  }
-
   function init() {
     if (typeof document === "undefined") return;
     const slug = document.body?.dataset?.gameSlug || document.body?.dataset?.gameId || "game";
@@ -28,8 +22,6 @@
     window.addEventListener("keydown", nudge, passive);
     window.addEventListener("pointerdown", nudge, passive);
     window.addEventListener("touchstart", nudge, passive);
-
-    window.addEventListener("beforeunload", stop);
 
   }
 

@@ -371,3 +371,101 @@
     };
   }
 })();
+
+// --- XP lifecycle wiring (pagehide/pageshow/visibilitychange/beforeunload) ---
+(function () {
+  if (typeof window === 'undefined' || typeof document === 'undefined') return;
+  if (!window.XP) return;
+  if (window.XP.__xpLifecycleWired) return;
+
+  window.XP.__xpLifecycleWired = true;
+
+  let running = typeof window.XP.isRunning === 'function' ? !!window.XP.isRunning() : false;
+  let retryTimer = null;
+
+  function tryCall(fnName, arg) {
+    try {
+      const XP = window.XP;
+      if (!XP || typeof XP[fnName] !== 'function') return false;
+      XP[fnName](arg);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function clearRetry() {
+    if (retryTimer) {
+      clearTimeout(retryTimer);
+      retryTimer = null;
+    }
+  }
+
+  function retryResume(attempt = 0) {
+    clearRetry();
+    const ok = tryCall('resumeSession');
+    if (ok) {
+      running = true;
+      return;
+    }
+    if (attempt >= 3) return;
+    retryTimer = setTimeout(() => retryResume(attempt + 1), 150 * (attempt + 1));
+  }
+
+  function resume() {
+    if (running) return;
+    const ok = tryCall('resumeSession') || tryCall('nudge');
+    if (ok) {
+      running = true;
+      clearRetry();
+    } else {
+      retryResume(0);
+    }
+  }
+
+  function pause() {
+    if (!running) return;
+    tryCall('stopSession', { flush: true });
+    running = false;
+    clearRetry();
+  }
+
+  function persisted(event) {
+    return !!(event && event.persisted);
+  }
+
+  window.addEventListener('pageshow', (event) => {
+    if (!persisted(event)) return;
+    resume();
+  }, { passive: true });
+
+  window.addEventListener('pagehide', (event) => {
+    if (persisted(event)) return;
+    pause();
+  }, { passive: true });
+
+  window.addEventListener('beforeunload', () => {
+    pause();
+  });
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      resume();
+    } else {
+      pause();
+    }
+  }, { passive: true });
+
+  if (document.visibilityState === 'visible') {
+    setTimeout(resume, 0);
+  }
+})();
+
+(function(){
+  try {
+    const nodes = document.querySelectorAll('a.xp-badge#xpBadge');
+    if (nodes.length !== 1) {
+      console.warn(`[xp] expected 1 xp-badge anchor with id="xpBadge", found ${nodes.length}`);
+    }
+  } catch {}
+})();
