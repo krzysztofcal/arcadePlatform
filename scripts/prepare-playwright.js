@@ -4,9 +4,34 @@ const { existsSync, mkdirSync, unlinkSync, writeFileSync } = require('node:fs');
 const path = require('node:path');
 const { findSystemChromium } = require('./system-browser');
 
-const playwrightPackagePath = require.resolve('playwright/package.json');
-const cliPath = path.join(path.dirname(playwrightPackagePath), 'cli.js');
 const skipFile = path.resolve(__dirname, '../.cache/skip-playwright-tests');
+
+function resolvePlaywrightCli() {
+  const candidates = ['@playwright/test', 'playwright'];
+  for (const pkg of candidates) {
+    try {
+      const pkgPath = require.resolve(`${pkg}/package.json`);
+      return {
+        packageName: pkg,
+        cliPath: path.join(path.dirname(pkgPath), 'cli.js'),
+      };
+    } catch (err) {
+      if (err && err.code !== 'MODULE_NOT_FOUND') {
+        throw err;
+      }
+    }
+  }
+  return null;
+}
+
+const resolvedCli = resolvePlaywrightCli();
+if (!resolvedCli) {
+  markSkip('Playwright CLI not available (install @playwright/test or playwright).');
+  console.warn('⚠️  Skipping Playwright browser installation: no Playwright package is installed.');
+  process.exit(0);
+}
+
+const { cliPath } = resolvedCli;
 
 function ensureCacheDir() {
   const dir = path.dirname(skipFile);

@@ -3,8 +3,32 @@ const { spawnSync } = require('node:child_process');
 const { existsSync, readFileSync } = require('node:fs');
 const path = require('node:path');
 
-const playwrightPackagePath = require.resolve('playwright/package.json');
-const cliPath = path.join(path.dirname(playwrightPackagePath), 'cli.js');
+function resolvePlaywrightCli() {
+  const candidates = ['@playwright/test', 'playwright'];
+  for (const pkg of candidates) {
+    try {
+      const pkgPath = require.resolve(`${pkg}/package.json`);
+      return {
+        packageName: pkg,
+        cliPath: path.join(path.dirname(pkgPath), 'cli.js'),
+      };
+    } catch (err) {
+      if (err && err.code !== 'MODULE_NOT_FOUND') {
+        throw err;
+      }
+    }
+  }
+  return null;
+}
+
+const resolvedCli = resolvePlaywrightCli();
+if (!resolvedCli) {
+  console.warn('⚠️  Playwright tests skipped: no Playwright package is installed.');
+  console.warn('    Install @playwright/test (or playwright) to enable the smoke suite.');
+  process.exit(0);
+}
+
+const { cliPath } = resolvedCli;
 const skipFile = path.resolve(__dirname, '../.cache/skip-playwright-tests');
 
 if (process.env.CI_NO_E2E === '1') {
