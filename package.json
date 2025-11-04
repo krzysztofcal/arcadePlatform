@@ -6,11 +6,14 @@
     "check:lifecycle": "node scripts/check-lifecycle.js",
     "check:xpbadge": "node scripts/check-xpbadge.js",
     "check:all": "node scripts/check-lifecycle.js && node scripts/check-xpbadge.js",
+    "guard:lifecycle": "node scripts/guard-lifecycle.js",
+    "guard:badge": "node scripts/guard-badge.js",
+    "ci:guards": "npm run guard:lifecycle && npm run guard:badge",
     "lint:games": "node scripts/validate-games.js",
     "prepare": "husky install",
     "test": "npm run check:all && npm run test:unit && npm run test:e2e",
     "test:unit": "npm run lint:games",
-    "test:e2e": "node scripts/run-e2e.js"
+    "test:e2e": "node scripts/prepare-playwright.js && node scripts/run-e2e.js"
   },
   "devDependencies": {
     "@playwright/test": "^1.46.0",
