@@ -1,0 +1,10 @@
+{
+  "badge": {
+    "selector": "a.xp-badge",
+    "id": "xpBadge"
+  },
+  "lifecycle": {
+    "allowedFiles": ["js/xp.js"],
+    "allowToken": "xp-guard:allow-adhoc"
+  }
+}

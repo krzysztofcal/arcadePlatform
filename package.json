@@ -3,13 +3,21 @@
   "private": true,
   "version": "0.0.0",
   "scripts": {
+    "check:lifecycle": "node scripts/check-lifecycle.js",
+    "check:xpbadge": "node scripts/check-xpbadge.js",
+    "check:all": "npm run check:lifecycle && npm run check:xpbadge",
     "lint:games": "node scripts/validate-games.js",
+    "prepare": "husky install",
+    "precommit:run": "npm run check:all && npm test || true",
+    "precommit:strict": "STRICT_GUARDS=1 npm run check:all && npm test",
     "pretest": "node scripts/prepare-playwright.js",
     "test": "node scripts/run-e2e.js",
     "test:install": "node scripts/prepare-playwright.js"
   },
   "devDependencies": {
-    "@playwright/test": "^1.46.0"
+    "@playwright/test": "^1.46.0",
+    "cheerio": "^1.0.0-rc.12",
+    "fast-glob": "^3.3.2",
+    "husky": "^9.0.11"
   }
 }
-

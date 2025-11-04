@@ -371,3 +371,12 @@
     };
   }
 })();
+
+(function(){
+  try {
+    const nodes = document.querySelectorAll('a.xp-badge#xpBadge');
+    if (nodes.length !== 1) {
+      console.warn(`[xp] expected 1 xp-badge anchor with id="xpBadge", found ${nodes.length}`);
+    }
+  } catch {}
+})();
