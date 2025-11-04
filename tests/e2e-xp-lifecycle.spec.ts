@@ -1,31 +1,29 @@
 import { test, expect, Page } from '@playwright/test';
 
 async function waitForRunning(page: Page) {
-  // Wait for XP to be loaded on the page
-  await page.waitForFunction(() => {
-    const w = /** @type {any} */(window);
-    return w.XP && typeof w.XP.startSession === 'function' && typeof w.XP.isRunning === 'function';
-  }, { timeout: 5000 });
+  // 1) Wait until XP is on window
+  await page.waitForFunction(() => !!(window as any).XP, { timeout: 5000 });
 
-  // Ensure a session is actually started
+  // 2) Start or resume a session so XP.isRunning() can become true
   await page.evaluate(() => {
-    const w = /** @type {any} */(window);
+    const w = (window as any);
+    if (!w.XP) return;
     try {
-      if (!w.XP.isRunning()) {
+      if (typeof w.XP.startSession === 'function' && (!w.XP.isRunning || !w.XP.isRunning())) {
         w.XP.startSession('e2e-lifecycle');
+      } else if (typeof w.XP.resumeSession === 'function') {
+        w.XP.resumeSession();
+      } else if (typeof w.XP.nudge === 'function') {
+        w.XP.nudge();
       }
-      // Kick resume/nudge in case page opened hidden or BFCache edge
-      w.XP.resumeSession && w.XP.resumeSession();
-      w.XP.nudge && w.XP.nudge();
     } catch {}
   });
 
-  // Now wait until XP runs
+  // 3) Wait for the running flag
   await page.waitForFunction(() => {
-    const w = /** @type {any} */(window);
-    return !!w.XP && w.XP.isRunning && w.XP.isRunning();
+    const w = (window as any);
+    return !!w.XP && typeof w.XP.isRunning === 'function' && w.XP.isRunning();
   }, { timeout: 5000 });
-}, { timeout: 5000 });
 }
 
 test.describe('XP lifecycle smoke', () => {
