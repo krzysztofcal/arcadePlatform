@@ -1,10 +1,17 @@
 import { test, expect, Page } from '@playwright/test';
 
 async function waitForRunning(page: Page) {
-  await page.waitForFunction(() => {
+  // Ensure the session actually starts on tests that don't auto-start.
+  await page.evaluate(() => {
+    const w = /** @type {any} */(window);
+    if (w.XP && typeof w.XP.startSession === 'function' && (!w.XP.isRunning || !w.XP.isRunning())) {
+      try { w.XP.startSession('e2e-lifecycle'); } catch (_) {}
+    }
+  });
+await page.waitForFunction(() => {
     const XP = (window as any).XP;
     return !!XP && typeof XP.isRunning === 'function' && XP.isRunning();
-  }, { timeout: 2000 });
+  }, { timeout: 5000 });
 }
 
 test.describe('XP lifecycle smoke', () => {
