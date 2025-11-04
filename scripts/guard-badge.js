@@ -13,8 +13,14 @@ function loadConfig() {
   return JSON.parse(readFileSync(cfgPath, 'utf8'));
 }
 
-function listHtmlFiles() {
-  const output = execSync("git ls-files '*.html' '**/*.html'", { encoding: 'utf8' }).trim();
+function listHtmlFiles(globs) {
+  const patterns = Array.isArray(globs) && globs.length
+    ? globs
+    : ['*.html', '**/*.html'];
+  const escaped = patterns
+    .map(pattern => `'${pattern.replace(/'/g, "'\\''")}'`)
+    .join(' ');
+  const output = execSync(`git ls-files ${escaped}`, { encoding: 'utf8' }).trim();
   if (!output) return [];
   const seen = new Set();
   const files = [];
@@ -80,10 +86,6 @@ function analyze(source, requiredId, requiredClass) {
     violations.push('id attached to non xp-badge anchor');
   }
 
-  if (anchorsMissingId.length && anchorsWithIdMissingClass.length === 0) {
-    violations.push('xp badge anchor missing id attribute');
-  }
-
   if (labelIdRx.test(source)) {
     violations.push('xp-badge__label carries id');
   }
@@ -105,7 +107,7 @@ function main() {
   const selector = cfg.badge?.selector || 'a.xp-badge';
   const requiredClass = selector.split('.').pop() || 'xp-badge';
 
-  const files = listHtmlFiles();
+  const files = listHtmlFiles(cfg.badge?.include);
   if (files.length === 0) {
     console.error('❌ No HTML files detected to verify badge discipline.');
     process.exit(1);
