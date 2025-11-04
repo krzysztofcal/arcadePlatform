@@ -2,16 +2,16 @@
 const fs = require('fs');
 const fg = require('fast-glob');
 const cheerio = require('cheerio');
+const path = require('path');
 
-const cfg = JSON.parse(fs.readFileSync('guard.config.json', 'utf8'));
+const cfgPath = path.resolve(process.cwd(), 'guard.config.json');
+const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
 const strict = process.env.STRICT_GUARDS === '1';
 
 const HTML_GLOBS = [
   '**/*.html',
   '!node_modules/**',
-  '!.git/**',
-  // ignore external vendor demos if any:
-  '!games-open/**' // remove this line if those pages should also comply
+  '!.git/**'
 ];
 
 let failed = false;

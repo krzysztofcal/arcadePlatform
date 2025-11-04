@@ -20,6 +20,9 @@ A lightweight arcade hub (static HTML/CSS/JS) with a sample game (Łap koty — 
 - Open `index.html` directly in a browser.
 - Game page: open `game_cats.html`.
 
+### XP guardrails
+- Run `npm run check:all` to validate lifecycle centralization and XP badge placement. See [docs/guards.md](docs/guards.md) for details.
+
 ## Tests
 There are two layers of tests:
 
