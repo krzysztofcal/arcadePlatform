@@ -242,7 +242,6 @@ async function loadCatalog(){
     "['pointerdown','pointermove','pointerup','touchstart','touchmove','keydown'].forEach(function(evt){ try { document.addEventListener(evt,onActive,{ passive:true }); } catch(_){ document.addEventListener(evt,onActive); } });" +
     "var beat=function(){ if (Date.now() - last <= ACTIVE_WINDOW) send(); };" +
     "var timer=setInterval(beat, HEARTBEAT);" +
-    "document.addEventListener('visibilitychange', function(){ if (document.hidden){ if (timer){ clearInterval(timer); timer=null; } } else if (!timer){ last=Date.now(); send(); timer=setInterval(beat, HEARTBEAT); } }, { passive:true });" + // xp-lifecycle-allow: temporary(2025-12-31)
     "send();" +
   "})();";
 
