@@ -435,7 +435,7 @@
   }
 
   window.addEventListener('pageshow', (event) => {
-    if (persisted(event)) return;
+    if (!persisted(event)) return;
     resume();
   }, { passive: true });
 
