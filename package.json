@@ -5,7 +5,7 @@
   "scripts": {
     "check:lifecycle": "node scripts/check-lifecycle.js",
     "check:xpbadge": "node scripts/check-xpbadge.js",
-    "check:all": "npm run check:lifecycle && npm run check:xpbadge",
+    "check:all": "node scripts/check-xpbadge.js && node scripts/check-lifecycle.js",
     "lint:games": "node scripts/validate-games.js",
     "prepare": "husky install",
     "precommit:run": "npm run check:all && npm test || true",
@@ -16,8 +16,6 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.46.0",
-    "cheerio": "^1.0.0-rc.12",
-    "fast-glob": "^3.3.2",
     "husky": "^9.0.11"
   }
 }

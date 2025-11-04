@@ -11,9 +11,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 20 }
+      - name: Run guard checks (no deps)
+        run: node scripts/check-xpbadge.js && node scripts/check-lifecycle.js
       - run: npm ci || npm i
-      - name: Advisory guards
-        run: npm run check:all && npm test
+      - name: Playwright tests
+        run: npm test
       # When ready to enforce:
       # - name: Enforced guards
-      #   run: STRICT_GUARDS=1 npm run check:all && npm test
+      #   run: STRICT_GUARDS=1 node scripts/check-xpbadge.js && STRICT_GUARDS=1 node scripts/check-lifecycle.js && npm test

@@ -1,26 +1,37 @@
 #!/usr/bin/env node
-const fs = require('fs');
-const fg = require('fast-glob');
+const { execSync } = require('child_process');
+const { readFileSync } = require('fs');
 const path = require('path');
 
+function gitList(patterns) {
+  const cmd = 'git ls-files ' + patterns.map(p => `"${p}"`).join(' ');
+  return execSync(cmd, { encoding: 'utf8' })
+    .split('\n')
+    .map(s => s.trim())
+    .filter(Boolean);
+}
+
 const cfgPath = path.resolve(process.cwd(), 'guard.config.json');
-const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
-const allowed = new Set(cfg.lifecycle.allowedFiles);
+const cfg = JSON.parse(readFileSync(cfgPath, 'utf8'));
+const allowed = new Set(cfg.lifecycle.allowedFiles || []);
 const allowToken = cfg.lifecycle.allowToken;
 const strict = process.env.STRICT_GUARDS === '1';
 
-const JS_GLOBS = ['**/*.js', '**/*.html', '!node_modules/**', '!.git/**'];
+const files = Array.from(
+  new Set([
+    ...gitList(['*.js', '**/*.js']),
+    ...gitList(['*.html', '**/*.html'])
+  ])
+);
 
 const RX = {
-  // raw lifecycle hooks that must be centralized
   pagehide: /addEventListener\(['"]pagehide['"][^)]*\)/,
   beforeunload: /addEventListener\(['"]beforeunload['"][^)]*\)/,
   pageshow: /addEventListener\(['"]pageshow['"][^)]*\)/,
   visibility: /addEventListener\(['"]visibilitychange['"][^)]*\)/,
-  // direct XP control calls (should be centralized too)
   xpStart: /XP\s*\.\s*startSession\s*\(/,
   xpStop: /XP\s*\.\s*stopSession\s*\(/,
-  xpResume: /XP\s*\.\s*resumeSession\s*\(/,
+  xpResume: /XP\s*\.\s*resumeSession\s*\(/
 };
 
 const LINE_RX = {
@@ -30,20 +41,18 @@ const LINE_RX = {
   visibility: /addEventListener\(['"]visibilitychange['"]/,
   xpStart: /XP\s*\.\s*startSession\s*\(/,
   xpStop: /XP\s*\.\s*stopSession\s*\(/,
-  xpResume: /XP\s*\.\s*resumeSession\s*\(/,
+  xpResume: /XP\s*\.\s*resumeSession\s*\(/
 };
 
-let failed = false;
-const files = fg.sync(JS_GLOBS, { dot: false });
-
 function isAllowed(file) {
-  // exact match on forward slashes
   const norm = file.split(path.sep).join('/');
   return allowed.has(norm);
 }
 
+let failed = false;
+
 for (const f of files) {
-  const src = fs.readFileSync(f, 'utf8');
+  const src = readFileSync(f, 'utf8');
   const lines = src.split('\n');
 
   const matches = [];
@@ -66,7 +75,7 @@ for (const f of files) {
         const lineNumber = leading.split('\n').length;
         detail.lines.push({
           index: lineNumber,
-          text: lines[lineNumber - 1] ?? match[0],
+          text: lines[lineNumber - 1] ?? match[0]
         });
       }
     }
@@ -80,11 +89,18 @@ for (const f of files) {
   const actionable = matches
     .map(match => ({
       key: match.key,
-      lines: match.lines.filter(line => !line.text.includes(allowToken)),
+      lines: match.lines.filter(line => !line.text.includes(allowToken))
     }))
     .filter(match => match.lines.length);
 
   if (!actionable.length) continue;
+
+  if (src.includes(allowToken)) {
+    const waived = actionable.every(match =>
+      match.lines.every(line => line.text.includes(allowToken))
+    );
+    if (waived) continue;
+  }
 
   failed = true;
   const summary = actionable.map(match => match.key).join(', ');
