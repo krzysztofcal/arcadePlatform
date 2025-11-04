@@ -418,9 +418,10 @@
     if (ok) {
       running = true;
       
+
     try { document.dispatchEvent(new Event('xp:visible')); } catch {}
-clearRetry();
-    } else {
+      clearRetry();
+} else {
       retryResume(0);
     }
   }
@@ -431,8 +432,8 @@ clearRetry();
     running = false;
     clearRetry();
   
+
     try { document.dispatchEvent(new Event('xp:hidden')); } catch {}
-}
 
   function persisted(event) {
     return !!(event && event.persisted);
