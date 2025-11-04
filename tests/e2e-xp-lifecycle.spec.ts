@@ -1,17 +1,31 @@
 import { test, expect, Page } from '@playwright/test';
 
 async function waitForRunning(page: Page) {
-  // Ensure the session actually starts on tests that don't auto-start.
+  // Wait for XP to be loaded on the page
+  await page.waitForFunction(() => {
+    const w = /** @type {any} */(window);
+    return w.XP && typeof w.XP.startSession === 'function' && typeof w.XP.isRunning === 'function';
+  }, { timeout: 5000 });
+
+  // Ensure a session is actually started
   await page.evaluate(() => {
     const w = /** @type {any} */(window);
-    if (w.XP && typeof w.XP.startSession === 'function' && (!w.XP.isRunning || !w.XP.isRunning())) {
-      try { w.XP.startSession('e2e-lifecycle'); } catch (_) {}
-    }
+    try {
+      if (!w.XP.isRunning()) {
+        w.XP.startSession('e2e-lifecycle');
+      }
+      // Kick resume/nudge in case page opened hidden or BFCache edge
+      w.XP.resumeSession && w.XP.resumeSession();
+      w.XP.nudge && w.XP.nudge();
+    } catch {}
   });
-await page.waitForFunction(() => {
-    const XP = (window as any).XP;
-    return !!XP && typeof XP.isRunning === 'function' && XP.isRunning();
+
+  // Now wait until XP runs
+  await page.waitForFunction(() => {
+    const w = /** @type {any} */(window);
+    return !!w.XP && w.XP.isRunning && w.XP.isRunning();
   }, { timeout: 5000 });
+}, { timeout: 5000 });
 }
 
 test.describe('XP lifecycle smoke', () => {
