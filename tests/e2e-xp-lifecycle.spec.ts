@@ -1,20 +1,47 @@
 import { test, expect, Page } from '@playwright/test';
 
+
 async function ensureXP(page: Page) {
-  // Be generous: wait for full load, then force-inject XP scripts if needed.
+  // Wait for full load to reduce races
   await page.waitForLoadState('load');
 
-  const hasXP = await page.evaluate(() => !!(window as any).XP).catch(() => false);
-  if (!hasXP) {
-    try { await page.addScriptTag({ url: '/js/xpClient.js' }); } catch {}
-    try { await page.addScriptTag({ url: '/js/xp.js' }); } catch {}
-    // Fallback relative (preview servers sometimes mount at a subpath)
-    try { await page.addScriptTag({ url: './js/xpClient.js' }); } catch {}
-    try { await page.addScriptTag({ url: './js/xp.js' }); } catch {}
-  }
+  // If XP already present, we're done
+  const hasXP0 = await page.evaluate(() => !!(window as any).XP).catch(() => false);
+  if (hasXP0) return;
 
+  // --- 1) Try filesystem-based injection (most reliable in CI) ---
+  try { await page.addScriptTag({ path: require('path').join(process.cwd(), 'js/xpClient.js') }); } catch {}
+  try { await page.addScriptTag({ path: require('path').join(process.cwd(), 'js/xp.js') }); } catch {}
+
+  let ok = await page.evaluate(() => !!(window as any).XP).catch(() => false);
+  if (ok) return;
+
+  // --- 2) Try URL-based injection from the running static server ---
+  try { await page.addScriptTag({ url: '/js/xpClient.js' }); } catch {}
+  try { await page.addScriptTag({ url: '/js/xp.js' }); } catch {}
+
+  ok = await page.evaluate(() => !!(window as any).XP).catch(() => false);
+  if (ok) return;
+
+  // --- 3) Last resort: fetch script text and inline it in the page ---
+  try {
+    const clientText = await page.evaluate(async () => {
+      try { return await (await fetch('/js/xpClient.js')).text(); } catch { return ''; }
+    });
+    if (clientText) await page.addScriptTag({ content: clientText });
+  } catch {}
+
+  try {
+    const xpText = await page.evaluate(async () => {
+      try { return await (await fetch('/js/xp.js')).text(); } catch { return ''; }
+    });
+    if (xpText) await page.addScriptTag({ content: xpText });
+  } catch {}
+
+  // Final wait for XP to appear
   await page.waitForFunction(() => !!(window as any).XP, { timeout: 10000 });
 }
+
 
 async function waitForRunning(page: Page) {
   await ensureXP(page);
