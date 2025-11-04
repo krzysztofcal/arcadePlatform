@@ -1,16 +1,29 @@
 import { test, expect, Page } from '@playwright/test';
 
 
+
+
+const path = require('path');
+const preloadPaths = [
+  path.join(process.cwd(), 'js/xpClient.js'),
+  path.join(process.cwd(), 'js/xp.js'),
+];
+
+test.beforeEach(async ({ page }) => {
+  // Surface any runtime errors to the test logs
+  page.on('pageerror', e => console.log('[pageerror]', e));
+  page.on('console', m => { if (m.type() === 'error') console.log('[console.error]', m.text()); });
+
+  for (const p of preloadPaths) {
+    try { await page.addInitScript({ path: p }); } catch (_) {}
+  }
+});
+
 async function ensureXP(page: Page) {
-  // Wait for full load to reduce races
-  await page.waitForLoadState('load');
-
-  // If XP already present, we're done
-  const hasXP0 = await page.evaluate(() => !!(window as any).XP).catch(() => false);
-  if (hasXP0) return;
-
-  // --- 1) Try filesystem-based injection (most reliable in CI) ---
-  try { await page.addScriptTag({ path: require('path').join(process.cwd(), 'js/xpClient.js') }); } catch {}
+  // Scripts are preloaded via addInitScript in beforeEach
+  await page.waitForFunction(() => !!(window as any).XP, { timeout: 10000 });
+}
+); } catch {}
   try { await page.addScriptTag({ path: require('path').join(process.cwd(), 'js/xp.js') }); } catch {}
 
   let ok = await page.evaluate(() => !!(window as any).XP).catch(() => false);
