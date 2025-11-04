@@ -5,6 +5,6 @@
   },
   "lifecycle": {
     "allowedFiles": ["js/xp.js"],
-    "allowToken": "xp-guard:allow-adhoc"
+    "waiverToken": "xp-lifecycle-allow"
   }
 }

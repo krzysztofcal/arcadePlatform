@@ -232,7 +232,7 @@
     replayBtn && replayBtn.addEventListener('click', startGame);
   } catch {}
 
-  window.addEventListener('visibilitychange', ()=>{ if (document.hidden && running) { paused = true; setPauseUI(); } });
+  window.addEventListener('visibilitychange', ()=>{ if (document.hidden && running) { paused = true; setPauseUI(); } }); // xp-lifecycle-allow: temporary(2025-12-31)
   (function(){
     if (audio.setMuted) audio.setMuted(!!state.muted);
     setMuteUI(); setPauseUI(); fs.syncButtons(); fitCanvasStandard(); renderHud(); draw();
@@ -240,12 +240,4 @@
     if (centerOverlay) centerOverlay.classList.remove('hidden');
     if (gameOverOverlay) gameOverOverlay.classList.add('hidden');
   })();
-  if (typeof window !== 'undefined'){
-    const stop = () => {
-      if (window.XP && typeof window.XP.stopSession === 'function'){
-        try { window.XP.stopSession({ flush: true }); } catch (_){}
-      }
-    };
-    window.addEventListener('beforeunload', stop);
-  }
 })();

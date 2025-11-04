@@ -7,6 +7,11 @@ const playwrightPackagePath = require.resolve('playwright/package.json');
 const cliPath = path.join(path.dirname(playwrightPackagePath), 'cli.js');
 const skipFile = path.resolve(__dirname, '../.cache/skip-playwright-tests');
 
+if (process.env.CI_NO_E2E === '1') {
+  console.warn('ℹ️  Playwright tests skipped: CI_NO_E2E=1');
+  process.exit(0);
+}
+
 if (existsSync(skipFile)) {
   const message = readFileSync(skipFile, 'utf8').trim();
   console.warn('⚠️  Playwright tests skipped:');

@@ -7,5 +7,5 @@ Global `window.XP` provides:
 - `nudge(): void`
 
 Lifecycle listeners (pagehide/beforeunload/pageshow/visibilitychange) must be
-centralized in `js/xp.js`. Any temporary exception must include a line comment:
-`/* xp-guard:allow-adhoc <issue/ticket> */` and be removed before release.
+centralized in `js/xp.js`. Any temporary exception must include a same-line comment:
+`// xp-lifecycle-allow: temporary(YYYY-MM-DD)` and be removed before the listed expiry.

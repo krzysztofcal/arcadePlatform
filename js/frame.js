@@ -242,7 +242,7 @@ async function loadCatalog(){
     "['pointerdown','pointermove','pointerup','touchstart','touchmove','keydown'].forEach(function(evt){ try { document.addEventListener(evt,onActive,{ passive:true }); } catch(_){ document.addEventListener(evt,onActive); } });" +
     "var beat=function(){ if (Date.now() - last <= ACTIVE_WINDOW) send(); };" +
     "var timer=setInterval(beat, HEARTBEAT);" +
-    "document.addEventListener('visibilitychange', function(){ if (document.hidden){ if (timer){ clearInterval(timer); timer=null; } } else if (!timer){ last=Date.now(); send(); timer=setInterval(beat, HEARTBEAT); } }, { passive:true });" +
+    "document.addEventListener('visibilitychange', function(){ if (document.hidden){ if (timer){ clearInterval(timer); timer=null; } } else if (!timer){ last=Date.now(); send(); timer=setInterval(beat, HEARTBEAT); } }, { passive:true });" + // xp-lifecycle-allow: temporary(2025-12-31)
     "send();" +
   "})();";
 
@@ -609,13 +609,5 @@ async function init(){
 
   track('adImpression', { slot: 'game_top', page: 'game', slug: slug || undefined });
 }
-  if (typeof window !== 'undefined'){
-    const cleanup = () => {
-      if (window.XP && typeof window.XP.stopSession === 'function'){
-        try { window.XP.stopSession({ flush: true }); } catch (_){ /* noop */ }
-      }
-    };
-    window.addEventListener('beforeunload', cleanup);
-  }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
 })();
