@@ -1,67 +1,28 @@
 import { test, expect, Page } from '@playwright/test';
+import path from 'path';
 
-
-
-
-const path = require('path');
-const preloadPaths = [
-  path.join(process.cwd(), 'js/xpClient.js'),
-  path.join(process.cwd(), 'js/xp.js'),
-];
-
+// Preload XP scripts before every test so window.XP is always present.
 test.beforeEach(async ({ page }) => {
-  // Surface any runtime errors to the test logs
-  page.on('pageerror', e => console.log('[pageerror]', e));
+  // Surface runtime errors to CI logs
+  page.on('pageerror', e => console.log('[pageerror]', e.message ?? String(e)));
   page.on('console', m => { if (m.type() === 'error') console.log('[console.error]', m.text()); });
 
-  for (const p of preloadPaths) {
-    try { await page.addInitScript({ path: p }); } catch (_) {}
+  const preload = [
+    path.join(process.cwd(), 'js/xpClient.js'),
+    path.join(process.cwd(), 'js/xp.js'),
+  ];
+  for (const p of preload) {
+    try { await page.addInitScript({ path: p }); } catch { /* ignore in CI */ }
   }
 });
 
-async function ensureXP(page: Page) {
-  // Scripts are preloaded via addInitScript in beforeEach
-  await page.waitForFunction(() => !!(window as any).XP, { timeout: 10000 });
-}
-); } catch {}
-  try { await page.addScriptTag({ path: require('path').join(process.cwd(), 'js/xp.js') }); } catch {}
-
-  let ok = await page.evaluate(() => !!(window as any).XP).catch(() => false);
-  if (ok) return;
-
-  // --- 2) Try URL-based injection from the running static server ---
-  try { await page.addScriptTag({ url: '/js/xpClient.js' }); } catch {}
-  try { await page.addScriptTag({ url: '/js/xp.js' }); } catch {}
-
-  ok = await page.evaluate(() => !!(window as any).XP).catch(() => false);
-  if (ok) return;
-
-  // --- 3) Last resort: fetch script text and inline it in the page ---
-  try {
-    const clientText = await page.evaluate(async () => {
-      try { return await (await fetch('/js/xpClient.js')).text(); } catch { return ''; }
-    });
-    if (clientText) await page.addScriptTag({ content: clientText });
-  } catch {}
-
-  try {
-    const xpText = await page.evaluate(async () => {
-      try { return await (await fetch('/js/xp.js')).text(); } catch { return ''; }
-    });
-    if (xpText) await page.addScriptTag({ content: xpText });
-  } catch {}
-
-  // Final wait for XP to appear
-  await page.waitForFunction(() => !!(window as any).XP, { timeout: 10000 });
+async function ensureXP(page: Page): Promise<void> {
+  await page.waitForFunction(() => !!(window as any).XP, { timeout: 10_000 });
 }
 
-
-async function waitForRunning(page: Page) {
-  await ensureXP(page);
-
-  // Start or resume so XP.isRunning() can become true
+async function startOrResume(page: Page): Promise<void> {
   await page.evaluate(() => {
-    const w = (window as any);
+    const w = window as any;
     if (!w.XP) return;
     try {
       if (typeof w.XP.startSession === 'function' && (!w.XP.isRunning || !w.XP.isRunning())) {
@@ -73,11 +34,15 @@ async function waitForRunning(page: Page) {
       }
     } catch {}
   });
+}
 
+async function waitForRunning(page: Page): Promise<void> {
+  await ensureXP(page);
+  await startOrResume(page);
   await page.waitForFunction(() => {
-    const w = (window as any);
+    const w = window as any;
     return !!w.XP && typeof w.XP.isRunning === 'function' && w.XP.isRunning();
-  }, { timeout: 10000 });
+  }, { timeout: 10_000 });
 }
 
 test.describe('XP lifecycle smoke', () => {
@@ -89,7 +54,6 @@ test.describe('XP lifecycle smoke', () => {
     await page.goBack({ waitUntil: 'load' });
     await waitForRunning(page);
 
-    // --- Visibility-change monkeypatch to simulate hide/show ---
     const visibilityHack = await page.evaluate(() => {
       const XP = (window as any).XP;
       if (!XP) return false;
@@ -108,7 +72,7 @@ test.describe('XP lifecycle smoke', () => {
             get() { return (window as any).__testVisibilityState === 'hidden'; },
           });
           return true;
-        } catch (_err) {
+        } catch {
           return false;
         }
       };
@@ -126,18 +90,18 @@ test.describe('XP lifecycle smoke', () => {
 
     expect(visibilityHack).toBeTruthy();
 
-    // Hide -> pause
+    // Hide -> expect paused
     await page.evaluate(() => { (window as any).__setVisibilityForTest?.('hidden'); });
     await page.waitForFunction(() => {
-      const w = (window as any);
+      const w = window as any;
       return !!w.XP && typeof w.XP.isRunning === 'function' && !w.XP.isRunning();
-    }, { timeout: 10000 });
+    }, { timeout: 10_000 });
 
-    // Show -> resume
+    // Show -> expect running
     await page.evaluate(() => { (window as any).__setVisibilityForTest?.('visible'); });
     await page.waitForFunction(() => {
-      const w = (window as any);
+      const w = window as any;
       return !!w.XP && typeof w.XP.isRunning === 'function' && w.XP.isRunning();
-    }, { timeout: 10000 });
+    }, { timeout: 10_000 });
   });
 });
