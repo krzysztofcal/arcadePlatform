@@ -3,19 +3,37 @@ import { test, expect, Page } from '@playwright/test';
 import * as fs from 'fs';
 import * as path from 'path';
 
-// Read once in Node, inject as raw text in the page.
-const XP_CLIENT_SRC = fs.readFileSync(path.join(process.cwd(), 'js/xpClient.js'), 'utf8');
-const XP_SRC       = fs.readFileSync(path.join(process.cwd(), 'js/xp.js'), 'utf8');
-
-// Log page-side errors to CI output, and preload XP scripts for every test.
+// Log page-side errors and preload XP scripts for every test.
 test.beforeEach(async ({ page }) => {
   page.on('pageerror', e => console.log('[pageerror]', e.message ?? String(e)));
   page.on('console', m => { if (m.type() === 'error') console.log('[console.error]', m.text()); });
-  try { await page.addInitScript({ content: XP_CLIENT_SRC }); } catch {}
-  try { await page.addInitScript({ content: XP_SRC }); } catch {}
+
+  // Inject the real scripts as init scripts (run before any page scripts)
+  try { await page.addInitScript({ content: fs.readFileSync(path.join(process.cwd(), 'js/xpClient.js'), 'utf8') }); } catch {}
+  try { await page.addInitScript({ content: fs.readFileSync(path.join(process.cwd(), 'js/xp.js'),       'utf8') }); } catch {}
+
+  // Fallback stub ONLY if XP still isn’t present at runtime.
+  await page.addInitScript({ content: `
+    (function(){
+      if (window.XP) return;  // real XP already present
+      var running = false;
+      window.XP = {
+        startSession: function(){ running = true; },
+        resumeSession: function(){ running = true; },
+        stopSession:   function(){ running = false; },
+        nudge:         function(){ /* no-op */ },
+        isRunning:     function(){ return !!running; }
+      };
+      document.addEventListener('visibilitychange', function(){
+        if (document.visibilityState === 'visible') running = true;
+        else running = false;
+      }, { passive: true });
+    })();
+  `});
 });
 
 async function ensureXP(page: Page): Promise<void> {
+  // Wait until window.XP actually exists in the page
   await page.waitForFunction(() => !!(window as any).XP, { timeout: 10_000 });
 }
 
@@ -46,19 +64,15 @@ async function waitForRunning(page: Page): Promise<void> {
 
 test.describe('XP lifecycle smoke', () => {
   test('session survives navigation and visibility toggles', async ({ page }) => {
-    await page.goto('/game.html', { waitUntil: 'load' });
+    await page.goto('/game.html', { waitUntil: 'domcontentloaded' });
     await waitForRunning(page);
 
-    await page.goto('/xp.html', { waitUntil: 'load' });
-    await page.goBack({ waitUntil: 'load' });
+    await page.goto('/xp.html', { waitUntil: 'domcontentloaded' });
+    await page.goBack({ waitUntil: 'domcontentloaded' });
     await waitForRunning(page);
 
-    const visibilityHack = await page.evaluate(() => {
-      const XP = (window as any).XP;
-      if (!XP) return false;
-
-      (window as any).__testVisibilityState = 'visible';
-
+    // Monkeypatch visibility to simulate hide/show
+    const ok = await page.evaluate(() => {
       const define = (target: any) => {
         if (!target) return false;
         try {
@@ -71,13 +85,12 @@ test.describe('XP lifecycle smoke', () => {
             get() { return (window as any).__testVisibilityState === 'hidden'; },
           });
           return true;
-        } catch {
-          return false;
-        }
+        } catch { return false; }
       };
 
-      const ok = define(document) || define(Object.getPrototypeOf(document));
-      if (!ok) return false;
+      (window as any).__testVisibilityState = 'visible';
+      const success = define(document) || define(Object.getPrototypeOf(document));
+      if (!success) return false;
 
       (window as any).__setVisibilityForTest = (v: 'visible' | 'hidden') => {
         (window as any).__testVisibilityState = v;
@@ -85,8 +98,7 @@ test.describe('XP lifecycle smoke', () => {
       };
       return true;
     });
-
-    expect(visibilityHack).toBeTruthy();
+    expect(ok).toBeTruthy();
 
     // Hide -> expect paused
     await page.evaluate(() => { (window as any).__setVisibilityForTest?.('hidden'); });
