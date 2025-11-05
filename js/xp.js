@@ -308,7 +308,8 @@
     setTotals,
     getSnapshot,
     refreshStatus,
-  });
+  
+    isRunning: function(){ try { return !!(typeof state !== 'undefined' ? state.running : (this && this.__running)); } catch(_) { return !!(this && this.__running); } },});
 })(typeof window !== "undefined" ? window : this, typeof document !== "undefined" ? document : undefined);
 // --- XP resume polyfill (idempotent) ---
 (function () {
@@ -406,8 +407,12 @@
   }
 
   function resume() {
-    const isRunning = !!(window.XP && typeof window.XP.isRunning === 'function' && window.XP.isRunning());
-    if (isRunning) return;
+    var runningNow = false;
+    try {
+      if (window.XP && typeof window.XP.isRunning === 'function') runningNow = !!window.XP.isRunning();
+      else runningNow = !!(typeof state !== 'undefined' ? state.running : false);
+    } catch(_) {}
+    if (runningNow) return;
     const ok = tryCall('resumeSession') || tryCall('nudge');
     if (ok) {
       try { document.dispatchEvent(new Event('xp:visible')); } catch {}
@@ -418,8 +423,12 @@
   }
 
   function pause() {
-    const isRunning = !!(window.XP && typeof window.XP.isRunning === 'function' && window.XP.isRunning());
-    if (!isRunning) return;
+    var runningNow = false;
+    try {
+      if (window.XP && typeof window.XP.isRunning === 'function') runningNow = !!window.XP.isRunning();
+      else runningNow = !!(typeof state !== 'undefined' ? state.running : false);
+    } catch(_) {}
+    if (!runningNow) return;
     tryCall('stopSession', { flush: true });
     clearRetry();
     try { document.dispatchEvent(new Event('xp:hidden')); } catch {}
