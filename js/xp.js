@@ -156,6 +156,23 @@
     if (!force && elapsed < CHUNK_MS) return;
     const visibility = Math.round(state.visibilitySeconds);
     const inputs = state.inputEvents;
+    /* xp idle guard */
+    if (typeof document !== "undefined" && document.hidden) {
+      state.windowStart = now;
+      state.activeMs = 0;
+      state.visibilitySeconds = 0;
+      state.inputEvents = 0;
+      return;
+    }
+    const _minInputsGate = Math.max(2, Math.ceil(CHUNK_MS / 4000));
+    if (visibility <= 1 || inputs < _minInputsGate) {
+      state.windowStart = now;
+      state.activeMs = 0;
+      state.visibilitySeconds = 0;
+      state.inputEvents = 0;
+      return;
+    }
+
     const payload = {
       gameId: state.gameId || "game",
       windowStart: state.windowStart,
@@ -219,8 +236,12 @@
 
   function stopSession(options) {
     const opts = options || {};
-    if (state.running && opts.flush !== false) {
-      sendWindow(true);
+    /* xp stop flush guard */ if (state.running && opts.flush !== false) {
+      const _minInputsGate = Math.max(2, Math.ceil(CHUNK_MS / 4000));
+      if (!(state.visibilitySeconds > 1 && state.inputEvents >= _minInputsGate)) {
+        // skip network flush if idle
+      } else {
+      sendWindow(true); }
     }
     state.running = false;
     state.gameId = null;
@@ -296,6 +317,11 @@
           nudge();
         }
       }, { passive: true });
+      /* xp input listeners */
+      ["pointerdown","pointermove","keydown","wheel","touchstart"].forEach(evt => {
+        try { window.addEventListener(evt, () => { try { nudge(); } catch(_){} }, { passive: true }); } catch(_) {}
+      });
+
     }
   }
 
