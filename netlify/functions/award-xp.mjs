@@ -1,11 +1,33 @@
 import crypto from "node:crypto";
 import { store } from "./_shared/store-upstash.mjs";
 
-let getBlobStore;
-try {
-  ({ getStore: getBlobStore } = await import("@netlify/blobs"));
-} catch (_) {
-  getBlobStore = null;
+let blobStorePromise = null;
+let blobStoreFailed = false;
+
+async function getThrottleStoreInstance() {
+  if (blobStoreFailed) return null;
+  if (!blobStorePromise) {
+    blobStorePromise = import("@netlify/blobs")
+      .then((mod) => {
+        if (!mod || typeof mod.getStore !== "function") {
+          blobStoreFailed = true;
+          return null;
+        }
+        try {
+          return mod.getStore({ name: BLOB_STORE_NAME, consistency: "strong" });
+        } catch (_) {
+          blobStoreFailed = true;
+          return null;
+        }
+      })
+      .catch(() => {
+        blobStoreFailed = true;
+        return null;
+      });
+  }
+  const storeInstance = await blobStorePromise;
+  if (!storeInstance) blobStoreFailed = true;
+  return storeInstance;
 }
 
 const DAILY_CAP = Number(process.env.XP_DAILY_CAP ?? 600);          // set to 3000 in Netlify
@@ -65,15 +87,6 @@ const headerLookup = (headers, name) => {
   const target = String(name ?? "").toLowerCase();
   return Object.entries(headers).find(([key]) => typeof key === "string" && key.toLowerCase() === target)?.[1];
 };
-
-const throttleStore = (() => {
-  if (typeof getBlobStore !== "function") return null;
-  try {
-    return getBlobStore({ name: BLOB_STORE_NAME, consistency: "strong" });
-  } catch (_) {
-    return null;
-  }
-})();
 
 export async function handler(event) {
   const origin = event.headers?.origin;
@@ -149,9 +162,11 @@ export async function handler(event) {
     return json(200, { ok: true, awarded: 0, reason: "insufficient-activity" }, origin);
   }
 
+  const throttleStore = throttleId ? await getThrottleStoreInstance() : null;
+
   let throttleState = null;
   if (throttleStore && throttleId) {
-    const throttleCheck = await checkThrottle(throttleId, now, {
+    const throttleCheck = await checkThrottle(throttleStore, throttleId, now, {
       minGapMs: MIN_GAP_MS,
       windowMs: WINDOW_MS,
       maxPerWindow: MAX_AWARDS_PER_WINDOW,
@@ -282,7 +297,7 @@ export async function handler(event) {
   if (status === 4) payload.locked = true;
 
   if (status === 0 && granted > 0 && throttleStore && throttleId && throttleState) {
-    await commitThrottle(throttleId, throttleState, Date.now(), {
+    await commitThrottle(throttleStore, throttleId, throttleState, Date.now(), {
       windowMs: WINDOW_MS,
       maxPerWindow: MAX_AWARDS_PER_WINDOW,
     });
@@ -293,7 +308,7 @@ export async function handler(event) {
 
 const throttleKey = (userId) => `user:${userId}`;
 
-async function checkThrottle(userId, now, opts = {}) {
+async function checkThrottle(throttleStore, userId, now, opts = {}) {
   if (!throttleStore || !userId) {
     return { ok: true, state: null };
   }
@@ -326,7 +341,7 @@ async function checkThrottle(userId, now, opts = {}) {
   }
 }
 
-async function commitThrottle(userId, snapshot, timestamp, opts = {}) {
+async function commitThrottle(throttleStore, userId, snapshot, timestamp, opts = {}) {
   if (!throttleStore || !userId) return;
 
   const windowMs = Number.isFinite(opts.windowMs) ? Math.max(0, Number(opts.windowMs)) : Math.max(0, WINDOW_MS);
