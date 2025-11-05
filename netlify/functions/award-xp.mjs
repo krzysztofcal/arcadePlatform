@@ -66,6 +66,12 @@ export async function handler(event) {
     visibilitySeconds,
     inputEvents,
   } = body;
+  // Task 1: block XP when user is idle (no recent input) or no visible time
+  if (!(Number.isFinite(visibilitySeconds) && visibilitySeconds > 0.5 &&
+        Number.isFinite(inputEvents) && inputEvents >= 1)) {
+    return json(200, { ok: true, awarded: 0, reason: "inactive" }, origin);
+  }
+
 
   if (!userId || !sessionId) {
     return json(400, { error: "missing_fields" }, origin);
