@@ -66,13 +66,7 @@ export async function handler(event) {
     visibilitySeconds,
     inputEvents,
   } = body;
-  // Task 1: block XP when user is idle
-if (!body.statusOnly) {
-    if (!(Number.isFinite(visibilitySeconds) && visibilitySeconds > 0.5 &&
-          Number.isFinite(inputEvents) && inputEvents >= 1)) {
-      return json(200, { ok: true, awarded: 0, reason: "inactive" }, origin);
-    }
-}
+  
 
 
 
@@ -80,7 +74,20 @@ if (!body.statusOnly) {
     return json(400, { error: "missing_fields" }, origin);
   }
 
-  if (body.statusOnly) {
+
+  
+  // Task 1: block XP when user is idle
+  if (!body.statusOnly) {
+    // Use clamped chunk to derive a reasonable input threshold
+    const _raw = Number(body.chunkMs);
+    const _chunk = Number.isFinite(_raw) ? Math.min(Math.max(_raw, 5000), DEFAULT_CHUNK_MS) : DEFAULT_CHUNK_MS;
+    const _minInputsGate = Math.max(2, Math.ceil(_chunk / 4000));
+    if (!(Number.isFinite(visibilitySeconds) && visibilitySeconds > 1 &&
+          Number.isFinite(inputEvents) && inputEvents >= _minInputsGate)) {
+      return json(200, { ok: true, awarded: 0, reason: "inactive" }, origin);
+    }
+  }
+if (body.statusOnly) {
     const todayKeyK = keyDaily(userId, dayKey());
     const totalKeyK = keyTotal(userId);
     const [todayRaw, totalRaw] = await Promise.all([
@@ -109,7 +116,7 @@ if (!body.statusOnly) {
     ? clamp(requestedStep, 1, DEFAULT_POINTS_PER_PERIOD)
     : DEFAULT_POINTS_PER_PERIOD;
   const minVisibility = Math.max(BASE_MIN_VISIBILITY_S, Math.round((chunkMs / 1000) * 0.6));
-  const minInputs = Math.max(BASE_MIN_INPUTS, 1);
+  const minInputs = Math.max(BASE_MIN_INPUTS, Math.ceil(chunkMs / 4000));
 
   // Basic window validity (defensive)
   const now = Date.now();
