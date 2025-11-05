@@ -237,7 +237,7 @@ async function loadCatalog(){
     "var last=Date.now();" +
     "var ACTIVE_WINDOW=5000;" +
     "var HEARTBEAT=4000;" +
-    "var send=function(){ try { parent.postMessage({ type: TYPE }, TARGET); } catch (_){} };" +
+    "var send=function(){ try { parent.postMessage({ type: TYPE, userGesture: true }, TARGET); } catch (_){} };" +
     "var onActive=function(){ last=Date.now(); send(); };" +
     "['pointerdown','pointermove','pointerup','touchstart','touchmove','keydown'].forEach(function(evt){ try { document.addEventListener(evt,onActive,{ passive:true }); } catch(_){ document.addEventListener(evt,onActive); } });" +
     "var beat=function(){ if (Date.now() - last <= ACTIVE_WINDOW) send(); };" +
@@ -280,7 +280,7 @@ async function loadCatalog(){
     const iframeEvents = ['pointerover', 'pointermove', 'touchstart', 'focus'];
     let listenersAttached = false;
     const onIframeActivity = () => {
-      try { window.postMessage({ type: 'kcswh:activity' }, postTarget); } catch (_){ }
+      try { window.postMessage({ type: 'kcswh:activity', userGesture: true }, postTarget); } catch (_){ }
     };
     const attachIframeActivityListeners = () => {
       if (listenersAttached) return;
