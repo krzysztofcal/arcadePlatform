@@ -18,12 +18,6 @@
       try { window.XP.startSession(slug); } catch (_){}
     }
   }
-  function xpNudge(){
-    if (window.XP && typeof window.XP.nudge === 'function'){
-      try { window.XP.nudge(); } catch (_){}
-    }
-  }
-
   // Fullscreen service integration
   const fs = FullscreenService({
     wrap: gameWrap,
@@ -172,7 +166,6 @@
   requestAnimationFrame(loop);
 
   function startGame(){
-    xpNudge();
     if(running||state.tokens<=0) return; audio.ensure(); state.tokens-=1; storage.save(state);
     running=true; paused=false; score=0; level=1; cats=[]; spawnCooldown=0; msLeft=15000; startTs = performance.now(); setPauseUI && setPauseUI();
     if (centerOverlay) centerOverlay.classList.add('hidden');
@@ -182,8 +175,8 @@
       analytics.startGame({ slug, page: pageId, mode: 'self', lang: getLang(), tokens_remaining: state.tokens });
     }
   }
-  const buy=()=>{ xpNudge(); if(running) return; state.tokens+=10; storage.save(state); renderHud(); };
-  const resetDemo=()=>{ xpNudge(); if(running) return; state={...window.CONFIG.DEFAULT_STATE}; storage.save(state); renderHud(); };
+  const buy=()=>{ if(running) return; state.tokens+=10; storage.save(state); renderHud(); };
+  const resetDemo=()=>{ if(running) return; state={...window.CONFIG.DEFAULT_STATE}; storage.save(state); renderHud(); };
 
   function setMuteUI(){
     if (!btnMute) return;
@@ -193,7 +186,6 @@
     btnMute.textContent = muted ? '🔈' : '🔇';
   }
   function toggleMute(){
-    xpNudge();
     if (audio.setMuted) {
       audio.setMuted(!(audio.isMuted && audio.isMuted()));
     }
@@ -208,7 +200,7 @@
     btnPause.textContent = paused ? '▶' : '⏸';
     btnPause.disabled = !running;
   }
-  function togglePause(){ xpNudge(); if (!running) return; paused = !paused; setPauseUI(); renderHud(); }
+  function togglePause(){ if (!running) return; paused = !paused; setPauseUI(); renderHud(); }
 
   // Use InputController for all inputs
   InputController({
@@ -220,7 +212,6 @@
     btnMute, btnPause,
     onToggleMute: toggleMute,
     onTogglePause: togglePause,
-    onActivity: xpNudge
   });
 
   // Redundant direct bindings as a safety net (in case controller wiring fails)
@@ -231,6 +222,24 @@
     bigStartBtn && bigStartBtn.addEventListener('click', startGame);
     replayBtn && replayBtn.addEventListener('click', startGame);
   } catch {}
+
+  function isControlEvent(e) {
+    if (e.type === 'keydown') {
+      if (e.repeat) return false;
+      const k = e.key.toLowerCase();
+      return ['arrowleft','arrowright','arrowup','arrowdown','a','d','w','s',' '].includes(k);
+    }
+    if (e.type === 'pointerdown' || e.type === 'mousedown' || e.type === 'touchstart') return true;
+    if (e.type === 'pointermove') return !!(e.buttons & 1); // dragging with button pressed
+    return false;
+  }
+
+  function onControl(e) { try { if (window.XP && isControlEvent(e)) window.XP.nudge(); } catch(_){} }
+  window.addEventListener('keydown', onControl, {passive:true});
+  window.addEventListener('pointerdown', onControl, {passive:true});
+  window.addEventListener('pointermove', onControl, {passive:true});
+  window.addEventListener('mousedown', onControl, {passive:true});
+  window.addEventListener('touchstart', onControl, {passive:true});
 
 document.addEventListener('xp:hidden',()=>{ if (running) { paused = true; setPauseUI(); }});  document.addEventListener('xp:visible',()=>{ if (running) { paused = false; setPauseUI(); }});
   (function(){

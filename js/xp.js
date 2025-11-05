@@ -1,6 +1,6 @@
 (function (window, document) {
   const CHUNK_MS = 10_000;
-  const ACTIVE_WINDOW_MS = 5_000;
+  const ACTIVE_WINDOW_MS = 8_000; // tighten to 8s (tweakable)
   const CACHE_KEY = "kcswh:xp:last";
 
   const LEVEL_BASE_XP = 100;
@@ -25,6 +25,10 @@
     lastResultTs: 0,
     snapshot: null,
   };
+
+  function isEngagedNow() {
+    return Date.now() <= state.activeUntil;
+  }
 
   function computeLevel(totalXp) {
     const total = Math.max(0, Number(totalXp) || 0);
@@ -153,6 +157,8 @@
     if (state.pending) return;
     const now = Date.now();
     const elapsed = now - state.windowStart;
+    const engaged = isEngagedNow();
+    if (!force && (!state.running || !engaged)) return;
     if (!force && elapsed < CHUNK_MS) return;
     const visibility = Math.round(state.visibilitySeconds);
     const inputs = state.inputEvents;
@@ -181,11 +187,10 @@
     state.lastTick = now;
     if (!state.running) return;
     const visible = !document.hidden;
-    if (visible) {
+    const engaged = isEngagedNow();
+    if (visible && engaged) {
       state.visibilitySeconds += delta / 1000;
-      if (now <= state.activeUntil) {
-        state.activeMs += delta;
-      }
+      state.activeMs += delta;
     }
     if (state.activeMs >= CHUNK_MS) {
       sendWindow(false);
