@@ -1,5 +1,5 @@
 (function (window, document) {
-  const CHUNK_MS = 5_000;
+  const CHUNK_MS = 10_000;
   const ACTIVE_WINDOW_MS = 5_000;
   const IDLE_TIMEOUT_MS = 6_000;
   const XP_EVENT_MIN_GAP_MS = 500;
