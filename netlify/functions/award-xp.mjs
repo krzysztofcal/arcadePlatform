@@ -1,14 +1,25 @@
 import crypto from "node:crypto";
 import { store } from "./_shared/store-upstash.mjs";
 
+let getBlobStore;
+try {
+  ({ getStore: getBlobStore } = await import("@netlify/blobs"));
+} catch (_) {
+  getBlobStore = null;
+}
+
 const DAILY_CAP = Number(process.env.XP_DAILY_CAP ?? 600);          // set to 3000 in Netlify
 const DEFAULT_CHUNK_MS = Number(process.env.XP_CHUNK_MS ?? 10_000); // 10s default
 const DEFAULT_POINTS_PER_PERIOD = Number(process.env.XP_POINTS_PER_PERIOD ?? 20);
 const DRIFT_MS = Number(process.env.XP_DRIFT_MS ?? 2_000);
-const BASE_MIN_VISIBILITY_S = Number(process.env.XP_MIN_VISIBILITY_S ?? 6);
+const BASE_MIN_VISIBILITY_S = Number(process.env.XP_MIN_VISIBILITY_S ?? 1.5);
 const BASE_MIN_INPUTS = Number(process.env.XP_MIN_INPUTS ?? 1);
 const KEY_NS = process.env.XP_KEY_NS ?? "kcswh:xp:v1";
 const EVENT_GAP_MS = Number(process.env.XP_EVENT_GAP_MS ?? 500);
+const MIN_GAP_MS = Number(process.env.XP_MIN_GAP_MS ?? 1_500);
+const WINDOW_MS = Number(process.env.XP_WINDOW_MS ?? (5 * 60 * 1000));
+const MAX_AWARDS_PER_WINDOW = Number(process.env.XP_MAX_AWARDS_PER_WINDOW ?? 40);
+const BLOB_STORE_NAME = process.env.XP_THROTTLE_STORE ?? "xp-awards-v1";
 const CORS_ALLOW = (process.env.XP_CORS_ALLOW ?? "")
   .split(",")
   .map(s => s.trim())
@@ -49,6 +60,21 @@ const keyTotal = (u) => `${KEY_NS}:total:${u}`;
 
 const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
 
+const headerLookup = (headers, name) => {
+  if (!headers) return undefined;
+  const target = String(name ?? "").toLowerCase();
+  return Object.entries(headers).find(([key]) => typeof key === "string" && key.toLowerCase() === target)?.[1];
+};
+
+const throttleStore = (() => {
+  if (typeof getBlobStore !== "function") return null;
+  try {
+    return getBlobStore({ name: BLOB_STORE_NAME, consistency: "strong" });
+  } catch (_) {
+    return null;
+  }
+})();
+
 export async function handler(event) {
   const origin = event.headers?.origin;
   if (event.httpMethod === "OPTIONS") return { statusCode: 204, headers: corsHeaders(origin) };
@@ -67,6 +93,9 @@ export async function handler(event) {
     visibilitySeconds,
     inputEvents,
   } = body;
+
+  const headerUserId = headerLookup(event.headers, "x-user-id");
+  const throttleId = headerUserId || userId;
 
   if (!userId || !sessionId) {
     return json(400, { error: "missing_fields" }, origin);
@@ -94,7 +123,7 @@ export async function handler(event) {
 
   const requestedChunkMs = Number(body.chunkMs);
   const chunkMs = Number.isFinite(requestedChunkMs)
-    ? clamp(requestedChunkMs, 5_000, DEFAULT_CHUNK_MS)
+    ? clamp(requestedChunkMs, 2_000, DEFAULT_CHUNK_MS)
     : DEFAULT_CHUNK_MS;
   const requestedStep = Number(body.pointsPerPeriod);
   const fallbackStep = Number.isFinite(requestedStep)
@@ -109,10 +138,28 @@ export async function handler(event) {
   if (windowEnd > now + DRIFT_MS || elapsed < (chunkMs - DRIFT_MS)) {
     return json(422, { ok: false, error: "invalid_window", elapsed }, origin);
   }
-  const visibleSeconds = Number(visibilitySeconds ?? 0);
-  const inputsCount = Number(inputEvents ?? 0);
-  if (visibleSeconds < minVisibility || inputsCount < minInputs) {
+  const visibleSecondsRaw = body.visibleSeconds ?? visibilitySeconds ?? 0;
+  const visibleSeconds = Number.isFinite(Number(visibleSecondsRaw)) ? Math.max(0, Number(visibleSecondsRaw)) : 0;
+  const inputsRaw = body.inputEvents ?? body.interactions ?? 0;
+  const inputsCount = Number.isFinite(Number(inputsRaw)) ? Math.max(0, Number(inputsRaw)) : 0;
+  const focusFlag = typeof body.focus === "boolean" ? body.focus : true;
+  const userInputFlag = typeof body.hasUserInput === "boolean" ? body.hasUserInput : (inputsCount > 0);
+
+  if (!focusFlag || !userInputFlag || visibleSeconds < minVisibility || inputsCount < minInputs) {
     return json(200, { ok: true, awarded: 0, reason: "insufficient-activity" }, origin);
+  }
+
+  let throttleState = null;
+  if (throttleStore && throttleId) {
+    const throttleCheck = await checkThrottle(throttleId, now, {
+      minGapMs: MIN_GAP_MS,
+      windowMs: WINDOW_MS,
+      maxPerWindow: MAX_AWARDS_PER_WINDOW,
+    });
+    if (!throttleCheck.ok) {
+      return json(200, { ok: true, awarded: 0, reason: throttleCheck.reason }, origin);
+    }
+    throttleState = throttleCheck.state;
   }
 
   const hasEarnedField = Object.prototype.hasOwnProperty.call(body, "earnedXp");
@@ -130,6 +177,8 @@ export async function handler(event) {
   const pointsPerPeriod = grantFromActivity != null
     ? clamp(grantFromActivity, 0, DEFAULT_POINTS_PER_PERIOD)
     : fallbackStep;
+
+  const chunkSpacingMs = Math.max(chunkMs, MIN_GAP_MS > 0 ? MIN_GAP_MS : chunkMs);
 
   // Keys
   const today     = dayKey(now);
@@ -211,7 +260,7 @@ export async function handler(event) {
     [dailyKeyK, lastKeyK, idemK, lockKeyK, totalKeyK],
     [
       String(now),
-      String(chunkMs),
+      String(chunkSpacingMs),
       String(pointsPerPeriod),
       String(DAILY_CAP),
       String(IDEM_TTL_SEC),
@@ -232,5 +281,76 @@ export async function handler(event) {
   if (status === 3) payload.tooSoon = true;
   if (status === 4) payload.locked = true;
 
+  if (status === 0 && granted > 0 && throttleStore && throttleId && throttleState) {
+    await commitThrottle(throttleId, throttleState, Date.now(), {
+      windowMs: WINDOW_MS,
+      maxPerWindow: MAX_AWARDS_PER_WINDOW,
+    });
+  }
+
   return json(200, payload, origin);
+}
+
+const throttleKey = (userId) => `user:${userId}`;
+
+async function checkThrottle(userId, now, opts = {}) {
+  if (!throttleStore || !userId) {
+    return { ok: true, state: null };
+  }
+
+  const gapMs = Number.isFinite(opts.minGapMs) ? Math.max(0, Number(opts.minGapMs)) : Math.max(0, MIN_GAP_MS);
+  const windowMs = Number.isFinite(opts.windowMs) ? Math.max(0, Number(opts.windowMs)) : Math.max(0, WINDOW_MS);
+  const maxPerWindowRaw = Number.isFinite(opts.maxPerWindow) ? Number(opts.maxPerWindow) : MAX_AWARDS_PER_WINDOW;
+  const maxPerWindow = maxPerWindowRaw > 0 ? maxPerWindowRaw : Number.POSITIVE_INFINITY;
+
+  try {
+    const raw = await throttleStore.get(throttleKey(userId), { type: "json" });
+    const lastAwardAt = Number(raw?.lastAwardAt) || 0;
+    const awardsRaw = Array.isArray(raw?.awards) ? raw.awards : [];
+    const cutoff = windowMs > 0 ? now - windowMs : 0;
+    const awards = awardsRaw
+      .map((value) => Number(value) || 0)
+      .filter((value) => value > 0 && (windowMs <= 0 || value >= cutoff));
+
+    if (gapMs > 0 && (now - lastAwardAt) < gapMs) {
+      return { ok: false, reason: "rate-limited-min-gap" };
+    }
+
+    if (windowMs > 0 && maxPerWindow !== Number.POSITIVE_INFINITY && awards.length >= maxPerWindow) {
+      return { ok: false, reason: "rate-limited-window" };
+    }
+
+    return { ok: true, state: { awards, lastAwardAt } };
+  } catch (_) {
+    return { ok: true, state: null };
+  }
+}
+
+async function commitThrottle(userId, snapshot, timestamp, opts = {}) {
+  if (!throttleStore || !userId) return;
+
+  const windowMs = Number.isFinite(opts.windowMs) ? Math.max(0, Number(opts.windowMs)) : Math.max(0, WINDOW_MS);
+  const maxPerWindowRaw = Number.isFinite(opts.maxPerWindow) ? Number(opts.maxPerWindow) : MAX_AWARDS_PER_WINDOW;
+  const maxPerWindow = maxPerWindowRaw > 0 ? maxPerWindowRaw : Number.POSITIVE_INFINITY;
+  const nowTs = Number.isFinite(Number(timestamp)) ? Number(timestamp) : Date.now();
+
+  const awardsBase = Array.isArray(snapshot?.awards) ? snapshot.awards : [];
+  const cutoff = windowMs > 0 ? nowTs - windowMs : 0;
+  const awards = awardsBase
+    .map((value) => Number(value) || 0)
+    .filter((value) => value > 0 && (windowMs <= 0 || value >= cutoff));
+
+  awards.push(nowTs);
+  if (maxPerWindow !== Number.POSITIVE_INFINITY && awards.length > maxPerWindow) {
+    awards.splice(0, awards.length - maxPerWindow);
+  }
+
+  try {
+    await throttleStore.setJSON(throttleKey(userId), {
+      lastAwardAt: nowTs,
+      awards,
+    });
+  } catch (_) {
+    // ignore persistence failures; throttling is best-effort
+  }
 }

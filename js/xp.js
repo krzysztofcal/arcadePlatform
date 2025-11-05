@@ -1,8 +1,9 @@
 (function (window, document) {
-  const CHUNK_MS = 10_000;
+  const CHUNK_MS = 2_000;
   const ACTIVE_WINDOW_MS = 5_000;
   const IDLE_TIMEOUT_MS = 6_000;
   const XP_EVENT_MIN_GAP_MS = 500;
+  const MAX_VISIBLE_S_PER_FLUSH = 10;
   const CACHE_KEY = "kcswh:xp:last";
 
   const LEVEL_BASE_XP = 100;
@@ -19,7 +20,10 @@
     windowStart: 0,
     activeMs: 0,
     visibilitySeconds: 0,
+    visibleMs: 0,
     inputEvents: 0,
+    hadUserInput: false,
+    focus: typeof document !== "undefined" ? (!document.hidden && (!document.hasFocus || document.hasFocus())) : true,
     activeUntil: 0,
     lastTick: 0,
     lastInteraction: 0,
@@ -30,6 +34,13 @@
     lastResultTs: 0,
     snapshot: null,
   };
+
+  function computeFocus() {
+    if (typeof document === "undefined") return true;
+    const visible = !document.hidden;
+    const active = typeof document.hasFocus === "function" ? document.hasFocus() : true;
+    return visible && active;
+  }
 
   function computeLevel(totalXp) {
     const total = Math.max(0, Number(totalXp) || 0);
@@ -172,51 +183,72 @@
   }
 
   async function sendWindow(force) {
-    if (!state.running || !window.XPClient || typeof window.XPClient.postWindow !== "function") return;
+    if (!window.XPClient || typeof window.XPClient.postWindow !== "function") return;
     if (state.pending) return;
     const now = Date.now();
+    const delta = state.lastTick ? Math.max(0, now - state.lastTick) : 0;
+    state.lastTick = now;
+    state.focus = computeFocus();
+
+    if (state.running && state.focus && now <= state.activeUntil) {
+      const seconds = delta / 1000;
+      state.visibilitySeconds += seconds;
+      state.visibleMs = Math.min(state.visibleMs + delta, MAX_VISIBLE_S_PER_FLUSH * 1000);
+      state.activeMs += delta;
+    }
+
     const elapsed = now - state.windowStart;
-    if (!force && elapsed < CHUNK_MS) return;
-    const visibility = Math.max(0, Number(state.visibilitySeconds.toFixed(2)));
+    if (!force && (!state.running || elapsed < CHUNK_MS)) {
+      return;
+    }
+
+    const visibilitySeconds = Number(Math.min(state.visibilitySeconds, MAX_VISIBLE_S_PER_FLUSH).toFixed(3));
     const inputs = state.inputEvents;
     const earnedXp = state.pendingXp;
     const hasEarned = earnedXp > 0;
+    const hadInput = state.hadUserInput || inputs > 0;
     const lastInteractionAgo = state.lastInteraction ? now - state.lastInteraction : Infinity;
     const idleTooLong = !Number.isFinite(lastInteractionAgo) || lastInteractionAgo > IDLE_TIMEOUT_MS;
 
-    if (!force && !hasEarned && idleTooLong) {
+    if (!force && !hasEarned && !hadInput && idleTooLong && visibilitySeconds <= 0) {
       state.windowStart = now;
       state.activeMs = 0;
       state.visibilitySeconds = 0;
+      state.visibleMs = 0;
       state.inputEvents = 0;
       state.pendingXp = 0;
+      state.hadUserInput = false;
       return;
     }
 
-    if (force && !hasEarned && idleTooLong) {
-      state.windowStart = now;
-      state.activeMs = 0;
-      state.visibilitySeconds = 0;
-      state.inputEvents = 0;
-      state.pendingXp = 0;
+    if (!force && visibilitySeconds <= 0 && !hadInput && !hasEarned) {
       return;
     }
 
+    const visibleSeconds = visibilitySeconds;
     const payload = {
       gameId: state.gameId || "game",
       windowStart: state.windowStart,
       windowEnd: now,
-      visibilitySeconds: visibility,
+      visibilitySeconds,
+      visibleSeconds,
       inputEvents: inputs,
+      interactions: inputs,
+      hasUserInput: !!hadInput,
+      focus: !!state.focus,
       chunkMs: CHUNK_MS,
       pointsPerPeriod: Math.max(0, earnedXp),
       earnedXp: Math.max(0, earnedXp),
     };
+
     state.windowStart = now;
     state.activeMs = 0;
     state.visibilitySeconds = 0;
+    state.visibleMs = 0;
     state.inputEvents = 0;
     state.pendingXp = 0;
+    state.hadUserInput = false;
+
     state.pending = window.XPClient.postWindow(payload)
       .then((data) => handleResponse(data))
       .catch(handleError)
@@ -227,14 +259,15 @@
     const now = Date.now();
     const delta = state.lastTick ? Math.max(0, now - state.lastTick) : 0;
     state.lastTick = now;
+    state.focus = computeFocus();
     if (!state.running) return;
-    const visible = !document.hidden;
-    if (visible && now <= state.activeUntil) {
+    if (state.focus && now <= state.activeUntil) {
       const seconds = delta / 1000;
       state.visibilitySeconds += seconds;
+      state.visibleMs = Math.min(state.visibleMs + delta, MAX_VISIBLE_S_PER_FLUSH * 1000);
       state.activeMs += delta;
     }
-    if (state.activeMs >= CHUNK_MS) {
+    if (state.activeMs >= CHUNK_MS || state.visibleMs >= CHUNK_MS) {
       sendWindow(false);
     }
   }
@@ -261,11 +294,15 @@
     state.windowStart = now;
     state.activeMs = 0;
     state.visibilitySeconds = 0;
+    state.visibleMs = 0;
     state.inputEvents = 0;
     state.activeUntil = now;
     state.lastInteraction = 0;
     state.lastXpAward = 0;
     state.pendingXp = 0;
+    state.hadUserInput = false;
+    state.focus = computeFocus();
+    state.lastTick = now;
   }
 
   function stopSession(options) {
@@ -277,17 +314,20 @@
     state.gameId = null;
     state.activeMs = 0;
     state.visibilitySeconds = 0;
+    state.visibleMs = 0;
     state.inputEvents = 0;
     state.activeUntil = 0;
     state.lastInteraction = 0;
     state.lastXpAward = 0;
     state.pendingXp = 0;
+    state.hadUserInput = false;
   }
 
   function registerInteraction(now) {
     state.lastInteraction = now;
     state.activeUntil = now + ACTIVE_WINDOW_MS;
     state.inputEvents += 1;
+    state.hadUserInput = true;
     if (!state.lastXpAward || (now - state.lastXpAward) >= XP_EVENT_MIN_GAP_MS) {
       state.lastXpAward = now;
       state.pendingXp += 1;
@@ -358,6 +398,10 @@
       }
       document.addEventListener("visibilitychange", () => {
         state.lastTick = Date.now();
+        state.focus = computeFocus();
+        if (document.visibilityState === "hidden") {
+          sendWindow(true);
+        }
       });
     }
     if (typeof window !== "undefined") {
@@ -367,6 +411,8 @@
           nudge({ interaction: true });
         }
       }, { passive: true });
+      window.addEventListener("pagehide", () => { sendWindow(true); }, { passive: true });
+      window.addEventListener("beforeunload", () => { sendWindow(true); }, { passive: true });
     }
   }
 

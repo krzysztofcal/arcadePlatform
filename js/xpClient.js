@@ -28,10 +28,11 @@
     const body = Object.assign({}, payload, { userId, sessionId });
     const res = await fetch(FN_URL, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", "x-user-id": userId },
       body: JSON.stringify(body),
       cache: "no-store",
       credentials: "omit",
+      keepalive: true,
     });
     if (!res.ok) {
       const text = await res.text().catch(() => "");
@@ -45,10 +46,11 @@
     const body = { userId, sessionId, gameId: "status", statusOnly: true };
     const res = await fetch(FN_URL, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", "x-user-id": userId },
       body: JSON.stringify(body),
       cache: "no-store",
       credentials: "omit",
+      keepalive: true,
     });
     if (!res.ok) {
       const text = await res.text().catch(() => "");
