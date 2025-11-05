@@ -1,7 +1,19 @@
 {
   "badge": {
     "selector": "a.xp-badge",
-    "id": "xpBadge"
+    "id": "xpBadge",
+    "include": [
+      "index.html",
+      "game*.html",
+      "xp.html",
+      "about/*.html",
+      "games-open/*/*.html",
+      "games/t-rex/index.html",
+      "landing/*.html",
+      "landing/legal/*.html",
+      "legal/*.html",
+      "tests/index.html"
+    ]
   },
   "lifecycle": {
     "allowedFiles": ["js/xp.js"],

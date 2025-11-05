@@ -373,14 +373,14 @@
 })();
 
 // --- XP lifecycle wiring (pagehide/pageshow/visibilitychange/beforeunload) ---
+
 (function () {
   if (typeof window === 'undefined' || typeof document === 'undefined') return;
   if (!window.XP) return;
   if (window.XP.__xpLifecycleWired) return;
-
   window.XP.__xpLifecycleWired = true;
 
-  let running = typeof window.XP.isRunning === 'function' ? !!window.XP.isRunning() : false;
+  let running = (typeof window.XP.isRunning === 'function') ? !!window.XP.isRunning() : false;
   let retryTimer = null;
 
   function tryCall(fnName, arg) {
@@ -389,9 +389,7 @@
       if (!XP || typeof XP[fnName] !== 'function') return false;
       XP[fnName](arg);
       return true;
-    } catch (_) {
-      return false;
-    }
+    } catch (_) { return false; }
   }
 
   function clearRetry() {
@@ -404,10 +402,7 @@
   function retryResume(attempt = 0) {
     clearRetry();
     const ok = tryCall('resumeSession');
-    if (ok) {
-      running = true;
-      return;
-    }
+    if (ok) { running = true; return; }
     if (attempt >= 3) return;
     retryTimer = setTimeout(() => retryResume(attempt + 1), 150 * (attempt + 1));
   }
@@ -417,6 +412,7 @@
     const ok = tryCall('resumeSession') || tryCall('nudge');
     if (ok) {
       running = true;
+      try { document.dispatchEvent(new Event('xp:visible')); } catch {}
       clearRetry();
     } else {
       retryResume(0);
@@ -428,11 +424,10 @@
     tryCall('stopSession', { flush: true });
     running = false;
     clearRetry();
+    try { document.dispatchEvent(new Event('xp:hidden')); } catch {}
   }
 
-  function persisted(event) {
-    return !!(event && event.persisted);
-  }
+  function persisted(event){ return !!(event && event.persisted); }
 
   window.addEventListener('pageshow', (event) => {
     if (!persisted(event)) return;
@@ -444,16 +439,11 @@
     pause();
   }, { passive: true });
 
-  window.addEventListener('beforeunload', () => {
-    pause();
-  });
+  window.addEventListener('beforeunload', () => { pause(); });
 
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') {
-      resume();
-    } else {
-      pause();
-    }
+    if (document.visibilityState === 'visible') resume();
+    else pause();
   }, { passive: true });
 
   if (document.visibilityState === 'visible') {

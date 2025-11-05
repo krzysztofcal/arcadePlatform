@@ -232,7 +232,7 @@
     replayBtn && replayBtn.addEventListener('click', startGame);
   } catch {}
 
-  window.addEventListener('visibilitychange', ()=>{ if (document.hidden && running) { paused = true; setPauseUI(); } }); // xp-lifecycle-allow: temporary(2025-12-31)
+document.addEventListener('xp:hidden',()=>{ if (running) { paused = true; setPauseUI(); }});  document.addEventListener('xp:visible',()=>{ if (running) { paused = false; setPauseUI(); }});
   (function(){
     if (audio.setMuted) audio.setMuted(!!state.muted);
     setMuteUI(); setPauseUI(); fs.syncButtons(); fitCanvasStandard(); renderHud(); draw();
