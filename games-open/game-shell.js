@@ -1,7 +1,7 @@
 (function () {
   function nudge() {
     if (window.XP && typeof window.XP.nudge === "function") {
-      try { window.XP.nudge(); } catch (_) { /* noop */ }
+      try { window.XP.nudge({ interaction: true }); } catch (_) { /* noop */ }
     }
   }
 

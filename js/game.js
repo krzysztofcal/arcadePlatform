@@ -20,7 +20,7 @@
   }
   function xpNudge(){
     if (window.XP && typeof window.XP.nudge === 'function'){
-      try { window.XP.nudge(); } catch (_){}
+      try { window.XP.nudge({ interaction: true }); } catch (_){}
     }
   }
 

@@ -234,15 +234,14 @@ async function loadCatalog(){
     "window.__kcswhActivityBridge = true;" +
     "var TYPE='kcswh:activity';" +
     "var TARGET='*';" +
-    "var last=Date.now();" +
+    "var last=0;" +
     "var ACTIVE_WINDOW=5000;" +
     "var HEARTBEAT=4000;" +
     "var send=function(){ try { parent.postMessage({ type: TYPE }, TARGET); } catch (_){} };" +
     "var onActive=function(){ last=Date.now(); send(); };" +
     "['pointerdown','pointermove','pointerup','touchstart','touchmove','keydown'].forEach(function(evt){ try { document.addEventListener(evt,onActive,{ passive:true }); } catch(_){ document.addEventListener(evt,onActive); } });" +
-    "var beat=function(){ if (Date.now() - last <= ACTIVE_WINDOW) send(); };" +
+    "var beat=function(){ if (last && (Date.now() - last) <= ACTIVE_WINDOW) send(); };" +
     "var timer=setInterval(beat, HEARTBEAT);" +
-    "send();" +
   "})();";
 
   function injectActivityBridgeIntoIframe(iframe){

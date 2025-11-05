@@ -146,13 +146,27 @@
       (function(){
         const allowedOrigin = location.origin;
 
-        function notifyActive(){
+        let lastActive = 0;
+        const ACTIVE_WINDOW = 5000;
+        const HEARTBEAT = 4000;
+
+        function notifyActive(force){
+          if (!force) {
+            if (!lastActive) return;
+            if ((Date.now() - lastActive) > ACTIVE_WINDOW) return;
+          }
           try { parent.postMessage({ type: 'kcswh:activity' }, allowedOrigin); } catch (_error) {}
         }
 
-        addEventListener('keydown', notifyActive, { passive: true });
-        addEventListener('pointerdown', notifyActive, { passive: true });
-        setInterval(notifyActive, 5000);
+        function markActive(){
+          lastActive = Date.now();
+          notifyActive(true);
+        }
+
+        addEventListener('keydown', markActive, { passive: true });
+        addEventListener('pointerdown', markActive, { passive: true });
+        addEventListener('touchstart', markActive, { passive: true });
+        setInterval(() => notifyActive(false), HEARTBEAT);
 
         window.reportScoreToPortal = function(gameId, score){
           try { parent.postMessage({ type: 'game-score', gameId, score }, allowedOrigin); } catch (_error) {}

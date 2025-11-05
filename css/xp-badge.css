@@ -38,6 +38,48 @@
   animation: xp-badge-spin 0.75s linear infinite;
 }
 
+.xp-badge__burst {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -24px) scale(0.8);
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: radial-gradient(120% 120% at 18% 18%, rgba(110, 231, 231, 0.95) 0%, rgba(167, 139, 250, 0.85) 60%, rgba(12, 18, 44, 0.6) 100%);
+  color: #fdfcff;
+  font-weight: 700;
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  box-shadow: 0 0 14px rgba(110, 231, 231, 0.4), 0 0 28px rgba(167, 139, 250, 0.3);
+  text-shadow: 0 2px 6px rgba(4, 4, 35, 0.55);
+  filter: drop-shadow(0 6px 16px rgba(86, 207, 207, 0.45));
+  z-index: 32;
+}
+
+.xp-badge__burst::after {
+  content: "";
+  position: absolute;
+  inset: -6px;
+  border-radius: inherit;
+  border: 1px solid rgba(253, 252, 255, 0.35);
+  opacity: 0.6;
+}
+
+.xp-badge__burst--active {
+  animation: xp-badge-burst 1.2s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+}
+
+@keyframes xp-badge-burst {
+  0% { opacity: 0; transform: translate(-50%, -12px) scale(0.6); }
+  20% { opacity: 1; transform: translate(-50%, -38px) scale(1.08); }
+  60% { opacity: 0.9; transform: translate(-50%, -68px) scale(1); }
+  85% { opacity: 0.62; transform: translate(-50%, -82px) scale(0.94); }
+  100% { opacity: 0; transform: translate(-50%, -100px) scale(0.88); }
+}
+
 @keyframes xp-badge-spin {
   0% { transform: rotate(0deg); }
   100% { transform: rotate(360deg); }

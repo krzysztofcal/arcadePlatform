@@ -3,11 +3,12 @@ import { store } from "./_shared/store-upstash.mjs";
 
 const DAILY_CAP = Number(process.env.XP_DAILY_CAP ?? 600);          // set to 3000 in Netlify
 const DEFAULT_CHUNK_MS = Number(process.env.XP_CHUNK_MS ?? 10_000); // 10s default
-const DEFAULT_POINTS_PER_PERIOD = Number(process.env.XP_POINTS_PER_PERIOD ?? 10);
+const DEFAULT_POINTS_PER_PERIOD = Number(process.env.XP_POINTS_PER_PERIOD ?? 20);
 const DRIFT_MS = Number(process.env.XP_DRIFT_MS ?? 2_000);
 const BASE_MIN_VISIBILITY_S = Number(process.env.XP_MIN_VISIBILITY_S ?? 6);
 const BASE_MIN_INPUTS = Number(process.env.XP_MIN_INPUTS ?? 1);
 const KEY_NS = process.env.XP_KEY_NS ?? "kcswh:xp:v1";
+const EVENT_GAP_MS = Number(process.env.XP_EVENT_GAP_MS ?? 500);
 const CORS_ALLOW = (process.env.XP_CORS_ALLOW ?? "")
   .split(",")
   .map(s => s.trim())
@@ -96,8 +97,8 @@ export async function handler(event) {
     ? clamp(requestedChunkMs, 5_000, DEFAULT_CHUNK_MS)
     : DEFAULT_CHUNK_MS;
   const requestedStep = Number(body.pointsPerPeriod);
-  const pointsPerPeriod = Number.isFinite(requestedStep)
-    ? clamp(requestedStep, 1, DEFAULT_POINTS_PER_PERIOD)
+  const fallbackStep = Number.isFinite(requestedStep)
+    ? clamp(requestedStep, 0, DEFAULT_POINTS_PER_PERIOD)
     : DEFAULT_POINTS_PER_PERIOD;
   const minVisibility = Math.max(BASE_MIN_VISIBILITY_S, Math.round((chunkMs / 1000) * 0.6));
   const minInputs = Math.max(BASE_MIN_INPUTS, 1);
@@ -108,9 +109,27 @@ export async function handler(event) {
   if (windowEnd > now + DRIFT_MS || elapsed < (chunkMs - DRIFT_MS)) {
     return json(422, { ok: false, error: "invalid_window", elapsed }, origin);
   }
-  if ((visibilitySeconds ?? 0) < minVisibility || (inputEvents ?? 0) < minInputs) {
+  const visibleSeconds = Number(visibilitySeconds ?? 0);
+  const inputsCount = Number(inputEvents ?? 0);
+  if (visibleSeconds < minVisibility || inputsCount < minInputs) {
     return json(200, { ok: true, awarded: 0, reason: "insufficient-activity" }, origin);
   }
+
+  const hasEarnedField = Object.prototype.hasOwnProperty.call(body, "earnedXp");
+  const rawEarned = Number(body.earnedXp);
+  const requestedEarned = hasEarnedField && Number.isFinite(rawEarned)
+    ? Math.max(0, Math.floor(rawEarned))
+    : null;
+  const gapMs = EVENT_GAP_MS > 0 ? EVENT_GAP_MS : 1;
+  const maxByGap = requestedEarned != null
+    ? Math.floor((Math.max(0, visibleSeconds) * 1000) / gapMs)
+    : null;
+  const grantFromActivity = (requestedEarned != null && maxByGap != null)
+    ? Math.min(requestedEarned, maxByGap)
+    : null;
+  const pointsPerPeriod = grantFromActivity != null
+    ? clamp(grantFromActivity, 0, DEFAULT_POINTS_PER_PERIOD)
+    : fallbackStep;
 
   // Keys
   const today     = dayKey(now);

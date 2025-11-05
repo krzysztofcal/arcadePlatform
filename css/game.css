@@ -109,11 +109,21 @@ canvas#game{ width:100%; height:auto; aspect-ratio:460/320; background:#0b1220; 
 .xp-badge--loading{ color:rgba(182,200,242,.96); background:rgba(148,163,184,.18); border-color:rgba(148,163,184,.35); }
 .xp-badge--loading::after{ content:""; width:12px; height:12px; border-radius:50%; border:2px solid currentColor; border-top-color:transparent; margin-left:4px; animation:xp-badge-spin .75s linear infinite; }
 .xp-badge--bump{ animation:xp-badge-bump .58s cubic-bezier(.25,1.5,.5,1); }
+.xp-badge__burst{ position:absolute; top:50%; left:50%; transform:translate(-50%, -24px) scale(.8); padding:6px 12px; border-radius:999px; background:radial-gradient(120% 120% at 20% 20%, rgba(110,231,231,.95) 0%, rgba(167,139,250,.85) 60%, rgba(15,21,48,.6) 100%); color:#fdfcff; font-weight:700; font-size:12px; text-shadow:0 2px 6px rgba(4,4,35,.6); box-shadow:0 0 14px rgba(110,231,231,.45), 0 0 28px rgba(167,139,250,.35); opacity:0; pointer-events:none; filter:drop-shadow(0 6px 16px rgba(86,207,207,.45)); white-space:nowrap; letter-spacing:.02em; z-index:25; }
+.xp-badge__burst::after{ content:""; position:absolute; inset:-6px; border-radius:inherit; border:1px solid rgba(253,252,255,.35); opacity:.6; }
+.xp-badge__burst--active{ animation:xp-badge-burst 1.2s cubic-bezier(.2,.8,.2,1) forwards; }
 @keyframes xp-badge-bump{
   0%{ transform:scale(1); }
   28%{ transform:scale(1.08); }
   52%{ transform:scale(.95); }
   100%{ transform:scale(1); }
+}
+@keyframes xp-badge-burst{
+  0%{ opacity:0; transform:translate(-50%, -10px) scale(.6); }
+  20%{ opacity:1; transform:translate(-50%, -36px) scale(1.05); }
+  60%{ opacity:.92; transform:translate(-50%, -64px) scale(1); }
+  85%{ opacity:.65; transform:translate(-50%, -78px) scale(.95); }
+  100%{ opacity:0; transform:translate(-50%, -96px) scale(.9); }
 }
 @keyframes xp-badge-spin{
   0%{ transform:rotate(0deg); }

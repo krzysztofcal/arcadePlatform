@@ -1,6 +1,8 @@
 (function (window, document) {
-  const CHUNK_MS = 10_000;
+  const CHUNK_MS = 5_000;
   const ACTIVE_WINDOW_MS = 5_000;
+  const IDLE_TIMEOUT_MS = 6_000;
+  const XP_EVENT_MIN_GAP_MS = 500;
   const CACHE_KEY = "kcswh:xp:last";
 
   const LEVEL_BASE_XP = 100;
@@ -20,6 +22,9 @@
     inputEvents: 0,
     activeUntil: 0,
     lastTick: 0,
+    lastInteraction: 0,
+    lastXpAward: 0,
+    pendingXp: 0,
     timerId: null,
     pending: null,
     lastResultTs: 0,
@@ -109,6 +114,23 @@
     state.badge.classList.add("xp-badge--bump");
   }
 
+  function spawnBurst(amount) {
+    if (!state.badge || !amount) return;
+    const burst = document.createElement("span");
+    burst.className = "xp-badge__burst";
+    burst.setAttribute("aria-hidden", "true");
+    burst.textContent = `+${amount} XP`;
+    state.badge.appendChild(burst);
+    requestAnimationFrame(() => {
+      burst.classList.add("xp-badge__burst--active");
+    });
+    burst.addEventListener("animationend", () => {
+      if (burst.parentNode) {
+        burst.parentNode.removeChild(burst);
+      }
+    });
+  }
+
   function attachBadge() {
     if (state.badge) return;
     state.badge = document.getElementById("xpBadge");
@@ -133,6 +155,7 @@
       if (typeof data.totalLifetime === "number") state.totalLifetime = data.totalLifetime;
       if (data.awarded && data.awarded > 0 && typeof previous === "number") {
         bumpBadge();
+        spawnBurst(data.awarded);
       }
       state.lastResultTs = Date.now();
       saveCache();
@@ -154,8 +177,31 @@
     const now = Date.now();
     const elapsed = now - state.windowStart;
     if (!force && elapsed < CHUNK_MS) return;
-    const visibility = Math.round(state.visibilitySeconds);
+    const visibility = Math.max(0, Number(state.visibilitySeconds.toFixed(2)));
     const inputs = state.inputEvents;
+    const earnedXp = state.pendingXp;
+    const hasEarned = earnedXp > 0;
+    const lastInteractionAgo = state.lastInteraction ? now - state.lastInteraction : Infinity;
+    const idleTooLong = !Number.isFinite(lastInteractionAgo) || lastInteractionAgo > IDLE_TIMEOUT_MS;
+
+    if (!force && !hasEarned && idleTooLong) {
+      state.windowStart = now;
+      state.activeMs = 0;
+      state.visibilitySeconds = 0;
+      state.inputEvents = 0;
+      state.pendingXp = 0;
+      return;
+    }
+
+    if (force && !hasEarned && idleTooLong) {
+      state.windowStart = now;
+      state.activeMs = 0;
+      state.visibilitySeconds = 0;
+      state.inputEvents = 0;
+      state.pendingXp = 0;
+      return;
+    }
+
     const payload = {
       gameId: state.gameId || "game",
       windowStart: state.windowStart,
@@ -163,12 +209,14 @@
       visibilitySeconds: visibility,
       inputEvents: inputs,
       chunkMs: CHUNK_MS,
-      pointsPerPeriod: 10
+      pointsPerPeriod: Math.max(0, earnedXp),
+      earnedXp: Math.max(0, earnedXp),
     };
     state.windowStart = now;
     state.activeMs = 0;
     state.visibilitySeconds = 0;
     state.inputEvents = 0;
+    state.pendingXp = 0;
     state.pending = window.XPClient.postWindow(payload)
       .then((data) => handleResponse(data))
       .catch(handleError)
@@ -181,11 +229,10 @@
     state.lastTick = now;
     if (!state.running) return;
     const visible = !document.hidden;
-    if (visible) {
-      state.visibilitySeconds += delta / 1000;
-      if (now <= state.activeUntil) {
-        state.activeMs += delta;
-      }
+    if (visible && now <= state.activeUntil) {
+      const seconds = delta / 1000;
+      state.visibilitySeconds += seconds;
+      state.activeMs += delta;
     }
     if (state.activeMs >= CHUNK_MS) {
       sendWindow(false);
@@ -210,11 +257,15 @@
     ensureTimer();
     state.running = true;
     state.gameId = gameId || "game";
-    state.windowStart = Date.now();
+    const now = Date.now();
+    state.windowStart = now;
     state.activeMs = 0;
     state.visibilitySeconds = 0;
     state.inputEvents = 0;
-    state.activeUntil = Date.now();
+    state.activeUntil = now;
+    state.lastInteraction = 0;
+    state.lastXpAward = 0;
+    state.pendingXp = 0;
   }
 
   function stopSession(options) {
@@ -228,11 +279,31 @@
     state.visibilitySeconds = 0;
     state.inputEvents = 0;
     state.activeUntil = 0;
+    state.lastInteraction = 0;
+    state.lastXpAward = 0;
+    state.pendingXp = 0;
   }
 
-  function nudge() {
-    state.activeUntil = Date.now() + ACTIVE_WINDOW_MS;
+  function registerInteraction(now) {
+    state.lastInteraction = now;
+    state.activeUntil = now + ACTIVE_WINDOW_MS;
     state.inputEvents += 1;
+    if (!state.lastXpAward || (now - state.lastXpAward) >= XP_EVENT_MIN_GAP_MS) {
+      state.lastXpAward = now;
+      state.pendingXp += 1;
+    }
+  }
+
+  function nudge(options) {
+    const opts = (options && typeof options === "object") ? options : {};
+    const now = Date.now();
+    const isSynthetic = !!opts.synthetic;
+    const shouldCount = !isSynthetic && opts.interaction !== false;
+    if (shouldCount) {
+      registerInteraction(now);
+    } else {
+      state.activeUntil = Math.max(state.activeUntil, now + ACTIVE_WINDOW_MS);
+    }
   }
 
   function setTotals(total, cap) {
@@ -293,7 +364,7 @@
       ensureTimer();
       window.addEventListener("message", (event) => {
         if (event && event.data && event.data.type === "kcswh:activity") {
-          nudge();
+          nudge({ interaction: true });
         }
       }, { passive: true });
     }
@@ -360,7 +431,7 @@
       try {
         if (window.XP.isRunning && window.XP.isRunning()) {
           // already running; give a tiny prod so UI/timers align
-          try { window.XP.nudge && window.XP.nudge(); } catch (_) {}
+          try { window.XP.nudge && window.XP.nudge({ synthetic: true }); } catch (_) {}
           return;
         }
         var gid = window.XP.__lastGameId || undefined; // fall back to last seen gameId
@@ -408,7 +479,7 @@
   function resume() {
     const isRunning = !!(window.XP && typeof window.XP.isRunning === 'function' && window.XP.isRunning());
     if (isRunning) return;
-    const ok = tryCall('resumeSession') || tryCall('nudge');
+    const ok = tryCall('resumeSession') || tryCall('nudge', { synthetic: true });
     if (ok) {
       try { document.dispatchEvent(new Event('xp:visible')); } catch {}
       clearRetry();

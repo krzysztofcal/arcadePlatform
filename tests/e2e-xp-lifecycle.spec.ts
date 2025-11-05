@@ -47,7 +47,7 @@ async function startOrResume(page: Page): Promise<void> {
       } else if (typeof w.XP.resumeSession === 'function') {
         w.XP.resumeSession();
       } else if (typeof w.XP.nudge === 'function') {
-        w.XP.nudge();
+        w.XP.nudge({ synthetic: true });
       }
     } catch {}
   });
