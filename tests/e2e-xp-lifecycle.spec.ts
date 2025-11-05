@@ -1,19 +1,18 @@
+// tests/e2e-xp-lifecycle.spec.ts
 import { test, expect, Page } from '@playwright/test';
-import path from 'path';
+import * as fs from 'fs';
+import * as path from 'path';
 
-// Preload XP scripts before every test so window.XP is always present.
+// Read once in Node, inject as raw text in the page.
+const XP_CLIENT_SRC = fs.readFileSync(path.join(process.cwd(), 'js/xpClient.js'), 'utf8');
+const XP_SRC       = fs.readFileSync(path.join(process.cwd(), 'js/xp.js'), 'utf8');
+
+// Log page-side errors to CI output, and preload XP scripts for every test.
 test.beforeEach(async ({ page }) => {
-  // Surface runtime errors to CI logs
   page.on('pageerror', e => console.log('[pageerror]', e.message ?? String(e)));
   page.on('console', m => { if (m.type() === 'error') console.log('[console.error]', m.text()); });
-
-  const preload = [
-    path.join(process.cwd(), 'js/xpClient.js'),
-    path.join(process.cwd(), 'js/xp.js'),
-  ];
-  for (const p of preload) {
-    try { await page.addInitScript({ path: p }); } catch { /* ignore in CI */ }
-  }
+  try { await page.addInitScript({ content: XP_CLIENT_SRC }); } catch {}
+  try { await page.addInitScript({ content: XP_SRC }); } catch {}
 });
 
 async function ensureXP(page: Page): Promise<void> {
@@ -77,14 +76,13 @@ test.describe('XP lifecycle smoke', () => {
         }
       };
 
-      const success = define(document) || define(Object.getPrototypeOf(document));
-      if (!success) return false;
+      const ok = define(document) || define(Object.getPrototypeOf(document));
+      if (!ok) return false;
 
-      (window as any).__setVisibilityForTest = (value: 'visible' | 'hidden') => {
-        (window as any).__testVisibilityState = value;
+      (window as any).__setVisibilityForTest = (v: 'visible' | 'hidden') => {
+        (window as any).__testVisibilityState = v;
         document.dispatchEvent(new Event('visibilitychange'));
       };
-
       return true;
     });
 
