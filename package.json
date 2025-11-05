@@ -26,5 +26,8 @@
       "node scripts/check-xpbadge.js --fix --files",
       "node scripts/check-lifecycle.js --files"
     ]
+  },
+  "dependencies": {
+    "@netlify/blobs": "^6.0.0"
   }
 }
