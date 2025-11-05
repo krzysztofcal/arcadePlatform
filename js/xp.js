@@ -380,7 +380,6 @@
   if (window.XP.__xpLifecycleWired) return;
   window.XP.__xpLifecycleWired = true;
 
-  let running = (typeof window.XP.isRunning === 'function') ? !!window.XP.isRunning() : false;
   let retryTimer = null;
 
   function tryCall(fnName, arg) {
@@ -393,25 +392,24 @@
   }
 
   function clearRetry() {
-    if (retryTimer) {
-      clearTimeout(retryTimer);
-      retryTimer = null;
-    }
+    if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
   }
 
   function retryResume(attempt = 0) {
     clearRetry();
+    const isRunning = !!(window.XP && typeof window.XP.isRunning === 'function' && window.XP.isRunning());
+    if (isRunning) return;
     const ok = tryCall('resumeSession');
-    if (ok) { running = true; return; }
+    if (ok) return;
     if (attempt >= 3) return;
     retryTimer = setTimeout(() => retryResume(attempt + 1), 150 * (attempt + 1));
   }
 
   function resume() {
-    if (running) return;
+    const isRunning = !!(window.XP && typeof window.XP.isRunning === 'function' && window.XP.isRunning());
+    if (isRunning) return;
     const ok = tryCall('resumeSession') || tryCall('nudge');
     if (ok) {
-      running = true;
       try { document.dispatchEvent(new Event('xp:visible')); } catch {}
       clearRetry();
     } else {
@@ -420,9 +418,9 @@
   }
 
   function pause() {
-    if (!running) return;
+    const isRunning = !!(window.XP && typeof window.XP.isRunning === 'function' && window.XP.isRunning());
+    if (!isRunning) return;
     tryCall('stopSession', { flush: true });
-    running = false;
     clearRetry();
     try { document.dispatchEvent(new Event('xp:hidden')); } catch {}
   }
@@ -450,7 +448,6 @@
     setTimeout(resume, 0);
   }
 })();
-
 (function(){
   try {
     const nodes = document.querySelectorAll('a.xp-badge#xpBadge');
