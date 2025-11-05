@@ -312,11 +312,32 @@
     }
     if (typeof window !== "undefined") {
       ensureTimer();
-      window.addEventListener("message", (event) => {
-        if (event && event.data && event.data.type === "kcswh:activity") {
-          nudge();
-        }
-      }, { passive: true });
+      
+      // Hardened kcswh activity bridge:
+      // - same-origin only
+      // - must carry { userGesture: true }
+      // - ignore when hidden
+      // - throttle to ~10 nudges/sec
+      (function(){
+        var __lastNudgeTs = 0;
+        window.addEventListener("message", (event) => {
+          try {
+            if (!event || !event.data) return;
+            if (typeof document !== "undefined" && document.hidden) return;
+            if (event.origin && typeof location !== "undefined" && event.origin !== location.origin) return;
+            if (event.data.type !== "kcswh:activity") return;
+            if (event.data.userGesture !== true) return;
+
+            // throttle
+            var now = Date.now();
+            if (now - __lastNudgeTs < 100) return; // 10/sec
+            __lastNudgeTs = now;
+
+            if (typeof nudge === "function") nudge();
+          } catch {}
+        }, { passive: true });
+      })();
+
       /* xp input listeners */
       ["pointerdown","pointermove","keydown","wheel","touchstart"].forEach(evt => {
         try { window.addEventListener(evt, () => { try { nudge(); } catch(_){} }, { passive: true }); } catch(_) {}
