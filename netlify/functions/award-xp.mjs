@@ -66,15 +66,7 @@ export async function handler(event) {
     visibilitySeconds,
     inputEvents,
   } = body;
-  
-
-
-
-  
-if (process.env.XP_DEBUG==="1") payload.debug = { mode: "statusOnly" };
-    
-  }
-if (!userId || (!body.statusOnly && !sessionId)) {
+  if (!userId || (!body.statusOnly && !sessionId)) {
     return json(400, { error: "missing_fields" }, origin);
   }
 
@@ -213,6 +205,7 @@ if (!userId || (!body.statusOnly && !sessionId)) {
   const status  = Number(res?.[2]) || 0; // 0=ok,1=idempotent,2=capped,3=too_soon,4=locked
   const lifetime = Number(res?.[3]) || 0;
 
+  const payload = { ok: true, awarded: granted, totalToday: total, cap: DAILY_CAP, totalLifetime: lifetime };
   if (process.env.XP_DEBUG==="1") payload.debug = { now, chunkMs, pointsPerPeriod, minVisibility, minInputs, visibilitySeconds, inputEvents, status };
     if (status === 1) payload.idempotent = true;
   if (status === 2) payload.capped = true;
