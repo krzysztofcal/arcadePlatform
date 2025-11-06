@@ -26,6 +26,15 @@
     snapshot: null,
   };
 
+  function resetActivityCounters(now) {
+    const ts = typeof now === "number" ? now : Date.now();
+    state.windowStart = ts;
+    state.visibilitySeconds = 0;
+    state.inputEvents = 0;
+    state.activeMs = 0;
+    state.activeUntil = 0;
+  }
+
   function isDocumentVisible() {
     if (typeof document === "undefined") return false;
     if (typeof document.hidden === "boolean") {
@@ -210,7 +219,10 @@
     state.lastTick = now;
     if (!state.running) return;
     const visible = isDocumentVisible();
-    if (!visible) return;
+    if (!visible) {
+      resetActivityCounters(now);
+      return;
+    }
 
     state.visibilitySeconds += delta / 1000;
     if (now <= state.activeUntil) {
@@ -320,7 +332,11 @@
       attachBadge();
     }
     document.addEventListener("visibilitychange", () => {
-      state.lastTick = Date.now();
+      const now = Date.now();
+      state.lastTick = now;
+      if (!isDocumentVisible()) {
+        resetActivityCounters(now);
+      }
     }, { passive: true });
   }
 
