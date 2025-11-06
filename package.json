@@ -16,7 +16,8 @@
     "test:e2e": "node scripts/prepare-playwright.js && node scripts/run-e2e.js",
     "syntax": "node scripts/syntax-check.mjs",
     "test:quick": "node scripts/syntax-check.mjs",
-    "test:cli": "node scripts/test-cli.mjs"
+    "test:cli": "node scripts/test-cli.mjs",
+    "serve:xp": "XP_DEBUG=1 node scripts/serve-award-xp.mjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.46.0",
