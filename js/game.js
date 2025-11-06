@@ -47,14 +47,10 @@
   const audio = AudioService();
   let state = storage.load();
 
-  const tokensEl = document.getElementById("tokens");
   const timeLeftEl = document.getElementById("timeLeft");
   const levelEl = document.getElementById("level");
   const lastScoreEl = document.getElementById("lastScore");
   const highScoreEl = document.getElementById("highScore");
-  const playBtn = document.getElementById("playBtn");
-  const buyBtn = document.getElementById("buyBtn");
-  const resetBtn = document.getElementById("resetBtn");
   const statusEl = document.getElementById("status");
   const leftBtn = document.getElementById("leftBtn");
   const rightBtn = document.getElementById("rightBtn");
@@ -70,7 +66,9 @@
 
   // Audio handled via AudioService
 
-  let running=false, paused=false, score=0, msLeft=15000, level=1, startTs=0;
+  const getRoundTime = ()=> (window.CONFIG && typeof window.CONFIG.ROUND_TIME_MS === 'number') ? window.CONFIG.ROUND_TIME_MS : 15000;
+
+  let running=false, paused=false, score=0, msLeft=getRoundTime(), level=1, startTs=0;
   let paddle={x:0, w:window.CONFIG.PADDLE.width, h:window.CONFIG.PADDLE.height, speed:window.CONFIG.PADDLE.speed, left:false, right:false};
   let cats=[], spawnCooldown=0, effects=[];
 
@@ -116,7 +114,13 @@
   const currentLevel = () => CatsRules.currentLevel(score);
   function levelParams(lv){ return CatsRules.levelParams(lv, window.CONFIG.LEVEL); }
   const fmtTime = (ms)=> (Math.max(0, ms)/1000).toFixed(1)+"s";
-  function renderHud(){ tokensEl.textContent=state.tokens; timeLeftEl.textContent=fmtTime(msLeft); lastScoreEl.textContent=state.lastScore; highScoreEl.textContent=state.highScore; levelEl.textContent=level; playBtn.disabled=state.tokens<=0||running; statusEl.textContent=running?("Punkty: "+score):"Gotowy"; }
+  function renderHud(){
+    if (timeLeftEl) timeLeftEl.textContent = fmtTime(msLeft);
+    if (lastScoreEl) lastScoreEl.textContent = state.lastScore;
+    if (highScoreEl) highScoreEl.textContent = state.highScore;
+    if (levelEl) levelEl.textContent = level;
+    if (statusEl) statusEl.textContent = running ? ("Punkty: " + score) : '';
+  }
   function spawnCat(){
     const {fallBase}=levelParams(level);
     const r=window.CONFIG.CAT.radius;
@@ -135,7 +139,7 @@
       ctx.beginPath(); ctx.arc(c.x,c.y,c.r,0,Math.PI*2); ctx.fillStyle="#fbbf24"; ctx.fill();
       ctx.font="16px system-ui, 'Apple Color Emoji', 'Segoe UI Emoji'"; ctx.textAlign="center"; ctx.textBaseline="middle"; ctx.fillStyle="#0b1220"; ctx.fillText("🐱", c.x, c.y+1); }
     for(const e of effects){ ctx.globalAlpha=Math.max(0,e.life/60); ctx.font="bold 16px system-ui"; ctx.textAlign="center"; ctx.fillStyle=e.color; ctx.fillText(e.text,e.x,e.y); ctx.globalAlpha=1; }
-    ctx.fillStyle="#9fb0d0"; ctx.font="12px system-ui"; ctx.fillText(running?"Łap koty! ← → / dotknij":"Naciśnij Zagraj",10,18);
+    ctx.fillStyle="#9fb0d0"; ctx.font="12px system-ui"; ctx.fillText(running?"Łap koty! ← → / dotknij":"Dotknij, aby zacząć",10,18);
   }
   function endGame(){
     running=false; paused=false; state.lastScore=score; if(score>state.highScore) state.highScore=score; storage.save(state);
@@ -173,17 +177,16 @@
 
   function startGame(){
     xpNudge();
-    if(running||state.tokens<=0) return; audio.ensure(); state.tokens-=1; storage.save(state);
-    running=true; paused=false; score=0; level=1; cats=[]; spawnCooldown=0; msLeft=15000; startTs = performance.now(); setPauseUI && setPauseUI();
+    if(running) return;
+    audio.ensure();
+    running=true; paused=false; score=0; level=1; cats=[]; spawnCooldown=0; msLeft=getRoundTime(); startTs = performance.now(); setPauseUI && setPauseUI();
     if (centerOverlay) centerOverlay.classList.add('hidden');
     if (gameOverOverlay) gameOverOverlay.classList.add('hidden');
     renderHud();
     if (analytics && analytics.startGame){
-      analytics.startGame({ slug, page: pageId, mode: 'self', lang: getLang(), tokens_remaining: state.tokens });
+      analytics.startGame({ slug, page: pageId, mode: 'self', lang: getLang() });
     }
   }
-  const buy=()=>{ xpNudge(); if(running) return; state.tokens+=10; storage.save(state); renderHud(); };
-  const resetDemo=()=>{ xpNudge(); if(running) return; state={...window.CONFIG.DEFAULT_STATE}; storage.save(state); renderHud(); };
 
   function setMuteUI(){
     if (!btnMute) return;
@@ -212,11 +215,9 @@
 
   // Use InputController for all inputs
   InputController({
-    canvas, paddle, leftBtn, rightBtn, playBtn, buyBtn, resetBtn,
+    canvas, paddle, leftBtn, rightBtn,
     widthProvider: () => canvas.getBoundingClientRect().width,
     onStart: startGame,
-    onBuy: buy,
-    onReset: resetDemo,
     btnMute, btnPause,
     onToggleMute: toggleMute,
     onTogglePause: togglePause,
@@ -225,9 +226,6 @@
 
   // Redundant direct bindings as a safety net (in case controller wiring fails)
   try {
-    playBtn && playBtn.addEventListener('click', startGame);
-    buyBtn && buyBtn.addEventListener('click', buy);
-    resetBtn && resetBtn.addEventListener('click', resetDemo);
     bigStartBtn && bigStartBtn.addEventListener('click', startGame);
     replayBtn && replayBtn.addEventListener('click', startGame);
   } catch {}

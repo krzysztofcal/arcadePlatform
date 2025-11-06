@@ -6,11 +6,7 @@
       leftBtn,
       rightBtn,
       onStart,
-      onBuy,
-      onReset,
       playBtn,
-      buyBtn,
-      resetBtn,
       widthProvider,
       btnMute,
       btnPause,
@@ -28,15 +24,17 @@
     let btnInterval=null;
     function pressDir(dir){ if(btnInterval) clearInterval(btnInterval); if(dir==='left'){ paddle.left=true; paddle.right=false; } if(dir==='right'){ paddle.right=true; paddle.left=false; } nudge(); btnInterval=setInterval(()=>{},50); }
     function releaseDir(){ if(btnInterval) clearInterval(btnInterval); paddle.left=false; paddle.right=false; }
-    leftBtn.addEventListener('pointerdown',()=>pressDir('left'));
-    rightBtn.addEventListener('pointerdown',()=>pressDir('right'));
-    leftBtn.addEventListener('pointerup',()=>{ releaseDir(); nudge(); });
-    rightBtn.addEventListener('pointerup',()=>{ releaseDir(); nudge(); });
-    leftBtn.addEventListener('pointerleave',releaseDir);
-    rightBtn.addEventListener('pointerleave',releaseDir);
-    playBtn.addEventListener('click', ()=>{ if(onStart) onStart(); nudge(); });
-    buyBtn.addEventListener('click', ()=>{ if(onBuy) onBuy(); nudge(); });
-    resetBtn.addEventListener('click', ()=>{ if(onReset) onReset(); nudge(); });
+    if (leftBtn){
+      leftBtn.addEventListener('pointerdown',()=>pressDir('left'));
+      leftBtn.addEventListener('pointerup',()=>{ releaseDir(); nudge(); });
+      leftBtn.addEventListener('pointerleave',releaseDir);
+    }
+    if (rightBtn){
+      rightBtn.addEventListener('pointerdown',()=>pressDir('right'));
+      rightBtn.addEventListener('pointerup',()=>{ releaseDir(); nudge(); });
+      rightBtn.addEventListener('pointerleave',releaseDir);
+    }
+    if (playBtn) playBtn.addEventListener('click', ()=>{ if(onStart) onStart(); nudge(); });
 
     if (btnMute && onToggleMute) btnMute.addEventListener('click', ()=>{ onToggleMute(); nudge(); });
     if (btnPause && onTogglePause) btnPause.addEventListener('click', ()=>{ onTogglePause(); nudge(); });

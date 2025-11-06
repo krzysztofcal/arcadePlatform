@@ -111,17 +111,10 @@
         </div>
 
         <div class="stats">
-          <div class="stat"><span>Żetony</span><strong id="tokens">-</strong></div>
           <div class="stat"><span>Czas</span><strong id="timeLeft">-</strong></div>
           <div class="stat"><span>Poziom</span><strong id="level">-</strong></div>
           <div class="stat"><span>Ostatni</span><strong id="lastScore">-</strong></div>
           <div class="stat"><span>Rekord</span><strong id="highScore">-</strong></div>
-        </div>
-
-        <div class="controls-row" style="margin-bottom:8px;">
-          <button id="playBtn" type="button">Zagraj (−1 żeton)</button>
-          <button id="buyBtn" type="button">Kup żetony (+10)</button>
-          <button id="resetBtn" type="button">Reset</button>
         </div>
 
         <canvas id="game"></canvas>
@@ -153,14 +146,8 @@
           </button>
         </div>
       </div>
-      <div class="meta">Pełny ekran wykorzystuje Fullscreen API. Użyj przycisku w pasku lub żółtego przycisku w prawym górnym rogu w trybie pełnego ekranu. Esc też działa.</div>
+      <div class="meta" data-i18n="catsFullscreenHint">Zanurz się w grze w trybie pełnoekranowym — użyj ikony w pasku u góry lub żółtego przycisku w rogu. Naciśnij Esc, aby wrócić.</div>
     </section>
-
-    <aside class="right">
-      <div class="tile"></div><div class="tile"></div><div class="tile"></div>
-      <div class="tile"></div><div class="tile"></div><div class="tile"></div>
-      <div class="tile"></div><div class="tile"></div>
-    </aside>
   </div>
 
   <script src="js/config.js" defer></script>
@@ -169,6 +156,7 @@
   <script src="js/core/FullscreenService.js" defer></script>
   <script src="js/core/InputController.js" defer></script>
   <script src="js/features/cats/CatsRules.js" defer></script>
+  <script src="js/i18n.js" defer></script>
   <script src="js/game.js" defer></script>
   <script src="js/sidebar.js" defer></script>
   <script src="js/cookiebot-manager.js" defer></script>
