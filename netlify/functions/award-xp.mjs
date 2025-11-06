@@ -235,10 +235,26 @@ export async function handler(event) {
   const lifetime = Number(res?.[3]) || 0;
 
   const payload = { ok: true, awarded: granted, totalToday: total, cap: DAILY_CAP, totalLifetime: lifetime };
-  if (process.env.XP_DEBUG==="1") payload.debug = { now, chunkMs, pointsPerPeriod, minVisibility, minInputs, visibilitySeconds, inputEvents, status };
-    if (status === 1) payload.idempotent = true;
+  if (process.env.XP_DEBUG === "1") {
+    payload.debug = {
+      now,
+      chunkMs,
+      pointsPerPeriod,
+      minVisibility,
+      minInputs,
+      visibilitySeconds,
+      inputEvents,
+      status,
+    };
+  }
+  if (status === 1) payload.idempotent = true;
   if (status === 2) payload.capped = true;
-  if (status === 3) payload.tooSoon = true;
+  if (status === 3) {
+    payload.tooSoon = true;
+    payload.awarded = 0;
+    payload.reason = "too_soon";
+    if (payload.debug) payload.debug.reason = "too_soon";
+  }
   if (status === 4) payload.locked = true;
 
   return json(200, payload, origin);
