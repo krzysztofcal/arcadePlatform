@@ -21,7 +21,10 @@ if (process.env.PLAYWRIGHT_BROWSER_CHANNEL) {
   };
 }
 
-const testMatch = process.env.CI_NO_E2E === '1' ? [] : ['tests/**/*.spec.ts'];
+const testMatch =
+  process.env.CI_NO_E2E === '1'
+    ? []
+    : ['tests/**/*.spec.ts', 'tests/**/*.spec.js'];
 
 if (process.env.CI_NO_E2E === '1') {
   console.warn('ℹ️  Playwright tests skipped: CI_NO_E2E=1');
