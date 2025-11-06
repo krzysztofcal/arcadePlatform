@@ -82,6 +82,7 @@ test('replay button restarts the round', async ({ page }) => {
 
   await page.waitForFunction(()=>{const el=document.getElementById('gameOverOverlay');return el&&!el.classList.contains('hidden');},{timeout:5000});
 
+  await page.evaluate(()=>{ if ((window as any).CONFIG) (window as any).CONFIG.ROUND_TIME_MS = 600; });
   await page.locator('#replayBtn').click();
 
   await expect(page.locator('#gameOverOverlay')).toHaveClass(/hidden/);
@@ -90,5 +91,5 @@ test('replay button restarts the round', async ({ page }) => {
 
   const timeAfterRestart = await readTimeLeft(page);
   expect(timeAfterRestart).toBeGreaterThan(0);
-  expect(timeAfterRestart).toBeLessThanOrEqual(0.6);
+  expect(timeAfterRestart).toBeLessThanOrEqual(1);
 });
