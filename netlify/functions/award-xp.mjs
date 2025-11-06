@@ -66,32 +66,31 @@ export async function handler(event) {
     visibilitySeconds,
     inputEvents,
   } = body;
-  
-
-
-
-  
-if (body.statusOnly) {
-    const todayKeyK = keyDaily(userId, dayKey());
-    const totalKeyK = keyTotal(userId);
-    const [todayRaw, totalRaw] = await Promise.all([
-      store.get(todayKeyK),
-      store.get(totalKeyK),
-    ]);
-    const payload = {
-      ok: true,
-      totalToday: Number(todayRaw) || 0,
-      cap: DAILY_CAP,
-      totalLifetime: Number(totalRaw) || 0,
-    };
-    return json(200, payload, origin);
-  }
-if (!userId || (!body.statusOnly && !sessionId)) {
+  if (!userId || (!body.statusOnly && !sessionId)) {
     return json(400, { error: "missing_fields" }, origin);
   }
 
 
   
+
+  // EARLY statusOnly (no window validation)
+  if (body.statusOnly) {
+    try {
+      const today = dayKey();
+      const dailyKeyK = keyDaily(userId, today);
+      const totalKeyK = keyTotal(userId);
+      const currentStr = await store.get(dailyKeyK);
+      const lifeStr = await store.get(totalKeyK);
+      const current = Number(currentStr || '0') || 0;
+      const lifetime = Number(lifeStr || '0') || 0;
+      const payload = { ok: true, awarded: 0, totalToday: current, cap: DAILY_CAP, totalLifetime: lifetime };
+      if (process.env.XP_DEBUG === '1') payload.debug = { mode: 'statusOnly' };
+      return json(200, payload, origin);
+    } catch (_) {
+      return json(200, { ok: true, awarded: 0, totalToday: 0, cap: DAILY_CAP, totalLifetime: 0 }, origin);
+    }
+  }
+
   // Task 1: block XP when user is idle
   if (!body.statusOnly) {
     // Use clamped chunk to derive a reasonable input threshold
@@ -226,7 +225,8 @@ if (!userId || (!body.statusOnly && !sessionId)) {
   const lifetime = Number(res?.[3]) || 0;
 
   const payload = { ok: true, awarded: granted, totalToday: total, cap: DAILY_CAP, totalLifetime: lifetime };
-  if (status === 1) payload.idempotent = true;
+  if (process.env.XP_DEBUG==="1") payload.debug = { now, chunkMs, pointsPerPeriod, minVisibility, minInputs, visibilitySeconds, inputEvents, status };
+    if (status === 1) payload.idempotent = true;
   if (status === 2) payload.capped = true;
   if (status === 3) payload.tooSoon = true;
   if (status === 4) payload.locked = true;
