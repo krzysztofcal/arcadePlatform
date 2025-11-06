@@ -26,6 +26,17 @@
     snapshot: null,
   };
 
+  function isDocumentVisible() {
+    if (typeof document === "undefined") return false;
+    if (typeof document.hidden === "boolean") {
+      return !document.hidden;
+    }
+    if (typeof document.visibilityState === "string") {
+      return document.visibilityState === "visible";
+    }
+    return false;
+  }
+
   function computeLevel(totalXp) {
     const total = Math.max(0, Number(totalXp) || 0);
     let level = 1;
@@ -158,7 +169,7 @@
     const visibility = Math.round(visibilitySecondsRaw);
     const inputs = state.inputEvents;
     /* xp idle guard */
-    if (typeof document !== "undefined" && document.hidden) {
+    if (!isDocumentVisible()) {
       state.windowStart = now;
       state.activeMs = 0;
       state.visibilitySeconds = 0;
@@ -198,7 +209,7 @@
     const delta = state.lastTick ? Math.max(0, now - state.lastTick) : 0;
     state.lastTick = now;
     if (!state.running) return;
-    const visible = typeof document !== "undefined" && !document.hidden;
+    const visible = isDocumentVisible();
     if (!visible) return;
 
     state.visibilitySeconds += delta / 1000;
