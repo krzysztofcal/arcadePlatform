@@ -154,7 +154,8 @@
     const now = Date.now();
     const elapsed = now - state.windowStart;
     if (!force && elapsed < CHUNK_MS) return;
-    const visibility = Math.round(state.visibilitySeconds);
+    const visibilitySecondsRaw = state.visibilitySeconds;
+    const visibility = Math.round(visibilitySecondsRaw);
     const inputs = state.inputEvents;
     /* xp idle guard */
     if (typeof document !== "undefined" && document.hidden) {
@@ -165,7 +166,7 @@
       return;
     }
     const _minInputsGate = Math.max(2, Math.ceil(CHUNK_MS / 4000));
-    if (visibility <= 1 || inputs < _minInputsGate) {
+    if (visibilitySecondsRaw <= 1 || inputs < _minInputsGate) {
       state.windowStart = now;
       state.activeMs = 0;
       state.visibilitySeconds = 0;
