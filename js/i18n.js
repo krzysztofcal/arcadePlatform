@@ -105,6 +105,7 @@
   window.I18N = {
     t: (key)=> (dict[key] && dict[key][currentLang]) || '',
     getLang: ()=> currentLang,
-    setLang: (l)=>{ persistLang(l); applyLang(l, 'api'); }
+    setLang: (l)=>{ persistLang(l); applyLang(l, 'api'); },
+    apply: applyLang
   };
 })();
