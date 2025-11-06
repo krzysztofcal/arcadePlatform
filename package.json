@@ -11,13 +11,18 @@
     "ci:guards": "npm run guard:lifecycle && npm run guard:badge",
     "lint:games": "node scripts/validate-games.js",
     "prepare": "husky install",
-    "test": "npm run check:all && npm run test:unit && npm run test:e2e",
+    "test": "node scripts/test-all.mjs",
     "test:unit": "npm run lint:games",
-    "test:e2e": "node scripts/prepare-playwright.js && node scripts/run-e2e.js"
+    "test:e2e": "node scripts/prepare-playwright.js && node scripts/run-e2e.js",
+    "syntax": "node scripts/syntax-check.mjs",
+    "test:quick": "node scripts/syntax-check.mjs",
+    "test:cli": "node scripts/test-cli.mjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.46.0",
-    "husky": "^9.0.11",
+    "acorn": "^8.15.0",
+    "fast-glob": "^3.3.3",
+    "husky": "^9.1.7",
     "lint-staged": "^15.2.7"
   },
   "lint-staged": {
