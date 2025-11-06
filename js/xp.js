@@ -225,7 +225,7 @@
   function startSession(gameId) {
     attachBadge();
     ensureTimer();
-      var __lastTopInputTs = 0;
+
     state.running = true;
     state.gameId = gameId || "game";
     state.windowStart = Date.now();
@@ -301,73 +301,46 @@
   }
 
   function init() {
-    if (typeof document !== "undefined") {
-      if (document.readyState === "loading") {
-        document.addEventListener("DOMContentLoaded", attachBadge, { once: true });
-      } else {
-        attachBadge();
-      }
-      document.addEventListener("visibilitychange", () => {
-        state.lastTick = Date.now();
-      });
+  if (typeof document !== "undefined") {
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", attachBadge, { once: true });
+    } else {
+      attachBadge();
     }
-    if (typeof window !== "undefined") {
-      ensureTimer();
-      
-            // Hardened kcswh activity bridge:
-      // - same-origin only
-      // - prefer { userGesture: true }
-      // - TEMP compat: accept legacy {type:'kcswh:activity'} only if near a real top-frame input (<1.5s)
-      // - ignore when hidden
-      // - throttle to ~10 nudges/sec
-      (function(){
-        var __lastNudgeTs = 0;
-        window.addEventListener("message", (event) => {
-          try {
-            if (!event || !event.data) return;
-            if (typeof document !== "undefined" && document.hidden) return;
-            if (event.origin && typeof location !== "undefined" && event.origin !== location.origin) return;
-            if (event.data.type !== "kcswh:activity") return;
-
-            var now = Date.now();
-
-            // Strict path: upgraded senders
-            if (event.data.userGesture === true) {
-              // ok
-            } else {
-              // TEMP compat for legacy senders: only if near a real user input in top frame
-              var lastTop = (typeof __lastTopInputTs !== 'undefined') ? __lastTopInputTs : 0;
-              if (!(lastTop && (now - lastTop) < 1500)) {
-                // Legacy message not correlated with a real user gesture → ignore
-                return;
-              }
-            }
-
-            // throttle
-            if (now - __lastNudgeTs < 100) return; // 10/sec
-            __lastNudgeTs = now;
-
-            if (typeof nudge === "function") nudge();
-          } catch {}
-        }, { passive: true });
-      })();
-
-            /* xp input listeners */
-      ["pointerdown","pointermove","keydown","wheel","touchstart"].forEach(evt => {
-        try {
-          window.addEventListener(evt, () => {
-            try {
-              if (typeof __lastTopInputTs !== 'undefined') __lastTopInputTs = Date.now();
-              nudge();
-            } catch(_) {}
-          }, { passive: true });
-        } catch(_) {}
-      });
-} catch(_){} }, { passive: true }); } catch(_) {}
-      });
-
-    }
+    document.addEventListener("visibilitychange", () => {
+      state.lastTick = Date.now();
+    }, { passive: true });
   }
+
+  if (typeof window !== "undefined") {
+    ensureTimer();
+
+    // Hardened activity bridge (same-origin, visible doc, requires userGesture:true, throttled)
+    (function(){
+      let __lastNudgeTs = 0;
+      window.addEventListener("message", (event) => {
+        try {
+          if (!event || !event.data) return;
+          if (typeof document !== "undefined" && document.hidden) return;
+          if (event.origin && typeof location !== "undefined" && event.origin !== location.origin) return;
+          if (event.data.type !== "kcswh:activity") return;
+          if (event.data.userGesture !== true) return;
+
+          const now = Date.now();
+          if (now - __lastNudgeTs < 100) return; // ~10/sec
+          __lastNudgeTs = now;
+
+          if (typeof nudge === "function") nudge();
+        } catch {}
+      }, { passive: true });
+    })();
+
+    // Top-frame input listeners -> nudge
+    ["pointerdown","pointermove","keydown","wheel","touchstart"].forEach(evt => {
+      try { window.addEventListener(evt, () => { try { nudge(); } catch(_){} }, { passive: true }); } catch(_) {}
+    });
+  }
+}
 
   init();
 
