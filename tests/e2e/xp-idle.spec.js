@@ -3,7 +3,7 @@ const { test, expect } = require('@playwright/test');
 const GAME_PAGE = process.env.XP_E2E_PAGE ?? '/game_cats.html';
 const SETTLE_DELAY_MS = 1_000;
 const IDLE_OBSERVE_MS = 12_000;
-const GESTURE_SPACING_MS = 4_000;
+const GESTURE_SPACING_MS = 800; // keep "active" continuous (each gesture extends ~2s)
 
 function initXpClientStub() {
   return `(() => {
@@ -46,8 +46,10 @@ test.describe('XP idle behaviour', () => {
     await page.waitForTimeout(SETTLE_DELAY_MS);
     await page.waitForTimeout(IDLE_OBSERVE_MS);
 
-    const count = await page.evaluate(() => window.__xpCalls.length);
-    expect(count).toBe(0);
+    const postCount = await page.evaluate(() =>
+      (window.__xpCalls || []).filter(c => c.method === 'postWindow').length
+    );
+    expect(postCount).toBe(0);
   });
 
   test('reports activity after sustained user input', async ({ page }) => {
@@ -66,16 +68,19 @@ test.describe('XP idle behaviour', () => {
       await page.keyboard.press('Space');
     };
 
-    for (let i = 0; i < 3; i += 1) {
+    // ~14 gestures * 0.8s spacing ≈ 11–12s of continuous "active" time
+    for (let i = 0; i < 14; i += 1) {
       await performGesture(i);
-      if (i < 2) {
+      if (i < 13) {
         await page.waitForTimeout(GESTURE_SPACING_MS);
       }
     }
 
-    await page.waitForTimeout(IDLE_OBSERVE_MS);
+    await page.waitForTimeout(2_000); // brief buffer to allow sendWindow
 
-    const count = await page.evaluate(() => window.__xpCalls.length);
-    expect(count).toBeGreaterThan(0);
+    const postCount = await page.evaluate(() =>
+      (window.__xpCalls || []).filter(c => c.method === 'postWindow').length
+    );
+    expect(postCount).toBeGreaterThan(0);
   });
 });
