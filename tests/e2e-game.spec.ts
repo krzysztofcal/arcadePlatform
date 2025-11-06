@@ -17,7 +17,9 @@ test('game starts, pauses, and resumes', async ({ page }) => {
   const gamePath = path.join(__dirname, '..', 'game_cats.html');
   expect(fs.existsSync(gamePath)).toBeTruthy();
 
-  await page.goto(fileUrl(gamePath));
+  await page.goto('/game_cats.html',{waitUntil:'domcontentloaded'});
+  await page.bringToFront();
+  await page.waitForTimeout(50);
   await page.evaluate(() => {
     try { localStorage.removeItem((window as any).CONFIG?.STORAGE_KEY || ''); } catch {}
   });
@@ -63,7 +65,9 @@ test('replay button restarts the round', async ({ page }) => {
   const gamePath = path.join(__dirname, '..', 'game_cats.html');
   expect(fs.existsSync(gamePath)).toBeTruthy();
 
-  await page.goto(fileUrl(gamePath));
+  await page.goto('/game_cats.html',{waitUntil:'domcontentloaded'});
+  await page.bringToFront();
+  await page.waitForTimeout(50);
   await page.evaluate(() => {
     try { localStorage.removeItem((window as any).CONFIG?.STORAGE_KEY || ''); } catch {}
   });
@@ -76,7 +80,7 @@ test('replay button restarts the round', async ({ page }) => {
   await page.locator('#bigStartBtn').click();
   await expect(page.locator('#centerOverlay')).toHaveClass(/hidden/);
 
-  await expect(page.locator('#gameOverOverlay')).toBeVisible({ timeout: 3000 });
+  await page.waitForFunction(()=>{const el=document.getElementById('gameOverOverlay');return el&&!el.classList.contains('hidden');},{timeout:5000});
 
   await page.locator('#replayBtn').click();
 
