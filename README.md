@@ -53,6 +53,7 @@ Run locally:
 - `npm i`
 - `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm install` if you rely on a system Chromium.
 - `npm run test` (set `CI_NO_E2E=1` to skip the Playwright suite when browsers aren’t available).
+- `PLAYWRIGHT=1 npm test` runs the full Playwright end-to-end suite, including the XP idle coverage.
 
 ## CI Status
 - GitHub Actions workflow: tests
