@@ -99,7 +99,17 @@ export async function handler(event) {
     const _minInputsGate = Math.max(2, Math.ceil(_chunk / 4000));
     if (!(Number.isFinite(visibilitySeconds) && visibilitySeconds > 1 &&
           Number.isFinite(inputEvents) && inputEvents >= _minInputsGate)) {
-      return json(200, { ok: true, awarded: 0, reason: "inactive" }, origin);
+      const payload = { ok: true, awarded: 0, reason: "insufficient-activity" };
+      if (process.env.XP_DEBUG === "1") {
+        payload.debug = {
+          chunkMs: _chunk,
+          minInputsGate: _minInputsGate,
+          visibilitySeconds,
+          inputEvents,
+          reason: "insufficient-activity",
+        };
+      }
+      return json(200, payload, origin);
     }
   }
 
