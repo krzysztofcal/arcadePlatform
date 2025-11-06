@@ -198,12 +198,12 @@
     const delta = state.lastTick ? Math.max(0, now - state.lastTick) : 0;
     state.lastTick = now;
     if (!state.running) return;
-    const visible = !document.hidden;
-    if (visible) {
-      state.visibilitySeconds += delta / 1000;
-      if (now <= state.activeUntil) {
-        state.activeMs += delta;
-      }
+    const visible = typeof document !== "undefined" && !document.hidden;
+    if (!visible) return;
+
+    state.visibilitySeconds += delta / 1000;
+    if (now <= state.activeUntil) {
+      state.activeMs += delta;
     }
     if (state.activeMs >= CHUNK_MS) {
       sendWindow(false);
