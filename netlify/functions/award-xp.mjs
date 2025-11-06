@@ -70,7 +70,23 @@ export async function handler(event) {
 
 
 
-  if (!userId || !sessionId) {
+  
+if (body.statusOnly) {
+    const todayKeyK = keyDaily(userId, dayKey());
+    const totalKeyK = keyTotal(userId);
+    const [todayRaw, totalRaw] = await Promise.all([
+      store.get(todayKeyK),
+      store.get(totalKeyK),
+    ]);
+    const payload = {
+      ok: true,
+      totalToday: Number(todayRaw) || 0,
+      cap: DAILY_CAP,
+      totalLifetime: Number(totalRaw) || 0,
+    };
+    return json(200, payload, origin);
+  }
+if (!userId || (!body.statusOnly && !sessionId)) {
     return json(400, { error: "missing_fields" }, origin);
   }
 
@@ -87,21 +103,7 @@ export async function handler(event) {
       return json(200, { ok: true, awarded: 0, reason: "inactive" }, origin);
     }
   }
-if (body.statusOnly) {
-    const todayKeyK = keyDaily(userId, dayKey());
-    const totalKeyK = keyTotal(userId);
-    const [todayRaw, totalRaw] = await Promise.all([
-      store.get(todayKeyK),
-      store.get(totalKeyK),
-    ]);
-    const payload = {
-      ok: true,
-      totalToday: Number(todayRaw) || 0,
-      cap: DAILY_CAP,
-      totalLifetime: Number(totalRaw) || 0,
-    };
-    return json(200, payload, origin);
-  }
+
 
   if (!gameId || !Number.isFinite(windowStart) || !Number.isFinite(windowEnd)) {
     return json(400, { error: "missing_fields" }, origin);

@@ -136,7 +136,7 @@
       if (target) {
         const injectBridge = () => {
           const scriptId = '__kcswhActivityBridge';
-          const scriptText = "(function(){if(window.__kcswhActivityBridge)return;window.__kcswhActivityBridge=true;var TYPE='kcswh:activity';var TARGET='*';var last=Date.now();var ACTIVE=5000;var HEARTBEAT=4000;var send=function(){try{parent.postMessage({type:TYPE},TARGET);}catch(_){}};var on=function(){last=Date.now();send();};['pointerdown','pointermove','pointerup','touchstart','touchmove','keydown'].forEach(function(evt){try{document.addEventListener(evt,on,{passive:true});}catch(_){document.addEventListener(evt,on);}});var beat=function(){if(Date.now()-last<=ACTIVE)send();};var timer=setInterval(beat,HEARTBEAT);send();})();";try {
+          const scriptText = "(function(){if(window.__kcswhActivityBridge)return;window.__kcswhActivityBridge=true;var TYPE='kcswh:activity';var TARGET='*';var last=Date.now();var ACTIVE=5000;var HEARTBEAT=4000;var send=function(){try{parent.postMessage({ type: TYPE, userGesture: true }, TARGET);}catch(_){}};var on=function(){last=Date.now();send();};['pointerdown','pointermove','pointerup','touchstart','touchmove','keydown'].forEach(function(evt){try{document.addEventListener(evt,on,{passive:true});}catch(_){document.addEventListener(evt,on);}});var beat=function(){if(Date.now()-last<=ACTIVE)send();};var timer=setInterval(beat,HEARTBEAT);send();})();";try {
             const doc = iframe.contentDocument;
             if (!doc || !doc.documentElement || doc.getElementById(scriptId)) return;
             const script = doc.createElement('script');
@@ -163,12 +163,16 @@
   <!-- XP message listener: convert child activity -> XP.nudge() -->
 <script>
   window.addEventListener("message", (ev) => {
-    if (!ev.data || typeof ev.data !== "object") return;
-    if (ev.data.type === "kcswh:activity") {
+    try {
+      if (!ev || !ev.data || typeof ev.data !== "object") return;
+      if (typeof document !== "undefined" && document.hidden) return;
+      if (ev.origin && typeof location !== "undefined" && ev.origin !== location.origin) return;
+      if (ev.data.type !== "kcswh:activity") return;
+      if (ev.data.userGesture !== true) return;
       if (window.XP && typeof window.XP.nudge === "function") {
         try { window.XP.nudge(); } catch (_) {}
       }
-    }
+    } catch {}
   }, { passive: true });
 </script>
 

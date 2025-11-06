@@ -225,6 +225,7 @@
   function startSession(gameId) {
     attachBadge();
     ensureTimer();
+
     state.running = true;
     state.gameId = gameId || "game";
     state.windowStart = Date.now();
@@ -300,30 +301,46 @@
   }
 
   function init() {
-    if (typeof document !== "undefined") {
-      if (document.readyState === "loading") {
-        document.addEventListener("DOMContentLoaded", attachBadge, { once: true });
-      } else {
-        attachBadge();
-      }
-      document.addEventListener("visibilitychange", () => {
-        state.lastTick = Date.now();
-      });
+  if (typeof document !== "undefined") {
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", attachBadge, { once: true });
+    } else {
+      attachBadge();
     }
-    if (typeof window !== "undefined") {
-      ensureTimer();
-      window.addEventListener("message", (event) => {
-        if (event && event.data && event.data.type === "kcswh:activity") {
-          nudge();
-        }
-      }, { passive: true });
-      /* xp input listeners */
-      ["pointerdown","pointermove","keydown","wheel","touchstart"].forEach(evt => {
-        try { window.addEventListener(evt, () => { try { nudge(); } catch(_){} }, { passive: true }); } catch(_) {}
-      });
-
-    }
+    document.addEventListener("visibilitychange", () => {
+      state.lastTick = Date.now();
+    }, { passive: true });
   }
+
+  if (typeof window !== "undefined") {
+    ensureTimer();
+
+    // Hardened activity bridge (same-origin, visible doc, requires userGesture:true, throttled)
+    (function(){
+      let __lastNudgeTs = 0;
+      window.addEventListener("message", (event) => {
+        try {
+          if (!event || !event.data) return;
+          if (typeof document !== "undefined" && document.hidden) return;
+          if (event.origin && typeof location !== "undefined" && event.origin !== location.origin) return;
+          if (event.data.type !== "kcswh:activity") return;
+          if (event.data.userGesture !== true) return;
+
+          const now = Date.now();
+          if (now - __lastNudgeTs < 100) return; // ~10/sec
+          __lastNudgeTs = now;
+
+          if (typeof nudge === "function") nudge();
+        } catch {}
+      }, { passive: true });
+    })();
+
+    // Top-frame input listeners -> nudge
+    ["pointerdown","pointermove","keydown","wheel","touchstart"].forEach(evt => {
+      try { window.addEventListener(evt, () => { try { nudge(); } catch(_){} }, { passive: true }); } catch(_) {}
+    });
+  }
+}
 
   init();
 

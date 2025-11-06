@@ -152,7 +152,7 @@
         const allowedOrigin = location.origin;
 
         function notifyActive(){
-          try { parent.postMessage({ type: 'kcswh:activity' }, allowedOrigin); } catch (_error) {}
+          try { parent.postMessage({ type: 'kcswh:activity', userGesture: true }, allowedOrigin); } catch (_error) {}
         }
 
         addEventListener('keydown', notifyActive, { passive: true });
