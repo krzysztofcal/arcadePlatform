@@ -7,39 +7,69 @@ function fileUrl(p: string) {
   return 'file://' + abs;
 }
 
-async function readTimeLeft(page) {
+async function readTimeLeft(page: import('@playwright/test').Page) {
   const text = (await page.locator('#timeLeft').innerText()).trim();
   const m = text.match(/([0-9]+(?:\.[0-9]+)?)s/);
   return m ? parseFloat(m[1]) : NaN;
 }
 
-test('game starts, pauses, and resumes (deterministic, no timers)', async ({ page }) => {
+test('game starts, pauses, and resumes', async ({ page }) => {
   const gamePath = path.join(__dirname, '..', 'game_cats.html');
   expect(fs.existsSync(gamePath)).toBeTruthy();
 
   await page.goto(fileUrl(gamePath));
-  // Ensure clean storage so tokens/time are predictable
   await page.evaluate(() => {
     try { localStorage.removeItem((window as any).CONFIG?.STORAGE_KEY || ''); } catch {}
   });
   await page.reload();
 
-  // Verify initial tokens and overlay
-  const tokensBefore = await page.locator('#tokens').innerText();
-  expect(tokensBefore.trim()).toBe('10');
   await expect(page.locator('#centerOverlay')).toBeVisible();
+  await expect(page.locator('#tokens')).toHaveCount(0);
+  const statusBefore = (await page.locator('#status').innerText()).trim();
+  expect(statusBefore).toBe('');
 
-  // Start the game (discrete state change)
-  await page.locator('#playBtn').click();
+  await page.locator('#bigStartBtn').click();
   await expect(page.locator('#centerOverlay')).toHaveClass(/hidden/);
-  const tokensAfterStart = await page.locator('#tokens').innerText();
-  expect(tokensAfterStart.trim()).toBe('9');
+  await expect(page.locator('#status')).toHaveText(/Punkty: 0/);
 
-  // Pause
+  const timeAfterStart = await readTimeLeft(page);
+  await page.waitForTimeout(200);
+  const timeAfterWait = await readTimeLeft(page);
+  expect(timeAfterWait).toBeLessThan(timeAfterStart);
+
   await page.locator('#btnPause').click();
   await expect(page.locator('#btnPause')).toHaveAttribute('aria-pressed', 'true');
 
-  // Resume
   await page.locator('#btnPause').click();
   await expect(page.locator('#btnPause')).toHaveAttribute('aria-pressed', 'false');
+});
+
+test('replay button restarts the round', async ({ page }) => {
+  const gamePath = path.join(__dirname, '..', 'game_cats.html');
+  expect(fs.existsSync(gamePath)).toBeTruthy();
+
+  await page.goto(fileUrl(gamePath));
+  await page.evaluate(() => {
+    try { localStorage.removeItem((window as any).CONFIG?.STORAGE_KEY || ''); } catch {}
+  });
+  await page.reload();
+  await page.evaluate(() => {
+    if ((window as any).CONFIG) (window as any).CONFIG.ROUND_TIME_MS = 600;
+  });
+
+  await expect(page.locator('#centerOverlay')).toBeVisible();
+  await page.locator('#bigStartBtn').click();
+  await expect(page.locator('#centerOverlay')).toHaveClass(/hidden/);
+
+  await expect(page.locator('#gameOverOverlay')).toBeVisible({ timeout: 3000 });
+
+  await page.locator('#replayBtn').click();
+
+  await expect(page.locator('#gameOverOverlay')).toHaveClass(/hidden/);
+  await expect(page.locator('#centerOverlay')).toHaveClass(/hidden/);
+  await expect(page.locator('#status')).toHaveText(/Punkty: 0/);
+
+  const timeAfterRestart = await readTimeLeft(page);
+  expect(timeAfterRestart).toBeGreaterThan(0);
+  expect(timeAfterRestart).toBeLessThanOrEqual(0.6);
 });

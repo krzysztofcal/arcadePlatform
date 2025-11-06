@@ -11,7 +11,7 @@
     expect(loaded).toEqual(defaultState);
 
     // Persist some values
-    const modified = { ...loaded, tokens: loaded.tokens + 3, lastScore: 7 };
+    const modified = { ...loaded, lastScore: 7, highScore: 12, muted: !loaded.muted };
     svc.save(modified);
     const loaded2 = svc.load();
     expect(loaded2).toEqual(modified);
