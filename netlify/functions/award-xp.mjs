@@ -72,6 +72,25 @@ export async function handler(event) {
 
 
   
+
+  // EARLY statusOnly (no window validation)
+  if (body.statusOnly) {
+    try {
+      const today = dayKey();
+      const dailyKeyK = keyDaily(userId, today);
+      const totalKeyK = keyTotal(userId);
+      const currentStr = await store.get(dailyKeyK);
+      const lifeStr = await store.get(totalKeyK);
+      const current = Number(currentStr || '0') || 0;
+      const lifetime = Number(lifeStr || '0') || 0;
+      const payload = { ok: true, awarded: 0, totalToday: current, cap: DAILY_CAP, totalLifetime: lifetime };
+      if (process.env.XP_DEBUG === '1') payload.debug = { mode: 'statusOnly' };
+      return json(200, payload, origin);
+    } catch (_) {
+      return json(200, { ok: true, awarded: 0, totalToday: 0, cap: DAILY_CAP, totalLifetime: 0 }, origin);
+    }
+  }
+
   // Task 1: block XP when user is idle
   if (!body.statusOnly) {
     // Use clamped chunk to derive a reasonable input threshold
@@ -118,21 +137,6 @@ export async function handler(event) {
   const lockKeyK  = keyLock(userId, gameId);
   const totalKeyK = keyTotal(userId);
 
-
-  // statusOnly: return totals without awarding
-  if (body.statusOnly) {
-    try {
-      const currentStr = await store.get(dailyKeyK);
-      const lifeStr = await store.get(totalKeyK);
-      const current = Number(currentStr || '0') || 0;
-      const lifetime = Number(lifeStr || '0') || 0;
-      const payload = { ok: true, awarded: 0, totalToday: current, cap: DAILY_CAP, totalLifetime: lifetime };
-      if (process.env.XP_DEBUG === '1') payload.debug = { mode: 'statusOnly' };
-      return json(200, payload, origin);
-    } catch (_) {
-      return json(200, { ok: true, awarded: 0, totalToday: 0, cap: DAILY_CAP, totalLifetime: 0 }, origin);
-    }
-  }
   // Atomic script: idempotency → cap → spacing (≥ CHUNK_MS since lastOk) → INCRBY → set lastOk(end) → set idem
   const script = `
     local daily = KEYS[1]
