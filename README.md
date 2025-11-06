@@ -28,6 +28,18 @@ A lightweight arcade hub (static HTML/CSS/JS) with a sample game (Łap koty — 
 - Each window needs at least a second of visibility and a few input events before it counts.
 - Going idle or switching tabs resets the window timers so no XP is awarded for background play.
 
+#### Server gates & debug
+- `award-xp.mjs` enforces multiple gates before points are granted:
+  - **Visibility gate** – requests must report more than a second of visibility, and the minimum rises with the requested chunk (60% of the chunk length, clamped by `XP_MIN_VISIBILITY_S`).
+  - **Input gate** – each window must include several inputs (`ceil(chunkMs / 4000)`, clamped by the `XP_MIN_INPUTS` baseline and never below two in the early guard).
+  - **Timing gate** – windows shorter than the requested chunk (minus drift) or ending in the future fail with `error: "invalid_window"`.
+  - **Spacing gate** – the server remembers the last accepted window end and rejects requests that arrive before another full chunk has elapsed (`reason: "too_soon"`).
+- Set `XP_DEBUG=1` (environment variable for the Netlify function or via `npm run serve:xp`) to receive a `debug` object alongside successful responses.
+  - Status-only probes get `debug: { mode: "statusOnly" }`.
+  - For early idle rejections the debug payload includes `{ chunkMs, minInputsGate, visibilitySeconds, inputEvents, reason }`.
+  - For validated windows the payload includes `{ now, chunkMs, pointsPerPeriod, minVisibility, minInputs, visibilitySeconds, inputEvents, status, reason? }`.
+  - `debug.reason` can surface `insufficient-activity`, `too_soon`, `invalid_window`, and the existing server reasons: `capped`, `locked`, `idempotent`.
+
 ## Tests
 There are two layers of tests:
 
