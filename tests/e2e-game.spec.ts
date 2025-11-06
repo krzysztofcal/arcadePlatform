@@ -24,7 +24,22 @@ test('game starts, pauses, and resumes', async ({ page }) => {
   await page.reload();
 
   await expect(page.locator('#centerOverlay')).toBeVisible();
+  const i18nLoaded = await page.evaluate(() => {
+    const api = (window as any).I18N;
+    return !!(api && typeof api.t === 'function');
+  });
+  expect(i18nLoaded).toBe(true);
   await expect(page.locator('#tokens')).toHaveCount(0);
+  await expect(page.locator('.stats .stat span:first-child')).toHaveText([
+    'Czas',
+    'Poziom',
+    'Ostatni',
+    'Rekord',
+  ]);
+  await expect(page.locator('body')).not.toContainText(/Kup\s*żetony/i);
+  await expect(page.locator('body')).not.toContainText('Zagraj (-1 żeton)');
+  await expect(page.locator('body')).not.toContainText('Kup żetony (+10)');
+  await expect(page.locator('body')).not.toContainText('Reset');
   const statusBefore = (await page.locator('#status').innerText()).trim();
   expect(statusBefore).toBe('');
 
