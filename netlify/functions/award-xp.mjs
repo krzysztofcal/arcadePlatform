@@ -8,6 +8,7 @@ const DRIFT_MS = Number(process.env.XP_DRIFT_MS ?? 2_000);
 const BASE_MIN_VISIBILITY_S = Number(process.env.XP_MIN_VISIBILITY_S ?? 6);
 const BASE_MIN_INPUTS = Number(process.env.XP_MIN_INPUTS ?? 1);
 const KEY_NS = process.env.XP_KEY_NS ?? "kcswh:xp:v1";
+const SCORE_DELTA_CEILING = Number(process.env.XP_SCORE_DELTA_CEILING ?? 10_000);
 const CORS_ALLOW = (process.env.XP_CORS_ALLOW ?? "")
   .split(",")
   .map(s => s.trim())
@@ -66,6 +67,11 @@ export async function handler(event) {
     visibilitySeconds,
     inputEvents,
   } = body;
+
+  const requestedScoreDelta = Number(body.scoreDelta);
+  const scoreDelta = Number.isFinite(requestedScoreDelta)
+    ? clamp(requestedScoreDelta, 0, SCORE_DELTA_CEILING)
+    : undefined;
   if (!userId || (!body.statusOnly && !sessionId)) {
     return json(400, { error: "missing_fields" }, origin);
   }
@@ -84,7 +90,7 @@ export async function handler(event) {
       const current = Number(currentStr || '0') || 0;
       const lifetime = Number(lifeStr || '0') || 0;
       const payload = { ok: true, awarded: 0, totalToday: current, cap: DAILY_CAP, totalLifetime: lifetime };
-      if (process.env.XP_DEBUG === '1') payload.debug = { mode: 'statusOnly' };
+      if (process.env.XP_DEBUG === '1') payload.debug = { mode: 'statusOnly', scoreDelta };
       return json(200, payload, origin);
     } catch (_) {
       return json(200, { ok: true, awarded: 0, totalToday: 0, cap: DAILY_CAP, totalLifetime: 0 }, origin);
@@ -107,6 +113,7 @@ export async function handler(event) {
           visibilitySeconds,
           inputEvents,
           reason: "insufficient-activity",
+          scoreDelta,
         };
       }
       return json(200, payload, origin);
@@ -245,6 +252,7 @@ export async function handler(event) {
       visibilitySeconds,
       inputEvents,
       status,
+      scoreDelta,
     };
   }
   const statusReasons = {
