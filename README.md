@@ -85,8 +85,8 @@ Score-driven XP awards are currently experimental and disabled by default to sup
 When score-driven awards are enabled:
 
 - `XP_USE_SCORE` (default `0`) toggles whether `scoreDelta` is considered when calculating XP.
-- `XP_SCORE_TO_XP` (default `100`) controls the conversion rate: XP gained per request is `scoreDelta / XP_SCORE_TO_XP`, rounded
-  down, before clamping. Negative values are ignored by the server-side guardrails.
+- `XP_SCORE_TO_XP` (default `1`) controls the conversion rate: XP gained per request is `scoreDelta * XP_SCORE_TO_XP`, rounded and
+  clamped. Negative values are ignored by the server-side guardrails.
 - `XP_MAX_XP_PER_WINDOW` (default `15`) caps the XP converted from a single window regardless of the incoming score.
 
 If a window is submitted without a `scoreDelta` value (including zero) or the feature is disabled, XP awards continue to use the
