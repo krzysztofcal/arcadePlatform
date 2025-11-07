@@ -75,8 +75,19 @@ Run locally:
 - `PLAYWRIGHT=1 npm test` runs the full Playwright end-to-end suite, including the XP idle coverage.
 
 ### Configuration
-- `XP_DEBUG=1` — include `debug` object in responses (and echo `scoreDelta` when present).
-- `XP_SCORE_DELTA_CEILING` — maximum accepted `scoreDelta` per window (default `10_000`).
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `XP_DEBUG` | `0` | Include the `debug` object in responses (and echo `scoreDelta` when present). |
+| `XP_SCORE_DELTA_CEILING` | `10_000` | Maximum accepted `scoreDelta` per window. |
+| `XP_USE_SCORE` | `0` | Enable score-driven XP grants instead of time-driven awards. |
+| `XP_SCORE_TO_XP` | `1` | Conversion rate from accepted score delta to XP (per request). |
+| `XP_MAX_XP_PER_WINDOW` | `15` | Cap on XP converted from a single window when score mode is enabled. |
+| `XP_SCORE_RATE_LIMIT_PER_MIN` | `10_000` (falls back to `XP_SCORE_DELTA_CEILING`) | Per-user rolling minute limit for accepted score deltas. |
+| `XP_SCORE_BURST_MAX` | `10_000` (falls back to `XP_SCORE_RATE_LIMIT_PER_MIN`) | Maximum score delta accepted in a single window while respecting the rate limit. |
+| `XP_SCORE_MIN_EVENTS` | `4` | Minimum input events required before a score-bearing window is considered. |
+| `XP_SCORE_MIN_VIS_S` | `8` | Minimum foreground visibility (seconds) required for score-bearing windows. |
+| `XP_SCORE_DEBUG_TRACE` | `0` | Forces score-mode debug fields even when `XP_DEBUG` is unset. |
 
 #### Enabling score-driven awards
 Score-driven XP awards are currently experimental and disabled by default to support a safe rollout. Enable the mode by setting
@@ -92,6 +103,13 @@ When score-driven awards are enabled:
 If a window is submitted without a `scoreDelta` value (including zero) or the feature is disabled, XP awards continue to use the
 existing time-based path.
 
+#### Score mode safeguards
+
+Score-driven windows are additionally throttled and validated:
+
+- **Rate limit & burst control** – each account has a rolling per-minute allowance (`XP_SCORE_RATE_LIMIT_PER_MIN`) and a per-window burst ceiling (`XP_SCORE_BURST_MAX`). Requests that exceed either bucket are rejected before any XP is granted.
+- **Stricter minimum activity** – score windows must meet higher baselines before they are accepted: at least `XP_SCORE_MIN_EVENTS` interactions and `XP_SCORE_MIN_VIS_S` seconds of focused play.
+- **Expanded debug fields** – when `XP_DEBUG` or `XP_SCORE_DEBUG_TRACE` is enabled, responses include score-mode diagnostics such as the active rate limit, burst cap, visibility, and input thresholds to help tune client behavior.
 
 ## CI Status
 - GitHub Actions workflow: tests

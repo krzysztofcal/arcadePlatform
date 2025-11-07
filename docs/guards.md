@@ -22,6 +22,10 @@ npm run check:all
 - Run with `--fix` to automatically add the id to a single badge anchor or strip an accidental `id="xpBadge"` from the label.
 - Each run prints a short summary such as `Badge: OK (9 pages)` or highlights the first violation for quick triage.
 
+## Score-mode limits
+
+Score-driven awards add rolling rate and burst limits so that large score deltas are metered in addition to the existing visibility/input gates. The new thresholds stack on top of the legacy guards—windows must still satisfy the time-based activity checks before the score buckets are considered.
+
 ## Git hooks and CI
 
 The Husky pre-commit hook uses `lint-staged` so only changed HTML/JS files are checked locally. GitHub Actions runs `npm run check:all` as a required status along with the test suite (set `CI_NO_E2E=1` to skip Playwright in restricted environments).
