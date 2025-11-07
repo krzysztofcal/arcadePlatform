@@ -338,8 +338,10 @@ export async function handler(event) {
     if (scoreRateKeyK) {
       const minuteCap = Math.max(0, Math.min(scoreRateLimit, scoreBurstMax));
       const reserveDelta = normalizedAccepted;
+      let reserveSucceeded = false;
       try {
         const newMinuteTotalRaw = await store.incrBy(scoreRateKeyK, reserveDelta);
+        reserveSucceeded = true;
         const newMinuteTotal = Number(newMinuteTotalRaw ?? "0");
         const previousMinute = Number.isFinite(newMinuteTotal) ? newMinuteTotal - reserveDelta : 0;
         if (previousMinute <= 0 && typeof store.expire === "function") {
@@ -386,7 +388,7 @@ export async function handler(event) {
           return json(200, payload, origin);
         }
       } catch (_) {
-        if (reserveDelta > 0) {
+        if (reserveSucceeded && reserveDelta > 0) {
           try {
             await store.decrBy(scoreRateKeyK, reserveDelta);
           } catch (_) {
