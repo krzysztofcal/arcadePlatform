@@ -187,7 +187,6 @@
       state.activeMs = 0;
       state.visibilitySeconds = 0;
       state.inputEvents = 0;
-      state.scoreDelta = 0;
       return;
     }
     const _minInputsGate = Math.max(2, Math.ceil(CHUNK_MS / 4000));
@@ -196,7 +195,6 @@
       state.activeMs = 0;
       state.visibilitySeconds = 0;
       state.inputEvents = 0;
-      state.scoreDelta = 0;
       return;
     }
 
