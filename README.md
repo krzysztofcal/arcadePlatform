@@ -78,11 +78,11 @@ Run locally:
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `XP_DEBUG` | `0` | Include the `debug` object in responses (and echo `scoreDelta` when present). |
+| `XP_DEBUG` | `0` | Include the `debug` object in responses (and echo `scoreDelta` when present; see also `XP_SCORE_DEBUG_TRACE`). |
 | `XP_SCORE_DELTA_CEILING` | `10_000` | Maximum accepted `scoreDelta` per window. |
 | `XP_USE_SCORE` | `0` | Enable score-driven XP grants instead of time-driven awards. |
 | `XP_SCORE_TO_XP` | `1` | Conversion rate from accepted score delta to XP (per request). |
-| `XP_MAX_XP_PER_WINDOW` | `15` | Cap on XP converted from a single window when score mode is enabled. |
+| `XP_MAX_XP_PER_WINDOW` | `10` | Cap on XP converted from a single window when score mode is enabled. |
 | `XP_SCORE_RATE_LIMIT_PER_MIN` | `10_000` (falls back to `XP_SCORE_DELTA_CEILING`) | Per-user rolling minute limit for accepted score deltas. |
 | `XP_SCORE_BURST_MAX` | `10_000` (falls back to `XP_SCORE_RATE_LIMIT_PER_MIN`) | Maximum score delta accepted in a single window while respecting the rate limit. |
 | `XP_SCORE_MIN_EVENTS` | `4` | Minimum input events required before a score-bearing window is considered. |
@@ -98,7 +98,7 @@ When score-driven awards are enabled:
 - `XP_USE_SCORE` (default `0`) toggles whether `scoreDelta` is considered when calculating XP.
 - `XP_SCORE_TO_XP` (default `1`) controls the conversion rate: XP gained per request is `scoreDelta * XP_SCORE_TO_XP`, rounded and
   clamped. Negative values are ignored by the server-side guardrails.
-- `XP_MAX_XP_PER_WINDOW` (default `15`) caps the XP converted from a single window regardless of the incoming score.
+- `XP_MAX_XP_PER_WINDOW` (default `10`) caps the XP converted from a single window regardless of the incoming score.
 
 If a window is submitted without a `scoreDelta` value (including zero) or the feature is disabled, XP awards continue to use the
 existing time-based path.
