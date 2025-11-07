@@ -258,6 +258,8 @@ export async function handler(event) {
   let scoreRateKeyK;
   const scoreRateLimit = Number.isFinite(XP_SCORE_RATE_LIMIT_PER_MIN) ? XP_SCORE_RATE_LIMIT_PER_MIN : SCORE_DELTA_CEILING;
   const scoreBurstMax = Number.isFinite(XP_SCORE_BURST_MAX) ? XP_SCORE_BURST_MAX : SCORE_DELTA_CEILING;
+  let reservedScoreDelta = 0;
+  let reservedScoreKey = null;
 
   if (useScoreMode) {
     const usage = await getScoreRateUsage(userId, now);
@@ -301,16 +303,13 @@ export async function handler(event) {
 
     const safeAccepted = Math.min(proposed, effectiveAllowance);
     const boundedAccepted = Number.isFinite(safeAccepted) ? safeAccepted : 0;
-    scoreDeltaAccepted = boundedAccepted;
-    const safeXp = clamp(boundedAccepted * XP_SCORE_TO_XP, 0, XP_MAX_XP_PER_WINDOW);
+    const normalizedAccepted = Math.max(0, Math.floor(boundedAccepted));
+    scoreDeltaAccepted = normalizedAccepted;
+    const safeXp = clamp(normalizedAccepted * XP_SCORE_TO_XP, 0, XP_MAX_XP_PER_WINDOW);
     scoreXp = Math.round(safeXp);
     grantStep = Number.isFinite(scoreXp) ? Math.max(0, scoreXp) : 0;
-  }
 
-  if (useScoreMode) {
-    const safeAcceptedScore = Number.isFinite(scoreDeltaAccepted) ? Math.max(0, scoreDeltaAccepted) : 0;
-    const safeGrantStep = Number.isFinite(grantStep) ? Math.max(0, grantStep) : 0;
-    if (safeAcceptedScore <= 0 || safeGrantStep <= 0) {
+    if (normalizedAccepted <= 0 || grantStep <= 0) {
       const { current, lifetime } = await getDailyAndLifetime(dailyKeyK, totalKeyK);
       const reason = "no_score";
       const payload = {
@@ -326,7 +325,7 @@ export async function handler(event) {
           mode: "score",
           scoreDelta: debugScoreDelta,
           scoreDeltaRaw: debugScoreDelta,
-          scoreDeltaAccepted: safeAcceptedScore,
+          scoreDeltaAccepted: normalizedAccepted,
           scoreRateMinute,
           scoreRateLimit,
           scoreBurstMax,
@@ -335,8 +334,92 @@ export async function handler(event) {
       }
       return json(200, payload, origin);
     }
-    scoreDeltaAccepted = safeAcceptedScore;
-    grantStep = safeGrantStep;
+
+    if (scoreRateKeyK) {
+      const minuteCap = Math.max(0, Math.min(scoreRateLimit, scoreBurstMax));
+      const reserveDelta = normalizedAccepted;
+      try {
+        const newMinuteTotalRaw = await store.incrBy(scoreRateKeyK, reserveDelta);
+        const newMinuteTotal = Number(newMinuteTotalRaw ?? "0");
+        const previousMinute = Number.isFinite(newMinuteTotal) ? newMinuteTotal - reserveDelta : 0;
+        if (previousMinute <= 0 && typeof store.expire === "function") {
+          try {
+            await store.expire(scoreRateKeyK, SCORE_RATE_TTL_SEC);
+          } catch (_) {
+            // ignore ttl persistence issues
+          }
+        }
+        reservedScoreDelta = reserveDelta;
+        reservedScoreKey = scoreRateKeyK;
+        scoreRateMinute = Number.isFinite(newMinuteTotal) ? newMinuteTotal : scoreRateMinute;
+        if (Number.isFinite(newMinuteTotal) && newMinuteTotal > minuteCap) {
+          try {
+            await store.decrBy(scoreRateKeyK, reserveDelta);
+          } catch (_) {
+            // best effort rollback
+          }
+          reservedScoreDelta = 0;
+          reservedScoreKey = null;
+          scoreRateMinute = previousMinute;
+          const { current, lifetime } = await getDailyAndLifetime(dailyKeyK, totalKeyK);
+          const reason = "score_rate_limit";
+          const payload = {
+            ok: true,
+            awarded: 0,
+            totalToday: current,
+            cap: DAILY_CAP,
+            totalLifetime: lifetime,
+            reason,
+          };
+          if (DEBUG_ENABLED || XP_SCORE_DEBUG_TRACE) {
+            payload.debug = {
+              mode: "score",
+              scoreDelta: debugScoreDelta,
+              scoreDeltaRaw: debugScoreDelta,
+              scoreDeltaAccepted: normalizedAccepted,
+              scoreRateMinute: previousMinute,
+              scoreRateLimit,
+              scoreBurstMax,
+              reason,
+            };
+          }
+          return json(200, payload, origin);
+        }
+      } catch (_) {
+        if (reserveDelta > 0) {
+          try {
+            await store.decrBy(scoreRateKeyK, reserveDelta);
+          } catch (_) {
+            // ignore secondary rollback errors
+          }
+        }
+        reservedScoreDelta = 0;
+        reservedScoreKey = null;
+        const { current, lifetime } = await getDailyAndLifetime(dailyKeyK, totalKeyK);
+        const reason = "score_rate_limit";
+        const payload = {
+          ok: true,
+          awarded: 0,
+          totalToday: current,
+          cap: DAILY_CAP,
+          totalLifetime: lifetime,
+          reason,
+        };
+        if (DEBUG_ENABLED || XP_SCORE_DEBUG_TRACE) {
+          payload.debug = {
+            mode: "score",
+            scoreDelta: debugScoreDelta,
+            scoreDeltaRaw: debugScoreDelta,
+            scoreDeltaAccepted: normalizedAccepted,
+            scoreRateMinute,
+            scoreRateLimit,
+            scoreBurstMax,
+            reason,
+          };
+        }
+        return json(200, payload, origin);
+      }
+    }
   }
 
   // Atomic script: idempotency → cap → spacing (≥ CHUNK_MS since lastOk) → INCRBY → set lastOk(end) → set idem
@@ -426,17 +509,17 @@ export async function handler(event) {
   const status  = Number(res?.[2]) || 0; // 0=ok,1=idempotent,2=capped,3=too_soon,4=locked
   const lifetime = Number(res?.[3]) || 0;
 
-  if (useScoreMode && scoreRateKeyK && status === 0) {
-    const acceptedDelta = Number.isFinite(scoreDeltaAccepted)
-      ? Math.max(0, scoreDeltaAccepted)
-      : 0;
-    const safeMinute = Number.isFinite(scoreRateMinute) ? Math.max(0, scoreRateMinute) : 0;
-    const updatedMinute = safeMinute + acceptedDelta;
-    try {
-      await store.setex(scoreRateKeyK, SCORE_RATE_TTL_SEC, updatedMinute);
-      scoreRateMinute = updatedMinute;
-    } catch (_) {
-      // ignore persistence issues for debug only
+  if (useScoreMode && reservedScoreDelta > 0 && reservedScoreKey) {
+    if (status !== 0 || granted <= 0) {
+      try {
+        const newMinuteRaw = await store.decrBy(reservedScoreKey, reservedScoreDelta);
+        const newMinute = Number(newMinuteRaw ?? "0");
+        scoreRateMinute = Number.isFinite(newMinute) ? newMinute : scoreRateMinute;
+      } catch (_) {
+        // ignore rollback failures
+      }
+      reservedScoreDelta = 0;
+      reservedScoreKey = null;
     }
   }
 
