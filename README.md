@@ -40,6 +40,15 @@ A lightweight arcade hub (static HTML/CSS/JS) with a sample game (Łap koty — 
   - For validated windows the payload includes `{ now, chunkMs, pointsPerPeriod, minVisibility, minInputs, visibilitySeconds, inputEvents, status, reason? }`.
   - `debug.reason` can surface `insufficient-activity`, `too_soon`, `invalid_window`, and the existing server reasons: `capped`, `locked`, `idempotent`.
 
+### Message contract: postWindow
+- Payload fields:
+  - `visibilitySeconds`
+  - `chunkMs`
+  - `inputEvents`
+  - `windowEnd`
+  - `scoreDelta` (optional) – represents the incremental score earned during the reported window compared with the previous window.
+- The server currently accepts and validates `scoreDelta`. When `XP_DEBUG=1`, successful responses echo the value as `debug.scoreDelta`, but the field does not yet influence XP awards.
+
 ## Tests
 There are two layers of tests:
 
