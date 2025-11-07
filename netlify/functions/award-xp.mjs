@@ -1,23 +1,28 @@
 import crypto from "node:crypto";
 import { store } from "./_shared/store-upstash.mjs";
 
-const DAILY_CAP = Number(process.env.XP_DAILY_CAP ?? 600);          // set to 3000 in Netlify
-const DEFAULT_CHUNK_MS = Number(process.env.XP_CHUNK_MS ?? 10_000); // 10s default
-const DEFAULT_POINTS_PER_PERIOD = Number(process.env.XP_POINTS_PER_PERIOD ?? 10);
+const asNumber = (raw, fallback) => {
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+const DAILY_CAP = asNumber(process.env.XP_DAILY_CAP, 600);          // set to 3000 in Netlify
+const DEFAULT_CHUNK_MS = asNumber(process.env.XP_CHUNK_MS, 10_000); // 10s default
+const DEFAULT_POINTS_PER_PERIOD = asNumber(process.env.XP_POINTS_PER_PERIOD, 10);
 const XP_USE_SCORE = process.env.XP_USE_SCORE === "1";
-const XP_SCORE_TO_XP = Number(process.env.XP_SCORE_TO_XP ?? 1);
-const XP_MAX_XP_PER_WINDOW = Number(process.env.XP_MAX_XP_PER_WINDOW ?? DEFAULT_POINTS_PER_PERIOD);
-const SCORE_DELTA_CEILING = Number(process.env.XP_SCORE_DELTA_CEILING ?? 10_000);
-const XP_SCORE_RATE_LIMIT_PER_MIN = Number(process.env.XP_SCORE_RATE_LIMIT_PER_MIN ?? SCORE_DELTA_CEILING);
-const XP_SCORE_BURST_MAX = Number(process.env.XP_SCORE_BURST_MAX ?? XP_SCORE_RATE_LIMIT_PER_MIN);
-const XP_SCORE_MIN_EVENTS = Number(process.env.XP_SCORE_MIN_EVENTS ?? 4);
-const XP_SCORE_MIN_VIS_S = Number(process.env.XP_SCORE_MIN_VIS_S ?? 8);
+const XP_SCORE_TO_XP = asNumber(process.env.XP_SCORE_TO_XP, 1);
+const XP_MAX_XP_PER_WINDOW = asNumber(process.env.XP_MAX_XP_PER_WINDOW, DEFAULT_POINTS_PER_PERIOD);
+const SCORE_DELTA_CEILING = asNumber(process.env.XP_SCORE_DELTA_CEILING, 10_000);
+const XP_SCORE_RATE_LIMIT_PER_MIN = asNumber(process.env.XP_SCORE_RATE_LIMIT_PER_MIN, SCORE_DELTA_CEILING);
+const XP_SCORE_BURST_MAX = asNumber(process.env.XP_SCORE_BURST_MAX, XP_SCORE_RATE_LIMIT_PER_MIN);
+const XP_SCORE_MIN_EVENTS = Math.max(0, asNumber(process.env.XP_SCORE_MIN_EVENTS, 4));
+const XP_SCORE_MIN_VIS_S = Math.max(0, asNumber(process.env.XP_SCORE_MIN_VIS_S, 8));
 const XP_SCORE_DEBUG_TRACE = process.env.XP_SCORE_DEBUG_TRACE === "1";
 const DEBUG_ENABLED = process.env.XP_DEBUG === "1";
 const SCORE_RATE_TTL_SEC = 90;
-const DRIFT_MS = Number(process.env.XP_DRIFT_MS ?? 2_000);
-const BASE_MIN_VISIBILITY_S = Number(process.env.XP_MIN_VISIBILITY_S ?? 6);
-const BASE_MIN_INPUTS = Number(process.env.XP_MIN_INPUTS ?? 1);
+const DRIFT_MS = asNumber(process.env.XP_DRIFT_MS, 2_000);
+const BASE_MIN_VISIBILITY_S = asNumber(process.env.XP_MIN_VISIBILITY_S, 6);
+const BASE_MIN_INPUTS = asNumber(process.env.XP_MIN_INPUTS, 1);
 const KEY_NS = process.env.XP_KEY_NS ?? "kcswh:xp:v1";
 const CORS_ALLOW = (process.env.XP_CORS_ALLOW ?? "")
   .split(",")
@@ -151,8 +156,8 @@ export async function handler(event) {
   // Task 1: block XP when user is idle
   if (!body.statusOnly) {
     if (useScoreMode) {
-      const minScoreEvents = Math.max(0, XP_SCORE_MIN_EVENTS);
-      const minScoreVisibility = Math.max(0, XP_SCORE_MIN_VIS_S);
+      const minScoreEvents = XP_SCORE_MIN_EVENTS;
+      const minScoreVisibility = XP_SCORE_MIN_VIS_S;
       if ((visibilitySeconds ?? 0) < minScoreVisibility || (inputEvents ?? 0) < minScoreEvents) {
         const payload = { ok: true, awarded: 0, reason: "insufficient-activity" };
         if (DEBUG_ENABLED || XP_SCORE_DEBUG_TRACE) {
@@ -249,14 +254,16 @@ export async function handler(event) {
 
   if (useScoreMode) {
     const usage = await getScoreRateUsage(userId, now);
-    scoreRateMinute = usage.current;
+    scoreRateMinute = Number.isFinite(usage.current) ? usage.current : 0;
     scoreRateKeyK = usage.key;
 
     const remainingRate = scoreRateLimit - scoreRateMinute;
     const remainingBurst = scoreBurstMax - scoreRateMinute;
-    const allowance = Math.min(remainingRate, remainingBurst);
-    const effectiveAllowance = Math.max(0, allowance);
-    const proposed = Math.max(0, Number(scoreDeltaAccepted ?? 0));
+    const allowanceRaw = Math.min(remainingRate, remainingBurst);
+    const effectiveAllowance = Math.max(0, Number.isFinite(allowanceRaw) ? allowanceRaw : 0);
+    const proposed = Number.isFinite(scoreDeltaAccepted)
+      ? Math.max(0, scoreDeltaAccepted)
+      : Math.max(0, Number(scoreDeltaRaw ?? 0));
 
     if (effectiveAllowance <= 0) {
       scoreDeltaAccepted = 0;
@@ -298,8 +305,10 @@ export async function handler(event) {
     }
 
     const safeAccepted = Math.min(proposed, effectiveAllowance);
-    scoreDeltaAccepted = safeAccepted;
-    scoreXp = Math.round(clamp(safeAccepted * XP_SCORE_TO_XP, 0, XP_MAX_XP_PER_WINDOW));
+    const boundedAccepted = Number.isFinite(safeAccepted) ? safeAccepted : 0;
+    scoreDeltaAccepted = boundedAccepted;
+    const safeXp = clamp(boundedAccepted * XP_SCORE_TO_XP, 0, XP_MAX_XP_PER_WINDOW);
+    scoreXp = Math.round(safeXp);
     grantStep = Number.isFinite(scoreXp) ? scoreXp : 0;
   }
 
@@ -391,8 +400,11 @@ export async function handler(event) {
   const lifetime = Number(res?.[3]) || 0;
 
   if (useScoreMode && scoreRateKeyK && status === 0) {
-    const acceptedDelta = Math.max(0, Number(scoreDeltaAccepted ?? 0));
-    const updatedMinute = Math.max(0, Number(scoreRateMinute ?? 0)) + acceptedDelta;
+    const acceptedDelta = Number.isFinite(scoreDeltaAccepted)
+      ? Math.max(0, scoreDeltaAccepted)
+      : 0;
+    const safeMinute = Number.isFinite(scoreRateMinute) ? Math.max(0, scoreRateMinute) : 0;
+    const updatedMinute = safeMinute + acceptedDelta;
     try {
       await store.setex(scoreRateKeyK, SCORE_RATE_TTL_SEC, updatedMinute);
       scoreRateMinute = updatedMinute;
