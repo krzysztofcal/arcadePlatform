@@ -6,6 +6,8 @@
   const LEVEL_BASE_XP = 100;
   const LEVEL_MULTIPLIER = 1.1;
 
+  const MAX_SCORE_DELTA = 10_000;
+
   const state = {
     badge: null,
     labelEl: null,
@@ -294,9 +296,12 @@
   function addScore(delta) {
     const numeric = Number(delta);
     if (!Number.isFinite(numeric)) return;
-    const clamped = Math.max(0, numeric);
-    if (clamped === 0) return;
-    state.scoreDelta += clamped;
+    const rounded = Math.round(numeric);
+    if (rounded <= 0) return;
+    state.scoreDelta = Math.min(
+      MAX_SCORE_DELTA,
+      Math.max(0, Math.round(state.scoreDelta)) + Math.min(MAX_SCORE_DELTA, rounded)
+    );
   }
 
   function setTotals(total, cap) {
