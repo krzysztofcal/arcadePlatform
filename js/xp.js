@@ -24,6 +24,7 @@
     pending: null,
     lastResultTs: 0,
     snapshot: null,
+    scoreDelta: 0,
   };
 
   function resetActivityCounters(now) {
@@ -33,6 +34,7 @@
     state.inputEvents = 0;
     state.activeMs = 0;
     state.activeUntil = 0;
+    state.scoreDelta = 0;
   }
 
   function isDocumentVisible() {
@@ -183,6 +185,7 @@
       state.activeMs = 0;
       state.visibilitySeconds = 0;
       state.inputEvents = 0;
+      state.scoreDelta = 0;
       return;
     }
     const _minInputsGate = Math.max(2, Math.ceil(CHUNK_MS / 4000));
@@ -191,6 +194,7 @@
       state.activeMs = 0;
       state.visibilitySeconds = 0;
       state.inputEvents = 0;
+      state.scoreDelta = 0;
       return;
     }
 
@@ -203,6 +207,9 @@
       chunkMs: CHUNK_MS,
       pointsPerPeriod: 10
     };
+    if (state.scoreDelta > 0) {
+      payload.scoreDelta = state.scoreDelta;
+    }
     state.windowStart = now;
     state.activeMs = 0;
     state.visibilitySeconds = 0;
@@ -211,6 +218,7 @@
       .then((data) => handleResponse(data))
       .catch(handleError)
       .finally(() => { state.pending = null; });
+    state.scoreDelta = 0;
   }
 
   function tick() {
@@ -257,6 +265,7 @@
     state.visibilitySeconds = 0;
     state.inputEvents = 0;
     state.activeUntil = Date.now();
+    state.scoreDelta = 0;
   }
 
   function stopSession(options) {
@@ -274,11 +283,20 @@
     state.visibilitySeconds = 0;
     state.inputEvents = 0;
     state.activeUntil = 0;
+    state.scoreDelta = 0;
   }
 
   function nudge() {
     state.activeUntil = Date.now() + ACTIVE_WINDOW_MS;
     state.inputEvents += 1;
+  }
+
+  function addScore(delta) {
+    const numeric = Number(delta);
+    if (!Number.isFinite(numeric)) return;
+    const clamped = Math.max(0, numeric);
+    if (clamped === 0) return;
+    state.scoreDelta += clamped;
   }
 
   function setTotals(total, cap) {
@@ -379,6 +397,7 @@
     setTotals,
     getSnapshot,
     refreshStatus,
+    addScore,
   
     isRunning: function(){ try { return !!(typeof state !== 'undefined' ? state.running : (this && this.__running)); } catch(_) { return !!(this && this.__running); } },});
 })(typeof window !== "undefined" ? window : this, typeof document !== "undefined" ? document : undefined);
