@@ -37,17 +37,27 @@ A lightweight arcade hub (static HTML/CSS/JS) with a sample game (Łap koty — 
 - Set `XP_DEBUG=1` (environment variable for the Netlify function or via `npm run serve:xp`) to receive a `debug` object alongside successful responses.
   - Status-only probes get `debug: { mode: "statusOnly" }`.
   - For early idle rejections the debug payload includes `{ chunkMs, minInputsGate, visibilitySeconds, inputEvents, reason }`.
-  - For validated windows the payload includes `{ now, chunkMs, pointsPerPeriod, minVisibility, minInputs, visibilitySeconds, inputEvents, status, reason? }`.
-  - `debug.reason` can surface `insufficient-activity`, `too_soon`, `invalid_window`, and the existing server reasons: `capped`, `locked`, `idempotent`.
+  - For validated windows the payload includes `{ now, chunkMs, pointsPerPeriod, minVisibility, minInputs, visibilitySeconds, inputEvents, status, reason?, scoreDelta? }`.
+  - When `XP_DEBUG=1`, `scoreDelta` is echoed in **statusOnly**, **insufficient-activity**, and **validated** responses. `debug.reason` can surface `insufficient-activity`, `too_soon`, `invalid_window`, and the existing server reasons: `capped`, `locked`, `idempotent`.
 
-### Message contract: postWindow
-- Payload fields:
-  - `visibilitySeconds`
-  - `chunkMs`
-  - `inputEvents`
-  - `windowEnd`
-  - `scoreDelta` (optional) – represents the incremental score earned during the reported window compared with the previous window.
-- The server currently accepts and validates `scoreDelta`. When `XP_DEBUG=1`, successful responses echo the value as `debug.scoreDelta`, but the field does not yet influence XP awards.
+### Message contract: `postWindow`
+Client → server payload (subset; required unless marked optional):
+  - `gameId` (string)
+  - `windowStart` (ms since epoch)
+  - `windowEnd` (ms since epoch)
+  - `visibilitySeconds` (number)
+  - `inputEvents` (integer)
+  - `chunkMs` (integer)
+  - `pointsPerPeriod` (integer)
+  - `scoreDelta` (integer, optional) — **incremental** score earned since the last sent window. The client **accumulates** during play and **resets after a send**; omitted when 0.
+
+Server behavior (P0.5):
+  - `scoreDelta` is **accepted and validated** but **ignored for awarding**.
+  - Validation clamps to `[0, SCORE_DELTA_CEILING]` (env; default `10_000`). With `XP_DEBUG=1`, responses may include `debug.scoreDelta`.
+  - Backwards compatible: older clients simply omit `scoreDelta`; older servers ignore the unknown field.
+
+Client hooks:
+  - `window.XP.addScore(delta)` — accepts a number; internally rounded and accumulated (non-negative). The sample “Cats” game calls `addScore(1)` on each catch.
 
 ## Tests
 There are two layers of tests:
@@ -63,6 +73,11 @@ Run locally:
 - `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm install` if you rely on a system Chromium.
 - `npm run test` (set `CI_NO_E2E=1` to skip the Playwright suite when browsers aren’t available).
 - `PLAYWRIGHT=1 npm test` runs the full Playwright end-to-end suite, including the XP idle coverage.
+
+### Configuration
+- `XP_DEBUG=1` — include `debug` object in responses (and echo `scoreDelta` when present).
+- `XP_SCORE_DELTA_CEILING` — maximum accepted `scoreDelta` per window (default `10_000`).
+
 
 ## CI Status
 - GitHub Actions workflow: tests
