@@ -84,6 +84,20 @@ async function getScoreRateUsage(userId, t = Date.now()) {
   }
 }
 
+async function getDailyAndLifetime(dailyKey, totalKey) {
+  try {
+    const [currentStr, lifetimeStr] = await Promise.all([
+      store.get(dailyKey),
+      store.get(totalKey),
+    ]);
+    const current = Number(currentStr ?? "0") || 0;
+    const lifetime = Number(lifetimeStr ?? "0") || 0;
+    return { current, lifetime };
+  } catch {
+    return { current: 0, lifetime: 0 };
+  }
+}
+
 const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
 
 export async function handler(event) {
@@ -109,7 +123,7 @@ export async function handler(event) {
   const scoreDeltaRaw = Number.isFinite(requestedScoreDelta)
     ? clamp(requestedScoreDelta, 0, SCORE_DELTA_CEILING)
     : undefined;
-  const useScoreMode = XP_USE_SCORE && Number.isFinite(scoreDeltaRaw);
+  const useScoreMode = XP_USE_SCORE && Number.isFinite(scoreDeltaRaw) && scoreDeltaRaw > 0;
   let scoreDeltaAccepted = useScoreMode ? scoreDeltaRaw : undefined;
   const rawScoreXp = useScoreMode
     ? Math.round(clamp(scoreDeltaRaw * XP_SCORE_TO_XP, 0, XP_MAX_XP_PER_WINDOW))
@@ -125,32 +139,25 @@ export async function handler(event) {
 
   // EARLY statusOnly (no window validation)
   if (body.statusOnly) {
-    try {
-      const today = dayKey();
-      const dailyKeyK = keyDaily(userId, today);
-      const totalKeyK = keyTotal(userId);
-      const currentStr = await store.get(dailyKeyK);
-      const lifeStr = await store.get(totalKeyK);
-      const current = Number(currentStr || '0') || 0;
-      const lifetime = Number(lifeStr || '0') || 0;
-      const payload = { ok: true, awarded: 0, totalToday: current, cap: DAILY_CAP, totalLifetime: lifetime };
-      if (DEBUG_ENABLED || XP_SCORE_DEBUG_TRACE) {
-        payload.debug = {
-          mode: 'statusOnly',
-          scoreDelta: debugScoreDelta,
-        };
-        if (useScoreMode) {
-          payload.debug.scoreDeltaRaw = debugScoreDelta;
-          payload.debug.scoreDeltaAccepted = scoreDeltaAccepted ?? null;
-          payload.debug.scoreRateMinute = null;
-          payload.debug.scoreRateLimit = XP_SCORE_RATE_LIMIT_PER_MIN;
-          payload.debug.scoreBurstMax = XP_SCORE_BURST_MAX;
-        }
+    const today = dayKey();
+    const dailyKeyK = keyDaily(userId, today);
+    const totalKeyK = keyTotal(userId);
+    const { current, lifetime } = await getDailyAndLifetime(dailyKeyK, totalKeyK);
+    const payload = { ok: true, awarded: 0, totalToday: current, cap: DAILY_CAP, totalLifetime: lifetime };
+    if (DEBUG_ENABLED || XP_SCORE_DEBUG_TRACE) {
+      payload.debug = {
+        mode: "statusOnly",
+        scoreDelta: debugScoreDelta,
+      };
+      if (useScoreMode) {
+        payload.debug.scoreDeltaRaw = debugScoreDelta;
+        payload.debug.scoreDeltaAccepted = scoreDeltaAccepted ?? null;
+        payload.debug.scoreRateMinute = null;
+        payload.debug.scoreRateLimit = XP_SCORE_RATE_LIMIT_PER_MIN;
+        payload.debug.scoreBurstMax = XP_SCORE_BURST_MAX;
       }
-      return json(200, payload, origin);
-    } catch (_) {
-      return json(200, { ok: true, awarded: 0, totalToday: 0, cap: DAILY_CAP, totalLifetime: 0 }, origin);
     }
+    return json(200, payload, origin);
   }
 
   // Task 1: block XP when user is idle
@@ -268,19 +275,7 @@ export async function handler(event) {
     if (effectiveAllowance <= 0) {
       scoreDeltaAccepted = 0;
       scoreXp = 0;
-      let current = 0;
-      let lifetime = 0;
-      try {
-        const [currentStr, lifetimeStr] = await Promise.all([
-          store.get(dailyKeyK),
-          store.get(totalKeyK),
-        ]);
-        current = Number(currentStr ?? '0') || 0;
-        lifetime = Number(lifetimeStr ?? '0') || 0;
-      } catch (_) {
-        current = 0;
-        lifetime = 0;
-      }
+      const { current, lifetime } = await getDailyAndLifetime(dailyKeyK, totalKeyK);
       const payload = {
         ok: true,
         awarded: 0,
@@ -309,7 +304,39 @@ export async function handler(event) {
     scoreDeltaAccepted = boundedAccepted;
     const safeXp = clamp(boundedAccepted * XP_SCORE_TO_XP, 0, XP_MAX_XP_PER_WINDOW);
     scoreXp = Math.round(safeXp);
-    grantStep = Number.isFinite(scoreXp) ? scoreXp : 0;
+    grantStep = Number.isFinite(scoreXp) ? Math.max(0, scoreXp) : 0;
+  }
+
+  if (useScoreMode) {
+    const safeAcceptedScore = Number.isFinite(scoreDeltaAccepted) ? Math.max(0, scoreDeltaAccepted) : 0;
+    const safeGrantStep = Number.isFinite(grantStep) ? Math.max(0, grantStep) : 0;
+    if (safeAcceptedScore <= 0 || safeGrantStep <= 0) {
+      const { current, lifetime } = await getDailyAndLifetime(dailyKeyK, totalKeyK);
+      const reason = "no_score";
+      const payload = {
+        ok: true,
+        awarded: 0,
+        totalToday: current,
+        cap: DAILY_CAP,
+        totalLifetime: lifetime,
+        reason,
+      };
+      if (DEBUG_ENABLED || XP_SCORE_DEBUG_TRACE) {
+        payload.debug = {
+          mode: "score",
+          scoreDelta: debugScoreDelta,
+          scoreDeltaRaw: debugScoreDelta,
+          scoreDeltaAccepted: safeAcceptedScore,
+          scoreRateMinute,
+          scoreRateLimit,
+          scoreBurstMax,
+          reason,
+        };
+      }
+      return json(200, payload, origin);
+    }
+    scoreDeltaAccepted = safeAcceptedScore;
+    grantStep = safeGrantStep;
   }
 
   // Atomic script: idempotency → cap → spacing (≥ CHUNK_MS since lastOk) → INCRBY → set lastOk(end) → set idem
