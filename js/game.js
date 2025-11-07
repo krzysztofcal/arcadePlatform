@@ -164,7 +164,8 @@
       const c=cats[i]; c.y+=c.vy;
       const withinX=(c.x+c.r)>=paddle.x && (c.x-c.r)<=paddle.x+paddle.w;
       const withinY=(c.y+c.r)>=(H-Y) && (c.y-c.r)<=(H-Y+paddle.h);
-      if(withinX && withinY){ score+=1; msLeft+=1000; timeLeftEl.classList.remove("pulse"); void timeLeftEl.offsetWidth; timeLeftEl.classList.add("pulse");
+      if(withinX && withinY){ score+=1; if (window.XP && typeof window.XP.addScore === 'function') { try { window.XP.addScore(1); } catch (_){} }
+        msLeft+=1000; timeLeftEl.classList.remove("pulse"); void timeLeftEl.offsetWidth; timeLeftEl.classList.add("pulse");
         pushEffect(c.x, Math.max(20,c.y-8), "+1", "#facc15"); audio.meow(); cats.splice(i,1); continue; }
       if(c.y-c.r>H){ msLeft=Math.max(0, msLeft-1000); timeLeftEl.classList.remove("pulse"); void timeLeftEl.offsetWidth; timeLeftEl.classList.add("pulse");
           pushEffect(c.x, H-30, "-1", "#f87171"); audio.hiss(); cats.splice(i,1); if(msLeft<=0){ endGame(); return; } }
