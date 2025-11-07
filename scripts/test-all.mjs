@@ -12,6 +12,9 @@ const has = s => !!(process.env[s] && process.env[s] !== "0");
 
 run("node", ["scripts/syntax-check.mjs"], "syntax");
 
+run("node", ["tests/xp-award-score.test.mjs"], "xp-award-score");
+run("node", ["tests/xp-award-score-rate.test.mjs"], "xp-award-score-rate");
+
 try { run("npm", ["run", "-s", "lint:games"], "unit"); } catch { /* optional */ }
 
 if (has("CLI")) {
