@@ -27,6 +27,7 @@
     lastResultTs: 0,
     snapshot: null,
     scoreDelta: 0,
+    scoreDeltaRemainder: 0,
   };
 
   function resetActivityCounters(now) {
@@ -37,6 +38,7 @@
     state.activeMs = 0;
     state.activeUntil = 0;
     state.scoreDelta = 0;
+    state.scoreDeltaRemainder = 0;
   }
 
   function isDocumentVisible() {
@@ -266,6 +268,7 @@
     state.inputEvents = 0;
     state.activeUntil = Date.now();
     state.scoreDelta = 0;
+    state.scoreDeltaRemainder = 0;
   }
 
   function stopSession(options) {
@@ -284,6 +287,7 @@
     state.inputEvents = 0;
     state.activeUntil = 0;
     state.scoreDelta = 0;
+    state.scoreDeltaRemainder = 0;
   }
 
   function nudge() {
@@ -294,12 +298,33 @@
   function addScore(delta) {
     const numeric = Number(delta);
     if (!Number.isFinite(numeric)) return;
-    const rounded = Math.round(numeric);
-    if (rounded <= 0) return;
-    state.scoreDelta = Math.min(
-      MAX_SCORE_DELTA,
-      Math.max(0, Math.round(state.scoreDelta)) + Math.min(MAX_SCORE_DELTA, rounded)
-    );
+    if (numeric <= 0) return;
+
+    if (!Number.isFinite(state.scoreDeltaRemainder)) {
+      state.scoreDeltaRemainder = 0;
+    }
+
+    state.scoreDeltaRemainder += numeric;
+    if (state.scoreDeltaRemainder < 1) {
+      return;
+    }
+
+    const whole = Math.floor(state.scoreDeltaRemainder);
+    if (whole <= 0) {
+      state.scoreDeltaRemainder = Math.max(0, state.scoreDeltaRemainder);
+      return;
+    }
+
+    const current = Math.max(0, Math.round(state.scoreDelta));
+    const capacity = Math.max(0, MAX_SCORE_DELTA - current);
+    if (capacity <= 0) {
+      state.scoreDeltaRemainder = Math.max(0, state.scoreDeltaRemainder);
+      return;
+    }
+
+    const toAdd = Math.min(whole, capacity);
+    state.scoreDelta = current + toAdd;
+    state.scoreDeltaRemainder = Math.max(0, state.scoreDeltaRemainder - toAdd);
   }
 
   function setTotals(total, cap) {
