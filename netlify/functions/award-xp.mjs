@@ -4,6 +4,9 @@ import { store } from "./_shared/store-upstash.mjs";
 const DAILY_CAP = Number(process.env.XP_DAILY_CAP ?? 600);          // set to 3000 in Netlify
 const DEFAULT_CHUNK_MS = Number(process.env.XP_CHUNK_MS ?? 10_000); // 10s default
 const DEFAULT_POINTS_PER_PERIOD = Number(process.env.XP_POINTS_PER_PERIOD ?? 10);
+const XP_USE_SCORE = process.env.XP_USE_SCORE === "1";
+const XP_SCORE_TO_XP = Number(process.env.XP_SCORE_TO_XP ?? 1);
+const XP_MAX_XP_PER_WINDOW = Number(process.env.XP_MAX_XP_PER_WINDOW ?? DEFAULT_POINTS_PER_PERIOD);
 const DRIFT_MS = Number(process.env.XP_DRIFT_MS ?? 2_000);
 const BASE_MIN_VISIBILITY_S = Number(process.env.XP_MIN_VISIBILITY_S ?? 6);
 const BASE_MIN_INPUTS = Number(process.env.XP_MIN_INPUTS ?? 1);
@@ -72,6 +75,11 @@ export async function handler(event) {
   const scoreDelta = Number.isFinite(requestedScoreDelta)
     ? clamp(requestedScoreDelta, 0, SCORE_DELTA_CEILING)
     : undefined;
+  const useScoreMode = XP_USE_SCORE && Number.isFinite(scoreDelta);
+  const scoreXp = useScoreMode
+    ? Math.round(clamp(scoreDelta * XP_SCORE_TO_XP, 0, XP_MAX_XP_PER_WINDOW))
+    : undefined;
+  const debugScoreDelta = Number.isFinite(scoreDelta) ? scoreDelta : null;
   if (!userId || (!body.statusOnly && !sessionId)) {
     return json(400, { error: "missing_fields" }, origin);
   }
@@ -90,7 +98,7 @@ export async function handler(event) {
       const current = Number(currentStr || '0') || 0;
       const lifetime = Number(lifeStr || '0') || 0;
       const payload = { ok: true, awarded: 0, totalToday: current, cap: DAILY_CAP, totalLifetime: lifetime };
-      if (process.env.XP_DEBUG === '1') payload.debug = { mode: 'statusOnly', scoreDelta };
+      if (process.env.XP_DEBUG === '1') payload.debug = { mode: 'statusOnly', scoreDelta: debugScoreDelta };
       return json(200, payload, origin);
     } catch (_) {
       return json(200, { ok: true, awarded: 0, totalToday: 0, cap: DAILY_CAP, totalLifetime: 0 }, origin);
@@ -107,14 +115,17 @@ export async function handler(event) {
           Number.isFinite(inputEvents) && inputEvents >= _minInputsGate)) {
       const payload = { ok: true, awarded: 0, reason: "insufficient-activity" };
       if (process.env.XP_DEBUG === "1") {
+        const debugMode = useScoreMode ? "score" : "time";
         payload.debug = {
           chunkMs: _chunk,
           minInputsGate: _minInputsGate,
           visibilitySeconds,
           inputEvents,
           reason: "insufficient-activity",
-          scoreDelta,
+          scoreDelta: debugScoreDelta,
+          mode: debugMode,
         };
+        if (useScoreMode) payload.debug.scoreXp = scoreXp;
       }
       return json(200, payload, origin);
     }
@@ -133,6 +144,7 @@ export async function handler(event) {
   const pointsPerPeriod = Number.isFinite(requestedStep)
     ? clamp(requestedStep, 1, DEFAULT_POINTS_PER_PERIOD)
     : DEFAULT_POINTS_PER_PERIOD;
+  const grantStep = Number.isFinite(scoreXp) ? scoreXp : pointsPerPeriod;
   const minVisibility = Math.max(BASE_MIN_VISIBILITY_S, Math.round((chunkMs / 1000) * 0.6));
   const minInputs = Math.max(BASE_MIN_INPUTS, Math.ceil(chunkMs / 4000));
 
@@ -227,7 +239,7 @@ export async function handler(event) {
     [
       String(now),
       String(chunkMs),
-      String(pointsPerPeriod),
+      String(grantStep),
       String(DAILY_CAP),
       String(IDEM_TTL_SEC),
       String(windowEnd),
@@ -243,17 +255,23 @@ export async function handler(event) {
 
   const payload = { ok: true, awarded: granted, totalToday: total, cap: DAILY_CAP, totalLifetime: lifetime };
   if (process.env.XP_DEBUG === "1") {
+    const debugMode = Number.isFinite(scoreXp) ? "score" : "time";
     payload.debug = {
       now,
       chunkMs,
       pointsPerPeriod,
+      grantStep,
       minVisibility,
       minInputs,
       visibilitySeconds,
       inputEvents,
       status,
-      scoreDelta,
+      scoreDelta: debugScoreDelta,
+      mode: debugMode,
     };
+    if (Number.isFinite(scoreXp)) {
+      payload.debug.scoreXp = scoreXp;
+    }
   }
   const statusReasons = {
     1: "idempotent",
