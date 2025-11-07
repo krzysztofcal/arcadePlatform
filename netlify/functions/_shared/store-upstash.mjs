@@ -31,23 +31,32 @@ function createMemoryStore() {
     });
   }
 
+  function remainingTtlMs(entry) {
+    if (!entry || entry.expiry == null) return null;
+    return Math.max(0, entry.expiry - Date.now());
+  }
+
   return {
     async get(key) { return getValue(key); },
     async setex(key, seconds, value) { setValue(key, value, seconds * 1000); return "OK"; },
     async incrBy(key, delta) {
-      const current = Number(getValue(key) ?? "0") + Number(delta);
-      setValue(key, current, null);
+      const entry = sweep(key);
+      const prev = Number(entry?.value ?? "0");
+      const current = prev + Number(delta);
+      setValue(key, current, remainingTtlMs(entry));
       return current;
     },
     async decrBy(key, delta) {
-      const current = Number(getValue(key) ?? "0") - Number(delta);
-      setValue(key, current, null);
+      const entry = sweep(key);
+      const prev = Number(entry?.value ?? "0");
+      const current = prev - Number(delta);
+      setValue(key, current, remainingTtlMs(entry));
       return current;
     },
     async expire(key, seconds) {
-      const entry = getValue(key);
-      if (entry == null) return 0;
-      setValue(key, entry, seconds * 1000);
+      const entry = sweep(key);
+      if (!entry) return 0;
+      setValue(key, entry.value, seconds * 1000);
       return 1;
     },
     async ttl(key) {
