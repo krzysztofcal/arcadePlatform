@@ -191,12 +191,15 @@ test.beforeEach(async ({ page }) => {
 
 test.describe('XP score awards debug modes', () => {
   test('score mode includes debug scoreXp and gating blocks insufficient input', async ({ page }) => {
+    const info = test.info();
+    const keyNamespace = `e2e:score:${info.title.replace(/\s+/g, '-')}:${Date.now()}:${Math.random().toString(36).slice(2)}`;
     const xpScoreToXp = 3;
     const handler = await loadAwardHandler({
       XP_USE_SCORE: '1',
       XP_DEBUG: '1',
       XP_SCORE_TO_XP: String(xpScoreToXp),
       XP_MAX_XP_PER_WINDOW: '100',
+      XP_KEY_NS: keyNamespace,
     });
 
     await setupPostWindowHandler(page, handler, { userId: 'xp-score-mode-user' });
@@ -229,9 +232,12 @@ test.describe('XP score awards debug modes', () => {
   });
 
   test('time mode reports debug mode time and still blocks insufficient activity', async ({ page }) => {
+    const info = test.info();
+    const keyNamespace = `e2e:score:${info.title.replace(/\s+/g, '-')}:${Date.now()}:${Math.random().toString(36).slice(2)}`;
     const handler = await loadAwardHandler({
       XP_USE_SCORE: '0',
       XP_DEBUG: '1',
+      XP_KEY_NS: keyNamespace,
     });
 
     await setupPostWindowHandler(page, handler, { userId: 'xp-time-mode-user' });
