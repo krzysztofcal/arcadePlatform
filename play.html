@@ -29,7 +29,6 @@
     }
   </style>
   <script src="/js/xpClient.js" defer></script>
-  <script src="/js/xp.js" defer></script>
 </head>
 <body>
   <header class="play-header">
@@ -176,6 +175,9 @@
   }, { passive: true });
 </script>
 
+<script src="/js/xp.js"></script>
+<script src="/js/xp-game-hook.js" defer></script>
+<script>GameXpBridge.auto();</script>
 </body>
 </html>
 

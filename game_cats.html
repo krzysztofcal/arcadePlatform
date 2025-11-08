@@ -27,7 +27,6 @@
   <script src="js/i18n.js" defer></script>
   <script src="js/topbar.js" defer></script>
   <script src="js/xpClient.js" defer></script>
-  <script src="js/xp.js" defer></script>
 </head>
 <body data-game-slug="cats">
   <div class="topbar">
@@ -179,6 +178,9 @@
       <button type="button" class="lang-btn" data-lang="en" aria-pressed="false">EN</button>
     </div>
   </footer>
+  <script src="/js/xp.js"></script>
+  <script src="/js/xp-game-hook.js" defer></script>
+  <script>GameXpBridge.auto();</script>
 </body>
 </html>
 

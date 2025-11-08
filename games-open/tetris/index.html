@@ -29,7 +29,6 @@
     <script src="../../js/i18n.js" defer></script>
     <script src="../../js/topbar.js" defer></script>
     <script src="../../js/xpClient.js" defer></script>
-    <script src="../../js/xp.js" defer></script>
   </head>
   <body data-game-slug="tetris" data-game-id="tetris">
     <div class="topbar">
@@ -192,5 +191,8 @@
         }
       })();
     </script>
-  </body>
+    <script src="../../js/xp.js"></script>
+    <script src="../../js/xp-game-hook.js" defer></script>
+    <script>GameXpBridge.auto();</script>
+</body>
 </html>
