@@ -28,7 +28,7 @@
   <script src="js/topbar.js" defer></script>
   <script src="js/xpClient.js" defer></script>
 </head>
-<body data-game-slug="cats">
+<body data-game-slug="cats" data-game-id="cats">
   <div class="topbar">
     <div class="topbar-left">
       <button class="hamburger" id="sbToggle" aria-label="Toggle navigation" aria-expanded="false">
@@ -178,9 +178,9 @@
       <button type="button" class="lang-btn" data-lang="en" aria-pressed="false">EN</button>
     </div>
   </footer>
-  <script src="/js/xp.js"></script>
+  <script src="/js/xp.js" defer></script>
   <script src="/js/xp-game-hook.js" defer></script>
-  <script>GameXpBridge.auto();</script>
+  <script>(function start(){if(window.GameXpBridge&&typeof window.GameXpBridge.auto==='function'){window.GameXpBridge.auto();}else{addEventListener('DOMContentLoaded',start,{once:true});}})();</script>
 </body>
 </html>
 

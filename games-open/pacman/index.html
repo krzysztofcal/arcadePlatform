@@ -184,8 +184,8 @@
         }
       })();
     </script>
-    <script src="../../js/xp.js"></script>
+    <script src="../../js/xp.js" defer></script>
     <script src="../../js/xp-game-hook.js" defer></script>
-    <script>GameXpBridge.auto();</script>
+    <script>(function start(){if(window.GameXpBridge&&typeof window.GameXpBridge.auto==='function'){window.GameXpBridge.auto();}else{addEventListener('DOMContentLoaded',start,{once:true});}})();</script>
 </body>
 </html>

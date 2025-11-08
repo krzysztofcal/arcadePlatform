@@ -82,9 +82,9 @@ function ensureSnippet(content, absPath, relPath) {
   const hookSrc = relativeAssetPath(dir, hookAsset);
   const leadingNewline = before.endsWith("\n") ? "" : "\n";
   const snippet =
-    `${leadingNewline}${indent}<script src="${xpSrc}"></script>` +
+    `${leadingNewline}${indent}<script src="${xpSrc}" defer></script>` +
     `\n${indent}<script src="${hookSrc}" defer></script>` +
-    `\n${indent}<script>GameXpBridge.auto();</script>\n`;
+    `\n${indent}<script>(function start(){if(window.GameXpBridge&&typeof window.GameXpBridge.auto==='function'){window.GameXpBridge.auto();}else{addEventListener('DOMContentLoaded',start,{once:true});}})();</script>\n`;
   return before + snippet + after;
 }
 
