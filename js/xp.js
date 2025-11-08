@@ -137,6 +137,14 @@
     setBadgeLoading(false);
   }
 
+  function refreshBadgeFromStorage() {
+    attachBadge();
+    if (!state.badge) return;
+    state.snapshot = null;
+    loadCache();
+    updateBadge();
+  }
+
   function bumpBadge() {
     if (!state.badge) return;
     state.badge.classList.remove("xp-badge--bump");
@@ -149,8 +157,6 @@
     state.badge = document.getElementById("xpBadge");
     if (!state.badge) return;
     ensureBadgeElements();
-    loadCache();
-    updateBadge();
     state.badge.addEventListener("animationend", (event) => {
       if (event.animationName === "xp-badge-bump") {
         state.badge.classList.remove("xp-badge--bump");
@@ -380,25 +386,49 @@
   }
 
   function init() {
-  if (typeof document !== "undefined") {
-    if (document.readyState === "loading") {
-      document.addEventListener("DOMContentLoaded", attachBadge, { once: true });
-    } else {
-      attachBadge();
-    }
-    document.addEventListener("visibilitychange", () => {
-      const now = Date.now();
-      state.lastTick = now;
-      if (!isDocumentVisible()) {
-        resetActivityCounters(now);
+    if (typeof document !== "undefined") {
+      const handleDomReady = () => { try { refreshBadgeFromStorage(); } catch (_) {} };
+      if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", handleDomReady, { once: true });
+      } else {
+        handleDomReady();
       }
-    }, { passive: true });
-  }
+      document.addEventListener("visibilitychange", () => {
+        const now = Date.now();
+        state.lastTick = now;
+        if (!isDocumentVisible()) {
+          resetActivityCounters(now);
+        } else {
+          refreshBadgeFromStorage();
+        }
+      }, { passive: true });
+    }
 
-  if (typeof window !== "undefined") {
-    ensureTimer();
+    if (typeof window !== "undefined") {
+      ensureTimer();
 
-    // Hardened activity bridge (same-origin, visible doc, requires userGesture:true, throttled)
+      window.addEventListener("pageshow", (event) => {
+        try {
+          if (event && event.persisted) {
+            refreshBadgeFromStorage();
+          }
+        } catch (_) {}
+      }, { passive: true });
+
+      window.addEventListener("storage", (event) => {
+        try {
+          if (!event) return;
+          if (event.storageArea && event.storageArea !== window.localStorage) return;
+          if (event.key && event.key !== CACHE_KEY) return;
+          refreshBadgeFromStorage();
+        } catch (_) {}
+      });
+
+      window.addEventListener("xp:updated", () => {
+        try { refreshBadgeFromStorage(); } catch (_) {}
+      });
+
+      // Hardened activity bridge (same-origin, visible doc, requires userGesture:true, throttled)
     (function(){
       let __lastNudgeTs = 0;
       window.addEventListener("message", (event) => {
