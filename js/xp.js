@@ -38,6 +38,18 @@
   const RUNTIME_CACHE_KEY = "kcswh:xp:regen";
   const FLUSH_ENDPOINT = (typeof window !== "undefined" && window && typeof window.XP_FLUSH_ENDPOINT === "string") ? window.XP_FLUSH_ENDPOINT : null;
 
+  function isGameHost() {
+    try {
+      if (typeof window !== "undefined" && window && window.XP_IS_GAME_HOST) return true;
+      if (typeof document !== "undefined" && document) {
+        const body = document.body;
+        if (body && typeof body.hasAttribute === "function" && body.hasAttribute("data-game-host")) return true;
+        if (typeof document.getElementById === "function" && document.getElementById("gameFrame")) return true;
+      }
+    } catch (_) {}
+    return false;
+  }
+
   const state = {
     badge: null,
     labelEl: null,
@@ -422,6 +434,9 @@
       }
       return;
     }
+    if (!isGameHost()) {
+      return;
+    }
     const visible = isDocumentVisible();
     if (!visible) {
       resetActivityCounters(now);
@@ -464,6 +479,7 @@
   }
 
   function startSession(gameId) {
+    if (!isGameHost()) return;
     attachBadge();
     hydrateRuntimeState();
     ensureTimer();
@@ -501,6 +517,8 @@
   }
 
   function nudge() {
+    if (!state.running) return;
+    if (!isGameHost()) return;
     state.activeUntil = Date.now() + ACTIVE_WINDOW_MS;
     state.inputEvents += 1;
   }
@@ -738,7 +756,15 @@
   function init() {
     hydrateRuntimeState();
     if (typeof document !== "undefined") {
-      const handleDomReady = () => { try { hydrateRuntimeState(); refreshBadgeFromStorage(); } catch (_) {} };
+      const handleDomReady = () => {
+        try {
+          hydrateRuntimeState();
+          refreshBadgeFromStorage();
+          if (!isGameHost() && state.running === true) {
+            stopSession({ flush: true });
+          }
+        } catch (_) {}
+      };
       if (document.readyState === "loading") {
         document.addEventListener("DOMContentLoaded", handleDomReady, { once: true });
       } else {
@@ -801,6 +827,8 @@
           if (typeof document !== "undefined" && document.hidden) return;
           if (event.origin && typeof location !== "undefined" && event.origin !== location.origin) return;
           if (event.data.type !== "kcswh:activity") return;
+          if (!state.running) return;
+          if (!isGameHost()) return;
           if (event.data.userGesture !== true) return;
           if (typeof navigator !== "undefined" && navigator.userActivation && navigator.userActivation.isActive !== true) return;
 
@@ -843,6 +871,8 @@
           window.addEventListener(evt, (ev) => {
             try {
               if (!isRealUserGesture(ev)) return;
+              if (!state.running) return;
+              if (!isGameHost()) return;
               recordTrustedInput();
               if (typeof nudge === "function") nudge();
             } catch(_) {}
