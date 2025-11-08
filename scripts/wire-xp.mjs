@@ -84,7 +84,7 @@ function ensureSnippet(content, absPath, relPath) {
   const snippet =
     `${leadingNewline}${indent}<script src="${xpSrc}" defer></script>` +
     `\n${indent}<script src="${hookSrc}" defer></script>` +
-    `\n${indent}<script>(function start(){if(window.GameXpBridge&&typeof window.GameXpBridge.auto==='function'){window.GameXpBridge.auto();}else{addEventListener('DOMContentLoaded',start,{once:true});}})();</script>\n`;
+    `\n${indent}<script>(function start(){if(window.GameXpBridge?.auto)return void window.GameXpBridge.auto();if(document.readyState==='complete'||document.readyState==='interactive')return setTimeout(start,0);addEventListener('DOMContentLoaded',start,{once:true});})();</script>\n`;
   return before + snippet + after;
 }
 

@@ -159,7 +159,7 @@
   <script src="js/cookiebot-manager.js" defer></script>
   <script src="/js/xp.js" defer></script>
   <script src="/js/xp-game-hook.js" defer></script>
-  <script>(function start(){if(window.GameXpBridge&&typeof window.GameXpBridge.auto==='function'){window.GameXpBridge.auto();}else{addEventListener('DOMContentLoaded',start,{once:true});}})();</script>
+  <script>(function start(){if(window.GameXpBridge?.auto)return void window.GameXpBridge.auto();if(document.readyState==='complete'||document.readyState==='interactive')return setTimeout(start,0);addEventListener('DOMContentLoaded',start,{once:true});})();</script>
 </body>
 </html>
 
