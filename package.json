@@ -5,10 +5,11 @@
   "scripts": {
     "check:lifecycle": "node scripts/check-lifecycle.js",
     "check:xpbadge": "node scripts/check-xpbadge.js",
-    "check:all": "node scripts/check-lifecycle.js && node scripts/check-xpbadge.js",
+    "check:games-xp-hook": "node scripts/check-games-xp-hook.mjs",
+    "check:all": "node scripts/check-lifecycle.js && node scripts/check-xpbadge.js && node scripts/check-games-xp-hook.mjs",
     "guard:lifecycle": "node scripts/guard-lifecycle.js",
     "guard:badge": "node scripts/guard-badge.js",
-    "ci:guards": "npm run guard:lifecycle && npm run guard:badge",
+    "ci:guards": "npm run guard:lifecycle && npm run guard:badge && npm run check:games-xp-hook",
     "lint:games": "node scripts/validate-games.js",
     "prepare": "husky install",
     "test": "node scripts/test-all.mjs",
@@ -17,12 +18,12 @@
     "syntax": "node scripts/syntax-check.mjs",
     "test:quick": "node scripts/syntax-check.mjs",
     "test:cli": "node scripts/test-cli.mjs",
-    "serve:xp": "XP_DEBUG=1 node scripts/serve-award-xp.mjs"
+    "serve:xp": "XP_DEBUG=1 node scripts/serve-award-xp.mjs",
+    "wire:xp": "node scripts/wire-xp.mjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.46.0",
     "acorn": "^8.15.0",
-    "fast-glob": "^3.3.3",
     "husky": "^9.1.7",
     "lint-staged": "^15.2.7"
   },
@@ -30,7 +31,8 @@
     "**/*.js": "node scripts/check-lifecycle.js --files",
     "**/*.html": [
       "node scripts/check-xpbadge.js --fix --files",
-      "node scripts/check-lifecycle.js --files"
+      "node scripts/check-lifecycle.js --files",
+      "node scripts/check-games-xp-hook.mjs --files"
     ]
   }
 }
