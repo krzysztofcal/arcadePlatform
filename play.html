@@ -80,6 +80,10 @@
         }
         if (attempt < 200) {
           setTimeout(() => startBridge(attempt + 1), 50);
+          return;
+        }
+        if (window.XP && typeof window.XP.startSession === 'function') {
+          try { window.XP.startSession(resolvedId); } catch (_) {}
         }
       };
       startBridge();
