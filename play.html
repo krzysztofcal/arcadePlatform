@@ -70,6 +70,18 @@
         }
       }
 
+      const resolvedId = xpId;
+      const startBridge = (attempt = 0) => {
+        if (window.GameXpBridge && typeof window.GameXpBridge.start === 'function') {
+          try { window.GameXpBridge.start(resolvedId); } catch (_) {}
+          return;
+        }
+        if (attempt < 20) {
+          setTimeout(() => startBridge(attempt + 1), 50);
+        }
+      };
+      startBridge();
+
       const creditsEl = document.getElementById('credits');
       if (creditsEl) {
         const idValue = (game.id || '').toLowerCase();
