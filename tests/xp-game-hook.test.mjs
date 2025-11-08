@@ -18,134 +18,289 @@ const instrumentedXp = xpSource.replace(
   '  if (window && !window.__xpTestHook) { window.__xpTestHook = () => state; }\n' + injectionTarget
 );
 
-const docListeners = new Map();
-const windowListeners = new Map();
-const timers = [];
-
-function fakeSetTimeout(fn) {
-  timers.push(typeof fn === 'function' ? fn : () => {});
-  return timers.length;
+function createListenerMap() {
+  return new Map();
 }
 
-function fakeClearTimeout(id) {
-  if (!id || id > timers.length) return;
-  timers[id - 1] = null;
+function addListener(store, type, handler) {
+  if (!store.has(type)) {
+    store.set(type, new Set());
+  }
+  store.get(type).add(handler);
 }
 
-function drainTimers(limit = 25) {
-  let runs = 0;
-  while (timers.some(Boolean) && runs < limit) {
-    const pending = timers.splice(0, timers.length);
-    for (const entry of pending) {
-      if (typeof entry === 'function') {
-        try { entry(); } catch (err) { console.error(err); }
-      }
-    }
-    runs += 1;
+function removeListener(store, type, handler) {
+  if (!store.has(type)) return;
+  const handlers = store.get(type);
+  handlers.delete(handler);
+  if (handlers.size === 0) {
+    store.delete(type);
   }
 }
 
-const documentStub = {
-  readyState: 'complete',
-  hidden: false,
-  visibilityState: 'visible',
-  title: 'Stub Game',
-  body: {
-    dataset: { gameId: 'body-game' },
-    getAttribute(name) { return name === 'data-game-id' ? 'body-game' : null; },
-  },
-  addEventListener(type, handler) {
-    docListeners.set(type, handler);
-  },
-  removeEventListener() {},
-  dispatchEvent() {},
-  getElementById() { return null; },
-  createElement() {
-    return {
-      className: '',
-      textContent: '',
-      appendChild() {},
-      classList: { add() {}, remove() {}, toggle() {} },
-      contains() { return false; },
-      querySelector() { return null; },
-    };
-  },
-  querySelectorAll() { return []; },
-};
+function emit(store, type, event) {
+  if (!store.has(type)) return;
+  for (const handler of [...store.get(type)]) {
+    if (typeof handler === 'function') {
+      handler(event);
+    }
+  }
+}
 
-const windowStub = {
-  localStorage: {
-    getItem() { return null; },
-    setItem() {},
-  },
-  addEventListener(type, handler) {
-    windowListeners.set(type, handler);
-  },
-  removeEventListener() {},
-  setInterval() { return 1; },
-  clearInterval() {},
-  setTimeout: fakeSetTimeout,
-  clearTimeout: fakeClearTimeout,
-  parent: null,
-  location: { origin: 'https://example.test' },
-  console,
-};
-windowStub.parent = windowStub;
-windowStub.document = documentStub;
+function createEnvironment(options = {}) {
+  const docListeners = createListenerMap();
+  const windowListeners = createListenerMap();
+  const timers = [];
 
-const context = {
-  window: windowStub,
-  document: documentStub,
-  location: windowStub.location,
-  console,
-  setTimeout: fakeSetTimeout,
-  clearTimeout: fakeClearTimeout,
-  Date,
-  Event,
-};
+  function fakeSetTimeout(fn) {
+    timers.push(typeof fn === 'function' ? fn : () => {});
+    return timers.length;
+  }
 
-vm.createContext(context);
+  function fakeClearTimeout(id) {
+    if (!id || id > timers.length) return;
+    timers[id - 1] = null;
+  }
 
-new vm.Script(hookSource, { filename: 'xp-game-hook.js' }).runInContext(context);
+  function drainTimers(limit = 25) {
+    let runs = 0;
+    while (timers.some(Boolean) && runs < limit) {
+      const pending = timers.splice(0, timers.length);
+      for (const entry of pending) {
+        if (typeof entry === 'function') {
+          try { entry(); } catch (err) { console.error(err); }
+        }
+      }
+      runs += 1;
+    }
+  }
 
-const Bridge = context.window.GameXpBridge;
-assert(Bridge, 'GameXpBridge missing');
-assert.equal(typeof Bridge.add, 'function');
+  const documentStub = {
+    readyState: options.readyState || 'complete',
+    hidden: false,
+    visibilityState: 'visible',
+    title: options.title || 'Stub Game',
+    body: {
+      dataset: { gameId: options.bodyGameId || 'body-game' },
+      getAttribute(name) {
+        if (name === 'data-game-id') return options.bodyGameId || 'body-game';
+        return null;
+      },
+    },
+    addEventListener(type, handler, _opts) {
+      addListener(docListeners, type, handler);
+    },
+    removeEventListener(type, handler) {
+      removeListener(docListeners, type, handler);
+    },
+    dispatchEvent(event) {
+      emit(docListeners, event.type, event);
+      return true;
+    },
+    getElementById() { return null; },
+    createElement() {
+      return {
+        className: '',
+        textContent: '',
+        appendChild() {},
+        classList: { add() {}, remove() {}, toggle() {} },
+        contains() { return false; },
+        querySelector() { return null; },
+      };
+    },
+    querySelectorAll() { return []; },
+  };
 
-Bridge.start('pre-init-game');
-Bridge.add(0.4);
-Bridge.add(0.4);
-Bridge.add(0.4);
+  const windowStub = {
+    localStorage: {
+      getItem() { return null; },
+      setItem() {},
+    },
+    addEventListener(type, handler, _opts) {
+      addListener(windowListeners, type, handler);
+    },
+    removeEventListener(type, handler) {
+      removeListener(windowListeners, type, handler);
+    },
+    setInterval() { return 1; },
+    clearInterval() {},
+    setTimeout: fakeSetTimeout,
+    clearTimeout: fakeClearTimeout,
+    parent: null,
+    location: { origin: 'https://example.test' },
+    console,
+  };
+  windowStub.parent = windowStub;
+  windowStub.document = documentStub;
 
-drainTimers();
-assert.equal(typeof context.window.XP, 'undefined', 'XP should not exist before loading xp.js');
+  const context = {
+    window: windowStub,
+    document: documentStub,
+    location: windowStub.location,
+    console,
+    setTimeout: fakeSetTimeout,
+    clearTimeout: fakeClearTimeout,
+    Date,
+    Event,
+  };
 
-new vm.Script(instrumentedXp, { filename: 'xp.js' }).runInContext(context);
+  vm.createContext(context);
 
-drainTimers();
+  new vm.Script(hookSource, { filename: 'xp-game-hook.js' }).runInContext(context);
 
-const XP = context.window.XP;
-assert(XP, 'XP API missing after load');
-const getState = context.window.__xpTestHook;
-assert.equal(typeof getState, 'function', 'state hook missing');
+  const Bridge = context.window.GameXpBridge;
+  assert(Bridge, 'GameXpBridge missing');
 
-const stateAfterInit = getState();
-assert.equal(stateAfterInit.scoreDelta, 1, 'queued fractional adds should roll to a whole point once XP loads');
+  function installXp() {
+    new vm.Script(instrumentedXp, { filename: 'xp.js' }).runInContext(context);
+    const XP = context.window.XP;
+    assert(XP, 'XP API missing after load');
+    const getState = context.window.__xpTestHook;
+    assert.equal(typeof getState, 'function', 'state hook missing');
+    return { XP, getState };
+  }
 
-Bridge.add(0.25);
-drainTimers();
-assert.equal(getState().scoreDelta, 1, 'sub-integer adds should remain queued');
+  return {
+    context,
+    Bridge,
+    installXp,
+    drainTimers,
+    triggerDoc(type, event = {}) {
+      emit(docListeners, type, { type, ...event });
+    },
+    triggerWindow(type, event = {}) {
+      emit(windowListeners, type, { type, ...event });
+    },
+    setReadyState(value) {
+      documentStub.readyState = value;
+    },
+  };
+}
 
-Bridge.add(0.25);
-drainTimers();
-assert.equal(getState().scoreDelta, 1, 'partial sum below one should not award points');
+// Fractional roll-up and queued awards survive until XP loads
+{
+  const env = createEnvironment();
+  const { Bridge, drainTimers, installXp } = env;
 
-Bridge.add(0.6);
-drainTimers();
-assert.equal(getState().scoreDelta, 2, 'fractional roll-up should award once threshold reached');
+  Bridge.start('pre-init-game');
+  Bridge.add(0.4);
+  Bridge.add(0.4);
+  Bridge.add(0.4);
 
-Bridge.add(9_999.5);
-drainTimers();
-assert.equal(getState().scoreDelta, 10_000, 'session awards should respect 10k cap');
+  drainTimers();
+  assert.equal(typeof env.context.window.XP, 'undefined', 'XP should not exist before loading xp.js');
+
+  const { XP, getState } = installXp();
+  drainTimers();
+
+  assert.equal(getState().scoreDelta, 1, 'queued fractional adds should roll to a whole point once XP loads');
+
+  Bridge.add(0.25);
+  drainTimers();
+  assert.equal(getState().scoreDelta, 1, 'sub-integer adds should remain queued');
+
+  Bridge.add(0.25);
+  drainTimers();
+  assert.equal(getState().scoreDelta, 1, 'partial sum below one should not award points');
+
+  Bridge.add(0.6);
+  drainTimers();
+  assert.equal(getState().scoreDelta, 2, 'fractional roll-up should award once threshold reached');
+
+  Bridge.add(9_999.5);
+  drainTimers();
+  assert.equal(getState().scoreDelta, 10_000, 'window awards should respect 10k cap');
+
+  // stop should still flush cleanly when XP is present
+  Bridge.stop({ flush: true });
+  drainTimers();
+  assert.equal(getState().running, false, 'stop should halt running session');
+  assert.equal(typeof XP.stopSession, 'function');
+}
+
+// Auto wiring responds to visibility toggles and activity
+{
+  const env = createEnvironment();
+  const { Bridge, drainTimers, installXp, triggerDoc, triggerWindow } = env;
+
+  Bridge.auto('Auto Session Name');
+  drainTimers();
+
+  const { XP, getState } = installXp();
+  drainTimers();
+
+  assert.equal(getState().running, true, 'auto should start a session once XP is ready');
+  assert.equal(getState().gameId, 'auto-session-name', 'auto start should slugify provided game id');
+
+  let stopCalls = 0;
+  const originalStop = XP.stopSession;
+  XP.stopSession = function wrappedStop(options) {
+    stopCalls += 1;
+    return originalStop.call(this, options);
+  };
+
+  triggerDoc('xp:hidden');
+  drainTimers();
+  assert.equal(getState().running, false, 'xp:hidden should stop the session');
+  assert.equal(stopCalls > 0, true, 'xp:hidden should flush stop');
+
+  triggerDoc('xp:visible');
+  drainTimers();
+  assert.equal(getState().running, true, 'xp:visible should restart the session');
+
+  let nudges = 0;
+  const originalNudge = XP.nudge;
+  XP.nudge = function wrappedNudge() {
+    nudges += 1;
+    return originalNudge.apply(this, arguments);
+  };
+
+  triggerWindow('pointerdown');
+  assert.equal(nudges > 0, true, 'pointerdown should proxy to XP.nudge');
+}
+
+// DOM readiness fallback should trigger auto start even without custom events
+{
+  const env = createEnvironment({ readyState: 'loading', bodyGameId: 'fallback-body' });
+  const { Bridge, drainTimers, installXp, triggerDoc, setReadyState } = env;
+
+  Bridge.auto();
+  drainTimers();
+
+  // simulate early stop before XP or visibility hooks fire
+  Bridge.stop({ flush: false });
+  drainTimers();
+
+  setReadyState('interactive');
+  triggerDoc('DOMContentLoaded');
+  drainTimers();
+
+  const { getState } = installXp();
+  drainTimers();
+  assert.equal(getState().running, true, 'DOMContentLoaded fallback should restart the session');
+  assert.equal(getState().gameId, 'fallback-body', 'detected body data attribute should provide the slugged id');
+}
+
+// Stop calls before XP loads should queue and flush later
+{
+  const env = createEnvironment();
+  const { Bridge, drainTimers, installXp } = env;
+
+  Bridge.start('queued-stop');
+  Bridge.add(1.4);
+  Bridge.stop({ flush: true });
+  drainTimers();
+
+  const { XP } = installXp();
+  let stopCalls = 0;
+  const originalStop = XP.stopSession;
+  XP.stopSession = function wrappedStop(options) {
+    stopCalls += 1;
+    return originalStop.call(this, options);
+  };
+
+  drainTimers();
+  assert.equal(stopCalls, 1, 'queued stop should flush once XP becomes available');
+}
 
 console.log('xp-game-hook tests passed');

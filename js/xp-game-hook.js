@@ -7,13 +7,14 @@
   const state = {
     remainder: 0,
     queuedWhole: 0,
-    sessionAwarded: 0,
     pendingStartGameId: null,
     pendingStopOptions: null,
     runningDesired: false,
     lastGameId: null,
     autoListenersBound: false,
     flushScheduled: false,
+    domReadyListenerBound: false,
+    handleVisible: null,
   };
 
   function getXp() {
@@ -38,6 +39,15 @@
     return text || null;
   }
 
+  function slugifyGameId(value) {
+    if (!value) return DEFAULT_GAME_ID;
+    const lowered = String(value).trim().toLowerCase();
+    if (!lowered) return DEFAULT_GAME_ID;
+    const dashed = lowered.replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+    const limited = dashed.slice(0, 64);
+    return limited || DEFAULT_GAME_ID;
+  }
+
   function detectGameId() {
     const fromWindow = normalizeGameId(window && window.GAME_ID);
     if (fromWindow) return fromWindow;
@@ -60,7 +70,6 @@
   function resetSessionAccounting() {
     state.remainder = 0;
     state.queuedWhole = 0;
-    state.sessionAwarded = 0;
   }
 
   function flush() {
@@ -112,6 +121,8 @@
       }
     };
 
+    state.handleVisible = handleVisible;
+
     const handleHidden = () => {
       stop({ flush: true });
     };
@@ -132,11 +143,61 @@
     }
   }
 
+  function ensureDomReadyKickoff() {
+    if (state.domReadyListenerBound) return;
+    state.domReadyListenerBound = true;
+
+    const runVisible = () => {
+      try {
+        if (typeof state.handleVisible === "function") {
+          state.handleVisible();
+        } else {
+          const gameId = state.lastGameId || detectGameId();
+          if (gameId) start(gameId);
+        }
+      } catch (_) {}
+    };
+
+    const immediateReady = document && typeof document.readyState === "string"
+      && (document.readyState === "interactive" || document.readyState === "complete");
+
+    if (immediateReady) {
+      runVisible();
+      return;
+    }
+
+    const once = () => {
+      try {
+        if (document && typeof document.removeEventListener === "function") {
+          document.removeEventListener("DOMContentLoaded", once);
+        }
+      } catch (_) {}
+      try {
+        if (window && typeof window.removeEventListener === "function") {
+          window.removeEventListener("load", once);
+        }
+      } catch (_) {}
+      runVisible();
+    };
+
+    if (document && typeof document.addEventListener === "function") {
+      try { document.addEventListener("DOMContentLoaded", once, { once: true, passive: true }); } catch (_) {
+        try { document.addEventListener("DOMContentLoaded", once); } catch (_) {}
+      }
+    }
+
+    if (window && typeof window.addEventListener === "function") {
+      try { window.addEventListener("load", once, { once: true, passive: true }); } catch (_) {
+        try { window.addEventListener("load", once); } catch (_) {}
+      }
+    }
+  }
+
   /**
    * @typedef {object} GameXpBridge
    * @property {(gameId?: string) => void} start Begin an XP session for the supplied game identifier.
    * @property {(options?: object) => void} stop Halt the active XP session, flushing the server payload by default.
-   * @property {(delta: number) => void} add Award XP points, with fractional roll-up and 10k session cap enforcement.
+   * @property {(delta: number) => void} add Award XP points, with fractional roll-up and 10k window cap alignment.
    * @property {() => void} nudge Mark the player as active for the current session.
    * @property {(gameId?: string) => void} auto Auto-start the session with lifecycle and activity wiring.
    */
@@ -149,6 +210,7 @@
     const resolved = normalizeGameId(gameId) || detectGameId();
     start(resolved);
     ensureAutoListeners();
+    ensureDomReadyKickoff();
   }
 
   /**
@@ -157,11 +219,12 @@
    */
   function start(gameId) {
     const resolved = normalizeGameId(gameId) || detectGameId();
-    state.lastGameId = resolved;
+    const slugged = slugifyGameId(resolved);
+    state.lastGameId = slugged;
     state.runningDesired = true;
     resetSessionAccounting();
     state.pendingStopOptions = null;
-    state.pendingStartGameId = resolved;
+    state.pendingStartGameId = slugged;
     flush();
   }
 
@@ -197,19 +260,11 @@
 
     state.remainder -= whole;
 
-    const capacity = Math.max(0, MAX_SCORE_DELTA - state.sessionAwarded);
-    if (capacity <= 0) {
-      state.remainder = 0;
-      state.queuedWhole = 0;
-      return;
-    }
-
-    const usable = Math.min(whole, capacity);
+    const usable = Math.min(whole, MAX_SCORE_DELTA);
     const unused = whole - usable;
     if (unused > 0) state.remainder += unused;
     if (usable <= 0) return;
 
-    state.sessionAwarded += usable;
     state.queuedWhole = Math.min(MAX_SCORE_DELTA, state.queuedWhole + usable);
     flush();
   }
