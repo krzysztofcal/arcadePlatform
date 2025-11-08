@@ -154,7 +154,7 @@
 
   function attachBadge() {
     if (state.badge) return;
-    state.badge = document.getElementById("xpBadge");
+    state.badge = document.querySelector("#xpBadge, .xp-badge, .xp-badge__link");
     if (!state.badge) return;
     ensureBadgeElements();
     state.badge.addEventListener("animationend", (event) => {
@@ -407,11 +407,9 @@
     if (typeof window !== "undefined") {
       ensureTimer();
 
-      window.addEventListener("pageshow", (event) => {
+      window.addEventListener("pageshow", () => {
         try {
-          if (event && event.persisted) {
-            refreshBadgeFromStorage();
-          }
+          refreshBadgeFromStorage();
         } catch (_) {}
       }, { passive: true });
 
