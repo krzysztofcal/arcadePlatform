@@ -4,7 +4,6 @@ import { dirname, join, relative, resolve, isAbsolute } from "node:path";
 import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import process from "node:process";
-import fg from "fast-glob";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
@@ -13,19 +12,6 @@ const execFileAsync = promisify(execFile);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const projectRoot = join(__dirname, "..");
-
-const patterns = [
-  "game*.html",
-  "games/**/index.html",
-  "games-open/**/index.html",
-  "play.html",
-];
-
-const ignore = [
-  "**/node_modules/**",
-  "**/.git/**",
-  "**/tests/**",
-];
 
 const args = process.argv.slice(2);
 const fileArgs = [];
@@ -57,20 +43,24 @@ function shouldInspect(relPath) {
   return false;
 }
 
-async function trackedFilesSet() {
+async function trackedFiles() {
   try {
     const { stdout } = await execFileAsync("git", ["ls-files"], { cwd: projectRoot });
-    const entries = stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-    return new Set(entries);
+    return stdout
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => toPosix(line));
   } catch (error) {
     console.error("Failed to read tracked files:", error.message);
     process.exitCode = 1;
-    return new Set();
+    return [];
   }
 }
 
 async function resolveFiles() {
-  const tracked = await trackedFilesSet();
+  const tracked = await trackedFiles();
+  const trackedSet = new Set(tracked);
 
   if (fileArgs.length) {
     const unique = new Set();
@@ -79,7 +69,7 @@ async function resolveFiles() {
       if (!shouldInspect(relPath)) continue;
       const absPath = join(projectRoot, relPath);
       if (!existsSync(absPath)) continue;
-      if (!tracked.has(relPath)) {
+      if (!trackedSet.has(relPath)) {
         // Allow staged-but-new files that may not be listed yet when lint-staged invokes the script.
         // git ls-files includes staged files, but fallback to accepting the path when it exists.
         unique.add(relPath);
@@ -90,15 +80,7 @@ async function resolveFiles() {
     return Array.from(unique);
   }
 
-  const files = await fg(patterns, { cwd: projectRoot, onlyFiles: true, ignore });
-  const normalized = [];
-  for (const file of files) {
-    const rel = toPosix(file);
-    if (tracked.has(rel)) {
-      normalized.push(rel);
-    }
-  }
-  return normalized;
+  return tracked.filter((file) => shouldInspect(file));
 }
 
 function countScriptTags(pattern, source) {
