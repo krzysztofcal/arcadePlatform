@@ -16,7 +16,7 @@
   }
 
   const MAX_SCORE_DELTA = parseNumber(window && window.XP_SCORE_DELTA_CEILING, DEFAULT_SCORE_DELTA_CEILING);
-  const BASELINE_XP_PER_SECOND = parseNumber(window && window.XP_BASELINE_XP_PER_SECOND, 6);
+  const BASELINE_XP_PER_SECOND = parseNumber(window && window.XP_BASELINE_XP_PER_SECOND, 10);
   const TICK_MS = parseNumber(window && window.XP_TICK_MS, 1_000);
   const ACTIVITY_EXPONENT = parseNumber(window && window.XP_ACTIVITY_EXPONENT, 1.5);
   const MAX_XP_PER_SECOND = parseNumber(window && window.XP_MAX_XP_PER_SECOND, 24);
@@ -546,12 +546,19 @@
     saveCache();
     persistRuntimeState();
     pulseBadge();
-    if (typeof document !== "undefined") {
+    const emitUpdate = (target) => {
+      if (!target || typeof target.dispatchEvent !== "function") return;
       try {
-        document.dispatchEvent(new CustomEvent("xp:updated", { detail: { awarded } }));
+        target.dispatchEvent(new CustomEvent("xp:updated", { detail: { awarded } }));
       } catch (_) {
-        try { document.dispatchEvent(new Event("xp:updated")); } catch (_) {}
+        try { target.dispatchEvent(new Event("xp:updated")); } catch (_) {}
       }
+    };
+    if (typeof window !== "undefined") {
+      emitUpdate(window);
+    }
+    if (typeof document !== "undefined") {
+      emitUpdate(document);
     }
     return awarded;
   }
