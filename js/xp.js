@@ -44,7 +44,11 @@
       if (typeof document !== "undefined" && document) {
         const body = document.body;
         if (body && typeof body.hasAttribute === "function" && body.hasAttribute("data-game-host")) return true;
-        if (typeof document.getElementById === "function" && document.getElementById("gameFrame")) return true;
+        if (typeof document.getElementById === "function") {
+          if (document.getElementById("gameFrame")) return true;
+          if (document.getElementById("frameBox")) return true;
+          if (document.getElementById("frameWrap")) return true;
+        }
       }
     } catch (_) {}
     return false;
@@ -830,12 +834,19 @@
           if (!state.running) return;
           if (!isGameHost()) return;
           if (event.data.userGesture !== true) return;
-          if (typeof navigator !== "undefined" && navigator.userActivation && navigator.userActivation.isActive !== true) return;
 
           const now = Date.now();
+          let activationIsActive = true;
+          if (typeof navigator !== "undefined" && navigator.userActivation) {
+            activationIsActive = navigator.userActivation.isActive === true;
+          }
+          const recentlyTrusted = state.lastTrustedInputTs && (now - state.lastTrustedInputTs) <= ACTIVE_WINDOW_MS;
+          if (!activationIsActive && !recentlyTrusted) return;
+
           if (now - __lastNudgeTs < 100) return; // ~10/sec
           __lastNudgeTs = now;
 
+          try { recordTrustedInput(); } catch (_) {}
           if (typeof nudge === "function") nudge();
         } catch {}
       }, { passive: true });
