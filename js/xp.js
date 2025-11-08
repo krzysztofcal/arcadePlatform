@@ -16,6 +16,14 @@
   }
 
   const MAX_SCORE_DELTA = parseNumber(window && window.XP_SCORE_DELTA_CEILING, DEFAULT_SCORE_DELTA_CEILING);
+  const BASELINE_XP_PER_SECOND = parseNumber(window && window.XP_BASELINE_XP_PER_SECOND, 6);
+  const TICK_MS = parseNumber(window && window.XP_TICK_MS, 1_000);
+  const ACTIVITY_EXPONENT = parseNumber(window && window.XP_ACTIVITY_EXPONENT, 1.5);
+  const MAX_XP_PER_SECOND = parseNumber(window && window.XP_MAX_XP_PER_SECOND, 24);
+  const FLUSH_INTERVAL_MS = 15_000;
+  const FLUSH_THRESHOLD = 50;
+  const RUNTIME_CACHE_KEY = "kcswh:xp:regen";
+  const FLUSH_ENDPOINT = (typeof window !== "undefined" && window && typeof window.XP_FLUSH_ENDPOINT === "string") ? window.XP_FLUSH_ENDPOINT : null;
 
   const state = {
     badge: null,
@@ -37,6 +45,23 @@
     snapshot: null,
     scoreDelta: 0,
     scoreDeltaRemainder: 0,
+    regen: {
+      carry: 0,
+      momentum: 0,
+      comboCount: 0,
+      pending: 0,
+      lastAward: 0,
+    },
+    flush: {
+      pending: 0,
+      lastSync: 0,
+      inflight: null,
+    },
+    boost: {
+      multiplier: 1,
+      expiresAt: 0,
+      source: null,
+    },
   };
 
   function resetActivityCounters(now) {
@@ -48,6 +73,85 @@
     state.activeUntil = 0;
     state.scoreDelta = 0;
     state.scoreDeltaRemainder = 0;
+  }
+
+  function getCurrentActivityRatio(now, delta) {
+    if (!Number.isFinite(delta) || delta <= 0) return 0;
+    if (!isDocumentVisible()) return 0;
+    const windowStart = now - delta;
+    const activeUntil = state.activeUntil || 0;
+    if (activeUntil <= windowStart) return 0;
+    const activeMs = Math.max(0, Math.min(delta, activeUntil - windowStart));
+    if (activeMs <= 0) return 0;
+    const ratio = Math.min(1, Math.max(0, activeMs / delta));
+    return Number.isFinite(ratio) ? ratio : 0;
+  }
+
+  function updateMomentum(activityRatio) {
+    const ratio = Math.min(1, Math.max(0, Number(activityRatio) || 0));
+    const prevMomentum = Number(state.regen.momentum) || 0;
+    let nextMomentum = prevMomentum;
+    if (ratio >= 0.75) {
+      nextMomentum = Math.min(1, prevMomentum + 0.12 + ((ratio - 0.75) * 0.4));
+      state.regen.comboCount = Math.min(20, (state.regen.comboCount || 0) + 1);
+    } else if (ratio >= 0.35) {
+      nextMomentum = Math.max(0, prevMomentum * 0.85 + ratio * 0.15);
+    } else {
+      nextMomentum = Math.max(0, prevMomentum * 0.5);
+      if (ratio <= 0.05) {
+        state.regen.comboCount = 0;
+      }
+    }
+    state.regen.momentum = nextMomentum;
+    return nextMomentum;
+  }
+
+  function computeBaseMultiplier(activityRatio) {
+    const clamped = Math.min(1, Math.max(0, Number(activityRatio) || 0));
+    const base = BASELINE_XP_PER_SECOND * Math.pow(clamped, ACTIVITY_EXPONENT);
+    if (!Number.isFinite(base)) return 0;
+    return Math.min(MAX_XP_PER_SECOND, Math.max(0, base));
+  }
+
+  function applyCombo(multiplier) {
+    const base = Number(multiplier) || 0;
+    if (base <= 0) return 0;
+    const comboCount = Math.max(0, Number(state.regen.comboCount) || 0);
+    if (comboCount <= 1) return base;
+    const comboBonus = Math.min(0.75, comboCount * 0.03);
+    return base * (1 + comboBonus);
+  }
+
+  function clearExpiredBoost(now) {
+    const ts = typeof now === "number" ? now : Date.now();
+    if (!state.boost) return;
+    if (state.boost.expiresAt && ts > state.boost.expiresAt) {
+      state.boost = { multiplier: 1, expiresAt: 0, source: null };
+      persistRuntimeState();
+    }
+  }
+
+  function applyBoost(multiplier) {
+    clearExpiredBoost();
+    const base = Number(multiplier) || 0;
+    if (base <= 0) return 0;
+    const boostMultiplier = Number(state.boost && state.boost.multiplier) || 1;
+    if (boostMultiplier <= 1) return base;
+    return base * boostMultiplier;
+  }
+
+  function accumulateLocalXp(xpDelta) {
+    const numeric = Number(xpDelta) || 0;
+    if (!Number.isFinite(numeric) || numeric <= 0) return 0;
+    let carry = Number(state.regen.carry) || 0;
+    const total = numeric + carry;
+    const whole = Math.floor(total);
+    carry = total - whole;
+    state.regen.carry = Math.max(0, carry);
+    if (whole <= 0) return 0;
+    state.regen.pending = Math.max(0, (state.regen.pending || 0) + whole);
+    state.flush.pending = Math.max(0, (state.flush.pending || 0) + whole);
+    return whole;
   }
 
   function isDocumentVisible() {
@@ -101,6 +205,49 @@
       };
       window.localStorage.setItem(CACHE_KEY, JSON.stringify(payload));
     } catch (_) { /* ignore */ }
+  }
+
+  function persistRuntimeState() {
+    if (typeof window === "undefined") return;
+    try {
+      const payload = {
+        carry: state.regen.carry || 0,
+        momentum: state.regen.momentum || 0,
+        comboCount: state.regen.comboCount || 0,
+        pending: state.regen.pending || 0,
+        flushPending: state.flush.pending || 0,
+        lastSync: state.flush.lastSync || 0,
+        boost: state.boost,
+      };
+      window.localStorage.setItem(RUNTIME_CACHE_KEY, JSON.stringify(payload));
+    } catch (_) { /* ignore */ }
+  }
+
+  function hydrateRuntimeState() {
+    if (typeof window === "undefined") return;
+    try {
+      const raw = window.localStorage.getItem(RUNTIME_CACHE_KEY);
+      if (!raw) {
+        if (!state.flush.lastSync) state.flush.lastSync = Date.now();
+        return;
+      }
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== "object") {
+        if (!state.flush.lastSync) state.flush.lastSync = Date.now();
+        return;
+      }
+      state.regen.carry = parseNumber(parsed.carry, state.regen.carry || 0) || 0;
+      state.regen.momentum = parseNumber(parsed.momentum, state.regen.momentum || 0) || 0;
+      state.regen.comboCount = Math.max(0, Math.floor(parseNumber(parsed.comboCount, state.regen.comboCount || 0) || 0));
+      state.regen.pending = Math.max(0, Math.floor(parseNumber(parsed.pending, state.regen.pending || 0) || 0));
+      state.flush.pending = Math.max(0, Math.floor(parseNumber(parsed.flushPending, state.flush.pending || 0) || 0));
+      state.flush.lastSync = parseNumber(parsed.lastSync, state.flush.lastSync || Date.now()) || Date.now();
+      if (parsed.boost && typeof parsed.boost === "object") {
+        state.boost = Object.assign({ multiplier: 1, expiresAt: 0, source: null }, parsed.boost);
+      }
+    } catch (_) {
+      if (!state.flush.lastSync) state.flush.lastSync = Date.now();
+    }
   }
 
   function ensureBadgeElements() {
@@ -251,14 +398,20 @@
     state.scoreDelta = 0;
   }
 
-  function tick() {
+  function onTick() {
     const now = Date.now();
     const delta = state.lastTick ? Math.max(0, now - state.lastTick) : 0;
     state.lastTick = now;
-    if (!state.running) return;
+    if (!state.running) {
+      if (state.flush.pending) {
+        flushXp(false).catch(() => {});
+      }
+      return;
+    }
     const visible = isDocumentVisible();
     if (!visible) {
       resetActivityCounters(now);
+      flushXp(true).catch(() => {});
       return;
     }
 
@@ -269,12 +422,17 @@
     if (state.activeMs >= CHUNK_MS) {
       sendWindow(false);
     }
+
+    const frameDelta = delta || TICK_MS;
+    const activityRatio = getCurrentActivityRatio(now, frameDelta);
+    awardLocalXp(activityRatio);
+    flushXp(false).catch(() => {});
   }
 
   function ensureTimer() {
     if (state.timerId) return;
     state.lastTick = Date.now();
-    state.timerId = window.setInterval(tick, 1000);
+    state.timerId = window.setInterval(onTick, TICK_MS);
   }
 
   function clearTimer() {
@@ -286,6 +444,7 @@
 
   function startSession(gameId) {
     attachBadge();
+    hydrateRuntimeState();
     ensureTimer();
 
     state.running = true;
@@ -297,6 +456,7 @@
     state.activeUntil = Date.now();
     state.scoreDelta = 0;
     state.scoreDeltaRemainder = 0;
+    if (!state.flush.lastSync) state.flush.lastSync = Date.now();
   }
 
   function stopSession(options) {
@@ -307,6 +467,7 @@
         // skip network flush if idle
       } else {
       sendWindow(true); }
+      flushXp(true).catch(() => {});
     }
     state.running = false;
     state.gameId = null;
@@ -355,6 +516,150 @@
     state.scoreDeltaRemainder = Math.max(0, state.scoreDeltaRemainder - toAdd);
   }
 
+  function pulseBadge() {
+    updateBadge();
+    bumpBadge();
+  }
+
+  function isAtCap() {
+    if (state.cap == null) return false;
+    if (typeof state.totalToday !== "number") return false;
+    return state.totalToday >= state.cap;
+  }
+
+  function awardLocalXp(activityRatio) {
+    if (!state.running) return 0;
+    if (isAtCap()) return 0;
+    const baseMultiplier = computeBaseMultiplier(activityRatio);
+    const momentum = updateMomentum(activityRatio);
+    let xpPerSecond = baseMultiplier * (1 + (momentum * 0.5));
+    xpPerSecond = applyCombo(xpPerSecond);
+    xpPerSecond = applyBoost(xpPerSecond);
+    xpPerSecond = Math.min(MAX_XP_PER_SECOND, Math.max(0, xpPerSecond));
+    const xpForTick = xpPerSecond * (TICK_MS / 1000);
+    const awarded = accumulateLocalXp(xpForTick);
+    if (awarded <= 0) return 0;
+    state.totalToday = (Number(state.totalToday) || 0) + awarded;
+    state.totalLifetime = (Number(state.totalLifetime) || 0) + awarded;
+    state.regen.lastAward = Date.now();
+    state.lastResultTs = state.regen.lastAward;
+    saveCache();
+    persistRuntimeState();
+    pulseBadge();
+    if (typeof document !== "undefined") {
+      try {
+        document.dispatchEvent(new CustomEvent("xp:updated", { detail: { awarded } }));
+      } catch (_) {
+        try { document.dispatchEvent(new Event("xp:updated")); } catch (_) {}
+      }
+    }
+    return awarded;
+  }
+
+  function shouldFlush(force) {
+    if (force) return true;
+    if (state.flush.inflight) return false;
+    if (!state.flush.pending) return false;
+    if (!isDocumentVisible()) return true;
+    if (isAtCap()) return true;
+    const now = Date.now();
+    if (state.flush.pending >= FLUSH_THRESHOLD) return true;
+    if (!state.flush.lastSync) return true;
+    if ((now - state.flush.lastSync) >= FLUSH_INTERVAL_MS) return true;
+    return false;
+  }
+
+  function markFlushSuccess(amount) {
+    const delta = Math.max(0, Number(amount) || 0);
+    if (delta > 0) {
+      state.flush.pending = Math.max(0, state.flush.pending - delta);
+      state.regen.pending = Math.max(0, state.regen.pending - delta);
+    }
+    state.flush.lastSync = Date.now();
+    persistRuntimeState();
+  }
+
+  function flushXp(force) {
+    if (state.flush.inflight) {
+      return state.flush.inflight;
+    }
+    if (!shouldFlush(force)) return Promise.resolve(false);
+    const pending = Math.max(0, state.flush.pending || 0);
+    if (!pending) return Promise.resolve(false);
+    const payload = {
+      pending,
+      totalToday: state.totalToday || 0,
+      totalLifetime: state.totalLifetime || 0,
+      ts: Date.now(),
+    };
+    const serialized = JSON.stringify(payload);
+    const done = () => { markFlushSuccess(pending); };
+
+    if (!FLUSH_ENDPOINT) {
+      done();
+      return Promise.resolve(true);
+    }
+
+    if (typeof navigator !== "undefined" && navigator && typeof navigator.sendBeacon === "function") {
+      const sent = navigator.sendBeacon(FLUSH_ENDPOINT, serialized);
+      if (sent) {
+        done();
+        return Promise.resolve(true);
+      }
+    }
+
+    if (typeof fetch !== "function") {
+      done();
+      return Promise.resolve(true);
+    }
+
+    const request = fetch(FLUSH_ENDPOINT, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: serialized,
+      keepalive: true,
+      credentials: "omit",
+    })
+      .then(() => { done(); return true; })
+      .catch((err) => {
+        if (window.console && console.debug) {
+          console.debug("XP flush failed", err);
+        }
+        persistRuntimeState();
+        return false;
+      })
+      .finally(() => { state.flush.inflight = null; });
+    state.flush.inflight = request;
+    return request;
+  }
+
+  function requestBoost(detail) {
+    if (!detail || typeof detail !== "object") return;
+    const multiplier = parseNumber(detail.multiplier, state.boost.multiplier || 1) || 1;
+    const durationMs = Math.max(0, parseNumber(detail.durationMs, 0) || 0);
+    const source = detail.source || null;
+    if (!Number.isFinite(multiplier) || multiplier <= 1) {
+      state.boost = { multiplier: 1, expiresAt: 0, source: null };
+      persistRuntimeState();
+      return;
+    }
+    const now = Date.now();
+    state.boost = {
+      multiplier: Math.max(1, multiplier),
+      expiresAt: durationMs > 0 ? now + durationMs : now + 15_000,
+      source,
+    };
+    persistRuntimeState();
+  }
+
+  function getFlushStatus() {
+    return {
+      pending: Math.max(0, state.flush.pending || 0),
+      lastSync: state.flush.lastSync || 0,
+      inflight: !!state.flush.inflight,
+    };
+  }
+
   function setTotals(total, cap) {
     state.totalToday = typeof total === "number" ? total : state.totalToday;
     state.cap = typeof cap === "number" ? cap : state.cap;
@@ -399,8 +704,9 @@
   }
 
   function init() {
+    hydrateRuntimeState();
     if (typeof document !== "undefined") {
-      const handleDomReady = () => { try { refreshBadgeFromStorage(); } catch (_) {} };
+      const handleDomReady = () => { try { hydrateRuntimeState(); refreshBadgeFromStorage(); } catch (_) {} };
       if (document.readyState === "loading") {
         document.addEventListener("DOMContentLoaded", handleDomReady, { once: true });
       } else {
@@ -411,7 +717,9 @@
         state.lastTick = now;
         if (!isDocumentVisible()) {
           resetActivityCounters(now);
+          flushXp(true).catch(() => {});
         } else {
+          hydrateRuntimeState();
           refreshBadgeFromStorage();
         }
       }, { passive: true });
@@ -422,12 +730,14 @@
 
       window.addEventListener("pageshow", () => {
         try {
+          hydrateRuntimeState();
           refreshBadgeFromStorage();
         } catch (_) {}
       }, { passive: true });
 
       window.addEventListener("focus", () => {
         try {
+          hydrateRuntimeState();
           refreshBadgeFromStorage();
         } catch (_) {}
       }, { passive: true });
@@ -436,13 +746,18 @@
         try {
           if (!event) return;
           if (event.storageArea && event.storageArea !== window.localStorage) return;
-          if (event.key && event.key !== CACHE_KEY) return;
+          if (event.key && event.key !== CACHE_KEY && event.key !== RUNTIME_CACHE_KEY) return;
+          hydrateRuntimeState();
           refreshBadgeFromStorage();
         } catch (_) {}
       });
 
       window.addEventListener("xp:updated", () => {
         try { refreshBadgeFromStorage(); } catch (_) {}
+      });
+
+      window.addEventListener("xp:boost", (event) => {
+        try { requestBoost(event && event.detail); } catch (_) {}
       });
 
       // Hardened activity bridge (same-origin, visible doc, requires userGesture:true, throttled)
@@ -508,6 +823,10 @@
     getSnapshot,
     refreshStatus,
     addScore,
+    awardLocalXp,
+    flushXp,
+    requestBoost,
+    getFlushStatus,
     scoreDeltaCeiling: MAX_SCORE_DELTA,
 
     isRunning: function(){ try { return !!(typeof state !== 'undefined' ? state.running : (this && this.__running)); } catch(_) { return !!(this && this.__running); } },});
