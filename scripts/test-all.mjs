@@ -14,6 +14,7 @@ run("node", ["scripts/syntax-check.mjs"], "syntax");
 
 run("node", ["tests/xp-client.test.mjs"], "xp-client");
 run("node", ["tests/xp-game-hook.test.mjs"], "xp-game-hook");
+run("node", ["tests/xp-multigame.test.mjs"], "xp-multigame");
 run("node", ["tests/xp-award-score.test.mjs"], "xp-award-score");
 run("node", ["tests/xp-award-score-rate.test.mjs"], "xp-award-score-rate");
 
