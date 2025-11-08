@@ -21,7 +21,7 @@ A lightweight arcade hub (static HTML/CSS/JS) with a sample game (Łap koty — 
 - Game page: open `game_cats.html`.
 
 ### XP guardrails
-- Run `npm run check:all` to validate lifecycle centralization and XP badge placement. Use `npm run check:xpbadge -- --fix` for auto-remediation when there’s exactly one badge anchor. See [docs/guards.md](docs/guards.md) for details.
+- Run `npm run check:all` to validate lifecycle centralization, XP badge placement, and XP bridge wiring. Use `npm run check:xpbadge -- --fix` for auto-remediation when there’s exactly one badge anchor. See [docs/guards.md](docs/guards.md) for details on the badge and lifecycle checks plus the new XP hook validator.
 
 #### XP windows & idle guard
 - XP windows only send while the tab stays visible and the game loop is running.
