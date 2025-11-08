@@ -154,7 +154,20 @@
 
   function attachBadge() {
     if (state.badge) return;
-    state.badge = document.querySelector(".xp-badge__link, #xpBadge, .xp-badge");
+    if (document && typeof document.querySelector === "function") {
+      state.badge = document.querySelector(".xp-badge__link, #xpBadge, .xp-badge");
+    } else {
+      const getByClass = (cls) => {
+        if (!document || typeof document.getElementsByClassName !== "function") return null;
+        const list = document.getElementsByClassName(cls);
+        if (!list || !list.length) return null;
+        return list[0] || null;
+      };
+      const byLink = getByClass("xp-badge__link");
+      const byId = document && typeof document.getElementById === "function" ? document.getElementById("xpBadge") : null;
+      const byWrapper = getByClass("xp-badge");
+      state.badge = byLink || byId || byWrapper || null;
+    }
     if (!state.badge) return;
     ensureBadgeElements();
     state.badge.addEventListener("animationend", (event) => {
@@ -452,10 +465,36 @@
       }, { passive: true });
     })();
 
-    // Top-frame input listeners -> nudge
-    ["pointerdown","pointermove","keydown","wheel","touchstart"].forEach(evt => {
-      try { window.addEventListener(evt, () => { try { nudge(); } catch(_){} }, { passive: true }); } catch(_) {}
-    });
+    // Top-frame input listeners -> nudge (only on real user gestures)
+    (function(){
+      // Decide if this event represents a true user gesture (not synthetic noise)
+      function isRealUserGesture(e){
+        // Prefer the platform signal if present
+        if (typeof navigator !== "undefined" && navigator.userActivation && navigator.userActivation.isActive) return true;
+        // Fallback heuristics
+        if (!e || e.isTrusted === false) return false;
+        switch (e.type) {
+          case "pointerdown":
+          case "touchstart":
+          case "keydown":
+          case "wheel":
+            return true;
+          // Explicitly ignore move/hover; too noisy and often synthetic in headless runs
+          case "pointermove":
+          case "mousemove":
+          default:
+            return false;
+        }
+      }
+
+      ["pointerdown","keydown","wheel","touchstart" /* no 'pointermove' */].forEach(evt => {
+        try {
+          window.addEventListener(evt, (ev) => {
+            try { if (isRealUserGesture(ev) && typeof nudge === "function") nudge(); } catch(_) {}
+          }, { passive: true });
+        } catch(_) {}
+      });
+    })();
   }
 }
 
