@@ -63,11 +63,10 @@
       document.getElementById('desc').textContent = description;
 
       const xpId = game.id || game.slug || id;
-      if (window.XP){
-        try { window.XP.stopSession({ flush: true }); } catch (_){}
-        if (typeof window.XP.startSession === 'function'){
-          try { window.XP.startSession(xpId); } catch (_){}
-        }
+      if (window.GameXpBridge && typeof window.GameXpBridge.stop === 'function') {
+        try { window.GameXpBridge.stop({ flush: true }); } catch (_) {}
+      } else if (window.XP && typeof window.XP.stopSession === 'function') {
+        try { window.XP.stopSession({ flush: true }); } catch (_) {}
       }
 
       const resolvedId = xpId;
@@ -158,11 +157,14 @@
           } catch (_){}
         };
         iframe.addEventListener('load', injectBridge);
-        iframe.addEventListener('pointerdown', () => {
-          if (window.XP && typeof window.XP.nudge === 'function') {
-            try { window.XP.nudge(); } catch (_){}
+        const sendNudge = () => {
+          if (window.GameXpBridge && typeof window.GameXpBridge.nudge === 'function') {
+            try { window.GameXpBridge.nudge(); } catch (_) {}
+          } else if (window.XP && typeof window.XP.nudge === 'function') {
+            try { window.XP.nudge(); } catch (_) {}
           }
-        }, { passive: true });
+        };
+        iframe.addEventListener('pointerdown', sendNudge, { passive: true });
         iframe.src = target;
       } else {
         document.body.innerHTML = 'Playable URL missing.';
@@ -180,7 +182,9 @@
       if (ev.origin && typeof location !== "undefined" && ev.origin !== location.origin) return;
       if (ev.data.type !== "kcswh:activity") return;
       if (ev.data.userGesture !== true) return;
-      if (window.XP && typeof window.XP.nudge === "function") {
+      if (window.GameXpBridge && typeof window.GameXpBridge.nudge === "function") {
+        try { window.GameXpBridge.nudge(); } catch (_) {}
+      } else if (window.XP && typeof window.XP.nudge === "function") {
         try { window.XP.nudge(); } catch (_) {}
       }
     } catch {}
