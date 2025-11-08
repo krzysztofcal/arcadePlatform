@@ -137,6 +137,14 @@
     setBadgeLoading(false);
   }
 
+  function refreshBadgeFromStorage() {
+    attachBadge();
+    if (!state.badge) return;
+    state.snapshot = null;
+    loadCache();
+    updateBadge();
+  }
+
   function bumpBadge() {
     if (!state.badge) return;
     state.badge.classList.remove("xp-badge--bump");
@@ -146,11 +154,22 @@
 
   function attachBadge() {
     if (state.badge) return;
-    state.badge = document.getElementById("xpBadge");
+    if (document && typeof document.querySelector === "function") {
+      state.badge = document.querySelector(".xp-badge__link, #xpBadge, .xp-badge");
+    } else {
+      const getByClass = (cls) => {
+        if (!document || typeof document.getElementsByClassName !== "function") return null;
+        const list = document.getElementsByClassName(cls);
+        if (!list || !list.length) return null;
+        return list[0] || null;
+      };
+      const byLink = getByClass("xp-badge__link");
+      const byId = document && typeof document.getElementById === "function" ? document.getElementById("xpBadge") : null;
+      const byWrapper = getByClass("xp-badge");
+      state.badge = byLink || byId || byWrapper || null;
+    }
     if (!state.badge) return;
     ensureBadgeElements();
-    loadCache();
-    updateBadge();
     state.badge.addEventListener("animationend", (event) => {
       if (event.animationName === "xp-badge-bump") {
         state.badge.classList.remove("xp-badge--bump");
@@ -380,25 +399,53 @@
   }
 
   function init() {
-  if (typeof document !== "undefined") {
-    if (document.readyState === "loading") {
-      document.addEventListener("DOMContentLoaded", attachBadge, { once: true });
-    } else {
-      attachBadge();
-    }
-    document.addEventListener("visibilitychange", () => {
-      const now = Date.now();
-      state.lastTick = now;
-      if (!isDocumentVisible()) {
-        resetActivityCounters(now);
+    if (typeof document !== "undefined") {
+      const handleDomReady = () => { try { refreshBadgeFromStorage(); } catch (_) {} };
+      if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", handleDomReady, { once: true });
+      } else {
+        handleDomReady();
       }
-    }, { passive: true });
-  }
+      document.addEventListener("visibilitychange", () => {
+        const now = Date.now();
+        state.lastTick = now;
+        if (!isDocumentVisible()) {
+          resetActivityCounters(now);
+        } else {
+          refreshBadgeFromStorage();
+        }
+      }, { passive: true });
+    }
 
-  if (typeof window !== "undefined") {
-    ensureTimer();
+    if (typeof window !== "undefined") {
+      ensureTimer();
 
-    // Hardened activity bridge (same-origin, visible doc, requires userGesture:true, throttled)
+      window.addEventListener("pageshow", () => {
+        try {
+          refreshBadgeFromStorage();
+        } catch (_) {}
+      }, { passive: true });
+
+      window.addEventListener("focus", () => {
+        try {
+          refreshBadgeFromStorage();
+        } catch (_) {}
+      }, { passive: true });
+
+      window.addEventListener("storage", (event) => {
+        try {
+          if (!event) return;
+          if (event.storageArea && event.storageArea !== window.localStorage) return;
+          if (event.key && event.key !== CACHE_KEY) return;
+          refreshBadgeFromStorage();
+        } catch (_) {}
+      });
+
+      window.addEventListener("xp:updated", () => {
+        try { refreshBadgeFromStorage(); } catch (_) {}
+      });
+
+      // Hardened activity bridge (same-origin, visible doc, requires userGesture:true, throttled)
     (function(){
       let __lastNudgeTs = 0;
       window.addEventListener("message", (event) => {
@@ -418,10 +465,36 @@
       }, { passive: true });
     })();
 
-    // Top-frame input listeners -> nudge
-    ["pointerdown","pointermove","keydown","wheel","touchstart"].forEach(evt => {
-      try { window.addEventListener(evt, () => { try { nudge(); } catch(_){} }, { passive: true }); } catch(_) {}
-    });
+    // Top-frame input listeners -> nudge (only on real user gestures)
+    (function(){
+      // Decide if this event represents a true user gesture (not synthetic noise)
+      function isRealUserGesture(e){
+        // Prefer the platform signal if present
+        if (typeof navigator !== "undefined" && navigator.userActivation && navigator.userActivation.isActive) return true;
+        // Fallback heuristics
+        if (!e || e.isTrusted === false) return false;
+        switch (e.type) {
+          case "pointerdown":
+          case "touchstart":
+          case "keydown":
+          case "wheel":
+            return true;
+          // Explicitly ignore move/hover; too noisy and often synthetic in headless runs
+          case "pointermove":
+          case "mousemove":
+          default:
+            return false;
+        }
+      }
+
+      ["pointerdown","keydown","wheel","touchstart" /* no 'pointermove' */].forEach(evt => {
+        try {
+          window.addEventListener(evt, (ev) => {
+            try { if (isRealUserGesture(ev) && typeof nudge === "function") nudge(); } catch(_) {}
+          }, { passive: true });
+        } catch(_) {}
+      });
+    })();
   }
 }
 
