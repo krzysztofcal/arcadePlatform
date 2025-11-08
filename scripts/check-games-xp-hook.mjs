@@ -88,6 +88,16 @@ function countScriptTags(pattern, source) {
   return matches ? matches.length : 0;
 }
 
+function stripHtmlComments(source) {
+  return source.replace(/<!--[\s\S]*?-->/g, "");
+}
+
+function stripJsComments(code) {
+  let out = code.replace(/\/\*[\s\S]*?\*\//g, "");
+  out = out.replace(/(^|[^:\\])\/\/.*$/gm, "$1");
+  return out;
+}
+
 function countInlineBridgeScripts(source) {
   const scriptTagRx = /<script\b[^>]*>[\s\S]*?<\/script>/gi;
   let count = 0;
@@ -95,7 +105,11 @@ function countInlineBridgeScripts(source) {
   while ((match = scriptTagRx.exec(source)) !== null) {
     const tag = match[0];
     if (/\bsrc\s*=/.test(tag)) continue;
-    if (tag.includes("GameXpBridge.auto(")) {
+    const inner = tag
+      .replace(/^<script\b[^>]*>/i, "")
+      .replace(/<\/script>\s*$/i, "");
+    const js = stripJsComments(inner);
+    if (js.includes("GameXpBridge.auto(")) {
       count += 1;
     }
   }
@@ -104,7 +118,8 @@ function countInlineBridgeScripts(source) {
 
 async function analyzeFile(relPath) {
   const absPath = join(projectRoot, relPath);
-  const source = await readFile(absPath, "utf8");
+  const raw = await readFile(absPath, "utf8");
+  const source = stripHtmlComments(raw);
 
   const xpScriptPattern = /<script\b[^>]*\bsrc\s*=\s*("|')[^"']*xp\.js(?:\?[^"']*)?\1[^>]*>\s*<\/script>/gi;
   const hookScriptPattern = /<script\b[^>]*\bsrc\s*=\s*("|')[^"']*xp-game-hook\.js(?:\?[^"']*)?\1[^>]*>\s*<\/script>/gi;
