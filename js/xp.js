@@ -92,7 +92,38 @@
       expiresAt: 0,
       source: null,
     },
+    debug: {
+      lastNoHostLog: 0,
+      hardIdleActive: false,
+      initLogged: false,
+    },
   };
+
+  function isDebugAdminEnabled() {
+    try {
+      if (window && window.KLog && typeof window.KLog.isAdmin === "function") {
+        return !!window.KLog.isAdmin();
+      }
+    } catch (_) {}
+    return false;
+  }
+
+  function logDebug(kind, data) {
+    try {
+      if (window && window.KLog && typeof window.KLog.log === "function") {
+        window.KLog.log(kind, data || {});
+      }
+    } catch (_) {}
+  }
+
+  function logBlockNoHost(now) {
+    if (!state.running) return;
+    const ts = typeof now === "number" ? now : Date.now();
+    const last = Number(state.debug.lastNoHostLog) || 0;
+    if (ts - last < 2_000) return;
+    state.debug.lastNoHostLog = ts;
+    logDebug("block_no_host", { running: true });
+  }
 
   function resetActivityCounters(now) {
     const ts = typeof now === "number" ? now : Date.now();
@@ -439,6 +470,7 @@
       return;
     }
     if (!isGameHost()) {
+      logBlockNoHost(now);
       return;
     }
     const visible = isDocumentVisible();
@@ -461,8 +493,15 @@
     const lastTrusted = Number(state.lastTrustedInputTs) || 0;
     if (lastTrusted && (now - lastTrusted) > HARD_IDLE_MS) {
       state.activeUntil = now;
+      if (!state.debug.hardIdleActive) {
+        state.debug.hardIdleActive = true;
+        logDebug("block_hard_idle", { idleMs: now - lastTrusted });
+      }
       activityRatio = 0;
     } else {
+      if (state.debug.hardIdleActive) {
+        state.debug.hardIdleActive = false;
+      }
       activityRatio = getCurrentActivityRatio(now, frameDelta);
     }
     awardLocalXp(activityRatio);
@@ -498,10 +537,17 @@
     state.scoreDelta = 0;
     state.scoreDeltaRemainder = 0;
     if (!state.flush.lastSync) state.flush.lastSync = Date.now();
+    state.debug.hardIdleActive = false;
+    state.debug.lastNoHostLog = 0;
+    logDebug("xp_start", { gameId: state.gameId, isHost: true });
   }
 
   function stopSession(options) {
     const opts = options || {};
+    const wasRunning = state.running === true;
+    if (wasRunning) {
+      logDebug("xp_stop", { flush: opts.flush !== false });
+    }
     /* xp stop flush guard */ if (state.running && opts.flush !== false) {
       const _minInputsGate = Math.max(2, Math.ceil(CHUNK_MS / 4000));
       if (!(state.visibilitySeconds > 1 && state.inputEvents >= _minInputsGate)) {
@@ -518,6 +564,8 @@
     state.activeUntil = 0;
     state.scoreDelta = 0;
     state.scoreDeltaRemainder = 0;
+    state.debug.hardIdleActive = false;
+    state.debug.lastNoHostLog = 0;
   }
 
   function nudge() {
@@ -607,6 +655,7 @@
     if (typeof document !== "undefined") {
       emitUpdate(document);
     }
+    logDebug("award", { awarded, activityRatio: Number(activityRatio) || 0 });
     return awarded;
   }
 
@@ -759,6 +808,16 @@
 
   function init() {
     hydrateRuntimeState();
+    if (!state.debug.initLogged) {
+      state.debug.initLogged = true;
+      let page = "";
+      try {
+        if (typeof location !== "undefined" && location && typeof location.pathname === "string") {
+          page = location.pathname;
+        }
+      } catch (_) {}
+      logDebug("xp_init", { page, admin: isDebugAdminEnabled() });
+    }
     if (typeof document !== "undefined") {
       const handleDomReady = () => {
         try {
