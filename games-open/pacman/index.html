@@ -29,7 +29,6 @@
     <script src="../../js/i18n.js" defer></script>
     <script src="../../js/topbar.js" defer></script>
     <script src="../../js/xpClient.js" defer></script>
-    <script src="../../js/xp.js" defer></script>
   </head>
   <body data-game-slug="pacman" data-game-id="pacman">
     <div class="topbar">
@@ -185,5 +184,8 @@
         }
       })();
     </script>
-  </body>
+    <script src="../../js/xp.js" defer></script>
+    <script src="../../js/xp-game-hook.js" defer></script>
+    <script>(function start(){if(window.GameXpBridge?.auto)return void window.GameXpBridge.auto();if(document.readyState==='complete'||document.readyState==='interactive')return setTimeout(start,0);addEventListener('DOMContentLoaded',start,{once:true});})();</script>
+</body>
 </html>

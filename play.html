@@ -29,7 +29,6 @@
     }
   </style>
   <script src="/js/xpClient.js" defer></script>
-  <script src="/js/xp.js" defer></script>
 </head>
 <body>
   <header class="play-header">
@@ -64,12 +63,30 @@
       document.getElementById('desc').textContent = description;
 
       const xpId = game.id || game.slug || id;
-      if (window.XP){
-        try { window.XP.stopSession({ flush: true }); } catch (_){}
-        if (typeof window.XP.startSession === 'function'){
-          try { window.XP.startSession(xpId); } catch (_){}
-        }
+      if (window.GameXpBridge && typeof window.GameXpBridge.stop === 'function') {
+        try { window.GameXpBridge.stop({ flush: true }); } catch (_) {}
+      } else if (window.XP && typeof window.XP.stopSession === 'function') {
+        try { window.XP.stopSession({ flush: true }); } catch (_) {}
       }
+
+      const resolvedId = xpId;
+      const startBridge = (attempt = 0) => {
+        if (window.GameXpBridge && typeof window.GameXpBridge.start === 'function') {
+          try { window.GameXpBridge.start(resolvedId); } catch (_) {}
+          return;
+        }
+        if (attempt === 0) {
+          addEventListener('load', () => startBridge(199), { once: true });
+        }
+        if (attempt < 200) {
+          setTimeout(() => startBridge(attempt + 1), 50);
+          return;
+        }
+        if (window.XP && typeof window.XP.startSession === 'function') {
+          try { window.XP.startSession(resolvedId); } catch (_) {}
+        }
+      };
+      startBridge();
 
       const creditsEl = document.getElementById('credits');
       if (creditsEl) {
@@ -147,11 +164,14 @@
           } catch (_){}
         };
         iframe.addEventListener('load', injectBridge);
-        iframe.addEventListener('pointerdown', () => {
-          if (window.XP && typeof window.XP.nudge === 'function') {
-            try { window.XP.nudge(); } catch (_){}
+        const sendNudge = () => {
+          if (window.GameXpBridge && typeof window.GameXpBridge.nudge === 'function') {
+            try { window.GameXpBridge.nudge(); } catch (_) {}
+          } else if (window.XP && typeof window.XP.nudge === 'function') {
+            try { window.XP.nudge(); } catch (_) {}
           }
-        }, { passive: true });
+        };
+        iframe.addEventListener('pointerdown', sendNudge, { passive: true });
         iframe.src = target;
       } else {
         document.body.innerHTML = 'Playable URL missing.';
@@ -169,13 +189,18 @@
       if (ev.origin && typeof location !== "undefined" && ev.origin !== location.origin) return;
       if (ev.data.type !== "kcswh:activity") return;
       if (ev.data.userGesture !== true) return;
-      if (window.XP && typeof window.XP.nudge === "function") {
+      if (window.GameXpBridge && typeof window.GameXpBridge.nudge === "function") {
+        try { window.GameXpBridge.nudge(); } catch (_) {}
+      } else if (window.XP && typeof window.XP.nudge === "function") {
         try { window.XP.nudge(); } catch (_) {}
       }
     } catch {}
   }, { passive: true });
 </script>
 
+<script src="/js/xp.js" defer></script>
+<script src="/js/xp-game-hook.js" defer></script>
+<script>(function start(){if(window.GameXpBridge?.auto)return void window.GameXpBridge.auto();if(document.readyState==='complete'||document.readyState==='interactive')return setTimeout(start,0);addEventListener('DOMContentLoaded',start,{once:true});})();</script>
 </body>
 </html>
 

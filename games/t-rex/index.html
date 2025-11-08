@@ -22,7 +22,7 @@
     gtag('config', 'G-JRP62LCXYK');
   </script>
 </head>
-<body>
+<body data-game-slug="t-rex" data-game-id="t-rex">
   <main class="game-shell">
     <header class="hud">
       <h1>T-Rex Runner</h1>
@@ -45,6 +45,9 @@
   </footer>
   <script src="../../js/cookiebot-manager.js" defer></script>
   <script src="main.js"></script>
+  <script src="../../js/xp.js" defer></script>
+  <script src="../../js/xp-game-hook.js" defer></script>
+  <script>(function start(){if(window.GameXpBridge?.auto)return void window.GameXpBridge.auto();if(document.readyState==='complete'||document.readyState==='interactive')return setTimeout(start,0);addEventListener('DOMContentLoaded',start,{once:true});})();</script>
 </body>
 </html>
 
