@@ -6,7 +6,16 @@
   const LEVEL_BASE_XP = 100;
   const LEVEL_MULTIPLIER = 1.1;
 
-  const MAX_SCORE_DELTA = 10_000;
+  const DEFAULT_SCORE_DELTA_CEILING = 10_000;
+
+  function parseNumber(value, fallback) {
+    if (value == null) return fallback;
+    const sanitized = typeof value === "string" ? value.replace(/_/g, "") : value;
+    const parsed = Number(sanitized);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  }
+
+  const MAX_SCORE_DELTA = parseNumber(window && window.XP_SCORE_DELTA_CEILING, DEFAULT_SCORE_DELTA_CEILING);
 
   const state = {
     badge: null,
@@ -426,7 +435,8 @@
     getSnapshot,
     refreshStatus,
     addScore,
-  
+    scoreDeltaCeiling: MAX_SCORE_DELTA,
+
     isRunning: function(){ try { return !!(typeof state !== 'undefined' ? state.running : (this && this.__running)); } catch(_) { return !!(this && this.__running); } },});
 })(typeof window !== "undefined" ? window : this, typeof document !== "undefined" ? document : undefined);
 // --- XP resume polyfill (idempotent) ---

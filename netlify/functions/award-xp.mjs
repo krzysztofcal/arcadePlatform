@@ -2,7 +2,9 @@ import crypto from "node:crypto";
 import { store } from "./_shared/store-upstash.mjs";
 
 const asNumber = (raw, fallback) => {
-  const parsed = Number(raw);
+  if (raw == null) return fallback;
+  const sanitized = typeof raw === "string" ? raw.replace(/_/g, "") : raw;
+  const parsed = Number(sanitized);
   return Number.isFinite(parsed) ? parsed : fallback;
 };
 

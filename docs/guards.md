@@ -33,7 +33,7 @@ npm run check:all
 The script fails fast when any of the tags are missing or duplicated and reports the offending pages.
 
 ### Bridge guard scope & remediation
-- **Scope:** the guard inspects every committed HTML file inside `games/`, `games-open/`, and the root playable shells (`game*.html`, `play.html`). Draft files outside those folders are ignored until they enter Git.
+- **Scope:** the guard inspects every committed HTML file inside `games/`, `games-open/`, and the root playable shells (`game*.html`, `play.html`). Draft files outside those folders are ignored until they enter Git. The list lives in `scripts/check-games-xp-hook.mjs` (`shouldInspect()`); update both the script and this doc when you add a new playable directory.
 - **What it checks:** each page must load `xp.js`, `xp-game-hook.js`, and contain exactly one inline bootstrapper that calls `GameXpBridge.auto()`. Extra copies or missing tags fail the run.
 - **How to fix failures:**
   1. Run `npm run wire:xp` to regenerate the snippet. The script preserves custom formatting but re-injects missing tags.
