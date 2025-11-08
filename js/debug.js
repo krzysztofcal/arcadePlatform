@@ -200,30 +200,51 @@
 
   async function dumpToClipboard() {
     const text = getText();
+    if (!window || typeof window.open !== "function") {
+      recordDump("window", false, { reason: "no_window" });
+      return false;
+    }
+
+    let child = null;
     try {
-      if (!window || typeof window.open !== "function") {
-        recordDump("window", false, { reason: "no_window" });
-        return false;
-      }
-      const child = window.open("", "_blank", "noopener,noreferrer");
-      if (!child || child.closed) {
-        recordDump("window", false, { reason: "blocked" });
-        return false;
-      }
+      child = window.open("about:blank", "_blank");
+    } catch (_) {
+      child = null;
+    }
+
+    if (!child || child.closed) {
+      recordDump("window", false, { reason: "blocked" });
+      return false;
+    }
+
+    try {
+      try {
+        child.opener = null;
+      } catch (_) {}
+
       const doc = child.document;
       if (!doc) {
-        recordDump("window", false, { reason: "no_document" });
-        return false;
+        throw new Error("no_document");
       }
+
       const escaped = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-      const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Arcade Hub Diagnostics</title><style>body{font-family:monospace;background:#050910;color:#e6ecff;margin:0;padding:16px;white-space:pre-wrap;word-break:break-word;}header{font-size:14px;margin-bottom:12px;opacity:0.8;}textarea{width:100%;height:240px;margin-top:12px;background:#0b1020;color:#e6ecff;border:1px solid rgba(230,236,255,0.2);padding:8px;font-family:inherit;}</style></head><body><header>Diagnostics dump generated ${new Date().toISOString()}</header><pre>${escaped || "(no diagnostics recorded)"}</pre><textarea readonly>${escaped}</textarea></body></html>`;
-      doc.open();
-      doc.write(html);
-      doc.close();
+      const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Arcade Hub Diagnostics</title><meta name="viewport" content="width=device-width, initial-scale=1"><style>body{font-family:monospace;background:#050910;color:#e6ecff;margin:0;padding:16px;white-space:pre-wrap;word-break:break-word;}header{font-size:14px;margin-bottom:12px;opacity:0.8;}textarea{width:100%;height:240px;margin-top:12px;background:#0b1020;color:#e6ecff;border:1px solid rgba(230,236,255,0.2);padding:8px;font-family:inherit;}</style></head><body><header>Diagnostics dump generated ${new Date().toISOString()}</header><pre>${escaped || "(no diagnostics recorded)"}</pre><textarea readonly>${escaped}</textarea></body></html>`;
+
+      if (typeof doc.write === "function") {
+        doc.open();
+        doc.write(html);
+        doc.close();
+      } else {
+        doc.documentElement.innerHTML = html;
+      }
+
       recordDump("window", true, { length: text.length });
       return true;
     } catch (error) {
       const message = error && error.message ? String(error.message).slice(0, 120) : "error";
+      try {
+        child.close();
+      } catch (_) {}
       recordDump("window", false, { reason: message });
       return false;
     }
