@@ -303,4 +303,20 @@ function createEnvironment(options = {}) {
   assert.equal(stopCalls, 1, 'queued stop should flush once XP becomes available');
 }
 
+// Stop followed by start before XP initializes should leave the last start active
+{
+  const env = createEnvironment();
+  const { Bridge, drainTimers, installXp } = env;
+
+  Bridge.start('game-a');
+  Bridge.stop({ flush: true });
+  Bridge.start('game-b');
+
+  const { getState } = installXp();
+  drainTimers();
+
+  assert.equal(getState().running, true, 'queued start should run after pending stop');
+  assert.equal(getState().gameId, 'game-b', 'latest queued start should determine the running session');
+}
+
 console.log('xp-game-hook tests passed');

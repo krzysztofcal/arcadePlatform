@@ -4,6 +4,9 @@
   const MAX_SCORE_DELTA = 10_000;
   const DEFAULT_GAME_ID = "game";
 
+  const MIN_FLUSH_DELAY_MS = 16;
+  const MAX_FLUSH_DELAY_MS = 1000;
+
   const state = {
     remainder: 0,
     queuedWhole: 0,
@@ -13,6 +16,7 @@
     lastGameId: null,
     autoListenersBound: false,
     flushScheduled: false,
+    flushDelayMs: MIN_FLUSH_DELAY_MS,
     domReadyListenerBound: false,
     handleVisible: null,
   };
@@ -23,14 +27,24 @@
     return xp;
   }
 
-  function scheduleFlush() {
+  function scheduleFlush(delay = state.flushDelayMs || MIN_FLUSH_DELAY_MS) {
     if (!window || typeof window.setTimeout !== "function") return;
     if (state.flushScheduled) return;
     state.flushScheduled = true;
     window.setTimeout(() => {
       state.flushScheduled = false;
-      flush();
-    }, 0);
+      const success = flush();
+      if (success) {
+        state.flushDelayMs = MIN_FLUSH_DELAY_MS;
+      } else {
+        const nextDelay = Math.min(
+          MAX_FLUSH_DELAY_MS,
+          Math.max(MIN_FLUSH_DELAY_MS, (state.flushDelayMs || MIN_FLUSH_DELAY_MS) * 2),
+        );
+        state.flushDelayMs = nextDelay;
+        scheduleFlush(nextDelay);
+      }
+    }, delay);
   }
 
   function normalizeGameId(value) {
@@ -75,17 +89,16 @@
   function flush() {
     const xp = getXp();
     if (!xp) {
-      scheduleFlush();
       return false;
     }
 
+    let didWork = false;
     if (state.pendingStopOptions) {
       try {
         xp.stopSession(state.pendingStopOptions);
       } catch (_) {}
       state.pendingStopOptions = null;
-      state.runningDesired = false;
-      return true;
+      didWork = true;
     }
 
     if (state.pendingStartGameId != null) {
@@ -93,6 +106,7 @@
         xp.startSession(state.pendingStartGameId);
       } catch (_) {}
       state.pendingStartGameId = null;
+      didWork = true;
     }
 
     if (state.queuedWhole > 0) {
@@ -102,12 +116,13 @@
         xp.addScore(amount);
       } catch (_) {
         state.queuedWhole += amount;
-        scheduleFlush();
         return false;
       }
+      didWork = true;
     }
 
-    return true;
+    if (didWork) state.flushDelayMs = MIN_FLUSH_DELAY_MS;
+    return didWork;
   }
 
   function ensureAutoListeners() {
@@ -225,7 +240,7 @@
     resetSessionAccounting();
     state.pendingStopOptions = null;
     state.pendingStartGameId = slugged;
-    flush();
+    if (!flush()) scheduleFlush();
   }
 
   /**
@@ -241,7 +256,7 @@
       opts.flush = true;
     }
     state.pendingStopOptions = opts;
-    flush();
+    if (!flush()) scheduleFlush();
   }
 
   /**
@@ -266,7 +281,7 @@
     if (usable <= 0) return;
 
     state.queuedWhole = Math.min(MAX_SCORE_DELTA, state.queuedWhole + usable);
-    flush();
+    if (!flush()) scheduleFlush();
   }
 
   /**
