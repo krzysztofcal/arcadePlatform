@@ -1,7 +1,37 @@
 (function (window, document) {
   if (typeof window === "undefined") return;
 
-  const MAX_SCORE_DELTA = 10_000;
+  const DEFAULT_SCORE_DELTA_CEILING = 10_000;
+
+  function parseNumber(value, fallback) {
+    if (value == null) return fallback;
+    const sanitized = typeof value === "string" ? value.replace(/_/g, "") : value;
+    const parsed = Number(sanitized);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  }
+
+  let cachedScoreDeltaCeiling = DEFAULT_SCORE_DELTA_CEILING;
+
+  function resolveScoreDeltaCeiling() {
+    const xp = window && window.XP;
+    const candidates = [];
+    if (xp && Object.prototype.hasOwnProperty.call(xp, "scoreDeltaCeiling")) {
+      candidates.push(xp.scoreDeltaCeiling);
+    }
+    if (window && Object.prototype.hasOwnProperty.call(window, "XP_SCORE_DELTA_CEILING")) {
+      candidates.push(window.XP_SCORE_DELTA_CEILING);
+    }
+
+    for (let i = 0; i < candidates.length; i += 1) {
+      const parsed = parseNumber(candidates[i], NaN);
+      if (Number.isFinite(parsed) && parsed > 0) {
+        cachedScoreDeltaCeiling = parsed;
+        return cachedScoreDeltaCeiling;
+      }
+    }
+
+    return cachedScoreDeltaCeiling;
+  }
   const DEFAULT_GAME_ID = "game";
 
   const MIN_FLUSH_DELAY_MS = 16;
@@ -99,6 +129,11 @@
       } catch (_) {}
       state.pendingStopOptions = null;
       didWork = true;
+    }
+
+    const ceiling = resolveScoreDeltaCeiling();
+    if (state.queuedWhole > ceiling) {
+      state.queuedWhole = ceiling;
     }
 
     if (state.pendingStartGameId != null) {
@@ -275,12 +310,13 @@
 
     state.remainder -= whole;
 
-    const usable = Math.min(whole, MAX_SCORE_DELTA);
+    const maxScoreDelta = resolveScoreDeltaCeiling();
+    const usable = Math.min(whole, maxScoreDelta);
     const unused = whole - usable;
     if (unused > 0) state.remainder += unused;
     if (usable <= 0) return;
 
-    state.queuedWhole = Math.min(MAX_SCORE_DELTA, state.queuedWhole + usable);
+    state.queuedWhole = Math.min(maxScoreDelta, state.queuedWhole + usable);
     if (!flush()) scheduleFlush();
   }
 
