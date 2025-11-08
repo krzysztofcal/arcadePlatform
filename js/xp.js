@@ -1,6 +1,19 @@
 (function (window, document) {
   const CHUNK_MS = 10_000;
-  const ACTIVE_WINDOW_MS = 5_000;
+  const HARD_IDLE_MS = parseNumber(window && window.XP_HARD_IDLE_MS, 6_000);
+  const isLikelyMobile = () => {
+    try {
+      if (typeof navigator !== "undefined" && navigator && typeof navigator.userAgentData === "object" && typeof navigator.userAgentData.mobile === "boolean") {
+        return navigator.userAgentData.mobile;
+      }
+      if (typeof navigator !== "undefined" && navigator && typeof navigator.userAgent === "string") {
+        return /Android|iPhone|iPad|iPod|Mobile|IEMobile|BlackBerry/i.test(navigator.userAgent);
+      }
+    } catch (_) {}
+    return false;
+  };
+  const DEFAULT_ACTIVE_WINDOW_MS = isLikelyMobile() ? 3_000 : 5_000;
+  const ACTIVE_WINDOW_MS = parseNumber(window && window.XP_ACTIVE_WINDOW_MS, DEFAULT_ACTIVE_WINDOW_MS);
   const CACHE_KEY = "kcswh:xp:last";
 
   const LEVEL_BASE_XP = 100;
@@ -45,6 +58,7 @@
     snapshot: null,
     scoreDelta: 0,
     scoreDeltaRemainder: 0,
+    lastTrustedInputTs: 0,
     regen: {
       carry: 0,
       momentum: 0,
@@ -424,7 +438,14 @@
     }
 
     const frameDelta = delta || TICK_MS;
-    const activityRatio = getCurrentActivityRatio(now, frameDelta);
+    let activityRatio = 0;
+    const lastTrusted = Number(state.lastTrustedInputTs) || 0;
+    if (lastTrusted && (now - lastTrusted) > HARD_IDLE_MS) {
+      state.activeUntil = now;
+      activityRatio = 0;
+    } else {
+      activityRatio = getCurrentActivityRatio(now, frameDelta);
+    }
     awardLocalXp(activityRatio);
     flushXp(false).catch(() => {});
   }
@@ -482,6 +503,10 @@
   function nudge() {
     state.activeUntil = Date.now() + ACTIVE_WINDOW_MS;
     state.inputEvents += 1;
+  }
+
+  function recordTrustedInput() {
+    state.lastTrustedInputTs = Date.now();
   }
 
   function addScore(delta) {
@@ -777,6 +802,7 @@
           if (event.origin && typeof location !== "undefined" && event.origin !== location.origin) return;
           if (event.data.type !== "kcswh:activity") return;
           if (event.data.userGesture !== true) return;
+          if (typeof navigator !== "undefined" && navigator.userActivation && navigator.userActivation.isActive !== true) return;
 
           const now = Date.now();
           if (now - __lastNudgeTs < 100) return; // ~10/sec
@@ -799,20 +825,27 @@
           case "pointerdown":
           case "touchstart":
           case "keydown":
-          case "wheel":
             return true;
+          case "wheel":
+            return !isLikelyMobile();
           // Explicitly ignore move/hover; too noisy and often synthetic in headless runs
           case "pointermove":
           case "mousemove":
           default:
             return false;
-        }
+      }
       }
 
-      ["pointerdown","keydown","wheel","touchstart" /* no 'pointermove' */].forEach(evt => {
+      const baseEvents = ["pointerdown","keydown","touchstart"]; // always track
+      const wheelEvents = isLikelyMobile() ? [] : ["wheel"];
+      baseEvents.concat(wheelEvents).forEach(evt => {
         try {
           window.addEventListener(evt, (ev) => {
-            try { if (isRealUserGesture(ev) && typeof nudge === "function") nudge(); } catch(_) {}
+            try {
+              if (!isRealUserGesture(ev)) return;
+              recordTrustedInput();
+              if (typeof nudge === "function") nudge();
+            } catch(_) {}
           }, { passive: true });
         } catch(_) {}
       });
