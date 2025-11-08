@@ -184,7 +184,7 @@
     return adminActive;
   }
 
-  function recordClipboard(method, success, extra) {
+  function recordDump(method, success, extra) {
     const payload = { method, success: !!success };
     if (extra && typeof extra === "object") {
       Object.keys(extra).forEach((key) => {
@@ -194,111 +194,39 @@
       });
     }
     try {
-      log("clipboard", payload);
+      log("diagnostic_dump", payload);
     } catch (_) {}
-  }
-
-  function isSecureProtocol() {
-    try {
-      return !!(window && window.location && window.location.protocol === "https:");
-    } catch (_) {
-      return false;
-    }
-  }
-
-  function isSafariFamily() {
-    try {
-      if (typeof navigator === "undefined" || !navigator) return false;
-      const ua = navigator.userAgent || "";
-      const vendor = navigator.vendor || "";
-      const isAppleVendor = /apple/i.test(vendor);
-      const isIOS = /iPad|iPhone|iPod/.test(ua);
-      const isSafari = /Safari/i.test(ua) && !/Chrome|CriOS|Edg|OPR/i.test(ua);
-      return isIOS || (isAppleVendor && isSafari);
-    } catch (_) {
-      return false;
-    }
-  }
-
-  function legacyCopyToClipboard(text) {
-    if (typeof document === "undefined") return false;
-    let textarea;
-    try {
-      textarea = document.createElement("textarea");
-      textarea.value = text;
-      textarea.setAttribute("readonly", "true");
-      textarea.style.position = "fixed";
-      textarea.style.top = "-200px";
-      textarea.style.opacity = "0";
-      const root = document.body || document.documentElement;
-      if (!root) return false;
-      root.appendChild(textarea);
-      const selection = document.getSelection ? document.getSelection() : null;
-      let previousRange = null;
-      if (selection && selection.rangeCount > 0) {
-        previousRange = selection.getRangeAt(0);
-      }
-      if (typeof textarea.focus === "function") {
-        textarea.focus();
-      }
-      if (typeof textarea.select === "function") {
-        textarea.select();
-      }
-      if (typeof textarea.setSelectionRange === "function") {
-        textarea.setSelectionRange(0, textarea.value.length);
-      }
-      const success = typeof document.execCommand === "function" && document.execCommand("copy");
-      if (selection) {
-        selection.removeAllRanges();
-        if (previousRange) {
-          selection.addRange(previousRange);
-        }
-      }
-      textarea.remove();
-      return !!success;
-    } catch (_) {
-      try {
-        if (textarea && textarea.parentNode) {
-          textarea.parentNode.removeChild(textarea);
-        }
-      } catch (_) {}
-      return false;
-    }
   }
 
   async function dumpToClipboard() {
     const text = getText();
-    if (!isSecureProtocol()) {
-      recordClipboard("skip", false, { reason: "insecure" });
+    try {
+      if (!window || typeof window.open !== "function") {
+        recordDump("window", false, { reason: "no_window" });
+        return false;
+      }
+      const child = window.open("", "_blank", "noopener,noreferrer");
+      if (!child || child.closed) {
+        recordDump("window", false, { reason: "blocked" });
+        return false;
+      }
+      const doc = child.document;
+      if (!doc) {
+        recordDump("window", false, { reason: "no_document" });
+        return false;
+      }
+      const escaped = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Arcade Hub Diagnostics</title><style>body{font-family:monospace;background:#050910;color:#e6ecff;margin:0;padding:16px;white-space:pre-wrap;word-break:break-word;}header{font-size:14px;margin-bottom:12px;opacity:0.8;}textarea{width:100%;height:240px;margin-top:12px;background:#0b1020;color:#e6ecff;border:1px solid rgba(230,236,255,0.2);padding:8px;font-family:inherit;}</style></head><body><header>Diagnostics dump generated ${new Date().toISOString()}</header><pre>${escaped || "(no diagnostics recorded)"}</pre><textarea readonly>${escaped}</textarea></body></html>`;
+      doc.open();
+      doc.write(html);
+      doc.close();
+      recordDump("window", true, { length: text.length });
+      return true;
+    } catch (error) {
+      const message = error && error.message ? String(error.message).slice(0, 120) : "error";
+      recordDump("window", false, { reason: message });
       return false;
     }
-
-    const shouldPreferLegacy = isSafariFamily();
-    let asyncAttempted = false;
-    if (!shouldPreferLegacy && typeof navigator !== "undefined" && navigator && navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
-      try {
-        asyncAttempted = true;
-        await navigator.clipboard.writeText(text);
-        recordClipboard("async", true);
-        return true;
-      } catch (error) {
-        const reason = error && error.message ? String(error.message).slice(0, 120) : "rejected";
-        recordClipboard("async", false, { reason });
-      }
-    }
-
-    const legacySuccess = legacyCopyToClipboard(text);
-    const extra = {
-      attemptedAsync: asyncAttempted && !shouldPreferLegacy,
-      forced: shouldPreferLegacy,
-    };
-    if (shouldPreferLegacy) {
-      extra.reason = "safari";
-    } else if (!asyncAttempted) {
-      extra.reason = "no_async_api";
-    }
-    recordClipboard("legacy", legacySuccess, extra);
-    return legacySuccess;
   }
 
   function downloadFile() {

@@ -111,9 +111,9 @@
             ensureRecorder();
             const attempt = window.KLog.dumpToClipboard ? window.KLog.dumpToClipboard() : false;
             Promise.resolve(attempt)
-              .then((copied) => {
-                if (copied) {
-                  showToast('Copied to clipboard');
+              .then((opened) => {
+                if (opened) {
+                  showToast('Opened diagnostics in a new tab');
                   return;
                 }
                 const downloaded = window.KLog.downloadFile ? window.KLog.downloadFile() : false;
