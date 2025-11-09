@@ -1596,14 +1596,37 @@
     flushXp,
     // Public API: dispatch an event so host integrations remain decoupled.
     requestBoost: function (multiplier, ttlMs, reason) {
-      const detail = {
-        multiplier,
-        mult: multiplier,
-        ttlMs,
-        durationMs: ttlMs,
-        reason,
-        source: reason,
-      };
+      let detail;
+      if (multiplier && typeof multiplier === "object") {
+        detail = Object.assign({}, multiplier);
+        if (detail.multiplier == null && typeof detail.mult === "number") {
+          detail.multiplier = detail.mult;
+        }
+        if (detail.mult == null && typeof detail.multiplier === "number") {
+          detail.mult = detail.multiplier;
+        }
+        if (detail.ttlMs == null && typeof detail.durationMs === "number") {
+          detail.ttlMs = detail.durationMs;
+        }
+        if (detail.durationMs == null && typeof detail.ttlMs === "number") {
+          detail.durationMs = detail.ttlMs;
+        }
+        if (detail.reason == null && typeof detail.source === "string") {
+          detail.reason = detail.source;
+        }
+        if (detail.source == null && typeof detail.reason === "string") {
+          detail.source = detail.reason;
+        }
+      } else {
+        detail = {
+          multiplier,
+          mult: multiplier,
+          ttlMs,
+          durationMs: ttlMs,
+          reason,
+          source: reason,
+        };
+      }
       try {
         const evt = typeof CustomEvent === "function"
           ? new CustomEvent("xp:boost", { detail })

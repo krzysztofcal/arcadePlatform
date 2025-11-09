@@ -248,6 +248,21 @@ assert.equal(getState().boostTimerId, null, 'legacy boost timer should clear');
 
 XP.stopSession({ flush: false });
 
+// Legacy direct-object invocation of the public wrapper should be normalized.
+freshSession('boost-legacy-direct-call');
+XP.requestBoost({ multiplier: 2, durationMs: 120, source: 'legacy-direct' });
+const directBoost = getState().boost;
+assert.equal(directBoost.multiplier, 2);
+assert.equal(directBoost.source, 'legacy-direct');
+assert(directBoost.expiresAt > Date.now());
+assert(getState().boostTimerId, 'legacy direct boost should schedule a timer');
+
+await new Promise((resolve) => setTimeout(resolve, 160));
+assert.equal(getState().boost.multiplier, 1, 'legacy direct boost should expire');
+assert.equal(getState().boostTimerId, null, 'legacy direct boost timer should clear');
+
+XP.stopSession({ flush: false });
+
 const flushStatus = XP.getFlushStatus();
 assert.equal(typeof flushStatus.pending, 'number');
 assert.equal(typeof flushStatus.lastSync, 'number');
