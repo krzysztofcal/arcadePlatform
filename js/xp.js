@@ -33,6 +33,9 @@
   const TICK_MS = parseNumber(window && window.XP_TICK_MS, 1_000);
   const ACTIVITY_EXPONENT = parseNumber(window && window.XP_ACTIVITY_EXPONENT, 1.5);
   const MAX_XP_PER_SECOND = parseNumber(window && window.XP_MAX_XP_PER_SECOND, 24);
+  const REQUIRE_SCORE_PULSE = parseNumber(window && window.XP_REQUIRE_SCORE, 1) === 1;
+  const SCORE_GRACE_MS = parseNumber(window && window.XP_SCORE_GRACE_MS, 8_000);
+  const GAME_SURFACE_SELECTOR = (window && window.XP_GAME_SURFACE_SELECTOR) || "#game, canvas, #gameFrame, #frameBox, #frameWrap, [data-game-surface]";
   const FLUSH_INTERVAL_MS = 15_000;
   const FLUSH_THRESHOLD = 50;
   const RUNTIME_CACHE_KEY = "kcswh:xp:regen";
@@ -101,7 +104,29 @@
       lastCapLog: 0,
       lastVisibilityLog: 0,
     },
+    lastScorePulseTs: 0,
   };
+
+  function isFromGameSurface(ev) {
+    try {
+      const root = document;
+      if (!root) return false;
+      const path = (ev && typeof ev.composedPath === "function") ? ev.composedPath() : null;
+      const target = (path && path.length) ? path[0] : (ev && ev.target);
+      if (!target) return false;
+      const isElement = (typeof Element !== "undefined" && target instanceof Element) || (target && target.nodeType === 1);
+      if (!isElement) return false;
+      if (typeof target.closest === "function" && target.closest(GAME_SURFACE_SELECTOR)) return true;
+
+      if (ev && ev.type === "keydown") {
+        const active = root.activeElement;
+        if (active && typeof active.closest === "function" && active.closest(GAME_SURFACE_SELECTOR)) {
+          return true;
+        }
+      }
+    } catch (_) {}
+    return false;
+  }
 
   function isDebugAdminEnabled() {
     try {
@@ -641,6 +666,7 @@
     state.activeUntil = Date.now();
     state.scoreDelta = 0;
     state.scoreDeltaRemainder = 0;
+    state.lastScorePulseTs = 0;
     if (!state.flush.lastSync) state.flush.lastSync = Date.now();
     state.debug.hardIdleActive = false;
     state.debug.lastNoHostLog = 0;
@@ -672,6 +698,7 @@
     state.activeUntil = 0;
     state.scoreDelta = 0;
     state.scoreDeltaRemainder = 0;
+    state.lastScorePulseTs = 0;
     state.debug.hardIdleActive = false;
     state.debug.lastNoHostLog = 0;
     state.debug.lastActivityLog = 0;
@@ -748,6 +775,12 @@
         });
       }
       return 0;
+    }
+    if (REQUIRE_SCORE_PULSE) {
+      const now = Date.now();
+      if (!state.lastScorePulseTs || (now - state.lastScorePulseTs) > SCORE_GRACE_MS) {
+        return 0;
+      }
     }
     const baseMultiplier = computeBaseMultiplier(activityRatio);
     const momentum = updateMomentum(activityRatio);
@@ -998,6 +1031,20 @@
         try { refreshBadgeFromStorage(); } catch (_) {}
       });
 
+      window.addEventListener("message", (event) => {
+        try {
+          if (!event || !event.data || typeof event.data !== "object") return;
+          if (event.origin && typeof location !== "undefined" && event.origin !== location.origin) return;
+          if (event.data.type !== "game-score") return;
+          if (!isGameHost()) return;
+          state.lastScorePulseTs = Date.now();
+          logDebug("score_pulse", {
+            gameId: event.data.gameId || state.gameId || "",
+            score: typeof event.data.score === "number" ? event.data.score : undefined,
+          });
+        } catch (_) {}
+      }, { passive: true });
+
       window.addEventListener("xp:boost", (event) => {
         try { requestBoost(event && event.detail); } catch (_) {}
       });
@@ -1079,6 +1126,10 @@
               if (!isRealUserGesture(ev)) return;
               if (!state.running) return;
               if (!isGameHost()) return;
+              if (!isFromGameSurface(ev)) {
+                logDebug("ignore_input_outside_surface", { type: ev && ev.type });
+                return;
+              }
               recordTrustedInput();
               if (typeof nudge === "function") nudge();
             } catch(_) {}
