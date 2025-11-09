@@ -53,13 +53,31 @@ const documentStub = {
       querySelector() { return null; },
     };
   },
+  createEvent(type) {
+    return {
+      type,
+      detail: null,
+      initCustomEvent(eventType, _bubbles, _cancelable, detail) {
+        this.type = eventType;
+        this.detail = detail;
+      },
+    };
+  },
   dispatchEvent() {},
 };
 
 const windowStub = {
   localStorage: {
-    getItem() { return null; },
-    setItem() {},
+    __store: new Map(),
+    getItem(key) {
+      return this.__store.has(key) ? this.__store.get(key) : null;
+    },
+    setItem(key, value) {
+      this.__store.set(key, String(value));
+    },
+    removeItem(key) {
+      this.__store.delete(key);
+    },
   },
   addEventListener(type, handler) {
     windowListeners.set(type, handler);
@@ -72,6 +90,14 @@ const windowStub = {
   setTimeout,
   clearTimeout,
   console,
+  dispatchEvent(evt) {
+    if (!evt || !evt.type) return false;
+    const handler = windowListeners.get(evt.type);
+    if (typeof handler === 'function') {
+      handler(evt);
+    }
+    return true;
+  },
 };
 windowStub.document = documentStub;
 windowStub.location = { origin: 'https://example.test' };
@@ -86,6 +112,19 @@ const context = {
   Date,
   Event,
 };
+
+class CustomEventShim {
+  constructor(type, init = {}) {
+    this.type = type;
+    this.detail = init && init.detail;
+  }
+}
+
+const previousCustomEvent = globalThis.CustomEvent;
+if (typeof previousCustomEvent !== 'function') {
+  globalThis.CustomEvent = CustomEventShim;
+}
+context.CustomEvent = globalThis.CustomEvent;
 
 vm.createContext(context);
 new vm.Script(instrumented, { filename: 'xp.js' }).runInContext(context);
@@ -166,4 +205,58 @@ triggerVisibilityChange();
 assert.equal(getState().scoreDeltaRemainder, 0);
 setVisibility(false);
 
+// Boost via public API should dispatch event, schedule a timer, and persist across stop/resume.
+freshSession('boost-public');
+const boostStart = Date.now();
+XP.requestBoost(2, 500, 'unit-test');
+const initialBoost = getState().boost;
+assert.equal(initialBoost.multiplier, 2);
+assert.equal(initialBoost.source, 'unit-test');
+assert(initialBoost.expiresAt > boostStart);
+assert(initialBoost.expiresAt - boostStart >= 500 && initialBoost.expiresAt - boostStart < 800);
+const firstTimer = getState().boostTimerId;
+assert(firstTimer, 'boost timer should be scheduled');
+
+XP.stopSession({ flush: false });
+assert.equal(getState().boostTimerId, null, 'boost timer should clear on stop');
+assert.equal(getState().boost.multiplier, 2, 'boost should persist after stop');
+
+XP.startSession('boost-public-resume');
+const resumed = getState();
+assert(resumed.boostTimerId, 'boost timer should reschedule on resume');
+assert.notEqual(resumed.boostTimerId, firstTimer, 'boost timer should refresh on resume');
+
+const waitForExpiry = Math.max(0, resumed.boost.expiresAt - Date.now() + 20);
+await new Promise((resolve) => setTimeout(resolve, waitForExpiry));
+assert.equal(getState().boost.multiplier, 1, 'boost should reset after expiration');
+assert.equal(getState().boostTimerId, null, 'boost timer should clear after expiration');
+
+// Legacy bridge payloads should continue to work via xp:boost events.
+const boostHandler = windowListeners.get('xp:boost');
+assert.equal(typeof boostHandler, 'function', 'xp:boost listener missing');
+boostHandler({ detail: { multiplier: 3, durationMs: 60, source: 'legacy-source' } });
+const legacyBoost = getState().boost;
+assert.equal(legacyBoost.multiplier, 3);
+assert.equal(legacyBoost.source, 'legacy-source');
+assert(legacyBoost.expiresAt > Date.now());
+const legacyTimer = getState().boostTimerId;
+assert(legacyTimer, 'legacy boost should schedule a timer');
+
+await new Promise((resolve) => setTimeout(resolve, 80));
+assert.equal(getState().boost.multiplier, 1, 'legacy boost should expire');
+assert.equal(getState().boostTimerId, null, 'legacy boost timer should clear');
+
+XP.stopSession({ flush: false });
+
+const flushStatus = XP.getFlushStatus();
+assert.equal(typeof flushStatus.pending, 'number');
+assert.equal(typeof flushStatus.lastSync, 'number');
+assert.equal(typeof flushStatus.inflight, 'boolean');
+
 console.log('xp-client tests passed');
+
+if (typeof previousCustomEvent !== 'function') {
+  delete globalThis.CustomEvent;
+} else {
+  globalThis.CustomEvent = previousCustomEvent;
+}

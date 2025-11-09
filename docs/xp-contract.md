@@ -7,6 +7,7 @@ Global `window.XP` provides:
 - `nudge(): void`
 - `requestBoost(multiplier: number, ttlMs?: number, reason?: string): void` (dispatches an `xp:boost` event; still accepts legacy `{ durationMs, source }` detail payloads.)
 - `getFlushStatus(): { pending: number, lastSync: number, inflight?: boolean }`
+- Boosts persist while `XP.stopSession()` is called, but boost timers are paused; they are rescheduled on the next `startSession()`/resume if the original TTL has not expired.
 
 Lifecycle listeners (pagehide/beforeunload/pageshow/visibilitychange) must be
 centralized in `js/xp.js`. Any temporary exception must include a same-line comment:

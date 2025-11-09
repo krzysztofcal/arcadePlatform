@@ -1012,6 +1012,15 @@
     state.debug.lastCapLog = 0;
     state.debug.lastVisibilityLog = 0;
     state.debug.lastAwardSkipLog = 0;
+
+    clearExpiredBoost();
+    if (!state.boostTimerId && state.boost && Number(state.boost.multiplier) > 1) {
+      if (state.boost.expiresAt && state.boost.expiresAt > Date.now()) {
+        scheduleBoostExpiration(state.boost.expiresAt);
+      } else {
+        resetBoost();
+      }
+    }
     logDebug("xp_start", { gameId: state.gameId, isHost: true });
   }
 
@@ -1031,6 +1040,7 @@
     }
     clearTimer();
     clearBadgeTimer();
+    clearBoostTimer();
     state.phase = "idle";
     state.running = false;
     state.gameId = null;
@@ -1258,40 +1268,49 @@
 
   // Internal boost setter supports both the new `(multiplier, ttlMs, reason)`
   // signature and legacy detail objects dispatched with `durationMs/source`.
-  function requestBoost(multiplier, ttlMs, reason) {
-    if (multiplier && typeof multiplier === "object") {
-      const detail = multiplier;
-      multiplier = detail.multiplier;
-      if (multiplier == null) multiplier = detail.mult;
-      ttlMs = detail.ttlMs;
-      if (ttlMs == null) ttlMs = detail.durationMs;
-      reason = detail.reason;
-      if (reason == null) reason = detail.source;
+  function requestBoost(multiplierOrDetail, ttlMs, reason) {
+    let rawMultiplier = multiplierOrDetail;
+    let rawTtl = ttlMs;
+    let rawSource = reason;
+
+    if (multiplierOrDetail && typeof multiplierOrDetail === "object") {
+      const detail = multiplierOrDetail;
+      rawMultiplier = detail.multiplier;
+      if (rawMultiplier == null) rawMultiplier = detail.mult;
+      rawTtl = detail.ttlMs;
+      if (rawTtl == null) rawTtl = detail.durationMs;
+      rawSource = detail.reason;
+      if (rawSource == null) rawSource = detail.source;
     }
 
-    const fallbackMultiplier = state.boost && state.boost.multiplier ? state.boost.multiplier : 1;
-    const parsedMultiplier = parseNumber(multiplier, fallbackMultiplier) || 1;
-    if (!Number.isFinite(parsedMultiplier) || parsedMultiplier <= 1) {
+    const fallbackMultiplier = state.boost && Number(state.boost.multiplier) > 1
+      ? state.boost.multiplier
+      : 1;
+    const parsedMultiplier = parseNumber(rawMultiplier, fallbackMultiplier) || fallbackMultiplier || 1;
+    const multiplier = Number.isFinite(parsedMultiplier) ? Math.max(1, parsedMultiplier) : 1;
+    if (multiplier <= 1) {
       resetBoost();
       return;
     }
 
-    const parsedTtl = parseNumber(ttlMs, 0) || 0;
+    const parsedTtl = parseNumber(rawTtl, 0) || 0;
     const ttl = Number.isFinite(parsedTtl) ? Math.max(0, parsedTtl) : 0;
     const now = Date.now();
     const expiresAt = now + (ttl > 0 ? ttl : 15_000);
-    const source = reason == null ? null : reason;
+    const source = rawSource == null ? null : String(rawSource);
 
     state.boost = {
-      multiplier: Math.max(1, parsedMultiplier),
+      multiplier,
       expiresAt,
       source,
     };
-    persistRuntimeState();
+
     scheduleBoostExpiration(expiresAt);
+
+    persistRuntimeState();
   }
 
-  function getFlushStatus() {
+  function readFlushStatus() {
     return {
       pending: Math.max(0, state.flush.pending || 0),
       lastSync: state.flush.lastSync || 0,
@@ -1604,7 +1623,7 @@
     },
     // Public probe: surface pending + lastSync while keeping legacy inflight flag.
     getFlushStatus: function () {
-      const status = getFlushStatus();
+      const status = readFlushStatus();
       return {
         pending: status && typeof status.pending === "number" ? status.pending : 0,
         lastSync: status && typeof status.lastSync === "number" ? status.lastSync : 0,
