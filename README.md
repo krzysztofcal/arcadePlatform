@@ -49,6 +49,11 @@ The helper survives soft navigations—if you’re swapping views inside an SPA,
 - Timestamps are monotonic per page so BFCache restores or retries never replay stale payloads. When a 422 `delta_out_of_range` arrives the bridge backs off briefly, fetches status, and adopts the advertised cap before retrying.
 - Metadata excludes core identifiers (`userId`, `sessionId`, `delta`, `ts`) automatically and still flows when `localStorage` or `crypto.randomUUID` are blocked (private browsing fallbacks).
 
+#### XPClient contract (important)
+- `XPClient.postWindow(payload)` returns the parsed success payload on **2xx** responses.
+- The helper **throws** an `Error` on non-2xx HTTP responses (for example `422 delta_out_of_range`, `500`) and on transport failures. The error message includes the server-provided `error` field when available.
+- Callers must wrap invocations in `try/catch` if they need to handle failures gracefully.
+
 #### Server gates & debug
 - `award-xp.mjs` validates the JSON body, tolerates legacy `scoreDelta` / `pointsPerPeriod` fields, and enforces `XP_DELTA_CAP` plus the daily (`XP_DAILY_CAP`) and per-session (`XP_SESSION_CAP`) ceilings.
 - Requests are rejected when the timestamp is stale (`status: "stale"`), another tab owns the lock (`status: "locked"`), metadata is malformed/oversized, or the optional activity guard blocks idle deltas.

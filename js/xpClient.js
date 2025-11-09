@@ -188,14 +188,19 @@
     if (metadata) body.metadata = metadata;
 
     let attempt = 0;
-    let lastResponse = null;
     while (attempt < 2) {
       const result = await sendRequest(body);
       if (!result.ok) {
         if (result.status === 422 && result.body && result.body.error === "delta_out_of_range") {
           clampAfterServerCap(body, result.body);
+          const capMsg = Number.isFinite(result.body.capDelta || result.body.cap)
+            ? ` (cap=${result.body.capDelta ?? result.body.cap})`
+            : "";
+          throw new Error(`XP request failed: delta_out_of_range${capMsg}`);
         }
-        return result;
+        const serverMsg = result.body?.error || result.error?.message || "unknown_error";
+        const code = result.status ?? 0;
+        throw new Error(`XP request failed: ${serverMsg} (status ${code})`);
       }
 
       const responseBody = result.body || {};
@@ -204,12 +209,11 @@
         await new Promise(resolve => setTimeout(resolve, 100 + Math.floor(Math.random() * 200)));
         body.ts = sanitizeTs({ ts: Math.max(Date.now(), body.ts + 1) });
         attempt += 1;
-        lastResponse = responseBody;
         continue;
       }
       return responseBody;
     }
-    return lastResponse || { ok: false, network: true, status: 0 };
+    throw new Error("XP request failed: exhausted retries");
   }
 
   async function fetchStatus() {
