@@ -109,7 +109,7 @@ function countInlineBridgeScripts(source) {
       .replace(/^<script\b[^>]*>/i, "")
       .replace(/<\/script>\s*$/i, "");
     const js = stripJsComments(inner);
-    if (js.includes("GameXpBridge.auto(")) {
+    if (/(?:GameXpBridge\.auto|bridge\.auto)\s*\(/.test(js)) {
       count += 1;
     }
   }

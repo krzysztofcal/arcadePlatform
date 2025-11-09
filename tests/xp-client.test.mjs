@@ -25,6 +25,17 @@ const documentStub = {
   readyState: 'complete',
   hidden: false,
   visibilityState: 'visible',
+  body: {
+    dataset: { gameHost: '', gameSlug: 'unit-test', gameId: 'unit-test' },
+    hasAttribute(name) {
+      return name === 'data-game-host';
+    },
+    getAttribute(name) {
+      if (name === 'data-game-id') return 'unit-test';
+      if (name === 'data-game-host') return '';
+      return null;
+    },
+  },
   addEventListener(type, handler) {
     docListeners.set(type, handler);
   },

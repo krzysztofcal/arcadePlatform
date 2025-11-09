@@ -41,36 +41,16 @@
   const HOST_SLUG_PATTERN = /^(2048|pacman|tetris|t-rex)$/i;
 
   function __isGameHost() {
+    if (typeof window !== "undefined" && window && window.XP_IS_GAME_HOST) return true;
+    if (typeof document === "undefined" || !document || !document.body) return false;
+    if (typeof document.body.hasAttribute === "function" && document.body.hasAttribute("data-game-host")) return true;
     try {
-      if (typeof window !== "undefined" && window && window.XP_IS_GAME_HOST) return true;
-      if (typeof document === "undefined" || !document) return true;
-      const body = document.body;
-      if (!body) return true;
-      if (typeof body.hasAttribute === "function" && body.hasAttribute("data-game-host")) return true;
-      if (body.dataset) {
-        if (Object.prototype.hasOwnProperty.call(body.dataset, "gameHost")) {
-          const flag = body.dataset.gameHost;
-          if (flag === "" || flag === "true" || flag === "1") return true;
-        }
-        if (body.dataset.gameId) return true;
-        if (body.dataset.gameSlug) return true;
-      }
-      if (typeof document.getElementById === "function") {
-        if (document.getElementById("gameFrame") || document.getElementById("frameBox") || document.getElementById("frameWrap")) {
-          return true;
-        }
-      }
-      const slug = (body.dataset && (body.dataset.gameSlug || body.dataset.gameId))
-        || (typeof location !== "undefined" && location && typeof location.pathname === "string"
-          ? location.pathname.split("/").filter(Boolean).slice(-1)[0] || ""
-          : "");
-      if (slug && HOST_SLUG_PATTERN.test(slug)) {
-        return true;
-      }
+      const slug = document.body.dataset?.gameSlug
+        || (location.pathname.split("/").filter(Boolean).slice(-1)[0] || "");
+      return HOST_SLUG_PATTERN.test(slug);
     } catch (_) {
       return false;
     }
-    return false;
   }
 
   const HOST_PAGE = __isGameHost();
@@ -206,7 +186,7 @@
   function ensureDebugRecorderPrimed() {
     const logger = getDebugLogger();
     if (!logger) return false;
-    let admin = true;
+    let admin = false;
     if (typeof logger.isAdmin === "function") {
       try {
         admin = !!logger.isAdmin();
@@ -1521,6 +1501,7 @@
   init();
 
   window.XP = Object.assign({}, window.XP || {}, {
+    __hostPage: HOST_PAGE,
     startSession,
     stopSession,
     nudge,
@@ -1539,6 +1520,7 @@
 // --- XP resume polyfill (idempotent) ---
 (function () {
   if (typeof window === 'undefined') return;
+  if (!window.XP || window.XP.__hostPage === false) return;
   if (!window.XP) return;
   if (window.XP.__xpResumeWired) return; // already wired
 
@@ -1602,6 +1584,7 @@
 
 (function () {
   if (typeof window === 'undefined' || typeof document === 'undefined') return;
+  if (!window.XP || window.XP.__hostPage === false) return;
   if (!window.XP) return;
   if (window.XP.__xpLifecycleWired) return;
   window.XP.__xpLifecycleWired = true;

@@ -52,6 +52,14 @@
   };
 
   let autoBootedSlug = null;
+  let autoBootstrapped = false;
+
+  function ensureAutoBootstrapped() {
+    if (autoBootstrapped) return;
+    autoBootstrapped = true;
+    ensureAutoListeners();
+    ensureDomReadyKickoff();
+  }
 
   function isHostDocument() {
     try {
@@ -280,18 +288,17 @@
   function auto(gameId) {
     const resolved = normalizeGameId(gameId) || detectGameId();
     const slugged = slugifyGameId(resolved);
-    if (autoBootedSlug && slugged && slugged === autoBootedSlug) {
-      return;
-    }
     if (!isHostDocument()) {
       if (slugged) {
         autoBootedSlug = slugged;
       }
       return;
     }
-    ensureAutoListeners();
-    ensureDomReadyKickoff();
+    ensureAutoBootstrapped();
     if (!slugged) {
+      return;
+    }
+    if (autoBootedSlug && slugged === autoBootedSlug) {
       return;
     }
     autoBootedSlug = slugged;
@@ -310,6 +317,7 @@
       state.pendingStartGameId = null;
       return;
     }
+    ensureAutoListeners();
     const xp = getXp();
     state.lastGameId = slugged;
     const running = xp && typeof xp.isRunning === "function" ? !!xp.isRunning() : false;

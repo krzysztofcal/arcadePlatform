@@ -160,7 +160,27 @@
   <script src="/js/debug.js" defer></script>
   <script src="/js/xp.js" defer></script>
   <script src="/js/xp-game-hook.js" defer></script>
-  <script>(function start(gameId){const MAX_ATTEMPTS=8;const BASE_DELAY=75;let attempts=0;function tryStart(){if(window.__xpAutoBooted)return;if(window.GameXpBridge&&typeof window.GameXpBridge.auto==='function'){try{window.GameXpBridge.auto(gameId);window.__xpAutoBooted=true;return;}catch(_){}}if(attempts>=MAX_ATTEMPTS)return;attempts+=1;const delay=Math.min(500,BASE_DELAY*(attempts+1));window.setTimeout(tryStart,delay);}tryStart();if(document.readyState==='loading'){document.addEventListener('DOMContentLoaded',tryStart,{once:true});}else{window.setTimeout(tryStart,0);}window.addEventListener('load',tryStart,{once:true});})();</script>
+  <script>
+    if (!window.__xpAutoBooted) {
+      window.__xpAutoBooted = true;
+      let tries = 0;
+      function boot() {
+        const bridge = window.GameXpBridge;
+        if (bridge && typeof bridge.auto === "function") {
+          bridge.auto();
+          return;
+        }
+        if (tries++ >= 5) return;
+        window.setTimeout(boot, Math.min(50 * tries, 200));
+      }
+      if (document.readyState === "complete") {
+        boot();
+      } else {
+        window.addEventListener("DOMContentLoaded", boot, { once: true });
+        window.addEventListener("load", boot, { once: true });
+      }
+    }
+  </script>
 </body>
 </html>
 

@@ -84,7 +84,27 @@ function ensureSnippet(content, absPath, relPath) {
   const snippet =
     `${leadingNewline}${indent}<script src="${xpSrc}" defer></script>` +
     `\n${indent}<script src="${hookSrc}" defer></script>` +
-    `\n${indent}<script>(function start(gameId){const MAX_ATTEMPTS=8;const BASE_DELAY=75;let attempts=0;function tryStart(){if(window.__xpAutoBooted)return;if(window.GameXpBridge&&typeof window.GameXpBridge.auto==='function'){try{window.GameXpBridge.auto(gameId);window.__xpAutoBooted=true;return;}catch(_){}}if(attempts>=MAX_ATTEMPTS)return;attempts+=1;const delay=Math.min(500,BASE_DELAY*(attempts+1));window.setTimeout(tryStart,delay);}tryStart();if(document.readyState==='loading'){document.addEventListener('DOMContentLoaded',tryStart,{once:true});}else{window.setTimeout(tryStart,0);}window.addEventListener('load',tryStart,{once:true});})();</script>\n`;
+    `\n${indent}<script>\n` +
+    `${indent}  if (!window.__xpAutoBooted) {\n` +
+    `${indent}    window.__xpAutoBooted = true;\n` +
+    `${indent}    let tries = 0;\n` +
+    `${indent}    function boot() {\n` +
+    `${indent}      const bridge = window.GameXpBridge;\n` +
+    `${indent}      if (bridge && typeof bridge.auto === "function") {\n` +
+    `${indent}        bridge.auto();\n` +
+    `${indent}        return;\n` +
+    `${indent}      }\n` +
+    `${indent}      if (tries++ >= 5) return;\n` +
+    `${indent}      window.setTimeout(boot, Math.min(50 * tries, 200));\n` +
+    `${indent}    }\n` +
+    `${indent}    if (document.readyState === "complete") {\n` +
+    `${indent}      boot();\n` +
+    `${indent}    } else {\n` +
+    `${indent}      window.addEventListener("DOMContentLoaded", boot, { once: true });\n` +
+    `${indent}      window.addEventListener("load", boot, { once: true });\n` +
+    `${indent}    }\n` +
+    `${indent}  }\n` +
+    `${indent}</script>\n`;
   return before + snippet + after;
 }
 
