@@ -84,12 +84,12 @@
   }
 
   function slugifyGameId(value) {
-    if (!value) return DEFAULT_GAME_ID;
+    if (!value) return null;
     const lowered = String(value).trim().toLowerCase();
-    if (!lowered) return DEFAULT_GAME_ID;
+    if (!lowered) return null;
     const dashed = lowered.replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
     const limited = dashed.slice(0, 64);
-    return limited || DEFAULT_GAME_ID;
+    return limited || null;
   }
 
   function detectGameId() {
@@ -108,7 +108,7 @@
     const title = document && normalizeGameId(document.title);
     if (title) return title;
 
-    return DEFAULT_GAME_ID;
+    return null;
   }
 
   function resetSessionAccounting() {
@@ -258,6 +258,7 @@
    */
   function auto(gameId) {
     const resolved = normalizeGameId(gameId) || detectGameId();
+    if (!resolved) return;
     start(resolved);
     ensureAutoListeners();
     ensureDomReadyKickoff();
@@ -270,6 +271,11 @@
   function start(gameId) {
     const resolved = normalizeGameId(gameId) || detectGameId();
     const slugged = slugifyGameId(resolved);
+    if (!slugged) {
+      state.runningDesired = false;
+      state.pendingStartGameId = null;
+      return;
+    }
     const xp = getXp();
     state.lastGameId = slugged;
     const running = xp && typeof xp.isRunning === "function" ? !!xp.isRunning() : false;

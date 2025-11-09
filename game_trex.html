@@ -84,7 +84,7 @@
           <button id="restart" type="button">Restart</button>
         </div>
 
-        <canvas id="game"></canvas>
+        <canvas id="game" data-game-surface></canvas>
 
         <p class="game-credit">T-Rex Runner © <a href="https://github.com/wayou/t-rex-runner" target="_blank" rel="noopener">wayou</a> — MIT License</p>
       </div>
@@ -124,7 +124,26 @@
   <script src="/js/debug.js" defer></script>
   <script src="/js/xp.js" defer></script>
   <script src="/js/xp-game-hook.js" defer></script>
-  <script>(function start(){if(window.GameXpBridge?.auto)return void window.GameXpBridge.auto();if(document.readyState==='complete'||document.readyState==='interactive')return setTimeout(start,0);addEventListener('DOMContentLoaded',start,{once:true});})();</script>
+  <script>
+    (function start() {
+      let retries = 0;
+      const begin = () => {
+        if (window.GameXpBridge && typeof window.GameXpBridge.auto === 'function') {
+          try { window.GameXpBridge.auto('t-rex'); } catch (_) {}
+          return;
+        }
+        if (retries < 20) {
+          retries += 1;
+          window.setTimeout(begin, 50);
+        }
+      };
+      if (document.readyState === 'complete' || document.readyState === 'interactive') {
+        begin();
+      } else {
+        document.addEventListener('DOMContentLoaded', begin, { once: true });
+      }
+    })();
+  </script>
 </body>
 </html>
 

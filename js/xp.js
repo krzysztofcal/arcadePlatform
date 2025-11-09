@@ -28,6 +28,16 @@
     return Number.isFinite(parsed) ? parsed : fallback;
   }
 
+  function normalizeGameId(value) {
+    if (value == null) return "";
+    try {
+      const text = String(value);
+      return text ? text.trim() : "";
+    } catch (_) {
+      return "";
+    }
+  }
+
   const MAX_SCORE_DELTA = parseNumber(window && window.XP_SCORE_DELTA_CEILING, DEFAULT_SCORE_DELTA_CEILING);
   const BASELINE_XP_PER_SECOND = parseNumber(window && window.XP_BASELINE_XP_PER_SECOND, 10);
   const TICK_MS = parseNumber(window && window.XP_TICK_MS, 1_000);
@@ -683,7 +693,7 @@
       return;
     }
 
-    const activeGameId = state.gameId || "game";
+    const activeGameId = normalizeGameId(state.gameId);
     if (!activeGameId) {
       logDebug("drop_mismatched_gameid", { expected: state.gameId || null, payloadGameId: null });
       return;
@@ -821,7 +831,12 @@
       activityRatio = 0;
     }
 
-    let isActive = hasRecentInput && (hasEvents || hasScore);
+    let isActive = false;
+    if (hasScore) {
+      isActive = true;
+    } else if (hasRecentInput && hasEvents) {
+      isActive = true;
+    }
     if (state.activityWindowFrozen) {
       isActive = false;
     }
@@ -893,14 +908,25 @@
       logDebug("block_no_host", { when: "startSession" });
       return;
     }
-    const normalizedId = gameId || state.gameId || "game";
-    if (state.phase === "running") {
-      if (state.gameId === normalizedId) {
-        logDebug("xp_start_ignored", { existingGameId: state.gameId || null });
-        return;
-      }
-      logDebug("xp_restart", { previousGameId: state.gameId || null, nextGameId: normalizedId });
+    const requestedId = normalizeGameId(gameId);
+    const fallbackId = requestedId || normalizeGameId(state.gameId);
+    if (!fallbackId) {
+      logDebug("xp_start_blocked", { reason: "missing_game_id" });
+      return;
+    }
+    if (state.running && state.gameId === fallbackId) {
+      logDebug("xp_start_ignored", { existingGameId: state.gameId || null });
+      return;
+    }
+    if (state.running && state.gameId && state.gameId !== fallbackId) {
+      logDebug("xp_restart", { previousGameId: state.gameId || null, nextGameId: fallbackId });
       stopSession({ flush: true });
+      if (typeof window !== "undefined" && window && typeof window.setTimeout === "function") {
+        window.setTimeout(() => {
+          try { startSession(fallbackId); } catch (_) {}
+        }, 0);
+      }
+      return;
     }
     attachBadge();
     hydrateRuntimeState();
@@ -909,7 +935,7 @@
 
     state.phase = "running";
     state.running = true;
-    state.gameId = normalizedId;
+    state.gameId = fallbackId;
     state.windowStart = Date.now();
     state.activeMs = 0;
     state.visibilitySeconds = 0;
@@ -925,7 +951,9 @@
     state.activityWindowFrozen = false;
     state.isActive = false;
     state.sessionXp = 0;
-    state.badgeBaselineXp = resolveBadgeBaseline();
+    const baseline = resolveBadgeBaseline();
+    const currentShown = Number(state.badgeShownXp) || 0;
+    state.badgeBaselineXp = Math.max(baseline, currentShown);
     state.pendingWindow = null;
     state.lastSuccessfulWindowEnd = null;
     if (!state.flush.lastSync) state.flush.lastSync = Date.now();
@@ -1352,7 +1380,6 @@
           if (event.data.type !== "game-score") return;
           if (!isGameHost()) return;
           state.lastScorePulseTs = Date.now();
-          state.scoreDeltaSinceLastAward = Math.max(0, (state.scoreDeltaSinceLastAward || 0) + 1);
           logDebug("score_pulse", {
             gameId: event.data.gameId || state.gameId || "",
             score: typeof event.data.score === "number" ? event.data.score : undefined,
