@@ -947,7 +947,7 @@
     state.activeMs = 0;
     state.visibilitySeconds = 0;
     state.inputEvents = 0;
-    state.activeUntil = Date.now();
+    state.activeUntil = 0;
     state.scoreDelta = 0;
     state.scoreDeltaRemainder = 0;
     state.lastScorePulseTs = 0;
