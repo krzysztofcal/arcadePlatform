@@ -31,6 +31,10 @@
   const MAX_SCORE_DELTA = parseNumber(window && window.XP_SCORE_DELTA_CEILING, DEFAULT_SCORE_DELTA_CEILING);
   const BASELINE_XP_PER_SECOND = parseNumber(window && window.XP_BASELINE_XP_PER_SECOND, 10);
   const TICK_MS = parseNumber(window && window.XP_TICK_MS, 1_000);
+  const AWARD_INTERVAL_MS = parseNumber(window && window.XP_AWARD_INTERVAL_MS, TICK_MS);
+  const ACTIVE_GRACE_MS = parseNumber(window && window.XP_ACTIVE_GRACE_MS, 300);
+  const MIN_EVENTS_PER_TICK = Math.max(1, Math.floor(parseNumber(window && window.XP_MIN_EVENTS_PER_TICK, 1)) || 1);
+  const HARD_IDLE_RESET = parseNumber(window && window.XP_HARD_IDLE_RESET, 1) !== 0;
   const ACTIVITY_EXPONENT = parseNumber(window && window.XP_ACTIVITY_EXPONENT, 1.5);
   const MAX_XP_PER_SECOND = parseNumber(window && window.XP_MAX_XP_PER_SECOND, 24);
   const REQUIRE_SCORE_PULSE = parseNumber(window && window.XP_REQUIRE_SCORE, 1) === 1;
@@ -71,7 +75,7 @@
     inputEvents: 0,
     activeUntil: 0,
     lastTick: 0,
-    timerId: null,
+    awardTimerId: null,
     pending: null,
     lastResultTs: 0,
     snapshot: null,
@@ -103,8 +107,17 @@
       lastActivityLog: 0,
       lastCapLog: 0,
       lastVisibilityLog: 0,
+      lastAwardSkipLog: 0,
+      lastUnfreezeLog: 0,
     },
     lastScorePulseTs: 0,
+    phase: "idle",
+    lastInputAt: 0,
+    eventsSinceLastAward: 0,
+    scoreDeltaSinceLastAward: 0,
+    listenersAttached: false,
+    activityWindowFrozen: false,
+    isActive: false,
   };
 
   function isFromGameSurface(ev) {
@@ -227,6 +240,29 @@
     state.activeUntil = 0;
     state.scoreDelta = 0;
     state.scoreDeltaRemainder = 0;
+  }
+
+  function zeroTickCounters() {
+    state.eventsSinceLastAward = 0;
+    state.scoreDeltaSinceLastAward = 0;
+  }
+
+  function markActiveInput(now) {
+    if (!state.running) return;
+    const ts = typeof now === "number" ? now : Date.now();
+    state.lastInputAt = ts;
+    state.eventsSinceLastAward = Math.max(0, (state.eventsSinceLastAward || 0) + 1);
+    if (state.activityWindowFrozen) {
+      state.activityWindowFrozen = false;
+      if (state.debug.hardIdleActive) {
+        state.debug.hardIdleActive = false;
+      }
+      const lastLog = Number(state.debug.lastUnfreezeLog) || 0;
+      if ((ts - lastLog) > 2_000) {
+        state.debug.lastUnfreezeLog = ts;
+        logDebug("activity_unfrozen", {});
+      }
+    }
   }
 
   function getCurrentActivityRatio(now, delta) {
@@ -578,31 +614,38 @@
     state.scoreDelta = 0;
   }
 
-  function onTick() {
+  function onAwardTick() {
     const now = Date.now();
     const delta = state.lastTick ? Math.max(0, now - state.lastTick) : 0;
     state.lastTick = now;
-    if (!state.running) {
-      if (state.flush.pending) {
+
+    if (!state.running || state.phase !== "running") {
+      if (state.flush && state.flush.pending) {
         flushXp(false).catch(() => {});
       }
       return;
     }
+
     if (!isGameHost()) {
       logBlockNoHost(now);
+      zeroTickCounters();
       return;
     }
-    const visible = isDocumentVisible();
-    if (!visible) {
+
+    if (!isDocumentVisible()) {
+      state.phase = "paused";
       if (!state.debug.lastVisibilityLog || (now - state.debug.lastVisibilityLog) > 2_000) {
         state.debug.lastVisibilityLog = now;
         logDebug("block_visibility", { hidden: true });
       }
       resetActivityCounters(now);
+      state.activityWindowFrozen = true;
+      zeroTickCounters();
       flushXp(true).catch(() => {});
       return;
     }
 
+    state.phase = "running";
     state.visibilitySeconds += delta / 1000;
     if (now <= state.activeUntil) {
       state.activeMs += delta;
@@ -611,8 +654,6 @@
       sendWindow(false);
     }
 
-    const frameDelta = delta || TICK_MS;
-    let activityRatio = 0;
     const lastTrusted = Number(state.lastTrustedInputTs) || 0;
     if (lastTrusted && (now - lastTrusted) > HARD_IDLE_MS) {
       state.activeUntil = now;
@@ -620,31 +661,75 @@
         state.debug.hardIdleActive = true;
         logDebug("block_hard_idle", { idleMs: now - lastTrusted });
       }
-      activityRatio = 0;
-    } else {
-      if (state.debug.hardIdleActive) {
-        state.debug.hardIdleActive = false;
+      state.activityWindowFrozen = true;
+      state.phase = "paused";
+      if (HARD_IDLE_RESET) {
+        state.activityWindowFrozen = true;
+        resetActivityCounters(now);
+        zeroTickCounters();
+      } else {
+        zeroTickCounters();
       }
-      activityRatio = getCurrentActivityRatio(now, frameDelta);
     }
+
+    const sinceLastInput = now - (state.lastInputAt || 0);
+    const hasRecentInput = sinceLastInput <= ACTIVE_GRACE_MS;
+    const events = Number(state.eventsSinceLastAward) || 0;
+    const hasEvents = events >= MIN_EVENTS_PER_TICK;
+    const scoreDelta = Number(state.scoreDeltaSinceLastAward) || 0;
+    const hasScore = scoreDelta > 0;
+    const frameDelta = delta || AWARD_INTERVAL_MS;
+    let activityRatio = getCurrentActivityRatio(now, frameDelta);
+    if (!Number.isFinite(activityRatio) || activityRatio < 0) {
+      activityRatio = 0;
+    }
+
+    let isActive = hasRecentInput && (hasEvents || hasScore);
+    if (state.activityWindowFrozen) {
+      isActive = false;
+    }
+    state.isActive = isActive;
+
     if (!state.debug.lastActivityLog || (now - state.debug.lastActivityLog) > 2_000) {
       state.debug.lastActivityLog = now;
-      logDebug("activity", { ratio: Number(activityRatio) || 0 });
+      logDebug("activity", { ratio: Number(activityRatio) || 0, events, sinceLastInput });
     }
-    awardLocalXp(activityRatio);
+
+    if (!isActive) {
+      const lastSkip = Number(state.debug.lastAwardSkipLog) || 0;
+      if ((now - lastSkip) > 500) {
+        state.debug.lastAwardSkipLog = now;
+        logDebug("award_skip", {
+          reason: state.activityWindowFrozen ? "frozen" : "inactive",
+          events,
+          sinceLastInput,
+        });
+      }
+      zeroTickCounters();
+      flushXp(false).catch(() => {});
+      return;
+    }
+
+    if (state.debug.hardIdleActive && !state.activityWindowFrozen) {
+      state.debug.hardIdleActive = false;
+    }
+
+    const awarded = awardLocalXp(activityRatio);
+    zeroTickCounters();
     flushXp(false).catch(() => {});
+    return awarded;
   }
 
   function ensureTimer() {
-    if (state.timerId) return;
+    if (state.awardTimerId) return;
     state.lastTick = Date.now();
-    state.timerId = window.setInterval(onTick, TICK_MS);
+    state.awardTimerId = window.setInterval(onAwardTick, AWARD_INTERVAL_MS);
   }
 
   function clearTimer() {
-    if (state.timerId) {
-      window.clearInterval(state.timerId);
-      state.timerId = null;
+    if (state.awardTimerId) {
+      window.clearInterval(state.awardTimerId);
+      state.awardTimerId = null;
     }
   }
 
@@ -653,10 +738,15 @@
       logDebug("block_no_host", { when: "startSession" });
       return;
     }
+    if (state.phase === "running") {
+      logDebug("xp_start_ignored", { existingGameId: state.gameId || null });
+      return;
+    }
     attachBadge();
     hydrateRuntimeState();
     ensureTimer();
 
+    state.phase = "running";
     state.running = true;
     state.gameId = gameId || "game";
     state.windowStart = Date.now();
@@ -667,12 +757,19 @@
     state.scoreDelta = 0;
     state.scoreDeltaRemainder = 0;
     state.lastScorePulseTs = 0;
+    state.lastInputAt = 0;
+    state.lastTrustedInputTs = 0;
+    state.eventsSinceLastAward = 0;
+    state.scoreDeltaSinceLastAward = 0;
+    state.activityWindowFrozen = false;
+    state.isActive = false;
     if (!state.flush.lastSync) state.flush.lastSync = Date.now();
     state.debug.hardIdleActive = false;
     state.debug.lastNoHostLog = 0;
     state.debug.lastActivityLog = 0;
     state.debug.lastCapLog = 0;
     state.debug.lastVisibilityLog = 0;
+    state.debug.lastAwardSkipLog = 0;
     logDebug("xp_start", { gameId: state.gameId, isHost: true });
   }
 
@@ -690,6 +787,8 @@
       sendWindow(true); }
       flushXp(true).catch(() => {});
     }
+    clearTimer();
+    state.phase = "idle";
     state.running = false;
     state.gameId = null;
     state.activeMs = 0;
@@ -698,6 +797,12 @@
     state.activeUntil = 0;
     state.scoreDelta = 0;
     state.scoreDeltaRemainder = 0;
+    state.eventsSinceLastAward = 0;
+    state.scoreDeltaSinceLastAward = 0;
+    state.lastInputAt = 0;
+    state.lastTrustedInputTs = 0;
+    state.activityWindowFrozen = false;
+    state.isActive = false;
     state.lastScorePulseTs = 0;
     state.debug.hardIdleActive = false;
     state.debug.lastNoHostLog = 0;
@@ -706,18 +811,25 @@
     state.debug.lastVisibilityLog = 0;
   }
 
-  function nudge() {
+  function nudge(options) {
     if (!state.running) return;
     if (!isGameHost()) {
       logDebug("block_no_host", { when: "nudge" });
       return;
     }
-    state.activeUntil = Date.now() + ACTIVE_WINDOW_MS;
+    const now = Date.now();
+    state.activeUntil = now + ACTIVE_WINDOW_MS;
     state.inputEvents += 1;
+    if (!options || options.skipMark !== true) {
+      state.lastTrustedInputTs = now;
+      markActiveInput(now);
+    }
   }
 
   function recordTrustedInput() {
-    state.lastTrustedInputTs = Date.now();
+    const now = Date.now();
+    state.lastTrustedInputTs = now;
+    markActiveInput(now);
   }
 
   function addScore(delta) {
@@ -750,6 +862,8 @@
     const toAdd = Math.min(whole, capacity);
     state.scoreDelta = current + toAdd;
     state.scoreDeltaRemainder = Math.max(0, state.scoreDeltaRemainder - toAdd);
+    state.scoreDeltaSinceLastAward = Math.max(0, (state.scoreDeltaSinceLastAward || 0) + toAdd);
+    state.lastScorePulseTs = Date.now();
   }
 
   function pulseBadge() {
@@ -788,7 +902,7 @@
     xpPerSecond = applyCombo(xpPerSecond);
     xpPerSecond = applyBoost(xpPerSecond);
     xpPerSecond = Math.min(MAX_XP_PER_SECOND, Math.max(0, xpPerSecond));
-    const xpForTick = xpPerSecond * (TICK_MS / 1000);
+    const xpForTick = xpPerSecond * (AWARD_INTERVAL_MS / 1000);
     const awarded = accumulateLocalXp(xpForTick);
     if (awarded <= 0) return 0;
     state.totalToday = (Number(state.totalToday) || 0) + awarded;
@@ -1038,6 +1152,7 @@
           if (event.data.type !== "game-score") return;
           if (!isGameHost()) return;
           state.lastScorePulseTs = Date.now();
+          state.scoreDeltaSinceLastAward = Math.max(0, (state.scoreDeltaSinceLastAward || 0) + 1);
           logDebug("score_pulse", {
             gameId: event.data.gameId || state.gameId || "",
             score: typeof event.data.score === "number" ? event.data.score : undefined,
@@ -1089,13 +1204,15 @@
           __lastNudgeTs = now;
 
           try { recordTrustedInput(); } catch (_) {}
-          if (typeof nudge === "function") nudge();
+          if (typeof nudge === "function") nudge({ skipMark: true });
         } catch {}
       }, { passive: true });
     })();
 
     // Top-frame input listeners -> nudge (only on real user gestures)
     (function(){
+      if (state.listenersAttached) return;
+      state.listenersAttached = true;
       // Decide if this event represents a true user gesture (not synthetic noise)
       function isRealUserGesture(e){
         // Prefer the platform signal if present
@@ -1131,7 +1248,7 @@
                 return;
               }
               recordTrustedInput();
-              if (typeof nudge === "function") nudge();
+              if (typeof nudge === "function") nudge({ skipMark: true });
             } catch(_) {}
           }, { passive: true });
         } catch(_) {}
@@ -1208,7 +1325,7 @@
       try {
         if (window.XP.isRunning && window.XP.isRunning()) {
           // already running; give a tiny prod so UI/timers align
-          try { window.XP.nudge && window.XP.nudge(); } catch (_) {}
+          try { window.XP.nudge && window.XP.nudge({ skipMark: true }); } catch (_) {}
           return;
         }
         var gid = window.XP.__lastGameId || undefined; // fall back to last seen gameId
