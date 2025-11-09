@@ -1,3 +1,4 @@
+const ADMIN_KEY="kcswh:admin";
 (function (window, document) {
   const STORAGE_LOG_KEY = "kcswh:debug:log";
   const STORAGE_META_KEY = "kcswh:debug:meta";
@@ -156,7 +157,7 @@
     try {
       const store = getStorage();
       if (!store) return false;
-      return !!store.getItem(STORAGE_ADMIN_KEY);
+      return !!(store.getItem(STORAGE_ADMIN_KEY)||store.getItem(ADMIN_KEY)||store.getItem("kcswh:admin"));
     } catch (_) {
       return false;
     }

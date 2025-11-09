@@ -5,3 +5,7 @@ playwright-report/
 
 # Local Netlify folder
 .netlify
+
+# Local Netlify dev
+netlify.toml
+deno.lock

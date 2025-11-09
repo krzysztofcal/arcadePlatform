@@ -1,3 +1,4 @@
+let _booted=false;
 (function (window, document) {
   if (typeof window === "undefined") return;
 
@@ -293,6 +294,8 @@
    * @param {string} [gameId] Optional override for the game identifier.
    */
   function auto(gameId) {
+  if(_booted) return;
+  _booted=true;
     const resolved = normalizeGameId(gameId) || detectGameId();
     const slugged = slugifyGameId(resolved);
     if (!isHostDocument()) {
