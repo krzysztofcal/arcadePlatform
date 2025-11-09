@@ -60,14 +60,21 @@
   function isGameHost() {
     try {
       if (typeof window !== "undefined" && window && window.XP_IS_GAME_HOST) return true;
-      if (typeof document !== "undefined" && document) {
-        const body = document.body;
-        if (body && typeof body.hasAttribute === "function" && body.hasAttribute("data-game-host")) return true;
-        if (typeof document.getElementById === "function") {
-          if (document.getElementById("gameFrame")) return true;
-          if (document.getElementById("frameBox")) return true;
-          if (document.getElementById("frameWrap")) return true;
-        }
+      if (typeof document === "undefined" || !document) return true;
+      const body = document.body;
+      if (!body) return true;
+      if (typeof body.hasAttribute === "function" && body.hasAttribute("data-game-host")) return true;
+      if (typeof body.hasAttribute === "function" && body.hasAttribute("data-game-id")) return true;
+      if (typeof body.hasAttribute === "function" && body.hasAttribute("data-game-slug")) return true;
+      if (body.dataset) {
+        if (body.dataset.gameHost === "true") return true;
+        if (body.dataset.gameId) return true;
+        if (body.dataset.gameSlug) return true;
+      }
+      if (typeof document.getElementById === "function") {
+        if (document.getElementById("gameFrame")) return true;
+        if (document.getElementById("frameBox")) return true;
+        if (document.getElementById("frameWrap")) return true;
       }
     } catch (_) {}
     return false;
