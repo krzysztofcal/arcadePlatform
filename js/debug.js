@@ -300,8 +300,14 @@
     persist(true);
   }
 
+  function ensureStartedForLog() {
+    if (started) return true;
+    if (!adminActive) return false;
+    return start(level > 0 ? level : 1);
+  }
+
   function log(kind, data) {
-    if (!started) return false;
+    if (!started && !ensureStartedForLog()) return false;
     if (!kind || typeof kind !== "string") return false;
     try {
       const entry = buildEntry(kind, data || {});

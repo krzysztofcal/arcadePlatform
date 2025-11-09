@@ -96,6 +96,7 @@
       lastNoHostLog: 0,
       hardIdleActive: false,
       initLogged: false,
+      adminInitLogged: false,
     },
   };
 
@@ -108,12 +109,76 @@
     return false;
   }
 
+  function getDebugLogger() {
+    try {
+      if (!window || !window.KLog || typeof window.KLog.log !== "function") return null;
+      return window.KLog;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function ensureDebugRecorderPrimed() {
+    const logger = getDebugLogger();
+    if (!logger) return false;
+    let admin = true;
+    if (typeof logger.isAdmin === "function") {
+      try {
+        admin = !!logger.isAdmin();
+      } catch (_) {
+        admin = false;
+      }
+    }
+    if (!admin) return false;
+    if (typeof logger.start === "function") {
+      try {
+        const status = typeof logger.status === "function" ? logger.status() : null;
+        const level = status && typeof status.level === "number" ? status.level : 0;
+        const startedAt = status && typeof status.startedAt === "number" ? status.startedAt : 0;
+        if (!Number.isFinite(level) || level <= 0 || !Number.isFinite(startedAt) || startedAt <= 0) {
+          logger.start(1);
+        }
+      } catch (_) {}
+    }
+    return true;
+  }
+
+  function writeDebugEntry(kind, data) {
+    const logger = getDebugLogger();
+    if (!logger) return false;
+    try {
+      return logger.log(kind, data || {});
+    } catch (_) {
+      return false;
+    }
+  }
+
   function logDebug(kind, data) {
     try {
-      if (window && window.KLog && typeof window.KLog.log === "function") {
-        window.KLog.log(kind, data || {});
+      if (!ensureDebugRecorderPrimed()) return false;
+      return !!writeDebugEntry(kind, data || {});
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function resolvePagePath() {
+    try {
+      if (typeof location !== "undefined" && location && typeof location.pathname === "string") {
+        return location.pathname;
       }
     } catch (_) {}
+    return "";
+  }
+
+  function emitAdminInitLog() {
+    if (!isDebugAdminEnabled()) return;
+    if (state.debug.adminInitLogged) return;
+    const page = resolvePagePath();
+    const logged = logDebug("xp_init", { page, admin: true });
+    if (logged && isDebugAdminEnabled()) {
+      state.debug.adminInitLogged = true;
+    }
   }
 
   function logBlockNoHost(now) {
@@ -810,13 +875,10 @@
     hydrateRuntimeState();
     if (!state.debug.initLogged) {
       state.debug.initLogged = true;
-      let page = "";
-      try {
-        if (typeof location !== "undefined" && location && typeof location.pathname === "string") {
-          page = location.pathname;
-        }
-      } catch (_) {}
-      logDebug("xp_init", { page, admin: isDebugAdminEnabled() });
+      const page = resolvePagePath();
+      const admin = isDebugAdminEnabled();
+      const logged = logDebug("xp_init", { page, admin });
+      state.debug.adminInitLogged = admin && logged;
     }
     if (typeof document !== "undefined") {
       const handleDomReady = () => {
@@ -880,6 +942,21 @@
       window.addEventListener("xp:boost", (event) => {
         try { requestBoost(event && event.detail); } catch (_) {}
       });
+
+      window.addEventListener("klog:admin", (event) => {
+        try {
+          const active = event && event.detail && event.detail.active === true;
+          if (!active) {
+            state.debug.adminInitLogged = false;
+            return;
+          }
+          emitAdminInitLog();
+        } catch (_) {}
+      }, { passive: true });
+
+      if (isDebugAdminEnabled()) {
+        emitAdminInitLog();
+      }
 
       // Hardened activity bridge (same-origin, visible doc, requires userGesture:true, throttled)
     (function(){
