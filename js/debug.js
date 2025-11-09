@@ -3,7 +3,7 @@
   const STORAGE_META_KEY = "kcswh:debug:meta";
   const STORAGE_ADMIN_KEY = "kcswh:admin";
   const MAX_LINES = 1000;
-  const MIRROR_THRESHOLD = 100;
+  const MIRROR_THRESHOLD = 5; // persist more eagerly
   const ENTRY_MAX_CHARS = 2000;
   const ADMIN_DURATION_MS = 24 * 60 * 60 * 1000;
 
@@ -128,6 +128,12 @@
     }
   }
 
+  function flush(force) {
+    try {
+      persist(!!force);
+    } catch (_) {}
+  }
+
   function refreshAdmin() {
     const record = readJson(STORAGE_ADMIN_KEY);
     const now = Date.now();
@@ -199,6 +205,7 @@
   }
 
   async function dumpToClipboard() {
+    flush(true);
     const text = getText();
     if (!window || typeof window.open !== "function") {
       recordDump("window", false, { reason: "no_window" });
@@ -348,6 +355,7 @@
     status,
     enableAdmin,
     isAdmin,
+    flush,
   };
 
   window.KLog = Object.assign({}, window.KLog || {}, api);

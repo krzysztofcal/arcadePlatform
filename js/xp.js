@@ -1129,6 +1129,14 @@
     } catch (_) { return false; }
   }
 
+  function flushRecorder() {
+    try {
+      if (window.KLog && typeof window.KLog.flush === 'function') {
+        window.KLog.flush(true);
+      }
+    } catch (_) {}
+  }
+
   function clearRetry() {
     if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
   }
@@ -1179,15 +1187,22 @@
   }, { passive: true });
 
   window.addEventListener('pagehide', (event) => {
+    flushRecorder();
     if (persisted(event)) return;
     pause();
   }, { passive: true });
 
-  window.addEventListener('beforeunload', () => { pause(); });
+  window.addEventListener('beforeunload', () => {
+    flushRecorder();
+    pause();
+  });
 
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') resume();
-    else pause();
+    else {
+      flushRecorder();
+      pause();
+    }
   }, { passive: true });
 
   if (document.visibilityState === 'visible') {
