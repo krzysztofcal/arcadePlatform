@@ -116,6 +116,7 @@
       expiresAt: 0,
       source: null,
     },
+    boostTimerId: null,
     debug: {
       lastNoHostLog: 0,
       hardIdleActive: false,
@@ -336,12 +337,54 @@
     return base * (1 + comboBonus);
   }
 
+  function clearBoostTimer() {
+    if (state.boostTimerId) {
+      try { clearTimeout(state.boostTimerId); } catch (_) {}
+      state.boostTimerId = null;
+    }
+  }
+
+  function resetBoost() {
+    const previous = state.boost || { multiplier: 1, expiresAt: 0, source: null };
+    clearBoostTimer();
+    state.boost = { multiplier: 1, expiresAt: 0, source: null };
+    if (previous.multiplier !== 1 || previous.expiresAt !== 0 || (previous.source || null) !== null) {
+      persistRuntimeState();
+    }
+  }
+
+  function scheduleBoostExpiration(expiresAt) {
+    clearBoostTimer();
+    const target = Number(expiresAt) || 0;
+    if (!Number.isFinite(target) || target <= 0) return;
+    const delay = Math.max(0, Math.floor(target - Date.now()));
+    if (delay <= 0) {
+      resetBoost();
+      return;
+    }
+    try {
+      state.boostTimerId = setTimeout(() => {
+        state.boostTimerId = null;
+        if (!state.boost || !state.boost.expiresAt) {
+          resetBoost();
+          return;
+        }
+        if (Date.now() >= state.boost.expiresAt) {
+          resetBoost();
+        } else {
+          scheduleBoostExpiration(state.boost.expiresAt);
+        }
+      }, delay);
+    } catch (_) {
+      resetBoost();
+    }
+  }
+
   function clearExpiredBoost(now) {
     const ts = typeof now === "number" ? now : Date.now();
     if (!state.boost) return;
     if (state.boost.expiresAt && ts > state.boost.expiresAt) {
-      state.boost = { multiplier: 1, expiresAt: 0, source: null };
-      persistRuntimeState();
+      resetBoost();
     }
   }
 
@@ -481,6 +524,7 @@
       state.flush.lastSync = parseNumber(parsed.lastSync, state.flush.lastSync || Date.now()) || Date.now();
       if (parsed.boost && typeof parsed.boost === "object") {
         state.boost = Object.assign({ multiplier: 1, expiresAt: 0, source: null }, parsed.boost);
+        scheduleBoostExpiration(state.boost.expiresAt || 0);
       }
     } catch (_) {
       if (!state.flush.lastSync) state.flush.lastSync = Date.now();
@@ -968,6 +1012,15 @@
     state.debug.lastCapLog = 0;
     state.debug.lastVisibilityLog = 0;
     state.debug.lastAwardSkipLog = 0;
+
+    clearExpiredBoost();
+    if (!state.boostTimerId && state.boost && Number(state.boost.multiplier) > 1) {
+      if (state.boost.expiresAt && state.boost.expiresAt > Date.now()) {
+        scheduleBoostExpiration(state.boost.expiresAt);
+      } else {
+        resetBoost();
+      }
+    }
     logDebug("xp_start", { gameId: state.gameId, isHost: true });
   }
 
@@ -987,6 +1040,7 @@
     }
     clearTimer();
     clearBadgeTimer();
+    clearBoostTimer();
     state.phase = "idle";
     state.running = false;
     state.gameId = null;
@@ -1212,26 +1266,51 @@
     return request;
   }
 
-  function requestBoost(detail) {
-    if (!detail || typeof detail !== "object") return;
-    const multiplier = parseNumber(detail.multiplier, state.boost.multiplier || 1) || 1;
-    const durationMs = Math.max(0, parseNumber(detail.durationMs, 0) || 0);
-    const source = detail.source || null;
-    if (!Number.isFinite(multiplier) || multiplier <= 1) {
-      state.boost = { multiplier: 1, expiresAt: 0, source: null };
-      persistRuntimeState();
+  // Internal boost setter supports both the new `(multiplier, ttlMs, reason)`
+  // signature and legacy detail objects dispatched with `durationMs/source`.
+  function requestBoost(multiplierOrDetail, ttlMs, reason) {
+    let rawMultiplier = multiplierOrDetail;
+    let rawTtl = ttlMs;
+    let rawSource = reason;
+
+    if (multiplierOrDetail && typeof multiplierOrDetail === "object") {
+      const detail = multiplierOrDetail;
+      rawMultiplier = detail.multiplier;
+      if (rawMultiplier == null) rawMultiplier = detail.mult;
+      rawTtl = detail.ttlMs;
+      if (rawTtl == null) rawTtl = detail.durationMs;
+      rawSource = detail.reason;
+      if (rawSource == null) rawSource = detail.source;
+    }
+
+    const fallbackMultiplier = state.boost && Number(state.boost.multiplier) > 1
+      ? state.boost.multiplier
+      : 1;
+    const parsedMultiplier = parseNumber(rawMultiplier, fallbackMultiplier) || fallbackMultiplier || 1;
+    const multiplier = Number.isFinite(parsedMultiplier) ? Math.max(1, parsedMultiplier) : 1;
+    if (multiplier <= 1) {
+      resetBoost();
       return;
     }
+
+    const parsedTtl = parseNumber(rawTtl, 0) || 0;
+    const ttl = Number.isFinite(parsedTtl) ? Math.max(0, parsedTtl) : 0;
     const now = Date.now();
+    const expiresAt = now + (ttl > 0 ? ttl : 15_000);
+    const source = rawSource == null ? null : String(rawSource);
+
     state.boost = {
-      multiplier: Math.max(1, multiplier),
-      expiresAt: durationMs > 0 ? now + durationMs : now + 15_000,
+      multiplier,
+      expiresAt,
       source,
     };
+
+    scheduleBoostExpiration(expiresAt);
+
     persistRuntimeState();
   }
 
-  function getFlushStatus() {
+  function readFlushStatus() {
     return {
       pending: Math.max(0, state.flush.pending || 0),
       lastSync: state.flush.lastSync || 0,
@@ -1402,7 +1481,11 @@
       }, { passive: true });
 
       window.addEventListener("xp:boost", (event) => {
-        try { requestBoost(event && event.detail); } catch (_) {}
+        try {
+          // Accept both new `{ multiplier, ttlMs, reason }` and legacy
+          // `{ multiplier, durationMs, source }` payloads.
+          requestBoost(event && event.detail);
+        } catch (_) {}
       });
 
       window.addEventListener("klog:admin", (event) => {
@@ -1511,8 +1594,65 @@
     addScore,
     awardLocalXp,
     flushXp,
-    requestBoost,
-    getFlushStatus,
+    // Public API: dispatch an event so host integrations remain decoupled.
+    requestBoost: function (multiplier, ttlMs, reason) {
+      let detail;
+      if (multiplier && typeof multiplier === "object") {
+        detail = Object.assign({}, multiplier);
+        if (detail.multiplier == null && typeof detail.mult === "number") {
+          detail.multiplier = detail.mult;
+        }
+        if (detail.mult == null && typeof detail.multiplier === "number") {
+          detail.mult = detail.multiplier;
+        }
+        if (detail.ttlMs == null && typeof detail.durationMs === "number") {
+          detail.ttlMs = detail.durationMs;
+        }
+        if (detail.durationMs == null && typeof detail.ttlMs === "number") {
+          detail.durationMs = detail.ttlMs;
+        }
+        if (detail.reason == null && typeof detail.source === "string") {
+          detail.reason = detail.source;
+        }
+        if (detail.source == null && typeof detail.reason === "string") {
+          detail.source = detail.reason;
+        }
+      } else {
+        detail = {
+          multiplier,
+          mult: multiplier,
+          ttlMs,
+          durationMs: ttlMs,
+          reason,
+          source: reason,
+        };
+      }
+      try {
+        const evt = typeof CustomEvent === "function"
+          ? new CustomEvent("xp:boost", { detail })
+          : null;
+        if (evt) {
+          window.dispatchEvent(evt);
+        } else if (typeof document !== "undefined" && document.createEvent) {
+          const legacyEvt = document.createEvent("CustomEvent");
+          legacyEvt.initCustomEvent("xp:boost", false, false, detail);
+          window.dispatchEvent(legacyEvt);
+        } else {
+          requestBoost(detail);
+        }
+      } catch (_) {
+        try { requestBoost(detail); } catch (_) {}
+      }
+    },
+    // Public probe: surface pending + lastSync while keeping legacy inflight flag.
+    getFlushStatus: function () {
+      const status = readFlushStatus();
+      return {
+        pending: status && typeof status.pending === "number" ? status.pending : 0,
+        lastSync: status && typeof status.lastSync === "number" ? status.lastSync : 0,
+        inflight: !!(status && status.inflight), // legacy flag retained for compatibility
+      };
+    },
     scoreDeltaCeiling: MAX_SCORE_DELTA,
 
     isRunning: function(){ try { return !!(typeof state !== 'undefined' ? state.running : (this && this.__running)); } catch(_) { return !!(this && this.__running); } },});
