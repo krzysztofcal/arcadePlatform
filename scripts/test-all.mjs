@@ -13,10 +13,14 @@ const has = s => !!(process.env[s] && process.env[s] !== "0");
 run("node", ["scripts/syntax-check.mjs"], "syntax");
 
 run("node", ["tests/xp-client.test.mjs"], "xp-client");
+run("node", ["tests/xp-client-contract.test.mjs"], "xp-client-contract");
 run("node", ["tests/xp-game-hook.test.mjs"], "xp-game-hook");
 run("node", ["tests/xp-multigame.test.mjs"], "xp-multigame");
-run("node", ["tests/xp-award-score.test.mjs"], "xp-award-score");
-run("node", ["tests/xp-award-score-rate.test.mjs"], "xp-award-score-rate");
+run("node", ["tests/xp-award-delta.test.mjs"], "xp-award-delta");
+run("node", ["tests/xp-award-session-daily.test.mjs"], "xp-award-session-daily");
+run("node", ["tests/xp-award-legacy-fallback.test.mjs"], "xp-award-legacy-fallback");
+run("node", ["tests/xp-client-bfcache.test.mjs"], "xp-client-bfcache");
+run("node", ["tests/xp-client.cors.test.mjs"], "xp-client-cors");
 run("node", ["tests/xp-gate.test.mjs"], "xp-gate");
 run("node", ["tests/xp-game-hook-idempotent.test.mjs"], "xp-game-hook-idempotent");
 run("node", ["tests/recorder-admin-only.test.mjs"], "recorder-admin-only");
