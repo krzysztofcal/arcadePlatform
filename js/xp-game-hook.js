@@ -270,7 +270,23 @@
   function start(gameId) {
     const resolved = normalizeGameId(gameId) || detectGameId();
     const slugged = slugifyGameId(resolved);
+    const xp = getXp();
     state.lastGameId = slugged;
+    const running = xp && typeof xp.isRunning === "function" ? !!xp.isRunning() : false;
+    const currentGameId = xp && xp.__lastGameId ? slugifyGameId(xp.__lastGameId) : null;
+
+    if (running && currentGameId === slugged) {
+      try { xp.startSession(slugged); } catch (_) {}
+      state.runningDesired = true;
+      state.pendingStopOptions = null;
+      state.pendingStartGameId = null;
+      return;
+    }
+
+    if (running && currentGameId && currentGameId !== slugged) {
+      try { xp.stopSession({ flush: true }); } catch (_) {}
+    }
+
     state.runningDesired = true;
     resetSessionAccounting();
     state.pendingStopOptions = null;

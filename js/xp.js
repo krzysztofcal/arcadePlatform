@@ -40,6 +40,8 @@
   const REQUIRE_SCORE_PULSE = parseNumber(window && window.XP_REQUIRE_SCORE, 1) === 1;
   const SCORE_GRACE_MS = parseNumber(window && window.XP_SCORE_GRACE_MS, 8_000);
   const GAME_SURFACE_SELECTOR = (window && window.XP_GAME_SURFACE_SELECTOR) || "#game, canvas, #gameFrame, #frameBox, #frameWrap, [data-game-surface]";
+  const BADGE_RECONCILE_INTERVAL_MS = parseNumber(window && window.XP_BADGE_RECONCILE_INTERVAL_MS, 15_000);
+  const SESSION_RENDER_MODE = (window && window.XP_SESSION_RENDER_MODE) || "monotonic";
   const FLUSH_INTERVAL_MS = 15_000;
   const FLUSH_THRESHOLD = 50;
   const RUNTIME_CACHE_KEY = "kcswh:xp:regen";
@@ -118,6 +120,13 @@
     listenersAttached: false,
     activityWindowFrozen: false,
     isActive: false,
+    sessionXp: 0,
+    badgeShownXp: 0,
+    serverTotalXp: null,
+    badgeBaselineXp: 0,
+    pendingWindow: null,
+    lastSuccessfulWindowEnd: null,
+    badgeTimerId: null,
   };
 
   function isFromGameSurface(ev) {
@@ -381,7 +390,27 @@
       if (typeof parsed.totalToday === "number") state.totalToday = parsed.totalToday;
       if (typeof parsed.cap === "number") state.cap = parsed.cap;
       if (typeof parsed.totalLifetime === "number") state.totalLifetime = parsed.totalLifetime;
+      if (typeof parsed.badgeShownXp === "number") state.badgeShownXp = parsed.badgeShownXp;
+      if (typeof parsed.serverTotalXp === "number") state.serverTotalXp = parsed.serverTotalXp;
+      if (typeof parsed.badgeBaselineXp === "number") state.badgeBaselineXp = parsed.badgeBaselineXp;
       state.lastResultTs = parsed.ts || 0;
+      if (state.serverTotalXp == null && typeof state.totalLifetime === "number") {
+        state.serverTotalXp = state.totalLifetime;
+      }
+      if (typeof state.badgeShownXp !== "number" || Number.isNaN(state.badgeShownXp)) {
+        state.badgeShownXp = typeof state.totalLifetime === "number" ? state.totalLifetime : 0;
+      }
+      if (!Number.isFinite(state.badgeBaselineXp)) {
+        if (typeof state.serverTotalXp === "number") {
+          state.badgeBaselineXp = state.serverTotalXp;
+        } else if (typeof state.badgeShownXp === "number") {
+          state.badgeBaselineXp = state.badgeShownXp;
+        } else if (typeof state.totalLifetime === "number") {
+          state.badgeBaselineXp = state.totalLifetime;
+        } else {
+          state.badgeBaselineXp = 0;
+        }
+      }
     } catch (_) { /* ignore */ }
   }
 
@@ -391,6 +420,9 @@
         totalToday: state.totalToday,
         cap: state.cap,
         totalLifetime: state.totalLifetime,
+        badgeShownXp: state.badgeShownXp,
+        serverTotalXp: state.serverTotalXp,
+        badgeBaselineXp: state.badgeBaselineXp,
         ts: Date.now(),
       };
       window.localStorage.setItem(CACHE_KEY, JSON.stringify(payload));
@@ -459,15 +491,35 @@
     state.badge.classList.toggle("xp-badge--loading", !!isLoading);
   }
 
+  function resolveBadgeBaseline() {
+    if (typeof state.serverTotalXp === "number") {
+      return state.serverTotalXp;
+    }
+    if (Number.isFinite(state.badgeBaselineXp)) {
+      return state.badgeBaselineXp;
+    }
+    if (typeof state.badgeShownXp === "number" && Number.isFinite(state.badgeShownXp)) {
+      return state.badgeShownXp;
+    }
+    if (typeof state.totalLifetime === "number" && Number.isFinite(state.totalLifetime)) {
+      return state.totalLifetime;
+    }
+    return 0;
+  }
+
   function updateBadge() {
     if (!state.badge) return;
     ensureBadgeElements();
-    if (state.totalToday == null) {
-      state.totalToday = 0;
+    const baseline = resolveBadgeBaseline();
+    const session = Math.max(0, Number(state.sessionXp) || 0);
+    const priorShown = Math.max(0, Number(state.badgeShownXp) || 0);
+    let candidate = baseline + session;
+    if (SESSION_RENDER_MODE === "monotonic") {
+      candidate = Math.max(priorShown, candidate);
     }
-    if (state.totalLifetime == null) {
-      state.totalLifetime = 0;
-    }
+    state.badgeShownXp = candidate;
+    state.badgeBaselineXp = Math.max(Number(state.badgeBaselineXp) || 0, baseline);
+    state.totalLifetime = Math.max(Number(state.totalLifetime) || 0, candidate);
     state.snapshot = computeLevel(state.totalLifetime);
     const totalText = state.snapshot.totalXp.toLocaleString();
     state.labelEl.textContent = `Lvl ${state.snapshot.level}, ${totalText} XP`;
@@ -515,21 +567,14 @@
     maybeRefreshStatus();
   }
 
-  function handleResponse(data) {
-    if (!data || typeof data !== "object") return;
-    if (typeof data.totalToday === "number") {
-      const previous = state.totalToday;
-      state.totalToday = data.totalToday;
-      if (data.cap != null) state.cap = data.cap;
-      if (typeof data.totalLifetime === "number") state.totalLifetime = data.totalLifetime;
-      if (data.awarded && data.awarded > 0 && typeof previous === "number") {
-        bumpBadge();
-      }
-      state.lastResultTs = Date.now();
-      saveCache();
-      updateBadge();
+  function handleResponse(data, meta) {
+    const mergedMeta = Object.assign({}, meta);
+    if (data && typeof data.awarded === "number" && data.awarded > 0) {
+      mergedMeta.bump = true;
     }
+    applyServerDelta(data, mergedMeta);
     setBadgeLoading(false);
+    return data;
   }
 
   function handleError(err) {
@@ -541,6 +586,75 @@
       console.debug("XP window failed", err);
     }
     setBadgeLoading(false);
+  }
+
+  function applyServerDelta(data, meta) {
+    if (!data || typeof data !== "object") return;
+    const keys = Object.keys(data);
+    if (!keys.length) return;
+
+    if (typeof data.cap === "number") {
+      state.cap = data.cap;
+    }
+    if (typeof data.totalToday === "number") {
+      state.totalToday = Math.max(0, Number(data.totalToday) || 0);
+    }
+
+    const reasonRaw = data.reason || (data.debug && data.debug.reason) || null;
+    const reason = typeof reasonRaw === "string" ? reasonRaw.toLowerCase() : null;
+    const statusRaw = typeof data.status === "string" ? data.status.toLowerCase() : null;
+    const skipTotals = (statusRaw === "statusonly")
+      || reason === "too_soon"
+      || reason === "insufficient-activity";
+
+    const totalLifetime = (typeof data.totalLifetime === "number") ? data.totalLifetime
+      : (typeof data.total === "number" ? data.total : null);
+
+    if (skipTotals || totalLifetime == null) {
+      saveCache();
+      updateBadge();
+      return;
+    }
+
+    const ok = data.ok === true || statusRaw === "ok" || (!statusRaw && data.awarded != null);
+    if (!ok) {
+      saveCache();
+      updateBadge();
+      return;
+    }
+
+    const sanitizedTotal = Math.max(0, Number(totalLifetime) || 0);
+    const previousServer = typeof state.serverTotalXp === "number" ? state.serverTotalXp : null;
+    let acked = 0;
+    if (previousServer != null) {
+      if (sanitizedTotal >= previousServer) {
+        acked = sanitizedTotal - previousServer;
+        state.serverTotalXp = sanitizedTotal;
+      } else {
+        state.serverTotalXp = previousServer;
+      }
+    } else {
+      const baseline = Math.max(0, Number(state.badgeBaselineXp) || 0);
+      if (sanitizedTotal >= baseline) {
+        acked = sanitizedTotal - baseline;
+      }
+      state.serverTotalXp = sanitizedTotal;
+    }
+
+    if (acked > 0) {
+      const pendingSession = Math.max(0, Number(state.sessionXp) || 0);
+      const toSubtract = Math.min(acked, pendingSession);
+      state.sessionXp = Math.max(0, pendingSession - toSubtract);
+    }
+
+    state.badgeBaselineXp = Math.max(Number(state.badgeBaselineXp) || 0, state.serverTotalXp || 0);
+    state.totalLifetime = Math.max(Number(state.totalLifetime) || 0, state.serverTotalXp || 0);
+    state.lastResultTs = Date.now();
+    if (meta && meta.bump === true) {
+      bumpBadge();
+    }
+    saveCache();
+    updateBadge();
   }
 
   async function sendWindow(force) {
@@ -569,8 +683,14 @@
       return;
     }
 
+    const activeGameId = state.gameId || "game";
+    if (!activeGameId) {
+      logDebug("drop_mismatched_gameid", { expected: state.gameId || null, payloadGameId: null });
+      return;
+    }
+
     const payload = {
-      gameId: state.gameId || "game",
+      gameId: activeGameId,
       windowStart: state.windowStart,
       windowEnd: now,
       visibilitySeconds: visibility,
@@ -585,6 +705,11 @@
     state.activeMs = 0;
     state.visibilitySeconds = 0;
     state.inputEvents = 0;
+    if (payload.gameId !== state.gameId) {
+      logDebug("drop_mismatched_gameid", { expected: state.gameId || null, payloadGameId: payload.gameId });
+      return;
+    }
+
     try {
       logDebug("send_window", {
         gameId: payload.gameId,
@@ -596,6 +721,13 @@
         force: !!force,
       });
     } catch (_) {}
+    state.pendingWindow = {
+      start: payload.windowStart,
+      end: payload.windowEnd,
+      inputs: payload.inputEvents,
+      visSeconds: payload.visibilitySeconds,
+    };
+
     state.pending = window.XPClient.postWindow(payload)
       .then((data) => {
         try {
@@ -607,9 +739,14 @@
           };
           logDebug("window_result", snap);
         } catch (_) {}
-        return handleResponse(data);
+        state.lastSuccessfulWindowEnd = payload.windowEnd;
+        state.pendingWindow = null;
+        return handleResponse(data, { source: "window" });
       })
-      .catch(handleError)
+      .catch((err) => {
+        state.pendingWindow = null;
+        handleError(err);
+      })
       .finally(() => { state.pending = null; });
     state.scoreDelta = 0;
   }
@@ -733,22 +870,46 @@
     }
   }
 
+  function ensureBadgeTimer() {
+    if (!window || typeof window.setInterval !== "function") return;
+    if (state.badgeTimerId) return;
+    if (!Number.isFinite(BADGE_RECONCILE_INTERVAL_MS) || BADGE_RECONCILE_INTERVAL_MS <= 0) return;
+    state.badgeTimerId = window.setInterval(() => {
+      try {
+        reconcileWithServer().catch(() => {});
+      } catch (_) {}
+    }, BADGE_RECONCILE_INTERVAL_MS);
+  }
+
+  function clearBadgeTimer() {
+    if (state.badgeTimerId && window && typeof window.clearInterval === "function") {
+      window.clearInterval(state.badgeTimerId);
+    }
+    state.badgeTimerId = null;
+  }
+
   function startSession(gameId) {
     if (!isGameHost()) {
       logDebug("block_no_host", { when: "startSession" });
       return;
     }
+    const normalizedId = gameId || state.gameId || "game";
     if (state.phase === "running") {
-      logDebug("xp_start_ignored", { existingGameId: state.gameId || null });
-      return;
+      if (state.gameId === normalizedId) {
+        logDebug("xp_start_ignored", { existingGameId: state.gameId || null });
+        return;
+      }
+      logDebug("xp_restart", { previousGameId: state.gameId || null, nextGameId: normalizedId });
+      stopSession({ flush: true });
     }
     attachBadge();
     hydrateRuntimeState();
     ensureTimer();
+    ensureBadgeTimer();
 
     state.phase = "running";
     state.running = true;
-    state.gameId = gameId || "game";
+    state.gameId = normalizedId;
     state.windowStart = Date.now();
     state.activeMs = 0;
     state.visibilitySeconds = 0;
@@ -763,6 +924,10 @@
     state.scoreDeltaSinceLastAward = 0;
     state.activityWindowFrozen = false;
     state.isActive = false;
+    state.sessionXp = 0;
+    state.badgeBaselineXp = resolveBadgeBaseline();
+    state.pendingWindow = null;
+    state.lastSuccessfulWindowEnd = null;
     if (!state.flush.lastSync) state.flush.lastSync = Date.now();
     state.debug.hardIdleActive = false;
     state.debug.lastNoHostLog = 0;
@@ -788,6 +953,7 @@
       flushXp(true).catch(() => {});
     }
     clearTimer();
+    clearBadgeTimer();
     state.phase = "idle";
     state.running = false;
     state.gameId = null;
@@ -804,11 +970,16 @@
     state.activityWindowFrozen = false;
     state.isActive = false;
     state.lastScorePulseTs = 0;
+    state.pendingWindow = null;
+    state.lastSuccessfulWindowEnd = null;
+    state.badgeBaselineXp = Math.max(resolveBadgeBaseline(), Number(state.badgeShownXp) || 0);
+    state.sessionXp = 0;
     state.debug.hardIdleActive = false;
     state.debug.lastNoHostLog = 0;
     state.debug.lastActivityLog = 0;
     state.debug.lastCapLog = 0;
     state.debug.lastVisibilityLog = 0;
+    updateBadge();
   }
 
   function nudge(options) {
@@ -909,6 +1080,7 @@
     state.totalLifetime = (Number(state.totalLifetime) || 0) + awarded;
     state.regen.lastAward = Date.now();
     state.lastResultTs = state.regen.lastAward;
+    state.sessionXp = Math.max(0, (Number(state.sessionXp) || 0) + awarded);
     saveCache();
     persistRuntimeState();
     pulseBadge();
@@ -1035,13 +1207,13 @@
   }
 
   function setTotals(total, cap) {
-    state.totalToday = typeof total === "number" ? total : state.totalToday;
-    state.cap = typeof cap === "number" ? cap : state.cap;
+    const payload = { ok: true };
+    if (typeof total === "number") payload.totalToday = total;
+    if (typeof cap === "number") payload.cap = cap;
     if (arguments.length >= 3 && typeof arguments[2] === "number") {
-      state.totalLifetime = arguments[2];
+      payload.totalLifetime = arguments[2];
     }
-    saveCache();
-    updateBadge();
+    applyServerDelta(payload, { source: "setTotals" });
   }
 
   function getSnapshot() {
@@ -1059,6 +1231,34 @@
       progress: state.snapshot.progress,
       lastSync: state.lastResultTs || 0,
     };
+  }
+
+  function reconcileWithServer() {
+    if (!state.running && state.phase !== "running") {
+      return Promise.resolve(null);
+    }
+    if (!window.XPClient || typeof window.XPClient.fetchStatus !== "function") {
+      return Promise.resolve(null);
+    }
+    return window.XPClient.fetchStatus()
+      .then((data) => {
+        applyServerDelta(data, { source: "reconcile" });
+        try {
+          logDebug("badge_reconcile", {
+            badgeShownXp: Number(state.badgeShownXp) || 0,
+            serverTotalXp: typeof state.serverTotalXp === "number" ? state.serverTotalXp : null,
+            sessionXp: Number(state.sessionXp) || 0,
+          });
+        } catch (_) {}
+        return data;
+      })
+      .catch((err) => {
+        try {
+          const message = err && err.message ? String(err.message).slice(0, 200) : "error";
+          logDebug("badge_reconcile_error", { message });
+        } catch (_) {}
+        return null;
+      });
   }
 
   function refreshStatus() {
