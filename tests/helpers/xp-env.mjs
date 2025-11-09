@@ -73,9 +73,20 @@ export function createEnvironment(options = {}) {
   let windowGameId = options.windowGameId || null;
 
   const attributes = new Map();
+  attributes.set('data-game-host', '');
 
   const bodyDataset = {};
   Object.defineProperty(bodyDataset, 'gameId', {
+    get() {
+      return bodyGameId;
+    },
+    set(value) {
+      bodyGameId = value == null ? value : String(value);
+    },
+    enumerable: true,
+    configurable: true,
+  });
+  Object.defineProperty(bodyDataset, 'gameSlug', {
     get() {
       return bodyGameId;
     },
@@ -116,6 +127,10 @@ export function createEnvironment(options = {}) {
         if (key === 'data-game-id') {
           bodyGameId = null;
         }
+      },
+      hasAttribute(name) {
+        const key = String(name).toLowerCase();
+        return attributes.has(key);
       },
       className: '',
       textContent: '',

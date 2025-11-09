@@ -30,7 +30,7 @@
   </style>
   <script src="/js/xpClient.js" defer></script>
 </head>
-<body>
+<body data-game-host>
   <header class="play-header">
     <a href="/">← Back</a>
     <a id="xpBadge" class="xp-badge xp-badge--loading" aria-live="polite" aria-busy="true" href="xp.html">
@@ -198,9 +198,30 @@
   }, { passive: true });
 </script>
 
+<script src="/js/debug.js" defer></script>
 <script src="/js/xp.js" defer></script>
-<script src="/js/xp-game-hook.js" defer></script>
-<script>(function start(){if(window.GameXpBridge?.auto)return void window.GameXpBridge.auto();if(document.readyState==='complete'||document.readyState==='interactive')return setTimeout(start,0);addEventListener('DOMContentLoaded',start,{once:true});})();</script>
+  <script src="/js/xp-game-hook.js" defer></script>
+  <script>
+    if (!window.__xpAutoBooted) {
+      window.__xpAutoBooted = true;
+      let tries = 0;
+      function boot() {
+        const bridge = window.GameXpBridge;
+        if (bridge && typeof bridge.auto === "function") {
+          bridge.auto();
+          return;
+        }
+        if (tries++ >= 5) return;
+        window.setTimeout(boot, Math.min(50 * tries, 200));
+      }
+      if (document.readyState === "complete") {
+        boot();
+      } else {
+        window.addEventListener("DOMContentLoaded", boot, { once: true });
+        window.addEventListener("load", boot, { once: true });
+      }
+    }
+  </script>
 </body>
 </html>
 

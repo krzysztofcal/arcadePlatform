@@ -11,6 +11,7 @@
   const GRAVITY = 2000;
   const JUMP_VELOCITY = -680;
   const INITIAL_SPEED = 360;
+  const XP_GAME_ID = 't-rex';
 
   const state = {
     running: false,
@@ -26,6 +27,37 @@
   };
 
   function formatScore(value) { return value.toString().padStart(5, '0'); }
+
+  let lastScorePulse = 0;
+
+  function getBridge() {
+    const bridge = window.GameXpBridge;
+    return bridge && typeof bridge === 'object' ? bridge : null;
+  }
+
+  function notifyScorePulse(totalScore) {
+    const payload = { type: 'game-score', gameId: XP_GAME_ID, score: totalScore };
+    const origin = (window.location && window.location.origin) ? window.location.origin : '*';
+    try { window.postMessage(payload, origin); } catch (_) {}
+    if (window.parent && window.parent !== window && typeof window.parent.postMessage === 'function') {
+      try { window.parent.postMessage(payload, origin); } catch (_) {}
+    }
+  }
+
+  function addScoreDelta(delta) {
+    if (!delta || !Number.isFinite(delta) || delta <= 0) return;
+    const bridge = getBridge();
+    if (bridge && typeof bridge.add === 'function') {
+      try { bridge.add(delta); } catch (_) {}
+    }
+  }
+
+  function nudgeXP() {
+    const bridge = getBridge();
+    if (bridge && typeof bridge.nudge === 'function') {
+      try { bridge.nudge(); } catch (_) {}
+    }
+  }
   function setupCanvas(){
     const dpr = window.devicePixelRatio || 1;
     canvas.width = WORLD_WIDTH * dpr;
@@ -38,18 +70,45 @@
   function reset(){
     state.running=false; state.lastTime=0; state.speed=INITIAL_SPEED; state.spawnTimer=0; state.spawnInterval=1.6; state.score=0;
     state.dino.y=GROUND_Y; state.dino.vy=0; state.dino.isJumping=false; state.obstacles.length=0; state.clouds.length=0;
+    lastScorePulse = 0;
     spawnCloud(); spawnCloud(); render(); updateScoreboard();
   }
   function start(){ if(state.running) return; state.running=true; state.lastTime=performance.now(); requestAnimationFrame(loop); }
   function jump(){ nudgeXP(); if(!state.running) start(); if(state.dino.isJumping) return; state.dino.isJumping=true; state.dino.vy=JUMP_VELOCITY; }
   function loop(ts){ if(!state.running) return; const dt=Math.min((ts-state.lastTime)/1000,0.035); state.lastTime=ts; update(dt); render(); requestAnimationFrame(loop); }
-  function update(dt){
-    state.speed += dt*12; state.spawnTimer += dt; if(state.spawnTimer>state.spawnInterval){ state.spawnTimer=0; state.spawnInterval=Math.max(1.0,1.8-state.speed/900); spawnObstacle(); }
-    const d=state.dino; d.vy+=GRAVITY*dt; d.y+=d.vy*dt; if(d.y>=GROUND_Y){ d.y=GROUND_Y; d.vy=0; d.isJumping=false; }
-    state.obstacles.forEach(ob=> ob.x -= state.speed*dt); state.obstacles = state.obstacles.filter(ob=> ob.x+ob.width>-10);
-    state.clouds.forEach(c=> c.x -= c.speed*dt); if(state.clouds.length<3) spawnCloud(); state.clouds = state.clouds.filter(c=> c.x+c.width>0);
-    detectCollision(); state.score += dt*12; if(Math.floor(state.score)%100===0){ state.speed+=5; } updateScoreboard();
-  }
+    function update(dt){
+      state.speed += dt*12;
+      state.spawnTimer += dt;
+      if(state.spawnTimer>state.spawnInterval){
+        state.spawnTimer=0;
+        state.spawnInterval=Math.max(1.0,1.8-state.speed/900);
+        spawnObstacle();
+      }
+      const d=state.dino;
+      d.vy+=GRAVITY*dt;
+      d.y+=d.vy*dt;
+      if(d.y>=GROUND_Y){
+        d.y=GROUND_Y;
+        d.vy=0;
+        d.isJumping=false;
+      }
+      state.obstacles.forEach(ob=> ob.x -= state.speed*dt);
+      state.obstacles = state.obstacles.filter(ob=> ob.x+ob.width>-10);
+      state.clouds.forEach(c=> c.x -= c.speed*dt);
+      if(state.clouds.length<3) spawnCloud();
+      state.clouds = state.clouds.filter(c=> c.x+c.width>0);
+      detectCollision();
+      state.score += dt*12;
+      if(Math.floor(state.score)%100===0){ state.speed+=5; }
+      updateScoreboard();
+      const wholeScore = Math.max(0, Math.floor(state.score));
+      if (wholeScore > lastScorePulse) {
+        const delta = wholeScore - lastScorePulse;
+        lastScorePulse = wholeScore;
+        notifyScorePulse(wholeScore);
+        addScoreDelta(delta);
+      }
+    }
   function detectCollision(){
     const d = state.dino;
     const dLeft = d.x;
@@ -87,13 +146,4 @@
   setupCanvas();
   reset();
 })();
-
-  if (window.XP && typeof window.XP.startSession === 'function'){
-    try { window.XP.startSession('t-rex'); } catch (_){}
-  }
-  function nudgeXP(){
-    if (window.XP && typeof window.XP.nudge === 'function'){
-      try { window.XP.nudge(); } catch (_){}
-    }
-  }
 
