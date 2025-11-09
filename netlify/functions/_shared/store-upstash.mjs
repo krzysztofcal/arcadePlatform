@@ -67,6 +67,7 @@ function createMemoryStore() {
       return ttl > 0 ? Math.ceil(ttl / 1000) : -2;
     },
     async eval(_script, keys = [], argv = []) {
+      // Memory impl supports only v2 delta script signature [sessionKey, sessionSyncKey, dailyKey, totalKey, lockKey] x [now, delta, dailyCap, sessionCap, ts, lockTtl].
       if (keys.length === 5 && argv.length === 6) {
         const [sessionKey, sessionSyncKey, dailyKey, totalKey, lockKey] = keys;
         const now = Number(argv[0]);

@@ -104,7 +104,13 @@ export async function handler(event) {
     return json(200, payload, origin);
   }
 
-  const deltaRaw = Number(body.delta);
+  let deltaRaw = Number(body.delta);
+  if (!Number.isFinite(deltaRaw)) {
+    const scoreDelta = Number(body.scoreDelta);
+    const pointsPerPeriod = Number(body.pointsPerPeriod);
+    if (Number.isFinite(scoreDelta)) deltaRaw = scoreDelta;
+    else if (Number.isFinite(pointsPerPeriod)) deltaRaw = pointsPerPeriod;
+  }
   if (!Number.isFinite(deltaRaw) || deltaRaw < 0) {
     return json(422, { error: "invalid_delta" }, origin);
   }

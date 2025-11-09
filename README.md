@@ -117,6 +117,12 @@ Server behavior:
   - Responses remain backwards compatible: `{ ok, awarded, totalToday, cap, totalLifetime }` plus the new `sessionTotal` and `lastSync` fields so clients can rehydrate badge state without branching.
   - When `XP_DEBUG=1`, the payload includes `debug` with the requested delta, active caps, and status code.
 
+Response status values:
+  - `ok` – full grant
+  - `partial` – partial grant (daily or session)
+  - `daily_cap`, `daily_cap_partial`, `session_cap`, `session_cap_partial`, `stale`, `locked`
+  - `statusOnly` – status probes without awarding XP
+
 Client hooks:
   - `window.XP.addScore(delta)` — queues XP locally; the bridge now forwards consolidated deltas via the simplified payload above and lets the server enforce rate limits.
 
@@ -145,7 +151,7 @@ Run locally:
 | `XP_DELTA_CAP` | `300` | Largest delta accepted from the client in a single request. |
 | `XP_LOCK_TTL_MS` | `3000` | Duration of the per-session Redis lock that guards concurrent writes. |
 
-Set these variables in tandem so the client and server agree on throughput; the bridge automatically mirrors `XP_DELTA_CAP` to keep requests inside the allowed range.
+Set these variables in tandem so the client and server agree on throughput; the server enforces this cap, and clients may optionally clamp to the same value to minimize rejected deltas.
 
 ## CI Status
 - GitHub Actions workflow: tests
