@@ -51,6 +51,25 @@
     handleVisible: null,
   };
 
+  function isHostDocument() {
+    try {
+      if (!document || !document.body) return false;
+      const body = document.body;
+      if (typeof body.hasAttribute === "function" && body.hasAttribute("data-game-host")) return true;
+      if (body.dataset) {
+        if (Object.prototype.hasOwnProperty.call(body.dataset, "gameHost")) return true;
+        if (body.dataset.gameId) return true;
+        if (body.dataset.gameSlug) return true;
+      }
+      if (typeof document.getElementById === "function") {
+        if (document.getElementById("gameFrame") || document.getElementById("frameBox") || document.getElementById("frameWrap")) {
+          return true;
+        }
+      }
+    } catch (_) {}
+    return false;
+  }
+
   function getXp() {
     const xp = window && window.XP;
     if (!xp || typeof xp.startSession !== "function") return null;
@@ -257,6 +276,9 @@
    * @param {string} [gameId] Optional override for the game identifier.
    */
   function auto(gameId) {
+    if (!isHostDocument()) {
+      return;
+    }
     const resolved = normalizeGameId(gameId) || detectGameId();
     if (!resolved) return;
     start(resolved);

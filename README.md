@@ -36,7 +36,13 @@ A lightweight arcade hub (static HTML/CSS/JS) with a sample game (Łap koty — 
 
 The clamp reflects the server configuration: the bridge reads `window.XP.scoreDeltaCeiling` (exported by `xp.js`) so any server-side change to `XP_SCORE_DELTA_CEILING` is mirrored client-side.
 
-When embedding the bridge manually, load `xp.js`, then `xp-game-hook.js`, and finally call `GameXpBridge.auto()` once the DOM is ready. The helper survives soft navigations—if you’re swapping views inside an SPA, call `GameXpBridge.start(newGameId)` for each routed surface; you do **not** need to re-inject the scripts.
+When embedding the bridge manually:
+
+1. Mark the playable shell with `<body data-game-host data-game-id="slug">` (or set `window.XP_IS_GAME_HOST = true` before `xp.js` executes). The guard fails builds that omit the attribute so non-host pages never accrue XP.
+2. Load `/js/debug.js`, `/js/xp.js`, and `/js/xp-game-hook.js` (in that order) using root-absolute paths.
+3. Include the bounded inline bootstrapper that calls `GameXpBridge.auto()` exactly once. The template retries up to ~500 ms with a gentle backoff and sets `window.__xpAutoBooted` after a successful call so network failures never spin in a tight loop.
+
+The helper survives soft navigations—if you’re swapping views inside an SPA, call `GameXpBridge.start(newGameId)` for each routed surface; you do **not** need to re-inject the scripts.
 
 #### XP windows & idle guard
 - XP windows only send while the tab stays visible and the game loop is running.

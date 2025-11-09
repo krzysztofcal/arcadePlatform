@@ -127,6 +127,7 @@ async function analyzeFile(relPath) {
   const xpScripts = countScriptTags(xpScriptPattern, source);
   const hookScripts = countScriptTags(hookScriptPattern, source);
   const inlineScripts = countInlineBridgeScripts(source);
+  const bodyMatch = source.match(/<body\b[^>]*>/i);
 
   const issues = [];
   if (xpScripts === 0) {
@@ -145,6 +146,10 @@ async function analyzeFile(relPath) {
     issues.push("missing GameXpBridge auto bootstrap script");
   } else if (inlineScripts > 1) {
     issues.push(`found ${inlineScripts} GameXpBridge auto bootstrap scripts`);
+  }
+
+  if (!bodyMatch || !/data-game-host\b/i.test(bodyMatch[0])) {
+    issues.push("missing data-game-host attribute on <body>");
   }
 
   return { relPath, issues };

@@ -1321,6 +1321,7 @@
       const logged = logDebug("xp_init", { page, admin });
       state.debug.adminInitLogged = admin && logged;
     }
+    const hostPage = isGameHost();
     if (typeof document !== "undefined") {
       const handleDomReady = () => {
         try {
@@ -1350,7 +1351,9 @@
     }
 
     if (typeof window !== "undefined") {
-      ensureTimer();
+      if (hostPage) {
+        ensureTimer();
+      }
 
       window.addEventListener("pageshow", () => {
         try {
@@ -1380,19 +1383,21 @@
         try { refreshBadgeFromStorage(); } catch (_) {}
       });
 
-      window.addEventListener("message", (event) => {
-        try {
-          if (!event || !event.data || typeof event.data !== "object") return;
-          if (event.origin && typeof location !== "undefined" && event.origin !== location.origin) return;
-          if (event.data.type !== "game-score") return;
-          if (!isGameHost()) return;
-          state.lastScorePulseTs = Date.now();
-          logDebug("score_pulse", {
-            gameId: event.data.gameId || state.gameId || "",
-            score: typeof event.data.score === "number" ? event.data.score : undefined,
-          });
-        } catch (_) {}
-      }, { passive: true });
+      if (hostPage) {
+        window.addEventListener("message", (event) => {
+          try {
+            if (!event || !event.data || typeof event.data !== "object") return;
+            if (event.origin && typeof location !== "undefined" && event.origin !== location.origin) return;
+            if (event.data.type !== "game-score") return;
+            if (!isGameHost()) return;
+            state.lastScorePulseTs = Date.now();
+            logDebug("score_pulse", {
+              gameId: event.data.gameId || state.gameId || "",
+              score: typeof event.data.score === "number" ? event.data.score : undefined,
+            });
+          } catch (_) {}
+        }, { passive: true });
+      }
 
       window.addEventListener("xp:boost", (event) => {
         try { requestBoost(event && event.detail); } catch (_) {}
@@ -1413,83 +1418,85 @@
         emitAdminInitLog();
       }
 
-      // Hardened activity bridge (same-origin, visible doc, requires userGesture:true, throttled)
-    (function(){
-      let __lastNudgeTs = 0;
-      window.addEventListener("message", (event) => {
-        try {
-          if (!event || !event.data) return;
-          if (typeof document !== "undefined" && document.hidden) return;
-          if (event.origin && typeof location !== "undefined" && event.origin !== location.origin) return;
-          if (event.data.type !== "kcswh:activity") return;
-          if (!state.running) return;
-          if (!isGameHost()) return;
-          if (event.data.userGesture !== true) return;
-
-          const now = Date.now();
-          let activationIsActive = true;
-          if (typeof navigator !== "undefined" && navigator.userActivation) {
-            activationIsActive = navigator.userActivation.isActive === true;
-          }
-          const recentlyTrusted = state.lastTrustedInputTs && (now - state.lastTrustedInputTs) <= ACTIVE_WINDOW_MS;
-          if (!activationIsActive && !recentlyTrusted) return;
-
-          if (now - __lastNudgeTs < 100) return; // ~10/sec
-          __lastNudgeTs = now;
-
-          try { recordTrustedInput(); } catch (_) {}
-          if (typeof nudge === "function") nudge({ skipMark: true });
-        } catch {}
-      }, { passive: true });
-    })();
-
-    // Top-frame input listeners -> nudge (only on real user gestures)
-    (function(){
-      if (state.listenersAttached) return;
-      state.listenersAttached = true;
-      // Decide if this event represents a true user gesture (not synthetic noise)
-      function isRealUserGesture(e){
-        // Prefer the platform signal if present
-        if (typeof navigator !== "undefined" && navigator.userActivation && navigator.userActivation.isActive) return true;
-        // Fallback heuristics
-        if (!e || e.isTrusted === false) return false;
-        switch (e.type) {
-          case "pointerdown":
-          case "touchstart":
-          case "keydown":
-            return true;
-          case "wheel":
-            return !isLikelyMobile();
-          // Explicitly ignore move/hover; too noisy and often synthetic in headless runs
-          case "pointermove":
-          case "mousemove":
-          default:
-            return false;
-      }
-      }
-
-      const baseEvents = ["pointerdown","keydown","touchstart"]; // always track
-      const wheelEvents = isLikelyMobile() ? [] : ["wheel"];
-      baseEvents.concat(wheelEvents).forEach(evt => {
-        try {
-          window.addEventListener(evt, (ev) => {
+      if (hostPage) {
+        // Hardened activity bridge (same-origin, visible doc, requires userGesture:true, throttled)
+        (function(){
+          let __lastNudgeTs = 0;
+          window.addEventListener("message", (event) => {
             try {
-              if (!isRealUserGesture(ev)) return;
+              if (!event || !event.data) return;
+              if (typeof document !== "undefined" && document.hidden) return;
+              if (event.origin && typeof location !== "undefined" && event.origin !== location.origin) return;
+              if (event.data.type !== "kcswh:activity") return;
               if (!state.running) return;
               if (!isGameHost()) return;
-              if (!isFromGameSurface(ev)) {
-                logDebug("ignore_input_outside_surface", { type: ev && ev.type });
-                return;
+              if (event.data.userGesture !== true) return;
+
+              const now = Date.now();
+              let activationIsActive = true;
+              if (typeof navigator !== "undefined" && navigator.userActivation) {
+                activationIsActive = navigator.userActivation.isActive === true;
               }
-              recordTrustedInput();
+              const recentlyTrusted = state.lastTrustedInputTs && (now - state.lastTrustedInputTs) <= ACTIVE_WINDOW_MS;
+              if (!activationIsActive && !recentlyTrusted) return;
+
+              if (now - __lastNudgeTs < 100) return; // ~10/sec
+              __lastNudgeTs = now;
+
+              try { recordTrustedInput(); } catch (_) {}
               if (typeof nudge === "function") nudge({ skipMark: true });
-            } catch(_) {}
+            } catch (_) {}
           }, { passive: true });
-        } catch(_) {}
-      });
-    })();
+        })();
+
+        // Top-frame input listeners -> nudge (only on real user gestures)
+        (function(){
+          if (state.listenersAttached) return;
+          state.listenersAttached = true;
+          // Decide if this event represents a true user gesture (not synthetic noise)
+          function isRealUserGesture(e){
+            // Prefer the platform signal if present
+            if (typeof navigator !== "undefined" && navigator.userActivation && navigator.userActivation.isActive) return true;
+            // Fallback heuristics
+            if (!e || e.isTrusted === false) return false;
+            switch (e.type) {
+              case "pointerdown":
+              case "touchstart":
+              case "keydown":
+                return true;
+              case "wheel":
+                return !isLikelyMobile();
+              // Explicitly ignore move/hover; too noisy and often synthetic in headless runs
+              case "pointermove":
+              case "mousemove":
+              default:
+                return false;
+            }
+          }
+
+          const baseEvents = ["pointerdown","keydown","touchstart"]; // always track
+          const wheelEvents = isLikelyMobile() ? [] : ["wheel"];
+          baseEvents.concat(wheelEvents).forEach(evt => {
+            try {
+              window.addEventListener(evt, (ev) => {
+                try {
+                  if (!isRealUserGesture(ev)) return;
+                  if (!state.running) return;
+                  if (!isGameHost()) return;
+                  if (!isFromGameSurface(ev)) {
+                    logDebug("ignore_input_outside_surface", { type: ev && ev.type });
+                    return;
+                  }
+                  recordTrustedInput();
+                  if (typeof nudge === "function") nudge({ skipMark: true });
+                } catch(_) {}
+              }, { passive: true });
+            } catch(_) {}
+          });
+        })();
+      }
+    }
   }
-}
 
   init();
 
@@ -1621,7 +1628,7 @@
     if (runningNow) return;
     const ok = tryCall('resumeSession') || tryCall('nudge');
     if (ok) {
-      try { document.dispatchEvent(new Event('xp:visible')); } catch {}
+      try { document.dispatchEvent(new Event('xp:visible')); } catch (_) {}
       clearRetry();
     } else {
       retryResume(0);
@@ -1637,7 +1644,7 @@
     if (!runningNow) return;
     tryCall('stopSession', { flush: true });
     clearRetry();
-    try { document.dispatchEvent(new Event('xp:hidden')); } catch {}
+    try { document.dispatchEvent(new Event('xp:hidden')); } catch (_) {}
   }
 
   function persisted(event){ return !!(event && event.persisted); }
@@ -1676,5 +1683,5 @@
     if (nodes.length !== 1) {
       console.warn(`[xp] expected 1 xp-badge anchor with id="xpBadge", found ${nodes.length}`);
     }
-  } catch {}
+  } catch (_) {}
 })();
