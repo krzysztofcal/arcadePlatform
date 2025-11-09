@@ -5,6 +5,8 @@ Global `window.XP` provides:
 - `stopSession(opts?: { flush?: boolean }): void`
 - `resumeSession(): void`
 - `nudge(): void`
+- `requestBoost(multiplier: number, ttlMs?: number, reason?: string): void` (dispatches an `xp:boost` event; still accepts legacy `{ durationMs, source }` detail payloads.)
+- `getFlushStatus(): { pending: number, lastSync: number, inflight?: boolean }`
 
 Lifecycle listeners (pagehide/beforeunload/pageshow/visibilitychange) must be
 centralized in `js/xp.js`. Any temporary exception must include a same-line comment:

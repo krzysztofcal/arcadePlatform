@@ -116,6 +116,7 @@
       expiresAt: 0,
       source: null,
     },
+    boostTimerId: null,
     debug: {
       lastNoHostLog: 0,
       hardIdleActive: false,
@@ -336,12 +337,54 @@
     return base * (1 + comboBonus);
   }
 
+  function clearBoostTimer() {
+    if (state.boostTimerId) {
+      try { clearTimeout(state.boostTimerId); } catch (_) {}
+      state.boostTimerId = null;
+    }
+  }
+
+  function resetBoost() {
+    const previous = state.boost || { multiplier: 1, expiresAt: 0, source: null };
+    clearBoostTimer();
+    state.boost = { multiplier: 1, expiresAt: 0, source: null };
+    if (previous.multiplier !== 1 || previous.expiresAt !== 0 || (previous.source || null) !== null) {
+      persistRuntimeState();
+    }
+  }
+
+  function scheduleBoostExpiration(expiresAt) {
+    clearBoostTimer();
+    const target = Number(expiresAt) || 0;
+    if (!Number.isFinite(target) || target <= 0) return;
+    const delay = Math.max(0, Math.floor(target - Date.now()));
+    if (delay <= 0) {
+      resetBoost();
+      return;
+    }
+    try {
+      state.boostTimerId = setTimeout(() => {
+        state.boostTimerId = null;
+        if (!state.boost || !state.boost.expiresAt) {
+          resetBoost();
+          return;
+        }
+        if (Date.now() >= state.boost.expiresAt) {
+          resetBoost();
+        } else {
+          scheduleBoostExpiration(state.boost.expiresAt);
+        }
+      }, delay);
+    } catch (_) {
+      resetBoost();
+    }
+  }
+
   function clearExpiredBoost(now) {
     const ts = typeof now === "number" ? now : Date.now();
     if (!state.boost) return;
     if (state.boost.expiresAt && ts > state.boost.expiresAt) {
-      state.boost = { multiplier: 1, expiresAt: 0, source: null };
-      persistRuntimeState();
+      resetBoost();
     }
   }
 
@@ -481,6 +524,7 @@
       state.flush.lastSync = parseNumber(parsed.lastSync, state.flush.lastSync || Date.now()) || Date.now();
       if (parsed.boost && typeof parsed.boost === "object") {
         state.boost = Object.assign({ multiplier: 1, expiresAt: 0, source: null }, parsed.boost);
+        scheduleBoostExpiration(state.boost.expiresAt || 0);
       }
     } catch (_) {
       if (!state.flush.lastSync) state.flush.lastSync = Date.now();
@@ -1212,23 +1256,39 @@
     return request;
   }
 
-  function requestBoost(detail) {
-    if (!detail || typeof detail !== "object") return;
-    const multiplier = parseNumber(detail.multiplier, state.boost.multiplier || 1) || 1;
-    const durationMs = Math.max(0, parseNumber(detail.durationMs, 0) || 0);
-    const source = detail.source || null;
-    if (!Number.isFinite(multiplier) || multiplier <= 1) {
-      state.boost = { multiplier: 1, expiresAt: 0, source: null };
-      persistRuntimeState();
+  // Internal boost setter supports both the new `(multiplier, ttlMs, reason)`
+  // signature and legacy detail objects dispatched with `durationMs/source`.
+  function requestBoost(multiplier, ttlMs, reason) {
+    if (multiplier && typeof multiplier === "object") {
+      const detail = multiplier;
+      multiplier = detail.multiplier;
+      if (multiplier == null) multiplier = detail.mult;
+      ttlMs = detail.ttlMs;
+      if (ttlMs == null) ttlMs = detail.durationMs;
+      reason = detail.reason;
+      if (reason == null) reason = detail.source;
+    }
+
+    const fallbackMultiplier = state.boost && state.boost.multiplier ? state.boost.multiplier : 1;
+    const parsedMultiplier = parseNumber(multiplier, fallbackMultiplier) || 1;
+    if (!Number.isFinite(parsedMultiplier) || parsedMultiplier <= 1) {
+      resetBoost();
       return;
     }
+
+    const parsedTtl = parseNumber(ttlMs, 0) || 0;
+    const ttl = Number.isFinite(parsedTtl) ? Math.max(0, parsedTtl) : 0;
     const now = Date.now();
+    const expiresAt = now + (ttl > 0 ? ttl : 15_000);
+    const source = reason == null ? null : reason;
+
     state.boost = {
-      multiplier: Math.max(1, multiplier),
-      expiresAt: durationMs > 0 ? now + durationMs : now + 15_000,
+      multiplier: Math.max(1, parsedMultiplier),
+      expiresAt,
       source,
     };
     persistRuntimeState();
+    scheduleBoostExpiration(expiresAt);
   }
 
   function getFlushStatus() {
@@ -1402,7 +1462,11 @@
       }, { passive: true });
 
       window.addEventListener("xp:boost", (event) => {
-        try { requestBoost(event && event.detail); } catch (_) {}
+        try {
+          // Accept both new `{ multiplier, ttlMs, reason }` and legacy
+          // `{ multiplier, durationMs, source }` payloads.
+          requestBoost(event && event.detail);
+        } catch (_) {}
       });
 
       window.addEventListener("klog:admin", (event) => {
@@ -1511,8 +1575,42 @@
     addScore,
     awardLocalXp,
     flushXp,
-    requestBoost,
-    getFlushStatus,
+    // Public API: dispatch an event so host integrations remain decoupled.
+    requestBoost: function (multiplier, ttlMs, reason) {
+      const detail = {
+        multiplier,
+        mult: multiplier,
+        ttlMs,
+        durationMs: ttlMs,
+        reason,
+        source: reason,
+      };
+      try {
+        const evt = typeof CustomEvent === "function"
+          ? new CustomEvent("xp:boost", { detail })
+          : null;
+        if (evt) {
+          window.dispatchEvent(evt);
+        } else if (typeof document !== "undefined" && document.createEvent) {
+          const legacyEvt = document.createEvent("CustomEvent");
+          legacyEvt.initCustomEvent("xp:boost", false, false, detail);
+          window.dispatchEvent(legacyEvt);
+        } else {
+          requestBoost(detail);
+        }
+      } catch (_) {
+        try { requestBoost(detail); } catch (_) {}
+      }
+    },
+    // Public probe: surface pending + lastSync while keeping legacy inflight flag.
+    getFlushStatus: function () {
+      const status = getFlushStatus();
+      return {
+        pending: status && typeof status.pending === "number" ? status.pending : 0,
+        lastSync: status && typeof status.lastSync === "number" ? status.lastSync : 0,
+        inflight: !!(status && status.inflight), // legacy flag retained for compatibility
+      };
+    },
     scoreDeltaCeiling: MAX_SCORE_DELTA,
 
     isRunning: function(){ try { return !!(typeof state !== 'undefined' ? state.running : (this && this.__running)); } catch(_) { return !!(this && this.__running); } },});
