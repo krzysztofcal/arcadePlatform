@@ -25,7 +25,33 @@
 
   async function postWindow(payload) {
     const { userId, sessionId } = ensureIds();
-    const body = Object.assign({}, payload, { userId, sessionId });
+    const source = (payload && typeof payload === "object") ? payload : {};
+    let delta = 0;
+    if (typeof source.delta === "number") {
+      delta = source.delta;
+    } else if (typeof source.scoreDelta === "number") {
+      delta = source.scoreDelta;
+    } else if (typeof source.pointsPerPeriod === "number") {
+      delta = source.pointsPerPeriod;
+    }
+    if (!Number.isFinite(delta) || delta < 0) delta = 0;
+    delta = Math.floor(delta);
+
+    let ts = Number(source.ts);
+    if (!Number.isFinite(ts)) ts = Number(source.windowEnd);
+    if (!Number.isFinite(ts)) ts = Date.now();
+
+    const metadata = {};
+    for (const key in source) {
+      if (!Object.prototype.hasOwnProperty.call(source, key)) continue;
+      if (key === "delta" || key === "ts") continue;
+      metadata[key] = source[key];
+    }
+
+    const body = { userId, sessionId, delta, ts };
+    if (Object.keys(metadata).length) {
+      body.metadata = metadata;
+    }
     const res = await fetch(FN_URL, {
       method: "POST",
       headers: { "content-type": "application/json" },

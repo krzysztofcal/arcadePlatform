@@ -104,23 +104,21 @@ Operators rolling out the P1.1 XP bridge should stage the following environment 
 Document every toggle change in your incident timeline—the bridge guard expects the environment to match the table above when P1.1 resumes.
 
 ### Message contract: `postWindow`
-Client → server payload (subset; required unless marked optional):
-  - `gameId` (string)
-  - `windowStart` (ms since epoch)
-  - `windowEnd` (ms since epoch)
-  - `visibilitySeconds` (number)
-  - `inputEvents` (integer)
-  - `chunkMs` (integer)
-  - `pointsPerPeriod` (integer)
-  - `scoreDelta` (integer, optional) — **incremental** score earned since the last sent window. The client **accumulates** during play and **resets after a send**; omitted when 0.
+Client → server payload (minimal set, extras allowed):
+  - `userId` (string)
+  - `sessionId` (string)
+  - `delta` (integer ≥ 0) – requested XP increment for the active session
+  - `ts` (ms since epoch) – last activity timestamp used for ordering/lastSync persistence
+  - `metadata` (object, optional) – any additional context (gameId, instrumentation, etc.)
 
-Server behavior (P0.5):
-  - `scoreDelta` is **accepted and validated** but **ignored for awarding**.
-  - Validation clamps to `[0, SCORE_DELTA_CEILING]` (env; default `10000`). With `XP_DEBUG=1`, responses may include `debug.scoreDelta`.
-  - Backwards compatible: older clients simply omit `scoreDelta`; older servers ignore the unknown field.
+Server behavior:
+  - Requests with `delta` outside `0…XP_DELTA_CAP` (default 300) are rejected.
+  - XP is granted directly from `delta` while enforcing per-session (`XP_SESSION_CAP`, default 300) and per-day (`XP_DAILY_CAP`, default 600) ceilings. Partial grants surface `reason: 'daily_cap_partial' | 'session_cap_partial'`.
+  - Responses remain backwards compatible: `{ ok, awarded, totalToday, cap, totalLifetime }` plus the new `sessionTotal` and `lastSync` fields so clients can rehydrate badge state without branching.
+  - When `XP_DEBUG=1`, the payload includes `debug` with the requested delta, active caps, and status code.
 
 Client hooks:
-  - `window.XP.addScore(delta)` — accepts a number; internally rounded and accumulated (non-negative). Available since the P1.1 rollout and gated server-side by `XP_USE_SCORE`, but safe to call even when the toggle is off. The sample “Cats” game calls `addScore(1)` on each catch.
+  - `window.XP.addScore(delta)` — queues XP locally; the bridge now forwards consolidated deltas via the simplified payload above and lets the server enforce rate limits.
 
 ## Tests
 There are two layers of tests:
@@ -141,38 +139,13 @@ Run locally:
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `XP_DEBUG` | `0` | Include the `debug` object in responses (and echo `scoreDelta` when present; see also `XP_SCORE_DEBUG_TRACE`). |
-| `XP_SCORE_DELTA_CEILING` | `10000` | Maximum accepted `scoreDelta` per window. |
-| `XP_USE_SCORE` | `0` | Enable score-driven XP grants instead of time-driven awards. |
-| `XP_SCORE_TO_XP` | `1` | Conversion rate from accepted score delta to XP (per request). |
-| `XP_MAX_XP_PER_WINDOW` | `10` | Cap on XP converted from a single window when score mode is enabled. |
-| `XP_SCORE_RATE_LIMIT_PER_MIN` | `10000` (falls back to `XP_SCORE_DELTA_CEILING`) | Per-user rolling minute limit for accepted score deltas. |
-| `XP_SCORE_BURST_MAX` | `10000` (falls back to `XP_SCORE_RATE_LIMIT_PER_MIN`) | Maximum score delta accepted in a single window while respecting the rate limit. |
-| `XP_SCORE_MIN_EVENTS` | `4` | Minimum input events required before a score-bearing window is considered. |
-| `XP_SCORE_MIN_VIS_S` | `8` | Minimum foreground visibility (seconds) required for score-bearing windows. |
-| `XP_SCORE_DEBUG_TRACE` | `0` | Forces score-mode debug fields even when `XP_DEBUG` is unset. |
+| `XP_DEBUG` | `0` | Include the `debug` object in responses for easier staging diagnostics. |
+| `XP_DAILY_CAP` | `600` | Maximum XP a user can gain per UTC day. |
+| `XP_SESSION_CAP` | `300` | Maximum XP a single session can accumulate before further deltas are rejected. |
+| `XP_DELTA_CAP` | `300` | Largest delta accepted from the client in a single request. |
+| `XP_LOCK_TTL_MS` | `3000` | Duration of the per-session Redis lock that guards concurrent writes. |
 
-#### Enabling score-driven awards
-Score-driven XP awards are currently experimental and disabled by default to support a safe rollout. Enable the mode by setting
-`XP_USE_SCORE=1`; when unset or false, the service falls back to time-based XP grants even if `scoreDelta` is provided.
-
-When score-driven awards are enabled:
-
-- `XP_USE_SCORE` (default `0`) toggles whether `scoreDelta` is considered when calculating XP.
-- `XP_SCORE_TO_XP` (default `1`) controls the conversion rate: XP gained per request is `scoreDelta * XP_SCORE_TO_XP`, rounded and
-  clamped. Negative values are ignored by the server-side guardrails.
-- `XP_MAX_XP_PER_WINDOW` (default `10`) caps the XP converted from a single window regardless of the incoming score.
-
-If a window is submitted without a `scoreDelta` value (including zero) or the feature is disabled, XP awards continue to use the
-existing time-based path.
-
-#### Score mode safeguards
-
-Score-driven windows are additionally throttled and validated:
-
-- **Rate limit & burst control** – each account has a rolling per-minute allowance (`XP_SCORE_RATE_LIMIT_PER_MIN`) and a per-window burst ceiling (`XP_SCORE_BURST_MAX`). Requests that exceed either bucket are rejected before any XP is granted.
-- **Stricter minimum activity** – score windows must meet higher baselines before they are accepted: at least `XP_SCORE_MIN_EVENTS` interactions and `XP_SCORE_MIN_VIS_S` seconds of focused play.
-- **Expanded debug fields** – when `XP_DEBUG` or `XP_SCORE_DEBUG_TRACE` is enabled, responses include score-mode diagnostics such as the active rate limit, burst cap, visibility, and input thresholds to help tune client behavior.
+Set these variables in tandem so the client and server agree on throughput; the bridge automatically mirrors `XP_DELTA_CAP` to keep requests inside the allowed range.
 
 ## CI Status
 - GitHub Actions workflow: tests

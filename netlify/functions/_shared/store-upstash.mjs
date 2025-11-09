@@ -67,58 +67,84 @@ function createMemoryStore() {
       return ttl > 0 ? Math.ceil(ttl / 1000) : -2;
     },
     async eval(_script, keys = [], argv = []) {
-      const [dailyKey, lastKey, idemKey, lockKey, totalKey] = keys;
-      const now = Number(argv[0]);
-      const chunk = Number(argv[1]);
-      const step = Number(argv[2]);
-      const cap = Number(argv[3]);
-      const idemTtl = Number(argv[4]) * 1000;
-      const endTs = Number(argv[5]);
-      const lastTtl = Number(argv[6]) * 1000;
-      const lockTtl = Number(argv[7]);
+      if (keys.length === 5 && argv.length === 6) {
+        const [sessionKey, sessionSyncKey, dailyKey, totalKey, lockKey] = keys;
+        const now = Number(argv[0]);
+        const delta = Number(argv[1]);
+        const dailyCap = Number(argv[2]);
+        const sessionCap = Number(argv[3]);
+        const ts = Number(argv[4]);
+        const lockTtl = Number(argv[5]);
 
-      const lockEntry = sweep(lockKey);
-      if (lockEntry) {
-        const current = Number(getValue(dailyKey) ?? "0");
-        const lifetime = Number(getValue(totalKey) ?? "0");
-        return [0, current, 4, lifetime];
+        const lockEntry = sweep(lockKey);
+        if (lockEntry) {
+          const currentDaily = Number(getValue(dailyKey) ?? "0");
+          const sessionTotalLocked = Number(getValue(sessionKey) ?? "0");
+          const lifetimeLocked = Number(getValue(totalKey) ?? "0");
+          const lastSyncLocked = Number(getValue(sessionSyncKey) ?? "0");
+          return [0, currentDaily, sessionTotalLocked, lifetimeLocked, lastSyncLocked, 6];
+        }
+
+        setValue(lockKey, now, lockTtl);
+
+        const release = () => { memory.delete(lockKey); };
+
+        let sessionTotal = Number(getValue(sessionKey) ?? "0");
+        let lastSync = Number(getValue(sessionSyncKey) ?? "0");
+        let dailyTotal = Number(getValue(dailyKey) ?? "0");
+        let lifetime = Number(getValue(totalKey) ?? "0");
+
+        try {
+          if (lastSync > 0 && ts <= lastSync) {
+            return [0, dailyTotal, sessionTotal, lifetime, lastSync, 2];
+          }
+
+          const remainingDaily = dailyCap - dailyTotal;
+          if (remainingDaily <= 0) {
+            return [0, dailyTotal, sessionTotal, lifetime, lastSync, 3];
+          }
+
+          const remainingSession = sessionCap - sessionTotal;
+          if (remainingSession <= 0) {
+            return [0, dailyTotal, sessionTotal, lifetime, lastSync, 5];
+          }
+
+          let grant = delta;
+          let status = 0;
+          if (grant > remainingDaily) {
+            grant = remainingDaily;
+            status = 1;
+          }
+          if (grant > remainingSession) {
+            grant = remainingSession;
+            status = 4;
+          }
+
+          if (grant <= 0) {
+            if (ts > lastSync) {
+              lastSync = ts;
+              setValue(sessionSyncKey, lastSync, null);
+            }
+            return [0, dailyTotal, sessionTotal, lifetime, lastSync, status];
+          }
+
+          dailyTotal += grant;
+          sessionTotal += grant;
+          lifetime += grant;
+          lastSync = ts;
+
+          setValue(dailyKey, dailyTotal, null);
+          setValue(sessionKey, sessionTotal, null);
+          setValue(totalKey, lifetime, null);
+          setValue(sessionSyncKey, lastSync, null);
+
+          return [grant, dailyTotal, sessionTotal, lifetime, lastSync, status];
+        } finally {
+          release();
+        }
       }
-      setValue(lockKey, now, lockTtl);
 
-      const release = () => { memory.delete(lockKey); };
-
-      try {
-        if (getValue(idemKey) != null) {
-          const current = Number(getValue(dailyKey) ?? "0");
-          const lifetime = Number(getValue(totalKey) ?? "0");
-          return [0, current, 1, lifetime];
-        }
-
-        let current = Number(getValue(dailyKey) ?? "0");
-        if (current >= cap) {
-          setValue(idemKey, "1", idemTtl);
-          const lifetime = Number(getValue(totalKey) ?? "0");
-          return [0, current, 2, lifetime];
-        }
-
-        const lastOk = Number(getValue(lastKey) ?? "0");
-        if ((endTs - lastOk) < chunk) {
-          const lifetime = Number(getValue(totalKey) ?? "0");
-          return [0, current, 3, lifetime];
-        }
-
-        const remaining = cap - current;
-        const grant = Math.min(step, remaining);
-        const newTotal = current + grant;
-        setValue(dailyKey, newTotal, null);
-        setValue(lastKey, endTs, lastTtl);
-        setValue(idemKey, "1", idemTtl);
-        const lifetime = Number(getValue(totalKey) ?? "0") + grant;
-        setValue(totalKey, lifetime, null);
-        return [grant, newTotal, 0, lifetime];
-      } finally {
-        release();
-      }
+      throw new Error("Unsupported eval signature in memory store");
     },
   };
 }
