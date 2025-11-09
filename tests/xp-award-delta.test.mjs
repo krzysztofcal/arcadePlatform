@@ -8,6 +8,10 @@ async function createHandler(label, overrides = {}) {
   process.env.XP_DAILY_CAP = String(overrides.dailyCap ?? 400);
   process.env.XP_SESSION_CAP = String(overrides.sessionCap ?? 200);
   process.env.XP_DELTA_CAP = String(overrides.deltaCap ?? 300);
+  process.env.XP_REQUIRE_ACTIVITY = overrides.requireActivity ? '1' : '0';
+  process.env.XP_MIN_ACTIVITY_EVENTS = String(overrides.minEvents ?? 4);
+  process.env.XP_MIN_ACTIVITY_VIS_S = String(overrides.minVisibility ?? 8);
+  process.env.XP_METADATA_MAX_BYTES = String(overrides.metadataLimit ?? 2048);
   const { handler } = await import(`../netlify/functions/award-xp.mjs?case=${label}`);
   return handler;
 }
@@ -90,11 +94,56 @@ async function testDeltaValidation() {
   assert.equal(rejected.statusCode, 422);
   const payload = JSON.parse(rejected.body);
   assert.equal(payload.error, 'delta_out_of_range');
+  assert.equal(payload.capDelta, 300);
+}
+
+async function testMetadataLimits() {
+  const handler = await createHandler('metadata', { metadataLimit: 64 });
+  const base = { userId: 'meta-user', sessionId: 'meta-session', ts: BASE_TS };
+
+  const accepted = await handler({ httpMethod: 'POST', headers: {}, body: JSON.stringify({ ...base, delta: 10, metadata: { note: 'ok' } }) });
+  assert.equal(accepted.statusCode, 200);
+
+  const hugeMeta = { ...base, delta: 10, metadata: { blob: 'x'.repeat(200) } };
+  const rejected = await handler({ httpMethod: 'POST', headers: {}, body: JSON.stringify(hugeMeta) });
+  assert.equal(rejected.statusCode, 413);
+  const payload = JSON.parse(rejected.body);
+  assert.equal(payload.error, 'metadata_too_large');
+
+  const depthMeta = { ...base, delta: 5, metadata: { a: { b: { c: { d: 1 } } } } };
+  const deep = await handler({ httpMethod: 'POST', headers: {}, body: JSON.stringify(depthMeta) });
+  assert.equal(deep.statusCode, 413);
+  const deepPayload = JSON.parse(deep.body);
+  assert.equal(deepPayload.error, 'metadata_too_large');
+
+  const invalid = await handler({ httpMethod: 'POST', headers: {}, body: JSON.stringify({ ...base, delta: 5, metadata: 'nope' }) });
+  assert.equal(invalid.statusCode, 400);
+  const invalidBody = JSON.parse(invalid.body);
+  assert.equal(invalidBody.error, 'invalid_metadata');
+}
+
+async function testActivityGuard() {
+  const handler = await createHandler('activity', { requireActivity: true, minEvents: 3, minVisibility: 5 });
+  const base = { userId: 'active-user', sessionId: 'active-session', ts: BASE_TS };
+
+  const inactive = await handler({ httpMethod: 'POST', headers: {}, body: JSON.stringify({ ...base, delta: 20, metadata: { inputEvents: 1, visibilitySeconds: 2 } }) });
+  assert.equal(inactive.statusCode, 200);
+  const inactivePayload = JSON.parse(inactive.body);
+  assert.equal(inactivePayload.reason, 'inactive');
+  assert.equal(inactivePayload.status, 'inactive');
+  assert.equal(inactivePayload.awarded, 0);
+
+  const active = await handler({ httpMethod: 'POST', headers: {}, body: JSON.stringify({ ...base, ts: BASE_TS + 10, delta: 20, metadata: { inputEvents: 4, visibilitySeconds: 6 } }) });
+  assert.equal(active.statusCode, 200);
+  const activePayload = JSON.parse(active.body);
+  assert.equal(activePayload.awarded, 20);
 }
 
 await testBasicAwarding();
 await testDailyCapPartial();
 await testStaleAndStatus();
 await testDeltaValidation();
+await testMetadataLimits();
+await testActivityGuard();
 
 console.log('xp-award-delta tests passed');

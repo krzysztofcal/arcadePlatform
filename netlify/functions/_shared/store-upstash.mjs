@@ -31,6 +31,13 @@ function createMemoryStore() {
     });
   }
 
+  function setExpiryMs(key, ttlMs) {
+    if (!ttlMs || ttlMs <= 0) return;
+    const entry = sweep(key);
+    if (!entry) return;
+    setValue(key, entry.value, ttlMs);
+  }
+
   function remainingTtlMs(entry) {
     if (!entry || entry.expiry == null) return null;
     return Math.max(0, entry.expiry - Date.now());
@@ -67,8 +74,8 @@ function createMemoryStore() {
       return ttl > 0 ? Math.ceil(ttl / 1000) : -2;
     },
     async eval(_script, keys = [], argv = []) {
-      // Memory impl supports only v2 delta script signature [sessionKey, sessionSyncKey, dailyKey, totalKey, lockKey] x [now, delta, dailyCap, sessionCap, ts, lockTtl].
-      if (keys.length === 5 && argv.length === 6) {
+      // Memory impl supports only v2 delta script signature [sessionKey, sessionSyncKey, dailyKey, totalKey, lockKey] x [now, delta, dailyCap, sessionCap, ts, lockTtl, sessionTtl].
+      if (keys.length === 5 && argv.length === 7) {
         const [sessionKey, sessionSyncKey, dailyKey, totalKey, lockKey] = keys;
         const now = Number(argv[0]);
         const delta = Number(argv[1]);
@@ -76,6 +83,7 @@ function createMemoryStore() {
         const sessionCap = Number(argv[3]);
         const ts = Number(argv[4]);
         const lockTtl = Number(argv[5]);
+        const sessionTtlMs = Number(argv[6]);
 
         const lockEntry = sweep(lockKey);
         if (lockEntry) {
@@ -124,8 +132,9 @@ function createMemoryStore() {
           if (grant <= 0) {
             if (ts > lastSync) {
               lastSync = ts;
-              setValue(sessionSyncKey, lastSync, null);
+              setValue(sessionSyncKey, lastSync, sessionTtlMs > 0 ? sessionTtlMs : null);
             }
+            if (sessionTtlMs > 0) setExpiryMs(sessionKey, sessionTtlMs);
             return [0, dailyTotal, sessionTotal, lifetime, lastSync, status];
           }
 
@@ -135,9 +144,9 @@ function createMemoryStore() {
           lastSync = ts;
 
           setValue(dailyKey, dailyTotal, null);
-          setValue(sessionKey, sessionTotal, null);
+          setValue(sessionKey, sessionTotal, sessionTtlMs > 0 ? sessionTtlMs : null);
           setValue(totalKey, lifetime, null);
-          setValue(sessionSyncKey, lastSync, null);
+          setValue(sessionSyncKey, lastSync, sessionTtlMs > 0 ? sessionTtlMs : null);
 
           return [grant, dailyTotal, sessionTotal, lifetime, lastSync, status];
         } finally {

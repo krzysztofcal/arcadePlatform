@@ -11,6 +11,12 @@ const asNumber = (raw, fallback) => {
 const DAILY_CAP = asNumber(process.env.XP_DAILY_CAP, 600);
 const SESSION_CAP = asNumber(process.env.XP_SESSION_CAP, 300);
 const DELTA_CAP = asNumber(process.env.XP_DELTA_CAP, 300);
+const SESSION_TTL_SEC = Math.max(0, asNumber(process.env.XP_SESSION_TTL_SEC, 604800));
+const SESSION_TTL_MS = SESSION_TTL_SEC > 0 ? SESSION_TTL_SEC * 1000 : 0;
+const REQUIRE_ACTIVITY = process.env.XP_REQUIRE_ACTIVITY === "1";
+const MIN_ACTIVITY_EVENTS = Math.max(0, asNumber(process.env.XP_MIN_ACTIVITY_EVENTS, 4));
+const MIN_ACTIVITY_VIS_S = Math.max(0, asNumber(process.env.XP_MIN_ACTIVITY_VIS_S, 8));
+const METADATA_MAX_BYTES = Math.max(0, asNumber(process.env.XP_METADATA_MAX_BYTES, 2048));
 const DEBUG_ENABLED = process.env.XP_DEBUG === "1";
 const KEY_NS = process.env.XP_KEY_NS ?? "kcswh:xp:v2";
 const CORS_ALLOW = (process.env.XP_CORS_ALLOW ?? "")
@@ -93,6 +99,7 @@ export async function handler(event) {
       awarded: 0,
       totalToday: current,
       cap: DAILY_CAP,
+      capDelta: DELTA_CAP,
       totalLifetime: lifetime,
       sessionTotal,
       lastSync,
@@ -119,7 +126,7 @@ export async function handler(event) {
     return json(422, { error: "invalid_delta" }, origin);
   }
   if (normalizedDelta > DELTA_CAP) {
-    return json(422, { error: "delta_out_of_range", cap: DELTA_CAP }, origin);
+    return json(422, { error: "delta_out_of_range", cap: DELTA_CAP, capDelta: DELTA_CAP }, origin);
   }
 
   const tsRaw = Number(body.ts ?? body.timestamp ?? body.windowEnd ?? Date.now());
@@ -128,12 +135,81 @@ export async function handler(event) {
   }
   const ts = Math.trunc(tsRaw);
 
+  let metadata = null;
+  if (body.metadata !== undefined) {
+    if (!body.metadata || typeof body.metadata !== "object" || Array.isArray(body.metadata)) {
+      return json(400, { error: "invalid_metadata" }, origin);
+    }
+    const cleaned = {};
+    for (const [key, value] of Object.entries(body.metadata)) {
+      if (key === "userId" || key === "sessionId" || key === "delta" || key === "ts") continue;
+      cleaned[key] = value;
+    }
+
+    const serialized = JSON.stringify(cleaned);
+    const bytes = Buffer.byteLength(serialized, "utf8");
+    const depthOk = (() => {
+      const MAX_DEPTH = 3;
+      const stack = [{ value: cleaned, depth: 1 }];
+      while (stack.length) {
+        const { value, depth } = stack.pop();
+        if (!value || typeof value !== "object") continue;
+        if (depth > MAX_DEPTH) return false;
+        for (const nested of Object.values(value)) {
+          if (nested && typeof nested === "object") {
+            stack.push({ value: nested, depth: depth + 1 });
+          }
+        }
+      }
+      return true;
+    })();
+
+    if (METADATA_MAX_BYTES && bytes > METADATA_MAX_BYTES) {
+      return json(413, { error: "metadata_too_large", limit: METADATA_MAX_BYTES }, origin);
+    }
+    if (!depthOk) {
+      return json(413, { error: "metadata_too_large", limit: METADATA_MAX_BYTES, reason: "depth" }, origin);
+    }
+    metadata = cleaned;
+  }
+
   const now = Date.now();
   const todayKey = keyDaily(userId, dayKey(ts));
   const totalKeyK = keyTotal(userId);
   const sessionKeyK = keySession(userId, sessionId);
   const sessionSyncKeyK = keySessionSync(userId, sessionId);
   const lockKeyK = keyLock(userId, sessionId);
+
+  if (REQUIRE_ACTIVITY && normalizedDelta > 0) {
+    const events = Number(metadata?.inputEvents ?? 0);
+    const visSeconds = Number(metadata?.visibilitySeconds ?? 0);
+    if (!Number.isFinite(events) || events < MIN_ACTIVITY_EVENTS || !Number.isFinite(visSeconds) || visSeconds < MIN_ACTIVITY_VIS_S) {
+      const { current, lifetime, sessionTotal, lastSync } = await getTotals({ userId, sessionId, now: ts });
+      const inactivePayload = {
+        ok: true,
+        awarded: 0,
+        totalToday: current,
+        totalLifetime: lifetime,
+        sessionTotal,
+        lastSync,
+        cap: DAILY_CAP,
+        capDelta: DELTA_CAP,
+        reason: "inactive",
+        status: "inactive",
+      };
+      if (DEBUG_ENABLED) {
+        inactivePayload.debug = {
+          mode: "inactive",
+          delta: normalizedDelta,
+          ts,
+          sessionCap: SESSION_CAP,
+          dailyCap: DAILY_CAP,
+          lastSync,
+        };
+      }
+      return json(200, inactivePayload, origin);
+    }
+  }
 
   const script = `
     local sessionKey = KEYS[1]
@@ -147,6 +223,7 @@ export async function handler(event) {
     local sessionCap = tonumber(ARGV[4])
     local ts = tonumber(ARGV[5])
     local lockTtl = tonumber(ARGV[6])
+    local sessionTtl = tonumber(ARGV[7])
 
     local locked = redis.call('SET', lockKey, tostring(now), 'PX', lockTtl, 'NX')
     if locked ~= 'OK' then
@@ -155,6 +232,13 @@ export async function handler(event) {
       local lifetime = tonumber(redis.call('GET', totalKey) or '0')
       local lastSync = tonumber(redis.call('GET', sessionSyncKey) or '0')
       return {0, currentDaily, sessionTotal, lifetime, lastSync, 6}
+    end
+
+    local function refreshSessionTtl()
+      if sessionTtl and sessionTtl > 0 then
+        redis.call('PEXPIRE', sessionKey, sessionTtl)
+        redis.call('PEXPIRE', sessionSyncKey, sessionTtl)
+      end
     end
 
     local function finish(grant, dailyTotal, sessionTotal, lifetime, sync, status)
@@ -196,6 +280,7 @@ export async function handler(event) {
       if ts > lastSync then
         lastSync = ts
         redis.call('SET', sessionSyncKey, tostring(lastSync))
+        refreshSessionTtl()
       end
       return finish(0, dailyTotal, sessionTotal, lifetime, lastSync, status)
     end
@@ -205,6 +290,7 @@ export async function handler(event) {
     lifetime = tonumber(redis.call('INCRBY', totalKey, grant))
     lastSync = ts
     redis.call('SET', sessionSyncKey, tostring(lastSync))
+    refreshSessionTtl()
     return finish(grant, dailyTotal, sessionTotal, lifetime, lastSync, status)
   `;
 
@@ -218,6 +304,7 @@ export async function handler(event) {
       String(Math.max(0, SESSION_CAP)),
       String(ts),
       String(LOCK_TTL_MS),
+      String(SESSION_TTL_MS),
     ]
   );
 
@@ -233,6 +320,7 @@ export async function handler(event) {
     awarded: granted,
     totalToday,
     cap: DAILY_CAP,
+    capDelta: DELTA_CAP,
     totalLifetime,
     sessionTotal,
     lastSync,
@@ -280,15 +368,16 @@ export async function handler(event) {
   }
 
   if (DEBUG_ENABLED) {
-    payload.debug = {
-      delta: normalizedDelta,
-      ts,
-      now,
-      status,
-      requested: normalizedDelta,
-      sessionCap: SESSION_CAP,
-      dailyCap: DAILY_CAP,
-    };
+      payload.debug = {
+        delta: normalizedDelta,
+        ts,
+        now,
+        status,
+        requested: normalizedDelta,
+        sessionCap: SESSION_CAP,
+        dailyCap: DAILY_CAP,
+        lastSync,
+      };
     if (reason) payload.debug.reason = reason;
   }
 

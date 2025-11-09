@@ -9,6 +9,7 @@ async function createHandler(label, overrides = {}) {
   process.env.XP_DAILY_CAP = String(overrides.dailyCap ?? 300);
   process.env.XP_SESSION_CAP = String(overrides.sessionCap ?? 200);
   process.env.XP_DELTA_CAP = String(overrides.deltaCap ?? 300);
+  process.env.XP_SESSION_TTL_SEC = String(overrides.sessionTtl ?? 604800);
   const { handler } = await import(`../netlify/functions/award-xp.mjs?mix=${label}`);
   return handler;
 }
@@ -77,8 +78,54 @@ async function testZeroDeltaAdvancesLastSync() {
   assert.equal(zeroAward.payload.reason ?? null, null);
 }
 
+async function testMidnightRollover() {
+  const beforeMidnight = Date.UTC(2024, 0, 3, 23, 59, 50);
+  const handler = await createHandler('midnight', { dailyCap: 400, sessionCap: 250 });
+  const base = { userId: 'midnight-user', sessionId: 'midnight-session', ts: beforeMidnight };
+
+  const dayOne = await invoke(handler, { ...base, delta: 150 });
+  assert.equal(dayOne.payload.totalToday, 150);
+  assert.equal(dayOne.payload.sessionTotal, 150);
+
+  const dayTwoTs = beforeMidnight + 20_000; // crosses UTC midnight
+  const dayTwo = await invoke(handler, { ...base, ts: dayTwoTs, delta: 200 });
+  assert.equal(dayTwo.payload.totalToday, 100);
+  assert.equal(dayTwo.payload.awarded, 100);
+  assert.equal(dayTwo.payload.sessionTotal, 250);
+  assert.equal(dayTwo.payload.sessionCapped, true);
+}
+
+async function testSessionTtlRefresh() {
+  const userId = 'ttl-user';
+  const sessionId = 'ttl-session';
+  process.env.XP_SESSION_TTL_SEC = '3';
+  const handler = await createHandler('ttl', { dailyCap: 500, sessionCap: 400, sessionTtl: 3 });
+  const base = { userId, sessionId, ts: BASE_TS };
+
+  const first = await invoke(handler, { ...base, delta: 50 });
+  assert.equal(first.payload.awarded, 50);
+
+  const { createHash } = await import('node:crypto');
+  const { store } = await import('../netlify/functions/_shared/store-upstash.mjs');
+  const hash = createHash('sha256').update(`${userId}|${sessionId}`).digest('hex');
+  const sessionKey = `${process.env.XP_KEY_NS}:session:${hash}`;
+
+  let ttlInitial = await store.ttl(sessionKey);
+  assert(ttlInitial > 0 && ttlInitial <= 3);
+
+  await new Promise(resolve => setTimeout(resolve, 1_200));
+  const ttlAfterWait = await store.ttl(sessionKey);
+  assert(ttlAfterWait > -2);
+
+  await invoke(handler, { ...base, ts: BASE_TS + 2_000, delta: 0 });
+  const ttlAfterHeartbeat = await store.ttl(sessionKey);
+  assert(ttlAfterHeartbeat > ttlAfterWait);
+}
+
 await testDailyAcrossSessions();
 await testSessionCapAcrossDays();
 await testZeroDeltaAdvancesLastSync();
+await testMidnightRollover();
+await testSessionTtlRefresh();
 
 console.log('xp-award session/daily tests passed');

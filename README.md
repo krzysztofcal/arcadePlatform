@@ -44,22 +44,18 @@ When embedding the bridge manually:
 
 The helper survives soft navigations—if you’re swapping views inside an SPA, call `GameXpBridge.start(newGameId)` for each routed surface; you do **not** need to re-inject the scripts.
 
-#### XP windows & idle guard
-- XP windows only send while the tab stays visible and the game loop is running.
-- Each window needs at least a second of visibility and a few input events before it counts.
-- Going idle or switching tabs resets the window timers so no XP is awarded for background play.
+#### XP delta guard
+- The XP bridge consolidates raw score updates and clamps deltas locally using `window.XP_DELTA_CAP_CLIENT` (default 300). The clamp can tighten at runtime when the server advertises a stricter ceiling.
+- Timestamps are monotonic per page so BFCache restores or retries never replay stale payloads. When a 422 `delta_out_of_range` arrives the bridge backs off briefly, fetches status, and adopts the advertised cap before retrying.
+- Metadata excludes core identifiers (`userId`, `sessionId`, `delta`, `ts`) automatically and still flows when `localStorage` or `crypto.randomUUID` are blocked (private browsing fallbacks).
 
 #### Server gates & debug
-- `award-xp.mjs` enforces multiple gates before points are granted:
-  - **Visibility gate** – requests must report more than a second of visibility, and the minimum rises with the requested chunk (60% of the chunk length, clamped by `XP_MIN_VISIBILITY_S`).
-  - **Input gate** – each window must include several inputs (`ceil(chunkMs / 4000)`, clamped by the `XP_MIN_INPUTS` baseline and never below two in the early guard).
-  - **Timing gate** – windows shorter than the requested chunk (minus drift) or ending in the future fail with `error: "invalid_window"`.
-  - **Spacing gate** – the server remembers the last accepted window end and rejects requests that arrive before another full chunk has elapsed (`reason: "too_soon"`).
-- Set `XP_DEBUG=1` (environment variable for the Netlify function or via `npm run serve:xp`) to receive a `debug` object alongside successful responses.
-  - Status-only probes get `debug: { mode: "statusOnly" }`.
-  - For early idle rejections the debug payload includes `{ chunkMs, minInputsGate, visibilitySeconds, inputEvents, reason }`.
-  - For validated windows the payload includes `{ now, chunkMs, pointsPerPeriod, minVisibility, minInputs, visibilitySeconds, inputEvents, status, reason?, scoreDelta? }`.
-  - When `XP_DEBUG=1`, `scoreDelta` is echoed in **statusOnly**, **insufficient-activity**, and **validated** responses. `debug.reason` can surface `insufficient-activity`, `too_soon`, `invalid_window`, and the existing server reasons: `capped`, `locked`, `idempotent`.
+- `award-xp.mjs` validates the JSON body, tolerates legacy `scoreDelta` / `pointsPerPeriod` fields, and enforces `XP_DELTA_CAP` plus the daily (`XP_DAILY_CAP`) and per-session (`XP_SESSION_CAP`) ceilings.
+- Requests are rejected when the timestamp is stale (`status: "stale"`), another tab owns the lock (`status: "locked"`), metadata is malformed/oversized, or the optional activity guard blocks idle deltas.
+- Flip `XP_REQUIRE_ACTIVITY=1` to require input/visibility thresholds (`XP_MIN_ACTIVITY_EVENTS`, `XP_MIN_ACTIVITY_VIS_S`). When disabled the function skips those checks entirely.
+- Metadata must remain shallow: depth ≤ 3 and serialized size ≤ `XP_METADATA_MAX_BYTES` (default 2048 bytes). Larger payloads return `413 metadata_too_large` without mutating totals.
+- Session keys refresh their TTL (`XP_SESSION_TTL_SEC`, default 7 days) whenever deltas are accepted or a zero-delta heartbeat advances `lastSync`, keeping Redis tidy.
+- Enabling `XP_DEBUG=1` adds `{ delta, ts, lastSync, status, dailyCap, sessionCap }` to responses for diagnostics.
 
 ### Diagnostics logging
 - Unlock the client recorder for 24 hours by visiting any page with `?admin=1` or tapping the About page title five times within three seconds. The flag is stored in `localStorage["kcswh:admin"]` and expires automatically.
@@ -112,15 +108,15 @@ Client → server payload (minimal set, extras allowed):
   - `metadata` (object, optional) – any additional context (gameId, instrumentation, etc.)
 
 Server behavior:
-  - Requests with `delta` outside `0…XP_DELTA_CAP` (default 300) are rejected.
+  - Requests with `delta` outside `0…XP_DELTA_CAP` (default 300) are rejected. Legacy clients can continue sending `scoreDelta` / `pointsPerPeriod` and the server will coerce them once per request.
   - XP is granted directly from `delta` while enforcing per-session (`XP_SESSION_CAP`, default 300) and per-day (`XP_DAILY_CAP`, default 600) ceilings. Partial grants surface `reason: 'daily_cap_partial' | 'session_cap_partial'`.
-  - Responses remain backwards compatible: `{ ok, awarded, totalToday, cap, totalLifetime }` plus the new `sessionTotal` and `lastSync` fields so clients can rehydrate badge state without branching.
-  - When `XP_DEBUG=1`, the payload includes `debug` with the requested delta, active caps, and status code.
+  - Responses remain backwards compatible: `{ ok, awarded, totalToday, cap, totalLifetime }` plus `sessionTotal`, `lastSync`, and `capDelta` so clients can rehydrate badge state and mirror the server cap.
+  - When `XP_DEBUG=1`, the payload includes `debug` with the requested delta, caps, lastSync, and status code.
 
 Response status values:
   - `ok` – full grant
   - `partial` – partial grant (daily or session)
-  - `daily_cap`, `daily_cap_partial`, `session_cap`, `session_cap_partial`, `stale`, `locked`
+  - `daily_cap`, `daily_cap_partial`, `session_cap`, `session_cap_partial`, `stale`, `locked`, `inactive`
   - `statusOnly` – status probes without awarding XP
 
 Client hooks:
@@ -150,8 +146,13 @@ Run locally:
 | `XP_SESSION_CAP` | `300` | Maximum XP a single session can accumulate before further deltas are rejected. |
 | `XP_DELTA_CAP` | `300` | Largest delta accepted from the client in a single request. |
 | `XP_LOCK_TTL_MS` | `3000` | Duration of the per-session Redis lock that guards concurrent writes. |
+| `XP_SESSION_TTL_SEC` | `604800` | TTL (seconds) for session counters; refreshed on each award/heartbeat to curb key bloat. |
+| `XP_REQUIRE_ACTIVITY` | `0` | When `1`, enforce minimum input/visibility thresholds before awarding XP. |
+| `XP_MIN_ACTIVITY_EVENTS` | `4` | Minimum `metadata.inputEvents` required when `XP_REQUIRE_ACTIVITY=1`. |
+| `XP_MIN_ACTIVITY_VIS_S` | `8` | Minimum `metadata.visibilitySeconds` required when `XP_REQUIRE_ACTIVITY=1`. |
+| `XP_METADATA_MAX_BYTES` | `2048` | Maximum serialized metadata size; larger payloads return `413 metadata_too_large`. |
 
-Set these variables in tandem so the client and server agree on throughput; the server enforces this cap, and clients may optionally clamp to the same value to minimize rejected deltas.
+Set these variables in tandem so the client and server agree on throughput; the server enforces the cap and surfaces `capDelta` so clients can mirror it without redeploying.
 
 ## CI Status
 - GitHub Actions workflow: tests
