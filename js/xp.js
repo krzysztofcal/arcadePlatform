@@ -97,6 +97,9 @@
       hardIdleActive: false,
       initLogged: false,
       adminInitLogged: false,
+      lastActivityLog: 0,
+      lastCapLog: 0,
+      lastVisibilityLog: 0,
     },
   };
 
@@ -469,6 +472,10 @@
   }
 
   function handleError(err) {
+    try {
+      const message = err && err.message ? String(err.message).slice(0, 200) : "error";
+      logDebug("window_error", { message });
+    } catch (_) {}
     if (window.console && console.debug) {
       console.debug("XP window failed", err);
     }
@@ -517,8 +524,30 @@
     state.activeMs = 0;
     state.visibilitySeconds = 0;
     state.inputEvents = 0;
+    try {
+      logDebug("send_window", {
+        gameId: payload.gameId,
+        windowStart: payload.windowStart,
+        windowEnd: payload.windowEnd,
+        visibilitySeconds: payload.visibilitySeconds,
+        inputEvents: payload.inputEvents,
+        scoreDelta: payload.scoreDelta || 0,
+        force: !!force,
+      });
+    } catch (_) {}
     state.pending = window.XPClient.postWindow(payload)
-      .then((data) => handleResponse(data))
+      .then((data) => {
+        try {
+          const snap = {
+            status: data && data.status,
+            reason: data && data.reason,
+            scoreDelta: data && data.scoreDelta,
+            debug: data && data.debug,
+          };
+          logDebug("window_result", snap);
+        } catch (_) {}
+        return handleResponse(data);
+      })
       .catch(handleError)
       .finally(() => { state.pending = null; });
     state.scoreDelta = 0;
@@ -540,6 +569,10 @@
     }
     const visible = isDocumentVisible();
     if (!visible) {
+      if (!state.debug.lastVisibilityLog || (now - state.debug.lastVisibilityLog) > 2_000) {
+        state.debug.lastVisibilityLog = now;
+        logDebug("block_visibility", { hidden: true });
+      }
       resetActivityCounters(now);
       flushXp(true).catch(() => {});
       return;
@@ -569,6 +602,10 @@
       }
       activityRatio = getCurrentActivityRatio(now, frameDelta);
     }
+    if (!state.debug.lastActivityLog || (now - state.debug.lastActivityLog) > 2_000) {
+      state.debug.lastActivityLog = now;
+      logDebug("activity", { ratio: Number(activityRatio) || 0 });
+    }
     awardLocalXp(activityRatio);
     flushXp(false).catch(() => {});
   }
@@ -587,7 +624,10 @@
   }
 
   function startSession(gameId) {
-    if (!isGameHost()) return;
+    if (!isGameHost()) {
+      logDebug("block_no_host", { when: "startSession" });
+      return;
+    }
     attachBadge();
     hydrateRuntimeState();
     ensureTimer();
@@ -604,6 +644,9 @@
     if (!state.flush.lastSync) state.flush.lastSync = Date.now();
     state.debug.hardIdleActive = false;
     state.debug.lastNoHostLog = 0;
+    state.debug.lastActivityLog = 0;
+    state.debug.lastCapLog = 0;
+    state.debug.lastVisibilityLog = 0;
     logDebug("xp_start", { gameId: state.gameId, isHost: true });
   }
 
@@ -631,11 +674,17 @@
     state.scoreDeltaRemainder = 0;
     state.debug.hardIdleActive = false;
     state.debug.lastNoHostLog = 0;
+    state.debug.lastActivityLog = 0;
+    state.debug.lastCapLog = 0;
+    state.debug.lastVisibilityLog = 0;
   }
 
   function nudge() {
     if (!state.running) return;
-    if (!isGameHost()) return;
+    if (!isGameHost()) {
+      logDebug("block_no_host", { when: "nudge" });
+      return;
+    }
     state.activeUntil = Date.now() + ACTIVE_WINDOW_MS;
     state.inputEvents += 1;
   }
@@ -689,7 +738,17 @@
 
   function awardLocalXp(activityRatio) {
     if (!state.running) return 0;
-    if (isAtCap()) return 0;
+    if (isAtCap()) {
+      const now = Date.now();
+      if (!state.debug.lastCapLog || (now - state.debug.lastCapLog) > 2_000) {
+        state.debug.lastCapLog = now;
+        logDebug("block_cap", {
+          totalToday: Number(state.totalToday) || 0,
+          cap: state.cap,
+        });
+      }
+      return 0;
+    }
     const baseMultiplier = computeBaseMultiplier(activityRatio);
     const momentum = updateMomentum(activityRatio);
     let xpPerSecond = baseMultiplier * (1 + (momentum * 0.5));
