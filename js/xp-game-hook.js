@@ -53,12 +53,19 @@
 
   let autoBootedSlug = null;
   let autoBootstrapped = false;
+  let autoBootGuarded = false;
 
   function ensureAutoBootstrapped() {
     if (autoBootstrapped) return;
     autoBootstrapped = true;
     ensureAutoListeners();
     ensureDomReadyKickoff();
+  }
+
+  function ensureAutoBootGuard() {
+    if (autoBootGuarded) return;
+    autoBootGuarded = true;
+    ensureAutoBootstrapped();
   }
 
   function isHostDocument() {
@@ -294,7 +301,7 @@
       }
       return;
     }
-    ensureAutoBootstrapped();
+    ensureAutoBootGuard();
     if (!slugged) {
       return;
     }
@@ -317,7 +324,7 @@
       state.pendingStartGameId = null;
       return;
     }
-    ensureAutoListeners();
+    ensureAutoBootGuard();
     const xp = getXp();
     state.lastGameId = slugged;
     const running = xp && typeof xp.isRunning === "function" ? !!xp.isRunning() : false;
