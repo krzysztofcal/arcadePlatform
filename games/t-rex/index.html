@@ -22,7 +22,7 @@
     gtag('config', 'G-JRP62LCXYK');
   </script>
 </head>
-<body data-game-slug="t-rex" data-game-id="t-rex">
+<body data-game-host data-game-slug="t-rex" data-game-id="t-rex">
   <main class="game-shell">
     <header class="hud">
       <h1>T-Rex Runner</h1>
@@ -34,7 +34,7 @@
         <span class="xp-badge__label">Syncing XP…</span>
       </a>
     </header>
-    <canvas id="game" width="600" height="200" role="img" aria-label="Side scrolling runner game"></canvas>
+    <canvas id="game" data-game-surface width="600" height="200" role="img" aria-label="Side scrolling runner game"></canvas>
     <div class="controls">
       <p>Press <kbd>space</kbd>, <kbd>↑</kbd> or tap to jump.</p>
       <button id="restart" type="button">Restart</button>
@@ -43,11 +43,32 @@
   <footer class="footer">
     <a href="#" id="manageCookies">Manage cookies</a>
   </footer>
-  <script src="../../js/cookiebot-manager.js" defer></script>
+  <script src="/js/cookiebot-manager.js" defer></script>
   <script src="main.js"></script>
-  <script src="../../js/xp.js" defer></script>
-  <script src="../../js/xp-game-hook.js" defer></script>
-  <script>(function start(){if(window.GameXpBridge?.auto)return void window.GameXpBridge.auto();if(document.readyState==='complete'||document.readyState==='interactive')return setTimeout(start,0);addEventListener('DOMContentLoaded',start,{once:true});})();</script>
+  <script src="/js/debug.js" defer></script>
+  <script src="/js/xp.js" defer></script>
+  <script src="/js/xp-game-hook.js" defer></script>
+  <script>
+    if (!window.__xpAutoBooted) {
+      window.__xpAutoBooted = true;
+      let tries = 0;
+      function boot() {
+        const bridge = window.GameXpBridge;
+        if (bridge && typeof bridge.auto === "function") {
+          bridge.auto();
+          return;
+        }
+        if (tries++ >= 5) return;
+        window.setTimeout(boot, Math.min(50 * tries, 200));
+      }
+      if (document.readyState === "complete") {
+        boot();
+      } else {
+        window.addEventListener("DOMContentLoaded", boot, { once: true });
+        window.addEventListener("load", boot, { once: true });
+      }
+    }
+  </script>
 </body>
 </html>
 

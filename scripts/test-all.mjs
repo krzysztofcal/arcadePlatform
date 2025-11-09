@@ -17,6 +17,9 @@ run("node", ["tests/xp-game-hook.test.mjs"], "xp-game-hook");
 run("node", ["tests/xp-multigame.test.mjs"], "xp-multigame");
 run("node", ["tests/xp-award-score.test.mjs"], "xp-award-score");
 run("node", ["tests/xp-award-score-rate.test.mjs"], "xp-award-score-rate");
+run("node", ["tests/xp-gate.test.mjs"], "xp-gate");
+run("node", ["tests/xp-game-hook-idempotent.test.mjs"], "xp-game-hook-idempotent");
+run("node", ["tests/recorder-admin-only.test.mjs"], "recorder-admin-only");
 
 try { run("npm", ["run", "-s", "lint:games"], "unit"); } catch { /* optional */ }
 

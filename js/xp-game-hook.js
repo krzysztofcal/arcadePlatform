@@ -51,6 +51,42 @@
     handleVisible: null,
   };
 
+  let autoBootedSlug = null;
+  let autoBootstrapped = false;
+  let autoBootGuarded = false;
+
+  function ensureAutoBootstrapped() {
+    if (autoBootstrapped) return;
+    autoBootstrapped = true;
+    ensureAutoListeners();
+    ensureDomReadyKickoff();
+  }
+
+  function ensureAutoBootGuard() {
+    if (autoBootGuarded) return;
+    autoBootGuarded = true;
+    ensureAutoBootstrapped();
+  }
+
+  function isHostDocument() {
+    try {
+      if (!document || !document.body) return false;
+      const body = document.body;
+      if (typeof body.hasAttribute === "function" && body.hasAttribute("data-game-host")) return true;
+      if (body.dataset) {
+        if (Object.prototype.hasOwnProperty.call(body.dataset, "gameHost")) return true;
+        if (body.dataset.gameId) return true;
+        if (body.dataset.gameSlug) return true;
+      }
+      if (typeof document.getElementById === "function") {
+        if (document.getElementById("gameFrame") || document.getElementById("frameBox") || document.getElementById("frameWrap")) {
+          return true;
+        }
+      }
+    } catch (_) {}
+    return false;
+  }
+
   function getXp() {
     const xp = window && window.XP;
     if (!xp || typeof xp.startSession !== "function") return null;
@@ -84,12 +120,12 @@
   }
 
   function slugifyGameId(value) {
-    if (!value) return DEFAULT_GAME_ID;
+    if (!value) return null;
     const lowered = String(value).trim().toLowerCase();
-    if (!lowered) return DEFAULT_GAME_ID;
+    if (!lowered) return null;
     const dashed = lowered.replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
     const limited = dashed.slice(0, 64);
-    return limited || DEFAULT_GAME_ID;
+    return limited || null;
   }
 
   function detectGameId() {
@@ -108,7 +144,7 @@
     const title = document && normalizeGameId(document.title);
     if (title) return title;
 
-    return DEFAULT_GAME_ID;
+    return null;
   }
 
   function resetSessionAccounting() {
@@ -258,9 +294,24 @@
    */
   function auto(gameId) {
     const resolved = normalizeGameId(gameId) || detectGameId();
-    start(resolved);
-    ensureAutoListeners();
-    ensureDomReadyKickoff();
+    const slugged = slugifyGameId(resolved);
+    if (!isHostDocument()) {
+      if (slugged) {
+        state.lastGameId = slugged;
+      }
+      return;
+    }
+    ensureAutoBootGuard();
+    if (!slugged) {
+      return;
+    }
+    const xp = getXp();
+    const running = xp && typeof xp.isRunning === "function" ? !!xp.isRunning() : false;
+    if (autoBootedSlug && slugged === autoBootedSlug && running) {
+      return;
+    }
+    autoBootedSlug = slugged;
+    start(slugged);
   }
 
   /**
@@ -270,7 +321,29 @@
   function start(gameId) {
     const resolved = normalizeGameId(gameId) || detectGameId();
     const slugged = slugifyGameId(resolved);
+    if (!slugged) {
+      state.runningDesired = false;
+      state.pendingStartGameId = null;
+      return;
+    }
+    ensureAutoBootGuard();
+    const xp = getXp();
     state.lastGameId = slugged;
+    const running = xp && typeof xp.isRunning === "function" ? !!xp.isRunning() : false;
+    const currentGameId = xp && xp.__lastGameId ? slugifyGameId(xp.__lastGameId) : null;
+
+    if (running && currentGameId === slugged) {
+      try { xp.startSession(slugged); } catch (_) {}
+      state.runningDesired = true;
+      state.pendingStopOptions = null;
+      state.pendingStartGameId = null;
+      return;
+    }
+
+    if (running && currentGameId && currentGameId !== slugged) {
+      try { xp.stopSession({ flush: true }); } catch (_) {}
+    }
+
     state.runningDesired = true;
     resetSessionAccounting();
     state.pendingStopOptions = null;

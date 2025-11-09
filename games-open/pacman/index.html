@@ -26,11 +26,11 @@
       gtag('js', new Date());
       gtag('config', 'G-JRP62LCXYK');
     </script>
-    <script src="../../js/i18n.js" defer></script>
-    <script src="../../js/topbar.js" defer></script>
-    <script src="../../js/xpClient.js" defer></script>
+    <script src="/js/i18n.js" defer></script>
+    <script src="/js/topbar.js" defer></script>
+    <script src="/js/xpClient.js" defer></script>
   </head>
-  <body data-game-slug="pacman" data-game-id="pacman">
+  <body data-game-host data-game-slug="pacman" data-game-id="pacman">
     <div class="topbar">
       <div class="topbar-left">
         <button class="hamburger" id="sbToggle" aria-label="Toggle navigation" aria-expanded="false">
@@ -142,10 +142,10 @@
       </div>
     </footer>
 
-    <script src="../../js/sidebar.js" defer></script>
+    <script src="/js/sidebar.js" defer></script>
     <script src="../game-shell.js" defer></script>
     <script src="script.js"></script>
-    <script src="../../js/cookiebot-manager.js" defer></script>
+    <script src="/js/cookiebot-manager.js" defer></script>
     <script>
       (function(){
         const allowedOrigin = location.origin;
@@ -184,8 +184,29 @@
         }
       })();
     </script>
-    <script src="../../js/xp.js" defer></script>
-    <script src="../../js/xp-game-hook.js" defer></script>
-    <script>(function start(){if(window.GameXpBridge?.auto)return void window.GameXpBridge.auto();if(document.readyState==='complete'||document.readyState==='interactive')return setTimeout(start,0);addEventListener('DOMContentLoaded',start,{once:true});})();</script>
+    <script src="/js/debug.js" defer></script>
+    <script src="/js/xp.js" defer></script>
+  <script src="/js/xp-game-hook.js" defer></script>
+  <script>
+    if (!window.__xpAutoBooted) {
+      window.__xpAutoBooted = true;
+      let tries = 0;
+      function boot() {
+        const bridge = window.GameXpBridge;
+        if (bridge && typeof bridge.auto === "function") {
+          bridge.auto();
+          return;
+        }
+        if (tries++ >= 5) return;
+        window.setTimeout(boot, Math.min(50 * tries, 200));
+      }
+      if (document.readyState === "complete") {
+        boot();
+      } else {
+        window.addEventListener("DOMContentLoaded", boot, { once: true });
+        window.addEventListener("load", boot, { once: true });
+      }
+    }
+  </script>
 </body>
 </html>

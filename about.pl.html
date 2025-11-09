@@ -23,6 +23,7 @@
     gtag('config', 'G-JRP62LCXYK');
   </script>
   <script src="js/analytics.js" defer></script>
+  <script src="js/debug.js" defer></script>
 </head>
 <body style="padding:16px; font-family:Poppins, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; color:#e8eeff; background:#0b1020;">
   <main>
@@ -31,6 +32,8 @@
         <span class="xp-badge__label">Synchronizuję XP…</span>
       </a>
     </div>
+    <button id="debugDumpButton" class="debug-dump-button" type="button" hidden>Dump diagnostics</button>
+    <div id="debugToast" class="debug-toast" role="status" aria-live="polite"></div>
     <h1>O serwisie</h1>
     <p>To prosty portal arcade (MVP). Więcej gier i funkcji już wkrótce.</p>
     <p>Kontakt: <a href="#" class="ft-link">email</a></p>
@@ -38,12 +41,149 @@
     <p><a id="backLink" href="index.html?lang=pl" class="ft-link">Wróć do portalu</a></p>
   </main>
   <script>
-    const params = new URLSearchParams(window.location.search);
-    const origin = params.get('origin');
-    const backLink = document.getElementById('backLink');
-    if (origin === 'landing') {
-      backLink.href = 'https://kcswh.pl/';
-    }
+    (function () {
+      const TAP_WINDOW_MS = 3000;
+      const TAP_COUNT = 5;
+
+      function onReady() {
+        try {
+          const params = new URLSearchParams(window.location.search);
+          const origin = params.get('origin');
+          const backLink = document.getElementById('backLink');
+          if (origin === 'landing' && backLink) {
+            backLink.href = 'https://kcswh.pl/';
+          }
+        } catch (_) {}
+
+        const dumpButton = document.getElementById('debugDumpButton');
+        const toast = document.getElementById('debugToast');
+        let toastTimer = null;
+
+        function showToast(message) {
+          if (!toast) return;
+          toast.textContent = message;
+          toast.classList.add('is-visible');
+          if (toastTimer) {
+            clearTimeout(toastTimer);
+          }
+          toastTimer = window.setTimeout(() => {
+            toast.classList.remove('is-visible');
+          }, 2400);
+        }
+
+        function isAdmin() {
+          try {
+            return !!(window.KLog && typeof window.KLog.isAdmin === 'function' && window.KLog.isAdmin());
+          } catch (_) {
+            return false;
+          }
+        }
+
+        function ensureRecorder() {
+          if (!isAdmin()) return;
+          try {
+            if (!window.KLog || typeof window.KLog.start !== 'function') return;
+            const status = typeof window.KLog.status === 'function' ? window.KLog.status() : null;
+            const level = status && typeof status.level === 'number' ? status.level : 0;
+            const startedAt = status && typeof status.startedAt === 'number' ? status.startedAt : 0;
+            if (!status || level <= 0 || !startedAt) {
+              window.KLog.start(1);
+            }
+          } catch (_) {}
+        }
+
+        function updateVisibility() {
+          if (!dumpButton) return;
+          if (!window.KLog || typeof window.KLog.isAdmin !== 'function') {
+            dumpButton.hidden = true;
+            return;
+          }
+          const active = isAdmin();
+          dumpButton.hidden = !active;
+          if (active) {
+            ensureRecorder();
+          }
+        }
+
+        if (dumpButton) {
+          dumpButton.addEventListener('click', () => {
+            if (!window.KLog) return;
+            ensureRecorder();
+            const attempt = window.KLog.dumpToClipboard ? window.KLog.dumpToClipboard() : false;
+            Promise.resolve(attempt)
+              .then((opened) => {
+                if (opened) {
+                  showToast('Opened diagnostics in a new tab');
+                  return;
+                }
+                const downloaded = window.KLog.downloadFile ? window.KLog.downloadFile() : false;
+                if (downloaded) {
+                  showToast('Downloaded file');
+                } else {
+                  showToast('Diagnostics unavailable');
+                }
+              })
+              .catch(() => {
+                const downloaded = window.KLog && window.KLog.downloadFile ? window.KLog.downloadFile() : false;
+                if (downloaded) {
+                  showToast('Downloaded file');
+                } else {
+                  showToast('Diagnostics unavailable');
+                }
+              });
+          });
+        }
+
+        function unlockAdmin() {
+          if (!window.KLog || typeof window.KLog.enableAdmin !== 'function') return false;
+          const enabled = window.KLog.enableAdmin(24 * 60 * 60 * 1000);
+          if (enabled) {
+            showToast('Debug unlocked for 24h');
+            updateVisibility();
+            ensureRecorder();
+          }
+          return enabled;
+        }
+
+        const title = document.querySelector('main h1');
+        if (title) {
+          let taps = [];
+          function recordTap() {
+            const now = Date.now();
+            taps = taps.filter((ts) => (now - ts) <= TAP_WINDOW_MS);
+            taps.push(now);
+            if (taps.length >= TAP_COUNT) {
+              taps = [];
+              unlockAdmin();
+            }
+          }
+          title.addEventListener('pointerdown', recordTap, { passive: true });
+          if (!window.PointerEvent) {
+            title.addEventListener('click', recordTap);
+            title.addEventListener('touchstart', recordTap, { passive: true });
+          }
+          title.addEventListener('keydown', (event) => {
+            if (!event) return;
+            if (event.key === 'Enter' || event.key === ' ') {
+              recordTap();
+            }
+          });
+          if (!title.hasAttribute('tabindex')) {
+            title.setAttribute('tabindex', '0');
+          }
+        }
+
+        window.addEventListener('klog:admin', updateVisibility);
+        updateVisibility();
+        window.setTimeout(updateVisibility, 250);
+      }
+
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', onReady, { once: true });
+      } else {
+        onReady();
+      }
+    })();
   </script>
   <script src="js/cookiebot-manager.js" defer></script>
 </body>
