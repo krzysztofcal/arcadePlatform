@@ -51,6 +51,8 @@
     handleVisible: null,
   };
 
+  let autoBootedSlug = null;
+
   function isHostDocument() {
     try {
       if (!document || !document.body) return false;
@@ -276,14 +278,24 @@
    * @param {string} [gameId] Optional override for the game identifier.
    */
   function auto(gameId) {
-    if (!isHostDocument()) {
+    const resolved = normalizeGameId(gameId) || detectGameId();
+    const slugged = slugifyGameId(resolved);
+    if (autoBootedSlug && slugged && slugged === autoBootedSlug) {
       return;
     }
-    const resolved = normalizeGameId(gameId) || detectGameId();
-    if (!resolved) return;
-    start(resolved);
+    if (!isHostDocument()) {
+      if (slugged) {
+        autoBootedSlug = slugged;
+      }
+      return;
+    }
     ensureAutoListeners();
     ensureDomReadyKickoff();
+    if (!slugged) {
+      return;
+    }
+    autoBootedSlug = slugged;
+    start(slugged);
   }
 
   /**

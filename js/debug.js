@@ -152,6 +152,16 @@
     return adminActive;
   }
 
+  function hasAdminFlag() {
+    try {
+      const store = getStorage();
+      if (!store) return false;
+      return !!store.getItem(STORAGE_ADMIN_KEY);
+    } catch (_) {
+      return false;
+    }
+  }
+
   function notifyAdminChange() {
     try {
       window.dispatchEvent(new CustomEvent("klog:admin", { detail: { active: adminActive } }));
@@ -187,7 +197,11 @@
   }
 
   function isAdmin() {
-    return adminActive;
+    if (!hasAdminFlag()) {
+      adminActive = false;
+      return false;
+    }
+    return refreshAdmin();
   }
 
   function recordDump(method, success, extra) {
@@ -309,7 +323,7 @@
 
   function ensureStartedForLog() {
     if (started) return true;
-    if (!adminActive) return false;
+    if (!isAdmin()) return false;
     return start(level > 0 ? level : 1);
   }
 
@@ -341,7 +355,7 @@
   hydrateFromStorage();
   refreshAdmin();
   maybeEnableFromUrl();
-  if (adminActive) {
+  if (isAdmin()) {
     start(1);
   }
 
