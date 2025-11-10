@@ -422,15 +422,40 @@ const fullActivity = await runTickAndSettle({ ratio: 1 });
 assert(fullActivity >= 9 && fullActivity <= 20, `expected ~10-20xp, got ${fullActivity}`);
 assert(lowerActivity < fullActivity, 'lower activity should yield less XP');
 
+const tickEvents = [];
+const tickListener = (event) => { if (event && event.detail) tickEvents.push(event.detail); };
+windowStub.addEventListener('xp:tick', tickListener);
+const observedAward = await runTickAndSettle({ ratio: 1 });
+windowStub.removeEventListener('xp:tick', tickListener);
+assert(tickEvents.length > 0, 'xp:tick event should be emitted for awards');
+const latestTick = tickEvents[tickEvents.length - 1];
+assert.equal(latestTick.awarded, observedAward, 'xp:tick detail should match awarded amount');
+assert(latestTick.combo >= 1, 'xp:tick detail should report combo streaks');
+assert(latestTick.boost >= 1, 'xp:tick detail should surface boost multiplier');
+assert(latestTick.ts >= DateMock.now() - 5_000, 'xp:tick detail should include a recent timestamp');
+assert(latestTick.progressToNext >= 0 && latestTick.progressToNext <= 1, 'xp:tick progress should be clamped between 0 and 1');
+
 // Combo momentum increases awards over consecutive high-activity ticks
 const comboBoost = await runTickAndSettle({ ratio: 1 });
 assert(comboBoost > fullActivity, 'combo bonus should increase XP on streaks');
 
 // Boost doubles payouts until expiration
+const boostEvents = [];
+const boostListener = (event) => {
+  if (event && event.detail && typeof event.detail.secondsLeft === 'number') {
+    boostEvents.push(event.detail);
+  }
+};
+windowStub.addEventListener('xp:boost', boostListener);
 XP.requestBoost(2, 4_000, 'unit-test');
 const boosted = await runTickAndSettle({ ratio: 1 });
+windowStub.removeEventListener('xp:boost', boostListener);
 assert(boosted > comboBoost, 'boost should increase awards');
 assert(boosted >= 20, 'boost should elevate awards near the cap');
+assert(boostEvents.length > 0, 'xp:boost status event should fire when boost activates');
+const lastBoostEvent = boostEvents[boostEvents.length - 1];
+assert.equal(lastBoostEvent.multiplier, 2, 'xp:boost detail should report the active multiplier');
+assert(lastBoostEvent.secondsLeft >= 3 && lastBoostEvent.secondsLeft <= 4, 'xp:boost secondsLeft should reflect remaining time');
 advanceTime(4_100);
 await settleFlush();
 const afterBoost = await runTickAndSettle({ ratio: 1 });

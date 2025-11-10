@@ -28,6 +28,76 @@
     return Number.isFinite(parsed) ? parsed : fallback;
   }
 
+  function dispatchXpEvent(name, detail) {
+    if (!window || typeof window.dispatchEvent !== "function") return false;
+    const payload = detail && typeof detail === "object" ? detail : null;
+    if (!payload) return false;
+    try {
+      if (typeof CustomEvent === "function") {
+        const evt = new CustomEvent(name, { detail: payload });
+        window.dispatchEvent(evt);
+        return true;
+      }
+    } catch (_) {}
+    if (!document || typeof document.createEvent !== "function") return false;
+    try {
+      const legacy = document.createEvent("CustomEvent");
+      legacy.initCustomEvent(name, false, false, payload);
+      window.dispatchEvent(legacy);
+      return true;
+    } catch (_) {}
+    return false;
+  }
+
+  function emitXpTick(detail) {
+    if (!detail || typeof detail !== "object") return;
+    let handled = false;
+    const bridge = window && window.GameXpBridge;
+    if (bridge && typeof bridge.dispatchXpTick === "function") {
+      try {
+        handled = bridge.dispatchXpTick(detail) === true;
+      } catch (_) {
+        handled = false;
+      }
+    }
+    if (!handled) {
+      dispatchXpEvent("xp:tick", detail);
+    }
+  }
+
+  function emitXpBoost(detail) {
+    if (!detail || typeof detail !== "object") return;
+    let handled = false;
+    const bridge = window && window.GameXpBridge;
+    if (bridge && typeof bridge.dispatchXpBoost === "function") {
+      try {
+        handled = bridge.dispatchXpBoost(detail) === true;
+      } catch (_) {
+        handled = false;
+      }
+    }
+    if (!handled) {
+      dispatchXpEvent("xp:boost", detail);
+    }
+  }
+
+  function resolveBoostSecondsLeft(now) {
+    if (!state.boost || !state.boost.expiresAt) return 0;
+    const ts = typeof now === "number" ? now : Date.now();
+    const remaining = Math.ceil((state.boost.expiresAt - ts) / 1000);
+    if (!Number.isFinite(remaining)) return 0;
+    return remaining <= 0 ? 0 : remaining;
+  }
+
+  function broadcastBoostState() {
+    const multiplier = Number(state.boost && state.boost.multiplier) || 1;
+    const secondsLeft = resolveBoostSecondsLeft();
+    emitXpBoost({
+      multiplier: multiplier < 1 ? 1 : multiplier,
+      secondsLeft: secondsLeft < 0 ? 0 : secondsLeft,
+    });
+  }
+
   function normalizeGameId(value) {
     if (value == null) return "";
     try {
@@ -351,6 +421,7 @@
     if (previous.multiplier !== 1 || previous.expiresAt !== 0 || (previous.source || null) !== null) {
       persistRuntimeState();
     }
+    broadcastBoostState();
   }
 
   function scheduleBoostExpiration(expiresAt) {
@@ -525,6 +596,7 @@
       if (parsed.boost && typeof parsed.boost === "object") {
         state.boost = Object.assign({ multiplier: 1, expiresAt: 0, source: null }, parsed.boost);
         scheduleBoostExpiration(state.boost.expiresAt || 0);
+        broadcastBoostState();
       }
     } catch (_) {
       if (!state.flush.lastSync) state.flush.lastSync = Date.now();
@@ -1157,10 +1229,14 @@
     const baseMultiplier = computeBaseMultiplier(activityRatio);
     const momentum = updateMomentum(activityRatio);
     let xpPerSecond = baseMultiplier * (1 + (momentum * 0.5));
-    xpPerSecond = applyCombo(xpPerSecond);
-    xpPerSecond = applyBoost(xpPerSecond);
+    const basePerSecond = Math.max(0, xpPerSecond);
+    const afterCombo = applyCombo(xpPerSecond);
+    xpPerSecond = afterCombo;
+    const afterBoost = applyBoost(xpPerSecond);
+    xpPerSecond = afterBoost;
     xpPerSecond = Math.min(MAX_XP_PER_SECOND, Math.max(0, xpPerSecond));
     const xpForTick = xpPerSecond * (AWARD_INTERVAL_MS / 1000);
+    const baseForTick = basePerSecond * (AWARD_INTERVAL_MS / 1000);
     const awarded = accumulateLocalXp(xpForTick);
     if (awarded <= 0) return 0;
     state.totalToday = (Number(state.totalToday) || 0) + awarded;
@@ -1186,6 +1262,31 @@
       emitUpdate(document);
     }
     logDebug("award", { awarded, activityRatio: Number(activityRatio) || 0 });
+    try {
+      const ts = state.regen && state.regen.lastAward ? state.regen.lastAward : Date.now();
+      const comboCount = Math.max(1, Math.floor(Number(state.regen && state.regen.comboCount) || 0));
+      const boostMultiplier = Number(state.boost && state.boost.multiplier);
+      const boostValue = Number.isFinite(boostMultiplier) && boostMultiplier > 1 ? boostMultiplier : 1;
+      const snapshot = (state.snapshot && typeof state.snapshot.progress === "number")
+        ? state.snapshot
+        : computeLevel(state.totalLifetime || 0);
+      const progress = snapshot && typeof snapshot.progress === "number" ? snapshot.progress : 0;
+      const totalLifetime = Number(state.totalLifetime);
+      const detail = {
+        awarded,
+        combo: comboCount,
+        boost: boostValue,
+        progressToNext: Number.isFinite(progress) ? Math.min(1, Math.max(0, progress)) : 0,
+        ts,
+      };
+      if (Number.isFinite(baseForTick) && baseForTick > 0) {
+        detail.base = Math.round(baseForTick);
+      }
+      if (Number.isFinite(totalLifetime) && totalLifetime > 0) {
+        detail.total = totalLifetime;
+      }
+      emitXpTick(detail);
+    } catch (_) {}
     return awarded;
   }
 
@@ -1308,6 +1409,7 @@
     scheduleBoostExpiration(expiresAt);
 
     persistRuntimeState();
+    broadcastBoostState();
   }
 
   function readFlushStatus() {
@@ -1482,9 +1584,13 @@
 
       window.addEventListener("xp:boost", (event) => {
         try {
+          const detail = event && event.detail;
+          if (detail && typeof detail === "object" && Object.prototype.hasOwnProperty.call(detail, "secondsLeft")) {
+            return;
+          }
           // Accept both new `{ multiplier, ttlMs, reason }` and legacy
           // `{ multiplier, durationMs, source }` payloads.
-          requestBoost(event && event.detail);
+          requestBoost(detail);
         } catch (_) {}
       });
 

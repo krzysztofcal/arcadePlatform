@@ -3,6 +3,81 @@
 
   const DEFAULT_SCORE_DELTA_CEILING = 10_000;
 
+  function dispatchXpEvent(name, detail) {
+    if (!window || typeof window.dispatchEvent !== "function") return false;
+    const payload = detail && typeof detail === "object" ? detail : null;
+    if (!payload) return false;
+    try {
+      if (typeof CustomEvent === "function") {
+        const evt = new CustomEvent(name, { detail: payload });
+        window.dispatchEvent(evt);
+        return true;
+      }
+    } catch (_) {}
+    if (!document || typeof document.createEvent !== "function") return false;
+    try {
+      const legacy = document.createEvent("CustomEvent");
+      legacy.initCustomEvent(name, false, false, payload);
+      window.dispatchEvent(legacy);
+      return true;
+    } catch (_) {}
+    return false;
+  }
+
+  function sanitizeProgress(value) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return 0;
+    if (numeric <= 0) return 0;
+    if (numeric >= 1) return 1;
+    return numeric;
+  }
+
+  function dispatchXpTick(detail) {
+    if (!detail || typeof detail !== "object") return false;
+    const awarded = Number(detail.awarded);
+    const comboRaw = Number(detail.combo);
+    const boostRaw = Number(detail.boost);
+    const ts = Number(detail.ts);
+    if (!Number.isFinite(awarded) || awarded < 0) return false;
+    if (!Number.isFinite(comboRaw) || comboRaw < 1) return false;
+    if (!Number.isFinite(boostRaw) || boostRaw < 1) return false;
+    if (!Number.isFinite(ts)) return false;
+    const progress = sanitizeProgress(detail.progressToNext);
+    const payload = {
+      awarded,
+      combo: Math.max(1, Math.floor(comboRaw)),
+      boost: Math.max(1, boostRaw),
+      progressToNext: progress,
+      ts,
+    };
+    if (detail.base != null) {
+      const base = Number(detail.base);
+      if (Number.isFinite(base) && base >= 0) {
+        payload.base = base;
+      }
+    }
+    if (detail.total != null) {
+      const total = Number(detail.total);
+      if (Number.isFinite(total) && total >= 0) {
+        payload.total = total;
+      }
+    }
+    return dispatchXpEvent("xp:tick", payload);
+  }
+
+  function dispatchXpBoost(detail) {
+    if (!detail || typeof detail !== "object") return false;
+    const multiplier = Number(detail.multiplier);
+    const secondsLeft = Number(detail.secondsLeft);
+    if (!Number.isFinite(multiplier) || multiplier < 1) return false;
+    if (!Number.isFinite(secondsLeft) || secondsLeft < 0) return false;
+    const payload = {
+      multiplier: multiplier < 1 ? 1 : multiplier,
+      secondsLeft: secondsLeft <= 0 ? 0 : Math.floor(secondsLeft),
+    };
+    return dispatchXpEvent("xp:boost", payload);
+  }
+
   function parseNumber(value, fallback) {
     if (value == null) return fallback;
     const sanitized = typeof value === "string" ? value.replace(/_/g, "") : value;
@@ -412,6 +487,8 @@
   bridge.stop = stop;
   bridge.add = add;
   bridge.nudge = nudge;
+  bridge.dispatchXpTick = dispatchXpTick;
+  bridge.dispatchXpBoost = dispatchXpBoost;
 
   window.GameXpBridge = bridge;
 })(typeof window !== "undefined" ? window : undefined, typeof document !== "undefined" ? document : undefined);
