@@ -116,11 +116,20 @@
     }
   }
 
-  function normalizeCombo(runtime) {
+  function readComboInfo(runtime) {
     const combo = runtime && Number(runtime.comboCount);
-    if (!Number.isFinite(combo)) return 1;
-    const rounded = Math.floor(combo);
-    return rounded >= 1 ? rounded : 1;
+    if (!Number.isFinite(combo) || combo <= 0) {
+      return { count: 0, multiplier: 1 };
+    }
+    const count = Math.max(0, Math.floor(combo));
+    if (count <= 1) {
+      return { count, multiplier: 1 };
+    }
+    const bonus = Math.min(0.75, count * 0.03);
+    return {
+      count,
+      multiplier: 1 + bonus,
+    };
   }
 
   function readBoostFromRuntime(runtime) {
@@ -152,7 +161,8 @@
 
   function buildTickDetail(awarded, runtime, snapshot) {
     const snap = typeof snapshot === "undefined" ? getSnapshot() : snapshot;
-    const combo = normalizeCombo(runtime);
+    const comboInfo = readComboInfo(runtime);
+    const combo = comboInfo.multiplier;
     const boostInfo = readBoostFromRuntime(runtime);
     const boost = boostInfo ? boostInfo.multiplier : 1;
     const progress = snap && typeof snap.progress === "number"
@@ -165,6 +175,9 @@
       progressToNext: progress,
       ts: Date.now(),
     };
+    if (comboInfo.count != null) {
+      detail.comboCount = comboInfo.count;
+    }
     if (snap && typeof snap.totalXp === "number") {
       detail.total = snap.totalXp;
     }

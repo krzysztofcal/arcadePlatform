@@ -162,9 +162,10 @@
     const boost = detail.boost;
 
     const pieces = [`+${awarded}`];
-    const comboText = `x${combo}`;
+    const comboText = `x${formatMultiplier(combo)}`;
+    const hasBoost = Number.isFinite(boost) && boost > 1.001;
     let suffix = comboText;
-    if (boost > 1) {
+    if (hasBoost) {
       suffix = `${comboText} • x${formatMultiplier(boost)} boost`;
     }
     pieces.push(`(${suffix})`);
@@ -202,14 +203,15 @@
   }
 
   function updateCombo(combo) {
-    const normalized = Math.max(1, Math.floor(combo || 1));
+    const numeric = Number(combo);
+    const normalized = Number.isFinite(numeric) ? Math.max(1, numeric) : 1;
     const previous = state.comboValue;
     state.comboValue = normalized;
     if (!ensureRoot()) return;
     withFrame(() => {
       if (state.comboText) {
-        state.comboText.textContent = `x${normalized}`;
-        if (normalized > previous) {
+        state.comboText.textContent = `x${formatMultiplier(normalized)}`;
+        if (normalized > previous + 0.001) {
           triggerPulse(state.comboText);
         }
       }
@@ -287,7 +289,7 @@
     const boost = Number(detail.boost);
     const progress = Number(detail.progressToNext);
     if (!Number.isFinite(awarded) || awarded < 0) return;
-    const normalizedCombo = Number.isFinite(combo) ? Math.max(1, Math.floor(combo)) : 1;
+    const normalizedCombo = Number.isFinite(combo) ? Math.max(1, combo) : 1;
     const normalizedBoost = Number.isFinite(boost) ? Math.max(1, boost) : 1;
     const normalizedProgress = Number.isFinite(progress) ? Math.max(0, Math.min(1, progress)) : 0;
 
