@@ -8,32 +8,25 @@ const asNumber = (raw, fallback) => {
   return Number.isFinite(parsed) ? parsed : fallback;
 };
 
-const DAILY_CAP = asNumber(process.env.XP_DAILY_CAP, 600);          // set to 3000 in Netlify
-const DEFAULT_CHUNK_MS = asNumber(process.env.XP_CHUNK_MS, 10_000); // 10s default
-const DEFAULT_POINTS_PER_PERIOD = asNumber(process.env.XP_POINTS_PER_PERIOD, 10);
-const XP_USE_SCORE = process.env.XP_USE_SCORE === "1";
-const XP_SCORE_TO_XP = asNumber(process.env.XP_SCORE_TO_XP, 1);
-const XP_MAX_XP_PER_WINDOW = asNumber(process.env.XP_MAX_XP_PER_WINDOW, DEFAULT_POINTS_PER_PERIOD);
-const SCORE_DELTA_CEILING = asNumber(process.env.XP_SCORE_DELTA_CEILING, 10_000);
-const XP_SCORE_RATE_LIMIT_PER_MIN = asNumber(process.env.XP_SCORE_RATE_LIMIT_PER_MIN, SCORE_DELTA_CEILING);
-const XP_SCORE_BURST_MAX = asNumber(process.env.XP_SCORE_BURST_MAX, XP_SCORE_RATE_LIMIT_PER_MIN);
-const XP_SCORE_MIN_EVENTS = Math.max(0, asNumber(process.env.XP_SCORE_MIN_EVENTS, 4));
-const XP_SCORE_MIN_VIS_S = Math.max(0, asNumber(process.env.XP_SCORE_MIN_VIS_S, 8));
-const XP_SCORE_DEBUG_TRACE = process.env.XP_SCORE_DEBUG_TRACE === "1";
+const DAILY_CAP = asNumber(process.env.XP_DAILY_CAP, 600);
+const SESSION_CAP = asNumber(process.env.XP_SESSION_CAP, 300);
+const DELTA_CAP = asNumber(process.env.XP_DELTA_CAP, 300);
+const SESSION_TTL_SEC = Math.max(0, asNumber(process.env.XP_SESSION_TTL_SEC, 604800));
+const SESSION_TTL_MS = SESSION_TTL_SEC > 0 ? SESSION_TTL_SEC * 1000 : 0;
+const REQUIRE_ACTIVITY = process.env.XP_REQUIRE_ACTIVITY === "1";
+const MIN_ACTIVITY_EVENTS = Math.max(0, asNumber(process.env.XP_MIN_ACTIVITY_EVENTS, 4));
+const MIN_ACTIVITY_VIS_S = Math.max(0, asNumber(process.env.XP_MIN_ACTIVITY_VIS_S, 8));
+const METADATA_MAX_BYTES = Math.max(0, asNumber(process.env.XP_METADATA_MAX_BYTES, 2048));
 const DEBUG_ENABLED = process.env.XP_DEBUG === "1";
-const SCORE_RATE_TTL_SEC = 90;
-const DRIFT_MS = asNumber(process.env.XP_DRIFT_MS, 2_000);
-const BASE_MIN_VISIBILITY_S = asNumber(process.env.XP_MIN_VISIBILITY_S, 6);
-const BASE_MIN_INPUTS = asNumber(process.env.XP_MIN_INPUTS, 1);
-const KEY_NS = process.env.XP_KEY_NS ?? "kcswh:xp:v1";
+const KEY_NS = process.env.XP_KEY_NS ?? "kcswh:xp:v2";
+const DRIFT_MS = Math.max(0, asNumber(process.env.XP_DRIFT_MS, 30_000));
 const CORS_ALLOW = (process.env.XP_CORS_ALLOW ?? "")
   .split(",")
   .map(s => s.trim())
   .filter(Boolean);
 
-const LAST_OK_TTL_SEC = 2 * 24 * 3600;  // keep lastOk ~2 days
-const IDEM_TTL_SEC = 24 * 3600;
-const LOCK_TTL_MS = Number(process.env.XP_LOCK_TTL_MS ?? 3_000);
+const RAW_LOCK_TTL = Number(process.env.XP_LOCK_TTL_MS ?? 3_000);
+const LOCK_TTL_MS = Number.isFinite(RAW_LOCK_TTL) && RAW_LOCK_TTL > 0 ? RAW_LOCK_TTL : 3_000;
 
 const json = (statusCode, obj, origin) => ({
   statusCode,
@@ -58,49 +51,31 @@ const dayKey = (t = Date.now()) => {
 };
 
 const hash = (s) => crypto.createHash("sha256").update(s).digest("hex");
-const keyIdem  = (u, s, g, start, end) => `${KEY_NS}:idemp:${hash(`${u}|${s}|${g}|${start}|${end}`)}`;
 const keyDaily = (u, day = dayKey()) => `${KEY_NS}:daily:${u}:${day}`;
-const keyLast  = (u, g) => `${KEY_NS}:lastok:${u}:${g}`; // NEW: last accepted end timestamp
-const keyLock  = (u, g) => `${KEY_NS}:lock:${u}:${g}`;
 const keyTotal = (u) => `${KEY_NS}:total:${u}`;
-const keyScoreRate = (u, t = Date.now()) => {
-  const d = new Date(t);
-  const bucket = [
-    d.getUTCFullYear(),
-    String(d.getUTCMonth() + 1).padStart(2, "0"),
-    String(d.getUTCDate()).padStart(2, "0"),
-    String(d.getUTCHours()).padStart(2, "0"),
-    String(d.getUTCMinutes()).padStart(2, "0"),
-  ].join("");
-  return `${KEY_NS}:scorerl:${u}:${bucket}`;
-};
+const keySession = (u, s) => `${KEY_NS}:session:${hash(`${u}|${s}`)}`;
+const keySessionSync = (u, s) => `${KEY_NS}:session:last:${hash(`${u}|${s}`)}`;
+const keyLock = (u, s) => `${KEY_NS}:lock:${hash(`${u}|${s}`)}`;
 
-async function getScoreRateUsage(userId, t = Date.now()) {
-  const key = keyScoreRate(userId, t);
+async function getTotals({ userId, sessionId, now = Date.now() }) {
+  const todayKey = keyDaily(userId, dayKey(now));
+  const totalKeyK = keyTotal(userId);
+  const sessionKeyK = sessionId ? keySession(userId, sessionId) : null;
+  const sessionSyncKeyK = sessionId ? keySessionSync(userId, sessionId) : null;
   try {
-    const raw = await store.get(key);
-    const current = Number(raw ?? "0");
-    return { key, current: Number.isFinite(current) ? current : 0 };
+    const reads = [store.get(todayKey), store.get(totalKeyK)];
+    if (sessionKeyK) reads.push(store.get(sessionKeyK));
+    if (sessionSyncKeyK) reads.push(store.get(sessionSyncKeyK));
+    const values = await Promise.all(reads);
+    const current = Number(values[0] ?? "0") || 0;
+    const lifetime = Number(values[1] ?? "0") || 0;
+    const sessionTotal = sessionKeyK ? (Number(values[2] ?? "0") || 0) : 0;
+    const lastSync = sessionSyncKeyK ? (Number(values[sessionKeyK ? 3 : 2] ?? "0") || 0) : 0;
+    return { current, lifetime, sessionTotal, lastSync };
   } catch {
-    return { key, current: 0 };
+    return { current: 0, lifetime: 0, sessionTotal: 0, lastSync: 0 };
   }
 }
-
-async function getDailyAndLifetime(dailyKey, totalKey) {
-  try {
-    const [currentStr, lifetimeStr] = await Promise.all([
-      store.get(dailyKey),
-      store.get(totalKey),
-    ]);
-    const current = Number(currentStr ?? "0") || 0;
-    const lifetime = Number(lifetimeStr ?? "0") || 0;
-    return { current, lifetime };
-  } catch {
-    return { current: 0, lifetime: 0 };
-  }
-}
-
-const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
 
 export async function handler(event) {
   const origin = event.headers?.origin;
@@ -111,468 +86,303 @@ export async function handler(event) {
   try { body = JSON.parse(event.body || "{}"); }
   catch { return json(400, { error: "bad_json" }, origin); }
 
-  const {
-    userId,
-    gameId,
-    sessionId,
-    windowStart,
-    windowEnd,
-    visibilitySeconds,
-    inputEvents,
-  } = body;
+  const userId = typeof body.userId === "string" ? body.userId.trim() : null;
+  const sessionIdRaw = body.sessionId;
+  const sessionId = typeof sessionIdRaw === "string" ? sessionIdRaw.trim() : null;
 
-  const requestedScoreDelta = Number(body.scoreDelta);
-  const scoreDeltaRaw = Number.isFinite(requestedScoreDelta)
-    ? clamp(requestedScoreDelta, 0, SCORE_DELTA_CEILING)
-    : undefined;
-  const useScoreMode = XP_USE_SCORE && Number.isFinite(scoreDeltaRaw) && scoreDeltaRaw > 0;
-  let scoreDeltaAccepted = useScoreMode ? scoreDeltaRaw : undefined;
-  const rawScoreXp = useScoreMode
-    ? Math.round(clamp(scoreDeltaRaw * XP_SCORE_TO_XP, 0, XP_MAX_XP_PER_WINDOW))
-    : undefined;
-  let scoreXp = rawScoreXp;
-  const debugScoreDelta = Number.isFinite(scoreDeltaRaw) ? scoreDeltaRaw : null;
   if (!userId || (!body.statusOnly && !sessionId)) {
     return json(400, { error: "missing_fields" }, origin);
   }
-
-
-  
-
-  // EARLY statusOnly (no window validation)
   if (body.statusOnly) {
-    const today = dayKey();
-    const dailyKeyK = keyDaily(userId, today);
-    const totalKeyK = keyTotal(userId);
-    const { current, lifetime } = await getDailyAndLifetime(dailyKeyK, totalKeyK);
-    const payload = { ok: true, awarded: 0, totalToday: current, cap: DAILY_CAP, totalLifetime: lifetime };
-    if (DEBUG_ENABLED || XP_SCORE_DEBUG_TRACE) {
-      payload.debug = {
-        mode: "statusOnly",
-        scoreDelta: debugScoreDelta,
-      };
-      if (useScoreMode) {
-        payload.debug.scoreDeltaRaw = debugScoreDelta;
-        payload.debug.scoreDeltaAccepted = scoreDeltaAccepted ?? null;
-        payload.debug.scoreRateMinute = null;
-        payload.debug.scoreRateLimit = XP_SCORE_RATE_LIMIT_PER_MIN;
-        payload.debug.scoreBurstMax = XP_SCORE_BURST_MAX;
-      }
+    const { current, lifetime, sessionTotal, lastSync } = await getTotals({ userId, sessionId, now: Date.now() });
+    const payload = {
+      ok: true,
+      awarded: 0,
+      totalToday: current,
+      cap: DAILY_CAP,
+      capDelta: DELTA_CAP,
+      totalLifetime: lifetime,
+      sessionTotal,
+      lastSync,
+      status: "statusOnly",
+    };
+    if (DEBUG_ENABLED) {
+      payload.debug = { mode: "statusOnly" };
     }
     return json(200, payload, origin);
   }
 
-  // Task 1: block XP when user is idle
-  if (!body.statusOnly) {
-    if (useScoreMode) {
-      const minScoreEvents = XP_SCORE_MIN_EVENTS;
-      const minScoreVisibility = XP_SCORE_MIN_VIS_S;
-      if ((visibilitySeconds ?? 0) < minScoreVisibility || (inputEvents ?? 0) < minScoreEvents) {
-        const payload = { ok: true, awarded: 0, reason: "insufficient-activity" };
-        if (DEBUG_ENABLED || XP_SCORE_DEBUG_TRACE) {
-          const debugMode = "score";
-          payload.debug = {
-            mode: debugMode,
-            visibilitySeconds,
-            inputEvents,
-            minScoreEvents,
-            minScoreVisibility,
-            scoreDelta: debugScoreDelta,
-            scoreDeltaRaw: Number.isFinite(scoreDeltaRaw) ? scoreDeltaRaw : null,
-            scoreDeltaAccepted: 0,
-            scoreRateMinute: null,
-            scoreRateLimit: XP_SCORE_RATE_LIMIT_PER_MIN,
-            scoreBurstMax: XP_SCORE_BURST_MAX,
-            reason: "insufficient-activity",
-          };
-        }
-        return json(200, payload, origin);
-      }
-    }
-
-    // Use clamped chunk to derive a reasonable input threshold
-    const _raw = Number(body.chunkMs);
-    const _chunk = Number.isFinite(_raw) ? Math.min(Math.max(_raw, 5000), DEFAULT_CHUNK_MS) : DEFAULT_CHUNK_MS;
-    const _minInputsGate = Math.max(2, Math.ceil(_chunk / 4000));
-    if (!(Number.isFinite(visibilitySeconds) && visibilitySeconds > 1 &&
-          Number.isFinite(inputEvents) && inputEvents >= _minInputsGate)) {
-      const payload = { ok: true, awarded: 0, reason: "insufficient-activity" };
-      if (DEBUG_ENABLED || XP_SCORE_DEBUG_TRACE) {
-        const debugMode = useScoreMode ? "score" : "time";
-        payload.debug = {
-          chunkMs: _chunk,
-          minInputsGate: _minInputsGate,
-          visibilitySeconds,
-          inputEvents,
-          reason: "insufficient-activity",
-          scoreDelta: debugScoreDelta,
-          mode: debugMode,
-        };
-        if (useScoreMode) {
-          payload.debug.scoreXp = rawScoreXp;
-          payload.debug.scoreDeltaRaw = debugScoreDelta;
-          payload.debug.scoreDeltaAccepted = scoreDeltaAccepted ?? null;
-          payload.debug.scoreRateMinute = null;
-          payload.debug.scoreRateLimit = XP_SCORE_RATE_LIMIT_PER_MIN;
-          payload.debug.scoreBurstMax = XP_SCORE_BURST_MAX;
-        }
-      }
-      return json(200, payload, origin);
-    }
+  let deltaRaw = Number(body.delta);
+  if (!Number.isFinite(deltaRaw)) {
+    const scoreDelta = Number(body.scoreDelta);
+    const pointsPerPeriod = Number(body.pointsPerPeriod);
+    if (Number.isFinite(scoreDelta)) deltaRaw = scoreDelta;
+    else if (Number.isFinite(pointsPerPeriod)) deltaRaw = pointsPerPeriod;
+  }
+  if (!Number.isFinite(deltaRaw) || deltaRaw < 0) {
+    return json(422, { error: "invalid_delta" }, origin);
+  }
+  const normalizedDelta = Math.floor(deltaRaw);
+  if (normalizedDelta < 0) {
+    return json(422, { error: "invalid_delta" }, origin);
+  }
+  if (normalizedDelta > DELTA_CAP) {
+    return json(422, { error: "delta_out_of_range", cap: DELTA_CAP, capDelta: DELTA_CAP }, origin);
   }
 
-
-  if (!gameId || !Number.isFinite(windowStart) || !Number.isFinite(windowEnd)) {
-    return json(400, { error: "missing_fields" }, origin);
-  }
-
-  const requestedChunkMs = Number(body.chunkMs);
-  const chunkMs = Number.isFinite(requestedChunkMs)
-    ? clamp(requestedChunkMs, 5_000, DEFAULT_CHUNK_MS)
-    : DEFAULT_CHUNK_MS;
-  const requestedStep = Number(body.pointsPerPeriod);
-  const pointsPerPeriod = Number.isFinite(requestedStep)
-    ? clamp(requestedStep, 1, DEFAULT_POINTS_PER_PERIOD)
-    : DEFAULT_POINTS_PER_PERIOD;
-  const minVisibility = Math.max(BASE_MIN_VISIBILITY_S, Math.round((chunkMs / 1000) * 0.6));
-  const minInputs = Math.max(BASE_MIN_INPUTS, Math.ceil(chunkMs / 4000));
-  let grantStep = pointsPerPeriod;
-
-  // Basic window validity (defensive)
   const now = Date.now();
-  const elapsed = windowEnd - windowStart;
-  if (windowEnd > now + DRIFT_MS || elapsed < (chunkMs - DRIFT_MS)) {
-    return json(422, { ok: false, error: "invalid_window", elapsed }, origin);
+  const tsRaw = Number(body.ts ?? body.timestamp ?? body.windowEnd ?? now);
+  if (!Number.isFinite(tsRaw) || tsRaw <= 0) {
+    return json(422, { error: "invalid_timestamp" }, origin);
   }
-  if ((visibilitySeconds ?? 0) < minVisibility || (inputEvents ?? 0) < minInputs) {
-    return json(200, { ok: true, awarded: 0, reason: "insufficient-activity" }, origin);
+  if (tsRaw > now + DRIFT_MS) {
+    return json(422, { error: "timestamp_in_future", driftMs: DRIFT_MS }, origin);
+  }
+  const ts = Math.trunc(tsRaw);
+
+  let metadata = null;
+  if (body.metadata !== undefined) {
+    if (!body.metadata || typeof body.metadata !== "object" || Array.isArray(body.metadata)) {
+      return json(400, { error: "invalid_metadata" }, origin);
+    }
+    const cleaned = {};
+    for (const [key, value] of Object.entries(body.metadata)) {
+      if (key === "userId" || key === "sessionId" || key === "delta" || key === "ts") continue;
+      cleaned[key] = value;
+    }
+
+    const serialized = JSON.stringify(cleaned);
+    const bytes = Buffer.byteLength(serialized, "utf8");
+    const depthOk = (() => {
+      const MAX_DEPTH = 3;
+      const stack = [{ value: cleaned, depth: 1 }];
+      while (stack.length) {
+        const { value, depth } = stack.pop();
+        if (!value || typeof value !== "object") continue;
+        if (depth > MAX_DEPTH) return false;
+        for (const nested of Object.values(value)) {
+          if (nested && typeof nested === "object") {
+            stack.push({ value: nested, depth: depth + 1 });
+          }
+        }
+      }
+      return true;
+    })();
+
+    if (METADATA_MAX_BYTES && bytes > METADATA_MAX_BYTES) {
+      return json(413, { error: "metadata_too_large", limit: METADATA_MAX_BYTES }, origin);
+    }
+    if (!depthOk) {
+      return json(413, { error: "metadata_too_large", limit: METADATA_MAX_BYTES, reason: "depth" }, origin);
+    }
+    metadata = cleaned;
   }
 
-  // Keys
-  const today     = dayKey(now);
-  const dailyKeyK = keyDaily(userId, today);
-  const lastKeyK  = keyLast(userId, gameId);
-  const idemK     = keyIdem(userId, sessionId, gameId, windowStart, windowEnd);
-  const lockKeyK  = keyLock(userId, gameId);
+  const todayKey = keyDaily(userId, dayKey(now));
   const totalKeyK = keyTotal(userId);
+  const sessionKeyK = keySession(userId, sessionId);
+  const sessionSyncKeyK = keySessionSync(userId, sessionId);
+  const lockKeyK = keyLock(userId, sessionId);
 
-  let scoreRateMinute = null;
-  let scoreRateKeyK;
-  const scoreRateLimit = Number.isFinite(XP_SCORE_RATE_LIMIT_PER_MIN) ? XP_SCORE_RATE_LIMIT_PER_MIN : SCORE_DELTA_CEILING;
-  const scoreBurstMax = Number.isFinite(XP_SCORE_BURST_MAX) ? XP_SCORE_BURST_MAX : SCORE_DELTA_CEILING;
-  let reservedScoreDelta = 0;
-  let reservedScoreKey = null;
-
-  if (useScoreMode) {
-    const usage = await getScoreRateUsage(userId, now);
-    scoreRateMinute = Number.isFinite(usage.current) ? usage.current : 0;
-    scoreRateKeyK = usage.key;
-
-    const remainingRate = scoreRateLimit - scoreRateMinute;
-    const remainingBurst = scoreBurstMax - scoreRateMinute;
-    const allowanceRaw = Math.min(remainingRate, remainingBurst);
-    const effectiveAllowance = Math.max(0, Number.isFinite(allowanceRaw) ? allowanceRaw : 0);
-    const proposed = Number.isFinite(scoreDeltaAccepted)
-      ? Math.max(0, scoreDeltaAccepted)
-      : Math.max(0, Number(scoreDeltaRaw ?? 0));
-
-    if (effectiveAllowance <= 0) {
-      scoreDeltaAccepted = 0;
-      scoreXp = 0;
-      const { current, lifetime } = await getDailyAndLifetime(dailyKeyK, totalKeyK);
-      const payload = {
+  if (REQUIRE_ACTIVITY && normalizedDelta > 0) {
+    const events = Number(metadata?.inputEvents ?? 0);
+    const visSeconds = Number(metadata?.visibilitySeconds ?? 0);
+    if (!Number.isFinite(events) || events < MIN_ACTIVITY_EVENTS || !Number.isFinite(visSeconds) || visSeconds < MIN_ACTIVITY_VIS_S) {
+      const { current, lifetime, sessionTotal, lastSync } = await getTotals({ userId, sessionId, now });
+      const inactivePayload = {
         ok: true,
         awarded: 0,
         totalToday: current,
-        cap: DAILY_CAP,
         totalLifetime: lifetime,
-        reason: "score_rate_limit",
-      };
-      if (DEBUG_ENABLED || XP_SCORE_DEBUG_TRACE) {
-        payload.debug = {
-          mode: "score",
-          scoreDelta: debugScoreDelta,
-          scoreDeltaRaw: debugScoreDelta,
-          scoreDeltaAccepted: 0,
-          scoreRateMinute,
-          scoreRateLimit: scoreRateLimit,
-          scoreBurstMax: scoreBurstMax,
-          reason: "score_rate_limit",
-        };
-      }
-      return json(200, payload, origin);
-    }
-
-    const safeAccepted = Math.min(proposed, effectiveAllowance);
-    const boundedAccepted = Number.isFinite(safeAccepted) ? safeAccepted : 0;
-    const normalizedAccepted = Math.max(0, Math.floor(boundedAccepted));
-    scoreDeltaAccepted = normalizedAccepted;
-    const safeXp = clamp(normalizedAccepted * XP_SCORE_TO_XP, 0, XP_MAX_XP_PER_WINDOW);
-    scoreXp = Math.round(safeXp);
-    grantStep = Number.isFinite(scoreXp) ? Math.max(0, scoreXp) : 0;
-
-    if (normalizedAccepted <= 0 || grantStep <= 0) {
-      const { current, lifetime } = await getDailyAndLifetime(dailyKeyK, totalKeyK);
-      const reason = "no_score";
-      const payload = {
-        ok: true,
-        awarded: 0,
-        totalToday: current,
+        sessionTotal,
+        lastSync,
         cap: DAILY_CAP,
-        totalLifetime: lifetime,
-        reason,
+        capDelta: DELTA_CAP,
+        reason: "inactive",
+        status: "inactive",
       };
-      if (DEBUG_ENABLED || XP_SCORE_DEBUG_TRACE) {
-        payload.debug = {
-          mode: "score",
-          scoreDelta: debugScoreDelta,
-          scoreDeltaRaw: debugScoreDelta,
-          scoreDeltaAccepted: normalizedAccepted,
-          scoreRateMinute,
-          scoreRateLimit,
-          scoreBurstMax,
-          reason,
+      if (DEBUG_ENABLED) {
+        inactivePayload.debug = {
+          mode: "inactive",
+          delta: normalizedDelta,
+          ts,
+          sessionCap: SESSION_CAP,
+          dailyCap: DAILY_CAP,
+          lastSync,
         };
       }
-      return json(200, payload, origin);
-    }
-
-    if (scoreRateKeyK) {
-      const minuteCap = Math.max(0, Math.min(scoreRateLimit, scoreBurstMax));
-      const reserveDelta = normalizedAccepted;
-      let reserveSucceeded = false;
-      try {
-        const newMinuteTotalRaw = await store.incrBy(scoreRateKeyK, reserveDelta);
-        reserveSucceeded = true;
-        const newMinuteTotal = Number(newMinuteTotalRaw ?? "0");
-        const previousMinute = Number.isFinite(newMinuteTotal) ? newMinuteTotal - reserveDelta : 0;
-        if (previousMinute <= 0 && typeof store.expire === "function") {
-          try {
-            await store.expire(scoreRateKeyK, SCORE_RATE_TTL_SEC);
-          } catch (_) {
-            // ignore ttl persistence issues
-          }
-        }
-        reservedScoreDelta = reserveDelta;
-        reservedScoreKey = scoreRateKeyK;
-        scoreRateMinute = Number.isFinite(newMinuteTotal) ? newMinuteTotal : scoreRateMinute;
-        if (Number.isFinite(newMinuteTotal) && newMinuteTotal > minuteCap) {
-          try {
-            await store.decrBy(scoreRateKeyK, reserveDelta);
-          } catch (_) {
-            // best effort rollback
-          }
-          reservedScoreDelta = 0;
-          reservedScoreKey = null;
-          scoreRateMinute = previousMinute;
-          const { current, lifetime } = await getDailyAndLifetime(dailyKeyK, totalKeyK);
-          const reason = "score_rate_limit";
-          const payload = {
-            ok: true,
-            awarded: 0,
-            totalToday: current,
-            cap: DAILY_CAP,
-            totalLifetime: lifetime,
-            reason,
-          };
-          if (DEBUG_ENABLED || XP_SCORE_DEBUG_TRACE) {
-            payload.debug = {
-              mode: "score",
-              scoreDelta: debugScoreDelta,
-              scoreDeltaRaw: debugScoreDelta,
-              scoreDeltaAccepted: normalizedAccepted,
-              scoreRateMinute: previousMinute,
-              scoreRateLimit,
-              scoreBurstMax,
-              reason,
-            };
-          }
-          return json(200, payload, origin);
-        }
-      } catch (_) {
-        if (reserveSucceeded && reserveDelta > 0) {
-          try {
-            await store.decrBy(scoreRateKeyK, reserveDelta);
-          } catch (_) {
-            // ignore secondary rollback errors
-          }
-        }
-        reservedScoreDelta = 0;
-        reservedScoreKey = null;
-        const { current, lifetime } = await getDailyAndLifetime(dailyKeyK, totalKeyK);
-        const reason = "score_rate_limit";
-        const payload = {
-          ok: true,
-          awarded: 0,
-          totalToday: current,
-          cap: DAILY_CAP,
-          totalLifetime: lifetime,
-          reason,
-        };
-        if (DEBUG_ENABLED || XP_SCORE_DEBUG_TRACE) {
-          payload.debug = {
-            mode: "score",
-            scoreDelta: debugScoreDelta,
-            scoreDeltaRaw: debugScoreDelta,
-            scoreDeltaAccepted: normalizedAccepted,
-            scoreRateMinute,
-            scoreRateLimit,
-            scoreBurstMax,
-            reason,
-          };
-        }
-        return json(200, payload, origin);
-      }
+      return json(200, inactivePayload, origin);
     }
   }
 
-  // Atomic script: idempotency → cap → spacing (≥ CHUNK_MS since lastOk) → INCRBY → set lastOk(end) → set idem
   const script = `
-    local daily = KEYS[1]
-    local lastk = KEYS[2]
-    local idem  = KEYS[3]
-    local lockk = KEYS[4]
-    local total = KEYS[5]
-    local now     = tonumber(ARGV[1])
-    local chunk   = tonumber(ARGV[2])
-    local step    = tonumber(ARGV[3])
-    local cap     = tonumber(ARGV[4])
-    local idemTtl = tonumber(ARGV[5])
-    local endTs   = tonumber(ARGV[6])
-    local lastTtl = tonumber(ARGV[7])
-    local lockTtl = tonumber(ARGV[8])
+    local sessionKey = KEYS[1]
+    local sessionSyncKey = KEYS[2]
+    local dailyKey = KEYS[3]
+    local totalKey = KEYS[4]
+    local lockKey = KEYS[5]
+    local now = tonumber(ARGV[1])
+    local delta = tonumber(ARGV[2])
+    local dailyCap = tonumber(ARGV[3])
+    local sessionCap = tonumber(ARGV[4])
+    local ts = tonumber(ARGV[5])
+    local lockTtl = tonumber(ARGV[6])
+    local sessionTtl = tonumber(ARGV[7])
 
-    -- Acquire lock with NX so only one invocation enters the critical section.
-    local locked = redis.call('SET', lockk, tostring(now), 'PX', lockTtl, 'NX')
-    local function getLifetime()
-      return tonumber(redis.call('GET', total) or '0')
-    end
-
+    local locked = redis.call('SET', lockKey, tostring(now), 'PX', lockTtl, 'NX')
     if locked ~= 'OK' then
-      local current = tonumber(redis.call('GET', daily) or '0')
-      return {0, current, 4, getLifetime()}  -- someone else holds the lock
+      local currentDaily = tonumber(redis.call('GET', dailyKey) or '0')
+      local sessionTotal = tonumber(redis.call('GET', sessionKey) or '0')
+      local lifetime = tonumber(redis.call('GET', totalKey) or '0')
+      local lastSync = tonumber(redis.call('GET', sessionSyncKey) or '0')
+      return {0, currentDaily, sessionTotal, lifetime, lastSync, 6}
     end
 
-    local function release()
-      redis.call('DEL', lockk)
+    local function refreshSessionTtl()
+      if sessionTtl and sessionTtl > 0 then
+        redis.call('PEXPIRE', sessionKey, sessionTtl)
+        redis.call('PEXPIRE', sessionSyncKey, sessionTtl)
+      end
     end
 
-    -- Idempotent?
-    if redis.call('GET', idem) then
-      local t = tonumber(redis.call('GET', daily) or '0')
-      local lifetime = getLifetime()
-      release()
-      return {0, t, 1, lifetime}    -- idempotent
+    local function finish(grant, dailyTotal, sessionTotal, lifetime, sync, status)
+      redis.call('DEL', lockKey)
+      return {grant, dailyTotal, sessionTotal, lifetime, sync, status}
     end
 
-    local current = tonumber(redis.call('GET', daily) or '0')
-    if current >= cap then
-      redis.call('SETEX', idem, idemTtl, '1')
-      local lifetime = getLifetime()
-      release()
-      return {0, current, 2, lifetime}  -- capped
+    local sessionTotal = tonumber(redis.call('GET', sessionKey) or '0')
+    local lastSync = tonumber(redis.call('GET', sessionSyncKey) or '0')
+    local dailyTotal = tonumber(redis.call('GET', dailyKey) or '0')
+    local lifetime = tonumber(redis.call('GET', totalKey) or '0')
+
+    if lastSync > 0 and ts <= lastSync then
+      return finish(0, dailyTotal, sessionTotal, lifetime, lastSync, 2)
     end
 
-    local lastOk = tonumber(redis.call('GET', lastk) or '0')
-    if (endTs - lastOk) < chunk then
-      -- too soon since last accepted window end
-      local lifetime = getLifetime()
-      release()
-      return {0, current, 3, lifetime}
+    local remainingDaily = dailyCap - dailyTotal
+    if remainingDaily <= 0 then
+      return finish(0, dailyTotal, sessionTotal, lifetime, lastSync, 3)
     end
 
-    local remaining = cap - current
-    local grant = step
-    if grant > remaining then grant = remaining end
+    local remainingSession = sessionCap - sessionTotal
+    if remainingSession <= 0 then
+      return finish(0, dailyTotal, sessionTotal, lifetime, lastSync, 5)
+    end
 
-    local newtotal = tonumber(redis.call('INCRBY', daily, grant))
-    local lifetime = tonumber(redis.call('INCRBY', total, grant))
-    redis.call('SETEX', lastk, lastTtl, tostring(endTs))
-    redis.call('SETEX', idem, idemTtl, '1')
-    release()
-    return {grant, newtotal, 0, lifetime} -- ok
+    local grant = delta
+    local status = 0
+    if grant > remainingDaily then
+      grant = remainingDaily
+      status = 1
+    end
+    if grant > remainingSession then
+      grant = remainingSession
+      status = 4
+    end
+
+    if grant <= 0 then
+      if ts > lastSync then
+        lastSync = ts
+        redis.call('SET', sessionSyncKey, tostring(lastSync))
+        refreshSessionTtl()
+      end
+      return finish(0, dailyTotal, sessionTotal, lifetime, lastSync, status)
+    end
+
+    dailyTotal = tonumber(redis.call('INCRBY', dailyKey, grant))
+    sessionTotal = tonumber(redis.call('INCRBY', sessionKey, grant))
+    lifetime = tonumber(redis.call('INCRBY', totalKey, grant))
+    lastSync = ts
+    redis.call('SET', sessionSyncKey, tostring(lastSync))
+    refreshSessionTtl()
+    return finish(grant, dailyTotal, sessionTotal, lifetime, lastSync, status)
   `;
 
   const res = await store.eval(
     script,
-    [dailyKeyK, lastKeyK, idemK, lockKeyK, totalKeyK],
+    [sessionKeyK, sessionSyncKeyK, todayKey, totalKeyK, lockKeyK],
     [
       String(now),
-      String(chunkMs),
-      String(grantStep),
+      String(normalizedDelta),
       String(DAILY_CAP),
-      String(IDEM_TTL_SEC),
-      String(windowEnd),
-      String(LAST_OK_TTL_SEC),
+      String(Math.max(0, SESSION_CAP)),
+      String(ts),
       String(LOCK_TTL_MS),
+      String(SESSION_TTL_MS),
     ]
   );
 
   const granted = Number(res?.[0]) || 0;
-  const total   = Number(res?.[1]) || 0;
-  const status  = Number(res?.[2]) || 0; // 0=ok,1=idempotent,2=capped,3=too_soon,4=locked
-  const lifetime = Number(res?.[3]) || 0;
+  const totalToday = Number(res?.[1]) || 0;
+  const sessionTotal = Number(res?.[2]) || 0;
+  const totalLifetime = Number(res?.[3]) || 0;
+  const lastSync = Number(res?.[4]) || 0;
+  const status = Number(res?.[5]) || 0;
 
-  if (useScoreMode && reservedScoreDelta > 0 && reservedScoreKey) {
-    if (status !== 0 || granted <= 0) {
-      try {
-        const newMinuteRaw = await store.decrBy(reservedScoreKey, reservedScoreDelta);
-        const newMinute = Number(newMinuteRaw ?? "0");
-        scoreRateMinute = Number.isFinite(newMinute) ? newMinute : scoreRateMinute;
-      } catch (_) {
-        // ignore rollback failures
-      }
-      reservedScoreDelta = 0;
-      reservedScoreKey = null;
-    }
-  }
-
-  const payload = { ok: true, awarded: granted, totalToday: total, cap: DAILY_CAP, totalLifetime: lifetime };
-  if (DEBUG_ENABLED || XP_SCORE_DEBUG_TRACE) {
-    const debugMode = useScoreMode ? "score" : "time";
-    payload.debug = {
-      now,
-      chunkMs,
-      pointsPerPeriod,
-      grantStep,
-      minVisibility,
-      minInputs,
-      visibilitySeconds,
-      inputEvents,
-      status,
-      scoreDelta: debugScoreDelta,
-      mode: debugMode,
-    };
-    if (useScoreMode) {
-      payload.debug.scoreXp = scoreXp;
-      payload.debug.scoreDeltaRaw = debugScoreDelta;
-      payload.debug.scoreDeltaAccepted = scoreDeltaAccepted ?? null;
-      payload.debug.scoreRateMinute = scoreRateMinute;
-      payload.debug.scoreRateLimit = scoreRateLimit;
-      payload.debug.scoreBurstMax = scoreBurstMax;
-    }
-  }
-  const statusReasons = {
-    1: "idempotent",
-    2: "capped",
-    3: "too_soon",
-    4: "locked",
+  const payload = {
+    ok: true,
+    awarded: granted,
+    totalToday,
+    cap: DAILY_CAP,
+    capDelta: DELTA_CAP,
+    totalLifetime,
+    sessionTotal,
+    lastSync,
   };
 
-  if (status === 1) payload.idempotent = true;
-  if (status === 2) payload.capped = true;
-  if (status === 3) {
-    payload.tooSoon = true;
+  const statusReasons = {
+    1: "daily_cap_partial",
+    2: "stale",
+    3: "daily_cap",
+    4: "session_cap_partial",
+    5: "session_cap",
+    6: "locked",
+  };
+
+  if (status === 1 || status === 3) {
+    payload.capped = true;
+  }
+  if (status === 4 || status === 5) {
+    payload.sessionCapped = true;
+  }
+  if (status === 2) {
+    payload.stale = true;
     payload.awarded = 0;
   }
-  if (status === 4) payload.locked = true;
+  if (status === 6) {
+    payload.locked = true;
+    payload.awarded = 0;
+  }
 
-  if (status !== 0) {
-    const reason = statusReasons[status];
-    if (reason) {
-      payload.reason = reason;
-      if (payload.debug) payload.debug.reason = reason;
+  const reason = statusReasons[status];
+  if (reason) {
+    payload.reason = reason;
+  } else if (granted < normalizedDelta) {
+    payload.reason = normalizedDelta > 0 ? "partial" : undefined;
+  }
+
+  if (!payload.status) {
+    if (status === 0 && normalizedDelta === granted) {
+      payload.status = "ok";
+    } else if (status === 1 || status === 4 || (status === 0 && granted < normalizedDelta)) {
+      payload.status = "partial";
+    } else if (reason) {
+      payload.status = reason;
     }
+  }
+
+  if (DEBUG_ENABLED) {
+      payload.debug = {
+        delta: normalizedDelta,
+        ts,
+        now,
+        status,
+        requested: normalizedDelta,
+        sessionCap: SESSION_CAP,
+        dailyCap: DAILY_CAP,
+        lastSync,
+      };
+    if (reason) payload.debug.reason = reason;
   }
 
   return json(200, payload, origin);

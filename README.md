@@ -44,22 +44,23 @@ When embedding the bridge manually:
 
 The helper survives soft navigations—if you’re swapping views inside an SPA, call `GameXpBridge.start(newGameId)` for each routed surface; you do **not** need to re-inject the scripts.
 
-#### XP windows & idle guard
-- XP windows only send while the tab stays visible and the game loop is running.
-- Each window needs at least a second of visibility and a few input events before it counts.
-- Going idle or switching tabs resets the window timers so no XP is awarded for background play.
+#### XP delta guard
+- The XP bridge consolidates raw score updates and clamps deltas locally using `window.XP_DELTA_CAP_CLIENT` (default 300). The clamp can tighten at runtime when the server advertises a stricter ceiling.
+- Timestamps are monotonic per page so BFCache restores or retries never replay stale payloads. When a 422 `delta_out_of_range` arrives the bridge backs off briefly, fetches status, and adopts the advertised cap before retrying.
+- Metadata excludes core identifiers (`userId`, `sessionId`, `delta`, `ts`) automatically and still flows when `localStorage` or `crypto.randomUUID` are blocked (private browsing fallbacks).
+
+#### XPClient contract (important)
+- `XPClient.postWindow(payload)` returns the parsed success payload on **2xx** responses.
+- The helper **throws** an `Error` on non-2xx HTTP responses (for example `422 delta_out_of_range`, `500`) and on transport failures. The error message includes the server-provided `error` field when available.
+- Callers must wrap invocations in `try/catch` if they need to handle failures gracefully.
 
 #### Server gates & debug
-- `award-xp.mjs` enforces multiple gates before points are granted:
-  - **Visibility gate** – requests must report more than a second of visibility, and the minimum rises with the requested chunk (60% of the chunk length, clamped by `XP_MIN_VISIBILITY_S`).
-  - **Input gate** – each window must include several inputs (`ceil(chunkMs / 4000)`, clamped by the `XP_MIN_INPUTS` baseline and never below two in the early guard).
-  - **Timing gate** – windows shorter than the requested chunk (minus drift) or ending in the future fail with `error: "invalid_window"`.
-  - **Spacing gate** – the server remembers the last accepted window end and rejects requests that arrive before another full chunk has elapsed (`reason: "too_soon"`).
-- Set `XP_DEBUG=1` (environment variable for the Netlify function or via `npm run serve:xp`) to receive a `debug` object alongside successful responses.
-  - Status-only probes get `debug: { mode: "statusOnly" }`.
-  - For early idle rejections the debug payload includes `{ chunkMs, minInputsGate, visibilitySeconds, inputEvents, reason }`.
-  - For validated windows the payload includes `{ now, chunkMs, pointsPerPeriod, minVisibility, minInputs, visibilitySeconds, inputEvents, status, reason?, scoreDelta? }`.
-  - When `XP_DEBUG=1`, `scoreDelta` is echoed in **statusOnly**, **insufficient-activity**, and **validated** responses. `debug.reason` can surface `insufficient-activity`, `too_soon`, `invalid_window`, and the existing server reasons: `capped`, `locked`, `idempotent`.
+- `award-xp.mjs` validates the JSON body, tolerates legacy `scoreDelta` / `pointsPerPeriod` fields, and enforces `XP_DELTA_CAP` plus the daily (`XP_DAILY_CAP`) and per-session (`XP_SESSION_CAP`) ceilings.
+- Requests are rejected when the timestamp is stale (`status: "stale"`), another tab owns the lock (`status: "locked"`), metadata is malformed/oversized, or the optional activity guard blocks idle deltas.
+- Flip `XP_REQUIRE_ACTIVITY=1` to require input/visibility thresholds (`XP_MIN_ACTIVITY_EVENTS`, `XP_MIN_ACTIVITY_VIS_S`). When disabled the function skips those checks entirely.
+- Metadata must remain shallow: depth ≤ 3 and serialized size ≤ `XP_METADATA_MAX_BYTES` (default 2048 bytes). Larger payloads return `413 metadata_too_large` without mutating totals.
+- Session keys refresh their TTL (`XP_SESSION_TTL_SEC`, default 7 days) whenever deltas are accepted or a zero-delta heartbeat advances `lastSync`, keeping Redis tidy.
+- Enabling `XP_DEBUG=1` adds `{ delta, ts, lastSync, status, dailyCap, sessionCap }` to responses for diagnostics.
 
 ### Diagnostics logging
 - Unlock the client recorder for 24 hours by visiting any page with `?admin=1` or tapping the About page title five times within three seconds. The flag is stored in `localStorage["kcswh:admin"]` and expires automatically.
@@ -104,23 +105,27 @@ Operators rolling out the P1.1 XP bridge should stage the following environment 
 Document every toggle change in your incident timeline—the bridge guard expects the environment to match the table above when P1.1 resumes.
 
 ### Message contract: `postWindow`
-Client → server payload (subset; required unless marked optional):
-  - `gameId` (string)
-  - `windowStart` (ms since epoch)
-  - `windowEnd` (ms since epoch)
-  - `visibilitySeconds` (number)
-  - `inputEvents` (integer)
-  - `chunkMs` (integer)
-  - `pointsPerPeriod` (integer)
-  - `scoreDelta` (integer, optional) — **incremental** score earned since the last sent window. The client **accumulates** during play and **resets after a send**; omitted when 0.
+Client → server payload (minimal set, extras allowed):
+  - `userId` (string)
+  - `sessionId` (string)
+  - `delta` (integer ≥ 0) – requested XP increment for the active session
+  - `ts` (ms since epoch) – last activity timestamp used for ordering/lastSync persistence
+  - `metadata` (object, optional) – any additional context (gameId, instrumentation, etc.)
 
-Server behavior (P0.5):
-  - `scoreDelta` is **accepted and validated** but **ignored for awarding**.
-  - Validation clamps to `[0, SCORE_DELTA_CEILING]` (env; default `10000`). With `XP_DEBUG=1`, responses may include `debug.scoreDelta`.
-  - Backwards compatible: older clients simply omit `scoreDelta`; older servers ignore the unknown field.
+Server behavior:
+  - Requests with `delta` outside `0…XP_DELTA_CAP` (default 300) are rejected. Legacy clients can continue sending `scoreDelta` / `pointsPerPeriod` and the server will coerce them once per request.
+  - XP is granted directly from `delta` while enforcing per-session (`XP_SESSION_CAP`, default 300) and per-day (`XP_DAILY_CAP`, default 600) ceilings. Partial grants surface `reason: 'daily_cap_partial' | 'session_cap_partial'`.
+  - Responses remain backwards compatible: `{ ok, awarded, totalToday, cap, totalLifetime }` plus `sessionTotal`, `lastSync`, and `capDelta` so clients can rehydrate badge state and mirror the server cap.
+  - When `XP_DEBUG=1`, the payload includes `debug` with the requested delta, caps, lastSync, and status code.
+
+Response status values:
+  - `ok` – full grant
+  - `partial` – partial grant (daily or session)
+  - `daily_cap`, `daily_cap_partial`, `session_cap`, `session_cap_partial`, `stale`, `locked`, `inactive`
+  - `statusOnly` – status probes without awarding XP
 
 Client hooks:
-  - `window.XP.addScore(delta)` — accepts a number; internally rounded and accumulated (non-negative). Available since the P1.1 rollout and gated server-side by `XP_USE_SCORE`, but safe to call even when the toggle is off. The sample “Cats” game calls `addScore(1)` on each catch.
+  - `window.XP.addScore(delta)` — queues XP locally; the bridge now forwards consolidated deltas via the simplified payload above and lets the server enforce rate limits.
 
 ## Tests
 There are two layers of tests:
@@ -141,38 +146,19 @@ Run locally:
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `XP_DEBUG` | `0` | Include the `debug` object in responses (and echo `scoreDelta` when present; see also `XP_SCORE_DEBUG_TRACE`). |
-| `XP_SCORE_DELTA_CEILING` | `10000` | Maximum accepted `scoreDelta` per window. |
-| `XP_USE_SCORE` | `0` | Enable score-driven XP grants instead of time-driven awards. |
-| `XP_SCORE_TO_XP` | `1` | Conversion rate from accepted score delta to XP (per request). |
-| `XP_MAX_XP_PER_WINDOW` | `10` | Cap on XP converted from a single window when score mode is enabled. |
-| `XP_SCORE_RATE_LIMIT_PER_MIN` | `10000` (falls back to `XP_SCORE_DELTA_CEILING`) | Per-user rolling minute limit for accepted score deltas. |
-| `XP_SCORE_BURST_MAX` | `10000` (falls back to `XP_SCORE_RATE_LIMIT_PER_MIN`) | Maximum score delta accepted in a single window while respecting the rate limit. |
-| `XP_SCORE_MIN_EVENTS` | `4` | Minimum input events required before a score-bearing window is considered. |
-| `XP_SCORE_MIN_VIS_S` | `8` | Minimum foreground visibility (seconds) required for score-bearing windows. |
-| `XP_SCORE_DEBUG_TRACE` | `0` | Forces score-mode debug fields even when `XP_DEBUG` is unset. |
+| `XP_DEBUG` | `0` | Include the `debug` object in responses for easier staging diagnostics. |
+| `XP_DAILY_CAP` | `600` | Maximum XP a user can gain per UTC day. |
+| `XP_SESSION_CAP` | `300` | Maximum XP a single session can accumulate before further deltas are rejected. |
+| `XP_DELTA_CAP` | `300` | Largest delta accepted from the client in a single request. |
+| `XP_LOCK_TTL_MS` | `3000` | Duration of the per-session Redis lock that guards concurrent writes. |
+| `XP_SESSION_TTL_SEC` | `604800` | TTL (seconds) for session counters; refreshed on each award/heartbeat to curb key bloat. |
+| `XP_DRIFT_MS` | `30000` | Maximum allowed future drift for client `ts`. Requests beyond this tolerance are rejected. |
+| `XP_REQUIRE_ACTIVITY` | `0` | When `1`, enforce minimum input/visibility thresholds before awarding XP. |
+| `XP_MIN_ACTIVITY_EVENTS` | `4` | Minimum `metadata.inputEvents` required when `XP_REQUIRE_ACTIVITY=1`. |
+| `XP_MIN_ACTIVITY_VIS_S` | `8` | Minimum `metadata.visibilitySeconds` required when `XP_REQUIRE_ACTIVITY=1`. |
+| `XP_METADATA_MAX_BYTES` | `2048` | Maximum serialized metadata size; larger payloads return `413 metadata_too_large`. |
 
-#### Enabling score-driven awards
-Score-driven XP awards are currently experimental and disabled by default to support a safe rollout. Enable the mode by setting
-`XP_USE_SCORE=1`; when unset or false, the service falls back to time-based XP grants even if `scoreDelta` is provided.
-
-When score-driven awards are enabled:
-
-- `XP_USE_SCORE` (default `0`) toggles whether `scoreDelta` is considered when calculating XP.
-- `XP_SCORE_TO_XP` (default `1`) controls the conversion rate: XP gained per request is `scoreDelta * XP_SCORE_TO_XP`, rounded and
-  clamped. Negative values are ignored by the server-side guardrails.
-- `XP_MAX_XP_PER_WINDOW` (default `10`) caps the XP converted from a single window regardless of the incoming score.
-
-If a window is submitted without a `scoreDelta` value (including zero) or the feature is disabled, XP awards continue to use the
-existing time-based path.
-
-#### Score mode safeguards
-
-Score-driven windows are additionally throttled and validated:
-
-- **Rate limit & burst control** – each account has a rolling per-minute allowance (`XP_SCORE_RATE_LIMIT_PER_MIN`) and a per-window burst ceiling (`XP_SCORE_BURST_MAX`). Requests that exceed either bucket are rejected before any XP is granted.
-- **Stricter minimum activity** – score windows must meet higher baselines before they are accepted: at least `XP_SCORE_MIN_EVENTS` interactions and `XP_SCORE_MIN_VIS_S` seconds of focused play.
-- **Expanded debug fields** – when `XP_DEBUG` or `XP_SCORE_DEBUG_TRACE` is enabled, responses include score-mode diagnostics such as the active rate limit, burst cap, visibility, and input thresholds to help tune client behavior.
+Set these variables in tandem so the client and server agree on throughput; the server enforces the cap and surfaces `capDelta` so clients can mirror it without redeploying.
 
 ## CI Status
 - GitHub Actions workflow: tests

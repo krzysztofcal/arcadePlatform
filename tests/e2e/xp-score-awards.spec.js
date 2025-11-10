@@ -95,12 +95,19 @@ test.describe('XP score awards handler', () => {
     expect(res.statusCode).toBe(200);
     const payload = JSON.parse(res.body);
     expect(payload.debug).toBeTruthy();
-    expect(payload.debug.mode).toBe('time');
-    expect(payload.debug.scoreDelta).toBe(null);
-    expect('scoreXp' in payload.debug).toBe(false);
+    // Delta-based debug payload mirrors the server contract.
+    expect(typeof payload.debug.delta).toBe('number');
+    expect(typeof payload.debug.ts).toBe('number');
+    expect(typeof payload.debug.now).toBe('number');
+    expect(payload.debug.sessionCap).toBeGreaterThan(0);
+    expect(payload.debug.dailyCap).toBeGreaterThan(0);
+    expect(payload.awarded).toBeGreaterThan(0);
+    if (payload.reason) {
+      expect(typeof payload.reason).toBe('string');
+    }
   });
 
-  test('provides debug payload in score mode with score deltas', async () => {
+  test('provides delta-based debug payload with score input', async () => {
     const handler = await loadAwardHandler({
       XP_DEBUG: '1',
       XP_USE_SCORE: '1',
@@ -119,9 +126,14 @@ test.describe('XP score awards handler', () => {
     expect(res.statusCode).toBe(200);
     const payload = JSON.parse(res.body);
     expect(payload.debug).toBeTruthy();
-    expect(payload.debug.mode).toBe('score');
-    expect(payload.debug.scoreDelta).toBe(2);
-    expect(payload.debug.scoreXp).toBe(20);
-    expect(payload.debug.grantStep).toBe(20);
+    expect(typeof payload.debug.delta).toBe('number');
+    expect(payload.awarded).toBe(payload.debug.delta);
+    expect(typeof payload.debug.ts).toBe('number');
+    expect(typeof payload.debug.now).toBe('number');
+    expect(payload.debug.sessionCap).toBeGreaterThan(0);
+    expect(payload.debug.dailyCap).toBeGreaterThan(0);
+    if (payload.reason) {
+      expect(typeof payload.reason).toBe('string');
+    }
   });
 });
