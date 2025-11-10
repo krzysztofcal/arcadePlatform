@@ -10,6 +10,7 @@
   const overlayBridgeState = {
     wired: false,
     lastBoostKey: null,
+    lastTotalXp: null,
   };
 
   function parseNumber(value, fallback) {
@@ -149,13 +150,13 @@
     }
   }
 
-  function buildTickDetail(awarded, runtime) {
-    const snapshot = getSnapshot();
+  function buildTickDetail(awarded, runtime, snapshot) {
+    const snap = typeof snapshot === "undefined" ? getSnapshot() : snapshot;
     const combo = normalizeCombo(runtime);
     const boostInfo = readBoostFromRuntime(runtime);
     const boost = boostInfo ? boostInfo.multiplier : 1;
-    const progress = snapshot && typeof snapshot.progress === "number"
-      ? clamp01(snapshot.progress)
+    const progress = snap && typeof snap.progress === "number"
+      ? clamp01(snap.progress)
       : 0;
     const detail = {
       awarded: Math.max(0, Math.round(awarded)),
@@ -164,8 +165,8 @@
       progressToNext: progress,
       ts: Date.now(),
     };
-    if (snapshot && typeof snapshot.totalXp === "number") {
-      detail.total = snapshot.totalXp;
+    if (snap && typeof snap.totalXp === "number") {
+      detail.total = snap.totalXp;
     }
     return detail;
   }
@@ -186,12 +187,24 @@
     const key = `${Math.max(1, multiplier)}:${Number.isFinite(expiresKey) ? Math.floor(expiresKey) : ""}`;
     if (overlayBridgeState.lastBoostKey === key) return;
     overlayBridgeState.lastBoostKey = key;
-    safeDispatch(BOOST_EVENT, {
-      multiplier: Math.max(1, multiplier),
+    const normalizedMultiplier = Math.max(1, multiplier);
+    const payload = {
+      multiplier: normalizedMultiplier,
       secondsLeft: normalizedSeconds,
-    });
+    };
+    if (normalizedSeconds > 0) {
+      const ttlMs = normalizedSeconds * 1000;
+      payload.ttlMs = ttlMs;
+      payload.durationMs = ttlMs;
+    }
+    if (Number.isFinite(expiresKey)) {
+      payload.expiresAt = Math.floor(expiresKey);
+    }
+    safeDispatch(BOOST_EVENT, payload);
     if (window && window.XP_DIAG) {
-      try { console.log("overlay:boost_start", { multiplier: Math.max(1, multiplier), secondsLeft: normalizedSeconds }); } catch (_) {}
+      try {
+        console.log("overlay:boost_start", { multiplier: normalizedMultiplier, secondsLeft: normalizedSeconds });
+      } catch (_) {}
     }
   }
 
@@ -234,15 +247,30 @@
   }
 
   function handleXpUpdated(event) {
-    const awarded = event && event.detail && typeof event.detail.awarded !== "undefined"
+    let awarded = event && event.detail && typeof event.detail.awarded !== "undefined"
       ? Number(event.detail.awarded)
       : NaN;
-    if (!Number.isFinite(awarded) || awarded < 0) return;
     const runtime = readRuntimeState();
-    const detail = buildTickDetail(awarded, runtime);
+    const snapshot = getSnapshot();
+    const totalXp = snapshot && typeof snapshot.totalXp === "number" ? snapshot.totalXp : null;
+    if ((!Number.isFinite(awarded) || awarded < 0) && Number.isFinite(totalXp)) {
+      const lastTotal = Number(overlayBridgeState.lastTotalXp);
+      const delta = Number.isFinite(lastTotal) ? totalXp - lastTotal : NaN;
+      if (Number.isFinite(delta) && delta > 0) {
+        awarded = delta;
+      }
+    }
+    if (!Number.isFinite(awarded) || awarded < 0) {
+      overlayBridgeState.lastTotalXp = Number.isFinite(totalXp) ? totalXp : overlayBridgeState.lastTotalXp;
+      return;
+    }
+    const detail = buildTickDetail(awarded, runtime, snapshot);
     safeDispatch(TICK_EVENT, detail);
     if (window && window.XP_DIAG) {
       try { console.log("overlay:tick", detail); } catch (_) {}
+    }
+    if (Number.isFinite(totalXp)) {
+      overlayBridgeState.lastTotalXp = totalXp;
     }
     const boostFromRuntime = readBoostFromRuntime(runtime);
     if (boostFromRuntime) {
