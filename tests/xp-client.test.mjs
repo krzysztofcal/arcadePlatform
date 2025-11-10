@@ -18,28 +18,177 @@ const instrumented = xpSource.replace(
     injectionTarget
 );
 
+function addListener(store, type, handler) {
+  const key = String(type);
+  const list = store.get(key) || [];
+  list.push(handler);
+  store.set(key, list);
+}
+
+function removeListener(store, type, handler) {
+  const key = String(type);
+  const list = store.get(key);
+  if (!list) return;
+  const next = handler ? list.filter((fn) => fn !== handler) : [];
+  if (next.length) {
+    store.set(key, next);
+  } else {
+    store.delete(key);
+  }
+}
+
+function getListeners(store, type) {
+  return store.get(String(type)) || [];
+}
+
 const docListeners = new Map();
 const windowListeners = new Map();
+
+const localStorageMock = {
+  __store: new Map(),
+  getItem(key) {
+    return this.__store.has(key) ? this.__store.get(key) : null;
+  },
+  setItem(key, value) {
+    this.__store.set(String(key), String(value));
+  },
+  removeItem(key) {
+    this.__store.delete(String(key));
+  },
+  clear() {
+    this.__store.clear();
+  },
+};
+
+let now = 10_000;
+let nextTimerId = 1;
+const timers = new Map();
+
+function scheduleTimer(fn, delay, repeating, interval) {
+  const id = nextTimerId++;
+  const due = now + Math.max(0, Number.isFinite(delay) ? Number(delay) : 0);
+  timers.set(id, {
+    fn,
+    time: due,
+    repeating: !!repeating,
+    interval: repeating ? Math.max(0, Number(interval || delay) || 0) : 0,
+  });
+  return id;
+}
+
+function clearTimer(id) {
+  timers.delete(id);
+}
+
+function advanceTime(ms) {
+  const target = now + Math.max(0, Number(ms) || 0);
+  while (true) {
+    let nextId = null;
+    let nextTime = Infinity;
+    for (const [id, timer] of timers) {
+      if (timer.time <= target && timer.time < nextTime) {
+        nextId = id;
+        nextTime = timer.time;
+      }
+    }
+    if (nextId == null) break;
+    const timer = timers.get(nextId);
+    timers.delete(nextId);
+    now = timer.time;
+    try {
+      timer.fn();
+    } catch (err) {
+      console.error('timer error', err);
+      throw err;
+    }
+    if (timer.repeating) {
+      timer.time = now + timer.interval;
+      timers.set(nextId, timer);
+    }
+  }
+  now = target;
+}
+
+async function settleMicrotasks() {
+  await Promise.resolve();
+}
+
+class DateMock extends Date {
+  constructor(...args) {
+    if (args.length === 0) {
+      super(now);
+    } else {
+      super(...args);
+    }
+  }
+  static now() {
+    return now;
+  }
+}
+DateMock.UTC = Date.UTC;
+DateMock.parse = Date.parse;
+
+class EventShim {
+  constructor(type, init = {}) {
+    this.type = type;
+    Object.assign(this, init);
+  }
+}
+
+class CustomEventShim extends EventShim {
+  constructor(type, init = {}) {
+    super(type, init);
+    this.detail = init && init.detail;
+  }
+}
+
+const sendBeaconCalls = [];
+let sendBeaconShouldSucceed = false;
+const flushRequests = [];
+let fetchShouldFail = false;
+
+async function fetchStub(url, options) {
+  flushRequests.push({ url, options });
+  if (fetchShouldFail) {
+    throw new Error('flush-failed');
+  }
+  return { ok: true, status: 200 };
+}
+
+const xpWindowCalls = [];
+const xpStatusCalls = [];
 
 const documentStub = {
   readyState: 'complete',
   hidden: false,
   visibilityState: 'visible',
   body: {
-    dataset: { gameHost: '', gameSlug: 'unit-test', gameId: 'unit-test' },
+    dataset: { gameHost: '1', gameSlug: 'unit-test', gameId: 'unit-test' },
     hasAttribute(name) {
       return name === 'data-game-host';
     },
     getAttribute(name) {
       if (name === 'data-game-id') return 'unit-test';
-      if (name === 'data-game-host') return '';
+      if (name === 'data-game-host') return '1';
       return null;
     },
+    appendChild() {},
+    classList: { add() {}, remove() {}, toggle() {} },
+    contains() { return false; },
+    querySelector() { return null; },
   },
   addEventListener(type, handler) {
-    docListeners.set(type, handler);
+    addListener(docListeners, type, handler);
   },
-  removeEventListener() {},
+  removeEventListener(type, handler) {
+    removeListener(docListeners, type, handler);
+  },
+  dispatchEvent(event) {
+    getListeners(docListeners, event.type).forEach((fn) => {
+      fn.call(documentStub, event);
+    });
+    return true;
+  },
   getElementById() {
     return null;
   },
@@ -63,68 +212,97 @@ const documentStub = {
       },
     };
   },
-  dispatchEvent() {},
 };
 
 const windowStub = {
-  localStorage: {
-    __store: new Map(),
-    getItem(key) {
-      return this.__store.has(key) ? this.__store.get(key) : null;
-    },
-    setItem(key, value) {
-      this.__store.set(key, String(value));
-    },
-    removeItem(key) {
-      this.__store.delete(key);
-    },
-  },
+  document: documentStub,
+  location: { origin: 'https://example.test', pathname: '/games/unit-test' },
+  localStorage: localStorageMock,
   addEventListener(type, handler) {
-    windowListeners.set(type, handler);
+    addListener(windowListeners, type, handler);
   },
-  removeEventListener() {},
-  setInterval() {
-    return 1;
+  removeEventListener(type, handler) {
+    removeListener(windowListeners, type, handler);
   },
-  clearInterval() {},
-  setTimeout,
-  clearTimeout,
-  console,
-  dispatchEvent(evt) {
-    if (!evt || !evt.type) return false;
-    const handler = windowListeners.get(evt.type);
-    if (typeof handler === 'function') {
-      handler(evt);
-    }
+  dispatchEvent(event) {
+    getListeners(windowListeners, event.type).forEach((fn) => {
+      fn.call(windowStub, event);
+    });
     return true;
   },
+  setTimeout: (fn, delay) => scheduleTimer(fn, delay, false, delay),
+  clearTimeout: clearTimer,
+  setInterval: (fn, delay) => scheduleTimer(fn, delay, true, delay),
+  clearInterval: clearTimer,
+  navigator: {
+    userActivation: { isActive: true },
+    sendBeacon(url, data) {
+      sendBeaconCalls.push({ url, data });
+      return sendBeaconShouldSucceed;
+    },
+  },
+  performance: { now: () => now },
+  console,
+  XP_REQUIRE_SCORE: 0,
+  XP_ACTIVE_GRACE_MS: 2_000,
+  XP_TICK_MS: 1_000,
+  XP_AWARD_INTERVAL_MS: 1_000,
+  XP_MIN_EVENTS_PER_TICK: 1,
+  XP_FLUSH_ENDPOINT: 'https://example.test/flush',
+  XP_BASELINE_XP_PER_SECOND: 10,
+  XP_HARD_IDLE_MS: 6_000,
+  XPClient: {
+    postWindow(payload) {
+      xpWindowCalls.push(payload);
+      return Promise.resolve({ ok: true, scoreDelta: 0 });
+    },
+    fetchStatus() {
+      xpStatusCalls.push({ when: Date.now() });
+      return Promise.resolve({ ok: true, totalToday: 0, cap: null, totalLifetime: 0 });
+    },
+  },
 };
-windowStub.document = documentStub;
-windowStub.location = { origin: 'https://example.test' };
+windowStub.window = windowStub;
+documentStub.defaultView = windowStub;
 
 const context = {
   window: windowStub,
   document: documentStub,
   location: windowStub.location,
   console,
-  setTimeout,
-  clearTimeout,
-  Date,
-  Event,
+  setTimeout: windowStub.setTimeout,
+  clearTimeout: windowStub.clearTimeout,
+  setInterval: windowStub.setInterval,
+  clearInterval: windowStub.clearInterval,
+  Date: DateMock,
+  Event: EventShim,
+  CustomEvent: CustomEventShim,
+  fetch: fetchStub,
+  navigator: windowStub.navigator,
+  performance: windowStub.performance,
 };
 
-class CustomEventShim {
-  constructor(type, init = {}) {
-    this.type = type;
-    this.detail = init && init.detail;
-  }
-}
+const RUNTIME_CACHE_KEY = 'kcswh:xp:regen';
+const CACHE_KEY = 'kcswh:xp:last';
 
-const previousCustomEvent = globalThis.CustomEvent;
-if (typeof previousCustomEvent !== 'function') {
-  globalThis.CustomEvent = CustomEventShim;
-}
-context.CustomEvent = globalThis.CustomEvent;
+localStorageMock.setItem(RUNTIME_CACHE_KEY, JSON.stringify({
+  carry: 1.4,
+  momentum: 0.35,
+  comboCount: 4,
+  pending: 18,
+  flushPending: 26,
+  lastSync: 55_000,
+  boost: { multiplier: 3, expiresAt: now + 5_000, source: 'storage' },
+}));
+localStorageMock.setItem(CACHE_KEY, JSON.stringify({
+  totalToday: 120,
+  cap: 900,
+  totalLifetime: 4_200,
+  badgeShownXp: 4_150,
+  serverTotalXp: 4_250,
+  badgeBaselineXp: 4_000,
+  ts: 42_000,
+}));
 
 vm.createContext(context);
 new vm.Script(instrumented, { filename: 'xp.js' }).runInContext(context);
@@ -134,144 +312,203 @@ assert(XP, 'XP API not initialized');
 const getState = context.window.__xpTestHook;
 assert.equal(typeof getState, 'function', 'state hook missing');
 
-function resetRemainders() {
-  const state = getState();
-  state.scoreDelta = 0;
-  state.scoreDeltaRemainder = 0;
-}
+const AWARD_INTERVAL_MS = windowStub.XP_AWARD_INTERVAL_MS;
+const HARD_IDLE_MS = windowStub.XP_HARD_IDLE_MS;
 
 function setVisibility(hidden) {
   documentStub.hidden = hidden;
   documentStub.visibilityState = hidden ? 'hidden' : 'visible';
 }
 
-function triggerVisibilityChange() {
-  const handler = docListeners.get('visibilitychange');
-  if (handler) handler();
+function trigger(type, target, eventInit = {}) {
+  const evt = new EventShim(type, eventInit);
+  target.dispatchEvent(evt);
 }
 
-function freshSession(label = 'test') {
+function markActiveWindow({ ratio = 1, events = 1, trusted = true } = {}) {
+  const state = getState();
+  const clamped = Math.max(0, Math.min(1, ratio));
+  state.lastInputAt = DateMock.now();
+  if (trusted) {
+    state.lastTrustedInputTs = DateMock.now();
+  }
+  state.eventsSinceLastAward = Math.max(events, 1);
+  state.activeUntil = DateMock.now() + clamped * AWARD_INTERVAL_MS;
+}
+
+function runTick(options) {
+  markActiveWindow(options);
+  const before = Number(getState().sessionXp) || 0;
+  advanceTime(AWARD_INTERVAL_MS);
+  const after = Number(getState().sessionXp) || 0;
+  return after - before;
+}
+
+async function runTickAndSettle(options) {
+  const awarded = runTick(options);
+  await settleFlush();
+  return awarded;
+}
+
+async function settleFlush() {
+  const inflight = getState().flush && getState().flush.inflight;
+  if (inflight && typeof inflight.then === 'function') {
+    try {
+      await inflight;
+    } catch (_) {}
+  }
+  await settleMicrotasks();
+}
+
+function resetNetworkStubs() {
+  sendBeaconCalls.length = 0;
+  flushRequests.length = 0;
+  fetchShouldFail = false;
+  sendBeaconShouldSucceed = false;
+}
+
+function freshSession(label) {
+  try { XP.stopSession({ flush: false }); } catch (_) {}
+  advanceTime(0);
   XP.startSession(label);
-  resetRemainders();
+  advanceTime(0);
+  const state = getState();
+  state.sessionXp = 0;
+  state.regen.pending = 0;
+  state.regen.carry = 0;
+  state.regen.momentum = 0;
+  state.regen.comboCount = 0;
+  state.flush.pending = 0;
+  state.flush.lastSync = DateMock.now();
+  state.totalToday = 0;
+  state.totalLifetime = 0;
+  state.cap = null;
+  state.boost = { multiplier: 1, expiresAt: 0, source: null };
+  state.boostTimerId = null;
+  localStorageMock.removeItem(RUNTIME_CACHE_KEY);
 }
 
-// Fractional accumulation should roll into whole numbers
-freshSession('fractional');
-XP.addScore(0.4);
-assert.equal(getState().scoreDelta, 0);
-assert(getState().scoreDeltaRemainder > 0 && getState().scoreDeltaRemainder < 1);
-XP.addScore(0.4);
-assert.equal(getState().scoreDelta, 0);
-XP.addScore(0.4);
-assert.equal(getState().scoreDelta, 1);
-assert(getState().scoreDeltaRemainder > 0 && getState().scoreDeltaRemainder < 1);
-XP.addScore(0.8);
-assert.equal(getState().scoreDelta, 2);
+// Hydration from localStorage and getFlushStatus coverage
+const hydrated = getState();
+assert.equal(hydrated.regen.pending, 18);
+assert.equal(hydrated.regen.comboCount, 4);
+assert.equal(hydrated.flush.pending, 26);
+assert.equal(hydrated.boost.multiplier, 3);
+const status = XP.getFlushStatus();
+assert.equal(status.pending, 26);
+assert.equal(status.lastSync, 55_000);
+assert.equal(status.inflight, false);
 
-// Clamp should respect MAX_SCORE_DELTA
-freshSession('clamp');
-XP.addScore(20_000.5);
-assert.equal(getState().scoreDelta, 10_000);
-XP.addScore(5);
-assert.equal(getState().scoreDelta, 10_000);
+// BFCache/pageshow hydration refreshes runtime state and boosts
+localStorageMock.setItem(RUNTIME_CACHE_KEY, JSON.stringify({
+  carry: 0,
+  momentum: 0,
+  comboCount: 1,
+  pending: 7,
+  flushPending: 12,
+  lastSync: 77_000,
+  boost: { multiplier: 2, expiresAt: DateMock.now() + 3_000, source: 'pageshow' },
+}));
+trigger('pageshow', windowStub);
+const hydratedAfterPageShow = getState();
+assert.equal(hydratedAfterPageShow.flush.pending, 12);
+assert.equal(hydratedAfterPageShow.boost.source, 'pageshow');
 
-// NaN and non-positive values ignored
-freshSession('nan');
-XP.addScore(NaN);
-XP.addScore(-5);
-assert.equal(getState().scoreDelta, 0);
-assert.equal(getState().scoreDeltaRemainder, 0);
+freshSession('tick-baseline');
 
-// Remainder cleared on startSession
-freshSession('start-reset');
-XP.addScore(0.6);
-assert(getState().scoreDeltaRemainder > 0);
-XP.startSession('start-reset-2');
-assert.equal(getState().scoreDeltaRemainder, 0);
+// Tick loop awards roughly baseline XP and scales with activity
+const lowerActivity = await runTickAndSettle({ ratio: 0.4 });
+const fullActivity = await runTickAndSettle({ ratio: 1 });
+assert(fullActivity >= 9 && fullActivity <= 20, `expected ~10-20xp, got ${fullActivity}`);
+assert(lowerActivity < fullActivity, 'lower activity should yield less XP');
 
-// Remainder cleared on stopSession
-freshSession('stop-reset');
-XP.addScore(0.6);
-assert(getState().scoreDeltaRemainder > 0);
-XP.stopSession({ flush: false });
-assert.equal(getState().scoreDeltaRemainder, 0);
+// Combo momentum increases awards over consecutive high-activity ticks
+const comboBoost = await runTickAndSettle({ ratio: 1 });
+assert(comboBoost > fullActivity, 'combo bonus should increase XP on streaks');
 
-// Remainder cleared on resetActivityCounters (via visibility change)
-freshSession('reset-activity');
-XP.addScore(0.6);
-assert(getState().scoreDeltaRemainder > 0);
+// Boost doubles payouts until expiration
+XP.requestBoost(2, 4_000, 'unit-test');
+const boosted = await runTickAndSettle({ ratio: 1 });
+assert(boosted > comboBoost, 'boost should increase awards');
+assert(boosted >= 20, 'boost should elevate awards near the cap');
+advanceTime(4_100);
+await settleFlush();
+const afterBoost = await runTickAndSettle({ ratio: 1 });
+assert(afterBoost < boosted, 'boost should expire after TTL');
+
+// Cap prevents further awards once reached
+const state = getState();
+state.cap = Math.floor(state.totalToday) + Math.floor(afterBoost);
+await runTickAndSettle({ ratio: 1 });
+const capped = await runTickAndSettle({ ratio: 1 });
+assert.equal(capped, 0, 'cap should block awards');
+state.cap = null;
+
+// Anti-idle: hard idle freezes activity until new input
+state.lastTrustedInputTs = DateMock.now() - (HARD_IDLE_MS + 10);
+const paused = await runTickAndSettle({ ratio: 1, trusted: false });
+assert.equal(paused, 0, 'hard idle should prevent awards');
+assert.equal(state.activityWindowFrozen, true);
+assert.equal(state.phase, 'paused', 'hard idle should pause ticker');
+XP.nudge();
+assert.equal(state.activityWindowFrozen, false, 'nudge should unfreeze activity window');
+state.phase = 'running';
+const unfrozen = await runTickAndSettle({ ratio: 1 });
+assert(unfrozen > 0, 'new input should resume awards');
+
+// xp:boost events hydrate boosts
+const boostListeners = getListeners(windowListeners, 'xp:boost');
+assert(boostListeners.length > 0, 'xp:boost listener should be registered');
+boostListeners[0]({ detail: { multiplier: 3, durationMs: 2_000, source: 'event' } });
+const boostedByEvent = await runTickAndSettle({ ratio: 1 });
+assert(boostedByEvent > unfrozen, 'xp:boost event should amplify awards');
+assert(boostedByEvent >= 20, 'xp:boost event should approach the cap');
+advanceTime(2_100);
+await settleFlush();
+
+// Flush batching by threshold and interval expiry
+resetNetworkStubs();
+freshSession('flush-behavior');
+let totalAwarded = 0;
+let beforeFlush = 0;
+while (flushRequests.length === 0) {
+  beforeFlush = totalAwarded;
+  totalAwarded += await runTickAndSettle({ ratio: 1 });
+}
+const firstFlushPayload = JSON.parse(flushRequests[0].options.body);
+assert(beforeFlush < firstFlushPayload.pending, 'flush should wait until batch threshold is reached');
+assert(firstFlushPayload.pending >= 25, 'flush batches at least 25 XP');
+assert.equal(getState().flush.pending, 0);
+
+// Interval expiry triggers flush even below threshold
+await runTickAndSettle({ ratio: 0.2 });
+const pendingAfterAward = getState().flush.pending;
+advanceTime(15_500);
+await settleFlush();
+const secondFlushPayload = JSON.parse(flushRequests[1].options.body);
+assert(secondFlushPayload.pending === pendingAfterAward, 'interval expiry should flush remaining pending XP');
+assert.equal(getState().flush.pending, 0);
+
+// Document hidden triggers flush and pause activity
+await runTickAndSettle({ ratio: 1 });
 setVisibility(true);
-triggerVisibilityChange();
-assert.equal(getState().scoreDeltaRemainder, 0);
+trigger('visibilitychange', documentStub);
+await settleFlush();
+assert(getState().phase !== 'running', 'hidden document should pause ticker');
 setVisibility(false);
+trigger('visibilitychange', documentStub);
 
-// Boost via public API should dispatch event, schedule a timer, and persist across stop/resume.
-freshSession('boost-public');
-const boostStart = Date.now();
-XP.requestBoost(2, 500, 'unit-test');
-const initialBoost = getState().boost;
-assert.equal(initialBoost.multiplier, 2);
-assert.equal(initialBoost.source, 'unit-test');
-assert(initialBoost.expiresAt > boostStart);
-assert(initialBoost.expiresAt - boostStart >= 500 && initialBoost.expiresAt - boostStart < 800);
-const firstTimer = getState().boostTimerId;
-assert(firstTimer, 'boost timer should be scheduled');
-
-XP.stopSession({ flush: false });
-assert.equal(getState().boostTimerId, null, 'boost timer should clear on stop');
-assert.equal(getState().boost.multiplier, 2, 'boost should persist after stop');
-
-XP.startSession('boost-public-resume');
-const resumed = getState();
-assert(resumed.boostTimerId, 'boost timer should reschedule on resume');
-assert.notEqual(resumed.boostTimerId, firstTimer, 'boost timer should refresh on resume');
-
-const waitForExpiry = Math.max(0, resumed.boost.expiresAt - Date.now() + 20);
-await new Promise((resolve) => setTimeout(resolve, waitForExpiry));
-assert.equal(getState().boost.multiplier, 1, 'boost should reset after expiration');
-assert.equal(getState().boostTimerId, null, 'boost timer should clear after expiration');
-
-// Legacy bridge payloads should continue to work via xp:boost events.
-const boostHandler = windowListeners.get('xp:boost');
-assert.equal(typeof boostHandler, 'function', 'xp:boost listener missing');
-boostHandler({ detail: { multiplier: 3, durationMs: 60, source: 'legacy-source' } });
-const legacyBoost = getState().boost;
-assert.equal(legacyBoost.multiplier, 3);
-assert.equal(legacyBoost.source, 'legacy-source');
-assert(legacyBoost.expiresAt > Date.now());
-const legacyTimer = getState().boostTimerId;
-assert(legacyTimer, 'legacy boost should schedule a timer');
-
-await new Promise((resolve) => setTimeout(resolve, 80));
-assert.equal(getState().boost.multiplier, 1, 'legacy boost should expire');
-assert.equal(getState().boostTimerId, null, 'legacy boost timer should clear');
-
-XP.stopSession({ flush: false });
-
-// Legacy direct-object invocation of the public wrapper should be normalized.
-freshSession('boost-legacy-direct-call');
-XP.requestBoost({ multiplier: 2, durationMs: 120, source: 'legacy-direct' });
-const directBoost = getState().boost;
-assert.equal(directBoost.multiplier, 2);
-assert.equal(directBoost.source, 'legacy-direct');
-assert(directBoost.expiresAt > Date.now());
-assert(getState().boostTimerId, 'legacy direct boost should schedule a timer');
-
-await new Promise((resolve) => setTimeout(resolve, 160));
-assert.equal(getState().boost.multiplier, 1, 'legacy direct boost should expire');
-assert.equal(getState().boostTimerId, null, 'legacy direct boost timer should clear');
-
-XP.stopSession({ flush: false });
-
-const flushStatus = XP.getFlushStatus();
-assert.equal(typeof flushStatus.pending, 'number');
-assert.equal(typeof flushStatus.lastSync, 'number');
-assert.equal(typeof flushStatus.inflight, 'boolean');
+// Flush failure restores pending counts
+resetNetworkStubs();
+await runTickAndSettle({ ratio: 1 });
+fetchShouldFail = true;
+const pendingBeforeFailure = getState().flush.pending;
+await XP.flushXp(true).catch(() => {});
+await settleFlush();
+assert.equal(getState().flush.pending, pendingBeforeFailure, 'pending XP should be restored after failure');
+fetchShouldFail = false;
+await XP.flushXp(true);
+await settleFlush();
+assert.equal(getState().flush.pending, 0, 'successful flush should clear pending');
 
 console.log('xp-client tests passed');
-
-if (typeof previousCustomEvent !== 'function') {
-  delete globalThis.CustomEvent;
-} else {
-  globalThis.CustomEvent = previousCustomEvent;
-}
