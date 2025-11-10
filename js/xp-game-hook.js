@@ -2,6 +2,15 @@
   if (typeof window === "undefined") return;
 
   const DEFAULT_SCORE_DELTA_CEILING = 10_000;
+  const RUNTIME_CACHE_KEY = "kcswh:xp:regen";
+  const TICK_EVENT = "xp:tick";
+  const BOOST_EVENT = "xp:boost";
+  const UPDATED_EVENT = "xp:updated";
+
+  const overlayBridgeState = {
+    wired: false,
+    lastBoostKey: null,
+  };
 
   function parseNumber(value, fallback) {
     if (value == null) return fallback;
@@ -60,12 +69,208 @@
     autoBootstrapped = true;
     ensureAutoListeners();
     ensureDomReadyKickoff();
+    ensureOverlayBridge();
   }
 
   function ensureAutoBootGuard() {
     if (autoBootGuarded) return;
     autoBootGuarded = true;
     ensureAutoBootstrapped();
+  }
+
+  function safeDispatch(eventName, detail) {
+    if (!window || typeof window.dispatchEvent !== "function") return;
+    const payload = detail && typeof detail === "object" ? { ...detail } : {};
+    try {
+      window.dispatchEvent(new CustomEvent(eventName, { detail: payload }));
+    } catch (_) {
+      try {
+        if (typeof document !== "undefined" && document.createEvent) {
+          const legacyEvt = document.createEvent("CustomEvent");
+          legacyEvt.initCustomEvent(eventName, false, false, payload);
+          window.dispatchEvent(legacyEvt);
+        }
+      } catch (_) {}
+    }
+  }
+
+  function clamp01(value) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return 0;
+    if (numeric <= 0) return 0;
+    if (numeric >= 1) return 1;
+    return numeric;
+  }
+
+  function readRuntimeState() {
+    if (!window || !window.localStorage) return null;
+    try {
+      const raw = window.localStorage.getItem(RUNTIME_CACHE_KEY);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== "object") return null;
+      return parsed;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function normalizeCombo(runtime) {
+    const combo = runtime && Number(runtime.comboCount);
+    if (!Number.isFinite(combo)) return 1;
+    const rounded = Math.floor(combo);
+    return rounded >= 1 ? rounded : 1;
+  }
+
+  function readBoostFromRuntime(runtime) {
+    if (!runtime || typeof runtime !== "object") return null;
+    const raw = runtime.boost;
+    if (!raw || typeof raw !== "object") return null;
+    const multiplier = parseNumber(raw.multiplier, NaN);
+    if (!Number.isFinite(multiplier) || multiplier <= 1) return null;
+    const expiresAt = parseNumber(raw.expiresAt, NaN);
+    const now = Date.now();
+    const secondsLeft = Number.isFinite(expiresAt)
+      ? Math.max(0, Math.round((expiresAt - now) / 1000))
+      : 0;
+    return {
+      multiplier: Math.max(1, multiplier),
+      expiresAt: Number.isFinite(expiresAt) ? expiresAt : 0,
+      secondsLeft,
+    };
+  }
+
+  function getSnapshot() {
+    if (!window || !window.XP || typeof window.XP.getSnapshot !== "function") return null;
+    try {
+      return window.XP.getSnapshot();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function buildTickDetail(awarded, runtime) {
+    const snapshot = getSnapshot();
+    const combo = normalizeCombo(runtime);
+    const boostInfo = readBoostFromRuntime(runtime);
+    const boost = boostInfo ? boostInfo.multiplier : 1;
+    const progress = snapshot && typeof snapshot.progress === "number"
+      ? clamp01(snapshot.progress)
+      : 0;
+    const detail = {
+      awarded: Math.max(0, Math.round(awarded)),
+      combo,
+      boost: Math.max(1, Number(boost) || 1),
+      progressToNext: progress,
+      ts: Date.now(),
+    };
+    if (snapshot && typeof snapshot.totalXp === "number") {
+      detail.total = snapshot.totalXp;
+    }
+    return detail;
+  }
+
+  function maybeEmitBoost(detail) {
+    if (!detail || typeof detail !== "object") return;
+    const multiplier = parseNumber(detail.multiplier, NaN);
+    if (!Number.isFinite(multiplier) || multiplier <= 1) return;
+    let secondsLeft = parseNumber(detail.secondsLeft, NaN);
+    if (!Number.isFinite(secondsLeft)) {
+      const expiresAt = parseNumber(detail.expiresAt, NaN);
+      if (Number.isFinite(expiresAt)) {
+        secondsLeft = Math.max(0, Math.round((expiresAt - Date.now()) / 1000));
+      }
+    }
+    const normalizedSeconds = Number.isFinite(secondsLeft) ? Math.max(0, Math.round(secondsLeft)) : 0;
+    const expiresKey = parseNumber(detail.expiresAt, NaN);
+    const key = `${Math.max(1, multiplier)}:${Number.isFinite(expiresKey) ? Math.floor(expiresKey) : ""}`;
+    if (overlayBridgeState.lastBoostKey === key) return;
+    overlayBridgeState.lastBoostKey = key;
+    safeDispatch(BOOST_EVENT, {
+      multiplier: Math.max(1, multiplier),
+      secondsLeft: normalizedSeconds,
+    });
+    if (window && window.XP_DIAG) {
+      try { console.log("overlay:boost_start", { multiplier: Math.max(1, multiplier), secondsLeft: normalizedSeconds }); } catch (_) {}
+    }
+  }
+
+  function computeBoostDetailFromEvent(detail) {
+    const payload = detail && typeof detail === "object" ? detail : {};
+    const runtime = readRuntimeState();
+    const runtimeBoost = readBoostFromRuntime(runtime);
+    let multiplier = parseNumber(payload.multiplier, NaN);
+    if (!Number.isFinite(multiplier)) multiplier = parseNumber(payload.mult, NaN);
+    if (!Number.isFinite(multiplier) && runtimeBoost) multiplier = runtimeBoost.multiplier;
+    if (!Number.isFinite(multiplier) || multiplier <= 1) return null;
+
+    const now = Date.now();
+    let expiresAt = parseNumber(payload.expiresAt, NaN);
+    if (!Number.isFinite(expiresAt)) {
+      const ttlMs = parseNumber(payload.ttlMs, NaN);
+      if (Number.isFinite(ttlMs)) expiresAt = now + ttlMs;
+    }
+    if (!Number.isFinite(expiresAt)) {
+      const durationMs = parseNumber(payload.durationMs, NaN);
+      if (Number.isFinite(durationMs)) expiresAt = now + durationMs;
+    }
+    if (!Number.isFinite(expiresAt) && runtimeBoost && runtimeBoost.expiresAt) {
+      expiresAt = runtimeBoost.expiresAt;
+    }
+
+    let secondsLeft = parseNumber(payload.secondsLeft, NaN);
+    if (!Number.isFinite(secondsLeft) && Number.isFinite(expiresAt)) {
+      secondsLeft = Math.max(0, Math.round((expiresAt - now) / 1000));
+    }
+    if (!Number.isFinite(secondsLeft) && runtimeBoost) {
+      secondsLeft = runtimeBoost.secondsLeft;
+    }
+
+    return {
+      multiplier: Math.max(1, multiplier),
+      expiresAt: Number.isFinite(expiresAt) ? expiresAt : 0,
+      secondsLeft: Number.isFinite(secondsLeft) ? Math.max(0, Math.round(secondsLeft)) : 0,
+    };
+  }
+
+  function handleXpUpdated(event) {
+    const awarded = event && event.detail && typeof event.detail.awarded !== "undefined"
+      ? Number(event.detail.awarded)
+      : NaN;
+    if (!Number.isFinite(awarded) || awarded < 0) return;
+    const runtime = readRuntimeState();
+    const detail = buildTickDetail(awarded, runtime);
+    safeDispatch(TICK_EVENT, detail);
+    if (window && window.XP_DIAG) {
+      try { console.log("overlay:tick", detail); } catch (_) {}
+    }
+    const boostFromRuntime = readBoostFromRuntime(runtime);
+    if (boostFromRuntime) {
+      maybeEmitBoost(boostFromRuntime);
+    }
+  }
+
+  function handleBoost(event) {
+    const computed = computeBoostDetailFromEvent(event && event.detail);
+    if (computed) {
+      maybeEmitBoost(computed);
+    }
+  }
+
+  function ensureOverlayBridge() {
+    if (overlayBridgeState.wired) return;
+    if (!window || typeof window.addEventListener !== "function") return;
+    overlayBridgeState.wired = true;
+    try { window.addEventListener(UPDATED_EVENT, handleXpUpdated, { passive: true }); } catch (_) {
+      try { window.addEventListener(UPDATED_EVENT, handleXpUpdated); } catch (_) {}
+    }
+    try { window.addEventListener(BOOST_EVENT, handleBoost, { passive: true }); } catch (_) {
+      try { window.addEventListener(BOOST_EVENT, handleBoost); } catch (_) {}
+    }
+    const runtimeBoost = readBoostFromRuntime(readRuntimeState());
+    if (runtimeBoost) {
+      maybeEmitBoost(runtimeBoost);
+    }
   }
 
   function isHostDocument() {
