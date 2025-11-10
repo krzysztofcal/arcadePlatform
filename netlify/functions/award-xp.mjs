@@ -19,6 +19,7 @@ const MIN_ACTIVITY_VIS_S = Math.max(0, asNumber(process.env.XP_MIN_ACTIVITY_VIS_
 const METADATA_MAX_BYTES = Math.max(0, asNumber(process.env.XP_METADATA_MAX_BYTES, 2048));
 const DEBUG_ENABLED = process.env.XP_DEBUG === "1";
 const KEY_NS = process.env.XP_KEY_NS ?? "kcswh:xp:v2";
+const DRIFT_MS = Math.max(0, asNumber(process.env.XP_DRIFT_MS, 30_000));
 const CORS_ALLOW = (process.env.XP_CORS_ALLOW ?? "")
   .split(",")
   .map(s => s.trim())
@@ -129,9 +130,13 @@ export async function handler(event) {
     return json(422, { error: "delta_out_of_range", cap: DELTA_CAP, capDelta: DELTA_CAP }, origin);
   }
 
-  const tsRaw = Number(body.ts ?? body.timestamp ?? body.windowEnd ?? Date.now());
+  const now = Date.now();
+  const tsRaw = Number(body.ts ?? body.timestamp ?? body.windowEnd ?? now);
   if (!Number.isFinite(tsRaw) || tsRaw <= 0) {
     return json(422, { error: "invalid_timestamp" }, origin);
+  }
+  if (tsRaw > now + DRIFT_MS) {
+    return json(422, { error: "timestamp_in_future", driftMs: DRIFT_MS }, origin);
   }
   const ts = Math.trunc(tsRaw);
 
@@ -173,8 +178,7 @@ export async function handler(event) {
     metadata = cleaned;
   }
 
-  const now = Date.now();
-  const todayKey = keyDaily(userId, dayKey(ts));
+  const todayKey = keyDaily(userId, dayKey(now));
   const totalKeyK = keyTotal(userId);
   const sessionKeyK = keySession(userId, sessionId);
   const sessionSyncKeyK = keySessionSync(userId, sessionId);
@@ -184,7 +188,7 @@ export async function handler(event) {
     const events = Number(metadata?.inputEvents ?? 0);
     const visSeconds = Number(metadata?.visibilitySeconds ?? 0);
     if (!Number.isFinite(events) || events < MIN_ACTIVITY_EVENTS || !Number.isFinite(visSeconds) || visSeconds < MIN_ACTIVITY_VIS_S) {
-      const { current, lifetime, sessionTotal, lastSync } = await getTotals({ userId, sessionId, now: ts });
+      const { current, lifetime, sessionTotal, lastSync } = await getTotals({ userId, sessionId, now });
       const inactivePayload = {
         ok: true,
         awarded: 0,

@@ -26,56 +26,77 @@ async function testDailyAcrossSessions() {
   const firstSession = { userId, sessionId: 'sess-a', ts: BASE_TS };
   const secondSession = { userId, sessionId: 'sess-b', ts: BASE_TS + 50 }; // slight offset
 
-  const first = await invoke(handler, { ...firstSession, delta: 150 });
-  assert.equal(first.payload.awarded, 150);
-  assert.equal(first.payload.totalToday, 150);
-  assert.equal(first.payload.sessionTotal, 150);
+  const originalNow = Date.now;
+  Date.now = () => BASE_TS;
+  try {
+    const first = await invoke(handler, { ...firstSession, delta: 150 });
+    assert.equal(first.payload.awarded, 150);
+    assert.equal(first.payload.totalToday, 150);
+    assert.equal(first.payload.sessionTotal, 150);
 
-  const second = await invoke(handler, { ...secondSession, delta: 150 });
-  assert.equal(second.payload.awarded, 110);
-  assert.equal(second.payload.capped, true);
-  assert.equal(second.payload.reason, 'daily_cap_partial');
-  assert.equal(second.payload.totalToday, 260);
-  assert.equal(second.payload.sessionTotal, 110);
+    const second = await invoke(handler, { ...secondSession, delta: 150 });
+    assert.equal(second.payload.awarded, 110);
+    assert.equal(second.payload.capped, true);
+    assert.equal(second.payload.reason, 'daily_cap_partial');
+    assert.equal(second.payload.totalToday, 260);
+    assert.equal(second.payload.sessionTotal, 110);
 
-  const third = await invoke(handler, { ...firstSession, ts: BASE_TS + 120, delta: 20 });
-  assert.equal(third.payload.awarded, 0);
-  assert.equal(third.payload.capped, true);
-  assert.equal(third.payload.reason, 'daily_cap');
+    const third = await invoke(handler, { ...firstSession, ts: BASE_TS + 120, delta: 20 });
+    assert.equal(third.payload.awarded, 0);
+    assert.equal(third.payload.capped, true);
+    assert.equal(third.payload.reason, 'daily_cap');
+  } finally {
+    Date.now = originalNow;
+  }
 }
 
 async function testSessionCapAcrossDays() {
   const handler = await createHandler('carry', { dailyCap: 400, sessionCap: 180 });
   const base = { userId: 'carry-user', sessionId: 'carry-session', ts: BASE_TS };
 
-  const dayOne = await invoke(handler, { ...base, delta: 140 });
-  assert.equal(dayOne.payload.awarded, 140);
-  assert.equal(dayOne.payload.sessionTotal, 140);
+  const originalNow = Date.now;
+  try {
+    Date.now = () => BASE_TS;
+    const dayOne = await invoke(handler, { ...base, delta: 140 });
+    assert.equal(dayOne.payload.awarded, 140);
+    assert.equal(dayOne.payload.sessionTotal, 140);
 
-  const dayTwo = await invoke(handler, { ...base, ts: BASE_TS + DAY_MS + 1000, delta: 100 });
-  assert.equal(dayTwo.payload.awarded, 40);
-  assert.equal(dayTwo.payload.sessionCapped, true);
-  assert.equal(dayTwo.payload.reason, 'session_cap_partial');
-  assert.equal(dayTwo.payload.sessionTotal, 180);
-  assert.equal(dayTwo.payload.totalToday, 40);
+    Date.now = () => BASE_TS + DAY_MS + 1_000;
+    const dayTwo = await invoke(handler, { ...base, ts: BASE_TS + DAY_MS + 1000, delta: 100 });
+    assert.equal(dayTwo.payload.awarded, 40);
+    assert.equal(dayTwo.payload.sessionCapped, true);
+    assert.equal(dayTwo.payload.reason, 'session_cap_partial');
+    assert.equal(dayTwo.payload.sessionTotal, 180);
+    assert.equal(dayTwo.payload.totalToday, 40);
 
-  const dayTwoFollowUp = await invoke(handler, { ...base, ts: BASE_TS + DAY_MS + 2000, delta: 50 });
-  assert.equal(dayTwoFollowUp.payload.awarded, 0);
-  assert.equal(dayTwoFollowUp.payload.sessionCapped, true);
-  assert.equal(dayTwoFollowUp.payload.reason, 'session_cap');
+    Date.now = () => BASE_TS + DAY_MS + 2_000;
+    const dayTwoFollowUp = await invoke(handler, { ...base, ts: BASE_TS + DAY_MS + 2000, delta: 50 });
+    assert.equal(dayTwoFollowUp.payload.awarded, 0);
+    assert.equal(dayTwoFollowUp.payload.sessionCapped, true);
+    assert.equal(dayTwoFollowUp.payload.reason, 'session_cap');
+  } finally {
+    Date.now = originalNow;
+  }
 }
 
 async function testZeroDeltaAdvancesLastSync() {
   const handler = await createHandler('zero', { dailyCap: 500, sessionCap: 300 });
   const base = { userId: 'zero-user', sessionId: 'zero-session', ts: BASE_TS };
 
-  const first = await invoke(handler, { ...base, delta: 90 });
-  assert.equal(first.payload.lastSync, BASE_TS);
+  const originalNow = Date.now;
+  Date.now = () => BASE_TS;
+  try {
+    const first = await invoke(handler, { ...base, delta: 90 });
+    assert.equal(first.payload.lastSync, BASE_TS);
 
-  const zeroAward = await invoke(handler, { ...base, ts: BASE_TS + 1234, delta: 0 });
-  assert.equal(zeroAward.payload.awarded, 0);
-  assert.equal(zeroAward.payload.lastSync, BASE_TS + 1234);
-  assert.equal(zeroAward.payload.reason ?? null, null);
+    Date.now = () => BASE_TS + 1_234;
+    const zeroAward = await invoke(handler, { ...base, ts: BASE_TS + 1234, delta: 0 });
+    assert.equal(zeroAward.payload.awarded, 0);
+    assert.equal(zeroAward.payload.lastSync, BASE_TS + 1234);
+    assert.equal(zeroAward.payload.reason ?? null, null);
+  } finally {
+    Date.now = originalNow;
+  }
 }
 
 async function testMidnightRollover() {
@@ -83,16 +104,23 @@ async function testMidnightRollover() {
   const handler = await createHandler('midnight', { dailyCap: 400, sessionCap: 250 });
   const base = { userId: 'midnight-user', sessionId: 'midnight-session', ts: beforeMidnight };
 
-  const dayOne = await invoke(handler, { ...base, delta: 150 });
-  assert.equal(dayOne.payload.totalToday, 150);
-  assert.equal(dayOne.payload.sessionTotal, 150);
+  const originalNow = Date.now;
+  try {
+    Date.now = () => beforeMidnight;
+    const dayOne = await invoke(handler, { ...base, delta: 150 });
+    assert.equal(dayOne.payload.totalToday, 150);
+    assert.equal(dayOne.payload.sessionTotal, 150);
 
-  const dayTwoTs = beforeMidnight + 20_000; // crosses UTC midnight
-  const dayTwo = await invoke(handler, { ...base, ts: dayTwoTs, delta: 200 });
-  assert.equal(dayTwo.payload.totalToday, 100);
-  assert.equal(dayTwo.payload.awarded, 100);
-  assert.equal(dayTwo.payload.sessionTotal, 250);
-  assert.equal(dayTwo.payload.sessionCapped, true);
+    const dayTwoTs = beforeMidnight + 20_000; // crosses UTC midnight
+    Date.now = () => dayTwoTs;
+    const dayTwo = await invoke(handler, { ...base, ts: dayTwoTs, delta: 200 });
+    assert.equal(dayTwo.payload.totalToday, 100);
+    assert.equal(dayTwo.payload.awarded, 100);
+    assert.equal(dayTwo.payload.sessionTotal, 250);
+    assert.equal(dayTwo.payload.sessionCapped, true);
+  } finally {
+    Date.now = originalNow;
+  }
 }
 
 async function testSessionTtlRefresh() {

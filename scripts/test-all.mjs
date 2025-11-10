@@ -19,6 +19,7 @@ run("node", ["tests/xp-multigame.test.mjs"], "xp-multigame");
 run("node", ["tests/xp-award-delta.test.mjs"], "xp-award-delta");
 run("node", ["tests/xp-award-session-daily.test.mjs"], "xp-award-session-daily");
 run("node", ["tests/xp-award-legacy-fallback.test.mjs"], "xp-award-legacy-fallback");
+run("node", ["tests/xp-award-drift.test.mjs"], "xp-award-drift");
 run("node", ["tests/xp-client-bfcache.test.mjs"], "xp-client-bfcache");
 run("node", ["tests/xp-client.cors.test.mjs"], "xp-client-cors");
 run("node", ["tests/xp-gate.test.mjs"], "xp-gate");
