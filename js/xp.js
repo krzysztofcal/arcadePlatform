@@ -683,7 +683,7 @@
     state.boost = { multiplier: 1, expiresAt: 0, source: null, totalSeconds: DEFAULT_BOOST_SEC, gameId: null };
     state.boostStartSeen = false;
     state.lastBoostDetail = null;
-    state.boostResetGuardUntil = Date.now() + 50;
+    state.boostResetGuardUntil = Date.now() + 125;
     const nextTotalSeconds = meta && Object.prototype.hasOwnProperty.call(meta, "totalSeconds")
       ? Math.max(0, Math.floor(parseNumber(meta.totalSeconds, DEFAULT_BOOST_SEC) || 0))
       : Math.max(0, Math.floor(parseNumber(previous.totalSeconds, DEFAULT_BOOST_SEC) || DEFAULT_BOOST_SEC));

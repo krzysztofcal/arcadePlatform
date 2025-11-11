@@ -529,7 +529,11 @@
     const currentGameId = xp && xp.__lastGameId ? slugifyGameId(xp.__lastGameId) : null;
 
     if (running && currentGameId === slugged) {
-      try { xp.startSession(slugged); } catch (_) {}
+      try {
+        if (xp && typeof xp.nudge === "function") {
+          xp.nudge({ skipMark: true });
+        }
+      } catch (_) {}
       state.runningDesired = true;
       state.pendingStopOptions = null;
       state.pendingStartGameId = null;
