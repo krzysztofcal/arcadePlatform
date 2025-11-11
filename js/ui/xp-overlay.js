@@ -52,13 +52,16 @@
   function getBadge() {
     if (!document || typeof document.querySelector !== "function") return null;
     let badge = null;
-    try { badge = document.querySelector(".xp-badge__link"); }
+    try { badge = document.querySelector(".xp-badge__link, .xp-badge"); }
     catch (_) { badge = null; }
     if (badge) return badge;
     if (typeof document.getElementById === "function") {
       try { badge = document.getElementById("xpBadge"); }
       catch (_) { badge = null; }
+      if (badge) return badge;
     }
+    try { badge = document.querySelector("[data-xp-badge], a[href*='xp']"); }
+    catch (_) { badge = null; }
     return badge || null;
   }
 
@@ -236,6 +239,10 @@
   function handleTick(event) {
     if (!event || !event.detail || typeof event.detail !== "object") return;
     state.pendingCombo = event.detail;
+    if (window && window.XP_DIAG) {
+      try { console.debug("[xp-overlay] tick", event.detail); }
+      catch (_) {}
+    }
     if (state.attached) {
       applyCombo(event.detail);
     }
@@ -299,6 +306,10 @@
     state.attached = true;
     attachAttempts = 0;
     clearAttachRetry();
+    if (window && window.XP_DIAG) {
+      try { console.debug("[xp-overlay] attached", { hasConic: state.hasConic }); }
+      catch (_) {}
+    }
     const xp = window.XP;
     if ((!state.boost || !state.boost.expiresAt || state.boost.expiresAt <= Date.now())
       && xp && typeof xp.getBoost === "function") {
@@ -318,6 +329,10 @@
       deactivateBoost();
     }
     if (state.pendingCombo) {
+      if (window && window.XP_DIAG) {
+        try { console.debug("[xp-overlay] replay combo", state.pendingCombo); }
+        catch (_) {}
+      }
       applyCombo(state.pendingCombo);
     }
     return true;

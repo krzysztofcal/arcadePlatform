@@ -1,4 +1,6 @@
-.xp-badge {
+.xp-badge,
+.xp-badge__link {
+  position: relative;
   --boost-frac: 0;
   --boost-hue: 172;
   --boost-glow: rgba(45, 212, 191, 0.4);
@@ -7,7 +9,8 @@
   --combo-glow: rgba(251, 191, 36, 0.25);
 }
 
-.xp-badge::after {
+.xp-badge::after,
+.xp-badge__link::after {
   content: "";
   position: absolute;
   inset: 3px;
