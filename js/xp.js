@@ -20,6 +20,7 @@
   const LEVEL_MULTIPLIER = 1.1;
 
   const DEFAULT_SCORE_DELTA_CEILING = 10_000;
+  const DEFAULT_BOOST_SEC = 15;
   const COMBO_CAP = 20;
   const COMBO_SUSTAIN_MS = 5_000;
   const COMBO_COOLDOWN_MS = 3_000;
@@ -243,6 +244,9 @@
     pendingWindow: null,
     lastSuccessfulWindowEnd: null,
     badgeTimerId: null,
+    runBoostTriggered: false,
+    storedHighScore: null,
+    storedHighScoreGameId: null,
   };
 
   function ensureComboState() {
@@ -679,6 +683,107 @@
     const boostMultiplier = Number(state.boost && state.boost.multiplier) || 1;
     if (boostMultiplier <= 1) return base;
     return base * boostMultiplier;
+  }
+
+  function resolveScorePulseGameId(gameId) {
+    const normalized = normalizeGameId(gameId);
+    if (normalized) return normalized;
+    const active = normalizeGameId(state.gameId);
+    if (active) return active;
+    try {
+      if (window && window.GameXpBridge && typeof window.GameXpBridge.getCurrentGameId === "function") {
+        const bridged = normalizeGameId(window.GameXpBridge.getCurrentGameId());
+        if (bridged) return bridged;
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  function dispatchNewRecordBoost(gameId) {
+    if (!window || typeof window.dispatchEvent !== "function") return;
+    const detail = {
+      multiplier: 1.5,
+      secondsLeft: DEFAULT_BOOST_SEC,
+      totalSeconds: DEFAULT_BOOST_SEC,
+      ttlMs: DEFAULT_BOOST_SEC * 1000,
+      source: "newRecord",
+    };
+    if (gameId) detail.gameId = gameId;
+    try {
+      if (typeof CustomEvent === "function") {
+        window.dispatchEvent(new CustomEvent("xp:boost", { detail }));
+        return;
+      }
+      if (typeof document !== "undefined" && document && typeof document.createEvent === "function") {
+        const evt = document.createEvent("CustomEvent");
+        evt.initCustomEvent("xp:boost", false, false, detail);
+        window.dispatchEvent(evt);
+        return;
+      }
+      window.dispatchEvent({ type: "xp:boost", detail });
+    } catch (_) {
+      try { window.dispatchEvent({ type: "xp:boost", detail }); } catch (_) {}
+    }
+  }
+
+  function updateStoredHighScore(gameId, score) {
+    let nextHighScore = score;
+    try {
+      if (window && window.GameXpBridge && typeof window.GameXpBridge.updateHighScoreIfBetter === "function") {
+        const result = window.GameXpBridge.updateHighScoreIfBetter(gameId, score);
+        if (result && typeof result === "object" && Object.prototype.hasOwnProperty.call(result, "highScore")) {
+          const parsed = Number(result.highScore);
+          if (Number.isFinite(parsed) && parsed >= 0) {
+            nextHighScore = Math.max(0, Math.floor(parsed));
+          }
+        } else if (typeof result === "number" && Number.isFinite(result)) {
+          nextHighScore = Math.max(0, Math.floor(result));
+        }
+      }
+    } catch (_) {}
+    return nextHighScore;
+  }
+
+  function readStoredHighScore(gameId) {
+    let stored = state.storedHighScore;
+    if (Number.isFinite(stored) && stored >= 0 && state.storedHighScoreGameId === gameId) {
+      return Math.max(0, Math.floor(stored));
+    }
+    stored = 0;
+    try {
+      if (window && window.GameXpBridge && typeof window.GameXpBridge.getHighScore === "function") {
+        const raw = window.GameXpBridge.getHighScore(gameId);
+        const parsed = Number(raw);
+        if (Number.isFinite(parsed) && parsed >= 0) {
+          stored = Math.max(0, Math.floor(parsed));
+        }
+      }
+    } catch (_) {}
+    state.storedHighScore = stored;
+    state.storedHighScoreGameId = gameId;
+    return stored;
+  }
+
+  function handleScorePulse(rawGameId, rawScore) {
+    const resolvedGameId = resolveScorePulseGameId(rawGameId);
+    const numericScore = Number(rawScore);
+    if (!Number.isFinite(numericScore)) return;
+    const score = Math.max(0, Math.floor(numericScore));
+    if (resolvedGameId && state.storedHighScoreGameId !== resolvedGameId) {
+      state.storedHighScore = null;
+      state.storedHighScoreGameId = resolvedGameId;
+      state.runBoostTriggered = false;
+    }
+    if (!resolvedGameId) return;
+    if (state.runBoostTriggered) return;
+    if (getBoostMultiplierValue() > 1) return;
+    const currentHighScore = readStoredHighScore(resolvedGameId);
+    if (score <= currentHighScore) return;
+    const updatedHighScore = updateStoredHighScore(resolvedGameId, score);
+    state.storedHighScore = updatedHighScore;
+    state.storedHighScoreGameId = resolvedGameId;
+    state.runBoostTriggered = true;
+    dispatchNewRecordBoost(resolvedGameId);
   }
 
   function accumulateLocalXp(xpDelta) {
@@ -1307,6 +1412,9 @@
     state.lastTrustedInputTs = 0;
     state.eventsSinceLastAward = 0;
     state.scoreDeltaSinceLastAward = 0;
+    state.runBoostTriggered = false;
+    state.storedHighScore = null;
+    state.storedHighScoreGameId = null;
     state.activityWindowFrozen = false;
     state.isActive = false;
     state.sessionXp = 0;
@@ -1362,6 +1470,9 @@
     state.scoreDeltaRemainder = 0;
     state.eventsSinceLastAward = 0;
     state.scoreDeltaSinceLastAward = 0;
+    state.runBoostTriggered = false;
+    state.storedHighScore = null;
+    state.storedHighScoreGameId = null;
     state.lastInputAt = 0;
     state.lastTrustedInputTs = 0;
     state.activityWindowFrozen = false;
@@ -1589,6 +1700,18 @@
       if (rawMultiplier == null) rawMultiplier = detail.mult;
       rawTtl = detail.ttlMs;
       if (rawTtl == null) rawTtl = detail.durationMs;
+      if (rawTtl == null && Object.prototype.hasOwnProperty.call(detail, "secondsLeft")) {
+        const seconds = parseNumber(detail.secondsLeft, NaN);
+        if (Number.isFinite(seconds)) {
+          rawTtl = seconds * 1000;
+        }
+      }
+      if (rawTtl == null && Object.prototype.hasOwnProperty.call(detail, "totalSeconds")) {
+        const seconds = parseNumber(detail.totalSeconds, NaN);
+        if (Number.isFinite(seconds)) {
+          rawTtl = seconds * 1000;
+        }
+      }
       rawSource = detail.reason;
       if (rawSource == null) rawSource = detail.source;
     }
@@ -1598,7 +1721,15 @@
       : 1;
     const parsedMultiplier = parseNumber(rawMultiplier, fallbackMultiplier) || fallbackMultiplier || 1;
     const multiplier = Number.isFinite(parsedMultiplier) ? Math.max(1, parsedMultiplier) : 1;
+    const source = rawSource == null ? null : String(rawSource);
     if (multiplier <= 1) {
+      if (source === "gameOver" || source === "visibility" || source === "pagehide") {
+        state.runBoostTriggered = false;
+        if (source === "gameOver") {
+          state.storedHighScore = null;
+          state.storedHighScoreGameId = null;
+        }
+      }
       resetBoost();
       return;
     }
@@ -1606,8 +1737,7 @@
     const parsedTtl = parseNumber(rawTtl, 0) || 0;
     const ttl = Number.isFinite(parsedTtl) ? Math.max(0, parsedTtl) : 0;
     const now = Date.now();
-    const expiresAt = now + (ttl > 0 ? ttl : 15_000);
-    const source = rawSource == null ? null : String(rawSource);
+    const expiresAt = now + (ttl > 0 ? ttl : DEFAULT_BOOST_SEC * 1000);
 
     state.boost = {
       multiplier,
@@ -1789,6 +1919,7 @@
             gameId: event.data.gameId || state.gameId || "",
             score: typeof event.data.score === "number" ? event.data.score : undefined,
           });
+          handleScorePulse(event.data.gameId, event.data.score);
         } catch (_) {}
       }, { passive: true });
 
@@ -2058,6 +2189,7 @@
   window.XP.__xpLifecycleWired = true;
 
   let retryTimer = null;
+  const BOOST_RESET_SECONDS = 15;
 
   function tryCall(fnName, arg) {
     try {
@@ -2106,15 +2238,46 @@
     }
   }
 
-  function pause() {
+  function emitLifecycleBoostStop(source) {
+    if (!window || typeof window.dispatchEvent !== "function") return;
+    const detail = {
+      multiplier: 1,
+      secondsLeft: 0,
+      totalSeconds: BOOST_RESET_SECONDS,
+      ttlMs: BOOST_RESET_SECONDS * 1000,
+      source: source || "visibility",
+    };
+    try {
+      if (typeof CustomEvent === "function") {
+        window.dispatchEvent(new CustomEvent("xp:boost", { detail }));
+        return;
+      }
+    } catch (_) {}
+    try {
+      if (typeof document !== "undefined" && document && typeof document.createEvent === "function") {
+        const evt = document.createEvent("CustomEvent");
+        evt.initCustomEvent("xp:boost", false, false, detail);
+        window.dispatchEvent(evt);
+        return;
+      }
+    } catch (_) {}
+    try { window.dispatchEvent({ type: "xp:boost", detail }); } catch (_) {}
+  }
+
+  function pause(options) {
+    const source = options && options.source ? String(options.source) : null;
     var runningNow = false;
     try {
       if (window.XP && typeof window.XP.isRunning === 'function') runningNow = !!window.XP.isRunning();
       else runningNow = !!(typeof state !== 'undefined' ? state.running : false);
     } catch(_) {}
-    if (!runningNow) return;
+    if (!runningNow) {
+      emitLifecycleBoostStop(source);
+      return;
+    }
     tryCall('stopSession', { flush: true });
     clearRetry();
+    emitLifecycleBoostStop(source);
     try { document.dispatchEvent(new Event('xp:hidden')); } catch (_) {}
   }
 
@@ -2128,19 +2291,19 @@
   window.addEventListener('pagehide', (event) => {
     flushRecorder();
     if (persisted(event)) return;
-    pause();
+    pause({ source: 'pagehide' });
   }, { passive: true });
 
   window.addEventListener('beforeunload', () => {
     flushRecorder();
-    pause();
+    pause({ source: 'pagehide' });
   });
 
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') resume();
     else {
       flushRecorder();
-      pause();
+      pause({ source: 'visibility' });
     }
   }, { passive: true });
 

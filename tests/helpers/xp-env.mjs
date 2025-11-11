@@ -162,17 +162,36 @@ export function createEnvironment(options = {}) {
     },
   };
 
+  const storage = new Map();
+
+  const localStorageStub = {
+    getItem(key) {
+      const normalized = String(key);
+      return storage.has(normalized) ? storage.get(normalized) : null;
+    },
+    setItem(key, value) {
+      storage.set(String(key), String(value));
+    },
+    removeItem(key) {
+      storage.delete(String(key));
+    },
+    clear() {
+      storage.clear();
+    },
+  };
+
   const windowStub = {
     GAME_ID: windowGameId,
-    localStorage: {
-      getItem() { return null; },
-      setItem() {},
-    },
+    localStorage: localStorageStub,
     addEventListener(type, handler) {
       addListener(windowListeners, type, handler);
     },
     removeEventListener(type, handler) {
       removeListener(windowListeners, type, handler);
+    },
+    dispatchEvent(event) {
+      emit(windowListeners, event.type, event);
+      return true;
     },
     setInterval() { return 1; },
     clearInterval() {},

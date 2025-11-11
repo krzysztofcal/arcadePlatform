@@ -2,6 +2,7 @@
   if (typeof window === "undefined") return;
 
   const DEFAULT_SCORE_DELTA_CEILING = 10_000;
+  const DEFAULT_BOOST_SEC = 15;
 
   function parseNumber(value, fallback) {
     if (value == null) return fallback;
@@ -33,9 +34,12 @@
     return cachedScoreDeltaCeiling;
   }
   const DEFAULT_GAME_ID = "game";
+  const HIGH_SCORE_PREFIX = "xp:hs:";
 
   const MIN_FLUSH_DELAY_MS = 16;
   const MAX_FLUSH_DELAY_MS = 1000;
+
+  const highScoreMemory = {};
 
   const state = {
     remainder: 0,
@@ -126,6 +130,124 @@
     const dashed = lowered.replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
     const limited = dashed.slice(0, 64);
     return limited || null;
+  }
+
+  function resolveBridgeGameId() {
+    try {
+      if (window && window.GameXpBridge && typeof window.GameXpBridge.getCurrentGameId === "function") {
+        const id = window.GameXpBridge.getCurrentGameId();
+        if (id) return id;
+      }
+    } catch (_) {}
+    if (state.lastGameId) return state.lastGameId;
+    const detected = detectGameId();
+    return detected;
+  }
+
+  function getHighScoreKey(gameId) {
+    const slugged = slugifyGameId(gameId) || DEFAULT_GAME_ID;
+    return `${HIGH_SCORE_PREFIX}${slugged}`;
+  }
+
+  function getHighScore(gameId) {
+    const key = getHighScoreKey(gameId);
+    let raw = null;
+    try {
+      if (window && window.localStorage && typeof window.localStorage.getItem === "function") {
+        raw = window.localStorage.getItem(key);
+      }
+    } catch (_) {
+      raw = null;
+    }
+    if (raw == null && Object.prototype.hasOwnProperty.call(highScoreMemory, key)) {
+      raw = highScoreMemory[key];
+    }
+    let parsed = parseNumber(raw, NaN);
+    if (!Number.isFinite(parsed) || parsed < 0) {
+      parsed = 0;
+    }
+    const normalized = Math.max(0, Math.floor(parsed));
+    highScoreMemory[key] = normalized;
+    return normalized;
+  }
+
+  function setHighScore(gameId, score) {
+    const key = getHighScoreKey(gameId);
+    const numeric = Math.max(0, Math.floor(parseNumber(score, 0) || 0));
+    highScoreMemory[key] = numeric;
+    try {
+      if (window && window.localStorage && typeof window.localStorage.setItem === "function") {
+        window.localStorage.setItem(key, String(numeric));
+      }
+    } catch (_) {}
+    return numeric;
+  }
+
+  function updateHighScoreIfBetter(gameId, score) {
+    const numeric = Math.max(0, Math.floor(parseNumber(score, NaN)) || 0);
+    const current = getHighScore(gameId);
+    if (!Number.isFinite(numeric) || numeric <= current) {
+      return { updated: false, highScore: current };
+    }
+    const updated = setHighScore(gameId, numeric);
+    return { updated: true, highScore: updated };
+  }
+
+  function dispatchBoost(detail) {
+    if (!window || typeof window.dispatchEvent !== "function") return;
+    const payload = detail && typeof detail === "object" ? { ...detail } : {};
+    if (Object.prototype.hasOwnProperty.call(payload, "secondsLeft")) {
+      const seconds = parseNumber(payload.secondsLeft, NaN);
+      if (Number.isFinite(seconds)) {
+        payload.secondsLeft = Math.max(0, Math.floor(seconds));
+        const ttlMs = payload.secondsLeft * 1000;
+        if (!Number.isFinite(parseNumber(payload.ttlMs, NaN)) || parseNumber(payload.ttlMs, NaN) < ttlMs) {
+          payload.ttlMs = ttlMs;
+        }
+      } else {
+        delete payload.secondsLeft;
+      }
+    }
+    if (Object.prototype.hasOwnProperty.call(payload, "totalSeconds")) {
+      const total = parseNumber(payload.totalSeconds, NaN);
+      if (Number.isFinite(total)) {
+        payload.totalSeconds = Math.max(0, Math.floor(total));
+        const ttlMs = payload.totalSeconds * 1000;
+        if (!Number.isFinite(parseNumber(payload.ttlMs, NaN)) || parseNumber(payload.ttlMs, NaN) < ttlMs) {
+          payload.ttlMs = ttlMs;
+        }
+      } else {
+        delete payload.totalSeconds;
+      }
+    }
+    try {
+      if (typeof CustomEvent === "function") {
+        const evt = new CustomEvent("xp:boost", { detail: payload });
+        window.dispatchEvent(evt);
+        return;
+      }
+      if (typeof document !== "undefined" && document && typeof document.createEvent === "function") {
+        const legacyEvt = document.createEvent("CustomEvent");
+        legacyEvt.initCustomEvent("xp:boost", false, false, payload);
+        window.dispatchEvent(legacyEvt);
+        return;
+      }
+      window.dispatchEvent({ type: "xp:boost", detail: payload });
+    } catch (_) {
+      try { window.dispatchEvent({ type: "xp:boost", detail: payload }); } catch (_) {}
+    }
+  }
+
+  function emitBoostStop(source, gameId) {
+    const payload = {
+      multiplier: 1,
+      secondsLeft: 0,
+      totalSeconds: DEFAULT_BOOST_SEC,
+      source: source || "gameOver",
+    };
+    const resolvedId = slugifyGameId(gameId) || slugifyGameId(resolveBridgeGameId());
+    if (resolvedId) payload.gameId = resolvedId;
+    dispatchBoost(payload);
   }
 
   function readWindowGameId() {
@@ -275,6 +397,7 @@
         try { window.addEventListener(evt, activity, { passive: true }); } catch (_) {}
       });
     }
+
   }
 
   function ensureDomReadyKickoff() {
@@ -473,6 +596,16 @@
     if (slugged) return slugged;
     const detected = slugifyGameId(detectGameId());
     return detected;
+  };
+  bridge.getHighScore = getHighScore;
+  bridge.setHighScore = setHighScore;
+  bridge.updateHighScoreIfBetter = updateHighScoreIfBetter;
+  bridge.gameOver = function gameOver(payload) {
+    const data = payload && typeof payload === "object" ? payload : {};
+    const gameId = slugifyGameId(data.gameId) || resolveBridgeGameId();
+    const result = updateHighScoreIfBetter(gameId, data.score);
+    emitBoostStop("gameOver", gameId);
+    return result;
   };
   bridge.isActiveGameWindow = function isActiveGameWindow() {
     if (!window || !document) return false;

@@ -143,3 +143,131 @@ import { createEnvironment } from './helpers/xp-env.mjs';
   assert.equal(getState().running, true, 'queued start should run after pending stop');
   assert.equal(getState().gameId, 'game-b', 'latest queued start should determine the running session');
 }
+
+// new_record_starts_boost
+{
+  const env = createEnvironment();
+  const { Bridge, drainTimers, installXp, triggerWindow } = env;
+
+  Bridge.start('record-game');
+
+  const { getState } = installXp();
+  drainTimers();
+
+  const boostEvents = [];
+  env.context.window.addEventListener('xp:boost', (event) => {
+    if (!event || !event.detail || event.detail.__xpInternal) return;
+    boostEvents.push(event.detail);
+  });
+
+  triggerWindow('message', { data: { type: 'game-score', gameId: 'record-game', score: 12 } });
+  drainTimers();
+
+  assert.equal(boostEvents.length, 1, 'new record should emit exactly one boost event');
+  const detail = boostEvents[0];
+  assert.equal(detail.multiplier, 1.5, 'new record boost should use 1.5x multiplier');
+  assert.equal(detail.source, 'newRecord', 'new record boost should mark the source');
+  assert.equal(detail.secondsLeft, 15, 'new record boost should expose the remaining seconds');
+  assert.equal(detail.totalSeconds, 15, 'new record boost should expose the total duration');
+  assert.equal(detail.gameId, 'record-game', 'new record boost should include the game id');
+  assert.equal(getState().boost.multiplier > 1, true, 'boost multiplier should be active after new record');
+  assert.equal(Bridge.getHighScore('record-game'), 12, 'new record should persist the high score');
+}
+
+// no_double_start_in_same_run
+{
+  const env = createEnvironment();
+  const { Bridge, drainTimers, installXp, triggerWindow } = env;
+
+  Bridge.start('record-game');
+
+  const { getState } = installXp();
+  drainTimers();
+
+  const boostEvents = [];
+  env.context.window.addEventListener('xp:boost', (event) => {
+    if (!event || !event.detail || event.detail.__xpInternal) return;
+    boostEvents.push(event.detail);
+  });
+
+  triggerWindow('message', { data: { type: 'game-score', gameId: 'record-game', score: 5 } });
+  drainTimers();
+  triggerWindow('message', { data: { type: 'game-score', gameId: 'record-game', score: 9 } });
+  drainTimers();
+  triggerWindow('message', { data: { type: 'game-score', gameId: 'record-game', score: 25 } });
+  drainTimers();
+
+  const newRecordEvents = boostEvents.filter((event) => event.source === 'newRecord');
+  assert.equal(newRecordEvents.length, 1, 'a single run should only start one new record boost');
+
+  env.triggerWindow('pagehide', { persisted: false });
+  drainTimers();
+
+  const pagehideEvents = boostEvents.filter((event) => event.source === 'pagehide');
+  assert.equal(pagehideEvents.length, 1, 'pagehide fallback should emit a boost reset');
+  assert.equal(getState().boost.multiplier, 1, 'pagehide fallback should clear the active boost');
+}
+
+// game_over_stops_boost_and_saves_hs
+{
+  const env = createEnvironment();
+  const { Bridge, drainTimers, installXp, triggerWindow } = env;
+
+  Bridge.start('record-game');
+
+  const { getState } = installXp();
+  drainTimers();
+
+  const boostEvents = [];
+  env.context.window.addEventListener('xp:boost', (event) => {
+    if (!event || !event.detail || event.detail.__xpInternal) return;
+    boostEvents.push(event.detail);
+  });
+
+  triggerWindow('message', { data: { type: 'game-score', gameId: 'record-game', score: 40 } });
+  drainTimers();
+
+  Bridge.gameOver({ score: 40 });
+  drainTimers();
+
+  assert.equal(Bridge.getHighScore('record-game'), 40, 'game over should persist the best score');
+  assert.equal(getState().boost.multiplier, 1, 'game over should reset the boost state');
+
+  const gameOverEvents = boostEvents.filter((event) => event.source === 'gameOver');
+  assert.equal(gameOverEvents.length, 1, 'game over should emit exactly one termination event');
+  assert.equal(gameOverEvents[0].multiplier, 1, 'game over termination should disable boost');
+  assert.equal(gameOverEvents[0].secondsLeft, 0, 'game over termination should report zero seconds left');
+
+  triggerWindow('message', { data: { type: 'game-score', gameId: 'record-game', score: 45 } });
+  drainTimers();
+
+  const newRecordEvents = boostEvents.filter((event) => event.source === 'newRecord');
+  assert.equal(newRecordEvents.length, 2, 'a new run after game over should trigger another boost');
+}
+
+// no_record_no_boost
+{
+  const env = createEnvironment();
+  const { Bridge, drainTimers, installXp, triggerWindow } = env;
+
+  Bridge.setHighScore('record-game', 100);
+  Bridge.start('record-game');
+
+  const { getState } = installXp();
+  drainTimers();
+
+  const boostEvents = [];
+  env.context.window.addEventListener('xp:boost', (event) => {
+    if (!event || !event.detail || event.detail.__xpInternal) return;
+    boostEvents.push(event.detail);
+  });
+
+  triggerWindow('message', { data: { type: 'game-score', gameId: 'record-game', score: 50 } });
+  drainTimers();
+  triggerWindow('message', { data: { type: 'game-score', gameId: 'record-game', score: 99 } });
+  drainTimers();
+
+  assert.equal(boostEvents.length, 0, 'scores below the record should not trigger boosts');
+  assert.equal(getState().boost.multiplier, 1, 'boost should remain inactive without a new record');
+  assert.equal(Bridge.getHighScore('record-game'), 100, 'stored high score should remain unchanged when not beaten');
+}
