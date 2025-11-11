@@ -125,50 +125,53 @@ function loadOverlay(now = 0) {
 
   const testApi = windowObj.XpOverlay && windowObj.XpOverlay.__test;
   assert.ok(testApi, 'overlay test API should exist');
-  assert.equal(typeof testApi.normalizeBoostCountdown, 'function', 'normalizeBoostCountdown helper should exist');
-  assert.equal(typeof testApi.getRemainingSeconds, 'function', 'getRemainingSeconds helper should exist');
-  assert.equal(typeof testApi.remainingSecondsFromDetail, 'function', 'remainingSecondsFromDetail helper should exist');
+  assert.equal(typeof testApi.normalizeExpiresAt, 'function', 'normalizeExpiresAt helper should exist');
+  assert.equal(typeof testApi.computeRemainingSeconds, 'function', 'computeRemainingSeconds helper should exist');
+  assert.equal(typeof testApi.formatClock, 'function', 'formatClock helper should exist');
 
-  return { helper: testApi.normalizeBoostCountdown, helpers: testApi, warnings, window: windowObj };
+  return { api: testApi, warnings, window: windowObj };
 }
 
-test('normalizeBoostCountdown derives from expiresAt milliseconds', () => {
+test('normalizeExpiresAt returns millisecond timestamps unchanged', () => {
   const now = 25_000;
-  const { helper } = loadOverlay(now);
+  const { api } = loadOverlay(now);
   const expiresAt = now + 15_000;
-  assert.equal(helper({ expiresAt }), 15);
+  assert.equal(api.normalizeExpiresAt(expiresAt), expiresAt);
 });
 
-test('normalizeBoostCountdown tolerates expiresAt in seconds', () => {
+test('normalizeExpiresAt repairs epoch seconds once', () => {
   const now = 1_731_280_000_000;
-  const { helper } = loadOverlay(now);
+  const { api, warnings } = loadOverlay(now);
   const expiresAtSeconds = Math.floor((now + 12_000) / 1000);
-  assert.equal(helper({ expiresAt: expiresAtSeconds }), 12);
+  const repaired = api.normalizeExpiresAt(expiresAtSeconds);
+  assert.equal(repaired, expiresAtSeconds * 1000);
+  assert.ok(warnings.length >= 1, 'repair should trigger a console warning');
 });
 
-test('normalizeBoostCountdown falls back to ttlMs when expiry missing', () => {
-  const { helper } = loadOverlay(0);
-  assert.equal(helper({ ttlMs: 9_500 }), 10);
+test('computeRemainingSeconds returns rounded-up seconds from ms', () => {
+  const now = 100_000;
+  const { api } = loadOverlay(now);
+  const expiresAt = now + 12_500;
+  assert.equal(api.computeRemainingSeconds(expiresAt, now), 13);
 });
 
-test('remainingSecondsFromDetail clamps durations above an hour', () => {
-  const now = 50_000;
-  const { helpers } = loadOverlay(now);
-  const future = now + 4_000_000;
-  assert.equal(helpers.remainingSecondsFromDetail({ expiresAt: future }), 3600);
+test('computeRemainingSeconds yields zero when expired', () => {
+  const now = 100_000;
+  const { api } = loadOverlay(now);
+  const expiresAt = now - 5_000;
+  assert.equal(api.computeRemainingSeconds(expiresAt, now), 0);
 });
 
-test('getRemainingSeconds normalizes epoch expiresAt values', () => {
-  const fakeNow = 1_731_280_000_000;
-  const { helpers } = loadOverlay(fakeNow);
-  const epochSeconds = Math.floor((fakeNow + 20_000) / 1000);
-  const remaining = helpers.getRemainingSeconds(epochSeconds, fakeNow);
-  assert.equal(remaining, 20);
+test('formatClock renders two-digit minutes and seconds', () => {
+  const { api } = loadOverlay(0);
+  assert.equal(api.formatClock(0), '00:00');
+  assert.equal(api.formatClock(5), '00:05');
+  assert.equal(api.formatClock(75), '01:15');
 });
 
-test('boost timer renders normalized countdown from epoch expiresAt', () => {
+test('boost timer renders countdown from authoritative expiresAt', () => {
   const now = 1_731_280_000_000;
-  const { window } = loadOverlay(now);
+  const { window, api } = loadOverlay(now);
   const badge = createNode('a');
   badge.className = 'xp-badge';
   badge.contains = () => false;
@@ -187,9 +190,10 @@ test('boost timer renders normalized countdown from epoch expiresAt', () => {
   overlay.attach();
 
   const secondsFromEpoch = Math.floor((now + 15_000) / 1000);
-  overlay.applyBoost({ multiplier: 1.5, endsAt: secondsFromEpoch });
+  overlay.applyBoost({ multiplier: 1.5, expiresAt: secondsFromEpoch });
   const state = overlay.getState();
 
   assert.equal(state.timerEl && state.timerEl.textContent, '00:15');
   assert.equal(state.multiplierEl && state.multiplierEl.textContent, 'x1.5');
+  assert.equal(api.computeRemainingSeconds(state.boost.expiresAt, now), 15);
 });

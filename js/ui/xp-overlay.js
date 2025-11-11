@@ -24,55 +24,33 @@
     catch (_) {}
   }
 
-  function normalizeMs(value) {
-    const numeric = Number(value);
-    if (!Number.isFinite(numeric) || numeric <= 0) return 0;
-    if (numeric > 1e9 && numeric < 1e12) return Math.floor(numeric * 1000);
+  function normalizeExpiresAt(raw) {
+    if (raw == null) return null;
+    const numeric = Number(raw);
+    if (!Number.isFinite(numeric) || numeric <= 0) return null;
+    if (numeric > 1e9 && numeric < 1e12) {
+      if (typeof console !== "undefined" && console && typeof console.warn === "function") {
+        try { console.warn("[xp-overlay] expiresAt provided in seconds; normalizing to ms", { expiresAt: numeric }); }
+        catch (_) {}
+      }
+      return Math.floor(numeric * 1000);
+    }
     return Math.floor(numeric);
   }
 
-  function getRemainingSeconds(expiresAt, now) {
+  function computeRemainingSeconds(expiresAtMs, now) {
+    if (!Number.isFinite(expiresAtMs) || expiresAtMs <= 0) return 0;
     const current = Number.isFinite(now) ? now : Date.now();
-    const expMs = normalizeMs(expiresAt);
-    if (!expMs) return 0;
-    const remaining = Math.ceil((expMs - current) / 1000);
-    if (!Number.isFinite(remaining) || remaining <= 0) return 0;
-    return Math.min(remaining, 3600);
+    const delta = Math.ceil((expiresAtMs - current) / 1000);
+    if (!Number.isFinite(delta) || delta <= 0) return 0;
+    return delta;
   }
 
-  function remainingSecondsFromDetail(detail) {
-    const payload = detail && typeof detail === "object" ? detail : {};
-    const now = Date.now();
-    const expiresSource = Object.prototype.hasOwnProperty.call(payload, "expiresAt")
-      ? payload.expiresAt
-      : payload.endsAt;
-    const secondsFromExpiry = getRemainingSeconds(expiresSource, now);
-    if (secondsFromExpiry > 0) return secondsFromExpiry;
-    const ttlMs = Number(payload.ttlMs);
-    if (Number.isFinite(ttlMs) && ttlMs > 0) {
-      const seconds = Math.max(0, Math.ceil(ttlMs / 1000));
-      return Math.min(seconds, 3600);
-    }
-    return 0;
-  }
-
-  function normalizeBoostCountdown(detail) {
-    return remainingSecondsFromDetail(detail);
-  }
-
-  function normalizeExpiresAt(rawValue, fallback, reference) {
-    const now = Number.isFinite(reference) ? reference : Date.now();
-    const fallbackMs = normalizeMs(fallback);
-    let expiresAt = normalizeMs(rawValue);
-    if (!Number.isFinite(expiresAt) || expiresAt <= now) {
-      expiresAt = Number.isFinite(fallbackMs) && fallbackMs > now ? fallbackMs : now;
-    }
-    const MAX_SPAN = 3600 * 1000;
-    if (expiresAt - now > MAX_SPAN) {
-      expiresAt = now + MAX_SPAN;
-    }
-    if (!Number.isFinite(expiresAt) || expiresAt <= now) return now;
-    return Math.floor(expiresAt);
+  function formatClock(seconds) {
+    const total = Math.max(0, Math.ceil(Number(seconds) || 0));
+    const minutes = Math.floor(total / 60);
+    const secs = total % 60;
+    return String(minutes).padStart(2, "0") + ":" + String(secs).padStart(2, "0");
   }
 
   const burstState = {
@@ -264,7 +242,6 @@
   }
 
   const FRAME_INTERVAL = 80; // ~12.5 FPS
-  const DEFAULT_TTL = 15_000;
 
   const state = {
     attached: false,
@@ -363,15 +340,6 @@
     return "x" + numeric.toFixed(1);
   }
 
-  function formatSeconds(ms) {
-    const remaining = Math.max(0, Math.ceil(Number(ms) / 1000));
-    const minutes = Math.floor(remaining / 60);
-    const seconds = remaining % 60;
-    const minuteText = String(minutes).padStart(2, "0");
-    const secondText = String(seconds).padStart(2, "0");
-    return minuteText + ":" + secondText;
-  }
-
   function setBadgeVariable(name, value) {
     if (!state.badge || !state.badge.style || typeof state.badge.style.setProperty !== "function") return;
     try { state.badge.style.setProperty(name, String(value)); }
@@ -428,42 +396,63 @@
     clearBadgeVariable("--boost-frac");
     clearBadgeVariable("--boost-hue");
     clearBadgeVariable("--boost-glow");
-    if (state.timerEl) state.timerEl.textContent = "";
+    if (state.timerEl) {
+      state.timerEl.textContent = "";
+      if (state.timerEl.style && typeof state.timerEl.style.setProperty === "function") {
+        try { state.timerEl.style.setProperty("display", "none"); }
+        catch (_) {}
+      } else if (state.timerEl.style && typeof state.timerEl.style.display !== "undefined") {
+        try { state.timerEl.style.display = "none"; }
+        catch (_) {}
+      }
+    }
     if (state.multiplierEl) state.multiplierEl.textContent = "";
   }
 
   function updateBoostDisplay(now) {
     if (!state.boost) return;
-    const current = typeof now === "number" ? now : Date.now();
-    const fallbackExpires = current + DEFAULT_TTL;
-    const expiresAt = normalizeExpiresAt(state.boost.expiresAt, fallbackExpires, current);
-    const remainingSeconds = getRemainingSeconds(expiresAt, current);
-    if (remainingSeconds <= 0) {
+    const current = Number.isFinite(now) ? now : Date.now();
+    const expiresAt = normalizeExpiresAt(state.boost.expiresAt);
+    if (!Number.isFinite(expiresAt) || expiresAt <= current) {
+      diagLog("boost_expired", { expiresAt, now: current });
       deactivateBoost();
       return;
     }
-    const remaining = remainingSeconds * 1000;
-    state.boost.expiresAt = expiresAt;
-    const MAX_DURATION = 3600 * 1000;
-    let durationMs = Number(state.boost.durationMs);
-    if (!Number.isFinite(durationMs) || durationMs <= 0 || durationMs < remaining) {
-      durationMs = Math.max(remaining, Math.min(DEFAULT_TTL, MAX_DURATION));
-      state.boost.durationMs = durationMs;
-    } else if (durationMs > MAX_DURATION) {
-      durationMs = MAX_DURATION;
-      state.boost.durationMs = durationMs;
+    const remainingMs = Math.max(0, expiresAt - current);
+    if (remainingMs <= 0) {
+      diagLog("boost_timer_ended", { expiresAt, now: current });
+      deactivateBoost();
+      return;
     }
-    const fraction = durationMs > 0 ? remaining / durationMs : 0;
-    const progress = Math.max(0, Math.min(1, 1 - fraction));
+
+    state.boost.expiresAt = expiresAt;
+
+    let totalMs = Number(state.boost.durationMs);
+    if (!Number.isFinite(totalMs) || totalMs <= 0 || totalMs < remainingMs) {
+      totalMs = remainingMs;
+    }
+    state.boost.durationMs = totalMs;
+    state.boost.startedAt = expiresAt - totalMs;
+
+    const progress = totalMs > 0 ? 1 - (remainingMs / totalMs) : 1;
     setBadgeVariable("--boost-hue", computeHue(state.boost.multiplier));
     setBadgeVariable("--boost-glow", computeGlow(state.boost.multiplier));
     if (state.hasConic) {
-      setBadgeVariable("--boost-frac", progress);
+      setBadgeVariable("--boost-frac", Math.max(0, Math.min(1, progress)));
     } else {
       clearBadgeVariable("--boost-frac");
     }
     if (state.multiplierEl) state.multiplierEl.textContent = formatMultiplier(state.boost.multiplier);
-    if (state.timerEl) state.timerEl.textContent = formatSeconds(remaining);
+    if (state.timerEl) {
+      state.timerEl.textContent = formatClock(remainingMs / 1000);
+      if (state.timerEl.style && typeof state.timerEl.style.removeProperty === "function") {
+        try { state.timerEl.style.removeProperty("display"); }
+        catch (_) {}
+      } else if (state.timerEl.style && typeof state.timerEl.style.display !== "undefined") {
+        try { state.timerEl.style.display = ""; }
+        catch (_) {}
+      }
+    }
     if (!state.badge || !state.badge.classList || typeof state.badge.classList.add !== "function") return;
     try { state.badge.classList.add("xp-boost--active"); }
     catch (_) {}
@@ -544,42 +533,42 @@
       deactivateBoost();
       return;
     }
+
     const now = Date.now();
-    let ttl = Number(payload.ttlMs);
-    const MAX_DURATION = 3600 * 1000;
-    if (Number.isFinite(ttl) && ttl > 0) {
-      ttl = Math.min(MAX_DURATION, Math.floor(ttl));
-    } else {
-      ttl = NaN;
-    }
-    const baseTtl = Number.isFinite(ttl) && ttl > 0 ? ttl : DEFAULT_TTL;
-    const endsAtSource = payload && Object.prototype.hasOwnProperty.call(payload, "expiresAt")
+    const rawExpires = Object.prototype.hasOwnProperty.call(payload || {}, "expiresAt")
       ? payload.expiresAt
       : payload && payload.endsAt;
-    let expiresAt = normalizeExpiresAt(endsAtSource, now + baseTtl, now);
-    if (expiresAt - now > MAX_DURATION) {
-      expiresAt = now + MAX_DURATION;
+    const expiresAt = normalizeExpiresAt(rawExpires);
+    if (!Number.isFinite(expiresAt) || expiresAt <= now) {
+      diagLog("boost_rejected", { reason: "invalid_expires", expiresAt: rawExpires, now });
+      deactivateBoost();
+      return;
     }
-    let remainingMs = Math.max(0, expiresAt - now);
+
+    const remainingMs = Math.max(0, expiresAt - now);
     if (remainingMs <= 0) {
-      remainingMs = baseTtl;
-      expiresAt = now + remainingMs;
+      diagLog("boost_rejected", { reason: "expired", expiresAt, now });
+      deactivateBoost();
+      return;
     }
-    let durationMs = Number.isFinite(ttl) && ttl > 0 ? Math.max(ttl, remainingMs) : remainingMs;
-    if (!Number.isFinite(durationMs) || durationMs <= 0) {
-      durationMs = baseTtl;
-    }
-    if (durationMs > MAX_DURATION) {
-      durationMs = MAX_DURATION;
-    }
-    const startedAt = Math.max(0, expiresAt - durationMs);
+
     state.boost = {
       multiplier,
-      startedAt,
-      durationMs,
       expiresAt,
+      durationMs: remainingMs,
+      startedAt: Math.max(0, expiresAt - remainingMs),
     };
-    updateBoostDisplay(startedAt);
+
+    const ttlCandidate = Number(payload && payload.ttlMs);
+    if (Number.isFinite(ttlCandidate) && ttlCandidate > 0) {
+      const ttl = Math.floor(ttlCandidate);
+      if (ttl > 0 && ttl >= remainingMs) {
+        state.boost.durationMs = ttl;
+        state.boost.startedAt = Math.max(0, expiresAt - ttl);
+      }
+    }
+
+    updateBoostDisplay(now);
     scheduleNextTick();
   }
 
@@ -737,10 +726,9 @@
     attach,
     detach,
     getState: function () { return Object.assign({}, state); },
-    normalizeMs,
-    getRemainingSeconds,
-    remainingSecondsFromDetail,
-    normalizeBoostCountdown,
+    normalizeExpiresAt,
+    computeRemainingSeconds,
+    formatClock,
     applyBoost,
     deactivateBoost,
     applyCombo,

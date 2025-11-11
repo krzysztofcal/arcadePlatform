@@ -378,7 +378,7 @@ await (async () => {
   assert.equal(harness.getWindowListenerCount('xp:boost'), 1, 'overlay should attach xp:boost listener for active game');
   assert.equal(harness.getWindowListenerCount('xp:tick'), 1, 'overlay should attach xp:tick listener for active game');
 
-  harness.dispatchBoost({ multiplier: 2, ttlMs: 5000 });
+  harness.dispatchBoost({ multiplier: 2, ttlMs: 5000, expiresAt: harness.context.Date.now() + 5000 });
   harness.advance(160);
   assert(harness.badge.classList.contains('xp-boost--active'), 'boost_border_active: badge should carry active class');
   const frac = parseFloat(harness.badge.style.getPropertyValue('--boost-frac') || '0');
@@ -441,7 +441,7 @@ await (async () => {
 await (async () => {
   const harness = createHarness();
   ensureAttached(harness);
-  harness.dispatchBoost({ multiplier: 2, ttlMs: 5000 });
+  harness.dispatchBoost({ multiplier: 2, ttlMs: 5000, expiresAt: harness.context.Date.now() + 5000 });
   harness.advance(160);
   harness.triggerWindow('pagehide');
   assert.equal(harness.getWindowListenerCount('xp:boost'), 0, 'no_duplicate_listeners_after_bfcache: listener removed on pagehide');
@@ -454,7 +454,7 @@ await (async () => {
 await (async () => {
   const harness = createHarness();
   ensureAttached(harness);
-  harness.dispatchBoost({ multiplier: 2, ttlMs: 3000 });
+  harness.dispatchBoost({ multiplier: 2, ttlMs: 3000, expiresAt: harness.context.Date.now() + 3000 });
   harness.advance(200);
   harness.setVisibility({ hidden: true, visibility: 'hidden' });
   harness.triggerDocument('visibilitychange');
@@ -467,7 +467,7 @@ await (async () => {
 await (async () => {
   const harness = createHarness({ conicSupport: false });
   ensureAttached(harness);
-  harness.dispatchBoost({ multiplier: 2, ttlMs: 4000 });
+  harness.dispatchBoost({ multiplier: 2, ttlMs: 4000, expiresAt: harness.context.Date.now() + 4000 });
   harness.advance(200);
   const fracValue = harness.badge.style.getPropertyValue('--boost-frac');
   assert.equal(fracValue, '', 'numeric_fallback_without_conic: conic variable should clear when unsupported');
