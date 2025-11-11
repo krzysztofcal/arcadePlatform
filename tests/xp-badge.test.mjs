@@ -153,3 +153,31 @@ test('normalizeBoostCountdown clamps epoch seconds to realistic countdown', () =
   const normalized = helper({ secondsLeft: Math.floor(fakeNow / 1000) });
   assert.ok(normalized >= 0 && normalized <= 3600, 'normalized value should be within range');
 });
+
+test('boost timer renders normalized countdown from epoch expiresAt', () => {
+  const now = 1_731_280_000_000;
+  const { window } = loadOverlay(now);
+  const badge = createNode('a');
+  badge.className = 'xp-badge';
+  badge.contains = () => false;
+  window.document.body.appendChild(badge);
+  window.document.querySelector = (selector) => {
+    if (!selector) return null;
+    if (String(selector).indexOf('xp-badge') !== -1) return badge;
+    return null;
+  };
+  window.GameXpBridge = {
+    isActiveGameWindow() { return true; },
+  };
+
+  const overlay = window.XpOverlay && window.XpOverlay.__test;
+  assert.ok(overlay, 'overlay test harness should exist');
+  overlay.attach();
+
+  const secondsFromEpoch = Math.floor((now + 15_000) / 1000);
+  overlay.applyBoost({ multiplier: 1.5, endsAt: secondsFromEpoch });
+  const state = overlay.getState();
+
+  assert.equal(state.timerEl && state.timerEl.textContent, '00:15');
+  assert.equal(state.multiplierEl && state.multiplierEl.textContent, 'x1.5');
+});

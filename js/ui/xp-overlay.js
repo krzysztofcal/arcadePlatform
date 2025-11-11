@@ -45,7 +45,8 @@
     if (!Number.isFinite(seconds)) {
       const endsAt = Number(payload.endsAt);
       if (Number.isFinite(endsAt)) {
-        seconds = Math.floor((endsAt - now) / 1000);
+        const normalizedEndsAt = normalizeExpiresAt(endsAt, now, now);
+        seconds = Math.floor((normalizedEndsAt - now) / 1000);
       }
     }
 
@@ -68,6 +69,30 @@
     if (seconds > 3600) seconds = 3600;
 
     return seconds;
+  }
+
+  function normalizeExpiresAt(rawValue, fallback, reference) {
+    const numeric = Number(rawValue);
+    const basis = Number.isFinite(reference) && reference > 0 ? reference : Date.now();
+    const fallbackNumeric = Number(fallback);
+    let threshold;
+    if (Number.isFinite(fallbackNumeric) && fallbackNumeric > 0) {
+      threshold = fallbackNumeric / 10;
+    } else if (Number.isFinite(basis) && basis > 0) {
+      threshold = basis / 10;
+    } else {
+      threshold = 1e11;
+    }
+    if (!Number.isFinite(threshold) || threshold <= 0) threshold = 1e11;
+
+    if (Number.isFinite(numeric) && numeric > 0) {
+      if (numeric < threshold) {
+        return numeric * 1000;
+      }
+      return numeric;
+    }
+
+    return Number.isFinite(fallbackNumeric) ? fallbackNumeric : 0;
   }
 
   const burstState = {
@@ -359,8 +384,12 @@
   }
 
   function formatSeconds(ms) {
-    const remaining = Math.max(0, Math.ceil(ms / 1000));
-    return remaining + "s";
+    const remaining = Math.max(0, Math.ceil(Number(ms) / 1000));
+    const minutes = Math.floor(remaining / 60);
+    const seconds = remaining % 60;
+    const minuteText = String(minutes).padStart(2, "0");
+    const secondText = String(seconds).padStart(2, "0");
+    return minuteText + ":" + secondText;
   }
 
   function setBadgeVariable(name, value) {
@@ -426,12 +455,23 @@
   function updateBoostDisplay(now) {
     if (!state.boost) return;
     const current = typeof now === "number" ? now : Date.now();
-    const remaining = Math.max(0, state.boost.expiresAt - current);
+    const expiresAt = normalizeExpiresAt(state.boost.expiresAt, current, current);
+    const remaining = Math.max(0, expiresAt - current);
     if (remaining <= 0) {
       deactivateBoost();
       return;
     }
-    const fraction = state.boost.durationMs > 0 ? remaining / state.boost.durationMs : 0;
+    state.boost.expiresAt = expiresAt;
+    const MAX_DURATION = 3600 * 1000;
+    let durationMs = Number(state.boost.durationMs);
+    if (!Number.isFinite(durationMs) || durationMs <= 0 || durationMs < remaining) {
+      durationMs = Math.max(remaining, Math.min(DEFAULT_TTL, MAX_DURATION));
+      state.boost.durationMs = durationMs;
+    } else if (durationMs > MAX_DURATION) {
+      durationMs = MAX_DURATION;
+      state.boost.durationMs = durationMs;
+    }
+    const fraction = durationMs > 0 ? remaining / durationMs : 0;
     const progress = Math.max(0, Math.min(1, 1 - fraction));
     setBadgeVariable("--boost-hue", computeHue(state.boost.multiplier));
     setBadgeVariable("--boost-glow", computeGlow(state.boost.multiplier));
@@ -522,17 +562,30 @@
       deactivateBoost();
       return;
     }
+    const now = Date.now();
     let ttl = Number(payload.ttlMs);
     const seconds = normalizeBoostCountdown(payload);
     if (!Number.isFinite(ttl) || ttl <= 0) ttl = Number(payload.durationMs);
     if (!Number.isFinite(ttl) || ttl <= 0) ttl = seconds * 1000;
     if (!Number.isFinite(ttl) || ttl <= 0) ttl = DEFAULT_TTL;
-    const startedAt = Date.now();
+    const MAX_DURATION = 3600 * 1000;
+    ttl = Math.max(0, Math.min(ttl, MAX_DURATION));
+    const fallbackExpires = now + (ttl || DEFAULT_TTL);
+    let expiresAt = normalizeExpiresAt(payload && payload.endsAt, fallbackExpires, now);
+    if (!Number.isFinite(expiresAt) || expiresAt <= now) {
+      expiresAt = fallbackExpires;
+    }
+    if (expiresAt - now > MAX_DURATION) {
+      expiresAt = now + MAX_DURATION;
+    }
+    const effectiveRemaining = Math.max(0, expiresAt - now);
+    const durationMs = Math.max(ttl || effectiveRemaining, effectiveRemaining || DEFAULT_TTL);
+    const startedAt = Math.max(0, expiresAt - durationMs);
     state.boost = {
       multiplier,
       startedAt,
-      durationMs: ttl,
-      expiresAt: startedAt + ttl,
+      durationMs,
+      expiresAt,
     };
     updateBoostDisplay(startedAt);
     scheduleNextTick();
