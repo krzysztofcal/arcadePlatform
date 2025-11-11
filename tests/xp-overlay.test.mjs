@@ -10,6 +10,7 @@ const repoRoot = path.join(__dirname, '..');
 const overlaySource = await readFile(path.join(repoRoot, 'js', 'ui', 'xp-overlay.js'), 'utf8');
 
 function createHarness(options = {}) {
+  const consoleRef = options.console || console;
   const listeners = new Map();
   const docListeners = new Map();
   const rafCallbacks = new Map();
@@ -72,6 +73,7 @@ function createHarness(options = {}) {
     node.parentNode = null;
     node.textContent = '';
     node.dataset = {};
+    const nodeListeners = new Map();
     node.hidden = false;
     Object.defineProperty(node, 'id', {
       get() { return localId; },
@@ -113,6 +115,32 @@ function createHarness(options = {}) {
       setProperty(name, value) { styleMap.set(name, String(value)); },
       removeProperty(name) { styleMap.delete(name); },
       getPropertyValue(name) { return styleMap.get(name) || ''; },
+    };
+    Object.defineProperty(node, 'offsetWidth', {
+      get() { return 0; },
+    });
+    node.addEventListener = function addEventListener(type, handler) {
+      if (!type || typeof handler !== 'function') return;
+      const key = String(type);
+      if (!nodeListeners.has(key)) nodeListeners.set(key, new Set());
+      nodeListeners.get(key).add(handler);
+    };
+    node.removeEventListener = function removeEventListener(type, handler) {
+      const key = String(type);
+      if (!nodeListeners.has(key)) return;
+      const bucket = nodeListeners.get(key);
+      bucket.delete(handler);
+      if (bucket.size === 0) nodeListeners.delete(key);
+    };
+    node.dispatchEvent = function dispatchEvent(event) {
+      if (!event) return true;
+      const key = String(event.type || '');
+      if (!nodeListeners.has(key)) return true;
+      for (const handler of [...nodeListeners.get(key)]) {
+        try { handler.call(node, event); }
+        catch (err) { consoleRef.error?.(err); }
+      }
+      return true;
     };
     node.appendChild = function appendChild(child) {
       if (!child) return child;
@@ -203,6 +231,12 @@ function createHarness(options = {}) {
     GameXpBridge: {
       isActiveGameWindow() { return !!activeGame && !hidden; },
     },
+    location: {
+      href: 'https://example.test/',
+      origin: 'https://example.test',
+      pathname: '/games/unit-test',
+      search: options.locationSearch || '',
+    },
     addEventListener(type, handler) { addListener(listeners, type, handler); },
     removeEventListener(type, handler) { removeListener(listeners, type, handler); },
     dispatchEvent(event) {
@@ -233,17 +267,18 @@ function createHarness(options = {}) {
         return options.conicSupport !== false;
       },
     },
-    console,
+    console: consoleRef,
   };
 
   const context = {
     window: windowStub,
     document,
-    console,
+    console: consoleRef,
     Date: FakeDate,
     setTimeout: windowStub.setTimeout.bind(windowStub),
     clearTimeout: windowStub.clearTimeout.bind(windowStub),
     CSS: windowStub.CSS,
+    location: windowStub.location,
   };
 
   vm.createContext(context);
@@ -270,7 +305,7 @@ function createHarness(options = {}) {
     for (const [id, meta] of pending) {
       timeouts.delete(id);
       try { meta.callback(); }
-      catch (err) { console.error(err); }
+      catch (err) { if (consoleRef && typeof consoleRef.error === 'function') { consoleRef.error(err); } }
     }
   }
 
@@ -294,6 +329,10 @@ function createHarness(options = {}) {
     windowStub.dispatchEvent({ type: 'xp:boost', detail });
   }
 
+  function dispatchTick(detail) {
+    windowStub.dispatchEvent({ type: 'xp:tick', detail });
+  }
+
   return {
     context,
     window: windowStub,
@@ -301,6 +340,7 @@ function createHarness(options = {}) {
     badge,
     advance,
     dispatchBoost,
+    dispatchTick,
     fireDomContentLoaded,
     setActiveGame(value) { activeGame = !!value; },
     setVisibility({ hidden: isHidden, visibility } = {}) {
@@ -336,6 +376,7 @@ await (async () => {
   const harness = createHarness();
   ensureAttached(harness);
   assert.equal(harness.getWindowListenerCount('xp:boost'), 1, 'overlay should attach xp:boost listener for active game');
+  assert.equal(harness.getWindowListenerCount('xp:tick'), 1, 'overlay should attach xp:tick listener for active game');
 
   harness.dispatchBoost({ multiplier: 2, ttlMs: 5000 });
   harness.advance(160);
@@ -345,6 +386,33 @@ await (async () => {
 
   harness.advance(5200);
   assert.equal(harness.badge.classList.contains('xp-boost--active'), false, 'boost_border_inactive: class removed after expiry');
+})();
+
+await (async () => {
+  const harness = createHarness();
+  ensureAttached(harness);
+  const overlayState = () => harness.window.XPOverlay.__test.getState();
+  harness.dispatchTick({
+    combo: { multiplier: 4, cap: 20 },
+    progressToNext: 0.5,
+    mode: 'build',
+  });
+  assert.equal(overlayState().comboDetail.multiplier, 4, 'xp:tick should update combo multiplier');
+  assert(Math.abs(overlayState().comboDetail.progress - 0.5) < 0.001, 'xp:tick should update combo progress');
+  assert.equal(harness.badge.style.getPropertyValue('--combo-progress'), '0.5', 'combo progress CSS variable should update');
+  harness.dispatchTick({
+    combo: { multiplier: 20, cap: 20 },
+    progressToNext: 0.8,
+    mode: 'sustain',
+  });
+  assert(harness.badge.classList.contains('xp-combo--sustain'), 'badge should reflect sustain mode');
+  harness.dispatchTick({
+    combo: { multiplier: 1, cap: 20 },
+    progressToNext: 0,
+    mode: 'cooldown',
+  });
+  assert.equal(harness.badge.classList.contains('xp-combo--sustain'), false, 'cooldown should clear sustain class');
+  assert(harness.badge.classList.contains('xp-combo--cooldown'), 'badge should reflect cooldown mode');
 })();
 
 await (async () => {
@@ -366,6 +434,7 @@ await (async () => {
   const harness = createHarness({ activeGame: false });
   ensureAttached(harness);
   assert.equal(harness.getWindowListenerCount('xp:boost'), 0, 'boost_gating: overlay should not attach when game inactive');
+  assert.equal(harness.getWindowListenerCount('xp:tick'), 0, 'boost_gating: xp:tick listener should not attach when game inactive');
   assert.equal(harness.badge.querySelector('.xp-boost-chip'), null, 'boost_gating: chip should not be injected for inactive game');
 })();
 
@@ -376,8 +445,10 @@ await (async () => {
   harness.advance(160);
   harness.triggerWindow('pagehide');
   assert.equal(harness.getWindowListenerCount('xp:boost'), 0, 'no_duplicate_listeners_after_bfcache: listener removed on pagehide');
+  assert.equal(harness.getWindowListenerCount('xp:tick'), 0, 'no_duplicate_listeners_after_bfcache: xp:tick listener removed on pagehide');
   harness.triggerWindow('pageshow');
   assert.equal(harness.getWindowListenerCount('xp:boost'), 1, 'no_duplicate_listeners_after_bfcache: listener reattached once');
+  assert.equal(harness.getWindowListenerCount('xp:tick'), 1, 'no_duplicate_listeners_after_bfcache: xp:tick listener reattached once');
 })();
 
 await (async () => {
@@ -388,6 +459,7 @@ await (async () => {
   harness.setVisibility({ hidden: true, visibility: 'hidden' });
   harness.triggerDocument('visibilitychange');
   assert.equal(harness.getWindowListenerCount('xp:boost'), 0, 'timers_are_cleared_on_detach: listener cleared on detach');
+  assert.equal(harness.getWindowListenerCount('xp:tick'), 0, 'timers_are_cleared_on_detach: xp:tick listener cleared on detach');
   assert.equal(harness.getActiveRafCount(), 0, 'timers_are_cleared_on_detach: raf cleared');
   assert.equal(harness.getActiveTimeoutCount(), 0, 'timers_are_cleared_on_detach: timers cleared');
 })();
@@ -401,4 +473,43 @@ await (async () => {
   assert.equal(fracValue, '', 'numeric_fallback_without_conic: conic variable should clear when unsupported');
   assert.match(harness.getMultiplierText(), /^x/, 'numeric_fallback_without_conic: multiplier should be visible');
   assert.match(harness.getTimerText(), /s$/, 'numeric_fallback_without_conic: timer text should update');
+  harness.dispatchTick({
+    combo: { multiplier: 3, cap: 20 },
+    progressToNext: 0.6,
+    mode: 'build',
+  });
+  assert.equal(harness.badge.style.getPropertyValue('--combo-progress'), '', 'numeric_fallback_without_conic: combo progress var should clear when unsupported');
+})();
+
+await (async () => {
+  const harness = createHarness();
+  const overlayApi = harness.window.XpOverlay || harness.window.XPOverlay;
+  assert(overlayApi && typeof overlayApi.showBurst === 'function', 'burst_overlay: showBurst should exist');
+  overlayApi.showBurst({ xp: 23, combo: 3, boost: 2 });
+  const root = harness.document.querySelector('.xp-overlay');
+  assert(root, 'burst_overlay: root element should be created');
+  const label = root.querySelector('.xp-overlay__label');
+  const meta = root.querySelector('.xp-overlay__meta');
+  assert.equal(label && label.textContent, '+23 XP', 'burst_overlay: label should include xp total');
+  assert.equal(meta && meta.textContent, 'Combo ×3 · Boost ×2', 'burst_overlay: meta should list combo and boost');
+  overlayApi.showBurst({ xp: 5, combo: 1, boost: 1 });
+  assert.equal(meta && meta.textContent, '', 'burst_overlay: meta should clear when combo/boost inactive');
+})();
+
+await (async () => {
+  const logs = [];
+  const fakeConsole = {
+    debug: (...args) => { logs.push({ level: 'debug', args }); },
+    log: (...args) => { logs.push({ level: 'log', args }); },
+    info: () => {},
+    warn: () => {},
+    error: () => {},
+  };
+  const harness = createHarness({ locationSearch: '?xpdiag=1', console: fakeConsole });
+  ensureAttached(harness);
+  const overlayApi = harness.window.XpOverlay || harness.window.XPOverlay;
+  overlayApi.showBurst({ xp: 9, combo: 2, boost: 1 });
+  assert.equal(harness.document.body.dataset.xpOverlayDebug, '1', 'diag_flag: debug dataset flag should enable outline');
+  const burstLogs = logs.filter((entry) => entry.level === 'debug' && entry.args && entry.args[0] === '[xp-overlay] burst');
+  assert(burstLogs.length >= 1, 'diag_flag: bursts should emit debug log entries');
 })();
