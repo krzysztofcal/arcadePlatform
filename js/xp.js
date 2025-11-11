@@ -593,6 +593,12 @@
       secondsLeft = 0;
     }
 
+    const MAX_SECONDS = 3600;
+    if (!Number.isFinite(secondsLeft) || secondsLeft < 0) {
+      secondsLeft = 0;
+    }
+    secondsLeft = Math.max(0, Math.min(MAX_SECONDS, secondsLeft));
+
     let totalSeconds = meta && Object.prototype.hasOwnProperty.call(meta, "totalSeconds")
       ? parseNumber(meta.totalSeconds, NaN)
       : NaN;
@@ -605,6 +611,11 @@
     }
     if (!Number.isFinite(totalSeconds) || totalSeconds <= 0) {
       totalSeconds = Math.max(secondsLeft, DEFAULT_BOOST_SEC);
+    }
+
+    totalSeconds = Math.max(secondsLeft, Math.min(MAX_SECONDS, totalSeconds));
+    if (secondsLeft > totalSeconds) {
+      secondsLeft = totalSeconds;
     }
 
     const detail = {
@@ -1002,21 +1013,56 @@
           totalSeconds: DEFAULT_BOOST_SEC,
           gameId: null,
         }, parsed.boost);
-        scheduleBoostExpiration(state.boost.expiresAt || 0);
+        const rawExpires = Number(state.boost.expiresAt);
         const nowTs = Date.now();
-        const ttl = (Number(state.boost.expiresAt) || 0) - nowTs;
-        if ((Number(state.boost.multiplier) || 1) > 1 && ttl > 0) {
+        const originalExpiresAt = Number.isFinite(rawExpires) ? rawExpires : 0;
+        let sanitizedExpiresAt = Number.isFinite(rawExpires) ? rawExpires : 0;
+        if (sanitizedExpiresAt > 0 && sanitizedExpiresAt < 1e12 && nowTs > 1e12) {
+          sanitizedExpiresAt = Math.floor(sanitizedExpiresAt * 1000);
+        }
+        const maxTtl = DEFAULT_BOOST_SEC * 1000;
+        if (sanitizedExpiresAt > 0) {
+          const delta = sanitizedExpiresAt - nowTs;
+          if (!Number.isFinite(delta) || delta < 0) {
+            sanitizedExpiresAt = 0;
+          } else if (delta > maxTtl) {
+            sanitizedExpiresAt = nowTs + maxTtl;
+          }
+        }
+        state.boost.totalSeconds = Math.max(0, Math.floor(parseNumber(state.boost.totalSeconds, DEFAULT_BOOST_SEC) || DEFAULT_BOOST_SEC));
+        state.boost.expiresAt = sanitizedExpiresAt;
+        scheduleBoostExpiration(sanitizedExpiresAt || 0);
+        let ttl = Math.max(0, Math.floor((Number(state.boost.expiresAt) || 0) - nowTs));
+        if (ttl === 0) {
+          if ((Number(state.boost.multiplier) || 1) > 1) {
+            resetBoost({
+              source: state.boost.source,
+              totalSeconds: state.boost.totalSeconds,
+              gameId: state.boost.gameId || state.gameId || null,
+            });
+          } else {
+            emitBoost(1, 0, {
+              source: state.boost.source,
+              totalSeconds: state.boost.totalSeconds,
+              secondsLeft: 0,
+              gameId: state.boost.gameId || state.gameId || null,
+            });
+          }
+        } else {
+          const secondsLeft = Math.max(0, Math.floor(ttl / 1000));
           emitBoost(state.boost.multiplier, ttl, {
             source: state.boost.source,
-            totalSeconds: state.boost.totalSeconds,
-            secondsLeft: Math.max(0, Math.floor(ttl / 1000)),
-            gameId: state.boost.gameId,
+            totalSeconds: Number(state.boost.totalSeconds) || DEFAULT_BOOST_SEC,
+            secondsLeft,
+            gameId: state.boost.gameId || state.gameId || null,
           });
-        } else {
-          emitBoost(1, 0, {
-            source: state.boost.source,
-            totalSeconds: state.boost.totalSeconds,
-            gameId: state.boost.gameId,
+        }
+        if (isDiagEnabled() && originalExpiresAt !== state.boost.expiresAt) {
+          logDebug("boost_hydrate_repair", {
+            expiresAt: state.boost.expiresAt,
+            originalExpiresAt,
+            ttl,
+            now: nowTs,
           });
         }
       }
@@ -1815,11 +1861,16 @@
     };
 
     const now = Date.now();
+    const MAX_BOOST_DURATION_MS = 5 * 60 * 1000;
+    const MAX_BOOST_SECONDS = Math.floor(MAX_BOOST_DURATION_MS / 1000);
 
     let secondsLeft = normalizeSeconds(rawSecondsLeft);
     let totalSeconds = normalizeSeconds(rawTotalSeconds);
     const parsedTtl = parseNumber(rawTtl, 0) || 0;
     let ttl = Number.isFinite(parsedTtl) ? Math.max(0, parsedTtl) : 0;
+    if (ttl > MAX_BOOST_DURATION_MS) {
+      ttl = MAX_BOOST_DURATION_MS;
+    }
 
     if (secondsLeft != null) {
       if (ttl <= 0) ttl = secondsLeft * 1000;
@@ -1829,15 +1880,36 @@
       secondsLeft = 0;
     }
 
+    if (secondsLeft != null) {
+      secondsLeft = Math.min(Math.max(0, secondsLeft), MAX_BOOST_SECONDS);
+    }
+
     if (totalSeconds != null) {
-      totalSeconds = Math.max(totalSeconds, secondsLeft);
+      totalSeconds = Math.max(totalSeconds, secondsLeft != null ? secondsLeft : 0);
     } else if (ttl > 0) {
-      totalSeconds = Math.max(secondsLeft, Math.floor(ttl / 1000));
+      totalSeconds = Math.max(secondsLeft != null ? secondsLeft : 0, Math.floor(ttl / 1000));
     } else {
-      totalSeconds = Math.max(secondsLeft, DEFAULT_BOOST_SEC);
+      totalSeconds = Math.max(secondsLeft != null ? secondsLeft : 0, DEFAULT_BOOST_SEC);
     }
     if (!Number.isFinite(totalSeconds) || totalSeconds <= 0) {
-      totalSeconds = Math.max(secondsLeft, DEFAULT_BOOST_SEC);
+      totalSeconds = Math.max(secondsLeft != null ? secondsLeft : 0, DEFAULT_BOOST_SEC);
+    }
+
+    totalSeconds = Math.min(MAX_BOOST_SECONDS, Math.max(secondsLeft != null ? secondsLeft : 0, totalSeconds));
+    if (secondsLeft != null) {
+      secondsLeft = Math.min(totalSeconds, Math.max(0, secondsLeft));
+    }
+
+    if (secondsLeft != null) {
+      const secondsMs = secondsLeft * 1000;
+      if (secondsLeft > 0 && ttl <= 0) {
+        ttl = secondsMs;
+      } else if (ttl > secondsMs) {
+        ttl = secondsMs;
+      }
+    }
+    if (ttl > MAX_BOOST_DURATION_MS) {
+      ttl = MAX_BOOST_DURATION_MS;
     }
 
     const normalizedGameId = rawGameId != null ? normalizeGameId(rawGameId) : null;
@@ -2057,6 +2129,20 @@
             score: typeof event.data.score === "number" ? event.data.score : undefined,
           });
           handleScorePulse(event.data.gameId, event.data.score);
+          try {
+            const XP = window && window.XP;
+            const running = XP && typeof XP.isRunning === "function" ? !!XP.isRunning() : false;
+            if (!running) {
+              const gid = resolveScorePulseGameId(event.data.gameId);
+              if (gid && XP && typeof XP.startSession === "function") {
+                try { window.__GAME_ID__ = gid; } catch (_) {}
+                XP.startSession(gid, { resume: true });
+                if (isDiagEnabled()) {
+                  logDebug("auto_start_from_score_pulse", { gameId: gid });
+                }
+              }
+            }
+          } catch (_) {}
         } catch (_) {}
       }, { passive: true });
 

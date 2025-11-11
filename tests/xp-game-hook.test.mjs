@@ -410,3 +410,64 @@ import { createEnvironment } from './helpers/xp-env.mjs';
 
   assert.equal(xpBoosts.filter((event) => event.source === 'newRecord').length, 2, 'BFCache resume should allow another record boost');
 }
+
+// boost hydration clamps seconds to sane values
+{
+  const env = createEnvironment();
+  const { context, installXp, drainTimers } = env;
+
+  const futureSeconds = Math.floor(Date.now() / 1000) + 600;
+  context.window.localStorage.setItem('kcswh:xp:regen', JSON.stringify({
+    boost: {
+      multiplier: 2,
+      expiresAt: futureSeconds,
+      totalSeconds: 15,
+      source: 'hydrate-test',
+      gameId: 'hydrate-game',
+    },
+  }));
+
+  const boostEvents = [];
+  context.window.addEventListener('xp:boost', (event) => {
+    if (!event || !event.detail) return;
+    if (event.detail.__xpOrigin === 'xp.js') {
+      boostEvents.push({ ...event.detail });
+    }
+  });
+
+  const { getState } = installXp();
+  drainTimers();
+
+  assert.equal(boostEvents.length > 0, true, 'hydrate should emit a boost event');
+  const detail = boostEvents[boostEvents.length - 1];
+  assert.equal(detail.multiplier > 1, true, 'hydrated boost should remain active');
+  assert.equal(detail.secondsLeft <= 15, true, 'hydrated secondsLeft should clamp to default duration');
+  assert.equal(detail.secondsLeft >= 0, true, 'hydrated secondsLeft should be non-negative');
+  assert.equal(detail.totalSeconds, 15, 'hydrated totalSeconds should remain consistent');
+
+  const ttlMs = Math.max(0, (getState().boost && getState().boost.expiresAt) - Date.now());
+  assert.equal(ttlMs <= 15_000, true, 'hydrated boost ttl should clamp to default window');
+}
+
+// score pulse auto-starts host session when idle
+{
+  const env = createEnvironment({ bodyGameId: 'score-run', windowGameId: null, pathname: '/games-open/score-run/index.html' });
+  const { context, installXp, drainTimers, triggerWindow } = env;
+
+  const { XP, getState } = installXp();
+  drainTimers();
+
+  assert.equal(typeof XP.isRunning, 'function', 'XP should expose isRunning');
+  assert.equal(XP.isRunning(), false, 'host should be idle before score pulse');
+
+  triggerWindow('message', {
+    data: { type: 'game-score', gameId: 'score-run', score: 8 },
+    origin: context.location.origin,
+  });
+  drainTimers();
+
+  assert.equal(XP.isRunning(), true, 'score pulse should start the session when idle');
+  assert.equal(getState().running, true, 'score pulse should transition host to running');
+  assert.equal(getState().gameId, 'score-run', 'score pulse auto-start should capture the game id');
+  assert.equal(context.window.__GAME_ID__, 'score-run', 'score pulse should persist window game id');
+}

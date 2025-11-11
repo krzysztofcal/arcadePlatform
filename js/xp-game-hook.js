@@ -317,8 +317,34 @@
       if (datasetId) return datasetId;
     }
 
+    try {
+      if (typeof location !== "undefined" && location && typeof location.pathname === "string") {
+        const parts = location.pathname.split("/").filter(Boolean);
+        if (parts.length) {
+          let segment = parts[parts.length - 1];
+          if (/^index(?:\.[a-z0-9]+)?$/i.test(segment) && parts.length >= 2) {
+            segment = parts[parts.length - 2];
+          }
+          if (parts[0] && parts[0].toLowerCase() === "games-open" && parts.length >= 2) {
+            segment = parts[1];
+          }
+          segment = String(segment || "").replace(/\.[a-z0-9]+$/i, "");
+          segment = segment.replace(/^game[_-]?/i, "");
+          segment = segment.replace(/_/g, "-");
+          if (segment.toLowerCase() === "trex") {
+            segment = "t-rex";
+          }
+          const fromPath = normalizeGameId(segment);
+          if (fromPath) return fromPath;
+        }
+      }
+    } catch (_) {}
+
     const title = document && normalizeGameId(document.title);
     if (title) return title;
+
+    const fallback = readWindowGameId();
+    if (fallback) return fallback;
 
     return null;
   }
@@ -459,7 +485,7 @@
       try {
         const attemptStart = () => {
           if (!state.runningDesired || state.handleVisibleRan) return;
-          const candidate = state.lastGameId || detectGameId();
+          const candidate = state.lastGameId || readWindowGameId() || detectGameId();
           if (candidate) {
             start(candidate);
           }

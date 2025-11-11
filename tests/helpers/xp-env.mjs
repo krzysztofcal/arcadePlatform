@@ -71,6 +71,7 @@ export function createEnvironment(options = {}) {
   let docTitle = options.title || 'Stub Game';
   let bodyGameId = options.bodyGameId || 'body-game';
   let windowGameId = options.windowGameId || null;
+  let locationPath = options.pathname || '/games-open/test/index.html';
 
   const attributes = new Map();
   attributes.set('data-game-host', '');
@@ -180,6 +181,16 @@ export function createEnvironment(options = {}) {
     },
   };
 
+  const locationStub = {
+    origin: options.origin || 'https://example.test',
+    get pathname() {
+      return locationPath;
+    },
+    set pathname(value) {
+      locationPath = value == null ? '/' : String(value);
+    },
+  };
+
   const windowStub = {
     GAME_ID: windowGameId,
     localStorage: localStorageStub,
@@ -198,7 +209,7 @@ export function createEnvironment(options = {}) {
     setTimeout: fakeSetTimeout,
     clearTimeout: fakeClearTimeout,
     parent: null,
-    location: { origin: options.origin || 'https://example.test' },
+    location: locationStub,
     console,
     postMessage() {},
   };
@@ -208,7 +219,7 @@ export function createEnvironment(options = {}) {
   const context = {
     window: windowStub,
     document: documentStub,
-    location: windowStub.location,
+    location: locationStub,
     console,
     setTimeout: fakeSetTimeout,
     clearTimeout: fakeClearTimeout,
@@ -280,6 +291,11 @@ export function createEnvironment(options = {}) {
       }
       if (typeof nextWindowId !== 'undefined') {
         windowStub.GAME_ID = nextWindowId == null ? nextWindowId : String(nextWindowId);
+      }
+    },
+    updateLocation({ pathname } = {}) {
+      if (typeof pathname !== 'undefined') {
+        locationStub.pathname = pathname;
       }
     },
   };
