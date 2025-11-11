@@ -18,6 +18,9 @@ const instrumented = xpSource.replace(
     injectionTarget
 );
 
+const xpHookSource = await readFile(path.join(__dirname, '..', 'js', 'xp-game-hook.js'), 'utf8');
+const xpOverlaySource = await readFile(path.join(__dirname, '..', 'js', 'ui', 'xp-overlay.js'), 'utf8');
+
 function addListener(store, type, handler) {
   const key = String(type);
   const list = store.get(key) || [];
@@ -306,11 +309,17 @@ localStorageMock.setItem(CACHE_KEY, JSON.stringify({
 
 vm.createContext(context);
 new vm.Script(instrumented, { filename: 'xp.js' }).runInContext(context);
+new vm.Script(xpHookSource, { filename: 'xp-game-hook.js' }).runInContext(context);
+new vm.Script(xpOverlaySource, { filename: 'xp-overlay.js' }).runInContext(context);
 
 const XP = context.window.XP;
 assert(XP, 'XP API not initialized');
 const getState = context.window.__xpTestHook;
 assert.equal(typeof getState, 'function', 'state hook missing');
+const GameXpBridge = context.window.GameXpBridge;
+assert(GameXpBridge, 'GameXpBridge missing');
+const XPOverlay = context.window.XPOverlay;
+assert(XPOverlay && typeof XPOverlay.init === 'function', 'XPOverlay.init missing');
 
 const AWARD_INTERVAL_MS = windowStub.XP_AWARD_INTERVAL_MS;
 const HARD_IDLE_MS = windowStub.XP_HARD_IDLE_MS;
@@ -365,6 +374,10 @@ function resetNetworkStubs() {
   flushRequests.length = 0;
   fetchShouldFail = false;
   sendBeaconShouldSucceed = false;
+}
+
+function getTimerCount() {
+  return timers.size;
 }
 
 function freshSession(label) {
@@ -510,5 +523,67 @@ fetchShouldFail = false;
 await XP.flushXp(true);
 await settleFlush();
 assert.equal(getState().flush.pending, 0, 'successful flush should clear pending');
+
+// Overlay gating scenarios
+windowStub.__GAME_ID__ = 'marketing-page';
+freshSession('marketing-xp');
+const timersBeforeNonGame = getTimerCount();
+const skippedOverlay = XPOverlay.init({ intervalMs: 200, onTick: () => { throw new Error('should not tick on non-game page'); } });
+assert.equal(skippedOverlay.active, false, 'gating_non_game_pages should skip overlay bootstrap');
+assert.equal(getTimerCount(), timersBeforeNonGame, 'non-active overlay must not allocate timers');
+skippedOverlay.destroy();
+
+windowStub.__GAME_ID__ = 'gating-visible';
+documentStub.visibilityState = 'visible';
+documentStub.hidden = false;
+freshSession('gating-visible');
+const hiddenBaseline = getListeners(docListeners, 'xp:hidden').length;
+const timerBaseline = getTimerCount();
+let overlayTicks = 0;
+const activeOverlay = XPOverlay.init({ intervalMs: 500, onTick: () => { overlayTicks += 1; } });
+assert.equal(activeOverlay.active, true, 'gating_game_visible should activate overlay');
+assert(getTimerCount() > timerBaseline, 'active overlay should start an interval timer');
+assert(getListeners(docListeners, 'xp:hidden').length > hiddenBaseline, 'active overlay attaches xp:hidden listener');
+advanceTime(500);
+assert(overlayTicks >= 1, 'overlay tick should run while tab is visible');
+
+documentStub.visibilityState = 'hidden';
+documentStub.hidden = true;
+trigger('visibilitychange', documentStub);
+advanceTime(500);
+const ticksAfterHide = overlayTicks;
+assert.equal(activeOverlay.isDestroyed(), true, 'overlay should tear down when tab becomes hidden');
+assert(getTimerCount() <= timerBaseline, 'overlay should clear its timer when hidden');
+assert.equal(getListeners(docListeners, 'xp:hidden').length, hiddenBaseline, 'xp:hidden listener removed after teardown');
+advanceTime(500);
+assert.equal(overlayTicks, ticksAfterHide, 'overlay should not tick after teardown');
+
+documentStub.visibilityState = 'visible';
+documentStub.hidden = false;
+
+windowStub.__GAME_ID__ = 'gating-pagehide';
+freshSession('gating-pagehide');
+const hiddenBeforePageHide = getListeners(docListeners, 'xp:hidden').length;
+const timersBeforePageHide = getTimerCount();
+const overlayForPageHide = XPOverlay.init({ intervalMs: 400 });
+assert.equal(overlayForPageHide.active, true, 'overlay should activate before pagehide test');
+trigger('pagehide', windowStub);
+assert.equal(overlayForPageHide.isDestroyed(), true, 'pagehide should destroy overlay instance');
+assert.equal(getListeners(docListeners, 'xp:hidden').length, hiddenBeforePageHide, 'xp:hidden listener removed after pagehide');
+assert(getTimerCount() <= timersBeforePageHide, 'pagehide cleanup should clear timers');
+
+windowStub.__GAME_ID__ = 'gating-beforeunload';
+freshSession('gating-beforeunload');
+const timersBeforeUnload = getTimerCount();
+const hiddenBeforeUnload = getListeners(docListeners, 'xp:hidden').length;
+const overlayForBeforeUnload = XPOverlay.init({ intervalMs: 400 });
+assert.equal(overlayForBeforeUnload.active, true, 'overlay should activate before beforeunload test');
+trigger('beforeunload', windowStub);
+assert.equal(overlayForBeforeUnload.isDestroyed(), true, 'beforeunload should destroy overlay instance');
+assert(getTimerCount() <= timersBeforeUnload, 'beforeunload cleanup should clear timers');
+assert.equal(getListeners(docListeners, 'xp:hidden').length, hiddenBeforeUnload, 'xp:hidden listener removed after beforeunload');
+
+documentStub.visibilityState = 'visible';
+documentStub.hidden = false;
 
 console.log('xp-client tests passed');

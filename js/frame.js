@@ -24,6 +24,14 @@
     ? window.GameUtils
     : null;
   let currentSlug = '';
+  function setWindowGameId(slug){
+    try {
+      if (typeof window === 'undefined') return;
+      if (slug) {
+        window.__GAME_ID__ = String(slug).trim();
+      }
+    } catch (_) {}
+  }
   let pendingFsAction = null;
   let lastFsState = false;
 
@@ -524,6 +532,7 @@ function showCatalogError(){
 async function init(){
   const slug = qsParam('slug') || '';
   currentSlug = slug;
+  setWindowGameId(slug || 'game-shell');
 
   let list;
   try {
@@ -538,6 +547,7 @@ async function init(){
   const game = list.find(g => g.slug === slug);
 
   if (!slug || !game){
+    if (!slug) setWindowGameId('game-shell');
     showEmptyState(
       slug ? 'Game not found' : 'No game selected',
       slug ? 'Game not found.' : 'Choose a game from the catalog to start playing.',

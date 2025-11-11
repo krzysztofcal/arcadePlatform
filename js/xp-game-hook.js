@@ -128,6 +128,54 @@
     return limited || null;
   }
 
+  function readWindowGameId() {
+    try {
+      if (typeof window === "undefined") return null;
+      if (Object.prototype.hasOwnProperty.call(window, "__GAME_ID__")) {
+        return normalizeGameId(window.__GAME_ID__);
+      }
+      if (window.__GAME_ID__ != null) {
+        return normalizeGameId(window.__GAME_ID__);
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  function resolvePageGameId() {
+    const fromWindow = readWindowGameId();
+    if (fromWindow) return slugifyGameId(fromWindow);
+    if (state.lastGameId) return slugifyGameId(state.lastGameId);
+    const detected = detectGameId();
+    return slugifyGameId(detected);
+  }
+
+  function resolveSessionGameId(xp) {
+    if (!xp) return null;
+    try {
+      if (xp.session && typeof xp.session === "object") {
+        const sessionId = normalizeGameId(xp.session.gameId);
+        if (sessionId) return sessionId;
+      }
+    } catch (_) {}
+    try {
+      if (xp.__lastGameId) {
+        const fromLast = normalizeGameId(xp.__lastGameId);
+        if (fromLast) return fromLast;
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  function updateXpSessionGameId(xp, gameId) {
+    if (!xp) return;
+    try {
+      if (!xp.session || typeof xp.session !== "object") {
+        xp.session = {};
+      }
+      xp.session.gameId = gameId || null;
+    } catch (_) {}
+  }
+
   function detectGameId() {
     const fromWindow = normalizeGameId(window && window.GAME_ID);
     if (fromWindow) return fromWindow;
@@ -329,6 +377,8 @@
     ensureAutoBootGuard();
     const xp = getXp();
     state.lastGameId = slugged;
+    try { if (window) window.__GAME_ID__ = slugged; } catch (_) {}
+    updateXpSessionGameId(xp, slugged);
     const running = xp && typeof xp.isRunning === "function" ? !!xp.isRunning() : false;
     const currentGameId = xp && xp.__lastGameId ? slugifyGameId(xp.__lastGameId) : null;
 
@@ -364,6 +414,8 @@
       opts.flush = true;
     }
     state.pendingStopOptions = opts;
+    const xp = getXp();
+    updateXpSessionGameId(xp, null);
     if (!flush()) scheduleFlush();
   }
 
@@ -412,6 +464,35 @@
   bridge.stop = stop;
   bridge.add = add;
   bridge.nudge = nudge;
+  bridge.getCurrentGameId = function getCurrentGameId() {
+    const pageId = resolvePageGameId();
+    if (pageId) return pageId;
+    const xp = getXp();
+    const sessionId = resolveSessionGameId(xp);
+    const slugged = slugifyGameId(sessionId);
+    if (slugged) return slugged;
+    const detected = slugifyGameId(detectGameId());
+    return detected;
+  };
+  bridge.isActiveGameWindow = function isActiveGameWindow() {
+    if (!window || !document) return false;
+    try {
+      if (typeof document.visibilityState === "string" && document.visibilityState !== "visible") return false;
+      if (document.hidden === true) return false;
+    } catch (_) {}
+    const pageId = resolvePageGameId();
+    if (!pageId) return false;
+    const xp = getXp();
+    const sessionId = slugifyGameId(resolveSessionGameId(xp));
+    if (!sessionId) return false;
+    if (sessionId !== pageId) return false;
+    let running = false;
+    if (xp && typeof xp.isRunning === "function") {
+      try { running = !!xp.isRunning(); } catch (_) { running = false; }
+    }
+    if (!running && !state.runningDesired) return false;
+    return true;
+  };
 
   window.GameXpBridge = bridge;
 })(typeof window !== "undefined" ? window : undefined, typeof document !== "undefined" ? document : undefined);
