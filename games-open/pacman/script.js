@@ -82,6 +82,13 @@ function updateScoreDisplay(){
   reportScore();
 }
 
+function notifyGameOver(){
+  const bridge = window.GameXpBridge;
+  if (bridge && typeof bridge.gameOver === "function") {
+    try { bridge.gameOver({ score }); } catch (_error) {}
+  }
+}
+
 startBtn.addEventListener("click", () => {
   if (!running) {
     running = true;
@@ -104,6 +111,7 @@ pauseBtn.addEventListener("click", () => {
 });
 
 resetBtn.addEventListener("click", () => {
+  notifyGameOver();
   resetGame();
   running = false;
   paused = false;
@@ -253,6 +261,7 @@ function update(delta) {
   ghosts.forEach(checkCollision);
   if (!pelletTotal) {
     running = false;
+    notifyGameOver();
     showOverlay("You win!", "Press reset to play again");
   }
 }
@@ -353,6 +362,7 @@ function loseLife() {
   livesEl.textContent = pacman.lives;
   if (pacman.lives <= 0) {
     running = false;
+    notifyGameOver();
     showOverlay("Game over", "Press reset to try again");
     return;
   }

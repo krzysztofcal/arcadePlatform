@@ -13,6 +13,28 @@
     lastTotalXp: null,
   };
 
+  const HIGH_SCORE_KEY_PREFIX = "ap:hs:";
+  const BOOST_IDLE_TIMEOUT_MS = 20_000;
+  const BOOST_SENTINEL_SECONDS = 9_999;
+  const DEFAULT_NEW_RECORD_MULTIPLIER = 1.5;
+
+  const boostState = {
+    active: false,
+    multiplier: DEFAULT_NEW_RECORD_MULTIPLIER,
+    ticker: null,
+    secondsLeft: 0,
+    source: "newRecord",
+    gameId: null,
+    lastPulseTs: 0,
+  };
+
+  const sessionState = {
+    highScore: 0,
+    lastScore: 0,
+    peakScore: 0,
+    lastScorePulseTs: 0,
+  };
+
   function parseNumber(value, fallback) {
     if (value == null) return fallback;
     const sanitized = typeof value === "string" ? value.replace(/_/g, "") : value;
@@ -64,6 +86,8 @@
   let autoBootedSlug = null;
   let autoBootstrapped = false;
   let autoBootGuarded = false;
+  let scoreListenerBound = false;
+  let boostGuardsBound = false;
 
   function ensureAutoBootstrapped() {
     if (autoBootstrapped) return;
@@ -71,6 +95,8 @@
     ensureAutoListeners();
     ensureDomReadyKickoff();
     ensureOverlayBridge();
+    ensureScoreListener();
+    ensureBoostGuards();
   }
 
   function ensureAutoBootGuard() {
@@ -181,6 +207,9 @@
     if (snap && typeof snap.totalXp === "number") {
       detail.total = snap.totalXp;
     }
+    if (state.lastGameId) {
+      detail.gameId = state.lastGameId;
+    }
     return detail;
   }
 
@@ -259,6 +288,153 @@
     };
   }
 
+  function clearBoostTicker() {
+    if (!boostState.ticker) return;
+    try { window.clearInterval(boostState.ticker); } catch (_) {}
+    boostState.ticker = null;
+  }
+
+  function syncBoostWithEngine(detail) {
+    const xp = getXp();
+    if (!xp || typeof xp.requestBoost !== "function") return;
+    try { xp.requestBoost(detail); } catch (_) {}
+  }
+
+  function dispatchBridgeBoost(detail) {
+    if (!detail || typeof detail !== "object") return;
+    const payload = { ...detail, __bridgeOrigin: true };
+    if (payload.secondsLeft != null && !payload.ttlMs) {
+      const ttl = Math.max(0, Math.round(Number(payload.secondsLeft) || 0)) * 1_000;
+      if (ttl > 0) payload.ttlMs = ttl;
+    }
+    safeDispatch(BOOST_EVENT, payload);
+    syncBoostWithEngine(payload);
+  }
+
+  function stopBoost(reason = "gameOver") {
+    const wasActive = boostState.active;
+    const lastGameId = boostState.gameId || state.lastGameId || null;
+    clearBoostTicker();
+    boostState.active = false;
+    boostState.secondsLeft = 0;
+    boostState.gameId = null;
+    boostState.lastPulseTs = 0;
+    boostState.multiplier = DEFAULT_NEW_RECORD_MULTIPLIER;
+    if (!wasActive) {
+      return;
+    }
+    dispatchBridgeBoost({ multiplier: 1, secondsLeft: 0, source: reason, gameId: lastGameId });
+  }
+
+  function ensureBoostTicker() {
+    if (!window || typeof window.setInterval !== "function") return;
+    if (boostState.ticker) return;
+    boostState.ticker = window.setInterval(() => {
+      if (!boostState.active) {
+        clearBoostTicker();
+        return;
+      }
+      const now = Date.now();
+      if (boostState.lastPulseTs && (now - boostState.lastPulseTs) > BOOST_IDLE_TIMEOUT_MS) {
+        stopBoost("inactive");
+        return;
+      }
+      if (boostState.secondsLeft > 0) {
+        boostState.secondsLeft = Math.max(0, boostState.secondsLeft - 1);
+      }
+      if (boostState.secondsLeft <= 0) {
+        stopBoost("expired");
+        return;
+      }
+      dispatchBridgeBoost({
+        multiplier: boostState.multiplier,
+        secondsLeft: boostState.secondsLeft,
+        source: boostState.source,
+        gameId: boostState.gameId,
+      });
+    }, 1_000);
+  }
+
+  function isBoostActive() {
+    return boostState.active;
+  }
+
+  function startNewRecordBoost(gameId, multiplier = DEFAULT_NEW_RECORD_MULTIPLIER) {
+    const slugged = slugifyGameId(gameId || state.lastGameId);
+    if (!slugged) return;
+    if (!isActiveGameWindow(slugged)) return;
+    const normalized = Math.max(1, Number(multiplier) || DEFAULT_NEW_RECORD_MULTIPLIER);
+    if (normalized <= 1) return;
+    if (boostState.active && boostState.gameId === slugged) {
+      boostState.multiplier = normalized;
+      boostState.secondsLeft = Math.max(boostState.secondsLeft, BOOST_SENTINEL_SECONDS);
+      boostState.lastPulseTs = Date.now();
+      dispatchBridgeBoost({
+        multiplier: boostState.multiplier,
+        secondsLeft: boostState.secondsLeft,
+        source: boostState.source,
+        gameId: slugged,
+      });
+      return;
+    }
+    stopBoost("refresh");
+    boostState.active = true;
+    boostState.multiplier = normalized;
+    boostState.gameId = slugged;
+    boostState.secondsLeft = BOOST_SENTINEL_SECONDS;
+    boostState.source = "newRecord";
+    boostState.lastPulseTs = Date.now();
+    dispatchBridgeBoost({
+      multiplier: boostState.multiplier,
+      secondsLeft: boostState.secondsLeft,
+      source: boostState.source,
+      gameId: slugged,
+    });
+    ensureBoostTicker();
+  }
+
+  function handleScoreMessage(event) {
+    if (!event || !event.data || typeof event.data !== "object") return;
+    if (event.origin && window && window.location && event.origin !== window.location.origin) return;
+    if (event.data.type !== "game-score") return;
+    const slugged = slugifyGameId(event.data.gameId || state.lastGameId || detectGameId());
+    if (!slugged) return;
+    const numeric = parseNumber(event.data.score, NaN);
+    if (!Number.isFinite(numeric) || numeric < 0) return;
+    const score = Math.max(0, Math.floor(numeric));
+    sessionState.lastScore = score;
+    if (score > sessionState.peakScore) sessionState.peakScore = score;
+    sessionState.lastScorePulseTs = Date.now();
+    if (boostState.active && boostState.gameId === slugged) {
+      boostState.lastPulseTs = Date.now();
+    }
+    if (slugged !== state.lastGameId) return;
+    if (!isActiveGameWindow(slugged)) return;
+    if (!boostState.active && score > sessionState.highScore) {
+      startNewRecordBoost(slugged, DEFAULT_NEW_RECORD_MULTIPLIER);
+    }
+  }
+
+  function ensureScoreListener() {
+    if (scoreListenerBound) return;
+    scoreListenerBound = true;
+    if (!window || typeof window.addEventListener !== "function") return;
+    try { window.addEventListener("message", handleScoreMessage, { passive: true }); } catch (_) {
+      try { window.addEventListener("message", handleScoreMessage); } catch (_) {}
+    }
+  }
+
+  function ensureBoostGuards() {
+    if (boostGuardsBound) return;
+    boostGuardsBound = true;
+    if (document && typeof document.addEventListener === "function") {
+      const handleHidden = () => { stopBoost("hidden"); };
+      try { document.addEventListener("xp:hidden", handleHidden, { passive: true }); } catch (_) {
+        try { document.addEventListener("xp:hidden", handleHidden); } catch (_) {}
+      }
+    }
+  }
+
   function handleXpUpdated(event) {
     let awarded = event && event.detail && typeof event.detail.awarded !== "undefined"
       ? Number(event.detail.awarded)
@@ -292,6 +468,9 @@
   }
 
   function handleBoost(event) {
+    if (event && event.detail && event.detail.__bridgeOrigin) {
+      return;
+    }
     const computed = computeBoostDetailFromEvent(event && event.detail);
     if (computed) {
       maybeEmitBoost(computed);
@@ -372,6 +551,47 @@
     const dashed = lowered.replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
     const limited = dashed.slice(0, 64);
     return limited || null;
+  }
+
+  function resolveHighScoreKey(gameId) {
+    const slugged = slugifyGameId(gameId);
+    if (!slugged) return null;
+    return `${HIGH_SCORE_KEY_PREFIX}${slugged}`;
+  }
+
+  function getHighScore(gameId) {
+    if (!window || !window.localStorage) return 0;
+    const key = resolveHighScoreKey(gameId);
+    if (!key) return 0;
+    try {
+      const raw = window.localStorage.getItem(key);
+      const parsed = parseNumber(raw, 0);
+      return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : 0;
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  function setHighScore(gameId, score) {
+    if (!window || !window.localStorage) return;
+    const key = resolveHighScoreKey(gameId);
+    if (!key) return;
+    const numeric = parseNumber(score, NaN);
+    if (!Number.isFinite(numeric) || numeric < 0) return;
+    try {
+      window.localStorage.setItem(key, String(Math.floor(numeric)));
+    } catch (_) {}
+  }
+
+  function updateHighScoreIfBetter(gameId, score) {
+    const current = getHighScore(gameId);
+    const numeric = parseNumber(score, NaN);
+    const nextScore = Number.isFinite(numeric) && numeric > 0 ? Math.floor(numeric) : 0;
+    if (nextScore > current) {
+      setHighScore(gameId, nextScore);
+      return { isNewRecord: true, previous: current, current: nextScore };
+    }
+    return { isNewRecord: false, previous: current, current };
   }
 
   function detectGameId() {
@@ -575,6 +795,13 @@
     ensureAutoBootGuard();
     const xp = getXp();
     state.lastGameId = slugged;
+    if (boostState.active && boostState.gameId && boostState.gameId !== slugged) {
+      stopBoost("gameSwitch");
+    }
+    sessionState.highScore = getHighScore(slugged);
+    sessionState.lastScore = 0;
+    sessionState.peakScore = 0;
+    sessionState.lastScorePulseTs = 0;
     const running = xp && typeof xp.isRunning === "function" ? !!xp.isRunning() : false;
     const currentGameId = xp && xp.__lastGameId ? slugifyGameId(xp.__lastGameId) : null;
 
@@ -605,6 +832,7 @@
     state.runningDesired = false;
     state.pendingStartGameId = null;
     resetSessionAccounting();
+    stopBoost("stop");
     const opts = options && typeof options === "object" ? { ...options } : {};
     if (!Object.prototype.hasOwnProperty.call(opts, "flush")) {
       opts.flush = true;
@@ -652,12 +880,64 @@
     }
   }
 
+  function gameOver(payload) {
+    const slugged = state.lastGameId || slugifyGameId(detectGameId());
+    const scoreValue = payload && typeof payload === "object" ? parseNumber(payload.score, NaN) : NaN;
+    const fallbackScore = sessionState.lastScore || sessionState.peakScore || 0;
+    const finalScore = Number.isFinite(scoreValue) && scoreValue >= 0 ? Math.floor(scoreValue) : Math.max(0, Math.floor(fallbackScore));
+    stopBoost("gameOver");
+    if (!slugged) return;
+    const result = updateHighScoreIfBetter(slugged, finalScore);
+    sessionState.highScore = result.current;
+    sessionState.lastScore = 0;
+    sessionState.peakScore = 0;
+    sessionState.lastScorePulseTs = 0;
+  }
+
+  function isActiveGameWindow(candidateGameId) {
+    if (!document) return false;
+    if (typeof document.visibilityState === "string" && document.visibilityState !== "visible") return false;
+    if (typeof document.hidden === "boolean" && document.hidden === true) return false;
+    const xp = getXp();
+    let running = false;
+    let activeId = null;
+    if (xp) {
+      try {
+        running = typeof xp.isRunning === "function" ? !!xp.isRunning() : false;
+      } catch (_) {
+        running = false;
+      }
+      if (xp.__lastGameId) {
+        activeId = slugifyGameId(xp.__lastGameId);
+      }
+    }
+    if (!running) return false;
+    if (!activeId && state.lastGameId) {
+      activeId = state.lastGameId;
+    }
+    const candidate = candidateGameId ? slugifyGameId(candidateGameId) : null;
+    if (candidate && activeId && candidate !== activeId) return false;
+    if (candidate && !activeId) {
+      return candidate === state.lastGameId;
+    }
+    if (!activeId) return false;
+    return activeId === state.lastGameId;
+  }
+
   const bridge = window.GameXpBridge || {};
   bridge.auto = auto;
   bridge.start = start;
   bridge.stop = stop;
   bridge.add = add;
   bridge.nudge = nudge;
+  bridge.gameOver = gameOver;
+  bridge.getHighScore = getHighScore;
+  bridge.setHighScore = setHighScore;
+  bridge.updateHighScoreIfBetter = updateHighScoreIfBetter;
+  bridge.startNewRecordBoost = startNewRecordBoost;
+  bridge.stopBoost = stopBoost;
+  bridge.isBoostActive = isBoostActive;
+  bridge.isActiveGameWindow = isActiveGameWindow;
 
   window.GameXpBridge = bridge;
 })(typeof window !== "undefined" ? window : undefined, typeof document !== "undefined" ? document : undefined);

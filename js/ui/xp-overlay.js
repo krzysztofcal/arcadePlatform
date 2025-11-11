@@ -16,10 +16,12 @@
     boostInterval: null,
     boostSecondsLeft: 0,
     boostMultiplier: 1,
+    boostSource: null,
     comboValue: 1,
     lastProgress: 0,
     popQueue: [],
     idleTimer: null,
+    activeGameId: null,
   };
 
   function logDiag(label, payload) {
@@ -95,6 +97,64 @@
     state.boostChip = root.querySelector("#xpBoostChip");
 
     return state.root;
+  }
+
+  function setRootHidden(hidden) {
+    const root = ensureRoot();
+    if (!root) return;
+    withFrame(() => {
+      root.hidden = !!hidden;
+      if (hidden) {
+        root.classList.add("xp-faded");
+      }
+    });
+  }
+
+  function hideBoostChip() {
+    clearBoostTimer();
+    if (!ensureRoot() || !state.boostChip) return;
+    withFrame(() => {
+      if (!state.boostChip) return;
+      state.boostChip.hidden = true;
+      state.boostChip.textContent = "";
+    });
+    state.boostSecondsLeft = 0;
+    state.boostMultiplier = 1;
+    state.boostSource = null;
+  }
+
+  function hideOverlay() {
+    hideBoostChip();
+    clearIdleTimer();
+    clearPops();
+    setRootHidden(true);
+  }
+
+  function shouldRender(detail) {
+    if (!document) return false;
+    if (typeof document.visibilityState === "string" && document.visibilityState !== "visible") return false;
+    if (typeof document.hidden === "boolean" && document.hidden === true) return false;
+    const bridge = window && window.GameXpBridge;
+    if (!bridge || typeof bridge.isActiveGameWindow !== "function") return false;
+    try {
+      const gameId = detail && detail.gameId != null ? detail.gameId : undefined;
+      return !!bridge.isActiveGameWindow(gameId);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function ensureActive(detail) {
+    const active = shouldRender(detail);
+    if (!active) {
+      hideOverlay();
+      return false;
+    }
+    if (detail && detail.gameId) {
+      state.activeGameId = detail.gameId;
+    }
+    setRootHidden(false);
+    return true;
   }
 
   function clearIdleTimer() {
@@ -241,39 +301,43 @@
     }
   }
 
-  function renderBoost(multiplier, secondsLeft) {
+  function renderBoost(multiplier, secondsLeft, source) {
+    if (!shouldRender({ gameId: state.activeGameId })) {
+      hideBoostChip();
+      return;
+    }
     if (!ensureRoot() || !state.boostChip) return;
     const seconds = Math.max(0, Math.round(secondsLeft));
     if (multiplier <= 1 || seconds <= 0) {
-      clearBoostTimer();
-      withFrame(() => {
-        if (!state.boostChip) return;
-        state.boostChip.hidden = true;
-        state.boostChip.textContent = "";
-      });
-      state.boostSecondsLeft = 0;
-      state.boostMultiplier = 1;
+      hideBoostChip();
       logDiag("overlay:boost_end");
       return;
     }
 
     state.boostSecondsLeft = seconds;
     state.boostMultiplier = Math.max(1, multiplier);
+    state.boostSource = source || null;
+    const isRecord = state.boostSource === "newRecord";
     withFrame(() => {
       if (!state.boostChip) return;
       state.boostChip.hidden = false;
-      state.boostChip.textContent = `BOOST x${formatMultiplier(multiplier)} · ${formatSeconds(seconds)}s`;
+      if (isRecord) {
+        state.boostChip.textContent = `BOOST x${formatMultiplier(multiplier)} · RECORD`;
+      } else {
+        state.boostChip.textContent = `BOOST x${formatMultiplier(multiplier)} · ${formatSeconds(seconds)}s`;
+      }
     });
-    logDiag("overlay:boost_start", { multiplier, seconds });
+    logDiag("overlay:boost_start", { multiplier, seconds, source });
 
     clearBoostTimer();
     if (!window || typeof window.setInterval !== "function") return;
     state.boostInterval = window.setInterval(() => {
       state.boostSecondsLeft -= 1;
       if (state.boostSecondsLeft <= 0) {
-        renderBoost(1, 0);
+        renderBoost(1, 0, source);
         return;
       }
+      if (isRecord) return;
       withFrame(() => {
         if (!state.boostChip) return;
         state.boostChip.textContent = `BOOST x${formatMultiplier(multiplier)} · ${formatSeconds(state.boostSecondsLeft)}s`;
@@ -292,6 +356,10 @@
     const normalizedCombo = Number.isFinite(combo) ? Math.max(1, combo) : 1;
     const normalizedBoost = Number.isFinite(boost) ? Math.max(1, boost) : 1;
     const normalizedProgress = Number.isFinite(progress) ? Math.max(0, Math.min(1, progress)) : 0;
+
+    const gameId = detail.gameId != null ? detail.gameId : state.activeGameId;
+    if (!ensureActive({ gameId })) return;
+    state.activeGameId = gameId || state.activeGameId;
 
     ensureRoot();
     withFrame(() => {
@@ -321,11 +389,17 @@
     const secondsLeft = Number(detail.secondsLeft);
     const normalizedMultiplier = Number.isFinite(multiplier) ? Math.max(1, multiplier) : 1;
     const normalizedSeconds = Number.isFinite(secondsLeft) ? Math.max(0, Math.round(secondsLeft)) : 0;
-    if (normalizedMultiplier <= 1 || normalizedSeconds <= 0) {
-      renderBoost(1, 0);
+    const gameId = detail.gameId != null ? detail.gameId : state.activeGameId;
+    if (!ensureActive({ gameId })) {
+      hideBoostChip();
       return;
     }
-    renderBoost(normalizedMultiplier, normalizedSeconds);
+    state.activeGameId = gameId || state.activeGameId;
+    if (normalizedMultiplier <= 1 || normalizedSeconds <= 0) {
+      renderBoost(1, 0, detail.source);
+      return;
+    }
+    renderBoost(normalizedMultiplier, normalizedSeconds, detail.source);
   }
 
   function attachListeners() {
@@ -356,14 +430,8 @@
 
   function cleanup() {
     detachListeners();
-    clearIdleTimer();
-    clearBoostTimer();
-    clearPops();
-    if (state.root) {
-      withFrame(() => {
-        if (state.root) state.root.classList.add("xp-faded");
-      });
-    }
+    hideOverlay();
+    state.activeGameId = null;
     logDiag("overlay:cleanup");
   }
 
@@ -373,9 +441,10 @@
 
   function handleXpVisible() {
     attachListeners();
+    if (!ensureActive({ gameId: state.activeGameId })) return;
     scheduleIdleFade();
     if (state.boostMultiplier > 1 && state.boostSecondsLeft > 0) {
-      renderBoost(state.boostMultiplier, state.boostSecondsLeft);
+      renderBoost(state.boostMultiplier, state.boostSecondsLeft, state.boostSource);
     }
   }
 

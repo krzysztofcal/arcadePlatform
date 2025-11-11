@@ -39,6 +39,13 @@ function reportScore(){
   }
 }
 
+function notifyGameOver(){
+  const bridge = window.GameXpBridge;
+  if (bridge && typeof bridge.gameOver === "function") {
+    try { bridge.gameOver({ score: player.score }); } catch (_error) {}
+  }
+}
+
 let lastTime = 0;
 let dropCounter = 0;
 let dropInterval = 800;
@@ -64,6 +71,7 @@ pauseBtn.addEventListener("click", () => {
 });
 
 resetBtn.addEventListener("click", () => {
+  notifyGameOver();
   resetGame();
 });
 
@@ -296,6 +304,7 @@ function playerReset() {
     merge(arena, player);
     running = false;
     pendingGameOver = true;
+    notifyGameOver();
     showOverlay("Game over", "Tap play to restart");
   }
 }
