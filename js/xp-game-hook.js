@@ -197,30 +197,53 @@
   function dispatchBoost(detail) {
     if (!window || typeof window.dispatchEvent !== "function") return;
     const payload = detail && typeof detail === "object" ? { ...detail } : {};
-    if (Object.prototype.hasOwnProperty.call(payload, "secondsLeft")) {
-      const seconds = parseNumber(payload.secondsLeft, NaN);
-      if (Number.isFinite(seconds)) {
-        payload.secondsLeft = Math.max(0, Math.floor(seconds));
-        const ttlMs = payload.secondsLeft * 1000;
-        if (!Number.isFinite(parseNumber(payload.ttlMs, NaN)) || parseNumber(payload.ttlMs, NaN) < ttlMs) {
-          payload.ttlMs = ttlMs;
-        }
-      } else {
-        delete payload.secondsLeft;
-      }
-    }
+    const now = Date.now();
     if (Object.prototype.hasOwnProperty.call(payload, "totalSeconds")) {
       const total = parseNumber(payload.totalSeconds, NaN);
       if (Number.isFinite(total)) {
         payload.totalSeconds = Math.max(0, Math.floor(total));
-        const ttlMs = payload.totalSeconds * 1000;
-        if (!Number.isFinite(parseNumber(payload.ttlMs, NaN)) || parseNumber(payload.ttlMs, NaN) < ttlMs) {
-          payload.ttlMs = ttlMs;
-        }
       } else {
         delete payload.totalSeconds;
       }
     }
+
+    let ttlMs = parseNumber(payload.ttlMs, NaN);
+    if (Number.isFinite(ttlMs)) {
+      ttlMs = Math.max(0, Math.floor(ttlMs));
+    } else {
+      ttlMs = NaN;
+    }
+
+    let expiresAt = null;
+    if (Object.prototype.hasOwnProperty.call(payload, "expiresAt")) {
+      expiresAt = parseNumber(payload.expiresAt, NaN);
+    } else if (Object.prototype.hasOwnProperty.call(payload, "endsAt")) {
+      expiresAt = parseNumber(payload.endsAt, NaN);
+    }
+    if (Number.isFinite(expiresAt)) {
+      if (expiresAt > 0 && expiresAt < 1e12) {
+        expiresAt = Math.floor(expiresAt * 1000);
+      } else {
+        expiresAt = Math.floor(expiresAt);
+      }
+    } else {
+      expiresAt = NaN;
+    }
+
+    if (!Number.isFinite(ttlMs) || ttlMs < 0) {
+      ttlMs = Number.isFinite(expiresAt) && expiresAt > now ? Math.max(0, expiresAt - now) : 0;
+    }
+    if (!Number.isFinite(expiresAt) || expiresAt <= 0) {
+      expiresAt = ttlMs > 0 ? now + ttlMs : now;
+    }
+
+    payload.ttlMs = ttlMs > 0 ? ttlMs : 0;
+    payload.expiresAt = expiresAt;
+    payload.endsAt = expiresAt;
+    if (Object.prototype.hasOwnProperty.call(payload, "secondsLeft")) {
+      delete payload.secondsLeft;
+    }
+
     const targets = [];
     if (window && typeof window.dispatchEvent === "function") targets.push(window);
     if (document && typeof document.dispatchEvent === "function") targets.push(document);
@@ -245,10 +268,13 @@
   }
 
   function emitBoostStop(source, gameId) {
+    const now = Date.now();
     const payload = {
       multiplier: 1,
-      secondsLeft: 0,
       totalSeconds: DEFAULT_BOOST_SEC,
+      ttlMs: 0,
+      expiresAt: now,
+      endsAt: now,
       source: source || "gameOver",
     };
     const resolvedId = slugifyGameId(gameId) || slugifyGameId(resolveBridgeGameId());

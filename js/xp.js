@@ -581,54 +581,27 @@
       ? Math.max(0, Math.floor(numericTtl))
       : 0;
     const hasBoost = Number.isFinite(numericMultiplier) && numericMultiplier > 1;
-
-    let secondsLeft = meta && Object.prototype.hasOwnProperty.call(meta, "secondsLeft")
-      ? parseNumber(meta.secondsLeft, NaN)
-      : NaN;
-    if (Number.isFinite(secondsLeft)) {
-      secondsLeft = Math.max(0, Math.floor(secondsLeft));
-    } else if (parsedTtl > 0) {
-      secondsLeft = Math.max(0, Math.floor(parsedTtl / 1000));
-    } else {
-      secondsLeft = 0;
-    }
-
-    const MAX_SECONDS = 3600;
-    if (!Number.isFinite(secondsLeft) || secondsLeft < 0) {
-      secondsLeft = 0;
-    }
-    secondsLeft = Math.max(0, Math.min(MAX_SECONDS, secondsLeft));
-
+    const now = Date.now();
+    const expiresAt = hasBoost && parsedTtl > 0 ? now + parsedTtl : now;
     let totalSeconds = meta && Object.prototype.hasOwnProperty.call(meta, "totalSeconds")
       ? parseNumber(meta.totalSeconds, NaN)
       : NaN;
-    if (Number.isFinite(totalSeconds)) {
-      totalSeconds = Math.max(secondsLeft, Math.floor(totalSeconds));
-    } else if (parsedTtl > 0) {
-      totalSeconds = Math.max(secondsLeft, Math.floor(parsedTtl / 1000));
-    } else {
-      totalSeconds = Math.max(secondsLeft, DEFAULT_BOOST_SEC);
-    }
     if (!Number.isFinite(totalSeconds) || totalSeconds <= 0) {
-      totalSeconds = Math.max(secondsLeft, DEFAULT_BOOST_SEC);
+      totalSeconds = parsedTtl > 0 ? Math.floor(parsedTtl / 1000) : DEFAULT_BOOST_SEC;
+    } else {
+      totalSeconds = Math.max(0, Math.floor(totalSeconds));
     }
-
-    totalSeconds = Math.max(secondsLeft, Math.min(MAX_SECONDS, totalSeconds));
-    if (secondsLeft > totalSeconds) {
-      secondsLeft = totalSeconds;
+    if (totalSeconds > 3600) {
+      totalSeconds = 3600;
     }
-
-    const now = Date.now();
-    const endsAt = hasBoost && parsedTtl > 0 ? now + parsedTtl : now;
 
     const detail = {
       multiplier: hasBoost ? numericMultiplier : 1,
-      secondsLeft,
-      totalSeconds,
       ttlMs: hasBoost ? parsedTtl : 0,
-      endsAt,
-      expiresAt: endsAt,
-      schema: 2,
+      expiresAt,
+      endsAt: expiresAt,
+      totalSeconds,
+      schema: 3,
       __xpOrigin: "xp.js",
       __xpInternal: true,
     };
@@ -704,13 +677,9 @@
     const nextTotalSeconds = meta && Object.prototype.hasOwnProperty.call(meta, "totalSeconds")
       ? Math.max(0, Math.floor(parseNumber(meta.totalSeconds, DEFAULT_BOOST_SEC) || 0))
       : Math.max(0, Math.floor(parseNumber(previous.totalSeconds, DEFAULT_BOOST_SEC) || DEFAULT_BOOST_SEC));
-    const nextSecondsLeft = meta && Object.prototype.hasOwnProperty.call(meta, "secondsLeft")
-      ? Math.max(0, Math.floor(parseNumber(meta.secondsLeft, 0) || 0))
-      : 0;
     const payload = {
       source: meta && meta.source != null ? meta.source : previous.source,
       totalSeconds: nextTotalSeconds || DEFAULT_BOOST_SEC,
-      secondsLeft: nextSecondsLeft,
       gameId: (meta && meta.gameId) || previous.gameId || null,
     };
     if (previous.multiplier !== 1 || previous.expiresAt !== 0 || (previous.source || null) !== null) {
@@ -787,7 +756,6 @@
   function dispatchNewRecordBoost(gameId) {
     const detail = {
       multiplier: 1.5,
-      secondsLeft: DEFAULT_BOOST_SEC,
       totalSeconds: DEFAULT_BOOST_SEC,
       ttlMs: DEFAULT_BOOST_SEC * 1000,
       source: "newRecord",
@@ -1050,16 +1018,13 @@
             emitBoost(1, 0, {
               source: state.boost.source,
               totalSeconds: state.boost.totalSeconds,
-              secondsLeft: 0,
               gameId: state.boost.gameId || state.gameId || null,
             });
           }
         } else {
-          const secondsLeft = Math.max(0, Math.floor(ttl / 1000));
           emitBoost(state.boost.multiplier, ttl, {
             source: state.boost.source,
             totalSeconds: Number(state.boost.totalSeconds) || DEFAULT_BOOST_SEC,
-            secondsLeft,
             gameId: state.boost.gameId || state.gameId || null,
           });
         }
@@ -1934,7 +1899,6 @@
       resetBoost({
         source,
         totalSeconds,
-        secondsLeft: secondsLeft != null ? secondsLeft : 0,
         gameId: normalizedGameId,
       });
       return;
@@ -1945,8 +1909,6 @@
 
     const ttlForState = ttl > 0 ? ttl : totalSeconds * 1000;
     const expiresAt = now + ttlForState;
-    const effectiveSecondsLeft = secondsLeft != null ? secondsLeft : Math.max(0, Math.floor(ttlForState / 1000));
-
     state.boost = {
       multiplier,
       expiresAt,
@@ -1960,7 +1922,6 @@
     emitBoost(multiplier, Math.max(0, expiresAt - now), {
       source,
       totalSeconds,
-      secondsLeft: effectiveSecondsLeft,
       gameId: normalizedGameId || null,
     });
 
@@ -2470,11 +2431,13 @@
   }
 
   function emitLifecycleBoostStop(source) {
+    const now = Date.now();
     const detail = {
       multiplier: 1,
-      secondsLeft: 0,
       totalSeconds: BOOST_RESET_SECONDS,
-      ttlMs: BOOST_RESET_SECONDS * 1000,
+      ttlMs: 0,
+      expiresAt: now,
+      endsAt: now,
       source: source || "visibility",
     };
     const targets = [];

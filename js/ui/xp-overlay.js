@@ -40,50 +40,24 @@
     return Math.min(remaining, 3600);
   }
 
-  function normalizeBoostCountdown(detail) {
+  function remainingSecondsFromDetail(detail) {
     const payload = detail && typeof detail === "object" ? detail : {};
     const now = Date.now();
-
-    let seconds = Number(payload.secondsLeft);
-    if (Number.isFinite(seconds)) {
-      seconds = Math.max(0, Math.floor(seconds));
-      if (seconds > 3600) {
-        const epochAdjusted = Math.floor(seconds - Math.floor(now / 1000));
-        if (epochAdjusted >= 0 && epochAdjusted <= 3600) {
-          seconds = epochAdjusted;
-        }
-      }
-    } else {
-      seconds = NaN;
+    const expiresSource = Object.prototype.hasOwnProperty.call(payload, "expiresAt")
+      ? payload.expiresAt
+      : payload.endsAt;
+    const secondsFromExpiry = getRemainingSeconds(expiresSource, now);
+    if (secondsFromExpiry > 0) return secondsFromExpiry;
+    const ttlMs = Number(payload.ttlMs);
+    if (Number.isFinite(ttlMs) && ttlMs > 0) {
+      const seconds = Math.max(0, Math.ceil(ttlMs / 1000));
+      return Math.min(seconds, 3600);
     }
+    return 0;
+  }
 
-    if (!Number.isFinite(seconds) || seconds <= 0) {
-      const ttlMs = Number(payload.ttlMs);
-      if (Number.isFinite(ttlMs) && ttlMs > 0) {
-        seconds = Math.max(0, Math.floor(ttlMs / 1000));
-      } else {
-        seconds = NaN;
-      }
-    }
-
-    if (!Number.isFinite(seconds) || seconds <= 0) {
-      const endsAtSource = Object.prototype.hasOwnProperty.call(payload, "endsAt")
-        ? payload.endsAt
-        : payload.expiresAt;
-      seconds = getRemainingSeconds(endsAtSource, now);
-    }
-
-    if (!Number.isFinite(seconds) || seconds < 0) seconds = 0;
-
-    if (diagEnabled && seconds > 3600) {
-      try {
-        console.warn("⚠️ XP UI: abnormal boost seconds detected", { detail: payload, seconds, now });
-      } catch (_) {}
-    }
-
-    if (seconds > 3600) seconds = 3600;
-
-    return seconds;
+  function normalizeBoostCountdown(detail) {
+    return remainingSecondsFromDetail(detail);
   }
 
   function normalizeExpiresAt(rawValue, fallback, reference) {
@@ -572,25 +546,32 @@
     }
     const now = Date.now();
     let ttl = Number(payload.ttlMs);
-    const seconds = normalizeBoostCountdown(payload);
-    if (!Number.isFinite(ttl) || ttl <= 0) ttl = Number(payload.durationMs);
-    if (!Number.isFinite(ttl) || ttl <= 0) ttl = seconds * 1000;
-    if (!Number.isFinite(ttl) || ttl <= 0) ttl = DEFAULT_TTL;
     const MAX_DURATION = 3600 * 1000;
-    ttl = Math.max(0, Math.min(ttl, MAX_DURATION));
-    const fallbackExpires = now + (ttl || DEFAULT_TTL);
-    const endsAtSource = payload && Object.prototype.hasOwnProperty.call(payload, "endsAt")
-      ? payload.endsAt
-      : payload && payload.expiresAt;
-    let expiresAt = normalizeExpiresAt(endsAtSource, fallbackExpires, now);
-    if (!Number.isFinite(expiresAt) || expiresAt <= now) {
-      expiresAt = fallbackExpires;
+    if (Number.isFinite(ttl) && ttl > 0) {
+      ttl = Math.min(MAX_DURATION, Math.floor(ttl));
+    } else {
+      ttl = NaN;
     }
+    const baseTtl = Number.isFinite(ttl) && ttl > 0 ? ttl : DEFAULT_TTL;
+    const endsAtSource = payload && Object.prototype.hasOwnProperty.call(payload, "expiresAt")
+      ? payload.expiresAt
+      : payload && payload.endsAt;
+    let expiresAt = normalizeExpiresAt(endsAtSource, now + baseTtl, now);
     if (expiresAt - now > MAX_DURATION) {
       expiresAt = now + MAX_DURATION;
     }
-    const effectiveRemaining = Math.max(0, expiresAt - now);
-    const durationMs = Math.max(ttl || effectiveRemaining, effectiveRemaining || DEFAULT_TTL);
+    let remainingMs = Math.max(0, expiresAt - now);
+    if (remainingMs <= 0) {
+      remainingMs = baseTtl;
+      expiresAt = now + remainingMs;
+    }
+    let durationMs = Number.isFinite(ttl) && ttl > 0 ? Math.max(ttl, remainingMs) : remainingMs;
+    if (!Number.isFinite(durationMs) || durationMs <= 0) {
+      durationMs = baseTtl;
+    }
+    if (durationMs > MAX_DURATION) {
+      durationMs = MAX_DURATION;
+    }
     const startedAt = Math.max(0, expiresAt - durationMs);
     state.boost = {
       multiplier,
@@ -758,6 +739,7 @@
     getState: function () { return Object.assign({}, state); },
     normalizeMs,
     getRemainingSeconds,
+    remainingSecondsFromDetail,
     normalizeBoostCountdown,
     applyBoost,
     deactivateBoost,

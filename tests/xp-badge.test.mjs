@@ -127,31 +127,35 @@ function loadOverlay(now = 0) {
   assert.ok(testApi, 'overlay test API should exist');
   assert.equal(typeof testApi.normalizeBoostCountdown, 'function', 'normalizeBoostCountdown helper should exist');
   assert.equal(typeof testApi.getRemainingSeconds, 'function', 'getRemainingSeconds helper should exist');
+  assert.equal(typeof testApi.remainingSecondsFromDetail, 'function', 'remainingSecondsFromDetail helper should exist');
 
   return { helper: testApi.normalizeBoostCountdown, helpers: testApi, warnings, window: windowObj };
 }
 
-test('normalizeBoostCountdown prefers secondsLeft when valid', () => {
-  const { helper } = loadOverlay(0);
-  assert.equal(helper({ secondsLeft: 12 }), 12);
-});
-
-test('normalizeBoostCountdown falls back to ttlMs', () => {
-  const { helper } = loadOverlay(0);
-  assert.equal(helper({ ttlMs: 9_500 }), 9);
-});
-
-test('normalizeBoostCountdown derives from endsAt', () => {
-  const now = 10_000;
+test('normalizeBoostCountdown derives from expiresAt milliseconds', () => {
+  const now = 25_000;
   const { helper } = loadOverlay(now);
-  assert.equal(helper({ endsAt: now + 8_000 }), 8);
+  const expiresAt = now + 15_000;
+  assert.equal(helper({ expiresAt }), 15);
 });
 
-test('normalizeBoostCountdown clamps epoch seconds to realistic countdown', () => {
-  const fakeNow = 1_731_280_000_000;
-  const { helper } = loadOverlay(fakeNow);
-  const normalized = helper({ secondsLeft: Math.floor(fakeNow / 1000) });
-  assert.ok(normalized >= 0 && normalized <= 3600, 'normalized value should be within range');
+test('normalizeBoostCountdown tolerates expiresAt in seconds', () => {
+  const now = 1_731_280_000_000;
+  const { helper } = loadOverlay(now);
+  const expiresAtSeconds = Math.floor((now + 12_000) / 1000);
+  assert.equal(helper({ expiresAt: expiresAtSeconds }), 12);
+});
+
+test('normalizeBoostCountdown falls back to ttlMs when expiry missing', () => {
+  const { helper } = loadOverlay(0);
+  assert.equal(helper({ ttlMs: 9_500 }), 10);
+});
+
+test('remainingSecondsFromDetail clamps durations above an hour', () => {
+  const now = 50_000;
+  const { helpers } = loadOverlay(now);
+  const future = now + 4_000_000;
+  assert.equal(helpers.remainingSecondsFromDetail({ expiresAt: future }), 3600);
 });
 
 test('getRemainingSeconds normalizes epoch expiresAt values', () => {
@@ -159,7 +163,7 @@ test('getRemainingSeconds normalizes epoch expiresAt values', () => {
   const { helpers } = loadOverlay(fakeNow);
   const epochSeconds = Math.floor((fakeNow + 20_000) / 1000);
   const remaining = helpers.getRemainingSeconds(epochSeconds, fakeNow);
-  assert.ok(remaining > 0 && remaining <= 20, 'remaining seconds should reflect delta, not epoch');
+  assert.equal(remaining, 20);
 });
 
 test('boost timer renders normalized countdown from epoch expiresAt', () => {
