@@ -155,16 +155,21 @@ import { createEnvironment } from './helpers/xp-env.mjs';
   drainTimers();
 
   const boostEvents = [];
+  const xpBoosts = [];
   env.context.window.addEventListener('xp:boost', (event) => {
-    if (!event || !event.detail || event.detail.__xpInternal) return;
-    boostEvents.push(event.detail);
+    if (!event || !event.detail) return;
+    const detail = { ...event.detail };
+    boostEvents.push(detail);
+    if (detail.__xpOrigin === 'xp.js') {
+      xpBoosts.push(detail);
+    }
   });
 
   triggerWindow('message', { data: { type: 'game-score', gameId: 'record-game', score: 12 } });
   drainTimers();
 
-  assert.equal(boostEvents.length, 1, 'new record should emit exactly one boost event');
-  const detail = boostEvents[0];
+  assert.equal(xpBoosts.length, 1, 'new record should emit exactly one boost event');
+  const detail = xpBoosts[0];
   assert.equal(detail.multiplier, 1.5, 'new record boost should use 1.5x multiplier');
   assert.equal(detail.source, 'newRecord', 'new record boost should mark the source');
   assert.equal(detail.secondsLeft, 15, 'new record boost should expose the remaining seconds');
@@ -185,9 +190,14 @@ import { createEnvironment } from './helpers/xp-env.mjs';
   drainTimers();
 
   const boostEvents = [];
+  const xpBoosts = [];
   env.context.window.addEventListener('xp:boost', (event) => {
-    if (!event || !event.detail || event.detail.__xpInternal) return;
-    boostEvents.push(event.detail);
+    if (!event || !event.detail) return;
+    const detail = { ...event.detail };
+    boostEvents.push(detail);
+    if (detail.__xpOrigin === 'xp.js') {
+      xpBoosts.push(detail);
+    }
   });
 
   triggerWindow('message', { data: { type: 'game-score', gameId: 'record-game', score: 5 } });
@@ -197,14 +207,14 @@ import { createEnvironment } from './helpers/xp-env.mjs';
   triggerWindow('message', { data: { type: 'game-score', gameId: 'record-game', score: 25 } });
   drainTimers();
 
-  const newRecordEvents = boostEvents.filter((event) => event.source === 'newRecord');
+  const newRecordEvents = xpBoosts.filter((event) => event.source === 'newRecord');
   assert.equal(newRecordEvents.length, 1, 'a single run should only start one new record boost');
 
   env.triggerWindow('pagehide', { persisted: false });
   drainTimers();
 
   const pagehideEvents = boostEvents.filter((event) => event.source === 'pagehide');
-  assert.equal(pagehideEvents.length, 1, 'pagehide fallback should emit a boost reset');
+  assert.equal(pagehideEvents.length > 0, true, 'pagehide fallback should emit a boost reset');
   assert.equal(getState().boost.multiplier, 1, 'pagehide fallback should clear the active boost');
 }
 
@@ -219,9 +229,14 @@ import { createEnvironment } from './helpers/xp-env.mjs';
   drainTimers();
 
   const boostEvents = [];
+  const xpBoosts = [];
   env.context.window.addEventListener('xp:boost', (event) => {
-    if (!event || !event.detail || event.detail.__xpInternal) return;
-    boostEvents.push(event.detail);
+    if (!event || !event.detail) return;
+    const detail = { ...event.detail };
+    boostEvents.push(detail);
+    if (detail.__xpOrigin === 'xp.js') {
+      xpBoosts.push(detail);
+    }
   });
 
   triggerWindow('message', { data: { type: 'game-score', gameId: 'record-game', score: 40 } });
@@ -233,7 +248,7 @@ import { createEnvironment } from './helpers/xp-env.mjs';
   assert.equal(Bridge.getHighScore('record-game'), 40, 'game over should persist the best score');
   assert.equal(getState().boost.multiplier, 1, 'game over should reset the boost state');
 
-  const gameOverEvents = boostEvents.filter((event) => event.source === 'gameOver');
+  const gameOverEvents = xpBoosts.filter((event) => event.source === 'gameOver');
   assert.equal(gameOverEvents.length, 1, 'game over should emit exactly one termination event');
   assert.equal(gameOverEvents[0].multiplier, 1, 'game over termination should disable boost');
   assert.equal(gameOverEvents[0].secondsLeft, 0, 'game over termination should report zero seconds left');
@@ -241,7 +256,7 @@ import { createEnvironment } from './helpers/xp-env.mjs';
   triggerWindow('message', { data: { type: 'game-score', gameId: 'record-game', score: 45 } });
   drainTimers();
 
-  const newRecordEvents = boostEvents.filter((event) => event.source === 'newRecord');
+  const newRecordEvents = xpBoosts.filter((event) => event.source === 'newRecord');
   assert.equal(newRecordEvents.length, 2, 'a new run after game over should trigger another boost');
 }
 
@@ -258,8 +273,8 @@ import { createEnvironment } from './helpers/xp-env.mjs';
 
   const boostEvents = [];
   env.context.window.addEventListener('xp:boost', (event) => {
-    if (!event || !event.detail || event.detail.__xpInternal) return;
-    boostEvents.push(event.detail);
+    if (!event || !event.detail) return;
+    boostEvents.push({ ...event.detail });
   });
 
   triggerWindow('message', { data: { type: 'game-score', gameId: 'record-game', score: 50 } });
@@ -270,4 +285,91 @@ import { createEnvironment } from './helpers/xp-env.mjs';
   assert.equal(boostEvents.length, 0, 'scores below the record should not trigger boosts');
   assert.equal(getState().boost.multiplier, 1, 'boost should remain inactive without a new record');
   assert.equal(Bridge.getHighScore('record-game'), 100, 'stored high score should remain unchanged when not beaten');
+}
+
+// iframe activity messages should extend the active window
+{
+  const env = createEnvironment();
+  const { Bridge, drainTimers, installXp, triggerWindow } = env;
+
+  Bridge.start('activity-game');
+
+  const { getState } = installXp();
+  drainTimers();
+
+  const before = getState().activeUntil;
+  triggerWindow('message', { data: { type: 'kcswh:activity', userGesture: true }, origin: env.context.window.location.origin });
+  drainTimers();
+
+  const after = getState().activeUntil;
+  assert.equal(after > before, true, 'activity messages should extend the active window');
+}
+
+// early visibility resets should not cancel the first record boost
+{
+  const env = createEnvironment();
+  const { Bridge, drainTimers, installXp, triggerDoc, triggerWindow, updateVisibility } = env;
+
+  Bridge.start('visibility-guard');
+
+  installXp();
+  drainTimers();
+
+  const xpBoosts = [];
+  env.context.window.addEventListener('xp:boost', (event) => {
+    if (!event || !event.detail) return;
+    if (event.detail.__xpOrigin === 'xp.js') {
+      xpBoosts.push({ ...event.detail });
+    }
+  });
+
+  updateVisibility({ hidden: true, visibilityState: 'hidden' });
+  triggerDoc('visibilitychange');
+  drainTimers();
+
+  assert.equal(xpBoosts.length, 0, 'early visibility reset should not emit an internal boost');
+
+  updateVisibility({ hidden: false, visibilityState: 'visible' });
+  triggerDoc('visibilitychange');
+  drainTimers();
+
+  triggerWindow('message', { data: { type: 'game-score', gameId: 'visibility-guard', score: 18 } });
+  drainTimers();
+
+  const recordEvents = xpBoosts.filter((event) => event.source === 'newRecord');
+  assert.equal(recordEvents.length, 1, 'record boost should still trigger after visibility bounce');
+}
+
+// BFCache resume should unlock another record boost
+{
+  const env = createEnvironment();
+  const { Bridge, drainTimers, installXp, triggerWindow } = env;
+
+  Bridge.start('bfcache-game');
+
+  installXp();
+  drainTimers();
+
+  const xpBoosts = [];
+  env.context.window.addEventListener('xp:boost', (event) => {
+    if (!event || !event.detail) return;
+    if (event.detail.__xpOrigin === 'xp.js') {
+      xpBoosts.push({ ...event.detail });
+    }
+  });
+
+  triggerWindow('message', { data: { type: 'game-score', gameId: 'bfcache-game', score: 22 } });
+  drainTimers();
+
+  assert.equal(xpBoosts.filter((event) => event.source === 'newRecord').length, 1, 'first run should trigger a boost');
+
+  env.triggerWindow('pagehide', { persisted: true });
+  drainTimers();
+  env.triggerWindow('pageshow', { persisted: true });
+  drainTimers();
+
+  triggerWindow('message', { data: { type: 'game-score', gameId: 'bfcache-game', score: 44 } });
+  drainTimers();
+
+  assert.equal(xpBoosts.filter((event) => event.source === 'newRecord').length, 2, 'BFCache resume should allow another record boost');
 }

@@ -53,6 +53,7 @@
     flushDelayMs: MIN_FLUSH_DELAY_MS,
     domReadyListenerBound: false,
     handleVisible: null,
+    handleVisibleRan: false,
   };
 
   let autoBootedSlug = null;
@@ -220,21 +221,26 @@
         delete payload.totalSeconds;
       }
     }
-    try {
-      if (typeof CustomEvent === "function") {
-        const evt = new CustomEvent("xp:boost", { detail: payload });
-        window.dispatchEvent(evt);
-        return;
-      }
-      if (typeof document !== "undefined" && document && typeof document.createEvent === "function") {
-        const legacyEvt = document.createEvent("CustomEvent");
-        legacyEvt.initCustomEvent("xp:boost", false, false, payload);
-        window.dispatchEvent(legacyEvt);
-        return;
-      }
-      window.dispatchEvent({ type: "xp:boost", detail: payload });
-    } catch (_) {
-      try { window.dispatchEvent({ type: "xp:boost", detail: payload }); } catch (_) {}
+    const targets = [];
+    if (window && typeof window.dispatchEvent === "function") targets.push(window);
+    if (document && typeof document.dispatchEvent === "function") targets.push(document);
+    for (let i = 0; i < targets.length; i += 1) {
+      const target = targets[i];
+      try {
+        if (typeof CustomEvent === "function") {
+          target.dispatchEvent(new CustomEvent("xp:boost", { detail: payload }));
+          continue;
+        }
+      } catch (_) {}
+      try {
+        if (document && typeof document.createEvent === "function") {
+          const legacyEvt = document.createEvent("CustomEvent");
+          legacyEvt.initCustomEvent("xp:boost", false, false, payload);
+          target.dispatchEvent(legacyEvt);
+          continue;
+        }
+      } catch (_) {}
+      try { target.dispatchEvent({ type: "xp:boost", detail: payload }); } catch (_) {}
     }
   }
 
@@ -448,6 +454,22 @@
         try { window.addEventListener("load", once); } catch (_) {}
       }
     }
+
+    if (window && typeof window.setTimeout === "function") {
+      try {
+        const attemptStart = () => {
+          if (!state.runningDesired || state.handleVisibleRan) return;
+          const candidate = state.lastGameId || detectGameId();
+          if (candidate) {
+            start(candidate);
+          }
+          if (state.runningDesired && !state.handleVisibleRan) {
+            window.setTimeout(attemptStart, 100);
+          }
+        };
+        window.setTimeout(attemptStart, 50);
+      } catch (_) {}
+    }
   }
 
   /**
@@ -466,6 +488,7 @@
   function auto(gameId) {
     const resolved = normalizeGameId(gameId) || detectGameId();
     const slugged = slugifyGameId(resolved);
+    state.runningDesired = true;
     if (!isHostDocument()) {
       if (slugged) {
         state.lastGameId = slugged;
@@ -493,11 +516,11 @@
     const resolved = normalizeGameId(gameId) || detectGameId();
     const slugged = slugifyGameId(resolved);
     if (!slugged) {
-      state.runningDesired = false;
       state.pendingStartGameId = null;
       return;
     }
     ensureAutoBootGuard();
+    state.handleVisibleRan = true;
     const xp = getXp();
     state.lastGameId = slugged;
     try { if (window) window.__GAME_ID__ = slugged; } catch (_) {}
