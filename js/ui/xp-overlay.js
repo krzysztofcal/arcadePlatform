@@ -26,6 +26,29 @@
     let destroyed = false;
     let timerId = null;
 
+    function addLifecycleListeners() {
+      if (typeof document.addEventListener === "function") {
+        try { document.addEventListener("visibilitychange", handleHidden, { passive: true }); }
+        catch (_) { try { document.addEventListener("visibilitychange", handleHidden); } catch (_) {} }
+      }
+      if (typeof window.addEventListener === "function") {
+        try { window.addEventListener("pagehide", handleHidden, { passive: true }); }
+        catch (_) { try { window.addEventListener("pagehide", handleHidden); } catch (_) {} }
+        try { window.addEventListener("beforeunload", handleHidden, { passive: true }); }
+        catch (_) { try { window.addEventListener("beforeunload", handleHidden); } catch (_) {} }
+      }
+    }
+
+    function removeLifecycleListeners() {
+      if (typeof document.removeEventListener === "function") {
+        try { document.removeEventListener("visibilitychange", handleHidden); } catch (_) {}
+      }
+      if (typeof window.removeEventListener === "function") {
+        try { window.removeEventListener("pagehide", handleHidden); } catch (_) {}
+        try { window.removeEventListener("beforeunload", handleHidden); } catch (_) {}
+      }
+    }
+
     function teardown() {
       if (destroyed) return;
       destroyed = true;
@@ -33,9 +56,7 @@
         try { window.clearInterval(timerId); } catch (_) {}
       }
       timerId = null;
-      if (typeof document.removeEventListener === "function") {
-        try { document.removeEventListener("xp:hidden", handleHidden); } catch (_) {}
-      }
+      removeLifecycleListeners();
       if (onTearDown) {
         try { onTearDown(); } catch (_) {}
       }
@@ -56,17 +77,12 @@
       }
     }
 
-    if (typeof document.addEventListener === "function") {
-      try { document.addEventListener("xp:hidden", handleHidden, { passive: true }); }
-      catch (_) { try { document.addEventListener("xp:hidden", handleHidden); } catch (_) {} }
-    }
+    addLifecycleListeners();
 
     if (typeof window.setInterval === "function") {
       try { timerId = window.setInterval(tick, tickMs); } catch (_) { timerId = null; }
     }
-    if (timerId == null) {
-      tick();
-    }
+    tick();
 
     return {
       active: true,
