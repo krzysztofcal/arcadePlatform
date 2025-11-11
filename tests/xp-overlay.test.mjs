@@ -438,4 +438,10 @@ await (async () => {
   assert.equal(fracValue, '', 'numeric_fallback_without_conic: conic variable should clear when unsupported');
   assert.match(harness.getMultiplierText(), /^x/, 'numeric_fallback_without_conic: multiplier should be visible');
   assert.match(harness.getTimerText(), /s$/, 'numeric_fallback_without_conic: timer text should update');
+  harness.dispatchTick({
+    combo: { multiplier: 3, cap: 20 },
+    progressToNext: 0.6,
+    mode: 'build',
+  });
+  assert.equal(harness.badge.style.getPropertyValue('--combo-progress'), '', 'numeric_fallback_without_conic: combo progress var should clear when unsupported');
 })();

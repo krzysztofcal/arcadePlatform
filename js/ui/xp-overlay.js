@@ -21,6 +21,7 @@
     attachRetryId: null,
     comboDetail: { mode: "build", multiplier: 1, progress: 0, cap: 1 },
     pendingCombo: null,
+    comboVisual: { hue: null, glow: null },
   };
 
   let attachAttempts = 0;
@@ -214,10 +215,22 @@
       try { state.badge.classList.toggle("xp-combo--cooldown", mode === "cooldown"); }
       catch (_) {}
     }
-    setBadgeVariable("--combo-progress", progress);
+    if (state.hasConic) {
+      setBadgeVariable("--combo-progress", progress);
+    } else {
+      clearBadgeVariable("--combo-progress");
+    }
     setBadgeVariable("--combo-multiplier", multiplier);
-    setBadgeVariable("--combo-hue", 48);
-    setBadgeVariable("--combo-glow", "rgba(251, 191, 36, 0.25)");
+    const targetHue = 48;
+    const targetGlow = "rgba(251, 191, 36, 0.25)";
+    if (state.comboVisual.hue !== targetHue) {
+      state.comboVisual.hue = targetHue;
+      setBadgeVariable("--combo-hue", targetHue);
+    }
+    if (state.comboVisual.glow !== targetGlow) {
+      state.comboVisual.glow = targetGlow;
+      setBadgeVariable("--combo-glow", targetGlow);
+    }
   }
 
   function handleTick(event) {
@@ -340,6 +353,7 @@
     clearBadgeVariable("--combo-glow");
     state.badge = null;
     state.pendingCombo = null;
+    state.comboVisual = { hue: null, glow: null };
   }
 
   function handleVisibilityChange() {
