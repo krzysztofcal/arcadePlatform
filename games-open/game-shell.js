@@ -16,6 +16,9 @@
   function init() {
     if (typeof document === "undefined") return;
     const slug = document.body?.dataset?.gameSlug || document.body?.dataset?.gameId || "game";
+    try {
+      if (slug) window.__GAME_ID__ = slug;
+    } catch (_) {}
     start(slug);
 
     const passive = { passive: true };

@@ -70,6 +70,9 @@
       }
 
       const resolvedId = xpId;
+      if (resolvedId) {
+        window.__GAME_ID__ = resolvedId;
+      }
       const startBridge = (attempt = 0) => {
         if (window.GameXpBridge && typeof window.GameXpBridge.start === 'function') {
           try { window.GameXpBridge.start(resolvedId); } catch (_) {}
@@ -199,6 +202,7 @@
 </script>
 
 <script src="/js/debug.js" defer></script>
+<script>window.__GAME_ID__ = 'play-shell';</script>
 <script src="/js/xp.js" defer></script>
   <script src="/js/xp-game-hook.js" defer></script>
   <script>
