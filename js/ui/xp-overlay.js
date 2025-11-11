@@ -27,17 +27,8 @@
 
   function detectConic() {
     if (!window.CSS || typeof window.CSS.supports !== "function") return false;
-    try {
-      if (window.CSS.supports("background", "conic-gradient(from 90deg, #000, #fff)")) {
-        return true;
-      }
-    } catch (_) {}
-    try {
-      if (window.CSS.supports("conic-gradient(from 90deg, #000, #fff)")) {
-        return true;
-      }
-    } catch (_) {}
-    return false;
+    try { return window.CSS.supports("background", "conic-gradient(from 90deg, #000, #fff)"); }
+    catch (_) { return false; }
   }
 
   function isDocumentHidden() {
@@ -159,6 +150,7 @@
     state.boost = null;
     stopTicker();
     state.lastTick = 0;
+    state.pendingCombo = null;
     if (state.badge && state.badge.classList && typeof state.badge.classList.remove === "function") {
       try { state.badge.classList.remove("xp-boost--active"); }
       catch (_) {}
@@ -224,6 +216,8 @@
     }
     setBadgeVariable("--combo-progress", progress);
     setBadgeVariable("--combo-multiplier", multiplier);
+    setBadgeVariable("--combo-hue", 48);
+    setBadgeVariable("--combo-glow", "rgba(251, 191, 36, 0.25)");
   }
 
   function handleTick(event) {
@@ -342,7 +336,10 @@
     }
     clearBadgeVariable("--combo-progress");
     clearBadgeVariable("--combo-multiplier");
+    clearBadgeVariable("--combo-hue");
+    clearBadgeVariable("--combo-glow");
     state.badge = null;
+    state.pendingCombo = null;
   }
 
   function handleVisibilityChange() {

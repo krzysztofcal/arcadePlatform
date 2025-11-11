@@ -2,6 +2,25 @@
   --boost-frac: 0;
   --boost-hue: 172;
   --boost-glow: rgba(45, 212, 191, 0.4);
+  --combo-progress: 0;
+  --combo-hue: 48;
+  --combo-glow: rgba(251, 191, 36, 0.25);
+}
+
+.xp-badge::after {
+  content: "";
+  position: absolute;
+  inset: 3px;
+  border-radius: inherit;
+  padding: 2px;
+  background: conic-gradient(from 270deg, hsla(var(--combo-hue), 95%, 54%, 0.9) calc(var(--combo-progress) * 360deg), transparent calc(var(--combo-progress) * 360deg));
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  pointer-events: none;
+  opacity: calc(var(--combo-progress));
+  z-index: 0;
 }
 
 .xp-boost--active {
@@ -21,6 +40,15 @@
   -webkit-mask-composite: xor;
   pointer-events: none;
   z-index: 0;
+}
+
+.xp-combo--sustain {
+  box-shadow: 0 0 0 1px hsla(var(--combo-hue), 90%, 60%, 0.6), 0 6px 18px var(--combo-glow);
+}
+
+.xp-combo--cooldown {
+  filter: saturate(0.9) brightness(0.98);
+  opacity: 0.95;
 }
 
 .xp-boost-chip {

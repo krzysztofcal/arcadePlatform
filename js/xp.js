@@ -749,6 +749,20 @@
         if (!state.flush.lastSync) state.flush.lastSync = Date.now();
         return;
       }
+      // Back-compat: migrate legacy comboCount -> combo snapshot.
+      if (!parsed.combo && Number.isFinite(parsed.comboCount)) {
+        const legacy = Math.max(0, Math.floor(Number(parsed.comboCount) || 0));
+        const stage = Math.max(1, Math.min(COMBO_CAP, 1 + Math.floor(legacy / 3)));
+        parsed.combo = {
+          mode: "build",
+          multiplier: stage,
+          points: 0,
+          stepThreshold: computeComboStepThreshold(stage),
+          sustainLeftMs: 0,
+          cooldownLeftMs: 0,
+          cap: COMBO_CAP,
+        };
+      }
       state.regen.carry = parseNumber(parsed.carry, state.regen.carry || 0) || 0;
       state.regen.momentum = parseNumber(parsed.momentum, state.regen.momentum || 0) || 0;
       state.combo = normalizeCombo(Object.assign(createComboState(), parsed.combo || {}));
