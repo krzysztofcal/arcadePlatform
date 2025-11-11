@@ -12,6 +12,13 @@ let best = Number(localStorage.getItem("ah-2048-best")) || 0;
 let overlayEl = null;
 let touchStart = null;
 
+function notifyGameOver() {
+  const bridge = window.GameXpBridge;
+  if (bridge && typeof bridge.gameOver === "function") {
+    try { bridge.gameOver({ score }); } catch (_error) {}
+  }
+}
+
 bestEl.textContent = best;
 
 function initBoard() {
@@ -119,8 +126,12 @@ function move(direction) {
   if (changed) {
     const spawned = spawnTile();
     drawBoard(false, spawned);
-    if (hasWon()) showOverlay("You made it!", "Keep going");
-    else if (isGameOver()) showOverlay("No more moves", "Try again");
+    if (hasWon()) {
+      showOverlay("You made it!", "Keep going");
+    } else if (isGameOver()) {
+      notifyGameOver();
+      showOverlay("No more moves", "Try again");
+    }
   }
 }
 
@@ -239,6 +250,9 @@ boardEl.addEventListener("touchend", (event) => {
   touchStart = null;
 });
 
-newGameBtn.addEventListener("click", initBoard);
+newGameBtn.addEventListener("click", () => {
+  notifyGameOver();
+  initBoard();
+});
 
 initBoard();

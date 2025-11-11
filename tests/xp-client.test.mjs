@@ -44,6 +44,211 @@ function getListeners(store, type) {
 const docListeners = new Map();
 const windowListeners = new Map();
 
+function matchesSelector(node, selector) {
+  if (!node || !selector) return false;
+  if (selector.startsWith('#')) {
+    return node.id === selector.slice(1);
+  }
+  if (selector.startsWith('.')) {
+    return node.classList && typeof node.classList.contains === 'function'
+      ? node.classList.contains(selector.slice(1))
+      : false;
+  }
+  return (node.tagName || '').toLowerCase() === selector.toLowerCase();
+}
+
+function traverseNodes(root, visitor) {
+  if (!root || !root.children) return false;
+  for (const child of root.children) {
+    if (visitor(child)) return true;
+    if (traverseNodes(child, visitor)) return true;
+  }
+  return false;
+}
+
+function collectNodes(root, selector, results) {
+  if (!root || !root.children) return;
+  for (const child of root.children) {
+    if (matchesSelector(child, selector)) {
+      results.push(child);
+    }
+    collectNodes(child, selector, results);
+  }
+}
+
+function createNode(tagName = '') {
+  const node = {
+    tagName: String(tagName || '').toUpperCase(),
+    id: '',
+    attributes: {},
+    dataset: {},
+    style: {},
+    hidden: false,
+    textContent: '',
+    children: [],
+    parentNode: null,
+    eventListeners: new Map(),
+  };
+
+  const classSet = new Set();
+
+  Object.defineProperty(node, 'className', {
+    get() {
+      return Array.from(classSet).join(' ');
+    },
+    set(value) {
+      classSet.clear();
+      String(value || '')
+        .split(/\s+/)
+        .filter(Boolean)
+        .forEach((cls) => classSet.add(cls));
+    },
+    enumerable: true,
+  });
+
+  node.classList = {
+    add(...classes) {
+      classes.forEach((cls) => {
+        if (cls) classSet.add(String(cls));
+      });
+    },
+    remove(...classes) {
+      classes.forEach((cls) => classSet.delete(String(cls)));
+    },
+    contains(cls) {
+      return classSet.has(String(cls));
+    },
+    toggle(cls, force) {
+      const value = String(cls);
+      if (force === true) {
+        classSet.add(value);
+        return true;
+      }
+      if (force === false) {
+        classSet.delete(value);
+        return false;
+      }
+      if (classSet.has(value)) {
+        classSet.delete(value);
+        return false;
+      }
+      classSet.add(value);
+      return true;
+    },
+  };
+
+  node.appendChild = function appendChild(child) {
+    if (!child) return child;
+    if (child.parentNode) {
+      child.parentNode.removeChild(child);
+    }
+    child.parentNode = node;
+    node.children.push(child);
+    return child;
+  };
+
+  node.removeChild = function removeChild(child) {
+    if (!child) return child;
+    const idx = node.children.indexOf(child);
+    if (idx >= 0) {
+      node.children.splice(idx, 1);
+      child.parentNode = null;
+    }
+    return child;
+  };
+
+  node.insertBefore = function insertBefore(child, before) {
+    if (!before || !node.children.length) {
+      return node.appendChild(child);
+    }
+    const index = node.children.indexOf(before);
+    if (index === -1) return node.appendChild(child);
+    if (child.parentNode) {
+      child.parentNode.removeChild(child);
+    }
+    child.parentNode = node;
+    node.children.splice(index, 0, child);
+    return child;
+  };
+
+  node.setAttribute = function setAttribute(name, value) {
+    const attr = String(name).toLowerCase();
+    const val = String(value);
+    node.attributes[attr] = val;
+    if (attr === 'id') {
+      node.id = val;
+    } else if (attr === 'class') {
+      node.className = val;
+    }
+  };
+
+  node.getAttribute = function getAttribute(name) {
+    const attr = String(name).toLowerCase();
+    if (attr === 'id') return node.id || null;
+    if (attr === 'class') return node.className || null;
+    return Object.prototype.hasOwnProperty.call(node.attributes, attr) ? node.attributes[attr] : null;
+  };
+
+  node.hasAttribute = function hasAttribute(name) {
+    const attr = String(name).toLowerCase();
+    if (attr === 'id') return !!node.id;
+    if (attr === 'class') return classSet.size > 0;
+    return Object.prototype.hasOwnProperty.call(node.attributes, attr);
+  };
+
+  node.querySelector = function querySelector(selector) {
+    let match = null;
+    traverseNodes(node, (candidate) => {
+      if (matchesSelector(candidate, selector)) {
+        match = candidate;
+        return true;
+      }
+      return false;
+    });
+    return match;
+  };
+
+  node.querySelectorAll = function querySelectorAll(selector) {
+    const results = [];
+    collectNodes(node, selector, results);
+    return results;
+  };
+
+  node.contains = function contains(target) {
+    if (!target) return false;
+    if (target === node) return true;
+    return traverseNodes(node, (candidate) => candidate === target);
+  };
+
+  node.addEventListener = function addEventListener(type, handler) {
+    if (!type || typeof handler !== 'function') return;
+    const key = String(type);
+    const list = node.eventListeners.get(key) || [];
+    list.push(handler);
+    node.eventListeners.set(key, list);
+  };
+
+  node.removeEventListener = function removeEventListener(type, handler) {
+    const key = String(type);
+    const list = node.eventListeners.get(key);
+    if (!list) return;
+    const next = handler ? list.filter((fn) => fn !== handler) : [];
+    if (next.length) {
+      node.eventListeners.set(key, next);
+    } else {
+      node.eventListeners.delete(key);
+    }
+  };
+
+  node.remove = function remove() {
+    if (node.parentNode) {
+      node.parentNode.removeChild(node);
+    }
+  };
+
+  return node;
+}
+
 const localStorageMock = {
   __store: new Map(),
   getItem(key) {
@@ -158,25 +363,16 @@ async function fetchStub(url, options) {
 const xpWindowCalls = [];
 const xpStatusCalls = [];
 
+const bodyNode = createNode('body');
+bodyNode.dataset = { gameHost: '1', gameSlug: 'unit-test', gameId: 'unit-test' };
+bodyNode.setAttribute('data-game-host', '1');
+bodyNode.setAttribute('data-game-id', 'unit-test');
+
 const documentStub = {
   readyState: 'complete',
   hidden: false,
   visibilityState: 'visible',
-  body: {
-    dataset: { gameHost: '1', gameSlug: 'unit-test', gameId: 'unit-test' },
-    hasAttribute(name) {
-      return name === 'data-game-host';
-    },
-    getAttribute(name) {
-      if (name === 'data-game-id') return 'unit-test';
-      if (name === 'data-game-host') return '1';
-      return null;
-    },
-    appendChild() {},
-    classList: { add() {}, remove() {}, toggle() {} },
-    contains() { return false; },
-    querySelector() { return null; },
-  },
+  body: bodyNode,
   addEventListener(type, handler) {
     addListener(docListeners, type, handler);
   },
@@ -189,18 +385,14 @@ const documentStub = {
     });
     return true;
   },
-  getElementById() {
-    return null;
+  getElementById(id) {
+    return bodyNode.querySelector(`#${id}`);
   },
-  createElement() {
-    return {
-      className: '',
-      textContent: '',
-      appendChild() {},
-      classList: { add() {}, remove() {}, toggle() {} },
-      contains() { return false; },
-      querySelector() { return null; },
-    };
+  querySelector(selector) {
+    return bodyNode.querySelector(selector);
+  },
+  createElement(tag) {
+    return createNode(tag);
   },
   createEvent(type) {
     return {
@@ -234,6 +426,12 @@ const windowStub = {
   clearTimeout: clearTimer,
   setInterval: (fn, delay) => scheduleTimer(fn, delay, true, delay),
   clearInterval: clearTimer,
+  requestAnimationFrame(callback) {
+    return scheduleTimer(() => {
+      try { callback(now); } catch (_) {}
+    }, 16, false, 16);
+  },
+  cancelAnimationFrame: clearTimer,
   navigator: {
     userActivation: { isActive: true },
     sendBeacon(url, data) {
@@ -307,6 +505,12 @@ localStorageMock.setItem(CACHE_KEY, JSON.stringify({
 vm.createContext(context);
 new vm.Script(instrumented, { filename: 'xp.js' }).runInContext(context);
 
+const xpGameHookSource = await readFile(path.join(__dirname, '..', 'js', 'xp-game-hook.js'), 'utf8');
+new vm.Script(xpGameHookSource, { filename: 'xp-game-hook.js' }).runInContext(context);
+
+const overlaySource = await readFile(path.join(__dirname, '..', 'js', 'ui', 'xp-overlay.js'), 'utf8');
+new vm.Script(overlaySource, { filename: 'xp-overlay.js' }).runInContext(context);
+
 const XP = context.window.XP;
 assert(XP, 'XP API not initialized');
 const getState = context.window.__xpTestHook;
@@ -314,6 +518,42 @@ assert.equal(typeof getState, 'function', 'state hook missing');
 
 const AWARD_INTERVAL_MS = windowStub.XP_AWARD_INTERVAL_MS;
 const HARD_IDLE_MS = windowStub.XP_HARD_IDLE_MS;
+
+const Bridge = context.window.GameXpBridge;
+assert(Bridge && typeof Bridge.auto === 'function', 'GameXpBridge missing');
+
+const boostEvents = [];
+windowStub.addEventListener('xp:boost', (event) => {
+  boostEvents.push(event);
+});
+
+function clearBoostEvents() {
+  boostEvents.length = 0;
+}
+
+function dispatchScore(gameId, score) {
+  const event = {
+    type: 'message',
+    data: { type: 'game-score', gameId, score },
+    origin: windowStub.location.origin,
+  };
+  windowStub.dispatchEvent(event);
+}
+
+function getOverlayRoot() {
+  return documentStub.getElementById('xpOverlay');
+}
+
+function currentPopCount() {
+  const root = getOverlayRoot();
+  if (!root) return 0;
+  const pops = root.querySelectorAll('.xp-pop');
+  return Array.isArray(pops) ? pops.length : pops.size || 0;
+}
+
+function repeatingTimerCount() {
+  return [...timers.values()].filter((timer) => timer.repeating).length;
+}
 
 function setVisibility(hidden) {
   documentStub.hidden = hidden;
@@ -413,6 +653,82 @@ trigger('pageshow', windowStub);
 const hydratedAfterPageShow = getState();
 assert.equal(hydratedAfterPageShow.flush.pending, 12);
 assert.equal(hydratedAfterPageShow.boost.source, 'pageshow');
+
+// New record boost triggers on score pulse and powers awards
+clearBoostEvents();
+Bridge.setHighScore('2048', 15);
+freshSession('2048');
+Bridge.start('2048');
+const baselineAward = await runTickAndSettle({ ratio: 1 });
+dispatchScore('2048', 5);
+dispatchScore('2048', 10);
+dispatchScore('2048', 20);
+await settleMicrotasks();
+const recordEvent = boostEvents.find((event) => event.detail && event.detail.source === 'newRecord' && event.detail.multiplier > 1);
+assert(recordEvent, 'expected new record boost event');
+assert.equal(recordEvent.detail.gameId, '2048');
+assert(recordEvent.detail.secondsLeft > 0, 'boost seconds should be positive');
+assert(Math.abs(getState().boost.multiplier - 1.5) < 0.05, 'boost multiplier should be ~1.5');
+const boostedAward = await runTickAndSettle({ ratio: 1 });
+assert(boostedAward >= Math.floor(baselineAward * 1.4), 'boosted tick should reflect multiplier');
+
+// Game over stops the boost and updates the stored high score
+clearBoostEvents();
+Bridge.gameOver({ score: 28 });
+await settleMicrotasks();
+assert.equal(Bridge.getHighScore('2048'), 28, 'high score should update after run');
+const endEvent = boostEvents.find((event) => event.detail && event.detail.multiplier === 1 && event.detail.source === 'gameOver');
+assert(endEvent, 'expected terminating boost event on gameOver');
+assert.equal(Math.round(getState().boost.multiplier), 1, 'boost multiplier should reset after game over');
+
+// Overlay stays quiet outside active game windows
+clearBoostEvents();
+Bridge.stop({ flush: false });
+setVisibility(true);
+windowStub.dispatchEvent(new CustomEventShim('xp:tick', {
+  detail: {
+    awarded: 5,
+    combo: 1,
+    boost: 1,
+    progressToNext: 0.25,
+    ts: DateMock.now(),
+    gameId: 'unit-test',
+  },
+}));
+await settleMicrotasks();
+advanceTime(20);
+await settleMicrotasks();
+const popsAfter = currentPopCount();
+assert(popsAfter === 0, 'overlay should not render pops when inactive');
+const overlayRoot = getOverlayRoot();
+assert(
+  overlayRoot && (overlayRoot.hidden === true || overlayRoot.classList.contains('xp-faded')),
+  'overlay root should remain hidden when inactive',
+);
+setVisibility(false);
+
+// BFCache/pagehide clears boost ticker without duplicating timers
+clearBoostEvents();
+Bridge.setHighScore('2048', 5);
+freshSession('2048');
+Bridge.start('2048');
+clearBoostEvents();
+dispatchScore('2048', 6);
+await settleMicrotasks();
+advanceTime(20);
+await settleMicrotasks();
+const startedEvent = boostEvents.find((event) => event.detail && event.detail.source === 'newRecord');
+assert(startedEvent, 'expected boost to start before pagehide');
+const timersBefore = repeatingTimerCount();
+Bridge.stopBoost('pagehide');
+await settleMicrotasks();
+advanceTime(1_000);
+const timersAfter = repeatingTimerCount();
+assert(timersAfter <= timersBefore, 'pagehide should clear active boost ticker');
+const pagehideEvent = boostEvents.find((event) => event.detail && event.detail.source === 'pagehide' && event.detail.multiplier === 1);
+assert(pagehideEvent, 'pagehide should emit a terminating boost event');
+Bridge.stop({ flush: false });
+clearBoostEvents();
 
 freshSession('tick-baseline');
 
