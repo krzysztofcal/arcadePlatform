@@ -142,6 +142,183 @@ class CustomEventShim extends EventShim {
   }
 }
 
+class ElementStub {
+  constructor(tag) {
+    this.nodeName = String(tag || "div").toUpperCase();
+    this.children = [];
+    this.parentNode = null;
+    this.attributes = Object.create(null);
+    this.style = {};
+    this.dataset = {};
+    this.__className = "";
+    this.textContent = "";
+    this.id = "";
+    this.hidden = false;
+    this.__listeners = new Map();
+    const classSet = new Set();
+    const syncClassName = () => { this.__className = Array.from(classSet).join(" "); };
+    Object.defineProperty(this, 'className', {
+      get: () => this.__className,
+      set: (value) => {
+        classSet.clear();
+        if (value) {
+          String(value).split(/\s+/).filter(Boolean).forEach((token) => classSet.add(token));
+        }
+        syncClassName();
+      },
+      enumerable: true,
+    });
+    this.classList = {
+      add: (...tokens) => {
+        tokens.forEach((token) => { if (token) classSet.add(String(token)); });
+        syncClassName();
+      },
+      remove: (...tokens) => {
+        tokens.forEach((token) => { classSet.delete(String(token)); });
+        syncClassName();
+      },
+      contains: (token) => classSet.has(String(token)),
+      toggle: (token, force) => {
+        const key = String(token);
+        const shouldAdd = force == null ? !classSet.has(key) : !!force;
+        if (shouldAdd) classSet.add(key); else classSet.delete(key);
+        syncClassName();
+        return shouldAdd;
+      },
+    };
+    this.className = "";
+  }
+
+  setAttribute(name, value) {
+    const key = String(name);
+    this.attributes[key] = String(value);
+    if (key === "id") this.id = String(value);
+    if (key === "hidden") this.hidden = true;
+  }
+
+  removeAttribute(name) {
+    const key = String(name);
+    delete this.attributes[key];
+    if (key === "id") this.id = "";
+    if (key === "hidden") this.hidden = false;
+  }
+
+  hasAttribute(name) {
+    return Object.prototype.hasOwnProperty.call(this.attributes, String(name));
+  }
+
+  getAttribute(name) {
+    return this.attributes[String(name)] ?? null;
+  }
+
+  appendChild(child) {
+    if (!child) return child;
+    if (child.parentNode) {
+      child.parentNode.removeChild(child);
+    }
+    this.children.push(child);
+    child.parentNode = this;
+    return child;
+  }
+
+  removeChild(child) {
+    const index = this.children.indexOf(child);
+    if (index >= 0) {
+      this.children.splice(index, 1);
+      child.parentNode = null;
+    }
+    return child;
+  }
+
+  contains(node) {
+    if (node === this) return true;
+    for (const child of this.children) {
+      if (child === node || (child.contains && child.contains(node))) return true;
+    }
+    return false;
+  }
+
+  remove() {
+    if (this.parentNode) {
+      this.parentNode.removeChild(this);
+    }
+  }
+
+  addEventListener(type, handler) {
+    const key = String(type);
+    const list = this.__listeners.get(key) || [];
+    list.push(handler);
+    this.__listeners.set(key, list);
+  }
+
+  removeEventListener(type, handler) {
+    const key = String(type);
+    if (!this.__listeners.has(key)) return;
+    if (!handler) {
+      this.__listeners.delete(key);
+      return;
+    }
+    const next = this.__listeners.get(key).filter((fn) => fn !== handler);
+    if (next.length) this.__listeners.set(key, next); else this.__listeners.delete(key);
+  }
+
+  dispatchEvent(event) {
+    const handlers = this.__listeners.get(event.type) || [];
+    handlers.slice().forEach((fn) => {
+      try { fn.call(this, event); } catch (_) {}
+    });
+    return true;
+  }
+
+  querySelector(selector) {
+    return this.querySelectorAll(selector)[0] || null;
+  }
+
+  querySelectorAll(selector) {
+    const results = [];
+    const match = (element) => {
+      const sel = String(selector);
+      if (!sel) return false;
+      if (sel.startsWith("#")) {
+        return element.id === sel.slice(1);
+      }
+      if (sel.startsWith(".")) {
+        return element.classList.contains(sel.slice(1));
+      }
+      return element.nodeName === sel.toUpperCase();
+    };
+    const traverse = (node) => {
+      node.children.forEach((child) => {
+        if (match(child)) results.push(child);
+        if (child.children && child.children.length) traverse(child);
+      });
+    };
+    traverse(this);
+    return results;
+  }
+
+  get firstElementChild() {
+    return this.children.find((child) => child != null) || null;
+  }
+
+  get childElementCount() {
+    return this.children.length;
+  }
+
+  get isConnected() {
+    let node = this;
+    while (node) {
+      if (node === documentStub.body) return true;
+      node = node.parentNode;
+    }
+    return false;
+  }
+
+  get offsetWidth() {
+    return 0;
+  }
+}
+
 const sendBeaconCalls = [];
 let sendBeaconShouldSucceed = false;
 const flushRequests = [];
@@ -158,25 +335,16 @@ async function fetchStub(url, options) {
 const xpWindowCalls = [];
 const xpStatusCalls = [];
 
+const documentBody = new ElementStub('body');
+documentBody.dataset = { gameHost: '1', gameSlug: 'unit-test', gameId: 'unit-test' };
+documentBody.setAttribute('data-game-host', '1');
+documentBody.setAttribute('data-game-id', 'unit-test');
+
 const documentStub = {
   readyState: 'complete',
   hidden: false,
   visibilityState: 'visible',
-  body: {
-    dataset: { gameHost: '1', gameSlug: 'unit-test', gameId: 'unit-test' },
-    hasAttribute(name) {
-      return name === 'data-game-host';
-    },
-    getAttribute(name) {
-      if (name === 'data-game-id') return 'unit-test';
-      if (name === 'data-game-host') return '1';
-      return null;
-    },
-    appendChild() {},
-    classList: { add() {}, remove() {}, toggle() {} },
-    contains() { return false; },
-    querySelector() { return null; },
-  },
+  body: documentBody,
   addEventListener(type, handler) {
     addListener(docListeners, type, handler);
   },
@@ -189,18 +357,17 @@ const documentStub = {
     });
     return true;
   },
-  getElementById() {
-    return null;
+  getElementById(id) {
+    return documentBody.querySelector(`#${id}`);
   },
-  createElement() {
-    return {
-      className: '',
-      textContent: '',
-      appendChild() {},
-      classList: { add() {}, remove() {}, toggle() {} },
-      contains() { return false; },
-      querySelector() { return null; },
-    };
+  querySelector(selector) {
+    return documentBody.querySelector(selector);
+  },
+  querySelectorAll(selector) {
+    return documentBody.querySelectorAll(selector);
+  },
+  createElement(tag) {
+    return new ElementStub(tag);
   },
   createEvent(type) {
     return {
@@ -307,6 +474,12 @@ localStorageMock.setItem(CACHE_KEY, JSON.stringify({
 vm.createContext(context);
 new vm.Script(instrumented, { filename: 'xp.js' }).runInContext(context);
 
+const xpHookSource = await readFile(path.join(__dirname, '..', 'js', 'xp-game-hook.js'), 'utf8');
+new vm.Script(xpHookSource, { filename: 'xp-game-hook.js' }).runInContext(context);
+
+const xpOverlaySource = await readFile(path.join(__dirname, '..', 'js', 'ui', 'xp-overlay.js'), 'utf8');
+new vm.Script(xpOverlaySource, { filename: 'xp-overlay.js' }).runInContext(context);
+
 const XP = context.window.XP;
 assert(XP, 'XP API not initialized');
 const getState = context.window.__xpTestHook;
@@ -368,9 +541,18 @@ function resetNetworkStubs() {
 }
 
 function freshSession(label) {
-  try { XP.stopSession({ flush: false }); } catch (_) {}
+  const bridge = windowStub.GameXpBridge;
+  if (bridge && typeof bridge.stop === 'function') {
+    try { bridge.stop({ flush: false }); } catch (_) {}
+  } else {
+    try { XP.stopSession({ flush: false }); } catch (_) {}
+  }
   advanceTime(0);
-  XP.startSession(label);
+  if (bridge && typeof bridge.start === 'function') {
+    try { bridge.start(label); } catch (_) {}
+  } else {
+    XP.startSession(label);
+  }
   advanceTime(0);
   const state = getState();
   state.sessionXp = 0;
@@ -490,6 +672,78 @@ assert(boostedByEvent > unfrozen, 'xp:boost event should amplify awards');
 assert(boostedByEvent >= 20, 'xp:boost event should approach the cap');
 advanceTime(2_100);
 await settleFlush();
+
+freshSession('2048');
+localStorageMock.setItem('ap:hs:2048', '15');
+const recordBoostEvents = [];
+const recordBoostListener = (event) => { if (event && event.detail && event.detail.source) recordBoostEvents.push(event.detail); };
+const recordTickDetails = [];
+const recordTickListener = (event) => { if (event && event.detail) recordTickDetails.push(event.detail); };
+windowStub.addEventListener('xp:boost', recordBoostListener);
+windowStub.addEventListener('xp:tick', recordTickListener);
+
+const emitScorePulse = (gameId, score) => {
+  trigger('message', windowStub, { data: { type: 'game-score', gameId, score }, origin: windowStub.location.origin });
+};
+
+emitScorePulse('2048', 5);
+emitScorePulse('2048', 10);
+assert.equal(recordBoostEvents.length, 0, 'boost should not trigger before beating the stored record');
+
+emitScorePulse('2048', 20);
+assert(recordBoostEvents.some((detail) => detail.source === 'newRecord'), 'new record should dispatch a boost event');
+const newRecordEvent = recordBoostEvents.find((detail) => detail.source === 'newRecord');
+assert(newRecordEvent.secondsLeft > 0, 'new record boost should expose a countdown placeholder');
+assert.equal(newRecordEvent.gameId, '2048');
+await runTickAndSettle({ ratio: 1 });
+const latestRecordTick = recordTickDetails[recordTickDetails.length - 1];
+assert(latestRecordTick.boost >= 1.5, 'new record boost should amplify tick multipliers');
+assert.equal(latestRecordTick.gameId, '2048');
+
+windowStub.GameXpBridge.gameOver({ score: 28, gameId: '2048' });
+const endRecordEvent = recordBoostEvents[recordBoostEvents.length - 1];
+assert.equal(endRecordEvent.source, 'gameOver', 'gameOver should publish a terminating boost event');
+assert.equal(endRecordEvent.multiplier, 1);
+assert.equal(endRecordEvent.secondsLeft, 0);
+await runTickAndSettle({ ratio: 1 });
+const postRecordTick = recordTickDetails[recordTickDetails.length - 1];
+assert(postRecordTick.boost <= 1.01, 'boost multiplier should clear after game over');
+assert.equal(localStorageMock.getItem('ap:hs:2048'), '28', 'high score storage should update after finishing the run');
+
+windowStub.removeEventListener('xp:boost', recordBoostListener);
+windowStub.removeEventListener('xp:tick', recordTickListener);
+
+recordBoostEvents.length = 0;
+freshSession('2048');
+localStorageMock.setItem('ap:hs:2048', '50');
+windowStub.addEventListener('xp:boost', recordBoostListener);
+emitScorePulse('2048', 60);
+assert(recordBoostEvents.some((detail) => detail.source === 'newRecord'), 'new record boost should activate before xp:hidden');
+assert(getListeners(docListeners, 'xp:hidden').length > 0, 'xp:hidden listener should be registered');
+recordBoostEvents.length = 0;
+trigger('pagehide', windowStub);
+advanceTime(2_500);
+const hiddenEvents = recordBoostEvents.filter((detail) => detail.source === 'hidden');
+assert(hiddenEvents.length >= 1, 'xp:hidden should emit a boost termination event');
+assert.equal(windowStub.GameXpBridge.isBoostActive(), false, 'boost state should clear after xp:hidden');
+windowStub.removeEventListener('xp:boost', recordBoostListener);
+
+const overlayRoot = documentStub.body.querySelector('#xpOverlay');
+const overlayStack = overlayRoot && overlayRoot.querySelector('#xpOverlayStack');
+assert(overlayRoot, 'overlay root should exist in the DOM');
+windowStub.GameXpBridge.stop({ flush: false });
+documentStub.hidden = true;
+documentStub.visibilityState = 'hidden';
+trigger('visibilitychange', documentStub);
+const initialPopCount = overlayStack ? overlayStack.childElementCount : 0;
+const idleTick = new CustomEventShim('xp:tick', { detail: { awarded: 5, combo: 1, boost: 1, progressToNext: 0.2, ts: DateMock.now(), gameId: 'about' } });
+windowStub.dispatchEvent(idleTick);
+const afterPopCount = overlayStack ? overlayStack.childElementCount : 0;
+assert.equal(afterPopCount, initialPopCount, 'overlay should not render pops when no active game session is running');
+assert(overlayRoot.hasAttribute('hidden'), 'overlay should remain hidden outside active gameplay');
+documentStub.hidden = false;
+documentStub.visibilityState = 'visible';
+trigger('visibilitychange', documentStub);
 
 // Flush batching by threshold and interval expiry
 resetNetworkStubs();

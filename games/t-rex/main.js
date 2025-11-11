@@ -126,7 +126,7 @@
       }
     }
   }
-  function gameOver(){ state.running=false; if(state.score>state.hiScore){ state.hiScore=Math.floor(state.score); localStorage.setItem('trex-hi', state.hiScore.toString()); } updateScoreboard(); drawGameOver(); }
+  function gameOver(){ state.running=false; const finalScore=Math.floor(state.score); if(state.score>state.hiScore){ state.hiScore=finalScore; localStorage.setItem('trex-hi', state.hiScore.toString()); } updateScoreboard(); drawGameOver(); if(window.GameXpBridge && typeof window.GameXpBridge.gameOver==='function'){ try{ window.GameXpBridge.gameOver({ score: finalScore, gameId: XP_GAME_ID }); }catch(_error){} } }
   function drawGameOver(){ ctx.save(); ctx.fillStyle='rgba(0,0,0,.5)'; ctx.fillRect(0,0,canvas.width,canvas.height); ctx.fillStyle='#f5f6fb'; ctx.font='24px "Courier New", monospace'; ctx.textAlign='center'; ctx.fillText('Game Over', WORLD_WIDTH/2, WORLD_HEIGHT/2-10); ctx.font='16px "Courier New", monospace'; ctx.fillText('Press restart or jump to try again', WORLD_WIDTH/2, WORLD_HEIGHT/2+14); ctx.restore(); }
   function spawnObstacle(){ const h=40+Math.random()*40,w=20+Math.random()*20; state.obstacles.push({x:WORLD_WIDTH+Math.random()*60, y:GROUND_Y+2-h, width:w, height:h}); }
   function spawnCloud(){ state.clouds.push({ x:WORLD_WIDTH+Math.random()*200, y:20+Math.random()*60, width:60+Math.random()*40, height:20+Math.random()*10, speed:30+Math.random()*20 }); }

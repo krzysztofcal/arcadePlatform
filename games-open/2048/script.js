@@ -120,7 +120,12 @@ function move(direction) {
     const spawned = spawnTile();
     drawBoard(false, spawned);
     if (hasWon()) showOverlay("You made it!", "Keep going");
-    else if (isGameOver()) showOverlay("No more moves", "Try again");
+    else if (isGameOver()) {
+      showOverlay("No more moves", "Try again");
+      if (window.GameXpBridge && typeof window.GameXpBridge.gameOver === "function") {
+        try { window.GameXpBridge.gameOver({ score, gameId: "2048" }); } catch (_error) {}
+      }
+    }
   }
 }
 

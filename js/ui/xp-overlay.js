@@ -17,10 +17,13 @@
     boostSeconds: 0,
     boostMultiplier: 1,
     boostVisible: false,
+    boostSource: null,
     idleTimer: null,
     lastCombo: 1,
     lastProgress: 0,
     lastTickTs: 0,
+    lastGameId: null,
+    overlayActive: false,
     mutations: [],
     rafQueued: false,
     tickHandler: null,
@@ -94,6 +97,7 @@
       root = document.createElement("div");
       root.id = "xpOverlay";
       root.setAttribute("aria-live", "polite");
+      root.setAttribute("hidden", "hidden");
       const stack = document.createElement("div");
       stack.id = "xpOverlayStack";
       stack.className = "xp-overlay__stack";
@@ -138,6 +142,60 @@
     return state.root;
   }
 
+  function isDocumentVisible() {
+    if (!document) return false;
+    if (typeof document.visibilityState === "string") {
+      return document.visibilityState === "visible";
+    }
+    if (typeof document.hidden === "boolean") {
+      return document.hidden === false;
+    }
+    return true;
+  }
+
+  function hasGameHostHint() {
+    try {
+      const body = document && document.body;
+      if (!body) return false;
+      if (typeof body.hasAttribute === "function" && body.hasAttribute("data-game-host")) return true;
+      if (body.dataset && (body.dataset.gameHost || body.dataset.gameId || body.dataset.gameSlug)) return true;
+    } catch (_) {}
+    return false;
+  }
+
+  function shouldDisplay(detail) {
+    if (!isDocumentVisible()) return false;
+    const bridge = window && window.GameXpBridge;
+    const candidate = detail && detail.gameId ? detail.gameId : state.lastGameId;
+    if (bridge && typeof bridge.isActiveGameWindow === "function") {
+      try {
+        return bridge.isActiveGameWindow(candidate) === true;
+      } catch (_) {}
+    }
+    return hasGameHostHint();
+  }
+
+  function hideOverlayRoot() {
+    if (!state.overlayActive && state.root && state.root.hasAttribute && state.root.hasAttribute("hidden")) return;
+    state.overlayActive = false;
+    scheduleMutation(() => {
+      const root = ensureRoot();
+      if (!root) return;
+      root.setAttribute("hidden", "hidden");
+      root.classList.remove("xp-faded");
+    });
+  }
+
+  function showOverlayRoot() {
+    if (state.overlayActive) return;
+    state.overlayActive = true;
+    scheduleMutation(() => {
+      const root = ensureRoot();
+      if (!root) return;
+      root.removeAttribute("hidden");
+    });
+  }
+
   function clearIdleTimer() {
     if (state.idleTimer) {
       try { window.clearTimeout(state.idleTimer); } catch (_) {}
@@ -154,6 +212,7 @@
 
   function markActive() {
     clearIdleTimer();
+    showOverlayRoot();
     scheduleMutation(() => {
       const root = ensureRoot();
       if (root) root.classList.remove("xp-faded");
@@ -237,6 +296,10 @@
 
   function refreshBoostText() {
     if (!state.boostChip) return;
+    if (state.boostSource === "newRecord") {
+      state.boostChip.textContent = `BOOST x${formatMultiplier(state.boostMultiplier)} · RECORD`;
+      return;
+    }
     state.boostChip.textContent = `BOOST x${formatMultiplier(state.boostMultiplier)} · ${formatSeconds(state.boostSeconds)}s`;
   }
 
@@ -245,11 +308,13 @@
       stopBoostTimer();
       state.boostMultiplier = 1;
       state.boostSeconds = 0;
+      state.boostSource = null;
       return;
     }
     state.boostVisible = false;
     state.boostMultiplier = 1;
     state.boostSeconds = 0;
+    state.boostSource = null;
     stopBoostTimer();
     scheduleMutation(() => {
       ensureRoot();
@@ -264,6 +329,10 @@
     stopBoostTimer();
     if (state.boostSeconds <= 0) return;
     if (typeof window.setInterval !== "function") return;
+    if (state.boostSource === "newRecord") {
+      refreshBoostText();
+      return;
+    }
     state.boostTimer = window.setInterval(() => {
       state.boostSeconds = Math.max(0, state.boostSeconds - 1);
       if (state.boostSeconds <= 0) {
@@ -279,7 +348,7 @@
     }, SECOND);
   }
 
-  function showBoost(multiplier, secondsLeft) {
+  function showBoost(multiplier, secondsLeft, detail) {
     const mult = Number(multiplier);
     const seconds = Number(secondsLeft);
     if (!Number.isFinite(mult) || mult < 1 || !Number.isFinite(seconds) || seconds < 0) {
@@ -294,6 +363,10 @@
     }
     state.boostMultiplier = normalizedMultiplier;
     state.boostSeconds = normalizedSeconds;
+    state.boostSource = detail && typeof detail.source === "string" ? detail.source : null;
+    if (detail && detail.gameId) {
+      state.lastGameId = detail.gameId;
+    }
     state.boostVisible = true;
     scheduleMutation(() => {
       ensureRoot();
@@ -317,9 +390,16 @@
     if (!Number.isFinite(combo) || combo < 1) return;
     if (!Number.isFinite(boost) || boost < 1) return;
     if (!Number.isFinite(ts)) return;
+    if (!shouldDisplay(detail)) {
+      hideOverlayRoot();
+      clearIdleTimer();
+      hideBoost();
+      return;
+    }
     const comboValue = Math.max(1, Math.floor(combo));
     const boostValue = boost > 1 ? boost : 1;
     const progressValue = Number.isFinite(progress) ? Math.min(1, Math.max(0, progress)) : 0;
+    state.lastGameId = detail && detail.gameId ? detail.gameId : state.lastGameId;
     const awardedText = Math.abs(awarded - Math.round(awarded)) < 0.001 ? Math.round(awarded) : Number(awarded.toFixed(2));
     const textParts = [`+${awardedText}`];
     const suffix = [`x${comboValue}`];
@@ -344,6 +424,11 @@
     if (!detail || typeof detail !== "object") return;
     const multiplier = Number(detail.multiplier);
     const secondsLeft = Number(detail.secondsLeft);
+    if (!shouldDisplay(detail)) {
+      hideBoost();
+      hideOverlayRoot();
+      return;
+    }
     if (!Number.isFinite(multiplier) || multiplier < 1) {
       hideBoost();
       return;
@@ -356,7 +441,8 @@
       hideBoost();
       return;
     }
-    showBoost(multiplier, secondsLeft);
+    showOverlayRoot();
+    showBoost(multiplier, secondsLeft, detail);
   }
 
   function attachListeners() {
@@ -390,6 +476,8 @@
     detachListeners();
     clearIdleTimer();
     stopBoostTimer();
+    hideBoost();
+    hideOverlayRoot();
     logDiag("cleanup", { reason: "xp:hidden" });
   }
 

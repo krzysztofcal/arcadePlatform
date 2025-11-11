@@ -354,6 +354,9 @@ function loseLife() {
   if (pacman.lives <= 0) {
     running = false;
     showOverlay("Game over", "Press reset to try again");
+    if (window.GameXpBridge && typeof window.GameXpBridge.gameOver === "function") {
+      try { window.GameXpBridge.gameOver({ score, gameId: "pacman" }); } catch (_error) {}
+    }
     return;
   }
   pacman.tileX = pacmanSpawn.x;

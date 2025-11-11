@@ -92,10 +92,17 @@
   function broadcastBoostState() {
     const multiplier = Number(state.boost && state.boost.multiplier) || 1;
     const secondsLeft = resolveBoostSecondsLeft();
-    emitXpBoost({
+    const detail = {
       multiplier: multiplier < 1 ? 1 : multiplier,
       secondsLeft: secondsLeft < 0 ? 0 : secondsLeft,
-    });
+    };
+    if (state.boost && state.boost.source != null) {
+      detail.source = state.boost.source;
+    }
+    if (state.gameId) {
+      detail.gameId = state.gameId;
+    }
+    emitXpBoost(detail);
   }
 
   function normalizeGameId(value) {
@@ -1279,6 +1286,9 @@
         progressToNext: Number.isFinite(progress) ? Math.min(1, Math.max(0, progress)) : 0,
         ts,
       };
+      if (state.gameId) {
+        detail.gameId = state.gameId;
+      }
       if (Number.isFinite(baseForTick) && baseForTick > 0) {
         detail.base = Math.round(baseForTick);
       }

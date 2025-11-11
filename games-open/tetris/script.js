@@ -297,6 +297,9 @@ function playerReset() {
     running = false;
     pendingGameOver = true;
     showOverlay("Game over", "Tap play to restart");
+    if (window.GameXpBridge && typeof window.GameXpBridge.gameOver === "function") {
+      try { window.GameXpBridge.gameOver({ score: player.score, gameId: "tetris" }); } catch (_error) {}
+    }
   }
 }
 
