@@ -162,6 +162,7 @@ async function fetchStub(url, options) {
 
 const xpWindowCalls = [];
 const xpStatusCalls = [];
+const overlayBursts = [];
 
 const documentStub = {
   readyState: 'complete',
@@ -221,7 +222,7 @@ const documentStub = {
 
 const windowStub = {
   document: documentStub,
-  location: { origin: 'https://example.test', pathname: '/games/unit-test' },
+  location: { origin: 'https://example.test', pathname: '/games/unit-test', search: '' },
   localStorage: localStorageMock,
   addEventListener(type, handler) {
     addListener(windowListeners, type, handler);
@@ -341,6 +342,16 @@ assert(GameXpBridge, 'GameXpBridge missing');
 const XPOverlay = context.window.XPOverlay;
 assert(XPOverlay && XPOverlay.__test && typeof XPOverlay.__test.attach === 'function', 'XPOverlay test interface missing');
 XPOverlay.__test.attach();
+const overlaySpy = (args) => {
+  overlayBursts.push(Object.assign({}, args));
+};
+if (context.window.XpOverlay) {
+  context.window.XpOverlay.showBurst = overlaySpy;
+}
+XPOverlay.showBurst = overlaySpy;
+if (XPOverlay.__test) {
+  XPOverlay.__test.showBurst = overlaySpy;
+}
 
 const AWARD_INTERVAL_MS = windowStub.XP_AWARD_INTERVAL_MS;
 const HARD_IDLE_MS = windowStub.XP_HARD_IDLE_MS;
@@ -579,9 +590,19 @@ assert(offEvent, 'should emit xp:boost off signal when hydrated boost is expired
 
 freshSession('tick-baseline');
 
+overlayBursts.length = 0;
+
 // Tick loop awards roughly baseline XP and scales with activity
 const lowerActivity = await runTickAndSettle({ ratio: 0.4 });
+assert(lowerActivity > 0, 'lower activity should still award XP');
+const burstsAfterLower = overlayBursts.length;
+assert(burstsAfterLower >= 1, 'overlay burst should fire on initial award');
 const fullActivity = await runTickAndSettle({ ratio: 1 });
+assert.equal(overlayBursts.length, burstsAfterLower + 1, 'overlay burst should fire for each award');
+const latestBurst = overlayBursts[overlayBursts.length - 1];
+assert(latestBurst && latestBurst.xp === fullActivity, 'overlay burst xp should match award amount');
+assert(Number.isFinite(latestBurst.combo), 'overlay burst should include combo multiplier');
+assert(Number.isFinite(latestBurst.boost), 'overlay burst should include boost multiplier');
 assert(fullActivity >= 9 && fullActivity <= 20, `expected ~10-20xp, got ${fullActivity}`);
 assert(lowerActivity < fullActivity, 'lower activity should yield less XP');
 
@@ -603,8 +624,10 @@ assert(afterBoost < boosted, 'boost should expire after TTL');
 const capState = getState();
 capState.cap = Math.floor(capState.totalToday) + Math.floor(afterBoost);
 await runTickAndSettle({ ratio: 1 });
+const burstsBeforeCapZero = overlayBursts.length;
 const capped = await runTickAndSettle({ ratio: 1 });
 assert.equal(capped, 0, 'cap should block awards');
+assert.equal(overlayBursts.length, burstsBeforeCapZero, 'overlay should not burst when awards are blocked');
 capState.cap = null;
 
 freshSession('combo-lifecycle');
@@ -618,8 +641,10 @@ freshSession('anti-idle');
 // Anti-idle: hard idle freezes activity until new input
 const state = getState();
 state.lastTrustedInputTs = DateMock.now() - (HARD_IDLE_MS + 10);
+const burstsBeforeIdlePause = overlayBursts.length;
 const paused = await runTickAndSettle({ ratio: 1, trusted: false });
 assert.equal(paused, 0, 'hard idle should prevent awards');
+assert.equal(overlayBursts.length, burstsBeforeIdlePause, 'overlay should not burst when hard idle blocks awards');
 assert.equal(state.activityWindowFrozen, true);
 assert.equal(state.phase, 'paused', 'hard idle should pause ticker');
 XP.nudge();

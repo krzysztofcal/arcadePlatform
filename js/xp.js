@@ -23,6 +23,35 @@
   const COMBO_CAP = 20;
   const COMBO_SUSTAIN_MS = 5_000;
   const COMBO_COOLDOWN_MS = 3_000;
+  const DIAG_QUERY = /\bxpdiag=1\b/;
+
+  let diagEnabledCache = null;
+
+  function isDiagEnabled() {
+    if (diagEnabledCache != null) return diagEnabledCache;
+    if (window && window.XP_DIAG) {
+      diagEnabledCache = true;
+      return true;
+    }
+    try {
+      if (typeof location !== "undefined" && location && typeof location.search === "string") {
+        if (DIAG_QUERY.test(location.search)) {
+          diagEnabledCache = true;
+          return true;
+        }
+      }
+    } catch (_) {}
+    try {
+      if (window && window.location && typeof window.location.search === "string") {
+        if (DIAG_QUERY.test(window.location.search)) {
+          diagEnabledCache = true;
+          return true;
+        }
+      }
+    } catch (_) {}
+    diagEnabledCache = false;
+    return false;
+  }
 
   function parseNumber(value, fallback) {
     if (value == null) return fallback;
@@ -556,6 +585,21 @@
     if (state.gameId) {
       detail.gameId = state.gameId;
     }
+    const comboMultiplier = Number.isFinite(comboSnapshot.multiplier) && comboSnapshot.multiplier > 0
+      ? comboSnapshot.multiplier
+      : 1;
+    const boostMultiplier = getBoostMultiplierValue();
+    if (isDiagEnabled()) {
+      try { console.debug("award_tick", { awarded: detail.awarded, combo: comboMultiplier, boost: boostMultiplier }); }
+      catch (_) {}
+    }
+    if (detail.awarded > 0) {
+      const overlay = (window && window.XpOverlay) || (window && window.XPOverlay);
+      if (overlay && typeof overlay.showBurst === "function") {
+        try { overlay.showBurst({ xp: detail.awarded, combo: comboMultiplier, boost: boostMultiplier }); }
+        catch (_) {}
+      }
+    }
     try {
       if (typeof CustomEvent === "function") {
         const evt = new CustomEvent("xp:tick", { detail });
@@ -619,6 +663,13 @@
     if (state.boost.expiresAt && ts > state.boost.expiresAt) {
       resetBoost();
     }
+  }
+
+  function getBoostMultiplierValue() {
+    const boost = state.boost || {};
+    const multiplier = Number(boost.multiplier);
+    if (!Number.isFinite(multiplier) || multiplier <= 0) return 1;
+    return multiplier;
   }
 
   function applyBoost(multiplier) {
@@ -1914,6 +1965,12 @@
         multiplier: Number.isFinite(multiplier) && multiplier > 0 ? multiplier : 1,
         expiresAt: Number.isFinite(expiresAt) && expiresAt > 0 ? expiresAt : 0,
       };
+    },
+    getBoostMultiplier: function () {
+      return getBoostMultiplierValue();
+    },
+    getCombo: function () {
+      return snapshotCombo();
     },
     // Public probe: surface pending + lastSync while keeping legacy inflight flag.
     getFlushStatus: function () {

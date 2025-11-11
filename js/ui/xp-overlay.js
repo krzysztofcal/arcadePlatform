@@ -1,6 +1,217 @@
 (function (window, document) {
   if (!window || !document) return;
 
+  const DIAG_QUERY = /\bxpdiag=1\b/;
+
+  function detectDiagEnabled() {
+    if (window && window.XP_DIAG) return true;
+    try {
+      if (typeof location !== "undefined" && location && typeof location.search === "string") {
+        return DIAG_QUERY.test(location.search);
+      }
+      if (window && window.location && typeof window.location.search === "string") {
+        return DIAG_QUERY.test(window.location.search);
+      }
+    } catch (_) {}
+    return false;
+  }
+
+  const diagEnabled = detectDiagEnabled();
+
+  function diagLog(label, payload) {
+    if (!diagEnabled) return;
+    try { console.debug(`[xp-overlay] ${label}`, payload); }
+    catch (_) {}
+  }
+
+  const burstState = {
+    root: null,
+    burstEl: null,
+    labelEl: null,
+    metaEl: null,
+    pendingArgs: null,
+    waitingForDom: false,
+  };
+
+  function applyDebugDataset() {
+    if (!diagEnabled) return;
+    try {
+      if (document && document.body && document.body.dataset) {
+        document.body.dataset.xpOverlayDebug = "1";
+      }
+    } catch (_) {}
+  }
+
+  function ensureBurstRoot() {
+    if (burstState.root && burstState.root.parentNode) {
+      applyDebugDataset();
+      return burstState.root;
+    }
+    if (!document || !document.body || typeof document.createElement !== "function") {
+      return null;
+    }
+    let root = null;
+    try { root = document.querySelector(".xp-overlay"); }
+    catch (_) { root = null; }
+    if (!root) {
+      root = document.createElement("div");
+      root.className = "xp-overlay";
+      if (root.style && typeof root.style.setProperty === "function") {
+        try { root.style.setProperty("z-index", "2147483647"); } catch (_) {}
+        try { root.style.setProperty("position", "fixed"); } catch (_) {}
+        try { root.style.setProperty("inset", "0"); } catch (_) {}
+        try { root.style.setProperty("pointer-events", "none"); } catch (_) {}
+      }
+      const burst = document.createElement("div");
+      burst.className = "xp-overlay__burst";
+      burst.setAttribute("aria-hidden", "true");
+      const label = document.createElement("span");
+      label.className = "xp-overlay__label";
+      const meta = document.createElement("span");
+      meta.className = "xp-overlay__meta";
+      burst.appendChild(label);
+      burst.appendChild(meta);
+      root.appendChild(burst);
+      try { document.body.appendChild(root); }
+      catch (_) {}
+      burstState.root = root;
+      burstState.burstEl = burst;
+      burstState.labelEl = label;
+      burstState.metaEl = meta;
+      applyDebugDataset();
+      return root;
+    }
+    try {
+      if (!document.body.contains(root)) {
+        document.body.appendChild(root);
+      }
+    } catch (_) {}
+    burstState.root = root;
+    burstState.burstEl = root.querySelector ? root.querySelector(".xp-overlay__burst") : null;
+    burstState.labelEl = root.querySelector ? root.querySelector(".xp-overlay__label") : null;
+    burstState.metaEl = root.querySelector ? root.querySelector(".xp-overlay__meta") : null;
+    if (!burstState.burstEl) {
+      const burst = document.createElement("div");
+      burst.className = "xp-overlay__burst";
+      burst.setAttribute("aria-hidden", "true");
+      const label = document.createElement("span");
+      label.className = "xp-overlay__label";
+      const meta = document.createElement("span");
+      meta.className = "xp-overlay__meta";
+      burst.appendChild(label);
+      burst.appendChild(meta);
+      try { root.appendChild(burst); }
+      catch (_) {}
+      burstState.burstEl = burst;
+      burstState.labelEl = label;
+      burstState.metaEl = meta;
+    } else {
+      if (!burstState.labelEl) {
+        const label = document.createElement("span");
+        label.className = "xp-overlay__label";
+        try { burstState.burstEl.appendChild(label); }
+        catch (_) {}
+        burstState.labelEl = label;
+      }
+      if (!burstState.metaEl) {
+        const meta = document.createElement("span");
+        meta.className = "xp-overlay__meta";
+        try { burstState.burstEl.appendChild(meta); }
+        catch (_) {}
+        burstState.metaEl = meta;
+      }
+    }
+    applyDebugDataset();
+    return burstState.root;
+  }
+
+  function scheduleBurstReplay() {
+    if (burstState.waitingForDom) return;
+    burstState.waitingForDom = true;
+    const replay = function () {
+      burstState.waitingForDom = false;
+      if (burstState.pendingArgs) {
+        const pending = burstState.pendingArgs;
+        burstState.pendingArgs = null;
+        showBurst(pending);
+      }
+    };
+    if (document && typeof document.addEventListener === "function") {
+      try { document.addEventListener("DOMContentLoaded", replay, { once: true }); return; }
+      catch (_) { try { document.addEventListener("DOMContentLoaded", replay); return; } catch (_) {} }
+    }
+    if (window && typeof window.setTimeout === "function") {
+      try { window.setTimeout(replay, 0); }
+      catch (_) {}
+    }
+  }
+
+  function restartBurstAnimation(el) {
+    if (!el || !el.classList || typeof el.classList.remove !== "function" || typeof el.classList.add !== "function") return;
+    try { el.classList.remove("is-animating"); }
+    catch (_) {}
+    try { /* eslint-disable no-unused-expressions */ el.offsetWidth; /* eslint-enable no-unused-expressions */ }
+    catch (_) {}
+    try { el.classList.add("is-animating"); }
+    catch (_) {}
+  }
+
+  function formatMetaMultiplier(value) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric) || numeric <= 0) return "×1";
+    if (Math.abs(numeric - Math.round(numeric)) < 0.05) {
+      return "×" + Math.round(numeric);
+    }
+    return "×" + numeric.toFixed(1);
+  }
+
+  function showBurst(args) {
+    const payload = args && typeof args === "object" ? args : {};
+    const xp = Math.max(0, Math.floor(Number(payload.xp) || 0));
+    const combo = Number(payload.combo);
+    const boost = Number(payload.boost);
+    const root = ensureBurstRoot();
+    if (!root || !burstState.burstEl || !burstState.labelEl || !burstState.metaEl) {
+      burstState.pendingArgs = { xp, combo, boost };
+      scheduleBurstReplay();
+      return;
+    }
+    diagLog("burst", { xp, combo, boost });
+    try { root.classList.add("is-visible"); }
+    catch (_) {}
+    burstState.labelEl.textContent = "+" + xp + " XP";
+    const parts = [];
+    if (Number.isFinite(combo) && combo > 1) {
+      parts.push("Combo " + formatMetaMultiplier(combo));
+    }
+    if (Number.isFinite(boost) && boost !== 1 && boost > 0) {
+      parts.push("Boost " + formatMetaMultiplier(boost));
+    }
+    burstState.metaEl.textContent = parts.join(" · ");
+    restartBurstAnimation(burstState.burstEl);
+    if (burstState.burstEl && typeof burstState.burstEl.addEventListener === "function") {
+      const handleEnd = function handleEnd() {
+        try { burstState.burstEl.classList.remove("is-animating"); }
+        catch (_) {}
+        if (burstState.burstEl && typeof burstState.burstEl.removeEventListener === "function") {
+          try { burstState.burstEl.removeEventListener("animationend", handleEnd); }
+          catch (_) {}
+        }
+      };
+      try { burstState.burstEl.addEventListener("animationend", handleEnd, { once: true }); }
+      catch (_) { try { burstState.burstEl.addEventListener("animationend", handleEnd); } catch (_) {} }
+    }
+  }
+
+  if (diagEnabled) {
+    if (document && typeof document.addEventListener === "function") {
+      try { document.addEventListener("DOMContentLoaded", applyDebugDataset, { once: true }); }
+      catch (_) { try { document.addEventListener("DOMContentLoaded", applyDebugDataset); } catch (_) {} }
+    } else {
+      applyDebugDataset();
+    }
+  }
+
   const FRAME_INTERVAL = 80; // ~12.5 FPS
   const DEFAULT_TTL = 15_000;
 
@@ -239,10 +450,7 @@
   function handleTick(event) {
     if (!event || !event.detail || typeof event.detail !== "object") return;
     state.pendingCombo = event.detail;
-    if (window && window.XP_DIAG) {
-      try { console.debug("[xp-overlay] tick", event.detail); }
-      catch (_) {}
-    }
+    diagLog("tick", event.detail);
     if (state.attached) {
       applyCombo(event.detail);
     }
@@ -306,10 +514,7 @@
     state.attached = true;
     attachAttempts = 0;
     clearAttachRetry();
-    if (window && window.XP_DIAG) {
-      try { console.debug("[xp-overlay] attached", { hasConic: state.hasConic }); }
-      catch (_) {}
-    }
+    diagLog("attached", { hasConic: state.hasConic });
     const xp = window.XP;
     if ((!state.boost || !state.boost.expiresAt || state.boost.expiresAt <= Date.now())
       && xp && typeof xp.getBoost === "function") {
@@ -329,10 +534,7 @@
       deactivateBoost();
     }
     if (state.pendingCombo) {
-      if (window && window.XP_DIAG) {
-        try { console.debug("[xp-overlay] replay combo", state.pendingCombo); }
-        catch (_) {}
-      }
+      diagLog("replay combo", state.pendingCombo);
       applyCombo(state.pendingCombo);
     }
     return true;
@@ -435,15 +637,26 @@
   bindWatchers();
   readyOrAttach();
 
-  window.XPOverlay = Object.assign({}, window.XPOverlay || {}, {
-    __test: {
-      attach,
-      detach,
-      getState: function () { return Object.assign({}, state); },
-      applyBoost,
-      deactivateBoost,
-      applyCombo,
-      handleTick,
-    },
+  const existingTest = (window.XpOverlay && window.XpOverlay.__test)
+    || (window.XPOverlay && window.XPOverlay.__test)
+    || {};
+  const testApi = Object.assign({}, existingTest, {
+    attach,
+    detach,
+    getState: function () { return Object.assign({}, state); },
+    applyBoost,
+    deactivateBoost,
+    applyCombo,
+    handleTick,
+    showBurst,
+    ensureBurstRoot,
   });
+
+  const overlayApi = Object.assign({}, window.XpOverlay || window.XPOverlay || {}, {
+    showBurst,
+    __test: testApi,
+  });
+
+  window.XpOverlay = overlayApi;
+  window.XPOverlay = overlayApi;
 })(typeof window !== "undefined" ? window : undefined, typeof document !== "undefined" ? document : undefined);
