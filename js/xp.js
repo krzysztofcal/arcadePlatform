@@ -618,11 +618,16 @@
       secondsLeft = totalSeconds;
     }
 
+    const now = Date.now();
+    const endsAt = hasBoost && parsedTtl > 0 ? now + parsedTtl : now;
+
     const detail = {
       multiplier: hasBoost ? numericMultiplier : 1,
       secondsLeft,
       totalSeconds,
       ttlMs: hasBoost ? parsedTtl : 0,
+      endsAt,
+      schema: 2,
       __xpOrigin: "xp.js",
       __xpInternal: true,
     };

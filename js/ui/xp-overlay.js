@@ -24,6 +24,52 @@
     catch (_) {}
   }
 
+  function normalizeBoostCountdown(detail) {
+    const payload = detail && typeof detail === "object" ? detail : {};
+    const now = Date.now();
+
+    let seconds = Number(payload.secondsLeft);
+    if (Number.isFinite(seconds)) {
+      seconds = Math.floor(seconds);
+    } else {
+      seconds = NaN;
+    }
+
+    if (!Number.isFinite(seconds)) {
+      const ttlMs = Number(payload.ttlMs);
+      if (Number.isFinite(ttlMs)) {
+        seconds = Math.floor(ttlMs / 1000);
+      }
+    }
+
+    if (!Number.isFinite(seconds)) {
+      const endsAt = Number(payload.endsAt);
+      if (Number.isFinite(endsAt)) {
+        seconds = Math.floor((endsAt - now) / 1000);
+      }
+    }
+
+    if (Number.isFinite(seconds) && seconds > 3600) {
+      const epochAdjusted = Math.floor(seconds - Math.floor(now / 1000));
+      if (epochAdjusted >= 0 && epochAdjusted <= 3600) {
+        seconds = epochAdjusted;
+      }
+    }
+
+    if (!Number.isFinite(seconds)) seconds = 0;
+
+    if (diagEnabled && seconds > 3600) {
+      try {
+        console.warn("⚠️ XP UI: abnormal boost seconds detected", { detail: payload, seconds, now });
+      } catch (_) {}
+    }
+
+    if (seconds < 0) seconds = 0;
+    if (seconds > 3600) seconds = 3600;
+
+    return seconds;
+  }
+
   const burstState = {
     root: null,
     burstEl: null,
@@ -477,7 +523,9 @@
       return;
     }
     let ttl = Number(payload.ttlMs);
+    const seconds = normalizeBoostCountdown(payload);
     if (!Number.isFinite(ttl) || ttl <= 0) ttl = Number(payload.durationMs);
+    if (!Number.isFinite(ttl) || ttl <= 0) ttl = seconds * 1000;
     if (!Number.isFinite(ttl) || ttl <= 0) ttl = DEFAULT_TTL;
     const startedAt = Date.now();
     state.boost = {
@@ -644,6 +692,7 @@
     attach,
     detach,
     getState: function () { return Object.assign({}, state); },
+    normalizeBoostCountdown,
     applyBoost,
     deactivateBoost,
     applyCombo,
