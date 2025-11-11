@@ -344,6 +344,41 @@
     }
   }
 
+  function emitBoost(multiplier, ttlMs) {
+    if (!window || typeof window.dispatchEvent !== "function") return;
+    try {
+      const numericMultiplier = Number(multiplier);
+      const numericTtl = Number(ttlMs);
+      let detail;
+      if (!Number.isFinite(numericMultiplier) || numericMultiplier <= 1
+        || !Number.isFinite(numericTtl) || numericTtl <= 0) {
+        detail = { multiplier: 1, ttlMs: 0, __xpInternal: true };
+      } else {
+        detail = {
+          multiplier: numericMultiplier,
+          ttlMs: Math.max(0, Math.floor(numericTtl)),
+          __xpInternal: true,
+        };
+      }
+      if (typeof CustomEvent === "function") {
+        const evt = new CustomEvent("xp:boost", { detail });
+        window.dispatchEvent(evt);
+        return;
+      }
+      if (typeof document !== "undefined" && document && typeof document.createEvent === "function") {
+        const legacyEvt = document.createEvent("CustomEvent");
+        legacyEvt.initCustomEvent("xp:boost", false, false, detail);
+        window.dispatchEvent(legacyEvt);
+        return;
+      }
+      window.dispatchEvent({ type: "xp:boost", detail });
+    } catch (_) {
+      try {
+        window.dispatchEvent({ type: "xp:boost", detail: { multiplier: 1, ttlMs: 0, __xpInternal: true } });
+      } catch (_) {}
+    }
+  }
+
   function resetBoost() {
     const previous = state.boost || { multiplier: 1, expiresAt: 0, source: null };
     clearBoostTimer();
@@ -351,6 +386,7 @@
     if (previous.multiplier !== 1 || previous.expiresAt !== 0 || (previous.source || null) !== null) {
       persistRuntimeState();
     }
+    emitBoost(1, 0);
   }
 
   function scheduleBoostExpiration(expiresAt) {
@@ -525,6 +561,13 @@
       if (parsed.boost && typeof parsed.boost === "object") {
         state.boost = Object.assign({ multiplier: 1, expiresAt: 0, source: null }, parsed.boost);
         scheduleBoostExpiration(state.boost.expiresAt || 0);
+        const nowTs = Date.now();
+        const ttl = (Number(state.boost.expiresAt) || 0) - nowTs;
+        if ((Number(state.boost.multiplier) || 1) > 1 && ttl > 0) {
+          emitBoost(state.boost.multiplier, ttl);
+        } else {
+          emitBoost(1, 0);
+        }
       }
     } catch (_) {
       if (!state.flush.lastSync) state.flush.lastSync = Date.now();
@@ -1307,6 +1350,8 @@
 
     scheduleBoostExpiration(expiresAt);
 
+    emitBoost(multiplier, Math.max(0, expiresAt - now));
+
     persistRuntimeState();
   }
 
@@ -1482,6 +1527,7 @@
 
       window.addEventListener("xp:boost", (event) => {
         try {
+          if (event && event.detail && event.detail.__xpInternal) return;
           // Accept both new `{ multiplier, ttlMs, reason }` and legacy
           // `{ multiplier, durationMs, source }` payloads.
           requestBoost(event && event.detail);
@@ -1643,6 +1689,15 @@
       } catch (_) {
         try { requestBoost(detail); } catch (_) {}
       }
+    },
+    getBoost: function () {
+      const boost = state.boost || { multiplier: 1, expiresAt: 0 };
+      const multiplier = Number(boost.multiplier);
+      const expiresAt = Number(boost.expiresAt);
+      return {
+        multiplier: Number.isFinite(multiplier) && multiplier > 0 ? multiplier : 1,
+        expiresAt: Number.isFinite(expiresAt) && expiresAt > 0 ? expiresAt : 0,
+      };
     },
     // Public probe: surface pending + lastSync while keeping legacy inflight flag.
     getFlushStatus: function () {

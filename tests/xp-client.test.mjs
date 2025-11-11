@@ -46,6 +46,7 @@ function getListeners(store, type) {
 
 const docListeners = new Map();
 const windowListeners = new Map();
+const boostEvents = [];
 
 const localStorageMock = {
   __store: new Map(),
@@ -265,6 +266,13 @@ const windowStub = {
     },
   },
 };
+const origWindowDispatch = windowStub.dispatchEvent.bind(windowStub);
+windowStub.dispatchEvent = function patchedDispatch(event) {
+  if (event && event.type === 'xp:boost') {
+    boostEvents.push(event);
+  }
+  return origWindowDispatch(event);
+};
 windowStub.window = windowStub;
 documentStub.defaultView = windowStub;
 
@@ -407,6 +415,9 @@ assert.equal(hydrated.regen.pending, 18);
 assert.equal(hydrated.regen.comboCount, 4);
 assert.equal(hydrated.flush.pending, 26);
 assert.equal(hydrated.boost.multiplier, 3);
+const hydrationBoostEvent = boostEvents.find((event) => event && event.type === 'xp:boost'
+  && event.detail && Number(event.detail.multiplier) > 1 && Number(event.detail.ttlMs) > 0);
+assert(hydrationBoostEvent, 'should emit xp:boost on hydration with active boost');
 const status = XP.getFlushStatus();
 assert.equal(status.pending, 26);
 assert.equal(status.lastSync, 55_000);
@@ -426,6 +437,21 @@ trigger('pageshow', windowStub);
 const hydratedAfterPageShow = getState();
 assert.equal(hydratedAfterPageShow.flush.pending, 12);
 assert.equal(hydratedAfterPageShow.boost.source, 'pageshow');
+
+const beforeOffEventCount = boostEvents.length;
+localStorageMock.setItem(RUNTIME_CACHE_KEY, JSON.stringify({
+  carry: 0,
+  momentum: 0,
+  comboCount: 0,
+  pending: 0,
+  flushPending: 0,
+  lastSync: 77_500,
+  boost: { multiplier: 4, expiresAt: DateMock.now() - 5, source: 'expired-hydration' },
+}));
+trigger('pageshow', windowStub);
+const offEvent = boostEvents.slice(beforeOffEventCount).find((event) => event && event.type === 'xp:boost'
+  && event.detail && Number(event.detail.multiplier) === 1 && Number(event.detail.ttlMs) === 0);
+assert(offEvent, 'should emit xp:boost off signal when hydrated boost is expired');
 
 freshSession('tick-baseline');
 

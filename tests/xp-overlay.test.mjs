@@ -22,6 +22,7 @@ function createHarness(options = {}) {
   let hidden = false;
   let visibilityState = 'visible';
   let activeGame = options.activeGame !== false;
+  const dispatchedEvents = [];
 
   function addListener(store, type, handler) {
     if (!handler) return;
@@ -205,6 +206,9 @@ function createHarness(options = {}) {
     addEventListener(type, handler) { addListener(listeners, type, handler); },
     removeEventListener(type, handler) { removeListener(listeners, type, handler); },
     dispatchEvent(event) {
+      if (event && typeof event === 'object') {
+        dispatchedEvents.push(event);
+      }
       emit(listeners, event.type, event);
       return true;
     },
@@ -320,6 +324,7 @@ function createHarness(options = {}) {
       const mult = badge.querySelector('.xp-boost-chip__multiplier');
       return mult ? mult.textContent : '';
     },
+    getDispatchedEvents() { return dispatchedEvents.slice(); },
   };
 }
 
@@ -340,6 +345,21 @@ await (async () => {
 
   harness.advance(5200);
   assert.equal(harness.badge.classList.contains('xp-boost--active'), false, 'boost_border_inactive: class removed after expiry');
+})();
+
+await (async () => {
+  const harness = createHarness();
+  harness.window.XP = {
+    getBoost() {
+      return { multiplier: 2, expiresAt: harness.context.Date.now() + 3_000 };
+    },
+  };
+  ensureAttached(harness);
+  harness.advance(100);
+  const xpEvents = harness.getDispatchedEvents().filter((event) => event && event.type === 'xp:boost');
+  assert.equal(xpEvents.length, 0, 'overlay self-hydrate path should not dispatch xp:boost events');
+  assert(harness.badge.classList.contains('xp-boost--active'), 'self-hydrate: badge should activate from XP state');
+  assert.notEqual(harness.getTimerText(), '', 'self-hydrate: timer text should populate');
 })();
 
 await (async () => {

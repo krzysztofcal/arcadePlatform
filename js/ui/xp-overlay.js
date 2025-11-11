@@ -17,7 +17,10 @@
     hasConic: detectConic(),
     watchersBound: false,
     boostListener: null,
+    attachRetryId: null,
   };
+
+  let attachAttempts = 0;
 
   function detectConic() {
     if (!window.CSS || typeof window.CSS.supports !== "function") return false;
@@ -141,6 +144,14 @@
     state.timerId = null;
   }
 
+  function clearAttachRetry() {
+    if (state.attachRetryId != null && typeof window.clearTimeout === "function") {
+      try { window.clearTimeout(state.attachRetryId); }
+      catch (_) {}
+    }
+    state.attachRetryId = null;
+  }
+
   function deactivateBoost() {
     state.boost = null;
     stopTicker();
@@ -245,6 +256,20 @@
       catch (_) {}
     }
     state.attached = true;
+    attachAttempts = 0;
+    clearAttachRetry();
+    const xp = window.XP;
+    if ((!state.boost || !state.boost.expiresAt || state.boost.expiresAt <= Date.now())
+      && xp && typeof xp.getBoost === "function") {
+      let hydrated = null;
+      try { hydrated = xp.getBoost(); }
+      catch (_) { hydrated = null; }
+      const expiresAt = hydrated && Number(hydrated.expiresAt);
+      const ttl = expiresAt ? (expiresAt - Date.now()) : 0;
+      if (hydrated && Number(hydrated.multiplier) > 1 && ttl > 0) {
+        applyBoost({ multiplier: hydrated.multiplier, ttlMs: ttl });
+      }
+    }
     if (state.boost && state.boost.expiresAt > Date.now()) {
       updateBoostDisplay(Date.now());
       scheduleNextTick();
@@ -256,6 +281,8 @@
 
   function detach() {
     if (!state.attached) return;
+    clearAttachRetry();
+    attachAttempts = 0;
     state.attached = false;
     stopTicker();
     if (typeof window.removeEventListener === "function" && state.boostListener) {
@@ -275,7 +302,7 @@
       detach();
       return;
     }
-    attach();
+    tryAttachWithBackoff();
   }
 
   function handleLifecycleTeardown() {
@@ -284,8 +311,26 @@
 
   function handlePageShow() {
     if (!isDocumentHidden()) {
-      attach();
+      tryAttachWithBackoff();
     }
+  }
+
+  function tryAttachWithBackoff() {
+    clearAttachRetry();
+    if (attach()) return true;
+    if (!window || typeof window.setTimeout !== "function") return false;
+    if (attachAttempts++ < 10) {
+      const delay = Math.min(50 * attachAttempts, 250);
+      try {
+        state.attachRetryId = window.setTimeout(() => {
+          state.attachRetryId = null;
+          tryAttachWithBackoff();
+        }, delay);
+      } catch (_) {
+        state.attachRetryId = null;
+      }
+    }
+    return false;
   }
 
   function bindWatchers() {
@@ -294,8 +339,8 @@
     if (document && typeof document.addEventListener === "function") {
       try { document.addEventListener("visibilitychange", handleVisibilityChange, { passive: true }); }
       catch (_) { try { document.addEventListener("visibilitychange", handleVisibilityChange); } catch (_) {} }
-      try { document.addEventListener("DOMContentLoaded", attach, { passive: true, once: false }); }
-      catch (_) { try { document.addEventListener("DOMContentLoaded", attach); } catch (_) {} }
+      try { document.addEventListener("DOMContentLoaded", tryAttachWithBackoff, { passive: true, once: false }); }
+      catch (_) { try { document.addEventListener("DOMContentLoaded", tryAttachWithBackoff); } catch (_) {} }
     }
     if (window && typeof window.addEventListener === "function") {
       try { window.addEventListener("pageshow", handlePageShow, { passive: true }); }
@@ -309,7 +354,7 @@
 
   function readyOrAttach() {
     if (document.readyState === "complete" || document.readyState === "interactive") {
-      attach();
+      tryAttachWithBackoff();
     }
   }
 
