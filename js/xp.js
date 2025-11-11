@@ -627,6 +627,7 @@
       totalSeconds,
       ttlMs: hasBoost ? parsedTtl : 0,
       endsAt,
+      expiresAt: endsAt,
       schema: 2,
       __xpOrigin: "xp.js",
       __xpInternal: true,

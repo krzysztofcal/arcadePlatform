@@ -123,12 +123,12 @@ function loadOverlay(now = 0) {
 
   vm.runInNewContext(overlaySource, sandbox, { filename: 'xp-overlay.js' });
 
-  const helper = windowObj.XpOverlay
-    && windowObj.XpOverlay.__test
-    && windowObj.XpOverlay.__test.normalizeBoostCountdown;
-  assert.equal(typeof helper, 'function', 'normalizeBoostCountdown helper should exist');
+  const testApi = windowObj.XpOverlay && windowObj.XpOverlay.__test;
+  assert.ok(testApi, 'overlay test API should exist');
+  assert.equal(typeof testApi.normalizeBoostCountdown, 'function', 'normalizeBoostCountdown helper should exist');
+  assert.equal(typeof testApi.getRemainingSeconds, 'function', 'getRemainingSeconds helper should exist');
 
-  return { helper, warnings, window: windowObj };
+  return { helper: testApi.normalizeBoostCountdown, helpers: testApi, warnings, window: windowObj };
 }
 
 test('normalizeBoostCountdown prefers secondsLeft when valid', () => {
@@ -152,6 +152,14 @@ test('normalizeBoostCountdown clamps epoch seconds to realistic countdown', () =
   const { helper } = loadOverlay(fakeNow);
   const normalized = helper({ secondsLeft: Math.floor(fakeNow / 1000) });
   assert.ok(normalized >= 0 && normalized <= 3600, 'normalized value should be within range');
+});
+
+test('getRemainingSeconds normalizes epoch expiresAt values', () => {
+  const fakeNow = 1_731_280_000_000;
+  const { helpers } = loadOverlay(fakeNow);
+  const epochSeconds = Math.floor((fakeNow + 20_000) / 1000);
+  const remaining = helpers.getRemainingSeconds(epochSeconds, fakeNow);
+  assert.ok(remaining > 0 && remaining <= 20, 'remaining seconds should reflect delta, not epoch');
 });
 
 test('boost timer renders normalized countdown from epoch expiresAt', () => {

@@ -24,40 +24,56 @@
     catch (_) {}
   }
 
+  function normalizeMs(value) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric) || numeric <= 0) return 0;
+    if (numeric > 1e9 && numeric < 1e12) return Math.floor(numeric * 1000);
+    return Math.floor(numeric);
+  }
+
+  function getRemainingSeconds(expiresAt, now) {
+    const current = Number.isFinite(now) ? now : Date.now();
+    const expMs = normalizeMs(expiresAt);
+    if (!expMs) return 0;
+    const remaining = Math.ceil((expMs - current) / 1000);
+    if (!Number.isFinite(remaining) || remaining <= 0) return 0;
+    return Math.min(remaining, 3600);
+  }
+
   function normalizeBoostCountdown(detail) {
     const payload = detail && typeof detail === "object" ? detail : {};
     const now = Date.now();
 
     let seconds = Number(payload.secondsLeft);
     if (Number.isFinite(seconds)) {
-      seconds = Math.floor(seconds);
+      seconds = Math.max(0, Math.floor(seconds));
+      if (seconds > 3600) {
+        const epochAdjusted = Math.floor(seconds - Math.floor(now / 1000));
+        if (epochAdjusted >= 0 && epochAdjusted <= 3600) {
+          seconds = epochAdjusted;
+        }
+      }
     } else {
       seconds = NaN;
     }
 
-    if (!Number.isFinite(seconds)) {
+    if (!Number.isFinite(seconds) || seconds <= 0) {
       const ttlMs = Number(payload.ttlMs);
-      if (Number.isFinite(ttlMs)) {
-        seconds = Math.floor(ttlMs / 1000);
+      if (Number.isFinite(ttlMs) && ttlMs > 0) {
+        seconds = Math.max(0, Math.floor(ttlMs / 1000));
+      } else {
+        seconds = NaN;
       }
     }
 
-    if (!Number.isFinite(seconds)) {
-      const endsAt = Number(payload.endsAt);
-      if (Number.isFinite(endsAt)) {
-        const normalizedEndsAt = normalizeExpiresAt(endsAt, now, now);
-        seconds = Math.floor((normalizedEndsAt - now) / 1000);
-      }
+    if (!Number.isFinite(seconds) || seconds <= 0) {
+      const endsAtSource = Object.prototype.hasOwnProperty.call(payload, "endsAt")
+        ? payload.endsAt
+        : payload.expiresAt;
+      seconds = getRemainingSeconds(endsAtSource, now);
     }
 
-    if (Number.isFinite(seconds) && seconds > 3600) {
-      const epochAdjusted = Math.floor(seconds - Math.floor(now / 1000));
-      if (epochAdjusted >= 0 && epochAdjusted <= 3600) {
-        seconds = epochAdjusted;
-      }
-    }
-
-    if (!Number.isFinite(seconds)) seconds = 0;
+    if (!Number.isFinite(seconds) || seconds < 0) seconds = 0;
 
     if (diagEnabled && seconds > 3600) {
       try {
@@ -65,34 +81,24 @@
       } catch (_) {}
     }
 
-    if (seconds < 0) seconds = 0;
     if (seconds > 3600) seconds = 3600;
 
     return seconds;
   }
 
   function normalizeExpiresAt(rawValue, fallback, reference) {
-    const numeric = Number(rawValue);
-    const basis = Number.isFinite(reference) && reference > 0 ? reference : Date.now();
-    const fallbackNumeric = Number(fallback);
-    let threshold;
-    if (Number.isFinite(fallbackNumeric) && fallbackNumeric > 0) {
-      threshold = fallbackNumeric / 10;
-    } else if (Number.isFinite(basis) && basis > 0) {
-      threshold = basis / 10;
-    } else {
-      threshold = 1e11;
+    const now = Number.isFinite(reference) ? reference : Date.now();
+    const fallbackMs = normalizeMs(fallback);
+    let expiresAt = normalizeMs(rawValue);
+    if (!Number.isFinite(expiresAt) || expiresAt <= now) {
+      expiresAt = Number.isFinite(fallbackMs) && fallbackMs > now ? fallbackMs : now;
     }
-    if (!Number.isFinite(threshold) || threshold <= 0) threshold = 1e11;
-
-    if (Number.isFinite(numeric) && numeric > 0) {
-      if (numeric < threshold) {
-        return numeric * 1000;
-      }
-      return numeric;
+    const MAX_SPAN = 3600 * 1000;
+    if (expiresAt - now > MAX_SPAN) {
+      expiresAt = now + MAX_SPAN;
     }
-
-    return Number.isFinite(fallbackNumeric) ? fallbackNumeric : 0;
+    if (!Number.isFinite(expiresAt) || expiresAt <= now) return now;
+    return Math.floor(expiresAt);
   }
 
   const burstState = {
@@ -455,12 +461,14 @@
   function updateBoostDisplay(now) {
     if (!state.boost) return;
     const current = typeof now === "number" ? now : Date.now();
-    const expiresAt = normalizeExpiresAt(state.boost.expiresAt, current, current);
-    const remaining = Math.max(0, expiresAt - current);
-    if (remaining <= 0) {
+    const fallbackExpires = current + DEFAULT_TTL;
+    const expiresAt = normalizeExpiresAt(state.boost.expiresAt, fallbackExpires, current);
+    const remainingSeconds = getRemainingSeconds(expiresAt, current);
+    if (remainingSeconds <= 0) {
       deactivateBoost();
       return;
     }
+    const remaining = remainingSeconds * 1000;
     state.boost.expiresAt = expiresAt;
     const MAX_DURATION = 3600 * 1000;
     let durationMs = Number(state.boost.durationMs);
@@ -571,7 +579,10 @@
     const MAX_DURATION = 3600 * 1000;
     ttl = Math.max(0, Math.min(ttl, MAX_DURATION));
     const fallbackExpires = now + (ttl || DEFAULT_TTL);
-    let expiresAt = normalizeExpiresAt(payload && payload.endsAt, fallbackExpires, now);
+    const endsAtSource = payload && Object.prototype.hasOwnProperty.call(payload, "endsAt")
+      ? payload.endsAt
+      : payload && payload.expiresAt;
+    let expiresAt = normalizeExpiresAt(endsAtSource, fallbackExpires, now);
     if (!Number.isFinite(expiresAt) || expiresAt <= now) {
       expiresAt = fallbackExpires;
     }
@@ -745,6 +756,8 @@
     attach,
     detach,
     getState: function () { return Object.assign({}, state); },
+    normalizeMs,
+    getRemainingSeconds,
     normalizeBoostCountdown,
     applyBoost,
     deactivateBoost,
