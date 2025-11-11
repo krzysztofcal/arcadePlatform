@@ -294,6 +294,10 @@ function createHarness(options = {}) {
     windowStub.dispatchEvent({ type: 'xp:boost', detail });
   }
 
+  function dispatchTick(detail) {
+    windowStub.dispatchEvent({ type: 'xp:tick', detail });
+  }
+
   return {
     context,
     window: windowStub,
@@ -301,6 +305,7 @@ function createHarness(options = {}) {
     badge,
     advance,
     dispatchBoost,
+    dispatchTick,
     fireDomContentLoaded,
     setActiveGame(value) { activeGame = !!value; },
     setVisibility({ hidden: isHidden, visibility } = {}) {
@@ -336,6 +341,7 @@ await (async () => {
   const harness = createHarness();
   ensureAttached(harness);
   assert.equal(harness.getWindowListenerCount('xp:boost'), 1, 'overlay should attach xp:boost listener for active game');
+  assert.equal(harness.getWindowListenerCount('xp:tick'), 1, 'overlay should attach xp:tick listener for active game');
 
   harness.dispatchBoost({ multiplier: 2, ttlMs: 5000 });
   harness.advance(160);
@@ -345,6 +351,33 @@ await (async () => {
 
   harness.advance(5200);
   assert.equal(harness.badge.classList.contains('xp-boost--active'), false, 'boost_border_inactive: class removed after expiry');
+})();
+
+await (async () => {
+  const harness = createHarness();
+  ensureAttached(harness);
+  const overlayState = () => harness.window.XPOverlay.__test.getState();
+  harness.dispatchTick({
+    combo: { multiplier: 4, cap: 20 },
+    progressToNext: 0.5,
+    mode: 'build',
+  });
+  assert.equal(overlayState().comboDetail.multiplier, 4, 'xp:tick should update combo multiplier');
+  assert(Math.abs(overlayState().comboDetail.progress - 0.5) < 0.001, 'xp:tick should update combo progress');
+  assert.equal(harness.badge.style.getPropertyValue('--combo-progress'), '0.5', 'combo progress CSS variable should update');
+  harness.dispatchTick({
+    combo: { multiplier: 20, cap: 20 },
+    progressToNext: 0.8,
+    mode: 'sustain',
+  });
+  assert(harness.badge.classList.contains('xp-combo--sustain'), 'badge should reflect sustain mode');
+  harness.dispatchTick({
+    combo: { multiplier: 1, cap: 20 },
+    progressToNext: 0,
+    mode: 'cooldown',
+  });
+  assert.equal(harness.badge.classList.contains('xp-combo--sustain'), false, 'cooldown should clear sustain class');
+  assert(harness.badge.classList.contains('xp-combo--cooldown'), 'badge should reflect cooldown mode');
 })();
 
 await (async () => {
@@ -366,6 +399,7 @@ await (async () => {
   const harness = createHarness({ activeGame: false });
   ensureAttached(harness);
   assert.equal(harness.getWindowListenerCount('xp:boost'), 0, 'boost_gating: overlay should not attach when game inactive');
+  assert.equal(harness.getWindowListenerCount('xp:tick'), 0, 'boost_gating: xp:tick listener should not attach when game inactive');
   assert.equal(harness.badge.querySelector('.xp-boost-chip'), null, 'boost_gating: chip should not be injected for inactive game');
 })();
 
@@ -376,8 +410,10 @@ await (async () => {
   harness.advance(160);
   harness.triggerWindow('pagehide');
   assert.equal(harness.getWindowListenerCount('xp:boost'), 0, 'no_duplicate_listeners_after_bfcache: listener removed on pagehide');
+  assert.equal(harness.getWindowListenerCount('xp:tick'), 0, 'no_duplicate_listeners_after_bfcache: xp:tick listener removed on pagehide');
   harness.triggerWindow('pageshow');
   assert.equal(harness.getWindowListenerCount('xp:boost'), 1, 'no_duplicate_listeners_after_bfcache: listener reattached once');
+  assert.equal(harness.getWindowListenerCount('xp:tick'), 1, 'no_duplicate_listeners_after_bfcache: xp:tick listener reattached once');
 })();
 
 await (async () => {
@@ -388,6 +424,7 @@ await (async () => {
   harness.setVisibility({ hidden: true, visibility: 'hidden' });
   harness.triggerDocument('visibilitychange');
   assert.equal(harness.getWindowListenerCount('xp:boost'), 0, 'timers_are_cleared_on_detach: listener cleared on detach');
+  assert.equal(harness.getWindowListenerCount('xp:tick'), 0, 'timers_are_cleared_on_detach: xp:tick listener cleared on detach');
   assert.equal(harness.getActiveRafCount(), 0, 'timers_are_cleared_on_detach: raf cleared');
   assert.equal(harness.getActiveTimeoutCount(), 0, 'timers_are_cleared_on_detach: timers cleared');
 })();

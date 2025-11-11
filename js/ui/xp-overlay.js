@@ -17,7 +17,10 @@
     hasConic: detectConic(),
     watchersBound: false,
     boostListener: null,
+    tickListener: null,
     attachRetryId: null,
+    comboDetail: { mode: "build", multiplier: 1, progress: 0, cap: 1 },
+    pendingCombo: null,
   };
 
   let attachAttempts = 0;
@@ -203,6 +206,34 @@
     scheduleNextTick();
   }
 
+  function applyCombo(detail) {
+    const payload = detail && typeof detail === "object" ? detail : null;
+    const combo = payload && payload.combo && typeof payload.combo === "object" ? payload.combo : null;
+    if (!combo) return;
+    const mode = typeof payload.mode === "string" ? payload.mode : (combo.mode || "build");
+    const rawMultiplier = Number(combo.multiplier);
+    const multiplier = Number.isFinite(rawMultiplier) && rawMultiplier > 0 ? rawMultiplier : 1;
+    const cap = Math.max(1, Number(combo.cap) || multiplier || 1);
+    const progress = Math.max(0, Math.min(1, Number(payload.progressToNext)));
+    state.comboDetail = { mode, multiplier, progress, cap };
+    if (state.badge && state.badge.classList && typeof state.badge.classList.toggle === "function") {
+      try { state.badge.classList.toggle("xp-combo--sustain", mode === "sustain"); }
+      catch (_) {}
+      try { state.badge.classList.toggle("xp-combo--cooldown", mode === "cooldown"); }
+      catch (_) {}
+    }
+    setBadgeVariable("--combo-progress", progress);
+    setBadgeVariable("--combo-multiplier", multiplier);
+  }
+
+  function handleTick(event) {
+    if (!event || !event.detail || typeof event.detail !== "object") return;
+    state.pendingCombo = event.detail;
+    if (state.attached) {
+      applyCombo(event.detail);
+    }
+  }
+
   function scheduleNextTick() {
     stopTicker();
     if (!state.boost) return;
@@ -254,6 +285,9 @@
       state.boostListener = handleBoost;
       try { window.addEventListener("xp:boost", state.boostListener); }
       catch (_) {}
+      state.tickListener = handleTick;
+      try { window.addEventListener("xp:tick", state.tickListener); }
+      catch (_) {}
     }
     state.attached = true;
     attachAttempts = 0;
@@ -276,6 +310,9 @@
     } else {
       deactivateBoost();
     }
+    if (state.pendingCombo) {
+      applyCombo(state.pendingCombo);
+    }
     return true;
   }
 
@@ -289,11 +326,22 @@
       try { window.removeEventListener("xp:boost", state.boostListener); }
       catch (_) {}
     }
+    if (typeof window.removeEventListener === "function" && state.tickListener) {
+      try { window.removeEventListener("xp:tick", state.tickListener); }
+      catch (_) {}
+    }
     state.boostListener = null;
+    state.tickListener = null;
     if (state.badge && state.badge.classList && typeof state.badge.classList.remove === "function") {
       try { state.badge.classList.remove("xp-boost--active"); }
       catch (_) {}
+      try { state.badge.classList.remove("xp-combo--sustain"); }
+      catch (_) {}
+      try { state.badge.classList.remove("xp-combo--cooldown"); }
+      catch (_) {}
     }
+    clearBadgeVariable("--combo-progress");
+    clearBadgeVariable("--combo-multiplier");
     state.badge = null;
   }
 
@@ -368,6 +416,8 @@
       getState: function () { return Object.assign({}, state); },
       applyBoost,
       deactivateBoost,
+      applyCombo,
+      handleTick,
     },
   });
 })(typeof window !== "undefined" ? window : undefined, typeof document !== "undefined" ? document : undefined);

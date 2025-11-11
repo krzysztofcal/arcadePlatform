@@ -47,6 +47,7 @@ function getListeners(store, type) {
 const docListeners = new Map();
 const windowListeners = new Map();
 const boostEvents = [];
+const tickEvents = [];
 
 const localStorageMock = {
   __store: new Map(),
@@ -271,6 +272,9 @@ windowStub.dispatchEvent = function patchedDispatch(event) {
   if (event && event.type === 'xp:boost') {
     boostEvents.push(event);
   }
+  if (event && event.type === 'xp:tick') {
+    tickEvents.push(event);
+  }
   return origWindowDispatch(event);
 };
 windowStub.window = windowStub;
@@ -299,7 +303,15 @@ const CACHE_KEY = 'kcswh:xp:last';
 localStorageMock.setItem(RUNTIME_CACHE_KEY, JSON.stringify({
   carry: 1.4,
   momentum: 0.35,
-  comboCount: 4,
+  combo: {
+    mode: 'build',
+    multiplier: 5,
+    points: 0.6,
+    stepThreshold: 2,
+    sustainLeftMs: 0,
+    cooldownLeftMs: 0,
+    cap: 20,
+  },
   pending: 18,
   flushPending: 26,
   lastSync: 55_000,
@@ -328,9 +340,12 @@ const GameXpBridge = context.window.GameXpBridge;
 assert(GameXpBridge, 'GameXpBridge missing');
 const XPOverlay = context.window.XPOverlay;
 assert(XPOverlay && XPOverlay.__test && typeof XPOverlay.__test.attach === 'function', 'XPOverlay test interface missing');
+XPOverlay.__test.attach();
 
 const AWARD_INTERVAL_MS = windowStub.XP_AWARD_INTERVAL_MS;
 const HARD_IDLE_MS = windowStub.XP_HARD_IDLE_MS;
+const COMBO_SUSTAIN_MS = 5_000;
+const COMBO_COOLDOWN_MS = 3_000;
 
 function setVisibility(hidden) {
   documentStub.hidden = hidden;
@@ -367,6 +382,89 @@ async function runTickAndSettle(options) {
   return awarded;
 }
 
+function getLastTickDetail() {
+  const last = tickEvents[tickEvents.length - 1];
+  if (!last || !last.detail || typeof last.detail !== 'object') return null;
+  return last.detail;
+}
+
+async function combo_cap_and_sustain() {
+  const cap = (getState().combo && getState().combo.cap) || 20;
+  let guard = 0;
+  while ((getState().combo && getState().combo.multiplier) < cap && guard < 200) {
+    await runTickAndSettle({ ratio: 1 });
+    guard += 1;
+  }
+  const combo = getState().combo;
+  assert(combo, 'combo state should exist at cap');
+  assert.equal(combo.multiplier, cap, 'combo should reach the cap');
+  assert.equal(combo.mode, 'sustain', 'combo should enter sustain at cap');
+  const detail = getLastTickDetail();
+  assert(detail && detail.mode === 'sustain', 'xp:tick should report sustain mode');
+  assert(detail && detail.progressToNext <= 1 && detail.progressToNext >= 0, 'progress should be normalized');
+  const sustainTicks = Math.max(0, Math.ceil(COMBO_SUSTAIN_MS / AWARD_INTERVAL_MS) - 1);
+  for (let i = 0; i < sustainTicks; i++) {
+    await runTickAndSettle({ ratio: 1 });
+    const sustainDetail = getLastTickDetail();
+    assert(sustainDetail && sustainDetail.mode === 'sustain', 'sustain should persist during timer');
+    assert(sustainDetail.progressToNext <= 1 && sustainDetail.progressToNext >= 0, 'sustain progress must remain bounded');
+  }
+}
+
+async function combo_cooldown_blocks_build() {
+  let guard = 0;
+  while (getState().combo && getState().combo.mode !== 'cooldown' && guard < 10) {
+    await runTickAndSettle({ ratio: 1 });
+    guard += 1;
+  }
+  const combo = getState().combo;
+  assert(combo && combo.mode === 'cooldown', 'combo should enter cooldown after sustain');
+  assert.equal(combo.multiplier, 1, 'cooldown should reset multiplier');
+  const detail = getLastTickDetail();
+  assert(detail && detail.mode === 'cooldown', 'xp:tick should report cooldown mode');
+  assert.equal(detail.progressToNext, 0, 'cooldown progress must lock at zero');
+  const cooldownTicks = Math.max(0, Math.ceil(COMBO_COOLDOWN_MS / AWARD_INTERVAL_MS) - 1);
+  for (let i = 0; i < cooldownTicks; i++) {
+    await runTickAndSettle({ ratio: 1 });
+    const cooldownDetail = getLastTickDetail();
+    assert(cooldownDetail && cooldownDetail.mode === 'cooldown', 'cooldown should persist for full timer');
+    assert.equal(cooldownDetail.progressToNext, 0, 'cooldown progress should remain locked');
+    assert.equal(getState().combo.multiplier, 1, 'multiplier should remain at baseline during cooldown');
+  }
+}
+
+async function combo_rebuild_after_cooldown() {
+  let guard = 0;
+  while (getState().combo && getState().combo.mode === 'cooldown' && guard < 10) {
+    await runTickAndSettle({ ratio: 1 });
+    guard += 1;
+  }
+  const combo = getState().combo;
+  assert(combo && combo.mode === 'build', 'combo should return to build after cooldown');
+  const baseline = combo.multiplier;
+  await runTickAndSettle({ ratio: 1 });
+  assert(getState().combo.multiplier >= baseline, 'combo multiplier should not regress after rebuild tick');
+  let rebuildGuard = 0;
+  while (getState().combo.multiplier <= baseline && rebuildGuard < 40) {
+    await runTickAndSettle({ ratio: 1 });
+    rebuildGuard += 1;
+  }
+  assert(getState().combo.multiplier > baseline, 'combo should begin rebuilding after cooldown');
+}
+
+function combo_no_stuck_values() {
+  assert(tickEvents.length > 0, 'xp:tick should emit events during combo lifecycle');
+  tickEvents.forEach((event) => {
+    if (!event || !event.detail || typeof event.detail !== 'object') return;
+    const detail = event.detail;
+    const combo = detail.combo;
+    assert(combo && typeof combo === 'object', 'tick detail should include combo payload');
+    assert(combo.multiplier >= 1 && combo.multiplier <= combo.cap, 'multiplier must stay within cap bounds');
+    assert(detail.progressToNext >= 0 && detail.progressToNext <= 1, 'progressToNext should stay normalized');
+    assert(['build', 'sustain', 'cooldown'].includes(detail.mode), 'combo mode should be known');
+  });
+}
+
 async function settleFlush() {
   const inflight = getState().flush && getState().flush.inflight;
   if (inflight && typeof inflight.then === 'function') {
@@ -398,7 +496,15 @@ function freshSession(label) {
   state.regen.pending = 0;
   state.regen.carry = 0;
   state.regen.momentum = 0;
-  state.regen.comboCount = 0;
+  state.combo = {
+    mode: 'build',
+    multiplier: 1,
+    points: 0,
+    stepThreshold: 1,
+    sustainLeftMs: 0,
+    cooldownLeftMs: 0,
+    cap: (state.combo && Number(state.combo.cap)) || 20,
+  };
   state.flush.pending = 0;
   state.flush.lastSync = DateMock.now();
   state.totalToday = 0;
@@ -412,7 +518,9 @@ function freshSession(label) {
 // Hydration from localStorage and getFlushStatus coverage
 const hydrated = getState();
 assert.equal(hydrated.regen.pending, 18);
-assert.equal(hydrated.regen.comboCount, 4);
+assert(hydrated.combo, 'combo state should hydrate');
+assert.equal(hydrated.combo.mode, 'build');
+assert.equal(hydrated.combo.multiplier, 5);
 assert.equal(hydrated.flush.pending, 26);
 assert.equal(hydrated.boost.multiplier, 3);
 const hydrationBoostEvent = boostEvents.find((event) => event && event.type === 'xp:boost'
@@ -427,7 +535,15 @@ assert.equal(status.inflight, false);
 localStorageMock.setItem(RUNTIME_CACHE_KEY, JSON.stringify({
   carry: 0,
   momentum: 0,
-  comboCount: 1,
+  combo: {
+    mode: 'build',
+    multiplier: 3,
+    points: 0.4,
+    stepThreshold: 2,
+    sustainLeftMs: 0,
+    cooldownLeftMs: 0,
+    cap: 20,
+  },
   pending: 7,
   flushPending: 12,
   lastSync: 77_000,
@@ -442,7 +558,15 @@ const beforeOffEventCount = boostEvents.length;
 localStorageMock.setItem(RUNTIME_CACHE_KEY, JSON.stringify({
   carry: 0,
   momentum: 0,
-  comboCount: 0,
+  combo: {
+    mode: 'cooldown',
+    multiplier: 1,
+    points: 0,
+    stepThreshold: 1,
+    sustainLeftMs: 0,
+    cooldownLeftMs: 500,
+    cap: 20,
+  },
   pending: 0,
   flushPending: 0,
   lastSync: 77_500,
@@ -476,14 +600,23 @@ const afterBoost = await runTickAndSettle({ ratio: 1 });
 assert(afterBoost < boosted, 'boost should expire after TTL');
 
 // Cap prevents further awards once reached
-const state = getState();
-state.cap = Math.floor(state.totalToday) + Math.floor(afterBoost);
+const capState = getState();
+capState.cap = Math.floor(capState.totalToday) + Math.floor(afterBoost);
 await runTickAndSettle({ ratio: 1 });
 const capped = await runTickAndSettle({ ratio: 1 });
 assert.equal(capped, 0, 'cap should block awards');
-state.cap = null;
+capState.cap = null;
+
+freshSession('combo-lifecycle');
+tickEvents.length = 0;
+await combo_cap_and_sustain();
+await combo_cooldown_blocks_build();
+await combo_rebuild_after_cooldown();
+combo_no_stuck_values();
+freshSession('anti-idle');
 
 // Anti-idle: hard idle freezes activity until new input
+const state = getState();
 state.lastTrustedInputTs = DateMock.now() - (HARD_IDLE_MS + 10);
 const paused = await runTickAndSettle({ ratio: 1, trusted: false });
 assert.equal(paused, 0, 'hard idle should prevent awards');

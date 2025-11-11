@@ -20,6 +20,9 @@
   const LEVEL_MULTIPLIER = 1.1;
 
   const DEFAULT_SCORE_DELTA_CEILING = 10_000;
+  const COMBO_CAP = 20;
+  const COMBO_SUSTAIN_MS = 5_000;
+  const COMBO_COOLDOWN_MS = 3_000;
 
   function parseNumber(value, fallback) {
     if (value == null) return fallback;
@@ -36,6 +39,74 @@
     } catch (_) {
       return "";
     }
+  }
+
+  function computeComboStepThreshold(multiplier) {
+    const stage = Math.max(1, Math.floor(Number(multiplier) || 1));
+    if (stage >= COMBO_CAP) return 1;
+    const base = 1 + Math.floor((stage - 1) / 3);
+    return Math.max(1, Math.min(5, base));
+  }
+
+  function createComboState() {
+    return {
+      mode: "build",
+      multiplier: 1,
+      points: 0,
+      stepThreshold: computeComboStepThreshold(1),
+      sustainLeftMs: 0,
+      cooldownLeftMs: 0,
+      cap: COMBO_CAP,
+    };
+  }
+
+  function normalizeCombo(raw) {
+    const combo = raw && typeof raw === "object" ? raw : {};
+    combo.cap = COMBO_CAP;
+    if (combo.mode !== "sustain" && combo.mode !== "cooldown") {
+      combo.mode = "build";
+    }
+    combo.multiplier = Math.max(1, Math.min(combo.cap, Math.floor(Number(combo.multiplier) || 1)));
+    combo.stepThreshold = computeComboStepThreshold(combo.multiplier);
+    combo.points = Math.max(0, Math.min(combo.stepThreshold, Number(combo.points) || 0));
+    combo.sustainLeftMs = Math.max(0, Math.min(COMBO_SUSTAIN_MS, Number(combo.sustainLeftMs) || 0));
+    combo.cooldownLeftMs = Math.max(0, Math.min(COMBO_COOLDOWN_MS, Number(combo.cooldownLeftMs) || 0));
+
+    if (combo.multiplier >= combo.cap) {
+      combo.multiplier = combo.cap;
+      combo.points = 0;
+      if (combo.mode === "build") {
+        combo.mode = combo.sustainLeftMs > 0 ? "sustain" : "cooldown";
+      }
+    }
+
+    if (combo.mode === "sustain") {
+      combo.multiplier = combo.cap;
+      if (combo.sustainLeftMs <= 0) {
+        combo.mode = "cooldown";
+        combo.cooldownLeftMs = Math.max(combo.cooldownLeftMs, COMBO_COOLDOWN_MS);
+        combo.sustainLeftMs = 0;
+      }
+      combo.points = 0;
+    }
+
+    if (combo.mode === "cooldown") {
+      combo.multiplier = 1;
+      combo.points = 0;
+      combo.sustainLeftMs = 0;
+      if (combo.cooldownLeftMs <= 0) {
+        combo.mode = "build";
+      }
+    }
+
+    if (combo.mode === "build") {
+      combo.sustainLeftMs = 0;
+      combo.cooldownLeftMs = 0;
+      combo.stepThreshold = computeComboStepThreshold(combo.multiplier);
+      combo.points = Math.max(0, Math.min(combo.stepThreshold, combo.points));
+    }
+
+    return combo;
   }
 
   const HOST_SLUG_PATTERN = /^(2048|pacman|tetris|t-rex)$/i;
@@ -102,10 +173,10 @@
     regen: {
       carry: 0,
       momentum: 0,
-      comboCount: 0,
       pending: 0,
       lastAward: 0,
     },
+    combo: createComboState(),
     flush: {
       pending: 0,
       lastSync: 0,
@@ -144,6 +215,101 @@
     lastSuccessfulWindowEnd: null,
     badgeTimerId: null,
   };
+
+  function ensureComboState() {
+    if (!state.combo || typeof state.combo !== "object") {
+      state.combo = createComboState();
+    }
+    return normalizeCombo(state.combo);
+  }
+
+  function snapshotCombo() {
+    const combo = ensureComboState();
+    return {
+      mode: combo.mode,
+      multiplier: combo.multiplier,
+      points: combo.points,
+      stepThreshold: combo.stepThreshold,
+      sustainLeftMs: combo.sustainLeftMs,
+      cooldownLeftMs: combo.cooldownLeftMs,
+      cap: combo.cap,
+    };
+  }
+
+  function computeComboProgress(combo) {
+    if (!combo || typeof combo !== "object") return 0;
+    if (combo.mode === "sustain") {
+      if (COMBO_SUSTAIN_MS <= 0) return 0;
+      return Math.max(0, Math.min(1, combo.sustainLeftMs / COMBO_SUSTAIN_MS));
+    }
+    if (combo.mode === "cooldown") {
+      return 0;
+    }
+    const threshold = combo.stepThreshold > 0 ? combo.stepThreshold : 1;
+    return Math.max(0, Math.min(1, combo.points / threshold));
+  }
+
+  function advanceCombo(deltaMs, activityRatio, isActive) {
+    const combo = ensureComboState();
+    const elapsed = Math.max(0, Number(deltaMs) || 0);
+    const ratio = Math.max(0, Math.min(1, Number(activityRatio) || 0));
+
+    if (combo.mode === "cooldown") {
+      if (elapsed > 0) {
+        combo.cooldownLeftMs = Math.max(0, combo.cooldownLeftMs - elapsed);
+        if (combo.cooldownLeftMs <= 0) {
+          combo.mode = "build";
+          combo.multiplier = 1;
+          combo.points = 0;
+        }
+      }
+      return normalizeCombo(combo);
+    }
+
+    if (combo.mode === "sustain") {
+      if (elapsed > 0) {
+        combo.sustainLeftMs = Math.max(0, combo.sustainLeftMs - elapsed);
+        if (combo.sustainLeftMs <= 0) {
+          combo.mode = "cooldown";
+          combo.cooldownLeftMs = COMBO_COOLDOWN_MS;
+          combo.multiplier = 1;
+          combo.points = 0;
+        }
+      }
+      return normalizeCombo(combo);
+    }
+
+    if (!isActive) {
+      combo.points = Math.max(0, combo.points * 0.5);
+      return normalizeCombo(combo);
+    }
+
+    if (ratio <= 0) {
+      combo.points = 0;
+      combo.multiplier = 1;
+      return normalizeCombo(combo);
+    }
+
+    const scaledGain = ratio * (elapsed > 0 ? Math.max(1, elapsed / AWARD_INTERVAL_MS) : 1);
+    if (Number.isFinite(scaledGain) && scaledGain > 0) {
+      combo.points = Math.max(0, combo.points + scaledGain);
+    }
+
+    while (combo.multiplier < combo.cap && combo.points >= combo.stepThreshold) {
+      combo.points -= combo.stepThreshold;
+      combo.multiplier += 1;
+      combo.stepThreshold = computeComboStepThreshold(combo.multiplier);
+    }
+
+    if (combo.multiplier >= combo.cap) {
+      combo.multiplier = combo.cap;
+      combo.mode = "sustain";
+      combo.sustainLeftMs = COMBO_SUSTAIN_MS;
+      combo.points = 0;
+    }
+
+    return normalizeCombo(combo);
+  }
 
   function isFromGameSurface(ev) {
     try {
@@ -308,14 +474,10 @@
     let nextMomentum = prevMomentum;
     if (ratio >= 0.75) {
       nextMomentum = Math.min(1, prevMomentum + 0.12 + ((ratio - 0.75) * 0.4));
-      state.regen.comboCount = Math.min(20, (state.regen.comboCount || 0) + 1);
     } else if (ratio >= 0.35) {
       nextMomentum = Math.max(0, prevMomentum * 0.85 + ratio * 0.15);
     } else {
       nextMomentum = Math.max(0, prevMomentum * 0.5);
-      if (ratio <= 0.05) {
-        state.regen.comboCount = 0;
-      }
     }
     state.regen.momentum = nextMomentum;
     return nextMomentum;
@@ -331,9 +493,10 @@
   function applyCombo(multiplier) {
     const base = Number(multiplier) || 0;
     if (base <= 0) return 0;
-    const comboCount = Math.max(0, Number(state.regen.comboCount) || 0);
-    if (comboCount <= 1) return base;
-    const comboBonus = Math.min(0.75, comboCount * 0.03);
+    const combo = ensureComboState();
+    const stage = Math.max(1, Number(combo.multiplier) || 1);
+    if (stage <= 1) return base;
+    const comboBonus = Math.min(0.75, Math.max(0, stage - 1) * 0.03);
     return base * (1 + comboBonus);
   }
 
@@ -375,6 +538,40 @@
     } catch (_) {
       try {
         window.dispatchEvent({ type: "xp:boost", detail: { multiplier: 1, ttlMs: 0, __xpInternal: true } });
+      } catch (_) {}
+    }
+  }
+
+  function emitTick(awarded, activityRatio, isActive) {
+    if (!window || typeof window.dispatchEvent !== "function") return;
+    const comboSnapshot = snapshotCombo();
+    const detail = {
+      awarded: Math.max(0, Number(awarded) || 0),
+      activityRatio: Math.max(0, Number(activityRatio) || 0),
+      isActive: !!isActive,
+      combo: comboSnapshot,
+      progressToNext: computeComboProgress(comboSnapshot),
+      mode: comboSnapshot.mode,
+    };
+    if (state.gameId) {
+      detail.gameId = state.gameId;
+    }
+    try {
+      if (typeof CustomEvent === "function") {
+        const evt = new CustomEvent("xp:tick", { detail });
+        window.dispatchEvent(evt);
+        return;
+      }
+      if (typeof document !== "undefined" && document && typeof document.createEvent === "function") {
+        const legacyEvt = document.createEvent("CustomEvent");
+        legacyEvt.initCustomEvent("xp:tick", false, false, detail);
+        window.dispatchEvent(legacyEvt);
+        return;
+      }
+      window.dispatchEvent({ type: "xp:tick", detail });
+    } catch (_) {
+      try {
+        window.dispatchEvent({ type: "xp:tick", detail });
       } catch (_) {}
     }
   }
@@ -529,7 +726,7 @@
       const payload = {
         carry: state.regen.carry || 0,
         momentum: state.regen.momentum || 0,
-        comboCount: state.regen.comboCount || 0,
+        combo: snapshotCombo(),
         pending: state.regen.pending || 0,
         flushPending: state.flush.pending || 0,
         lastSync: state.flush.lastSync || 0,
@@ -554,7 +751,7 @@
       }
       state.regen.carry = parseNumber(parsed.carry, state.regen.carry || 0) || 0;
       state.regen.momentum = parseNumber(parsed.momentum, state.regen.momentum || 0) || 0;
-      state.regen.comboCount = Math.max(0, Math.floor(parseNumber(parsed.comboCount, state.regen.comboCount || 0) || 0));
+      state.combo = normalizeCombo(Object.assign(createComboState(), parsed.combo || {}));
       state.regen.pending = Math.max(0, Math.floor(parseNumber(parsed.pending, state.regen.pending || 0) || 0));
       state.flush.pending = Math.max(0, Math.floor(parseNumber(parsed.flushPending, state.flush.pending || 0) || 0));
       state.flush.lastSync = parseNumber(parsed.lastSync, state.flush.lastSync || Date.now()) || Date.now();
@@ -569,6 +766,7 @@
           emitBoost(1, 0);
         }
       }
+      ensureComboState();
     } catch (_) {
       if (!state.flush.lastSync) state.flush.lastSync = Date.now();
     }
@@ -939,6 +1137,8 @@
       logDebug("activity", { ratio: Number(activityRatio) || 0, events, sinceLastInput });
     }
 
+    advanceCombo(frameDelta, isActive ? activityRatio : 0, isActive);
+
     if (!isActive) {
       const lastSkip = Number(state.debug.lastAwardSkipLog) || 0;
       if ((now - lastSkip) > 500) {
@@ -951,6 +1151,7 @@
       }
       zeroTickCounters();
       flushXp(false).catch(() => {});
+      emitTick(0, activityRatio, false);
       return;
     }
 
@@ -961,6 +1162,7 @@
     const awarded = awardLocalXp(activityRatio);
     zeroTickCounters();
     flushXp(false).catch(() => {});
+    emitTick(awarded, activityRatio, true);
     return awarded;
   }
 
