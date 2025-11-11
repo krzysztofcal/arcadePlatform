@@ -830,13 +830,27 @@
       state.runBoostTriggered = false;
     }
     if (!resolvedGameId) return;
-    if (state.runBoostTriggered) return;
-    if (getBoostMultiplierValue() > 1) return;
-    const currentHighScore = readStoredHighScore(resolvedGameId);
-    if (score <= currentHighScore) return;
-    const updatedHighScore = updateStoredHighScore(resolvedGameId, score);
-    state.storedHighScore = updatedHighScore;
-    state.storedHighScoreGameId = resolvedGameId;
+    const prevHigh = readStoredHighScore(resolvedGameId);
+    const beatRecord = score > prevHigh;
+    if (beatRecord) {
+      const updatedHighScore = updateStoredHighScore(resolvedGameId, score);
+      state.storedHighScore = updatedHighScore;
+      state.storedHighScoreGameId = resolvedGameId;
+    }
+    if (!beatRecord) return;
+    const boostActive = getBoostMultiplierValue() > 1;
+    if (state.runBoostTriggered) {
+      if (isDiagEnabled()) {
+        logDebug("hs_update", { gameId: resolvedGameId, score, prevHigh, boosted: true, activeBoost: boostActive });
+      }
+      return;
+    }
+    if (boostActive) {
+      if (isDiagEnabled()) {
+        logDebug("hs_update", { gameId: resolvedGameId, score, prevHigh, boosted: false, activeBoost: true });
+      }
+      return;
+    }
     state.runBoostTriggered = true;
     dispatchNewRecordBoost(resolvedGameId);
   }

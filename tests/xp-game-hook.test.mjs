@@ -218,6 +218,43 @@ import { createEnvironment } from './helpers/xp-env.mjs';
   assert.equal(getState().boost.multiplier, 1, 'pagehide fallback should clear the active boost');
 }
 
+// hs_updates_after_first_boost_but_no_double_boost
+{
+  const env = createEnvironment();
+  const { Bridge, drainTimers, installXp, triggerWindow } = env;
+
+  Bridge.start('record-game');
+
+  installXp();
+  drainTimers();
+
+  const xpBoosts = [];
+  env.context.window.addEventListener('xp:boost', (event) => {
+    if (!event || !event.detail) return;
+    if (event.detail.__xpOrigin === 'xp.js') {
+      xpBoosts.push({ ...event.detail });
+    }
+  });
+
+  triggerWindow('message', { data: { type: 'game-score', gameId: 'record-game', score: 10 } });
+  drainTimers();
+  triggerWindow('message', { data: { type: 'game-score', gameId: 'record-game', score: 15 } });
+  drainTimers();
+  triggerWindow('message', { data: { type: 'game-score', gameId: 'record-game', score: 25 } });
+  drainTimers();
+
+  const recordBoosts = xpBoosts.filter((event) => event.source === 'newRecord');
+  assert.equal(recordBoosts.length, 1, 'only the first record should trigger a boost animation');
+  assert.equal(Bridge.getHighScore('record-game'), 25, 'high score should continue updating after the first boost');
+
+  env.triggerWindow('pagehide', { persisted: false });
+  drainTimers();
+
+  Bridge.start('record-game');
+  drainTimers();
+  assert.equal(Bridge.getHighScore('record-game'), 25, 'high score should persist into the next run even without gameOver');
+}
+
 // game_over_stops_boost_and_saves_hs
 {
   const env = createEnvironment();
