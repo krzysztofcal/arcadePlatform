@@ -2,6 +2,7 @@
   if (typeof window === "undefined") return;
 
   const DEFAULT_SCORE_DELTA_CEILING = 10_000;
+  const DEFAULT_BOOST_SEC = 15;
 
   function parseNumber(value, fallback) {
     if (value == null) return fallback;
@@ -33,9 +34,12 @@
     return cachedScoreDeltaCeiling;
   }
   const DEFAULT_GAME_ID = "game";
+  const HIGH_SCORE_PREFIX = "xp:hs:";
 
   const MIN_FLUSH_DELAY_MS = 16;
   const MAX_FLUSH_DELAY_MS = 1000;
+
+  const highScoreMemory = {};
 
   const state = {
     remainder: 0,
@@ -49,6 +53,7 @@
     flushDelayMs: MIN_FLUSH_DELAY_MS,
     domReadyListenerBound: false,
     handleVisible: null,
+    handleVisibleRan: false,
   };
 
   let autoBootedSlug = null;
@@ -128,6 +133,155 @@
     return limited || null;
   }
 
+  function resolveBridgeGameId() {
+    try {
+      if (window && window.GameXpBridge && typeof window.GameXpBridge.getCurrentGameId === "function") {
+        const id = window.GameXpBridge.getCurrentGameId();
+        if (id) return id;
+      }
+    } catch (_) {}
+    if (state.lastGameId) return state.lastGameId;
+    const detected = detectGameId();
+    return detected;
+  }
+
+  function getHighScoreKey(gameId) {
+    const slugged = slugifyGameId(gameId) || DEFAULT_GAME_ID;
+    return `${HIGH_SCORE_PREFIX}${slugged}`;
+  }
+
+  function getHighScore(gameId) {
+    const key = getHighScoreKey(gameId);
+    let raw = null;
+    try {
+      if (window && window.localStorage && typeof window.localStorage.getItem === "function") {
+        raw = window.localStorage.getItem(key);
+      }
+    } catch (_) {
+      raw = null;
+    }
+    if (raw == null && Object.prototype.hasOwnProperty.call(highScoreMemory, key)) {
+      raw = highScoreMemory[key];
+    }
+    let parsed = parseNumber(raw, NaN);
+    if (!Number.isFinite(parsed) || parsed < 0) {
+      parsed = 0;
+    }
+    const normalized = Math.max(0, Math.floor(parsed));
+    highScoreMemory[key] = normalized;
+    return normalized;
+  }
+
+  function setHighScore(gameId, score) {
+    const key = getHighScoreKey(gameId);
+    const numeric = Math.max(0, Math.floor(parseNumber(score, 0) || 0));
+    highScoreMemory[key] = numeric;
+    try {
+      if (window && window.localStorage && typeof window.localStorage.setItem === "function") {
+        window.localStorage.setItem(key, String(numeric));
+      }
+    } catch (_) {}
+    return numeric;
+  }
+
+  function updateHighScoreIfBetter(gameId, score) {
+    const numeric = Math.max(0, Math.floor(parseNumber(score, NaN)) || 0);
+    const current = getHighScore(gameId);
+    if (!Number.isFinite(numeric) || numeric <= current) {
+      return { updated: false, highScore: current };
+    }
+    const updated = setHighScore(gameId, numeric);
+    return { updated: true, highScore: updated };
+  }
+
+  function dispatchBoost(detail) {
+    if (!window || typeof window.dispatchEvent !== "function") return;
+    const payload = detail && typeof detail === "object" ? { ...detail } : {};
+    const now = Date.now();
+    if (Object.prototype.hasOwnProperty.call(payload, "totalSeconds")) {
+      const total = parseNumber(payload.totalSeconds, NaN);
+      if (Number.isFinite(total)) {
+        payload.totalSeconds = Math.max(0, Math.floor(total));
+      } else {
+        delete payload.totalSeconds;
+      }
+    }
+
+    let ttlMs = parseNumber(payload.ttlMs, NaN);
+    if (Number.isFinite(ttlMs)) {
+      ttlMs = Math.max(0, Math.floor(ttlMs));
+    } else {
+      ttlMs = NaN;
+    }
+
+    let expiresAt = null;
+    if (Object.prototype.hasOwnProperty.call(payload, "expiresAt")) {
+      expiresAt = parseNumber(payload.expiresAt, NaN);
+    } else if (Object.prototype.hasOwnProperty.call(payload, "endsAt")) {
+      expiresAt = parseNumber(payload.endsAt, NaN);
+    }
+    if (Number.isFinite(expiresAt)) {
+      if (expiresAt > 0 && expiresAt < 1e12) {
+        expiresAt = Math.floor(expiresAt * 1000);
+      } else {
+        expiresAt = Math.floor(expiresAt);
+      }
+    } else {
+      expiresAt = NaN;
+    }
+
+    if (!Number.isFinite(ttlMs) || ttlMs < 0) {
+      ttlMs = Number.isFinite(expiresAt) && expiresAt > now ? Math.max(0, expiresAt - now) : 0;
+    }
+    if (!Number.isFinite(expiresAt) || expiresAt <= 0) {
+      expiresAt = ttlMs > 0 ? now + ttlMs : now;
+    }
+
+    payload.ttlMs = ttlMs > 0 ? ttlMs : 0;
+    payload.expiresAt = expiresAt;
+    payload.endsAt = expiresAt;
+    if (Object.prototype.hasOwnProperty.call(payload, "secondsLeft")) {
+      delete payload.secondsLeft;
+    }
+
+    const targets = [];
+    if (window && typeof window.dispatchEvent === "function") targets.push(window);
+    if (document && typeof document.dispatchEvent === "function") targets.push(document);
+    for (let i = 0; i < targets.length; i += 1) {
+      const target = targets[i];
+      try {
+        if (typeof CustomEvent === "function") {
+          target.dispatchEvent(new CustomEvent("xp:boost", { detail: payload }));
+          continue;
+        }
+      } catch (_) {}
+      try {
+        if (document && typeof document.createEvent === "function") {
+          const legacyEvt = document.createEvent("CustomEvent");
+          legacyEvt.initCustomEvent("xp:boost", false, false, payload);
+          target.dispatchEvent(legacyEvt);
+          continue;
+        }
+      } catch (_) {}
+      try { target.dispatchEvent({ type: "xp:boost", detail: payload }); } catch (_) {}
+    }
+  }
+
+  function emitBoostStop(source, gameId) {
+    const now = Date.now();
+    const payload = {
+      multiplier: 1,
+      totalSeconds: DEFAULT_BOOST_SEC,
+      ttlMs: 0,
+      expiresAt: now,
+      endsAt: now,
+      source: source || "gameOver",
+    };
+    const resolvedId = slugifyGameId(gameId) || slugifyGameId(resolveBridgeGameId());
+    if (resolvedId) payload.gameId = resolvedId;
+    dispatchBoost(payload);
+  }
+
   function readWindowGameId() {
     try {
       if (typeof window === "undefined") return null;
@@ -189,8 +343,34 @@
       if (datasetId) return datasetId;
     }
 
+    try {
+      if (typeof location !== "undefined" && location && typeof location.pathname === "string") {
+        const parts = location.pathname.split("/").filter(Boolean);
+        if (parts.length) {
+          let segment = parts[parts.length - 1];
+          if (/^index(?:\.[a-z0-9]+)?$/i.test(segment) && parts.length >= 2) {
+            segment = parts[parts.length - 2];
+          }
+          if (parts[0] && parts[0].toLowerCase() === "games-open" && parts.length >= 2) {
+            segment = parts[1];
+          }
+          segment = String(segment || "").replace(/\.[a-z0-9]+$/i, "");
+          segment = segment.replace(/^game[_-]?/i, "");
+          segment = segment.replace(/_/g, "-");
+          if (segment.toLowerCase() === "trex") {
+            segment = "t-rex";
+          }
+          const fromPath = normalizeGameId(segment);
+          if (fromPath) return fromPath;
+        }
+      }
+    } catch (_) {}
+
     const title = document && normalizeGameId(document.title);
     if (title) return title;
+
+    const fallback = readWindowGameId();
+    if (fallback) return fallback;
 
     return null;
   }
@@ -275,6 +455,7 @@
         try { window.addEventListener(evt, activity, { passive: true }); } catch (_) {}
       });
     }
+
   }
 
   function ensureDomReadyKickoff() {
@@ -325,6 +506,22 @@
         try { window.addEventListener("load", once); } catch (_) {}
       }
     }
+
+    if (window && typeof window.setTimeout === "function") {
+      try {
+        const attemptStart = () => {
+          if (!state.runningDesired || state.handleVisibleRan) return;
+          const candidate = state.lastGameId || readWindowGameId() || detectGameId();
+          if (candidate) {
+            start(candidate);
+          }
+          if (state.runningDesired && !state.handleVisibleRan) {
+            window.setTimeout(attemptStart, 100);
+          }
+        };
+        window.setTimeout(attemptStart, 50);
+      } catch (_) {}
+    }
   }
 
   /**
@@ -343,6 +540,7 @@
   function auto(gameId) {
     const resolved = normalizeGameId(gameId) || detectGameId();
     const slugged = slugifyGameId(resolved);
+    state.runningDesired = true;
     if (!isHostDocument()) {
       if (slugged) {
         state.lastGameId = slugged;
@@ -370,11 +568,11 @@
     const resolved = normalizeGameId(gameId) || detectGameId();
     const slugged = slugifyGameId(resolved);
     if (!slugged) {
-      state.runningDesired = false;
       state.pendingStartGameId = null;
       return;
     }
     ensureAutoBootGuard();
+    state.handleVisibleRan = true;
     const xp = getXp();
     state.lastGameId = slugged;
     try { if (window) window.__GAME_ID__ = slugged; } catch (_) {}
@@ -383,7 +581,11 @@
     const currentGameId = xp && xp.__lastGameId ? slugifyGameId(xp.__lastGameId) : null;
 
     if (running && currentGameId === slugged) {
-      try { xp.startSession(slugged); } catch (_) {}
+      try {
+        if (xp && typeof xp.nudge === "function") {
+          xp.nudge({ skipMark: true });
+        }
+      } catch (_) {}
       state.runningDesired = true;
       state.pendingStopOptions = null;
       state.pendingStartGameId = null;
@@ -473,6 +675,16 @@
     if (slugged) return slugged;
     const detected = slugifyGameId(detectGameId());
     return detected;
+  };
+  bridge.getHighScore = getHighScore;
+  bridge.setHighScore = setHighScore;
+  bridge.updateHighScoreIfBetter = updateHighScoreIfBetter;
+  bridge.gameOver = function gameOver(payload) {
+    const data = payload && typeof payload === "object" ? payload : {};
+    const gameId = slugifyGameId(data.gameId) || resolveBridgeGameId();
+    const result = updateHighScoreIfBetter(gameId, data.score);
+    emitBoostStop("gameOver", gameId);
+    return result;
   };
   bridge.isActiveGameWindow = function isActiveGameWindow() {
     if (!window || !document) return false;

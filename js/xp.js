@@ -20,6 +20,7 @@
   const LEVEL_MULTIPLIER = 1.1;
 
   const DEFAULT_SCORE_DELTA_CEILING = 10_000;
+  const DEFAULT_BOOST_SEC = 15;
   const COMBO_CAP = 20;
   const COMBO_SUSTAIN_MS = 5_000;
   const COMBO_COOLDOWN_MS = 3_000;
@@ -243,6 +244,12 @@
     pendingWindow: null,
     lastSuccessfulWindowEnd: null,
     badgeTimerId: null,
+    runBoostTriggered: false,
+    boostStartSeen: false,
+    boostResetGuardUntil: 0,
+    lastBoostDetail: null,
+    storedHighScore: null,
+    storedHighScoreGameId: null,
   };
 
   function ensureComboState() {
@@ -536,39 +543,79 @@
     }
   }
 
-  function emitBoost(multiplier, ttlMs) {
-    if (!window || typeof window.dispatchEvent !== "function") return;
-    try {
-      const numericMultiplier = Number(multiplier);
-      const numericTtl = Number(ttlMs);
-      let detail;
-      if (!Number.isFinite(numericMultiplier) || numericMultiplier <= 1
-        || !Number.isFinite(numericTtl) || numericTtl <= 0) {
-        detail = { multiplier: 1, ttlMs: 0, __xpInternal: true };
-      } else {
-        detail = {
-          multiplier: numericMultiplier,
-          ttlMs: Math.max(0, Math.floor(numericTtl)),
-          __xpInternal: true,
-        };
-      }
-      if (typeof CustomEvent === "function") {
-        const evt = new CustomEvent("xp:boost", { detail });
-        window.dispatchEvent(evt);
-        return;
-      }
-      if (typeof document !== "undefined" && document && typeof document.createEvent === "function") {
-        const legacyEvt = document.createEvent("CustomEvent");
-        legacyEvt.initCustomEvent("xp:boost", false, false, detail);
-        window.dispatchEvent(legacyEvt);
-        return;
-      }
-      window.dispatchEvent({ type: "xp:boost", detail });
-    } catch (_) {
-      try {
-        window.dispatchEvent({ type: "xp:boost", detail: { multiplier: 1, ttlMs: 0, __xpInternal: true } });
-      } catch (_) {}
+  function broadcastBoost(detail) {
+    if (!detail || typeof detail !== "object") return;
+    const targets = [];
+    if (typeof window !== "undefined" && window && typeof window.dispatchEvent === "function") {
+      targets.push(window);
     }
+    if (typeof document !== "undefined" && document && typeof document.dispatchEvent === "function") {
+      targets.push(document);
+    }
+    if (!targets.length) return;
+    for (let i = 0; i < targets.length; i += 1) {
+      const target = targets[i];
+      try {
+        if (typeof CustomEvent === "function") {
+          const evt = new CustomEvent("xp:boost", { detail });
+          target.dispatchEvent(evt);
+          continue;
+        }
+      } catch (_) {}
+      try {
+        if (typeof document !== "undefined" && document && typeof document.createEvent === "function") {
+          const evt = document.createEvent("CustomEvent");
+          evt.initCustomEvent("xp:boost", false, false, detail);
+          target.dispatchEvent(evt);
+          continue;
+        }
+      } catch (_) {}
+      try { target.dispatchEvent({ type: "xp:boost", detail }); } catch (_) {}
+    }
+  }
+
+  function emitBoost(multiplier, ttlMs, meta) {
+    const numericMultiplier = Number(multiplier);
+    const numericTtl = Number(ttlMs);
+    const parsedTtl = Number.isFinite(numericTtl) && numericTtl > 0
+      ? Math.max(0, Math.floor(numericTtl))
+      : 0;
+    const hasBoost = Number.isFinite(numericMultiplier) && numericMultiplier > 1;
+    const now = Date.now();
+    const expiresAt = hasBoost && parsedTtl > 0 ? now + parsedTtl : now;
+    let totalSeconds = meta && Object.prototype.hasOwnProperty.call(meta, "totalSeconds")
+      ? parseNumber(meta.totalSeconds, NaN)
+      : NaN;
+    if (!Number.isFinite(totalSeconds) || totalSeconds <= 0) {
+      totalSeconds = parsedTtl > 0 ? Math.floor(parsedTtl / 1000) : DEFAULT_BOOST_SEC;
+    } else {
+      totalSeconds = Math.max(0, Math.floor(totalSeconds));
+    }
+    if (totalSeconds > 3600) {
+      totalSeconds = 3600;
+    }
+
+    const detail = {
+      multiplier: hasBoost ? numericMultiplier : 1,
+      ttlMs: hasBoost ? parsedTtl : 0,
+      expiresAt,
+      endsAt: expiresAt,
+      totalSeconds,
+      schema: 3,
+      __xpOrigin: "xp.js",
+      __xpInternal: true,
+    };
+
+    if (meta && meta.source != null) {
+      detail.source = String(meta.source);
+    }
+    if (meta && meta.gameId) {
+      detail.gameId = meta.gameId;
+    }
+
+    state.lastBoostDetail = detail;
+
+    broadcastBoost(detail);
   }
 
   function emitTick(awarded, activityRatio, isActive) {
@@ -620,14 +667,25 @@
     }
   }
 
-  function resetBoost() {
-    const previous = state.boost || { multiplier: 1, expiresAt: 0, source: null };
+  function resetBoost(meta) {
+    const previous = state.boost || { multiplier: 1, expiresAt: 0, source: null, totalSeconds: DEFAULT_BOOST_SEC, gameId: null };
     clearBoostTimer();
-    state.boost = { multiplier: 1, expiresAt: 0, source: null };
+    state.boost = { multiplier: 1, expiresAt: 0, source: null, totalSeconds: DEFAULT_BOOST_SEC, gameId: null };
+    state.boostStartSeen = false;
+    state.lastBoostDetail = null;
+    state.boostResetGuardUntil = Date.now() + 125;
+    const nextTotalSeconds = meta && Object.prototype.hasOwnProperty.call(meta, "totalSeconds")
+      ? Math.max(0, Math.floor(parseNumber(meta.totalSeconds, DEFAULT_BOOST_SEC) || 0))
+      : Math.max(0, Math.floor(parseNumber(previous.totalSeconds, DEFAULT_BOOST_SEC) || DEFAULT_BOOST_SEC));
+    const payload = {
+      source: meta && meta.source != null ? meta.source : previous.source,
+      totalSeconds: nextTotalSeconds || DEFAULT_BOOST_SEC,
+      gameId: (meta && meta.gameId) || previous.gameId || null,
+    };
     if (previous.multiplier !== 1 || previous.expiresAt !== 0 || (previous.source || null) !== null) {
       persistRuntimeState();
     }
-    emitBoost(1, 0);
+    emitBoost(1, 0, payload);
   }
 
   function scheduleBoostExpiration(expiresAt) {
@@ -679,6 +737,107 @@
     const boostMultiplier = Number(state.boost && state.boost.multiplier) || 1;
     if (boostMultiplier <= 1) return base;
     return base * boostMultiplier;
+  }
+
+  function resolveScorePulseGameId(gameId) {
+    const normalized = normalizeGameId(gameId);
+    if (normalized) return normalized;
+    const active = normalizeGameId(state.gameId);
+    if (active) return active;
+    try {
+      if (window && window.GameXpBridge && typeof window.GameXpBridge.getCurrentGameId === "function") {
+        const bridged = normalizeGameId(window.GameXpBridge.getCurrentGameId());
+        if (bridged) return bridged;
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  function dispatchNewRecordBoost(gameId) {
+    const detail = {
+      multiplier: 1.5,
+      totalSeconds: DEFAULT_BOOST_SEC,
+      ttlMs: DEFAULT_BOOST_SEC * 1000,
+      source: "newRecord",
+    };
+    if (gameId) detail.gameId = gameId;
+    try {
+      requestBoost(detail);
+    } catch (_) {}
+  }
+
+  function updateStoredHighScore(gameId, score) {
+    let nextHighScore = score;
+    try {
+      if (window && window.GameXpBridge && typeof window.GameXpBridge.updateHighScoreIfBetter === "function") {
+        const result = window.GameXpBridge.updateHighScoreIfBetter(gameId, score);
+        if (result && typeof result === "object" && Object.prototype.hasOwnProperty.call(result, "highScore")) {
+          const parsed = Number(result.highScore);
+          if (Number.isFinite(parsed) && parsed >= 0) {
+            nextHighScore = Math.max(0, Math.floor(parsed));
+          }
+        } else if (typeof result === "number" && Number.isFinite(result)) {
+          nextHighScore = Math.max(0, Math.floor(result));
+        }
+      }
+    } catch (_) {}
+    return nextHighScore;
+  }
+
+  function readStoredHighScore(gameId) {
+    let stored = state.storedHighScore;
+    if (Number.isFinite(stored) && stored >= 0 && state.storedHighScoreGameId === gameId) {
+      return Math.max(0, Math.floor(stored));
+    }
+    stored = 0;
+    try {
+      if (window && window.GameXpBridge && typeof window.GameXpBridge.getHighScore === "function") {
+        const raw = window.GameXpBridge.getHighScore(gameId);
+        const parsed = Number(raw);
+        if (Number.isFinite(parsed) && parsed >= 0) {
+          stored = Math.max(0, Math.floor(parsed));
+        }
+      }
+    } catch (_) {}
+    state.storedHighScore = stored;
+    state.storedHighScoreGameId = gameId;
+    return stored;
+  }
+
+  function handleScorePulse(rawGameId, rawScore) {
+    const resolvedGameId = resolveScorePulseGameId(rawGameId);
+    const numericScore = Number(rawScore);
+    if (!Number.isFinite(numericScore)) return;
+    const score = Math.max(0, Math.floor(numericScore));
+    if (resolvedGameId && state.storedHighScoreGameId !== resolvedGameId) {
+      state.storedHighScore = null;
+      state.storedHighScoreGameId = resolvedGameId;
+      state.runBoostTriggered = false;
+    }
+    if (!resolvedGameId) return;
+    const prevHigh = readStoredHighScore(resolvedGameId);
+    const beatRecord = score > prevHigh;
+    if (beatRecord) {
+      const updatedHighScore = updateStoredHighScore(resolvedGameId, score);
+      state.storedHighScore = updatedHighScore;
+      state.storedHighScoreGameId = resolvedGameId;
+    }
+    if (!beatRecord) return;
+    const boostActive = getBoostMultiplierValue() > 1;
+    if (state.runBoostTriggered) {
+      if (isDiagEnabled()) {
+        logDebug("hs_update", { gameId: resolvedGameId, score, prevHigh, boosted: true, activeBoost: boostActive });
+      }
+      return;
+    }
+    if (boostActive) {
+      if (isDiagEnabled()) {
+        logDebug("hs_update", { gameId: resolvedGameId, score, prevHigh, boosted: false, activeBoost: true });
+      }
+      return;
+    }
+    state.runBoostTriggered = true;
+    dispatchNewRecordBoost(resolvedGameId);
   }
 
   function accumulateLocalXp(xpDelta) {
@@ -821,14 +980,61 @@
       state.flush.pending = Math.max(0, Math.floor(parseNumber(parsed.flushPending, state.flush.pending || 0) || 0));
       state.flush.lastSync = parseNumber(parsed.lastSync, state.flush.lastSync || Date.now()) || Date.now();
       if (parsed.boost && typeof parsed.boost === "object") {
-        state.boost = Object.assign({ multiplier: 1, expiresAt: 0, source: null }, parsed.boost);
-        scheduleBoostExpiration(state.boost.expiresAt || 0);
+        state.boost = Object.assign({
+          multiplier: 1,
+          expiresAt: 0,
+          source: null,
+          totalSeconds: DEFAULT_BOOST_SEC,
+          gameId: null,
+        }, parsed.boost);
+        const rawExpires = Number(state.boost.expiresAt);
         const nowTs = Date.now();
-        const ttl = (Number(state.boost.expiresAt) || 0) - nowTs;
-        if ((Number(state.boost.multiplier) || 1) > 1 && ttl > 0) {
-          emitBoost(state.boost.multiplier, ttl);
+        const originalExpiresAt = Number.isFinite(rawExpires) ? rawExpires : 0;
+        let sanitizedExpiresAt = Number.isFinite(rawExpires) ? rawExpires : 0;
+        if (sanitizedExpiresAt > 0 && sanitizedExpiresAt < 1e12 && nowTs > 1e12) {
+          sanitizedExpiresAt = Math.floor(sanitizedExpiresAt * 1000);
+        }
+        const maxTtl = DEFAULT_BOOST_SEC * 1000;
+        if (sanitizedExpiresAt > 0) {
+          const delta = sanitizedExpiresAt - nowTs;
+          if (!Number.isFinite(delta) || delta < 0) {
+            sanitizedExpiresAt = 0;
+          } else if (delta > maxTtl) {
+            sanitizedExpiresAt = nowTs + maxTtl;
+          }
+        }
+        state.boost.totalSeconds = Math.max(0, Math.floor(parseNumber(state.boost.totalSeconds, DEFAULT_BOOST_SEC) || DEFAULT_BOOST_SEC));
+        state.boost.expiresAt = sanitizedExpiresAt;
+        scheduleBoostExpiration(sanitizedExpiresAt || 0);
+        let ttl = Math.max(0, Math.floor((Number(state.boost.expiresAt) || 0) - nowTs));
+        if (ttl === 0) {
+          if ((Number(state.boost.multiplier) || 1) > 1) {
+            resetBoost({
+              source: state.boost.source,
+              totalSeconds: state.boost.totalSeconds,
+              gameId: state.boost.gameId || state.gameId || null,
+            });
+          } else {
+            emitBoost(1, 0, {
+              source: state.boost.source,
+              totalSeconds: state.boost.totalSeconds,
+              gameId: state.boost.gameId || state.gameId || null,
+            });
+          }
         } else {
-          emitBoost(1, 0);
+          emitBoost(state.boost.multiplier, ttl, {
+            source: state.boost.source,
+            totalSeconds: Number(state.boost.totalSeconds) || DEFAULT_BOOST_SEC,
+            gameId: state.boost.gameId || state.gameId || null,
+          });
+        }
+        if (isDiagEnabled() && originalExpiresAt !== state.boost.expiresAt) {
+          logDebug("boost_hydrate_repair", {
+            expiresAt: state.boost.expiresAt,
+            originalExpiresAt,
+            ttl,
+            now: nowTs,
+          });
         }
       }
       ensureComboState();
@@ -1307,6 +1513,12 @@
     state.lastTrustedInputTs = 0;
     state.eventsSinceLastAward = 0;
     state.scoreDeltaSinceLastAward = 0;
+    state.runBoostTriggered = false;
+    state.boostStartSeen = false;
+    state.boostResetGuardUntil = Date.now() + 250;
+    state.lastBoostDetail = null;
+    state.storedHighScore = null;
+    state.storedHighScoreGameId = null;
     state.activityWindowFrozen = false;
     state.isActive = false;
     state.sessionXp = 0;
@@ -1362,6 +1574,10 @@
     state.scoreDeltaRemainder = 0;
     state.eventsSinceLastAward = 0;
     state.scoreDeltaSinceLastAward = 0;
+    state.runBoostTriggered = false;
+    state.lastBoostDetail = null;
+    state.storedHighScore = null;
+    state.storedHighScoreGameId = null;
     state.lastInputAt = 0;
     state.lastTrustedInputTs = 0;
     state.activityWindowFrozen = false;
@@ -1579,18 +1795,26 @@
   // Internal boost setter supports both the new `(multiplier, ttlMs, reason)`
   // signature and legacy detail objects dispatched with `durationMs/source`.
   function requestBoost(multiplierOrDetail, ttlMs, reason) {
-    let rawMultiplier = multiplierOrDetail;
-    let rawTtl = ttlMs;
-    let rawSource = reason;
+    const detail = multiplierOrDetail && typeof multiplierOrDetail === "object" ? multiplierOrDetail : null;
 
-    if (multiplierOrDetail && typeof multiplierOrDetail === "object") {
-      const detail = multiplierOrDetail;
-      rawMultiplier = detail.multiplier;
-      if (rawMultiplier == null) rawMultiplier = detail.mult;
-      rawTtl = detail.ttlMs;
-      if (rawTtl == null) rawTtl = detail.durationMs;
-      rawSource = detail.reason;
-      if (rawSource == null) rawSource = detail.source;
+    let rawMultiplier = detail ? detail.multiplier : multiplierOrDetail;
+    if (rawMultiplier == null && detail && Object.prototype.hasOwnProperty.call(detail, "mult")) {
+      rawMultiplier = detail.mult;
+    }
+    let rawTtl = detail && Object.prototype.hasOwnProperty.call(detail, "ttlMs") ? detail.ttlMs : ttlMs;
+    if (rawTtl == null && detail && Object.prototype.hasOwnProperty.call(detail, "durationMs")) {
+      rawTtl = detail.durationMs;
+    }
+    const rawSecondsLeft = detail && Object.prototype.hasOwnProperty.call(detail, "secondsLeft")
+      ? detail.secondsLeft
+      : null;
+    const rawTotalSeconds = detail && Object.prototype.hasOwnProperty.call(detail, "totalSeconds")
+      ? detail.totalSeconds
+      : null;
+    const rawGameId = detail && Object.prototype.hasOwnProperty.call(detail, "gameId") ? detail.gameId : null;
+    let rawSource = detail && Object.prototype.hasOwnProperty.call(detail, "reason") ? detail.reason : reason;
+    if (rawSource == null && detail && Object.prototype.hasOwnProperty.call(detail, "source")) {
+      rawSource = detail.source;
     }
 
     const fallbackMultiplier = state.boost && Number(state.boost.multiplier) > 1
@@ -1598,26 +1822,108 @@
       : 1;
     const parsedMultiplier = parseNumber(rawMultiplier, fallbackMultiplier) || fallbackMultiplier || 1;
     const multiplier = Number.isFinite(parsedMultiplier) ? Math.max(1, parsedMultiplier) : 1;
+    const source = rawSource == null ? null : String(rawSource);
+
+    const normalizeSeconds = (value) => {
+      if (value == null) return null;
+      const parsed = parseNumber(value, NaN);
+      if (!Number.isFinite(parsed) || parsed < 0) return null;
+      return Math.max(0, Math.floor(parsed));
+    };
+
+    const now = Date.now();
+    const MAX_BOOST_DURATION_MS = 5 * 60 * 1000;
+    const MAX_BOOST_SECONDS = Math.floor(MAX_BOOST_DURATION_MS / 1000);
+
+    let secondsLeft = normalizeSeconds(rawSecondsLeft);
+    let totalSeconds = normalizeSeconds(rawTotalSeconds);
+    const parsedTtl = parseNumber(rawTtl, 0) || 0;
+    let ttl = Number.isFinite(parsedTtl) ? Math.max(0, parsedTtl) : 0;
+    if (ttl > MAX_BOOST_DURATION_MS) {
+      ttl = MAX_BOOST_DURATION_MS;
+    }
+
+    if (secondsLeft != null) {
+      if (ttl <= 0) ttl = secondsLeft * 1000;
+    } else if (ttl > 0) {
+      secondsLeft = Math.max(0, Math.floor(ttl / 1000));
+    } else {
+      secondsLeft = 0;
+    }
+
+    if (secondsLeft != null) {
+      secondsLeft = Math.min(Math.max(0, secondsLeft), MAX_BOOST_SECONDS);
+    }
+
+    if (totalSeconds != null) {
+      totalSeconds = Math.max(totalSeconds, secondsLeft != null ? secondsLeft : 0);
+    } else if (ttl > 0) {
+      totalSeconds = Math.max(secondsLeft != null ? secondsLeft : 0, Math.floor(ttl / 1000));
+    } else {
+      totalSeconds = Math.max(secondsLeft != null ? secondsLeft : 0, DEFAULT_BOOST_SEC);
+    }
+    if (!Number.isFinite(totalSeconds) || totalSeconds <= 0) {
+      totalSeconds = Math.max(secondsLeft != null ? secondsLeft : 0, DEFAULT_BOOST_SEC);
+    }
+
+    totalSeconds = Math.min(MAX_BOOST_SECONDS, Math.max(secondsLeft != null ? secondsLeft : 0, totalSeconds));
+    if (secondsLeft != null) {
+      secondsLeft = Math.min(totalSeconds, Math.max(0, secondsLeft));
+    }
+
+    if (secondsLeft != null) {
+      const secondsMs = secondsLeft * 1000;
+      if (secondsLeft > 0 && ttl <= 0) {
+        ttl = secondsMs;
+      } else if (ttl > secondsMs) {
+        ttl = secondsMs;
+      }
+    }
+    if (ttl > MAX_BOOST_DURATION_MS) {
+      ttl = MAX_BOOST_DURATION_MS;
+    }
+
+    const normalizedGameId = rawGameId != null ? normalizeGameId(rawGameId) : null;
+
     if (multiplier <= 1) {
-      resetBoost();
+      if (!state.boostStartSeen && now < state.boostResetGuardUntil) {
+        return;
+      }
+      if (source === "gameOver" || source === "visibility" || source === "pagehide") {
+        state.runBoostTriggered = false;
+        if (source === "gameOver") {
+          state.storedHighScore = null;
+          state.storedHighScoreGameId = null;
+        }
+      }
+      resetBoost({
+        source,
+        totalSeconds,
+        gameId: normalizedGameId,
+      });
       return;
     }
 
-    const parsedTtl = parseNumber(rawTtl, 0) || 0;
-    const ttl = Number.isFinite(parsedTtl) ? Math.max(0, parsedTtl) : 0;
-    const now = Date.now();
-    const expiresAt = now + (ttl > 0 ? ttl : 15_000);
-    const source = rawSource == null ? null : String(rawSource);
+    state.boostStartSeen = true;
+    state.boostResetGuardUntil = now + 250;
 
+    const ttlForState = ttl > 0 ? ttl : totalSeconds * 1000;
+    const expiresAt = now + ttlForState;
     state.boost = {
       multiplier,
       expiresAt,
       source,
+      totalSeconds,
+      gameId: normalizedGameId || null,
     };
 
     scheduleBoostExpiration(expiresAt);
 
-    emitBoost(multiplier, Math.max(0, expiresAt - now));
+    emitBoost(multiplier, Math.max(0, expiresAt - now), {
+      source,
+      totalSeconds,
+      gameId: normalizedGameId || null,
+    });
 
     persistRuntimeState();
   }
@@ -1789,15 +2095,32 @@
             gameId: event.data.gameId || state.gameId || "",
             score: typeof event.data.score === "number" ? event.data.score : undefined,
           });
+          handleScorePulse(event.data.gameId, event.data.score);
+          try {
+            const XP = window && window.XP;
+            const running = XP && typeof XP.isRunning === "function" ? !!XP.isRunning() : false;
+            if (!running) {
+              const gid = resolveScorePulseGameId(event.data.gameId);
+              if (gid && XP && typeof XP.startSession === "function") {
+                try { window.__GAME_ID__ = gid; } catch (_) {}
+                XP.startSession(gid, { resume: true });
+                if (isDiagEnabled()) {
+                  logDebug("auto_start_from_score_pulse", { gameId: gid });
+                }
+              }
+            }
+          } catch (_) {}
         } catch (_) {}
       }, { passive: true });
 
       window.addEventListener("xp:boost", (event) => {
         try {
-          if (event && event.detail && event.detail.__xpInternal) return;
+          if (!event || !event.detail) return;
+          if (event.detail.__xpOrigin === "xp.js") return;
+          if (event.detail.__xpInternal) return;
           // Accept both new `{ multiplier, ttlMs, reason }` and legacy
           // `{ multiplier, durationMs, source }` payloads.
-          requestBoost(event && event.detail);
+          requestBoost(event.detail);
         } catch (_) {}
       });
 
@@ -2058,6 +2381,7 @@
   window.XP.__xpLifecycleWired = true;
 
   let retryTimer = null;
+  const BOOST_RESET_SECONDS = 15;
 
   function tryCall(fnName, arg) {
     try {
@@ -2106,15 +2430,57 @@
     }
   }
 
-  function pause() {
+  function emitLifecycleBoostStop(source) {
+    const now = Date.now();
+    const detail = {
+      multiplier: 1,
+      totalSeconds: BOOST_RESET_SECONDS,
+      ttlMs: 0,
+      expiresAt: now,
+      endsAt: now,
+      source: source || "visibility",
+    };
+    const targets = [];
+    if (typeof window !== 'undefined' && window && typeof window.dispatchEvent === 'function') {
+      targets.push(window);
+    }
+    if (typeof document !== 'undefined' && document && typeof document.dispatchEvent === 'function') {
+      targets.push(document);
+    }
+    for (let i = 0; i < targets.length; i += 1) {
+      const target = targets[i];
+      try {
+        if (typeof CustomEvent === 'function') {
+          target.dispatchEvent(new CustomEvent('xp:boost', { detail }));
+          continue;
+        }
+      } catch (_) {}
+      try {
+        if (typeof document !== 'undefined' && document && typeof document.createEvent === 'function') {
+          const evt = document.createEvent('CustomEvent');
+          evt.initCustomEvent('xp:boost', false, false, detail);
+          target.dispatchEvent(evt);
+          continue;
+        }
+      } catch (_) {}
+      try { target.dispatchEvent({ type: 'xp:boost', detail }); } catch (_) {}
+    }
+  }
+
+  function pause(options) {
+    const source = options && options.source ? String(options.source) : null;
     var runningNow = false;
     try {
       if (window.XP && typeof window.XP.isRunning === 'function') runningNow = !!window.XP.isRunning();
       else runningNow = !!(typeof state !== 'undefined' ? state.running : false);
     } catch(_) {}
-    if (!runningNow) return;
+    if (!runningNow) {
+      emitLifecycleBoostStop(source);
+      return;
+    }
     tryCall('stopSession', { flush: true });
     clearRetry();
+    emitLifecycleBoostStop(source);
     try { document.dispatchEvent(new Event('xp:hidden')); } catch (_) {}
   }
 
@@ -2122,25 +2488,30 @@
 
   window.addEventListener('pageshow', (event) => {
     if (!persisted(event)) return;
+    try {
+      state.runBoostTriggered = false;
+      state.boostStartSeen = false;
+      state.boostResetGuardUntil = Date.now() + 250;
+    } catch (_) {}
     resume();
   }, { passive: true });
 
   window.addEventListener('pagehide', (event) => {
     flushRecorder();
     if (persisted(event)) return;
-    pause();
+    pause({ source: 'pagehide' });
   }, { passive: true });
 
   window.addEventListener('beforeunload', () => {
     flushRecorder();
-    pause();
+    pause({ source: 'pagehide' });
   });
 
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') resume();
     else {
       flushRecorder();
-      pause();
+      pause({ source: 'visibility' });
     }
   }, { passive: true });
 

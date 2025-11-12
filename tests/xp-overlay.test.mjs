@@ -15,10 +15,14 @@ function createHarness(options = {}) {
   const docListeners = new Map();
   const rafCallbacks = new Map();
   const timeouts = new Map();
+  const intervals = new Map();
   const idMap = new Map();
   let nextRafId = 1;
   let nextTimeoutId = 1;
-  let now = 0;
+  let nextIntervalId = 1;
+  let intervalCreates = 0;
+  let intervalClears = 0;
+  let now = options.startNow ?? 1_700_000_000_000;
   let readyState = 'loading';
   let hidden = false;
   let visibilityState = 'visible';
@@ -262,6 +266,22 @@ function createHarness(options = {}) {
     clearTimeout(id) {
       timeouts.delete(id);
     },
+    setInterval(callback, delay) {
+      const id = nextIntervalId++;
+      const intervalDelay = Math.max(0, Number(delay) || 0);
+      intervals.set(id, {
+        callback,
+        delay: intervalDelay,
+        next: now + intervalDelay,
+      });
+      intervalCreates += 1;
+      return id;
+    },
+    clearInterval(id) {
+      if (intervals.delete(id)) {
+        intervalClears += 1;
+      }
+    },
     CSS: {
       supports() {
         return options.conicSupport !== false;
@@ -277,6 +297,8 @@ function createHarness(options = {}) {
     Date: FakeDate,
     setTimeout: windowStub.setTimeout.bind(windowStub),
     clearTimeout: windowStub.clearTimeout.bind(windowStub),
+    setInterval: windowStub.setInterval.bind(windowStub),
+    clearInterval: windowStub.clearInterval.bind(windowStub),
     CSS: windowStub.CSS,
     location: windowStub.location,
   };
@@ -309,15 +331,31 @@ function createHarness(options = {}) {
     }
   }
 
+  function flushIntervals() {
+    for (const [id, meta] of [...intervals.entries()]) {
+      if (!meta) continue;
+      if (meta.next > now) continue;
+      const delay = Math.max(1, Math.floor(meta.delay));
+      try { meta.callback(); }
+      catch (err) { if (consoleRef && typeof consoleRef.error === 'function') { consoleRef.error(err); } }
+      if (intervals.has(id)) {
+        meta.next = now + delay;
+        intervals.set(id, meta);
+      }
+    }
+  }
+
   function advance(ms) {
     const target = now + Math.max(0, Number(ms) || 0);
     while (now < target) {
       now = Math.min(target, now + 16);
       flushRaf();
       flushTimeouts();
+      flushIntervals();
     }
     flushRaf();
     flushTimeouts();
+    flushIntervals();
   }
 
   function fireDomContentLoaded() {
@@ -356,6 +394,13 @@ function createHarness(options = {}) {
     getWindowListenerCount(type) { return listeners.has(type) ? listeners.get(type).size : 0; },
     getActiveRafCount() { return rafCallbacks.size; },
     getActiveTimeoutCount() { return [...timeouts.values()].filter((meta) => meta.at > now).length; },
+    getIntervalStats() {
+      return {
+        creates: intervalCreates,
+        clears: intervalClears,
+        active: intervals.size,
+      };
+    },
     getTimerText() {
       const timer = badge.querySelector('.xp-boost-chip__timer');
       return timer ? timer.textContent : '';
@@ -378,7 +423,7 @@ await (async () => {
   assert.equal(harness.getWindowListenerCount('xp:boost'), 1, 'overlay should attach xp:boost listener for active game');
   assert.equal(harness.getWindowListenerCount('xp:tick'), 1, 'overlay should attach xp:tick listener for active game');
 
-  harness.dispatchBoost({ multiplier: 2, ttlMs: 5000 });
+  harness.dispatchBoost({ multiplier: 2, ttlMs: 5000, expiresAt: harness.context.Date.now() + 5000 });
   harness.advance(160);
   assert(harness.badge.classList.contains('xp-boost--active'), 'boost_border_active: badge should carry active class');
   const frac = parseFloat(harness.badge.style.getPropertyValue('--boost-frac') || '0');
@@ -441,7 +486,7 @@ await (async () => {
 await (async () => {
   const harness = createHarness();
   ensureAttached(harness);
-  harness.dispatchBoost({ multiplier: 2, ttlMs: 5000 });
+  harness.dispatchBoost({ multiplier: 2, ttlMs: 5000, expiresAt: harness.context.Date.now() + 5000 });
   harness.advance(160);
   harness.triggerWindow('pagehide');
   assert.equal(harness.getWindowListenerCount('xp:boost'), 0, 'no_duplicate_listeners_after_bfcache: listener removed on pagehide');
@@ -454,7 +499,7 @@ await (async () => {
 await (async () => {
   const harness = createHarness();
   ensureAttached(harness);
-  harness.dispatchBoost({ multiplier: 2, ttlMs: 3000 });
+  harness.dispatchBoost({ multiplier: 2, ttlMs: 3000, expiresAt: harness.context.Date.now() + 3000 });
   harness.advance(200);
   harness.setVisibility({ hidden: true, visibility: 'hidden' });
   harness.triggerDocument('visibilitychange');
@@ -467,7 +512,7 @@ await (async () => {
 await (async () => {
   const harness = createHarness({ conicSupport: false });
   ensureAttached(harness);
-  harness.dispatchBoost({ multiplier: 2, ttlMs: 4000 });
+  harness.dispatchBoost({ multiplier: 2, ttlMs: 4000, expiresAt: harness.context.Date.now() + 4000 });
   harness.advance(200);
   const fracValue = harness.badge.style.getPropertyValue('--boost-frac');
   assert.equal(fracValue, '', 'numeric_fallback_without_conic: conic variable should clear when unsupported');
@@ -479,6 +524,65 @@ await (async () => {
     mode: 'build',
   });
   assert.equal(harness.badge.style.getPropertyValue('--combo-progress'), '', 'numeric_fallback_without_conic: combo progress var should clear when unsupported');
+})();
+
+await (async () => {
+  const harness = createHarness();
+  ensureAttached(harness);
+  const base = harness.context.Date.now();
+  harness.dispatchBoost({ multiplier: 1.5, ttlMs: 29_500, expiresAt: base + 29_500 });
+  harness.advance(50);
+  assert.equal(harness.getTimerText(), '30s', 'seconds_display: timer should ceil to next second');
+  harness.advance(1000);
+  assert.equal(harness.getTimerText(), '29s', 'seconds_display: timer should tick at 1Hz');
+})();
+
+await (async () => {
+  const harness = createHarness();
+  ensureAttached(harness);
+  const base = harness.context.Date.now();
+  harness.dispatchBoost({ multiplier: 2, ttlMs: 5 * 60_000, expiresAt: base + 5 * 60_000 });
+  harness.advance(50);
+  assert.equal(harness.getTimerText(), '30s', 'cap_display: timer should clamp display to 30 seconds when boost longer');
+  const nowAfterInitial = harness.context.Date.now();
+  const untilReveal = Math.max(0, (base + (5 * 60_000) - 30_000) - nowAfterInitial);
+  harness.advance(untilReveal);
+  assert.equal(harness.getTimerText(), '30s', 'cap_display: timer remains at cap until actual remaining drops below 30s');
+  harness.advance(1000);
+  assert.equal(harness.getTimerText(), '29s', 'cap_display: timer continues counting down after passing the cap threshold');
+})();
+
+await (async () => {
+  const harness = createHarness();
+  ensureAttached(harness);
+  const overlay = harness.window.XPOverlay.__test;
+  overlay.attach();
+  const afterAttach = harness.getIntervalStats();
+  assert.equal(afterAttach.creates, 1, 'interval_singleton: attach should create one interval');
+  overlay.deactivateBoost();
+  overlay.detach();
+  const afterDetach = harness.getIntervalStats();
+  assert.equal(afterDetach.creates, 1, 'interval_singleton: no duplicate interval creations');
+  assert.equal(afterDetach.clears, 1, 'interval_singleton: teardown clears interval exactly once');
+})();
+
+await (async () => {
+  const harnessMs = createHarness();
+  ensureAttached(harnessMs);
+  const baseMs = harnessMs.context.Date.now();
+  harnessMs.dispatchBoost({ multiplier: 1.5, ttlMs: 15_000, expiresAt: baseMs + 15_000 });
+  harnessMs.advance(10);
+  const msText = harnessMs.getTimerText();
+
+  const harnessSec = createHarness();
+  ensureAttached(harnessSec);
+  const baseSec = Math.floor(harnessSec.context.Date.now() / 1000);
+  harnessSec.dispatchBoost({ multiplier: 1.5, ttlMs: 15_000, expiresAt: baseSec + 15 });
+  harnessSec.advance(10);
+  const secText = harnessSec.getTimerText();
+
+  assert.equal(msText, '15s', 'expires_ms_input: timer should render from ms expiry');
+  assert.equal(secText, '15s', 'expires_seconds_input: timer should normalize seconds expiry');
 })();
 
 await (async () => {

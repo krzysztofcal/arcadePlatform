@@ -143,3 +143,336 @@ import { createEnvironment } from './helpers/xp-env.mjs';
   assert.equal(getState().running, true, 'queued start should run after pending stop');
   assert.equal(getState().gameId, 'game-b', 'latest queued start should determine the running session');
 }
+
+// new_record_starts_boost
+{
+  const env = createEnvironment();
+  const { Bridge, drainTimers, installXp, triggerWindow } = env;
+
+  Bridge.start('record-game');
+
+  const { getState } = installXp();
+  drainTimers();
+
+  const boostEvents = [];
+  const xpBoosts = [];
+  env.context.window.addEventListener('xp:boost', (event) => {
+    if (!event || !event.detail) return;
+    const detail = { ...event.detail };
+    boostEvents.push(detail);
+    if (detail.__xpOrigin === 'xp.js') {
+      xpBoosts.push(detail);
+    }
+  });
+
+  triggerWindow('message', { data: { type: 'game-score', gameId: 'record-game', score: 12 } });
+  drainTimers();
+
+  assert.equal(xpBoosts.length, 1, 'new record should emit exactly one boost event');
+  const detail = xpBoosts[0];
+  assert.equal(detail.multiplier, 1.5, 'new record boost should use 1.5x multiplier');
+  assert.equal(detail.source, 'newRecord', 'new record boost should mark the source');
+  assert.equal(detail.ttlMs, 15_000, 'new record boost should expose the remaining duration in ms');
+  const nowTs = env.context.Date.now();
+  assert.equal(detail.totalSeconds, 15, 'new record boost should expose the total duration');
+  assert.equal(detail.expiresAt >= nowTs, true, 'new record boost should expire in the future');
+  assert.equal(detail.expiresAt - nowTs <= detail.ttlMs, true, 'expiresAt should fall within the ttl window');
+  assert.equal(detail.gameId, 'record-game', 'new record boost should include the game id');
+  assert.equal(getState().boost.multiplier > 1, true, 'boost multiplier should be active after new record');
+  assert.equal(Bridge.getHighScore('record-game'), 12, 'new record should persist the high score');
+}
+
+// no_double_start_in_same_run
+{
+  const env = createEnvironment();
+  const { Bridge, drainTimers, installXp, triggerWindow } = env;
+
+  Bridge.start('record-game');
+
+  const { getState } = installXp();
+  drainTimers();
+
+  const boostEvents = [];
+  const xpBoosts = [];
+  env.context.window.addEventListener('xp:boost', (event) => {
+    if (!event || !event.detail) return;
+    const detail = { ...event.detail };
+    boostEvents.push(detail);
+    if (detail.__xpOrigin === 'xp.js') {
+      xpBoosts.push(detail);
+    }
+  });
+
+  triggerWindow('message', { data: { type: 'game-score', gameId: 'record-game', score: 5 } });
+  drainTimers();
+  triggerWindow('message', { data: { type: 'game-score', gameId: 'record-game', score: 9 } });
+  drainTimers();
+  triggerWindow('message', { data: { type: 'game-score', gameId: 'record-game', score: 25 } });
+  drainTimers();
+
+  const newRecordEvents = xpBoosts.filter((event) => event.source === 'newRecord');
+  assert.equal(newRecordEvents.length, 1, 'a single run should only start one new record boost');
+
+  env.triggerWindow('pagehide', { persisted: false });
+  drainTimers();
+
+  const pagehideEvents = boostEvents.filter((event) => event.source === 'pagehide');
+  assert.equal(pagehideEvents.length > 0, true, 'pagehide fallback should emit a boost reset');
+  assert.equal(getState().boost.multiplier, 1, 'pagehide fallback should clear the active boost');
+}
+
+// hs_updates_after_first_boost_but_no_double_boost
+{
+  const env = createEnvironment();
+  const { Bridge, drainTimers, installXp, triggerWindow } = env;
+
+  Bridge.start('record-game');
+
+  installXp();
+  drainTimers();
+
+  const xpBoosts = [];
+  env.context.window.addEventListener('xp:boost', (event) => {
+    if (!event || !event.detail) return;
+    if (event.detail.__xpOrigin === 'xp.js') {
+      xpBoosts.push({ ...event.detail });
+    }
+  });
+
+  triggerWindow('message', { data: { type: 'game-score', gameId: 'record-game', score: 10 } });
+  drainTimers();
+  triggerWindow('message', { data: { type: 'game-score', gameId: 'record-game', score: 15 } });
+  drainTimers();
+  triggerWindow('message', { data: { type: 'game-score', gameId: 'record-game', score: 25 } });
+  drainTimers();
+
+  const recordBoosts = xpBoosts.filter((event) => event.source === 'newRecord');
+  assert.equal(recordBoosts.length, 1, 'only the first record should trigger a boost animation');
+  assert.equal(Bridge.getHighScore('record-game'), 25, 'high score should continue updating after the first boost');
+
+  env.triggerWindow('pagehide', { persisted: false });
+  drainTimers();
+
+  Bridge.start('record-game');
+  drainTimers();
+  assert.equal(Bridge.getHighScore('record-game'), 25, 'high score should persist into the next run even without gameOver');
+}
+
+// game_over_stops_boost_and_saves_hs
+{
+  const env = createEnvironment();
+  const { Bridge, drainTimers, installXp, triggerWindow } = env;
+
+  Bridge.start('record-game');
+
+  const { getState } = installXp();
+  drainTimers();
+
+  const boostEvents = [];
+  const xpBoosts = [];
+  env.context.window.addEventListener('xp:boost', (event) => {
+    if (!event || !event.detail) return;
+    const detail = { ...event.detail };
+    boostEvents.push(detail);
+    if (detail.__xpOrigin === 'xp.js') {
+      xpBoosts.push(detail);
+    }
+  });
+
+  triggerWindow('message', { data: { type: 'game-score', gameId: 'record-game', score: 40 } });
+  drainTimers();
+
+  Bridge.gameOver({ score: 40 });
+  drainTimers();
+
+  assert.equal(Bridge.getHighScore('record-game'), 40, 'game over should persist the best score');
+  assert.equal(getState().boost.multiplier, 1, 'game over should reset the boost state');
+
+  const gameOverEvents = xpBoosts.filter((event) => event.source === 'gameOver');
+  assert.equal(gameOverEvents.length, 1, 'game over should emit exactly one termination event');
+  assert.equal(gameOverEvents[0].multiplier, 1, 'game over termination should disable boost');
+  assert.equal(gameOverEvents[0].ttlMs, 0, 'game over termination should report zero remaining duration');
+  const postNow = env.context.Date.now();
+  assert.equal(gameOverEvents[0].expiresAt <= postNow + 10, true, 'game over termination should expire immediately');
+
+  triggerWindow('message', { data: { type: 'game-score', gameId: 'record-game', score: 45 } });
+  drainTimers();
+
+  const newRecordEvents = xpBoosts.filter((event) => event.source === 'newRecord');
+  assert.equal(newRecordEvents.length, 2, 'a new run after game over should trigger another boost');
+}
+
+// no_record_no_boost
+{
+  const env = createEnvironment();
+  const { Bridge, drainTimers, installXp, triggerWindow } = env;
+
+  Bridge.setHighScore('record-game', 100);
+  Bridge.start('record-game');
+
+  const { getState } = installXp();
+  drainTimers();
+
+  const boostEvents = [];
+  env.context.window.addEventListener('xp:boost', (event) => {
+    if (!event || !event.detail) return;
+    boostEvents.push({ ...event.detail });
+  });
+
+  triggerWindow('message', { data: { type: 'game-score', gameId: 'record-game', score: 50 } });
+  drainTimers();
+  triggerWindow('message', { data: { type: 'game-score', gameId: 'record-game', score: 99 } });
+  drainTimers();
+
+  assert.equal(boostEvents.length, 0, 'scores below the record should not trigger boosts');
+  assert.equal(getState().boost.multiplier, 1, 'boost should remain inactive without a new record');
+  assert.equal(Bridge.getHighScore('record-game'), 100, 'stored high score should remain unchanged when not beaten');
+}
+
+// iframe activity messages should extend the active window
+{
+  const env = createEnvironment();
+  const { Bridge, drainTimers, installXp, triggerWindow } = env;
+
+  Bridge.start('activity-game');
+
+  const { getState } = installXp();
+  drainTimers();
+
+  const before = getState().activeUntil;
+  triggerWindow('message', { data: { type: 'kcswh:activity', userGesture: true }, origin: env.context.window.location.origin });
+  drainTimers();
+
+  const after = getState().activeUntil;
+  assert.equal(after > before, true, 'activity messages should extend the active window');
+}
+
+// early visibility resets should not cancel the first record boost
+{
+  const env = createEnvironment();
+  const { Bridge, drainTimers, installXp, triggerDoc, triggerWindow, updateVisibility } = env;
+
+  Bridge.start('visibility-guard');
+
+  installXp();
+  drainTimers();
+
+  const xpBoosts = [];
+  env.context.window.addEventListener('xp:boost', (event) => {
+    if (!event || !event.detail) return;
+    if (event.detail.__xpOrigin === 'xp.js') {
+      xpBoosts.push({ ...event.detail });
+    }
+  });
+
+  updateVisibility({ hidden: true, visibilityState: 'hidden' });
+  triggerDoc('visibilitychange');
+  drainTimers();
+
+  assert.equal(xpBoosts.length, 0, 'early visibility reset should not emit an internal boost');
+
+  updateVisibility({ hidden: false, visibilityState: 'visible' });
+  triggerDoc('visibilitychange');
+  drainTimers();
+
+  triggerWindow('message', { data: { type: 'game-score', gameId: 'visibility-guard', score: 18 } });
+  drainTimers();
+
+  const recordEvents = xpBoosts.filter((event) => event.source === 'newRecord');
+  assert.equal(recordEvents.length, 1, 'record boost should still trigger after visibility bounce');
+}
+
+// BFCache resume should unlock another record boost
+{
+  const env = createEnvironment();
+  const { Bridge, drainTimers, installXp, triggerWindow } = env;
+
+  Bridge.start('bfcache-game');
+
+  installXp();
+  drainTimers();
+
+  const xpBoosts = [];
+  env.context.window.addEventListener('xp:boost', (event) => {
+    if (!event || !event.detail) return;
+    if (event.detail.__xpOrigin === 'xp.js') {
+      xpBoosts.push({ ...event.detail });
+    }
+  });
+
+  triggerWindow('message', { data: { type: 'game-score', gameId: 'bfcache-game', score: 22 } });
+  drainTimers();
+
+  assert.equal(xpBoosts.filter((event) => event.source === 'newRecord').length, 1, 'first run should trigger a boost');
+
+  env.triggerWindow('pagehide', { persisted: true });
+  drainTimers();
+  env.triggerWindow('pageshow', { persisted: true });
+  drainTimers();
+
+  triggerWindow('message', { data: { type: 'game-score', gameId: 'bfcache-game', score: 44 } });
+  drainTimers();
+
+  assert.equal(xpBoosts.filter((event) => event.source === 'newRecord').length, 2, 'BFCache resume should allow another record boost');
+}
+
+// boost hydration clamps seconds to sane values
+{
+  const env = createEnvironment();
+  const { context, installXp, drainTimers } = env;
+
+  const futureSeconds = Math.floor(Date.now() / 1000) + 600;
+  context.window.localStorage.setItem('kcswh:xp:regen', JSON.stringify({
+    boost: {
+      multiplier: 2,
+      expiresAt: futureSeconds,
+      totalSeconds: 15,
+      source: 'hydrate-test',
+      gameId: 'hydrate-game',
+    },
+  }));
+
+  const boostEvents = [];
+  context.window.addEventListener('xp:boost', (event) => {
+    if (!event || !event.detail) return;
+    if (event.detail.__xpOrigin === 'xp.js') {
+      boostEvents.push({ ...event.detail });
+    }
+  });
+
+  const { getState } = installXp();
+  drainTimers();
+
+  assert.equal(boostEvents.length > 0, true, 'hydrate should emit a boost event');
+  const detail = boostEvents[boostEvents.length - 1];
+  assert.equal(detail.multiplier > 1, true, 'hydrated boost should remain active');
+  assert.equal(detail.ttlMs <= 15_000, true, 'hydrated ttl should clamp to default duration');
+  assert.equal(detail.ttlMs >= 0, true, 'hydrated ttl should be non-negative');
+  assert.equal(detail.totalSeconds, 15, 'hydrated totalSeconds should remain consistent');
+
+  const ttlMs = Math.max(0, (getState().boost && getState().boost.expiresAt) - Date.now());
+  assert.equal(ttlMs <= 15_000, true, 'hydrated boost ttl should clamp to default window');
+}
+
+// score pulse auto-starts host session when idle
+{
+  const env = createEnvironment({ bodyGameId: 'score-run', windowGameId: null, pathname: '/games-open/score-run/index.html' });
+  const { context, installXp, drainTimers, triggerWindow } = env;
+
+  const { XP, getState } = installXp();
+  drainTimers();
+
+  assert.equal(typeof XP.isRunning, 'function', 'XP should expose isRunning');
+  assert.equal(XP.isRunning(), false, 'host should be idle before score pulse');
+
+  triggerWindow('message', {
+    data: { type: 'game-score', gameId: 'score-run', score: 8 },
+    origin: context.location.origin,
+  });
+  drainTimers();
+
+  assert.equal(XP.isRunning(), true, 'score pulse should start the session when idle');
+  assert.equal(getState().running, true, 'score pulse should transition host to running');
+  assert.equal(getState().gameId, 'score-run', 'score pulse auto-start should capture the game id');
+  assert.equal(context.window.__GAME_ID__, 'score-run', 'score pulse should persist window game id');
+}
