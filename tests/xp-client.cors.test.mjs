@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 
+process.env.XP_DAILY_SECRET = 'test-secret';
+
 async function createHandler(ns = 'test:cors') {
   process.env.XP_DEBUG = '0';
   process.env.XP_KEY_NS = ns;
