@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 
 const BASE_TS = 1_700_000_000_000;
 
+const cookieJar = new WeakMap();
+
 async function createHandler(label, overrides = {}) {
   process.env.XP_DEBUG = '1';
   process.env.XP_KEY_NS = `test:delta:${label}`;
@@ -12,12 +14,21 @@ async function createHandler(label, overrides = {}) {
   process.env.XP_MIN_ACTIVITY_EVENTS = String(overrides.minEvents ?? 4);
   process.env.XP_MIN_ACTIVITY_VIS_S = String(overrides.minVisibility ?? 8);
   process.env.XP_METADATA_MAX_BYTES = String(overrides.metadataLimit ?? 2048);
+  process.env.XP_DAILY_SECRET = overrides.secret ?? 'test-secret';
   const { handler } = await import(`../netlify/functions/award-xp.mjs?case=${label}`);
   return handler;
 }
 
 async function invoke(handler, body) {
-  const res = await handler({ httpMethod: 'POST', headers: {}, body: JSON.stringify(body) });
+  const existing = cookieJar.get(handler) ?? '';
+  const headers = existing ? { cookie: existing } : {};
+  const res = await handler({ httpMethod: 'POST', headers, body: JSON.stringify(body) });
+  const setCookie = res.headers?.['set-cookie'] ?? res.headers?.['Set-Cookie'];
+  if (setCookie) {
+    const value = Array.isArray(setCookie) ? setCookie[0] : setCookie;
+    const pair = value.split(';')[0];
+    cookieJar.set(handler, pair);
+  }
   return { statusCode: res.statusCode, payload: JSON.parse(res.body) };
 }
 

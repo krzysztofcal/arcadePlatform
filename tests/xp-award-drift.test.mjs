@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 
+const cookieJar = new WeakMap();
+
 async function createHandler(ns = "test:drift", overrides = {}) {
   process.env.XP_DEBUG = "1";
   process.env.XP_KEY_NS = ns;
@@ -7,12 +9,23 @@ async function createHandler(ns = "test:drift", overrides = {}) {
   process.env.XP_SESSION_CAP = String(overrides.sessionCap ?? 300);
   process.env.XP_DELTA_CAP = String(overrides.deltaCap ?? 300);
   process.env.XP_DRIFT_MS = String(overrides.driftMs ?? 30_000);
+  process.env.XP_DAILY_SECRET = overrides.secret ?? "test-secret";
   const { handler } = await import(`../netlify/functions/award-xp.mjs?drift=${ns}`);
   return handler;
 }
 
 async function invoke(handler, body, origin) {
-  const res = await handler({ httpMethod: "POST", headers: { origin: origin ?? "" }, body: JSON.stringify(body) });
+  const existing = cookieJar.get(handler) ?? "";
+  const headers = {};
+  if (origin) headers.origin = origin;
+  if (existing) headers.cookie = existing;
+  const res = await handler({ httpMethod: "POST", headers, body: JSON.stringify(body) });
+  const setCookie = res.headers?.["set-cookie"] ?? res.headers?.["Set-Cookie"];
+  if (setCookie) {
+    const value = Array.isArray(setCookie) ? setCookie[0] : setCookie;
+    const pair = value.split(";")[0];
+    cookieJar.set(handler, pair);
+  }
   return { status: res.statusCode, json: JSON.parse(res.body) };
 }
 
@@ -40,11 +53,20 @@ async function invoke(handler, body, origin) {
   {
     const driftMs = 30_000;
     const futureTs = NOW + driftMs + 1;
+    const futureHeaders = {};
+    const existing = cookieJar.get(handler) ?? "";
+    if (existing) futureHeaders.cookie = existing;
     const fut = await handler({
       httpMethod: "POST",
-      headers: {},
+      headers: futureHeaders,
       body: JSON.stringify({ ...base, ts: futureTs, delta: 20 }),
     });
+    const setCookie = fut.headers?.["set-cookie"] ?? fut.headers?.["Set-Cookie"];
+    if (setCookie) {
+      const value = Array.isArray(setCookie) ? setCookie[0] : setCookie;
+      const pair = value.split(";")[0];
+      cookieJar.set(handler, pair);
+    }
     assert.equal(fut.statusCode, 422);
     const err = JSON.parse(fut.body);
     assert.equal(err.error, "timestamp_in_future");

@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 const DAY_MS = 24 * 60 * 60 * 1000;
 const BASE_TS = Date.UTC(2024, 0, 2, 3, 4, 5);
 
+const cookieJar = new WeakMap();
+
 async function createHandler(label, overrides = {}) {
   process.env.XP_DEBUG = '1';
   process.env.XP_KEY_NS = `test:delta:${label}`;
@@ -10,12 +12,21 @@ async function createHandler(label, overrides = {}) {
   process.env.XP_SESSION_CAP = String(overrides.sessionCap ?? 200);
   process.env.XP_DELTA_CAP = String(overrides.deltaCap ?? 300);
   process.env.XP_SESSION_TTL_SEC = String(overrides.sessionTtl ?? 604800);
+  process.env.XP_DAILY_SECRET = overrides.secret ?? 'test-secret';
   const { handler } = await import(`../netlify/functions/award-xp.mjs?mix=${label}`);
   return handler;
 }
 
 async function invoke(handler, body) {
-  const res = await handler({ httpMethod: 'POST', headers: {}, body: JSON.stringify(body) });
+  const existing = cookieJar.get(handler) ?? '';
+  const headers = existing ? { cookie: existing } : {};
+  const res = await handler({ httpMethod: 'POST', headers, body: JSON.stringify(body) });
+  const setCookie = res.headers?.['set-cookie'] ?? res.headers?.['Set-Cookie'];
+  if (setCookie) {
+    const value = Array.isArray(setCookie) ? setCookie[0] : setCookie;
+    const pair = value.split(';')[0];
+    cookieJar.set(handler, pair);
+  }
   return { statusCode: res.statusCode, payload: JSON.parse(res.body) };
 }
 
@@ -100,24 +111,25 @@ async function testZeroDeltaAdvancesLastSync() {
 }
 
 async function testMidnightRollover() {
-  const beforeMidnight = Date.UTC(2024, 0, 3, 23, 59, 50);
+  const beforeReset = Date.UTC(2024, 0, 3, 1, 50, 0); // 02:50 local (UTC+1)
   const handler = await createHandler('midnight', { dailyCap: 400, sessionCap: 250 });
-  const base = { userId: 'midnight-user', sessionId: 'midnight-session', ts: beforeMidnight };
+  const base = { userId: 'midnight-user', sessionId: 'midnight-session', ts: beforeReset };
 
   const originalNow = Date.now;
   try {
-    Date.now = () => beforeMidnight;
+    Date.now = () => beforeReset;
     const dayOne = await invoke(handler, { ...base, delta: 150 });
     assert.equal(dayOne.payload.totalToday, 150);
     assert.equal(dayOne.payload.sessionTotal, 150);
 
-    const dayTwoTs = beforeMidnight + 20_000; // crosses UTC midnight
-    Date.now = () => dayTwoTs;
-    const dayTwo = await invoke(handler, { ...base, ts: dayTwoTs, delta: 200 });
+    const afterReset = Date.UTC(2024, 0, 3, 2, 10, 0); // 03:10 local
+    Date.now = () => afterReset;
+    const dayTwo = await invoke(handler, { ...base, ts: afterReset, delta: 200 });
     assert.equal(dayTwo.payload.totalToday, 100);
     assert.equal(dayTwo.payload.awarded, 100);
     assert.equal(dayTwo.payload.sessionTotal, 250);
     assert.equal(dayTwo.payload.sessionCapped, true);
+    assert.notEqual(dayTwo.payload.dayKey, dayOne.payload.dayKey);
   } finally {
     Date.now = originalNow;
   }

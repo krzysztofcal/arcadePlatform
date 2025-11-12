@@ -1,6 +1,87 @@
 import crypto from "node:crypto";
 import { store } from "./_shared/store-upstash.mjs";
 
+const warsawDateFormatter = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "Europe/Warsaw",
+  hour12: false,
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+});
+
+const warsawOffsetFormatter = new Intl.DateTimeFormat("en-US", {
+  timeZone: "Europe/Warsaw",
+  hour12: false,
+  timeZoneName: "longOffset",
+});
+
+const XP_DAY_COOKIE = "xp_day";
+
+const warsawParts = (ms) => {
+  const parts = warsawDateFormatter.formatToParts(new Date(ms));
+  const result = {};
+  for (const part of parts) {
+    if (part.type === "year" || part.type === "month" || part.type === "day" || part.type === "hour") {
+      result[part.type] = Number(part.value);
+    }
+  }
+  return result;
+};
+
+const parseWarsawOffsetMinutes = (ms) => {
+  const parts = warsawOffsetFormatter.formatToParts(new Date(ms));
+  const offsetPart = parts.find((part) => part.type === "timeZoneName");
+  if (!offsetPart) return 0;
+  const match = /GMT([+-])(\d{2}):(\d{2})/.exec(offsetPart.value);
+  if (!match) return 0;
+  const sign = match[1] === "-" ? -1 : 1;
+  const hours = Number(match[2]);
+  const minutes = Number(match[3]);
+  return sign * (hours * 60 + minutes);
+};
+
+const warsawNow = (ms = Date.now()) => ({
+  ...warsawParts(ms),
+  ms,
+});
+
+const toWarsawEpoch = (year, month, day, hour) => {
+  let guessUtc = Date.UTC(year, month - 1, day, hour, 0, 0, 0);
+  let offset = parseWarsawOffsetMinutes(guessUtc);
+  let adjusted = guessUtc - offset * 60_000;
+  const adjustedOffset = parseWarsawOffsetMinutes(adjusted);
+  if (adjustedOffset !== offset) {
+    offset = adjustedOffset;
+    adjusted = Date.UTC(year, month - 1, day, hour, 0, 0, 0) - offset * 60_000;
+  }
+  return adjusted;
+};
+
+const getDailyKey = (ms = Date.now()) => {
+  let effectiveMs = ms;
+  let { year, month, day, hour } = warsawParts(effectiveMs);
+  if (hour < 3) {
+    effectiveMs -= 3 * 60 * 60 * 1000;
+    ({ year, month, day } = warsawParts(effectiveMs));
+  }
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+};
+
+const getNextResetEpoch = (ms = Date.now()) => {
+  const current = warsawNow(ms);
+  let targetYear = current.year;
+  let targetMonth = current.month;
+  let targetDay = current.day;
+  if (current.hour >= 3) {
+    const tomorrow = warsawParts(ms + 24 * 60 * 60 * 1000);
+    targetYear = tomorrow.year;
+    targetMonth = tomorrow.month;
+    targetDay = tomorrow.day;
+  }
+  return toWarsawEpoch(targetYear, targetMonth, targetDay, 3);
+};
+
 const asNumber = (raw, fallback) => {
   if (raw == null) return fallback;
   const sanitized = typeof raw === "string" ? raw.replace(/_/g, "") : raw;
@@ -8,7 +89,7 @@ const asNumber = (raw, fallback) => {
   return Number.isFinite(parsed) ? parsed : fallback;
 };
 
-const DAILY_CAP = asNumber(process.env.XP_DAILY_CAP, 600);
+const DAILY_CAP = Math.max(0, asNumber(process.env.XP_DAILY_CAP, 3000));
 const SESSION_CAP = asNumber(process.env.XP_SESSION_CAP, 300);
 const DELTA_CAP = asNumber(process.env.XP_DELTA_CAP, 300);
 const SESSION_TTL_SEC = Math.max(0, asNumber(process.env.XP_SESSION_TTL_SEC, 604800));
@@ -28,11 +109,87 @@ const CORS_ALLOW = (process.env.XP_CORS_ALLOW ?? "")
 const RAW_LOCK_TTL = Number(process.env.XP_LOCK_TTL_MS ?? 3_000);
 const LOCK_TTL_MS = Number.isFinite(RAW_LOCK_TTL) && RAW_LOCK_TTL > 0 ? RAW_LOCK_TTL : 3_000;
 
-const json = (statusCode, obj, origin) => ({
-  statusCode,
-  headers: corsHeaders(origin),
-  body: JSON.stringify(obj),
-});
+const sanitizeTotal = (value) => {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) return 0;
+  const floored = Math.floor(numeric);
+  return floored > 0 ? floored : 0;
+};
+
+const signPayload = (payload, secret) =>
+  crypto.createHmac("sha256", secret).update(payload).digest("base64url");
+
+const safeEquals = (a, b) => {
+  if (a.length !== b.length) return false;
+  const left = Buffer.from(a, "utf8");
+  const right = Buffer.from(b, "utf8");
+  if (left.length !== right.length) return false;
+  return crypto.timingSafeEqual(left, right);
+};
+
+const parseCookies = (header) => {
+  if (!header || typeof header !== "string") return {};
+  const jar = {};
+  const parts = header.split(/;\s*/);
+  for (const part of parts) {
+    if (!part) continue;
+    const [name, ...rest] = part.split("=");
+    if (!name) continue;
+    jar[name.trim()] = rest.join("=");
+  }
+  return jar;
+};
+
+const readXpCookie = (header, secret) => {
+  const cookies = parseCookies(header);
+  const raw = cookies[XP_DAY_COOKIE];
+  if (!raw) return { key: null, total: 0 };
+  const [encodedPayload, signature] = raw.split(".");
+  if (!encodedPayload || !signature) return { key: null, total: 0 };
+  let payloadJson;
+  try {
+    payloadJson = Buffer.from(encodedPayload, "base64url").toString("utf8");
+  } catch {
+    return { key: null, total: 0 };
+  }
+  const expectedSig = signPayload(payloadJson, secret);
+  if (!safeEquals(signature, expectedSig)) {
+    return { key: null, total: 0 };
+  }
+  try {
+    const parsed = JSON.parse(payloadJson);
+    const key = typeof parsed?.k === "string" ? parsed.k : null;
+    const total = sanitizeTotal(parsed?.t);
+    if (!key) return { key: null, total: 0 };
+    return { key, total };
+  } catch {
+    return { key: null, total: 0 };
+  }
+};
+
+const buildXpCookie = ({ key, total, secret, now, nextReset }) => {
+  const safeTotal = Math.min(DAILY_CAP, Math.max(0, sanitizeTotal(total)));
+  const payload = JSON.stringify({ k: key, t: safeTotal });
+  const encoded = Buffer.from(payload, "utf8").toString("base64url");
+  const signature = signPayload(payload, secret);
+  const maxAgeMs = Math.max(0, nextReset - now);
+  const maxAge = Math.max(0, Math.floor(maxAgeMs / 1000));
+  return `${XP_DAY_COOKIE}=${encoded}.${signature}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${maxAge}`;
+};
+
+const json = (statusCode, obj, origin, extraHeaders) => {
+  const headers = { ...corsHeaders(origin) };
+  if (extraHeaders && typeof extraHeaders === "object") {
+    for (const [key, value] of Object.entries(extraHeaders)) {
+      if (value !== undefined) headers[key] = value;
+    }
+  }
+  return {
+    statusCode,
+    headers,
+    body: JSON.stringify(obj),
+  };
+};
 
 function corsHeaders(origin) {
   const allow = origin && CORS_ALLOW.includes(origin) ? origin : "*";
@@ -45,20 +202,15 @@ function corsHeaders(origin) {
   };
 }
 
-const dayKey = (t = Date.now()) => {
-  const d = new Date(t);
-  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
-};
-
 const hash = (s) => crypto.createHash("sha256").update(s).digest("hex");
-const keyDaily = (u, day = dayKey()) => `${KEY_NS}:daily:${u}:${day}`;
+const keyDaily = (u, day = getDailyKey()) => `${KEY_NS}:daily:${u}:${day}`;
 const keyTotal = (u) => `${KEY_NS}:total:${u}`;
 const keySession = (u, s) => `${KEY_NS}:session:${hash(`${u}|${s}`)}`;
 const keySessionSync = (u, s) => `${KEY_NS}:session:last:${hash(`${u}|${s}`)}`;
 const keyLock = (u, s) => `${KEY_NS}:lock:${hash(`${u}|${s}`)}`;
 
 async function getTotals({ userId, sessionId, now = Date.now() }) {
-  const todayKey = keyDaily(userId, dayKey(now));
+  const todayKey = keyDaily(userId, getDailyKey(now));
   const totalKeyK = keyTotal(userId);
   const sessionKeyK = sessionId ? keySession(userId, sessionId) : null;
   const sessionSyncKeyK = sessionId ? keySessionSync(userId, sessionId) : null;
@@ -80,36 +232,66 @@ async function getTotals({ userId, sessionId, now = Date.now() }) {
 export async function handler(event) {
   const origin = event.headers?.origin;
   if (event.httpMethod === "OPTIONS") return { statusCode: 204, headers: corsHeaders(origin) };
-  if (event.httpMethod !== "POST")   return json(405, { error: "method_not_allowed" }, origin);
+
+  const secret = process.env.XP_DAILY_SECRET;
+  if (!secret) {
+    return json(500, { error: "server_config", message: "xp_daily_secret_missing" }, origin);
+  }
+
+  const now = Date.now();
+  const dayKeyNow = getDailyKey(now);
+  const nextReset = getNextResetEpoch(now);
+  const cookieHeader = event.headers?.cookie ?? event.headers?.Cookie ?? "";
+  const cookieState = readXpCookie(cookieHeader, secret);
+  let totalToday = cookieState.key === dayKeyNow ? cookieState.total : 0;
+  totalToday = Math.min(DAILY_CAP, Math.max(0, sanitizeTotal(totalToday)));
+
+  const remainingForToday = () => Math.max(0, DAILY_CAP - totalToday);
+
+  const respond = (statusCode, payload, extraHeaders) => {
+    const cookieValue = buildXpCookie({ key: dayKeyNow, total: totalToday, secret, now, nextReset });
+    const headers = extraHeaders ? { ...extraHeaders } : {};
+    headers["set-cookie"] = cookieValue;
+    return json(statusCode, payload, origin, headers);
+  };
+
+  if (event.httpMethod !== "POST") {
+    return respond(405, { error: "method_not_allowed", remaining: remainingForToday(), dayKey: dayKeyNow, nextReset });
+  }
 
   let body;
   try { body = JSON.parse(event.body || "{}"); }
-  catch { return json(400, { error: "bad_json" }, origin); }
+  catch { return respond(400, { error: "bad_json", remaining: remainingForToday(), dayKey: dayKeyNow, nextReset }); }
 
   const userId = typeof body.userId === "string" ? body.userId.trim() : null;
   const sessionIdRaw = body.sessionId;
   const sessionId = typeof sessionIdRaw === "string" ? sessionIdRaw.trim() : null;
 
   if (!userId || (!body.statusOnly && !sessionId)) {
-    return json(400, { error: "missing_fields" }, origin);
+    return respond(400, { error: "missing_fields", remaining: remainingForToday(), dayKey: dayKeyNow, nextReset });
   }
+
   if (body.statusOnly) {
-    const { current, lifetime, sessionTotal, lastSync } = await getTotals({ userId, sessionId, now: Date.now() });
+    const { lifetime, sessionTotal, lastSync } = await getTotals({ userId, sessionId, now });
     const payload = {
       ok: true,
       awarded: 0,
-      totalToday: current,
+      granted: 0,
+      totalToday,
       cap: DAILY_CAP,
       capDelta: DELTA_CAP,
       totalLifetime: lifetime,
       sessionTotal,
       lastSync,
       status: "statusOnly",
+      remaining: remainingForToday(),
+      dayKey: dayKeyNow,
+      nextReset,
     };
     if (DEBUG_ENABLED) {
-      payload.debug = { mode: "statusOnly" };
+      payload.debug = { mode: "statusOnly", cookieTotal: totalToday };
     }
-    return json(200, payload, origin);
+    return respond(200, payload);
   }
 
   let deltaRaw = Number(body.delta);
@@ -120,30 +302,29 @@ export async function handler(event) {
     else if (Number.isFinite(pointsPerPeriod)) deltaRaw = pointsPerPeriod;
   }
   if (!Number.isFinite(deltaRaw) || deltaRaw < 0) {
-    return json(422, { error: "invalid_delta" }, origin);
+    return respond(422, { error: "invalid_delta", remaining: remainingForToday(), dayKey: dayKeyNow, nextReset });
   }
   const normalizedDelta = Math.floor(deltaRaw);
   if (normalizedDelta < 0) {
-    return json(422, { error: "invalid_delta" }, origin);
+    return respond(422, { error: "invalid_delta", remaining: remainingForToday(), dayKey: dayKeyNow, nextReset });
   }
   if (normalizedDelta > DELTA_CAP) {
-    return json(422, { error: "delta_out_of_range", cap: DELTA_CAP, capDelta: DELTA_CAP }, origin);
+    return respond(422, { error: "delta_out_of_range", cap: DELTA_CAP, capDelta: DELTA_CAP, remaining: remainingForToday(), dayKey: dayKeyNow, nextReset });
   }
 
-  const now = Date.now();
   const tsRaw = Number(body.ts ?? body.timestamp ?? body.windowEnd ?? now);
   if (!Number.isFinite(tsRaw) || tsRaw <= 0) {
-    return json(422, { error: "invalid_timestamp" }, origin);
+    return respond(422, { error: "invalid_timestamp", remaining: remainingForToday(), dayKey: dayKeyNow, nextReset });
   }
   if (tsRaw > now + DRIFT_MS) {
-    return json(422, { error: "timestamp_in_future", driftMs: DRIFT_MS }, origin);
+    return respond(422, { error: "timestamp_in_future", driftMs: DRIFT_MS, remaining: remainingForToday(), dayKey: dayKeyNow, nextReset });
   }
   const ts = Math.trunc(tsRaw);
 
   let metadata = null;
   if (body.metadata !== undefined) {
     if (!body.metadata || typeof body.metadata !== "object" || Array.isArray(body.metadata)) {
-      return json(400, { error: "invalid_metadata" }, origin);
+      return respond(400, { error: "invalid_metadata", remaining: remainingForToday(), dayKey: dayKeyNow, nextReset });
     }
     const cleaned = {};
     for (const [key, value] of Object.entries(body.metadata)) {
@@ -170,15 +351,15 @@ export async function handler(event) {
     })();
 
     if (METADATA_MAX_BYTES && bytes > METADATA_MAX_BYTES) {
-      return json(413, { error: "metadata_too_large", limit: METADATA_MAX_BYTES }, origin);
+      return respond(413, { error: "metadata_too_large", limit: METADATA_MAX_BYTES, remaining: remainingForToday(), dayKey: dayKeyNow, nextReset });
     }
     if (!depthOk) {
-      return json(413, { error: "metadata_too_large", limit: METADATA_MAX_BYTES, reason: "depth" }, origin);
+      return respond(413, { error: "metadata_too_large", limit: METADATA_MAX_BYTES, reason: "depth", remaining: remainingForToday(), dayKey: dayKeyNow, nextReset });
     }
     metadata = cleaned;
   }
 
-  const todayKey = keyDaily(userId, dayKey(now));
+  const todayKey = keyDaily(userId, dayKeyNow);
   const totalKeyK = keyTotal(userId);
   const sessionKeyK = keySession(userId, sessionId);
   const sessionSyncKeyK = keySessionSync(userId, sessionId);
@@ -188,11 +369,12 @@ export async function handler(event) {
     const events = Number(metadata?.inputEvents ?? 0);
     const visSeconds = Number(metadata?.visibilitySeconds ?? 0);
     if (!Number.isFinite(events) || events < MIN_ACTIVITY_EVENTS || !Number.isFinite(visSeconds) || visSeconds < MIN_ACTIVITY_VIS_S) {
-      const { current, lifetime, sessionTotal, lastSync } = await getTotals({ userId, sessionId, now });
+      const { lifetime, sessionTotal, lastSync } = await getTotals({ userId, sessionId, now });
       const inactivePayload = {
         ok: true,
         awarded: 0,
-        totalToday: current,
+        granted: 0,
+        totalToday,
         totalLifetime: lifetime,
         sessionTotal,
         lastSync,
@@ -200,6 +382,9 @@ export async function handler(event) {
         capDelta: DELTA_CAP,
         reason: "inactive",
         status: "inactive",
+        remaining: remainingForToday(),
+        dayKey: dayKeyNow,
+        nextReset,
       };
       if (DEBUG_ENABLED) {
         inactivePayload.debug = {
@@ -211,8 +396,15 @@ export async function handler(event) {
           lastSync,
         };
       }
-      return json(200, inactivePayload, origin);
+      return respond(200, inactivePayload);
     }
+  }
+
+  const totalBefore = totalToday;
+  const cookieRemainingBefore = Math.max(0, DAILY_CAP - totalBefore);
+  const clampedDelta = Math.min(normalizedDelta, cookieRemainingBefore);
+  if (normalizedDelta > clampedDelta && DEBUG_ENABLED) {
+    console.log("daily_cap", { requested: normalizedDelta, clamped: clampedDelta, remaining: cookieRemainingBefore, dayKey: dayKeyNow });
   }
 
   const script = `
@@ -303,7 +495,7 @@ export async function handler(event) {
     [sessionKeyK, sessionSyncKeyK, todayKey, totalKeyK, lockKeyK],
     [
       String(now),
-      String(normalizedDelta),
+      String(clampedDelta),
       String(DAILY_CAP),
       String(Math.max(0, SESSION_CAP)),
       String(ts),
@@ -312,22 +504,29 @@ export async function handler(event) {
     ]
   );
 
-  const granted = Number(res?.[0]) || 0;
-  const totalToday = Number(res?.[1]) || 0;
+  const granted = Math.max(0, Math.floor(Number(res?.[0]) || 0));
+  const redisDailyTotal = Number(res?.[1]) || 0;
   const sessionTotal = Number(res?.[2]) || 0;
   const totalLifetime = Number(res?.[3]) || 0;
   const lastSync = Number(res?.[4]) || 0;
   const status = Number(res?.[5]) || 0;
 
+  totalToday = Math.min(DAILY_CAP, Math.max(0, sanitizeTotal(totalBefore + granted)));
+  const remaining = remainingForToday();
+
   const payload = {
     ok: true,
     awarded: granted,
+    granted,
     totalToday,
     cap: DAILY_CAP,
     capDelta: DELTA_CAP,
     totalLifetime,
     sessionTotal,
     lastSync,
+    remaining,
+    dayKey: dayKeyNow,
+    nextReset,
   };
 
   const statusReasons = {
@@ -348,27 +547,39 @@ export async function handler(event) {
   if (status === 2) {
     payload.stale = true;
     payload.awarded = 0;
+    payload.granted = 0;
   }
   if (status === 6) {
     payload.locked = true;
     payload.awarded = 0;
+    payload.granted = 0;
   }
 
   const reason = statusReasons[status];
   if (reason) {
     payload.reason = reason;
   } else if (granted < normalizedDelta) {
-    payload.reason = normalizedDelta > 0 ? "partial" : undefined;
+    if (clampedDelta < normalizedDelta) {
+      payload.reason = clampedDelta > 0 ? "daily_cap_partial" : "daily_cap";
+    } else {
+      payload.reason = normalizedDelta > 0 ? "partial" : undefined;
+    }
   }
 
   if (!payload.status) {
-    if (status === 0 && normalizedDelta === granted) {
+    if (status === 0 && normalizedDelta === granted && clampedDelta === normalizedDelta) {
       payload.status = "ok";
     } else if (status === 1 || status === 4 || (status === 0 && granted < normalizedDelta)) {
       payload.status = "partial";
     } else if (reason) {
       payload.status = reason;
     }
+  }
+
+  if (clampedDelta < normalizedDelta) {
+    payload.capped = true;
+    if (!payload.reason) payload.reason = "daily_cap";
+    if (!payload.status || payload.status === "ok") payload.status = "partial";
   }
 
   if (DEBUG_ENABLED) {
@@ -378,12 +589,18 @@ export async function handler(event) {
         now,
         status,
         requested: normalizedDelta,
+        clamped: clampedDelta,
         sessionCap: SESSION_CAP,
         dailyCap: DAILY_CAP,
         lastSync,
+        totalBefore,
+        totalAfter: totalToday,
+        remainingBefore: cookieRemainingBefore,
+        remainingAfter: remaining,
+        redisDailyTotal,
       };
     if (reason) payload.debug.reason = reason;
   }
 
-  return json(200, payload, origin);
+  return respond(200, payload);
 }
