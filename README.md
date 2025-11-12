@@ -60,6 +60,7 @@ The helper survives soft navigations—if you’re swapping views inside an SPA,
   - Client requests are not pre-clamped by the cookie; Redis remains authoritative to avoid under-grant on fresh devices.
   - The cookie is HttpOnly + SameSite=Lax, signed with `XP_DAILY_SECRET`, and its payload mirrors the response totals (`granted` equals the legacy `awarded` field but should be preferred going forward and `awarded` will be phased out in a future update). When `XP_COOKIE_SECURE=1`, the cookie is also marked Secure for HTTPS deployments.
   - `awarded` and `granted` are equal today; clients should migrate to `granted`.
+  - Local Playwright runs inject `XP_DAILY_SECRET=test-secret` (and `XP_DEBUG=1`) so the preview server matches the production contract; set `XP_DAILY_SECRET` when running the function manually to avoid `500 server_config/xp_daily_secret_missing`.
 - Requests are rejected when the timestamp is stale (`status: "stale"`), another tab owns the lock (`status: "locked"`), metadata is malformed/oversized, or the optional activity guard blocks idle deltas.
 - Flip `XP_REQUIRE_ACTIVITY=1` to require input/visibility thresholds (`XP_MIN_ACTIVITY_EVENTS`, `XP_MIN_ACTIVITY_VIS_S`). When disabled the function skips those checks entirely.
 - Metadata must remain shallow: depth ≤ 3 and serialized size ≤ `XP_METADATA_MAX_BYTES` (default 2048 bytes). Larger payloads return `413 metadata_too_large` without mutating totals.

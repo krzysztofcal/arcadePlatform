@@ -40,5 +40,9 @@ export default defineConfig({
     reuseExistingServer: !process.env.CI,
     stdout: 'pipe',
     stderr: 'pipe',
+    env: {
+      XP_DAILY_SECRET: 'test-secret',
+      XP_DEBUG: '1',
+    },
   },
 });
