@@ -452,25 +452,15 @@
 
     if (state.timerEl) {
       const SHOW_CAP_MS = 30 * 1000;
-      if (remainingMsRaw <= SHOW_CAP_MS) {
-        const seconds = Math.ceil(remainingMsRaw / 1000);
-        state.timerEl.textContent = `${seconds}s`;
-        if (state.timerEl.style && typeof state.timerEl.style.removeProperty === "function") {
-          try { state.timerEl.style.removeProperty("display"); }
-          catch (_) {}
-        } else if (state.timerEl.style && typeof state.timerEl.style.display !== "undefined") {
-          try { state.timerEl.style.display = ""; }
-          catch (_) {}
-        }
-      } else {
-        state.timerEl.textContent = "";
-        if (state.timerEl.style && typeof state.timerEl.style.setProperty === "function") {
-          try { state.timerEl.style.setProperty("display", "none"); }
-          catch (_) {}
-        } else if (state.timerEl.style && typeof state.timerEl.style.display !== "undefined") {
-          try { state.timerEl.style.display = "none"; }
-          catch (_) {}
-        }
+      const cappedMs = Math.min(remainingMsRaw, SHOW_CAP_MS);
+      const seconds = Math.max(0, Math.ceil(cappedMs / 1000));
+      state.timerEl.textContent = `${seconds}s`;
+      if (state.timerEl.style && typeof state.timerEl.style.removeProperty === "function") {
+        try { state.timerEl.style.removeProperty("display"); }
+        catch (_) {}
+      } else if (state.timerEl.style && typeof state.timerEl.style.display !== "undefined") {
+        try { state.timerEl.style.display = ""; }
+        catch (_) {}
       }
     }
 
@@ -559,13 +549,8 @@
     const rawExpires = Object.prototype.hasOwnProperty.call(payload || {}, "expiresAt")
       ? payload.expiresAt
       : payload && payload.endsAt;
-    let expiresAt = Number(rawExpires) || 0;
-    if (expiresAt > 0 && expiresAt < 1e12 && now > 1e12) {
-      expiresAt = Math.floor(expiresAt * 1000);
-    } else {
-      expiresAt = Math.floor(expiresAt);
-    }
-    if (!Number.isFinite(expiresAt) || expiresAt <= now) {
+    const expiresAt = normalizeExpiresAt(rawExpires);
+    if (!Number.isFinite(expiresAt) || !expiresAt || expiresAt <= now) {
       diagLog("boost_rejected", { reason: "invalid_expires", expiresAt: rawExpires, now });
       deactivateBoost();
       return;
