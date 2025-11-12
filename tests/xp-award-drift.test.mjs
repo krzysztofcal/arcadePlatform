@@ -137,7 +137,11 @@ async function invoke(handler, body, options = {}) {
     const headers = {};
     const existing = readCookie(handler);
     if (existing) headers.cookie = existing;
-    const res = await handler({ httpMethod: "GET", headers });
+    const res = await handler({
+      httpMethod: "GET",
+      headers,
+      queryStringParameters: { userId: base.userId, sessionId: base.sessionId },
+    });
     assert.equal(res.statusCode, 405);
     const payload = JSON.parse(res.body);
     assert.equal(payload.error, "method_not_allowed");

@@ -171,7 +171,8 @@ const buildXpCookie = ({ key, total, secret, now, nextReset }) => {
   const signature = signPayload(payload, secret);
   const maxAgeMs = Math.max(0, nextReset - now);
   const maxAge = Math.max(0, Math.floor(maxAgeMs / 1000));
-  return `${XP_DAY_COOKIE}=${encoded}.${signature}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${maxAge}`;
+  const secureAttr = process.env.XP_COOKIE_SECURE === "1" ? "; Secure" : "";
+  return `${XP_DAY_COOKIE}=${encoded}.${signature}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${maxAge}${secureAttr}`;
 };
 
 const json = (statusCode, obj, origin, extraHeaders) => {
@@ -190,13 +191,15 @@ const json = (statusCode, obj, origin, extraHeaders) => {
 
 function corsHeaders(origin) {
   const allow = origin && CORS_ALLOW.includes(origin) ? origin : "*";
-  return {
+  const headers = {
     "content-type": "application/json; charset=utf-8",
     "access-control-allow-origin": allow,
     "access-control-allow-headers": "content-type,authorization,x-api-key",
     "access-control-allow-methods": "POST,OPTIONS",
     "cache-control": "no-store",
   };
+  if (allow !== "*") headers.vary = "Origin";
+  return headers;
 }
 
 const hash = (s) => crypto.createHash("sha256").update(s).digest("hex");
