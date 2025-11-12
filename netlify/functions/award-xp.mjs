@@ -109,7 +109,7 @@ const CORS_ALLOW = (process.env.XP_CORS_ALLOW ?? "")
   .filter(Boolean);
 
 const RAW_LOCK_TTL = Number(process.env.XP_LOCK_TTL_MS ?? 3_000);
-const LOCK_TTL_MS = Number.isFinite(RAW_LOCK_TTL) && RAW_LOCK_TTL > 0 ? RAW_LOCK_TTL : 3_000;
+const LOCK_TTL_MS = Number.isFinite(RAW_LOCK_TTL) && RAW_LOCK_TTL >= 0 ? RAW_LOCK_TTL : 3_000;
 
 const sanitizeTotal = (value) => Math.max(0, Math.floor(Number(value) || 0));
 
@@ -198,7 +198,7 @@ function corsHeaders(origin) {
     "access-control-allow-methods": "POST,OPTIONS",
     "cache-control": "no-store",
   };
-  if (allow !== "*") headers.vary = "Origin";
+  if (allow !== "*") headers["Vary"] = "Origin";
   return headers;
 }
 
