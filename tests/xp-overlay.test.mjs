@@ -543,9 +543,13 @@ await (async () => {
   const base = harness.context.Date.now();
   harness.dispatchBoost({ multiplier: 2, ttlMs: 5 * 60_000, expiresAt: base + 5 * 60_000 });
   harness.advance(50);
-  assert.equal(harness.getTimerText(), '30s', 'cap_display: timer should cap at 30 seconds');
-  harness.advance(2000);
-  assert.equal(harness.getTimerText(), '28s', 'cap_display: countdown should continue from capped value');
+  assert.equal(harness.getTimerText(), '', 'cap_display: timer hidden when remaining exceeds 30 seconds');
+  const nowAfterInitial = harness.context.Date.now();
+  const untilReveal = Math.max(0, (base + (5 * 60_000) - 30_000) - nowAfterInitial);
+  harness.advance(untilReveal);
+  assert.equal(harness.getTimerText(), '30s', 'cap_display: timer appears once remaining enters 30 second window');
+  harness.advance(1000);
+  assert.equal(harness.getTimerText(), '29s', 'cap_display: timer continues counting down after reveal');
 })();
 
 await (async () => {
