@@ -58,6 +58,8 @@ const toWarsawEpoch = (year, month, day, hour) => {
   return adjusted;
 };
 
+// Warsaw reset occurs at 03:00 local time. Date math in this zone automatically
+// normalizes DST gaps/overlaps so the key always shifts after the local reset.
 const getDailyKey = (ms = Date.now()) => {
   let effectiveMs = ms;
   let { year, month, day, hour } = warsawParts(effectiveMs);
@@ -109,12 +111,7 @@ const CORS_ALLOW = (process.env.XP_CORS_ALLOW ?? "")
 const RAW_LOCK_TTL = Number(process.env.XP_LOCK_TTL_MS ?? 3_000);
 const LOCK_TTL_MS = Number.isFinite(RAW_LOCK_TTL) && RAW_LOCK_TTL > 0 ? RAW_LOCK_TTL : 3_000;
 
-const sanitizeTotal = (value) => {
-  const numeric = Number(value);
-  if (!Number.isFinite(numeric) || numeric <= 0) return 0;
-  const floored = Math.floor(numeric);
-  return floored > 0 ? floored : 0;
-};
+const sanitizeTotal = (value) => Math.max(0, Math.floor(Number(value) || 0));
 
 const signPayload = (payload, secret) =>
   crypto.createHmac("sha256", secret).update(payload).digest("base64url");
@@ -243,55 +240,125 @@ export async function handler(event) {
   const nextReset = getNextResetEpoch(now);
   const cookieHeader = event.headers?.cookie ?? event.headers?.Cookie ?? "";
   const cookieState = readXpCookie(cookieHeader, secret);
-  let totalToday = cookieState.key === dayKeyNow ? cookieState.total : 0;
-  totalToday = Math.min(DAILY_CAP, Math.max(0, sanitizeTotal(totalToday)));
+  const cookieKeyMatches = cookieState.key === dayKeyNow;
+  const cookieTotal = cookieKeyMatches ? sanitizeTotal(cookieState.total) : 0;
+  const cookieRemainingBefore = Math.max(0, DAILY_CAP - cookieTotal);
 
-  const remainingForToday = () => Math.max(0, DAILY_CAP - totalToday);
+  const queryUserId = typeof event.queryStringParameters?.userId === "string"
+    ? event.queryStringParameters.userId.trim()
+    : null;
+  const querySessionId = typeof event.queryStringParameters?.sessionId === "string"
+    ? event.queryStringParameters.sessionId.trim()
+    : null;
 
-  const respond = (statusCode, payload, extraHeaders) => {
-    const cookieValue = buildXpCookie({ key: dayKeyNow, total: totalToday, secret, now, nextReset });
-    const headers = extraHeaders ? { ...extraHeaders } : {};
-    headers["set-cookie"] = cookieValue;
-    return json(statusCode, payload, origin, headers);
+  const applyDiagnostics = (payload, extra = {}) => {
+    if (!DEBUG_ENABLED) return;
+    const debug = payload.debug ?? {};
+    if (debug.redisDailyTotalRaw === undefined && extra.redisDailyTotalRaw !== undefined) {
+      debug.redisDailyTotalRaw = extra.redisDailyTotalRaw;
+    }
+    if (extra.redisDailyTotal !== undefined) {
+      debug.redisDailyTotal = extra.redisDailyTotal;
+    }
+    debug.cookieKey = cookieState.key;
+    debug.cookieTotal = cookieState.total;
+    debug.cookieTotalSanitized = cookieTotal;
+    debug.cookieRemainingBefore = cookieRemainingBefore;
+    Object.assign(debug, extra);
+    payload.debug = debug;
+  };
+
+  const buildResponse = (statusCode, payload, totalTodaySource, debugExtra = {}) => {
+    const safeTotal = Math.min(DAILY_CAP, Math.max(0, sanitizeTotal(totalTodaySource)));
+    const remaining = Math.max(0, DAILY_CAP - safeTotal);
+    payload.totalToday = safeTotal;
+    payload.remaining = remaining;
+    payload.dayKey ??= dayKeyNow;
+    payload.nextReset ??= nextReset;
+    applyDiagnostics(payload, { redisDailyTotalRaw: totalTodaySource, redisDailyTotal: safeTotal, ...debugExtra });
+    return json(statusCode, payload, origin, {
+      "Set-Cookie": buildXpCookie({ key: dayKeyNow, total: safeTotal, secret, now, nextReset }),
+    });
   };
 
   if (event.httpMethod !== "POST") {
-    return respond(405, { error: "method_not_allowed", remaining: remainingForToday(), dayKey: dayKeyNow, nextReset });
+    let totals = null;
+    if (queryUserId) {
+      totals = await getTotals({ userId: queryUserId, sessionId: querySessionId, now });
+    }
+    const totalSource = totals ? totals.current : cookieTotal;
+    const payload = { error: "method_not_allowed" };
+    return buildResponse(405, payload, totalSource, { mode: "method_not_allowed" });
   }
 
-  let body;
-  try { body = JSON.parse(event.body || "{}"); }
-  catch { return respond(400, { error: "bad_json", remaining: remainingForToday(), dayKey: dayKeyNow, nextReset }); }
+  let body = {};
+  try {
+    if (event.body) {
+      body = JSON.parse(event.body);
+    }
+  } catch {
+    let totals = null;
+    if (queryUserId) {
+      totals = await getTotals({ userId: queryUserId, sessionId: querySessionId, now });
+    }
+    const totalSource = totals ? totals.current : cookieTotal;
+    const payload = { error: "bad_json" };
+    return buildResponse(400, payload, totalSource, { mode: "bad_json" });
+  }
 
-  const userId = typeof body.userId === "string" ? body.userId.trim() : null;
-  const sessionIdRaw = body.sessionId;
+  const userId = typeof body.userId === "string" ? body.userId.trim() : queryUserId;
+  const sessionIdRaw = body.sessionId ?? querySessionId;
   const sessionId = typeof sessionIdRaw === "string" ? sessionIdRaw.trim() : null;
 
+  let totalsPromise = null;
+  const fetchTotals = async () => {
+    if (!userId) return { current: cookieTotal, lifetime: 0, sessionTotal: 0, lastSync: 0 };
+    if (!totalsPromise) {
+      totalsPromise = getTotals({ userId, sessionId, now });
+    }
+    return totalsPromise;
+  };
+
+  const respond = async (statusCode, payload, options = {}) => {
+    let totalSource = options.totalOverride;
+    let totals = options.totals;
+    if (totals) {
+      totalSource = totalSource ?? totals.current;
+    }
+    if (totalSource === undefined && userId) {
+      totals = await fetchTotals();
+      totalSource = totals.current;
+    }
+    if (totalSource === undefined) totalSource = cookieTotal;
+    if (totals && payload.totalLifetime === undefined) payload.totalLifetime = totals.lifetime;
+    if (totals && payload.sessionTotal === undefined && totals.sessionTotal !== undefined) {
+      payload.sessionTotal = totals.sessionTotal;
+    }
+    if (totals && payload.lastSync === undefined && totals.lastSync !== undefined) {
+      payload.lastSync = totals.lastSync;
+    }
+    return buildResponse(statusCode, payload, totalSource, options.debugExtra ?? {});
+  };
+
   if (!userId || (!body.statusOnly && !sessionId)) {
-    return respond(400, { error: "missing_fields", remaining: remainingForToday(), dayKey: dayKeyNow, nextReset });
+    const totals = userId ? await fetchTotals() : null;
+    return respond(400, { error: "missing_fields" }, { totals });
   }
 
   if (body.statusOnly) {
-    const { lifetime, sessionTotal, lastSync } = await getTotals({ userId, sessionId, now });
+    const totals = await fetchTotals();
     const payload = {
       ok: true,
       awarded: 0,
       granted: 0,
-      totalToday,
       cap: DAILY_CAP,
       capDelta: DELTA_CAP,
-      totalLifetime: lifetime,
-      sessionTotal,
-      lastSync,
+      totalLifetime: totals.lifetime,
+      sessionTotal: totals.sessionTotal,
+      lastSync: totals.lastSync,
       status: "statusOnly",
-      remaining: remainingForToday(),
-      dayKey: dayKeyNow,
-      nextReset,
     };
-    if (DEBUG_ENABLED) {
-      payload.debug = { mode: "statusOnly", cookieTotal: totalToday };
-    }
-    return respond(200, payload);
+    return respond(200, payload, { totals, debugExtra: { mode: "statusOnly" } });
   }
 
   let deltaRaw = Number(body.delta);
@@ -302,29 +369,35 @@ export async function handler(event) {
     else if (Number.isFinite(pointsPerPeriod)) deltaRaw = pointsPerPeriod;
   }
   if (!Number.isFinite(deltaRaw) || deltaRaw < 0) {
-    return respond(422, { error: "invalid_delta", remaining: remainingForToday(), dayKey: dayKeyNow, nextReset });
+    const totals = await fetchTotals();
+    return respond(422, { error: "invalid_delta" }, { totals });
   }
   const normalizedDelta = Math.floor(deltaRaw);
   if (normalizedDelta < 0) {
-    return respond(422, { error: "invalid_delta", remaining: remainingForToday(), dayKey: dayKeyNow, nextReset });
+    const totals = await fetchTotals();
+    return respond(422, { error: "invalid_delta" }, { totals });
   }
   if (normalizedDelta > DELTA_CAP) {
-    return respond(422, { error: "delta_out_of_range", cap: DELTA_CAP, capDelta: DELTA_CAP, remaining: remainingForToday(), dayKey: dayKeyNow, nextReset });
+    const totals = await fetchTotals();
+    return respond(422, { error: "delta_out_of_range", cap: DELTA_CAP, capDelta: DELTA_CAP }, { totals });
   }
 
   const tsRaw = Number(body.ts ?? body.timestamp ?? body.windowEnd ?? now);
   if (!Number.isFinite(tsRaw) || tsRaw <= 0) {
-    return respond(422, { error: "invalid_timestamp", remaining: remainingForToday(), dayKey: dayKeyNow, nextReset });
+    const totals = await fetchTotals();
+    return respond(422, { error: "invalid_timestamp" }, { totals });
   }
   if (tsRaw > now + DRIFT_MS) {
-    return respond(422, { error: "timestamp_in_future", driftMs: DRIFT_MS, remaining: remainingForToday(), dayKey: dayKeyNow, nextReset });
+    const totals = await fetchTotals();
+    return respond(422, { error: "timestamp_in_future", driftMs: DRIFT_MS }, { totals });
   }
   const ts = Math.trunc(tsRaw);
 
   let metadata = null;
   if (body.metadata !== undefined) {
     if (!body.metadata || typeof body.metadata !== "object" || Array.isArray(body.metadata)) {
-      return respond(400, { error: "invalid_metadata", remaining: remainingForToday(), dayKey: dayKeyNow, nextReset });
+      const totals = await fetchTotals();
+      return respond(400, { error: "invalid_metadata" }, { totals });
     }
     const cleaned = {};
     for (const [key, value] of Object.entries(body.metadata)) {
@@ -351,10 +424,12 @@ export async function handler(event) {
     })();
 
     if (METADATA_MAX_BYTES && bytes > METADATA_MAX_BYTES) {
-      return respond(413, { error: "metadata_too_large", limit: METADATA_MAX_BYTES, remaining: remainingForToday(), dayKey: dayKeyNow, nextReset });
+      const totals = await fetchTotals();
+      return respond(413, { error: "metadata_too_large", limit: METADATA_MAX_BYTES }, { totals });
     }
     if (!depthOk) {
-      return respond(413, { error: "metadata_too_large", limit: METADATA_MAX_BYTES, reason: "depth", remaining: remainingForToday(), dayKey: dayKeyNow, nextReset });
+      const totals = await fetchTotals();
+      return respond(413, { error: "metadata_too_large", limit: METADATA_MAX_BYTES, reason: "depth" }, { totals });
     }
     metadata = cleaned;
   }
@@ -369,39 +444,31 @@ export async function handler(event) {
     const events = Number(metadata?.inputEvents ?? 0);
     const visSeconds = Number(metadata?.visibilitySeconds ?? 0);
     if (!Number.isFinite(events) || events < MIN_ACTIVITY_EVENTS || !Number.isFinite(visSeconds) || visSeconds < MIN_ACTIVITY_VIS_S) {
-      const { lifetime, sessionTotal, lastSync } = await getTotals({ userId, sessionId, now });
+      const totals = await fetchTotals();
       const inactivePayload = {
         ok: true,
         awarded: 0,
         granted: 0,
-        totalToday,
-        totalLifetime: lifetime,
-        sessionTotal,
-        lastSync,
         cap: DAILY_CAP,
         capDelta: DELTA_CAP,
         reason: "inactive",
         status: "inactive",
-        remaining: remainingForToday(),
-        dayKey: dayKeyNow,
-        nextReset,
       };
-      if (DEBUG_ENABLED) {
-        inactivePayload.debug = {
+      return respond(200, inactivePayload, {
+        totals,
+        debugExtra: {
           mode: "inactive",
           delta: normalizedDelta,
           ts,
           sessionCap: SESSION_CAP,
           dailyCap: DAILY_CAP,
-          lastSync,
-        };
-      }
-      return respond(200, inactivePayload);
+          events,
+          visSeconds,
+        },
+      });
     }
   }
 
-  const totalBefore = totalToday;
-  const cookieRemainingBefore = Math.max(0, DAILY_CAP - totalBefore);
   const clampedDelta = Math.min(normalizedDelta, cookieRemainingBefore);
   if (normalizedDelta > clampedDelta && DEBUG_ENABLED) {
     console.log("daily_cap", { requested: normalizedDelta, clamped: clampedDelta, remaining: cookieRemainingBefore, dayKey: dayKeyNow });
@@ -505,20 +572,19 @@ export async function handler(event) {
   );
 
   const granted = Math.max(0, Math.floor(Number(res?.[0]) || 0));
-  const redisDailyTotal = Number(res?.[1]) || 0;
+  const redisDailyTotalRaw = Number(res?.[1]) || 0;
   const sessionTotal = Number(res?.[2]) || 0;
   const totalLifetime = Number(res?.[3]) || 0;
   const lastSync = Number(res?.[4]) || 0;
   const status = Number(res?.[5]) || 0;
 
-  totalToday = Math.min(DAILY_CAP, Math.max(0, sanitizeTotal(totalBefore + granted)));
-  const remaining = remainingForToday();
+  const totalTodayRedis = Math.min(DAILY_CAP, Math.max(0, sanitizeTotal(redisDailyTotalRaw)));
+  const remaining = Math.max(0, DAILY_CAP - totalTodayRedis);
 
   const payload = {
     ok: true,
     awarded: granted,
     granted,
-    totalToday,
     cap: DAILY_CAP,
     capDelta: DELTA_CAP,
     totalLifetime,
@@ -582,25 +648,22 @@ export async function handler(event) {
     if (!payload.status || payload.status === "ok") payload.status = "partial";
   }
 
-  if (DEBUG_ENABLED) {
-      payload.debug = {
-        delta: normalizedDelta,
-        ts,
-        now,
-        status,
-        requested: normalizedDelta,
-        clamped: clampedDelta,
-        sessionCap: SESSION_CAP,
-        dailyCap: DAILY_CAP,
-        lastSync,
-        totalBefore,
-        totalAfter: totalToday,
-        remainingBefore: cookieRemainingBefore,
-        remainingAfter: remaining,
-        redisDailyTotal,
-      };
-    if (reason) payload.debug.reason = reason;
-  }
+  const debugExtra = {
+    mode: "award",
+    delta: normalizedDelta,
+    ts,
+    now,
+    status,
+    requested: normalizedDelta,
+    clamped: clampedDelta,
+    sessionCap: SESSION_CAP,
+    dailyCap: DAILY_CAP,
+    lastSync,
+    remainingBefore: cookieRemainingBefore,
+    remainingAfter: remaining,
+    redisDailyTotalRaw,
+  };
+  if (reason) debugExtra.reason = reason;
 
-  return respond(200, payload);
+  return respond(200, payload, { totalOverride: redisDailyTotalRaw, debugExtra });
 }
