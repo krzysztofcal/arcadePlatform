@@ -193,7 +193,7 @@ test('boost timer renders countdown from authoritative expiresAt', () => {
   overlay.applyBoost({ multiplier: 1.5, expiresAt: secondsFromEpoch });
   const state = overlay.getState();
 
-  assert.equal(state.timerEl && state.timerEl.textContent, '00:15');
+  assert.equal(state.timerEl && state.timerEl.textContent, '15s');
   assert.equal(state.multiplierEl && state.multiplierEl.textContent, 'x1.5');
   assert.equal(api.computeRemainingSeconds(state.boost.expiresAt, now), 15);
 });

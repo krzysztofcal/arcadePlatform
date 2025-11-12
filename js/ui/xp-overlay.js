@@ -389,6 +389,12 @@
     stopTicker();
     state.lastTick = 0;
     state.pendingCombo = null;
+    if (typeof window !== "undefined" && window.__xpBoostInterval) {
+      try { clearInterval(window.__xpBoostInterval); }
+      catch (_) {}
+      try { delete window.__xpBoostInterval; }
+      catch (_) { window.__xpBoostInterval = null; }
+    }
     if (state.badge && state.badge.classList && typeof state.badge.classList.remove === "function") {
       try { state.badge.classList.remove("xp-boost--active"); }
       catch (_) {}
@@ -411,14 +417,19 @@
 
   function updateBoostDisplay(now) {
     if (!state.boost) return;
-    const current = Number.isFinite(now) ? now : Date.now();
-    const expiresAt = normalizeExpiresAt(state.boost.expiresAt);
+    const current   = Number.isFinite(now) ? now : Date.now();
+    let   expiresAt = Number(state.boost && state.boost.expiresAt) || 0;
+    expiresAt = (expiresAt > 0 && expiresAt < 1e12 && Date.now() > 1e12)
+      ? Math.floor(expiresAt * 1000)
+      : Math.floor(expiresAt);
     if (!Number.isFinite(expiresAt) || expiresAt <= current) {
       diagLog("boost_expired", { expiresAt, now: current });
       deactivateBoost();
       return;
     }
-    const remainingMs = Math.max(0, expiresAt - current);
+    let remainingMs = Math.max(0, expiresAt - current);
+    const UI_CAP_MS = 30 * 1000;
+    if (remainingMs > UI_CAP_MS) remainingMs = UI_CAP_MS;
     if (remainingMs <= 0) {
       diagLog("boost_timer_ended", { expiresAt, now: current });
       deactivateBoost();
@@ -444,7 +455,8 @@
     }
     if (state.multiplierEl) state.multiplierEl.textContent = formatMultiplier(state.boost.multiplier);
     if (state.timerEl) {
-      state.timerEl.textContent = formatClock(remainingMs / 1000);
+      const seconds = Math.ceil(remainingMs / 1000);
+      state.timerEl.textContent = `${seconds}s`;
       if (state.timerEl.style && typeof state.timerEl.style.removeProperty === "function") {
         try { state.timerEl.style.removeProperty("display"); }
         catch (_) {}
@@ -527,6 +539,24 @@
 
   function applyBoost(detail) {
     const payload = detail && typeof detail === "object" ? detail : { multiplier: detail };
+    try {
+      if (state.boost) {
+        const now = Date.now();
+        const nextMultiplier = Number(payload && payload.multiplier);
+        const currentMultiplier = Number(state.boost && state.boost.multiplier) || 1;
+        const rawExpires = Object.prototype.hasOwnProperty.call(payload || {}, "expiresAt")
+          ? payload.expiresAt
+          : payload && payload.endsAt;
+        const nextExpires = normalizeExpiresAt(rawExpires);
+        const currentExpires = normalizeExpiresAt(state.boost && state.boost.expiresAt);
+        if (Number.isFinite(currentExpires) && currentExpires > now
+          && (!Number.isFinite(nextMultiplier) || nextMultiplier <= currentMultiplier)
+          && Number.isFinite(nextExpires) && nextExpires <= currentExpires + 1000) {
+          diagLog("boost_ignored", { reason: "redundant" });
+          return;
+        }
+      }
+    } catch (_) {}
     let multiplier = Number(payload.multiplier);
     if (!Number.isFinite(multiplier)) multiplier = 1;
     if (multiplier <= 1) {
@@ -585,6 +615,17 @@
     if (!badge) return false;
     state.badge = badge;
     ensureChip(badge);
+    if (typeof window !== "undefined" && typeof window.setInterval === "function" && !window.__xpBoostInterval) {
+      try {
+        window.__xpBoostInterval = window.setInterval(() => {
+          try { updateBoostDisplay(Date.now()); }
+          catch (_) {}
+        }, 1000);
+      } catch (_) {
+        try { delete window.__xpBoostInterval; }
+        catch (_) { window.__xpBoostInterval = null; }
+      }
+    }
     if (typeof window.addEventListener === "function") {
       state.boostListener = handleBoost;
       try { window.addEventListener("xp:boost", state.boostListener); }
@@ -628,6 +669,12 @@
     attachAttempts = 0;
     state.attached = false;
     stopTicker();
+    if (typeof window !== "undefined" && window.__xpBoostInterval) {
+      try { clearInterval(window.__xpBoostInterval); }
+      catch (_) {}
+      try { delete window.__xpBoostInterval; }
+      catch (_) { window.__xpBoostInterval = null; }
+    }
     if (typeof window.removeEventListener === "function" && state.boostListener) {
       try { window.removeEventListener("xp:boost", state.boostListener); }
       catch (_) {}
