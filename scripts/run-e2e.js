@@ -46,9 +46,19 @@ if (existsSync(skipFile)) {
   process.exit(0);
 }
 
+const childEnv = { ...process.env };
+
+if (!childEnv.XP_DAILY_SECRET) {
+  childEnv.XP_DAILY_SECRET = 'test-secret';
+}
+
+if (!childEnv.XP_DEBUG) {
+  childEnv.XP_DEBUG = '1';
+}
+
 const result = spawnSync(process.execPath, [cliPath, 'test', ...process.argv.slice(2)], {
   stdio: 'inherit',
-  env: process.env,
+  env: childEnv,
 });
 
 process.exit(result.status ?? 1);
