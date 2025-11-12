@@ -499,13 +499,16 @@ export async function handler(event) {
     local lockTtl = tonumber(ARGV[6])
     local sessionTtl = tonumber(ARGV[7])
 
-    local locked = redis.call('SET', lockKey, tostring(now), 'PX', lockTtl, 'NX')
-    if locked ~= 'OK' then
-      local currentDaily = tonumber(redis.call('GET', dailyKey) or '0')
-      local sessionTotal = tonumber(redis.call('GET', sessionKey) or '0')
-      local lifetime = tonumber(redis.call('GET', totalKey) or '0')
-      local lastSync = tonumber(redis.call('GET', sessionSyncKey) or '0')
-      return {0, currentDaily, sessionTotal, lifetime, lastSync, 6}
+    local shouldLock = lockTtl and lockTtl > 0
+    if shouldLock then
+      local locked = redis.call('SET', lockKey, tostring(now), 'PX', lockTtl, 'NX')
+      if locked ~= 'OK' then
+        local currentDaily = tonumber(redis.call('GET', dailyKey) or '0')
+        local sessionTotal = tonumber(redis.call('GET', sessionKey) or '0')
+        local lifetime = tonumber(redis.call('GET', totalKey) or '0')
+        local lastSync = tonumber(redis.call('GET', sessionSyncKey) or '0')
+        return {0, currentDaily, sessionTotal, lifetime, lastSync, 6}
+      end
     end
 
     local function refreshSessionTtl()
@@ -516,7 +519,9 @@ export async function handler(event) {
     end
 
     local function finish(grant, dailyTotal, sessionTotal, lifetime, sync, status)
-      redis.call('DEL', lockKey)
+      if shouldLock then
+        redis.call('DEL', lockKey)
+      end
       return {grant, dailyTotal, sessionTotal, lifetime, sync, status}
     end
 
