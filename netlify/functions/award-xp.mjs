@@ -482,9 +482,6 @@ export async function handler(event) {
     }
   }
 
-  // Do not pre-clamp by cookie; Redis remains authoritative so stale cookies cannot under-grant.
-  const requestedDelta = normalizedDelta;
-
   const script = `
     local sessionKey = KEYS[1]
     local sessionSyncKey = KEYS[2]
@@ -568,12 +565,13 @@ export async function handler(event) {
     return finish(grant, dailyTotal, sessionTotal, lifetime, lastSync, status)
   `;
 
+  // Redis clamps the award; never shrink normalizedDelta using cookie heuristics so fresh devices do not under-grant.
   const res = await store.eval(
     script,
     [sessionKeyK, sessionSyncKeyK, todayKey, totalKeyK, lockKeyK],
     [
       String(now),
-      String(requestedDelta),
+      String(normalizedDelta),
       String(DAILY_CAP),
       String(Math.max(0, SESSION_CAP)),
       String(ts),
@@ -664,8 +662,7 @@ export async function handler(event) {
     ts,
     now,
     status,
-    requested: requestedDelta,
-    cookiePredictedGrant: Math.min(normalizedDelta, cookieRemainingBefore),
+    requested: normalizedDelta,
     sessionCap: SESSION_CAP,
     dailyCap: DAILY_CAP,
     lastSync,
