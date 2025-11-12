@@ -1,3 +1,5 @@
+process.env.XP_DAILY_SECRET = 'test-secret';
+
 import assert from 'node:assert/strict';
 
 async function createHandler(ns = 'test:legacy-fallback') {
