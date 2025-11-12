@@ -268,7 +268,8 @@ export async function handler(event) {
     payload.debug = debug;
   };
 
-  const buildResponse = (statusCode, payload, totalTodaySource, debugExtra = {}) => {
+  const buildResponse = (statusCode, payload, totalTodaySource, options = {}) => {
+    const { debugExtra = {}, skipCookie = false } = options;
     const safeTotal = Math.min(DAILY_CAP, Math.max(0, sanitizeTotal(totalTodaySource)));
     const remaining = Math.max(0, DAILY_CAP - safeTotal);
     payload.totalToday = safeTotal;
@@ -276,9 +277,10 @@ export async function handler(event) {
     payload.dayKey ??= dayKeyNow;
     payload.nextReset ??= nextReset;
     applyDiagnostics(payload, { redisDailyTotalRaw: totalTodaySource, redisDailyTotal: safeTotal, ...debugExtra });
-    return json(statusCode, payload, origin, {
-      "Set-Cookie": buildXpCookie({ key: dayKeyNow, total: safeTotal, secret, now, nextReset }),
-    });
+    const headers = skipCookie
+      ? undefined
+      : { "Set-Cookie": buildXpCookie({ key: dayKeyNow, total: safeTotal, secret, now, nextReset }) };
+    return json(statusCode, payload, origin, headers);
   };
 
   if (event.httpMethod !== "POST") {
@@ -288,7 +290,10 @@ export async function handler(event) {
     }
     const totalSource = totals ? totals.current : cookieTotal;
     const payload = { error: "method_not_allowed" };
-    return buildResponse(405, payload, totalSource, { mode: "method_not_allowed" });
+    return buildResponse(405, payload, totalSource, {
+      debugExtra: { mode: "method_not_allowed" },
+      skipCookie: !queryUserId,
+    });
   }
 
   let body = {};
@@ -303,7 +308,10 @@ export async function handler(event) {
     }
     const totalSource = totals ? totals.current : cookieTotal;
     const payload = { error: "bad_json" };
-    return buildResponse(400, payload, totalSource, { mode: "bad_json" });
+    return buildResponse(400, payload, totalSource, {
+      debugExtra: { mode: "bad_json" },
+      skipCookie: !queryUserId,
+    });
   }
 
   const userId = typeof body.userId === "string" ? body.userId.trim() : queryUserId;
@@ -322,6 +330,7 @@ export async function handler(event) {
   const respond = async (statusCode, payload, options = {}) => {
     let totalSource = options.totalOverride;
     let totals = options.totals;
+    let skipCookie = options.skipCookie;
     if (totals) {
       totalSource = totalSource ?? totals.current;
     }
@@ -337,12 +346,16 @@ export async function handler(event) {
     if (totals && payload.lastSync === undefined && totals.lastSync !== undefined) {
       payload.lastSync = totals.lastSync;
     }
-    return buildResponse(statusCode, payload, totalSource, options.debugExtra ?? {});
+    if (skipCookie === undefined) skipCookie = !userId;
+    return buildResponse(statusCode, payload, totalSource, {
+      debugExtra: options.debugExtra ?? {},
+      skipCookie,
+    });
   };
 
   if (!userId || (!body.statusOnly && !sessionId)) {
     const totals = userId ? await fetchTotals() : null;
-    return respond(400, { error: "missing_fields" }, { totals });
+    return respond(400, { error: "missing_fields" }, { totals, skipCookie: !userId });
   }
 
   if (body.statusOnly) {
@@ -469,10 +482,8 @@ export async function handler(event) {
     }
   }
 
-  const clampedDelta = Math.min(normalizedDelta, cookieRemainingBefore);
-  if (normalizedDelta > clampedDelta && DEBUG_ENABLED) {
-    console.log("daily_cap", { requested: normalizedDelta, clamped: clampedDelta, remaining: cookieRemainingBefore, dayKey: dayKeyNow });
-  }
+  // Do not pre-clamp by cookie; Redis remains authoritative so stale cookies cannot under-grant.
+  const requestedDelta = normalizedDelta;
 
   const script = `
     local sessionKey = KEYS[1]
@@ -562,7 +573,7 @@ export async function handler(event) {
     [sessionKeyK, sessionSyncKeyK, todayKey, totalKeyK, lockKeyK],
     [
       String(now),
-      String(clampedDelta),
+      String(requestedDelta),
       String(DAILY_CAP),
       String(Math.max(0, SESSION_CAP)),
       String(ts),
@@ -625,15 +636,20 @@ export async function handler(event) {
   if (reason) {
     payload.reason = reason;
   } else if (granted < normalizedDelta) {
-    if (clampedDelta < normalizedDelta) {
-      payload.reason = clampedDelta > 0 ? "daily_cap_partial" : "daily_cap";
-    } else {
-      payload.reason = normalizedDelta > 0 ? "partial" : undefined;
-    }
+    payload.reason = normalizedDelta > 0 ? "partial" : undefined;
+  }
+
+  if (DEBUG_ENABLED && granted < normalizedDelta && (status === 1 || status === 3)) {
+    console.log("daily_cap", {
+      requested: normalizedDelta,
+      granted,
+      remaining,
+      dayKey: dayKeyNow,
+    });
   }
 
   if (!payload.status) {
-    if (status === 0 && normalizedDelta === granted && clampedDelta === normalizedDelta) {
+    if (status === 0 && normalizedDelta === granted) {
       payload.status = "ok";
     } else if (status === 1 || status === 4 || (status === 0 && granted < normalizedDelta)) {
       payload.status = "partial";
@@ -642,20 +658,14 @@ export async function handler(event) {
     }
   }
 
-  if (clampedDelta < normalizedDelta) {
-    payload.capped = true;
-    if (!payload.reason) payload.reason = "daily_cap";
-    if (!payload.status || payload.status === "ok") payload.status = "partial";
-  }
-
   const debugExtra = {
     mode: "award",
     delta: normalizedDelta,
     ts,
     now,
     status,
-    requested: normalizedDelta,
-    clamped: clampedDelta,
+    requested: requestedDelta,
+    cookiePredictedGrant: Math.min(normalizedDelta, cookieRemainingBefore),
     sessionCap: SESSION_CAP,
     dailyCap: DAILY_CAP,
     lastSync,

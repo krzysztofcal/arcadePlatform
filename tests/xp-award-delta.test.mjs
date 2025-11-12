@@ -1,8 +1,11 @@
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 
 const BASE_TS = 1_700_000_000_000;
 
 const cookieJar = new WeakMap();
+const XP_DAY_COOKIE = 'xp_day';
+const DEFAULT_SECRET = 'test-secret';
 
 function getJar(handler) {
   let jar = cookieJar.get(handler);
@@ -41,6 +44,14 @@ function expectCookieTotal(pair, expected) {
   const decoded = decodeCookie(pair);
   assert.ok(decoded, 'cookie parsed');
   assert.equal(decoded.t, expected);
+}
+
+function buildSignedCookie({ key, total, secret = DEFAULT_SECRET }) {
+  const safeTotal = Math.max(0, Math.floor(Number(total) || 0));
+  const payload = JSON.stringify({ k: key, t: safeTotal });
+  const encoded = Buffer.from(payload, 'utf8').toString('base64url');
+  const signature = crypto.createHmac('sha256', secret).update(payload).digest('base64url');
+  return `${XP_DAY_COOKIE}=${encoded}.${signature}`;
 }
 
 async function createHandler(label, overrides = {}) {
@@ -202,6 +213,37 @@ async function testStatusOnlyHealsCookie() {
   }
 }
 
+async function testNoUnderGrantWithStaleCookie() {
+  const handler = await createHandler('under-grant');
+  const base = { userId: 'under-user', ts: BASE_TS };
+
+  const originalNow = Date.now;
+  Date.now = () => BASE_TS;
+  try {
+    const first = await invoke(handler, { ...base, sessionId: 'session-a', delta: 200 });
+    assert.equal(first.statusCode, 200);
+    expectCookieTotal(first.cookie, 200);
+    const decoded = decodeCookie(first.cookie);
+    assert.ok(decoded?.k, 'day key available');
+
+    const stalePair = buildSignedCookie({ key: decoded.k, total: 0 });
+    storeCookie(handler, stalePair, 'device-b');
+
+    const second = await invoke(
+      handler,
+      { ...base, sessionId: 'session-b', ts: BASE_TS + 1, delta: 100 },
+      { jar: 'device-b' }
+    );
+    assert.equal(second.statusCode, 200);
+    assert.equal(second.payload.awarded, 100);
+    assert.equal(second.payload.remaining, 100);
+    assert.equal(second.payload.totalToday, 300);
+    expectCookieTotal(second.cookie, 300);
+  } finally {
+    Date.now = originalNow;
+  }
+}
+
 async function testDeltaValidation() {
   const handler = await createHandler('invalid');
   const base = { userId: 'user-invalid', sessionId: 'sess-invalid', ts: BASE_TS };
@@ -304,13 +346,64 @@ async function testInactiveConsistency() {
   }
 }
 
+async function testNoIdentitySkipsCookie() {
+  const handler = await createHandler('no-identity');
+  const base = { userId: 'no-identity-user', sessionId: 'no-identity-session', ts: BASE_TS };
+
+  const originalNow = Date.now;
+  Date.now = () => BASE_TS;
+  try {
+    const award = await invoke(handler, { ...base, delta: 50 });
+    assert.equal(award.statusCode, 200);
+    expectCookieTotal(award.cookie, 50);
+
+    const noIdentityGet = await handler({ httpMethod: 'GET', headers: {}, queryStringParameters: {} });
+    assert.equal(noIdentityGet.statusCode, 405);
+    assert.equal(noIdentityGet.headers?.['Set-Cookie'] ?? noIdentityGet.headers?.['set-cookie'], undefined);
+
+    const identifiedGet = await handler({
+      httpMethod: 'GET',
+      headers: {},
+      queryStringParameters: { userId: base.userId, sessionId: base.sessionId },
+    });
+    const getCookie = identifiedGet.headers?.['Set-Cookie'] ?? identifiedGet.headers?.['set-cookie'];
+    assert.ok(getCookie, 'cookie present for identified GET');
+    const getPair = (Array.isArray(getCookie) ? getCookie[0] : getCookie).split(';')[0];
+    expectCookieTotal(getPair, 50);
+
+    const badJson = await handler({
+      httpMethod: 'POST',
+      headers: {},
+      body: '{',
+      queryStringParameters: {},
+    });
+    assert.equal(badJson.statusCode, 400);
+    assert.equal(badJson.headers?.['Set-Cookie'] ?? badJson.headers?.['set-cookie'], undefined);
+
+    const badJsonIdentified = await handler({
+      httpMethod: 'POST',
+      headers: {},
+      body: '{',
+      queryStringParameters: { userId: base.userId, sessionId: base.sessionId },
+    });
+    const badCookie = badJsonIdentified.headers?.['Set-Cookie'] ?? badJsonIdentified.headers?.['set-cookie'];
+    assert.ok(badCookie, 'cookie present for identified bad JSON');
+    const badPair = (Array.isArray(badCookie) ? badCookie[0] : badCookie).split(';')[0];
+    expectCookieTotal(badPair, 50);
+  } finally {
+    Date.now = originalNow;
+  }
+}
+
 await testBasicAwarding();
 await testDailyCapPartial();
 await testStaleAndStatus();
 await testStatusOnlyHealsCookie();
+await testNoUnderGrantWithStaleCookie();
 await testDeltaValidation();
 await testMetadataLimits();
 await testActivityGuard();
 await testInactiveConsistency();
+await testNoIdentitySkipsCookie();
 
 console.log('xp-award-delta tests passed');
