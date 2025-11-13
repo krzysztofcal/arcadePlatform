@@ -184,9 +184,21 @@ function extractNumber(text) {
 async function openXpPage(page) {
   await page.goto(XP_PAGE, { waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => {
-    const value = document.getElementById('xpRemaining');
-    const hint = document.getElementById('xpRemainingHint');
-    return !!(value && value.textContent && hint && hint.textContent);
+    try {
+      const totals = window.__xpTestTotals;
+      const XP = window.XP;
+      if (!totals || !XP || typeof XP.getSnapshot !== 'function') return false;
+
+      const snap = XP.getSnapshot();
+      const requiredToday = Number(totals.totalToday || 0);
+      const currentToday = Number(snap.totalToday || 0);
+
+      // Page is "ready" once the XP snapshot reflects at least the
+      // totals the stub has already accumulated on the game page.
+      return currentToday >= requiredToday;
+    } catch (_) {
+      return false;
+    }
   }, null, { timeout: 10_000 });
 }
 
