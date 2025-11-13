@@ -168,7 +168,48 @@
     }
   }
 
-  const HOST_PAGE = __isGameHost();
+  function __isXpHostPage() {
+    try {
+      if (typeof window !== "undefined" && window && typeof window.XP_HOST_PAGE === "string" && window.XP_HOST_PAGE) {
+        if (window.XP_HOST_PAGE.toLowerCase() === "xp") return true;
+      }
+    } catch (_) {}
+    if (typeof document !== "undefined" && document) {
+      try {
+        if (document.documentElement && typeof document.documentElement.getAttribute === "function") {
+          const attr = document.documentElement.getAttribute("data-xp-host");
+          if (attr && attr.toLowerCase() === "xp") return true;
+        }
+      } catch (_) {}
+      try {
+        if (document.body && document.body.classList && document.body.classList.contains("xp-page-body")) {
+          return true;
+        }
+      } catch (_) {}
+      try {
+        if (typeof document.querySelector === "function" && document.querySelector(".xp-page")) {
+          return true;
+        }
+      } catch (_) {}
+    }
+    try {
+      const path = typeof location !== "undefined" && location && typeof location.pathname === "string"
+        ? location.pathname
+        : "";
+      if (/\bxp(?:\.html)?$/i.test(path || "")) {
+        return true;
+      }
+    } catch (_) {}
+    return false;
+  }
+
+  function detectHostPage() {
+    if (__isGameHost()) return "game";
+    if (__isXpHostPage()) return "xp";
+    return "default";
+  }
+
+  const HOST_PAGE = detectHostPage();
 
   const MAX_SCORE_DELTA = parseNumber(window && window.XP_SCORE_DELTA_CEILING, DEFAULT_SCORE_DELTA_CEILING);
   const BASELINE_XP_PER_SECOND = parseNumber(window && window.XP_BASELINE_XP_PER_SECOND, 10);
@@ -190,7 +231,7 @@
   const FLUSH_ENDPOINT = (typeof window !== "undefined" && window && typeof window.XP_FLUSH_ENDPOINT === "string") ? window.XP_FLUSH_ENDPOINT : null;
 
   function isGameHost() {
-    return HOST_PAGE;
+    return HOST_PAGE === "game";
   }
 
   const state = {
@@ -1241,6 +1282,14 @@
     setBadgeLoading(false);
   }
 
+  function dispatchXpUpdatedEvent() {
+    try {
+      if (window && typeof window.dispatchEvent === "function") {
+        window.dispatchEvent(new CustomEvent("xp:updated"));
+      }
+    } catch (_) {}
+  }
+
   function applyServerDelta(data, meta) {
     if (!data || typeof data !== "object") return;
     const keys = Object.keys(data);
@@ -1284,6 +1333,7 @@
     if (skipTotals || totalLifetime == null) {
       saveCache();
       updateBadge();
+      dispatchXpUpdatedEvent();
       return;
     }
 
@@ -1291,6 +1341,7 @@
     if (!ok) {
       saveCache();
       updateBadge();
+      dispatchXpUpdatedEvent();
       return;
     }
 
@@ -1326,6 +1377,7 @@
     }
     saveCache();
     updateBadge();
+    dispatchXpUpdatedEvent();
   }
 
   async function sendWindow(force) {
@@ -1354,9 +1406,29 @@
       return;
     }
 
-    const activeGameId = normalizeGameId(state.gameId);
+    // ------------------------------------------------------------
+    //  FIX: allow window submission when startSession was never called
+    // ------------------------------------------------------------
+    let activeGameId = normalizeGameId(state.gameId);
+
+    // Fallback #1 – use the gameId that produced the last high-score pulse
+    if (!activeGameId && state.storedHighScoreGameId) {
+      activeGameId = normalizeGameId(state.storedHighScoreGameId);
+    }
+
+    // Fallback #2 – if a score pulse arrived before startSession, try to
+    //             auto-start the session (idempotent)
+    if (!activeGameId && state.lastScorePulseTs) {
+      const gidFromPulse = resolveScorePulseGameId(null); // uses internal cache
+      if (gidFromPulse) {
+        activeGameId = gidFromPulse;
+        // auto-start (will set state.gameId for future ticks)
+        try { startSession(gidFromPulse, { resume: true }); } catch (_) {}
+      }
+    }
+
     if (!activeGameId) {
-      logDebug("drop_mismatched_gameid", { expected: state.gameId || null, payloadGameId: null });
+      logDebug("drop_no_gameid", { reason: "no_state_or_stored_gameid" });
       return;
     }
 
@@ -1377,9 +1449,13 @@
     state.activeMs = 0;
     state.visibilitySeconds = 0;
     state.inputEvents = 0;
+    // Only warn – do **not** abort the flush when we used a fallback
     if (payload.gameId !== state.gameId) {
-      logDebug("drop_mismatched_gameid", { expected: state.gameId || null, payloadGameId: payload.gameId });
-      return;
+      logDebug("gameid_fallback_used", {
+        stateGameId: state.gameId || null,
+        used: payload.gameId,
+        source: state.storedHighScoreGameId ? "highScore" : "scorePulse"
+      });
     }
 
     const rawRemaining = getRemainingDaily();
@@ -2083,6 +2159,9 @@
     applyServerDelta(payload, { source: "setTotals" });
   }
 
+  /**
+   * Public UI getter that reports the safe remaining allowance for the current day.
+   */
   function getRemainingDaily() {
     maybeResetDailyAllowance();
     if (state.cap == null) return Infinity;
@@ -2096,13 +2175,26 @@
     return Infinity;
   }
 
+  /**
+   * Public UI getter for the epoch (ms) when the daily cap resets, or 0 when unknown.
+   */
   function getNextResetEpoch() {
+    maybeResetDailyAllowance();
     const next = Number(state.nextResetEpoch);
     if (!Number.isFinite(next) || next <= 0) return 0;
     return Math.floor(next);
   }
 
+  /**
+   * Return a UI-friendly snapshot of XP totals.
+   * - totalToday: XP earned during the current day window
+   * - cap: daily cap (null when unlimited)
+   * - totalXp: lifetime XP from the server
+   * - level/xpIntoLevel/xpForNextLevel/xpToNextLevel/progress: level progress helpers
+   * - lastSync: epoch ms of the most recent successful server response
+   */
   function getSnapshot() {
+    maybeResetDailyAllowance();
     if (!state.snapshot) {
       state.snapshot = computeLevel(state.totalLifetime || 0);
     }
@@ -2119,8 +2211,33 @@
     };
   }
 
+  function getBoostSnapshot() {
+    const boost = state.boost && typeof state.boost === "object" ? state.boost : {};
+    const now = Date.now();
+    const expiresAtRaw = Number(boost.expiresAt);
+    const expiresAt = Number.isFinite(expiresAtRaw) && expiresAtRaw > 0 ? Math.floor(expiresAtRaw) : 0;
+    const multRaw = Number(boost.multiplier);
+    const multiplier = Number.isFinite(multRaw) && multRaw > 0 ? multRaw : 1;
+    const active = !!(expiresAt > now && multiplier > 1);
+    const source = typeof boost.source === "string" && boost.source ? boost.source : null;
+    return { active, multiplier, expiresAt, source };
+  }
+
+  function getComboSnapshot() {
+    const snap = snapshotCombo();
+    return {
+      mode: snap.mode,
+      multiplier: snap.multiplier,
+      points: snap.points,
+      stepThreshold: snap.stepThreshold,
+      sustainLeftMs: snap.sustainLeftMs,
+      cooldownLeftMs: snap.cooldownLeftMs,
+    };
+  }
+
   function reconcileWithServer() {
-    if (!state.running && state.phase !== "running") {
+    const allowPassiveReconcile = HOST_PAGE === "xp";
+    if (!allowPassiveReconcile && !state.running && state.phase !== "running") {
       return Promise.resolve(null);
     }
     if (!window.XPClient || typeof window.XPClient.fetchStatus !== "function") {
@@ -2150,6 +2267,17 @@
   function refreshStatus() {
     if (!window.XPClient || typeof window.XPClient.fetchStatus !== "function") return Promise.resolve(null);
     setBadgeLoading(true);
+    if (HOST_PAGE === "xp") {
+      return reconcileWithServer()
+        .then((data) => {
+          setBadgeLoading(false);
+          return data;
+        })
+        .catch((err) => {
+          setBadgeLoading(false);
+          throw err;
+        });
+    }
     return window.XPClient.fetchStatus()
       .then((data) => { handleResponse(data); return data; })
       .catch((err) => { handleError(err); throw err; });
@@ -2384,6 +2512,8 @@
     getRemainingDaily,
     getNextResetEpoch,
     getSnapshot,
+    getBoostSnapshot,
+    getComboSnapshot,
     refreshStatus,
     addScore,
     awardLocalXp,
@@ -2469,7 +2599,7 @@
 // --- XP resume polyfill (idempotent) ---
 (function () {
   if (typeof window === 'undefined') return;
-  if (!window.XP || window.XP.__hostPage === false) return;
+  if (!window.XP || window.XP.__hostPage !== 'game') return;
   if (!window.XP) return;
   if (window.XP.__xpResumeWired) return; // already wired
 
@@ -2533,7 +2663,7 @@
 
 (function () {
   if (typeof window === 'undefined' || typeof document === 'undefined') return;
-  if (!window.XP || window.XP.__hostPage === false) return;
+  if (!window.XP || window.XP.__hostPage !== 'game') return;
   if (!window.XP) return;
   if (window.XP.__xpLifecycleWired) return;
   window.XP.__xpLifecycleWired = true;
