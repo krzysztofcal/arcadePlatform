@@ -11,6 +11,15 @@
     return Number.isFinite(parsed) ? parsed : fallback;
   }
 
+  function logDebug(kind, data) {
+    try {
+      if (!window || !window.KLog || typeof window.KLog.log !== "function") return false;
+      return !!window.KLog.log(kind, data || {});
+    } catch (_) {
+      return false;
+    }
+  }
+
   let cachedScoreDeltaCeiling = DEFAULT_SCORE_DELTA_CEILING;
 
   function resolveScoreDeltaCeiling() {
@@ -54,6 +63,7 @@
     domReadyListenerBound: false,
     handleVisible: null,
     handleVisibleRan: false,
+    lastDailyCapLog: 0,
   };
 
   let autoBootedSlug = null;
@@ -409,12 +419,30 @@
     }
 
     if (state.queuedWhole > 0) {
-      const amount = state.queuedWhole;
-      state.queuedWhole = 0;
+      let allowance = Infinity;
+      if (xp && typeof xp.getRemainingDaily === "function") {
+        const remaining = xp.getRemainingDaily();
+        allowance = Number.isFinite(remaining) ? Math.max(0, Math.floor(remaining)) : Infinity;
+      }
+      if (allowance <= 0) {
+        const now = Date.now();
+        if (!state.lastDailyCapLog || (now - state.lastDailyCapLog) > 500) {
+          state.lastDailyCapLog = now;
+          logDebug("award_skip", { reason: "daily_cap" });
+        }
+        return didWork;
+      }
+      let amount = state.queuedWhole;
+      if (allowance < amount) {
+        logDebug("award_preclamp", { want: amount, remaining: allowance });
+        amount = allowance;
+      }
+      const leftover = Math.max(0, state.queuedWhole - amount);
+      state.queuedWhole = leftover;
       try {
         xp.addScore(amount);
       } catch (_) {
-        state.queuedWhole += amount;
+        state.queuedWhole = amount + leftover;
         return false;
       }
       didWork = true;

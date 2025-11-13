@@ -55,12 +55,19 @@ The helper survives soft navigations—if you’re swapping views inside an SPA,
 - Callers must wrap invocations in `try/catch` if they need to handle failures gracefully.
 
 #### Server gates & debug
-- `award-xp.mjs` validates the JSON body, tolerates legacy `scoreDelta` / `pointsPerPeriod` fields, and enforces `XP_DELTA_CAP` plus the daily (`XP_DAILY_CAP`) and per-session (`XP_SESSION_CAP`) ceilings.
-  - Every response surfaces Redis-sourced `totalToday`/`remaining`, and the signed `xp_day` cookie is rewritten on each call to mirror Redis so stale or missing cookies self-heal automatically.
-  - Client requests are not pre-clamped by the cookie; Redis remains authoritative to avoid under-grant on fresh devices.
+- `award-xp.mjs` validates the JSON body, tolerates legacy `scoreDelta` / `pointsPerPeriod` fields, and enforces `XP_DELTA_CAP` plus the per-session (`XP_SESSION_CAP`) ceiling and the Warsaw-local daily (`XP_DAILY_CAP`, default 3000) window that runs from 03:00 to 03:00 (CET/CEST aware).
+  - Every response surfaces Redis-sourced `totalToday`, `remaining`, `dayKey`, and `nextReset` (epoch ms of the next Warsaw reset). The signed `xp_day` cookie is rewritten on each call so stale or missing cookies self-heal automatically.
+  - The cookie pre-clamps each award before Redis executes, so once the server reports `remaining: 0` the next calls immediately short-circuit until the advertised `nextReset`. Redis still tracks session/lifetime totals for analytics, and any session caps stack on top of the daily allowance.
   - The cookie is HttpOnly + SameSite=Lax, signed with `XP_DAILY_SECRET`, and its payload mirrors the response totals (`granted` equals the legacy `awarded` field but should be preferred going forward and `awarded` will be phased out in a future update). When `XP_COOKIE_SECURE=1`, the cookie is also marked Secure for HTTPS deployments.
   - `awarded` and `granted` are equal today; clients should migrate to `granted`.
-  - Local Playwright runs inject `XP_DAILY_SECRET=test-secret` (and `XP_DEBUG=1`) so the preview server matches the production contract; set `XP_DAILY_SECRET` when running the function manually to avoid `500 server_config/xp_daily_secret_missing`.
+  - Local Playwright runs inject `XP_DAILY_SECRET=test-secret` (and `XP_DEBUG=1`) so the preview server matches the production contract; set `XP_DAILY_SECRET` (32+ chars) when running the function manually to avoid `500 server_config/xp_daily_secret_missing`.
+
+### Daily XP Cap (03:00 Europe/Warsaw)
+- Users can earn up to **3000 XP** between consecutive 03:00 Europe/Warsaw instants (handles CET/CEST automatically). Responses include `nextReset` (epoch ms) so clients can render countdowns or pause scheduling until the boundary passes.
+- The `xp_day` cookie stores `{ k: <dayKey>, t: <awardedToday> }`, is signed with `XP_DAILY_SECRET`, and expires exactly at the next reset. Deleting the cookie simply causes the server to reissue the authoritative totals on the next award.
+- `window.XP.getRemainingDaily()` and `window.XP.getNextResetEpoch()` expose the live allowance for UI surfaces, while the runtime automatically resets the cached totals once the stored `nextReset` elapses.
+- `XP.addScore()` and the `GameXpBridge` flush path pre-clamp outgoing deltas based on the server-advertised `remaining` value and emit `award_preclamp` / `award_skip { reason: 'daily_cap' }` diagnostics so operators can confirm when the cap halts awards.
+
 - Requests are rejected when the timestamp is stale (`status: "stale"`), another tab owns the lock (`status: "locked"`), metadata is malformed/oversized, or the optional activity guard blocks idle deltas.
 - Flip `XP_REQUIRE_ACTIVITY=1` to require input/visibility thresholds (`XP_MIN_ACTIVITY_EVENTS`, `XP_MIN_ACTIVITY_VIS_S`). When disabled the function skips those checks entirely.
 - Metadata must remain shallow: depth ≤ 3 and serialized size ≤ `XP_METADATA_MAX_BYTES` (default 2048 bytes). Larger payloads return `413 metadata_too_large` without mutating totals.
@@ -119,8 +126,8 @@ Client → server payload (minimal set, extras allowed):
 
 Server behavior:
   - Requests with `delta` outside `0…XP_DELTA_CAP` (default 300) are rejected. Legacy clients can continue sending `scoreDelta` / `pointsPerPeriod` and the server will coerce them once per request.
-  - XP is granted directly from `delta` while enforcing per-session (`XP_SESSION_CAP`, default 300) and per-day (`XP_DAILY_CAP`, default 600) ceilings. Partial grants surface `reason: 'daily_cap_partial' | 'session_cap_partial'`.
-  - Responses remain backwards compatible: `{ ok, awarded, totalToday, cap, totalLifetime }` plus `sessionTotal`, `lastSync`, and `capDelta` so clients can rehydrate badge state and mirror the server cap.
+- XP is granted directly from `delta` while enforcing per-session (`XP_SESSION_CAP`, default 300) and per-day (`XP_DAILY_CAP`, default 3000) ceilings. The daily cap resets at 03:00 Europe/Warsaw (handles CET/CEST) and partial grants surface `reason: 'daily_cap_partial' | 'session_cap_partial'`.
+- Responses remain backwards compatible: `{ ok, awarded, granted, totalToday, remaining, dayKey, nextReset, cap, totalLifetime }` plus `sessionTotal`, `lastSync`, and `capDelta` so clients can rehydrate badge state, countdown to the next reset, and mirror the server cap.
   - When `XP_DEBUG=1`, the payload includes `debug` with the requested delta, caps, lastSync, and status code.
 
 Response status values:
@@ -152,7 +159,7 @@ Run locally:
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `XP_DEBUG` | `0` | Include the `debug` object in responses for easier staging diagnostics. |
-| `XP_DAILY_CAP` | `600` | Maximum XP a user can gain per UTC day. |
+| `XP_DAILY_CAP` | `3000` | Maximum XP a user can gain per Warsaw local day (03:00–03:00 CET/CEST). |
 | `XP_SESSION_CAP` | `300` | Maximum XP a single session can accumulate before further deltas are rejected. |
 | `XP_DELTA_CAP` | `300` | Largest delta accepted from the client in a single request. |
 | `XP_LOCK_TTL_MS` | `3000` | Duration of the per-session Redis lock that guards concurrent writes. |
@@ -162,6 +169,7 @@ Run locally:
 | `XP_MIN_ACTIVITY_EVENTS` | `4` | Minimum `metadata.inputEvents` required when `XP_REQUIRE_ACTIVITY=1`. |
 | `XP_MIN_ACTIVITY_VIS_S` | `8` | Minimum `metadata.visibilitySeconds` required when `XP_REQUIRE_ACTIVITY=1`. |
 | `XP_METADATA_MAX_BYTES` | `2048` | Maximum serialized metadata size; larger payloads return `413 metadata_too_large`. |
+| `XP_DAILY_SECRET` | _(required)_ | 32+ character HMAC secret used to sign the `xp_day` cookie. |
 
 Set these variables in tandem so the client and server agree on throughput; the server enforces the cap and surfaces `capDelta` so clients can mirror it without redeploying.
 
