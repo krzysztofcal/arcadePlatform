@@ -2267,6 +2267,17 @@
   function refreshStatus() {
     if (!window.XPClient || typeof window.XPClient.fetchStatus !== "function") return Promise.resolve(null);
     setBadgeLoading(true);
+    if (HOST_PAGE === "xp") {
+      return reconcileWithServer()
+        .then((data) => {
+          setBadgeLoading(false);
+          return data;
+        })
+        .catch((err) => {
+          setBadgeLoading(false);
+          throw err;
+        });
+    }
     return window.XPClient.fetchStatus()
       .then((data) => { handleResponse(data); return data; })
       .catch((err) => { handleError(err); throw err; });
