@@ -573,13 +573,15 @@ export async function handler(event) {
     return finish(grant, dailyTotal, sessionTotal, lifetime, lastSync, status)
   `;
 
-  // Redis clamps the award; never shrink normalizedDelta using cookie heuristics so fresh devices do not under-grant.
+  const cookieLimitedDelta = Math.min(normalizedDelta, cookieRemainingBefore);
+  const cookieClamped = cookieLimitedDelta < normalizedDelta;
+
   const res = await store.eval(
     script,
     [sessionKeyK, sessionSyncKeyK, todayKey, totalKeyK, lockKeyK],
     [
       String(now),
-      String(normalizedDelta),
+      String(cookieLimitedDelta),
       String(DAILY_CAP),
       String(Math.max(0, SESSION_CAP)),
       String(ts),
@@ -645,7 +647,17 @@ export async function handler(event) {
     payload.reason = normalizedDelta > 0 ? "partial" : undefined;
   }
 
-  if (DEBUG_ENABLED && granted < normalizedDelta && (status === 1 || status === 3)) {
+  if (cookieClamped) {
+    payload.capped = true;
+    if (!payload.reason || payload.reason === "partial") {
+      payload.reason = granted > 0 ? "daily_cap_partial" : "daily_cap";
+    }
+    if (!payload.status || payload.status === "ok" || payload.status === "partial") {
+      payload.status = payload.reason || (granted > 0 ? "daily_cap_partial" : "daily_cap");
+    }
+  }
+
+  if (DEBUG_ENABLED && granted < normalizedDelta && (status === 1 || status === 3 || cookieClamped)) {
     console.log("daily_cap", {
       requested: normalizedDelta,
       granted,
@@ -679,6 +691,7 @@ export async function handler(event) {
     redisDailyTotalRaw,
   };
   if (reason) debugExtra.reason = reason;
+  if (cookieClamped) debugExtra.cookieClamped = true;
 
   return respond(200, payload, { totalOverride: redisDailyTotalRaw, debugExtra });
 }

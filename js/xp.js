@@ -20,6 +20,7 @@
   const LEVEL_MULTIPLIER = 1.1;
 
   const DEFAULT_SCORE_DELTA_CEILING = 10_000;
+  const DEFAULT_CLIENT_DELTA_CAP = 300;
   const DEFAULT_BOOST_SEC = 15;
   const COMBO_CAP = 20;
   const COMBO_SUSTAIN_MS = 5_000;
@@ -59,6 +60,19 @@
     const sanitized = typeof value === "string" ? value.replace(/_/g, "") : value;
     const parsed = Number(sanitized);
     return Number.isFinite(parsed) ? parsed : fallback;
+  }
+
+  function getClientDeltaCap() {
+    if (typeof window === "undefined" || !window) {
+      return DEFAULT_CLIENT_DELTA_CAP;
+    }
+    const raw = Object.prototype.hasOwnProperty.call(window, "XP_DELTA_CAP_CLIENT")
+      ? window.XP_DELTA_CAP_CLIENT
+      : undefined;
+    const parsed = parseNumber(raw, DEFAULT_CLIENT_DELTA_CAP);
+    if (!Number.isFinite(parsed)) return DEFAULT_CLIENT_DELTA_CAP;
+    const normalized = Math.max(0, Math.floor(parsed));
+    return normalized || 0;
   }
 
   function normalizeGameId(value) {
@@ -250,6 +264,9 @@
     lastBoostDetail: null,
     storedHighScore: null,
     storedHighScoreGameId: null,
+    dailyRemaining: Infinity,
+    nextResetEpoch: 0,
+    dayKey: null,
   };
 
   function ensureComboState() {
@@ -430,6 +447,15 @@
     }
   }
 
+  function logAwardSkip(reason, extra) {
+    const now = Date.now();
+    const lastSkip = Number(state.debug.lastAwardSkipLog) || 0;
+    if ((now - lastSkip) <= 500) return false;
+    state.debug.lastAwardSkipLog = now;
+    logDebug("award_skip", Object.assign({ reason }, extra || {}));
+    return true;
+  }
+
   function resolvePagePath() {
     try {
       if (typeof location !== "undefined" && location && typeof location.pathname === "string") {
@@ -472,6 +498,15 @@
   function zeroTickCounters() {
     state.eventsSinceLastAward = 0;
     state.scoreDeltaSinceLastAward = 0;
+  }
+
+  function dropScoreBuffers(reason) {
+    state.scoreDelta = 0;
+    state.scoreDeltaRemainder = 0;
+    state.scoreDeltaSinceLastAward = 0;
+    try {
+      logDebug("award_drop_buffer", { reason: reason || "unknown" });
+    } catch (_) {}
   }
 
   function markActiveInput(now) {
@@ -882,6 +917,40 @@
     return { level, totalXp: total, xpIntoLevel, xpForNextLevel, xpToNextLevel, progress };
   }
 
+  function syncDailyRemainingFromTotals() {
+    const capValue = Number(state.cap);
+    const totalValue = Number(state.totalToday);
+    if (!Number.isFinite(capValue)) {
+      state.dailyRemaining = Infinity;
+      return;
+    }
+    if (!Number.isFinite(totalValue)) {
+      return;
+    }
+    const normalizedCap = Math.max(0, Math.floor(capValue));
+    const normalizedTotal = Math.max(0, Math.floor(totalValue));
+    state.dailyRemaining = Math.max(0, normalizedCap - normalizedTotal);
+  }
+
+  function maybeResetDailyAllowance(now) {
+    const resetAt = Number(state.nextResetEpoch) || 0;
+    if (!resetAt) return false;
+    const ts = typeof now === "number" ? now : Date.now();
+    if (ts < resetAt) return false;
+    const prevKey = state.dayKey || null;
+    state.dayKey = null;
+    state.nextResetEpoch = 0;
+    state.totalToday = 0;
+    state.dailyRemaining = Infinity;
+    syncDailyRemainingFromTotals();
+    try {
+      logDebug("daily_reset", { prevKey, resetAt });
+    } catch (_) {}
+    saveCache();
+    updateBadge();
+    return true;
+  }
+
   function loadCache() {
     try {
       const raw = window.localStorage.getItem(CACHE_KEY);
@@ -895,6 +964,15 @@
       if (typeof parsed.serverTotalXp === "number") state.serverTotalXp = parsed.serverTotalXp;
       if (typeof parsed.badgeBaselineXp === "number") state.badgeBaselineXp = parsed.badgeBaselineXp;
       state.lastResultTs = parsed.ts || 0;
+      if (typeof parsed.nextReset === "number") {
+        const nextReset = Math.floor(parsed.nextReset);
+        if (Number.isFinite(nextReset) && nextReset > 0) {
+          state.nextResetEpoch = nextReset;
+        }
+      }
+      if (typeof parsed.dayKey === "string" && parsed.dayKey) {
+        state.dayKey = parsed.dayKey;
+      }
       if (state.serverTotalXp == null && typeof state.totalLifetime === "number") {
         state.serverTotalXp = state.totalLifetime;
       }
@@ -912,6 +990,8 @@
           state.badgeBaselineXp = 0;
         }
       }
+      syncDailyRemainingFromTotals();
+      maybeResetDailyAllowance();
     } catch (_) { /* ignore */ }
   }
 
@@ -925,6 +1005,8 @@
         serverTotalXp: state.serverTotalXp,
         badgeBaselineXp: state.badgeBaselineXp,
         ts: Date.now(),
+        nextReset: state.nextResetEpoch || 0,
+        dayKey: state.dayKey || null,
       };
       window.localStorage.setItem(CACHE_KEY, JSON.stringify(payload));
     } catch (_) { /* ignore */ }
@@ -1164,12 +1246,30 @@
     const keys = Object.keys(data);
     if (!keys.length) return;
 
-    if (typeof data.cap === "number") {
-      state.cap = data.cap;
+    if (typeof data.cap === "number" && Number.isFinite(data.cap)) {
+      state.cap = Math.max(0, Math.floor(data.cap));
     }
     if (typeof data.totalToday === "number") {
-      state.totalToday = Math.max(0, Number(data.totalToday) || 0);
+      state.totalToday = Math.max(0, Math.floor(Number(data.totalToday) || 0));
     }
+    syncDailyRemainingFromTotals();
+    if (typeof data.remaining === "number") {
+      const remaining = Math.max(0, Math.floor(Number(data.remaining) || 0));
+      state.dailyRemaining = remaining;
+    }
+    if (typeof data.dayKey === "string" && data.dayKey) {
+      state.dayKey = data.dayKey;
+    }
+    const nextResetRaw = Object.prototype.hasOwnProperty.call(data, "nextReset")
+      ? data.nextReset
+      : data.nextResetEpoch;
+    if (typeof nextResetRaw === "number") {
+      const nextReset = Math.floor(Number(nextResetRaw) || 0);
+      if (Number.isFinite(nextReset) && nextReset > 0) {
+        state.nextResetEpoch = nextReset;
+      }
+    }
+    maybeResetDailyAllowance();
 
     const reasonRaw = data.reason || (data.debug && data.debug.reason) || null;
     const reason = typeof reasonRaw === "string" ? reasonRaw.toLowerCase() : null;
@@ -1269,8 +1369,9 @@
       chunkMs: CHUNK_MS,
       pointsPerPeriod: 10
     };
-    if (state.scoreDelta > 0) {
-      payload.scoreDelta = state.scoreDelta;
+    const pendingScore = Math.max(0, Math.floor(Number(state.scoreDelta) || 0));
+    if (pendingScore > 0) {
+      payload.scoreDelta = pendingScore;
     }
     state.windowStart = now;
     state.activeMs = 0;
@@ -1279,6 +1380,44 @@
     if (payload.gameId !== state.gameId) {
       logDebug("drop_mismatched_gameid", { expected: state.gameId || null, payloadGameId: payload.gameId });
       return;
+    }
+
+    const rawRemaining = getRemainingDaily();
+    const numericRemaining = Number.isFinite(rawRemaining)
+      ? Math.max(0, Math.floor(rawRemaining))
+      : Infinity;
+    const hasFiniteRemaining = Number.isFinite(numericRemaining);
+    const requestedScore = typeof payload.scoreDelta === "number"
+      ? Math.max(0, Math.floor(payload.scoreDelta))
+      : 0;
+
+    if (hasFiniteRemaining && numericRemaining <= 0) {
+      dropScoreBuffers("daily_cap");
+      logAwardSkip("daily_cap", { remaining: 0 });
+      return;
+    }
+
+    let sendScore = requestedScore;
+    const clientCap = getClientDeltaCap();
+    const hasClientCap = Number.isFinite(clientCap) && clientCap > 0;
+    if (requestedScore > 0 && hasFiniteRemaining && requestedScore > numericRemaining) {
+      logDebug("award_preclamp", { want: requestedScore, remaining: numericRemaining });
+      sendScore = numericRemaining;
+    }
+    if (requestedScore > 0 && hasClientCap && sendScore > clientCap) {
+      logDebug("award_preclamp", { want: sendScore, capDelta: clientCap });
+      sendScore = clientCap;
+    }
+    if (requestedScore > 0) {
+      const leftover = Math.max(0, requestedScore - sendScore);
+      state.scoreDelta = leftover;
+      state.scoreDeltaSinceLastAward = Math.max(0, (state.scoreDeltaSinceLastAward || 0) - sendScore);
+      payload.scoreDelta = sendScore;
+      if (sendScore <= 0) {
+        dropScoreBuffers("daily_cap");
+        logAwardSkip("daily_cap", { remaining: Math.max(0, numericRemaining) });
+        return;
+      }
     }
 
     try {
@@ -1319,7 +1458,6 @@
         handleError(err);
       })
       .finally(() => { state.pending = null; });
-    state.scoreDelta = 0;
   }
 
   function onAwardTick() {
@@ -1411,15 +1549,10 @@
     advanceCombo(frameDelta, isActive ? activityRatio : 0, isActive);
 
     if (!isActive) {
-      const lastSkip = Number(state.debug.lastAwardSkipLog) || 0;
-      if ((now - lastSkip) > 500) {
-        state.debug.lastAwardSkipLog = now;
-        logDebug("award_skip", {
-          reason: state.activityWindowFrozen ? "frozen" : "inactive",
-          events,
-          sinceLastInput,
-        });
-      }
+      logAwardSkip(state.activityWindowFrozen ? "frozen" : "inactive", {
+        events,
+        sinceLastInput,
+      });
       zeroTickCounters();
       flushXp(false).catch(() => {});
       emitTick(0, activityRatio, false);
@@ -1656,7 +1789,11 @@
   }
 
   function isAtCap() {
+    maybeResetDailyAllowance();
     if (state.cap == null) return false;
+    if (Number.isFinite(state.dailyRemaining) && state.dailyRemaining <= 0) {
+      return true;
+    }
     if (typeof state.totalToday !== "number") return false;
     return state.totalToday >= state.cap;
   }
@@ -1946,6 +2083,25 @@
     applyServerDelta(payload, { source: "setTotals" });
   }
 
+  function getRemainingDaily() {
+    maybeResetDailyAllowance();
+    if (state.cap == null) return Infinity;
+    const remaining = Number(state.dailyRemaining);
+    if (Number.isFinite(remaining)) {
+      return Math.max(0, Math.floor(remaining));
+    }
+    if (typeof state.totalToday === "number") {
+      return Math.max(0, Math.floor(Math.max(0, Number(state.cap)) - Math.floor(state.totalToday)));
+    }
+    return Infinity;
+  }
+
+  function getNextResetEpoch() {
+    const next = Number(state.nextResetEpoch);
+    if (!Number.isFinite(next) || next <= 0) return 0;
+    return Math.floor(next);
+  }
+
   function getSnapshot() {
     if (!state.snapshot) {
       state.snapshot = computeLevel(state.totalLifetime || 0);
@@ -2225,6 +2381,8 @@
     stopSession,
     nudge,
     setTotals,
+    getRemainingDaily,
+    getNextResetEpoch,
     getSnapshot,
     refreshStatus,
     addScore,

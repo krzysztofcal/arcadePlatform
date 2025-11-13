@@ -88,6 +88,11 @@ test.beforeEach(async ({ page }) => {
 
 test.describe('XP score protocol', () => {
   test('includes scoreDelta only when a score window has awards', async ({ page }) => {
+    // Allow large deltas for this test; bypass client clamp
+    await page.addInitScript(() => {
+      window.XP_DELTA_CAP_CLIENT = 10_000;
+    });
+
     await page.goto(GAME_PAGE, { waitUntil: 'domcontentloaded' });
     await ensureXpReady(page);
 
