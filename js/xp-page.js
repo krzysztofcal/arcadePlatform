@@ -206,6 +206,17 @@
     if (remainingValue == null && capValue != null) {
       remainingValue = Math.max(0, capValue - totalToday);
     }
+    // When the cap is effectively reached, ensure the display reflects the
+    // fully-consumed allowance even if the runtime is a tick behind.
+    let displayToday = totalToday;
+    if (
+      capValue != null &&
+      remainingValue != null &&
+      remainingValue <= 1 &&
+      displayToday < capValue
+    ) {
+      displayToday = capValue;
+    }
     const nextReset = typeof window.XP.getNextResetEpoch === "function" ? window.XP.getNextResetEpoch() : 0;
     const boost = typeof window.XP.getBoostSnapshot === "function" ? window.XP.getBoostSnapshot() : null;
     const combo = typeof window.XP.getComboSnapshot === "function" ? window.XP.getComboSnapshot() : null;
@@ -217,7 +228,7 @@
     if (capEl) capEl.textContent = capText;
     if (todayLineEl) {
       const template = t("xp_daily_line", "You have earned {amount} XP today.");
-      todayLineEl.textContent = formatTemplate(template, { amount: formatNumber(totalToday) });
+      todayLineEl.textContent = formatTemplate(template, { amount: formatNumber(displayToday) });
     }
     if (capLineEl) {
       const template = t("xp_daily_cap_line", "The daily XP cap is {cap} XP.");
