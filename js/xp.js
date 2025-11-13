@@ -1406,9 +1406,29 @@
       return;
     }
 
-    const activeGameId = normalizeGameId(state.gameId);
+    // ------------------------------------------------------------
+    //  FIX: allow window submission when startSession was never called
+    // ------------------------------------------------------------
+    let activeGameId = normalizeGameId(state.gameId);
+
+    // Fallback #1 – use the gameId that produced the last high-score pulse
+    if (!activeGameId && state.storedHighScoreGameId) {
+      activeGameId = normalizeGameId(state.storedHighScoreGameId);
+    }
+
+    // Fallback #2 – if a score pulse arrived before startSession, try to
+    //             auto-start the session (idempotent)
+    if (!activeGameId && state.lastScorePulseTs) {
+      const gidFromPulse = resolveScorePulseGameId(null); // uses internal cache
+      if (gidFromPulse) {
+        activeGameId = gidFromPulse;
+        // auto-start (will set state.gameId for future ticks)
+        try { startSession(gidFromPulse, { resume: true }); } catch (_) {}
+      }
+    }
+
     if (!activeGameId) {
-      logDebug("drop_mismatched_gameid", { expected: state.gameId || null, payloadGameId: null });
+      logDebug("drop_no_gameid", { reason: "no_state_or_stored_gameid" });
       return;
     }
 
@@ -1429,9 +1449,13 @@
     state.activeMs = 0;
     state.visibilitySeconds = 0;
     state.inputEvents = 0;
+    // Only warn – do **not** abort the flush when we used a fallback
     if (payload.gameId !== state.gameId) {
-      logDebug("drop_mismatched_gameid", { expected: state.gameId || null, payloadGameId: payload.gameId });
-      return;
+      logDebug("gameid_fallback_used", {
+        stateGameId: state.gameId || null,
+        used: payload.gameId,
+        source: state.storedHighScoreGameId ? "highScore" : "scorePulse"
+      });
     }
 
     const rawRemaining = getRemainingDaily();
