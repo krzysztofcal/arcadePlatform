@@ -218,6 +218,47 @@
     } catch (_) {}
   }
 
+  const ERROR_MARKERS = ["window_error", "error", "fatal", "exception", "uncaught"];
+  const WARNING_MARKERS = ["award_skip", "block_cap", "warn", "warning", "retry"];
+
+  function getLineSeverity(text) {
+    if (!text) return null;
+    const normalized = String(text).toLowerCase();
+    for (let i = 0; i < ERROR_MARKERS.length; i += 1) {
+      if (normalized.indexOf(ERROR_MARKERS[i]) !== -1) {
+        return "error";
+      }
+    }
+    for (let j = 0; j < WARNING_MARKERS.length; j += 1) {
+      if (normalized.indexOf(WARNING_MARKERS[j]) !== -1) {
+        return "warn";
+      }
+    }
+    return null;
+  }
+
+  function renderLogLines(doc, container, rawText) {
+    if (!container || !doc) return;
+    container.textContent = "";
+    const output = rawText && rawText.length > 0 ? rawText : "No diagnostics available…";
+    const lines = output.split("\n");
+    const frag = doc.createDocumentFragment();
+    for (let i = 0; i < lines.length; i += 1) {
+      const line = lines[i];
+      const lineEl = doc.createElement("div");
+      lineEl.className = "log-line";
+      const severity = getLineSeverity(line);
+      if (severity === "error") {
+        lineEl.classList.add("line--error");
+      } else if (severity === "warn") {
+        lineEl.classList.add("line--warn");
+      }
+      lineEl.textContent = line || "";
+      frag.appendChild(lineEl);
+    }
+    container.appendChild(frag);
+  }
+
   async function dumpToClipboard() {
     flush(true);
     const text = getText();
@@ -248,7 +289,7 @@
         throw new Error("no_document");
       }
 
-      const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Arcade Hub Diagnostics</title><meta name="viewport" content="width=device-width, initial-scale=1"><style>body{font-family:monospace;background:#050910;color:#e6ecff;margin:0;padding:16px;white-space:pre-wrap;word-break:break-word;}header{font-size:14px;margin-bottom:12px;opacity:0.8;}pre{margin:0;background:#0b1020;padding:12px;border:1px solid rgba(230,236,255,0.2);}button{cursor:pointer;font-family:inherit;font-size:13px;border:1px solid rgba(230,236,255,0.3);background:#142040;color:#fff;padding:6px 10px;border-radius:4px;margin-bottom:12px;}button:focus{outline:2px solid rgba(255,255,255,0.4);outline-offset:1px;}</style></head><body><header>Diagnostics dump generated ${new Date().toISOString()}</header><button id="copyLogsBtn" type="button">Copy all logs</button><pre id="diagnosticsLog">No diagnostics available…</pre><script>(function(){function getLogText(){var el=document.getElementById("diagnosticsLog");if(!el)return"";return el.innerText||el.textContent||"";}function fallbackCopy(text){return new Promise(function(resolve,reject){try{var textarea=document.createElement("textarea");textarea.value=text;textarea.setAttribute("readonly","readonly");textarea.style.position="absolute";textarea.style.left="-9999px";document.body.appendChild(textarea);textarea.select();var ok=false;try{ok=document.execCommand("copy");}catch(err){ok=false;}textarea.remove();if(ok){resolve();return;}reject(new Error("execCommand_failed"));}catch(error){reject(error);}});}function copyLogs(){var text=getLogText();if(!text){return Promise.reject(new Error("empty_log"));}if(navigator&&navigator.clipboard&&typeof navigator.clipboard.writeText==="function"){return navigator.clipboard.writeText(text);}return fallbackCopy(text);}var btn=document.getElementById("copyLogsBtn");if(!btn)return;var baseLabel=btn.textContent||"Copy";var timer=null;function reset(){if(timer){clearTimeout(timer);}timer=setTimeout(function(){btn.textContent=baseLabel;},1600);}btn.addEventListener("click",function(){copyLogs().then(function(){btn.textContent="Copied!";reset();}).catch(function(error){console.warn("Copy logs failed",error);btn.textContent="Copy failed";reset();});});})();</script></body></html>`;
+      const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Arcade Hub Diagnostics</title><meta name="viewport" content="width=device-width, initial-scale=1"><style>body{font-family:monospace;background:#050910;color:#e6ecff;margin:0;padding:16px;white-space:pre-wrap;word-break:break-word;}header{font-size:14px;margin-bottom:12px;opacity:0.8;}pre{margin:0;background:#0b1020;padding:12px;border:1px solid rgba(230,236,255,0.2);display:flex;flex-direction:column;gap:2px;}button{cursor:pointer;font-family:inherit;font-size:13px;border:1px solid rgba(230,236,255,0.3);background:#142040;color:#fff;padding:6px 10px;border-radius:4px;margin-bottom:12px;}button:focus{outline:2px solid rgba(255,255,255,0.4);outline-offset:1px;}.log-line{display:block;white-space:pre-wrap;word-break:break-word;line-height:1.35;}.log-line:empty::after{content:"\00a0";}.line--error{color:#ff4d4f;font-weight:600;}.line--warn{color:#ffa940;}</style></head><body><header>Diagnostics dump generated ${new Date().toISOString()}</header><button id="copyLogsBtn" type="button">Copy all logs</button><pre id="diagnosticsLog">No diagnostics available…</pre><script>(function(){function getLogText(){var el=document.getElementById("diagnosticsLog");if(!el)return"";return el.innerText||el.textContent||"";}function fallbackCopy(text){return new Promise(function(resolve,reject){try{var textarea=document.createElement("textarea");textarea.value=text;textarea.setAttribute("readonly","readonly");textarea.style.position="absolute";textarea.style.left="-9999px";document.body.appendChild(textarea);textarea.select();var ok=false;try{ok=document.execCommand("copy");}catch(err){ok=false;}textarea.remove();if(ok){resolve();return;}reject(new Error("execCommand_failed"));}catch(error){reject(error);}});}function copyLogs(){var text=getLogText();if(!text){return Promise.reject(new Error("empty_log"));}if(navigator&&navigator.clipboard&&typeof navigator.clipboard.writeText==="function"){return navigator.clipboard.writeText(text);}return fallbackCopy(text);}var btn=document.getElementById("copyLogsBtn");if(!btn)return;var baseLabel=btn.textContent||"Copy";var timer=null;function reset(){if(timer){clearTimeout(timer);}timer=setTimeout(function(){btn.textContent=baseLabel;},1600);}btn.addEventListener("click",function(){copyLogs().then(function(){btn.textContent="Copied!";reset();}).catch(function(error){console.warn("Copy logs failed",error);btn.textContent="Copy failed";reset();});});})();</script></body></html>`;
 
       if (typeof doc.write === "function") {
         doc.open();
@@ -260,9 +301,7 @@
 
       const logContainer = doc.getElementById("diagnosticsLog");
       if (logContainer) {
-        logContainer.textContent = ""; // Single-source render: keep one container and overwrite it for each dump.
-        const output = text && text.length > 0 ? text : "No diagnostics available…";
-        logContainer.textContent = output;
+        renderLogLines(doc, logContainer, text);
       }
 
       recordDump("window", true, { length: text.length });
