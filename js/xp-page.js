@@ -5,9 +5,9 @@
   const capEl = document.getElementById("xpDailyCap");
   const remainingEl = document.getElementById("xpRemaining");
   const remainingHintEl = document.getElementById("xpRemainingHint");
-  const todayEl = document.getElementById("xpToday");
-  const todayCapEl = document.getElementById("xpTodayCap");
-  const todayRemainingEl = document.getElementById("xpTodayRemaining");
+  const todayLineEl = document.getElementById("xpTodayLine");
+  const capLineEl = document.getElementById("xpCapLine");
+  const remainingLineEl = document.getElementById("xpRemainingLine");
   const resetHintEl = document.getElementById("xpResetHint");
   const progressBar = document.querySelector(".xp-progress__bar");
   const progressFill = document.getElementById("xpProgressFill");
@@ -17,10 +17,36 @@
   const comboStatusEl = document.getElementById("xpComboStatus");
   const comboHintEl = document.getElementById("xpComboHint");
 
+  function t(key, fallback){
+    if (window.I18N && typeof window.I18N.t === "function") {
+      const translated = window.I18N.t(key);
+      if (translated) return translated;
+    }
+    return fallback;
+  }
+
+  function formatTemplate(template, values){
+    if (!template || typeof template !== "string") return "";
+    const map = values || {};
+    return template.replace(/\{(\w+)\}/g, (match, token)=> {
+      if (Object.prototype.hasOwnProperty.call(map, token)) {
+        return map[token];
+      }
+      return match;
+    });
+  }
+
   function formatNumber(value){
     const num = Number(value);
     if (!Number.isFinite(num)) return "0";
     return Math.max(0, Math.floor(num)).toLocaleString();
+  }
+
+  function translateComboMode(mode){
+    if (mode === "build") return t("xp_combo_mode_build", "build");
+    if (mode === "sustain") return t("xp_combo_mode_sustain", "sustain");
+    if (mode === "cooldown") return t("xp_combo_mode_cooldown", "cooldown");
+    return mode;
   }
 
   function formatMultiplier(value){
@@ -38,20 +64,29 @@
   }
 
   function formatRemainingHint(value){
-    if (!Number.isFinite(value)) return "Remaining allowance unavailable.";
-    if (value <= 0) return "Daily cap reached. Come back after reset.";
-    return `You can still earn ${formatNumber(value)} XP before the reset.`;
+    if (!Number.isFinite(value)) {
+      return t("xp_summary_remaining_hint_unavailable", "Remaining allowance unavailable.");
+    }
+    if (value <= 0) {
+      return t("xp_summary_remaining_hint_cap", "Daily cap reached. Come back after reset.");
+    }
+    const template = t("xp_summary_remaining_hint", "You can still earn {amount} XP before the reset.");
+    return formatTemplate(template, { amount: formatNumber(value) });
   }
 
   function formatResetHint(epoch){
     if (!Number.isFinite(epoch) || epoch <= Date.now()) return "";
+    const template = t("xp_daily_reset_hint", "Daily XP resets at {time} (Europe/Warsaw).");
     try {
-      const date = new Date(epoch);
-      const time = date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-      return `Daily cap resets at ${time}.`;
+      if (typeof Intl !== "undefined" && typeof Intl.DateTimeFormat === "function") {
+        const formatter = new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Warsaw" });
+        const time = formatter.format(new Date(epoch));
+        return formatTemplate(template, { time });
+      }
     } catch (_error) {
-      return "";
+      return formatTemplate(template, { time: "03:00" });
     }
+    return formatTemplate(template, { time: "03:00" });
   }
 
   function safeInt(value){
@@ -94,9 +129,13 @@
     }
     if (progressDetails) {
       if (forNext > 0) {
-        progressDetails.textContent = `${formatNumber(intoLevel)} / ${formatNumber(forNext)} XP to next level`;
+        const template = t("xp_progress_details", "{current} / {total} XP to next level");
+        progressDetails.textContent = formatTemplate(template, {
+          current: formatNumber(intoLevel),
+          total: formatNumber(forNext)
+        });
       } else {
-        progressDetails.textContent = "Maximum level achieved";
+        progressDetails.textContent = t("xp_progress_details_max", "Maximum level achieved");
       }
     }
   }
@@ -109,13 +148,23 @@
     const timeLeft = expiresAt > now ? expiresAt - now : 0;
     const active = !!(data.active && multiplier > 1 && timeLeft > 0);
     if (boostStatusEl) {
-      boostStatusEl.textContent = active ? `Active boost: ${formatMultiplier(multiplier)}` : "No active boost.";
+      if (active) {
+        const template = t("xp_boost_status_active", "Active boost: {multiplier}");
+        boostStatusEl.textContent = formatTemplate(template, { multiplier: formatMultiplier(multiplier) });
+      } else {
+        boostStatusEl.textContent = t("xp_boost_status_default", "No active boost.");
+      }
     }
     if (boostHintEl) {
       if (active) {
-        boostHintEl.textContent = timeLeft < 10_000 ? "Boost ends soon." : `Ends in ${formatDuration(timeLeft)}.`;
+        if (timeLeft < 10_000) {
+          boostHintEl.textContent = t("xp_boost_hint_ending", "Boost ends soon.");
+        } else {
+          const template = t("xp_boost_hint_timer", "Ends in {time}.");
+          boostHintEl.textContent = formatTemplate(template, { time: formatDuration(timeLeft) });
+        }
       } else {
-        boostHintEl.textContent = "Boosts give temporary XP multipliers when unlocked.";
+        boostHintEl.textContent = t("xp_boost_hint_default", "Boosts give temporary XP multipliers when unlocked.");
       }
     }
   }
@@ -125,13 +174,20 @@
     const multiplier = Number.isFinite(Number(data.multiplier)) ? Number(data.multiplier) : 1;
     const mode = typeof data.mode === "string" ? data.mode : "build";
     if (comboStatusEl) {
-      comboStatusEl.textContent = `Combo: ${formatMultiplier(multiplier)} (${mode})`;
+      const template = t("xp_combo_status", "Combo: {multiplier} ({mode})");
+      comboStatusEl.textContent = formatTemplate(template, {
+        multiplier: formatMultiplier(multiplier),
+        mode: translateComboMode(mode)
+      });
     }
     if (comboHintEl) {
-      let hint = "Keep playing to build your combo.";
-      if (mode === "sustain") hint = "Stay active to keep your combo.";
-      else if (mode === "cooldown") hint = "Combo cooling down.";
-      comboHintEl.textContent = hint;
+      let key = "xp_combo_hint_build";
+      if (mode === "sustain") key = "xp_combo_hint_sustain";
+      else if (mode === "cooldown") key = "xp_combo_hint_cooldown";
+      const fallback = mode === "sustain"
+        ? "Stay active to keep your combo."
+        : (mode === "cooldown" ? "Combo cooling down." : "Keep playing to build your combo.");
+      comboHintEl.textContent = t(key, fallback);
     }
   }
 
@@ -159,12 +215,22 @@
     if (totalEl) totalEl.textContent = formatNumber(totalXp);
     const capText = capValue != null ? `${formatNumber(capValue)} XP` : "—";
     if (capEl) capEl.textContent = capText;
-    if (todayEl) todayEl.textContent = formatNumber(totalToday);
-    if (todayCapEl) todayCapEl.textContent = capText;
+    if (todayLineEl) {
+      const template = t("xp_daily_line", "You have earned {amount} XP today.");
+      todayLineEl.textContent = formatTemplate(template, { amount: formatNumber(totalToday) });
+    }
+    if (capLineEl) {
+      const template = t("xp_daily_cap_line", "The daily XP cap is {cap} XP.");
+      capLineEl.textContent = formatTemplate(template, { cap: capValue != null ? formatNumber(capValue) : "—" });
+    }
     const remainingText = remainingValue != null ? `${formatNumber(remainingValue)} XP` : "—";
     if (remainingEl) remainingEl.textContent = remainingText;
     if (remainingHintEl) remainingHintEl.textContent = formatRemainingHint(remainingValue);
-    if (todayRemainingEl) todayRemainingEl.textContent = remainingText;
+    if (remainingLineEl) {
+      const template = t("xp_daily_remaining_line", "Remaining today: {remaining} XP.");
+      const remainingValueText = remainingValue != null ? formatNumber(remainingValue) : "—";
+      remainingLineEl.textContent = formatTemplate(template, { remaining: remainingValueText });
+    }
     if (resetHintEl) {
       const hint = formatResetHint(nextReset);
       if (hint) {
@@ -197,6 +263,7 @@
     }
     applySnapshot();
     refresh();
+    document.addEventListener("langchange", applySnapshot);
   }
 
   if (document.readyState === "loading") {

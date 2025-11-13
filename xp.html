@@ -80,70 +80,70 @@
     <main>
       <article class="xp-page" aria-labelledby="xpTitle">
         <header class="xp-header">
-          <h1 id="xpTitle">XP Progress</h1>
-          <p class="xp-subtitle">Track your overall XP, daily gains, and level progress.</p>
+          <h1 id="xpTitle" data-i18n="xp_title">XP Progress</h1>
+          <p class="xp-subtitle" data-i18n="xp_subtitle">Track your overall XP, daily gains, and level progress.</p>
         </header>
 
         <div class="xp-content" id="xpContent">
           <section class="xp-card xp-summary" aria-label="XP summary">
             <div class="xp-summary__metric">
-              <span class="xp-summary__label">LEVEL</span>
+              <span class="xp-summary__label" data-i18n="xp_summary_level">LEVEL</span>
               <span class="xp-summary__value" id="xpLevel">1</span>
             </div>
             <div class="xp-summary__metric">
-              <span class="xp-summary__label">TOTAL XP</span>
+              <span class="xp-summary__label" data-i18n="xp_summary_total_xp">TOTAL XP</span>
               <span class="xp-summary__value" id="xpTotal">0</span>
             </div>
             <div class="xp-summary__metric">
-              <span class="xp-summary__label">DAILY LIMIT</span>
+              <span class="xp-summary__label" data-i18n="xp_summary_daily_limit">DAILY LIMIT</span>
               <span class="xp-summary__value" id="xpDailyCap">0 XP</span>
             </div>
             <div class="xp-summary__metric xp-summary__metric--remaining">
-              <span class="xp-summary__label">REMAINING TODAY</span>
+              <span class="xp-summary__label" data-i18n="xp_summary_remaining_today">REMAINING TODAY</span>
               <span class="xp-summary__value" id="xpRemaining">0 XP</span>
-              <span class="xp-summary__subtext" id="xpRemainingHint">You can still earn XP before the reset.</span>
+              <span class="xp-summary__subtext" id="xpRemainingHint" data-i18n="xp_summary_remaining_hint">You can still earn XP before the reset.</span>
             </div>
           </section>
 
           <section class="xp-card" aria-labelledby="xpProgressTitle">
-            <h2 id="xpProgressTitle" class="xp-card__title">Progress to next level</h2>
+            <h2 id="xpProgressTitle" class="xp-card__title" data-i18n="xp_progress_title">Progress to next level</h2>
             <div class="xp-progress">
               <div class="xp-progress__bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
                 <div class="xp-progress__fill" id="xpProgressFill"></div>
               </div>
-              <div class="xp-progress__details" id="xpProgressDetails">0 / 0 XP to next level</div>
+              <div class="xp-progress__details" id="xpProgressDetails" data-i18n="xp_progress_details_fallback">0 / 0 XP to next level</div>
             </div>
           </section>
 
           <section class="xp-card xp-details" aria-labelledby="xpDailyTitle">
-            <h2 id="xpDailyTitle" class="xp-card__title">Daily progress</h2>
-            <p class="xp-details__text" id="xpTodayLine">You have earned <span id="xpToday">0</span> XP today.</p>
-            <p class="xp-details__text" id="xpCapLine">The daily XP cap is <span id="xpTodayCap">0 XP</span>.</p>
-            <p class="xp-details__text" id="xpRemainingLine">Remaining today: <span id="xpTodayRemaining">0 XP</span>.</p>
-            <p class="xp-details__hint" id="xpResetHint" hidden>Daily XP resets at 03:00 (Europe/Warsaw).</p>
-            <p class="xp-details__hint">Each new level requires 10% more XP than the previous one. Play a little every day to keep leveling up!</p>
+            <h2 id="xpDailyTitle" class="xp-card__title" data-i18n="xp_daily_title">Daily progress</h2>
+            <p class="xp-details__text" id="xpTodayLine" data-i18n="xp_daily_line">You have earned {amount} XP today.</p>
+            <p class="xp-details__text" id="xpCapLine" data-i18n="xp_daily_cap_line">The daily XP cap is {cap} XP.</p>
+            <p class="xp-details__text" id="xpRemainingLine" data-i18n="xp_daily_remaining_line">Remaining today: {remaining} XP.</p>
+            <p class="xp-details__hint" id="xpResetHint" data-i18n="xp_daily_reset_hint" hidden>Daily XP resets at 03:00 (Europe/Warsaw).</p>
+            <p class="xp-details__hint" id="xpLevelingHint" data-i18n="xp_daily_leveling_hint">Each new level requires 10% more XP than the previous one. Play a little every day to keep leveling up!</p>
           </section>
 
           <section class="xp-card xp-boost-card" aria-labelledby="xpBoostTitle">
-            <h2 id="xpBoostTitle" class="xp-card__title">Boost &amp; combo</h2>
+            <h2 id="xpBoostTitle" class="xp-card__title" data-i18n="xp_boost_card_title">Boost &amp; combo</h2>
             <div class="xp-boost" role="group" aria-label="Boost and combo status">
               <div class="xp-boost__section">
-                <span class="xp-boost__label">Boost</span>
-                <p class="xp-boost__status" id="xpBoostStatus">No active boost.</p>
-                <p class="xp-boost__hint" id="xpBoostHint">Boosts give temporary XP multipliers when unlocked.</p>
+                <span class="xp-boost__label" data-i18n="xp_boost_label">Boost</span>
+                <p class="xp-boost__status" id="xpBoostStatus" data-i18n="xp_boost_status_default">No active boost.</p>
+                <p class="xp-boost__hint" id="xpBoostHint" data-i18n="xp_boost_hint_default">Boosts give temporary XP multipliers when unlocked.</p>
               </div>
               <div class="xp-boost__section">
-                <span class="xp-boost__label">Combo</span>
-                <p class="xp-boost__status" id="xpComboStatus">Combo: x1 (build)</p>
-                <p class="xp-boost__hint" id="xpComboHint">Keep playing to build your combo.</p>
+                <span class="xp-boost__label" data-i18n="xp_combo_label">Combo</span>
+                <p class="xp-boost__status" id="xpComboStatus" data-i18n="xp_combo_status_default">Combo: x1 (build)</p>
+                <p class="xp-boost__hint" id="xpComboHint" data-i18n="xp_combo_hint_build">Keep playing to build your combo.</p>
               </div>
             </div>
           </section>
         </div>
 
         <section class="xp-card xp-fallback" id="xpUnavailable" aria-live="polite">
-          <h2 class="xp-card__title">XP system unavailable</h2>
-          <p class="xp-details__text">We couldn't load your XP data right now. Refresh the page or try again later.</p>
+          <h2 class="xp-card__title" data-i18n="xp_fallback_title">XP system unavailable</h2>
+          <p class="xp-details__text" data-i18n="xp_fallback_text">We couldn't load your XP data right now. Refresh the page or try again later.</p>
         </section>
       </article>
     </main>
