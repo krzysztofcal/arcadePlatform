@@ -248,8 +248,7 @@
         throw new Error("no_document");
       }
 
-      const escaped = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-      const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Arcade Hub Diagnostics</title><meta name="viewport" content="width=device-width, initial-scale=1"><style>body{font-family:monospace;background:#050910;color:#e6ecff;margin:0;padding:16px;white-space:pre-wrap;word-break:break-word;}header{font-size:14px;margin-bottom:12px;opacity:0.8;}textarea{width:100%;height:240px;margin-top:12px;background:#0b1020;color:#e6ecff;border:1px solid rgba(230,236,255,0.2);padding:8px;font-family:inherit;}</style></head><body><header>Diagnostics dump generated ${new Date().toISOString()}</header><pre>${escaped || "(no diagnostics recorded)"}</pre><textarea readonly>${escaped}</textarea></body></html>`;
+      const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Arcade Hub Diagnostics</title><meta name="viewport" content="width=device-width, initial-scale=1"><style>body{font-family:monospace;background:#050910;color:#e6ecff;margin:0;padding:16px;white-space:pre-wrap;word-break:break-word;}header{font-size:14px;margin-bottom:12px;opacity:0.8;}pre{margin:0;background:#0b1020;padding:12px;border:1px solid rgba(230,236,255,0.2);}</style></head><body><header>Diagnostics dump generated ${new Date().toISOString()}</header><pre id="diagnosticsLog">No diagnostics available…</pre></body></html>`;
 
       if (typeof doc.write === "function") {
         doc.open();
@@ -257,6 +256,13 @@
         doc.close();
       } else {
         doc.documentElement.innerHTML = html;
+      }
+
+      const logContainer = doc.getElementById("diagnosticsLog");
+      if (logContainer) {
+        logContainer.textContent = ""; // Single-source render: keep one container and overwrite it for each dump.
+        const output = text && text.length > 0 ? text : "No diagnostics available…";
+        logContainer.textContent = output;
       }
 
       recordDump("window", true, { length: text.length });
