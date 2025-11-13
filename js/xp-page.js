@@ -248,12 +248,10 @@
 
   function refresh(){
     if (!window.XP || typeof window.XP.refreshStatus !== "function") {
-      applySnapshot();
       return Promise.resolve();
     }
     return window.XP.refreshStatus()
-      .catch(() => null)
-      .then(() => { applySnapshot(); });
+      .catch(() => null);
   }
 
   function init(){
@@ -261,8 +259,7 @@
       setFallbackVisible(true);
       return;
     }
-    applySnapshot();
-    refresh();
+    refresh().then(applySnapshot);
     document.addEventListener("langchange", applySnapshot);
   }
 
@@ -271,4 +268,8 @@
   } else {
     init();
   }
+
+  window.addEventListener("xp:updated", () => {
+    applySnapshot();
+  });
 })();

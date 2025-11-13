@@ -1241,6 +1241,14 @@
     setBadgeLoading(false);
   }
 
+  function dispatchXpUpdatedEvent() {
+    try {
+      if (window && typeof window.dispatchEvent === "function") {
+        window.dispatchEvent(new CustomEvent("xp:updated"));
+      }
+    } catch (_) {}
+  }
+
   function applyServerDelta(data, meta) {
     if (!data || typeof data !== "object") return;
     const keys = Object.keys(data);
@@ -1284,6 +1292,7 @@
     if (skipTotals || totalLifetime == null) {
       saveCache();
       updateBadge();
+      dispatchXpUpdatedEvent();
       return;
     }
 
@@ -1291,6 +1300,7 @@
     if (!ok) {
       saveCache();
       updateBadge();
+      dispatchXpUpdatedEvent();
       return;
     }
 
@@ -1326,6 +1336,7 @@
     }
     saveCache();
     updateBadge();
+    dispatchXpUpdatedEvent();
   }
 
   async function sendWindow(force) {
