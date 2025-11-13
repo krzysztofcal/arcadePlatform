@@ -221,7 +221,8 @@ test.describe('XP Progress page', () => {
     expect(totalXp).toBeGreaterThanOrEqual(totals.totalToday);
 
     const capText = await page.textContent('#xpDailyCap');
-    expect(capText).toContain('3000');
+    const capValue = extractNumber(capText);
+    expect(capValue).toBe(3000);
 
     const earnedToday = extractNumber(await page.textContent('#xpTodayLine'));
     expect(earnedToday).toBeGreaterThan(0);
