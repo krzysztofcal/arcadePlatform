@@ -430,6 +430,9 @@
           state.lastDailyCapLog = now;
           logDebug("award_skip", { reason: "daily_cap" });
         }
+        state.queuedWhole = 0;
+        state.remainder = 0;
+        logDebug("award_drop_buffer", { reason: "daily_cap" });
         return didWork;
       }
       let amount = state.queuedWhole;

@@ -20,6 +20,7 @@
   const LEVEL_MULTIPLIER = 1.1;
 
   const DEFAULT_SCORE_DELTA_CEILING = 10_000;
+  const DEFAULT_CLIENT_DELTA_CAP = 300;
   const DEFAULT_BOOST_SEC = 15;
   const COMBO_CAP = 20;
   const COMBO_SUSTAIN_MS = 5_000;
@@ -59,6 +60,19 @@
     const sanitized = typeof value === "string" ? value.replace(/_/g, "") : value;
     const parsed = Number(sanitized);
     return Number.isFinite(parsed) ? parsed : fallback;
+  }
+
+  function getClientDeltaCap() {
+    if (typeof window === "undefined" || !window) {
+      return DEFAULT_CLIENT_DELTA_CAP;
+    }
+    const raw = Object.prototype.hasOwnProperty.call(window, "XP_DELTA_CAP_CLIENT")
+      ? window.XP_DELTA_CAP_CLIENT
+      : undefined;
+    const parsed = parseNumber(raw, DEFAULT_CLIENT_DELTA_CAP);
+    if (!Number.isFinite(parsed)) return DEFAULT_CLIENT_DELTA_CAP;
+    const normalized = Math.max(0, Math.floor(parsed));
+    return normalized || 0;
   }
 
   function normalizeGameId(value) {
@@ -484,6 +498,15 @@
   function zeroTickCounters() {
     state.eventsSinceLastAward = 0;
     state.scoreDeltaSinceLastAward = 0;
+  }
+
+  function dropScoreBuffers(reason) {
+    state.scoreDelta = 0;
+    state.scoreDeltaRemainder = 0;
+    state.scoreDeltaSinceLastAward = 0;
+    try {
+      logDebug("award_drop_buffer", { reason: reason || "unknown" });
+    } catch (_) {}
   }
 
   function markActiveInput(now) {
@@ -1369,14 +1392,21 @@
       : 0;
 
     if (hasFiniteRemaining && numericRemaining <= 0) {
+      dropScoreBuffers("daily_cap");
       logAwardSkip("daily_cap", { remaining: 0 });
       return;
     }
 
     let sendScore = requestedScore;
+    const clientCap = getClientDeltaCap();
+    const hasClientCap = Number.isFinite(clientCap) && clientCap > 0;
     if (requestedScore > 0 && hasFiniteRemaining && requestedScore > numericRemaining) {
       logDebug("award_preclamp", { want: requestedScore, remaining: numericRemaining });
       sendScore = numericRemaining;
+    }
+    if (requestedScore > 0 && hasClientCap && sendScore > clientCap) {
+      logDebug("award_preclamp", { want: sendScore, capDelta: clientCap });
+      sendScore = clientCap;
     }
     if (requestedScore > 0) {
       const leftover = Math.max(0, requestedScore - sendScore);
@@ -1384,6 +1414,7 @@
       state.scoreDeltaSinceLastAward = Math.max(0, (state.scoreDeltaSinceLastAward || 0) - sendScore);
       payload.scoreDelta = sendScore;
       if (sendScore <= 0) {
+        dropScoreBuffers("daily_cap");
         logAwardSkip("daily_cap", { remaining: Math.max(0, numericRemaining) });
         return;
       }
