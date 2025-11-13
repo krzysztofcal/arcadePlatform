@@ -126,8 +126,18 @@ function buildXpClientStub(config = {}) {
 }
 
 async function clearStorage(page) {
-  await page.goto('about:blank');
-  await page.evaluate(() => localStorage.clear());
+  await page.goto(XP_PAGE, { waitUntil: 'domcontentloaded' });
+  await page.evaluate(() => {
+    try {
+      if (window.localStorage) {
+        window.localStorage.clear();
+      }
+    } catch (err) {
+      if (!(err && err.name === 'SecurityError')) {
+        throw err;
+      }
+    }
+  });
 }
 
 async function waitForXpReady(page) {
@@ -183,6 +193,12 @@ async function openXpPage(page) {
 test.describe('XP Progress page', () => {
   test('shows earned XP and remaining allowance', async ({ page }) => {
     await clearStorage(page);
+    await page.evaluate(() => {
+      if (window.localStorage) {
+        window.localStorage.setItem('__xpProgressProbe', '1');
+        window.localStorage.removeItem('__xpProgressProbe');
+      }
+    });
     await page.addInitScript({ content: buildXpClientStub({ cap: 3000, award: 120, storageKey: '__xpProgressDefault' }) });
 
     await page.goto(GAME_PAGE, { waitUntil: 'domcontentloaded' });
