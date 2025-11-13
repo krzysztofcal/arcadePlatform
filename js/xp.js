@@ -2083,6 +2083,9 @@
     applyServerDelta(payload, { source: "setTotals" });
   }
 
+  /**
+   * Public UI getter that reports the safe remaining allowance for the current day.
+   */
   function getRemainingDaily() {
     maybeResetDailyAllowance();
     if (state.cap == null) return Infinity;
@@ -2096,13 +2099,26 @@
     return Infinity;
   }
 
+  /**
+   * Public UI getter for the epoch (ms) when the daily cap resets, or 0 when unknown.
+   */
   function getNextResetEpoch() {
+    maybeResetDailyAllowance();
     const next = Number(state.nextResetEpoch);
     if (!Number.isFinite(next) || next <= 0) return 0;
     return Math.floor(next);
   }
 
+  /**
+   * Return a UI-friendly snapshot of XP totals.
+   * - totalToday: XP earned during the current day window
+   * - cap: daily cap (null when unlimited)
+   * - totalXp: lifetime XP from the server
+   * - level/xpIntoLevel/xpForNextLevel/xpToNextLevel/progress: level progress helpers
+   * - lastSync: epoch ms of the most recent successful server response
+   */
   function getSnapshot() {
+    maybeResetDailyAllowance();
     if (!state.snapshot) {
       state.snapshot = computeLevel(state.totalLifetime || 0);
     }
@@ -2116,6 +2132,30 @@
       xpToNextLevel: state.snapshot.xpToNextLevel,
       progress: state.snapshot.progress,
       lastSync: state.lastResultTs || 0,
+    };
+  }
+
+  function getBoostSnapshot() {
+    const boost = state.boost && typeof state.boost === "object" ? state.boost : {};
+    const now = Date.now();
+    const expiresAtRaw = Number(boost.expiresAt);
+    const expiresAt = Number.isFinite(expiresAtRaw) && expiresAtRaw > 0 ? Math.floor(expiresAtRaw) : 0;
+    const multRaw = Number(boost.multiplier);
+    const multiplier = Number.isFinite(multRaw) && multRaw > 0 ? multRaw : 1;
+    const active = !!(expiresAt > now && multiplier > 1);
+    const source = typeof boost.source === "string" && boost.source ? boost.source : null;
+    return { active, multiplier, expiresAt, source };
+  }
+
+  function getComboSnapshot() {
+    const snap = snapshotCombo();
+    return {
+      mode: snap.mode,
+      multiplier: snap.multiplier,
+      points: snap.points,
+      stepThreshold: snap.stepThreshold,
+      sustainLeftMs: snap.sustainLeftMs,
+      cooldownLeftMs: snap.cooldownLeftMs,
     };
   }
 
@@ -2384,6 +2424,8 @@
     getRemainingDaily,
     getNextResetEpoch,
     getSnapshot,
+    getBoostSnapshot,
+    getComboSnapshot,
     refreshStatus,
     addScore,
     awardLocalXp,
