@@ -573,6 +573,23 @@ assert.equal(totalsOnlySnapshot.totalToday, 300);
 assert.equal(totalsOnlySnapshot.remaining, 2_700);
 assert.equal(XP.getRemainingDaily(), 2_700);
 
+// Server summaries without daily fields keep the client-tracked today/remaining values
+freshSession('preserve-daily-on-summary');
+const preserveState = getState();
+preserveState.cap = 3_000;
+preserveState.totalToday = 444;
+preserveState.dailyRemaining = 2_556;
+preserveState.totalLifetime = 8_000;
+preserveState.serverTotalXp = 8_000;
+preserveState.badgeBaselineXp = 8_000;
+const snapshotBeforeSummary = XP.getSnapshot();
+const lifetimeAfterSummary = snapshotBeforeSummary.totalXp + 250;
+XP.setTotals(undefined, undefined, lifetimeAfterSummary);
+const snapshotAfterSummary = XP.getSnapshot();
+assert.equal(snapshotAfterSummary.totalToday, snapshotBeforeSummary.totalToday);
+assert.equal(snapshotAfterSummary.remaining, snapshotBeforeSummary.remaining);
+assert.equal(XP.getRemainingDaily(), snapshotBeforeSummary.remaining);
+
 // Remaining allowance from the server is preserved even if the cap is temporarily unknown
 freshSession('remaining-fallback');
 const fallbackState = getState();
