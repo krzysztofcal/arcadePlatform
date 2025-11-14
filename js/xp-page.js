@@ -191,27 +191,22 @@
     }
   }
 
-  function logXpState(label){
+  function logDashboardDebug(stage){
+    if (!window || !window.XP_DEBUG_DAILY_TOTALS) return;
     try {
-      const xpApi = window && window.XP ? window.XP : null;
-      const snapshot = xpApi && typeof xpApi.getSnapshot === "function" ? xpApi.getSnapshot() : null;
-      const remaining = xpApi && typeof xpApi.getRemainingDaily === "function" ? xpApi.getRemainingDaily() : null;
-      const detail = {
+      const xpApi = window.XP;
+      if (!xpApi || typeof xpApi.getSnapshot !== "function") return;
+      const snapshot = xpApi.getSnapshot();
+      const payload = {
         snapshot,
-        remaining,
-        state: xpApi && xpApi.__stateInternal__ != null ? xpApi.__stateInternal__ : "<no-debug-state>"
+        remaining: typeof xpApi.getRemainingDaily === "function" ? xpApi.getRemainingDaily() : null,
+        state: xpApi && xpApi.__stateInternal__ != null ? xpApi.__stateInternal__ : null,
       };
-      const tag = typeof label === "string" && label ? label : "STATE";
-      console.log(`[XP-PAGE][${tag}]`, detail);
-      const eventMap = {
-        HYDRATED: "dashboard_initial",
-        INITIAL: "dashboard_initial",
-        BEFORE_REFRESH: "dashboard_before_totals",
-        SUMMARY: "dashboard_after_totals"
-      };
-      const eventName = eventMap[tag];
-      if (eventName && xpApi && typeof xpApi.log === "function") {
-        try { xpApi.log(eventName, detail); } catch (_) { /* ignore */ }
+      if (typeof console !== "undefined" && console && typeof console.log === "function") {
+        console.log(`[XP-PAGE][${stage || "dashboard"}]`, payload);
+      }
+      if (typeof xpApi.log === "function") {
+        xpApi.log(stage || "dashboard", payload);
       }
     } catch (_) { /* ignore */ }
   }
@@ -327,7 +322,7 @@
       }
     } catch (_) {}
     window.XP.isHydrated = true;
-    logXpState("HYDRATED");
+    logDashboardDebug("dashboard_initial");
     applySnapshot();
   }
 
@@ -337,10 +332,10 @@
       return;
     }
     await hydrateBeforeRender();
-    logXpState("BEFORE_REFRESH");
+    logDashboardDebug("dashboard_before_totals");
     refresh()
       .then(() => {
-        logXpState("SUMMARY");
+        logDashboardDebug("dashboard_after_totals");
         applySnapshot();
       })
       .catch(() => {});

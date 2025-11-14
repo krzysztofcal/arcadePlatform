@@ -492,6 +492,24 @@
     }
   }
 
+  function logDailyTotalsDebug(from, totals, before, after) {
+    if (typeof window === "undefined" || !window || !window.XP_DEBUG_DAILY_TOTALS) return;
+    try {
+      const xpApi = window.XP;
+      const payload = {
+        from: from || "applyServerDelta",
+        totals: totals || null,
+        before: before || null,
+        after: after || null,
+      };
+      if (xpApi && typeof xpApi.log === "function") {
+        xpApi.log("totals_debug", payload);
+      } else {
+        logDebug("totals_debug", payload);
+      }
+    } catch (_) { /* ignore */ }
+  }
+
   function logAwardSkip(reason, extra) {
     const now = Date.now();
     const lastSkip = Number(state.debug.lastAwardSkipLog) || 0;
@@ -1257,19 +1275,25 @@
   function normalizeServerPayload(raw) {
     if (!raw || typeof raw !== "object") return {};
     const normalized = Object.assign({}, raw);
-    const hasDailyCapRaw = Object.prototype.hasOwnProperty.call(raw, "dailyCap")
-      || Object.prototype.hasOwnProperty.call(raw, "cap");
-    const capCandidates = [raw.dailyCap, raw.cap, state.cap, Number(window && window.XP_DAILY_CAP), DEFAULT_DAILY_CAP];
+    const capKeys = ["dailyCap", "cap"];
     let cap = null;
-    for (let i = 0; i < capCandidates.length; i += 1) {
-      const candidate = Number(capCandidates[i]);
-      if (Number.isFinite(candidate)) {
-        cap = Math.max(0, Math.floor(candidate));
+    let capProvided = false;
+    for (let i = 0; i < capKeys.length; i += 1) {
+      const key = capKeys[i];
+      if (!Object.prototype.hasOwnProperty.call(raw, key)) continue;
+      capProvided = true;
+      const numeric = Number(raw[key]);
+      if (Number.isFinite(numeric)) {
+        cap = Math.max(0, Math.floor(numeric));
         break;
       }
     }
-    if (cap != null) {
-      normalized.cap = cap;
+    if (capProvided) {
+      if (cap != null) {
+        normalized.cap = cap;
+      } else {
+        delete normalized.cap;
+      }
     }
 
     const totalTodayKeys = ["totalToday", "todayEarned", "xpToday", "totalTodayXp"];
@@ -1283,13 +1307,20 @@
         delete normalized[key];
         continue;
       }
+      totalTodayProvided = true;
       const numeric = Number(rawValue);
       if (Number.isFinite(numeric)) {
         totalToday = Math.max(0, Math.floor(numeric));
-        totalTodayProvided = true;
         break;
       }
       delete normalized[key];
+    }
+    if (totalTodayProvided) {
+      if (totalToday != null) {
+        normalized.totalToday = totalToday;
+      } else {
+        delete normalized.totalToday;
+      }
     }
 
     const remainingKeys = ["remainingDaily", "remainingToday", "remaining"];
@@ -1303,41 +1334,21 @@
         delete normalized[key];
         continue;
       }
+      remainingProvided = true;
       const numeric = Number(rawValue);
       if (Number.isFinite(numeric)) {
-        const normalizedValue = Math.max(0, Math.floor(numeric));
-        remaining = cap != null ? Math.min(cap, normalizedValue) : normalizedValue;
-        remainingProvided = true;
+        remaining = Math.max(0, Math.floor(numeric));
         break;
       }
       delete normalized[key];
     }
-
-    const hasServerFlag = Object.prototype.hasOwnProperty.call(raw, "__serverHasDaily");
-    const serverHasDaily = hasServerFlag
-      ? raw.__serverHasDaily === true
-      : (hasDailyCapRaw || totalTodayProvided || remainingProvided);
-    normalized.__hasDailyCap = hasDailyCapRaw;
-    normalized.__hasTotalToday = totalTodayProvided;
-    normalized.__hasRemaining = remainingProvided;
-    normalized.__serverHasDaily = serverHasDaily;
-
-    if (serverHasDaily) {
-      if (totalToday == null && remaining != null && cap != null) {
-        totalToday = Math.max(0, cap - remaining);
-      }
-
-      if (remaining == null && totalToday != null && cap != null) {
-        remaining = Math.max(0, cap - totalToday);
-      }
-
-      if (totalToday != null) {
-        normalized.totalToday = totalToday;
-      }
-
+    if (remainingProvided) {
       if (remaining != null) {
         normalized.remainingDaily = remaining;
         normalized.remaining = remaining;
+      } else {
+        delete normalized.remainingDaily;
+        delete normalized.remaining;
       }
     }
 
@@ -1364,10 +1375,6 @@
         delete copy[key];
       }
     }
-    delete copy.__hasDailyCap;
-    delete copy.__hasTotalToday;
-    delete copy.__hasRemaining;
-    delete copy.__serverHasDaily;
     return copy;
   }
 
@@ -1429,43 +1436,7 @@
 
   function applyServerDelta(data, meta) {
     if (!data || typeof data !== "object") return;
-    const capMetaPresent = Object.prototype.hasOwnProperty.call(data, "__hasDailyCap");
-    const totalMetaPresent = Object.prototype.hasOwnProperty.call(data, "__hasTotalToday");
-    const remainingMetaPresent = Object.prototype.hasOwnProperty.call(data, "__hasRemaining");
-    const serverMetaPresent = Object.prototype.hasOwnProperty.call(data, "__serverHasDaily");
     const remainingKeyNames = ["remainingDaily", "remaining", "remainingToday"];
-
-    const hasDailyCapFlag = capMetaPresent
-      ? data.__hasDailyCap === true
-      : Object.prototype.hasOwnProperty.call(data, "cap");
-    const hasTotalTodayFlag = totalMetaPresent
-      ? data.__hasTotalToday === true
-      : Object.prototype.hasOwnProperty.call(data, "totalToday");
-    const hasRemainingFlag = remainingMetaPresent
-      ? data.__hasRemaining === true
-      : remainingKeyNames.some((key) => Object.prototype.hasOwnProperty.call(data, key));
-    const serverHasDailyFlag = serverMetaPresent
-      ? data.__serverHasDaily === true
-      : (hasDailyCapFlag || hasTotalTodayFlag || hasRemainingFlag);
-    delete data.__hasDailyCap;
-    delete data.__hasTotalToday;
-    delete data.__hasRemaining;
-    delete data.__serverHasDaily;
-    const logBefore = () => {
-      try {
-        if (window.console && typeof console.debug === "function") {
-          console.debug("[XP] applyServerDelta before:", getSnapshot(), "delta:", data, "meta:", meta || null);
-        }
-      } catch (_) {}
-    };
-    const logAfter = () => {
-      try {
-        if (window.console && typeof console.debug === "function") {
-          console.debug("[XP] applyServerDelta after:", getSnapshot());
-        }
-      } catch (_) {}
-    };
-    logBefore();
     try {
       const keys = Object.keys(data);
       if (!keys.length) return;
@@ -1476,88 +1447,46 @@
         dailyRemaining: Number.isFinite(state.dailyRemaining) ? state.dailyRemaining : null,
       };
 
-      let normalizedCap = null;
-      if (hasDailyCapFlag && Object.prototype.hasOwnProperty.call(data, "cap")) {
+      let capUpdated = false;
+      if (Object.prototype.hasOwnProperty.call(data, "cap")) {
         const capCandidate = Number(data.cap);
         if (Number.isFinite(capCandidate)) {
-          normalizedCap = Math.max(0, Math.floor(capCandidate));
+          state.cap = Math.max(0, Math.floor(capCandidate));
+          capUpdated = true;
         }
       }
-      if (normalizedCap == null && typeof state.cap === "number" && Number.isFinite(state.cap)) {
-        normalizedCap = Math.max(0, Math.floor(state.cap));
+      if (!capUpdated && state.cap == null && Number.isFinite(DEFAULT_DAILY_CAP)) {
+        state.cap = Math.max(0, Math.floor(DEFAULT_DAILY_CAP));
       }
-      if (normalizedCap == null && Number.isFinite(DEFAULT_DAILY_CAP)) {
-        normalizedCap = Math.max(0, Math.floor(DEFAULT_DAILY_CAP));
-      }
-      if (serverHasDailyFlag && normalizedCap != null) {
-        state.cap = normalizedCap;
-      } else if (state.cap == null && normalizedCap != null) {
-        state.cap = normalizedCap;
-      }
-      const capForDailyMath = Number.isFinite(state.cap) ? Math.max(0, Math.floor(state.cap)) : null;
 
-      let totalTodayFromPayload = null;
-      if (serverHasDailyFlag && Object.prototype.hasOwnProperty.call(data, "totalToday")) {
+      if (Object.prototype.hasOwnProperty.call(data, "totalToday")) {
         const nextTotalToday = Number(data.totalToday);
         if (Number.isFinite(nextTotalToday)) {
-          totalTodayFromPayload = Math.max(0, Math.floor(nextTotalToday));
-        }
-      }
-
-      let remainingFromPayload = null;
-      if (serverHasDailyFlag) {
-        for (let i = 0; i < remainingKeyNames.length; i += 1) {
-          const key = remainingKeyNames[i];
-          if (!Object.prototype.hasOwnProperty.call(data, key)) continue;
-          const numeric = Number(data[key]);
-          if (Number.isFinite(numeric)) {
-            remainingFromPayload = Math.max(0, Math.floor(numeric));
-            break;
-          }
-        }
-      }
-
-      if (serverHasDailyFlag) {
-        if (totalTodayFromPayload == null && remainingFromPayload != null && capForDailyMath != null) {
-          const derivedToday = Math.max(0, capForDailyMath - remainingFromPayload);
-          totalTodayFromPayload = derivedToday;
-        }
-
-        if (remainingFromPayload == null && totalTodayFromPayload != null && capForDailyMath != null) {
-          remainingFromPayload = Math.max(0, capForDailyMath - totalTodayFromPayload);
-        }
-
-        if (totalTodayFromPayload != null) {
-          state.totalToday = totalTodayFromPayload;
-        }
-
-        if (remainingFromPayload != null) {
-          state.dailyRemaining = remainingFromPayload;
+          state.totalToday = Math.max(0, Math.floor(nextTotalToday));
         }
       }
 
       syncDailyRemainingFromTotals();
 
-      try {
-        logDebug("totals_debug", {
-          from: meta && meta.source ? meta.source : "applyServerDelta",
-          serverHasDaily: serverHasDailyFlag,
-          hasDailyCap: hasDailyCapFlag,
-          hasTotalToday: hasTotalTodayFlag,
-          hasRemaining: hasRemainingFlag,
-          totals: {
-            cap: Object.prototype.hasOwnProperty.call(data, "cap") ? data.cap : undefined,
-            totalToday: Object.prototype.hasOwnProperty.call(data, "totalToday") ? data.totalToday : undefined,
-            remaining: data.remaining,
-          },
-          before: beforeDaily,
-          after: {
-            cap: typeof state.cap === "number" ? state.cap : null,
-            totalToday: typeof state.totalToday === "number" ? state.totalToday : null,
-            dailyRemaining: Number.isFinite(state.dailyRemaining) ? state.dailyRemaining : null,
-          },
-        });
-      } catch (_) {}
+      const totalsForLog = {
+        cap: Object.prototype.hasOwnProperty.call(data, "cap") ? data.cap : undefined,
+        totalToday: Object.prototype.hasOwnProperty.call(data, "totalToday") ? data.totalToday : undefined,
+        remaining: undefined,
+      };
+      for (let i = 0; i < remainingKeyNames.length; i += 1) {
+        const key = remainingKeyNames[i];
+        if (Object.prototype.hasOwnProperty.call(data, key)) {
+          totalsForLog.remaining = data[key];
+          break;
+        }
+      }
+      const afterDaily = {
+        cap: typeof state.cap === "number" ? state.cap : null,
+        totalToday: typeof state.totalToday === "number" ? state.totalToday : null,
+        dailyRemaining: Number.isFinite(state.dailyRemaining) ? state.dailyRemaining : null,
+      };
+      const source = meta && meta.source ? meta.source : "applyServerDelta";
+      logDailyTotalsDebug(source, totalsForLog, beforeDaily, afterDaily);
 
       if (typeof data.dayKey === "string" && data.dayKey) {
         state.dayKey = data.dayKey;
@@ -1632,7 +1561,7 @@
       updateBadge();
       dispatchXpUpdatedEvent();
     } finally {
-      logAfter();
+      /* noop */
     }
   }
 
@@ -2408,7 +2337,6 @@
 
   function setTotals(total, cap) {
     let payload;
-    const remainingKeys = ["remaining", "remainingDaily", "remainingToday"];
 
     if (total && typeof total === "object" && !Array.isArray(total)) {
       payload = Object.assign({ ok: true }, total);
@@ -2416,14 +2344,6 @@
         && !Object.prototype.hasOwnProperty.call(payload, "cap")) {
         payload.cap = payload.dailyCap;
       }
-      const hasCap = Object.prototype.hasOwnProperty.call(payload, "cap")
-        || Object.prototype.hasOwnProperty.call(payload, "dailyCap");
-      const hasTotalToday = Object.prototype.hasOwnProperty.call(payload, "totalToday");
-      const hasRemaining = remainingKeys.some((key) => Object.prototype.hasOwnProperty.call(payload, key));
-      payload.__hasDailyCap = hasCap;
-      payload.__hasTotalToday = hasTotalToday;
-      payload.__hasRemaining = hasRemaining;
-      payload.__serverHasDaily = hasCap || hasTotalToday || hasRemaining;
     } else {
       payload = { ok: true };
       if (typeof total === "number") {
@@ -2435,10 +2355,6 @@
       if (arguments.length >= 3 && typeof arguments[2] === "number") {
         payload.totalLifetime = arguments[2];
       }
-      payload.__hasDailyCap = Object.prototype.hasOwnProperty.call(payload, "cap");
-      payload.__hasTotalToday = Object.prototype.hasOwnProperty.call(payload, "totalToday");
-      payload.__hasRemaining = false;
-      payload.__serverHasDaily = payload.__hasDailyCap || payload.__hasTotalToday;
     }
 
     applyServerDelta(payload, { source: "setTotals" });
@@ -2541,17 +2457,7 @@
     }
     return window.XPClient.fetchStatus()
       .then((data) => {
-        try {
-          if (window.console && typeof console.debug === "function") {
-            console.debug("[XP] refreshStatus raw:", data);
-          }
-        } catch (_) {}
         const normalized = normalizeServerPayload(data);
-        try {
-          if (window.console && typeof console.debug === "function") {
-            console.debug("[XP] refreshStatus normalized:", normalized);
-          }
-        } catch (_) {}
         const lifetimeOnly = stripDailyFieldsForReconcile(normalized);
         applyServerDelta(lifetimeOnly, { source: "reconcile" });
         try {
@@ -2588,17 +2494,7 @@
     }
     return window.XPClient.fetchStatus()
       .then((data) => {
-        try {
-          if (window.console && typeof console.debug === "function") {
-            console.debug("[XP] refreshStatus raw:", data);
-          }
-        } catch (_) {}
         const normalized = normalizeServerPayload(data);
-        try {
-          if (window.console && typeof console.debug === "function") {
-            console.debug("[XP] refreshStatus normalized:", normalized);
-          }
-        } catch (_) {}
         handleResponse(normalized);
         return data;
       })
