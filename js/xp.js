@@ -1275,6 +1275,7 @@
   function normalizeServerPayload(raw) {
     if (!raw || typeof raw !== "object") return {};
     const normalized = Object.assign({}, raw);
+    const hasExplicitServerDaily = raw.__serverHasDaily === true;
     const capKeys = ["dailyCap", "cap"];
     let cap = null;
     let capProvided = false;
@@ -1350,6 +1351,14 @@
         delete normalized.remainingDaily;
         delete normalized.remaining;
       }
+    }
+
+    const totalTodayValid = totalToday != null;
+    const remainingValid = remaining != null;
+    if (hasExplicitServerDaily || totalTodayValid || remainingValid) {
+      normalized.__serverHasDaily = true;
+    } else if (Object.prototype.hasOwnProperty.call(normalized, "__serverHasDaily")) {
+      delete normalized.__serverHasDaily;
     }
 
     return normalized;
@@ -1447,6 +1456,7 @@
         dailyRemaining: Number.isFinite(state.dailyRemaining) ? state.dailyRemaining : null,
       };
 
+      const serverHasDaily = data.__serverHasDaily === true;
       let capUpdated = false;
       if (Object.prototype.hasOwnProperty.call(data, "cap")) {
         const capCandidate = Number(data.cap);
@@ -1473,12 +1483,25 @@
         totalToday: Object.prototype.hasOwnProperty.call(data, "totalToday") ? data.totalToday : undefined,
         remaining: undefined,
       };
+      let remainingFromServer = null;
+      let remainingKeyUsed = null;
       for (let i = 0; i < remainingKeyNames.length; i += 1) {
         const key = remainingKeyNames[i];
-        if (Object.prototype.hasOwnProperty.call(data, key)) {
-          totalsForLog.remaining = data[key];
-          break;
+        if (!Object.prototype.hasOwnProperty.call(data, key)) continue;
+        remainingKeyUsed = key;
+        const numeric = Number(data[key]);
+        if (Number.isFinite(numeric)) {
+          remainingFromServer = Math.max(0, Math.floor(numeric));
         }
+        break;
+      }
+      if (remainingKeyUsed) {
+        totalsForLog.remaining = data[remainingKeyUsed];
+      }
+      if (remainingFromServer != null) {
+        state.dailyRemaining = remainingFromServer;
+      } else if (!serverHasDaily) {
+        // Keep derived value when the server has no opinion about the daily allowance.
       }
       const afterDaily = {
         cap: typeof state.cap === "number" ? state.cap : null,
@@ -2458,8 +2481,10 @@
     return window.XPClient.fetchStatus()
       .then((data) => {
         const normalized = normalizeServerPayload(data);
-        const lifetimeOnly = stripDailyFieldsForReconcile(normalized);
-        applyServerDelta(lifetimeOnly, { source: "reconcile" });
+        const payload = (normalized && normalized.__serverHasDaily === true)
+          ? normalized
+          : stripDailyFieldsForReconcile(normalized);
+        applyServerDelta(payload, { source: "reconcile" });
         try {
           logDebug("badge_reconcile", {
             badgeShownXp: Number(state.badgeShownXp) || 0,

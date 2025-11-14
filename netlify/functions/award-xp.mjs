@@ -210,7 +210,8 @@ const keySessionSync = (u, s) => `${KEY_NS}:session:last:${hash(`${u}|${s}`)}`;
 const keyLock = (u, s) => `${KEY_NS}:lock:${hash(`${u}|${s}`)}`;
 
 async function getTotals({ userId, sessionId, now = Date.now() }) {
-  const todayKey = keyDaily(userId, getDailyKey(now));
+  const dayKeyNow = getDailyKey(now);
+  const todayKey = keyDaily(userId, dayKeyNow);
   const totalKeyK = keyTotal(userId);
   const sessionKeyK = sessionId ? keySession(userId, sessionId) : null;
   const sessionSyncKeyK = sessionId ? keySessionSync(userId, sessionId) : null;
@@ -219,13 +220,34 @@ async function getTotals({ userId, sessionId, now = Date.now() }) {
     if (sessionKeyK) reads.push(store.get(sessionKeyK));
     if (sessionSyncKeyK) reads.push(store.get(sessionSyncKeyK));
     const values = await Promise.all(reads);
-    const current = Number(values[0] ?? "0") || 0;
+    const currentRaw = Number(values[0] ?? "0") || 0;
+    const current = Math.max(0, Math.floor(currentRaw));
     const lifetime = Number(values[1] ?? "0") || 0;
     const sessionTotal = sessionKeyK ? (Number(values[2] ?? "0") || 0) : 0;
     const lastSync = sessionSyncKeyK ? (Number(values[sessionKeyK ? 3 : 2] ?? "0") || 0) : 0;
-    return { current, lifetime, sessionTotal, lastSync };
+    const cap = DAILY_CAP;
+    const remaining = Math.max(0, cap - Math.min(cap, current));
+    return {
+      current,
+      lifetime,
+      sessionTotal,
+      lastSync,
+      cap,
+      remaining,
+      dayKey: dayKeyNow,
+      nextReset: getNextResetEpoch(now),
+    };
   } catch {
-    return { current: 0, lifetime: 0, sessionTotal: 0, lastSync: 0 };
+    return {
+      current: 0,
+      lifetime: 0,
+      sessionTotal: 0,
+      lastSync: 0,
+      cap: DAILY_CAP,
+      remaining: DAILY_CAP,
+      dayKey: dayKeyNow,
+      nextReset: getNextResetEpoch(now),
+    };
   }
 }
 
@@ -272,13 +294,17 @@ export async function handler(event) {
   };
 
   const buildResponse = (statusCode, payload, totalTodaySource, options = {}) => {
-    const { debugExtra = {}, skipCookie = false } = options;
+    const { debugExtra = {}, skipCookie = false, totals = null } = options;
     const safeTotal = Math.min(DAILY_CAP, Math.max(0, sanitizeTotal(totalTodaySource)));
     const remaining = Math.max(0, DAILY_CAP - safeTotal);
     payload.totalToday = safeTotal;
     payload.remaining = remaining;
-    payload.dayKey ??= dayKeyNow;
-    payload.nextReset ??= nextReset;
+    payload.dayKey = totals?.dayKey || payload.dayKey || dayKeyNow;
+    payload.nextReset = Number.isFinite(totals?.nextReset) ? totals.nextReset : (payload.nextReset ?? nextReset);
+    if (totals && Number.isFinite(totals.cap) && payload.cap == null) {
+      payload.cap = totals.cap;
+    }
+    payload.__serverHasDaily = true;
     applyDiagnostics(payload, {
       redisDailyTotalRaw: totalTodaySource,
       redisDailyTotal: safeTotal,
@@ -358,6 +384,7 @@ export async function handler(event) {
     return buildResponse(statusCode, payload, totalSource, {
       debugExtra: options.debugExtra ?? {},
       skipCookie,
+      totals,
     });
   };
 
