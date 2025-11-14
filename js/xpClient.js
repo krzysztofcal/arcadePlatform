@@ -161,6 +161,38 @@
     else if (Number.isFinite(payload.cap)) setClientCap(Number(payload.cap));
   }
 
+  function normalizeStatusPayload(payload) {
+    if (!payload || typeof payload !== "object") return payload;
+    let capValue = Number(payload.cap);
+    if (!Number.isFinite(capValue)) {
+      const envCap = Number(window && window.XP_DAILY_CAP);
+      if (Number.isFinite(envCap)) {
+        capValue = Math.max(0, Math.floor(envCap));
+        payload.cap = capValue;
+      }
+    } else {
+      capValue = Math.max(0, Math.floor(capValue));
+      payload.cap = capValue;
+    }
+
+    const todayRaw = Number(payload.totalToday);
+    const remainingRaw = Number(payload.remaining);
+    const hasToday = Number.isFinite(todayRaw);
+    const hasRemaining = Number.isFinite(remainingRaw);
+
+    if (!hasToday && hasRemaining && Number.isFinite(capValue)) {
+      const normalizedRemaining = Math.max(0, Math.floor(remainingRaw));
+      payload.totalToday = Math.max(0, capValue - normalizedRemaining);
+    }
+
+    if (!hasRemaining && hasToday && Number.isFinite(capValue)) {
+      const normalizedToday = Math.max(0, Math.floor(todayRaw));
+      payload.remaining = Math.max(0, capValue - normalizedToday);
+    }
+
+    return payload;
+  }
+
   function clampAfterServerCap(body, response) {
     const cap = Number(response?.cap ?? response?.capDelta);
     if (Number.isFinite(cap) && cap > 0) {
@@ -232,7 +264,7 @@
     }
     const payload = await res.json();
     updateCapFromPayload(payload);
-    return payload;
+    return normalizeStatusPayload(payload);
   }
 
   window.XPClient = { postWindow, fetchStatus };
