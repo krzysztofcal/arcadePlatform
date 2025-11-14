@@ -201,10 +201,17 @@
         remaining,
         state: xpApi && xpApi.__stateInternal__ != null ? xpApi.__stateInternal__ : "<no-debug-state>"
       };
-      if (label === "SUMMARY") {
-        console.log("[XP-PAGE][SUMMARY]", detail);
-      } else {
-        console.log("[XP-PAGE][HYDRATED]", detail);
+      const tag = typeof label === "string" && label ? label : "STATE";
+      console.log(`[XP-PAGE][${tag}]`, detail);
+      const eventMap = {
+        HYDRATED: "dashboard_initial",
+        INITIAL: "dashboard_initial",
+        BEFORE_REFRESH: "dashboard_before_totals",
+        SUMMARY: "dashboard_after_totals"
+      };
+      const eventName = eventMap[tag];
+      if (eventName && xpApi && typeof xpApi.log === "function") {
+        try { xpApi.log(eventName, detail); } catch (_) { /* ignore */ }
       }
     } catch (_) { /* ignore */ }
   }
@@ -330,6 +337,7 @@
       return;
     }
     await hydrateBeforeRender();
+    logXpState("BEFORE_REFRESH");
     refresh()
       .then(() => {
         logXpState("SUMMARY");

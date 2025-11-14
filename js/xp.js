@@ -1272,43 +1272,64 @@
 
     const totalTodayKeys = ["totalToday", "todayEarned", "xpToday", "totalTodayXp"];
     let totalToday = null;
+    let totalTodayProvided = false;
     for (let i = 0; i < totalTodayKeys.length; i += 1) {
       const key = totalTodayKeys[i];
       if (!Object.prototype.hasOwnProperty.call(normalized, key)) continue;
-      const numeric = Number(normalized[key]);
+      const rawValue = normalized[key];
+      if (rawValue == null) {
+        delete normalized[key];
+        continue;
+      }
+      const numeric = Number(rawValue);
       if (Number.isFinite(numeric)) {
         totalToday = Math.max(0, Math.floor(numeric));
+        totalTodayProvided = true;
         break;
       }
+      delete normalized[key];
     }
 
     const remainingKeys = ["remainingDaily", "remainingToday", "remaining"];
     let remaining = null;
+    let remainingProvided = false;
     for (let i = 0; i < remainingKeys.length; i += 1) {
       const key = remainingKeys[i];
       if (!Object.prototype.hasOwnProperty.call(normalized, key)) continue;
-      const numeric = Number(normalized[key]);
+      const rawValue = normalized[key];
+      if (rawValue == null) {
+        delete normalized[key];
+        continue;
+      }
+      const numeric = Number(rawValue);
       if (Number.isFinite(numeric)) {
-        remaining = Math.max(0, Math.floor(numeric));
+        const normalizedValue = Math.max(0, Math.floor(numeric));
+        remaining = cap != null ? Math.min(cap, normalizedValue) : normalizedValue;
+        remainingProvided = true;
         break;
       }
+      delete normalized[key];
     }
 
-    if (totalToday == null && remaining != null && cap != null) {
-      totalToday = Math.max(0, cap - remaining);
-    }
+    const serverHasDaily = totalTodayProvided || remainingProvided;
 
-    if (remaining == null && totalToday != null && cap != null) {
-      remaining = Math.max(0, cap - totalToday);
-    }
+    if (serverHasDaily) {
+      if (totalToday == null && remaining != null && cap != null) {
+        totalToday = Math.max(0, cap - remaining);
+      }
 
-    if (totalToday != null) {
-      normalized.totalToday = totalToday;
-    }
+      if (remaining == null && totalToday != null && cap != null) {
+        remaining = Math.max(0, cap - totalToday);
+      }
 
-    if (remaining != null) {
-      normalized.remainingDaily = remaining;
-      normalized.remaining = remaining;
+      if (totalToday != null) {
+        normalized.totalToday = totalToday;
+      }
+
+      if (remaining != null) {
+        normalized.remainingDaily = remaining;
+        normalized.remaining = remaining;
+      }
     }
 
     return normalized;
@@ -2674,6 +2695,10 @@
     startSession,
     stopSession,
     nudge,
+    log: function (eventName, payload) {
+      if (!eventName || typeof eventName !== "string") return;
+      try { logDebug(eventName, payload || {}); } catch (_) {}
+    },
     setTotals,
     loadFromCache: function () { loadCache(); },
     hydrateFromCache: function () { hydrateRuntimeState(); },
