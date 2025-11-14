@@ -2537,17 +2537,29 @@
     if (HOST_PAGE === "xp") {
       return window.XPClient.fetchStatus()
         .then((data) => {
-          handleResponse(data, { source: "status" });
+          const normalized = normalizeServerPayload(data);
+          handleResponse(normalized, { source: "status" });
+          setBadgeLoading(false);
           return data;
         })
-        .catch((err) => { handleError(err); throw err; });
+        .catch((err) => {
+          setBadgeLoading(false);
+          handleError(err);
+          throw err;
+        });
     }
     return window.XPClient.fetchStatus()
       .then((data) => {
-        handleResponse(data, { source: "status" });
+        const normalized = normalizeServerPayload(data);
+        handleResponse(normalized, { source: "status" });
+        setBadgeLoading(false);
         return data;
       })
-      .catch((err) => { handleError(err); throw err; });
+      .catch((err) => {
+        setBadgeLoading(false);
+        handleError(err);
+        throw err;
+      });
   }
 
   function maybeRefreshStatus() {
