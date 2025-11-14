@@ -2377,12 +2377,40 @@
   }
 
   function setTotals(total, cap) {
-    const payload = { ok: true };
-    if (typeof total === "number") payload.totalToday = total;
-    if (typeof cap === "number") payload.cap = cap;
-    if (arguments.length >= 3 && typeof arguments[2] === "number") {
-      payload.totalLifetime = arguments[2];
+    let payload;
+    const remainingKeys = ["remaining", "remainingDaily", "remainingToday"];
+
+    if (total && typeof total === "object" && !Array.isArray(total)) {
+      payload = Object.assign({ ok: true }, total);
+      if (Object.prototype.hasOwnProperty.call(payload, "dailyCap")
+        && !Object.prototype.hasOwnProperty.call(payload, "cap")) {
+        payload.cap = payload.dailyCap;
+      }
+      const hasCap = Object.prototype.hasOwnProperty.call(payload, "cap")
+        || Object.prototype.hasOwnProperty.call(payload, "dailyCap");
+      const hasTotalToday = Object.prototype.hasOwnProperty.call(payload, "totalToday");
+      const hasRemaining = remainingKeys.some((key) => Object.prototype.hasOwnProperty.call(payload, key));
+      payload.__hasDailyCap = hasCap;
+      payload.__hasTotalToday = hasTotalToday;
+      payload.__hasRemaining = hasRemaining;
+      payload.__serverHasDaily = hasCap || hasTotalToday || hasRemaining;
+    } else {
+      payload = { ok: true };
+      if (typeof total === "number") {
+        payload.totalToday = total;
+      }
+      if (typeof cap === "number") {
+        payload.cap = cap;
+      }
+      if (arguments.length >= 3 && typeof arguments[2] === "number") {
+        payload.totalLifetime = arguments[2];
+      }
+      payload.__hasDailyCap = Object.prototype.hasOwnProperty.call(payload, "cap");
+      payload.__hasTotalToday = Object.prototype.hasOwnProperty.call(payload, "totalToday");
+      payload.__hasRemaining = false;
+      payload.__serverHasDaily = payload.__hasDailyCap || payload.__hasTotalToday;
     }
+
     applyServerDelta(payload, { source: "setTotals" });
   }
 

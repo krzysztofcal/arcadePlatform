@@ -584,7 +584,7 @@ preserveState.serverTotalXp = 8_000;
 preserveState.badgeBaselineXp = 8_000;
 const snapshotBeforeSummary = XP.getSnapshot();
 const lifetimeAfterSummary = snapshotBeforeSummary.totalXp + 250;
-XP.setTotals(undefined, undefined, lifetimeAfterSummary);
+XP.setTotals({ totalLifetime: lifetimeAfterSummary });
 const snapshotAfterSummary = XP.getSnapshot();
 assert.equal(snapshotAfterSummary.totalToday, snapshotBeforeSummary.totalToday);
 assert.equal(snapshotAfterSummary.remaining, snapshotBeforeSummary.remaining);
