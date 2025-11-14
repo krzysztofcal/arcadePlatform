@@ -165,6 +165,13 @@
     if (!payload || typeof payload !== "object") return payload;
     let capValue = Number(payload.cap);
     if (!Number.isFinite(capValue)) {
+      const dailyCapValue = Number(payload.dailyCap);
+      if (Number.isFinite(dailyCapValue)) {
+        capValue = Math.max(0, Math.floor(dailyCapValue));
+        payload.cap = capValue;
+      }
+    }
+    if (!Number.isFinite(capValue)) {
       const envCap = Number(window && window.XP_DAILY_CAP);
       if (Number.isFinite(envCap)) {
         capValue = Math.max(0, Math.floor(envCap));
@@ -175,8 +182,16 @@
       payload.cap = capValue;
     }
 
-    const todayRaw = Number(payload.totalToday);
-    const remainingRaw = Number(payload.remaining);
+    payload.dailyCap = capValue;
+
+    let todayRaw = Number(payload.totalToday);
+    if (!Number.isFinite(todayRaw)) {
+      todayRaw = Number(payload.awardedToday);
+    }
+    let remainingRaw = Number(payload.remaining);
+    if (!Number.isFinite(remainingRaw)) {
+      remainingRaw = Number(payload.remainingToday);
+    }
     const hasToday = Number.isFinite(todayRaw);
     const hasRemaining = Number.isFinite(remainingRaw);
 

@@ -171,14 +171,29 @@ export async function handler(event) {
 
   const buildResponse = (statusCode, payload, totalTodaySource, options = {}) => {
     const { debugExtra = {}, skipCookie = false, totals = null } = options;
-    const safeTotal = Math.min(DAILY_CAP, Math.max(0, sanitizeTotal(totalTodaySource)));
-    const remaining = Math.max(0, DAILY_CAP - safeTotal);
+    const resolvedCap = (() => {
+      if (totals && Number.isFinite(totals.cap)) return Math.max(0, Math.floor(totals.cap));
+      if (Number.isFinite(payload.cap)) return Math.max(0, Math.floor(payload.cap));
+      return DAILY_CAP;
+    })();
+    const safeTotal = Math.min(resolvedCap, Math.max(0, sanitizeTotal(totalTodaySource)));
+    const remaining = Math.max(0, resolvedCap - safeTotal);
+    payload.cap = resolvedCap;
+    payload.dailyCap = resolvedCap;
     payload.totalToday = safeTotal;
+    payload.awardedToday = safeTotal;
     payload.remaining = remaining;
+    payload.remainingToday = remaining;
     payload.dayKey = totals?.dayKey || payload.dayKey || dayKeyNow;
-    payload.nextReset = Number.isFinite(totals?.nextReset) ? totals.nextReset : (payload.nextReset ?? nextReset);
-    if (totals && Number.isFinite(totals.cap) && payload.cap == null) {
-      payload.cap = totals.cap;
+    const resolvedReset = Number.isFinite(totals?.nextReset)
+      ? totals.nextReset
+      : (payload.nextReset ?? nextReset);
+    payload.nextReset = resolvedReset;
+    payload.nextResetEpoch = resolvedReset;
+    if (payload.totalLifetime != null && Number.isFinite(payload.totalLifetime)) {
+      payload.totalXp = payload.totalLifetime;
+    } else if (totals && Number.isFinite(totals.lifetime)) {
+      payload.totalXp = totals.lifetime;
     }
     payload.__serverHasDaily = true;
     applyDiagnostics(payload, {

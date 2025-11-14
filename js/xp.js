@@ -510,6 +510,24 @@
     } catch (_) { /* ignore */ }
   }
 
+  function dumpDailyState() {
+    if (typeof window === "undefined" || !window) return null;
+    if (!window.XP_DEBUG_DAILY_TOTALS && !window.XP_DIAG) return null;
+    const payload = {
+      cap: typeof state.cap === "number" ? state.cap : null,
+      totalToday: typeof state.totalToday === "number" ? state.totalToday : null,
+      dailyRemaining: Number.isFinite(state.dailyRemaining) ? state.dailyRemaining : null,
+      nextResetEpoch: Number(state.nextResetEpoch) || 0,
+      dayKey: state.dayKey || null,
+    };
+    try {
+      if (typeof console !== "undefined" && console && typeof console.log === "function") {
+        console.log("[XP][daily_state]", payload);
+      }
+    } catch (_) {}
+    return payload;
+  }
+
   function logAwardSkip(reason, extra) {
     const now = Date.now();
     const lastSkip = Number(state.debug.lastAwardSkipLog) || 0;
@@ -1297,7 +1315,7 @@
       }
     }
 
-    const totalTodayKeys = ["totalToday", "todayEarned", "xpToday", "totalTodayXp"];
+    const totalTodayKeys = ["totalToday", "awardedToday", "todayEarned", "xpToday", "totalTodayXp"];
     let totalToday = null;
     let totalTodayProvided = false;
     for (let i = 0; i < totalTodayKeys.length; i += 1) {
@@ -1371,6 +1389,7 @@
       "cap",
       "dailyCap",
       "totalToday",
+      "awardedToday",
       "todayEarned",
       "xpToday",
       "totalTodayXp",
@@ -1533,7 +1552,8 @@
         || reason === "insufficient-activity";
 
       const totalLifetime = (typeof data.totalLifetime === "number") ? data.totalLifetime
-        : (typeof data.total === "number" ? data.total : null);
+        : (typeof data.totalXp === "number") ? data.totalXp
+          : (typeof data.total === "number" ? data.total : null);
 
       if (skipTotals || totalLifetime == null) {
         saveCache();
@@ -2367,6 +2387,14 @@
         && !Object.prototype.hasOwnProperty.call(payload, "cap")) {
         payload.cap = payload.dailyCap;
       }
+      if (Object.prototype.hasOwnProperty.call(payload, "awardedToday")
+        && !Object.prototype.hasOwnProperty.call(payload, "totalToday")) {
+        payload.totalToday = payload.awardedToday;
+      }
+      if (Object.prototype.hasOwnProperty.call(payload, "remainingToday")
+        && !Object.prototype.hasOwnProperty.call(payload, "remaining")) {
+        payload.remaining = payload.remainingToday;
+      }
     } else {
       payload = { ok: true };
       if (typeof total === "number") {
@@ -2767,6 +2795,7 @@
     addScore,
     awardLocalXp,
     flushXp,
+    dumpDailyState,
     isHydrated: typeof window.XP === "object" && window.XP && typeof window.XP.isHydrated === "boolean"
       ? window.XP.isHydrated
       : false,

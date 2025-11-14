@@ -573,6 +573,23 @@ assert.equal(totalsOnlySnapshot.totalToday, 300);
 assert.equal(totalsOnlySnapshot.remaining, 2_700);
 assert.equal(XP.getRemainingDaily(), 2_700);
 
+// Server alias fields hydrate daily totals without additional hints
+freshSession('server-aliases');
+XP.setTotals({
+  dailyCap: 2_500,
+  awardedToday: 400,
+  remainingToday: 2_100,
+  totalXp: 9_000,
+  nextResetEpoch: 987_000,
+});
+const aliasSnapshot = XP.getSnapshot();
+assert.equal(aliasSnapshot.cap, 2_500);
+assert.equal(aliasSnapshot.totalToday, 400);
+assert.equal(aliasSnapshot.remaining, 2_100);
+assert.equal(XP.getRemainingDaily(), 2_100);
+const aliasState = getState();
+assert.equal(aliasState.nextResetEpoch, 987_000);
+
 // Server summaries without daily fields keep the client-tracked today/remaining values
 freshSession('preserve-daily-on-summary');
 const preserveState = getState();
