@@ -553,6 +553,26 @@ const remainingSnapshot = XP.getSnapshot();
 assert.equal(remainingSnapshot.totalToday, 124);
 assert.equal(remainingSnapshot.remaining, 2_876);
 
+// Local awards adjust the derived remaining allowance without waiting for server syncs
+freshSession('remaining-drift');
+XP.setTotals(100, 3_000, 5_000);
+const localAward = XP.awardLocalXp(1);
+assert(localAward > 0, 'local award should grant XP');
+const snapshotAfterLocalAward = XP.getSnapshot();
+const derivedRemaining = Math.max(0, snapshotAfterLocalAward.cap - snapshotAfterLocalAward.totalToday);
+assert.equal(snapshotAfterLocalAward.remaining, derivedRemaining);
+assert.equal(XP.getRemainingDaily(), derivedRemaining);
+XP.stopSession({ flush: false });
+
+// Totals-only payloads still produce the correct remaining allowance
+const driftState = getState();
+driftState.dailyRemaining = NaN;
+XP.setTotals(300, 3_000, 5_500);
+const totalsOnlySnapshot = XP.getSnapshot();
+assert.equal(totalsOnlySnapshot.totalToday, 300);
+assert.equal(totalsOnlySnapshot.remaining, 2_700);
+assert.equal(XP.getRemainingDaily(), 2_700);
+
 // BFCache/pageshow hydration refreshes runtime state and boosts
 localStorageMock.setItem(RUNTIME_CACHE_KEY, JSON.stringify({
   carry: 0,

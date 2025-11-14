@@ -305,6 +305,8 @@
     lastBoostDetail: null,
     storedHighScore: null,
     storedHighScoreGameId: null,
+    // Derived from cap - totalToday. Server hints are normalized through
+    // syncDailyRemainingFromTotals() so this never drifts from the totals.
     dailyRemaining: Infinity,
     nextResetEpoch: 0,
     dayKey: null,
@@ -969,15 +971,10 @@
     if (Number.isFinite(todayValue)) {
       const normalizedToday = Math.max(0, Math.floor(todayValue));
       const candidate = normalizedCap - normalizedToday;
-      if (!Number.isFinite(candidate)) return;
-      if (!Number.isFinite(state.dailyRemaining) || state.dailyRemaining == null) {
-        state.dailyRemaining = Math.max(0, Math.floor(candidate));
-      }
+      state.dailyRemaining = Math.max(0, Math.floor(candidate));
       return;
     }
-    if (!Number.isFinite(state.dailyRemaining) || state.dailyRemaining == null) {
-      state.dailyRemaining = normalizedCap;
-    }
+    state.dailyRemaining = normalizedCap;
   }
 
   function maybeResetDailyAllowance(now) {
@@ -1940,6 +1937,7 @@
     if (awarded <= 0) return 0;
     state.totalToday = (Number(state.totalToday) || 0) + awarded;
     state.totalLifetime = (Number(state.totalLifetime) || 0) + awarded;
+    syncDailyRemainingFromTotals();
     state.regen.lastAward = Date.now();
     state.lastResultTs = state.regen.lastAward;
     state.sessionXp = Math.max(0, (Number(state.sessionXp) || 0) + awarded);
@@ -2200,13 +2198,14 @@
    */
   function getRemainingDaily() {
     maybeResetDailyAllowance();
-    if (typeof state.cap !== "number" || !Number.isFinite(state.cap)) return Infinity;
+    const capValue = Number(state.cap);
+    if (!Number.isFinite(capValue)) return Infinity;
     const remaining = Number(state.dailyRemaining);
     if (Number.isFinite(remaining)) {
       return Math.max(0, Math.floor(remaining));
     }
     if (typeof state.totalToday === "number") {
-      const normalizedCap = Math.max(0, Math.floor(Number(state.cap) || 0));
+      const normalizedCap = Math.max(0, Math.floor(capValue));
       const normalizedToday = Math.max(0, Math.floor(Number(state.totalToday) || 0));
       return Math.max(0, normalizedCap - normalizedToday);
     }
