@@ -1323,19 +1323,12 @@
     let remainingFromPayload = null;
     if (typeof data.remaining === "number") {
       remainingFromPayload = Math.max(0, Math.floor(Number(data.remaining) || 0));
-      state.dailyRemaining = remainingFromPayload;
     }
 
     if (totalTodayFromPayload == null && remainingFromPayload != null && normalizedCap != null) {
       const derivedToday = Math.max(0, normalizedCap - remainingFromPayload);
       state.totalToday = derivedToday;
       totalTodayFromPayload = derivedToday;
-    }
-
-    if (remainingFromPayload == null && totalTodayFromPayload != null && normalizedCap != null) {
-      const derivedRemaining = Math.max(0, normalizedCap - totalTodayFromPayload);
-      state.dailyRemaining = derivedRemaining;
-      remainingFromPayload = derivedRemaining;
     }
 
     syncDailyRemainingFromTotals();
