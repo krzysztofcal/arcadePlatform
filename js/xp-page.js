@@ -201,8 +201,13 @@
     const totalToday = safeInt(snapshot && snapshot.totalToday) || 0;
     const totalXp = safeInt(snapshot && snapshot.totalXp) || 0;
     const level = safeInt(snapshot && snapshot.level) || 1;
-    const remainingRaw = typeof window.XP.getRemainingDaily === "function" ? window.XP.getRemainingDaily() : null;
-    let remainingValue = safeInt(remainingRaw);
+    const snapshotRemainingRaw = snapshot && snapshot.remaining;
+    let remainingValue = safeInt(snapshotRemainingRaw);
+    let runtimeRemainingRaw = null;
+    if (remainingValue == null && typeof window.XP.getRemainingDaily === "function") {
+      runtimeRemainingRaw = window.XP.getRemainingDaily();
+      remainingValue = safeInt(runtimeRemainingRaw);
+    }
     if (remainingValue == null && capValue != null) {
       remainingValue = Math.max(0, capValue - totalToday);
     }
@@ -224,7 +229,8 @@
           displayToday,
           capValue,
           remainingValue,
-          rawRemaining: remainingRaw,
+          snapshotRemaining: snapshotRemainingRaw,
+          runtimeRemaining: runtimeRemainingRaw,
         });
       } catch (_) { /* ignore */ }
     }

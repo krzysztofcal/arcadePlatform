@@ -1004,12 +1004,6 @@
       if (!parsed || typeof parsed !== "object") return;
       if (typeof parsed.totalToday === "number") state.totalToday = parsed.totalToday;
       if (typeof parsed.cap === "number") state.cap = parsed.cap;
-      if (typeof parsed.dailyRemaining === "number") {
-        const cachedRemaining = Number(parsed.dailyRemaining);
-        if (Number.isFinite(cachedRemaining)) {
-          state.dailyRemaining = cachedRemaining;
-        }
-      }
       if (typeof parsed.totalLifetime === "number") state.totalLifetime = parsed.totalLifetime;
       if (typeof parsed.badgeShownXp === "number") state.badgeShownXp = parsed.badgeShownXp;
       if (typeof parsed.serverTotalXp === "number") state.serverTotalXp = parsed.serverTotalXp;
@@ -1051,7 +1045,6 @@
       const payload = {
         totalToday: state.totalToday,
         cap: state.cap,
-        dailyRemaining: Number.isFinite(state.dailyRemaining) ? Math.max(0, Math.floor(state.dailyRemaining)) : null,
         totalLifetime: state.totalLifetime,
         badgeShownXp: state.badgeShownXp,
         serverTotalXp: state.serverTotalXp,
@@ -2229,10 +2222,11 @@
     if (!state.snapshot) {
       state.snapshot = computeLevel(state.totalLifetime || 0);
     }
+    const remaining = getRemainingDaily();
     return {
       totalToday: typeof state.totalToday === "number" ? state.totalToday : 0,
       cap: state.cap != null ? state.cap : null,
-      remaining: Number.isFinite(state.dailyRemaining) ? Math.max(0, Math.floor(state.dailyRemaining)) : null,
+      remaining: Number.isFinite(remaining) ? Math.max(0, Math.floor(remaining)) : null,
       totalXp: state.snapshot.totalXp,
       level: state.snapshot.level,
       xpIntoLevel: state.snapshot.xpIntoLevel,
