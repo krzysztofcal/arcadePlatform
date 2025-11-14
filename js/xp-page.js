@@ -201,12 +201,15 @@
     const totalToday = safeInt(snapshot && snapshot.totalToday) || 0;
     const totalXp = safeInt(snapshot && snapshot.totalXp) || 0;
     const level = safeInt(snapshot && snapshot.level) || 1;
-    const snapshotRemainingRaw = snapshot && snapshot.remaining;
-    let remainingValue = safeInt(snapshotRemainingRaw);
     let runtimeRemainingRaw = null;
-    if (remainingValue == null && typeof window.XP.getRemainingDaily === "function") {
+    let remainingValue = null;
+    if (typeof window.XP.getRemainingDaily === "function") {
       runtimeRemainingRaw = window.XP.getRemainingDaily();
       remainingValue = safeInt(runtimeRemainingRaw);
+    }
+    const snapshotRemainingRaw = snapshot && snapshot.remaining;
+    if (remainingValue == null) {
+      remainingValue = safeInt(snapshotRemainingRaw);
     }
     if (remainingValue == null && capValue != null) {
       remainingValue = Math.max(0, capValue - totalToday);

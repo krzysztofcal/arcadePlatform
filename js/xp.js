@@ -2219,9 +2219,8 @@
    */
   function getSnapshot() {
     maybeResetDailyAllowance();
-    if (!state.snapshot) {
-      state.snapshot = computeLevel(state.totalLifetime || 0);
-    }
+    const totalLifetime = Math.max(0, Number(state.totalLifetime) || 0);
+    state.snapshot = computeLevel(totalLifetime);
     const remaining = getRemainingDaily();
     return {
       totalToday: typeof state.totalToday === "number" ? state.totalToday : 0,

@@ -573,6 +573,13 @@ assert.equal(totalsOnlySnapshot.totalToday, 300);
 assert.equal(totalsOnlySnapshot.remaining, 2_700);
 assert.equal(XP.getRemainingDaily(), 2_700);
 
+// Snapshots recompute level data each time totals change
+const baselineSnapshot = XP.getSnapshot();
+const nextLifetime = baselineSnapshot.totalXp + 500;
+XP.setTotals(0, 3_000, nextLifetime);
+const refreshedSnapshot = XP.getSnapshot();
+assert.equal(refreshedSnapshot.totalXp, nextLifetime);
+
 // BFCache/pageshow hydration refreshes runtime state and boosts
 localStorageMock.setItem(RUNTIME_CACHE_KEY, JSON.stringify({
   carry: 0,
