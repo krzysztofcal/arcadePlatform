@@ -191,9 +191,30 @@
     }
   }
 
+  function logXpState(label){
+    try {
+      const xpApi = window && window.XP ? window.XP : null;
+      const snapshot = xpApi && typeof xpApi.getSnapshot === "function" ? xpApi.getSnapshot() : null;
+      const remaining = xpApi && typeof xpApi.getRemainingDaily === "function" ? xpApi.getRemainingDaily() : null;
+      const detail = {
+        snapshot,
+        remaining,
+        state: xpApi && xpApi.__stateInternal__ != null ? xpApi.__stateInternal__ : "<no-debug-state>"
+      };
+      if (label === "SUMMARY") {
+        console.log("[XP-PAGE][SUMMARY]", detail);
+      } else {
+        console.log("[XP-PAGE][HYDRATED]", detail);
+      }
+    } catch (_) { /* ignore */ }
+  }
+
   function applySnapshot(){
     if (!window.XP || typeof window.XP.getSnapshot !== "function") {
       setFallbackVisible(true);
+      return;
+    }
+    if (!window.XP.isHydrated) {
       return;
     }
     const snapshot = window.XP.getSnapshot();
@@ -285,12 +306,36 @@
       .catch(() => null);
   }
 
-  function init(){
+  async function hydrateBeforeRender(){
+    if (!window.XP) return;
+    window.XP.isHydrated = false;
+    try {
+      if (typeof window.XP.loadFromCache === "function") {
+        await window.XP.loadFromCache();
+      }
+    } catch (_) {}
+    try {
+      if (typeof window.XP.hydrateFromCache === "function") {
+        await window.XP.hydrateFromCache();
+      }
+    } catch (_) {}
+    window.XP.isHydrated = true;
+    logXpState("HYDRATED");
+    applySnapshot();
+  }
+
+  async function init(){
     if (!window.XP) {
       setFallbackVisible(true);
       return;
     }
-    refresh().then(applySnapshot);
+    await hydrateBeforeRender();
+    refresh()
+      .then(() => {
+        logXpState("SUMMARY");
+        applySnapshot();
+      })
+      .catch(() => {});
     document.addEventListener("langchange", applySnapshot);
   }
 

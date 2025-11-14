@@ -1002,7 +1002,12 @@
       if (!raw) return;
       const parsed = JSON.parse(raw);
       if (!parsed || typeof parsed !== "object") return;
-      if (typeof parsed.totalToday === "number") state.totalToday = parsed.totalToday;
+      if (typeof parsed.totalToday === "number") {
+        const cachedToday = Number(parsed.totalToday);
+        if (Number.isFinite(cachedToday)) {
+          state.totalToday = cachedToday;
+        }
+      }
       if (typeof parsed.cap === "number") state.cap = parsed.cap;
       if (typeof parsed.totalLifetime === "number") state.totalLifetime = parsed.totalLifetime;
       if (typeof parsed.badgeShownXp === "number") state.badgeShownXp = parsed.badgeShownXp;
@@ -1043,7 +1048,7 @@
   function saveCache() {
     try {
       const payload = {
-        totalToday: state.totalToday,
+        totalToday: Number.isFinite(Number(state.totalToday)) ? Number(state.totalToday) : 0,
         cap: state.cap,
         totalLifetime: state.totalLifetime,
         badgeShownXp: state.badgeShownXp,
@@ -1068,6 +1073,9 @@
         flushPending: state.flush.pending || 0,
         lastSync: state.flush.lastSync || 0,
         boost: state.boost,
+        totalToday: Number.isFinite(Number(state.totalToday))
+          ? Math.max(0, Math.floor(Number(state.totalToday)))
+          : 0,
       };
       window.localStorage.setItem(RUNTIME_CACHE_KEY, JSON.stringify(payload));
     } catch (_) { /* ignore */ }
@@ -1099,6 +1107,10 @@
           cooldownLeftMs: 0,
           cap: COMBO_CAP,
         };
+      }
+      const cachedToday = parseNumber(parsed.totalToday, state.totalToday || 0);
+      if (Number.isFinite(cachedToday)) {
+        state.totalToday = Math.max(0, Math.floor(cachedToday));
       }
       state.regen.carry = parseNumber(parsed.carry, state.regen.carry || 0) || 0;
       state.regen.momentum = parseNumber(parsed.momentum, state.regen.momentum || 0) || 0;
@@ -1165,6 +1177,7 @@
         }
       }
       ensureComboState();
+      syncDailyRemainingFromTotals();
     } catch (_) {
       if (!state.flush.lastSync) state.flush.lastSync = Date.now();
     }
@@ -2545,6 +2558,8 @@
     stopSession,
     nudge,
     setTotals,
+    loadFromCache: function () { loadCache(); },
+    hydrateFromCache: function () { hydrateRuntimeState(); },
     getRemainingDaily,
     getNextResetEpoch,
     getSnapshot,
@@ -2554,6 +2569,9 @@
     addScore,
     awardLocalXp,
     flushXp,
+    isHydrated: typeof window.XP === "object" && window.XP && typeof window.XP.isHydrated === "boolean"
+      ? window.XP.isHydrated
+      : false,
     // Public API: dispatch an event so host integrations remain decoupled.
     requestBoost: function (multiplier, ttlMs, reason) {
       let detail;
@@ -2630,7 +2648,21 @@
     },
     scoreDeltaCeiling: MAX_SCORE_DELTA,
 
-    isRunning: function(){ try { return !!(typeof state !== 'undefined' ? state.running : (this && this.__running)); } catch(_) { return !!(this && this.__running); } },});
+    isRunning: function(){ try { return !!(typeof state !== 'undefined' ? state.running : (this && this.__running)); } catch(_) { return !!(this && this.__running); } },
+  });
+
+  try {
+    if (window.XP && typeof Object.defineProperty === "function") {
+      Object.defineProperty(window.XP, "__stateInternal__", {
+        configurable: true,
+        get: function () { return state; }
+      });
+    } else if (window.XP) {
+      window.XP.__stateInternal__ = state;
+    }
+  } catch (_) {
+    try { window.XP.__stateInternal__ = state; } catch (_) {}
+  }
 })(typeof window !== "undefined" ? window : this, typeof document !== "undefined" ? document : undefined);
 // --- XP resume polyfill (idempotent) ---
 (function () {
