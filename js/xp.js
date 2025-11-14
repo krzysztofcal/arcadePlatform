@@ -1316,6 +1316,7 @@
     let remainingFromPayload = null;
     if (typeof data.remaining === "number") {
       remainingFromPayload = Math.max(0, Math.floor(Number(data.remaining) || 0));
+      state.dailyRemaining = remainingFromPayload;
     }
 
     if (totalTodayFromPayload == null && remainingFromPayload != null && normalizedCap != null) {
@@ -1325,6 +1326,10 @@
     }
 
     syncDailyRemainingFromTotals();
+
+    if (!Number.isFinite(Number(state.cap)) && remainingFromPayload != null) {
+      state.dailyRemaining = remainingFromPayload;
+    }
     if (typeof data.dayKey === "string" && data.dayKey) {
       state.dayKey = data.dayKey;
     }
@@ -2185,7 +2190,13 @@
   function getRemainingDaily() {
     maybeResetDailyAllowance();
     const capValue = Number(state.cap);
-    if (!Number.isFinite(capValue)) return Infinity;
+    if (!Number.isFinite(capValue)) {
+      const fallback = Number(state.dailyRemaining);
+      if (Number.isFinite(fallback)) {
+        return Math.max(0, Math.floor(fallback));
+      }
+      return Infinity;
+    }
     const remaining = Number(state.dailyRemaining);
     if (Number.isFinite(remaining)) {
       return Math.max(0, Math.floor(remaining));

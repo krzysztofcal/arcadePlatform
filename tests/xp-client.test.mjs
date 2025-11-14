@@ -573,6 +573,20 @@ assert.equal(totalsOnlySnapshot.totalToday, 300);
 assert.equal(totalsOnlySnapshot.remaining, 2_700);
 assert.equal(XP.getRemainingDaily(), 2_700);
 
+// Remaining allowance from the server is preserved even if the cap is temporarily unknown
+freshSession('remaining-fallback');
+const fallbackState = getState();
+fallbackState.cap = null;
+fallbackState.totalToday = null;
+fallbackState.dailyRemaining = 1_111;
+fallbackState.serverTotalXp = 0;
+fallbackState.badgeBaselineXp = 0;
+fallbackState.badgeShownXp = 0;
+const fallbackRemaining = XP.getRemainingDaily();
+assert.equal(fallbackRemaining, 1_111);
+const fallbackSnapshot = XP.getSnapshot();
+assert.equal(fallbackSnapshot.remaining, 1_111);
+
 // Snapshots recompute level data each time totals change
 const baselineSnapshot = XP.getSnapshot();
 const nextLifetime = baselineSnapshot.totalXp + 500;
