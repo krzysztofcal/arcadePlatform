@@ -1,5 +1,6 @@
 (function () {
-  const FN_URL = "/.netlify/functions/award-xp";
+  const AWARD_URL = "/.netlify/functions/award-xp";
+  const STATUS_URL = "/.netlify/functions/xp-status";
   const USER_KEY = "kcswh:userId";
   const SESSION_KEY = "kcswh:sessionId";
   const MAX_TS = Number.MAX_SAFE_INTEGER;
@@ -122,7 +123,7 @@
 
   async function sendRequest(body) {
     try {
-      const res = await fetch(FN_URL, {
+      const res = await fetch(AWARD_URL, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
@@ -263,10 +264,8 @@
     throw new Error("XP request failed: exhausted retries");
   }
 
-  async function fetchStatus() {
-    const { userId, sessionId } = ensureIds();
-    const body = { userId, sessionId, gameId: "status", statusOnly: true };
-    const res = await fetch(FN_URL, {
+  async function fetchStatusFrom(url, body) {
+    const res = await fetch(url, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
@@ -280,6 +279,23 @@
     const payload = await res.json();
     updateCapFromPayload(payload);
     return normalizeStatusPayload(payload);
+  }
+
+  async function fetchStatus() {
+    const { userId, sessionId } = ensureIds();
+    const baseBody = { userId, sessionId };
+    let primaryError = null;
+    try {
+      return await fetchStatusFrom(STATUS_URL, baseBody);
+    } catch (err) {
+      primaryError = err;
+    }
+    const fallbackBody = { userId, sessionId, gameId: "status", statusOnly: true };
+    try {
+      return await fetchStatusFrom(AWARD_URL, fallbackBody);
+    } catch (err) {
+      throw primaryError || err;
+    }
   }
 
   window.XPClient = { postWindow, fetchStatus };

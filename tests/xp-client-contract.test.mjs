@@ -80,5 +80,53 @@ async function loadClientWithFetch(fetchImpl) {
     );
   }
 
+  // fetchStatus prefers xp-status endpoint
+  {
+    const requests = [];
+    const XPClient = await loadClientWithFetch(async (url, opts) => {
+      requests.push({ url, body: opts?.body ? JSON.parse(opts.body) : null });
+      if (url.includes('xp-status')) {
+        return response(200, {
+          cap: 3000,
+          totalToday: 123,
+          remaining: 2877,
+          __serverHasDaily: true,
+        });
+      }
+      return response(200, { ok: true });
+    });
+    const status = await XPClient.fetchStatus();
+    assert.equal(requests.length, 1);
+    assert.ok(requests[0].url.includes('xp-status'));
+    assert.equal(status.totalToday, 123);
+    assert.equal(status.remaining, 2877);
+  }
+
+  // fetchStatus falls back to award endpoint on failure
+  {
+    const requests = [];
+    const XPClient = await loadClientWithFetch(async (url, opts) => {
+      requests.push({ url, body: opts?.body ? JSON.parse(opts.body) : null });
+      if (url.includes('xp-status')) {
+        return response(500, { error: 'status_fail' });
+      }
+      if (url.includes('award-xp')) {
+        return response(200, {
+          cap: 3000,
+          totalToday: 50,
+          remaining: 2950,
+          __serverHasDaily: true,
+        });
+      }
+      return response(404, { error: 'not_found' });
+    });
+    const status = await XPClient.fetchStatus();
+    assert.equal(requests.length, 2);
+    assert.ok(requests[0].url.includes('xp-status'));
+    assert.ok(requests[1].url.includes('award-xp'));
+    assert.equal(status.totalToday, 50);
+    assert.equal(status.remaining, 2950);
+  }
+
   console.log('xp-client contract tests passed');
 })();

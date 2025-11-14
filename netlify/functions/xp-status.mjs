@@ -13,7 +13,7 @@ function corsHeaders(origin) {
     "content-type": "application/json; charset=utf-8",
     "access-control-allow-origin": allow,
     "access-control-allow-headers": "content-type,authorization,x-api-key",
-    "access-control-allow-methods": "POST,OPTIONS",
+    "access-control-allow-methods": "GET,POST,OPTIONS",
     "cache-control": "no-store",
   };
   if (allow !== "*") headers["Vary"] = "Origin";
