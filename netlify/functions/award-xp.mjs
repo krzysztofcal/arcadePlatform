@@ -279,7 +279,12 @@ export async function handler(event) {
     payload.remaining = remaining;
     payload.dayKey ??= dayKeyNow;
     payload.nextReset ??= nextReset;
-    applyDiagnostics(payload, { redisDailyTotalRaw: totalTodaySource, redisDailyTotal: safeTotal, ...debugExtra });
+    applyDiagnostics(payload, {
+      redisDailyTotalRaw: totalTodaySource,
+      redisDailyTotal: safeTotal,
+      remainingAfter: remaining,
+      ...debugExtra,
+    });
     const headers = skipCookie
       ? undefined
       : { "Set-Cookie": buildXpCookie({ key: dayKeyNow, total: safeTotal, secret, now, nextReset }) };

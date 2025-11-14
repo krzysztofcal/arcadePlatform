@@ -542,6 +542,17 @@ assert.equal(status.pending, 26);
 assert.equal(status.lastSync, 55_000);
 assert.equal(status.inflight, false);
 
+// Remaining daily allowance reflects runtime state and snapshot surfaces the same number
+hydrated.cap = 3_000;
+hydrated.totalToday = 124;
+hydrated.dailyRemaining = 2_876;
+hydrated.snapshot = null;
+const remainingAllowance = XP.getRemainingDaily();
+assert.equal(remainingAllowance, 2_876);
+const remainingSnapshot = XP.getSnapshot();
+assert.equal(remainingSnapshot.totalToday, 124);
+assert.equal(remainingSnapshot.remaining, 2_876);
+
 // BFCache/pageshow hydration refreshes runtime state and boosts
 localStorageMock.setItem(RUNTIME_CACHE_KEY, JSON.stringify({
   carry: 0,
