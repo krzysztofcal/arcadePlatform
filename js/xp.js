@@ -2535,20 +2535,16 @@
     if (!window.XPClient || typeof window.XPClient.fetchStatus !== "function") return Promise.resolve(null);
     setBadgeLoading(true);
     if (HOST_PAGE === "xp") {
-      return reconcileWithServer()
+      return window.XPClient.fetchStatus()
         .then((data) => {
-          setBadgeLoading(false);
+          handleResponse(data, { source: "status" });
           return data;
         })
-        .catch((err) => {
-          setBadgeLoading(false);
-          throw err;
-        });
+        .catch((err) => { handleError(err); throw err; });
     }
     return window.XPClient.fetchStatus()
       .then((data) => {
-        const normalized = normalizeServerPayload(data);
-        handleResponse(normalized);
+        handleResponse(data, { source: "status" });
         return data;
       })
       .catch((err) => { handleError(err); throw err; });
