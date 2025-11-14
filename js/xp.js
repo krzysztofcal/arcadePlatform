@@ -1313,7 +1313,10 @@
       delete normalized[key];
     }
 
-    const serverHasDaily = hasDailyCapRaw || totalTodayProvided || remainingProvided;
+    const hasServerFlag = Object.prototype.hasOwnProperty.call(raw, "__serverHasDaily");
+    const serverHasDaily = hasServerFlag
+      ? raw.__serverHasDaily === true
+      : (hasDailyCapRaw || totalTodayProvided || remainingProvided);
     normalized.__hasDailyCap = hasDailyCapRaw;
     normalized.__hasTotalToday = totalTodayProvided;
     normalized.__hasRemaining = remainingProvided;
@@ -1339,6 +1342,33 @@
     }
 
     return normalized;
+  }
+
+  function stripDailyFieldsForReconcile(payload) {
+    if (!payload || typeof payload !== "object") return {};
+    const copy = Object.assign({}, payload);
+    const dailyKeys = [
+      "cap",
+      "dailyCap",
+      "totalToday",
+      "todayEarned",
+      "xpToday",
+      "totalTodayXp",
+      "remaining",
+      "remainingDaily",
+      "remainingToday",
+    ];
+    for (let i = 0; i < dailyKeys.length; i += 1) {
+      const key = dailyKeys[i];
+      if (Object.prototype.hasOwnProperty.call(copy, key)) {
+        delete copy[key];
+      }
+    }
+    delete copy.__hasDailyCap;
+    delete copy.__hasTotalToday;
+    delete copy.__hasRemaining;
+    delete copy.__serverHasDaily;
+    return copy;
   }
 
   function attachBadge() {
@@ -2522,7 +2552,8 @@
             console.debug("[XP] refreshStatus normalized:", normalized);
           }
         } catch (_) {}
-        applyServerDelta(normalized, { source: "reconcile" });
+        const lifetimeOnly = stripDailyFieldsForReconcile(normalized);
+        applyServerDelta(lifetimeOnly, { source: "reconcile" });
         try {
           logDebug("badge_reconcile", {
             badgeShownXp: Number(state.badgeShownXp) || 0,
