@@ -1,4 +1,5 @@
 const { test, expect } = require('@playwright/test');
+const { driveActiveWindow } = require('./helpers/xp-driver');
 
 const GAME_PAGE = process.env.XP_E2E_PAGE ?? '/game_cats.html';
 const VISIBILITY_WARMUP_MS = 2_200;
@@ -67,6 +68,8 @@ async function runWindow(page, scoreDelta) {
     }, scoreDelta);
   }
 
+  await driveActiveWindow(page);
+
   await page.evaluate(() => {
     const xp = window.XP;
     if (!xp || typeof xp.stopSession !== 'function') return;
@@ -83,6 +86,9 @@ function getPostWindowPayloads(page) {
 }
 
 test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => {
+    window.__XP_TEST_DISABLE_IDLE_GUARD = true;
+  });
   await page.addInitScript({ content: initXpClientRecorder() });
 });
 

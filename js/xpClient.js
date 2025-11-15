@@ -1,5 +1,6 @@
 (function () {
-  const FN_URL = "/.netlify/functions/award-xp";
+  const AWARD_URL = "/.netlify/functions/award-xp";
+  const STATUS_URL = "/.netlify/functions/xp-status";
   const USER_KEY = "kcswh:userId";
   const SESSION_KEY = "kcswh:sessionId";
   const MAX_TS = Number.MAX_SAFE_INTEGER;
@@ -122,7 +123,7 @@
 
   async function sendRequest(body) {
     try {
-      const res = await fetch(FN_URL, {
+      const res = await fetch(AWARD_URL, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
@@ -159,6 +160,53 @@
     if (!payload || typeof payload !== "object") return;
     if (Number.isFinite(payload.capDelta)) setClientCap(Number(payload.capDelta));
     else if (Number.isFinite(payload.cap)) setClientCap(Number(payload.cap));
+  }
+
+  function normalizeStatusPayload(payload) {
+    if (!payload || typeof payload !== "object") return payload;
+    let capValue = Number(payload.cap);
+    if (!Number.isFinite(capValue)) {
+      const dailyCapValue = Number(payload.dailyCap);
+      if (Number.isFinite(dailyCapValue)) {
+        capValue = Math.max(0, Math.floor(dailyCapValue));
+        payload.cap = capValue;
+      }
+    }
+    if (!Number.isFinite(capValue)) {
+      const envCap = Number(window && window.XP_DAILY_CAP);
+      if (Number.isFinite(envCap)) {
+        capValue = Math.max(0, Math.floor(envCap));
+        payload.cap = capValue;
+      }
+    } else {
+      capValue = Math.max(0, Math.floor(capValue));
+      payload.cap = capValue;
+    }
+
+    payload.dailyCap = capValue;
+
+    let todayRaw = Number(payload.totalToday);
+    if (!Number.isFinite(todayRaw)) {
+      todayRaw = Number(payload.awardedToday);
+    }
+    let remainingRaw = Number(payload.remaining);
+    if (!Number.isFinite(remainingRaw)) {
+      remainingRaw = Number(payload.remainingToday);
+    }
+    const hasToday = Number.isFinite(todayRaw);
+    const hasRemaining = Number.isFinite(remainingRaw);
+
+    if (!hasToday && hasRemaining && Number.isFinite(capValue)) {
+      const normalizedRemaining = Math.max(0, Math.floor(remainingRaw));
+      payload.totalToday = Math.max(0, capValue - normalizedRemaining);
+    }
+
+    if (!hasRemaining && hasToday && Number.isFinite(capValue)) {
+      const normalizedToday = Math.max(0, Math.floor(todayRaw));
+      payload.remaining = Math.max(0, capValue - normalizedToday);
+    }
+
+    return payload;
   }
 
   function clampAfterServerCap(body, response) {
@@ -216,10 +264,8 @@
     throw new Error("XP request failed: exhausted retries");
   }
 
-  async function fetchStatus() {
-    const { userId, sessionId } = ensureIds();
-    const body = { userId, sessionId, gameId: "status", statusOnly: true };
-    const res = await fetch(FN_URL, {
+  async function fetchStatusFrom(url, body) {
+    const res = await fetch(url, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
@@ -232,7 +278,24 @@
     }
     const payload = await res.json();
     updateCapFromPayload(payload);
-    return payload;
+    return normalizeStatusPayload(payload);
+  }
+
+  async function fetchStatus() {
+    const { userId, sessionId } = ensureIds();
+    const baseBody = { userId, sessionId };
+    let primaryError = null;
+    try {
+      return await fetchStatusFrom(STATUS_URL, baseBody);
+    } catch (err) {
+      primaryError = err;
+    }
+    const fallbackBody = { userId, sessionId, gameId: "status", statusOnly: true };
+    try {
+      return await fetchStatusFrom(AWARD_URL, fallbackBody);
+    } catch (err) {
+      throw primaryError || err;
+    }
   }
 
   window.XPClient = { postWindow, fetchStatus };

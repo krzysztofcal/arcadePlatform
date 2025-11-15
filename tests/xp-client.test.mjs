@@ -542,6 +542,92 @@ assert.equal(status.pending, 26);
 assert.equal(status.lastSync, 55_000);
 assert.equal(status.inflight, false);
 
+// Remaining daily allowance reflects runtime state and snapshot surfaces the same number
+hydrated.cap = 3_000;
+hydrated.totalToday = 124;
+hydrated.dailyRemaining = 2_876;
+hydrated.snapshot = null;
+const remainingAllowance = XP.getRemainingDaily();
+assert.equal(remainingAllowance, 2_876);
+const remainingSnapshot = XP.getSnapshot();
+assert.equal(remainingSnapshot.totalToday, 124);
+assert.equal(remainingSnapshot.remaining, 2_876);
+
+// Local awards adjust the derived remaining allowance without waiting for server syncs
+freshSession('remaining-drift');
+XP.setTotals(100, 3_000, 5_000);
+const localAward = XP.awardLocalXp(1);
+assert(localAward > 0, 'local award should grant XP');
+const snapshotAfterLocalAward = XP.getSnapshot();
+const derivedRemaining = Math.max(0, snapshotAfterLocalAward.cap - snapshotAfterLocalAward.totalToday);
+assert.equal(snapshotAfterLocalAward.remaining, derivedRemaining);
+assert.equal(XP.getRemainingDaily(), derivedRemaining);
+XP.stopSession({ flush: false });
+
+// Totals-only payloads still produce the correct remaining allowance
+const driftState = getState();
+driftState.dailyRemaining = NaN;
+XP.setTotals(300, 3_000, 5_500);
+const totalsOnlySnapshot = XP.getSnapshot();
+assert.equal(totalsOnlySnapshot.totalToday, 300);
+assert.equal(totalsOnlySnapshot.remaining, 2_700);
+assert.equal(XP.getRemainingDaily(), 2_700);
+
+// Server alias fields hydrate daily totals without additional hints
+freshSession('server-aliases');
+XP.setTotals({
+  dailyCap: 2_500,
+  awardedToday: 400,
+  remainingToday: 2_100,
+  totalXp: 9_000,
+  nextResetEpoch: 987_000,
+});
+const aliasSnapshot = XP.getSnapshot();
+assert.equal(aliasSnapshot.cap, 2_500);
+assert.equal(aliasSnapshot.totalToday, 400);
+assert.equal(aliasSnapshot.remaining, 2_100);
+assert.equal(XP.getRemainingDaily(), 2_100);
+const aliasState = getState();
+assert.equal(aliasState.nextResetEpoch, 987_000);
+
+// Server summaries without daily fields keep the client-tracked today/remaining values
+freshSession('preserve-daily-on-summary');
+const preserveState = getState();
+preserveState.cap = 3_000;
+preserveState.totalToday = 444;
+preserveState.dailyRemaining = 2_556;
+preserveState.totalLifetime = 8_000;
+preserveState.serverTotalXp = 8_000;
+preserveState.badgeBaselineXp = 8_000;
+const snapshotBeforeSummary = XP.getSnapshot();
+const lifetimeAfterSummary = snapshotBeforeSummary.totalXp + 250;
+XP.setTotals({ totalLifetime: lifetimeAfterSummary });
+const snapshotAfterSummary = XP.getSnapshot();
+assert.equal(snapshotAfterSummary.totalToday, snapshotBeforeSummary.totalToday);
+assert.equal(snapshotAfterSummary.remaining, snapshotBeforeSummary.remaining);
+assert.equal(XP.getRemainingDaily(), snapshotBeforeSummary.remaining);
+
+// Remaining allowance from the server is preserved even if the cap is temporarily unknown
+freshSession('remaining-fallback');
+const fallbackState = getState();
+fallbackState.cap = null;
+fallbackState.totalToday = null;
+fallbackState.dailyRemaining = 1_111;
+fallbackState.serverTotalXp = 0;
+fallbackState.badgeBaselineXp = 0;
+fallbackState.badgeShownXp = 0;
+const fallbackRemaining = XP.getRemainingDaily();
+assert.equal(fallbackRemaining, 1_111);
+const fallbackSnapshot = XP.getSnapshot();
+assert.equal(fallbackSnapshot.remaining, 1_111);
+
+// Snapshots recompute level data each time totals change
+const baselineSnapshot = XP.getSnapshot();
+const nextLifetime = baselineSnapshot.totalXp + 500;
+XP.setTotals(0, 3_000, nextLifetime);
+const refreshedSnapshot = XP.getSnapshot();
+assert.equal(refreshedSnapshot.totalXp, nextLifetime);
+
 // BFCache/pageshow hydration refreshes runtime state and boosts
 localStorageMock.setItem(RUNTIME_CACHE_KEY, JSON.stringify({
   carry: 0,
