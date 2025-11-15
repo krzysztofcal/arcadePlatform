@@ -576,42 +576,37 @@
     return true;
   }
 
-  function tapPostWindow(payload, previousLength) {
+  function tapPostWindow(payload, xpTapLengthBefore) {
+  try {
+    if (!isTestMode()) return;
     if (typeof window === "undefined" || !window) return;
-    const currentList = Array.isArray(window.__xpCalls) ? window.__xpCalls : null;
-    if (currentList && typeof previousLength === "number" && currentList.length > previousLength) {
+
+    const awards = payload && Array.isArray(payload.awards) ? payload.awards : [];
+    const snapshot = {
+      ts: Date.now(),
+      gameId: payload && payload.gameId ? String(payload.gameId) : null,
+      scoreDelta: typeof payload.scoreDelta === "number" ? payload.scoreDelta : 0,
+      awards,
+    };
+
+    if (!Array.isArray(window.__xpCalls)) {
+      window.__xpCalls = [];
+    }
+
+    if (
+      typeof xpTapLengthBefore === "number" &&
+      xpTapLengthBefore >= 0 &&
+      xpTapLengthBefore < window.__xpCalls.length
+    ) {
+      // already tapped for this window
       return;
     }
-    const schedulePush = () => {
-      const ensureArray = () => {
-        if (Array.isArray(window.__xpCalls)) return true;
-        try {
-          window.__xpCalls = [];
-          return true;
-        } catch (_) {
-          return Array.isArray(window.__xpCalls);
-        }
-      };
-      if (!ensureArray()) return;
-      try {
-        const cloned = Object.assign({}, payload);
-        window.__xpCalls.push({
-          method: "postWindow",
-          args: [cloned],
-          payload: cloned,
-        });
-      } catch (_) {
-        try { window.__xpCalls.push({ method: "postWindow" }); } catch (_) {}
-      }
-    };
-    try {
-      if (typeof Promise === "function" && Promise.resolve) {
-        Promise.resolve().then(schedulePush);
-        return;
-      }
-    } catch (_) {}
-    schedulePush();
+
+    window.__xpCalls.push(snapshot);
+  } catch (_) {
+    // swallow in tests
   }
+}
 
   function resolvePagePath() {
     try {
@@ -1672,9 +1667,9 @@
       const reasonRaw = data.reason || (data.debug && data.debug.reason) || null;
       const reason = typeof reasonRaw === "string" ? reasonRaw.toLowerCase() : null;
       const statusRaw = typeof data.status === "string" ? data.status.toLowerCase() : null;
-      const skipTotals = (statusRaw === "statusonly")
-        || reason === "too_soon"
-        || reason === "insufficient-activity";
+      const skipTotals =
+  reason === "too_soon" ||
+  reason === "insufficient-activity";
 
       const totalLifetime = (typeof data.totalLifetime === "number") ? data.totalLifetime
         : (typeof data.totalXp === "number") ? data.totalXp
