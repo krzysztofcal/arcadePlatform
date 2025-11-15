@@ -1,5 +1,9 @@
 (function (window, document) {
   const CHUNK_MS = 10_000;
+  const TEST_WINDOW_MS = (typeof window !== "undefined" && window && typeof window.__XP_TEST_WINDOW_MS === "number")
+    ? Math.max(500, Math.floor(window.__XP_TEST_WINDOW_MS))
+    : null;
+  const WINDOW_MS = TEST_WINDOW_MS != null ? TEST_WINDOW_MS : CHUNK_MS;
   const HARD_IDLE_MS = parseNumber(window && window.XP_HARD_IDLE_MS, 6_000);
   const isLikelyMobile = () => {
     try {
@@ -1710,7 +1714,7 @@
     if (state.pending) return;
     const now = Date.now();
     const elapsed = now - state.windowStart;
-    if (!force && elapsed < CHUNK_MS) return;
+    if (!force && elapsed < WINDOW_MS) return;
     const visibilitySecondsRaw = state.visibilitySeconds;
     const visibility = Math.round(visibilitySecondsRaw);
     const inputs = state.inputEvents;
@@ -1724,7 +1728,7 @@
         state.inputEvents = 0;
         return;
       }
-      const _minInputsGate = Math.max(2, Math.ceil(CHUNK_MS / 4000));
+      const _minInputsGate = Math.max(2, Math.ceil(WINDOW_MS / 4000));
       if (visibilitySecondsRaw <= 1 || inputs < _minInputsGate) {
         state.windowStart = now;
         state.activeMs = 0;
@@ -1766,7 +1770,7 @@
       windowEnd: now,
       visibilitySeconds: visibility,
       inputEvents: inputs,
-      chunkMs: CHUNK_MS,
+      chunkMs: WINDOW_MS,
       pointsPerPeriod: 10
     };
     const pendingScore = Math.max(0, Math.floor(Number(state.scoreDelta) || 0));
@@ -1905,7 +1909,7 @@
     if (now <= state.activeUntil) {
       state.activeMs += delta;
     }
-    if (state.activeMs >= CHUNK_MS) {
+    if (state.activeMs >= WINDOW_MS) {
       sendWindow(false);
     }
 
@@ -2096,11 +2100,20 @@
       logDebug("xp_stop", { flush: opts.flush !== false });
     }
     /* xp stop flush guard */ if (state.running && opts.flush !== false) {
-      const _minInputsGate = Math.max(2, Math.ceil(CHUNK_MS / 4000));
-      if (!(state.visibilitySeconds > 1 && state.inputEvents >= _minInputsGate)) {
-        // skip network flush if idle
+      const _minInputsGate = Math.max(2, Math.ceil(WINDOW_MS / 4000));
+      const meetsActivityThreshold = state.visibilitySeconds > 1 && state.inputEvents >= _minInputsGate;
+      const pendingScore = Math.max(0, Math.floor(Number(state.scoreDelta) || 0));
+      const hasPendingWindow = pendingScore > 0
+        || (Number(state.activeMs) || 0) > 0
+        || (Number(state.visibilitySeconds) || 0) > 0
+        || (Number(state.inputEvents) || 0) > 0;
+      if (opts.flush === true && hasPendingWindow) {
+        sendWindow(true);
+      } else if (meetsActivityThreshold) {
+        sendWindow(true);
       } else {
-      sendWindow(true); }
+        // skip network flush if idle
+      }
       flushXp(true).catch(() => {});
     }
     clearTimer();

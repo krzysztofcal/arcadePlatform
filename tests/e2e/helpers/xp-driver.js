@@ -13,6 +13,15 @@ async function driveActiveWindow(page, durationMs = MIN_DURATION_MS, inputCount 
 
   await page.bringToFront();
 
+  await page.evaluate(() => {
+    if (window.XP && typeof window.XP.startSession === 'function') {
+      if (!window.XP.__e2eActiveSession) {
+        window.XP.startSession('xp-e2e');
+        window.XP.__e2eActiveSession = true;
+      }
+    }
+  });
+
   const inputs = Math.max(MIN_INPUTS, Number(inputCount) || 0);
   const step = resolveStep(durationMs, inputs);
 
