@@ -299,7 +299,14 @@
     }
     const remainingText = `${formatNumber(remainingValue)} XP`;
     if (remainingEl) remainingEl.textContent = remainingText;
-    if (remainingHintEl) remainingHintEl.textContent = formatRemainingHint(remainingValue);
+    if (remainingHintEl) {
+      const txt = formatRemainingHint(remainingValue);
+      remainingHintEl.textContent = (txt && String(txt).trim().length)
+        ? txt
+        : (remainingValue <= 0
+            ? t("xp_remaining_capped", "You’ve reached today’s XP cap. Come back after the daily reset.")
+            : t("xp_remaining_left", "Keep going—XP is still available today."));
+    }
     if (remainingLineEl) {
       const template = t("xp_daily_remaining_line", "Remaining today: {remaining} XP.");
       const remainingValueText = formatNumber(remainingValue);

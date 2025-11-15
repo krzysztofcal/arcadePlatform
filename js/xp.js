@@ -1684,6 +1684,7 @@
         saveCache();
         updateBadge();
         dispatchXpUpdatedEvent();
+        try { window.XP.isHydrated = true; } catch (_) {}
         return;
       }
 
@@ -1692,6 +1693,7 @@
         saveCache();
         updateBadge();
         dispatchXpUpdatedEvent();
+        try { window.XP.isHydrated = true; } catch (_) {}
         return;
       }
 
@@ -1728,6 +1730,7 @@
       saveCache();
       updateBadge();
       dispatchXpUpdatedEvent();
+      try { window.XP.isHydrated = true; } catch (_) {}
     } finally {
       /* noop */
     }
@@ -1788,6 +1791,10 @@
       return;
     }
 
+    const _scoreA = Math.max(0, Math.floor(Number(state.scoreDelta) || 0));
+    const _scoreB = Math.max(0, Math.floor(Number(state.scoreDeltaRemainder) || 0));
+    let pendingScore = _scoreA + _scoreB;
+
     const payload = {
       gameId: activeGameId,
       windowStart: state.windowStart,
@@ -1797,7 +1804,6 @@
       chunkMs: WINDOW_MS,
       pointsPerPeriod: 10
     };
-    const pendingScore = Math.max(0, Math.floor(Number(state.scoreDelta) || 0));
     if (pendingScore > 0) {
       payload.scoreDelta = pendingScore;
     }
@@ -1894,6 +1900,12 @@
         handleError(err);
       })
       .finally(() => { state.pending = null; });
+
+    // Clear local score buffers after we handed them to the server.
+    try {
+      state.scoreDelta = 0;
+      state.scoreDeltaRemainder = 0;
+    } catch (_) {}
 
     tapPostWindow(payload, xpTapLengthBefore);
   }
@@ -2040,6 +2052,10 @@
       const visSeconds = Math.max(1, Math.round(Number(state.visibilitySeconds) || windowMs / 1000));
       const inputEvents = Math.max(1, Number(state.inputEvents) || MIN_EVENTS_PER_TICK || 1);
 
+      const _scoreA = Math.max(0, Math.floor(Number(state.scoreDelta) || 0));
+      const _scoreB = Math.max(0, Math.floor(Number(state.scoreDeltaRemainder) || 0));
+      const pendingScore = _scoreA + _scoreB;
+
       const payload = {
         gameId,
         windowStart: state.windowStart || (now - windowMs),
@@ -2050,7 +2066,6 @@
         pointsPerPeriod: 10,
       };
 
-      const pendingScore = Math.max(0, Math.floor(Number(state.scoreDelta) || 0));
       if (pendingScore > 0) payload.scoreDelta = pendingScore;
 
       const tapLenBefore = Array.isArray(window.__xpCalls) ? window.__xpCalls.length : null;
@@ -2059,6 +2074,11 @@
       window.XPClient.postWindow(payload)
         .then((data) => { handleResponse(data, { source: "window" }); })
         .catch((err) => { handleError(err); });
+
+      try {
+        state.scoreDelta = 0;
+        state.scoreDeltaRemainder = 0;
+      } catch (_) {}
     } catch (_) {
       /* swallow in tests */
     }
@@ -2255,6 +2275,11 @@
 
     state.scoreDeltaRemainder += numeric;
     if (state.scoreDeltaRemainder < 1) {
+      try {
+        if (window && window.__XP_TEST_DISABLE_IDLE_GUARD === true) {
+          state.scoreDelta = Math.max(0, Math.floor((state.scoreDelta || 0) + numeric));
+        }
+      } catch (_) {}
       return;
     }
 
@@ -2971,6 +2996,12 @@ function maybeRefreshStatus() {
       refreshBadgeFromStorage();
     } catch (_) {}
     markHydratedFlag();
+    // Ensure XP dashboard code doesn't bail out waiting on hydration.
+    try {
+      window.XP.isHydrated = true;
+    } catch (_) {
+      window.XP = Object.assign({}, window.XP || {}, { isHydrated: true });
+    }
 
     if (!isGameHost()) {
       if (state.running === true) {
