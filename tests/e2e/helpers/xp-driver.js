@@ -36,6 +36,20 @@ async function driveActiveWindow(page, durationMs = MIN_DURATION_MS, inputCount 
   }
 
   await page.waitForTimeout(1_000);
+
+  await page.evaluate(() => {
+    try {
+      if (
+        window.__XP_TEST_DISABLE_IDLE_GUARD === true &&
+        window.XP &&
+        typeof window.XP.__debugForceWindow === 'function'
+      ) {
+        window.XP.__debugForceWindow();
+      }
+    } catch (_) {
+      /* ignore */
+    }
+  });
 }
 
 module.exports = { driveActiveWindow };

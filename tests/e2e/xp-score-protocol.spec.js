@@ -47,6 +47,7 @@ async function runWindow(page, scoreDelta) {
     const xp = window.XP;
     if (!xp || typeof xp.startSession !== 'function') return;
     xp.startSession('xp-score-e2e');
+    xp.__e2eActiveSession = true;
   });
 
   await page.waitForTimeout(VISIBILITY_WARMUP_MS);

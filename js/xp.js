@@ -1996,6 +1996,17 @@
     }
   }
 
+  function debugForceWindow() {
+    try {
+      if (!window || !window.XPClient || typeof window.XPClient.postWindow !== "function") {
+        return;
+      }
+      sendWindow(true);
+    } catch (_) {
+      /* swallow */
+    }
+  }
+
   function ensureBadgeTimer() {
     if (!window || typeof window.setInterval !== "function") return;
     if (state.badgeTimerId) return;
@@ -2940,6 +2951,9 @@ function maybeRefreshStatus() {
     isHydrated: typeof window.XP === "object" && window.XP && typeof window.XP.isHydrated === "boolean"
       ? window.XP.isHydrated
       : false,
+    __debugForceWindow: function () {
+      debugForceWindow();
+    },
     // Public API: dispatch an event so host integrations remain decoupled.
     requestBoost: function (multiplier, ttlMs, reason) {
       let detail;
