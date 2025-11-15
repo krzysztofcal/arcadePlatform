@@ -1749,15 +1749,8 @@
     if (!disableIdleGuard) {
       /* xp idle guard */
       if (!isDocumentVisible()) {
-      {
-  // merge score buffers (remainder + whole) and clear for the next window
-  let __sum = Math.max(0, Number(state.scoreDelta) || 0) + Math.max(0, Number(state.scoreDeltaRemainder) || 0);
-  const pendingScore = Math.floor(__sum);
-  state.scoreDelta = 0;
-  state.scoreDeltaRemainder = __sum - pendingScore;
-  if (pendingScore > 0) { payload.scoreDelta = pendingScore; }
-}
-state.windowStart = now;
+
+      state.windowStart = now;
         state.activeMs = 0;
         state.visibilitySeconds = 0;
         state.inputEvents = 0;
