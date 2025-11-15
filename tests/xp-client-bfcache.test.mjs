@@ -35,11 +35,15 @@ function response(status, json) {
 
 let statusBootstraps = 0;
 
-async function fetchStub(_url, options = {}) {
+async function fetchStub(url, options = {}) {
   const body = options.body ? JSON.parse(options.body) : {};
+  if (typeof url === 'string' && url.includes('xp-status')) {
+    statusBootstraps += 1;
+    return response(200, { ok: true, status: 'statusOnly', totalToday: 0, totalLifetime: 0, sessionTotal: 0, lastSync: 0, cap: 400, capDelta: 240, __serverHasDaily: true });
+  }
   if (body.statusOnly) {
     statusBootstraps += 1;
-    return response(200, { ok: true, status: 'statusOnly', totalToday: 0, totalLifetime: 0, sessionTotal: 0, lastSync: 0, cap: 400, capDelta: 240 });
+    return response(200, { ok: true, status: 'statusOnly', totalToday: 0, totalLifetime: 0, sessionTotal: 0, lastSync: 0, cap: 400, capDelta: 240, __serverHasDaily: true });
   }
   requests.push(body);
   return response(200, { ok: true, awarded: body.delta, totalToday: body.delta, sessionTotal: body.delta, totalLifetime: body.delta, lastSync: body.ts, cap: 400, capDelta: 240 });
