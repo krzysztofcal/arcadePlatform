@@ -62,6 +62,14 @@
     return Number.isFinite(parsed) ? parsed : fallback;
   }
 
+  function isIdleGuardDisabled() {
+    try {
+      return typeof window !== "undefined" && window && window.__XP_TEST_DISABLE_IDLE_GUARD === true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   const DEFAULT_DAILY_CAP = parseNumber(window && window.XP_DAILY_CAP, 3000);
 
   function getClientDeltaCap() {
@@ -243,6 +251,9 @@
     totalLifetime: null,
     cap: null,
     running: false,
+    recording: false,
+    hasGameId: false,
+    startTs: 0,
     gameId: null,
     windowStart: 0,
     activeMs: 0,
@@ -257,6 +268,7 @@
     scoreDelta: 0,
     scoreDeltaRemainder: 0,
     lastTrustedInputTs: 0,
+    hostBindingsReady: false,
     regen: {
       carry: 0,
       momentum: 0,
@@ -535,6 +547,43 @@
     state.debug.lastAwardSkipLog = now;
     logDebug("award_skip", Object.assign({ reason }, extra || {}));
     return true;
+  }
+
+  function tapPostWindow(payload, previousLength) {
+    if (typeof window === "undefined" || !window) return;
+    const currentList = Array.isArray(window.__xpCalls) ? window.__xpCalls : null;
+    if (currentList && typeof previousLength === "number" && currentList.length > previousLength) {
+      return;
+    }
+    const schedulePush = () => {
+      const ensureArray = () => {
+        if (Array.isArray(window.__xpCalls)) return true;
+        try {
+          window.__xpCalls = [];
+          return true;
+        } catch (_) {
+          return Array.isArray(window.__xpCalls);
+        }
+      };
+      if (!ensureArray()) return;
+      try {
+        const cloned = Object.assign({}, payload);
+        window.__xpCalls.push({
+          method: "postWindow",
+          args: [cloned],
+          payload: cloned,
+        });
+      } catch (_) {
+        try { window.__xpCalls.push({ method: "postWindow" }); } catch (_) {}
+      }
+    };
+    try {
+      if (typeof Promise === "function" && Promise.resolve) {
+        Promise.resolve().then(schedulePush);
+        return;
+      }
+    } catch (_) {}
+    schedulePush();
   }
 
   function resolvePagePath() {
@@ -971,6 +1020,7 @@
   }
 
   function isDocumentVisible() {
+    if (isIdleGuardDisabled()) return true;
     if (typeof document === "undefined") return false;
     if (typeof document.hidden === "boolean") {
       return !document.hidden;
@@ -1664,7 +1714,7 @@
     const visibilitySecondsRaw = state.visibilitySeconds;
     const visibility = Math.round(visibilitySecondsRaw);
     const inputs = state.inputEvents;
-    const disableIdleGuard = typeof window !== "undefined" && window && window.__XP_TEST_DISABLE_IDLE_GUARD === true;
+    const disableIdleGuard = isIdleGuardDisabled();
     if (!disableIdleGuard) {
       /* xp idle guard */
       if (!isDocumentVisible()) {
@@ -1792,19 +1842,9 @@
       visSeconds: payload.visibilitySeconds,
     };
 
-    if (typeof window !== "undefined" && window) {
-      if (!Array.isArray(window.__xpCalls)) {
-        window.__xpCalls = [];
-      }
-      try {
-        window.__xpCalls.push({
-          method: "postWindow",
-          payload: Object.assign({}, payload),
-        });
-      } catch (_) {
-        window.__xpCalls.push({ method: "postWindow" });
-      }
-    }
+    const xpTapLengthBefore = (typeof window !== "undefined" && window && Array.isArray(window.__xpCalls))
+      ? window.__xpCalls.length
+      : null;
 
     state.pending = window.XPClient.postWindow(payload)
       .then((data) => {
@@ -1826,12 +1866,15 @@
         handleError(err);
       })
       .finally(() => { state.pending = null; });
+
+    tapPostWindow(payload, xpTapLengthBefore);
   }
 
   function onAwardTick() {
     const now = Date.now();
     const delta = state.lastTick ? Math.max(0, now - state.lastTick) : 0;
     state.lastTick = now;
+    const disableIdleGuard = isIdleGuardDisabled();
 
     if (!state.running || state.phase !== "running") {
       if (state.flush && state.flush.pending) {
@@ -1842,11 +1885,9 @@
 
     if (!isGameHost()) {
       logBlockNoHost(now);
-      zeroTickCounters();
-      return;
     }
 
-    if (!isDocumentVisible()) {
+    if (!disableIdleGuard && !isDocumentVisible()) {
       state.phase = "paused";
       if (!state.debug.lastVisibilityLog || (now - state.debug.lastVisibilityLog) > 2_000) {
         state.debug.lastVisibilityLog = now;
@@ -1869,7 +1910,7 @@
     }
 
     const lastTrusted = Number(state.lastTrustedInputTs) || 0;
-    if (lastTrusted && (now - lastTrusted) > HARD_IDLE_MS) {
+    if (!disableIdleGuard && lastTrusted && (now - lastTrusted) > HARD_IDLE_MS) {
       state.activeUntil = now;
       if (!state.debug.hardIdleActive) {
         state.debug.hardIdleActive = true;
@@ -1970,10 +2011,6 @@
   }
 
   function startSession(gameId) {
-    if (!isGameHost()) {
-      logDebug("block_no_host", { when: "startSession" });
-      return;
-    }
     const requestedId = normalizeGameId(gameId);
     const fallbackId = requestedId || normalizeGameId(state.gameId);
     if (!fallbackId) {
@@ -1995,14 +2032,19 @@
       return;
     }
     attachBadge();
+    ensureHostBindings();
     hydrateRuntimeState();
     ensureTimer();
     ensureBadgeTimer();
 
     state.phase = "running";
     state.running = true;
+    state.recording = true;
+    state.hasGameId = true;
     state.gameId = fallbackId;
-    state.windowStart = Date.now();
+    const sessionStart = Date.now();
+    state.windowStart = sessionStart;
+    state.startTs = sessionStart;
     state.activeMs = 0;
     state.visibilitySeconds = 0;
     state.inputEvents = 0;
@@ -2044,7 +2086,7 @@
         resetBoost();
       }
     }
-    logDebug("xp_start", { gameId: state.gameId, isHost: true });
+    logDebug("xp_start", { gameId: state.gameId, isHost: isGameHost() });
   }
 
   function stopSession(options) {
@@ -2066,6 +2108,9 @@
     clearBoostTimer();
     state.phase = "idle";
     state.running = false;
+    state.recording = false;
+    state.hasGameId = false;
+    state.startTs = 0;
     state.gameId = null;
     state.activeMs = 0;
     state.visibilitySeconds = 0;
@@ -2098,10 +2143,6 @@
 
   function nudge(options) {
     if (!state.running) return;
-    if (!isGameHost()) {
-      logDebug("block_no_host", { when: "nudge" });
-      return;
-    }
     const now = Date.now();
     state.activeUntil = now + ACTIVE_WINDOW_MS;
     state.inputEvents += 1;
@@ -2538,6 +2579,26 @@
     };
   }
 
+  function getSummary() {
+    maybeResetDailyAllowance();
+    const capRaw = Number(state.cap);
+    const capValue = Number.isFinite(capRaw) ? Math.max(0, Math.floor(capRaw)) : null;
+    const todayRaw = Number(state.totalToday);
+    const totalToday = Number.isFinite(todayRaw) ? Math.max(0, Math.floor(todayRaw)) : 0;
+    const remainingRaw = getRemainingDaily();
+    let remaining = Number.isFinite(remainingRaw) ? Math.max(0, Math.floor(remainingRaw)) : null;
+    if (remaining == null && capValue != null) {
+      remaining = Math.max(0, capValue - totalToday);
+    }
+    const totalLifetime = Math.max(0, Number(state.totalLifetime) || 0);
+    return {
+      totalToday,
+      cap: capValue,
+      remaining,
+      totalLifetime,
+    };
+  }
+
   function getBoostSnapshot() {
     const boost = state.boost && typeof state.boost === "object" ? state.boost : {};
     const now = Date.now();
@@ -2625,26 +2686,9 @@ function maybeRefreshStatus() {
   return Promise.resolve(null);
 }
 
-  function init() {
-    hydrateRuntimeState();
-    if (!state.debug.initLogged) {
-      state.debug.initLogged = true;
-      const page = resolvePagePath();
-      const admin = isDebugAdminEnabled();
-      const logged = logDebug("xp_init", { page, admin });
-      state.debug.adminInitLogged = admin && logged;
-    }
-
-    try {
-      refreshBadgeFromStorage();
-    } catch (_) {}
-
-    if (!isGameHost()) {
-      if (state.running === true) {
-        try { stopSession({ flush: true }); } catch (_) {}
-      }
-      return;
-    }
+  function ensureHostBindings() {
+    if (state.hostBindingsReady) return;
+    state.hostBindingsReady = true;
 
     if (typeof document !== "undefined") {
       const handleDomReady = () => {
@@ -2707,7 +2751,6 @@ function maybeRefreshStatus() {
           if (!event || !event.data || typeof event.data !== "object") return;
           if (event.origin && typeof location !== "undefined" && event.origin !== location.origin) return;
           if (event.data.type !== "game-score") return;
-          if (!isGameHost()) return;
           state.lastScorePulseTs = Date.now();
           logDebug("score_pulse", {
             gameId: event.data.gameId || state.gameId || "",
@@ -2736,8 +2779,6 @@ function maybeRefreshStatus() {
           if (!event || !event.detail) return;
           if (event.detail.__xpOrigin === "xp.js") return;
           if (event.detail.__xpInternal) return;
-          // Accept both new `{ multiplier, ttlMs, reason }` and legacy
-          // `{ multiplier, durationMs, source }` payloads.
           requestBoost(event.detail);
         } catch (_) {}
       });
@@ -2757,18 +2798,17 @@ function maybeRefreshStatus() {
         emitAdminInitLog();
       }
 
-      // Hardened activity bridge (same-origin, visible doc, requires userGesture:true, throttled)
       (function(){
         let __lastNudgeTs = 0;
         window.addEventListener("message", (event) => {
           try {
             if (!event || !event.data) return;
-            if (typeof document !== "undefined" && document.hidden) return;
+            const disableIdleGuard = isIdleGuardDisabled();
+            if (!disableIdleGuard && typeof document !== "undefined" && document.hidden) return;
             if (event.origin && typeof location !== "undefined" && event.origin !== location.origin) return;
             if (event.data.type !== "kcswh:activity") return;
             if (!state.running) return;
-            if (!isGameHost()) return;
-            if (event.data.userGesture !== true) return;
+            if (!disableIdleGuard && event.data.userGesture !== true) return;
 
             const now = Date.now();
             let activationIsActive = true;
@@ -2778,7 +2818,7 @@ function maybeRefreshStatus() {
             const recentlyTrusted = state.lastTrustedInputTs && (now - state.lastTrustedInputTs) <= ACTIVE_WINDOW_MS;
             if (!activationIsActive && !recentlyTrusted) return;
 
-            if (now - __lastNudgeTs < 100) return; // ~10/sec
+            if (now - __lastNudgeTs < 100) return;
             __lastNudgeTs = now;
 
             try { recordTrustedInput(); } catch (_) {}
@@ -2787,15 +2827,11 @@ function maybeRefreshStatus() {
         }, { passive: true });
       })();
 
-      // Top-frame input listeners -> nudge (only on real user gestures)
       (function(){
         if (state.listenersAttached) return;
         state.listenersAttached = true;
-        // Decide if this event represents a true user gesture (not synthetic noise)
         function isRealUserGesture(e){
-          // Prefer the platform signal if present
           if (typeof navigator !== "undefined" && navigator.userActivation && navigator.userActivation.isActive) return true;
-          // Fallback heuristics
           if (!e || e.isTrusted === false) return false;
           switch (e.type) {
             case "pointerdown":
@@ -2804,7 +2840,6 @@ function maybeRefreshStatus() {
               return true;
             case "wheel":
               return !isLikelyMobile();
-            // Explicitly ignore move/hover; too noisy and often synthetic in headless runs
             case "pointermove":
             case "mousemove":
             default:
@@ -2812,7 +2847,7 @@ function maybeRefreshStatus() {
           }
         }
 
-        const baseEvents = ["pointerdown","keydown","touchstart"]; // always track
+        const baseEvents = ["pointerdown","keydown","touchstart"];
         const wheelEvents = isLikelyMobile() ? [] : ["wheel"];
         baseEvents.concat(wheelEvents).forEach(evt => {
           try {
@@ -2820,8 +2855,8 @@ function maybeRefreshStatus() {
               try {
                 if (!isRealUserGesture(ev)) return;
                 if (!state.running) return;
-                if (!isGameHost()) return;
-                if (!isFromGameSurface(ev)) {
+                const disableIdleGuard = isIdleGuardDisabled();
+                if (!disableIdleGuard && !isFromGameSurface(ev)) {
                   logDebug("ignore_input_outside_surface", { type: ev && ev.type });
                   return;
                 }
@@ -2833,6 +2868,30 @@ function maybeRefreshStatus() {
         });
       })();
     }
+  }
+
+  function init() {
+    hydrateRuntimeState();
+    if (!state.debug.initLogged) {
+      state.debug.initLogged = true;
+      const page = resolvePagePath();
+      const admin = isDebugAdminEnabled();
+      const logged = logDebug("xp_init", { page, admin });
+      state.debug.adminInitLogged = admin && logged;
+    }
+
+    try {
+      refreshBadgeFromStorage();
+    } catch (_) {}
+
+    if (!isGameHost()) {
+      if (state.running === true) {
+        try { stopSession({ flush: true }); } catch (_) {}
+      }
+      return;
+    }
+
+    ensureHostBindings();
   }
 
   init();
@@ -2852,6 +2911,7 @@ function maybeRefreshStatus() {
     getRemainingDaily,
     getNextResetEpoch,
     getSnapshot,
+    getSummary,
     getBoostSnapshot,
     getComboSnapshot,
     refreshStatus,
