@@ -1,4 +1,5 @@
 const { test, expect } = require('@playwright/test');
+const { driveActiveWindow } = require('./helpers/xp-driver');
 
 const GAME_PAGE = process.env.XP_E2E_PAGE ?? '/game_cats.html';
 const VISIBILITY_WARMUP_MS = 2_200;
@@ -58,6 +59,8 @@ async function runWindow(page, scoreDelta) {
     });
     await page.waitForTimeout(NUDGE_SPACING_MS);
   }
+
+  await driveActiveWindow(page);
 
   if (typeof scoreDelta === 'number') {
     await page.evaluate((delta) => {

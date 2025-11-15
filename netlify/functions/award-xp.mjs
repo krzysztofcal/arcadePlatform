@@ -1,97 +1,22 @@
 import crypto from "node:crypto";
 import { store } from "./_shared/store-upstash.mjs";
-
-const warsawDateFormatter = new Intl.DateTimeFormat("en-CA", {
-  timeZone: "Europe/Warsaw",
-  hour12: false,
-  year: "numeric",
-  month: "2-digit",
-  day: "2-digit",
-  hour: "2-digit",
-});
-
-const warsawOffsetFormatter = new Intl.DateTimeFormat("en-US", {
-  timeZone: "Europe/Warsaw",
-  hour12: false,
-  timeZoneName: "longOffset",
-});
+import {
+  asNumber,
+  getDailyCap,
+  getDailyKey,
+  getNextResetEpoch,
+  getTotals,
+  keyDaily,
+  keyLock,
+  keySession,
+  keySessionSync,
+  keyTotal,
+} from "./lib/daily-totals.mjs";
 
 const XP_DAY_COOKIE = "xp_day";
 
-const warsawParts = (ms) => {
-  const parts = warsawDateFormatter.formatToParts(new Date(ms));
-  const result = {};
-  for (const part of parts) {
-    if (part.type === "year" || part.type === "month" || part.type === "day" || part.type === "hour") {
-      result[part.type] = Number(part.value);
-    }
-  }
-  return result;
-};
-
-const parseWarsawOffsetMinutes = (ms) => {
-  const parts = warsawOffsetFormatter.formatToParts(new Date(ms));
-  const offsetPart = parts.find((part) => part.type === "timeZoneName");
-  if (!offsetPart) return 0;
-  const match = /GMT([+-])(\d{2}):(\d{2})/.exec(offsetPart.value);
-  if (!match) return 0;
-  const sign = match[1] === "-" ? -1 : 1;
-  const hours = Number(match[2]);
-  const minutes = Number(match[3]);
-  return sign * (hours * 60 + minutes);
-};
-
-const warsawNow = (ms = Date.now()) => ({
-  ...warsawParts(ms),
-  ms,
-});
-
-const toWarsawEpoch = (year, month, day, hour) => {
-  let guessUtc = Date.UTC(year, month - 1, day, hour, 0, 0, 0);
-  let offset = parseWarsawOffsetMinutes(guessUtc);
-  let adjusted = guessUtc - offset * 60_000;
-  const adjustedOffset = parseWarsawOffsetMinutes(adjusted);
-  if (adjustedOffset !== offset) {
-    offset = adjustedOffset;
-    adjusted = Date.UTC(year, month - 1, day, hour, 0, 0, 0) - offset * 60_000;
-  }
-  return adjusted;
-};
-
-// Warsaw reset occurs at 03:00 local time. Date math in this zone automatically
-// normalizes DST gaps/overlaps so the key always shifts after the local reset.
-const getDailyKey = (ms = Date.now()) => {
-  let effectiveMs = ms;
-  let { year, month, day, hour } = warsawParts(effectiveMs);
-  if (hour < 3) {
-    effectiveMs -= 3 * 60 * 60 * 1000;
-    ({ year, month, day } = warsawParts(effectiveMs));
-  }
-  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-};
-
-const getNextResetEpoch = (ms = Date.now()) => {
-  const current = warsawNow(ms);
-  let targetYear = current.year;
-  let targetMonth = current.month;
-  let targetDay = current.day;
-  if (current.hour >= 3) {
-    const tomorrow = warsawParts(ms + 24 * 60 * 60 * 1000);
-    targetYear = tomorrow.year;
-    targetMonth = tomorrow.month;
-    targetDay = tomorrow.day;
-  }
-  return toWarsawEpoch(targetYear, targetMonth, targetDay, 3);
-};
-
-const asNumber = (raw, fallback) => {
-  if (raw == null) return fallback;
-  const sanitized = typeof raw === "string" ? raw.replace(/_/g, "") : raw;
-  const parsed = Number(sanitized);
-  return Number.isFinite(parsed) ? parsed : fallback;
-};
-
-const DAILY_CAP = Math.max(0, asNumber(process.env.XP_DAILY_CAP, 3000));
+const DAILY_CAP = getDailyCap();
+const KEY_NS = process.env.XP_KEY_NS ?? "kcswh:xp:v2";
 const SESSION_CAP = asNumber(process.env.XP_SESSION_CAP, 300);
 const DELTA_CAP = asNumber(process.env.XP_DELTA_CAP, 300);
 const SESSION_TTL_SEC = Math.max(0, asNumber(process.env.XP_SESSION_TTL_SEC, 604800));
@@ -101,7 +26,6 @@ const MIN_ACTIVITY_EVENTS = Math.max(0, asNumber(process.env.XP_MIN_ACTIVITY_EVE
 const MIN_ACTIVITY_VIS_S = Math.max(0, asNumber(process.env.XP_MIN_ACTIVITY_VIS_S, 8));
 const METADATA_MAX_BYTES = Math.max(0, asNumber(process.env.XP_METADATA_MAX_BYTES, 2048));
 const DEBUG_ENABLED = process.env.XP_DEBUG === "1";
-const KEY_NS = process.env.XP_KEY_NS ?? "kcswh:xp:v2";
 const DRIFT_MS = Math.max(0, asNumber(process.env.XP_DRIFT_MS, 30_000));
 const CORS_ALLOW = (process.env.XP_CORS_ALLOW ?? "")
   .split(",")
@@ -202,32 +126,6 @@ function corsHeaders(origin) {
   return headers;
 }
 
-const hash = (s) => crypto.createHash("sha256").update(s).digest("hex");
-const keyDaily = (u, day = getDailyKey()) => `${KEY_NS}:daily:${u}:${day}`;
-const keyTotal = (u) => `${KEY_NS}:total:${u}`;
-const keySession = (u, s) => `${KEY_NS}:session:${hash(`${u}|${s}`)}`;
-const keySessionSync = (u, s) => `${KEY_NS}:session:last:${hash(`${u}|${s}`)}`;
-const keyLock = (u, s) => `${KEY_NS}:lock:${hash(`${u}|${s}`)}`;
-
-async function getTotals({ userId, sessionId, now = Date.now() }) {
-  const todayKey = keyDaily(userId, getDailyKey(now));
-  const totalKeyK = keyTotal(userId);
-  const sessionKeyK = sessionId ? keySession(userId, sessionId) : null;
-  const sessionSyncKeyK = sessionId ? keySessionSync(userId, sessionId) : null;
-  try {
-    const reads = [store.get(todayKey), store.get(totalKeyK)];
-    if (sessionKeyK) reads.push(store.get(sessionKeyK));
-    if (sessionSyncKeyK) reads.push(store.get(sessionSyncKeyK));
-    const values = await Promise.all(reads);
-    const current = Number(values[0] ?? "0") || 0;
-    const lifetime = Number(values[1] ?? "0") || 0;
-    const sessionTotal = sessionKeyK ? (Number(values[2] ?? "0") || 0) : 0;
-    const lastSync = sessionSyncKeyK ? (Number(values[sessionKeyK ? 3 : 2] ?? "0") || 0) : 0;
-    return { current, lifetime, sessionTotal, lastSync };
-  } catch {
-    return { current: 0, lifetime: 0, sessionTotal: 0, lastSync: 0 };
-  }
-}
 
 export async function handler(event) {
   const origin = event.headers?.origin;
@@ -272,14 +170,38 @@ export async function handler(event) {
   };
 
   const buildResponse = (statusCode, payload, totalTodaySource, options = {}) => {
-    const { debugExtra = {}, skipCookie = false } = options;
-    const safeTotal = Math.min(DAILY_CAP, Math.max(0, sanitizeTotal(totalTodaySource)));
-    const remaining = Math.max(0, DAILY_CAP - safeTotal);
+    const { debugExtra = {}, skipCookie = false, totals = null } = options;
+    const resolvedCap = (() => {
+      if (totals && Number.isFinite(totals.cap)) return Math.max(0, Math.floor(totals.cap));
+      if (Number.isFinite(payload.cap)) return Math.max(0, Math.floor(payload.cap));
+      return DAILY_CAP;
+    })();
+    const safeTotal = Math.min(resolvedCap, Math.max(0, sanitizeTotal(totalTodaySource)));
+    const remaining = Math.max(0, resolvedCap - safeTotal);
+    payload.cap = resolvedCap;
+    payload.dailyCap = resolvedCap;
     payload.totalToday = safeTotal;
+    payload.awardedToday = safeTotal;
     payload.remaining = remaining;
-    payload.dayKey ??= dayKeyNow;
-    payload.nextReset ??= nextReset;
-    applyDiagnostics(payload, { redisDailyTotalRaw: totalTodaySource, redisDailyTotal: safeTotal, ...debugExtra });
+    payload.remainingToday = remaining;
+    payload.dayKey = totals?.dayKey || payload.dayKey || dayKeyNow;
+    const resolvedReset = Number.isFinite(totals?.nextReset)
+      ? totals.nextReset
+      : (payload.nextReset ?? nextReset);
+    payload.nextReset = resolvedReset;
+    payload.nextResetEpoch = resolvedReset;
+    if (payload.totalLifetime != null && Number.isFinite(payload.totalLifetime)) {
+      payload.totalXp = payload.totalLifetime;
+    } else if (totals && Number.isFinite(totals.lifetime)) {
+      payload.totalXp = totals.lifetime;
+    }
+    payload.__serverHasDaily = true;
+    applyDiagnostics(payload, {
+      redisDailyTotalRaw: totalTodaySource,
+      redisDailyTotal: safeTotal,
+      remainingAfter: remaining,
+      ...debugExtra,
+    });
     const headers = skipCookie
       ? undefined
       : { "Set-Cookie": buildXpCookie({ key: dayKeyNow, total: safeTotal, secret, now, nextReset }) };
@@ -289,7 +211,7 @@ export async function handler(event) {
   if (event.httpMethod !== "POST") {
     let totals = null;
     if (queryUserId) {
-      totals = await getTotals({ userId: queryUserId, sessionId: querySessionId, now });
+      totals = await getTotals({ userId: queryUserId, sessionId: querySessionId, now, keyNamespace: KEY_NS });
     }
     const totalSource = totals ? totals.current : cookieTotal;
     const payload = { error: "method_not_allowed" };
@@ -307,7 +229,7 @@ export async function handler(event) {
   } catch {
     let totals = null;
     if (queryUserId) {
-      totals = await getTotals({ userId: queryUserId, sessionId: querySessionId, now });
+      totals = await getTotals({ userId: queryUserId, sessionId: querySessionId, now, keyNamespace: KEY_NS });
     }
     const totalSource = totals ? totals.current : cookieTotal;
     const payload = { error: "bad_json" };
@@ -325,7 +247,7 @@ export async function handler(event) {
   const fetchTotals = async () => {
     if (!userId) return { current: cookieTotal, lifetime: 0, sessionTotal: 0, lastSync: 0 };
     if (!totalsPromise) {
-      totalsPromise = getTotals({ userId, sessionId, now });
+      totalsPromise = getTotals({ userId, sessionId, now, keyNamespace: KEY_NS });
     }
     return totalsPromise;
   };
@@ -353,6 +275,7 @@ export async function handler(event) {
     return buildResponse(statusCode, payload, totalSource, {
       debugExtra: options.debugExtra ?? {},
       skipCookie,
+      totals,
     });
   };
 
@@ -450,11 +373,11 @@ export async function handler(event) {
     metadata = cleaned;
   }
 
-  const todayKey = keyDaily(userId, dayKeyNow);
-  const totalKeyK = keyTotal(userId);
-  const sessionKeyK = keySession(userId, sessionId);
-  const sessionSyncKeyK = keySessionSync(userId, sessionId);
-  const lockKeyK = keyLock(userId, sessionId);
+  const todayKey = keyDaily(userId, dayKeyNow, KEY_NS);
+  const totalKeyK = keyTotal(userId, KEY_NS);
+  const sessionKeyK = keySession(userId, sessionId, KEY_NS);
+  const sessionSyncKeyK = keySessionSync(userId, sessionId, KEY_NS);
+  const lockKeyK = keyLock(userId, sessionId, KEY_NS);
 
   if (REQUIRE_ACTIVITY && normalizedDelta > 0) {
     const events = Number(metadata?.inputEvents ?? 0);
