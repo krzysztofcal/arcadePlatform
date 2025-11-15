@@ -220,22 +220,18 @@
       return;
     }
     const snapshot = window.XP.getSnapshot();
-    const capValue = resolveCap(snapshot);
+    const capValueRaw = resolveCap(snapshot);
+    const capValue = capValueRaw != null ? safeInt(capValueRaw) : null;
     const totalToday = safeInt(snapshot && snapshot.totalToday) || 0;
     const totalXp = safeInt(snapshot && snapshot.totalXp) || 0;
     const level = safeInt(snapshot && snapshot.level) || 1;
-    let runtimeRemainingRaw = null;
-    let remainingValue = null;
-    if (typeof window.XP.getRemainingDaily === "function") {
-      runtimeRemainingRaw = window.XP.getRemainingDaily();
-      remainingValue = safeInt(runtimeRemainingRaw);
-    }
-    const snapshotRemainingRaw = snapshot && snapshot.remaining;
-    if (remainingValue == null) {
-      remainingValue = safeInt(snapshotRemainingRaw);
-    }
-    if (remainingValue == null && capValue != null) {
-      remainingValue = Math.max(0, capValue - totalToday);
+    const remainingValue = capValue != null ? Math.max(0, capValue - totalToday) : 0;
+    if (typeof window !== "undefined") {
+      window.__xpTestTotals = {
+        cap: capValue,
+        totalToday,
+        remaining: remainingValue,
+      };
     }
     // When the cap is effectively reached, ensure the display reflects the
     // fully-consumed allowance even if the runtime is a tick behind.
@@ -255,8 +251,6 @@
           displayToday,
           capValue,
           remainingValue,
-          snapshotRemaining: snapshotRemainingRaw,
-          runtimeRemaining: runtimeRemainingRaw,
         });
       } catch (_) { /* ignore */ }
     }
@@ -277,12 +271,12 @@
       const template = t("xp_daily_cap_line", "The daily XP cap is {cap} XP.");
       capLineEl.textContent = formatTemplate(template, { cap: capValue != null ? formatNumber(capValue) : "—" });
     }
-    const remainingText = remainingValue != null ? `${formatNumber(remainingValue)} XP` : "—";
+    const remainingText = `${formatNumber(remainingValue)} XP`;
     if (remainingEl) remainingEl.textContent = remainingText;
     if (remainingHintEl) remainingHintEl.textContent = formatRemainingHint(remainingValue);
     if (remainingLineEl) {
       const template = t("xp_daily_remaining_line", "Remaining today: {remaining} XP.");
-      const remainingValueText = remainingValue != null ? formatNumber(remainingValue) : "—";
+      const remainingValueText = formatNumber(remainingValue);
       remainingLineEl.textContent = formatTemplate(template, { remaining: remainingValueText });
     }
     if (resetHintEl) {

@@ -1545,6 +1545,23 @@
         }
       }
 
+      (function enforceDailyInvariants() {
+        const cap = Number.isFinite(state.cap) ? state.cap : null;
+        const totalToday = Number.isFinite(state.totalToday) ? state.totalToday : null;
+        const remaining = Number.isFinite(state.dailyRemaining) ? state.dailyRemaining : null;
+
+        if (cap != null && remaining != null && totalToday == null) {
+          state.totalToday = Math.max(0, cap - remaining);
+        }
+
+        if (cap != null && Number.isFinite(state.totalToday) && !Number.isFinite(state.dailyRemaining)) {
+          state.dailyRemaining = Math.max(0, cap - state.totalToday);
+        }
+
+        afterDaily.totalToday = Number.isFinite(state.totalToday) ? state.totalToday : null;
+        afterDaily.dailyRemaining = Number.isFinite(state.dailyRemaining) ? state.dailyRemaining : null;
+      }());
+
       logDailyTotalsDebug(source, totalsForLog, beforeDaily, afterDaily);
 
       if (typeof data.dayKey === "string" && data.dayKey) {
@@ -1761,6 +1778,20 @@
       inputs: payload.inputEvents,
       visSeconds: payload.visibilitySeconds,
     };
+
+    if (typeof window !== "undefined" && window) {
+      if (!Array.isArray(window.__xpCalls)) {
+        window.__xpCalls = [];
+      }
+      try {
+        window.__xpCalls.push({
+          method: "postWindow",
+          payload: Object.assign({}, payload),
+        });
+      } catch (_) {
+        window.__xpCalls.push({ method: "postWindow" });
+      }
+    }
 
     state.pending = window.XPClient.postWindow(payload)
       .then((data) => {
