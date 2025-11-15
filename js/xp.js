@@ -62,6 +62,8 @@
     return Number.isFinite(parsed) ? parsed : fallback;
   }
 
+  const DEFAULT_DAILY_CAP = parseNumber(window && window.XP_DAILY_CAP, 3000);
+
   function getClientDeltaCap() {
     if (typeof window === "undefined" || !window) {
       return DEFAULT_CLIENT_DELTA_CAP;
@@ -168,7 +170,48 @@
     }
   }
 
-  const HOST_PAGE = __isGameHost();
+  function __isXpHostPage() {
+    try {
+      if (typeof window !== "undefined" && window && typeof window.XP_HOST_PAGE === "string" && window.XP_HOST_PAGE) {
+        if (window.XP_HOST_PAGE.toLowerCase() === "xp") return true;
+      }
+    } catch (_) {}
+    if (typeof document !== "undefined" && document) {
+      try {
+        if (document.documentElement && typeof document.documentElement.getAttribute === "function") {
+          const attr = document.documentElement.getAttribute("data-xp-host");
+          if (attr && attr.toLowerCase() === "xp") return true;
+        }
+      } catch (_) {}
+      try {
+        if (document.body && document.body.classList && document.body.classList.contains("xp-page-body")) {
+          return true;
+        }
+      } catch (_) {}
+      try {
+        if (typeof document.querySelector === "function" && document.querySelector(".xp-page")) {
+          return true;
+        }
+      } catch (_) {}
+    }
+    try {
+      const path = typeof location !== "undefined" && location && typeof location.pathname === "string"
+        ? location.pathname
+        : "";
+      if (/\bxp(?:\.html)?$/i.test(path || "")) {
+        return true;
+      }
+    } catch (_) {}
+    return false;
+  }
+
+  function detectHostPage() {
+    if (__isGameHost()) return "game";
+    if (__isXpHostPage()) return "xp";
+    return "default";
+  }
+
+  const HOST_PAGE = detectHostPage();
 
   const MAX_SCORE_DELTA = parseNumber(window && window.XP_SCORE_DELTA_CEILING, DEFAULT_SCORE_DELTA_CEILING);
   const BASELINE_XP_PER_SECOND = parseNumber(window && window.XP_BASELINE_XP_PER_SECOND, 10);
@@ -190,7 +233,7 @@
   const FLUSH_ENDPOINT = (typeof window !== "undefined" && window && typeof window.XP_FLUSH_ENDPOINT === "string") ? window.XP_FLUSH_ENDPOINT : null;
 
   function isGameHost() {
-    return HOST_PAGE;
+    return HOST_PAGE === "game";
   }
 
   const state = {
@@ -264,6 +307,8 @@
     lastBoostDetail: null,
     storedHighScore: null,
     storedHighScoreGameId: null,
+    // Derived from cap - totalToday. Server hints are normalized through
+    // syncDailyRemainingFromTotals() so this never drifts from the totals.
     dailyRemaining: Infinity,
     nextResetEpoch: 0,
     dayKey: null,
@@ -445,6 +490,42 @@
     } catch (_) {
       return false;
     }
+  }
+
+  function logDailyTotalsDebug(from, totals, before, after) {
+    if (typeof window === "undefined" || !window || !window.XP_DEBUG_DAILY_TOTALS) return;
+    try {
+      const xpApi = window.XP;
+      const payload = {
+        from: from || "applyServerDelta",
+        totals: totals || null,
+        before: before || null,
+        after: after || null,
+      };
+      if (xpApi && typeof xpApi.log === "function") {
+        xpApi.log("totals_debug", payload);
+      } else {
+        logDebug("totals_debug", payload);
+      }
+    } catch (_) { /* ignore */ }
+  }
+
+  function dumpDailyState() {
+    if (typeof window === "undefined" || !window) return null;
+    if (!window.XP_DEBUG_DAILY_TOTALS && !window.XP_DIAG) return null;
+    const payload = {
+      cap: typeof state.cap === "number" ? state.cap : null,
+      totalToday: typeof state.totalToday === "number" ? state.totalToday : null,
+      dailyRemaining: Number.isFinite(state.dailyRemaining) ? state.dailyRemaining : null,
+      nextResetEpoch: Number(state.nextResetEpoch) || 0,
+      dayKey: state.dayKey || null,
+    };
+    try {
+      if (typeof console !== "undefined" && console && typeof console.log === "function") {
+        console.log("[XP][daily_state]", payload);
+      }
+    } catch (_) {}
+    return payload;
   }
 
   function logAwardSkip(reason, extra) {
@@ -919,17 +1000,19 @@
 
   function syncDailyRemainingFromTotals() {
     const capValue = Number(state.cap);
-    const totalValue = Number(state.totalToday);
     if (!Number.isFinite(capValue)) {
       state.dailyRemaining = Infinity;
       return;
     }
-    if (!Number.isFinite(totalValue)) {
+    const normalizedCap = Math.max(0, Math.floor(capValue));
+    const todayValue = Number(state.totalToday);
+    if (Number.isFinite(todayValue)) {
+      const normalizedToday = Math.max(0, Math.floor(todayValue));
+      const candidate = normalizedCap - normalizedToday;
+      state.dailyRemaining = Math.max(0, Math.floor(candidate));
       return;
     }
-    const normalizedCap = Math.max(0, Math.floor(capValue));
-    const normalizedTotal = Math.max(0, Math.floor(totalValue));
-    state.dailyRemaining = Math.max(0, normalizedCap - normalizedTotal);
+    state.dailyRemaining = normalizedCap;
   }
 
   function maybeResetDailyAllowance(now) {
@@ -957,7 +1040,12 @@
       if (!raw) return;
       const parsed = JSON.parse(raw);
       if (!parsed || typeof parsed !== "object") return;
-      if (typeof parsed.totalToday === "number") state.totalToday = parsed.totalToday;
+      if (typeof parsed.totalToday === "number") {
+        const cachedToday = Number(parsed.totalToday);
+        if (Number.isFinite(cachedToday)) {
+          state.totalToday = cachedToday;
+        }
+      }
       if (typeof parsed.cap === "number") state.cap = parsed.cap;
       if (typeof parsed.totalLifetime === "number") state.totalLifetime = parsed.totalLifetime;
       if (typeof parsed.badgeShownXp === "number") state.badgeShownXp = parsed.badgeShownXp;
@@ -998,7 +1086,7 @@
   function saveCache() {
     try {
       const payload = {
-        totalToday: state.totalToday,
+        totalToday: Number.isFinite(Number(state.totalToday)) ? Number(state.totalToday) : 0,
         cap: state.cap,
         totalLifetime: state.totalLifetime,
         badgeShownXp: state.badgeShownXp,
@@ -1023,6 +1111,9 @@
         flushPending: state.flush.pending || 0,
         lastSync: state.flush.lastSync || 0,
         boost: state.boost,
+        totalToday: Number.isFinite(Number(state.totalToday))
+          ? Math.max(0, Math.floor(Number(state.totalToday)))
+          : 0,
       };
       window.localStorage.setItem(RUNTIME_CACHE_KEY, JSON.stringify(payload));
     } catch (_) { /* ignore */ }
@@ -1054,6 +1145,10 @@
           cooldownLeftMs: 0,
           cap: COMBO_CAP,
         };
+      }
+      const cachedToday = parseNumber(parsed.totalToday, state.totalToday || 0);
+      if (Number.isFinite(cachedToday)) {
+        state.totalToday = Math.max(0, Math.floor(cachedToday));
       }
       state.regen.carry = parseNumber(parsed.carry, state.regen.carry || 0) || 0;
       state.regen.momentum = parseNumber(parsed.momentum, state.regen.momentum || 0) || 0;
@@ -1120,6 +1215,7 @@
         }
       }
       ensureComboState();
+      syncDailyRemainingFromTotals();
     } catch (_) {
       if (!state.flush.lastSync) state.flush.lastSync = Date.now();
     }
@@ -1194,6 +1290,122 @@
     state.badge.classList.add("xp-badge--bump");
   }
 
+  function normalizeServerPayload(raw) {
+    if (!raw || typeof raw !== "object") return {};
+    const normalized = Object.assign({}, raw);
+    const hasExplicitServerDaily = raw.__serverHasDaily === true;
+    const capKeys = ["dailyCap", "cap"];
+    let cap = null;
+    let capProvided = false;
+    for (let i = 0; i < capKeys.length; i += 1) {
+      const key = capKeys[i];
+      if (!Object.prototype.hasOwnProperty.call(raw, key)) continue;
+      capProvided = true;
+      const numeric = Number(raw[key]);
+      if (Number.isFinite(numeric)) {
+        cap = Math.max(0, Math.floor(numeric));
+        break;
+      }
+    }
+    if (capProvided) {
+      if (cap != null) {
+        normalized.cap = cap;
+      } else {
+        delete normalized.cap;
+      }
+    }
+
+    const totalTodayKeys = ["totalToday", "awardedToday", "todayEarned", "xpToday", "totalTodayXp"];
+    let totalToday = null;
+    let totalTodayProvided = false;
+    for (let i = 0; i < totalTodayKeys.length; i += 1) {
+      const key = totalTodayKeys[i];
+      if (!Object.prototype.hasOwnProperty.call(normalized, key)) continue;
+      const rawValue = normalized[key];
+      if (rawValue == null) {
+        delete normalized[key];
+        continue;
+      }
+      totalTodayProvided = true;
+      const numeric = Number(rawValue);
+      if (Number.isFinite(numeric)) {
+        totalToday = Math.max(0, Math.floor(numeric));
+        break;
+      }
+      delete normalized[key];
+    }
+    if (totalTodayProvided) {
+      if (totalToday != null) {
+        normalized.totalToday = totalToday;
+      } else {
+        delete normalized.totalToday;
+      }
+    }
+
+    const remainingKeys = ["remainingDaily", "remainingToday", "remaining"];
+    let remaining = null;
+    let remainingProvided = false;
+    for (let i = 0; i < remainingKeys.length; i += 1) {
+      const key = remainingKeys[i];
+      if (!Object.prototype.hasOwnProperty.call(normalized, key)) continue;
+      const rawValue = normalized[key];
+      if (rawValue == null) {
+        delete normalized[key];
+        continue;
+      }
+      remainingProvided = true;
+      const numeric = Number(rawValue);
+      if (Number.isFinite(numeric)) {
+        remaining = Math.max(0, Math.floor(numeric));
+        break;
+      }
+      delete normalized[key];
+    }
+    if (remainingProvided) {
+      if (remaining != null) {
+        normalized.remainingDaily = remaining;
+        normalized.remaining = remaining;
+      } else {
+        delete normalized.remainingDaily;
+        delete normalized.remaining;
+      }
+    }
+
+    const totalTodayValid = totalToday != null;
+    const remainingValid = remaining != null;
+    if (hasExplicitServerDaily || totalTodayValid || remainingValid) {
+      normalized.__serverHasDaily = true;
+    } else if (Object.prototype.hasOwnProperty.call(normalized, "__serverHasDaily")) {
+      delete normalized.__serverHasDaily;
+    }
+
+    return normalized;
+  }
+
+  function stripDailyFieldsForReconcile(payload) {
+    if (!payload || typeof payload !== "object") return {};
+    const copy = Object.assign({}, payload);
+    const dailyKeys = [
+      "cap",
+      "dailyCap",
+      "totalToday",
+      "awardedToday",
+      "todayEarned",
+      "xpToday",
+      "totalTodayXp",
+      "remaining",
+      "remainingDaily",
+      "remainingToday",
+    ];
+    for (let i = 0; i < dailyKeys.length; i += 1) {
+      const key = dailyKeys[i];
+      if (Object.prototype.hasOwnProperty.call(copy, key)) {
+        delete copy[key];
+      }
+    }
+    return copy;
+  }
+
   function attachBadge() {
     if (state.badge) return;
     if (document && typeof document.querySelector === "function") {
@@ -1225,9 +1437,10 @@
     if (data && typeof data.awarded === "number" && data.awarded > 0) {
       mergedMeta.bump = true;
     }
-    applyServerDelta(data, mergedMeta);
+    const payload = normalizeServerPayload(data);
+    applyServerDelta(payload, mergedMeta);
     setBadgeLoading(false);
-    return data;
+    return payload;
   }
 
   function handleError(err) {
@@ -1241,91 +1454,158 @@
     setBadgeLoading(false);
   }
 
+  function dispatchXpUpdatedEvent() {
+    try {
+      if (window && typeof window.dispatchEvent === "function") {
+        window.dispatchEvent(new CustomEvent("xp:updated"));
+      }
+    } catch (_) {}
+  }
+
   function applyServerDelta(data, meta) {
     if (!data || typeof data !== "object") return;
-    const keys = Object.keys(data);
-    if (!keys.length) return;
+    const remainingKeyNames = ["remainingDaily", "remaining", "remainingToday"];
+    try {
+      const keys = Object.keys(data);
+      if (!keys.length) return;
 
-    if (typeof data.cap === "number" && Number.isFinite(data.cap)) {
-      state.cap = Math.max(0, Math.floor(data.cap));
-    }
-    if (typeof data.totalToday === "number") {
-      state.totalToday = Math.max(0, Math.floor(Number(data.totalToday) || 0));
-    }
-    syncDailyRemainingFromTotals();
-    if (typeof data.remaining === "number") {
-      const remaining = Math.max(0, Math.floor(Number(data.remaining) || 0));
-      state.dailyRemaining = remaining;
-    }
-    if (typeof data.dayKey === "string" && data.dayKey) {
-      state.dayKey = data.dayKey;
-    }
-    const nextResetRaw = Object.prototype.hasOwnProperty.call(data, "nextReset")
-      ? data.nextReset
-      : data.nextResetEpoch;
-    if (typeof nextResetRaw === "number") {
-      const nextReset = Math.floor(Number(nextResetRaw) || 0);
-      if (Number.isFinite(nextReset) && nextReset > 0) {
-        state.nextResetEpoch = nextReset;
+      const beforeDaily = {
+        cap: typeof state.cap === "number" ? state.cap : null,
+        totalToday: typeof state.totalToday === "number" ? state.totalToday : null,
+        dailyRemaining: Number.isFinite(state.dailyRemaining) ? state.dailyRemaining : null,
+      };
+
+      const serverHasDaily = data.__serverHasDaily === true;
+      let capUpdated = false;
+      if (Object.prototype.hasOwnProperty.call(data, "cap")) {
+        const capCandidate = Number(data.cap);
+        if (Number.isFinite(capCandidate)) {
+          state.cap = Math.max(0, Math.floor(capCandidate));
+          capUpdated = true;
+        }
       }
-    }
-    maybeResetDailyAllowance();
+      if (!capUpdated && state.cap == null && Number.isFinite(DEFAULT_DAILY_CAP)) {
+        state.cap = Math.max(0, Math.floor(DEFAULT_DAILY_CAP));
+      }
 
-    const reasonRaw = data.reason || (data.debug && data.debug.reason) || null;
-    const reason = typeof reasonRaw === "string" ? reasonRaw.toLowerCase() : null;
-    const statusRaw = typeof data.status === "string" ? data.status.toLowerCase() : null;
-    const skipTotals = (statusRaw === "statusonly")
-      || reason === "too_soon"
-      || reason === "insufficient-activity";
+      if (Object.prototype.hasOwnProperty.call(data, "totalToday")) {
+        const nextTotalToday = Number(data.totalToday);
+        if (Number.isFinite(nextTotalToday)) {
+          state.totalToday = Math.max(0, Math.floor(nextTotalToday));
+        }
+      }
 
-    const totalLifetime = (typeof data.totalLifetime === "number") ? data.totalLifetime
-      : (typeof data.total === "number" ? data.total : null);
+      syncDailyRemainingFromTotals();
 
-    if (skipTotals || totalLifetime == null) {
-      saveCache();
-      updateBadge();
-      return;
-    }
+      const totalsForLog = {
+        cap: Object.prototype.hasOwnProperty.call(data, "cap") ? data.cap : undefined,
+        totalToday: Object.prototype.hasOwnProperty.call(data, "totalToday") ? data.totalToday : undefined,
+        remaining: undefined,
+      };
+      let remainingFromServer = null;
+      let remainingKeyUsed = null;
+      for (let i = 0; i < remainingKeyNames.length; i += 1) {
+        const key = remainingKeyNames[i];
+        if (!Object.prototype.hasOwnProperty.call(data, key)) continue;
+        remainingKeyUsed = key;
+        const numeric = Number(data[key]);
+        if (Number.isFinite(numeric)) {
+          remainingFromServer = Math.max(0, Math.floor(numeric));
+        }
+        break;
+      }
+      if (remainingKeyUsed) {
+        totalsForLog.remaining = data[remainingKeyUsed];
+      }
+      if (remainingFromServer != null) {
+        state.dailyRemaining = remainingFromServer;
+      } else if (!serverHasDaily) {
+        // Keep derived value when the server has no opinion about the daily allowance.
+      }
+      const afterDaily = {
+        cap: typeof state.cap === "number" ? state.cap : null,
+        totalToday: typeof state.totalToday === "number" ? state.totalToday : null,
+        dailyRemaining: Number.isFinite(state.dailyRemaining) ? state.dailyRemaining : null,
+      };
+      const source = meta && meta.source ? meta.source : "applyServerDelta";
+      logDailyTotalsDebug(source, totalsForLog, beforeDaily, afterDaily);
 
-    const ok = data.ok === true || statusRaw === "ok" || (!statusRaw && data.awarded != null);
-    if (!ok) {
-      saveCache();
-      updateBadge();
-      return;
-    }
+      if (typeof data.dayKey === "string" && data.dayKey) {
+        state.dayKey = data.dayKey;
+      }
+      const nextResetRaw = Object.prototype.hasOwnProperty.call(data, "nextReset")
+        ? data.nextReset
+        : data.nextResetEpoch;
+      if (typeof nextResetRaw === "number") {
+        const nextReset = Math.floor(Number(nextResetRaw) || 0);
+        if (Number.isFinite(nextReset) && nextReset > 0) {
+          state.nextResetEpoch = nextReset;
+        }
+      }
+      maybeResetDailyAllowance();
 
-    const sanitizedTotal = Math.max(0, Number(totalLifetime) || 0);
-    const previousServer = typeof state.serverTotalXp === "number" ? state.serverTotalXp : null;
-    let acked = 0;
-    if (previousServer != null) {
-      if (sanitizedTotal >= previousServer) {
-        acked = sanitizedTotal - previousServer;
-        state.serverTotalXp = sanitizedTotal;
+      const reasonRaw = data.reason || (data.debug && data.debug.reason) || null;
+      const reason = typeof reasonRaw === "string" ? reasonRaw.toLowerCase() : null;
+      const statusRaw = typeof data.status === "string" ? data.status.toLowerCase() : null;
+      const skipTotals = (statusRaw === "statusonly")
+        || reason === "too_soon"
+        || reason === "insufficient-activity";
+
+      const totalLifetime = (typeof data.totalLifetime === "number") ? data.totalLifetime
+        : (typeof data.totalXp === "number") ? data.totalXp
+          : (typeof data.total === "number" ? data.total : null);
+
+      if (skipTotals || totalLifetime == null) {
+        saveCache();
+        updateBadge();
+        dispatchXpUpdatedEvent();
+        return;
+      }
+
+      const ok = data.ok === true || statusRaw === "ok" || (!statusRaw && data.awarded != null);
+      if (!ok) {
+        saveCache();
+        updateBadge();
+        dispatchXpUpdatedEvent();
+        return;
+      }
+
+      const sanitizedTotal = Math.max(0, Number(totalLifetime) || 0);
+      const previousServer = typeof state.serverTotalXp === "number" ? state.serverTotalXp : null;
+      let acked = 0;
+      if (previousServer != null) {
+        if (sanitizedTotal >= previousServer) {
+          acked = sanitizedTotal - previousServer;
+          state.serverTotalXp = sanitizedTotal;
+        } else {
+          state.serverTotalXp = previousServer;
+        }
       } else {
-        state.serverTotalXp = previousServer;
+        const baseline = Math.max(0, Number(state.badgeBaselineXp) || 0);
+        if (sanitizedTotal >= baseline) {
+          acked = sanitizedTotal - baseline;
+        }
+        state.serverTotalXp = sanitizedTotal;
       }
-    } else {
-      const baseline = Math.max(0, Number(state.badgeBaselineXp) || 0);
-      if (sanitizedTotal >= baseline) {
-        acked = sanitizedTotal - baseline;
+
+      if (acked > 0) {
+        const pendingSession = Math.max(0, Number(state.sessionXp) || 0);
+        const toSubtract = Math.min(acked, pendingSession);
+        state.sessionXp = Math.max(0, pendingSession - toSubtract);
       }
-      state.serverTotalXp = sanitizedTotal;
-    }
 
-    if (acked > 0) {
-      const pendingSession = Math.max(0, Number(state.sessionXp) || 0);
-      const toSubtract = Math.min(acked, pendingSession);
-      state.sessionXp = Math.max(0, pendingSession - toSubtract);
+      state.badgeBaselineXp = Math.max(Number(state.badgeBaselineXp) || 0, state.serverTotalXp || 0);
+      state.totalLifetime = Math.max(Number(state.totalLifetime) || 0, state.serverTotalXp || 0);
+      state.lastResultTs = Date.now();
+      if (meta && meta.bump === true) {
+        bumpBadge();
+      }
+      saveCache();
+      updateBadge();
+      dispatchXpUpdatedEvent();
+    } finally {
+      /* noop */
     }
-
-    state.badgeBaselineXp = Math.max(Number(state.badgeBaselineXp) || 0, state.serverTotalXp || 0);
-    state.totalLifetime = Math.max(Number(state.totalLifetime) || 0, state.serverTotalXp || 0);
-    state.lastResultTs = Date.now();
-    if (meta && meta.bump === true) {
-      bumpBadge();
-    }
-    saveCache();
-    updateBadge();
   }
 
   async function sendWindow(force) {
@@ -1354,9 +1634,29 @@
       return;
     }
 
-    const activeGameId = normalizeGameId(state.gameId);
+    // ------------------------------------------------------------
+    //  FIX: allow window submission when startSession was never called
+    // ------------------------------------------------------------
+    let activeGameId = normalizeGameId(state.gameId);
+
+    // Fallback #1 – use the gameId that produced the last high-score pulse
+    if (!activeGameId && state.storedHighScoreGameId) {
+      activeGameId = normalizeGameId(state.storedHighScoreGameId);
+    }
+
+    // Fallback #2 – if a score pulse arrived before startSession, try to
+    //             auto-start the session (idempotent)
+    if (!activeGameId && state.lastScorePulseTs) {
+      const gidFromPulse = resolveScorePulseGameId(null); // uses internal cache
+      if (gidFromPulse) {
+        activeGameId = gidFromPulse;
+        // auto-start (will set state.gameId for future ticks)
+        try { startSession(gidFromPulse, { resume: true }); } catch (_) {}
+      }
+    }
+
     if (!activeGameId) {
-      logDebug("drop_mismatched_gameid", { expected: state.gameId || null, payloadGameId: null });
+      logDebug("drop_no_gameid", { reason: "no_state_or_stored_gameid" });
       return;
     }
 
@@ -1377,9 +1677,13 @@
     state.activeMs = 0;
     state.visibilitySeconds = 0;
     state.inputEvents = 0;
+    // Only warn – do **not** abort the flush when we used a fallback
     if (payload.gameId !== state.gameId) {
-      logDebug("drop_mismatched_gameid", { expected: state.gameId || null, payloadGameId: payload.gameId });
-      return;
+      logDebug("gameid_fallback_used", {
+        stateGameId: state.gameId || null,
+        used: payload.gameId,
+        source: state.storedHighScoreGameId ? "highScore" : "scorePulse"
+      });
     }
 
     const rawRemaining = getRemainingDaily();
@@ -1828,6 +2132,7 @@
     if (awarded <= 0) return 0;
     state.totalToday = (Number(state.totalToday) || 0) + awarded;
     state.totalLifetime = (Number(state.totalLifetime) || 0) + awarded;
+    syncDailyRemainingFromTotals();
     state.regen.lastAward = Date.now();
     state.lastResultTs = state.regen.lastAward;
     state.sessionXp = Math.max(0, (Number(state.sessionXp) || 0) + awarded);
@@ -2074,41 +2379,91 @@
   }
 
   function setTotals(total, cap) {
-    const payload = { ok: true };
-    if (typeof total === "number") payload.totalToday = total;
-    if (typeof cap === "number") payload.cap = cap;
-    if (arguments.length >= 3 && typeof arguments[2] === "number") {
-      payload.totalLifetime = arguments[2];
+    let payload;
+
+    if (total && typeof total === "object" && !Array.isArray(total)) {
+      payload = Object.assign({ ok: true }, total);
+      if (Object.prototype.hasOwnProperty.call(payload, "dailyCap")
+        && !Object.prototype.hasOwnProperty.call(payload, "cap")) {
+        payload.cap = payload.dailyCap;
+      }
+      if (Object.prototype.hasOwnProperty.call(payload, "awardedToday")
+        && !Object.prototype.hasOwnProperty.call(payload, "totalToday")) {
+        payload.totalToday = payload.awardedToday;
+      }
+      if (Object.prototype.hasOwnProperty.call(payload, "remainingToday")
+        && !Object.prototype.hasOwnProperty.call(payload, "remaining")) {
+        payload.remaining = payload.remainingToday;
+      }
+    } else {
+      payload = { ok: true };
+      if (typeof total === "number") {
+        payload.totalToday = total;
+      }
+      if (typeof cap === "number") {
+        payload.cap = cap;
+      }
+      if (arguments.length >= 3 && typeof arguments[2] === "number") {
+        payload.totalLifetime = arguments[2];
+      }
     }
+
     applyServerDelta(payload, { source: "setTotals" });
   }
 
+  /**
+   * Public UI getter that reports the safe remaining allowance for the current day.
+   */
   function getRemainingDaily() {
     maybeResetDailyAllowance();
-    if (state.cap == null) return Infinity;
+    const capValue = Number(state.cap);
+    if (!Number.isFinite(capValue)) {
+      const fallback = Number(state.dailyRemaining);
+      if (Number.isFinite(fallback)) {
+        return Math.max(0, Math.floor(fallback));
+      }
+      return Infinity;
+    }
     const remaining = Number(state.dailyRemaining);
     if (Number.isFinite(remaining)) {
       return Math.max(0, Math.floor(remaining));
     }
     if (typeof state.totalToday === "number") {
-      return Math.max(0, Math.floor(Math.max(0, Number(state.cap)) - Math.floor(state.totalToday)));
+      const normalizedCap = Math.max(0, Math.floor(capValue));
+      const normalizedToday = Math.max(0, Math.floor(Number(state.totalToday) || 0));
+      return Math.max(0, normalizedCap - normalizedToday);
     }
     return Infinity;
   }
 
+  /**
+   * Public UI getter for the epoch (ms) when the daily cap resets, or 0 when unknown.
+   */
   function getNextResetEpoch() {
+    maybeResetDailyAllowance();
     const next = Number(state.nextResetEpoch);
     if (!Number.isFinite(next) || next <= 0) return 0;
     return Math.floor(next);
   }
 
+  /**
+   * Return a UI-friendly snapshot of XP totals.
+   * - totalToday: XP earned during the current day window
+   * - cap: daily cap (null when unlimited)
+   * - remaining: XP still available before the daily cap hits (null when unknown)
+   * - totalXp: lifetime XP from the server
+   * - level/xpIntoLevel/xpForNextLevel/xpToNextLevel/progress: level progress helpers
+   * - lastSync: epoch ms of the most recent successful server response
+   */
   function getSnapshot() {
-    if (!state.snapshot) {
-      state.snapshot = computeLevel(state.totalLifetime || 0);
-    }
+    maybeResetDailyAllowance();
+    const totalLifetime = Math.max(0, Number(state.totalLifetime) || 0);
+    state.snapshot = computeLevel(totalLifetime);
+    const remaining = getRemainingDaily();
     return {
       totalToday: typeof state.totalToday === "number" ? state.totalToday : 0,
       cap: state.cap != null ? state.cap : null,
+      remaining: Number.isFinite(remaining) ? Math.max(0, Math.floor(remaining)) : null,
       totalXp: state.snapshot.totalXp,
       level: state.snapshot.level,
       xpIntoLevel: state.snapshot.xpIntoLevel,
@@ -2119,8 +2474,33 @@
     };
   }
 
+  function getBoostSnapshot() {
+    const boost = state.boost && typeof state.boost === "object" ? state.boost : {};
+    const now = Date.now();
+    const expiresAtRaw = Number(boost.expiresAt);
+    const expiresAt = Number.isFinite(expiresAtRaw) && expiresAtRaw > 0 ? Math.floor(expiresAtRaw) : 0;
+    const multRaw = Number(boost.multiplier);
+    const multiplier = Number.isFinite(multRaw) && multRaw > 0 ? multRaw : 1;
+    const active = !!(expiresAt > now && multiplier > 1);
+    const source = typeof boost.source === "string" && boost.source ? boost.source : null;
+    return { active, multiplier, expiresAt, source };
+  }
+
+  function getComboSnapshot() {
+    const snap = snapshotCombo();
+    return {
+      mode: snap.mode,
+      multiplier: snap.multiplier,
+      points: snap.points,
+      stepThreshold: snap.stepThreshold,
+      sustainLeftMs: snap.sustainLeftMs,
+      cooldownLeftMs: snap.cooldownLeftMs,
+    };
+  }
+
   function reconcileWithServer() {
-    if (!state.running && state.phase !== "running") {
+    const allowPassiveReconcile = HOST_PAGE === "xp";
+    if (!allowPassiveReconcile && !state.running && state.phase !== "running") {
       return Promise.resolve(null);
     }
     if (!window.XPClient || typeof window.XPClient.fetchStatus !== "function") {
@@ -2128,7 +2508,11 @@
     }
     return window.XPClient.fetchStatus()
       .then((data) => {
-        applyServerDelta(data, { source: "reconcile" });
+        const normalized = normalizeServerPayload(data);
+        const payload = (normalized && normalized.__serverHasDaily === true)
+          ? normalized
+          : stripDailyFieldsForReconcile(normalized);
+        applyServerDelta(payload, { source: "reconcile" });
         try {
           logDebug("badge_reconcile", {
             badgeShownXp: Number(state.badgeShownXp) || 0,
@@ -2150,9 +2534,32 @@
   function refreshStatus() {
     if (!window.XPClient || typeof window.XPClient.fetchStatus !== "function") return Promise.resolve(null);
     setBadgeLoading(true);
+    if (HOST_PAGE === "xp") {
+      return window.XPClient.fetchStatus()
+        .then((data) => {
+          const normalized = normalizeServerPayload(data);
+          handleResponse(normalized, { source: "status" });
+          setBadgeLoading(false);
+          return data;
+        })
+        .catch((err) => {
+          setBadgeLoading(false);
+          handleError(err);
+          throw err;
+        });
+    }
     return window.XPClient.fetchStatus()
-      .then((data) => { handleResponse(data); return data; })
-      .catch((err) => { handleError(err); throw err; });
+      .then((data) => {
+        const normalized = normalizeServerPayload(data);
+        handleResponse(normalized, { source: "status" });
+        setBadgeLoading(false);
+        return data;
+      })
+      .catch((err) => {
+        setBadgeLoading(false);
+        handleError(err);
+        throw err;
+      });
   }
 
   function maybeRefreshStatus() {
@@ -2380,14 +2787,26 @@
     startSession,
     stopSession,
     nudge,
+    log: function (eventName, payload) {
+      if (!eventName || typeof eventName !== "string") return;
+      try { logDebug(eventName, payload || {}); } catch (_) {}
+    },
     setTotals,
+    loadFromCache: function () { loadCache(); },
+    hydrateFromCache: function () { hydrateRuntimeState(); },
     getRemainingDaily,
     getNextResetEpoch,
     getSnapshot,
+    getBoostSnapshot,
+    getComboSnapshot,
     refreshStatus,
     addScore,
     awardLocalXp,
     flushXp,
+    dumpDailyState,
+    isHydrated: typeof window.XP === "object" && window.XP && typeof window.XP.isHydrated === "boolean"
+      ? window.XP.isHydrated
+      : false,
     // Public API: dispatch an event so host integrations remain decoupled.
     requestBoost: function (multiplier, ttlMs, reason) {
       let detail;
@@ -2464,12 +2883,26 @@
     },
     scoreDeltaCeiling: MAX_SCORE_DELTA,
 
-    isRunning: function(){ try { return !!(typeof state !== 'undefined' ? state.running : (this && this.__running)); } catch(_) { return !!(this && this.__running); } },});
+    isRunning: function(){ try { return !!(typeof state !== 'undefined' ? state.running : (this && this.__running)); } catch(_) { return !!(this && this.__running); } },
+  });
+
+  try {
+    if (window.XP && typeof Object.defineProperty === "function") {
+      Object.defineProperty(window.XP, "__stateInternal__", {
+        configurable: true,
+        get: function () { return state; }
+      });
+    } else if (window.XP) {
+      window.XP.__stateInternal__ = state;
+    }
+  } catch (_) {
+    try { window.XP.__stateInternal__ = state; } catch (_) {}
+  }
 })(typeof window !== "undefined" ? window : this, typeof document !== "undefined" ? document : undefined);
 // --- XP resume polyfill (idempotent) ---
 (function () {
   if (typeof window === 'undefined') return;
-  if (!window.XP || window.XP.__hostPage === false) return;
+  if (!window.XP || window.XP.__hostPage !== 'game') return;
   if (!window.XP) return;
   if (window.XP.__xpResumeWired) return; // already wired
 
@@ -2533,7 +2966,7 @@
 
 (function () {
   if (typeof window === 'undefined' || typeof document === 'undefined') return;
-  if (!window.XP || window.XP.__hostPage === false) return;
+  if (!window.XP || window.XP.__hostPage !== 'game') return;
   if (!window.XP) return;
   if (window.XP.__xpLifecycleWired) return;
   window.XP.__xpLifecycleWired = true;
