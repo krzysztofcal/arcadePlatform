@@ -226,89 +226,98 @@
     } catch (_) { /* ignore */ }
   }
 
-  function applySnapshot(){
-    if (!window.XP || typeof window.XP.getSnapshot !== "function") {
-      setFallbackVisible(true);
-      return;
-    }
-const snapshot = window.XP.getSnapshot();
-    const capValueRaw = resolveCap(snapshot);
-    const capValue = capValueRaw != null ? safeInt(capValueRaw) : null;
-    const snapshotToday = safeInt(snapshot && snapshot.totalToday);
-    const snapshotRemaining = safeInt(snapshot && snapshot.remaining);
-    let totalToday = snapshotToday != null ? snapshotToday : null;
-    if (capValue != null && snapshotRemaining != null) {
-      const derivedToday = Math.max(0, capValue - snapshotRemaining);
-      if (totalToday == null || derivedToday > totalToday) {
-        totalToday = derivedToday;
-      }
-    }
-    if (totalToday == null) {
-      totalToday = 0;
-    }
-    let remainingValue;
-    if (capValue != null) {
-      remainingValue = Math.max(0, capValue - totalToday);
-    } else if (snapshotRemaining != null) {
-      remainingValue = snapshotRemaining;
-    } else {
-      remainingValue = 0;
-    }
-    const totalXp = safeInt(snapshot && snapshot.totalXp) || 0;
-    const level = safeInt(snapshot && snapshot.level) || 1;
-    setTestTotals({ cap: capValue, totalToday, remaining: remainingValue });
-    // When the cap is effectively reached, ensure the display reflects the
-    // fully-consumed allowance even if the runtime is a tick behind.
+  
+function applySnapshot() {
+  try {
+    const xp = window.XP || {};
+    const snapshot = typeof xp.getSnapshot === "function" ? xp.getSnapshot() : {};
+    const summary  = typeof xp.getSummary  === "function" ? xp.getSummary()  : {};
+
+    // --- CAP ---
+    const capValue =
+      (snapshot && snapshot.cap != null ? safeInt(snapshot.cap) : null)
+      ?? (summary  && summary.cap  != null ? safeInt(summary.cap)  : null)
+      ?? null;
+
+    // --- TODAY ---
+    let totalToday =
+      (snapshot && snapshot.totalToday != null ? safeInt(snapshot.totalToday) : null)
+      ?? (summary  && summary.totalToday != null ? safeInt(summary.totalToday)  : null)
+      ?? 0;
+
+    // --- REMAINING ---
+    let remainingValue =
+      capValue != null ? Math.max(0, capValue - totalToday)
+      : (snapshot && snapshot.remaining != null ? safeInt(snapshot.remaining)
+      : (summary  && summary.remaining  != null ? safeInt(summary.remaining)
+      : 0));
+
+    // --- HANDLE CAP EDGE CASE ---
     let displayToday = totalToday;
-    if (
-      capValue != null &&
-      remainingValue <= 1 &&
-      displayToday < capValue
-    ) {
+    if (capValue != null && remainingValue <= 1 && displayToday < capValue) {
       displayToday = capValue;
     }
-    if ((window && window.XP_DEBUG) || (window && window.XP_DIAG)) {
-      try {
-        console.debug("XP_PAGE_SNAPSHOT", {
-          totalToday,
-          displayToday,
-          capValue,
-          remainingValue,
-        });
-      } catch (_) { /* ignore */ }
-    }
-    const nextReset = typeof window.XP.getNextResetEpoch === "function" ? window.XP.getNextResetEpoch() : 0;
-    const boost = typeof window.XP.getBoostSnapshot === "function" ? window.XP.getBoostSnapshot() : null;
-    const combo = typeof window.XP.getComboSnapshot === "function" ? window.XP.getComboSnapshot() : null;
+
+    // Save for tests
+    setTestTotals({
+      cap: capValue,
+      totalToday,
+      remaining: remainingValue
+    });
+
+    // --- BASIC INFO ---
+    const totalXp = safeInt(snapshot.totalXp) || 0;
+    const level   = safeInt(snapshot.level)   || 1;
 
     setFallbackVisible(false);
+
     if (levelEl) levelEl.textContent = formatNumber(level);
     if (totalEl) totalEl.textContent = formatNumber(totalXp);
-    const capText = capValue != null ? `${formatNumber(capValue)} XP` : "—";
-    if (capEl) capEl.textContent = capText;
-    if (todayLineEl) {
-      const template = t("xp_daily_line", "You have earned {amount} XP today.");
-      todayLineEl.textContent = formatTemplate(template, { amount: formatNumber(displayToday) });
-    }
+
+    // --- CAP LINE ---
+    if (capEl) capEl.textContent = capValue != null ? `${formatNumber(capValue)} XP` : "—";
+
     if (capLineEl) {
       const template = t("xp_daily_cap_line", "The daily XP cap is {cap} XP.");
-      capLineEl.textContent = formatTemplate(template, { cap: capValue != null ? formatNumber(capValue) : "—" });
+      capLineEl.textContent = formatTemplate(template, {
+        cap: capValue != null ? formatNumber(capValue) : "—"
+      });
     }
+
+    // --- TODAY LINE ---
+    if (todayLineEl) {
+      const template = t("xp_daily_line", "You have earned {amount} XP today.");
+      todayLineEl.textContent = formatTemplate(template, {
+        amount: formatNumber(displayToday)
+      });
+    }
+
+    // --- REMAINING ---
     const remainingText = `${formatNumber(remainingValue)} XP`;
     if (remainingEl) remainingEl.textContent = remainingText;
+
+    if (remainingLineEl) {
+      const template = t("xp_daily_remaining_line", "Remaining today: {remaining} XP.");
+      remainingLineEl.textContent = formatTemplate(template, {
+        remaining: formatNumber(remainingValue)
+      });
+    }
+
     if (remainingHintEl) {
       const txt = formatRemainingHint(remainingValue);
-      remainingHintEl.textContent = (txt && String(txt).trim().length)
+      remainingHintEl.textContent =
+        (txt && txt.trim().length)
         ? txt
         : (remainingValue <= 0
             ? t("xp_remaining_capped", "You’ve reached today’s XP cap. Come back after the daily reset.")
             : t("xp_remaining_left", "Keep going—XP is still available today."));
     }
-    if (remainingLineEl) {
-      const template = t("xp_daily_remaining_line", "Remaining today: {remaining} XP.");
-      const remainingValueText = formatNumber(remainingValue);
-      remainingLineEl.textContent = formatTemplate(template, { remaining: remainingValueText });
-    }
+
+    // --- RESET HINT ---
+    const nextReset = typeof xp.getNextResetEpoch === "function"
+      ? xp.getNextResetEpoch()
+      : 0;
+
     if (resetHintEl) {
       const hint = formatResetHint(nextReset);
       if (hint) {
@@ -319,12 +328,22 @@ const snapshot = window.XP.getSnapshot();
       }
     }
 
+    // --- RENDER SECTIONS ---
     renderProgress(snapshot);
-    renderBoost(boost);
-    renderCombo(combo);
-  }
 
-  function refresh(){
+    const boost = typeof xp.getBoostSnapshot === "function" ? xp.getBoostSnapshot() : null;
+    renderBoost(boost);
+
+    const combo = typeof xp.getComboSnapshot === "function" ? xp.getComboSnapshot() : null;
+    renderCombo(combo);
+
+  } catch (err) {
+    console.error("applySnapshot error:", err);
+  }
+}
+
+
+function refresh(){
     if (!window.XP || typeof window.XP.refreshStatus !== "function") {
       return Promise.resolve();
     }
