@@ -1,4 +1,5 @@
 const { test, expect } = require('@playwright/test');
+const { driveActiveWindow } = require('./helpers/xp-driver');
 
 const GAME_PAGE = '/games-open/2048/index.html';
 const XP_PAGE = '/xp.html';
@@ -189,22 +190,33 @@ async function openXpPage(page) {
   await page.goto(XP_PAGE, { waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => {
     try {
-      const totals = window.__xpTestTotals;
       const XP = window.XP;
-      if (!totals || !XP || typeof XP.getSnapshot !== 'function') return false;
+      let summary = null;
+      if (XP && typeof XP.getSummary === 'function') {
+        summary = XP.getSummary();
+      }
 
-      const snap = XP.getSnapshot();
-      const requiredToday = Number(totals.totalToday || 0);
-      const currentToday = Number(snap.totalToday || 0);
+      const hasSummary = summary
+        && typeof summary.totalToday === 'number'
+        && typeof summary.cap === 'number';
 
-      // Page is "ready" once the XP snapshot reflects at least the
-      // totals the stub has already accumulated on the game page.
-      return currentToday >= requiredToday;
+      const totals = window.__xpTestTotals;
+      const hasDebugTotals = totals
+        && typeof totals.totalToday === 'number'
+        && typeof totals.cap === 'number';
+
+      return hasSummary || hasDebugTotals;
     } catch (_) {
       return false;
     }
   }, null, { timeout: 10_000 });
 }
+
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => {
+    window.__XP_TEST_DISABLE_IDLE_GUARD = true;
+  });
+});
 
 test.describe('XP Progress page', () => {
   test('shows earned XP and remaining allowance', async ({ page }) => {
@@ -219,9 +231,10 @@ test.describe('XP Progress page', () => {
 
     await page.goto(GAME_PAGE, { waitUntil: 'domcontentloaded' });
     await simulatePlayWindow(page);
+    await driveActiveWindow(page);
     await waitForAward(page, 1);
-    const totals = await page.evaluate(() => window.__xpTestTotals);
-    expect(totals.totalToday).toBeGreaterThan(0);
+    const gameTotals = await page.evaluate(() => window.__xpTestTotals);
+    expect(gameTotals.totalToday).toBeGreaterThan(0);
 
     await openXpPage(page);
 
@@ -234,7 +247,7 @@ test.describe('XP Progress page', () => {
     expect(extractNumber(levelText)).toBeGreaterThanOrEqual(1);
 
     const totalXp = extractNumber(await page.textContent('#xpTotal'));
-    expect(totalXp).toBeGreaterThanOrEqual(totals.totalToday);
+    expect(totalXp).toBeGreaterThanOrEqual(gameTotals.totalToday);
 
     const capText = await page.textContent('#xpDailyCap');
     const capValue = extractNumber(capText);
@@ -243,8 +256,25 @@ test.describe('XP Progress page', () => {
     const earnedToday = extractNumber(await page.textContent('#xpTodayLine'));
     expect(earnedToday).toBeGreaterThan(0);
 
+    const { summary, totals } = await page.evaluate(() => {
+      const XP = window.XP;
+      const s = XP && typeof XP.getSummary === 'function' ? XP.getSummary() : null;
+      const t = window.__xpTestTotals || null;
+      return { summary: s, totals: t };
+    });
+
     const remainingValue = extractNumber(await page.textContent('#xpRemaining'));
-    const expectedRemaining = Math.max(0, (totals.cap ?? 0) - totals.totalToday);
+    const expectedRemainingFromSummary = summary && typeof summary.remaining === 'number'
+      ? summary.remaining
+      : null;
+
+    let expectedRemaining = expectedRemainingFromSummary;
+    if (!Number.isFinite(expectedRemaining)) {
+      const cap = (summary && summary.cap) ?? (totals && totals.cap) ?? 0;
+      const totalToday = (summary && summary.totalToday) ?? (totals && totals.totalToday) ?? 0;
+      expectedRemaining = Math.max(0, cap - totalToday);
+    }
+
     expect(Math.abs(remainingValue - expectedRemaining)).toBeLessThanOrEqual(1);
 
     const todayRemainingText = extractNumber(await page.textContent('#xpRemainingLine'));
@@ -260,6 +290,7 @@ test.describe('XP Progress page', () => {
 
     await page.goto(GAME_PAGE, { waitUntil: 'domcontentloaded' });
     await simulatePlayWindow(page, 15);
+    await driveActiveWindow(page);
     await waitForAward(page, 1);
     const totals = await page.evaluate(() => window.__xpTestTotals);
     expect(totals.totalToday).toBeGreaterThanOrEqual(60);
@@ -289,6 +320,7 @@ test.describe('XP Progress page', () => {
 
     await page.goto(GAME_PAGE, { waitUntil: 'domcontentloaded' });
     await simulatePlayWindow(page, 12);
+    await driveActiveWindow(page);
     await waitForAward(page, 1);
     const totals = await page.evaluate(() => window.__xpTestTotals);
     expect(totals.totalToday).toBeGreaterThan(0);

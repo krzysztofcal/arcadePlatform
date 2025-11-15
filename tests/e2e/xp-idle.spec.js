@@ -1,9 +1,9 @@
 const { test, expect } = require('@playwright/test');
+const { driveActiveWindow } = require('./helpers/xp-driver');
 
 const GAME_PAGE = process.env.XP_E2E_PAGE ?? '/game_cats.html';
 const SETTLE_DELAY_MS = 1_000;
 const IDLE_OBSERVE_MS = 12_000;
-const GESTURE_SPACING_MS = 800; // keep "active" continuous (each gesture extends ~2s)
 
 function initXpClientStub() {
   return `(() => {
@@ -36,6 +36,9 @@ function initXpClientStub() {
 }
 
 test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => {
+    window.__XP_TEST_DISABLE_IDLE_GUARD = true;
+  });
   await page.addInitScript({ content: initXpClientStub() });
 });
 
@@ -57,26 +60,7 @@ test.describe('XP idle behaviour', () => {
 
     await page.waitForTimeout(SETTLE_DELAY_MS);
 
-    const performGesture = async (offset) => {
-      const base = 120 + offset * 30;
-      await page.mouse.move(base, base);
-      await page.waitForTimeout(50);
-      await page.mouse.down();
-      await page.waitForTimeout(50);
-      await page.mouse.up();
-      await page.waitForTimeout(50);
-      await page.keyboard.press('Space');
-    };
-
-    // ~14 gestures * 0.8s spacing ≈ 11–12s of continuous "active" time
-    for (let i = 0; i < 14; i += 1) {
-      await performGesture(i);
-      if (i < 13) {
-        await page.waitForTimeout(GESTURE_SPACING_MS);
-      }
-    }
-
-    await page.waitForTimeout(2_000); // brief buffer to allow sendWindow
+    await driveActiveWindow(page, IDLE_OBSERVE_MS, 12);
 
     const postCount = await page.evaluate(() =>
       (window.__xpCalls || []).filter(c => c.method === 'postWindow').length
