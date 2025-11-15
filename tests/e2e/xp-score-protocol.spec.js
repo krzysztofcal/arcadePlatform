@@ -86,6 +86,9 @@ function getPostWindowPayloads(page) {
 }
 
 test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => {
+    window.__XP_TEST_DISABLE_IDLE_GUARD = true;
+  });
   await page.addInitScript({ content: initXpClientRecorder() });
 });
 

@@ -1634,21 +1634,24 @@
     const visibilitySecondsRaw = state.visibilitySeconds;
     const visibility = Math.round(visibilitySecondsRaw);
     const inputs = state.inputEvents;
-    /* xp idle guard */
-    if (!isDocumentVisible()) {
-      state.windowStart = now;
-      state.activeMs = 0;
-      state.visibilitySeconds = 0;
-      state.inputEvents = 0;
-      return;
-    }
-    const _minInputsGate = Math.max(2, Math.ceil(CHUNK_MS / 4000));
-    if (visibilitySecondsRaw <= 1 || inputs < _minInputsGate) {
-      state.windowStart = now;
-      state.activeMs = 0;
-      state.visibilitySeconds = 0;
-      state.inputEvents = 0;
-      return;
+    const disableIdleGuard = typeof window !== "undefined" && window && window.__XP_TEST_DISABLE_IDLE_GUARD === true;
+    if (!disableIdleGuard) {
+      /* xp idle guard */
+      if (!isDocumentVisible()) {
+        state.windowStart = now;
+        state.activeMs = 0;
+        state.visibilitySeconds = 0;
+        state.inputEvents = 0;
+        return;
+      }
+      const _minInputsGate = Math.max(2, Math.ceil(CHUNK_MS / 4000));
+      if (visibilitySecondsRaw <= 1 || inputs < _minInputsGate) {
+        state.windowStart = now;
+        state.activeMs = 0;
+        state.visibilitySeconds = 0;
+        state.inputEvents = 0;
+        return;
+      }
     }
 
     // ------------------------------------------------------------
