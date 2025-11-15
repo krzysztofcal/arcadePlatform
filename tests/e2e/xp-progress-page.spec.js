@@ -1,4 +1,5 @@
 const { test, expect } = require('@playwright/test');
+const { driveActiveWindow } = require('./helpers/xp-driver');
 
 const GAME_PAGE = '/games-open/2048/index.html';
 const XP_PAGE = '/xp.html';
@@ -219,6 +220,7 @@ test.describe('XP Progress page', () => {
 
     await page.goto(GAME_PAGE, { waitUntil: 'domcontentloaded' });
     await simulatePlayWindow(page);
+    await driveActiveWindow(page);
     await waitForAward(page, 1);
     const totals = await page.evaluate(() => window.__xpTestTotals);
     expect(totals.totalToday).toBeGreaterThan(0);
@@ -260,6 +262,7 @@ test.describe('XP Progress page', () => {
 
     await page.goto(GAME_PAGE, { waitUntil: 'domcontentloaded' });
     await simulatePlayWindow(page, 15);
+    await driveActiveWindow(page);
     await waitForAward(page, 1);
     const totals = await page.evaluate(() => window.__xpTestTotals);
     expect(totals.totalToday).toBeGreaterThanOrEqual(60);
@@ -289,6 +292,7 @@ test.describe('XP Progress page', () => {
 
     await page.goto(GAME_PAGE, { waitUntil: 'domcontentloaded' });
     await simulatePlayWindow(page, 12);
+    await driveActiveWindow(page);
     await waitForAward(page, 1);
     const totals = await page.evaluate(() => window.__xpTestTotals);
     expect(totals.totalToday).toBeGreaterThan(0);
