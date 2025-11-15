@@ -1528,39 +1528,52 @@
         dailyRemaining: Number.isFinite(state.dailyRemaining) ? state.dailyRemaining : null,
       };
       const source = meta && meta.source ? meta.source : "applyServerDelta";
-
-      // Guard: status/reconcile responses must NOT rewind local daily progress.
-      if (source === "status" || source === "reconcile") {
-        const beforeToday = typeof beforeDaily.totalToday === "number" ? beforeDaily.totalToday : null;
-        const afterToday = typeof afterDaily.totalToday === "number" ? afterDaily.totalToday : null;
-
-        // If server reports *less* used today than we already know, treat it as stale
-        // and keep the local daily totals.
-        if (beforeToday != null && afterToday != null && afterToday < beforeToday) {
-          state.totalToday = beforeToday;
+      const beforeTodayValue = typeof beforeDaily.totalToday === "number" ? beforeDaily.totalToday : null;
+      const guardStatusReconcile = source === "status" || source === "reconcile";
+      const refreshAfterDailySnapshot = () => {
+        afterDaily.cap = typeof state.cap === "number" ? state.cap : null;
+        afterDaily.totalToday = typeof state.totalToday === "number" ? state.totalToday : null;
+        afterDaily.dailyRemaining = Number.isFinite(state.dailyRemaining) ? state.dailyRemaining : null;
+      };
+      const preventDailyRewind = () => {
+        if (!guardStatusReconcile) return;
+        if (beforeTodayValue == null) return;
+        const afterTodayValue = typeof state.totalToday === "number" ? state.totalToday : null;
+        if (afterTodayValue != null && afterTodayValue < beforeTodayValue) {
+          state.totalToday = beforeTodayValue;
           syncDailyRemainingFromTotals();
-          // Refresh afterDaily snapshot to reflect the corrected state.
-          afterDaily.totalToday = state.totalToday;
-          afterDaily.dailyRemaining = Number.isFinite(state.dailyRemaining) ? state.dailyRemaining : null;
+          refreshAfterDailySnapshot();
         }
-      }
+      };
+
+      preventDailyRewind();
 
       (function enforceDailyInvariants() {
         const cap = Number.isFinite(state.cap) ? state.cap : null;
-        const totalToday = Number.isFinite(state.totalToday) ? state.totalToday : null;
-        const remaining = Number.isFinite(state.dailyRemaining) ? state.dailyRemaining : null;
+        const currentRemaining = Number.isFinite(state.dailyRemaining) ? state.dailyRemaining : null;
+        const currentToday = Number.isFinite(state.totalToday) ? state.totalToday : null;
+        const derivedFromRemaining = (cap != null && currentRemaining != null)
+          ? Math.max(0, cap - currentRemaining)
+          : null;
 
-        if (cap != null && remaining != null && totalToday == null) {
-          state.totalToday = Math.max(0, cap - remaining);
+        if (derivedFromRemaining != null) {
+          if (currentToday == null || derivedFromRemaining > currentToday) {
+            state.totalToday = derivedFromRemaining;
+          } else if (!guardStatusReconcile && derivedFromRemaining < currentToday) {
+            state.totalToday = derivedFromRemaining;
+          }
         }
 
-        if (cap != null && Number.isFinite(state.totalToday) && !Number.isFinite(state.dailyRemaining)) {
+        if (cap != null && Number.isFinite(state.totalToday)) {
           state.dailyRemaining = Math.max(0, cap - state.totalToday);
+        } else if (cap != null && !Number.isFinite(state.dailyRemaining)) {
+          state.dailyRemaining = cap;
         }
 
-        afterDaily.totalToday = Number.isFinite(state.totalToday) ? state.totalToday : null;
-        afterDaily.dailyRemaining = Number.isFinite(state.dailyRemaining) ? state.dailyRemaining : null;
+        refreshAfterDailySnapshot();
       }());
+
+      preventDailyRewind();
 
       logDailyTotalsDebug(source, totalsForLog, beforeDaily, afterDaily);
 

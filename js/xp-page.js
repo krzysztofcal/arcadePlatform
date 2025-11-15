@@ -116,6 +116,21 @@
     }
   }
 
+  function setTestTotals(totals){
+    if (typeof window === "undefined") return;
+    const payload = Object.assign({ cap: null, totalToday: 0, remaining: 0 }, totals || {});
+    try {
+      Object.defineProperty(window, "__xpTestTotals", {
+        configurable: true,
+        enumerable: false,
+        value: payload,
+        writable: true,
+      });
+    } catch (_) {
+      window.__xpTestTotals = payload;
+    }
+  }
+
   function renderProgress(snapshot){
     const intoLevel = safeInt(snapshot && snapshot.xpIntoLevel) || 0;
     const forNext = safeInt(snapshot && snapshot.xpForNextLevel) || 0;
@@ -222,23 +237,34 @@
     const snapshot = window.XP.getSnapshot();
     const capValueRaw = resolveCap(snapshot);
     const capValue = capValueRaw != null ? safeInt(capValueRaw) : null;
-    const totalToday = safeInt(snapshot && snapshot.totalToday) || 0;
+    const snapshotToday = safeInt(snapshot && snapshot.totalToday);
+    const snapshotRemaining = safeInt(snapshot && snapshot.remaining);
+    let totalToday = snapshotToday != null ? snapshotToday : null;
+    if (capValue != null && snapshotRemaining != null) {
+      const derivedToday = Math.max(0, capValue - snapshotRemaining);
+      if (totalToday == null || derivedToday > totalToday) {
+        totalToday = derivedToday;
+      }
+    }
+    if (totalToday == null) {
+      totalToday = 0;
+    }
+    let remainingValue;
+    if (capValue != null) {
+      remainingValue = Math.max(0, capValue - totalToday);
+    } else if (snapshotRemaining != null) {
+      remainingValue = snapshotRemaining;
+    } else {
+      remainingValue = 0;
+    }
     const totalXp = safeInt(snapshot && snapshot.totalXp) || 0;
     const level = safeInt(snapshot && snapshot.level) || 1;
-    const remainingValue = capValue != null ? Math.max(0, capValue - totalToday) : 0;
-    if (typeof window !== "undefined") {
-      window.__xpTestTotals = {
-        cap: capValue,
-        totalToday,
-        remaining: remainingValue,
-      };
-    }
+    setTestTotals({ cap: capValue, totalToday, remaining: remainingValue });
     // When the cap is effectively reached, ensure the display reflects the
     // fully-consumed allowance even if the runtime is a tick behind.
     let displayToday = totalToday;
     if (
       capValue != null &&
-      remainingValue != null &&
       remainingValue <= 1 &&
       displayToday < capValue
     ) {
