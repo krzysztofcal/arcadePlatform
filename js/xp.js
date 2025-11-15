@@ -74,6 +74,29 @@
     }
   }
 
+  function isTestMode() {
+    try {
+      return typeof window !== "undefined" && window && window.__XP_TEST_DISABLE_IDLE_GUARD === true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function markHydratedFlag() {
+    try {
+      if (typeof window === "undefined" || !window) return;
+      if (!window.XP || typeof window.XP !== "object") {
+        window.XP = window.XP || {};
+      }
+      window.XP.isHydrated = true;
+    } catch (_) {
+      try {
+        window.XP = window.XP || {};
+        window.XP.isHydrated = true;
+      } catch (_) {}
+    }
+  }
+
   const DEFAULT_DAILY_CAP = parseNumber(window && window.XP_DAILY_CAP, 3000);
 
   function getClientDeltaCap() {
@@ -1494,6 +1517,7 @@
     const payload = normalizeServerPayload(data);
     applyServerDelta(payload, mergedMeta);
     setBadgeLoading(false);
+    markHydratedFlag();
     return payload;
   }
 
@@ -1997,13 +2021,46 @@
   }
 
   function debugForceWindow() {
+    if (!isTestMode()) return;
+
     try {
       if (!window || !window.XPClient || typeof window.XPClient.postWindow !== "function") {
         return;
       }
-      sendWindow(true);
+
+      const now = Date.now();
+      const windowMs = Number.isFinite(WINDOW_MS) && WINDOW_MS > 0 ? WINDOW_MS : CHUNK_MS;
+
+      let gameId = normalizeGameId(state.gameId);
+      if (!gameId) {
+        gameId = "xp-e2e";
+        state.gameId = gameId;
+      }
+
+      const visSeconds = Math.max(1, Math.round(Number(state.visibilitySeconds) || windowMs / 1000));
+      const inputEvents = Math.max(1, Number(state.inputEvents) || MIN_EVENTS_PER_TICK || 1);
+
+      const payload = {
+        gameId,
+        windowStart: state.windowStart || (now - windowMs),
+        windowEnd: now,
+        visibilitySeconds: visSeconds,
+        inputEvents,
+        chunkMs: windowMs,
+        pointsPerPeriod: 10,
+      };
+
+      const pendingScore = Math.max(0, Math.floor(Number(state.scoreDelta) || 0));
+      if (pendingScore > 0) payload.scoreDelta = pendingScore;
+
+      const tapLenBefore = Array.isArray(window.__xpCalls) ? window.__xpCalls.length : null;
+      tapPostWindow(payload, tapLenBefore);
+
+      window.XPClient.postWindow(payload)
+        .then((data) => { handleResponse(data, { source: "window" }); })
+        .catch((err) => { handleError(err); });
     } catch (_) {
-      /* swallow */
+      /* swallow in tests */
     }
   }
 
@@ -2901,6 +2958,7 @@ function maybeRefreshStatus() {
 
   function init() {
     hydrateRuntimeState();
+    markHydratedFlag();
     if (!state.debug.initLogged) {
       state.debug.initLogged = true;
       const page = resolvePagePath();
@@ -2912,6 +2970,7 @@ function maybeRefreshStatus() {
     try {
       refreshBadgeFromStorage();
     } catch (_) {}
+    markHydratedFlag();
 
     if (!isGameHost()) {
       if (state.running === true) {
