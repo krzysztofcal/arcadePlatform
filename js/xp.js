@@ -1528,6 +1528,23 @@
         dailyRemaining: Number.isFinite(state.dailyRemaining) ? state.dailyRemaining : null,
       };
       const source = meta && meta.source ? meta.source : "applyServerDelta";
+
+      // Guard: status/reconcile responses must NOT rewind local daily progress.
+      if (source === "status" || source === "reconcile") {
+        const beforeToday = typeof beforeDaily.totalToday === "number" ? beforeDaily.totalToday : null;
+        const afterToday = typeof afterDaily.totalToday === "number" ? afterDaily.totalToday : null;
+
+        // If server reports *less* used today than we already know, treat it as stale
+        // and keep the local daily totals.
+        if (beforeToday != null && afterToday != null && afterToday < beforeToday) {
+          state.totalToday = beforeToday;
+          syncDailyRemainingFromTotals();
+          // Refresh afterDaily snapshot to reflect the corrected state.
+          afterDaily.totalToday = state.totalToday;
+          afterDaily.dailyRemaining = Number.isFinite(state.dailyRemaining) ? state.dailyRemaining : null;
+        }
+      }
+
       logDailyTotalsDebug(source, totalsForLog, beforeDaily, afterDaily);
 
       if (typeof data.dayKey === "string" && data.dayKey) {
@@ -2509,10 +2526,8 @@
     return window.XPClient.fetchStatus()
       .then((data) => {
         const normalized = normalizeServerPayload(data);
-        const payload = (normalized && normalized.__serverHasDaily === true)
-          ? normalized
-          : stripDailyFieldsForReconcile(normalized);
-        applyServerDelta(payload, { source: "reconcile" });
+        const payload = normalized;
+applyServerDelta(payload, { source: "reconcile" });
         try {
           logDebug("badge_reconcile", {
             badgeShownXp: Number(state.badgeShownXp) || 0,
@@ -2532,43 +2547,36 @@
   }
 
   function refreshStatus() {
-    if (!window.XPClient || typeof window.XPClient.fetchStatus !== "function") return Promise.resolve(null);
-    setBadgeLoading(true);
-    if (HOST_PAGE === "xp") {
-      return window.XPClient.fetchStatus()
-        .then((data) => {
-          const normalized = normalizeServerPayload(data);
-          handleResponse(normalized, { source: "status" });
-          setBadgeLoading(false);
-          return data;
-        })
-        .catch((err) => {
-          setBadgeLoading(false);
-          handleError(err);
-          throw err;
-        });
-    }
-    return window.XPClient.fetchStatus()
-      .then((data) => {
-        const normalized = normalizeServerPayload(data);
-        handleResponse(normalized, { source: "status" });
-        setBadgeLoading(false);
-        return data;
-      })
-      .catch((err) => {
-        setBadgeLoading(false);
-        handleError(err);
-        throw err;
-      });
+  if (!window.XPClient || typeof window.XPClient.fetchStatus !== "function") {
+    return Promise.resolve(null);
   }
 
-  function maybeRefreshStatus() {
-    const now = Date.now();
-    const staleMs = 60_000;
-    if (!state.lastResultTs || (now - state.lastResultTs) > staleMs) {
-      refreshStatus().catch(() => {});
-    }
+  setBadgeLoading(true);
+
+  return window.XPClient.fetchStatus()
+    .then((data) => {
+      const normalized = normalizeServerPayload(data);
+      handleResponse(normalized, { source: "status" });
+      setBadgeLoading(false);
+      return data;
+    })
+    .catch((err) => {
+      setBadgeLoading(false);
+      handleError(err);
+      throw err;
+    });
+}
+
+function maybeRefreshStatus() {
+  const now = Date.now();
+  const staleMs = 60_000;
+
+  if (!state.lastResultTs || (now - state.lastResultTs) > staleMs) {
+    return refreshStatus().catch(() => {});
   }
+
+  return Promise.resolve(null);
+}
 
   function init() {
     hydrateRuntimeState();
