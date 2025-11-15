@@ -231,10 +231,7 @@
       setFallbackVisible(true);
       return;
     }
-    if (!window.XP.isHydrated) {
-      return;
-    }
-    const snapshot = window.XP.getSnapshot();
+const snapshot = window.XP.getSnapshot();
     const capValueRaw = resolveCap(snapshot);
     const capValue = capValueRaw != null ? safeInt(capValueRaw) : null;
     const snapshotToday = safeInt(snapshot && snapshot.totalToday);
@@ -331,9 +328,7 @@
     if (!window.XP || typeof window.XP.refreshStatus !== "function") {
       return Promise.resolve();
     }
-    return window.XP.refreshStatus()
-      .catch(() => null);
-  }
+    return window.XP.refreshStatus().then(()=>{ try{ applySnapshot(); }catch(_){ } }).catch(()=>null);}
 
   async function hydrateBeforeRender(){
     if (!window.XP) return;
@@ -379,3 +374,10 @@
     applySnapshot();
   });
 })();
+
+/* XP_PAGE_AUTO_INIT */
+try {
+  if (typeof window !== "undefined") {
+    setTimeout(() => { try { typeof applySnapshot==="function" && applySnapshot(); typeof refresh==="function" && refresh(); } catch(_) {} }, 50);
+  }
+} catch(_) {}

@@ -1749,7 +1749,7 @@
     if (!disableIdleGuard) {
       /* xp idle guard */
       if (!isDocumentVisible()) {
-        state.windowStart = now;
+      state.windowStart = now;
         state.activeMs = 0;
         state.visibilitySeconds = 0;
         state.inputEvents = 0;
