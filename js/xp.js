@@ -2100,6 +2100,7 @@
       logDebug("xp_stop", { flush: opts.flush !== false });
     }
     /* xp stop flush guard */ if (state.running && opts.flush !== false) {
+      const disableIdleGuard = isIdleGuardDisabled();
       const _minInputsGate = Math.max(2, Math.ceil(WINDOW_MS / 4000));
       const meetsActivityThreshold = state.visibilitySeconds > 1 && state.inputEvents >= _minInputsGate;
       const pendingScore = Math.max(0, Math.floor(Number(state.scoreDelta) || 0));
@@ -2107,8 +2108,12 @@
         || (Number(state.activeMs) || 0) > 0
         || (Number(state.visibilitySeconds) || 0) > 0
         || (Number(state.inputEvents) || 0) > 0;
-      if (opts.flush === true && hasPendingWindow) {
-        sendWindow(true);
+      if (opts.flush === true) {
+        if (disableIdleGuard || hasPendingWindow || meetsActivityThreshold) {
+          sendWindow(true);
+        } else {
+          // skip network flush if idle
+        }
       } else if (meetsActivityThreshold) {
         sendWindow(true);
       } else {
