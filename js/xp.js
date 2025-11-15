@@ -1749,7 +1749,15 @@
     if (!disableIdleGuard) {
       /* xp idle guard */
       if (!isDocumentVisible()) {
-      state.windowStart = now;
+      {
+  // merge score buffers (remainder + whole) and clear for the next window
+  let __sum = Math.max(0, Number(state.scoreDelta) || 0) + Math.max(0, Number(state.scoreDeltaRemainder) || 0);
+  const pendingScore = Math.floor(__sum);
+  state.scoreDelta = 0;
+  state.scoreDeltaRemainder = __sum - pendingScore;
+  if (pendingScore > 0) { payload.scoreDelta = pendingScore; }
+}
+state.windowStart = now;
         state.activeMs = 0;
         state.visibilitySeconds = 0;
         state.inputEvents = 0;
@@ -1923,8 +1931,7 @@
       return;
     }
 
-    if (!isGameHost()) {
-      logBlockNoHost(now);
+    if (!isGameHost()) { logBlockNoHost(now);
     }
 
     if (!disableIdleGuard && !isDocumentVisible()) {
@@ -1937,8 +1944,7 @@
       state.activityWindowFrozen = true;
       zeroTickCounters();
       flushXp(true).catch(() => {});
-      return;
-    }
+       }
 
     state.phase = "running";
     state.visibilitySeconds += delta / 1000;
@@ -2124,8 +2130,8 @@
       return;
     }
     attachBadge();
-    ensureHostBindings();
-    hydrateRuntimeState();
+    if (isGameHost()) { ensureHostBindings(); }
+hydrateRuntimeState();
     ensureTimer();
     ensureBadgeTimer();
 
@@ -2855,7 +2861,13 @@ function maybeRefreshStatus() {
 
       window.addEventListener("xp:updated", () => {
         try { refreshBadgeFromStorage(); } catch (_) {}
-      });
+      
+/* __xpHostGuard__ */
+if (!isGameHost()) {
+  if (state.running === true) { try { stopSession({ flush: true }); } catch (_) {} }
+  return;
+}
+});
 
       window.addEventListener("message", (event) => {
         try {
@@ -2982,7 +2994,8 @@ function maybeRefreshStatus() {
   }
 
   function init() {
-    hydrateRuntimeState();
+  if (isGameHost()) { ensureHostBindings(); }
+hydrateRuntimeState();
     markHydratedFlag();
     if (!state.debug.initLogged) {
       state.debug.initLogged = true;
@@ -3010,8 +3023,8 @@ function maybeRefreshStatus() {
       return;
     }
 
-    ensureHostBindings();
-  }
+    if (isGameHost()) { ensureHostBindings(); }
+}
 
   init();
 
