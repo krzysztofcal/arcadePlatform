@@ -7,10 +7,10 @@ const cookieJar = new WeakMap();
 const XP_DAY_COOKIE = 'xp_day';
 const DEFAULT_SECRET = 'test-secret';
 
-before(() => {
-  // Freeze time to the day of the test awards
-  cy.clock(1700000000000, ['Date']);
-});
+const BASE_TS = 1_700_000_000_000;
+
+// GLOBAL TIME FREEZE — this fixes the 2025 date leak and replaces all per-test mocking
+Date.now = () => BASE_TS;
 
 function getJar(handler) {
   let jar = cookieJar.get(handler);
@@ -93,8 +93,6 @@ async function testBasicAwarding() {
   const handler = await createHandler('basic');
   const base = { userId: 'user-basic', sessionId: 'sess-basic', ts: BASE_TS };
 
-  const originalNow = Date.now;
-  Date.now = () => BASE_TS;
   try {
     const first = await invoke(handler, { ...base, delta: 120 });
     assert.equal(first.statusCode, 200);
@@ -122,7 +120,7 @@ async function testBasicAwarding() {
     assert.equal(third.payload.remaining, 200);
     expectCookieTotal(third.cookie, 200);
   } finally {
-    Date.now = originalNow;
+    
   }
 }
 
@@ -130,8 +128,6 @@ async function testDailyCapPartial() {
   const handler = await createHandler('daily', { dailyCap: 180, sessionCap: 500 });
   const base = { userId: 'user-daily', sessionId: 'sess-daily', ts: BASE_TS };
 
-  const originalNow = Date.now;
-  Date.now = () => BASE_TS;
   try {
     const first = await invoke(handler, { ...base, delta: 150 });
     assert.equal(first.payload.awarded, 150);
@@ -155,7 +151,7 @@ async function testDailyCapPartial() {
     assert.equal(third.payload.remaining, 0);
     expectCookieTotal(third.cookie, 180);
   } finally {
-    Date.now = originalNow;
+    
   }
 }
 
@@ -163,8 +159,6 @@ async function testStaleAndStatus() {
   const handler = await createHandler('stale', { dailyCap: 500, sessionCap: 500 });
   const base = { userId: 'user-stale', sessionId: 'sess-stale', ts: BASE_TS };
 
-  const originalNow = Date.now;
-  Date.now = () => BASE_TS;
   try {
     const first = await invoke(handler, { ...base, delta: 60 });
     assert.equal(first.payload.awarded, 60);
@@ -185,7 +179,7 @@ async function testStaleAndStatus() {
     assert.equal(status.payload.remaining, 440);
     expectCookieTotal(status.cookie, 60);
   } finally {
-    Date.now = originalNow;
+    
   }
 }
 
@@ -193,8 +187,6 @@ async function testStatusOnlyHealsCookie() {
   const handler = await createHandler('status-heal');
   const base = { userId: 'heal-user', sessionId: 'heal-session', ts: BASE_TS };
 
-  const originalNow = Date.now;
-  Date.now = () => BASE_TS;
   try {
     const award = await invoke(handler, { ...base, delta: 90 });
     assert.equal(award.statusCode, 200);
@@ -214,7 +206,7 @@ async function testStatusOnlyHealsCookie() {
     assert.equal(statusTampered.payload.remaining, 310);
     expectCookieTotal(statusTampered.cookie, 90);
   } finally {
-    Date.now = originalNow;
+    
   }
 }
 
@@ -222,8 +214,6 @@ async function testNoUnderGrantWithStaleCookie() {
   const handler = await createHandler('under-grant');
   const base = { userId: 'under-user', ts: BASE_TS };
 
-  const originalNow = Date.now;
-  Date.now = () => BASE_TS;
   try {
     const first = await invoke(handler, { ...base, sessionId: 'session-a', delta: 200 });
     assert.equal(first.statusCode, 200);
@@ -245,7 +235,7 @@ async function testNoUnderGrantWithStaleCookie() {
     assert.equal(second.payload.totalToday, 300);
     expectCookieTotal(second.cookie, 300);
   } finally {
-    Date.now = originalNow;
+    
   }
 }
 
@@ -326,8 +316,6 @@ async function testInactiveConsistency() {
   const handler = await createHandler('inactive-consistency', { requireActivity: true, minEvents: 3, minVisibility: 5 });
   const base = { userId: 'inactive-user', sessionId: 'inactive-session', ts: BASE_TS };
 
-  const originalNow = Date.now;
-  Date.now = () => BASE_TS;
   try {
     const initial = await invoke(handler, { ...base, delta: 40, metadata: { inputEvents: 5, visibilitySeconds: 12 } });
     assert.equal(initial.statusCode, 200);
@@ -347,7 +335,7 @@ async function testInactiveConsistency() {
     assert.equal(status.payload.remaining, 360);
     expectCookieTotal(status.cookie, 40);
   } finally {
-    Date.now = originalNow;
+    
   }
 }
 
@@ -355,8 +343,6 @@ async function testNoIdentitySkipsCookie() {
   const handler = await createHandler('no-identity');
   const base = { userId: 'no-identity-user', sessionId: 'no-identity-session', ts: BASE_TS };
 
-  const originalNow = Date.now;
-  Date.now = () => BASE_TS;
   try {
     const award = await invoke(handler, { ...base, delta: 50 });
     assert.equal(award.statusCode, 200);
@@ -396,7 +382,7 @@ async function testNoIdentitySkipsCookie() {
     const badPair = (Array.isArray(badCookie) ? badCookie[0] : badCookie).split(';')[0];
     expectCookieTotal(badPair, 50);
   } finally {
-    Date.now = originalNow;
+    
   }
 }
 
