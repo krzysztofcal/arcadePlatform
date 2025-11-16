@@ -15,18 +15,10 @@ import {
 
 const XP_DAY_COOKIE = "xp_day";
 
-const DAILY_CAP = getDailyCap();
 const KEY_NS = process.env.XP_KEY_NS ?? "kcswh:xp:v2";
-const SESSION_CAP = asNumber(process.env.XP_SESSION_CAP, 300);
-const DELTA_CAP = asNumber(process.env.XP_DELTA_CAP, 300);
-const SESSION_TTL_SEC = Math.max(0, asNumber(process.env.XP_SESSION_TTL_SEC, 604800));
-const SESSION_TTL_MS = SESSION_TTL_SEC > 0 ? SESSION_TTL_SEC * 1000 : 0;
-const REQUIRE_ACTIVITY = process.env.XP_REQUIRE_ACTIVITY === "1";
-const MIN_ACTIVITY_EVENTS = Math.max(0, asNumber(process.env.XP_MIN_ACTIVITY_EVENTS, 4));
-const MIN_ACTIVITY_VIS_S = Math.max(0, asNumber(process.env.XP_MIN_ACTIVITY_VIS_S, 8));
-const METADATA_MAX_BYTES = Math.max(0, asNumber(process.env.XP_METADATA_MAX_BYTES, 2048));
+
 const DEBUG_ENABLED = process.env.XP_DEBUG === "1";
-const DRIFT_MS = Math.max(0, asNumber(process.env.XP_DRIFT_MS, 30_000));
+
 const CORS_ALLOW = (process.env.XP_CORS_ALLOW ?? "")
   .split(",")
   .map(s => s.trim())
@@ -88,14 +80,16 @@ const readXpCookie = (header, secret) => {
   }
 };
 
-const buildXpCookie = ({ key, total, secret, now, nextReset }) => {
-  const safeTotal = Math.min(DAILY_CAP, Math.max(0, sanitizeTotal(total)));
+const buildXpCookie = ({ key, total, cap, secret, secure, now, nextReset }) => {
+  const safeTotal = Math.min(
+    Math.max(0, Math.floor(Number(total) || 0)),
+    Math.max(0, Math.floor(Number(cap) || 0))
+  );
   const payload = JSON.stringify({ k: key, t: safeTotal });
   const encoded = Buffer.from(payload, "utf8").toString("base64url");
   const signature = signPayload(payload, secret);
-  const maxAgeMs = Math.max(0, nextReset - now);
-  const maxAge = Math.max(0, Math.floor(maxAgeMs / 1000));
-  const secureAttr = process.env.XP_COOKIE_SECURE === "1" ? "; Secure" : "";
+  const maxAge = Math.max(0, Math.floor(Math.max(0, nextReset - now) / 1000));
+  const secureAttr = secure ? "; Secure" : "";
   return `${XP_DAY_COOKIE}=${encoded}.${signature}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${maxAge}${secureAttr}`;
 };
 
@@ -126,6 +120,26 @@ function corsHeaders(origin) {
   return headers;
 }
 
+function resolveCfg(env = (typeof process !== "undefined" ? process.env : {})) {
+  const num = (k, d) => {
+    const v = Number(env[k] ?? d);
+    return Number.isFinite(v) ? v : d;
+  };
+  return {
+    ns: env.XP_KEY_NS ?? "kcswh:xp:v2",
+    dailyCap: Math.max(0, num("XP_DAILY_CAP", 3000)),
+    sessionCap: Math.max(0, num("XP_SESSION_CAP", 300)),
+    deltaCap: Math.max(0, num("XP_DELTA_CAP", 300)),
+    sessionTtlMs: Math.max(0, num("XP_SESSION_TTL_SEC", 604800)) * 1000,
+    requireActivity: env.XP_REQUIRE_ACTIVITY === "1",
+    minEvents: Math.max(0, num("XP_MIN_ACTIVITY_EVENTS", 4)),
+    minVisS: Math.max(0, num("XP_MIN_ACTIVITY_VIS_S", 8)),
+    metadataMax: Math.max(0, num("XP_METADATA_MAX_BYTES", 2048)),
+    driftMs: Math.max(0, num("XP_DRIFT_MS", 30000)),
+    cookieSecure: env.XP_COOKIE_SECURE === "1",
+    debug: env.XP_DEBUG === "1",
+  };
+}
 
 export async function handler(event) {
   const origin = event.headers?.origin;
@@ -136,6 +150,8 @@ export async function handler(event) {
     return json(500, { error: "server_config", message: "xp_daily_secret_missing" }, origin);
   }
 
+  const cfg = resolveCfg();
+  const DEBUG_ENABLED = cfg.debug;
   const now = Date.now();
   const dayKeyNow = getDailyKey(now);
   const nextReset = getNextResetEpoch(now);
@@ -143,7 +159,7 @@ export async function handler(event) {
   const cookieState = readXpCookie(cookieHeader, secret);
   const cookieKeyMatches = cookieState.key === dayKeyNow;
   const cookieTotal = cookieKeyMatches ? sanitizeTotal(cookieState.total) : 0;
-  const cookieRemainingBefore = Math.max(0, DAILY_CAP - cookieTotal);
+  const cookieRemainingBefore = Math.max(0, cfg.dailyCap - cookieTotal);
 
   const queryUserId = typeof event.queryStringParameters?.userId === "string"
     ? event.queryStringParameters.userId.trim()
@@ -174,7 +190,7 @@ export async function handler(event) {
     const resolvedCap = (() => {
       if (totals && Number.isFinite(totals.cap)) return Math.max(0, Math.floor(totals.cap));
       if (Number.isFinite(payload.cap)) return Math.max(0, Math.floor(payload.cap));
-      return DAILY_CAP;
+      return cfg.dailyCap;
     })();
     const safeTotal = Math.min(resolvedCap, Math.max(0, sanitizeTotal(totalTodaySource)));
     const remaining = Math.max(0, resolvedCap - safeTotal);
@@ -204,14 +220,22 @@ export async function handler(event) {
     });
     const headers = skipCookie
       ? undefined
-      : { "Set-Cookie": buildXpCookie({ key: dayKeyNow, total: safeTotal, secret, now, nextReset }) };
+      : { "Set-Cookie": buildXpCookie({
+          key: dayKeyNow,
+          total: safeTotal,
+          cap: resolvedCap,
+          secret,
+          secure: cfg.cookieSecure,
+          now,
+          nextReset
+        }) };
     return json(statusCode, payload, origin, headers);
   };
 
   if (event.httpMethod !== "POST") {
     let totals = null;
     if (queryUserId) {
-      totals = await getTotals({ userId: queryUserId, sessionId: querySessionId, now, keyNamespace: KEY_NS });
+      totals = await getTotals({ userId: queryUserId, sessionId: querySessionId, now, keyNamespace: cfg.ns });
     }
     const totalSource = totals ? totals.current : cookieTotal;
     const payload = { error: "method_not_allowed" };
@@ -229,7 +253,7 @@ export async function handler(event) {
   } catch {
     let totals = null;
     if (queryUserId) {
-      totals = await getTotals({ userId: queryUserId, sessionId: querySessionId, now, keyNamespace: KEY_NS });
+      totals = await getTotals({ userId: queryUserId, sessionId: querySessionId, now, keyNamespace: cfg.ns });
     }
     const totalSource = totals ? totals.current : cookieTotal;
     const payload = { error: "bad_json" };
@@ -247,7 +271,7 @@ export async function handler(event) {
   const fetchTotals = async () => {
     if (!userId) return { current: cookieTotal, lifetime: 0, sessionTotal: 0, lastSync: 0 };
     if (!totalsPromise) {
-      totalsPromise = getTotals({ userId, sessionId, now, keyNamespace: KEY_NS });
+      totalsPromise = getTotals({ userId, sessionId, now, keyNamespace: cfg.ns });
     }
     return totalsPromise;
   };
@@ -290,8 +314,8 @@ export async function handler(event) {
       ok: true,
       awarded: 0,
       granted: 0,
-      cap: DAILY_CAP,
-      capDelta: DELTA_CAP,
+      cap: cfg.dailyCap,
+      capDelta: cfg.deltaCap,
       totalLifetime: totals.lifetime,
       sessionTotal: totals.sessionTotal,
       lastSync: totals.lastSync,
@@ -316,9 +340,9 @@ export async function handler(event) {
     const totals = await fetchTotals();
     return respond(422, { error: "invalid_delta" }, { totals });
   }
-  if (normalizedDelta > DELTA_CAP) {
+  if (normalizedDelta > cfg.deltaCap) {
     const totals = await fetchTotals();
-    return respond(422, { error: "delta_out_of_range", cap: DELTA_CAP, capDelta: DELTA_CAP }, { totals });
+    return respond(422, { error: "delta_out_of_range", cap: cfg.deltaCap, capDelta: cfg.deltaCap }, { totals });
   }
 
   const tsRaw = Number(body.ts ?? body.timestamp ?? body.windowEnd ?? now);
@@ -326,9 +350,9 @@ export async function handler(event) {
     const totals = await fetchTotals();
     return respond(422, { error: "invalid_timestamp" }, { totals });
   }
-  if (tsRaw > now + DRIFT_MS) {
+  if (tsRaw > now + cfg.driftMs) {
     const totals = await fetchTotals();
-    return respond(422, { error: "timestamp_in_future", driftMs: DRIFT_MS }, { totals });
+    return respond(422, { error: "timestamp_in_future", driftMs: cfg.driftMs }, { totals });
   }
   const ts = Math.trunc(tsRaw);
 
@@ -362,34 +386,38 @@ export async function handler(event) {
       return true;
     })();
 
-    if (METADATA_MAX_BYTES && bytes > METADATA_MAX_BYTES) {
+    if (cfg.metadataMax && bytes > cfg.metadataMax) {
       const totals = await fetchTotals();
-      return respond(413, { error: "metadata_too_large", limit: METADATA_MAX_BYTES }, { totals });
+      return respond(413, { error: "metadata_too_large", limit: cfg.metadataMax }, { totals });
     }
     if (!depthOk) {
       const totals = await fetchTotals();
-      return respond(413, { error: "metadata_too_large", limit: METADATA_MAX_BYTES, reason: "depth" }, { totals });
+      return respond(413, { error: "metadata_too_large", limit: cfg.metadataMax, reason: "depth" }, { totals });
     }
     metadata = cleaned;
   }
 
-  const todayKey = keyDaily(userId, dayKeyNow, KEY_NS);
-  const totalKeyK = keyTotal(userId, KEY_NS);
-  const sessionKeyK = keySession(userId, sessionId, KEY_NS);
-  const sessionSyncKeyK = keySessionSync(userId, sessionId, KEY_NS);
-  const lockKeyK = keyLock(userId, sessionId, KEY_NS);
+  // shard awards by the award window's timestamp day (prevents cross-day pollution)
+const awardDayKey = getDailyKey(ts);
+const isTodayAward = awardDayKey === dayKeyNow;
 
-  if (REQUIRE_ACTIVITY && normalizedDelta > 0) {
+const dailyKeyK       = keyDaily(userId, awardDayKey, cfg.ns);
+const totalKeyK       = keyTotal(userId, cfg.ns);
+const sessionKeyK     = keySession(userId, sessionId, cfg.ns);
+const sessionSyncKeyK = keySessionSync(userId, sessionId, cfg.ns);
+const lockKeyK        = keyLock(userId, sessionId, cfg.ns);
+
+  if (cfg.requireActivity && normalizedDelta > 0) {
     const events = Number(metadata?.inputEvents ?? 0);
     const visSeconds = Number(metadata?.visibilitySeconds ?? 0);
-    if (!Number.isFinite(events) || events < MIN_ACTIVITY_EVENTS || !Number.isFinite(visSeconds) || visSeconds < MIN_ACTIVITY_VIS_S) {
+    if (!Number.isFinite(events) || events < cfg.minEvents || !Number.isFinite(visSeconds) || visSeconds < cfg.minVisS) {
       const totals = await fetchTotals();
       const inactivePayload = {
         ok: true,
         awarded: 0,
         granted: 0,
-        cap: DAILY_CAP,
-        capDelta: DELTA_CAP,
+        cap: cfg.dailyCap,
+        capDelta: cfg.deltaCap,
         reason: "inactive",
         status: "inactive",
       };
@@ -399,8 +427,8 @@ export async function handler(event) {
           mode: "inactive",
           delta: normalizedDelta,
           ts,
-          sessionCap: SESSION_CAP,
-          dailyCap: DAILY_CAP,
+          sessionCap: cfg.sessionCap,
+          dailyCap: cfg.dailyCap,
           events,
           visSeconds,
         },
@@ -497,19 +525,21 @@ export async function handler(event) {
   `;
 
   const cookieLimitedDelta = Math.min(normalizedDelta, cookieRemainingBefore);
-  const cookieClamped = cookieLimitedDelta < normalizedDelta;
+  // only clamp by cookie for today's bucket; backfills clamp by their own bucket
+  const cookieClamped = isTodayAward && cookieLimitedDelta < normalizedDelta;
+  const effectiveDelta = isTodayAward ? cookieLimitedDelta : normalizedDelta;
 
   const res = await store.eval(
     script,
-    [sessionKeyK, sessionSyncKeyK, todayKey, totalKeyK, lockKeyK],
+    [sessionKeyK, sessionSyncKeyK, dailyKeyK, totalKeyK, lockKeyK],
     [
       String(now),
-      String(cookieLimitedDelta),
-      String(DAILY_CAP),
-      String(Math.max(0, SESSION_CAP)),
+      String(effectiveDelta),
+      String(cfg.dailyCap),
+      String(Math.max(0, cfg.sessionCap)),
       String(ts),
       String(LOCK_TTL_MS),
-      String(SESSION_TTL_MS),
+      String(cfg.sessionTtlMs),
     ]
   );
 
@@ -520,20 +550,20 @@ export async function handler(event) {
   const lastSync = Number(res?.[4]) || 0;
   const status = Number(res?.[5]) || 0;
 
-  const totalTodayRedis = Math.min(DAILY_CAP, Math.max(0, sanitizeTotal(redisDailyTotalRaw)));
-  const remaining = Math.max(0, DAILY_CAP - totalTodayRedis);
+  const totalTodayRedis = Math.min(cfg.dailyCap, Math.max(0, sanitizeTotal(redisDailyTotalRaw)));
+  const remaining = Math.max(0, cfg.dailyCap - totalTodayRedis);
 
   const payload = {
     ok: true,
     awarded: granted,
     granted,
-    cap: DAILY_CAP,
-    capDelta: DELTA_CAP,
+    cap: cfg.dailyCap,
+    capDelta: cfg.deltaCap,
     totalLifetime,
     sessionTotal,
     lastSync,
     remaining,
-    dayKey: dayKeyNow,
+    dayKey: awardDayKey, // reflect the bucket hit
     nextReset,
   };
 
@@ -585,7 +615,8 @@ export async function handler(event) {
       requested: normalizedDelta,
       granted,
       remaining,
-      dayKey: dayKeyNow,
+      dayKey: awardDayKey,
+      bucket: isTodayAward ? "today" : "backfill",
     });
   }
 
@@ -606,15 +637,27 @@ export async function handler(event) {
     now,
     status,
     requested: normalizedDelta,
-    sessionCap: SESSION_CAP,
-    dailyCap: DAILY_CAP,
+    sessionCap: cfg.sessionCap,
+    dailyCap: cfg.dailyCap,
     lastSync,
     remainingBefore: cookieRemainingBefore,
     remainingAfter: remaining,
     redisDailyTotalRaw,
+    awardDayKey,
+    cookieDayKey: dayKeyNow,
   };
+
   if (reason) debugExtra.reason = reason;
   if (cookieClamped) debugExtra.cookieClamped = true;
 
-  return respond(200, payload, { totalOverride: redisDailyTotalRaw, debugExtra });
+  // If the award hit today's bucket, reflect that total and refresh today's cookie.
+  // If it hit a different day (backfill), show today's totals and skip cookie.
+  if (isTodayAward) {
+    return respond(200, payload, { totalOverride: redisDailyTotalRaw, debugExtra });
+  } else {
+    const todaysTotals = await fetchTotals();
+    debugExtra.backfill = true;
+    return respond(200, payload, { totals: todaysTotals, skipCookie: true, debugExtra });
+  }
 }
+
