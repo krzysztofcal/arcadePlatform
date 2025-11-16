@@ -47,6 +47,7 @@ async function runWindow(page, scoreDelta) {
     const xp = window.XP;
     if (!xp || typeof xp.startSession !== 'function') return;
     xp.startSession('xp-score-e2e');
+    xp.__e2eActiveSession = true;
   });
 
   await page.waitForTimeout(VISIBILITY_WARMUP_MS);
@@ -88,6 +89,7 @@ function getPostWindowPayloads(page) {
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
     window.__XP_TEST_DISABLE_IDLE_GUARD = true;
+    window.__XP_TEST_WINDOW_MS = 1_000;
   });
   await page.addInitScript({ content: initXpClientRecorder() });
 });

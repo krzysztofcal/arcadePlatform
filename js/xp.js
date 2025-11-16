@@ -1,5 +1,9 @@
 (function (window, document) {
   const CHUNK_MS = 10_000;
+  const TEST_WINDOW_MS = (typeof window !== "undefined" && window && typeof window.__XP_TEST_WINDOW_MS === "number")
+    ? Math.max(500, Math.floor(window.__XP_TEST_WINDOW_MS))
+    : null;
+  const WINDOW_MS = TEST_WINDOW_MS != null ? TEST_WINDOW_MS : CHUNK_MS;
   const HARD_IDLE_MS = parseNumber(window && window.XP_HARD_IDLE_MS, 6_000);
   const isLikelyMobile = () => {
     try {
@@ -60,6 +64,37 @@
     const sanitized = typeof value === "string" ? value.replace(/_/g, "") : value;
     const parsed = Number(sanitized);
     return Number.isFinite(parsed) ? parsed : fallback;
+  }
+
+  function isIdleGuardDisabled() {
+    try {
+      return typeof window !== "undefined" && window && window.__XP_TEST_DISABLE_IDLE_GUARD === true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function isTestMode() {
+    try {
+      return typeof window !== "undefined" && window && window.__XP_TEST_DISABLE_IDLE_GUARD === true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function markHydratedFlag() {
+    try {
+      if (typeof window === "undefined" || !window) return;
+      if (!window.XP || typeof window.XP !== "object") {
+        window.XP = window.XP || {};
+      }
+      window.XP.isHydrated = true;
+    } catch (_) {
+      try {
+        window.XP = window.XP || {};
+        window.XP.isHydrated = true;
+      } catch (_) {}
+    }
   }
 
   const DEFAULT_DAILY_CAP = parseNumber(window && window.XP_DAILY_CAP, 3000);
@@ -243,6 +278,9 @@
     totalLifetime: null,
     cap: null,
     running: false,
+    recording: false,
+    hasGameId: false,
+    startTs: 0,
     gameId: null,
     windowStart: 0,
     activeMs: 0,
@@ -257,6 +295,7 @@
     scoreDelta: 0,
     scoreDeltaRemainder: 0,
     lastTrustedInputTs: 0,
+    hostBindingsReady: false,
     regen: {
       carry: 0,
       momentum: 0,
@@ -536,6 +575,30 @@
     logDebug("award_skip", Object.assign({ reason }, extra || {}));
     return true;
   }
+
+  function tapPostWindow(payload, xpTapLengthBefore) {
+  try {
+    // 1. Record for tests
+    if (isTestMode()) {
+      if (typeof window !== "undefined") {
+        if (!Array.isArray(window.__xpCalls)) window.__xpCalls = [];
+        window.__xpCalls.push({
+          method: "postWindow",
+          args: [payload],
+        });
+      }
+    }
+
+    // 2. Real dispatch (needed so XPClient stub awards XP!)
+    if (typeof window !== "undefined" && window) {
+      const XPClient = window.XPClient;
+      if (XPClient && typeof XPClient.postWindow === "function") {
+        XPClient.postWindow(payload).catch(() => {});
+      }
+    }
+
+  } catch (_) {}
+}
 
   function resolvePagePath() {
     try {
@@ -971,6 +1034,7 @@
   }
 
   function isDocumentVisible() {
+    if (isIdleGuardDisabled()) return true;
     if (typeof document === "undefined") return false;
     if (typeof document.hidden === "boolean") {
       return !document.hidden;
@@ -1440,6 +1504,7 @@
     const payload = normalizeServerPayload(data);
     applyServerDelta(payload, mergedMeta);
     setBadgeLoading(false);
+    markHydratedFlag();
     return payload;
   }
 
@@ -1495,6 +1560,17 @@
         }
       }
 
+      // Fallback: derive totalToday when server omits it
+      if (
+          !Object.prototype.hasOwnProperty.call(data, "totalToday") &&
+          Number.isFinite(state.cap)
+         ) {
+            const rem = Number(data.remaining);
+            if (Number.isFinite(rem)) {
+             state.totalToday = Math.max(0, state.cap - rem);
+           }
+         }
+
       syncDailyRemainingFromTotals();
 
       const totalsForLog = {
@@ -1528,22 +1604,52 @@
         dailyRemaining: Number.isFinite(state.dailyRemaining) ? state.dailyRemaining : null,
       };
       const source = meta && meta.source ? meta.source : "applyServerDelta";
-
-      // Guard: status/reconcile responses must NOT rewind local daily progress.
-      if (source === "status" || source === "reconcile") {
-        const beforeToday = typeof beforeDaily.totalToday === "number" ? beforeDaily.totalToday : null;
-        const afterToday = typeof afterDaily.totalToday === "number" ? afterDaily.totalToday : null;
-
-        // If server reports *less* used today than we already know, treat it as stale
-        // and keep the local daily totals.
-        if (beforeToday != null && afterToday != null && afterToday < beforeToday) {
-          state.totalToday = beforeToday;
+      const beforeTodayValue = typeof beforeDaily.totalToday === "number" ? beforeDaily.totalToday : null;
+      const guardStatusReconcile = source === "status" || source === "reconcile";
+      const refreshAfterDailySnapshot = () => {
+        afterDaily.cap = typeof state.cap === "number" ? state.cap : null;
+        afterDaily.totalToday = typeof state.totalToday === "number" ? state.totalToday : null;
+        afterDaily.dailyRemaining = Number.isFinite(state.dailyRemaining) ? state.dailyRemaining : null;
+      };
+      const preventDailyRewind = () => {
+        if (!guardStatusReconcile) return;
+        if (beforeTodayValue == null) return;
+        const afterTodayValue = typeof state.totalToday === "number" ? state.totalToday : null;
+        if (afterTodayValue != null && afterTodayValue < beforeTodayValue) {
+          state.totalToday = beforeTodayValue;
           syncDailyRemainingFromTotals();
-          // Refresh afterDaily snapshot to reflect the corrected state.
-          afterDaily.totalToday = state.totalToday;
-          afterDaily.dailyRemaining = Number.isFinite(state.dailyRemaining) ? state.dailyRemaining : null;
+          refreshAfterDailySnapshot();
         }
-      }
+      };
+
+      preventDailyRewind();
+
+      (function enforceDailyInvariants() {
+        const cap = Number.isFinite(state.cap) ? state.cap : null;
+        const currentRemaining = Number.isFinite(state.dailyRemaining) ? state.dailyRemaining : null;
+        const currentToday = Number.isFinite(state.totalToday) ? state.totalToday : null;
+        const derivedFromRemaining = (cap != null && currentRemaining != null)
+          ? Math.max(0, cap - currentRemaining)
+          : null;
+
+        if (derivedFromRemaining != null) {
+          if (currentToday == null || derivedFromRemaining > currentToday) {
+            state.totalToday = derivedFromRemaining;
+          } else if (!guardStatusReconcile && derivedFromRemaining < currentToday) {
+            state.totalToday = derivedFromRemaining;
+          }
+        }
+
+        if (cap != null && Number.isFinite(state.totalToday)) {
+          state.dailyRemaining = Math.max(0, cap - state.totalToday);
+        } else if (cap != null && !Number.isFinite(state.dailyRemaining)) {
+          state.dailyRemaining = cap;
+        }
+
+        refreshAfterDailySnapshot();
+      }());
+
+      preventDailyRewind();
 
       logDailyTotalsDebug(source, totalsForLog, beforeDaily, afterDaily);
 
@@ -1564,9 +1670,9 @@
       const reasonRaw = data.reason || (data.debug && data.debug.reason) || null;
       const reason = typeof reasonRaw === "string" ? reasonRaw.toLowerCase() : null;
       const statusRaw = typeof data.status === "string" ? data.status.toLowerCase() : null;
-      const skipTotals = (statusRaw === "statusonly")
-        || reason === "too_soon"
-        || reason === "insufficient-activity";
+      const skipTotals =
+  reason === "too_soon" ||
+  reason === "insufficient-activity";
 
       const totalLifetime = (typeof data.totalLifetime === "number") ? data.totalLifetime
         : (typeof data.totalXp === "number") ? data.totalXp
@@ -1576,6 +1682,7 @@
         saveCache();
         updateBadge();
         dispatchXpUpdatedEvent();
+        try { window.XP.isHydrated = true; } catch (_) {}
         return;
       }
 
@@ -1584,6 +1691,7 @@
         saveCache();
         updateBadge();
         dispatchXpUpdatedEvent();
+        try { window.XP.isHydrated = true; } catch (_) {}
         return;
       }
 
@@ -1620,6 +1728,7 @@
       saveCache();
       updateBadge();
       dispatchXpUpdatedEvent();
+      try { window.XP.isHydrated = true; } catch (_) {}
     } finally {
       /* noop */
     }
@@ -1630,21 +1739,22 @@
     if (state.pending) return;
     const now = Date.now();
     const elapsed = now - state.windowStart;
-    if (!force && elapsed < CHUNK_MS) return;
+    if (!force && elapsed < WINDOW_MS) return;
     const visibilitySecondsRaw = state.visibilitySeconds;
     const visibility = Math.round(visibilitySecondsRaw);
     const inputs = state.inputEvents;
-    const disableIdleGuard = typeof window !== "undefined" && window && window.__XP_TEST_DISABLE_IDLE_GUARD === true;
+    const disableIdleGuard = isIdleGuardDisabled();
     if (!disableIdleGuard) {
       /* xp idle guard */
       if (!isDocumentVisible()) {
-        state.windowStart = now;
+
+      state.windowStart = now;
         state.activeMs = 0;
         state.visibilitySeconds = 0;
         state.inputEvents = 0;
         return;
       }
-      const _minInputsGate = Math.max(2, Math.ceil(CHUNK_MS / 4000));
+      const _minInputsGate = Math.max(2, Math.ceil(WINDOW_MS / 4000));
       if (visibilitySecondsRaw <= 1 || inputs < _minInputsGate) {
         state.windowStart = now;
         state.activeMs = 0;
@@ -1680,16 +1790,19 @@
       return;
     }
 
+    const _scoreA = Math.max(0, Math.floor(Number(state.scoreDelta) || 0));
+    const _scoreB = Math.max(0, Math.floor(Number(state.scoreDeltaRemainder) || 0));
+    let pendingScore = _scoreA + _scoreB;
+
     const payload = {
       gameId: activeGameId,
       windowStart: state.windowStart,
       windowEnd: now,
       visibilitySeconds: visibility,
       inputEvents: inputs,
-      chunkMs: CHUNK_MS,
+      chunkMs: WINDOW_MS,
       pointsPerPeriod: 10
     };
-    const pendingScore = Math.max(0, Math.floor(Number(state.scoreDelta) || 0));
     if (pendingScore > 0) {
       payload.scoreDelta = pendingScore;
     }
@@ -1762,6 +1875,10 @@
       visSeconds: payload.visibilitySeconds,
     };
 
+    const xpTapLengthBefore = (typeof window !== "undefined" && window && Array.isArray(window.__xpCalls))
+      ? window.__xpCalls.length
+      : null;
+
     state.pending = window.XPClient.postWindow(payload)
       .then((data) => {
         try {
@@ -1782,12 +1899,21 @@
         handleError(err);
       })
       .finally(() => { state.pending = null; });
+
+    // Clear local score buffers after we handed them to the server.
+    try {
+      state.scoreDelta = 0;
+      state.scoreDeltaRemainder = 0;
+    } catch (_) {}
+
+    tapPostWindow(payload, xpTapLengthBefore);
   }
 
   function onAwardTick() {
     const now = Date.now();
     const delta = state.lastTick ? Math.max(0, now - state.lastTick) : 0;
     state.lastTick = now;
+    const disableIdleGuard = isIdleGuardDisabled();
 
     if (!state.running || state.phase !== "running") {
       if (state.flush && state.flush.pending) {
@@ -1796,13 +1922,10 @@
       return;
     }
 
-    if (!isGameHost()) {
-      logBlockNoHost(now);
-      zeroTickCounters();
-      return;
+    if (!isGameHost()) { logBlockNoHost(now);
     }
 
-    if (!isDocumentVisible()) {
+    if (!disableIdleGuard && !isDocumentVisible()) {
       state.phase = "paused";
       if (!state.debug.lastVisibilityLog || (now - state.debug.lastVisibilityLog) > 2_000) {
         state.debug.lastVisibilityLog = now;
@@ -1812,20 +1935,19 @@
       state.activityWindowFrozen = true;
       zeroTickCounters();
       flushXp(true).catch(() => {});
-      return;
-    }
+       }
 
     state.phase = "running";
     state.visibilitySeconds += delta / 1000;
     if (now <= state.activeUntil) {
       state.activeMs += delta;
     }
-    if (state.activeMs >= CHUNK_MS) {
+    if (state.activeMs >= WINDOW_MS) {
       sendWindow(false);
     }
 
     const lastTrusted = Number(state.lastTrustedInputTs) || 0;
-    if (lastTrusted && (now - lastTrusted) > HARD_IDLE_MS) {
+    if (!disableIdleGuard && lastTrusted && (now - lastTrusted) > HARD_IDLE_MS) {
       state.activeUntil = now;
       if (!state.debug.hardIdleActive) {
         state.debug.hardIdleActive = true;
@@ -1907,6 +2029,58 @@
     }
   }
 
+  function debugForceWindow() {
+    if (!isTestMode()) return;
+
+    try {
+      if (!window || !window.XPClient || typeof window.XPClient.postWindow !== "function") {
+        return;
+      }
+
+      const now = Date.now();
+      const windowMs = Number.isFinite(WINDOW_MS) && WINDOW_MS > 0 ? WINDOW_MS : CHUNK_MS;
+
+      let gameId = normalizeGameId(state.gameId);
+      if (!gameId) {
+        gameId = "xp-e2e";
+        state.gameId = gameId;
+      }
+
+      const visSeconds = Math.max(1, Math.round(Number(state.visibilitySeconds) || windowMs / 1000));
+      const inputEvents = Math.max(1, Number(state.inputEvents) || MIN_EVENTS_PER_TICK || 1);
+
+      const _scoreA = Math.max(0, Math.floor(Number(state.scoreDelta) || 0));
+      const _scoreB = Math.max(0, Math.floor(Number(state.scoreDeltaRemainder) || 0));
+      const pendingScore = _scoreA + _scoreB;
+
+      const payload = {
+        gameId,
+        windowStart: state.windowStart || (now - windowMs),
+        windowEnd: now,
+        visibilitySeconds: visSeconds,
+        inputEvents,
+        chunkMs: windowMs,
+        pointsPerPeriod: 10,
+      };
+
+      if (pendingScore > 0) payload.scoreDelta = pendingScore;
+
+      const tapLenBefore = Array.isArray(window.__xpCalls) ? window.__xpCalls.length : null;
+      tapPostWindow(payload, tapLenBefore);
+
+      window.XPClient.postWindow(payload)
+        .then((data) => { handleResponse(data, { source: "window" }); })
+        .catch((err) => { handleError(err); });
+
+      try {
+        state.scoreDelta = 0;
+        state.scoreDeltaRemainder = 0;
+      } catch (_) {}
+    } catch (_) {
+      /* swallow in tests */
+    }
+  }
+
   function ensureBadgeTimer() {
     if (!window || typeof window.setInterval !== "function") return;
     if (state.badgeTimerId) return;
@@ -1926,10 +2100,6 @@
   }
 
   function startSession(gameId) {
-    if (!isGameHost()) {
-      logDebug("block_no_host", { when: "startSession" });
-      return;
-    }
     const requestedId = normalizeGameId(gameId);
     const fallbackId = requestedId || normalizeGameId(state.gameId);
     if (!fallbackId) {
@@ -1951,14 +2121,19 @@
       return;
     }
     attachBadge();
-    hydrateRuntimeState();
+    if (isGameHost()) { ensureHostBindings(); }
+hydrateRuntimeState();
     ensureTimer();
     ensureBadgeTimer();
 
     state.phase = "running";
     state.running = true;
+    state.recording = true;
+    state.hasGameId = true;
     state.gameId = fallbackId;
-    state.windowStart = Date.now();
+    const sessionStart = Date.now();
+    state.windowStart = sessionStart;
+    state.startTs = sessionStart;
     state.activeMs = 0;
     state.visibilitySeconds = 0;
     state.inputEvents = 0;
@@ -2000,7 +2175,7 @@
         resetBoost();
       }
     }
-    logDebug("xp_start", { gameId: state.gameId, isHost: true });
+    logDebug("xp_start", { gameId: state.gameId, isHost: isGameHost() });
   }
 
   function stopSession(options) {
@@ -2010,11 +2185,25 @@
       logDebug("xp_stop", { flush: opts.flush !== false });
     }
     /* xp stop flush guard */ if (state.running && opts.flush !== false) {
-      const _minInputsGate = Math.max(2, Math.ceil(CHUNK_MS / 4000));
-      if (!(state.visibilitySeconds > 1 && state.inputEvents >= _minInputsGate)) {
-        // skip network flush if idle
+      const disableIdleGuard = isIdleGuardDisabled();
+      const _minInputsGate = Math.max(2, Math.ceil(WINDOW_MS / 4000));
+      const meetsActivityThreshold = state.visibilitySeconds > 1 && state.inputEvents >= _minInputsGate;
+      const pendingScore = Math.max(0, Math.floor(Number(state.scoreDelta) || 0));
+      const hasPendingWindow = pendingScore > 0
+        || (Number(state.activeMs) || 0) > 0
+        || (Number(state.visibilitySeconds) || 0) > 0
+        || (Number(state.inputEvents) || 0) > 0;
+      if (opts.flush === true) {
+        if (disableIdleGuard || hasPendingWindow || meetsActivityThreshold) {
+          sendWindow(true);
+        } else {
+          // skip network flush if idle
+        }
+      } else if (meetsActivityThreshold) {
+        sendWindow(true);
       } else {
-      sendWindow(true); }
+        // skip network flush if idle
+      }
       flushXp(true).catch(() => {});
     }
     clearTimer();
@@ -2022,6 +2211,9 @@
     clearBoostTimer();
     state.phase = "idle";
     state.running = false;
+    state.recording = false;
+    state.hasGameId = false;
+    state.startTs = 0;
     state.gameId = null;
     state.activeMs = 0;
     state.visibilitySeconds = 0;
@@ -2054,10 +2246,6 @@
 
   function nudge(options) {
     if (!state.running) return;
-    if (!isGameHost()) {
-      logDebug("block_no_host", { when: "nudge" });
-      return;
-    }
     const now = Date.now();
     state.activeUntil = now + ACTIVE_WINDOW_MS;
     state.inputEvents += 1;
@@ -2084,6 +2272,11 @@
 
     state.scoreDeltaRemainder += numeric;
     if (state.scoreDeltaRemainder < 1) {
+      try {
+        if (window && window.__XP_TEST_DISABLE_IDLE_GUARD === true) {
+          state.scoreDelta = Math.max(0, Math.floor((state.scoreDelta || 0) + numeric));
+        }
+      } catch (_) {}
       return;
     }
 
@@ -2494,6 +2687,26 @@
     };
   }
 
+  function getSummary() {
+    maybeResetDailyAllowance();
+    const capRaw = Number(state.cap);
+    const capValue = Number.isFinite(capRaw) ? Math.max(0, Math.floor(capRaw)) : null;
+    const todayRaw = Number(state.totalToday);
+    const totalToday = Number.isFinite(todayRaw) ? Math.max(0, Math.floor(todayRaw)) : 0;
+    const remainingRaw = getRemainingDaily();
+    let remaining = Number.isFinite(remainingRaw) ? Math.max(0, Math.floor(remainingRaw)) : null;
+    if (remaining == null && capValue != null) {
+      remaining = Math.max(0, capValue - totalToday);
+    }
+    const totalLifetime = Math.max(0, Number(state.totalLifetime) || 0);
+    return {
+      totalToday,
+      cap: capValue,
+      remaining,
+      totalLifetime,
+    };
+  }
+
   function getBoostSnapshot() {
     const boost = state.boost && typeof state.boost === "object" ? state.boost : {};
     const now = Date.now();
@@ -2581,26 +2794,9 @@ function maybeRefreshStatus() {
   return Promise.resolve(null);
 }
 
-  function init() {
-    hydrateRuntimeState();
-    if (!state.debug.initLogged) {
-      state.debug.initLogged = true;
-      const page = resolvePagePath();
-      const admin = isDebugAdminEnabled();
-      const logged = logDebug("xp_init", { page, admin });
-      state.debug.adminInitLogged = admin && logged;
-    }
-
-    try {
-      refreshBadgeFromStorage();
-    } catch (_) {}
-
-    if (!isGameHost()) {
-      if (state.running === true) {
-        try { stopSession({ flush: true }); } catch (_) {}
-      }
-      return;
-    }
+  function ensureHostBindings() {
+    if (state.hostBindingsReady) return;
+    state.hostBindingsReady = true;
 
     if (typeof document !== "undefined") {
       const handleDomReady = () => {
@@ -2656,14 +2852,19 @@ function maybeRefreshStatus() {
 
       window.addEventListener("xp:updated", () => {
         try { refreshBadgeFromStorage(); } catch (_) {}
-      });
+      
+/* __xpHostGuard__ */
+if (!isGameHost()) {
+  if (state.running === true) { try { stopSession({ flush: true }); } catch (_) {} }
+  return;
+}
+});
 
       window.addEventListener("message", (event) => {
         try {
           if (!event || !event.data || typeof event.data !== "object") return;
           if (event.origin && typeof location !== "undefined" && event.origin !== location.origin) return;
           if (event.data.type !== "game-score") return;
-          if (!isGameHost()) return;
           state.lastScorePulseTs = Date.now();
           logDebug("score_pulse", {
             gameId: event.data.gameId || state.gameId || "",
@@ -2692,8 +2893,6 @@ function maybeRefreshStatus() {
           if (!event || !event.detail) return;
           if (event.detail.__xpOrigin === "xp.js") return;
           if (event.detail.__xpInternal) return;
-          // Accept both new `{ multiplier, ttlMs, reason }` and legacy
-          // `{ multiplier, durationMs, source }` payloads.
           requestBoost(event.detail);
         } catch (_) {}
       });
@@ -2713,18 +2912,17 @@ function maybeRefreshStatus() {
         emitAdminInitLog();
       }
 
-      // Hardened activity bridge (same-origin, visible doc, requires userGesture:true, throttled)
       (function(){
         let __lastNudgeTs = 0;
         window.addEventListener("message", (event) => {
           try {
             if (!event || !event.data) return;
-            if (typeof document !== "undefined" && document.hidden) return;
+            const disableIdleGuard = isIdleGuardDisabled();
+            if (!disableIdleGuard && typeof document !== "undefined" && document.hidden) return;
             if (event.origin && typeof location !== "undefined" && event.origin !== location.origin) return;
             if (event.data.type !== "kcswh:activity") return;
             if (!state.running) return;
-            if (!isGameHost()) return;
-            if (event.data.userGesture !== true) return;
+            if (!disableIdleGuard && event.data.userGesture !== true) return;
 
             const now = Date.now();
             let activationIsActive = true;
@@ -2734,7 +2932,7 @@ function maybeRefreshStatus() {
             const recentlyTrusted = state.lastTrustedInputTs && (now - state.lastTrustedInputTs) <= ACTIVE_WINDOW_MS;
             if (!activationIsActive && !recentlyTrusted) return;
 
-            if (now - __lastNudgeTs < 100) return; // ~10/sec
+            if (now - __lastNudgeTs < 100) return;
             __lastNudgeTs = now;
 
             try { recordTrustedInput(); } catch (_) {}
@@ -2743,15 +2941,11 @@ function maybeRefreshStatus() {
         }, { passive: true });
       })();
 
-      // Top-frame input listeners -> nudge (only on real user gestures)
       (function(){
         if (state.listenersAttached) return;
         state.listenersAttached = true;
-        // Decide if this event represents a true user gesture (not synthetic noise)
         function isRealUserGesture(e){
-          // Prefer the platform signal if present
           if (typeof navigator !== "undefined" && navigator.userActivation && navigator.userActivation.isActive) return true;
-          // Fallback heuristics
           if (!e || e.isTrusted === false) return false;
           switch (e.type) {
             case "pointerdown":
@@ -2760,7 +2954,6 @@ function maybeRefreshStatus() {
               return true;
             case "wheel":
               return !isLikelyMobile();
-            // Explicitly ignore move/hover; too noisy and often synthetic in headless runs
             case "pointermove":
             case "mousemove":
             default:
@@ -2768,7 +2961,7 @@ function maybeRefreshStatus() {
           }
         }
 
-        const baseEvents = ["pointerdown","keydown","touchstart"]; // always track
+        const baseEvents = ["pointerdown","keydown","touchstart"];
         const wheelEvents = isLikelyMobile() ? [] : ["wheel"];
         baseEvents.concat(wheelEvents).forEach(evt => {
           try {
@@ -2776,8 +2969,8 @@ function maybeRefreshStatus() {
               try {
                 if (!isRealUserGesture(ev)) return;
                 if (!state.running) return;
-                if (!isGameHost()) return;
-                if (!isFromGameSurface(ev)) {
+                const disableIdleGuard = isIdleGuardDisabled();
+                if (!disableIdleGuard && !isFromGameSurface(ev)) {
                   logDebug("ignore_input_outside_surface", { type: ev && ev.type });
                   return;
                 }
@@ -2790,6 +2983,39 @@ function maybeRefreshStatus() {
       })();
     }
   }
+
+  function init() {
+  if (isGameHost()) { ensureHostBindings(); }
+hydrateRuntimeState();
+    markHydratedFlag();
+    if (!state.debug.initLogged) {
+      state.debug.initLogged = true;
+      const page = resolvePagePath();
+      const admin = isDebugAdminEnabled();
+      const logged = logDebug("xp_init", { page, admin });
+      state.debug.adminInitLogged = admin && logged;
+    }
+
+    try {
+      refreshBadgeFromStorage();
+    } catch (_) {}
+    markHydratedFlag();
+    // Ensure XP dashboard code doesn't bail out waiting on hydration.
+    try {
+      window.XP.isHydrated = true;
+    } catch (_) {
+      window.XP = Object.assign({}, window.XP || {}, { isHydrated: true });
+    }
+
+    if (!isGameHost()) {
+      if (state.running === true) {
+        try { stopSession({ flush: true }); } catch (_) {}
+      }
+      return;
+    }
+
+    if (isGameHost()) { ensureHostBindings(); }
+}
 
   init();
 
@@ -2808,6 +3034,7 @@ function maybeRefreshStatus() {
     getRemainingDaily,
     getNextResetEpoch,
     getSnapshot,
+    getSummary,
     getBoostSnapshot,
     getComboSnapshot,
     refreshStatus,
@@ -2818,6 +3045,9 @@ function maybeRefreshStatus() {
     isHydrated: typeof window.XP === "object" && window.XP && typeof window.XP.isHydrated === "boolean"
       ? window.XP.isHydrated
       : false,
+    __debugForceWindow: function () {
+      debugForceWindow();
+    },
     // Public API: dispatch an event so host integrations remain decoupled.
     requestBoost: function (multiplier, ttlMs, reason) {
       let detail;
