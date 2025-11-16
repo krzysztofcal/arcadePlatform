@@ -397,30 +397,60 @@ export async function handler(event) {
     }
   }
 
-// Resolve award window timestamp from body OR raw metadata (supports backfill days)
-  const pickNumber = (...vals) => {
-    for (const v of vals) {
-      const n = (typeof asNumber === "function") ? asNumber(v) : Number(v);
-      if (Number.isFinite(n)) return n;
-    }
-    return undefined;
-  };
+  // --- Resolve award window timestamp (supports backfill days & nested keys)
+// NOTE: We intentionally read from raw body.metadata even if later we drop metadata
+// for being too big/deep — the timestamp must still be honored.
 
-  // Pull from body first, then from the raw metadata payload (even if we later ignore it)
-  const tsFromBody = pickNumber(body.ts, body.timestamp, body.windowEnd);
-  const tsFromMeta = pickNumber(body?.metadata?.ts, body?.metadata?.timestamp, body?.metadata?.windowEnd);
-
-  let tsRaw = tsFromBody ?? tsFromMeta ?? now;
-
-  if (!(Number.isFinite(tsRaw) && tsRaw > 0)) {
-    const totals = await fetchTotals();
-    return respond(422, { error: "invalid_timestamp" }, { totals });
+const coerceTs = (v) => {
+  if (v == null) return undefined;
+  // Prefer repo helper if present; fallback to Number/Date.parse for ISO.
+  const n = (typeof asNumber === "function") ? asNumber(v) : Number(v);
+  if (Number.isFinite(n) && n > 0) return n;
+  if (typeof v === "string") {
+    const d = Date.parse(v);
+    if (Number.isFinite(d) && d > 0) return d;
   }
-  if (tsRaw > now + cfg.driftMs) {
-    const totals = await fetchTotals();
-    return respond(422, { error: "timestamp_in_future", driftMs: cfg.driftMs }, { totals });
+  return undefined;
+};
+
+const pick = (...cands) => {
+  for (const c of cands) {
+    const t = coerceTs(c);
+    if (t !== undefined) return t;
   }
-  const ts = Math.trunc(tsRaw);
+  return undefined;
+};
+
+let tsRaw =
+  // 1) Body first
+  pick(
+    body?.ts,
+    body?.timestamp,
+    body?.windowEnd,
+    body?.window?.end
+  )
+  // 2) Raw metadata (shallow + a few common nested spellings)
+  ?? pick(
+    body?.metadata?.ts,
+    body?.metadata?.timestamp,
+    body?.metadata?.windowEnd,
+    body?.metadata?.window_end,
+    body?.metadata?.windowEndEpoch,
+    body?.metadata?.window?.end,
+    body?.metadata?.award?.windowEnd
+  )
+  // 3) Fallback to now
+  ?? now;
+
+if (!(Number.isFinite(tsRaw) && tsRaw > 0)) {
+  const totals = await fetchTotals();
+  return respond(422, { error: "invalid_timestamp" }, { totals });
+}
+if (tsRaw > now + cfg.driftMs) {
+  const totals = await fetchTotals();
+  return respond(422, { error: "timestamp_in_future", driftMs: cfg.driftMs }, { totals });
+}
+const ts = Math.trunc(tsRaw);
 
   // shard awards by the award window's timestamp day (prevents cross-day pollution)
 const awardDayKey = getDailyKey(ts);
