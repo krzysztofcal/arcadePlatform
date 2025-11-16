@@ -673,8 +673,11 @@ const lockKeyK        = keyLock(userId, sessionId, cfg.ns);
     local ts         = tonumber(ARGV[5])
     local lockTtl    = tonumber(ARGV[6])
     local sessionTtl = tonumber(ARGV[7])
-    local dayStart   = tonumber(ARGV[8])   -- NEW
-    local dayEnd     = tonumber(ARGV[9])   -- NEW
+    
+    -- derive award-day window bounds from ts (UTC)
+    local DAY      = 86400000
+    local dayStart = ts - (ts % DAY)
+    local dayEnd   = dayStart + DAY
 
     local shouldLock = lockTtl and lockTtl > 0
     if shouldLock then
@@ -771,9 +774,7 @@ const lockKeyK        = keyLock(userId, sessionId, cfg.ns);
       String(Math.max(0, cfg.sessionCap)),
       String(ts),
       String(LOCK_TTL_MS),
-      String(cfg.sessionTtlMs),
-      String(dayStartMs),   // NEW: ARGV[8]
-      String(dayEndMs)      // NEW: ARGV[9]
+      String(cfg.sessionTtlMs)
     ]
   );
 
