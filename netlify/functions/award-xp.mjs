@@ -377,30 +377,34 @@ export async function handler(event) {
     const serialized = JSON.stringify(cleaned);
     const bytes = Buffer.byteLength(serialized, "utf8");
 
-    // Depth check up to 3 levels
-    const MAX_DEPTH = 3;
-    let depthOk = true;
-    const stack = [{ value: cleaned, depth: 1 }];
-    while (stack.length) {
-      const { value, depth } = stack.pop();
-      if (!value || typeof value !== "object") continue;
-      if (depth > MAX_DEPTH) { depthOk = false; break; }
-      for (const nested of Object.values(value)) {
-        if (nested && typeof nested === "object") {
-          stack.push({ value: nested, depth: depth + 1 });
-        }
-      }
+    // Depth check — reject if deeper +3 levels deep
+    const checkDepth = (obj, depth = 1) => {
+      if (depth > 3) return false;
+      if (!obj || typeof obj !== "object") return true;
+      return Object.values(obj).every(val =>
+        !val || typeof val !== "object" || checkDepth(val, depth + 1)
+      );
+    };
+
+    if (!checkDepth(cleaned)) {
+      const totals = await fetchTotals();
+      return respond(413, {
+        error: "metadata_too_large",
+        reason: "max_depth_exceeded",
+        maxDepth: 3
+      }, { totals });
     }
 
-    // Default to using cleaned metadata…
-    metadata = cleaned;
-
-    // …but if it's too large or too deep, ignore it (do NOT block awarding).
-    // Drop when size is at or above the limit, or when too deep.
-    if ((cfg.metadataMax && bytes >= cfg.metadataMax) || !depthOk) {
-      metadata = null;
-      metadataDropped = true;
+    if (cfg.metadataMax && bytes > cfg.metadataMax) {
+      const totals = await fetchTotals();
+      return respond(413, {
+        error: "metadata_too_large",
+        sizeBytes: bytes,
+        limitBytes: cfg.metadataMax
+      }, { totals });
     }
+
+    metadata = cleaned; // safe to use
   }
 
 
