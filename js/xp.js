@@ -581,31 +581,15 @@
     if (!isTestMode()) return;
     if (typeof window === "undefined" || !window) return;
 
-    const awards = payload && Array.isArray(payload.awards) ? payload.awards : [];
-    const snapshot = {
-      ts: Date.now(),
-      gameId: payload && payload.gameId ? String(payload.gameId) : null,
-      scoreDelta: typeof payload.scoreDelta === "number" ? payload.scoreDelta : 0,
-      awards,
-    };
-
     if (!Array.isArray(window.__xpCalls)) {
       window.__xpCalls = [];
     }
 
-    if (
-      typeof xpTapLengthBefore === "number" &&
-      xpTapLengthBefore >= 0 &&
-      xpTapLengthBefore < window.__xpCalls.length
-    ) {
-      // already tapped for this window
-      return;
-    }
-
-    window.__xpCalls.push(snapshot);
-  } catch (_) {
-    // swallow in tests
-  }
+    window.__xpCalls.push({
+      method: "postWindow",
+      args: [payload]
+    });
+  } catch (_) {}
 }
 
   function resolvePagePath() {
@@ -1567,6 +1551,17 @@
           state.totalToday = Math.max(0, Math.floor(nextTotalToday));
         }
       }
+
+      // Fallback: derive totalToday when server omits it
+      if (
+          !Object.prototype.hasOwnProperty.call(data, "totalToday") &&
+          Number.isFinite(state.cap)
+         ) {
+            const rem = Number(data.remaining);
+            if (Number.isFinite(rem)) {
+             state.totalToday = Math.max(0, state.cap - rem);
+           }
+         }
 
       syncDailyRemainingFromTotals();
 
