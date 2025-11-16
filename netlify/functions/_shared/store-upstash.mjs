@@ -104,8 +104,9 @@ function createMemoryStore() {
         let lifetime = Number(getValue(totalKey) ?? "0");
 
         try {
-          if (lastSync > 0 && ts <= lastSync) {
-            return [0, dailyTotal, sessionTotal, lifetime, lastSync, 2];
+          // idempotency-only stale: allow older ts; only exact duplicate is stale
+            if (lastSync > 0 && ts === lastSync) {
+              return [0, dailyTotal, sessionTotal, lifetime, lastSync, 2];
           }
 
           const remainingDaily = dailyCap - dailyTotal;
@@ -141,7 +142,7 @@ function createMemoryStore() {
           dailyTotal += grant;
           sessionTotal += grant;
           lifetime += grant;
-          lastSync = ts;
+          if (ts > lastSync) lastSync = ts;
 
           setValue(dailyKey, dailyTotal, null);
           setValue(sessionKey, sessionTotal, sessionTtlMs > 0 ? sessionTtlMs : null);
