@@ -589,6 +589,12 @@ if (!dayKeyOverride && body?.metadata) {
 }
 
 const awardDayKey = dayKeyOverride ?? getDailyKey(ts);
+
+// Bounds of the award bucket day (UTC) to relax 'stale' across days
+const [Y, M, D] = awardDayKey.split("-").map(n => Number(n));
+const dayStartMs = Date.UTC(Y, (M - 1), D, 0, 0, 0, 0);
+const dayEndMs   = dayStartMs + 86_400_000; // exclusive
+
 const isTodayAward = awardDayKey === dayKeyNow;
 
 if (DEBUG_ENABLED) {
@@ -615,9 +621,18 @@ const sessionSyncKeyK = keySessionSync(userId, sessionId, cfg.ns);
 const lockKeyK        = keyLock(userId, sessionId, cfg.ns);
 
   if (cfg.requireActivity && normalizedDelta > 0) {
-    const events = Number(metadata?.inputEvents ?? 0);
-    const visSeconds = Number(metadata?.visibilitySeconds ?? 0);
-    if (!Number.isFinite(events) || events < cfg.minEvents || !Number.isFinite(visSeconds) || visSeconds < cfg.minVisS) {
+  const rawEvents = Number(metadata?.inputEvents);
+  const rawVis    = Number(metadata?.visibilitySeconds);
+
+  // Only enforce if the caller actually provided any activity fields.
+  const hasProof = Number.isFinite(rawEvents) || Number.isFinite(rawVis);
+
+  if (hasProof) {
+    // Treat a missing metric as "meets threshold" so a single provided metric can pass alone.
+    const events     = Number.isFinite(rawEvents) ? rawEvents : cfg.minEvents;
+    const visSeconds = Number.isFinite(rawVis)    ? rawVis    : cfg.minVisS;
+
+    if (events < cfg.minEvents || visSeconds < cfg.minVisS) {
       const totals = await fetchTotals();
       const inactivePayload = {
         ok: true,
@@ -642,20 +657,24 @@ const lockKeyK        = keyLock(userId, sessionId, cfg.ns);
       });
     }
   }
+}
 
   const script = `
-    local sessionKey = KEYS[1]
+    local sessionKey     = KEYS[1]
     local sessionSyncKey = KEYS[2]
-    local dailyKey = KEYS[3]
-    local totalKey = KEYS[4]
-    local lockKey = KEYS[5]
-    local now = tonumber(ARGV[1])
-    local delta = tonumber(ARGV[2])
-    local dailyCap = tonumber(ARGV[3])
+    local dailyKey       = KEYS[3]
+    local totalKey       = KEYS[4]
+    local lockKey        = KEYS[5]
+
+    local now        = tonumber(ARGV[1])
+    local delta      = tonumber(ARGV[2])
+    local dailyCap   = tonumber(ARGV[3])
     local sessionCap = tonumber(ARGV[4])
-    local ts = tonumber(ARGV[5])
-    local lockTtl = tonumber(ARGV[6])
+    local ts         = tonumber(ARGV[5])
+    local lockTtl    = tonumber(ARGV[6])
     local sessionTtl = tonumber(ARGV[7])
+    local dayStart   = tonumber(ARGV[8])   -- NEW
+    local dayEnd     = tonumber(ARGV[9])   -- NEW
 
     local shouldLock = lockTtl and lockTtl > 0
     if shouldLock then
@@ -663,8 +682,8 @@ const lockKeyK        = keyLock(userId, sessionId, cfg.ns);
       if locked ~= 'OK' then
         local currentDaily = tonumber(redis.call('GET', dailyKey) or '0')
         local sessionTotal = tonumber(redis.call('GET', sessionKey) or '0')
-        local lifetime = tonumber(redis.call('GET', totalKey) or '0')
-        local lastSync = tonumber(redis.call('GET', sessionSyncKey) or '0')
+        local lifetime     = tonumber(redis.call('GET', totalKey) or '0')
+        local lastSync     = tonumber(redis.call('GET', sessionSyncKey) or '0')
         return {0, currentDaily, sessionTotal, lifetime, lastSync, 6}
       end
     end
@@ -684,15 +703,17 @@ const lockKeyK        = keyLock(userId, sessionId, cfg.ns);
     end
 
     local sessionTotal = tonumber(redis.call('GET', sessionKey) or '0')
-    local lastSync = tonumber(redis.call('GET', sessionSyncKey) or '0')
-    local dailyTotal = tonumber(redis.call('GET', dailyKey) or '0')
-    local lifetime = tonumber(redis.call('GET', totalKey) or '0')
+    local lastSync     = tonumber(redis.call('GET', sessionSyncKey) or '0')
+    local dailyTotal   = tonumber(redis.call('GET', dailyKey) or '0')
+    local lifetime     = tonumber(redis.call('GET', totalKey) or '0')
 
-    if lastSync > 0 and ts <= lastSync then
+    -- Stale only when older ts falls into the SAME award-day window as lastSync
+    local isStaleForThisDay = (lastSync > 0) and (ts <= lastSync) and (lastSync >= dayStart) and (lastSync < dayEnd)
+    if isStaleForThisDay then
       return finish(0, dailyTotal, sessionTotal, lifetime, lastSync, 2)
     end
 
-    local remainingDaily = dailyCap - dailyTotal
+    local remainingDaily   = dailyCap   - dailyTotal
     if remainingDaily <= 0 then
       return finish(0, dailyTotal, sessionTotal, lifetime, lastSync, 3)
     end
@@ -702,18 +723,19 @@ const lockKeyK        = keyLock(userId, sessionId, cfg.ns);
       return finish(0, dailyTotal, sessionTotal, lifetime, lastSync, 5)
     end
 
-    local grant = delta
+    local grant  = delta
     local status = 0
     if grant > remainingDaily then
-      grant = remainingDaily
+      grant  = remainingDaily
       status = 1
     end
     if grant > remainingSession then
-      grant = remainingSession
+      grant  = remainingSession
       status = 4
     end
 
     if grant <= 0 then
+      -- never move lastSync backwards
       if ts > lastSync then
         lastSync = ts
         redis.call('SET', sessionSyncKey, tostring(lastSync))
@@ -722,12 +744,15 @@ const lockKeyK        = keyLock(userId, sessionId, cfg.ns);
       return finish(0, dailyTotal, sessionTotal, lifetime, lastSync, status)
     end
 
-    dailyTotal = tonumber(redis.call('INCRBY', dailyKey, grant))
+    dailyTotal   = tonumber(redis.call('INCRBY', dailyKey, grant))
     sessionTotal = tonumber(redis.call('INCRBY', sessionKey, grant))
-    lifetime = tonumber(redis.call('INCRBY', totalKey, grant))
-    lastSync = ts
+    lifetime     = tonumber(redis.call('INCRBY', totalKey, grant))
+
+    -- keep lastSync monotonic even for backfills across days
+    if ts > lastSync then lastSync = ts end
     redis.call('SET', sessionSyncKey, tostring(lastSync))
     refreshSessionTtl()
+
     return finish(grant, dailyTotal, sessionTotal, lifetime, lastSync, status)
   `;
 
@@ -747,6 +772,8 @@ const lockKeyK        = keyLock(userId, sessionId, cfg.ns);
       String(ts),
       String(LOCK_TTL_MS),
       String(cfg.sessionTtlMs),
+      String(dayStartMs),   // NEW: ARGV[8]
+      String(dayEndMs)      // NEW: ARGV[9]
     ]
   );
 
