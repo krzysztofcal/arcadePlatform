@@ -373,11 +373,14 @@ export async function handler(event) {
     metadata = cleaned;
   }
 
-  const todayKey = keyDaily(userId, dayKeyNow, KEY_NS);
-  const totalKeyK = keyTotal(userId, KEY_NS);
-  const sessionKeyK = keySession(userId, sessionId, KEY_NS);
-  const sessionSyncKeyK = keySessionSync(userId, sessionId, KEY_NS);
-  const lockKeyK = keyLock(userId, sessionId, KEY_NS);
+  // shard awards by the award window's timestamp day (prevents cross-day pollution)
+const awardDayKey = getDailyKey(ts);
+const isTodayAward = awardDayKey === dayKeyNow;
+const dailyKeyK = keyDaily(userId, awardDayKey, KEY_NS);
+const totalKeyK = keyTotal(userId, KEY_NS);
+const sessionKeyK = keySession(userId, sessionId, KEY_NS);
+const sessionSyncKeyK = keySessionSync(userId, sessionId, KEY_NS);
+const lockKeyK = keyLock(userId, sessionId, KEY_NS);
 
   if (REQUIRE_ACTIVITY && normalizedDelta > 0) {
     const events = Number(metadata?.inputEvents ?? 0);
@@ -497,21 +500,23 @@ export async function handler(event) {
   `;
 
   const cookieLimitedDelta = Math.min(normalizedDelta, cookieRemainingBefore);
-  const cookieClamped = cookieLimitedDelta < normalizedDelta;
+// only consider cookie clamp for today's bucket; backfills should be clamped by the bucket they hit
+const cookieClamped = isTodayAward && cookieLimitedDelta < normalizedDelta;
+const effectiveDelta = isTodayAward ? cookieLimitedDelta : normalizedDelta;
 
-  const res = await store.eval(
-    script,
-    [sessionKeyK, sessionSyncKeyK, todayKey, totalKeyK, lockKeyK],
-    [
-      String(now),
-      String(cookieLimitedDelta),
-      String(DAILY_CAP),
-      String(Math.max(0, SESSION_CAP)),
-      String(ts),
-      String(LOCK_TTL_MS),
-      String(SESSION_TTL_MS),
-    ]
-  );
+const res = await store.eval(
+  script,
+  [sessionKeyK, sessionSyncKeyK, dailyKeyK, totalKeyK, lockKeyK],
+  [
+    String(now),
+    String(effectiveDelta),
+    String(DAILY_CAP),
+    String(Math.max(0, SESSION_CAP)),
+    String(ts),
+    String(LOCK_TTL_MS),
+    String(SESSION_TTL_MS),
+  ]
+);
 
   const granted = Math.max(0, Math.floor(Number(res?.[0]) || 0));
   const redisDailyTotalRaw = Number(res?.[1]) || 0;
@@ -585,7 +590,8 @@ export async function handler(event) {
       requested: normalizedDelta,
       granted,
       remaining,
-      dayKey: dayKeyNow,
+      dayKey: awardDayKey,
+      bucket: isTodayAward ? "today" : "backfill",
     });
   }
 
@@ -600,21 +606,31 @@ export async function handler(event) {
   }
 
   const debugExtra = {
-    mode: "award",
-    delta: normalizedDelta,
-    ts,
-    now,
-    status,
-    requested: normalizedDelta,
-    sessionCap: SESSION_CAP,
-    dailyCap: DAILY_CAP,
-    lastSync,
-    remainingBefore: cookieRemainingBefore,
-    remainingAfter: remaining,
-    redisDailyTotalRaw,
-  };
-  if (reason) debugExtra.reason = reason;
-  if (cookieClamped) debugExtra.cookieClamped = true;
+  mode: "award",
+  delta: normalizedDelta,
+  ts,
+  now,
+  status,
+  requested: normalizedDelta,
+  sessionCap: SESSION_CAP,
+  dailyCap: DAILY_CAP,
+  lastSync,
+  remainingBefore: cookieRemainingBefore,
+  remainingAfter: remaining,
+  redisDailyTotalRaw,
+  awardDayKey,
+  cookieDayKey: dayKeyNow,
+};
+if (reason) debugExtra.reason = reason;
+if (cookieClamped) debugExtra.cookieClamped = true;
 
+// If the award hit today's bucket, reflect that total and refresh today's cookie.
+// If it hit a different day (backfill), show *today's* totals and skip cookie (avoid poisoning today's pre-clamp).
+if (isTodayAward) {
   return respond(200, payload, { totalOverride: redisDailyTotalRaw, debugExtra });
+} else {
+  const todaysTotals = await fetchTotals();
+  debugExtra.backfill = true;
+  return respond(200, payload, { totals: todaysTotals, skipCookie: true, debugExtra });
+}
 }
