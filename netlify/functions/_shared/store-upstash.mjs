@@ -74,89 +74,87 @@ function createMemoryStore() {
       return ttl > 0 ? Math.ceil(ttl / 1000) : -2;
     },
     async eval(_script, keys = [], argv = []) {
-      // Memory impl supports only v2 delta script signature [sessionKey, sessionSyncKey, dailyKey, totalKey, lockKey] x [now, delta, dailyCap, sessionCap, ts, lockTtl, sessionTtl].
-      if (keys.length === 5 && argv.length === 7) {
-        const [sessionKey, sessionSyncKey, dailyKey, totalKey, lockKey] = keys;
-        const now = Number(argv[0]);
-        const delta = Number(argv[1]);
-        const dailyCap = Number(argv[2]);
-        const sessionCap = Number(argv[3]);
-        const ts = Number(argv[4]);
-        const lockTtl = Number(argv[5]);
-        const sessionTtlMs = Number(argv[6]);
+  // Memory impl supports only v2 delta script signature:
+  // KEYS: [sessionKey, sessionSyncKey, dailyKey, totalKey, lockKey]
+  // ARGV: [now, delta, dailyCap, sessionCap, ts, lockTtl, sessionTtl]
+  if (keys.length === 5 && argv.length === 7) {
+    const [sessionKey, sessionSyncKey, dailyKey, totalKey, lockKey] = keys;
+    const now = Number(argv[0]);
+    const delta = Number(argv[1]);
+    const dailyCap = Number(argv[2]);
+    const sessionCap = Number(argv[3]);
+    const ts = Number(argv[4]);
+    const lockTtl = Number(argv[5]);
+    const sessionTtlMs = Number(argv[6]);
 
-        const lockEntry = sweep(lockKey);
-        if (lockEntry) {
-          const currentDaily = Number(getValue(dailyKey) ?? "0");
-          const sessionTotalLocked = Number(getValue(sessionKey) ?? "0");
-          const lifetimeLocked = Number(getValue(totalKey) ?? "0");
-          const lastSyncLocked = Number(getValue(sessionSyncKey) ?? "0");
-          return [0, currentDaily, sessionTotalLocked, lifetimeLocked, lastSyncLocked, 6];
-        }
+    // lock
+    const lockEntry = sweep(lockKey);
+    if (lockEntry) {
+      const currentDaily = Number(getValue(dailyKey) ?? "0");
+      const sessionTotalLocked = Number(getValue(sessionKey) ?? "0");
+      const lifetimeLocked = Number(getValue(totalKey) ?? "0");
+      const lastSyncLocked = Number(getValue(sessionSyncKey) ?? "0");
+      return [0, currentDaily, sessionTotalLocked, lifetimeLocked, lastSyncLocked, 6];
+    }
+    setValue(lockKey, now, lockTtl);
+    const release = () => { memory.delete(lockKey); };
 
-        setValue(lockKey, now, lockTtl);
+    let sessionTotal = Number(getValue(sessionKey) ?? "0");
+    let lastSync = Number(getValue(sessionSyncKey) ?? "0");
+    let dailyTotal = Number(getValue(dailyKey) ?? "0");
+    let lifetime = Number(getValue(totalKey) ?? "0");
 
-        const release = () => { memory.delete(lockKey); };
-
-        let sessionTotal = Number(getValue(sessionKey) ?? "0");
-        let lastSync = Number(getValue(sessionSyncKey) ?? "0");
-        let dailyTotal = Number(getValue(dailyKey) ?? "0");
-        let lifetime = Number(getValue(totalKey) ?? "0");
-
-        try {
-          // idempotency-only stale: allow older ts; only exact duplicate is stale
-            if (lastSync > 0 && ts === lastSync) {
-              return [0, dailyTotal, sessionTotal, lifetime, lastSync, 2];
-          }
-
-          const remainingDaily = dailyCap - dailyTotal;
-          if (remainingDaily <= 0) {
-            return [0, dailyTotal, sessionTotal, lifetime, lastSync, 3];
-          }
-
-          const remainingSession = sessionCap - sessionTotal;
-          if (remainingSession <= 0) {
-            return [0, dailyTotal, sessionTotal, lifetime, lastSync, 5];
-          }
-
-          let grant = delta;
-          let status = 0;
-          if (grant > remainingDaily) {
-            grant = remainingDaily;
-            status = 1;
-          }
-          if (grant > remainingSession) {
-            grant = remainingSession;
-            status = 4;
-          }
-
-          if (grant <= 0) {
-            if (ts > lastSync) {
-              lastSync = ts;
-              setValue(sessionSyncKey, lastSync, sessionTtlMs > 0 ? sessionTtlMs : null);
-            }
-            if (sessionTtlMs > 0) setExpiryMs(sessionKey, sessionTtlMs);
-            return [0, dailyTotal, sessionTotal, lifetime, lastSync, status];
-          }
-
-          dailyTotal += grant;
-          sessionTotal += grant;
-          lifetime += grant;
-          if (ts > lastSync) lastSync = ts;
-
-          setValue(dailyKey, dailyTotal, null);
-          setValue(sessionKey, sessionTotal, sessionTtlMs > 0 ? sessionTtlMs : null);
-          setValue(totalKey, lifetime, null);
-          setValue(sessionSyncKey, lastSync, sessionTtlMs > 0 ? sessionTtlMs : null);
-
-          return [grant, dailyTotal, sessionTotal, lifetime, lastSync, status];
-        } finally {
-          release();
-        }
+    try {
+      // idempotency only (match Lua): duplicate ts is stale; older-but-not-equal is allowed
+      if (lastSync > 0 && ts === lastSync) {
+        return [0, dailyTotal, sessionTotal, lifetime, lastSync, 2];
       }
 
-      throw new Error("Unsupported eval signature in memory store");
-    },
+      const remainingDaily = dailyCap - dailyTotal;
+      if (remainingDaily <= 0) {
+        return [0, dailyTotal, sessionTotal, lifetime, lastSync, 3];
+      }
+
+      const remainingSession = sessionCap - sessionTotal;
+      if (remainingSession <= 0) {
+        return [0, dailyTotal, sessionTotal, lifetime, lastSync, 5];
+      }
+
+      let grant = delta;
+      let status = 0;
+      if (grant > remainingDaily) { grant = remainingDaily; status = 1; }
+      if (grant > remainingSession) { grant = remainingSession; status = 4; }
+
+      if (grant <= 0) {
+        // never move lastSync backwards
+        if (ts > lastSync) {
+          lastSync = ts;
+          setValue(sessionSyncKey, lastSync, sessionTtlMs > 0 ? sessionTtlMs : null);
+        }
+        if (sessionTtlMs > 0) setExpiryMs(sessionKey, sessionTtlMs);
+        return [0, dailyTotal, sessionTotal, lifetime, lastSync, status];
+      }
+
+      // apply grant
+      dailyTotal += grant;
+      sessionTotal += grant;
+      lifetime += grant;
+      // keep lastSync monotonic even for backfills
+      lastSync = ts > lastSync ? ts : lastSync;
+
+      setValue(dailyKey, dailyTotal, null);
+      setValue(sessionKey, sessionTotal, sessionTtlMs > 0 ? sessionTtlMs : null);
+      setValue(totalKey, lifetime, null);
+      setValue(sessionSyncKey, lastSync, sessionTtlMs > 0 ? sessionTtlMs : null);
+
+      return [grant, dailyTotal, sessionTotal, lifetime, lastSync, status];
+    } finally {
+      release();
+    }
+  }
+
+  throw new Error("Unsupported eval signature in memory store");
+},
   };
 }
 
