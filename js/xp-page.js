@@ -226,8 +226,7 @@
     } catch (_) { /* ignore */ }
   }
 
-  
-function applySnapshot() {
+  function applySnapshot() {
   try {
     const xp = (typeof window !== "undefined" && window.XP) || {};
     const snapshot = (xp && typeof xp.getSnapshot === "function") ? xp.getSnapshot() : (xp && xp.snapshot) || {};
@@ -243,8 +242,8 @@ function applySnapshot() {
       return null;
     }
 
-    // --- CAP ---
-    const capValue = pickNumber(
+    // --- CAP (prefer server, then env) ---
+    let capValue = pickNumber(
       snapshot && snapshot.cap,
       snapshot && snapshot.dailyCap,
       snapshot && snapshot.limit,
@@ -255,9 +254,23 @@ function applySnapshot() {
       summary  && summary.totals && summary.totals.dailyCap,
       summary  && summary.totals && summary.totals.limit
     );
+    if (capValue == null) {
+      const envCap = Number(window && window.XP_DAILY_CAP);
+      if (Number.isFinite(envCap) && envCap > 0) capValue = Math.floor(envCap);
+    }
 
-    // --- TODAY ---
-    let totalToday = pickNumber(
+    // --- LOOSE REMAINING (what server gave us directly) ---
+    const remainingLoose = pickNumber(
+      snapshot && snapshot.remaining,
+      snapshot && snapshot.remainingToday,
+      summary  && summary.remaining,
+      summary  && summary.remainingToday,
+      summary  && summary.totals && summary.totals.remaining,
+      summary  && summary.totals && summary.totals.remainingToday
+    );
+
+    // --- RAW TODAY (if provided) ---
+    let totalTodayRaw = pickNumber(
       snapshot && snapshot.totalToday,
       snapshot && snapshot.todayTotal,
       snapshot && snapshot.today,
@@ -268,42 +281,40 @@ function applySnapshot() {
       summary  && summary.totals  && summary.totals.today,
       summary  && summary.totals  && summary.totals.earned
     );
-    if (totalToday == null) totalToday = 0;
 
-    // --- REMAINING ---
-    const remainingFromCaps = capValue != null
-      ? Math.max(0, capValue - totalToday)
-      : null;
+    // --- DERIVE TODAY/REMAINING CONSISTENTLY ---
+    let totalToday = null;
+    let remainingValue = null;
 
-    const remainingLoose = pickNumber(
-      snapshot && snapshot.remaining,
-      snapshot && snapshot.remainingToday,
-      summary  && summary.remaining,
-      summary  && summary.remainingToday,
-      summary  && summary.totals && summary.totals.remaining,
-      summary  && summary.totals && summary.totals.remainingToday
-    );
+    // Prefer server-provided remaining first
+    if (remainingLoose != null) remainingValue = Math.max(0, remainingLoose);
+    if (totalTodayRaw != null) totalToday = Math.max(0, totalTodayRaw);
 
-    let remainingValue;
-    if (remainingFromCaps != null) {
-      remainingValue = remainingFromCaps;
-    } else if (remainingLoose != null) {
-      remainingValue = remainingLoose;
-    } else {
-      remainingValue = 0;
+    // If totalToday missing but cap + remaining known, derive it
+    if (totalToday == null && capValue != null && remainingValue != null) {
+      totalToday = Math.max(0, capValue - remainingValue);
     }
 
-    // --- HANDLE CAP EDGE CASE ---
+    // If remaining missing but cap + today known, derive it
+    if (remainingValue == null && capValue != null && totalToday != null) {
+      remainingValue = Math.max(0, capValue - totalToday);
+    }
+
+    // Final fallbacks (keep null to signal "unknown" to the hint text)
+    if (totalToday == null) totalToday = 0;
+
+    // --- HANDLE CAP EDGE CASE (UI-friendly rounding) ---
     let displayToday = totalToday;
-    if (capValue != null && remainingValue <= 1 && displayToday < capValue) {
+    if (capValue != null && Number.isFinite(remainingValue) && remainingValue <= 1 && displayToday < capValue) {
       displayToday = capValue;
     }
 
     // Save for tests (xp-progress-page.spec reads this)
     setTestTotals({
       cap: capValue,
-      totalToday: totalToday,
-      remaining: remainingValue
+      totalToday: displayToday,
+      // keep the raw remainingValue; when null, the hint will say "unavailable"
+      remaining: Number.isFinite(remainingValue) ? remainingValue : null
     });
 
     // --- BASIC INFO ---
@@ -333,7 +344,7 @@ function applySnapshot() {
       });
     }
 
-    // --- REMAINING ---
+    // --- REMAINING (text value; if unknown, will render "0" but hint clarifies) ---
     const remainingText = `${formatNumber(remainingValue)} XP`;
     if (remainingEl) remainingEl.textContent = remainingText;
 
@@ -344,23 +355,19 @@ function applySnapshot() {
       });
     }
 
-    
+    // --- REMAINING HINT (never empty) ---
     if (remainingHintEl) {
       const txt = formatRemainingHint(remainingValue);
       remainingHintEl.textContent =
         (txt && txt.trim().length)
           ? txt
-          : (remainingValue <= 0
+          : (Number.isFinite(remainingValue) && remainingValue <= 0
               ? t("xp_remaining_capped", "You’ve reached today’s XP cap. Come back after the daily reset.")
               : t("xp_remaining_left", "Keep going—XP is still available today."));
     }
-  
 
     // --- RESET HINT ---
-    const nextReset = typeof xp.getNextResetEpoch === "function"
-      ? xp.getNextResetEpoch()
-      : 0;
-
+    const nextReset = typeof xp.getNextResetEpoch === "function" ? xp.getNextResetEpoch() : 0;
     if (resetHintEl) {
       const hint = formatResetHint(nextReset);
       if (hint) {
@@ -384,6 +391,8 @@ function applySnapshot() {
     try { console.error("applySnapshot error:", err); } catch (_) {}
   }
 }
+
+
 function refresh(){
     if (!window.XP || typeof window.XP.refreshStatus !== "function") {
       return Promise.resolve();
