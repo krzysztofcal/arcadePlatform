@@ -397,24 +397,21 @@ export async function handler(event) {
     }
   }
 
-  // --- Resolve award window timestamp (supports backfill days, deep nesting, seconds/ms/ISO)
-// We intentionally read from raw body.metadata even if we later drop metadata for size/depth.
+
+// --- Resolve award window timestamp (supports backfill days, deep nesting, seconds/ms/ISO)
+// Prefer RAW metadata (deep) first, then body-level, then now.
+// This allows tests to backfill a different day even if body has a "today" ts.
 
 const coerceTsMs = (v) => {
   if (v == null) return undefined;
-
-  // Prefer repo helper if present
   let n = typeof asNumber === "function" ? asNumber(v) : Number(v);
-
   if (Number.isFinite(n) && n > 0) {
-    // Heuristics: if it's "seconds" make it ms
-    if (n < 1e11) n = n * 1000; // e.g., 1699999999 -> 1699999999000
+    if (n < 1e11) n = n * 1000; // seconds -> ms
     return n;
   }
-
   if (typeof v === "string") {
     const d = Date.parse(v);
-    if (Number.isFinite(d) && d > 0) return d; // ISO date string
+    if (Number.isFinite(d) && d > 0) return d; // ISO
   }
   return undefined;
 };
@@ -449,7 +446,7 @@ const findTsDeep = (obj, maxDepth = 8) => {
     }
 
     // special case: { window: { end: ... } }
-    if (value && typeof value === "object" && value.window && typeof value.window === "object") {
+    if (value.window && typeof value.window === "object") {
       const t = coerceTsMs(value.window.end ?? value.window.endTs ?? value.window.endMs);
       if (t !== undefined) return { ts: t, path: [...path, "window.end"].join(".") };
     }
@@ -463,61 +460,22 @@ const findTsDeep = (obj, maxDepth = 8) => {
   return { ts: undefined, path: undefined };
 };
 
-// --- dayKey resolution helpers (accept explicit day bucket override) ---
-const coerceDayKey = (v) => {
-  if (typeof v !== "string") return undefined;
-  const s = v.trim();
-  // YYYY-MM-DD
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return undefined;
-  return s;
-};
-const pickDayKey = (...vals) => {
-  for (const v of vals) {
-    const dk = coerceDayKey(v);
-    if (dk) return dk;
-  }
-  return undefined;
-};
-const findDayKeyDeep = (obj, maxDepth = 8) => {
-  if (!obj || typeof obj !== "object") return { dayKey: undefined, path: undefined };
-  const wanted = new Set(["daykey", "day_key", "day", "date"]); // accept common spellings
-  const stack = [{ value: obj, path: [] }];
-  while (stack.length) {
-    const { value, path } = stack.pop();
-    if (!value || typeof value !== "object") continue;
-    for (const [k, v] of Object.entries(value)) {
-      const keyLc = String(k).toLowerCase();
-      if (wanted.has(keyLc)) {
-        const dk = coerceDayKey(v);
-        if (dk) return { dayKey: dk, path: [...path, k].join(".") };
-      }
-      if (v && typeof v === "object" && path.length < maxDepth) {
-        stack.push({ value: v, path: [...path, k] });
-      }
-    }
-  }
-  return { dayKey: undefined, path: undefined };
-};
-// --- end dayKey helpers ---
-
-// 1) Body-level candidates
-let tsRaw =
-  pickFirst(
-    body?.ts,
-    body?.timestamp,
-    body?.windowEnd,
-    body?.window?.end
-  );
-
-// 2) Deep search in raw metadata if not found at body level
+// 1) Prefer deep ts from RAW metadata (even if we later drop metadata due to size/depth)
 let tsPath = undefined;
-if (tsRaw === undefined && body?.metadata) {
+let tsRaw;
+if (body?.metadata) {
   const found = findTsDeep(body.metadata, 10);
   tsRaw = found.ts;
-  tsPath = found.path;
+  tsPath = found.path ? `metadata.${found.path}` : undefined;
 }
 
-// 3) Fallback to now
+// 2) Fall back to body-level candidates
+if (tsRaw === undefined) {
+  tsRaw = pickFirst(body?.ts, body?.timestamp, body?.windowEnd, body?.window?.end);
+  if (tsRaw !== undefined && !tsPath) tsPath = "body";
+}
+
+// 3) Finally, default to now
 if (tsRaw === undefined) tsRaw = now;
 
 if (!(Number.isFinite(tsRaw) && tsRaw > 0)) {
@@ -531,9 +489,8 @@ if (tsRaw > now + cfg.driftMs) {
 const ts = Math.trunc(tsRaw);
 
 if (DEBUG_ENABLED) {
-  console.log("ts_pick", { tsRaw, ts });
+  console.log("ts_pick", { tsRaw, ts, tsPath });
 }
-
 // --- end timestamp resolution
 
 // --- Resolve award day bucket: explicit dayKey override OR fall back to ts ---
