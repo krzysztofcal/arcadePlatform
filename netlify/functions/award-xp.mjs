@@ -911,14 +911,24 @@ const lockKeyK        = keyLock(userId, sessionId, cfg.ns);
   if (reason) debugExtra.reason = reason;
   if (cookieClamped) debugExtra.cookieClamped = true;
 
-  // If the award hit today's bucket, reflect that total and refresh today's cookie.
-  // If it hit a different day (backfill), show today's totals and skip cookie.
-  if (isTodayAward) {
-    return respond(200, payload, { totalOverride: redisDailyTotalRaw, debugExtra });
-  } else {
+  // ALWAYS refresh the cookie for today's bucket
+  // Only skip cookie on genuine backfills (awardDayKey ≠ dayKeyNow)
+  const isBackfill = awardDayKey !== dayKeyNow;
+
+  if (isBackfill) {
     const todaysTotals = await fetchTotals();
     debugExtra.backfill = true;
-    return respond(200, payload, { totals: todaysTotals, skipCookie: true, debugExtra });
+    return respond(200, payload, {
+      totals: todaysTotals,
+      skipCookie: true,
+      debugExtra
+    });
+  } else {
+    // Normal today award — always refresh cookie + TTL
+    return respond(200, payload, {
+      totalOverride: redisDailyTotalRaw,
+      debugExtra
+    });
   }
 }
 
