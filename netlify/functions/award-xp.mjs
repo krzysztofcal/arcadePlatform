@@ -355,16 +355,7 @@ export async function handler(event) {
     return respond(422, { error: "delta_out_of_range", capDelta: cfg.deltaCap }, { totals });
   }
 
-  const tsRaw = Number(body.ts ?? body.timestamp ?? body.windowEnd ?? now);
-  if (!Number.isFinite(tsRaw) || tsRaw <= 0) {
-    const totals = await fetchTotals();
-    return respond(422, { error: "invalid_timestamp" }, { totals });
-  }
-  if (tsRaw > now + cfg.driftMs) {
-    const totals = await fetchTotals();
-    return respond(422, { error: "timestamp_in_future", driftMs: cfg.driftMs }, { totals });
-  }
-  const ts = Math.trunc(tsRaw);
+  
 
   let metadata = null;
   if (body.metadata !== undefined) {
@@ -406,13 +397,38 @@ export async function handler(event) {
     }
   }
 
+// Resolve award window timestamp from body OR raw metadata (supports backfill days)
+  const pickNumber = (...vals) => {
+    for (const v of vals) {
+      const n = (typeof asNumber === "function") ? asNumber(v) : Number(v);
+      if (Number.isFinite(n)) return n;
+    }
+    return undefined;
+  };
+
+  // Pull from body first, then from the raw metadata payload (even if we later ignore it)
+  const tsFromBody = pickNumber(body.ts, body.timestamp, body.windowEnd);
+  const tsFromMeta = pickNumber(body?.metadata?.ts, body?.metadata?.timestamp, body?.metadata?.windowEnd);
+
+  let tsRaw = tsFromBody ?? tsFromMeta ?? now;
+
+  if (!(Number.isFinite(tsRaw) && tsRaw > 0)) {
+    const totals = await fetchTotals();
+    return respond(422, { error: "invalid_timestamp" }, { totals });
+  }
+  if (tsRaw > now + cfg.driftMs) {
+    const totals = await fetchTotals();
+    return respond(422, { error: "timestamp_in_future", driftMs: cfg.driftMs }, { totals });
+  }
+  const ts = Math.trunc(tsRaw);
+
   // shard awards by the award window's timestamp day (prevents cross-day pollution)
 const awardDayKey = getDailyKey(ts);
 const isTodayAward = awardDayKey === dayKeyNow;
 
-// Recompute cookie clamp now that we know the user.
-// Clamp if: (a) no userId provided (anonymous), OR (b) cookie has no uid, OR (c) cookie uid matches userId.
-const cookieUserOk = (!userId) || (!cookieState.uid) || (cookieState.uid === userId);
+// Clamp if anonymous OR cookie uid matches the current user.
+// If cookie has no uid and a named user is present => do NOT clamp.
+const cookieUserOk = (!userId) || (cookieState.uid && cookieState.uid === userId);
 cookieKeyMatches = cookieState.key === dayKeyNow;
 cookieTotal = (cookieKeyMatches && cookieUserOk) ? sanitizeTotal(cookieState.total) : 0;
 cookieRemainingBefore = Math.max(0, cfg.dailyCap - cookieTotal);
