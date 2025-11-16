@@ -396,7 +396,8 @@ export async function handler(event) {
     metadata = cleaned;
 
     // …but if it's too large or too deep, ignore it (do NOT block awarding).
-    if ((cfg.metadataMax && bytes > cfg.metadataMax) || !depthOk) {
+    // Drop when size is at or above the limit, or when too deep.
+    if ((cfg.metadataMax && bytes >= cfg.metadataMax) || !depthOk) {
       metadata = null;
       metadataDropped = true;
     }
