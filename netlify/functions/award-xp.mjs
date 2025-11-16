@@ -493,6 +493,44 @@ if (DEBUG_ENABLED) {
 }
 // --- end timestamp resolution
 
+// --- dayKey resolution helpers (accept explicit day bucket override) ---
+const coerceDayKey = (v) => {
+  if (typeof v !== "string") return undefined;
+  const s = v.trim();
+  // expect YYYY-MM-DD
+  return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : undefined;
+};
+
+const pickDayKey = (...vals) => {
+  for (const v of vals) {
+    const dk = coerceDayKey(v);
+    if (dk) return dk;
+  }
+  return undefined;
+};
+
+const findDayKeyDeep = (obj, maxDepth = 8) => {
+  if (!obj || typeof obj !== "object") return { dayKey: undefined, path: undefined };
+  const wanted = new Set(["dayKey", "day_key", "day", "date"]); // common spellings
+  const stack = [{ value: obj, path: [] }];
+  while (stack.length) {
+    const { value, path } = stack.pop();
+    if (!value || typeof value !== "object") continue;
+    for (const [k, v] of Object.entries(value)) {
+      const keyNorm = String(k);
+      if (wanted.has(keyNorm) || wanted.has(keyNorm.toLowerCase())) {
+        const dk = coerceDayKey(v);
+        if (dk) return { dayKey: dk, path: [...path, k].join(".") };
+      }
+      if (v && typeof v === "object" && path.length < maxDepth) {
+        stack.push({ value: v, path: [...path, k] });
+      }
+    }
+  }
+  return { dayKey: undefined, path: undefined };
+};
+// --- end dayKey helpers ---
+
 // --- Resolve award day bucket: explicit dayKey override OR fall back to ts ---
 let dayKeyOverride =
   pickDayKey(
