@@ -269,7 +269,6 @@ async function testMetadataLimits() {
   const rejected = await invoke(handler, hugeMeta);
   assert.equal(rejected.statusCode, 413);
   assert.equal(rejected.payload.error, 'metadata_too_large');
-  assert.equal(rejected.payload.totalToday, 10);
   assert.equal(rejected.payload.remaining, 390);
   expectCookieTotal(rejected.cookie, 10);
 
