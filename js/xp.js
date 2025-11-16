@@ -578,17 +578,25 @@
 
   function tapPostWindow(payload, xpTapLengthBefore) {
   try {
-    if (!isTestMode()) return;
-    if (typeof window === "undefined" || !window) return;
-
-    if (!Array.isArray(window.__xpCalls)) {
-      window.__xpCalls = [];
+    // 1. Record for tests
+    if (isTestMode()) {
+      if (typeof window !== "undefined") {
+        if (!Array.isArray(window.__xpCalls)) window.__xpCalls = [];
+        window.__xpCalls.push({
+          method: "postWindow",
+          args: [payload],
+        });
+      }
     }
 
-    window.__xpCalls.push({
-      method: "postWindow",
-      args: [payload]
-    });
+    // 2. Real dispatch (needed so XPClient stub awards XP!)
+    if (typeof window !== "undefined" && window) {
+      const XPClient = window.XPClient;
+      if (XPClient && typeof XPClient.postWindow === "function") {
+        XPClient.postWindow(payload).catch(() => {});
+      }
+    }
+
   } catch (_) {}
 }
 
