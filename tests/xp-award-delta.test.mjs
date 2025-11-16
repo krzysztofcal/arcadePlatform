@@ -1,8 +1,6 @@
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 
-const BASE_TS = 1_700_000_000_000;
-
 const cookieJar = new WeakMap();
 const XP_DAY_COOKIE = 'xp_day';
 const DEFAULT_SECRET = 'test-secret';
