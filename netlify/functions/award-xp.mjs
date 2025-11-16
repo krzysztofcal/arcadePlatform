@@ -409,9 +409,10 @@ export async function handler(event) {
   // shard awards by the award window's timestamp day (prevents cross-day pollution)
 const awardDayKey = getDailyKey(ts);
 const isTodayAward = awardDayKey === dayKeyNow;
+
 // Recompute cookie clamp now that we know the user.
-// Only clamp if the cookie belongs to the same user (or no userId was provided).
-const cookieUserOk = !userId || (cookieState.uid && cookieState.uid === userId);
+// Clamp if: (a) no userId provided (anonymous), OR (b) cookie has no uid, OR (c) cookie uid matches userId.
+const cookieUserOk = (!userId) || (!cookieState.uid) || (cookieState.uid === userId);
 cookieKeyMatches = cookieState.key === dayKeyNow;
 cookieTotal = (cookieKeyMatches && cookieUserOk) ? sanitizeTotal(cookieState.total) : 0;
 cookieRemainingBefore = Math.max(0, cfg.dailyCap - cookieTotal);
