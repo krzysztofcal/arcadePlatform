@@ -424,29 +424,45 @@ const pickFirst = (...vals) => {
   return undefined;
 };
 
-// DFS search for timestamp-like keys inside an object
+// DFS search for timestamp-like keys inside an object (broadened)
 const findTsDeep = (obj, maxDepth = 8) => {
   if (!obj || typeof obj !== "object") return { ts: undefined, path: undefined };
-  const wanted = new Set([
-    "ts","timestamp","time","windowend","window_end","windowendepoch",
-    "end","endts","endms","endtime","endedat","endepoch"
+
+  // exact names we already like
+  const exact = new Set([
+    "ts","timestamp","time",
+    "windowend","window_end","windowendepoch",
+    "end","endts","endms","endtime","endedat","endepoch",
+    "windowendms", "window_end_ms",
+    "expires","expiresat","expiration","expiry"
   ]);
+
+  const isTsKey = (k) => {
+    const key = String(k);
+    const lc  = key.toLowerCase();
+    if (exact.has(lc)) return true;
+
+    // generic heuristics: keys that look like "window...end|expire" or "...end(ms|ts|time|epoch)"
+    if (lc.includes("window") && (lc.includes("end") || lc.includes("expire"))) return true;
+    if (/(^|[._-])(end|expires?|expiration)(ms|ts|time|epoch)?$/.test(lc)) return true;
+    return false;
+  };
+
   const stack = [{ value: obj, path: [] }];
   while (stack.length) {
     const { value, path } = stack.pop();
     if (!value || typeof value !== "object") continue;
 
-    // direct keys
+    // 1) direct keys on this level
     for (const [k, v] of Object.entries(value)) {
-      const keyLc = String(k).toLowerCase();
-      if (wanted.has(keyLc)) {
+      if (isTsKey(k)) {
         const t = coerceTsMs(v);
         if (t !== undefined) return { ts: t, path: [...path, k].join(".") };
       }
     }
 
-    // special case: { window: { end: ... } }
-    if (value.window && typeof value.window === "object") {
+    // 2) special compact form: { window: { end / endTs / endMs } }
+    if (value && typeof value === "object" && value.window && typeof value.window === "object") {
       const t = coerceTsMs(value.window.end ?? value.window.endTs ?? value.window.endMs);
       if (t !== undefined) return { ts: t, path: [...path, "window.end"].join(".") };
     }
@@ -495,10 +511,32 @@ if (DEBUG_ENABLED) {
 
 // --- dayKey resolution helpers (accept explicit day bucket override) ---
 const coerceDayKey = (v) => {
-  if (typeof v !== "string") return undefined;
-  const s = v.trim();
-  // expect YYYY-MM-DD
-  return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : undefined;
+  if (v == null) return undefined;
+
+  // direct YYYY-MM-DD
+  if (typeof v === "string") {
+    const s = v.trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+
+    // ISO-ish strings
+    const parsed = Date.parse(s);
+    if (Number.isFinite(parsed)) return getDailyKey(parsed);
+
+    // numeric-in-string -> seconds/ms
+    const n = Number(s);
+    if (Number.isFinite(n) && n > 0) {
+      const ms = n < 1e11 ? n * 1000 : n;
+      return getDailyKey(ms);
+    }
+    return undefined;
+  }
+
+  if (typeof v === "number" && Number.isFinite(v) && v > 0) {
+    const ms = v < 1e11 ? v * 1000 : v;
+    return getDailyKey(ms);
+  }
+
+  return undefined;
 };
 
 const pickDayKey = (...vals) => {
@@ -511,14 +549,17 @@ const pickDayKey = (...vals) => {
 
 const findDayKeyDeep = (obj, maxDepth = 8) => {
   if (!obj || typeof obj !== "object") return { dayKey: undefined, path: undefined };
-  const wanted = new Set(["dayKey", "day_key", "day", "date"]); // common spellings
+  const wanted = new Set(["dayKey","day_key","day","date","awardDayKey","windowDayKey","bucketDay"]);
   const stack = [{ value: obj, path: [] }];
+
   while (stack.length) {
     const { value, path } = stack.pop();
     if (!value || typeof value !== "object") continue;
+
     for (const [k, v] of Object.entries(value)) {
       const keyNorm = String(k);
-      if (wanted.has(keyNorm) || wanted.has(keyNorm.toLowerCase())) {
+      const keyLc   = keyNorm.toLowerCase();
+      if (wanted.has(keyNorm) || wanted.has(keyLc)) {
         const dk = coerceDayKey(v);
         if (dk) return { dayKey: dk, path: [...path, k].join(".") };
       }
