@@ -7,6 +7,11 @@ const cookieJar = new WeakMap();
 const XP_DAY_COOKIE = 'xp_day';
 const DEFAULT_SECRET = 'test-secret';
 
+before(() => {
+  // Freeze time to the day of the test awards
+  cy.clock(1700000000000, ['Date']);
+});
+
 function getJar(handler) {
   let jar = cookieJar.get(handler);
   if (!jar) {
