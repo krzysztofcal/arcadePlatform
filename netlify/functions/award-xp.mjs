@@ -397,50 +397,91 @@ export async function handler(event) {
     }
   }
 
-  // --- Resolve award window timestamp (supports backfill days & nested keys)
-// NOTE: We intentionally read from raw body.metadata even if later we drop metadata
-// for being too big/deep — the timestamp must still be honored.
+  // --- Resolve award window timestamp (supports backfill days, deep nesting, seconds/ms/ISO)
+// We intentionally read from raw body.metadata even if we later drop metadata for size/depth.
 
-const coerceTs = (v) => {
+const coerceTsMs = (v) => {
   if (v == null) return undefined;
-  // Prefer repo helper if present; fallback to Number/Date.parse for ISO.
-  const n = (typeof asNumber === "function") ? asNumber(v) : Number(v);
-  if (Number.isFinite(n) && n > 0) return n;
+
+  // Prefer repo helper if present
+  let n = typeof asNumber === "function" ? asNumber(v) : Number(v);
+
+  if (Number.isFinite(n) && n > 0) {
+    // Heuristics: if it's "seconds" make it ms
+    if (n < 1e11) n = n * 1000; // e.g., 1699999999 -> 1699999999000
+    return n;
+  }
+
   if (typeof v === "string") {
     const d = Date.parse(v);
-    if (Number.isFinite(d) && d > 0) return d;
+    if (Number.isFinite(d) && d > 0) return d; // ISO date string
   }
   return undefined;
 };
 
-const pick = (...cands) => {
-  for (const c of cands) {
-    const t = coerceTs(c);
+const pickFirst = (...vals) => {
+  for (const v of vals) {
+    const t = coerceTsMs(v);
     if (t !== undefined) return t;
   }
   return undefined;
 };
 
+// DFS search for timestamp-like keys inside an object
+const findTsDeep = (obj, maxDepth = 8) => {
+  if (!obj || typeof obj !== "object") return { ts: undefined, path: undefined };
+  const wanted = new Set([
+    "ts","timestamp","time","windowend","window_end","windowendepoch",
+    "end","endts","endms","endtime","endedat","endepoch"
+  ]);
+  const stack = [{ value: obj, path: [] }];
+  while (stack.length) {
+    const { value, path } = stack.pop();
+    if (!value || typeof value !== "object") continue;
+
+    // direct keys
+    for (const [k, v] of Object.entries(value)) {
+      const keyLc = String(k).toLowerCase();
+      if (wanted.has(keyLc)) {
+        const t = coerceTsMs(v);
+        if (t !== undefined) return { ts: t, path: [...path, k].join(".") };
+      }
+    }
+
+    // special case: { window: { end: ... } }
+    if (value && typeof value === "object" && value.window && typeof value.window === "object") {
+      const t = coerceTsMs(value.window.end ?? value.window.endTs ?? value.window.endMs);
+      if (t !== undefined) return { ts: t, path: [...path, "window.end"].join(".") };
+    }
+
+    if (path.length < maxDepth) {
+      for (const [k, v] of Object.entries(value)) {
+        if (v && typeof v === "object") stack.push({ value: v, path: [...path, k] });
+      }
+    }
+  }
+  return { ts: undefined, path: undefined };
+};
+
+// 1) Body-level candidates
 let tsRaw =
-  // 1) Body first
-  pick(
+  pickFirst(
     body?.ts,
     body?.timestamp,
     body?.windowEnd,
     body?.window?.end
-  )
-  // 2) Raw metadata (shallow + a few common nested spellings)
-  ?? pick(
-    body?.metadata?.ts,
-    body?.metadata?.timestamp,
-    body?.metadata?.windowEnd,
-    body?.metadata?.window_end,
-    body?.metadata?.windowEndEpoch,
-    body?.metadata?.window?.end,
-    body?.metadata?.award?.windowEnd
-  )
-  // 3) Fallback to now
-  ?? now;
+  );
+
+// 2) Deep search in raw metadata if not found at body level
+let tsPath = undefined;
+if (tsRaw === undefined && body?.metadata) {
+  const found = findTsDeep(body.metadata, 10);
+  tsRaw = found.ts;
+  tsPath = found.path;
+}
+
+// 3) Fallback to now
+if (tsRaw === undefined) tsRaw = now;
 
 if (!(Number.isFinite(tsRaw) && tsRaw > 0)) {
   const totals = await fetchTotals();
@@ -451,6 +492,12 @@ if (tsRaw > now + cfg.driftMs) {
   return respond(422, { error: "timestamp_in_future", driftMs: cfg.driftMs }, { totals });
 }
 const ts = Math.trunc(tsRaw);
+
+if (DEBUG_ENABLED) {
+  console.log("ts_pick", { tsRaw, ts });
+}
+
+// --- end timestamp resolution
 
   // shard awards by the award window's timestamp day (prevents cross-day pollution)
 const awardDayKey = getDailyKey(ts);
@@ -679,6 +726,8 @@ const lockKeyK        = keyLock(userId, sessionId, cfg.ns);
       remaining,
       dayKey: awardDayKey,
       bucket: isTodayAward ? "today" : "backfill",
+      tsRaw,
+      ts
     });
   }
 
