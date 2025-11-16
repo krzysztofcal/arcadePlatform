@@ -175,21 +175,24 @@ export async function handler(event) {
     : null;
 
   const applyDiagnostics = (payload, extra = {}) => {
-    if (!DEBUG_ENABLED) return;
-    const debug = payload.debug ?? {};
-    if (debug.redisDailyTotalRaw === undefined && extra.redisDailyTotalRaw !== undefined) {
-      debug.redisDailyTotalRaw = extra.redisDailyTotalRaw;
-    }
-    if (extra.redisDailyTotal !== undefined) {
-      debug.redisDailyTotal = extra.redisDailyTotal;
-    }
-    debug.cookieKey = cookieState.key;
-    debug.cookieTotal = cookieState.total;
-    debug.cookieTotalSanitized = cookieTotal;
-    debug.cookieRemainingBefore = cookieRemainingBefore;
-    Object.assign(debug, extra);
-    payload.debug = debug;
-  };
+  if (!DEBUG_ENABLED) return;
+  const debug = payload.debug ?? {};
+  if (debug.redisDailyTotalRaw === undefined && extra.redisDailyTotalRaw !== undefined) {
+    debug.redisDailyTotalRaw = extra.redisDailyTotalRaw;
+  }
+  if (extra.redisDailyTotal !== undefined) {
+    debug.redisDailyTotal = extra.redisDailyTotal;
+  }
+  if (extra.metadataDropped !== undefined) {
+    debug.metadataDropped = !!extra.metadataDropped;
+  }
+  debug.cookieKey = cookieState.key;
+  debug.cookieTotal = cookieState.total;
+  debug.cookieTotalSanitized = cookieTotal;
+  debug.cookieRemainingBefore = cookieRemainingBefore;
+  Object.assign(debug, extra);
+  payload.debug = debug;
+};
 
   const buildResponse = (statusCode, payload, totalTodaySource, options = {}) => {
     const { debugExtra = {}, skipCookie = false, totals = null } = options;
@@ -358,6 +361,7 @@ export async function handler(event) {
   
 
   let metadata = null;
+  let metadataDropped = false;
   if (body.metadata !== undefined) {
     if (!body.metadata || typeof body.metadata !== "object" || Array.isArray(body.metadata)) {
       const totals = await fetchTotals();
@@ -394,6 +398,7 @@ export async function handler(event) {
     // …but if it's too large or too deep, ignore it (do NOT block awarding).
     if ((cfg.metadataMax && bytes > cfg.metadataMax) || !depthOk) {
       metadata = null;
+      metadataDropped = true;
     }
   }
 
@@ -502,7 +507,7 @@ if (tsRaw > now + cfg.driftMs) {
   const totals = await fetchTotals();
   return respond(422, { error: "timestamp_in_future", driftMs: cfg.driftMs }, { totals });
 }
-const ts = Math.trunc(tsRaw);
+let ts = Math.trunc(tsRaw); // make it mutable for possible nudge
 
 if (DEBUG_ENABLED) {
   console.log("ts_pick", { tsRaw, ts, tsPath });
@@ -589,6 +594,19 @@ if (!dayKeyOverride && body?.metadata) {
 }
 
 const awardDayKey = dayKeyOverride ?? getDailyKey(ts);
+
+// If metadata was dropped (too big/deep), avoid false "stale" on duplicate ts in the same award day.
+// We only do this minimal nudge inside the same bucket and only when it would be stale.
+if (metadataDropped) {
+  const totals = await fetchTotals();
+  const last = Number(totals?.lastSync || 0);
+  if (last > 0 && getDailyKey(last) === awardDayKey && ts <= last) {
+    ts = last + 1; // nudge by 1 ms to preserve monotonicity without blocking the award
+    if (DEBUG_ENABLED) {
+      console.log("ts_nudged_due_to_metadata_drop", { oldTs: tsRaw, nudgedTs: ts, awardDayKey, lastSync: last });
+    }
+  }
+}
 
 // Bounds of the award bucket day (UTC) to relax 'stale' across days
 const [Y, M, D] = awardDayKey.split("-").map(n => Number(n));
@@ -882,6 +900,7 @@ const lockKeyK        = keyLock(userId, sessionId, cfg.ns);
     redisDailyTotalRaw,
     awardDayKey,
     cookieDayKey: dayKeyNow,
+    metadataDropped,
   };
 
   if (reason) debugExtra.reason = reason;
