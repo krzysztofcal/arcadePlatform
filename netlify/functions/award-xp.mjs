@@ -710,9 +710,9 @@ const lockKeyK        = keyLock(userId, sessionId, cfg.ns);
     local dailyTotal   = tonumber(redis.call('GET', dailyKey) or '0')
     local lifetime     = tonumber(redis.call('GET', totalKey) or '0')
 
-    -- Stale only when older ts falls into the SAME award-day window as lastSync
-    local isStaleForThisDay = (lastSync > 0) and (ts <= lastSync) and (lastSync >= dayStart) and (lastSync < dayEnd)
-    if isStaleForThisDay then
+    -- Idempotency only: treat exact duplicate timestamp as stale.
+    -- Older-but-not-equal timestamps are allowed (we keep lastSync monotonic below).
+    if (lastSync > 0) and (ts == lastSync) then
       return finish(0, dailyTotal, sessionTotal, lifetime, lastSync, 2)
     end
 
