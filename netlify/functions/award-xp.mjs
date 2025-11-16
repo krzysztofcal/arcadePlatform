@@ -463,6 +463,43 @@ const findTsDeep = (obj, maxDepth = 8) => {
   return { ts: undefined, path: undefined };
 };
 
+// --- dayKey resolution helpers (accept explicit day bucket override) ---
+const coerceDayKey = (v) => {
+  if (typeof v !== "string") return undefined;
+  const s = v.trim();
+  // YYYY-MM-DD
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return undefined;
+  return s;
+};
+const pickDayKey = (...vals) => {
+  for (const v of vals) {
+    const dk = coerceDayKey(v);
+    if (dk) return dk;
+  }
+  return undefined;
+};
+const findDayKeyDeep = (obj, maxDepth = 8) => {
+  if (!obj || typeof obj !== "object") return { dayKey: undefined, path: undefined };
+  const wanted = new Set(["daykey", "day_key", "day", "date"]); // accept common spellings
+  const stack = [{ value: obj, path: [] }];
+  while (stack.length) {
+    const { value, path } = stack.pop();
+    if (!value || typeof value !== "object") continue;
+    for (const [k, v] of Object.entries(value)) {
+      const keyLc = String(k).toLowerCase();
+      if (wanted.has(keyLc)) {
+        const dk = coerceDayKey(v);
+        if (dk) return { dayKey: dk, path: [...path, k].join(".") };
+      }
+      if (v && typeof v === "object" && path.length < maxDepth) {
+        stack.push({ value: v, path: [...path, k] });
+      }
+    }
+  }
+  return { dayKey: undefined, path: undefined };
+};
+// --- end dayKey helpers ---
+
 // 1) Body-level candidates
 let tsRaw =
   pickFirst(
@@ -499,9 +536,34 @@ if (DEBUG_ENABLED) {
 
 // --- end timestamp resolution
 
-  // shard awards by the award window's timestamp day (prevents cross-day pollution)
-const awardDayKey = getDailyKey(ts);
+// --- Resolve award day bucket: explicit dayKey override OR fall back to ts ---
+let dayKeyOverride =
+  pickDayKey(
+    body?.dayKey,
+    body?.award?.dayKey,
+    body?.window?.dayKey,
+    body?.windowDayKey
+  );
+
+let dayKeyPath;
+if (!dayKeyOverride && body?.metadata) {
+  const found = findDayKeyDeep(body.metadata, 10); // scan raw metadata (even if later dropped)
+  dayKeyOverride = found.dayKey;
+  dayKeyPath = found.path;
+}
+
+const awardDayKey = dayKeyOverride ?? getDailyKey(ts);
 const isTodayAward = awardDayKey === dayKeyNow;
+
+if (DEBUG_ENABLED) {
+  console.log("day_pick", {
+    dayKeyOverride,
+    awardDayKey,
+    dayKeyNow,
+    dayKeyPath
+  });
+}
+// --- end award day selection ---
 
 // Clamp if anonymous OR cookie uid matches the current user.
 // If cookie has no uid and a named user is present => do NOT clamp.
