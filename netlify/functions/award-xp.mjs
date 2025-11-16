@@ -15,8 +15,6 @@ import {
 
 const XP_DAY_COOKIE = "xp_day";
 
-const KEY_NS = process.env.XP_KEY_NS ?? "kcswh:xp:v2";
-
 const DEBUG_ENABLED = process.env.XP_DEBUG === "1";
 
 const CORS_ALLOW = (process.env.XP_CORS_ALLOW ?? "")
@@ -56,36 +54,40 @@ const parseCookies = (header) => {
 const readXpCookie = (header, secret) => {
   const cookies = parseCookies(header);
   const raw = cookies[XP_DAY_COOKIE];
-  if (!raw) return { key: null, total: 0 };
+  if (!raw) return { key: null, total: 0, uid: null };
   const [encodedPayload, signature] = raw.split(".");
-  if (!encodedPayload || !signature) return { key: null, total: 0 };
+  if (!encodedPayload || !signature) return { key: null, total: 0, uid: null };
+
   let payloadJson;
   try {
     payloadJson = Buffer.from(encodedPayload, "base64url").toString("utf8");
   } catch {
-    return { key: null, total: 0 };
+    return { key: null, total: 0, uid: null };
   }
+
   const expectedSig = signPayload(payloadJson, secret);
   if (!safeEquals(signature, expectedSig)) {
-    return { key: null, total: 0 };
+    return { key: null, total: 0, uid: null };
   }
+
   try {
     const parsed = JSON.parse(payloadJson);
     const key = typeof parsed?.k === "string" ? parsed.k : null;
     const total = sanitizeTotal(parsed?.t);
-    if (!key) return { key: null, total: 0 };
-    return { key, total };
+    const uid = typeof parsed?.u === "string" ? parsed.u : null;
+    if (!key) return { key: null, total: 0, uid: null };
+    return { key, total, uid };
   } catch {
-    return { key: null, total: 0 };
+    return { key: null, total: 0, uid: null };
   }
 };
 
-const buildXpCookie = ({ key, total, cap, secret, secure, now, nextReset }) => {
+const buildXpCookie = ({ key, userId, total, cap, secret, secure, now, nextReset }) => {
   const safeTotal = Math.min(
     Math.max(0, Math.floor(Number(total) || 0)),
     Math.max(0, Math.floor(Number(cap) || 0))
   );
-  const payload = JSON.stringify({ k: key, t: safeTotal });
+  const payload = JSON.stringify({ k: key, u: String(userId || ""), t: safeTotal });
   const encoded = Buffer.from(payload, "utf8").toString("base64url");
   const signature = signPayload(payload, secret);
   const maxAge = Math.max(0, Math.floor(Math.max(0, nextReset - now) / 1000));
@@ -157,9 +159,13 @@ export async function handler(event) {
   const nextReset = getNextResetEpoch(now);
   const cookieHeader = event.headers?.cookie ?? event.headers?.Cookie ?? "";
   const cookieState = readXpCookie(cookieHeader, secret);
-  const cookieKeyMatches = cookieState.key === dayKeyNow;
-  const cookieTotal = cookieKeyMatches ? sanitizeTotal(cookieState.total) : 0;
-  const cookieRemainingBefore = Math.max(0, cfg.dailyCap - cookieTotal);
+  
+  // AFTER (let + provisional values used for early error paths)
+  let cookieKeyMatches = cookieState.key === dayKeyNow;
+  let cookieTotal = cookieKeyMatches ? sanitizeTotal(cookieState.total) : 0;
+  let cookieRemainingBefore = Math.max(0, cfg.dailyCap - cookieTotal);
+
+
 
   const queryUserId = typeof event.queryStringParameters?.userId === "string"
     ? event.queryStringParameters.userId.trim()
@@ -222,6 +228,7 @@ export async function handler(event) {
       ? undefined
       : { "Set-Cookie": buildXpCookie({
           key: dayKeyNow,
+          userId: options.cookieUserId ?? null,
           total: safeTotal,
           cap: resolvedCap,
           secret,
@@ -242,6 +249,7 @@ export async function handler(event) {
     return buildResponse(405, payload, totalSource, {
       debugExtra: { mode: "method_not_allowed" },
       skipCookie: !queryUserId,
+      cookieUserId: queryUserId,
     });
   }
 
@@ -260,6 +268,7 @@ export async function handler(event) {
     return buildResponse(400, payload, totalSource, {
       debugExtra: { mode: "bad_json" },
       skipCookie: !queryUserId,
+      cookieUserId: queryUserId,
     });
   }
 
@@ -300,6 +309,7 @@ export async function handler(event) {
       debugExtra: options.debugExtra ?? {},
       skipCookie,
       totals,
+      cookieUserId: userId,
     });
   };
 
@@ -342,7 +352,7 @@ export async function handler(event) {
   }
   if (normalizedDelta > cfg.deltaCap) {
     const totals = await fetchTotals();
-    return respond(422, { error: "delta_out_of_range", cap: cfg.deltaCap, capDelta: cfg.deltaCap }, { totals });
+    return respond(422, { error: "delta_out_of_range", capDelta: cfg.deltaCap }, { totals });
   }
 
   const tsRaw = Number(body.ts ?? body.timestamp ?? body.windowEnd ?? now);
@@ -362,6 +372,7 @@ export async function handler(event) {
       const totals = await fetchTotals();
       return respond(400, { error: "invalid_metadata" }, { totals });
     }
+
     const cleaned = {};
     for (const [key, value] of Object.entries(body.metadata)) {
       if (key === "userId" || key === "sessionId" || key === "delta" || key === "ts") continue;
@@ -370,36 +381,40 @@ export async function handler(event) {
 
     const serialized = JSON.stringify(cleaned);
     const bytes = Buffer.byteLength(serialized, "utf8");
-    const depthOk = (() => {
-      const MAX_DEPTH = 3;
-      const stack = [{ value: cleaned, depth: 1 }];
-      while (stack.length) {
-        const { value, depth } = stack.pop();
-        if (!value || typeof value !== "object") continue;
-        if (depth > MAX_DEPTH) return false;
-        for (const nested of Object.values(value)) {
-          if (nested && typeof nested === "object") {
-            stack.push({ value: nested, depth: depth + 1 });
-          }
+
+    // Depth check up to 3 levels
+    const MAX_DEPTH = 3;
+    let depthOk = true;
+    const stack = [{ value: cleaned, depth: 1 }];
+    while (stack.length) {
+      const { value, depth } = stack.pop();
+      if (!value || typeof value !== "object") continue;
+      if (depth > MAX_DEPTH) { depthOk = false; break; }
+      for (const nested of Object.values(value)) {
+        if (nested && typeof nested === "object") {
+          stack.push({ value: nested, depth: depth + 1 });
         }
       }
-      return true;
-    })();
+    }
 
-    if (cfg.metadataMax && bytes > cfg.metadataMax) {
-      const totals = await fetchTotals();
-      return respond(413, { error: "metadata_too_large", limit: cfg.metadataMax }, { totals });
-    }
-    if (!depthOk) {
-      const totals = await fetchTotals();
-      return respond(413, { error: "metadata_too_large", limit: cfg.metadataMax, reason: "depth" }, { totals });
-    }
+    // Default to using cleaned metadata…
     metadata = cleaned;
+
+    // …but if it's too large or too deep, ignore it (do NOT block awarding).
+    if ((cfg.metadataMax && bytes > cfg.metadataMax) || !depthOk) {
+      metadata = null;
+    }
   }
 
   // shard awards by the award window's timestamp day (prevents cross-day pollution)
 const awardDayKey = getDailyKey(ts);
 const isTodayAward = awardDayKey === dayKeyNow;
+// Recompute cookie clamp now that we know the user.
+// Only clamp if the cookie belongs to the same user (or no userId was provided).
+const cookieUserOk = !userId || (cookieState.uid && cookieState.uid === userId);
+cookieKeyMatches = cookieState.key === dayKeyNow;
+cookieTotal = (cookieKeyMatches && cookieUserOk) ? sanitizeTotal(cookieState.total) : 0;
+cookieRemainingBefore = Math.max(0, cfg.dailyCap - cookieTotal);
 
 const dailyKeyK       = keyDaily(userId, awardDayKey, cfg.ns);
 const totalKeyK       = keyTotal(userId, cfg.ns);
