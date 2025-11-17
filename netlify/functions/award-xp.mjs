@@ -238,8 +238,12 @@ export async function handler(event) {
     const userIdForCookie = options.cookieUserId ?? null;
     const useMirror = cookieMirror && !!cookieState.key;
 
+    // NEW: choose what total to put into the cookie (today's!)
+    const cookieTotalForSet = Number.isFinite(options.cookieTotalOverride)
+      ? sanitizeTotal(options.cookieTotalOverride)
+      : safeTotal;
+
     if (useMirror) {
-      // Mirror the incoming cookie exactly
       headers = {
         "Set-Cookie": buildXpCookie({
           key: cookieState.key,
@@ -253,12 +257,11 @@ export async function handler(event) {
         }),
       };
     } else if (userIdForCookie) {
-      // Set today's cookie only if we have identity
       headers = {
         "Set-Cookie": buildXpCookie({
           key: dayKeyNow,
           userId: userIdForCookie,
-          total: safeTotal,
+          total: cookieTotalForSet, // <-- use override if provided
           cap: resolvedCap,
           secret,
           secure: cfg.cookieSecure,
@@ -267,9 +270,8 @@ export async function handler(event) {
         }),
       };
     }
-    // else: no userId and no mirror → do NOT set a cookie
   }
-
+// end
   return json(statusCode, payload, origin, headers);
 };
 
@@ -347,11 +349,13 @@ export async function handler(event) {
       payload.lastSync = totals.lastSync;
     }
     if (skipCookie === undefined) skipCookie = (!userId) || hasDayDrift;
-    return buildResponse(statusCode, payload, totalSource, { debugExtra: options.debugExtra ?? {},
+    
+    return buildResponse(statusCode, payload, totalSource, {
+      debugExtra: options.debugExtra ?? {},
       skipCookie,
       totals,
-    
       cookieUserId: userId,
+      cookieMirror: !!options.cookieMirror, // <-- pass-through
     });
   };
 
@@ -1039,11 +1043,15 @@ if (isTodayAward) {
   debugExtra: { ...debugExtra, cookieRefreshed: true }
 });
 } else {
+  // Backfill bucket: always emit a Set-Cookie header.
+  const haveIncomingCookie = !!cookieState.key;
   return respond(200, payload, {
-    totalOverride: redisDailyTotalRaw,
-    // On day drift, do NOT touch the cookie (preserves prior t=50 expected by tests)
-    skipCookie: true,
-    debugExtra: { ...debugExtra, backfill: true, cookieFromAwardBucket: true }
+    totalOverride: redisDailyTotalRaw,   // payload/remaining reflect the backfill bucket
+    skipCookie: false,                   // always set cookie
+    cookieMirror: haveIncomingCookie,    // mirror if we already have one
+    cookieUserId: userId,                // needed when creating a new cookie
+    cookieTotalOverride: cookieTotal,    // use TODAY's total for the cookie value
+    debugExtra: { ...debugExtra, backfill: true, cookieMirrored: haveIncomingCookie }
   });
 }
 
