@@ -347,10 +347,10 @@ export async function handler(event) {
       payload.lastSync = totals.lastSync;
     }
     if (skipCookie === undefined) skipCookie = (!userId) || hasDayDrift;
-    return buildResponse(statusCode, payload, totalSource, {
-      debugExtra: options.debugExtra ?? {},
+    return buildResponse(statusCode, payload, totalSource, { debugExtra: options.debugExtra ?? {},
       skipCookie,
       totals,
+    
       cookieUserId: userId,
     });
   };
@@ -971,8 +971,7 @@ if (isTodayAward) {
   return respond(200, payload, {
     totalOverride: redisDailyTotalRaw,
     // On day drift, do NOT touch the cookie (preserves prior t=50 expected by tests)
-    skipCookie: !userId,
-    cookieUserId: userId,
+    skipCookie: true,
     debugExtra: { ...debugExtra, backfill: true, cookieFromAwardBucket: true }
   });
 }
