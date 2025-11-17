@@ -637,7 +637,15 @@ cookieKeyMatches = cookieState.key === dayKeyNow;
 cookieTotal = (cookieKeyMatches && cookieUserOk) ? sanitizeTotal(cookieState.total) : 0;
 cookieRemainingBefore = Math.max(0, cfg.dailyCap - cookieTotal);
 
-const dailyKeyK       = keyDaily(userId, awardDayKey, cfg.ns);
+// Recompute the actual day key after any ts nudge
+const actualAwardDayKey = getDailyKey(ts);
+
+const dailyKeyK       = keyDaily(userId, actualAwardDayKey, cfg.ns);
+const totalKeyK       = keyTotal(userId, cfg.ns);
+const sessionKeyK     = keySession(userId, sessionId, cfg.ns);
+const sessionSyncKeyK = keySessionSync(userId, sessionId, cfg.ns);
+const lockKeyK        = keyLock(userId, sessionId, cfg.ns);
+
 const totalKeyK       = keyTotal(userId, cfg.ns);
 const sessionKeyK     = keySession(userId, sessionId, cfg.ns);
 const sessionSyncKeyK = keySessionSync(userId, sessionId, cfg.ns);
