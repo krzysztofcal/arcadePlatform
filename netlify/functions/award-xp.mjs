@@ -968,13 +968,12 @@ if (isTodayAward) {
   debugExtra: { ...debugExtra, cookieRefreshed: true }
 });
 } else {
-  const todaysTotals = await fetchTotals();
   return respond(200, payload, {
-    totals: todaysTotals,
+    totalOverride: redisDailyTotalRaw,
     // On day drift, do NOT touch the cookie (preserves prior t=50 expected by tests)
-    skipCookie: hasDayDrift,
+    skipCookie: !userId,
     cookieUserId: userId,
-    debugExtra: { ...debugExtra, backfill: true, skipCookieDueToDrift: hasDayDrift }
+    debugExtra: { ...debugExtra, backfill: true, cookieFromAwardBucket: true }
   });
 }
 
