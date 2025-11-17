@@ -911,12 +911,14 @@ const lockKeyK        = keyLock(userId, sessionId, cfg.ns);
   if (reason) debugExtra.reason = reason;
   if (cookieClamped) debugExtra.cookieClamped = true;
 
-  // FINAL RETURN — determine if this award hit TODAY's bucket
-  // Use the FINAL ts (after possible nudge) to be 100% accurate
-  const finalDayKey = getDailyKey(ts);
-  const isBackfill = finalDayKey !== dayKeyNow;
+  // FINAL: Determine if we should refresh the cookie
+  // We refresh the cookie if and only if the award was applied to TODAY's bucket
+  // Use the FINAL ts value (after any nudge) — this is the source of truth
+  const finalAwardDayKey = getDailyKey(ts);
+  const isBackfill = finalAwardDayKey !== dayKeyNow;
 
   if (isBackfill) {
+    // Genuine backfill → do NOT touch today's cookie
     const todaysTotals = await fetchTotals();
     debugExtra.backfill = true;
     return respond(200, payload, {
@@ -925,7 +927,7 @@ const lockKeyK        = keyLock(userId, sessionId, cfg.ns);
       debugExtra
     });
   } else {
-    // Today’s bucket → always refresh cookie
+    // Today's bucket → ALWAYS refresh cookie with new total and extended TTL
     return respond(200, payload, {
       totalOverride: redisDailyTotalRaw,
       debugExtra
