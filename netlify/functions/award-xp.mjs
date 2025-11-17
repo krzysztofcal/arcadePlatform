@@ -282,12 +282,12 @@ export async function handler(event) {
     const totalSource = totals ? totals.current : cookieTotal;
     const payload = { error: "method_not_allowed" };
     return buildResponse(405, payload, totalSource, {
-  	debugExtra: { mode: "method_not_allowed" },
-  	// If userId is provided → set today's cookie from server totals.
-  	// If userId is missing → mirror the incoming cookie (keeps t=50 instead of overwriting with 0).
-  	skipCookie: false,
-  	cookieUserId: queryUserId ?? cookieState.uid ?? null,
-  	cookieMirror: !queryUserId,
+      debugExtra: { mode: "method_not_allowed" },
+      // If identity is present, DO NOT touch the cookie (avoid day drift).
+      // If no identity, mirror the incoming cookie exactly.
+      skipCookie: !!queryUserId,
+      cookieUserId: queryUserId ?? null,
+      cookieMirror: !queryUserId,
     });
   }
 
@@ -304,10 +304,11 @@ export async function handler(event) {
     const totalSource = totals ? totals.current : cookieTotal;
     const payload = { error: "bad_json" };
     return buildResponse(400, payload, totalSource, {
-  	debugExtra: { mode: "bad_json" },
-  	skipCookie: false,
-  	cookieUserId: queryUserId ?? cookieState.uid ?? null,
-  	cookieMirror: !queryUserId,
+      debugExtra: { mode: "bad_json" },
+      // Same rule as above: identity → don't touch cookie; no identity → mirror.
+      skipCookie: !!queryUserId,
+      cookieUserId: queryUserId ?? null,
+      cookieMirror: !queryUserId,
     });
   }
 
