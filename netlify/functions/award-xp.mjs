@@ -2,7 +2,6 @@ import crypto from "node:crypto";
 import { store } from "./_shared/store-upstash.mjs";
 import {
   asNumber,
-  getDailyCap,
   getDailyKey,
   getNextResetEpoch,
   getTotals,
@@ -197,43 +196,62 @@ export async function handler(event) {
   Object.assign(debug, extra);
   payload.debug = debug;
 };
-
+ 
+// build response
   const buildResponse = (statusCode, payload, totalTodaySource, options = {}) => {
-    const { debugExtra = {}, skipCookie = false, totals = null } = options;
-    const resolvedCap = (() => {
-      if (totals && Number.isFinite(totals.cap)) return Math.max(0, Math.floor(totals.cap));
-      if (Number.isFinite(payload.cap)) return Math.max(0, Math.floor(payload.cap));
-      return cfg.dailyCap;
-    })();
-    const safeTotal = Math.min(resolvedCap, Math.max(0, sanitizeTotal(totalTodaySource)));
-    const remaining = Math.max(0, resolvedCap - safeTotal);
-    payload.cap = resolvedCap;
-    payload.dailyCap = resolvedCap;
-    payload.totalToday = safeTotal;
-    payload.awardedToday = safeTotal;
-    payload.remaining = remaining;
-    payload.remainingToday = remaining;
-    payload.dayKey = totals?.dayKey || payload.dayKey || dayKeyNow;
-    const resolvedReset = Number.isFinite(totals?.nextReset)
-      ? totals.nextReset
-      : (payload.nextReset ?? nextReset);
-    payload.nextReset = resolvedReset;
-    payload.nextResetEpoch = resolvedReset;
-    if (payload.totalLifetime != null && Number.isFinite(payload.totalLifetime)) {
-      payload.totalXp = payload.totalLifetime;
-    } else if (totals && Number.isFinite(totals.lifetime)) {
-      payload.totalXp = totals.lifetime;
-    }
-    payload.__serverHasDaily = true;
-    applyDiagnostics(payload, {
-      redisDailyTotalRaw: totalTodaySource,
-      redisDailyTotal: safeTotal,
-      remainingAfter: remaining,
-      ...debugExtra,
-    });
-    const headers = skipCookie
-      ? undefined
-      : { "Set-Cookie": buildXpCookie({
+  const { debugExtra = {}, skipCookie = false, totals = null, cookieMirror = false } = options;
+  const resolvedCap = (() => {
+    if (totals && Number.isFinite(totals.cap)) return Math.max(0, Math.floor(totals.cap));
+    if (Number.isFinite(payload.cap)) return Math.max(0, Math.floor(payload.cap));
+    return cfg.dailyCap;
+  })();
+  const safeTotal = Math.min(resolvedCap, Math.max(0, sanitizeTotal(totalTodaySource)));
+  const remaining = Math.max(0, resolvedCap - safeTotal);
+  payload.cap = resolvedCap;
+  payload.dailyCap = resolvedCap;
+  payload.totalToday = safeTotal;
+  payload.awardedToday = safeTotal;
+  payload.remaining = remaining;
+  payload.remainingToday = remaining;
+  payload.dayKey = totals?.dayKey || payload.dayKey || dayKeyNow;
+  const resolvedReset = Number.isFinite(totals?.nextReset)
+    ? totals.nextReset
+    : (payload.nextReset ?? nextReset);
+  payload.nextReset = resolvedReset;
+  payload.nextResetEpoch = resolvedReset;
+  if (payload.totalLifetime != null && Number.isFinite(payload.totalLifetime)) {
+    payload.totalXp = payload.totalLifetime;
+  } else if (totals && Number.isFinite(totals.lifetime)) {
+    payload.totalXp = totals.lifetime;
+  }
+  payload.__serverHasDaily = true;
+  applyDiagnostics(payload, {
+    redisDailyTotalRaw: totalTodaySource,
+    redisDailyTotal: safeTotal,
+    remainingAfter: remaining,
+    ...debugExtra,
+  });
+
+  let headers;
+  if (!skipCookie) {
+    // If asked, mirror the incoming cookie exactly (same day key + total), if present.
+    const useMirror = cookieMirror && cookieState.key;
+    if (useMirror) {
+      headers = {
+        "Set-Cookie": buildXpCookie({
+          key: cookieState.key,
+          userId: options.cookieUserId ?? cookieState.uid ?? null,
+          total: sanitizeTotal(cookieState.total),
+          cap: resolvedCap,
+          secret,
+          secure: cfg.cookieSecure,
+          now,
+          nextReset,
+        }),
+      };
+    } else {
+      headers = {
+        "Set-Cookie": buildXpCookie({
           key: dayKeyNow,
           userId: options.cookieUserId ?? null,
           total: safeTotal,
@@ -241,10 +259,16 @@ export async function handler(event) {
           secret,
           secure: cfg.cookieSecure,
           now,
-          nextReset
-        }) };
-    return json(statusCode, payload, origin, headers);
-  };
+          nextReset,
+        }),
+      };
+    }
+  }
+
+  return json(statusCode, payload, origin, headers);
+};
+
+// headers end
 
   if (event.httpMethod !== "POST") {
     let totals = null;
@@ -254,9 +278,12 @@ export async function handler(event) {
     const totalSource = totals ? totals.current : cookieTotal;
     const payload = { error: "method_not_allowed" };
     return buildResponse(405, payload, totalSource, {
-      debugExtra: { mode: "method_not_allowed" },
-      skipCookie: !queryUserId,
-      cookieUserId: queryUserId,
+  	debugExtra: { mode: "method_not_allowed" },
+  	// If userId is provided → set today's cookie from server totals.
+  	// If userId is missing → mirror the incoming cookie (keeps t=50 instead of overwriting with 0).
+  	skipCookie: false,
+  	cookieUserId: queryUserId ?? cookieState.uid ?? null,
+  	cookieMirror: !queryUserId,
     });
   }
 
@@ -273,9 +300,10 @@ export async function handler(event) {
     const totalSource = totals ? totals.current : cookieTotal;
     const payload = { error: "bad_json" };
     return buildResponse(400, payload, totalSource, {
-      debugExtra: { mode: "bad_json" },
-      skipCookie: !queryUserId,
-      cookieUserId: queryUserId,
+  	debugExtra: { mode: "bad_json" },
+  	skipCookie: false,
+  	cookieUserId: queryUserId ?? cookieState.uid ?? null,
+  	cookieMirror: !queryUserId,
     });
   }
 
@@ -322,7 +350,13 @@ export async function handler(event) {
 
   if (!userId || (!body.statusOnly && !sessionId)) {
     const totals = userId ? await fetchTotals() : null;
-    return respond(400, { error: "missing_fields" }, { totals, skipCookie: !userId });
+    return respond(400, { error: "missing_fields" }, {
+      totals,
+      // mirror only when we don't have a userId (same rule as 405/400 bad JSON)
+      skipCookie: false,
+      cookieUserId: userId ?? cookieState.uid ?? null,
+      cookieMirror: !userId,
+    });
   }
 
   if (body.statusOnly) {
