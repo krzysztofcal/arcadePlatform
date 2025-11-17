@@ -1043,15 +1043,17 @@ if (isTodayAward) {
   debugExtra: { ...debugExtra, cookieRefreshed: true }
 });
 } else {
-  // Backfill bucket: always emit a Set-Cookie header.
-  const haveIncomingCookie = !!cookieState.key;
+  // Backfill bucket — set cookie to TODAY's total (not the backfill bucket or mirrored old value).
+  const todaysTotals = await fetchTotals();          // totals for current dayKey (today)
+  const todaysTotal  = Number(todaysTotals?.current) || 0;
+
   return respond(200, payload, {
-    totalOverride: redisDailyTotalRaw,   // payload/remaining reflect the backfill bucket
-    skipCookie: false,                   // always set cookie
-    cookieMirror: haveIncomingCookie,    // mirror if we already have one
-    cookieUserId: userId,                // needed when creating a new cookie
-    cookieTotalOverride: cookieTotal,    // use TODAY's total for the cookie value
-    debugExtra: { ...debugExtra, backfill: true, cookieMirrored: haveIncomingCookie }
+    totalOverride: redisDailyTotalRaw,               // payload/remaining reflect the backfill bucket
+    skipCookie: false,                               // always set cookie on backfill
+    cookieMirror: false,                             // do NOT mirror incoming cookie
+    cookieUserId: userId,                            // ensure cookie has identity
+    cookieTotalOverride: todaysTotal,                // write TODAY's total into cookie
+    debugExtra: { ...debugExtra, backfill: true }
   });
 }
 
