@@ -630,10 +630,9 @@ if (DEBUG_ENABLED) {
 }
 // --- end award day selection ---
 
-// Clamp if anonymous OR cookie uid matches the current user.
-// If cookie has no uid and a named user is present => do NOT clamp.
-
+// Final correct cookie validation — after all clamping logic
 cookieKeyMatches = cookieState.key === dayKeyNow;
+const cookieUserOk = (!userId) || (cookieState.uid && cookieState.uid === userId);
 cookieTotal = (cookieKeyMatches && cookieUserOk) ? sanitizeTotal(cookieState.total) : 0;
 cookieRemainingBefore = Math.max(0, cfg.dailyCap - cookieTotal);
 
