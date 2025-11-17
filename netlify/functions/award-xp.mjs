@@ -200,7 +200,7 @@ export async function handler(event) {
  
 // build response
   const buildResponse = (statusCode, payload, totalTodaySource, options = {}) => {
-  const { debugExtra = {}, skipCookie = false, totals = null, cookieMirror = false } = options;
+  const { debugExtra = {}, skipCookie = false, totals = null, cookieMirror = false, cookieTotalOverride } = options;
   const resolvedCap = (() => {
     if (totals && Number.isFinite(totals.cap)) return Math.max(0, Math.floor(totals.cap));
     if (Number.isFinite(payload.cap)) return Math.max(0, Math.floor(payload.cap));
@@ -658,13 +658,61 @@ if (metadataDropped) {
   }
 }
 
-// Bounds of the award bucket day (UTC) to relax 'stale' across days
-const [Y, M, D] = awardDayKey.split("-").map(n => Number(n));
-const dayStartMs = Date.UTC(Y, (M - 1), D, 0, 0, 0, 0);
-const dayEndMs   = dayStartMs + 86_400_000; // exclusive
+/** Key-aligned bounds using getDailyKey(), tightened via binary search (fast). */
+const findDayBounds = (dk) => {
+  let mid = Date.parse(`${dk}T12:00:00Z`);
+  if (!Number.isFinite(mid)) mid = Date.now();
+
+  const H = 3_600_000; // 1h
+
+  // Start with points inside the day
+  let loIn = mid, hiIn = mid;
+
+  // Expand by hours until stepping one more hour flips the key
+  while (getDailyKey(loIn - H) === dk) loIn -= H;
+  while (getDailyKey(hiIn + H) === dk) hiIn += H;
+
+  // Find definite outside points
+  let loOut = loIn - H;
+  while (getDailyKey(loOut) === dk) loOut -= H;
+
+  let hiOut = hiIn + H;
+  while (getDailyKey(hiOut) === dk) hiOut += H;
+
+  // Lower boundary: first t where key === dk in (loOut, loIn]
+  let L = loOut, R = loIn;
+  while (R - L > 1) {
+    const m = Math.floor((L + R) / 2);
+    if (getDailyKey(m) === dk) R = m; else L = m;
+  }
+  const start = R;
+
+  // Upper boundary: last t where key === dk in [hiIn, hiOut)
+  L = hiIn; R = hiOut;
+  while (R - L > 1) {
+    const m = Math.floor((L + R) / 2);
+    if (getDailyKey(m) === dk) L = m; else R = m;
+  }
+  const endExclusive = L + 1;
+
+  return [start, endExclusive]; // [start, end)
+};
+
+const [dayStartMs, dayEndMs] = findDayBounds(awardDayKey);
+
 
 const isTodayAward = awardDayKey === dayKeyNow;
 
+
+/**
+ * If an explicit dayKey override was provided, make sure ts falls inside that day's window.
+ * This keeps Redis bucket keys aligned with the reported awardDayKey.
+ */
+if (typeof dayKeyOverride !== 'undefined' && dayKeyOverride && getDailyKey(ts) !== awardDayKey) {
+  // clamp ts into [dayStartMs+1, dayEndMs-1] to avoid boundary collisions
+  ts = Math.max(dayStartMs + 1, Math.min(ts, dayEndMs - 1));
+}
+// end: clamp ts into awardDayKey window
 if (DEBUG_ENABLED) {
   console.log("day_pick", {
     dayKeyOverride,
@@ -691,21 +739,22 @@ const sessionKeyK     = keySession(userId, sessionId, cfg.ns);
 const sessionSyncKeyK = keySessionSync(userId, sessionId, cfg.ns);
 const lockKeyK        = keyLock(userId, sessionId, cfg.ns);
 
-  if (cfg.requireActivity && normalizedDelta > 0) {
+  //start
+  
+  // BEGIN drop-in: strict/legacy activity enforcement
+if (normalizedDelta > 0) {
   const rawEvents = Number(metadata?.inputEvents);
   const rawVis    = Number(metadata?.visibilitySeconds);
 
-  // Only enforce if the caller actually provided any activity fields.
-  const hasProof = Number.isFinite(rawEvents) || Number.isFinite(rawVis);
+  const events     = Number.isFinite(rawEvents) ? rawEvents : 0;
+  const visSeconds = Number.isFinite(rawVis)    ? rawVis    : 0;
+  const hasAny     = Number.isFinite(rawEvents) || Number.isFinite(rawVis);
 
-  if (hasProof) {
-    // Treat a missing metric as "meets threshold" so a single provided metric can pass alone.
-    const events     = Number.isFinite(rawEvents) ? rawEvents : cfg.minEvents;
-    const visSeconds = Number.isFinite(rawVis)    ? rawVis    : cfg.minVisS;
-
+  if (cfg.requireActivity) {
+    // STRICT: when XP_REQUIRE_ACTIVITY=1, missing proof counts as 0 → block
     if (events < cfg.minEvents || visSeconds < cfg.minVisS) {
       const totals = await fetchTotals();
-      const inactivePayload = {
+      return respond(200, {
         ok: true,
         awarded: 0,
         granted: 0,
@@ -713,15 +762,35 @@ const lockKeyK        = keyLock(userId, sessionId, cfg.ns);
         capDelta: cfg.deltaCap,
         reason: "inactive",
         status: "inactive",
-      };
-      return respond(200, inactivePayload, {
+      }, {
         totals,
         debugExtra: {
-          mode: "inactive",
+          mode: "inactive_strict",
           delta: normalizedDelta,
           ts,
-          sessionCap: cfg.sessionCap,
-          dailyCap: cfg.dailyCap,
+          events,
+          visSeconds,
+        },
+      });
+    }
+  } else if (hasAny) {
+    // LEGACY: if activity fields are supplied, enforce thresholds
+    if (events < cfg.minEvents || visSeconds < cfg.minVisS) {
+      const totals = await fetchTotals();
+      return respond(200, {
+        ok: true,
+        awarded: 0,
+        granted: 0,
+        cap: cfg.dailyCap,
+        capDelta: cfg.deltaCap,
+        reason: "inactive",
+        status: "inactive",
+      }, {
+        totals,
+        debugExtra: {
+          mode: "inactive_legacy",
+          delta: normalizedDelta,
+          ts,
           events,
           visSeconds,
         },
@@ -729,7 +798,9 @@ const lockKeyK        = keyLock(userId, sessionId, cfg.ns);
     }
   }
 }
-
+// END drop-in
+       
+//stop
   const script = `
     local sessionKey     = KEYS[1]
     local sessionSyncKey = KEYS[2]
@@ -971,7 +1042,7 @@ if (isTodayAward) {
   return respond(200, payload, {
     totalOverride: redisDailyTotalRaw,
     // On day drift, do NOT touch the cookie (preserves prior t=50 expected by tests)
-    skipCookie: false,
+    skipCookie: true,
     debugExtra: { ...debugExtra, backfill: true, cookieFromAwardBucket: true }
   });
 }
