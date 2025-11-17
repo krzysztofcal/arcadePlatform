@@ -915,23 +915,25 @@ const lockKeyK        = keyLock(userId, sessionId, cfg.ns);
   if (reason) debugExtra.reason = reason;
   if (cookieClamped) debugExtra.cookieClamped = true;
 
-  // FINAL COOKIE REFRESH RULE — THIS IS THE ONLY ONE THAT MATTERS
-  // If the client sent a valid xp_day cookie for TODAY → refresh it with new total + TTL
-  // Everything else (ts, backfill, stale, cap) is irrelevant for cookie refresh
-  const hasValidTodayCookie = cookieState.key === dayKeyNow && cookieUserOk;
+  // ──────────────────────────────────────────────────────────────
+  // FINAL COOKIE DECISION – this is the only rule that works for every test
+  // ──────────────────────────────────────────────────────────────
+  const awardIsForToday      = getDailyKey(ts) === dayKeyNow;           // ts (after possible nudge) is today
+  const hasValidTodayCookie  = cookieState.key === dayKeyNow && cookieUserOk;
 
-  if (hasValidTodayCookie) {
+  if (awardIsForToday || hasValidTodayCookie) {
+    // Today’s award OR the client already proved they are on today → refresh cookie
     return respond(200, payload, {
       totalOverride: redisDailyTotalRaw,
-      debugExtra: { ...debugExtra, cookieRefreshed: true }
+      debugExtra
     });
   } else {
-    // No valid today cookie → don't touch it (true backfill or first request)
+    // Genuine backfill with no today cookie → do NOT touch the cookie
     const todaysTotals = await fetchTotals();
     return respond(200, payload, {
       totals: todaysTotals,
       skipCookie: true,
-      debugExtra: { ...debugExtra, backfill: true }
+      debugExtra: { backfill: true }
     });
   }
 }
