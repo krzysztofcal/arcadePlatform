@@ -15,8 +15,6 @@ import {
 
 const XP_DAY_COOKIE = "xp_day";
 
-const DEBUG_ENABLED = process.env.XP_DEBUG === "1";
-
 const CORS_ALLOW = (process.env.XP_CORS_ALLOW ?? "")
   .split(",")
   .map(s => s.trim())
@@ -92,7 +90,9 @@ const buildXpCookie = ({ key, userId, total, cap, secret, secure, now, nextReset
   const signature = signPayload(payload, secret);
   const maxAge = Math.max(0, Math.floor(Math.max(0, nextReset - now) / 1000));
   const secureAttr = secure ? "; Secure" : "";
+  
   return `${XP_DAY_COOKIE}=${encoded}.${signature}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${maxAge}${secureAttr}`;
+
 };
 
 const json = (statusCode, obj, origin, extraHeaders) => {
@@ -118,7 +118,11 @@ function corsHeaders(origin) {
     "access-control-allow-methods": "POST,OPTIONS",
     "cache-control": "no-store",
   };
-  if (allow !== "*") headers["Vary"] = "Origin";
+  if (allow !== "*") {
+    headers["Vary"] = "Origin";
+    // if you send requests with credentials from a browser, uncomment the next line:
+    // headers["access-control-allow-credentials"] = "true";
+  }
   return headers;
 }
 
@@ -914,22 +918,21 @@ const lockKeyK        = keyLock(userId, sessionId, cfg.ns);
   if (reason) debugExtra.reason = reason;
   if (cookieClamped) debugExtra.cookieClamped = true;
 
-  // FINAL COOKIE DECISION — THIS ONE ACTUALLY WORKS (tested locally against both suites)
-  const hasValidTodayCookie = cookieState.key === dayKeyNow && cookieUserOk;
-  const clientIntendsToday   = getDailyKey(tsRaw) === dayKeyNow;   // original ts, before any nudge
+  // Decide which totals drive the cookie value
+if (isTodayAward) {
+  // Awarding today's bucket — cookie should reflect today's post-award total
+  return respond(200, payload, {
+    totalOverride: redisDailyTotalRaw,   // drives Set-Cookie via buildResponse
+    debugExtra: { ...debugExtra, cookieRefreshed: true }
+  });
+} else {
+  // Backfill past day — cookie should still reflect *today's* totals
+  const todaysTotals = await fetchTotals();
+  return respond(200, payload, {
+    totals: todaysTotals,                // lets buildResponse set cookie for today
+    debugExtra: { ...debugExtra, backfill: true }
+  });
+}
 
-  if (hasValidTodayCookie || clientIntendsToday) {
-    return respond(200, payload, {
-      totalOverride: redisDailyTotalRaw,
-      debugExtra
-    });
-  } else {
-    const todaysTotals = await fetchTotals();
-    return respond(200, payload, {
-      totals: todaysTotals,
-      skipCookie: true,
-      debugExtra: { backfill: true }
-    });
-  }
 }
 
