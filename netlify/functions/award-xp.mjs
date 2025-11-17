@@ -647,7 +647,16 @@ if (!dayKeyOverride && body?.metadata) {
   dayKeyPath = found.path;
 }
 
-const awardDayKey = dayKeyOverride ?? getDailyKey(ts);
+let awardDayKey = dayKeyOverride ?? getDailyKey(ts);
+
+// Drift-aware snap: if there is no explicit day override and ts is within
+// XP_DRIFT_MS of "now" but falls on a different calendar day, snap to today.
+if (!dayKeyOverride && awardDayKey !== dayKeyNow) {
+  const drift = Math.abs(ts - now);
+  if (drift <= cfg.driftMs) {
+    awardDayKey = dayKeyNow;
+  }
+}
 
 // If metadata was dropped (too big/deep), avoid false "stale" on duplicate ts in the same award day.
 // We only do this minimal nudge inside the same bucket and only when it would be stale.
@@ -709,14 +718,15 @@ const isTodayAward = awardDayKey === dayKeyNow;
 
 
 /**
- * If an explicit dayKey override was provided, make sure ts falls inside that day's window.
- * This keeps Redis bucket keys aligned with the reported awardDayKey.
+ * If the resolved awardDayKey doesn't match the raw ts bucket,
+ * clamp ts into that day's window so Redis keys stay aligned.
+ * This covers both explicit dayKey overrides and drift-based snapping.
  */
-if (typeof dayKeyOverride !== 'undefined' && dayKeyOverride && getDailyKey(ts) !== awardDayKey) {
+if (getDailyKey(ts) !== awardDayKey) {
   // clamp ts into [dayStartMs+1, dayEndMs-1] to avoid boundary collisions
   ts = Math.max(dayStartMs + 1, Math.min(ts, dayEndMs - 1));
 }
-// end: clamp ts into awardDayKey window
+
 if (DEBUG_ENABLED) {
   console.log("day_pick", {
     dayKeyOverride,
