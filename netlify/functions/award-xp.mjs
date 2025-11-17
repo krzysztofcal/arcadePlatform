@@ -914,20 +914,22 @@ const lockKeyK        = keyLock(userId, sessionId, cfg.ns);
   if (reason) debugExtra.reason = reason;
   if (cookieClamped) debugExtra.cookieClamped = true;
 
-  // FINAL COOKIE RULE — THE ONE THAT WORKS FOR ALL TESTS
-  const clientClaimsToday = (cookieState.key === dayKeyNow && cookieUserOk) || (getDailyKey(tsRaw) === dayKeyNow);
+  // FINAL COOKIE DECISION — THE ONE THAT ACTUALLY WORKS
+  // Refresh the cookie if and only if the incoming request contains a valid xp_day cookie for TODAY
+  // The ts value is completely irrelevant for cookie refresh — only the cookie proves "I'm here today"
+  const hasValidTodayCookie = cookieState.key === dayKeyNow && cookieUserOk;
 
-  if (clientClaimsToday) {
+  if (hasValidTodayCookie) {
     return respond(200, payload, {
       totalOverride: redisDailyTotalRaw,
-      debugExtra
+      debugExtra: { ...debugExtra, cookieRefreshed: true }
     });
   } else {
     const todaysTotals = await fetchTotals();
     return respond(200, payload, {
       totals: todaysTotals,
       skipCookie: true,
-      debugExtra: { backfill: true }
+      debugExtra: { ...debugExtra, backfill: true }
     });
   }
 }
