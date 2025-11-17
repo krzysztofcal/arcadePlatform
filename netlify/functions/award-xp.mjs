@@ -282,13 +282,15 @@ export async function handler(event) {
     const totalSource = totals ? totals.current : cookieTotal;
     const payload = { error: "method_not_allowed" };
     return buildResponse(405, payload, totalSource, {
-      debugExtra: { mode: "method_not_allowed" },
-      // If identity is present, DO NOT touch the cookie (avoid day drift).
-      // If no identity, mirror the incoming cookie exactly.
-      skipCookie: !!queryUserId,
-      cookieUserId: queryUserId ?? null,
-      cookieMirror: !queryUserId,
-    });
+  debugExtra: { mode: "method_not_allowed" },
+  // Set cookie only if identity is present AND there is no day drift with the incoming cookie.
+  // - no identity  -> skip cookie
+  // - identity + cookie day != today -> skip cookie (preserve old day’s cookie)
+  // - identity + no cookie OR cookie day == today -> set cookie
+  skipCookie: !queryUserId || (cookieState.key && cookieState.key !== dayKeyNow),
+  cookieUserId: queryUserId ?? null,
+  cookieMirror: false, // don't mirror on GET (tests expect skip for no-identity)
+});
   }
 
   let body = {};
@@ -304,12 +306,11 @@ export async function handler(event) {
     const totalSource = totals ? totals.current : cookieTotal;
     const payload = { error: "bad_json" };
     return buildResponse(400, payload, totalSource, {
-      debugExtra: { mode: "bad_json" },
-      // Same rule as above: identity → don't touch cookie; no identity → mirror.
-      skipCookie: !!queryUserId,
-      cookieUserId: queryUserId ?? null,
-      cookieMirror: !queryUserId,
-    });
+  debugExtra: { mode: "bad_json" },
+  skipCookie: !queryUserId || (cookieState.key && cookieState.key !== dayKeyNow),
+  cookieUserId: queryUserId ?? null,
+  cookieMirror: false,
+});
   }
 
   const userId = typeof body.userId === "string" ? body.userId.trim() : queryUserId;
@@ -354,15 +355,15 @@ export async function handler(event) {
   };
 
   if (!userId || (!body.statusOnly && !sessionId)) {
-    const totals = userId ? await fetchTotals() : null;
-    return respond(400, { error: "missing_fields" }, {
-      totals,
-      // no identity -> do NOT set cookie, and do NOT mirror here
-      skipCookie: !userId,
-      cookieUserId: userId ?? null,
-      cookieMirror: false,
-    });
-  }
+  const totals = userId ? await fetchTotals() : null;
+  return respond(400, { error: "missing_fields" }, {
+    totals,
+    // Only set cookie when identity present AND no day drift vs incoming cookie.
+    skipCookie: !userId || (cookieState.key && cookieState.key !== dayKeyNow),
+    cookieUserId: userId ?? null,
+    cookieMirror: false,
+  });
+}
 
   if (body.statusOnly) {
     const totals = await fetchTotals();
