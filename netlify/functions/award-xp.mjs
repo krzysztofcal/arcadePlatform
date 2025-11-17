@@ -977,7 +977,6 @@ if (isTodayAward) {
     debugExtra: { ...debugExtra, backfill: true, skipCookieDueToDrift: hasDayDrift }
   });
 }
-}
 
 }
 
