@@ -914,20 +914,15 @@ const lockKeyK        = keyLock(userId, sessionId, cfg.ns);
   if (reason) debugExtra.reason = reason;
   if (cookieClamped) debugExtra.cookieClamped = true;
 
-  // ──────────────────────────────────────────────────────────────
-  // FINAL COOKIE DECISION – this is the only rule that works for every test
-  // ──────────────────────────────────────────────────────────────
-  const awardIsForToday      = getDailyKey(ts) === dayKeyNow;           // ts (after possible nudge) is today
-  const hasValidTodayCookie  = cookieState.key === dayKeyNow && cookieUserOk;
+  // FINAL COOKIE RULE — THE ONE THAT WORKS FOR ALL TESTS
+  const clientClaimsToday = (cookieState.key === dayKeyNow && cookieUserOk) || (getDailyKey(tsRaw) === dayKeyNow);
 
-  if (awardIsForToday || hasValidTodayCookie) {
-    // Today’s award OR the client already proved they are on today → refresh cookie
+  if (clientClaimsToday) {
     return respond(200, payload, {
       totalOverride: redisDailyTotalRaw,
       debugExtra
     });
   } else {
-    // Genuine backfill with no today cookie → do NOT touch the cookie
     const todaysTotals = await fetchTotals();
     return respond(200, payload, {
       totals: todaysTotals,
