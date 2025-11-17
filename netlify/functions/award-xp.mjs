@@ -971,7 +971,7 @@ if (isTodayAward) {
   return respond(200, payload, {
     totalOverride: redisDailyTotalRaw,
     // On day drift, do NOT touch the cookie (preserves prior t=50 expected by tests)
-    skipCookie: true,
+    skipCookie: false,
     debugExtra: { ...debugExtra, backfill: true, cookieFromAwardBucket: true }
   });
 }
