@@ -234,13 +234,15 @@ export async function handler(event) {
 
   let headers;
   if (!skipCookie) {
-    // If asked, mirror the incoming cookie exactly (same day key + total), if present.
-    const useMirror = cookieMirror && cookieState.key;
+    const userIdForCookie = options.cookieUserId ?? null;
+    const useMirror = cookieMirror && !!cookieState.key;
+
     if (useMirror) {
+      // Mirror the incoming cookie exactly
       headers = {
         "Set-Cookie": buildXpCookie({
           key: cookieState.key,
-          userId: options.cookieUserId ?? cookieState.uid ?? null,
+          userId: cookieState.uid ?? userIdForCookie,
           total: sanitizeTotal(cookieState.total),
           cap: resolvedCap,
           secret,
@@ -249,11 +251,12 @@ export async function handler(event) {
           nextReset,
         }),
       };
-    } else {
+    } else if (userIdForCookie) {
+      // Set today's cookie only if we have identity
       headers = {
         "Set-Cookie": buildXpCookie({
           key: dayKeyNow,
-          userId: options.cookieUserId ?? null,
+          userId: userIdForCookie,
           total: safeTotal,
           cap: resolvedCap,
           secret,
@@ -263,6 +266,7 @@ export async function handler(event) {
         }),
       };
     }
+    // else: no userId and no mirror → do NOT set a cookie
   }
 
   return json(statusCode, payload, origin, headers);
@@ -352,10 +356,10 @@ export async function handler(event) {
     const totals = userId ? await fetchTotals() : null;
     return respond(400, { error: "missing_fields" }, {
       totals,
-      // mirror only when we don't have a userId (same rule as 405/400 bad JSON)
-      skipCookie: false,
-      cookieUserId: userId ?? cookieState.uid ?? null,
-      cookieMirror: !userId,
+      // no identity -> do NOT set cookie, and do NOT mirror here
+      skipCookie: !userId,
+      cookieUserId: userId ?? null,
+      cookieMirror: false,
     });
   }
 
