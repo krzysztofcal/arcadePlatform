@@ -632,7 +632,7 @@ if (DEBUG_ENABLED) {
 
 // Clamp if anonymous OR cookie uid matches the current user.
 // If cookie has no uid and a named user is present => do NOT clamp.
-const cookieUserOk = (!userId) || (cookieState.uid && cookieState.uid === userId);
+
 cookieKeyMatches = cookieState.key === dayKeyNow;
 cookieTotal = (cookieKeyMatches && cookieUserOk) ? sanitizeTotal(cookieState.total) : 0;
 cookieRemainingBefore = Math.max(0, cfg.dailyCap - cookieTotal);
