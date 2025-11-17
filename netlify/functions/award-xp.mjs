@@ -162,7 +162,8 @@ export async function handler(event) {
   const nextReset = getNextResetEpoch(now);
   const cookieHeader = event.headers?.cookie ?? event.headers?.Cookie ?? "";
   const cookieState = readXpCookie(cookieHeader, secret);
-  
+  const hasDayDrift = !!(cookieState.key && cookieState.key !== dayKeyNow); 
+
   // AFTER (let + provisional values used for early error paths)
   let cookieKeyMatches = cookieState.key === dayKeyNow;
   let cookieTotal = cookieKeyMatches ? sanitizeTotal(cookieState.total) : 0;
@@ -287,7 +288,7 @@ export async function handler(event) {
   // - no identity  -> skip cookie
   // - identity + cookie day != today -> skip cookie (preserve old day’s cookie)
   // - identity + no cookie OR cookie day == today -> set cookie
-  skipCookie: !queryUserId || (cookieState.key && cookieState.key !== dayKeyNow),
+  skipCookie: !queryUserId || hasDayDrift,
   cookieUserId: queryUserId ?? null,
   cookieMirror: false, // don't mirror on GET (tests expect skip for no-identity)
 });
@@ -345,7 +346,7 @@ export async function handler(event) {
     if (totals && payload.lastSync === undefined && totals.lastSync !== undefined) {
       payload.lastSync = totals.lastSync;
     }
-    if (skipCookie === undefined) skipCookie = !userId;
+    if (skipCookie === undefined) skipCookie = (!userId) || hasDayDrift;
     return buildResponse(statusCode, payload, totalSource, {
       debugExtra: options.debugExtra ?? {},
       skipCookie,
@@ -958,15 +959,14 @@ const lockKeyK        = keyLock(userId, sessionId, cfg.ns);
   if (reason) debugExtra.reason = reason;
   if (cookieClamped) debugExtra.cookieClamped = true;
 
-const hasDayDrift = !!(cookieState.key && cookieState.key !== dayKeyNow);
-
   // Decide which totals drive the cookie value
 if (isTodayAward) {
   // Awarding today's bucket — cookie should reflect today's post-award total
   return respond(200, payload, {
-    totalOverride: redisDailyTotalRaw,   // drives Set-Cookie via buildResponse
-    debugExtra: { ...debugExtra, cookieRefreshed: true }
-  });
+  totalOverride: redisDailyTotalRaw,
+  skipCookie: false,
+  debugExtra: { ...debugExtra, cookieRefreshed: true }
+});
 } else {
   const todaysTotals = await fetchTotals();
   return respond(200, payload, {
