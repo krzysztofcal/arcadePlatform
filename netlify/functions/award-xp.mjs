@@ -641,10 +641,6 @@ cookieRemainingBefore = Math.max(0, cfg.dailyCap - cookieTotal);
 const actualAwardDayKey = getDailyKey(ts);
 
 const dailyKeyK       = keyDaily(userId, actualAwardDayKey, cfg.ns);
-const totalKeyK       = keyTotal(userId, cfg.ns);
-const sessionKeyK     = keySession(userId, sessionId, cfg.ns);
-const sessionSyncKeyK = keySessionSync(userId, sessionId, cfg.ns);
-const lockKeyK        = keyLock(userId, sessionId, cfg.ns);
 
 const totalKeyK       = keyTotal(userId, cfg.ns);
 const sessionKeyK     = keySession(userId, sessionId, cfg.ns);
