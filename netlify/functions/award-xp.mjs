@@ -978,7 +978,7 @@ if (isTodayAward) {
   const todaysTotal = Number(todayTotals?.current) || 0;
   
   return respond(200, payload, {
-    totalOverride: redisDailyTotalRaw,  // Payload shows the backfill day's total
+    totalOverride: todaysTotal,  // Payload shows TODAY's total
     totals: todayTotals,                 // Pass today's full totals for cookie
     skipCookie: false,                   // DO set cookie
     cookieUserId: userId,
