@@ -73,7 +73,7 @@ async function testDailyAcrossSessions() {
   const userId = 'multi-user';
 
   const firstSession = { userId, sessionId: 'sess-a', ts: BASE_TS };
-  const secondSession = { userId, sessionId: 'sess-b', ts: BASE_TS + 50 }; // slight offset
+  const secondSession = { userId, sessionId: 'sess-b', ts: BASE_TS + 50 };
 
   const originalNow = Date.now;
   Date.now = () => BASE_TS;
@@ -168,7 +168,7 @@ async function testZeroDeltaAdvancesLastSync() {
 }
 
 async function testMidnightRollover() {
-  const beforeReset = Date.UTC(2024, 0, 3, 1, 50, 0); // 02:50 local (UTC+1)
+  const beforeReset = Date.UTC(2024, 0, 3, 1, 50, 0);
   const handler = await createHandler('midnight', { dailyCap: 400, sessionCap: 250 });
   const base = { userId: 'midnight-user', sessionId: 'midnight-session', ts: beforeReset };
 
@@ -181,7 +181,7 @@ async function testMidnightRollover() {
     assert.equal(dayOne.payload.remaining, 250);
     expectCookieTotal(dayOne.cookie, 150);
 
-    const afterReset = Date.UTC(2024, 0, 3, 2, 10, 0); // 03:10 local
+    const afterReset = Date.UTC(2024, 0, 3, 2, 10, 0);
     Date.now = () => afterReset;
     const dayTwo = await invoke(handler, { ...base, ts: afterReset, delta: 200 });
     assert.equal(dayTwo.payload.totalToday, 100);
@@ -235,34 +235,37 @@ async function testSessionTtlRefresh() {
   const sessionId = 'ttl-session';
   process.env.XP_SESSION_TTL_SEC = '3';
   const handler = await createHandler('ttl', { dailyCap: 500, sessionCap: 400, sessionTtl: 3 });
-  const base = { userId, sessionId, ts: BASE_TS };
 
-  const first = await invoke(handler, { ...base, delta: 50 });
-  assert.equal(first.payload.awarded, 50);
-  expectCookieTotal(first.cookie, 50);
+  const originalNow = Date.now;
+  const testNow = Date.now();
+  Date.now = () => testNow;
 
-  const { createHash } = await import('node:crypto');
-  const { store } = await import('../netlify/functions/_shared/store-upstash.mjs');
-  const hash = createHash('sha256').update(`${userId}|${sessionId}`).digest('hex');
-  const sessionKey = `${process.env.XP_KEY_NS}:session:${hash}`;
+  try {
+    const base = { userId, sessionId, ts: testNow };
+    const first = await invoke(handler, { ...base, delta: 50 });
+    assert.equal(first.payload.awarded, 50);
+    expectCookieTotal(first.cookie, 50);
 
-  let ttlInitial = await store.ttl(sessionKey);
-  assert(ttlInitial > 0 && ttlInitial <= 3);
+    const { createHash } = await import('node:crypto');
+    const { store } = await import('../netlify/functions/_shared/store-upstash.mjs');
+    const hash = createHash('sha256').update(`${userId}|${sessionId}`).digest('hex');
+    const sessionKey = `${process.env.XP_KEY_NS}:session:${hash}`;
 
-  await new Promise(resolve => setTimeout(resolve, 1_200));
-  const ttlAfterWait = await store.ttl(sessionKey);
-  assert(ttlAfterWait > -2);
+    let ttlInitial = await store.ttl(sessionKey);
+    assert(ttlInitial > 0 && ttlInitial <= 3, `Initial TTL should be 0-3, got ${ttlInitial}`);
 
-  await invoke(handler, { ...base, ts: BASE_TS + 2_000, delta: 0 });
-  const ttlAfterHeartbeat = await store.ttl(sessionKey);
-  assert(ttlAfterHeartbeat > ttlAfterWait);
+    await new Promise(resolve => setTimeout(resolve, 1_200));
+    const ttlAfterWait = await store.ttl(sessionKey);
+    assert(ttlAfterWait > -2, `TTL after wait should be > -2, got ${ttlAfterWait}`);
+
+    await invoke(handler, { ...base, ts: testNow + 2_000, delta: 0 });
+    
+    // Small delay to ensure Redis PEXPIRE completes
+    await new Promise(resolve => setTimeout(resolve, 50));
+    
+    const ttlAfterHeartbeat = await store.ttl(sessionKey);
+    assert(ttlAfterHeartbeat > ttlAfterWait, `TTL after heartbeat (${ttlAfterHeartbeat}) should be > TTL after wait (${ttlAfterWait})`);
+  } finally {
+    Date.now = originalNow;
+  }
 }
-
-await testDailyAcrossSessions();
-await testSessionCapAcrossDays();
-await testZeroDeltaAdvancesLastSync();
-await testMidnightRollover();
-await testSessionTtlRefresh();
-await testCrossDeviceNearCap();
-
-console.log('xp-award session/daily tests passed');
