@@ -19,20 +19,28 @@ async function invoke(handler, body) {
 
 (async () => {
   const handler = await createHandler();
-  const base = { userId: 'legacy-user', sessionId: 'legacy-sess', ts: 1_700_000_000_000 };
+  const testTs = 1_700_000_000_000;
+  const base = { userId: 'legacy-user', sessionId: 'legacy-sess', ts: testTs };
 
-  const legacyScoreDelta = await invoke(handler, { ...base, scoreDelta: 50 });
-  assert.equal(legacyScoreDelta.statusCode, 200);
-  assert.equal(legacyScoreDelta.payload.awarded, 50);
+  const originalNow = Date.now;
+  Date.now = () => testTs;
+  
+  try {
+    const legacyScoreDelta = await invoke(handler, { ...base, scoreDelta: 50 });
+    assert.equal(legacyScoreDelta.statusCode, 200);
+    assert.equal(legacyScoreDelta.payload.awarded, 50);
 
-  const legacyPointsPerPeriod = await invoke(handler, { ...base, ts: base.ts + 1, pointsPerPeriod: 30 });
-  assert.equal(legacyPointsPerPeriod.statusCode, 200);
-  assert.equal(legacyPointsPerPeriod.payload.awarded, 30);
+    const legacyPointsPerPeriod = await invoke(handler, { ...base, ts: base.ts + 1, pointsPerPeriod: 30 });
+    assert.equal(legacyPointsPerPeriod.statusCode, 200);
+    assert.equal(legacyPointsPerPeriod.payload.awarded, 30);
 
-  const missingDelta = await handler({ httpMethod: 'POST', headers: {}, body: JSON.stringify({ userId: base.userId, sessionId: base.sessionId, ts: base.ts + 2 }) });
-  assert.equal(missingDelta.statusCode, 422);
-  const err = JSON.parse(missingDelta.body);
-  assert.equal(err.error, 'invalid_delta');
+    const missingDelta = await handler({ httpMethod: 'POST', headers: {}, body: JSON.stringify({ userId: base.userId, sessionId: base.sessionId, ts: base.ts + 2 }) });
+    assert.equal(missingDelta.statusCode, 422);
+    const err = JSON.parse(missingDelta.body);
+    assert.equal(err.error, 'invalid_delta');
 
-  console.log('xp-award-legacy-fallback tests passed');
+    console.log('xp-award-legacy-fallback tests passed');
+  } finally {
+    Date.now = originalNow;
+  }
 })();
