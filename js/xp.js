@@ -1879,6 +1879,8 @@
       ? window.__xpCalls.length
       : null;
 
+
+    tapPostWindow(payload, xpTapLengthBefore);
     state.pending = window.XPClient.postWindow(payload)
       .then((data) => {
         try {
