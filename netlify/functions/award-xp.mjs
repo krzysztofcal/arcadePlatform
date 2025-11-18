@@ -557,15 +557,6 @@ if (tsRaw > now + cfg.driftMs) {
   const totals = await fetchTotals();
   return respond(422, { error: "timestamp_in_future", driftMs: cfg.driftMs }, { totals });
 }
-
-// Reject timestamps older than drift window
-if (tsRaw < now - cfg.driftMs) {
-  const totals = await fetchTotals();
-  return respond(422, {
-    error: "timestamp_too_old",
-    driftMs: cfg.driftMs
-  }, { totals });
-}
 let ts = Math.trunc(tsRaw); // make it mutable for possible nudge
 
 if (DEBUG_ENABLED) {
@@ -653,21 +644,6 @@ if (!dayKeyOverride && body?.metadata) {
 }
 
 const awardDayKey = dayKeyOverride ?? getDailyKey(ts);
-
-// Drift-aware snap: reject timestamps outside drift window unless explicitly overridden
-if (!dayKeyOverride && awardDayKey !== dayKeyNow) {
-  const drift = Math.abs(ts - now);
-  if (drift <= cfg.driftMs) {
-    awardDayKey = dayKeyNow;
-  } else {
-    const totals = await fetchTotals();
-    return respond(422, {
-      error: "timestamp_out_of_range",
-      driftMs: cfg.driftMs,
-      actualDrift: drift
-    }, { totals });
-  }
-}
 
 // If metadata was dropped (too big/deep), avoid false "stale" on duplicate ts in the same award day.
 // We only do this minimal nudge inside the same bucket and only when it would be stale.
@@ -992,13 +968,27 @@ if (isTodayAward) {
   debugExtra: { ...debugExtra, cookieRefreshed: true }
 });
 } else {
+  // Backfill award (past day) — fetch and set cookie to TODAY's totals
+  const todayTotals = await getTotals({
+    userId,
+    sessionId,
+    now,
+    keyNamespace: cfg.ns
+  });
+  const todaysTotal = Number(todayTotals?.current) || 0;
+  
   return respond(200, payload, {
-    totalOverride: redisDailyTotalRaw,
-    // On day drift, do NOT touch the cookie (preserves prior t=50 expected by tests)
-    skipCookie: true,
-    debugExtra: { ...debugExtra, backfill: true, cookieFromAwardBucket: true }
+    totalOverride: redisDailyTotalRaw,  // Payload shows the backfill day's total
+    totals: todayTotals,                 // Pass today's full totals for cookie
+    skipCookie: false,                   // DO set cookie
+    cookieUserId: userId,
+    debugExtra: {
+      ...debugExtra,
+      backfill: true,
+      backfillDayTotal: redisDailyTotalRaw,
+      todayTotal: todaysTotal
+    }
   });
 }
 
 }
-
