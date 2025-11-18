@@ -76,20 +76,23 @@ async function invoke(handler, body, options = {}) {
 
   const base = { userId: "u", sessionId: "s" };
 
-  // 1) Accept past timestamps (staleness handled by lastSync ordering)
+  // 1) Accept past timestamps - backfill to correct day bucket
   {
     const past = await invoke(handler, { ...base, ts: NOW - 86_400_000, delta: 5 });
     assert.equal(past.statusCode, 200);
-    assert.equal(past.payload.awarded, 5);
-    assert.equal(past.payload.totalToday, 5);
-    assert.equal(past.payload.remaining, 395);
-    expectCookieTotal(past.cookie, 5);
+    assert.equal(past.payload.awarded, 5, "Should award 5 XP to yesterday's bucket");
+    assert.equal(past.payload.totalLifetime, 5, "Lifetime total should be 5");
+    assert.equal(past.payload.totalToday, 0, "Today's bucket should still be 0 (award was to yesterday)");
+    assert.equal(past.payload.remaining, 400, "Today's remaining should be full (400)");
+    expectCookieTotal(past.cookie, 0); // Cookie shows TODAY's total, which is 0
 
     const past2 = await invoke(handler, { ...base, ts: NOW - 60_000, delta: 10 });
     assert.equal(past2.statusCode, 200);
-    assert.equal(past2.payload.totalToday, 15);
-    assert.equal(past2.payload.remaining, 385);
-    expectCookieTotal(past2.cookie, 15);
+    assert.equal(past2.payload.awarded, 10, "Should award 10 XP to today's bucket");
+    assert.equal(past2.payload.totalLifetime, 15, "Lifetime total should be 15 (5 + 10)");
+    assert.equal(past2.payload.totalToday, 10, "Today's bucket should be 10");
+    assert.equal(past2.payload.remaining, 390, "Today's remaining should be 390");
+    expectCookieTotal(past2.cookie, 10); // Cookie shows TODAY's actual total
   }
 
   // 2) Reject far-future timestamp
@@ -100,9 +103,9 @@ async function invoke(handler, body, options = {}) {
     assert.equal(future.statusCode, 422);
     assert.equal(future.payload.error, "timestamp_in_future");
     assert.equal(future.payload.driftMs, driftMs);
-    assert.equal(future.payload.totalToday, 15);
-    assert.equal(future.payload.remaining, 385);
-    expectCookieTotal(future.cookie, 15);
+    assert.equal(future.payload.totalToday, 10, "Error response should still show current totals");
+    assert.equal(future.payload.totalLifetime, 15);
+    expectCookieTotal(future.cookie, 10);
   }
 
   // 3) Future but within tolerance passes
@@ -110,29 +113,32 @@ async function invoke(handler, body, options = {}) {
     const within = await invoke(handler, { ...base, ts: NOW + 29_000, delta: 7 });
     assert.equal(within.statusCode, 200);
     assert.equal(within.payload.awarded, 7);
-    assert.equal(within.payload.totalToday, 22);
-    assert.equal(within.payload.remaining, 378);
-    expectCookieTotal(within.cookie, 22);
+    assert.equal(within.payload.totalToday, 17, "Today's total is now 17 (10 + 7)");
+    assert.equal(within.payload.totalLifetime, 22, "Lifetime is 22 (5 + 10 + 7)");
+    assert.equal(within.payload.remaining, 383);
+    expectCookieTotal(within.cookie, 17);
   }
 
-  // 4) Server-day bucket wins over client ts day
+  // 4) Daily cap enforcement across buckets
   {
-    const nextDayTs = NOW + 36 * 3_600 * 1_000;
-    const handler2 = await createHandler("serverBucket", { driftMs: 200_000_000 });
+    const handler2 = await createHandler("capTest", { dailyCap: 20, driftMs: 200_000_000 });
     Date.now = () => NOW;
-    const first = await invoke(handler2, { ...base, ts: NOW, delta: 9 });
+    
+    const first = await invoke(handler2, { ...base, ts: NOW, delta: 15 });
     assert.equal(first.statusCode, 200);
-    assert.equal(first.payload.awarded, 9);
-    assert.equal(first.payload.totalToday, 9);
-    expectCookieTotal(first.cookie, 9);
-    const second = await invoke(handler2, { ...base, ts: nextDayTs, delta: 11 });
+    assert.equal(first.payload.awarded, 15);
+    assert.equal(first.payload.totalToday, 15);
+    assert.equal(first.payload.remaining, 5);
+    
+    const second = await invoke(handler2, { ...base, ts: NOW + 1000, delta: 10 });
     assert.equal(second.statusCode, 200);
+    assert.equal(second.payload.awarded, 5, "Should cap at daily limit");
+    assert.equal(second.payload.capped, true);
     assert.equal(second.payload.totalToday, 20);
-    assert.equal(second.payload.remaining, 380);
-    expectCookieTotal(second.cookie, 20);
+    assert.equal(second.payload.remaining, 0);
   }
 
-  // 5) Non-POST surfaces Redis totals and rewrites cookie
+  // 5) Non-POST surfaces current totals
   {
     const headers = {};
     const existing = readCookie(handler);
@@ -145,14 +151,8 @@ async function invoke(handler, body, options = {}) {
     assert.equal(res.statusCode, 405);
     const payload = JSON.parse(res.body);
     assert.equal(payload.error, "method_not_allowed");
-    assert.equal(payload.totalToday, 22);
-    assert.equal(payload.remaining, 378);
-    const setCookie = res.headers?.["Set-Cookie"] ?? res.headers?.["set-cookie"];
-    if (setCookie) {
-      const pair = (Array.isArray(setCookie) ? setCookie[0] : setCookie).split(";")[0];
-      expectCookieTotal(pair, 22);
-      storeCookie(handler, pair);
-    }
+    assert.equal(payload.totalToday, 17, "Should reflect current today's total");
+    assert.equal(payload.totalLifetime, 22, "Should reflect lifetime total");
   }
 
   Date.now = realNow;
