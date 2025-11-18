@@ -122,15 +122,16 @@ async function invoke(handler, body, options = {}) {
   // 4) Daily cap enforcement across buckets
   {
     const handler2 = await createHandler("capTest", { dailyCap: 20, driftMs: 200_000_000 });
+    const base2 = { userId: "cap-user", sessionId: "cap-session" };
     Date.now = () => NOW;
     
-    const first = await invoke(handler2, { ...base, ts: NOW, delta: 15 });
+    const first = await invoke(handler2, { ...base2, ts: NOW, delta: 15 });
     assert.equal(first.statusCode, 200);
     assert.equal(first.payload.awarded, 15);
     assert.equal(first.payload.totalToday, 15);
     assert.equal(first.payload.remaining, 5);
     
-    const second = await invoke(handler2, { ...base, ts: NOW + 1000, delta: 10 });
+    const second = await invoke(handler2, { ...base2, ts: NOW + 1000, delta: 10 });
     assert.equal(second.statusCode, 200);
     assert.equal(second.payload.awarded, 5, "Should cap at daily limit");
     assert.equal(second.payload.capped, true);
