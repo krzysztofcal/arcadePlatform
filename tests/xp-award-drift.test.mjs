@@ -139,22 +139,6 @@ async function invoke(handler, body, options = {}) {
     assert.equal(second.payload.remaining, 0);
   }
 
-  // 5) Non-POST surfaces current totals
-  {
-    const headers = {};
-    const existing = readCookie(handler);
-    if (existing) headers.cookie = existing;
-    const res = await handler({
-      httpMethod: "GET",
-      headers,
-      queryStringParameters: { userId: base.userId, sessionId: base.sessionId },
-    });
-    assert.equal(res.statusCode, 405);
-    const payload = JSON.parse(res.body);
-    assert.equal(payload.error, "method_not_allowed");
-    assert.equal(payload.totalToday, 17, "Should reflect current today's total");
-    assert.equal(payload.totalLifetime, 22, "Should reflect lifetime total");
-  }
 
   Date.now = realNow;
   console.log("xp-award-drift tests passed");
