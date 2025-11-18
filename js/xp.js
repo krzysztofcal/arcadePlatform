@@ -2061,9 +2061,9 @@
         inputEvents,
         chunkMs: windowMs,
         pointsPerPeriod: 10,
+      scoreDelta: pendingScore,
       };
 
-      if (pendingScore > 0) payload.scoreDelta = pendingScore;
 
       const tapLenBefore = Array.isArray(window.__xpCalls) ? window.__xpCalls.length : null;
       tapPostWindow(payload, tapLenBefore);
