@@ -46,6 +46,8 @@ Generated SHA-256 hashes for all inline scripts to allow them under strict CSP:
 | Dev mode badge | index.html:141-177 | `sha256-XrSFJ4ySkYx4TqUdjPrziMO+uQIIR9QiyrzQ3l2ejNw=` |
 | Cookiebot manager | index.html:180-206 | `sha256-NEdFk8Iej2nQfmFNE6omWij3OZeU6XX/Ro7dPxUjU1U=` |
 | XP autoboot (alt) | game.html, game_trex.html, game_cats.html | `sha256-HcEv6hsWQ+FJOehazeZ8pCh/Ygrqocog7DSLvEEY9Cg=` |
+| Cookiebot dynamic 1 | Dynamic (injected by Cookiebot) | `sha256-/xMvUPI31ylnPKXTCl4AkOXA4sQahPIEP/rLBk0MYQ4=` |
+| Cookiebot dynamic 2 | Dynamic (injected by Cookiebot) | `sha256-G4wLt0za6nHAbsgdWH3uNsJdlQxuBK2+0NgPRfODpCI=` |
 
 ### 3. CSP Directives
 
@@ -64,14 +66,14 @@ style-src 'self' 'unsafe-inline' https://fonts.googleapis.com
 font-src 'self' https://fonts.gstatic.com data:
   - Allow fonts from self, Google Fonts, and data URIs
 
-img-src 'self' data: https://github.com https://www.googletagmanager.com
-  - Allow images from self, data URIs, GitHub, GTM
+img-src 'self' data: https://github.com https://www.googletagmanager.com https://imgsct.cookiebot.com
+  - Allow images from self, data URIs, GitHub, GTM, Cookiebot tracking
 
 connect-src 'self' https://*.netlify.app https://www.google-analytics.com
   - Allow API calls to self, Netlify functions, Google Analytics
 
-frame-src 'self'
-  - Only allow iframes from same origin
+frame-src 'self' https://consentcdn.cookiebot.com
+  - Allow iframes from same origin and Cookiebot consent banner
 
 frame-ancestors 'none'
   - Prevent site from being embedded in iframes (clickjacking protection)
