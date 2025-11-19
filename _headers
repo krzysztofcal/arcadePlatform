@@ -13,5 +13,5 @@
   Referrer-Policy: strict-origin-when-cross-origin
 
   # Feature policy / Permissions policy
-  Permissions-Policy: clipboard-write=(self), geolocation=(), microphone=(), camera=(), payment=()
+  Permissions-Policy: geolocation=(), microphone=(), camera=(), payment=()
 
