@@ -18,14 +18,14 @@ const events = [
 
 function buildQuery(event) {
   const search = `${LISTENER}('${event}'`;
-  return `grep -nR "${search}" js games games-open play.html | grep -v js/xp.js`;
+  return `grep -nR "${search}" js games games-open play.html | grep -v js/xp/core.js`;
 }
 
 const [badPageShow, badPageHide, badUnload] = events.map(buildQuery).map(grep);
 
 if (badPageShow || badPageHide || badUnload) {
-  console.error('❌ Lifecycle listeners found outside js/xp.js:\n', badPageShow, badPageHide, badUnload);
+  console.error('❌ Lifecycle listeners found outside js/xp/core.js:\n', badPageShow, badPageHide, badUnload);
   process.exit(1);
 }
 
-console.log('✅ Lifecycle centralized in js/xp.js only.');
+console.log('✅ Lifecycle centralized in js/xp/core.js only.');

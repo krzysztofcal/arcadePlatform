@@ -22,6 +22,9 @@ const ignore = [
   "**/tests/**",
 ];
 
+const comboAsset = join(projectRoot, "js", "xp", "combo.js");
+const scoringAsset = join(projectRoot, "js", "xp", "scoring.js");
+const coreAsset = join(projectRoot, "js", "xp", "core.js");
 const xpAsset = join(projectRoot, "js", "xp.js");
 const hookAsset = join(projectRoot, "js", "xp-game-hook.js");
 
@@ -57,7 +60,7 @@ function detectIndent(beforeBody) {
 
 function removeExistingSnippets(content) {
   const xpPattern = new RegExp(
-    String.raw`[\t ]*<script[^>]+src=("|')([^"']*/)?xp(?:-game-hook)?\.js\1[^>]*><\/script>[\t ]*(?:\r?\n)?`,
+    String.raw`[\t ]*<script[^>]+src=("|')([^"']*/)?xp(?:-game-hook|\/combo|\/scoring|\/core)?\.js\1[^>]*><\/script>[\t ]*(?:\r?\n)?`,
     "gi"
   );
   const autoPattern = new RegExp(
@@ -78,11 +81,17 @@ function ensureSnippet(content, absPath, relPath) {
   const after = cleaned.slice(closingIndex);
   const indent = detectIndent(before);
   const dir = dirname(absPath);
+  const comboSrc = relativeAssetPath(dir, comboAsset);
+  const scoringSrc = relativeAssetPath(dir, scoringAsset);
+  const coreSrc = relativeAssetPath(dir, coreAsset);
   const xpSrc = relativeAssetPath(dir, xpAsset);
   const hookSrc = relativeAssetPath(dir, hookAsset);
   const leadingNewline = before.endsWith("\n") ? "" : "\n";
   const snippet =
-    `${leadingNewline}${indent}<script src="${xpSrc}" defer></script>` +
+    `${leadingNewline}${indent}<script src="${comboSrc}" defer></script>` +
+    `\n${indent}<script src="${scoringSrc}" defer></script>` +
+    `\n${indent}<script src="${coreSrc}" defer></script>` +
+    `\n${indent}<script src="${xpSrc}" defer></script>` +
     `\n${indent}<script src="${hookSrc}" defer></script>` +
     `\n${indent}<script>\n` +
     `${indent}  if (!window.__xpAutoBooted) {\n` +

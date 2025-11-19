@@ -48,7 +48,7 @@ if (!existsSync(cfgPath)) {
 }
 const cfg = JSON.parse(readFileSync(cfgPath, 'utf8'));
 const allowedFiles = new Set(
-  (cfg.lifecycle?.allowedFiles || ['js/xp.js']).map(f => f.split(path.sep).join('/'))
+  (cfg.lifecycle?.allowedFiles || ['js/xp/core.js']).map(f => f.split(path.sep).join('/'))
 );
 const waiverToken = cfg.lifecycle?.waiverToken || 'xp-lifecycle-allow';
 const strict = process.env.STRICT_GUARDS === '1';

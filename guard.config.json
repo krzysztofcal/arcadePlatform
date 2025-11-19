@@ -16,7 +16,10 @@
     ]
   },
   "lifecycle": {
-    "allowedFiles": ["js/xp.js", "js/ui/xp-overlay.js"],
+    "allowedFiles": [
+      "js/xp/core.js",
+      "js/ui/xp-overlay.js"
+    ],
     "waiverToken": "xp-lifecycle-allow"
   }
 }
