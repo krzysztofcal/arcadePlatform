@@ -13,7 +13,7 @@ This document describes the emergency security patches applied to address critic
 ### 1. CORS Wildcard Vulnerability (CRITICAL) ✅
 
 **File:** `netlify/functions/award-xp.mjs`
-**Lines:** 192-220, 244-256, 178-199
+**Lines:** 206-233, 244-256, 178-199
 
 **Problem:**
 - CORS headers defaulted to wildcard `"*"` when origin was not in whitelist
@@ -21,9 +21,19 @@ This document describes the emergency security patches applied to address critic
 - Enabled CSRF attacks and unauthorized access
 
 **Fix:**
-- Reject requests from non-whitelisted origins with HTTP 403
-- Return explicit error: `{ error: "forbidden", message: "origin_not_allowed" }`
+- **Reject cross-origin requests** from non-whitelisted origins with HTTP 403
+- **Allow same-origin requests** (no Origin header present)
+- Return explicit error for blocked origins: `{ error: "forbidden", message: "origin_not_allowed" }`
 - Applied to both OPTIONS preflight and POST requests
+
+**CORS Behavior:**
+According to CORS spec, the `Origin` header is only present for cross-origin requests:
+- **No Origin header:** Same-origin or local request → Allow
+- **Origin header present:** Cross-origin request → Enforce whitelist
+- **Origin in whitelist:** Allow with CORS headers
+- **Origin not in whitelist:** Reject with HTTP 403
+
+This correctly allows tests, same-origin requests, and local development while blocking unauthorized cross-origin access.
 
 **Configuration:**
 Set allowed origins via environment variable:
