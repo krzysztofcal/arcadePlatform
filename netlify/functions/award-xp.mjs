@@ -111,6 +111,11 @@ const CORS_ALLOW = (process.env.XP_CORS_ALLOW ?? "")
 const RAW_LOCK_TTL = Number(process.env.XP_LOCK_TTL_MS ?? 3_000);
 const LOCK_TTL_MS = Number.isFinite(RAW_LOCK_TTL) && RAW_LOCK_TTL >= 0 ? RAW_LOCK_TTL : 3_000;
 
+// SECURITY: Rate limiting configuration
+const RATE_LIMIT_PER_USER_PER_MIN = Math.max(0, asNumber(process.env.XP_RATE_LIMIT_USER_PER_MIN, 10));
+const RATE_LIMIT_PER_IP_PER_MIN = Math.max(0, asNumber(process.env.XP_RATE_LIMIT_IP_PER_MIN, 20));
+const RATE_LIMIT_ENABLED = process.env.XP_RATE_LIMIT_ENABLED !== "0"; // Default enabled
+
 const sanitizeTotal = (value) => Math.max(0, Math.floor(Number(value) || 0));
 
 const signPayload = (payload, secret) =>
@@ -176,7 +181,16 @@ const buildXpCookie = ({ key, total, secret, now, nextReset }) => {
 };
 
 const json = (statusCode, obj, origin, extraHeaders) => {
-  const headers = { ...corsHeaders(origin) };
+  const corsHeadersObj = corsHeaders(origin);
+  if (!corsHeadersObj) {
+    // SECURITY: Reject requests from non-whitelisted origins
+    return {
+      statusCode: 403,
+      headers: { "content-type": "application/json; charset=utf-8" },
+      body: JSON.stringify({ error: "forbidden", message: "origin_not_allowed" }),
+    };
+  }
+  const headers = { ...corsHeadersObj };
   if (extraHeaders && typeof extraHeaders === "object") {
     for (const [key, value] of Object.entries(extraHeaders)) {
       if (value !== undefined) headers[key] = value;
@@ -190,15 +204,18 @@ const json = (statusCode, obj, origin, extraHeaders) => {
 };
 
 function corsHeaders(origin) {
-  const allow = origin && CORS_ALLOW.includes(origin) ? origin : "*";
+  // SECURITY: Reject non-whitelisted origins instead of allowing wildcard
+  if (!origin || !CORS_ALLOW.includes(origin)) {
+    return null; // Signal rejection
+  }
   const headers = {
     "content-type": "application/json; charset=utf-8",
-    "access-control-allow-origin": allow,
+    "access-control-allow-origin": origin,
     "access-control-allow-headers": "content-type,authorization,x-api-key",
     "access-control-allow-methods": "POST,OPTIONS",
     "cache-control": "no-store",
+    "Vary": "Origin",
   };
-  if (allow !== "*") headers["Vary"] = "Origin";
   return headers;
 }
 
@@ -208,6 +225,101 @@ const keyTotal = (u) => `${KEY_NS}:total:${u}`;
 const keySession = (u, s) => `${KEY_NS}:session:${hash(`${u}|${s}`)}`;
 const keySessionSync = (u, s) => `${KEY_NS}:session:last:${hash(`${u}|${s}`)}`;
 const keyLock = (u, s) => `${KEY_NS}:lock:${hash(`${u}|${s}`)}`;
+const keyRateLimitUser = (userId) => `${KEY_NS}:ratelimit:user:${userId}:${Math.floor(Date.now() / 60000)}`;
+const keyRateLimitIp = (ip) => `${KEY_NS}:ratelimit:ip:${hash(ip)}:${Math.floor(Date.now() / 60000)}`;
+const keySessionRegistry = (userId, sessionId) => `${KEY_NS}:registry:${hash(`${userId}|${sessionId}`)}`;
+
+// SECURITY: Session registration
+async function registerSession({ userId, sessionId }) {
+  if (!userId || !sessionId) return { registered: false };
+  const key = keySessionRegistry(userId, sessionId);
+  try {
+    // Register session with 7 day TTL (same as session data)
+    const ttlSeconds = SESSION_TTL_SEC > 0 ? SESSION_TTL_SEC : 604800;
+    await store.setex(key, ttlSeconds, Date.now().toString());
+    return { registered: true };
+  } catch (err) {
+    console.error('[XP] Session registration failed:', err);
+    return { registered: false };
+  }
+}
+
+async function isSessionRegistered({ userId, sessionId }) {
+  if (!userId || !sessionId) return false;
+  const key = keySessionRegistry(userId, sessionId);
+  try {
+    const value = await store.get(key);
+    return value !== null;
+  } catch {
+    return false; // Fail open - don't block on Redis errors
+  }
+}
+
+// SECURITY: Rate limiting check
+async function checkRateLimit({ userId, ip }) {
+  if (!RATE_LIMIT_ENABLED) return { allowed: true };
+
+  const checks = [];
+
+  // Check userId rate limit
+  if (userId && RATE_LIMIT_PER_USER_PER_MIN > 0) {
+    const userKey = keyRateLimitUser(userId);
+    checks.push(
+      store.incrBy(userKey, 1)
+        .then(async (count) => {
+          if (count === 1) {
+            // Set expiry on first request in this minute window
+            await store.expire(userKey, 60);
+          }
+          return {
+            type: 'user',
+            count,
+            limit: RATE_LIMIT_PER_USER_PER_MIN,
+            exceeded: count > RATE_LIMIT_PER_USER_PER_MIN,
+          };
+        })
+        .catch(() => ({ type: 'user', count: 0, limit: RATE_LIMIT_PER_USER_PER_MIN, exceeded: false }))
+    );
+  }
+
+  // Check IP rate limit
+  if (ip && RATE_LIMIT_PER_IP_PER_MIN > 0) {
+    const ipKey = keyRateLimitIp(ip);
+    checks.push(
+      store.incrBy(ipKey, 1)
+        .then(async (count) => {
+          if (count === 1) {
+            await store.expire(ipKey, 60);
+          }
+          return {
+            type: 'ip',
+            count,
+            limit: RATE_LIMIT_PER_IP_PER_MIN,
+            exceeded: count > RATE_LIMIT_PER_IP_PER_MIN,
+          };
+        })
+        .catch(() => ({ type: 'ip', count: 0, limit: RATE_LIMIT_PER_IP_PER_MIN, exceeded: false }))
+    );
+  }
+
+  if (checks.length === 0) {
+    return { allowed: true };
+  }
+
+  const results = await Promise.all(checks);
+  const exceeded = results.find(r => r.exceeded);
+
+  if (exceeded) {
+    return {
+      allowed: false,
+      type: exceeded.type,
+      count: exceeded.count,
+      limit: exceeded.limit,
+    };
+  }
+
+  return { allowed: true, checks: results };
+}
 
 async function getTotals({ userId, sessionId, now = Date.now() }) {
   const todayKey = keyDaily(userId, getDailyKey(now));
@@ -231,7 +343,17 @@ async function getTotals({ userId, sessionId, now = Date.now() }) {
 
 export async function handler(event) {
   const origin = event.headers?.origin;
-  if (event.httpMethod === "OPTIONS") return { statusCode: 204, headers: corsHeaders(origin) };
+  if (event.httpMethod === "OPTIONS") {
+    const corsHeadersObj = corsHeaders(origin);
+    if (!corsHeadersObj) {
+      return {
+        statusCode: 403,
+        headers: { "content-type": "application/json; charset=utf-8" },
+        body: JSON.stringify({ error: "forbidden", message: "origin_not_allowed" }),
+      };
+    }
+    return { statusCode: 204, headers: corsHeadersObj };
+  }
 
   const secret = process.env.XP_DAILY_SECRET;
   if (!secret) {
@@ -321,6 +443,28 @@ export async function handler(event) {
   const sessionIdRaw = body.sessionId ?? querySessionId;
   const sessionId = typeof sessionIdRaw === "string" ? sessionIdRaw.trim() : null;
 
+  // SECURITY: Rate limiting check
+  const clientIp = event.headers?.["x-forwarded-for"]?.split(",")[0]?.trim()
+    || event.headers?.["x-real-ip"]
+    || "unknown";
+
+  const rateLimitResult = await checkRateLimit({ userId, ip: clientIp });
+  if (!rateLimitResult.allowed) {
+    const payload = {
+      error: "rate_limit_exceeded",
+      message: `Too many requests from ${rateLimitResult.type}`,
+      retryAfter: 60,
+    };
+    if (DEBUG_ENABLED) {
+      payload.debug = {
+        rateLimitType: rateLimitResult.type,
+        count: rateLimitResult.count,
+        limit: rateLimitResult.limit,
+      };
+    }
+    return json(429, payload, origin, { "Retry-After": "60" });
+  }
+
   let totalsPromise = null;
   const fetchTotals = async () => {
     if (!userId) return { current: cookieTotal, lifetime: 0, sessionTotal: 0, lastSync: 0 };
@@ -362,6 +506,9 @@ export async function handler(event) {
   }
 
   if (body.statusOnly) {
+    // SECURITY: Auto-register session when status is requested (session start)
+    await registerSession({ userId, sessionId });
+
     const totals = await fetchTotals();
     const payload = {
       ok: true,
@@ -396,6 +543,23 @@ export async function handler(event) {
   if (normalizedDelta > DELTA_CAP) {
     const totals = await fetchTotals();
     return respond(422, { error: "delta_out_of_range", cap: DELTA_CAP, capDelta: DELTA_CAP }, { totals });
+  }
+
+  // SECURITY: Session validation - register session if delta=0 (session start), validate if delta>0
+  if (normalizedDelta === 0) {
+    // Auto-register session on first request (delta=0 is session initialization)
+    await registerSession({ userId, sessionId });
+  } else if (normalizedDelta > 0) {
+    // Validate session is registered before accepting XP deltas
+    const registered = await isSessionRegistered({ userId, sessionId });
+    if (!registered) {
+      // Auto-register on first XP-bearing request for backward compatibility
+      // In a future version, this could be enforced by rejecting unregistered sessions
+      await registerSession({ userId, sessionId });
+      if (DEBUG_ENABLED) {
+        console.log('[XP] Auto-registered unregistered session:', { userId, sessionId: sessionId.substring(0, 8) });
+      }
+    }
   }
 
   const tsRaw = Number(body.ts ?? body.timestamp ?? body.windowEnd ?? now);

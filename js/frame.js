@@ -507,12 +507,26 @@ function showEmptyState(titleText, message, options){
   if (metaEl) metaEl.textContent = text;
   if (frameWrap) frameWrap.classList.add('empty');
   if (frameBox){
-    let inner = '<div class="emptyState"><p>' + text + '</p>';
+    // SECURITY: Use safe DOM manipulation instead of innerHTML to prevent XSS
+    frameBox.innerHTML = '';
+    const emptyStateDiv = document.createElement('div');
+    emptyStateDiv.className = 'emptyState';
+
+    const textPara = document.createElement('p');
+    textPara.textContent = text; // Safe - no HTML interpretation
+    emptyStateDiv.appendChild(textPara);
+
     if (linkHref){
-      inner += '<p><a class="emptyStateLink" href="' + linkHref + '">' + linkLabel + '</a></p>';
+      const linkPara = document.createElement('p');
+      const link = document.createElement('a');
+      link.className = 'emptyStateLink';
+      link.href = linkHref;
+      link.textContent = linkLabel; // Safe - no HTML interpretation
+      linkPara.appendChild(link);
+      emptyStateDiv.appendChild(linkPara);
     }
-    inner += '</div>';
-    frameBox.innerHTML = inner;
+
+    frameBox.appendChild(emptyStateDiv);
   }
   if (consentOverlay) consentOverlay.classList.add('hidden');
   if (rotateOverlay) rotateOverlay.classList.add('hidden');
