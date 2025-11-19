@@ -22,18 +22,21 @@ This document describes the emergency security patches applied to address critic
 
 **Fix:**
 - **Reject cross-origin requests** from non-whitelisted origins with HTTP 403
+- **Validation happens BEFORE any side effects** (rate limiting, session registration, XP awarding)
 - **Allow same-origin requests** (no Origin header present)
 - Return explicit error for blocked origins: `{ error: "forbidden", message: "origin_not_allowed" }`
 - Applied to both OPTIONS preflight and POST requests
+- **Defense in depth:** Dual validation at handler entry + response generation
 
 **CORS Behavior:**
 According to CORS spec, the `Origin` header is only present for cross-origin requests:
 - **No Origin header:** Same-origin or local request → Allow
 - **Origin header present:** Cross-origin request → Enforce whitelist
 - **Origin in whitelist:** Allow with CORS headers
-- **Origin not in whitelist:** Reject with HTTP 403
+- **Origin not in whitelist:** Reject with HTTP 403 **immediately before any mutations**
 
-This correctly allows tests, same-origin requests, and local development while blocking unauthorized cross-origin access.
+**Critical Security Fix:**
+Initial implementation validated CORS only when generating responses, allowing blocked origins to trigger rate limiting, session registration, and XP awarding before receiving 403. Now CORS validation is the **first check** in the handler, preventing all side effects for blocked origins.
 
 **Configuration:**
 Set allowed origins via environment variable:

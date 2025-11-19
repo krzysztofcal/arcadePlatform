@@ -356,8 +356,24 @@ async function getTotals({ userId, sessionId, now = Date.now() }) {
 
 export async function handler(event) {
   const origin = event.headers?.origin;
+
+  // SECURITY: Validate CORS BEFORE any side effects (rate limiting, session registration, XP awarding)
+  // Check if this is a cross-origin request (has Origin header) from a non-whitelisted origin
+  if (origin && CORS_ALLOW.length > 0 && !CORS_ALLOW.includes(origin)) {
+    // Reject immediately before any mutations
+    return {
+      statusCode: 403,
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+        "cache-control": "no-store",
+      },
+      body: JSON.stringify({ error: "forbidden", message: "origin_not_allowed" }),
+    };
+  }
+
   if (event.httpMethod === "OPTIONS") {
     const corsHeadersObj = corsHeaders(origin);
+    // This should never be null now due to check above, but keep for safety
     if (!corsHeadersObj) {
       return {
         statusCode: 403,
