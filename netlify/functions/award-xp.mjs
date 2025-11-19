@@ -204,18 +204,31 @@ const json = (statusCode, obj, origin, extraHeaders) => {
 };
 
 function corsHeaders(origin) {
-  // SECURITY: Reject non-whitelisted origins instead of allowing wildcard
-  if (!origin || !CORS_ALLOW.includes(origin)) {
-    return null; // Signal rejection
-  }
+  // SECURITY: CORS validation for cross-origin requests
+  // Note: Origin header is only present for cross-origin requests
+  // Same-origin and local requests don't have Origin header - allow those
+
   const headers = {
     "content-type": "application/json; charset=utf-8",
-    "access-control-allow-origin": origin,
-    "access-control-allow-headers": "content-type,authorization,x-api-key",
-    "access-control-allow-methods": "POST,OPTIONS",
     "cache-control": "no-store",
-    "Vary": "Origin",
   };
+
+  // If there's no Origin header, it's same-origin/local - allow it
+  if (!origin) {
+    return headers;
+  }
+
+  // If there IS an Origin header, enforce whitelist
+  if (CORS_ALLOW.length > 0 && !CORS_ALLOW.includes(origin)) {
+    return null; // Signal rejection for non-whitelisted origins
+  }
+
+  // Origin is whitelisted (or no whitelist configured) - add CORS headers
+  headers["access-control-allow-origin"] = origin;
+  headers["access-control-allow-headers"] = "content-type,authorization,x-api-key";
+  headers["access-control-allow-methods"] = "POST,OPTIONS";
+  headers["Vary"] = "Origin";
+
   return headers;
 }
 
