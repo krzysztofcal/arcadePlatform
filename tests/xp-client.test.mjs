@@ -7,16 +7,19 @@ import path from 'node:path';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const xpSource = await readFile(path.join(__dirname, '..', 'js', 'xp.js'), 'utf8');
-const injectionTarget = '})(typeof window !== "undefined" ? window : this, typeof document !== "undefined" ? document : undefined);';
-if (!xpSource.includes(injectionTarget)) {
-  throw new Error('xp.js format mismatch');
+const comboSource = await readFile(path.join(__dirname, '..', 'js', 'xp', 'combo.js'), 'utf8');
+const scoringSource = await readFile(path.join(__dirname, '..', 'js', 'xp', 'scoring.js'), 'utf8');
+const xpCoreSource = await readFile(path.join(__dirname, '..', 'js', 'xp', 'core.js'), 'utf8');
+const xpShellSource = await readFile(path.join(__dirname, '..', 'js', 'xp.js'), 'utf8');
+const hookMarker = '  } catch (_) {}\n}';
+const hookIndex = xpCoreSource.lastIndexOf(hookMarker);
+if (hookIndex === -1) {
+  throw new Error('xp core format mismatch');
 }
-const instrumented = xpSource.replace(
-  injectionTarget,
-  '  if (window && !window.__xpTestHook) { window.__xpTestHook = () => state; }\n' +
-    injectionTarget
-);
+const hookPrefix = xpCoreSource.slice(0, hookIndex);
+const hookSuffix = xpCoreSource.slice(hookIndex + hookMarker.length);
+const hookSnippet = '  } catch (_) {}\n  if (window && !window.__xpTestHook) { window.__xpTestHook = () => state; }\n}';
+const instrumentedCore = `${hookPrefix}${hookSnippet}${hookSuffix}`;
 
 const xpHookSource = await readFile(path.join(__dirname, '..', 'js', 'xp-game-hook.js'), 'utf8');
 const xpOverlaySource = await readFile(path.join(__dirname, '..', 'js', 'ui', 'xp-overlay.js'), 'utf8');
@@ -329,9 +332,17 @@ localStorageMock.setItem(CACHE_KEY, JSON.stringify({
 }));
 
 vm.createContext(context);
-new vm.Script(instrumented, { filename: 'xp.js' }).runInContext(context);
-new vm.Script(xpHookSource, { filename: 'xp-game-hook.js' }).runInContext(context);
-new vm.Script(xpOverlaySource, { filename: 'xp-overlay.js' }).runInContext(context);
+const bootScripts = [
+  { code: comboSource, name: 'xp/combo.js' },
+  { code: scoringSource, name: 'xp/scoring.js' },
+  { code: instrumentedCore, name: 'xp/core.js' },
+  { code: xpShellSource, name: 'xp.js' },
+  { code: xpHookSource, name: 'xp-game-hook.js' },
+  { code: xpOverlaySource, name: 'xp-overlay.js' },
+];
+for (const entry of bootScripts) {
+  new vm.Script(entry.code, { filename: entry.name }).runInContext(context);
+}
 
 const XP = context.window.XP;
 assert(XP, 'XP API not initialized');

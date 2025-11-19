@@ -122,9 +122,15 @@ async function analyzeFile(relPath) {
   const source = stripHtmlComments(raw);
 
   const xpScriptPattern = /<script\b[^>]*\bsrc\s*=\s*("|')[^"']*xp\.js(?:\?[^"']*)?\1[^>]*>\s*<\/script>/gi;
+  const comboScriptPattern = /<script\b[^>]*\bsrc\s*=\s*("|')[^"']*xp\/combo\.js(?:\?[^"']*)?\1[^>]*>\s*<\/script>/gi;
+  const scoringScriptPattern = /<script\b[^>]*\bsrc\s*=\s*("|')[^"']*xp\/scoring\.js(?:\?[^"']*)?\1[^>]*>\s*<\/script>/gi;
+  const coreScriptPattern = /<script\b[^>]*\bsrc\s*=\s*("|')[^"']*xp\/core\.js(?:\?[^"']*)?\1[^>]*>\s*<\/script>/gi;
   const hookScriptPattern = /<script\b[^>]*\bsrc\s*=\s*("|')[^"']*xp-game-hook\.js(?:\?[^"']*)?\1[^>]*>\s*<\/script>/gi;
 
   const xpScripts = countScriptTags(xpScriptPattern, source);
+  const comboScripts = countScriptTags(comboScriptPattern, source);
+  const scoringScripts = countScriptTags(scoringScriptPattern, source);
+  const coreScripts = countScriptTags(coreScriptPattern, source);
   const hookScripts = countScriptTags(hookScriptPattern, source);
   const inlineScripts = countInlineBridgeScripts(source);
   const bodyMatch = source.match(/<body\b[^>]*>/i);
@@ -134,6 +140,24 @@ async function analyzeFile(relPath) {
     issues.push("missing xp.js script tag");
   } else if (xpScripts > 1) {
     issues.push(`found ${xpScripts} xp.js script tags`);
+  }
+
+  if (comboScripts === 0) {
+    issues.push("missing xp/combo.js script tag");
+  } else if (comboScripts > 1) {
+    issues.push(`found ${comboScripts} xp/combo.js script tags`);
+  }
+
+  if (scoringScripts === 0) {
+    issues.push("missing xp/scoring.js script tag");
+  } else if (scoringScripts > 1) {
+    issues.push(`found ${scoringScripts} xp/scoring.js script tags`);
+  }
+
+  if (coreScripts === 0) {
+    issues.push("missing xp/core.js script tag");
+  } else if (coreScripts > 1) {
+    issues.push(`found ${coreScripts} xp/core.js script tags`);
   }
 
   if (hookScripts === 0) {

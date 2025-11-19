@@ -9,17 +9,20 @@ const __dirname = path.dirname(__filename);
 const repoRoot = path.join(__dirname, '..', '..');
 
 const hookSource = await readFile(path.join(repoRoot, 'js', 'xp-game-hook.js'), 'utf8');
-const xpSource = await readFile(path.join(repoRoot, 'js', 'xp.js'), 'utf8');
+const comboSource = await readFile(path.join(repoRoot, 'js', 'xp', 'combo.js'), 'utf8');
+const scoringSource = await readFile(path.join(repoRoot, 'js', 'xp', 'scoring.js'), 'utf8');
+const xpCoreSource = await readFile(path.join(repoRoot, 'js', 'xp', 'core.js'), 'utf8');
+const xpShellSource = await readFile(path.join(repoRoot, 'js', 'xp.js'), 'utf8');
 
-const injectionTarget = '})(typeof window !== "undefined" ? window : this, typeof document !== "undefined" ? document : undefined);';
-if (!xpSource.includes(injectionTarget)) {
-  throw new Error('xp.js format mismatch');
+const hookMarker = '  } catch (_) {}\n}';
+const hookIndex = xpCoreSource.lastIndexOf(hookMarker);
+if (hookIndex === -1) {
+  throw new Error('xp core format mismatch');
 }
-
-const instrumentedXp = xpSource.replace(
-  injectionTarget,
-  '  if (window && !window.__xpTestHook) { window.__xpTestHook = () => state; }\n' + injectionTarget,
-);
+const hookPrefix = xpCoreSource.slice(0, hookIndex);
+const hookSuffix = xpCoreSource.slice(hookIndex + hookMarker.length);
+const hookSnippet = '  } catch (_) {}\n  if (window && !window.__xpTestHook) { window.__xpTestHook = () => state; }\n}';
+const instrumentedCore = `${hookPrefix}${hookSnippet}${hookSuffix}`;
 
 function createListenerMap() {
   return new Map();
@@ -238,7 +241,15 @@ export function createEnvironment(options = {}) {
 
   function installXp() {
     if (!context.window.XP) {
-      new vm.Script(instrumentedXp, { filename: 'xp.js' }).runInContext(context);
+      const scripts = [
+        { code: comboSource, name: 'xp/combo.js' },
+        { code: scoringSource, name: 'xp/scoring.js' },
+        { code: instrumentedCore, name: 'xp/core.js' },
+        { code: xpShellSource, name: 'xp.js' },
+      ];
+      for (const entry of scripts) {
+        new vm.Script(entry.code, { filename: entry.name }).runInContext(context);
+      }
     }
     const XP = context.window.XP;
     const getState = context.window.__xpTestHook;

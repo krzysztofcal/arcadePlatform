@@ -77,7 +77,13 @@ async function runXpWithDom({ hasHostAttr = false, slug = "", visibilityState = 
   sandbox.window.window = windowObj;
 
   vm.createContext(sandbox);
+  const comboSrc = await fs.readFile(new URL("../js/xp/combo.js", import.meta.url), "utf8");
+  const scoringSrc = await fs.readFile(new URL("../js/xp/scoring.js", import.meta.url), "utf8");
+  const coreSrc = await fs.readFile(new URL("../js/xp/core.js", import.meta.url), "utf8");
   const src = await fs.readFile(new URL("../js/xp.js", import.meta.url), "utf8");
+  vm.runInContext(comboSrc, sandbox, { filename: "xp/combo.js" });
+  vm.runInContext(scoringSrc, sandbox, { filename: "xp/scoring.js" });
+  vm.runInContext(coreSrc, sandbox, { filename: "xp/core.js" });
   vm.runInContext(src, sandbox, { filename: "xp.js" });
 
   return calls;

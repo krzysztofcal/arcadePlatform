@@ -10,6 +10,9 @@ test.beforeEach(async ({ page }) => {
 
   // Inject the real scripts as init scripts (run before any page scripts)
   try { await page.addInitScript({ content: fs.readFileSync(path.join(process.cwd(), 'js/xpClient.js'), 'utf8') }); } catch {}
+  try { await page.addInitScript({ content: fs.readFileSync(path.join(process.cwd(), 'js/xp/combo.js'), 'utf8') }); } catch {}
+  try { await page.addInitScript({ content: fs.readFileSync(path.join(process.cwd(), 'js/xp/scoring.js'), 'utf8') }); } catch {}
+  try { await page.addInitScript({ content: fs.readFileSync(path.join(process.cwd(), 'js/xp/core.js'), 'utf8') }); } catch {}
   try { await page.addInitScript({ content: fs.readFileSync(path.join(process.cwd(), 'js/xp.js'),       'utf8') }); } catch {}
 
   // Fallback stub ONLY if XP still isn’t present at runtime.
