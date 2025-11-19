@@ -53,8 +53,8 @@ Generated SHA-256 hashes for all inline scripts to allow them under strict CSP:
 default-src 'self'
   - Only allow resources from same origin by default
 
-script-src 'self' https://consent.cookiebot.com https://www.googletagmanager.com https://github.com [hashes]
-  - Allow scripts from self, Cookiebot, Google Tag Manager, GitHub
+script-src 'self' https://consent.cookiebot.com https://consentcdn.cookiebot.com https://www.googletagmanager.com https://github.com [hashes]
+  - Allow scripts from self, Cookiebot (consent + CDN), Google Tag Manager, GitHub
   - Allow inline scripts only with matching SHA-256 hashes
 
 style-src 'self' 'unsafe-inline' https://fonts.googleapis.com
