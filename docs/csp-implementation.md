@@ -39,6 +39,7 @@ Generated SHA-256 hashes for all inline scripts to allow them under strict CSP:
 | Game loader | play.html:48-186 | `sha256-BXGXBorW8mlhTPKDCok0aiBZOGWyKJ9NLbeCp3LDYBU=` |
 | Message listener | play.html:189-204 | `sha256-abjvafYxRJPluYN0Kq7u5j4wpFnn454sy6KWSsP+FPA=` |
 | Debug/admin unlock | about.en.html, about.pl.html:45-188 | `sha256-YCvyYCnuX5SrGntgepIszM19NUEVt76UAEw52WlkgFA=` |
+| Score reporter | games-open/*/index.html:146-183 | `sha256-WBJmvETfJ9Uee95uGRCNEgHtCwjtF16eMdYINNpRbsc=` |
 
 ### 3. CSP Directives
 
