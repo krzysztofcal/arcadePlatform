@@ -1,3 +1,17 @@
 /*
-  Permissions-Policy: clipboard-write=(self)
+  # Content Security Policy
+  # Protects against XSS, clickjacking, and other code injection attacks
+  Content-Security-Policy: default-src 'self'; script-src 'self' https://consent.cookiebot.com https://www.googletagmanager.com https://github.com 'sha256-RxjC9yYMCxrDvdV2MRVGu3psi/rGesk5yo+xz8t0mTg=' 'sha256-b9iJTOPg44XsNt2+bPEvkfGsFVqaumQri2/zrB5sA2o=' 'sha256-r2Com2yfQQJausYYBQrPxaAWCcsnq/DeXka9Een02Es=' 'sha256-7DqW5VpwTmlMgcPXCGjl28RbTrTtFBRbVNjzoXcX2ko=' 'sha256-Oqt8ODQWKmLkPiB2r9xrcowu+l+WYwZHfUCf9sDFFzs=' 'sha256-SWcqpLVOMnXcdN/VcUKPlxZykeV9QrkVNrvQUD6SZJk=' 'sha256-AO9B7DMlmWxTtLbca1rsS5u3qc7ZYy2nDO8OZbmZIU0='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: https://github.com https://www.googletagmanager.com; connect-src 'self' https://*.netlify.app https://www.google-analytics.com; frame-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests
+
+  # Prevent clickjacking attacks
+  X-Frame-Options: DENY
+
+  # Prevent MIME type sniffing
+  X-Content-Type-Options: nosniff
+
+  # Control referrer information
+  Referrer-Policy: strict-origin-when-cross-origin
+
+  # Feature policy / Permissions policy
+  Permissions-Policy: clipboard-write=(self), geolocation=(), microphone=(), camera=(), payment=(), usb=()
 
