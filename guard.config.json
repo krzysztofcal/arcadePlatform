@@ -17,10 +17,7 @@
   },
   "lifecycle": {
     "allowedFiles": [
-      "js/xp/combo.js",
-      "js/xp/scoring.js",
       "js/xp/core.js",
-      "js/xp.js",
       "js/ui/xp-overlay.js"
     ],
     "waiverToken": "xp-lifecycle-allow"
