@@ -48,6 +48,7 @@ Generated SHA-256 hashes for all inline scripts to allow them under strict CSP:
 | XP autoboot (alt) | game.html, game_trex.html, game_cats.html | `sha256-HcEv6hsWQ+FJOehazeZ8pCh/Ygrqocog7DSLvEEY9Cg=` |
 | Cookiebot dynamic 1 | Dynamic (injected by Cookiebot) | `sha256-/xMvUPI31ylnPKXTCl4AkOXA4sQahPIEP/rLBk0MYQ4=` |
 | Cookiebot dynamic 2 | Dynamic (injected by Cookiebot) | `sha256-G4wLt0za6nHAbsgdWH3uNsJdlQxuBK2+0NgPRfODpCI=` |
+| Cookiebot dynamic 3 | Dynamic (injected by Cookiebot) | `sha256-rheNw0W7/WnghVoEDZSojC48OVSe5vRhWzdVfHTHCv0=` |
 
 ### 3. CSP Directives
 
@@ -72,8 +73,8 @@ img-src 'self' data: https://github.com https://www.googletagmanager.com https:/
 connect-src 'self' https://*.netlify.app https://www.google-analytics.com
   - Allow API calls to self, Netlify functions, Google Analytics
 
-frame-src 'self' https://consentcdn.cookiebot.com
-  - Allow iframes from same origin and Cookiebot consent banner
+frame-src 'self' https://consentcdn.cookiebot.com https://app.netlify.com
+  - Allow iframes from same origin, Cookiebot consent banner, and Netlify preview bar
 
 frame-ancestors 'none'
   - Prevent site from being embedded in iframes (clickjacking protection)
