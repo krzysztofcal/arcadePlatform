@@ -69,7 +69,7 @@ test.describe('E2E Security Tests', () => {
 
       expect(response.status()).toBe(403);
       const text = await response.text();
-      expect(text).toContain('Origin not allowed');
+      expect(text).toContain('origin_not_allowed');
     });
 
     test('should allow localhost origin in development', async ({ request }) => {
