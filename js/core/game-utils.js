@@ -24,30 +24,6 @@
     }
   }
 
-  function isSafeRedirectUrl(url, baseUrl){
-    // Explicit whitelist of allowed hostnames for redirects
-    const allowedHosts = [
-      'play.kcswh.pl',
-      'localhost',
-      '127.0.0.1'
-    ];
-
-    try {
-      const parsed = new URL(url, baseUrl);
-
-      // Must be HTTPS in production (or HTTP for localhost)
-      const isLocalhost = ['localhost', '127.0.0.1'].includes(parsed.hostname);
-      const validProtocol = parsed.protocol === 'https:' || (isLocalhost && parsed.protocol === 'http:');
-
-      if (!validProtocol) return false;
-      if (!allowedHosts.includes(parsed.hostname)) return false;
-
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
   function sanitizeSelfPage(page, baseHref){
     if (!isNonEmptyString(page)) return null;
     const base = resolveBase(baseHref);
@@ -59,11 +35,8 @@
       // Protocol validation
       if (!['http:', 'https:'].includes(url.protocol)) return null;
 
-      // Same-origin validation
+      // Same-origin validation (sufficient protection against open redirects)
       if (expectedOrigin && url.origin !== expectedOrigin) return null;
-
-      // Additional whitelist validation for redirects
-      if (!isSafeRedirectUrl(url.href, referenceHref)) return null;
 
       return url;
     } catch (err) {

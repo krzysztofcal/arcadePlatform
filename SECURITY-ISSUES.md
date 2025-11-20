@@ -3,7 +3,8 @@
 **Date:** 2025-11-20 (Updated)
 **Audit Reference:** PR #108 identified 7 critical, 4 high, 5 medium severity issues
 **Fixed (Initial):** 4 issues (CORS, Rate Limiting, Session Validation, XSS in frame.js)
-**Fixed (2025-11-20):** 5 additional issues (XSS in games, Cookie Secure flag, Redirect validation, CSP headers, SRI documentation)
+**Fixed (2025-11-20):** 4 additional issues (XSS in games, Cookie Secure flag, CSP headers, SRI documentation)
+**Verified Secure:** 1 issue (Open redirect validation - already protected by same-origin check)
 **Remaining:** 0 critical, 3 high, 3 medium
 
 ---
@@ -30,11 +31,11 @@
 - **Fix:** Changed from opt-in to opt-out - defaults to Secure in production
 - **Result:** Session cookies now protected from HTTP interception by default
 
-### ✅ HIGH #5: Open Redirect Validation (COMPLETED)
-- **Status:** Enhanced with explicit hostname whitelist
-- **File:** `js/core/game-utils.js:27-72`
-- **Fix:** Added `isSafeRedirectUrl()` with whitelist validation
-- **Result:** Redirects restricted to whitelisted domains (play.kcswh.pl, localhost)
+### ✅ HIGH #5: Open Redirect Validation (VERIFIED SECURE)
+- **Status:** Same-origin validation already implemented and sufficient
+- **File:** `js/core/game-utils.js:27-44`
+- **Fix:** Confirmed existing same-origin check prevents open redirects
+- **Result:** Redirects restricted to same origin only (protocol + domain + port)
 
 ### ✅ MEDIUM #10: Subresource Integrity (SRI) (DOCUMENTED)
 - **Status:** Documented limitation
@@ -311,51 +312,45 @@ function calculateXPForEvent(gameId, eventType, data) {
 
 ---
 
-### ✅ HIGH #5: Open Redirect Validation (FIXED)
+### ✅ HIGH #5: Open Redirect Validation (VERIFIED SECURE)
 
-**File:** `js/core/game-utils.js:27-72` ✅
+**File:** `js/core/game-utils.js:27-44` ✅
 **Risk:** Phishing attacks via malicious redirects
 **Impact:** Users redirected to attacker-controlled sites
-**Status:** COMPLETED 2025-11-20 - Enhanced with explicit whitelist
+**Status:** VERIFIED 2025-11-20 - Same-origin check already prevents open redirects
 
-**Vulnerable Code:**
+**Analysis:**
+The existing `sanitizeSelfPage()` function already provides sufficient protection:
+
 ```javascript
-location.replace(safeUrl.toString());
-```
+function sanitizeSelfPage(page, baseHref){
+  const expectedOrigin = base ? base.origin : null;
+  const url = new URL(page, referenceHref);
 
-**Issue:** `safeUrl` validation may be insufficient
+  // Protocol validation
+  if (!['http:', 'https:'].includes(url.protocol)) return null;
 
-**Secure Fix:**
-```javascript
-function isSafeRedirectUrl(url, baseUrl = location.origin) {
-  try {
-    const parsed = new URL(url, baseUrl);
+  // Same-origin validation (prevents open redirects)
+  if (expectedOrigin && url.origin !== expectedOrigin) return null;
 
-    // Whitelist of allowed hostnames
-    const allowedHosts = [
-      'play.kcswh.pl',
-      'localhost',
-      '127.0.0.1'
-    ];
-
-    // Must be HTTPS in production (or HTTP for localhost)
-    const isLocalhost = ['localhost', '127.0.0.1'].includes(parsed.hostname);
-    const validProtocol = parsed.protocol === 'https:' || (isLocalhost && parsed.protocol === 'http:');
-
-    return allowedHosts.includes(parsed.hostname) && validProtocol;
-  } catch {
-    return false;
-  }
-}
-
-// Usage
-if (isSafeRedirectUrl(targetUrl)) {
-  location.replace(targetUrl);
-} else {
-  console.error('Unsafe redirect blocked:', targetUrl);
-  location.replace('/'); // Fallback to home
+  return url;
 }
 ```
+
+**Why this is secure:**
+- Origin includes protocol + domain + port (e.g., `https://play.kcswh.pl:443`)
+- Redirects to different origins (like `https://evil.com`) are blocked
+- Works in all environments (localhost, dev, production) without hardcoded whitelist
+- Any attempt to redirect to external site fails the origin check
+
+**Attempted enhancement (removed due to issues):**
+Initially attempted to add explicit hostname whitelist, but this broke legitimate navigation:
+- Didn't work with different ports (localhost:8888)
+- Didn't work with Netlify dev environments
+- Was redundant with existing same-origin check
+
+**Conclusion:**
+No code changes needed. Existing same-origin validation provides sufficient protection against open redirect attacks while maintaining functionality across all environments.
 
 ---
 
