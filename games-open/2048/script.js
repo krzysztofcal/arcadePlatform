@@ -169,7 +169,26 @@ function showOverlay(title, subtitle) {
   removeOverlay();
   overlayEl = document.createElement("div");
   overlayEl.className = "overlay-banner";
-  overlayEl.innerHTML = `<div><div>${title}</div><div style="font-size:1rem; margin-top:0.5rem; color: rgba(203,213,255,0.75);">${subtitle}</div></div>`;
+
+  // Create container
+  const container = document.createElement("div");
+
+  // Create title element
+  const titleDiv = document.createElement('div');
+  titleDiv.textContent = title; // Safe - no HTML interpretation
+  container.appendChild(titleDiv);
+
+  // Create subtitle element
+  if (subtitle) {
+    const subtitleDiv = document.createElement('div');
+    subtitleDiv.style.fontSize = '1rem';
+    subtitleDiv.style.marginTop = '0.5rem';
+    subtitleDiv.style.color = 'rgba(203,213,255,0.75)';
+    subtitleDiv.textContent = subtitle; // Safe - no HTML interpretation
+    container.appendChild(subtitleDiv);
+  }
+
+  overlayEl.appendChild(container);
   boardEl.appendChild(overlayEl);
 }
 

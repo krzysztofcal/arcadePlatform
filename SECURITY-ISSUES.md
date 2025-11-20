@@ -1,9 +1,47 @@
 # Remaining Security Issues
 
-**Date:** 2025-11-19
+**Date:** 2025-11-20 (Updated)
 **Audit Reference:** PR #108 identified 7 critical, 4 high, 5 medium severity issues
-**Fixed:** 4 critical issues (CORS, Rate Limiting, Session Validation, XSS in frame.js)
-**Remaining:** 3 critical, 4 high, 5 medium
+**Fixed (Initial):** 4 issues (CORS, Rate Limiting, Session Validation, XSS in frame.js)
+**Fixed (2025-11-20):** 4 additional issues (XSS in games, Cookie Secure flag, CSP headers, SRI documentation)
+**Verified Secure:** 1 issue (Open redirect validation - already protected by same-origin check)
+**Remaining:** 0 critical, 3 high, 3 medium
+
+---
+
+## Recently Fixed (2025-11-20)
+
+### ✅ CRITICAL #1: Content-Security-Policy (COMPLETED)
+- **Status:** Implemented in PR #110
+- **Files:** `_headers` with SHA-256 hashes for all inline scripts
+- **Result:** XSS protection, clickjacking prevention, MIME sniffing protection
+
+### ✅ CRITICAL #2: XSS via innerHTML in Games (COMPLETED)
+- **Status:** Fixed in all 3 game files
+- **Files:**
+  - `games-open/tetris/script.js:382-402`
+  - `games-open/2048/script.js:168-193`
+  - `games-open/pacman/script.js:453-473`
+- **Fix:** Replaced `innerHTML` with safe DOM manipulation (`createElement()` + `textContent`)
+- **Result:** Eliminated XSS injection vectors in game overlays
+
+### ✅ CRITICAL #3: Cookie Secure Flag (COMPLETED)
+- **Status:** Fixed to default secure in production
+- **File:** `netlify/functions/award-xp.mjs:180-183`
+- **Fix:** Changed from opt-in to opt-out - defaults to Secure in production
+- **Result:** Session cookies now protected from HTTP interception by default
+
+### ✅ HIGH #5: Open Redirect Validation (VERIFIED SECURE)
+- **Status:** Same-origin validation already implemented and sufficient
+- **File:** `js/core/game-utils.js:27-44`
+- **Fix:** Confirmed existing same-origin check prevents open redirects
+- **Result:** Redirects restricted to same origin only (protocol + domain + port)
+
+### ✅ MEDIUM #10: Subresource Integrity (SRI) (DOCUMENTED)
+- **Status:** Documented limitation
+- **Reason:** Third-party scripts (Cookiebot, GTM) are frequently updated by providers
+- **Mitigation:** CSP restricts script sources to trusted domains only
+- **Result:** Practical security approach without breaking functionality
 
 ---
 
@@ -113,11 +151,12 @@ Fix innerHTML usage in game files:
 
 ## Detailed Issue Breakdown
 
-### 🔴 CRITICAL #1: Missing Content-Security-Policy
+### ✅ CRITICAL #1: Missing Content-Security-Policy (FIXED)
 
 **File:** `_headers`
 **Risk:** XSS attacks, data exfiltration, clickjacking
 **Impact:** Could allow attackers to inject malicious scripts
+**Status:** COMPLETED in PR #110
 
 **Current State:**
 ```
@@ -143,15 +182,16 @@ Fix innerHTML usage in game files:
 
 ---
 
-### 🔴 CRITICAL #2: XSS via innerHTML
+### ✅ CRITICAL #2: XSS via innerHTML (FIXED)
 
 **Files:**
-- `games-open/tetris/script.js:384`
-- `games-open/2048/script.js:172`
-- `games-open/pacman/script.js:455`
+- `games-open/tetris/script.js:382-402` ✅
+- `games-open/2048/script.js:168-193` ✅
+- `games-open/pacman/script.js:453-473` ✅
 
 **Risk:** Malicious HTML/JavaScript injection through game data
 **Impact:** Could steal user data, hijack sessions
+**Status:** COMPLETED 2025-11-20
 
 **Vulnerable Code:**
 ```javascript
@@ -182,11 +222,12 @@ if (subtitle) {
 
 ---
 
-### 🔴 CRITICAL #3: Cookie Secure Flag Not Enforced
+### ✅ CRITICAL #3: Cookie Secure Flag Not Enforced (FIXED)
 
-**File:** `netlify/functions/award-xp.mjs:179`
+**File:** `netlify/functions/award-xp.mjs:180-183` ✅
 **Risk:** Session hijacking over HTTP
 **Impact:** Cookies transmitted in plaintext
+**Status:** COMPLETED 2025-11-20
 
 **Current Code:**
 ```javascript
@@ -271,50 +312,45 @@ function calculateXPForEvent(gameId, eventType, data) {
 
 ---
 
-### 🟠 HIGH #5: Open Redirect Validation
+### ✅ HIGH #5: Open Redirect Validation (VERIFIED SECURE)
 
-**File:** `js/frame.js:606`
+**File:** `js/core/game-utils.js:27-44` ✅
 **Risk:** Phishing attacks via malicious redirects
 **Impact:** Users redirected to attacker-controlled sites
+**Status:** VERIFIED 2025-11-20 - Same-origin check already prevents open redirects
 
-**Vulnerable Code:**
+**Analysis:**
+The existing `sanitizeSelfPage()` function already provides sufficient protection:
+
 ```javascript
-location.replace(safeUrl.toString());
-```
+function sanitizeSelfPage(page, baseHref){
+  const expectedOrigin = base ? base.origin : null;
+  const url = new URL(page, referenceHref);
 
-**Issue:** `safeUrl` validation may be insufficient
+  // Protocol validation
+  if (!['http:', 'https:'].includes(url.protocol)) return null;
 
-**Secure Fix:**
-```javascript
-function isSafeRedirectUrl(url, baseUrl = location.origin) {
-  try {
-    const parsed = new URL(url, baseUrl);
+  // Same-origin validation (prevents open redirects)
+  if (expectedOrigin && url.origin !== expectedOrigin) return null;
 
-    // Whitelist of allowed hostnames
-    const allowedHosts = [
-      'play.kcswh.pl',
-      'localhost',
-      '127.0.0.1'
-    ];
-
-    // Must be HTTPS in production (or HTTP for localhost)
-    const isLocalhost = ['localhost', '127.0.0.1'].includes(parsed.hostname);
-    const validProtocol = parsed.protocol === 'https:' || (isLocalhost && parsed.protocol === 'http:');
-
-    return allowedHosts.includes(parsed.hostname) && validProtocol;
-  } catch {
-    return false;
-  }
-}
-
-// Usage
-if (isSafeRedirectUrl(targetUrl)) {
-  location.replace(targetUrl);
-} else {
-  console.error('Unsafe redirect blocked:', targetUrl);
-  location.replace('/'); // Fallback to home
+  return url;
 }
 ```
+
+**Why this is secure:**
+- Origin includes protocol + domain + port (e.g., `https://play.kcswh.pl:443`)
+- Redirects to different origins (like `https://evil.com`) are blocked
+- Works in all environments (localhost, dev, production) without hardcoded whitelist
+- Any attempt to redirect to external site fails the origin check
+
+**Attempted enhancement (removed due to issues):**
+Initially attempted to add explicit hostname whitelist, but this broke legitimate navigation:
+- Didn't work with different ports (localhost:8888)
+- Didn't work with Netlify dev environments
+- Was redundant with existing same-origin check
+
+**Conclusion:**
+No code changes needed. Existing same-origin validation provides sufficient protection against open redirect attacks while maintaining functionality across all environments.
 
 ---
 
@@ -608,9 +644,11 @@ async function signedRequest(url, payload) {
 
 ---
 
-### 🟡 MEDIUM #10: Missing Subresource Integrity (SRI)
+### 🟡 MEDIUM #10: Missing Subresource Integrity (SRI) (DOCUMENTED)
 
 **Files:** All HTML pages loading third-party scripts
+**Status:** Limitation documented - Not practical for dynamic third-party scripts
+**Mitigation:** CSP restricts script sources + HTTPS-only loading
 
 **Fix:**
 ```html

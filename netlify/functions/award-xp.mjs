@@ -176,7 +176,12 @@ const buildXpCookie = ({ key, total, secret, now, nextReset }) => {
   const signature = signPayload(payload, secret);
   const maxAgeMs = Math.max(0, nextReset - now);
   const maxAge = Math.max(0, Math.floor(maxAgeMs / 1000));
-  const secureAttr = process.env.XP_COOKIE_SECURE === "1" ? "; Secure" : "";
+
+  // Default to Secure in production, allow opt-out for local dev
+  const isProduction = process.env.CONTEXT === "production" || process.env.NODE_ENV === "production";
+  const secureFlag = process.env.XP_COOKIE_SECURE !== "0"; // Opt-out instead of opt-in
+  const secureAttr = (secureFlag || isProduction) ? "; Secure" : "";
+
   return `${XP_DAY_COOKIE}=${encoded}.${signature}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${maxAge}${secureAttr}`;
 };
 

@@ -31,8 +31,13 @@
     const expectedOrigin = base ? base.origin : null;
     try {
       const url = new URL(page, referenceHref);
+
+      // Protocol validation
       if (!['http:', 'https:'].includes(url.protocol)) return null;
+
+      // Same-origin validation (sufficient protection against open redirects)
       if (expectedOrigin && url.origin !== expectedOrigin) return null;
+
       return url;
     } catch (err) {
       return null;

@@ -381,7 +381,24 @@ function resetGame() {
 
 function showOverlay(title, subtitle) {
   overlay.hidden = false;
-  overlay.innerHTML = `<div>${title}</div><div style="font-size:1rem; margin-top:0.5rem; color: rgba(203,213,255,0.7);">${subtitle}</div>`;
+
+  // Clear overlay safely
+  overlay.innerHTML = '';
+
+  // Create title element
+  const titleDiv = document.createElement('div');
+  titleDiv.textContent = title; // Safe - no HTML interpretation
+  overlay.appendChild(titleDiv);
+
+  // Create subtitle element
+  if (subtitle) {
+    const subtitleDiv = document.createElement('div');
+    subtitleDiv.style.fontSize = '1rem';
+    subtitleDiv.style.marginTop = '0.5rem';
+    subtitleDiv.style.color = 'rgba(203,213,255,0.7)';
+    subtitleDiv.textContent = subtitle; // Safe - no HTML interpretation
+    overlay.appendChild(subtitleDiv);
+  }
 }
 
 function hideOverlay() {
