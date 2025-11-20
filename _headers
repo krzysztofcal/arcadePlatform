@@ -1,3 +1,17 @@
 /*
-  Permissions-Policy: clipboard-write=(self)
+  # Content Security Policy
+  # Protects against XSS, clickjacking, and other code injection attacks
+  Content-Security-Policy: default-src 'self'; script-src 'self' https://consent.cookiebot.com https://consentcdn.cookiebot.com https://www.googletagmanager.com https://github.com 'sha256-RxjC9yYMCxrDvdV2MRVGu3psi/rGesk5yo+xz8t0mTg=' 'sha256-b9iJTOPg44XsNt2+bPEvkfGsFVqaumQri2/zrB5sA2o=' 'sha256-r2Com2yfQQJausYYBQrPxaAWCcsnq/DeXka9Een02Es=' 'sha256-7DqW5VpwTmlMgcPXCGjl28RbTrTtFBRbVNjzoXcX2ko=' 'sha256-Oqt8ODQWKmLkPiB2r9xrcowu+l+WYwZHfUCf9sDFFzs=' 'sha256-hj8NYUFe4nbn60KAXU7N2GrsNT/k8E1xkdlLIoRL9XM=' 'sha256-0Wb+NgnHAGHhGh/6nFbkTiktnYSpz6EVA5IxiiUU8DQ=' 'sha256-nLjGeBvK8BQE0UTh0+74CPwdrKgQDVRFFVyOcYuMf7g=' 'sha256-Rnt3+nPKWPiw/qrDaU3o++VVHxBSkZ+c3jPI2wHLOOk=' 'sha256-SWcqpLVOMnXcdN/VcUKPlxZykeV9QrkVNrvQUD6SZJk=' 'sha256-AO9B7DMlmWxTtLbca1rsS5u3qc7ZYy2nDO8OZbmZIU0=' 'sha256-BXGXBorW8mlhTPKDCok0aiBZOGWyKJ9NLbeCp3LDYBU=' 'sha256-abjvafYxRJPluYN0Kq7u5j4wpFnn454sy6KWSsP+FPA=' 'sha256-YCvyYCnuX5SrGntgepIszM19NUEVt76UAEw52WlkgFA=' 'sha256-WBJmvETfJ9Uee95uGRCNEgHtCwjtF16eMdYINNpRbsc=' 'sha256-bxIgv2KNbg8pLY+E6rvROlo+ZLN7q5/ewsU47HCI9ig=' 'sha256-n8rDo7QaU07PA+tbptp8dPzNTvSOtqmiCMW2WzL0sAg=' 'sha256-K0xa9bAC4DqNSn9XZu4Om24HawID+A+8sFLJPkcxhyc=' 'sha256-XrSFJ4ySkYx4TqUdjPrziMO+uQIIR9QiyrzQ3l2ejNw=' 'sha256-NEdFk8Iej2nQfmFNE6omWij3OZeU6XX/Ro7dPxUjU1U=' 'sha256-HcEv6hsWQ+FJOehazeZ8pCh/Ygrqocog7DSLvEEY9Cg=' 'sha256-/xMvUPI31ylnPKXTCl4AkOXA4sQahPIEP/rLBk0MYQ4=' 'sha256-G4wLt0za6nHAbsgdWH3uNsJdlQxuBK2+0NgPRfODpCI=' 'sha256-rheNw0W7/WnghVoEDZSojC48OVSe5vRhWzdVfHTHCv0=' 'sha256-jHRymoWpX/G1UN93sLvOZ0jns2+9joiABzpMmVTyQaM=' 'sha256-m1HaEnDAmXYsLGVIkrnznqN0XzWa2+18yq52aZc2uMU='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: https://github.com https://www.googletagmanager.com https://imgsct.cookiebot.com; connect-src 'self' https://*.netlify.app https://www.google-analytics.com; frame-src 'self' https://consentcdn.cookiebot.com https://app.netlify.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests
+
+  # Prevent clickjacking attacks
+  X-Frame-Options: DENY
+
+  # Prevent MIME type sniffing
+  X-Content-Type-Options: nosniff
+
+  # Control referrer information
+  Referrer-Policy: strict-origin-when-cross-origin
+
+  # Feature policy / Permissions policy
+  Permissions-Policy: geolocation=(), microphone=(), camera=(), payment=()
 

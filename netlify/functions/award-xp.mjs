@@ -218,8 +218,12 @@ function corsHeaders(origin) {
     return headers;
   }
 
-  // If there IS an Origin header, enforce whitelist
-  if (CORS_ALLOW.length > 0 && !CORS_ALLOW.includes(origin)) {
+  // Automatically allow Netlify deploy preview and production domains
+  // Pattern: https://*.netlify.app (including deploy-preview-*, branch-*, etc.)
+  const isNetlifyDomain = /^https:\/\/[a-z0-9-]+\.netlify\.app$/i.test(origin);
+
+  // If there IS an Origin header, enforce whitelist (unless it's a Netlify domain)
+  if (!isNetlifyDomain && CORS_ALLOW.length > 0 && !CORS_ALLOW.includes(origin)) {
     return null; // Signal rejection for non-whitelisted origins
   }
 
@@ -359,7 +363,9 @@ export async function handler(event) {
 
   // SECURITY: Validate CORS BEFORE any side effects (rate limiting, session registration, XP awarding)
   // Check if this is a cross-origin request (has Origin header) from a non-whitelisted origin
-  if (origin && CORS_ALLOW.length > 0 && !CORS_ALLOW.includes(origin)) {
+  // Automatically allow Netlify domains (*.netlify.app)
+  const isNetlifyDomain = origin ? /^https:\/\/[a-z0-9-]+\.netlify\.app$/i.test(origin) : false;
+  if (origin && !isNetlifyDomain && CORS_ALLOW.length > 0 && !CORS_ALLOW.includes(origin)) {
     // Reject immediately before any mutations
     return {
       statusCode: 403,
