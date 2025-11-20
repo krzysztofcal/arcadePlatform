@@ -62,31 +62,37 @@ npm run test:e2e -- tests/e2e-security-headers.spec.ts
 npm run test:e2e -- tests/e2e-security-isolation.spec.ts
 ```
 
-### Run with Netlify Function Server
+### Test Infrastructure
 
-For tests that require the actual award-xp endpoint:
+The tests use an **integrated test server** (`scripts/test-server.js`) that combines:
+- Static file serving (HTML, CSS, JS)
+- Netlify function handling (`/.netlify/functions/award-xp`)
+- Security headers (loaded from `_headers` file)
 
-**Terminal 1 - Start static server:**
-```bash
-node scripts/static-server.js
-```
+This server is automatically started by Playwright's `webServer` config.
 
-**Terminal 2 - Start function server:**
-```bash
-XP_DAILY_SECRET=test-secret XP_DEBUG=1 npm run serve:xp
-```
+**No manual server setup required!** Just run `npm run test:e2e`.
 
-**Terminal 3 - Run tests:**
-```bash
-XP_FUNCTION_PORT=8888 npx playwright test tests/e2e-security.spec.ts
-```
+### Test Categories
+
+**API Security Tests** (`e2e-security.spec.ts`, `e2e-security-headers.spec.ts`):
+- Use Playwright's `request` API for direct HTTP testing
+- Test server-side security controls (CORS, rate limiting, XP caps)
+- **Rate limit resilient** - gracefully skip when 429 rate limit hit
+- ✅ **95+ tests should pass in CI**
+
+**Browser Context Tests** (`e2e-security-isolation.spec.ts`):
+- Use Playwright's `page` API for browser automation
+- Test client-side isolation (multi-tab, localStorage, XP system integration)
+- Require `window.XP` object and game page context
+- ⚠️ **Some tests may not run in API-only test mode**
 
 ### Run in CI/CD
 
 The tests automatically adapt to the environment:
-- **Local development**: Expects function server on port 8888
-- **Netlify deployment**: Uses `.netlify/functions/award-xp` on same origin
-- **CI/CD**: Set `CI_NO_E2E=1` to skip E2E tests if needed
+- **Playwright CI**: Uses integrated test-server.js (no manual setup)
+- **Netlify deployment**: Tests against actual deployed functions
+- **Skip E2E**: Set `CI_NO_E2E=1` to skip all E2E tests if needed
 
 ## Test Coverage
 
@@ -117,13 +123,15 @@ The tests automatically adapt to the environment:
 
 ### Known Issues and Limitations
 
-1. **Function Server Dependency**: Core XP endpoint tests require the Netlify function server to be running separately. In local development, this requires manual setup.
+1. **Rate Limiting in CI**: Tests gracefully skip when rate limited (429 response). This is expected behavior in CI where tests run sequentially from the same IP and may hit per-IP rate limits (20 req/min).
 
-2. **Rate Limit Reset**: Rate limit reset tests require waiting 60+ seconds for rate limit windows to expire. These tests have extended timeouts.
+2. **Browser Context Tests**: Tests in `e2e-security-isolation.spec.ts` require full page context with `window.XP` object. These may not pass when the XP client-side system isn't fully initialized.
 
-3. **Cookie Access**: Some cookie security tests are limited by browser security policies (e.g., HttpOnly cookies cannot be read by JavaScript, which is the expected behavior).
+3. **Cookie Access**: Some cookie security tests are limited by browser security policies (e.g., HttpOnly cookies cannot be read by JavaScript, which is the expected behavior being tested).
 
 4. **CSP Testing**: CSP violation detection relies on console errors, which may vary across browsers.
+
+5. **HTTPS Tests**: HTTPS enforcement tests only validate on production (https://), not on localhost (http://).
 
 ## Security Test Philosophy
 
