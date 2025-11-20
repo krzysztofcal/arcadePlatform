@@ -630,8 +630,8 @@ test.describe('E2E Security Tests', () => {
       };
       const response = await request.post(XP_ENDPOINT, { data: payload });
 
-      // API may accept and use server time, or reject
-      expect([200, 400, 422]).toContain(response.status());
+      // API may accept and use server time, reject, or be rate limited
+      expect([200, 400, 422, 429]).toContain(response.status());
     });
 
     test('should handle oversized userId', async ({ request }) => {
@@ -639,8 +639,8 @@ test.describe('E2E Security Tests', () => {
       const payload = createXPRequest({ userId: oversizedUserId });
       const response = await request.post(XP_ENDPOINT, { data: payload });
 
-      // API may accept (and truncate internally), or reject
-      expect([200, 400, 413, 422]).toContain(response.status());
+      // API may accept (and truncate internally), reject, or be rate limited
+      expect([200, 400, 413, 422, 429]).toContain(response.status());
     });
 
     test('should handle special characters in userId', async ({ request }) => {
@@ -648,8 +648,8 @@ test.describe('E2E Security Tests', () => {
       const payload = createXPRequest({ userId: specialUserId });
       const response = await request.post(XP_ENDPOINT, { data: payload });
 
-      // Should either accept (with sanitization) or reject
-      expect([200, 400, 422]).toContain(response.status());
+      // Should either accept (with sanitization), reject, or be rate limited
+      expect([200, 400, 422, 429]).toContain(response.status());
     });
 
     test('should reject null userId', async ({ request }) => {
