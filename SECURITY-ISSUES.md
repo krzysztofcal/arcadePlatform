@@ -1,9 +1,46 @@
 # Remaining Security Issues
 
-**Date:** 2025-11-19
+**Date:** 2025-11-20 (Updated)
 **Audit Reference:** PR #108 identified 7 critical, 4 high, 5 medium severity issues
-**Fixed:** 4 critical issues (CORS, Rate Limiting, Session Validation, XSS in frame.js)
-**Remaining:** 3 critical, 4 high, 5 medium
+**Fixed (Initial):** 4 issues (CORS, Rate Limiting, Session Validation, XSS in frame.js)
+**Fixed (2025-11-20):** 5 additional issues (XSS in games, Cookie Secure flag, Redirect validation, CSP headers, SRI documentation)
+**Remaining:** 0 critical, 3 high, 3 medium
+
+---
+
+## Recently Fixed (2025-11-20)
+
+### ✅ CRITICAL #1: Content-Security-Policy (COMPLETED)
+- **Status:** Implemented in PR #110
+- **Files:** `_headers` with SHA-256 hashes for all inline scripts
+- **Result:** XSS protection, clickjacking prevention, MIME sniffing protection
+
+### ✅ CRITICAL #2: XSS via innerHTML in Games (COMPLETED)
+- **Status:** Fixed in all 3 game files
+- **Files:**
+  - `games-open/tetris/script.js:382-402`
+  - `games-open/2048/script.js:168-193`
+  - `games-open/pacman/script.js:453-473`
+- **Fix:** Replaced `innerHTML` with safe DOM manipulation (`createElement()` + `textContent`)
+- **Result:** Eliminated XSS injection vectors in game overlays
+
+### ✅ CRITICAL #3: Cookie Secure Flag (COMPLETED)
+- **Status:** Fixed to default secure in production
+- **File:** `netlify/functions/award-xp.mjs:180-183`
+- **Fix:** Changed from opt-in to opt-out - defaults to Secure in production
+- **Result:** Session cookies now protected from HTTP interception by default
+
+### ✅ HIGH #5: Open Redirect Validation (COMPLETED)
+- **Status:** Enhanced with explicit hostname whitelist
+- **File:** `js/core/game-utils.js:27-72`
+- **Fix:** Added `isSafeRedirectUrl()` with whitelist validation
+- **Result:** Redirects restricted to whitelisted domains (play.kcswh.pl, localhost)
+
+### ✅ MEDIUM #10: Subresource Integrity (SRI) (DOCUMENTED)
+- **Status:** Documented limitation
+- **Reason:** Third-party scripts (Cookiebot, GTM) are frequently updated by providers
+- **Mitigation:** CSP restricts script sources to trusted domains only
+- **Result:** Practical security approach without breaking functionality
 
 ---
 
@@ -113,11 +150,12 @@ Fix innerHTML usage in game files:
 
 ## Detailed Issue Breakdown
 
-### 🔴 CRITICAL #1: Missing Content-Security-Policy
+### ✅ CRITICAL #1: Missing Content-Security-Policy (FIXED)
 
 **File:** `_headers`
 **Risk:** XSS attacks, data exfiltration, clickjacking
 **Impact:** Could allow attackers to inject malicious scripts
+**Status:** COMPLETED in PR #110
 
 **Current State:**
 ```
@@ -143,15 +181,16 @@ Fix innerHTML usage in game files:
 
 ---
 
-### 🔴 CRITICAL #2: XSS via innerHTML
+### ✅ CRITICAL #2: XSS via innerHTML (FIXED)
 
 **Files:**
-- `games-open/tetris/script.js:384`
-- `games-open/2048/script.js:172`
-- `games-open/pacman/script.js:455`
+- `games-open/tetris/script.js:382-402` ✅
+- `games-open/2048/script.js:168-193` ✅
+- `games-open/pacman/script.js:453-473` ✅
 
 **Risk:** Malicious HTML/JavaScript injection through game data
 **Impact:** Could steal user data, hijack sessions
+**Status:** COMPLETED 2025-11-20
 
 **Vulnerable Code:**
 ```javascript
@@ -182,11 +221,12 @@ if (subtitle) {
 
 ---
 
-### 🔴 CRITICAL #3: Cookie Secure Flag Not Enforced
+### ✅ CRITICAL #3: Cookie Secure Flag Not Enforced (FIXED)
 
-**File:** `netlify/functions/award-xp.mjs:179`
+**File:** `netlify/functions/award-xp.mjs:180-183` ✅
 **Risk:** Session hijacking over HTTP
 **Impact:** Cookies transmitted in plaintext
+**Status:** COMPLETED 2025-11-20
 
 **Current Code:**
 ```javascript
@@ -271,11 +311,12 @@ function calculateXPForEvent(gameId, eventType, data) {
 
 ---
 
-### 🟠 HIGH #5: Open Redirect Validation
+### ✅ HIGH #5: Open Redirect Validation (FIXED)
 
-**File:** `js/frame.js:606`
+**File:** `js/core/game-utils.js:27-72` ✅
 **Risk:** Phishing attacks via malicious redirects
 **Impact:** Users redirected to attacker-controlled sites
+**Status:** COMPLETED 2025-11-20 - Enhanced with explicit whitelist
 
 **Vulnerable Code:**
 ```javascript
@@ -608,9 +649,11 @@ async function signedRequest(url, payload) {
 
 ---
 
-### 🟡 MEDIUM #10: Missing Subresource Integrity (SRI)
+### 🟡 MEDIUM #10: Missing Subresource Integrity (SRI) (DOCUMENTED)
 
 **Files:** All HTML pages loading third-party scripts
+**Status:** Limitation documented - Not practical for dynamic third-party scripts
+**Mitigation:** CSP restricts script sources + HTTPS-only loading
 
 **Fix:**
 ```html
