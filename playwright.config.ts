@@ -35,7 +35,7 @@ export default defineConfig({
   testMatch,
   use: useConfig,
   webServer: {
-    command: 'node scripts/static-server.js',
+    command: 'node scripts/test-server.js',
     url: BASE_URL,
     reuseExistingServer: !process.env.CI,
     stdout: 'pipe',
@@ -43,6 +43,8 @@ export default defineConfig({
     env: {
       XP_DAILY_SECRET: 'test-secret',
       XP_DEBUG: '1',
+      // Enable CORS whitelist for security testing
+      XP_CORS_ALLOW: 'http://localhost:8888,https://example.netlify.app',
     },
   },
 });
