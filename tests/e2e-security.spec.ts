@@ -378,64 +378,43 @@ test.describe('E2E Security Tests', () => {
   // D. Cookie Security Tests
   // ============================================================================
 
-  test.describe.skip('Cookie Security', () => {
-    // Skipped: Browser page crashes in test environment
-    // Cookie security is validated through API tests and in production
+  test.describe('Cookie Security', () => {
 
-    test('should set HttpOnly cookie', async ({ page }) => {
-      await page.goto('/');
-
-      // Make XP request through page context
-      const response = await page.evaluate(async () => {
-        const res = await fetch('/.netlify/functions/award-xp', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            userId: 'test-user',
-            sessionId: 'test-session',
-            delta: 10,
-            ts: Date.now()
-          })
-        });
-        return res.ok;
+    test('should set HttpOnly cookie via Set-Cookie header', async ({ request }) => {
+      const response = await request.post(XP_ENDPOINT, {
+        data: createXPRequest()
       });
 
-      // Try to access cookie via JavaScript
-      const cookies = await page.context().cookies();
-      const xpCookie = cookies.find(c => c.name.startsWith('xp_'));
+      // Skip if rate limited
+      if (response.status() === 429) return;
 
-      if (xpCookie) {
-        expect(xpCookie.httpOnly).toBe(true);
+      expect(response.status()).toBe(200);
+
+      // Check Set-Cookie header
+      const setCookie = response.headers()['set-cookie'];
+      if (setCookie) {
+        expect(setCookie.toLowerCase()).toContain('httponly');
       }
     });
 
-    test('should set Secure flag in production', async ({ page }) => {
-      await page.goto('/');
+    test('should set SameSite cookie attribute', async ({ request }) => {
+      const response = await request.post(XP_ENDPOINT, {
+        data: createXPRequest()
+      });
 
-      const cookies = await page.context().cookies();
-      const xpCookie = cookies.find(c => c.name.startsWith('xp_'));
+      // Skip if rate limited
+      if (response.status() === 429) return;
 
-      if (xpCookie) {
-        // Check if running on HTTPS
-        const isHttps = page.url().startsWith('https://');
-        if (isHttps) {
-          expect(xpCookie.secure).toBe(true);
-        }
+      expect(response.status()).toBe(200);
+
+      // Check Set-Cookie header for SameSite
+      const setCookie = response.headers()['set-cookie'];
+      if (setCookie) {
+        expect(setCookie.toLowerCase()).toContain('samesite');
       }
     });
 
-    test('should set SameSite=Lax for CSRF protection', async ({ page }) => {
-      await page.goto('/');
-
-      const cookies = await page.context().cookies();
-      const xpCookie = cookies.find(c => c.name.startsWith('xp_'));
-
-      if (xpCookie) {
-        expect(xpCookie.sameSite).toBe('Lax');
-      }
-    });
-
-    test('should reject tampered cookies', async ({ request, page }) => {
+    test('should reject tampered cookies', async ({ request }) => {
       // First, get a valid cookie
       const firstResponse = await request.post(XP_ENDPOINT, {
         data: createXPRequest()
@@ -447,7 +426,7 @@ test.describe('E2E Security Tests', () => {
       expect(firstResponse.status()).toBe(200);
 
       // Get cookies
-      const cookies = await firstResponse.headers()['set-cookie'];
+      const cookies = firstResponse.headers()['set-cookie'];
 
       if (cookies) {
         // Try to tamper with cookie value
@@ -464,9 +443,21 @@ test.describe('E2E Security Tests', () => {
         // Skip if rate limited
         if (response.status() === 429) return;
 
-        // Server should either reject or issue new cookie
-        // It should NOT trust the tampered cookie
-        expect(response.status()).toBeLessThanOrEqual(422);
+        // Server should either reject or issue new cookie (not trust tampered cookie)
+        expect([200, 400, 403, 422]).toContain(response.status());
+      }
+    });
+
+    test('should include Path attribute in cookie', async ({ request }) => {
+      const response = await request.post(XP_ENDPOINT, {
+        data: createXPRequest()
+      });
+
+      if (response.status() === 429) return;
+
+      const setCookie = response.headers()['set-cookie'];
+      if (setCookie) {
+        expect(setCookie.toLowerCase()).toContain('path=');
       }
     });
   });
@@ -788,62 +779,87 @@ test.describe('E2E Security Tests', () => {
   // H. Integration Tests (Game Page Context)
   // ============================================================================
 
-  test.describe.skip('Game Page Integration', () => {
-    // Skipped: Browser page crashes in test environment and requires window.XP
-    // Game integration is validated in production with full XP client
+  test.describe('Game Page Integration', () => {
 
-    test('should successfully award XP from game page context', async ({ page }) => {
-      // Navigate to a game page
-      await page.goto('/game.html');
-
-      // Wait for XP system to initialize
-      await page.waitForTimeout(1000);
-
-      // Check if XP system is available
-      const xpAvailable = await page.evaluate(() => {
-        return typeof window.XP !== 'undefined';
+    test('should successfully award XP via API (simulating game context)', async ({ request }) => {
+      // Simulate XP award as if it came from a game page
+      const response = await request.post(XP_ENDPOINT, {
+        data: {
+          userId: generateUserId(),
+          sessionId: generateSessionId(),
+          delta: 10,
+          ts: Date.now(),
+          metadata: {
+            gameId: 'test-game',
+            source: 'game-integration-test'
+          }
+        },
+        headers: {
+          'Origin': 'http://localhost:8888' // Simulate same-origin request
+        }
       });
 
-      if (xpAvailable) {
-        // Try to award XP
-        const result = await page.evaluate(async () => {
-          // Simulate game XP award
-          if (window.XP && typeof window.XP.award === 'function') {
-            return await window.XP.award(10, { source: 'test' });
-          }
-          return null;
-        });
+      if (response.status() === 429) return;
 
-        // If XP system is active, award should succeed
-        if (result) {
-          expect(result.ok).toBe(true);
-        }
-      }
+      expect(response.status()).toBe(200);
+      const data = await response.json();
+      expect(data.ok).toBe(true);
+      expect(data.granted).toBe(10);
     });
 
-    test('should enforce visibility requirements for XP awards', async ({ page }) => {
-      await page.goto('/game.html');
-      await page.waitForTimeout(1000);
+    test('should track XP across game sessions', async ({ request }) => {
+      const userId = generateUserId();
 
-      // Hide the page
-      await page.evaluate(() => {
-        Object.defineProperty(document, 'hidden', {
-          configurable: true,
-          get: () => true
-        });
-        document.dispatchEvent(new Event('visibilitychange'));
-      });
-
-      // Try to award XP while hidden
-      const result = await page.evaluate(async () => {
-        if (window.XP && typeof window.XP.award === 'function') {
-          return await window.XP.award(10, { source: 'test-hidden' });
+      // First game session
+      const response1 = await request.post(XP_ENDPOINT, {
+        data: {
+          userId,
+          sessionId: 'game-session-1',
+          delta: 50,
+          ts: Date.now(),
+          metadata: { gameId: 'game1' }
         }
-        return null;
       });
 
-      // Awards while hidden should be queued or rejected
-      // This depends on implementation details
+      if (response1.status() === 429) return;
+
+      // Second game session
+      const response2 = await request.post(XP_ENDPOINT, {
+        data: {
+          userId,
+          sessionId: 'game-session-2',
+          delta: 30,
+          ts: Date.now() + 1,
+          metadata: { gameId: 'game2' }
+        }
+      });
+
+      if (response2.status() === 429) return;
+
+      const data2 = await response2.json();
+      expect(data2.totalToday).toBe(80); // 50 + 30
+    });
+
+    test('should accept game metadata in requests', async ({ request }) => {
+      const response = await request.post(XP_ENDPOINT, {
+        data: {
+          userId: generateUserId(),
+          sessionId: generateSessionId(),
+          delta: 10,
+          ts: Date.now(),
+          metadata: {
+            gameId: 'test-game',
+            level: 5,
+            score: 1000,
+            action: 'level_complete'
+          }
+        }
+      });
+
+      if (response.status() === 429) return;
+
+      // Server should accept metadata
+      expect(response.status()).toBe(200);
     });
   });
 
