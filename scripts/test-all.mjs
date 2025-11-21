@@ -26,6 +26,7 @@ run("node", ["tests/xp-client.cors.test.mjs"], "xp-client-cors");
 run("node", ["tests/xp-gate.test.mjs"], "xp-gate");
 run("node", ["tests/xp-game-hook-idempotent.test.mjs"], "xp-game-hook-idempotent");
 run("node", ["tests/recorder-admin-only.test.mjs"], "recorder-admin-only");
+run("node", ["tests/secureStorage.test.mjs"], "secure-storage");
 
 try { run("npm", ["run", "-s", "lint:games"], "unit"); } catch { /* optional */ }
 
