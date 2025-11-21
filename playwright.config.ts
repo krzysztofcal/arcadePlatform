@@ -35,6 +35,7 @@ export default defineConfig({
   testMatch,
   use: useConfig,
   webServer: {
+    // Integrated test server serves static assets, security headers, and Netlify functions
     command: 'node scripts/test-server.js',
     url: BASE_URL,
     reuseExistingServer: !process.env.CI,
