@@ -75,18 +75,18 @@ This server is automatically started by Playwright's `webServer` config.
 
 ### Test Categories
 
-**API Security Tests** (`e2e-security.spec.ts`):
+**API Security Tests** (all test files):
 - Use Playwright's `request` API for direct HTTP testing
-- Test server-side security controls (CORS, rate limiting, XP caps)
+- **No browser required** - works in any environment
+- Test all security controls via HTTP requests
 - **Rate limit resilient** - gracefully skip when 429 rate limit hit
-- ✅ **41 tests pass in CI** (core API security validation)
+- ✅ **75 tests pass** (comprehensive security validation)
 
-**Browser Context Tests** (`e2e-security-headers.spec.ts`, `e2e-security-isolation.spec.ts`):
+**Browser Context Tests** (3 tests in `e2e-security-isolation.spec.ts`):
 - Use Playwright's `page` API for browser automation
-- Test client-side isolation, security headers, XP system integration
-- ⚠️ **Currently skipped (52 tests)** - Browser pages crash in test environment
-- These tests document expected production behavior
-- Will be validated in production deployment
+- Require a browser to be installed (Chrome/Chromium)
+- ⏭️ **Skipped** if no browser is available
+- Set `CHROME_BIN` environment variable to enable these tests
 
 ### Run in CI/CD
 
@@ -101,45 +101,45 @@ The tests automatically adapt to the environment:
 
 | Control | Test File | Status |
 |---------|-----------|--------|
-| CORS validation | `e2e-security.spec.ts` | ✅ **Passing** (API tests) |
-| Rate limiting (per-user) | `e2e-security.spec.ts` | ✅ **Passing** (API tests) |
-| Rate limiting (per-IP) | `e2e-security.spec.ts` | ✅ **Passing** (API tests) |
-| Daily XP cap (3000) | `e2e-security.spec.ts` | ✅ **Passing** (API tests) |
-| Session XP cap (300) | `e2e-security.spec.ts` | ✅ **Passing** (API tests) |
-| Delta XP cap (300) | `e2e-security.spec.ts` | ✅ **Passing** (API tests) |
-| Session validation | `e2e-security.spec.ts` | ✅ **Passing** (API tests) |
-| Input validation | `e2e-security.spec.ts` | ✅ **Passing** (API tests) |
-| Error handling | `e2e-security.spec.ts` | ✅ **Passing** (API tests) |
-| Response format | `e2e-security.spec.ts` | ✅ **Passing** (API tests) |
-| Cookie security | `e2e-security.spec.ts` | ⏭️ **Skipped** (browser crashes) |
-| CSP enforcement | `e2e-security-headers.spec.ts` | ⏭️ **Skipped** (browser crashes) |
-| X-Frame-Options | `e2e-security-headers.spec.ts` | ⏭️ **Skipped** (browser crashes) |
-| Referrer-Policy | `e2e-security-headers.spec.ts` | ⏭️ **Skipped** (browser crashes) |
-| Permissions-Policy | `e2e-security-headers.spec.ts` | ⏭️ **Skipped** (browser crashes) |
-| XSS prevention | `e2e-security-headers.spec.ts` | ⏭️ **Skipped** (browser crashes) |
-| HTTPS enforcement | `e2e-security-headers.spec.ts` | ⏭️ **Skipped** (browser crashes) |
-| Multi-tab isolation | `e2e-security-isolation.spec.ts` | ⏭️ **Skipped** (browser crashes) |
-| Session isolation | `e2e-security-isolation.spec.ts` | ⏭️ **Skipped** (browser crashes) |
-| localStorage security | `e2e-security-isolation.spec.ts` | ⏭️ **Skipped** (browser crashes) |
-| XP state isolation | `e2e-security-isolation.spec.ts` | ⏭️ **Skipped** (browser crashes) |
-| Privacy protection | `e2e-security-isolation.spec.ts` | ⏭️ **Skipped** (browser crashes) |
+| CORS validation | `e2e-security.spec.ts` | ✅ **Passing** |
+| Rate limiting (per-user) | `e2e-security.spec.ts` | ✅ **Passing** |
+| Rate limiting (per-IP) | `e2e-security.spec.ts` | ✅ **Passing** |
+| Daily XP cap (3000) | `e2e-security.spec.ts` | ✅ **Passing** |
+| Session XP cap (300) | `e2e-security.spec.ts` | ✅ **Passing** |
+| Delta XP cap (300) | `e2e-security.spec.ts` | ✅ **Passing** |
+| Cookie security | `e2e-security.spec.ts` | ✅ **Passing** |
+| Session validation | `e2e-security.spec.ts` | ✅ **Passing** |
+| Input validation | `e2e-security.spec.ts` | ✅ **Passing** |
+| Error handling | `e2e-security.spec.ts` | ✅ **Passing** |
+| Response format | `e2e-security.spec.ts` | ✅ **Passing** |
+| Game integration | `e2e-security.spec.ts` | ✅ **Passing** |
+| CSP header | `e2e-security-headers.spec.ts` | ✅ **Passing** |
+| X-Frame-Options | `e2e-security-headers.spec.ts` | ✅ **Passing** |
+| X-Content-Type-Options | `e2e-security-headers.spec.ts` | ✅ **Passing** |
+| Referrer-Policy | `e2e-security-headers.spec.ts` | ✅ **Passing** |
+| Permissions-Policy | `e2e-security-headers.spec.ts` | ✅ **Passing** |
+| XSS prevention | `e2e-security-headers.spec.ts` | ✅ **Passing** |
+| Session isolation (API) | `e2e-security-isolation.spec.ts` | ✅ **Passing** |
+| Privacy protection (API) | `e2e-security-isolation.spec.ts` | ✅ **Passing** |
+| Concurrent access (API) | `e2e-security-isolation.spec.ts` | ✅ **Passing** |
+| Multi-tab isolation | `e2e-security-isolation.spec.ts` | ⏭️ **Skipped** (requires browser) |
+| localStorage security | `e2e-security-isolation.spec.ts` | ⏭️ **Skipped** (requires browser) |
+| XP client integration | `e2e-security-isolation.spec.ts` | ⏭️ **Skipped** (requires browser) |
 
-**Summary**: 41 passing / 52 skipped / 0 failing (100% pass rate)
+**Summary**: 75 passing / 3 skipped / 0 failing (100% pass rate)
 
 ### Known Issues and Limitations
 
 1. **Rate Limiting in CI**: Tests gracefully skip when rate limited (429 response). This is expected behavior in CI where tests run sequentially from the same IP and may hit per-IP rate limits (20 req/min).
 
-2. **Browser Context Tests Skipped**: Tests in `e2e-security-headers.spec.ts` and `e2e-security-isolation.spec.ts` are currently skipped (52 tests total) due to browser page crashes in the test environment. These tests:
-   - Document expected production behavior
-   - Will be validated in production deployment
-   - Test security headers, client-side isolation, and XP system integration
+2. **Browser-Based Tests (3 tests)**: These tests require Chrome/Chromium to be installed:
+   - `Multi-tab isolation requires browser`
+   - `localStorage security requires browser`
+   - `XP client integration requires browser`
 
-3. **Cookie Security Tests**: Browser-based cookie tests are skipped due to environment issues. Cookie security is validated through API-based tests that check Set-Cookie headers.
+   To enable these tests, install Chrome/Chromium and set `CHROME_BIN` environment variable.
 
-4. **XP Client Integration**: Tests requiring `window.XP` object are skipped until the XP client-side system is fully integrated into game pages.
-
-5. **Test Environment vs Production**: Some security features (CSP, HTTPS, security headers) are validated in production rather than test environment due to infrastructure constraints.
+3. **All Other Tests Run Without Browser**: The remaining 75 tests use API-based testing and work in any environment without requiring a browser installation.
 
 ## Security Test Philosophy
 
