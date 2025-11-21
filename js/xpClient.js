@@ -1,7 +1,11 @@
 (function () {
   const FN_URL = "/.netlify/functions/award-xp";
+  const START_SESSION_URL = "/.netlify/functions/start-session";
   const USER_KEY = "kcswh:userId";
   const SESSION_KEY = "kcswh:sessionId";
+  const SERVER_SESSION_KEY = "kcswh:serverSessionId";
+  const SERVER_SESSION_TOKEN_KEY = "kcswh:serverSessionToken";
+  const SERVER_SESSION_EXPIRES_KEY = "kcswh:serverSessionExpires";
   const MAX_TS = Number.MAX_SAFE_INTEGER;
   const DEFAULT_DELTA_CAP = 300;
 
@@ -11,6 +15,8 @@
     statusPromise: null,
     backoffUntil: 0,
     lastTs: 0,
+    serverSessionPromise: null,
+    serverSessionToken: null,
   };
 
   function randomId() {
@@ -43,6 +49,107 @@
       }
       return state.fallbackIds;
     }
+  }
+
+  // Server-side session management
+  function loadServerSession() {
+    try {
+      const ls = window.localStorage;
+      const token = ls.getItem(SERVER_SESSION_TOKEN_KEY);
+      const expires = Number(ls.getItem(SERVER_SESSION_EXPIRES_KEY) || "0");
+
+      // Check if session is still valid (with 60 second buffer)
+      if (token && expires > Date.now() + 60000) {
+        state.serverSessionToken = token;
+        return token;
+      }
+      // Session expired or missing
+      return null;
+    } catch (_) {
+      return state.serverSessionToken;
+    }
+  }
+
+  function saveServerSession(sessionId, sessionToken, expiresIn) {
+    try {
+      const ls = window.localStorage;
+      const expiresAt = Date.now() + (expiresIn * 1000);
+      ls.setItem(SERVER_SESSION_KEY, sessionId);
+      ls.setItem(SERVER_SESSION_TOKEN_KEY, sessionToken);
+      ls.setItem(SERVER_SESSION_EXPIRES_KEY, String(expiresAt));
+      state.serverSessionToken = sessionToken;
+    } catch (_) {
+      // Fallback to in-memory only
+      state.serverSessionToken = sessionToken;
+    }
+  }
+
+  function clearServerSession() {
+    try {
+      const ls = window.localStorage;
+      ls.removeItem(SERVER_SESSION_KEY);
+      ls.removeItem(SERVER_SESSION_TOKEN_KEY);
+      ls.removeItem(SERVER_SESSION_EXPIRES_KEY);
+    } catch (_) {}
+    state.serverSessionToken = null;
+    state.serverSessionPromise = null;
+  }
+
+  async function startServerSession(force = false) {
+    // Check if we already have a valid session
+    if (!force) {
+      const existing = loadServerSession();
+      if (existing) {
+        return existing;
+      }
+    }
+
+    // Avoid concurrent session starts
+    if (state.serverSessionPromise) {
+      return state.serverSessionPromise;
+    }
+
+    const { userId } = ensureIds();
+
+    state.serverSessionPromise = (async () => {
+      try {
+        const res = await fetch(START_SESSION_URL, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ userId }),
+          cache: "no-store",
+          credentials: "omit",
+        });
+
+        if (!res.ok) {
+          const text = await res.text().catch(() => "");
+          console.error("[XPClient] Failed to start session:", res.status, text);
+          throw new Error(`Session start failed (${res.status})`);
+        }
+
+        const data = await res.json();
+        if (data.ok && data.sessionToken) {
+          saveServerSession(data.sessionId, data.sessionToken, data.expiresIn || 604800);
+          return data.sessionToken;
+        }
+        throw new Error("Invalid session response");
+      } catch (err) {
+        state.serverSessionPromise = null;
+        throw err;
+      } finally {
+        state.serverSessionPromise = null;
+      }
+    })();
+
+    return state.serverSessionPromise;
+  }
+
+  async function ensureServerSession() {
+    const existing = loadServerSession();
+    if (existing) {
+      return existing;
+    }
+    return startServerSession();
   }
 
   function currentClientCap() {
@@ -184,13 +291,43 @@
     let ts = sanitizeTs(source);
     const metadata = buildMetadata(source);
 
+    // Get server session token (if available, non-blocking)
+    let sessionToken = loadServerSession();
+    // If no session token, try to get one (but don't fail if we can't)
+    if (!sessionToken) {
+      try {
+        sessionToken = await ensureServerSession();
+      } catch (_) {
+        // Continue without server session - server may accept the request anyway
+      }
+    }
+
     const body = { userId, sessionId, delta, ts };
+    if (sessionToken) body.sessionToken = sessionToken;
     if (metadata) body.metadata = metadata;
 
     let attempt = 0;
-    while (attempt < 2) {
+    let sessionRefreshed = false;
+    while (attempt < 3) {
       const result = await sendRequest(body);
       if (!result.ok) {
+        // Handle invalid session - refresh and retry once
+        if (result.status === 401 && result.body?.error === "invalid_session" && !sessionRefreshed) {
+          clearServerSession();
+          try {
+            const newToken = await startServerSession(true);
+            body.sessionToken = newToken;
+            sessionRefreshed = true;
+            attempt += 1;
+            continue;
+          } catch (_) {
+            // If we can't get a new session, try without (server may allow it)
+            delete body.sessionToken;
+            attempt += 1;
+            continue;
+          }
+        }
+
         if (result.status === 422 && result.body && result.body.error === "delta_out_of_range") {
           clampAfterServerCap(body, result.body);
           const capMsg = Number.isFinite(result.body.capDelta || result.body.cap)
@@ -235,5 +372,10 @@
     return payload;
   }
 
-  window.XPClient = { postWindow, fetchStatus };
+  window.XPClient = {
+    postWindow,
+    fetchStatus,
+    startServerSession,
+    clearServerSession,
+  };
 })();
