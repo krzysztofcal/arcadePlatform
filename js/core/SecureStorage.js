@@ -282,6 +282,80 @@
     }
 
     /**
+     * Get the key registry storage key (for tracking encrypted keys)
+     * @returns {string}
+     */
+    function getKeyRegistryKey() {
+      return prefix + '__secure_keys__';
+    }
+
+    /**
+     * Load the key registry from storage
+     * @returns {Set<string>}
+     */
+    function loadKeyRegistry() {
+      const storage = getStorage();
+      if (!storage) return new Set();
+
+      try {
+        const raw = storage.getItem(getKeyRegistryKey());
+        if (raw) {
+          return new Set(JSON.parse(raw));
+        }
+      } catch (e) {
+        // Ignore parse errors
+      }
+      return new Set();
+    }
+
+    /**
+     * Save the key registry to storage
+     * @param {Set<string>} registry
+     */
+    function saveKeyRegistry(registry) {
+      const storage = getStorage();
+      if (!storage) return;
+
+      try {
+        storage.setItem(getKeyRegistryKey(), JSON.stringify(Array.from(registry)));
+      } catch (e) {
+        // Ignore save errors
+      }
+    }
+
+    /**
+     * Add a key to the registry (only when encryptKeys is enabled)
+     * @param {string} key
+     */
+    function addToKeyRegistry(key) {
+      if (!encryptKeys) return;
+      const registry = loadKeyRegistry();
+      registry.add(key);
+      saveKeyRegistry(registry);
+    }
+
+    /**
+     * Remove a key from the registry
+     * @param {string} key
+     */
+    function removeFromKeyRegistry(key) {
+      if (!encryptKeys) return;
+      const registry = loadKeyRegistry();
+      registry.delete(key);
+      saveKeyRegistry(registry);
+    }
+
+    /**
+     * Clear the key registry
+     */
+    function clearKeyRegistry() {
+      const storage = getStorage();
+      if (storage) {
+        storage.removeItem(getKeyRegistryKey());
+      }
+    }
+
+    /**
      * Initialize the secure storage
      * Must be called before using encrypted operations
      * @returns {Promise<boolean>} Whether encryption is enabled
@@ -354,10 +428,10 @@
      */
     async function getFullKey(key) {
       if (encryptKeys && encryptionEnabled && encryptionKey) {
-        // Hash the key for privacy
+        // Hash the key for privacy, but include prefix so clear/keys/etc work
         const keyBytes = stringToBytes(prefix + key);
         const hashBuffer = await crypto.subtle.digest('SHA-256', keyBytes);
-        return '__ek__' + bytesToBase64(new Uint8Array(hashBuffer)).slice(0, 32);
+        return prefix + '__ek__' + bytesToBase64(new Uint8Array(hashBuffer)).slice(0, 32);
       }
       return prefix + key;
     }
@@ -392,6 +466,9 @@
         } else {
           memoryFallback[fullKey] = storedValue;
         }
+
+        // Track key in registry when encryptKeys is enabled
+        addToKeyRegistry(key);
 
         return true;
       } catch (e) {
@@ -481,6 +558,10 @@
           storage.removeItem(fullKey);
         }
         delete memoryFallback[fullKey];
+
+        // Remove from key registry when encryptKeys is enabled
+        removeFromKeyRegistry(key);
+
         return true;
       } catch (e) {
         return false;
@@ -535,6 +616,9 @@
           }
         });
 
+        // Clear key registry when encryptKeys is enabled
+        clearKeyRegistry();
+
         return true;
       } catch (e) {
         return false;
@@ -548,13 +632,21 @@
     async function keys() {
       await ensureInit();
 
+      // When encryptKeys is enabled, use the key registry
+      if (encryptKeys && encryptionEnabled) {
+        const registry = loadKeyRegistry();
+        return Array.from(registry);
+      }
+
       const storage = getStorage();
       const result = [];
 
       if (storage) {
         for (let i = 0; i < storage.length; i++) {
           const key = storage.key(i);
-          if (key && key.startsWith(prefix) && !key.endsWith('__secure_salt__')) {
+          if (key && key.startsWith(prefix) &&
+              !key.endsWith('__secure_salt__') &&
+              !key.endsWith('__secure_keys__')) {
             result.push(key.slice(prefix.length));
           }
         }
@@ -562,7 +654,9 @@
 
       // Add memory fallback keys
       Object.keys(memoryFallback).forEach(key => {
-        if (key.startsWith(prefix) && !key.endsWith('__secure_salt__')) {
+        if (key.startsWith(prefix) &&
+            !key.endsWith('__secure_salt__') &&
+            !key.endsWith('__secure_keys__')) {
           const shortKey = key.slice(prefix.length);
           if (!result.includes(shortKey)) {
             result.push(shortKey);
@@ -678,7 +772,9 @@
       if (storage) {
         for (let i = 0; i < storage.length; i++) {
           const key = storage.key(i);
-          if (key && key.startsWith(prefix)) {
+          if (key && key.startsWith(prefix) &&
+              !key.endsWith('__secure_salt__') &&
+              !key.endsWith('__secure_keys__')) {
             const value = storage.getItem(key);
             if (value) {
               totalSize += key.length + value.length;

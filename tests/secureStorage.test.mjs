@@ -898,4 +898,159 @@ console.log('Running SecureStorage tests...\n');
   console.log('  PASS');
 }
 
+// ====================
+// encryptKeys Tests
+// ====================
+
+{
+  console.log('Test: SecureStorage with encryptKeys hashes storage keys');
+  const ctx = createTestContext();
+  const prefix = uniqueKey();
+  const storage = ctx.window.SecureStorage({
+    storageKey: prefix,
+    passphrase: 'encrypt-keys-pass',
+    encryptKeys: true,
+  });
+
+  await storage.init();
+
+  await storage.setItem('sensitiveKey', 'sensitiveValue');
+
+  // The key should be hashed, not stored as plain text
+  const rawKey = prefix + ':sensitiveKey';
+  assert.equal(ctx.localStorage.getItem(rawKey), null);
+
+  // But we should be able to retrieve it
+  const retrieved = await storage.getItem('sensitiveKey');
+  assert.equal(retrieved, 'sensitiveValue');
+  console.log('  PASS');
+}
+
+{
+  console.log('Test: SecureStorage with encryptKeys - keys() returns original keys');
+  const ctx = createTestContext();
+  const prefix = uniqueKey();
+  const storage = ctx.window.SecureStorage({
+    storageKey: prefix,
+    passphrase: 'encrypt-keys-pass',
+    encryptKeys: true,
+  });
+
+  await storage.init();
+
+  await storage.setItem('key1', 'value1');
+  await storage.setItem('key2', 'value2');
+  await storage.setItem('key3', 'value3');
+
+  const keys = await storage.keys();
+  const sortedKeys = keys.sort();
+  assert.equal(sortedKeys.length, 3);
+  assert.equal(sortedKeys[0], 'key1');
+  assert.equal(sortedKeys[1], 'key2');
+  assert.equal(sortedKeys[2], 'key3');
+  console.log('  PASS');
+}
+
+{
+  console.log('Test: SecureStorage with encryptKeys - clear() removes all items');
+  const ctx = createTestContext();
+  const prefix = uniqueKey();
+  const storage = ctx.window.SecureStorage({
+    storageKey: prefix,
+    passphrase: 'encrypt-keys-pass',
+    encryptKeys: true,
+  });
+
+  await storage.init();
+
+  await storage.setItem('key1', 'value1');
+  await storage.setItem('key2', 'value2');
+
+  // Verify items exist
+  assert.equal(await storage.hasItem('key1'), true);
+  assert.equal(await storage.hasItem('key2'), true);
+
+  await storage.clear();
+
+  // Verify items are cleared
+  assert.equal(await storage.hasItem('key1'), false);
+  assert.equal(await storage.hasItem('key2'), false);
+
+  const keys = await storage.keys();
+  assert.equal(keys.length, 0);
+  console.log('  PASS');
+}
+
+{
+  console.log('Test: SecureStorage with encryptKeys - rotateKey works');
+  const ctx = createTestContext();
+  const prefix = uniqueKey();
+  const storage = ctx.window.SecureStorage({
+    storageKey: prefix,
+    passphrase: 'old-pass',
+    encryptKeys: true,
+  });
+
+  await storage.init();
+
+  await storage.setItem('key1', 'value1');
+  await storage.setItem('key2', { nested: 'object' });
+
+  // Rotate key
+  const result = await storage.rotateKey('new-pass');
+  assert.equal(result, true);
+
+  // Values should still be accessible
+  assert.equal(await storage.getItem('key1'), 'value1');
+  assert.equal(JSON.stringify(await storage.getItem('key2')), JSON.stringify({ nested: 'object' }));
+  console.log('  PASS');
+}
+
+{
+  console.log('Test: SecureStorage with encryptKeys - removeItem works');
+  const ctx = createTestContext();
+  const prefix = uniqueKey();
+  const storage = ctx.window.SecureStorage({
+    storageKey: prefix,
+    passphrase: 'encrypt-keys-pass',
+    encryptKeys: true,
+  });
+
+  await storage.init();
+
+  await storage.setItem('toRemove', 'value');
+  assert.equal(await storage.hasItem('toRemove'), true);
+
+  await storage.removeItem('toRemove');
+  assert.equal(await storage.hasItem('toRemove'), false);
+
+  // Key should not appear in keys()
+  const keys = await storage.keys();
+  assert.equal(keys.includes('toRemove'), false);
+  console.log('  PASS');
+}
+
+{
+  console.log('Test: SecureStorage with encryptKeys - getStats excludes internal keys');
+  const ctx = createTestContext();
+  const prefix = uniqueKey();
+  const storage = ctx.window.SecureStorage({
+    storageKey: prefix,
+    passphrase: 'encrypt-keys-pass',
+    encryptKeys: true,
+  });
+
+  await storage.init();
+
+  await storage.setItem('key1', 'value1');
+  await storage.setItem('key2', 'value2');
+
+  const stats = await storage.getStats();
+
+  // Should count only user data, not internal keys (salt, key registry)
+  assert.equal(stats.encryptedCount, 2);
+  assert.equal(stats.encryptionEnabled, true);
+  console.log('  PASS');
+}
+
 console.log('\nAll SecureStorage tests passed!');
