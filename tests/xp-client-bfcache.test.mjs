@@ -23,6 +23,7 @@ const localStorage = {
 };
 
 const requests = [];
+let sessionStarts = 0;
 
 function response(status, json) {
   return {
@@ -35,7 +36,19 @@ function response(status, json) {
 
 let statusBootstraps = 0;
 
-async function fetchStub(_url, options = {}) {
+async function fetchStub(url, options = {}) {
+  // Handle start-session endpoint
+  if (url === '/.netlify/functions/start-session') {
+    sessionStarts += 1;
+    return response(200, {
+      ok: true,
+      sessionId: 'test-session-id',
+      sessionToken: 'test-session-token',
+      expiresIn: 604800,
+      createdAt: Date.now(),
+    });
+  }
+
   const body = options.body ? JSON.parse(options.body) : {};
   if (body.statusOnly) {
     statusBootstraps += 1;
