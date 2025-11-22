@@ -104,10 +104,19 @@ const METADATA_MAX_BYTES = Math.max(0, asNumber(process.env.XP_METADATA_MAX_BYTE
 const DEBUG_ENABLED = process.env.XP_DEBUG === "1";
 const KEY_NS = process.env.XP_KEY_NS ?? "kcswh:xp:v2";
 const DRIFT_MS = Math.max(0, asNumber(process.env.XP_DRIFT_MS, 30_000));
-const CORS_ALLOW = (process.env.XP_CORS_ALLOW ?? "")
-  .split(",")
-  .map(s => s.trim())
-  .filter(Boolean);
+// Build CORS allowlist from env var + auto-include Netlify site URL
+const CORS_ALLOW = (() => {
+  const fromEnv = (process.env.XP_CORS_ALLOW ?? "")
+    .split(",")
+    .map(s => s.trim())
+    .filter(Boolean);
+  // Auto-include the Netlify site URL (handles custom domains)
+  const siteUrl = process.env.URL;
+  if (siteUrl && !fromEnv.includes(siteUrl)) {
+    fromEnv.push(siteUrl);
+  }
+  return fromEnv;
+})();
 
 const RAW_LOCK_TTL = Number(process.env.XP_LOCK_TTL_MS ?? 3_000);
 const LOCK_TTL_MS = Number.isFinite(RAW_LOCK_TTL) && RAW_LOCK_TTL >= 0 ? RAW_LOCK_TTL : 3_000;
