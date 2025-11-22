@@ -1277,6 +1277,44 @@ function bootXpCore(window, document) {
         force: !!force,
       });
     } catch (_) {}
+
+    // Session gate: ensure session before sending XP
+    const sessionGate = (async () => {
+      const requireSession = window.XP_REQUIRE_SERVER_SESSION === true;
+      const warnMode = window.XP_SERVER_SESSION_WARN_MODE === true;
+
+      // Get session status
+      let sessionResult = { token: null, error: null };
+      if (window.XPClient && typeof window.XPClient.ensureServerSession === "function") {
+        try {
+          sessionResult = await window.XPClient.ensureServerSession();
+        } catch (err) {
+          sessionResult = { token: null, error: err.message || "unknown" };
+        }
+      }
+
+      if (sessionResult.token) {
+        // Happy path: attach token to payload
+        payload.sessionToken = sessionResult.token;
+      } else if (requireSession) {
+        // Enforcement ON, no token → block
+        logDebug("send_blocked_no_session", {
+          gameId: payload.gameId,
+          error: sessionResult.error,
+        });
+        return false; // Signal to abort
+      } else if (warnMode) {
+        // Warn mode → send without token, log at DEBUG level
+        logDebug("send_without_session_warn", {
+          gameId: payload.gameId,
+          error: sessionResult.error,
+        });
+      }
+      // else: neither enforce nor warn mode, just send without token (silent)
+
+      return true; // Signal to proceed
+    })();
+
     state.pendingWindow = {
       start: payload.windowStart,
       end: payload.windowEnd,
@@ -1284,7 +1322,13 @@ function bootXpCore(window, document) {
       visSeconds: payload.visibilitySeconds,
     };
 
-    state.pending = window.XPClient.postWindow(payload)
+    state.pending = sessionGate.then((shouldProceed) => {
+      if (!shouldProceed) {
+        state.pendingWindow = null;
+        return Promise.resolve(null);
+      }
+      return window.XPClient.postWindow(payload);
+    })
       .then((data) => {
         try {
           const snap = {
@@ -1476,6 +1520,17 @@ function bootXpCore(window, document) {
     hydrateRuntimeState();
     ensureTimer();
     ensureBadgeTimer();
+
+    // Proactively initialize server session (don't wait for first XP window)
+    if (window.XPClient && typeof window.XPClient.ensureServerSession === "function") {
+      window.XPClient.ensureServerSession().then((result) => {
+        if (result.token) {
+          logDebug("session_init_success", { gameId: fallbackId });
+        } else {
+          logDebug("session_init_failed", { gameId: fallbackId, error: result.error });
+        }
+      }).catch(() => {});
+    }
 
     state.phase = "running";
     state.running = true;
@@ -2325,6 +2380,12 @@ function bootXpCore(window, document) {
       if (window.XP && typeof window.XP.isRunning === 'function') runningNow = !!window.XP.isRunning();
       else runningNow = !!(typeof state !== 'undefined' ? state.running : false);
     } catch(_) {}
+
+    // Re-check session on resume (handles BFCache and session expiry)
+    if (window.XPClient && typeof window.XPClient.ensureServerSession === 'function') {
+      window.XPClient.ensureServerSession().catch(function() {});
+    }
+
     if (runningNow) return;
     const ok = tryCall('resumeSession') || tryCall('nudge');
     if (ok) {

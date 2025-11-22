@@ -9,6 +9,11 @@
   const MAX_TS = Number.MAX_SAFE_INTEGER;
   const DEFAULT_DELTA_CAP = 300;
 
+  // Session states: "none" | "pending" | "ready"
+  const SESSION_NONE = "none";
+  const SESSION_PENDING = "pending";
+  const SESSION_READY = "ready";
+
   const state = {
     fallbackIds: null,
     statusBootstrapped: false,
@@ -17,6 +22,7 @@
     lastTs: 0,
     serverSessionPromise: null,
     serverSessionToken: null,
+    sessionStatus: SESSION_NONE,
   };
 
   function randomId() {
@@ -52,6 +58,17 @@
   }
 
   // Server-side session management
+  function isSessionExpired() {
+    try {
+      const ls = window.localStorage;
+      const expires = Number(ls.getItem(SERVER_SESSION_EXPIRES_KEY) || "0");
+      // Expired if we have an expiry time and it's in the past (with 60s buffer)
+      return expires > 0 && expires <= Date.now() + 60000;
+    } catch (_) {
+      return false;
+    }
+  }
+
   function loadServerSession() {
     try {
       const ls = window.localStorage;
@@ -61,6 +78,7 @@
       // Check if session is still valid (with 60 second buffer)
       if (token && expires > Date.now() + 60000) {
         state.serverSessionToken = token;
+        state.sessionStatus = SESSION_READY;
         return token;
       }
       // Session expired or missing
@@ -78,9 +96,11 @@
       ls.setItem(SERVER_SESSION_TOKEN_KEY, sessionToken);
       ls.setItem(SERVER_SESSION_EXPIRES_KEY, String(expiresAt));
       state.serverSessionToken = sessionToken;
+      state.sessionStatus = SESSION_READY;
     } catch (_) {
       // Fallback to in-memory only
       state.serverSessionToken = sessionToken;
+      state.sessionStatus = SESSION_READY;
     }
   }
 
@@ -93,6 +113,7 @@
     } catch (_) {}
     state.serverSessionToken = null;
     state.serverSessionPromise = null;
+    state.sessionStatus = SESSION_NONE;
   }
 
   async function startServerSession(force = false) {
@@ -110,6 +131,7 @@
     }
 
     const { userId } = ensureIds();
+    state.sessionStatus = SESSION_PENDING;
 
     state.serverSessionPromise = (async () => {
       try {
@@ -134,6 +156,7 @@
         }
         throw new Error("Invalid session response");
       } catch (err) {
+        state.sessionStatus = SESSION_NONE; // Back to none, allows retry
         state.serverSessionPromise = null;
         throw err;
       } finally {
@@ -144,12 +167,58 @@
     return state.serverSessionPromise;
   }
 
+  /**
+   * Ensures a server session is available.
+   * Returns { token, error } - token is null if session failed.
+   * Handles expiry by clearing and re-fetching.
+   */
   async function ensureServerSession() {
+    // Check for expired session - clear and allow re-fetch
+    if (isSessionExpired()) {
+      clearServerSession();
+    }
+
+    // Already ready? Return immediately
+    if (state.sessionStatus === SESSION_READY && state.serverSessionToken) {
+      return { token: state.serverSessionToken, error: null };
+    }
+
+    // Check localStorage (might have been set by another tab)
     const existing = loadServerSession();
     if (existing) {
-      return existing;
+      return { token: existing, error: null };
     }
-    return startServerSession();
+
+    // Already pending? Wait for existing promise
+    if (state.sessionStatus === SESSION_PENDING && state.serverSessionPromise) {
+      try {
+        const token = await state.serverSessionPromise;
+        return { token, error: null };
+      } catch (err) {
+        return { token: null, error: err.message };
+      }
+    }
+
+    // Start new session
+    try {
+      const token = await startServerSession();
+      return { token, error: null };
+    } catch (err) {
+      return { token: null, error: err.message };
+    }
+  }
+
+  /**
+   * Get current session status without triggering fetch.
+   * Returns { status, token }
+   */
+  function getSessionStatus() {
+    // Check expiry first
+    if (isSessionExpired()) {
+      return { status: SESSION_NONE, token: null };
+    }
+    const token = loadServerSession();
+    return { status: state.sessionStatus, token };
   }
 
   function currentClientCap() {
@@ -291,16 +360,9 @@
     let ts = sanitizeTs(source);
     const metadata = buildMetadata(source);
 
-    // Get server session token (if available, non-blocking)
-    let sessionToken = loadServerSession();
-    // If no session token, try to get one (but don't fail if we can't)
-    if (!sessionToken) {
-      try {
-        sessionToken = await ensureServerSession();
-      } catch (_) {
-        // Continue without server session - server may accept the request anyway
-      }
-    }
+    // Session token should be provided by caller (via ensureServerSession gate)
+    // or loaded from storage. No lazy acquisition here - caller is responsible.
+    let sessionToken = source.sessionToken || loadServerSession();
 
     const body = { userId, sessionId, delta, ts };
     if (sessionToken) body.sessionToken = sessionToken;
@@ -377,5 +439,7 @@
     fetchStatus,
     startServerSession,
     clearServerSession,
+    ensureServerSession,
+    getSessionStatus,
   };
 })();
