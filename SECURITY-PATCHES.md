@@ -112,7 +112,60 @@ if (!registered) {
 
 ---
 
-### 4. XSS Prevention in frame.js (CRITICAL) ✅
+### 4. Server Session Enforcement (HIGH) ✅
+
+**File:** `netlify/functions/award-xp.mjs`
+**Lines:** 526-599
+
+**Problem:**
+- Session tokens not validated against server-side state
+- Potential for session hijacking
+- No fingerprint validation for anti-replay protection
+
+**Fix:**
+- Implemented server-side session token validation with HMAC signatures
+- Browser fingerprint validation prevents token theft/replay
+- Redis-backed session store with TTL
+- Two-phase rollout capability (warn mode → enforce mode)
+
+**Validation Checks:**
+1. HMAC signature verification on session tokens
+2. User ID matches token claims
+3. Browser fingerprint matches stored value
+4. Session exists and is valid in Redis
+5. Suspicious activity logging for potential hijacking attempts
+
+**Configuration:**
+```bash
+# Phase 1 - Monitoring (start here)
+XP_SERVER_SESSION_WARN_MODE=1   # Log failures but allow requests
+XP_REQUIRE_SERVER_SESSION=0
+
+# Phase 2 - Enforcement (after verification)
+XP_SERVER_SESSION_WARN_MODE=0
+XP_REQUIRE_SERVER_SESSION=1     # Reject requests without valid tokens
+```
+
+**Response when enforcement rejects:**
+```json
+{
+  "error": "invalid_session",
+  "message": "session_validation_failed",
+  "requiresNewSession": true
+}
+```
+
+**Rollout Procedure:**
+1. Deploy with `XP_SERVER_SESSION_WARN_MODE=1` to monitor
+2. Review logs for `[XP] Session validation failed (warn mode)` entries
+3. After confirming minimal legitimate failures, enable enforcement
+4. Set `XP_REQUIRE_SERVER_SESSION=1` and disable warn mode
+
+See `netlify.toml` for complete environment variable documentation.
+
+---
+
+### 5. XSS Prevention in frame.js (CRITICAL) ✅
 
 **File:** `js/frame.js`
 **Lines:** 509-530
@@ -176,7 +229,8 @@ frameBox.appendChild(emptyStateDiv);
 - ✅ Rate limited (10 req/min per user, 20/min per IP)
 - ✅ XSS vulnerability patched
 - ✅ Sessions tracked and validated
-- **Risk Level:** MEDIUM (anonymous play still has inherent limitations)
+- ✅ Server-side session token enforcement available (HMAC-signed, fingerprint-validated)
+- **Risk Level:** LOW-MEDIUM (when session enforcement enabled)
 
 ---
 
@@ -222,6 +276,12 @@ XP_RATE_LIMIT_ENABLED=1
 
 # Cookie Security (Recommended)
 XP_COOKIE_SECURE=1  # Force HTTPS-only cookies
+
+# Server Session Enforcement (Production Rollout)
+# Phase 1 - Monitoring
+XP_SERVER_SESSION_WARN_MODE=1   # Start with warn mode to monitor
+# Phase 2 - Enforcement (after verification)
+# XP_REQUIRE_SERVER_SESSION=1   # Enable after confirming warn mode success
 ```
 
 ### Local Development

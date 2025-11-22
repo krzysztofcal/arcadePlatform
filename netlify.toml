@@ -1,0 +1,165 @@
+# Netlify configuration for Arcade Platform
+# Documentation: https://docs.netlify.com/configure-builds/file-based-configuration/
+
+[build]
+  # No build command needed - static site
+  publish = "."
+  functions = "netlify/functions"
+
+[functions]
+  # Function bundling settings
+  node_bundler = "esbuild"
+
+# =============================================================================
+# Environment Variables Documentation
+# =============================================================================
+# These variables should be configured in Netlify's Environment Variables UI
+# (Site configuration > Environment variables) for security reasons.
+#
+# REQUIRED SECRETS (set in Netlify UI, never in this file):
+# - XP_DAILY_SECRET: 32+ character HMAC secret for cookie/token signing
+# - UPSTASH_REDIS_REST_URL: Upstash Redis REST API URL
+# - UPSTASH_REDIS_REST_TOKEN: Upstash Redis REST API token
+#
+# =============================================================================
+# SERVER SESSION ENFORCEMENT (Production Rollout)
+# =============================================================================
+#
+# Phase 1 - Monitoring (Warn Mode):
+#   XP_SERVER_SESSION_WARN_MODE=1
+#   XP_REQUIRE_SERVER_SESSION=0
+#
+#   In warn mode, requests without valid session tokens are logged but allowed.
+#   Monitor logs for session validation failures before enforcing.
+#
+# Phase 2 - Enforcement:
+#   XP_SERVER_SESSION_WARN_MODE=0
+#   XP_REQUIRE_SERVER_SESSION=1
+#
+#   In enforce mode, requests without valid session tokens are rejected (401).
+#   Only enable after verifying warn mode shows minimal legitimate failures.
+#
+# Session Enforcement Variables:
+# | Variable                     | Values | Purpose                              |
+# |------------------------------|--------|--------------------------------------|
+# | XP_SERVER_SESSION_WARN_MODE  | 0 or 1 | Log session failures, don't block    |
+# | XP_REQUIRE_SERVER_SESSION    | 0 or 1 | Reject requests without valid tokens |
+#
+# =============================================================================
+
+# Development context - relaxed settings for local testing
+[context.development.environment]
+  XP_DEBUG = "1"
+  XP_RATE_LIMIT_ENABLED = "0"
+  XP_SESSION_RATE_LIMIT_ENABLED = "0"
+  XP_SERVER_SESSION_WARN_MODE = "0"
+  XP_REQUIRE_SERVER_SESSION = "0"
+
+# Branch deploy context - same as production
+[context.branch-deploy.environment]
+  XP_DEBUG = "0"
+  XP_RATE_LIMIT_ENABLED = "1"
+  XP_SESSION_RATE_LIMIT_ENABLED = "1"
+
+# Deploy preview context - relaxed for testing
+[context.deploy-preview.environment]
+  XP_DEBUG = "1"
+  XP_RATE_LIMIT_ENABLED = "1"
+  XP_SESSION_RATE_LIMIT_ENABLED = "1"
+  XP_SERVER_SESSION_WARN_MODE = "1"
+  XP_REQUIRE_SERVER_SESSION = "0"
+
+# Production context - secure defaults
+# NOTE: These are baseline values. Override in Netlify UI for sensitive settings.
+[context.production.environment]
+  XP_DEBUG = "0"
+  XP_RATE_LIMIT_ENABLED = "1"
+  XP_SESSION_RATE_LIMIT_ENABLED = "1"
+  # Server session enforcement - enable gradually:
+  # Step 1: Start with warn mode to monitor
+  XP_SERVER_SESSION_WARN_MODE = "1"
+  # Step 2: After verification, enable enforcement (set in Netlify UI)
+  # XP_REQUIRE_SERVER_SESSION = "1"
+  XP_REQUIRE_SERVER_SESSION = "0"
+
+# =============================================================================
+# All Environment Variables Reference
+# =============================================================================
+#
+# Session Enforcement:
+#   XP_SERVER_SESSION_WARN_MODE - Log but allow requests without valid tokens
+#   XP_REQUIRE_SERVER_SESSION   - Reject requests without valid tokens (401)
+#
+# Session Configuration:
+#   XP_SESSION_TTL_SEC          - Session TTL in seconds (default: 604800 = 7 days)
+#   XP_SESSION_RATE_LIMIT_IP    - Session creation rate limit per IP (default: 5/min)
+#   XP_SESSION_RATE_LIMIT_ENABLED - Enable session creation rate limiting
+#
+# XP Caps:
+#   XP_DAILY_CAP     - Max XP per day (default: 3000)
+#   XP_SESSION_CAP   - Max XP per session (default: 300)
+#   XP_DELTA_CAP     - Max XP per request (default: 300)
+#
+# Rate Limiting:
+#   XP_RATE_LIMIT_USER_PER_MIN - Requests per user per minute (default: 10)
+#   XP_RATE_LIMIT_IP_PER_MIN   - Requests per IP per minute (default: 20)
+#   XP_RATE_LIMIT_ENABLED      - Enable request rate limiting
+#
+# CORS:
+#   XP_CORS_ALLOW - Comma-separated allowed origins
+#                   Example: "https://play.kcswh.pl,http://localhost:4173"
+#
+# Security:
+#   XP_COOKIE_SECURE - Force HTTPS-only cookies (recommended: 1)
+#   XP_DAILY_SECRET  - HMAC secret for signing (32+ chars, set in UI)
+#
+# Debugging:
+#   XP_DEBUG - Include debug info in responses (0 for production)
+#
+# Activity Validation:
+#   XP_REQUIRE_ACTIVITY   - Require activity events for XP
+#   XP_MIN_ACTIVITY_EVENTS - Minimum input events (default: 4)
+#   XP_MIN_ACTIVITY_VIS_S  - Minimum visibility seconds (default: 8)
+#
+# Other:
+#   XP_KEY_NS           - Redis key namespace (default: "kcswh:xp:v2")
+#   XP_DRIFT_MS         - Allowed timestamp drift (default: 30000)
+#   XP_LOCK_TTL_MS      - Request lock TTL (default: 3000)
+#   XP_METADATA_MAX_BYTES - Max metadata size (default: 2048)
+#
+# =============================================================================
+
+# Headers for security
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "SAMEORIGIN"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+
+# Cache static assets
+[[headers]]
+  for = "/css/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+[[headers]]
+  for = "/js/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+# Redirects for Netlify Functions
+[[redirects]]
+  from = "/api/award-xp"
+  to = "/.netlify/functions/award-xp"
+  status = 200
+
+[[redirects]]
+  from = "/api/start-session"
+  to = "/.netlify/functions/start-session"
+  status = 200
