@@ -5,10 +5,19 @@ import { store } from "./_shared/store-upstash.mjs";
 const SESSION_TTL_SEC = Math.max(0, Number(process.env.XP_SESSION_TTL_SEC) || 604800); // 7 days default
 const KEY_NS = process.env.XP_KEY_NS ?? "kcswh:xp:v2";
 const DEBUG_ENABLED = process.env.XP_DEBUG === "1";
-const CORS_ALLOW = (process.env.XP_CORS_ALLOW ?? "")
-  .split(",")
-  .map(s => s.trim())
-  .filter(Boolean);
+// Build CORS allowlist from env var + auto-include Netlify site URL
+const CORS_ALLOW = (() => {
+  const fromEnv = (process.env.XP_CORS_ALLOW ?? "")
+    .split(",")
+    .map(s => s.trim())
+    .filter(Boolean);
+  // Auto-include the Netlify site URL (handles custom domains)
+  const siteUrl = process.env.URL;
+  if (siteUrl && !fromEnv.includes(siteUrl)) {
+    fromEnv.push(siteUrl);
+  }
+  return fromEnv;
+})();
 
 // Rate limiting for session creation
 const SESSION_RATE_LIMIT_PER_IP_PER_MIN = Math.max(0, Number(process.env.XP_SESSION_RATE_LIMIT_IP) || 5);
