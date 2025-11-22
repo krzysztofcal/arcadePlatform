@@ -173,6 +173,33 @@ Run locally:
 
 Set these variables in tandem so the client and server agree on throughput; the server enforces the cap and surfaces `capDelta` so clients can mirror it without redeploying.
 
+### Server Session Enforcement (Production)
+
+Server-side session validation prevents session hijacking and token forgery attacks. Roll out in two phases:
+
+| Variable | Phase | Purpose |
+| --- | --- | --- |
+| `XP_SERVER_SESSION_WARN_MODE` | Monitoring | Set to `1` to log session validation failures without blocking requests. Use this to identify legitimate clients that may not be sending tokens correctly. |
+| `XP_REQUIRE_SERVER_SESSION` | Enforcement | Set to `1` to reject requests without valid session tokens (returns 401). Only enable after warn mode shows minimal false positives. |
+
+**Rollout procedure:**
+
+1. **Phase 1 - Monitoring:** Set `XP_SERVER_SESSION_WARN_MODE=1` in Netlify environment variables. Monitor function logs for `[XP] Session validation failed (warn mode)` entries. Review any patterns of legitimate failures.
+
+2. **Phase 2 - Enforcement:** Once satisfied that clients are correctly sending session tokens:
+   - Set `XP_SERVER_SESSION_WARN_MODE=0`
+   - Set `XP_REQUIRE_SERVER_SESSION=1`
+
+3. **Rollback:** If enforcement causes issues, immediately set `XP_REQUIRE_SERVER_SESSION=0` and re-enable warn mode while investigating.
+
+**Session validation checks:**
+- HMAC signature verification on session tokens
+- User ID matches token claims
+- Browser fingerprint matches (anti-hijacking)
+- Session exists and is valid in Redis
+
+See `netlify.toml` for the complete environment variable reference.
+
 ## CI Status
 - GitHub Actions workflow: tests
 
