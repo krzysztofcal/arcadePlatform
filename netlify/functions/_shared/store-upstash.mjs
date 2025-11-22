@@ -178,10 +178,11 @@ const remoteStore = {
   async expire(key, seconds) { return call("EXPIRE", key, String(seconds)); },
   async ttl(key) { return call("TTL", key); },
   async eval(script, keys = [], argv = []) {
-    // Upstash REST API expects array format: [script, numkeys, key1, key2, ..., arg1, arg2, ...]
-    // All values should be strings for consistency with Upstash REST API
-    const body = [script, String(keys.length), ...keys.map(String), ...argv.map(String)];
-    const res = await fetch(`${BASE}/eval`, {
+    // Upstash REST API expects array format: ["eval", script, numkeys, key1, key2, ..., arg1, arg2, ...]
+    // The command name must be included as the first element when POSTing to the root endpoint
+    // See: https://github.com/upstash/redis-js/blob/main/pkg/commands/eval.ts
+    const body = ["eval", script, keys.length, ...keys, ...argv];
+    const res = await fetch(BASE, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${TOKEN}`,
