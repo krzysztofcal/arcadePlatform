@@ -179,7 +179,8 @@ const remoteStore = {
   async ttl(key) { return call("TTL", key); },
   async eval(script, keys = [], argv = []) {
     // Upstash REST API expects array format: [script, numkeys, key1, key2, ..., arg1, arg2, ...]
-    const body = [script, keys.length, ...keys, ...argv];
+    // All values should be strings for consistency with Upstash REST API
+    const body = [script, String(keys.length), ...keys.map(String), ...argv.map(String)];
     const res = await fetch(`${BASE}/eval`, {
       method: "POST",
       headers: {
@@ -189,7 +190,18 @@ const remoteStore = {
       cache: "no-store",
       body: JSON.stringify(body),
     });
-    if (!res.ok) throw new Error(`Upstash eval failed: ${res.status}`);
+    if (!res.ok) {
+      // Log the actual error response for debugging
+      let errorDetail = "";
+      try {
+        const errorBody = await res.text();
+        errorDetail = `: ${errorBody}`;
+        console.error(`[Upstash] eval failed with status ${res.status}${errorDetail}`);
+      } catch {
+        console.error(`[Upstash] eval failed with status ${res.status} (could not read error body)`);
+      }
+      throw new Error(`Upstash eval failed: ${res.status}${errorDetail}`);
+    }
     const data = await res.json();
     return data.result;
   },
