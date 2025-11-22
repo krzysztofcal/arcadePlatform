@@ -1,0 +1,371 @@
+import crypto from "node:crypto";
+import { store } from "./_shared/store-upstash.mjs";
+
+// Configuration
+const SESSION_TTL_SEC = Math.max(0, Number(process.env.XP_SESSION_TTL_SEC) || 604800); // 7 days default
+const KEY_NS = process.env.XP_KEY_NS ?? "kcswh:xp:v2";
+const DEBUG_ENABLED = process.env.XP_DEBUG === "1";
+const CORS_ALLOW = (process.env.XP_CORS_ALLOW ?? "")
+  .split(",")
+  .map(s => s.trim())
+  .filter(Boolean);
+
+// Rate limiting for session creation
+const SESSION_RATE_LIMIT_PER_IP_PER_MIN = Math.max(0, Number(process.env.XP_SESSION_RATE_LIMIT_IP) || 5);
+const SESSION_RATE_LIMIT_ENABLED = process.env.XP_SESSION_RATE_LIMIT_ENABLED !== "0";
+
+// SECURITY: HMAC signing utilities
+const signPayload = (payload, secret) =>
+  crypto.createHmac("sha256", secret).update(payload).digest("base64url");
+
+const safeEquals = (a, b) => {
+  if (a.length !== b.length) return false;
+  const left = Buffer.from(a, "utf8");
+  const right = Buffer.from(b, "utf8");
+  if (left.length !== right.length) return false;
+  return crypto.timingSafeEqual(left, right);
+};
+
+// Hash helper
+const hash = (s) => crypto.createHash("sha256").update(s).digest("hex");
+
+// Key generators
+const keyServerSession = (sessionId) => `${KEY_NS}:server-session:${sessionId}`;
+const keySessionRateLimitIp = (ip) => `${KEY_NS}:session-ratelimit:ip:${hash(ip)}:${Math.floor(Date.now() / 60000)}`;
+
+// CORS headers
+function corsHeaders(origin) {
+  const headers = {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+  };
+
+  if (!origin) {
+    return headers;
+  }
+
+  const isNetlifyDomain = /^https:\/\/[a-z0-9-]+\.netlify\.app$/i.test(origin);
+
+  if (!isNetlifyDomain && CORS_ALLOW.length > 0 && !CORS_ALLOW.includes(origin)) {
+    return null;
+  }
+
+  headers["access-control-allow-origin"] = origin;
+  headers["access-control-allow-headers"] = "content-type,authorization,x-api-key";
+  headers["access-control-allow-methods"] = "POST,OPTIONS";
+  headers["Vary"] = "Origin";
+
+  return headers;
+}
+
+const json = (statusCode, obj, origin, extraHeaders) => {
+  const corsHeadersObj = corsHeaders(origin);
+  if (!corsHeadersObj) {
+    return {
+      statusCode: 403,
+      headers: { "content-type": "application/json; charset=utf-8" },
+      body: JSON.stringify({ error: "forbidden", message: "origin_not_allowed" }),
+    };
+  }
+  const headers = { ...corsHeadersObj };
+  if (extraHeaders && typeof extraHeaders === "object") {
+    for (const [key, value] of Object.entries(extraHeaders)) {
+      if (value !== undefined) headers[key] = value;
+    }
+  }
+  return {
+    statusCode,
+    headers,
+    body: JSON.stringify(obj),
+  };
+};
+
+// Generate cryptographically secure session ID
+function generateSessionId() {
+  return crypto.randomBytes(32).toString("base64url");
+}
+
+// Create session token with HMAC signature
+function createSignedSessionToken({ sessionId, userId, createdAt, fingerprint, secret }) {
+  const payload = JSON.stringify({
+    sid: sessionId,
+    uid: userId,
+    ts: createdAt,
+    fp: fingerprint,
+  });
+  const encoded = Buffer.from(payload, "utf8").toString("base64url");
+  const signature = signPayload(payload, secret);
+  return `${encoded}.${signature}`;
+}
+
+// Verify and decode session token
+export function verifySessionToken(token, secret) {
+  if (!token || typeof token !== "string") {
+    return { valid: false, reason: "missing_token" };
+  }
+
+  const [encodedPayload, signature] = token.split(".");
+  if (!encodedPayload || !signature) {
+    return { valid: false, reason: "malformed_token" };
+  }
+
+  let payloadJson;
+  try {
+    payloadJson = Buffer.from(encodedPayload, "base64url").toString("utf8");
+  } catch {
+    return { valid: false, reason: "invalid_encoding" };
+  }
+
+  const expectedSig = signPayload(payloadJson, secret);
+  if (!safeEquals(signature, expectedSig)) {
+    return { valid: false, reason: "invalid_signature" };
+  }
+
+  try {
+    const parsed = JSON.parse(payloadJson);
+    return {
+      valid: true,
+      sessionId: parsed.sid,
+      userId: parsed.uid,
+      createdAt: parsed.ts,
+      fingerprint: parsed.fp,
+    };
+  } catch {
+    return { valid: false, reason: "invalid_payload" };
+  }
+}
+
+// Generate client fingerprint from request headers
+function generateFingerprint(headers, ip) {
+  const userAgent = headers?.["user-agent"] || "";
+  const acceptLanguage = headers?.["accept-language"] || "";
+  const acceptEncoding = headers?.["accept-encoding"] || "";
+
+  // Create a fingerprint from stable browser characteristics
+  // Note: IP is NOT included to allow for network changes (mobile, VPN, etc.)
+  // Instead, we use browser characteristics that are more stable
+  const fingerprintData = `${userAgent}|${acceptLanguage}|${acceptEncoding}`;
+  return hash(fingerprintData).substring(0, 16);
+}
+
+// Rate limiting for session creation
+async function checkSessionRateLimit(ip) {
+  if (!SESSION_RATE_LIMIT_ENABLED || !ip) {
+    return { allowed: true };
+  }
+
+  const key = keySessionRateLimitIp(ip);
+  try {
+    const count = await store.incrBy(key, 1);
+    if (count === 1) {
+      await store.expire(key, 60);
+    }
+
+    if (count > SESSION_RATE_LIMIT_PER_IP_PER_MIN) {
+      return {
+        allowed: false,
+        count,
+        limit: SESSION_RATE_LIMIT_PER_IP_PER_MIN,
+      };
+    }
+    return { allowed: true, count };
+  } catch {
+    return { allowed: true }; // Fail open on Redis errors
+  }
+}
+
+// Store session metadata in Redis
+async function storeSession({ sessionId, userId, createdAt, fingerprint, ip }) {
+  const key = keyServerSession(sessionId);
+  const sessionData = JSON.stringify({
+    userId,
+    createdAt,
+    fingerprint,
+    ipHash: hash(ip || "unknown").substring(0, 16), // Store hashed IP for audit, not validation
+    lastActivity: createdAt,
+  });
+
+  try {
+    await store.setex(key, SESSION_TTL_SEC, sessionData);
+    return { stored: true };
+  } catch (err) {
+    console.error("[start-session] Failed to store session:", err);
+    return { stored: false, error: err.message };
+  }
+}
+
+// Validate session exists and matches
+export async function validateServerSession({ sessionId, userId, fingerprint }) {
+  const key = keyServerSession(sessionId);
+
+  try {
+    const raw = await store.get(key);
+    if (!raw) {
+      return { valid: false, reason: "session_not_found" };
+    }
+
+    const data = JSON.parse(raw);
+
+    // Verify userId matches
+    if (data.userId !== userId) {
+      return { valid: false, reason: "user_mismatch" };
+    }
+
+    // Verify fingerprint matches (anti-hijacking)
+    if (data.fingerprint !== fingerprint) {
+      return { valid: false, reason: "fingerprint_mismatch", suspicious: true };
+    }
+
+    // Session is valid
+    return {
+      valid: true,
+      createdAt: data.createdAt,
+      lastActivity: data.lastActivity,
+    };
+  } catch (err) {
+    console.error("[start-session] Failed to validate session:", err);
+    return { valid: false, reason: "validation_error" };
+  }
+}
+
+// Update session last activity
+export async function touchSession(sessionId) {
+  const key = keyServerSession(sessionId);
+
+  try {
+    const raw = await store.get(key);
+    if (!raw) return { updated: false };
+
+    const data = JSON.parse(raw);
+    data.lastActivity = Date.now();
+
+    await store.setex(key, SESSION_TTL_SEC, JSON.stringify(data));
+    return { updated: true };
+  } catch {
+    return { updated: false };
+  }
+}
+
+export async function handler(event) {
+  const origin = event.headers?.origin;
+
+  // SECURITY: Validate CORS before any side effects
+  const isNetlifyDomain = origin ? /^https:\/\/[a-z0-9-]+\.netlify\.app$/i.test(origin) : false;
+  if (origin && !isNetlifyDomain && CORS_ALLOW.length > 0 && !CORS_ALLOW.includes(origin)) {
+    return {
+      statusCode: 403,
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+        "cache-control": "no-store",
+      },
+      body: JSON.stringify({ error: "forbidden", message: "origin_not_allowed" }),
+    };
+  }
+
+  // Handle CORS preflight
+  if (event.httpMethod === "OPTIONS") {
+    const corsHeadersObj = corsHeaders(origin);
+    if (!corsHeadersObj) {
+      return {
+        statusCode: 403,
+        headers: { "content-type": "application/json; charset=utf-8" },
+        body: JSON.stringify({ error: "forbidden", message: "origin_not_allowed" }),
+      };
+    }
+    return { statusCode: 204, headers: corsHeadersObj };
+  }
+
+  // Only accept POST requests
+  if (event.httpMethod !== "POST") {
+    return json(405, { error: "method_not_allowed" }, origin);
+  }
+
+  // Validate secret is configured
+  const secret = process.env.XP_DAILY_SECRET;
+  if (!secret) {
+    return json(500, { error: "server_config", message: "secret_not_configured" }, origin);
+  }
+
+  // Get client IP
+  const clientIp = event.headers?.["x-forwarded-for"]?.split(",")[0]?.trim()
+    || event.headers?.["x-real-ip"]
+    || "unknown";
+
+  // Rate limiting
+  const rateLimitResult = await checkSessionRateLimit(clientIp);
+  if (!rateLimitResult.allowed) {
+    const payload = {
+      error: "rate_limit_exceeded",
+      message: "Too many session creation requests",
+      retryAfter: 60,
+    };
+    if (DEBUG_ENABLED) {
+      payload.debug = {
+        count: rateLimitResult.count,
+        limit: rateLimitResult.limit,
+      };
+    }
+    return json(429, payload, origin, { "Retry-After": "60" });
+  }
+
+  // Parse request body
+  let body = {};
+  try {
+    if (event.body) {
+      body = JSON.parse(event.body);
+    }
+  } catch {
+    return json(400, { error: "bad_json" }, origin);
+  }
+
+  // Validate userId is provided
+  const userId = typeof body.userId === "string" ? body.userId.trim() : null;
+  if (!userId) {
+    return json(400, { error: "missing_user_id" }, origin);
+  }
+
+  // Generate session data
+  const now = Date.now();
+  const sessionId = generateSessionId();
+  const fingerprint = generateFingerprint(event.headers, clientIp);
+
+  // Create signed session token
+  const sessionToken = createSignedSessionToken({
+    sessionId,
+    userId,
+    createdAt: now,
+    fingerprint,
+    secret,
+  });
+
+  // Store session in Redis
+  const storeResult = await storeSession({
+    sessionId,
+    userId,
+    createdAt: now,
+    fingerprint,
+    ip: clientIp,
+  });
+
+  if (!storeResult.stored) {
+    return json(500, { error: "session_storage_failed" }, origin);
+  }
+
+  // Build response
+  const response = {
+    ok: true,
+    sessionId,
+    sessionToken,
+    expiresIn: SESSION_TTL_SEC,
+    createdAt: now,
+  };
+
+  if (DEBUG_ENABLED) {
+    response.debug = {
+      fingerprint,
+      ipHash: hash(clientIp).substring(0, 8),
+    };
+  }
+
+  return json(200, response, origin);
+}

@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { store } from "./_shared/store-upstash.mjs";
+import { verifySessionToken, validateServerSession, touchSession } from "./start-session.mjs";
 
 const warsawDateFormatter = new Intl.DateTimeFormat("en-CA", {
   timeZone: "Europe/Warsaw",
@@ -115,6 +116,13 @@ const LOCK_TTL_MS = Number.isFinite(RAW_LOCK_TTL) && RAW_LOCK_TTL >= 0 ? RAW_LOC
 const RATE_LIMIT_PER_USER_PER_MIN = Math.max(0, asNumber(process.env.XP_RATE_LIMIT_USER_PER_MIN, 10));
 const RATE_LIMIT_PER_IP_PER_MIN = Math.max(0, asNumber(process.env.XP_RATE_LIMIT_IP_PER_MIN, 20));
 const RATE_LIMIT_ENABLED = process.env.XP_RATE_LIMIT_ENABLED !== "0"; // Default enabled
+
+// SECURITY: Server-side session token configuration
+// These are read at runtime to support dynamic configuration changes
+// When enabled, XP awards require a valid server-signed session token
+const getRequireServerSession = () => process.env.XP_REQUIRE_SERVER_SESSION === "1";
+// Warn mode logs validation failures but doesn't block requests (for gradual rollout)
+const getServerSessionWarnMode = () => process.env.XP_SERVER_SESSION_WARN_MODE === "1";
 
 const sanitizeTotal = (value) => Math.max(0, Math.floor(Number(value) || 0));
 
@@ -242,6 +250,16 @@ function corsHeaders(origin) {
 }
 
 const hash = (s) => crypto.createHash("sha256").update(s).digest("hex");
+
+// Generate client fingerprint from request headers (must match start-session.mjs)
+function generateFingerprint(headers) {
+  const userAgent = headers?.["user-agent"] || "";
+  const acceptLanguage = headers?.["accept-language"] || "";
+  const acceptEncoding = headers?.["accept-encoding"] || "";
+  const fingerprintData = `${userAgent}|${acceptLanguage}|${acceptEncoding}`;
+  return hash(fingerprintData).substring(0, 16);
+}
+
 const keyDaily = (u, day = getDailyKey()) => `${KEY_NS}:daily:${u}:${day}`;
 const keyTotal = (u) => `${KEY_NS}:total:${u}`;
 const keySession = (u, s) => `${KEY_NS}:session:${hash(`${u}|${s}`)}`;
@@ -503,6 +521,81 @@ export async function handler(event) {
       };
     }
     return json(429, payload, origin, { "Retry-After": "60" });
+  }
+
+  // SECURITY: Server-side session token validation
+  const sessionToken = body.sessionToken || event.headers?.["x-session-token"];
+  const requireServerSession = getRequireServerSession();
+  const serverSessionWarnMode = getServerSessionWarnMode();
+  if (requireServerSession || serverSessionWarnMode) {
+    if (!body.statusOnly) {
+      const fingerprint = generateFingerprint(event.headers);
+      let sessionValid = false;
+      let sessionError = null;
+
+      if (!sessionToken) {
+        sessionError = "missing_session_token";
+      } else {
+        // Verify HMAC signature on token
+        const tokenResult = verifySessionToken(sessionToken, secret);
+        if (!tokenResult.valid) {
+          sessionError = `token_${tokenResult.reason}`;
+        } else if (tokenResult.userId !== userId) {
+          sessionError = "token_user_mismatch";
+        } else if (tokenResult.fingerprint !== fingerprint) {
+          sessionError = "token_fingerprint_mismatch";
+        } else {
+          // Verify session exists in Redis and matches
+          const serverValidation = await validateServerSession({
+            sessionId: tokenResult.sessionId,
+            userId,
+            fingerprint,
+          });
+          if (!serverValidation.valid) {
+            sessionError = `session_${serverValidation.reason}`;
+            if (serverValidation.suspicious) {
+              console.warn("[XP] SECURITY: Potential session hijacking attempt", {
+                userId,
+                fingerprint,
+                ip: clientIp,
+                reason: serverValidation.reason,
+              });
+            }
+          } else {
+            sessionValid = true;
+            // Update session last activity
+            touchSession(tokenResult.sessionId).catch(() => {});
+          }
+        }
+      }
+
+      if (!sessionValid) {
+        if (requireServerSession) {
+          // Enforce mode: reject request
+          const payload = {
+            error: "invalid_session",
+            message: sessionError || "session_validation_failed",
+            requiresNewSession: true,
+          };
+          if (DEBUG_ENABLED) {
+            payload.debug = {
+              sessionError,
+              hasToken: !!sessionToken,
+              fingerprint,
+            };
+          }
+          return json(401, payload, origin);
+        } else if (serverSessionWarnMode) {
+          // Warn mode: log but don't block
+          console.warn("[XP] Session validation failed (warn mode):", {
+            userId,
+            sessionError,
+            hasToken: !!sessionToken,
+            ip: clientIp,
+          });
+        }
+      }
+    }
   }
 
   let totalsPromise = null;
