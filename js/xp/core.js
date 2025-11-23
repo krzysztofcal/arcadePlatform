@@ -1125,7 +1125,11 @@ function bootXpCore(window, document) {
         state.nextResetEpoch = nextReset;
       }
     }
-    maybeResetDailyAllowance();
+    // NOTE: We intentionally do NOT call maybeResetDailyAllowance() here.
+    // The server is the authoritative source of truth for daily totals and remaining XP.
+    // If there's clock drift between client and server, calling maybeResetDailyAllowance()
+    // would incorrectly reset the values we just received from the server.
+    // The reset logic in loadCache() handles the offline/cached data case.
 
     const reasonRaw = data.reason || (data.debug && data.debug.reason) || null;
     const reason = typeof reasonRaw === "string" ? reasonRaw.toLowerCase() : null;
