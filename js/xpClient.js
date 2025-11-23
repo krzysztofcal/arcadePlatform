@@ -518,12 +518,14 @@
     }
 
     let attempt = 0;
+    const payloadJson = JSON.stringify(body);
+    const allowBeacon = opts.allowBeacon === true;
     while (attempt < 3) {
       try {
         const res = await fetch(CALC_URL, {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify(body),
+          body: payloadJson,
           cache: "no-store",
           credentials: "include",
           keepalive: opts.keepalive === true,
@@ -566,6 +568,15 @@
 
         return responseBody;
       } catch (err) {
+        if (allowBeacon && typeof navigator !== "undefined" && navigator && typeof navigator.sendBeacon === "function") {
+          try {
+            const beaconPayload = new Blob([payloadJson], { type: "application/json" });
+            const beaconOk = navigator.sendBeacon(CALC_URL, beaconPayload);
+            if (beaconOk) {
+              return { _transport: "beacon" };
+            }
+          } catch (_) {}
+        }
         attempt += 1;
         if (attempt >= 3) {
           throw err;
