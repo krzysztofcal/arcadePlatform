@@ -297,15 +297,22 @@
     }
   }
 
-  async function sendRequest(body) {
+  async function sendRequest(body, options) {
+    const opts = options || {};
+    const keepalive = opts.keepalive === true;
+    const allowBeacon = opts.allowBeacon === true;
+    const payload = JSON.stringify(body);
+    const requestInit = {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: payload,
+      cache: "no-store",
+      credentials: "omit",
+    };
+    if (keepalive) requestInit.keepalive = true;
+    let transport = keepalive ? "keepalive" : "fetch";
     try {
-      const res = await fetch(FN_URL, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(body),
-        cache: "no-store",
-        credentials: "omit",
-      });
+      const res = await fetch(FN_URL, requestInit);
       const status = res.status;
       if (!res.ok) {
         let parsed = null;
@@ -315,7 +322,7 @@
         } catch (_) {
           return { ok: false, network: true, status };
         }
-        const result = { ok: false, network: true, status, body: parsed };
+        const result = { ok: false, network: true, status, body: parsed, transport };
         if (status === 422 && parsed && parsed.error === "delta_out_of_range") {
           result.network = false;
         }
@@ -323,12 +330,21 @@
       }
       try {
         const json = await res.json();
-        return { ok: true, body: json };
+        return { ok: true, body: json, transport };
       } catch (_) {
-        return { ok: false, network: true, status: res.status };
+        return { ok: false, network: true, status: res.status, transport };
       }
     } catch (err) {
-      return { ok: false, network: true, status: 0, error: err };
+      if (allowBeacon && typeof navigator !== "undefined" && navigator && typeof navigator.sendBeacon === "function") {
+        try {
+          const beaconPayload = new Blob([payload], { type: "application/json" });
+          const beaconOk = navigator.sendBeacon(FN_URL, beaconPayload);
+          if (beaconOk) {
+            return { ok: true, body: null, transport: "beacon", status: 0 };
+          }
+        } catch (_) {}
+      }
+      return { ok: false, network: true, status: 0, error: err, transport };
     }
   }
 
@@ -351,7 +367,8 @@
     ensureStatusBootstrap(true);
   }
 
-  async function postWindow(payload) {
+  async function postWindow(payload, options) {
+    const opts = options || {};
     const source = (payload && typeof payload === "object") ? payload : {};
     ensureStatusBootstrap(false);
     await maybeBackoff();
@@ -372,7 +389,10 @@
     let attempt = 0;
     let sessionRefreshed = false;
     while (attempt < 3) {
-      const result = await sendRequest(body);
+      const result = await sendRequest(body, {
+        keepalive: opts.keepalive === true,
+        allowBeacon: opts.allowBeacon === true,
+      });
       if (!result.ok) {
         // Handle invalid session - refresh and retry once
         if (result.status === 401 && result.body?.error === "invalid_session" && !sessionRefreshed) {
@@ -404,6 +424,9 @@
       }
 
       const responseBody = result.body || {};
+      if (result.transport) {
+        responseBody._transport = result.transport;
+      }
       updateCapFromPayload(responseBody);
       if (responseBody && responseBody.locked && attempt === 0) {
         await new Promise(resolve => setTimeout(resolve, 100 + Math.floor(Math.random() * 200)));
@@ -457,7 +480,8 @@
    * Post window to server-side calculation endpoint
    * Server calculates XP based on activity instead of trusting client delta
    */
-  async function postWindowServerCalc(payload) {
+  async function postWindowServerCalc(payload, options) {
+    const opts = options || {};
     const source = (payload && typeof payload === "object") ? payload : {};
     ensureStatusBootstrap(false);
     await maybeBackoff();
@@ -502,6 +526,7 @@
           body: JSON.stringify(body),
           cache: "no-store",
           credentials: "include",
+          keepalive: opts.keepalive === true,
         });
 
         if (!res.ok) {
@@ -523,6 +548,9 @@
         }
 
         const responseBody = await res.json();
+        if (responseBody && typeof responseBody === "object" && opts.keepalive === true) {
+          responseBody._transport = "keepalive";
+        }
 
         // Update client cap from server response
         if (responseBody && typeof responseBody === "object") {
@@ -554,11 +582,11 @@
    * Unified postWindow that routes to server calc or legacy endpoint
    * based on configuration
    */
-  async function postWindowAuto(payload) {
+  async function postWindowAuto(payload, options) {
     if (isServerCalcEnabled()) {
-      return postWindowServerCalc(payload);
+      return postWindowServerCalc(payload, options);
     }
-    return postWindow(payload);
+    return postWindow(payload, options);
   }
 
   window.XPClient = {
