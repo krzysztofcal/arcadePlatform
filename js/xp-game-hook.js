@@ -687,7 +687,10 @@
       try { xp.nudge(); return; } catch (_) {}
     }
     if (window && window.parent && window.parent !== window && typeof window.parent.postMessage === "function") {
-      try { window.parent.postMessage({ type: "kcswh:activity", userGesture: true }, window.location ? window.location.origin || "*" : "*"); } catch (_) {}
+      const targetOrigin = window.location?.origin;
+      if (targetOrigin && targetOrigin !== "null") {
+        try { window.parent.postMessage({ type: "kcswh:activity", userGesture: true }, targetOrigin); } catch (_) {}
+      }
     }
   }
 
