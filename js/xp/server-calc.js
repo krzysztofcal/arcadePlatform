@@ -176,15 +176,7 @@
       }
     });
 
-    // Also track on unload
-    window.addEventListener('beforeunload', function () {
-      if (isVisible && visibilityStart > 0) {
-        const visibleMs = Date.now() - visibilityStart;
-        state.visibilitySeconds += visibleMs / 1000;
-      }
-      // Try to send final window
-      sendWindow({ force: true, sync: true });
-    });
+    // Note: beforeunload handling is done in core.js to comply with lifecycle guards
   }
 
   /**
