@@ -113,7 +113,7 @@ function update(delta){
   }
 
   pipes.forEach((pipe) => {
-    pipe.x -= pipeSpeed * delta * 60;
+    pipe.x -= pipeSpeed * delta;
     if (!pipe.scored && pipe.x + pipeWidth < birdX) {
       pipe.scored = true;
       score += 1;
