@@ -21,9 +21,8 @@
     window.addEventListener('keyup', e=>{ if(e.key==='ArrowLeft'){ paddle.left=false; nudge(); } if(e.key==='ArrowRight'){ paddle.right=false; nudge(); } });
     canvas.addEventListener('pointerdown', e=>{ setPaddleByPointerX(e.clientX); nudge(); e.preventDefault(); }, {passive:false});
     canvas.addEventListener('pointermove', e=>{ if(e.buttons){ setPaddleByPointerX(e.clientX); nudge(); } e.preventDefault(); }, {passive:false});
-    let btnInterval=null;
-    function pressDir(dir){ if(btnInterval) clearInterval(btnInterval); if(dir==='left'){ paddle.left=true; paddle.right=false; } if(dir==='right'){ paddle.right=true; paddle.left=false; } nudge(); btnInterval=setInterval(()=>{},50); }
-    function releaseDir(){ if(btnInterval) clearInterval(btnInterval); paddle.left=false; paddle.right=false; }
+    function pressDir(dir){ if(dir==='left'){ paddle.left=true; paddle.right=false; } if(dir==='right'){ paddle.right=true; paddle.left=false; } nudge(); }
+    function releaseDir(){ paddle.left=false; paddle.right=false; }
     if (leftBtn){
       leftBtn.addEventListener('pointerdown',()=>pressDir('left'));
       leftBtn.addEventListener('pointerup',()=>{ releaseDir(); nudge(); });
@@ -43,7 +42,6 @@
       if (e.code === 'Space') { e.preventDefault(); if (onTogglePause) onTogglePause(); nudge(); }
       if (e.code === 'KeyM') { if (onToggleMute) onToggleMute(); nudge(); }
     });
-    return { };
   }
   window.InputController = InputController;
 })();

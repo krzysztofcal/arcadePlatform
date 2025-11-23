@@ -49,7 +49,7 @@ if (existsSync(skipFile)) {
 const childEnv = { ...process.env };
 
 if (!childEnv.XP_DAILY_SECRET) {
-  childEnv.XP_DAILY_SECRET = 'test-secret';
+  childEnv.XP_DAILY_SECRET = 'test-secret-for-sessions-32chars!';
 }
 
 if (!childEnv.XP_DEBUG) {

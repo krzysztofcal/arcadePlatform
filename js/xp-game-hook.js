@@ -62,6 +62,8 @@
     flushDelayMs: MIN_FLUSH_DELAY_MS,
     domReadyListenerBound: false,
     handleVisible: null,
+    handleHidden: null,
+    activityListener: null,
     handleVisibleRan: false,
     lastDailyCapLog: 0,
   };
@@ -471,10 +473,12 @@
     const handleHidden = () => {
       stop({ flush: true });
     };
+    state.handleHidden = handleHidden;
 
     const activity = () => {
       try { nudge(); } catch (_) {}
     };
+    state.activityListener = activity;
 
     if (document && typeof document.addEventListener === "function") {
       document.addEventListener("xp:visible", handleVisible, { passive: true });
@@ -487,6 +491,37 @@
       });
     }
 
+  }
+
+  /**
+   * Remove all event listeners set up by ensureAutoListeners.
+   * Call this when the game is completely unloaded to prevent memory leaks.
+   * After cleanup, auto() or start() can re-initialize the listeners.
+   */
+  function cleanup() {
+    if (!state.autoListenersBound) return;
+
+    if (document && typeof document.removeEventListener === "function") {
+      if (state.handleVisible) {
+        try { document.removeEventListener("xp:visible", state.handleVisible); } catch (_) {}
+      }
+      if (state.handleHidden) {
+        try { document.removeEventListener("xp:hidden", state.handleHidden); } catch (_) {}
+      }
+    }
+
+    if (window && typeof window.removeEventListener === "function" && state.activityListener) {
+      ["pointerdown", "pointerup", "keydown", "keyup", "touchstart", "wheel"].forEach((evt) => {
+        try { window.removeEventListener(evt, state.activityListener); } catch (_) {}
+      });
+    }
+
+    state.autoListenersBound = false;
+    state.handleVisible = null;
+    state.handleHidden = null;
+    state.activityListener = null;
+    // Reset bootstrap flag so listeners can be re-bound on next auto()/start() call
+    autoBootstrapped = false;
   }
 
   function ensureDomReadyKickoff() {
@@ -698,6 +733,7 @@
   bridge.auto = auto;
   bridge.start = start;
   bridge.stop = stop;
+  bridge.cleanup = cleanup;
   bridge.add = add;
   bridge.nudge = nudge;
   bridge.getCurrentGameId = function getCurrentGameId() {

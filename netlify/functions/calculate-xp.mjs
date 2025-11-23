@@ -745,9 +745,9 @@ export async function handler(event) {
 
     if (!sessionToken) {
       sessionError = "missing_session_token";
-    } else if (!SESSION_SECRET) {
-      // If no secret configured, skip validation but warn
-      console.warn("[XP-CALC] SESSION_SECRET not configured, skipping token validation");
+    } else if (!SESSION_SECRET || SESSION_SECRET.length < 32) {
+      // If no secret configured or too short, skip validation but warn
+      console.warn("[XP-CALC] SESSION_SECRET not configured or too short (<32 chars), skipping token validation");
       sessionValid = true;
     } else {
       // Verify HMAC signature on token

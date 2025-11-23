@@ -42,7 +42,7 @@ export default defineConfig({
     stdout: 'pipe',
     stderr: 'pipe',
     env: {
-      XP_DAILY_SECRET: 'test-secret',
+      XP_DAILY_SECRET: 'test-secret-for-sessions-32chars!',
       XP_DEBUG: '1',
       // Enable CORS whitelist for security testing
       XP_CORS_ALLOW: 'http://localhost:8888,https://example.netlify.app',

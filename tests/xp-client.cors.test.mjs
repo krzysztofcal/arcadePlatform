@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 
-process.env.XP_DAILY_SECRET = 'test-secret';
+process.env.XP_DAILY_SECRET = 'test-secret-for-sessions-32chars!';
 
 async function createHandler(ns = 'test:cors') {
   process.env.XP_DEBUG = '0';

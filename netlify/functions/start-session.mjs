@@ -289,10 +289,13 @@ export async function handler(event) {
     return json(405, { error: "method_not_allowed" }, origin);
   }
 
-  // Validate secret is configured
+  // Validate secret is configured and has sufficient entropy
   const secret = process.env.XP_DAILY_SECRET;
   if (!secret) {
     return json(500, { error: "server_config", message: "secret_not_configured" }, origin);
+  }
+  if (secret.length < 32) {
+    return json(500, { error: "server_config", message: "secret_too_short" }, origin);
   }
 
   // Get client IP

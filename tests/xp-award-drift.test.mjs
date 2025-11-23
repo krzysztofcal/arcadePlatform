@@ -45,7 +45,7 @@ async function createHandler(ns = "test:drift", overrides = {}) {
   process.env.XP_SESSION_CAP = String(overrides.sessionCap ?? 300);
   process.env.XP_DELTA_CAP = String(overrides.deltaCap ?? 300);
   process.env.XP_DRIFT_MS = String(overrides.driftMs ?? 30_000);
-  process.env.XP_DAILY_SECRET = overrides.secret ?? "test-secret";
+  process.env.XP_DAILY_SECRET = overrides.secret ?? "test-secret-for-sessions-32chars!";
   const { handler } = await import(`../netlify/functions/award-xp.mjs?drift=${ns}`);
   return handler;
 }

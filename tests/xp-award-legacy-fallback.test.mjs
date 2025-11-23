@@ -1,4 +1,4 @@
-process.env.XP_DAILY_SECRET = 'test-secret';
+process.env.XP_DAILY_SECRET = 'test-secret-for-sessions-32chars!';
 
 import assert from 'node:assert/strict';
 

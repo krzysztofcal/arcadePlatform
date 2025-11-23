@@ -432,6 +432,9 @@ export async function handler(event) {
   if (!secret) {
     return json(500, { error: "server_config", message: "xp_daily_secret_missing" }, origin);
   }
+  if (secret.length < 32) {
+    return json(500, { error: "server_config", message: "xp_daily_secret_too_short" }, origin);
+  }
 
   const now = Date.now();
   const dayKeyNow = getDailyKey(now);
