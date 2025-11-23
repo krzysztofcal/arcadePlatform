@@ -808,6 +808,14 @@ function bootXpCore(window, document) {
       if (!parsed || typeof parsed !== "object") return;
       if (typeof parsed.totalToday === "number") state.totalToday = parsed.totalToday;
       if (typeof parsed.cap === "number") state.cap = parsed.cap;
+      // Load dailyRemaining directly from cache instead of recalculating
+      // This preserves the server's authoritative value
+      if (typeof parsed.dailyRemaining === "number" && Number.isFinite(parsed.dailyRemaining)) {
+        state.dailyRemaining = Math.max(0, Math.floor(parsed.dailyRemaining));
+      } else if (typeof parsed.cap === "number" && typeof parsed.totalToday === "number") {
+        // Fallback for old cache entries without dailyRemaining
+        state.dailyRemaining = Math.max(0, parsed.cap - parsed.totalToday);
+      }
       if (typeof parsed.totalLifetime === "number") state.totalLifetime = parsed.totalLifetime;
       if (typeof parsed.badgeShownXp === "number") state.badgeShownXp = parsed.badgeShownXp;
       if (typeof parsed.serverTotalXp === "number") state.serverTotalXp = parsed.serverTotalXp;
@@ -839,8 +847,11 @@ function bootXpCore(window, document) {
           state.badgeBaselineXp = 0;
         }
       }
-      syncDailyRemainingFromTotals();
-      maybeResetDailyAllowance();
+      // NOTE: We intentionally do NOT call syncDailyRemainingFromTotals() or
+      // maybeResetDailyAllowance() here. The server is the source of truth for
+      // daily XP data, and we now save/load dailyRemaining directly from the cache.
+      // This prevents cached stale nextResetEpoch values from triggering resets
+      // that overwrite correct server data.
     } catch (_) { /* ignore */ }
   }
 
@@ -849,6 +860,7 @@ function bootXpCore(window, document) {
       const payload = {
         totalToday: state.totalToday,
         cap: state.cap,
+        dailyRemaining: state.dailyRemaining,
         totalLifetime: state.totalLifetime,
         badgeShownXp: state.badgeShownXp,
         serverTotalXp: state.serverTotalXp,
@@ -1701,7 +1713,8 @@ function bootXpCore(window, document) {
   }
 
   function isAtCap() {
-    maybeResetDailyAllowance();
+    // NOTE: We do NOT call maybeResetDailyAllowance() here anymore.
+    // The server is the source of truth for daily XP data.
     if (state.cap == null) return false;
     if (Number.isFinite(state.dailyRemaining) && state.dailyRemaining <= 0) {
       return true;
@@ -1928,7 +1941,9 @@ function bootXpCore(window, document) {
   }
 
   function getRemainingDaily() {
-    maybeResetDailyAllowance();
+    // NOTE: We do NOT call maybeResetDailyAllowance() here anymore.
+    // The server is the source of truth for daily XP data.
+    // Calling reset here could overwrite correct server values with stale data.
     if (state.cap == null) return Infinity;
     const remaining = Number(state.dailyRemaining);
     if (Number.isFinite(remaining)) {
