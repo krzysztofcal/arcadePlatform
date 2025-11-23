@@ -487,6 +487,12 @@
       body.boostMultiplier = source.boostMultiplier;
     }
 
+    // Add session token if available (from source or stored)
+    const sessionToken = source.sessionToken || loadServerSession();
+    if (sessionToken) {
+      body.sessionToken = sessionToken;
+    }
+
     let attempt = 0;
     while (attempt < 3) {
       try {

@@ -15,6 +15,7 @@
 
 import crypto from "node:crypto";
 import { store } from "./_shared/store-upstash.mjs";
+import { verifySessionToken, validateServerSession, touchSession } from "./start-session.mjs";
 
 // ============================================================================
 // Configuration Constants
@@ -54,6 +55,9 @@ const SESSION_TTL_MS = SESSION_TTL_SEC > 0 ? SESSION_TTL_SEC * 1000 : 0;
 const KEY_NS = process.env.XP_KEY_NS ?? "kcswh:xp:v2";
 const DRIFT_MS = Math.max(0, asNumber(process.env.XP_DRIFT_MS, 30_000));
 const DEBUG_ENABLED = process.env.XP_DEBUG === "1";
+const SESSION_SECRET = process.env.XP_SESSION_SECRET || process.env.XP_DAILY_SECRET || "";
+const REQUIRE_SERVER_SESSION = process.env.XP_REQUIRE_SERVER_SESSION === "1";
+const SERVER_SESSION_WARN_MODE = process.env.XP_SERVER_SESSION_WARN_MODE === "1";
 
 // Rate Limiting
 const RATE_LIMIT_PER_USER_PER_MIN = Math.max(0, asNumber(process.env.XP_RATE_LIMIT_USER_PER_MIN, 10));
@@ -161,6 +165,17 @@ const GAME_XP_RULES = {
 // ============================================================================
 
 const hash = (s) => crypto.createHash("sha256").update(s).digest("hex");
+
+/**
+ * Generate fingerprint from request headers for session validation
+ */
+function generateFingerprint(headers) {
+  if (!headers) return "";
+  const ua = headers["user-agent"] || "";
+  const lang = headers["accept-language"] || "";
+  const enc = headers["accept-encoding"] || "";
+  return hash(`${ua}|${lang}|${enc}`).slice(0, 16);
+}
 
 const warsawDateFormatter = new Intl.DateTimeFormat("en-CA", {
   timeZone: "Europe/Warsaw",
@@ -719,6 +734,81 @@ export async function handler(event) {
       message: `Too many requests from ${rateLimitResult.type}`,
       retryAfter: 60,
     }, origin, { "Retry-After": "60" });
+  }
+
+  // SECURITY: Server-side session token validation
+  const sessionToken = body.sessionToken || event.headers?.["x-session-token"];
+  if (REQUIRE_SERVER_SESSION || SERVER_SESSION_WARN_MODE) {
+    const fingerprint = generateFingerprint(event.headers);
+    let sessionValid = false;
+    let sessionError = null;
+
+    if (!sessionToken) {
+      sessionError = "missing_session_token";
+    } else if (!SESSION_SECRET) {
+      // If no secret configured, skip validation but warn
+      console.warn("[XP-CALC] SESSION_SECRET not configured, skipping token validation");
+      sessionValid = true;
+    } else {
+      // Verify HMAC signature on token
+      const tokenResult = verifySessionToken(sessionToken, SESSION_SECRET);
+      if (!tokenResult.valid) {
+        sessionError = `token_${tokenResult.reason}`;
+      } else if (tokenResult.userId !== userId) {
+        sessionError = "token_user_mismatch";
+      } else if (tokenResult.fingerprint !== fingerprint) {
+        sessionError = "token_fingerprint_mismatch";
+      } else {
+        // Verify session exists in Redis and matches
+        const serverValidation = await validateServerSession({
+          sessionId: tokenResult.sessionId,
+          userId,
+          fingerprint,
+        });
+        if (!serverValidation.valid) {
+          sessionError = `session_${serverValidation.reason}`;
+          if (serverValidation.suspicious) {
+            console.warn("[XP-CALC] SECURITY: Potential session hijacking attempt", {
+              userId,
+              fingerprint,
+              ip: clientIp,
+              reason: serverValidation.reason,
+            });
+          }
+        } else {
+          sessionValid = true;
+          // Update session last activity
+          touchSession(tokenResult.sessionId).catch(() => {});
+        }
+      }
+    }
+
+    if (!sessionValid) {
+      if (REQUIRE_SERVER_SESSION) {
+        // Enforce mode: reject request
+        const payload = {
+          error: "invalid_session",
+          message: sessionError || "session_validation_failed",
+          requiresNewSession: true,
+        };
+        if (DEBUG_ENABLED) {
+          payload.debug = {
+            sessionError,
+            hasToken: !!sessionToken,
+            fingerprint,
+          };
+        }
+        return json(401, payload, origin);
+      } else if (SERVER_SESSION_WARN_MODE) {
+        // Warn mode: log but don't block
+        console.warn("[XP-CALC] Session validation failed (warn mode):", {
+          userId,
+          sessionError,
+          hasToken: !!sessionToken,
+          ip: clientIp,
+        });
+      }
+    }
   }
 
   // Extract game event data
