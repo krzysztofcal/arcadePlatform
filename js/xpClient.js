@@ -521,8 +521,11 @@
     const payloadJson = JSON.stringify(body);
     const allowBeacon = opts.allowBeacon === true;
     while (attempt < 3) {
+      let networkError = false;
+      let lastError = null;
+      let res = null;
       try {
-        const res = await fetch(CALC_URL, {
+        res = await fetch(CALC_URL, {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: payloadJson,
@@ -530,7 +533,12 @@
           credentials: "include",
           keepalive: opts.keepalive === true,
         });
+      } catch (err) {
+        networkError = true;
+        lastError = err;
+      }
 
+      if (res) {
         if (!res.ok) {
           let parsed = null;
           try {
@@ -567,23 +575,24 @@
         }
 
         return responseBody;
-      } catch (err) {
-        if (allowBeacon && typeof navigator !== "undefined" && navigator && typeof navigator.sendBeacon === "function") {
-          try {
-            const beaconPayload = new Blob([payloadJson], { type: "application/json" });
-            const beaconOk = navigator.sendBeacon(CALC_URL, beaconPayload);
-            if (beaconOk) {
-              return { _transport: "beacon" };
-            }
-          } catch (_) {}
-        }
-        attempt += 1;
-        if (attempt >= 3) {
-          throw err;
-        }
-        // Brief backoff before retry
-        await new Promise(resolve => setTimeout(resolve, 500 * attempt));
       }
+
+      if (networkError && allowBeacon && typeof navigator !== "undefined" && navigator && typeof navigator.sendBeacon === "function") {
+        try {
+          const beaconPayload = new Blob([payloadJson], { type: "application/json" });
+          const beaconOk = navigator.sendBeacon(CALC_URL, beaconPayload);
+          if (beaconOk) {
+            return { _transport: "beacon" };
+          }
+        } catch (_) {}
+      }
+
+      attempt += 1;
+      if (attempt >= 3) {
+        throw lastError || new Error("Server calc failed");
+      }
+      // Brief backoff before retry
+      await new Promise(resolve => setTimeout(resolve, 500 * attempt));
     }
 
     throw new Error("Server calc failed: exhausted retries");
