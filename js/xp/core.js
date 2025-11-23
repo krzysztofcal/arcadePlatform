@@ -66,6 +66,8 @@ function bootXpCore(window, document) {
     return Number.isFinite(parsed) ? parsed : fallback;
   }
 
+  const EARLY_WINDOW_MS = parseNumber(window && window.XP_EARLY_WINDOW_MS, 4_000);
+
   function normalizeGameId(value) {
     if (value == null) return "";
     try {
@@ -176,6 +178,7 @@ function bootXpCore(window, document) {
     serverTotalXp: null,
     badgeBaselineXp: 0,
     pendingWindow: null,
+    earlyWindowSent: false,
     lastSuccessfulWindowEnd: null,
     badgeTimerId: null,
     runBoostTriggered: false,
@@ -1186,7 +1189,13 @@ function bootXpCore(window, document) {
     if (state.pending) return;
     const now = Date.now();
     const elapsed = now - state.windowStart;
-    if (!force && elapsed < CHUNK_MS) return;
+    const earlyWindowDue = !force
+      && !state.earlyWindowSent
+      && Number.isFinite(EARLY_WINDOW_MS)
+      && EARLY_WINDOW_MS > 0
+      && state.activeMs >= EARLY_WINDOW_MS
+      && elapsed >= EARLY_WINDOW_MS;
+    if (!force && !earlyWindowDue && elapsed < CHUNK_MS) return;
     const visibilitySecondsRaw = state.visibilitySeconds;
     const visibility = Math.round(visibilitySecondsRaw);
     const inputs = state.inputEvents;
@@ -1282,6 +1291,7 @@ function bootXpCore(window, document) {
         inputEvents: payload.inputEvents,
         scoreDelta: payload.scoreDelta || 0,
         force: !!force,
+        early: !!earlyWindowDue,
       });
     } catch (_) {}
 
@@ -1338,7 +1348,8 @@ function bootXpCore(window, document) {
       const postFn = window.XPClient.isServerCalcEnabled && window.XPClient.isServerCalcEnabled()
         ? window.XPClient.postWindowServerCalc
         : window.XPClient.postWindow;
-      return postFn(payload);
+      const transportOptions = force ? { keepalive: true, allowBeacon: true } : {};
+      return postFn(payload, transportOptions);
     })
       .then((data) => {
         try {
@@ -1348,12 +1359,16 @@ function bootXpCore(window, document) {
             scoreDelta: data && data.scoreDelta,
             debug: data && data.debug,
             gameId: payload.gameId,
+            transport: (data && data._transport) || "fetch",
           };
           logDebug("window_result", snap);
           if (window.console && console.debug) {
             console.debug("[xp] window_result", snap);
           }
         } catch (_) {}
+        if (earlyWindowDue) {
+          state.earlyWindowSent = true;
+        }
         state.lastSuccessfulWindowEnd = payload.windowEnd;
         state.pendingWindow = null;
         return handleResponse(data, { source: "window" });
@@ -1402,6 +1417,11 @@ function bootXpCore(window, document) {
       state.activeMs += delta;
     }
     if (state.activeMs >= CHUNK_MS) {
+      sendWindow(false);
+    } else if (!state.earlyWindowSent
+      && Number.isFinite(EARLY_WINDOW_MS)
+      && EARLY_WINDOW_MS > 0
+      && state.activeMs >= EARLY_WINDOW_MS) {
       sendWindow(false);
     }
 
@@ -1575,6 +1595,7 @@ function bootXpCore(window, document) {
     const currentShown = Number(state.badgeShownXp) || 0;
     state.badgeBaselineXp = Math.max(baseline, currentShown);
     state.pendingWindow = null;
+    state.earlyWindowSent = false;
     state.lastSuccessfulWindowEnd = null;
     if (!state.flush.lastSync) state.flush.lastSync = Date.now();
     state.debug.hardIdleActive = false;
@@ -1633,6 +1654,7 @@ function bootXpCore(window, document) {
     state.isActive = false;
     state.lastScorePulseTs = 0;
     state.pendingWindow = null;
+    state.earlyWindowSent = false;
     state.lastSuccessfulWindowEnd = null;
     state.badgeBaselineXp = Math.max(resolveBadgeBaseline(), Number(state.badgeShownXp) || 0);
     state.sessionXp = 0;
