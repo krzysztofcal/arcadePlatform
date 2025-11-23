@@ -55,36 +55,38 @@
   }
   function applyLang(lang, source){
     currentLang = lang;
-    // Update footer texts
-    document.querySelectorAll('[data-i18n]').forEach(el=>{
-      const key = el.getAttribute('data-i18n');
-      const val = (dict[key] && dict[key][lang]) || el.textContent;
-      if (val) el.textContent = val;
-    });
-    // Update localized hrefs
-    document.querySelectorAll('[data-href-en]').forEach(el=>{
-      const href = el.getAttribute(lang === 'pl' ? 'data-href-pl' : 'data-href-en');
-      if (href) el.setAttribute('href', href + location.search);
-    });
-    // Inputs: placeholder and aria-label
-    document.querySelectorAll('[data-i18n-placeholder]').forEach(el=>{
-      const k = el.getAttribute('data-i18n-placeholder');
-      const v = dict[k] && dict[k][lang];
-      if (v) el.setAttribute('placeholder', v);
-    });
-    document.querySelectorAll('[data-i18n-aria]').forEach(el=>{
-      const k = el.getAttribute('data-i18n-aria');
-      const v = dict[k] && dict[k][lang];
-      if (v) el.setAttribute('aria-label', v);
-    });
-    // Toggle pressed state
-    document.querySelectorAll('.lang-btn').forEach(btn=>{
-      btn.setAttribute('aria-pressed', btn.getAttribute('data-lang') === lang ? 'true' : 'false');
-    });
-    if (initialized && analytics && analytics.langChange){
-      analytics.langChange({ lang, source: source || 'ui' });
-    }
-    try { document.dispatchEvent(new CustomEvent('langchange', { detail: { lang } })); } catch {}
+    const elements = document.querySelectorAll('[data-i18n], [data-href-en], [data-href-pl], [data-i18n-placeholder], [data-i18n-aria], .lang-btn');
+    const update = ()=>{
+      elements.forEach(el=>{
+        const data = el.dataset || {};
+        const key = data.i18n;
+        if (key){
+          const val = (dict[key] && dict[key][lang]) || el.textContent;
+          if (val) el.textContent = val;
+        }
+        const href = lang === 'pl' ? data.hrefPl : data.hrefEn;
+        if (href) el.setAttribute('href', href + location.search);
+        const placeholderKey = data.i18nPlaceholder;
+        if (placeholderKey){
+          const v = dict[placeholderKey] && dict[placeholderKey][lang];
+          if (v) el.setAttribute('placeholder', v);
+        }
+        const ariaKey = data.i18nAria;
+        if (ariaKey){
+          const v = dict[ariaKey] && dict[ariaKey][lang];
+          if (v) el.setAttribute('aria-label', v);
+        }
+        if (el.classList && el.classList.contains('lang-btn')){
+          el.setAttribute('aria-pressed', data.lang === lang ? 'true' : 'false');
+        }
+      });
+      if (initialized && analytics && analytics.langChange){
+        analytics.langChange({ lang, source: source || 'ui' });
+      }
+      try { document.dispatchEvent(new CustomEvent('langchange', { detail: { lang } })); } catch {}
+    };
+
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(update); else update();
   }
 
   function init(){
