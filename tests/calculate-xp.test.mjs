@@ -468,4 +468,25 @@ describe("GAME_XP_RULES", () => {
     expect(rules.events.power_pellet()).toBe(5);
     expect(rules.events.level_complete(3)).toBe(45); // 3 * 15 = 45
   });
+
+  it("should have cats game rules", () => {
+    expect(GAME_XP_RULES.cats).toBeDefined();
+    expect(GAME_XP_RULES.cats.scoreToXpRatio).toBe(1.0); // 1 cat = 1 XP
+    expect(GAME_XP_RULES.cats.events).toBeDefined();
+    expect(GAME_XP_RULES.cats.events.cat_caught).toBeDefined();
+  });
+
+  it("should have cats game aliases", () => {
+    // Multiple slug variations should work
+    expect(GAME_XP_RULES["catch-cats"]).toBeDefined();
+    expect(GAME_XP_RULES["game_cats"]).toBeDefined();
+  });
+
+  it("should calculate correct XP for cats events", () => {
+    const rules = GAME_XP_RULES.cats;
+    expect(rules.events.cat_caught()).toBe(1); // 1 XP per cat
+    expect(rules.events.streak(3)).toBe(0);    // No bonus for < 5 streak
+    expect(rules.events.streak(5)).toBe(5);    // 5 XP bonus for 5+ streak
+    expect(rules.events.level_up(3)).toBe(6);  // 3 * 2 = 6 XP
+  });
 });

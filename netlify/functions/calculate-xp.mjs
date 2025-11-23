@@ -122,6 +122,38 @@ const GAME_XP_RULES = {
       milestone: (distance) => Math.floor(distance / 100) * 2,
     }
   },
+  // Catch Cats: each cat caught = 1 score point
+  cats: {
+    baseXpPerSecond: BASELINE_XP_PER_SECOND,
+    scoreToXpRatio: 1.0,   // 1 cat = 1 XP (score 1:1 with XP)
+    maxScoreXpPerWindow: 30, // Cap per window (prevents farming)
+    events: {
+      cat_caught: () => 1,           // 1 XP per cat
+      streak: (count) => count >= 5 ? 5 : 0, // 5 XP bonus for 5+ streak
+      level_up: (level) => level * 2,  // 2 XP per level
+    }
+  },
+  // Alias for catch-cats slug variations
+  "catch-cats": {
+    baseXpPerSecond: BASELINE_XP_PER_SECOND,
+    scoreToXpRatio: 1.0,
+    maxScoreXpPerWindow: 30,
+    events: {
+      cat_caught: () => 1,
+      streak: (count) => count >= 5 ? 5 : 0,
+      level_up: (level) => level * 2,
+    }
+  },
+  "game_cats": {
+    baseXpPerSecond: BASELINE_XP_PER_SECOND,
+    scoreToXpRatio: 1.0,
+    maxScoreXpPerWindow: 30,
+    events: {
+      cat_caught: () => 1,
+      streak: (count) => count >= 5 ? 5 : 0,
+      level_up: (level) => level * 2,
+    }
+  },
 };
 
 // ============================================================================
