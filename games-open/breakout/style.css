@@ -1,0 +1,19 @@
+.game-shell {
+  background: radial-gradient(circle at 20% 20%, rgba(255, 148, 94, 0.08), transparent 40%), radial-gradient(circle at 80% 70%, rgba(94, 217, 255, 0.08), transparent 45%), #0c1327;
+}
+
+#board {
+  background: linear-gradient(180deg, #0f1c35 0%, #0c1327 100%);
+  border: 2px solid rgba(255, 255, 255, 0.14);
+  border-radius: 14px;
+  box-shadow: 0 18px 52px rgba(0, 0, 0, 0.35);
+}
+
+.dpad {
+  max-width: 240px;
+  margin: 0 auto;
+}
+
+.mobile-hint {
+  text-align: center;
+}

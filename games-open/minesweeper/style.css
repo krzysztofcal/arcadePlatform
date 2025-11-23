@@ -1,0 +1,53 @@
+.game-shell {
+  background: radial-gradient(circle at 10% 20%, rgba(255, 255, 255, 0.05), transparent 45%), #0e1b32;
+}
+
+.mine-board {
+  display: grid;
+  grid-template-columns: repeat(10, 1fr);
+  gap: 6px;
+  width: 360px;
+  margin: 0 auto;
+}
+
+.mine-tile {
+  background: #13213d;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  height: 36px;
+  color: #e5edff;
+  font-weight: 700;
+  text-align: center;
+  line-height: 36px;
+  cursor: pointer;
+  transition: background 120ms ease, transform 120ms ease;
+}
+
+.mine-tile.revealed {
+  background: #1d2b48;
+  border-color: rgba(255, 255, 255, 0.12);
+  transform: translateY(-1px);
+}
+
+.mine-tile.flagged {
+  background: #2f3f64;
+  color: #ffd166;
+}
+
+.mine-tile.bomb {
+  background: #b71c1c;
+  color: #ffffff;
+}
+
+.controls {
+  display: flex;
+  justify-content: center;
+}
+
+.button.full {
+  width: 240px;
+}
+
+.mobile-hint {
+  text-align: center;
+}
