@@ -267,8 +267,9 @@ XP_COOKIE_SECURE=0
 - New server-side XP calculation endpoint (`/calculate-xp`)
 - Server calculates XP based on activity (input events, visibility, score changes)
 - Session state (combo, momentum) tracked in Redis server-side
-- Game-specific XP rules (tetris, 2048, pacman, t-rex)
+- Game-specific XP rules (tetris, 2048, pacman, t-rex, cats)
 - Client sends raw activity data, NOT calculated XP values
+- **Documentation:** See [docs/xp-calculation-rules.md](docs/xp-calculation-rules.md)
 
 **Activation:**
 - Enable via `window.XP_SERVER_CALC = true`
