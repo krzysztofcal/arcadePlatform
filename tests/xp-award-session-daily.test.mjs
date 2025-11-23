@@ -48,7 +48,7 @@ async function createHandler(label, overrides = {}) {
   process.env.XP_SESSION_CAP = String(overrides.sessionCap ?? 200);
   process.env.XP_DELTA_CAP = String(overrides.deltaCap ?? 300);
   process.env.XP_SESSION_TTL_SEC = String(overrides.sessionTtl ?? 604800);
-  process.env.XP_DAILY_SECRET = overrides.secret ?? 'test-secret';
+  process.env.XP_DAILY_SECRET = overrides.secret ?? 'test-secret-for-sessions-32chars!';
   const { handler } = await import(`../netlify/functions/award-xp.mjs?mix=${label}`);
   return handler;
 }

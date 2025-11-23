@@ -5,7 +5,7 @@ const BASE_TS = 1_700_000_000_000;
 
 const cookieJar = new WeakMap();
 const XP_DAY_COOKIE = 'xp_day';
-const DEFAULT_SECRET = 'test-secret';
+const DEFAULT_SECRET = 'test-secret-for-sessions-32chars!';
 
 function getJar(handler) {
   let jar = cookieJar.get(handler);
@@ -64,7 +64,7 @@ async function createHandler(label, overrides = {}) {
   process.env.XP_MIN_ACTIVITY_EVENTS = String(overrides.minEvents ?? 4);
   process.env.XP_MIN_ACTIVITY_VIS_S = String(overrides.minVisibility ?? 8);
   process.env.XP_METADATA_MAX_BYTES = String(overrides.metadataLimit ?? 2048);
-  process.env.XP_DAILY_SECRET = overrides.secret ?? 'test-secret';
+  process.env.XP_DAILY_SECRET = overrides.secret ?? 'test-secret-for-sessions-32chars!';
   const { handler } = await import(`../netlify/functions/award-xp.mjs?case=${label}`);
   return handler;
 }
