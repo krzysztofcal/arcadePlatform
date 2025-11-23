@@ -1327,7 +1327,11 @@ function bootXpCore(window, document) {
         state.pendingWindow = null;
         return Promise.resolve(null);
       }
-      return window.XPClient.postWindow(payload);
+      // Use server-side calculation when enabled, otherwise legacy endpoint
+      const postFn = window.XPClient.isServerCalcEnabled && window.XPClient.isServerCalcEnabled()
+        ? window.XPClient.postWindowServerCalc
+        : window.XPClient.postWindow;
+      return postFn(payload);
     })
       .then((data) => {
         try {

@@ -1,11 +1,12 @@
 # Remaining Security Issues
 
-**Date:** 2025-11-20 (Updated)
+**Date:** 2025-11-23 (Updated)
 **Audit Reference:** PR #108 identified 7 critical, 4 high, 5 medium severity issues
 **Fixed (Initial):** 4 issues (CORS, Rate Limiting, Session Validation, XSS in frame.js)
 **Fixed (2025-11-20):** 4 additional issues (XSS in games, Cookie Secure flag, CSP headers, SRI documentation)
+**Fixed (2025-11-23):** 1 issue (Server-side XP calculation - eliminates XP manipulation)
 **Verified Secure:** 1 issue (Open redirect validation - already protected by same-origin check)
-**Remaining:** 0 critical, 3 high, 3 medium
+**Remaining:** 0 critical, 2 high, 3 medium
 
 ---
 
@@ -255,23 +256,43 @@ XP_COOKIE_SECURE=0
 
 ---
 
-### 🟠 HIGH #4: Client-Controlled XP Calculations
+### ✅ HIGH #4: Client-Controlled XP Calculations (IMPLEMENTED)
 
-**File:** `js/xp/core.js`, `js/xp/scoring.js`
+**File:** `netlify/functions/calculate-xp.mjs`, `js/xpClient.js`
 **Risk:** XP value manipulation
-**Impact:** Users can inflate their XP
+**Impact:** Users could inflate their XP
+**Status:** IMPLEMENTED 2025-11-23
 
-**Current Mitigation:**
+**Solution Implemented:**
+- New server-side XP calculation endpoint (`/calculate-xp`)
+- Server calculates XP based on activity (input events, visibility, score changes)
+- Session state (combo, momentum) tracked in Redis server-side
+- Game-specific XP rules (tetris, 2048, pacman, t-rex)
+- Client sends raw activity data, NOT calculated XP values
+
+**Activation:**
+- Enable via `window.XP_SERVER_CALC = true`
+- Or URL param: `?xpserver=1`
+- Or localStorage: `xp:serverCalc = "1"`
+
+**Security Improvements:**
+- XP manipulation eliminated - server calculates all values
+- Combo state tracked server-side (can't be spoofed)
+- Activity validation enforced (min input events + visibility)
+- All existing caps still enforced (daily, session, delta)
+
+**Backward Compatibility:**
+- Legacy `/award-xp` endpoint still works
+- Gradual rollout supported via feature flags
+- Automatic routing based on configuration
+
+**Previous Mitigation (still active):**
 - Daily cap (3000 XP)
 - Session cap (300 XP)
 - Delta cap (300 XP per request)
 - Rate limiting (10 req/min)
 
-**Remaining Gap:**
-- Client still calculates XP amounts
-- Server only validates caps, not correctness
-
-**Long-term Fix:**
+**Original Long-term Fix (now implemented):**
 Server-side XP calculation based on game events:
 
 ```javascript
