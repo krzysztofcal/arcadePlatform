@@ -496,6 +496,7 @@
   /**
    * Remove all event listeners set up by ensureAutoListeners.
    * Call this when the game is completely unloaded to prevent memory leaks.
+   * After cleanup, auto() or start() can re-initialize the listeners.
    */
   function cleanup() {
     if (!state.autoListenersBound) return;
@@ -519,6 +520,8 @@
     state.handleVisible = null;
     state.handleHidden = null;
     state.activityListener = null;
+    // Reset bootstrap flag so listeners can be re-bound on next auto()/start() call
+    autoBootstrapped = false;
   }
 
   function ensureDomReadyKickoff() {
