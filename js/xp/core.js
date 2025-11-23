@@ -1079,7 +1079,14 @@ function bootXpCore(window, document) {
   function handleError(err) {
     try {
       const message = err && err.message ? String(err.message).slice(0, 200) : "error";
-      logDebug("window_error", { message });
+      const context = { message };
+      if (state && state.pendingWindow) {
+        context.window = { ...state.pendingWindow };
+      }
+      logDebug("window_error", context);
+      if (window.console && console.debug) {
+        console.debug("[xp] window_error", context);
+      }
     } catch (_) {}
     if (window.console && console.debug) {
       console.debug("XP window failed", err);
@@ -1340,8 +1347,12 @@ function bootXpCore(window, document) {
             reason: data && data.reason,
             scoreDelta: data && data.scoreDelta,
             debug: data && data.debug,
+            gameId: payload.gameId,
           };
           logDebug("window_result", snap);
+          if (window.console && console.debug) {
+            console.debug("[xp] window_result", snap);
+          }
         } catch (_) {}
         state.lastSuccessfulWindowEnd = payload.windowEnd;
         state.pendingWindow = null;

@@ -103,6 +103,7 @@ const MIN_ACTIVITY_VIS_S = Math.max(0, asNumber(process.env.XP_MIN_ACTIVITY_VIS_
 const METADATA_MAX_BYTES = Math.max(0, asNumber(process.env.XP_METADATA_MAX_BYTES, 2048));
 const DEBUG_ENABLED = process.env.XP_DEBUG === "1";
 const KEY_NS = process.env.XP_KEY_NS ?? "kcswh:xp:v2";
+const LOCK_KEY_PREFIX = `${KEY_NS}:lock:`;
 const DRIFT_MS = Math.max(0, asNumber(process.env.XP_DRIFT_MS, 30_000));
 // Build CORS allowlist from env var + auto-include Netlify site URL
 const CORS_ALLOW = (() => {
@@ -120,6 +121,11 @@ const CORS_ALLOW = (() => {
 
 const RAW_LOCK_TTL = Number(process.env.XP_LOCK_TTL_MS ?? 3_000);
 const LOCK_TTL_MS = Number.isFinite(RAW_LOCK_TTL) && RAW_LOCK_TTL >= 0 ? RAW_LOCK_TTL : 3_000;
+console.log("[XP] Lock configuration", {
+  lockTtlMs: LOCK_TTL_MS,
+  rawLockTtl: RAW_LOCK_TTL,
+  lockPrefix: LOCK_KEY_PREFIX,
+});
 
 // SECURITY: Rate limiting configuration
 const RATE_LIMIT_PER_USER_PER_MIN = Math.max(0, asNumber(process.env.XP_RATE_LIMIT_USER_PER_MIN, 30));
@@ -273,7 +279,7 @@ const keyDaily = (u, day = getDailyKey()) => `${KEY_NS}:daily:${u}:${day}`;
 const keyTotal = (u) => `${KEY_NS}:total:${u}`;
 const keySession = (u, s) => `${KEY_NS}:session:${hash(`${u}|${s}`)}`;
 const keySessionSync = (u, s) => `${KEY_NS}:session:last:${hash(`${u}|${s}`)}`;
-const keyLock = (u, s) => `${KEY_NS}:lock:${hash(`${u}|${s}`)}`;
+const keyLock = (u, s) => `${LOCK_KEY_PREFIX}${hash(`${u}|${s}`)}`;
 const keyRateLimitUser = (userId) => `${KEY_NS}:ratelimit:user:${userId}:${Math.floor(Date.now() / 60000)}`;
 const keyRateLimitIp = (ip) => `${KEY_NS}:ratelimit:ip:${hash(ip)}:${Math.floor(Date.now() / 60000)}`;
 const keySessionRegistry = (userId, sessionId) => `${KEY_NS}:registry:${hash(`${userId}|${sessionId}`)}`;
@@ -813,7 +819,9 @@ export async function handler(event) {
         local sessionTotal = tonumber(redis.call('GET', sessionKey) or '0')
         local lifetime = tonumber(redis.call('GET', totalKey) or '0')
         local lastSync = tonumber(redis.call('GET', sessionSyncKey) or '0')
-        return {0, currentDaily, sessionTotal, lifetime, lastSync, 6}
+        local lockedAt = tonumber(redis.call('GET', lockKey) or '0')
+        local lockTtlRemaining = tonumber(redis.call('PTTL', lockKey) or -1)
+        return {0, currentDaily, sessionTotal, lifetime, lastSync, 6, lockedAt, lockTtlRemaining}
       end
     end
 
@@ -824,11 +832,11 @@ export async function handler(event) {
       end
     end
 
-    local function finish(grant, dailyTotal, sessionTotal, lifetime, sync, status)
+    local function finish(grant, dailyTotal, sessionTotal, lifetime, sync, status, lockedAt, lockTtlRemaining)
       if shouldLock then
         redis.call('DEL', lockKey)
       end
-      return {grant, dailyTotal, sessionTotal, lifetime, sync, status}
+      return {grant, dailyTotal, sessionTotal, lifetime, sync, status, lockedAt, lockTtlRemaining}
     end
 
     local sessionTotal = tonumber(redis.call('GET', sessionKey) or '0')
@@ -902,6 +910,9 @@ export async function handler(event) {
   const totalLifetime = Number(res?.[3]) || 0;
   const lastSync = Number(res?.[4]) || 0;
   const status = Number(res?.[5]) || 0;
+  const lockedAt = Number(res?.[6]) || 0;
+  const lockTtlRemainingRaw = Number(res?.[7]);
+  const lockTtlRemainingMs = Number.isFinite(lockTtlRemainingRaw) ? lockTtlRemainingRaw : null;
 
   const totalTodayRedis = Math.min(DAILY_CAP, Math.max(0, sanitizeTotal(redisDailyTotalRaw)));
   const remaining = Math.max(0, DAILY_CAP - totalTodayRedis);
@@ -998,6 +1009,30 @@ export async function handler(event) {
   };
   if (reason) debugExtra.reason = reason;
   if (cookieClamped) debugExtra.cookieClamped = true;
+
+  if (status === 6) {
+    const lockAgeMs = lockedAt > 0 ? Math.max(0, now - lockedAt) : null;
+    const lockInfo = {
+      key: lockKeyK,
+      ttlMs: LOCK_TTL_MS,
+    };
+    if (lockAgeMs !== null) lockInfo.ageMs = lockAgeMs;
+    if (lockTtlRemainingMs !== null) lockInfo.remainingMs = lockTtlRemainingMs;
+    payload.lock = lockInfo;
+    debugExtra.lockKey = lockKeyK;
+    debugExtra.lockTtlMs = LOCK_TTL_MS;
+    debugExtra.lockAgeMs = lockAgeMs;
+    debugExtra.lockTtlRemainingMs = lockTtlRemainingMs;
+    if (DEBUG_ENABLED) {
+      console.debug("[XP] Lock contention", {
+        lockKey: lockKeyK,
+        lockAgeMs,
+        lockTtlMs: LOCK_TTL_MS,
+        lockTtlRemainingMs,
+        status,
+      });
+    }
+  }
 
   return respond(200, payload, { totalOverride: redisDailyTotalRaw, debugExtra });
 }

@@ -11,12 +11,14 @@ let score = 0;
 let best = Number(localStorage.getItem("ah-2048-best")) || 0;
 let overlayEl = null;
 let touchStart = null;
+let lastXpScore = 0;
 
 bestEl.textContent = best;
 
 function initBoard() {
   board = Array.from({ length: SIZE }, () => Array(SIZE).fill(0));
   score = 0;
+  lastXpScore = 0;
   updateScore();
   spawnTile();
   spawnTile();
@@ -26,6 +28,14 @@ function initBoard() {
 
 function updateScore() {
   scoreEl.textContent = score;
+  const bridge = window && window.GameXpBridge;
+  if (bridge && typeof bridge.add === "function") {
+    const delta = Math.max(0, score - lastXpScore);
+    if (delta > 0) {
+      try { bridge.add(delta); } catch (_error) {}
+    }
+  }
+  lastXpScore = score;
   if (typeof window.reportScoreToPortal === "function") {
     try { window.reportScoreToPortal("2048", score); } catch (_error) {}
   }
