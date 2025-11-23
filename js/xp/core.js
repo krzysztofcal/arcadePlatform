@@ -1949,6 +1949,7 @@ function bootXpCore(window, document) {
     return {
       totalToday: typeof state.totalToday === "number" ? state.totalToday : 0,
       cap: state.cap != null ? state.cap : null,
+      dailyRemaining: getRemainingDaily(),
       totalXp: state.snapshot.totalXp,
       level: state.snapshot.level,
       xpIntoLevel: state.snapshot.xpIntoLevel,

@@ -2,6 +2,7 @@
   const levelEl = document.getElementById("xpLevel");
   const totalEl = document.getElementById("xpTotal");
   const capEl = document.getElementById("xpDailyCap");
+  const dailyRemainingEl = document.getElementById("xpDailyRemaining");
   const todayEl = document.getElementById("xpToday");
   const todayCapEl = document.getElementById("xpTodayCap");
   const progressBar = document.querySelector(".xp-progress__bar");
@@ -20,6 +21,8 @@
     if (totalEl) totalEl.textContent = formatNumber(snapshot.totalXp);
     const capText = snapshot.cap == null ? "—" : `${formatNumber(snapshot.cap)} XP`;
     if (capEl) capEl.textContent = capText;
+    const remainingText = snapshot.dailyRemaining === Infinity ? "—" : `${formatNumber(snapshot.dailyRemaining)} XP`;
+    if (dailyRemainingEl) dailyRemainingEl.textContent = remainingText;
     if (todayEl) todayEl.textContent = formatNumber(snapshot.totalToday);
     if (todayCapEl) todayCapEl.textContent = snapshot.cap == null ? "—" : `${formatNumber(snapshot.cap)} XP`;
 
