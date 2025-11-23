@@ -137,14 +137,14 @@ test.describe('E2E Security Tests', () => {
 
   test.describe('Rate Limiting', () => {
 
-    test('should enforce per-user rate limit (10 req/min)', async ({ request }) => {
+    test('should enforce per-user rate limit (30 req/min)', async ({ request }) => {
       const userId = generateUserId();
       const sessionId = generateSessionId();
       let successCount = 0;
       let rateLimitHit = false;
 
-      // Attempt 12 requests with same userId
-      for (let i = 0; i < 12; i++) {
+      // Attempt 35 requests with same userId
+      for (let i = 0; i < 35; i++) {
         const payload = createXPRequest({ userId, sessionId, ts: Date.now() + i });
         const response = await request.post(XP_ENDPOINT, { data: payload });
 
@@ -164,17 +164,17 @@ test.describe('E2E Security Tests', () => {
         expect(rateLimitHit).toBe(true);
       } else {
         // Should succeed for some requests, then hit rate limit
-        expect(successCount).toBeLessThanOrEqual(10);
+        expect(successCount).toBeLessThanOrEqual(30);
         expect(rateLimitHit).toBe(true);
       }
     });
 
-    test('should enforce per-IP rate limit (20 req/min)', async ({ request }) => {
+    test('should enforce per-IP rate limit (60 req/min)', async ({ request }) => {
       let successCount = 0;
       let rateLimitHit = false;
 
-      // Attempt 25 requests with different userIds (same IP)
-      for (let i = 0; i < 25; i++) {
+      // Attempt 65 requests with different userIds (same IP)
+      for (let i = 0; i < 65; i++) {
         const payload = createXPRequest({ ts: Date.now() + i });
         const response = await request.post(XP_ENDPOINT, { data: payload });
 
@@ -185,8 +185,8 @@ test.describe('E2E Security Tests', () => {
         }
       }
 
-      // Should succeed for first ~20, then hit rate limit
-      expect(successCount).toBeLessThanOrEqual(20);
+      // Should succeed for first ~60, then hit rate limit
+      expect(successCount).toBeLessThanOrEqual(60);
       expect(rateLimitHit).toBe(true);
     });
 
@@ -194,8 +194,8 @@ test.describe('E2E Security Tests', () => {
       const userId = generateUserId();
       const sessionId = generateSessionId();
 
-      // Hit rate limit
-      for (let i = 0; i < 11; i++) {
+      // Hit rate limit (31 requests to exceed 30 req/min limit)
+      for (let i = 0; i < 31; i++) {
         await request.post(XP_ENDPOINT, {
           data: createXPRequest({ userId, sessionId, ts: Date.now() + i })
         });
@@ -218,8 +218,8 @@ test.describe('E2E Security Tests', () => {
       const session1 = generateSessionId();
       const session2 = generateSessionId();
 
-      // Hit rate limit for user1
-      for (let i = 0; i < 11; i++) {
+      // Hit rate limit for user1 (31 requests to exceed 30 req/min limit)
+      for (let i = 0; i < 31; i++) {
         await request.post(XP_ENDPOINT, {
           data: createXPRequest({ userId: user1, sessionId: session1, ts: Date.now() + i })
         });

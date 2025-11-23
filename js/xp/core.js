@@ -25,8 +25,8 @@ function bootXpCore(window, document) {
   const ACTIVE_WINDOW_MS = parseNumber(window && window.XP_ACTIVE_WINDOW_MS, DEFAULT_ACTIVE_WINDOW_MS);
   const CACHE_KEY = "kcswh:xp:last";
 
-  const LEVEL_BASE_XP = 100;
-  const LEVEL_MULTIPLIER = 1.1;
+  const LEVEL_BASE_XP = parseNumber(window && window.XP_LEVEL_BASE_XP, 100);
+  const LEVEL_MULTIPLIER = parseNumber(window && window.XP_LEVEL_MULTIPLIER, 1.35);
 
   const DEFAULT_BOOST_SEC = 15;
   const DIAG_QUERY = /\bxpdiag=1\b/;
@@ -1327,7 +1327,11 @@ function bootXpCore(window, document) {
         state.pendingWindow = null;
         return Promise.resolve(null);
       }
-      return window.XPClient.postWindow(payload);
+      // Use server-side calculation when enabled, otherwise legacy endpoint
+      const postFn = window.XPClient.isServerCalcEnabled && window.XPClient.isServerCalcEnabled()
+        ? window.XPClient.postWindowServerCalc
+        : window.XPClient.postWindow;
+      return postFn(payload);
     })
       .then((data) => {
         try {

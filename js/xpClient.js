@@ -1,5 +1,6 @@
 (function () {
   const FN_URL = "/.netlify/functions/award-xp";
+  const CALC_URL = "/.netlify/functions/calculate-xp";
   const START_SESSION_URL = "/.netlify/functions/start-session";
   const USER_KEY = "kcswh:userId";
   const SESSION_KEY = "kcswh:sessionId";
@@ -434,8 +435,137 @@
     return payload;
   }
 
+  /**
+   * Check if server-side XP calculation is enabled
+   */
+  function isServerCalcEnabled() {
+    if (window.XP_SERVER_CALC === true) return true;
+    try {
+      if (typeof location !== "undefined" && location && typeof location.search === "string") {
+        if (/\bxpserver=1\b/.test(location.search)) return true;
+      }
+    } catch (_) {}
+    try {
+      if (typeof localStorage !== "undefined" && localStorage) {
+        if (localStorage.getItem("xp:serverCalc") === "1") return true;
+      }
+    } catch (_) {}
+    return false;
+  }
+
+  /**
+   * Post window to server-side calculation endpoint
+   * Server calculates XP based on activity instead of trusting client delta
+   */
+  async function postWindowServerCalc(payload) {
+    const source = (payload && typeof payload === "object") ? payload : {};
+    ensureStatusBootstrap(false);
+    await maybeBackoff();
+
+    const { userId, sessionId } = ensureIds();
+
+    // Build payload for server-side calculation
+    // Note: We send raw activity data, NOT calculated delta
+    const body = {
+      userId,
+      sessionId,
+      gameId: source.gameId || "default",
+      windowStart: source.windowStart || 0,
+      windowEnd: source.windowEnd || Date.now(),
+      inputEvents: Math.max(0, Math.floor(Number(source.inputEvents) || 0)),
+      visibilitySeconds: Math.max(0, Number(source.visibilitySeconds) || 0),
+      scoreDelta: Math.max(0, Math.floor(Number(source.scoreDelta) || 0)),
+    };
+
+    // Add game events if present
+    if (Array.isArray(source.gameEvents) && source.gameEvents.length > 0) {
+      body.gameEvents = source.gameEvents.slice(0, 50);
+    }
+
+    // Add boost if present
+    if (source.boostMultiplier && source.boostMultiplier > 1) {
+      body.boostMultiplier = source.boostMultiplier;
+    }
+
+    // Add session token if available (from source or stored)
+    const sessionToken = source.sessionToken || loadServerSession();
+    if (sessionToken) {
+      body.sessionToken = sessionToken;
+    }
+
+    let attempt = 0;
+    while (attempt < 3) {
+      try {
+        const res = await fetch(CALC_URL, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+          cache: "no-store",
+          credentials: "include",
+        });
+
+        if (!res.ok) {
+          let parsed = null;
+          try {
+            const text = await res.text();
+            parsed = text ? JSON.parse(text) : null;
+          } catch (_) {
+            throw new Error(`Server calc failed (${res.status})`);
+          }
+
+          if (res.status === 429) {
+            // Rate limited - back off
+            state.backoffUntil = Date.now() + 60000;
+            throw new Error("Rate limited");
+          }
+
+          throw new Error(parsed?.message || parsed?.error || `Server calc failed (${res.status})`);
+        }
+
+        const responseBody = await res.json();
+
+        // Update client cap from server response
+        if (responseBody && typeof responseBody === "object") {
+          if (Number.isFinite(responseBody.capDelta)) setClientCap(Number(responseBody.capDelta));
+        }
+
+        // Dispatch event for listeners
+        if (typeof window !== "undefined" && typeof CustomEvent === "function") {
+          window.dispatchEvent(new CustomEvent("xp:server-calculated", {
+            detail: responseBody,
+          }));
+        }
+
+        return responseBody;
+      } catch (err) {
+        attempt += 1;
+        if (attempt >= 3) {
+          throw err;
+        }
+        // Brief backoff before retry
+        await new Promise(resolve => setTimeout(resolve, 500 * attempt));
+      }
+    }
+
+    throw new Error("Server calc failed: exhausted retries");
+  }
+
+  /**
+   * Unified postWindow that routes to server calc or legacy endpoint
+   * based on configuration
+   */
+  async function postWindowAuto(payload) {
+    if (isServerCalcEnabled()) {
+      return postWindowServerCalc(payload);
+    }
+    return postWindow(payload);
+  }
+
   window.XPClient = {
     postWindow,
+    postWindowServerCalc,
+    postWindowAuto,
+    isServerCalcEnabled,
     fetchStatus,
     startServerSession,
     clearServerSession,
