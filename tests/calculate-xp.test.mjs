@@ -395,7 +395,7 @@ describe("calculate-xp endpoint", () => {
   describe("rate limiting", () => {
     it("should rate limit excessive requests", async () => {
       // Simulate rate limit exceeded
-      store.incrBy.mockResolvedValue(15); // Over the 10 req/min limit
+      store.incrBy.mockResolvedValue(35); // Over the 30 req/min limit
 
       const event = {
         httpMethod: "POST",

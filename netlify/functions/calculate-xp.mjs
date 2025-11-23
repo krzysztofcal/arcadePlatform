@@ -60,8 +60,8 @@ const REQUIRE_SERVER_SESSION = process.env.XP_REQUIRE_SERVER_SESSION === "1";
 const SERVER_SESSION_WARN_MODE = process.env.XP_SERVER_SESSION_WARN_MODE === "1";
 
 // Rate Limiting
-const RATE_LIMIT_PER_USER_PER_MIN = Math.max(0, asNumber(process.env.XP_RATE_LIMIT_USER_PER_MIN, 10));
-const RATE_LIMIT_PER_IP_PER_MIN = Math.max(0, asNumber(process.env.XP_RATE_LIMIT_IP_PER_MIN, 20));
+const RATE_LIMIT_PER_USER_PER_MIN = Math.max(0, asNumber(process.env.XP_RATE_LIMIT_USER_PER_MIN, 30));
+const RATE_LIMIT_PER_IP_PER_MIN = Math.max(0, asNumber(process.env.XP_RATE_LIMIT_IP_PER_MIN, 60));
 const RATE_LIMIT_ENABLED = process.env.XP_RATE_LIMIT_ENABLED !== "0";
 
 // CORS
