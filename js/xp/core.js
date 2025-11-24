@@ -1120,10 +1120,32 @@ function bootXpCore(window, document) {
     if (typeof data.totalToday === "number") {
       state.totalToday = Math.max(0, Math.floor(Number(data.totalToday) || 0));
     }
-    syncDailyRemainingFromTotals();
+    // Handle dailyRemaining updates carefully to avoid race conditions.
+    // The server's remaining value should be authoritative, but stale server responses
+    // (from race conditions) could have higher remaining values than our local state
+    // if we've earned XP that hasn't been acknowledged by the server yet.
     if (typeof data.remaining === "number") {
-      const remaining = Math.max(0, Math.floor(Number(data.remaining) || 0));
-      state.dailyRemaining = remaining;
+      const serverRemaining = Math.max(0, Math.floor(Number(data.remaining) || 0));
+      const currentRemaining = Number(state.dailyRemaining);
+
+      // If we have a valid local dailyRemaining that's LOWER than server's value,
+      // AND the day hasn't changed, preserve our local value (it's more up-to-date).
+      // The server might be returning stale data due to a race condition with pending XP.
+      const dayChanged = typeof data.dayKey === "string" && data.dayKey && data.dayKey !== state.dayKey;
+
+      if (dayChanged) {
+        // Day changed - server value is correct (reset happened)
+        state.dailyRemaining = serverRemaining;
+      } else if (Number.isFinite(currentRemaining) && currentRemaining < serverRemaining) {
+        // Our local value is lower (more XP spent) - keep it as it's more up-to-date
+        // This handles race conditions where server hasn't processed our latest XP yet
+      } else {
+        // Use server's value - it's either lower or we don't have a valid local value
+        state.dailyRemaining = serverRemaining;
+      }
+    } else {
+      // Fallback: recalculate only if server didn't provide remaining
+      syncDailyRemainingFromTotals();
     }
     if (typeof data.dayKey === "string" && data.dayKey) {
       state.dayKey = data.dayKey;
