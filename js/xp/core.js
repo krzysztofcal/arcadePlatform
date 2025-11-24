@@ -1774,6 +1774,11 @@ function bootXpCore(window, document) {
     const awarded = accumulateLocalXp(xpForTick);
     if (awarded <= 0) return 0;
     state.totalToday = (Number(state.totalToday) || 0) + awarded;
+    // Also decrement dailyRemaining when XP is awarded locally
+    // This keeps dailyRemaining in sync with totalToday for accurate display
+    if (Number.isFinite(state.dailyRemaining)) {
+      state.dailyRemaining = Math.max(0, state.dailyRemaining - awarded);
+    }
     state.totalLifetime = (Number(state.totalLifetime) || 0) + awarded;
     state.regen.lastAward = Date.now();
     state.lastResultTs = state.regen.lastAward;
