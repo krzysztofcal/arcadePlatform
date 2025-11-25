@@ -1131,12 +1131,16 @@ function bootXpCore(window, document) {
       // If we have a valid local dailyRemaining that's LOWER than server's value,
       // AND the day hasn't changed, preserve our local value (it's more up-to-date).
       // The server might be returning stale data due to a race condition with pending XP.
-      const dayChanged = typeof data.dayKey === "string" && data.dayKey && data.dayKey !== state.dayKey;
+      // Only consider it a day change if we have a local dayKey and it differs from server's
+      const hasLocalDayKey = typeof state.dayKey === "string" && state.dayKey;
+      const dayChanged = typeof data.dayKey === "string" && data.dayKey &&
+                         hasLocalDayKey && data.dayKey !== state.dayKey;
 
       if (isDiagEnabled()) {
         console.log("[XP] applyServerDelta dailyRemaining decision:", {
           currentRemaining,
           serverRemaining,
+          hasLocalDayKey,
           dayChanged,
           serverDayKey: data.dayKey,
           localDayKey: state.dayKey,
