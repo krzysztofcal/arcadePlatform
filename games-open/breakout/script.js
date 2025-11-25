@@ -216,7 +216,7 @@ function loop(){
 }
 
 function setDirection(dir){
-  const speed = 16;
+  const speed = 26;
   if (dir === "left") paddleX = Math.max(0, paddleX - speed);
   if (dir === "right") paddleX = Math.min(canvas.width - paddleWidth, paddleX + speed);
 }
@@ -252,7 +252,7 @@ canvas.addEventListener("touchmove", (event) => {
   if (!touchStart || event.touches.length !== 1) return;
   event.preventDefault();
   const delta = event.touches[0].clientX - touchStart;
-  paddleX = Math.min(canvas.width - paddleWidth, Math.max(0, paddleX + delta * 0.25));
+  paddleX = Math.min(canvas.width - paddleWidth, Math.max(0, paddleX + delta * 0.4));
   touchStart = event.touches[0].clientX;
 }, { passive: false });
 
