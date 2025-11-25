@@ -31,6 +31,7 @@
   <script src="js/xp/core.js" defer></script>
   <script src="js/xp.js" defer></script>
   <script src="/js/ui/xp-overlay.js" defer></script>
+  <script src="js/about-debug.js" defer></script>
 </head>
 <body style="padding:16px; font-family:Poppins, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; color:#e8eeff; background:#0b1020;">
   <main>
@@ -50,261 +51,31 @@
     <p><a id="backLink" href="index.html?lang=pl" class="ft-link">Wróć do portalu</a></p>
   </main>
   <script>
-    (function () {
-      const TAP_WINDOW_MS = 3000;
-      const TAP_COUNT = 5;
-
-      function onReady() {
-        try {
-          const params = new URLSearchParams(window.location.search);
-          const origin = params.get('origin');
-          const backLink = document.getElementById('backLink');
-          if (origin === 'landing' && backLink) {
-            backLink.href = 'https://kcswh.pl/';
-          }
-        } catch (_) {}
-
-        const dumpButton = document.getElementById('debugDumpButton');
-        const xpDumpButton = document.getElementById('xpDumpButton');
-        const xpDiagOutput = document.getElementById('xpDiagOutput');
-        const toast = document.getElementById('debugToast');
-        let toastTimer = null;
-        let visibilityRefreshTimer = null;
-
-        function showToast(message) {
-          if (!toast) return;
-          toast.textContent = message;
-          toast.classList.add('is-visible');
-          if (toastTimer) {
-            clearTimeout(toastTimer);
-          }
-          toastTimer = window.setTimeout(() => {
-            toast.classList.remove('is-visible');
-          }, 2400);
-        }
-
-        function isAdmin() {
-          try {
-            return !!(window.KLog && typeof window.KLog.isAdmin === 'function' && window.KLog.isAdmin());
-          } catch (_) {
-            return false;
-          }
-        }
-
-        function ensureRecorder() {
-          if (!isAdmin()) return;
-          try {
-            if (!window.KLog || typeof window.KLog.start !== 'function') return;
-            const status = typeof window.KLog.status === 'function' ? window.KLog.status() : null;
-            const level = status && typeof status.level === 'number' ? status.level : 0;
-            const startedAt = status && typeof status.startedAt === 'number' ? status.startedAt : 0;
-            if (!status || level <= 0 || !startedAt) {
-              window.KLog.start(1);
-            }
-          } catch (_) {}
-        }
-
-        function updateVisibility() {
-          const hasRecorder = !!(window.KLog && typeof window.KLog.isAdmin === 'function');
-          if (dumpButton) {
-            if (!hasRecorder) {
-              dumpButton.hidden = true;
-            } else {
-              const active = isAdmin();
-              dumpButton.hidden = !active;
-              if (active) {
-                ensureRecorder();
-              }
-            }
-          }
-
-          const hasXP = !!(window.XP && typeof window.XP.getDiagnosticLogs === 'function');
-          if (xpDumpButton) {
-            const active = isAdmin();
-            xpDumpButton.hidden = !(hasXP && active);
-          }
-
-          const needsRefresh = (!hasRecorder || !hasXP);
-          if (needsRefresh && !visibilityRefreshTimer) {
-            visibilityRefreshTimer = window.setTimeout(() => {
-              visibilityRefreshTimer = null;
-              updateVisibility();
-            }, 800);
-          }
-        }
-
-        if (dumpButton) {
-          dumpButton.addEventListener('click', () => {
-            if (!window.KLog) return;
-            ensureRecorder();
-            const attempt = window.KLog.dumpToClipboard ? window.KLog.dumpToClipboard() : false;
-            Promise.resolve(attempt)
-              .then((opened) => {
-                if (opened) {
-                  showToast('Opened diagnostics in a new tab');
-                  return;
-                }
-                const downloaded = window.KLog.downloadFile ? window.KLog.downloadFile() : false;
-                if (downloaded) {
-                  showToast('Downloaded file');
-                } else {
-                  showToast('Diagnostics unavailable');
-                }
-              })
-              .catch(() => {
-                const downloaded = window.KLog && window.KLog.downloadFile ? window.KLog.downloadFile() : false;
-                if (downloaded) {
-                  showToast('Downloaded file');
-                } else {
-                  showToast('Diagnostics unavailable');
-                }
-              });
-          });
-        }
-
-        if (xpDumpButton) {
-          xpDumpButton.addEventListener('click', () => {
-            if (!window.XP || typeof window.XP.getDiagnosticLogs !== 'function') {
-              showToast('XP diagnostics unavailable');
-              return;
-            }
-            try {
-              const logs = window.XP.getDiagnosticLogs();
-              if (!logs || logs.length === 0) {
-                showToast('No diagnostic logs available');
-                if (xpDiagOutput) {
-                  xpDiagOutput.style.display = 'none';
-                }
-                return;
-              }
-
-              function renderXpLogsInline() {
-                let output = 'XP DIAGNOSTIC LOGS (' + logs.length + ' entries)\n';
-                output += '='.repeat(60) + '\n\n';
-
-                logs.forEach((entry, index) => {
-                  output += '[' + (index + 1) + '] ' + entry.timestamp + '\n';
-                  output += '    ' + entry.message + '\n';
-                  if (entry.data && typeof entry.data === 'object') {
-                    output += '    Data: ' + JSON.stringify(entry.data, null, 2).split('\n').join('\n    ') + '\n';
-                  } else if (entry.data) {
-                    output += '    Data: ' + entry.data + '\n';
-                  }
-                  output += '\n';
-                });
-
-                if (xpDiagOutput) {
-                  xpDiagOutput.textContent = output;
-                  xpDiagOutput.style.display = 'block';
-                  xpDiagOutput.scrollTop = xpDiagOutput.scrollHeight;
-                }
-              }
-
-              function openXpLogWindow() {
-                let popup = null;
-                try {
-                  popup = window.open('about:blank', '_blank');
-                } catch (_) {
-                  popup = null;
-                }
-                if (!popup || popup.closed) {
-                  return false;
-                }
-                try {
-                  const doc = popup.document;
-                  const html = '<!DOCTYPE html><html><head><meta charset="utf-8"><title>XP Diagnostics</title><meta name="viewport" content="width=device-width,initial-scale=1">' +
-                    '<style>body{font-family:monospace;background:#050910;color:#e6ecff;margin:0;padding:16px;white-space:pre-wrap;word-break:break-word;}header{font-size:14px;margin-bottom:12px;opacity:0.8;}pre{margin:0;background:#0b1020;padding:12px;border:1px solid rgba(230,236,255,0.2);display:flex;flex-direction:column;gap:2px;}button{cursor:pointer;font-family:inherit;font-size:13px;border:1px solid rgba(230,236,255,0.3);background:#142040;color:#fff;padding:6px 10px;border-radius:4px;margin-bottom:12px;}button:focus{outline:2px solid rgba(255,255,255,0.4);outline-offset:1px;}.log-line{display:block;white-space:pre-wrap;word-break:break-word;line-height:1.35;}.log-line:empty::after{content:"\\00a0";}.line--error{color:#ff4d4f;font-weight:600;}.line--warn{color:#ffa940;}</style></head><body><header>XP diagnostics generated ' + new Date().toISOString() + '</header><button id="copyXpLogsBtn" type="button">Copy all logs</button><pre id="xpDiagnosticsLog">Loading…</pre>' +
-                    '<script>(function(){function render(lines){var box=document.getElementById("xpDiagnosticsLog");if(!box)return;box.textContent="";var frag=document.createDocumentFragment();for(var i=0;i<lines.length;i+=1){var line=document.createElement("div");line.className="log-line";line.textContent=lines[i];frag.appendChild(line);}box.appendChild(frag);}function getText(){var el=document.getElementById("xpDiagnosticsLog");if(!el)return"";return el.innerText||el.textContent||"";}function fallbackCopy(text){return new Promise(function(resolve,reject){try{var textarea=document.createElement("textarea");textarea.value=text;textarea.setAttribute("readonly","readonly");textarea.style.position="absolute";textarea.style.left="-9999px";document.body.appendChild(textarea);textarea.select();var ok=false;try{ok=document.execCommand("copy");}catch(err){ok=false;}textarea.remove();if(ok){resolve();return;}reject(new Error("execCommand_failed"));}catch(error){reject(error);}});}function copyLogs(){var text=getText();if(!text){return Promise.reject(new Error("empty_log"));}if(navigator&&navigator.clipboard&&typeof navigator.clipboard.writeText==="function"){return navigator.clipboard.writeText(text);}return fallbackCopy(text);}var btn=document.getElementById("copyXpLogsBtn");if(btn){var baseLabel=btn.textContent||"Copy";var timer=null;function reset(){if(timer){clearTimeout(timer);}timer=setTimeout(function(){btn.textContent=baseLabel;},1600);}btn.addEventListener("click",function(){copyLogs().then(function(){btn.textContent="Copied!";reset();}).catch(function(){btn.textContent="Copy failed";reset();});});}window.addEventListener("message",function(evt){if(!evt||!evt.data||evt.data.type!=="xpLogs")return;render(evt.data.lines||[]);});})();<' + '/script></body></html>';
-                  doc.open();
-                  doc.write(html);
-                  doc.close();
-
-                  const lines = [];
-                  logs.forEach((entry, index) => {
-                    const parts = [];
-                    parts.push('[' + (index + 1) + '] ' + entry.timestamp);
-                    parts.push('    ' + entry.message);
-                    if (entry.data && typeof entry.data === 'object') {
-                      parts.push('    Data: ' + JSON.stringify(entry.data, null, 2).split('\n').join('\n    '));
-                    } else if (entry.data) {
-                      parts.push('    Data: ' + entry.data);
-                    }
-                    parts.push('');
-                    lines.push.apply(lines, parts);
-                  });
-
-                  popup.postMessage({ type: 'xpLogs', lines }, '*');
-                  return true;
-                } catch (_) {
-                  try { popup.close(); } catch (_) {}
-                  return false;
-                }
-              }
-
-              const opened = openXpLogWindow();
-              if (opened) {
-                showToast('Opened XP diagnostics in a new tab');
-                return;
-              }
-
-              renderXpLogsInline();
-              showToast('XP diagnostics displayed (' + logs.length + ' entries)');
-            } catch (err) {
-              showToast('Error dumping XP diagnostics');
-            }
-          });
-        }
-
-        function unlockAdmin() {
-          if (!window.KLog || typeof window.KLog.enableAdmin !== 'function') return false;
-          const enabled = window.KLog.enableAdmin(24 * 60 * 60 * 1000);
-          if (enabled) {
-            showToast('Debug unlocked for 24h');
-            updateVisibility();
-            ensureRecorder();
-          }
-          return enabled;
-        }
-
-        const title = document.querySelector('main h1');
-        if (title) {
-          let taps = [];
-          function recordTap() {
-            const now = Date.now();
-            taps = taps.filter((ts) => (now - ts) <= TAP_WINDOW_MS);
-            taps.push(now);
-            if (taps.length >= TAP_COUNT) {
-              taps = [];
-              unlockAdmin();
-            }
-          }
-          title.addEventListener('pointerdown', recordTap, { passive: true });
-          if (!window.PointerEvent) {
-            title.addEventListener('click', recordTap);
-            title.addEventListener('touchstart', recordTap, { passive: true });
-          }
-          title.addEventListener('keydown', (event) => {
-            if (!event) return;
-            if (event.key === 'Enter' || event.key === ' ') {
-              recordTap();
-            }
-          });
-          if (!title.hasAttribute('tabindex')) {
-            title.setAttribute('tabindex', '0');
-          }
-        }
-
-        window.addEventListener('klog:admin', updateVisibility);
-        updateVisibility();
-        window.setTimeout(updateVisibility, 250);
+    document.addEventListener('DOMContentLoaded', function () {
+      if (window.AboutDebug && typeof window.AboutDebug.init === 'function') {
+        window.AboutDebug.init({
+          landingBackHref: 'https://kcswh.pl/',
+          messages: {
+            openedDiagnostics: 'Otworzono diagnostykę w nowej karcie',
+            downloadedFile: 'Pobrano plik',
+            diagnosticsUnavailable: 'Diagnostyka niedostępna',
+            unlocked: 'Debug odblokowany na 24h',
+            xpUnavailable: 'Diagnostyka XP niedostępna',
+            xpEmpty: 'Brak logów diagnostycznych',
+            xpDisplayedWithCount: 'Wyświetlono logi XP (%COUNT% wpisów)',
+            xpOpened: 'Otwarto diagnostykę XP w nowej karcie',
+            xpError: 'Błąd podczas pobierania logów XP',
+            popupTitle: 'Diagnostyka XP',
+            popupGenerated: 'Logi XP wygenerowane',
+            copyButton: 'Kopiuj logi',
+            copied: 'Skopiowano!',
+            copyFailed: 'Kopiowanie nieudane',
+            loading: 'Ładowanie…',
+            inlineHeader: 'LOGI DIAGNOSTYCZNE XP (%COUNT% wpisów)',
+          },
+        });
       }
-
-      if (document.readyState === 'complete' || document.readyState === 'interactive') {
-        onReady();
-      } else {
-        document.addEventListener('DOMContentLoaded', onReady, { once: true });
-      }
-    })();
+    });
   </script>
   <script src="js/cookiebot-manager.js" defer></script>
 </body>
