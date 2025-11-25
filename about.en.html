@@ -25,6 +25,11 @@
   </script>
   <script src="js/analytics.js" defer></script>
   <script src="js/debug.js" defer></script>
+  <script src="js/xpClient.js" defer></script>
+  <script src="js/xp/combo.js" defer></script>
+  <script src="js/xp/scoring.js" defer></script>
+  <script src="js/xp/core.js" defer></script>
+  <script src="js/xp.js" defer></script>
   <script src="/js/ui/xp-overlay.js" defer></script>
 </head>
 <body style="padding:16px; font-family:Poppins, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; color:#e8eeff; background:#0b1020;">
@@ -64,6 +69,7 @@
         const xpDiagOutput = document.getElementById('xpDiagOutput');
         const toast = document.getElementById('debugToast');
         let toastTimer = null;
+        let visibilityRefreshTimer = null;
 
         function showToast(message) {
           if (!toast) return;
@@ -99,8 +105,9 @@
         }
 
         function updateVisibility() {
+          const hasRecorder = !!(window.KLog && typeof window.KLog.isAdmin === 'function');
           if (dumpButton) {
-            if (!window.KLog || typeof window.KLog.isAdmin !== 'function') {
+            if (!hasRecorder) {
               dumpButton.hidden = true;
             } else {
               const active = isAdmin();
@@ -111,10 +118,18 @@
             }
           }
 
+          const hasXP = !!(window.XP && typeof window.XP.getDiagnosticLogs === 'function');
           if (xpDumpButton) {
-            const hasXP = !!(window.XP && typeof window.XP.getDiagnosticLogs === 'function');
             const active = isAdmin();
             xpDumpButton.hidden = !(hasXP && active);
+          }
+
+          const needsRefresh = (!hasRecorder || !hasXP);
+          if (needsRefresh && !visibilityRefreshTimer) {
+            visibilityRefreshTimer = window.setTimeout(() => {
+              visibilityRefreshTimer = null;
+              updateVisibility();
+            }, 800);
           }
         }
 
@@ -163,25 +178,76 @@
                 return;
               }
 
-              let output = 'XP DIAGNOSTIC LOGS (' + logs.length + ' entries)\n';
-              output += '='.repeat(60) + '\n\n';
+              function renderXpLogsInline() {
+                let output = 'XP DIAGNOSTIC LOGS (' + logs.length + ' entries)\n';
+                output += '='.repeat(60) + '\n\n';
 
-              logs.forEach((entry, index) => {
-                output += '[' + (index + 1) + '] ' + entry.timestamp + '\n';
-                output += '    ' + entry.message + '\n';
-                if (entry.data && typeof entry.data === 'object') {
-                  output += '    Data: ' + JSON.stringify(entry.data, null, 2).split('\n').join('\n    ') + '\n';
-                } else if (entry.data) {
-                  output += '    Data: ' + entry.data + '\n';
+                logs.forEach((entry, index) => {
+                  output += '[' + (index + 1) + '] ' + entry.timestamp + '\n';
+                  output += '    ' + entry.message + '\n';
+                  if (entry.data && typeof entry.data === 'object') {
+                    output += '    Data: ' + JSON.stringify(entry.data, null, 2).split('\n').join('\n    ') + '\n';
+                  } else if (entry.data) {
+                    output += '    Data: ' + entry.data + '\n';
+                  }
+                  output += '\n';
+                });
+
+                if (xpDiagOutput) {
+                  xpDiagOutput.textContent = output;
+                  xpDiagOutput.style.display = 'block';
+                  xpDiagOutput.scrollTop = xpDiagOutput.scrollHeight;
                 }
-                output += '\n';
-              });
-
-              if (xpDiagOutput) {
-                xpDiagOutput.textContent = output;
-                xpDiagOutput.style.display = 'block';
-                xpDiagOutput.scrollTop = xpDiagOutput.scrollHeight;
               }
+
+              function openXpLogWindow() {
+                let popup = null;
+                try {
+                  popup = window.open('about:blank', '_blank');
+                } catch (_) {
+                  popup = null;
+                }
+                if (!popup || popup.closed) {
+                  return false;
+                }
+                try {
+                  const doc = popup.document;
+                  const html = '<!DOCTYPE html><html><head><meta charset="utf-8"><title>XP Diagnostics</title><meta name="viewport" content="width=device-width,initial-scale=1">' +
+                    '<style>body{font-family:monospace;background:#050910;color:#e6ecff;margin:0;padding:16px;white-space:pre-wrap;word-break:break-word;}header{font-size:14px;margin-bottom:12px;opacity:0.8;}pre{margin:0;background:#0b1020;padding:12px;border:1px solid rgba(230,236,255,0.2);display:flex;flex-direction:column;gap:2px;}button{cursor:pointer;font-family:inherit;font-size:13px;border:1px solid rgba(230,236,255,0.3);background:#142040;color:#fff;padding:6px 10px;border-radius:4px;margin-bottom:12px;}button:focus{outline:2px solid rgba(255,255,255,0.4);outline-offset:1px;}.log-line{display:block;white-space:pre-wrap;word-break:break-word;line-height:1.35;}.log-line:empty::after{content:"\\00a0";}.line--error{color:#ff4d4f;font-weight:600;}.line--warn{color:#ffa940;}</style></head><body><header>XP diagnostics generated ' + new Date().toISOString() + '</header><button id="copyXpLogsBtn" type="button">Copy all logs</button><pre id="xpDiagnosticsLog">Loading…</pre>' +
+                    '<script>(function(){function render(lines){var box=document.getElementById("xpDiagnosticsLog");if(!box)return;box.textContent="";var frag=document.createDocumentFragment();for(var i=0;i<lines.length;i+=1){var line=document.createElement("div");line.className="log-line";line.textContent=lines[i];frag.appendChild(line);}box.appendChild(frag);}function getText(){var el=document.getElementById("xpDiagnosticsLog");if(!el)return"";return el.innerText||el.textContent||"";}function fallbackCopy(text){return new Promise(function(resolve,reject){try{var textarea=document.createElement("textarea");textarea.value=text;textarea.setAttribute("readonly","readonly");textarea.style.position="absolute";textarea.style.left="-9999px";document.body.appendChild(textarea);textarea.select();var ok=false;try{ok=document.execCommand("copy");}catch(err){ok=false;}textarea.remove();if(ok){resolve();return;}reject(new Error("execCommand_failed"));}catch(error){reject(error);}});}function copyLogs(){var text=getText();if(!text){return Promise.reject(new Error("empty_log"));}if(navigator&&navigator.clipboard&&typeof navigator.clipboard.writeText==="function"){return navigator.clipboard.writeText(text);}return fallbackCopy(text);}var btn=document.getElementById("copyXpLogsBtn");if(btn){var baseLabel=btn.textContent||"Copy";var timer=null;function reset(){if(timer){clearTimeout(timer);}timer=setTimeout(function(){btn.textContent=baseLabel;},1600);}btn.addEventListener("click",function(){copyLogs().then(function(){btn.textContent="Copied!";reset();}).catch(function(){btn.textContent="Copy failed";reset();});});}window.addEventListener("message",function(evt){if(!evt||!evt.data||evt.data.type!=="xpLogs")return;render(evt.data.lines||[]);});})();<' + '/script></body></html>';
+                  doc.open();
+                  doc.write(html);
+                  doc.close();
+
+                  const lines = [];
+                  logs.forEach((entry, index) => {
+                    const parts = [];
+                    parts.push('[' + (index + 1) + '] ' + entry.timestamp);
+                    parts.push('    ' + entry.message);
+                    if (entry.data && typeof entry.data === 'object') {
+                      parts.push('    Data: ' + JSON.stringify(entry.data, null, 2).split('\n').join('\n    '));
+                    } else if (entry.data) {
+                      parts.push('    Data: ' + entry.data);
+                    }
+                    parts.push('');
+                    lines.push.apply(lines, parts);
+                  });
+
+                  popup.postMessage({ type: 'xpLogs', lines }, '*');
+                  return true;
+                } catch (_) {
+                  try { popup.close(); } catch (_) {}
+                  return false;
+                }
+              }
+
+              const opened = openXpLogWindow();
+              if (opened) {
+                showToast('Opened XP diagnostics in a new tab');
+                return;
+              }
+
+              renderXpLogsInline();
               showToast('XP diagnostics displayed (' + logs.length + ' entries)');
             } catch (err) {
               showToast('Error dumping XP diagnostics');
@@ -233,10 +299,10 @@
         window.setTimeout(updateVisibility, 250);
       }
 
-      if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', onReady, { once: true });
-      } else {
+      if (document.readyState === 'complete' || document.readyState === 'interactive') {
         onReady();
+      } else {
+        document.addEventListener('DOMContentLoaded', onReady, { once: true });
       }
     })();
   </script>
