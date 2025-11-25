@@ -1136,35 +1136,34 @@ function bootXpCore(window, document) {
       const dayChanged = typeof data.dayKey === "string" && data.dayKey &&
                          hasLocalDayKey && data.dayKey !== state.dayKey;
 
-      if (isDiagEnabled()) {
-        console.log("[XP] applyServerDelta dailyRemaining decision:", {
-          currentRemaining,
-          serverRemaining,
-          hasLocalDayKey,
-          dayChanged,
-          serverDayKey: data.dayKey,
-          localDayKey: state.dayKey,
-          serverTotalToday: data.totalToday,
-          localTotalToday: state.totalToday,
-        });
-      }
+      // TEMPORARY: Always log for debugging (remove isDiagEnabled check)
+      console.log("[XP-DEBUG] applyServerDelta dailyRemaining decision:", {
+        currentRemaining,
+        serverRemaining,
+        hasLocalDayKey,
+        dayChanged,
+        serverDayKey: data.dayKey,
+        localDayKey: state.dayKey,
+        serverTotalToday: data.totalToday,
+        localTotalToday: state.totalToday,
+      });
 
       if (dayChanged) {
         // Day changed - server value is correct (reset happened)
-        if (isDiagEnabled()) console.log("[XP] Day changed, using server remaining:", serverRemaining);
+        console.log("[XP-DEBUG] Day changed, using server remaining:", serverRemaining);
         state.dailyRemaining = serverRemaining;
       } else if (Number.isFinite(currentRemaining) && currentRemaining < serverRemaining) {
         // Our local value is lower (more XP spent) - keep it as it's more up-to-date
         // This handles race conditions where server hasn't processed our latest XP yet
-        if (isDiagEnabled()) console.log("[XP] Keeping local remaining (more up-to-date):", currentRemaining);
+        console.log("[XP-DEBUG] Keeping local remaining (more up-to-date):", currentRemaining);
       } else {
         // Use server's value - it's either lower or we don't have a valid local value
-        if (isDiagEnabled()) console.log("[XP] Using server remaining:", serverRemaining);
+        console.log("[XP-DEBUG] Using server remaining:", serverRemaining);
         state.dailyRemaining = serverRemaining;
       }
     } else {
       // Fallback: recalculate only if server didn't provide remaining
-      if (isDiagEnabled()) console.log("[XP] Server didn't provide remaining, recalculating from totals");
+      console.log("[XP-DEBUG] Server didn't provide remaining, recalculating from totals");
       syncDailyRemainingFromTotals();
     }
     if (typeof data.dayKey === "string" && data.dayKey) {
@@ -1799,14 +1798,19 @@ function bootXpCore(window, document) {
     const oldRemaining = state.dailyRemaining;
     if (Number.isFinite(state.dailyRemaining)) {
       state.dailyRemaining = Math.max(0, state.dailyRemaining - awarded);
-      if (isDiagEnabled()) {
-        console.log("[XP] Local award decremented dailyRemaining:", {
-          awarded,
-          oldRemaining,
-          newRemaining: state.dailyRemaining,
-          totalToday: state.totalToday,
-        });
-      }
+      // TEMPORARY: Always log for debugging
+      console.log("[XP-DEBUG] Local award decremented dailyRemaining:", {
+        awarded,
+        oldRemaining,
+        newRemaining: state.dailyRemaining,
+        totalToday: state.totalToday,
+      });
+    } else {
+      console.log("[XP-DEBUG] dailyRemaining NOT finite, not decrementing:", {
+        awarded,
+        dailyRemaining: state.dailyRemaining,
+        totalToday: state.totalToday,
+      });
     }
     state.totalLifetime = (Number(state.totalLifetime) || 0) + awarded;
     state.regen.lastAward = Date.now();
