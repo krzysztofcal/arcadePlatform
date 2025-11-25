@@ -785,19 +785,24 @@ function bootXpCore(window, document) {
     return { level, totalXp: total, xpIntoLevel, xpForNextLevel, xpToNextLevel, progress };
   }
 
-  function syncDailyRemainingFromTotals() {
+  function computeRemainingFromTotals() {
     const capValue = Number(state.cap);
     const totalValue = Number(state.totalToday);
-    if (!Number.isFinite(capValue)) {
-      state.dailyRemaining = Infinity;
-      return;
-    }
-    if (!Number.isFinite(totalValue)) {
-      return;
+    if (!Number.isFinite(capValue) || !Number.isFinite(totalValue)) {
+      return null;
     }
     const normalizedCap = Math.max(0, Math.floor(capValue));
     const normalizedTotal = Math.max(0, Math.floor(totalValue));
-    state.dailyRemaining = Math.max(0, normalizedCap - normalizedTotal);
+    return Math.max(0, normalizedCap - normalizedTotal);
+  }
+
+  function syncDailyRemainingFromTotals() {
+    const remaining = computeRemainingFromTotals();
+    if (remaining == null) {
+      state.dailyRemaining = Infinity;
+      return;
+    }
+    state.dailyRemaining = remaining;
   }
 
   function maybeResetDailyAllowance(now) {
@@ -1145,7 +1150,19 @@ function bootXpCore(window, document) {
     // if we've earned XP that hasn't been acknowledged by the server yet.
     if (typeof data.remaining === "number") {
       const serverRemaining = Math.max(0, Math.floor(Number(data.remaining) || 0));
-      const currentRemaining = Number(state.dailyRemaining);
+      let currentRemaining = Number(state.dailyRemaining);
+      if (!Number.isFinite(currentRemaining)) {
+        const derivedRemaining = computeRemainingFromTotals();
+        if (Number.isFinite(derivedRemaining)) {
+          currentRemaining = derivedRemaining;
+          state.dailyRemaining = derivedRemaining;
+          logDiagnostic("Derived local remaining from totals", {
+            derivedRemaining,
+            cap: state.cap,
+            totalToday: state.totalToday,
+          });
+        }
+      }
 
       // If we have a valid local dailyRemaining that's LOWER than server's value,
       // AND the day hasn't changed, preserve our local value (it's more up-to-date).
