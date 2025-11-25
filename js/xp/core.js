@@ -66,6 +66,24 @@ function bootXpCore(window, document) {
     return Number.isFinite(parsed) ? parsed : fallback;
   }
 
+  // Diagnostic logging helper - logs to console and stores in buffer for later retrieval
+  const MAX_DIAGNOSTIC_LOGS = 100; // Keep last 100 entries
+  function logDiagnostic(message, data) {
+    const timestamp = new Date().toISOString();
+    const entry = { timestamp, message, data };
+
+    // Log to console
+    console.log(`[XP-DEBUG] ${message}`, data || '');
+
+    // Store in buffer
+    state.debug.diagnosticLogs.push(entry);
+
+    // Keep only last MAX_DIAGNOSTIC_LOGS entries
+    if (state.debug.diagnosticLogs.length > MAX_DIAGNOSTIC_LOGS) {
+      state.debug.diagnosticLogs.shift();
+    }
+  }
+
   const EARLY_WINDOW_MS = parseNumber(window && window.XP_EARLY_WINDOW_MS, 4_000);
 
   function normalizeGameId(value) {
@@ -164,6 +182,7 @@ function bootXpCore(window, document) {
       lastVisibilityLog: 0,
       lastAwardSkipLog: 0,
       lastUnfreezeLog: 0,
+      diagnosticLogs: [], // Buffer for diagnostic logs
     },
     lastScorePulseTs: 0,
     phase: "idle",
@@ -1136,8 +1155,8 @@ function bootXpCore(window, document) {
       const dayChanged = typeof data.dayKey === "string" && data.dayKey &&
                          hasLocalDayKey && data.dayKey !== state.dayKey;
 
-      // TEMPORARY: Always log for debugging (remove isDiagEnabled check)
-      console.log("[XP-DEBUG] applyServerDelta dailyRemaining decision:", {
+      // Log decision for diagnostics
+      logDiagnostic("applyServerDelta dailyRemaining decision", {
         currentRemaining,
         serverRemaining,
         hasLocalDayKey,
@@ -1150,20 +1169,20 @@ function bootXpCore(window, document) {
 
       if (dayChanged) {
         // Day changed - server value is correct (reset happened)
-        console.log("[XP-DEBUG] Day changed, using server remaining:", serverRemaining);
+        logDiagnostic("Day changed, using server remaining", { serverRemaining });
         state.dailyRemaining = serverRemaining;
       } else if (Number.isFinite(currentRemaining) && currentRemaining < serverRemaining) {
         // Our local value is lower (more XP spent) - keep it as it's more up-to-date
         // This handles race conditions where server hasn't processed our latest XP yet
-        console.log("[XP-DEBUG] Keeping local remaining (more up-to-date):", currentRemaining);
+        logDiagnostic("Keeping local remaining (more up-to-date)", { currentRemaining });
       } else {
         // Use server's value - it's either lower or we don't have a valid local value
-        console.log("[XP-DEBUG] Using server remaining:", serverRemaining);
+        logDiagnostic("Using server remaining", { serverRemaining });
         state.dailyRemaining = serverRemaining;
       }
     } else {
       // Fallback: recalculate only if server didn't provide remaining
-      console.log("[XP-DEBUG] Server didn't provide remaining, recalculating from totals");
+      logDiagnostic("Server didn't provide remaining, recalculating from totals", {});
       syncDailyRemainingFromTotals();
     }
     if (typeof data.dayKey === "string" && data.dayKey) {
@@ -1798,15 +1817,14 @@ function bootXpCore(window, document) {
     const oldRemaining = state.dailyRemaining;
     if (Number.isFinite(state.dailyRemaining)) {
       state.dailyRemaining = Math.max(0, state.dailyRemaining - awarded);
-      // TEMPORARY: Always log for debugging
-      console.log("[XP-DEBUG] Local award decremented dailyRemaining:", {
+      logDiagnostic("Local award decremented dailyRemaining", {
         awarded,
         oldRemaining,
         newRemaining: state.dailyRemaining,
         totalToday: state.totalToday,
       });
     } else {
-      console.log("[XP-DEBUG] dailyRemaining NOT finite, not decrementing:", {
+      logDiagnostic("dailyRemaining NOT finite, not decrementing", {
         awarded,
         dailyRemaining: state.dailyRemaining,
         totalToday: state.totalToday,
@@ -2383,6 +2401,26 @@ function bootXpCore(window, document) {
       };
     },
     scoreDeltaCeiling: MAX_SCORE_DELTA,
+
+    // Diagnostic logging functions for troubleshooting
+    getDiagnosticLogs: function() {
+      return state.debug.diagnosticLogs.map(entry => ({
+        timestamp: entry.timestamp,
+        message: entry.message,
+        data: entry.data,
+      }));
+    },
+    clearDiagnosticLogs: function() {
+      state.debug.diagnosticLogs = [];
+    },
+    dumpDiagnostics: function() {
+      const logs = state.debug.diagnosticLogs;
+      console.log("[XP] Diagnostic Log Dump (" + logs.length + " entries):");
+      logs.forEach((entry, index) => {
+        console.log(`[${index + 1}] ${entry.timestamp} - ${entry.message}`, entry.data);
+      });
+      return logs;
+    },
 
     isRunning: function(){ try { return !!(typeof state !== 'undefined' ? state.running : (this && this.__running)); } catch(_) { return !!(this && this.__running); } },});
 // --- XP resume polyfill (idempotent) ---
