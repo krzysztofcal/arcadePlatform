@@ -40,8 +40,8 @@
         <span class="xp-badge__label">Synchronizuję XP…</span>
       </a>
     </div>
-    <button id="debugDumpButton" class="debug-dump-button" type="button" hidden>Dump diagnostics</button>
-    <button id="xpDumpButton" class="debug-dump-button" type="button" hidden style="margin-left:8px;">Dump XP diagnostics</button>
+    <button id="debugDumpButton" class="debug-dump-button" type="button" hidden>Zrzut diagnostyki</button>
+    <button id="xpDumpButton" class="debug-dump-button" type="button" hidden style="margin-left:8px;">Zrzut diagnostyki XP</button>
     <div id="debugToast" class="debug-toast" role="status" aria-live="polite"></div>
     <div id="xpDiagOutput" style="display:none;margin-top:20px;background:#000;color:#0f0;padding:20px;max-height:400px;overflow:auto;font-size:12px;white-space:pre-wrap;border:1px solid #0f0;"></div>
     <h1>O serwisie</h1>
@@ -74,7 +74,154 @@
             inlineHeader: 'LOGI DIAGNOSTYCZNE XP (%COUNT% wpisów)',
           },
         });
+        return;
       }
+
+      try {
+        const params = new URLSearchParams(window.location.search || '');
+        const origin = params.get('origin');
+        const backLink = document.getElementById('backLink');
+        if (origin === 'landing' && backLink) {
+          backLink.href = 'https://kcswh.pl/';
+        }
+      } catch (_) {}
+
+      const dumpButton = document.getElementById('debugDumpButton');
+      const xpDumpButton = document.getElementById('xpDumpButton');
+      const xpDiagOutput = document.getElementById('xpDiagOutput');
+      const toast = document.getElementById('debugToast');
+      const title = document.querySelector('main h1');
+      const tapWindow = 3000;
+      const tapCount = 5;
+      let taps = [];
+      let toastTimer = null;
+
+      function showToast(message) {
+        if (!toast) return;
+        toast.textContent = message;
+        toast.classList.add('is-visible');
+        if (toastTimer) {
+          clearTimeout(toastTimer);
+        }
+        toastTimer = window.setTimeout(function () {
+          toast.classList.remove('is-visible');
+        }, 2400);
+      }
+
+      function isAdmin() {
+        try {
+          return !!(window.KLog && typeof window.KLog.isAdmin === 'function' && window.KLog.isAdmin());
+        } catch (_) {
+          return false;
+        }
+      }
+
+      function ensureRecorder() {
+        if (!isAdmin()) return;
+        if (!window.KLog || typeof window.KLog.start !== 'function') return;
+        try {
+          const status = typeof window.KLog.status === 'function' ? window.KLog.status() : null;
+          const level = status && typeof status.level === 'number' ? status.level : 0;
+          const startedAt = status && typeof status.startedAt === 'number' ? status.startedAt : 0;
+          if (!status || level <= 0 || !startedAt) {
+            window.KLog.start(1);
+          }
+        } catch (_) {}
+      }
+
+      function updateVisibility() {
+        const hasRecorder = !!(window.KLog && typeof window.KLog.isAdmin === 'function');
+        if (dumpButton) {
+          dumpButton.hidden = !(hasRecorder && isAdmin());
+        }
+        const hasXP = !!(window.XP && typeof window.XP.getDiagnosticLogs === 'function');
+        if (xpDumpButton) {
+          xpDumpButton.hidden = !(hasXP && isAdmin());
+        }
+        if (isAdmin()) {
+          ensureRecorder();
+        }
+      }
+
+      if (dumpButton) {
+        dumpButton.addEventListener('click', function () {
+          if (!window.KLog) return;
+          ensureRecorder();
+          if (typeof window.KLog.dumpToClipboard === 'function') {
+            window.KLog.dumpToClipboard();
+            showToast('Skopiowano logi');
+            return;
+          }
+          if (typeof window.KLog.dump === 'function') {
+            const ok = window.KLog.dump();
+            if (ok) {
+              showToast('Pobrano logi');
+              return;
+            }
+          }
+          showToast('Diagnostyka niedostępna');
+        });
+      }
+
+      if (xpDumpButton) {
+        xpDumpButton.addEventListener('click', function () {
+          if (!window.XP || typeof window.XP.getDiagnosticLogs !== 'function') {
+            showToast('Diagnostyka XP niedostępna');
+            return;
+          }
+          const logs = window.XP.getDiagnosticLogs();
+          if (!logs || !logs.length) {
+            showToast('Brak logów diagnostycznych');
+            return;
+          }
+          if (window.AboutDebug && typeof window.AboutDebug._renderInline === 'function') {
+            window.AboutDebug._renderInline(logs, xpDiagOutput, { inlineHeader: 'LOGI DIAGNOSTYCZNE XP (%COUNT% wpisów)' });
+            showToast('Wyświetlono logi XP');
+            return;
+          }
+          if (xpDiagOutput) {
+            xpDiagOutput.textContent = JSON.stringify(logs, null, 2);
+            xpDiagOutput.style.display = 'block';
+            showToast('Wyświetlono logi XP');
+          }
+        });
+      }
+
+      if (title) {
+        function recordTap() {
+          const now = Date.now();
+          taps = taps.filter(function (ts) { return (now - ts) <= tapWindow; });
+          taps.push(now);
+          if (taps.length >= tapCount) {
+            taps = [];
+            if (window.KLog && typeof window.KLog.enableAdmin === 'function') {
+              const ok = window.KLog.enableAdmin(24 * 60 * 60 * 1000);
+              if (ok) {
+                showToast('Debug odblokowany na 24h');
+                ensureRecorder();
+                updateVisibility();
+              }
+            }
+          }
+        }
+        title.addEventListener('pointerdown', recordTap, { passive: true });
+        if (!window.PointerEvent) {
+          title.addEventListener('click', recordTap);
+          title.addEventListener('touchstart', recordTap, { passive: true });
+        }
+        title.addEventListener('keydown', function (event) {
+          if (!event) return;
+          if (event.key === 'Enter' || event.key === ' ') {
+            recordTap();
+          }
+        });
+        if (!title.hasAttribute('tabindex')) {
+          title.setAttribute('tabindex', '0');
+        }
+      }
+
+      window.addEventListener('klog:admin', updateVisibility);
+      updateVisibility();
     });
   </script>
   <script src="js/cookiebot-manager.js" defer></script>
