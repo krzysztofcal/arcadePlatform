@@ -90,7 +90,7 @@ function resetGame(){
 }
 
 function setDirection(dir){
-  const speed = 16;
+  const speed = 28;
   if (dir === "left") playerX = Math.max(0, playerX - speed);
   if (dir === "right") playerX = Math.min(canvas.width - paddleWidth, playerX + speed);
 }
@@ -126,7 +126,7 @@ canvas.addEventListener("touchmove", (event) => {
   if (!touchStart || event.touches.length !== 1) return;
   event.preventDefault();
   const delta = event.touches[0].clientX - touchStart;
-  playerX = Math.min(canvas.width - paddleWidth, Math.max(0, playerX + delta * 0.3));
+  playerX = Math.min(canvas.width - paddleWidth, Math.max(0, playerX + delta * 0.5));
   touchStart = event.touches[0].clientX;
 }, { passive: false });
 
