@@ -1133,18 +1133,34 @@ function bootXpCore(window, document) {
       // The server might be returning stale data due to a race condition with pending XP.
       const dayChanged = typeof data.dayKey === "string" && data.dayKey && data.dayKey !== state.dayKey;
 
+      if (isDiagEnabled()) {
+        console.log("[XP] applyServerDelta dailyRemaining decision:", {
+          currentRemaining,
+          serverRemaining,
+          dayChanged,
+          serverDayKey: data.dayKey,
+          localDayKey: state.dayKey,
+          serverTotalToday: data.totalToday,
+          localTotalToday: state.totalToday,
+        });
+      }
+
       if (dayChanged) {
         // Day changed - server value is correct (reset happened)
+        if (isDiagEnabled()) console.log("[XP] Day changed, using server remaining:", serverRemaining);
         state.dailyRemaining = serverRemaining;
       } else if (Number.isFinite(currentRemaining) && currentRemaining < serverRemaining) {
         // Our local value is lower (more XP spent) - keep it as it's more up-to-date
         // This handles race conditions where server hasn't processed our latest XP yet
+        if (isDiagEnabled()) console.log("[XP] Keeping local remaining (more up-to-date):", currentRemaining);
       } else {
         // Use server's value - it's either lower or we don't have a valid local value
+        if (isDiagEnabled()) console.log("[XP] Using server remaining:", serverRemaining);
         state.dailyRemaining = serverRemaining;
       }
     } else {
       // Fallback: recalculate only if server didn't provide remaining
+      if (isDiagEnabled()) console.log("[XP] Server didn't provide remaining, recalculating from totals");
       syncDailyRemainingFromTotals();
     }
     if (typeof data.dayKey === "string" && data.dayKey) {
@@ -1776,8 +1792,17 @@ function bootXpCore(window, document) {
     state.totalToday = (Number(state.totalToday) || 0) + awarded;
     // Also decrement dailyRemaining when XP is awarded locally
     // This keeps dailyRemaining in sync with totalToday for accurate display
+    const oldRemaining = state.dailyRemaining;
     if (Number.isFinite(state.dailyRemaining)) {
       state.dailyRemaining = Math.max(0, state.dailyRemaining - awarded);
+      if (isDiagEnabled()) {
+        console.log("[XP] Local award decremented dailyRemaining:", {
+          awarded,
+          oldRemaining,
+          newRemaining: state.dailyRemaining,
+          totalToday: state.totalToday,
+        });
+      }
     }
     state.totalLifetime = (Number(state.totalLifetime) || 0) + awarded;
     state.regen.lastAward = Date.now();
