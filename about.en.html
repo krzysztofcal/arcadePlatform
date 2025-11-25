@@ -35,7 +35,9 @@
       </a>
     </div>
     <button id="debugDumpButton" class="debug-dump-button" type="button" hidden>Dump diagnostics</button>
+    <button id="xpDumpButton" class="debug-dump-button" type="button" hidden style="margin-left:8px;">Dump XP diagnostics</button>
     <div id="debugToast" class="debug-toast" role="status" aria-live="polite"></div>
+    <div id="xpDiagOutput" style="display:none;margin-top:20px;background:#000;color:#0f0;padding:20px;max-height:400px;overflow:auto;font-size:12px;white-space:pre-wrap;border:1px solid #0f0;"></div>
     <h1>About</h1>
     <p>This is a simple arcade portal (MVP). More games and features are coming soon.</p>
     <p>Contact: <a href="#" class="ft-link">email</a></p>
@@ -58,6 +60,8 @@
         } catch (_) {}
 
         const dumpButton = document.getElementById('debugDumpButton');
+        const xpDumpButton = document.getElementById('xpDumpButton');
+        const xpDiagOutput = document.getElementById('xpDiagOutput');
         const toast = document.getElementById('debugToast');
         let toastTimer = null;
 
@@ -95,15 +99,22 @@
         }
 
         function updateVisibility() {
-          if (!dumpButton) return;
-          if (!window.KLog || typeof window.KLog.isAdmin !== 'function') {
-            dumpButton.hidden = true;
-            return;
+          if (dumpButton) {
+            if (!window.KLog || typeof window.KLog.isAdmin !== 'function') {
+              dumpButton.hidden = true;
+            } else {
+              const active = isAdmin();
+              dumpButton.hidden = !active;
+              if (active) {
+                ensureRecorder();
+              }
+            }
           }
-          const active = isAdmin();
-          dumpButton.hidden = !active;
-          if (active) {
-            ensureRecorder();
+
+          if (xpDumpButton) {
+            const hasXP = !!(window.XP && typeof window.XP.getDiagnosticLogs === 'function');
+            const active = isAdmin();
+            xpDumpButton.hidden = !(hasXP && active);
           }
         }
 
@@ -133,6 +144,48 @@
                   showToast('Diagnostics unavailable');
                 }
               });
+          });
+        }
+
+        if (xpDumpButton) {
+          xpDumpButton.addEventListener('click', () => {
+            if (!window.XP || typeof window.XP.getDiagnosticLogs !== 'function') {
+              showToast('XP diagnostics unavailable');
+              return;
+            }
+            try {
+              const logs = window.XP.getDiagnosticLogs();
+              if (!logs || logs.length === 0) {
+                showToast('No diagnostic logs available');
+                if (xpDiagOutput) {
+                  xpDiagOutput.style.display = 'none';
+                }
+                return;
+              }
+
+              let output = 'XP DIAGNOSTIC LOGS (' + logs.length + ' entries)\n';
+              output += '='.repeat(60) + '\n\n';
+
+              logs.forEach((entry, index) => {
+                output += '[' + (index + 1) + '] ' + entry.timestamp + '\n';
+                output += '    ' + entry.message + '\n';
+                if (entry.data && typeof entry.data === 'object') {
+                  output += '    Data: ' + JSON.stringify(entry.data, null, 2).split('\n').join('\n    ') + '\n';
+                } else if (entry.data) {
+                  output += '    Data: ' + entry.data + '\n';
+                }
+                output += '\n';
+              });
+
+              if (xpDiagOutput) {
+                xpDiagOutput.textContent = output;
+                xpDiagOutput.style.display = 'block';
+                xpDiagOutput.scrollTop = xpDiagOutput.scrollHeight;
+              }
+              showToast('XP diagnostics displayed (' + logs.length + ' entries)');
+            } catch (err) {
+              showToast('Error dumping XP diagnostics');
+            }
           });
         }
 
