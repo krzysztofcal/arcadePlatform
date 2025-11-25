@@ -21,6 +21,10 @@ let best = Number(localStorage.getItem("ah-pong-best")) || 0;
 let lastXpScore = 0;
 let running = false;
 let touchStart = null;
+let countdownTimer = null;
+let countdownText = "";
+let countdownActive = false;
+let gameOver = false;
 
 bestEl.textContent = best;
 
@@ -53,6 +57,13 @@ function stopSession(){
   }
 }
 
+function clearCountdown(){
+  if (countdownTimer) {
+    window.clearTimeout(countdownTimer);
+    countdownTimer = null;
+  }
+}
+
 function updateScoreDisplay(){
   scoreEl.textContent = score;
   if (score > best) {
@@ -77,6 +88,31 @@ function resetBall(direction){
   ballDY = direction * 3;
 }
 
+function startCountdown(){
+  clearCountdown();
+  countdownActive = true;
+  countdownText = "3";
+  const steps = ["3", "2", "1", "Start"];
+  let index = 0;
+
+  function tick(){
+    countdownText = steps[index];
+    index += 1;
+    if (index < steps.length) {
+      countdownTimer = window.setTimeout(tick, 800);
+      return;
+    }
+    countdownTimer = window.setTimeout(() => {
+      countdownActive = false;
+      countdownText = "";
+      running = true;
+      startSession();
+    }, 600);
+  }
+
+  tick();
+}
+
 function resetGame(){
   stopSession();
   score = 0;
@@ -84,9 +120,10 @@ function resetGame(){
   playerX = (canvas.width - paddleWidth) / 2;
   aiX = (canvas.width - paddleWidth) / 2;
   resetBall(1);
-  running = true;
+  running = false;
+  gameOver = false;
   updateScoreDisplay();
-  startSession();
+  startCountdown();
 }
 
 function setDirection(dir){
@@ -180,6 +217,7 @@ function update(){
 
 function endMatch(won){
   running = false;
+  gameOver = true;
   stopSession();
 }
 
@@ -212,7 +250,11 @@ function draw(){
     ctx.fillStyle = "#ffffff";
     ctx.font = "bold 28px Poppins, sans-serif";
     ctx.textAlign = "center";
-    ctx.fillText("Round over", canvas.width / 2, canvas.height / 2);
+    if (countdownActive) {
+      ctx.fillText(countdownText, canvas.width / 2, canvas.height / 2);
+    } else if (gameOver) {
+      ctx.fillText("Round over", canvas.width / 2, canvas.height / 2);
+    }
   }
 }
 
