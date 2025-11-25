@@ -86,6 +86,9 @@ function resetGame(){
 }
 
 function startGame(){
+  if (pendingStop) {
+    resetGame();
+  }
   running = true;
   pendingStop = false;
   startSession();
