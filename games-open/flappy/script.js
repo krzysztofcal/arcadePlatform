@@ -23,6 +23,7 @@ let lastXpScore = 0;
 let running = false;
 let lastFrame = 0;
 let pendingStop = false;
+let animTime = 0;
 
 bestEl.textContent = best;
 
@@ -148,14 +149,75 @@ function drawBackground(){
 }
 
 function drawBird(){
-  ctx.fillStyle = "#ffeb3b";
+  const flap = Math.sin(animTime * 8);
+  const bodyRadiusX = 16;
+  const bodyRadiusY = 12;
+
+  ctx.save();
+  ctx.translate(birdX, birdY);
+  ctx.shadowColor = "rgba(0, 0, 0, 0.25)";
+  ctx.shadowBlur = 8;
+  ctx.shadowOffsetY = 3;
+
+  const bodyGradient = ctx.createLinearGradient(-bodyRadiusX, -bodyRadiusY, bodyRadiusX, bodyRadiusY);
+  bodyGradient.addColorStop(0, "#ffe16a");
+  bodyGradient.addColorStop(1, "#ffb92d");
+  ctx.fillStyle = bodyGradient;
   ctx.beginPath();
-  ctx.ellipse(birdX, birdY, 14, 10, 0, 0, Math.PI * 2);
+  ctx.ellipse(0, 0, bodyRadiusX, bodyRadiusY, 0, 0, Math.PI * 2);
   ctx.fill();
+
+  ctx.fillStyle = "#f6d255";
+  ctx.beginPath();
+  ctx.ellipse(2, 2, 10, 7, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.save();
+  ctx.translate(-6, -2 + flap * 3);
+  ctx.rotate(-Math.PI / 6 + flap * 0.35);
+  ctx.fillStyle = "#ffcf45";
+  ctx.beginPath();
+  ctx.moveTo(-4, 0);
+  ctx.quadraticCurveTo(6, -4, 12, 6);
+  ctx.quadraticCurveTo(4, 10, -4, 6);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+
+  ctx.fillStyle = "#f79e2d";
+  ctx.beginPath();
+  ctx.moveTo(12, 2);
+  ctx.lineTo(20, 6);
+  ctx.lineTo(12, 8);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.fillStyle = "#ffb92d";
+  ctx.beginPath();
+  ctx.moveTo(-10, -2);
+  ctx.lineTo(-18, 0);
+  ctx.lineTo(-12, 4);
+  ctx.closePath();
+  ctx.fill();
+
   ctx.fillStyle = "#111827";
   ctx.beginPath();
-  ctx.arc(birdX + 6, birdY - 4, 3, 0, Math.PI * 2);
+  ctx.arc(6, -4, 3, 0, Math.PI * 2);
   ctx.fill();
+  ctx.fillStyle = "#ffffff";
+  ctx.beginPath();
+  ctx.arc(7, -5, 1, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.fillStyle = "#f07167";
+  ctx.beginPath();
+  ctx.moveTo(-2, -8);
+  ctx.lineTo(2, -12);
+  ctx.lineTo(6, -8);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.restore();
 }
 
 function drawPipes(){
@@ -187,6 +249,7 @@ function draw(){
 function loop(timestamp){
   if (!lastFrame) lastFrame = timestamp;
   const delta = Math.min(1.6, (timestamp - lastFrame) / 16.6667);
+  animTime += delta;
   update(delta);
   draw();
   lastFrame = timestamp;
