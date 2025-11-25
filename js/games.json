@@ -49,6 +49,56 @@
       "thumbnail": "img/games/pacman-maze.svg",
       "tags": ["arcade", "retro", "classic"],
       "source": { "type": "self", "page": "games-open/pacman/index.html" }
+    },
+    {
+      "id": "open-snake",
+      "slug": "snake",
+      "title": { "en": "Snake", "pl": "Wąż" },
+      "description": { "en": "Eat apples to grow without hitting yourself.", "pl": "Jedz jabłka i unikaj zderzeń ze sobą." },
+      "category": ["Arcade"],
+      "thumbnail": "img/games/snake.svg",
+      "tags": ["retro", "arcade"],
+      "source": { "type": "self", "page": "games-open/snake/index.html" }
+    },
+    {
+      "id": "open-flappy",
+      "slug": "flappy",
+      "title": { "en": "Flappy Bird", "pl": "Flappy Bird" },
+      "description": { "en": "Tap to dodge pipes and keep flying.", "pl": "Stukaj, by omijać rury i utrzymać lot." },
+      "category": ["Arcade"],
+      "thumbnail": "img/games/flappy.svg",
+      "tags": ["arcade", "runner"],
+      "source": { "type": "self", "page": "games-open/flappy/index.html" }
+    },
+    {
+      "id": "open-breakout",
+      "slug": "breakout",
+      "title": { "en": "Breakout", "pl": "Breakout" },
+      "description": { "en": "Bounce the ball to clear every brick.", "pl": "Odbijaj piłkę, by zbić wszystkie klocki." },
+      "category": ["Arcade", "Puzzle"],
+      "thumbnail": "img/games/breakout.svg",
+      "tags": ["arcade", "retro"],
+      "source": { "type": "self", "page": "games-open/breakout/index.html" }
+    },
+    {
+      "id": "open-minesweeper",
+      "slug": "minesweeper",
+      "title": { "en": "Minesweeper", "pl": "Saper" },
+      "description": { "en": "Mark mines and clear every safe tile.", "pl": "Oznacz miny i odkryj wszystkie bezpieczne pola." },
+      "category": ["Puzzle"],
+      "thumbnail": "img/games/minesweeper.svg",
+      "tags": ["logic", "puzzle"],
+      "source": { "type": "self", "page": "games-open/minesweeper/index.html" }
+    },
+    {
+      "id": "open-pong",
+      "slug": "pong",
+      "title": { "en": "Pong", "pl": "Pong" },
+      "description": { "en": "Deflect the ball past your opponent.", "pl": "Odbij piłkę za przeciwnika." },
+      "category": ["Arcade"],
+      "thumbnail": "img/games/pong.svg",
+      "tags": ["retro", "arcade"],
+      "source": { "type": "self", "page": "games-open/pong/index.html" }
     }
   ]
 }

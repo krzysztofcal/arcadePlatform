@@ -1,0 +1,25 @@
+.game-shell {
+  background: linear-gradient(180deg, #0b152b 0%, #0b1c34 40%, #0c2540 100%);
+}
+
+#board {
+  display: block;
+  margin: 0 auto;
+  background: linear-gradient(180deg, #7dd1ff 0%, #4b96ff 50%, #2d60c4 100%);
+  border: 2px solid rgba(255, 255, 255, 0.16);
+  border-radius: 18px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.35);
+}
+
+.controls {
+  display: flex;
+  justify-content: center;
+}
+
+.button.full {
+  width: 240px;
+}
+
+.mobile-hint {
+  text-align: center;
+}

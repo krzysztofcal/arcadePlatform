@@ -1,0 +1,31 @@
+:root {
+  --snake-green: #7fffa2;
+  --snake-bg: #0d1527;
+  --snake-apple: #ff7b7b;
+  --snake-grid: #182138;
+}
+
+.game-shell {
+  background: radial-gradient(circle at 10% 10%, rgba(126, 255, 201, 0.08), transparent 40%), radial-gradient(circle at 90% 80%, rgba(255, 123, 123, 0.08), transparent 45%), #0b1020;
+}
+
+.board-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#board {
+  background: var(--snake-bg);
+  border: 2px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.35);
+}
+
+.mobile-hint {
+  text-align: center;
+}
+
+.notice {
+  max-width: 640px;
+}

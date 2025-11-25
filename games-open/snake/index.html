@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#0b1020" />
+    <title>Snake — Arcade Hub</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@500;600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="../../css/game.css" />
+    <link rel="stylesheet" href="../game-shell.css" />
+    <link rel="stylesheet" href="style.css" />
+    <link rel="stylesheet" href="/css/xp-overlay.css" />
+    <script id="Cookiebot"
+            src="https://consent.cookiebot.com/uc.js"
+            data-cbid="c76249cb-52a7-4dba-adbf-da79fe8a6276"
+            data-blockingmode="auto"
+            type="text/javascript">
+    </script>
+    <script type="text/plain" data-cookieconsent="statistics"
+            src="https://www.googletagmanager.com/gtag/js?id=G-JRP62LCXYK"></script>
+    <script type="text/plain" data-cookieconsent="statistics">
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){ dataLayer.push(arguments); }
+      gtag('js', new Date());
+      gtag('config', 'G-JRP62LCXYK');
+    </script>
+    <script src="/js/i18n.js" defer></script>
+    <script src="/js/topbar.js" defer></script>
+    <script src="/js/xpClient.js" defer></script>
+    <script src="/js/ui/xp-overlay.js" defer></script>
+  </head>
+  <body data-game-host data-game-slug="snake" data-game-id="snake">
+    <div class="topbar">
+      <div class="topbar-left">
+        <button class="hamburger" id="sbToggle" aria-label="Toggle navigation" aria-expanded="false">
+          <span></span><span></span><span></span>
+        </button>
+        <div class="brand"><div class="logo" aria-hidden="true"></div><h1>Arcade Hub</h1></div>
+        <div class="search search-box">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M21 21l-3.9-3.9M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15z" stroke="#86e1e1" stroke-width="2" stroke-linecap="round"/></svg>
+          <input type="search" data-i18n-aria="searchAria" data-i18n-placeholder="searchPlaceholder" aria-label="Search games" placeholder="Search games (inactive in MVP)" />
+        </div>
+      </div>
+      <div class="topbar-right">
+        <a id="xpBadge" class="xp-badge xp-badge--loading" aria-live="polite" aria-busy="true" href="../../xp.html">
+          <span class="xp-badge__label">Syncing XP…</span>
+        </a>
+        <span class="chip">MVP</span>
+      </div>
+    </div>
+
+    <div class="layout">
+      <aside class="sidebar collapsed" id="sidebar" aria-label="Main navigation">
+        <nav class="sb-nav">
+          <ul class="sb-list">
+            <li class="sb-item">
+              <a href="../../index.html" class="sb-link sb-home" aria-label="Home" tabindex="0">
+                <span class="sb-ico" aria-hidden="true">
+                  <svg class="sb-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 10.5 12 4l9 6.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1v-9.5Z"/></svg>
+                </span>
+                <span class="sb-label">Home</span>
+              </a>
+            </li>
+          </ul>
+        </nav>
+      </aside>
+
+      <section class="center">
+        <div class="gameWrap game-shell-host">
+          <main class="game-shell" data-track-focus>
+            <header class="hud">
+              <div class="hud-title">
+                <h1>Snake</h1>
+                <p>Eat apples, grow longer, and avoid running into yourself.</p>
+              </div>
+              <div class="scoreboard">
+                <div class="score-card">
+                  <span>Score</span>
+                  <strong id="score">0</strong>
+                </div>
+                <div class="score-card">
+                  <span>Best</span>
+                  <strong id="best">0</strong>
+                </div>
+              </div>
+              <div class="primary-actions">
+                <button class="button" type="button" id="new-game">New game</button>
+              </div>
+            </header>
+
+            <section class="board-wrap">
+              <canvas id="board" width="400" height="400" aria-label="Snake board"></canvas>
+              <div class="mobile-hint">Swipe or use the controls to steer.</div>
+            </section>
+
+            <section class="controls">
+              <div class="dpad" aria-hidden="false">
+                <button type="button" data-dir="" aria-hidden="true"></button>
+                <button type="button" data-dir="up" aria-label="Move up">↑</button>
+                <button type="button" data-dir="" aria-hidden="true"></button>
+                <button type="button" data-dir="left" aria-label="Move left">←</button>
+                <button type="button" data-dir="down" aria-label="Move down">↓</button>
+                <button type="button" data-dir="right" aria-label="Move right">→</button>
+                <button type="button" data-dir="" aria-hidden="true"></button>
+                <button type="button" data-dir="" aria-hidden="true"></button>
+                <button type="button" data-dir="" aria-hidden="true"></button>
+              </div>
+            </section>
+
+            <p class="notice">Tip: aim for the corners to stay clear when the snake grows.</p>
+            <p class="game-credit">Arcade Hub adaptation of the classic Snake game.</p>
+          </main>
+        </div>
+      </section>
+
+      <aside class="right"></aside>
+    </div>
+
+    <footer class="site-footer" role="contentinfo">
+      <nav class="footer-nav" aria-label="Footer">
+        <a class="ft-link" data-i18n="about" data-href-en="../../about.en.html" data-href-pl="../../about.pl.html" href="../../about.en.html">About</a>
+        <span class="sep">•</span>
+        <a class="ft-link" data-i18n="licenses" data-href-en="../../about/licenses.html" data-href-pl="../../about/licenses.html" href="../../about/licenses.html">Licenses</a>
+        <span class="sep">•</span>
+        <a class="ft-link" data-i18n="terms" data-href-en="../../legal/terms.en.html" data-href-pl="../../legal/terms.pl.html" href="../../legal/terms.en.html">Terms</a>
+        <span class="sep">•</span>
+        <a class="ft-link" data-i18n="privacy" data-href-en="../../legal/privacy.en.html" data-href-pl="../../legal/privacy.pl.html" href="../../legal/privacy.en.html">Privacy</a>
+        <span class="sep">•</span>
+        <a class="ft-link" data-i18n="contact" href="mailto:contact@kcswh.pl">Contact</a>
+        <span class="sep">•</span>
+        <a class="ft-link manage-cookies" data-i18n="manageCookies" id="manageCookies" href="#">Manage cookies</a>
+      </nav>
+      <div class="lang-switch" aria-label="Language">
+        <button type="button" class="lang-btn" data-lang="pl" aria-pressed="false">PL</button>
+        <button type="button" class="lang-btn" data-lang="en" aria-pressed="false">EN</button>
+      </div>
+    </footer>
+
+    <script src="/js/sidebar.js" defer></script>
+    <script src="../game-shell.js" defer></script>
+    <script src="script.js"></script>
+    <script src="/js/cookiebot-manager.js" defer></script>
+    <script>
+      (function(){
+        const allowedOrigin = location.origin;
+
+        function notifyActive(){
+          try { parent.postMessage({ type: 'kcswh:activity', userGesture: true }, allowedOrigin); } catch (_error) {}
+        }
+
+        addEventListener('keydown', notifyActive, { passive: true });
+        addEventListener('pointerdown', notifyActive, { passive: true });
+        setInterval(notifyActive, 5000);
+
+        window.reportScoreToPortal = function(gameId, score){
+          try { parent.postMessage({ type: 'game-score', gameId, score }, allowedOrigin); } catch (_error) {}
+        };
+
+        const scoreEl = document.querySelector('#score, .score, .js-score, .score-container');
+        const gameId = document.body.dataset.gameId || document.title || 'game';
+        if (scoreEl && 'MutationObserver' in window){
+          let last = -Infinity;
+          const parseScore = () => {
+            const raw = (scoreEl.textContent || '').replace(/\D+/g, '');
+            const value = parseInt(raw, 10);
+            return Number.isFinite(value) ? value : 0;
+          };
+          const push = () => {
+            const score = parseScore();
+            if (score > last){
+              last = score;
+              window.reportScoreToPortal(gameId, score);
+            }
+          };
+          const observer = new MutationObserver(push);
+          observer.observe(scoreEl, { childList: true, characterData: true, subtree: true });
+          push();
+        }
+      })();
+    </script>
+    <script src="/js/debug.js" defer></script>
+    <script>window.__GAME_ID__ = 'snake';</script>
+    <script src="/js/xp/combo.js" defer></script>
+    <script src="/js/xp/scoring.js" defer></script>
+    <script src="/js/xp/core.js" defer></script>
+    <script src="/js/xp.js" defer></script>
+    <script src="/js/xp-game-hook.js" defer></script>
+    <script src="/js/ui/xp-overlay.js" defer></script>
+    <script>
+      if (!window.__xpAutoBooted) {
+        window.__xpAutoBooted = true;
+        let tries = 0;
+        function boot() {
+          const bridge = window.GameXpBridge;
+          if (bridge && typeof bridge.auto === "function") {
+            bridge.auto("snake");
+            return;
+          }
+          if (tries++ >= 5) return;
+          window.setTimeout(boot, Math.min(50 * tries, 200));
+        }
+        if (document.readyState === "complete") {
+          boot();
+        } else {
+          window.addEventListener("DOMContentLoaded", boot, { once: true });
+          window.addEventListener("load", boot, { once: true });
+        }
+      }
+    </script>
+  </body>
+</html>
