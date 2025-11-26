@@ -70,6 +70,13 @@
         const toast = document.getElementById('debugToast');
         let toastTimer = null;
 
+        console.log('[About] Elements found:', {
+          dumpButton: !!dumpButton,
+          xpDumpButton: !!xpDumpButton,
+          xpDiagOutput: !!xpDiagOutput,
+          toast: !!toast
+        });
+
         function showToast(message) {
           if (!toast) return;
           toast.textContent = message;
@@ -104,6 +111,8 @@
         }
 
         function updateVisibility() {
+          console.log('[About] updateVisibility called');
+
           if (dumpButton) {
             if (!window.KLog || typeof window.KLog.isAdmin !== 'function') {
               dumpButton.hidden = true;
@@ -118,8 +127,15 @@
 
           if (xpDumpButton) {
             const hasXP = !!(window.XP && typeof window.XP.getDiagnosticLogs === 'function');
+            console.log('[About] XP button visibility:', {
+              'window.XP exists': !!window.XP,
+              'getDiagnosticLogs exists': window.XP && typeof window.XP.getDiagnosticLogs === 'function',
+              hasXP: hasXP,
+              'button.hidden': xpDumpButton.hidden
+            });
             // TEMPORARY: Always show XP dump button if XP is loaded (skip admin check for debugging)
             xpDumpButton.hidden = !hasXP;
+            console.log('[About] Set XP button.hidden =', xpDumpButton.hidden);
           }
         }
 
@@ -153,17 +169,35 @@
         }
 
         if (xpDumpButton) {
+          console.log('[About] Adding click handler to XP dump button');
           xpDumpButton.addEventListener('click', () => {
-            if (!window.XP || typeof window.XP.getDiagnosticLogs !== 'function') {
+            console.log('[About] XP dump button clicked');
+
+            // Check if window.XP exists
+            if (!window.XP) {
+              console.log('[About] window.XP does not exist');
+              showToast('XP system not loaded');
+              return;
+            }
+            console.log('[About] window.XP exists');
+
+            // Check if getDiagnosticLogs exists
+            if (typeof window.XP.getDiagnosticLogs !== 'function') {
+              console.log('[About] window.XP.getDiagnosticLogs is not a function');
               showToast('XP diagnostics unavailable');
               return;
             }
+            console.log('[About] window.XP.getDiagnosticLogs exists');
+
             try {
               const logs = window.XP.getDiagnosticLogs();
+              console.log('[About] Got logs:', logs ? logs.length : 'null/undefined', 'entries');
+
               if (!logs || logs.length === 0) {
-                showToast('No diagnostic logs available');
+                showToast('No diagnostic logs (length=' + (logs ? logs.length : 'null') + ')');
                 if (xpDiagOutput) {
-                  xpDiagOutput.style.display = 'none';
+                  xpDiagOutput.textContent = 'No XP diagnostic logs available yet.\n\nLogs will appear here after:\n1. Playing a game to earn XP\n2. Navigating to XP dashboard\n3. Coming back here and clicking this button';
+                  xpDiagOutput.style.display = 'block';
                 }
                 return;
               }
@@ -187,9 +221,15 @@
                 xpDiagOutput.style.display = 'block';
                 xpDiagOutput.scrollTop = xpDiagOutput.scrollHeight;
               }
+              console.log('[About] XP diagnostics displayed');
               showToast('XP diagnostics displayed (' + logs.length + ' entries)');
             } catch (err) {
-              showToast('Error dumping XP diagnostics');
+              console.error('[About] Error dumping XP diagnostics:', err);
+              showToast('Error: ' + err.message);
+              if (xpDiagOutput) {
+                xpDiagOutput.textContent = 'Error dumping XP diagnostics:\n' + err.toString();
+                xpDiagOutput.style.display = 'block';
+              }
             }
           });
         }
