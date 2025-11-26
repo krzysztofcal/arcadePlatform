@@ -2367,7 +2367,7 @@ function bootXpCore(window, document) {
     scoreDeltaCeiling: MAX_SCORE_DELTA,
 
     isRunning: function(){ try { return !!(typeof state !== 'undefined' ? state.running : (this && this.__running)); } catch(_) { return !!(this && this.__running); } },
-  };
+  });
 // --- XP resume polyfill (idempotent) ---
 (function () {
   if (typeof window === 'undefined') return;
