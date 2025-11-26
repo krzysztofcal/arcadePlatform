@@ -6,6 +6,7 @@
   let identity = null;
   let isMenuOpen = false;
   let userState = null;
+  let identityReady = false;
 
   function selectTopbar(){
     const nodes = Array.from(doc.querySelectorAll('.topbar-right'));
@@ -147,7 +148,7 @@
     }
 
     function handleAction(action){
-      if (!identity){
+      if (!identity || !identityReady){
         announce('Sign-in unavailable.');
         closeMenu(true);
         return;
@@ -222,9 +223,32 @@
       return;
     }
 
-    identity.on('init', function(user){ ui.setUser(user || null); });
-    identity.on('login', function(user){ ui.setUser(user || null); ui.announce('Signed in as ' + displayName(user)); ui.closeMenu(true); });
-    identity.on('logout', function(){ ui.setUser(null); ui.announce('Signed out'); ui.closeMenu(true); });
+    identity.on('init', function(user){
+      identityReady = true;
+      ui.setUser(user || null);
+      try { if (identity.close) identity.close(); } catch (_){ }
+    });
+
+    identity.on('login', function(user){
+      identityReady = true;
+      ui.setUser(user || null);
+      ui.announce('Signed in as ' + displayName(user));
+      ui.closeMenu(true);
+    });
+
+    identity.on('logout', function(){
+      identityReady = true;
+      ui.setUser(null);
+      ui.announce('Signed out');
+      ui.closeMenu(true);
+    });
+
+    identity.on('error', function(){
+      identityReady = false;
+      ui.setUser(null);
+      ui.announce('Sign-in unavailable. Enable Netlify Identity.');
+      try { if (identity.close) identity.close(); } catch (_){ }
+    });
 
     try {
       identity.init();
