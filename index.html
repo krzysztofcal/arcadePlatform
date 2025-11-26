@@ -41,6 +41,9 @@
   </script>
   <script src="js/analytics.js" defer></script>
   <script src="js/i18n.js" defer></script>
+  <script src="/js/auth/supabase-config.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js" defer></script>
+  <script src="/js/auth/supabaseClient.js" defer></script>
 </head>
 <body>
   <div class="topbar">
@@ -61,7 +64,23 @@
       <a id="xpBadge" class="xp-badge xp-badge--loading" aria-live="polite" aria-busy="true" href="xp.html">
         <span class="xp-badge__label">Syncing XP…</span>
       </a>
-      <span class="chip">MVP</span>
+      <div class="avatar-shell" id="avatarShell">
+        <button type="button" class="avatar-btn" id="avatarButton" aria-haspopup="true" aria-expanded="false">
+          <span class="avatar-circle" id="avatarInitials" aria-hidden="true">AH</span>
+          <span class="avatar-label" id="avatarLabel">Sign in</span>
+          <span class="avatar-caret" aria-hidden="true">▾</span>
+        </button>
+        <div class="avatar-menu" id="avatarMenu" hidden>
+          <div class="avatar-menu__user">
+            <div class="avatar-menu__initials" id="avatarMenuInitials" aria-hidden="true">AH</div>
+            <div class="avatar-menu__meta">
+              <div class="avatar-menu__name" id="avatarMenuName">Guest</div>
+              <div class="avatar-menu__email" id="avatarMenuEmail">Sign in to sync progress</div>
+            </div>
+          </div>
+          <button type="button" class="avatar-menu__action" id="avatarMenuAction">Sign in</button>
+        </div>
+      </div>
     </div>
   </div>
 
