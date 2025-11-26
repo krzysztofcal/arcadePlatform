@@ -6,11 +6,10 @@
   var nodes = {};
 
   function pickEnv(){
-    var env = window.SUPABASE_CONFIG || window.SUPABASE_ENV || window.ENV || window.CONFIG || {};
-    var maybe = env.supabase || env.SUPABASE || env;
+    var cfg = (window.SUPABASE_CONFIG || {});
     return {
-      url: maybe.SUPABASE_URL || maybe.supabaseUrl || maybe.url,
-      key: maybe.SUPABASE_KEY || maybe.supabaseKey || maybe.key
+      url: cfg.SUPABASE_URL || cfg.supabaseUrl || cfg.url,
+      key: cfg.SUPABASE_ANON_KEY || cfg.SUPABASE_KEY || cfg.supabaseKey || cfg.key
     };
   }
 
