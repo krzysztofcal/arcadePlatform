@@ -166,7 +166,7 @@
 
     client.auth.getSession().then(function(res){
       var session = res.data && res.data.session ? res.data.session : null;
-      logDiag('supabase:session_initial', { hasSession: !!(session && session.user), email: session && session.user ? session.user.email : undefined });
+      logDiag('supabase:session_initial', { hasSession: !!(session && session.user), hasEmail: !!(session && session.user && session.user.email) });
       renderUser(session && session.user ? session.user : null);
     }).catch(function(err){
       logDiag('supabase:session_error', { message: err && err.message ? String(err.message) : 'error' });
