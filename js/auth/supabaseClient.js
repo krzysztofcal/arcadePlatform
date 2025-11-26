@@ -5,6 +5,17 @@
   var state = { user: null, open: false };
   var nodes = {};
 
+  function logDiag(label, payload){
+    var logger = window && window.KLog;
+    if (logger && typeof logger.isAdmin === 'function' && logger.isAdmin() && typeof logger.log === 'function'){
+      try { logger.log(label, payload || {}); } catch (_err){}
+      return;
+    }
+    if (window && window.XP_DIAG && typeof console !== 'undefined' && console && typeof console.debug === 'function'){
+      try { console.debug('[supabase]', label, payload || {}); } catch (_err){}
+    }
+  }
+
   function pickEnv(){
     var cfg = (window.SUPABASE_CONFIG || {});
     return {
@@ -15,14 +26,19 @@
 
   function initClient(){
     var env = pickEnv();
-    if (window.supabase && window.supabase.createClient && env.url && env.key){
+    var hasSupabase = !!(window.supabase && window.supabase.createClient);
+    if (hasSupabase && env.url && env.key){
       try {
         window.supabaseClient = window.supabase.createClient(env.url, env.key);
+        logDiag('supabase:init_ok', { urlPresent: !!env.url, keyPresent: !!env.key });
       } catch (_err){
         window.supabaseClient = null;
       }
     } else {
       window.supabaseClient = window.supabaseClient || null;
+    }
+    if (!window.supabaseClient){
+      logDiag('supabase:init_failed', { hasSupabase: hasSupabase, url: !!env.url, key: !!env.key });
     }
     return window.supabaseClient;
   }
@@ -107,8 +123,11 @@
   function handleAction(){
     if (!nodes.menuAction) return;
     var intent = nodes.menuAction.dataset.intent;
+    logDiag('supabase:avatar_action', { intent: intent });
     if (intent === 'signout' && window.supabaseClient && window.supabaseClient.auth){
-      window.supabaseClient.auth.signOut().catch(function(){});
+      window.supabaseClient.auth.signOut().catch(function(err){
+        logDiag('supabase:signout_error', { message: err && err.message ? String(err.message) : 'error' });
+      });
       toggleMenu(false);
       return;
     }
@@ -141,10 +160,16 @@
     }
 
     client.auth.getSession().then(function(res){
-      renderUser(res.data && res.data.session ? res.data.session.user : null);
-    }).catch(function(){ renderUser(null); });
+      var session = res.data && res.data.session ? res.data.session : null;
+      logDiag('supabase:session_initial', { hasSession: !!(session && session.user), email: session && session.user ? session.user.email : undefined });
+      renderUser(session && session.user ? session.user : null);
+    }).catch(function(err){
+      logDiag('supabase:session_error', { message: err && err.message ? String(err.message) : 'error' });
+      renderUser(null);
+    });
 
-    client.auth.onAuthStateChange(function(_event, session){
+    client.auth.onAuthStateChange(function(event, session){
+      logDiag('supabase:auth_change', { event: event, hasUser: !!(session && session.user) });
       renderUser(session && session.user ? session.user : null);
     });
   }
