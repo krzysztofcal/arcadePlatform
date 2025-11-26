@@ -164,6 +164,8 @@ button:focus-visible, a:focus-visible{ outline:2px solid var(--accent); outline-
   .topbar{
     flex-wrap: wrap;
     align-items: flex-start;
+    height: auto;
+    min-height: var(--topbar-h);
   }
 
   .topbar-left{

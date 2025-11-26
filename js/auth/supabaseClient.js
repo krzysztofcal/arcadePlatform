@@ -7,10 +7,11 @@
 
   function logDiag(label, payload){
     var logger = window && window.KLog;
-    if (logger && typeof logger.isAdmin === 'function' && logger.isAdmin() && typeof logger.log === 'function'){
+
+    if (logger && typeof logger.log === 'function'){
       try { logger.log(label, payload || {}); } catch (_err){}
-      return;
     }
+
     if (window && window.XP_DIAG && typeof console !== 'undefined' && console && typeof console.debug === 'function'){
       try { console.debug('[supabase]', label, payload || {}); } catch (_err){}
     }
@@ -180,6 +181,7 @@
   }
 
   function init(){
+    logDiag('supabase:init_start', {});
     wireAvatar();
     var client = initClient();
     hydrateSession(client);

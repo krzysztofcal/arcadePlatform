@@ -108,6 +108,8 @@ body{margin:0; background:linear-gradient(180deg, #0b1020 0%, #0a0d1a 100%); col
   .topbar{
     flex-wrap: wrap;
     align-items: flex-start;
+    height: auto;
+    min-height: var(--topbar-h);
   }
 
   .topbar-left{
