@@ -42,6 +42,10 @@
     <button id="debugDumpButton" class="debug-dump-button" type="button" hidden>Dump diagnostics</button>
     <button id="xpDumpButton" class="debug-dump-button" type="button" hidden style="margin-left:8px;">Dump XP diagnostics</button>
     <div id="debugToast" class="debug-toast" role="status" aria-live="polite"></div>
+    <div id="diagnosticStatus" style="display:none;margin-top:16px;padding:12px;background:#1a2332;border:1px solid #2a3f5f;border-radius:4px;font-size:11px;font-family:monospace;color:#8fa3bf;">
+      <div style="font-weight:bold;margin-bottom:8px;color:#fff;">Diagnostic Status:</div>
+      <div id="statusContent"></div>
+    </div>
     <div id="xpDiagOutput" style="display:none;margin-top:20px;background:#000;color:#0f0;padding:20px;max-height:400px;overflow:auto;font-size:12px;white-space:pre-wrap;border:1px solid #0f0;"></div>
     <h1>About</h1>
     <p>This is a simple arcade portal (MVP). More games and features are coming soon.</p>
@@ -68,6 +72,8 @@
         const xpDumpButton = document.getElementById('xpDumpButton');
         const xpDiagOutput = document.getElementById('xpDiagOutput');
         const toast = document.getElementById('debugToast');
+        const diagnosticStatus = document.getElementById('diagnosticStatus');
+        const statusContent = document.getElementById('statusContent');
         let toastTimer = null;
 
         console.log('[About] Elements found:', {
@@ -76,6 +82,39 @@
           xpDiagOutput: !!xpDiagOutput,
           toast: !!toast
         });
+
+        // Show diagnostic status panel
+        function updateDiagnosticStatus() {
+          if (!diagnosticStatus || !statusContent) return;
+
+          const status = [];
+          status.push('✓ Diagnostic panel loaded');
+          status.push('Button elements: ' + (xpDumpButton ? 'FOUND' : 'NOT FOUND'));
+          status.push('window.XP: ' + (typeof window.XP !== 'undefined' ? 'EXISTS' : 'UNDEFINED'));
+
+          if (window.XP) {
+            status.push('window.XP.getDiagnosticLogs: ' + (typeof window.XP.getDiagnosticLogs === 'function' ? 'EXISTS' : 'MISSING'));
+            if (typeof window.XP.getDiagnosticLogs === 'function') {
+              try {
+                const logs = window.XP.getDiagnosticLogs();
+                status.push('Diagnostic logs count: ' + (logs ? logs.length : 0));
+              } catch (e) {
+                status.push('Error getting logs: ' + e.message);
+              }
+            }
+          }
+
+          if (xpDumpButton) {
+            status.push('XP button visibility: ' + (xpDumpButton.hidden ? 'HIDDEN' : 'VISIBLE'));
+          }
+
+          statusContent.innerHTML = status.join('<br>');
+          diagnosticStatus.style.display = 'block';
+        }
+
+        // Update status every 2 seconds
+        updateDiagnosticStatus();
+        window.setInterval(updateDiagnosticStatus, 2000);
 
         function showToast(message) {
           if (!toast) return;
