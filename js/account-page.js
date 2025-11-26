@@ -2,7 +2,7 @@
   if (typeof window === 'undefined' || typeof document === 'undefined') return;
 
   var doc = document;
-  var auth = window.SupabaseAuth || {};
+  var auth = null;
   var nodes = {};
 
   function selectNodes(){
@@ -26,7 +26,6 @@
     if (!nodes.status) return;
     nodes.status.textContent = message || '';
     nodes.status.dataset.tone = tone || '';
-    nodes.status.hidden = !message;
   }
 
   function renderUser(user){
@@ -48,6 +47,11 @@
     var password = nodes.signInPass && nodes.signInPass.value ? nodes.signInPass.value : '';
     if (!email || !password){
       setStatus('Enter both email and password to sign in.', 'error');
+      return;
+    }
+
+    if (!auth || !auth.signIn){
+      setStatus('Authentication is not ready. Refresh and try again.', 'error');
       return;
     }
 
@@ -75,6 +79,11 @@
       return;
     }
 
+    if (!auth || !auth.signUp){
+      setStatus('Authentication is not ready. Refresh and try again.', 'error');
+      return;
+    }
+
     setStatus('Creating your account…', 'info');
     auth.signUp(email, password).then(function(res){
       var needsVerify = res && res.data && res.data.user && res.data.user.confirmation_sent_at;
@@ -91,6 +100,11 @@
 
   function handleSignOut(){
     setStatus('Signing out…', 'info');
+    if (!auth || !auth.signOut){
+      setStatus('Authentication is not ready. Refresh and try again.', 'error');
+      return;
+    }
+
     auth.signOut().then(function(){
       setStatus('Signed out.', 'success');
       renderUser(null);
@@ -129,6 +143,9 @@
     auth.getCurrentUser().then(function(user){
       renderUser(user);
       setStatus(user ? 'Signed in.' : '', user ? 'success' : '');
+    }).catch(function(err){
+      var msg = err && err.message ? String(err.message) : 'Could not load your session. Please try again.';
+      setStatus(msg, 'error');
     });
 
     if (auth.onAuthChange){
@@ -144,6 +161,7 @@
   }
 
   function init(){
+    auth = (typeof window !== 'undefined' && window.SupabaseAuth) ? window.SupabaseAuth : null;
     selectNodes();
     wireEvents();
     hydrateUser();
