@@ -1122,8 +1122,23 @@ function bootXpCore(window, document) {
     if (typeof data.cap === "number" && Number.isFinite(data.cap)) {
       state.cap = Math.max(0, Math.floor(data.cap));
     }
+
+    // Protect totalToday from stale server data - keep local value if it's higher
+    // (local value may include XP that's pending/in-flight to server)
     if (typeof data.totalToday === "number") {
-      state.totalToday = Math.max(0, Math.floor(Number(data.totalToday) || 0));
+      const serverTotalToday = Math.max(0, Math.floor(Number(data.totalToday) || 0));
+      const localTotalToday = Number(state.totalToday) || 0;
+
+      // Only use server value if it's equal or higher (more up-to-date)
+      // OR if this is a different day (day reset)
+      const serverDayKey = typeof data.dayKey === "string" ? data.dayKey : null;
+      const localDayKey = typeof state.dayKey === "string" ? state.dayKey : null;
+      const dayChanged = serverDayKey && localDayKey && serverDayKey !== localDayKey;
+
+      if (dayChanged || serverTotalToday >= localTotalToday) {
+        state.totalToday = serverTotalToday;
+      }
+      // else: keep local totalToday (it's higher, meaning we have pending XP)
     }
     // Handle dailyRemaining updates carefully to avoid race conditions.
     // The server's remaining value should be authoritative, but stale server responses
