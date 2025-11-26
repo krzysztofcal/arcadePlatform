@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0b1020">
+  <title>Account • Arcade Hub</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;800&display=swap">
+  <link rel="stylesheet" href="css/portal.css">
+  <link rel="stylesheet" href="/css/xp-overlay.css">
+  <style>
+    .account-grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+
+    .account-note { color: #a0aec0; font-size: 14px; line-height: 1.5; }
+
+    .account-status { margin: 0 0 16px; padding: 12px 14px; border-radius: 12px; background: rgba(255, 255, 255, 0.05); }
+
+    .account-status[data-tone="error"] { color: #fda4af; background: rgba(255, 77, 109, 0.1); }
+
+    .account-status[data-tone="success"] { color: #86efac; background: rgba(22, 163, 74, 0.1); }
+
+    .account-status[data-tone="info"] { color: #7dd3fc; background: rgba(14, 165, 233, 0.12); }
+
+    .account-form label { display: block; font-weight: 600; margin-bottom: 6px; }
+
+    .account-form input { width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid rgba(255, 255, 255, 0.1); background: rgba(255, 255, 255, 0.04); color: #e2e8f0; }
+
+    .account-form input:focus { outline: 2px solid #6ee7e7; outline-offset: 2px; }
+
+    .account-form button { margin-top: 12px; width: 100%; padding: 12px; border: none; border-radius: 12px; background: linear-gradient(90deg, #6ee7e7, #a78bfa); color: #0b1020; font-weight: 700; cursor: pointer; }
+
+    .account-form button:hover { opacity: 0.95; }
+
+    .account-panel__actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 12px; }
+
+    .account-panel__btn { padding: 10px 14px; border-radius: 12px; border: none; cursor: pointer; font-weight: 600; }
+
+    .account-panel__btn--primary { background: linear-gradient(90deg, #6ee7e7, #a78bfa); color: #0b1020; }
+
+    .account-panel__btn--ghost { background: rgba(255, 255, 255, 0.08); color: #e2e8f0; }
+  </style>
+  <script id="Cookiebot"
+          src="https://consent.cookiebot.com/uc.js"
+          data-cbid="c76249cb-52a7-4dba-adbf-da79fe8a6276"
+          data-blockingmode="auto"
+          type="text/javascript">
+  </script>
+  <script type="text/plain" data-cookieconsent="statistics"
+          src="https://www.googletagmanager.com/gtag/js?id=G-JRP62LCXYK"></script>
+  <script type="text/plain" data-cookieconsent="statistics">
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){ dataLayer.push(arguments); }
+    gtag('js', new Date());
+    gtag('config', 'G-JRP62LCXYK');
+  </script>
+  <script src="js/analytics.js" defer></script>
+  <script src="js/i18n.js" defer></script>
+  <script src="/js/auth/supabase-config.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js" defer></script>
+  <script src="/js/auth/supabaseClient.js" defer></script>
+  <script src="js/topbar.js" defer></script>
+  <script src="js/xpClient.js" defer></script>
+  <script src="/js/ui/xp-overlay.js" defer></script>
+  <script src="js/debug.js" defer></script>
+  <script src="js/xp/combo.js" defer></script>
+  <script src="js/xp/scoring.js" defer></script>
+  <script src="js/xp/core.js" defer></script>
+  <script src="js/xp.js" defer></script>
+  <script src="js/sidebar.js" defer></script>
+  <script src="js/account-page.js" defer></script>
+</head>
+<body>
+  <div class="topbar">
+    <div class="topbar-left">
+      <button class="hamburger" id="sbToggle" aria-label="Toggle navigation" aria-expanded="false">
+        <span></span><span></span><span></span>
+      </button>
+      <a href="index.html" class="brand" aria-label="Arcade Hub home">
+        <div class="logo" aria-hidden="true"></div>
+        <h1>Arcade Hub</h1>
+      </a>
+      <div class="search search-box">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M21 21l-3.9-3.9M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15z" stroke="#86e1e1" stroke-width="2" stroke-linecap="round"/></svg>
+        <input type="search" aria-label="Search games" placeholder="Search games (inactive in MVP)" />
+      </div>
+    </div>
+    <div class="topbar-right">
+      <a id="xpBadge" class="xp-badge xp-badge--loading" aria-live="polite" aria-busy="true" href="xp.html">
+        <span class="xp-badge__label">Syncing XP…</span>
+      </a>
+      <div class="avatar-shell" id="avatarShell">
+        <button type="button" class="avatar-btn" id="avatarButton" aria-haspopup="true" aria-expanded="false">
+          <span class="avatar-circle" id="avatarInitials" aria-hidden="true">AH</span>
+          <span class="avatar-label" id="avatarLabel">Sign in</span>
+          <span class="avatar-caret" aria-hidden="true">▾</span>
+        </button>
+        <div class="avatar-menu" id="avatarMenu" hidden>
+          <div class="avatar-menu__user">
+            <div class="avatar-menu__initials" id="avatarMenuInitials" aria-hidden="true">AH</div>
+            <div class="avatar-menu__meta">
+              <div class="avatar-menu__name" id="avatarMenuName">Guest</div>
+              <div class="avatar-menu__email" id="avatarMenuEmail">Sign in to sync progress</div>
+            </div>
+          </div>
+          <button type="button" class="avatar-menu__action" id="avatarMenuAction">Sign in</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="shell">
+    <aside class="sidebar collapsed" id="sidebar" aria-label="Main navigation">
+      <nav class="sb-nav">
+        <ul class="sb-list">
+          <li class="sb-item">
+            <a href="index.html" class="sb-link sb-home" aria-label="Home" tabindex="0">
+              <span class="sb-ico" aria-hidden="true">
+                <svg class="sb-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 10.5 12 4l9 6.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1v-9.5Z"/></svg>
+              </span>
+              <span class="sb-label">Home</span>
+            </a>
+          </li>
+          <li class="sb-item">
+            <a href="about.en.html" class="sb-link" tabindex="0">
+              <span class="sb-ico" aria-hidden="true"></span>
+              <span class="sb-label">About</span>
+            </a>
+          </li>
+        </ul>
+      </nav>
+    </aside>
+
+    <main>
+      <article class="xp-page" aria-labelledby="accountTitle">
+        <header class="xp-header">
+          <h1 id="accountTitle">Your account</h1>
+          <p class="xp-subtitle">Sign in to sync XP and manage your Arcade Hub profile.</p>
+        </header>
+
+        <div class="account-status" id="accountStatus" aria-live="polite" hidden></div>
+
+        <section class="account-grid" id="authForms" aria-label="Authentication">
+          <div class="xp-card">
+            <h2 class="xp-card__title">Sign in</h2>
+            <form class="account-form" id="signinForm">
+              <label for="signinEmail">Email</label>
+              <input id="signinEmail" name="email" type="email" autocomplete="email" required placeholder="you@example.com">
+              <label for="signinPassword">Password</label>
+              <input id="signinPassword" name="password" type="password" autocomplete="current-password" required placeholder="••••••••">
+              <button type="submit">Sign in</button>
+            </form>
+          </div>
+
+          <div class="xp-card">
+            <h2 class="xp-card__title">Create account</h2>
+            <form class="account-form" id="signupForm">
+              <label for="signupEmail">Email</label>
+              <input id="signupEmail" name="email" type="email" autocomplete="email" required placeholder="you@example.com">
+              <label for="signupPassword">Password</label>
+              <input id="signupPassword" name="password" type="password" autocomplete="new-password" required placeholder="Choose a password">
+              <button type="submit">Sign up</button>
+            </form>
+            <p class="account-note">We may ask you to verify your email before unlocking cloud sync.</p>
+          </div>
+        </section>
+
+        <section class="xp-card" id="accountPanel" hidden aria-label="Account details">
+          <h2 class="xp-card__title">Account</h2>
+          <p class="xp-details__text">Signed in as <strong id="accountName">Player</strong>.</p>
+          <p class="xp-details__text">Email: <strong id="accountEmail">you@example.com</strong></p>
+          <div class="account-panel__actions">
+            <button type="button" class="account-panel__btn account-panel__btn--primary" id="signOutButton">Sign out</button>
+            <button type="button" class="account-panel__btn account-panel__btn--ghost" id="deleteAccountButton">Delete account</button>
+          </div>
+          <p class="account-note" id="deleteAccountNote" tabindex="-1">Account deletion is coming soon. Contact support if you need data removed sooner.</p>
+        </section>
+      </article>
+    </main>
+  </div>
+
+  <footer class="site-footer" role="contentinfo">
+    <nav class="footer-nav" aria-label="Footer">
+      <a class="ft-link" href="about.en.html">About</a>
+      <span class="sep">•</span>
+      <a class="ft-link" href="about/licenses.html">Licenses</a>
+      <span class="sep">•</span>
+      <a class="ft-link" href="legal/terms.en.html">Terms</a>
+      <span class="sep">•</span>
+      <a class="ft-link" href="legal/privacy.en.html">Privacy</a>
+      <span class="sep">•</span>
+      <a class="ft-link" href="mailto:contact@kcswh.pl">Contact</a>
+      <span class="sep">•</span>
+      <a class="ft-link manage-cookies" id="manageCookies" href="#" data-cookieconsent="ignore">Manage cookies</a>
+    </nav>
+    <div class="lang-switch" aria-label="Language">
+      <button type="button" class="lang-btn" data-lang="pl" aria-pressed="false">PL</button>
+      <button type="button" class="lang-btn" data-lang="en" aria-pressed="false">EN</button>
+    </div>
+  </footer>
+</body>
+</html>
