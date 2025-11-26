@@ -53,6 +53,18 @@ button:focus-visible {
   font-weight: 800;
   font-size: 22px;
   letter-spacing: 0.02em;
+  text-decoration: none;
+  color: inherit;
+  cursor: pointer;
+  transition: opacity 0.2s ease;
+}
+
+.brand:hover {
+  opacity: 0.88;
+}
+
+.brand:active {
+  opacity: 0.75;
 }
 
 .brand-badge {

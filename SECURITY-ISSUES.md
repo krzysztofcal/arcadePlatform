@@ -766,7 +766,7 @@ test.describe('Security Tests', () => {
 
 **DO NOT** open a public issue for security vulnerabilities.
 
-Email security@kcswh.pl with:
+Email contact@kcswh.pl with:
 - Description of the vulnerability
 - Steps to reproduce
 - Potential impact
