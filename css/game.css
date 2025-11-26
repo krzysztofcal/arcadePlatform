@@ -159,6 +159,42 @@ button:focus-visible, a:focus-visible{ outline:2px solid var(--accent); outline-
   .topbar-left{ gap:10px; }
   .xp-badge{ padding:6px 12px; font-size:12px; }
 }
+
+@media (max-width: 540px){
+  .topbar{
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+
+  .topbar-left{
+    flex: 1 0 100%;
+    min-width: 0;
+  }
+
+  .topbar-right{
+    flex: 1 0 100%;
+    margin-left: 0;
+    justify-content: flex-end;
+    padding-top: 6px;
+  }
+}
+
+@media (max-width: 480px){
+  .search-box{
+    max-width: 140px;
+  }
+
+  .search-box input{
+    width: 0;
+    opacity: 0;
+  }
+
+  .search-box:focus-within input{
+    width: 140px;
+    opacity: 1;
+  }
+}
+
 @media (max-width: 600px){
   .search-box{ padding:8px 10px; }
   .search-box input{ width:0; opacity:0; min-width:0; }

@@ -131,13 +131,18 @@
       toggleMenu(false);
       return;
     }
-    var event;
     try {
-      event = new CustomEvent('auth:signin-request');
-    } catch (_err){
-      return;
-    }
-    doc.dispatchEvent(event);
+      var ev;
+      if (typeof CustomEvent === 'function') {
+        ev = new CustomEvent('auth:signin-request');
+      } else if (doc.createEvent) {
+        ev = doc.createEvent('Event');
+        ev.initEvent('auth:signin-request', true, true);
+      }
+      if (ev && doc.dispatchEvent) {
+        doc.dispatchEvent(ev);
+      }
+    } catch (_err){}
     toggleMenu(false);
   }
 
