@@ -25,11 +25,6 @@
   </script>
   <script src="js/analytics.js" defer></script>
   <script src="js/debug.js" defer></script>
-  <script src="js/xpClient.js" defer></script>
-  <script src="js/xp/combo.js" defer></script>
-  <script src="js/xp/scoring.js" defer></script>
-  <script src="js/xp/core.js" defer></script>
-  <script src="js/xp.js" defer></script>
   <script src="/js/ui/xp-overlay.js" defer></script>
 </head>
 <body style="padding:16px; font-family:Poppins, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; color:#e8eeff; background:#0b1020;">
@@ -40,13 +35,7 @@
       </a>
     </div>
     <button id="debugDumpButton" class="debug-dump-button" type="button" hidden>Dump diagnostics</button>
-    <button id="xpDumpButton" class="debug-dump-button" type="button" hidden style="margin-left:8px;">Dump XP diagnostics</button>
     <div id="debugToast" class="debug-toast" role="status" aria-live="polite"></div>
-    <div id="diagnosticStatus" style="display:none;margin-top:16px;padding:12px;background:#1a2332;border:1px solid #2a3f5f;border-radius:4px;font-size:11px;font-family:monospace;color:#8fa3bf;">
-      <div style="font-weight:bold;margin-bottom:8px;color:#fff;">Diagnostic Status:</div>
-      <div id="statusContent"></div>
-    </div>
-    <div id="xpDiagOutput" style="display:none;margin-top:20px;background:#000;color:#0f0;padding:20px;max-height:400px;overflow:auto;font-size:12px;white-space:pre-wrap;border:1px solid #0f0;"></div>
     <h1>About</h1>
     <p>This is a simple arcade portal (MVP). More games and features are coming soon.</p>
     <p>Contact: <a href="#" class="ft-link">email</a></p>
@@ -69,52 +58,8 @@
         } catch (_) {}
 
         const dumpButton = document.getElementById('debugDumpButton');
-        const xpDumpButton = document.getElementById('xpDumpButton');
-        const xpDiagOutput = document.getElementById('xpDiagOutput');
         const toast = document.getElementById('debugToast');
-        const diagnosticStatus = document.getElementById('diagnosticStatus');
-        const statusContent = document.getElementById('statusContent');
         let toastTimer = null;
-
-        console.log('[About] Elements found:', {
-          dumpButton: !!dumpButton,
-          xpDumpButton: !!xpDumpButton,
-          xpDiagOutput: !!xpDiagOutput,
-          toast: !!toast
-        });
-
-        // Show diagnostic status panel
-        function updateDiagnosticStatus() {
-          if (!diagnosticStatus || !statusContent) return;
-
-          const status = [];
-          status.push('✓ Diagnostic panel loaded');
-          status.push('Button elements: ' + (xpDumpButton ? 'FOUND' : 'NOT FOUND'));
-          status.push('window.XP: ' + (typeof window.XP !== 'undefined' ? 'EXISTS' : 'UNDEFINED'));
-
-          if (window.XP) {
-            status.push('window.XP.getDiagnosticLogs: ' + (typeof window.XP.getDiagnosticLogs === 'function' ? 'EXISTS' : 'MISSING'));
-            if (typeof window.XP.getDiagnosticLogs === 'function') {
-              try {
-                const logs = window.XP.getDiagnosticLogs();
-                status.push('Diagnostic logs count: ' + (logs ? logs.length : 0));
-              } catch (e) {
-                status.push('Error getting logs: ' + e.message);
-              }
-            }
-          }
-
-          if (xpDumpButton) {
-            status.push('XP button visibility: ' + (xpDumpButton.hidden ? 'HIDDEN' : 'VISIBLE'));
-          }
-
-          statusContent.innerHTML = status.join('<br>');
-          diagnosticStatus.style.display = 'block';
-        }
-
-        // Update status every 2 seconds
-        updateDiagnosticStatus();
-        window.setInterval(updateDiagnosticStatus, 2000);
 
         function showToast(message) {
           if (!toast) return;
@@ -150,31 +95,15 @@
         }
 
         function updateVisibility() {
-          console.log('[About] updateVisibility called');
-
-          if (dumpButton) {
-            if (!window.KLog || typeof window.KLog.isAdmin !== 'function') {
-              dumpButton.hidden = true;
-            } else {
-              const active = isAdmin();
-              dumpButton.hidden = !active;
-              if (active) {
-                ensureRecorder();
-              }
-            }
+          if (!dumpButton) return;
+          if (!window.KLog || typeof window.KLog.isAdmin !== 'function') {
+            dumpButton.hidden = true;
+            return;
           }
-
-          if (xpDumpButton) {
-            const hasXP = !!(window.XP && typeof window.XP.getDiagnosticLogs === 'function');
-            console.log('[About] XP button visibility:', {
-              'window.XP exists': !!window.XP,
-              'getDiagnosticLogs exists': window.XP && typeof window.XP.getDiagnosticLogs === 'function',
-              hasXP: hasXP,
-              'button.hidden': xpDumpButton.hidden
-            });
-            // TEMPORARY: Always show XP dump button if XP is loaded (skip admin check for debugging)
-            xpDumpButton.hidden = !hasXP;
-            console.log('[About] Set XP button.hidden =', xpDumpButton.hidden);
+          const active = isAdmin();
+          dumpButton.hidden = !active;
+          if (active) {
+            ensureRecorder();
           }
         }
 
@@ -204,72 +133,6 @@
                   showToast('Diagnostics unavailable');
                 }
               });
-          });
-        }
-
-        if (xpDumpButton) {
-          console.log('[About] Adding click handler to XP dump button');
-          xpDumpButton.addEventListener('click', () => {
-            console.log('[About] XP dump button clicked');
-
-            // Check if window.XP exists
-            if (!window.XP) {
-              console.log('[About] window.XP does not exist');
-              showToast('XP system not loaded');
-              return;
-            }
-            console.log('[About] window.XP exists');
-
-            // Check if getDiagnosticLogs exists
-            if (typeof window.XP.getDiagnosticLogs !== 'function') {
-              console.log('[About] window.XP.getDiagnosticLogs is not a function');
-              showToast('XP diagnostics unavailable');
-              return;
-            }
-            console.log('[About] window.XP.getDiagnosticLogs exists');
-
-            try {
-              const logs = window.XP.getDiagnosticLogs();
-              console.log('[About] Got logs:', logs ? logs.length : 'null/undefined', 'entries');
-
-              if (!logs || logs.length === 0) {
-                showToast('No diagnostic logs (length=' + (logs ? logs.length : 'null') + ')');
-                if (xpDiagOutput) {
-                  xpDiagOutput.textContent = 'No XP diagnostic logs available yet.\n\nLogs will appear here after:\n1. Playing a game to earn XP\n2. Navigating to XP dashboard\n3. Coming back here and clicking this button';
-                  xpDiagOutput.style.display = 'block';
-                }
-                return;
-              }
-
-              let output = 'XP DIAGNOSTIC LOGS (' + logs.length + ' entries)\n';
-              output += '='.repeat(60) + '\n\n';
-
-              logs.forEach((entry, index) => {
-                output += '[' + (index + 1) + '] ' + entry.timestamp + '\n';
-                output += '    ' + entry.message + '\n';
-                if (entry.data && typeof entry.data === 'object') {
-                  output += '    Data: ' + JSON.stringify(entry.data, null, 2).split('\n').join('\n    ') + '\n';
-                } else if (entry.data) {
-                  output += '    Data: ' + entry.data + '\n';
-                }
-                output += '\n';
-              });
-
-              if (xpDiagOutput) {
-                xpDiagOutput.textContent = output;
-                xpDiagOutput.style.display = 'block';
-                xpDiagOutput.scrollTop = xpDiagOutput.scrollHeight;
-              }
-              console.log('[About] XP diagnostics displayed');
-              showToast('XP diagnostics displayed (' + logs.length + ' entries)');
-            } catch (err) {
-              console.error('[About] Error dumping XP diagnostics:', err);
-              showToast('Error: ' + err.message);
-              if (xpDiagOutput) {
-                xpDiagOutput.textContent = 'Error dumping XP diagnostics:\n' + err.toString();
-                xpDiagOutput.style.display = 'block';
-              }
-            }
           });
         }
 
