@@ -118,8 +118,8 @@
 
           if (xpDumpButton) {
             const hasXP = !!(window.XP && typeof window.XP.getDiagnosticLogs === 'function');
-            const active = isAdmin();
-            xpDumpButton.hidden = !(hasXP && active);
+            // TEMPORARY: Always show XP dump button if XP is loaded (skip admin check for debugging)
+            xpDumpButton.hidden = !hasXP;
           }
         }
 
