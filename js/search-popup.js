@@ -160,17 +160,12 @@
 
       if (thumbnailUrl){
         icon.classList.add('search-popup__icon--has-image');
-        if (thumbnailUrl.endsWith('.svg')){
-          icon.style.backgroundImage = `url("${thumbnailUrl.replace(/"/g, '%22')}")`;
-          icon.style.backgroundSize = 'cover';
-          icon.style.backgroundPosition = 'center';
-        } else {
-          const img = this.document.createElement('img');
-          img.src = thumbnailUrl;
-          img.alt = '';
-          img.loading = 'lazy';
-          icon.appendChild(img);
-        }
+        // Use <img> for all thumbnails (SVG and raster)
+        const img = this.document.createElement('img');
+        img.src = thumbnailUrl;
+        img.alt = '';
+        img.loading = 'lazy';
+        icon.appendChild(img);
       } else {
         // Fallback icon
         icon.innerHTML = '<svg viewBox="0 0 24 24" fill="none"><rect x="4" y="4" width="16" height="16" rx="2" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="3" fill="currentColor"/></svg>';
