@@ -556,18 +556,34 @@ test.describe('E2E Security Tests', () => {
       const userId = generateUserId();
       const sessionId = generateSessionId();
 
-      // Send request with old timestamp
-      const oldTimestamp = Date.now() - (10 * 60 * 1000); // 10 minutes ago
-      const payload = createXPRequest({ userId, sessionId, ts: oldTimestamp });
-      const response = await request.post(XP_ENDPOINT, { data: payload });
+      // First request with current timestamp - this establishes lastSync
+      const ts1 = Date.now();
+      const response1 = await request.post(XP_ENDPOINT, {
+        data: createXPRequest({ userId, sessionId, ts: ts1, delta: 10 })
+      });
 
       // Skip if rate limited
-      if (response.status() === 429) return;
+      if (response1.status() === 429) return;
 
-      // Should reject or mark as stale
-      const data = await response.json();
-      if (response.status() === 200) {
-        expect(data.status).toContain('stale');
+      expect(response1.status()).toBe(200);
+      const data1 = await response1.json();
+      expect(data1.awarded).toBe(10);
+
+      // Second request with older timestamp - should be marked as stale
+      // because ts2 < lastSync (established by first request)
+      const ts2 = ts1 - (10 * 60 * 1000); // 10 minutes before first request
+      const response2 = await request.post(XP_ENDPOINT, {
+        data: createXPRequest({ userId, sessionId, ts: ts2, delta: 10 })
+      });
+
+      // Skip if rate limited
+      if (response2.status() === 429) return;
+
+      // Should mark as stale because timestamp is older than lastSync
+      const data2 = await response2.json();
+      if (response2.status() === 200) {
+        expect(data2.status).toContain('stale');
+        expect(data2.awarded).toBe(0);
       }
     });
 
