@@ -47,6 +47,7 @@ body{margin:0; background:linear-gradient(180deg, #0b1020 0%, #0a0d1a 100%); col
 .search-popup__item:focus{ outline:2px solid var(--accent); outline-offset:2px; text-decoration:none !important; }
 .search-popup__item:visited{ color:#e8eeff !important; text-decoration:none !important; }
 .search-popup__icon{ width:40px; height:40px; border-radius:10px; border:1px solid var(--border); background-image:linear-gradient(160deg, #0f1430 0%, #0b1020 100%); background-size:cover; background-position:center; flex:0 0 40px; display:grid; place-items:center; }
+.search-popup__icon--has-image{ background-image:none; background-color:transparent; }
 .search-popup__icon img{ width:100%; height:100%; object-fit:cover; border-radius:10px; }
 .search-popup__icon svg{ width:24px; height:24px; fill:#cdd6ff; opacity:.9; }
 .search-popup__name{ font:600 14px/1.3 Poppins, sans-serif; color:#e8eeff !important; flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }

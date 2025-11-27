@@ -159,6 +159,7 @@
       console.debug('SearchPopup: Game', game.slug || game.id, 'thumbnail:', game.thumbnail, '→', thumbnailUrl);
 
       if (thumbnailUrl){
+        icon.classList.add('search-popup__icon--has-image');
         if (thumbnailUrl.endsWith('.svg')){
           icon.style.backgroundImage = `url("${thumbnailUrl.replace(/"/g, '%22')}")`;
           icon.style.backgroundSize = 'cover';
