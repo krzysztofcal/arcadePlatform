@@ -88,7 +88,12 @@
 
       if (game.source.page){
         try {
-          const url = new URL(game.source.page, this.window.location.href);
+          // Use absolute path from origin to avoid relative path issues
+          let path = game.source.page;
+          if (!path.startsWith('/')) {
+            path = '/' + path;
+          }
+          const url = new URL(path, this.window.location.origin);
           if (url.origin !== this.window.location.origin) return null;
           url.searchParams.set('lang', lang);
           if (slug) url.searchParams.set('slug', slug);
@@ -100,7 +105,8 @@
 
       if (game.source.type === 'distributor'){
         try {
-          const url = new URL('game.html', this.window.location.href);
+          // Use absolute path from origin
+          const url = new URL('/game.html', this.window.location.origin);
           url.searchParams.set('slug', slug);
           url.searchParams.set('lang', lang);
           return url.toString();
@@ -115,7 +121,18 @@
     safeImageUrl(url){
       if (!url || typeof url !== 'string') return null;
       try {
-        const parsed = new URL(url, this.window.location.href);
+        // If it's already an absolute URL, use it as-is
+        if (url.startsWith('http://') || url.startsWith('https://')) {
+          const parsed = new URL(url);
+          if (!['http:', 'https:'].includes(parsed.protocol)) return null;
+          return parsed.href;
+        }
+        // Otherwise, resolve relative to origin
+        let path = url;
+        if (!path.startsWith('/')) {
+          path = '/' + path;
+        }
+        const parsed = new URL(path, this.window.location.origin);
         if (!['http:', 'https:'].includes(parsed.protocol)) return null;
         return parsed.href;
       } catch (err) {
@@ -125,7 +142,10 @@
 
     createResultItem(game, lang){
       const href = this.getGameHref(game, lang);
-      if (!href) return null;
+      if (!href) {
+        console.debug('SearchPopup: No href generated for game', game.slug || game.id);
+        return null;
+      }
 
       const item = this.document.createElement('a');
       item.className = 'search-popup__item';
@@ -136,9 +156,13 @@
       icon.className = 'search-popup__icon';
 
       const thumbnailUrl = this.safeImageUrl(game.thumbnail);
+      console.debug('SearchPopup: Game', game.slug || game.id, 'thumbnail:', game.thumbnail, '→', thumbnailUrl);
+
       if (thumbnailUrl){
         if (thumbnailUrl.endsWith('.svg')){
           icon.style.backgroundImage = `url("${thumbnailUrl.replace(/"/g, '%22')}")`;
+          icon.style.backgroundSize = 'cover';
+          icon.style.backgroundPosition = 'center';
         } else {
           const img = this.document.createElement('img');
           img.src = thumbnailUrl;
