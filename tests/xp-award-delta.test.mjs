@@ -248,6 +248,8 @@ async function testDeltaValidation() {
   const handler = await createHandler('invalid');
   const base = { userId: 'user-invalid', sessionId: 'sess-invalid', ts: BASE_TS };
 
+  Date.now = () => BASE_TS;
+
   const rejected = await handler({ httpMethod: 'POST', headers: {}, body: JSON.stringify({ ...base, delta: 500 }) });
   assert.equal(rejected.statusCode, 422);
   const payload = JSON.parse(rejected.body);
@@ -265,6 +267,8 @@ async function testDeltaValidation() {
 async function testMetadataLimits() {
   const handler = await createHandler('metadata', { metadataLimit: 64 });
   const base = { userId: 'meta-user', sessionId: 'meta-session', ts: BASE_TS };
+
+  Date.now = () => BASE_TS;
 
   const accepted = await invoke(handler, { ...base, delta: 10, metadata: { note: 'ok' } });
   assert.equal(accepted.statusCode, 200);
@@ -299,6 +303,8 @@ async function testMetadataLimits() {
 async function testActivityGuard() {
   const handler = await createHandler('activity', { requireActivity: true, minEvents: 3, minVisibility: 5 });
   const base = { userId: 'active-user', sessionId: 'active-session', ts: BASE_TS };
+
+  Date.now = () => BASE_TS;
 
   const inactive = await invoke(handler, { ...base, delta: 20, metadata: { inputEvents: 1, visibilitySeconds: 2 } });
   assert.equal(inactive.statusCode, 200);
