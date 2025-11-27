@@ -25,8 +25,8 @@ body{margin:0; background:linear-gradient(180deg, #0b1020 0%, #0a0d1a 100%); col
 /* Hamburger */
 .hamburger{ width:40px; height:40px; display:grid; place-items:center; background:transparent; border:1px solid var(--border); border-radius:10px; margin-right:8px; cursor:pointer; }
 .hamburger span{ display:block; width:18px; height:2px; background:#cdd6ff; margin:3px 0; }
-.topbar{ position:fixed; left:0; right:0; top:0; height:var(--topbar-h); display:flex; align-items:center; gap:12px; padding:12px 18px; background:var(--card); border-bottom:1px solid var(--border); z-index:100; }
-.topbar-left{ display:flex; align-items:center; gap:12px; flex:1; min-width:0; }
+.topbar{ position:fixed; left:0; right:0; top:0; height:var(--topbar-h); display:flex; align-items:center; gap:12px; padding:12px 18px; background:var(--card); border-bottom:1px solid var(--border); z-index:100; overflow:visible; }
+.topbar-left{ display:flex; align-items:center; gap:12px; flex:1; min-width:0; overflow:visible; }
 .topbar-right{ margin-left:auto; display:flex; align-items:center; gap:12px; }
 .brand{ display:flex; align-items:center; gap:10px; text-decoration:none; cursor:pointer; transition:opacity .2s ease; }
 .brand:hover{ opacity:.88; }
@@ -39,7 +39,7 @@ body{margin:0; background:linear-gradient(180deg, #0b1020 0%, #0a0d1a 100%); col
 .search-box input:focus{ width:320px; }
 
 /* Search popup dropdown */
-.search-popup{ position:absolute; top:calc(100% + 6px); left:0; right:0; background:var(--card-2); border:1px solid var(--border); border-radius:14px; padding:8px; box-shadow:0 14px 32px rgba(0,0,0,.35); z-index:120; max-height:400px; overflow-y:auto; min-width:320px; }
+.search-popup{ position:absolute; top:calc(100% + 8px); left:0; right:0; background:var(--card-2); border:1px solid var(--border); border-radius:14px; padding:8px; box-shadow:0 14px 32px rgba(0,0,0,.35); z-index:9999; max-height:400px; overflow-y:auto; min-width:320px; }
 .search-popup[hidden]{ display:none; }
 .search-popup__empty{ padding:16px; text-align:center; color:var(--muted); font:600 13px Poppins, sans-serif; }
 .search-popup__item{ display:flex; align-items:center; gap:12px; padding:10px 12px; border-radius:10px; cursor:pointer; text-decoration:none; color:inherit; transition:background .18s ease; border:1px solid transparent; }

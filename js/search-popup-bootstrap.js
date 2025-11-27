@@ -33,7 +33,7 @@
         i18n: window.I18N,
         analytics: window.Analytics,
         fetchImpl: (url, options) => window.fetch(url, Object.assign({ cache: 'no-cache' }, options)),
-        gamesEndpoint: 'js/games.json',
+        gamesEndpoint: '/js/games.json',
         win: window,
         doc: document
       });
