@@ -6,28 +6,46 @@
 
   function initSearchPopup(){
     const searchInput = document.querySelector('.search-box input[type="search"]');
-    if (!searchInput || !window.SearchPopup) return;
+
+    if (!searchInput) {
+      console.debug('Search popup: No search input found');
+      return;
+    }
+
+    if (!window.SearchPopup) {
+      console.error('Search popup: SearchPopup class not available');
+      return;
+    }
 
     // Only initialize on non-main pages (pages without gamesGrid)
     const gamesGrid = document.getElementById('gamesGrid');
-    if (gamesGrid) return; // Main page already has inline search
+    if (gamesGrid) {
+      console.debug('Search popup: Skipping initialization on main page');
+      return; // Main page already has inline search
+    }
 
-    const popup = new window.SearchPopup({
-      searchInput,
-      catalog: window.ArcadeCatalog,
-      i18n: window.I18N,
-      analytics: window.Analytics,
-      fetchImpl: (url, options) => window.fetch(url, Object.assign({ cache: 'no-cache' }, options)),
-      gamesEndpoint: 'js/games.json',
-      win: window,
-      doc: document
-    });
+    console.debug('Search popup: Initializing on non-main page');
 
-    popup.init().catch(err => {
-      if (window.console && typeof window.console.error === 'function'){
-        window.console.error('Failed to initialize search popup:', err);
-      }
-    });
+    try {
+      const popup = new window.SearchPopup({
+        searchInput,
+        catalog: window.ArcadeCatalog,
+        i18n: window.I18N,
+        analytics: window.Analytics,
+        fetchImpl: (url, options) => window.fetch(url, Object.assign({ cache: 'no-cache' }, options)),
+        gamesEndpoint: 'js/games.json',
+        win: window,
+        doc: document
+      });
+
+      popup.init().then(() => {
+        console.debug('Search popup: Initialization complete');
+      }).catch(err => {
+        console.error('Search popup: Failed to initialize:', err);
+      });
+    } catch (err) {
+      console.error('Search popup: Error creating instance:', err);
+    }
   }
 
   if (document.readyState === 'loading'){
