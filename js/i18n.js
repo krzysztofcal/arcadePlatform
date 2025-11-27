@@ -24,7 +24,7 @@
     licensesLicenseMIT: { en: 'Licensed under the MIT License.', pl: 'Na licencji MIT.' },
     licensesSource: { en: 'Source:', pl: 'Źródło:' },
     playChip: { en: 'PLAY', pl: 'GRAJ' },
-    searchPlaceholder: { en: 'Search games (inactive in MVP)', pl: 'Szukaj gier (nieaktywne w MVP)' },
+    searchPlaceholder: { en: 'Search games', pl: 'Szukaj gier' },
     searchAria: { en: 'Search games', pl: 'Szukaj gier' },
     catsFullscreenHint: {
       en: 'Make the game feel bigger — use the top bar icon or the yellow corner button to go full screen, and press Esc to return.',

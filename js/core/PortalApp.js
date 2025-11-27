@@ -5,6 +5,9 @@
   const SHARED_GAME_UTILS = global.GameUtils && typeof global.GameUtils === 'object'
     ? global.GameUtils
     : null;
+  const SEARCH_UTILS = global.GameSearch && typeof global.GameSearch === 'object'
+    ? global.GameSearch
+    : null;
 
   function isNonEmptyString(value){
     return typeof value === 'string' && value.trim().length > 0;
@@ -46,6 +49,8 @@
       this.defaultCategory = this.categoryItems[0];
       this.categoryButtons = new Map();
       this.activeCategory = this.defaultCategory;
+      this.searchQuery = '';
+      this.searchInput = options.searchInput || null;
       this.promoTracked = false;
       this.allGames = [];
       this.gamesEndpoint = isNonEmptyString(options.gamesEndpoint)
@@ -54,6 +59,7 @@
       this.window = options.win || global;
       this.document = options.doc || global.document;
       this.gameUtils = SHARED_GAME_UTILS;
+      this.searchUtils = SEARCH_UTILS;
       this.onLangChange = () => this.renderCurrentList('langchange');
     }
 
@@ -327,6 +333,22 @@
       return list.filter(item => item && Array.isArray(item.category) && item.category.includes(category));
     }
 
+    filterBySearch(list, query){
+      if (!Array.isArray(list)) return [];
+      if (!query || typeof query !== 'string' || !query.trim()) return list;
+      if (this.searchUtils && typeof this.searchUtils.filterGamesBySearch === 'function'){
+        const lang = this.getLang();
+        return this.searchUtils.filterGamesBySearch(list, query, lang);
+      }
+      return list;
+    }
+
+    filterGames(list, category, searchQuery){
+      let filtered = this.filterByCategory(list, category);
+      filtered = this.filterBySearch(filtered, searchQuery);
+      return filtered;
+    }
+
     updateCategoryButtons(){
       if (!this.categoryButtons.size) return;
       this.categoryButtons.forEach((button, name) => {
@@ -336,13 +358,18 @@
       });
     }
 
-    updateUrl(category){
+    updateUrl(category, searchQuery){
       try {
         const params = new URLSearchParams(this.window.location.search);
         if (category && category !== this.defaultCategory){
           params.set('category', category);
         } else {
           params.delete('category');
+        }
+        if (searchQuery && searchQuery.trim()){
+          params.set('search', searchQuery.trim());
+        } else {
+          params.delete('search');
         }
         const query = params.toString();
         const newUrl = `${this.window.location.pathname}${query ? `?${query}` : ''}${this.window.location.hash}`;
@@ -351,13 +378,13 @@
         }
       } catch (err) {
         if (global.console && typeof global.console.debug === 'function'){
-          global.console.debug('Failed to update category in URL', err);
+          global.console.debug('Failed to update URL', err);
         }
       }
     }
 
     currentCategoryList(){
-      return this.filterByCategory(this.allGames, this.activeCategory);
+      return this.filterGames(this.allGames, this.activeCategory, this.searchQuery);
     }
 
     renderCurrentList(reason){
@@ -369,10 +396,43 @@
       if (normalized === this.activeCategory) return;
       this.activeCategory = normalized;
       this.updateCategoryButtons();
-      this.updateUrl(this.activeCategory);
+      this.updateUrl(this.activeCategory, this.searchQuery);
       this.renderCurrentList('category');
       if (this.analytics && typeof this.analytics.event === 'function'){
         this.analytics.event('select_content', { category: this.activeCategory });
+      }
+    }
+
+    handleSearchInput(value){
+      const query = typeof value === 'string' ? value : '';
+      if (query === this.searchQuery) return;
+      this.searchQuery = query;
+      this.updateUrl(this.activeCategory, this.searchQuery);
+      this.renderCurrentList('search');
+      if (this.analytics && typeof this.analytics.event === 'function'){
+        this.analytics.event('search', { search_term: this.searchQuery });
+      }
+    }
+
+    setupSearchInput(){
+      if (!this.searchInput) return;
+      const debounced = this.searchUtils && typeof this.searchUtils.debounce === 'function'
+        ? this.searchUtils.debounce((value) => this.handleSearchInput(value), 300)
+        : (value) => this.handleSearchInput(value);
+      this.searchInput.addEventListener('input', (e) => {
+        if (e && e.target) debounced(e.target.value);
+      });
+      this.searchInput.addEventListener('search', (e) => {
+        if (e && e.target) this.handleSearchInput(e.target.value);
+      });
+    }
+
+    getInitialSearch(){
+      try {
+        const params = new URLSearchParams(this.window.location.search);
+        return params.get('search') || '';
+      } catch (err) {
+        return '';
       }
     }
 
@@ -442,13 +502,22 @@ renderForCategory(category, reason){
       }
 
       this.activeCategory = this.getInitialCategory();
+      this.searchQuery = this.getInitialSearch();
       this.updateCategoryButtons();
-      this.updateUrl(this.activeCategory);
+      this.updateUrl(this.activeCategory, this.searchQuery);
+
+      // Set initial search input value from URL
+      if (this.searchInput && this.searchQuery) {
+        this.searchInput.value = this.searchQuery;
+      }
+
+      // Setup search input event listeners
+      this.setupSearchInput();
 
       this.clearLoadingSkeleton();
 
       // Ensure homepage grid renders immediately
-      this.renderForCategory(this.activeCategory, 'init');
+      this.renderCurrentList('init');
 
       // Re-render on language change
       this.document.addEventListener('langchange', this.onLangChange);

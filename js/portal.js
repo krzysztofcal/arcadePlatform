@@ -6,6 +6,7 @@
   const app = new window.PortalApp({
     grid,
     categoryBar: document.getElementById('categoryBar'),
+    searchInput: document.getElementById('searchInput'),
     analytics: window.Analytics,
     catalog: window.ArcadeCatalog,
     i18n: window.I18N,
