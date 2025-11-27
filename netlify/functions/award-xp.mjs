@@ -722,6 +722,30 @@ export async function handler(event) {
     const totals = await fetchTotals();
     return respond(422, { error: "timestamp_in_future", driftMs: DRIFT_MS }, { totals });
   }
+  // SECURITY: Reject timestamps that are too old (potential replay attacks or clock skew)
+  if (tsRaw < now - DRIFT_MS) {
+    const totals = await fetchTotals();
+    const stalePayload = {
+      ok: true,
+      awarded: 0,
+      granted: 0,
+      cap: DAILY_CAP,
+      capDelta: DELTA_CAP,
+      status: "stale",
+      reason: "stale",
+      stale: true,
+    };
+    return respond(200, stalePayload, {
+      totals,
+      debugExtra: {
+        mode: "timestamp_too_old",
+        ts: tsRaw,
+        now,
+        driftMs: DRIFT_MS,
+        age: now - tsRaw
+      }
+    });
+  }
   const ts = Math.trunc(tsRaw);
 
   let metadata = null;
