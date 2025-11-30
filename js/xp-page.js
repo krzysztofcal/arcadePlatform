@@ -14,11 +14,59 @@
     return num.toLocaleString();
   }
 
-  function applySnapshot(){
-    if (!window.XP || typeof window.XP.getSnapshot !== "function") return;
-    const snapshot = window.XP.getSnapshot();
-    if (levelEl) levelEl.textContent = snapshot.level;
-    if (totalEl) totalEl.textContent = formatNumber(snapshot.totalXp);
+  function showLoading(loading) {
+    // Show/hide loading state in the UI
+    if (dailyRemainingEl) {
+      if (loading) {
+        dailyRemainingEl.textContent = "Refreshing...";
+        dailyRemainingEl.style.opacity = "0.6";
+      } else {
+        dailyRemainingEl.style.opacity = "1";
+      }
+    }
+  }
+
+  async function applySnapshot(){
+    if (!window.XP) return;
+
+    // Use flushAndFetchSnapshot() if available for fresh server data
+    let snapshot;
+    if (typeof window.XP.flushAndFetchSnapshot === "function") {
+      try {
+        showLoading(true);
+        // Flush pending XP and get fresh server snapshot
+        const serverSnapshot = await window.XP.flushAndFetchSnapshot();
+        // Get full snapshot with level progression
+        if (typeof window.XP.getSnapshot === "function") {
+          snapshot = window.XP.getSnapshot();
+          // Override with fresh server values
+          snapshot.totalToday = serverSnapshot.totalToday;
+          snapshot.dailyRemaining = serverSnapshot.dailyRemaining;
+          snapshot.cap = serverSnapshot.cap;
+          snapshot.totalXp = serverSnapshot.totalLifetime;
+        } else {
+          snapshot = serverSnapshot;
+        }
+      } catch (err) {
+        if (window.console && console.debug) {
+          console.debug('[xp-page] flushAndFetchSnapshot failed, using getSnapshot', err);
+        }
+        // Fallback to regular snapshot
+        if (typeof window.XP.getSnapshot === "function") {
+          snapshot = window.XP.getSnapshot();
+        }
+      } finally {
+        showLoading(false);
+      }
+    } else if (typeof window.XP.getSnapshot === "function") {
+      // Fallback for older versions without flush API
+      snapshot = window.XP.getSnapshot();
+    }
+
+    if (!snapshot) return;
+
+    if (levelEl) levelEl.textContent = snapshot.level || 0;
+    if (totalEl) totalEl.textContent = formatNumber(snapshot.totalXp || snapshot.totalLifetime);
     const capText = snapshot.cap == null ? "—" : `${formatNumber(snapshot.cap)} XP`;
     if (capEl) capEl.textContent = capText;
     const remainingText = snapshot.dailyRemaining === Infinity ? "—" : `${formatNumber(snapshot.dailyRemaining)} XP`;
@@ -42,23 +90,24 @@
     }
   }
 
-  function refresh(){
+  async function refresh(){
     if (!window.XP || typeof window.XP.refreshStatus !== "function") {
-      applySnapshot();
+      await applySnapshot();
       return;
     }
-    window.XP.refreshStatus()
-      .then(() => applySnapshot())
-      .catch(() => applySnapshot());
+    try {
+      await window.XP.refreshStatus();
+      await applySnapshot();
+    } catch (err) {
+      await applySnapshot();
+    }
   }
 
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", () => {
-      applySnapshot();
       refresh();
     });
   } else {
-    applySnapshot();
     refresh();
   }
 })();

@@ -839,6 +839,17 @@ function bootXpCore(window, document) {
   }
 
   function saveCache() {
+    // Only save cache when fully synced with server
+    // This prevents saving stale/incomplete state to localStorage
+    if (!state.sync.hasServerSnapshot) {
+      // Skip save until we receive first server response
+      return;
+    }
+    if (state.sync.pendingDelta > 0 || state.sync.inFlight) {
+      // Skip save while XP is pending or in-flight
+      return;
+    }
+
     try {
       const payload = {
         totalToday: state.totalToday,
@@ -1144,6 +1155,9 @@ function bootXpCore(window, document) {
     state.sync.lastServerSeq = serverSeq;
     state.sync.hasServerSnapshot = true;
 
+    // Reset pending delta - server has now acknowledged all local XP
+    state.sync.pendingDelta = 0;
+
     // Server snapshot applied; client will no longer attempt any local reset logic.
 
     const reasonRaw = data.reason || (data.debug && data.debug.reason) || null;
@@ -1363,6 +1377,9 @@ function bootXpCore(window, document) {
         state.pendingWindow = null;
         return Promise.resolve(null);
       }
+      // Mark sync as in-flight (XP request to server is starting)
+      state.sync.inFlight = true;
+
       // Use server-side calculation when enabled, otherwise legacy endpoint
       const postFn = window.XPClient.isServerCalcEnabled && window.XPClient.isServerCalcEnabled()
         ? window.XPClient.postWindowServerCalc
@@ -1396,7 +1413,10 @@ function bootXpCore(window, document) {
         state.pendingWindow = null;
         handleError(err);
       })
-      .finally(() => { state.pending = null; });
+      .finally(() => {
+        state.pending = null;
+        state.sync.inFlight = false;
+      });
   }
 
   function onAwardTick() {
@@ -1756,6 +1776,10 @@ function bootXpCore(window, document) {
     const xpForTick = xpPerSecond * (AWARD_INTERVAL_MS / 1000);
     const awarded = accumulateLocalXp(xpForTick);
     if (awarded <= 0) return 0;
+
+    // Track pending XP not yet acknowledged by server
+    state.sync.pendingDelta += awarded;
+
     state.totalToday = (Number(state.totalToday) || 0) + awarded;
     // Also decrement dailyRemaining when XP is awarded locally
     // This keeps dailyRemaining in sync with totalToday for accurate display
@@ -1794,6 +1818,51 @@ function bootXpCore(window, document) {
       isAtCap,
       persistRuntimeState,
     });
+  }
+
+  /**
+   * Flush all pending local XP to server and return a fresh server snapshot.
+   * Used by dashboard to ensure it displays fully synced state.
+   * @returns {Promise<Object>} Snapshot of server-synced XP state
+   */
+  async function flushAndFetchSnapshot() {
+    // 1. Mark flush requested
+    state.sync.flushRequested = true;
+
+    // 2. If there's pending local XP, force send it to server
+    if (state.sync.pendingDelta > 0 || state.scoreDelta > 0) {
+      try {
+        await sendWindow(true); // force = true
+      } catch (err) {
+        // Continue even if flush fails - return best available state
+        if (window.console && console.debug) {
+          console.debug('[xp] flushAndFetchSnapshot: sendWindow failed', err);
+        }
+      }
+    }
+
+    // 3. Wait for sync to complete (nothing in-flight)
+    const maxWaitMs = 5000; // 5 second timeout
+    const startWait = Date.now();
+    while (state.sync.inFlight && (Date.now() - startWait < maxWaitMs)) {
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+
+    // 4. Reset flush requested flag
+    state.sync.flushRequested = false;
+
+    // 5. Return current server-synced state
+    return {
+      totalToday: state.totalToday || 0,
+      totalLifetime: state.totalLifetime || 0,
+      dailyRemaining: getRemainingDaily(),
+      cap: state.cap,
+      dayKey: state.dayKey,
+      nextResetEpoch: state.nextResetEpoch,
+      hasServerSnapshot: state.sync.hasServerSnapshot,
+      inFlight: state.sync.inFlight,
+      pendingDelta: state.sync.pendingDelta,
+    };
   }
 
   // Internal boost setter supports both the new `(multiplier, ttlMs, reason)`
@@ -2263,6 +2332,7 @@ function bootXpCore(window, document) {
     addScore,
     awardLocalXp,
     flushXp,
+    flushAndFetchSnapshot,
     // Public API: dispatch an event so host integrations remain decoupled.
     requestBoost: function (multiplier, ttlMs, reason) {
       let detail;
