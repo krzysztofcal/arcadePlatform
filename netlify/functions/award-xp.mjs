@@ -541,9 +541,7 @@ export async function handler(event) {
     debug.authProvided = authContext.provided;
     debug.authValid = authContext.valid;
     debug.authReason = authContext.reason;
-    debug.userId = userId || null;
-    debug.anonId = anonId || null;
-    debug.identityId = identityId || null;
+    // NOTE: Do not include raw anonId/identityId in debug to avoid reflecting user input in responses (XSS safety).
     Object.assign(debug, extra);
     payload.debug = debug;
   };
