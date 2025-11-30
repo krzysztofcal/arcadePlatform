@@ -94,7 +94,7 @@ function generateSessionId() {
   return crypto.randomBytes(32).toString("base64url");
 }
 
-// Create session token with HMAC signature
+// Create session token with HMAC signature (userId represents identityId: anonId today, Supabase userId later)
 function createSignedSessionToken({ sessionId, userId, createdAt, fingerprint, secret }) {
   const payload = JSON.stringify({
     sid: sessionId,
@@ -203,7 +203,7 @@ async function storeSession({ sessionId, userId, createdAt, fingerprint, ip }) {
   }
 }
 
-// Validate session exists and matches
+// Validate session exists and matches (userId is the identityId stored in the token)
 export async function validateServerSession({ sessionId, userId, fingerprint }) {
   const key = keyServerSession(sessionId);
 
@@ -320,6 +320,12 @@ export async function handler(event) {
     return json(429, payload, origin, { "Retry-After": "60" });
   }
 
+  const queryAnonIdRaw = typeof event.queryStringParameters?.anonId === "string"
+    ? event.queryStringParameters.anonId
+    : typeof event.queryStringParameters?.userId === "string"
+      ? event.queryStringParameters.userId
+      : null;
+
   // Parse request body
   let body = {};
   try {
@@ -330,10 +336,16 @@ export async function handler(event) {
     return json(400, { error: "bad_json" }, origin);
   }
 
-  // Validate userId is provided
-  const userId = typeof body.userId === "string" ? body.userId.trim() : null;
-  if (!userId) {
-    return json(400, { error: "missing_user_id" }, origin);
+  const bodyAnonIdRaw = typeof body.anonId === "string"
+    ? body.anonId
+    : typeof body.userId === "string"
+      ? body.userId
+      : null;
+  const anonIdRaw = bodyAnonIdRaw ?? queryAnonIdRaw;
+  const anonId = typeof anonIdRaw === "string" ? anonIdRaw.trim() : null;
+
+  if (!anonId) {
+    return json(400, { error: "missing_anon_id" }, origin);
   }
 
   // Generate session data
@@ -344,7 +356,7 @@ export async function handler(event) {
   // Create signed session token
   const sessionToken = createSignedSessionToken({
     sessionId,
-    userId,
+    userId: anonId, // userId field carries identityId (anonId today)
     createdAt: now,
     fingerprint,
     secret,
@@ -353,7 +365,7 @@ export async function handler(event) {
   // Store session in Redis
   const storeResult = await storeSession({
     sessionId,
-    userId,
+    userId: anonId,
     createdAt: now,
     fingerprint,
     ip: clientIp,
