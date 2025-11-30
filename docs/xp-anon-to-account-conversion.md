@@ -67,21 +67,24 @@ Profile has not been previously converted:
 convertedToUserId === null
 5.2 Conversion Cap
 Limit converted XP by:
-Skopiuj kod
 
+```
 allowedXp = min(
     totalAnonXp,
     DAILY_CAP * anonActiveDays,
     MAX_TOTAL_CONVERSION_CAP
 )
+```
 Defaults:
+```
 DAILY_CAP = 3000
 MAX_TOTAL_CONVERSION_CAP = 100_000
+```
 5.3 Final value
 Converted XP is added to the user’s permanent XP:
-Skopiuj kod
-
+```
 finalUserXp = userXp + allowedXp
+```
 6. Security Requirements
 6.1 Prevent multi-device abuse
 Only XP from the current anonId is convertible.
@@ -107,8 +110,7 @@ This is acceptable v1 behavior.
 After conversion:
 A new anon session on that browser will never be convertible again for that same account.
 7. Backend Logic (Pseudocode)
-Skopiuj kod
-
+```
 function attemptConversion(userId, anonId):
     user = getUserProfile(userId)
     anon = getAnonProfile(anonId)
@@ -135,6 +137,7 @@ function attemptConversion(userId, anonId):
         anon.anonActiveDays = 0
 
     return { converted: true, amount: allowedXp }
+```
 8. Frontend Requirements
 8.1 When user logs in:
 The XP client sends anonId + session token to backend.
@@ -210,4 +213,4 @@ XP → chips conversion for poker economy.
 (F4) Conversion partial refunds or bonuses
 Promotional: “Get a 10% XP bonus when you sign up.”
 (F5) Risk scoring for abnormal XP gain
-Detect suspicious XP earning patterns prior to conversion.EOF
+Detect suspicious XP earning patterns prior to conversion.
