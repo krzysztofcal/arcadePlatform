@@ -196,6 +196,14 @@
       toggleMenu(false);
       return;
     }
+
+    var onAccountPage = /account\.html(\?|#|$)/.test(window.location.pathname || '');
+    if (!onAccountPage){
+      toggleMenu(false);
+      window.location.href = 'account.html';
+      return;
+    }
+
     try {
       var ev;
       if (typeof CustomEvent === 'function') {

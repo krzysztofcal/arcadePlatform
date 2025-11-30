@@ -26,6 +26,7 @@
     if (!nodes.status) return;
     nodes.status.textContent = message || '';
     nodes.status.dataset.tone = tone || '';
+    nodes.status.hidden = !message;
   }
 
   function renderUser(user){
