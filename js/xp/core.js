@@ -791,7 +791,8 @@ function bootXpCore(window, document) {
         state.dailyRemaining = Math.max(0, Math.floor(parsed.dailyRemaining));
       } else if (typeof parsed.cap === "number" && typeof parsed.totalToday === "number") {
         // Fallback for old cache entries without dailyRemaining
-        state.dailyRemaining = Math.max(0, parsed.cap - parsed.totalToday);
+        const computed = computeRemainingFromTotals();
+        state.dailyRemaining = Number.isFinite(computed) ? computed : Infinity;
       }
       if (typeof parsed.totalLifetime === "number") state.totalLifetime = parsed.totalLifetime;
       if (typeof parsed.badgeShownXp === "number") state.badgeShownXp = parsed.badgeShownXp;
