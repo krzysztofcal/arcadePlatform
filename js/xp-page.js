@@ -26,6 +26,17 @@
     }
   }
 
+  function showSyncError(errorMsg) {
+    // Show sync error in the UI
+    if (dailyRemainingEl) {
+      dailyRemainingEl.textContent = "Sync failed";
+      dailyRemainingEl.style.opacity = "1";
+    }
+    if (window.console && console.error) {
+      console.error('[xp-page] Sync error:', errorMsg);
+    }
+  }
+
   async function applySnapshot(){
     if (!window.XP) return;
 
@@ -47,16 +58,12 @@
         } else {
           snapshot = serverSnapshot;
         }
-      } catch (err) {
-        if (window.console && console.debug) {
-          console.debug('[xp-page] flushAndFetchSnapshot failed, using getSnapshot', err);
-        }
-        // Fallback to regular snapshot
-        if (typeof window.XP.getSnapshot === "function") {
-          snapshot = window.XP.getSnapshot();
-        }
-      } finally {
         showLoading(false);
+      } catch (err) {
+        // Sync failed - do NOT fall back to stale data
+        // Show error clearly to user
+        showSyncError(err.message || 'Unknown sync error');
+        return; // Exit without rendering stale snapshot
       }
     } else if (typeof window.XP.getSnapshot === "function") {
       // Fallback for older versions without flush API

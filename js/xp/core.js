@@ -152,6 +152,7 @@ function bootXpCore(window, document) {
       hasServerSnapshot: false,  // True once we have applied at least one valid server response
       lastServerSeq: 0,          // Sequence/timestamp of last accepted server response
       pendingDelta: 0,           // Accumulated local XP not yet fully acknowledged by server
+      lastSentDelta: 0,          // XP amount included in the currently in-flight request
       inFlight: false,           // True while a request to award-xp is in progress
       flushRequested: false,     // True when dashboard requests a flush
     },
@@ -1155,8 +1156,12 @@ function bootXpCore(window, document) {
     state.sync.lastServerSeq = serverSeq;
     state.sync.hasServerSnapshot = true;
 
-    // Reset pending delta - server has now acknowledged all local XP
-    state.sync.pendingDelta = 0;
+    // Adjust pending delta based on what was sent and acknowledged
+    // Only subtract the XP that was included in this specific request
+    if (state.sync.lastSentDelta > 0) {
+      state.sync.pendingDelta = Math.max(0, state.sync.pendingDelta - state.sync.lastSentDelta);
+      state.sync.lastSentDelta = 0;
+    }
 
     // Server snapshot applied; client will no longer attempt any local reset logic.
 
@@ -1377,6 +1382,18 @@ function bootXpCore(window, document) {
         state.pendingWindow = null;
         return Promise.resolve(null);
       }
+
+      // Capture pending XP delta to send in this request
+      const deltaToSend = Math.max(0, Math.floor(state.sync.pendingDelta || 0));
+      state.sync.lastSentDelta = deltaToSend;
+
+      // Add pending client-side tick XP to payload
+      if (deltaToSend > 0) {
+        // Combine with existing scoreDelta if present, or set as new field
+        const existingScore = Math.max(0, Math.floor(payload.scoreDelta || 0));
+        payload.scoreDelta = existingScore + deltaToSend;
+      }
+
       // Mark sync as in-flight (XP request to server is starting)
       state.sync.inFlight = true;
 
@@ -1823,46 +1840,53 @@ function bootXpCore(window, document) {
   /**
    * Flush all pending local XP to server and return a fresh server snapshot.
    * Used by dashboard to ensure it displays fully synced state.
+   * Throws error if sync fails or times out.
    * @returns {Promise<Object>} Snapshot of server-synced XP state
    */
   async function flushAndFetchSnapshot() {
     // 1. Mark flush requested
     state.sync.flushRequested = true;
 
-    // 2. If there's pending local XP, force send it to server
-    if (state.sync.pendingDelta > 0 || state.scoreDelta > 0) {
-      try {
-        await sendWindow(true); // force = true
-      } catch (err) {
-        // Continue even if flush fails - return best available state
-        if (window.console && console.debug) {
-          console.debug('[xp] flushAndFetchSnapshot: sendWindow failed', err);
-        }
+    try {
+      // 2. If there's pending local XP, force send it to server
+      if (state.sync.pendingDelta > 0 || state.scoreDelta > 0) {
+        await sendWindow(true); // force = true, will throw on error
       }
+
+      // 3. Wait for sync to complete (nothing in-flight)
+      const maxWaitMs = 5000; // 5 second timeout
+      const startWait = Date.now();
+      while (state.sync.inFlight && (Date.now() - startWait < maxWaitMs)) {
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
+
+      // 4. Validate sync success - must be fully synced to return snapshot
+      if (state.sync.inFlight) {
+        throw new Error("XP flush timeout: request still in-flight after 5s");
+      }
+      if (state.sync.pendingDelta > 0) {
+        throw new Error("XP flush incomplete: " + state.sync.pendingDelta + " XP unacknowledged");
+      }
+      if (!state.sync.hasServerSnapshot) {
+        throw new Error("XP flush failed: no valid server response received");
+      }
+
+      // 5. Return current server-synced state (guaranteed fresh)
+      return {
+        totalToday: state.totalToday || 0,
+        totalLifetime: state.totalLifetime || 0,
+        dailyRemaining: getRemainingDaily(),
+        cap: state.cap,
+        dayKey: state.dayKey,
+        nextResetEpoch: state.nextResetEpoch,
+        hasServerSnapshot: state.sync.hasServerSnapshot,
+        inFlight: state.sync.inFlight,
+        pendingDelta: state.sync.pendingDelta,
+      };
+    } finally {
+      // Always reset flush requested flag
+      state.sync.flushRequested = false;
     }
-
-    // 3. Wait for sync to complete (nothing in-flight)
-    const maxWaitMs = 5000; // 5 second timeout
-    const startWait = Date.now();
-    while (state.sync.inFlight && (Date.now() - startWait < maxWaitMs)) {
-      await new Promise(resolve => setTimeout(resolve, 50));
-    }
-
-    // 4. Reset flush requested flag
-    state.sync.flushRequested = false;
-
-    // 5. Return current server-synced state
-    return {
-      totalToday: state.totalToday || 0,
-      totalLifetime: state.totalLifetime || 0,
-      dailyRemaining: getRemainingDaily(),
-      cap: state.cap,
-      dayKey: state.dayKey,
-      nextResetEpoch: state.nextResetEpoch,
-      hasServerSnapshot: state.sync.hasServerSnapshot,
-      inFlight: state.sync.inFlight,
-      pendingDelta: state.sync.pendingDelta,
-    };
   }
 
   // Internal boost setter supports both the new `(multiplier, ttlMs, reason)`
