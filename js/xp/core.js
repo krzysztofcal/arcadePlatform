@@ -148,6 +148,13 @@ function bootXpCore(window, document) {
       lastSync: 0,
       inflight: null,
     },
+    sync: {
+      hasServerSnapshot: false,  // True once we have applied at least one valid server response
+      lastServerSeq: 0,          // Sequence/timestamp of last accepted server response
+      pendingDelta: 0,           // Accumulated local XP not yet fully acknowledged by server
+      inFlight: false,           // True while a request to award-xp is in progress
+      flushRequested: false,     // True when dashboard requests a flush
+    },
     boost: {
       multiplier: 1,
       expiresAt: 0,
@@ -1090,6 +1097,22 @@ function bootXpCore(window, document) {
     const keys = Object.keys(data);
     if (!keys.length) return;
 
+    // Extract server sequence/timestamp to enforce monotonic snapshots (no rollbacks)
+    const serverSeq = Math.floor(Number(
+      data.ts || (data.debug && data.debug.ts) || data.serverEpoch || Date.now()
+    ) || 0);
+
+    // Reject stale responses (out-of-order, older than last accepted snapshot)
+    if (serverSeq > 0 && serverSeq < state.sync.lastServerSeq) {
+      try {
+        logDebug("xp_server_response_ignored_stale", {
+          serverSeq,
+          lastServerSeq: state.sync.lastServerSeq,
+        });
+      } catch (_) {}
+      return; // Ignore this stale response
+    }
+
     // Server is the single source of truth for dayKey, totalToday, cap, remaining, nextResetEpoch.
     // Client does not override or correct these once received.
 
@@ -1116,6 +1139,10 @@ function bootXpCore(window, document) {
     if (typeof nextResetRaw === "number" && Number.isFinite(nextResetRaw)) {
       state.nextResetEpoch = Math.floor(nextResetRaw);
     }
+
+    // Mark this server response as accepted
+    state.sync.lastServerSeq = serverSeq;
+    state.sync.hasServerSnapshot = true;
 
     // Server snapshot applied; client will no longer attempt any local reset logic.
 
