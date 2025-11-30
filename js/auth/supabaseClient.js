@@ -130,6 +130,7 @@
     nodes.menuName = doc.getElementById('avatarMenuName');
     nodes.menuEmail = doc.getElementById('avatarMenuEmail');
     nodes.menuAction = doc.getElementById('avatarMenuAction');
+    nodes.menuUser = doc.querySelector('.avatar-menu__user');
   }
 
   function renderUser(user){
@@ -240,6 +241,16 @@
     toggleMenu(false);
   }
 
+  function handleMenuUserClick(e){
+    if (!state.user) return;
+    e.preventDefault();
+    try {
+      window.location.assign('account.html');
+    } catch (_err) {
+      window.location.href = 'account.html';
+    }
+  }
+
   function wireAvatar(){
     selectNodes();
     if (!nodes.button || !nodes.shell) return;
@@ -248,6 +259,7 @@
     doc.addEventListener('click', outsideClick);
     doc.addEventListener('keydown', handleEscape);
     if (nodes.menuAction){ nodes.menuAction.addEventListener('click', handleAction); }
+    if (nodes.menuUser){ nodes.menuUser.addEventListener('click', handleMenuUserClick); }
 
     renderUser(state.user);
   }
