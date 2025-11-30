@@ -153,6 +153,9 @@ const safeEquals = (a, b) => {
 };
 
 const SUPABASE_JWT_SECRET = process.env.SUPABASE_JWT_SECRET || process.env.SUPABASE_JWT_SECRET_V2;
+if (!SUPABASE_JWT_SECRET) {
+  console.warn("[XP][AUTH] Supabase JWT secret missing – JWT auth disabled, treating all requests as anonymous");
+}
 
 const decodeBase64UrlJson = (segment) => {
   if (!segment) return null;
@@ -173,12 +176,12 @@ const extractBearerToken = (headers) => {
 
 const verifySupabaseJwt = (token) => {
   if (!token) return { provided: false, valid: false, reason: "missing_token" };
+  if (!SUPABASE_JWT_SECRET) {
+    return { provided: false, valid: false, reason: "auth_disabled" };
+  }
   const [headerSegment, payloadSegment, signatureSegment] = token.split(".");
   if (!headerSegment || !payloadSegment || !signatureSegment) {
     return { provided: true, valid: false, reason: "malformed_token" };
-  }
-  if (!SUPABASE_JWT_SECRET) {
-    return { provided: true, valid: false, reason: "missing_secret" };
   }
   const header = decodeBase64UrlJson(headerSegment);
   const payload = decodeBase64UrlJson(payloadSegment);
@@ -503,7 +506,8 @@ export async function handler(event) {
 
   const jwtToken = extractBearerToken(event.headers);
   const authContext = verifySupabaseJwt(jwtToken);
-  const userId = authContext.valid ? authContext.userId : null;
+  const userId = authContext.valid ? authContext.userId : null; // userId is always derived from Supabase JWT; never trust payload userId
+  // If JWT is missing or invalid, we treat the request as anonymous and do not block XP, per Hard XP spec.
 
   const applyDiagnostics = (payload, extra = {}) => {
     if (!DEBUG_ENABLED) return;
@@ -518,6 +522,9 @@ export async function handler(event) {
     debug.cookieTotal = cookieState.total;
     debug.cookieTotalSanitized = cookieTotal;
     debug.cookieRemainingBefore = cookieRemainingBefore;
+    debug.authProvided = authContext.provided;
+    debug.authValid = authContext.valid;
+    debug.authReason = authContext.reason;
     Object.assign(debug, extra);
     payload.debug = debug;
   };
@@ -536,11 +543,6 @@ export async function handler(event) {
       : { "Set-Cookie": buildXpCookie({ key: dayKeyNow, total: safeTotal, secret, now, nextReset }) };
     return json(statusCode, payload, origin, headers);
   };
-
-  if (authContext.provided && !authContext.valid) {
-    const payload = { error: "unauthorized", reason: authContext.reason };
-    return buildResponse(401, payload, cookieTotal, { skipCookie: true, debugExtra: { mode: "auth_failed" } });
-  }
 
   if (event.httpMethod !== "POST") {
     let totals = null;
