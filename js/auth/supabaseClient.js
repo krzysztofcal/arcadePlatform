@@ -213,7 +213,8 @@
 
     // SIGN IN / OPEN ACCOUNT PAGE
     if (!isOnAccountPage()){
-      toggleMenu(false);
+      // Important: do NOT close the popup before navigation
+      logDiag('supabase:navigate_account', { from: window.location.href || '' });
       try {
         window.location.assign('account.html');
       } catch (_err){
@@ -222,7 +223,7 @@
       return;
     }
 
-    // ALREADY ON ACCOUNT PAGE → ask it to show/focus sign-in form
+    // ALREADY ON ACCOUNT PAGE → Show/focus sign-in form
     try {
       var ev;
       if (typeof CustomEvent === 'function') {
@@ -231,7 +232,7 @@
         ev = doc.createEvent('Event');
         ev.initEvent('auth:signin-request', true, true);
       }
-      if (ev && doc.dispatchEvent) {
+      if (ev && doc.dispatchEvent){
         doc.dispatchEvent(ev);
       }
     } catch (_err){}
