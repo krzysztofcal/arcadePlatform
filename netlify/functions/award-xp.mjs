@@ -152,6 +152,58 @@ const safeEquals = (a, b) => {
   return crypto.timingSafeEqual(left, right);
 };
 
+const SUPABASE_JWT_SECRET = process.env.SUPABASE_JWT_SECRET || process.env.SUPABASE_JWT_SECRET_V2;
+
+const decodeBase64UrlJson = (segment) => {
+  if (!segment) return null;
+  try {
+    const decoded = Buffer.from(segment, "base64url").toString("utf8");
+    return JSON.parse(decoded);
+  } catch {
+    return null;
+  }
+};
+
+const extractBearerToken = (headers) => {
+  const headerValue = headers?.authorization || headers?.Authorization || headers?.AUTHORIZATION;
+  if (!headerValue || typeof headerValue !== "string") return null;
+  const match = /^Bearer\s+(.+)$/i.exec(headerValue.trim());
+  return match ? match[1].trim() : null;
+};
+
+const verifySupabaseJwt = (token) => {
+  if (!token) return { provided: false, valid: false, reason: "missing_token" };
+  const [headerSegment, payloadSegment, signatureSegment] = token.split(".");
+  if (!headerSegment || !payloadSegment || !signatureSegment) {
+    return { provided: true, valid: false, reason: "malformed_token" };
+  }
+  if (!SUPABASE_JWT_SECRET) {
+    return { provided: true, valid: false, reason: "missing_secret" };
+  }
+  const header = decodeBase64UrlJson(headerSegment);
+  const payload = decodeBase64UrlJson(payloadSegment);
+  if (!header || !payload) {
+    return { provided: true, valid: false, reason: "invalid_encoding" };
+  }
+  const alg = header.alg || "HS256";
+  const hmacAlg = alg === "HS512" ? "sha512" : "sha256";
+  const expectedSig = crypto.createHmac(hmacAlg, SUPABASE_JWT_SECRET)
+    .update(`${headerSegment}.${payloadSegment}`)
+    .digest("base64url");
+  if (!safeEquals(signatureSegment, expectedSig)) {
+    return { provided: true, valid: false, reason: "invalid_signature" };
+  }
+  const nowSec = Math.floor(Date.now() / 1000);
+  if (payload.exp && Number(payload.exp) <= nowSec) {
+    return { provided: true, valid: false, reason: "expired" };
+  }
+  const userId = typeof payload.sub === "string" ? payload.sub : null;
+  if (!userId) {
+    return { provided: true, valid: false, reason: "missing_sub" };
+  }
+  return { provided: true, valid: true, userId, payload };
+};
+
 const parseCookies = (header) => {
   if (!header || typeof header !== "string") return {};
   const jar = {};
@@ -445,12 +497,13 @@ export async function handler(event) {
   const cookieTotal = cookieKeyMatches ? sanitizeTotal(cookieState.total) : 0;
   const cookieRemainingBefore = Math.max(0, DAILY_CAP - cookieTotal);
 
-  const queryUserId = typeof event.queryStringParameters?.userId === "string"
-    ? event.queryStringParameters.userId.trim()
-    : null;
   const querySessionId = typeof event.queryStringParameters?.sessionId === "string"
     ? event.queryStringParameters.sessionId.trim()
     : null;
+
+  const jwtToken = extractBearerToken(event.headers);
+  const authContext = verifySupabaseJwt(jwtToken);
+  const userId = authContext.valid ? authContext.userId : null;
 
   const applyDiagnostics = (payload, extra = {}) => {
     if (!DEBUG_ENABLED) return;
@@ -484,16 +537,21 @@ export async function handler(event) {
     return json(statusCode, payload, origin, headers);
   };
 
+  if (authContext.provided && !authContext.valid) {
+    const payload = { error: "unauthorized", reason: authContext.reason };
+    return buildResponse(401, payload, cookieTotal, { skipCookie: true, debugExtra: { mode: "auth_failed" } });
+  }
+
   if (event.httpMethod !== "POST") {
     let totals = null;
-    if (queryUserId) {
-      totals = await getTotals({ userId: queryUserId, sessionId: querySessionId, now });
+    if (userId) {
+      totals = await getTotals({ userId, sessionId: querySessionId, now });
     }
     const totalSource = totals ? totals.current : cookieTotal;
     const payload = { error: "method_not_allowed" };
     return buildResponse(405, payload, totalSource, {
       debugExtra: { mode: "method_not_allowed" },
-      skipCookie: !queryUserId,
+      skipCookie: !userId,
     });
   }
 
@@ -504,18 +562,17 @@ export async function handler(event) {
     }
   } catch {
     let totals = null;
-    if (queryUserId) {
-      totals = await getTotals({ userId: queryUserId, sessionId: querySessionId, now });
+    if (userId) {
+      totals = await getTotals({ userId, sessionId: querySessionId, now });
     }
     const totalSource = totals ? totals.current : cookieTotal;
     const payload = { error: "bad_json" };
     return buildResponse(400, payload, totalSource, {
       debugExtra: { mode: "bad_json" },
-      skipCookie: !queryUserId,
+      skipCookie: !userId,
     });
   }
 
-  const userId = typeof body.userId === "string" ? body.userId.trim() : queryUserId;
   const sessionIdRaw = body.sessionId ?? querySessionId;
   const sessionId = typeof sessionIdRaw === "string" ? sessionIdRaw.trim() : null;
 
