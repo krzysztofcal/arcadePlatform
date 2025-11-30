@@ -196,6 +196,15 @@
     return href.indexOf('account.html') !== -1;
   }
 
+  function navigateToAccount(){
+    var url = '/account.html';
+    try {
+      window.location.assign(url);
+    } catch (_err) {
+      window.location.href = url;
+    }
+  }
+
   function handleAction(){
     if (!nodes.menuAction) return;
     var intent = nodes.menuAction.dataset.intent || 'signin';
@@ -216,11 +225,7 @@
     if (!isOnAccountPage()){
       // Important: do NOT close the popup before navigation
       logDiag('supabase:navigate_account', { from: window.location.href || '' });
-      try {
-        window.location.assign('account.html');
-      } catch (_err){
-        window.location.href = 'account.html';
-      }
+      navigateToAccount();
       return;
     }
 
@@ -244,11 +249,7 @@
   function handleMenuUserClick(e){
     if (!state.user) return;
     e.preventDefault();
-    try {
-      window.location.assign('account.html');
-    } catch (_err) {
-      window.location.href = 'account.html';
-    }
+    navigateToAccount();
   }
 
   function wireAvatar(){
