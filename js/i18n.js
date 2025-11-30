@@ -20,6 +20,16 @@
       en: 'Below are details for included projects.',
       pl: 'Poniżej znajdziesz szczegóły wykorzystanych projektów.'
     },
+    licensesSupabaseTitle: { en: 'Supabase', pl: 'Supabase' },
+    licensesSupabaseDesc: {
+      en: 'Authentication & database platform used for user accounts and XP sync.',
+      pl: 'Platforma uwierzytelniania i bazy danych używana dla kont użytkowników i synchronizacji XP.'
+    },
+    licensesSupabaseLicense: {
+      en: 'Licensed under the Apache License 2.0.',
+      pl: 'Licencjonowane na podstawie Apache License 2.0.'
+    },
+    licensesSupabaseSource: { en: 'Source:', pl: 'Źródło:' },
     licensesOriginalBy: { en: 'Original project by', pl: 'Oryginalny projekt:' },
     licensesLicenseMIT: { en: 'Licensed under the MIT License.', pl: 'Na licencji MIT.' },
     licensesSource: { en: 'Source:', pl: 'Źródło:' },

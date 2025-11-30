@@ -2,8 +2,8 @@
   if (typeof window === 'undefined' || typeof document === 'undefined') return;
 
   var doc = document;
-  var state = { user: null, open: false };
   var nodes = {};
+  var state = { user: null, open: false, client: null };
 
   function logDiag(label, payload){
     var logger = window && window.KLog;
@@ -25,34 +25,98 @@
     };
   }
 
-  function initClient(){
+  function getClient(){
+    if (state.client){ return state.client; }
+
     var env = pickEnv();
     var hasSupabase = !!(window.supabase && window.supabase.createClient);
     if (hasSupabase && env.url && env.key){
       try {
-        window.supabaseClient = window.supabase.createClient(env.url, env.key);
+        state.client = window.supabase.createClient(env.url, env.key);
+        window.supabaseClient = state.client;
         logDiag('supabase:init_ok', { urlPresent: !!env.url, keyPresent: !!env.key });
       } catch (_err){
-        window.supabaseClient = null;
+        state.client = null;
       }
-    } else {
-      window.supabaseClient = window.supabaseClient || null;
+    } else if (window.supabaseClient){
+      state.client = window.supabaseClient;
     }
-    if (!window.supabaseClient){
+
+    if (!state.client){
       logDiag('supabase:init_failed', { hasSupabase: hasSupabase, url: !!env.url, key: !!env.key });
     }
-    return window.supabaseClient;
+
+    return state.client;
+  }
+
+  function getCurrentUser(){
+    var client = getClient();
+    if (!client || !client.auth || typeof client.auth.getSession !== 'function'){
+      return Promise.resolve(null);
+    }
+
+    return client.auth.getSession().then(function(res){
+      var session = res && res.data ? res.data.session : null;
+      var user = session && session.user ? session.user : null;
+      logDiag('supabase:session_initial', { hasSession: !!user, hasEmail: !!(user && user.email) });
+      return user;
+    }).catch(function(err){
+      logDiag('supabase:session_error', { message: err && err.message ? String(err.message) : 'error' });
+      return null;
+    });
+  }
+
+  function onAuthChange(callback){
+    var client = getClient();
+    if (!client || !client.auth || typeof client.auth.onAuthStateChange !== 'function'){
+      return function(){};
+    }
+
+    var result = client.auth.onAuthStateChange(function(event, session){
+      var user = session && session.user ? session.user : null;
+      logDiag('supabase:auth_change', { event: event, hasUser: !!user });
+      if (typeof callback === 'function'){
+        try { callback(event, user); } catch (_err){}
+      }
+    });
+
+    var subscription = result && result.data ? result.data.subscription : null;
+    if (subscription && typeof subscription.unsubscribe === 'function'){
+      return function(){ subscription.unsubscribe(); };
+    }
+    if (result && typeof result.unsubscribe === 'function'){ return function(){ result.unsubscribe(); }; }
+    return function(){};
+  }
+
+  function signIn(email, password){
+    var client = getClient();
+    if (!client || !client.auth || typeof client.auth.signInWithPassword !== 'function'){
+      return Promise.reject(new Error('Authentication client not ready'));
+    }
+    return client.auth.signInWithPassword({ email: email, password: password });
+  }
+
+  function signUp(email, password){
+    var client = getClient();
+    if (!client || !client.auth || typeof client.auth.signUp !== 'function'){
+      return Promise.reject(new Error('Authentication client not ready'));
+    }
+    return client.auth.signUp({ email: email, password: password });
+  }
+
+  function signOut(){
+    var client = getClient();
+    if (!client || !client.auth || typeof client.auth.signOut !== 'function'){
+      return Promise.reject(new Error('Authentication client not ready'));
+    }
+    return client.auth.signOut();
   }
 
   function computeInitials(name){
     var str = (name || '').trim();
-    if (!str){
-      return 'AH';
-    }
+    if (!str){ return 'AH'; }
     var parts = str.split(/\s+/).filter(Boolean);
-    if (parts.length >= 2){
-      return (parts[0].charAt(0) + parts[1].charAt(0)).toUpperCase();
-    }
+    if (parts.length >= 2){ return (parts[0].charAt(0) + parts[1].charAt(0)).toUpperCase(); }
     return str.slice(0, 2).toUpperCase();
   }
 
@@ -66,6 +130,7 @@
     nodes.menuName = doc.getElementById('avatarMenuName');
     nodes.menuEmail = doc.getElementById('avatarMenuEmail');
     nodes.menuAction = doc.getElementById('avatarMenuAction');
+    nodes.menuUser = doc.querySelector('.avatar-menu__user');
   }
 
   function renderUser(user){
@@ -121,17 +186,50 @@
     if (e.key === 'Escape'){ toggleMenu(false); }
   }
 
+  function isOnAccountPage(){
+    var href = '';
+    try {
+      href = String(window.location.href || '');
+    } catch (_err){
+      href = '';
+    }
+    return href.indexOf('account.html') !== -1;
+  }
+
+  function navigateToAccount(){
+    var url = '/account.html';
+    try {
+      window.location.assign(url);
+    } catch (_err) {
+      window.location.href = url;
+    }
+  }
+
   function handleAction(){
     if (!nodes.menuAction) return;
-    var intent = nodes.menuAction.dataset.intent;
+    var intent = nodes.menuAction.dataset.intent || 'signin';
     logDiag('supabase:avatar_action', { intent: intent });
-    if (intent === 'signout' && window.supabaseClient && window.supabaseClient.auth){
-      window.supabaseClient.auth.signOut().catch(function(err){
-        logDiag('supabase:signout_error', { message: err && err.message ? String(err.message) : 'error' });
+
+    // SIGN OUT
+    if (intent === 'signout'){
+      signOut().catch(function(err){
+        logDiag('supabase:signout_error', {
+          message: err && err.message ? String(err.message) : 'error'
+        });
       });
       toggleMenu(false);
       return;
     }
+
+    // SIGN IN / OPEN ACCOUNT PAGE
+    if (!isOnAccountPage()){
+      // Important: do NOT close the popup before navigation
+      logDiag('supabase:navigate_account', { from: window.location.href || '' });
+      navigateToAccount();
+      return;
+    }
+
+    // ALREADY ON ACCOUNT PAGE → Show/focus sign-in form
     try {
       var ev;
       if (typeof CustomEvent === 'function') {
@@ -140,11 +238,18 @@
         ev = doc.createEvent('Event');
         ev.initEvent('auth:signin-request', true, true);
       }
-      if (ev && doc.dispatchEvent) {
+      if (ev && doc.dispatchEvent){
         doc.dispatchEvent(ev);
       }
     } catch (_err){}
+
     toggleMenu(false);
+  }
+
+  function handleMenuUserClick(e){
+    if (!state.user) return;
+    e.preventDefault();
+    navigateToAccount();
   }
 
   function wireAvatar(){
@@ -155,37 +260,38 @@
     doc.addEventListener('click', outsideClick);
     doc.addEventListener('keydown', handleEscape);
     if (nodes.menuAction){ nodes.menuAction.addEventListener('click', handleAction); }
+    if (nodes.menuUser){ nodes.menuUser.addEventListener('click', handleMenuUserClick); }
 
     renderUser(state.user);
   }
 
-  function hydrateSession(client){
-    if (!client || !client.auth) {
-      renderUser(null);
-      return;
-    }
+  function hydrateSession(){
+    renderUser(null);
 
-    client.auth.getSession().then(function(res){
-      var session = res.data && res.data.session ? res.data.session : null;
-      logDiag('supabase:session_initial', { hasSession: !!(session && session.user), hasEmail: !!(session && session.user && session.user.email) });
-      renderUser(session && session.user ? session.user : null);
-    }).catch(function(err){
-      logDiag('supabase:session_error', { message: err && err.message ? String(err.message) : 'error' });
-      renderUser(null);
+    getCurrentUser().then(function(user){
+      renderUser(user);
     });
 
-    client.auth.onAuthStateChange(function(event, session){
-      logDiag('supabase:auth_change', { event: event, hasUser: !!(session && session.user) });
-      renderUser(session && session.user ? session.user : null);
+    onAuthChange(function(_event, user){
+      renderUser(user);
     });
   }
 
   function init(){
     logDiag('supabase:init_start', {});
     wireAvatar();
-    var client = initClient();
-    hydrateSession(client);
+    getClient();
+    hydrateSession();
   }
+
+  window.SupabaseAuth = {
+    getClient: getClient,
+    getCurrentUser: getCurrentUser,
+    onAuthChange: onAuthChange,
+    signIn: signIn,
+    signUp: signUp,
+    signOut: signOut
+  };
 
   if (doc.readyState === 'loading'){
     doc.addEventListener('DOMContentLoaded', init, { once: true });
