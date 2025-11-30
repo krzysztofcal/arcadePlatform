@@ -4,21 +4,37 @@
   /**
    * Recently Played Tracker - Tracks games when they are viewed/played
    * Works with both anonymous and logged-in users
+   * Uses KLog for proper logging to the debug system
    */
 
   let catalogCache = null;
+  const LOG_PREFIX = 'recently_played';
+
+  function klog(kind, data) {
+    try {
+      if (global.KLog && typeof global.KLog.log === 'function') {
+        global.KLog.log(`${LOG_PREFIX}_${kind}`, data || {});
+      }
+    } catch (err) {
+      // Fallback to console if KLog not available
+      try {
+        console.log(`[${LOG_PREFIX}] ${kind}:`, data);
+      } catch (_) {}
+    }
+  }
 
   async function loadCatalog() {
     if (catalogCache) return catalogCache;
 
     try {
-      const res = await fetch('js/games.json', { cache: 'no-cache' });
+      const res = await fetch('/js/games.json', { cache: 'no-cache' });
       const data = await res.json();
       const games = Array.isArray(data) ? data : (Array.isArray(data.games) ? data.games : []);
       catalogCache = games;
+      klog('catalog_loaded', { count: games.length });
       return games;
     } catch (err) {
-      console.error('Failed to load game catalog for tracking:', err);
+      klog('catalog_error', { error: err.message });
       return [];
     }
   }
@@ -35,7 +51,7 @@
       }
 
       if (!global.recentlyPlayed) {
-        console.warn('RecentlyPlayedService not available');
+        klog('service_unavailable', { slug, attempts });
         return;
       }
 
@@ -50,12 +66,12 @@
           title: game.title,
           thumbnail: game.thumbnail
         });
-        console.log('Tracked game:', slug);
+        klog('tracked', { slug, id: game.id });
       } else {
-        console.warn('Game not found in catalog:', slug);
+        klog('game_not_found', { slug, catalogSize: games.length });
       }
     } catch (err) {
-      console.error('Failed to track game:', slug, err);
+      klog('track_error', { slug, error: err.message });
     }
   }
 
@@ -131,7 +147,12 @@
 
       if ((analyticsViewGameHooked && analyticsStartGameHooked && xpStartSessionHooked) || attempts >= maxAttempts) {
         clearInterval(interval);
-        console.log('Recently played tracker initialized');
+        klog('initialized', {
+          analyticsViewGame: analyticsViewGameHooked,
+          analyticsStartGame: analyticsStartGameHooked,
+          xpStartSession: xpStartSessionHooked,
+          attempts: attempts
+        });
       }
     }, 100);
   }
@@ -144,22 +165,44 @@
 
       if (slug) {
         // Small delay to ensure service is loaded
-        setTimeout(() => trackGame(slug), 500);
+        setTimeout(() => {
+          klog('url_track_attempt', { slug });
+          trackGame(slug);
+        }, 500);
       }
     } catch (err) {
-      console.error('Failed to track from URL:', err);
+      klog('url_track_error', { error: err.message });
+    }
+  }
+
+  // Track from game ID in window object (for games-open)
+  function trackFromWindowGameId() {
+    try {
+      if (global.__GAME_ID__ && typeof global.__GAME_ID__ === 'string') {
+        const gameId = global.__GAME_ID__;
+        // Small delay to ensure service is loaded
+        setTimeout(() => {
+          klog('window_game_id_track', { gameId });
+          trackGame(gameId);
+        }, 500);
+      }
+    } catch (err) {
+      klog('window_game_id_error', { error: err.message });
     }
   }
 
   // Initialize
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => {
-      setupHooks();
-      trackFromURL();
-    });
-  } else {
+  function init() {
+    klog('init_start', { url: window.location.pathname });
     setupHooks();
     trackFromURL();
+    trackFromWindowGameId();
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
   }
 
 })(window);
