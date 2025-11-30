@@ -122,6 +122,7 @@ function bootXpCore(window, document) {
     totalLifetime: null,
     cap: null,
     running: false,
+    hasServerSnapshot: false, // True after first server response; server is then source of truth
     gameId: null,
     windowStart: 0,
     activeMs: 0,
@@ -1119,80 +1120,35 @@ function bootXpCore(window, document) {
     const keys = Object.keys(data);
     if (!keys.length) return;
 
-    if (typeof data.cap === "number" && Number.isFinite(data.cap)) {
-      state.cap = Math.max(0, Math.floor(data.cap));
-    }
+    // Server is the single source of truth for dayKey, totalToday, cap, remaining, nextResetEpoch.
+    // Client does not override or correct these once received.
 
-    // Protect totalToday from stale server data - keep local value if it's higher
-    // (local value may include XP that's pending/in-flight to server)
-    if (typeof data.totalToday === "number") {
-      const serverTotalToday = Math.max(0, Math.floor(Number(data.totalToday) || 0));
-      const localTotalToday = Number(state.totalToday) || 0;
-
-      // Only use server value if it's equal or higher (more up-to-date)
-      // OR if this is a different day (day reset)
-      const serverDayKey = typeof data.dayKey === "string" ? data.dayKey : null;
-      const localDayKey = typeof state.dayKey === "string" ? state.dayKey : null;
-      const dayChanged = serverDayKey && localDayKey && serverDayKey !== localDayKey;
-
-      if (dayChanged || serverTotalToday >= localTotalToday) {
-        state.totalToday = serverTotalToday;
-      }
-      // else: keep local totalToday (it's higher, meaning we have pending XP)
-    }
-    // Handle dailyRemaining updates carefully to avoid race conditions.
-    // The server's remaining value should be authoritative, but stale server responses
-    // (from race conditions) could have higher remaining values than our local state
-    // if we've earned XP that hasn't been acknowledged by the server yet.
-    if (typeof data.remaining === "number") {
-      const serverRemaining = Math.max(0, Math.floor(Number(data.remaining) || 0));
-      let currentRemaining = Number(state.dailyRemaining);
-      if (!Number.isFinite(currentRemaining)) {
-        const derivedRemaining = computeRemainingFromTotals();
-        if (Number.isFinite(derivedRemaining)) {
-          currentRemaining = derivedRemaining;
-          state.dailyRemaining = derivedRemaining;
-        }
-      }
-
-      // If we have a valid local dailyRemaining that's LOWER than server's value,
-      // AND the day hasn't changed, preserve our local value (it's more up-to-date).
-      // The server might be returning stale data due to a race condition with pending XP.
-      // Only consider it a day change if we have a local dayKey and it differs from server's
-      const hasLocalDayKey = typeof state.dayKey === "string" && state.dayKey;
-      const dayChanged = typeof data.dayKey === "string" && data.dayKey &&
-                         hasLocalDayKey && data.dayKey !== state.dayKey;
-
-      if (dayChanged) {
-        // Day changed - server value is correct (reset happened)
-        state.dailyRemaining = serverRemaining;
-      } else if (Number.isFinite(currentRemaining) && currentRemaining < serverRemaining) {
-        // Our local value is lower (more XP spent) - keep it as it's more up-to-date
-        // This handles race conditions where server hasn't processed our latest XP yet
-      } else {
-        // Use server's value - it's either lower or we don't have a valid local value
-        state.dailyRemaining = serverRemaining;
-      }
-    } else {
-      // Fallback: recalculate only if server didn't provide remaining
-      syncDailyRemainingFromTotals();
-    }
+    // Step 1: dayKey
     if (typeof data.dayKey === "string" && data.dayKey) {
       state.dayKey = data.dayKey;
     }
+
+    // Step 2: totals & cap (server canonical)
+    if (typeof data.cap === "number" && Number.isFinite(data.cap)) {
+      state.cap = Math.max(0, Math.floor(data.cap));
+    }
+    if (typeof data.totalToday === "number") {
+      state.totalToday = Math.max(0, Math.floor(Number(data.totalToday) || 0));
+    }
+    if (typeof data.remaining === "number") {
+      state.dailyRemaining = Math.max(0, Math.floor(Number(data.remaining) || 0));
+    }
+
+    // Step 3: nextResetEpoch
     const nextResetRaw = Object.prototype.hasOwnProperty.call(data, "nextReset")
       ? data.nextReset
       : data.nextResetEpoch;
-    if (typeof nextResetRaw === "number") {
-      const nextReset = Math.floor(Number(nextResetRaw) || 0);
-      if (Number.isFinite(nextReset) && nextReset > 0) {
-        state.nextResetEpoch = nextReset;
-      }
+    if (typeof nextResetRaw === "number" && Number.isFinite(nextResetRaw)) {
+      state.nextResetEpoch = Math.floor(nextResetRaw);
     }
-    // NOTE: We intentionally do NOT call maybeResetDailyAllowance() here.
-    // The server is the authoritative source of truth for daily totals and remaining XP.
-    // If there's clock drift between client and server, calling maybeResetDailyAllowance()
-    // would incorrectly reset the values we just received from the server.
+
+    // Step 4: mark server snapshot received
+    state.hasServerSnapshot = true;
     // The reset logic in loadCache() handles the offline/cached data case.
 
     const reasonRaw = data.reason || (data.debug && data.debug.reason) || null;
@@ -1765,14 +1721,16 @@ function bootXpCore(window, document) {
   }
 
   function isAtCap() {
-    // NOTE: We do NOT call maybeResetDailyAllowance() here anymore.
-    // The server is the source of truth for daily XP data.
+    // Side-effect-free check. Does not call reset functions.
     if (state.cap == null) return false;
-    if (Number.isFinite(state.dailyRemaining) && state.dailyRemaining <= 0) {
-      return true;
+
+    if (Number.isFinite(state.dailyRemaining)) {
+      return state.dailyRemaining <= 0;
     }
-    if (typeof state.totalToday !== "number") return false;
-    return state.totalToday >= state.cap;
+
+    // Fallback: compute from totals
+    const computed = computeRemainingFromTotals();
+    return Number.isFinite(computed) && computed <= 0;
   }
 
   function awardLocalXp(activityRatio) {
@@ -1998,17 +1956,22 @@ function bootXpCore(window, document) {
   }
 
   function getRemainingDaily() {
-    // NOTE: We do NOT call maybeResetDailyAllowance() here anymore.
-    // The server is the source of truth for daily XP data.
-    // Calling reset here could overwrite correct server values with stale data.
+    // Pure getter - uses server canonical values when available, falls back to computation.
+    // Does not call any reset functions.
     if (state.cap == null) return Infinity;
+
     const remaining = Number(state.dailyRemaining);
     if (Number.isFinite(remaining)) {
       return Math.max(0, Math.floor(remaining));
     }
-    if (typeof state.totalToday === "number") {
-      return Math.max(0, Math.floor(Math.max(0, Number(state.cap)) - Math.floor(state.totalToday)));
+
+    // Fallback: compute from totals and store
+    const computed = computeRemainingFromTotals();
+    if (Number.isFinite(computed)) {
+      state.dailyRemaining = computed;
+      return computed;
     }
+
     return Infinity;
   }
 
