@@ -185,25 +185,44 @@
     if (e.key === 'Escape'){ toggleMenu(false); }
   }
 
+  function isOnAccountPage(){
+    var href = '';
+    try {
+      href = String(window.location.href || '');
+    } catch (_err){
+      href = '';
+    }
+    return href.indexOf('account.html') !== -1;
+  }
+
   function handleAction(){
     if (!nodes.menuAction) return;
-    var intent = nodes.menuAction.dataset.intent;
+    var intent = nodes.menuAction.dataset.intent || 'signin';
     logDiag('supabase:avatar_action', { intent: intent });
+
+    // SIGN OUT
     if (intent === 'signout'){
       signOut().catch(function(err){
-        logDiag('supabase:signout_error', { message: err && err.message ? String(err.message) : 'error' });
+        logDiag('supabase:signout_error', {
+          message: err && err.message ? String(err.message) : 'error'
+        });
       });
       toggleMenu(false);
       return;
     }
 
-    var onAccountPage = /account\.html(\?|#|$)/.test(window.location.pathname || '');
-    if (!onAccountPage){
+    // SIGN IN / OPEN ACCOUNT PAGE
+    if (!isOnAccountPage()){
       toggleMenu(false);
-      window.location.href = 'account.html';
+      try {
+        window.location.assign('account.html');
+      } catch (_err){
+        window.location.href = 'account.html';
+      }
       return;
     }
 
+    // ALREADY ON ACCOUNT PAGE → ask it to show/focus sign-in form
     try {
       var ev;
       if (typeof CustomEvent === 'function') {
@@ -212,8 +231,11 @@
         ev = doc.createEvent('Event');
         ev.initEvent('auth:signin-request', true, true);
       }
-      if (ev && doc.dispatchEvent) { doc.dispatchEvent(ev); }
+      if (ev && doc.dispatchEvent) {
+        doc.dispatchEvent(ev);
+      }
     } catch (_err){}
+
     toggleMenu(false);
   }
 
