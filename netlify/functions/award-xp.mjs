@@ -572,7 +572,7 @@ export async function handler(event) {
     const payload = { error: "method_not_allowed" };
     return buildResponse(405, payload, totalSource, {
       debugExtra: { mode: "method_not_allowed" },
-      skipCookie: !userId,
+      skipCookie: !identityId,
     });
   }
 
@@ -590,7 +590,7 @@ export async function handler(event) {
     const payload = { error: "bad_json" };
     return buildResponse(400, payload, totalSource, {
       debugExtra: { mode: "bad_json" },
-      skipCookie: !userId,
+      skipCookie: !identityId,
     });
   }
 
@@ -744,7 +744,7 @@ export async function handler(event) {
 
   if (!identityId || (!body.statusOnly && !sessionId)) {
     const totals = identityId ? await fetchTotals() : null;
-    return respond(400, { error: "missing_fields" }, { totals, skipCookie: !userId });
+    return respond(400, { error: "missing_fields" }, { totals, skipCookie: !identityId });
   }
 
   if (body.statusOnly) {
