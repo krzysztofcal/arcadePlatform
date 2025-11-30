@@ -22,6 +22,12 @@
     nodes.signUpPass = doc.getElementById('signupPassword');
   }
 
+  function setBlockVisibility(node, isVisible){
+    if (!node) return;
+    node.hidden = !isVisible;
+    node.style.display = isVisible ? '' : 'none';
+  }
+
   function setStatus(message, tone){
     if (!nodes.status) return;
     nodes.status.textContent = message || '';
@@ -31,8 +37,10 @@
 
   function renderUser(user){
     var hasUser = !!user;
-    if (nodes.forms){ nodes.forms.hidden = hasUser; }
-    if (nodes.account){ nodes.account.hidden = !hasUser; }
+
+    // Toggle panels
+    setBlockVisibility(nodes.forms, !hasUser);
+    setBlockVisibility(nodes.account, hasUser);
 
     if (!hasUser){ return; }
 
@@ -128,8 +136,8 @@
     }
 
     doc.addEventListener('auth:signin-request', function(){
-      if (nodes.forms){ nodes.forms.hidden = false; }
-      if (nodes.account){ nodes.account.hidden = true; }
+      setBlockVisibility(nodes.forms, true);
+      setBlockVisibility(nodes.account, false);
       if (nodes.signInEmail){ nodes.signInEmail.focus(); }
     });
   }
