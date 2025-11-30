@@ -734,7 +734,8 @@ export async function handler(event) {
     if (totals && payload.lastSync === undefined && totals.lastSync !== undefined) {
       payload.lastSync = totals.lastSync;
     }
-    if (skipCookie === undefined) skipCookie = !userId;
+    // Default: set XP cookie unless an explicit skipCookie is provided.
+    if (skipCookie === undefined) skipCookie = false;
     return buildResponse(statusCode, payload, totalSource, {
       debugExtra: options.debugExtra ?? {},
       skipCookie,
