@@ -122,7 +122,6 @@ function bootXpCore(window, document) {
     totalLifetime: null,
     cap: null,
     running: false,
-    hasServerSnapshot: false, // True after first server response; server is then source of truth
     gameId: null,
     windowStart: 0,
     activeMs: 0,
@@ -778,34 +777,6 @@ function bootXpCore(window, document) {
     return Math.max(0, normalizedCap - normalizedTotal);
   }
 
-  function syncDailyRemainingFromTotals() {
-    const remaining = computeRemainingFromTotals();
-    if (remaining == null) {
-      state.dailyRemaining = Infinity;
-      return;
-    }
-    state.dailyRemaining = remaining;
-  }
-
-  function maybeResetDailyAllowance(now) {
-    const resetAt = Number(state.nextResetEpoch) || 0;
-    if (!resetAt) return false;
-    const ts = typeof now === "number" ? now : Date.now();
-    if (ts < resetAt) return false;
-    const prevKey = state.dayKey || null;
-    state.dayKey = null;
-    state.nextResetEpoch = 0;
-    state.totalToday = 0;
-    state.dailyRemaining = Infinity;
-    syncDailyRemainingFromTotals();
-    try {
-      logDebug("daily_reset", { prevKey, resetAt });
-    } catch (_) {}
-    saveCache();
-    updateBadge();
-    return true;
-  }
-
   function loadCache() {
     try {
       const raw = window.localStorage.getItem(CACHE_KEY);
@@ -853,11 +824,9 @@ function bootXpCore(window, document) {
           state.badgeBaselineXp = 0;
         }
       }
-      // NOTE: We intentionally do NOT call syncDailyRemainingFromTotals() or
-      // maybeResetDailyAllowance() here. The server is the source of truth for
-      // daily XP data, and we now save/load dailyRemaining directly from the cache.
-      // This prevents cached stale nextResetEpoch values from triggering resets
-      // that overwrite correct server data.
+      // Server is the source of truth for daily XP data (totalToday, dailyRemaining, dayKey).
+      // Cache is used only for initial UI display before the first server response.
+      // No client-side reset logic; server provides canonical values on every sync.
     } catch (_) { /* ignore */ }
   }
 
@@ -1147,9 +1116,7 @@ function bootXpCore(window, document) {
       state.nextResetEpoch = Math.floor(nextResetRaw);
     }
 
-    // Step 4: mark server snapshot received
-    state.hasServerSnapshot = true;
-    // The reset logic in loadCache() handles the offline/cached data case.
+    // Server snapshot applied; client will no longer attempt any local reset logic.
 
     const reasonRaw = data.reason || (data.debug && data.debug.reason) || null;
     const reason = typeof reasonRaw === "string" ? reasonRaw.toLowerCase() : null;
