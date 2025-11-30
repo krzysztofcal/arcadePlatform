@@ -39,7 +39,16 @@
     catsFullscreenHint: {
       en: 'Make the game feel bigger — use the top bar icon or the yellow corner button to go full screen, and press Esc to return.',
       pl: 'Zanurz się w grze w trybie pełnoekranowym — użyj ikony w pasku u góry lub żółtego przycisku w rogu. Naciśnij Esc, aby wrócić.'
-    }
+    },
+    recentlyPlayed: { en: 'Recently played', pl: 'Ostatnio grane' },
+    recentlyPlayedTitle: { en: 'Recently Played', pl: 'Ostatnio grane' },
+    recentlyPlayedDesc: { en: 'Pick up where you left off', pl: 'Kontynuuj tam, gdzie skończyłeś' },
+    noRecentGames: { en: 'No recent games', pl: 'Brak ostatnio granych' },
+    noRecentGamesDesc: {
+      en: 'You haven\'t played any games yet. Start playing to see your history here!',
+      pl: 'Nie grałeś jeszcze w żadne gry. Zacznij grać, aby zobaczyć swoją historię tutaj!'
+    },
+    browseGames: { en: 'Browse Games', pl: 'Przeglądaj gry' }
   };
 
   let currentLang = 'en';

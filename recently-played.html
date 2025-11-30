@@ -1,33 +1,37 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="pl">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#0b1020">
-  <title>Arcade Hub — Game</title>
-  <meta name="description" content="Discover and play hand-picked arcade games on Arcade Hub.">
+  <title>Recently Played — Arcade Hub</title>
+  <meta name="description" content="View your recently played games on Arcade Hub.">
+  <link rel="canonical" href="https://play.kcswh.pl/recently-played.html">
+  <!-- OpenGraph / Twitter -->
   <meta property="og:type" content="website">
-  <meta property="og:title" content="Arcade Hub — Game">
-  <meta property="og:description" content="Discover and play hand-picked arcade games on Arcade Hub.">
-  <meta property="og:image" content="img/og/portal-1200x630.svg">
-  <meta property="og:url" content="https://arcadehub.example/game.html">
+  <meta property="og:url" content="https://play.kcswh.pl/recently-played.html">
+  <meta property="og:title" content="Recently Played — Arcade Hub">
+  <meta property="og:description" content="View your recently played games on Arcade Hub.">
+  <meta property="og:image" content="https://play.kcswh.pl/img/og/portal-1200x630.svg">
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="Arcade Hub — Game">
-  <meta name="twitter:description" content="Discover and play hand-picked arcade games on Arcade Hub.">
-  <meta name="twitter:image" content="img/og/portal-1200x630.svg">
-  <link rel="canonical" href="https://arcadehub.example/game.html">
+  <meta name="twitter:title" content="Recently Played — Arcade Hub">
+  <meta name="twitter:description" content="View your recently played games on Arcade Hub.">
+  <meta name="twitter:image" content="https://play.kcswh.pl/img/og/portal-1200x630.svg">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/game.css">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;800&display=swap">
+  <link rel="stylesheet" href="css/portal.css">
   <link rel="stylesheet" href="/css/xp-overlay.css">
   <link rel="stylesheet" href="/css/search-popup.css">
+  <!-- Explicit favicon to avoid /favicon.ico 404 and use inline SVG -->
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%236ee7e7'/%3E%3Cstop offset='1' stop-color='%23a78bfa'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='64' height='64' rx='14' ry='14' fill='%23111533'/%3E%3Ccircle cx='24' cy='24' r='16' fill='url(%23g)'/%3E%3Ccircle cx='40' cy='40' r='16' fill='url(%23g)' opacity='0.7'/%3E%3C/svg%3E" />
   <script id="Cookiebot"
           src="https://consent.cookiebot.com/uc.js"
           data-cbid="c76249cb-52a7-4dba-adbf-da79fe8a6276"
           data-blockingmode="auto"
           type="text/javascript">
   </script>
+  <!-- GA4 (blocked until Statistics consent) -->
   <script type="text/plain" data-cookieconsent="statistics"
           src="https://www.googletagmanager.com/gtag/js?id=G-JRP62LCXYK"></script>
   <script type="text/plain" data-cookieconsent="statistics">
@@ -41,8 +45,52 @@
   <script src="/js/auth/supabase-config.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js" defer></script>
   <script src="/js/auth/supabaseClient.js" defer></script>
+  <style>
+    .page-header {
+      padding: 2rem 1rem 1rem;
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+    .page-header h1 {
+      font-size: 2rem;
+      font-weight: 800;
+      color: #fff;
+      margin: 0 0 0.5rem;
+    }
+    .page-header p {
+      color: #9fb0d0;
+      font-size: 1rem;
+      margin: 0;
+    }
+    .empty-state {
+      text-align: center;
+      padding: 4rem 1rem;
+      color: #9fb0d0;
+    }
+    .empty-state h2 {
+      font-size: 1.5rem;
+      color: #6ee7e7;
+      margin-bottom: 1rem;
+    }
+    .empty-state p {
+      margin-bottom: 1.5rem;
+    }
+    .empty-state a {
+      display: inline-block;
+      padding: 0.75rem 1.5rem;
+      background: linear-gradient(135deg, #6ee7e7 0%, #a78bfa 100%);
+      color: #0b1020;
+      text-decoration: none;
+      border-radius: 8px;
+      font-weight: 600;
+      transition: transform 0.2s;
+    }
+    .empty-state a:hover {
+      transform: translateY(-2px);
+    }
+  </style>
 </head>
-<body data-game-host>
+<body>
   <div class="topbar">
     <div class="topbar-left">
       <button class="hamburger" id="sbToggle" aria-label="Toggle navigation" aria-expanded="false">
@@ -54,7 +102,7 @@
       </a>
       <div class="search search-box">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M21 21l-3.9-3.9M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15z" stroke="#86e1e1" stroke-width="2" stroke-linecap="round"/></svg>
-        <input type="search" data-i18n-aria="searchAria" data-i18n-placeholder="searchPlaceholder" aria-label="Search games" placeholder="Search games" />
+        <input type="search" id="searchInput" data-i18n-aria="searchAria" data-i18n-placeholder="searchPlaceholder" aria-label="Search games" placeholder="Search games" />
       </div>
     </div>
     <div class="topbar-right">
@@ -81,7 +129,7 @@
     </div>
   </div>
 
-  <div class="layout">
+  <div class="shell">
     <aside class="sidebar collapsed" id="sidebar" aria-label="Main navigation">
       <nav class="sb-nav">
         <ul class="sb-list">
@@ -94,70 +142,32 @@
             </a>
           </li>
           <li class="sb-item">
-            <a href="recently-played.html" class="sb-link" aria-label="Recently played" tabindex="0">
+            <a href="recently-played.html" class="sb-link is-active" aria-label="Recently played" tabindex="0">
               <span class="sb-ico" aria-hidden="true"></span>
               <span class="sb-label" data-i18n="recentlyPlayed">Recently played</span>
+            </a>
+          </li>
+          <li class="sb-item">
+            <a href="about.en.html" class="sb-link" tabindex="0" data-href-en="about.en.html" data-href-pl="about.pl.html">
+              <span class="sb-ico" aria-hidden="true"></span>
+              <span class="sb-label" data-i18n="about">About</span>
             </a>
           </li>
         </ul>
       </nav>
     </aside>
-
-    <section class="center">
-      <a class="back" href="index.html">← Back to games</a>
-      <div class="slot-fixed" id="slotGameTop" aria-label="Promotional"><span class="slot-badge">Promo</span>Reserved slot</div>
-      <div class="titleBar">
-        <h1 id="gameTitle">Loading…</h1>
-        <div class="actions">
-          <button type="button" class="btnIcon" id="btnEnterFs" title="Full screen" aria-label="Full screen">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M8 3H3v5M16 3h5v5M8 21H3v-5M21 21h-5v-5" stroke="#9fb0d0" stroke-width="2" stroke-linecap="round"/></svg>
-          </button>
-          <button type="button" class="btnIcon" id="btnExitFs" title="Exit full screen" aria-label="Exit full screen" style="display:none;">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M9 9H4V4m11 0h5v5M9 15H4v5m11 0h5v-5" stroke="#fbbf24" stroke-width="2" stroke-linecap="round"/></svg>
-          </button>
-        </div>
+    <main>
+      <div class="page-header">
+        <h1 data-i18n="recentlyPlayedTitle">Recently Played</h1>
+        <p data-i18n="recentlyPlayedDesc">Pick up where you left off</p>
       </div>
-
-      <section class="gameIntro" id="gameIntro" aria-label="Game summary">
-        <div class="heroCover" id="gameCoverWrap" hidden>
-          <img id="gameCover" alt="" loading="lazy" decoding="async" />
-        </div>
-        <div class="heroMeta">
-          <p id="gameDescription" class="heroDescription">Loading game details…</p>
-          <div class="pillRow" id="gameCategories" aria-label="Categories"></div>
-          <div class="pillRow" id="gameTags" aria-label="Tags"></div>
-        </div>
+      <section class="grid" id="gamesGrid"></section>
+      <section class="empty-state" id="emptyState" hidden>
+        <h2 data-i18n="noRecentGames">No recent games</h2>
+        <p data-i18n="noRecentGamesDesc">You haven't played any games yet. Start playing to see your history here!</p>
+        <a href="index.html" data-i18n="browseGames">Browse Games</a>
       </section>
-
-      <div class="gameWrap" id="frameWrap">
-        <div class="centerOverlay" id="consentOverlay">
-          <div>
-            <div style="color:#9fb0d0; margin-bottom:8px; text-align:center;">Waiting for consent…</div>
-          </div>
-        </div>
-
-        <div class="centerOverlay hidden" id="rotateOverlay">
-          <div>
-            <div style="color:#9fb0d0; margin-bottom:8px; text-align:center;">Please rotate your device</div>
-          </div>
-        </div>
-
-        <div id="frameBox" class="frameBox">
-          <!-- iframe injected after consent -->
-        </div>
-      </div>
-
-      <div class="meta" id="gameMeta"></div>
-
-      <section class="similarSection" id="similarSection" aria-label="Similar games" hidden>
-        <div class="similarHeader">
-          <h2>Similar games</h2>
-        </div>
-        <div class="similarList" id="similarList"></div>
-      </section>
-    </section>
-
-    <aside class="right" style="display:none;"></aside>
+    </main>
   </div>
 
   <footer class="site-footer" role="contentinfo">
@@ -172,7 +182,8 @@
       <span class="sep">•</span>
       <a class="ft-link" data-i18n="contact" href="mailto:contact@kcswh.pl">Contact</a>
       <span class="sep">•</span>
-      <a class="ft-link manage-cookies" data-i18n="manageCookies" href="#">Manage cookies</a>
+      <a class="ft-link manage-cookies" data-i18n="manageCookies"
+         id="manageCookies" href="#" data-cookieconsent="ignore">Manage cookies</a>
     </nav>
     <div class="lang-switch" aria-label="Language">
       <button type="button" class="lang-btn" data-lang="pl" aria-pressed="false">PL</button>
@@ -182,46 +193,52 @@
 
   <script src="js/topbar.js" defer></script>
   <script src="js/xpClient.js" defer></script>
-  <script src="js/sidebar.js" defer></script>
+  <script src="/js/ui/xp-overlay.js" defer></script>
+  <script src="js/debug.js" defer></script>
+  <script src="js/xp/combo.js" defer></script>
+  <script src="js/xp/scoring.js" defer></script>
+  <script src="js/xp/core.js" defer></script>
+  <script src="js/xp.js" defer></script>
   <script src="js/core/catalog.js" defer></script>
+  <script src="js/core/game-utils.js" defer></script>
+  <script src="js/core/search-utils.js" defer></script>
+  <script src="js/core/PortalApp.js" defer></script>
   <script src="js/core/RecentlyPlayedService.js" defer></script>
   <script src="js/core/StorageService.js" defer></script>
   <script src="js/recently-played-tracker.js" defer></script>
-  <script src="js/core/game-utils.js" defer></script>
-  <script src="js/core/search-utils.js" defer></script>
+  <script src="js/recently-played-page.js" defer></script>
+  <script src="js/sidebar.js" defer></script>
   <script src="js/search-popup.js" defer></script>
   <script src="js/search-popup-bootstrap.js" defer></script>
-  <script src="js/frame.js" defer></script>
   <script src="js/cookiebot-manager.js" defer></script>
-  <script src="/js/debug.js" defer></script>
-  <script>window.__GAME_ID__ = 'game-shell';</script>
-  <script src="/js/xp/combo.js" defer></script>
-  <script src="/js/xp/scoring.js" defer></script>
-  <script src="/js/xp/core.js" defer></script>
-  <script src="/js/xp.js" defer></script>
-  <script src="/js/xp-game-hook.js" defer></script>
-  <script src="/js/ui/xp-overlay.js" defer></script>
   <script>
-    if (!window.__xpAutoBooted) {
-      window.__xpAutoBooted = true;
-      let tries = 0;
-      function boot() {
-        const bridge = window.GameXpBridge;
-        if (bridge && typeof bridge.auto === "function") {
-          bridge.auto();
-          return;
-        }
-        if (tries++ >= 5) return;
-        window.setTimeout(boot, Math.min(50 * tries, 200));
-      }
-      if (document.readyState === "complete") {
-        boot();
+  (function () {
+    function openConsent() {
+      if (window.Cookiebot && typeof Cookiebot.renew === 'function') {
+        Cookiebot.renew();
+      } else if (window.Cookiebot && typeof Cookiebot.show === 'function') {
+        Cookiebot.show();
       } else {
-        window.addEventListener("DOMContentLoaded", boot, { once: true });
-        window.addEventListener("load", boot, { once: true });
+        alert('Menedżer zgód nie został jeszcze załadowany.');
       }
     }
+    function wire(el) {
+      if (!el) return;
+      el.addEventListener('click', function (e) {
+        e.preventDefault();
+        openConsent();
+      });
+      el.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openConsent(); }
+      });
+    }
+    function init() {
+      document.querySelectorAll('#manageCookies, [data-manage-cookies]').forEach(wire);
+    }
+    document.readyState === 'loading'
+      ? document.addEventListener('DOMContentLoaded', init)
+      : init();
+  })();
   </script>
 </body>
 </html>
-
