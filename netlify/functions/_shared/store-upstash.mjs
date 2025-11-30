@@ -1,6 +1,7 @@
 // Minimal Upstash REST client (no extra deps).
 const BASE = process.env.UPSTASH_REDIS_REST_URL;
 const TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN;
+const USER_PROFILE_PREFIX = "kcswh:xp:user:";
 
 if (!BASE || !TOKEN) {
   console.warn("[store-upstash] Missing UPSTASH env; falling back to in-memory store.");
@@ -45,6 +46,7 @@ function createMemoryStore() {
 
   return {
     async get(key) { return getValue(key); },
+    async set(key, value) { setValue(key, value, null); return "OK"; },
     async setex(key, seconds, value) { setValue(key, value, seconds * 1000); return "OK"; },
     async incrBy(key, delta) {
       const entry = sweep(key);
@@ -172,6 +174,7 @@ async function call(cmd, ...args) {
 
 const remoteStore = {
   async get(key) { return call("GET", key); },
+  async set(key, value) { return call("SET", key, String(value)); },
   async setex(key, seconds, value) { return call("SETEX", key, String(seconds), String(value)); },
   async incrBy(key, delta) { return call("INCRBY", key, String(delta)); },
   async decrBy(key, delta) { return call("DECRBY", key, String(delta)); },
@@ -209,3 +212,44 @@ const remoteStore = {
 };
 
 export const store = (!BASE || !TOKEN) ? createMemoryStore() : remoteStore;
+
+const clampTotalXp = (value) => {
+  const parsed = Math.floor(Number(value) || 0);
+  return parsed < 0 ? 0 : parsed;
+};
+
+const profileKey = (userId) => `${USER_PROFILE_PREFIX}${userId}`;
+
+export async function getUserProfile(userId) {
+  if (!userId) return null;
+  try {
+    const raw = await store.get(profileKey(userId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    const totalXp = clampTotalXp(parsed.totalXp ?? parsed.total ?? 0);
+    const createdAt = typeof parsed.createdAt === "string" ? parsed.createdAt : null;
+    const updatedAt = typeof parsed.updatedAt === "string" ? parsed.updatedAt : createdAt;
+    return { userId, totalXp, createdAt, updatedAt };
+  } catch {
+    return null;
+  }
+}
+
+export async function saveUserProfile({ userId, totalXp, now = Date.now() }) {
+  if (!userId) return null;
+  const existing = await getUserProfile(userId);
+  const timestamp = new Date(now).toISOString();
+  const profile = {
+    userId,
+    totalXp: clampTotalXp(totalXp),
+    createdAt: existing?.createdAt || timestamp,
+    updatedAt: timestamp,
+  };
+  try {
+    await store.set(profileKey(userId), JSON.stringify(profile));
+    return profile;
+  } catch (err) {
+    console.error("[store-upstash] Failed to persist user profile", { userId, error: err?.message });
+    return existing || profile;
+  }
+}

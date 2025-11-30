@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { store } from "./_shared/store-upstash.mjs";
+import { store, saveUserProfile } from "./_shared/store-upstash.mjs";
 import { verifySessionToken, validateServerSession, touchSession } from "./start-session.mjs";
 
 const warsawDateFormatter = new Intl.DateTimeFormat("en-CA", {
@@ -206,6 +206,15 @@ const verifySupabaseJwt = (token) => {
   }
   return { provided: true, valid: true, userId, payload };
 };
+
+async function persistUserProfile({ userId, totalXp, now }) {
+  if (!userId) return;
+  try {
+    await saveUserProfile({ userId, totalXp, now });
+  } catch (err) {
+    console.error("[XP][AUTH] Failed to save user profile", { userId, error: err?.message });
+  }
+}
 
 const parseCookies = (header) => {
   if (!header || typeof header !== "string") return {};
@@ -750,6 +759,9 @@ export async function handler(event) {
     await registerSession({ userId: identityId, sessionId });
 
     const totals = await fetchTotals();
+    if (userId) {
+      await persistUserProfile({ userId, totalXp: totals.lifetime, now });
+    }
     const payload = {
       ok: true,
       awarded: 0,
@@ -1124,6 +1136,10 @@ export async function handler(event) {
         status,
       });
     }
+  }
+
+  if (userId) {
+    await persistUserProfile({ userId, totalXp: totalLifetime, now });
   }
 
   return respond(200, payload, { totalOverride: redisDailyTotalRaw, debugExtra });
