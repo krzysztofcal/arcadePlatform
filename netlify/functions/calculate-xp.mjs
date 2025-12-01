@@ -58,6 +58,7 @@ const DEBUG_ENABLED = process.env.XP_DEBUG === "1";
 const SESSION_SECRET = process.env.XP_SESSION_SECRET || process.env.XP_DAILY_SECRET || "";
 const REQUIRE_SERVER_SESSION = process.env.XP_REQUIRE_SERVER_SESSION === "1";
 const SERVER_SESSION_WARN_MODE = process.env.XP_SERVER_SESSION_WARN_MODE === "1";
+const SUPABASE_JWT_SECRET = process.env.SUPABASE_JWT_SECRET || process.env.SUPABASE_JWT_SECRET_V2;
 
 // Rate Limiting
 const RATE_LIMIT_PER_USER_PER_MIN = Math.max(0, asNumber(process.env.XP_RATE_LIMIT_USER_PER_MIN, 30));
@@ -163,6 +164,72 @@ const GAME_XP_RULES = {
 // ============================================================================
 // Utility Functions
 // ============================================================================
+
+const klog = (kind, data) => {
+  try {
+    console.log(`[klog] ${kind}`, JSON.stringify(data));
+  } catch {
+    console.log(`[klog] ${kind}`, data);
+  }
+};
+
+const safeEquals = (a, b) => {
+  if (!a || !b || a.length !== b.length) return false;
+  const left = Buffer.from(a, "utf8");
+  const right = Buffer.from(b, "utf8");
+  if (left.length !== right.length) return false;
+  return crypto.timingSafeEqual(left, right);
+};
+
+const decodeBase64UrlJson = (segment) => {
+  if (!segment) return null;
+  try {
+    const decoded = Buffer.from(segment, "base64url").toString("utf8");
+    return JSON.parse(decoded);
+  } catch {
+    return null;
+  }
+};
+
+const extractBearerToken = (headers) => {
+  const headerValue = headers?.authorization || headers?.Authorization || headers?.AUTHORIZATION;
+  if (!headerValue || typeof headerValue !== "string") return null;
+  const match = /^Bearer\s+(.+)$/i.exec(headerValue.trim());
+  return match ? match[1].trim() : null;
+};
+
+const verifySupabaseJwt = (token) => {
+  if (!token) return { provided: false, valid: false, reason: "missing_token" };
+  if (!SUPABASE_JWT_SECRET) {
+    return { provided: false, valid: false, reason: "auth_disabled" };
+  }
+  const [headerSegment, payloadSegment, signatureSegment] = token.split(".");
+  if (!headerSegment || !payloadSegment || !signatureSegment) {
+    return { provided: true, valid: false, reason: "malformed_token" };
+  }
+  const header = decodeBase64UrlJson(headerSegment);
+  const payload = decodeBase64UrlJson(payloadSegment);
+  if (!header || !payload) {
+    return { provided: true, valid: false, reason: "invalid_encoding" };
+  }
+  const alg = header.alg || "HS256";
+  const hmacAlg = alg === "HS512" ? "sha512" : "sha256";
+  const expectedSig = crypto.createHmac(hmacAlg, SUPABASE_JWT_SECRET)
+    .update(`${headerSegment}.${payloadSegment}`)
+    .digest("base64url");
+  if (!safeEquals(signatureSegment, expectedSig)) {
+    return { provided: true, valid: false, reason: "invalid_signature" };
+  }
+  const nowSec = Math.floor(Date.now() / 1000);
+  if (payload.exp && Number(payload.exp) <= nowSec) {
+    return { provided: true, valid: false, reason: "expired" };
+  }
+  const userId = typeof payload.sub === "string" ? payload.sub : null;
+  if (!userId) {
+    return { provided: true, valid: false, reason: "missing_sub" };
+  }
+  return { provided: true, valid: true, userId, payload };
+};
 
 const hash = (s) => crypto.createHash("sha256").update(s).digest("hex");
 
@@ -715,11 +782,23 @@ export async function handler(event) {
     return json(400, { error: "bad_json" }, origin);
   }
 
-  const userId = typeof body.userId === "string" ? body.userId.trim() : null;
-  const sessionId = typeof body.sessionId === "string" ? body.sessionId.trim() : null;
+  const authToken = extractBearerToken(event.headers);
+  const supabaseAuth = verifySupabaseJwt(authToken);
+  const supabaseUserId = supabaseAuth.valid ? supabaseAuth.userId : null;
 
-  if (!userId || !sessionId) {
-    return json(400, { error: "missing_fields", message: "userId and sessionId required" }, origin);
+  const bodyAnonIdRaw = typeof body.anonId === "string"
+    ? body.anonId
+    : typeof body.userId === "string"
+      ? body.userId
+      : null;
+  const anonId = bodyAnonIdRaw ? bodyAnonIdRaw.trim() : null;
+
+  const identityId = supabaseUserId || anonId;
+  const sessionId = typeof body.sessionId === "string" ? body.sessionId.trim() : null;
+  const userId = identityId;
+
+  if (!identityId || !sessionId) {
+    return json(400, { error: "missing_fields", message: "identity and sessionId required" }, origin);
   }
 
   // Rate limiting
@@ -727,7 +806,7 @@ export async function handler(event) {
     || event.headers?.["x-real-ip"]
     || "unknown";
 
-  const rateLimitResult = await checkRateLimit({ userId, ip: clientIp });
+  const rateLimitResult = await checkRateLimit({ userId: identityId, ip: clientIp });
   if (!rateLimitResult.allowed) {
     return json(429, {
       error: "rate_limit_exceeded",
@@ -754,7 +833,7 @@ export async function handler(event) {
       const tokenResult = verifySessionToken(sessionToken, SESSION_SECRET);
       if (!tokenResult.valid) {
         sessionError = `token_${tokenResult.reason}`;
-      } else if (tokenResult.userId !== userId) {
+      } else if (tokenResult.userId !== identityId) {
         sessionError = "token_user_mismatch";
       } else if (tokenResult.fingerprint !== fingerprint) {
         sessionError = "token_fingerprint_mismatch";
@@ -762,14 +841,14 @@ export async function handler(event) {
         // Verify session exists in Redis and matches
         const serverValidation = await validateServerSession({
           sessionId: tokenResult.sessionId,
-          userId,
+          userId: identityId,
           fingerprint,
         });
         if (!serverValidation.valid) {
           sessionError = `session_${serverValidation.reason}`;
           if (serverValidation.suspicious) {
             console.warn("[XP-CALC] SECURITY: Potential session hijacking attempt", {
-              userId,
+              userId: identityId,
               fingerprint,
               ip: clientIp,
               reason: serverValidation.reason,
@@ -839,6 +918,15 @@ export async function handler(event) {
       }, origin);
     }
   }
+
+  klog("calc_award_attempt", {
+    identityId,
+    userId: supabaseUserId,
+    anonId,
+    gameId: body.gameId || null,
+    scoreDelta: body.scoreDelta ?? body.delta ?? null,
+    hasSessionToken: !!(body.sessionToken || event.headers?.["x-session-token"]),
+  });
 
   // Get or create session state
   const sessionState = await getSessionState(userId, sessionId);
@@ -996,6 +1084,14 @@ export async function handler(event) {
   const status = Number(res?.[5]) || 0;
 
   const remaining = Math.max(0, DAILY_CAP - redisDailyTotal);
+
+  klog("calc_award_result", {
+    identityId,
+    granted,
+    totalLifetime,
+    totalToday: redisDailyTotal,
+    status,
+  });
 
   // Update session state
   sessionState.combo = updatedCombo;
