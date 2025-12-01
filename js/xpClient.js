@@ -46,29 +46,35 @@
       return state.authPromise;
     }
 
-    const client = getSupabaseClient();
-    if (!client || !client.auth || typeof client.auth.getSession !== "function") {
-      state.authCheckedAt = now;
-      state.authToken = null;
-      return null;
-    }
+    state.authPromise = (async () => {
+      try {
+        let token = null;
+        const bridge = (typeof window !== "undefined") ? window.SupabaseAuthBridge : null;
+        const getter = bridge && typeof bridge.getAccessToken === "function" ? bridge.getAccessToken : null;
+        if (getter) {
+          token = await getter();
+        }
 
-    state.authPromise = client.auth.getSession()
-      .then((res) => {
-        const session = res && res.data ? res.data.session : null;
-        const token = session && session.access_token ? session.access_token : null;
+        if (!token) {
+          const client = getSupabaseClient();
+          if (client && client.auth && typeof client.auth.getSession === "function") {
+            const res = await client.auth.getSession();
+            const session = res && res.data ? res.data.session : null;
+            token = session && session.access_token ? session.access_token : null;
+          }
+        }
+
         state.authToken = token || null;
         state.authCheckedAt = Date.now();
         return state.authToken;
-      })
-      .catch(() => {
+      } catch (_) {
         state.authToken = null;
         state.authCheckedAt = Date.now();
         return null;
-      })
-      .finally(() => {
+      } finally {
         state.authPromise = null;
-      });
+      }
+    })();
 
     return state.authPromise;
   }
@@ -77,12 +83,15 @@
     return !!state.authToken;
   }
 
-  async function buildAuthHeaders() {
-    const token = await fetchAuthToken(false);
-    if (token) {
-      return { Authorization: `Bearer ${token}` };
-    }
-    return {};
+  async function buildAuthHeaders(baseHeaders) {
+    const headers = Object.assign({}, baseHeaders || {});
+    try {
+      const token = await fetchAuthToken(false);
+      if (token) {
+        headers.Authorization = `Bearer ${token}`;
+      }
+    } catch (_) {}
+    return headers;
   }
 
   function randomId() {
@@ -204,7 +213,7 @@
 
     state.serverSessionPromise = (async () => {
       try {
-        const headers = Object.assign({ "content-type": "application/json" }, await buildAuthHeaders());
+        const headers = await buildAuthHeaders({ "content-type": "application/json" });
         const res = await fetch(START_SESSION_URL, {
           method: "POST",
           headers,
@@ -371,7 +380,7 @@
     const keepalive = opts.keepalive === true;
     const allowBeacon = opts.allowBeacon === true;
     const payload = JSON.stringify(body);
-    const headers = Object.assign({ "content-type": "application/json" }, await buildAuthHeaders());
+    const headers = await buildAuthHeaders({ "content-type": "application/json" });
     const requestInit = {
       method: "POST",
       headers,
@@ -512,7 +521,7 @@
   async function fetchStatus() {
     const { userId, sessionId } = ensureIds();
     const body = { userId, sessionId, gameId: "status", statusOnly: true };
-    const headers = Object.assign({ "content-type": "application/json" }, await buildAuthHeaders());
+    const headers = await buildAuthHeaders({ "content-type": "application/json" });
     const res = await fetch(FN_URL, {
       method: "POST",
       headers,
@@ -591,7 +600,7 @@
     let attempt = 0;
     const payloadJson = JSON.stringify(body);
     const allowBeacon = opts.allowBeacon === true;
-    const headers = Object.assign({ "content-type": "application/json" }, await buildAuthHeaders());
+    const headers = await buildAuthHeaders({ "content-type": "application/json" });
     while (attempt < 3) {
       let networkError = false;
       let lastError = null;

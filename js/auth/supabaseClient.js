@@ -66,6 +66,22 @@
     });
   }
 
+  function getAccessToken(){
+    var client = getClient();
+    if (!client || !client.auth || typeof client.auth.getSession !== 'function'){
+      return Promise.resolve(null);
+    }
+
+    return client.auth.getSession().then(function(res){
+      var session = res && res.data ? res.data.session : null;
+      var token = session && session.access_token ? session.access_token : null;
+      return token || null;
+    }).catch(function(err){
+      logDiag('supabase:token_error', { message: err && err.message ? String(err.message) : 'error' });
+      return null;
+    });
+  }
+
   function onAuthChange(callback){
     var client = getClient();
     if (!client || !client.auth || typeof client.auth.onAuthStateChange !== 'function'){
@@ -282,6 +298,13 @@
     wireAvatar();
     getClient();
     hydrateSession();
+  }
+
+  if (typeof window !== 'undefined'){
+    var bridge = window.SupabaseAuthBridge || {};
+    bridge.getAccessToken = getAccessToken;
+    window.SupabaseAuthBridge = bridge;
+    logDiag('supabase:token_bridge_init', { attached: true });
   }
 
   window.SupabaseAuth = {
