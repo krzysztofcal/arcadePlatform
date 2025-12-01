@@ -9,6 +9,7 @@
   const SERVER_SESSION_EXPIRES_KEY = "kcswh:serverSessionExpires";
   const MAX_TS = Number.MAX_SAFE_INTEGER;
   const DEFAULT_DELTA_CAP = 300;
+  const AUTH_CACHE_MS = 60000;
 
   // Session states: "none" | "pending" | "ready"
   const SESSION_NONE = "none";
@@ -24,7 +25,65 @@
     serverSessionPromise: null,
     serverSessionToken: null,
     sessionStatus: SESSION_NONE,
+    authToken: null,
+    authCheckedAt: 0,
+    authPromise: null,
   };
+
+  function getSupabaseClient() {
+    if (typeof window === "undefined") return null;
+    const existing = window.supabaseClient;
+    if (existing && existing.auth) return existing;
+    return null;
+  }
+
+  async function fetchAuthToken(force) {
+    const now = Date.now();
+    if (!force && state.authToken && (now - state.authCheckedAt) < AUTH_CACHE_MS) {
+      return state.authToken;
+    }
+    if (!force && state.authPromise) {
+      return state.authPromise;
+    }
+
+    const client = getSupabaseClient();
+    if (!client || !client.auth || typeof client.auth.getSession !== "function") {
+      state.authCheckedAt = now;
+      state.authToken = null;
+      return null;
+    }
+
+    state.authPromise = client.auth.getSession()
+      .then((res) => {
+        const session = res && res.data ? res.data.session : null;
+        const token = session && session.access_token ? session.access_token : null;
+        state.authToken = token || null;
+        state.authCheckedAt = Date.now();
+        return state.authToken;
+      })
+      .catch(() => {
+        state.authToken = null;
+        state.authCheckedAt = Date.now();
+        return null;
+      })
+      .finally(() => {
+        state.authPromise = null;
+      });
+
+    return state.authPromise;
+  }
+
+  function isAuthenticated() {
+    return !!state.authToken;
+  }
+
+  async function buildAuthHeaders() {
+    const token = await fetchAuthToken(false);
+    if (token) {
+      return { Authorization: `Bearer ${token}` };
+    }
+    return {};
+  }
 
   function randomId() {
     if (typeof crypto !== "undefined") {
@@ -145,9 +204,10 @@
 
     state.serverSessionPromise = (async () => {
       try {
+        const headers = Object.assign({ "content-type": "application/json" }, await buildAuthHeaders());
         const res = await fetch(START_SESSION_URL, {
           method: "POST",
-          headers: { "content-type": "application/json" },
+          headers,
           body: JSON.stringify({ userId }),
           cache: "no-store",
           credentials: "omit",
@@ -311,9 +371,10 @@
     const keepalive = opts.keepalive === true;
     const allowBeacon = opts.allowBeacon === true;
     const payload = JSON.stringify(body);
+    const headers = Object.assign({ "content-type": "application/json" }, await buildAuthHeaders());
     const requestInit = {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers,
       body: payload,
       cache: "no-store",
       credentials: "omit",
@@ -451,9 +512,10 @@
   async function fetchStatus() {
     const { userId, sessionId } = ensureIds();
     const body = { userId, sessionId, gameId: "status", statusOnly: true };
+    const headers = Object.assign({ "content-type": "application/json" }, await buildAuthHeaders());
     const res = await fetch(FN_URL, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers,
       body: JSON.stringify(body),
       cache: "no-store",
       credentials: "omit",
@@ -529,6 +591,7 @@
     let attempt = 0;
     const payloadJson = JSON.stringify(body);
     const allowBeacon = opts.allowBeacon === true;
+    const headers = Object.assign({ "content-type": "application/json" }, await buildAuthHeaders());
     while (attempt < 3) {
       let networkError = false;
       let lastError = null;
@@ -536,7 +599,7 @@
       try {
         res = await fetch(CALC_URL, {
           method: "POST",
-          headers: { "content-type": "application/json" },
+          headers,
           body: payloadJson,
           cache: "no-store",
           credentials: "include",
@@ -628,5 +691,6 @@
     clearServerSession,
     ensureServerSession,
     getSessionStatus,
+    isAuthenticated,
   };
 })();

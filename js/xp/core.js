@@ -993,7 +993,20 @@ function bootXpCore(window, document) {
     state.badge.classList.toggle("xp-badge--loading", !!isLoading);
   }
 
+  function isAuthenticatedUser() {
+    try {
+      if (window && window.XPClient && typeof window.XPClient.isAuthenticated === "function") {
+        return window.XPClient.isAuthenticated() === true;
+      }
+    } catch (_) {}
+    return false;
+  }
+
   function resolveBadgeBaseline() {
+    const authenticated = isAuthenticatedUser();
+    if (authenticated && typeof state.serverTotalXp === "number") {
+      return state.serverTotalXp;
+    }
     if (typeof state.serverTotalXp === "number") {
       return state.serverTotalXp;
     }
@@ -1012,16 +1025,26 @@ function bootXpCore(window, document) {
   function updateBadge() {
     if (!state.badge) return;
     ensureBadgeElements();
-    const baseline = resolveBadgeBaseline();
+    const authenticated = isAuthenticatedUser();
+    const baseline = (authenticated && typeof state.serverTotalXp === "number")
+      ? state.serverTotalXp
+      : resolveBadgeBaseline();
     const session = Math.max(0, Number(state.sessionXp) || 0);
     const priorShown = Math.max(0, Number(state.badgeShownXp) || 0);
     let candidate = baseline + session;
-    if (SESSION_RENDER_MODE === "monotonic") {
+    if (authenticated && typeof state.serverTotalXp === "number" && candidate < state.serverTotalXp) {
+      candidate = state.serverTotalXp;
+    }
+    if (!authenticated && SESSION_RENDER_MODE === "monotonic") {
       candidate = Math.max(priorShown, candidate);
     }
     state.badgeShownXp = candidate;
-    state.badgeBaselineXp = Math.max(Number(state.badgeBaselineXp) || 0, baseline);
-    state.totalLifetime = Math.max(Number(state.totalLifetime) || 0, candidate);
+    state.badgeBaselineXp = authenticated
+      ? Math.max(0, baseline)
+      : Math.max(Number(state.badgeBaselineXp) || 0, baseline);
+    state.totalLifetime = authenticated
+      ? Math.max(0, candidate)
+      : Math.max(Number(state.totalLifetime) || 0, candidate);
     state.snapshot = computeLevel(state.totalLifetime);
     const totalText = state.snapshot.totalXp.toLocaleString();
     state.labelEl.textContent = `Lvl ${state.snapshot.level}, ${totalText} XP`;
@@ -1150,6 +1173,7 @@ function bootXpCore(window, document) {
       return;
     }
 
+    const authenticated = isAuthenticatedUser();
     const sanitizedTotal = Math.max(0, Number(totalLifetime) || 0);
     const previousServer = typeof state.serverTotalXp === "number" ? state.serverTotalXp : null;
     let acked = 0;
@@ -1174,8 +1198,12 @@ function bootXpCore(window, document) {
       state.sessionXp = Math.max(0, pendingSession - toSubtract);
     }
 
-    state.badgeBaselineXp = Math.max(Number(state.badgeBaselineXp) || 0, state.serverTotalXp || 0);
-    state.totalLifetime = Math.max(Number(state.totalLifetime) || 0, state.serverTotalXp || 0);
+    state.badgeBaselineXp = authenticated
+      ? Math.max(0, state.serverTotalXp || 0)
+      : Math.max(Number(state.badgeBaselineXp) || 0, state.serverTotalXp || 0);
+    state.totalLifetime = authenticated
+      ? Math.max(0, state.serverTotalXp || 0)
+      : Math.max(Number(state.totalLifetime) || 0, state.serverTotalXp || 0);
     state.lastResultTs = Date.now();
     if (meta && meta.bump === true) {
       bumpBadge();
