@@ -463,6 +463,108 @@ async function getTotals({ userId, sessionId, now = Date.now() }) {
   }
 }
 
+// XP Migration: Convert anonymous XP to authenticated user account
+async function migrateAnonXpToUser({ userId, anonId, now = Date.now() }) {
+  if (!userId || !anonId || userId === anonId) {
+    return { migrated: false, amount: 0 };
+  }
+
+  const CONVERSION_KEY_PREFIX = `${KEY_NS}:converted:`;
+  const conversionKey = `${CONVERSION_KEY_PREFIX}${userId}`;
+  const anonConversionKey = `${CONVERSION_KEY_PREFIX}anon:${anonId}`;
+
+  try {
+    // Check if this user has already converted XP
+    const alreadyConverted = await store.get(conversionKey);
+    if (alreadyConverted) {
+      return { migrated: false, amount: 0, reason: "already_converted" };
+    }
+
+    // Check if this anonymous profile has already been converted to another user
+    const anonAlreadyConverted = await store.get(anonConversionKey);
+    if (anonAlreadyConverted) {
+      return { migrated: false, amount: 0, reason: "anon_already_converted" };
+    }
+
+    // Fetch anonymous XP totals
+    const anonTotals = await getTotals({ userId: anonId, sessionId: null, now });
+    const anonXp = anonTotals.lifetime;
+
+    if (anonXp <= 0) {
+      return { migrated: false, amount: 0, reason: "no_anon_xp" };
+    }
+
+    // Fetch current authenticated user XP
+    const userTotals = await getTotals({ userId, sessionId: null, now });
+    const currentUserXp = userTotals.lifetime;
+
+    // Calculate allowed conversion amount (apply caps per spec)
+    const MAX_TOTAL_CONVERSION_CAP = 100_000;
+    const allowedXp = Math.min(anonXp, MAX_TOTAL_CONVERSION_CAP);
+
+    if (allowedXp <= 0) {
+      return { migrated: false, amount: 0, reason: "no_convertible_xp" };
+    }
+
+    // Perform atomic migration of lifetime XP
+    const newUserTotal = currentUserXp + allowedXp;
+    const userTotalKey = keyTotal(userId);
+    await store.set(userTotalKey, String(newUserTotal));
+
+    // Also migrate today's XP (but respect daily cap)
+    const todayKey = getDailyKey(now);
+    const userTodayKey = keyDaily(userId, todayKey);
+    const anonTodayKey = keyDaily(anonId, todayKey);
+
+    try {
+      const anonTodayXp = Number(await store.get(anonTodayKey) || "0") || 0;
+      if (anonTodayXp > 0) {
+        const currentUserTodayXp = Number(await store.get(userTodayKey) || "0") || 0;
+        const combinedToday = Math.min(DAILY_CAP, currentUserTodayXp + anonTodayXp);
+        await store.set(userTodayKey, String(combinedToday));
+      }
+    } catch (err) {
+      console.warn("[XP] Failed to migrate daily XP", { error: err?.message });
+    }
+
+    // Mark conversion as complete
+    const conversionRecord = JSON.stringify({
+      userId,
+      anonId,
+      amount: allowedXp,
+      previousUserXp: currentUserXp,
+      previousAnonXp: anonXp,
+      timestamp: new Date(now).toISOString(),
+    });
+
+    // Store conversion markers (with 1 year TTL)
+    const oneYearSec = 365 * 24 * 60 * 60;
+    await store.setex(conversionKey, oneYearSec, conversionRecord);
+    await store.setex(anonConversionKey, oneYearSec, userId);
+
+    console.log("[XP] Successfully migrated anonymous XP", {
+      userId: userId.substring(0, 8),
+      anonId: anonId.substring(0, 8),
+      amount: allowedXp,
+      newTotal: newUserTotal,
+    });
+
+    return {
+      migrated: true,
+      amount: allowedXp,
+      previousUserXp: currentUserXp,
+      newTotal: newUserTotal,
+    };
+  } catch (err) {
+    console.error("[XP] Failed to migrate anonymous XP", {
+      userId: userId?.substring(0, 8),
+      anonId: anonId?.substring(0, 8),
+      error: err?.message,
+    });
+    return { migrated: false, amount: 0, error: err?.message };
+  }
+}
+
 export async function handler(event) {
   const origin = event.headers?.origin;
 
@@ -758,10 +860,29 @@ export async function handler(event) {
     // SECURITY: Auto-register session when status is requested (session start)
     await registerSession({ userId: identityId, sessionId });
 
-    const totals = await fetchTotals();
+    let migrationResult = null;
+    let totals = null;
+
+    // XP Migration: If user is authenticated and has a different anonId, attempt migration
+    if (userId && anonId && userId !== anonId) {
+      migrationResult = await migrateAnonXpToUser({ userId, anonId, now });
+
+      if (migrationResult.migrated) {
+        console.log("[XP] XP migration triggered during statusOnly request", {
+          userId: userId.substring(0, 8),
+          anonId: anonId.substring(0, 8),
+          amount: migrationResult.amount,
+        });
+      }
+    }
+
+    // Fetch totals using the authenticated identity
+    totals = await fetchTotals();
+
     if (userId) {
       await persistUserProfile({ userId, totalXp: totals.lifetime, now });
     }
+
     const payload = {
       ok: true,
       awarded: 0,
@@ -773,7 +894,16 @@ export async function handler(event) {
       lastSync: totals.lastSync,
       status: "statusOnly",
     };
-    return respond(200, payload, { totals, debugExtra: { mode: "statusOnly" } });
+
+    // Include migration info in response if migration occurred
+    if (migrationResult && migrationResult.migrated) {
+      payload.xpMigrated = {
+        amount: migrationResult.amount,
+        previousXp: migrationResult.previousUserXp,
+      };
+    }
+
+    return respond(200, payload, { totals, debugExtra: { mode: "statusOnly", migrated: migrationResult?.migrated } });
   }
 
   let deltaRaw = Number(body.delta);
