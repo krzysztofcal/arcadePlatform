@@ -797,12 +797,12 @@ export async function handler(event) {
       : null;
   const anonId = bodyAnonIdRaw ? bodyAnonIdRaw.trim() : null;
 
-  const identityId = supabaseUserId || anonId;
+  const xpIdentity = anonId || null; // XP storage identity stays anon-based for now
+  const identityId = supabaseUserId || anonId; // diagnostic only
   const sessionId = typeof body.sessionId === "string" ? body.sessionId.trim() : null;
-  const identityKey = identityId;
-  const userId = identityKey;
+  const userId = xpIdentity;
 
-  if (!identityKey || !sessionId) {
+  if (!xpIdentity || !sessionId) {
     return json(400, { error: "missing_fields", message: "identity and sessionId required" }, origin);
   }
 
@@ -811,7 +811,7 @@ export async function handler(event) {
     || event.headers?.["x-real-ip"]
     || "unknown";
 
-  const rateLimitResult = await checkRateLimit({ userId: identityKey, ip: clientIp });
+  const rateLimitResult = await checkRateLimit({ userId: xpIdentity, ip: clientIp });
   if (!rateLimitResult.allowed) {
     return json(429, {
       error: "rate_limit_exceeded",
@@ -838,22 +838,22 @@ export async function handler(event) {
       const tokenResult = verifySessionToken(sessionToken, SESSION_SECRET);
       if (!tokenResult.valid) {
         sessionError = `token_${tokenResult.reason}`;
-      } else if (tokenResult.userId !== identityKey) {
+      } else if (tokenResult.userId !== supabaseUserId) {
         sessionError = "token_user_mismatch";
       } else if (tokenResult.fingerprint !== fingerprint) {
         sessionError = "token_fingerprint_mismatch";
       } else {
         // Verify session exists in Redis and matches
-        const serverValidation = await validateServerSession({
-          sessionId: tokenResult.sessionId,
-          userId: identityKey,
-          fingerprint,
-        });
+          const serverValidation = await validateServerSession({
+            sessionId: tokenResult.sessionId,
+            userId: xpIdentity,
+            fingerprint,
+          });
         if (!serverValidation.valid) {
           sessionError = `session_${serverValidation.reason}`;
           if (serverValidation.suspicious) {
             console.warn("[XP-CALC] SECURITY: Potential session hijacking attempt", {
-              userId: identityKey,
+              userId: xpIdentity,
               fingerprint,
               ip: clientIp,
               reason: serverValidation.reason,
@@ -886,7 +886,7 @@ export async function handler(event) {
       } else if (SERVER_SESSION_WARN_MODE) {
         // Warn mode: log but don't block
         console.warn("[XP-CALC] Session validation failed (warn mode):", {
-          userId,
+          userId: xpIdentity,
           sessionError,
           hasToken: !!sessionToken,
           ip: clientIp,
@@ -926,8 +926,9 @@ export async function handler(event) {
 
   klog("calc_award_attempt", {
     identityId,
-    userId: supabaseUserId,
+    supabaseUserId,
     anonId,
+    xpIdentity,
     gameId: body.gameId || null,
     scoreDelta: body.scoreDelta ?? body.delta ?? null,
     hasSessionToken: !!(body.sessionToken || event.headers?.["x-session-token"]),
@@ -995,10 +996,10 @@ export async function handler(event) {
   const nextReset = getNextResetEpoch(now);
 
   // Redis keys
-  const todayKey = keyDaily(userId, dayKeyNow);
-  const totalKeyK = keyTotal(userId);
-  const sessionKeyK = keySession(userId, sessionId);
-  const sessionSyncKeyK = keySessionSync(userId, sessionId);
+  const todayKey = keyDaily(xpIdentity, dayKeyNow);
+  const totalKeyK = keyTotal(xpIdentity);
+  const sessionKeyK = keySession(xpIdentity, sessionId);
+  const sessionSyncKeyK = keySessionSync(xpIdentity, sessionId);
 
   // Award XP atomically with caps
   const script = `
@@ -1091,7 +1092,8 @@ export async function handler(event) {
   const remaining = Math.max(0, DAILY_CAP - redisDailyTotal);
 
   klog("calc_award_result", {
-    identityId,
+    xpIdentity,
+    supabaseUserId,
     granted,
     totalLifetime,
     totalToday: redisDailyTotal,
