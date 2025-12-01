@@ -7,7 +7,6 @@
 
   const grid = document.getElementById('gamesGrid');
   const emptyState = document.getElementById('emptyState');
-  const searchInput = document.getElementById('searchInput');
 
   async function init() {
     if (!grid) {
@@ -64,10 +63,11 @@
       }
 
       // Use PortalApp to render the games
+      // Note: We don't pass searchInput here - the global search popup will handle search
       const app = new global.PortalApp({
         grid: grid,
         categoryBar: null, // No category bar on recently played page
-        searchInput: searchInput,
+        searchInput: null, // Let global search popup handle search
         analytics: global.Analytics,
         catalog: global.ArcadeCatalog,
         i18n: global.I18N,
@@ -77,10 +77,7 @@
       // Override allGames with our recently played games
       app.allGames = matchedGames;
 
-      // Setup search input
-      app.setupSearchInput();
-
-      // Render the list
+      // Render the list (don't call setupSearchInput - let search popup handle it)
       app.renderList(matchedGames, 'recently_played', 'Recently Played');
 
       // Re-render on language change
