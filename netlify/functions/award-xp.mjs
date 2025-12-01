@@ -622,6 +622,7 @@ export async function handler(event) {
   }
 
   identityId = userId || anonId; // identityId is the XP identity used for keys, caps, sessions: Supabase userId when available, otherwise anonId.
+  const identityKey = identityId;
 
   const sessionIdRaw = body.sessionId ?? querySessionId;
   let sessionId = typeof sessionIdRaw === "string" ? sessionIdRaw.trim() : null;
@@ -632,7 +633,7 @@ export async function handler(event) {
     || "unknown";
 
   const isStatusOnly = body.statusOnly === true;
-  const rateLimitResult = isStatusOnly ? { allowed: true } : await checkRateLimit({ userId: identityId, ip: clientIp });
+  const rateLimitResult = isStatusOnly ? { allowed: true } : await checkRateLimit({ userId: identityKey, ip: clientIp });
   if (!rateLimitResult.allowed) {
     const retryAfter = rateLimitResult.retryAfter ?? 60;
     const payload = {
@@ -672,22 +673,22 @@ export async function handler(event) {
         parsedSessionToken = tokenResult;
         if (!tokenResult.valid) {
           sessionError = `token_${tokenResult.reason}`;
-        } else if (tokenResult.userId !== identityId) {
-          sessionError = "token_user_mismatch";
-        } else if (tokenResult.fingerprint !== fingerprint) {
-          sessionError = "token_fingerprint_mismatch";
-        } else {
-          // Verify session exists in Redis and matches
-          const serverValidation = await validateServerSession({
-            sessionId: tokenResult.sessionId,
-            userId: identityId,
-            fingerprint,
-          });
+      } else if (tokenResult.userId !== identityKey) {
+        sessionError = "token_user_mismatch";
+      } else if (tokenResult.fingerprint !== fingerprint) {
+        sessionError = "token_fingerprint_mismatch";
+      } else {
+        // Verify session exists in Redis and matches
+        const serverValidation = await validateServerSession({
+          sessionId: tokenResult.sessionId,
+          userId: identityKey,
+          fingerprint,
+        });
           if (!serverValidation.valid) {
             sessionError = `session_${serverValidation.reason}`;
             if (serverValidation.suspicious) {
               console.warn("[XP] SECURITY: Potential session hijacking attempt", {
-                userId: identityId,
+                userId: identityKey,
                 fingerprint,
                 ip: clientIp,
                 reason: serverValidation.reason,
@@ -719,26 +720,26 @@ export async function handler(event) {
           return json(401, payload, origin);
         } else if (serverSessionWarnMode) {
           // Warn mode: log but don't block
-          console.warn("[XP] Session validation failed (warn mode):", {
-            userId: identityId,
-            sessionError,
-            hasToken: !!sessionToken,
-            ip: clientIp,
-          });
+            console.warn("[XP] Session validation failed (warn mode):", {
+          userId: identityKey,
+          sessionError,
+          hasToken: !!sessionToken,
+          ip: clientIp,
+        });
         }
       }
     }
   }
 
-  if (parsedSessionToken?.valid && parsedSessionToken.userId === identityId) {
+  if (parsedSessionToken?.valid && parsedSessionToken.userId === identityKey) {
     sessionId = parsedSessionToken.sessionId;
   }
 
   let totalsPromise = null;
   const fetchTotals = async () => {
-    if (!identityId) return { current: cookieTotal, lifetime: 0, sessionTotal: 0, lastSync: 0 };
+    if (!identityKey) return { current: cookieTotal, lifetime: 0, sessionTotal: 0, lastSync: 0 };
     if (!totalsPromise) {
-      totalsPromise = getTotals({ userId: identityId, sessionId, now });
+      totalsPromise = getTotals({ userId: identityKey, sessionId, now });
     }
     return totalsPromise;
   };
@@ -750,7 +751,7 @@ export async function handler(event) {
     if (totals) {
       totalSource = totalSource ?? totals.current;
     }
-    if (totalSource === undefined && identityId) {
+    if (totalSource === undefined && identityKey) {
       totals = await fetchTotals();
       totalSource = totals.current;
     }
@@ -774,16 +775,16 @@ export async function handler(event) {
     });
   };
 
-  if (!identityId || (!body.statusOnly && !sessionId)) {
-    const totals = identityId ? await fetchTotals() : null;
-    return respond(400, { error: "missing_fields" }, { totals, skipCookie: !identityId });
+  if (!identityKey || (!body.statusOnly && !sessionId)) {
+    const totals = identityKey ? await fetchTotals() : null;
+    return respond(400, { error: "missing_fields" }, { totals, skipCookie: !identityKey });
   }
 
   if (body.statusOnly) {
     // SECURITY: Auto-register session when status is requested (session start)
     const sessId = sessionId || crypto.randomUUID();
     sessionId = sessId;
-    await registerSession({ userId: identityId, sessionId: sessId });
+    await registerSession({ userId: identityKey, sessionId: sessId });
     if (parsedSessionToken?.valid) {
       touchSession(parsedSessionToken.sessionId).catch(() => {});
     }
@@ -837,16 +838,16 @@ export async function handler(event) {
   // SECURITY: Session validation - register session if delta=0 (session start), validate if delta>0
   if (normalizedDelta === 0) {
     // Auto-register session on first request (delta=0 is session initialization)
-    await registerSession({ userId: identityId, sessionId });
+    await registerSession({ userId: identityKey, sessionId });
   } else if (normalizedDelta > 0) {
     // Validate session is registered before accepting XP deltas
-    const registered = await isSessionRegistered({ userId: identityId, sessionId });
+    const registered = await isSessionRegistered({ userId: identityKey, sessionId });
     if (!registered) {
       // Auto-register on first XP-bearing request for backward compatibility
       // In a future version, this could be enforced by rejecting unregistered sessions
-      await registerSession({ userId: identityId, sessionId });
+      await registerSession({ userId: identityKey, sessionId });
       if (DEBUG_ENABLED) {
-        console.log('[XP] Auto-registered unregistered session:', { userId: identityId, sessionId: sessionId.substring(0, 8) });
+        console.log('[XP] Auto-registered unregistered session:', { userId: identityKey, sessionId: sessionId.substring(0, 8) });
       }
     }
   }
@@ -903,11 +904,11 @@ export async function handler(event) {
     metadata = cleaned;
   }
 
-  const todayKey = keyDaily(identityId, dayKeyNow);
-  const totalKeyK = keyTotal(identityId);
-  const sessionKeyK = keySession(identityId, sessionId);
-  const sessionSyncKeyK = keySessionSync(identityId, sessionId);
-  const lockKeyK = keyLock(identityId, sessionId);
+  const todayKey = keyDaily(identityKey, dayKeyNow);
+  const totalKeyK = keyTotal(identityKey);
+  const sessionKeyK = keySession(identityKey, sessionId);
+  const sessionSyncKeyK = keySessionSync(identityKey, sessionId);
+  const lockKeyK = keyLock(identityKey, sessionId);
 
   if (REQUIRE_ACTIVITY && normalizedDelta > 0) {
     const events = Number(metadata?.inputEvents ?? 0);

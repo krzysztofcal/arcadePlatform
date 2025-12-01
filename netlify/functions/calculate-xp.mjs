@@ -799,9 +799,10 @@ export async function handler(event) {
 
   const identityId = supabaseUserId || anonId;
   const sessionId = typeof body.sessionId === "string" ? body.sessionId.trim() : null;
-  const userId = identityId;
+  const identityKey = identityId;
+  const userId = identityKey;
 
-  if (!identityId || !sessionId) {
+  if (!identityKey || !sessionId) {
     return json(400, { error: "missing_fields", message: "identity and sessionId required" }, origin);
   }
 
@@ -810,7 +811,7 @@ export async function handler(event) {
     || event.headers?.["x-real-ip"]
     || "unknown";
 
-  const rateLimitResult = await checkRateLimit({ userId: identityId, ip: clientIp });
+  const rateLimitResult = await checkRateLimit({ userId: identityKey, ip: clientIp });
   if (!rateLimitResult.allowed) {
     return json(429, {
       error: "rate_limit_exceeded",
@@ -837,7 +838,7 @@ export async function handler(event) {
       const tokenResult = verifySessionToken(sessionToken, SESSION_SECRET);
       if (!tokenResult.valid) {
         sessionError = `token_${tokenResult.reason}`;
-      } else if (tokenResult.userId !== identityId) {
+      } else if (tokenResult.userId !== identityKey) {
         sessionError = "token_user_mismatch";
       } else if (tokenResult.fingerprint !== fingerprint) {
         sessionError = "token_fingerprint_mismatch";
@@ -845,14 +846,14 @@ export async function handler(event) {
         // Verify session exists in Redis and matches
         const serverValidation = await validateServerSession({
           sessionId: tokenResult.sessionId,
-          userId: identityId,
+          userId: identityKey,
           fingerprint,
         });
         if (!serverValidation.valid) {
           sessionError = `session_${serverValidation.reason}`;
           if (serverValidation.suspicious) {
             console.warn("[XP-CALC] SECURITY: Potential session hijacking attempt", {
-              userId: identityId,
+              userId: identityKey,
               fingerprint,
               ip: clientIp,
               reason: serverValidation.reason,
