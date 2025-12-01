@@ -119,8 +119,8 @@ const CORS_ALLOW = (() => {
   return fromEnv;
 })();
 
-const RAW_LOCK_TTL = Number(process.env.XP_LOCK_TTL_MS ?? 3_000);
-const LOCK_TTL_MS = Number.isFinite(RAW_LOCK_TTL) && RAW_LOCK_TTL >= 0 ? RAW_LOCK_TTL : 3_000;
+const RAW_LOCK_TTL = Number(process.env.XP_LOCK_TTL_MS ?? 1_000);
+const LOCK_TTL_MS = Number.isFinite(RAW_LOCK_TTL) && RAW_LOCK_TTL >= 0 ? RAW_LOCK_TTL : 1_000;
 console.log("[XP] Lock configuration", {
   lockTtlMs: LOCK_TTL_MS,
   rawLockTtl: RAW_LOCK_TTL,
@@ -140,6 +140,16 @@ const getRequireServerSession = () => process.env.XP_REQUIRE_SERVER_SESSION === 
 const getServerSessionWarnMode = () => process.env.XP_SERVER_SESSION_WARN_MODE === "1";
 
 const sanitizeTotal = (value) => Math.max(0, Math.floor(Number(value) || 0));
+
+const sleep = (ms = 0) => new Promise(resolve => setTimeout(resolve, ms));
+
+const klog = (kind, data) => {
+  try {
+    console.log(`[klog] ${kind}`, JSON.stringify(data));
+  } catch {
+    console.log(`[klog] ${kind}`, data);
+  }
+};
 
 const signPayload = (payload, secret) =>
   crypto.createHmac("sha256", secret).update(payload).digest("base64url");
@@ -621,12 +631,14 @@ export async function handler(event) {
     || event.headers?.["x-real-ip"]
     || "unknown";
 
-  const rateLimitResult = await checkRateLimit({ userId: identityId, ip: clientIp });
+  const isStatusOnly = body.statusOnly === true;
+  const rateLimitResult = isStatusOnly ? { allowed: true } : await checkRateLimit({ userId: identityId, ip: clientIp });
   if (!rateLimitResult.allowed) {
+    const retryAfter = rateLimitResult.retryAfter ?? 60;
     const payload = {
       error: "rate_limit_exceeded",
       message: `Too many requests from ${rateLimitResult.type}`,
-      retryAfter: 60,
+      retryAfter,
     };
     if (DEBUG_ENABLED) {
       payload.debug = {
@@ -635,7 +647,7 @@ export async function handler(event) {
         limit: rateLimitResult.limit,
       };
     }
-    return json(429, payload, origin, { "Retry-After": "60" });
+    return json(429, payload, origin, { "Retry-After": String(retryAfter) });
   }
 
   // SECURITY: Server-side session token validation
@@ -759,6 +771,12 @@ export async function handler(event) {
     await registerSession({ userId: identityId, sessionId });
 
     const totals = await fetchTotals();
+    klog('xp_statusOnly_debug', {
+      identityId,
+      userId,
+      anonId,
+      totals,
+    });
     if (userId) {
       await persistUserProfile({ userId, totalXp: totals.lifetime, now });
     }
@@ -994,7 +1012,7 @@ export async function handler(event) {
   const cookieLimitedDelta = Math.min(normalizedDelta, cookieRemainingBefore);
   const cookieClamped = cookieLimitedDelta < normalizedDelta;
 
-  const res = await store.eval(
+  const runAwardScript = () => store.eval(
     script,
     [sessionKeyK, sessionSyncKeyK, todayKey, totalKeyK, lockKeyK],
     [
@@ -1008,12 +1026,19 @@ export async function handler(event) {
     ]
   );
 
+  let res = await runAwardScript();
+  let status = Number(res?.[5]) || 0;
+  if (status === 6) {
+    await sleep(100 + Math.floor(Math.random() * 150));
+    res = await runAwardScript();
+    status = Number(res?.[5]) || 0;
+  }
+
   const granted = Math.max(0, Math.floor(Number(res?.[0]) || 0));
   const redisDailyTotalRaw = Number(res?.[1]) || 0;
   const sessionTotal = Number(res?.[2]) || 0;
   const totalLifetime = Number(res?.[3]) || 0;
   const lastSync = Number(res?.[4]) || 0;
-  const status = Number(res?.[5]) || 0;
   const lockedAt = Number(res?.[6]) || 0;
   const lockTtlRemainingRaw = Number(res?.[7]);
   const lockTtlRemainingMs = Number.isFinite(lockTtlRemainingRaw) ? lockTtlRemainingRaw : null;
