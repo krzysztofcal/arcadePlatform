@@ -7,6 +7,7 @@
 
   const grid = document.getElementById('gamesGrid');
   const emptyState = document.getElementById('emptyState');
+  const searchInput = document.querySelector('.search-box input[type="search"]');
 
   async function init() {
     if (!grid) {
@@ -27,6 +28,8 @@
 
       if (!recentGames || recentGames.length === 0) {
         showEmptyState();
+        // Still initialize search popup even if no recent games
+        initSearchPopup();
         return;
       }
 
@@ -59,6 +62,7 @@
 
       if (matchedGames.length === 0) {
         showEmptyState();
+        initSearchPopup();
         return;
       }
 
@@ -90,6 +94,9 @@
         emptyState.hidden = true;
       }
 
+      // Initialize search popup manually (since bootstrap skips pages with gamesGrid)
+      initSearchPopup();
+
       // Track page view
       if (global.Analytics && typeof global.Analytics.event === 'function') {
         global.Analytics.event('page_view', {
@@ -101,6 +108,41 @@
     } catch (err) {
       console.error('Failed to load recently played page:', err);
       showEmptyState();
+    }
+  }
+
+  function initSearchPopup() {
+    if (!searchInput) {
+      console.debug('Recently played: No search input found');
+      return;
+    }
+
+    if (!global.SearchPopup) {
+      console.error('Recently played: SearchPopup class not available');
+      return;
+    }
+
+    try {
+      console.debug('Recently played: Initializing search popup');
+
+      const popup = new global.SearchPopup({
+        searchInput: searchInput,
+        catalog: global.ArcadeCatalog,
+        i18n: global.I18N,
+        analytics: global.Analytics,
+        fetchImpl: (url, options) => global.fetch(url, Object.assign({ cache: 'no-cache' }, options)),
+        gamesEndpoint: '/js/games.json',
+        win: global,
+        doc: document
+      });
+
+      popup.init().then(() => {
+        console.debug('Recently played: Search popup initialized successfully');
+      }).catch(err => {
+        console.error('Recently played: Search popup initialization failed:', err);
+      });
+    } catch (err) {
+      console.error('Recently played: Error creating search popup:', err);
     }
   }
 
