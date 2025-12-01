@@ -624,7 +624,7 @@ export async function handler(event) {
   identityId = userId || anonId; // identityId is the XP identity used for keys, caps, sessions: Supabase userId when available, otherwise anonId.
 
   const sessionIdRaw = body.sessionId ?? querySessionId;
-  const sessionId = typeof sessionIdRaw === "string" ? sessionIdRaw.trim() : null;
+  let sessionId = typeof sessionIdRaw === "string" ? sessionIdRaw.trim() : null;
 
   // SECURITY: Rate limiting check
   const clientIp = event.headers?.["x-forwarded-for"]?.split(",")[0]?.trim()
@@ -652,6 +652,10 @@ export async function handler(event) {
 
   // SECURITY: Server-side session token validation
   const sessionToken = body.sessionToken || event.headers?.["x-session-token"];
+  let parsedSessionToken = null;
+  if (sessionToken) {
+    parsedSessionToken = verifySessionToken(sessionToken, secret);
+  }
   const requireServerSession = getRequireServerSession();
   const serverSessionWarnMode = getServerSessionWarnMode();
   if (requireServerSession || serverSessionWarnMode) {
@@ -664,7 +668,8 @@ export async function handler(event) {
         sessionError = "missing_session_token";
       } else {
         // Verify HMAC signature on token
-        const tokenResult = verifySessionToken(sessionToken, secret);
+        const tokenResult = parsedSessionToken ?? verifySessionToken(sessionToken, secret);
+        parsedSessionToken = tokenResult;
         if (!tokenResult.valid) {
           sessionError = `token_${tokenResult.reason}`;
         } else if (tokenResult.userId !== identityId) {
@@ -725,6 +730,10 @@ export async function handler(event) {
     }
   }
 
+  if (parsedSessionToken?.valid && parsedSessionToken.userId === identityId) {
+    sessionId = parsedSessionToken.sessionId;
+  }
+
   let totalsPromise = null;
   const fetchTotals = async () => {
     if (!identityId) return { current: cookieTotal, lifetime: 0, sessionTotal: 0, lastSync: 0 };
@@ -753,6 +762,10 @@ export async function handler(event) {
     if (totals && payload.lastSync === undefined && totals.lastSync !== undefined) {
       payload.lastSync = totals.lastSync;
     }
+    const responseSessionToken = options.sessionToken ?? sessionToken;
+    if (responseSessionToken) {
+      payload.sessionToken = responseSessionToken;
+    }
     // Default: set XP cookie unless an explicit skipCookie is provided.
     if (skipCookie === undefined) skipCookie = false;
     return buildResponse(statusCode, payload, totalSource, {
@@ -768,7 +781,12 @@ export async function handler(event) {
 
   if (body.statusOnly) {
     // SECURITY: Auto-register session when status is requested (session start)
-    await registerSession({ userId: identityId, sessionId });
+    const sessId = sessionId || crypto.randomUUID();
+    sessionId = sessId;
+    await registerSession({ userId: identityId, sessionId: sessId });
+    if (parsedSessionToken?.valid) {
+      touchSession(parsedSessionToken.sessionId).catch(() => {});
+    }
 
     const totals = await fetchTotals();
     klog('xp_statusOnly_debug', {
@@ -790,6 +808,7 @@ export async function handler(event) {
       sessionTotal: totals.sessionTotal,
       lastSync: totals.lastSync,
       status: "statusOnly",
+      sessionId: sessId,
     };
     return respond(200, payload, { totals, debugExtra: { mode: "statusOnly" } });
   }
@@ -919,6 +938,8 @@ export async function handler(event) {
     }
   }
 
+  klog('award_attempt', { identityId, sessionId, hasSessionToken: !!sessionToken });
+
   const script = `
     local sessionKey = KEYS[1]
     local sessionSyncKey = KEYS[2]
@@ -1042,6 +1063,8 @@ export async function handler(event) {
   const lockedAt = Number(res?.[6]) || 0;
   const lockTtlRemainingRaw = Number(res?.[7]);
   const lockTtlRemainingMs = Number.isFinite(lockTtlRemainingRaw) ? lockTtlRemainingRaw : null;
+
+  klog('award_result', { status, granted, totalLifetime });
 
   const totalTodayRedis = Math.min(DAILY_CAP, Math.max(0, sanitizeTotal(redisDailyTotalRaw)));
   const remaining = Math.max(0, DAILY_CAP - totalTodayRedis);
