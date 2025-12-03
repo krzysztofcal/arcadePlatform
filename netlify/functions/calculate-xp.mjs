@@ -935,7 +935,7 @@ export async function handler(event) {
   });
 
   // Get or create session state
-  const sessionState = await getSessionState(userId, sessionId);
+  const sessionState = await getSessionState(xpIdentity, sessionId);
 
   // Check for stale/duplicate requests
   if (sessionState.lastWindowEnd > 0 && windowEnd <= sessionState.lastWindowEnd) {
@@ -1071,14 +1071,16 @@ export async function handler(event) {
 
   let res;
   try {
-    klog("calc_award_redis_eval_start", {
-      xpIdentity,
-      userId,
-      sessionId,
-      dayKeyNow,
-      keys: { todayKey, totalKeyK, sessionKeyK, sessionSyncKeyK },
-      cappedDelta,
-    });
+    if (cappedDelta > 0) {
+      klog("calc_award_redis_eval_start", {
+        xpIdentity,
+        userId,
+        sessionId,
+        dayKeyNow,
+        keys: { todayKey, totalKeyK, sessionKeyK, sessionSyncKeyK },
+        cappedDelta,
+      });
+    }
 
     res = await store.eval(
       script,
@@ -1111,31 +1113,33 @@ export async function handler(event) {
 
   const remaining = Math.max(0, DAILY_CAP - redisDailyTotal);
 
-  klog("calc_award_debug_totals", {
-    xpIdentity,
-    userId,
-    sessionId,
-    awarded: granted,
-    redisDailyTotal,
-    totalLifetime,
-    keys: { todayKey, totalKeyK, sessionKeyK, sessionSyncKeyK },
-  });
+  if (granted > 0) {
+    klog("calc_award_debug_totals", {
+      xpIdentity,
+      userId,
+      sessionId,
+      awarded: granted,
+      redisDailyTotal,
+      totalLifetime,
+      keys: { todayKey, totalKeyK, sessionKeyK, sessionSyncKeyK },
+    });
 
-  klog("calc_award_result", {
-    xpIdentity,
-    userId,
-    supabaseUserId,
-    granted,
-    totalLifetime,
-    totalToday: redisDailyTotal,
-    status,
-    raw: res,
-  });
+    klog("calc_award_result", {
+      xpIdentity,
+      userId,
+      supabaseUserId,
+      granted,
+      totalLifetime,
+      totalToday: redisDailyTotal,
+      status,
+      raw: res,
+    });
+  }
 
   // Update session state
   sessionState.combo = updatedCombo;
   sessionState.lastWindowEnd = windowEnd;
-  await saveSessionState(userId, sessionId, sessionState);
+  await saveSessionState(xpIdentity, sessionId, sessionState);
 
   // Build response
   const payload = {

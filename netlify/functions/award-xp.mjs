@@ -977,7 +977,14 @@ export async function handler(event) {
     }
   }
 
-  klog('award_attempt', { identityId, xpIdentity, sessionId, hasSessionToken: !!sessionToken });
+  klog('award_attempt', {
+    identityId,
+    xpIdentity,
+    supabaseUserId,
+    anonId,
+    sessionId,
+    hasSessionToken: !!sessionToken,
+  });
 
   const script = `
     local sessionKey = KEYS[1]
@@ -1113,7 +1120,14 @@ export async function handler(event) {
   const lockTtlRemainingRaw = Number(res?.[7]);
   const lockTtlRemainingMs = Number.isFinite(lockTtlRemainingRaw) ? lockTtlRemainingRaw : null;
 
-  klog('award_result', { status, granted, totalLifetime });
+  klog('award_result', {
+    xpIdentity,
+    supabaseUserId,
+    anonId,
+    status,
+    granted,
+    totalLifetime,
+  });
 
   const totalTodayRedis = Math.min(DAILY_CAP, Math.max(0, sanitizeTotal(redisDailyTotalRaw)));
   const remaining = Math.max(0, DAILY_CAP - totalTodayRedis);

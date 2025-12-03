@@ -37,6 +37,33 @@
     return null;
   }
 
+  function getAuthBridge() {
+    if (typeof window === "undefined") return null;
+
+    if (window.SupabaseAuthBridge && typeof window.SupabaseAuthBridge.getAccessToken === "function") {
+      return window.SupabaseAuthBridge;
+    }
+
+    try {
+      if (window.parent
+        && window.parent !== window
+        && window.parent.SupabaseAuthBridge
+        && typeof window.parent.SupabaseAuthBridge.getAccessToken === "function") {
+        return window.parent.SupabaseAuthBridge;
+      }
+    } catch (_) {}
+
+    try {
+      if (window.opener
+        && window.opener.SupabaseAuthBridge
+        && typeof window.opener.SupabaseAuthBridge.getAccessToken === "function") {
+        return window.opener.SupabaseAuthBridge;
+      }
+    } catch (_) {}
+
+    return null;
+  }
+
   async function fetchAuthToken(force) {
     const now = Date.now();
     if (!force && state.authToken && (now - state.authCheckedAt) < AUTH_CACHE_MS) {
@@ -49,8 +76,11 @@
     state.authPromise = (async () => {
       try {
         let token = null;
-        const bridge = (typeof window !== "undefined") ? window.SupabaseAuthBridge : null;
-        const getter = bridge && typeof bridge.getAccessToken === "function" ? bridge.getAccessToken : null;
+
+        const bridge = getAuthBridge();
+        const getter = bridge && typeof bridge.getAccessToken === "function"
+          ? bridge.getAccessToken
+          : null;
         if (getter) {
           token = await getter();
         }

@@ -1181,16 +1181,6 @@ function bootXpCore(window, document) {
       return;
     }
 
-    const hasLocalLifetime = typeof state.totalLifetime === "number" && state.totalLifetime > 0;
-    if (hasLocalLifetime && data.totalLifetime === 0 && !isExplicitReset) {
-      if (window.console && console.warn) {
-        console.warn("[XP] Skipping 0 totalLifetime from server snapshot (stale)");
-      }
-      saveCache();
-      updateBadge();
-      return;
-    }
-
     const sanitizedTotal = Math.max(0, Number(totalLifetimeRaw) || 0);
     const previousServer = typeof state.serverTotalXp === "number" ? state.serverTotalXp : null;
     const previousTotal = typeof state.totalLifetime === "number" ? state.totalLifetime : null;
@@ -1198,7 +1188,9 @@ function bootXpCore(window, document) {
       (previousServer != null && previousServer > 0)
       || (previousTotal != null && previousTotal > 0);
 
-    if (hasLocalProgress && sanitizedTotal === 0 && !isExplicitReset) {
+    const authenticated = isAuthenticatedUser();
+
+    if (authenticated && hasLocalProgress && sanitizedTotal === 0 && !isExplicitReset) {
       if (window.console && console.warn) {
         console.warn("[XP] Ignoring zero server total that would reset local XP", {
           status: statusRaw,
@@ -1213,7 +1205,7 @@ function bootXpCore(window, document) {
       return;
     }
 
-    if (previousServer != null && sanitizedTotal < previousServer && !isExplicitReset) {
+    if (authenticated && previousServer != null && sanitizedTotal < previousServer && !isExplicitReset) {
       if (window.console && console.warn) {
         console.warn("[XP] Ignoring lower server total that would reduce lifetime", {
           status: statusRaw,
@@ -1234,8 +1226,6 @@ function bootXpCore(window, document) {
       updateBadge();
       return;
     }
-
-    const authenticated = isAuthenticatedUser();
     let acked = 0;
     if (previousServer != null) {
       if (sanitizedTotal >= previousServer) {
