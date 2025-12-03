@@ -1125,35 +1125,9 @@ function bootXpCore(window, document) {
     const keys = Object.keys(data);
     if (!keys.length) return;
 
-    // Check early if we should skip this response to avoid clobbering cached values
-    const reasonRaw = data.reason || (data.debug && data.debug.reason) || null;
-    const reason = typeof reasonRaw === "string" ? reasonRaw.toLowerCase() : null;
-    const statusRaw = typeof data.status === "string" ? data.status.toLowerCase() : null;
-    // Ignore status-only snapshots so empty server totals don't clobber cached XP.
-    const skipTotals = (statusRaw === "statusonly")
-      || reason === "too_soon"
-      || reason === "insufficient-activity";
-
-    const totalLifetime = (typeof data.totalLifetime === "number") ? data.totalLifetime
-      : (typeof data.total === "number" ? data.total : null);
-
-    if (skipTotals || totalLifetime == null) {
-      saveCache();
-      // Don't call updateBadge() when skipping - it would overwrite state.totalLifetime
-      return;
-    }
-
-    // Only update state if we're not skipping totals
+    // Always update metadata fields (cap, dayKey, nextReset) - even for statusOnly responses
     if (typeof data.cap === "number" && Number.isFinite(data.cap)) {
       state.cap = Math.max(0, Math.floor(data.cap));
-    }
-    if (typeof data.totalToday === "number") {
-      state.totalToday = Math.max(0, Math.floor(Number(data.totalToday) || 0));
-    }
-    syncDailyRemainingFromTotals();
-    if (typeof data.remaining === "number") {
-      const remaining = Math.max(0, Math.floor(Number(data.remaining) || 0));
-      state.dailyRemaining = remaining;
     }
     if (typeof data.dayKey === "string" && data.dayKey) {
       state.dayKey = data.dayKey;
@@ -1168,6 +1142,34 @@ function bootXpCore(window, document) {
       }
     }
     maybeResetDailyAllowance();
+
+    // Check if we should skip updating totals (but keep metadata above)
+    const reasonRaw = data.reason || (data.debug && data.debug.reason) || null;
+    const reason = typeof reasonRaw === "string" ? reasonRaw.toLowerCase() : null;
+    const statusRaw = typeof data.status === "string" ? data.status.toLowerCase() : null;
+    // Ignore status-only snapshots so empty server totals don't clobber cached XP.
+    const skipTotals = (statusRaw === "statusonly")
+      || reason === "too_soon"
+      || reason === "insufficient-activity";
+
+    const totalLifetime = (typeof data.totalLifetime === "number") ? data.totalLifetime
+      : (typeof data.total === "number" ? data.total : null);
+
+    if (skipTotals || totalLifetime == null) {
+      saveCache();
+      // Don't call updateBadge() when skipping totals - it would overwrite state.totalLifetime
+      return;
+    }
+
+    // Update daily totals only if not skipping
+    if (typeof data.totalToday === "number") {
+      state.totalToday = Math.max(0, Math.floor(Number(data.totalToday) || 0));
+    }
+    syncDailyRemainingFromTotals();
+    if (typeof data.remaining === "number") {
+      const remaining = Math.max(0, Math.floor(Number(data.remaining) || 0));
+      state.dailyRemaining = remaining;
+    }
 
     const ok = data.ok === true || statusRaw === "ok" || (!statusRaw && data.awarded != null);
     if (!ok) {
