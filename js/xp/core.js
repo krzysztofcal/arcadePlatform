@@ -1139,7 +1139,7 @@ function bootXpCore(window, document) {
 
     if (skipTotals || totalLifetime == null) {
       saveCache();
-      updateBadge();
+      // Don't call updateBadge() when skipping - it would overwrite state.totalLifetime
       return;
     }
 
@@ -1172,7 +1172,7 @@ function bootXpCore(window, document) {
     const ok = data.ok === true || statusRaw === "ok" || (!statusRaw && data.awarded != null);
     if (!ok) {
       saveCache();
-      updateBadge();
+      // Don't call updateBadge() - preserve current display when response is not ok
       return;
     }
 
