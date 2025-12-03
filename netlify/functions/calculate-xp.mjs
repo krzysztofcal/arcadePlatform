@@ -838,7 +838,7 @@ export async function handler(event) {
       const tokenResult = verifySessionToken(sessionToken, SESSION_SECRET);
       if (!tokenResult.valid) {
         sessionError = `token_${tokenResult.reason}`;
-      } else if (tokenResult.userId !== supabaseUserId) {
+      } else if (tokenResult.userId !== xpIdentity) {
         sessionError = "token_user_mismatch";
       } else if (tokenResult.fingerprint !== fingerprint) {
         sessionError = "token_fingerprint_mismatch";

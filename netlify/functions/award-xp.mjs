@@ -675,7 +675,7 @@ export async function handler(event) {
         parsedSessionToken = tokenResult;
         if (!tokenResult.valid) {
           sessionError = `token_${tokenResult.reason}`;
-        } else if (tokenResult.userId !== supabaseUserId) {
+        } else if (tokenResult.userId !== xpIdentity) {
           sessionError = "token_user_mismatch";
         } else if (tokenResult.fingerprint !== fingerprint) {
           sessionError = "token_fingerprint_mismatch";
@@ -733,7 +733,7 @@ export async function handler(event) {
     }
   }
 
-  if (parsedSessionToken?.valid && parsedSessionToken.userId === supabaseUserId) {
+  if (parsedSessionToken?.valid && parsedSessionToken.userId === xpIdentity) {
     sessionId = parsedSessionToken.sessionId;
   }
 
