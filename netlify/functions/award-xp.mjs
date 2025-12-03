@@ -591,7 +591,7 @@ export async function handler(event) {
     const payload = { error: "method_not_allowed" };
     return buildResponse(405, payload, totalSource, {
       debugExtra: { mode: "method_not_allowed" },
-      skipCookie: !xpIdentity,
+      skipCookie: !!supabaseUserId,
     });
   }
 
@@ -609,7 +609,7 @@ export async function handler(event) {
     const payload = { error: "bad_json" };
     return buildResponse(400, payload, totalSource, {
       debugExtra: { mode: "bad_json" },
-      skipCookie: !xpIdentity,
+      skipCookie: !!supabaseUserId,
     });
   }
 
@@ -792,8 +792,8 @@ export async function handler(event) {
     if (responseSessionToken) {
       payload.sessionToken = responseSessionToken;
     }
-    // Default: set XP cookie unless an explicit skipCookie is provided.
-    if (skipCookie === undefined) skipCookie = false;
+    // Default: authenticated users skip cookies; anonymous users keep cookie tracking unless explicitly disabled.
+    if (skipCookie === undefined) skipCookie = !!supabaseUserId;
     return buildResponse(statusCode, payload, totalSource, {
       debugExtra: options.debugExtra ?? {},
       skipCookie,
@@ -802,7 +802,7 @@ export async function handler(event) {
 
   if (!xpIdentity || (!body.statusOnly && !sessionId)) {
     const totals = xpIdentity ? await fetchTotals() : null;
-    return respond(400, { error: "missing_fields" }, { totals, skipCookie: !xpIdentity });
+    return respond(400, { error: "missing_fields" }, { totals, skipCookie: !!supabaseUserId });
   }
 
   if (body.statusOnly) {
@@ -1058,15 +1058,25 @@ export async function handler(event) {
     return finish(grant, dailyTotal, sessionTotal, lifetime, lastSync, status)
   `;
 
-  const cookieLimitedDelta = Math.min(normalizedDelta, cookieRemainingBefore);
-  const cookieClamped = cookieLimitedDelta < normalizedDelta;
+  const effectiveDelta = supabaseUserId
+    ? normalizedDelta
+    : Math.min(normalizedDelta, cookieRemainingBefore);
+  const cookieClamped = !supabaseUserId && effectiveDelta < normalizedDelta;
+
+  klog("award_cookie_delta_adjust", {
+    anonId,
+    supabaseUserId,
+    normalizedDelta,
+    cookieRemainingBefore,
+    effectiveDelta,
+  });
 
   const runAwardScript = () => store.eval(
     script,
     [sessionKeyK, sessionSyncKeyK, todayKey, totalKeyK, lockKeyK],
     [
       String(now),
-      String(cookieLimitedDelta),
+      String(effectiveDelta),
       String(DAILY_CAP),
       String(Math.max(0, SESSION_CAP)),
       String(ts),
