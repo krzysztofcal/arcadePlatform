@@ -339,20 +339,20 @@ function generateFingerprint(headers) {
   return hash(fingerprintData).substring(0, 16);
 }
 
-// NOTE: userId parameter represents the XP identity: Supabase userId for logged-in users, or anonId for anonymous users.
-const keyDaily = (u, day = getDailyKey()) => `${KEY_NS}:daily:${u}:${day}`;
-const keyTotal = (u) => `${KEY_NS}:total:${u}`;
-const keySession = (u, s) => `${KEY_NS}:session:${hash(`${u}|${s}`)}`;
-const keySessionSync = (u, s) => `${KEY_NS}:session:last:${hash(`${u}|${s}`)}`;
-const keyLock = (u, s) => `${LOCK_KEY_PREFIX}${hash(`${u}|${s}`)}`;
-const keyRateLimitUser = (userId) => `${KEY_NS}:ratelimit:user:${userId}:${Math.floor(Date.now() / 60000)}`;
+// NOTE: identityId parameter represents the XP identity: always uses anonId for XP storage, regardless of authentication status.
+const keyDaily = (identityId, day = getDailyKey()) => `${KEY_NS}:daily:${identityId}:${day}`;
+const keyTotal = (identityId) => `${KEY_NS}:total:${identityId}`;
+const keySession = (identityId, s) => `${KEY_NS}:session:${hash(`${identityId}|${s}`)}`;
+const keySessionSync = (identityId, s) => `${KEY_NS}:session:last:${hash(`${identityId}|${s}`)}`;
+const keyLock = (identityId, s) => `${LOCK_KEY_PREFIX}${hash(`${identityId}|${s}`)}`;
+const keyRateLimitUser = (identityId) => `${KEY_NS}:ratelimit:user:${identityId}:${Math.floor(Date.now() / 60000)}`;
 const keyRateLimitIp = (ip) => `${KEY_NS}:ratelimit:ip:${hash(ip)}:${Math.floor(Date.now() / 60000)}`;
-const keySessionRegistry = (userId, sessionId) => `${KEY_NS}:registry:${hash(`${userId}|${sessionId}`)}`;
+const keySessionRegistry = (identityId, sessionId) => `${KEY_NS}:registry:${hash(`${identityId}|${sessionId}`)}`;
 
 // SECURITY: Session registration
-async function registerSession({ userId, sessionId }) {
-  if (!userId || !sessionId) return { registered: false };
-  const key = keySessionRegistry(userId, sessionId);
+async function registerSession({ identityId, sessionId }) {
+  if (!identityId || !sessionId) return { registered: false };
+  const key = keySessionRegistry(identityId, sessionId);
   try {
     // Register session with 7 day TTL (same as session data)
     const ttlSeconds = SESSION_TTL_SEC > 0 ? SESSION_TTL_SEC : 604800;
@@ -364,9 +364,9 @@ async function registerSession({ userId, sessionId }) {
   }
 }
 
-async function isSessionRegistered({ userId, sessionId }) {
-  if (!userId || !sessionId) return false;
-  const key = keySessionRegistry(userId, sessionId);
+async function isSessionRegistered({ identityId, sessionId }) {
+  if (!identityId || !sessionId) return false;
+  const key = keySessionRegistry(identityId, sessionId);
   try {
     const value = await store.get(key);
     return value !== null;
@@ -376,15 +376,15 @@ async function isSessionRegistered({ userId, sessionId }) {
 }
 
 // SECURITY: Rate limiting check
-async function checkRateLimit({ userId, ip }) {
-  // userId represents the XP identity (Supabase userId or anonId) for per-identity throttling.
+async function checkRateLimit({ identityId, ip }) {
+  // identityId represents the XP identity (always anonId) for per-identity throttling.
   if (!RATE_LIMIT_ENABLED) return { allowed: true };
 
   const checks = [];
 
-  // Check userId rate limit
-  if (userId && RATE_LIMIT_PER_USER_PER_MIN > 0) {
-    const userKey = keyRateLimitUser(userId);
+  // Check identityId rate limit
+  if (identityId && RATE_LIMIT_PER_USER_PER_MIN > 0) {
+    const userKey = keyRateLimitUser(identityId);
     checks.push(
       store.incrBy(userKey, 1)
         .then(async (count) => {
@@ -442,12 +442,12 @@ async function checkRateLimit({ userId, ip }) {
   return { allowed: true, checks: results };
 }
 
-async function getTotals({ userId, sessionId, now = Date.now() }) {
-  // userId represents the XP identity (Supabase userId or anonId) for XP aggregation keys.
-  const todayKey = keyDaily(userId, getDailyKey(now));
-  const totalKeyK = keyTotal(userId);
-  const sessionKeyK = sessionId ? keySession(userId, sessionId) : null;
-  const sessionSyncKeyK = sessionId ? keySessionSync(userId, sessionId) : null;
+async function getTotals({ identityId, sessionId, now = Date.now() }) {
+  // identityId represents the XP identity (always anonId) for XP aggregation keys.
+  const todayKey = keyDaily(identityId, getDailyKey(now));
+  const totalKeyK = keyTotal(identityId);
+  const sessionKeyK = sessionId ? keySession(identityId, sessionId) : null;
+  const sessionSyncKeyK = sessionId ? keySessionSync(identityId, sessionId) : null;
   try {
     const reads = [store.get(todayKey), store.get(totalKeyK)];
     if (sessionKeyK) reads.push(store.get(sessionKeyK));
@@ -532,7 +532,9 @@ export async function handler(event) {
   const userId = authContext.valid ? authContext.userId : null; // userId is always derived from Supabase JWT; never trust payload userId
   // If JWT is missing or invalid, we treat the request as anonymous and do not block XP, per Hard XP spec.
 
-  let identityId = userId || anonId;
+  // IMPORTANT: Always use anonId for XP storage identity, even when authenticated.
+  // This ensures XP persists correctly across login/logout. userId is only used for user profile persistence.
+  let identityId = anonId;
 
   const applyDiagnostics = (payload, extra = {}) => {
     if (!DEBUG_ENABLED) return;
@@ -573,7 +575,7 @@ export async function handler(event) {
   if (event.httpMethod !== "POST") {
     let totals = null;
     if (identityId) {
-      totals = await getTotals({ userId: identityId, sessionId: querySessionId, now });
+      totals = await getTotals({ identityId, sessionId: querySessionId, now });
     }
     const totalSource = totals ? totals.current : cookieTotal;
     const payload = { error: "method_not_allowed" };
@@ -591,7 +593,7 @@ export async function handler(event) {
   } catch {
     let totals = null;
     if (identityId) {
-      totals = await getTotals({ userId: identityId, sessionId: querySessionId, now });
+      totals = await getTotals({ identityId, sessionId: querySessionId, now });
     }
     const totalSource = totals ? totals.current : cookieTotal;
     const payload = { error: "bad_json" };
@@ -611,7 +613,8 @@ export async function handler(event) {
     anonId = typeof anonIdRaw === "string" ? anonIdRaw.trim() : null;
   }
 
-  identityId = userId || anonId; // identityId is the XP identity used for keys, caps, sessions: Supabase userId when available, otherwise anonId.
+  // IMPORTANT: Always use anonId for XP storage identity, even when authenticated.
+  identityId = anonId;
 
   const sessionIdRaw = body.sessionId ?? querySessionId;
   const sessionId = typeof sessionIdRaw === "string" ? sessionIdRaw.trim() : null;
@@ -622,7 +625,7 @@ export async function handler(event) {
     || "unknown";
 
   const isStatusOnly = body.statusOnly === true;
-  const rateLimitResult = isStatusOnly ? { allowed: true } : await checkRateLimit({ userId: identityId, ip: clientIp });
+  const rateLimitResult = isStatusOnly ? { allowed: true } : await checkRateLimit({ identityId, ip: clientIp });
   if (!rateLimitResult.allowed) {
     const payload = {
       error: "rate_limit_exceeded",
@@ -664,7 +667,7 @@ export async function handler(event) {
           // Verify session exists in Redis and matches
           const serverValidation = await validateServerSession({
             sessionId: tokenResult.sessionId,
-            userId: identityId,
+            userId: identityId,  // identityId is anonId for XP storage
             fingerprint,
           });
           if (!serverValidation.valid) {
@@ -718,7 +721,7 @@ export async function handler(event) {
   const fetchTotals = async () => {
     if (!identityId) return { current: cookieTotal, lifetime: 0, sessionTotal: 0, lastSync: 0 };
     if (!totalsPromise) {
-      totalsPromise = getTotals({ userId: identityId, sessionId, now });
+      totalsPromise = getTotals({ identityId, sessionId, now });
     }
     return totalsPromise;
   };
@@ -757,7 +760,7 @@ export async function handler(event) {
 
   if (body.statusOnly) {
     // SECURITY: Auto-register session when status is requested (session start)
-    await registerSession({ userId: identityId, sessionId });
+    await registerSession({ identityId, sessionId });
 
     const totals = await fetchTotals();
     if (userId) {
@@ -801,16 +804,16 @@ export async function handler(event) {
   // SECURITY: Session validation - register session if delta=0 (session start), validate if delta>0
   if (normalizedDelta === 0) {
     // Auto-register session on first request (delta=0 is session initialization)
-    await registerSession({ userId: identityId, sessionId });
+    await registerSession({ identityId, sessionId });
   } else if (normalizedDelta > 0) {
     // Validate session is registered before accepting XP deltas
-    const registered = await isSessionRegistered({ userId: identityId, sessionId });
+    const registered = await isSessionRegistered({ identityId, sessionId });
     if (!registered) {
       // Auto-register on first XP-bearing request for backward compatibility
       // In a future version, this could be enforced by rejecting unregistered sessions
-      await registerSession({ userId: identityId, sessionId });
+      await registerSession({ identityId, sessionId });
       if (DEBUG_ENABLED) {
-        console.log('[XP] Auto-registered unregistered session:', { userId: identityId, sessionId: sessionId.substring(0, 8) });
+        console.log('[XP] Auto-registered unregistered session:', { identityId, sessionId: sessionId.substring(0, 8) });
       }
     }
   }
