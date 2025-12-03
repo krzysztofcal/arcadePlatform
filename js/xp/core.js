@@ -1150,18 +1150,69 @@ function bootXpCore(window, document) {
     }
     maybeResetDailyAllowance();
 
+    const statusRaw = typeof data.status === "string" ? data.status.toLowerCase() : null;
     const reasonRaw = data.reason || (data.debug && data.debug.reason) || null;
     const reason = typeof reasonRaw === "string" ? reasonRaw.toLowerCase() : null;
-    const statusRaw = typeof data.status === "string" ? data.status.toLowerCase() : null;
     // Ignore status-only snapshots so empty server totals don't clobber cached XP.
     const skipTotals = (statusRaw === "statusonly")
       || reason === "too_soon"
       || reason === "insufficient-activity";
+    const FORCE_IGNORE_SERVER_TOTALS = false;
 
-    const totalLifetime = (typeof data.totalLifetime === "number") ? data.totalLifetime
-      : (typeof data.total === "number" ? data.total : null);
+    if (FORCE_IGNORE_SERVER_TOTALS) {
+      saveCache();
+      updateBadge();
+      return;
+    }
 
-    if (skipTotals || totalLifetime == null) {
+    const totalLifetimeRaw =
+      typeof data.totalLifetime === "number" ? data.totalLifetime :
+      typeof data.total === "number" ? data.total :
+      null;
+
+    if (skipTotals || totalLifetimeRaw == null) {
+      saveCache();
+      updateBadge();
+      return;
+    }
+
+    const sanitizedTotal = Math.max(0, Number(totalLifetimeRaw) || 0);
+    const previousServer = typeof state.serverTotalXp === "number" ? state.serverTotalXp : null;
+    const previousTotal = typeof state.totalLifetime === "number" ? state.totalLifetime : null;
+    const isExplicitReset =
+      reason === "reset"
+      || reason === "daily_reset"
+      || reason === "day_reset"
+      || reason === "hard_reset";
+    const hasLocalProgress =
+      (previousServer != null && previousServer > 0)
+      || (previousTotal != null && previousTotal > 0);
+
+    if (hasLocalProgress && sanitizedTotal === 0 && !isExplicitReset) {
+      if (window.console && console.warn) {
+        console.warn("[XP] Ignoring zero server total that would reset local XP", {
+          status: statusRaw,
+          reason,
+          serverTotal: sanitizedTotal,
+          previousServer,
+          previousTotal,
+        });
+      }
+      saveCache();
+      updateBadge();
+      return;
+    }
+
+    if (previousServer != null && sanitizedTotal < previousServer && !isExplicitReset) {
+      if (window.console && console.warn) {
+        console.warn("[XP] Ignoring lower server total that would reduce lifetime", {
+          status: statusRaw,
+          reason,
+          serverTotal: sanitizedTotal,
+          previousServer,
+          previousTotal,
+        });
+      }
       saveCache();
       updateBadge();
       return;
@@ -1175,8 +1226,6 @@ function bootXpCore(window, document) {
     }
 
     const authenticated = isAuthenticatedUser();
-    const sanitizedTotal = Math.max(0, Number(totalLifetime) || 0);
-    const previousServer = typeof state.serverTotalXp === "number" ? state.serverTotalXp : null;
     let acked = 0;
     if (previousServer != null) {
       if (sanitizedTotal >= previousServer) {

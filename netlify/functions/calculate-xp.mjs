@@ -1069,18 +1069,38 @@ export async function handler(event) {
     return {grant, dailyTotal, sessionTotal, lifetime, lastSync, status}
   `;
 
-  const res = await store.eval(
-    script,
-    [sessionKeyK, sessionSyncKeyK, todayKey, totalKeyK],
-    [
-      String(now),
-      String(cappedDelta),
-      String(DAILY_CAP),
-      String(Math.max(0, SESSION_CAP)),
-      String(windowEnd),
-      String(SESSION_TTL_MS),
-    ]
-  );
+  let res;
+  try {
+    klog("calc_award_redis_eval_start", {
+      xpIdentity,
+      userId,
+      sessionId,
+      dayKeyNow,
+      keys: { todayKey, totalKeyK, sessionKeyK, sessionSyncKeyK },
+      cappedDelta,
+    });
+
+    res = await store.eval(
+      script,
+      [sessionKeyK, sessionSyncKeyK, todayKey, totalKeyK],
+      [
+        String(now),
+        String(cappedDelta),
+        String(DAILY_CAP),
+        String(Math.max(0, SESSION_CAP)),
+        String(windowEnd),
+        String(SESSION_TTL_MS),
+      ]
+    );
+  } catch (err) {
+    console.error("[XP-CALC] Redis eval failed", {
+      xpIdentity,
+      userId,
+      sessionId,
+      errMessage: err && err.message,
+    });
+    throw err;
+  }
 
   const granted = Math.max(0, Math.floor(Number(res?.[0]) || 0));
   const redisDailyTotal = Number(res?.[1]) || 0;
@@ -1093,11 +1113,13 @@ export async function handler(event) {
 
   klog("calc_award_result", {
     xpIdentity,
+    userId,
     supabaseUserId,
     granted,
     totalLifetime,
     totalToday: redisDailyTotal,
     status,
+    raw: res,
   });
 
   // Update session state
