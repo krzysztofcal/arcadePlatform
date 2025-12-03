@@ -1111,6 +1111,16 @@ export async function handler(event) {
 
   const remaining = Math.max(0, DAILY_CAP - redisDailyTotal);
 
+  klog("calc_award_debug_totals", {
+    xpIdentity,
+    userId,
+    sessionId,
+    awarded: granted,
+    redisDailyTotal,
+    totalLifetime,
+    keys: { todayKey, totalKeyK, sessionKeyK, sessionSyncKeyK },
+  });
+
   klog("calc_award_result", {
     xpIdentity,
     userId,

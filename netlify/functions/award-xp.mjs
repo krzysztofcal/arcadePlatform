@@ -467,7 +467,18 @@ async function getTotals({ userId, sessionId, now = Date.now() }) {
     const lifetime = Number(values[1] ?? "0") || 0;
     const sessionTotal = sessionKeyK ? (Number(values[2] ?? "0") || 0) : 0;
     const lastSync = sessionSyncKeyK ? (Number(values[sessionKeyK ? 3 : 2] ?? "0") || 0) : 0;
-    return { current, lifetime, sessionTotal, lastSync };
+    const totals = { current, lifetime, sessionTotal, lastSync };
+    klog("award_getTotals_debug", {
+      xpIdentityUserId: userId,
+      sessionId,
+      now,
+      totals,
+      keys: {
+        todayKey,
+        totalKey: totalKeyK,
+      },
+    });
+    return totals;
   } catch {
     return { current: 0, lifetime: 0, sessionTotal: 0, lastSync: 0 };
   }
