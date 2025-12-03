@@ -1151,7 +1151,8 @@ function bootXpCore(window, document) {
     maybeResetDailyAllowance();
 
     const statusRaw = typeof data.status === "string" ? data.status.toLowerCase() : null;
-    const reasonRaw = data.reason || (data.debug && data.debug.reason) || null;
+    const debug = data && data.debug ? data.debug : null;
+    const reasonRaw = data.reason || (debug && debug.reason) || null;
     const reason = typeof reasonRaw === "string" ? reasonRaw.toLowerCase() : null;
     const isExplicitReset =
       reason === "reset"
@@ -1183,12 +1184,17 @@ function bootXpCore(window, document) {
 
     const sanitizedTotal = Math.max(0, Number(totalLifetimeRaw) || 0);
     const previousServer = typeof state.serverTotalXp === "number" ? state.serverTotalXp : null;
-    const previousTotal = typeof state.totalLifetime === "number" ? state.totalLifetime : null;
+    const previousTotalRaw =
+      typeof state.totalLifetime === "number"
+        ? state.totalLifetime
+        : (typeof state.badgeBaselineXp === "number" ? state.badgeBaselineXp : null);
+    const previousTotal = previousTotalRaw != null ? previousTotalRaw : null;
     const hasLocalProgress =
       (previousServer != null && previousServer > 0)
       || (previousTotal != null && previousTotal > 0);
 
-    const authenticated = isAuthenticatedUser();
+    const serverThinksAuthenticated = !!(debug && debug.authValid);
+    const authenticated = isAuthenticatedUser() || serverThinksAuthenticated;
 
     if (authenticated && hasLocalProgress && sanitizedTotal === 0 && !isExplicitReset) {
       if (window.console && console.warn) {
