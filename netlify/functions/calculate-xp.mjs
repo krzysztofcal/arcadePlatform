@@ -797,7 +797,7 @@ export async function handler(event) {
       : null;
   const anonId = bodyAnonIdRaw ? bodyAnonIdRaw.trim() : null;
 
-  const xpIdentity = anonId || null; // XP storage identity stays anon-based for now
+  const xpIdentity = supabaseUserId || anonId || null;
   const identityId = supabaseUserId || anonId; // diagnostic only
   const sessionId = typeof body.sessionId === "string" ? body.sessionId.trim() : null;
   const userId = xpIdentity;

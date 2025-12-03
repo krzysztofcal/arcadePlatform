@@ -1153,6 +1153,11 @@ function bootXpCore(window, document) {
     const statusRaw = typeof data.status === "string" ? data.status.toLowerCase() : null;
     const reasonRaw = data.reason || (data.debug && data.debug.reason) || null;
     const reason = typeof reasonRaw === "string" ? reasonRaw.toLowerCase() : null;
+    const isExplicitReset =
+      reason === "reset"
+      || reason === "daily_reset"
+      || reason === "day_reset"
+      || reason === "hard_reset";
     // Ignore status-only snapshots so empty server totals don't clobber cached XP.
     const skipTotals = (statusRaw === "statusonly")
       || reason === "too_soon"
@@ -1176,14 +1181,19 @@ function bootXpCore(window, document) {
       return;
     }
 
+    const hasLocalLifetime = typeof state.totalLifetime === "number" && state.totalLifetime > 0;
+    if (hasLocalLifetime && data.totalLifetime === 0 && !isExplicitReset) {
+      if (window.console && console.warn) {
+        console.warn("[XP] Skipping 0 totalLifetime from server snapshot (stale)");
+      }
+      saveCache();
+      updateBadge();
+      return;
+    }
+
     const sanitizedTotal = Math.max(0, Number(totalLifetimeRaw) || 0);
     const previousServer = typeof state.serverTotalXp === "number" ? state.serverTotalXp : null;
     const previousTotal = typeof state.totalLifetime === "number" ? state.totalLifetime : null;
-    const isExplicitReset =
-      reason === "reset"
-      || reason === "daily_reset"
-      || reason === "day_reset"
-      || reason === "hard_reset";
     const hasLocalProgress =
       (previousServer != null && previousServer > 0)
       || (previousTotal != null && previousTotal > 0);

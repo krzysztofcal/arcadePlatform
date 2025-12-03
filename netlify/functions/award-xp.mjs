@@ -535,15 +535,15 @@ export async function handler(event) {
   let anonIdRaw = queryAnonIdRaw;
   let anonId = typeof anonIdRaw === "string" ? anonIdRaw.trim() : null;
 
-  // anonId is the XP storage identity (hotfix): always use anon-based identity for XP buckets.
-
   const jwtToken = extractBearerToken(event.headers);
   const authContext = verifySupabaseJwt(jwtToken);
   const userId = authContext.valid ? authContext.userId : null; // userId is always derived from Supabase JWT; never trust payload userId
   const supabaseUserId = userId;
   // If JWT is missing or invalid, we treat the request as anonymous and do not block XP, per Hard XP spec.
 
-  let xpIdentity = anonId || null;
+  let xpIdentity = authContext.valid && authContext.userId
+    ? authContext.userId
+    : (anonId || null);
   let identityId = userId || anonId;
 
   const applyDiagnostics = (payload, extra = {}) => {
@@ -623,8 +623,31 @@ export async function handler(event) {
     anonId = typeof anonIdRaw === "string" ? anonIdRaw.trim() : null;
   }
 
-  xpIdentity = anonId || null;
-  identityId = userId || anonId; // identityId is for diagnostics only; XP storage uses xpIdentity (anon-based).
+  xpIdentity = authContext.valid && authContext.userId
+    ? authContext.userId
+    : (anonId || null);
+  identityId = userId || anonId; // identityId is for diagnostics only; XP storage uses xpIdentity.
+
+  if (authContext.valid && authContext.userId && anonId && anonId !== authContext.userId) {
+    try {
+      const anonTotals = await getTotals({ userId: anonId, now });
+      if (anonTotals && anonTotals.lifetime > 0) {
+        const pipe = store.pipeline();
+        const anonTotalKey = keyTotal(anonId);
+        const userTotalKey = keyTotal(authContext.userId);
+        pipe.incrby(userTotalKey, anonTotals.lifetime);
+        pipe.del(anonTotalKey);
+        await pipe.exec();
+        console.log("[XP] Migrated anon XP to account", {
+          from: anonId,
+          to: authContext.userId,
+          amount: anonTotals.lifetime,
+        });
+      }
+    } catch (err) {
+      console.warn("[XP] XP migration failed:", err);
+    }
+  }
 
   const sessionIdRaw = body.sessionId ?? querySessionId;
   let sessionId = typeof sessionIdRaw === "string" ? sessionIdRaw.trim() : null;
