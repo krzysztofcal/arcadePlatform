@@ -339,7 +339,7 @@ function generateFingerprint(headers) {
   return hash(fingerprintData).substring(0, 16);
 }
 
-// NOTE: identityId parameter represents the XP identity: always uses anonId for XP storage, regardless of authentication status.
+// NOTE: identityId parameter represents the XP identity: userId for logged-in users (cross-browser), anonId for anonymous (browser-specific).
 const keyDaily = (identityId, day = getDailyKey()) => `${KEY_NS}:daily:${identityId}:${day}`;
 const keyTotal = (identityId) => `${KEY_NS}:total:${identityId}`;
 const keySession = (identityId, s) => `${KEY_NS}:session:${hash(`${identityId}|${s}`)}`;
@@ -377,7 +377,7 @@ async function isSessionRegistered({ identityId, sessionId }) {
 
 // SECURITY: Rate limiting check
 async function checkRateLimit({ identityId, ip }) {
-  // identityId represents the XP identity (always anonId) for per-identity throttling.
+  // identityId: userId for logged-in users, anonId for anonymous users.
   if (!RATE_LIMIT_ENABLED) return { allowed: true };
 
   const checks = [];
@@ -442,8 +442,55 @@ async function checkRateLimit({ identityId, ip }) {
   return { allowed: true, checks: results };
 }
 
+// Migrate XP from source identity to target identity (for login transitions)
+async function migrateXP({ fromIdentity, toIdentity, now = Date.now() }) {
+  if (!fromIdentity || !toIdentity || fromIdentity === toIdentity) {
+    return { migrated: false };
+  }
+
+  const dayKey = getDailyKey(now);
+  const fromDailyKey = keyDaily(fromIdentity, dayKey);
+  const fromTotalKey = keyTotal(fromIdentity);
+  const toDailyKey = keyDaily(toIdentity, dayKey);
+  const toTotalKey = keyTotal(toIdentity);
+
+  try {
+    // Read both source and destination XP
+    const [fromDaily, fromTotal, toDaily, toTotal] = await Promise.all([
+      store.get(fromDailyKey),
+      store.get(fromTotalKey),
+      store.get(toDailyKey),
+      store.get(toTotalKey),
+    ]);
+
+    const fromDailyXP = Number(fromDaily ?? "0") || 0;
+    const fromTotalXP = Number(fromTotal ?? "0") || 0;
+    const toDailyXP = Number(toDaily ?? "0") || 0;
+    const toTotalXP = Number(toTotal ?? "0") || 0;
+
+    // Only migrate if source has XP and destination has less
+    if (fromTotalXP > 0 && fromTotalXP > toTotalXP) {
+      // Merge XP: take max of daily (respecting cap), sum for total
+      const mergedDaily = Math.min(DAILY_CAP, Math.max(fromDailyXP, toDailyXP));
+      const mergedTotal = Math.max(fromTotalXP, toTotalXP); // Take higher value
+
+      await Promise.all([
+        store.set(toDailyKey, String(mergedDaily)),
+        store.set(toTotalKey, String(mergedTotal)),
+      ]);
+
+      return { migrated: true, fromDaily: fromDailyXP, fromTotal: fromTotalXP, toDaily: mergedDaily, toTotal: mergedTotal };
+    }
+
+    return { migrated: false, reason: "no_migration_needed" };
+  } catch (err) {
+    console.error('[XP] Migration failed:', err);
+    return { migrated: false, error: err.message };
+  }
+}
+
 async function getTotals({ identityId, sessionId, now = Date.now() }) {
-  // identityId represents the XP identity (always anonId) for XP aggregation keys.
+  // identityId: userId for logged-in users (cross-browser), anonId for anonymous users (browser-specific)
   const todayKey = keyDaily(identityId, getDailyKey(now));
   const totalKeyK = keyTotal(identityId);
   const sessionKeyK = sessionId ? keySession(identityId, sessionId) : null;
@@ -532,9 +579,8 @@ export async function handler(event) {
   const userId = authContext.valid ? authContext.userId : null; // userId is always derived from Supabase JWT; never trust payload userId
   // If JWT is missing or invalid, we treat the request as anonymous and do not block XP, per Hard XP spec.
 
-  // IMPORTANT: Always use anonId for XP storage identity, even when authenticated.
-  // This ensures XP persists correctly across login/logout. userId is only used for user profile persistence.
-  let identityId = anonId;
+  // XP identity: use userId for logged-in users (cross-browser), anonId for anonymous (browser-specific)
+  let identityId = userId || anonId;
 
   const applyDiagnostics = (payload, extra = {}) => {
     if (!DEBUG_ENABLED) return;
@@ -613,8 +659,8 @@ export async function handler(event) {
     anonId = typeof anonIdRaw === "string" ? anonIdRaw.trim() : null;
   }
 
-  // IMPORTANT: Always use anonId for XP storage identity, even when authenticated.
-  identityId = anonId;
+  // Update identityId if body provided anonId and user is not logged in
+  identityId = userId || anonId;
 
   const sessionIdRaw = body.sessionId ?? querySessionId;
   const sessionId = typeof sessionIdRaw === "string" ? sessionIdRaw.trim() : null;
@@ -659,15 +705,17 @@ export async function handler(event) {
         const tokenResult = verifySessionToken(sessionToken, secret);
         if (!tokenResult.valid) {
           sessionError = `token_${tokenResult.reason}`;
-        } else if (tokenResult.userId !== identityId) {
+        } else if (tokenResult.userId !== identityId && tokenResult.userId !== anonId) {
+          // Allow session token with either current identityId or anonId (for login transitions)
           sessionError = "token_user_mismatch";
         } else if (tokenResult.fingerprint !== fingerprint) {
           sessionError = "token_fingerprint_mismatch";
         } else {
           // Verify session exists in Redis and matches
+          // Use the userId from the session token (might be anonId from before login)
           const serverValidation = await validateServerSession({
             sessionId: tokenResult.sessionId,
-            userId: identityId,  // identityId is anonId for XP storage
+            userId: tokenResult.userId,
             fingerprint,
           });
           if (!serverValidation.valid) {
@@ -761,6 +809,19 @@ export async function handler(event) {
   if (body.statusOnly) {
     // SECURITY: Auto-register session when status is requested (session start)
     await registerSession({ identityId, sessionId });
+
+    // Migrate XP from anonId to userId when user first logs in
+    if (userId && anonId && userId !== anonId) {
+      const migration = await migrateXP({ fromIdentity: anonId, toIdentity: userId, now });
+      if (DEBUG_ENABLED && migration.migrated) {
+        console.log('[XP] Migrated XP on login:', {
+          from: 'anonId',
+          to: 'userId',
+          fromTotal: migration.fromTotal,
+          toTotal: migration.toTotal,
+        });
+      }
+    }
 
     const totals = await fetchTotals();
     if (userId) {
