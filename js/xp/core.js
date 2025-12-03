@@ -1153,7 +1153,8 @@ function bootXpCore(window, document) {
     const reasonRaw = data.reason || (data.debug && data.debug.reason) || null;
     const reason = typeof reasonRaw === "string" ? reasonRaw.toLowerCase() : null;
     const statusRaw = typeof data.status === "string" ? data.status.toLowerCase() : null;
-    const skipTotals = reason === "too_soon"
+    const skipTotals = (statusRaw === "statusonly")
+      || reason === "too_soon"
       || reason === "insufficient-activity";
 
     const totalLifetime = (typeof data.totalLifetime === "number") ? data.totalLifetime
