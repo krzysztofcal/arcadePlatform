@@ -1159,11 +1159,18 @@ function bootXpCore(window, document) {
       || reason === "daily_reset"
       || reason === "day_reset"
       || reason === "hard_reset";
-    // Ignore status-only snapshots so empty server totals don't clobber cached XP.
-    const skipTotals = (statusRaw === "statusonly")
+
+    const skipTotals =
+      statusRaw === "statusonly"
       || reason === "too_soon"
       || reason === "insufficient-activity";
     const FORCE_IGNORE_SERVER_TOTALS = false;
+
+    if (skipTotals) {
+      saveCache();
+      updateBadge();
+      return;
+    }
 
     if (FORCE_IGNORE_SERVER_TOTALS) {
       saveCache();
@@ -1176,32 +1183,38 @@ function bootXpCore(window, document) {
       typeof data.total === "number" ? data.total :
       null;
 
-    if (skipTotals || totalLifetimeRaw == null) {
+    if (totalLifetimeRaw == null) {
       saveCache();
       updateBadge();
       return;
     }
 
     const sanitizedTotal = Math.max(0, Number(totalLifetimeRaw) || 0);
-    const previousServer = typeof state.serverTotalXp === "number" ? state.serverTotalXp : null;
+    const previousServer =
+      typeof state.serverTotalXp === "number" ? state.serverTotalXp : null;
     const previousTotalRaw =
       typeof state.totalLifetime === "number"
         ? state.totalLifetime
-        : (typeof state.badgeBaselineXp === "number" ? state.badgeBaselineXp : null);
+        : (typeof state.badgeBaselineXp === "number"
+          ? state.badgeBaselineXp
+          : null);
     const previousTotal = previousTotalRaw != null ? previousTotalRaw : null;
-    const hasLocalProgress =
-      (previousServer != null && previousServer > 0)
-      || (previousTotal != null && previousTotal > 0);
+
+    const localFloor =
+      previousServer != null
+        ? previousServer
+        : (previousTotal != null ? previousTotal : 0);
 
     const serverThinksAuthenticated = !!(debug && debug.authValid);
     const authenticated = isAuthenticatedUser() || serverThinksAuthenticated;
 
-    if (authenticated && hasLocalProgress && sanitizedTotal === 0 && !isExplicitReset) {
+    if (authenticated && sanitizedTotal === 0 && !isExplicitReset) {
       if (window.console && console.warn) {
-        console.warn("[XP] Ignoring zero server total that would reset local XP", {
+        console.warn("[XP] Ignoring zero server total for authenticated user", {
           status: statusRaw,
           reason,
           serverTotal: sanitizedTotal,
+          localFloor,
           previousServer,
           previousTotal,
         });
@@ -1211,12 +1224,13 @@ function bootXpCore(window, document) {
       return;
     }
 
-    if (authenticated && previousServer != null && sanitizedTotal < previousServer && !isExplicitReset) {
+    if (authenticated && sanitizedTotal < localFloor && !isExplicitReset) {
       if (window.console && console.warn) {
-        console.warn("[XP] Ignoring lower server total that would reduce lifetime", {
+        console.warn("[XP] Ignoring regressive server total for authenticated user", {
           status: statusRaw,
           reason,
           serverTotal: sanitizedTotal,
+          localFloor,
           previousServer,
           previousTotal,
         });
