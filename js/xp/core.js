@@ -1125,6 +1125,25 @@ function bootXpCore(window, document) {
     const keys = Object.keys(data);
     if (!keys.length) return;
 
+    // Check early if we should skip this response to avoid clobbering cached values
+    const reasonRaw = data.reason || (data.debug && data.debug.reason) || null;
+    const reason = typeof reasonRaw === "string" ? reasonRaw.toLowerCase() : null;
+    const statusRaw = typeof data.status === "string" ? data.status.toLowerCase() : null;
+    // Ignore status-only snapshots so empty server totals don't clobber cached XP.
+    const skipTotals = (statusRaw === "statusonly")
+      || reason === "too_soon"
+      || reason === "insufficient-activity";
+
+    const totalLifetime = (typeof data.totalLifetime === "number") ? data.totalLifetime
+      : (typeof data.total === "number" ? data.total : null);
+
+    if (skipTotals || totalLifetime == null) {
+      saveCache();
+      updateBadge();
+      return;
+    }
+
+    // Only update state if we're not skipping totals
     if (typeof data.cap === "number" && Number.isFinite(data.cap)) {
       state.cap = Math.max(0, Math.floor(data.cap));
     }
@@ -1149,22 +1168,6 @@ function bootXpCore(window, document) {
       }
     }
     maybeResetDailyAllowance();
-
-    const reasonRaw = data.reason || (data.debug && data.debug.reason) || null;
-    const reason = typeof reasonRaw === "string" ? reasonRaw.toLowerCase() : null;
-    const statusRaw = typeof data.status === "string" ? data.status.toLowerCase() : null;
-    const skipTotals = (statusRaw === "statusonly")
-      || reason === "too_soon"
-      || reason === "insufficient-activity";
-
-    const totalLifetime = (typeof data.totalLifetime === "number") ? data.totalLifetime
-      : (typeof data.total === "number" ? data.total : null);
-
-    if (skipTotals || totalLifetime == null) {
-      saveCache();
-      updateBadge();
-      return;
-    }
 
     const ok = data.ok === true || statusRaw === "ok" || (!statusRaw && data.awarded != null);
     if (!ok) {
