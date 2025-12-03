@@ -616,12 +616,13 @@ export async function handler(event) {
   const sessionIdRaw = body.sessionId ?? querySessionId;
   const sessionId = typeof sessionIdRaw === "string" ? sessionIdRaw.trim() : null;
 
-  // SECURITY: Rate limiting check
+  // SECURITY: Rate limiting check (skip for statusOnly - they're read-only sync requests)
   const clientIp = event.headers?.["x-forwarded-for"]?.split(",")[0]?.trim()
     || event.headers?.["x-real-ip"]
     || "unknown";
 
-  const rateLimitResult = await checkRateLimit({ userId: identityId, ip: clientIp });
+  const isStatusOnly = body.statusOnly === true;
+  const rateLimitResult = isStatusOnly ? { allowed: true } : await checkRateLimit({ userId: identityId, ip: clientIp });
   if (!rateLimitResult.allowed) {
     const payload = {
       error: "rate_limit_exceeded",
