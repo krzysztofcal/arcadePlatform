@@ -1153,6 +1153,7 @@ function bootXpCore(window, document) {
     const reasonRaw = data.reason || (data.debug && data.debug.reason) || null;
     const reason = typeof reasonRaw === "string" ? reasonRaw.toLowerCase() : null;
     const statusRaw = typeof data.status === "string" ? data.status.toLowerCase() : null;
+    // Ignore status-only snapshots so empty server totals don't clobber cached XP.
     const skipTotals = (statusRaw === "statusonly")
       || reason === "too_soon"
       || reason === "insufficient-activity";
