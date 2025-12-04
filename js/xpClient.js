@@ -83,6 +83,9 @@
           : null;
         if (getter) {
           token = await getter();
+          if (window && window.console && typeof console.debug === "function") {
+            console.debug("[XPClient] auth_bridge_result", { hasToken: !!token });
+          }
         }
 
         if (!token) {
@@ -92,12 +95,23 @@
             const session = res && res.data ? res.data.session : null;
             token = session && session.access_token ? session.access_token : null;
           }
+          if (window && window.console && typeof console.debug === "function") {
+            console.debug("[XPClient] auth_client_result", { hasToken: !!token });
+          }
         }
 
         state.authToken = token || null;
         state.authCheckedAt = Date.now();
         return state.authToken;
-      } catch (_) {
+      } catch (err) {
+        if (window && window.console && typeof console.warn === "function") {
+          try {
+            const message = err && err.message ? String(err.message) : "error";
+            console.warn("[XPClient] auth_token_fetch_error", { message });
+          } catch (_) {
+            console.warn("[XPClient] auth_token_fetch_error");
+          }
+        }
         state.authToken = null;
         state.authCheckedAt = Date.now();
         return null;
