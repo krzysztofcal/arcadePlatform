@@ -633,6 +633,29 @@ export async function handler(event) {
 
   identityId = userId || anonId || null;
 
+  // If we have a Supabase user and a prior anon id, migrate anon totals into the
+  // authenticated bucket so status reads and new awards share the same keys.
+  if (userId && anonId && anonId !== userId) {
+    try {
+      const anonTotals = await getTotals({ userId: anonId, sessionId: querySessionId, now });
+      if (anonTotals && anonTotals.lifetime > 0) {
+        const pipe = store.pipeline();
+        const anonTotalKey = keyTotal(anonId);
+        const userTotalKey = keyTotal(userId);
+        pipe.incrby(userTotalKey, anonTotals.lifetime);
+        pipe.del(anonTotalKey);
+        await pipe.exec();
+        console.log("[XP] Migrated anon XP to account", {
+          from: anonId,
+          to: userId,
+          amount: anonTotals.lifetime,
+        });
+      }
+    } catch (err) {
+      console.warn("[XP] XP migration failed:", err);
+    }
+  }
+
   const sessionIdRaw = body.sessionId ?? querySessionId;
   let sessionId = typeof sessionIdRaw === "string" ? sessionIdRaw.trim() : null;
 
