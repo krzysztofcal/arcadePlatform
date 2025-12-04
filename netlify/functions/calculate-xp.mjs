@@ -64,6 +64,9 @@ const RATE_LIMIT_PER_USER_PER_MIN = Math.max(0, asNumber(process.env.XP_RATE_LIM
 const RATE_LIMIT_PER_IP_PER_MIN = Math.max(0, asNumber(process.env.XP_RATE_LIMIT_IP_PER_MIN, 60));
 const RATE_LIMIT_ENABLED = process.env.XP_RATE_LIMIT_ENABLED !== "0";
 
+// Supabase JWT verification
+const SUPABASE_JWT_SECRET = process.env.SUPABASE_JWT_SECRET || process.env.SUPABASE_JWT_SECRET_V2 || "";
+
 // CORS
 const CORS_ALLOW = (() => {
   const fromEnv = (process.env.XP_CORS_ALLOW ?? "")
@@ -170,6 +173,74 @@ const klog = (kind, data) => {
   } catch {
     console.log(`[klog] ${kind}`, data);
   }
+};
+
+const safeEquals = (a, b) => {
+  if (!a || !b || a.length !== b.length) return false;
+  const left = Buffer.from(a, "utf8");
+  const right = Buffer.from(b, "utf8");
+  if (left.length !== right.length) return false;
+  return crypto.timingSafeEqual(left, right);
+};
+
+const decodeBase64UrlJson = (segment) => {
+  if (!segment) return null;
+  try {
+    const decoded = Buffer.from(segment, "base64url").toString("utf8");
+    return JSON.parse(decoded);
+  } catch {
+    return null;
+  }
+};
+
+const extractBearerToken = (headers) => {
+  const headerValue = headers?.authorization || headers?.Authorization || headers?.AUTHORIZATION;
+  if (!headerValue || typeof headerValue !== "string") return null;
+  const match = /^Bearer\s+(.+)$/.exec(headerValue.trim());
+  return match ? match[1].trim() : null;
+};
+
+const verifySupabaseJwt = (token) => {
+  if (!token) {
+    return { provided: false, valid: false, userId: null, reason: "missing_token" };
+  }
+  if (!SUPABASE_JWT_SECRET || SUPABASE_JWT_SECRET.length < 32) {
+    return { provided: false, valid: false, userId: null, reason: "disabled_or_missing_secret" };
+  }
+
+  const [headerSegment, payloadSegment, signatureSegment] = token.split(".");
+  if (!headerSegment || !payloadSegment || !signatureSegment) {
+    return { provided: true, valid: false, userId: null, reason: "malformed_token" };
+  }
+
+  const header = decodeBase64UrlJson(headerSegment);
+  const payload = decodeBase64UrlJson(payloadSegment);
+  if (!header || !payload) {
+    return { provided: true, valid: false, userId: null, reason: "invalid_encoding" };
+  }
+
+  const alg = header.alg || "HS256";
+  const hmacAlg = alg === "HS512" ? "sha512" : "sha256";
+  const expectedSig = crypto
+    .createHmac(hmacAlg, SUPABASE_JWT_SECRET)
+    .update(`${headerSegment}.${payloadSegment}`)
+    .digest("base64url");
+
+  if (!safeEquals(signatureSegment, expectedSig)) {
+    return { provided: true, valid: false, userId: null, reason: "invalid_signature" };
+  }
+
+  const nowSec = Math.floor(Date.now() / 1000);
+  if (payload.exp && Number(payload.exp) <= nowSec) {
+    return { provided: true, valid: false, userId: null, reason: "expired" };
+  }
+
+  const userId = typeof payload.sub === "string" ? payload.sub : null;
+  if (!userId) {
+    return { provided: true, valid: false, userId: null, reason: "no_sub" };
+  }
+
+  return { provided: true, valid: true, userId, reason: "ok", payload };
 };
 
 const hash = (s) => crypto.createHash("sha256").update(s).digest("hex");
@@ -723,12 +794,28 @@ export async function handler(event) {
     return json(400, { error: "bad_json" }, origin);
   }
 
-  const userId = typeof body.userId === "string" ? body.userId.trim() : null;
+  const bodyAnonIdRaw = typeof body.anonId === "string"
+    ? body.anonId
+    : (typeof body.userId === "string" ? body.userId : null);
+  const anonId = bodyAnonIdRaw ? bodyAnonIdRaw.trim() : null;
   const sessionId = typeof body.sessionId === "string" ? body.sessionId.trim() : null;
 
-  if (!userId || !sessionId) {
-    return json(400, { error: "missing_fields", message: "userId and sessionId required" }, origin);
+  const jwtToken = extractBearerToken(event.headers);
+  const authContext = verifySupabaseJwt(jwtToken);
+  const supabaseUserId = authContext.valid ? authContext.userId : null;
+  const identityId = supabaseUserId || anonId || null;
+
+  klog("calc_identity_debug", {
+    anonId,
+    supabaseUserId,
+    identityId,
+  });
+
+  if (!identityId || !sessionId) {
+    return json(400, { error: "missing_fields", message: "identity and sessionId required" }, origin);
   }
+
+  const userId = identityId;
 
   // Rate limiting
   const clientIp = event.headers?.["x-forwarded-for"]?.split(",")[0]?.trim()
@@ -849,7 +936,9 @@ export async function handler(event) {
   }
 
   klog("calc_award_attempt", {
-    userId,
+    identityId: userId,
+    supabaseUserId,
+    anonId,
     gameId: body.gameId || null,
     scoreDelta: body.scoreDelta ?? body.delta ?? null,
     hasSessionToken: !!(body.sessionToken || event.headers?.["x-session-token"]),
@@ -1034,7 +1123,9 @@ export async function handler(event) {
 
   if (granted > 0) {
     klog("calc_award_debug_totals", {
-      userId,
+      identityId: userId,
+      supabaseUserId,
+      anonId,
       sessionId,
       awarded: granted,
       redisDailyTotal,
@@ -1043,7 +1134,9 @@ export async function handler(event) {
     });
 
     klog("calc_award_result", {
-      userId,
+      identityId: userId,
+      supabaseUserId,
+      anonId,
       granted,
       totalLifetime,
       totalToday: redisDailyTotal,
