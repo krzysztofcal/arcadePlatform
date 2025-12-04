@@ -344,6 +344,32 @@ const keySessionState = (u, s) => `${KEY_NS}:session:state:${hash(`${u}|${s}`)}`
 const keyRateLimitUser = (userId) => `${KEY_NS}:ratelimit:user:${userId}:${Math.floor(Date.now() / 60000)}`;
 const keyRateLimitIp = (ip) => `${KEY_NS}:ratelimit:ip:${hash(ip)}:${Math.floor(Date.now() / 60000)}`;
 
+async function getTotals({ userId, sessionId, now }) {
+  if (!userId) {
+    return { current: 0, lifetime: 0, sessionTotal: 0, lastSync: 0 };
+  }
+
+  const dayKeyNow = getDailyKey(now || Date.now());
+  const todayKey = keyDaily(userId, dayKeyNow);
+  const totalKeyK = keyTotal(userId);
+  const sessionKeyK = keySession(userId, sessionId || "");
+  const sessionSyncKeyK = keySessionSync(userId, sessionId || "");
+
+  const [dailyRaw, totalRaw, sessionRaw, syncRaw] = await Promise.all([
+    store.get(todayKey),
+    store.get(totalKeyK),
+    store.get(sessionKeyK),
+    store.get(sessionSyncKeyK),
+  ]);
+
+  const current = Math.max(0, Math.floor(Number(dailyRaw) || 0));
+  const lifetime = Math.max(0, Math.floor(Number(totalRaw) || 0));
+  const sessionTotal = Math.max(0, Math.floor(Number(sessionRaw) || 0));
+  const lastSync = Math.max(0, Math.floor(Number(syncRaw) || 0));
+
+  return { current, lifetime, sessionTotal, lastSync };
+}
+
 // ============================================================================
 // Combo System (Server-Side)
 // ============================================================================
@@ -816,6 +842,26 @@ export async function handler(event) {
   }
 
   const userId = identityId;
+
+  // Migrate anon lifetime into the authenticated bucket on first logged-in write
+  if (supabaseUserId && anonId && anonId !== supabaseUserId) {
+    try {
+      const anonTotals = await getTotals({ userId: anonId, sessionId, now });
+      if (anonTotals && anonTotals.lifetime > 0) {
+        const anonTotalKey = keyTotal(anonId);
+        const userTotalKey = keyTotal(supabaseUserId);
+        await store.incrBy(userTotalKey, anonTotals.lifetime);
+        await store.set(anonTotalKey, 0);
+        klog("calc_anon_migrated", {
+          from: anonId,
+          to: supabaseUserId,
+          amount: anonTotals.lifetime,
+        });
+      }
+    } catch (err) {
+      console.warn("[XP-CALC] XP migration failed", { message: err?.message });
+    }
+  }
 
   // Rate limiting
   const clientIp = event.headers?.["x-forwarded-for"]?.split(",")[0]?.trim()

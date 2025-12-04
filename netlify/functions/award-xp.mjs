@@ -554,6 +554,26 @@ export async function handler(event) {
 
   let identityId = userId || anonId || null;
 
+  // Migrate existing anon XP into the authenticated Supabase bucket once the user logs in.
+  if (userId && anonId && anonId !== userId) {
+    try {
+      const anonTotals = await getTotals({ userId: anonId, sessionId: querySessionId, now });
+      if (anonTotals && anonTotals.lifetime > 0) {
+        const anonTotalKey = keyTotal(anonId);
+        const userTotalKey = keyTotal(userId);
+        await store.incrBy(userTotalKey, anonTotals.lifetime);
+        await store.set(anonTotalKey, 0);
+        klog("award_anon_migrated", {
+          from: anonId,
+          to: userId,
+          amount: anonTotals.lifetime,
+        });
+      }
+    } catch (err) {
+      console.warn("[XP] XP migration failed", { message: err?.message });
+    }
+  }
+
   const applyDiagnostics = (payload, extra = {}) => {
     if (!DEBUG_ENABLED) return;
     const debug = payload.debug ?? {};
@@ -1070,8 +1090,10 @@ export async function handler(event) {
     return finish(grant, dailyTotal, sessionTotal, lifetime, lastSync, status)
   `;
 
-  const effectiveDelta = Math.min(normalizedDelta, cookieRemainingBefore);
-  const cookieClamped = effectiveDelta < normalizedDelta;
+  const effectiveDelta = supabaseUserId
+    ? normalizedDelta
+    : Math.min(normalizedDelta, cookieRemainingBefore);
+  const cookieClamped = !supabaseUserId && effectiveDelta < normalizedDelta;
 
   klog("award_cookie_delta_adjust", {
     anonId,
