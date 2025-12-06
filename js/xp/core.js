@@ -1022,32 +1022,49 @@ function bootXpCore(window, document) {
     return 0;
   }
 
+  function getDisplayTotalXp() {
+    const authenticated = isAuthenticatedUser();
+    if (authenticated) {
+      const serverTotal = Number(state.serverTotalXp || state.totalLifetime || 0);
+      return Math.max(0, Number.isFinite(serverTotal) ? serverTotal : 0);
+    }
+
+    const baseline = Math.max(0, Number(state.badgeBaselineXp) || 0);
+    const session = Math.max(0, Number(state.sessionXp) || 0);
+    return baseline + session;
+  }
+
   function updateBadge() {
     if (!state.badge) return;
     ensureBadgeElements();
     const authenticated = isAuthenticatedUser();
-    const baseline = (authenticated && typeof state.serverTotalXp === "number")
-      ? state.serverTotalXp
-      : resolveBadgeBaseline();
+    const displayTotal = getDisplayTotalXp();
     const session = Math.max(0, Number(state.sessionXp) || 0);
     const priorShown = Math.max(0, Number(state.badgeShownXp) || 0);
-    let candidate = baseline + session;
-    if (authenticated && typeof state.serverTotalXp === "number" && candidate < state.serverTotalXp) {
-      candidate = state.serverTotalXp;
-    }
+    let candidate = authenticated ? Math.max(0, displayTotal) : displayTotal;
     if (!authenticated && SESSION_RENDER_MODE === "monotonic") {
       candidate = Math.max(priorShown, candidate);
     }
     state.badgeShownXp = candidate;
     state.badgeBaselineXp = authenticated
-      ? Math.max(0, baseline)
-      : Math.max(Number(state.badgeBaselineXp) || 0, baseline);
+      ? Math.max(0, Number(state.serverTotalXp) || 0)
+      : Math.max(Number(state.badgeBaselineXp) || 0, resolveBadgeBaseline());
     state.totalLifetime = authenticated
       ? Math.max(0, candidate)
       : Math.max(Number(state.totalLifetime) || 0, candidate);
     state.snapshot = computeLevel(state.totalLifetime);
     const totalText = state.snapshot.totalXp.toLocaleString();
     state.labelEl.textContent = `Lvl ${state.snapshot.level}, ${totalText} XP`;
+    if (window.console && console.debug) {
+      console.debug("[XP] ui_display_total_xp", {
+        authenticated,
+        displayTotal: candidate,
+        serverTotalXp: state.serverTotalXp,
+        totalLifetime: state.totalLifetime,
+        badgeBaselineXp: state.badgeBaselineXp,
+        sessionXp: state.sessionXp,
+      });
+    }
     setBadgeLoading(false);
   }
 
@@ -1154,6 +1171,11 @@ function bootXpCore(window, document) {
     const debug = data && data.debug ? data.debug : null;
     const reasonRaw = data.reason || (debug && debug.reason) || null;
     const reason = typeof reasonRaw === "string" ? reasonRaw.toLowerCase() : null;
+    const serverThinksAuthenticated = !!(debug && debug.authValid);
+    const clientThinksAuthenticated = isAuthenticatedUser && typeof isAuthenticatedUser === "function"
+      ? isAuthenticatedUser()
+      : false;
+    const authenticated = serverThinksAuthenticated || clientThinksAuthenticated;
     const isExplicitReset =
       reason === "reset"
       || reason === "daily_reset"
@@ -1161,7 +1183,7 @@ function bootXpCore(window, document) {
       || reason === "hard_reset";
 
     const skipTotals =
-      statusRaw === "statusonly"
+      (!authenticated && statusRaw === "statusonly")
       || reason === "too_soon"
       || reason === "insufficient-activity";
     const FORCE_IGNORE_SERVER_TOTALS = false;
@@ -1205,10 +1227,7 @@ function bootXpCore(window, document) {
         ? previousServer
         : (previousTotal != null ? previousTotal : 0);
 
-    const serverThinksAuthenticated = !!(debug && debug.authValid);
-    const authenticated = isAuthenticatedUser() || serverThinksAuthenticated;
-
-    if (authenticated && sanitizedTotal === 0 && !isExplicitReset) {
+    if (authenticated && sanitizedTotal === 0 && localFloor > 0 && !isExplicitReset) {
       if (window.console && console.warn) {
         console.warn("[XP] Ignoring zero server total for authenticated user", {
           status: statusRaw,
@@ -1275,6 +1294,17 @@ function bootXpCore(window, document) {
       ? Math.max(0, state.serverTotalXp || 0)
       : Math.max(Number(state.totalLifetime) || 0, state.serverTotalXp || 0);
     state.lastResultTs = Date.now();
+    if (window.console && console.debug) {
+      console.debug("[XP] server_totals_applied", {
+        authenticated,
+        sanitizedTotal,
+        previousServer,
+        previousTotal,
+        serverTotalXp: state.serverTotalXp,
+        totalLifetime: state.totalLifetime,
+        badgeBaselineXp: state.badgeBaselineXp,
+      });
+    }
     if (meta && meta.bump === true) {
       bumpBadge();
     }

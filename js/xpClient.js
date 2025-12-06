@@ -808,6 +808,14 @@
           responseBody._transport = "keepalive";
         }
 
+        if (window && window.console && typeof window.console.debug === "function" && responseBody) {
+          window.console.debug("[XP] server_calc_apply", {
+            awarded: responseBody.awarded || 0,
+            totalLifetime: responseBody.totalLifetime,
+            remaining: responseBody.remaining,
+          });
+        }
+
         // Update client cap from server response
         if (responseBody && typeof responseBody === "object") {
           if (Number.isFinite(responseBody.capDelta)) setClientCap(Number(responseBody.capDelta));
