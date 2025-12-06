@@ -548,37 +548,7 @@ export async function handler(event) {
 
   const jwtToken = extractBearerToken(event.headers);
   const authContext = verifySupabaseJwt(jwtToken);
-  const userId = authContext.valid ? authContext.userId : null; // userId is always derived from Supabase JWT; never trust payload userId
-  const supabaseUserId = userId;
-  // If JWT is missing or invalid, we treat the request as anonymous and do not block XP, per Hard XP spec.
-
-  let identityId = null;
-  if (authContext.provided) {
-    identityId = userId;
-  } else {
-    identityId = anonId;
-  }
-
-
-  // Migrate existing anon XP into the authenticated Supabase bucket once the user logs in.
-  if (userId && anonId && anonId !== userId) {
-    try {
-      const anonTotals = await getTotals({ userId: anonId, sessionId: querySessionId, now });
-      if (anonTotals && anonTotals.lifetime > 0) {
-        const anonTotalKey = keyTotal(anonId);
-        const userTotalKey = keyTotal(userId);
-        await store.incrBy(userTotalKey, anonTotals.lifetime);
-        await store.set(anonTotalKey, 0);
-        klog("award_anon_migrated", {
-          from: anonId,
-          to: userId,
-          amount: anonTotals.lifetime,
-        });
-      }
-    } catch (err) {
-      console.warn("[XP] XP migration failed", { message: err?.message });
-    }
-  }
+  const supabaseUserId = authContext.valid ? authContext.userId : null;
 
   const applyDiagnostics = (payload, extra = {}) => {
     if (!DEBUG_ENABLED) return;
@@ -596,7 +566,7 @@ export async function handler(event) {
     debug.authProvided = authContext.provided;
     debug.authValid = authContext.valid;
     debug.authReason = authContext.reason;
-    // NOTE: Do not include raw anonId/identityId in debug to avoid reflecting user input in responses (XSS safety).
+    // NOTE: Do not include raw anonId/xpIdentity in debug to avoid reflecting user input in responses (XSS safety).
     Object.assign(debug, extra);
     payload.debug = debug;
   };
@@ -618,16 +588,18 @@ export async function handler(event) {
 
   if (event.httpMethod !== "POST") {
     let totals = null;
-    if (identityId) {
-      totals = await getTotals({ userId: identityId, sessionId: querySessionId, now });
+    if (xpIdentity) {
+      totals = await getTotals({ userId: xpIdentity, sessionId: querySessionId, now });
     }
     const totalSource = totals ? totals.current : cookieTotal;
     const payload = { error: "method_not_allowed" };
     return buildResponse(405, payload, totalSource, {
       debugExtra: { mode: "method_not_allowed" },
-      skipCookie: !identityId,
+      skipCookie: !xpIdentity,
     });
   }
+
+  let xpIdentity = supabaseUserId || anonId || null;
 
   let body = {};
   try {
@@ -636,14 +608,14 @@ export async function handler(event) {
     }
   } catch {
     let totals = null;
-    if (identityId) {
-      totals = await getTotals({ userId: identityId, sessionId: querySessionId, now });
+    if (xpIdentity) {
+      totals = await getTotals({ userId: xpIdentity, sessionId: querySessionId, now });
     }
     const totalSource = totals ? totals.current : cookieTotal;
     const payload = { error: "bad_json" };
     return buildResponse(400, payload, totalSource, {
       debugExtra: { mode: "bad_json" },
-      skipCookie: !identityId,
+      skipCookie: !xpIdentity,
     });
   }
 
@@ -657,34 +629,32 @@ export async function handler(event) {
     anonId = typeof anonIdRaw === "string" ? anonIdRaw.trim() : null;
   }
 
-  if (authContext.provided) {
-    identityId = userId;
-  } else {
-    identityId = anonId;
-  }
+  xpIdentity = supabaseUserId || anonId || null;
 
   klog("auth_debug", {
     provided: authContext.provided,
     valid: authContext.valid,
     reason: authContext.reason,
-    identityId,
+    xpIdentity: xpIdentity,
+    supabaseUserId,
+    anonId,
   });
 
   // If we have a Supabase user and a prior anon id, migrate anon totals into the
   // authenticated bucket so status reads and new awards share the same keys.
-  if (userId && anonId && anonId !== userId) {
+  if (supabaseUserId && anonId && anonId !== supabaseUserId) {
     try {
       const anonTotals = await getTotals({ userId: anonId, sessionId: querySessionId, now });
       if (anonTotals && anonTotals.lifetime > 0) {
         const pipe = store.pipeline();
         const anonTotalKey = keyTotal(anonId);
-        const userTotalKey = keyTotal(userId);
+        const userTotalKey = keyTotal(supabaseUserId);
         pipe.incrby(userTotalKey, anonTotals.lifetime);
         pipe.del(anonTotalKey);
         await pipe.exec();
         console.log("[XP] Migrated anon XP to account", {
           from: anonId,
-          to: userId,
+          to: supabaseUserId,
           amount: anonTotals.lifetime,
         });
       }
@@ -702,7 +672,7 @@ export async function handler(event) {
     || "unknown";
 
   const isStatusOnly = body.statusOnly === true;
-  const rateLimitResult = isStatusOnly ? { allowed: true } : await checkRateLimit({ userId: identityId, ip: clientIp });
+  const rateLimitResult = isStatusOnly ? { allowed: true } : await checkRateLimit({ userId: xpIdentity, ip: clientIp });
   if (!rateLimitResult.allowed) {
     const retryAfter = rateLimitResult.retryAfter ?? 60;
     const payload = {
@@ -742,7 +712,7 @@ export async function handler(event) {
         parsedSessionToken = tokenResult;
         if (!tokenResult.valid) {
           sessionError = `token_${tokenResult.reason}`;
-        } else if (tokenResult.userId !== identityId) {
+        } else if (tokenResult.userId !== xpIdentity) {
           sessionError = "token_user_mismatch";
         } else if (tokenResult.fingerprint !== fingerprint) {
           sessionError = "token_fingerprint_mismatch";
@@ -750,14 +720,14 @@ export async function handler(event) {
           // Verify session exists in Redis and matches
           const serverValidation = await validateServerSession({
             sessionId: tokenResult.sessionId,
-            userId: identityId,
+            userId: xpIdentity,
             fingerprint,
           });
           if (!serverValidation.valid) {
             sessionError = `session_${serverValidation.reason}`;
             if (serverValidation.suspicious) {
               console.warn("[XP] SECURITY: Potential session hijacking attempt", {
-                userId: identityId,
+                userId: xpIdentity,
                 fingerprint,
                 ip: clientIp,
                 reason: serverValidation.reason,
@@ -790,7 +760,7 @@ export async function handler(event) {
         } else if (serverSessionWarnMode) {
           // Warn mode: log but don't block
             console.warn("[XP] Session validation failed (warn mode):", {
-          userId: identityId,
+          userId: xpIdentity,
           sessionError,
           hasToken: !!sessionToken,
           ip: clientIp,
@@ -800,15 +770,15 @@ export async function handler(event) {
     }
   }
 
-  if (parsedSessionToken?.valid && parsedSessionToken.userId === identityId) {
+  if (parsedSessionToken?.valid && parsedSessionToken.userId === xpIdentity) {
     sessionId = parsedSessionToken.sessionId;
   }
 
   let totalsPromise = null;
   const fetchTotals = async () => {
-    if (!identityId) return { current: cookieTotal, lifetime: 0, sessionTotal: 0, lastSync: 0 };
+    if (!xpIdentity) return { current: cookieTotal, lifetime: 0, sessionTotal: 0, lastSync: 0 };
     if (!totalsPromise) {
-      totalsPromise = getTotals({ userId: identityId, sessionId, now });
+      totalsPromise = getTotals({ userId: xpIdentity, sessionId, now });
     }
     return totalsPromise;
   };
@@ -820,7 +790,7 @@ export async function handler(event) {
     if (totals) {
       totalSource = totalSource ?? totals.current;
     }
-    if (totalSource === undefined && identityId) {
+    if (totalSource === undefined && xpIdentity) {
       totals = await fetchTotals();
       totalSource = totals.current;
     }
@@ -844,24 +814,24 @@ export async function handler(event) {
     });
   };
 
-  if (!identityId || (!body.statusOnly && !sessionId)) {
-    const totals = identityId ? await fetchTotals() : null;
-    return respond(400, { error: "missing_fields" }, { totals, skipCookie: !identityId });
+  if (!xpIdentity || (!body.statusOnly && !sessionId)) {
+    const totals = xpIdentity ? await fetchTotals() : null;
+    return respond(400, { error: "missing_fields" }, { totals, skipCookie: !xpIdentity });
   }
 
   if (body.statusOnly) {
     // SECURITY: Auto-register session when status is requested (session start)
     const sessId = sessionId || crypto.randomUUID();
     sessionId = sessId;
-    await registerSession({ userId: identityId, sessionId: sessId });
+    await registerSession({ userId: xpIdentity, sessionId: sessId });
     if (parsedSessionToken?.valid) {
       touchSession(parsedSessionToken.sessionId).catch(() => {});
     }
 
     const totals = await fetchTotals();
     klog('xp_statusOnly_debug', {
-      identityId,
-      userId,
+      xpIdentity,
+      userId: supabaseUserId,
       anonId,
       supabaseUserId,
       totals,
@@ -908,16 +878,16 @@ export async function handler(event) {
   // SECURITY: Session validation - register session if delta=0 (session start), validate if delta>0
   if (normalizedDelta === 0) {
     // Auto-register session on first request (delta=0 is session initialization)
-    await registerSession({ userId: identityId, sessionId });
+    await registerSession({ userId: xpIdentity, sessionId });
   } else if (normalizedDelta > 0) {
     // Validate session is registered before accepting XP deltas
-    const registered = await isSessionRegistered({ userId: identityId, sessionId });
+    const registered = await isSessionRegistered({ userId: xpIdentity, sessionId });
     if (!registered) {
       // Auto-register on first XP-bearing request for backward compatibility
       // In a future version, this could be enforced by rejecting unregistered sessions
-      await registerSession({ userId: identityId, sessionId });
+      await registerSession({ userId: xpIdentity, sessionId });
       if (DEBUG_ENABLED) {
-        console.log('[XP] Auto-registered unregistered session:', { userId: identityId, sessionId: sessionId.substring(0, 8) });
+        console.log('[XP] Auto-registered unregistered session:', { userId: xpIdentity, sessionId: sessionId.substring(0, 8) });
       }
     }
   }
@@ -974,11 +944,11 @@ export async function handler(event) {
     metadata = cleaned;
   }
 
-  const todayKey = keyDaily(identityId, dayKeyNow);
-  const totalKeyK = keyTotal(identityId);
-  const sessionKeyK = keySession(identityId, sessionId);
-  const sessionSyncKeyK = keySessionSync(identityId, sessionId);
-  const lockKeyK = keyLock(identityId, sessionId);
+  const todayKey = keyDaily(xpIdentity, dayKeyNow);
+  const totalKeyK = keyTotal(xpIdentity);
+  const sessionKeyK = keySession(xpIdentity, sessionId);
+  const sessionSyncKeyK = keySessionSync(xpIdentity, sessionId);
+  const lockKeyK = keyLock(xpIdentity, sessionId);
 
   if (REQUIRE_ACTIVITY && normalizedDelta > 0) {
     const events = Number(metadata?.inputEvents ?? 0);
@@ -1012,11 +982,11 @@ export async function handler(event) {
   klog("award_identity", {
     anonymous: !supabaseUserId,
     supabaseUserId,
-    identityId,
+    xpIdentity,
   });
 
   klog('award_attempt', {
-    identityId,
+    xpIdentity,
     supabaseUserId,
     anonId,
     sessionId,
@@ -1158,7 +1128,7 @@ export async function handler(event) {
   const lockTtlRemainingMs = Number.isFinite(lockTtlRemainingRaw) ? lockTtlRemainingRaw : null;
 
   klog('award_result', {
-    identityId,
+    xpIdentity,
     supabaseUserId,
     anonId,
     status,
