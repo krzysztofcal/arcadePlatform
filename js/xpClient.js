@@ -690,6 +690,23 @@
     return payload;
   }
 
+  async function refreshBadgeFromServer(options) {
+    const opts = options || {};
+    try {
+      await ensureAuthTokenWithRetry();
+      const payload = await fetchStatus();
+      if (typeof window !== "undefined" && window.XP && typeof window.XP.refreshFromServerStatus === "function") {
+        try {
+          window.XP.refreshFromServerStatus(payload, { bump: opts.bumpBadge === true });
+        } catch (_) {}
+      }
+      return payload;
+    } catch (err) {
+      klog("xp_refresh_error", { message: err && err.message ? String(err.message) : "error" });
+      return null;
+    }
+  }
+
   /**
    * Check if server-side XP calculation is enabled
    */
@@ -869,6 +886,7 @@
     postWindowAuto,
     isServerCalcEnabled,
     fetchStatus,
+    refreshBadgeFromServer,
     startServerSession,
     clearServerSession,
     ensureServerSession,

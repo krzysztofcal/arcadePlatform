@@ -4,6 +4,9 @@
   var doc = document;
   var nodes = {};
   var state = { user: null, open: false, client: null };
+  var authListeners = [];
+  var authSubscriptionAttached = false;
+  var authUnsubscribe = null;
 
   function logDiag(label, payload){
     var logger = window && window.KLog;
@@ -88,26 +91,45 @@
     logDiag('supabase:token_bridge_init', { attached: true });
   }
 
-  function onAuthChange(callback){
+  function notifyAuthListeners(event, session){
+    for (var i = 0; i < authListeners.length; i++){
+      var listener = authListeners[i];
+      if (typeof listener === 'function'){
+        try { listener(event, session); } catch (_err){}
+      }
+    }
+  }
+
+  function attachAuthSubscription(){
+    if (authSubscriptionAttached) return;
     var client = getClient();
     if (!client || !client.auth || typeof client.auth.onAuthStateChange !== 'function'){
-      return function(){};
+      return;
     }
-
+    authSubscriptionAttached = true;
     var result = client.auth.onAuthStateChange(function(event, session){
       var user = session && session.user ? session.user : null;
       logDiag('supabase:auth_change', { event: event, hasUser: !!user });
-      if (typeof callback === 'function'){
-        try { callback(event, user); } catch (_err){}
-      }
+      notifyAuthListeners(event, session || null);
     });
 
     var subscription = result && result.data ? result.data.subscription : null;
     if (subscription && typeof subscription.unsubscribe === 'function'){
-      return function(){ subscription.unsubscribe(); };
+      authUnsubscribe = function(){ subscription.unsubscribe(); };
+    } else if (result && typeof result.unsubscribe === 'function'){
+      authUnsubscribe = function(){ result.unsubscribe(); };
     }
-    if (result && typeof result.unsubscribe === 'function'){ return function(){ result.unsubscribe(); }; }
-    return function(){};
+  }
+
+  function onAuthChange(callback){
+    if (typeof callback === 'function'){
+      authListeners.push(callback);
+    }
+    attachAuthSubscription();
+    return function(){
+      if (!callback) return;
+      authListeners = authListeners.filter(function(fn){ return fn !== callback; });
+    };
   }
 
   function signIn(email, password){
@@ -294,8 +316,9 @@
       renderUser(user);
     });
 
-    onAuthChange(function(_event, user){
-      renderUser(user);
+    onAuthChange(function(_event, session){
+      var nextUser = session && session.user ? session.user : null;
+      renderUser(nextUser);
     });
   }
 
