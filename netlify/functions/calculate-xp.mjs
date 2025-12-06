@@ -843,26 +843,6 @@ export async function handler(event) {
 
   const userId = identityId;
 
-  // Migrate anon lifetime into the authenticated bucket on first logged-in write
-  if (supabaseUserId && anonId && anonId !== supabaseUserId) {
-    try {
-      const anonTotals = await getTotals({ userId: anonId, sessionId, now });
-      if (anonTotals && anonTotals.lifetime > 0) {
-        const anonTotalKey = keyTotal(anonId);
-        const userTotalKey = keyTotal(supabaseUserId);
-        await store.incrBy(userTotalKey, anonTotals.lifetime);
-        await store.set(anonTotalKey, 0);
-        klog("calc_anon_migrated", {
-          from: anonId,
-          to: supabaseUserId,
-          amount: anonTotals.lifetime,
-        });
-      }
-    } catch (err) {
-      console.warn("[XP-CALC] XP migration failed", { message: err?.message });
-    }
-  }
-
   // Rate limiting
   const clientIp = event.headers?.["x-forwarded-for"]?.split(",")[0]?.trim()
     || event.headers?.["x-real-ip"]
