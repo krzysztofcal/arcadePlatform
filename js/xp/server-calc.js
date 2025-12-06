@@ -27,6 +27,17 @@
   const MIN_WINDOW_MS = 5_000;  // Minimum window before sending
   const MAX_EVENTS_PER_WINDOW = 50;  // Cap game events per request
 
+  function shouldUseServerCalc(win) {
+    const host = win && win.location && win.location.hostname;
+    if (!host) return false;
+
+    if (host === 'localhost' || host === '127.0.0.1') return true;
+    if (host === 'play.kcswh.pl' || host === 'landing.kcswh.pl') return true;
+    if (typeof host === 'string' && host.endsWith('.netlify.app')) return true;
+
+    return false;
+  }
+
   // State
   const state = {
     enabled: false,
@@ -90,6 +101,32 @@
     } catch (_) {}
 
     return false;
+  }
+
+  function initServerCalc(win, doc, config = {}) {
+    try {
+      const enable = shouldUseServerCalc(win);
+      if (win) {
+        win.XP_SERVER_CALC = enable;
+      }
+      if (win && win.console && typeof win.console.debug === 'function') {
+        win.console.debug('[xp] Server calc auto-config', {
+          host: win && win.location && win.location.hostname,
+          XP_SERVER_CALC: enable,
+        });
+      }
+    } catch (err) {
+      if (win && win.console && typeof win.console.error === 'function') {
+        win.console.error('[xp] Failed to init server calc', err);
+      }
+      if (win) win.XP_SERVER_CALC = false;
+    }
+
+    if (config && config.autoInit === true && win && win.XpServerCalc && typeof win.XpServerCalc.init === 'function') {
+      try {
+        win.XpServerCalc.init({});
+      } catch (_) {}
+    }
   }
 
   /**
@@ -466,6 +503,14 @@
     enable: enable,
     disable: disable,
     destroy: destroy,
+    shouldUseServerCalc: shouldUseServerCalc,
+    initServerCalc: initServerCalc,
   };
+
+  try {
+    if (typeof window !== 'undefined') {
+      initServerCalc(window, typeof document !== 'undefined' ? document : undefined, {});
+    }
+  } catch (_) {}
 
 })(typeof window !== 'undefined' ? window : this);

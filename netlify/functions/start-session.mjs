@@ -5,6 +5,7 @@ import { store } from "./_shared/store-upstash.mjs";
 const SESSION_TTL_SEC = Math.max(0, Number(process.env.XP_SESSION_TTL_SEC) || 604800); // 7 days default
 const KEY_NS = process.env.XP_KEY_NS ?? "kcswh:xp:v2";
 const DEBUG_ENABLED = process.env.XP_DEBUG === "1";
+const SUPABASE_JWT_SECRET = process.env.SUPABASE_JWT_SECRET || process.env.SUPABASE_JWT_SECRET_V2 || "";
 // Build CORS allowlist from env var + auto-include Netlify site URL
 const CORS_ALLOW = (() => {
   const fromEnv = (process.env.XP_CORS_ALLOW ?? "")
@@ -33,6 +34,66 @@ const safeEquals = (a, b) => {
   const right = Buffer.from(b, "utf8");
   if (left.length !== right.length) return false;
   return crypto.timingSafeEqual(left, right);
+};
+
+const decodeBase64UrlJson = (segment) => {
+  if (!segment) return null;
+  try {
+    const decoded = Buffer.from(segment, "base64url").toString("utf8");
+    return JSON.parse(decoded);
+  } catch {
+    return null;
+  }
+};
+
+const extractBearerToken = (headers) => {
+  const headerValue = headers?.authorization || headers?.Authorization || headers?.AUTHORIZATION;
+  if (!headerValue || typeof headerValue !== "string") return null;
+  const match = /^Bearer\s+(.+)$/i.exec(headerValue.trim());
+  return match ? match[1].trim() : null;
+};
+
+const verifySupabaseJwt = (token) => {
+  if (!token) {
+    return { provided: false, valid: false, userId: null, reason: "missing_token" };
+  }
+  if (!SUPABASE_JWT_SECRET || SUPABASE_JWT_SECRET.length < 32) {
+    return { provided: false, valid: false, userId: null, reason: "disabled_or_missing_secret" };
+  }
+
+  const [headerSegment, payloadSegment, signatureSegment] = token.split(".");
+  if (!headerSegment || !payloadSegment || !signatureSegment) {
+    return { provided: true, valid: false, userId: null, reason: "malformed_token" };
+  }
+
+  const header = decodeBase64UrlJson(headerSegment);
+  const payload = decodeBase64UrlJson(payloadSegment);
+  if (!header || !payload) {
+    return { provided: true, valid: false, userId: null, reason: "invalid_encoding" };
+  }
+
+  const alg = header.alg || "HS256";
+  const hmacAlg = alg === "HS512" ? "sha512" : "sha256";
+  const expectedSig = crypto
+    .createHmac(hmacAlg, SUPABASE_JWT_SECRET)
+    .update(`${headerSegment}.${payloadSegment}`)
+    .digest("base64url");
+
+  if (!safeEquals(signatureSegment, expectedSig)) {
+    return { provided: true, valid: false, userId: null, reason: "invalid_signature" };
+  }
+
+  const nowSec = Math.floor(Date.now() / 1000);
+  if (payload.exp && Number(payload.exp) <= nowSec) {
+    return { provided: true, valid: false, userId: null, reason: "expired" };
+  }
+
+  const userId = typeof payload.sub === "string" ? payload.sub : null;
+  if (!userId) {
+    return { provided: true, valid: false, userId: null, reason: "missing_sub" };
+  }
+
+  return { provided: true, valid: true, userId, reason: "ok", payload };
 };
 
 // Hash helper
@@ -344,8 +405,13 @@ export async function handler(event) {
   const anonIdRaw = bodyAnonIdRaw ?? queryAnonIdRaw;
   const anonId = typeof anonIdRaw === "string" ? anonIdRaw.trim() : null;
 
-  if (!anonId) {
-    return json(400, { error: "missing_anon_id" }, origin);
+  const jwtToken = extractBearerToken(event.headers);
+  const authContext = verifySupabaseJwt(jwtToken);
+  const supabaseUserId = authContext.valid ? authContext.userId : null;
+  const identityId = supabaseUserId || anonId || null;
+
+  if (!identityId) {
+    return json(400, { error: "missing_identity" }, origin);
   }
 
   // Generate session data
@@ -356,7 +422,7 @@ export async function handler(event) {
   // Create signed session token
   const sessionToken = createSignedSessionToken({
     sessionId,
-    userId: anonId, // userId field carries identityId (anonId today)
+    userId: identityId, // userId field carries identityId (Supabase userId when authenticated)
     createdAt: now,
     fingerprint,
     secret,
@@ -365,7 +431,7 @@ export async function handler(event) {
   // Store session in Redis
   const storeResult = await storeSession({
     sessionId,
-    userId: anonId,
+    userId: identityId,
     createdAt: now,
     fingerprint,
     ip: clientIp,

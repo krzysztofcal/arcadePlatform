@@ -42,6 +42,23 @@ vi.mock("../netlify/functions/_shared/store-upstash.mjs", () => {
   };
 });
 
+async function loadHandlerWithEnv(requireActivityValue) {
+  const originalEnv = process.env.XP_REQUIRE_ACTIVITY;
+  process.env.XP_REQUIRE_ACTIVITY = requireActivityValue;
+  vi.resetModules();
+  const module = await import("../netlify/functions/calculate-xp.mjs");
+  const { store: freshStore } = await import("../netlify/functions/_shared/store-upstash.mjs");
+  return {
+    handler: module.handler,
+    GAME_XP_RULES: module.GAME_XP_RULES,
+    store: freshStore,
+    restore: () => {
+      process.env.XP_REQUIRE_ACTIVITY = originalEnv;
+      vi.resetModules();
+    }
+  };
+}
+
 // Now import the handler
 const module = await import("../netlify/functions/calculate-xp.mjs");
 const { handler, GAME_XP_RULES } = module;
@@ -185,25 +202,7 @@ describe("calculate-xp endpoint", () => {
     });
 
     it("should return inactive when no input events and activity required", async () => {
-      // Temporarily enable activity requirement
-      const originalEnv = process.env.XP_REQUIRE_ACTIVITY;
-      process.env.XP_REQUIRE_ACTIVITY = "1";
-
-      // Re-import to pick up new env
-      vi.resetModules();
-
-      // Re-mock the store
-      vi.doMock("../netlify/functions/_shared/store-upstash.mjs", () => ({
-        store: {
-          get: vi.fn(() => Promise.resolve(null)),
-          setex: vi.fn(() => Promise.resolve("OK")),
-          incrBy: vi.fn(() => Promise.resolve(1)),
-          expire: vi.fn(() => Promise.resolve(1)),
-          eval: vi.fn(() => Promise.resolve([0, 0, 0, 0, Date.now(), 0])),
-        },
-      }));
-
-      const { handler: freshHandler } = await import("../netlify/functions/calculate-xp.mjs");
+      const { handler: freshHandler, restore } = await loadHandlerWithEnv("1");
 
       const event = {
         httpMethod: "POST",
@@ -216,6 +215,7 @@ describe("calculate-xp endpoint", () => {
           windowEnd: Date.now(),
           inputEvents: 0, // No activity
           visibilitySeconds: 0,
+          scoreDelta: 500,
         }),
       };
 
@@ -227,7 +227,37 @@ describe("calculate-xp endpoint", () => {
       expect(body.awarded).toBe(0);
       expect(body.reason).toBe("inactive");
 
-      process.env.XP_REQUIRE_ACTIVITY = originalEnv;
+      restore();
+    });
+
+    it("should award XP when activity gating is disabled", async () => {
+      const { handler: freshHandler, restore, store: freshStore } = await loadHandlerWithEnv("0");
+
+      const event = {
+        httpMethod: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          userId: "user-123",
+          sessionId: "sess-123",
+          gameId: "tetris",
+          windowStart: Date.now() - 10000,
+          windowEnd: Date.now(),
+          inputEvents: 0,
+          visibilitySeconds: 0,
+          scoreDelta: 500,
+        }),
+      };
+
+      freshStore.eval.mockResolvedValue([15, 15, 15, 15, Date.now(), 0]);
+
+      const response = await freshHandler(event);
+      expect(response.statusCode).toBe(200);
+
+      const body = JSON.parse(response.body);
+      expect(body.ok).toBe(true);
+      expect(body.awarded).toBeGreaterThan(0);
+
+      restore();
     });
 
     it("should cap XP per request", async () => {

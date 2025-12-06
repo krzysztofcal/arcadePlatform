@@ -30,10 +30,105 @@
     authPromise: null,
   };
 
+  let serverCalcInitRequested = false;
+
+  function hostShouldUseServerCalc(win) {
+    const host = win && win.location && win.location.hostname;
+    if (!host) return false;
+    if (host === "localhost" || host === "127.0.0.1") return true;
+    if (host === "play.kcswh.pl" || host === "landing.kcswh.pl") return true;
+    if (typeof host === "string" && host.endsWith(".netlify.app")) return true;
+    return false;
+  }
+
+  function ensureServerCalcInit() {
+    if (typeof window === "undefined") return;
+
+    if (!serverCalcInitRequested && typeof window.XP_SERVER_CALC === "undefined") {
+      window.XP_SERVER_CALC = hostShouldUseServerCalc(window);
+    }
+
+    if (window.XpServerCalc && typeof window.XpServerCalc.initServerCalc === "function") {
+      try {
+        window.XpServerCalc.initServerCalc(window, typeof document !== "undefined" ? document : undefined, {});
+      } catch (_) {}
+      return;
+    }
+
+    if (serverCalcInitRequested) return;
+    serverCalcInitRequested = true;
+
+    if (typeof document === "undefined" || !document || typeof document.createElement !== "function") {
+      serverCalcInitRequested = false;
+      return;
+    }
+
+    const script = document.createElement("script");
+    script.src = "/js/xp/server-calc.js";
+    script.async = true;
+    script.onload = function () {
+      serverCalcInitRequested = false;
+      if (window.XpServerCalc && typeof window.XpServerCalc.initServerCalc === "function") {
+        try {
+          window.XpServerCalc.initServerCalc(window, document, {});
+        } catch (_) {}
+      }
+    };
+    script.onerror = function () {
+      serverCalcInitRequested = false;
+    };
+
+    (document.head || document.body || document.documentElement).appendChild(script);
+  }
+
+  ensureServerCalcInit();
+
+  function klog(kind, data) {
+    if (typeof window === "undefined") return;
+    try {
+      if (window.KLog && typeof window.KLog.log === "function") {
+        window.KLog.log(kind, data || {});
+        return;
+      }
+    } catch (_) {}
+    try {
+      if (typeof console !== "undefined" && console && typeof console.log === "function") {
+        console.log(`[klog] ${kind}`, data || {});
+      }
+    } catch (_) {}
+  }
+
   function getSupabaseClient() {
     if (typeof window === "undefined") return null;
     const existing = window.supabaseClient;
     if (existing && existing.auth) return existing;
+    return null;
+  }
+
+  function getAuthBridge() {
+    if (typeof window === "undefined") return null;
+
+    if (window.SupabaseAuthBridge && typeof window.SupabaseAuthBridge.getAccessToken === "function") {
+      return window.SupabaseAuthBridge;
+    }
+
+    try {
+      if (window.parent
+        && window.parent !== window
+        && window.parent.SupabaseAuthBridge
+        && typeof window.parent.SupabaseAuthBridge.getAccessToken === "function") {
+        return window.parent.SupabaseAuthBridge;
+      }
+    } catch (_) {}
+
+    try {
+      if (window.opener
+        && window.opener.SupabaseAuthBridge
+        && typeof window.opener.SupabaseAuthBridge.getAccessToken === "function") {
+        return window.opener.SupabaseAuthBridge;
+      }
+    } catch (_) {}
+
     return null;
   }
 
@@ -46,29 +141,52 @@
       return state.authPromise;
     }
 
-    const client = getSupabaseClient();
-    if (!client || !client.auth || typeof client.auth.getSession !== "function") {
-      state.authCheckedAt = now;
-      state.authToken = null;
-      return null;
-    }
+    state.authPromise = (async () => {
+      try {
+        let token = null;
 
-    state.authPromise = client.auth.getSession()
-      .then((res) => {
-        const session = res && res.data ? res.data.session : null;
-        const token = session && session.access_token ? session.access_token : null;
+        const bridge = getAuthBridge();
+        const getter = bridge && typeof bridge.getAccessToken === "function"
+          ? bridge.getAccessToken
+          : null;
+        if (getter) {
+          token = await getter();
+          if (window && window.console && typeof console.debug === "function") {
+            console.debug("[XPClient] auth_bridge_result", { hasToken: !!token });
+          }
+        }
+
+        if (!token) {
+          const client = getSupabaseClient();
+          if (client && client.auth && typeof client.auth.getSession === "function") {
+            const res = await client.auth.getSession();
+            const session = res && res.data ? res.data.session : null;
+            token = session && session.access_token ? session.access_token : null;
+          }
+          if (window && window.console && typeof console.debug === "function") {
+            console.debug("[XPClient] auth_client_result", { hasToken: !!token });
+          }
+        }
+
         state.authToken = token || null;
         state.authCheckedAt = Date.now();
         return state.authToken;
-      })
-      .catch(() => {
+      } catch (err) {
+        if (window && window.console && typeof console.warn === "function") {
+          try {
+            const message = err && err.message ? String(err.message) : "error";
+            console.warn("[XPClient] auth_token_fetch_error", { message });
+          } catch (_) {
+            console.warn("[XPClient] auth_token_fetch_error");
+          }
+        }
         state.authToken = null;
         state.authCheckedAt = Date.now();
         return null;
-      })
-      .finally(() => {
+      } finally {
         state.authPromise = null;
-      });
+      }
+    })();
 
     return state.authPromise;
   }
@@ -77,12 +195,53 @@
     return !!state.authToken;
   }
 
-  async function buildAuthHeaders() {
-    const token = await fetchAuthToken(false);
-    if (token) {
-      return { Authorization: `Bearer ${token}` };
+  async function isUserLoggedIn() {
+    try {
+      const bridge = getAuthBridge();
+      if (bridge && typeof bridge.getAccessToken === "function") {
+        const token = await bridge.getAccessToken();
+        if (token) return true;
+      }
+    } catch (_) {}
+
+    const client = getSupabaseClient();
+    if (client && client.auth && typeof client.auth.getSession === "function") {
+      try {
+        const res = await client.auth.getSession();
+        const session = res && res.data ? res.data.session : null;
+        if (session && session.user) return true;
+      } catch (_) {}
     }
-    return {};
+    return false;
+  }
+
+  async function ensureAuthTokenWithRetry() {
+    let token = await fetchAuthToken(false);
+    let attempts = 0;
+    while (!token && attempts < 2) {
+      token = await fetchAuthToken(true);
+      attempts += 1;
+    }
+    if (!token) {
+      try {
+        const loggedIn = await isUserLoggedIn();
+        if (loggedIn) {
+          klog("xp_missing_auth_token", {});
+        }
+      } catch (_) {}
+    }
+    return token;
+  }
+
+  async function buildAuthHeaders(baseHeaders) {
+    const headers = Object.assign({}, baseHeaders || {});
+    try {
+      const token = await ensureAuthTokenWithRetry();
+      if (token) {
+        headers.Authorization = `Bearer ${token}`;
+      }
+    } catch (_) {}
+    return headers;
   }
 
   function randomId() {
@@ -204,7 +363,7 @@
 
     state.serverSessionPromise = (async () => {
       try {
-        const headers = Object.assign({ "content-type": "application/json" }, await buildAuthHeaders());
+        const headers = await buildAuthHeaders({ "content-type": "application/json" });
         const res = await fetch(START_SESSION_URL, {
           method: "POST",
           headers,
@@ -371,7 +530,8 @@
     const keepalive = opts.keepalive === true;
     const allowBeacon = opts.allowBeacon === true;
     const payload = JSON.stringify(body);
-    const headers = Object.assign({ "content-type": "application/json" }, await buildAuthHeaders());
+    await ensureAuthTokenWithRetry();
+    const headers = await buildAuthHeaders({ "content-type": "application/json" });
     const requestInit = {
       method: "POST",
       headers,
@@ -512,7 +672,8 @@
   async function fetchStatus() {
     const { userId, sessionId } = ensureIds();
     const body = { userId, sessionId, gameId: "status", statusOnly: true };
-    const headers = Object.assign({ "content-type": "application/json" }, await buildAuthHeaders());
+    await ensureAuthTokenWithRetry();
+    const headers = await buildAuthHeaders({ "content-type": "application/json" });
     const res = await fetch(FN_URL, {
       method: "POST",
       headers,
@@ -533,18 +694,30 @@
    * Check if server-side XP calculation is enabled
    */
   function isServerCalcEnabled() {
-    if (window.XP_SERVER_CALC === true) return true;
+    ensureServerCalcInit();
+
+    let serverCalcEnabled = window.XP_SERVER_CALC === true;
     try {
-      if (typeof location !== "undefined" && location && typeof location.search === "string") {
-        if (/\bxpserver=1\b/.test(location.search)) return true;
+      if (!serverCalcEnabled && typeof location !== "undefined" && location && typeof location.search === "string") {
+        if (/\bxpserver=1\b/.test(location.search)) serverCalcEnabled = true;
       }
     } catch (_) {}
     try {
-      if (typeof localStorage !== "undefined" && localStorage) {
-        if (localStorage.getItem("xp:serverCalc") === "1") return true;
+      if (!serverCalcEnabled && typeof localStorage !== "undefined" && localStorage) {
+        if (localStorage.getItem("xp:serverCalc") === "1") serverCalcEnabled = true;
       }
     } catch (_) {}
-    return false;
+
+    try {
+      if (window && window.console && typeof console.debug === "function") {
+        console.debug("[xpClient] Server calc decision", {
+          XP_SERVER_CALC: window.XP_SERVER_CALC,
+          serverCalcEnabled,
+        });
+      }
+    } catch (_) {}
+
+    return serverCalcEnabled;
   }
 
   /**
@@ -591,7 +764,8 @@
     let attempt = 0;
     const payloadJson = JSON.stringify(body);
     const allowBeacon = opts.allowBeacon === true;
-    const headers = Object.assign({ "content-type": "application/json" }, await buildAuthHeaders());
+    await ensureAuthTokenWithRetry();
+    const headers = await buildAuthHeaders({ "content-type": "application/json" });
     while (attempt < 3) {
       let networkError = false;
       let lastError = null;
@@ -632,6 +806,14 @@
         const responseBody = await res.json();
         if (responseBody && typeof responseBody === "object" && opts.keepalive === true) {
           responseBody._transport = "keepalive";
+        }
+
+        if (window && window.console && typeof window.console.debug === "function" && responseBody) {
+          window.console.debug("[XP] server_calc_apply", {
+            awarded: responseBody.awarded || 0,
+            totalLifetime: responseBody.totalLifetime,
+            remaining: responseBody.remaining,
+          });
         }
 
         // Update client cap from server response

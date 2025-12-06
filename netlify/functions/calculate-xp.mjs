@@ -47,7 +47,7 @@ const DELTA_CAP = asNumber(process.env.XP_DELTA_CAP, 300);
 // Activity Requirements
 const MIN_ACTIVITY_EVENTS = Math.max(0, asNumber(process.env.XP_MIN_ACTIVITY_EVENTS, 4));
 const MIN_ACTIVITY_VIS_S = Math.max(0, asNumber(process.env.XP_MIN_ACTIVITY_VIS_S, 8));
-const REQUIRE_ACTIVITY = process.env.XP_REQUIRE_ACTIVITY !== "0"; // Default enabled for server calc
+const REQUIRE_ACTIVITY = process.env.XP_REQUIRE_ACTIVITY === "1"; // Require activity only when explicitly enabled
 
 // Session & Security
 const SESSION_TTL_SEC = Math.max(0, asNumber(process.env.XP_SESSION_TTL_SEC, 604800));
@@ -63,6 +63,9 @@ const SERVER_SESSION_WARN_MODE = process.env.XP_SERVER_SESSION_WARN_MODE === "1"
 const RATE_LIMIT_PER_USER_PER_MIN = Math.max(0, asNumber(process.env.XP_RATE_LIMIT_USER_PER_MIN, 30));
 const RATE_LIMIT_PER_IP_PER_MIN = Math.max(0, asNumber(process.env.XP_RATE_LIMIT_IP_PER_MIN, 60));
 const RATE_LIMIT_ENABLED = process.env.XP_RATE_LIMIT_ENABLED !== "0";
+
+// Supabase JWT verification
+const SUPABASE_JWT_SECRET = process.env.SUPABASE_JWT_SECRET || process.env.SUPABASE_JWT_SECRET_V2 || "";
 
 // CORS
 const CORS_ALLOW = (() => {
@@ -164,6 +167,82 @@ const GAME_XP_RULES = {
 // Utility Functions
 // ============================================================================
 
+const klog = (kind, data) => {
+  try {
+    console.log(`[klog] ${kind}`, JSON.stringify(data));
+  } catch {
+    console.log(`[klog] ${kind}`, data);
+  }
+};
+
+const safeEquals = (a, b) => {
+  if (!a || !b || a.length !== b.length) return false;
+  const left = Buffer.from(a, "utf8");
+  const right = Buffer.from(b, "utf8");
+  if (left.length !== right.length) return false;
+  return crypto.timingSafeEqual(left, right);
+};
+
+const decodeBase64UrlJson = (segment) => {
+  if (!segment) return null;
+  try {
+    const decoded = Buffer.from(segment, "base64url").toString("utf8");
+    return JSON.parse(decoded);
+  } catch {
+    return null;
+  }
+};
+
+const extractBearerToken = (headers) => {
+  const headerValue = headers?.authorization || headers?.Authorization || headers?.AUTHORIZATION;
+  if (!headerValue || typeof headerValue !== "string") return null;
+  const match = /^Bearer\s+(.+)$/.exec(headerValue.trim());
+  return match ? match[1].trim() : null;
+};
+
+const verifySupabaseJwt = (token) => {
+  if (!token) {
+    return { provided: false, valid: false, userId: null, reason: "missing_token" };
+  }
+  if (!SUPABASE_JWT_SECRET || SUPABASE_JWT_SECRET.length < 32) {
+    return { provided: false, valid: false, userId: null, reason: "disabled_or_missing_secret" };
+  }
+
+  const [headerSegment, payloadSegment, signatureSegment] = token.split(".");
+  if (!headerSegment || !payloadSegment || !signatureSegment) {
+    return { provided: true, valid: false, userId: null, reason: "malformed_token" };
+  }
+
+  const header = decodeBase64UrlJson(headerSegment);
+  const payload = decodeBase64UrlJson(payloadSegment);
+  if (!header || !payload) {
+    return { provided: true, valid: false, userId: null, reason: "invalid_encoding" };
+  }
+
+  const alg = header.alg || "HS256";
+  const hmacAlg = alg === "HS512" ? "sha512" : "sha256";
+  const expectedSig = crypto
+    .createHmac(hmacAlg, SUPABASE_JWT_SECRET)
+    .update(`${headerSegment}.${payloadSegment}`)
+    .digest("base64url");
+
+  if (!safeEquals(signatureSegment, expectedSig)) {
+    return { provided: true, valid: false, userId: null, reason: "invalid_signature" };
+  }
+
+  const nowSec = Math.floor(Date.now() / 1000);
+  if (payload.exp && Number(payload.exp) <= nowSec) {
+    return { provided: true, valid: false, userId: null, reason: "expired" };
+  }
+
+  const userId = typeof payload.sub === "string" ? payload.sub : null;
+  if (!userId) {
+    return { provided: true, valid: false, userId: null, reason: "no_sub" };
+  }
+
+  return { provided: true, valid: true, userId, reason: "ok", payload };
+};
+
 const hash = (s) => crypto.createHash("sha256").update(s).digest("hex");
 
 /**
@@ -264,6 +343,32 @@ const keySessionSync = (u, s) => `${KEY_NS}:session:last:${hash(`${u}|${s}`)}`;
 const keySessionState = (u, s) => `${KEY_NS}:session:state:${hash(`${u}|${s}`)}`;
 const keyRateLimitUser = (userId) => `${KEY_NS}:ratelimit:user:${userId}:${Math.floor(Date.now() / 60000)}`;
 const keyRateLimitIp = (ip) => `${KEY_NS}:ratelimit:ip:${hash(ip)}:${Math.floor(Date.now() / 60000)}`;
+
+async function getTotals({ userId, sessionId, now }) {
+  if (!userId) {
+    return { current: 0, lifetime: 0, sessionTotal: 0, lastSync: 0 };
+  }
+
+  const dayKeyNow = getDailyKey(now || Date.now());
+  const todayKey = keyDaily(userId, dayKeyNow);
+  const totalKeyK = keyTotal(userId);
+  const sessionKeyK = keySession(userId, sessionId || "");
+  const sessionSyncKeyK = keySessionSync(userId, sessionId || "");
+
+  const [dailyRaw, totalRaw, sessionRaw, syncRaw] = await Promise.all([
+    store.get(todayKey),
+    store.get(totalKeyK),
+    store.get(sessionKeyK),
+    store.get(sessionSyncKeyK),
+  ]);
+
+  const current = Math.max(0, Math.floor(Number(dailyRaw) || 0));
+  const lifetime = Math.max(0, Math.floor(Number(totalRaw) || 0));
+  const sessionTotal = Math.max(0, Math.floor(Number(sessionRaw) || 0));
+  const lastSync = Math.max(0, Math.floor(Number(syncRaw) || 0));
+
+  return { current, lifetime, sessionTotal, lastSync };
+}
 
 // ============================================================================
 // Combo System (Server-Side)
@@ -705,6 +810,11 @@ export async function handler(event) {
     return json(405, { error: "method_not_allowed" }, origin);
   }
 
+  klog("calc_env_debug", {
+    XP_REQUIRE_ACTIVITY: process.env.XP_REQUIRE_ACTIVITY,
+    requireActivity: REQUIRE_ACTIVITY,
+  });
+
   // Parse body
   let body = {};
   try {
@@ -715,12 +825,28 @@ export async function handler(event) {
     return json(400, { error: "bad_json" }, origin);
   }
 
-  const userId = typeof body.userId === "string" ? body.userId.trim() : null;
+  const bodyAnonIdRaw = typeof body.anonId === "string"
+    ? body.anonId
+    : (typeof body.userId === "string" ? body.userId : null);
+  const anonId = bodyAnonIdRaw ? bodyAnonIdRaw.trim() : null;
   const sessionId = typeof body.sessionId === "string" ? body.sessionId.trim() : null;
 
-  if (!userId || !sessionId) {
-    return json(400, { error: "missing_fields", message: "userId and sessionId required" }, origin);
+  const jwtToken = extractBearerToken(event.headers);
+  const authContext = verifySupabaseJwt(jwtToken);
+  const supabaseUserId = authContext.valid ? authContext.userId : null;
+  const identityId = supabaseUserId || anonId || null;
+
+  klog("calc_identity_debug", {
+    anonId,
+    supabaseUserId,
+    identityId,
+  });
+
+  if (!identityId || !sessionId) {
+    return json(400, { error: "missing_fields", message: "identity and sessionId required" }, origin);
   }
+
+  const userId = identityId;
 
   // Rate limiting
   const clientIp = event.headers?.["x-forwarded-for"]?.split(",")[0]?.trim()
@@ -760,11 +886,11 @@ export async function handler(event) {
         sessionError = "token_fingerprint_mismatch";
       } else {
         // Verify session exists in Redis and matches
-        const serverValidation = await validateServerSession({
-          sessionId: tokenResult.sessionId,
-          userId,
-          fingerprint,
-        });
+          const serverValidation = await validateServerSession({
+            sessionId: tokenResult.sessionId,
+            userId,
+            fingerprint,
+          });
         if (!serverValidation.valid) {
           sessionError = `session_${serverValidation.reason}`;
           if (serverValidation.suspicious) {
@@ -839,6 +965,15 @@ export async function handler(event) {
       }, origin);
     }
   }
+
+  klog("calc_award_attempt", {
+    identityId: userId,
+    supabaseUserId,
+    anonId,
+    gameId: body.gameId || null,
+    scoreDelta: body.scoreDelta ?? body.delta ?? null,
+    hasSessionToken: !!(body.sessionToken || event.headers?.["x-session-token"]),
+  });
 
   // Get or create session state
   const sessionState = await getSessionState(userId, sessionId);
@@ -975,18 +1110,38 @@ export async function handler(event) {
     return {grant, dailyTotal, sessionTotal, lifetime, lastSync, status}
   `;
 
-  const res = await store.eval(
-    script,
-    [sessionKeyK, sessionSyncKeyK, todayKey, totalKeyK],
-    [
-      String(now),
-      String(cappedDelta),
-      String(DAILY_CAP),
-      String(Math.max(0, SESSION_CAP)),
-      String(windowEnd),
-      String(SESSION_TTL_MS),
-    ]
-  );
+  let res;
+  try {
+    if (cappedDelta > 0) {
+      klog("calc_award_redis_eval_start", {
+        userId,
+        sessionId,
+        dayKeyNow,
+        keys: { todayKey, totalKeyK, sessionKeyK, sessionSyncKeyK },
+        cappedDelta,
+      });
+    }
+
+    res = await store.eval(
+      script,
+      [sessionKeyK, sessionSyncKeyK, todayKey, totalKeyK],
+      [
+        String(now),
+        String(cappedDelta),
+        String(DAILY_CAP),
+        String(Math.max(0, SESSION_CAP)),
+        String(windowEnd),
+        String(SESSION_TTL_MS),
+      ]
+    );
+  } catch (err) {
+    console.error("[XP-CALC] Redis eval failed", {
+      userId,
+      sessionId,
+      errMessage: err && err.message,
+    });
+    throw err;
+  }
 
   const granted = Math.max(0, Math.floor(Number(res?.[0]) || 0));
   const redisDailyTotal = Number(res?.[1]) || 0;
@@ -996,6 +1151,30 @@ export async function handler(event) {
   const status = Number(res?.[5]) || 0;
 
   const remaining = Math.max(0, DAILY_CAP - redisDailyTotal);
+
+  if (granted > 0) {
+    klog("calc_award_debug_totals", {
+      identityId: userId,
+      supabaseUserId,
+      anonId,
+      sessionId,
+      awarded: granted,
+      redisDailyTotal,
+      totalLifetime,
+      keys: { todayKey, totalKeyK, sessionKeyK, sessionSyncKeyK },
+    });
+
+    klog("calc_award_result", {
+      identityId: userId,
+      supabaseUserId,
+      anonId,
+      granted,
+      totalLifetime,
+      totalToday: redisDailyTotal,
+      status,
+      raw: res,
+    });
+  }
 
   // Update session state
   sessionState.combo = updatedCombo;
