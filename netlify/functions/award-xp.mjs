@@ -555,18 +555,38 @@ export async function handler(event) {
   let identityId = userId || anonId || null;
 
   // Migrate existing anon XP into the authenticated Supabase bucket once the user logs in.
+  // This runs early with query param anonId (if provided).
   if (userId && anonId && anonId !== userId) {
     try {
       const anonTotals = await getTotals({ userId: anonId, sessionId: querySessionId, now });
-      if (anonTotals && anonTotals.lifetime > 0) {
+      const dayKeyNowForMigration = getDailyKey(now);
+
+      // Migrate both lifetime AND daily XP
+      const migrateLifetime = anonTotals && anonTotals.lifetime > 0;
+      const migrateCurrent = anonTotals && anonTotals.current > 0;
+
+      if (migrateLifetime || migrateCurrent) {
         const anonTotalKey = keyTotal(anonId);
         const userTotalKey = keyTotal(userId);
-        await store.incrBy(userTotalKey, anonTotals.lifetime);
-        await store.set(anonTotalKey, 0);
+        const anonDailyKey = keyDaily(anonId, dayKeyNowForMigration);
+        const userDailyKey = keyDaily(userId, dayKeyNowForMigration);
+
+        if (migrateLifetime) {
+          await store.incrBy(userTotalKey, anonTotals.lifetime);
+          await store.set(anonTotalKey, 0);
+        }
+
+        if (migrateCurrent) {
+          await store.incrBy(userDailyKey, anonTotals.current);
+          await store.set(anonDailyKey, 0);
+        }
+
         klog("award_anon_migrated", {
           from: anonId,
           to: userId,
-          amount: anonTotals.lifetime,
+          lifetimeMigrated: migrateLifetime ? anonTotals.lifetime : 0,
+          dailyMigrated: migrateCurrent ? anonTotals.current : 0,
+          dayKey: dayKeyNowForMigration,
         });
       }
     } catch (err) {
@@ -658,15 +678,41 @@ export async function handler(event) {
   if (userId && anonId && anonId !== userId) {
     try {
       const anonTotals = await getTotals({ userId: anonId, sessionId: querySessionId, now });
-      if (anonTotals && anonTotals.lifetime > 0) {
+      const dayKeyNowForMigration = getDailyKey(now);
+
+      klog("xp_migration_check", {
+        from: anonId,
+        to: userId,
+        anonTotals,
+        dayKey: dayKeyNowForMigration,
+      });
+
+      // Migrate both lifetime AND daily XP
+      const migrateLifetime = anonTotals && anonTotals.lifetime > 0;
+      const migrateCurrent = anonTotals && anonTotals.current > 0;
+
+      if (migrateLifetime || migrateCurrent) {
         const anonTotalKey = keyTotal(anonId);
         const userTotalKey = keyTotal(userId);
-        await store.incrBy(userTotalKey, anonTotals.lifetime);
-        await store.set(anonTotalKey, 0);
-        console.log("[XP] Migrated anon XP to account", {
+        const anonDailyKey = keyDaily(anonId, dayKeyNowForMigration);
+        const userDailyKey = keyDaily(userId, dayKeyNowForMigration);
+
+        if (migrateLifetime) {
+          await store.incrBy(userTotalKey, anonTotals.lifetime);
+          await store.set(anonTotalKey, 0);
+        }
+
+        if (migrateCurrent) {
+          await store.incrBy(userDailyKey, anonTotals.current);
+          await store.set(anonDailyKey, 0);
+        }
+
+        klog("xp_migration_complete", {
           from: anonId,
           to: userId,
-          amount: anonTotals.lifetime,
+          lifetimeMigrated: migrateLifetime ? anonTotals.lifetime : 0,
+          dailyMigrated: migrateCurrent ? anonTotals.current : 0,
+          dayKey: dayKeyNowForMigration,
         });
       }
     } catch (err) {
