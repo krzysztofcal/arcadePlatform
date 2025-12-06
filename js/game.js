@@ -1,5 +1,27 @@
 // Game page composed from small services (no bundler)
 (function(){
+  'use strict';
+
+  var LOG_PREFIX = 'cats_game';
+
+  /**
+   * klog helper - logs to KLog if available, otherwise console
+   */
+  function klog(kind, data) {
+    var payload = data || {};
+    try {
+      if (typeof window !== 'undefined' && window.KLog && typeof window.KLog.log === 'function') {
+        window.KLog.log(LOG_PREFIX + '_' + kind, payload);
+        return;
+      }
+    } catch (_) {}
+    try {
+      if (typeof console !== 'undefined' && console && typeof console.log === 'function') {
+        console.log('[' + LOG_PREFIX + '] ' + kind + ':', payload);
+      }
+    } catch (_) {}
+  }
+
   const { CONFIG, StorageService, AudioService, FullscreenService, InputController, CatsRules } = window;
   const gameWrap = document.getElementById('gameWrap');
   const btnEnterFs = document.getElementById('btnEnterFs');
@@ -11,6 +33,8 @@
   const slug = 'cats-arcade';
   const pageId = 'game_cats';
   const getLang = ()=> (window.I18N && window.I18N.getLang && window.I18N.getLang()) || 'en';
+
+  klog('init', { slug: slug, pageId: pageId });
 
   if (window.XP){
     try { window.XP.stopSession({ flush: true }); } catch (_){}
@@ -142,6 +166,7 @@
     ctx.fillStyle="#9fb0d0"; ctx.font="12px system-ui"; ctx.fillText(running?"Łap koty! ← → / dotknij":"Dotknij, aby zacząć",10,18);
   }
   function endGame(){
+    klog('game_over', { score: score, level: level, highScore: state.highScore, slug: slug });
     running=false; paused=false; state.lastScore=score; if(score>state.highScore) state.highScore=score; storage.save(state);
     setPauseUI && setPauseUI(); renderHud();
     // Show game over overlay with stats
@@ -179,6 +204,7 @@
   function startGame(){
     xpNudge();
     if(running) return;
+    klog('start', { slug: slug });
     audio.ensure();
     running=true; paused=false; score=0; level=1; cats=[]; spawnCooldown=0; msLeft=getRoundTime(); startTs = performance.now(); setPauseUI && setPauseUI();
     if (centerOverlay) centerOverlay.classList.add('hidden');
@@ -204,6 +230,7 @@
     state.muted = audio.isMuted ? audio.isMuted() : !state.muted;
     storage.save(state);
     setMuteUI();
+    klog('mute_toggle', { muted: state.muted, slug: slug });
   }
   function setPauseUI(){
     if (!btnPause) return;
@@ -212,7 +239,7 @@
     btnPause.textContent = paused ? '▶' : '⏸';
     btnPause.disabled = !running;
   }
-  function togglePause(){ xpNudge(); if (!running) return; paused = !paused; setPauseUI(); renderHud(); }
+  function togglePause(){ xpNudge(); if (!running) return; paused = !paused; setPauseUI(); renderHud(); klog('pause_toggle', { paused: paused, slug: slug }); }
 
   // Use InputController for all inputs
   InputController({

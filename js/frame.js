@@ -1,5 +1,27 @@
 /* Minimal distributor game frame: consent gating + responsive iframe */
 (function(){
+  'use strict';
+
+  var LOG_PREFIX = 'frame_game';
+
+  /**
+   * klog helper - logs to KLog if available, otherwise console
+   */
+  function klog(kind, data) {
+    var payload = data || {};
+    try {
+      if (typeof window !== 'undefined' && window.KLog && typeof window.KLog.log === 'function') {
+        window.KLog.log(LOG_PREFIX + '_' + kind, payload);
+        return;
+      }
+    } catch (_) {}
+    try {
+      if (typeof console !== 'undefined' && console && typeof console.log === 'function') {
+        console.log('[' + LOG_PREFIX + '] ' + kind + ':', payload);
+      }
+    } catch (_) {}
+  }
+
   const titleEl = document.getElementById('gameTitle');
   const metaEl = document.getElementById('gameMeta');
   const frameBox = document.getElementById('frameBox');
@@ -8,6 +30,8 @@
   const rotateOverlay = document.getElementById('rotateOverlay');
   const btnEnter = document.getElementById('btnEnterFs');
   const btnExit = document.getElementById('btnExitFs');
+  const btnMute = document.getElementById('btnMute');
+  const btnPause = document.getElementById('btnPause');
   const introSection = document.getElementById('gameIntro');
   const coverWrap = document.getElementById('gameCoverWrap');
   const coverEl = document.getElementById('gameCover');
@@ -19,6 +43,17 @@
   const canonicalLink = document.querySelector('link[rel="canonical"]');
 
   const analytics = window.Analytics;
+
+  // Game control state
+  let gameMuted = false;
+  let gamePaused = false;
+  let gameStarted = false;
+  let currentIframe = null;
+
+  // Load muted state from localStorage
+  try {
+    gameMuted = localStorage.getItem('frame-game-muted') === 'true';
+  } catch (_) {}
   const catalog = window.ArcadeCatalog;
   const gameUtils = window.GameUtils && typeof window.GameUtils === 'object'
     ? window.GameUtils
@@ -186,6 +221,116 @@
     try { document.exitFullscreen && document.exitFullscreen(); } catch {}
   }
 
+  /**
+   * Update mute button UI
+   */
+  function updateMuteUI() {
+    if (!btnMute) return;
+    btnMute.setAttribute('aria-pressed', gameMuted ? 'true' : 'false');
+    btnMute.title = gameMuted ? 'Unmute' : 'Mute';
+    btnMute.textContent = gameMuted ? '🔈' : '🔇';
+  }
+
+  /**
+   * Update pause button UI
+   */
+  function updatePauseUI() {
+    if (!btnPause) return;
+    btnPause.setAttribute('aria-pressed', gamePaused ? 'true' : 'false');
+    btnPause.title = gamePaused ? 'Resume' : 'Pause';
+    btnPause.textContent = gamePaused ? '▶' : '⏸';
+    btnPause.disabled = !gameStarted;
+  }
+
+  /**
+   * Send control message to iframe
+   */
+  function sendIframeMessage(type, data) {
+    if (!currentIframe) return;
+    try {
+      const message = { type: 'kcswh:game-control', action: type, ...data };
+      currentIframe.contentWindow.postMessage(message, '*');
+      klog('iframe_message_sent', { type: type, data: data });
+    } catch (err) {
+      klog('iframe_message_error', { type: type, error: String(err) });
+    }
+  }
+
+  /**
+   * Toggle mute state
+   */
+  function toggleMute() {
+    gameMuted = !gameMuted;
+    klog('mute_toggle', { muted: gameMuted, slug: currentSlug });
+    try {
+      localStorage.setItem('frame-game-muted', gameMuted ? 'true' : 'false');
+    } catch (_) {}
+    updateMuteUI();
+    sendIframeMessage('mute', { muted: gameMuted });
+  }
+
+  /**
+   * Toggle pause state
+   */
+  function togglePause() {
+    if (!gameStarted) return;
+    gamePaused = !gamePaused;
+    klog('pause_toggle', { paused: gamePaused, slug: currentSlug });
+    updatePauseUI();
+    sendIframeMessage('pause', { paused: gamePaused });
+  }
+
+  /**
+   * Handle keyboard shortcuts
+   */
+  function handleKeydown(e) {
+    if (e.code === 'KeyM') {
+      toggleMute();
+    }
+    if (e.code === 'Space' && gameStarted) {
+      // Don't prevent default for Space in iframe games - let the game handle it
+      // togglePause();
+    }
+    if (e.code === 'KeyF') {
+      if (isFullscreenActive()) {
+        exitFs();
+      } else {
+        enterFs();
+      }
+    }
+  }
+
+  /**
+   * Check if fullscreen is active
+   */
+  function isFullscreenActive() {
+    return !!(document.fullscreenElement && frameWrap.contains(document.fullscreenElement));
+  }
+
+  /**
+   * Initialize control buttons
+   */
+  function initControls() {
+    klog('init_controls', { slug: currentSlug });
+
+    // Mute button
+    if (btnMute) {
+      btnMute.addEventListener('click', toggleMute);
+    }
+
+    // Pause button
+    if (btnPause) {
+      btnPause.addEventListener('click', togglePause);
+    }
+
+    // Keyboard shortcuts
+    window.addEventListener('keydown', handleKeydown);
+
+    // Initial UI state
+    updateMuteUI();
+    updatePauseUI();
+  }
+
   function normalizeList(rawList){
     if (catalog && typeof catalog.normalizeGameList === 'function'){
       return catalog.normalizeGameList(rawList);
@@ -268,6 +413,7 @@ async function loadCatalog(){
   }
 
   function injectIframe(url, orientation){
+    klog('inject_iframe', { url: url, orientation: orientation, slug: currentSlug });
     frameBox.innerHTML = '';
     const iframe = document.createElement('iframe');
     iframe.className = 'frameIframe';
@@ -277,6 +423,12 @@ async function loadCatalog(){
     iframe.referrerPolicy = 'no-referrer-when-downgrade';
     iframe.src = url;
     frameBox.appendChild(iframe);
+
+    // Store iframe reference for control messaging
+    currentIframe = iframe;
+    gameStarted = true;
+    gamePaused = false;
+    updatePauseUI();
     const postTarget = (function(){
       try {
         if (typeof window !== 'undefined' && window.location && window.location.origin){
@@ -544,9 +696,13 @@ function showCatalogError(){
 }
 
 async function init(){
+  klog('init', {});
   const slug = qsParam('slug') || '';
   currentSlug = slug;
   setWindowGameId(slug || 'game-shell');
+
+  // Initialize control buttons
+  initControls();
 
   let list;
   try {

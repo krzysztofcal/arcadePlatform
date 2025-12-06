@@ -1,4 +1,26 @@
 (function(){
+  'use strict';
+
+  var LOG_PREFIX = 'fullscreen_service';
+
+  /**
+   * klog helper - logs to KLog if available, otherwise console
+   */
+  function klog(kind, data) {
+    var payload = data || {};
+    try {
+      if (typeof window !== 'undefined' && window.KLog && typeof window.KLog.log === 'function') {
+        window.KLog.log(LOG_PREFIX + '_' + kind, payload);
+        return;
+      }
+    } catch (_) {}
+    try {
+      if (typeof console !== 'undefined' && console && typeof console.log === 'function') {
+        console.log('[' + LOG_PREFIX + '] ' + kind + ':', payload);
+      }
+    } catch (_) {}
+  }
+
   function FullscreenService(opts){
     const { wrap, btnEnter, btnExit, overlayExit, canvas, aspect, reserved, onResizeRequest, analyticsContext } = opts;
     const analytics = window.Analytics;
@@ -25,10 +47,12 @@
 
     function isActive(){ return document.fullscreenElement === wrap || document.webkitFullscreenElement === wrap; }
     function enter(){
+      klog('enter_request', contextPayload());
       pendingAction = { trigger: 'button', requested: 'enter' };
       if (wrap.requestFullscreen) wrap.requestFullscreen(); else if (wrap.webkitRequestFullscreen) wrap.webkitRequestFullscreen();
     }
     function exit(){
+      klog('exit_request', contextPayload());
       pendingAction = { trigger: 'button', requested: 'exit' };
       if (document.exitFullscreen) document.exitFullscreen(); else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
     }
@@ -71,6 +95,7 @@
       wrap.classList.toggle('fsActive', isFs);
       fit();
       if (lastState !== isFs){
+        klog('state_change', { isFullscreen: isFs, ...contextPayload() });
         emit(isFs);
         lastState = isFs;
       }
