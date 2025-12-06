@@ -47,7 +47,7 @@ const DELTA_CAP = asNumber(process.env.XP_DELTA_CAP, 300);
 // Activity Requirements
 const MIN_ACTIVITY_EVENTS = Math.max(0, asNumber(process.env.XP_MIN_ACTIVITY_EVENTS, 4));
 const MIN_ACTIVITY_VIS_S = Math.max(0, asNumber(process.env.XP_MIN_ACTIVITY_VIS_S, 8));
-const REQUIRE_ACTIVITY = process.env.XP_REQUIRE_ACTIVITY !== "0"; // Default enabled for server calc
+const REQUIRE_ACTIVITY = process.env.XP_REQUIRE_ACTIVITY === "1"; // Require activity only when explicitly enabled
 
 // Session & Security
 const SESSION_TTL_SEC = Math.max(0, asNumber(process.env.XP_SESSION_TTL_SEC, 604800));
@@ -809,6 +809,11 @@ export async function handler(event) {
   if (event.httpMethod !== "POST") {
     return json(405, { error: "method_not_allowed" }, origin);
   }
+
+  klog("calc_env_debug", {
+    XP_REQUIRE_ACTIVITY: process.env.XP_REQUIRE_ACTIVITY,
+    requireActivity: REQUIRE_ACTIVITY,
+  });
 
   // Parse body
   let body = {};

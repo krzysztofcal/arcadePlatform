@@ -30,6 +30,59 @@
     authPromise: null,
   };
 
+  let serverCalcInitRequested = false;
+
+  function hostShouldUseServerCalc(win) {
+    const host = win && win.location && win.location.hostname;
+    if (!host) return false;
+    if (host === "localhost" || host === "127.0.0.1") return true;
+    if (host === "play.kcswh.pl" || host === "landing.kcswh.pl") return true;
+    if (typeof host === "string" && host.endsWith(".netlify.app")) return true;
+    return false;
+  }
+
+  function ensureServerCalcInit() {
+    if (typeof window === "undefined") return;
+
+    if (!serverCalcInitRequested && typeof window.XP_SERVER_CALC === "undefined") {
+      window.XP_SERVER_CALC = hostShouldUseServerCalc(window);
+    }
+
+    if (window.XpServerCalc && typeof window.XpServerCalc.initServerCalc === "function") {
+      try {
+        window.XpServerCalc.initServerCalc(window, typeof document !== "undefined" ? document : undefined, {});
+      } catch (_) {}
+      return;
+    }
+
+    if (serverCalcInitRequested) return;
+    serverCalcInitRequested = true;
+
+    if (typeof document === "undefined" || !document || typeof document.createElement !== "function") {
+      serverCalcInitRequested = false;
+      return;
+    }
+
+    const script = document.createElement("script");
+    script.src = "/js/xp/server-calc.js";
+    script.async = true;
+    script.onload = function () {
+      serverCalcInitRequested = false;
+      if (window.XpServerCalc && typeof window.XpServerCalc.initServerCalc === "function") {
+        try {
+          window.XpServerCalc.initServerCalc(window, document, {});
+        } catch (_) {}
+      }
+    };
+    script.onerror = function () {
+      serverCalcInitRequested = false;
+    };
+
+    (document.head || document.body || document.documentElement).appendChild(script);
+  }
+
+  ensureServerCalcInit();
+
   function klog(kind, data) {
     if (typeof window === "undefined") return;
     try {
@@ -641,18 +694,30 @@
    * Check if server-side XP calculation is enabled
    */
   function isServerCalcEnabled() {
-    if (window.XP_SERVER_CALC === true) return true;
+    ensureServerCalcInit();
+
+    let serverCalcEnabled = window.XP_SERVER_CALC === true;
     try {
-      if (typeof location !== "undefined" && location && typeof location.search === "string") {
-        if (/\bxpserver=1\b/.test(location.search)) return true;
+      if (!serverCalcEnabled && typeof location !== "undefined" && location && typeof location.search === "string") {
+        if (/\bxpserver=1\b/.test(location.search)) serverCalcEnabled = true;
       }
     } catch (_) {}
     try {
-      if (typeof localStorage !== "undefined" && localStorage) {
-        if (localStorage.getItem("xp:serverCalc") === "1") return true;
+      if (!serverCalcEnabled && typeof localStorage !== "undefined" && localStorage) {
+        if (localStorage.getItem("xp:serverCalc") === "1") serverCalcEnabled = true;
       }
     } catch (_) {}
-    return false;
+
+    try {
+      if (window && window.console && typeof console.debug === "function") {
+        console.debug("[xpClient] Server calc decision", {
+          XP_SERVER_CALC: window.XP_SERVER_CALC,
+          serverCalcEnabled,
+        });
+      }
+    } catch (_) {}
+
+    return serverCalcEnabled;
   }
 
   /**
