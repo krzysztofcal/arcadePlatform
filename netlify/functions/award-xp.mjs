@@ -119,8 +119,8 @@ const CORS_ALLOW = (() => {
   return fromEnv;
 })();
 
-const RAW_LOCK_TTL = Number(process.env.XP_LOCK_TTL_MS ?? 1_000);
-const LOCK_TTL_MS = Number.isFinite(RAW_LOCK_TTL) && RAW_LOCK_TTL >= 0 ? RAW_LOCK_TTL : 1_000;
+const RAW_LOCK_TTL = Number(process.env.XP_LOCK_TTL_MS ?? 3_000);
+const LOCK_TTL_MS = Number.isFinite(RAW_LOCK_TTL) && RAW_LOCK_TTL >= 0 ? RAW_LOCK_TTL : 3_000;
 console.log("[XP] Lock configuration", {
   lockTtlMs: LOCK_TTL_MS,
   rawLockTtl: RAW_LOCK_TTL,
@@ -349,7 +349,8 @@ function generateFingerprint(headers) {
   return hash(fingerprintData).substring(0, 16);
 }
 
-// NOTE: userId parameter represents the XP storage identity (anonId for current hotfix).
+// NOTE: userId represents the XP storage identity:
+// Supabase userId for logged-in users, or anonId for anonymous users.
 const keyDaily = (u, day = getDailyKey()) => `${KEY_NS}:daily:${u}:${day}`;
 const keyTotal = (u) => `${KEY_NS}:total:${u}`;
 const keySession = (u, s) => `${KEY_NS}:session:${hash(`${u}|${s}`)}`;
@@ -358,6 +359,7 @@ const keyLock = (u, s) => `${LOCK_KEY_PREFIX}${hash(`${u}|${s}`)}`;
 const keyRateLimitUser = (userId) => `${KEY_NS}:ratelimit:user:${userId}:${Math.floor(Date.now() / 60000)}`;
 const keyRateLimitIp = (ip) => `${KEY_NS}:ratelimit:ip:${hash(ip)}:${Math.floor(Date.now() / 60000)}`;
 const keySessionRegistry = (userId, sessionId) => `${KEY_NS}:registry:${hash(`${userId}|${sessionId}`)}`;
+const keyMigration = (anonId, userId) => `${KEY_NS}:migration:${hash(`${anonId}|${userId}`)}`;
 
 // SECURITY: Session registration
 async function registerSession({ userId, sessionId }) {
@@ -549,6 +551,7 @@ export async function handler(event) {
   const jwtToken = extractBearerToken(event.headers);
   const authContext = verifySupabaseJwt(jwtToken);
   const supabaseUserId = authContext.valid ? authContext.userId : null;
+  let xpIdentity = supabaseUserId || anonId || null;
 
   const applyDiagnostics = (payload, extra = {}) => {
     if (!DEBUG_ENABLED) return;
@@ -599,8 +602,6 @@ export async function handler(event) {
     });
   }
 
-  let xpIdentity = supabaseUserId || anonId || null;
-
   let body = {};
   try {
     if (event.body) {
@@ -635,28 +636,36 @@ export async function handler(event) {
     provided: authContext.provided,
     valid: authContext.valid,
     reason: authContext.reason,
+    identityId: xpIdentity,
     xpIdentity: xpIdentity,
     supabaseUserId,
     anonId,
   });
 
-  // If we have a Supabase user and a prior anon id, migrate anon totals into the
+  // If we have a Supabase user and a prior anon id, migrate anon totals once into the
   // authenticated bucket so status reads and new awards share the same keys.
   if (supabaseUserId && anonId && anonId !== supabaseUserId) {
+    const markerKey = keyMigration(anonId, supabaseUserId);
     try {
-      const anonTotals = await getTotals({ userId: anonId, sessionId: querySessionId, now });
-      if (anonTotals && anonTotals.lifetime > 0) {
-        const pipe = store.pipeline();
-        const anonTotalKey = keyTotal(anonId);
-        const userTotalKey = keyTotal(supabaseUserId);
-        pipe.incrby(userTotalKey, anonTotals.lifetime);
-        pipe.del(anonTotalKey);
-        await pipe.exec();
-        console.log("[XP] Migrated anon XP to account", {
-          from: anonId,
-          to: supabaseUserId,
-          amount: anonTotals.lifetime,
-        });
+      const already = await store.get(markerKey);
+      if (!already) {
+        const anonTotals = await getTotals({ userId: anonId, sessionId: querySessionId, now });
+        if (anonTotals && anonTotals.lifetime > 0) {
+          const anonTotalKey = keyTotal(anonId);
+          const userTotalKey = keyTotal(supabaseUserId);
+          const pipe = store.pipeline();
+          pipe.incrby(userTotalKey, anonTotals.lifetime);
+          pipe.del(anonTotalKey);
+          pipe.set(markerKey, String(anonTotals.lifetime));
+          await pipe.exec();
+          console.log("[XP] Migrated anon XP to account", {
+            from: anonId,
+            to: supabaseUserId,
+            amount: anonTotals.lifetime,
+          });
+        } else {
+          await store.set(markerKey, "0");
+        }
       }
     } catch (err) {
       console.warn("[XP] XP migration failed:", err);
