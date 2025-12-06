@@ -659,12 +659,10 @@ export async function handler(event) {
     try {
       const anonTotals = await getTotals({ userId: anonId, sessionId: querySessionId, now });
       if (anonTotals && anonTotals.lifetime > 0) {
-        const pipe = store.pipeline();
         const anonTotalKey = keyTotal(anonId);
         const userTotalKey = keyTotal(userId);
-        pipe.incrby(userTotalKey, anonTotals.lifetime);
-        pipe.del(anonTotalKey);
-        await pipe.exec();
+        await store.incrBy(userTotalKey, anonTotals.lifetime);
+        await store.set(anonTotalKey, 0);
         console.log("[XP] Migrated anon XP to account", {
           from: anonId,
           to: userId,
