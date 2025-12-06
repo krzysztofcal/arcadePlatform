@@ -4,6 +4,8 @@ import { createSupabaseJwt, parseJsonBody } from "./helpers/xp-test-helpers.mjs"
 
 const mockData = new Map();
 
+const saveUserProfileMock = vi.fn(async () => {});
+
 const pipelineFactory = () => {
   const operations = [];
   const pipeline = {
@@ -58,11 +60,15 @@ const store = {
     store.setex.mockClear();
     store.del.mockClear();
     store.pipeline.mockClear();
+    saveUserProfileMock.mockClear();
     store._lastPipeline = null;
   },
 };
 
-vi.mock("../netlify/functions/_shared/store-upstash.mjs", () => ({ store }));
+vi.mock("../netlify/functions/_shared/store-upstash.mjs", () => ({
+  store,
+  saveUserProfile: saveUserProfileMock,
+}));
 
 const keyTotal = (u) => `${process.env.XP_KEY_NS}:total:${u}`;
 const keyMigration = (anonId, userId) => {
@@ -120,6 +126,9 @@ describe("anon to user migration", () => {
     const againBody = parseJsonBody(again);
     expect(againBody.totalLifetime).toBeGreaterThanOrEqual(100);
     expect(store.pipeline).toHaveBeenCalledTimes(1);
+    expect(saveUserProfileMock).toHaveBeenCalledWith(
+      expect.objectContaining({ userId, totalXp: expect.any(Number) })
+    );
   });
 
   it("M2: skips migration when anon bucket empty", async () => {
