@@ -82,6 +82,12 @@
     });
   }
 
+  if (typeof window !== 'undefined'){
+    if (!window.SupabaseAuthBridge) window.SupabaseAuthBridge = {};
+    window.SupabaseAuthBridge.getAccessToken = getAccessToken;
+    logDiag('supabase:token_bridge_init', { attached: true });
+  }
+
   function onAuthChange(callback){
     var client = getClient();
     if (!client || !client.auth || typeof client.auth.onAuthStateChange !== 'function'){
@@ -298,13 +304,6 @@
     wireAvatar();
     getClient();
     hydrateSession();
-  }
-
-  if (typeof window !== 'undefined'){
-    var bridge = window.SupabaseAuthBridge || {};
-    bridge.getAccessToken = getAccessToken;
-    window.SupabaseAuthBridge = bridge;
-    logDiag('supabase:token_bridge_init', { attached: true });
   }
 
   window.SupabaseAuth = {

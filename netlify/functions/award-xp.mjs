@@ -552,7 +552,13 @@ export async function handler(event) {
   const supabaseUserId = userId;
   // If JWT is missing or invalid, we treat the request as anonymous and do not block XP, per Hard XP spec.
 
-  let identityId = userId || anonId || null;
+  let identityId = null;
+  if (authContext.provided) {
+    identityId = userId;
+  } else {
+    identityId = anonId;
+  }
+
 
   // Migrate existing anon XP into the authenticated Supabase bucket once the user logs in.
   if (userId && anonId && anonId !== userId) {
@@ -651,7 +657,18 @@ export async function handler(event) {
     anonId = typeof anonIdRaw === "string" ? anonIdRaw.trim() : null;
   }
 
-  identityId = userId || anonId || null;
+  if (authContext.provided) {
+    identityId = userId;
+  } else {
+    identityId = anonId;
+  }
+
+  klog("auth_debug", {
+    provided: authContext.provided,
+    valid: authContext.valid,
+    reason: authContext.reason,
+    identityId,
+  });
 
   // If we have a Supabase user and a prior anon id, migrate anon totals into the
   // authenticated bucket so status reads and new awards share the same keys.
@@ -991,6 +1008,12 @@ export async function handler(event) {
       });
     }
   }
+
+  klog("award_identity", {
+    anonymous: !supabaseUserId,
+    supabaseUserId,
+    identityId,
+  });
 
   klog('award_attempt', {
     identityId,

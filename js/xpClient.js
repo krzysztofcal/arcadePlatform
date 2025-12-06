@@ -30,6 +30,21 @@
     authPromise: null,
   };
 
+  function klog(kind, data) {
+    if (typeof window === "undefined") return;
+    try {
+      if (window.KLog && typeof window.KLog.log === "function") {
+        window.KLog.log(kind, data || {});
+        return;
+      }
+    } catch (_) {}
+    try {
+      if (typeof console !== "undefined" && console && typeof console.log === "function") {
+        console.log(`[klog] ${kind}`, data || {});
+      }
+    } catch (_) {}
+  }
+
   function getSupabaseClient() {
     if (typeof window === "undefined") return null;
     const existing = window.supabaseClient;
@@ -127,10 +142,48 @@
     return !!state.authToken;
   }
 
+  async function isUserLoggedIn() {
+    try {
+      const bridge = getAuthBridge();
+      if (bridge && typeof bridge.getAccessToken === "function") {
+        const token = await bridge.getAccessToken();
+        if (token) return true;
+      }
+    } catch (_) {}
+
+    const client = getSupabaseClient();
+    if (client && client.auth && typeof client.auth.getSession === "function") {
+      try {
+        const res = await client.auth.getSession();
+        const session = res && res.data ? res.data.session : null;
+        if (session && session.user) return true;
+      } catch (_) {}
+    }
+    return false;
+  }
+
+  async function ensureAuthTokenWithRetry() {
+    let token = await fetchAuthToken(false);
+    let attempts = 0;
+    while (!token && attempts < 2) {
+      token = await fetchAuthToken(true);
+      attempts += 1;
+    }
+    if (!token) {
+      try {
+        const loggedIn = await isUserLoggedIn();
+        if (loggedIn) {
+          klog("xp_missing_auth_token", {});
+        }
+      } catch (_) {}
+    }
+    return token;
+  }
+
   async function buildAuthHeaders(baseHeaders) {
     const headers = Object.assign({}, baseHeaders || {});
     try {
-      const token = await fetchAuthToken(false);
+      const token = await ensureAuthTokenWithRetry();
       if (token) {
         headers.Authorization = `Bearer ${token}`;
       }
@@ -424,6 +477,7 @@
     const keepalive = opts.keepalive === true;
     const allowBeacon = opts.allowBeacon === true;
     const payload = JSON.stringify(body);
+    await ensureAuthTokenWithRetry();
     const headers = await buildAuthHeaders({ "content-type": "application/json" });
     const requestInit = {
       method: "POST",
@@ -565,6 +619,7 @@
   async function fetchStatus() {
     const { userId, sessionId } = ensureIds();
     const body = { userId, sessionId, gameId: "status", statusOnly: true };
+    await ensureAuthTokenWithRetry();
     const headers = await buildAuthHeaders({ "content-type": "application/json" });
     const res = await fetch(FN_URL, {
       method: "POST",
@@ -644,6 +699,7 @@
     let attempt = 0;
     const payloadJson = JSON.stringify(body);
     const allowBeacon = opts.allowBeacon === true;
+    await ensureAuthTokenWithRetry();
     const headers = await buildAuthHeaders({ "content-type": "application/json" });
     while (attempt < 3) {
       let networkError = false;
