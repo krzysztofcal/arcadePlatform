@@ -6,6 +6,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
+import { withEnv } from "./helpers/xp-test-helpers.mjs";
 
 // Set up environment for in-memory store before imports
 process.env.XP_REQUIRE_ACTIVITY = "0"; // Disable by default for most tests
@@ -510,6 +511,90 @@ describe("GAME_XP_RULES", () => {
     // Multiple slug variations should work
     expect(GAME_XP_RULES["catch-cats"]).toBeDefined();
     expect(GAME_XP_RULES["game_cats"]).toBeDefined();
+  });
+
+  describe("activity gating toggle", () => {
+    it("G1: requires activity when XP_REQUIRE_ACTIVITY=1", async () => {
+      const { handler, store, restore } = await loadHandlerWithEnv("1");
+
+      const response = await handler({
+        httpMethod: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          userId: "user-gate",
+          sessionId: "sess-gate",
+          windowStart: Date.now() - 1000,
+          windowEnd: Date.now(),
+          inputEvents: 0,
+          visibilitySeconds: 0,
+          scoreDelta: 500,
+        }),
+      });
+
+      const body = JSON.parse(response.body);
+      expect(response.statusCode).toBe(200);
+      expect(body.ok).toBe(true);
+      expect(body.awarded).toBe(0);
+      expect(body.reason).toBe("inactive");
+      expect(store.eval).not.toHaveBeenCalled();
+      restore();
+    });
+
+    it("G2: does not gate when XP_REQUIRE_ACTIVITY=0", async () => {
+      const { handler, store, restore } = await loadHandlerWithEnv("0");
+      store.eval.mockResolvedValue([15, 15, 15, 15, Date.now(), 0]);
+
+      const response = await handler({
+        httpMethod: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          userId: "user-gate",
+          sessionId: "sess-gate",
+          windowStart: Date.now() - 1000,
+          windowEnd: Date.now(),
+          inputEvents: 0,
+          visibilitySeconds: 0,
+          scoreDelta: 500,
+        }),
+      });
+
+      const body = JSON.parse(response.body);
+      expect(response.statusCode).toBe(200);
+      expect(body.awarded).toBeGreaterThan(0);
+      expect(body.reason).not.toBe("inactive");
+      expect(store.eval).toHaveBeenCalled();
+      restore();
+    });
+
+    it("G3: defaults to no gating when XP_REQUIRE_ACTIVITY unset", async () => {
+      await withEnv({ XP_REQUIRE_ACTIVITY: undefined }, async () => {
+        vi.resetModules();
+        const module = await import("../netlify/functions/calculate-xp.mjs");
+        const { store: freshStore } = await import("../netlify/functions/_shared/store-upstash.mjs");
+        freshStore._reset?.();
+        freshStore.eval.mockResolvedValue([12, 12, 12, 12, Date.now(), 0]);
+
+        const response = await module.handler({
+          httpMethod: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            userId: "user-default",
+            sessionId: "sess-default",
+            windowStart: Date.now() - 1000,
+            windowEnd: Date.now(),
+            inputEvents: 0,
+            visibilitySeconds: 0,
+            scoreDelta: 300,
+          }),
+        });
+
+        const body = JSON.parse(response.body);
+        expect(response.statusCode).toBe(200);
+        expect(body.awarded).toBeGreaterThan(0);
+        expect(body.reason).not.toBe("inactive");
+        expect(freshStore.eval).toHaveBeenCalled();
+      });
+    });
   });
 
   it("should calculate correct XP for cats events", () => {
