@@ -2,6 +2,7 @@
 const BASE = process.env.UPSTASH_REDIS_REST_URL;
 const TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN;
 const USER_PROFILE_PREFIX = "kcswh:xp:user:";
+const ANON_PROFILE_PREFIX = "kcswh:xp:anon:";
 
 if (!BASE || !TOKEN) {
   console.warn("[store-upstash] Missing UPSTASH env; falling back to in-memory store.");
@@ -43,6 +44,40 @@ function createMemoryStore() {
     if (!entry || entry.expiry == null) return null;
     return Math.max(0, entry.expiry - Date.now());
   }
+
+  const pipelineFactory = () => {
+    const operations = [];
+    return {
+      operations,
+      incrby(key, value) {
+        operations.push({ op: "incrby", key, value });
+        const entry = sweep(key);
+        const current = Number(entry?.value ?? "0");
+        setValue(key, current + Number(value), remainingTtlMs(entry));
+        return this;
+      },
+      decrby(key, value) {
+        operations.push({ op: "decrby", key, value });
+        const entry = sweep(key);
+        const current = Number(entry?.value ?? "0");
+        setValue(key, current - Number(value), remainingTtlMs(entry));
+        return this;
+      },
+      del(key) {
+        operations.push({ op: "del", key });
+        memory.delete(key);
+        return this;
+      },
+      set(key, value) {
+        operations.push({ op: "set", key, value });
+        setValue(key, value, null);
+        return this;
+      },
+      exec() {
+        return Promise.resolve(operations);
+      },
+    };
+  };
 
   return {
     async get(key) { return getValue(key); },
@@ -158,6 +193,7 @@ function createMemoryStore() {
 
       throw new Error("Unsupported eval signature in memory store");
     },
+    pipeline: () => pipelineFactory(),
   };
 }
 
@@ -209,6 +245,26 @@ const remoteStore = {
     const data = await res.json();
     return data.result;
   },
+  pipeline() {
+    const operations = [];
+    const execOps = async () => {
+      for (const op of operations) {
+        if (op.op === "incrby") await remoteStore.incrBy(op.key, op.value);
+        else if (op.op === "decrby") await remoteStore.decrBy(op.key, op.value);
+        else if (op.op === "del") await call("DEL", op.key);
+        else if (op.op === "set") await remoteStore.set(op.key, op.value);
+      }
+      return operations;
+    };
+    return {
+      operations,
+      incrby(key, value) { operations.push({ op: "incrby", key, value }); return this; },
+      decrby(key, value) { operations.push({ op: "decrby", key, value }); return this; },
+      del(key) { operations.push({ op: "del", key }); return this; },
+      set(key, value) { operations.push({ op: "set", key, value }); return this; },
+      exec: execOps,
+    };
+  },
 };
 
 export const store = (!BASE || !TOKEN) ? createMemoryStore() : remoteStore;
@@ -219,23 +275,36 @@ const clampTotalXp = (value) => {
 };
 
 const profileKey = (userId) => `${USER_PROFILE_PREFIX}${userId}`;
+const anonProfileKey = (anonId) => `${ANON_PROFILE_PREFIX}${anonId}`;
 
 export async function getUserProfile(userId) {
   if (!userId) return null;
   try {
     const raw = await store.get(profileKey(userId));
-    if (!raw) return null;
+    const nowIso = new Date().toISOString();
+    if (!raw) {
+      const profile = {
+        userId,
+        totalXp: 0,
+        createdAt: nowIso,
+        updatedAt: nowIso,
+        hasConvertedAnonXp: false,
+      };
+      await store.set(profileKey(userId), JSON.stringify(profile));
+      return profile;
+    }
     const parsed = JSON.parse(raw);
     const totalXp = clampTotalXp(parsed.totalXp ?? parsed.total ?? 0);
-    const createdAt = typeof parsed.createdAt === "string" ? parsed.createdAt : null;
+    const createdAt = typeof parsed.createdAt === "string" ? parsed.createdAt : nowIso;
     const updatedAt = typeof parsed.updatedAt === "string" ? parsed.updatedAt : createdAt;
-    return { userId, totalXp, createdAt, updatedAt };
+    const hasConvertedAnonXp = parsed.hasConvertedAnonXp === true;
+    return { userId, totalXp, createdAt, updatedAt, hasConvertedAnonXp };
   } catch {
     return null;
   }
 }
 
-export async function saveUserProfile({ userId, totalXp, now = Date.now() }) {
+export async function saveUserProfile({ userId, totalXp, now = Date.now(), hasConvertedAnonXp = false }) {
   if (!userId) return null;
   const existing = await getUserProfile(userId);
   const timestamp = new Date(now).toISOString();
@@ -244,6 +313,7 @@ export async function saveUserProfile({ userId, totalXp, now = Date.now() }) {
     totalXp: clampTotalXp(totalXp),
     createdAt: existing?.createdAt || timestamp,
     updatedAt: timestamp,
+    hasConvertedAnonXp: existing?.hasConvertedAnonXp === true || hasConvertedAnonXp === true,
   };
   try {
     await store.set(profileKey(userId), JSON.stringify(profile));
@@ -251,5 +321,57 @@ export async function saveUserProfile({ userId, totalXp, now = Date.now() }) {
   } catch (err) {
     console.error("[store-upstash] Failed to persist user profile", { userId, error: err?.message });
     return existing || profile;
+  }
+}
+
+export function initAnonProfile(anonId, now, dayKey) {
+  return {
+    anonId,
+    totalAnonXp: 0,
+    anonActiveDays: 0,
+    lastActivityTs: now,
+    createdAt: new Date(now).toISOString(),
+    convertedToUserId: null,
+    lastActiveDayKey: dayKey,
+  };
+}
+
+export async function getAnonProfile(anonId) {
+  if (!anonId) return null;
+  try {
+    const raw = await store.get(anonProfileKey(anonId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return {
+      anonId,
+      totalAnonXp: Number(parsed.totalAnonXp) || 0,
+      anonActiveDays: Number(parsed.anonActiveDays) || 0,
+      lastActivityTs: Number(parsed.lastActivityTs) || 0,
+      createdAt: typeof parsed.createdAt === "string" ? parsed.createdAt : new Date().toISOString(),
+      convertedToUserId: parsed.convertedToUserId ?? null,
+      lastActiveDayKey: parsed.lastActiveDayKey,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export async function saveAnonProfile(profile) {
+  if (!profile || !profile.anonId) return null;
+  const normalized = {
+    anonId: profile.anonId,
+    totalAnonXp: Number(profile.totalAnonXp) || 0,
+    anonActiveDays: Number(profile.anonActiveDays) || 0,
+    lastActivityTs: Number(profile.lastActivityTs) || 0,
+    createdAt: typeof profile.createdAt === "string" ? profile.createdAt : new Date().toISOString(),
+    convertedToUserId: profile.convertedToUserId ?? null,
+    lastActiveDayKey: profile.lastActiveDayKey,
+  };
+  try {
+    await store.set(anonProfileKey(profile.anonId), JSON.stringify(normalized));
+    return normalized;
+  } catch (err) {
+    console.error("[store-upstash] Failed to persist anon profile", { anonId: profile.anonId, error: err?.message });
+    return normalized;
   }
 }
