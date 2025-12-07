@@ -340,6 +340,18 @@
     } catch (_) {}
   }
 
+  function handleMigration(migration, payload) {
+    if (!migration || migration.migrated !== true) return;
+    if ((!payload || !payload.conversion || payload.conversion.converted !== true) && migration.amount > 0) {
+      handleConversion({ converted: true, amount: migration.amount });
+    }
+    if (typeof window !== "undefined" && window.XP && typeof window.XP.refreshFromServerStatus === "function") {
+      try {
+        window.XP.refreshFromServerStatus(payload || migration, { bump: true });
+      } catch (_) {}
+    }
+  }
+
   function ensureIds() {
     try {
       const ls = window.localStorage;
@@ -641,6 +653,7 @@
       try {
         const json = await res.json();
         handleConversion(json && json.conversion ? json.conversion : null);
+        handleMigration(json && json.migration ? json.migration : null, json);
         return { ok: true, body: json, transport };
       } catch (_) {
         return { ok: false, network: true, status: res.status, transport };
@@ -769,6 +782,7 @@
     const payload = await res.json();
     updateCapFromPayload(payload);
     handleConversion(payload && payload.conversion ? payload.conversion : null);
+    handleMigration(payload && payload.migration ? payload.migration : null, payload);
     return payload;
   }
 
@@ -908,6 +922,7 @@
           responseBody._transport = "keepalive";
         }
         handleConversion(responseBody && responseBody.conversion ? responseBody.conversion : null);
+        handleMigration(responseBody && responseBody.migration ? responseBody.migration : null, responseBody);
 
         if (window && window.console && typeof window.console.debug === "function" && responseBody) {
           window.console.debug("[XP] server_calc_apply", {

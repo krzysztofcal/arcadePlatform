@@ -535,7 +535,7 @@ async function releaseConversionLock(lockKey, storeClient = store) {
 
 async function migrateAnonToAccount({ storeClient = store, anonId, accountId, now = Date.now() }) {
   if (!anonId || !accountId || anonId === accountId) {
-    return { migrated: 0, anonBefore: 0, accountBefore: 0, accountAfter: 0 };
+    return { migrated: 0, anonBefore: 0, accountBefore: 0, accountAfter: 0, reason: "invalid_ids" };
   }
 
   const [anonTotals, accountTotals] = await Promise.all([
@@ -548,7 +548,24 @@ async function migrateAnonToAccount({ storeClient = store, anonId, accountId, no
 
   if (anonLifetime <= 0) {
     klog("xp_migrate_noop", { anonId, accountId, anonLifetime, accountLifetime });
-    return { migrated: 0, anonBefore: anonLifetime, accountBefore: accountLifetime, accountAfter: accountLifetime };
+    return {
+      migrated: 0,
+      anonBefore: anonLifetime,
+      accountBefore: accountLifetime,
+      accountAfter: accountLifetime,
+      reason: "anon_has_no_xp",
+    };
+  }
+
+  if (accountLifetime > 0) {
+    klog("xp_migrate_skip_account_has_xp", { anonId, accountId, anonLifetime, accountLifetime });
+    return {
+      migrated: 0,
+      anonBefore: anonLifetime,
+      accountBefore: accountLifetime,
+      accountAfter: accountLifetime,
+      reason: "account_has_xp",
+    };
   }
 
   const migrated = anonLifetime;
@@ -575,7 +592,7 @@ async function migrateAnonToAccount({ storeClient = store, anonId, accountId, no
     accountAfter,
   });
 
-  return { migrated, anonBefore: anonLifetime, accountBefore: accountLifetime, accountAfter };
+  return { migrated, anonBefore: anonLifetime, accountBefore: accountLifetime, accountAfter, reason: "migrated" };
 }
 
 async function attemptAnonToUserConversion({ userId, anonId, authContext, storeClient = store }) {
@@ -612,7 +629,7 @@ async function attemptAnonToUserConversion({ userId, anonId, authContext, storeC
       now: Date.now(),
     });
 
-    if (!migration.migrated) return { converted: false, amount: 0 };
+    if (!migration.migrated) return { converted: false, amount: 0, reason: migration.reason };
 
     await saveUserProfile({ userId, totalXp: migration.accountAfter, hasConvertedAnonXp: true });
 
@@ -624,7 +641,7 @@ async function attemptAnonToUserConversion({ userId, anonId, authContext, storeC
     anonProfile.anonActiveDays = 0;
     await saveAnonProfile(anonProfile);
 
-    return { converted: true, amount: migration.migrated };
+    return { converted: true, amount: migration.migrated, migration };
   } finally {
     await releaseConversionLock(lockKey, storeClient);
   }
@@ -925,6 +942,11 @@ export async function handler(event) {
   };
 
   const respond = async (statusCode, payload, options = {}) => {
+    payload.migration = {
+      migrated: conversion.converted === true,
+      amount: conversion.converted ? conversion.amount : 0,
+      reason: conversion.reason ?? (conversion.converted ? "migrated" : ""),
+    };
     payload.conversion = {
       converted: conversion.converted === true,
       amount: conversion.converted ? conversion.amount : 0,

@@ -94,7 +94,13 @@ describe("migrateAnonToAccount", () => {
 
     const result = await migrateAnonToAccount({ storeClient: store, anonId, accountId: userId, now: Date.now() });
 
-    expect(result).toEqual({ migrated: 80, anonBefore: 80, accountBefore: 0, accountAfter: 80 });
+    expect(result).toEqual({
+      migrated: 80,
+      anonBefore: 80,
+      accountBefore: 0,
+      accountAfter: 80,
+      reason: "migrated",
+    });
     const anonTotals = await getTotalsForIdentity({ userId: anonId, now: Date.now(), storeClient: store });
     const userTotals = await getTotalsForIdentity({ userId: userId, now: Date.now(), storeClient: store });
     expect(anonTotals?.lifetime).toBe(0);
@@ -108,7 +114,7 @@ describe("migrateAnonToAccount", () => {
     ]);
   });
 
-  it("adds anon lifetime on top of existing account XP", async () => {
+  it("skips migration when account already has XP", async () => {
     const { migrateAnonToAccount } = await loadModule();
     const anonId = "anon-plus";
     const userId = "user-plus";
@@ -117,9 +123,10 @@ describe("migrateAnonToAccount", () => {
 
     const result = await migrateAnonToAccount({ storeClient: store, anonId, accountId: userId, now: Date.now() });
 
-    expect(result.migrated).toBe(50);
-    expect(result.accountAfter).toBe(150);
-    expect(Number(mockData.get(keyTotal(userId)))).toBe(150);
+    expect(result.migrated).toBe(0);
+    expect(result.accountAfter).toBe(100);
+    expect(result.reason).toBe("account_has_xp");
+    expect(Number(mockData.get(keyTotal(userId)))).toBe(100);
   });
 
   it("is idempotent when called twice", async () => {
