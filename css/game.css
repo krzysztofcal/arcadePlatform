@@ -13,8 +13,8 @@ body{margin:0; background:linear-gradient(180deg, #0b1020 0%, #090d19 100%); col
 }
 .left{ background:#111735; border:1px solid var(--border); border-radius:16px; padding:10px; display:flex; flex-direction:column; align-items:center; gap:8px; }
 .icon{ width:36px; height:36px; border-radius:12px; border:1px dashed var(--border); background:transparent; }
-.center{ display:flex; flex-direction:column; gap:12px; }
-.gameWrap{ background:#111735; border:1px solid var(--border); border-radius:16px; padding:12px; position:relative; margin-bottom:20px; }
+.center{ display:flex; flex-direction:column; gap:12px; padding-bottom:80px; }
+.gameWrap{ background:#111735; border:1px solid var(--border); border-radius:16px; padding:12px; position:relative; margin-bottom:60px; }
 .gameWrap.fsActive{ border-radius:0; border:none; padding:10px; }
 .gameWrap.fsActive{
   /* Respect iOS safe-area insets in fullscreen */
