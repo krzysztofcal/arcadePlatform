@@ -92,6 +92,37 @@ describe("anon to user migration", () => {
     assert.strictEqual(second.amount, 0);
   });
 
+  it("applies cap to migrated amount and leaves anon remainder", async () => {
+    const anonId = "anon-cap";
+    const userId = "user-cap";
+    usedIds.add(anonId);
+    usedIds.add(userId);
+
+    await store.set(keyTotal(anonId), "8000");
+    await store.set(keyTotal(userId), "0");
+    await store.set(`kcswh:xp:anon:${anonId}`, JSON.stringify({
+      anonId,
+      totalAnonXp: 8000,
+      anonActiveDays: 1,
+      lastActivityTs: Date.now(),
+      createdAt: new Date().toISOString(),
+      convertedToUserId: null,
+      lastActiveDayKey: "2024-05-02",
+    }));
+
+    const result = await attemptAnonToUserConversion({
+      userId,
+      anonId,
+      authContext: { emailVerified: true },
+      storeClient: store,
+    });
+
+    assert.strictEqual(result.converted, true);
+    assert.strictEqual(result.amount, 3000);
+    assert.strictEqual(await store.get(keyTotal(userId)), "3000");
+    assert.strictEqual(await store.get(keyTotal(anonId)), "5000");
+  });
+
   it("skips conversion when account already has XP", async () => {
     const anonId = "anon-444";
     const userId = "user-444";

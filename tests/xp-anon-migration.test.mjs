@@ -12,6 +12,12 @@ const pipelineFactory = () => {
       mockData.set(key, String(current + Number(value)));
       return pipeline;
     }),
+    decrby: vi.fn((key, value) => {
+      operations.push({ op: "decrby", key, value });
+      const current = Number(mockData.get(key) || 0);
+      mockData.set(key, String(current - Number(value)));
+      return pipeline;
+    }),
     del: vi.fn((key) => {
       operations.push({ op: "del", key });
       mockData.delete(key);
@@ -92,7 +98,7 @@ describe("migrateAnonToAccount", () => {
     mockData.set(keyTotal(userId), "0");
     mockData.set(keyDaily(anonId, "2024-06-05"), "80");
 
-    const result = await migrateAnonToAccount({ storeClient: store, anonId, accountId: userId, now: Date.now() });
+    const result = await migrateAnonToAccount({ storeClient: store, anonId, accountId: userId, now: Date.now(), allowedAmount: 80 });
 
     expect(result).toEqual({
       migrated: 80,
@@ -111,6 +117,42 @@ describe("migrateAnonToAccount", () => {
       { op: "del", key: keyTotal(anonId) },
       { op: "del", key: keyDaily(anonId, "2024-06-05") },
       { op: "set", key: expect.stringContaining(anonId), value: "80" },
+    ]);
+  });
+
+  it("uses allowed amount and leaves remaining anon lifetime when capped", async () => {
+    const { migrateAnonToAccount, getTotalsForIdentity } = await loadModule();
+    const anonId = "anon-partial";
+    const userId = "user-partial";
+    mockData.set(keyTotal(anonId), "8000");
+    mockData.set(keyTotal(userId), "0");
+
+    const result = await migrateAnonToAccount({
+      storeClient: store,
+      anonId,
+      accountId: userId,
+      allowedAmount: 3000,
+      now: Date.now(),
+    });
+
+    expect(result).toEqual({
+      migrated: 3000,
+      anonBefore: 8000,
+      accountBefore: 0,
+      accountAfter: 3000,
+      reason: "migrated",
+    });
+
+    const anonTotals = await getTotalsForIdentity({ userId: anonId, now: Date.now(), storeClient: store });
+    const userTotals = await getTotalsForIdentity({ userId: userId, now: Date.now(), storeClient: store });
+    expect(anonTotals?.lifetime).toBe(5000);
+    expect(userTotals?.lifetime).toBe(3000);
+
+    const ops = store._lastPipeline?.operations || [];
+    expect(ops).toEqual([
+      { op: "incrby", key: keyTotal(userId), value: 3000 },
+      { op: "decrby", key: keyTotal(anonId), value: 3000 },
+      { op: "set", key: expect.stringContaining(anonId), value: "3000" },
     ]);
   });
 

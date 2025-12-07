@@ -56,23 +56,23 @@ afterEach(async () => {
 
 describe("calculateAllowedAnonConversion", () => {
   it("caps by daily cap when XP below cap", () => {
-    const result = calculateAllowedAnonConversion(1000, 1, 3000, 100000);
+    const result = calculateAllowedAnonConversion(1000, 1);
     assert.strictEqual(result, 1000);
   });
 
   it("caps by daily cap when XP exceeds", () => {
-    const result = calculateAllowedAnonConversion(10000, 1, 3000, 100000);
+    const result = calculateAllowedAnonConversion(10000, 1);
     assert.strictEqual(result, 3000);
   });
 
   it("caps by max total", () => {
-    const result = calculateAllowedAnonConversion(200000, 100, 3000, 100000);
+    const result = calculateAllowedAnonConversion(200000, 100);
     assert.strictEqual(result, 100000);
   });
 
   it("returns 0 when xp or days missing", () => {
-    assert.strictEqual(calculateAllowedAnonConversion(0, 1, 3000, 100000), 0);
-    assert.strictEqual(calculateAllowedAnonConversion(10, 0, 3000, 100000), 0);
+    assert.strictEqual(calculateAllowedAnonConversion(0, 1), 0);
+    assert.strictEqual(calculateAllowedAnonConversion(10, 0), 0);
   });
 });
 
@@ -114,6 +114,34 @@ describe("attemptAnonToUserConversion", () => {
     });
     assert.strictEqual(second.converted, false);
     assert.strictEqual(second.amount, 0);
+  });
+
+  it("caps conversion amount using anon active days and leaves remaining anon total", async () => {
+    const anonId = "anon-partial";
+    const userId = "user-partial";
+    await saveAnonProfile({
+      anonId,
+      totalAnonXp: 8000,
+      anonActiveDays: 1,
+      lastActivityTs: Date.now(),
+      createdAt: new Date().toISOString(),
+      convertedToUserId: null,
+      lastActiveDayKey: "2024-05-02",
+    });
+    await store.set(keyTotal(anonId), "8000");
+    await store.set(keyTotal(userId), "0");
+
+    const result = await attemptAnonToUserConversion({
+      userId,
+      anonId,
+      authContext: { emailVerified: true },
+      storeClient: store,
+    });
+
+    assert.strictEqual(result.converted, true);
+    assert.strictEqual(result.amount, 3000);
+    assert.strictEqual(await store.get(keyTotal(userId)), "3000");
+    assert.strictEqual(await store.get(keyTotal(anonId)), "5000");
   });
 
   it("skips conversion when email not verified", async () => {

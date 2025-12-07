@@ -202,6 +202,7 @@ E2E tests:
 Implementation Notes
 - Server maintains an internal `lastActiveDayKey` on the anon profile to count active days based on server-computed day keys.
 - This helper field does not change external behavior or acceptance criteria.
+- Conversion uses `calculateAllowedAnonConversion`, capping migrated XP at `min(lifetimeAnonXp, DAILY_CAP * anonActiveDays, MAX_TOTAL_CONVERSION_CAP)`; any XP above the cap remains on the anon identity.
 Play as anon
 Create account
 Check XP
