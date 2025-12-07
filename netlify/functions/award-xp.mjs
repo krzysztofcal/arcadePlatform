@@ -378,6 +378,7 @@ const keyRateLimitIp = (ip) => `${KEY_NS}:ratelimit:ip:${hash(ip)}:${Math.floor(
 const keySessionRegistry = (userId, sessionId) => `${KEY_NS}:registry:${hash(`${userId}|${sessionId}`)}`;
 const keyMigration = (anonId, userId) => `${KEY_NS}:migration:${hash(`${anonId}|${userId}`)}`;
 const keyConversionLock = (anonId, userId) => `${KEY_NS}:convlock:${hash(`${anonId}|${userId}`)}`;
+const keyUserConversionGuard = (userId) => `${KEY_NS}:conversion:user:${userId}`;
 
 // SECURITY: Session registration
 async function registerSession({ userId, sessionId }) {
@@ -610,39 +611,60 @@ async function migrateAnonToAccount({ storeClient = store, anonId, accountId, al
 }
 
 async function attemptAnonToUserConversion({ userId, anonId, authContext, storeClient = store }) {
-  if (!ANON_CONVERSION_ENABLED) return { converted: false, amount: 0 };
-  if (!userId || !anonId || anonId === userId) return { converted: false, amount: 0 };
-  const emailVerified = !!(authContext?.emailVerified
-    || authContext?.payload?.email_confirmed_at
-    || authContext?.payload?.email_confirmed === true
-    || authContext?.payload?.email_verified === true);
-  if (!emailVerified) return { converted: false, amount: 0 };
+  if (!ANON_CONVERSION_ENABLED) {
+    klog("xp_migration_skip_disabled", { userId, anonId });
+    return { converted: false, amount: 0, reason: "disabled" };
+  }
+  if (!userId || !anonId || anonId === userId) {
+    klog("xp_migration_skip_ineligible", { userId, anonId });
+    return { converted: false, amount: 0, reason: "ineligible" };
+  }
+
+  const conversionGuardKey = keyUserConversionGuard(userId);
+  const conversionGuard = await storeClient.get(conversionGuardKey);
+  if (conversionGuard) {
+    klog("xp_migration_skip_already_converted", { userId, anonId, source: "redis_guard" });
+    return { converted: false, amount: 0, reason: "already_converted" };
+  }
+
+  const userProfile = await getUserProfile(userId);
+  if (userProfile?.anonConversionCompleted || userProfile?.hasConvertedAnonXp) {
+    klog("xp_migration_skip_already_converted", {
+      userId,
+      anonId,
+      source: "profile_flag",
+      convertedFromAnonId: userProfile?.convertedFromAnonId || null,
+    });
+    return { converted: false, amount: 0, reason: "already_converted" };
+  }
+
   const lockKey = keyConversionLock(anonId, userId);
   const lockAcquired = await acquireConversionLock(lockKey, LOCK_TTL_MS, storeClient);
   if (!lockAcquired) {
-    const [existingUser, existingAnon] = await Promise.all([
-      getUserProfile(userId),
-      getAnonProfile(anonId),
-    ]);
-    if (existingUser?.hasConvertedAnonXp || existingAnon?.convertedToUserId != null) {
-      return { converted: false, amount: 0 };
-    }
-    return { converted: false, amount: 0 };
+    klog("xp_migration_skip_ineligible", { userId, anonId, reason: "lock_not_acquired" });
+    return { converted: false, amount: 0, reason: "lock_not_acquired" };
   }
 
   try {
     const now = Date.now();
-    const userProfile = await getUserProfile(userId);
-    if (userProfile?.hasConvertedAnonXp) return { converted: false, amount: 0 };
     let anonProfile = await getAnonProfile(anonId);
-    if (anonProfile?.convertedToUserId != null) return { converted: false, amount: 0 };
+    if (anonProfile?.convertedToUserId != null) {
+      klog("xp_migration_skip_already_converted", { userId, anonId, source: "anon_profile" });
+      return { converted: false, amount: 0, reason: "already_converted" };
+    }
 
     const anonTotals = await getTotalsForIdentity({ userId: anonId, now, storeClient });
     const anonLifetime = sanitizeTotal(anonTotals?.lifetime);
+    if (anonLifetime <= 0) {
+      klog("xp_migration_skip_no_anon_totals", { userId, anonId });
+      return { converted: false, amount: 0, reason: "no_anon_totals" };
+    }
+
     const anonDays = Number(anonProfile?.anonActiveDays) || 0;
     const allowed = calculateAllowedAnonConversion(anonLifetime, anonDays);
     if (!allowed || allowed <= 0) {
-      return { converted: false, amount: 0, reason: "cap_zero" };
+      klog("xp_migration_skip_zero_amount", { userId, anonId, anonLifetime, anonActiveDays: anonDays });
+      return { converted: false, amount: 0, reason: "zero_amount" };
     }
 
     const migration = await migrateAnonToAccount({
@@ -653,9 +675,24 @@ async function attemptAnonToUserConversion({ userId, anonId, authContext, storeC
       now,
     });
 
-    if (!migration.migrated) return { converted: false, amount: 0, reason: migration.reason };
+    if (!migration.migrated) {
+      if (migration.reason === "account_has_xp") {
+        klog("xp_migration_skip_already_converted", { userId, anonId, source: "account_has_xp" });
+      } else {
+        klog("xp_migration_skip_zero_amount", { userId, anonId, reason: migration.reason });
+      }
+      return { converted: false, amount: 0, reason: migration.reason };
+    }
 
-    await saveUserProfile({ userId, totalXp: migration.accountAfter, hasConvertedAnonXp: true });
+    const conversionAt = new Date(now).toISOString();
+    await saveUserProfile({
+      userId,
+      totalXp: migration.accountAfter,
+      hasConvertedAnonXp: true,
+      anonConversionCompleted: true,
+      convertedFromAnonId: anonId,
+      anonConversionAt: conversionAt,
+    });
 
     if (!anonProfile) {
       anonProfile = initAnonProfile(anonId, now, getDailyKey(now));
@@ -665,7 +702,24 @@ async function attemptAnonToUserConversion({ userId, anonId, authContext, storeC
     anonProfile.anonActiveDays = 0;
     await saveAnonProfile(anonProfile);
 
-    return { converted: true, amount: migration.migrated, migration };
+    await storeClient.set(conversionGuardKey, "1");
+
+    const userTotalsAfter = await getTotalsForIdentity({ userId, now, storeClient });
+    klog("xp_migration_success", {
+      userId,
+      anonId,
+      migrateAmount: migration.migrated,
+      anonTotals: {
+        current: sanitizeTotal(anonTotals?.current),
+        lifetime: anonLifetime,
+      },
+      newUserTotals: {
+        totalLifetime: userTotalsAfter?.lifetime ?? migration.accountAfter,
+        totalToday: userTotalsAfter?.current ?? 0,
+      },
+    });
+
+    return { converted: true, amount: migration.migrated, migration, reason: "success" };
   } finally {
     await releaseConversionLock(lockKey, storeClient);
   }

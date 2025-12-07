@@ -297,6 +297,9 @@ export async function getUserProfile(userId) {
         createdAt: nowIso,
         updatedAt: nowIso,
         hasConvertedAnonXp: false,
+        anonConversionCompleted: false,
+        convertedFromAnonId: null,
+        anonConversionAt: null,
       };
     }
     const parsed = JSON.parse(raw);
@@ -304,13 +307,33 @@ export async function getUserProfile(userId) {
     const createdAt = typeof parsed.createdAt === "string" ? parsed.createdAt : nowIso;
     const updatedAt = typeof parsed.updatedAt === "string" ? parsed.updatedAt : createdAt;
     const hasConvertedAnonXp = parsed.hasConvertedAnonXp === true;
-    return { userId, totalXp, createdAt, updatedAt, hasConvertedAnonXp };
+    const anonConversionCompleted = parsed.anonConversionCompleted === true || hasConvertedAnonXp;
+    const convertedFromAnonId = typeof parsed.convertedFromAnonId === "string" ? parsed.convertedFromAnonId : null;
+    const anonConversionAt = typeof parsed.anonConversionAt === "string" ? parsed.anonConversionAt : null;
+    return {
+      userId,
+      totalXp,
+      createdAt,
+      updatedAt,
+      hasConvertedAnonXp,
+      anonConversionCompleted,
+      convertedFromAnonId,
+      anonConversionAt,
+    };
   } catch {
     return null;
   }
 }
 
-export async function saveUserProfile({ userId, totalXp, now = Date.now(), hasConvertedAnonXp = false }) {
+export async function saveUserProfile({
+  userId,
+  totalXp,
+  now = Date.now(),
+  hasConvertedAnonXp = false,
+  anonConversionCompleted = false,
+  convertedFromAnonId = null,
+  anonConversionAt = null,
+}) {
   if (!userId) return null;
   const existing = await getUserProfile(userId);
   const timestamp = new Date(now).toISOString();
@@ -320,6 +343,9 @@ export async function saveUserProfile({ userId, totalXp, now = Date.now(), hasCo
     createdAt: existing?.createdAt || timestamp,
     updatedAt: timestamp,
     hasConvertedAnonXp: existing?.hasConvertedAnonXp === true || hasConvertedAnonXp === true,
+    anonConversionCompleted: existing?.anonConversionCompleted === true || anonConversionCompleted === true,
+    convertedFromAnonId: convertedFromAnonId ?? existing?.convertedFromAnonId ?? null,
+    anonConversionAt: anonConversionAt ?? existing?.anonConversionAt ?? null,
   };
   try {
     await store.set(profileKey(userId), JSON.stringify(profile));
