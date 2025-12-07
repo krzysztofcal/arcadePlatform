@@ -4,6 +4,8 @@
   var doc = document;
   var nodes = {};
   var state = { user: null, open: false, client: null };
+  var authListeners = [];
+  var authSubscriptionAttached = false;
 
   function logDiag(label, payload){
     var logger = window && window.KLog;
@@ -88,26 +90,41 @@
     logDiag('supabase:token_bridge_init', { attached: true });
   }
 
-  function onAuthChange(callback){
+  function notifyAuthListeners(event, session){
+    var user = session && session.user ? session.user : null;
+    for (var i = 0; i < authListeners.length; i++){
+      var listener = authListeners[i];
+      if (typeof listener === 'function'){
+        try { listener(event, user, session); } catch (_err){}
+      }
+    }
+  }
+
+  function attachAuthSubscription(){
+    if (authSubscriptionAttached) return;
     var client = getClient();
     if (!client || !client.auth || typeof client.auth.onAuthStateChange !== 'function'){
-      return function(){};
+      return;
     }
-
+    authSubscriptionAttached = true;
     var result = client.auth.onAuthStateChange(function(event, session){
-      var user = session && session.user ? session.user : null;
-      logDiag('supabase:auth_change', { event: event, hasUser: !!user });
-      if (typeof callback === 'function'){
-        try { callback(event, user); } catch (_err){}
-      }
+      logDiag('supabase:auth_change', { event: event, hasUser: !!(session && session.user) });
+      notifyAuthListeners(event, session || null);
     });
+  }
 
-    var subscription = result && result.data ? result.data.subscription : null;
-    if (subscription && typeof subscription.unsubscribe === 'function'){
-      return function(){ subscription.unsubscribe(); };
+  // SupabaseAuth.onAuthChange contract: listener(event, user, session?)
+  // - user is always the second argument (or null)
+  // - session is an optional third argument
+  function onAuthChange(callback){
+    if (typeof callback === 'function'){
+      authListeners.push(callback);
     }
-    if (result && typeof result.unsubscribe === 'function'){ return function(){ result.unsubscribe(); }; }
-    return function(){};
+    attachAuthSubscription();
+    return function(){
+      if (!callback) return;
+      authListeners = authListeners.filter(function(fn){ return fn !== callback; });
+    };
   }
 
   function signIn(email, password){

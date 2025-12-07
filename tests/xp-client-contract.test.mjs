@@ -10,7 +10,7 @@ function response(status, json) {
   };
 }
 
-async function loadClientWithFetch(fetchImpl) {
+async function loadClientWithFetch(fetchImpl, options = {}) {
   const fs = await import('node:fs/promises');
   const path = await import('node:path');
   const { fileURLToPath } = await import('node:url');
@@ -19,12 +19,13 @@ async function loadClientWithFetch(fetchImpl) {
   const src = await fs.readFile(path.join(__dirname, '..', 'js', 'xpClient.js'), 'utf8');
 
   const store = new Map();
+  const baseWindow = { localStorage: {
+    getItem: k => store.get(k) ?? null,
+    setItem: (k, v) => store.set(k, String(v)),
+    removeItem: k => store.delete(k),
+  } };
   const ctx = {
-    window: { localStorage: {
-      getItem: k => store.get(k) ?? null,
-      setItem: (k, v) => store.set(k, String(v)),
-      removeItem: k => store.delete(k),
-    } },
+    window: Object.assign(baseWindow, options.window || {}),
     fetch: fetchImpl,
     crypto: { randomUUID: () => 'uuid-test' },
     Date, setTimeout, clearTimeout, console,
@@ -78,6 +79,29 @@ async function loadClientWithFetch(fetchImpl) {
       () => XPClient.postWindow({ delta: 1, ts: 444 }),
       /fetch failed|XP request failed/i
     );
+  }
+
+  // refreshBadgeFromServer applies status payload and bump meta
+  {
+    let applied = null;
+    const calls = [];
+    const XPClient = await loadClientWithFetch(async (_url, opts) => {
+      calls.push(JSON.parse(opts?.body || '{}'));
+      return response(200, { ok: true, status: 'statusOnly', totalLifetime: 777, cap: 10 });
+    }, {
+      window: {
+        XP: {
+          refreshFromServerStatus(payload, meta){
+            applied = { payload, meta };
+          },
+        },
+      },
+    });
+    await XPClient.refreshBadgeFromServer({ bumpBadge: true });
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].statusOnly, true);
+    assert.equal(applied.payload.totalLifetime, 777);
+    assert.equal(applied.meta.bump, true);
   }
 
   console.log('xp-client contract tests passed');

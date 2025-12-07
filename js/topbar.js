@@ -53,4 +53,27 @@
   } else {
     prune();
   }
+
+  function refreshXpBadge(){
+    if (!window || !window.XPClient || typeof window.XPClient.refreshBadgeFromServer !== 'function') return;
+    try {
+      window.XPClient.refreshBadgeFromServer({ bumpBadge: true });
+    } catch (_err){}
+  }
+
+  function handleAuthChange(event, _user, _session){
+    if (event !== 'SIGNED_IN') return;
+    refreshXpBadge();
+  }
+
+  function wireAuthBridge(){
+    if (!window || !window.SupabaseAuth || typeof window.SupabaseAuth.onAuthChange !== 'function') return;
+    window.SupabaseAuth.onAuthChange(handleAuthChange);
+  }
+
+  if (doc.readyState === 'loading'){
+    doc.addEventListener('DOMContentLoaded', wireAuthBridge, { once: true });
+  } else {
+    wireAuthBridge();
+  }
 })();

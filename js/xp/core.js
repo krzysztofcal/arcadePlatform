@@ -1312,6 +1312,16 @@ function bootXpCore(window, document) {
     updateBadge();
   }
 
+  function refreshFromServerStatus(payload, meta) {
+    if (!payload || typeof payload !== "object") return null;
+    var mergedMeta = Object.assign({}, meta || {});
+    if (mergedMeta.bumpBadge === true && mergedMeta.bump !== true) {
+      mergedMeta.bump = true;
+    }
+    applyServerDelta(payload, mergedMeta);
+    return payload;
+  }
+
   async function sendWindow(force) {
     if (!state.running || !window.XPClient || typeof window.XPClient.postWindow !== "function") return;
     if (state.pending) return;
@@ -2353,6 +2363,7 @@ function bootXpCore(window, document) {
     getNextResetEpoch,
     getSnapshot,
     refreshStatus,
+    refreshFromServerStatus,
     addScore,
     awardLocalXp,
     flushXp,
