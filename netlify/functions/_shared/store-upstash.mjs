@@ -4,6 +4,14 @@ const TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN;
 const USER_PROFILE_PREFIX = "kcswh:xp:user:";
 const ANON_PROFILE_PREFIX = "kcswh:xp:anon:";
 
+function logStoreError(message, meta) {
+  if (typeof klog === "function") {
+    klog(message, meta || {});
+  } else {
+    console.error(message, meta || {});
+  }
+}
+
 if (!BASE || !TOKEN) {
   console.warn("[store-upstash] Missing UPSTASH env; falling back to in-memory store.");
 }
@@ -236,9 +244,9 @@ const remoteStore = {
       try {
         const errorBody = await res.text();
         errorDetail = `: ${errorBody}`;
-        console.error(`[Upstash] eval failed with status ${res.status}${errorDetail}`);
+        logStoreError(`[Upstash] eval failed with status ${res.status}${errorDetail}`);
       } catch {
-        console.error(`[Upstash] eval failed with status ${res.status} (could not read error body)`);
+        logStoreError(`[Upstash] eval failed with status ${res.status} (could not read error body)`);
       }
       throw new Error(`Upstash eval failed: ${res.status}${errorDetail}`);
     }
@@ -283,15 +291,13 @@ export async function getUserProfile(userId) {
     const raw = await store.get(profileKey(userId));
     const nowIso = new Date().toISOString();
     if (!raw) {
-      const profile = {
+      return {
         userId,
         totalXp: 0,
         createdAt: nowIso,
         updatedAt: nowIso,
         hasConvertedAnonXp: false,
       };
-      await store.set(profileKey(userId), JSON.stringify(profile));
-      return profile;
     }
     const parsed = JSON.parse(raw);
     const totalXp = clampTotalXp(parsed.totalXp ?? parsed.total ?? 0);
@@ -319,7 +325,7 @@ export async function saveUserProfile({ userId, totalXp, now = Date.now(), hasCo
     await store.set(profileKey(userId), JSON.stringify(profile));
     return profile;
   } catch (err) {
-    console.error("[store-upstash] Failed to persist user profile", { userId, error: err?.message });
+    logStoreError("[store-upstash] Failed to persist user profile", { userId, error: err?.message });
     return existing || profile;
   }
 }
@@ -371,7 +377,7 @@ export async function saveAnonProfile(profile) {
     await store.set(anonProfileKey(profile.anonId), JSON.stringify(normalized));
     return normalized;
   } catch (err) {
-    console.error("[store-upstash] Failed to persist anon profile", { anonId: profile.anonId, error: err?.message });
+    logStoreError("[store-upstash] Failed to persist anon profile", { anonId: profile.anonId, error: err?.message });
     return normalized;
   }
 }
