@@ -487,3 +487,27 @@ function loop(time) {
 }
 
 requestAnimationFrame(loop);
+
+// Register controls with GameShell for parent frame communication
+if (window.GameShell && typeof window.GameShell.registerControls === 'function') {
+  window.GameShell.registerControls({
+    onPause: function() {
+      if (running && !paused) {
+        paused = true;
+        showOverlay("Paused", "Tap start to resume");
+      }
+    },
+    onResume: function() {
+      if (paused) {
+        paused = false;
+        hideOverlay();
+      }
+    },
+    onMute: function() {
+      // Pacman has no audio yet
+    },
+    onUnmute: function() {
+      // Pacman has no audio yet
+    }
+  });
+}

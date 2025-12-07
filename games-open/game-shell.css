@@ -25,6 +25,8 @@
   background: transparent;
   border: none;
   padding: 12px;
+  padding-bottom: 100px;
+  margin-bottom: 60px;
 }
 
 .game-shell-host .game-shell {

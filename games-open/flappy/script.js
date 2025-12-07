@@ -292,3 +292,25 @@ resetBtn.addEventListener("click", () => {
 
 resetGame();
 requestAnimationFrame(loop);
+
+// Register controls with GameShell for parent frame communication
+if (window.GameShell && typeof window.GameShell.registerControls === 'function') {
+  window.GameShell.registerControls({
+    onPause: function() {
+      if (running) {
+        running = false;
+      }
+    },
+    onResume: function() {
+      if (!running && !pendingStop) {
+        running = true;
+      }
+    },
+    onMute: function() {
+      // Flappy bird has no audio yet
+    },
+    onUnmute: function() {
+      // Flappy bird has no audio yet
+    }
+  });
+}

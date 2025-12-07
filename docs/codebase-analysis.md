@@ -18,4 +18,17 @@ The portal is a static HTML site enhanced with standalone JavaScript services. R
 ## Opportunities
 - Adopt a lightweight build step (Eleventy, Astro, or Vite + templating) to consolidate `<head>` metadata and shared footer structures.
 - Create unit tests for `PortalApp` by instantiating it with a mocked `document` and `fetchImpl`, improving confidence when adding filters or pagination.
-- Extract shared button/overlay components from `js/game.js` into reusable services similar to `FullscreenService` and `InputController` to slim page scripts.
+
+## Game Controls Service
+
+A standardized `GameControlsService` (`js/core/GameControlsService.js`) has been introduced to provide consistent game control buttons (mute, pause, fullscreen) across all game pages. This service:
+
+- Provides unified mute/pause/fullscreen controls for all games
+- Supports keyboard shortcuts (M for mute, Space for pause, F for fullscreen)
+- Integrates with the klog logging system for debugging and analytics
+- Handles state persistence in localStorage
+- Supports both native canvas games and iframe-embedded distributor games
+
+All game pages (game_cats.html, game_trex.html, game.html) now include the same control buttons in their `.titleBar` section, ensuring a consistent user experience across the portal.
+
+For detailed implementation documentation, see [docs/game-controls.md](./game-controls.md).

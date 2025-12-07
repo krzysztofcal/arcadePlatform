@@ -259,3 +259,27 @@ newGameBtn.addEventListener("click", resetGame);
 
 resetGame();
 requestAnimationFrame(loop);
+
+// Register controls with GameShell for parent frame communication
+if (window.GameShell && typeof window.GameShell.registerControls === 'function') {
+  window.GameShell.registerControls({
+    onPause: function() {
+      if (running) {
+        running = false;
+        drawMessage("Paused");
+      }
+    },
+    onResume: function() {
+      if (!running && !pendingStop) {
+        running = true;
+        draw();
+      }
+    },
+    onMute: function() {
+      // Snake has no audio yet
+    },
+    onUnmute: function() {
+      // Snake has no audio yet
+    }
+  });
+}
