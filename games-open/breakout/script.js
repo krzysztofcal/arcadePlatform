@@ -266,3 +266,25 @@ newGameBtn.addEventListener("click", () => {
 
 resetGame();
 loop();
+
+// Register controls with GameShell for parent frame communication
+if (window.GameShell && typeof window.GameShell.registerControls === 'function') {
+  window.GameShell.registerControls({
+    onPause: function() {
+      if (running) {
+        running = false;
+      }
+    },
+    onResume: function() {
+      if (!running && lives > 0) {
+        running = true;
+      }
+    },
+    onMute: function() {
+      // Breakout has no audio yet
+    },
+    onUnmute: function() {
+      // Breakout has no audio yet
+    }
+  });
+}

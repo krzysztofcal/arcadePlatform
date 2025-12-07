@@ -214,3 +214,22 @@ function endGame(won){
 resetBtn.addEventListener("click", resetGame);
 
 resetGame();
+
+// Register controls with GameShell for parent frame communication
+// Note: Minesweeper is turn-based, so pause/resume are no-ops
+if (window.GameShell && typeof window.GameShell.registerControls === 'function') {
+  window.GameShell.registerControls({
+    onPause: function() {
+      // Turn-based game - no continuous loop to pause
+    },
+    onResume: function() {
+      // Turn-based game - no continuous loop to resume
+    },
+    onMute: function() {
+      // Minesweeper has no audio yet
+    },
+    onUnmute: function() {
+      // Minesweeper has no audio yet
+    }
+  });
+}

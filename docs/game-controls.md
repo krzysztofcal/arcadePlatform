@@ -113,6 +113,7 @@ All game control events are logged using the klog utility with the following pre
 | Cats Game | `cats_game_` | `init`, `start`, `game_over`, `mute_toggle`, `pause_toggle` |
 | T-Rex Game | `trex_game_` | `init`, `start`, `reset`, `game_over`, `mute_toggle`, `pause_toggle`, `fullscreen_change` |
 | Frame (iframe games) | `frame_game_` | `init`, `init_controls`, `inject_iframe`, `mute_toggle`, `pause_toggle`, `iframe_message_*` |
+| GameShell (iframe games) | `game_shell_` | `init`, `control_message`, `mute_change`, `pause_change`, `controls_registered` |
 
 ## State Persistence
 
@@ -169,7 +170,70 @@ Game controls integrate with the XP system:
 
 ## Iframe Game Control Protocol
 
-For iframe games to support parent-controlled mute/pause, they should listen for messages:
+Iframe games in `games-open/` use the `GameShell` utility to handle control messages from the parent frame.
+
+### GameShell API
+
+The `games-open/game-shell.js` file provides a shared API for all iframe games:
+
+```javascript
+// GameShell is automatically initialized and listens for control messages
+// Games register their callbacks to respond to pause/mute commands:
+
+window.GameShell.registerControls({
+  onPause: function() {
+    // Handle pause - stop game loop, show overlay, etc.
+    running = false;
+  },
+  onResume: function() {
+    // Handle resume - restart game loop
+    running = true;
+  },
+  onMute: function() {
+    // Handle mute - disable audio
+  },
+  onUnmute: function() {
+    // Handle unmute - enable audio
+  }
+});
+
+// Check current state
+window.GameShell.isPaused();  // returns boolean
+window.GameShell.isMuted();   // returns boolean
+window.GameShell.getState();  // returns { paused, muted }
+```
+
+### Supported Iframe Games
+
+All games in `games-open/` now support control messages:
+
+| Game | Pause Support | Notes |
+|------|--------------|-------|
+| Flappy Bird | ✅ | Stops game loop |
+| Pong | ✅ | Stops game loop |
+| Tetris | ✅ | Shows "Paused" overlay |
+| Snake | ✅ | Shows "Paused" message |
+| Breakout | ✅ | Stops game loop |
+| Pacman | ✅ | Shows "Paused" overlay |
+| 2048 | N/A | Turn-based, no continuous loop |
+| Minesweeper | N/A | Turn-based, no continuous loop |
+
+### Message Protocol
+
+The parent frame (game.html via frame.js) sends messages in this format:
+
+```javascript
+{
+  type: 'kcswh:game-control',
+  action: 'pause' | 'mute',
+  paused: boolean,  // for pause action
+  muted: boolean    // for mute action
+}
+```
+
+### Legacy Support
+
+For games that don't use GameShell, they can listen directly for messages:
 
 ```javascript
 window.addEventListener('message', function(event) {

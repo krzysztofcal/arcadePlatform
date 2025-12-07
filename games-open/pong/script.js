@@ -270,3 +270,25 @@ newGameBtn.addEventListener("click", () => {
 
 resetGame();
 loop();
+
+// Register controls with GameShell for parent frame communication
+if (window.GameShell && typeof window.GameShell.registerControls === 'function') {
+  window.GameShell.registerControls({
+    onPause: function() {
+      if (running) {
+        running = false;
+      }
+    },
+    onResume: function() {
+      if (!running && !gameOver && !countdownActive) {
+        running = true;
+      }
+    },
+    onMute: function() {
+      // Pong has no audio yet
+    },
+    onUnmute: function() {
+      // Pong has no audio yet
+    }
+  });
+}

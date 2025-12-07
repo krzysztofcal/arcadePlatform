@@ -271,3 +271,22 @@ boardEl.addEventListener("touchend", (event) => {
 newGameBtn.addEventListener("click", initBoard);
 
 initBoard();
+
+// Register controls with GameShell for parent frame communication
+// Note: 2048 is turn-based, so pause/resume are no-ops
+if (window.GameShell && typeof window.GameShell.registerControls === 'function') {
+  window.GameShell.registerControls({
+    onPause: function() {
+      // Turn-based game - no continuous loop to pause
+    },
+    onResume: function() {
+      // Turn-based game - no continuous loop to resume
+    },
+    onMute: function() {
+      // 2048 has no audio yet
+    },
+    onUnmute: function() {
+      // 2048 has no audio yet
+    }
+  });
+}

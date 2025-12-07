@@ -420,3 +420,27 @@ function update(time = 0) {
 
 resetGame();
 update();
+
+// Register controls with GameShell for parent frame communication
+if (window.GameShell && typeof window.GameShell.registerControls === 'function') {
+  window.GameShell.registerControls({
+    onPause: function() {
+      if (running && !pendingGameOver) {
+        running = false;
+        showOverlay("Paused", "Tap play to resume");
+      }
+    },
+    onResume: function() {
+      if (!running && !pendingGameOver) {
+        running = true;
+        hideOverlay();
+      }
+    },
+    onMute: function() {
+      // Tetris has no audio yet
+    },
+    onUnmute: function() {
+      // Tetris has no audio yet
+    }
+  });
+}
