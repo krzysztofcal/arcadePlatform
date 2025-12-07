@@ -2,6 +2,8 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { createSupabaseJwt, mockStoreEvalReturn, parseJsonBody } from "./helpers/xp-test-helpers.mjs";
 
 const mockData = new Map();
+const mockUserProfiles = new Map();
+const mockAnonProfiles = new Map();
 
 const pipelineFactory = () => {
   const operations = [];
@@ -28,7 +30,18 @@ const pipelineFactory = () => {
   return pipeline;
 };
 
-const saveUserProfileMock = vi.fn(async () => {});
+const saveUserProfileMock = vi.fn(async ({ userId, totalXp }) => {
+  if (!userId) return null;
+  const profile = {
+    userId,
+    totalXp: Number(totalXp) || 0,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    hasConvertedAnonXp: false,
+  };
+  mockUserProfiles.set(userId, profile);
+  return profile;
+});
 
 const store = {
   get: vi.fn((key) => Promise.resolve(mockData.get(key) ?? null)),
@@ -59,6 +72,8 @@ const store = {
   _mockData: mockData,
   _reset: () => {
     mockData.clear();
+    mockUserProfiles.clear();
+    mockAnonProfiles.clear();
     store.eval.mockClear();
     store.get.mockClear();
     store.set.mockClear();
@@ -74,6 +89,22 @@ const store = {
 vi.mock("../netlify/functions/_shared/store-upstash.mjs", () => ({
   store,
   saveUserProfile: saveUserProfileMock,
+  getUserProfile: vi.fn(async (userId) => mockUserProfiles.get(userId) || null),
+  getAnonProfile: vi.fn(async (anonId) => mockAnonProfiles.get(anonId) || null),
+  saveAnonProfile: vi.fn(async (profile) => {
+    if (!profile || !profile.anonId) return null;
+    mockAnonProfiles.set(profile.anonId, profile);
+    return profile;
+  }),
+  initAnonProfile: vi.fn((anonId, now, dayKey) => ({
+    anonId,
+    totalAnonXp: 0,
+    anonActiveDays: 0,
+    lastActivityTs: now,
+    createdAt: new Date(now).toISOString(),
+    convertedToUserId: null,
+    lastActiveDayKey: dayKey,
+  })),
 }));
 
 async function loadAwardXp() {

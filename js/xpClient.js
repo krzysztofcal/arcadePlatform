@@ -28,6 +28,7 @@
     authToken: null,
     authCheckedAt: 0,
     authPromise: null,
+    shownConversions: {},
   };
 
   let serverCalcInitRequested = false;
@@ -258,6 +259,85 @@
     }
     // Last resort fallback for environments without crypto (very rare)
     return Math.random().toString(36).slice(2) + Date.now().toString(36);
+  }
+
+  function decodeJwtSub(token) {
+    if (!token || typeof token !== "string") return null;
+    const parts = token.split(".");
+    if (parts.length < 2) return null;
+    try {
+      const payload = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+      const decoded = atob(payload);
+      const json = JSON.parse(decoded);
+      return typeof json.sub === "string" ? json.sub : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function currentUserIdForConversion() {
+    const token = state.authToken;
+    const sub = decodeJwtSub(token);
+    if (sub) return sub;
+    try {
+      const ids = ensureIds();
+      return ids && ids.userId ? ids.userId : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function showConversionToast(amount) {
+    if (typeof document === "undefined") return;
+    const existing = document.getElementById("xp-conversion-toast");
+    if (existing) {
+      existing.textContent = `We converted ${amount.toLocaleString()} XP from your guest profile to your account.`;
+      return;
+    }
+    const el = document.createElement("div");
+    el.id = "xp-conversion-toast";
+    el.textContent = `We converted ${amount.toLocaleString()} XP from your guest profile to your account.`;
+    el.style.position = "fixed";
+    el.style.bottom = "16px";
+    el.style.left = "50%";
+    el.style.transform = "translateX(-50%)";
+    el.style.padding = "12px 16px";
+    el.style.background = "#0b1021";
+    el.style.color = "#fff";
+    el.style.borderRadius = "12px";
+    el.style.boxShadow = "0 4px 12px rgba(0,0,0,0.25)";
+    el.style.zIndex = "9999";
+    el.style.fontSize = "14px";
+    el.style.lineHeight = "18px";
+    el.style.textAlign = "center";
+    el.setAttribute("aria-live", "polite");
+    (document.body || document.documentElement).appendChild(el);
+    setTimeout(() => {
+      try {
+        if (el && el.parentNode) el.parentNode.removeChild(el);
+      } catch (_) {}
+    }, 5000);
+  }
+
+  function handleConversion(conversion) {
+    if (!conversion || conversion.converted !== true || !conversion.amount || conversion.amount <= 0) return;
+    const userId = currentUserIdForConversion();
+    if (!userId) return;
+    const key = `kcswh:xpConversionShown:${userId}`;
+    if (state.shownConversions[userId]) return;
+    try {
+      if (typeof localStorage !== "undefined" && localStorage.getItem(key)) {
+        state.shownConversions[userId] = true;
+        return;
+      }
+    } catch (_) {}
+    showConversionToast(conversion.amount);
+    state.shownConversions[userId] = true;
+    try {
+      if (typeof localStorage !== "undefined") {
+        localStorage.setItem(key, String(conversion.amount));
+      }
+    } catch (_) {}
   }
 
   function ensureIds() {
@@ -560,6 +640,7 @@
       }
       try {
         const json = await res.json();
+        handleConversion(json && json.conversion ? json.conversion : null);
         return { ok: true, body: json, transport };
       } catch (_) {
         return { ok: false, network: true, status: res.status, transport };
@@ -687,6 +768,7 @@
     }
     const payload = await res.json();
     updateCapFromPayload(payload);
+    handleConversion(payload && payload.conversion ? payload.conversion : null);
     return payload;
   }
 
@@ -825,6 +907,7 @@
         if (responseBody && typeof responseBody === "object" && opts.keepalive === true) {
           responseBody._transport = "keepalive";
         }
+        handleConversion(responseBody && responseBody.conversion ? responseBody.conversion : null);
 
         if (window && window.console && typeof window.console.debug === "function" && responseBody) {
           window.console.debug("[XP] server_calc_apply", {

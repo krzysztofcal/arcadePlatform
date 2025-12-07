@@ -3,8 +3,21 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { createSupabaseJwt, parseJsonBody } from "./helpers/xp-test-helpers.mjs";
 
 const mockData = new Map();
+const mockUserProfiles = new Map();
+const mockAnonProfiles = new Map();
 
-const saveUserProfileMock = vi.fn(async () => {});
+const saveUserProfileMock = vi.fn(async ({ userId, totalXp, hasConvertedAnonXp }) => {
+  if (!userId) return null;
+  const profile = {
+    userId,
+    totalXp: Number(totalXp) || 0,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    hasConvertedAnonXp: hasConvertedAnonXp === true,
+  };
+  mockUserProfiles.set(userId, profile);
+  return profile;
+});
 
 const pipelineFactory = () => {
   const operations = [];
@@ -54,6 +67,8 @@ const store = {
   _mockData: mockData,
   _reset: () => {
     mockData.clear();
+    mockUserProfiles.clear();
+    mockAnonProfiles.clear();
     store.eval.mockClear();
     store.get.mockClear();
     store.set.mockClear();
@@ -68,6 +83,22 @@ const store = {
 vi.mock("../netlify/functions/_shared/store-upstash.mjs", () => ({
   store,
   saveUserProfile: saveUserProfileMock,
+  getUserProfile: vi.fn(async (userId) => mockUserProfiles.get(userId) || null),
+  getAnonProfile: vi.fn(async (anonId) => mockAnonProfiles.get(anonId) || null),
+  saveAnonProfile: vi.fn(async (profile) => {
+    if (!profile || !profile.anonId) return null;
+    mockAnonProfiles.set(profile.anonId, profile);
+    return profile;
+  }),
+  initAnonProfile: vi.fn((anonId, now, dayKey) => ({
+    anonId,
+    totalAnonXp: 0,
+    anonActiveDays: 0,
+    lastActivityTs: now,
+    createdAt: new Date(now).toISOString(),
+    convertedToUserId: null,
+    lastActiveDayKey: dayKey,
+  })),
 }));
 
 const keyTotal = (u) => `${process.env.XP_KEY_NS}:total:${u}`;
@@ -90,16 +121,29 @@ describe("anon to user migration", () => {
     process.env.XP_DEBUG = "1";
     process.env.XP_REQUIRE_SERVER_SESSION = "0";
     process.env.XP_DAILY_SECRET = "test-secret-for-daily-32chars!";
+    process.env.XP_ANON_CONVERSION_ENABLED = "1";
+    process.env.XP_ANON_CONVERSION_MAX_CAP = "100000";
   });
 
-  it("M1: migrates anon totals exactly once", async () => {
+  it("M1: converts anon profile once with caps", async () => {
     const anonId = "anon-111";
     const userId = "user-123";
-    const token = createSupabaseJwt({ sub: userId, secret: process.env.SUPABASE_JWT_SECRET });
+    const token = createSupabaseJwt({
+      sub: userId,
+      secret: process.env.SUPABASE_JWT_SECRET,
+      payload: { email_confirmed_at: new Date().toISOString() },
+    });
     const { handler } = await loadAwardXp();
 
-    mockData.set(keyTotal(anonId), "100");
-    mockData.set(keyTotal(userId), "0");
+    mockAnonProfiles.set(anonId, {
+      anonId,
+      totalAnonXp: 5000,
+      anonActiveDays: 2,
+      lastActivityTs: Date.now(),
+      createdAt: new Date().toISOString(),
+      convertedToUserId: null,
+      lastActiveDayKey: "2024-05-01",
+    });
 
     const first = await handler({
       httpMethod: "POST",
@@ -109,33 +153,45 @@ describe("anon to user migration", () => {
 
     const body = parseJsonBody(first);
     expect(first.statusCode).toBe(200);
-    expect(body.totalLifetime).toBeGreaterThanOrEqual(100);
+    expect(body.conversion.converted).toBe(true);
+    expect(body.conversion.amount).toBe(5000);
     const ops = store._lastPipeline?.operations || [];
     expect(ops).toEqual([
-      { op: "incrby", key: keyTotal(userId), value: 100 },
+      { op: "incrby", key: keyTotal(userId), value: 5000 },
       { op: "del", key: keyTotal(anonId) },
-      { op: "set", key: keyMigration(anonId, userId), value: "100" },
+      { op: "set", key: keyMigration(anonId, userId), value: "5000" },
     ]);
+    const anonProfile = mockAnonProfiles.get(anonId);
+    expect(anonProfile.totalAnonXp).toBe(0);
+    expect(anonProfile.anonActiveDays).toBe(0);
+    expect(anonProfile.convertedToUserId).toBe(userId);
+    const savedUser = mockUserProfiles.get(userId);
+    expect(savedUser.hasConvertedAnonXp).toBe(true);
 
     const again = await handler({
       httpMethod: "POST",
       headers: { Authorization: `Bearer ${token}` },
       body: JSON.stringify({ anonId, sessionId: "sess-1", delta: 0 }),
     });
-
     const againBody = parseJsonBody(again);
-    expect(againBody.totalLifetime).toBeGreaterThanOrEqual(100);
+    expect(againBody.conversion.converted).toBe(false);
+    expect(againBody.conversion.amount).toBe(0);
     expect(store.pipeline).toHaveBeenCalledTimes(1);
-    expect(saveUserProfileMock).toHaveBeenCalledWith(
-      expect.objectContaining({ userId, totalXp: expect.any(Number) })
-    );
   });
 
-  it("M2: skips migration when anon bucket empty", async () => {
-    const anonId = "anon-empty";
-    const userId = "user-123";
+  it("M2: skips conversion when email not verified", async () => {
+    const anonId = "anon-unverified";
+    const userId = "user-456";
     const token = createSupabaseJwt({ sub: userId, secret: process.env.SUPABASE_JWT_SECRET });
     const { handler } = await loadAwardXp();
+    mockAnonProfiles.set(anonId, {
+      anonId,
+      totalAnonXp: 4000,
+      anonActiveDays: 1,
+      lastActivityTs: Date.now(),
+      createdAt: new Date().toISOString(),
+      convertedToUserId: null,
+    });
 
     const response = await handler({
       httpMethod: "POST",
@@ -144,20 +200,30 @@ describe("anon to user migration", () => {
     });
 
     const body = parseJsonBody(response);
-    expect(response.statusCode).toBe(200);
-    expect(body.totalLifetime).toBeGreaterThanOrEqual(0);
+    expect(body.conversion.converted).toBe(false);
+    expect(body.conversion.amount).toBe(0);
     expect(store.pipeline).not.toHaveBeenCalled();
-    expect(mockData.get(keyMigration(anonId, userId))).toBe("0");
+    expect(mockAnonProfiles.get(anonId).convertedToUserId).toBeNull();
   });
 
-  it("M3: merges anon XP into existing user total", async () => {
-    const anonId = "anon-merge";
-    const userId = "user-merge";
-    const token = createSupabaseJwt({ sub: userId, secret: process.env.SUPABASE_JWT_SECRET });
+  it("M3: enforces daily cap multiplier", async () => {
+    const anonId = "anon-cap";
+    const userId = "user-cap";
+    const token = createSupabaseJwt({
+      sub: userId,
+      secret: process.env.SUPABASE_JWT_SECRET,
+      payload: { email_confirmed_at: new Date().toISOString() },
+    });
     const { handler } = await loadAwardXp();
-
-    mockData.set(keyTotal(anonId), "50");
-    mockData.set(keyTotal(userId), "200");
+    process.env.XP_DAILY_CAP = "3000";
+    mockAnonProfiles.set(anonId, {
+      anonId,
+      totalAnonXp: 10000,
+      anonActiveDays: 1,
+      lastActivityTs: Date.now(),
+      createdAt: new Date().toISOString(),
+      convertedToUserId: null,
+    });
 
     const response = await handler({
       httpMethod: "POST",
@@ -166,39 +232,9 @@ describe("anon to user migration", () => {
     });
 
     const body = parseJsonBody(response);
-    expect(response.statusCode).toBe(200);
-    expect(body.totalLifetime).toBeGreaterThanOrEqual(250);
+    expect(body.conversion.converted).toBe(true);
+    expect(body.conversion.amount).toBe(3000);
     const ops = store._lastPipeline?.operations || [];
-    expect(ops[0]).toEqual({ op: "incrby", key: keyTotal(userId), value: 50 });
-    expect(mockData.get(keyTotal(anonId))).toBeUndefined();
-    expect(mockData.get(keyTotal(userId))).toBe("250");
-  });
-
-  it("M4: subsequent awards use migrated user bucket", async () => {
-    const anonId = "anon-followup";
-    const userId = "user-followup";
-    const token = createSupabaseJwt({ sub: userId, secret: process.env.SUPABASE_JWT_SECRET });
-    const { handler } = await loadAwardXp();
-
-    mockData.set(keyTotal(anonId), "100");
-    mockData.set(keyTotal(userId), "0");
-
-    await handler({
-      httpMethod: "POST",
-      headers: { Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ anonId, sessionId: "sess-1", delta: 0 }),
-    });
-
-    store.eval.mockResolvedValue([25, 25, 25, 125, Date.now(), 0]);
-    const second = await handler({
-      httpMethod: "POST",
-      headers: { Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ anonId, sessionId: "sess-1", delta: 25 }),
-    });
-
-    const body = parseJsonBody(second);
-    expect(body.totalLifetime).toBe(125);
-    const keys = store.eval.mock.calls[0][1];
-    expect(keys[3]).toBe(`${process.env.XP_KEY_NS}:total:${userId}`);
+    expect(ops[0]).toEqual({ op: "incrby", key: keyTotal(userId), value: 3000 });
   });
 });

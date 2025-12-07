@@ -1,5 +1,12 @@
 import crypto from "node:crypto";
-import { store, saveUserProfile } from "./_shared/store-upstash.mjs";
+import {
+  store,
+  saveUserProfile,
+  getUserProfile,
+  getAnonProfile,
+  saveAnonProfile,
+  initAnonProfile,
+} from "./_shared/store-upstash.mjs";
 import { verifySessionToken, validateServerSession, touchSession } from "./start-session.mjs";
 
 const warsawDateFormatter = new Intl.DateTimeFormat("en-CA", {
@@ -103,6 +110,8 @@ const MIN_ACTIVITY_VIS_S = Math.max(0, asNumber(process.env.XP_MIN_ACTIVITY_VIS_
 const METADATA_MAX_BYTES = Math.max(0, asNumber(process.env.XP_METADATA_MAX_BYTES, 2048));
 const DEBUG_ENABLED = process.env.XP_DEBUG === "1";
 const KEY_NS = process.env.XP_KEY_NS ?? "kcswh:xp:v2";
+const MAX_TOTAL_CONVERSION_CAP = Number(process.env.XP_ANON_CONVERSION_MAX_CAP || "100000");
+const ANON_CONVERSION_ENABLED = process.env.XP_ANON_CONVERSION_ENABLED !== "0";
 const LOCK_KEY_PREFIX = `${KEY_NS}:lock:`;
 const DRIFT_MS = Math.max(0, asNumber(process.env.XP_DRIFT_MS, 30_000));
 // Build CORS allowlist from env var + auto-include Netlify site URL
@@ -140,6 +149,14 @@ const getRequireServerSession = () => process.env.XP_REQUIRE_SERVER_SESSION === 
 const getServerSessionWarnMode = () => process.env.XP_SERVER_SESSION_WARN_MODE === "1";
 
 const sanitizeTotal = (value) => Math.max(0, Math.floor(Number(value) || 0));
+
+function calculateAllowedAnonConversion(totalAnonXp, anonActiveDays) {
+  const xp = Math.max(0, Number(totalAnonXp) || 0);
+  const days = Math.max(0, Number(anonActiveDays) || 0);
+  if (xp <= 0 || days <= 0) return 0;
+  const capByDays = DAILY_CAP * days;
+  return Math.min(xp, capByDays, MAX_TOTAL_CONVERSION_CAP);
+}
 
 const sleep = (ms = 0) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -486,6 +503,45 @@ async function getTotals({ userId, sessionId, now = Date.now() }) {
   }
 }
 
+async function attemptAnonToUserConversion({ userId, anonId, authContext, storeClient = store }) {
+  if (!ANON_CONVERSION_ENABLED) return { converted: false, amount: 0 };
+  if (!userId || !anonId || anonId === userId) return { converted: false, amount: 0 };
+  const emailVerified = !!(authContext?.emailVerified
+    || authContext?.payload?.email_confirmed_at
+    || authContext?.payload?.email_confirmed === true
+    || authContext?.payload?.email_verified === true);
+  if (!emailVerified) return { converted: false, amount: 0 };
+
+  const userProfile = await getUserProfile(userId);
+  if (userProfile?.hasConvertedAnonXp) return { converted: false, amount: 0 };
+  const anonProfile = await getAnonProfile(anonId);
+  if (!anonProfile) return { converted: false, amount: 0 };
+  if (anonProfile.convertedToUserId != null) return { converted: false, amount: 0 };
+
+  const allowedXp = calculateAllowedAnonConversion(anonProfile.totalAnonXp, anonProfile.anonActiveDays);
+  if (allowedXp <= 0) return { converted: false, amount: 0 };
+
+  const anonTotalKey = keyTotal(anonId);
+  const userTotalKey = keyTotal(userId);
+  const markerKey = keyMigration(anonId, userId);
+
+  const pipe = storeClient.pipeline();
+  pipe.incrby(userTotalKey, allowedXp);
+  pipe.del(anonTotalKey);
+  pipe.set(markerKey, String(allowedXp));
+  await pipe.exec();
+
+  const newTotal = (userProfile?.totalXp || 0) + allowedXp;
+  await saveUserProfile({ userId, totalXp: newTotal, hasConvertedAnonXp: true });
+
+  anonProfile.convertedToUserId = userId;
+  anonProfile.totalAnonXp = 0;
+  anonProfile.anonActiveDays = 0;
+  await saveAnonProfile(anonProfile);
+
+  return { converted: true, amount: allowedXp };
+}
+
 export async function handler(event) {
   const origin = event.headers?.origin;
 
@@ -550,8 +606,12 @@ export async function handler(event) {
 
   const jwtToken = extractBearerToken(event.headers);
   const authContext = verifySupabaseJwt(jwtToken);
+  authContext.emailVerified = !!(authContext.payload?.email_confirmed_at
+    || authContext.payload?.email_confirmed === true
+    || authContext.payload?.email_verified === true);
   const supabaseUserId = authContext.valid ? authContext.userId : null;
   let xpIdentity = supabaseUserId || anonId || null;
+  let conversion = { converted: false, amount: 0 };
 
   const applyDiagnostics = (payload, extra = {}) => {
     if (!DEBUG_ENABLED) return;
@@ -642,33 +702,17 @@ export async function handler(event) {
     anonId,
   });
 
-  // If we have a Supabase user and a prior anon id, migrate anon totals once into the
-  // authenticated bucket so status reads and new awards share the same keys.
   if (supabaseUserId && anonId && anonId !== supabaseUserId) {
-    const markerKey = keyMigration(anonId, supabaseUserId);
     try {
-      const already = await store.get(markerKey);
-      if (!already) {
-        const anonTotals = await getTotals({ userId: anonId, sessionId: querySessionId, now });
-        if (anonTotals && anonTotals.lifetime > 0) {
-          const anonTotalKey = keyTotal(anonId);
-          const userTotalKey = keyTotal(supabaseUserId);
-          const pipe = store.pipeline();
-          pipe.incrby(userTotalKey, anonTotals.lifetime);
-          pipe.del(anonTotalKey);
-          pipe.set(markerKey, String(anonTotals.lifetime));
-          await pipe.exec();
-          console.log("[XP] Migrated anon XP to account", {
-            from: anonId,
-            to: supabaseUserId,
-            amount: anonTotals.lifetime,
-          });
-        } else {
-          await store.set(markerKey, "0");
-        }
-      }
+      conversion = await attemptAnonToUserConversion({
+        userId: supabaseUserId,
+        anonId,
+        authContext,
+        storeClient: store,
+      });
     } catch (err) {
-      console.warn("[XP] XP migration failed:", err);
+      klog("xp_conversion_error", { error: err?.message, userId: supabaseUserId, anonId });
+      conversion = { converted: false, amount: 0 };
     }
   }
 
@@ -793,6 +837,10 @@ export async function handler(event) {
   };
 
   const respond = async (statusCode, payload, options = {}) => {
+    payload.conversion = {
+      converted: conversion.converted === true,
+      amount: conversion.converted ? conversion.amount : 0,
+    };
     let totalSource = options.totalOverride;
     let totals = options.totals;
     let skipCookie = options.skipCookie;
@@ -1145,6 +1193,21 @@ export async function handler(event) {
     totalLifetime,
   });
 
+  if (!supabaseUserId && anonId && granted > 0) {
+    let anonProfile = await getAnonProfile(anonId);
+    if (!anonProfile) anonProfile = initAnonProfile(anonId, now, dayKeyNow);
+    anonProfile.totalAnonXp += granted;
+    if (anonProfile.lastActiveDayKey !== dayKeyNow) {
+      anonProfile.anonActiveDays += 1;
+      anonProfile.lastActiveDayKey = dayKeyNow;
+    }
+    anonProfile.lastActivityTs = now;
+    if (!anonProfile.createdAt) {
+      anonProfile.createdAt = new Date(now).toISOString();
+    }
+    await saveAnonProfile(anonProfile);
+  }
+
   const totalTodayRedis = Math.min(DAILY_CAP, Math.max(0, sanitizeTotal(redisDailyTotalRaw)));
   const remaining = Math.max(0, DAILY_CAP - totalTodayRedis);
 
@@ -1271,3 +1334,5 @@ export async function handler(event) {
 
   return respond(200, payload, { totalOverride: redisDailyTotalRaw, debugExtra });
 }
+
+export { calculateAllowedAnonConversion, attemptAnonToUserConversion };

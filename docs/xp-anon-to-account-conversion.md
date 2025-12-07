@@ -198,6 +198,10 @@ Phase 5 — Testing
 Unit tests: anon days, caps, limit enforcement.
 Integration tests: conversion + XP sync.
 E2E tests:
+
+Implementation Notes
+- Server maintains an internal `lastActiveDayKey` on the anon profile to count active days based on server-computed day keys.
+- This helper field does not change external behavior or acceptance criteria.
 Play as anon
 Create account
 Check XP
