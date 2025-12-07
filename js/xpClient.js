@@ -698,7 +698,6 @@
         try {
           window.XP.refreshFromServerStatus(payload, {
             bump: opts.bumpBadge === true,
-            bumpBadge: opts.bumpBadge === true,
           });
         } catch (_) {}
       }

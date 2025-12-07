@@ -19,12 +19,13 @@ async function loadClientWithFetch(fetchImpl, options = {}) {
   const src = await fs.readFile(path.join(__dirname, '..', 'js', 'xpClient.js'), 'utf8');
 
   const store = new Map();
+  const baseWindow = { localStorage: {
+    getItem: k => store.get(k) ?? null,
+    setItem: (k, v) => store.set(k, String(v)),
+    removeItem: k => store.delete(k),
+  } };
   const ctx = {
-    window: { localStorage: {
-      getItem: k => store.get(k) ?? null,
-      setItem: (k, v) => store.set(k, String(v)),
-      removeItem: k => store.delete(k),
-    }, ...(options.window || {}) },
+    window: Object.assign(baseWindow, options.window || {}),
     fetch: fetchImpl,
     crypto: { randomUUID: () => 'uuid-test' },
     Date, setTimeout, clearTimeout, console,

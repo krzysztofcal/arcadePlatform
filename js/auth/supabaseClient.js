@@ -6,7 +6,6 @@
   var state = { user: null, open: false, client: null };
   var authListeners = [];
   var authSubscriptionAttached = false;
-  var authUnsubscribe = null;
 
   function logDiag(label, payload){
     var logger = window && window.KLog;
@@ -112,13 +111,6 @@
       logDiag('supabase:auth_change', { event: event, hasUser: !!(session && session.user) });
       notifyAuthListeners(event, session || null);
     });
-
-    var subscription = result && result.data ? result.data.subscription : null;
-    if (subscription && typeof subscription.unsubscribe === 'function'){
-      authUnsubscribe = function(){ subscription.unsubscribe(); };
-    } else if (result && typeof result.unsubscribe === 'function'){
-      authUnsubscribe = function(){ result.unsubscribe(); };
-    }
   }
 
   // SupabaseAuth.onAuthChange contract: listener(event, user, session?)
