@@ -56,7 +56,7 @@ const store = {
     mockData.delete(key);
     return Promise.resolve(1);
   }),
-  eval: vi.fn(() => Promise.resolve([0, 0, 0, 0, Date.now(), 0])),
+  eval: vi.fn(() => Promise.resolve(1)),
   pipeline: vi.fn(() => {
     const pipeline = pipelineFactory();
     store._lastPipeline = pipeline;
@@ -68,6 +68,7 @@ const store = {
     mockUserProfiles.clear();
     mockAnonProfiles.clear();
     store.eval.mockClear();
+    store.eval.mockImplementation(() => Promise.resolve(1));
     store.get.mockClear();
     store.set.mockClear();
     store.setex.mockClear();
@@ -77,6 +78,7 @@ const store = {
     store._lastPipeline = null;
   },
 };
+store.eval.mockImplementation(() => Promise.resolve(1));
 
 vi.mock("../netlify/functions/_shared/store-upstash.mjs", () => ({
   store,
@@ -218,5 +220,74 @@ describe("attemptAnonToUserConversion", () => {
     });
     expect(result.converted).toBe(true);
     expect(result.amount).toBe(3000);
+  });
+
+  it("only converts once when lock is held by first caller", async () => {
+    const { attemptAnonToUserConversion } = await loadModule();
+    mockAnonProfiles.set("anon-lock", {
+      anonId: "anon-lock",
+      totalAnonXp: 5000,
+      anonActiveDays: 2,
+      convertedToUserId: null,
+    });
+    let evalCall = 0;
+    store.eval.mockImplementation(() => {
+      evalCall += 1;
+      return Promise.resolve(evalCall === 1 ? 1 : 0);
+    });
+
+    const first = await attemptAnonToUserConversion({
+      userId: "user-lock",
+      anonId: "anon-lock",
+      authContext: { emailVerified: true },
+      storeClient: store,
+    });
+    const second = await attemptAnonToUserConversion({
+      userId: "user-lock",
+      anonId: "anon-lock",
+      authContext: { emailVerified: true },
+      storeClient: store,
+    });
+
+    expect(first.converted).toBe(true);
+    expect(first.amount).toBe(5000);
+    expect(second.converted).toBe(false);
+    expect(second.amount).toBe(0);
+    expect(store.pipeline).toHaveBeenCalledTimes(1);
+    const anon = mockAnonProfiles.get("anon-lock");
+    expect(anon.convertedToUserId).toBe("user-lock");
+    expect(anon.totalAnonXp).toBe(0);
+    const user = mockUserProfiles.get("user-lock");
+    expect(user?.hasConvertedAnonXp).toBe(true);
+  });
+
+  it("skips conversion when lock unavailable after prior conversion", async () => {
+    const { attemptAnonToUserConversion } = await loadModule();
+    mockAnonProfiles.set("anon-lock2", {
+      anonId: "anon-lock2",
+      totalAnonXp: 4000,
+      anonActiveDays: 2,
+      convertedToUserId: null,
+    });
+
+    store.eval.mockImplementation(() => Promise.resolve(1));
+    await attemptAnonToUserConversion({
+      userId: "user-lock2",
+      anonId: "anon-lock2",
+      authContext: { emailVerified: true },
+      storeClient: store,
+    });
+
+    store.eval.mockImplementation(() => Promise.resolve(0));
+    const second = await attemptAnonToUserConversion({
+      userId: "user-lock2",
+      anonId: "anon-lock2",
+      authContext: { emailVerified: true },
+      storeClient: store,
+    });
+
+    expect(second.converted).toBe(false);
+    expect(second.amount).toBe(0);
+    expect(store.pipeline).toHaveBeenCalledTimes(1);
   });
 });

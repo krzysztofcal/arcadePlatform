@@ -6,40 +6,74 @@
  */
 
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
-import { withEnv } from "./helpers/xp-test-helpers.mjs";
+import { withEnv, createSupabaseJwt } from "./helpers/xp-test-helpers.mjs";
 
 // Set up environment for in-memory store before imports
 process.env.XP_REQUIRE_ACTIVITY = "0"; // Disable by default for most tests
+process.env.SUPABASE_JWT_SECRET = process.env.SUPABASE_JWT_SECRET || "testsecret";
 
 // Mock store before importing handler
 vi.mock("../netlify/functions/_shared/store-upstash.mjs", () => {
   const mockData = new Map();
+  const mockAnonProfiles = new Map();
+
+  const store = {
+    get: vi.fn((key) => Promise.resolve(mockData.get(key) || null)),
+    setex: vi.fn((key, ttl, value) => {
+      mockData.set(key, value);
+      return Promise.resolve("OK");
+    }),
+    set: vi.fn((key, value) => {
+      mockData.set(key, value);
+      return Promise.resolve("OK");
+    }),
+    incrBy: vi.fn((key, amount) => {
+      const current = Number(mockData.get(key) || 0);
+      const newVal = current + amount;
+      mockData.set(key, String(newVal));
+      return Promise.resolve(newVal);
+    }),
+    expire: vi.fn(() => Promise.resolve(1)),
+    eval: vi.fn((script, keys, args) => {
+      // Simulate the Lua script response: [granted, daily, session, lifetime, lastSync, status]
+      return Promise.resolve([10, 10, 10, 10, Date.now(), 0]);
+    }),
+    _mockData: mockData,
+    _reset: () => {
+      mockData.clear();
+      mockAnonProfiles.clear();
+      store.get.mockClear();
+      store.setex.mockClear();
+      store.set.mockClear();
+      store.incrBy.mockClear();
+      store.expire.mockClear();
+      store.eval.mockClear();
+      store.eval.mockImplementation((script, keys, args) => Promise.resolve([10, 10, 10, 10, Date.now(), 0]));
+    },
+  };
+
+  const getAnonProfile = vi.fn(async (anonId) => mockAnonProfiles.get(anonId) || null);
+  const saveAnonProfile = vi.fn(async (profile) => {
+    if (!profile?.anonId) return null;
+    const normalized = { ...profile };
+    mockAnonProfiles.set(profile.anonId, normalized);
+    return normalized;
+  });
+  const initAnonProfile = vi.fn((anonId, now, dayKey) => ({
+    anonId,
+    totalAnonXp: 0,
+    anonActiveDays: 0,
+    lastActivityTs: now,
+    createdAt: new Date(now).toISOString(),
+    convertedToUserId: null,
+    lastActiveDayKey: dayKey,
+  }));
 
   return {
-    store: {
-      get: vi.fn((key) => Promise.resolve(mockData.get(key) || null)),
-      setex: vi.fn((key, ttl, value) => {
-        mockData.set(key, value);
-        return Promise.resolve("OK");
-      }),
-      set: vi.fn((key, value) => {
-        mockData.set(key, value);
-        return Promise.resolve("OK");
-      }),
-      incrBy: vi.fn((key, amount) => {
-        const current = Number(mockData.get(key) || 0);
-        const newVal = current + amount;
-        mockData.set(key, String(newVal));
-        return Promise.resolve(newVal);
-      }),
-      expire: vi.fn(() => Promise.resolve(1)),
-      eval: vi.fn((script, keys, args) => {
-        // Simulate the Lua script response: [granted, daily, session, lifetime, lastSync, status]
-        return Promise.resolve([10, 10, 10, 10, Date.now(), 0]);
-      }),
-      _mockData: mockData,
-      _reset: () => mockData.clear(),
-    },
+    store,
+    getAnonProfile,
+    saveAnonProfile,
+    initAnonProfile,
   };
 });
 
@@ -65,7 +99,7 @@ const module = await import("../netlify/functions/calculate-xp.mjs");
 const { handler, GAME_XP_RULES } = module;
 
 // Get reference to mocked store
-const { store } = await import("../netlify/functions/_shared/store-upstash.mjs");
+const { store, getAnonProfile } = await import("../netlify/functions/_shared/store-upstash.mjs");
 
 describe("calculate-xp endpoint", () => {
   beforeEach(() => {
@@ -594,6 +628,59 @@ describe("GAME_XP_RULES", () => {
         expect(body.reason).not.toBe("inactive");
         expect(freshStore.eval).toHaveBeenCalled();
       });
+    });
+  });
+
+  describe("anon profile tracking", () => {
+    it("updates anon profile on anonymous awards", async () => {
+      store.eval.mockResolvedValue([50, 50, 50, 50, Date.now(), 0]);
+
+      const response = await handler({
+        httpMethod: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          userId: "anon-award",
+          sessionId: "sess-anon",
+          windowStart: Date.now() - 1000,
+          windowEnd: Date.now(),
+          inputEvents: 5,
+          visibilitySeconds: 10,
+          scoreDelta: 100,
+        }),
+      });
+
+      expect(response.statusCode).toBe(200);
+      const anon = await getAnonProfile("anon-award");
+      expect(anon).toBeTruthy();
+      expect(anon.totalAnonXp).toBe(50);
+      expect(anon.convertedToUserId).toBeNull();
+      expect(anon.lastActivityTs).toBeGreaterThan(0);
+    });
+
+    it("skips anon profile update for logged-in users", async () => {
+      const token = createSupabaseJwt({ sub: "user-logged", secret: process.env.SUPABASE_JWT_SECRET });
+      store.eval.mockResolvedValue([30, 30, 30, 30, Date.now(), 0]);
+
+      const response = await handler({
+        httpMethod: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          userId: "user-logged",
+          sessionId: "sess-logged",
+          windowStart: Date.now() - 1000,
+          windowEnd: Date.now(),
+          inputEvents: 5,
+          visibilitySeconds: 10,
+          scoreDelta: 50,
+        }),
+      });
+
+      expect(response.statusCode).toBe(200);
+      const anon = await getAnonProfile("user-logged");
+      expect(anon).toBeNull();
     });
   });
 

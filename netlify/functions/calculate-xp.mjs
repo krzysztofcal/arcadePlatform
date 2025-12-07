@@ -14,7 +14,12 @@
  */
 
 import crypto from "node:crypto";
-import { store } from "./_shared/store-upstash.mjs";
+import {
+  store,
+  getAnonProfile,
+  saveAnonProfile,
+  initAnonProfile,
+} from "./_shared/store-upstash.mjs";
 import { verifySessionToken, validateServerSession, touchSession } from "./start-session.mjs";
 
 // ============================================================================
@@ -1174,6 +1179,21 @@ export async function handler(event) {
       status,
       raw: res,
     });
+  }
+
+  if (!supabaseUserId && anonId && granted > 0) {
+    let anonProfile = await getAnonProfile(anonId);
+    if (!anonProfile) anonProfile = initAnonProfile(anonId, now, dayKeyNow);
+    anonProfile.totalAnonXp += granted;
+    if (anonProfile.lastActiveDayKey !== dayKeyNow) {
+      anonProfile.anonActiveDays += 1;
+      anonProfile.lastActiveDayKey = dayKeyNow;
+    }
+    anonProfile.lastActivityTs = now;
+    if (!anonProfile.createdAt) {
+      anonProfile.createdAt = new Date(now).toISOString();
+    }
+    await saveAnonProfile(anonProfile);
   }
 
   // Update session state
