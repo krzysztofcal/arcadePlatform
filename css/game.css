@@ -4,7 +4,7 @@
 }
 
 *{box-sizing:border-box}
-body{margin:0; background:linear-gradient(180deg, #0b1020 0%, #090d19 100%); color:#e8eeff; font-family:Poppins, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; padding-bottom:72px; padding-top:calc(var(--topbar-h) + 16px);} 
+body{margin:0; background:linear-gradient(180deg, #0b1020 0%, #090d19 100%); color:#e8eeff; font-family:Poppins, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; padding-bottom:100px; padding-top:calc(var(--topbar-h) + 16px);} 
 .layout{ display:grid; grid-template-columns: 72px 1fr 280px; gap:14px; padding:14px; min-height:100vh; }
 @media (max-width: 1100px){ .layout{ grid-template-columns: 64px 1fr 220px; } }
 @media (max-width: 860px){
@@ -14,7 +14,7 @@ body{margin:0; background:linear-gradient(180deg, #0b1020 0%, #090d19 100%); col
 .left{ background:#111735; border:1px solid var(--border); border-radius:16px; padding:10px; display:flex; flex-direction:column; align-items:center; gap:8px; }
 .icon{ width:36px; height:36px; border-radius:12px; border:1px dashed var(--border); background:transparent; }
 .center{ display:flex; flex-direction:column; gap:12px; }
-.gameWrap{ background:#111735; border:1px solid var(--border); border-radius:16px; padding:12px; position:relative; }
+.gameWrap{ background:#111735; border:1px solid var(--border); border-radius:16px; padding:12px; position:relative; margin-bottom:20px; }
 .gameWrap.fsActive{ border-radius:0; border:none; padding:10px; }
 .gameWrap.fsActive{
   /* Respect iOS safe-area insets in fullscreen */
