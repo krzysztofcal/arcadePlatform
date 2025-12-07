@@ -187,7 +187,7 @@
     <script src="/js/core/GameControlsService.js" defer></script>
     <script src="script.js"></script>
     <script>
-      document.addEventListener('DOMContentLoaded', function() {
+      window.addEventListener('load', function() {
         if (!window.GameControlsService) return;
         var controls = window.GameControlsService({
           wrap: document.getElementById('gameWrap'),

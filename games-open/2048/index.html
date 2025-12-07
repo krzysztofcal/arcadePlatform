@@ -193,8 +193,8 @@
     <script src="/js/core/GameControlsService.js" defer></script>
     <script src="script.js"></script>
     <script>
-      // Initialize game controls after DOM is ready
-      document.addEventListener('DOMContentLoaded', function() {
+      // Initialize game controls after all scripts are loaded
+      window.addEventListener('load', function() {
         if (!window.GameControlsService) return;
         var controls = window.GameControlsService({
           wrap: document.getElementById('gameWrap'),
