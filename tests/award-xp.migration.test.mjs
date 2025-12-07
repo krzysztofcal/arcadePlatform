@@ -115,6 +115,7 @@ const keyMigration = (anonId, userId) => {
   const hash = crypto.createHash("sha256").update(`${anonId}|${userId}`).digest("hex");
   return `${process.env.XP_KEY_NS}:migration:${hash}`;
 };
+const keyDaily = (u, day) => `${process.env.XP_KEY_NS}:daily:${u}:${day}`;
 
 async function loadAwardXp() {
   const mod = await import("../netlify/functions/award-xp.mjs");
@@ -132,6 +133,12 @@ describe("anon to user migration", () => {
     process.env.XP_DAILY_SECRET = "test-secret-for-daily-32chars!";
     process.env.XP_ANON_CONVERSION_ENABLED = "1";
     process.env.XP_ANON_CONVERSION_MAX_CAP = "100000";
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2024-06-05T12:00:00Z"));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("M1: converts anon profile once with caps", async () => {
@@ -153,6 +160,9 @@ describe("anon to user migration", () => {
       convertedToUserId: null,
       lastActiveDayKey: "2024-05-01",
     });
+    mockData.set(keyTotal(anonId), "5000");
+    mockData.set(keyTotal(userId), "0");
+    mockData.set(keyDaily(anonId, "2024-06-05"), "5000");
 
     const first = await handler({
       httpMethod: "POST",
@@ -168,6 +178,7 @@ describe("anon to user migration", () => {
     expect(ops).toEqual([
       { op: "incrby", key: keyTotal(userId), value: 5000 },
       { op: "del", key: keyTotal(anonId) },
+      { op: "del", key: keyDaily(anonId, "2024-06-05") },
       { op: "set", key: keyMigration(anonId, userId), value: "5000" },
     ]);
     const anonProfile = mockAnonProfiles.get(anonId);
@@ -207,6 +218,9 @@ describe("anon to user migration", () => {
       convertedToUserId: null,
       lastActiveDayKey: "2024-05-01",
     });
+    mockData.set(keyTotal(anonId), "50");
+    mockData.set(keyTotal(userId), "0");
+    mockData.set(keyDaily(anonId, "2024-06-05"), "50");
 
     const response = await handler({
       httpMethod: "POST",

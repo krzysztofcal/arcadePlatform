@@ -110,6 +110,8 @@ vi.mock("../netlify/functions/_shared/store-upstash.mjs", () => ({
   })),
 }));
 
+const keyTotal = (u) => `${process.env.XP_KEY_NS}:total:${u}`;
+
 async function loadModule() {
   const mod = await import("../netlify/functions/award-xp.mjs");
   return {
@@ -179,6 +181,8 @@ describe("attemptAnonToUserConversion", () => {
       lastActivityTs: Date.now(),
       createdAt: new Date().toISOString(),
     });
+    mockData.set(keyTotal("anon-1"), "6000");
+    mockData.set(keyTotal("user-1"), "0");
     const result = await attemptAnonToUserConversion({
       userId: "user-1",
       anonId: "anon-1",
@@ -203,6 +207,8 @@ describe("attemptAnonToUserConversion", () => {
       anonActiveDays: 1,
       convertedToUserId: null,
     });
+    mockData.set(keyTotal("anon-2"), "4000");
+    mockData.set(keyTotal("user-2"), "0");
     const result = await attemptAnonToUserConversion({
       userId: "user-2",
       anonId: "anon-2",
@@ -222,6 +228,8 @@ describe("attemptAnonToUserConversion", () => {
       updatedAt: new Date().toISOString(),
       hasConvertedAnonXp: true,
     });
+    mockData.set(keyTotal("anon-3"), "1000");
+    mockData.set(keyTotal("user-3"), "100");
     const result = await attemptAnonToUserConversion({
       userId: "user-3",
       anonId: "anon-3",
@@ -231,7 +239,7 @@ describe("attemptAnonToUserConversion", () => {
     expect(result.converted).toBe(false);
   });
 
-  it("applies caps based on active days", async () => {
+  it("converts full lifetime regardless of active days", async () => {
     const { attemptAnonToUserConversion } = await loadModule();
     mockAnonProfiles.set("anon-4", {
       anonId: "anon-4",
@@ -239,6 +247,8 @@ describe("attemptAnonToUserConversion", () => {
       anonActiveDays: 1,
       convertedToUserId: null,
     });
+    mockData.set(keyTotal("anon-4"), "10000");
+    mockData.set(keyTotal("user-4"), "0");
     const result = await attemptAnonToUserConversion({
       userId: "user-4",
       anonId: "anon-4",
@@ -246,7 +256,7 @@ describe("attemptAnonToUserConversion", () => {
       storeClient: store,
     });
     expect(result.converted).toBe(true);
-    expect(result.amount).toBe(3000);
+    expect(result.amount).toBe(10000);
   });
 
   it("converts when XP exists but anonActiveDays was zero", async () => {
@@ -259,6 +269,8 @@ describe("attemptAnonToUserConversion", () => {
       createdAt: new Date().toISOString(),
       lastActivityTs: Date.now(),
     });
+    mockData.set(keyTotal("anon-day1"), "50");
+    mockData.set(keyTotal("user-day1"), "0");
 
     const result = await attemptAnonToUserConversion({
       userId: "user-day1",
@@ -284,6 +296,8 @@ describe("attemptAnonToUserConversion", () => {
       anonActiveDays: 2,
       convertedToUserId: null,
     });
+    mockData.set(keyTotal("anon-lock"), "5000");
+    mockData.set(keyTotal("user-lock"), "0");
     let evalCall = 0;
     store.eval.mockImplementation(() => {
       evalCall += 1;
@@ -323,6 +337,8 @@ describe("attemptAnonToUserConversion", () => {
       anonActiveDays: 2,
       convertedToUserId: null,
     });
+    mockData.set(keyTotal("anon-lock2"), "4000");
+    mockData.set(keyTotal("user-lock2"), "0");
 
     store.eval.mockImplementation(() => Promise.resolve(1));
     await attemptAnonToUserConversion({
