@@ -92,10 +92,11 @@
   }
 
   function notifyAuthListeners(event, session){
+    var user = session && session.user ? session.user : null;
     for (var i = 0; i < authListeners.length; i++){
       var listener = authListeners[i];
       if (typeof listener === 'function'){
-        try { listener(event, session); } catch (_err){}
+        try { listener(event, user, session); } catch (_err){}
       }
     }
   }
@@ -108,8 +109,7 @@
     }
     authSubscriptionAttached = true;
     var result = client.auth.onAuthStateChange(function(event, session){
-      var user = session && session.user ? session.user : null;
-      logDiag('supabase:auth_change', { event: event, hasUser: !!user });
+      logDiag('supabase:auth_change', { event: event, hasUser: !!(session && session.user) });
       notifyAuthListeners(event, session || null);
     });
 
@@ -121,6 +121,9 @@
     }
   }
 
+  // SupabaseAuth.onAuthChange contract: listener(event, user, session?)
+  // - user is always the second argument (or null)
+  // - session is an optional third argument
   function onAuthChange(callback){
     if (typeof callback === 'function'){
       authListeners.push(callback);
@@ -316,9 +319,8 @@
       renderUser(user);
     });
 
-    onAuthChange(function(_event, session){
-      var nextUser = session && session.user ? session.user : null;
-      renderUser(nextUser);
+    onAuthChange(function(_event, user){
+      renderUser(user);
     });
   }
 

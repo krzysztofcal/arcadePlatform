@@ -61,7 +61,7 @@
     } catch (_err){}
   }
 
-  function handleAuthChange(event){
+  function handleAuthChange(event, _user, _session){
     if (event !== 'SIGNED_IN') return;
     refreshXpBadge();
   }

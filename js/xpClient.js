@@ -693,11 +693,13 @@
   async function refreshBadgeFromServer(options) {
     const opts = options || {};
     try {
-      await ensureAuthTokenWithRetry();
       const payload = await fetchStatus();
       if (typeof window !== "undefined" && window.XP && typeof window.XP.refreshFromServerStatus === "function") {
         try {
-          window.XP.refreshFromServerStatus(payload, { bump: opts.bumpBadge === true });
+          window.XP.refreshFromServerStatus(payload, {
+            bump: opts.bumpBadge === true,
+            bumpBadge: opts.bumpBadge === true,
+          });
         } catch (_) {}
       }
       return payload;
