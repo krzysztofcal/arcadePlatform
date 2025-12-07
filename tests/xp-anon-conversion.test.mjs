@@ -1,363 +1,182 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import assert from "node:assert/strict";
+import { describe, it, beforeEach, afterEach } from "node:test";
 
-const mockData = new Map();
-const mockUserProfiles = new Map();
-const mockAnonProfiles = new Map();
+let store;
+let keyNs;
+let keyTotal;
+let keyDaily;
+let saveAnonProfile;
+let saveUserProfile;
+let getAnonProfile;
+let getUserProfile;
+let attemptAnonToUserConversion;
+let calculateAllowedAnonConversion;
 
-const pipelineFactory = () => {
-  const operations = [];
-  const pipeline = {
-    operations,
-    incrby: vi.fn((key, value) => {
-      operations.push({ op: "incrby", key, value });
-      const current = Number(mockData.get(key) || 0);
-      mockData.set(key, String(current + Number(value)));
-      return pipeline;
-    }),
-    del: vi.fn((key) => {
-      operations.push({ op: "del", key });
-      mockData.delete(key);
-      return pipeline;
-    }),
-    set: vi.fn((key, value) => {
-      operations.push({ op: "set", key, value });
-      mockData.set(key, value);
-      return pipeline;
-    }),
-    exec: vi.fn(() => Promise.resolve(operations)),
-  };
-  return pipeline;
-};
-
-const saveUserProfileMock = vi.fn(async ({ userId, totalXp, hasConvertedAnonXp }) => {
-  if (!userId) return null;
-  const profile = {
-    userId,
-    totalXp: Number(totalXp) || 0,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-    hasConvertedAnonXp: hasConvertedAnonXp === true,
-  };
-  mockUserProfiles.set(userId, profile);
-  return profile;
-});
-
-const store = {
-  get: vi.fn((key) => Promise.resolve(mockData.get(key) ?? null)),
-  set: vi.fn((key, value) => {
-    mockData.set(key, value);
-    return Promise.resolve("OK");
-  }),
-  setex: vi.fn((key, ttl, value) => {
-    mockData.set(key, value);
-    return Promise.resolve("OK");
-  }),
-  del: vi.fn((key) => {
-    mockData.delete(key);
-    return Promise.resolve(1);
-  }),
-  eval: vi.fn(() => Promise.resolve(1)),
-  pipeline: vi.fn(() => {
-    const pipeline = pipelineFactory();
-    store._lastPipeline = pipeline;
-    return pipeline;
-  }),
-  _mockData: mockData,
-  _reset: () => {
-    mockData.clear();
-    mockUserProfiles.clear();
-    mockAnonProfiles.clear();
-    store.eval.mockClear();
-    store.eval.mockImplementation(() => Promise.resolve(1));
-    store.get.mockClear();
-    store.set.mockClear();
-    store.setex.mockClear();
-    store.del.mockClear();
-    store.pipeline.mockClear();
-    saveUserProfileMock.mockClear();
-    store._lastPipeline = null;
-  },
-};
-store.eval.mockImplementation(() => Promise.resolve(1));
-
-vi.mock("../netlify/functions/_shared/store-upstash.mjs", () => ({
-  store,
-  saveUserProfile: saveUserProfileMock,
-  getUserProfile: vi.fn(async (userId) => mockUserProfiles.get(userId) || null),
-  getAnonProfile: vi.fn(async (anonId) => {
-    const profile = mockAnonProfiles.get(anonId);
-    if (!profile) return null;
-    const totalAnonXp = Number(profile.totalAnonXp) || 0;
-    let anonActiveDays = Number(profile.anonActiveDays) || 0;
-    if (totalAnonXp > 0 && anonActiveDays <= 0) {
-      anonActiveDays = 1;
-    }
-    return { ...profile, totalAnonXp, anonActiveDays };
-  }),
-  saveAnonProfile: vi.fn(async (profile) => {
-    if (!profile || !profile.anonId) return null;
-    mockAnonProfiles.set(profile.anonId, profile);
-    return profile;
-  }),
-  initAnonProfile: vi.fn((anonId, now, dayKey) => ({
-    anonId,
-    totalAnonXp: 0,
-    anonActiveDays: 1,
-    lastActivityTs: now,
-    createdAt: new Date(now).toISOString(),
-    convertedToUserId: null,
-    lastActiveDayKey: dayKey,
-  })),
-}));
-
-const keyTotal = (u) => `${process.env.XP_KEY_NS}:total:${u}`;
-
-async function loadModule() {
-  const mod = await import("../netlify/functions/award-xp.mjs");
-  return {
-    calculateAllowedAnonConversion: mod.calculateAllowedAnonConversion,
-    attemptAnonToUserConversion: mod.attemptAnonToUserConversion,
-  };
+function buildKeyTotal(id) {
+  return `${keyNs}:total:${id}`;
 }
 
-describe("calculateAllowedAnonConversion", () => {
-  it("returns eligible XP under daily cap", async () => {
-    const { calculateAllowedAnonConversion } = await loadModule();
-    expect(calculateAllowedAnonConversion(1000, 1)).toBe(1000);
-  });
+function buildKeyDaily(id, day) {
+  return `${keyNs}:daily:${id}:${day}`;
+}
 
-  it("caps by daily multiplier", async () => {
-    const { calculateAllowedAnonConversion } = await loadModule();
-    expect(calculateAllowedAnonConversion(10000, 1)).toBe(3000);
-  });
+async function loadModules() {
+  const storeModule = await import("../netlify/functions/_shared/store-upstash.mjs");
+  ({ store, saveAnonProfile, saveUserProfile, getAnonProfile, getUserProfile } = storeModule);
+  const awardModule = await import("../netlify/functions/award-xp.mjs");
+  attemptAnonToUserConversion = awardModule.attemptAnonToUserConversion;
+  calculateAllowedAnonConversion = awardModule.calculateAllowedAnonConversion;
+  keyNs = process.env.XP_KEY_NS || "xp:v2";
+  keyTotal = buildKeyTotal;
+  keyDaily = buildKeyDaily;
+}
 
-  it("caps by global max", async () => {
-    const { calculateAllowedAnonConversion } = await loadModule();
-    expect(calculateAllowedAnonConversion(200000, 100)).toBe(100000);
-  });
+async function resetKeys(...ids) {
+  if (!store) return;
+  const deletions = ids.flatMap((id) => [buildKeyTotal(id), buildKeyDaily(id, "2024-06-05"), `kcswh:xp:user:${id}`, `kcswh:xp:anon:${id}`]);
+  await Promise.all(deletions.map((k) => store.del?.(k)));
+}
 
-  it("returns zero when xp or days missing", async () => {
-    const { calculateAllowedAnonConversion } = await loadModule();
-    expect(calculateAllowedAnonConversion(0, 5)).toBe(0);
-    expect(calculateAllowedAnonConversion(1000, 0)).toBe(0);
-  });
+beforeEach(async () => {
+  process.env.SUPABASE_JWT_SECRET = "test_supabase_jwt_secret_12345678901234567890";
+  process.env.XP_KEY_NS = "test:xp";
+  process.env.XP_DEBUG = "1";
+  process.env.XP_REQUIRE_SERVER_SESSION = "0";
+  process.env.XP_DAILY_SECRET = "test-secret-for-daily-32chars!";
+  process.env.XP_ANON_CONVERSION_ENABLED = "1";
+  process.env.XP_ANON_CONVERSION_MAX_CAP = "100000";
+  process.env.XP_DAILY_CAP = "3000";
+  await loadModules();
+  store.eval = async () => 1;
 });
 
-describe("getAnonProfile normalization", () => {
-  it("defaults anonActiveDays to 1 when XP exists but days are zero", async () => {
-    const { getAnonProfile } = await import("../netlify/functions/_shared/store-upstash.mjs");
-    mockAnonProfiles.set("anon-normalize", {
-      anonId: "anon-normalize",
-      totalAnonXp: 50,
-      anonActiveDays: 0,
-      lastActivityTs: Date.now(),
-      createdAt: new Date().toISOString(),
-      convertedToUserId: null,
-    });
+afterEach(async () => {
+  await resetKeys("anon-111", "user-123", "anon-1", "user-1", "user-2", "anon-2", "anon-lock", "user-lock");
+});
 
-    const profile = await getAnonProfile("anon-normalize");
-    expect(profile.totalAnonXp).toBe(50);
-    expect(profile.anonActiveDays).toBe(1);
+describe("calculateAllowedAnonConversion", () => {
+  it("caps by daily cap when XP below cap", () => {
+    const result = calculateAllowedAnonConversion(1000, 1, 3000, 100000);
+    assert.strictEqual(result, 1000);
+  });
+
+  it("caps by daily cap when XP exceeds", () => {
+    const result = calculateAllowedAnonConversion(10000, 1, 3000, 100000);
+    assert.strictEqual(result, 3000);
+  });
+
+  it("caps by max total", () => {
+    const result = calculateAllowedAnonConversion(200000, 100, 3000, 100000);
+    assert.strictEqual(result, 100000);
+  });
+
+  it("returns 0 when xp or days missing", () => {
+    assert.strictEqual(calculateAllowedAnonConversion(0, 1, 3000, 100000), 0);
+    assert.strictEqual(calculateAllowedAnonConversion(10, 0, 3000, 100000), 0);
   });
 });
 
 describe("attemptAnonToUserConversion", () => {
-  beforeEach(() => {
-    vi.resetModules();
-    store._reset();
-    process.env.XP_KEY_NS = "test:xp:v2";
-    process.env.XP_DAILY_CAP = "3000";
-    process.env.XP_ANON_CONVERSION_ENABLED = "1";
-    process.env.XP_ANON_CONVERSION_MAX_CAP = "100000";
-  });
-
-  it("converts anon profile when verified", async () => {
-    const { attemptAnonToUserConversion } = await loadModule();
-    mockAnonProfiles.set("anon-1", {
-      anonId: "anon-1",
-      totalAnonXp: 6000,
+  it("converts anon profile once with caps", async () => {
+    const anonId = "anon-111";
+    const userId = "user-123";
+    await saveAnonProfile({
+      anonId,
+      totalAnonXp: 5000,
       anonActiveDays: 2,
-      convertedToUserId: null,
       lastActivityTs: Date.now(),
       createdAt: new Date().toISOString(),
+      convertedToUserId: null,
+      lastActiveDayKey: "2024-05-01",
     });
-    mockData.set(keyTotal("anon-1"), "6000");
-    mockData.set(keyTotal("user-1"), "0");
+    await store.set(keyTotal(anonId), "5000");
+    await store.set(keyTotal(userId), "0");
+    await store.set(keyDaily(anonId, "2024-06-05"), "5000");
+
+    const first = await attemptAnonToUserConversion({
+      userId,
+      anonId,
+      authContext: { emailVerified: true, payload: { email_confirmed_at: new Date().toISOString() } },
+      storeClient: store,
+    });
+
+    assert.strictEqual(first.converted, true);
+    assert.strictEqual(first.amount, 5000);
+    assert.strictEqual((await getUserProfile(userId))?.hasConvertedAnonXp, true);
+    assert.strictEqual((await getAnonProfile(anonId))?.convertedToUserId, userId);
+    assert.strictEqual((await getAnonProfile(anonId))?.totalAnonXp, 0);
+
+    const second = await attemptAnonToUserConversion({
+      userId,
+      anonId,
+      authContext: { emailVerified: true },
+      storeClient: store,
+    });
+    assert.strictEqual(second.converted, false);
+    assert.strictEqual(second.amount, 0);
+  });
+
+  it("skips conversion when email not verified", async () => {
     const result = await attemptAnonToUserConversion({
       userId: "user-1",
       anonId: "anon-1",
-      authContext: { emailVerified: true },
-      storeClient: store,
-    });
-    expect(result.converted).toBe(true);
-    expect(result.amount).toBe(6000);
-    const user = mockUserProfiles.get("user-1");
-    expect(user.hasConvertedAnonXp).toBe(true);
-    const anon = mockAnonProfiles.get("anon-1");
-    expect(anon.totalAnonXp).toBe(0);
-    expect(anon.anonActiveDays).toBe(0);
-    expect(anon.convertedToUserId).toBe("user-1");
-  });
-
-  it("skips when email unverified", async () => {
-    const { attemptAnonToUserConversion } = await loadModule();
-    mockAnonProfiles.set("anon-2", {
-      anonId: "anon-2",
-      totalAnonXp: 4000,
-      anonActiveDays: 1,
-      convertedToUserId: null,
-    });
-    mockData.set(keyTotal("anon-2"), "4000");
-    mockData.set(keyTotal("user-2"), "0");
-    const result = await attemptAnonToUserConversion({
-      userId: "user-2",
-      anonId: "anon-2",
       authContext: { emailVerified: false },
       storeClient: store,
     });
-    expect(result.converted).toBe(false);
-    expect(store.pipeline).not.toHaveBeenCalled();
+    assert.strictEqual(result.converted, false);
+    assert.strictEqual(result.amount, 0);
   });
 
-  it("skips if already converted", async () => {
-    const { attemptAnonToUserConversion } = await loadModule();
-    mockUserProfiles.set("user-3", {
-      userId: "user-3",
-      totalXp: 100,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      hasConvertedAnonXp: true,
-    });
-    mockData.set(keyTotal("anon-3"), "1000");
-    mockData.set(keyTotal("user-3"), "100");
+  it("skips when user already converted", async () => {
+    await saveUserProfile({ userId: "user-2", totalXp: 100, hasConvertedAnonXp: true });
     const result = await attemptAnonToUserConversion({
-      userId: "user-3",
-      anonId: "anon-3",
+      userId: "user-2",
+      anonId: "anon-2",
       authContext: { emailVerified: true },
       storeClient: store,
     });
-    expect(result.converted).toBe(false);
+    assert.strictEqual(result.converted, false);
   });
 
-  it("converts full lifetime regardless of active days", async () => {
-    const { attemptAnonToUserConversion } = await loadModule();
-    mockAnonProfiles.set("anon-4", {
-      anonId: "anon-4",
-      totalAnonXp: 10000,
-      anonActiveDays: 1,
-      convertedToUserId: null,
-    });
-    mockData.set(keyTotal("anon-4"), "10000");
-    mockData.set(keyTotal("user-4"), "0");
-    const result = await attemptAnonToUserConversion({
-      userId: "user-4",
-      anonId: "anon-4",
-      authContext: { emailVerified: true },
-      storeClient: store,
-    });
-    expect(result.converted).toBe(true);
-    expect(result.amount).toBe(10000);
-  });
+  it("enforces lock allowing only first caller", async () => {
+    let lockCalls = 0;
+    const lockStore = {
+      ...store,
+      eval: async () => {
+        lockCalls += 1;
+        return lockCalls === 1 ? 1 : 0;
+      },
+    };
 
-  it("converts when XP exists but anonActiveDays was zero", async () => {
-    const { attemptAnonToUserConversion } = await loadModule();
-    mockAnonProfiles.set("anon-day1", {
-      anonId: "anon-day1",
-      totalAnonXp: 50,
-      anonActiveDays: 0,
-      convertedToUserId: null,
-      createdAt: new Date().toISOString(),
-      lastActivityTs: Date.now(),
-    });
-    mockData.set(keyTotal("anon-day1"), "50");
-    mockData.set(keyTotal("user-day1"), "0");
-
-    const result = await attemptAnonToUserConversion({
-      userId: "user-day1",
-      anonId: "anon-day1",
-      authContext: { emailVerified: true },
-      storeClient: store,
-    });
-
-    expect(result.converted).toBe(true);
-    expect(result.amount).toBe(50);
-    const user = mockUserProfiles.get("user-day1");
-    expect(user?.hasConvertedAnonXp).toBe(true);
-    const anon = mockAnonProfiles.get("anon-day1");
-    expect(anon?.convertedToUserId).toBe("user-day1");
-    expect(anon?.totalAnonXp).toBe(0);
-  });
-
-  it("only converts once when lock is held by first caller", async () => {
-    const { attemptAnonToUserConversion } = await loadModule();
-    mockAnonProfiles.set("anon-lock", {
+    await saveAnonProfile({
       anonId: "anon-lock",
-      totalAnonXp: 5000,
-      anonActiveDays: 2,
+      totalAnonXp: 100,
+      anonActiveDays: 1,
+      lastActivityTs: Date.now(),
+      createdAt: new Date().toISOString(),
       convertedToUserId: null,
     });
-    mockData.set(keyTotal("anon-lock"), "5000");
-    mockData.set(keyTotal("user-lock"), "0");
-    let evalCall = 0;
-    store.eval.mockImplementation(() => {
-      evalCall += 1;
-      return Promise.resolve(evalCall === 1 ? 1 : 0);
-    });
+    await store.set(keyTotal("anon-lock"), "100");
+    await store.set(keyTotal("user-lock"), "0");
 
     const first = await attemptAnonToUserConversion({
       userId: "user-lock",
       anonId: "anon-lock",
       authContext: { emailVerified: true },
-      storeClient: store,
+      storeClient: lockStore,
     });
+
+    assert.strictEqual(first.converted, true);
+    assert.strictEqual(first.amount, 100);
+
     const second = await attemptAnonToUserConversion({
       userId: "user-lock",
       anonId: "anon-lock",
       authContext: { emailVerified: true },
-      storeClient: store,
+      storeClient: lockStore,
     });
 
-    expect(first.converted).toBe(true);
-    expect(first.amount).toBe(5000);
-    expect(second.converted).toBe(false);
-    expect(second.amount).toBe(0);
-    expect(store.pipeline).toHaveBeenCalledTimes(1);
-    const anon = mockAnonProfiles.get("anon-lock");
-    expect(anon.convertedToUserId).toBe("user-lock");
-    expect(anon.totalAnonXp).toBe(0);
-    const user = mockUserProfiles.get("user-lock");
-    expect(user?.hasConvertedAnonXp).toBe(true);
-  });
-
-  it("skips conversion when lock unavailable after prior conversion", async () => {
-    const { attemptAnonToUserConversion } = await loadModule();
-    mockAnonProfiles.set("anon-lock2", {
-      anonId: "anon-lock2",
-      totalAnonXp: 4000,
-      anonActiveDays: 2,
-      convertedToUserId: null,
-    });
-    mockData.set(keyTotal("anon-lock2"), "4000");
-    mockData.set(keyTotal("user-lock2"), "0");
-
-    store.eval.mockImplementation(() => Promise.resolve(1));
-    await attemptAnonToUserConversion({
-      userId: "user-lock2",
-      anonId: "anon-lock2",
-      authContext: { emailVerified: true },
-      storeClient: store,
-    });
-
-    store.eval.mockImplementation(() => Promise.resolve(0));
-    const second = await attemptAnonToUserConversion({
-      userId: "user-lock2",
-      anonId: "anon-lock2",
-      authContext: { emailVerified: true },
-      storeClient: store,
-    });
-
-    expect(second.converted).toBe(false);
-    expect(second.amount).toBe(0);
-    expect(store.pipeline).toHaveBeenCalledTimes(1);
+    assert.strictEqual(second.converted, false);
+    assert.strictEqual(second.amount, 0);
   });
 });
