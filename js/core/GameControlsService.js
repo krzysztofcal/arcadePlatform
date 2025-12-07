@@ -48,6 +48,7 @@
    * @param {number} opts.aspect - Aspect ratio for fullscreen (optional)
    * @param {number} opts.reserved - Reserved space for UI elements (optional)
    * @param {function} opts.onResizeRequest - Callback when resize is needed (optional)
+   * @param {boolean} opts.disableSpacePause - If true, disables Space key for pause (for games that use Space for gameplay)
    * @returns {object} GameControlsService instance
    */
   function GameControlsService(opts) {
@@ -71,6 +72,7 @@
     var aspect = opts.aspect || (16/9);
     var reserved = opts.reserved;
     var onResizeRequest = opts.onResizeRequest;
+    var disableSpacePause = !!opts.disableSpacePause;
 
     var analytics = window.Analytics;
     var pendingFsAction = null;
@@ -280,7 +282,7 @@
       if (e.code === 'KeyM') {
         toggleMute();
       }
-      if (e.code === 'Space' && isRunningProvider()) {
+      if (e.code === 'Space' && !disableSpacePause && isRunningProvider()) {
         e.preventDefault();
         togglePause();
       }

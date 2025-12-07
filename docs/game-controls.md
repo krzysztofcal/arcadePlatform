@@ -11,9 +11,11 @@ All game pages support the following controls:
 | Control | Button | Keyboard | Description |
 |---------|--------|----------|-------------|
 | Mute/Unmute | 🔇/🔈 | `M` | Toggle game audio on/off |
-| Pause/Resume | ⏸/▶ | `Space` | Pause or resume the game |
+| Pause/Resume | ⏸/▶ | `Space`* | Pause or resume the game |
 | Enter Fullscreen | ↗ icon | `F` | Enter fullscreen mode |
 | Exit Fullscreen | ↙ icon | `Esc` | Exit fullscreen mode |
+
+*Note: Space key for pause can be disabled via `disableSpacePause: true` for games that use Space for gameplay (e.g., T-Rex jump).
 
 ## Architecture
 
@@ -44,6 +46,7 @@ const controls = GameControlsService({
   btnExitFs: btnExitFs,
   overlayExit: overlayExit,
   gameId: 'game-id',
+  disableSpacePause: false, // Set to true if game uses Space for gameplay
   onMuteChange: function(muted) { /* handle mute */ },
   onPauseChange: function(paused) { /* handle pause */ },
   onFullscreenChange: function(isFs) { /* handle fullscreen */ },
@@ -142,6 +145,7 @@ When adding control buttons to a new game page, ensure:
 6. [ ] klog calls are added for all control events
 7. [ ] UI updates correctly when controls are toggled
 8. [ ] Keyboard shortcuts work (M for mute, Space for pause, F for fullscreen)
+9. [ ] If game uses Space for gameplay, set `disableSpacePause: true`
 
 ## CSS Styling
 

@@ -443,6 +443,7 @@
       overlayExit: overlayExit,
       gameId: XP_GAME_ID,
       aspect: ASPECT_RATIO,
+      disableSpacePause: true, // T-Rex uses Space for jump
       onMuteChange: function(muted) {
         toggleMute(muted);
       },
