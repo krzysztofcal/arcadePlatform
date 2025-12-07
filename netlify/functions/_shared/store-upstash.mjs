@@ -334,7 +334,8 @@ export function initAnonProfile(anonId, now, dayKey) {
   return {
     anonId,
     totalAnonXp: 0,
-    anonActiveDays: 0,
+    // First profile creation corresponds to an active day when XP is earned.
+    anonActiveDays: 1,
     lastActivityTs: now,
     createdAt: new Date(now).toISOString(),
     convertedToUserId: null,
@@ -348,10 +349,17 @@ export async function getAnonProfile(anonId) {
     const raw = await store.get(anonProfileKey(anonId));
     if (!raw) return null;
     const parsed = JSON.parse(raw);
+    const totalAnonXp = Number(parsed.totalAnonXp) || 0;
+    let anonActiveDays = Number(parsed.anonActiveDays) || 0;
+
+    if (totalAnonXp > 0 && anonActiveDays <= 0) {
+      anonActiveDays = 1;
+    }
+
     return {
       anonId,
-      totalAnonXp: Number(parsed.totalAnonXp) || 0,
-      anonActiveDays: Number(parsed.anonActiveDays) || 0,
+      totalAnonXp,
+      anonActiveDays,
       lastActivityTs: Number(parsed.lastActivityTs) || 0,
       createdAt: typeof parsed.createdAt === "string" ? parsed.createdAt : new Date().toISOString(),
       convertedToUserId: parsed.convertedToUserId ?? null,

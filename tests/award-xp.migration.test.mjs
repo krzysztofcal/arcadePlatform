@@ -84,7 +84,16 @@ vi.mock("../netlify/functions/_shared/store-upstash.mjs", () => ({
   store,
   saveUserProfile: saveUserProfileMock,
   getUserProfile: vi.fn(async (userId) => mockUserProfiles.get(userId) || null),
-  getAnonProfile: vi.fn(async (anonId) => mockAnonProfiles.get(anonId) || null),
+  getAnonProfile: vi.fn(async (anonId) => {
+    const profile = mockAnonProfiles.get(anonId);
+    if (!profile) return null;
+    const totalAnonXp = Number(profile.totalAnonXp) || 0;
+    let anonActiveDays = Number(profile.anonActiveDays) || 0;
+    if (totalAnonXp > 0 && anonActiveDays <= 0) {
+      anonActiveDays = 1;
+    }
+    return { ...profile, totalAnonXp, anonActiveDays };
+  }),
   saveAnonProfile: vi.fn(async (profile) => {
     if (!profile || !profile.anonId) return null;
     mockAnonProfiles.set(profile.anonId, profile);
@@ -93,7 +102,7 @@ vi.mock("../netlify/functions/_shared/store-upstash.mjs", () => ({
   initAnonProfile: vi.fn((anonId, now, dayKey) => ({
     anonId,
     totalAnonXp: 0,
-    anonActiveDays: 0,
+    anonActiveDays: 1,
     lastActivityTs: now,
     createdAt: new Date(now).toISOString(),
     convertedToUserId: null,
@@ -177,6 +186,44 @@ describe("anon to user migration", () => {
     expect(againBody.conversion.converted).toBe(false);
     expect(againBody.conversion.amount).toBe(0);
     expect(store.pipeline).toHaveBeenCalledTimes(1);
+  });
+
+  it("M1b: converts anon profile with XP but zero active days", async () => {
+    const anonId = "anon-day1";
+    const userId = "user-day1";
+    const token = createSupabaseJwt({
+      sub: userId,
+      secret: process.env.SUPABASE_JWT_SECRET,
+      payload: { email_confirmed_at: new Date().toISOString() },
+    });
+    const { handler } = await loadAwardXp();
+
+    mockAnonProfiles.set(anonId, {
+      anonId,
+      totalAnonXp: 50,
+      anonActiveDays: 0,
+      lastActivityTs: Date.now(),
+      createdAt: new Date().toISOString(),
+      convertedToUserId: null,
+      lastActiveDayKey: "2024-05-01",
+    });
+
+    const response = await handler({
+      httpMethod: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ anonId, sessionId: "sess-1", delta: 0 }),
+    });
+
+    const body = parseJsonBody(response);
+    expect(body.conversion.converted).toBe(true);
+    expect(body.conversion.amount).toBe(50);
+    const ops = store._lastPipeline?.operations || [];
+    expect(ops[0]).toEqual({ op: "incrby", key: keyTotal(userId), value: 50 });
+    const anonProfile = mockAnonProfiles.get(anonId);
+    expect(anonProfile.totalAnonXp).toBe(0);
+    expect(anonProfile.convertedToUserId).toBe(userId);
+    const userProfile = mockUserProfiles.get(userId);
+    expect(userProfile.hasConvertedAnonXp).toBe(true);
   });
 
   it("M2: skips conversion when email not verified", async () => {

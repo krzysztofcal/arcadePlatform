@@ -84,7 +84,16 @@ vi.mock("../netlify/functions/_shared/store-upstash.mjs", () => ({
   store,
   saveUserProfile: saveUserProfileMock,
   getUserProfile: vi.fn(async (userId) => mockUserProfiles.get(userId) || null),
-  getAnonProfile: vi.fn(async (anonId) => mockAnonProfiles.get(anonId) || null),
+  getAnonProfile: vi.fn(async (anonId) => {
+    const profile = mockAnonProfiles.get(anonId);
+    if (!profile) return null;
+    const totalAnonXp = Number(profile.totalAnonXp) || 0;
+    let anonActiveDays = Number(profile.anonActiveDays) || 0;
+    if (totalAnonXp > 0 && anonActiveDays <= 0) {
+      anonActiveDays = 1;
+    }
+    return { ...profile, totalAnonXp, anonActiveDays };
+  }),
   saveAnonProfile: vi.fn(async (profile) => {
     if (!profile || !profile.anonId) return null;
     mockAnonProfiles.set(profile.anonId, profile);
@@ -93,7 +102,7 @@ vi.mock("../netlify/functions/_shared/store-upstash.mjs", () => ({
   initAnonProfile: vi.fn((anonId, now, dayKey) => ({
     anonId,
     totalAnonXp: 0,
-    anonActiveDays: 0,
+    anonActiveDays: 1,
     lastActivityTs: now,
     createdAt: new Date(now).toISOString(),
     convertedToUserId: null,
@@ -129,6 +138,24 @@ describe("calculateAllowedAnonConversion", () => {
     const { calculateAllowedAnonConversion } = await loadModule();
     expect(calculateAllowedAnonConversion(0, 5)).toBe(0);
     expect(calculateAllowedAnonConversion(1000, 0)).toBe(0);
+  });
+});
+
+describe("getAnonProfile normalization", () => {
+  it("defaults anonActiveDays to 1 when XP exists but days are zero", async () => {
+    const { getAnonProfile } = await import("../netlify/functions/_shared/store-upstash.mjs");
+    mockAnonProfiles.set("anon-normalize", {
+      anonId: "anon-normalize",
+      totalAnonXp: 50,
+      anonActiveDays: 0,
+      lastActivityTs: Date.now(),
+      createdAt: new Date().toISOString(),
+      convertedToUserId: null,
+    });
+
+    const profile = await getAnonProfile("anon-normalize");
+    expect(profile.totalAnonXp).toBe(50);
+    expect(profile.anonActiveDays).toBe(1);
   });
 });
 
@@ -220,6 +247,33 @@ describe("attemptAnonToUserConversion", () => {
     });
     expect(result.converted).toBe(true);
     expect(result.amount).toBe(3000);
+  });
+
+  it("converts when XP exists but anonActiveDays was zero", async () => {
+    const { attemptAnonToUserConversion } = await loadModule();
+    mockAnonProfiles.set("anon-day1", {
+      anonId: "anon-day1",
+      totalAnonXp: 50,
+      anonActiveDays: 0,
+      convertedToUserId: null,
+      createdAt: new Date().toISOString(),
+      lastActivityTs: Date.now(),
+    });
+
+    const result = await attemptAnonToUserConversion({
+      userId: "user-day1",
+      anonId: "anon-day1",
+      authContext: { emailVerified: true },
+      storeClient: store,
+    });
+
+    expect(result.converted).toBe(true);
+    expect(result.amount).toBe(50);
+    const user = mockUserProfiles.get("user-day1");
+    expect(user?.hasConvertedAnonXp).toBe(true);
+    const anon = mockAnonProfiles.get("anon-day1");
+    expect(anon?.convertedToUserId).toBe("user-day1");
+    expect(anon?.totalAnonXp).toBe(0);
   });
 
   it("only converts once when lock is held by first caller", async () => {

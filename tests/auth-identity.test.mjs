@@ -90,7 +90,16 @@ vi.mock("../netlify/functions/_shared/store-upstash.mjs", () => ({
   store,
   saveUserProfile: saveUserProfileMock,
   getUserProfile: vi.fn(async (userId) => mockUserProfiles.get(userId) || null),
-  getAnonProfile: vi.fn(async (anonId) => mockAnonProfiles.get(anonId) || null),
+  getAnonProfile: vi.fn(async (anonId) => {
+    const profile = mockAnonProfiles.get(anonId);
+    if (!profile) return null;
+    const totalAnonXp = Number(profile.totalAnonXp) || 0;
+    let anonActiveDays = Number(profile.anonActiveDays) || 0;
+    if (totalAnonXp > 0 && anonActiveDays <= 0) {
+      anonActiveDays = 1;
+    }
+    return { ...profile, totalAnonXp, anonActiveDays };
+  }),
   saveAnonProfile: vi.fn(async (profile) => {
     if (!profile || !profile.anonId) return null;
     mockAnonProfiles.set(profile.anonId, profile);
@@ -99,7 +108,7 @@ vi.mock("../netlify/functions/_shared/store-upstash.mjs", () => ({
   initAnonProfile: vi.fn((anonId, now, dayKey) => ({
     anonId,
     totalAnonXp: 0,
-    anonActiveDays: 0,
+    anonActiveDays: 1,
     lastActivityTs: now,
     createdAt: new Date(now).toISOString(),
     convertedToUserId: null,
