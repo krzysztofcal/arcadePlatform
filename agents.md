@@ -1,5 +1,27 @@
 # agents.md — ArcadePlatform Codex Guide
 
+## 0. How This File Works With `skills.md`
+
+This `agents.md` file defines **how** AI agents must behave:
+- coding rules and style conventions,
+- allowed patterns,
+- roles (Architect, Coder, Reviewer, Tester),
+- workflow expectations (Speckit-first),
+- safety, CSP, JSP compatibility,
+- enforcement rules.
+
+It does **not** list capabilities of the repo.
+
+For **what skills this project provides** — commands, scripts, XP entry points, Netlify functions, game shell wiring, security tools, and required documentation —  
+agents must also read **`skills.md`**.
+
+The two files work together:
+
+- **agents.md** → *How to work* (rules, style, behaviour, expectations).  
+- **skills.md** → *What to work with* (commands, modules, functions, docs, guards, tests).
+
+All AI agents must consult **both documents** before producing plans, code, or reviews.
+
 ## 1. Project Overview
 ArcadePlatform is a lightweight browser arcade hub built with static HTML/CSS/JS.
 It includes a central XP system (combo/boost mechanics, BFCache-safe lifecycle), a set of mini-games, and Netlify Functions for XP/analytics.
