@@ -226,12 +226,12 @@
     const frogCenterX = game.frog.x + game.frog.size / 2;
     const frogCenterY = game.frog.y + game.frog.size / 2;
 
-    // Check car collisions
+    // Check car collisions - use overlap detection
     for (const car of game.cars) {
-      if (frogCenterX > car.x &&
-          frogCenterX < car.x + car.width &&
-          frogCenterY > car.y &&
-          frogCenterY < car.y + car.height) {
+      if (game.frog.x < car.x + car.width &&
+          game.frog.x + game.frog.size > car.x &&
+          game.frog.y < car.y + car.height &&
+          game.frog.y + game.frog.size > car.y) {
         hitByObstacle();
         return;
       }
@@ -242,10 +242,11 @@
       let onLog = false;
 
       for (const log of game.logs) {
-        if (frogCenterX > log.x &&
-            frogCenterX < log.x + log.width &&
-            frogCenterY > log.y &&
-            frogCenterY < log.y + log.height) {
+        // More forgiving collision - check if frog overlaps with log
+        if (game.frog.x < log.x + log.width &&
+            game.frog.x + game.frog.size > log.x &&
+            game.frog.y < log.y + log.height &&
+            game.frog.y + game.frog.size > log.y) {
           onLog = true;
           // Move frog with the log
           game.frog.x += log.speed;

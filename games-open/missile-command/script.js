@@ -31,7 +31,10 @@
     playerMissiles: [],
     explosions: [],
     lastSpawn: 0,
-    spawnDelay: 1500
+    spawnDelay: 1500,
+    missilesThisWave: 0,
+    missileTargetForWave: 10,
+    waveComplete: false
   };
 
   let best = parseInt(localStorage.getItem('missile-command-best') || '0');
@@ -88,6 +91,9 @@
     game.explosions = [];
     game.lastSpawn = Date.now();
     game.spawnDelay = 1500;
+    game.missilesThisWave = 0;
+    game.missileTargetForWave = 10;
+    game.waveComplete = false;
 
     updateUI();
     if (window.KLog) window.KLog.log('missile_command_start', { wave: game.wave });
@@ -168,10 +174,17 @@
 
     const now = Date.now();
 
-    // Spawn enemy missiles
-    if (now - game.lastSpawn > game.spawnDelay) {
+    // Spawn enemy missiles (only if we haven't spawned all for this wave)
+    if (!game.waveComplete && game.missilesThisWave < game.missileTargetForWave &&
+        now - game.lastSpawn > game.spawnDelay) {
       spawnEnemyMissile();
+      game.missilesThisWave++;
       game.lastSpawn = now;
+
+      // Mark wave as complete when all missiles spawned
+      if (game.missilesThisWave >= game.missileTargetForWave) {
+        game.waveComplete = true;
+      }
     }
 
     // Update enemy missiles
@@ -259,12 +272,16 @@
       return exp.age < exp.maxAge;
     });
 
-    // Check if wave is complete
-    if (game.enemyMissiles.length === 0 && game.explosions.length === 0) {
+    // Check if wave is complete (all missiles spawned and cleared)
+    if (game.waveComplete &&
+        game.enemyMissiles.length === 0 &&
+        game.explosions.filter(e => !e.isPlayer).length === 0) {
       const aliveCities = game.cities.filter(c => c.alive).length;
       if (aliveCities === 0) {
         gameOver();
       } else {
+        // Advance to next wave
+        game.waveComplete = false;
         setTimeout(() => {
           if (game.running) nextWave();
         }, 1000);
@@ -290,6 +307,9 @@
 
     game.spawnDelay = Math.max(500, 1500 - game.wave * 100);
     game.lastSpawn = Date.now();
+    game.missilesThisWave = 0;
+    game.missileTargetForWave = Math.min(10 + game.wave * 2, 30);
+    game.waveComplete = false;
 
     updateUI();
     if (window.KLog) window.KLog.log('missile_command_wave_complete', {

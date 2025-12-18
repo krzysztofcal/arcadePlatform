@@ -136,7 +136,7 @@
     const aliveInvaders = game.invaders.filter(inv => inv.alive);
     if (aliveInvaders.length === 0) return;
 
-    if (Math.random() < 0.02) {
+    if (Math.random() < 0.15) {
       const invader = aliveInvaders[Math.floor(Math.random() * aliveInvaders.length)];
       game.invaderBullets.push({
         x: invader.x + invader.width / 2 - 2,
