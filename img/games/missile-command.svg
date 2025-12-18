@@ -1,0 +1,18 @@
+<svg width="180" height="180" viewBox="0 0 180 180" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="180" height="180" rx="28" fill="#0c1c34"/>
+  <rect x="40" y="150" width="16" height="20" fill="#4ade80"/>
+  <rect x="82" y="150" width="16" height="20" fill="#4ade80"/>
+  <rect x="124" y="150" width="16" height="20" fill="#4ade80"/>
+  <polygon points="48,144 42,150 54,150" fill="#4ade80"/>
+  <polygon points="90,144 84,150 96,150" fill="#4ade80"/>
+  <polygon points="132,144 126,150 138,150" fill="#4ade80"/>
+  <rect x="30" y="162" width="12" height="8" fill="#3b82f6"/>
+  <rect x="72" y="162" width="12" height="8" fill="#3b82f6"/>
+  <rect x="114" y="162" width="12" height="8" fill="#3b82f6"/>
+  <rect x="156" y="162" width="12" height="8" fill="#3b82f6"/>
+  <line x1="60" y1="30" x2="38" y2="148" stroke="#ef4444" stroke-width="2" stroke-dasharray="4 2"/>
+  <line x1="100" y1="30" x2="82" y2="120" stroke="#ef4444" stroke-width="2" stroke-dasharray="4 2"/>
+  <line x1="140" y1="30" x2="128" y2="100" stroke="#ef4444" stroke-width="2" stroke-dasharray="4 2"/>
+  <circle cx="90" cy="80" r="12" fill="#fbbf24" opacity="0.4"/>
+  <circle cx="70" cy="100" r="8" fill="#fbbf24" opacity="0.3"/>
+</svg>

@@ -1,0 +1,43 @@
+.game-controls {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.game-controls button {
+  padding: 12px 24px;
+  font-size: 16px;
+  font-weight: 600;
+  background: linear-gradient(135deg, #f43f5e 0%, #dc2626 100%);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.game-controls button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(244, 63, 94, 0.4);
+}
+
+.game-controls button:active {
+  transform: translateY(0);
+}
+
+#board {
+  background: #000;
+  border: 2px solid rgba(244, 63, 94, 0.3);
+  border-radius: 8px;
+  max-width: 100%;
+  height: auto;
+  cursor: crosshair;
+}
+
+.board-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
