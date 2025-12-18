@@ -4,7 +4,7 @@
 create type if not exists public.chips_tx_type as enum ('MINT', 'BURN', 'BUY_IN', 'CASH_OUT', 'RAKE_FEE', 'PRIZE_PAYOUT');
 
 alter table public.chips_transactions
-    add column if not exists idempotency_key text not null default gen_random_uuid(),
+    add column if not exists idempotency_key text not null default gen_random_uuid()::text,
     add column if not exists payload_hash text not null default encode(gen_random_bytes(16), 'hex'),
     add column if not exists tx_type public.chips_tx_type not null default 'MINT';
 
@@ -29,8 +29,6 @@ values
     ('SYSTEM', 'TREASURY', 'active')
 on conflict (system_key) do nothing;
 
--- Make snapshots represent the latest known values per account
-alter table if exists public.chips_account_snapshot disable row level security;
 drop table if exists public.chips_account_snapshot;
 create table public.chips_account_snapshot (
     account_id uuid primary key references public.chips_accounts (id) on delete cascade,
