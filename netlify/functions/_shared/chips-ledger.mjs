@@ -15,6 +15,13 @@ const asInt = (value, fallback = 0) => {
   return Number.isInteger(parsed) ? parsed : fallback;
 };
 
+function badRequest(code, message) {
+  const err = new Error(message || code);
+  err.status = 400;
+  err.code = code;
+  return err;
+}
+
 const hashPayload = (input) =>
   crypto.createHash("sha256").update(JSON.stringify(input)).digest("hex");
 
@@ -140,7 +147,7 @@ select
 
 function validateEntries(entries) {
   if (!Array.isArray(entries) || entries.length === 0) {
-    throw new Error("At least one entry is required");
+    throw badRequest("missing_entries", "At least one entry is required");
   }
   const sanitized = [];
   let hasUserEntry = false;
@@ -149,16 +156,13 @@ function validateEntries(entries) {
     const kind = entry?.accountType || entry?.kind;
     const systemKey = entry?.systemKey;
     if (!Number.isInteger(amount) || amount === 0) {
-      throw new Error("Entry amount must be a non-zero integer");
+      throw badRequest("invalid_entry_amount", "Entry amount must be a non-zero integer");
     }
     if (kind !== "USER" && kind !== "SYSTEM") {
-      const error = new Error("Unsupported accountType in entry");
-      error.status = 400;
-      error.code = "unsupported_account_type";
-      throw error;
+      throw badRequest("unsupported_account_type", "Unsupported accountType in entry");
     }
     if (kind !== "USER" && !systemKey) {
-      throw new Error("System entries must provide systemKey");
+      throw badRequest("missing_system_key", "System entries must provide systemKey");
     }
     if (kind === "USER") {
       hasUserEntry = true;
@@ -167,7 +171,7 @@ function validateEntries(entries) {
     sanitized.push({ kind, systemKey, amount, metadata });
   }
   if (!hasUserEntry) {
-    throw new Error("Transactions must include the user account");
+    throw badRequest("missing_user_entry", "Transactions must include the user account");
   }
   return sanitized;
 }
@@ -183,10 +187,10 @@ async function postTransaction({
   createdBy = null,
 }) {
   if (!VALID_TX_TYPES.has(txType)) {
-    throw new Error("Invalid transaction type");
+    throw badRequest("invalid_tx_type", "Invalid transaction type");
   }
   if (!idempotencyKey) {
-    throw new Error("Idempotency key is required");
+    throw badRequest("missing_idempotency_key", "Idempotency key is required");
   }
 
   const normalizedEntries = validateEntries(entries);
@@ -213,14 +217,10 @@ async function postTransaction({
   for (const key of uniqueSystemKeys) {
     const account = systemMap.get(key);
     if (!account) {
-      const error = new Error(`System account ${key} not found`);
-      error.status = 400;
-      throw error;
+      throw badRequest("system_account_missing", `System account ${key} not found`);
     }
     if (account.status !== "active") {
-      const error = new Error(`System account ${key} is not active`);
-      error.status = 400;
-      throw error;
+      throw badRequest("system_account_inactive", `System account ${key} is not active`);
     }
   }
 
@@ -244,9 +244,7 @@ async function postTransaction({
 
   for (const rec of entryRecords) {
     if (!rec.account_id) {
-      const error = new Error("Missing account for entry");
-      error.status = 400;
-      throw error;
+      throw badRequest("missing_account", "Missing account for entry");
     }
   }
 
@@ -326,8 +324,15 @@ select
     ]);
   } catch (error) {
     const combined = `${error.message || ""} ${error.details || ""}`.toLowerCase();
-    const isUnique = combined.includes("duplicate") || combined.includes("unique") || combined.includes("23505");
-    if (isUnique) {
+    const is23505 = combined.includes("23505");
+    const mentionsIdempotency =
+      combined.includes("idempotency") ||
+      combined.includes("idempotency_key") ||
+      combined.includes("chips_transactions_idempotency_key_uidx");
+    const looksUnique =
+      combined.includes("duplicate key value violates") || combined.includes("duplicate") || combined.includes("unique");
+    const isIdempotencyUnique = (is23505 && mentionsIdempotency) || (looksUnique && mentionsIdempotency);
+    if (isIdempotencyUnique) {
       const existingTx = await findTransactionByKey(idempotencyKey);
       if (existingTx) {
         if (existingTx.payload_hash !== payloadHash || existingTx.tx_type !== txType) {

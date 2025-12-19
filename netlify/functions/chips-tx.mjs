@@ -94,14 +94,16 @@ export async function handler(event) {
     };
   } catch (error) {
     const combined = `${error.message || ""} ${error.details || ""}`;
-    const isInsufficient = /insufficient_funds/i.test(combined);
+    const isInsufficient = /insufficient_funds/i.test(combined.toLowerCase());
     const status = isInsufficient ? 400 : error.status || 500;
     klog("chips_tx_error", { error: error.message, status, idempotencyKey });
     const body = status === 409
       ? { error: "idempotency_conflict" }
       : isInsufficient
         ? { error: "insufficient_funds" }
-        : { error: "server_error" };
+        : status === 400 && error.code
+          ? { error: error.code }
+          : { error: "server_error" };
     return { statusCode: status, headers: cors, body: JSON.stringify(body) };
   }
 }
