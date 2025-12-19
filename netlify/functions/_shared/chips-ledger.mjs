@@ -12,7 +12,7 @@ const VALID_TX_TYPES = new Set([
 
 const asInt = (value, fallback = 0) => {
   const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : fallback;
+  return Number.isInteger(parsed) ? parsed : fallback;
 };
 
 const hashPayload = (input) =>
@@ -67,7 +67,7 @@ async function getUserBalance(userId) {
 }
 
 async function listUserLedger(userId, { afterSeq = null, limit = 50 } = {}) {
-  const cappedLimit = Math.min(Math.max(1, Number(limit) || 50), 200);
+  const cappedLimit = Math.min(Math.max(1, Number.isInteger(limit) ? limit : 50), 200);
   const account = await getOrCreateUserAccount(userId);
   const query = `
 with entries as (
