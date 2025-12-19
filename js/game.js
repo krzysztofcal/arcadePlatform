@@ -70,6 +70,7 @@
   const storage = StorageService(CONFIG);
   const audio = AudioService();
   let state = storage.load();
+  state.muted = !!(state && state.muted);
 
   const timeLeftEl = document.getElementById("timeLeft");
   const levelEl = document.getElementById("level");
