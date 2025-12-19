@@ -151,8 +151,11 @@ function validateEntries(entries) {
     if (!Number.isInteger(amount) || amount === 0) {
       throw new Error("Entry amount must be a non-zero integer");
     }
-    if (kind !== "USER" && kind !== "SYSTEM" && kind !== "ESCROW") {
-      throw new Error("Unsupported accountType in entry");
+    if (kind !== "USER" && kind !== "SYSTEM") {
+      const error = new Error("Unsupported accountType in entry");
+      error.status = 400;
+      error.code = "unsupported_account_type";
+      throw error;
     }
     if (kind !== "USER" && !systemKey) {
       throw new Error("System entries must provide systemKey");
@@ -308,18 +311,41 @@ select
   (select coalesce(jsonb_agg(entries order by entry_seq), '[]'::jsonb) from entries) as entries,
   (select row_to_json(account) from account) as account;
 `;
-
-  const result = await executeSql(insertQuery, [
-    reference,
-    description,
-    safeMetadata,
-    idempotencyKey,
-    payloadHash,
-    txType,
-    createdBy,
-    JSON.stringify(entryRecords),
-    userAccount.id,
-  ]);
+  let result;
+  try {
+    result = await executeSql(insertQuery, [
+      reference,
+      description,
+      safeMetadata,
+      idempotencyKey,
+      payloadHash,
+      txType,
+      createdBy,
+      JSON.stringify(entryRecords),
+      userAccount.id,
+    ]);
+  } catch (error) {
+    const combined = `${error.message || ""} ${error.details || ""}`.toLowerCase();
+    const isUnique = combined.includes("duplicate") || combined.includes("unique") || combined.includes("23505");
+    if (isUnique) {
+      const existingTx = await findTransactionByKey(idempotencyKey);
+      if (existingTx) {
+        if (existingTx.payload_hash !== payloadHash || existingTx.tx_type !== txType) {
+          const conflict = new Error("Idempotency key already used with different payload");
+          conflict.status = 409;
+          throw conflict;
+        }
+        const snapshot = await fetchTransactionSnapshot(idempotencyKey, userAccount.id);
+        if (snapshot?.transaction) {
+          return snapshot;
+        }
+      }
+      const conflict = new Error("Idempotency key conflict");
+      conflict.status = 409;
+      throw conflict;
+    }
+    throw error;
+  }
 
   if (!result?.[0]?.transaction) {
     klog("chips_tx_missing_rows", { idempotencyKey });
