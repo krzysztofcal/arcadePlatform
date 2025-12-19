@@ -1,11 +1,22 @@
 -- Chips ledger hardening follow-up
 -- Adds idempotency, append-only protections, system account uniqueness, tx typing, and snapshot clarity.
 
-create type if not exists public.chips_tx_type as enum ('MINT', 'BURN', 'BUY_IN', 'CASH_OUT', 'RAKE_FEE', 'PRIZE_PAYOUT');
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_type t
+    join pg_namespace n on n.oid = t.typnamespace
+    where t.typname = 'chips_tx_type'
+      and n.nspname = 'public'
+  ) then
+    create type public.chips_tx_type as enum ('MINT', 'BURN', 'BUY_IN', 'CASH_OUT', 'RAKE_FEE', 'PRIZE_PAYOUT');
+  end if;
+end $$;
 
 alter table public.chips_transactions
-    add column if not exists idempotency_key text not null default gen_random_uuid()::text,
-    add column if not exists payload_hash text not null default encode(gen_random_bytes(16), 'hex'),
+    add column if not exists idempotency_key text not null,
+    add column if not exists payload_hash text not null,
     add column if not exists tx_type public.chips_tx_type not null default 'MINT';
 
 alter table public.chips_transactions
@@ -85,9 +96,21 @@ for each row execute function public.chips_entries_apply_account_delta();
 
 -- Restore deny-all RLS on snapshots after recreation
 alter table public.chips_account_snapshot enable row level security;
-create policy if not exists deny_all_chips_account_snapshot on public.chips_account_snapshot
-    using (false)
-    with check (false);
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_policies
+    where schemaname = 'public'
+      and tablename  = 'chips_account_snapshot'
+      and policyname = 'deny_all_chips_account_snapshot'
+  ) then
+    create policy deny_all_chips_account_snapshot
+      on public.chips_account_snapshot
+      using (false)
+      with check (false);
+  end if;
+end $$;
 
 -- Optional: user-filtered view for future safe reads
 create or replace view public.v_user_chips_entries as
