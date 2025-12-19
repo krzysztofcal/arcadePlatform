@@ -25,16 +25,31 @@ jobs:
           PLAYWRIGHT: 1
 
   chips-integration:
-    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.CHIPS_INTEGRATION_ENABLED == '1' && secrets.CHIPS_TEST_BASE_URL != '' && secrets.CHIPS_TEST_USER_JWT != '' }}
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.CHIPS_INTEGRATION_ENABLED == '1' }}
     needs: verify
     runs-on: ubuntu-latest
     steps:
+      - name: Chips integration preflight (skip if secrets missing)
+        id: chips_preflight
+        shell: bash
+        run: |
+          if [ -z "${CHIPS_TEST_BASE_URL}" ] || [ -z "${CHIPS_TEST_USER_JWT}" ]; then
+            echo "Required chips secrets missing; skipping chips integration."
+            echo "should_run=0" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "should_run=1" >> "$GITHUB_OUTPUT"
+        env:
+          CHIPS_TEST_BASE_URL: ${{ secrets.CHIPS_TEST_BASE_URL }}
+          CHIPS_TEST_USER_JWT: ${{ secrets.CHIPS_TEST_USER_JWT }}
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 20 }
       - name: Install dependencies
+        if: ${{ steps.chips_preflight.outputs.should_run == '1' }}
         run: npm ci || npm i
       - name: Run chips integration tests
+        if: ${{ steps.chips_preflight.outputs.should_run == '1' }}
         run: npm run test:chips
         env:
           CHIPS_TEST_BASE_URL: ${{ secrets.CHIPS_TEST_BASE_URL }}
