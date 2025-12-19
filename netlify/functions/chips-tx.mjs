@@ -93,7 +93,8 @@ export async function handler(event) {
       }),
     };
   } catch (error) {
-    const isInsufficient = /insufficient_funds/i.test(error.message || error.details || "");
+    const combined = `${error.message || ""} ${error.details || ""}`;
+    const isInsufficient = /insufficient_funds/i.test(combined);
     const status = isInsufficient ? 400 : error.status || 500;
     klog("chips_tx_error", { error: error.message, status, idempotencyKey });
     const body = status === 409

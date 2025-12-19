@@ -12,7 +12,7 @@ const SERVICE_ROLE_KEY =
 const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY_V2 || "";
 const SQL_ENDPOINT = SUPABASE_URL ? `${SUPABASE_URL.replace(/\/$/, "")}/sql/v1` : "";
 const AUTH_ENDPOINT = SUPABASE_URL ? `${SUPABASE_URL.replace(/\/$/, "")}/auth/v1/user` : "";
-const AUTH_API_KEY = SUPABASE_ANON_KEY || SERVICE_ROLE_KEY || "";
+const AUTH_API_KEY = SUPABASE_ANON_KEY || "";
 
 if (!SUPABASE_URL || !SERVICE_ROLE_KEY) {
   console.warn("[chips] Supabase service credentials missing – chips functions will error without SUPABASE_URL and SERVICE_ROLE_KEY");

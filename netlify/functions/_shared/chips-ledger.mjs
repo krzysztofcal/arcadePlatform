@@ -80,7 +80,7 @@ with entries as (
     t.reference,
     t.description,
     t.idempotency_key,
-    t.sequence as tx_sequence
+    t.created_at as tx_created_at
   from public.chips_entries e
   join public.chips_transactions t on t.id = e.transaction_id
   where e.account_id = $1
