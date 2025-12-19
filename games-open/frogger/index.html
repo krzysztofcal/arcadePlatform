@@ -196,53 +196,25 @@
     <script src="script.js"></script>
     <script>
       window.addEventListener('load', function() {
-        console.log('[DEBUG] Load event fired');
-        console.log('[DEBUG] GameControlsService exists?', !!window.GameControlsService);
         if (!window.GameControlsService) return;
-
-        var btnMute = document.getElementById('btnMute');
-        var btnPause = document.getElementById('btnPause');
-        var btnEnterFs = document.getElementById('btnEnterFs');
-        var btnExitFs = document.getElementById('btnExitFs');
-
-        console.log('[DEBUG] Button refs:', {
-          btnMute: !!btnMute,
-          btnPause: !!btnPause,
-          btnEnterFs: !!btnEnterFs,
-          btnExitFs: !!btnExitFs
-        });
-
         var controls = window.GameControlsService({
           wrap: document.getElementById('gameWrap'),
-          btnMute: btnMute,
-          btnPause: btnPause,
-          btnEnterFs: btnEnterFs,
-          btnExitFs: btnExitFs,
+          btnMute: document.getElementById('btnMute'),
+          btnPause: document.getElementById('btnPause'),
+          btnEnterFs: document.getElementById('btnEnterFs'),
+          btnExitFs: document.getElementById('btnExitFs'),
           gameId: 'frogger',
           onMuteChange: function(muted) {
-            console.log('[DEBUG] onMuteChange called:', muted);
             if (window.GameShell && window.GameShell.setMuted) window.GameShell.setMuted(muted);
           },
           onPauseChange: function(paused) {
-            console.log('[DEBUG] onPauseChange called:', paused);
             if (window.GameShell && window.GameShell.setPaused) window.GameShell.setPaused(paused);
           },
           isMutedProvider: function() { return window.GameShell && window.GameShell.isMuted ? window.GameShell.isMuted() : false; },
           isPausedProvider: function() { return window.GameShell && window.GameShell.isPaused ? window.GameShell.isPaused() : false; },
           isRunningProvider: function() { return true; }
         });
-        console.log('[DEBUG] About to call init()');
         controls.init();
-        console.log('[DEBUG] init() completed');
-
-        // Test if listeners were attached
-        setTimeout(function() {
-          console.log('[DEBUG] Testing click after 1 second...');
-          if (btnMute) {
-            btnMute.click();
-            console.log('[DEBUG] Programmatic click on btnMute executed');
-          }
-        }, 1000);
       });
     </script>
     <script src="/js/cookiebot-manager.js" defer></script>
