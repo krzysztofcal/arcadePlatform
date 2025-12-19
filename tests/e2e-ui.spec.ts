@@ -11,6 +11,13 @@ test('Mute button toggles aria-pressed and title', async ({ page }) => {
   const gamePath = path.join(__dirname, '..', 'game_cats.html');
   expect(fs.existsSync(gamePath)).toBeTruthy();
 
+  // Ensure deterministic mute state across runs
+  await page.addInitScript(() => {
+    try {
+      localStorage.removeItem('arcade_cats_smooth_state_page_fs_fix');
+    } catch (_) {}
+  });
+
   await page.goto(fileUrl(gamePath));
 
   const mute = page.locator('#btnMute');
@@ -19,13 +26,17 @@ test('Mute button toggles aria-pressed and title', async ({ page }) => {
   const beforePressed = await mute.getAttribute('aria-pressed');
   const beforeTitle = (await mute.getAttribute('title')) || '';
 
+  // Initial state should be unmuted
+  expect(beforePressed).toBe('false');
+  expect(beforeTitle).toBe('Mute');
+
   await mute.click();
   const afterPressed = await mute.getAttribute('aria-pressed');
   const afterTitle = (await mute.getAttribute('title')) || '';
 
   // aria-pressed should toggle, and title should swap Mute/Unmute
-  expect(beforePressed === 'true' ? 'false' : 'true').toBe(afterPressed);
-  expect(beforeTitle === 'Mute' ? 'Unmute' : 'Mute').toBe(afterTitle);
+  expect(afterPressed).toBe('true');
+  expect(afterTitle).toBe('Unmute');
 });
 
 test('Fullscreen buttons sanity (enter/exit visibility)', async ({ page }) => {
