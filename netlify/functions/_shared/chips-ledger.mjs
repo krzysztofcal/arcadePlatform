@@ -138,7 +138,7 @@ account as (
 )
 select
   (select row_to_json(txn) from txn) as transaction,
-  (select coalesce(jsonb_agg(entries), '[]'::jsonb) from entries) as entries,
+  (select coalesce(jsonb_agg(e order by e.entry_seq), '[]'::jsonb) from entries e) as entries,
   (select row_to_json(account) from account) as account;
 `;
   const rows = await executeSql(query, [idempotencyKey, accountId]);
