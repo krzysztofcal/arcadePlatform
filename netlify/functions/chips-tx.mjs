@@ -29,16 +29,6 @@ function buildEntries(txType, amount) {
         { accountType: "USER", amount: -value },
         { accountType: "SYSTEM", systemKey: "TREASURY", amount: value },
       ];
-    case "PRIZE_PAYOUT":
-      return [
-        { accountType: "USER", amount: value },
-        { accountType: "SYSTEM", systemKey: "HOUSE", amount: -value },
-      ];
-    case "RAKE_FEE":
-      return [
-        { accountType: "USER", amount: -value },
-        { accountType: "SYSTEM", systemKey: "HOUSE", amount: value },
-      ];
     default:
       return null;
   }

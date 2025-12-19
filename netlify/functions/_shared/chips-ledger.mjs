@@ -271,19 +271,6 @@ locked_accounts as (
   join deltas d on d.account_id = a.id
   for update
 ),
-guard as (
-  select
-    case
-      when exists (
-        select 1
-        from locked_accounts a
-        join deltas d on d.account_id = a.id
-        where (a.balance + d.delta) < 0
-      )
-      then (select pg_catalog.pg_sleep(0)) -- dummy to allow next line
-      else null
-    end as ok
-),
 entries as (
   insert into public.chips_entries (transaction_id, account_id, amount, metadata)
   select insert_txn.id, i.account_id, i.amount, i.metadata
