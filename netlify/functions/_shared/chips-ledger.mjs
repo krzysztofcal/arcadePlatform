@@ -311,7 +311,8 @@ select
       combined.includes("idempotency_key") ||
       combined.includes("chips_transactions_idempotency_key_uidx");
     const looksUnique =
-      combined.includes("duplicate key value violates") ||
+      combined.includes("duplicate key value") ||
+      combined.includes("duplicate key") ||
       combined.includes("violates unique constraint") ||
       combined.includes("duplicate");
     const isIdempotencyUnique = (is23505 && mentionsIdempotency) || (looksUnique && mentionsIdempotency);
