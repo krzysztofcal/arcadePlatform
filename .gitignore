@@ -5,3 +5,6 @@ playwright-report/
 
 # Local Netlify folder
 .netlify
+
+# Generated build info (created during Netlify build)
+js/build-info.js

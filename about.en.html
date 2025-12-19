@@ -42,6 +42,7 @@
   <script src="js/xp/scoring.js" defer></script>
   <script src="js/xp/core.js" defer></script>
   <script src="js/xp.js" defer></script>
+  <script src="js/build-info.js" defer></script>
 </head>
 <body>
   <div class="topbar">
@@ -118,6 +119,22 @@
     <p>Contact: <a href="#" class="ft-link">email</a></p>
     <p><a href="#" class="ft-link manage-cookies" data-i18n="manageCookies">Manage cookies</a></p>
     <p><a id="backLink" href="index.html?lang=en" class="ft-link">Back to portal</a></p>
+
+    <section id="buildInfoSection" class="build-info" hidden>
+      <h2>Build Information</h2>
+      <dl class="build-info__list">
+        <dt>Version</dt>
+        <dd id="buildVersion">-</dd>
+        <dt>Build Type</dt>
+        <dd id="buildType">-</dd>
+        <dt>Branch</dt>
+        <dd id="buildBranch">-</dd>
+        <dt>Build Time</dt>
+        <dd id="buildTime">-</dd>
+        <dt>Deploy ID</dt>
+        <dd id="buildDeployId">-</dd>
+      </dl>
+    </section>
     </main>
   </div>
   <script>
@@ -256,6 +273,70 @@
         window.addEventListener('klog:admin', updateVisibility);
         updateVisibility();
         window.setTimeout(updateVisibility, 250);
+
+        // Initialize build info display
+        initBuildInfo();
+      }
+
+      function initBuildInfo() {
+        const section = document.getElementById('buildInfoSection');
+        if (!section) return;
+
+        // Check if BUILD_INFO is available (generated during Netlify build)
+        if (typeof window.BUILD_INFO === 'undefined') {
+          // No build info available (local development without running build script)
+          return;
+        }
+
+        const info = window.BUILD_INFO;
+
+        // Populate the fields
+        const versionEl = document.getElementById('buildVersion');
+        const typeEl = document.getElementById('buildType');
+        const branchEl = document.getElementById('buildBranch');
+        const timeEl = document.getElementById('buildTime');
+        const deployEl = document.getElementById('buildDeployId');
+
+        if (versionEl) {
+          versionEl.textContent = info.commitShort || info.version || '-';
+          versionEl.title = info.commitHash || '';
+        }
+
+        if (typeEl) {
+          const typeLabels = {
+            prod: 'Production',
+            preview: 'PR Preview',
+            branch: 'Branch Deploy',
+            dev: 'Development',
+            local: 'Local Build'
+          };
+          typeEl.textContent = typeLabels[info.buildType] || info.buildType || '-';
+          typeEl.dataset.buildType = info.buildType || '';
+          if (info.reviewId) {
+            typeEl.textContent += ' (PR #' + info.reviewId + ')';
+          }
+        }
+
+        if (branchEl) {
+          branchEl.textContent = info.branch || '-';
+        }
+
+        if (timeEl && info.buildTime) {
+          try {
+            const date = new Date(info.buildTime);
+            timeEl.textContent = date.toLocaleString();
+            timeEl.title = info.buildTime;
+          } catch (_) {
+            timeEl.textContent = info.buildTime;
+          }
+        }
+
+        if (deployEl) {
+          deployEl.textContent = info.deployId || '-';
+        }
+
+        // Show the section
+        section.hidden = false;
       }
 
       if (document.readyState === 'loading') {

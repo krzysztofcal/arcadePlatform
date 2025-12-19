@@ -2,7 +2,8 @@
 # Documentation: https://docs.netlify.com/configure-builds/file-based-configuration/
 
 [build]
-  # No build command needed - static site
+  # Generate build info before deploying
+  command = "node scripts/generate-build-info.js"
   publish = "."
   functions = "netlify/functions"
 
