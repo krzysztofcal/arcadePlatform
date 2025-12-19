@@ -229,7 +229,7 @@ async function postTransaction({
     }
   }
 
-const insertQuery = `
+  const insertQuery = `
 with insert_txn as (
   insert into public.chips_transactions (reference, description, metadata, idempotency_key, payload_hash, tx_type, created_by)
   values ($1, $2, coalesce($3::jsonb, '{}'::jsonb), $4, $5, $6, $7)
