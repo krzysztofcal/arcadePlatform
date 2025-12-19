@@ -43,7 +43,9 @@ jobs:
           CHIPS_TEST_BASE_URL: ${{ secrets.CHIPS_TEST_BASE_URL }}
           CHIPS_TEST_USER_JWT: ${{ secrets.CHIPS_TEST_USER_JWT }}
       - uses: actions/checkout@v4
+        if: ${{ steps.chips_preflight.outputs.should_run == '1' }}
       - uses: actions/setup-node@v4
+        if: ${{ steps.chips_preflight.outputs.should_run == '1' }}
         with: { node-version: 20 }
       - name: Install dependencies
         if: ${{ steps.chips_preflight.outputs.should_run == '1' }}
