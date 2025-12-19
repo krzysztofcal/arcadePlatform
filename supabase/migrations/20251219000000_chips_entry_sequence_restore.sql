@@ -1,4 +1,4 @@
--- Ensure chips entry sequencing and balance application triggers exist
+-- Ensure chips entry sequencing trigger exists; balance updates occur within the ledger transaction SQL.
 
 create or replace function public.chips_entries_assign_sequence()
 returns trigger
@@ -25,21 +25,6 @@ drop trigger if exists chips_entries_assign_sequence_trg on public.chips_entries
 create trigger chips_entries_assign_sequence_trg
 before insert on public.chips_entries
 for each row execute function public.chips_entries_assign_sequence();
-
-create or replace function public.chips_entries_apply_account_delta()
-returns trigger
-language plpgsql
-as $$
-begin
-    update public.chips_accounts
-    set balance = balance + new.amount,
-        updated_at = timezone('utc', now())
-    where id = new.account_id;
-    return new;
-end;
-$$;
-
+-- Balance is applied by the SQL ledger transaction, not by triggers (avoid double-apply).
 drop trigger if exists chips_entries_apply_account_delta_trg on public.chips_entries;
-create trigger chips_entries_apply_account_delta_trg
-after insert on public.chips_entries
-for each row execute function public.chips_entries_apply_account_delta();
+drop function if exists public.chips_entries_apply_account_delta();
