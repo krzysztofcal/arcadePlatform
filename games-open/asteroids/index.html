@@ -194,36 +194,6 @@
     <script src="../game-shell.js" defer></script>
     <script src="/js/core/GameControlsService.js" defer></script>
     <script src="script.js"></script>
-    <script>
-      console.log('[ASTEROIDS] Script executing');
-      window.addEventListener('load', function() {
-        console.log('[ASTEROIDS] Load event fired');
-        console.log('[ASTEROIDS] GameControlsService:', typeof window.GameControlsService);
-        if (!window.GameControlsService) return;
-        var controls = window.GameControlsService({
-          wrap: document.getElementById('gameWrap'),
-          btnMute: document.getElementById('btnMute'),
-          btnPause: document.getElementById('btnPause'),
-          btnEnterFs: document.getElementById('btnEnterFs'),
-          btnExitFs: document.getElementById('btnExitFs'),
-          gameId: 'asteroids',
-          onMuteChange: function(muted) {
-            console.log('[ASTEROIDS] Mute changed:', muted);
-            if (window.GameShell && window.GameShell.setMuted) window.GameShell.setMuted(muted);
-          },
-          onPauseChange: function(paused) {
-            console.log('[ASTEROIDS] Pause changed:', paused);
-            if (window.GameShell && window.GameShell.setPaused) window.GameShell.setPaused(paused);
-          },
-          isMutedProvider: function() { return window.GameShell && window.GameShell.isMuted ? window.GameShell.isMuted() : false; },
-          isPausedProvider: function() { return window.GameShell && window.GameShell.isPaused ? window.GameShell.isPaused() : false; },
-          isRunningProvider: function() { return true; }
-        });
-        console.log('[ASTEROIDS] Calling init()');
-        controls.init();
-        console.log('[ASTEROIDS] Init complete');
-      });
-    </script>
     <script src="/js/cookiebot-manager.js" defer></script>
     <script>
       (function(){

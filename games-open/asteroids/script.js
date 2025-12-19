@@ -304,4 +304,28 @@
 
   // Auto-start
   init();
+
+  // Initialize GameControlsService
+  window.addEventListener('load', function() {
+    if (!window.GameControlsService) return;
+    const controls = window.GameControlsService({
+      wrap: document.getElementById('gameWrap'),
+      btnMute: document.getElementById('btnMute'),
+      btnPause: document.getElementById('btnPause'),
+      btnEnterFs: document.getElementById('btnEnterFs'),
+      btnExitFs: document.getElementById('btnExitFs'),
+      gameId: 'asteroids',
+      onMuteChange: function(muted) {
+        if (window.GameShell && window.GameShell.setMuted) window.GameShell.setMuted(muted);
+      },
+      onPauseChange: function(paused) {
+        if (window.GameShell && window.GameShell.setPaused) window.GameShell.setPaused(paused);
+      },
+      isMutedProvider: function() { return window.GameShell && window.GameShell.isMuted ? window.GameShell.isMuted() : false; },
+      isPausedProvider: function() { return window.GameShell && window.GameShell.isPaused ? window.GameShell.isPaused() : false; },
+      isRunningProvider: function() { return true; }
+    });
+    controls.init();
+    console.log('[ASTEROIDS] GameControlsService initialized from script.js');
+  });
 })();
