@@ -1,7 +1,13 @@
 import { baseHeaders, corsHeaders, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
 import { getUserBalance } from "./_shared/chips-ledger.mjs";
 
+const CHIPS_ENABLED = process.env.CHIPS_ENABLED === "1";
+
 export async function handler(event) {
+  if (!CHIPS_ENABLED) {
+    return { statusCode: 404, headers: baseHeaders(), body: JSON.stringify({ error: "not_found" }) };
+  }
+
   const origin = event.headers?.origin || event.headers?.Origin;
   const cors = corsHeaders(origin);
   if (!cors) {

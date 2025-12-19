@@ -12,6 +12,8 @@ const parseBody = (body) => {
 
 const ALLOWED_TX_TYPES = new Set(["BUY_IN", "CASH_OUT"]);
 
+const CHIPS_ENABLED = process.env.CHIPS_ENABLED === "1";
+
 function buildEntries(txType, amount) {
   const value = Number(amount);
   if (!Number.isInteger(value) || value <= 0) {
@@ -35,6 +37,10 @@ function buildEntries(txType, amount) {
 }
 
 export async function handler(event) {
+  if (!CHIPS_ENABLED) {
+    return { statusCode: 404, headers: baseHeaders(), body: JSON.stringify({ error: "not_found" }) };
+  }
+
   const origin = event.headers?.origin || event.headers?.Origin;
   const cors = corsHeaders(origin);
   if (!cors) {

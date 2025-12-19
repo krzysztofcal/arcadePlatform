@@ -6,7 +6,13 @@ const asInt = (value, fallback = null) => {
   return Number.isInteger(parsed) ? parsed : fallback;
 };
 
+const CHIPS_ENABLED = process.env.CHIPS_ENABLED === "1";
+
 export async function handler(event) {
+  if (!CHIPS_ENABLED) {
+    return { statusCode: 404, headers: baseHeaders(), body: JSON.stringify({ error: "not_found" }) };
+  }
+
   const origin = event.headers?.origin || event.headers?.Origin;
   const cors = corsHeaders(origin);
   if (!cors) {
