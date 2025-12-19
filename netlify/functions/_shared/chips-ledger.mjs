@@ -330,7 +330,9 @@ select
       combined.includes("idempotency_key") ||
       combined.includes("chips_transactions_idempotency_key_uidx");
     const looksUnique =
-      combined.includes("duplicate key value violates") || combined.includes("duplicate") || combined.includes("unique");
+      combined.includes("duplicate key value violates") ||
+      combined.includes("violates unique constraint") ||
+      combined.includes("duplicate");
     const isIdempotencyUnique = (is23505 && mentionsIdempotency) || (looksUnique && mentionsIdempotency);
     if (isIdempotencyUnique) {
       const existingTx = await findTransactionByKey(idempotencyKey);

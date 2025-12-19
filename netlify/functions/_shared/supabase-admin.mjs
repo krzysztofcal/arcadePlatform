@@ -6,6 +6,13 @@ const klog = (kind, data) => {
   }
 };
 
+function baseHeaders() {
+  return {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+  };
+}
+
 const SUPABASE_URL = process.env.SUPABASE_URL || "";
 const SERVICE_ROLE_KEY =
   process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SERVICE_KEY_V2 || "";
@@ -31,10 +38,7 @@ const CORS_ALLOW = (() => {
 })();
 
 function corsHeaders(origin) {
-  const headers = {
-    "content-type": "application/json; charset=utf-8",
-    "cache-control": "no-store",
-  };
+  const headers = baseHeaders();
 
   if (!origin) {
     return headers;
@@ -144,6 +148,7 @@ async function executeSql(query, params = []) {
 }
 
 export {
+  baseHeaders,
   corsHeaders,
   executeSql,
   extractBearerToken,

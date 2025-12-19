@@ -1,4 +1,4 @@
-import { corsHeaders, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
+import { baseHeaders, corsHeaders, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
 import { listUserLedger } from "./_shared/chips-ledger.mjs";
 
 const asInt = (value, fallback = null) => {
@@ -10,7 +10,11 @@ export async function handler(event) {
   const origin = event.headers?.origin || event.headers?.Origin;
   const cors = corsHeaders(origin);
   if (!cors) {
-    return { statusCode: 403, body: JSON.stringify({ error: "forbidden_origin" }) };
+    return {
+      statusCode: 403,
+      headers: baseHeaders(),
+      body: JSON.stringify({ error: "forbidden_origin" }),
+    };
   }
   if (event.httpMethod === "OPTIONS") {
     return { statusCode: 204, headers: cors, body: "" };

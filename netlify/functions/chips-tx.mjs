@@ -1,4 +1,4 @@
-import { corsHeaders, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
+import { baseHeaders, corsHeaders, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
 import { postTransaction } from "./_shared/chips-ledger.mjs";
 
 const parseBody = (body) => {
@@ -38,7 +38,11 @@ export async function handler(event) {
   const origin = event.headers?.origin || event.headers?.Origin;
   const cors = corsHeaders(origin);
   if (!cors) {
-    return { statusCode: 403, body: JSON.stringify({ error: "forbidden_origin" }) };
+    return {
+      statusCode: 403,
+      headers: baseHeaders(),
+      body: JSON.stringify({ error: "forbidden_origin" }),
+    };
   }
   if (event.httpMethod === "OPTIONS") {
     return { statusCode: 204, headers: cors, body: "" };
@@ -93,16 +97,16 @@ export async function handler(event) {
       }),
     };
   } catch (error) {
-    const combined = `${error.message || ""} ${error.details || ""}`;
-    const isInsufficient = /insufficient_funds/i.test(combined.toLowerCase());
+    const combined = `${error.message || ""} ${error.details || ""}`.toLowerCase();
+    const isInsufficient = combined.includes("insufficient_funds");
     const status = isInsufficient ? 400 : error.status || 500;
     klog("chips_tx_error", { error: error.message, status, idempotencyKey });
     const body = status === 409
       ? { error: "idempotency_conflict" }
-      : isInsufficient
-        ? { error: "insufficient_funds" }
-        : status === 400 && error.code
-          ? { error: error.code }
+      : status === 400 && error.code
+        ? { error: error.code }
+        : isInsufficient
+          ? { error: "insufficient_funds" }
           : { error: "server_error" };
     return { statusCode: status, headers: cors, body: JSON.stringify(body) };
   }
