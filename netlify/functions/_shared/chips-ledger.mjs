@@ -197,15 +197,6 @@ async function postTransaction({
   const safeMetadata = metadata && typeof metadata === "object" ? metadata : {};
   const payloadHash = hashPayload({ userId, txType, idempotencyKey, entries: normalizedEntries, reference, description, metadata: safeMetadata });
 
-  const existing = await findTransactionByKey(idempotencyKey);
-  if (existing) {
-    if (existing.payload_hash !== payloadHash || existing.tx_type !== txType) {
-      const error = new Error("Idempotency key already used with different payload");
-      error.status = 409;
-      throw error;
-    }
-  }
-
   const userAccount = await getOrCreateUserAccount(userId);
   const neededSystemKeys = normalizedEntries
     .filter(entry => entry.kind !== "USER" && entry.systemKey)
@@ -222,16 +213,6 @@ async function postTransaction({
     if (account.status !== "active") {
       throw badRequest("system_account_inactive", `System account ${key} is not active`);
     }
-  }
-
-  if (existing) {
-    const snapshot = await fetchTransactionSnapshot(idempotencyKey, userAccount.id);
-    if (!snapshot?.transaction) {
-      const error = new Error("Failed to load existing transaction");
-      error.status = 500;
-      throw error;
-    }
-    return snapshot;
   }
 
   const entryRecords = normalizedEntries.map(entry => {

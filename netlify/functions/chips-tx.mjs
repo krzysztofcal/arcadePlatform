@@ -98,7 +98,7 @@ export async function handler(event) {
     };
   } catch (error) {
     const combined = `${error.message || ""} ${error.details || ""}`.toLowerCase();
-    const isInsufficient = combined.includes("insufficient_funds");
+    const isInsufficient = /(^|\W)insufficient_funds(\W|$)/i.test(combined);
     const status = isInsufficient ? 400 : error.status || 500;
     klog("chips_tx_error", { error: error.message, status, idempotencyKey });
     const body = status === 409
