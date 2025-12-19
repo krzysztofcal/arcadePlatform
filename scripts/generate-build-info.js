@@ -36,18 +36,49 @@ function getGitBranch() {
 
 function getSourceBranch() {
   // For PRs, try to get the actual source branch name from git
+  // In Netlify PR builds, we're in detached HEAD state
+
+  // Method 1: Try git log --format=%D to find remote refs
   try {
-    // In Netlify PR builds, we're in detached HEAD state
-    // Try to find the branch name from the reflog or remote refs
     const result = execSync('git log -1 --format=%D HEAD', { encoding: 'utf8' }).trim();
     // Result might be like: "HEAD, origin/claude/add-version-build-info-msEu8"
     const match = result.match(/origin\/([^,\s]+)/);
-    if (match) {
+    if (match && !match[1].startsWith('pull/')) {
       return match[1];
     }
   } catch {
     // Ignore errors
   }
+
+  // Method 2: Try to find branch from remote refs containing this commit
+  try {
+    const result = execSync('git branch -r --contains HEAD 2>/dev/null', { encoding: 'utf8' }).trim();
+    // Result might be like: "  origin/claude/add-version-build-info-msEu8"
+    const lines = result.split('\n').map(l => l.trim()).filter(l => l && !l.includes('HEAD') && !l.includes('pull/'));
+    if (lines.length > 0) {
+      const match = lines[0].match(/origin\/(.+)/);
+      if (match) {
+        return match[1];
+      }
+    }
+  } catch {
+    // Ignore errors
+  }
+
+  // Method 3: Try git name-rev
+  try {
+    const result = execSync('git name-rev --name-only HEAD 2>/dev/null', { encoding: 'utf8' }).trim();
+    // Result might be like: "remotes/origin/claude/add-version-build-info-msEu8"
+    if (result && !result.includes('undefined') && !result.startsWith('pull/')) {
+      const match = result.match(/(?:remotes\/)?origin\/(.+)/);
+      if (match) {
+        return match[1];
+      }
+    }
+  } catch {
+    // Ignore errors
+  }
+
   return null;
 }
 
@@ -89,9 +120,22 @@ function generateBuildInfo() {
   let branch = env.BRANCH || env.HEAD || getGitBranch() || 'unknown';
   if (branch.startsWith('pull/') && branch.endsWith('/head')) {
     // Try to get the actual source branch from git
+    console.log('  Attempting to resolve PR branch...');
     const sourceBranch = getSourceBranch();
     if (sourceBranch) {
+      console.log('  Found source branch:', sourceBranch);
       branch = sourceBranch;
+    } else {
+      console.log('  Could not determine source branch from git');
+      // Debug: Show what git sees
+      try {
+        const refs = execSync('git log -1 --format=%D HEAD 2>/dev/null || echo "N/A"', { encoding: 'utf8' }).trim();
+        console.log('  git log -1 --format=%D:', refs);
+      } catch { /* ignore */ }
+      try {
+        const branches = execSync('git branch -r 2>/dev/null | head -5 || echo "N/A"', { encoding: 'utf8' }).trim();
+        console.log('  git branch -r (first 5):', branches.replace(/\n/g, ', '));
+      } catch { /* ignore */ }
     }
   }
 
