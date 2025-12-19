@@ -34,6 +34,23 @@ function getGitBranch() {
   }
 }
 
+function getSourceBranch() {
+  // For PRs, try to get the actual source branch name from git
+  try {
+    // In Netlify PR builds, we're in detached HEAD state
+    // Try to find the branch name from the reflog or remote refs
+    const result = execSync('git log -1 --format=%D HEAD', { encoding: 'utf8' }).trim();
+    // Result might be like: "HEAD, origin/claude/add-version-build-info-msEu8"
+    const match = result.match(/origin\/([^,\s]+)/);
+    if (match) {
+      return match[1];
+    }
+  } catch {
+    // Ignore errors
+  }
+  return null;
+}
+
 function getGitCommitDate() {
   try {
     return execSync('git log -1 --format=%cI', { encoding: 'utf8' }).trim();
@@ -65,9 +82,18 @@ function generateBuildInfo() {
   // Netlify provides these, fallback to git commands for local builds
   const commitHash = env.COMMIT_REF || getGitCommit() || 'unknown';
   const commitShort = commitHash.substring(0, 7);
-  const branch = env.BRANCH || env.HEAD || getGitBranch() || 'unknown';
   const context = env.CONTEXT || 'local';
   const buildType = getBuildType(context);
+
+  // For PR builds, try to get actual source branch instead of "pull/X/head"
+  let branch = env.BRANCH || env.HEAD || getGitBranch() || 'unknown';
+  if (branch.startsWith('pull/') && branch.endsWith('/head')) {
+    // Try to get the actual source branch from git
+    const sourceBranch = getSourceBranch();
+    if (sourceBranch) {
+      branch = sourceBranch;
+    }
+  }
 
   const buildInfo = {
     // Version identification
