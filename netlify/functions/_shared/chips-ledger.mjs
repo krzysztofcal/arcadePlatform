@@ -287,15 +287,15 @@ apply_balance as (
   set balance = a.balance + d.delta
   from deltas d
   where a.id = d.account_id
-  returning a.id
+  returning 1 as ok
 ),
 entries as (
   insert into public.chips_entries (transaction_id, account_id, amount, metadata)
   select insert_txn.id, i.account_id, i.amount, i.metadata
   from insert_txn
   join guard on true
-  join apply_balance on true
   join input_entries i on true
+  where exists (select 1 from apply_balance)
   returning *
 ),
 account as (

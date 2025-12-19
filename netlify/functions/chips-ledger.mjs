@@ -1,9 +1,9 @@
 import { corsHeaders, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
 import { listUserLedger } from "./_shared/chips-ledger.mjs";
 
-const asInt = (value, fallback = 0) => {
+const asInt = (value, fallback = null) => {
   const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : fallback;
+  return Number.isInteger(parsed) ? parsed : fallback;
 };
 
 export async function handler(event) {
@@ -27,7 +27,8 @@ export async function handler(event) {
   }
 
   const afterSeq = event.queryStringParameters?.after ? asInt(event.queryStringParameters.after, null) : null;
-  const limit = event.queryStringParameters?.limit ? asInt(event.queryStringParameters.limit, 50) : 50;
+  const limitRaw = event.queryStringParameters?.limit ? asInt(event.queryStringParameters.limit, 50) : 50;
+  const limit = Number.isInteger(limitRaw) ? limitRaw : 50;
 
   try {
     const ledger = await listUserLedger(auth.userId, { afterSeq, limit });
