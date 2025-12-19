@@ -13,24 +13,44 @@ function baseHeaders() {
   };
 }
 
-function normalizeJsonCell(value) {
-  if (value == null) return value;
-  if (typeof value !== "string") return value;
+function looksLikeJsonString(value) {
+  if (typeof value !== "string") return false;
   const s = value.trim();
-  const looksJson = (s.startsWith("{") && s.endsWith("}")) || (s.startsWith("[") && s.endsWith("]"));
-  if (!looksJson) return value;
-  try {
-    return JSON.parse(s);
-  } catch {
-    return value;
+  return (s.startsWith("{") && s.endsWith("}")) || (s.startsWith("[") && s.endsWith("]"));
+}
+
+function normalizeJsonDeep(value) {
+  if (value == null) return value;
+
+  if (typeof value === "string" && looksLikeJsonString(value)) {
+    try {
+      const parsed = JSON.parse(value.trim());
+      return normalizeJsonDeep(parsed);
+    } catch {
+      return value;
+    }
   }
+
+  if (Array.isArray(value)) {
+    return value.map(normalizeJsonDeep);
+  }
+
+  if (typeof value === "object") {
+    const out = {};
+    for (const [k, v] of Object.entries(value)) {
+      out[k] = normalizeJsonDeep(v);
+    }
+    return out;
+  }
+
+  return value;
 }
 
 function normalizeRow(row) {
   if (!row || typeof row !== "object") return row;
-  const out = { ...row };
-  for (const key of Object.keys(out)) {
-    out[key] = normalizeJsonCell(out[key]);
+  const out = {};
+  for (const [k, v] of Object.entries(row)) {
+    out[k] = normalizeJsonDeep(v);
   }
   return out;
 }
