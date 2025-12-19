@@ -10,7 +10,7 @@ const parseBody = (body) => {
   }
 };
 
-const ALLOWED_TX_TYPES = new Set(["BUY_IN", "CASH_OUT", "PRIZE_PAYOUT", "RAKE_FEE"]);
+const ALLOWED_TX_TYPES = new Set(["BUY_IN", "CASH_OUT"]);
 
 function buildEntries(txType, amount) {
   const value = Number(amount);
@@ -103,11 +103,14 @@ export async function handler(event) {
       }),
     };
   } catch (error) {
-    const status = error.status || 500;
+    const isInsufficient = /insufficient_funds/i.test(error.message || error.details || "");
+    const status = isInsufficient ? 400 : error.status || 500;
     klog("chips_tx_error", { error: error.message, status, idempotencyKey });
     const body = status === 409
       ? { error: "idempotency_conflict" }
-      : { error: "server_error" };
+      : isInsufficient
+        ? { error: "insufficient_funds" }
+        : { error: "server_error" };
     return { statusCode: status, headers: cors, body: JSON.stringify(body) };
   }
 }

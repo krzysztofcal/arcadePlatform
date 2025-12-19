@@ -253,16 +253,48 @@ with insert_txn as (
   values ($1, $2, coalesce($3::jsonb, '{}'::jsonb), $4, $5, $6, $7)
   returning *
 ),
+input_entries as (
+  select
+    v.account_id,
+    v.amount,
+    coalesce(v.metadata, '{}'::jsonb) as metadata
+  from jsonb_to_recordset(($8::text)::jsonb) as v(account_id uuid, amount bigint, metadata jsonb)
+),
+deltas as (
+  select account_id, sum(amount)::bigint as delta
+  from input_entries
+  group by account_id
+),
+locked_accounts as (
+  select a.id, a.balance
+  from public.chips_accounts a
+  join deltas d on d.account_id = a.id
+  for update
+),
+guard as (
+  select
+    case
+      when exists (
+        select 1
+        from locked_accounts a
+        join deltas d on d.account_id = a.id
+        where (a.balance + d.delta) < 0
+      )
+      then (select pg_catalog.pg_sleep(0)) -- dummy to allow next line
+      else null
+    end as ok
+),
 entries as (
   insert into public.chips_entries (transaction_id, account_id, amount, metadata)
-  select insert_txn.id, v.account_id, v.amount, coalesce(v.metadata, '{}'::jsonb)
+  select insert_txn.id, i.account_id, i.amount, i.metadata
   from insert_txn
-  join jsonb_to_recordset(($8::text)::jsonb) as v(account_id uuid, amount bigint, metadata jsonb)
-  on true
+  join input_entries i on true
   returning *
 ),
 account as (
-  select id, balance, next_entry_seq from public.chips_accounts where id = $9
+  select id, balance, next_entry_seq
+  from public.chips_accounts
+  where id = $9
 )
 select
   (select row_to_json(insert_txn) from insert_txn) as transaction,
