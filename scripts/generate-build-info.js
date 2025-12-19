@@ -118,6 +118,8 @@ function generateBuildInfo() {
 
   // For PR builds, try to get actual source branch instead of "pull/X/head"
   let branch = env.BRANCH || env.HEAD || getGitBranch() || 'unknown';
+  const originalBranch = branch; // Keep original for logging
+
   if (branch.startsWith('pull/') && branch.endsWith('/head')) {
     // Try to get the actual source branch from git
     console.log('  Attempting to resolve PR branch...');
@@ -136,6 +138,11 @@ function generateBuildInfo() {
         const branches = execSync('git branch -r 2>/dev/null | head -5 || echo "N/A"', { encoding: 'utf8' }).trim();
         console.log('  git branch -r (first 5):', branches.replace(/\n/g, ', '));
       } catch { /* ignore */ }
+
+      // If we have a reviewId, use a friendlier format
+      if (env.REVIEW_ID) {
+        branch = `PR #${env.REVIEW_ID}`;
+      }
     }
   }
 
