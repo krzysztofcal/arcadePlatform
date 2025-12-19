@@ -76,6 +76,15 @@ async function verifyLedgerCursor() {
   assert.equal(first.status, 200, `ledger should succeed; ${formatResponse(first)}`);
   assert.equal(first.body?.sequenceOk, true, `initial sequenceOk should be true; ${formatResponse(first)}`);
   const entries = Array.isArray(first.body?.entries) ? first.body.entries : [];
+  if (first.body?.sequenceOk === true && entries.length > 1) {
+    for (let i = 1; i < entries.length; i += 1) {
+      assert.equal(
+        entries[i].entry_seq,
+        entries[i - 1].entry_seq + 1,
+        "ledger entries must be contiguous when sequenceOk is true",
+      );
+    }
+  }
   if (!entries.length) return;
   const lastSeq = entries[entries.length - 1].entry_seq;
   ensureInteger(lastSeq, "last entry_seq");
@@ -89,6 +98,15 @@ async function verifyLedgerCursor() {
       lastSeq + 1,
       "paged entries must start at lastSeq + 1 when sequenceOk is true",
     );
+    if (nextEntries.length > 1) {
+      for (let i = 1; i < nextEntries.length; i += 1) {
+        assert.equal(
+          nextEntries[i].entry_seq,
+          nextEntries[i - 1].entry_seq + 1,
+          "paged ledger entries must be contiguous when sequenceOk is true",
+        );
+      }
+    }
   }
   for (const entry of nextEntries) {
     assert.ok(entry.entry_seq > lastSeq, "paged entries must advance cursor");

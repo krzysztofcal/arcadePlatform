@@ -23,3 +23,20 @@ jobs:
         run: npm run test:e2e
         env:
           PLAYWRIGHT: 1
+
+  chips-integration:
+    if: ${{ secrets.CHIPS_TEST_BASE_URL != '' && secrets.CHIPS_TEST_USER_JWT != '' }}
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - name: Install dependencies
+        run: npm ci || npm i
+      - name: Run chips integration tests
+        run: npm run test:chips
+        env:
+          CHIPS_TEST_BASE_URL: ${{ secrets.CHIPS_TEST_BASE_URL }}
+          CHIPS_TEST_USER_JWT: ${{ secrets.CHIPS_TEST_USER_JWT }}
+          CHIPS_TEST_TIMEOUT_MS: ${{ secrets.CHIPS_TEST_TIMEOUT_MS }}

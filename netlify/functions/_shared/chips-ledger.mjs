@@ -287,7 +287,7 @@ account as (
 )
 select
   (select row_to_json(insert_txn) from insert_txn) as transaction,
-  (select coalesce(jsonb_agg(entries order by entry_seq), '[]'::jsonb) from entries) as entries,
+  (select coalesce(jsonb_agg(e order by e.entry_seq), '[]'::jsonb) from entries e) as entries,
   (select row_to_json(account) from account) as account;
 `;
   let result;
