@@ -1,0 +1,12 @@
+<svg width="180" height="180" viewBox="0 0 180 180" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="180" height="180" rx="28" fill="#0c1c34"/>
+  <polygon points="90,130 82,120 98,120" fill="#4ade80"/>
+  <rect x="76" y="120" width="28" height="4" fill="#4ade80"/>
+  <path d="M60 60 l-8 -8 l8 -8 l8 8 l8 -8 l8 8 l-8 8 l8 8 z" fill="#c084fc"/>
+  <path d="M90 60 l-8 -8 l8 -8 l8 8 l8 -8 l8 8 l-8 8 l8 8 z" fill="#c084fc"/>
+  <path d="M120 60 l-8 -8 l8 -8 l8 8 l8 -8 l8 8 l-8 8 l8 8 z" fill="#c084fc"/>
+  <path d="M52 86 l-6 -6 l6 -6 l6 6 l6 -6 l6 6 l-6 6 l6 6 z" fill="#06b6d4"/>
+  <path d="M82 86 l-6 -6 l6 -6 l6 6 l6 -6 l6 6 l-6 6 l6 6 z" fill="#06b6d4"/>
+  <path d="M112 86 l-6 -6 l6 -6 l6 6 l6 -6 l6 6 l-6 6 l6 6 z" fill="#06b6d4"/>
+  <rect x="88" y="104" width="4" height="12" fill="#fbbf24"/>
+</svg>

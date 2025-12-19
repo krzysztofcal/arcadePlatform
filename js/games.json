@@ -99,6 +99,56 @@
       "thumbnail": "img/games/pong.svg",
       "tags": ["retro", "arcade"],
       "source": { "type": "self", "page": "games-open/pong/index.html" }
+    },
+    {
+      "id": "open-space-invaders",
+      "slug": "space-invaders",
+      "title": { "en": "Space Invaders", "pl": "Space Invaders" },
+      "description": { "en": "Defend Earth by shooting alien invaders.", "pl": "Broń Ziemi przed obcymi najeźdźcami." },
+      "category": ["Arcade", "Shooter"],
+      "thumbnail": "img/games/space-invaders.svg",
+      "tags": ["shooter", "retro", "classic"],
+      "source": { "type": "self", "page": "games-open/space-invaders/index.html" }
+    },
+    {
+      "id": "open-asteroids",
+      "slug": "asteroids",
+      "title": { "en": "Asteroids", "pl": "Asteroidy" },
+      "description": { "en": "Destroy asteroids in deep space.", "pl": "Niszcz asteroidy w kosmosie." },
+      "category": ["Arcade", "Shooter"],
+      "thumbnail": "img/games/asteroids.svg",
+      "tags": ["shooter", "retro", "classic"],
+      "source": { "type": "self", "page": "games-open/asteroids/index.html" }
+    },
+    {
+      "id": "open-frogger",
+      "slug": "frogger",
+      "title": { "en": "Frogger", "pl": "Żabka" },
+      "description": { "en": "Help the frog cross the road and river safely.", "pl": "Pomóż żabce bezpiecznie przekroczyć drogę i rzekę." },
+      "category": ["Arcade"],
+      "thumbnail": "img/games/frogger.svg",
+      "tags": ["retro", "arcade", "classic"],
+      "source": { "type": "self", "page": "games-open/frogger/index.html" }
+    },
+    {
+      "id": "open-galaga",
+      "slug": "galaga",
+      "title": { "en": "Galaga", "pl": "Galaga" },
+      "description": { "en": "Destroy waves of alien attackers.", "pl": "Niszcz fale obcych agresorów." },
+      "category": ["Arcade", "Shooter"],
+      "thumbnail": "img/games/galaga.svg",
+      "tags": ["shooter", "retro", "classic"],
+      "source": { "type": "self", "page": "games-open/galaga/index.html" }
+    },
+    {
+      "id": "open-missile-command",
+      "slug": "missile-command",
+      "title": { "en": "Missile Command", "pl": "Dowództwo Rakiet" },
+      "description": { "en": "Defend your cities by destroying incoming missiles.", "pl": "Broń swoich miast przed nadlatującymi rakietami." },
+      "category": ["Arcade", "Shooter"],
+      "thumbnail": "img/games/missile-command.svg",
+      "tags": ["shooter", "retro", "classic"],
+      "source": { "type": "self", "page": "games-open/missile-command/index.html" }
     }
   ]
 }
