@@ -92,16 +92,42 @@ create unique index if not exists chips_accounts_system_key_unique_partial
 create index if not exists chips_entries_account_seq_idx on public.chips_entries (account_id, entry_seq);
 create index if not exists chips_transactions_idempotency_idx on public.chips_transactions (idempotency_key);
 
-alter table public.chips_accounts
-  add constraint if not exists chips_accounts_user_system_exclusive check (
-    (account_type = 'USER' and user_id is not null and system_key is null)
-    or (account_type <> 'USER' and user_id is null and system_key is not null)
-  );
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint
+    where conname = 'chips_accounts_user_system_exclusive'
+  ) then
+    alter table public.chips_accounts
+      add constraint chips_accounts_user_system_exclusive check (
+        (account_type = 'USER' and user_id is not null and system_key is null)
+        or (account_type <> 'USER' and user_id is null and system_key is not null)
+      );
+  end if;
+end $$;
 
-alter table public.chips_transactions
-  add constraint if not exists chips_transactions_idempotency_key_present check (length(idempotency_key) > 0),
-  add constraint if not exists chips_transactions_payload_hash_present check (length(payload_hash) > 0);
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'chips_transactions_idempotency_key_present') then
+    alter table public.chips_transactions
+      add constraint chips_transactions_idempotency_key_present check (length(idempotency_key) > 0);
+  end if;
 
-alter table public.chips_entries
-  add constraint if not exists chips_entries_non_zero_amount check (amount <> 0),
-  add constraint if not exists chips_entries_entry_seq_positive check (entry_seq > 0);
+  if not exists (select 1 from pg_constraint where conname = 'chips_transactions_payload_hash_present') then
+    alter table public.chips_transactions
+      add constraint chips_transactions_payload_hash_present check (length(payload_hash) > 0);
+  end if;
+end $$;
+
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'chips_entries_non_zero_amount') then
+    alter table public.chips_entries
+      add constraint chips_entries_non_zero_amount check (amount <> 0);
+  end if;
+
+  if not exists (select 1 from pg_constraint where conname = 'chips_entries_entry_seq_positive') then
+    alter table public.chips_entries
+      add constraint chips_entries_entry_seq_positive check (entry_seq > 0);
+  end if;
+end $$;
