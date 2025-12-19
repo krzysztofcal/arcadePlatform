@@ -13,6 +13,28 @@ function baseHeaders() {
   };
 }
 
+function normalizeJsonCell(value) {
+  if (value == null) return value;
+  if (typeof value !== "string") return value;
+  const s = value.trim();
+  const looksJson = (s.startsWith("{") && s.endsWith("}")) || (s.startsWith("[") && s.endsWith("]"));
+  if (!looksJson) return value;
+  try {
+    return JSON.parse(s);
+  } catch {
+    return value;
+  }
+}
+
+function normalizeRow(row) {
+  if (!row || typeof row !== "object") return row;
+  const out = { ...row };
+  for (const key of Object.keys(out)) {
+    out[key] = normalizeJsonCell(out[key]);
+  }
+  return out;
+}
+
 const SUPABASE_URL = process.env.SUPABASE_URL || "";
 const SERVICE_ROLE_KEY =
   process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SERVICE_KEY_V2 || "";
@@ -141,7 +163,7 @@ async function executeSql(query, params = []) {
   }
 
   if (payload && Array.isArray(payload.data)) {
-    return payload.data;
+    return payload.data.map(normalizeRow);
   }
 
   return payload;

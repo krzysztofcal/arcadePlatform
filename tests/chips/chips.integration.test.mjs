@@ -36,6 +36,10 @@ async function verifyBalanceStructure() {
 async function runBuyIn(amount, key) {
   const { status, body } = await postTx(config, { txType: "BUY_IN", amount, idempotencyKey: key });
   assert.equal(status, 200, `buy-in should succeed; ${formatResponse({ status, body })}`);
+  assert.ok(Array.isArray(body.entries), "buy-in response entries must be an array");
+  if (body.entries.length) {
+    assert.equal(typeof body.entries[0].metadata, "object", "entry metadata must be object when present");
+  }
   ensureInteger(body.account?.balance ?? 0, "account.balance");
   return body;
 }
