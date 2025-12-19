@@ -10,13 +10,13 @@ import {
 
 const config = loadConfig();
 if (config.missing) {
-  const message = `Chips integration tests missing env vars: ${config.missing.join(", ")}`;
-  console.log(message);
+  const missingList = config.missing.join(", ");
+  console.log(`Chips integration tests missing env vars: ${missingList}`);
   if (process.env.CHIPS_TEST_OPTIONAL === "1") {
-    console.log("Set CHIPS_TEST_OPTIONAL=1 to skip locally. Skipping.");
+    console.log("CHIPS_TEST_OPTIONAL=1 is set — skipping chips integration tests.");
     process.exit(0);
   }
-  console.log("Set CHIPS_TEST_OPTIONAL=1 to skip locally.");
+  console.log("To skip locally, set CHIPS_TEST_OPTIONAL=1.");
   process.exit(1);
 }
 

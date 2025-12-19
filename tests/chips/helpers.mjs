@@ -37,8 +37,20 @@ async function apiFetch(config, path, { method = "GET", headers = {}, body } = {
     init.headers["content-type"] = "application/json";
     init.body = typeof body === "string" ? body : JSON.stringify(body);
   }
-  const response = await fetch(url, init);
-  return response;
+  const timeoutMs = Number(process.env.CHIPS_TEST_TIMEOUT_MS || 15000);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, { ...init, signal: controller.signal });
+    return response;
+  } catch (err) {
+    if (err?.name === "AbortError") {
+      throw new Error(`chips test request timed out after ${timeoutMs}ms: ${url.toString()}`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 async function readJson(response) {
