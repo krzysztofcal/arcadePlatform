@@ -247,7 +247,7 @@ async function postTransaction({
     }
   }
 
-  const insertQuery = `
+const insertQuery = `
 with insert_txn as (
   insert into public.chips_transactions (reference, description, metadata, idempotency_key, payload_hash, tx_type, created_by)
   values ($1, $2, coalesce($3::jsonb, '{}'::jsonb), $4, $5, $6, $7)
@@ -260,10 +260,33 @@ input_entries as (
     coalesce(v.metadata, '{}'::jsonb) as metadata
   from jsonb_to_recordset(($8::text)::jsonb) as v(account_id uuid, amount bigint, metadata jsonb)
 ),
+deltas as (
+  select account_id, sum(amount)::bigint as delta
+  from input_entries
+  group by account_id
+),
+locked_accounts as (
+  select a.id, a.balance
+  from public.chips_accounts a
+  join deltas d on d.account_id = a.id
+  for update
+),
+guard as (
+  select case when exists (
+    select 1
+    from locked_accounts a
+    join deltas d on d.account_id = a.id
+    where (a.balance + d.delta) < 0
+  )
+  then public.raise_insufficient_funds()
+  else null
+  end as ok
+),
 entries as (
   insert into public.chips_entries (transaction_id, account_id, amount, metadata)
   select insert_txn.id, i.account_id, i.amount, i.metadata
   from insert_txn
+  join guard on true
   join input_entries i on true
   returning *
 ),
