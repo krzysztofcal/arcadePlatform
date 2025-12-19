@@ -2,8 +2,8 @@
 # Documentation: https://docs.netlify.com/configure-builds/file-based-configuration/
 
 [build]
-  # Generate build info before deploying
-  command = "node scripts/generate-build-info.js"
+  # Generate build info before deploying (script is in repo root, not landing/)
+  command = "node ../scripts/generate-build-info.js"
   publish = "."
   functions = "netlify/functions"
 
