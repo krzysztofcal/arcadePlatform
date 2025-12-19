@@ -260,17 +260,6 @@ input_entries as (
     coalesce(v.metadata, '{}'::jsonb) as metadata
   from jsonb_to_recordset(($8::text)::jsonb) as v(account_id uuid, amount bigint, metadata jsonb)
 ),
-deltas as (
-  select account_id, sum(amount)::bigint as delta
-  from input_entries
-  group by account_id
-),
-locked_accounts as (
-  select a.id, a.balance
-  from public.chips_accounts a
-  join deltas d on d.account_id = a.id
-  for update
-),
 entries as (
   insert into public.chips_entries (transaction_id, account_id, amount, metadata)
   select insert_txn.id, i.account_id, i.amount, i.metadata

@@ -1,5 +1,3 @@
-import crypto from "node:crypto";
-
 const klog = (kind, data) => {
   try {
     console.log(`[klog] ${kind}`, JSON.stringify(data));
@@ -11,7 +9,10 @@ const klog = (kind, data) => {
 const SUPABASE_URL = process.env.SUPABASE_URL || "";
 const SERVICE_ROLE_KEY =
   process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SERVICE_KEY_V2 || "";
+const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY_V2 || "";
 const SQL_ENDPOINT = SUPABASE_URL ? `${SUPABASE_URL.replace(/\/$/, "")}/sql/v1` : "";
+const AUTH_ENDPOINT = SUPABASE_URL ? `${SUPABASE_URL.replace(/\/$/, "")}/auth/v1/user` : "";
+const AUTH_API_KEY = SUPABASE_ANON_KEY || SERVICE_ROLE_KEY || "";
 
 if (!SUPABASE_URL || !SERVICE_ROLE_KEY) {
   console.warn("[chips] Supabase service credentials missing – chips functions will error without SUPABASE_URL and SERVICE_ROLE_KEY");
@@ -54,74 +55,50 @@ function corsHeaders(origin) {
   };
 }
 
-const decodeBase64UrlJson = (segment) => {
-  if (!segment) return null;
-  try {
-    const decoded = Buffer.from(segment, "base64url").toString("utf8");
-    return JSON.parse(decoded);
-  } catch {
-    return null;
-  }
-};
-
-const safeEquals = (a, b) => {
-  if (a.length !== b.length) return false;
-  const left = Buffer.from(a, "utf8");
-  const right = Buffer.from(b, "utf8");
-  if (left.length !== right.length) return false;
-  return crypto.timingSafeEqual(left, right);
-};
-
 const extractBearerToken = (headers) => {
   const headerValue = headers?.authorization || headers?.Authorization || headers?.AUTHORIZATION;
   if (!headerValue || typeof headerValue !== "string") return null;
   const match = /^Bearer\s+(.+)$/i.exec(headerValue.trim());
   return match ? match[1].trim() : null;
 };
-
-const SUPABASE_JWT_SECRET = process.env.SUPABASE_JWT_SECRET || process.env.SUPABASE_JWT_SECRET_V2 || "";
-
-const verifySupabaseJwt = (token) => {
+const verifySupabaseJwt = async (token) => {
   if (!token) {
     return { provided: false, valid: false, userId: null, reason: "missing_token" };
   }
-  if (!SUPABASE_JWT_SECRET || SUPABASE_JWT_SECRET.length < 16) {
-    return { provided: false, valid: false, userId: null, reason: "disabled_or_missing_secret" };
+  if (!AUTH_ENDPOINT || !AUTH_API_KEY) {
+    return { provided: true, valid: false, userId: null, reason: "missing_supabase_config" };
   }
 
-  const [headerSegment, payloadSegment, signatureSegment] = token.split(".");
-  if (!headerSegment || !payloadSegment || !signatureSegment) {
-    return { provided: true, valid: false, userId: null, reason: "malformed_token" };
+  try {
+    const response = await fetch(AUTH_ENDPOINT, {
+      method: "GET",
+      headers: {
+        apikey: AUTH_API_KEY,
+        authorization: `Bearer ${token}`,
+      },
+    });
+
+    if (!response.ok) {
+      return { provided: true, valid: false, userId: null, reason: response.status === 401 ? "unauthorized" : "auth_request_failed" };
+    }
+
+    let body = null;
+    try {
+      body = await response.json();
+    } catch {
+      body = null;
+    }
+
+    const userId = body?.id || body?.user?.id || null;
+    if (!userId) {
+      return { provided: true, valid: false, userId: null, reason: "missing_user" };
+    }
+
+    return { provided: true, valid: true, userId, reason: "ok", user: body };
+  } catch (error) {
+    klog("supabase_auth_error", { message: error?.message || "request_failed" });
+    return { provided: true, valid: false, userId: null, reason: "auth_request_failed" };
   }
-
-  const header = decodeBase64UrlJson(headerSegment);
-  const payload = decodeBase64UrlJson(payloadSegment);
-  if (!header || !payload) {
-    return { provided: true, valid: false, userId: null, reason: "invalid_encoding" };
-  }
-
-  const alg = header.alg || "HS256";
-  const hmacAlg = alg === "HS512" ? "sha512" : "sha256";
-  const expectedSig = crypto
-    .createHmac(hmacAlg, SUPABASE_JWT_SECRET)
-    .update(`${headerSegment}.${payloadSegment}`)
-    .digest("base64url");
-
-  if (!safeEquals(signatureSegment, expectedSig)) {
-    return { provided: true, valid: false, userId: null, reason: "invalid_signature" };
-  }
-
-  const nowSec = Math.floor(Date.now() / 1000);
-  if (payload.exp && Number(payload.exp) <= nowSec) {
-    return { provided: true, valid: false, userId: null, reason: "expired" };
-  }
-
-  const userId = typeof payload.sub === "string" ? payload.sub : null;
-  if (!userId) {
-    return { provided: true, valid: false, userId: null, reason: "missing_sub" };
-  }
-
-  return { provided: true, valid: true, userId, reason: "ok", payload };
 };
 
 async function executeSql(query, params = []) {

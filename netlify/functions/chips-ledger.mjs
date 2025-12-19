@@ -20,7 +20,7 @@ export async function handler(event) {
   }
 
   const token = extractBearerToken(event.headers);
-  const auth = verifySupabaseJwt(token);
+  const auth = await verifySupabaseJwt(token);
   if (!auth.valid || !auth.userId) {
     klog("chips_ledger_auth_failed", { reason: auth.reason });
     return { statusCode: 401, headers: cors, body: JSON.stringify({ error: "unauthorized", reason: auth.reason }) };
