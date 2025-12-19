@@ -1,5 +1,5 @@
 import { corsHeaders, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
-import { VALID_TX_TYPES, postTransaction } from "./_shared/chips-ledger.mjs";
+import { postTransaction } from "./_shared/chips-ledger.mjs";
 
 const parseBody = (body) => {
   if (!body) return {};
@@ -9,6 +9,40 @@ const parseBody = (body) => {
     return {};
   }
 };
+
+const ALLOWED_TX_TYPES = new Set(["BUY_IN", "CASH_OUT", "PRIZE_PAYOUT", "RAKE_FEE"]);
+
+function buildEntries(txType, amount) {
+  const value = Number(amount);
+  if (!Number.isInteger(value) || value <= 0) {
+    return null;
+  }
+
+  switch (txType) {
+    case "BUY_IN":
+      return [
+        { accountType: "USER", amount: value },
+        { accountType: "SYSTEM", systemKey: "TREASURY", amount: -value },
+      ];
+    case "CASH_OUT":
+      return [
+        { accountType: "USER", amount: -value },
+        { accountType: "SYSTEM", systemKey: "TREASURY", amount: value },
+      ];
+    case "PRIZE_PAYOUT":
+      return [
+        { accountType: "USER", amount: value },
+        { accountType: "SYSTEM", systemKey: "HOUSE", amount: -value },
+      ];
+    case "RAKE_FEE":
+      return [
+        { accountType: "USER", amount: -value },
+        { accountType: "SYSTEM", systemKey: "HOUSE", amount: value },
+      ];
+    default:
+      return null;
+  }
+}
 
 export async function handler(event) {
   const origin = event.headers?.origin || event.headers?.Origin;
@@ -31,14 +65,19 @@ export async function handler(event) {
   }
 
   const payload = parseBody(event.body);
-  const { txType, idempotencyKey, reference = null, description = null, metadata = {}, entries = [] } = payload;
+  const { txType, idempotencyKey, amount, reference = null, description = null, metadata = {} } = payload;
   const safeMetadata = metadata && typeof metadata === "object" ? metadata : {};
 
-  if (!VALID_TX_TYPES.has(txType)) {
+  if (!ALLOWED_TX_TYPES.has(txType)) {
     return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "invalid_tx_type" }) };
   }
   if (!idempotencyKey || typeof idempotencyKey !== "string") {
     return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "missing_idempotency_key" }) };
+  }
+
+  const entries = buildEntries(txType, amount);
+  if (!entries) {
+    return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "invalid_amount" }) };
   }
 
   try {

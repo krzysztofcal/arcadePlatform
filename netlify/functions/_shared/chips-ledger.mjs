@@ -70,7 +70,7 @@ async function listUserLedger(userId, { afterSeq = null, limit = 50 } = {}) {
   const cappedLimit = Math.min(Math.max(1, Number(limit) || 50), 200);
   const account = await getOrCreateUserAccount(userId);
   const query = `
-entries as (
+with entries as (
   select
     e.entry_seq,
     e.amount,
@@ -257,7 +257,7 @@ entries as (
   insert into public.chips_entries (transaction_id, account_id, amount, metadata)
   select insert_txn.id, v.account_id, v.amount, coalesce(v.metadata, '{}'::jsonb)
   from insert_txn
-  join jsonb_to_recordset($8::jsonb) as v(account_id uuid, amount bigint, metadata jsonb)
+  join jsonb_to_recordset(($8::text)::jsonb) as v(account_id uuid, amount bigint, metadata jsonb)
   on true
   returning *
 ),
@@ -278,7 +278,7 @@ select
     payloadHash,
     txType,
     createdBy,
-    entryRecords,
+    JSON.stringify(entryRecords),
     userAccount.id,
   ]);
 
