@@ -69,6 +69,10 @@ if (!SUPABASE_DB_URL) {
 
 const sql = SUPABASE_DB_URL ? postgres(SUPABASE_DB_URL, { max: 1 }) : null;
 
+if (SUPABASE_DB_URL && sql) {
+  klog("chips_sql_client_ready", { enabled: true });
+}
+
 const CORS_ALLOW = (() => {
   const fromEnv = (process.env.XP_CORS_ALLOW ?? "")
     .split(",")
@@ -110,6 +114,7 @@ const extractBearerToken = (headers) => {
   return match ? match[1].trim() : null;
 };
 const verifySupabaseJwt = async (token) => {
+  // Note: Verification is performed via Supabase Auth HTTP endpoint; this adds network latency but is acceptable for now.
   if (!token) {
     return { provided: false, valid: false, userId: null, reason: "missing_token" };
   }

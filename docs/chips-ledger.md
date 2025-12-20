@@ -162,12 +162,28 @@ If you keep this mental model, the system will stay correct.
 
 ## Netlify production configuration (required)
 
-Set the Supabase **Transaction pooler (IPv4) connection string** and enable chips before deploying:
+Use the Supabase **Transaction pooler (IPv4) connection string** (port **6543**, includes pooling) with `?sslmode=require`, then redeploy:
 
 ```
-netlify env:set SUPABASE_DB_URL "postgresql://<user>:<pass>@<host>:<port>/<db>?sslmode=require" --context production
+netlify env:set SUPABASE_DB_URL "postgresql://<user>:<pass>@<host>:6543/<db>?sslmode=require" --context production
 netlify env:set CHIPS_ENABLED "1" --context production
 netlify deploy --prod
 ```
 
-Connection string source: Supabase Dashboard → Settings → Database → Connection string → **Transaction pooler** → URI (IPv4-compatible). Keep existing Supabase auth env vars (`SUPABASE_URL`, `SUPABASE_ANON_KEY`/`SUPABASE_ANON_KEY_V2`). Redeploy is required after updating env vars.
+Connection string source: Supabase Dashboard → Settings → Database → Connection string → **Transaction pooler** → URI (IPv4-compatible). Keep existing Supabase auth env vars (`SUPABASE_URL`, `SUPABASE_ANON_KEY`/`SUPABASE_ANON_KEY_V2`). Netlify builds do **not** hot-reload env vars, so a redeploy is required after any env change.
+
+> Note: JWT verification currently calls the Supabase Auth HTTP endpoint (`/auth/v1/user`). This is acceptable but adds network latency; local verification can be considered later.
+
+### Verification after deploy
+
+Check production env values and redeploy status:
+
+```
+netlify env:list --context production
+netlify deploy --prod
+```
+
+Sanity checks (after redeploy):
+- Missing token should return `401` with reason `missing_token`.
+- If `SUPABASE_DB_URL` is not set, function logs will show `chips_sql_config_missing`.
+- SQL or connectivity issues surface as `chips_sql_error` logs with Postgres fields (code/constraint/table/etc.).
