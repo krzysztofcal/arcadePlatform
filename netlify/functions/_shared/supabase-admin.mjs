@@ -1,3 +1,5 @@
+import postgres from "postgres";
+
 const klog = (kind, data) => {
   try {
     console.log(`[klog] ${kind}`, JSON.stringify(data));
@@ -56,16 +58,18 @@ function normalizeRow(row) {
 }
 
 const SUPABASE_URL = process.env.SUPABASE_URL || "";
-const SERVICE_ROLE_KEY =
-  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SERVICE_KEY_V2 || "";
 const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY_V2 || "";
-const SQL_ENDPOINT = SUPABASE_URL ? `${SUPABASE_URL.replace(/\/$/, "")}/sql/v1` : "";
+const SUPABASE_DB_URL = process.env.SUPABASE_DB_URL || "";
 const AUTH_ENDPOINT = SUPABASE_URL ? `${SUPABASE_URL.replace(/\/$/, "")}/auth/v1/user` : "";
 const AUTH_API_KEY = SUPABASE_ANON_KEY || "";
 
-if (!SUPABASE_URL || !SERVICE_ROLE_KEY) {
-  console.warn("[chips] Supabase service credentials missing – chips functions will error without SUPABASE_URL and SERVICE_ROLE_KEY");
+if (!SUPABASE_DB_URL) {
+  console.warn("[chips] Supabase DB URL missing – chips functions will error without SUPABASE_DB_URL");
 }
+
+const sql = SUPABASE_DB_URL
+  ? postgres(SUPABASE_DB_URL, { max: 1, idle_timeout: 30, connect_timeout: 10 })
+  : null;
 
 const CORS_ALLOW = (() => {
   const fromEnv = (process.env.XP_CORS_ALLOW ?? "")
@@ -108,6 +112,7 @@ const extractBearerToken = (headers) => {
   return match ? match[1].trim() : null;
 };
 const verifySupabaseJwt = async (token) => {
+  // Note: Verification is performed via Supabase Auth HTTP endpoint; this adds network latency but is acceptable for now.
   if (!token) {
     return { provided: false, valid: false, userId: null, reason: "missing_token" };
   }
@@ -148,45 +153,31 @@ const verifySupabaseJwt = async (token) => {
 };
 
 async function executeSql(query, params = []) {
-  if (!SQL_ENDPOINT || !SERVICE_ROLE_KEY) {
-    throw new Error("Supabase SQL endpoint not configured");
+  if (!sql) {
+    klog("chips_sql_config_missing", { hasDbUrl: !!SUPABASE_DB_URL });
+    throw new Error("Supabase DB connection not configured (SUPABASE_DB_URL missing)");
   }
 
-  const response = await fetch(SQL_ENDPOINT, {
-    method: "POST",
-    headers: {
-      apikey: SERVICE_ROLE_KEY,
-      authorization: `Bearer ${SERVICE_ROLE_KEY}`,
-      "content-type": "application/json",
-      prefer: "tx=commit",
-    },
-    body: JSON.stringify({ query, params }),
-  });
+  try {
+    const rows = await sql.unsafe(query, params);
 
-  const text = await response.text();
-  let payload = null;
-  if (text) {
-    try {
-      payload = JSON.parse(text);
-    } catch {
-      payload = { error: { message: text } };
+    if (Array.isArray(rows)) {
+      return rows.map(normalizeRow);
     }
-  }
 
-  if (!response.ok || payload?.error) {
-    const message = payload?.error?.message || payload?.error || response.statusText;
-    const details = payload?.error?.details || payload?.error?.hint;
-    const error = new Error(message || "SQL API error");
-    error.status = response.status;
-    error.details = details;
+    return rows;
+  } catch (error) {
+    klog("chips_sql_error", {
+      message: error?.message || "sql_failed",
+      code: error?.code,
+      detail: error?.detail,
+      hint: error?.hint,
+      constraint: error?.constraint,
+      schema: error?.schema,
+      table: error?.table,
+    });
     throw error;
   }
-
-  if (payload && Array.isArray(payload.data)) {
-    return payload.data.map(normalizeRow);
-  }
-
-  return payload;
 }
 
 export {
