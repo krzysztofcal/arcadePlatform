@@ -67,11 +67,9 @@ if (!SUPABASE_DB_URL) {
   console.warn("[chips] Supabase DB URL missing – chips functions will error without SUPABASE_DB_URL");
 }
 
-const sql = SUPABASE_DB_URL ? postgres(SUPABASE_DB_URL, { max: 1 }) : null;
-
-if (SUPABASE_DB_URL && sql) {
-  klog("chips_sql_client_ready", { enabled: true });
-}
+const sql = SUPABASE_DB_URL
+  ? postgres(SUPABASE_DB_URL, { max: 1, idle_timeout: 30, connect_timeout: 10 })
+  : null;
 
 const CORS_ALLOW = (() => {
   const fromEnv = (process.env.XP_CORS_ALLOW ?? "")

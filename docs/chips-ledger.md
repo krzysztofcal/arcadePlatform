@@ -176,10 +176,11 @@ Connection string source: Supabase Dashboard → Settings → Database → Conne
 
 ### Verification after deploy
 
-Check production env values and redeploy status:
+Check production env values (redeploy only if env vars changed):
 
 ```
 netlify env:list --context production
+# If you updated env vars, redeploy the site so functions see the new values:
 netlify deploy --prod
 ```
 
