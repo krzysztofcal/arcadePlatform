@@ -162,7 +162,7 @@ If you keep this mental model, the system will stay correct.
 
 ## Netlify production configuration (required)
 
-Set the Supabase Postgres connection string and enable chips before deploying:
+Set the Supabase **Transaction pooler (IPv4) connection string** and enable chips before deploying:
 
 ```
 netlify env:set SUPABASE_DB_URL "postgresql://<user>:<pass>@<host>:<port>/<db>?sslmode=require" --context production
@@ -170,4 +170,4 @@ netlify env:set CHIPS_ENABLED "1" --context production
 netlify deploy --prod
 ```
 
-Connection string source: Supabase Dashboard → Settings → Database → Connection string → URI (pooler preferred). Keep existing Supabase auth env vars (`SUPABASE_URL`, `SUPABASE_ANON_KEY`/`SUPABASE_ANON_KEY_V2`).
+Connection string source: Supabase Dashboard → Settings → Database → Connection string → **Transaction pooler** → URI (IPv4-compatible). Keep existing Supabase auth env vars (`SUPABASE_URL`, `SUPABASE_ANON_KEY`/`SUPABASE_ANON_KEY_V2`). Redeploy is required after updating env vars.

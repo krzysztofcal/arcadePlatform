@@ -58,8 +58,6 @@ function normalizeRow(row) {
 }
 
 const SUPABASE_URL = process.env.SUPABASE_URL || "";
-const SERVICE_ROLE_KEY =
-  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SERVICE_KEY_V2 || "";
 const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY_V2 || "";
 const SUPABASE_DB_URL = process.env.SUPABASE_DB_URL || "";
 const AUTH_ENDPOINT = SUPABASE_URL ? `${SUPABASE_URL.replace(/\/$/, "")}/auth/v1/user` : "";
@@ -69,9 +67,7 @@ if (!SUPABASE_DB_URL) {
   console.warn("[chips] Supabase DB URL missing – chips functions will error without SUPABASE_DB_URL");
 }
 
-const sql = SUPABASE_DB_URL
-  ? postgres(SUPABASE_DB_URL, { max: 1, idle_timeout: 20, connect_timeout: 10 })
-  : null;
+const sql = SUPABASE_DB_URL ? postgres(SUPABASE_DB_URL, { max: 1 }) : null;
 
 const CORS_ALLOW = (() => {
   const fromEnv = (process.env.XP_CORS_ALLOW ?? "")
@@ -168,7 +164,15 @@ async function executeSql(query, params = []) {
 
     return rows;
   } catch (error) {
-    klog("chips_sql_error", { message: error?.message || "sql_failed" });
+    klog("chips_sql_error", {
+      message: error?.message || "sql_failed",
+      code: error?.code,
+      detail: error?.detail,
+      hint: error?.hint,
+      constraint: error?.constraint,
+      schema: error?.schema,
+      table: error?.table,
+    });
     throw error;
   }
 }
