@@ -4,6 +4,7 @@ import path from "node:path";
 import postgres from "postgres";
 
 const dbUrl = process.env.CHIPS_MIGRATIONS_TEST_DB_URL;
+const allowDrop = process.env.CHIPS_MIGRATIONS_ALLOW_DROP === "1";
 
 if (!dbUrl) {
   console.log("Skipping chips migration tests: CHIPS_MIGRATIONS_TEST_DB_URL not set.");
@@ -14,9 +15,24 @@ process.env.SUPABASE_DB_URL = dbUrl;
 
 const seedKey = "seed:treasury:v1";
 const seedAmount = 1000000;
+const assertTestDatabase = async (sql) => {
+  const rows = await sql`select current_database() as name;`;
+  const name = rows?.[0]?.name || "";
+  const isTestDb = /_test$/i.test(name) || name === "chips_test_db";
+  if (!allowDrop && !isTestDb) {
+    throw new Error(
+      `Refusing to drop non-test database (${name}). Set CHIPS_MIGRATIONS_ALLOW_DROP=1 to override.`
+    );
+  }
+};
 const systemBalances = async (sql, key) => {
   const rows = await sql`select balance from public.chips_accounts where system_key = ${key} limit 1;`;
   return Number(rows?.[0]?.balance ?? 0);
+};
+
+const accountNextSeq = async (sql, key) => {
+  const rows = await sql`select next_entry_seq from public.chips_accounts where system_key = ${key} limit 1;`;
+  return Number(rows?.[0]?.next_entry_seq ?? 0);
 };
 
 const seedTxCount = async (sql) => {
@@ -25,6 +41,7 @@ const seedTxCount = async (sql) => {
 };
 
 const dropAndRecreateSchema = async (sql) => {
+  await assertTestDatabase(sql);
   await sql.unsafe("drop schema if exists public cascade;");
   await sql.unsafe("create schema public;");
 };
@@ -98,6 +115,45 @@ async function expectSuccessfulBuyIn(sql) {
   assert.equal(treasury, seedAmount - 25, "Treasury should decrease by buy-in amount");
 }
 
+async function assertSeedSequencing(sql) {
+  const txRows = await sql`select id from public.chips_transactions where idempotency_key = ${seedKey} limit 1;`;
+  const txId = txRows?.[0]?.id;
+  assert.ok(txId, "Seed transaction should exist");
+
+  const entries = await sql`
+    select account_id, amount, entry_seq
+    from public.chips_entries
+    where transaction_id = ${txId}
+    order by account_id, entry_seq;
+  `;
+
+  assert.equal(entries.length, 2, "Seed transaction must create two entries");
+  assert.equal(entries.reduce((sum, row) => sum + Number(row.amount || 0), 0), 0, "Entries must balance to zero");
+  entries.forEach((row) => {
+    assert.ok(Number(row.entry_seq) > 0, "Entries require positive sequence");
+  });
+
+  const accountRows = await sql`
+    select system_key, next_entry_seq
+    from public.chips_accounts
+    where system_key in ('GENESIS', 'TREASURY');
+  `;
+  const seqByKey = new Map(accountRows.map((row) => [row.system_key, Number(row.next_entry_seq || 0)]));
+  assert.equal(seqByKey.get("GENESIS"), 2, "GENESIS next_entry_seq should advance after seed entry");
+  assert.equal(seqByKey.get("TREASURY"), 2, "TREASURY next_entry_seq should advance after seed entry");
+}
+
+async function assertBuyInSequencing(sql) {
+  const { getUserBalance, listUserLedger } = await withLedger();
+  const userId = "00000000-0000-0000-0000-000000000001";
+  const ledger = await listUserLedger(userId, { limit: 10 });
+  assert.ok(ledger.sequenceOk, "User ledger sequence should remain contiguous after buy-in");
+
+  const userBalance = await getUserBalance(userId);
+  assert.equal(userBalance.nextEntrySeq, 2, "User next_entry_seq should advance after first entry");
+  assert.equal(await accountNextSeq(sql, "TREASURY"), 3, "TREASURY next_entry_seq should advance again after buy-in");
+}
+
 async function main() {
   const sql = postgres(dbUrl, { max: 1 });
   await dropAndRecreateSchema(sql);
@@ -109,15 +165,22 @@ async function main() {
   const afterSeed = await systemBalances(sql, "TREASURY");
   assert.ok(afterSeed >= seedAmount, "Treasury should be funded after seed migration");
   assert.equal(await seedTxCount(sql), 1, "Seed transaction should be recorded once");
+  await assertSeedSequencing(sql);
 
   await expectSuccessfulBuyIn(sql);
+  await assertBuyInSequencing(sql);
 
   await runMigration(sql, seedMigration);
   assert.equal(await seedTxCount(sql), 1, "Seed transaction should stay idempotent");
   const afterRerun = await systemBalances(sql, "TREASURY");
   assert.equal(afterRerun, seedAmount - 25, "Treasury balance should not change on rerun");
+  assert.equal(await accountNextSeq(sql, "TREASURY"), 3, "TREASURY sequence should remain stable on rerun");
 
   await sql.end({ timeout: 5 });
+  const adminModule = await import("../../netlify/functions/_shared/supabase-admin.mjs");
+  if (adminModule?.closeSql) {
+    await adminModule.closeSql();
+  }
   console.log("Chips migration tests passed");
 }
 
