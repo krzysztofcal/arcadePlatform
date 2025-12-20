@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160" role="img" aria-labelledby="title desc">
+  <title id="title">Connect Four game thumbnail</title>
+  <desc id="desc">Blue game board with red and yellow discs.</desc>
+  <rect width="160" height="160" rx="20" fill="#101b37" />
+  <rect x="16" y="32" width="128" height="112" rx="12" fill="#1e40af" />
+  <g>
+    <circle cx="40" cy="56" r="12" fill="#0f172a" />
+    <circle cx="80" cy="56" r="12" fill="#0f172a" />
+    <circle cx="120" cy="56" r="12" fill="#0f172a" />
+    <circle cx="40" cy="88" r="12" fill="#ef4444" />
+    <circle cx="80" cy="88" r="12" fill="#eab308" />
+    <circle cx="120" cy="88" r="12" fill="#0f172a" />
+    <circle cx="40" cy="120" r="12" fill="#eab308" />
+    <circle cx="80" cy="120" r="12" fill="#ef4444" />
+    <circle cx="120" cy="120" r="12" fill="#ef4444" />
+  </g>
+  <circle cx="80" cy="20" r="10" fill="#eab308" opacity="0.8" />
+  <path d="M80 30 L80 44" stroke="#eab308" stroke-width="3" stroke-dasharray="4 4" opacity="0.6" />
+</svg>

@@ -1,0 +1,94 @@
+.playfield {
+  display: grid;
+  justify-items: center;
+  gap: 0.75rem;
+}
+
+.memory-frame {
+  padding: 1.5rem;
+}
+
+.memory-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: clamp(8px, 2vw, 12px);
+  width: min(360px, 90vw);
+}
+
+.memory-card {
+  aspect-ratio: 1;
+  perspective: 1000px;
+  cursor: pointer;
+}
+
+.memory-card .card-front,
+.memory-card .card-back {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  backface-visibility: hidden;
+  display: grid;
+  place-items: center;
+  border-radius: 12px;
+  font-size: clamp(1.5rem, 5vw, 2.2rem);
+  font-weight: 700;
+  transition: transform 0.4s ease;
+}
+
+.memory-card .card-front {
+  background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+  color: rgba(255, 255, 255, 0.8);
+  box-shadow: 0 4px 16px rgba(79, 70, 229, 0.4);
+}
+
+.memory-card .card-back {
+  background: linear-gradient(135deg, rgba(30, 41, 59, 0.95), rgba(15, 23, 42, 0.95));
+  border: 2px solid var(--accent);
+  transform: rotateY(180deg);
+  box-shadow: 0 4px 16px rgba(110, 231, 231, 0.3);
+}
+
+.memory-card.flipped .card-front {
+  transform: rotateY(180deg);
+}
+
+.memory-card.flipped .card-back {
+  transform: rotateY(0deg);
+}
+
+.memory-card.matched .card-back {
+  background: linear-gradient(135deg, rgba(34, 197, 94, 0.3), rgba(22, 163, 74, 0.3));
+  border-color: #22c55e;
+}
+
+.memory-card:not(.flipped):not(.matched):hover .card-front {
+  transform: scale(1.05);
+}
+
+.memory-card:not(.flipped):not(.matched):active .card-front {
+  transform: scale(0.98);
+}
+
+#stateOverlay[hidden] {
+  display: none;
+}
+
+.notice {
+  text-align: center;
+}
+
+@media (max-width: 520px) {
+  .scoreboard {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .memory-grid {
+    gap: 6px;
+  }
+
+  .memory-card .card-front,
+  .memory-card .card-back {
+    border-radius: 8px;
+  }
+}
