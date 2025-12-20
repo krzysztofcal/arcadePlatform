@@ -155,16 +155,22 @@ const verifySupabaseJwt = async (token) => {
 
 async function executeSql(query, params = []) {
   if (!sql) {
+    klog("chips_sql_config_missing", { hasDbUrl: !!SUPABASE_DB_URL });
     throw new Error("Supabase DB connection not configured (SUPABASE_DB_URL missing)");
   }
 
-  const rows = await sql.unsafe(query, params);
+  try {
+    const rows = await sql.unsafe(query, params);
 
-  if (Array.isArray(rows)) {
-    return rows.map(normalizeRow);
+    if (Array.isArray(rows)) {
+      return rows.map(normalizeRow);
+    }
+
+    return rows;
+  } catch (error) {
+    klog("chips_sql_error", { message: error?.message || "sql_failed" });
+    throw error;
   }
-
-  return rows;
 }
 
 export {
