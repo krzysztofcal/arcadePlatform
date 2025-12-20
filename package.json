@@ -22,6 +22,9 @@
     "serve:xp": "XP_DEBUG=1 node scripts/serve-award-xp.mjs",
     "wire:xp": "node scripts/wire-xp.mjs"
   },
+  "dependencies": {
+    "postgres": "^3.4.5"
+  },
   "devDependencies": {
     "@playwright/test": "^1.46.0",
     "acorn": "^8.15.0",
