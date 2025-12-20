@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160" role="img" aria-labelledby="title desc">
+  <title id="title">Sokoban game thumbnail</title>
+  <desc id="desc">Player pushing boxes onto target spots.</desc>
+  <rect width="160" height="160" rx="20" fill="#101b37" />
+  <g>
+    <rect x="20" y="20" width="24" height="24" rx="3" fill="#78350f" stroke="#92400e" stroke-width="2" />
+    <rect x="44" y="20" width="24" height="24" rx="3" fill="#78350f" stroke="#92400e" stroke-width="2" />
+    <rect x="68" y="20" width="24" height="24" rx="3" fill="#78350f" stroke="#92400e" stroke-width="2" />
+    <rect x="92" y="20" width="24" height="24" rx="3" fill="#78350f" stroke="#92400e" stroke-width="2" />
+    <rect x="116" y="20" width="24" height="24" rx="3" fill="#78350f" stroke="#92400e" stroke-width="2" />
+    <rect x="20" y="44" width="24" height="24" rx="3" fill="#78350f" stroke="#92400e" stroke-width="2" />
+    <rect x="116" y="44" width="24" height="24" rx="3" fill="#78350f" stroke="#92400e" stroke-width="2" />
+    <rect x="20" y="68" width="24" height="24" rx="3" fill="#78350f" stroke="#92400e" stroke-width="2" />
+    <rect x="116" y="68" width="24" height="24" rx="3" fill="#78350f" stroke="#92400e" stroke-width="2" />
+    <rect x="20" y="92" width="24" height="24" rx="3" fill="#78350f" stroke="#92400e" stroke-width="2" />
+    <rect x="116" y="92" width="24" height="24" rx="3" fill="#78350f" stroke="#92400e" stroke-width="2" />
+    <rect x="20" y="116" width="24" height="24" rx="3" fill="#78350f" stroke="#92400e" stroke-width="2" />
+    <rect x="44" y="116" width="24" height="24" rx="3" fill="#78350f" stroke="#92400e" stroke-width="2" />
+    <rect x="68" y="116" width="24" height="24" rx="3" fill="#78350f" stroke="#92400e" stroke-width="2" />
+    <rect x="92" y="116" width="24" height="24" rx="3" fill="#78350f" stroke="#92400e" stroke-width="2" />
+    <rect x="116" y="116" width="24" height="24" rx="3" fill="#78350f" stroke="#92400e" stroke-width="2" />
+  </g>
+  <rect x="44" y="44" width="72" height="72" fill="#374151" />
+  <rect x="92" y="68" width="20" height="20" rx="3" fill="none" stroke="#22c55e" stroke-width="2" stroke-dasharray="4 3" />
+  <rect x="68" y="68" width="18" height="18" rx="3" fill="#f59e0b" />
+  <circle cx="56" cy="78" r="10" fill="#3b82f6" />
+  <path d="M48 82 L64 82" stroke="#3b82f6" stroke-width="3" opacity="0.5" />
+</svg>

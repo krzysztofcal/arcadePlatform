@@ -149,6 +149,56 @@
       "thumbnail": "img/games/missile-command.svg",
       "tags": ["shooter", "retro", "classic"],
       "source": { "type": "self", "page": "games-open/missile-command/index.html" }
+    },
+    {
+      "id": "open-simon",
+      "slug": "simon",
+      "title": { "en": "Simon", "pl": "Simon" },
+      "description": { "en": "Repeat the pattern of lights and sounds.", "pl": "Powtórz wzór świateł i dźwięków." },
+      "category": ["Puzzle"],
+      "thumbnail": "img/games/simon.svg",
+      "tags": ["memory", "classic", "puzzle"],
+      "source": { "type": "self", "page": "games-open/simon/index.html" }
+    },
+    {
+      "id": "open-connect-four",
+      "slug": "connect-four",
+      "title": { "en": "Connect Four", "pl": "Czwórki" },
+      "description": { "en": "Drop discs to connect four in a row.", "pl": "Wrzucaj krążki, aby ułożyć cztery w rzędzie." },
+      "category": ["Puzzle", "Strategy"],
+      "thumbnail": "img/games/connect-four.svg",
+      "tags": ["strategy", "two-player", "classic"],
+      "source": { "type": "self", "page": "games-open/connect-four/index.html" }
+    },
+    {
+      "id": "open-whac-a-mole",
+      "slug": "whac-a-mole",
+      "title": { "en": "Whac-A-Mole", "pl": "Kret" },
+      "description": { "en": "Whack the moles as fast as you can!", "pl": "Uderzaj krety tak szybko, jak potrafisz!" },
+      "category": ["Arcade"],
+      "thumbnail": "img/games/whac-a-mole.svg",
+      "tags": ["arcade", "reflex", "casual"],
+      "source": { "type": "self", "page": "games-open/whac-a-mole/index.html" }
+    },
+    {
+      "id": "open-memory-match",
+      "slug": "memory-match",
+      "title": { "en": "Memory Match", "pl": "Memory" },
+      "description": { "en": "Find all matching pairs of cards.", "pl": "Znajdź wszystkie pasujące pary kart." },
+      "category": ["Puzzle"],
+      "thumbnail": "img/games/memory-match.svg",
+      "tags": ["memory", "puzzle", "casual"],
+      "source": { "type": "self", "page": "games-open/memory-match/index.html" }
+    },
+    {
+      "id": "open-sokoban",
+      "slug": "sokoban",
+      "title": { "en": "Sokoban", "pl": "Sokoban" },
+      "description": { "en": "Push boxes onto the target spots.", "pl": "Przepychaj skrzynie na wyznaczone miejsca." },
+      "category": ["Puzzle"],
+      "thumbnail": "img/games/sokoban.svg",
+      "tags": ["puzzle", "logic", "classic"],
+      "source": { "type": "self", "page": "games-open/sokoban/index.html" }
     }
   ]
 }
