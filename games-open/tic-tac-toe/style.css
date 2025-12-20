@@ -1,0 +1,106 @@
+.playfield {
+  display: grid;
+  justify-items: center;
+  gap: 0.75rem;
+}
+
+.ttt-frame {
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+}
+
+.ttt-status {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: #e2e8f0;
+  text-align: center;
+  min-height: 1.5em;
+}
+
+.ttt-board {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  width: min(320px, 85vw);
+  height: min(320px, 85vw);
+}
+
+.ttt-cell {
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(135deg, #1e293b 0%, #334155 100%);
+  border: 2px solid #475569;
+  border-radius: 12px;
+  font-size: clamp(2rem, 8vw, 4rem);
+  font-weight: 700;
+  color: #e2e8f0;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ttt-cell:hover:not(.x):not(.o) {
+  background: linear-gradient(135deg, #334155 0%, #475569 100%);
+  border-color: #60a5fa;
+  transform: scale(1.02);
+}
+
+.ttt-cell:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.ttt-cell.x {
+  color: #60a5fa;
+  text-shadow: 0 0 20px rgba(96, 165, 250, 0.5);
+}
+
+.ttt-cell.o {
+  color: #f87171;
+  text-shadow: 0 0 20px rgba(248, 113, 113, 0.5);
+}
+
+.ttt-cell.winning {
+  animation: winning-pulse 0.5s ease-in-out infinite alternate;
+  background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%);
+  border-color: #4ade80;
+}
+
+@keyframes winning-pulse {
+  from {
+    box-shadow: 0 0 10px rgba(34, 197, 94, 0.5);
+    transform: scale(1);
+  }
+  to {
+    box-shadow: 0 0 30px rgba(34, 197, 94, 0.8);
+    transform: scale(1.05);
+  }
+}
+
+.notice {
+  text-align: center;
+}
+
+@media (max-width: 520px) {
+  .scoreboard {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .ttt-frame {
+    padding: 1rem;
+  }
+
+  .ttt-board {
+    gap: 6px;
+  }
+
+  .ttt-cell {
+    border-radius: 8px;
+  }
+}
