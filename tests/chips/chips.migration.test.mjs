@@ -26,12 +26,24 @@ const assertTestDatabase = async (sql) => {
   }
 };
 const systemBalances = async (sql, key) => {
-  const rows = await sql`select balance from public.chips_accounts where system_key = ${key} limit 1;`;
+  const rows = await sql`
+    select balance
+    from public.chips_accounts
+    where account_type = 'SYSTEM'
+      and system_key = ${key}
+    limit 1;
+  `;
   return Number(rows?.[0]?.balance ?? 0);
 };
 
 const accountNextSeq = async (sql, key) => {
-  const rows = await sql`select next_entry_seq from public.chips_accounts where system_key = ${key} limit 1;`;
+  const rows = await sql`
+    select next_entry_seq
+    from public.chips_accounts
+    where account_type = 'SYSTEM'
+      and system_key = ${key}
+    limit 1;
+  `;
   return Number(rows?.[0]?.next_entry_seq ?? 0);
 };
 
@@ -52,15 +64,16 @@ const seedEntryCount = async (sql) => {
 
 const expectNegativeBalanceGuard = async (sql) => {
   const genesisBefore = await systemBalances(sql, "GENESIS");
+  const ROLLBACK = new Error("rollback");
   await sql
     .begin(async (tx) => {
       await tx`update public.chips_accounts set balance = -1 where system_key = 'GENESIS' and account_type = 'SYSTEM';`;
       const genesisAfter = await systemBalances(tx, "GENESIS");
       assert.equal(genesisAfter, -1, "GENESIS should be allowed to go negative");
-      throw new Error("rollback");
+      throw ROLLBACK;
     })
     .catch((error) => {
-      if (error?.message !== "rollback") {
+      if (error !== ROLLBACK) {
         throw error;
       }
     });
