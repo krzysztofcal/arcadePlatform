@@ -1,27 +1,28 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="pl">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#0b1020">
-  <title>Arcade Hub — Free Mobile‑Friendly HTML5 Games</title>
-  <meta name="description" content="Play free, mobile‑friendly HTML5 arcade games. Quick to start, no installs.">
-  <link rel="canonical" href="https://play.kcswh.pl/">
+  <title>Favorites — Arcade Hub</title>
+  <meta name="description" content="View your favorite games on Arcade Hub.">
+  <link rel="canonical" href="https://play.kcswh.pl/favorites.html">
   <!-- OpenGraph / Twitter -->
   <meta property="og:type" content="website">
-  <meta property="og:url" content="https://play.kcswh.pl/">
-  <meta property="og:title" content="Arcade Hub — Free Mobile‑Friendly HTML5 Games">
-  <meta property="og:description" content="Play free, mobile‑friendly HTML5 arcade games. Quick to start, no installs.">
+  <meta property="og:url" content="https://play.kcswh.pl/favorites.html">
+  <meta property="og:title" content="Favorites — Arcade Hub">
+  <meta property="og:description" content="View your favorite games on Arcade Hub.">
   <meta property="og:image" content="https://play.kcswh.pl/img/og/portal-1200x630.svg">
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="Arcade Hub — Free Mobile‑Friendly HTML5 Games">
-  <meta name="twitter:description" content="Play free, mobile‑friendly HTML5 arcade games. Quick to start, no installs.">
+  <meta name="twitter:title" content="Favorites — Arcade Hub">
+  <meta name="twitter:description" content="View your favorite games on Arcade Hub.">
   <meta name="twitter:image" content="https://play.kcswh.pl/img/og/portal-1200x630.svg">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;800&display=swap">
   <link rel="stylesheet" href="css/portal.css">
   <link rel="stylesheet" href="/css/xp-overlay.css">
+  <link rel="stylesheet" href="/css/search-popup.css">
   <!-- Explicit favicon to avoid /favicon.ico 404 and use inline SVG -->
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%236ee7e7'/%3E%3Cstop offset='1' stop-color='%23a78bfa'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='64' height='64' rx='14' ry='14' fill='%23111533'/%3E%3Ccircle cx='24' cy='24' r='16' fill='url(%23g)'/%3E%3Ccircle cx='40' cy='40' r='16' fill='url(%23g)' opacity='0.7'/%3E%3C/svg%3E" />
   <script id="Cookiebot"
@@ -44,6 +45,76 @@
   <script src="/js/auth/supabase-config.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js" defer></script>
   <script src="/js/auth/supabaseClient.js" defer></script>
+  <style>
+    .page-header {
+      padding: 2rem 1rem 1rem;
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+    .page-header h1 {
+      font-size: 2rem;
+      font-weight: 800;
+      color: #fff;
+      margin: 0 0 0.5rem;
+    }
+    .page-header p {
+      color: #9fb0d0;
+      font-size: 1rem;
+      margin: 0;
+    }
+    .empty-state {
+      text-align: center;
+      padding: 4rem 1rem;
+      color: #9fb0d0;
+    }
+    .empty-state h2 {
+      font-size: 1.5rem;
+      color: #6ee7e7;
+      margin-bottom: 1rem;
+    }
+    .empty-state p {
+      margin-bottom: 1.5rem;
+    }
+    .empty-state a {
+      display: inline-block;
+      padding: 0.75rem 1.5rem;
+      background: linear-gradient(135deg, #6ee7e7 0%, #a78bfa 100%);
+      color: #0b1020;
+      text-decoration: none;
+      border-radius: 8px;
+      font-weight: 600;
+      transition: transform 0.2s;
+    }
+    .empty-state a:hover {
+      transform: translateY(-2px);
+    }
+    .login-prompt {
+      text-align: center;
+      padding: 4rem 1rem;
+      color: #9fb0d0;
+    }
+    .login-prompt h2 {
+      font-size: 1.5rem;
+      color: #fbbf24;
+      margin-bottom: 1rem;
+    }
+    .login-prompt p {
+      margin-bottom: 1.5rem;
+    }
+    .login-prompt a {
+      display: inline-block;
+      padding: 0.75rem 1.5rem;
+      background: linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%);
+      color: #0b1020;
+      text-decoration: none;
+      border-radius: 8px;
+      font-weight: 600;
+      transition: transform 0.2s;
+    }
+    .login-prompt a:hover {
+      transform: translateY(-2px);
+    }
+  </style>
 </head>
 <body>
   <div class="topbar">
@@ -103,26 +174,37 @@
             </a>
           </li>
           <li class="sb-item">
-            <a href="favorites.html" class="sb-link" aria-label="Favorites" tabindex="0">
+            <a href="favorites.html" class="sb-link is-active" aria-label="Favorites" tabindex="0">
               <span class="sb-ico" aria-hidden="true">
                 <svg class="sb-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
               </span>
               <span class="sb-label" data-i18n="favorites">Favorites</span>
             </a>
           </li>
+          <li class="sb-item">
+            <a href="about.en.html" class="sb-link" tabindex="0" data-href-en="about.en.html" data-href-pl="about.pl.html">
+              <span class="sb-ico" aria-hidden="true"></span>
+              <span class="sb-label" data-i18n="about">About</span>
+            </a>
+          </li>
         </ul>
       </nav>
     </aside>
     <main>
-      <nav class="category-bar" id="categoryBar" aria-label="Game categories"></nav>
+      <div class="page-header">
+        <h1 data-i18n="favoritesTitle">Favorites</h1>
+        <p data-i18n="favoritesDesc">Your favorite games in one place</p>
+      </div>
       <section class="grid" id="gamesGrid"></section>
-      <section class="ad-slot" aria-label="Advertisement">
-        <ins class="adsbygoogle"
-             style="display:block"
-             data-ad-client="ca-pub-4054734235779751"
-             data-ad-slot="6777117794"
-             data-ad-format="auto"
-             data-full-width-responsive="true"></ins>
+      <section class="empty-state" id="emptyState" hidden>
+        <h2 data-i18n="noFavorites">No favorites yet</h2>
+        <p data-i18n="noFavoritesDesc">Add games to your favorites by clicking the star icon while playing!</p>
+        <a href="index.html" data-i18n="browseGames">Browse Games</a>
+      </section>
+      <section class="login-prompt" id="loginPrompt" hidden>
+        <h2 data-i18n="signInForFavorites">Sign in to use Favorites</h2>
+        <p data-i18n="signInForFavoritesDesc">Create an account to save your favorite games across all your devices.</p>
+        <a href="account.html" data-i18n="signIn">Sign In</a>
       </section>
     </main>
   </div>
@@ -139,14 +221,15 @@
       <span class="sep">•</span>
       <a class="ft-link" data-i18n="contact" href="mailto:contact@kcswh.pl">Contact</a>
       <span class="sep">•</span>
-<a class="ft-link manage-cookies" data-i18n="manageCookies"
-   id="manageCookies" href="#" data-cookieconsent="ignore">Manage cookies</a>
+      <a class="ft-link manage-cookies" data-i18n="manageCookies"
+         id="manageCookies" href="#" data-cookieconsent="ignore">Manage cookies</a>
     </nav>
     <div class="lang-switch" aria-label="Language">
       <button type="button" class="lang-btn" data-lang="pl" aria-pressed="false">PL</button>
       <button type="button" class="lang-btn" data-lang="en" aria-pressed="false">EN</button>
     </div>
   </footer>
+
   <script src="js/topbar.js" defer></script>
   <script src="js/xpClient.js" defer></script>
   <script src="/js/ui/xp-overlay.js" defer></script>
@@ -163,48 +246,11 @@
   <script src="js/core/FavoritesService.js" defer></script>
   <script src="js/core/StorageService.js" defer></script>
   <script src="js/recently-played-tracker.js" defer></script>
-  <script src="js/portal.js" defer></script>
+  <script src="js/favorites-page.js" defer></script>
   <script src="js/sidebar.js" defer></script>
+  <script src="js/search-popup.js" defer></script>
+  <script src="js/search-popup-bootstrap.js" defer></script>
   <script src="js/cookiebot-manager.js" defer></script>
-  <script>
-    (function(){
-      try {
-        var params = new URLSearchParams(location.search);
-        var dev = params.get('dev') === '1' || localStorage.getItem('devMode') === '1';
-        if (!dev) return;
-        var link = document.createElement('a');
-        link.href = 'https://github.com/krzysztofcal/arcadePlatform/actions/workflows/tests.yml';
-        link.target = '_blank';
-        link.rel = 'noopener';
-        link.style.position = 'fixed';
-        link.style.right = '10px';
-        link.style.bottom = '10px';
-        link.style.background = 'rgba(17,23,53,.85)';
-        link.style.border = '1px solid #202a55';
-        link.style.borderRadius = '8px';
-        link.style.padding = '4px 6px';
-        link.style.display = 'inline-flex';
-        link.style.alignItems = 'center';
-        link.style.gap = '6px';
-        link.style.zIndex = '9999';
-
-        var img = document.createElement('img');
-        img.src = 'https://github.com/krzysztofcal/arcadePlatform/actions/workflows/tests.yml/badge.svg?branch=main';
-        img.alt = 'CI Tests Status';
-        img.style.height = '18px';
-        img.style.filter = 'drop-shadow(0 0 2px rgba(0,0,0,.4))';
-
-        var text = document.createElement('span');
-        text.textContent = 'Tests';
-        text.style.color = '#9fb0d0';
-        text.style.font = '12px Poppins, system-ui, sans-serif';
-
-        link.appendChild(img);
-        link.appendChild(text);
-        document.body.appendChild(link);
-      } catch(e) {}
-    })();
-  </script>
   <script>
   (function () {
     function openConsent() {
@@ -236,8 +282,3 @@
   </script>
 </body>
 </html>
-
-
-
-
-
