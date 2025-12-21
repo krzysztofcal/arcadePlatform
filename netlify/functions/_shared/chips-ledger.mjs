@@ -268,46 +268,36 @@ locked_accounts as (
   for update
 ),
 guard as (
-  select not exists (
-    select 1
-    from locked_accounts a
-    join deltas d on d.account_id = a.id
-    where (a.balance + d.delta) < 0
-      and not (a.account_type = 'SYSTEM' and a.system_key = 'GENESIS')
-  ) as ok
-),
-raise_if as (
-  select case when not (select ok from guard) then public.raise_insufficient_funds() end as ok
+  select case
+    when exists (
+      select 1
+      from locked_accounts a
+      join deltas d on d.account_id = a.id
+      where (a.balance + d.delta) < 0
+        and not (a.account_type = 'SYSTEM' and a.system_key = 'GENESIS')
+    ) then public.raise_insufficient_funds()
+  end as ok
 ),
 apply_balance as (
   update public.chips_accounts a
   set balance = a.balance + d.delta
-  from deltas d
+  from deltas d, guard g
   where a.id = d.account_id
-    and (select ok from guard)
   returning a.id
 ),
 expected as (
   select count(*) as expected_accounts from deltas
 )
 select
-  (select ok from guard) as guard_ok,
-  (select ok from raise_if) as guard_check,
+  (select ok from guard) as guard_check,
   (select count(*) from apply_balance) as updated_accounts,
   (select expected_accounts from expected) as expected_accounts;
         `,
         [entriesPayload]
       );
 
-      const guardOk = !!applyResult?.[0]?.guard_ok;
       const updatedAccounts = Number(applyResult?.[0]?.updated_accounts || 0);
       const expectedAccounts = Number(applyResult?.[0]?.expected_accounts || 0);
-      if (!guardOk) {
-        const insufficient = new Error("insufficient_funds");
-        insufficient.code = "P0001";
-        insufficient.status = 400;
-        throw insufficient;
-      }
       if (expectedAccounts !== updatedAccounts) {
         const mismatch = new Error("Failed to apply expected account balances");
         mismatch.code = "chips_apply_mismatch";
