@@ -199,6 +199,56 @@
       "thumbnail": "img/games/sokoban.svg",
       "tags": ["puzzle", "logic", "classic"],
       "source": { "type": "self", "page": "games-open/sokoban/index.html" }
+    },
+    {
+      "id": "open-brick-breaker",
+      "slug": "brick-breaker",
+      "title": { "en": "Brick Breaker", "pl": "Brick Breaker" },
+      "description": { "en": "Break all the bricks with the ball!", "pl": "Zbij wszystkie klocki piłką!" },
+      "category": ["Arcade"],
+      "thumbnail": "img/games/brick-breaker.svg",
+      "tags": ["arcade", "classic", "retro"],
+      "source": { "type": "self", "page": "games-open/brick-breaker/index.html" }
+    },
+    {
+      "id": "open-tic-tac-toe",
+      "slug": "tic-tac-toe",
+      "title": { "en": "Tic-Tac-Toe", "pl": "Kółko i Krzyżyk" },
+      "description": { "en": "Beat the AI in this classic strategy game!", "pl": "Pokonaj AI w tej klasycznej grze strategicznej!" },
+      "category": ["Puzzle", "Strategy"],
+      "thumbnail": "img/games/tic-tac-toe.svg",
+      "tags": ["strategy", "classic", "puzzle"],
+      "source": { "type": "self", "page": "games-open/tic-tac-toe/index.html" }
+    },
+    {
+      "id": "open-hangman",
+      "slug": "hangman",
+      "title": { "en": "Hangman", "pl": "Wisielec" },
+      "description": { "en": "Guess the word before you run out of tries!", "pl": "Odgadnij słowo zanim skończą ci się próby!" },
+      "category": ["Puzzle"],
+      "thumbnail": "img/games/hangman.svg",
+      "tags": ["word", "classic", "puzzle"],
+      "source": { "type": "self", "page": "games-open/hangman/index.html" }
+    },
+    {
+      "id": "open-solitaire",
+      "slug": "solitaire",
+      "title": { "en": "Solitaire", "pl": "Pasjans" },
+      "description": { "en": "Classic Klondike card game.", "pl": "Klasyczny pasjans Klondike." },
+      "category": ["Card"],
+      "thumbnail": "img/games/solitaire.svg",
+      "tags": ["card", "classic", "casual"],
+      "source": { "type": "self", "page": "games-open/solitaire/index.html" }
+    },
+    {
+      "id": "open-sudoku",
+      "slug": "sudoku",
+      "title": { "en": "Sudoku", "pl": "Sudoku" },
+      "description": { "en": "Fill the grid with numbers 1-9.", "pl": "Wypełnij siatkę liczbami od 1 do 9." },
+      "category": ["Puzzle"],
+      "thumbnail": "img/games/sudoku.svg",
+      "tags": ["puzzle", "logic", "classic"],
+      "source": { "type": "self", "page": "games-open/sudoku/index.html" }
     }
   ]
 }
