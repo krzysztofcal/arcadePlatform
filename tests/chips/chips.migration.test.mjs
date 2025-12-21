@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import postgres from "postgres";
@@ -216,6 +217,7 @@ async function expectIdempotentReplaySamePayload(sql) {
   const key = `idem-same-${Date.now()}`;
   const amount = 15;
   const beforeTreasury = await systemBalances(sql, "TREASURY");
+  const beforeSeq = await accountNextSeq(sql, "TREASURY");
   const first = await postTransaction({
     userId: idempotentUserId,
     txType: "BUY_IN",
@@ -226,6 +228,15 @@ async function expectIdempotentReplaySamePayload(sql) {
     ],
     createdBy: null,
   });
+
+  const afterFirstSeq = await accountNextSeq(sql, "TREASURY");
+  assert.equal(afterFirstSeq, beforeSeq + 1, "First idempotent call should advance TREASURY sequence once");
+  const firstEntries = await sql`
+    select account_id, amount, entry_seq
+    from public.chips_entries
+    where transaction_id = ${first.transaction.id}
+    order by entry_seq;
+  `;
 
   const second = await postTransaction({
     userId: idempotentUserId,
@@ -238,6 +249,15 @@ async function expectIdempotentReplaySamePayload(sql) {
     createdBy: null,
   });
 
+  const afterSecondSeq = await accountNextSeq(sql, "TREASURY");
+  assert.equal(afterSecondSeq, afterFirstSeq, "Idempotent replay must not advance TREASURY sequence");
+  const secondEntries = await sql`
+    select account_id, amount, entry_seq
+    from public.chips_entries
+    where transaction_id = ${second.transaction.id}
+    order by entry_seq;
+  `;
+
   assert.equal(first?.transaction?.id, second?.transaction?.id, "Idempotent replay should return same transaction");
   const afterTreasury = await systemBalances(sql, "TREASURY");
   assert.equal(afterTreasury, beforeTreasury - amount, "Treasury should only be charged once for idempotent replay");
@@ -248,7 +268,18 @@ async function expectIdempotentReplaySamePayload(sql) {
   `;
   assert.equal(Number(entryCountRows?.[0]?.count || 0), 2, "Idempotent replay must keep single set of entries");
 
-  return { amountSpent: amount, treasurySeqDelta: 1 };
+  const pluck = (row) => ({
+    account_id: row.account_id,
+    amount: Number(row.amount || 0),
+    entry_seq: Number(row.entry_seq || 0),
+  });
+  assert.deepEqual(
+    secondEntries.map(pluck),
+    firstEntries.map(pluck),
+    "Replay response must match original entries"
+  );
+
+  return { amountSpent: amount, treasurySeqDelta: afterFirstSeq - beforeSeq };
 }
 
 async function expectIdempotentReplayDifferentPayload(sql) {
@@ -256,6 +287,7 @@ async function expectIdempotentReplayDifferentPayload(sql) {
   const key = `idem-conflict-${Date.now()}`;
   const amount = 5;
   const beforeTreasury = await systemBalances(sql, "TREASURY");
+  const beforeSeq = await accountNextSeq(sql, "TREASURY");
 
   const first = await postTransaction({
     userId: conflictUserId,
@@ -267,6 +299,15 @@ async function expectIdempotentReplayDifferentPayload(sql) {
     ],
     createdBy: null,
   });
+
+  const afterFirstSeq = await accountNextSeq(sql, "TREASURY");
+  assert.equal(afterFirstSeq, beforeSeq + 1, "First conflict call should advance TREASURY sequence once");
+  const firstEntries = await sql`
+    select account_id, amount, entry_seq
+    from public.chips_entries
+    where transaction_id = ${first.transaction.id}
+    order by entry_seq;
+  `;
 
   let caught = null;
   try {
@@ -288,6 +329,8 @@ async function expectIdempotentReplayDifferentPayload(sql) {
   assert.equal(caught?.status, 409, "Idempotency conflict should surface with 409");
   const afterTreasury = await systemBalances(sql, "TREASURY");
   assert.equal(afterTreasury, beforeTreasury - amount, "Conflict replay should not re-apply balances");
+  const afterSecondSeq = await accountNextSeq(sql, "TREASURY");
+  assert.equal(afterSecondSeq, afterFirstSeq, "Conflict replay must not advance TREASURY sequence");
   const entryCountRows = await sql`
     select count(*) as count
     from public.chips_entries
@@ -295,7 +338,24 @@ async function expectIdempotentReplayDifferentPayload(sql) {
   `;
   assert.equal(Number(entryCountRows?.[0]?.count || 0), 2, "Conflict replay must retain original entries only");
 
-  return { amountSpent: amount, treasurySeqDelta: 1 };
+  const entryRows = await sql`
+    select account_id, amount, entry_seq
+    from public.chips_entries
+    where transaction_id = ${first.transaction.id}
+    order by entry_seq;
+  `;
+  const pluck = (row) => ({
+    account_id: row.account_id,
+    amount: Number(row.amount || 0),
+    entry_seq: Number(row.entry_seq || 0),
+  });
+  assert.deepEqual(
+    entryRows.map(pluck),
+    firstEntries.map(pluck),
+    "Conflict replay must keep original entry ordering"
+  );
+
+  return { amountSpent: amount, treasurySeqDelta: afterFirstSeq - beforeSeq };
 }
 
 async function expectSuccessfulBuyIn(sql) {
@@ -388,6 +448,9 @@ async function expectAtomicSequenceAllocation(sql, startingSeq) {
     assert.equal(beforeSeq, startingSeq, "TREASURY next_entry_seq should match expected starting value");
   }
 
+  const seqKey = `sequence-${Date.now()}`;
+  const seqHash = crypto.createHash("sha256").update(seqKey).digest("hex");
+
   const txIdRows = await sql`
     insert into public.chips_transactions (
       reference,
@@ -401,8 +464,8 @@ async function expectAtomicSequenceAllocation(sql, startingSeq) {
       'sequence-check',
       'ensure atomic entry sequencing',
       '{}'::jsonb,
-      ${`sequence-${Date.now()}`},
-      ${`sequence-${Date.now()}`},
+      ${seqKey},
+      ${seqHash},
       'MINT',
       null
     )
