@@ -150,6 +150,64 @@ async function expectInsufficientBuyIn(sql) {
   }
 }
 
+async function expectInvalidMetadata(sql) {
+  const { postTransaction } = await withLedger();
+  const key = `badmeta-${Date.now()}`;
+  const before = await systemBalances(sql, "TREASURY");
+  const circular = {};
+  circular.self = circular;
+  let caught = null;
+  try {
+    await postTransaction({
+      userId: "00000000-0000-0000-0000-000000000001",
+      txType: "BUY_IN",
+      idempotencyKey: key,
+      metadata: circular,
+      entries: [
+        { accountType: "USER", amount: 1 },
+        { accountType: "SYSTEM", systemKey: "TREASURY", amount: -1 },
+      ],
+      createdBy: null,
+    });
+  } catch (error) {
+    caught = error;
+  }
+
+  assert.ok(caught, "Circular metadata must reject the transaction");
+  assert.equal(caught?.status, 400, "Invalid metadata should surface as bad request");
+  assert.equal(caught?.code, "invalid_metadata", "Invalid metadata should map to invalid_metadata");
+  const after = await systemBalances(sql, "TREASURY");
+  assert.equal(after, before, "Balances must remain unchanged when metadata is invalid");
+}
+
+async function expectInvalidEntryMetadata(sql) {
+  const { postTransaction } = await withLedger();
+  const key = `bad-entry-meta-${Date.now()}`;
+  const before = await systemBalances(sql, "TREASURY");
+  let caught = null;
+  try {
+    await postTransaction({
+      userId: "00000000-0000-0000-0000-000000000001",
+      txType: "BUY_IN",
+      idempotencyKey: key,
+      metadata: {},
+      entries: [
+        { accountType: "USER", amount: 1, metadata: { a: 1n } },
+        { accountType: "SYSTEM", systemKey: "TREASURY", amount: -1 },
+      ],
+      createdBy: null,
+    });
+  } catch (error) {
+    caught = error;
+  }
+
+  assert.ok(caught, "Non-serializable entry metadata must reject the transaction");
+  assert.equal(caught?.status, 400, "Invalid entry metadata should surface as bad request");
+  assert.equal(caught?.code, "invalid_entry_metadata", "Entry metadata should map to invalid_entry_metadata");
+  const after = await systemBalances(sql, "TREASURY");
+  assert.equal(after, before, "Balances must remain unchanged when entry metadata is invalid");
+}
+
 async function expectSuccessfulBuyIn(sql) {
   const { postTransaction, getUserBalance } = await withLedger();
   const key = `buyin-ok-${Date.now()}`;
@@ -299,6 +357,8 @@ async function main() {
   await runMigrations(sql, migrationsWithoutSeed);
   await expectNegativeBalanceGuard(sql);
   await expectInsufficientBuyIn(sql);
+  await expectInvalidMetadata(sql);
+  await expectInvalidEntryMetadata(sql);
 
   await runMigration(sql, seedMigration);
   const afterSeed = await systemBalances(sql, "TREASURY");

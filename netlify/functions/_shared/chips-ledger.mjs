@@ -195,8 +195,31 @@ async function postTransaction({
 
   const normalizedEntries = validateEntries(entries);
   const safeMetadata = metadata && typeof metadata === "object" ? metadata : {};
-  const safeMetadataJson = JSON.stringify(safeMetadata);
-  const payloadHash = hashPayload({ userId, txType, idempotencyKey, entries: normalizedEntries, reference, description, metadata: safeMetadata });
+  let safeMetadataJson = "{}";
+  let safeMetadataNormalized = {};
+  try {
+    safeMetadataJson = JSON.stringify(safeMetadata);
+    safeMetadataNormalized = JSON.parse(safeMetadataJson);
+  } catch (error) {
+    throw badRequest("invalid_metadata", "Metadata must be JSON-serializable");
+  }
+
+  let sanitizedEntriesNormalized = [];
+  try {
+    sanitizedEntriesNormalized = JSON.parse(JSON.stringify(normalizedEntries));
+  } catch (error) {
+    throw badRequest("invalid_entry_metadata", "Entry metadata must be JSON-serializable");
+  }
+
+  const payloadHash = hashPayload({
+    userId,
+    txType,
+    idempotencyKey,
+    entries: sanitizedEntriesNormalized,
+    reference,
+    description,
+    metadata: safeMetadataNormalized,
+  });
 
   const userAccount = await getOrCreateUserAccount(userId);
   const neededSystemKeys = normalizedEntries
@@ -205,16 +228,6 @@ async function postTransaction({
   const uniqueSystemKeys = [...new Set(neededSystemKeys)];
   const systemAccounts = await fetchSystemAccounts(uniqueSystemKeys);
   const systemMap = new Map(systemAccounts.map(acc => [acc.system_key, acc]));
-
-  for (const key of uniqueSystemKeys) {
-    const account = systemMap.get(key);
-    if (!account) {
-      throw badRequest("system_account_missing", `System account ${key} not found`);
-    }
-    if (account.status !== "active") {
-      throw badRequest("system_account_inactive", `System account ${key} is not active`);
-    }
-  }
 
   const entryRecords = normalizedEntries.map(entry => {
     if (entry.kind === "USER") {
@@ -232,7 +245,23 @@ async function postTransaction({
     }
   }
 
-  const entriesPayload = JSON.stringify(entryRecords);
+  let entriesPayload = "[]";
+  try {
+    entriesPayload = JSON.stringify(entryRecords);
+  } catch (error) {
+    throw badRequest("invalid_entry_metadata", "Entry metadata must be JSON-serializable");
+  }
+
+  for (const key of uniqueSystemKeys) {
+    const account = systemMap.get(key);
+    if (!account) {
+      throw badRequest("system_account_missing", `System account ${key} not found`);
+    }
+    if (account.status !== "active") {
+      throw badRequest("system_account_inactive", `System account ${key} is not active`);
+    }
+  }
+
   let result;
   try {
     result = await beginSql(async tx => {
@@ -268,15 +297,17 @@ locked_accounts as (
   for update
 ),
 guard as (
-  select case
-    when exists (
-      select 1
-      from locked_accounts a
-      join deltas d on d.account_id = a.id
-      where (a.balance + d.delta) < 0
-        and not (a.account_type = 'SYSTEM' and a.system_key = 'GENESIS')
-    ) then public.raise_insufficient_funds()
-    else true
+  select not exists (
+    select 1
+    from locked_accounts a
+    join deltas d on d.account_id = a.id
+    where (a.balance + d.delta) < 0
+      and not (a.account_type = 'SYSTEM' and a.system_key = 'GENESIS')
+  ) as ok
+),
+raise_if as (
+  select case when not (select ok from guard)
+    then public.raise_insufficient_funds()
   end as ok
 ),
 apply_balance as (
@@ -292,7 +323,9 @@ expected as (
 )
 select
   (select count(*) from apply_balance) as updated_accounts,
-  (select expected_accounts from expected) as expected_accounts;
+  (select expected_accounts from expected) as expected_accounts,
+  (select ok from guard) as guard_ok,
+  (select ok from raise_if) as guard_check;
         `,
         [entriesPayload]
       );
@@ -300,6 +333,12 @@ select
       const updatedAccounts = Number(applyResult?.[0]?.updated_accounts || 0);
       const expectedAccounts = Number(applyResult?.[0]?.expected_accounts || 0);
       if (expectedAccounts !== updatedAccounts) {
+        klog("chips_apply_mismatch", {
+          expectedAccounts,
+          updatedAccounts,
+          idempotencyKey,
+          txType,
+        });
         const mismatch = new Error("Failed to apply expected account balances");
         mismatch.code = "chips_apply_mismatch";
         throw mismatch;
