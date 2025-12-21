@@ -24,10 +24,8 @@ declare
   tx_id uuid;
   genesis_id uuid;
   genesis_status text;
-  genesis_balance bigint;
   treasury_id uuid;
   treasury_status text;
-  treasury_balance bigint;
   entries_count int := 0;
   now_ts timestamptz := timezone('utc', now());
 begin
@@ -56,12 +54,14 @@ begin
     return;
   end if;
 
-  select id, status, balance into genesis_id, genesis_status, genesis_balance
+  select id, status
+  into genesis_id, genesis_status
   from public.chips_accounts
   where account_type = 'SYSTEM' and system_key = 'GENESIS'
   for update;
 
-  select id, status, balance into treasury_id, treasury_status, treasury_balance
+  select id, status
+  into treasury_id, treasury_status
   from public.chips_accounts
   where account_type = 'SYSTEM' and system_key = 'TREASURY'
   for update;
@@ -74,25 +74,34 @@ begin
     raise exception 'system_account_inactive' using errcode = 'P0001';
   end if;
 
-  if treasury_balance + seed_amount < 0 then
-    raise exception 'insufficient_funds' using errcode = 'P0001';
+  if seed_amount is null or seed_amount <= 0 then
+    raise exception 'invalid_amount' using errcode = 'P0001';
   end if;
 
-  update public.chips_accounts
-  set balance = balance - seed_amount,
-      updated_at = now_ts
-  where id = genesis_id;
-
-  update public.chips_accounts
-  set balance = balance + seed_amount,
-      updated_at = now_ts
-  where id = treasury_id;
-
-  with inserted_entries as (
+  with raw_entries as (
+    select tx_id as transaction_id, genesis_id as account_id, (-seed_amount)::bigint as amount,
+           jsonb_build_object('source', 'TREASURY_SEED') as metadata
+    union all
+    select tx_id, treasury_id, (seed_amount)::bigint, jsonb_build_object('source', 'TREASURY_SEED')
+  ),
+  deltas as (
+    select account_id, sum(amount)::bigint as delta
+    from raw_entries
+    group by account_id
+  ),
+  apply_balance as (
+    update public.chips_accounts a
+    set balance = a.balance + d.delta,
+        updated_at = now_ts
+    from deltas d
+    where a.id = d.account_id
+    returning a.id
+  ),
+  inserted_entries as (
     insert into public.chips_entries (transaction_id, account_id, amount, metadata)
-    values
-      (tx_id, genesis_id, -seed_amount, jsonb_build_object('source', 'TREASURY_SEED')),
-      (tx_id, treasury_id, seed_amount, jsonb_build_object('source', 'TREASURY_SEED'))
+    select r.transaction_id, r.account_id, r.amount, r.metadata
+    from raw_entries r
+    join apply_balance ab on ab.id = r.account_id
     returning 1
   )
   select count(*) into entries_count from inserted_entries;
