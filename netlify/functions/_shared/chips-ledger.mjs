@@ -299,7 +299,7 @@ select
         [entriesPayload]
       );
 
-      const guardOk = applyResult?.[0]?.guard_ok === true;
+      const guardOk = !!applyResult?.[0]?.guard_ok;
       const updatedAccounts = Number(applyResult?.[0]?.updated_accounts || 0);
       const expectedAccounts = Number(applyResult?.[0]?.expected_accounts || 0);
       if (!guardOk) {

@@ -216,7 +216,80 @@ async function assertBuyInSequencing(sql) {
 
   const userBalance = await getUserBalance(userId);
   assert.equal(userBalance.nextEntrySeq, 2, "User next_entry_seq should advance after first entry");
-  assert.equal(await accountNextSeq(sql, "TREASURY"), 3, "TREASURY next_entry_seq should advance again after buy-in");
+  const treasurySeq = await accountNextSeq(sql, "TREASURY");
+  assert.equal(treasurySeq, 3, "TREASURY next_entry_seq should advance again after buy-in");
+  return { treasurySeq };
+}
+
+async function expectAtomicSequenceAllocation(sql, startingSeq) {
+  const treasuryRows = await sql`
+    select id, next_entry_seq
+    from public.chips_accounts
+    where account_type = 'SYSTEM'
+      and system_key = 'TREASURY'
+    limit 1;
+  `;
+  const treasuryId = treasuryRows?.[0]?.id;
+  const beforeSeq = Number(treasuryRows?.[0]?.next_entry_seq || 0);
+  assert.ok(treasuryId, "TREASURY account must exist before sequence allocation test");
+  if (typeof startingSeq === "number") {
+    assert.equal(beforeSeq, startingSeq, "TREASURY next_entry_seq should match expected starting value");
+  }
+
+  const txIdRows = await sql`
+    insert into public.chips_transactions (
+      reference,
+      description,
+      metadata,
+      idempotency_key,
+      payload_hash,
+      tx_type,
+      created_by
+    ) values (
+      'sequence-check',
+      'ensure atomic entry sequencing',
+      '{}'::jsonb,
+      ${`sequence-${Date.now()}`},
+      ${`sequence-${Date.now()}`},
+      'MINT',
+      null
+    )
+    returning id;
+  `;
+  const txId = txIdRows?.[0]?.id;
+  assert.ok(txId, "Sequence test requires a transaction id");
+
+  let caught = null;
+  try {
+    await sql.begin(async (tx) => {
+      await tx`
+        insert into public.chips_entries (transaction_id, account_id, amount, metadata)
+        select ${txId}, ${treasuryId}, v.amount, '{}'::jsonb
+        from (values (1::bigint), (-1::bigint)) as v(amount);
+      `;
+    });
+  } catch (error) {
+    caught = error;
+  }
+
+  assert.ok(!caught, `Sequence allocation should not throw (got ${caught?.code || caught?.message || "unknown"})`);
+
+  const entries = await sql`
+    select entry_seq
+    from public.chips_entries
+    where transaction_id = ${txId}
+    order by entry_seq;
+  `;
+  const entrySeqs = entries.map((row) => Number(row.entry_seq || 0));
+  assert.deepEqual(
+    entrySeqs,
+    [beforeSeq, beforeSeq + 1],
+    "Multi-row insert must assign distinct, contiguous entry_seq values"
+  );
+
+  const afterSeq = await accountNextSeq(sql, "TREASURY");
+  assert.equal(afterSeq, beforeSeq + 2, "TREASURY next_entry_seq should advance for each inserted entry");
+  return afterSeq;
 }
 
 async function main() {
@@ -235,13 +308,14 @@ async function main() {
   await assertSeedSequencing(sql);
 
   await expectSuccessfulBuyIn(sql);
-  await assertBuyInSequencing(sql);
+  const { treasurySeq } = await assertBuyInSequencing(sql);
+  const postSequenceTest = await expectAtomicSequenceAllocation(sql, treasurySeq);
 
   await runMigration(sql, seedMigration);
   assert.equal(await seedTxCount(sql), 1, "Seed transaction should stay idempotent");
   const afterRerun = await systemBalances(sql, "TREASURY");
   assert.equal(afterRerun, seedAmount - 25, "Treasury balance should not change on rerun");
-  assert.equal(await accountNextSeq(sql, "TREASURY"), 3, "TREASURY sequence should remain stable on rerun");
+  assert.equal(await accountNextSeq(sql, "TREASURY"), postSequenceTest, "TREASURY sequence should remain stable on rerun");
   assert.equal(await seedEntryCount(sql), 2, "Seed rerun must not add or drop entries");
 
   await sql.end({ timeout: 5 });
