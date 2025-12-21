@@ -40,6 +40,16 @@ const seedTxCount = async (sql) => {
   return Number(rows?.[0]?.count ?? 0);
 };
 
+const seedEntryCount = async (sql) => {
+  const rows = await sql`
+    select count(*) as count
+    from public.chips_entries e
+    join public.chips_transactions t on t.id = e.transaction_id
+    where t.idempotency_key = ${seedKey};
+  `;
+  return Number(rows?.[0]?.count ?? 0);
+};
+
 const dropAndRecreateSchema = async (sql) => {
   await assertTestDatabase(sql);
   await sql.unsafe("drop schema if exists public cascade;");
@@ -54,6 +64,11 @@ const migrationFiles = fs
 const seedMigration = migrationFiles.find((file) => file.includes("seed_treasury_genesis"));
 if (!seedMigration) {
   console.log("Seed migration not found; cannot run tests.");
+  process.exit(1);
+}
+const seedMigrationContent = fs.readFileSync(path.join(migrationsDir, seedMigration), "utf8");
+if (seedMigrationContent.includes("raise_insufficient_funds")) {
+  console.log("Seed migration depends on raise_insufficient_funds; aborting.");
   process.exit(1);
 }
 const migrationsWithoutSeed = migrationFiles.filter((file) => file !== seedMigration);
@@ -165,6 +180,7 @@ async function main() {
   const afterSeed = await systemBalances(sql, "TREASURY");
   assert.ok(afterSeed >= seedAmount, "Treasury should be funded after seed migration");
   assert.equal(await seedTxCount(sql), 1, "Seed transaction should be recorded once");
+  assert.equal(await seedEntryCount(sql), 2, "Seed transaction must insert exactly two entries");
   await assertSeedSequencing(sql);
 
   await expectSuccessfulBuyIn(sql);
@@ -175,6 +191,7 @@ async function main() {
   const afterRerun = await systemBalances(sql, "TREASURY");
   assert.equal(afterRerun, seedAmount - 25, "Treasury balance should not change on rerun");
   assert.equal(await accountNextSeq(sql, "TREASURY"), 3, "TREASURY sequence should remain stable on rerun");
+  assert.equal(await seedEntryCount(sql), 2, "Seed rerun must not add or drop entries");
 
   await sql.end({ timeout: 5 });
   const adminModule = await import("../../netlify/functions/_shared/supabase-admin.mjs");
