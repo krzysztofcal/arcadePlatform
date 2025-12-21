@@ -218,10 +218,12 @@ async function postTransaction({
 
   const entryRecords = normalizedEntries.map(entry => {
     if (entry.kind === "USER") {
-      return { account_id: userAccount.id, amount: entry.amount, metadata: entry.metadata };
+      const safeEntryMetadata = entry?.metadata && typeof entry.metadata === "object" ? entry.metadata : {};
+      return { account_id: userAccount.id, amount: entry.amount, metadata: safeEntryMetadata };
     }
     const account = systemMap.get(entry.systemKey);
-    return { account_id: account?.id, amount: entry.amount, metadata: entry.metadata, system_key: entry.systemKey };
+    const safeEntryMetadata = entry?.metadata && typeof entry.metadata === "object" ? entry.metadata : {};
+    return { account_id: account?.id, amount: entry.amount, metadata: safeEntryMetadata, system_key: entry.systemKey };
   });
 
   for (const rec of entryRecords) {
@@ -297,8 +299,15 @@ select
         [entriesPayload]
       );
 
+      const guardOk = applyResult?.[0]?.guard_ok === true;
       const updatedAccounts = Number(applyResult?.[0]?.updated_accounts || 0);
       const expectedAccounts = Number(applyResult?.[0]?.expected_accounts || 0);
+      if (!guardOk) {
+        const insufficient = new Error("insufficient_funds");
+        insufficient.code = "P0001";
+        insufficient.status = 400;
+        throw insufficient;
+      }
       if (expectedAccounts !== updatedAccounts) {
         const mismatch = new Error("Failed to apply expected account balances");
         mismatch.code = "chips_apply_mismatch";
