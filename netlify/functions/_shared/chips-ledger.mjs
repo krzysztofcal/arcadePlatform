@@ -1,23 +1,5 @@
 import crypto from "node:crypto";
-import { beginSql, klog } from "./supabase-admin.mjs";
-
-async function executeSql(query, params = []) {
-  try {
-    const rows = await beginSql(tx => tx.unsafe(query, params));
-    return rows;
-  } catch (error) {
-    klog("chips_sql_error", {
-      message: error?.message || "sql_failed",
-      code: error?.code,
-      detail: error?.detail,
-      hint: error?.hint,
-      constraint: error?.constraint,
-      schema: error?.schema,
-      table: error?.table,
-    });
-    throw error;
-  }
-}
+import { beginSql, executeSql, klog } from "./supabase-admin.mjs";
 
 const VALID_TX_TYPES = new Set([
   "MINT",
@@ -310,8 +292,7 @@ expected as (
 )
 select
   (select count(*) from apply_balance) as updated_accounts,
-  (select expected_accounts from expected) as expected_accounts
-from guard;
+  (select expected_accounts from expected) as expected_accounts;
         `,
         [entriesPayload]
       );
