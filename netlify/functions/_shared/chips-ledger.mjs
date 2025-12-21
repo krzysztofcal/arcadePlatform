@@ -1,5 +1,23 @@
 import crypto from "node:crypto";
-import { beginSql, executeSql, klog } from "./supabase-admin.mjs";
+import { beginSql, klog } from "./supabase-admin.mjs";
+
+async function executeSql(query, params = []) {
+  try {
+    const rows = await beginSql(tx => tx.unsafe(query, params));
+    return rows;
+  } catch (error) {
+    klog("chips_sql_error", {
+      message: error?.message || "sql_failed",
+      code: error?.code,
+      detail: error?.detail,
+      hint: error?.hint,
+      constraint: error?.constraint,
+      schema: error?.schema,
+      table: error?.table,
+    });
+    throw error;
+  }
+}
 
 const VALID_TX_TYPES = new Set([
   "MINT",
@@ -276,22 +294,24 @@ guard as (
       where (a.balance + d.delta) < 0
         and not (a.account_type = 'SYSTEM' and a.system_key = 'GENESIS')
     ) then public.raise_insufficient_funds()
+    else true
   end as ok
 ),
 apply_balance as (
   update public.chips_accounts a
   set balance = a.balance + d.delta
-  from deltas d, guard g
+  from deltas d
   where a.id = d.account_id
+    and (select ok from guard)
   returning a.id
 ),
 expected as (
   select count(*) as expected_accounts from deltas
 )
 select
-  (select ok from guard) as guard_check,
   (select count(*) from apply_balance) as updated_accounts,
-  (select expected_accounts from expected) as expected_accounts;
+  (select expected_accounts from expected) as expected_accounts
+from guard;
         `,
         [entriesPayload]
       );

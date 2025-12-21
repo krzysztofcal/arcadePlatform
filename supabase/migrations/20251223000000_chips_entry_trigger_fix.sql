@@ -46,9 +46,13 @@ $$;
 
 drop trigger if exists chips_entries_assign_sequence_trg on public.chips_entries;
 drop trigger if exists chips_entries_advance_next_entry_seq_trg on public.chips_entries;
+drop trigger if exists chips_entries_set_sequence_before_trg on public.chips_entries;
+drop trigger if exists chips_entries_apply_account_delta_trg on public.chips_entries;
 
 drop function if exists public.chips_entries_set_sequence_before();
+drop function if exists public.chips_entries_assign_sequence_before();
 drop function if exists public.chips_accounts_advance_next_entry_seq();
+drop function if exists public.chips_entries_apply_account_delta();
 
 create trigger chips_entries_assign_sequence_trg
 before insert on public.chips_entries
