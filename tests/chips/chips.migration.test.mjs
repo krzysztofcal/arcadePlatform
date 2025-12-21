@@ -182,6 +182,12 @@ async function expectInvalidMetadata(sql) {
   assert.equal(caught?.code, "invalid_metadata", "Invalid metadata should map to invalid_metadata");
   const after = await systemBalances(sql, "TREASURY");
   assert.equal(after, before, "Balances must remain unchanged when metadata is invalid");
+  const txRows = await sql`
+    select count(*) as count
+    from public.chips_transactions
+    where idempotency_key = ${key};
+  `;
+  assert.equal(Number(txRows?.[0]?.count || 0), 0, "Invalid metadata must not create a transaction");
 }
 
 async function expectInvalidEntryMetadata(sql) {
@@ -210,6 +216,12 @@ async function expectInvalidEntryMetadata(sql) {
   assert.equal(caught?.code, "invalid_entry_metadata", "Entry metadata should map to invalid_entry_metadata");
   const after = await systemBalances(sql, "TREASURY");
   assert.equal(after, before, "Balances must remain unchanged when entry metadata is invalid");
+  const txRows = await sql`
+    select count(*) as count
+    from public.chips_transactions
+    where idempotency_key = ${key};
+  `;
+  assert.equal(Number(txRows?.[0]?.count || 0), 0, "Invalid entry metadata must not create a transaction");
 }
 
 async function expectIdempotentReplaySamePayload(sql) {
@@ -277,6 +289,17 @@ async function expectIdempotentReplaySamePayload(sql) {
     secondEntries.map(pluck),
     firstEntries.map(pluck),
     "Replay response must match original entries"
+  );
+
+  const normalizeResp = (row) => ({
+    account_id: row.account_id,
+    amount: Number(row.amount || 0),
+    entry_seq: Number(row.entry_seq || 0),
+  });
+  assert.deepEqual(
+    (second.entries || []).map(normalizeResp),
+    (first.entries || []).map(normalizeResp),
+    "Idempotent replay must return identical snapshot entries"
   );
 
   return { amountSpent: amount, treasurySeqDelta: afterFirstSeq - beforeSeq };
@@ -353,6 +376,24 @@ async function expectIdempotentReplayDifferentPayload(sql) {
     entryRows.map(pluck),
     firstEntries.map(pluck),
     "Conflict replay must keep original entry ordering"
+  );
+
+  const replayOriginal = await postTransaction({
+    userId: conflictUserId,
+    txType: "BUY_IN",
+    idempotencyKey: key,
+    entries: [
+      { accountType: "USER", amount },
+      { accountType: "SYSTEM", systemKey: "TREASURY", amount: -amount },
+    ],
+    createdBy: null,
+  });
+  const afterReplaySeq = await accountNextSeq(sql, "TREASURY");
+  assert.equal(afterReplaySeq, afterSecondSeq, "Replay after conflict must not advance TREASURY sequence");
+  assert.equal(
+    replayOriginal?.transaction?.id,
+    first.transaction.id,
+    "Original payload should replay to the original transaction after conflict"
   );
 
   return { amountSpent: amount, treasurySeqDelta: afterFirstSeq - beforeSeq };

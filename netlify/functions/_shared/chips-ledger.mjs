@@ -25,6 +25,8 @@ function badRequest(code, message) {
 const hashPayload = (input) =>
   crypto.createHash("sha256").update(JSON.stringify(input)).digest("hex");
 
+const isPlainObject = (value) => value && typeof value === "object" && !Array.isArray(value);
+
 async function getOrCreateUserAccount(userId) {
   const query = `
 with existing as (
@@ -167,7 +169,7 @@ function validateEntries(entries) {
     if (kind === "USER") {
       hasUserEntry = true;
     }
-    const metadata = entry?.metadata && typeof entry.metadata === "object" ? entry.metadata : {};
+    const metadata = isPlainObject(entry?.metadata) ? entry.metadata : {};
     sanitized.push({ kind, systemKey, amount, metadata });
   }
   if (!hasUserEntry) {
@@ -194,7 +196,7 @@ async function postTransaction({
   }
 
   const normalizedEntries = validateEntries(entries);
-  const safeMetadata = metadata && typeof metadata === "object" ? metadata : {};
+  const safeMetadata = isPlainObject(metadata) ? metadata : {};
   let safeMetadataJson = "{}";
   let safeMetadataNormalized = {};
   try {
@@ -214,11 +216,11 @@ async function postTransaction({
 
   const entryRecords = normalizedEntries.map(entry => {
     if (entry.kind === "USER") {
-      const safeEntryMetadata = entry?.metadata && typeof entry.metadata === "object" ? entry.metadata : {};
+      const safeEntryMetadata = isPlainObject(entry?.metadata) ? entry.metadata : {};
       return { account_id: userAccount.id, amount: entry.amount, metadata: safeEntryMetadata };
     }
     const account = systemMap.get(entry.systemKey);
-    const safeEntryMetadata = entry?.metadata && typeof entry.metadata === "object" ? entry.metadata : {};
+    const safeEntryMetadata = isPlainObject(entry?.metadata) ? entry.metadata : {};
     return { account_id: account?.id, amount: entry.amount, metadata: safeEntryMetadata, system_key: entry.systemKey };
   });
 
@@ -239,7 +241,10 @@ async function postTransaction({
   try {
     entriesPayloadNormalized = JSON.parse(entriesPayload);
   } catch (error) {
-    throw new Error("entries_payload_parse_failed");
+    const parseErr = new Error("entries_payload_parse_failed");
+    parseErr.code = "entries_payload_parse_failed";
+    parseErr.status = 500;
+    throw parseErr;
   }
 
   for (const key of uniqueSystemKeys) {
@@ -265,6 +270,7 @@ async function postTransaction({
   let result;
   try {
     result = await beginSql(async tx => {
+      // IMPORTANT: inside this block use ONLY `tx` for all SQL to keep it atomic.
       const txRows = await tx`
         insert into public.chips_transactions (reference, description, metadata, idempotency_key, payload_hash, tx_type, created_by)
         values (${reference}, ${description}, ${safeMetadataJson}::jsonb, ${idempotencyKey}, ${payloadHash}, ${txType}, ${createdBy})
@@ -332,6 +338,12 @@ select
 
       const updatedAccounts = Number(applyResult?.[0]?.updated_accounts || 0);
       const expectedAccounts = Number(applyResult?.[0]?.expected_accounts || 0);
+      if (updatedAccounts === 0 && expectedAccounts > 0) {
+        const failed = new Error("Failed to apply any account balances");
+        failed.code = "chips_apply_failed";
+        failed.status = 500;
+        throw failed;
+      }
       if (expectedAccounts !== updatedAccounts) {
         klog("chips_apply_mismatch", {
           expectedAccounts,
