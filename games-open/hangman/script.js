@@ -331,7 +331,7 @@
     controls.init();
   });
 
-  // Initial setup
-  createKeyboard();
+  // Initial setup - auto-start the game
+  startGame();
   klog('init', {});
 })();

@@ -29,6 +29,9 @@
   var stockEl = document.getElementById('stock');
   var wasteEl = document.getElementById('waste');
   var overlay = document.getElementById('stateOverlay');
+  var confirmModal = document.getElementById('confirmModal');
+  var confirmYesBtn = document.getElementById('confirmYes');
+  var confirmNoBtn = document.getElementById('confirmNo');
   var playBtn = document.getElementById('play');
   var undoBtn = document.getElementById('undo');
   var movesEl = document.getElementById('moves');
@@ -501,7 +504,24 @@
 
   playBtn.addEventListener('click', function() {
     initAudio();
+    // Check if a game is in progress (moves have been made)
+    if (moves > 0) {
+      confirmModal.hidden = false;
+      klog('confirm_new_game_shown', {});
+    } else {
+      startGame();
+    }
+  });
+
+  confirmYesBtn.addEventListener('click', function() {
+    confirmModal.hidden = true;
     startGame();
+    klog('confirm_new_game_yes', {});
+  });
+
+  confirmNoBtn.addEventListener('click', function() {
+    confirmModal.hidden = true;
+    klog('confirm_new_game_no', {});
   });
 
   undoBtn.addEventListener('click', undo);
