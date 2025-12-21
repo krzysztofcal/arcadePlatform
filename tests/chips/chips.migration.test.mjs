@@ -190,7 +190,8 @@ async function assertSeedSequencing(sql) {
   const accountRows = await sql`
     select system_key, next_entry_seq
     from public.chips_accounts
-    where system_key in ('GENESIS', 'TREASURY');
+    where account_type = 'SYSTEM'
+      and system_key in ('GENESIS', 'TREASURY');
   `;
   const seqByKey = new Map(accountRows.map((row) => [row.system_key, Number(row.next_entry_seq || 0)]));
   assert.equal(seqByKey.get("GENESIS"), 2, "GENESIS next_entry_seq should advance after seed entry");
