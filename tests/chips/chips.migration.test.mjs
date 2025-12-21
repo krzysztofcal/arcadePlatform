@@ -146,22 +146,32 @@ async function expectInsufficientBuyIn(sql) {
   } catch (error) {
     const message = (error?.message || "").toLowerCase();
     assert.ok(message.includes("insufficient_funds"), "Error should report insufficient_funds");
+    assert.equal(error?.code, "P0001", "Insufficient funds should surface with P0001");
   }
 }
 
 async function expectSuccessfulBuyIn(sql) {
   const { postTransaction, getUserBalance } = await withLedger();
   const key = `buyin-ok-${Date.now()}`;
-  const result = await postTransaction({
-    userId: "00000000-0000-0000-0000-000000000001",
-    txType: "BUY_IN",
-    idempotencyKey: key,
-    entries: [
-      { accountType: "USER", amount: 25 },
-      { accountType: "SYSTEM", systemKey: "TREASURY", amount: -25 },
-    ],
-    createdBy: null,
-  });
+  let result = null;
+  let caught = null;
+  try {
+    result = await postTransaction({
+      userId: "00000000-0000-0000-0000-000000000001",
+      txType: "BUY_IN",
+      idempotencyKey: key,
+      entries: [
+        { accountType: "USER", amount: 25 },
+        { accountType: "SYSTEM", systemKey: "TREASURY", amount: -25 },
+      ],
+      createdBy: null,
+    });
+  } catch (error) {
+    caught = error;
+  }
+
+  assert.ok(!caught, `BUY_IN should succeed without errors (got ${caught?.code || caught?.message || "unknown"})`);
+  assert.notEqual(caught?.code, "27000", "Posting must not raise tuple-already-modified trigger errors");
   assert.ok(result?.transaction?.id, "BUY_IN should record a transaction");
   const balance = await getUserBalance("00000000-0000-0000-0000-000000000001");
   assert.equal(balance.balance, 25, "User balance should increase by BUY_IN amount");

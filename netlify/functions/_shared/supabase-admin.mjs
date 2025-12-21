@@ -194,4 +194,5 @@ export {
   extractBearerToken,
   klog,
   verifySupabaseJwt,
+  sql,
 };

@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { executeSql, klog } from "./supabase-admin.mjs";
+import { executeSql, klog, sql } from "./supabase-admin.mjs";
 
 const VALID_TX_TYPES = new Set([
   "MINT",
@@ -229,18 +229,33 @@ async function postTransaction({
     }
   }
 
-  const insertQuery = `
-with insert_txn as (
-  insert into public.chips_transactions (reference, description, metadata, idempotency_key, payload_hash, tx_type, created_by)
-  values ($1, $2, coalesce($3::jsonb, '{}'::jsonb), $4, $5, $6, $7)
-  returning *
-),
-input_entries as (
+  if (!sql) {
+    throw new Error("Supabase DB connection not configured (SUPABASE_DB_URL missing)");
+  }
+
+  const entriesPayload = JSON.stringify(entryRecords);
+  let result;
+  try {
+    result = await sql.begin(async tx => {
+      const txRows = await tx`
+        insert into public.chips_transactions (reference, description, metadata, idempotency_key, payload_hash, tx_type, created_by)
+        values (${reference}, ${description}, ${safeMetadata}, ${idempotencyKey}, ${payloadHash}, ${txType}, ${createdBy})
+        returning *;
+      `;
+
+      const transactionRow = txRows?.[0];
+      if (!transactionRow) {
+        throw new Error("Failed to insert transaction row");
+      }
+
+      const applyResult = await tx.unsafe(
+        `
+with input_entries as (
   select
     v.account_id,
     v.amount,
     coalesce(v.metadata, '{}'::jsonb) as metadata
-  from jsonb_to_recordset(($8::text)::jsonb) as v(account_id uuid, amount bigint, metadata jsonb)
+  from jsonb_to_recordset(($1::text)::jsonb) as v(account_id uuid, amount bigint, metadata jsonb)
 ),
 deltas as (
   select account_id, sum(amount)::bigint as delta
@@ -248,7 +263,7 @@ deltas as (
   group by account_id
 ),
 locked_accounts as (
-  select a.id, a.balance
+  select a.id, a.balance, a.account_type, a.system_key
   from public.chips_accounts a
   join deltas d on d.account_id = a.id
   for update
@@ -259,50 +274,68 @@ guard as (
     from locked_accounts a
     join deltas d on d.account_id = a.id
     where (a.balance + d.delta) < 0
-  )
-  then public.raise_insufficient_funds()
-  else null
-  end as ok
+      and not (a.account_type = 'SYSTEM' and a.system_key = 'GENESIS')
+  ) then public.raise_insufficient_funds() else null end as ok
 ),
 apply_balance as (
   update public.chips_accounts a
   set balance = a.balance + d.delta
   from deltas d
   where a.id = d.account_id
-  returning 1 as ok
+    and exists (select 1 from guard)
+  returning a.id
 ),
-entries as (
-  insert into public.chips_entries (transaction_id, account_id, amount, metadata)
-  select insert_txn.id, i.account_id, i.amount, i.metadata
-  from insert_txn
-  join guard on true
-  join input_entries i on true
-  where exists (select 1 from apply_balance)
-  returning *
-),
-account as (
-  select id, balance, next_entry_seq
-  from public.chips_accounts
-  where id = $9
+expected as (
+  select count(*) as expected_accounts from deltas
 )
 select
-  (select row_to_json(insert_txn) from insert_txn) as transaction,
-  (select coalesce(jsonb_agg(e order by e.entry_seq), '[]'::jsonb) from entries e) as entries,
-  (select row_to_json(account) from account) as account;
-`;
-  let result;
-  try {
-    result = await executeSql(insertQuery, [
-      reference,
-      description,
-      safeMetadata,
-      idempotencyKey,
-      payloadHash,
-      txType,
-      createdBy,
-      JSON.stringify(entryRecords),
-      userAccount.id,
-    ]);
+  (select count(*) from apply_balance) as updated_accounts,
+  (select expected_accounts from expected) as expected_accounts;
+        `,
+        [entriesPayload]
+      );
+
+      const updatedAccounts = Number(applyResult?.[0]?.updated_accounts || 0);
+      const expectedAccounts = Number(applyResult?.[0]?.expected_accounts || 0);
+      if (expectedAccounts !== updatedAccounts) {
+        const mismatch = new Error("Failed to apply expected account balances");
+        mismatch.code = "chips_apply_mismatch";
+        throw mismatch;
+      }
+
+      const entriesResult = await tx.unsafe(
+        `
+with input_entries as (
+  select
+    v.account_id,
+    v.amount,
+    coalesce(v.metadata, '{}'::jsonb) as metadata
+  from jsonb_to_recordset(($2::text)::jsonb) as v(account_id uuid, amount bigint, metadata jsonb)
+),
+inserted as (
+  insert into public.chips_entries (transaction_id, account_id, amount, metadata)
+  select $1, i.account_id, i.amount, i.metadata
+  from input_entries i
+  returning *
+)
+select coalesce(jsonb_agg(inserted order by inserted.entry_seq), '[]'::jsonb) as entries;
+        `,
+        [transactionRow.id, entriesPayload]
+      );
+
+      const accountRows = await tx`
+        select id, balance, next_entry_seq
+        from public.chips_accounts
+        where id = ${userAccount.id}
+        limit 1;
+      `;
+
+      return {
+        transaction: transactionRow,
+        entries: entriesResult?.[0]?.entries || [],
+        account: accountRows?.[0] || null,
+      };
+    });
   } catch (error) {
     const combined = `${error.message || ""} ${error.details || ""}`.toLowerCase();
     const is23505 = combined.includes("23505");
@@ -336,12 +369,12 @@ select
     throw error;
   }
 
-  if (!result?.[0]?.transaction) {
+  if (!result?.transaction) {
     klog("chips_tx_missing_rows", { idempotencyKey });
     throw new Error("Failed to record transaction");
   }
 
-  return result[0];
+  return result;
 }
 
 export {
