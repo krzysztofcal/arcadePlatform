@@ -52,10 +52,19 @@ const seedEntryCount = async (sql) => {
 
 const expectNegativeBalanceGuard = async (sql) => {
   const genesisBefore = await systemBalances(sql, "GENESIS");
-  await sql`update public.chips_accounts set balance = -1 where system_key = 'GENESIS' and account_type = 'SYSTEM';`;
-  const genesisAfter = await systemBalances(sql, "GENESIS");
-  assert.equal(genesisAfter, -1, "GENESIS should be allowed to go negative");
-  await sql`update public.chips_accounts set balance = ${genesisBefore} where system_key = 'GENESIS' and account_type = 'SYSTEM';`;
+  await sql
+    .begin(async (tx) => {
+      await tx`update public.chips_accounts set balance = -1 where system_key = 'GENESIS' and account_type = 'SYSTEM';`;
+      const genesisAfter = await systemBalances(tx, "GENESIS");
+      assert.equal(genesisAfter, -1, "GENESIS should be allowed to go negative");
+      throw new Error("rollback");
+    })
+    .catch((error) => {
+      if (error?.message !== "rollback") {
+        throw error;
+      }
+    });
+  assert.equal(await systemBalances(sql, "GENESIS"), genesisBefore, "GENESIS balance should rollback after test");
 
   try {
     await sql`update public.chips_accounts set balance = -1 where system_key = 'TREASURY' and account_type = 'SYSTEM';`;

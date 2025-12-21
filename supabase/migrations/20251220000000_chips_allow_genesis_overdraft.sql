@@ -4,7 +4,7 @@ returns trigger
 language plpgsql
 as $$
 begin
-  if new.balance < 0 and not (new.account_type = 'SYSTEM' and new.system_key = 'GENESIS') then
+  if new.balance < 0 and not (old.account_type = 'SYSTEM' and old.system_key = 'GENESIS') then
     raise exception 'insufficient_funds' using errcode = 'P0001';
   end if;
   return new;
