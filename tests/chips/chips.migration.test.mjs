@@ -50,6 +50,23 @@ const seedEntryCount = async (sql) => {
   return Number(rows?.[0]?.count ?? 0);
 };
 
+const expectNegativeBalanceGuard = async (sql) => {
+  const genesisBefore = await systemBalances(sql, "GENESIS");
+  await sql`update public.chips_accounts set balance = -1 where system_key = 'GENESIS' and account_type = 'SYSTEM';`;
+  const genesisAfter = await systemBalances(sql, "GENESIS");
+  assert.equal(genesisAfter, -1, "GENESIS should be allowed to go negative");
+  await sql`update public.chips_accounts set balance = ${genesisBefore} where system_key = 'GENESIS' and account_type = 'SYSTEM';`;
+
+  try {
+    await sql`update public.chips_accounts set balance = -1 where system_key = 'TREASURY' and account_type = 'SYSTEM';`;
+    assert.fail("Non-GENESIS accounts must not go negative");
+  } catch (error) {
+    assert.equal(error?.code, "P0001", "Non-GENESIS negative balance must raise P0001");
+    const message = (error?.message || "").toLowerCase();
+    assert.ok(message.includes("insufficient_funds"), "Error should mention insufficient_funds");
+  }
+};
+
 const dropAndRecreateSchema = async (sql) => {
   await assertTestDatabase(sql);
   await sql.unsafe("drop schema if exists public cascade;");
@@ -174,6 +191,7 @@ async function main() {
   await dropAndRecreateSchema(sql);
 
   await runMigrations(sql, migrationsWithoutSeed);
+  await expectNegativeBalanceGuard(sql);
   await expectInsufficientBuyIn(sql);
 
   await runMigration(sql, seedMigration);
