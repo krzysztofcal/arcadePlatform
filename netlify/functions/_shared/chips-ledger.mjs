@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { executeSql, klog, sql } from "./supabase-admin.mjs";
+import { beginSql, executeSql, klog } from "./supabase-admin.mjs";
 
 const VALID_TX_TYPES = new Set([
   "MINT",
@@ -195,6 +195,7 @@ async function postTransaction({
 
   const normalizedEntries = validateEntries(entries);
   const safeMetadata = metadata && typeof metadata === "object" ? metadata : {};
+  const safeMetadataJson = JSON.stringify(safeMetadata);
   const payloadHash = hashPayload({ userId, txType, idempotencyKey, entries: normalizedEntries, reference, description, metadata: safeMetadata });
 
   const userAccount = await getOrCreateUserAccount(userId);
@@ -229,17 +230,13 @@ async function postTransaction({
     }
   }
 
-  if (!sql) {
-    throw new Error("Supabase DB connection not configured (SUPABASE_DB_URL missing)");
-  }
-
   const entriesPayload = JSON.stringify(entryRecords);
   let result;
   try {
-    result = await sql.begin(async tx => {
+    result = await beginSql(async tx => {
       const txRows = await tx`
         insert into public.chips_transactions (reference, description, metadata, idempotency_key, payload_hash, tx_type, created_by)
-        values (${reference}, ${description}, ${safeMetadata}, ${idempotencyKey}, ${payloadHash}, ${txType}, ${createdBy})
+        values (${reference}, ${description}, ${safeMetadataJson}::jsonb, ${idempotencyKey}, ${payloadHash}, ${txType}, ${createdBy})
         returning *;
       `;
 
@@ -269,26 +266,31 @@ locked_accounts as (
   for update
 ),
 guard as (
-  select case when exists (
+  select not exists (
     select 1
     from locked_accounts a
     join deltas d on d.account_id = a.id
     where (a.balance + d.delta) < 0
       and not (a.account_type = 'SYSTEM' and a.system_key = 'GENESIS')
-  ) then public.raise_insufficient_funds() else null end as ok
+  ) as ok
+),
+raise_if as (
+  select case when not (select ok from guard) then public.raise_insufficient_funds() end as ok
 ),
 apply_balance as (
   update public.chips_accounts a
   set balance = a.balance + d.delta
   from deltas d
   where a.id = d.account_id
-    and exists (select 1 from guard)
+    and (select ok from guard)
   returning a.id
 ),
 expected as (
   select count(*) as expected_accounts from deltas
 )
 select
+  (select ok from guard) as guard_ok,
+  (select ok from raise_if) as guard_check,
   (select count(*) from apply_balance) as updated_accounts,
   (select expected_accounts from expected) as expected_accounts;
         `,
