@@ -19,6 +19,7 @@ const seedAmount = 1000000;
 const primaryUserId = "00000000-0000-0000-0000-000000000001";
 const idempotentUserId = "00000000-0000-0000-0000-000000000002";
 const conflictUserId = "00000000-0000-0000-0000-000000000003";
+const crossUserId = "00000000-0000-0000-0000-000000000004";
 const assertTestDatabase = async (sql) => {
   const rows = await sql`select current_database() as name;`;
   const name = rows?.[0]?.name || "";
@@ -399,6 +400,79 @@ async function expectIdempotentReplayDifferentPayload(sql) {
   return { amountSpent: amount, treasurySeqDelta: afterFirstSeq - beforeSeq };
 }
 
+async function expectCrossUserIdempotencyConflict(sql) {
+  const { postTransaction } = await withLedger();
+  const key = `idem-cross-${Date.now()}`;
+  const amount = 7;
+  const beforeTreasury = await systemBalances(sql, "TREASURY");
+  const beforeSeq = await accountNextSeq(sql, "TREASURY");
+
+  const first = await postTransaction({
+    userId: idempotentUserId,
+    txType: "BUY_IN",
+    idempotencyKey: key,
+    entries: [
+      { accountType: "USER", amount },
+      { accountType: "SYSTEM", systemKey: "TREASURY", amount: -amount },
+    ],
+    createdBy: null,
+  });
+
+  const afterFirstSeq = await accountNextSeq(sql, "TREASURY");
+  assert.equal(afterFirstSeq, beforeSeq + 1, "Cross-user first call should advance TREASURY sequence once");
+
+  let caught = null;
+  try {
+    await postTransaction({
+      userId: crossUserId,
+      txType: "BUY_IN",
+      idempotencyKey: key,
+      entries: [
+        { accountType: "USER", amount },
+        { accountType: "SYSTEM", systemKey: "TREASURY", amount: -amount },
+      ],
+      createdBy: null,
+    });
+  } catch (error) {
+    caught = error;
+  }
+
+  assert.ok(caught, "Cross-user reuse must raise idempotency conflict");
+  assert.equal(caught?.status, 409, "Cross-user idempotency conflict should surface with 409");
+  const afterTreasury = await systemBalances(sql, "TREASURY");
+  assert.equal(afterTreasury, beforeTreasury - amount, "Cross-user conflict must not re-apply balances");
+  const afterSecondSeq = await accountNextSeq(sql, "TREASURY");
+  assert.equal(afterSecondSeq, afterFirstSeq, "Cross-user conflict must not advance TREASURY sequence");
+
+  const entryCountRows = await sql`
+    select count(*) as count
+    from public.chips_entries
+    where transaction_id = ${first.transaction.id};
+  `;
+  assert.equal(Number(entryCountRows?.[0]?.count || 0), 2, "Cross-user conflict must keep original entries only");
+
+  const replayOriginal = await postTransaction({
+    userId: idempotentUserId,
+    txType: "BUY_IN",
+    idempotencyKey: key,
+    entries: [
+      { accountType: "USER", amount },
+      { accountType: "SYSTEM", systemKey: "TREASURY", amount: -amount },
+    ],
+    createdBy: null,
+  });
+  assert.equal(
+    replayOriginal?.transaction?.id,
+    first.transaction.id,
+    "Original user replay should still return the original transaction"
+  );
+
+  const afterReplaySeq = await accountNextSeq(sql, "TREASURY");
+  assert.equal(afterReplaySeq, afterSecondSeq, "Replay after cross-user conflict must not advance TREASURY sequence");
+
+  return { amountSpent: amount, treasurySeqDelta: afterFirstSeq - beforeSeq };
+}
+
 async function expectSuccessfulBuyIn(sql) {
   const { postTransaction, getUserBalance } = await withLedger();
   const key = `buyin-ok-${Date.now()}`;
@@ -575,6 +649,10 @@ async function main() {
   const idemConflict = await expectIdempotentReplayDifferentPayload(sql);
   expectedTreasuryBalance -= idemConflict.amountSpent;
   expectedTreasurySeq += idemConflict.treasurySeqDelta;
+
+  const crossConflict = await expectCrossUserIdempotencyConflict(sql);
+  expectedTreasuryBalance -= crossConflict.amountSpent;
+  expectedTreasurySeq += crossConflict.treasurySeqDelta;
 
   const buyInResult = await expectSuccessfulBuyIn(sql);
   expectedTreasuryBalance -= buyInResult.amountSpent;

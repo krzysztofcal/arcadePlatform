@@ -27,7 +27,7 @@ const hashPayload = (input) =>
 
 const isPlainObject = (value) => value && typeof value === "object" && !Array.isArray(value);
 
-async function getOrCreateUserAccount(userId) {
+async function getOrCreateUserAccount(userId, tx = null) {
   const query = `
 with existing as (
   select * from public.chips_accounts where user_id = $1 and account_type = 'USER' for update
@@ -46,7 +46,8 @@ account as (
 )
 select row_to_json(account) as account from account;
 `;
-  const result = await executeSql(query, [userId]);
+  const runner = tx ? (q, params) => tx.unsafe(q, params) : executeSql;
+  const result = await runner(query, [userId]);
   const account = result?.[0]?.account;
   if (!account) {
     throw new Error("Failed to prepare chips account");
@@ -115,7 +116,7 @@ select * from entries;
 
 async function findTransactionByKey(idempotencyKey) {
   const query = `
-select id, tx_type, payload_hash, idempotency_key, reference, description, created_at
+select id, tx_type, payload_hash, idempotency_key, reference, description, created_at, user_id
 from public.chips_transactions
 where idempotency_key = $1
 limit 1;
@@ -124,10 +125,10 @@ limit 1;
   return rows?.[0] || null;
 }
 
-async function fetchTransactionSnapshot(idempotencyKey, accountId) {
+async function fetchTransactionSnapshotByTxId(transactionId) {
   const query = `
 with txn as (
-  select * from public.chips_transactions where idempotency_key = $1
+  select * from public.chips_transactions where id = $1
 ),
 entries as (
   select e.*
@@ -136,14 +137,18 @@ entries as (
   order by e.entry_seq asc
 ),
 account as (
-  select id, balance, next_entry_seq from public.chips_accounts where id = $2
+  select id, balance, next_entry_seq
+  from public.chips_accounts
+  where user_id = (select user_id from txn)
+    and account_type = 'USER'
+  limit 1
 )
 select
   (select row_to_json(txn) from txn) as transaction,
   (select coalesce(jsonb_agg(e order by e.entry_seq), '[]'::jsonb) from entries e) as entries,
   (select row_to_json(account) from account) as account;
 `;
-  const rows = await executeSql(query, [idempotencyKey, accountId]);
+  const rows = await executeSql(query, [transactionId]);
   return rows?.[0] || null;
 }
 
@@ -206,46 +211,12 @@ async function postTransaction({
     throw badRequest("invalid_metadata", "Metadata must be JSON-serializable");
   }
 
-  const userAccount = await getOrCreateUserAccount(userId);
   const neededSystemKeys = normalizedEntries
     .filter(entry => entry.kind !== "USER" && entry.systemKey)
     .map(entry => entry.systemKey);
   const uniqueSystemKeys = [...new Set(neededSystemKeys)];
   const systemAccounts = await fetchSystemAccounts(uniqueSystemKeys);
   const systemMap = new Map(systemAccounts.map(acc => [acc.system_key, acc]));
-
-  const entryRecords = normalizedEntries.map(entry => {
-    if (entry.kind === "USER") {
-      const safeEntryMetadata = isPlainObject(entry?.metadata) ? entry.metadata : {};
-      return { account_id: userAccount.id, amount: entry.amount, metadata: safeEntryMetadata };
-    }
-    const account = systemMap.get(entry.systemKey);
-    const safeEntryMetadata = isPlainObject(entry?.metadata) ? entry.metadata : {};
-    return { account_id: account?.id, amount: entry.amount, metadata: safeEntryMetadata, system_key: entry.systemKey };
-  });
-
-  for (const rec of entryRecords) {
-    if (!rec.account_id) {
-      throw badRequest("missing_account", "Missing account for entry");
-    }
-  }
-
-  let entriesPayload = "[]";
-  try {
-    entriesPayload = JSON.stringify(entryRecords);
-  } catch (error) {
-    throw badRequest("invalid_entry_metadata", "Entry metadata must be JSON-serializable");
-  }
-
-  let entriesPayloadNormalized = [];
-  try {
-    entriesPayloadNormalized = JSON.parse(entriesPayload);
-  } catch (error) {
-    const parseErr = new Error("entries_payload_parse_failed");
-    parseErr.code = "entries_payload_parse_failed";
-    parseErr.status = 500;
-    throw parseErr;
-  }
 
   for (const key of uniqueSystemKeys) {
     const account = systemMap.get(key);
@@ -257,23 +228,60 @@ async function postTransaction({
     }
   }
 
-  const payloadHash = hashPayload({
-    userId,
-    txType,
-    idempotencyKey,
-    reference,
-    description,
-    metadata: safeMetadataNormalized,
-    entries: entriesPayloadNormalized,
-  });
-
   let result;
+  let userAccount = null;
+  let payloadHash = null;
   try {
     result = await beginSql(async tx => {
       // IMPORTANT: inside this block use ONLY `tx` for all SQL to keep it atomic.
+      userAccount = await getOrCreateUserAccount(userId, tx);
+
+      const entryRecords = normalizedEntries.map(entry => {
+        if (entry.kind === "USER") {
+          const safeEntryMetadata = isPlainObject(entry?.metadata) ? entry.metadata : {};
+          return { account_id: userAccount.id, amount: entry.amount, metadata: safeEntryMetadata };
+        }
+        const account = systemMap.get(entry.systemKey);
+        const safeEntryMetadata = isPlainObject(entry?.metadata) ? entry.metadata : {};
+        return { account_id: account?.id, amount: entry.amount, metadata: safeEntryMetadata, system_key: entry.systemKey };
+      });
+
+      for (const rec of entryRecords) {
+        if (!rec.account_id) {
+          throw badRequest("missing_account", "Missing account for entry");
+        }
+      }
+
+      let entriesPayload = "[]";
+      try {
+        entriesPayload = JSON.stringify(entryRecords);
+      } catch (error) {
+        throw badRequest("invalid_entry_metadata", "Entry metadata must be JSON-serializable");
+      }
+
+      let entriesPayloadNormalized = [];
+      try {
+        entriesPayloadNormalized = JSON.parse(entriesPayload);
+      } catch (error) {
+        const parseErr = new Error("entries_payload_parse_failed");
+        parseErr.code = "entries_payload_parse_failed";
+        parseErr.status = 500;
+        throw parseErr;
+      }
+
+      payloadHash = hashPayload({
+        userId,
+        txType,
+        idempotencyKey,
+        reference,
+        description,
+        metadata: safeMetadataNormalized,
+        entries: entriesPayloadNormalized,
+      });
+
       const txRows = await tx`
-        insert into public.chips_transactions (reference, description, metadata, idempotency_key, payload_hash, tx_type, created_by)
-        values (${reference}, ${description}, ${safeMetadataJson}::jsonb, ${idempotencyKey}, ${payloadHash}, ${txType}, ${createdBy})
+        insert into public.chips_transactions (reference, description, metadata, idempotency_key, payload_hash, tx_type, user_id, created_by)
+        values (${reference}, ${description}, ${safeMetadataJson}::jsonb, ${idempotencyKey}, ${payloadHash}, ${txType}, ${userId}, ${createdBy})
         returning *;
       `;
 
@@ -406,12 +414,17 @@ select coalesce(jsonb_agg(inserted order by inserted.entry_seq), '[]'::jsonb) as
     if (isIdempotencyUnique) {
       const existingTx = await findTransactionByKey(idempotencyKey);
       if (existingTx) {
+        if (existingTx.user_id && existingTx.user_id !== userId) {
+          const conflict = new Error("Idempotency key already used by another user");
+          conflict.status = 409;
+          throw conflict;
+        }
         if (existingTx.payload_hash !== payloadHash || existingTx.tx_type !== txType) {
           const conflict = new Error("Idempotency key already used with different payload");
           conflict.status = 409;
           throw conflict;
         }
-        const snapshot = await fetchTransactionSnapshot(idempotencyKey, userAccount.id);
+        const snapshot = await fetchTransactionSnapshotByTxId(existingTx.id);
         if (snapshot?.transaction) {
           return snapshot;
         }
