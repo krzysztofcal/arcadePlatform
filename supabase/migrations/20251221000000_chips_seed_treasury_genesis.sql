@@ -1,6 +1,5 @@
 -- Bootstrap the chips treasury with an idempotent genesis transaction.
--- Invariant-safe: applies balances via the same guarded ledger shape as runtime posting
--- and never edits balances directly.
+-- Invariant-safe: applies balances via a guarded posting shape and never edits balances directly.
 
 create extension if not exists "pgcrypto";
 
@@ -19,7 +18,7 @@ where not exists (
 
 do $$
 declare
-  seed_amount bigint := 1000000; -- adjust as needed for production bankroll
+  seed_amount bigint := 1000000;
   seed_key text := 'seed:treasury:v1';
   tx_id uuid;
   genesis_id uuid;
@@ -42,29 +41,28 @@ begin
     'Initial treasury funding',
     jsonb_build_object('source', 'GENESIS'),
     seed_key,
-    encode(digest(seed_key || ':' || seed_amount::text, 'sha256'), 'hex'),
+    encode(extensions.digest((seed_key || ':' || seed_amount::text)::text, 'sha256'), 'hex'),
     'MINT',
     null
   )
   on conflict (idempotency_key) do nothing
-  returning id
-  into tx_id;
+  returning id into tx_id;
 
   if tx_id is null then
     return;
   end if;
 
   select id, status
-  into genesis_id, genesis_status
-  from public.chips_accounts
-  where account_type = 'SYSTEM' and system_key = 'GENESIS'
-  for update;
+    into genesis_id, genesis_status
+    from public.chips_accounts
+    where account_type = 'SYSTEM' and system_key = 'GENESIS'
+    for update;
 
   select id, status
-  into treasury_id, treasury_status
-  from public.chips_accounts
-  where account_type = 'SYSTEM' and system_key = 'TREASURY'
-  for update;
+    into treasury_id, treasury_status
+    from public.chips_accounts
+    where account_type = 'SYSTEM' and system_key = 'TREASURY'
+    for update;
 
   if genesis_id is null or treasury_id is null then
     raise exception 'system_account_missing' using errcode = 'P0001';
@@ -89,13 +87,20 @@ begin
     from raw_entries
     group by account_id
   ),
+  locked as (
+    select a.id
+    from public.chips_accounts a
+    join deltas d on d.account_id = a.id
+    for update
+  ),
   apply_balance as (
     update public.chips_accounts a
-    set balance = a.balance + d.delta,
-        updated_at = now_ts
-    from deltas d
-    where a.id = d.account_id
-    returning a.id
+      set balance = a.balance + d.delta,
+          updated_at = now_ts
+      from deltas d
+      where a.id = d.account_id
+        and exists (select 1 from locked l where l.id = a.id)
+      returning a.id
   ),
   inserted_entries as (
     insert into public.chips_entries (transaction_id, account_id, amount, metadata)
