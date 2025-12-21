@@ -105,15 +105,36 @@ export async function handler(event) {
   } catch (error) {
     const combined = `${error.message || ""} ${error.details || ""}`.toLowerCase();
     const isInsufficient = /(^|\W)insufficient_funds(\W|$)/.test(combined);
-    const status = isInsufficient ? 400 : error.status || 500;
+    const isP0001 = error.code === "P0001";
+    const safeP0001 = /system_account_missing|system_account_inactive/.test(combined);
+    const status = error.status || (isInsufficient || (isP0001 && safeP0001) ? 400 : 500);
     klog("chips_tx_error", { error: error.message, status, idempotencyKey });
+    const safeCodes = new Set([
+      "invalid_tx_type",
+      "missing_idempotency_key",
+      "invalid_amount",
+      "system_account_missing",
+      "system_account_inactive",
+      "missing_entries",
+      "invalid_entry_amount",
+      "unsupported_account_type",
+      "missing_system_key",
+      "missing_user_entry",
+    ]);
+    const derivedError = (() => {
+      if (isInsufficient) return "insufficient_funds";
+      if (isP0001) {
+        if (combined.includes("system_account_missing")) return "system_account_missing";
+        if (combined.includes("system_account_inactive")) return "system_account_inactive";
+      }
+      if (status === 400 && error.code && safeCodes.has(error.code)) return error.code;
+      return null;
+    })();
     const body = status === 409
       ? { error: "idempotency_conflict" }
-      : status === 400 && error.code
-        ? { error: error.code }
-        : isInsufficient
-          ? { error: "insufficient_funds" }
-          : { error: "server_error" };
+      : derivedError
+        ? { error: derivedError }
+        : { error: "server_error" };
     return { statusCode: status, headers: cors, body: JSON.stringify(body) };
   }
 }

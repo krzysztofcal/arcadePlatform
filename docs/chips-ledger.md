@@ -160,6 +160,15 @@ If you keep this mental model, the system will stay correct.
 
 ---
 
+## Initial funding required
+
+- The treasury must hold chips before any `BUY_IN` can succeed.
+- Migration `supabase/migrations/20251221000000_chips_seed_treasury_genesis.sql` seeds **1,000,000** chips via a normal, balanced ledger transaction (`MINT` from `SYSTEM/GENESIS` to `SYSTEM/TREASURY`) keyed by `seed:treasury:v1`.
+- The seed uses the same guarded posting shape as runtime transactions (no direct balance edits) and is safe to re-run thanks to the fixed idempotency key. Apply migrations normally (e.g. `supabase db push` or `psql "$SUPABASE_DB_URL" -f supabase/migrations/20251221000000_chips_seed_treasury_genesis.sql`).
+- Verify the seed by checking that `SYSTEM/TREASURY` has a positive balance and the ledger contains a single transaction with idempotency key `seed:treasury:v1`. Without this migration, `BUY_IN` calls return `400 { "error": "insufficient_funds" }` because the treasury balance is zero.
+
+---
+
 ## Netlify production configuration (required)
 
 Use the Supabase **Transaction pooler (IPv4) connection string** (port **6543**, includes pooling) with `?sslmode=require`, then redeploy:
