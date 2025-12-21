@@ -15,6 +15,9 @@ process.env.SUPABASE_DB_URL = dbUrl;
 
 const seedKey = "seed:treasury:v1";
 const seedAmount = 1000000;
+const primaryUserId = "00000000-0000-0000-0000-000000000001";
+const idempotentUserId = "00000000-0000-0000-0000-000000000002";
+const conflictUserId = "00000000-0000-0000-0000-000000000003";
 const assertTestDatabase = async (sql) => {
   const rows = await sql`select current_database() as name;`;
   const name = rows?.[0]?.name || "";
@@ -133,7 +136,7 @@ async function expectInsufficientBuyIn(sql) {
   const key = `buyin-${Date.now()}`;
   try {
     await postTransaction({
-      userId: "00000000-0000-0000-0000-000000000001",
+      userId: primaryUserId,
       txType: "BUY_IN",
       idempotencyKey: key,
       entries: [
@@ -159,7 +162,7 @@ async function expectInvalidMetadata(sql) {
   let caught = null;
   try {
     await postTransaction({
-      userId: "00000000-0000-0000-0000-000000000001",
+      userId: primaryUserId,
       txType: "BUY_IN",
       idempotencyKey: key,
       metadata: circular,
@@ -187,7 +190,7 @@ async function expectInvalidEntryMetadata(sql) {
   let caught = null;
   try {
     await postTransaction({
-      userId: "00000000-0000-0000-0000-000000000001",
+      userId: primaryUserId,
       txType: "BUY_IN",
       idempotencyKey: key,
       metadata: {},
@@ -208,19 +211,109 @@ async function expectInvalidEntryMetadata(sql) {
   assert.equal(after, before, "Balances must remain unchanged when entry metadata is invalid");
 }
 
-async function expectSuccessfulBuyIn(sql) {
-  const { postTransaction, getUserBalance } = await withLedger();
-  const key = `buyin-ok-${Date.now()}`;
-  let result = null;
+async function expectIdempotentReplaySamePayload(sql) {
+  const { postTransaction } = await withLedger();
+  const key = `idem-same-${Date.now()}`;
+  const amount = 15;
+  const beforeTreasury = await systemBalances(sql, "TREASURY");
+  const first = await postTransaction({
+    userId: idempotentUserId,
+    txType: "BUY_IN",
+    idempotencyKey: key,
+    entries: [
+      { accountType: "USER", amount },
+      { accountType: "SYSTEM", systemKey: "TREASURY", amount: -amount },
+    ],
+    createdBy: null,
+  });
+
+  const second = await postTransaction({
+    userId: idempotentUserId,
+    txType: "BUY_IN",
+    idempotencyKey: key,
+    entries: [
+      { accountType: "USER", amount },
+      { accountType: "SYSTEM", systemKey: "TREASURY", amount: -amount },
+    ],
+    createdBy: null,
+  });
+
+  assert.equal(first?.transaction?.id, second?.transaction?.id, "Idempotent replay should return same transaction");
+  const afterTreasury = await systemBalances(sql, "TREASURY");
+  assert.equal(afterTreasury, beforeTreasury - amount, "Treasury should only be charged once for idempotent replay");
+  const entryCountRows = await sql`
+    select count(*) as count
+    from public.chips_entries
+    where transaction_id = ${first.transaction.id};
+  `;
+  assert.equal(Number(entryCountRows?.[0]?.count || 0), 2, "Idempotent replay must keep single set of entries");
+
+  return { amountSpent: amount, treasurySeqDelta: 1 };
+}
+
+async function expectIdempotentReplayDifferentPayload(sql) {
+  const { postTransaction } = await withLedger();
+  const key = `idem-conflict-${Date.now()}`;
+  const amount = 5;
+  const beforeTreasury = await systemBalances(sql, "TREASURY");
+
+  const first = await postTransaction({
+    userId: conflictUserId,
+    txType: "BUY_IN",
+    idempotencyKey: key,
+    entries: [
+      { accountType: "USER", amount },
+      { accountType: "SYSTEM", systemKey: "TREASURY", amount: -amount },
+    ],
+    createdBy: null,
+  });
+
   let caught = null;
   try {
-    result = await postTransaction({
-      userId: "00000000-0000-0000-0000-000000000001",
+    await postTransaction({
+      userId: conflictUserId,
       txType: "BUY_IN",
       idempotencyKey: key,
       entries: [
-        { accountType: "USER", amount: 25 },
-        { accountType: "SYSTEM", systemKey: "TREASURY", amount: -25 },
+        { accountType: "USER", amount: amount + 1 },
+        { accountType: "SYSTEM", systemKey: "TREASURY", amount: -(amount + 1) },
+      ],
+      createdBy: null,
+    });
+  } catch (error) {
+    caught = error;
+  }
+
+  assert.ok(caught, "Different payload must raise idempotency conflict");
+  assert.equal(caught?.status, 409, "Idempotency conflict should surface with 409");
+  const afterTreasury = await systemBalances(sql, "TREASURY");
+  assert.equal(afterTreasury, beforeTreasury - amount, "Conflict replay should not re-apply balances");
+  const entryCountRows = await sql`
+    select count(*) as count
+    from public.chips_entries
+    where transaction_id = ${first.transaction.id};
+  `;
+  assert.equal(Number(entryCountRows?.[0]?.count || 0), 2, "Conflict replay must retain original entries only");
+
+  return { amountSpent: amount, treasurySeqDelta: 1 };
+}
+
+async function expectSuccessfulBuyIn(sql) {
+  const { postTransaction, getUserBalance } = await withLedger();
+  const key = `buyin-ok-${Date.now()}`;
+  const amount = 25;
+  let result = null;
+  let caught = null;
+  const beforeTreasury = await systemBalances(sql, "TREASURY");
+  const beforeUser = await getUserBalance(primaryUserId);
+  try {
+    result = await postTransaction({
+      userId: primaryUserId,
+      txType: "BUY_IN",
+      idempotencyKey: key,
+      entries: [
+        { accountType: "USER", amount },
+        { accountType: "SYSTEM", systemKey: "TREASURY", amount: -amount },
       ],
       createdBy: null,
     });
@@ -231,10 +324,11 @@ async function expectSuccessfulBuyIn(sql) {
   assert.ok(!caught, `BUY_IN should succeed without errors (got ${caught?.code || caught?.message || "unknown"})`);
   assert.notEqual(caught?.code, "27000", "Posting must not raise tuple-already-modified trigger errors");
   assert.ok(result?.transaction?.id, "BUY_IN should record a transaction");
-  const balance = await getUserBalance("00000000-0000-0000-0000-000000000001");
-  assert.equal(balance.balance, 25, "User balance should increase by BUY_IN amount");
+  const balance = await getUserBalance(primaryUserId);
+  assert.equal(balance.balance, beforeUser.balance + amount, "User balance should increase by BUY_IN amount");
   const treasury = await systemBalances(sql, "TREASURY");
-  assert.equal(treasury, seedAmount - 25, "Treasury should decrease by buy-in amount");
+  assert.equal(treasury, beforeTreasury - amount, "Treasury should decrease by buy-in amount");
+  return { amountSpent: amount, treasurySeqDelta: 1 };
 }
 
 async function assertSeedSequencing(sql) {
@@ -266,16 +360,16 @@ async function assertSeedSequencing(sql) {
   assert.equal(seqByKey.get("TREASURY"), 2, "TREASURY next_entry_seq should advance after seed entry");
 }
 
-async function assertBuyInSequencing(sql) {
+async function assertBuyInSequencing(sql, expectedTreasurySeq) {
   const { getUserBalance, listUserLedger } = await withLedger();
-  const userId = "00000000-0000-0000-0000-000000000001";
+  const userId = primaryUserId;
   const ledger = await listUserLedger(userId, { limit: 10 });
   assert.ok(ledger.sequenceOk, "User ledger sequence should remain contiguous after buy-in");
 
   const userBalance = await getUserBalance(userId);
   assert.equal(userBalance.nextEntrySeq, 2, "User next_entry_seq should advance after first entry");
   const treasurySeq = await accountNextSeq(sql, "TREASURY");
-  assert.equal(treasurySeq, 3, "TREASURY next_entry_seq should advance again after buy-in");
+  assert.equal(treasurySeq, expectedTreasurySeq, "TREASURY next_entry_seq should advance as expected after buy-in");
   return { treasurySeq };
 }
 
@@ -367,15 +461,32 @@ async function main() {
   assert.equal(await seedEntryCount(sql), 2, "Seed transaction must insert exactly two entries");
   await assertSeedSequencing(sql);
 
-  await expectSuccessfulBuyIn(sql);
-  const { treasurySeq } = await assertBuyInSequencing(sql);
-  const postSequenceTest = await expectAtomicSequenceAllocation(sql, treasurySeq);
+  let expectedTreasuryBalance = afterSeed;
+  let expectedTreasurySeq = await accountNextSeq(sql, "TREASURY");
+
+  const idemReplay = await expectIdempotentReplaySamePayload(sql);
+  expectedTreasuryBalance -= idemReplay.amountSpent;
+  expectedTreasurySeq += idemReplay.treasurySeqDelta;
+
+  const idemConflict = await expectIdempotentReplayDifferentPayload(sql);
+  expectedTreasuryBalance -= idemConflict.amountSpent;
+  expectedTreasurySeq += idemConflict.treasurySeqDelta;
+
+  const buyInResult = await expectSuccessfulBuyIn(sql);
+  expectedTreasuryBalance -= buyInResult.amountSpent;
+  expectedTreasurySeq += buyInResult.treasurySeqDelta;
+
+  const { treasurySeq } = await assertBuyInSequencing(sql, expectedTreasurySeq);
+  expectedTreasurySeq = treasurySeq;
+
+  const postSequenceTest = await expectAtomicSequenceAllocation(sql, expectedTreasurySeq);
+  expectedTreasurySeq = postSequenceTest;
 
   await runMigration(sql, seedMigration);
   assert.equal(await seedTxCount(sql), 1, "Seed transaction should stay idempotent");
   const afterRerun = await systemBalances(sql, "TREASURY");
-  assert.equal(afterRerun, seedAmount - 25, "Treasury balance should not change on rerun");
-  assert.equal(await accountNextSeq(sql, "TREASURY"), postSequenceTest, "TREASURY sequence should remain stable on rerun");
+  assert.equal(afterRerun, expectedTreasuryBalance, "Treasury balance should remain unchanged on rerun");
+  assert.equal(await accountNextSeq(sql, "TREASURY"), expectedTreasurySeq, "TREASURY sequence should remain stable on rerun");
   assert.equal(await seedEntryCount(sql), 2, "Seed rerun must not add or drop entries");
 
   await sql.end({ timeout: 5 });

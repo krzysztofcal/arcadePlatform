@@ -204,23 +204,6 @@ async function postTransaction({
     throw badRequest("invalid_metadata", "Metadata must be JSON-serializable");
   }
 
-  let sanitizedEntriesNormalized = [];
-  try {
-    sanitizedEntriesNormalized = JSON.parse(JSON.stringify(normalizedEntries));
-  } catch (error) {
-    throw badRequest("invalid_entry_metadata", "Entry metadata must be JSON-serializable");
-  }
-
-  const payloadHash = hashPayload({
-    userId,
-    txType,
-    idempotencyKey,
-    entries: sanitizedEntriesNormalized,
-    reference,
-    description,
-    metadata: safeMetadataNormalized,
-  });
-
   const userAccount = await getOrCreateUserAccount(userId);
   const neededSystemKeys = normalizedEntries
     .filter(entry => entry.kind !== "USER" && entry.systemKey)
@@ -252,6 +235,13 @@ async function postTransaction({
     throw badRequest("invalid_entry_metadata", "Entry metadata must be JSON-serializable");
   }
 
+  let entriesPayloadNormalized = [];
+  try {
+    entriesPayloadNormalized = JSON.parse(entriesPayload);
+  } catch (error) {
+    throw new Error("entries_payload_parse_failed");
+  }
+
   for (const key of uniqueSystemKeys) {
     const account = systemMap.get(key);
     if (!account) {
@@ -261,6 +251,16 @@ async function postTransaction({
       throw badRequest("system_account_inactive", `System account ${key} is not active`);
     }
   }
+
+  const payloadHash = hashPayload({
+    userId,
+    txType,
+    idempotencyKey,
+    reference,
+    description,
+    metadata: safeMetadataNormalized,
+    entries: entriesPayloadNormalized,
+  });
 
   let result;
   try {
@@ -341,6 +341,7 @@ select
         });
         const mismatch = new Error("Failed to apply expected account balances");
         mismatch.code = "chips_apply_mismatch";
+        mismatch.status = 500;
         throw mismatch;
       }
 
