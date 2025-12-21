@@ -180,10 +180,17 @@ async function executeSql(query, params = []) {
   }
 }
 
+async function closeSql() {
+  if (sql && typeof sql.end === "function") {
+    await sql.end({ timeout: 5 });
+  }
+}
+
 export {
   baseHeaders,
   corsHeaders,
   executeSql,
+  closeSql,
   extractBearerToken,
   klog,
   verifySupabaseJwt,
