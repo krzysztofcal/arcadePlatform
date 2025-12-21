@@ -26,12 +26,24 @@ const assertTestDatabase = async (sql) => {
   }
 };
 const systemBalances = async (sql, key) => {
-  const rows = await sql`select balance from public.chips_accounts where system_key = ${key} limit 1;`;
+  const rows = await sql`
+    select balance
+    from public.chips_accounts
+    where account_type = 'SYSTEM'
+      and system_key = ${key}
+    limit 1;
+  `;
   return Number(rows?.[0]?.balance ?? 0);
 };
 
 const accountNextSeq = async (sql, key) => {
-  const rows = await sql`select next_entry_seq from public.chips_accounts where system_key = ${key} limit 1;`;
+  const rows = await sql`
+    select next_entry_seq
+    from public.chips_accounts
+    where account_type = 'SYSTEM'
+      and system_key = ${key}
+    limit 1;
+  `;
   return Number(rows?.[0]?.next_entry_seq ?? 0);
 };
 
@@ -48,6 +60,33 @@ const seedEntryCount = async (sql) => {
     where t.idempotency_key = ${seedKey};
   `;
   return Number(rows?.[0]?.count ?? 0);
+};
+
+const expectNegativeBalanceGuard = async (sql) => {
+  const genesisBefore = await systemBalances(sql, "GENESIS");
+  const ROLLBACK = new Error("rollback");
+  await sql
+    .begin(async (tx) => {
+      await tx`update public.chips_accounts set balance = -1 where system_key = 'GENESIS' and account_type = 'SYSTEM';`;
+      const genesisAfter = await systemBalances(tx, "GENESIS");
+      assert.equal(genesisAfter, -1, "GENESIS should be allowed to go negative");
+      throw ROLLBACK;
+    })
+    .catch((error) => {
+      if (error !== ROLLBACK) {
+        throw error;
+      }
+    });
+  assert.equal(await systemBalances(sql, "GENESIS"), genesisBefore, "GENESIS balance should rollback after test");
+
+  try {
+    await sql`update public.chips_accounts set balance = -1 where system_key = 'TREASURY' and account_type = 'SYSTEM';`;
+    assert.fail("Non-GENESIS accounts must not go negative");
+  } catch (error) {
+    assert.equal(error?.code, "P0001", "Non-GENESIS negative balance must raise P0001");
+    const message = (error?.message || "").toLowerCase();
+    assert.ok(message.includes("insufficient_funds"), "Error should mention insufficient_funds");
+  }
 };
 
 const dropAndRecreateSchema = async (sql) => {
@@ -151,7 +190,8 @@ async function assertSeedSequencing(sql) {
   const accountRows = await sql`
     select system_key, next_entry_seq
     from public.chips_accounts
-    where system_key in ('GENESIS', 'TREASURY');
+    where account_type = 'SYSTEM'
+      and system_key in ('GENESIS', 'TREASURY');
   `;
   const seqByKey = new Map(accountRows.map((row) => [row.system_key, Number(row.next_entry_seq || 0)]));
   assert.equal(seqByKey.get("GENESIS"), 2, "GENESIS next_entry_seq should advance after seed entry");
@@ -174,6 +214,7 @@ async function main() {
   await dropAndRecreateSchema(sql);
 
   await runMigrations(sql, migrationsWithoutSeed);
+  await expectNegativeBalanceGuard(sql);
   await expectInsufficientBuyIn(sql);
 
   await runMigration(sql, seedMigration);
