@@ -28,6 +28,13 @@ const hashPayload = (input) =>
 const isPlainObject = (value) =>
   value !== null && typeof value === "object" && Object.getPrototypeOf(value) === Object.prototype;
 
+const assertPlainObjectOrNull = (value, code) => {
+  if (value == null) return;
+  if (!isPlainObject(value)) {
+    throw badRequest(code, "Metadata must be a plain JSON object");
+  }
+};
+
 async function getOrCreateUserAccount(userId, tx = null) {
   const query = `
 with existing as (
@@ -175,7 +182,14 @@ function validateEntries(entries) {
     if (kind === "USER") {
       hasUserEntry = true;
     }
-    const metadata = isPlainObject(entry?.metadata) ? entry.metadata : {};
+    if (
+      Object.prototype.hasOwnProperty.call(entry, "metadata") &&
+      entry.metadata != null &&
+      !isPlainObject(entry.metadata)
+    ) {
+      throw badRequest("invalid_entry_metadata", "Entry metadata must be a plain JSON object");
+    }
+    const metadata = entry?.metadata ?? {};
     sanitized.push({ kind, systemKey, amount, metadata });
   }
   if (!hasUserEntry) {
@@ -202,7 +216,8 @@ async function postTransaction({
   }
 
   const normalizedEntries = validateEntries(entries);
-  const safeMetadata = isPlainObject(metadata) ? metadata : {};
+  assertPlainObjectOrNull(metadata, "invalid_metadata");
+  const safeMetadata = metadata ?? {};
   let safeMetadataJson = "{}";
   let safeMetadataNormalized = {};
   try {
@@ -260,11 +275,11 @@ async function postTransaction({
 
       const entryRecords = normalizedEntries.map(entry => {
         if (entry.kind === "USER") {
-          const safeEntryMetadata = isPlainObject(entry?.metadata) ? entry.metadata : {};
+          const safeEntryMetadata = entry?.metadata ?? {};
           return { account_id: userAccount.id, amount: entry.amount, metadata: safeEntryMetadata };
         }
         const account = systemMap.get(entry.systemKey);
-        const safeEntryMetadata = isPlainObject(entry?.metadata) ? entry.metadata : {};
+        const safeEntryMetadata = entry?.metadata ?? {};
         return { account_id: account?.id, amount: entry.amount, metadata: safeEntryMetadata, system_key: entry.systemKey };
       });
 
@@ -387,6 +402,19 @@ select coalesce(jsonb_agg(inserted order by inserted.entry_seq), '[]'::jsonb) as
         [transactionRow.id, entriesPayload]
       );
 
+      const insertedEntries = entriesResult?.[0]?.entries || [];
+      if (Array.isArray(insertedEntries) && insertedEntries.length !== entryRecords.length) {
+        const mismatch = new Error("Inserted entries count mismatch");
+        mismatch.code = "chips_entries_mismatch";
+        mismatch.status = 500;
+        klog("chips_entries_mismatch", {
+          expected: entryRecords.length,
+          actual: insertedEntries.length,
+          idempotencyKey,
+        });
+        throw mismatch;
+      }
+
       const accountRows = await tx`
         select id, balance, next_entry_seq
         from public.chips_accounts
@@ -402,8 +430,10 @@ select coalesce(jsonb_agg(inserted order by inserted.entry_seq), '[]'::jsonb) as
     });
   } catch (error) {
     const combined = `${error.message || ""} ${error.details || ""}`.toLowerCase();
-    const is23505 = combined.includes("23505");
+    const constraint = (error?.constraint || "").toLowerCase();
+    const is23505 = error?.code === "23505";
     const mentionsIdempotency =
+      constraint.includes("chips_transactions_idempotency_key") ||
       combined.includes("idempotency") ||
       combined.includes("idempotency_key") ||
       combined.includes("chips_transactions_idempotency_key_uidx");

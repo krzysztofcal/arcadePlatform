@@ -225,6 +225,80 @@ async function expectInvalidEntryMetadata(sql) {
   assert.equal(Number(txRows?.[0]?.count || 0), 0, "Invalid entry metadata must not create a transaction");
 }
 
+async function expectInvalidMetadataShape(sql) {
+  const { postTransaction } = await withLedger();
+  const shapes = [[], "x"];
+  for (let i = 0; i < shapes.length; i += 1) {
+    const key = `badmeta-shape-${i}-${Date.now()}`;
+    const before = await systemBalances(sql, "TREASURY");
+    let caught = null;
+    try {
+      await postTransaction({
+        userId: primaryUserId,
+        txType: "BUY_IN",
+        idempotencyKey: key,
+        metadata: shapes[i],
+        entries: [
+          { accountType: "USER", amount: 1 },
+          { accountType: "SYSTEM", systemKey: "TREASURY", amount: -1 },
+        ],
+        createdBy: null,
+      });
+    } catch (error) {
+      caught = error;
+    }
+
+    assert.ok(caught, "Non-object metadata must reject the transaction");
+    assert.equal(caught?.status, 400, "Invalid metadata shape should surface as bad request");
+    assert.equal(caught?.code, "invalid_metadata", "Invalid metadata should map to invalid_metadata");
+    const after = await systemBalances(sql, "TREASURY");
+    assert.equal(after, before, "Balances must remain unchanged when metadata shape is invalid");
+    const txRows = await sql`
+      select count(*) as count
+      from public.chips_transactions
+      where idempotency_key = ${key};
+    `;
+    assert.equal(Number(txRows?.[0]?.count || 0), 0, "Invalid metadata shape must not create a transaction");
+  }
+}
+
+async function expectInvalidEntryMetadataShape(sql) {
+  const { postTransaction } = await withLedger();
+  const shapes = [[], "x"];
+  for (let i = 0; i < shapes.length; i += 1) {
+    const key = `bad-entry-shape-${i}-${Date.now()}`;
+    const before = await systemBalances(sql, "TREASURY");
+    let caught = null;
+    try {
+      await postTransaction({
+        userId: primaryUserId,
+        txType: "BUY_IN",
+        idempotencyKey: key,
+        metadata: {},
+        entries: [
+          { accountType: "USER", amount: 1, metadata: shapes[i] },
+          { accountType: "SYSTEM", systemKey: "TREASURY", amount: -1 },
+        ],
+        createdBy: null,
+      });
+    } catch (error) {
+      caught = error;
+    }
+
+    assert.ok(caught, "Non-object entry metadata must reject the transaction");
+    assert.equal(caught?.status, 400, "Invalid entry metadata shape should surface as bad request");
+    assert.equal(caught?.code, "invalid_entry_metadata", "Entry metadata should map to invalid_entry_metadata");
+    const after = await systemBalances(sql, "TREASURY");
+    assert.equal(after, before, "Balances must remain unchanged when entry metadata shape is invalid");
+    const txRows = await sql`
+      select count(*) as count
+      from public.chips_transactions
+      where idempotency_key = ${key};
+    `;
+    assert.equal(Number(txRows?.[0]?.count || 0), 0, "Invalid entry metadata shape must not create a transaction");
+  }
+}
+
 async function expectIdempotentReplaySamePayload(sql) {
   const { postTransaction } = await withLedger();
   const key = `idem-same-${Date.now()}`;
@@ -631,6 +705,8 @@ async function main() {
   await expectInsufficientBuyIn(sql);
   await expectInvalidMetadata(sql);
   await expectInvalidEntryMetadata(sql);
+  await expectInvalidMetadataShape(sql);
+  await expectInvalidEntryMetadataShape(sql);
 
   await runMigration(sql, seedMigration);
   const afterSeed = await systemBalances(sql, "TREASURY");
