@@ -25,7 +25,8 @@ function badRequest(code, message) {
 const hashPayload = (input) =>
   crypto.createHash("sha256").update(JSON.stringify(input)).digest("hex");
 
-const isPlainObject = (value) => value && typeof value === "object" && !Array.isArray(value);
+const isPlainObject = (value) =>
+  value !== null && typeof value === "object" && Object.getPrototypeOf(value) === Object.prototype;
 
 async function getOrCreateUserAccount(userId, tx = null) {
   const query = `
@@ -125,7 +126,7 @@ limit 1;
   return rows?.[0] || null;
 }
 
-async function fetchTransactionSnapshotByTxId(transactionId) {
+async function fetchTransactionSnapshotByTxId(transactionId, userId = null) {
   const query = `
 with txn as (
   select * from public.chips_transactions where id = $1
@@ -139,7 +140,7 @@ entries as (
 account as (
   select id, balance, next_entry_seq
   from public.chips_accounts
-  where user_id = (select user_id from txn)
+  where user_id = coalesce($2::uuid, (select user_id from txn))
     and account_type = 'USER'
   limit 1
 )
@@ -148,7 +149,7 @@ select
   (select coalesce(jsonb_agg(e order by e.entry_seq), '[]'::jsonb) from entries e) as entries,
   (select row_to_json(account) from account) as account;
 `;
-  const rows = await executeSql(query, [transactionId]);
+  const rows = await executeSql(query, [transactionId, userId]);
   return rows?.[0] || null;
 }
 
@@ -228,9 +229,30 @@ async function postTransaction({
     }
   }
 
+  const hashableEntries = normalizedEntries.map((entry) => ({
+    kind: entry.kind,
+    systemKey: entry.systemKey ?? null,
+    amount: entry.amount,
+    metadata: entry.metadata ?? {},
+  }));
+
+  let payloadHash;
+  try {
+    payloadHash = hashPayload({
+      userId,
+      txType,
+      idempotencyKey,
+      reference,
+      description,
+      metadata: safeMetadataNormalized,
+      entries: hashableEntries,
+    });
+  } catch (error) {
+    throw badRequest("invalid_entry_metadata", "Entry metadata must be JSON-serializable");
+  }
+
   let result;
   let userAccount = null;
-  let payloadHash = null;
   try {
     result = await beginSql(async tx => {
       // IMPORTANT: inside this block use ONLY `tx` for all SQL to keep it atomic.
@@ -258,26 +280,6 @@ async function postTransaction({
       } catch (error) {
         throw badRequest("invalid_entry_metadata", "Entry metadata must be JSON-serializable");
       }
-
-      let entriesPayloadNormalized = [];
-      try {
-        entriesPayloadNormalized = JSON.parse(entriesPayload);
-      } catch (error) {
-        const parseErr = new Error("entries_payload_parse_failed");
-        parseErr.code = "entries_payload_parse_failed";
-        parseErr.status = 500;
-        throw parseErr;
-      }
-
-      payloadHash = hashPayload({
-        userId,
-        txType,
-        idempotencyKey,
-        reference,
-        description,
-        metadata: safeMetadataNormalized,
-        entries: entriesPayloadNormalized,
-      });
 
       const txRows = await tx`
         insert into public.chips_transactions (reference, description, metadata, idempotency_key, payload_hash, tx_type, user_id, created_by)
@@ -424,7 +426,7 @@ select coalesce(jsonb_agg(inserted order by inserted.entry_seq), '[]'::jsonb) as
           conflict.status = 409;
           throw conflict;
         }
-        const snapshot = await fetchTransactionSnapshotByTxId(existingTx.id);
+        const snapshot = await fetchTransactionSnapshotByTxId(existingTx.id, userId);
         if (snapshot?.transaction) {
           return snapshot;
         }
