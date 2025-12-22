@@ -10,6 +10,17 @@ const parseBody = (body) => {
   }
 };
 
+function isPlainObject(value) {
+  if (value === null || typeof value !== "object") return false;
+  if (Array.isArray(value)) return false;
+  try {
+    const proto = Object.getPrototypeOf(value);
+    return proto === Object.prototype || proto === null;
+  } catch {
+    return false;
+  }
+}
+
 const ALLOWED_TX_TYPES = new Set(["BUY_IN", "CASH_OUT"]);
 
 const CHIPS_ENABLED = process.env.CHIPS_ENABLED === "1";
@@ -65,8 +76,8 @@ export async function handler(event) {
   }
 
   const payload = parseBody(event.body);
-  const { txType, idempotencyKey, amount, reference = null, description = null, metadata = {} } = payload;
-  const safeMetadata = metadata && typeof metadata === "object" ? metadata : {};
+  const { txType, idempotencyKey, amount, entries: entries, reference = null, description = null, metadata = {} } = payload;
+  const safeMetadata = isPlainObject(metadata) ? metadata : {};
 
   if (!ALLOWED_TX_TYPES.has(txType)) {
     return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "invalid_tx_type" }) };
