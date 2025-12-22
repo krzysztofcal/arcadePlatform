@@ -10,6 +10,17 @@ const parseBody = (body) => {
   }
 };
 
+function isPlainObject(value) {
+  if (value === null || typeof value !== "object") return false;
+  if (Array.isArray(value)) return false;
+  try {
+    const proto = Object.getPrototypeOf(value);
+    return proto === Object.prototype || proto === null;
+  } catch {
+    return false;
+  }
+}
+
 const ALLOWED_TX_TYPES = new Set(["BUY_IN", "CASH_OUT"]);
 
 const CHIPS_ENABLED = process.env.CHIPS_ENABLED === "1";
@@ -65,8 +76,8 @@ export async function handler(event) {
   }
 
   const payload = parseBody(event.body);
-  const { txType, idempotencyKey, amount, reference = null, description = null, metadata = {} } = payload;
-  const safeMetadata = metadata && typeof metadata === "object" ? metadata : {};
+  const { txType, idempotencyKey, amount, entries, reference = null, description = null, metadata = {} } = payload;
+  const safeMetadata = isPlainObject(metadata) ? metadata : {};
 
   if (!ALLOWED_TX_TYPES.has(txType)) {
     return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "invalid_tx_type" }) };
@@ -75,9 +86,30 @@ export async function handler(event) {
     return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "missing_idempotency_key" }) };
   }
 
-  const entries = buildEntries(txType, amount);
-  if (!entries) {
-    return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "invalid_amount" }) };
+  let entriesToPost;
+  if (entries != null) {
+    if (!Array.isArray(entries) || entries.length === 0) {
+      return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "missing_entries" }) };
+    }
+    for (const entry of entries) {
+      const accountType = entry?.accountType;
+      if (accountType !== "USER" && accountType !== "SYSTEM") {
+        return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "unsupported_account_type" }) };
+      }
+      const entryAmount = entry?.amount;
+      if (!Number.isInteger(entryAmount) || entryAmount === 0) {
+        return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "invalid_entry_amount" }) };
+      }
+      if (accountType === "SYSTEM" && !entry?.systemKey) {
+        return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "missing_system_key" }) };
+      }
+    }
+    entriesToPost = entries;
+  } else {
+    entriesToPost = buildEntries(txType, amount);
+    if (!entriesToPost) {
+      return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "invalid_amount" }) };
+    }
   }
 
   try {
@@ -88,7 +120,7 @@ export async function handler(event) {
       reference,
       description,
       metadata: safeMetadata,
-      entries,
+      entries: entriesToPost,
       createdBy: auth.userId,
     });
     klog("chips_tx_ok", { userId: auth.userId, txType, idempotencyKey });
