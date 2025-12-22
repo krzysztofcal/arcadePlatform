@@ -47,7 +47,7 @@ inserted as (
   returning *
 ),
 account as (
-  select * from inserted
+  select i.* from inserted i
   union all
   select * from existing
   limit 1
