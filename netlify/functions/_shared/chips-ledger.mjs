@@ -427,7 +427,7 @@ from inserted i;
 
       return {
         transaction: transactionRow,
-        entries: entriesResult?.[0]?.entries || [],
+        entries: insertedEntries,
         account: accountRows?.[0] || null,
       };
     });
