@@ -397,12 +397,15 @@ inserted as (
   from input_entries i
   returning *
 )
-select coalesce(jsonb_agg(inserted order by inserted.entry_seq), '[]'::jsonb) as entries;
+select coalesce(jsonb_agg(i order by i.entry_seq), '[]'::jsonb) as entries
+from inserted i;
         `,
         [transactionRow.id, entriesPayload]
       );
 
-      const insertedEntries = entriesResult?.[0]?.entries || [];
+      const insertedEntries = Array.isArray(entriesResult?.[0]?.entries)
+        ? entriesResult[0].entries
+        : [];
       if (Array.isArray(insertedEntries) && insertedEntries.length !== entryRecords.length) {
         const mismatch = new Error("Inserted entries count mismatch");
         mismatch.code = "chips_entries_mismatch";
