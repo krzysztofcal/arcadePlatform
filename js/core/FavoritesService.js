@@ -10,6 +10,33 @@
   const CACHE_KEY = 'kcswh:favorites-cache';
   const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
+  function getAuthBridge(globalRef) {
+    if (!globalRef || !globalRef.SupabaseAuthBridge) return null;
+
+    if (typeof globalRef.SupabaseAuthBridge.getAccessToken === 'function') {
+      return globalRef.SupabaseAuthBridge;
+    }
+
+    try {
+      if (globalRef.parent
+        && globalRef.parent !== globalRef
+        && globalRef.parent.SupabaseAuthBridge
+        && typeof globalRef.parent.SupabaseAuthBridge.getAccessToken === 'function') {
+        return globalRef.parent.SupabaseAuthBridge;
+      }
+    } catch (_err) {}
+
+    try {
+      if (globalRef.opener
+        && globalRef.opener.SupabaseAuthBridge
+        && typeof globalRef.opener.SupabaseAuthBridge.getAccessToken === 'function') {
+        return globalRef.opener.SupabaseAuthBridge;
+      }
+    } catch (_err) {}
+
+    return null;
+  }
+
   /**
    * FavoritesService class
    */
@@ -20,7 +47,7 @@
       this.favorites = new Set();
       this.cacheTimestamp = 0;
       this.loading = false;
-      this.listeners = [];
+     this.listeners = [];
     }
 
     /**
@@ -28,8 +55,17 @@
      * @returns {Promise<string|null>}
      */
     async getAccessToken() {
+      const bridge = getAuthBridge(global);
+      if (bridge && typeof bridge.getAccessToken === 'function') {
+        const token = await bridge.getAccessToken();
+        if (token) return token;
+      }
+
       if (global.SupabaseAuth && typeof global.SupabaseAuth.getAccessToken === 'function') {
-        return global.SupabaseAuth.getAccessToken();
+        try {
+          const token = await global.SupabaseAuth.getAccessToken();
+          if (token) return token;
+        } catch (_err) {}
       }
       return null;
     }
