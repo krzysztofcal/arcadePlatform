@@ -184,13 +184,16 @@
     try {
       var payload = await authedFetchWithRetry(url, { method: 'GET' });
       if (payload && payload.data && payload.data.entries){
+        var loggedInvalidAmount = false;
+        var loggedInvalidSeq = false;
         for (var i = 0; i < payload.data.entries.length; i++){
           var entry = payload.data.entries[i];
           if (entry){
             if (typeof entry.amount === 'string'){
               var parsed = parseLedgerAmount(entry.amount);
               entry.amount = parsed;
-              if (entry.amount == null && window && window.XP_DIAG && console && typeof console.debug === 'function'){
+              if (!loggedInvalidAmount && entry.amount == null && window && window.XP_DIAG && console && typeof console.debug === 'function'){
+                loggedInvalidAmount = true;
                 try {
                   console.debug('[chips] invalid ledger amount', {
                     entry_seq: entry.entry_seq,
@@ -199,6 +202,13 @@
                   });
                 } catch (_err){}
               }
+            }
+            var hasValidSeq = Number.isInteger(entry.entry_seq) && entry.entry_seq > 0;
+            if (!loggedInvalidSeq && !hasValidSeq && window && window.XP_DIAG && console && typeof console.debug === 'function'){
+              loggedInvalidSeq = true;
+              try {
+                console.debug('[chips] invalid ledger entry_seq', { raw_entry_seq: entry.entry_seq, tx_type: entry.tx_type });
+              } catch (_err2){}
             }
           }
         }

@@ -149,9 +149,31 @@
       if (nodes.chipLedgerEmpty){ nodes.chipLedgerEmpty.hidden = false; }
       return;
     }
+
+    var invalidSeqCount = 0;
+    var rendered = 0;
     for (var i = 0; i < entries.length; i++){
-      var row = buildLedgerRow(entries[i]);
-      if (row){ nodes.chipLedgerList.appendChild(row); }
+      var entry = entries[i];
+      var hasValidSeq = entry && Number.isInteger(entry.entry_seq) && entry.entry_seq > 0;
+      var row = buildLedgerRow(entry);
+      if (row && !hasValidSeq){
+        row.dataset.invalid = row.dataset.invalid ? row.dataset.invalid + ',entry_seq' : 'entry_seq';
+        invalidSeqCount += 1;
+      }
+      if (row){
+        nodes.chipLedgerList.appendChild(row);
+        rendered += 1;
+      }
+    }
+
+    if (rendered === 0 && nodes.chipLedgerEmpty){
+      nodes.chipLedgerEmpty.hidden = false;
+    }
+
+    if (invalidSeqCount > 0 && window && window.XP_DIAG && typeof console !== 'undefined' && console && typeof console.debug === 'function'){
+      try {
+        console.debug('[chips] invalid entry_seq in ledger', { count: invalidSeqCount });
+      } catch (_err){}
     }
   }
 

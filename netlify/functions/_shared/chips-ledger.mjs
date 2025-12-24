@@ -17,6 +17,18 @@ const asInt = (value, fallback = 0) => {
   return Number.isInteger(parsed) ? parsed : fallback;
 };
 
+const parsePositiveInt = (value) => {
+  if (value == null) return null;
+  const normalized = typeof value === "string" ? value.trim() : value;
+  if (normalized === "") return null;
+  const parsed = Number(normalized);
+  if (!Number.isFinite(parsed)) return null;
+  if (Math.trunc(parsed) !== parsed) return null;
+  if (parsed <= 0) return null;
+  if (Math.abs(parsed) > Number.MAX_SAFE_INTEGER) return null;
+  return parsed;
+};
+
 const parseWholeInt = (value) => {
   if (value === null || value === undefined) return null;
   const normalized = typeof value === "string" ? value.trim() : value;
@@ -129,18 +141,32 @@ with entries as (
 select * from entries;
 `;
   const rows = await executeSql(query, [account.id, afterSeq, cappedLimit]);
-  const expectedStart = afterSeq ? asInt(afterSeq, 0) + 1 : 1;
+  const parsedAfterSeq = parsePositiveInt(afterSeq);
+  const expectedStart = parsedAfterSeq ? parsedAfterSeq + 1 : 1;
   let sequenceOk = true;
   let cursor = expectedStart;
+  let mismatchLogged = false;
   for (const row of rows || []) {
-    if (asInt(row.entry_seq) !== cursor) {
+    const parsedSeq = parsePositiveInt(row?.entry_seq);
+    if (parsedSeq !== cursor) {
       sequenceOk = false;
+      if (!mismatchLogged) {
+        klog("chips:ledger_sequence_mismatch", {
+          after_seq: parsedAfterSeq || 0,
+          expected_seq: cursor,
+          actual_seq: parsedSeq,
+          raw_entry_seq: row?.entry_seq,
+          tx_type: row?.tx_type ?? null,
+          idempotency_key: row?.idempotency_key ?? null,
+        });
+        mismatchLogged = true;
+      }
       break;
     }
     cursor += 1;
   }
   const normalizedEntries = (rows || []).map(row => {
-    const parsedEntrySeq = asInt(row?.entry_seq, null);
+    const parsedEntrySeq = parsePositiveInt(row?.entry_seq);
     const entrySeq = parsedEntrySeq;
     if (parsedEntrySeq === null) {
       klog("chips:ledger_invalid_entry_seq", {
