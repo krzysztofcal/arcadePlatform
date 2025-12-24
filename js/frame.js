@@ -385,7 +385,9 @@ async function loadCatalog(){
   const IFRAME_ACTIVITY_BRIDGE_ID = '__kcswhActivityBridge';
   function buildActivityBridgeScript(targetOrigin){
     if (!targetOrigin) return null;
-    const safeTarget = String(targetOrigin).replace(/'/g, "\\'");
+    const safeTarget = String(targetOrigin)
+      .replace(/\\/g, '\\\\')
+      .replace(/'/g, "\\'");
     return "(function(){" +
       "if (window.__kcswhActivityBridge) return;" +
       "window.__kcswhActivityBridge = true;" +
