@@ -8,6 +8,11 @@
 
   var state = { token: null, checkedAt: 0, tokenPromise: null };
 
+  function toNumber(value){
+    var num = Number(value);
+    return Number.isFinite(num) ? num : null;
+  }
+
   function klog(kind, data){
     try {
       if (window.KLog && typeof window.KLog.log === 'function'){
@@ -133,9 +138,26 @@
     throw err;
   }
 
+  async function authedFetchWithRetry(url, options){
+    try {
+      var res = await authedFetch(url, options);
+      return await parseResponse(res);
+    } catch (err){
+      if (err && err.status === 401){
+        try { await fetchAuthToken(true); } catch (_err){}
+        var retryRes = await authedFetch(url, options);
+        return await parseResponse(retryRes);
+      }
+      throw err;
+    }
+  }
+
   async function fetchBalance(){
-    var res = await authedFetch(BALANCE_URL, { method: 'GET' });
-    var payload = await parseResponse(res);
+    var payload = await authedFetchWithRetry(BALANCE_URL, { method: 'GET' });
+    if (payload && payload.data){
+      var parsed = toNumber(payload.data.balance);
+      if (parsed != null){ payload.data.balance = parsed; }
+    }
     emit('chips:balance', payload.data);
     return payload.data;
   }
@@ -149,15 +171,31 @@
       params.push('limit=' + encodeURIComponent(options.limit));
     }
     var url = params.length ? (LEDGER_URL + '?' + params.join('&')) : LEDGER_URL;
-    var res = await authedFetch(url, { method: 'GET' });
-    var payload = await parseResponse(res);
-    emit('chips:ledger', payload.data);
-    return payload.data;
+    try {
+      var payload = await authedFetchWithRetry(url, { method: 'GET' });
+      if (payload && payload.data && payload.data.entries){
+        for (var i = 0; i < payload.data.entries.length; i++){
+          var entry = payload.data.entries[i];
+          if (entry && entry.amount != null){
+            var val = toNumber(entry.amount);
+            if (val != null){ entry.amount = val; }
+          }
+        }
+      }
+      emit('chips:ledger', payload.data);
+      return payload.data;
+    } catch (err){
+      if (err && err.status === 404){
+        var empty = { entries: [] };
+        emit('chips:ledger', empty);
+        return empty;
+      }
+      throw err;
+    }
   }
 
   async function postTransaction(input){
-    var res = await authedFetch(TX_URL, { method: 'POST', body: JSON.stringify(input || {}) });
-    var payload = await parseResponse(res);
+    var payload = await authedFetchWithRetry(TX_URL, { method: 'POST', body: JSON.stringify(input || {}) });
     emit('chips:tx-complete', payload.data);
     return payload.data;
   }

@@ -2,6 +2,7 @@
   if (typeof document === 'undefined') return;
   const doc = document;
   const chipNodes = { badge: null, amount: null, ready: false };
+  let chipInFlight = null;
 
   function pickPreferredTopbar(list){
     if (!list || !list.length) return null;
@@ -103,22 +104,30 @@
   async function refreshChipBadge(){
     ensureChipNodes();
     if (!chipNodes.badge || !window || !window.ChipsClient || typeof window.ChipsClient.fetchBalance !== 'function') return;
+    if (chipInFlight){ return chipInFlight; }
     setChipBadge('Syncing chips…', { loading: true });
-    try {
-      const balance = await window.ChipsClient.fetchBalance();
-      const value = balance && typeof balance.balance === 'number' ? balance.balance : null;
-      renderChipBadgeBalance(value);
-    } catch (err){
-      if (err && (err.status === 404 || err.code === 'not_found')){
-        hideChipBadge();
-        return;
+    chipInFlight = (async function(){
+      try {
+        const balance = await window.ChipsClient.fetchBalance();
+        const raw = balance && balance.balance != null ? Number(balance.balance) : null;
+        const value = Number.isFinite(raw) ? raw : null;
+        renderChipBadgeBalance(value);
+      } catch (err){
+        if (err && (err.status === 404 || err.code === 'not_found')){
+          hideChipBadge();
+          return;
+        }
+        if (err && err.code === 'not_authenticated'){
+          renderChipBadgeSignedOut();
+          return;
+        }
+        setChipBadge('Chip sync failed', { loading: false });
+      } finally {
+        chipInFlight = null;
       }
-      if (err && err.code === 'not_authenticated'){
-        renderChipBadgeSignedOut();
-        return;
-      }
-      setChipBadge('Chip sync failed', { loading: false });
-    }
+    })();
+
+    return chipInFlight;
   }
 
   function handleAuthChange(event, _user, _session){

@@ -5,6 +5,7 @@
   var auth = null;
   var nodes = {};
   var currentUser = null;
+  var chipsInFlight = null;
 
   function selectNodes(){
     nodes.status = doc.getElementById('accountStatus');
@@ -77,7 +78,8 @@
 
   function renderChipBalance(balance){
     if (!nodes.chipBalanceValue) return;
-    var amount = (balance && typeof balance.balance === 'number') ? balance.balance : null;
+    var raw = balance && balance.balance != null ? Number(balance.balance) : null;
+    var amount = Number.isFinite(raw) ? raw : null;
     nodes.chipBalanceValue.textContent = amount == null ? '—' : amount.toLocaleString();
   }
 
@@ -106,7 +108,8 @@
 
     var amount = doc.createElement('div');
     amount.className = 'chip-ledger__amount';
-    var value = entry && typeof entry.amount === 'number' ? entry.amount : 0;
+    var rawAmount = entry && entry.amount != null ? Number(entry.amount) : null;
+    var value = Number.isFinite(rawAmount) ? rawAmount : 0;
     amount.textContent = (value >= 0 ? '+' : '') + value.toLocaleString();
     amount.className += value >= 0 ? ' chip-ledger__amount--positive' : ' chip-ledger__amount--negative';
 
@@ -118,11 +121,11 @@
   function renderLedger(entries){
     if (!nodes.chipLedgerList) return;
     nodes.chipLedgerList.innerHTML = '';
+    if (nodes.chipLedgerEmpty){ nodes.chipLedgerEmpty.hidden = true; }
     if (!entries || !entries.length){
       if (nodes.chipLedgerEmpty){ nodes.chipLedgerEmpty.hidden = false; }
       return;
     }
-    if (nodes.chipLedgerEmpty){ nodes.chipLedgerEmpty.hidden = true; }
     for (var i = 0; i < entries.length; i++){
       var row = buildLedgerRow(entries[i]);
       if (row){ nodes.chipLedgerList.appendChild(row); }
@@ -136,24 +139,39 @@
       return;
     }
 
+    if (chipsInFlight){ return chipsInFlight; }
+
     setBlockVisibility(nodes.chipPanel, true);
     setChipStatus('Syncing chips…', 'info');
+    if (nodes.chipBalanceValue){ nodes.chipBalanceValue.textContent = '—'; }
+    if (nodes.chipLedgerList){ nodes.chipLedgerList.innerHTML = ''; }
+    if (nodes.chipLedgerEmpty){ nodes.chipLedgerEmpty.hidden = true; }
 
-    try {
-      var state = await window.ChipsClient.fetchState({ limit: 10 });
-      renderChipBalance(state && state.balance ? state.balance : null);
-      renderLedger(state && state.ledger && state.ledger.entries ? state.ledger.entries : []);
-      setChipStatus('', '');
-    } catch (err){
-      if (err && (err.status === 404 || err.code === 'not_found')){
-        setChipStatus('Chips are not available right now.', 'info');
-        return;
+    chipsInFlight = (async function(){
+      try {
+        var state = await window.ChipsClient.fetchState({ limit: 10 });
+        renderChipBalance(state && state.balance ? state.balance : null);
+        renderLedger(state && state.ledger && state.ledger.entries ? state.ledger.entries : []);
+        setChipStatus('', '');
+      } catch (err){
+        if (err && (err.status === 404 || err.code === 'not_found')){
+          clearChips();
+          setChipStatus('Chips are not available right now.', 'info');
+          setBlockVisibility(nodes.chipPanel, false);
+          return;
+        }
+        if (err && err.code === 'not_authenticated'){
+          clearChips();
+          setBlockVisibility(nodes.chipPanel, false);
+          return;
+        }
+        setChipStatus('Could not load chips right now.', 'error');
+      } finally {
+        chipsInFlight = null;
       }
-      var message = err && err.code === 'not_authenticated'
-        ? 'Sign in to view your chips.'
-        : 'Could not load chips right now.';
-      setChipStatus(message, 'error');
-    }
+    })();
+
+    return chipsInFlight;
   }
 
   function handleSignIn(e){
