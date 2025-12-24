@@ -45,7 +45,7 @@
 
       // Listen for auth changes
       if (global.SupabaseAuth && typeof global.SupabaseAuth.onAuthChange === 'function') {
-        global.SupabaseAuth.onAuthChange(async (user) => {
+        global.SupabaseAuth.onAuthChange(async (event, user) => {
           if (user) {
             if (loginPrompt) loginPrompt.hidden = true;
             await renderFavorites();
