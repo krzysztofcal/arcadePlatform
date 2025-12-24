@@ -1,6 +1,9 @@
 -- Favorites schema - stores user favorite games
 -- Cross-browser support via database storage (requires authentication)
 
+-- Ensure pgcrypto extension exists for gen_random_uuid()
+create extension if not exists pgcrypto with schema extensions;
+
 -- Create favorites table if it doesn't exist
 do $$
 begin
@@ -37,7 +40,7 @@ do $$
 begin
   if not exists (
     select 1 from pg_policies
-    where tablename = 'favorites' and policyname = 'favorites_select_own'
+    where schemaname = 'public' and tablename = 'favorites' and policyname = 'favorites_select_own'
   ) then
     create policy favorites_select_own on public.favorites
       for select using (auth.uid() = user_id);
@@ -49,7 +52,7 @@ do $$
 begin
   if not exists (
     select 1 from pg_policies
-    where tablename = 'favorites' and policyname = 'favorites_insert_own'
+    where schemaname = 'public' and tablename = 'favorites' and policyname = 'favorites_insert_own'
   ) then
     create policy favorites_insert_own on public.favorites
       for insert with check (auth.uid() = user_id);
@@ -61,7 +64,7 @@ do $$
 begin
   if not exists (
     select 1 from pg_policies
-    where tablename = 'favorites' and policyname = 'favorites_delete_own'
+    where schemaname = 'public' and tablename = 'favorites' and policyname = 'favorites_delete_own'
   ) then
     create policy favorites_delete_own on public.favorites
       for delete using (auth.uid() = user_id);
