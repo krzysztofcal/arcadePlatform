@@ -15,7 +15,10 @@
 
   function parseLedgerAmount(value){
     if (value === null || value === undefined) return null;
-    var num = Number(value);
+    var normalized = value;
+    if (typeof value === 'string'){ normalized = value.trim(); }
+    if (normalized === '') return null;
+    var num = Number(normalized);
     if (!Number.isFinite(num)) return null;
     if (Math.trunc(num) !== num) return null;
     if (num === 0) return null;
@@ -189,19 +192,26 @@
         for (var i = 0; i < payload.data.entries.length; i++){
           var entry = payload.data.entries[i];
           if (entry){
-            if (typeof entry.amount === 'string'){
-              var parsed = parseLedgerAmount(entry.amount);
-              entry.amount = parsed;
-              if (!loggedInvalidAmount && entry.amount == null && window && window.XP_DIAG && console && typeof console.debug === 'function'){
-                loggedInvalidAmount = true;
-                try {
-                  console.debug('[chips] invalid ledger amount', {
-                    entry_seq: entry.entry_seq,
-                    raw_amount: entry && entry.raw_amount != null ? entry.raw_amount : null,
-                    tx_type: entry.tx_type,
-                  });
-                } catch (_err){}
-              }
+            var rawAmount = entry && Object.prototype.hasOwnProperty.call(entry, 'amount') ? entry.amount : null;
+            var parsedAmount = parseLedgerAmount(rawAmount);
+            entry.amount = parsedAmount;
+            if (
+              !loggedInvalidAmount &&
+              rawAmount != null &&
+              parsedAmount == null &&
+              window &&
+              window.XP_DIAG &&
+              console &&
+              typeof console.debug === 'function'
+            ){
+              loggedInvalidAmount = true;
+              try {
+                console.debug('[chips] invalid ledger amount', {
+                  entry_seq: entry.entry_seq,
+                  raw_amount: entry && entry.raw_amount != null ? entry.raw_amount : rawAmount,
+                  tx_type: entry.tx_type,
+                });
+              } catch (_err){}
             }
             var hasValidSeq = Number.isInteger(entry.entry_seq) && entry.entry_seq > 0;
             if (!loggedInvalidSeq && !hasValidSeq && window && window.XP_DIAG && console && typeof console.debug === 'function'){

@@ -10,7 +10,8 @@ const VALID_TX_TYPES = new Set([
   "PRIZE_PAYOUT",
 ]);
 
-const asInt = (value, fallback = 0) => {
+// Loose integer parsing for non-sequence fields only (balances, etc.).
+const asLooseInt = (value, fallback = 0) => {
   if (value == null) return fallback;
   if (typeof value === "string" && value.trim() === "") return fallback;
   const parsed = Number(value);
@@ -110,8 +111,8 @@ async function getUserBalance(userId) {
   const account = await getOrCreateUserAccount(userId);
   return {
     accountId: account.id,
-    balance: asInt(account.balance, 0),
-    nextEntrySeq: asInt(account.next_entry_seq, 1),
+    balance: asLooseInt(account.balance, 0),
+    nextEntrySeq: asLooseInt(account.next_entry_seq, 1),
     status: account.status,
   };
 }
@@ -119,6 +120,11 @@ async function getUserBalance(userId) {
 async function listUserLedger(userId, { afterSeq = null, limit = 50 } = {}) {
   const cappedLimit = Math.min(Math.max(1, Number.isInteger(limit) ? limit : 50), 200);
   const account = await getOrCreateUserAccount(userId);
+  const hasAfter = afterSeq !== null && afterSeq !== undefined && !(typeof afterSeq === "string" && afterSeq.trim() === "");
+  const parsedAfterSeq = parsePositiveInt(afterSeq);
+  if (hasAfter && parsedAfterSeq === null) {
+    throw badRequest("invalid_after_seq", "Invalid after sequence");
+  }
   const query = `
 with entries as (
   select
@@ -140,8 +146,7 @@ with entries as (
 )
 select * from entries;
 `;
-  const rows = await executeSql(query, [account.id, afterSeq, cappedLimit]);
-  const parsedAfterSeq = parsePositiveInt(afterSeq);
+  const rows = await executeSql(query, [account.id, parsedAfterSeq, cappedLimit]);
   const expectedStart = parsedAfterSeq ? parsedAfterSeq + 1 : 1;
   let sequenceOk = true;
   let cursor = expectedStart;
@@ -158,6 +163,7 @@ select * from entries;
           raw_entry_seq: row?.entry_seq,
           tx_type: row?.tx_type ?? null,
           idempotency_key: row?.idempotency_key ?? null,
+          reason: parsedSeq === null ? "invalid_entry_seq" : "non_contiguous_seq",
         });
         mismatchLogged = true;
       }

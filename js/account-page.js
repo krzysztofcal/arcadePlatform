@@ -155,11 +155,11 @@
     for (var i = 0; i < entries.length; i++){
       var entry = entries[i];
       var hasValidSeq = entry && Number.isInteger(entry.entry_seq) && entry.entry_seq > 0;
-      var row = buildLedgerRow(entry);
-      if (row && !hasValidSeq){
-        row.dataset.invalid = row.dataset.invalid ? row.dataset.invalid + ',entry_seq' : 'entry_seq';
+      if (!hasValidSeq){
         invalidSeqCount += 1;
+        continue;
       }
+      var row = buildLedgerRow(entry);
       if (row){
         nodes.chipLedgerList.appendChild(row);
         rendered += 1;
