@@ -100,7 +100,12 @@
 
     var time = doc.createElement('div');
     time.className = 'chip-ledger__time';
-    time.textContent = entry && entry.created_at ? new Date(entry.created_at).toLocaleString() : '';
+    var parsedCreated = entry && entry.created_at ? new Date(entry.created_at) : null;
+    var parsedTxCreated = entry && entry.tx_created_at ? new Date(entry.tx_created_at) : null;
+    var useCreated = parsedCreated && !Number.isNaN(parsedCreated.getTime()) ? parsedCreated : null;
+    var useTxCreated = parsedTxCreated && !Number.isNaN(parsedTxCreated.getTime()) ? parsedTxCreated : null;
+    var displayTime = useCreated || useTxCreated;
+    time.textContent = displayTime ? displayTime.toLocaleString() : '';
 
     meta.appendChild(type);
     if (desc.textContent){ meta.appendChild(desc); }
@@ -109,9 +114,14 @@
     var amount = doc.createElement('div');
     amount.className = 'chip-ledger__amount';
     var rawAmount = entry && entry.amount != null ? Number(entry.amount) : null;
-    var value = Number.isFinite(rawAmount) ? rawAmount : 0;
-    amount.textContent = (value >= 0 ? '+' : '') + value.toLocaleString();
-    amount.className += value >= 0 ? ' chip-ledger__amount--positive' : ' chip-ledger__amount--negative';
+    var hasAmount = Number.isFinite(rawAmount) && rawAmount !== 0;
+    if (hasAmount){
+      amount.textContent = (rawAmount > 0 ? '+' : '') + rawAmount.toLocaleString();
+      amount.className += rawAmount > 0 ? ' chip-ledger__amount--positive' : ' chip-ledger__amount--negative';
+    } else {
+      amount.textContent = '—';
+      item.dataset.invalid = 'amount';
+    }
 
     item.appendChild(meta);
     item.appendChild(amount);

@@ -119,7 +119,41 @@ select * from entries;
     }
     cursor += 1;
   }
-  return { entries: rows || [], sequenceOk, nextExpectedSeq: cursor };
+  const normalizedEntries = (rows || []).map(row => {
+    const parsedAmount = Number(row?.amount);
+    const validAmount =
+      Number.isInteger(parsedAmount) &&
+      parsedAmount !== 0 &&
+      Math.abs(parsedAmount) <= Number.MAX_SAFE_INTEGER
+        ? parsedAmount
+        : null;
+
+    const asIso = (value) => {
+      if (!value) return null;
+      const dt = new Date(value);
+      if (Number.isNaN(dt.getTime())) return null;
+      return dt.toISOString();
+    };
+
+    const createdAt = asIso(row?.created_at);
+    const txCreatedAt = asIso(row?.tx_created_at);
+
+    const safe = {
+      entry_seq: row?.entry_seq,
+      amount: validAmount,
+      metadata: row?.metadata ?? null,
+      created_at: createdAt,
+      tx_type: row?.tx_type,
+      reference: row?.reference,
+      description: row?.description,
+      idempotency_key: row?.idempotency_key,
+      tx_created_at: txCreatedAt,
+    };
+
+    return safe;
+  });
+
+  return { entries: normalizedEntries, sequenceOk, nextExpectedSeq: cursor };
 }
 
 async function findTransactionByKey(idempotencyKey) {
