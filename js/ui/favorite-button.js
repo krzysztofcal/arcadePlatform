@@ -86,10 +86,10 @@
       e.preventDefault();
       e.stopPropagation();
 
-      console.debug('[FavoriteButton] handleClick: gameId=', gameId, 'favoritesService=', !!global.favoritesService, 'isLoading=', isLoading);
+      console.log('[FavoriteButton] CLICK - gameId:', gameId, 'hasService:', !!global.favoritesService, 'isLoading:', isLoading);
 
       if (!global.favoritesService || isLoading) {
-        console.debug('[FavoriteButton] handleClick: early return');
+        console.log('[FavoriteButton] CLICK - early return (no service or loading)');
         return;
       }
 
@@ -97,10 +97,13 @@
       updateUI();
 
       try {
+        console.log('[FavoriteButton] CLICK - calling toggleFavorite...');
         const result = await global.favoritesService.toggleFavorite(gameId);
-        console.debug('[FavoriteButton] handleClick: result=', result);
+        console.log('[FavoriteButton] CLICK - result:', result);
         if (result.success) {
           isFavorite = result.isFavorite;
+        } else {
+          console.warn('[FavoriteButton] CLICK - toggle failed, result:', result);
         }
       } catch (err) {
         console.error('[FavoriteButton] Failed to toggle favorite:', err);
@@ -114,13 +117,19 @@
      * Check authentication status and favorite state
      */
     async function checkStatus() {
+      console.debug('[FavoriteButton] checkStatus called, gameId=', gameId);
+
       if (!global.favoritesService) {
-        console.debug('[FavoriteButton] FavoritesService not available');
+        console.debug('[FavoriteButton] FavoritesService not available, retrying in 200ms');
+        // Retry after a short delay - FavoritesService might not be loaded yet
+        setTimeout(checkStatus, 200);
         return;
       }
 
       try {
+        console.debug('[FavoriteButton] Checking authentication...');
         isAuthenticated = await global.favoritesService.isAuthenticated();
+        console.debug('[FavoriteButton] isAuthenticated=', isAuthenticated);
 
         if (!button) return;
 
@@ -130,13 +139,16 @@
           // Check if game is favorite
           await global.favoritesService.init(false);
           isFavorite = global.favoritesService.isFavoriteSync(gameId);
+          console.debug('[FavoriteButton] isFavorite (cached)=', isFavorite);
           updateUI();
 
           // Fetch fresh data from API
           const freshFavorites = await global.favoritesService.getFavorites(true);
           isFavorite = freshFavorites.includes(gameId);
+          console.debug('[FavoriteButton] isFavorite (fresh)=', isFavorite);
           updateUI();
         } else {
+          console.debug('[FavoriteButton] Not authenticated, hiding button');
           button.style.display = 'none';
         }
       } catch (err) {
