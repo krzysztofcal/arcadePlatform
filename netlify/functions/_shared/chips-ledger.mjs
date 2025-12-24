@@ -15,6 +15,24 @@ const asInt = (value, fallback = 0) => {
   return Number.isInteger(parsed) ? parsed : fallback;
 };
 
+const parseWholeInt = (value) => {
+  if (value === null || value === undefined) return null;
+  const normalized = typeof value === "string" ? value.trim() : value;
+  const parsed = Number(normalized);
+  if (!Number.isFinite(parsed)) return null;
+  if (Math.trunc(parsed) !== parsed) return null;
+  if (parsed === 0) return null;
+  if (Math.abs(parsed) > Number.MAX_SAFE_INTEGER) return null;
+  return parsed;
+};
+
+const asIso = (value) => {
+  if (!value) return null;
+  const dt = new Date(value);
+  if (Number.isNaN(dt.getTime())) return null;
+  return dt.toISOString();
+};
+
 function badRequest(code, message) {
   const err = new Error(message || code);
   err.status = 400;
@@ -120,37 +138,31 @@ select * from entries;
     cursor += 1;
   }
   const normalizedEntries = (rows || []).map(row => {
-    const parsedAmount = Number(row?.amount);
-    const validAmount =
-      Number.isInteger(parsedAmount) &&
-      parsedAmount !== 0 &&
-      Math.abs(parsedAmount) <= Number.MAX_SAFE_INTEGER
-        ? parsedAmount
-        : null;
-
-    const asIso = (value) => {
-      if (!value) return null;
-      const dt = new Date(value);
-      if (Number.isNaN(dt.getTime())) return null;
-      return dt.toISOString();
-    };
-
+    const entrySeq = Number.isInteger(Number(row?.entry_seq)) ? Number(row.entry_seq) : null;
+    const parsedAmount = parseWholeInt(row?.amount);
     const createdAt = asIso(row?.created_at);
     const txCreatedAt = asIso(row?.tx_created_at);
 
-    const safe = {
-      entry_seq: row?.entry_seq,
-      amount: validAmount,
+    if (parsedAmount === null && row?.amount != null) {
+      klog("chips:ledger_invalid_amount", {
+        entry_seq: row?.entry_seq,
+        raw_amount: row?.amount,
+        tx_type: row?.tx_type,
+      });
+    }
+
+    return {
+      entry_seq: entrySeq,
+      amount: parsedAmount,
+      raw_amount: row?.amount == null ? null : String(row.amount),
       metadata: row?.metadata ?? null,
       created_at: createdAt,
-      tx_type: row?.tx_type,
-      reference: row?.reference,
-      description: row?.description,
-      idempotency_key: row?.idempotency_key,
+      tx_type: row?.tx_type ?? null,
+      reference: row?.reference ?? null,
+      description: row?.description ?? null,
+      idempotency_key: row?.idempotency_key ?? null,
       tx_created_at: txCreatedAt,
     };
-
-    return safe;
   });
 
   return { entries: normalizedEntries, sequenceOk, nextExpectedSeq: cursor };

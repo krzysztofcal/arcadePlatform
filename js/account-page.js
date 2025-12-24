@@ -114,13 +114,26 @@
     var amount = doc.createElement('div');
     amount.className = 'chip-ledger__amount';
     var rawAmount = entry && entry.amount != null ? Number(entry.amount) : null;
-    var hasAmount = Number.isFinite(rawAmount) && rawAmount !== 0;
-    if (hasAmount){
+    var validAmount =
+      Number.isFinite(rawAmount) &&
+      Math.trunc(rawAmount) === rawAmount &&
+      rawAmount !== 0;
+
+    if (validAmount){
       amount.textContent = (rawAmount > 0 ? '+' : '') + rawAmount.toLocaleString();
       amount.className += rawAmount > 0 ? ' chip-ledger__amount--positive' : ' chip-ledger__amount--negative';
     } else {
       amount.textContent = '—';
       item.dataset.invalid = 'amount';
+      if (window && window.XP_DIAG && typeof console !== 'undefined' && console && typeof console.debug === 'function'){
+        try {
+          console.debug('[chips] invalid ledger amount', {
+            entry_seq: entry && entry.entry_seq,
+            raw_amount: entry && entry.raw_amount,
+            entry: entry,
+          });
+        } catch (_err){}
+      }
     }
 
     item.appendChild(meta);
