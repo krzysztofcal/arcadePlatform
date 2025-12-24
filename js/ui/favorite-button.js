@@ -86,13 +86,19 @@
       e.preventDefault();
       e.stopPropagation();
 
-      if (!global.favoritesService || isLoading) return;
+      console.debug('[FavoriteButton] handleClick: gameId=', gameId, 'favoritesService=', !!global.favoritesService, 'isLoading=', isLoading);
+
+      if (!global.favoritesService || isLoading) {
+        console.debug('[FavoriteButton] handleClick: early return');
+        return;
+      }
 
       isLoading = true;
       updateUI();
 
       try {
         const result = await global.favoritesService.toggleFavorite(gameId);
+        console.debug('[FavoriteButton] handleClick: result=', result);
         if (result.success) {
           isFavorite = result.isFavorite;
         }
@@ -158,7 +164,7 @@
 
       // Listen for auth changes
       if (global.SupabaseAuth && typeof global.SupabaseAuth.onAuthChange === 'function') {
-        global.SupabaseAuth.onAuthChange(async (user) => {
+        global.SupabaseAuth.onAuthChange(async (event, user) => {
           isAuthenticated = !!user;
           if (button) {
             button.style.display = isAuthenticated ? '' : 'none';

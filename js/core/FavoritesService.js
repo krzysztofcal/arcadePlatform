@@ -56,17 +56,21 @@
      */
     async getAccessToken() {
       const bridge = getAuthBridge(global);
+      console.debug('[FavoritesService] getAccessToken: bridge=', !!bridge);
       if (bridge && typeof bridge.getAccessToken === 'function') {
         const token = await bridge.getAccessToken();
+        console.debug('[FavoritesService] getAccessToken: bridge token=', !!token);
         if (token) return token;
       }
 
       if (global.SupabaseAuth && typeof global.SupabaseAuth.getAccessToken === 'function') {
         try {
           const token = await global.SupabaseAuth.getAccessToken();
+          console.debug('[FavoritesService] getAccessToken: SupabaseAuth token=', !!token);
           if (token) return token;
         } catch (_err) {}
       }
+      console.debug('[FavoritesService] getAccessToken: no token found');
       return null;
     }
 
@@ -225,7 +229,11 @@
      * @returns {Promise<boolean>}
      */
     async addFavorite(gameId) {
-      if (!gameId) return false;
+      console.debug('[FavoritesService] addFavorite called:', gameId);
+      if (!gameId) {
+        console.debug('[FavoritesService] addFavorite: no gameId');
+        return false;
+      }
 
       const token = await this.getAccessToken();
       if (!token) {
@@ -233,6 +241,7 @@
         return false;
       }
 
+      console.debug('[FavoritesService] addFavorite: making API call to', this.apiEndpoint);
       try {
         const response = await fetch(this.apiEndpoint, {
           method: 'POST',
@@ -243,11 +252,13 @@
           body: JSON.stringify({ gameId })
         });
 
+        console.debug('[FavoritesService] addFavorite: response status=', response.status);
         if (!response.ok) {
           throw new Error(`API error: ${response.status}`);
         }
 
         const data = await response.json();
+        console.debug('[FavoritesService] addFavorite: response data=', data);
         if (!data.ok) {
           throw new Error(data.error || 'Failed to add favorite');
         }
@@ -257,6 +268,7 @@
         this.saveToCache();
         this.notifyListeners();
 
+        console.debug('[FavoritesService] addFavorite: success');
         return true;
       } catch (err) {
         console.error('[FavoritesService] Failed to add favorite:', err);
@@ -315,13 +327,17 @@
      * @returns {Promise<{success: boolean, isFavorite: boolean}>}
      */
     async toggleFavorite(gameId) {
+      console.debug('[FavoritesService] toggleFavorite:', gameId);
       const currentlyFavorite = this.isFavoriteSync(gameId);
+      console.debug('[FavoritesService] currentlyFavorite:', currentlyFavorite);
 
       if (currentlyFavorite) {
         const success = await this.removeFavorite(gameId);
+        console.debug('[FavoritesService] removeFavorite result:', success);
         return { success, isFavorite: !success };
       } else {
         const success = await this.addFavorite(gameId);
+        console.debug('[FavoritesService] addFavorite result:', success);
         return { success, isFavorite: success };
       }
     }
@@ -369,7 +385,7 @@
 
       // Set up auth state change listener
       if (global.SupabaseAuth && typeof global.SupabaseAuth.onAuthChange === 'function') {
-        global.SupabaseAuth.onAuthChange(async (user) => {
+        global.SupabaseAuth.onAuthChange(async (event, user) => {
           if (user) {
             // User logged in - refresh favorites from API
             await this.fetchFavorites();
