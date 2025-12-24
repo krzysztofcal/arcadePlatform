@@ -129,7 +129,7 @@
         try {
           console.debug('[chips] invalid ledger amount', {
             entry_seq: entry && entry.entry_seq,
-            raw_amount: entry && entry.raw_amount,
+            raw_amount: entry && entry.raw_amount != null ? entry.raw_amount : null,
             entry: entry,
           });
         } catch (_err){}

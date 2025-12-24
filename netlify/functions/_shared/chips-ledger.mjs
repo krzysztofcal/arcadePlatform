@@ -138,15 +138,25 @@ select * from entries;
     cursor += 1;
   }
   const normalizedEntries = (rows || []).map(row => {
-    const entrySeq = Number.isInteger(Number(row?.entry_seq)) ? Number(row.entry_seq) : null;
+    const parsedEntrySeq = asInt(row?.entry_seq, null);
+    let entrySeq = parsedEntrySeq;
+    if (parsedEntrySeq === null) {
+      klog("chips:ledger_invalid_entry_seq", {
+        raw_entry_seq: row?.entry_seq,
+        tx_type: row?.tx_type,
+        idempotency_key: row?.idempotency_key,
+      });
+      entrySeq = 0;
+    }
+
     const parsedAmount = parseWholeInt(row?.amount);
     const createdAt = asIso(row?.created_at);
     const txCreatedAt = asIso(row?.tx_created_at);
 
     if (parsedAmount === null && row?.amount != null) {
       klog("chips:ledger_invalid_amount", {
-        entry_seq: row?.entry_seq,
-        raw_amount: row?.amount,
+        entry_seq: entrySeq,
+        raw_amount: row?.amount == null ? null : String(row.amount),
         tx_type: row?.tx_type,
       });
     }
