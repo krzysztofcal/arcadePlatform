@@ -3,8 +3,10 @@
  * Requires authentication - only works for logged-in users
  * Cross-browser support via database storage
  */
+console.log('[FavoritesService] Script loading...');
 (function(global){
   'use strict';
+  console.log('[FavoritesService] IIFE executing, global=', typeof global);
 
   const API_ENDPOINT = '/api/favorites';
   const CACHE_KEY = 'kcswh:favorites-cache';

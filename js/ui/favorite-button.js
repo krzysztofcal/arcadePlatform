@@ -3,8 +3,10 @@
  * Shows filled star when favorited, outline star when not
  * Only visible for authenticated users
  */
+console.log('[FavoriteButton] Script loading...');
 (function(global){
   'use strict';
+  console.log('[FavoriteButton] IIFE executing');
 
   const STAR_FILLED = '★';
   const STAR_OUTLINE = '☆';
