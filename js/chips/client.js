@@ -19,6 +19,7 @@
     if (!Number.isFinite(num)) return null;
     if (Math.trunc(num) !== num) return null;
     if (num === 0) return null;
+    if (Math.abs(num) > Number.MAX_SAFE_INTEGER) return null;
     return num;
   }
 
@@ -186,16 +187,18 @@
         for (var i = 0; i < payload.data.entries.length; i++){
           var entry = payload.data.entries[i];
           if (entry){
-            var parsed = parseLedgerAmount(entry.amount);
-            entry.amount = parsed;
-            if (entry.amount == null && window && window.XP_DIAG && console && typeof console.debug === 'function'){
-              try {
-                console.debug('[chips] invalid ledger amount', {
-                  entry_seq: entry.entry_seq,
-                  raw_amount: entry.raw_amount,
-                  tx_type: entry.tx_type,
-                });
-              } catch (_err){}
+            if (typeof entry.amount === 'string'){
+              var parsed = parseLedgerAmount(entry.amount);
+              entry.amount = parsed;
+              if (entry.amount == null && window && window.XP_DIAG && console && typeof console.debug === 'function'){
+                try {
+                  console.debug('[chips] invalid ledger amount', {
+                    entry_seq: entry.entry_seq,
+                    raw_amount: entry && entry.raw_amount != null ? entry.raw_amount : null,
+                    tx_type: entry.tx_type,
+                  });
+                } catch (_err){}
+              }
             }
           }
         }

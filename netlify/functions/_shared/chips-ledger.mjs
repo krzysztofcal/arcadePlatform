@@ -11,6 +11,8 @@ const VALID_TX_TYPES = new Set([
 ]);
 
 const asInt = (value, fallback = 0) => {
+  if (value == null) return fallback;
+  if (typeof value === "string" && value.trim() === "") return fallback;
   const parsed = Number(value);
   return Number.isInteger(parsed) ? parsed : fallback;
 };
@@ -139,14 +141,13 @@ select * from entries;
   }
   const normalizedEntries = (rows || []).map(row => {
     const parsedEntrySeq = asInt(row?.entry_seq, null);
-    let entrySeq = parsedEntrySeq;
+    const entrySeq = parsedEntrySeq;
     if (parsedEntrySeq === null) {
       klog("chips:ledger_invalid_entry_seq", {
         raw_entry_seq: row?.entry_seq,
         tx_type: row?.tx_type,
         idempotency_key: row?.idempotency_key,
       });
-      entrySeq = 0;
     }
 
     const parsedAmount = parseWholeInt(row?.amount);
