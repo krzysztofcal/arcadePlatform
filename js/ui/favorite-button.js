@@ -203,6 +203,11 @@
    * Looks for data-game-id attribute on body and .actions container in .titleBar
    */
   function autoInit() {
+    // Prevent double initialization
+    if (global.__favoriteButtonInitialized) {
+      return;
+    }
+
     const body = document.body;
     const gameId = body.dataset.gameId || body.dataset.gameSlug;
 
@@ -218,6 +223,15 @@
       return;
     }
 
+    // Check if button already exists
+    if (actionsContainer.querySelector('.btnFavorite')) {
+      console.debug('[FavoriteButton] Button already exists');
+      return;
+    }
+
+    // Mark as initialized
+    global.__favoriteButtonInitialized = true;
+
     // Create the favorite button
     FavoriteButton({
       gameId: gameId,
@@ -231,9 +245,9 @@
   // Expose globally
   global.FavoriteButton = FavoriteButton;
 
-  // Auto-initialize on DOM ready
+  // Auto-initialize on DOM ready (only once)
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', autoInit);
+    document.addEventListener('DOMContentLoaded', autoInit, { once: true });
   } else {
     // Small delay to ensure services are loaded
     setTimeout(autoInit, 50);
