@@ -25,6 +25,7 @@ declare
   genesis_status text;
   treasury_id uuid;
   treasury_status text;
+  applied_count int := 0;
   entries_count int := 0;
   now_ts timestamptz := timezone('utc', now());
 begin
@@ -101,12 +102,23 @@ begin
       where a.id = d.account_id
         and exists (select 1 from locked l where l.id = a.id)
       returning a.id
+  )
+  select count(*) into applied_count from apply_balance;
+
+  if applied_count <> 2 then
+    raise exception 'seed_balance_invariant_failed' using errcode = 'P0001';
+  end if;
+
+  with raw_entries as (
+    select tx_id as transaction_id, genesis_id as account_id, (-seed_amount)::bigint as amount,
+           jsonb_build_object('source', 'TREASURY_SEED') as metadata
+    union all
+    select tx_id, treasury_id, (seed_amount)::bigint, jsonb_build_object('source', 'TREASURY_SEED')
   ),
   inserted_entries as (
     insert into public.chips_entries (transaction_id, account_id, amount, metadata)
     select r.transaction_id, r.account_id, r.amount, r.metadata
     from raw_entries r
-    join apply_balance ab on ab.id = r.account_id
     returning 1
   )
   select count(*) into entries_count from inserted_entries;

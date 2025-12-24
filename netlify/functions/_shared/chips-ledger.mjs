@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { executeSql, klog } from "./supabase-admin.mjs";
+import { beginSql, executeSql, klog } from "./supabase-admin.mjs";
 
 const VALID_TX_TYPES = new Set([
   "MINT",
@@ -25,7 +25,17 @@ function badRequest(code, message) {
 const hashPayload = (input) =>
   crypto.createHash("sha256").update(JSON.stringify(input)).digest("hex");
 
-async function getOrCreateUserAccount(userId) {
+const isPlainObject = (value) =>
+  value !== null && typeof value === "object" && Object.getPrototypeOf(value) === Object.prototype;
+
+const assertPlainObjectOrNull = (value, code) => {
+  if (value == null) return;
+  if (!isPlainObject(value)) {
+    throw badRequest(code, "Metadata must be a plain JSON object");
+  }
+};
+
+async function getOrCreateUserAccount(userId, tx = null) {
   const query = `
 with existing as (
   select * from public.chips_accounts where user_id = $1 and account_type = 'USER' for update
@@ -37,14 +47,15 @@ inserted as (
   returning *
 ),
 account as (
-  select * from inserted
+  select i.* from inserted i
   union all
   select * from existing
   limit 1
 )
 select row_to_json(account) as account from account;
 `;
-  const result = await executeSql(query, [userId]);
+  const runner = tx ? (q, params) => tx.unsafe(q, params) : executeSql;
+  const result = await runner(query, [userId]);
   const account = result?.[0]?.account;
   if (!account) {
     throw new Error("Failed to prepare chips account");
@@ -113,7 +124,7 @@ select * from entries;
 
 async function findTransactionByKey(idempotencyKey) {
   const query = `
-select id, tx_type, payload_hash, idempotency_key, reference, description, created_at
+select id, tx_type, payload_hash, idempotency_key, reference, description, created_at, user_id
 from public.chips_transactions
 where idempotency_key = $1
 limit 1;
@@ -122,10 +133,10 @@ limit 1;
   return rows?.[0] || null;
 }
 
-async function fetchTransactionSnapshot(idempotencyKey, accountId) {
+async function fetchTransactionSnapshotByTxId(transactionId, userId = null) {
   const query = `
 with txn as (
-  select * from public.chips_transactions where idempotency_key = $1
+  select * from public.chips_transactions where id = $1
 ),
 entries as (
   select e.*
@@ -134,14 +145,18 @@ entries as (
   order by e.entry_seq asc
 ),
 account as (
-  select id, balance, next_entry_seq from public.chips_accounts where id = $2
+  select id, balance, next_entry_seq
+  from public.chips_accounts
+  where user_id = coalesce($2::uuid, (select user_id from txn))
+    and account_type = 'USER'
+  limit 1
 )
 select
   (select row_to_json(txn) from txn) as transaction,
   (select coalesce(jsonb_agg(e order by e.entry_seq), '[]'::jsonb) from entries e) as entries,
   (select row_to_json(account) from account) as account;
 `;
-  const rows = await executeSql(query, [idempotencyKey, accountId]);
+  const rows = await executeSql(query, [transactionId, userId]);
   return rows?.[0] || null;
 }
 
@@ -167,7 +182,14 @@ function validateEntries(entries) {
     if (kind === "USER") {
       hasUserEntry = true;
     }
-    const metadata = entry?.metadata && typeof entry.metadata === "object" ? entry.metadata : {};
+    if (
+      Object.prototype.hasOwnProperty.call(entry, "metadata") &&
+      entry.metadata != null &&
+      !isPlainObject(entry.metadata)
+    ) {
+      throw badRequest("invalid_entry_metadata", "Entry metadata must be a plain JSON object");
+    }
+    const metadata = entry?.metadata ?? {};
     sanitized.push({ kind, systemKey, amount, metadata });
   }
   if (!hasUserEntry) {
@@ -194,10 +216,17 @@ async function postTransaction({
   }
 
   const normalizedEntries = validateEntries(entries);
-  const safeMetadata = metadata && typeof metadata === "object" ? metadata : {};
-  const payloadHash = hashPayload({ userId, txType, idempotencyKey, entries: normalizedEntries, reference, description, metadata: safeMetadata });
+  assertPlainObjectOrNull(metadata, "invalid_metadata");
+  const safeMetadata = metadata ?? {};
+  let safeMetadataJson = "{}";
+  let safeMetadataNormalized = {};
+  try {
+    safeMetadataJson = JSON.stringify(safeMetadata);
+    safeMetadataNormalized = JSON.parse(safeMetadataJson);
+  } catch (error) {
+    throw badRequest("invalid_metadata", "Metadata must be JSON-serializable");
+  }
 
-  const userAccount = await getOrCreateUserAccount(userId);
   const neededSystemKeys = normalizedEntries
     .filter(entry => entry.kind !== "USER" && entry.systemKey)
     .map(entry => entry.systemKey);
@@ -215,32 +244,77 @@ async function postTransaction({
     }
   }
 
-  const entryRecords = normalizedEntries.map(entry => {
-    if (entry.kind === "USER") {
-      return { account_id: userAccount.id, amount: entry.amount, metadata: entry.metadata };
-    }
-    const account = systemMap.get(entry.systemKey);
-    return { account_id: account?.id, amount: entry.amount, metadata: entry.metadata, system_key: entry.systemKey };
-  });
+  const hashableEntries = normalizedEntries.map((entry) => ({
+    kind: entry.kind,
+    systemKey: entry.systemKey ?? null,
+    amount: entry.amount,
+    metadata: entry.metadata ?? {},
+  }));
 
-  for (const rec of entryRecords) {
-    if (!rec.account_id) {
-      throw badRequest("missing_account", "Missing account for entry");
-    }
+  let payloadHash;
+  try {
+    payloadHash = hashPayload({
+      userId,
+      txType,
+      idempotencyKey,
+      reference,
+      description,
+      metadata: safeMetadataNormalized,
+      entries: hashableEntries,
+    });
+  } catch (error) {
+    throw badRequest("invalid_entry_metadata", "Entry metadata must be JSON-serializable");
   }
 
-  const insertQuery = `
-with insert_txn as (
-  insert into public.chips_transactions (reference, description, metadata, idempotency_key, payload_hash, tx_type, created_by)
-  values ($1, $2, coalesce($3::jsonb, '{}'::jsonb), $4, $5, $6, $7)
-  returning *
-),
-input_entries as (
+  let result;
+  let userAccount = null;
+  try {
+    result = await beginSql(async tx => {
+      // IMPORTANT: inside this block use ONLY `tx` for all SQL to keep it atomic.
+      userAccount = await getOrCreateUserAccount(userId, tx);
+
+      const entryRecords = normalizedEntries.map(entry => {
+        if (entry.kind === "USER") {
+          const safeEntryMetadata = entry?.metadata ?? {};
+          return { account_id: userAccount.id, amount: entry.amount, metadata: safeEntryMetadata };
+        }
+        const account = systemMap.get(entry.systemKey);
+        const safeEntryMetadata = entry?.metadata ?? {};
+        return { account_id: account?.id, amount: entry.amount, metadata: safeEntryMetadata, system_key: entry.systemKey };
+      });
+
+      for (const rec of entryRecords) {
+        if (!rec.account_id) {
+          throw badRequest("missing_account", "Missing account for entry");
+        }
+      }
+
+      let entriesPayload = "[]";
+      try {
+        entriesPayload = JSON.stringify(entryRecords);
+      } catch (error) {
+        throw badRequest("invalid_entry_metadata", "Entry metadata must be JSON-serializable");
+      }
+
+      const txRows = await tx`
+        insert into public.chips_transactions (reference, description, metadata, idempotency_key, payload_hash, tx_type, user_id, created_by)
+        values (${reference}, ${description}, ${safeMetadataJson}::jsonb, ${idempotencyKey}, ${payloadHash}, ${txType}, ${userId}, ${createdBy})
+        returning *;
+      `;
+
+      const transactionRow = txRows?.[0];
+      if (!transactionRow) {
+        throw new Error("Failed to insert transaction row");
+      }
+
+      const applyResult = await tx.unsafe(
+        `
+with input_entries as (
   select
     v.account_id,
     v.amount,
     coalesce(v.metadata, '{}'::jsonb) as metadata
-  from jsonb_to_recordset(($8::text)::jsonb) as v(account_id uuid, amount bigint, metadata jsonb)
+  from jsonb_to_recordset(($1::text)::jsonb) as v(account_id uuid, amount bigint, metadata jsonb)
 ),
 deltas as (
   select account_id, sum(amount)::bigint as delta
@@ -248,20 +322,23 @@ deltas as (
   group by account_id
 ),
 locked_accounts as (
-  select a.id, a.balance
+  select a.id, a.balance, a.account_type, a.system_key
   from public.chips_accounts a
   join deltas d on d.account_id = a.id
   for update
 ),
 guard as (
-  select case when exists (
+  select not exists (
     select 1
     from locked_accounts a
     join deltas d on d.account_id = a.id
     where (a.balance + d.delta) < 0
-  )
-  then public.raise_insufficient_funds()
-  else null
+      and not (a.account_type = 'SYSTEM' and a.system_key = 'GENESIS')
+  ) as ok
+),
+raise_if as (
+  select case when not (select ok from guard)
+    then public.raise_insufficient_funds()
   end as ok
 ),
 apply_balance as (
@@ -269,44 +346,97 @@ apply_balance as (
   set balance = a.balance + d.delta
   from deltas d
   where a.id = d.account_id
-  returning 1 as ok
+    and (select ok from guard)
+  returning a.id
 ),
-entries as (
-  insert into public.chips_entries (transaction_id, account_id, amount, metadata)
-  select insert_txn.id, i.account_id, i.amount, i.metadata
-  from insert_txn
-  join guard on true
-  join input_entries i on true
-  where exists (select 1 from apply_balance)
-  returning *
-),
-account as (
-  select id, balance, next_entry_seq
-  from public.chips_accounts
-  where id = $9
+expected as (
+  select count(*) as expected_accounts from deltas
 )
 select
-  (select row_to_json(insert_txn) from insert_txn) as transaction,
-  (select coalesce(jsonb_agg(e order by e.entry_seq), '[]'::jsonb) from entries e) as entries,
-  (select row_to_json(account) from account) as account;
-`;
-  let result;
-  try {
-    result = await executeSql(insertQuery, [
-      reference,
-      description,
-      safeMetadata,
-      idempotencyKey,
-      payloadHash,
-      txType,
-      createdBy,
-      JSON.stringify(entryRecords),
-      userAccount.id,
-    ]);
+  (select count(*) from apply_balance) as updated_accounts,
+  (select expected_accounts from expected) as expected_accounts,
+  (select ok from guard) as guard_ok,
+  (select ok from raise_if) as guard_check;
+        `,
+        [entriesPayload]
+      );
+
+      const updatedAccounts = Number(applyResult?.[0]?.updated_accounts || 0);
+      const expectedAccounts = Number(applyResult?.[0]?.expected_accounts || 0);
+      if (updatedAccounts === 0 && expectedAccounts > 0) {
+        const failed = new Error("Failed to apply any account balances");
+        failed.code = "chips_apply_failed";
+        failed.status = 500;
+        throw failed;
+      }
+      if (expectedAccounts !== updatedAccounts) {
+        klog("chips_apply_mismatch", {
+          expectedAccounts,
+          updatedAccounts,
+          idempotencyKey,
+          txType,
+        });
+        const mismatch = new Error("Failed to apply expected account balances");
+        mismatch.code = "chips_apply_mismatch";
+        mismatch.status = 500;
+        throw mismatch;
+      }
+
+      const entriesResult = await tx.unsafe(
+        `
+with input_entries as (
+  select
+    v.account_id,
+    v.amount,
+    coalesce(v.metadata, '{}'::jsonb) as metadata
+  from jsonb_to_recordset(($2::text)::jsonb) as v(account_id uuid, amount bigint, metadata jsonb)
+),
+inserted as (
+  insert into public.chips_entries (transaction_id, account_id, amount, metadata)
+  select $1, i.account_id, i.amount, i.metadata
+  from input_entries i
+  returning *
+)
+select coalesce(jsonb_agg(i order by i.entry_seq), '[]'::jsonb) as entries
+from inserted i;
+        `,
+        [transactionRow.id, entriesPayload]
+      );
+
+      const insertedEntries = Array.isArray(entriesResult?.[0]?.entries)
+        ? entriesResult[0].entries
+        : [];
+      if (Array.isArray(insertedEntries) && insertedEntries.length !== entryRecords.length) {
+        const mismatch = new Error("Inserted entries count mismatch");
+        mismatch.code = "chips_entries_mismatch";
+        mismatch.status = 500;
+        klog("chips_entries_mismatch", {
+          expected: entryRecords.length,
+          actual: insertedEntries.length,
+          idempotencyKey,
+        });
+        throw mismatch;
+      }
+
+      const accountRows = await tx`
+        select id, balance, next_entry_seq
+        from public.chips_accounts
+        where id = ${userAccount.id}
+        limit 1;
+      `;
+
+      return {
+        transaction: transactionRow,
+        entries: insertedEntries,
+        account: accountRows?.[0] || null,
+      };
+    });
   } catch (error) {
     const combined = `${error.message || ""} ${error.details || ""}`.toLowerCase();
-    const is23505 = combined.includes("23505");
+    const constraint = (error?.constraint || "").toLowerCase();
+    const is23505 = error?.code === "23505";
     const mentionsIdempotency =
+      constraint.includes("chips_transactions_idempotency_key") ||
       combined.includes("idempotency") ||
       combined.includes("idempotency_key") ||
       combined.includes("chips_transactions_idempotency_key_uidx");
@@ -319,12 +449,17 @@ select
     if (isIdempotencyUnique) {
       const existingTx = await findTransactionByKey(idempotencyKey);
       if (existingTx) {
+        if (existingTx.user_id && existingTx.user_id !== userId) {
+          const conflict = new Error("Idempotency key already used by another user");
+          conflict.status = 409;
+          throw conflict;
+        }
         if (existingTx.payload_hash !== payloadHash || existingTx.tx_type !== txType) {
           const conflict = new Error("Idempotency key already used with different payload");
           conflict.status = 409;
           throw conflict;
         }
-        const snapshot = await fetchTransactionSnapshot(idempotencyKey, userAccount.id);
+        const snapshot = await fetchTransactionSnapshotByTxId(existingTx.id, userId);
         if (snapshot?.transaction) {
           return snapshot;
         }
@@ -336,12 +471,12 @@ select
     throw error;
   }
 
-  if (!result?.[0]?.transaction) {
+  if (!result?.transaction) {
     klog("chips_tx_missing_rows", { idempotencyKey });
     throw new Error("Failed to record transaction");
   }
 
-  return result[0];
+  return result;
 }
 
 export {
