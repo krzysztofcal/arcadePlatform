@@ -3,9 +3,8 @@ const BASE = process.env.UPSTASH_REDIS_REST_URL;
 const TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN;
 const USER_PROFILE_PREFIX = "kcswh:xp:user:";
 
-if (!BASE || !TOKEN) {
-  console.warn("[store-upstash] Missing UPSTASH env; falling back to in-memory store.");
-}
+// Track whether we're using memory store (for fallback logic)
+export const isMemoryStore = !BASE || !TOKEN;
 
 function createMemoryStore() {
   const memory = new Map();
@@ -195,16 +194,7 @@ const remoteStore = {
       body: JSON.stringify(body),
     });
     if (!res.ok) {
-      // Log the actual error response for debugging
-      let errorDetail = "";
-      try {
-        const errorBody = await res.text();
-        errorDetail = `: ${errorBody}`;
-        console.error(`[Upstash] eval failed with status ${res.status}${errorDetail}`);
-      } catch {
-        console.error(`[Upstash] eval failed with status ${res.status} (could not read error body)`);
-      }
-      throw new Error(`Upstash eval failed: ${res.status}${errorDetail}`);
+      throw new Error(`Upstash eval failed: ${res.status}`);
     }
     const data = await res.json();
     return data.result;
@@ -231,15 +221,8 @@ return {count, 0}
 `;
 
 export async function atomicRateLimitIncr(key, ttlSeconds = 60) {
-  try {
-    const result = await store.eval(RATE_LIMIT_SCRIPT, [key], [String(ttlSeconds)]);
-    if (Array.isArray(result)) {
-      return { count: Number(result[0]) || 0, ttlSet: result[1] === 1 };
-    }
-    // Fallback: if eval returns unexpected format, treat as count
-    return { count: Number(result) || 0, ttlSet: false };
-  } catch {
-    // Memory store doesn't support this script signature; use fallback
+  // Memory store doesn't support the rate-limit Lua script; use non-atomic fallback
+  if (isMemoryStore) {
     const count = await store.incrBy(key, 1);
     const ttl = await store.ttl(key);
     if (ttl < 0) {
@@ -248,6 +231,13 @@ export async function atomicRateLimitIncr(key, ttlSeconds = 60) {
     }
     return { count, ttlSet: false };
   }
+
+  // Upstash: use atomic Lua script (let errors propagate to caller)
+  const result = await store.eval(RATE_LIMIT_SCRIPT, [key], [String(ttlSeconds)]);
+  if (Array.isArray(result)) {
+    return { count: Number(result[0]) || 0, ttlSet: result[1] === 1 };
+  }
+  return { count: Number(result) || 0, ttlSet: false };
 }
 
 const clampTotalXp = (value) => {
@@ -285,8 +275,8 @@ export async function saveUserProfile({ userId, totalXp, now = Date.now() }) {
   try {
     await store.set(profileKey(userId), JSON.stringify(profile));
     return profile;
-  } catch (err) {
-    console.error("[store-upstash] Failed to persist user profile", { userId, error: err?.message });
+  } catch {
+    // Silently fall back to returning the existing/new profile object
     return existing || profile;
   }
 }
