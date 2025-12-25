@@ -34,6 +34,7 @@
     <script src="/js/topbar.js" defer></script>
     <script src="/js/xpClient.js" defer></script>
     <script src="/js/ui/xp-overlay.js" defer></script>
+    <script src="/js/ui/favorite-button.js" defer></script>
   </head>
   <body data-game-host data-game-slug="frogger" data-game-id="frogger">
     <div class="topbar">
@@ -92,6 +93,20 @@
                 <span class="sb-label" data-i18n="recentlyPlayed">Recently played</span>
               </a>
             </li>
+            <li class="sb-item">
+              <a href="../../favorites.html" class="sb-link" aria-label="Favorites" tabindex="0">
+                <span class="sb-ico" aria-hidden="true">
+                  <svg class="sb-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+                </span>
+                <span class="sb-label" data-i18n="favorites">Favorites</span>
+              </a>
+            </li>
+                    <li class="sb-item">
+            <a href="../../about.en.html" class="sb-link" tabindex="0" data-href-en="../../about.en.html" data-href-pl="../../about.pl.html">
+              <span class="sb-ico" aria-hidden="true"></span>
+              <span class="sb-label" data-i18n="about">About</span>
+            </a>
+          </li>
           </ul>
         </nav>
       </aside>
@@ -185,6 +200,7 @@
 
     <script src="/js/core/catalog.js" defer></script>
     <script src="/js/core/RecentlyPlayedService.js" defer></script>
+    <script src="/js/core/FavoritesService.js" defer></script>
     <script src="/js/core/StorageService.js" defer></script>
     <script src="/js/recently-played-tracker.js" defer></script>
     <script src="/js/core/search-utils.js" defer></script>

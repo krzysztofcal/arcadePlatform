@@ -27,6 +27,7 @@ run("node", ["tests/xp-gate.test.mjs"], "xp-gate");
 run("node", ["tests/xp-game-hook-idempotent.test.mjs"], "xp-game-hook-idempotent");
 run("node", ["tests/recorder-admin-only.test.mjs"], "recorder-admin-only");
 run("node", ["tests/secureStorage.test.mjs"], "secure-storage");
+run("node", ["tests/favorites-service.test.mjs"], "favorites-service");
 
 try { run("npm", ["run", "-s", "lint:games"], "unit"); } catch { /* optional */ }
 

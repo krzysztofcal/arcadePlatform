@@ -49,6 +49,7 @@
   let gamePaused = false;
   let gameStarted = false;
   let currentIframe = null;
+  let currentIframeOrigin = null;
 
   // Load muted state from localStorage
   try {
@@ -246,10 +247,10 @@
    * Send control message to iframe
    */
   function sendIframeMessage(type, data) {
-    if (!currentIframe) return;
+    if (!currentIframe || !currentIframeOrigin) return;
     try {
       const message = { type: 'kcswh:game-control', action: type, ...data };
-      currentIframe.contentWindow.postMessage(message, '*');
+      currentIframe.contentWindow.postMessage(message, currentIframeOrigin);
       klog('iframe_message_sent', { type: type, data: data });
     } catch (err) {
       klog('iframe_message_error', { type: type, error: String(err) });
@@ -382,21 +383,27 @@ async function loadCatalog(){
   }
 
   const IFRAME_ACTIVITY_BRIDGE_ID = '__kcswhActivityBridge';
-  const IFRAME_ACTIVITY_BRIDGE_SCRIPT = "(function(){" +
-    "if (window.__kcswhActivityBridge) return;" +
-    "window.__kcswhActivityBridge = true;" +
-    "var TYPE='kcswh:activity';" +
-    "var TARGET='*';" +
-    "var last=Date.now();" +
-    "var ACTIVE_WINDOW=5000;" +
-    "var HEARTBEAT=4000;" +
-    "var send=function(){ try { parent.postMessage({ type: TYPE, userGesture: true }, TARGET); } catch (_){} };" +
-    "var onActive=function(){ last=Date.now(); send(); };" +
-    "['pointerdown','pointermove','pointerup','touchstart','touchmove','keydown'].forEach(function(evt){ try { document.addEventListener(evt,onActive,{ passive:true }); } catch(_){ document.addEventListener(evt,onActive); } });" +
-    "var beat=function(){ if (Date.now() - last <= ACTIVE_WINDOW) send(); };" +
-    "var timer=setInterval(beat, HEARTBEAT);" +
-    "send();" +
-  "})();";
+  function buildActivityBridgeScript(targetOrigin){
+    if (!targetOrigin) return null;
+    const safeTarget = String(targetOrigin)
+      .replace(/\\/g, '\\\\')
+      .replace(/'/g, "\\'");
+    return "(function(){" +
+      "if (window.__kcswhActivityBridge) return;" +
+      "window.__kcswhActivityBridge = true;" +
+      "var TYPE='kcswh:activity';" +
+      "var TARGET='" + safeTarget + "';" +
+      "var last=Date.now();" +
+      "var ACTIVE_WINDOW=5000;" +
+      "var HEARTBEAT=4000;" +
+      "var send=function(){ try { parent.postMessage({ type: TYPE, userGesture: true }, TARGET); } catch (_){} };" +
+      "var onActive=function(){ last=Date.now(); send(); };" +
+      "['pointerdown','pointermove','pointerup','touchstart','touchmove','keydown'].forEach(function(evt){ try { document.addEventListener(evt,onActive,{ passive:true }); } catch(_){ document.addEventListener(evt,onActive); } });" +
+      "var beat=function(){ if (Date.now() - last <= ACTIVE_WINDOW) send(); };" +
+      "var timer=setInterval(beat, HEARTBEAT);" +
+      "send();" +
+    "})();";
+  }
 
   function injectActivityBridgeIntoIframe(iframe){
     if (!iframe) return;
@@ -404,10 +411,19 @@ async function loadCatalog(){
       const doc = iframe.contentDocument;
       if (!doc || !doc.documentElement) return;
       if (doc.getElementById(IFRAME_ACTIVITY_BRIDGE_ID)) return;
+      const activityTarget = (function(){
+        try {
+          return window.location && window.location.origin ? window.location.origin : null;
+        } catch (_) {
+          return null;
+        }
+      })();
+      const scriptText = buildActivityBridgeScript(activityTarget);
+      if (!scriptText) return;
       const script = doc.createElement('script');
       script.id = IFRAME_ACTIVITY_BRIDGE_ID;
       script.type = 'text/javascript';
-      script.text = IFRAME_ACTIVITY_BRIDGE_SCRIPT;
+      script.text = scriptText;
       doc.documentElement.appendChild(script);
     } catch (_){ /* noop */ }
   }
@@ -426,20 +442,20 @@ async function loadCatalog(){
 
     // Store iframe reference for control messaging
     currentIframe = iframe;
+    try {
+      const resolvedOrigin = new URL(iframe.src, window.location.href).origin;
+      currentIframeOrigin = resolvedOrigin && resolvedOrigin !== 'null' ? resolvedOrigin : null;
+    } catch (_) {
+      currentIframeOrigin = null;
+    }
     gameStarted = true;
     gamePaused = false;
     updatePauseUI();
-    const postTarget = (function(){
-      try {
-        if (typeof window !== 'undefined' && window.location && window.location.origin){
-          return window.location.origin;
-        }
-      } catch (_){ }
-      return '*';
-    })();
+    const postTarget = currentIframeOrigin;
     const iframeEvents = ['pointerover', 'pointermove', 'touchstart', 'focus'];
     let listenersAttached = false;
     const onIframeActivity = () => {
+      if (!postTarget) return;
       try { window.postMessage({ type: 'kcswh:activity', userGesture: true }, postTarget); } catch (_){ }
     };
     const attachIframeActivityListeners = () => {
