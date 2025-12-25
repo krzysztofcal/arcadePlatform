@@ -129,9 +129,18 @@ function handleLedgerQuery(query, params = []) {
 function applyEntries(entriesPayload) {
   const records = JSON.parse(entriesPayload);
   const deltas = new Map();
+  let totalDelta = 0;
   for (const record of records) {
     const current = deltas.get(record.account_id) || 0;
     deltas.set(record.account_id, current + Number(record.amount || 0));
+    totalDelta += Number(record.amount || 0);
+  }
+
+  if (totalDelta !== 0) {
+    const unbalanced = new Error("unbalanced_entries");
+    unbalanced.code = "unbalanced_entries";
+    unbalanced.status = 400;
+    throw unbalanced;
   }
 
   for (const [accountId, delta] of deltas.entries()) {
@@ -142,10 +151,11 @@ function applyEntries(entriesPayload) {
       missing.status = 400;
       throw missing;
     }
-    const isGenesis = account.account_type === "SYSTEM" && account.system_key === "GENESIS";
-    if (!isGenesis && account.balance + delta < 0) {
+    const enforceGuard = account.account_type === "USER";
+    if (enforceGuard && account.balance + delta < 0) {
       const insufficient = new Error("insufficient_funds");
-      insufficient.code = "P0001";
+      insufficient.code = "insufficient_funds";
+      insufficient.status = 400;
       throw insufficient;
     }
   }
@@ -331,6 +341,21 @@ describe("chips ledger idempotency and validation", () => {
     ).rejects.toMatchObject({ code: "missing_user_entry", status: 400 });
   });
 
+  it("requires balanced double-entry amounts", async () => {
+    const { postTransaction } = await loadLedger();
+    await expect(
+      postTransaction({
+        userId: "user-2",
+        txType: "MINT",
+        idempotencyKey: "unbalanced",
+        entries: [
+          { accountType: "USER", amount: 10 },
+          { accountType: "SYSTEM", systemKey: "TREASURY", amount: -5 },
+        ],
+      }),
+    ).rejects.toMatchObject({ code: "unbalanced_entries", status: 400 });
+  });
+
   it("prevents user balances from going negative", async () => {
     const { postTransaction } = await loadLedger();
     await expect(
@@ -343,7 +368,7 @@ describe("chips ledger idempotency and validation", () => {
           { accountType: "SYSTEM", systemKey: "TREASURY", amount: 25 },
         ],
       }),
-    ).rejects.toMatchObject({ code: "P0001" });
+    ).rejects.toMatchObject({ code: "insufficient_funds", status: 400 });
   });
 });
 
@@ -384,6 +409,26 @@ describe("chips auth isolation and idempotency per identity", () => {
       httpMethod: "POST",
       headers: { authorization: "Bearer user-b", origin: "https://arcade.test" },
       body: JSON.stringify(body),
+    });
+    expect(conflict.statusCode).toBe(409);
+    expect(JSON.parse(conflict.body).error).toBe("idempotency_conflict");
+  });
+
+  it("rejects mismatched payloads for the same idempotency key", async () => {
+    const { handler } = await loadTxHandler();
+    const baseBody = { txType: "BUY_IN", amount: 10, idempotencyKey: "idem-body" };
+
+    const first = await handler({
+      httpMethod: "POST",
+      headers: { authorization: "Bearer user-c", origin: "https://arcade.test" },
+      body: JSON.stringify(baseBody),
+    });
+    expect(first.statusCode).toBe(200);
+
+    const conflict = await handler({
+      httpMethod: "POST",
+      headers: { authorization: "Bearer user-c", origin: "https://arcade.test" },
+      body: JSON.stringify({ ...baseBody, amount: 11 }),
     });
     expect(conflict.statusCode).toBe(409);
     expect(JSON.parse(conflict.body).error).toBe("idempotency_conflict");
@@ -451,5 +496,79 @@ describe("chips ledger sequencing", () => {
     expect(page.sequenceOk).toBe(true);
     expect(page.entries).toHaveLength(0);
     expect(page.nextExpectedSeq).toBe(6);
+  });
+
+  it("rejects invalid cursor values and clamps limits", async () => {
+    const { postTransaction, listUserLedger } = await loadLedger();
+    await postTransaction({
+      userId: "user-6",
+      txType: "BUY_IN",
+      idempotencyKey: "cursor-1",
+      entries: [
+        { accountType: "USER", amount: 1 },
+        { accountType: "SYSTEM", systemKey: "TREASURY", amount: -1 },
+      ],
+    });
+
+    for (let i = 0; i < 205; i += 1) {
+      // create enough entries to exercise the limit cap
+      // eslint-disable-next-line no-await-in-loop
+      await postTransaction({
+        userId: "user-6",
+        txType: "BUY_IN",
+        idempotencyKey: `cursor-${i + 2}`,
+        entries: [
+          { accountType: "USER", amount: 1 },
+          { accountType: "SYSTEM", systemKey: "TREASURY", amount: -1 },
+        ],
+      });
+    }
+
+    await expect(listUserLedger("user-6", { afterSeq: "abc" })).rejects.toMatchObject({
+      code: "invalid_after_seq",
+      status: 400,
+    });
+
+    const limited = await listUserLedger("user-6", { afterSeq: null, limit: 0 });
+    expect(limited.entries).toHaveLength(1);
+
+    const many = await listUserLedger("user-6", { afterSeq: null, limit: 9999 });
+    expect(many.entries.length).toBeLessThanOrEqual(200);
+  });
+});
+
+describe("chips handlers security and gating", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    mockLog.mockClear();
+    resetMockDb();
+  });
+
+  it("returns 404 when chips are disabled", async () => {
+    process.env.CHIPS_ENABLED = "0";
+    const { handler: txHandler } = await loadTxHandler();
+    const { handler: ledgerHandler } = await import("../netlify/functions/chips-ledger.mjs");
+
+    const txResult = await txHandler({ httpMethod: "POST", headers: {}, body: "{}" });
+    expect(txResult.statusCode).toBe(404);
+    expect(JSON.parse(txResult.body).error).toBe("not_found");
+
+    const ledgerResult = await ledgerHandler({ httpMethod: "GET", headers: {}, queryStringParameters: {} });
+    expect(ledgerResult.statusCode).toBe(404);
+    expect(JSON.parse(ledgerResult.body).error).toBe("not_found");
+  });
+
+  it("requires authorization headers", async () => {
+    process.env.CHIPS_ENABLED = "1";
+    const { handler: txHandler } = await loadTxHandler();
+    const { handler: ledgerHandler } = await import("../netlify/functions/chips-ledger.mjs");
+
+    const txResult = await txHandler({ httpMethod: "POST", headers: {}, body: "{}" });
+    expect(txResult.statusCode).toBe(401);
+    expect(JSON.parse(txResult.body).error).toBe("unauthorized");
+
+    const ledgerResult = await ledgerHandler({ httpMethod: "GET", headers: {}, queryStringParameters: {} });
+    expect(ledgerResult.statusCode).toBe(401);
+    expect(JSON.parse(ledgerResult.body).error).toBe("unauthorized");
   });
 });
