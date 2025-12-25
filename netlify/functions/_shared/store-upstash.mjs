@@ -100,12 +100,12 @@ function createMemoryStore() {
 
         const release = () => { memory.delete(lockKey); };
 
-        let sessionTotal = Number(getValue(sessionKey) ?? "0");
-        let lastSync = Number(getValue(sessionSyncKey) ?? "0");
-        let dailyTotal = Number(getValue(dailyKey) ?? "0");
-        let lifetime = Number(getValue(totalKey) ?? "0");
-
+        // Wrap all operations after lock acquisition in try block to ensure cleanup
         try {
+          let sessionTotal = Number(getValue(sessionKey) ?? "0");
+          let lastSync = Number(getValue(sessionSyncKey) ?? "0");
+          let dailyTotal = Number(getValue(dailyKey) ?? "0");
+          let lifetime = Number(getValue(totalKey) ?? "0");
           if (lastSync > 0 && ts <= lastSync) {
             return [0, dailyTotal, sessionTotal, lifetime, lastSync, 2];
           }

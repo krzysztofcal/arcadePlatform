@@ -674,8 +674,14 @@ async function checkRateLimit({ userId, ip }) {
     checks.push(
       store.incrBy(userKey, 1)
         .then(async (count) => {
-          if (count === 1) {
-            await store.expire(userKey, 60);
+          // Set expiry on first few requests to be resilient to missed TTL
+          // This handles edge cases where expire call fails on first request
+          if (count <= 3) {
+            try {
+              await store.expire(userKey, 60);
+            } catch (expireErr) {
+              console.warn('[XP-CALC] Rate limit expire failed for user:', { userId, error: expireErr?.message });
+            }
           }
           return {
             type: 'user',
@@ -693,8 +699,13 @@ async function checkRateLimit({ userId, ip }) {
     checks.push(
       store.incrBy(ipKey, 1)
         .then(async (count) => {
-          if (count === 1) {
-            await store.expire(ipKey, 60);
+          // Set expiry on first few requests to be resilient to missed TTL
+          if (count <= 3) {
+            try {
+              await store.expire(ipKey, 60);
+            } catch (expireErr) {
+              console.warn('[XP-CALC] Rate limit expire failed for IP:', { error: expireErr?.message });
+            }
           }
           return {
             type: 'ip',
