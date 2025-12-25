@@ -256,7 +256,10 @@ function makeTxRunner() {
 
 vi.mock("../netlify/functions/_shared/supabase-admin.mjs", () => {
   const baseHeaders = () => ({ "content-type": "application/json" });
-  const corsHeaders = () => baseHeaders();
+  const corsHeaders = (origin) => {
+    if (!origin) return null;
+    return { ...baseHeaders(), "access-control-allow-origin": origin };
+  };
   const extractBearerToken = headers => {
     const headerValue = headers?.authorization || headers?.Authorization;
     if (!headerValue || typeof headerValue !== "string") return null;
@@ -711,11 +714,11 @@ describe("chips handlers security and gating", () => {
     const { handler: txHandler } = await loadTxHandler();
     const { handler: ledgerHandler } = await import("../netlify/functions/chips-ledger.mjs");
 
-    const txResult = await txHandler({ httpMethod: "POST", headers: {}, body: "{}" });
+    const txResult = await txHandler({ httpMethod: "POST", headers: { origin: "https://arcade.test" }, body: "{}" });
     expect(txResult.statusCode).toBe(401);
     expect(JSON.parse(txResult.body).error).toBeTruthy();
 
-    const ledgerResult = await ledgerHandler({ httpMethod: "GET", headers: {}, queryStringParameters: {} });
+    const ledgerResult = await ledgerHandler({ httpMethod: "GET", headers: { origin: "https://arcade.test" }, queryStringParameters: {} });
     expect(ledgerResult.statusCode).toBe(401);
     expect(JSON.parse(ledgerResult.body).error).toBeTruthy();
   });
