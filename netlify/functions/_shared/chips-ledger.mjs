@@ -10,9 +10,42 @@ const VALID_TX_TYPES = new Set([
   "PRIZE_PAYOUT",
 ]);
 
-const asInt = (value, fallback = 0) => {
+// Loose integer parsing for non-sequence fields only (balances, etc.).
+const asLooseInt = (value, fallback = 0) => {
+  if (value == null) return fallback;
+  if (typeof value === "string" && value.trim() === "") return fallback;
   const parsed = Number(value);
   return Number.isInteger(parsed) ? parsed : fallback;
+};
+
+const parsePositiveInt = (value) => {
+  if (value == null) return null;
+  const normalized = typeof value === "string" ? value.trim() : value;
+  if (normalized === "") return null;
+  const parsed = Number(normalized);
+  if (!Number.isFinite(parsed)) return null;
+  if (Math.trunc(parsed) !== parsed) return null;
+  if (parsed <= 0) return null;
+  if (Math.abs(parsed) > Number.MAX_SAFE_INTEGER) return null;
+  return parsed;
+};
+
+const parseWholeInt = (value) => {
+  if (value === null || value === undefined) return null;
+  const normalized = typeof value === "string" ? value.trim() : value;
+  const parsed = Number(normalized);
+  if (!Number.isFinite(parsed)) return null;
+  if (Math.trunc(parsed) !== parsed) return null;
+  if (parsed === 0) return null;
+  if (Math.abs(parsed) > Number.MAX_SAFE_INTEGER) return null;
+  return parsed;
+};
+
+const asIso = (value) => {
+  if (!value) return null;
+  const dt = new Date(value);
+  if (Number.isNaN(dt.getTime())) return null;
+  return dt.toISOString();
 };
 
 function badRequest(code, message) {
@@ -78,8 +111,8 @@ async function getUserBalance(userId) {
   const account = await getOrCreateUserAccount(userId);
   return {
     accountId: account.id,
-    balance: asInt(account.balance, 0),
-    nextEntrySeq: asInt(account.next_entry_seq, 1),
+    balance: asLooseInt(account.balance, 0),
+    nextEntrySeq: asLooseInt(account.next_entry_seq, 1),
     status: account.status,
   };
 }
@@ -87,6 +120,11 @@ async function getUserBalance(userId) {
 async function listUserLedger(userId, { afterSeq = null, limit = 50 } = {}) {
   const cappedLimit = Math.min(Math.max(1, Number.isInteger(limit) ? limit : 50), 200);
   const account = await getOrCreateUserAccount(userId);
+  const hasAfter = afterSeq !== null && afterSeq !== undefined && !(typeof afterSeq === "string" && afterSeq.trim() === "");
+  const parsedAfterSeq = parsePositiveInt(afterSeq);
+  if (hasAfter && parsedAfterSeq === null) {
+    throw badRequest("invalid_after_seq", "Invalid after sequence");
+  }
   const query = `
 with entries as (
   select
@@ -108,18 +146,69 @@ with entries as (
 )
 select * from entries;
 `;
-  const rows = await executeSql(query, [account.id, afterSeq, cappedLimit]);
-  const expectedStart = afterSeq ? asInt(afterSeq, 0) + 1 : 1;
+  const rows = await executeSql(query, [account.id, parsedAfterSeq, cappedLimit]);
+  const expectedStart = parsedAfterSeq ? parsedAfterSeq + 1 : 1;
   let sequenceOk = true;
   let cursor = expectedStart;
+  let mismatchLogged = false;
   for (const row of rows || []) {
-    if (asInt(row.entry_seq) !== cursor) {
+    const parsedSeq = parsePositiveInt(row?.entry_seq);
+    if (parsedSeq !== cursor) {
       sequenceOk = false;
+      if (!mismatchLogged) {
+        klog("chips:ledger_sequence_mismatch", {
+          after_seq: parsedAfterSeq || 0,
+          expected_seq: cursor,
+          actual_seq: parsedSeq,
+          raw_entry_seq: row?.entry_seq,
+          tx_type: row?.tx_type ?? null,
+          idempotency_key: row?.idempotency_key ?? null,
+          reason: parsedSeq === null ? "invalid_entry_seq" : "non_contiguous_seq",
+        });
+        mismatchLogged = true;
+      }
       break;
     }
     cursor += 1;
   }
-  return { entries: rows || [], sequenceOk, nextExpectedSeq: cursor };
+  const normalizedEntries = (rows || []).map(row => {
+    const parsedEntrySeq = parsePositiveInt(row?.entry_seq);
+    const entrySeq = parsedEntrySeq;
+    if (parsedEntrySeq === null) {
+      klog("chips:ledger_invalid_entry_seq", {
+        raw_entry_seq: row?.entry_seq,
+        tx_type: row?.tx_type,
+        idempotency_key: row?.idempotency_key,
+      });
+    }
+
+    const parsedAmount = parseWholeInt(row?.amount);
+    const createdAt = asIso(row?.created_at);
+    const txCreatedAt = asIso(row?.tx_created_at);
+
+    if (parsedAmount === null && row?.amount != null) {
+      klog("chips:ledger_invalid_amount", {
+        entry_seq: entrySeq,
+        raw_amount: row?.amount == null ? null : String(row.amount),
+        tx_type: row?.tx_type,
+      });
+    }
+
+    return {
+      entry_seq: entrySeq,
+      amount: parsedAmount,
+      raw_amount: row?.amount == null ? null : String(row.amount),
+      metadata: row?.metadata ?? null,
+      created_at: createdAt,
+      tx_type: row?.tx_type ?? null,
+      reference: row?.reference ?? null,
+      description: row?.description ?? null,
+      idempotency_key: row?.idempotency_key ?? null,
+      tx_created_at: txCreatedAt,
+    };
+  });
+
+  return { entries: normalizedEntries, sequenceOk, nextExpectedSeq: cursor };
 }
 
 async function findTransactionByKey(idempotencyKey) {

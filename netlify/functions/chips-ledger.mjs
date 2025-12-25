@@ -1,11 +1,6 @@
 import { baseHeaders, corsHeaders, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
 import { listUserLedger } from "./_shared/chips-ledger.mjs";
 
-const asInt = (value, fallback = null) => {
-  const parsed = Number(value);
-  return Number.isInteger(parsed) ? parsed : fallback;
-};
-
 const CHIPS_ENABLED = process.env.CHIPS_ENABLED === "1";
 
 export async function handler(event) {
@@ -36,9 +31,12 @@ export async function handler(event) {
     return { statusCode: 401, headers: cors, body: JSON.stringify({ error: "unauthorized", reason: auth.reason }) };
   }
 
-  const afterSeq = event.queryStringParameters?.after ? asInt(event.queryStringParameters.after, null) : null;
-  const limitRaw = event.queryStringParameters?.limit ? asInt(event.queryStringParameters.limit, 50) : 50;
-  const limit = Number.isInteger(limitRaw) ? limitRaw : 50;
+  const afterSeq = Object.prototype.hasOwnProperty.call(event.queryStringParameters || {}, "after")
+    ? event.queryStringParameters.after
+    : null;
+  const limitRaw = event.queryStringParameters?.limit;
+  const parsedLimit = Number(limitRaw);
+  const limit = Number.isInteger(parsedLimit) ? parsedLimit : 50;
 
   try {
     const ledger = await listUserLedger(auth.userId, { afterSeq, limit });
@@ -54,7 +52,9 @@ export async function handler(event) {
       }),
     };
   } catch (error) {
-    klog("chips_ledger_error", { error: error.message });
-    return { statusCode: 500, headers: cors, body: JSON.stringify({ error: "server_error" }) };
+    const status = error && error.status ? error.status : 500;
+    const code = error && error.code ? error.code : "server_error";
+    klog("chips_ledger_error", { error: error.message, code });
+    return { statusCode: status, headers: cors, body: JSON.stringify({ error: code }) };
   }
 }
