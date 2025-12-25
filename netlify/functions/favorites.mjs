@@ -92,7 +92,7 @@ async function removeFavorite(userId, gameId, origin) {
   }
 
   const sanitizedGameId = gameId.trim();
-  if (sanitizedGameId.length === 0) {
+  if (sanitizedGameId.length === 0 || sanitizedGameId.length > 100) {
     return json(400, { error: "invalid_game_id", message: "Invalid gameId" }, origin);
   }
 
