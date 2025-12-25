@@ -13,6 +13,7 @@
     "lint:games": "node scripts/validate-games.js",
     "prepare": "husky install",
     "test": "node scripts/test-all.mjs",
+    "test:xp-anon": "node --test tests/xp-anon-conversion.test.mjs tests/award-xp.migration.test.mjs",
     "test:unit": "npm run lint:games",
     "test:e2e": "node scripts/prepare-playwright.js && node scripts/run-e2e.js",
     "syntax": "node scripts/syntax-check.mjs",

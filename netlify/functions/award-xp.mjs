@@ -1,5 +1,12 @@
 import crypto from "node:crypto";
-import { store, saveUserProfile } from "./_shared/store-upstash.mjs";
+import {
+  store,
+  saveUserProfile,
+  getUserProfile,
+  getAnonProfile,
+  saveAnonProfile,
+  initAnonProfile,
+} from "./_shared/store-upstash.mjs";
 import { verifySessionToken, validateServerSession, touchSession } from "./start-session.mjs";
 
 const warsawDateFormatter = new Intl.DateTimeFormat("en-CA", {
@@ -103,6 +110,8 @@ const MIN_ACTIVITY_VIS_S = Math.max(0, asNumber(process.env.XP_MIN_ACTIVITY_VIS_
 const METADATA_MAX_BYTES = Math.max(0, asNumber(process.env.XP_METADATA_MAX_BYTES, 2048));
 const DEBUG_ENABLED = process.env.XP_DEBUG === "1";
 const KEY_NS = process.env.XP_KEY_NS ?? "kcswh:xp:v2";
+const MAX_TOTAL_CONVERSION_CAP = Number(process.env.XP_ANON_CONVERSION_MAX_CAP || "100000");
+const ANON_CONVERSION_ENABLED = process.env.XP_ANON_CONVERSION_ENABLED !== "0";
 const LOCK_KEY_PREFIX = `${KEY_NS}:lock:`;
 const DRIFT_MS = Math.max(0, asNumber(process.env.XP_DRIFT_MS, 30_000));
 // Build CORS allowlist from env var + auto-include Netlify site URL
@@ -140,6 +149,14 @@ const getRequireServerSession = () => process.env.XP_REQUIRE_SERVER_SESSION === 
 const getServerSessionWarnMode = () => process.env.XP_SERVER_SESSION_WARN_MODE === "1";
 
 const sanitizeTotal = (value) => Math.max(0, Math.floor(Number(value) || 0));
+
+function calculateAllowedAnonConversion(totalAnonXp, anonActiveDays) {
+  const xp = Math.max(0, Number(totalAnonXp) || 0);
+  const days = Math.max(0, Number(anonActiveDays) || 0);
+  if (xp <= 0 || days <= 0) return 0;
+  const capByDays = DAILY_CAP * days;
+  return Math.min(xp, capByDays, MAX_TOTAL_CONVERSION_CAP);
+}
 
 const sleep = (ms = 0) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -360,6 +377,8 @@ const keyRateLimitUser = (userId) => `${KEY_NS}:ratelimit:user:${userId}:${Math.
 const keyRateLimitIp = (ip) => `${KEY_NS}:ratelimit:ip:${hash(ip)}:${Math.floor(Date.now() / 60000)}`;
 const keySessionRegistry = (userId, sessionId) => `${KEY_NS}:registry:${hash(`${userId}|${sessionId}`)}`;
 const keyMigration = (anonId, userId) => `${KEY_NS}:migration:${hash(`${anonId}|${userId}`)}`;
+const keyConversionLock = (anonId, userId) => `${KEY_NS}:convlock:${hash(`${anonId}|${userId}`)}`;
+const keyUserConversionGuard = (userId) => `${KEY_NS}:conversion:user:${userId}`;
 
 // SECURITY: Session registration
 async function registerSession({ userId, sessionId }) {
@@ -454,16 +473,17 @@ async function checkRateLimit({ userId, ip }) {
   return { allowed: true, checks: results };
 }
 
-async function getTotals({ userId, sessionId, now = Date.now() }) {
+async function getTotals({ userId, sessionId, now = Date.now(), storeClient = store }) {
+  if (!userId) return null;
   // userId represents the XP identity (Supabase userId or anonId) for XP aggregation keys.
   const todayKey = keyDaily(userId, getDailyKey(now));
   const totalKeyK = keyTotal(userId);
   const sessionKeyK = sessionId ? keySession(userId, sessionId) : null;
   const sessionSyncKeyK = sessionId ? keySessionSync(userId, sessionId) : null;
   try {
-    const reads = [store.get(todayKey), store.get(totalKeyK)];
-    if (sessionKeyK) reads.push(store.get(sessionKeyK));
-    if (sessionSyncKeyK) reads.push(store.get(sessionSyncKeyK));
+    const reads = [storeClient.get(todayKey), storeClient.get(totalKeyK)];
+    if (sessionKeyK) reads.push(storeClient.get(sessionKeyK));
+    if (sessionSyncKeyK) reads.push(storeClient.get(sessionSyncKeyK));
     const values = await Promise.all(reads);
     const current = Number(values[0] ?? "0") || 0;
     const lifetime = Number(values[1] ?? "0") || 0;
@@ -483,6 +503,225 @@ async function getTotals({ userId, sessionId, now = Date.now() }) {
     return totals;
   } catch {
     return { current: 0, lifetime: 0, sessionTotal: 0, lastSync: 0 };
+  }
+}
+
+async function getTotalsForIdentity({ userId, now = Date.now(), storeClient = store }) {
+  return getTotals({ userId, sessionId: null, now, storeClient });
+}
+
+async function acquireConversionLock(lockKey, ttlMs = LOCK_TTL_MS, storeClient = store) {
+  if (!lockKey) return false;
+  const ttl = Math.max(1, Number(ttlMs) || 0);
+  try {
+    const res = await storeClient.eval(
+      "if redis.call('SETNX', KEYS[1], ARGV[1]) == 1 then redis.call('PEXPIRE', KEYS[1], ARGV[2]); return 1 end; return 0",
+      [lockKey],
+      ["1", String(ttl)]
+    );
+    return Number(res) === 1;
+  } catch {
+    return false;
+  }
+}
+
+async function releaseConversionLock(lockKey, storeClient = store) {
+  if (!lockKey) return;
+  try {
+    await storeClient.del(lockKey);
+  } catch {
+    // ignore
+  }
+}
+
+async function migrateAnonToAccount({ storeClient = store, anonId, accountId, allowedAmount, now = Date.now() }) {
+  if (!anonId || !accountId || anonId === accountId) {
+    return { migrated: 0, anonBefore: 0, accountBefore: 0, accountAfter: 0, reason: "invalid_ids" };
+  }
+
+  const [anonTotals, accountTotals] = await Promise.all([
+    getTotalsForIdentity({ userId: anonId, now, storeClient }),
+    getTotalsForIdentity({ userId: accountId, now, storeClient }),
+  ]);
+
+  const anonLifetime = sanitizeTotal(anonTotals?.lifetime);
+  const accountLifetime = sanitizeTotal(accountTotals?.lifetime);
+
+  if (anonLifetime <= 0) {
+    klog("xp_migrate_noop", { anonId, accountId, anonLifetime, accountLifetime });
+    return {
+      migrated: 0,
+      anonBefore: anonLifetime,
+      accountBefore: accountLifetime,
+      accountAfter: accountLifetime,
+      reason: "anon_has_no_xp",
+    };
+  }
+
+  if (accountLifetime > 0) {
+    klog("xp_migrate_skip_account_has_xp", { anonId, accountId, anonLifetime, accountLifetime });
+    return {
+      migrated: 0,
+      anonBefore: anonLifetime,
+      accountBefore: accountLifetime,
+      accountAfter: accountLifetime,
+      reason: "account_has_xp",
+    };
+  }
+
+  const allowed = sanitizeTotal(allowedAmount ?? anonLifetime);
+  const migrated = Math.min(allowed, anonLifetime);
+  if (migrated <= 0) {
+    return {
+      migrated: 0,
+      anonBefore: anonLifetime,
+      accountBefore: accountLifetime,
+      accountAfter: accountLifetime,
+      reason: "allowed_zero",
+    };
+  }
+  const accountAfter = accountLifetime + migrated;
+
+  const anonTotalKey = keyTotal(anonId);
+  const anonDailyKey = keyDaily(anonId, getDailyKey(now));
+  const userTotalKey = keyTotal(accountId);
+  const markerKey = keyMigration(anonId, accountId);
+
+  const pipe = storeClient.pipeline();
+  pipe.incrby(userTotalKey, migrated);
+  if (migrated === anonLifetime) {
+    pipe.del(anonTotalKey);
+    pipe.del(anonDailyKey);
+  } else {
+    pipe.decrby(anonTotalKey, migrated);
+  }
+  pipe.set(markerKey, String(migrated));
+  await pipe.exec();
+
+  klog("xp_migrate_anon_to_account", {
+    anonId,
+    accountId,
+    migrated,
+    anonLifetime,
+    accountLifetime,
+    accountAfter,
+  });
+
+  return { migrated, anonBefore: anonLifetime, accountBefore: accountLifetime, accountAfter, reason: "migrated" };
+}
+
+async function attemptAnonToUserConversion({ userId, anonId, authContext, storeClient = store }) {
+  if (!ANON_CONVERSION_ENABLED) {
+    klog("xp_migration_skip_disabled", { userId, anonId });
+    return { converted: false, amount: 0, reason: "disabled" };
+  }
+  if (!userId || !anonId || anonId === userId) {
+    klog("xp_migration_skip_ineligible", { userId, anonId });
+    return { converted: false, amount: 0, reason: "ineligible" };
+  }
+
+  const conversionGuardKey = keyUserConversionGuard(userId);
+  const conversionGuard = await storeClient.get(conversionGuardKey);
+  if (conversionGuard) {
+    klog("xp_migration_skip_already_converted", { userId, anonId, source: "redis_guard" });
+    return { converted: false, amount: 0, reason: "already_converted" };
+  }
+
+  const userProfile = await getUserProfile(userId);
+  if (userProfile?.anonConversionCompleted || userProfile?.hasConvertedAnonXp) {
+    klog("xp_migration_skip_already_converted", {
+      userId,
+      anonId,
+      source: "profile_flag",
+      convertedFromAnonId: userProfile?.convertedFromAnonId || null,
+    });
+    return { converted: false, amount: 0, reason: "already_converted" };
+  }
+
+  const lockKey = keyConversionLock(anonId, userId);
+  const lockAcquired = await acquireConversionLock(lockKey, LOCK_TTL_MS, storeClient);
+  if (!lockAcquired) {
+    klog("xp_migration_skip_ineligible", { userId, anonId, reason: "lock_not_acquired" });
+    return { converted: false, amount: 0, reason: "lock_not_acquired" };
+  }
+
+  try {
+    const now = Date.now();
+    let anonProfile = await getAnonProfile(anonId);
+    if (anonProfile?.convertedToUserId != null) {
+      klog("xp_migration_skip_already_converted", { userId, anonId, source: "anon_profile" });
+      return { converted: false, amount: 0, reason: "already_converted" };
+    }
+
+    const anonTotals = await getTotalsForIdentity({ userId: anonId, now, storeClient });
+    const anonLifetime = sanitizeTotal(anonTotals?.lifetime);
+    if (anonLifetime <= 0) {
+      klog("xp_migration_skip_no_anon_totals", { userId, anonId });
+      return { converted: false, amount: 0, reason: "no_anon_totals" };
+    }
+
+    const anonDays = Number(anonProfile?.anonActiveDays) || 0;
+    const allowed = calculateAllowedAnonConversion(anonLifetime, anonDays);
+    if (!allowed || allowed <= 0) {
+      klog("xp_migration_skip_zero_amount", { userId, anonId, anonLifetime, anonActiveDays: anonDays });
+      return { converted: false, amount: 0, reason: "zero_amount" };
+    }
+
+    const migration = await migrateAnonToAccount({
+      storeClient,
+      anonId,
+      accountId: userId,
+      allowedAmount: allowed,
+      now,
+    });
+
+    if (!migration.migrated) {
+      if (migration.reason === "account_has_xp") {
+        klog("xp_migration_skip_already_converted", { userId, anonId, source: "account_has_xp" });
+      } else {
+        klog("xp_migration_skip_zero_amount", { userId, anonId, reason: migration.reason });
+      }
+      return { converted: false, amount: 0, reason: migration.reason };
+    }
+
+    const conversionAt = new Date(now).toISOString();
+    await saveUserProfile({
+      userId,
+      totalXp: migration.accountAfter,
+      hasConvertedAnonXp: true,
+      anonConversionCompleted: true,
+      convertedFromAnonId: anonId,
+      anonConversionAt: conversionAt,
+    });
+
+    if (!anonProfile) {
+      anonProfile = initAnonProfile(anonId, now, getDailyKey(now));
+    }
+    anonProfile.convertedToUserId = userId;
+    anonProfile.totalAnonXp = 0;
+    anonProfile.anonActiveDays = 0;
+    await saveAnonProfile(anonProfile);
+
+    await storeClient.set(conversionGuardKey, "1");
+
+    const userTotalsAfter = await getTotalsForIdentity({ userId, now, storeClient });
+    klog("xp_migration_success", {
+      userId,
+      anonId,
+      migrateAmount: migration.migrated,
+      anonTotals: {
+        current: sanitizeTotal(anonTotals?.current),
+        lifetime: anonLifetime,
+      },
+      newUserTotals: {
+        totalLifetime: userTotalsAfter?.lifetime ?? migration.accountAfter,
+        totalToday: userTotalsAfter?.current ?? 0,
+      },
+    });
+
+    return { converted: true, amount: migration.migrated, migration, reason: "success" };
+  } finally {
+    await releaseConversionLock(lockKey, storeClient);
   }
 }
 
@@ -550,8 +789,12 @@ export async function handler(event) {
 
   const jwtToken = extractBearerToken(event.headers);
   const authContext = verifySupabaseJwt(jwtToken);
+  authContext.emailVerified = !!(authContext.payload?.email_confirmed_at
+    || authContext.payload?.email_confirmed === true
+    || authContext.payload?.email_verified === true);
   const supabaseUserId = authContext.valid ? authContext.userId : null;
   let xpIdentity = supabaseUserId || anonId || null;
+  let conversion = { converted: false, amount: 0 };
 
   const applyDiagnostics = (payload, extra = {}) => {
     if (!DEBUG_ENABLED) return;
@@ -642,33 +885,17 @@ export async function handler(event) {
     anonId,
   });
 
-  // If we have a Supabase user and a prior anon id, migrate anon totals once into the
-  // authenticated bucket so status reads and new awards share the same keys.
   if (supabaseUserId && anonId && anonId !== supabaseUserId) {
-    const markerKey = keyMigration(anonId, supabaseUserId);
     try {
-      const already = await store.get(markerKey);
-      if (!already) {
-        const anonTotals = await getTotals({ userId: anonId, sessionId: querySessionId, now });
-        if (anonTotals && anonTotals.lifetime > 0) {
-          const anonTotalKey = keyTotal(anonId);
-          const userTotalKey = keyTotal(supabaseUserId);
-          const pipe = store.pipeline();
-          pipe.incrby(userTotalKey, anonTotals.lifetime);
-          pipe.del(anonTotalKey);
-          pipe.set(markerKey, String(anonTotals.lifetime));
-          await pipe.exec();
-          console.log("[XP] Migrated anon XP to account", {
-            from: anonId,
-            to: supabaseUserId,
-            amount: anonTotals.lifetime,
-          });
-        } else {
-          await store.set(markerKey, "0");
-        }
-      }
+      conversion = await attemptAnonToUserConversion({
+        userId: supabaseUserId,
+        anonId,
+        authContext,
+        storeClient: store,
+      });
     } catch (err) {
-      console.warn("[XP] XP migration failed:", err);
+      klog("xp_conversion_error", { error: err?.message, userId: supabaseUserId, anonId });
+      conversion = { converted: false, amount: 0 };
     }
   }
 
@@ -793,6 +1020,15 @@ export async function handler(event) {
   };
 
   const respond = async (statusCode, payload, options = {}) => {
+    payload.migration = {
+      migrated: conversion.converted === true,
+      amount: conversion.converted ? conversion.amount : 0,
+      reason: conversion.reason ?? (conversion.converted ? "migrated" : ""),
+    };
+    payload.conversion = {
+      converted: conversion.converted === true,
+      amount: conversion.converted ? conversion.amount : 0,
+    };
     let totalSource = options.totalOverride;
     let totals = options.totals;
     let skipCookie = options.skipCookie;
@@ -1145,6 +1381,21 @@ export async function handler(event) {
     totalLifetime,
   });
 
+  if (!supabaseUserId && anonId && granted > 0) {
+    let anonProfile = await getAnonProfile(anonId);
+    if (!anonProfile) anonProfile = initAnonProfile(anonId, now, dayKeyNow);
+    anonProfile.totalAnonXp += granted;
+    if (anonProfile.lastActiveDayKey !== dayKeyNow) {
+      anonProfile.anonActiveDays += 1;
+      anonProfile.lastActiveDayKey = dayKeyNow;
+    }
+    anonProfile.lastActivityTs = now;
+    if (!anonProfile.createdAt) {
+      anonProfile.createdAt = new Date(now).toISOString();
+    }
+    await saveAnonProfile(anonProfile);
+  }
+
   const totalTodayRedis = Math.min(DAILY_CAP, Math.max(0, sanitizeTotal(redisDailyTotalRaw)));
   const remaining = Math.max(0, DAILY_CAP - totalTodayRedis);
 
@@ -1271,3 +1522,5 @@ export async function handler(event) {
 
   return respond(200, payload, { totalOverride: redisDailyTotalRaw, debugExtra });
 }
+
+export { calculateAllowedAnonConversion, attemptAnonToUserConversion, migrateAnonToAccount, getTotalsForIdentity };

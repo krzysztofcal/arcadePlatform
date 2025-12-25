@@ -10,12 +10,15 @@ export async function withEnv(overrides, fn) {
   }
 }
 
-export function createSupabaseJwt({ sub, secret, alg = "HS256", expOffsetSec = 3600 }) {
+export function createSupabaseJwt({ sub, secret, alg = "HS256", expOffsetSec = 3600, payload: extraPayload }) {
   const header = { alg, typ: "JWT" };
   const payload = {
     sub,
     exp: Math.floor(Date.now() / 1000) + expOffsetSec,
   };
+  if (extraPayload && typeof extraPayload === "object") {
+    Object.assign(payload, extraPayload);
+  }
   const headerSegment = Buffer.from(JSON.stringify(header)).toString("base64url");
   const payloadSegment = Buffer.from(JSON.stringify(payload)).toString("base64url");
   const hmacAlg = alg === "HS512" ? "sha512" : "sha256";
