@@ -4,18 +4,18 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#0b1020">
-  <title>Recently Played — Arcade Hub</title>
-  <meta name="description" content="View your recently played games on Arcade Hub.">
-  <link rel="canonical" href="https://play.kcswh.pl/recently-played.html">
+  <title>Favorites — Arcade Hub</title>
+  <meta name="description" content="View your favorite games on Arcade Hub.">
+  <link rel="canonical" href="https://play.kcswh.pl/favorites.html">
   <!-- OpenGraph / Twitter -->
   <meta property="og:type" content="website">
-  <meta property="og:url" content="https://play.kcswh.pl/recently-played.html">
-  <meta property="og:title" content="Recently Played — Arcade Hub">
-  <meta property="og:description" content="View your recently played games on Arcade Hub.">
+  <meta property="og:url" content="https://play.kcswh.pl/favorites.html">
+  <meta property="og:title" content="Favorites — Arcade Hub">
+  <meta property="og:description" content="View your favorite games on Arcade Hub.">
   <meta property="og:image" content="https://play.kcswh.pl/img/og/portal-1200x630.svg">
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="Recently Played — Arcade Hub">
-  <meta name="twitter:description" content="View your recently played games on Arcade Hub.">
+  <meta name="twitter:title" content="Favorites — Arcade Hub">
+  <meta name="twitter:description" content="View your favorite games on Arcade Hub.">
   <meta name="twitter:image" content="https://play.kcswh.pl/img/og/portal-1200x630.svg">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -88,6 +88,32 @@
     .empty-state a:hover {
       transform: translateY(-2px);
     }
+    .login-prompt {
+      text-align: center;
+      padding: 4rem 1rem;
+      color: #9fb0d0;
+    }
+    .login-prompt h2 {
+      font-size: 1.5rem;
+      color: #fbbf24;
+      margin-bottom: 1rem;
+    }
+    .login-prompt p {
+      margin-bottom: 1.5rem;
+    }
+    .login-prompt a {
+      display: inline-block;
+      padding: 0.75rem 1.5rem;
+      background: linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%);
+      color: #0b1020;
+      text-decoration: none;
+      border-radius: 8px;
+      font-weight: 600;
+      transition: transform 0.2s;
+    }
+    .login-prompt a:hover {
+      transform: translateY(-2px);
+    }
   </style>
 </head>
 <body>
@@ -142,13 +168,13 @@
             </a>
           </li>
           <li class="sb-item">
-            <a href="recently-played.html" class="sb-link is-active" aria-label="Recently played" tabindex="0">
+            <a href="recently-played.html" class="sb-link" aria-label="Recently played" tabindex="0">
               <span class="sb-ico" aria-hidden="true"></span>
               <span class="sb-label" data-i18n="recentlyPlayed">Recently played</span>
             </a>
           </li>
           <li class="sb-item">
-            <a href="favorites.html" class="sb-link" aria-label="Favorites" tabindex="0">
+            <a href="favorites.html" class="sb-link is-active" aria-label="Favorites" tabindex="0">
               <span class="sb-ico" aria-hidden="true">
                 <svg class="sb-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
               </span>
@@ -166,14 +192,19 @@
     </aside>
     <main>
       <div class="page-header">
-        <h1 data-i18n="recentlyPlayedTitle">Recently Played</h1>
-        <p data-i18n="recentlyPlayedDesc">Pick up where you left off</p>
+        <h1 data-i18n="favoritesTitle">Favorites</h1>
+        <p data-i18n="favoritesDesc">Your favorite games in one place</p>
       </div>
       <section class="grid" id="gamesGrid"></section>
       <section class="empty-state" id="emptyState" hidden>
-        <h2 data-i18n="noRecentGames">No recent games</h2>
-        <p data-i18n="noRecentGamesDesc">You haven't played any games yet. Start playing to see your history here!</p>
+        <h2 data-i18n="noFavorites">No favorites yet</h2>
+        <p data-i18n="noFavoritesDesc">Add games to your favorites by clicking the star icon while playing!</p>
         <a href="index.html" data-i18n="browseGames">Browse Games</a>
+      </section>
+      <section class="login-prompt" id="loginPrompt" hidden>
+        <h2 data-i18n="signInForFavorites">Sign in to use Favorites</h2>
+        <p data-i18n="signInForFavoritesDesc">Create an account to save your favorite games across all your devices.</p>
+        <a href="account.html" data-i18n="signIn">Sign In</a>
       </section>
     </main>
   </div>
@@ -212,9 +243,10 @@
   <script src="js/core/search-utils.js" defer></script>
   <script src="js/core/PortalApp.js" defer></script>
   <script src="js/core/RecentlyPlayedService.js" defer></script>
+  <script src="js/core/FavoritesService.js" defer></script>
   <script src="js/core/StorageService.js" defer></script>
   <script src="js/recently-played-tracker.js" defer></script>
-  <script src="js/recently-played-page.js" defer></script>
+  <script src="js/favorites-page.js" defer></script>
   <script src="js/sidebar.js" defer></script>
   <script src="js/search-popup.js" defer></script>
   <script src="js/search-popup-bootstrap.js" defer></script>

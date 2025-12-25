@@ -48,7 +48,23 @@
       en: 'You haven\'t played any games yet. Start playing to see your history here!',
       pl: 'Nie grałeś jeszcze w żadne gry. Zacznij grać, aby zobaczyć swoją historię tutaj!'
     },
-    browseGames: { en: 'Browse Games', pl: 'Przeglądaj gry' }
+    browseGames: { en: 'Browse Games', pl: 'Przeglądaj gry' },
+    favorites: { en: 'Favorites', pl: 'Ulubione' },
+    favoritesTitle: { en: 'Favorites', pl: 'Ulubione' },
+    favoritesDesc: { en: 'Your favorite games in one place', pl: 'Twoje ulubione gry w jednym miejscu' },
+    noFavorites: { en: 'No favorites yet', pl: 'Brak ulubionych' },
+    noFavoritesDesc: {
+      en: 'Add games to your favorites by clicking the star icon while playing!',
+      pl: 'Dodawaj gry do ulubionych klikając ikonę gwiazdki podczas grania!'
+    },
+    signInForFavorites: { en: 'Sign in to use Favorites', pl: 'Zaloguj się, aby korzystać z Ulubionych' },
+    signInForFavoritesDesc: {
+      en: 'Create an account to save your favorite games across all your devices.',
+      pl: 'Załóż konto, aby zapisać ulubione gry na wszystkich swoich urządzeniach.'
+    },
+    signIn: { en: 'Sign In', pl: 'Zaloguj się' },
+    addToFavorites: { en: 'Add to favorites', pl: 'Dodaj do ulubionych' },
+    removeFromFavorites: { en: 'Remove from favorites', pl: 'Usuń z ulubionych' }
   };
 
   let currentLang = 'en';

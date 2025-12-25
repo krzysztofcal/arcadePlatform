@@ -65,8 +65,12 @@ canvas#game{ width:100%; height:auto; aspect-ratio:460/320; background:#0b1220; 
 .titleBar{ display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
 .titleBar h1{ margin:0; font-size:20px; }
 .actions{ display:flex; gap:10px; margin-left:auto; }
-.btnIcon{ width:40px; height:40px; border-radius:12px; display:grid; place-items:center; border:1px solid var(--border); background:transparent; color:#cdd6ff; text-decoration:none; }
+.btnIcon{ width:40px; height:40px; border-radius:12px; display:grid; place-items:center; border:1px solid var(--border); background:transparent; color:#cdd6ff; text-decoration:none; cursor:pointer; font-size:18px; transition:color .18s ease, border-color .18s ease, background .18s ease; }
+.btnIcon:hover{ background:rgba(110,231,231,.08); border-color:rgba(110,231,231,.4); }
 .btnIcon:focus-visible{ outline:2px solid var(--accent); outline-offset:2px; }
+.btnFavorite{ font-size:20px; }
+.btnFavorite[aria-pressed="true"]{ color:#fbbf24; border-color:rgba(251,191,36,.4); }
+.btnFavorite[aria-pressed="true"]:hover{ background:rgba(251,191,36,.12); }
 .gameIntro{ display:flex; gap:20px; align-items:flex-start; background:#111735; border:1px solid var(--border); border-radius:16px; padding:16px; margin-top:4px; }
 .heroCover{ width:220px; min-width:200px; aspect-ratio:3/2; border-radius:14px; overflow:hidden; background:rgba(15,20,48,.8); border:1px solid var(--border); display:flex; align-items:center; justify-content:center; }
 .heroCover img{ width:100%; height:100%; object-fit:cover; display:block; }

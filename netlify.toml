@@ -165,3 +165,8 @@
   from = "/api/start-session"
   to = "/.netlify/functions/start-session"
   status = 200
+
+[[redirects]]
+  from = "/api/favorites"
+  to = "/.netlify/functions/favorites"
+  status = 200
