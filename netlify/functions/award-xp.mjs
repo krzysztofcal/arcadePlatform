@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { store, saveUserProfile } from "./_shared/store-upstash.mjs";
+import { store, saveUserProfile, atomicRateLimitIncr } from "./_shared/store-upstash.mjs";
 import { verifySessionToken, validateServerSession, touchSession } from "./start-session.mjs";
 
 const warsawDateFormatter = new Intl.DateTimeFormat("en-CA", {
@@ -394,54 +394,39 @@ async function checkRateLimit({ userId, ip }) {
 
   const checks = [];
 
-  // Check userId rate limit
+  // Check userId rate limit (atomic increment + TTL via Lua script)
   if (userId && RATE_LIMIT_PER_USER_PER_MIN > 0) {
     const userKey = keyRateLimitUser(userId);
     checks.push(
-      store.incrBy(userKey, 1)
-        .then(async (count) => {
-          // Set expiry on first few requests to be resilient to missed TTL
-          // This handles edge cases where expire call fails on first request
-          if (count <= 3) {
-            try {
-              await store.expire(userKey, 60);
-            } catch (expireErr) {
-              console.warn('[XP] Rate limit expire failed for user:', { userId, error: expireErr?.message });
-            }
-          }
-          return {
-            type: 'user',
-            count,
-            limit: RATE_LIMIT_PER_USER_PER_MIN,
-            exceeded: count > RATE_LIMIT_PER_USER_PER_MIN,
-          };
+      atomicRateLimitIncr(userKey, 60)
+        .then(({ count }) => ({
+          type: 'user',
+          count,
+          limit: RATE_LIMIT_PER_USER_PER_MIN,
+          exceeded: count > RATE_LIMIT_PER_USER_PER_MIN,
+        }))
+        .catch((err) => {
+          klog("xp_rate_limit_atomic_failed", { keyType: "user", userId, error: err?.message });
+          return { type: 'user', count: 0, limit: RATE_LIMIT_PER_USER_PER_MIN, exceeded: false };
         })
-        .catch(() => ({ type: 'user', count: 0, limit: RATE_LIMIT_PER_USER_PER_MIN, exceeded: false }))
     );
   }
 
-  // Check IP rate limit
+  // Check IP rate limit (atomic increment + TTL via Lua script)
   if (ip && RATE_LIMIT_PER_IP_PER_MIN > 0) {
     const ipKey = keyRateLimitIp(ip);
     checks.push(
-      store.incrBy(ipKey, 1)
-        .then(async (count) => {
-          // Set expiry on first few requests to be resilient to missed TTL
-          if (count <= 3) {
-            try {
-              await store.expire(ipKey, 60);
-            } catch (expireErr) {
-              console.warn('[XP] Rate limit expire failed for IP:', { error: expireErr?.message });
-            }
-          }
-          return {
-            type: 'ip',
-            count,
-            limit: RATE_LIMIT_PER_IP_PER_MIN,
-            exceeded: count > RATE_LIMIT_PER_IP_PER_MIN,
-          };
+      atomicRateLimitIncr(ipKey, 60)
+        .then(({ count }) => ({
+          type: 'ip',
+          count,
+          limit: RATE_LIMIT_PER_IP_PER_MIN,
+          exceeded: count > RATE_LIMIT_PER_IP_PER_MIN,
+        }))
+        .catch((err) => {
+          klog("xp_rate_limit_atomic_failed", { keyType: "ip", error: err?.message });
+          return { type: 'ip', count: 0, limit: RATE_LIMIT_PER_IP_PER_MIN, exceeded: false };
         })
-        .catch(() => ({ type: 'ip', count: 0, limit: RATE_LIMIT_PER_IP_PER_MIN, exceeded: false }))
     );
   }
 

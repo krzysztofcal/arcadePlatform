@@ -213,6 +213,43 @@ const remoteStore = {
 
 export const store = (!BASE || !TOKEN) ? createMemoryStore() : remoteStore;
 
+/**
+ * Atomic rate limit increment with TTL guarantee.
+ * Increments key and ensures TTL is set atomically using Lua EVAL.
+ * Returns { count, ttlSet } where ttlSet indicates if TTL was (re)applied.
+ */
+const RATE_LIMIT_SCRIPT = `
+local key = KEYS[1]
+local ttl_seconds = tonumber(ARGV[1])
+local count = redis.call('INCR', key)
+local current_ttl = redis.call('TTL', key)
+if current_ttl < 0 then
+  redis.call('EXPIRE', key, ttl_seconds)
+  return {count, 1}
+end
+return {count, 0}
+`;
+
+export async function atomicRateLimitIncr(key, ttlSeconds = 60) {
+  try {
+    const result = await store.eval(RATE_LIMIT_SCRIPT, [key], [String(ttlSeconds)]);
+    if (Array.isArray(result)) {
+      return { count: Number(result[0]) || 0, ttlSet: result[1] === 1 };
+    }
+    // Fallback: if eval returns unexpected format, treat as count
+    return { count: Number(result) || 0, ttlSet: false };
+  } catch {
+    // Memory store doesn't support this script signature; use fallback
+    const count = await store.incrBy(key, 1);
+    const ttl = await store.ttl(key);
+    if (ttl < 0) {
+      await store.expire(key, ttlSeconds);
+      return { count, ttlSet: true };
+    }
+    return { count, ttlSet: false };
+  }
+}
+
 const clampTotalXp = (value) => {
   const parsed = Math.floor(Number(value) || 0);
   return parsed < 0 ? 0 : parsed;
