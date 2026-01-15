@@ -8,6 +8,11 @@ const USER_PROFILE_PREFIX = "kcswh:xp:user:";
 // Track whether we're using memory store (for fallback logic)
 export const isMemoryStore = !BASE || !TOKEN;
 
+// Log memory-store fallback once on cold start
+if (isMemoryStore) {
+  klog("upstash_env_missing_falling_back_to_memory", { hasBase: !!BASE, hasToken: !!TOKEN });
+}
+
 function createMemoryStore() {
   const memory = new Map();
 
@@ -196,7 +201,14 @@ const remoteStore = {
       body: JSON.stringify(body),
     });
     if (!res.ok) {
-      const logPayload = { status: res.status, statusText: res.statusText };
+      // Intentionally mutating properties on const object for cleaner code
+      const logPayload = {
+        op: "eval",
+        status: res.status,
+        statusText: res.statusText,
+        keysCount: Array.isArray(keys) ? keys.length : 0,
+        argvCount: Array.isArray(argv) ? argv.length : 0,
+      };
       try {
         const rawBody = await res.text();
         logPayload.bodyPreview = rawBody.slice(0, 500);
