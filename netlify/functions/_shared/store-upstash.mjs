@@ -4,6 +4,7 @@ import { klog } from "./supabase-admin.mjs";
 const BASE = process.env.UPSTASH_REDIS_REST_URL;
 const TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN;
 const USER_PROFILE_PREFIX = "kcswh:xp:user:";
+const UPSTASH_DEBUG = process.env.UPSTASH_DEBUG === "1";
 
 // Track whether we're using memory store (for fallback logic)
 export const isMemoryStore = !BASE || !TOKEN;
@@ -196,7 +197,14 @@ const remoteStore = {
       body: JSON.stringify(body),
     });
     if (!res.ok) {
-      klog("upstash_eval_failed", { status: res.status, statusText: res.statusText });
+      const logPayload = { status: res.status, statusText: res.statusText };
+      if (UPSTASH_DEBUG) {
+        try {
+          const body = await res.text();
+          logPayload.bodyPreview = body.slice(0, 400);
+        } catch { /* ignore body read errors */ }
+      }
+      klog("upstash_eval_failed", logPayload);
       throw new Error(`Upstash eval failed: ${res.status}`);
     }
     const data = await res.json();
