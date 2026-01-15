@@ -9,7 +9,9 @@ const USER_PROFILE_PREFIX = "kcswh:xp:user:";
 export const isMemoryStore = !BASE || !TOKEN;
 
 // Log memory-store fallback once on cold start
-if (isMemoryStore) {
+let didLogMemoryFallback = false;
+if (isMemoryStore && !didLogMemoryFallback) {
+  didLogMemoryFallback = true;
   klog("upstash_env_missing_falling_back_to_memory", { hasBase: !!BASE, hasToken: !!TOKEN });
 }
 
@@ -224,7 +226,7 @@ const remoteStore = {
   },
 };
 
-export const store = (!BASE || !TOKEN) ? createMemoryStore() : remoteStore;
+export const store = isMemoryStore ? createMemoryStore() : remoteStore;
 
 /**
  * Rate limit increment with TTL.
