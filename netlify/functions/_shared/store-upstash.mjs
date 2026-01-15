@@ -1,4 +1,6 @@
 // Minimal Upstash REST client (no extra deps).
+import { klog } from "./supabase-admin.mjs";
+
 const BASE = process.env.UPSTASH_REDIS_REST_URL;
 const TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN;
 const USER_PROFILE_PREFIX = "kcswh:xp:user:";
@@ -194,6 +196,7 @@ const remoteStore = {
       body: JSON.stringify(body),
     });
     if (!res.ok) {
+      klog("upstash_eval_failed", { status: res.status, statusText: res.statusText });
       throw new Error(`Upstash eval failed: ${res.status}`);
     }
     const data = await res.json();
@@ -204,8 +207,8 @@ const remoteStore = {
 export const store = (!BASE || !TOKEN) ? createMemoryStore() : remoteStore;
 
 /**
- * Atomic rate limit increment with TTL guarantee.
- * Increments key and ensures TTL is set atomically using Lua EVAL.
+ * Rate limit increment with TTL.
+ * Atomic in Upstash via Lua EVAL; memory fallback is best-effort (non-atomic).
  * Returns { count, ttlSet } where ttlSet indicates if TTL was (re)applied.
  */
 const RATE_LIMIT_SCRIPT = `
@@ -275,8 +278,8 @@ export async function saveUserProfile({ userId, totalXp, now = Date.now() }) {
   try {
     await store.set(profileKey(userId), JSON.stringify(profile));
     return profile;
-  } catch {
-    // Silently fall back to returning the existing/new profile object
+  } catch (err) {
+    klog("upstash_save_user_profile_failed", { userId, error: err?.message });
     return existing || profile;
   }
 }
