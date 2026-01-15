@@ -14,7 +14,8 @@
  */
 
 import crypto from "node:crypto";
-import { store } from "./_shared/store-upstash.mjs";
+import { store, atomicRateLimitIncr } from "./_shared/store-upstash.mjs";
+import { klog } from "./_shared/supabase-admin.mjs";
 import { verifySessionToken, validateServerSession, touchSession } from "./start-session.mjs";
 
 // ============================================================================
@@ -166,14 +167,6 @@ const GAME_XP_RULES = {
 // ============================================================================
 // Utility Functions
 // ============================================================================
-
-const klog = (kind, data) => {
-  try {
-    console.log(`[klog] ${kind}`, JSON.stringify(data));
-  } catch {
-    console.log(`[klog] ${kind}`, data);
-  }
-};
 
 const safeEquals = (a, b) => {
   if (!a || !b || a.length !== b.length) return false;
@@ -634,7 +627,7 @@ async function getSessionState(userId, sessionId) {
     };
   } catch (err) {
     if (DEBUG_ENABLED) {
-      console.error('[XP-CALC] Failed to get session state:', err);
+      klog("calc_session_state_get_failed", { userId, sessionId, error: err?.message });
     }
     return {
       combo: createComboState(),
@@ -654,7 +647,7 @@ async function saveSessionState(userId, sessionId, state) {
     return true;
   } catch (err) {
     if (DEBUG_ENABLED) {
-      console.error('[XP-CALC] Failed to save session state:', err);
+      klog("calc_session_state_save_failed", { userId, sessionId, error: err?.message });
     }
     return false;
   }
@@ -669,41 +662,39 @@ async function checkRateLimit({ userId, ip }) {
 
   const checks = [];
 
+  // Check userId rate limit (atomic increment + TTL via Lua script)
   if (userId && RATE_LIMIT_PER_USER_PER_MIN > 0) {
     const userKey = keyRateLimitUser(userId);
     checks.push(
-      store.incrBy(userKey, 1)
-        .then(async (count) => {
-          if (count === 1) {
-            await store.expire(userKey, 60);
-          }
-          return {
-            type: 'user',
-            count,
-            limit: RATE_LIMIT_PER_USER_PER_MIN,
-            exceeded: count > RATE_LIMIT_PER_USER_PER_MIN,
-          };
+      atomicRateLimitIncr(userKey, 60)
+        .then(({ count }) => ({
+          type: 'user',
+          count,
+          limit: RATE_LIMIT_PER_USER_PER_MIN,
+          exceeded: count > RATE_LIMIT_PER_USER_PER_MIN,
+        }))
+        .catch((err) => {
+          klog("xp_rate_limit_atomic_failed", { keyType: "user", userId, error: err?.message });
+          return { type: 'user', count: 0, limit: RATE_LIMIT_PER_USER_PER_MIN, exceeded: false };
         })
-        .catch(() => ({ type: 'user', count: 0, limit: RATE_LIMIT_PER_USER_PER_MIN, exceeded: false }))
     );
   }
 
+  // Check IP rate limit (atomic increment + TTL via Lua script)
   if (ip && RATE_LIMIT_PER_IP_PER_MIN > 0) {
     const ipKey = keyRateLimitIp(ip);
     checks.push(
-      store.incrBy(ipKey, 1)
-        .then(async (count) => {
-          if (count === 1) {
-            await store.expire(ipKey, 60);
-          }
-          return {
-            type: 'ip',
-            count,
-            limit: RATE_LIMIT_PER_IP_PER_MIN,
-            exceeded: count > RATE_LIMIT_PER_IP_PER_MIN,
-          };
+      atomicRateLimitIncr(ipKey, 60)
+        .then(({ count }) => ({
+          type: 'ip',
+          count,
+          limit: RATE_LIMIT_PER_IP_PER_MIN,
+          exceeded: count > RATE_LIMIT_PER_IP_PER_MIN,
+        }))
+        .catch((err) => {
+          klog("xp_rate_limit_atomic_failed", { keyType: "ip", error: err?.message });
+          return { type: 'ip', count: 0, limit: RATE_LIMIT_PER_IP_PER_MIN, exceeded: false };
         })
-        .catch(() => ({ type: 'ip', count: 0, limit: RATE_LIMIT_PER_IP_PER_MIN, exceeded: false }))
     );
   }
 
@@ -873,7 +864,7 @@ export async function handler(event) {
       sessionError = "missing_session_token";
     } else if (!SESSION_SECRET || SESSION_SECRET.length < 32) {
       // If no secret configured or too short, skip validation but warn
-      console.warn("[XP-CALC] SESSION_SECRET not configured or too short (<32 chars), skipping token validation");
+      klog("calc_session_secret_missing_or_short", {});
       sessionValid = true;
     } else {
       // Verify HMAC signature on token
@@ -894,7 +885,7 @@ export async function handler(event) {
         if (!serverValidation.valid) {
           sessionError = `session_${serverValidation.reason}`;
           if (serverValidation.suspicious) {
-            console.warn("[XP-CALC] SECURITY: Potential session hijacking attempt", {
+            klog("calc_session_validation_suspicious", {
               userId,
               fingerprint,
               ip: clientIp,
@@ -927,7 +918,7 @@ export async function handler(event) {
         return json(401, payload, origin);
       } else if (SERVER_SESSION_WARN_MODE) {
         // Warn mode: log but don't block
-        console.warn("[XP-CALC] Session validation failed (warn mode):", {
+        klog("calc_session_validation_warn_mode_failed", {
           userId,
           sessionError,
           hasToken: !!sessionToken,
@@ -1135,10 +1126,10 @@ export async function handler(event) {
       ]
     );
   } catch (err) {
-    console.error("[XP-CALC] Redis eval failed", {
+    klog("calc_redis_eval_failed", {
       userId,
       sessionId,
-      errMessage: err && err.message,
+      error: err?.message,
     });
     throw err;
   }
