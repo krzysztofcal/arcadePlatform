@@ -15,6 +15,7 @@
 
 import crypto from "node:crypto";
 import { store, atomicRateLimitIncr } from "./_shared/store-upstash.mjs";
+import { klog } from "./_shared/supabase-admin.mjs";
 import { verifySessionToken, validateServerSession, touchSession } from "./start-session.mjs";
 
 // ============================================================================
@@ -166,14 +167,6 @@ const GAME_XP_RULES = {
 // ============================================================================
 // Utility Functions
 // ============================================================================
-
-const klog = (kind, data) => {
-  try {
-    console.log(`[klog] ${kind}`, JSON.stringify(data));
-  } catch {
-    console.log(`[klog] ${kind}`, data);
-  }
-};
 
 const safeEquals = (a, b) => {
   if (!a || !b || a.length !== b.length) return false;
@@ -634,7 +627,7 @@ async function getSessionState(userId, sessionId) {
     };
   } catch (err) {
     if (DEBUG_ENABLED) {
-      console.error('[XP-CALC] Failed to get session state:', err);
+      klog("calc_session_state_get_failed", { userId, sessionId, error: err?.message });
     }
     return {
       combo: createComboState(),
@@ -654,7 +647,7 @@ async function saveSessionState(userId, sessionId, state) {
     return true;
   } catch (err) {
     if (DEBUG_ENABLED) {
-      console.error('[XP-CALC] Failed to save session state:', err);
+      klog("calc_session_state_save_failed", { userId, sessionId, error: err?.message });
     }
     return false;
   }
@@ -871,7 +864,7 @@ export async function handler(event) {
       sessionError = "missing_session_token";
     } else if (!SESSION_SECRET || SESSION_SECRET.length < 32) {
       // If no secret configured or too short, skip validation but warn
-      console.warn("[XP-CALC] SESSION_SECRET not configured or too short (<32 chars), skipping token validation");
+      klog("calc_session_secret_missing_or_short", {});
       sessionValid = true;
     } else {
       // Verify HMAC signature on token
@@ -892,7 +885,7 @@ export async function handler(event) {
         if (!serverValidation.valid) {
           sessionError = `session_${serverValidation.reason}`;
           if (serverValidation.suspicious) {
-            console.warn("[XP-CALC] SECURITY: Potential session hijacking attempt", {
+            klog("calc_session_validation_suspicious", {
               userId,
               fingerprint,
               ip: clientIp,
@@ -925,7 +918,7 @@ export async function handler(event) {
         return json(401, payload, origin);
       } else if (SERVER_SESSION_WARN_MODE) {
         // Warn mode: log but don't block
-        console.warn("[XP-CALC] Session validation failed (warn mode):", {
+        klog("calc_session_validation_warn_mode_failed", {
           userId,
           sessionError,
           hasToken: !!sessionToken,
@@ -1133,10 +1126,10 @@ export async function handler(event) {
       ]
     );
   } catch (err) {
-    console.error("[XP-CALC] Redis eval failed", {
+    klog("calc_redis_eval_failed", {
       userId,
       sessionId,
-      errMessage: err && err.message,
+      error: err?.message,
     });
     throw err;
   }

@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { store, saveUserProfile, atomicRateLimitIncr } from "./_shared/store-upstash.mjs";
+import { klog } from "./_shared/supabase-admin.mjs";
 import { verifySessionToken, validateServerSession, touchSession } from "./start-session.mjs";
 
 const warsawDateFormatter = new Intl.DateTimeFormat("en-CA", {
@@ -121,7 +122,7 @@ const CORS_ALLOW = (() => {
 
 const RAW_LOCK_TTL = Number(process.env.XP_LOCK_TTL_MS ?? 3_000);
 const LOCK_TTL_MS = Number.isFinite(RAW_LOCK_TTL) && RAW_LOCK_TTL >= 0 ? RAW_LOCK_TTL : 3_000;
-console.log("[XP] Lock configuration", {
+klog("xp_lock_config", {
   lockTtlMs: LOCK_TTL_MS,
   rawLockTtl: RAW_LOCK_TTL,
   lockPrefix: LOCK_KEY_PREFIX,
@@ -143,14 +144,6 @@ const sanitizeTotal = (value) => Math.max(0, Math.floor(Number(value) || 0));
 
 const sleep = (ms = 0) => new Promise(resolve => setTimeout(resolve, ms));
 
-const klog = (kind, data) => {
-  try {
-    console.log(`[klog] ${kind}`, JSON.stringify(data));
-  } catch {
-    console.log(`[klog] ${kind}`, data);
-  }
-};
-
 const signPayload = (payload, secret) =>
   crypto.createHmac("sha256", secret).update(payload).digest("base64url");
 
@@ -164,7 +157,7 @@ const safeEquals = (a, b) => {
 
 const SUPABASE_JWT_SECRET = process.env.SUPABASE_JWT_SECRET || process.env.SUPABASE_JWT_SECRET_V2;
 if (!SUPABASE_JWT_SECRET) {
-  console.warn("[XP][AUTH] Supabase JWT secret missing – JWT auth disabled, treating all requests as anonymous");
+  klog("xp_auth_jwt_secret_missing", {});
 }
 
 const decodeBase64UrlJson = (segment) => {
@@ -222,7 +215,7 @@ async function persistUserProfile({ userId, totalXp, now }) {
   try {
     await saveUserProfile({ userId, totalXp, now });
   } catch (err) {
-    console.error("[XP][AUTH] Failed to save user profile", { userId, error: err?.message });
+    klog("xp_save_user_profile_failed", { userId, error: err?.message });
   }
 }
 
@@ -371,7 +364,7 @@ async function registerSession({ userId, sessionId }) {
     await store.setex(key, ttlSeconds, Date.now().toString());
     return { registered: true };
   } catch (err) {
-    console.error('[XP] Session registration failed:', err);
+    klog("xp_session_registration_failed", { userId, sessionId, error: err?.message });
     return { registered: false };
   }
 }
@@ -653,7 +646,7 @@ export async function handler(event) {
           pipe.del(anonTotalKey);
           pipe.set(markerKey, String(anonTotals.lifetime));
           await pipe.exec();
-          console.log("[XP] Migrated anon XP to account", {
+          klog("xp_migrated_anon_to_account", {
             from: anonId,
             to: supabaseUserId,
             amount: anonTotals.lifetime,
@@ -663,7 +656,7 @@ export async function handler(event) {
         }
       }
     } catch (err) {
-      console.warn("[XP] XP migration failed:", err);
+      klog("xp_migration_failed", { from: anonId, to: supabaseUserId, error: err?.message });
     }
   }
 
@@ -730,7 +723,7 @@ export async function handler(event) {
           if (!serverValidation.valid) {
             sessionError = `session_${serverValidation.reason}`;
             if (serverValidation.suspicious) {
-              console.warn("[XP] SECURITY: Potential session hijacking attempt", {
+              klog("xp_session_validation_suspicious", {
                 userId: xpIdentity,
                 fingerprint,
                 ip: clientIp,
@@ -763,12 +756,12 @@ export async function handler(event) {
           return json(401, payload, origin);
         } else if (serverSessionWarnMode) {
           // Warn mode: log but don't block
-            console.warn("[XP] Session validation failed (warn mode):", {
-          userId: xpIdentity,
-          sessionError,
-          hasToken: !!sessionToken,
-          ip: clientIp,
-        });
+          klog("xp_session_validation_warn_mode_failed", {
+            userId: xpIdentity,
+            sessionError,
+            hasToken: !!sessionToken,
+            ip: clientIp,
+          });
         }
       }
     }
@@ -891,7 +884,7 @@ export async function handler(event) {
       // In a future version, this could be enforced by rejecting unregistered sessions
       await registerSession({ userId: xpIdentity, sessionId });
       if (DEBUG_ENABLED) {
-        console.log('[XP] Auto-registered unregistered session:', { userId: xpIdentity, sessionId: sessionId.substring(0, 8) });
+        klog("xp_auto_registered_session", { userId: xpIdentity, sessionId: sessionId.substring(0, 8) });
       }
     }
   }
@@ -1201,7 +1194,7 @@ export async function handler(event) {
   }
 
   if (DEBUG_ENABLED && granted < normalizedDelta && (status === 1 || status === 3 || cookieClamped)) {
-    console.log("daily_cap", {
+    klog("xp_daily_cap_hit", {
       requested: normalizedDelta,
       granted,
       remaining,
@@ -1250,7 +1243,7 @@ export async function handler(event) {
     debugExtra.lockAgeMs = lockAgeMs;
     debugExtra.lockTtlRemainingMs = lockTtlRemainingMs;
     if (DEBUG_ENABLED) {
-      console.debug("[XP] Lock contention", {
+      klog("xp_lock_contention", {
         lockKey: lockKeyK,
         lockAgeMs,
         lockTtlMs: LOCK_TTL_MS,
