@@ -68,8 +68,12 @@
       for (var i = 0; i < methods.length; i++){
         var name = methods[i];
         if (typeof bridge[name] === 'function'){
-          bridge[name]();
-          return;
+          try {
+            bridge[name]();
+            return;
+          } catch (_err){
+            break;
+          }
         }
       }
     }
@@ -353,6 +357,8 @@
       signInBtn.addEventListener('click', openSignIn);
     }
 
+    window.addEventListener('beforeunload', stopAuthWatch); // xp-lifecycle-allow:poker-lobby(2026-01-01)
+
     checkAuth().then(function(authed){
       if (authed) loadTables();
     });
@@ -511,8 +517,14 @@
           var seat = seats.find(function(s){ return s.seatNo === i; });
           var div = document.createElement('div');
           div.className = 'poker-seat' + (seat ? '' : ' poker-seat--empty');
-          div.innerHTML = '<div class="poker-seat-no">Seat ' + i + '</div>' +
-            '<div class="poker-seat-user">' + (seat ? shortId(seat.userId) : 'Empty') + '</div>';
+          var seatNoEl = document.createElement('div');
+          seatNoEl.className = 'poker-seat-no';
+          seatNoEl.textContent = 'Seat ' + i;
+          var seatUserEl = document.createElement('div');
+          seatUserEl.className = 'poker-seat-user';
+          seatUserEl.textContent = seat ? shortId(seat.userId) : 'Empty';
+          div.appendChild(seatNoEl);
+          div.appendChild(seatUserEl);
           seatsGrid.appendChild(div);
         }
       }
@@ -609,6 +621,7 @@
 
     document.addEventListener('visibilitychange', handleVisibility); // xp-lifecycle-allow:poker-table(2026-01-01)
     window.addEventListener('beforeunload', stopPolling); // xp-lifecycle-allow:poker-table(2026-01-01)
+    window.addEventListener('beforeunload', stopAuthWatch); // xp-lifecycle-allow:poker-table-auth(2026-01-01)
 
     checkAuth().then(function(authed){
       if (authed){

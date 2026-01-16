@@ -94,6 +94,7 @@
     loading: { en: 'Loading...', pl: 'Ładowanie...' },
     pokerAuthLobby: { en: 'Please log in to access the poker lobby.', pl: 'Zaloguj się, aby uzyskać dostęp do lobby pokera.' },
     pokerAuthTable: { en: 'Please log in to view this table.', pl: 'Zaloguj się, aby zobaczyć ten stół.' },
+    pokerAuthExpired: { en: 'Session expired. Please sign in again.', pl: 'Sesja wygasła. Zaloguj się ponownie.' },
     backToLobby: { en: 'Back to lobby', pl: 'Powrót do lobby' },
     pokerErrLoadTables: { en: 'Failed to load tables', pl: 'Nie udało się załadować stołów' },
     pokerErrCreateTable: { en: 'Failed to create table', pl: 'Nie udało się utworzyć stołu' },
