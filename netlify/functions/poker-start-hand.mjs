@@ -128,7 +128,8 @@ export async function handler(event) {
       }
 
       // Idempotency does not bypass authorization.
-      const sameRequest = currentState.lastStartHandRequestId === requestIdParsed.value;
+      const sameRequest =
+        currentState.lastStartHandRequestId === requestIdParsed.value && currentState.lastStartHandUserId === auth.userId;
       if (sameRequest) {
         if (typeof currentState.handId === "string" && currentState.handId.trim()) {
           return {
@@ -147,7 +148,8 @@ export async function handler(event) {
         [tableId]
       );
       const seats = Array.isArray(seatRows) ? seatRows : [];
-      if (seats.length < 2) {
+      const validSeats = seats.filter((seat) => Number.isInteger(seat?.seat_no));
+      if (validSeats.length < 2) {
         throw makeError(409, "not_enough_players");
       }
 
@@ -155,10 +157,7 @@ export async function handler(event) {
         throw makeError(409, "already_in_hand");
       }
 
-      const seatNos = seats.map((seat) => seat.seat_no).filter((seatNo) => Number.isInteger(seatNo));
-      if (seatNos.length < 2) {
-        throw makeError(409, "not_enough_players");
-      }
+      const seatNos = validSeats.map((seat) => seat.seat_no);
       const prevButton = normalizeSeatNo(currentState.buttonSeatNo);
       const prevIndex = prevButton != null ? seatNos.indexOf(prevButton) : -1;
       const buttonSeatNo = prevIndex >= 0 ? seatNos[(prevIndex + 1) % seatNos.length] : seatNos[0];
@@ -166,7 +165,7 @@ export async function handler(event) {
       const nextToActSeatNo = seatNos[(buttonIndex + 1) % seatNos.length];
 
       const handId = `hand_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
-      const derivedSeats = seats.map((seat) => ({ userId: seat.user_id, seatNo: seat.seat_no }));
+      const derivedSeats = validSeats.map((seat) => ({ userId: seat.user_id, seatNo: seat.seat_no }));
 
       const updatedState = {
         ...currentState,
@@ -179,6 +178,7 @@ export async function handler(event) {
         buttonSeatNo,
         nextToActSeatNo,
         lastStartHandRequestId: requestIdParsed.value || null,
+        lastStartHandUserId: auth.userId,
         startedAt: new Date().toISOString(),
       };
 
