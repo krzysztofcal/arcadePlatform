@@ -85,6 +85,15 @@ const CORS_ALLOW = (() => {
   return fromEnv;
 })();
 
+// SECURITY: Extract site name from Netlify URL for CORS validation
+// This allows deploy previews only for our specific site, not all *.netlify.app
+const NETLIFY_SITE_NAME = (() => {
+  const siteUrl = process.env.URL || "";
+  // Match pattern like https://my-site.netlify.app or https://deploy-preview-123--my-site.netlify.app
+  const match = siteUrl.match(/(?:^https?:\/\/)?(?:[a-z0-9-]+--)?([a-z0-9-]+)\.netlify\.app/i);
+  return match ? match[1].toLowerCase() : null;
+})();
+
 function corsHeaders(origin) {
   const headers = baseHeaders();
 
@@ -92,9 +101,18 @@ function corsHeaders(origin) {
     return headers;
   }
 
-  const isNetlifyDomain = /^https:\/\/[a-z0-9-]+\.netlify\.app$/i.test(origin);
+  // SECURITY: Only allow Netlify domains that belong to OUR site
+  // This prevents other Netlify users from accessing our API
+  let isOurNetlifyDomain = false;
+  if (NETLIFY_SITE_NAME) {
+    const netlifyPattern = new RegExp(
+      `^https:\\/\\/(?:[a-z0-9-]+--)?${NETLIFY_SITE_NAME}\\.netlify\\.app$`,
+      "i"
+    );
+    isOurNetlifyDomain = netlifyPattern.test(origin);
+  }
 
-  if (!isNetlifyDomain && CORS_ALLOW.length > 0 && !CORS_ALLOW.includes(origin)) {
+  if (!isOurNetlifyDomain && CORS_ALLOW.length > 0 && !CORS_ALLOW.includes(origin)) {
     return null;
   }
 

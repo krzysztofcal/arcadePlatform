@@ -133,6 +133,11 @@ const RATE_LIMIT_PER_USER_PER_MIN = Math.max(0, asNumber(process.env.XP_RATE_LIM
 const RATE_LIMIT_PER_IP_PER_MIN = Math.max(0, asNumber(process.env.XP_RATE_LIMIT_IP_PER_MIN, 60));
 const RATE_LIMIT_ENABLED = process.env.XP_RATE_LIMIT_ENABLED !== "0"; // Default enabled
 
+// SECURITY: Input validation limits
+// Max length for user-provided IDs (anonId, sessionId) to prevent abuse
+// UUIDs are 36 chars, so 128 provides ample room while preventing excessively long values
+const MAX_ID_LENGTH = 128;
+
 // SECURITY: Server-side session token configuration
 // These are read at runtime to support dynamic configuration changes
 // When enabled, XP awards require a valid server-signed session token
@@ -298,6 +303,15 @@ const json = (statusCode, obj, origin, extraHeaders) => {
   };
 };
 
+// SECURITY: Extract site name from Netlify URL for CORS validation
+// This allows deploy previews only for our specific site, not all *.netlify.app
+const NETLIFY_SITE_NAME = (() => {
+  const siteUrl = process.env.URL || "";
+  // Match pattern like https://my-site.netlify.app or https://deploy-preview-123--my-site.netlify.app
+  const match = siteUrl.match(/(?:^https?:\/\/)?(?:[a-z0-9-]+--)?([a-z0-9-]+)\.netlify\.app/i);
+  return match ? match[1].toLowerCase() : null;
+})();
+
 function corsHeaders(origin) {
   // SECURITY: CORS validation for cross-origin requests
   // Note: Origin header is only present for cross-origin requests
@@ -313,12 +327,20 @@ function corsHeaders(origin) {
     return headers;
   }
 
-  // Automatically allow Netlify deploy preview and production domains
-  // Pattern: https://*.netlify.app (including deploy-preview-*, branch-*, etc.)
-  const isNetlifyDomain = /^https:\/\/[a-z0-9-]+\.netlify\.app$/i.test(origin);
+  // SECURITY: Only allow Netlify domains that belong to OUR site
+  // This prevents other Netlify users from accessing our API
+  // Pattern: https://<something>--<our-site-name>.netlify.app or https://<our-site-name>.netlify.app
+  let isOurNetlifyDomain = false;
+  if (NETLIFY_SITE_NAME) {
+    const netlifyPattern = new RegExp(
+      `^https:\\/\\/(?:[a-z0-9-]+--)?${NETLIFY_SITE_NAME}\\.netlify\\.app$`,
+      "i"
+    );
+    isOurNetlifyDomain = netlifyPattern.test(origin);
+  }
 
-  // If there IS an Origin header, enforce whitelist (unless it's a Netlify domain)
-  if (!isNetlifyDomain && CORS_ALLOW.length > 0 && !CORS_ALLOW.includes(origin)) {
+  // If there IS an Origin header, enforce whitelist (unless it's our Netlify domain)
+  if (!isOurNetlifyDomain && CORS_ALLOW.length > 0 && !CORS_ALLOW.includes(origin)) {
     return null; // Signal rejection for non-whitelisted origins
   }
 
@@ -479,9 +501,16 @@ export async function handler(event) {
 
   // SECURITY: Validate CORS BEFORE any side effects (rate limiting, session registration, XP awarding)
   // Check if this is a cross-origin request (has Origin header) from a non-whitelisted origin
-  // Automatically allow Netlify domains (*.netlify.app)
-  const isNetlifyDomain = origin ? /^https:\/\/[a-z0-9-]+\.netlify\.app$/i.test(origin) : false;
-  if (origin && !isNetlifyDomain && CORS_ALLOW.length > 0 && !CORS_ALLOW.includes(origin)) {
+  // Only allow Netlify domains belonging to OUR site (not all *.netlify.app)
+  let isOurNetlifyDomain = false;
+  if (origin && NETLIFY_SITE_NAME) {
+    const netlifyPattern = new RegExp(
+      `^https:\\/\\/(?:[a-z0-9-]+--)?${NETLIFY_SITE_NAME}\\.netlify\\.app$`,
+      "i"
+    );
+    isOurNetlifyDomain = netlifyPattern.test(origin);
+  }
+  if (origin && !isOurNetlifyDomain && CORS_ALLOW.length > 0 && !CORS_ALLOW.includes(origin)) {
     // Reject immediately before any mutations
     return {
       statusCode: 403,
@@ -535,6 +564,11 @@ export async function handler(event) {
 
   let anonIdRaw = queryAnonIdRaw;
   let anonId = typeof anonIdRaw === "string" ? anonIdRaw.trim() : null;
+  // SECURITY: Validate anonId length to prevent Redis key abuse
+  if (anonId && anonId.length > MAX_ID_LENGTH) {
+    anonId = null; // Reject overly long IDs
+    klog("xp_anonId_too_long", { length: anonIdRaw?.length });
+  }
 
   const jwtToken = extractBearerToken(event.headers);
   const authContext = verifySupabaseJwt(jwtToken);
@@ -616,6 +650,11 @@ export async function handler(event) {
   if (bodyAnonIdRaw) {
     anonIdRaw = bodyAnonIdRaw;
     anonId = typeof anonIdRaw === "string" ? anonIdRaw.trim() : null;
+    // SECURITY: Validate anonId length to prevent Redis key abuse
+    if (anonId && anonId.length > MAX_ID_LENGTH) {
+      anonId = null;
+      klog("xp_body_anonId_too_long", { length: bodyAnonIdRaw?.length });
+    }
   }
 
   xpIdentity = supabaseUserId || anonId || null;
@@ -662,6 +701,11 @@ export async function handler(event) {
 
   const sessionIdRaw = body.sessionId ?? querySessionId;
   let sessionId = typeof sessionIdRaw === "string" ? sessionIdRaw.trim() : null;
+  // SECURITY: Validate sessionId length to prevent Redis key abuse
+  if (sessionId && sessionId.length > MAX_ID_LENGTH) {
+    sessionId = null;
+    klog("xp_sessionId_too_long", { length: sessionIdRaw?.length });
+  }
 
   // SECURITY: Rate limiting check
   const clientIp = event.headers?.["x-forwarded-for"]?.split(",")[0]?.trim()
@@ -669,7 +713,9 @@ export async function handler(event) {
     || "unknown";
 
   const isStatusOnly = body.statusOnly === true;
-  const rateLimitResult = isStatusOnly ? { allowed: true } : await checkRateLimit({ userId: xpIdentity, ip: clientIp });
+  // SECURITY: Apply rate limiting to ALL requests including statusOnly
+  // Previously statusOnly bypassed rate limiting which could be exploited for DoS
+  const rateLimitResult = await checkRateLimit({ userId: xpIdentity, ip: clientIp });
   if (!rateLimitResult.allowed) {
     const retryAfter = rateLimitResult.retryAfter ?? 60;
     const payload = {
@@ -696,7 +742,12 @@ export async function handler(event) {
   const requireServerSession = getRequireServerSession();
   const serverSessionWarnMode = getServerSessionWarnMode();
   if (requireServerSession || serverSessionWarnMode) {
-    if (!body.statusOnly) {
+    // SECURITY: Validate server sessions for both statusOnly and non-statusOnly requests.
+    // Previously statusOnly completely bypassed session validation which could be exploited.
+    // For statusOnly, we still log validation failures (warn mode) but don't block since
+    // the user might be checking status before establishing a session.
+    const isNonStatusRequest = !body.statusOnly;
+    if (isNonStatusRequest || serverSessionWarnMode) {
       const fingerprint = generateFingerprint(event.headers);
       let sessionValid = false;
       let sessionError = null;
@@ -739,7 +790,9 @@ export async function handler(event) {
       }
 
       if (!sessionValid) {
-        if (requireServerSession) {
+        // SECURITY: Only reject non-statusOnly requests in enforce mode.
+        // statusOnly requests should still be allowed to check status without a session.
+        if (requireServerSession && isNonStatusRequest) {
           // Enforce mode: reject request
           const payload = {
             error: "invalid_session",
@@ -755,12 +808,13 @@ export async function handler(event) {
           }
           return json(401, payload, origin);
         } else if (serverSessionWarnMode) {
-          // Warn mode: log but don't block
+          // Warn mode: log but don't block (applies to all requests including statusOnly)
           klog("xp_session_validation_warn_mode_failed", {
             userId: xpIdentity,
             sessionError,
             hasToken: !!sessionToken,
             ip: clientIp,
+            isStatusOnly: body.statusOnly === true,
           });
         }
       }
@@ -817,10 +871,9 @@ export async function handler(event) {
   }
 
   if (body.statusOnly) {
-    // SECURITY: Auto-register session when status is requested (session start)
-    const sessId = sessionId || crypto.randomUUID();
-    sessionId = sessId;
-    await registerSession({ userId: xpIdentity, sessionId: sessId });
+    // SECURITY: Do NOT auto-register sessions for statusOnly requests.
+    // Sessions must be created via /start-session endpoint which performs proper validation.
+    // Previously this auto-registered sessions which could bypass session validation entirely.
     if (parsedSessionToken?.valid) {
       touchSession(parsedSessionToken.sessionId).catch(() => {});
     }
@@ -846,8 +899,11 @@ export async function handler(event) {
       sessionTotal: totals.sessionTotal,
       lastSync: totals.lastSync,
       status: "statusOnly",
-      sessionId: sessId,
     };
+    // Only include sessionId if one was provided via valid sessionToken
+    if (sessionId) {
+      payload.sessionId = sessionId;
+    }
     return respond(200, payload, { totals, debugExtra: { mode: "statusOnly" } });
   }
 

@@ -103,6 +103,15 @@ const hash = (s) => crypto.createHash("sha256").update(s).digest("hex");
 const keyServerSession = (sessionId) => `${KEY_NS}:server-session:${sessionId}`;
 const keySessionRateLimitIp = (ip) => `${KEY_NS}:session-ratelimit:ip:${hash(ip)}:${Math.floor(Date.now() / 60000)}`;
 
+// SECURITY: Extract site name from Netlify URL for CORS validation
+// This allows deploy previews only for our specific site, not all *.netlify.app
+const NETLIFY_SITE_NAME = (() => {
+  const siteUrl = process.env.URL || "";
+  // Match pattern like https://my-site.netlify.app or https://deploy-preview-123--my-site.netlify.app
+  const match = siteUrl.match(/(?:^https?:\/\/)?(?:[a-z0-9-]+--)?([a-z0-9-]+)\.netlify\.app/i);
+  return match ? match[1].toLowerCase() : null;
+})();
+
 // CORS headers
 function corsHeaders(origin) {
   const headers = {
@@ -114,9 +123,18 @@ function corsHeaders(origin) {
     return headers;
   }
 
-  const isNetlifyDomain = /^https:\/\/[a-z0-9-]+\.netlify\.app$/i.test(origin);
+  // SECURITY: Only allow Netlify domains that belong to OUR site
+  // This prevents other Netlify users from accessing our API
+  let isOurNetlifyDomain = false;
+  if (NETLIFY_SITE_NAME) {
+    const netlifyPattern = new RegExp(
+      `^https:\\/\\/(?:[a-z0-9-]+--)?${NETLIFY_SITE_NAME}\\.netlify\\.app$`,
+      "i"
+    );
+    isOurNetlifyDomain = netlifyPattern.test(origin);
+  }
 
-  if (!isNetlifyDomain && CORS_ALLOW.length > 0 && !CORS_ALLOW.includes(origin)) {
+  if (!isOurNetlifyDomain && CORS_ALLOW.length > 0 && !CORS_ALLOW.includes(origin)) {
     return null;
   }
 
@@ -320,8 +338,16 @@ export async function handler(event) {
   const origin = event.headers?.origin;
 
   // SECURITY: Validate CORS before any side effects
-  const isNetlifyDomain = origin ? /^https:\/\/[a-z0-9-]+\.netlify\.app$/i.test(origin) : false;
-  if (origin && !isNetlifyDomain && CORS_ALLOW.length > 0 && !CORS_ALLOW.includes(origin)) {
+  // Only allow Netlify domains belonging to OUR site (not all *.netlify.app)
+  let isOurNetlifyDomain = false;
+  if (origin && NETLIFY_SITE_NAME) {
+    const netlifyPattern = new RegExp(
+      `^https:\\/\\/(?:[a-z0-9-]+--)?${NETLIFY_SITE_NAME}\\.netlify\\.app$`,
+      "i"
+    );
+    isOurNetlifyDomain = netlifyPattern.test(origin);
+  }
+  if (origin && !isOurNetlifyDomain && CORS_ALLOW.length > 0 && !CORS_ALLOW.includes(origin)) {
     return {
       statusCode: 403,
       headers: {

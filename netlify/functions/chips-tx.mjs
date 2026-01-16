@@ -87,29 +87,17 @@ export async function handler(event) {
   }
 
   let entriesToPost;
+  // SECURITY: For BUY_IN/CASH_OUT, always use server-generated entries via buildEntries()
+  // to prevent custom entry injection attacks (double-spending, balance manipulation).
+  // Custom entries are rejected for these standard transaction types.
   if (entries != null) {
-    if (!Array.isArray(entries) || entries.length === 0) {
-      return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "missing_entries" }) };
-    }
-    for (const entry of entries) {
-      const accountType = entry?.accountType;
-      if (accountType !== "USER" && accountType !== "SYSTEM") {
-        return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "unsupported_account_type" }) };
-      }
-      const entryAmount = entry?.amount;
-      if (!Number.isInteger(entryAmount) || entryAmount === 0) {
-        return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "invalid_entry_amount" }) };
-      }
-      if (accountType === "SYSTEM" && !entry?.systemKey) {
-        return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "missing_system_key" }) };
-      }
-    }
-    entriesToPost = entries;
-  } else {
-    entriesToPost = buildEntries(txType, amount);
-    if (!entriesToPost) {
-      return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "invalid_amount" }) };
-    }
+    // Reject custom entries for BUY_IN/CASH_OUT - these must use buildEntries() for safety
+    return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "custom_entries_not_allowed", message: "Custom entries are not allowed for BUY_IN/CASH_OUT transactions" }) };
+  }
+
+  entriesToPost = buildEntries(txType, amount);
+  if (!entriesToPost) {
+    return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "invalid_amount" }) };
   }
 
   try {

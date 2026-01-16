@@ -721,6 +721,15 @@ async function checkRateLimit({ userId, ip }) {
 // CORS Handling
 // ============================================================================
 
+// SECURITY: Extract site name from Netlify URL for CORS validation
+// This allows deploy previews only for our specific site, not all *.netlify.app
+const NETLIFY_SITE_NAME = (() => {
+  const siteUrl = process.env.URL || "";
+  // Match pattern like https://my-site.netlify.app or https://deploy-preview-123--my-site.netlify.app
+  const match = siteUrl.match(/(?:^https?:\/\/)?(?:[a-z0-9-]+--)?([a-z0-9-]+)\.netlify\.app/i);
+  return match ? match[1].toLowerCase() : null;
+})();
+
 function corsHeaders(origin) {
   const headers = {
     "content-type": "application/json; charset=utf-8",
@@ -731,9 +740,18 @@ function corsHeaders(origin) {
     return headers;
   }
 
-  const isNetlifyDomain = /^https:\/\/[a-z0-9-]+\.netlify\.app$/i.test(origin);
+  // SECURITY: Only allow Netlify domains that belong to OUR site
+  // This prevents other Netlify users from accessing our API
+  let isOurNetlifyDomain = false;
+  if (NETLIFY_SITE_NAME) {
+    const netlifyPattern = new RegExp(
+      `^https:\\/\\/(?:[a-z0-9-]+--)?${NETLIFY_SITE_NAME}\\.netlify\\.app$`,
+      "i"
+    );
+    isOurNetlifyDomain = netlifyPattern.test(origin);
+  }
 
-  if (!isNetlifyDomain && CORS_ALLOW.length > 0 && !CORS_ALLOW.includes(origin)) {
+  if (!isOurNetlifyDomain && CORS_ALLOW.length > 0 && !CORS_ALLOW.includes(origin)) {
     return null;
   }
 
@@ -937,7 +955,9 @@ export async function handler(event) {
   const visibilitySeconds = Math.max(0, Number(body.visibilitySeconds) || 0);
   const scoreDelta = Math.max(0, Math.floor(Number(body.scoreDelta) || 0));
   const gameEvents = Array.isArray(body.gameEvents) ? body.gameEvents.slice(0, 50) : []; // Limit events
-  const clientBoost = Math.max(1, Math.min(5, Number(body.boostMultiplier) || 1)); // Client-reported boost
+  // SECURITY: Client-reported boost is parsed but NOT trusted for XP calculation
+  // This is kept for logging/debugging purposes only
+  const clientBoost = Math.max(1, Math.min(5, Number(body.boostMultiplier) || 1));
 
   // Timestamp validation
   if (windowEnd > now + DRIFT_MS) {
@@ -1004,9 +1024,10 @@ export async function handler(event) {
     ? sessionState.boostMultiplier
     : 1;
 
-  // Use the higher of server-tracked boost or client-reported boost
-  // (client might have received a boost we haven't tracked yet)
-  const effectiveBoost = Math.max(activeBoost, clientBoost);
+  // SECURITY: Only use server-tracked boost, do NOT trust client-reported boost
+  // Previously this used Math.max(activeBoost, clientBoost) which let clients
+  // claim any boost multiplier up to 5x even without server-side validation
+  const effectiveBoost = activeBoost;
 
   // Calculate XP server-side
   const calculation = calculateXP({
