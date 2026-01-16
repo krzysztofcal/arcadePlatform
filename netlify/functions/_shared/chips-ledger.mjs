@@ -6,6 +6,9 @@ const VALID_TX_TYPES = new Set([
   "BURN",
   "BUY_IN",
   "CASH_OUT",
+  "TABLE_BUY_IN",
+  "TABLE_CASH_OUT",
+  "HAND_SETTLEMENT",
   "RAKE_FEE",
   "PRIZE_PAYOUT",
 ]);
