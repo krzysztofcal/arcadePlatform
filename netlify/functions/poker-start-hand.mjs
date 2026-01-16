@@ -156,6 +156,9 @@ export async function handler(event) {
       }
 
       const seatNos = seats.map((seat) => seat.seat_no).filter((seatNo) => Number.isInteger(seatNo));
+      if (seatNos.length < 2) {
+        throw makeError(409, "not_enough_players");
+      }
       const prevButton = normalizeSeatNo(currentState.buttonSeatNo);
       const prevIndex = prevButton != null ? seatNos.indexOf(prevButton) : -1;
       const buttonSeatNo = prevIndex >= 0 ? seatNos[(prevIndex + 1) % seatNos.length] : seatNos[0];
@@ -179,12 +182,14 @@ export async function handler(event) {
         startedAt: new Date().toISOString(),
       };
 
-      const newVersion = Number(stateRow.version) + 1;
-
-      await tx.unsafe(
-        "update public.poker_state set version = version + 1, state = $2::jsonb, updated_at = now() where table_id = $1;",
+      const updateRows = await tx.unsafe(
+        "update public.poker_state set version = version + 1, state = $2::jsonb, updated_at = now() where table_id = $1 returning version;",
         [tableId, JSON.stringify(updatedState)]
       );
+      const newVersion = normalizeVersion(updateRows?.[0]?.version);
+      if (newVersion == null) {
+        throw makeError(409, "state_invalid");
+      }
 
       await tx.unsafe(
         "insert into public.poker_actions (table_id, version, user_id, action_type, amount) values ($1, $2, $3, $4, $5);",
