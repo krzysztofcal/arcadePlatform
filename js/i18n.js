@@ -94,7 +94,14 @@
     loading: { en: 'Loading...', pl: 'Ładowanie...' },
     pokerAuthLobby: { en: 'Please log in to access the poker lobby.', pl: 'Zaloguj się, aby uzyskać dostęp do lobby pokera.' },
     pokerAuthTable: { en: 'Please log in to view this table.', pl: 'Zaloguj się, aby zobaczyć ten stół.' },
-    backToLobby: { en: 'Back to lobby', pl: 'Powrót do lobby' }
+    backToLobby: { en: 'Back to lobby', pl: 'Powrót do lobby' },
+    pokerErrLoadTables: { en: 'Failed to load tables', pl: 'Nie udało się załadować stołów' },
+    pokerErrCreateTable: { en: 'Failed to create table', pl: 'Nie udało się utworzyć stołu' },
+    pokerErrNoTableId: { en: 'Table created but no ID returned', pl: 'Stół utworzony, ale nie zwrócono ID' },
+    pokerErrMissingTableId: { en: 'No tableId provided', pl: 'Nie podano ID stołu' },
+    pokerErrLoadTable: { en: 'Failed to load table', pl: 'Nie udało się załadować stołu' },
+    pokerErrJoin: { en: 'Failed to join', pl: 'Nie udało się dołączyć' },
+    pokerErrLeave: { en: 'Failed to leave', pl: 'Nie udało się opuścić stołu' }
   };
 
   let currentLang = 'en';

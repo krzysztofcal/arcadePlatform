@@ -171,7 +171,7 @@
         renderTables(data.tables || []);
       } catch (err){
         klog('poker_lobby_load_error', { error: err.message || err.code });
-        setError(errorEl, err.message || 'Failed to load tables');
+        setError(errorEl, err.message || t('pokerErrLoadTables', 'Failed to load tables'));
         if (tableList) tableList.innerHTML = '';
       }
     }
@@ -207,11 +207,11 @@
         if (data.tableId){
           window.location.href = '/poker/table.html?tableId=' + encodeURIComponent(data.tableId);
         } else {
-          setError(errorEl, 'Table created but no ID returned');
+          setError(errorEl, t('pokerErrNoTableId', 'Table created but no ID returned'));
         }
       } catch (err){
         klog('poker_create_error', { error: err.message || err.code });
-        setError(errorEl, err.message || 'Failed to create table');
+        setError(errorEl, err.message || t('pokerErrCreateTable', 'Failed to create table'));
       } finally {
         setLoading(createBtn, false);
       }
@@ -246,7 +246,7 @@
     var params = new URLSearchParams(window.location.search);
     var tableId = params.get('tableId');
     if (!tableId){
-      document.body.innerHTML = '<div class="poker-page"><p class="poker-error">No tableId provided</p><a href="/poker/" class="poker-back">&larr; Back to lobby</a></div>';
+      document.body.innerHTML = '<div class="poker-page"><p class="poker-error">' + t('pokerErrMissingTableId', 'No tableId provided') + '</p><a href="/poker/" class="poker-back">&larr; ' + t('backToLobby', 'Back to lobby') + '</a></div>';
       return;
     }
 
@@ -293,7 +293,7 @@
         if (isPolling){ resetPollBackoff(); }
       } catch (err){
         klog('poker_table_load_error', { tableId: tableId, error: err.message || err.code });
-        setError(errorEl, err.message || 'Failed to load table');
+        setError(errorEl, err.message || t('pokerErrLoadTable', 'Failed to load table'));
         if (isPolling){ increasePollBackoff(); }
       }
     }
@@ -381,7 +381,7 @@
         loadTable();
       } catch (err){
         klog('poker_join_error', { tableId: tableId, error: err.message || err.code });
-        setError(errorEl, err.message || 'Failed to join');
+        setError(errorEl, err.message || t('pokerErrJoin', 'Failed to join'));
       } finally {
         setLoading(joinBtn, false);
         setLoading(leaveBtn, false);
@@ -397,7 +397,7 @@
         loadTable();
       } catch (err){
         klog('poker_leave_error', { tableId: tableId, error: err.message || err.code });
-        setError(errorEl, err.message || 'Failed to leave');
+        setError(errorEl, err.message || t('pokerErrLeave', 'Failed to leave'));
       } finally {
         setLoading(joinBtn, false);
         setLoading(leaveBtn, false);
