@@ -58,9 +58,16 @@ export async function handler(event) {
   const origin = event.headers?.origin || event.headers?.Origin;
   const cors = corsHeaders(origin);
   if (!cors) {
+    const headers = {
+      ...baseHeaders(),
+      "access-control-allow-origin": "null",
+      "access-control-allow-credentials": "true",
+      "access-control-allow-headers": "authorization, content-type",
+      "access-control-allow-methods": "GET, POST, DELETE, OPTIONS",
+    };
     return {
       statusCode: 403,
-      headers: baseHeaders(),
+      headers,
       body: JSON.stringify({ error: "forbidden_origin" }),
     };
   }
