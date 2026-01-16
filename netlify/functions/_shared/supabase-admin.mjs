@@ -1,5 +1,7 @@
 import postgres from "postgres";
 
+// Exception policy: console.* usage is allowed ONLY inside klog.
+// All other logging must go through klog for consistent log capture.
 const klog = (kind, data) => {
   try {
     console.log(`[klog] ${kind}`, JSON.stringify(data));
@@ -64,7 +66,7 @@ const AUTH_ENDPOINT = SUPABASE_URL ? `${SUPABASE_URL.replace(/\/$/, "")}/auth/v1
 const AUTH_API_KEY = SUPABASE_ANON_KEY || "";
 
 if (!SUPABASE_DB_URL) {
-  console.warn("[chips] Supabase DB URL missing – chips functions will error without SUPABASE_DB_URL");
+  klog("chips_db_url_missing", { hasDbUrl: false });
 }
 
 const sql = SUPABASE_DB_URL
@@ -189,7 +191,12 @@ async function beginSql(fn) {
 
 async function closeSql() {
   if (sql && typeof sql.end === "function") {
-    await sql.end({ timeout: 5 });
+    try {
+      await sql.end({ timeout: 5 });
+    } catch {
+      // Fallback for postgres client versions that don't support options
+      await sql.end();
+    }
   }
 }
 

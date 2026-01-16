@@ -1,10 +1,18 @@
 // Minimal Upstash REST client (no extra deps).
+import { klog } from "./supabase-admin.mjs";
+
 const BASE = process.env.UPSTASH_REDIS_REST_URL;
 const TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN;
 const USER_PROFILE_PREFIX = "kcswh:xp:user:";
 
-if (!BASE || !TOKEN) {
-  console.warn("[store-upstash] Missing UPSTASH env; falling back to in-memory store.");
+// Track whether we're using memory store (for fallback logic)
+export const isMemoryStore = !BASE || !TOKEN;
+
+// Log memory-store fallback once on cold start
+let didLogMemoryFallback = false;
+if (isMemoryStore && !didLogMemoryFallback) {
+  didLogMemoryFallback = true;
+  klog("upstash_env_missing_falling_back_to_memory", { hasBase: !!BASE, hasToken: !!TOKEN });
 }
 
 function createMemoryStore() {
@@ -100,12 +108,12 @@ function createMemoryStore() {
 
         const release = () => { memory.delete(lockKey); };
 
-        let sessionTotal = Number(getValue(sessionKey) ?? "0");
-        let lastSync = Number(getValue(sessionSyncKey) ?? "0");
-        let dailyTotal = Number(getValue(dailyKey) ?? "0");
-        let lifetime = Number(getValue(totalKey) ?? "0");
-
+        // Wrap all operations after lock acquisition in try block to ensure cleanup
         try {
+          let sessionTotal = Number(getValue(sessionKey) ?? "0");
+          let lastSync = Number(getValue(sessionSyncKey) ?? "0");
+          let dailyTotal = Number(getValue(dailyKey) ?? "0");
+          let lifetime = Number(getValue(totalKey) ?? "0");
           if (lastSync > 0 && ts <= lastSync) {
             return [0, dailyTotal, sessionTotal, lifetime, lastSync, 2];
           }
@@ -195,23 +203,67 @@ const remoteStore = {
       body: JSON.stringify(body),
     });
     if (!res.ok) {
-      // Log the actual error response for debugging
-      let errorDetail = "";
+      // Intentionally mutating properties on const object for cleaner code
+      const logPayload = {
+        op: "eval",
+        status: res.status,
+        statusText: res.statusText,
+        keysCount: Array.isArray(keys) ? keys.length : 0,
+        argvCount: Array.isArray(argv) ? argv.length : 0,
+      };
       try {
-        const errorBody = await res.text();
-        errorDetail = `: ${errorBody}`;
-        console.error(`[Upstash] eval failed with status ${res.status}${errorDetail}`);
+        const rawBody = await res.text();
+        logPayload.bodyPreview = rawBody.slice(0, 500);
+        logPayload.bodyTruncated = rawBody.length > 500;
       } catch {
-        console.error(`[Upstash] eval failed with status ${res.status} (could not read error body)`);
+        logPayload.bodyPreview = "unavailable";
       }
-      throw new Error(`Upstash eval failed: ${res.status}${errorDetail}`);
+      klog("upstash_eval_failed", logPayload);
+      throw new Error(`Upstash eval failed: ${res.status} ${res.statusText}`);
     }
     const data = await res.json();
     return data.result;
   },
 };
 
-export const store = (!BASE || !TOKEN) ? createMemoryStore() : remoteStore;
+export const store = isMemoryStore ? createMemoryStore() : remoteStore;
+
+/**
+ * Rate limit increment with TTL.
+ * Atomic in Upstash via Lua EVAL; memory fallback is best-effort (non-atomic).
+ * Returns { count, ttlSet } where ttlSet indicates if TTL was (re)applied.
+ */
+const RATE_LIMIT_SCRIPT = `
+local key = KEYS[1]
+local ttl_seconds = tonumber(ARGV[1])
+local count = redis.call('INCR', key)
+local current_ttl = redis.call('TTL', key)
+if current_ttl < 0 then
+  redis.call('EXPIRE', key, ttl_seconds)
+  return {count, 1}
+end
+return {count, 0}
+`;
+
+export async function atomicRateLimitIncr(key, ttlSeconds = 60) {
+  // Memory store doesn't support the rate-limit Lua script; use non-atomic fallback
+  if (isMemoryStore) {
+    const count = await store.incrBy(key, 1);
+    const ttl = await store.ttl(key);
+    if (ttl < 0) {
+      await store.expire(key, ttlSeconds);
+      return { count, ttlSet: true };
+    }
+    return { count, ttlSet: false };
+  }
+
+  // Upstash: use atomic Lua script (let errors propagate to caller)
+  const result = await store.eval(RATE_LIMIT_SCRIPT, [key], [String(ttlSeconds)]);
+  if (Array.isArray(result)) {
+    return { count: Number(result[0]) || 0, ttlSet: result[1] === 1 };
+  }
+  return { count: Number(result) || 0, ttlSet: false };
+}
 
 const clampTotalXp = (value) => {
   const parsed = Math.floor(Number(value) || 0);
@@ -249,7 +301,7 @@ export async function saveUserProfile({ userId, totalXp, now = Date.now() }) {
     await store.set(profileKey(userId), JSON.stringify(profile));
     return profile;
   } catch (err) {
-    console.error("[store-upstash] Failed to persist user profile", { userId, error: err?.message });
+    klog("upstash_save_user_profile_failed", { userId, error: err?.message });
     return existing || profile;
   }
 }
