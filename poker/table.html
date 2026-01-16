@@ -48,7 +48,12 @@
     <a href="/poker/" class="poker-back">&larr; <span data-i18n="backToLobby">Back to lobby</span></a>
 
     <div id="pokerError" class="poker-error" hidden></div>
-    <div id="pokerAuthMsg" class="poker-auth-msg" hidden data-i18n="pokerAuthTable">Please log in to view this table.</div>
+    <div id="pokerAuthMsg" class="poker-auth-msg" hidden>
+      <div class="poker-auth-text" data-i18n="pokerAuthTable">Please log in to view this table.</div>
+      <div class="poker-auth-actions">
+        <button id="pokerSignIn" class="poker-btn poker-btn--primary" data-i18n="signIn">Sign In</button>
+      </div>
+    </div>
 
     <div id="pokerTableContent" hidden>
       <div class="poker-header">

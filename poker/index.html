@@ -46,7 +46,12 @@
 
   <main class="poker-page">
     <div id="pokerError" class="poker-error" hidden></div>
-    <div id="pokerAuthMsg" class="poker-auth-msg" hidden data-i18n="pokerAuthLobby">Please log in to access the poker lobby.</div>
+    <div id="pokerAuthMsg" class="poker-auth-msg" hidden>
+      <div class="poker-auth-text" data-i18n="pokerAuthLobby">Please log in to access the poker lobby.</div>
+      <div class="poker-auth-actions">
+        <button id="pokerSignIn" class="poker-btn poker-btn--primary" data-i18n="signIn">Sign In</button>
+      </div>
+    </div>
 
     <div id="pokerLobbyContent" hidden>
       <div class="poker-header">
