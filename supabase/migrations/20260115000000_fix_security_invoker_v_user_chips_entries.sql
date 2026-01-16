@@ -50,3 +50,8 @@ begin
       );
   end if;
 end $$;
+
+-- Grants required for security-invoker view access.
+grant select on public.v_user_chips_entries to authenticated;
+grant select on public.chips_accounts to authenticated;
+grant select on public.chips_entries to authenticated;
