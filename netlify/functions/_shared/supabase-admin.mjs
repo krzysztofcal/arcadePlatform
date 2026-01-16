@@ -69,9 +69,19 @@ if (!SUPABASE_DB_URL) {
   klog("chips_db_url_missing", { hasDbUrl: false });
 }
 
-const sql = SUPABASE_DB_URL
-  ? postgres(SUPABASE_DB_URL, { max: 1, idle_timeout: 30, connect_timeout: 10 })
-  : null;
+const POSTGRES_OPTIONS = { max: 1, idle_timeout: 30, connect_timeout: 10, prepare: false };
+
+const sql = SUPABASE_DB_URL ? postgres(SUPABASE_DB_URL, POSTGRES_OPTIONS) : null;
+
+if (SUPABASE_DB_URL) {
+  let dbHost = "unknown";
+  try {
+    dbHost = new URL(SUPABASE_DB_URL).host || "unknown";
+  } catch {
+    dbHost = "invalid";
+  }
+  klog("chips_db_client_init", { dbHost, preparedStatementsDisabled: POSTGRES_OPTIONS.prepare === false });
+}
 
 const CORS_ALLOW = (() => {
   const fromEnv = (process.env.XP_CORS_ALLOW ?? "")
