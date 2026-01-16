@@ -64,7 +64,8 @@
     },
     signIn: { en: 'Sign In', pl: 'Zaloguj się' },
     addToFavorites: { en: 'Add to favorites', pl: 'Dodaj do ulubionych' },
-    removeFromFavorites: { en: 'Remove from favorites', pl: 'Usuń z ulubionych' }
+    removeFromFavorites: { en: 'Remove from favorites', pl: 'Usuń z ulubionych' },
+    poker: { en: 'Poker', pl: 'Poker' }
   };
 
   let currentLang = 'en';

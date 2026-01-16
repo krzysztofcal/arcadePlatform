@@ -6,9 +6,10 @@
   var GET_URL = '/.netlify/functions/poker-get-table';
   var JOIN_URL = '/.netlify/functions/poker-join';
   var LEAVE_URL = '/.netlify/functions/poker-leave';
-  var POLL_INTERVAL = 2000;
+  var POLL_INTERVAL_BASE = 2000;
+  var POLL_INTERVAL_MAX = 10000;
 
-  var state = { token: null, polling: false, pollTimer: null };
+  var state = { token: null, polling: false, pollTimer: null, pollInterval: POLL_INTERVAL_BASE, pollErrors: 0 };
 
   function klog(kind, data){
     try {
@@ -91,16 +92,28 @@
     return 'ui-' + Date.now() + '-' + Math.random().toString(36).substring(2, 8);
   }
 
-  function getUserIdFromToken(token){
-    if (!token) return null;
+  function decodeBase64Url(str){
+    var base64 = str.replace(/-/g, '+').replace(/_/g, '/');
+    var pad = base64.length % 4;
+    if (pad){ base64 += '===='.substring(pad); }
+    return atob(base64);
+  }
+
+  function decodeJwtPayload(token){
+    if (!token || typeof token !== 'string') return null;
+    var parts = token.split('.');
+    if (parts.length < 2) return null;
     try {
-      var parts = token.split('.');
-      if (parts.length < 2) return null;
-      var payload = JSON.parse(atob(parts[1]));
-      return payload.sub || null;
+      var decoded = decodeBase64Url(parts[1]);
+      return JSON.parse(decoded);
     } catch (_err){
       return null;
     }
+  }
+
+  function getUserIdFromToken(token){
+    var payload = decodeJwtPayload(token);
+    return payload && payload.sub ? payload.sub : null;
   }
 
   function setError(el, msg){
@@ -263,16 +276,43 @@
       return true;
     }
 
-    async function loadTable(){
+    async function loadTable(isPolling){
       setError(errorEl, null);
       try {
         var data = await apiGet(GET_URL + '?tableId=' + encodeURIComponent(tableId));
         tableData = data;
         renderTable(data);
+        if (isPolling){ resetPollBackoff(); }
       } catch (err){
         klog('poker_table_load_error', { tableId: tableId, error: err.message || err.code });
         setError(errorEl, err.message || 'Failed to load table');
+        if (isPolling){ increasePollBackoff(); }
       }
+    }
+
+    function resetPollBackoff(){
+      state.pollErrors = 0;
+      if (state.pollInterval !== POLL_INTERVAL_BASE){
+        state.pollInterval = POLL_INTERVAL_BASE;
+        restartPolling();
+      }
+    }
+
+    function increasePollBackoff(){
+      state.pollErrors++;
+      if (state.pollErrors >= 2){
+        var newInterval = Math.min(state.pollInterval * 2, POLL_INTERVAL_MAX);
+        if (newInterval !== state.pollInterval){
+          state.pollInterval = newInterval;
+          restartPolling();
+        }
+      }
+    }
+
+    function restartPolling(){
+      if (!state.polling) return;
+      stopPolling();
+      startPolling();
     }
 
     function renderTable(data){
@@ -348,8 +388,8 @@
       state.polling = true;
       state.pollTimer = setInterval(function(){
         if (document.visibilityState === 'hidden') return;
-        loadTable();
-      }, POLL_INTERVAL);
+        loadTable(true);
+      }, state.pollInterval);
     }
 
     function stopPolling(){
@@ -364,8 +404,10 @@
       if (document.visibilityState === 'hidden'){
         stopPolling();
       } else {
+        state.pollInterval = POLL_INTERVAL_BASE;
+        state.pollErrors = 0;
         startPolling();
-        loadTable();
+        loadTable(false);
       }
     }
 
@@ -382,7 +424,7 @@
 
     checkAuth().then(function(authed){
       if (authed){
-        loadTable();
+        loadTable(false);
         startPolling();
       }
     });
