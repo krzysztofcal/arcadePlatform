@@ -20,7 +20,7 @@ const makeError = (status, code) => {
 };
 
 const parseRequestId = (value) => {
-  if (value == null) return { ok: true, value: null };
+  if (value == null) return { ok: false, value: null };
   if (typeof value !== "string") return { ok: false, value: null };
   const trimmed = value.trim();
   if (!trimmed) return { ok: false, value: null };
@@ -39,8 +39,6 @@ const normalizeState = (value) => {
   if (typeof value === "object") return value;
   return {};
 };
-
-const parseSeats = (value) => (Array.isArray(value) ? value : []);
 
 const parseStacks = (value) => (value && typeof value === "object" && !Array.isArray(value) ? value : {});
 
@@ -97,10 +95,7 @@ export async function handler(event) {
 
   try {
     const result = await beginSql(async (tx) => {
-      const tableRows = await tx.unsafe(
-        "select id, status, max_players from public.poker_tables where id = $1 limit 1;",
-        [tableId]
-      );
+      const tableRows = await tx.unsafe("select id, status from public.poker_tables where id = $1 limit 1;", [tableId]);
       const table = tableRows?.[0] || null;
       if (!table) {
         throw makeError(404, "table_not_found");
@@ -119,7 +114,19 @@ export async function handler(event) {
       }
 
       const currentState = normalizeState(stateRow.state);
-      if (requestIdParsed.value && currentState.lastStartHandRequestId === requestIdParsed.value) {
+      const authSeatRows = await tx.unsafe(
+        "select user_id from public.poker_seats where table_id = $1 and user_id = $2 and status = 'SEATED' limit 1;",
+        [tableId, auth.userId]
+      );
+      if (!authSeatRows?.[0]) {
+        throw makeError(403, "not_allowed");
+      }
+
+      if (
+        currentState.lastStartHandRequestId === requestIdParsed.value &&
+        currentState.phase &&
+        currentState.phase !== "INIT"
+      ) {
         return {
           tableId,
           version: stateRow.version,
@@ -150,7 +157,6 @@ export async function handler(event) {
       const nextToActSeatNo = seatNos[(buttonIndex + 1) % seatNos.length];
 
       const handId = `hand_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
-      const currentSeats = parseSeats(currentState.seats);
       const derivedSeats = seats.map((seat) => ({ userId: seat.user_id, seatNo: seat.seat_no }));
 
       const updatedState = {
@@ -159,7 +165,7 @@ export async function handler(event) {
         handId,
         phase: "HAND_ACTIVE",
         pot: 0,
-        seats: currentSeats.length ? currentSeats : derivedSeats,
+        seats: derivedSeats,
         stacks: parseStacks(currentState.stacks),
         buttonSeatNo,
         nextToActSeatNo,
