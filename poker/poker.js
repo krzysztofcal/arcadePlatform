@@ -519,10 +519,10 @@
           div.className = 'poker-seat' + (seat ? '' : ' poker-seat--empty');
           var seatNoEl = document.createElement('div');
           seatNoEl.className = 'poker-seat-no';
-          seatNoEl.textContent = 'Seat ' + i;
+          seatNoEl.textContent = t('pokerSeatPrefix', 'Seat') + ' ' + i;
           var seatUserEl = document.createElement('div');
           seatUserEl.className = 'poker-seat-user';
-          seatUserEl.textContent = seat ? shortId(seat.userId) : 'Empty';
+          seatUserEl.textContent = seat ? shortId(seat.userId) : t('pokerSeatEmpty', 'Empty');
           div.appendChild(seatNoEl);
           div.appendChild(seatUserEl);
           seatsGrid.appendChild(div);

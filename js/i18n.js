@@ -92,6 +92,8 @@
     showRawJson: { en: 'Show raw JSON', pl: 'Pokaż JSON' },
     noOpenTables: { en: 'No open tables', pl: 'Brak otwartych stołów' },
     loading: { en: 'Loading...', pl: 'Ładowanie...' },
+    pokerSeatPrefix: { en: 'Seat', pl: 'Miejsce' },
+    pokerSeatEmpty: { en: 'Empty', pl: 'Wolne' },
     pokerAuthLobby: { en: 'Please log in to access the poker lobby.', pl: 'Zaloguj się, aby uzyskać dostęp do lobby pokera.' },
     pokerAuthTable: { en: 'Please log in to view this table.', pl: 'Zaloguj się, aby zobaczyć ten stół.' },
     pokerAuthExpired: { en: 'Session expired. Please sign in again.', pl: 'Sesja wygasła. Zaloguj się ponownie.' },
