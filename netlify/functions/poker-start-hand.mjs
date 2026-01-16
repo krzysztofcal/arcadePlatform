@@ -49,6 +49,11 @@ const normalizeSeatNo = (value) => {
   return value;
 };
 
+const normalizeVersion = (value) => {
+  const num = Number(value);
+  return Number.isFinite(num) ? num : null;
+};
+
 export async function handler(event) {
   const origin = event.headers?.origin || event.headers?.Origin;
   const cors = corsHeaders(origin);
@@ -122,18 +127,19 @@ export async function handler(event) {
         throw makeError(403, "not_allowed");
       }
 
-      if (
-        currentState.lastStartHandRequestId === requestIdParsed.value &&
-        currentState.phase &&
-        currentState.phase !== "INIT"
-      ) {
-        return {
-          tableId,
-          version: stateRow.version,
-          handId: currentState.handId || null,
-          buttonSeatNo: normalizeSeatNo(currentState.buttonSeatNo),
-          nextToActSeatNo: normalizeSeatNo(currentState.nextToActSeatNo),
-        };
+      // Idempotency does not bypass authorization.
+      const sameRequest = currentState.lastStartHandRequestId === requestIdParsed.value;
+      if (sameRequest) {
+        if (typeof currentState.handId === "string" && currentState.handId.trim()) {
+          return {
+            tableId,
+            version: normalizeVersion(stateRow.version),
+            handId: currentState.handId,
+            buttonSeatNo: normalizeSeatNo(currentState.buttonSeatNo),
+            nextToActSeatNo: normalizeSeatNo(currentState.nextToActSeatNo),
+          };
+        }
+        throw makeError(409, "state_invalid");
       }
 
       const seatRows = await tx.unsafe(
