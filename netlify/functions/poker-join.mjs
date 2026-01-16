@@ -121,7 +121,7 @@ export async function handler(event) {
   try {
     await beginSql(async (tx) => {
       const tableRows = await tx.unsafe(
-        "select id, status from public.poker_tables where id = $1 limit 1;",
+        "select id, status, max_players from public.poker_tables where id = $1 limit 1;",
         [tableId]
       );
       const table = tableRows?.[0] || null;
@@ -130,6 +130,9 @@ export async function handler(event) {
       }
       if (table.status !== "OPEN") {
         throw makeError(409, "table_not_open");
+      }
+      if (seatNo >= Number(table.max_players)) {
+        throw makeError(400, "invalid_seat_no");
       }
 
       try {
@@ -172,7 +175,7 @@ export async function handler(event) {
       });
 
       const stateRows = await tx.unsafe(
-        "select version, state from public.poker_state where table_id = $1 limit 1;",
+        "select version, state from public.poker_state where table_id = $1 for update;",
         [tableId]
       );
       const stateRow = stateRows?.[0] || null;
