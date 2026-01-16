@@ -61,9 +61,8 @@ export async function handler(event) {
     const headers = {
       ...baseHeaders(),
       "access-control-allow-origin": "null",
-      "access-control-allow-credentials": "true",
       "access-control-allow-headers": "authorization, content-type",
-      "access-control-allow-methods": "GET, POST, DELETE, OPTIONS",
+      "access-control-allow-methods": "POST, OPTIONS",
     };
     return {
       statusCode: 403,
