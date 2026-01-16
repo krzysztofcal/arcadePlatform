@@ -133,77 +133,105 @@ const decodeBase64UrlJson = (segment) => {
     return null;
   }
 };
-const safeEquals = (a, b) => {
+const safeCompareBase64Url = (a, b) => {
   if (!a || !b) return false;
-  if (a.length !== b.length) return false;
-  const left = Buffer.from(a, "utf8");
-  const right = Buffer.from(b, "utf8");
+  let left;
+  let right;
+  try {
+    left = Buffer.from(a, "base64url");
+    right = Buffer.from(b, "base64url");
+  } catch {
+    return false;
+  }
   if (left.length !== right.length) return false;
   return crypto.timingSafeEqual(left, right);
 };
-const buildJwtAuthResult = ({ provided, valid, userId, reason, payload }) => ({
-  provided,
-  valid,
-  userId: userId || null,
-  reason,
-  user: payload || null,
-});
+const buildJwtUser = (payload) => {
+  if (!payload || typeof payload !== "object") return null;
+  const sub = typeof payload.sub === "string" ? payload.sub.trim() : "";
+  if (!sub) return null;
+  const user = { id: sub, sub };
+  if (typeof payload.email === "string") {
+    user.email = payload.email;
+  }
+  user.claims = payload;
+  return user;
+};
+const buildJwtAuthResult = ({ provided, valid, userId, reason, payload }) => {
+  const user = valid ? buildJwtUser(payload) : null;
+  return {
+    provided,
+    valid,
+    userId: userId || user?.id || null,
+    reason,
+    user,
+  };
+};
+const AUTH_VERIFY_SLOW_MS = 25;
+let authVerifyModeLogged = false;
+const logAuthTiming = (start) => {
+  const ms = Date.now() - start;
+  if (!authVerifyModeLogged) {
+    klog("auth_verify_mode", { mode: "local" });
+    authVerifyModeLogged = true;
+  }
+  if (ms >= AUTH_VERIFY_SLOW_MS) {
+    klog("auth_verify_local_ms", { ms, thresholdMs: AUTH_VERIFY_SLOW_MS });
+  }
+};
 const verifySupabaseJwt = async (token) => {
   const start = Date.now();
+  const finish = (result) => {
+    logAuthTiming(start);
+    return result;
+  };
   if (!token) {
-    klog("auth_verify_mode", { mode: "local" });
-    klog("auth_verify_local_ms", { ms: Date.now() - start });
-    return buildJwtAuthResult({ provided: false, valid: false, reason: "missing_token" });
+    return finish(buildJwtAuthResult({ provided: false, valid: false, reason: "missing_token" }));
   }
   if (!SUPABASE_JWT_SECRET) {
-    klog("auth_verify_mode", { mode: "local" });
-    klog("auth_verify_local_ms", { ms: Date.now() - start });
-    return buildJwtAuthResult({ provided: true, valid: false, reason: "missing_jwt_secret" });
+    return finish(buildJwtAuthResult({ provided: true, valid: false, reason: "missing_jwt_secret" }));
   }
 
   const [headerSegment, payloadSegment, signatureSegment] = token.split(".");
   if (!headerSegment || !payloadSegment || !signatureSegment) {
-    klog("auth_verify_mode", { mode: "local" });
-    klog("auth_verify_local_ms", { ms: Date.now() - start });
-    return buildJwtAuthResult({ provided: true, valid: false, reason: "malformed_token" });
+    return finish(buildJwtAuthResult({ provided: true, valid: false, reason: "malformed_token" }));
   }
 
   const header = decodeBase64UrlJson(headerSegment);
   const payload = decodeBase64UrlJson(payloadSegment);
-  if (!header || !payload) {
-    klog("auth_verify_mode", { mode: "local" });
-    klog("auth_verify_local_ms", { ms: Date.now() - start });
-    return buildJwtAuthResult({ provided: true, valid: false, reason: "invalid_encoding" });
+  if (!header || typeof header !== "object" || !payload || typeof payload !== "object") {
+    return finish(buildJwtAuthResult({ provided: true, valid: false, reason: "invalid_encoding" }));
   }
 
-  const alg = header.alg || "HS256";
+  const alg = header.alg;
+  if (alg !== "HS256" && alg !== "HS512") {
+    return finish(buildJwtAuthResult({ provided: true, valid: false, reason: "unsupported_alg" }));
+  }
   const hmacAlg = alg === "HS512" ? "sha512" : "sha256";
   const expectedSig = crypto.createHmac(hmacAlg, SUPABASE_JWT_SECRET)
     .update(`${headerSegment}.${payloadSegment}`)
     .digest("base64url");
-  if (!safeEquals(signatureSegment, expectedSig)) {
-    klog("auth_verify_mode", { mode: "local" });
-    klog("auth_verify_local_ms", { ms: Date.now() - start });
-    return buildJwtAuthResult({ provided: true, valid: false, reason: "invalid_signature" });
+  if (!safeCompareBase64Url(signatureSegment, expectedSig)) {
+    return finish(buildJwtAuthResult({ provided: true, valid: false, reason: "invalid_signature" }));
   }
 
   const nowSec = Math.floor(Date.now() / 1000);
-  if (payload.exp && Number(payload.exp) <= nowSec) {
-    klog("auth_verify_mode", { mode: "local" });
-    klog("auth_verify_local_ms", { ms: Date.now() - start });
-    return buildJwtAuthResult({ provided: true, valid: false, reason: "expired" });
+  if (!Number.isFinite(payload.exp)) {
+    return finish(buildJwtAuthResult({ provided: true, valid: false, reason: "missing_exp" }));
+  }
+  if (Number(payload.exp) <= nowSec) {
+    return finish(buildJwtAuthResult({ provided: true, valid: false, reason: "expired" }));
+  }
+  if (Number.isFinite(payload.nbf) && Number(payload.nbf) > nowSec) {
+    return finish(buildJwtAuthResult({ provided: true, valid: false, reason: "not_yet_valid" }));
   }
 
-  const userId = typeof payload.sub === "string" ? payload.sub : null;
+  const userId = typeof payload.sub === "string" ? payload.sub.trim() : null;
   if (!userId) {
-    klog("auth_verify_mode", { mode: "local" });
-    klog("auth_verify_local_ms", { ms: Date.now() - start });
-    return buildJwtAuthResult({ provided: true, valid: false, reason: "missing_sub" });
+    return finish(buildJwtAuthResult({ provided: true, valid: false, reason: "missing_sub" }));
   }
 
-  klog("auth_verify_mode", { mode: "local" });
-  klog("auth_verify_local_ms", { ms: Date.now() - start });
-  return buildJwtAuthResult({ provided: true, valid: true, userId, reason: "ok", payload });
+  return finish(buildJwtAuthResult({ provided: true, valid: true, userId, reason: "ok", payload }));
 };
 
 async function executeSql(query, params = []) {
