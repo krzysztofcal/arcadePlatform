@@ -179,9 +179,9 @@ netlify env:set CHIPS_ENABLED "1" --context production
 netlify deploy --prod
 ```
 
-Connection string source: Supabase Dashboard → Settings → Database → Connection string → **Transaction pooler** → URI (IPv4-compatible). Keep existing Supabase auth env vars (`SUPABASE_URL`, `SUPABASE_ANON_KEY`/`SUPABASE_ANON_KEY_V2`). Netlify builds do **not** hot-reload env vars, so a redeploy is required after any env change.
+Connection string source: Supabase Dashboard → Settings → Database → Connection string → **Transaction pooler** → URI (IPv4-compatible). Keep existing Supabase auth env vars (`SUPABASE_URL`, `SUPABASE_ANON_KEY`/`SUPABASE_ANON_KEY_V2`, `SUPABASE_JWT_SECRET`/`SUPABASE_JWT_SECRET_V2`). Netlify builds do **not** hot-reload env vars, so a redeploy is required after any env change.
 
-> Note: JWT verification currently calls the Supabase Auth HTTP endpoint (`/auth/v1/user`). This is acceptable but adds network latency; local verification can be considered later.
+> Note: JWT verification now uses local signature validation with `SUPABASE_JWT_SECRET`. Missing secrets will cause auth to fail, so ensure the Netlify env is populated for each deploy context.
 
 ### Verification after deploy
 
