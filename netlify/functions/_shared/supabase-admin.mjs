@@ -1,3 +1,4 @@
+import crypto from "crypto";
 import postgres from "postgres";
 
 // Exception policy: console.* usage is allowed ONLY inside klog.
@@ -59,14 +60,14 @@ function normalizeRow(row) {
   return out;
 }
 
-const SUPABASE_URL = process.env.SUPABASE_URL || "";
-const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY_V2 || "";
+const SUPABASE_JWT_SECRET = process.env.SUPABASE_JWT_SECRET || process.env.SUPABASE_JWT_SECRET_V2 || "";
 const SUPABASE_DB_URL = process.env.SUPABASE_DB_URL || "";
-const AUTH_ENDPOINT = SUPABASE_URL ? `${SUPABASE_URL.replace(/\/$/, "")}/auth/v1/user` : "";
-const AUTH_API_KEY = SUPABASE_ANON_KEY || "";
 
 if (!SUPABASE_DB_URL) {
   klog("chips_db_url_missing", { hasDbUrl: false });
+}
+if (!SUPABASE_JWT_SECRET) {
+  klog("auth_jwt_secret_missing", {});
 }
 
 const POSTGRES_OPTIONS = { max: 1, idle_timeout: 30, connect_timeout: 10, prepare: false };
@@ -123,45 +124,114 @@ const extractBearerToken = (headers) => {
   const match = /^Bearer\s+(.+)$/i.exec(headerValue.trim());
   return match ? match[1].trim() : null;
 };
-const verifySupabaseJwt = async (token) => {
-  // Note: Verification is performed via Supabase Auth HTTP endpoint; this adds network latency but is acceptable for now.
-  if (!token) {
-    return { provided: false, valid: false, userId: null, reason: "missing_token" };
-  }
-  if (!AUTH_ENDPOINT || !AUTH_API_KEY) {
-    return { provided: true, valid: false, userId: null, reason: "missing_supabase_config" };
-  }
-
+const decodeBase64UrlJson = (segment) => {
+  if (!segment) return null;
   try {
-    const response = await fetch(AUTH_ENDPOINT, {
-      method: "GET",
-      headers: {
-        apikey: AUTH_API_KEY,
-        authorization: `Bearer ${token}`,
-      },
-    });
-
-    if (!response.ok) {
-      return { provided: true, valid: false, userId: null, reason: response.status === 401 ? "unauthorized" : "auth_request_failed" };
-    }
-
-    let body = null;
-    try {
-      body = await response.json();
-    } catch {
-      body = null;
-    }
-
-    const userId = body?.id || body?.user?.id || null;
-    if (!userId) {
-      return { provided: true, valid: false, userId: null, reason: "missing_user" };
-    }
-
-    return { provided: true, valid: true, userId, reason: "ok", user: body };
-  } catch (error) {
-    klog("supabase_auth_error", { message: error?.message || "request_failed" });
-    return { provided: true, valid: false, userId: null, reason: "auth_request_failed" };
+    const decoded = Buffer.from(segment, "base64url").toString("utf8");
+    return JSON.parse(decoded);
+  } catch {
+    return null;
   }
+};
+const safeCompareBase64Url = (a, b) => {
+  if (!a || !b) return false;
+  let left;
+  let right;
+  try {
+    left = Buffer.from(a, "base64url");
+    right = Buffer.from(b, "base64url");
+  } catch {
+    return false;
+  }
+  if (left.length !== right.length) return false;
+  return crypto.timingSafeEqual(left, right);
+};
+const buildJwtUser = (payload) => {
+  if (!payload || typeof payload !== "object") return null;
+  const sub = typeof payload.sub === "string" ? payload.sub.trim() : "";
+  if (!sub) return null;
+  const user = { id: sub, sub };
+  if (typeof payload.email === "string") {
+    user.email = payload.email;
+  }
+  user.claims = payload;
+  return user;
+};
+const buildJwtAuthResult = ({ provided, valid, userId, reason, payload }) => {
+  const user = valid ? buildJwtUser(payload) : null;
+  return {
+    provided,
+    valid,
+    userId: userId || user?.id || null,
+    reason,
+    user,
+  };
+};
+const AUTH_VERIFY_SLOW_MS = 25;
+let authVerifyModeLogged = false;
+const logAuthTiming = (start) => {
+  const ms = Date.now() - start;
+  if (!authVerifyModeLogged) {
+    klog("auth_verify_mode", { mode: "local" });
+    authVerifyModeLogged = true;
+  }
+  if (ms >= AUTH_VERIFY_SLOW_MS) {
+    klog("auth_verify_local_ms", { ms, thresholdMs: AUTH_VERIFY_SLOW_MS });
+  }
+};
+const verifySupabaseJwt = async (token) => {
+  const start = Date.now();
+  const finish = (result) => {
+    logAuthTiming(start);
+    return result;
+  };
+  if (!token) {
+    return finish(buildJwtAuthResult({ provided: false, valid: false, reason: "missing_token" }));
+  }
+  if (!SUPABASE_JWT_SECRET) {
+    return finish(buildJwtAuthResult({ provided: true, valid: false, reason: "missing_jwt_secret" }));
+  }
+
+  const [headerSegment, payloadSegment, signatureSegment] = token.split(".");
+  if (!headerSegment || !payloadSegment || !signatureSegment) {
+    return finish(buildJwtAuthResult({ provided: true, valid: false, reason: "malformed_token" }));
+  }
+
+  const header = decodeBase64UrlJson(headerSegment);
+  const payload = decodeBase64UrlJson(payloadSegment);
+  if (!header || typeof header !== "object" || !payload || typeof payload !== "object") {
+    return finish(buildJwtAuthResult({ provided: true, valid: false, reason: "invalid_encoding" }));
+  }
+
+  const alg = header.alg;
+  if (alg !== "HS256" && alg !== "HS512") {
+    return finish(buildJwtAuthResult({ provided: true, valid: false, reason: "unsupported_alg" }));
+  }
+  const hmacAlg = alg === "HS512" ? "sha512" : "sha256";
+  const expectedSig = crypto.createHmac(hmacAlg, SUPABASE_JWT_SECRET)
+    .update(`${headerSegment}.${payloadSegment}`)
+    .digest("base64url");
+  if (!safeCompareBase64Url(signatureSegment, expectedSig)) {
+    return finish(buildJwtAuthResult({ provided: true, valid: false, reason: "invalid_signature" }));
+  }
+
+  const nowSec = Math.floor(Date.now() / 1000);
+  if (!Number.isFinite(payload.exp)) {
+    return finish(buildJwtAuthResult({ provided: true, valid: false, reason: "missing_exp" }));
+  }
+  if (Number(payload.exp) <= nowSec) {
+    return finish(buildJwtAuthResult({ provided: true, valid: false, reason: "expired" }));
+  }
+  if (Number.isFinite(payload.nbf) && Number(payload.nbf) > nowSec) {
+    return finish(buildJwtAuthResult({ provided: true, valid: false, reason: "not_yet_valid" }));
+  }
+
+  const userId = typeof payload.sub === "string" ? payload.sub.trim() : null;
+  if (!userId) {
+    return finish(buildJwtAuthResult({ provided: true, valid: false, reason: "missing_sub" }));
+  }
+
+  return finish(buildJwtAuthResult({ provided: true, valid: true, userId, reason: "ok", payload }));
 };
 
 async function executeSql(query, params = []) {
