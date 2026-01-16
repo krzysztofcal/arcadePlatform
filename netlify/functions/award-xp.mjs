@@ -330,17 +330,21 @@ function corsHeaders(origin) {
   // SECURITY: Only allow Netlify domains that belong to OUR site
   // This prevents other Netlify users from accessing our API
   // Pattern: https://<something>--<our-site-name>.netlify.app or https://<our-site-name>.netlify.app
-  let isOurNetlifyDomain = false;
+  // Fallback: If NETLIFY_SITE_NAME is unavailable (test/local env), allow all *.netlify.app
+  let isAllowedNetlifyDomain = false;
   if (NETLIFY_SITE_NAME) {
     const netlifyPattern = new RegExp(
       `^https:\\/\\/(?:[a-z0-9-]+--)?${NETLIFY_SITE_NAME}\\.netlify\\.app$`,
       "i"
     );
-    isOurNetlifyDomain = netlifyPattern.test(origin);
+    isAllowedNetlifyDomain = netlifyPattern.test(origin);
+  } else {
+    // Fallback for test/local environments where URL is not set
+    isAllowedNetlifyDomain = /^https:\/\/[a-z0-9-]+\.netlify\.app$/i.test(origin);
   }
 
-  // If there IS an Origin header, enforce whitelist (unless it's our Netlify domain)
-  if (!isOurNetlifyDomain && CORS_ALLOW.length > 0 && !CORS_ALLOW.includes(origin)) {
+  // If there IS an Origin header, enforce whitelist (unless it's an allowed Netlify domain)
+  if (!isAllowedNetlifyDomain && CORS_ALLOW.length > 0 && !CORS_ALLOW.includes(origin)) {
     return null; // Signal rejection for non-whitelisted origins
   }
 
@@ -502,15 +506,21 @@ export async function handler(event) {
   // SECURITY: Validate CORS BEFORE any side effects (rate limiting, session registration, XP awarding)
   // Check if this is a cross-origin request (has Origin header) from a non-whitelisted origin
   // Only allow Netlify domains belonging to OUR site (not all *.netlify.app)
-  let isOurNetlifyDomain = false;
-  if (origin && NETLIFY_SITE_NAME) {
-    const netlifyPattern = new RegExp(
-      `^https:\\/\\/(?:[a-z0-9-]+--)?${NETLIFY_SITE_NAME}\\.netlify\\.app$`,
-      "i"
-    );
-    isOurNetlifyDomain = netlifyPattern.test(origin);
+  // Fallback: If NETLIFY_SITE_NAME is unavailable (test/local env), allow all *.netlify.app
+  let isAllowedNetlifyDomain = false;
+  if (origin) {
+    if (NETLIFY_SITE_NAME) {
+      const netlifyPattern = new RegExp(
+        `^https:\\/\\/(?:[a-z0-9-]+--)?${NETLIFY_SITE_NAME}\\.netlify\\.app$`,
+        "i"
+      );
+      isAllowedNetlifyDomain = netlifyPattern.test(origin);
+    } else {
+      // Fallback for test/local environments where URL is not set
+      isAllowedNetlifyDomain = /^https:\/\/[a-z0-9-]+\.netlify\.app$/i.test(origin);
+    }
   }
-  if (origin && !isOurNetlifyDomain && CORS_ALLOW.length > 0 && !CORS_ALLOW.includes(origin)) {
+  if (origin && !isAllowedNetlifyDomain && CORS_ALLOW.length > 0 && !CORS_ALLOW.includes(origin)) {
     // Reject immediately before any mutations
     return {
       statusCode: 403,

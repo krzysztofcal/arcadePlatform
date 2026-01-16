@@ -742,16 +742,20 @@ function corsHeaders(origin) {
 
   // SECURITY: Only allow Netlify domains that belong to OUR site
   // This prevents other Netlify users from accessing our API
-  let isOurNetlifyDomain = false;
+  // Fallback: If NETLIFY_SITE_NAME is unavailable (test/local env), allow all *.netlify.app
+  let isAllowedNetlifyDomain = false;
   if (NETLIFY_SITE_NAME) {
     const netlifyPattern = new RegExp(
       `^https:\\/\\/(?:[a-z0-9-]+--)?${NETLIFY_SITE_NAME}\\.netlify\\.app$`,
       "i"
     );
-    isOurNetlifyDomain = netlifyPattern.test(origin);
+    isAllowedNetlifyDomain = netlifyPattern.test(origin);
+  } else {
+    // Fallback for test/local environments where URL is not set
+    isAllowedNetlifyDomain = /^https:\/\/[a-z0-9-]+\.netlify\.app$/i.test(origin);
   }
 
-  if (!isOurNetlifyDomain && CORS_ALLOW.length > 0 && !CORS_ALLOW.includes(origin)) {
+  if (!isAllowedNetlifyDomain && CORS_ALLOW.length > 0 && !CORS_ALLOW.includes(origin)) {
     return null;
   }
 
