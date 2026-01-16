@@ -92,6 +92,14 @@
     return 'ui-' + Date.now() + '-' + Math.random().toString(36).substring(2, 8);
   }
 
+  function t(key, fallback){
+    if (window.I18N && typeof window.I18N.t === 'function'){
+      var val = window.I18N.t(key);
+      if (val) return val;
+    }
+    return fallback || key;
+  }
+
   function decodeBase64Url(str){
     var base64 = str.replace(/-/g, '+').replace(/_/g, '/');
     var pad = base64.length % 4;
@@ -157,7 +165,7 @@
 
     async function loadTables(){
       setError(errorEl, null);
-      if (tableList) tableList.innerHTML = '<div class="poker-loading">Loading...</div>';
+      if (tableList) tableList.innerHTML = '<div class="poker-loading">' + t('loading', 'Loading...') + '</div>';
       try {
         var data = await apiGet(LIST_URL + '?status=OPEN&limit=20');
         renderTables(data.tables || []);
@@ -171,19 +179,19 @@
     function renderTables(tables){
       if (!tableList) return;
       if (!tables || tables.length === 0){
-        tableList.innerHTML = '<div class="poker-loading">No open tables</div>';
+        tableList.innerHTML = '<div class="poker-loading">' + t('noOpenTables', 'No open tables') + '</div>';
         return;
       }
       tableList.innerHTML = '';
-      tables.forEach(function(t){
+      tables.forEach(function(tbl){
         var row = document.createElement('div');
         row.className = 'poker-table-row';
-        var stakes = t.stakes || {};
-        row.innerHTML = '<span class="tid">' + shortId(t.id) + '</span>' +
+        var stakes = tbl.stakes || {};
+        row.innerHTML = '<span class="tid">' + shortId(tbl.id) + '</span>' +
           '<span class="stakes">' + (stakes.sb || 0) + '/' + (stakes.bb || 0) + '</span>' +
-          '<span class="seats">' + (t.seatCount || 0) + '/' + (t.maxPlayers || 6) + '</span>' +
-          '<span class="status">' + (t.status || 'OPEN') + '</span>' +
-          '<button class="poker-btn" data-open="' + t.id + '">Open</button>';
+          '<span class="seats">' + (tbl.seatCount || 0) + '/' + (tbl.maxPlayers || 6) + '</span>' +
+          '<span class="status">' + (tbl.status || 'OPEN') + '</span>' +
+          '<button class="poker-btn" data-open="' + tbl.id + '">' + t('open', 'Open') + '</button>';
         tableList.appendChild(row);
       });
     }
@@ -292,27 +300,40 @@
 
     function resetPollBackoff(){
       state.pollErrors = 0;
-      if (state.pollInterval !== POLL_INTERVAL_BASE){
-        state.pollInterval = POLL_INTERVAL_BASE;
-        restartPolling();
-      }
+      state.pollInterval = POLL_INTERVAL_BASE;
     }
 
     function increasePollBackoff(){
       state.pollErrors++;
       if (state.pollErrors >= 2){
-        var newInterval = Math.min(state.pollInterval * 2, POLL_INTERVAL_MAX);
-        if (newInterval !== state.pollInterval){
-          state.pollInterval = newInterval;
-          restartPolling();
-        }
+        state.pollInterval = Math.min(state.pollInterval * 2, POLL_INTERVAL_MAX);
       }
     }
 
-    function restartPolling(){
-      if (!state.polling) return;
-      stopPolling();
-      startPolling();
+    function scheduleNextPoll(){
+      if (!state.polling || document.visibilityState === 'hidden') return;
+      if (state.pollTimer){ clearTimeout(state.pollTimer); }
+      state.pollTimer = setTimeout(pollOnce, state.pollInterval);
+    }
+
+    async function pollOnce(){
+      if (!state.polling || document.visibilityState === 'hidden') return;
+      await loadTable(true);
+      scheduleNextPoll();
+    }
+
+    function startPolling(){
+      if (state.polling) return;
+      state.polling = true;
+      scheduleNextPoll();
+    }
+
+    function stopPolling(){
+      state.polling = false;
+      if (state.pollTimer){
+        clearTimeout(state.pollTimer);
+        state.pollTimer = null;
+      }
     }
 
     function renderTable(data){
@@ -380,23 +401,6 @@
       } finally {
         setLoading(joinBtn, false);
         setLoading(leaveBtn, false);
-      }
-    }
-
-    function startPolling(){
-      if (state.polling) return;
-      state.polling = true;
-      state.pollTimer = setInterval(function(){
-        if (document.visibilityState === 'hidden') return;
-        loadTable(true);
-      }, state.pollInterval);
-    }
-
-    function stopPolling(){
-      state.polling = false;
-      if (state.pollTimer){
-        clearInterval(state.pollTimer);
-        state.pollTimer = null;
       }
     }
 

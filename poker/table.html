@@ -45,53 +45,53 @@
   </div>
 
   <main class="poker-page">
-    <a href="/poker/" class="poker-back">&larr; Back to lobby</a>
+    <a href="/poker/" class="poker-back">&larr; <span data-i18n="backToLobby">Back to lobby</span></a>
 
     <div id="pokerError" class="poker-error" hidden></div>
-    <div id="pokerAuthMsg" class="poker-auth-msg" hidden>Please log in to view this table.</div>
+    <div id="pokerAuthMsg" class="poker-auth-msg" hidden data-i18n="pokerAuthTable">Please log in to view this table.</div>
 
     <div id="pokerTableContent" hidden>
       <div class="poker-header">
-        <h2>Table: <span id="pokerTableId">-</span></h2>
+        <h2><span data-i18n="table">Table</span>: <span id="pokerTableId">-</span></h2>
       </div>
 
       <div class="poker-info">
-        <div class="poker-info-item">Stakes: <strong id="pokerStakes">-</strong></div>
-        <div class="poker-info-item">Status: <strong id="pokerStatus">-</strong></div>
+        <div class="poker-info-item"><span data-i18n="stakes">Stakes</span>: <strong id="pokerStakes">-</strong></div>
+        <div class="poker-info-item"><span data-i18n="status">Status</span>: <strong id="pokerStatus">-</strong></div>
       </div>
 
       <div class="poker-panel">
-        <h3>Seats</h3>
+        <h3 data-i18n="seats">Seats</h3>
         <div id="pokerSeatsGrid" class="poker-seats-grid"></div>
       </div>
 
       <div class="poker-panel">
-        <h3>Join Table</h3>
+        <h3 data-i18n="joinTable">Join Table</h3>
         <div class="poker-form-row">
-          <label class="poker-label">Seat:</label>
+          <label class="poker-label" data-i18n="seat">Seat:</label>
           <input type="number" id="pokerSeatNo" class="poker-input" value="0" min="0">
-          <label class="poker-label">Buy-in:</label>
+          <label class="poker-label" data-i18n="buyIn">Buy-in:</label>
           <input type="number" id="pokerBuyIn" class="poker-input" value="100" min="1">
-          <button id="pokerJoin" class="poker-btn poker-btn--primary">Join</button>
+          <button id="pokerJoin" class="poker-btn poker-btn--primary" data-i18n="join">Join</button>
         </div>
       </div>
 
       <div class="poker-panel">
-        <h3>Leave Table</h3>
+        <h3 data-i18n="leaveTable">Leave Table</h3>
         <div class="poker-form-row">
-          <button id="pokerLeave" class="poker-btn">Leave &amp; Cash Out</button>
+          <button id="pokerLeave" class="poker-btn" data-i18n="leaveAndCashOut">Leave &amp; Cash Out</button>
         </div>
       </div>
 
       <div class="poker-state-panel">
-        <h3>Game State</h3>
+        <h3 data-i18n="gameState">Game State</h3>
         <div class="poker-state-row">
-          <div class="poker-state-item">Your Stack: <strong id="pokerYourStack">-</strong></div>
-          <div class="poker-state-item">Pot: <strong id="pokerPot">0</strong></div>
-          <div class="poker-state-item">Phase: <strong id="pokerPhase">-</strong></div>
-          <div class="poker-state-item">Version: <strong id="pokerVersion">-</strong></div>
+          <div class="poker-state-item"><span data-i18n="yourStack">Your Stack</span>: <strong id="pokerYourStack">-</strong></div>
+          <div class="poker-state-item"><span data-i18n="pot">Pot</span>: <strong id="pokerPot">0</strong></div>
+          <div class="poker-state-item"><span data-i18n="phase">Phase</span>: <strong id="pokerPhase">-</strong></div>
+          <div class="poker-state-item"><span data-i18n="version">Version</span>: <strong id="pokerVersion">-</strong></div>
         </div>
-        <button id="pokerJsonToggle" class="poker-json-toggle">Show raw JSON</button>
+        <button id="pokerJsonToggle" class="poker-json-toggle" data-i18n="showRawJson">Show raw JSON</button>
         <pre id="pokerJsonBox" class="poker-json-box" hidden></pre>
       </div>
     </div>
