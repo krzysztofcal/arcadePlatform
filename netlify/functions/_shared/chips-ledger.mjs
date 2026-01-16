@@ -99,14 +99,15 @@ select row_to_json(account) as account from account;
   return account;
 }
 
-async function fetchSystemAccounts(systemKeys = []) {
+async function fetchSystemAccounts(systemKeys = [], tx = null) {
   if (!systemKeys.length) return [];
   const query = `
 select id, system_key, account_type, status
 from public.chips_accounts
 where system_key = any($1::text[]);
 `;
-  const result = await executeSql(query, [systemKeys]);
+  const runner = tx ? (q, params) => tx.unsafe(q, params) : executeSql;
+  const result = await runner(query, [systemKeys]);
   return Array.isArray(result) ? result : [];
 }
 
@@ -214,18 +215,19 @@ select * from entries;
   return { entries: normalizedEntries, sequenceOk, nextExpectedSeq: cursor };
 }
 
-async function findTransactionByKey(idempotencyKey) {
+async function findTransactionByKey(idempotencyKey, tx = null) {
   const query = `
 select id, tx_type, payload_hash, idempotency_key, reference, description, created_at, user_id
 from public.chips_transactions
 where idempotency_key = $1
 limit 1;
 `;
-  const rows = await executeSql(query, [idempotencyKey]);
+  const runner = tx ? (q, params) => tx.unsafe(q, params) : executeSql;
+  const rows = await runner(query, [idempotencyKey]);
   return rows?.[0] || null;
 }
 
-async function fetchTransactionSnapshotByTxId(transactionId, userId = null) {
+async function fetchTransactionSnapshotByTxId(transactionId, userId = null, tx = null) {
   const query = `
 with txn as (
   select * from public.chips_transactions where id = $1
@@ -248,7 +250,8 @@ select
   (select coalesce(jsonb_agg(e order by e.entry_seq), '[]'::jsonb) from entries e) as entries,
   (select row_to_json(account) from account) as account;
 `;
-  const rows = await executeSql(query, [transactionId, userId]);
+  const runner = tx ? (q, params) => tx.unsafe(q, params) : executeSql;
+  const rows = await runner(query, [transactionId, userId]);
   return rows?.[0] || null;
 }
 
@@ -265,7 +268,7 @@ function validateEntries(entries) {
     if (!Number.isInteger(amount) || amount === 0) {
       throw badRequest("invalid_entry_amount", "Entry amount must be a non-zero integer");
     }
-    if (kind !== "USER" && kind !== "SYSTEM") {
+    if (kind !== "USER" && kind !== "SYSTEM" && kind !== "ESCROW") {
       throw badRequest("unsupported_account_type", "Unsupported accountType in entry");
     }
     if (kind !== "USER" && !systemKey) {
@@ -299,6 +302,7 @@ async function postTransaction({
   metadata = {},
   entries = [],
   createdBy = null,
+  tx = null,
 }) {
   if (!VALID_TX_TYPES.has(txType)) {
     throw badRequest("invalid_tx_type", "Invalid transaction type");
@@ -323,7 +327,7 @@ async function postTransaction({
     .filter(entry => entry.kind !== "USER" && entry.systemKey)
     .map(entry => entry.systemKey);
   const uniqueSystemKeys = [...new Set(neededSystemKeys)];
-  const systemAccounts = await fetchSystemAccounts(uniqueSystemKeys);
+  const systemAccounts = await fetchSystemAccounts(uniqueSystemKeys, tx);
   const systemMap = new Map(systemAccounts.map(acc => [acc.system_key, acc]));
 
   for (const key of uniqueSystemKeys) {
@@ -360,47 +364,46 @@ async function postTransaction({
 
   let result;
   let userAccount = null;
-  try {
-    result = await beginSql(async tx => {
-      // IMPORTANT: inside this block use ONLY `tx` for all SQL to keep it atomic.
-      userAccount = await getOrCreateUserAccount(userId, tx);
+  const runInTx = async (sqlTx) => {
+    // IMPORTANT: inside this block use ONLY `sqlTx` for all SQL to keep it atomic.
+    userAccount = await getOrCreateUserAccount(userId, sqlTx);
 
-      const entryRecords = normalizedEntries.map(entry => {
-        if (entry.kind === "USER") {
-          const safeEntryMetadata = entry?.metadata ?? {};
-          return { account_id: userAccount.id, amount: entry.amount, metadata: safeEntryMetadata };
-        }
-        const account = systemMap.get(entry.systemKey);
+    const entryRecords = normalizedEntries.map(entry => {
+      if (entry.kind === "USER") {
         const safeEntryMetadata = entry?.metadata ?? {};
-        return { account_id: account?.id, amount: entry.amount, metadata: safeEntryMetadata, system_key: entry.systemKey };
-      });
-
-      for (const rec of entryRecords) {
-        if (!rec.account_id) {
-          throw badRequest("missing_account", "Missing account for entry");
-        }
+        return { account_id: userAccount.id, amount: entry.amount, metadata: safeEntryMetadata };
       }
+      const account = systemMap.get(entry.systemKey);
+      const safeEntryMetadata = entry?.metadata ?? {};
+      return { account_id: account?.id, amount: entry.amount, metadata: safeEntryMetadata, system_key: entry.systemKey };
+    });
 
-      let entriesPayload = "[]";
-      try {
-        entriesPayload = JSON.stringify(entryRecords);
-      } catch (error) {
-        throw badRequest("invalid_entry_metadata", "Entry metadata must be JSON-serializable");
+    for (const rec of entryRecords) {
+      if (!rec.account_id) {
+        throw badRequest("missing_account", "Missing account for entry");
       }
+    }
 
-      const txRows = await tx`
-        insert into public.chips_transactions (reference, description, metadata, idempotency_key, payload_hash, tx_type, user_id, created_by)
-        values (${reference}, ${description}, ${safeMetadataJson}::jsonb, ${idempotencyKey}, ${payloadHash}, ${txType}, ${userId}, ${createdBy})
-        returning *;
-      `;
+    let entriesPayload = "[]";
+    try {
+      entriesPayload = JSON.stringify(entryRecords);
+    } catch (error) {
+      throw badRequest("invalid_entry_metadata", "Entry metadata must be JSON-serializable");
+    }
 
-      const transactionRow = txRows?.[0];
-      if (!transactionRow) {
-        throw new Error("Failed to insert transaction row");
-      }
+    const txRows = await sqlTx`
+      insert into public.chips_transactions (reference, description, metadata, idempotency_key, payload_hash, tx_type, user_id, created_by)
+      values (${reference}, ${description}, ${safeMetadataJson}::jsonb, ${idempotencyKey}, ${payloadHash}, ${txType}, ${userId}, ${createdBy})
+      returning *;
+    `;
 
-      const applyResult = await tx.unsafe(
-        `
+    const transactionRow = txRows?.[0];
+    if (!transactionRow) {
+      throw new Error("Failed to insert transaction row");
+    }
+
+    const applyResult = await sqlTx.unsafe(
+      `
 with input_entries as (
   select
     v.account_id,
@@ -449,33 +452,33 @@ select
   (select expected_accounts from expected) as expected_accounts,
   (select ok from guard) as guard_ok,
   (select ok from raise_if) as guard_check;
-        `,
-        [entriesPayload]
-      );
+      `,
+      [entriesPayload]
+    );
 
-      const updatedAccounts = Number(applyResult?.[0]?.updated_accounts || 0);
-      const expectedAccounts = Number(applyResult?.[0]?.expected_accounts || 0);
-      if (updatedAccounts === 0 && expectedAccounts > 0) {
-        const failed = new Error("Failed to apply any account balances");
-        failed.code = "chips_apply_failed";
-        failed.status = 500;
-        throw failed;
-      }
-      if (expectedAccounts !== updatedAccounts) {
-        klog("chips_apply_mismatch", {
-          expectedAccounts,
-          updatedAccounts,
-          idempotencyKey,
-          txType,
-        });
-        const mismatch = new Error("Failed to apply expected account balances");
-        mismatch.code = "chips_apply_mismatch";
-        mismatch.status = 500;
-        throw mismatch;
-      }
+    const updatedAccounts = Number(applyResult?.[0]?.updated_accounts || 0);
+    const expectedAccounts = Number(applyResult?.[0]?.expected_accounts || 0);
+    if (updatedAccounts === 0 && expectedAccounts > 0) {
+      const failed = new Error("Failed to apply any account balances");
+      failed.code = "chips_apply_failed";
+      failed.status = 500;
+      throw failed;
+    }
+    if (expectedAccounts !== updatedAccounts) {
+      klog("chips_apply_mismatch", {
+        expectedAccounts,
+        updatedAccounts,
+        idempotencyKey,
+        txType,
+      });
+      const mismatch = new Error("Failed to apply expected account balances");
+      mismatch.code = "chips_apply_mismatch";
+      mismatch.status = 500;
+      throw mismatch;
+    }
 
-      const entriesResult = await tx.unsafe(
-        `
+    const entriesResult = await sqlTx.unsafe(
+      `
 with input_entries as (
   select
     v.account_id,
@@ -491,38 +494,41 @@ inserted as (
 )
 select coalesce(jsonb_agg(i order by i.entry_seq), '[]'::jsonb) as entries
 from inserted i;
-        `,
-        [transactionRow.id, entriesPayload]
-      );
+      `,
+      [transactionRow.id, entriesPayload]
+    );
 
-      const insertedEntries = Array.isArray(entriesResult?.[0]?.entries)
-        ? entriesResult[0].entries
-        : [];
-      if (Array.isArray(insertedEntries) && insertedEntries.length !== entryRecords.length) {
-        const mismatch = new Error("Inserted entries count mismatch");
-        mismatch.code = "chips_entries_mismatch";
-        mismatch.status = 500;
-        klog("chips_entries_mismatch", {
-          expected: entryRecords.length,
-          actual: insertedEntries.length,
-          idempotencyKey,
-        });
-        throw mismatch;
-      }
+    const insertedEntries = Array.isArray(entriesResult?.[0]?.entries)
+      ? entriesResult[0].entries
+      : [];
+    if (Array.isArray(insertedEntries) && insertedEntries.length !== entryRecords.length) {
+      const mismatch = new Error("Inserted entries count mismatch");
+      mismatch.code = "chips_entries_mismatch";
+      mismatch.status = 500;
+      klog("chips_entries_mismatch", {
+        expected: entryRecords.length,
+        actual: insertedEntries.length,
+        idempotencyKey,
+      });
+      throw mismatch;
+    }
 
-      const accountRows = await tx`
-        select id, balance, next_entry_seq
-        from public.chips_accounts
-        where id = ${userAccount.id}
-        limit 1;
-      `;
+    const accountRows = await sqlTx`
+      select id, balance, next_entry_seq
+      from public.chips_accounts
+      where id = ${userAccount.id}
+      limit 1;
+    `;
 
-      return {
-        transaction: transactionRow,
-        entries: insertedEntries,
-        account: accountRows?.[0] || null,
-      };
-    });
+    return {
+      transaction: transactionRow,
+      entries: insertedEntries,
+      account: accountRows?.[0] || null,
+    };
+  };
+
+  try {
+    result = tx ? await runInTx(tx) : await beginSql(async sqlTx => runInTx(sqlTx));
   } catch (error) {
     const combined = `${error.message || ""} ${error.details || ""}`.toLowerCase();
     const constraint = (error?.constraint || "").toLowerCase();
@@ -539,7 +545,7 @@ from inserted i;
       combined.includes("duplicate");
     const isIdempotencyUnique = (is23505 && mentionsIdempotency) || (looksUnique && mentionsIdempotency);
     if (isIdempotencyUnique) {
-      const existingTx = await findTransactionByKey(idempotencyKey);
+      const existingTx = await findTransactionByKey(idempotencyKey, tx);
       if (existingTx) {
         if (existingTx.user_id && existingTx.user_id !== userId) {
           const conflict = new Error("Idempotency key already used by another user");
@@ -551,7 +557,7 @@ from inserted i;
           conflict.status = 409;
           throw conflict;
         }
-        const snapshot = await fetchTransactionSnapshotByTxId(existingTx.id, userId);
+        const snapshot = await fetchTransactionSnapshotByTxId(existingTx.id, userId, tx);
         if (snapshot?.transaction) {
           return snapshot;
         }

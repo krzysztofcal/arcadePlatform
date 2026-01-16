@@ -165,9 +165,10 @@ export async function handler(event) {
         idempotencyKey,
         entries: [
           { accountType: "USER", amount: -buyIn },
-          { accountType: "SYSTEM", systemKey: escrowSystemKey, amount: buyIn },
+          { accountType: "ESCROW", systemKey: escrowSystemKey, amount: buyIn },
         ],
         createdBy: auth.userId,
+        tx,
       });
 
       const stateRows = await tx.unsafe(
