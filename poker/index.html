@@ -26,6 +26,9 @@
       </a>
     </div>
     <div class="topbar-right">
+      <a id="xpBadge" class="xp-badge xp-badge--loading" aria-live="polite" aria-busy="true" href="xp.html">
+        <span class="xp-badge__label">Syncing XP…</span>
+      </a>
       <div class="avatar-shell" id="avatarShell">
         <button type="button" class="avatar-btn" id="avatarButton" aria-haspopup="true" aria-expanded="false">
           <span class="avatar-circle" id="avatarInitials" aria-hidden="true">AH</span>
@@ -46,7 +49,12 @@
 
   <main class="poker-page">
     <div id="pokerError" class="poker-error" hidden></div>
-    <div id="pokerAuthMsg" class="poker-auth-msg" hidden data-i18n="pokerAuthLobby">Please log in to access the poker lobby.</div>
+    <div id="pokerAuthMsg" class="poker-auth-msg" hidden>
+      <div class="poker-auth-text" data-i18n="pokerAuthLobby">Please log in to access the poker lobby.</div>
+      <div class="poker-auth-actions">
+        <button id="pokerSignIn" class="poker-btn poker-btn--primary" data-i18n="signIn">Sign In</button>
+      </div>
+    </div>
 
     <div id="pokerLobbyContent" hidden>
       <div class="poker-header">
