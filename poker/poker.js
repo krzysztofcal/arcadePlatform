@@ -201,11 +201,12 @@
     return !!(data && data.pending);
   }
 
-  function scheduleRetry(fn){
+  function scheduleRetry(fn, delayMs){
     if (typeof fn !== 'function') return;
+    var delay = typeof delayMs === 'number' ? delayMs : 600;
     setTimeout(function(){
       fn();
-    }, 600);
+    }, delay);
   }
 
   // ========== LOBBY PAGE ==========
@@ -419,6 +420,9 @@
     var pendingJoinRetries = 0;
     var pendingLeaveRetries = 0;
     var pendingMaxRetries = 8;
+    var heartbeatPendingRetries = 0;
+    var heartbeatInFlight = false;
+    var HEARTBEAT_PENDING_MAX_RETRIES = 8;
 
     function stopAuthWatch(){
       if (authTimer){
@@ -535,15 +539,26 @@
       sendHeartbeat();
     }
 
+    function getHeartbeatPendingDelay(retries){
+      var delay = 600 * Math.pow(2, retries - 1);
+      return Math.min(delay, 5000);
+    }
+
     async function sendHeartbeat(){
       if (document.visibilityState === 'hidden') return;
+      if (heartbeatInFlight) return;
+      heartbeatInFlight = true;
       try {
         var data = await apiPost(HEARTBEAT_URL, { tableId: tableId, requestId: heartbeatRequestId });
         if (isPendingResponse(data)){
+          heartbeatPendingRetries++;
           heartbeatRequestId = generateRequestId();
-          scheduleRetry(sendHeartbeat);
+          if (heartbeatPendingRetries <= HEARTBEAT_PENDING_MAX_RETRIES){
+            scheduleRetry(sendHeartbeat, getHeartbeatPendingDelay(heartbeatPendingRetries));
+          }
           return;
         }
+        heartbeatPendingRetries = 0;
         if (data && data.closed){
           stopPolling();
           stopHeartbeat();
@@ -564,6 +579,8 @@
           return;
         }
         klog('poker_heartbeat_error', { tableId: tableId, error: err.message || err.code });
+      } finally {
+        heartbeatInFlight = false;
       }
     }
 
