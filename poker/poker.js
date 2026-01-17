@@ -640,10 +640,6 @@
           });
           return;
         }
-        if (err && err.code === 'request_in_flight'){
-          scheduleReload(loadTable);
-          return;
-        }
         klog('poker_join_error', { tableId: tableId, error: err.message || err.code });
         setError(errorEl, err.message || t('pokerErrJoin', 'Failed to join'));
       } finally {
@@ -673,10 +669,6 @@
             stopHeartbeat: stopHeartbeat,
             onAuthExpired: startAuthWatch
           });
-          return;
-        }
-        if (err && err.code === 'request_in_flight'){
-          scheduleReload(loadTable);
           return;
         }
         klog('poker_leave_error', { tableId: tableId, error: err.message || err.code });

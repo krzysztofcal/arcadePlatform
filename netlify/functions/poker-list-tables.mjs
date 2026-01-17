@@ -50,7 +50,7 @@ export async function handler(event) {
   const limit = limitParsed.value;
   const status = statusParsed.value;
 
-  const statusFilter = status === "OPEN" ? " where t.status != 'CLOSED'" : "";
+  const statusFilter = status === "OPEN" ? " where t.status = 'OPEN'" : "";
   const query = `
 select t.id, t.stakes, t.max_players, t.status, t.created_by, t.created_at, t.updated_at, t.last_activity_at,
        coalesce(s.seat_count, 0) as seat_count

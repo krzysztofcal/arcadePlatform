@@ -74,7 +74,7 @@ left join (
   group by table_id
 ) cnt on cnt.table_id = t.id
 where s.user_id = $1
-  and ($2 = 'ALL' or t.status != 'CLOSED')
+  and ($2 = 'ALL' or t.status = 'OPEN')
 order by t.updated_at desc, t.created_at desc
 limit $3;
   `;

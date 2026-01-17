@@ -15,7 +15,7 @@ const intervalInterpolation = "interval '${";
 assert.ok(!getTableSrc.includes(intervalInterpolation), "get-table should not interpolate interval strings");
 assert.ok(!sweepSrc.includes(intervalInterpolation), "sweep should not interpolate interval strings");
 
-const requestIdRegex = /return \{ ok: true, value: null \}/;
+const requestIdRegex = /return\s*\{\s*ok\s*:\s*true\s*,\s*value\s*:\s*null\s*\}/;
 assert.ok(requestIdRegex.test(joinSrc), "join should allow missing requestId");
 assert.ok(requestIdRegex.test(leaveSrc), "leave should allow missing requestId");
 
