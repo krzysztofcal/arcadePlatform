@@ -111,8 +111,8 @@ export async function handler(event) {
       if (!table) {
         throw makeError(404, "table_not_found");
       }
-      if (table.status !== "OPEN") {
-        throw makeError(409, "table_not_open");
+      if (table.status === "CLOSED") {
+        throw makeError(409, "table_closed");
       }
 
       const stateRows = await tx.unsafe(
@@ -126,7 +126,7 @@ export async function handler(event) {
 
       const currentState = normalizeState(stateRow.state);
       const authSeatRows = await tx.unsafe(
-        "select user_id from public.poker_seats where table_id = $1 and user_id = $2 and status = 'SEATED' limit 1;",
+        "select user_id from public.poker_seats where table_id = $1 and user_id = $2 and status = 'ACTIVE' limit 1;",
         [tableId, auth.userId]
       );
       if (!authSeatRows?.[0]) {
@@ -150,7 +150,7 @@ export async function handler(event) {
       }
 
       const seatRows = await tx.unsafe(
-        "select user_id, seat_no from public.poker_seats where table_id = $1 and status = 'SEATED' order by seat_no asc;",
+        "select user_id, seat_no from public.poker_seats where table_id = $1 and status = 'ACTIVE' order by seat_no asc;",
         [tableId]
       );
       const seats = Array.isArray(seatRows) ? seatRows : [];

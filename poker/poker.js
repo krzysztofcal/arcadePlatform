@@ -6,8 +6,10 @@
   var GET_URL = '/.netlify/functions/poker-get-table';
   var JOIN_URL = '/.netlify/functions/poker-join';
   var LEAVE_URL = '/.netlify/functions/poker-leave';
+  var HEARTBEAT_URL = '/.netlify/functions/poker-heartbeat';
   var POLL_INTERVAL_BASE = 2000;
   var POLL_INTERVAL_MAX = 10000;
+  var HEARTBEAT_INTERVAL_MS = 20000;
 
   var state = { token: null, polling: false, pollTimer: null, pollInterval: POLL_INTERVAL_BASE, pollErrors: 0 };
 
@@ -115,6 +117,9 @@
     if (!opts) return;
     if (typeof opts.stopPolling === 'function'){
       opts.stopPolling();
+    }
+    if (typeof opts.stopHeartbeat === 'function'){
+      opts.stopHeartbeat();
     }
     if (opts.authMsg) opts.authMsg.hidden = false;
     if (opts.content) opts.content.hidden = true;
@@ -396,6 +401,7 @@
     var tableData = null;
     var tableMaxPlayers = 6;
     var authTimer = null;
+    var heartbeatTimer = null;
 
     function stopAuthWatch(){
       if (authTimer){
@@ -412,6 +418,7 @@
             stopAuthWatch();
             loadTable(false);
             startPolling();
+            startHeartbeat();
           }
         });
       }, 3000);
@@ -446,6 +453,7 @@
             content: tableContent,
             errorEl: errorEl,
             stopPolling: stopPolling,
+            stopHeartbeat: stopHeartbeat,
             onAuthExpired: startAuthWatch
           });
           return;
@@ -494,6 +502,40 @@
       }
     }
 
+    function stopHeartbeat(){
+      if (heartbeatTimer){
+        clearInterval(heartbeatTimer);
+        heartbeatTimer = null;
+      }
+    }
+
+    function startHeartbeat(){
+      if (heartbeatTimer) return;
+      heartbeatTimer = setInterval(sendHeartbeat, HEARTBEAT_INTERVAL_MS);
+      sendHeartbeat();
+    }
+
+    async function sendHeartbeat(){
+      if (document.visibilityState === 'hidden') return;
+      try {
+        await apiPost(HEARTBEAT_URL, { tableId: tableId });
+      } catch (err){
+        if (isAuthError(err)){
+          handleAuthExpired({
+            authMsg: authMsg,
+            content: tableContent,
+            errorEl: errorEl,
+            stopPolling: stopPolling,
+            stopHeartbeat: stopHeartbeat,
+            onAuthExpired: startAuthWatch
+          });
+          stopHeartbeat();
+          return;
+        }
+        klog('poker_heartbeat_error', { tableId: tableId, error: err.message || err.code });
+      }
+    }
+
     function renderTable(data){
       var table = data.table || {};
       var seats = data.seats || [];
@@ -516,15 +558,34 @@
         for (var i = 0; i < maxPlayers; i++){
           var seat = seats.find(function(s){ return s.seatNo === i; });
           var div = document.createElement('div');
-          div.className = 'poker-seat' + (seat ? '' : ' poker-seat--empty');
+          var seatClass = 'poker-seat';
+          if (!seat){
+            seatClass += ' poker-seat--empty';
+          } else if (seat.status && seat.status.toUpperCase() === 'INACTIVE'){
+            seatClass += ' poker-seat--inactive';
+          }
+          div.className = seatClass;
           var seatNoEl = document.createElement('div');
           seatNoEl.className = 'poker-seat-no';
           seatNoEl.textContent = t('pokerSeatPrefix', 'Seat') + ' ' + i;
           var seatUserEl = document.createElement('div');
           seatUserEl.className = 'poker-seat-user';
           seatUserEl.textContent = seat ? shortId(seat.userId) : t('pokerSeatEmpty', 'Empty');
+          var seatStatusEl = document.createElement('div');
+          seatStatusEl.className = 'poker-seat-status';
+          if (!seat){
+            seatStatusEl.className += ' poker-seat-status--empty';
+            seatStatusEl.textContent = t('pokerSeatOpen', 'Open');
+          } else if (seat.status && seat.status.toUpperCase() === 'INACTIVE'){
+            seatStatusEl.className += ' poker-seat-status--inactive';
+            seatStatusEl.textContent = t('pokerSeatInactive', 'Inactive');
+          } else {
+            seatStatusEl.className += ' poker-seat-status--active';
+            seatStatusEl.textContent = t('pokerSeatActive', 'Active');
+          }
           div.appendChild(seatNoEl);
           div.appendChild(seatUserEl);
+          div.appendChild(seatStatusEl);
           seatsGrid.appendChild(div);
         }
       }
@@ -559,6 +620,7 @@
             content: tableContent,
             errorEl: errorEl,
             stopPolling: stopPolling,
+            stopHeartbeat: stopHeartbeat,
             onAuthExpired: startAuthWatch
           });
           return;
@@ -585,6 +647,7 @@
             content: tableContent,
             errorEl: errorEl,
             stopPolling: stopPolling,
+            stopHeartbeat: stopHeartbeat,
             onAuthExpired: startAuthWatch
           });
           return;
@@ -600,10 +663,12 @@
     function handleVisibility(){
       if (document.visibilityState === 'hidden'){
         stopPolling();
+        stopHeartbeat();
       } else {
         state.pollInterval = POLL_INTERVAL_BASE;
         state.pollErrors = 0;
         startPolling();
+        startHeartbeat();
         loadTable(false);
       }
     }
@@ -621,12 +686,14 @@
 
     document.addEventListener('visibilitychange', handleVisibility); // xp-lifecycle-allow:poker-table(2026-01-01)
     window.addEventListener('beforeunload', stopPolling); // xp-lifecycle-allow:poker-table(2026-01-01)
+    window.addEventListener('beforeunload', stopHeartbeat); // xp-lifecycle-allow:poker-table-heartbeat(2026-01-01)
     window.addEventListener('beforeunload', stopAuthWatch); // xp-lifecycle-allow:poker-table-auth(2026-01-01)
 
     checkAuth().then(function(authed){
       if (authed){
         loadTable(false);
         startPolling();
+        startHeartbeat();
       }
     });
   }

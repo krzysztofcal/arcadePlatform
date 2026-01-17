@@ -1,4 +1,5 @@
 import { baseHeaders, corsHeaders, executeSql, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
+import { presenceIntervalSql } from "./_shared/poker-utils.mjs";
 
 const parseLimit = (value) => {
   if (value == null || value === "") return { ok: true, value: 20 };
@@ -50,14 +51,15 @@ export async function handler(event) {
   const limit = limitParsed.value;
   const status = statusParsed.value;
 
-  const statusFilter = status === "OPEN" ? " where t.status = 'OPEN'" : "";
+  const statusFilter = status === "OPEN" ? " where t.status != 'CLOSED'" : "";
   const query = `
-select t.id, t.stakes, t.max_players, t.status, t.created_by, t.created_at, t.updated_at,
+select t.id, t.stakes, t.max_players, t.status, t.created_by, t.created_at, t.updated_at, t.last_activity_at,
        coalesce(s.seat_count, 0) as seat_count
 from public.poker_tables t
 left join (
   select table_id, count(*)::int as seat_count
   from public.poker_seats
+  where status = 'ACTIVE'
   group by table_id
 ) s on s.table_id = t.id${statusFilter}
 order by t.created_at desc
@@ -65,6 +67,10 @@ limit $1;
   `;
 
   try {
+    await executeSql(
+      `update public.poker_seats set status = 'INACTIVE'
+       where status = 'ACTIVE' and last_seen_at < now() - interval '${presenceIntervalSql}';`
+    );
     const rows = await executeSql(query, [limit]);
     const tables = Array.isArray(rows)
       ? rows.map((row) => ({
@@ -75,6 +81,7 @@ limit $1;
           createdBy: row.created_by,
           createdAt: row.created_at,
           updatedAt: row.updated_at,
+          lastActivityAt: row.last_activity_at,
           seatCount: row.seat_count ?? 0,
         }))
       : [];

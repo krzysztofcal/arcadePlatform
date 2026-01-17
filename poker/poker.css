@@ -64,11 +64,21 @@
 
 .poker-seat{background:var(--card-2); border:1px solid var(--border); border-radius:10px; padding:12px; text-align:center;}
 
+.poker-seat--empty .poker-seat-user{color:var(--muted); font-style:italic;}
+
+.poker-seat--inactive{border-color:rgba(248,113,113,.5);}
+
 .poker-seat-no{font:700 11px Poppins, sans-serif; color:var(--muted); margin-bottom:4px;}
 
 .poker-seat-user{font:600 12px Poppins, sans-serif; color:#e8eeff; word-break:break-all;}
 
-.poker-seat--empty .poker-seat-user{color:var(--muted); font-style:italic;}
+.poker-seat-status{margin-top:6px; font:600 11px Poppins, sans-serif; color:var(--accent);}
+
+.poker-seat-status--active{color:var(--accent);}
+
+.poker-seat-status--inactive{color:#fca5a5;}
+
+.poker-seat-status--empty{color:var(--muted);}
 
 .poker-state-panel{background:var(--card-2); border:1px solid var(--border); border-radius:10px; padding:12px; margin-top:12px;}
 

@@ -1,4 +1,5 @@
 import { baseHeaders, corsHeaders, executeSql, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
+import { presenceIntervalSql } from "./_shared/poker-utils.mjs";
 
 const parseLimit = (value) => {
   if (value == null || value === "") return { ok: true, value: 20 };
@@ -59,24 +60,31 @@ select
   t.created_by,
   t.created_at,
   t.updated_at,
+  t.last_activity_at,
   s.seat_no,
   s.status as seat_status,
   s.created_at as seat_created_at,
+  s.last_seen_at as seat_last_seen_at,
   coalesce(cnt.seat_count, 0) as seat_count
 from public.poker_seats s
 join public.poker_tables t on t.id = s.table_id
 left join (
   select table_id, count(*)::int as seat_count
   from public.poker_seats
+  where status = 'ACTIVE'
   group by table_id
 ) cnt on cnt.table_id = t.id
 where s.user_id = $1
-  and ($2 = 'ALL' or t.status = 'OPEN')
+  and ($2 = 'ALL' or t.status != 'CLOSED')
 order by t.updated_at desc, t.created_at desc
 limit $3;
   `;
 
   try {
+    await executeSql(
+      `update public.poker_seats set status = 'INACTIVE'
+       where status = 'ACTIVE' and last_seen_at < now() - interval '${presenceIntervalSql}';`
+    );
     const rows = await executeSql(query, [auth.userId, status, limit]);
     const tables = Array.isArray(rows)
       ? rows.map((row) => ({
@@ -87,9 +95,11 @@ limit $3;
           createdBy: row.created_by,
           createdAt: row.created_at,
           updatedAt: row.updated_at,
+          lastActivityAt: row.last_activity_at,
           seatNo: row.seat_no,
           seatStatus: row.seat_status,
           seatCreatedAt: row.seat_created_at,
+          seatLastSeenAt: row.seat_last_seen_at,
           seatCount: row.seat_count ?? 0,
         }))
       : [];
