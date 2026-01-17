@@ -2,6 +2,21 @@ import { test, expect } from '@playwright/test';
 
 const REQUEST_ID_MAX_LEN = 200;
 
+const makeBase64Url = (value: string) =>
+  Buffer.from(value)
+    .toString('base64')
+    .replace(/=+$/g, '')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_');
+
+const buildJwt = (userId: string) => {
+  const header = makeBase64Url(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
+  const payload = makeBase64Url(
+    JSON.stringify({ sub: userId, exp: Math.floor(Date.now() / 1000) + 3600 })
+  );
+  return `${header}.${payload}.signature`;
+};
+
 const safeJsonParse = (value?: string | null) => {
   if (!value) return null;
   try {
@@ -15,7 +30,7 @@ test('poker: can join and leave table (no pointerevent requestId)', async ({ pag
   const userId = 'd2b72e4b-cc87-4c61-9b06-7b8d6f1d2c3e';
   const shortUserId = userId.substring(0, 8);
   const tableId = '11111111-1111-4111-8111-111111111111';
-  const token = 'test-token';
+  const token = buildJwt(userId);
 
   const tableState = {
     joined: false,
