@@ -208,6 +208,13 @@
     }, 600);
   }
 
+  function scheduleRetry(fn){
+    if (typeof fn !== 'function') return;
+    setTimeout(function(){
+      fn();
+    }, 600);
+  }
+
   // ========== LOBBY PAGE ==========
   function initLobby(){
     var errorEl = document.getElementById('pokerError');
@@ -413,6 +420,11 @@
     var tableMaxPlayers = 6;
     var authTimer = null;
     var heartbeatTimer = null;
+    var pendingJoinRequestId = null;
+    var pendingLeaveRequestId = null;
+    var pendingJoinRetries = 0;
+    var pendingLeaveRetries = 0;
+    var pendingMaxRetries = 8;
 
     function stopAuthWatch(){
       if (authTimer){
@@ -610,7 +622,35 @@
       if (jsonBox) jsonBox.textContent = JSON.stringify(gameState, null, 2);
     }
 
-    async function joinTable(){
+    async function retryJoin(){
+      if (!pendingJoinRequestId) return;
+      if (pendingJoinRetries >= pendingMaxRetries){
+        pendingJoinRequestId = null;
+        pendingJoinRetries = 0;
+        setLoading(joinBtn, false);
+        setLoading(leaveBtn, false);
+        setError(errorEl, t('pokerErrJoinPending', 'Join still pending. Please try again.'));
+        return;
+      }
+      pendingJoinRetries++;
+      await joinTable(pendingJoinRequestId);
+    }
+
+    async function retryLeave(){
+      if (!pendingLeaveRequestId) return;
+      if (pendingLeaveRetries >= pendingMaxRetries){
+        pendingLeaveRequestId = null;
+        pendingLeaveRetries = 0;
+        setLoading(joinBtn, false);
+        setLoading(leaveBtn, false);
+        setError(errorEl, t('pokerErrLeavePending', 'Leave still pending. Please try again.'));
+        return;
+      }
+      pendingLeaveRetries++;
+      await leaveTable(pendingLeaveRequestId);
+    }
+
+    async function joinTable(requestIdOverride){
       setError(errorEl, null);
       var seatNo = parseInt(seatNoInput ? seatNoInput.value : 0, 10);
       var buyIn = parseInt(buyInInput ? buyInInput.value : 100, 10) || 100;
@@ -622,13 +662,22 @@
       setLoading(joinBtn, true);
       setLoading(leaveBtn, true);
       try {
-        var joinResult = await apiPost(JOIN_URL, { tableId: tableId, seatNo: seatNo, buyIn: buyIn, requestId: generateRequestId() });
+        if (!requestIdOverride && !pendingJoinRequestId){
+          pendingJoinRequestId = generateRequestId();
+          pendingJoinRetries = 0;
+        }
+        var joinRequestId = requestIdOverride || pendingJoinRequestId || generateRequestId();
+        var joinResult = await apiPost(JOIN_URL, { tableId: tableId, seatNo: seatNo, buyIn: buyIn, requestId: joinRequestId });
         if (isPendingResponse(joinResult)){
-          scheduleReload(loadTable);
+          scheduleRetry(retryJoin);
           return;
         }
+        pendingJoinRequestId = null;
+        pendingJoinRetries = 0;
         loadTable();
       } catch (err){
+        pendingJoinRequestId = null;
+        pendingJoinRetries = 0;
         if (isAuthError(err)){
           handleAuthExpired({
             authMsg: authMsg,
@@ -643,23 +692,34 @@
         klog('poker_join_error', { tableId: tableId, error: err.message || err.code });
         setError(errorEl, err.message || t('pokerErrJoin', 'Failed to join'));
       } finally {
-        setLoading(joinBtn, false);
-        setLoading(leaveBtn, false);
+        if (!pendingJoinRequestId){
+          setLoading(joinBtn, false);
+          setLoading(leaveBtn, false);
+        }
       }
     }
 
-    async function leaveTable(){
+    async function leaveTable(requestIdOverride){
       setError(errorEl, null);
       setLoading(joinBtn, true);
       setLoading(leaveBtn, true);
       try {
-        var leaveResult = await apiPost(LEAVE_URL, { tableId: tableId, requestId: generateRequestId() });
+        if (!requestIdOverride && !pendingLeaveRequestId){
+          pendingLeaveRequestId = generateRequestId();
+          pendingLeaveRetries = 0;
+        }
+        var leaveRequestId = requestIdOverride || pendingLeaveRequestId || generateRequestId();
+        var leaveResult = await apiPost(LEAVE_URL, { tableId: tableId, requestId: leaveRequestId });
         if (isPendingResponse(leaveResult)){
-          scheduleReload(loadTable);
+          scheduleRetry(retryLeave);
           return;
         }
+        pendingLeaveRequestId = null;
+        pendingLeaveRetries = 0;
         loadTable();
       } catch (err){
+        pendingLeaveRequestId = null;
+        pendingLeaveRetries = 0;
         if (isAuthError(err)){
           handleAuthExpired({
             authMsg: authMsg,
@@ -674,8 +734,10 @@
         klog('poker_leave_error', { tableId: tableId, error: err.message || err.code });
         setError(errorEl, err.message || t('pokerErrLeave', 'Failed to leave'));
       } finally {
-        setLoading(joinBtn, false);
-        setLoading(leaveBtn, false);
+        if (!pendingLeaveRequestId){
+          setLoading(joinBtn, false);
+          setLoading(leaveBtn, false);
+        }
       }
     }
 

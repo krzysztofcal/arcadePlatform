@@ -87,14 +87,6 @@ export async function handler(event) {
           }))
         : [];
 
-      const hasActiveSeat = seats.some((seat) => seat.status === "ACTIVE");
-      if (hasActiveSeat) {
-        await tx.unsafe(
-          "update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1;",
-          [tableId]
-        );
-      }
-
       return { table, seats, stateRow };
     });
 

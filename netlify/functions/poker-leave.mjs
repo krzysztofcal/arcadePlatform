@@ -155,6 +155,9 @@ export async function handler(event) {
           [tableId, auth.userId]
         );
         const seatNo = seatRows?.[0]?.seat_no;
+        if (!Number.isInteger(seatNo)) {
+          throw makeError(409, "not_seated");
+        }
 
         const stateRows = await tx.unsafe(
           "select version, state from public.poker_state where table_id = $1 for update;",
@@ -168,6 +171,9 @@ export async function handler(event) {
         const currentState = normalizeState(stateRow.state);
         const stacks = parseStacks(currentState.stacks);
         const stackValue = parseStackValue(stacks?.[auth.userId]);
+        if (!stackValue) {
+          throw makeError(409, "nothing_to_cash_out");
+        }
 
         if (stackValue) {
           const escrowSystemKey = `POKER_TABLE:${tableId}`;
