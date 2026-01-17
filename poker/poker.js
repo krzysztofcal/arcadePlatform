@@ -10,6 +10,7 @@
   var POLL_INTERVAL_BASE = 2000;
   var POLL_INTERVAL_MAX = 10000;
   var HEARTBEAT_INTERVAL_MS = 20000;
+  var UI_VERSION = '2025-02-19';
 
   var state = { token: null, polling: false, pollTimer: null, pollInterval: POLL_INTERVAL_BASE, pollErrors: 0 };
 
@@ -817,6 +818,7 @@
   // ========== INIT ==========
   function init(){
     var isTable = window.location.pathname.indexOf('/poker/table') !== -1;
+    klog('poker_ui_loaded', { version: UI_VERSION, page: isTable ? 'table' : 'lobby' });
     if (isTable){
       initTable();
     } else {
