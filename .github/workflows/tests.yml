@@ -26,7 +26,7 @@ jobs:
         run: npm run lint:games
 
       - name: Install Playwright Browsers
-        run: npx playwright install --with-deps
+        run: npx playwright install
 
       - name: Run Playwright tests
         run: PLAYWRIGHT=1 npm test
