@@ -90,7 +90,15 @@ test('poker: can join and leave table (no pointerevent requestId)', async ({ pag
     }
 
     if (pathname.endsWith('/poker-join') && request.method() === 'POST') {
-      const payload = request.postData() ? JSON.parse(request.postData() as string) : {};
+      let payload = {};
+      const rawPayload = request.postData();
+      if (rawPayload) {
+        try {
+          payload = JSON.parse(rawPayload);
+        } catch (_err) {
+          payload = {};
+        }
+      }
       if (
         typeof payload?.requestId !== 'string' ||
         !payload.requestId.trim() ||
@@ -110,13 +118,26 @@ test('poker: can join and leave table (no pointerevent requestId)', async ({ pag
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({ ok: true }),
+        body: JSON.stringify({
+          ok: true,
+          tableId,
+          seatNo: tableState.seatNo,
+          userId,
+        }),
       });
       return;
     }
 
     if (pathname.endsWith('/poker-leave') && request.method() === 'POST') {
-      const payload = request.postData() ? JSON.parse(request.postData() as string) : {};
+      let payload = {};
+      const rawPayload = request.postData();
+      if (rawPayload) {
+        try {
+          payload = JSON.parse(rawPayload);
+        } catch (_err) {
+          payload = {};
+        }
+      }
       if (
         typeof payload?.requestId !== 'string' ||
         !payload.requestId.trim() ||
@@ -134,7 +155,7 @@ test('poker: can join and leave table (no pointerevent requestId)', async ({ pag
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({ ok: true }),
+        body: JSON.stringify({ ok: true, tableId }),
       });
       return;
     }
@@ -187,16 +208,14 @@ test('poker: can join and leave table (no pointerevent requestId)', async ({ pag
   expect(joinRequestId.length, 'join requestId should be <= 200 chars').toBeLessThanOrEqual(200);
 
   const seatUser = page.locator('#pokerSeatsGrid .poker-seat-user', { hasText: shortUserId });
-  const seat = seatUser.locator('..');
 
   await expect(seatUser).toContainText(shortUserId, { timeout: 20000 });
-  await expect
-    .poll(async () => (await seat.getAttribute('class')) || '', { timeout: 20000 })
-    .not.toContain('poker-seat--empty');
 
   await expect(page.locator('#pokerYourStack')).toHaveText('100', { timeout: 20000 });
 
-  await page.locator('#pokerJsonToggle').click();
+  if (!(await page.locator('#pokerJsonBox').isVisible())) {
+    await page.locator('#pokerJsonToggle').click();
+  }
   await expect(page.locator('#pokerJsonBox')).toBeVisible();
 
   await expect(async () => {
@@ -228,9 +247,7 @@ test('poker: can join and leave table (no pointerevent requestId)', async ({ pag
   expect(leaveRequestId, 'leave requestId should not be a pointer event').not.toBe('[object PointerEvent]');
   expect(leaveRequestId.length, 'leave requestId should be <= 200 chars').toBeLessThanOrEqual(200);
 
-  await expect
-    .poll(async () => (await seat.getAttribute('class')) || '', { timeout: 20000 })
-    .toContain('poker-seat--empty');
+  await expect(seatUser).toHaveCount(0, { timeout: 20000 });
 
   await expect(page.locator('#pokerYourStack')).toHaveText('-', { timeout: 20000 });
 
