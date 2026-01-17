@@ -26,6 +26,10 @@ assert.ok(requestIdRegex.test(joinSrc), "join should allow missing requestId");
 assert.ok(requestIdRegex.test(leaveSrc), "leave should allow missing requestId");
 assert.ok(requestIdRegex.test(heartbeatSrc), "heartbeat should allow missing requestId");
 assert.ok(/value\s*===\s*\"\"/.test(heartbeatSrc), "heartbeat should allow empty requestId string");
+const numericRequestIdRegex = /typeof\s+\w+\s*===\s*\"number\"[\s\S]*?Number\.isFinite/;
+assert.ok(numericRequestIdRegex.test(joinSrc), "join should coerce numeric requestId values");
+assert.ok(numericRequestIdRegex.test(leaveSrc), "leave should coerce numeric requestId values");
+assert.ok(numericRequestIdRegex.test(heartbeatSrc), "heartbeat should coerce numeric requestId values");
 
 assert.ok(sweepSrc.includes("POKER_SWEEP_SECRET"), "sweep must require POKER_SWEEP_SECRET");
 assert.ok(sweepSrc.includes("x-sweep-secret"), "sweep must check x-sweep-secret header");
@@ -49,7 +53,8 @@ assert.ok(pokerUiSrc.includes("pendingJoinRequestId"), "poker UI should store pe
 assert.ok(pokerUiSrc.includes("pendingLeaveRequestId"), "poker UI should store pending leave requestId");
 assert.ok(pokerUiSrc.includes("apiPost(JOIN_URL"), "poker UI should retry join via apiPost");
 assert.ok(pokerUiSrc.includes("apiPost(LEAVE_URL"), "poker UI should retry leave via apiPost");
-const heartbeatCallRegex = /apiPost\(\s*HEARTBEAT_URL[\s\S]*?\{[\s\S]*?tableId\s*:\s*tableId[\s\S]*?requestId\s*:\s*heartbeatRequestId[\s\S]*?\}[\s\S]*?\)/;
+const heartbeatCallRegex =
+  /apiPost\(\s*HEARTBEAT_URL[\s\S]*?\{[\s\S]*?tableId\s*:\s*tableId[\s\S]*?requestId\s*:\s*(?:heartbeatRequestId|String\(\s*heartbeatRequestId\s*\))[\s\S]*?\}[\s\S]*?\)/;
 assert.ok(heartbeatCallRegex.test(pokerUiSrc), "poker UI heartbeat should send requestId and tableId");
 assert.ok(!/tbl\.max_players/.test(pokerUiSrc), "poker UI should not read tbl.max_players");
 assert.ok(!/table\.max_players/.test(pokerUiSrc), "poker UI should not read table.max_players");
