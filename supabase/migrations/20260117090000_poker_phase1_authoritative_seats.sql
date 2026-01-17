@@ -24,7 +24,7 @@ with ranked_seats as (
     ctid,
     row_number() over (
       partition by table_id, seat_no
-      order by joined_at desc nulls last, created_at desc nulls last, ctid desc
+      order by joined_at desc nulls last, ctid desc
     ) as rn
   from public.poker_seats
   where table_id is not null and seat_no is not null
@@ -37,7 +37,7 @@ with ranked_users as (
     ctid,
     row_number() over (
       partition by table_id, user_id
-      order by joined_at desc nulls last, created_at desc nulls last, ctid desc
+      order by joined_at desc nulls last, ctid desc
     ) as rn
   from public.poker_seats
   where table_id is not null and user_id is not null
