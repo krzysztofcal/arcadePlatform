@@ -11,7 +11,7 @@
     }
   }
 
-  var state = { running: false, paused: false, muted: false, loaded: false, startTime: null, ci: null };
+  var state = { running: false, paused: false, muted: false, loaded: false, startTime: null, ci: null, timeInterval: null, activityInterval: null, listenersAttached: false };
 
   var elements = { dos: null, playBtn: null, restartBtn: null, timeEl: null, loadingOverlay: null, loadingProgress: null, loadingText: null, mobileControls: null };
 
@@ -188,7 +188,8 @@
       if (elements.playBtn) elements.playBtn.style.display = 'none';
       if (elements.restartBtn) elements.restartBtn.style.display = 'inline-flex';
       initMobileControls();
-      setInterval(updateTime, 1000);
+      if (state.timeInterval) clearInterval(state.timeInterval);
+      state.timeInterval = setInterval(updateTime, 1000);
       setupGameEventListeners();
       klog('freedoom_loaded', { success: true });
     }).catch(function(error) {
@@ -199,10 +200,13 @@
   }
 
   function setupGameEventListeners() {
+    if (state.listenersAttached) return;
+    state.listenersAttached = true;
     document.addEventListener('keydown', function() { notifyActivity(); }, { passive: true });
     document.addEventListener('mousedown', function() { notifyActivity(); }, { passive: true });
     document.addEventListener('touchstart', function() { notifyActivity(); }, { passive: true });
-    setInterval(function() { if (state.running && !state.paused) notifyActivity(); }, 3000);
+    if (state.activityInterval) clearInterval(state.activityInterval);
+    state.activityInterval = setInterval(function() { if (state.running && !state.paused) notifyActivity(); }, 3000);
   }
 
   function resumeGame() { if (!state.ci) return; state.paused = false; state.running = true; }
@@ -236,7 +240,6 @@
     initElements();
     if (elements.playBtn) elements.playBtn.addEventListener('click', startGame);
     if (elements.restartBtn) elements.restartBtn.addEventListener('click', restartGame);
-    document.addEventListener('keydown', function(e) { if (e.code === 'Escape' && state.running) state.paused = !state.paused; });
     window.addEventListener('resize', function() { if (state.loaded) initMobileControls(); });
   }
 

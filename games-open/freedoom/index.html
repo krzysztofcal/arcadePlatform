@@ -233,67 +233,13 @@
     <script src="../game-shell.js" defer></script>
     <script src="/js/core/GameControlsService.js" defer></script>
     <script src="script.js"></script>
-    <script>
-      window.addEventListener('load', function() {
-        if (!window.GameControlsService) return;
-        var controls = window.GameControlsService({
-          wrap: document.getElementById('gameWrap'),
-          btnMute: document.getElementById('btnMute'),
-          btnPause: document.getElementById('btnPause'),
-          btnEnterFs: document.getElementById('btnEnterFs'),
-          btnExitFs: document.getElementById('btnExitFs'),
-          gameId: 'freedoom',
-          disableSpacePause: true,
-          onMuteChange: function(muted) {
-            if (window.FreedoomGame && window.FreedoomGame.setMuted) window.FreedoomGame.setMuted(muted);
-          },
-          onPauseChange: function(paused) {
-            if (window.FreedoomGame && window.FreedoomGame.setPaused) window.FreedoomGame.setPaused(paused);
-          },
-          isMutedProvider: function() { return window.FreedoomGame && window.FreedoomGame.isMuted ? window.FreedoomGame.isMuted() : false; },
-          isPausedProvider: function() { return window.FreedoomGame && window.FreedoomGame.isPaused ? window.FreedoomGame.isPaused() : false; },
-          isRunningProvider: function() { return window.FreedoomGame && window.FreedoomGame.isRunning ? window.FreedoomGame.isRunning() : false; }
-        });
-        controls.init();
-      });
-    </script>
     <script src="/js/cookiebot-manager.js" defer></script>
-    <script>
-      (function(){
-        var allowedOrigin = location.origin;
-        function notifyActive(){ try { parent.postMessage({ type: 'kcswh:activity', userGesture: true }, allowedOrigin); } catch (_e) {} }
-        addEventListener('keydown', notifyActive, { passive: true });
-        addEventListener('pointerdown', notifyActive, { passive: true });
-        setInterval(notifyActive, 5000);
-      })();
-    </script>
     <script src="/js/debug.js" defer></script>
-    <script>window.__GAME_ID__ = 'freedoom';</script>
     <script src="/js/xp/combo.js" defer></script>
     <script src="/js/xp/scoring.js" defer></script>
     <script src="/js/xp/core.js" defer></script>
     <script src="/js/xp.js" defer></script>
-  <script src="/js/xp-game-hook.js" defer></script>
-  <script>
-    if (!window.__xpAutoBooted) {
-      window.__xpAutoBooted = true;
-      var tries = 0;
-      function boot() {
-        var bridge = window.GameXpBridge;
-        if (bridge && typeof bridge.auto === "function") {
-          bridge.auto();
-          return;
-        }
-        if (tries++ >= 5) return;
-        window.setTimeout(boot, Math.min(50 * tries, 200));
-      }
-      if (document.readyState === "complete") {
-        boot();
-      } else {
-        window.addEventListener("DOMContentLoaded", boot, { once: true });
-        window.addEventListener("load", boot, { once: true });
-      }
-    }
-  </script>
+    <script src="/js/xp-game-hook.js" defer></script>
+    <script src="boot.js" defer></script>
 </body>
 </html>

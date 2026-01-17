@@ -1,7 +1,7 @@
 {
   "games": [
     {
-      "id": "open-freedoom",
+      "id": "freedoom",
       "slug": "freedoom",
       "title": { "en": "Freedoom", "pl": "Freedoom" },
       "description": { "en": "Classic 3D first-person shooter. Battle demons across hellish landscapes.", "pl": "Klasyczna strzelanka FPS 3D. Walcz z demonami w piekielnych krajobrazach." },
