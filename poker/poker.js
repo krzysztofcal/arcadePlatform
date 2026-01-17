@@ -691,6 +691,7 @@
     }
 
     async function joinTable(requestIdOverride){
+      var override = (typeof requestIdOverride === 'string' && requestIdOverride.trim()) ? requestIdOverride.trim() : null;
       setError(errorEl, null);
       var seatNo = parseInt(seatNoInput ? seatNoInput.value : 0, 10);
       var buyIn = parseInt(buyInInput ? buyInInput.value : 100, 10) || 100;
@@ -702,11 +703,11 @@
       setLoading(joinBtn, true);
       setLoading(leaveBtn, true);
       try {
-        if (!requestIdOverride && !pendingJoinRequestId){
+        if (!override && !pendingJoinRequestId){
           pendingJoinRequestId = String(generateRequestId());
           pendingJoinRetries = 0;
         }
-        var joinRequestId = requestIdOverride || pendingJoinRequestId || String(generateRequestId());
+        var joinRequestId = override || pendingJoinRequestId || String(generateRequestId());
         var joinResult = await apiPost(JOIN_URL, {
           tableId: tableId,
           seatNo: seatNo,
@@ -812,6 +813,22 @@
       }
     }
 
+    function handleJoinClick(event){
+      if (event){
+        event.preventDefault();
+        event.stopPropagation();
+      }
+      klog('poker_join_click', { tableId: tableId, hasToken: !!state.token });
+      joinTable().catch(function(err){
+        pendingJoinRequestId = null;
+        pendingJoinRetries = 0;
+        setLoading(joinBtn, false);
+        setLoading(leaveBtn, false);
+        klog('poker_join_click_error', { message: err && (err.message || err.code) ? err.message || err.code : 'unknown_error' });
+        setError(errorEl, err && (err.message || err.code) ? err.message || err.code : t('pokerErrJoin', 'Failed to join'));
+      });
+    }
+
     function handleLeaveClick(event){
       if (event){
         event.preventDefault();
@@ -828,7 +845,7 @@
       });
     }
 
-    if (joinBtn) joinBtn.addEventListener('click', joinTable);
+    if (joinBtn) joinBtn.addEventListener('click', handleJoinClick);
     if (leaveBtn) leaveBtn.addEventListener('click', handleLeaveClick);
     if (jsonToggle){
       jsonToggle.addEventListener('click', function(){
