@@ -41,24 +41,4 @@
     controls.init();
   });
 
-  // XP auto boot
-  if (!window.__xpAutoBooted) {
-    window.__xpAutoBooted = true;
-    var tries = 0;
-    function boot() {
-      var bridge = window.GameXpBridge;
-      if (bridge && typeof bridge.auto === 'function') {
-        bridge.auto();
-        return;
-      }
-      if (tries++ >= 5) return;
-      window.setTimeout(boot, Math.min(50 * tries, 200));
-    }
-    if (document.readyState === 'complete') {
-      boot();
-    } else {
-      window.addEventListener('DOMContentLoaded', boot, { once: true });
-      window.addEventListener('load', boot, { once: true });
-    }
-  }
 })();
