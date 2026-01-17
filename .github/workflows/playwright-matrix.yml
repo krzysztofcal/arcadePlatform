@@ -1,0 +1,31 @@
+name: Playwright Matrix
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 2 * * *"
+
+permissions:
+  contents: read
+
+jobs:
+  e2e-matrix:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox, webkit]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install dependencies
+        run: npm ci || npm i
+      - name: Install Playwright Browser
+        run: npx playwright install --with-deps ${{ matrix.browser }}
+      - name: Run Playwright tests
+        run: npm run test:e2e
+        env:
+          PLAYWRIGHT: 1
+          PLAYWRIGHT_BROWSER: ${{ matrix.browser }}

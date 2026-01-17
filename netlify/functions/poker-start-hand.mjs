@@ -1,4 +1,5 @@
 import { baseHeaders, beginSql, corsHeaders, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
+import { isValidUuid } from "./_shared/poker-utils.mjs";
 
 const parseBody = (body) => {
   if (!body) return { ok: true, value: {} };
@@ -41,8 +42,6 @@ const normalizeState = (value) => {
 };
 
 const parseStacks = (value) => (value && typeof value === "object" && !Array.isArray(value) ? value : {});
-
-const isValidUuid = (value) => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 
 const normalizeSeatNo = (value) => {
   if (typeof value !== "number" || !Number.isInteger(value)) return null;
@@ -126,7 +125,7 @@ export async function handler(event) {
 
       const currentState = normalizeState(stateRow.state);
       const authSeatRows = await tx.unsafe(
-        "select user_id from public.poker_seats where table_id = $1 and user_id = $2 and status = 'SEATED' limit 1;",
+        "select user_id from public.poker_seats where table_id = $1 and user_id = $2 and status = 'ACTIVE' limit 1;",
         [tableId, auth.userId]
       );
       if (!authSeatRows?.[0]) {
@@ -150,7 +149,7 @@ export async function handler(event) {
       }
 
       const seatRows = await tx.unsafe(
-        "select user_id, seat_no from public.poker_seats where table_id = $1 and status = 'SEATED' order by seat_no asc;",
+        "select user_id, seat_no from public.poker_seats where table_id = $1 and status = 'ACTIVE' order by seat_no asc;",
         [tableId]
       );
       const seats = Array.isArray(seatRows) ? seatRows : [];
@@ -172,6 +171,14 @@ export async function handler(event) {
 
       const handId = `hand_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
       const derivedSeats = validSeats.map((seat) => ({ userId: seat.user_id, seatNo: seat.seat_no }));
+      const activeUserIds = new Set(validSeats.map((seat) => seat.user_id));
+      const currentStacks = parseStacks(currentState.stacks);
+      const nextStacks = Object.entries(currentStacks).reduce((acc, [userId, amount]) => {
+        if (activeUserIds.has(userId)) {
+          acc[userId] = amount;
+        }
+        return acc;
+      }, {});
 
       const updatedState = {
         ...currentState,
@@ -180,7 +187,7 @@ export async function handler(event) {
         phase: "HAND_ACTIVE",
         pot: 0,
         seats: derivedSeats,
-        stacks: parseStacks(currentState.stacks),
+        stacks: nextStacks,
         buttonSeatNo,
         nextToActSeatNo,
         lastStartHandRequestId: requestIdParsed.value || null,

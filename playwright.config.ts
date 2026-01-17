@@ -8,17 +8,34 @@ const BASE_URL = `http://${HOST}:${PORT}`;
 const systemChromium = findSystemChromium();
 
 type UseConfig = NonNullable<ReturnType<typeof defineConfig>['use']>;
-const useConfig: UseConfig = {
+const baseUseConfig: UseConfig = {
   baseURL: BASE_URL,
 };
 
+const requestedBrowser = process.env.PLAYWRIGHT_BROWSER || '';
+const allowedBrowsers = new Set(['chromium', 'firefox', 'webkit']);
+if (requestedBrowser && !allowedBrowsers.has(requestedBrowser)) {
+  throw new Error(
+    `Invalid PLAYWRIGHT_BROWSER "${requestedBrowser}". Allowed values: chromium, firefox, webkit.`
+  );
+}
+const chromiumUse: UseConfig = { ...baseUseConfig, browserName: 'chromium' };
 if (process.env.PLAYWRIGHT_BROWSER_CHANNEL) {
-  useConfig.channel = process.env.PLAYWRIGHT_BROWSER_CHANNEL as UseConfig['channel'];
+  chromiumUse.channel = process.env.PLAYWRIGHT_BROWSER_CHANNEL as UseConfig['channel'];
 } else if (systemChromium) {
-  useConfig.browserName = 'chromium';
-  useConfig.launchOptions = {
+  chromiumUse.launchOptions = {
     executablePath: systemChromium,
   };
+}
+
+const resolvedBrowser = requestedBrowser || (systemChromium ? 'chromium' : '');
+let useConfig: UseConfig = baseUseConfig;
+if (resolvedBrowser) {
+  if (resolvedBrowser === 'chromium') {
+    useConfig = chromiumUse;
+  } else {
+    useConfig = { ...baseUseConfig, browserName: resolvedBrowser as UseConfig['browserName'] };
+  }
 }
 
 const testMatch =
