@@ -696,7 +696,7 @@
           pendingJoinRequestId = String(generateRequestId());
           pendingJoinRetries = 0;
         }
-        var joinRequestId = requestIdOverride || pendingJoinRequestId || generateRequestId();
+        var joinRequestId = requestIdOverride || pendingJoinRequestId || String(generateRequestId());
         var joinResult = await apiPost(JOIN_URL, {
           tableId: tableId,
           seatNo: seatNo,
@@ -743,7 +743,7 @@
           pendingLeaveRequestId = String(generateRequestId());
           pendingLeaveRetries = 0;
         }
-        var leaveRequestId = requestIdOverride || pendingLeaveRequestId || generateRequestId();
+        var leaveRequestId = requestIdOverride || pendingLeaveRequestId || String(generateRequestId());
         var leaveResult = await apiPost(LEAVE_URL, { tableId: tableId, requestId: String(leaveRequestId) });
         if (isPendingResponse(leaveResult)){
           scheduleRetry(retryLeave);
