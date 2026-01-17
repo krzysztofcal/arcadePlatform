@@ -1,0 +1,20 @@
+name: Poker Sweep
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call sweep
+        env:
+          SWEEP_SECRET: ${{ secrets.POKER_SWEEP_SECRET }}
+        run: |
+          curl -fsS -X POST "https://play.kcswh.pl/.netlify/functions/poker-sweep" \
+            -H "x-sweep-secret: ${SWEEP_SECRET}" | cat
