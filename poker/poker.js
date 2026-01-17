@@ -548,6 +548,7 @@
       if (document.visibilityState === 'hidden') return;
       if (heartbeatInFlight) return;
       heartbeatInFlight = true;
+      var shouldReturn = false;
       try {
         var data = await apiPost(HEARTBEAT_URL, { tableId: tableId, requestId: heartbeatRequestId });
         if (isPendingResponse(data)){
@@ -556,14 +557,16 @@
           if (heartbeatPendingRetries <= HEARTBEAT_PENDING_MAX_RETRIES){
             scheduleRetry(sendHeartbeat, getHeartbeatPendingDelay(heartbeatPendingRetries));
           }
-          return;
+          shouldReturn = true;
         }
-        heartbeatPendingRetries = 0;
-        if (data && data.closed){
-          stopPolling();
-          stopHeartbeat();
-          loadTable(false);
-          return;
+        if (!shouldReturn){
+          heartbeatPendingRetries = 0;
+          if (data && data.closed){
+            stopPolling();
+            stopHeartbeat();
+            loadTable(false);
+            shouldReturn = true;
+          }
         }
       } catch (err){
         if (isAuthError(err)){
@@ -576,12 +579,13 @@
             onAuthExpired: startAuthWatch
           });
           stopHeartbeat();
-          return;
+          shouldReturn = true;
         }
         klog('poker_heartbeat_error', { tableId: tableId, error: err.message || err.code });
       } finally {
         heartbeatInFlight = false;
       }
+      if (shouldReturn) return;
     }
 
     function renderTable(data){
