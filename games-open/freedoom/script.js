@@ -15,7 +15,8 @@
 
   var elements = { dos: null, playBtn: null, restartBtn: null, timeEl: null, loadingOverlay: null, loadingProgress: null, loadingText: null, mobileControls: null };
 
-  var FREEDOOM_BUNDLE_URL = 'https://cdn.dos.zone/original/2X/2/24b00b14f118580763440ecaddcc948f8cb94f14.jsdos';
+  // Use the Doom shareware bundle from dos.zone CDN (Freedoom bundle was returning 403)
+  var FREEDOOM_BUNDLE_URL = 'https://cdn.dos.zone/custom/dos/doom.jsdos';
 
   function initElements() {
     elements.dos = document.getElementById('dos');
@@ -177,13 +178,12 @@
     if (elements.playBtn) { elements.playBtn.disabled = true; elements.playBtn.style.display = 'none'; }
     showLoading(false);
 
-    Dos(elements.dos).run(FREEDOOM_BUNDLE_URL).then(function(ci) {
+    // js-dos v8 API: pass URL in config, js-dos handles its own loading UI
+    Dos(elements.dos, { url: FREEDOOM_BUNDLE_URL }).then(function(ci) {
       state.ci = ci;
       state.loaded = true;
       state.running = true;
       state.startTime = Date.now();
-      showLoading(false);
-      if (elements.playBtn) elements.playBtn.style.display = 'none';
       if (elements.restartBtn) elements.restartBtn.style.display = 'inline-flex';
       initMobileControls();
       if (state.timeInterval) clearInterval(state.timeInterval);
