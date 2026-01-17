@@ -86,6 +86,23 @@ const isRequestPendingStale = (row) => {
 export async function handler(event) {
   const origin = event.headers?.origin || event.headers?.Origin;
   const cors = corsHeaders(origin);
+
+  const parsed = parseBody(event.body);
+  const payload = parsed.ok ? parsed.value ?? {} : null;
+  const tableIdValue = payload && typeof payload.tableId === "string" ? payload.tableId.trim() : "";
+  const requestIdValue = payload?.requestId;
+  const requestIdPresent = requestIdValue != null && requestIdValue !== "";
+
+  const token = extractBearerToken(event.headers);
+  const auth = await verifySupabaseJwt(token);
+  const userId = auth.userId || null;
+  klog("poker_leave_start", {
+    tableId: tableIdValue || null,
+    userId,
+    hasAuth: !!(auth.valid && auth.userId),
+    requestIdPresent,
+  });
+
   if (!cors) {
     return {
       statusCode: 403,
@@ -99,18 +116,14 @@ export async function handler(event) {
   if (event.httpMethod !== "POST") {
     return { statusCode: 405, headers: cors, body: JSON.stringify({ error: "method_not_allowed" }) };
   }
-
-  const parsed = parseBody(event.body);
   if (!parsed.ok) {
     return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "invalid_json" }) };
   }
 
-  const payload = parsed.value ?? {};
   if (payload && !isPlainObject(payload)) {
     return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "invalid_payload" }) };
   }
 
-  const tableIdValue = payload?.tableId;
   const tableId = typeof tableIdValue === "string" ? tableIdValue.trim() : "";
   if (!tableId || !isValidUuid(tableId)) {
     return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "invalid_table_id" }) };
@@ -122,13 +135,12 @@ export async function handler(event) {
   }
   const requestId = requestIdParsed.value;
 
-  const token = extractBearerToken(event.headers);
-  const auth = await verifySupabaseJwt(token);
   if (!auth.valid || !auth.userId) {
     return { statusCode: 401, headers: cors, body: JSON.stringify({ error: "unauthorized", reason: auth.reason }) };
   }
 
   try {
+    let txId = null;
     const result = await beginSql(async (tx) => {
       if (requestId) {
         const requestRows = await tx.unsafe(
@@ -220,7 +232,7 @@ export async function handler(event) {
             ? `poker:leave:${requestId}`
             : `poker:leave:${tableId}:${auth.userId}:${stackValue}`;
 
-          await postTransaction({
+          const txResult = await postTransaction({
             userId: auth.userId,
             txType: "TABLE_CASH_OUT",
             idempotencyKey,
@@ -231,6 +243,7 @@ export async function handler(event) {
             createdBy: auth.userId,
             tx,
           });
+          txId = txResult?.transaction?.id || null;
         }
 
         const seats = parseSeats(currentState.seats).filter((seatItem) => seatItem?.userId !== auth.userId);
@@ -264,7 +277,13 @@ export async function handler(event) {
             [tableId, requestId, JSON.stringify(resultPayload)]
           );
         }
-        klog("poker_leave_ok", { tableId, userId: auth.userId, seatNo: seatNo ?? null });
+        klog("poker_leave_ok", {
+          tableId,
+          userId: auth.userId,
+          requestId: requestId || null,
+          cashedOut: !!stackValue,
+          txId,
+        });
         return resultPayload;
       } catch (error) {
         if (requestId) {
@@ -284,10 +303,20 @@ export async function handler(event) {
     };
   } catch (error) {
     if (error?.status && error?.code) {
-      klog("poker_leave_fail", { tableId, userId: auth.userId, reason: error.code });
+      klog("poker_leave_error", {
+        tableId,
+        userId: auth.userId || null,
+        code: error.code,
+        message: error.message || null,
+      });
       return { statusCode: error.status, headers: cors, body: JSON.stringify({ error: error.code }) };
     }
-    klog("poker_leave_error", { message: error?.message || "unknown_error" });
+    klog("poker_leave_error", {
+      tableId,
+      userId: auth?.userId || null,
+      code: error?.code || "server_error",
+      message: error?.message || "unknown_error",
+    });
     return { statusCode: 500, headers: cors, body: JSON.stringify({ error: "server_error" }) };
   }
 }
