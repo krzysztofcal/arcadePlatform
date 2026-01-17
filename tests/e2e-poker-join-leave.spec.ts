@@ -1,25 +1,10 @@
 import { test, expect } from '@playwright/test';
 
-const makeBase64Url = (value: string) =>
-  Buffer.from(value)
-    .toString('base64')
-    .replace(/=+$/g, '')
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_');
-
-const buildJwt = (userId: string) => {
-  const header = makeBase64Url(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
-  const payload = makeBase64Url(
-    JSON.stringify({ sub: userId, exp: Math.floor(Date.now() / 1000) + 3600 })
-  );
-  return `${header}.${payload}.signature`;
-};
-
 test('poker: can join and leave table (no pointerevent requestId)', async ({ page }) => {
-  const userId = 'user-12345678-90ab-cdef-1234-567890abcdef';
+  const userId = 'd2b72e4b-cc87-4c61-9b06-7b8d6f1d2c3e';
   const shortUserId = userId.substring(0, 8);
   const tableId = '11111111-1111-4111-8111-111111111111';
-  const token = buildJwt(userId);
+  const token = 'test-token';
 
   const tableState = {
     joined: false,
@@ -106,6 +91,18 @@ test('poker: can join and leave table (no pointerevent requestId)', async ({ pag
 
     if (pathname.endsWith('/poker-join') && request.method() === 'POST') {
       const payload = request.postData() ? JSON.parse(request.postData() as string) : {};
+      if (
+        typeof payload?.requestId !== 'string' ||
+        !payload.requestId.trim() ||
+        payload.requestId === '[object PointerEvent]'
+      ) {
+        await route.fulfill({
+          status: 400,
+          contentType: 'application/json',
+          body: JSON.stringify({ error: 'invalid_request_id' }),
+        });
+        return;
+      }
       tableState.joined = true;
       tableState.seatNo = Number.isFinite(payload?.seatNo) ? payload.seatNo : 0;
       tableState.buyIn = Number.isFinite(payload?.buyIn) ? payload.buyIn : 100;
@@ -119,6 +116,19 @@ test('poker: can join and leave table (no pointerevent requestId)', async ({ pag
     }
 
     if (pathname.endsWith('/poker-leave') && request.method() === 'POST') {
+      const payload = request.postData() ? JSON.parse(request.postData() as string) : {};
+      if (
+        typeof payload?.requestId !== 'string' ||
+        !payload.requestId.trim() ||
+        payload.requestId === '[object PointerEvent]'
+      ) {
+        await route.fulfill({
+          status: 400,
+          contentType: 'application/json',
+          body: JSON.stringify({ error: 'invalid_request_id' }),
+        });
+        return;
+      }
       tableState.joined = false;
       tableState.version += 1;
       await route.fulfill({
@@ -145,7 +155,7 @@ test('poker: can join and leave table (no pointerevent requestId)', async ({ pag
   await expect(page.locator('#pokerLobbyContent')).toBeVisible();
 
   await Promise.all([
-    page.waitForURL('**/poker/table.html?tableId=*'),
+    page.waitForURL(/\/poker\/table\.html\?tableId=/),
     page.locator('#pokerCreate').click(),
   ]);
 
@@ -176,8 +186,8 @@ test('poker: can join and leave table (no pointerevent requestId)', async ({ pag
   expect(joinRequestId, 'join requestId should not be a pointer event').not.toBe('[object PointerEvent]');
   expect(joinRequestId.length, 'join requestId should be <= 200 chars').toBeLessThanOrEqual(200);
 
-  const seat = page.locator('#pokerSeatsGrid .poker-seat').first();
-  const seatUser = page.locator('#pokerSeatsGrid .poker-seat-user').first();
+  const seatUser = page.locator('#pokerSeatsGrid .poker-seat-user', { hasText: shortUserId });
+  const seat = seatUser.locator('..');
 
   await expect(seatUser).toContainText(shortUserId, { timeout: 20000 });
   await expect
@@ -186,8 +196,12 @@ test('poker: can join and leave table (no pointerevent requestId)', async ({ pag
 
   await expect(page.locator('#pokerYourStack')).toHaveText('100', { timeout: 20000 });
 
+  await page.locator('#pokerJsonToggle').click();
+  await expect(page.locator('#pokerJsonBox')).toBeVisible();
+
   await expect(async () => {
     const jsonText = await page.locator('#pokerJsonBox').textContent();
+    expect(jsonText, 'expected JSON payload to be available').toBeTruthy();
     const state = JSON.parse(jsonText || '{}');
     expect(state?.stacks?.[userId]).toBe(100);
   }).toPass({ timeout: 20000 });
@@ -222,6 +236,7 @@ test('poker: can join and leave table (no pointerevent requestId)', async ({ pag
 
   await expect(async () => {
     const jsonText = await page.locator('#pokerJsonBox').textContent();
+    expect(jsonText, 'expected JSON payload to be available').toBeTruthy();
     const state = JSON.parse(jsonText || '{}');
     expect(state?.stacks?.[userId]).toBeUndefined();
   }).toPass({ timeout: 20000 });
