@@ -154,7 +154,11 @@ export async function handler(event) {
         [tableId]
       );
       const seats = Array.isArray(seatRows) ? seatRows : [];
-      const validSeats = seats.filter((seat) => Number.isInteger(seat?.seat_no));
+      const validSeats = seats.filter((seat) => {
+        if (!Number.isInteger(seat?.seat_no)) return false;
+        if (typeof seat?.user_id !== "string") return false;
+        return !!seat.user_id.trim();
+      });
       if (validSeats.length < 2) {
         throw makeError(409, "not_enough_players");
       }
