@@ -67,6 +67,7 @@ export async function handler(event) {
       );
       const stateRow = stateRows?.[0] || null;
       if (!stateRow) {
+        klog("poker_state_missing", { tableId });
         throw new Error("poker_state_missing");
       }
 

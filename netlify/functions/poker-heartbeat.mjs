@@ -1,6 +1,8 @@
 import { baseHeaders, beginSql, corsHeaders, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
 import { isValidUuid } from "./_shared/poker-utils.mjs";
 
+const REQUEST_PENDING_STALE_SEC = 30;
+
 const parseBody = (body) => {
   if (!body) return { ok: true, value: {} };
   try {
@@ -32,6 +34,13 @@ const parseResultJson = (value) => {
   }
   if (typeof value === "object") return value;
   return null;
+};
+
+const isRequestPendingStale = (row) => {
+  if (!row?.created_at) return false;
+  const createdAtMs = Date.parse(row.created_at);
+  if (!Number.isFinite(createdAtMs)) return false;
+  return Date.now() - createdAtMs > REQUEST_PENDING_STALE_SEC * 1000;
 };
 
 export async function handler(event) {
@@ -71,6 +80,7 @@ export async function handler(event) {
   if (!requestIdParsed.ok) {
     return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "invalid_request_id" }) };
   }
+  const requestId = requestIdParsed.value;
 
   const token = extractBearerToken(event.headers);
   const auth = await verifySupabaseJwt(token);
@@ -80,24 +90,58 @@ export async function handler(event) {
 
   try {
     const result = await beginSql(async (tx) => {
-      if (requestIdParsed.value) {
+      if (requestId) {
         const requestRows = await tx.unsafe(
-          "select result_json from public.poker_requests where request_id = $1 limit 1;",
-          [requestIdParsed.value]
+          "select result_json, created_at from public.poker_requests where table_id = $1 and request_id = $2 limit 1;",
+          [tableId, requestId]
         );
-        if (requestRows?.[0]) {
-          const stored = parseResultJson(requestRows[0].result_json);
+        const existingRow = requestRows?.[0];
+        if (existingRow) {
+          const stored = parseResultJson(existingRow.result_json);
           if (stored) return stored;
+          if (isRequestPendingStale(existingRow)) {
+            await tx.unsafe("delete from public.poker_requests where table_id = $1 and request_id = $2;", [
+              tableId,
+              requestId,
+            ]);
+          } else {
+            return { ok: false, pending: true, requestId };
+          }
         }
       }
 
-      if (requestIdParsed.value) {
-        await tx.unsafe(
-          `insert into public.poker_requests (table_id, user_id, request_id, kind)
+      if (requestId) {
+        const insertRequest = () =>
+          tx.unsafe(
+            `insert into public.poker_requests (table_id, user_id, request_id, kind)
            values ($1, $2, $3, 'HEARTBEAT')
-           on conflict (request_id) do nothing;`,
-          [tableId, auth.userId, requestIdParsed.value]
-        );
+           on conflict (table_id, request_id) do nothing
+           returning request_id;`,
+            [tableId, auth.userId, requestId]
+          );
+        let insertedRows = await insertRequest();
+        const hasRequest = !!insertedRows?.[0]?.request_id;
+        if (!hasRequest) {
+          const existingRows = await tx.unsafe(
+            "select result_json, created_at from public.poker_requests where table_id = $1 and request_id = $2 limit 1;",
+            [tableId, requestId]
+          );
+          const existingConflict = existingRows?.[0];
+          const stored = parseResultJson(existingConflict?.result_json);
+          if (stored) return stored;
+          if (existingConflict && isRequestPendingStale(existingConflict)) {
+            await tx.unsafe("delete from public.poker_requests where table_id = $1 and request_id = $2;", [
+              tableId,
+              requestId,
+            ]);
+            insertedRows = await insertRequest();
+            if (!insertedRows?.[0]?.request_id) {
+              return { ok: false, pending: true, requestId };
+            }
+          } else {
+            return { ok: false, pending: true, requestId };
+          }
+        }
       }
 
       const tableRows = await tx.unsafe("select status from public.poker_tables where id = $1 limit 1;", [tableId]);
@@ -118,10 +162,10 @@ export async function handler(event) {
         if (isSeated) {
           resultPayload.closed = true;
         }
-        if (requestIdParsed.value) {
+        if (requestId) {
           await tx.unsafe(
-            "update public.poker_requests set result_json = $2::jsonb where request_id = $1;",
-            [requestIdParsed.value, JSON.stringify(resultPayload)]
+            "update public.poker_requests set result_json = $3::jsonb where table_id = $1 and request_id = $2;",
+            [tableId, requestId, JSON.stringify(resultPayload)]
           );
         }
         return resultPayload;
@@ -139,10 +183,10 @@ export async function handler(event) {
       }
 
       const resultPayload = { ok: true, seated: isSeated, seatNo: isSeated ? seatNo : null };
-      if (requestIdParsed.value) {
+      if (requestId) {
         await tx.unsafe(
-          "update public.poker_requests set result_json = $2::jsonb where request_id = $1;",
-          [requestIdParsed.value, JSON.stringify(resultPayload)]
+          "update public.poker_requests set result_json = $3::jsonb where table_id = $1 and request_id = $2;",
+          [tableId, requestId, JSON.stringify(resultPayload)]
         );
       }
       return resultPayload;
