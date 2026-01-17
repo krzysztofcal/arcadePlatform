@@ -6,10 +6,8 @@
   var GET_URL = '/.netlify/functions/poker-get-table';
   var JOIN_URL = '/.netlify/functions/poker-join';
   var LEAVE_URL = '/.netlify/functions/poker-leave';
-  var HEARTBEAT_URL = '/.netlify/functions/poker-heartbeat';
   var POLL_INTERVAL_BASE = 2000;
   var POLL_INTERVAL_MAX = 10000;
-  var HEARTBEAT_INTERVAL_MS = 20000;
 
   var state = { token: null, polling: false, pollTimer: null, pollInterval: POLL_INTERVAL_BASE, pollErrors: 0 };
 
@@ -118,9 +116,6 @@
     if (typeof opts.stopPolling === 'function'){
       opts.stopPolling();
     }
-    if (typeof opts.stopHeartbeat === 'function'){
-      opts.stopHeartbeat();
-    }
     if (opts.authMsg) opts.authMsg.hidden = false;
     if (opts.content) opts.content.hidden = true;
     if (opts.errorEl){
@@ -195,24 +190,6 @@
   function setLoading(el, loading){
     if (!el) return;
     el.disabled = loading;
-  }
-
-  function isPendingResponse(data){
-    return !!(data && data.pending);
-  }
-
-  function scheduleReload(fn){
-    if (typeof fn !== 'function') return;
-    setTimeout(function(){
-      fn();
-    }, 600);
-  }
-
-  function scheduleRetry(fn){
-    if (typeof fn !== 'function') return;
-    setTimeout(function(){
-      fn();
-    }, 600);
   }
 
   // ========== LOBBY PAGE ==========
@@ -419,12 +396,6 @@
     var tableData = null;
     var tableMaxPlayers = 6;
     var authTimer = null;
-    var heartbeatTimer = null;
-    var pendingJoinRequestId = null;
-    var pendingLeaveRequestId = null;
-    var pendingJoinRetries = 0;
-    var pendingLeaveRetries = 0;
-    var pendingMaxRetries = 8;
 
     function stopAuthWatch(){
       if (authTimer){
@@ -441,7 +412,6 @@
             stopAuthWatch();
             loadTable(false);
             startPolling();
-            startHeartbeat();
           }
         });
       }, 3000);
@@ -476,7 +446,6 @@
             content: tableContent,
             errorEl: errorEl,
             stopPolling: stopPolling,
-            stopHeartbeat: stopHeartbeat,
             onAuthExpired: startAuthWatch
           });
           return;
@@ -525,40 +494,6 @@
       }
     }
 
-    function stopHeartbeat(){
-      if (heartbeatTimer){
-        clearInterval(heartbeatTimer);
-        heartbeatTimer = null;
-      }
-    }
-
-    function startHeartbeat(){
-      if (heartbeatTimer) return;
-      heartbeatTimer = setInterval(sendHeartbeat, HEARTBEAT_INTERVAL_MS);
-      sendHeartbeat();
-    }
-
-    async function sendHeartbeat(){
-      if (document.visibilityState === 'hidden') return;
-      try {
-        await apiPost(HEARTBEAT_URL, { tableId: tableId });
-      } catch (err){
-        if (isAuthError(err)){
-          handleAuthExpired({
-            authMsg: authMsg,
-            content: tableContent,
-            errorEl: errorEl,
-            stopPolling: stopPolling,
-            stopHeartbeat: stopHeartbeat,
-            onAuthExpired: startAuthWatch
-          });
-          stopHeartbeat();
-          return;
-        }
-        klog('poker_heartbeat_error', { tableId: tableId, error: err.message || err.code });
-      }
-    }
-
     function renderTable(data){
       var table = data.table || {};
       var seats = data.seats || [];
@@ -581,34 +516,15 @@
         for (var i = 0; i < maxPlayers; i++){
           var seat = seats.find(function(s){ return s.seatNo === i; });
           var div = document.createElement('div');
-          var seatClass = 'poker-seat';
-          if (!seat){
-            seatClass += ' poker-seat--empty';
-          } else if (seat.status && seat.status.toUpperCase() === 'INACTIVE'){
-            seatClass += ' poker-seat--inactive';
-          }
-          div.className = seatClass;
+          div.className = 'poker-seat' + (seat ? '' : ' poker-seat--empty');
           var seatNoEl = document.createElement('div');
           seatNoEl.className = 'poker-seat-no';
           seatNoEl.textContent = t('pokerSeatPrefix', 'Seat') + ' ' + i;
           var seatUserEl = document.createElement('div');
           seatUserEl.className = 'poker-seat-user';
           seatUserEl.textContent = seat ? shortId(seat.userId) : t('pokerSeatEmpty', 'Empty');
-          var seatStatusEl = document.createElement('div');
-          seatStatusEl.className = 'poker-seat-status';
-          if (!seat){
-            seatStatusEl.className += ' poker-seat-status--empty';
-            seatStatusEl.textContent = t('pokerSeatOpen', 'Open');
-          } else if (seat.status && seat.status.toUpperCase() === 'INACTIVE'){
-            seatStatusEl.className += ' poker-seat-status--inactive';
-            seatStatusEl.textContent = t('pokerSeatInactive', 'Inactive');
-          } else {
-            seatStatusEl.className += ' poker-seat-status--active';
-            seatStatusEl.textContent = t('pokerSeatActive', 'Active');
-          }
           div.appendChild(seatNoEl);
           div.appendChild(seatUserEl);
-          div.appendChild(seatStatusEl);
           seatsGrid.appendChild(div);
         }
       }
@@ -622,35 +538,7 @@
       if (jsonBox) jsonBox.textContent = JSON.stringify(gameState, null, 2);
     }
 
-    async function retryJoin(){
-      if (!pendingJoinRequestId) return;
-      if (pendingJoinRetries >= pendingMaxRetries){
-        pendingJoinRequestId = null;
-        pendingJoinRetries = 0;
-        setLoading(joinBtn, false);
-        setLoading(leaveBtn, false);
-        setError(errorEl, t('pokerErrJoinPending', 'Join still pending. Please try again.'));
-        return;
-      }
-      pendingJoinRetries++;
-      await joinTable(pendingJoinRequestId);
-    }
-
-    async function retryLeave(){
-      if (!pendingLeaveRequestId) return;
-      if (pendingLeaveRetries >= pendingMaxRetries){
-        pendingLeaveRequestId = null;
-        pendingLeaveRetries = 0;
-        setLoading(joinBtn, false);
-        setLoading(leaveBtn, false);
-        setError(errorEl, t('pokerErrLeavePending', 'Leave still pending. Please try again.'));
-        return;
-      }
-      pendingLeaveRetries++;
-      await leaveTable(pendingLeaveRequestId);
-    }
-
-    async function joinTable(requestIdOverride){
+    async function joinTable(){
       setError(errorEl, null);
       var seatNo = parseInt(seatNoInput ? seatNoInput.value : 0, 10);
       var buyIn = parseInt(buyInInput ? buyInInput.value : 100, 10) || 100;
@@ -662,29 +550,15 @@
       setLoading(joinBtn, true);
       setLoading(leaveBtn, true);
       try {
-        if (!requestIdOverride && !pendingJoinRequestId){
-          pendingJoinRequestId = generateRequestId();
-          pendingJoinRetries = 0;
-        }
-        var joinRequestId = requestIdOverride || pendingJoinRequestId || generateRequestId();
-        var joinResult = await apiPost(JOIN_URL, { tableId: tableId, seatNo: seatNo, buyIn: buyIn, requestId: joinRequestId });
-        if (isPendingResponse(joinResult)){
-          scheduleRetry(retryJoin);
-          return;
-        }
-        pendingJoinRequestId = null;
-        pendingJoinRetries = 0;
+        await apiPost(JOIN_URL, { tableId: tableId, seatNo: seatNo, buyIn: buyIn, requestId: generateRequestId() });
         loadTable();
       } catch (err){
-        pendingJoinRequestId = null;
-        pendingJoinRetries = 0;
         if (isAuthError(err)){
           handleAuthExpired({
             authMsg: authMsg,
             content: tableContent,
             errorEl: errorEl,
             stopPolling: stopPolling,
-            stopHeartbeat: stopHeartbeat,
             onAuthExpired: startAuthWatch
           });
           return;
@@ -692,41 +566,25 @@
         klog('poker_join_error', { tableId: tableId, error: err.message || err.code });
         setError(errorEl, err.message || t('pokerErrJoin', 'Failed to join'));
       } finally {
-        if (!pendingJoinRequestId){
-          setLoading(joinBtn, false);
-          setLoading(leaveBtn, false);
-        }
+        setLoading(joinBtn, false);
+        setLoading(leaveBtn, false);
       }
     }
 
-    async function leaveTable(requestIdOverride){
+    async function leaveTable(){
       setError(errorEl, null);
       setLoading(joinBtn, true);
       setLoading(leaveBtn, true);
       try {
-        if (!requestIdOverride && !pendingLeaveRequestId){
-          pendingLeaveRequestId = generateRequestId();
-          pendingLeaveRetries = 0;
-        }
-        var leaveRequestId = requestIdOverride || pendingLeaveRequestId || generateRequestId();
-        var leaveResult = await apiPost(LEAVE_URL, { tableId: tableId, requestId: leaveRequestId });
-        if (isPendingResponse(leaveResult)){
-          scheduleRetry(retryLeave);
-          return;
-        }
-        pendingLeaveRequestId = null;
-        pendingLeaveRetries = 0;
+        await apiPost(LEAVE_URL, { tableId: tableId, requestId: generateRequestId() });
         loadTable();
       } catch (err){
-        pendingLeaveRequestId = null;
-        pendingLeaveRetries = 0;
         if (isAuthError(err)){
           handleAuthExpired({
             authMsg: authMsg,
             content: tableContent,
             errorEl: errorEl,
             stopPolling: stopPolling,
-            stopHeartbeat: stopHeartbeat,
             onAuthExpired: startAuthWatch
           });
           return;
@@ -734,22 +592,18 @@
         klog('poker_leave_error', { tableId: tableId, error: err.message || err.code });
         setError(errorEl, err.message || t('pokerErrLeave', 'Failed to leave'));
       } finally {
-        if (!pendingLeaveRequestId){
-          setLoading(joinBtn, false);
-          setLoading(leaveBtn, false);
-        }
+        setLoading(joinBtn, false);
+        setLoading(leaveBtn, false);
       }
     }
 
     function handleVisibility(){
       if (document.visibilityState === 'hidden'){
         stopPolling();
-        stopHeartbeat();
       } else {
         state.pollInterval = POLL_INTERVAL_BASE;
         state.pollErrors = 0;
         startPolling();
-        startHeartbeat();
         loadTable(false);
       }
     }
@@ -767,14 +621,12 @@
 
     document.addEventListener('visibilitychange', handleVisibility); // xp-lifecycle-allow:poker-table(2026-01-01)
     window.addEventListener('beforeunload', stopPolling); // xp-lifecycle-allow:poker-table(2026-01-01)
-    window.addEventListener('beforeunload', stopHeartbeat); // xp-lifecycle-allow:poker-table-heartbeat(2026-01-01)
     window.addEventListener('beforeunload', stopAuthWatch); // xp-lifecycle-allow:poker-table-auth(2026-01-01)
 
     checkAuth().then(function(authed){
       if (authed){
         loadTable(false);
         startPolling();
-        startHeartbeat();
       }
     });
   }

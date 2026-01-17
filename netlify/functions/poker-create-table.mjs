@@ -15,8 +15,7 @@ const isPlainObject = (value) =>
 const parseMaxPlayers = (value) => {
   if (value == null || value === "") return 6;
   const num = Number(value);
-  if (!Number.isFinite(num) || !Number.isInteger(num)) return null;
-  if (num < 2 || num > 10) return null;
+  if (!Number.isFinite(num) || !Number.isInteger(num) || num <= 0) return null;
   return num;
 };
 
@@ -75,11 +74,7 @@ export async function handler(event) {
   try {
     await beginSql(async (tx) => {
       const tableRows = await tx.unsafe(
-        `
-insert into public.poker_tables (stakes, max_players, status, created_by, updated_at, last_activity_at)
-values ($1::jsonb, $2, 'OPEN', $3, now(), now())
-returning id;
-        `,
+        "insert into public.poker_tables (stakes, max_players, status, created_by) values ($1::jsonb, $2, 'OPEN', $3) returning id;",
         [stakesJson, maxPlayers, auth.userId]
       );
       tableId = tableRows?.[0]?.id || null;
