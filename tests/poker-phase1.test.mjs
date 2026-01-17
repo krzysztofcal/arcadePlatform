@@ -109,6 +109,10 @@ assert.ok(
   "migration should add poker_requests table_id/request_id unique index"
 );
 assert.ok(
+  phase1MigrationSrc.includes("pg_constraint") && phase1MigrationSrc.includes("drop constraint %I"),
+  "migration should dynamically drop legacy unique constraint"
+);
+assert.ok(
   sweepSrc.includes("delete from public.poker_requests"),
   "sweep should delete old poker_requests"
 );
