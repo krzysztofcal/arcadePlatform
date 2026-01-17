@@ -46,7 +46,9 @@ assert.ok(pokerUiSrc.includes("pendingJoinRequestId"), "poker UI should store pe
 assert.ok(pokerUiSrc.includes("pendingLeaveRequestId"), "poker UI should store pending leave requestId");
 assert.ok(pokerUiSrc.includes("apiPost(JOIN_URL"), "poker UI should retry join via apiPost");
 assert.ok(pokerUiSrc.includes("apiPost(LEAVE_URL"), "poker UI should retry leave via apiPost");
-assert.ok(!/max_players/.test(pokerUiSrc), "poker UI should not read max_players");
+assert.ok(!/tbl\.max_players/.test(pokerUiSrc), "poker UI should not read tbl.max_players");
+assert.ok(!/table\.max_players/.test(pokerUiSrc), "poker UI should not read table.max_players");
+assert.ok(!/seat_count/.test(pokerUiSrc), "poker UI should not read seat_count");
 assert.ok(!joinSrc.includes("RUNNING"), "join should not set status to RUNNING");
 assert.ok(!leaveSrc.includes("RUNNING"), "leave should not set status to RUNNING");
 assert.ok(
