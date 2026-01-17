@@ -100,12 +100,32 @@ export async function handler(event) {
         );
       }
 
+      const tableRows = await tx.unsafe("select status from public.poker_tables where id = $1 limit 1;", [tableId]);
+      const tableStatus = tableRows?.[0]?.status;
+      if (!tableStatus) {
+        return { error: "table_not_found", statusCode: 404 };
+      }
+
       const seatRows = await tx.unsafe(
         "select seat_no from public.poker_seats where table_id = $1 and user_id = $2 limit 1;",
         [tableId, auth.userId]
       );
       const seatNo = seatRows?.[0]?.seat_no;
       const isSeated = Number.isInteger(seatNo);
+
+      if (tableStatus === "CLOSED") {
+        const resultPayload = { ok: true, seated: isSeated, seatNo: isSeated ? seatNo : null };
+        if (isSeated) {
+          resultPayload.closed = true;
+        }
+        if (requestIdParsed.value) {
+          await tx.unsafe(
+            "update public.poker_requests set result_json = $2::jsonb where request_id = $1;",
+            [requestIdParsed.value, JSON.stringify(resultPayload)]
+          );
+        }
+        return resultPayload;
+      }
 
       if (isSeated) {
         await tx.unsafe(
@@ -127,6 +147,14 @@ export async function handler(event) {
       }
       return resultPayload;
     });
+
+    if (result?.error) {
+      return {
+        statusCode: result.statusCode || 400,
+        headers: cors,
+        body: JSON.stringify({ error: result.error }),
+      };
+    }
 
     return {
       statusCode: 200,
