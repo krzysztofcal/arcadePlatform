@@ -90,8 +90,8 @@ export async function handler(event) {
         : [];
 
       const hasActiveSeat = seats.some((seat) => seat.status === "ACTIVE");
-      const isSeated = seats.some((seat) => seat.userId === auth.userId);
-      if (hasActiveSeat || isSeated) {
+      const isSeatedActive = seats.some((seat) => seat.userId === auth.userId && seat.status === "ACTIVE");
+      if (hasActiveSeat || isSeatedActive) {
         await tx.unsafe(
           "update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1;",
           [tableId]
@@ -113,11 +113,13 @@ export async function handler(event) {
       id: table.id,
       stakes: table.stakes,
       maxPlayers: table.max_players,
+      max_players: table.max_players,
       status: table.status,
       createdBy: table.created_by,
       createdAt: table.created_at,
       updatedAt: table.updated_at,
       lastActivityAt: table.last_activity_at,
+      last_activity_at: table.last_activity_at,
     };
 
     return {

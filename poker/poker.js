@@ -197,6 +197,17 @@
     el.disabled = loading;
   }
 
+  function isPendingResponse(data){
+    return !!(data && data.pending);
+  }
+
+  function scheduleReload(fn){
+    if (typeof fn !== 'function') return;
+    setTimeout(function(){
+      fn();
+    }, 600);
+  }
+
   // ========== LOBBY PAGE ==========
   function initLobby(){
     var errorEl = document.getElementById('pokerError');
@@ -611,7 +622,11 @@
       setLoading(joinBtn, true);
       setLoading(leaveBtn, true);
       try {
-        await apiPost(JOIN_URL, { tableId: tableId, seatNo: seatNo, buyIn: buyIn, requestId: generateRequestId() });
+        var joinResult = await apiPost(JOIN_URL, { tableId: tableId, seatNo: seatNo, buyIn: buyIn, requestId: generateRequestId() });
+        if (isPendingResponse(joinResult)){
+          scheduleReload(loadTable);
+          return;
+        }
         loadTable();
       } catch (err){
         if (isAuthError(err)){
@@ -623,6 +638,10 @@
             stopHeartbeat: stopHeartbeat,
             onAuthExpired: startAuthWatch
           });
+          return;
+        }
+        if (err && err.code === 'request_in_flight'){
+          scheduleReload(loadTable);
           return;
         }
         klog('poker_join_error', { tableId: tableId, error: err.message || err.code });
@@ -638,7 +657,11 @@
       setLoading(joinBtn, true);
       setLoading(leaveBtn, true);
       try {
-        await apiPost(LEAVE_URL, { tableId: tableId, requestId: generateRequestId() });
+        var leaveResult = await apiPost(LEAVE_URL, { tableId: tableId, requestId: generateRequestId() });
+        if (isPendingResponse(leaveResult)){
+          scheduleReload(loadTable);
+          return;
+        }
         loadTable();
       } catch (err){
         if (isAuthError(err)){
@@ -650,6 +673,10 @@
             stopHeartbeat: stopHeartbeat,
             onAuthExpired: startAuthWatch
           });
+          return;
+        }
+        if (err && err.code === 'request_in_flight'){
+          scheduleReload(loadTable);
           return;
         }
         klog('poker_leave_error', { tableId: tableId, error: err.message || err.code });

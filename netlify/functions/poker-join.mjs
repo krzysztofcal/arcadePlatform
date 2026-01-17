@@ -156,7 +156,7 @@ export async function handler(event) {
           );
           const stored = parseResultJson(existingRows?.[0]?.result_json);
           if (stored) return stored;
-          throw makeError(409, "request_in_flight");
+          return { ok: false, pending: true, requestId };
         }
       }
 
@@ -169,16 +169,15 @@ export async function handler(event) {
         if (!table) {
           throw makeError(404, "table_not_found");
         }
-        if (table.status === "CLOSED") {
-          throw makeError(409, "table_closed");
-        }
-
         const seatRows = await tx.unsafe(
           "select seat_no from public.poker_seats where table_id = $1 and user_id = $2 limit 1;",
           [tableId, auth.userId]
         );
         const existingSeatNo = seatRows?.[0]?.seat_no;
         if (Number.isInteger(existingSeatNo)) {
+          if (table.status === "CLOSED") {
+            throw makeError(409, "table_closed");
+          }
           await tx.unsafe(
             "update public.poker_seats set status = 'ACTIVE', last_seen_at = now() where table_id = $1 and user_id = $2;",
             [tableId, auth.userId]
@@ -204,6 +203,14 @@ export async function handler(event) {
           }
           klog("poker_join_ok", { tableId, userId: auth.userId, seatNo: existingSeatNo, rejoin: true });
           return resultPayload;
+        }
+
+        if (table.status === "CLOSED") {
+          throw makeError(409, "table_closed");
+        }
+
+        if (table.status !== "OPEN") {
+          throw makeError(409, "table_not_open");
         }
 
         if (seatNo >= Number(table.max_players)) {

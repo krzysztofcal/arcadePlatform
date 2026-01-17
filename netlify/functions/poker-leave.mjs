@@ -138,7 +138,7 @@ export async function handler(event) {
           );
           const stored = parseResultJson(existingRows?.[0]?.result_json);
           if (stored) return stored;
-          throw makeError(409, "request_in_flight");
+          return { ok: false, pending: true, requestId };
         }
       }
 

@@ -3,14 +3,7 @@ import { PRESENCE_TTL_SEC, TABLE_EMPTY_CLOSE_SEC } from "./_shared/poker-utils.m
 
 export async function handler(event) {
   const origin = event.headers?.origin || event.headers?.Origin;
-  const cors = corsHeaders(origin);
-  if (!cors) {
-    return {
-      statusCode: 403,
-      headers: baseHeaders(),
-      body: JSON.stringify({ error: "forbidden_origin" }),
-    };
-  }
+  const cors = corsHeaders(origin) || baseHeaders();
   if (event.httpMethod === "OPTIONS") {
     return { statusCode: 204, headers: cors, body: "" };
   }

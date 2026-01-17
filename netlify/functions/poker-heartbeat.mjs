@@ -33,6 +33,8 @@ const parseResultJson = (value) => {
   return null;
 };
 
+const isValidUuid = (value) => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+
 export async function handler(event) {
   const origin = event.headers?.origin || event.headers?.Origin;
   const cors = corsHeaders(origin);
@@ -62,7 +64,7 @@ export async function handler(event) {
 
   const tableIdValue = payload?.tableId;
   const tableId = typeof tableIdValue === "string" ? tableIdValue.trim() : "";
-  if (!tableId) {
+  if (!tableId || !isValidUuid(tableId)) {
     return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "invalid_table_id" }) };
   }
 
