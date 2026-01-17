@@ -213,15 +213,9 @@ export async function handler(event) {
           [tableId, JSON.stringify(updatedState)]
         );
 
-        const activeRows = await tx.unsafe(
-          "select count(*)::int as seat_count from public.poker_seats where table_id = $1 and status = 'ACTIVE';",
-          [tableId]
-        );
-        const activeCount = activeRows?.[0]?.seat_count || 0;
-        const nextStatus = activeCount >= 2 ? "RUNNING" : "OPEN";
         await tx.unsafe(
-          "update public.poker_tables set status = $2, last_activity_at = now(), updated_at = now() where id = $1;",
-          [tableId, nextStatus]
+          "update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1;",
+          [tableId]
         );
 
         const resultPayload = { ok: true, tableId, cashedOut: stackValue || 0, seatNo: seatNo ?? null };

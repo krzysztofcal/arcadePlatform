@@ -36,3 +36,5 @@ assert.ok(pokerUiSrc.includes("pendingJoinRequestId"), "poker UI should store pe
 assert.ok(pokerUiSrc.includes("pendingLeaveRequestId"), "poker UI should store pending leave requestId");
 assert.ok(pokerUiSrc.includes("apiPost(JOIN_URL"), "poker UI should retry join via apiPost");
 assert.ok(pokerUiSrc.includes("apiPost(LEAVE_URL"), "poker UI should retry leave via apiPost");
+assert.ok(!joinSrc.includes("RUNNING"), "join should not set status to RUNNING");
+assert.ok(!leaveSrc.includes("RUNNING"), "leave should not set status to RUNNING");

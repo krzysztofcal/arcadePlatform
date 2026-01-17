@@ -19,6 +19,32 @@ create index if not exists poker_seats_table_id_idx on public.poker_seats (table
 
 create index if not exists poker_seats_table_id_last_seen_idx on public.poker_seats (table_id, last_seen_at);
 
+with ranked_seats as (
+  select
+    ctid,
+    row_number() over (
+      partition by table_id, seat_no
+      order by joined_at desc nulls last, created_at desc nulls last, ctid desc
+    ) as rn
+  from public.poker_seats
+  where table_id is not null and seat_no is not null
+)
+delete from public.poker_seats
+where ctid in (select ctid from ranked_seats where rn > 1);
+
+with ranked_users as (
+  select
+    ctid,
+    row_number() over (
+      partition by table_id, user_id
+      order by joined_at desc nulls last, created_at desc nulls last, ctid desc
+    ) as rn
+  from public.poker_seats
+  where table_id is not null and user_id is not null
+)
+delete from public.poker_seats
+where ctid in (select ctid from ranked_users where rn > 1);
+
 create unique index if not exists poker_seats_table_id_seat_no_key on public.poker_seats (table_id, seat_no);
 
 create unique index if not exists poker_seats_table_id_user_id_key on public.poker_seats (table_id, user_id);
