@@ -178,9 +178,9 @@
     if (elements.playBtn) { elements.playBtn.disabled = true; elements.playBtn.style.display = 'none'; }
     showLoading(false);
 
-    // js-dos v8 API: pass URL in config, js-dos handles its own loading UI
-    Dos(elements.dos, { url: FREEDOOM_BUNDLE_URL }).then(function(ci) {
-      state.ci = ci;
+    // js-dos v8 API: Dos() does not return a Promise, it handles everything internally
+    try {
+      Dos(elements.dos, { url: FREEDOOM_BUNDLE_URL });
       state.loaded = true;
       state.running = true;
       state.startTime = Date.now();
@@ -190,10 +190,10 @@
       state.timeInterval = setInterval(updateTime, 1000);
       setupGameEventListeners();
       klog('freedoom_loaded', { success: true });
-    }).catch(function(error) {
+    } catch (error) {
       klog('freedoom_load_error', { error: String(error) });
       if (elements.playBtn) { elements.playBtn.disabled = false; elements.playBtn.style.display = 'inline-flex'; elements.playBtn.textContent = 'Retry'; }
-    });
+    }
   }
 
   function setupGameEventListeners() {
