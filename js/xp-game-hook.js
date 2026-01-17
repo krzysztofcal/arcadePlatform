@@ -49,6 +49,8 @@
   const MAX_FLUSH_DELAY_MS = 1000;
 
   const highScoreMemory = {};
+  const highScoreMemoryOrder = [];
+  const HIGH_SCORE_MEMORY_LIMIT = 100;
 
   const state = {
     remainder: 0,
@@ -162,6 +164,21 @@
     return `${HIGH_SCORE_PREFIX}${slugged}`;
   }
 
+  function rememberHighScoreKey(key) {
+    if (!key) return;
+    const index = highScoreMemoryOrder.indexOf(key);
+    if (index !== -1) {
+      highScoreMemoryOrder.splice(index, 1);
+    }
+    highScoreMemoryOrder.push(key);
+    if (highScoreMemoryOrder.length > HIGH_SCORE_MEMORY_LIMIT) {
+      const oldest = highScoreMemoryOrder.shift();
+      if (oldest && Object.prototype.hasOwnProperty.call(highScoreMemory, oldest)) {
+        delete highScoreMemory[oldest];
+      }
+    }
+  }
+
   function getHighScore(gameId) {
     const key = getHighScoreKey(gameId);
     let raw = null;
@@ -181,6 +198,7 @@
     }
     const normalized = Math.max(0, Math.floor(parsed));
     highScoreMemory[key] = normalized;
+    rememberHighScoreKey(key);
     return normalized;
   }
 
@@ -188,6 +206,7 @@
     const key = getHighScoreKey(gameId);
     const numeric = Math.max(0, Math.floor(parseNumber(score, 0) || 0));
     highScoreMemory[key] = numeric;
+    rememberHighScoreKey(key);
     try {
       if (window && window.localStorage && typeof window.localStorage.setItem === "function") {
         window.localStorage.setItem(key, String(numeric));
