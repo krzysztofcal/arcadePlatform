@@ -533,7 +533,7 @@
     function startHeartbeat(){
       if (heartbeatTimer) return;
       if (!heartbeatRequestId){
-        heartbeatRequestId = generateRequestId();
+        heartbeatRequestId = String(generateRequestId());
       }
       heartbeatTimer = setInterval(sendHeartbeat, HEARTBEAT_INTERVAL_MS);
       sendHeartbeat();
@@ -550,10 +550,10 @@
       heartbeatInFlight = true;
       var shouldReturn = false;
       try {
-        var data = await apiPost(HEARTBEAT_URL, { tableId: tableId, requestId: heartbeatRequestId });
+        var data = await apiPost(HEARTBEAT_URL, { tableId: tableId, requestId: String(heartbeatRequestId) });
         if (isPendingResponse(data)){
           heartbeatPendingRetries++;
-          heartbeatRequestId = generateRequestId();
+          heartbeatRequestId = String(generateRequestId());
           if (heartbeatPendingRetries <= HEARTBEAT_PENDING_MAX_RETRIES){
             scheduleRetry(sendHeartbeat, getHeartbeatPendingDelay(heartbeatPendingRetries));
           }
@@ -693,11 +693,16 @@
       setLoading(leaveBtn, true);
       try {
         if (!requestIdOverride && !pendingJoinRequestId){
-          pendingJoinRequestId = generateRequestId();
+          pendingJoinRequestId = String(generateRequestId());
           pendingJoinRetries = 0;
         }
         var joinRequestId = requestIdOverride || pendingJoinRequestId || generateRequestId();
-        var joinResult = await apiPost(JOIN_URL, { tableId: tableId, seatNo: seatNo, buyIn: buyIn, requestId: joinRequestId });
+        var joinResult = await apiPost(JOIN_URL, {
+          tableId: tableId,
+          seatNo: seatNo,
+          buyIn: buyIn,
+          requestId: String(joinRequestId)
+        });
         if (isPendingResponse(joinResult)){
           scheduleRetry(retryJoin);
           return;
@@ -735,11 +740,11 @@
       setLoading(leaveBtn, true);
       try {
         if (!requestIdOverride && !pendingLeaveRequestId){
-          pendingLeaveRequestId = generateRequestId();
+          pendingLeaveRequestId = String(generateRequestId());
           pendingLeaveRetries = 0;
         }
         var leaveRequestId = requestIdOverride || pendingLeaveRequestId || generateRequestId();
-        var leaveResult = await apiPost(LEAVE_URL, { tableId: tableId, requestId: leaveRequestId });
+        var leaveResult = await apiPost(LEAVE_URL, { tableId: tableId, requestId: String(leaveRequestId) });
         if (isPendingResponse(leaveResult)){
           scheduleRetry(retryLeave);
           return;

@@ -15,11 +15,18 @@ const parseBody = (body) => {
 const isPlainObject = (value) =>
   value !== null && typeof value === "object" && !Array.isArray(value) && Object.getPrototypeOf(value) === Object.prototype;
 
+const REQUEST_ID_MAX_LEN = 200;
+
 const parseRequestId = (value) => {
   if (value == null || value === "") return { ok: true, value: null };
-  if (typeof value !== "string") return { ok: false, value: null };
-  const trimmed = value.trim();
+  let normalized = value;
+  if (typeof normalized === "number" && Number.isFinite(normalized)) {
+    normalized = String(normalized);
+  }
+  if (typeof normalized !== "string") return { ok: false, value: null };
+  const trimmed = normalized.trim();
   if (!trimmed) return { ok: false, value: null };
+  if (trimmed.length > REQUEST_ID_MAX_LEN) return { ok: false, value: null };
   return { ok: true, value: trimmed };
 };
 

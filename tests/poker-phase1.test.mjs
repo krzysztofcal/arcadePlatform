@@ -26,6 +26,10 @@ assert.ok(requestIdRegex.test(joinSrc), "join should allow missing requestId");
 assert.ok(requestIdRegex.test(leaveSrc), "leave should allow missing requestId");
 assert.ok(requestIdRegex.test(heartbeatSrc), "heartbeat should allow missing requestId");
 assert.ok(/value\s*===\s*\"\"/.test(heartbeatSrc), "heartbeat should allow empty requestId string");
+const numericRequestIdRegex = /typeof\s+\w+\s*===\s*\"number\"[\s\S]*?Number\.isFinite/;
+assert.ok(numericRequestIdRegex.test(joinSrc), "join should coerce numeric requestId values");
+assert.ok(numericRequestIdRegex.test(leaveSrc), "leave should coerce numeric requestId values");
+assert.ok(numericRequestIdRegex.test(heartbeatSrc), "heartbeat should coerce numeric requestId values");
 
 assert.ok(sweepSrc.includes("POKER_SWEEP_SECRET"), "sweep must require POKER_SWEEP_SECRET");
 assert.ok(sweepSrc.includes("x-sweep-secret"), "sweep must check x-sweep-secret header");
