@@ -124,14 +124,6 @@
               </div>
               <div class="scoreboard">
                 <div class="score-card">
-                  <span>Kills</span>
-                  <strong id="kills">0</strong>
-                </div>
-                <div class="score-card">
-                  <span>Secrets</span>
-                  <strong id="secrets">0</strong>
-                </div>
-                <div class="score-card">
                   <span>Time</span>
                   <strong id="time">0:00</strong>
                 </div>
@@ -269,39 +261,10 @@
     <script>
       (function(){
         var allowedOrigin = location.origin;
-
-        function notifyActive(){
-          try { parent.postMessage({ type: 'kcswh:activity', userGesture: true }, allowedOrigin); } catch (e) {}
-        }
-
+        function notifyActive(){ try { parent.postMessage({ type: 'kcswh:activity', userGesture: true }, allowedOrigin); } catch (_e) {} }
         addEventListener('keydown', notifyActive, { passive: true });
         addEventListener('pointerdown', notifyActive, { passive: true });
         setInterval(notifyActive, 5000);
-
-        window.reportScoreToPortal = function(gameId, score){
-          try { parent.postMessage({ type: 'game-score', gameId: gameId, score: score }, allowedOrigin); } catch (e) {}
-        };
-
-        var scoreEl = document.querySelector('#kills');
-        var gameId = document.body.dataset.gameId || document.title || 'game';
-        if (scoreEl && 'MutationObserver' in window){
-          var last = -Infinity;
-          var parseScore = function() {
-            var raw = (scoreEl.textContent || '').replace(/\D+/g, '');
-            var value = parseInt(raw, 10);
-            return Number.isFinite(value) ? value : 0;
-          };
-          var push = function() {
-            var score = parseScore();
-            if (score > last){
-              last = score;
-              window.reportScoreToPortal(gameId, score);
-            }
-          };
-          var observer = new MutationObserver(push);
-          observer.observe(scoreEl, { childList: true, characterData: true, subtree: true });
-          push();
-        }
       })();
     </script>
     <script src="/js/debug.js" defer></script>
@@ -311,7 +274,6 @@
     <script src="/js/xp/core.js" defer></script>
     <script src="/js/xp.js" defer></script>
   <script src="/js/xp-game-hook.js" defer></script>
-  <script src="/js/ui/xp-overlay.js" defer></script>
   <script>
     if (!window.__xpAutoBooted) {
       window.__xpAutoBooted = true;
