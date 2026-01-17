@@ -105,6 +105,10 @@ assert.ok(
   "migration should scope poker_requests uniqueness to table_id + request_id"
 );
 assert.ok(
+  phase1MigrationSrc.includes("poker_requests_table_id_request_id_key"),
+  "migration should add poker_requests table_id/request_id unique index"
+);
+assert.ok(
   sweepSrc.includes("delete from public.poker_requests"),
   "sweep should delete old poker_requests"
 );

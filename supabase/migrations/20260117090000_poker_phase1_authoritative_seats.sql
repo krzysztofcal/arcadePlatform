@@ -59,4 +59,19 @@ create table if not exists public.poker_requests (
   unique (table_id, request_id)
 );
 
+do $$
+begin
+  if exists (
+    select 1
+    from pg_constraint
+    where conname = 'poker_requests_request_id_key'
+      and conrelid = 'public.poker_requests'::regclass
+  ) then
+    alter table public.poker_requests drop constraint poker_requests_request_id_key;
+  end if;
+end $$;
+
+create unique index if not exists poker_requests_table_id_request_id_key
+  on public.poker_requests (table_id, request_id);
+
 create index if not exists poker_requests_created_at_idx on public.poker_requests (created_at);
