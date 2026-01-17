@@ -201,13 +201,6 @@
     return !!(data && data.pending);
   }
 
-  function scheduleReload(fn){
-    if (typeof fn !== 'function') return;
-    setTimeout(function(){
-      fn();
-    }, 600);
-  }
-
   function scheduleRetry(fn){
     if (typeof fn !== 'function') return;
     setTimeout(function(){
@@ -545,7 +538,18 @@
     async function sendHeartbeat(){
       if (document.visibilityState === 'hidden') return;
       try {
-        await apiPost(HEARTBEAT_URL, { tableId: tableId, requestId: heartbeatRequestId });
+        var data = await apiPost(HEARTBEAT_URL, { tableId: tableId, requestId: heartbeatRequestId });
+        if (isPendingResponse(data)){
+          heartbeatRequestId = generateRequestId();
+          scheduleRetry(sendHeartbeat);
+          return;
+        }
+        if (data && data.closed){
+          stopPolling();
+          stopHeartbeat();
+          loadTable(false);
+          return;
+        }
       } catch (err){
         if (isAuthError(err)){
           handleAuthExpired({
