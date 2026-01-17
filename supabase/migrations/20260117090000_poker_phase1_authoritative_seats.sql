@@ -58,3 +58,5 @@ create table if not exists public.poker_requests (
   created_at timestamptz not null default now(),
   unique (request_id)
 );
+
+create index if not exists poker_requests_created_at_idx on public.poker_requests (created_at);

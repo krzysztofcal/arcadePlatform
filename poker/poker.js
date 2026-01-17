@@ -297,8 +297,8 @@
         var row = document.createElement('div');
         row.className = 'poker-table-row';
         var stakes = tbl.stakes || {};
-        var maxPlayers = tbl.maxPlayers != null ? tbl.maxPlayers : (tbl.max_players != null ? tbl.max_players : 6);
-        var seatCount = tbl.seatCount != null ? tbl.seatCount : (tbl.seat_count != null ? tbl.seat_count : 0);
+        var maxPlayers = tbl.maxPlayers != null ? tbl.maxPlayers : 6;
+        var seatCount = tbl.seatCount != null ? tbl.seatCount : 0;
         var tid = document.createElement('span');
         tid.className = 'tid';
         tid.textContent = shortId(tbl.id);
@@ -570,7 +570,7 @@
       if (stakesEl) stakesEl.textContent = (stakes.sb || 0) + '/' + (stakes.bb || 0);
       if (statusEl) statusEl.textContent = table.status || '-';
 
-      var maxPlayers = table.max_players != null ? table.max_players : (table.maxPlayers != null ? table.maxPlayers : 6);
+      var maxPlayers = table.maxPlayers != null ? table.maxPlayers : 6;
       tableMaxPlayers = maxPlayers;
       if (seatNoInput){
         seatNoInput.min = 0;

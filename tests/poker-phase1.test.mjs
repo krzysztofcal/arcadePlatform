@@ -12,6 +12,7 @@ const leaveSrc = read("netlify/functions/poker-leave.mjs");
 const heartbeatSrc = read("netlify/functions/poker-heartbeat.mjs");
 const startHandSrc = read("netlify/functions/poker-start-hand.mjs");
 const pokerUiSrc = read("poker/poker.js");
+const phase1MigrationSrc = read("supabase/migrations/20260117090000_poker_phase1_authoritative_seats.sql");
 
 const intervalInterpolation = "interval '${";
 assert.ok(!getTableSrc.includes(intervalInterpolation), "get-table should not interpolate interval strings");
@@ -20,6 +21,8 @@ assert.ok(!sweepSrc.includes(intervalInterpolation), "sweep should not interpola
 const requestIdRegex = /return\s*\{\s*ok\s*:\s*true\s*,\s*value\s*:\s*null\s*\}/;
 assert.ok(requestIdRegex.test(joinSrc), "join should allow missing requestId");
 assert.ok(requestIdRegex.test(leaveSrc), "leave should allow missing requestId");
+assert.ok(requestIdRegex.test(heartbeatSrc), "heartbeat should allow missing requestId");
+assert.ok(/value\s*===\s*\"\"/.test(heartbeatSrc), "heartbeat should allow empty requestId string");
 
 assert.ok(sweepSrc.includes("POKER_SWEEP_SECRET"), "sweep must require POKER_SWEEP_SECRET");
 assert.ok(sweepSrc.includes("x-sweep-secret"), "sweep must check x-sweep-secret header");
@@ -34,6 +37,8 @@ assert.ok(leaveSrc.includes("not_seated"), "leave should return not_seated when 
 assert.ok(leaveSrc.includes("nothing_to_cash_out"), "leave should return nothing_to_cash_out when no stack");
 assert.ok(!getTableSrc.includes("set last_activity_at"), "get-table should not update last_activity_at");
 assert.ok(!/update public\\.poker_seats set status = 'INACTIVE'/.test(getTableSrc), "get-table should not mark seats inactive");
+assert.ok(!/max_players\s*:/.test(getTableSrc), "get-table should not return max_players duplicate");
+assert.ok(!/last_activity_at\s*:/.test(getTableSrc), "get-table should not return last_activity_at duplicate");
 assert.ok(/status = 'ACTIVE'/.test(startHandSrc), "start-hand should select ACTIVE seats");
 assert.ok(startHandSrc.includes("nextStacks"), "start-hand should filter stacks to ACTIVE seats");
 assert.ok(startHandSrc.includes("derivedSeats"), "start-hand should re-derive seats from ACTIVE rows");
@@ -41,5 +46,17 @@ assert.ok(pokerUiSrc.includes("pendingJoinRequestId"), "poker UI should store pe
 assert.ok(pokerUiSrc.includes("pendingLeaveRequestId"), "poker UI should store pending leave requestId");
 assert.ok(pokerUiSrc.includes("apiPost(JOIN_URL"), "poker UI should retry join via apiPost");
 assert.ok(pokerUiSrc.includes("apiPost(LEAVE_URL"), "poker UI should retry leave via apiPost");
+assert.ok(!/tbl\.max_players/.test(pokerUiSrc), "poker UI should not read tbl.max_players");
+assert.ok(!/table\.max_players/.test(pokerUiSrc), "poker UI should not read table.max_players");
+assert.ok(!/tbl\.seat_count/.test(pokerUiSrc), "poker UI should not read tbl.seat_count");
+assert.ok(!/table\.seat_count/.test(pokerUiSrc), "poker UI should not read table.seat_count");
 assert.ok(!joinSrc.includes("RUNNING"), "join should not set status to RUNNING");
 assert.ok(!leaveSrc.includes("RUNNING"), "leave should not set status to RUNNING");
+assert.ok(
+  phase1MigrationSrc.includes("poker_requests_created_at_idx"),
+  "migration should add poker_requests created_at index"
+);
+assert.ok(
+  sweepSrc.includes("delete from public.poker_requests"),
+  "sweep should delete old poker_requests"
+);

@@ -44,6 +44,10 @@ returning t.id;
         [TABLE_EMPTY_CLOSE_SEC]
       );
       const closedCount = Array.isArray(closedRows) ? closedRows.length : 0;
+
+      await tx.unsafe(
+        "delete from public.poker_requests where created_at < now() - interval '24 hours';"
+      );
       return { expiredCount, closedCount };
     });
 

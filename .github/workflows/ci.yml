@@ -16,13 +16,14 @@ jobs:
       - name: Install dependencies
         run: npm ci || npm i
       - name: Install Playwright Browsers
-        run: npx playwright install --with-deps chromium
+        run: npx playwright install chromium
       - name: Unit checks
         run: npm run test:unit
       - name: Playwright E2E tests
         run: npm run test:e2e
         env:
           PLAYWRIGHT: 1
+          PLAYWRIGHT_BROWSER: chromium
 
   chips-integration:
     if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.CHIPS_INTEGRATION_ENABLED == '1' }}

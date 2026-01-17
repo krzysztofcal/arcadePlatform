@@ -95,13 +95,11 @@ export async function handler(event) {
       id: table.id,
       stakes: table.stakes,
       maxPlayers: table.max_players,
-      max_players: table.max_players,
       status: table.status,
       createdBy: table.created_by,
       createdAt: table.created_at,
       updatedAt: table.updated_at,
       lastActivityAt: table.last_activity_at,
-      last_activity_at: table.last_activity_at,
     };
 
     return {
