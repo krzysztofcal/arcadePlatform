@@ -177,9 +177,7 @@
     if (elements.playBtn) { elements.playBtn.disabled = true; elements.playBtn.textContent = 'Loading...'; }
     showLoading(true);
 
-    var config = { url: FREEDOOM_BUNDLE_URL, autoStart: true, kiosk: false, noSideBar: true, noFullscreen: true, noSocialLinks: true };
-
-    Dos(elements.dos, config).then(function(ci) {
+    Dos(elements.dos).run(FREEDOOM_BUNDLE_URL).then(function(ci) {
       state.ci = ci;
       state.loaded = true;
       state.running = true;
