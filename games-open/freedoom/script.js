@@ -15,8 +15,9 @@
 
   var elements = { dos: null, playBtn: null, restartBtn: null, timeEl: null, loadingOverlay: null, loadingProgress: null, loadingText: null, mobileControls: null };
 
-  // Use the Doom shareware bundle from dos.zone CDN (Freedoom bundle was returning 403)
-  var FREEDOOM_BUNDLE_URL = 'https://cdn.dos.zone/custom/dos/doom.jsdos';
+  // Bundle URL - using js-dos official example bundle to verify integration works
+  // TODO: Replace with self-hosted doom.jsdos or freedoom.jsdos bundle
+  var FREEDOOM_BUNDLE_URL = 'https://v8.js-dos.com/bundles/digger.jsdos';
 
   function initElements() {
     elements.dos = document.getElementById('dos');
@@ -176,24 +177,28 @@
   function startGame() {
     if (state.loaded) { resumeGame(); return; }
     if (elements.playBtn) { elements.playBtn.disabled = true; elements.playBtn.style.display = 'none'; }
-    showLoading(false);
+    showLoading(true, 'Loading...');
 
-    // js-dos v8 API: Dos() does not return a Promise, it handles everything internally
-    try {
-      Dos(elements.dos, { url: FREEDOOM_BUNDLE_URL });
+    // js-dos v8 API: Dos(element) returns instance, .run(url) returns Promise
+    var dosInstance = Dos(elements.dos);
+
+    dosInstance.run(FREEDOOM_BUNDLE_URL).then(function(ci) {
+      state.ci = ci;
       state.loaded = true;
       state.running = true;
       state.startTime = Date.now();
+      showLoading(false);
       if (elements.restartBtn) elements.restartBtn.style.display = 'inline-flex';
       initMobileControls();
       if (state.timeInterval) clearInterval(state.timeInterval);
       state.timeInterval = setInterval(updateTime, 1000);
       setupGameEventListeners();
       klog('freedoom_loaded', { success: true });
-    } catch (error) {
+    }).catch(function(error) {
       klog('freedoom_load_error', { error: String(error) });
+      showLoading(true, 'Failed to load game. Check console.');
       if (elements.playBtn) { elements.playBtn.disabled = false; elements.playBtn.style.display = 'inline-flex'; elements.playBtn.textContent = 'Retry'; }
-    }
+    });
   }
 
   function setupGameEventListeners() {
