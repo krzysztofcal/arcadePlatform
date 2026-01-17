@@ -13,6 +13,12 @@ const baseUseConfig: UseConfig = {
 };
 
 const requestedBrowser = process.env.PLAYWRIGHT_BROWSER || '';
+const allowedBrowsers = new Set(['chromium', 'firefox', 'webkit']);
+if (requestedBrowser && !allowedBrowsers.has(requestedBrowser)) {
+  throw new Error(
+    `Invalid PLAYWRIGHT_BROWSER "${requestedBrowser}". Allowed values: chromium, firefox, webkit.`
+  );
+}
 const chromiumUse: UseConfig = { ...baseUseConfig, browserName: 'chromium' };
 if (process.env.PLAYWRIGHT_BROWSER_CHANNEL) {
   chromiumUse.channel = process.env.PLAYWRIGHT_BROWSER_CHANNEL as UseConfig['channel'];

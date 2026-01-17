@@ -13,6 +13,9 @@ const heartbeatSrc = read("netlify/functions/poker-heartbeat.mjs");
 const startHandSrc = read("netlify/functions/poker-start-hand.mjs");
 const pokerUiSrc = read("poker/poker.js");
 const phase1MigrationSrc = read("supabase/migrations/20260117090000_poker_phase1_authoritative_seats.sql");
+const ciWorkflowSrc = read(".github/workflows/ci.yml");
+const testsWorkflowSrc = read(".github/workflows/tests.yml");
+const matrixWorkflowSrc = read(".github/workflows/playwright-matrix.yml");
 
 const intervalInterpolation = "interval '${";
 assert.ok(!getTableSrc.includes(intervalInterpolation), "get-table should not interpolate interval strings");
@@ -54,9 +57,52 @@ assert.ok(!/tbl\.seat_count/.test(pokerUiSrc), "poker UI should not read tbl.sea
 assert.ok(!/table\.seat_count/.test(pokerUiSrc), "poker UI should not read table.seat_count");
 assert.ok(!joinSrc.includes("RUNNING"), "join should not set status to RUNNING");
 assert.ok(!leaveSrc.includes("RUNNING"), "leave should not set status to RUNNING");
+assert.ok(joinSrc.includes("REQUEST_PENDING_STALE_SEC"), "join should guard stale pending requests");
+assert.ok(leaveSrc.includes("REQUEST_PENDING_STALE_SEC"), "leave should guard stale pending requests");
+assert.ok(heartbeatSrc.includes("REQUEST_PENDING_STALE_SEC"), "heartbeat should guard stale pending requests");
+assert.ok(
+  /select result_json, created_at from public\.poker_requests/.test(joinSrc),
+  "join should query request created_at for pending checks"
+);
+assert.ok(
+  /select result_json, created_at from public\.poker_requests/.test(leaveSrc),
+  "leave should query request created_at for pending checks"
+);
+assert.ok(
+  /select result_json, created_at from public\.poker_requests/.test(heartbeatSrc),
+  "heartbeat should query request created_at for pending checks"
+);
+assert.ok(
+  /table_id = \$1 and request_id = \$2/.test(joinSrc),
+  "join should scope request queries by table_id and request_id"
+);
+assert.ok(
+  /table_id = \$1 and request_id = \$2/.test(leaveSrc),
+  "leave should scope request queries by table_id and request_id"
+);
+assert.ok(
+  /table_id = \$1 and request_id = \$2/.test(heartbeatSrc),
+  "heartbeat should scope request queries by table_id and request_id"
+);
+assert.ok(
+  ciWorkflowSrc.includes("playwright install --with-deps"),
+  "ci workflow should install Playwright with deps"
+);
+assert.ok(
+  testsWorkflowSrc.includes("playwright install --with-deps"),
+  "tests workflow should install Playwright with deps"
+);
+assert.ok(
+  matrixWorkflowSrc.includes("playwright install --with-deps"),
+  "matrix workflow should install Playwright with deps"
+);
 assert.ok(
   phase1MigrationSrc.includes("poker_requests_created_at_idx"),
   "migration should add poker_requests created_at index"
+);
+assert.ok(
+  phase1MigrationSrc.includes("unique (table_id, request_id)"),
+  "migration should scope poker_requests uniqueness to table_id + request_id"
 );
 assert.ok(
   sweepSrc.includes("delete from public.poker_requests"),

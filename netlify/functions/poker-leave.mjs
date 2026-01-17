@@ -2,6 +2,8 @@ import { baseHeaders, beginSql, corsHeaders, extractBearerToken, klog, verifySup
 import { isValidUuid } from "./_shared/poker-utils.mjs";
 import { postTransaction } from "./_shared/chips-ledger.mjs";
 
+const REQUEST_PENDING_STALE_SEC = 30;
+
 const parseBody = (body) => {
   if (!body) return { ok: true, value: {} };
   try {
@@ -67,6 +69,13 @@ const parseResultJson = (value) => {
   return null;
 };
 
+const isRequestPendingStale = (row) => {
+  if (!row?.created_at) return false;
+  const createdAtMs = Date.parse(row.created_at);
+  if (!Number.isFinite(createdAtMs)) return false;
+  return Date.now() - createdAtMs > REQUEST_PENDING_STALE_SEC * 1000;
+};
+
 export async function handler(event) {
   const origin = event.headers?.origin || event.headers?.Origin;
   const cors = corsHeaders(origin);
@@ -116,30 +125,53 @@ export async function handler(event) {
     const result = await beginSql(async (tx) => {
       if (requestId) {
         const requestRows = await tx.unsafe(
-          "select result_json from public.poker_requests where request_id = $1 limit 1;",
-          [requestId]
+          "select result_json, created_at from public.poker_requests where table_id = $1 and request_id = $2 limit 1;",
+          [tableId, requestId]
         );
-        if (requestRows?.[0]) {
-          const stored = parseResultJson(requestRows[0].result_json);
+        const existingRow = requestRows?.[0];
+        if (existingRow) {
+          const stored = parseResultJson(existingRow.result_json);
           if (stored) return stored;
+          if (isRequestPendingStale(existingRow)) {
+            await tx.unsafe("delete from public.poker_requests where table_id = $1 and request_id = $2;", [
+              tableId,
+              requestId,
+            ]);
+          } else {
+            return { ok: false, pending: true, requestId };
+          }
         }
 
-        const insertedRows = await tx.unsafe(
-          `insert into public.poker_requests (table_id, user_id, request_id, kind)
+        const insertRequest = () =>
+          tx.unsafe(
+            `insert into public.poker_requests (table_id, user_id, request_id, kind)
            values ($1, $2, $3, 'LEAVE')
-           on conflict (request_id) do nothing
+           on conflict (table_id, request_id) do nothing
            returning request_id;`,
-          [tableId, auth.userId, requestId]
-        );
+            [tableId, auth.userId, requestId]
+          );
+        let insertedRows = await insertRequest();
         const hasRequest = !!insertedRows?.[0]?.request_id;
         if (!hasRequest) {
           const existingRows = await tx.unsafe(
-            "select result_json from public.poker_requests where request_id = $1 limit 1;",
-            [requestId]
+            "select result_json, created_at from public.poker_requests where table_id = $1 and request_id = $2 limit 1;",
+            [tableId, requestId]
           );
-          const stored = parseResultJson(existingRows?.[0]?.result_json);
+          const existingConflict = existingRows?.[0];
+          const stored = parseResultJson(existingConflict?.result_json);
           if (stored) return stored;
-          return { ok: false, pending: true, requestId };
+          if (existingConflict && isRequestPendingStale(existingConflict)) {
+            await tx.unsafe("delete from public.poker_requests where table_id = $1 and request_id = $2;", [
+              tableId,
+              requestId,
+            ]);
+            insertedRows = await insertRequest();
+            if (!insertedRows?.[0]?.request_id) {
+              return { ok: false, pending: true, requestId };
+            }
+          } else {
+            return { ok: false, pending: true, requestId };
+          }
         }
       }
 
@@ -221,15 +253,18 @@ export async function handler(event) {
         const resultPayload = { ok: true, tableId, cashedOut: stackValue || 0, seatNo: seatNo ?? null };
         if (requestId) {
           await tx.unsafe(
-            "update public.poker_requests set result_json = $2::jsonb where request_id = $1;",
-            [requestId, JSON.stringify(resultPayload)]
+            "update public.poker_requests set result_json = $3::jsonb where table_id = $1 and request_id = $2;",
+            [tableId, requestId, JSON.stringify(resultPayload)]
           );
         }
         klog("poker_leave_ok", { tableId, userId: auth.userId, seatNo: seatNo ?? null });
         return resultPayload;
       } catch (error) {
         if (requestId) {
-          await tx.unsafe("delete from public.poker_requests where request_id = $1;", [requestId]);
+          await tx.unsafe("delete from public.poker_requests where table_id = $1 and request_id = $2;", [
+            tableId,
+            requestId,
+          ]);
         }
         throw error;
       }
