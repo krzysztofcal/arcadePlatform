@@ -420,6 +420,7 @@
     var tableMaxPlayers = 6;
     var authTimer = null;
     var heartbeatTimer = null;
+    var heartbeatRequestId = null;
     var pendingJoinRequestId = null;
     var pendingLeaveRequestId = null;
     var pendingJoinRetries = 0;
@@ -534,6 +535,9 @@
 
     function startHeartbeat(){
       if (heartbeatTimer) return;
+      if (!heartbeatRequestId){
+        heartbeatRequestId = generateRequestId();
+      }
       heartbeatTimer = setInterval(sendHeartbeat, HEARTBEAT_INTERVAL_MS);
       sendHeartbeat();
     }
@@ -541,7 +545,7 @@
     async function sendHeartbeat(){
       if (document.visibilityState === 'hidden') return;
       try {
-        await apiPost(HEARTBEAT_URL, { tableId: tableId });
+        await apiPost(HEARTBEAT_URL, { tableId: tableId, requestId: heartbeatRequestId });
       } catch (err){
         if (isAuthError(err)){
           handleAuthExpired({
