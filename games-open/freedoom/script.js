@@ -174,8 +174,8 @@
 
   function startGame() {
     if (state.loaded) { resumeGame(); return; }
-    if (elements.playBtn) { elements.playBtn.disabled = true; elements.playBtn.textContent = 'Loading...'; }
-    showLoading(true);
+    if (elements.playBtn) { elements.playBtn.disabled = true; elements.playBtn.style.display = 'none'; }
+    showLoading(false);
 
     Dos(elements.dos).run(FREEDOOM_BUNDLE_URL).then(function(ci) {
       state.ci = ci;
@@ -192,8 +192,7 @@
       klog('freedoom_loaded', { success: true });
     }).catch(function(error) {
       klog('freedoom_load_error', { error: String(error) });
-      showLoading(true, 'Failed to load. Tap Retry.');
-      if (elements.playBtn) { elements.playBtn.disabled = false; elements.playBtn.textContent = 'Retry'; }
+      if (elements.playBtn) { elements.playBtn.disabled = false; elements.playBtn.style.display = 'inline-flex'; elements.playBtn.textContent = 'Retry'; }
     });
   }
 
