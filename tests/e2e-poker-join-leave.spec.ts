@@ -1,5 +1,16 @@
 import { test, expect } from '@playwright/test';
 
+const REQUEST_ID_MAX_LEN = 200;
+
+const safeJsonParse = (value?: string | null) => {
+  if (!value) return null;
+  try {
+    return JSON.parse(value);
+  } catch (_err) {
+    return null;
+  }
+};
+
 test('poker: can join and leave table (no pointerevent requestId)', async ({ page }) => {
   const userId = 'd2b72e4b-cc87-4c61-9b06-7b8d6f1d2c3e';
   const shortUserId = userId.substring(0, 8);
@@ -102,6 +113,7 @@ test('poker: can join and leave table (no pointerevent requestId)', async ({ pag
       if (
         typeof payload?.requestId !== 'string' ||
         !payload.requestId.trim() ||
+        payload.requestId.length > REQUEST_ID_MAX_LEN ||
         payload.requestId === '[object PointerEvent]'
       ) {
         await route.fulfill({
@@ -141,6 +153,7 @@ test('poker: can join and leave table (no pointerevent requestId)', async ({ pag
       if (
         typeof payload?.requestId !== 'string' ||
         !payload.requestId.trim() ||
+        payload.requestId.length > REQUEST_ID_MAX_LEN ||
         payload.requestId === '[object PointerEvent]'
       ) {
         await route.fulfill({
@@ -200,7 +213,7 @@ test('poker: can join and leave table (no pointerevent requestId)', async ({ pag
   const joinResponse = await joinResponsePromise;
   expect(joinResponse.status()).toBe(200);
 
-  const joinPayload = joinRequest.postData() ? JSON.parse(joinRequest.postData() as string) : {};
+  const joinPayload = safeJsonParse(joinRequest.postData()) || {};
   const joinRequestId = joinPayload.requestId;
   expect(typeof joinRequestId, 'join requestId should be a string').toBe('string');
   expect(joinRequestId, 'join requestId should be non-empty').toBeTruthy();
@@ -240,7 +253,7 @@ test('poker: can join and leave table (no pointerevent requestId)', async ({ pag
   const leaveResponse = await leaveResponsePromise;
   expect(leaveResponse.status()).toBe(200);
 
-  const leavePayload = leaveRequest.postData() ? JSON.parse(leaveRequest.postData() as string) : {};
+  const leavePayload = safeJsonParse(leaveRequest.postData()) || {};
   const leaveRequestId = leavePayload.requestId;
   expect(typeof leaveRequestId, 'leave requestId should be a string').toBe('string');
   expect(leaveRequestId, 'leave requestId should be non-empty').toBeTruthy();
