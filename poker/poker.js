@@ -10,6 +10,7 @@
   var POLL_INTERVAL_BASE = 2000;
   var POLL_INTERVAL_MAX = 10000;
   var HEARTBEAT_INTERVAL_MS = 20000;
+  var UI_VERSION = '2025-02-19';
 
   var state = { token: null, polling: false, pollTimer: null, pollInterval: POLL_INTERVAL_BASE, pollErrors: 0 };
 
@@ -408,6 +409,7 @@
     var jsonToggle = document.getElementById('pokerJsonToggle');
     var jsonBox = document.getElementById('pokerJsonBox');
     var signInBtn = document.getElementById('pokerSignIn');
+    var leaveSelector = '#pokerLeave';
 
     var currentUserId = null;
     var tableData = null;
@@ -423,6 +425,14 @@
     var heartbeatPendingRetries = 0;
     var heartbeatInFlight = false;
     var HEARTBEAT_PENDING_MAX_RETRIES = 8;
+
+    if (leaveBtn){
+      klog('poker_leave_bind', { found: true, selector: leaveSelector, page: 'table' });
+    } else {
+      klog('poker_leave_bind', { found: false, selector: leaveSelector, page: 'table' });
+      klog('poker_leave_bind_missing', { path: window.location.pathname });
+      setError(errorEl, t('pokerErrLeaveMissing', 'Leave button not found (UI wiring bug)'));
+    }
 
     function stopAuthWatch(){
       if (authTimer){
@@ -744,9 +754,22 @@
           pendingLeaveRetries = 0;
         }
         var leaveRequestId = requestIdOverride || pendingLeaveRequestId || String(generateRequestId());
+        klog('poker_leave_request', { tableId: tableId, requestId: String(leaveRequestId), url: LEAVE_URL });
         var leaveResult = await apiPost(LEAVE_URL, { tableId: tableId, requestId: String(leaveRequestId) });
-        if (isPendingResponse(leaveResult)){
+        var pendingResponse = isPendingResponse(leaveResult);
+        klog('poker_leave_response', {
+          ok: !!(leaveResult && leaveResult.ok),
+          pending: pendingResponse,
+          code: leaveResult && leaveResult.error ? leaveResult.error : null
+        });
+        if (pendingResponse){
           scheduleRetry(retryLeave);
+          return;
+        }
+        if (leaveResult && leaveResult.ok === false){
+          pendingLeaveRequestId = null;
+          pendingLeaveRetries = 0;
+          setError(errorEl, t('pokerErrLeave', 'Failed to leave'));
           return;
         }
         pendingLeaveRequestId = null;
@@ -789,8 +812,24 @@
       }
     }
 
+    function handleLeaveClick(event){
+      if (event){
+        event.preventDefault();
+        event.stopPropagation();
+      }
+      klog('poker_leave_click', { tableId: tableId, hasToken: !!state.token });
+      leaveTable().catch(function(err){
+        pendingLeaveRequestId = null;
+        pendingLeaveRetries = 0;
+        setLoading(joinBtn, false);
+        setLoading(leaveBtn, false);
+        klog('poker_leave_click_error', { message: err && (err.message || err.code) ? err.message || err.code : 'unknown_error' });
+        setError(errorEl, err && (err.message || err.code) ? err.message || err.code : t('pokerErrLeave', 'Failed to leave'));
+      });
+    }
+
     if (joinBtn) joinBtn.addEventListener('click', joinTable);
-    if (leaveBtn) leaveBtn.addEventListener('click', leaveTable);
+    if (leaveBtn) leaveBtn.addEventListener('click', handleLeaveClick);
     if (jsonToggle){
       jsonToggle.addEventListener('click', function(){
         if (jsonBox) jsonBox.hidden = !jsonBox.hidden;
@@ -817,6 +856,7 @@
   // ========== INIT ==========
   function init(){
     var isTable = window.location.pathname.indexOf('/poker/table') !== -1;
+    klog('poker_ui_loaded', { version: UI_VERSION, page: isTable ? 'table' : 'lobby' });
     if (isTable){
       initTable();
     } else {

@@ -53,6 +53,8 @@ assert.ok(pokerUiSrc.includes("pendingJoinRequestId"), "poker UI should store pe
 assert.ok(pokerUiSrc.includes("pendingLeaveRequestId"), "poker UI should store pending leave requestId");
 assert.ok(pokerUiSrc.includes("apiPost(JOIN_URL"), "poker UI should retry join via apiPost");
 assert.ok(pokerUiSrc.includes("apiPost(LEAVE_URL"), "poker UI should retry leave via apiPost");
+assert.ok(pokerUiSrc.includes("poker_leave_bind"), "poker UI should log leave bind state");
+assert.ok(pokerUiSrc.includes("poker_leave_click"), "poker UI should log leave click");
 const heartbeatCallRegex =
   /apiPost\(\s*HEARTBEAT_URL[\s\S]*?\{[\s\S]*?tableId\s*:\s*tableId[\s\S]*?requestId\s*:\s*(?:heartbeatRequestId|String\(\s*heartbeatRequestId\s*\))[\s\S]*?\}[\s\S]*?\)/;
 assert.ok(heartbeatCallRegex.test(pokerUiSrc), "poker UI heartbeat should send requestId and tableId");
@@ -65,6 +67,9 @@ assert.ok(!leaveSrc.includes("RUNNING"), "leave should not set status to RUNNING
 assert.ok(joinSrc.includes("REQUEST_PENDING_STALE_SEC"), "join should guard stale pending requests");
 assert.ok(leaveSrc.includes("REQUEST_PENDING_STALE_SEC"), "leave should guard stale pending requests");
 assert.ok(heartbeatSrc.includes("REQUEST_PENDING_STALE_SEC"), "heartbeat should guard stale pending requests");
+assert.ok(leaveSrc.includes("poker_leave_start"), "leave should log poker_leave_start");
+assert.ok(leaveSrc.includes("poker_leave_ok"), "leave should log poker_leave_ok");
+assert.ok(leaveSrc.includes("poker_leave_error"), "leave should log poker_leave_error");
 assert.ok(
   /select result_json, created_at from public\.poker_requests/.test(joinSrc),
   "join should query request created_at for pending checks"
