@@ -1,6 +1,16 @@
 {
   "games": [
     {
+      "id": "open-freedoom",
+      "slug": "freedoom",
+      "title": { "en": "Freedoom", "pl": "Freedoom" },
+      "description": { "en": "Classic 3D first-person shooter. Battle demons across hellish landscapes.", "pl": "Klasyczna strzelanka FPS 3D. Walcz z demonami w piekielnych krajobrazach." },
+      "category": ["Shooter", "Action"],
+      "thumbnail": "img/games/freedoom.svg",
+      "tags": ["fps", "shooter", "3d", "classic", "retro", "action"],
+      "source": { "type": "self", "page": "games-open/freedoom/index.html" }
+    },
+    {
       "id": "trex",
       "slug": "trex",
       "title": { "en": "T-Rex Runner", "pl": "T-Rex Biegacz" },
