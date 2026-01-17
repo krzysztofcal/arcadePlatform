@@ -1,5 +1,5 @@
 import { baseHeaders, beginSql, corsHeaders, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
-import { PRESENCE_TTL_SEC, isValidUuid } from "./_shared/poker-utils.mjs";
+import { isValidUuid } from "./_shared/poker-utils.mjs";
 
 const parseTableId = (event) => {
   const queryValue = event.queryStringParameters?.tableId;
@@ -47,13 +47,6 @@ export async function handler(event) {
 
   try {
     const result = await beginSql(async (tx) => {
-      await tx.unsafe(
-        `update public.poker_seats set status = 'INACTIVE'
-         where table_id = $1 and status = 'ACTIVE'
-           and last_seen_at < now() - ($2::int * interval '1 second');`,
-        [tableId, PRESENCE_TTL_SEC]
-      );
-
       const tableRows = await tx.unsafe(
         "select id, stakes, max_players, status, created_by, created_at, updated_at, last_activity_at from public.poker_tables where id = $1 limit 1;",
         [tableId]

@@ -171,6 +171,14 @@ export async function handler(event) {
 
       const handId = `hand_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
       const derivedSeats = validSeats.map((seat) => ({ userId: seat.user_id, seatNo: seat.seat_no }));
+      const activeUserIds = new Set(validSeats.map((seat) => seat.user_id));
+      const currentStacks = parseStacks(currentState.stacks);
+      const nextStacks = Object.entries(currentStacks).reduce((acc, [userId, amount]) => {
+        if (activeUserIds.has(userId)) {
+          acc[userId] = amount;
+        }
+        return acc;
+      }, {});
 
       const updatedState = {
         ...currentState,
@@ -179,7 +187,7 @@ export async function handler(event) {
         phase: "HAND_ACTIVE",
         pot: 0,
         seats: derivedSeats,
-        stacks: parseStacks(currentState.stacks),
+        stacks: nextStacks,
         buttonSeatNo,
         nextToActSeatNo,
         lastStartHandRequestId: requestIdParsed.value || null,

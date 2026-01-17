@@ -10,6 +10,7 @@ const sweepSrc = read("netlify/functions/poker-sweep.mjs");
 const joinSrc = read("netlify/functions/poker-join.mjs");
 const leaveSrc = read("netlify/functions/poker-leave.mjs");
 const heartbeatSrc = read("netlify/functions/poker-heartbeat.mjs");
+const startHandSrc = read("netlify/functions/poker-start-hand.mjs");
 const pokerUiSrc = read("poker/poker.js");
 
 const intervalInterpolation = "interval '${";
@@ -32,6 +33,10 @@ assert.ok(/table\.status\s*!==?\s*['"]OPEN['"]/.test(joinSrc), "join should guar
 assert.ok(leaveSrc.includes("not_seated"), "leave should return not_seated when user is not seated");
 assert.ok(leaveSrc.includes("nothing_to_cash_out"), "leave should return nothing_to_cash_out when no stack");
 assert.ok(!getTableSrc.includes("set last_activity_at"), "get-table should not update last_activity_at");
+assert.ok(!/update public\\.poker_seats set status = 'INACTIVE'/.test(getTableSrc), "get-table should not mark seats inactive");
+assert.ok(/status = 'ACTIVE'/.test(startHandSrc), "start-hand should select ACTIVE seats");
+assert.ok(startHandSrc.includes("nextStacks"), "start-hand should filter stacks to ACTIVE seats");
+assert.ok(startHandSrc.includes("derivedSeats"), "start-hand should re-derive seats from ACTIVE rows");
 assert.ok(pokerUiSrc.includes("pendingJoinRequestId"), "poker UI should store pending join requestId");
 assert.ok(pokerUiSrc.includes("pendingLeaveRequestId"), "poker UI should store pending leave requestId");
 assert.ok(pokerUiSrc.includes("apiPost(JOIN_URL"), "poker UI should retry join via apiPost");
