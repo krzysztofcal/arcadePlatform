@@ -151,6 +151,14 @@
     return 'ui-' + Date.now() + '-' + Math.random().toString(36).substring(2, 8);
   }
 
+  function normalizeRequestId(value){
+    var trimmed = (typeof value === 'string') ? value.trim() : '';
+    if (trimmed && trimmed !== '[object PointerEvent]' && trimmed.length <= 200){
+      return trimmed;
+    }
+    return String(generateRequestId());
+  }
+
   function t(key, fallback){
     if (window.I18N && typeof window.I18N.t === 'function'){
       var val = window.I18N.t(key);
@@ -410,6 +418,7 @@
     var jsonBox = document.getElementById('pokerJsonBox');
     var signInBtn = document.getElementById('pokerSignIn');
     var leaveSelector = '#pokerLeave';
+    var joinSelector = '#pokerJoin';
 
     var currentUserId = null;
     var tableData = null;
@@ -425,6 +434,14 @@
     var heartbeatPendingRetries = 0;
     var heartbeatInFlight = false;
     var HEARTBEAT_PENDING_MAX_RETRIES = 8;
+
+    if (joinBtn){
+      klog('poker_join_bind', { found: true, selector: joinSelector, page: 'table' });
+    } else {
+      klog('poker_join_bind', { found: false, selector: joinSelector, page: 'table' });
+      klog('poker_join_bind_missing', { path: window.location.pathname });
+      setError(errorEl, t('pokerErrJoinMissing', 'Join button not found (UI wiring bug)'));
+    }
 
     if (leaveBtn){
       klog('poker_leave_bind', { found: true, selector: leaveSelector, page: 'table' });
@@ -543,7 +560,7 @@
     function startHeartbeat(){
       if (heartbeatTimer) return;
       if (!heartbeatRequestId){
-        heartbeatRequestId = String(generateRequestId());
+        heartbeatRequestId = normalizeRequestId(generateRequestId());
       }
       heartbeatTimer = setInterval(sendHeartbeat, HEARTBEAT_INTERVAL_MS);
       sendHeartbeat();
@@ -560,10 +577,12 @@
       heartbeatInFlight = true;
       var shouldReturn = false;
       try {
-        var data = await apiPost(HEARTBEAT_URL, { tableId: tableId, requestId: String(heartbeatRequestId) });
+        var requestId = normalizeRequestId(heartbeatRequestId);
+        heartbeatRequestId = requestId;
+        var data = await apiPost(HEARTBEAT_URL, { tableId: tableId, requestId: requestId });
         if (isPendingResponse(data)){
           heartbeatPendingRetries++;
-          heartbeatRequestId = String(generateRequestId());
+          heartbeatRequestId = normalizeRequestId(generateRequestId());
           if (heartbeatPendingRetries <= HEARTBEAT_PENDING_MAX_RETRIES){
             scheduleRetry(sendHeartbeat, getHeartbeatPendingDelay(heartbeatPendingRetries));
           }
@@ -704,15 +723,15 @@
       setLoading(leaveBtn, true);
       try {
         if (!override && !pendingJoinRequestId){
-          pendingJoinRequestId = String(generateRequestId());
+          pendingJoinRequestId = normalizeRequestId(generateRequestId());
           pendingJoinRetries = 0;
         }
-        var joinRequestId = override || pendingJoinRequestId || String(generateRequestId());
+        var joinRequestId = override ? normalizeRequestId(override) : normalizeRequestId(pendingJoinRequestId || generateRequestId());
         var joinResult = await apiPost(JOIN_URL, {
           tableId: tableId,
           seatNo: seatNo,
           buyIn: buyIn,
-          requestId: String(joinRequestId)
+          requestId: joinRequestId
         });
         if (isPendingResponse(joinResult)){
           scheduleRetry(retryJoin);
@@ -750,13 +769,14 @@
       setLoading(joinBtn, true);
       setLoading(leaveBtn, true);
       try {
-        if (!requestIdOverride && !pendingLeaveRequestId){
-          pendingLeaveRequestId = String(generateRequestId());
+        var override = (typeof requestIdOverride === 'string' && requestIdOverride.trim()) ? requestIdOverride.trim() : null;
+        if (!override && !pendingLeaveRequestId){
+          pendingLeaveRequestId = normalizeRequestId(generateRequestId());
           pendingLeaveRetries = 0;
         }
-        var leaveRequestId = requestIdOverride || pendingLeaveRequestId || String(generateRequestId());
-        klog('poker_leave_request', { tableId: tableId, requestId: String(leaveRequestId), url: LEAVE_URL });
-        var leaveResult = await apiPost(LEAVE_URL, { tableId: tableId, requestId: String(leaveRequestId) });
+        var leaveRequestId = override ? normalizeRequestId(override) : normalizeRequestId(pendingLeaveRequestId || generateRequestId());
+        klog('poker_leave_request', { tableId: tableId, requestId: leaveRequestId, url: LEAVE_URL });
+        var leaveResult = await apiPost(LEAVE_URL, { tableId: tableId, requestId: leaveRequestId });
         var pendingResponse = isPendingResponse(leaveResult);
         klog('poker_leave_response', {
           ok: !!(leaveResult && leaveResult.ok),

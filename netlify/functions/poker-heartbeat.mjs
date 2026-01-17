@@ -1,5 +1,6 @@
 import { baseHeaders, beginSql, corsHeaders, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
 import { isValidUuid } from "./_shared/poker-utils.mjs";
+import { normalizeRequestId } from "./_shared/poker-request-id.mjs";
 
 const REQUEST_PENDING_STALE_SEC = 30;
 
@@ -14,21 +15,6 @@ const parseBody = (body) => {
 
 const isPlainObject = (value) =>
   value !== null && typeof value === "object" && !Array.isArray(value) && Object.getPrototypeOf(value) === Object.prototype;
-
-const REQUEST_ID_MAX_LEN = 200;
-
-const parseRequestId = (value) => {
-  if (value == null || value === "") return { ok: true, value: null };
-  let normalized = value;
-  if (typeof normalized === "number" && Number.isFinite(normalized)) {
-    normalized = String(normalized);
-  }
-  if (typeof normalized !== "string") return { ok: false, value: null };
-  const trimmed = normalized.trim();
-  if (!trimmed) return { ok: false, value: null };
-  if (trimmed.length > REQUEST_ID_MAX_LEN) return { ok: false, value: null };
-  return { ok: true, value: trimmed };
-};
 
 const parseResultJson = (value) => {
   if (!value) return null;
@@ -83,7 +69,7 @@ export async function handler(event) {
     return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "invalid_table_id" }) };
   }
 
-  const requestIdParsed = parseRequestId(payload?.requestId);
+  const requestIdParsed = normalizeRequestId(payload?.requestId, { maxLen: 200 });
   if (!requestIdParsed.ok) {
     return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "invalid_request_id" }) };
   }
