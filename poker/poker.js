@@ -420,6 +420,7 @@
     var tableMaxPlayers = 6;
     var authTimer = null;
     var heartbeatTimer = null;
+    var heartbeatRequestId = null;
     var pendingJoinRequestId = null;
     var pendingLeaveRequestId = null;
     var pendingJoinRetries = 0;
@@ -439,6 +440,9 @@
         checkAuth().then(function(authed){
           if (authed){
             stopAuthWatch();
+            if (!heartbeatRequestId){
+              heartbeatRequestId = generateRequestId();
+            }
             loadTable(false);
             startPolling();
             startHeartbeat();
@@ -541,7 +545,7 @@
     async function sendHeartbeat(){
       if (document.visibilityState === 'hidden') return;
       try {
-        await apiPost(HEARTBEAT_URL, { tableId: tableId });
+        await apiPost(HEARTBEAT_URL, { tableId: tableId, requestId: heartbeatRequestId });
       } catch (err){
         if (isAuthError(err)){
           handleAuthExpired({
@@ -772,6 +776,9 @@
 
     checkAuth().then(function(authed){
       if (authed){
+        if (!heartbeatRequestId){
+          heartbeatRequestId = generateRequestId();
+        }
         loadTable(false);
         startPolling();
         startHeartbeat();

@@ -46,6 +46,10 @@ assert.ok(pokerUiSrc.includes("pendingJoinRequestId"), "poker UI should store pe
 assert.ok(pokerUiSrc.includes("pendingLeaveRequestId"), "poker UI should store pending leave requestId");
 assert.ok(pokerUiSrc.includes("apiPost(JOIN_URL"), "poker UI should retry join via apiPost");
 assert.ok(pokerUiSrc.includes("apiPost(LEAVE_URL"), "poker UI should retry leave via apiPost");
+assert.ok(
+  /apiPost\(\s*HEARTBEAT_URL\s*,\s*\{\s*tableId\s*:\s*tableId\s*,\s*requestId\s*:\s*heartbeatRequestId\s*\}\s*\)/.test(pokerUiSrc),
+  "poker UI heartbeat should send requestId"
+);
 assert.ok(!/tbl\.max_players/.test(pokerUiSrc), "poker UI should not read tbl.max_players");
 assert.ok(!/table\.max_players/.test(pokerUiSrc), "poker UI should not read table.max_players");
 assert.ok(!/tbl\.seat_count/.test(pokerUiSrc), "poker UI should not read tbl.seat_count");
