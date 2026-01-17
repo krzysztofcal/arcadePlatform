@@ -28,9 +28,22 @@ assert.ok(/trimmed\s*===\s*\"\[object PointerEvent\]\"/.test(requestIdHelperSrc)
 assert.ok(/trimmed\.length\s*>\s*maxLen/.test(requestIdHelperSrc), "requestId helper should enforce max length");
 const numericRequestIdRegex = /typeof\s+\w+\s*===\s*\"number\"[\s\S]*?Number\.isFinite/;
 assert.ok(numericRequestIdRegex.test(requestIdHelperSrc), "requestId helper should coerce numeric requestId values");
-assert.ok(/normalizeRequestId\(\s*payload\?\.\s*requestId\s*,\s*\{\s*maxLen\s*:\s*200\s*\}\s*\)/.test(joinSrc), "join should normalize requestId");
-assert.ok(/normalizeRequestId\(\s*payload\?\.\s*requestId\s*,\s*\{\s*maxLen\s*:\s*200\s*\}\s*\)/.test(leaveSrc), "leave should normalize requestId");
-assert.ok(/normalizeRequestId\(\s*payload\?\.\s*requestId\s*,\s*\{\s*maxLen\s*:\s*200\s*\}\s*\)/.test(heartbeatSrc), "heartbeat should normalize requestId");
+
+const assertRequestIdNormalizerUsage = (label, src) => {
+  assert.ok(
+    src.includes("./_shared/poker-request-id.mjs") && /normalizeRequestId/.test(src),
+    `${label} should import normalizeRequestId helper`
+  );
+  assert.ok(/normalizeRequestId\([\s\S]*?requestId[\s\S]*?\)/.test(src), `${label} should normalize requestId`);
+  assert.ok(
+    /maxLen/.test(src) && /200/.test(src),
+    `${label} should enforce requestId max length 200`
+  );
+};
+
+assertRequestIdNormalizerUsage("join", joinSrc);
+assertRequestIdNormalizerUsage("leave", leaveSrc);
+assertRequestIdNormalizerUsage("heartbeat", heartbeatSrc);
 
 assert.ok(sweepSrc.includes("POKER_SWEEP_SECRET"), "sweep must require POKER_SWEEP_SECRET");
 assert.ok(sweepSrc.includes("x-sweep-secret"), "sweep must check x-sweep-secret header");

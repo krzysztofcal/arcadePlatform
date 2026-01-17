@@ -165,6 +165,15 @@
     return trimmed || String(generateRequestId());
   }
 
+  function resolveRequestId(pendingValue, overrideValue){
+    var override = getValidRequestId(overrideValue);
+    if (override) return { requestId: override, nextPending: null };
+    var pending = getValidRequestId(pendingValue);
+    if (pending) return { requestId: pending, nextPending: null };
+    var generated = normalizeRequestId(generateRequestId());
+    return { requestId: generated, nextPending: generated };
+  }
+
   function t(key, fallback){
     if (window.I18N && typeof window.I18N.t === 'function'){
       var val = window.I18N.t(key);
@@ -583,8 +592,10 @@
       heartbeatInFlight = true;
       var shouldReturn = false;
       try {
-        var requestId = normalizeRequestId(heartbeatRequestId);
-        heartbeatRequestId = requestId;
+        if (!getValidRequestId(heartbeatRequestId)){
+          heartbeatRequestId = normalizeRequestId(generateRequestId());
+        }
+        var requestId = heartbeatRequestId;
         var data = await apiPost(HEARTBEAT_URL, { tableId: tableId, requestId: requestId });
         if (isPendingResponse(data)){
           heartbeatPendingRetries++;
@@ -716,7 +727,6 @@
     }
 
     async function joinTable(requestIdOverride){
-      var override = getValidRequestId(requestIdOverride);
       setError(errorEl, null);
       var seatNo = parseInt(seatNoInput ? seatNoInput.value : 0, 10);
       var buyIn = parseInt(buyInInput ? buyInInput.value : 100, 10) || 100;
@@ -728,11 +738,12 @@
       setLoading(joinBtn, true);
       setLoading(leaveBtn, true);
       try {
-        if (!override && !pendingJoinRequestId){
-          pendingJoinRequestId = normalizeRequestId(generateRequestId());
+        var resolved = resolveRequestId(pendingJoinRequestId, requestIdOverride);
+        if (resolved.nextPending){
+          pendingJoinRequestId = resolved.nextPending;
           pendingJoinRetries = 0;
         }
-        var joinRequestId = override ? normalizeRequestId(override) : (pendingJoinRequestId || normalizeRequestId(generateRequestId()));
+        var joinRequestId = resolved.requestId;
         var joinResult = await apiPost(JOIN_URL, {
           tableId: tableId,
           seatNo: seatNo,
@@ -775,12 +786,12 @@
       setLoading(joinBtn, true);
       setLoading(leaveBtn, true);
       try {
-        var override = getValidRequestId(requestIdOverride);
-        if (!override && !pendingLeaveRequestId){
-          pendingLeaveRequestId = normalizeRequestId(generateRequestId());
+        var resolved = resolveRequestId(pendingLeaveRequestId, requestIdOverride);
+        if (resolved.nextPending){
+          pendingLeaveRequestId = resolved.nextPending;
           pendingLeaveRetries = 0;
         }
-        var leaveRequestId = override ? normalizeRequestId(override) : (pendingLeaveRequestId || normalizeRequestId(generateRequestId()));
+        var leaveRequestId = resolved.requestId;
         klog('poker_leave_request', { tableId: tableId, requestId: leaveRequestId, url: LEAVE_URL });
         var leaveResult = await apiPost(LEAVE_URL, { tableId: tableId, requestId: leaveRequestId });
         var pendingResponse = isPendingResponse(leaveResult);
