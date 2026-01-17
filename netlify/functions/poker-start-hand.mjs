@@ -1,4 +1,5 @@
 import { baseHeaders, beginSql, corsHeaders, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
+import { isValidUuid } from "./_shared/poker-utils.mjs";
 
 const parseBody = (body) => {
   if (!body) return { ok: true, value: {} };
@@ -41,8 +42,6 @@ const normalizeState = (value) => {
 };
 
 const parseStacks = (value) => (value && typeof value === "object" && !Array.isArray(value) ? value : {});
-
-const isValidUuid = (value) => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 
 const normalizeSeatNo = (value) => {
   if (typeof value !== "number" || !Number.isInteger(value)) return null;
@@ -111,8 +110,8 @@ export async function handler(event) {
       if (!table) {
         throw makeError(404, "table_not_found");
       }
-      if (table.status === "CLOSED") {
-        throw makeError(409, "table_closed");
+      if (table.status !== "OPEN") {
+        throw makeError(409, "table_not_open");
       }
 
       const stateRows = await tx.unsafe(

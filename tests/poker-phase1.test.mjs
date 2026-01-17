@@ -24,4 +24,5 @@ assert.ok(sweepSrc.includes("x-sweep-secret"), "sweep must check x-sweep-secret 
 
 assert.ok(/isValidUuid/.test(heartbeatSrc), "heartbeat should validate tableId with UUID check");
 assert.ok(!sweepSrc.includes("forbidden_origin"), "sweep should not reject missing origin");
-assert.ok(/table\.status !== \"OPEN\"/.test(joinSrc), "join should guard new seats behind OPEN status");
+assert.ok(joinSrc.includes("table_not_open"), "join should return table_not_open when table is not OPEN");
+assert.ok(/table\.status\s*!==?\s*['"]OPEN['"]/.test(joinSrc), "join should guard new seats behind OPEN status");

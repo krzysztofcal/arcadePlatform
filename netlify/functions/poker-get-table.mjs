@@ -1,5 +1,5 @@
 import { baseHeaders, beginSql, corsHeaders, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
-import { PRESENCE_TTL_SEC } from "./_shared/poker-utils.mjs";
+import { PRESENCE_TTL_SEC, isValidUuid } from "./_shared/poker-utils.mjs";
 
 const parseTableId = (event) => {
   const queryValue = event.queryStringParameters?.tableId;
@@ -16,8 +16,6 @@ const parseTableId = (event) => {
   if (last === "poker-get-table" || last === "poker-get-table.mjs") return "";
   return last;
 };
-
-const isValidUuid = (value) => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 
 export async function handler(event) {
   const origin = event.headers?.origin || event.headers?.Origin;

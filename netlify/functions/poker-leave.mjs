@@ -1,4 +1,5 @@
 import { baseHeaders, beginSql, corsHeaders, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
+import { isValidUuid } from "./_shared/poker-utils.mjs";
 import { postTransaction } from "./_shared/chips-ledger.mjs";
 
 const parseBody = (body) => {
@@ -95,7 +96,7 @@ export async function handler(event) {
 
   const tableIdValue = payload?.tableId;
   const tableId = typeof tableIdValue === "string" ? tableIdValue.trim() : "";
-  if (!tableId) {
+  if (!tableId || !isValidUuid(tableId)) {
     return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "invalid_table_id" }) };
   }
 
