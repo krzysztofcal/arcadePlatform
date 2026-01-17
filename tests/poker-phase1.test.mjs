@@ -10,6 +10,7 @@ const sweepSrc = read("netlify/functions/poker-sweep.mjs");
 const joinSrc = read("netlify/functions/poker-join.mjs");
 const leaveSrc = read("netlify/functions/poker-leave.mjs");
 const heartbeatSrc = read("netlify/functions/poker-heartbeat.mjs");
+const requestIdHelperSrc = read("netlify/functions/_shared/poker-request-id.mjs");
 const startHandSrc = read("netlify/functions/poker-start-hand.mjs");
 const pokerUiSrc = read("poker/poker.js");
 const phase1MigrationSrc = read("supabase/migrations/20260117090000_poker_phase1_authoritative_seats.sql");
@@ -21,15 +22,15 @@ const intervalInterpolation = "interval '${";
 assert.ok(!getTableSrc.includes(intervalInterpolation), "get-table should not interpolate interval strings");
 assert.ok(!sweepSrc.includes(intervalInterpolation), "sweep should not interpolate interval strings");
 
-const requestIdRegex = /return\s*\{\s*ok\s*:\s*true\s*,\s*value\s*:\s*null\s*\}/;
-assert.ok(requestIdRegex.test(joinSrc), "join should allow missing requestId");
-assert.ok(requestIdRegex.test(leaveSrc), "leave should allow missing requestId");
-assert.ok(requestIdRegex.test(heartbeatSrc), "heartbeat should allow missing requestId");
-assert.ok(/value\s*===\s*\"\"/.test(heartbeatSrc), "heartbeat should allow empty requestId string");
+const requestIdRegex = /value\s*==\s*null\s*\|\|\s*value\s*===\s*\"\"\s*\)\s*return\s*\{\s*ok\s*:\s*true\s*,\s*value\s*:\s*null\s*\}/;
+assert.ok(requestIdRegex.test(requestIdHelperSrc), "requestId helper should allow missing requestId");
+assert.ok(/trimmed\s*===\s*\"\[object PointerEvent\]\"/.test(requestIdHelperSrc), "requestId helper should reject pointer event string");
+assert.ok(/trimmed\.length\s*>\s*maxLen/.test(requestIdHelperSrc), "requestId helper should enforce max length");
 const numericRequestIdRegex = /typeof\s+\w+\s*===\s*\"number\"[\s\S]*?Number\.isFinite/;
-assert.ok(numericRequestIdRegex.test(joinSrc), "join should coerce numeric requestId values");
-assert.ok(numericRequestIdRegex.test(leaveSrc), "leave should coerce numeric requestId values");
-assert.ok(numericRequestIdRegex.test(heartbeatSrc), "heartbeat should coerce numeric requestId values");
+assert.ok(numericRequestIdRegex.test(requestIdHelperSrc), "requestId helper should coerce numeric requestId values");
+assert.ok(/normalizeRequestId\(\s*payload\?\.\s*requestId\s*,\s*\{\s*maxLen\s*:\s*200\s*\}\s*\)/.test(joinSrc), "join should normalize requestId");
+assert.ok(/normalizeRequestId\(\s*payload\?\.\s*requestId\s*,\s*\{\s*maxLen\s*:\s*200\s*\}\s*\)/.test(leaveSrc), "leave should normalize requestId");
+assert.ok(/normalizeRequestId\(\s*payload\?\.\s*requestId\s*,\s*\{\s*maxLen\s*:\s*200\s*\}\s*\)/.test(heartbeatSrc), "heartbeat should normalize requestId");
 
 assert.ok(sweepSrc.includes("POKER_SWEEP_SECRET"), "sweep must require POKER_SWEEP_SECRET");
 assert.ok(sweepSrc.includes("x-sweep-secret"), "sweep must check x-sweep-secret header");
@@ -56,7 +57,7 @@ assert.ok(pokerUiSrc.includes("apiPost(LEAVE_URL"), "poker UI should retry leave
 assert.ok(pokerUiSrc.includes("poker_leave_bind"), "poker UI should log leave bind state");
 assert.ok(pokerUiSrc.includes("poker_leave_click"), "poker UI should log leave click");
 const heartbeatCallRegex =
-  /apiPost\(\s*HEARTBEAT_URL[\s\S]*?\{[\s\S]*?tableId\s*:\s*tableId[\s\S]*?requestId\s*:\s*(?:heartbeatRequestId|String\(\s*heartbeatRequestId\s*\))[\s\S]*?\}[\s\S]*?\)/;
+  /apiPost\(\s*HEARTBEAT_URL[\s\S]*?\{[\s\S]*?tableId\s*:\s*tableId[\s\S]*?requestId\s*:\s*(?:requestId|heartbeatRequestId|String\(\s*heartbeatRequestId\s*\))[\s\S]*?\}[\s\S]*?\)/;
 assert.ok(heartbeatCallRegex.test(pokerUiSrc), "poker UI heartbeat should send requestId and tableId");
 assert.ok(!/tbl\.max_players/.test(pokerUiSrc), "poker UI should not read tbl.max_players");
 assert.ok(!/table\.max_players/.test(pokerUiSrc), "poker UI should not read table.max_players");

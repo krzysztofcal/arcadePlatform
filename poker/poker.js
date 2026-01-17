@@ -151,12 +151,18 @@
     return 'ui-' + Date.now() + '-' + Math.random().toString(36).substring(2, 8);
   }
 
+  function getValidRequestId(value){
+    if (typeof value !== 'string') return null;
+    var trimmed = value.trim();
+    if (!trimmed) return null;
+    if (trimmed === '[object PointerEvent]') return null;
+    if (trimmed.length > 200) return null;
+    return trimmed;
+  }
+
   function normalizeRequestId(value){
-    var trimmed = (typeof value === 'string') ? value.trim() : '';
-    if (trimmed && trimmed !== '[object PointerEvent]' && trimmed.length <= 200){
-      return trimmed;
-    }
-    return String(generateRequestId());
+    var trimmed = getValidRequestId(value);
+    return trimmed || String(generateRequestId());
   }
 
   function t(key, fallback){
@@ -710,7 +716,7 @@
     }
 
     async function joinTable(requestIdOverride){
-      var override = (typeof requestIdOverride === 'string' && requestIdOverride.trim()) ? requestIdOverride.trim() : null;
+      var override = getValidRequestId(requestIdOverride);
       setError(errorEl, null);
       var seatNo = parseInt(seatNoInput ? seatNoInput.value : 0, 10);
       var buyIn = parseInt(buyInInput ? buyInInput.value : 100, 10) || 100;
@@ -726,7 +732,7 @@
           pendingJoinRequestId = normalizeRequestId(generateRequestId());
           pendingJoinRetries = 0;
         }
-        var joinRequestId = override ? normalizeRequestId(override) : normalizeRequestId(pendingJoinRequestId || generateRequestId());
+        var joinRequestId = override ? normalizeRequestId(override) : (pendingJoinRequestId || normalizeRequestId(generateRequestId()));
         var joinResult = await apiPost(JOIN_URL, {
           tableId: tableId,
           seatNo: seatNo,
@@ -769,12 +775,12 @@
       setLoading(joinBtn, true);
       setLoading(leaveBtn, true);
       try {
-        var override = (typeof requestIdOverride === 'string' && requestIdOverride.trim()) ? requestIdOverride.trim() : null;
+        var override = getValidRequestId(requestIdOverride);
         if (!override && !pendingLeaveRequestId){
           pendingLeaveRequestId = normalizeRequestId(generateRequestId());
           pendingLeaveRetries = 0;
         }
-        var leaveRequestId = override ? normalizeRequestId(override) : normalizeRequestId(pendingLeaveRequestId || generateRequestId());
+        var leaveRequestId = override ? normalizeRequestId(override) : (pendingLeaveRequestId || normalizeRequestId(generateRequestId()));
         klog('poker_leave_request', { tableId: tableId, requestId: leaveRequestId, url: LEAVE_URL });
         var leaveResult = await apiPost(LEAVE_URL, { tableId: tableId, requestId: leaveRequestId });
         var pendingResponse = isPendingResponse(leaveResult);
