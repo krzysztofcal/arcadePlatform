@@ -72,10 +72,10 @@ begin
       and t.relname = 'poker_requests'
       and c.contype = 'u'
       and (
-        select array_agg(a.attname order by k.ordinality)
+        select array_agg(a.attname::text order by k.ordinality)
         from unnest(c.conkey) with ordinality as k(attnum, ordinality)
         join pg_attribute a on a.attrelid = t.oid and a.attnum = k.attnum
-      ) = array['request_id']
+      ) = array['request_id']::text[]
   loop
     execute format('alter table public.poker_requests drop constraint %I', rec.conname);
   end loop;
@@ -95,10 +95,10 @@ begin
       and t.relname = 'poker_requests'
       and idx.indisunique
       and (
-        select array_agg(a.attname order by k.ordinality)
+        select array_agg(a.attname::text order by k.ordinality)
         from unnest(idx.indkey) with ordinality as k(attnum, ordinality)
         join pg_attribute a on a.attrelid = t.oid and a.attnum = k.attnum
-      ) = array['request_id']
+      ) = array['request_id']::text[]
   loop
     execute format('drop index if exists %I', rec.index_name);
   end loop;
