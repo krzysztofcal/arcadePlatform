@@ -580,8 +580,9 @@
           });
           stopHeartbeat();
           shouldReturn = true;
+        } else {
+          klog('poker_heartbeat_error', { tableId: tableId, error: err.message || err.code });
         }
-        klog('poker_heartbeat_error', { tableId: tableId, error: err.message || err.code });
       } finally {
         heartbeatInFlight = false;
       }
