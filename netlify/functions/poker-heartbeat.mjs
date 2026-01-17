@@ -14,7 +14,7 @@ const isPlainObject = (value) =>
   value !== null && typeof value === "object" && !Array.isArray(value) && Object.getPrototypeOf(value) === Object.prototype;
 
 const parseRequestId = (value) => {
-  if (value == null) return { ok: true, value: null };
+  if (value == null || value === "") return { ok: true, value: null };
   if (typeof value !== "string") return { ok: false, value: null };
   const trimmed = value.trim();
   if (!trimmed) return { ok: false, value: null };
