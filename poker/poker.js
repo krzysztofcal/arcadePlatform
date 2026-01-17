@@ -440,9 +440,6 @@
         checkAuth().then(function(authed){
           if (authed){
             stopAuthWatch();
-            if (!heartbeatRequestId){
-              heartbeatRequestId = generateRequestId();
-            }
             loadTable(false);
             startPolling();
             startHeartbeat();
@@ -538,6 +535,9 @@
 
     function startHeartbeat(){
       if (heartbeatTimer) return;
+      if (!heartbeatRequestId){
+        heartbeatRequestId = generateRequestId();
+      }
       heartbeatTimer = setInterval(sendHeartbeat, HEARTBEAT_INTERVAL_MS);
       sendHeartbeat();
     }
@@ -776,9 +776,6 @@
 
     checkAuth().then(function(authed){
       if (authed){
-        if (!heartbeatRequestId){
-          heartbeatRequestId = generateRequestId();
-        }
         loadTable(false);
         startPolling();
         startHeartbeat();
