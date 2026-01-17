@@ -1,5 +1,5 @@
 import { baseHeaders, beginSql, corsHeaders, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
-import { presenceIntervalSql } from "./_shared/poker-utils.mjs";
+import { PRESENCE_TTL_SEC } from "./_shared/poker-utils.mjs";
 
 const parseTableId = (event) => {
   const queryValue = event.queryStringParameters?.tableId;
@@ -52,8 +52,8 @@ export async function handler(event) {
       await tx.unsafe(
         `update public.poker_seats set status = 'INACTIVE'
          where table_id = $1 and status = 'ACTIVE'
-           and last_seen_at < now() - interval '${presenceIntervalSql}';`,
-        [tableId]
+           and last_seen_at < now() - ($2::int * interval '1 second');`,
+        [tableId, PRESENCE_TTL_SEC]
       );
 
       const tableRows = await tx.unsafe(
@@ -110,8 +110,14 @@ export async function handler(event) {
     const stateRow = result.stateRow;
 
     const tablePayload = {
-      ...table,
+      id: table.id,
+      stakes: table.stakes,
       maxPlayers: table.max_players,
+      status: table.status,
+      createdBy: table.created_by,
+      createdAt: table.created_at,
+      updatedAt: table.updated_at,
+      lastActivityAt: table.last_activity_at,
     };
 
     return {

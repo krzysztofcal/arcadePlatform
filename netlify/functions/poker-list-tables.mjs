@@ -1,5 +1,4 @@
 import { baseHeaders, corsHeaders, executeSql, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
-import { presenceIntervalSql } from "./_shared/poker-utils.mjs";
 
 const parseLimit = (value) => {
   if (value == null || value === "") return { ok: true, value: 20 };
@@ -67,10 +66,6 @@ limit $1;
   `;
 
   try {
-    await executeSql(
-      `update public.poker_seats set status = 'INACTIVE'
-       where status = 'ACTIVE' and last_seen_at < now() - interval '${presenceIntervalSql}';`
-    );
     const rows = await executeSql(query, [limit]);
     const tables = Array.isArray(rows)
       ? rows.map((row) => ({

@@ -21,7 +21,7 @@ const makeError = (status, code) => {
 };
 
 const parseRequestId = (value) => {
-  if (value == null) return { ok: false, value: null };
+  if (value == null || value === "") return { ok: true, value: null };
   if (typeof value !== "string") return { ok: false, value: null };
   const trimmed = value.trim();
   if (!trimmed) return { ok: false, value: null };
@@ -103,6 +103,7 @@ export async function handler(event) {
   if (!requestIdParsed.ok) {
     return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "invalid_request_id" }) };
   }
+  const requestId = requestIdParsed.value;
 
   const token = extractBearerToken(event.headers);
   const auth = await verifySupabaseJwt(token);
@@ -112,31 +113,33 @@ export async function handler(event) {
 
   try {
     const result = await beginSql(async (tx) => {
-      const requestRows = await tx.unsafe(
-        "select result_json from public.poker_requests where request_id = $1 limit 1;",
-        [requestIdParsed.value]
-      );
-      if (requestRows?.[0]) {
-        const stored = parseResultJson(requestRows[0].result_json);
-        if (stored) return stored;
-      }
-
-      const insertedRows = await tx.unsafe(
-        `insert into public.poker_requests (table_id, user_id, request_id, kind)
-         values ($1, $2, $3, 'LEAVE')
-         on conflict (request_id) do nothing
-         returning request_id;`,
-        [tableId, auth.userId, requestIdParsed.value]
-      );
-      const hasRequest = !!insertedRows?.[0]?.request_id;
-      if (!hasRequest) {
-        const existingRows = await tx.unsafe(
+      if (requestId) {
+        const requestRows = await tx.unsafe(
           "select result_json from public.poker_requests where request_id = $1 limit 1;",
-          [requestIdParsed.value]
+          [requestId]
         );
-        const stored = parseResultJson(existingRows?.[0]?.result_json);
-        if (stored) return stored;
-        throw makeError(409, "request_in_flight");
+        if (requestRows?.[0]) {
+          const stored = parseResultJson(requestRows[0].result_json);
+          if (stored) return stored;
+        }
+
+        const insertedRows = await tx.unsafe(
+          `insert into public.poker_requests (table_id, user_id, request_id, kind)
+           values ($1, $2, $3, 'LEAVE')
+           on conflict (request_id) do nothing
+           returning request_id;`,
+          [tableId, auth.userId, requestId]
+        );
+        const hasRequest = !!insertedRows?.[0]?.request_id;
+        if (!hasRequest) {
+          const existingRows = await tx.unsafe(
+            "select result_json from public.poker_requests where request_id = $1 limit 1;",
+            [requestId]
+          );
+          const stored = parseResultJson(existingRows?.[0]?.result_json);
+          if (stored) return stored;
+          throw makeError(409, "request_in_flight");
+        }
       }
 
       try {
@@ -167,7 +170,9 @@ export async function handler(event) {
 
         if (stackValue) {
           const escrowSystemKey = `POKER_TABLE:${tableId}`;
-          const idempotencyKey = `poker:leave:${requestIdParsed.value}`;
+          const idempotencyKey = requestId
+            ? `poker:leave:${requestId}`
+            : `poker:leave:${tableId}:${auth.userId}:${stackValue}`;
 
           await postTransaction({
             userId: auth.userId,
@@ -213,14 +218,18 @@ export async function handler(event) {
         );
 
         const resultPayload = { ok: true, tableId, cashedOut: stackValue || 0, seatNo: seatNo ?? null };
-        await tx.unsafe(
-          "update public.poker_requests set result_json = $2::jsonb where request_id = $1;",
-          [requestIdParsed.value, JSON.stringify(resultPayload)]
-        );
+        if (requestId) {
+          await tx.unsafe(
+            "update public.poker_requests set result_json = $2::jsonb where request_id = $1;",
+            [requestId, JSON.stringify(resultPayload)]
+          );
+        }
         klog("poker_leave_ok", { tableId, userId: auth.userId, seatNo: seatNo ?? null });
         return resultPayload;
       } catch (error) {
-        await tx.unsafe("delete from public.poker_requests where request_id = $1;", [requestIdParsed.value]);
+        if (requestId) {
+          await tx.unsafe("delete from public.poker_requests where request_id = $1;", [requestId]);
+        }
         throw error;
       }
     });

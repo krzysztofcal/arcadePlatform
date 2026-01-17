@@ -5,15 +5,10 @@ const TABLE_EMPTY_CLOSE_SEC = 300;
 const now = () => new Date().toISOString();
 const nowSec = () => Math.floor(Date.now() / 1000);
 
-const presenceIntervalSql = `${PRESENCE_TTL_SEC} seconds`;
-const tableEmptyIntervalSql = `${TABLE_EMPTY_CLOSE_SEC} seconds`;
-
 export {
   PRESENCE_TTL_SEC,
   HEARTBEAT_INTERVAL_SEC,
   TABLE_EMPTY_CLOSE_SEC,
   now,
   nowSec,
-  presenceIntervalSql,
-  tableEmptyIntervalSql,
 };

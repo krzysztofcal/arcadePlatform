@@ -19,6 +19,10 @@ create index if not exists poker_seats_table_id_idx on public.poker_seats (table
 
 create index if not exists poker_seats_table_id_last_seen_idx on public.poker_seats (table_id, last_seen_at);
 
+create unique index if not exists poker_seats_table_id_seat_no_key on public.poker_seats (table_id, seat_no);
+
+create unique index if not exists poker_seats_table_id_user_id_key on public.poker_seats (table_id, user_id);
+
 create table if not exists public.poker_requests (
   table_id uuid not null references public.poker_tables (id) on delete cascade,
   user_id uuid not null,
