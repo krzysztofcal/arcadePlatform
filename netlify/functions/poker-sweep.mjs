@@ -1,6 +1,10 @@
 import { baseHeaders, beginSql, klog } from "./_shared/supabase-admin.mjs";
 import { PRESENCE_TTL_SEC, TABLE_EMPTY_CLOSE_SEC } from "./_shared/poker-utils.mjs";
 
+const STALE_PENDING_CUTOFF_MINUTES = 10;
+const STALE_PENDING_LIMIT = 500;
+const OLD_REQUESTS_LIMIT = 1000;
+
 export async function handler(event) {
   if (event.httpMethod === "OPTIONS") {
     return { statusCode: 204, headers: baseHeaders(), body: "" };
@@ -21,6 +25,22 @@ export async function handler(event) {
 
   try {
     const result = await beginSql(async (tx) => {
+      const cleanupRows = await tx.unsafe(
+        `with candidates as (
+          select ctid
+          from public.poker_requests
+          where result_json is null
+            and created_at is not null
+            and created_at < now() - ($1::int * interval '1 minute')
+          limit $2
+        )
+        delete from public.poker_requests
+        where ctid in (select ctid from candidates)
+        returning 1;`,
+        [STALE_PENDING_CUTOFF_MINUTES, STALE_PENDING_LIMIT]
+      );
+      const cleanupCount = Array.isArray(cleanupRows) ? cleanupRows.length : 0;
+
       const expiredRows = await tx.unsafe(
         `update public.poker_seats set status = 'INACTIVE'
          where status = 'ACTIVE' and last_seen_at < now() - ($1::int * interval '1 second')
@@ -46,11 +66,26 @@ returning t.id;
       const closedCount = Array.isArray(closedRows) ? closedRows.length : 0;
 
       await tx.unsafe(
-        "delete from public.poker_requests where created_at < now() - interval '24 hours';"
+        `with candidates as (
+          select ctid
+          from public.poker_requests
+          where created_at < now() - interval '24 hours'
+          limit $1
+        )
+        delete from public.poker_requests
+        where ctid in (select ctid from candidates);`,
+        [OLD_REQUESTS_LIMIT]
       );
-      return { expiredCount, closedCount };
+      return { cleanupCount, expiredCount, closedCount };
     });
 
+    if (result.cleanupCount > 0) {
+      klog("poker_requests_cleanup", {
+        deleted: result.cleanupCount,
+        cutoffMinutes: STALE_PENDING_CUTOFF_MINUTES,
+        limit: STALE_PENDING_LIMIT,
+      });
+    }
     return {
       statusCode: 200,
       headers: baseHeaders(),

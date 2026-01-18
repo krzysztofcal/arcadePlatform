@@ -71,6 +71,19 @@ export async function handler(event) {
 
   const requestIdParsed = normalizeRequestId(payload?.requestId, { maxLen: 200 });
   if (!requestIdParsed.ok) {
+    const requestIdValue = payload?.requestId;
+    const requestIdType = typeof requestIdValue;
+    const requestIdTrimmed = typeof requestIdValue === "string" ? requestIdValue.trim() : "";
+    const requestIdPreview = requestIdTrimmed ? requestIdTrimmed.slice(0, 50) : null;
+    const requestIdPresent = requestIdTrimmed !== "";
+    klog("poker_request_id_invalid", {
+      fn: "heartbeat",
+      tableId,
+      requestIdType,
+      requestIdPreview,
+      requestIdPresent,
+      reason: "normalize_failed",
+    });
     return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "invalid_request_id" }) };
   }
   const requestId = requestIdParsed.value;

@@ -73,22 +73,6 @@ export async function handler(event) {
   const origin = event.headers?.origin || event.headers?.Origin;
   const cors = corsHeaders(origin);
 
-  const parsed = parseBody(event.body);
-  const payload = parsed.ok ? parsed.value ?? {} : null;
-  const tableIdValue = payload && typeof payload.tableId === "string" ? payload.tableId.trim() : "";
-  const requestIdValue = payload?.requestId;
-  const requestIdPresent = requestIdValue != null && requestIdValue !== "";
-
-  const token = extractBearerToken(event.headers);
-  const auth = await verifySupabaseJwt(token);
-  const userId = auth.userId || null;
-  klog("poker_leave_start", {
-    tableId: tableIdValue || null,
-    userId,
-    hasAuth: !!(auth.valid && auth.userId),
-    requestIdPresent,
-  });
-
   if (!cors) {
     return {
       statusCode: 403,
@@ -102,24 +86,53 @@ export async function handler(event) {
   if (event.httpMethod !== "POST") {
     return { statusCode: 405, headers: cors, body: JSON.stringify({ error: "method_not_allowed" }) };
   }
+
+  const parsed = parseBody(event.body);
   if (!parsed.ok) {
     return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "invalid_json" }) };
   }
 
+  const payload = parsed.value ?? {};
   if (payload && !isPlainObject(payload)) {
     return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "invalid_payload" }) };
   }
 
+  const tableIdValue = payload?.tableId;
+  const tableIdRaw = typeof tableIdValue === "string" ? tableIdValue : "";
   const tableId = typeof tableIdValue === "string" ? tableIdValue.trim() : "";
   if (!tableId || !isValidUuid(tableId)) {
     return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "invalid_table_id" }) };
   }
 
+  const requestIdValue = payload?.requestId;
+  const requestIdTrimmed = typeof requestIdValue === "string" ? requestIdValue.trim() : "";
+  const requestIdPresent = requestIdTrimmed !== "";
   const requestIdParsed = normalizeRequestId(payload?.requestId, { maxLen: 200 });
   if (!requestIdParsed.ok) {
+    const requestIdType = typeof requestIdValue;
+    const requestIdPreview = requestIdTrimmed ? requestIdTrimmed.slice(0, 50) : null;
+    klog("poker_request_id_invalid", {
+      fn: "leave",
+      tableId,
+      requestIdType,
+      requestIdPreview,
+      requestIdPresent,
+      reason: "normalize_failed",
+    });
     return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "invalid_request_id" }) };
   }
   const requestId = requestIdParsed.value;
+
+  const token = extractBearerToken(event.headers);
+  const auth = await verifySupabaseJwt(token);
+  const userId = auth.userId || null;
+  klog("poker_leave_start", {
+    tableId,
+    tableIdRaw: tableIdRaw || null,
+    userId,
+    hasAuth: !!(auth.valid && auth.userId),
+    requestIdPresent,
+  });
 
   if (!auth.valid || !auth.userId) {
     return { statusCode: 401, headers: cors, body: JSON.stringify({ error: "unauthorized", reason: auth.reason }) };
