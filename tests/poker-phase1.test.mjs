@@ -66,7 +66,7 @@ assert.ok(pokerUiSrc.includes("pendingJoinRequestId"), "poker UI should store pe
 assert.ok(pokerUiSrc.includes("pendingLeaveRequestId"), "poker UI should store pending leave requestId");
 assert.ok(/function\s+resolveRequestId\s*\(/.test(pokerUiSrc), "poker UI should define resolveRequestId helper");
 assert.ok(
-  /nextPending\s*:\s*pending/.test(pokerUiSrc) && /requestId\s*:\s*pending/.test(pokerUiSrc),
+  /if\s*\(\s*pending\s*\)\s*return\s*\{[\s\S]*?requestId\s*:\s*pending[\s\S]*?nextPending\s*:\s*pending[\s\S]*?\}/.test(pokerUiSrc),
   "poker UI should keep pending requestId during retries"
 );
 assert.ok(pokerUiSrc.includes("apiPost(JOIN_URL"), "poker UI should retry join via apiPost");
