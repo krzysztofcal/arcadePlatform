@@ -212,6 +212,67 @@ describe("poker all-in and side pot behavior", () => {
     });
   });
 
+  it("deals the board without burn cards in fixed order", () => {
+    const state = makeBaseState({
+      phase: "PREFLOP",
+      streetBet: 10,
+      minRaiseTo: 20,
+      lastFullRaiseSize: 10,
+      deckSeed: 42,
+      deckIndex: 0,
+      board: [],
+      closingSeat: 2,
+      actorSeat: 1,
+      actionRequiredFromUserId: "actor",
+      actedThisStreet: { 1: false, 2: false },
+      public: {
+        seats: [
+          {
+            userId: "actor",
+            seatNo: 1,
+            status: "ACTIVE",
+            stack: 50,
+            betThisStreet: 10,
+            hasFolded: false,
+            isAllIn: false,
+          },
+          {
+            userId: "closer",
+            seatNo: 2,
+            status: "ACTIVE",
+            stack: 50,
+            betThisStreet: 10,
+            hasFolded: false,
+            isAllIn: false,
+          },
+        ],
+      },
+    });
+
+    const first = applyAction({
+      currentState: state,
+      actionType: "CHECK",
+      amount: null,
+      userId: "actor",
+      stakes: { bb: 10 },
+      holeCards: {},
+    });
+
+    const second = applyAction({
+      currentState: first.state,
+      actionType: "CHECK",
+      amount: null,
+      userId: "closer",
+      stakes: { bb: 10 },
+      holeCards: {},
+    });
+
+    expect(second.ok).toBe(true);
+    expect(second.state.phase).toBe("FLOP");
+    expect(second.state.board).toEqual(["Ts", "4s", "9h"]);
+    expect(second.state.deckIndex).toBe(3);
+  });
+
   it("closes the street when the closing seat folds", () => {
     const state = makeBaseState({
       phase: "FLOP",

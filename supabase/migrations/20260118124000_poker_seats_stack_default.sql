@@ -15,6 +15,7 @@ begin
     execute 'update public.poker_seats set stack = 0 where stack is null';
     execute 'alter table public.poker_seats alter column stack set default 0';
     execute 'alter table public.poker_seats alter column stack set not null';
+    execute 'alter table public.poker_seats add constraint if not exists poker_seats_stack_non_negative check (stack >= 0)';
   else
     raise notice 'poker_seats.stack has non-numeric type %, skipping default/not-null changes', col_type;
   end if;

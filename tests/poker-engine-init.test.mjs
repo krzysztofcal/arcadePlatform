@@ -21,6 +21,8 @@ describe("poker initHand basics", () => {
     expect(result.state.actionRequiredFromUserId).toBeTruthy();
     expect(result.state.allowedActions.length).toBeGreaterThan(0);
     expect(result.state.potTotal).toBe(3);
+    expect(result.state.deckIndex).toBe(4);
+    expect(result.state.public.seats[0].stack + result.state.public.seats[1].stack).toBe(197);
     expect(Object.keys(result.holeCards).length).toBe(2);
   });
 });

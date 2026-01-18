@@ -610,6 +610,7 @@ const applyAction = ({ currentState, actionType, amount, userId, stakes, holeCar
 
   if (shouldClose) {
     const deck = getDeckForHand(state.deckSeed);
+    // Simplified dealing: no burn cards.
     if (state.phase === "PREFLOP") {
       const startIndex = Number.isFinite(state.deckIndex) ? state.deckIndex : 0;
       state.board = [...(state.board || []), ...deck.slice(startIndex, startIndex + 3)];
