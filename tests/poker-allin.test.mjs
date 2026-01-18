@@ -188,4 +188,108 @@ describe("poker all-in and side pot behavior", () => {
     expect(second.ok).toBe(true);
     expect(second.state.phase).toBe("TURN");
   });
+
+  it("closes the street when the closing seat folds", () => {
+    const state = makeBaseState({
+      phase: "FLOP",
+      streetBet: 0,
+      minRaiseTo: 10,
+      lastFullRaiseSize: 10,
+      raiseClosed: false,
+      bbAmount: 10,
+      deckSeed: 42,
+      deckIndex: 0,
+      board: ["2c", "3d", "4h"],
+      closingSeat: 1,
+      actorSeat: 1,
+      actionRequiredFromUserId: "actor",
+      actedThisStreet: { 1: false, 2: false },
+      public: {
+        seats: [
+          {
+            userId: "actor",
+            seatNo: 1,
+            status: "ACTIVE",
+            stack: 50,
+            betThisStreet: 0,
+            hasFolded: false,
+            isAllIn: false,
+          },
+          {
+            userId: "closer",
+            seatNo: 2,
+            status: "ACTIVE",
+            stack: 50,
+            betThisStreet: 0,
+            hasFolded: false,
+            isAllIn: false,
+          },
+        ],
+      },
+    });
+
+    const result = applyAction({
+      currentState: state,
+      actionType: "FOLD",
+      amount: null,
+      userId: "actor",
+      stakes: { bb: 10 },
+      holeCards: {},
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.state.phase).toBe("TURN");
+  });
+
+  it("advances when no one can act", () => {
+    const state = makeBaseState({
+      phase: "FLOP",
+      streetBet: 20,
+      minRaiseTo: 30,
+      lastFullRaiseSize: 10,
+      raiseClosed: true,
+      bbAmount: 10,
+      deckSeed: 42,
+      deckIndex: 0,
+      board: ["2c", "3d", "4h"],
+      closingSeat: null,
+      actorSeat: 1,
+      actionRequiredFromUserId: "actor",
+      actedThisStreet: { 1: true, 2: true },
+      public: {
+        seats: [
+          {
+            userId: "actor",
+            seatNo: 1,
+            status: "ACTIVE",
+            stack: 0,
+            betThisStreet: 20,
+            hasFolded: false,
+            isAllIn: true,
+          },
+          {
+            userId: "closer",
+            seatNo: 2,
+            status: "ACTIVE",
+            stack: 0,
+            betThisStreet: 20,
+            hasFolded: false,
+            isAllIn: true,
+          },
+        ],
+      },
+    });
+
+    const result = applyAction({
+      currentState: state,
+      actionType: "CHECK",
+      amount: null,
+      userId: "actor",
+      stakes: { bb: 10 },
+      holeCards: {},
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.state.phase).toBe("TURN");
+  });
 });

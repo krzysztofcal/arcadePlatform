@@ -144,6 +144,7 @@ const resetStreetBets = (publicSeats) => {
 const resolveClosingSeat = (publicSeats, preferredSeat) => {
   const activeSeatNos = publicSeats.filter((seat) => canAct(seat)).map((seat) => seat.seatNo);
   if (activeSeatNos.includes(preferredSeat)) return preferredSeat;
+  if (!activeSeatNos.length) return null;
   const seatNos = getSeatNos(publicSeats);
   const startIndex = seatNos.indexOf(preferredSeat);
   if (startIndex >= 0) {
@@ -540,6 +541,7 @@ const applyAction = ({ currentState, actionType, amount, userId, stakes, holeCar
     return { ok: false, error: "invalid_action" };
   }
 
+  const closingSeatBeforeRepair = state.closingSeat;
   if (!canAct(publicSeats.find((seat) => seat.seatNo === state.closingSeat))) {
     state.closingSeat = resolveClosingSeat(publicSeats, state.closingSeat);
   }
@@ -568,8 +570,10 @@ const applyAction = ({ currentState, actionType, amount, userId, stakes, holeCar
   const settled = allSettled(publicSeats, state.streetBet || 0);
   const acted = allActed(publicSeats, state.actedThisStreet);
   const nextSeat = advanceActor(publicSeats, state.actorSeat);
-  const closingSeatActed = state.closingSeat != null && actedSeatNo === state.closingSeat;
-  const shouldClose = settled && acted && closingSeatActed;
+  const anyoneCanAct = publicSeats.some((seat) => isInHand(seat) && canAct(seat));
+  const closingRequirementSatisfied =
+    !anyoneCanAct || closingSeatBeforeRepair == null || actedSeatNo === closingSeatBeforeRepair;
+  const shouldClose = settled && acted && closingRequirementSatisfied;
 
   if (shouldClose) {
     const deck = getDeckForHand(state.deckSeed);
