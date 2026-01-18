@@ -169,7 +169,7 @@
     var override = getValidRequestId(overrideValue);
     if (override) return { requestId: override, nextPending: null };
     var pending = getValidRequestId(pendingValue);
-    if (pending) return { requestId: pending, nextPending: null };
+    if (pending) return { requestId: pending, nextPending: pending };
     var generated = normalizeRequestId(generateRequestId());
     return { requestId: generated, nextPending: generated };
   }

@@ -64,6 +64,11 @@ assert.ok(startHandSrc.includes("nextStacks"), "start-hand should filter stacks 
 assert.ok(startHandSrc.includes("derivedSeats"), "start-hand should re-derive seats from ACTIVE rows");
 assert.ok(pokerUiSrc.includes("pendingJoinRequestId"), "poker UI should store pending join requestId");
 assert.ok(pokerUiSrc.includes("pendingLeaveRequestId"), "poker UI should store pending leave requestId");
+assert.ok(/function\s+resolveRequestId\s*\(/.test(pokerUiSrc), "poker UI should define resolveRequestId helper");
+assert.ok(
+  /nextPending\s*:\s*pending/.test(pokerUiSrc) && /requestId\s*:\s*pending/.test(pokerUiSrc),
+  "poker UI should keep pending requestId during retries"
+);
 assert.ok(pokerUiSrc.includes("apiPost(JOIN_URL"), "poker UI should retry join via apiPost");
 assert.ok(pokerUiSrc.includes("apiPost(LEAVE_URL"), "poker UI should retry leave via apiPost");
 assert.ok(pokerUiSrc.includes("poker_leave_bind"), "poker UI should log leave bind state");
