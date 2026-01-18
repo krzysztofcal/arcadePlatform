@@ -38,4 +38,24 @@ describe("toPublicState showdown reveal policy", () => {
     const result = toPublicState(makeSettledState("RIVER"), "player-1");
     expect(result.settled.revealed).toBeUndefined();
   });
+
+  it("clears allowedActions for non-actors", () => {
+    const state = {
+      ...makeSettledState(),
+      actionRequiredFromUserId: "actor",
+      allowedActions: ["CHECK", "BET"],
+    };
+    const result = toPublicState(state, "observer");
+    expect(result.allowedActions).toEqual([]);
+  });
+
+  it("keeps allowedActions for the actor", () => {
+    const state = {
+      ...makeSettledState(),
+      actionRequiredFromUserId: "actor",
+      allowedActions: ["CHECK", "BET"],
+    };
+    const result = toPublicState(state, "actor");
+    expect(result.allowedActions).toEqual(["CHECK", "BET"]);
+  });
 });

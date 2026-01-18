@@ -26,6 +26,8 @@ const parseActionType = (value) => {
   if (typeof value !== "string") return null;
   const upper = value.trim().toUpperCase();
   if (!upper) return null;
+  const allowed = ["FOLD", "CHECK", "CALL", "BET", "RAISE"];
+  if (!allowed.includes(upper)) return null;
   return upper;
 };
 

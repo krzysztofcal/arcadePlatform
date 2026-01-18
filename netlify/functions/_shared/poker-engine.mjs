@@ -414,6 +414,9 @@ const toPublicState = (state, currentUserId) => {
   delete publicState.contrib;
   delete publicState.lastFullRaiseSize;
   delete publicState.raiseClosed;
+  if (publicState.actionRequiredFromUserId !== currentUserId) {
+    publicState.allowedActions = [];
+  }
   if (publicState?.settled?.revealed) {
     const publicSeats = Array.isArray(publicState.public?.seats) ? publicState.public.seats : [];
     const isViewerSeated = !!currentUserId && publicSeats.some((seat) => seat?.userId === currentUserId);
@@ -522,6 +525,7 @@ const applyAction = ({ currentState, actionType, amount, userId, stakes, holeCar
       }
     }
   } else if (actionType === "RAISE") {
+    if (state.raiseClosed) return { ok: false, error: "cannot_raise" };
     if (streetBet <= 0) return { ok: false, error: "cannot_raise" };
     if (!Number.isInteger(normalizedAmount) || normalizedAmount <= streetBet) return { ok: false, error: "invalid_raise" };
     const maxToBet = betThisStreet + stack;

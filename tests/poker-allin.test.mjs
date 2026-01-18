@@ -123,6 +123,25 @@ describe("poker all-in and side pot behavior", () => {
     expect(nextActor).toBeTruthy();
   });
 
+  it("rejects raises when betting is closed", () => {
+    const result = applyAction({
+      currentState: makeBaseState({
+        raiseClosed: true,
+        streetBet: 20,
+        minRaiseTo: 40,
+        lastFullRaiseSize: 20,
+      }),
+      actionType: "RAISE",
+      amount: 30,
+      userId: "actor",
+      stakes: { bb: 10 },
+      holeCards: {},
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe("cannot_raise");
+  });
+
   it("does not close a street until the closing seat acts", () => {
     const state = makeBaseState({
       phase: "FLOP",
