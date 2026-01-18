@@ -241,7 +241,7 @@ describe("poker all-in and side pot behavior", () => {
     expect(result.state.phase).toBe("TURN");
   });
 
-  it("advances when no one can act", () => {
+  it("rejects actions from an all-in or zero-stack seat", () => {
     const state = makeBaseState({
       phase: "FLOP",
       streetBet: 20,
@@ -252,7 +252,7 @@ describe("poker all-in and side pot behavior", () => {
       deckSeed: 42,
       deckIndex: 0,
       board: ["2c", "3d", "4h"],
-      closingSeat: null,
+      closingSeat: 2,
       actorSeat: 1,
       actionRequiredFromUserId: "actor",
       actedThisStreet: { 1: true, 2: true },
@@ -283,6 +283,58 @@ describe("poker all-in and side pot behavior", () => {
     const result = applyAction({
       currentState: state,
       actionType: "CHECK",
+      amount: null,
+      userId: "actor",
+      stakes: { bb: 10 },
+      holeCards: {},
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe("cannot_act");
+  });
+
+  it("advances street when the last legal action results in no one able to act", () => {
+    const state = makeBaseState({
+      phase: "FLOP",
+      streetBet: 20,
+      minRaiseTo: 30,
+      lastFullRaiseSize: 10,
+      raiseClosed: true,
+      bbAmount: 10,
+      deckSeed: 42,
+      deckIndex: 0,
+      board: ["2c", "3d", "4h"],
+      closingSeat: 1,
+      actorSeat: 1,
+      actionRequiredFromUserId: "actor",
+      actedThisStreet: { 1: false, 2: true },
+      public: {
+        seats: [
+          {
+            userId: "actor",
+            seatNo: 1,
+            status: "ACTIVE",
+            stack: 5,
+            betThisStreet: 0,
+            hasFolded: false,
+            isAllIn: false,
+          },
+          {
+            userId: "closer",
+            seatNo: 2,
+            status: "ACTIVE",
+            stack: 0,
+            betThisStreet: 20,
+            hasFolded: false,
+            isAllIn: true,
+          },
+        ],
+      },
+    });
+
+    const result = applyAction({
+      currentState: state,
+      actionType: "CALL",
       amount: null,
       userId: "actor",
       stakes: { bb: 10 },

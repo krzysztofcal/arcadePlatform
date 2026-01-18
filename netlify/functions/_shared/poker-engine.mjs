@@ -454,6 +454,9 @@ const applyAction = ({ currentState, actionType, amount, userId, stakes, holeCar
   if (!actorSeat) return { ok: false, error: "not_seated" };
   const actedSeatNo = actorSeat.seatNo;
   if (state.actionRequiredFromUserId !== userId) return { ok: false, error: "not_your_turn" };
+  if (actorSeat.hasFolded || actorSeat.isAllIn || actorSeat.stack <= 0) {
+    return { ok: false, error: "cannot_act" };
+  }
   if (state.phase === "WAITING" || state.phase === "INIT" || state.phase === "SETTLED") {
     return { ok: false, error: "hand_not_active" };
   }
