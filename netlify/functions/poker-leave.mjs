@@ -248,14 +248,42 @@ export async function handler(event) {
         const seats = parseSeats(currentState.seats).filter((seatItem) => seatItem?.userId !== auth.userId);
         const updatedStacks = { ...stacks };
         delete updatedStacks[auth.userId];
+        const publicSeats = seats.map((seat) => ({
+          userId: seat.userId,
+          seatNo: seat.seatNo,
+          status: "ACTIVE",
+          stack: Number.isFinite(updatedStacks[seat.userId]) ? updatedStacks[seat.userId] : 0,
+          betThisStreet: 0,
+          hasFolded: false,
+          isAllIn: false,
+        }));
+        const now = new Date().toISOString();
 
         const updatedState = {
           ...currentState,
           tableId: currentState.tableId || tableId,
+          handId: currentState.handId || null,
+          handNo: Number.isFinite(currentState.handNo) ? currentState.handNo : 0,
+          phase: currentState.phase || "WAITING",
+          dealerSeat: currentState.dealerSeat ?? null,
+          sbSeat: currentState.sbSeat ?? null,
+          bbSeat: currentState.bbSeat ?? null,
+          actorSeat: currentState.actorSeat ?? null,
+          deckSeed: currentState.deckSeed ?? null,
+          deck: currentState.deck ?? null,
+          board: Array.isArray(currentState.board) ? currentState.board : [],
+          hole: currentState.hole ?? null,
+          public: { seats: publicSeats },
           seats,
           stacks: updatedStacks,
-          pot: Number.isFinite(currentState.pot) ? currentState.pot : 0,
-          phase: currentState.phase || "INIT",
+          potTotal: Number.isFinite(currentState.potTotal) ? currentState.potTotal : Number(currentState.pot) || 0,
+          sidePots: currentState.sidePots ?? null,
+          streetBet: Number.isFinite(currentState.streetBet) ? currentState.streetBet : 0,
+          minRaiseTo: Number.isFinite(currentState.minRaiseTo) ? currentState.minRaiseTo : 0,
+          actionRequiredFromUserId: currentState.actionRequiredFromUserId ?? null,
+          allowedActions: Array.isArray(currentState.allowedActions) ? currentState.allowedActions : [],
+          lastMoveAt: currentState.lastMoveAt || now,
+          updatedAt: now,
         };
 
         await tx.unsafe("delete from public.poker_seats where table_id = $1 and user_id = $2;", [tableId, auth.userId]);

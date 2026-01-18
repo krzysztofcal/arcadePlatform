@@ -6,6 +6,7 @@
   var GET_URL = '/.netlify/functions/poker-get-table';
   var JOIN_URL = '/.netlify/functions/poker-join';
   var LEAVE_URL = '/.netlify/functions/poker-leave';
+  var ACT_URL = '/.netlify/functions/poker-act';
   var HEARTBEAT_URL = '/.netlify/functions/poker-heartbeat';
   var POLL_INTERVAL_BASE = 2000;
   var POLL_INTERVAL_MAX = 10000;
@@ -454,12 +455,23 @@
     var leaveBtn = document.getElementById('pokerLeave');
     var joinStatusEl = document.getElementById('pokerJoinStatus');
     var leaveStatusEl = document.getElementById('pokerLeaveStatus');
+    var actionStatusEl = document.getElementById('pokerActionStatus');
     var seatNoInput = document.getElementById('pokerSeatNo');
     var buyInInput = document.getElementById('pokerBuyIn');
+    var actionAmountInput = document.getElementById('pokerActionAmount');
+    var actionFoldBtn = document.getElementById('pokerActionFold');
+    var actionCheckBtn = document.getElementById('pokerActionCheck');
+    var actionCallBtn = document.getElementById('pokerActionCall');
+    var actionBetBtn = document.getElementById('pokerActionBet');
+    var actionRaiseBtn = document.getElementById('pokerActionRaise');
     var yourStackEl = document.getElementById('pokerYourStack');
     var potEl = document.getElementById('pokerPot');
     var phaseEl = document.getElementById('pokerPhase');
     var versionEl = document.getElementById('pokerVersion');
+    var boardEl = document.getElementById('pokerBoard');
+    var actorEl = document.getElementById('pokerActor');
+    var toCallEl = document.getElementById('pokerToCall');
+    var streetBetEl = document.getElementById('pokerStreetBet');
     var jsonToggle = document.getElementById('pokerJsonToggle');
     var jsonBox = document.getElementById('pokerJsonBox');
     var signInBtn = document.getElementById('pokerSignIn');
@@ -474,14 +486,21 @@
     var heartbeatRequestId = null;
     var pendingJoinRequestId = null;
     var pendingLeaveRequestId = null;
+    var pendingActRequestId = null;
+    var pendingActType = null;
+    var pendingActAmount = null;
     var pendingJoinRetries = 0;
     var pendingLeaveRetries = 0;
+    var pendingActRetries = 0;
     var pendingJoinStartedAt = null;
     var pendingLeaveStartedAt = null;
+    var pendingActStartedAt = null;
     var pendingJoinTimer = null;
     var pendingLeaveTimer = null;
+    var pendingActTimer = null;
     var joinPending = false;
     var leavePending = false;
+    var actPending = false;
     var pendingHiddenAt = null;
     var heartbeatPendingRetries = 0;
     var heartbeatInFlight = false;
@@ -538,11 +557,17 @@
     }
 
     function updatePendingUi(){
-      var busy = joinPending || leavePending;
+      var busy = joinPending || leavePending || actPending;
       setLoading(joinBtn, busy);
       setLoading(leaveBtn, busy);
+      setLoading(actionFoldBtn, busy);
+      setLoading(actionCheckBtn, busy);
+      setLoading(actionCallBtn, busy);
+      setLoading(actionBetBtn, busy);
+      setLoading(actionRaiseBtn, busy);
       if (seatNoInput) seatNoInput.disabled = busy;
       if (buyInInput) buyInInput.disabled = busy;
+      if (actionAmountInput) actionAmountInput.disabled = busy;
       if (joinStatusEl){
         joinStatusEl.textContent = joinPending ? t('pokerJoinPending', 'Joining...') : '';
         joinStatusEl.hidden = !joinPending;
@@ -551,6 +576,10 @@
         leaveStatusEl.textContent = leavePending ? t('pokerLeavePending', 'Leaving...') : '';
         leaveStatusEl.hidden = !leavePending;
       }
+      if (actionStatusEl){
+        actionStatusEl.textContent = actPending ? t('pokerActPending', 'Sending action...') : '';
+        actionStatusEl.hidden = !actPending;
+      }
     }
 
     function setPendingState(action, isPending){
@@ -558,6 +587,8 @@
         joinPending = isPending;
       } else if (action === 'leave'){
         leavePending = isPending;
+      } else if (action === 'act'){
+        actPending = isPending;
       }
       updatePendingUi();
     }
@@ -584,15 +615,36 @@
       setPendingState('leave', false);
     }
 
+    function clearActPending(){
+      pendingActRequestId = null;
+      pendingActType = null;
+      pendingActAmount = null;
+      pendingActRetries = 0;
+      pendingActStartedAt = null;
+      if (pendingActTimer){
+        clearTimeout(pendingActTimer);
+        pendingActTimer = null;
+      }
+      setPendingState('act', false);
+    }
+
     function handlePendingTimeout(action){
-      var message = action === 'join' ? t('pokerErrJoinPending', 'Join still pending. Please try again.') : t('pokerErrLeavePending', 'Leave still pending. Please try again.');
-      var endpoint = action === 'join' ? JOIN_URL : LEAVE_URL;
-      var retries = action === 'join' ? pendingJoinRetries : pendingLeaveRetries;
+      var message = action === 'join'
+        ? t('pokerErrJoinPending', 'Join still pending. Please try again.')
+        : action === 'leave'
+          ? t('pokerErrLeavePending', 'Leave still pending. Please try again.')
+          : t('pokerErrActPending', 'Action still pending. Please try again.');
+      var endpoint = action === 'join' ? JOIN_URL : action === 'leave' ? LEAVE_URL : ACT_URL;
+      var retries = action === 'join' ? pendingJoinRetries : action === 'leave' ? pendingLeaveRetries : pendingActRetries;
       klog('poker_pending_timeout', { action: action, tableId: tableId, retries: retries, budgetMs: PENDING_RETRY_BUDGET_MS });
       if (action === 'join'){
         clearJoinPending();
       } else {
-        clearLeavePending();
+        if (action === 'leave'){
+          clearLeavePending();
+        } else {
+          clearActPending();
+        }
       }
       setActionError(action, endpoint, 'pending_timeout', message);
     }
@@ -600,8 +652,8 @@
     function schedulePendingRetry(action, retryFn){
       if (!isPageActive()) return;
       setPendingState(action, true);
-      var startedAt = action === 'join' ? pendingJoinStartedAt : pendingLeaveStartedAt;
-      var retries = action === 'join' ? pendingJoinRetries : pendingLeaveRetries;
+      var startedAt = action === 'join' ? pendingJoinStartedAt : action === 'leave' ? pendingLeaveStartedAt : pendingActStartedAt;
+      var retries = action === 'join' ? pendingJoinRetries : action === 'leave' ? pendingLeaveRetries : pendingActRetries;
       if (!startedAt) startedAt = Date.now();
       retries += 1;
       var delay = getPendingDelay(retries);
@@ -615,10 +667,17 @@
         if (pendingJoinTimer) clearTimeout(pendingJoinTimer);
         pendingJoinTimer = scheduleRetry(retryFn, delay);
       } else {
-        pendingLeaveStartedAt = startedAt;
-        pendingLeaveRetries = retries;
-        if (pendingLeaveTimer) clearTimeout(pendingLeaveTimer);
-        pendingLeaveTimer = scheduleRetry(retryFn, delay);
+        if (action === 'leave'){
+          pendingLeaveStartedAt = startedAt;
+          pendingLeaveRetries = retries;
+          if (pendingLeaveTimer) clearTimeout(pendingLeaveTimer);
+          pendingLeaveTimer = scheduleRetry(retryFn, delay);
+        } else {
+          pendingActStartedAt = startedAt;
+          pendingActRetries = retries;
+          if (pendingActTimer) clearTimeout(pendingActTimer);
+          pendingActTimer = scheduleRetry(retryFn, delay);
+        }
       }
     }
 
@@ -631,12 +690,17 @@
         clearTimeout(pendingLeaveTimer);
         pendingLeaveTimer = null;
       }
+      if (pendingActTimer){
+        clearTimeout(pendingActTimer);
+        pendingActTimer = null;
+      }
     }
 
     // stopPendingAll cancels pending operations (clears request ids) — used for unload and auth expiry.
     function stopPendingAll(){
       clearJoinPending();
       clearLeavePending();
+      clearActPending();
     }
 
     function pauseJoinPending(){
@@ -653,6 +717,14 @@
         pendingLeaveTimer = null;
       }
       setPendingState('leave', false);
+    }
+
+    function pauseActPending(){
+      if (pendingActTimer){
+        clearTimeout(pendingActTimer);
+        pendingActTimer = null;
+      }
+      setPendingState('act', false);
     }
 
     function setActionError(action, endpoint, code, message){
@@ -805,6 +877,8 @@
       var seats = data.seats || [];
       var stateObj = data.state || {};
       var gameState = stateObj.state || {};
+      var publicSeats = (gameState.public && gameState.public.seats) ? gameState.public.seats : [];
+      var actorSeatNo = gameState.actorSeat;
 
       if (tableIdEl) tableIdEl.textContent = shortId(table.id || tableId);
       var stakes = table.stakes || {};
@@ -827,6 +901,9 @@
             seatClass += ' poker-seat--empty';
           } else if (seat.status && seat.status.toUpperCase() === 'INACTIVE'){
             seatClass += ' poker-seat--inactive';
+          }
+          if (seat && actorSeatNo != null && seat.seatNo === actorSeatNo){
+            seatClass += ' poker-seat--actor';
           }
           div.className = seatClass;
           var seatNoEl = document.createElement('div');
@@ -855,11 +932,29 @@
       }
 
       var stacks = gameState.stacks || {};
+      var actorSeat = publicSeats.find(function(seat){ return seat.seatNo === actorSeatNo; });
       var yourStack = currentUserId && stacks[currentUserId] != null ? stacks[currentUserId] : '-';
       if (yourStackEl) yourStackEl.textContent = yourStack;
-      if (potEl) potEl.textContent = gameState.pot != null ? gameState.pot : 0;
+      if (potEl) potEl.textContent = gameState.potTotal != null ? gameState.potTotal : (gameState.pot != null ? gameState.pot : 0);
       if (phaseEl) phaseEl.textContent = gameState.phase || '-';
       if (versionEl) versionEl.textContent = stateObj.version != null ? stateObj.version : '-';
+      if (boardEl){
+        var board = Array.isArray(gameState.board) ? gameState.board : [];
+        boardEl.textContent = board.length ? board.join(' ') : '-';
+      }
+      if (actorEl) actorEl.textContent = actorSeat ? shortId(actorSeat.userId) : '-';
+      var streetBet = Number.isFinite(gameState.streetBet) ? gameState.streetBet : 0;
+      var yourPublic = publicSeats.find(function(seat){ return seat.userId === currentUserId; });
+      var yourBet = yourPublic && Number.isFinite(yourPublic.betThisStreet) ? yourPublic.betThisStreet : 0;
+      var toCall = Math.max(0, streetBet - yourBet);
+      if (toCallEl) toCallEl.textContent = toCall;
+      if (streetBetEl) streetBetEl.textContent = streetBet;
+      var allowed = Array.isArray(gameState.allowedActions) ? gameState.allowedActions : [];
+      if (actionFoldBtn) actionFoldBtn.disabled = allowed.indexOf('FOLD') < 0 || actPending;
+      if (actionCheckBtn) actionCheckBtn.disabled = allowed.indexOf('CHECK') < 0 || actPending;
+      if (actionCallBtn) actionCallBtn.disabled = allowed.indexOf('CALL') < 0 || actPending;
+      if (actionBetBtn) actionBetBtn.disabled = allowed.indexOf('BET') < 0 || actPending;
+      if (actionRaiseBtn) actionRaiseBtn.disabled = allowed.indexOf('RAISE') < 0 || actPending;
       if (jsonBox) jsonBox.textContent = JSON.stringify(gameState, null, 2);
     }
 
@@ -873,6 +968,12 @@
       if (!isPageActive()) return;
       if (!pendingLeaveRequestId) return;
       await leaveTable(pendingLeaveRequestId);
+    }
+
+    async function retryAct(){
+      if (!isPageActive()) return;
+      if (!pendingActRequestId) return;
+      await act(pendingActRequestId, pendingActType, pendingActAmount);
     }
 
     async function joinTable(requestIdOverride){
@@ -992,6 +1093,67 @@
       }
     }
 
+    async function act(requestIdOverride, actionTypeOverride, amountOverride){
+      if (actPending) return;
+      setPendingState('act', true);
+      try {
+        var resolved = resolveRequestId(pendingActRequestId, requestIdOverride);
+        if (resolved.nextPending){
+          pendingActRequestId = normalizeRequestId(resolved.nextPending);
+          pendingActRetries = 0;
+          pendingActStartedAt = null;
+        } else if (!pendingActRequestId) {
+          pendingActRequestId = normalizeRequestId(resolved.requestId);
+        }
+        var requestId = normalizeRequestId(resolved.requestId);
+        var actionType = actionTypeOverride;
+        var amountValue = typeof amountOverride === 'number' ? amountOverride : null;
+        pendingActType = actionType;
+        pendingActAmount = amountValue;
+        var payload = { tableId: tableId, requestId: requestId, actionType: actionType };
+        if (amountValue != null) payload.amount = amountValue;
+        var actResult = await apiPost(ACT_URL, payload);
+        if (isPendingResponse(actResult)){
+          schedulePendingRetry('act', retryAct);
+          return;
+        }
+        if (actResult && actResult.ok === false){
+          clearActPending();
+          setActionError('act', ACT_URL, actResult.error || 'request_failed', t('pokerErrAct', 'Failed to act'));
+          return;
+        }
+        clearActPending();
+        setError(errorEl, null);
+        if (!isPageActive()) return;
+        if (actResult && actResult.state && tableData){
+          tableData.state = { version: actResult.version, state: actResult.state };
+          renderTable(tableData);
+        } else {
+          loadTable(false);
+        }
+      } catch (err){
+        if (isAbortError(err)){
+          pauseActPending();
+          return;
+        }
+        if (isAuthError(err)){
+          stopPendingAll();
+          handleAuthExpired({
+            authMsg: authMsg,
+            content: tableContent,
+            errorEl: errorEl,
+            stopPolling: stopPolling,
+            stopHeartbeat: stopHeartbeat,
+            onAuthExpired: startAuthWatch
+          });
+          return;
+        }
+        clearActPending();
+        klog('poker_act_error', { tableId: tableId, error: err.message || err.code });
+        setActionError('act', ACT_URL, err.code || 'request_failed', err.message || t('pokerErrAct', 'Failed to act'));
+      }
+    }
+
     function handleVisibility(){
       if (document.visibilityState === 'hidden'){
         stopPolling();
@@ -1003,6 +1165,7 @@
           var hiddenDuration = Date.now() - pendingHiddenAt;
           if (pendingJoinStartedAt) pendingJoinStartedAt += hiddenDuration;
           if (pendingLeaveStartedAt) pendingLeaveStartedAt += hiddenDuration;
+          if (pendingActStartedAt) pendingActStartedAt += hiddenDuration;
           pendingHiddenAt = null;
         }
         state.pollInterval = POLL_INTERVAL_BASE;
@@ -1011,7 +1174,8 @@
         startHeartbeat();
         if (pendingJoinRequestId) schedulePendingRetry('join', retryJoin);
         if (pendingLeaveRequestId) schedulePendingRetry('leave', retryLeave);
-        if (!pendingJoinRequestId && !pendingLeaveRequestId) loadTable(false);
+        if (pendingActRequestId) schedulePendingRetry('act', retryAct);
+        if (!pendingJoinRequestId && !pendingLeaveRequestId && !pendingActRequestId) loadTable(false);
       }
     }
 
@@ -1053,8 +1217,54 @@
       });
     }
 
+    function parseActionAmount(){
+      if (!actionAmountInput) return 0;
+      var value = parseInt(actionAmountInput.value, 10);
+      if (isNaN(value) || value < 0) value = 0;
+      actionAmountInput.value = value;
+      return value;
+    }
+
+    function handleActionClick(actionType){
+      if (joinPending || leavePending || actPending) return;
+      setError(errorEl, null);
+      var amount = null;
+      if (actionType === 'BET' || actionType === 'RAISE'){
+        amount = parseActionAmount();
+      }
+      act(null, actionType, amount).catch(function(err){
+        if (isAbortError(err)){
+          pauseActPending();
+          return;
+        }
+        clearActPending();
+        klog('poker_act_click_error', { message: err && (err.message || err.code) ? err.message || err.code : 'unknown_error' });
+        setActionError('act', ACT_URL, err && err.code ? err.code : 'request_failed', err && (err.message || err.code) ? err.message || err.code : t('pokerErrAct', 'Failed to act'));
+      });
+    }
+
     if (joinBtn) joinBtn.addEventListener('click', handleJoinClick);
     if (leaveBtn) leaveBtn.addEventListener('click', handleLeaveClick);
+    if (actionFoldBtn) actionFoldBtn.addEventListener('click', function(event){
+      if (event){ event.preventDefault(); event.stopPropagation(); }
+      handleActionClick('FOLD');
+    });
+    if (actionCheckBtn) actionCheckBtn.addEventListener('click', function(event){
+      if (event){ event.preventDefault(); event.stopPropagation(); }
+      handleActionClick('CHECK');
+    });
+    if (actionCallBtn) actionCallBtn.addEventListener('click', function(event){
+      if (event){ event.preventDefault(); event.stopPropagation(); }
+      handleActionClick('CALL');
+    });
+    if (actionBetBtn) actionBetBtn.addEventListener('click', function(event){
+      if (event){ event.preventDefault(); event.stopPropagation(); }
+      handleActionClick('BET');
+    });
+    if (actionRaiseBtn) actionRaiseBtn.addEventListener('click', function(event){
+      if (event){ event.preventDefault(); event.stopPropagation(); }
+      handleActionClick('RAISE');
+    });
     if (jsonToggle){
       jsonToggle.addEventListener('click', function(){
         if (jsonBox) jsonBox.hidden = !jsonBox.hidden;
