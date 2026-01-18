@@ -669,6 +669,9 @@
         if (isPolling){ resetPollBackoff(); }
       } catch (err){
         if (isAuthError(err)){
+          stopPendingRetries();
+          if (pendingJoinRequestId) pauseJoinPending();
+          if (pendingLeaveRequestId) pauseLeavePending();
           handleAuthExpired({
             authMsg: authMsg,
             content: tableContent,
@@ -899,7 +902,10 @@
         if (!isPageActive()) return;
         loadTable(false);
       } catch (err){
-        if (isAbortError(err)) return;
+        if (isAbortError(err)){
+          pauseJoinPending();
+          return;
+        }
         if (isAuthError(err)){
           pauseJoinPending();
           handleAuthExpired({
@@ -950,7 +956,10 @@
         if (!isPageActive()) return;
         loadTable(false);
       } catch (err){
-        if (isAbortError(err)) return;
+        if (isAbortError(err)){
+          pauseLeavePending();
+          return;
+        }
         if (isAuthError(err)){
           pauseLeavePending();
           handleAuthExpired({
@@ -974,6 +983,8 @@
         stopPolling();
         stopHeartbeat();
         stopPendingRetries();
+        if (pendingJoinRequestId) pauseJoinPending();
+        if (pendingLeaveRequestId) pauseLeavePending();
         if (!pendingHiddenAt) pendingHiddenAt = Date.now();
       } else {
         if (pendingHiddenAt){
@@ -1002,7 +1013,10 @@
       setError(errorEl, null);
       joinTable().catch(function(err){
         clearJoinPending();
-        if (isAbortError(err)) return;
+        if (isAbortError(err)){
+          pauseJoinPending();
+          return;
+        }
         klog('poker_join_click_error', { message: err && (err.message || err.code) ? err.message || err.code : 'unknown_error' });
         setActionError('join', JOIN_URL, err && err.code ? err.code : 'request_failed', err && (err.message || err.code) ? err.message || err.code : t('pokerErrJoin', 'Failed to join'));
       });
@@ -1018,7 +1032,10 @@
       setError(errorEl, null);
       leaveTable().catch(function(err){
         clearLeavePending();
-        if (isAbortError(err)) return;
+        if (isAbortError(err)){
+          pauseLeavePending();
+          return;
+        }
         klog('poker_leave_click_error', { message: err && (err.message || err.code) ? err.message || err.code : 'unknown_error' });
         setActionError('leave', LEAVE_URL, err && err.code ? err.code : 'request_failed', err && (err.message || err.code) ? err.message || err.code : t('pokerErrLeave', 'Failed to leave'));
       });
