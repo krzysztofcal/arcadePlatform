@@ -114,7 +114,10 @@
 
   function isAbortError(err){
     if (!err) return false;
-    return err.name === 'AbortError' || err.code === 'abort' || err.code === 'aborted' || err.message === 'AbortError';
+    if (err.name === 'AbortError') return true;
+    if (err.code === 'abort' || err.code === 'aborted') return true;
+    if (typeof err.message === 'string' && err.message.toLowerCase().indexOf('abort') !== -1) return true;
+    return false;
   }
 
   function isAuthError(err){
@@ -239,10 +242,15 @@
     return !!(data && data.pending);
   }
 
+  function isPageActive(){
+    return document.visibilityState !== 'hidden';
+  }
+
   function scheduleRetry(fn, delayMs){
     if (typeof fn !== 'function') return;
     var delay = typeof delayMs === 'number' ? delayMs : 600;
-    setTimeout(function(){
+    return setTimeout(function(){
+      if (!isPageActive()) return;
       fn();
     }, delay);
   }
@@ -482,6 +490,8 @@
     var pendingLeaveRetries = 0;
     var pendingJoinStartedAt = null;
     var pendingLeaveStartedAt = null;
+    var pendingJoinTimer = null;
+    var pendingLeaveTimer = null;
     var joinPending = false;
     var leavePending = false;
     var heartbeatPendingRetries = 0;
@@ -567,6 +577,10 @@
       pendingJoinRequestId = null;
       pendingJoinRetries = 0;
       pendingJoinStartedAt = null;
+      if (pendingJoinTimer){
+        clearTimeout(pendingJoinTimer);
+        pendingJoinTimer = null;
+      }
       setPendingState('join', false);
     }
 
@@ -574,6 +588,10 @@
       pendingLeaveRequestId = null;
       pendingLeaveRetries = 0;
       pendingLeaveStartedAt = null;
+      if (pendingLeaveTimer){
+        clearTimeout(pendingLeaveTimer);
+        pendingLeaveTimer = null;
+      }
       setPendingState('leave', false);
     }
 
@@ -601,11 +619,25 @@
       if (action === 'join'){
         pendingJoinStartedAt = startedAt;
         pendingJoinRetries = retries;
+        if (pendingJoinTimer) clearTimeout(pendingJoinTimer);
+        pendingJoinTimer = scheduleRetry(retryFn, delay);
       } else {
         pendingLeaveStartedAt = startedAt;
         pendingLeaveRetries = retries;
+        if (pendingLeaveTimer) clearTimeout(pendingLeaveTimer);
+        pendingLeaveTimer = scheduleRetry(retryFn, delay);
       }
-      scheduleRetry(retryFn, delay);
+    }
+
+    function stopPendingRetries(){
+      if (pendingJoinTimer){
+        clearTimeout(pendingJoinTimer);
+        pendingJoinTimer = null;
+      }
+      if (pendingLeaveTimer){
+        clearTimeout(pendingLeaveTimer);
+        pendingLeaveTimer = null;
+      }
     }
 
     function setActionError(action, endpoint, code, message){
@@ -830,7 +862,6 @@
     }
 
     async function joinTable(requestIdOverride){
-      setError(errorEl, null);
       var seatNo = parseInt(seatNoInput ? seatNoInput.value : 0, 10);
       var buyIn = parseInt(buyInInput ? buyInInput.value : 100, 10) || 100;
       if (isNaN(seatNo)) seatNo = 0;
@@ -862,6 +893,7 @@
           return;
         }
         clearJoinPending();
+        setError(errorEl, null);
         loadTable();
       } catch (err){
         clearJoinPending();
@@ -885,7 +917,6 @@
     }
 
     async function leaveTable(requestIdOverride){
-      setError(errorEl, null);
       setPendingState('leave', true);
       try {
         var resolved = resolveRequestId(pendingLeaveRequestId, requestIdOverride);
@@ -917,6 +948,7 @@
           return;
         }
         clearLeavePending();
+        setError(errorEl, null);
         loadTable();
       } catch (err){
         clearLeavePending();
@@ -943,6 +975,7 @@
       if (document.visibilityState === 'hidden'){
         stopPolling();
         stopHeartbeat();
+        stopPendingRetries();
       } else {
         state.pollInterval = POLL_INTERVAL_BASE;
         state.pollErrors = 0;
@@ -998,6 +1031,7 @@
     document.addEventListener('visibilitychange', handleVisibility); // xp-lifecycle-allow:poker-table(2026-01-01)
     window.addEventListener('beforeunload', stopPolling); // xp-lifecycle-allow:poker-table(2026-01-01)
     window.addEventListener('beforeunload', stopHeartbeat); // xp-lifecycle-allow:poker-table-heartbeat(2026-01-01)
+    window.addEventListener('beforeunload', stopPendingRetries); // xp-lifecycle-allow:poker-table-pending(2026-01-01)
     window.addEventListener('beforeunload', stopAuthWatch); // xp-lifecycle-allow:poker-table-auth(2026-01-01)
 
     checkAuth().then(function(authed){
