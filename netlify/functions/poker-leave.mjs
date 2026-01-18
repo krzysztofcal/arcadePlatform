@@ -79,16 +79,6 @@ export async function handler(event) {
   const requestIdValue = payload?.requestId;
   const requestIdPresent = requestIdValue != null && requestIdValue !== "";
 
-  const token = extractBearerToken(event.headers);
-  const auth = await verifySupabaseJwt(token);
-  const userId = auth.userId || null;
-  klog("poker_leave_start", {
-    tableId: tableIdValue || null,
-    userId,
-    hasAuth: !!(auth.valid && auth.userId),
-    requestIdPresent,
-  });
-
   if (!cors) {
     return {
       statusCode: 403,
@@ -130,6 +120,16 @@ export async function handler(event) {
     return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "invalid_request_id" }) };
   }
   const requestId = requestIdParsed.value;
+
+  const token = extractBearerToken(event.headers);
+  const auth = await verifySupabaseJwt(token);
+  const userId = auth.userId || null;
+  klog("poker_leave_start", {
+    tableId: tableIdValue || null,
+    userId,
+    hasAuth: !!(auth.valid && auth.userId),
+    requestIdPresent,
+  });
 
   if (!auth.valid || !auth.userId) {
     return { statusCode: 401, headers: cors, body: JSON.stringify({ error: "unauthorized", reason: auth.reason }) };

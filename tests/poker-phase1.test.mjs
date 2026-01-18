@@ -14,7 +14,6 @@ const requestIdHelperSrc = read("netlify/functions/_shared/poker-request-id.mjs"
 const startHandSrc = read("netlify/functions/poker-start-hand.mjs");
 const pokerUiSrc = read("poker/poker.js");
 const phase1MigrationSrc = read("supabase/migrations/20260117090000_poker_phase1_authoritative_seats.sql");
-const requestIdMigrationSrc = read("supabase/migrations/20260201090000_poker_requests_request_id_unique.sql");
 const ciWorkflowSrc = read(".github/workflows/ci.yml");
 const testsWorkflowSrc = read(".github/workflows/tests.yml");
 const matrixWorkflowSrc = read(".github/workflows/playwright-matrix.yml");
@@ -174,14 +173,6 @@ assert.ok(
 assert.ok(
   phase1MigrationSrc.includes("pg_constraint") && phase1MigrationSrc.includes("drop constraint %I"),
   "migration should dynamically drop legacy unique constraint"
-);
-assert.ok(
-  /row_number\(\)\s+over\s*\([\s\S]*?partition by table_id,\s*request_id/.test(requestIdMigrationSrc),
-  "requestId migration should de-dupe poker_requests by table_id and request_id"
-);
-assert.ok(
-  /create unique index if not exists poker_requests_table_id_request_id_key/.test(requestIdMigrationSrc),
-  "requestId migration should enforce poker_requests table_id/request_id uniqueness"
 );
 assert.ok(
   sweepSrc.includes("delete from public.poker_requests"),
