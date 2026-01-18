@@ -151,6 +151,29 @@
     return 'ui-' + Date.now() + '-' + Math.random().toString(36).substring(2, 8);
   }
 
+  function getValidRequestId(value){
+    if (typeof value !== 'string') return null;
+    var trimmed = value.trim();
+    if (!trimmed) return null;
+    if (trimmed === '[object PointerEvent]') return null;
+    if (trimmed.length > 200) return null;
+    return trimmed;
+  }
+
+  function normalizeRequestId(value){
+    var trimmed = getValidRequestId(value);
+    return trimmed || String(generateRequestId());
+  }
+
+  function resolveRequestId(pendingValue, overrideValue){
+    var override = getValidRequestId(overrideValue);
+    if (override) return { requestId: override, nextPending: null };
+    var pending = getValidRequestId(pendingValue);
+    if (pending) return { requestId: pending, nextPending: pending };
+    var generated = normalizeRequestId(generateRequestId());
+    return { requestId: generated, nextPending: generated };
+  }
+
   function t(key, fallback){
     if (window.I18N && typeof window.I18N.t === 'function'){
       var val = window.I18N.t(key);
@@ -410,6 +433,7 @@
     var jsonBox = document.getElementById('pokerJsonBox');
     var signInBtn = document.getElementById('pokerSignIn');
     var leaveSelector = '#pokerLeave';
+    var joinSelector = '#pokerJoin';
 
     var currentUserId = null;
     var tableData = null;
@@ -426,12 +450,18 @@
     var heartbeatInFlight = false;
     var HEARTBEAT_PENDING_MAX_RETRIES = 8;
 
+    if (joinBtn){
+      klog('poker_join_bind', { found: true, selector: joinSelector, page: 'table' });
+    } else {
+      klog('poker_join_bind', { found: false, selector: joinSelector, page: 'table' });
+      klog('poker_join_bind_missing', { path: window.location.pathname });
+    }
+
     if (leaveBtn){
       klog('poker_leave_bind', { found: true, selector: leaveSelector, page: 'table' });
     } else {
       klog('poker_leave_bind', { found: false, selector: leaveSelector, page: 'table' });
       klog('poker_leave_bind_missing', { path: window.location.pathname });
-      setError(errorEl, t('pokerErrLeaveMissing', 'Leave button not found (UI wiring bug)'));
     }
 
     function stopAuthWatch(){
@@ -543,7 +573,7 @@
     function startHeartbeat(){
       if (heartbeatTimer) return;
       if (!heartbeatRequestId){
-        heartbeatRequestId = String(generateRequestId());
+        heartbeatRequestId = normalizeRequestId(generateRequestId());
       }
       heartbeatTimer = setInterval(sendHeartbeat, HEARTBEAT_INTERVAL_MS);
       sendHeartbeat();
@@ -560,10 +590,14 @@
       heartbeatInFlight = true;
       var shouldReturn = false;
       try {
-        var data = await apiPost(HEARTBEAT_URL, { tableId: tableId, requestId: String(heartbeatRequestId) });
+        if (!getValidRequestId(heartbeatRequestId)){
+          heartbeatRequestId = normalizeRequestId(generateRequestId());
+        }
+        var requestId = heartbeatRequestId;
+        var data = await apiPost(HEARTBEAT_URL, { tableId: tableId, requestId: requestId });
         if (isPendingResponse(data)){
           heartbeatPendingRetries++;
-          heartbeatRequestId = String(generateRequestId());
+          heartbeatRequestId = normalizeRequestId(generateRequestId());
           if (heartbeatPendingRetries <= HEARTBEAT_PENDING_MAX_RETRIES){
             scheduleRetry(sendHeartbeat, getHeartbeatPendingDelay(heartbeatPendingRetries));
           }
@@ -691,7 +725,6 @@
     }
 
     async function joinTable(requestIdOverride){
-      var override = (typeof requestIdOverride === 'string' && requestIdOverride.trim()) ? requestIdOverride.trim() : null;
       setError(errorEl, null);
       var seatNo = parseInt(seatNoInput ? seatNoInput.value : 0, 10);
       var buyIn = parseInt(buyInInput ? buyInInput.value : 100, 10) || 100;
@@ -703,16 +736,17 @@
       setLoading(joinBtn, true);
       setLoading(leaveBtn, true);
       try {
-        if (!override && !pendingJoinRequestId){
-          pendingJoinRequestId = String(generateRequestId());
+        var resolved = resolveRequestId(pendingJoinRequestId, requestIdOverride);
+        if (resolved.nextPending){
+          pendingJoinRequestId = resolved.nextPending;
           pendingJoinRetries = 0;
         }
-        var joinRequestId = override || pendingJoinRequestId || String(generateRequestId());
+        var joinRequestId = resolved.requestId;
         var joinResult = await apiPost(JOIN_URL, {
           tableId: tableId,
           seatNo: seatNo,
           buyIn: buyIn,
-          requestId: String(joinRequestId)
+          requestId: joinRequestId
         });
         if (isPendingResponse(joinResult)){
           scheduleRetry(retryJoin);
@@ -750,13 +784,14 @@
       setLoading(joinBtn, true);
       setLoading(leaveBtn, true);
       try {
-        if (!requestIdOverride && !pendingLeaveRequestId){
-          pendingLeaveRequestId = String(generateRequestId());
+        var resolved = resolveRequestId(pendingLeaveRequestId, requestIdOverride);
+        if (resolved.nextPending){
+          pendingLeaveRequestId = resolved.nextPending;
           pendingLeaveRetries = 0;
         }
-        var leaveRequestId = requestIdOverride || pendingLeaveRequestId || String(generateRequestId());
-        klog('poker_leave_request', { tableId: tableId, requestId: String(leaveRequestId), url: LEAVE_URL });
-        var leaveResult = await apiPost(LEAVE_URL, { tableId: tableId, requestId: String(leaveRequestId) });
+        var leaveRequestId = resolved.requestId;
+        klog('poker_leave_request', { tableId: tableId, requestId: leaveRequestId, url: LEAVE_URL });
+        var leaveResult = await apiPost(LEAVE_URL, { tableId: tableId, requestId: leaveRequestId });
         var pendingResponse = isPendingResponse(leaveResult);
         klog('poker_leave_response', {
           ok: !!(leaveResult && leaveResult.ok),

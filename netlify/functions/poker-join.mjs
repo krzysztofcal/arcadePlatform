@@ -1,6 +1,7 @@
 import { baseHeaders, beginSql, corsHeaders, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
 import { HEARTBEAT_INTERVAL_SEC, isValidUuid } from "./_shared/poker-utils.mjs";
 import { postTransaction } from "./_shared/chips-ledger.mjs";
+import { normalizeRequestId } from "./_shared/poker-request-id.mjs";
 
 const REQUEST_PENDING_STALE_SEC = 30;
 
@@ -36,21 +37,6 @@ const parseBuyIn = (value) => {
   if (!Number.isFinite(num) || !Number.isInteger(num) || num <= 0) return null;
   if (Math.abs(num) > Number.MAX_SAFE_INTEGER) return null;
   return num;
-};
-
-const REQUEST_ID_MAX_LEN = 200;
-
-const parseRequestId = (value) => {
-  if (value == null || value === "") return { ok: true, value: null };
-  let normalized = value;
-  if (typeof normalized === "number" && Number.isFinite(normalized)) {
-    normalized = String(normalized);
-  }
-  if (typeof normalized !== "string") return { ok: false, value: null };
-  const trimmed = normalized.trim();
-  if (!trimmed) return { ok: false, value: null };
-  if (trimmed.length > REQUEST_ID_MAX_LEN) return { ok: false, value: null };
-  return { ok: true, value: trimmed };
 };
 
 const parseResultJson = (value) => {
@@ -133,7 +119,7 @@ export async function handler(event) {
     return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "invalid_buy_in" }) };
   }
 
-  const requestIdParsed = parseRequestId(payload?.requestId);
+  const requestIdParsed = normalizeRequestId(payload?.requestId, { maxLen: 200 });
   if (!requestIdParsed.ok) {
     return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "invalid_request_id" }) };
   }
