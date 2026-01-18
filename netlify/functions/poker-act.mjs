@@ -278,20 +278,26 @@ export async function handler(event) {
       }
 
       const updateRows = await tx.unsafe(
-        "update public.poker_state set version = version + 1, state = $2::jsonb, updated_at = now() where table_id = $1 returning version;",
-        [tableId, JSON.stringify(nextState)]
+        `with updated as (
+           update public.poker_state
+           set version = version + 1,
+               state = $2::jsonb,
+               updated_at = now()
+           where table_id = $1
+           returning version
+         ),
+         ins as (
+           insert into public.poker_actions (table_id, version, user_id, action_type, amount)
+           select $1, updated.version, $3, data.action_type, data.amount
+           from updated
+           join (values ($4, $5), ($6, $7)) as data(action_type, amount) on true
+           returning version
+         )
+         select version from updated;`,
+        [tableId, JSON.stringify(nextState), auth.userId, actionType, amount ?? null, requestMarker, null]
       );
       const newVersion = Number(updateRows?.[0]?.version);
       if (!Number.isFinite(newVersion)) throw makeError(409, "state_invalid");
-
-      await tx.unsafe(
-        "insert into public.poker_actions (table_id, version, user_id, action_type, amount) values ($1, $2, $3, $4, $5);",
-        [tableId, newVersion, auth.userId, actionType, amount ?? null]
-      );
-      await tx.unsafe(
-        "insert into public.poker_actions (table_id, version, user_id, action_type, amount) values ($1, $2, $3, $4, $5);",
-        [tableId, newVersion, auth.userId, requestMarker, null]
-      );
 
       const nextSeats = Array.isArray(nextState.public?.seats) ? nextState.public.seats : [];
       for (const seat of nextSeats) {
