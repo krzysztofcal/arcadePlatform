@@ -633,8 +633,8 @@
       }
     }
 
+    // stopPendingAll cancels pending operations (clears request ids) — used for unload and auth expiry.
     function stopPendingAll(){
-      stopPendingRetries();
       clearJoinPending();
       clearLeavePending();
     }
@@ -887,7 +887,7 @@
       try {
         var resolved = resolveRequestId(pendingJoinRequestId, requestIdOverride);
         if (resolved.nextPending){
-          pendingJoinRequestId = resolved.nextPending;
+          pendingJoinRequestId = normalizeRequestId(resolved.nextPending);
           pendingJoinRetries = 0;
           pendingJoinStartedAt = null;
         } else if (!pendingJoinRequestId) {
@@ -900,6 +900,11 @@
           buyIn: buyIn,
           requestId: joinRequestId
         });
+        if (joinResult && joinResult.ok === false){
+          clearJoinPending();
+          setActionError('join', JOIN_URL, joinResult.error || 'request_failed', t('pokerErrJoin', 'Failed to join'));
+          return;
+        }
         if (isPendingResponse(joinResult)){
           schedulePendingRetry('join', retryJoin);
           return;
@@ -936,7 +941,7 @@
       try {
         var resolved = resolveRequestId(pendingLeaveRequestId, requestIdOverride);
         if (resolved.nextPending){
-          pendingLeaveRequestId = resolved.nextPending;
+          pendingLeaveRequestId = normalizeRequestId(resolved.nextPending);
           pendingLeaveRetries = 0;
           pendingLeaveStartedAt = null;
         } else if (!pendingLeaveRequestId) {
