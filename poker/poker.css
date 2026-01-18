@@ -26,6 +26,8 @@
 
 .poker-form-row:last-child{margin-bottom:0;}
 
+.poker-inline-status{font:600 12px Poppins, sans-serif; color:var(--muted);}
+
 .poker-table-list{display:flex; flex-direction:column; gap:8px;}
 
 .poker-table-row{display:flex; align-items:center; gap:12px; padding:10px 14px; background:var(--card-2); border:1px solid var(--border); border-radius:10px;}

@@ -104,7 +104,11 @@
     pokerErrMissingTableId: { en: 'No tableId provided', pl: 'Nie podano ID stołu' },
     pokerErrLoadTable: { en: 'Failed to load table', pl: 'Nie udało się załadować stołu' },
     pokerErrJoin: { en: 'Failed to join', pl: 'Nie udało się dołączyć' },
-    pokerErrLeave: { en: 'Failed to leave', pl: 'Nie udało się opuścić stołu' }
+    pokerErrLeave: { en: 'Failed to leave', pl: 'Nie udało się opuścić stołu' },
+    pokerErrJoinPending: { en: 'Join still pending. Please try again.', pl: 'Dołączanie wciąż trwa. Spróbuj ponownie.' },
+    pokerErrLeavePending: { en: 'Leave still pending. Please try again.', pl: 'Opuszczanie wciąż trwa. Spróbuj ponownie.' },
+    pokerJoinPending: { en: 'Joining...', pl: 'Dołączanie...' },
+    pokerLeavePending: { en: 'Leaving...', pl: 'Opuszczanie...' }
   };
 
   let currentLang = 'en';
