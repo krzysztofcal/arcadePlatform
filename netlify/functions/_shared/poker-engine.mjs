@@ -28,12 +28,17 @@ const normalizeState = (value) => {
 const normalizeSeatRows = (rows) =>
   Array.isArray(rows)
     ? rows
-        .map((row) => ({
-          userId: row?.user_id || row?.userId || null,
-          seatNo: Number.isInteger(row?.seat_no) ? row.seat_no : row?.seatNo,
-          status: row?.status || "ACTIVE",
-          stack: Number.isFinite(Number(row?.stack)) ? Number(row.stack) : null,
-        }))
+        .map((row) => {
+          const seatNoRaw = row?.seat_no ?? row?.seatNo;
+          const seatNo = Number(seatNoRaw);
+          const stackRaw = Number(row?.stack);
+          return {
+            userId: row?.user_id || row?.userId || null,
+            seatNo: Number.isInteger(seatNo) && seatNo >= 0 ? seatNo : null,
+            status: row?.status || "ACTIVE",
+            stack: Number.isFinite(stackRaw) ? stackRaw : 0,
+          };
+        })
         .filter((row) => row.userId && Number.isInteger(row.seatNo))
     : [];
 
@@ -99,12 +104,22 @@ const getSeatNos = (publicSeats) => publicSeats.map((seat) => seat.seatNo).sort(
 const buildAllowedActions = (seat, state) => {
   if (!seat || seat.hasFolded || seat.stack <= 0) return [];
   if (state.actionRequiredFromUserId !== seat.userId) return [];
-  const toCall = Math.max(0, (state.streetBet || 0) - (seat.betThisStreet || 0));
+  const streetBet = Math.max(0, Number(state.streetBet) || 0);
+  const betThisStreet = Math.max(0, Number(seat.betThisStreet) || 0);
+  const toCall = Math.max(0, streetBet - betThisStreet);
+  const minRaiseTo = Number.isFinite(state.minRaiseTo) ? state.minRaiseTo : 0;
+  const baseBb = Number.isFinite(state.bbAmount) ? state.bbAmount : 0;
+  const fallbackBb = minRaiseTo && streetBet ? minRaiseTo - streetBet : 0;
+  const bbAmount = Math.max(1, baseBb || fallbackBb || 1);
+  const minBet = streetBet === 0 ? Math.max(1, Math.floor(baseBb || minRaiseTo || 0) || 1) : 1;
   const actions = ["FOLD"];
   if (toCall === 0) actions.push("CHECK");
   if (toCall > 0 && seat.stack > toCall) actions.push("CALL");
-  if ((state.streetBet || 0) === 0 && seat.stack > 0) actions.push("BET");
-  if ((state.streetBet || 0) > 0 && seat.stack > toCall) actions.push("RAISE");
+  if (streetBet === 0 && seat.stack > 1 && seat.stack > minBet) actions.push("BET");
+  if (streetBet > 0 && minRaiseTo > streetBet) {
+    const minToPay = minRaiseTo - betThisStreet;
+    if (minToPay > toCall && seat.stack > minToPay) actions.push("RAISE");
+  }
   return actions;
 };
 
@@ -177,6 +192,7 @@ const startStreetState = ({ state, publicSeats, streetNo, actorSeat, closingSeat
   state.streetBet = 0;
   state.minRaiseTo = bbAmount;
   state.streetNo = streetNo;
+  state.bbAmount = bbAmount;
   state.lastAggressorSeat = null;
   state.closingSeat = resolveClosingSeat(publicSeats, closingSeat);
   state.actedThisStreet = initActedThisStreet(publicSeats);
@@ -258,6 +274,8 @@ const initHand = ({ tableId, seats, stacks, stakes, prevState }) => {
     sidePots: null,
     streetBet,
     minRaiseTo: streetBet + bbAmount,
+    sbAmount,
+    bbAmount,
     actionRequiredFromUserId: actorUser ? actorUser.userId : null,
     allowedActions: [],
     lastMoveAt: nowIso(),
@@ -324,11 +342,13 @@ const cleanStateForNextHand = (state) => ({
   sidePots: null,
   streetBet: 0,
   minRaiseTo: 0,
+  sbAmount: 0,
+  bbAmount: 0,
   actionRequiredFromUserId: null,
   allowedActions: [],
   lastMoveAt: nowIso(),
   updatedAt: nowIso(),
-};
+});
 
 const toPublicState = (state, currentUserId) => {
   if (!state || !isPlainObject(state)) return {};
@@ -357,7 +377,8 @@ const applyAction = ({ currentState, actionType, amount, userId, stakes, holeCar
   if (!state.actedThisStreet || typeof state.actedThisStreet !== "object") {
     state.actedThisStreet = initActedThisStreet(publicSeats);
   }
-  const bbAmount = Math.max(1, Number(stakes?.bb) || 2);
+  const bbAmount = Number.isFinite(state.bbAmount) ? state.bbAmount : Math.max(1, Number(stakes?.bb) || 2);
+  if (!Number.isFinite(state.bbAmount)) state.bbAmount = bbAmount;
   if (state.lastAggressorSeat == null) state.lastAggressorSeat = null;
   if (state.closingSeat == null) {
     const defaultClosing = state.phase === "PREFLOP" ? state.bbSeat : state.dealerSeat;
@@ -370,7 +391,9 @@ const applyAction = ({ currentState, actionType, amount, userId, stakes, holeCar
   if (!actorSeat) return { ok: false, error: "not_seated" };
   if (state.actionRequiredFromUserId !== userId) return { ok: false, error: "not_your_turn" };
   if (!PHASES.includes(state.phase)) return { ok: false, error: "invalid_phase" };
-  if (state.phase === "WAITING" || state.phase === "SETTLED") return { ok: false, error: "hand_not_active" };
+  if (state.phase === "WAITING" || state.phase === "INIT" || state.phase === "SETTLED") {
+    return { ok: false, error: "hand_not_active" };
+  }
 
   const streetBet = Number.isFinite(state.streetBet) ? state.streetBet : 0;
   const betThisStreet = Number.isFinite(actorSeat.betThisStreet) ? actorSeat.betThisStreet : 0;
@@ -402,7 +425,6 @@ const applyAction = ({ currentState, actionType, amount, userId, stakes, holeCar
     state.streetBet = normalizedAmount;
     state.minRaiseTo = normalizedAmount + bbAmount;
     state.lastAggressorSeat = actorSeat.seatNo;
-    state.closingSeat = actorSeat.seatNo;
     state.actedThisStreet = markAllAwaitingResponse(publicSeats, actorSeat.seatNo);
   } else if (actionType === "RAISE") {
     if (streetBet <= 0) return { ok: false, error: "cannot_raise" };
@@ -418,7 +440,6 @@ const applyAction = ({ currentState, actionType, amount, userId, stakes, holeCar
     state.streetBet = normalizedAmount;
     state.minRaiseTo = normalizedAmount + bbAmount;
     state.lastAggressorSeat = actorSeat.seatNo;
-    state.closingSeat = actorSeat.seatNo;
     state.actedThisStreet = markAllAwaitingResponse(publicSeats, actorSeat.seatNo);
   } else if (actionType === "FOLD") {
     actorSeat.hasFolded = true;

@@ -1,7 +1,7 @@
 import { baseHeaders, beginSql, corsHeaders, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
 import { normalizeRequestId } from "./_shared/poker-request-id.mjs";
 import { isValidUuid } from "./_shared/poker-utils.mjs";
-import { applyAction, ensureAutoStart, normalizeSeatRows, normalizeState, toPublicState } from "./_shared/poker-engine.mjs";
+import { applyAction, normalizeSeatRows, normalizeState, toPublicState } from "./_shared/poker-engine.mjs";
 
 const parseBody = (body) => {
   if (!body) return { ok: true, value: {} };
@@ -139,6 +139,11 @@ export async function handler(event) {
       const stateRow = stateRows?.[0] || null;
       if (!stateRow) throw new Error("poker_state_missing");
       const currentState = normalizeState(stateRow.state);
+      const phase = currentState.phase || "WAITING";
+      const activePhases = ["PREFLOP", "FLOP", "TURN", "RIVER", "SHOWDOWN"];
+      if (!activePhases.includes(phase)) {
+        throw makeError(409, "hand_not_active");
+      }
 
       const requestMarker = `REQUEST:${requestId}`;
       const existingRows = await tx.unsafe(
@@ -168,23 +173,9 @@ export async function handler(event) {
         return acc;
       }, {});
 
-      const autoStarted = ensureAutoStart({ state: currentState, tableId, seats, stacks, stakes });
-      if (!autoStarted.ok) throw makeError(409, autoStarted.error || "cannot_start");
-      const baseState = autoStarted.state || currentState;
+      const baseState = currentState;
       const handId = baseState.handId;
-      let holeCards = {};
-      if (autoStarted.holeCards) {
-        const inserts = Object.entries(autoStarted.holeCards);
-        for (const [userId, cards] of inserts) {
-          await tx.unsafe(
-            "insert into public.poker_hole_cards (table_id, hand_id, user_id, cards) values ($1, $2, $3, $4::jsonb) on conflict do nothing;",
-            [tableId, handId, userId, JSON.stringify(cards)]
-          );
-        }
-        holeCards = autoStarted.holeCards;
-      } else {
-        holeCards = await loadHoleCardsForHand(tx, tableId, handId);
-      }
+      const holeCards = await loadHoleCardsForHand(tx, tableId, handId);
 
       const actionResult = applyAction({
         currentState: baseState,
@@ -196,6 +187,10 @@ export async function handler(event) {
       });
       if (!actionResult.ok) throw makeError(409, actionResult.error || "action_invalid");
       const nextState = actionResult.state;
+
+      if (nextState.phase === "SETTLED" && handId) {
+        await tx.unsafe("delete from public.poker_hole_cards where table_id = $1 and hand_id = $2;", [tableId, handId]);
+      }
 
       const updateRows = await tx.unsafe(
         "update public.poker_state set version = version + 1, state = $2::jsonb, updated_at = now() where table_id = $1 returning version;",
@@ -224,9 +219,7 @@ export async function handler(event) {
       }
 
       const publicState = toPublicState(nextState, auth.userId);
-      const userHoleCards = autoStarted.holeCards
-        ? autoStarted.holeCards[auth.userId]
-        : await loadHoleCardsForUser(tx, tableId, handId, auth.userId);
+      const userHoleCards = await loadHoleCardsForUser(tx, tableId, handId, auth.userId);
       if (userHoleCards) {
         publicState.hole = { [auth.userId]: userHoleCards };
       }
