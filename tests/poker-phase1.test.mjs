@@ -34,10 +34,9 @@ const assertRequestIdNormalizerUsage = (label, src) => {
     src.includes("./_shared/poker-request-id.mjs") && /normalizeRequestId/.test(src),
     `${label} should import normalizeRequestId helper`
   );
-  assert.ok(/normalizeRequestId\([\s\S]*?requestId[\s\S]*?\)/.test(src), `${label} should normalize requestId`);
   assert.ok(
-    /maxLen/.test(src) && /200/.test(src),
-    `${label} should enforce requestId max length 200`
+    /normalizeRequestId\([\s\S]*?payload\s*\?\.\s*requestId[\s\S]*?\{\s*maxLen\s*:\s*200\s*\}[\s\S]*?\)/.test(src),
+    `${label} should normalize requestId with maxLen 200`
   );
 };
 

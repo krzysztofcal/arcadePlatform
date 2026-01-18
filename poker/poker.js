@@ -455,7 +455,6 @@
     } else {
       klog('poker_join_bind', { found: false, selector: joinSelector, page: 'table' });
       klog('poker_join_bind_missing', { path: window.location.pathname });
-      setError(errorEl, t('pokerErrJoinMissing', 'Join button not found (UI wiring bug)'));
     }
 
     if (leaveBtn){
@@ -463,7 +462,6 @@
     } else {
       klog('poker_leave_bind', { found: false, selector: leaveSelector, page: 'table' });
       klog('poker_leave_bind_missing', { path: window.location.pathname });
-      setError(errorEl, t('pokerErrLeaveMissing', 'Leave button not found (UI wiring bug)'));
     }
 
     function stopAuthWatch(){
