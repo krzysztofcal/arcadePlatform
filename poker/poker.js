@@ -898,7 +898,7 @@
           pendingJoinRetries = 0;
           pendingJoinStartedAt = null;
         } else if (!pendingJoinRequestId) {
-          pendingJoinRequestId = resolved.requestId;
+          pendingJoinRequestId = normalizeRequestId(resolved.requestId);
         }
         var joinRequestId = resolved.requestId;
         var joinResult = await apiPost(JOIN_URL, {
@@ -947,7 +947,7 @@
           pendingLeaveRetries = 0;
           pendingLeaveStartedAt = null;
         } else if (!pendingLeaveRequestId) {
-          pendingLeaveRequestId = resolved.requestId;
+          pendingLeaveRequestId = normalizeRequestId(resolved.requestId);
         }
         var leaveRequestId = resolved.requestId;
         klog('poker_leave_request', { tableId: tableId, requestId: leaveRequestId, url: LEAVE_URL });
