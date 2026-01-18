@@ -188,6 +188,7 @@ export async function handler(event) {
       if (initResult.holeCards) {
         const inserts = Object.entries(initResult.holeCards);
         for (const [userId, cards] of inserts) {
+          // Hole cards are server-only, relying on service-role access.
           await tx.unsafe(
             "insert into public.poker_hole_cards (table_id, hand_id, user_id, cards) values ($1, $2, $3, $4::jsonb) on conflict do nothing;",
             [tableId, updatedState.handId, userId, JSON.stringify(cards)]

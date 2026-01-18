@@ -13,3 +13,18 @@ create policy "poker_hole_cards_read_own"
   on public.poker_hole_cards
   for select
   using (auth.uid() = user_id);
+
+create policy "poker_hole_cards_no_client_insert"
+  on public.poker_hole_cards
+  for insert
+  with check (false);
+
+create policy "poker_hole_cards_no_client_update"
+  on public.poker_hole_cards
+  for update
+  using (false);
+
+create policy "poker_hole_cards_no_client_delete"
+  on public.poker_hole_cards
+  for delete
+  using (false);
