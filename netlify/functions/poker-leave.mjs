@@ -73,12 +73,6 @@ export async function handler(event) {
   const origin = event.headers?.origin || event.headers?.Origin;
   const cors = corsHeaders(origin);
 
-  const parsed = parseBody(event.body);
-  const payload = parsed.ok ? parsed.value ?? {} : null;
-  const tableIdValue = payload && typeof payload.tableId === "string" ? payload.tableId.trim() : "";
-  const requestIdValue = payload?.requestId;
-  const requestIdPresent = requestIdValue != null && requestIdValue !== "";
-
   if (!cors) {
     return {
       statusCode: 403,
@@ -92,6 +86,9 @@ export async function handler(event) {
   if (event.httpMethod !== "POST") {
     return { statusCode: 405, headers: cors, body: JSON.stringify({ error: "method_not_allowed" }) };
   }
+
+  const parsed = parseBody(event.body);
+  const payload = parsed.ok ? parsed.value ?? {} : null;
   if (!parsed.ok) {
     return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "invalid_json" }) };
   }
@@ -100,14 +97,16 @@ export async function handler(event) {
     return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "invalid_payload" }) };
   }
 
-  const tableId = typeof tableIdValue === "string" ? tableIdValue.trim() : "";
+  const tableIdRaw = payload && typeof payload.tableId === "string" ? payload.tableId.trim() : "";
+  const tableId = typeof tableIdRaw === "string" ? tableIdRaw.trim() : "";
   if (!tableId || !isValidUuid(tableId)) {
     return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "invalid_table_id" }) };
   }
 
+  const requestIdValue = payload?.requestId;
+  const requestIdPresent = requestIdValue != null && requestIdValue !== "";
   const requestIdParsed = normalizeRequestId(payload?.requestId, { maxLen: 200 });
   if (!requestIdParsed.ok) {
-    const requestIdValue = payload?.requestId;
     const requestIdType = typeof requestIdValue;
     const requestIdPreview = typeof requestIdValue === "string" ? requestIdValue.trim().slice(0, 50) : null;
     klog("poker_request_id_invalid", {
@@ -115,6 +114,7 @@ export async function handler(event) {
       tableId,
       requestIdType,
       requestIdPreview,
+      requestIdPresent,
       reason: "normalize_failed",
     });
     return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "invalid_request_id" }) };
@@ -125,7 +125,8 @@ export async function handler(event) {
   const auth = await verifySupabaseJwt(token);
   const userId = auth.userId || null;
   klog("poker_leave_start", {
-    tableId: tableIdValue || null,
+    tableId,
+    tableIdRaw: tableIdRaw || null,
     userId,
     hasAuth: !!(auth.valid && auth.userId),
     requestIdPresent,

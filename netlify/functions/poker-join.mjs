@@ -124,11 +124,13 @@ export async function handler(event) {
     const requestIdValue = payload?.requestId;
     const requestIdType = typeof requestIdValue;
     const requestIdPreview = typeof requestIdValue === "string" ? requestIdValue.trim().slice(0, 50) : null;
+    const requestIdPresent = requestIdValue != null && requestIdValue !== "";
     klog("poker_request_id_invalid", {
       fn: "join",
       tableId,
       requestIdType,
       requestIdPreview,
+      requestIdPresent,
       reason: "normalize_failed",
     });
     return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "invalid_request_id" }) };

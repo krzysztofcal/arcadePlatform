@@ -30,6 +30,7 @@ export async function handler(event) {
           select ctid
           from public.poker_requests
           where result_json is null
+            and created_at is not null
             and created_at < now() - ($1::int * interval '1 minute')
           limit $2
         )
@@ -78,11 +79,13 @@ returning t.id;
       return { cleanupCount, expiredCount, closedCount };
     });
 
-    klog("poker_requests_cleanup", {
-      deleted: result.cleanupCount,
-      cutoffMinutes: STALE_PENDING_CUTOFF_MINUTES,
-      limit: STALE_PENDING_LIMIT,
-    });
+    if (result.cleanupCount > 0) {
+      klog("poker_requests_cleanup", {
+        deleted: result.cleanupCount,
+        cutoffMinutes: STALE_PENDING_CUTOFF_MINUTES,
+        limit: STALE_PENDING_LIMIT,
+      });
+    }
     return {
       statusCode: 200,
       headers: baseHeaders(),
