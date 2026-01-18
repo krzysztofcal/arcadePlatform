@@ -164,41 +164,121 @@
     if (window.GameXpBridge && typeof window.GameXpBridge.nudge === 'function') window.GameXpBridge.nudge();
   }
 
-  function showLoading(show, errorMsg) {
+  function showLoading(show, msg) {
     if (elements.loadingOverlay) {
       elements.loadingOverlay.style.display = show ? 'flex' : 'none';
-      if (errorMsg && elements.loadingText) {
-        elements.loadingText.textContent = errorMsg;
-        elements.loadingText.style.color = '#ff6b6b';
+    }
+    if (elements.loadingText && msg) {
+      elements.loadingText.textContent = msg;
+      elements.loadingText.style.color = show ? '#ff6b6b' : '';
+    }
+    if (elements.loadingProgress) {
+      elements.loadingProgress.textContent = show ? '' : '';
+    }
+  }
+
+  function showRetryButton(errorMsg) {
+    showLoading(true, errorMsg);
+    if (elements.playBtn) {
+      elements.playBtn.disabled = false;
+      elements.playBtn.style.display = 'inline-flex';
+      elements.playBtn.textContent = 'Retry';
+    }
+  }
+
+  // Preflight diagnostics for js-dos API
+  function getDosPreflight() {
+    var info = {
+      dosType: typeof window.Dos,
+      dosKeys: [],
+      elementExists: !!elements.dos
+    };
+    if (window.Dos && typeof window.Dos === 'function') {
+      try {
+        info.dosKeys = Object.keys(window.Dos);
+      } catch (e) {
+        info.dosKeysError = String(e);
       }
     }
+    return info;
+  }
+
+  // Handle success after game loads
+  function onGameLoaded(ci) {
+    state.ci = ci;
+    state.loaded = true;
+    state.running = true;
+    state.startTime = Date.now();
+    showLoading(false);
+    if (elements.playBtn) elements.playBtn.style.display = 'none';
+    if (elements.restartBtn) elements.restartBtn.style.display = 'inline-flex';
+    initMobileControls();
+    if (state.timeInterval) clearInterval(state.timeInterval);
+    state.timeInterval = setInterval(updateTime, 1000);
+    setupGameEventListeners();
+    klog('freedoom_loaded', { success: true });
+  }
+
+  // Handle failure during game load
+  function onGameError(error, preflight) {
+    var errMsg = String(error);
+    klog('freedoom_load_error', { error: errMsg, preflight: preflight });
+    showRetryButton('Failed: ' + errMsg.slice(0, 50));
   }
 
   function startGame() {
     if (state.loaded) { resumeGame(); return; }
     if (elements.playBtn) { elements.playBtn.disabled = true; elements.playBtn.style.display = 'none'; }
     showLoading(true, 'Loading...');
+    if (elements.loadingProgress) elements.loadingProgress.textContent = '';
 
-    // js-dos v8 API: Dos(element) returns instance, .run(url) returns Promise
-    var dosInstance = Dos(elements.dos);
+    // Preflight diagnostics
+    var preflight = getDosPreflight();
+    klog('dos_preflight', preflight);
 
-    dosInstance.run(FREEDOOM_BUNDLE_URL).then(function(ci) {
-      state.ci = ci;
-      state.loaded = true;
-      state.running = true;
-      state.startTime = Date.now();
-      showLoading(false);
-      if (elements.restartBtn) elements.restartBtn.style.display = 'inline-flex';
-      initMobileControls();
-      if (state.timeInterval) clearInterval(state.timeInterval);
-      state.timeInterval = setInterval(updateTime, 1000);
-      setupGameEventListeners();
-      klog('freedoom_loaded', { success: true });
-    }).catch(function(error) {
-      klog('freedoom_load_error', { error: String(error) });
-      showLoading(true, 'Failed to load game. Check console.');
-      if (elements.playBtn) { elements.playBtn.disabled = false; elements.playBtn.style.display = 'inline-flex'; elements.playBtn.textContent = 'Retry'; }
-    });
+    // Check if Dos is available
+    if (typeof window.Dos !== 'function') {
+      onGameError('js-dos not loaded: Dos is ' + typeof window.Dos, preflight);
+      return;
+    }
+
+    try {
+      var dosInit = window.Dos(elements.dos);
+
+      // Determine API shape and get a Promise that resolves to CI
+      var runPromise = null;
+
+      if (dosInit && typeof dosInit.run === 'function') {
+        // Direct .run() method available
+        runPromise = dosInit.run(FREEDOOM_BUNDLE_URL);
+      } else if (dosInit && typeof dosInit.then === 'function') {
+        // dosInit is a Promise/thenable - wait for it then call .run()
+        runPromise = dosInit.then(function(instance) {
+          if (instance && typeof instance.run === 'function') {
+            return instance.run(FREEDOOM_BUNDLE_URL);
+          }
+          throw new Error('js-dos instance has no .run(): ' + Object.keys(instance || {}).join(','));
+        });
+      } else {
+        // Unknown API shape
+        var shape = dosInit ? Object.keys(dosInit).join(',') : 'null/undefined';
+        throw new Error('js-dos API mismatch: Dos() returned ' + typeof dosInit + ' with keys: ' + shape);
+      }
+
+      // Handle the promise
+      if (runPromise && typeof runPromise.then === 'function') {
+        runPromise.then(function(ci) {
+          onGameLoaded(ci);
+        }).catch(function(err) {
+          onGameError(err, preflight);
+        });
+      } else {
+        throw new Error('js-dos run did not return a Promise');
+      }
+
+    } catch (err) {
+      onGameError(err, preflight);
+    }
   }
 
   function setupGameEventListeners() {
