@@ -479,7 +479,6 @@
     var pendingLeaveTimer = null;
     var joinPending = false;
     var leavePending = false;
-    var needsRefreshOnVisible = false;
     var heartbeatPendingRetries = 0;
     var heartbeatInFlight = false;
     var HEARTBEAT_PENDING_MAX_RETRIES = 8;
@@ -584,6 +583,8 @@
     function handlePendingTimeout(action){
       var message = action === 'join' ? t('pokerErrJoinPending', 'Join still pending. Please try again.') : t('pokerErrLeavePending', 'Leave still pending. Please try again.');
       var endpoint = action === 'join' ? JOIN_URL : LEAVE_URL;
+      var retries = action === 'join' ? pendingJoinRetries : pendingLeaveRetries;
+      klog('poker_pending_timeout', { action: action, tableId: tableId, retries: retries, budgetMs: PENDING_RETRY_BUDGET_MS });
       if (action === 'join'){
         clearJoinPending();
       } else {
@@ -872,10 +873,7 @@
         }
         clearJoinPending();
         setError(errorEl, null);
-        if (!isPageActive()){
-          needsRefreshOnVisible = true;
-          return;
-        }
+        if (!isPageActive()) return;
         loadTable(false);
       } catch (err){
         clearJoinPending();
@@ -924,10 +922,7 @@
         }
         clearLeavePending();
         setError(errorEl, null);
-        if (!isPageActive()){
-          needsRefreshOnVisible = true;
-          return;
-        }
+        if (!isPageActive()) return;
         loadTable(false);
       } catch (err){
         clearLeavePending();
@@ -952,14 +947,13 @@
         stopPolling();
         stopHeartbeat();
         stopPendingRetries();
-        clearJoinPending();
-        clearLeavePending();
       } else {
         state.pollInterval = POLL_INTERVAL_BASE;
         state.pollErrors = 0;
         startPolling();
         startHeartbeat();
-        if (needsRefreshOnVisible) needsRefreshOnVisible = false;
+        if (pendingJoinRequestId) schedulePendingRetry('join', retryJoin);
+        if (pendingLeaveRequestId) schedulePendingRetry('leave', retryLeave);
         loadTable(false);
       }
     }
@@ -972,7 +966,6 @@
       if (joinPending || leavePending) return;
       klog('poker_join_click', { tableId: tableId, hasToken: !!state.token });
       setError(errorEl, null);
-      setPendingState('join', true);
       joinTable().catch(function(err){
         clearJoinPending();
         klog('poker_join_click_error', { message: err && (err.message || err.code) ? err.message || err.code : 'unknown_error' });
@@ -988,7 +981,6 @@
       if (joinPending || leavePending) return;
       klog('poker_leave_click', { tableId: tableId, hasToken: !!state.token });
       setError(errorEl, null);
-      setPendingState('leave', true);
       leaveTable().catch(function(err){
         clearLeavePending();
         klog('poker_leave_click_error', { message: err && (err.message || err.code) ? err.message || err.code : 'unknown_error' });
