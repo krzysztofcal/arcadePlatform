@@ -634,16 +634,9 @@
     }
 
     function stopPendingAll(){
-      var hadPending = false;
-      if (pendingJoinRequestId){
-        pauseJoinPending();
-        hadPending = true;
-      }
-      if (pendingLeaveRequestId){
-        pauseLeavePending();
-        hadPending = true;
-      }
-      if (!hadPending) stopPendingRetries();
+      stopPendingRetries();
+      clearJoinPending();
+      clearLeavePending();
     }
 
     function pauseJoinPending(){
@@ -998,7 +991,7 @@
       if (document.visibilityState === 'hidden'){
         stopPolling();
         stopHeartbeat();
-        stopPendingAll();
+        stopPendingRetries();
         if (!pendingHiddenAt) pendingHiddenAt = Date.now();
       } else {
         if (pendingHiddenAt){
