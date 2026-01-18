@@ -1232,7 +1232,7 @@
       if (actionType === 'BET' || actionType === 'RAISE'){
         amount = parseActionAmount();
         if (!amount){
-          setActionError('act', ACT_URL, 'invalid_amount', t('pokerErrActAmount', 'Enter a bet or raise amount.'));
+          setActionError('act', ACT_URL, 'invalid_amount', t('pokerErrActAmount', 'Enter the total bet amount (raise to).'));
           return;
         }
       }

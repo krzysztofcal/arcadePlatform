@@ -36,6 +36,34 @@ const parseAmount = (value) => {
   return num;
 };
 
+const mapHoleCards = (rows) =>
+  Array.isArray(rows)
+    ? rows.reduce((acc, row) => {
+        if (row?.user_id && row?.cards) {
+          acc[row.user_id] = row.cards;
+        }
+        return acc;
+      }, {})
+    : {};
+
+const loadHoleCardsForHand = async (tx, tableId, handId) => {
+  if (!handId) return {};
+  const rows = await tx.unsafe(
+    "select user_id, cards from public.poker_hole_cards where table_id = $1 and hand_id = $2;",
+    [tableId, handId]
+  );
+  return mapHoleCards(rows);
+};
+
+const loadHoleCardsForUser = async (tx, tableId, handId, userId) => {
+  if (!handId || !userId) return null;
+  const rows = await tx.unsafe(
+    "select cards from public.poker_hole_cards where table_id = $1 and hand_id = $2 and user_id = $3 limit 1;",
+    [tableId, handId, userId]
+  );
+  return rows?.[0]?.cards || null;
+};
+
 export async function handler(event) {
   const origin = event.headers?.origin || event.headers?.Origin;
   const cors = corsHeaders(origin);
@@ -125,7 +153,12 @@ export async function handler(event) {
         );
         const latest = latestRows?.[0] || stateRow;
         const latestState = normalizeState(latest?.state);
-        return { ok: true, state: toPublicState(latestState, auth.userId), version: Number(latest?.version) };
+        const publicState = toPublicState(latestState, auth.userId);
+        const userHoleCards = await loadHoleCardsForUser(tx, tableId, latestState?.handId, auth.userId);
+        if (userHoleCards) {
+          publicState.hole = { [auth.userId]: userHoleCards };
+        }
+        return { ok: true, state: publicState, version: Number(latest?.version) };
       }
 
       const stakes = table.stakes || {};
@@ -138,8 +171,29 @@ export async function handler(event) {
       const autoStarted = ensureAutoStart({ state: currentState, tableId, seats, stacks, stakes });
       if (!autoStarted.ok) throw makeError(409, autoStarted.error || "cannot_start");
       const baseState = autoStarted.state || currentState;
+      const handId = baseState.handId;
+      let holeCards = {};
+      if (autoStarted.holeCards) {
+        const inserts = Object.entries(autoStarted.holeCards);
+        for (const [userId, cards] of inserts) {
+          await tx.unsafe(
+            "insert into public.poker_hole_cards (table_id, hand_id, user_id, cards) values ($1, $2, $3, $4::jsonb) on conflict do nothing;",
+            [tableId, handId, userId, JSON.stringify(cards)]
+          );
+        }
+        holeCards = autoStarted.holeCards;
+      } else {
+        holeCards = await loadHoleCardsForHand(tx, tableId, handId);
+      }
 
-      const actionResult = applyAction({ currentState: baseState, actionType, amount, userId: auth.userId, stakes });
+      const actionResult = applyAction({
+        currentState: baseState,
+        actionType,
+        amount,
+        userId: auth.userId,
+        stakes,
+        holeCards,
+      });
       if (!actionResult.ok) throw makeError(409, actionResult.error || "action_invalid");
       const nextState = actionResult.state;
 
@@ -170,6 +224,12 @@ export async function handler(event) {
       }
 
       const publicState = toPublicState(nextState, auth.userId);
+      const userHoleCards = autoStarted.holeCards
+        ? autoStarted.holeCards[auth.userId]
+        : await loadHoleCardsForUser(tx, tableId, handId, auth.userId);
+      if (userHoleCards) {
+        publicState.hole = { [auth.userId]: userHoleCards };
+      }
       return { ok: true, state: publicState, version: newVersion };
     });
 

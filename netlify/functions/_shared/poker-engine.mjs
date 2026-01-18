@@ -71,6 +71,11 @@ const shuffleDeck = (deck, seed) => {
   return copy;
 };
 
+const getDeckForHand = (deckSeed) => {
+  const seed = Number.isFinite(Number(deckSeed)) ? Number(deckSeed) : 0;
+  return shuffleDeck(buildDeck(), seed);
+};
+
 const nextSeatFrom = (seatNos, current) => {
   if (!seatNos.length) return null;
   const idx = seatNos.indexOf(current);
@@ -123,8 +128,6 @@ const resetStreetBets = (publicSeats) => {
   return bets;
 };
 
-const dealBoard = (deck, count) => deck.splice(0, count);
-
 const resolveClosingSeat = (publicSeats, preferredSeat) => {
   const activeSeatNos = publicSeats.filter((seat) => !seat.hasFolded && seat.stack > 0).map((seat) => seat.seatNo);
   if (activeSeatNos.includes(preferredSeat)) return preferredSeat;
@@ -163,10 +166,10 @@ const markAllAwaitingResponse = (publicSeats, aggressorSeatNo) => {
 };
 
 const allSettled = (publicSeats, streetBet) =>
-  publicSeats.every((seat) => seat.hasFolded || (seat.betThisStreet || 0) >= streetBet);
+  publicSeats.every((seat) => !isInHand(seat) || (seat.betThisStreet || 0) >= streetBet);
 
 const allActed = (publicSeats, actedThisStreet) =>
-  publicSeats.every((seat) => seat.hasFolded || actedThisStreet?.[seat.seatNo]);
+  publicSeats.every((seat) => !isInHand(seat) || actedThisStreet?.[seat.seatNo]);
 
 const startStreetState = ({ state, publicSeats, streetNo, actorSeat, closingSeat, bbAmount }) => {
   const resetBets = resetStreetBets(publicSeats);
@@ -195,12 +198,15 @@ const initHand = ({ tableId, seats, stacks, stakes, prevState }) => {
   const handNo = Number.isFinite(prevState?.handNo) ? prevState.handNo + 1 : 1;
   const handId = `hand_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
   const seed = Math.floor(Math.random() * 1e9);
-  const deck = shuffleDeck(buildDeck(), seed);
-  const hole = {};
+  const deck = getDeckForHand(seed);
+  const holeCards = {};
   const bets = {};
   const folded = {};
-  for (const seat of activeSeats) {
-    hole[seat.userId] = [deck.shift(), deck.shift()];
+  const orderedSeats = activeSeats.slice().sort((a, b) => a.seatNo - b.seatNo);
+  let deckIndex = 0;
+  for (const seat of orderedSeats) {
+    holeCards[seat.userId] = [deck[deckIndex], deck[deckIndex + 1]];
+    deckIndex += 2;
     bets[seat.userId] = 0;
     folded[seat.userId] = false;
   }
@@ -244,9 +250,8 @@ const initHand = ({ tableId, seats, stacks, stakes, prevState }) => {
     lastAggressorSeat: bbSeat,
     actedThisStreet,
     deckSeed: seed,
-    deck,
+    deckIndex,
     board: [],
-    hole,
     public: { seats: publicSeats },
     stacks: stacksCopy,
     potTotal,
@@ -264,10 +269,11 @@ const initHand = ({ tableId, seats, stacks, stakes, prevState }) => {
   return {
     ok: true,
     state,
+    holeCards,
   };
 };
 
-const settleHand = (state, stacks) => {
+const settleHand = (state, stacks, holeCards) => {
   const publicSeats = state.public?.seats || [];
   const active = publicSeats.filter((seat) => isInHand(seat));
   if (active.length === 1) {
@@ -279,7 +285,7 @@ const settleHand = (state, stacks) => {
   let bestScore = null;
   let winners = [];
   for (const seat of active) {
-    const hole = state.hole?.[seat.userId] || [];
+    const hole = holeCards?.[seat.userId] || [];
     const score = evaluateHand([...board, ...hole]);
     if (!score) continue;
     if (!bestScore || compareScores(score.score, bestScore.score) > 0) {
@@ -296,7 +302,7 @@ const settleHand = (state, stacks) => {
   });
   const revealed = {};
   winners.forEach((userId) => {
-    revealed[userId] = state.hole?.[userId] || [];
+    revealed[userId] = holeCards?.[userId] || [];
   });
   return { winners, stacks, revealed };
 };
@@ -311,9 +317,8 @@ const cleanStateForNextHand = (state) => ({
   bbSeat: null,
   actorSeat: null,
   deckSeed: null,
-  deck: null,
+  deckIndex: 0,
   board: [],
-  hole: null,
   public: state.public,
   potTotal: 0,
   sidePots: null,
@@ -330,13 +335,10 @@ const toPublicState = (state, currentUserId) => {
   const publicState = { ...state };
   delete publicState.deck;
   delete publicState.hole;
-  if (currentUserId && state?.hole?.[currentUserId]) {
-    publicState.hole = { [currentUserId]: state.hole[currentUserId] };
-  }
   return publicState;
 };
 
-const applyAction = ({ currentState, actionType, amount, userId, stakes }) => {
+const applyAction = ({ currentState, actionType, amount, userId, stakes, holeCards }) => {
   const state = normalizeState(currentState);
   let publicSeats = Array.isArray(state.public?.seats) ? state.public.seats.map((s) => ({ ...s })) : [];
   if (!publicSeats.length && Array.isArray(state.seats)) {
@@ -381,17 +383,19 @@ const applyAction = ({ currentState, actionType, amount, userId, stakes }) => {
     state.actedThisStreet[actorSeat.seatNo] = true;
   } else if (actionType === "CALL") {
     if (toCall <= 0) return { ok: false, error: "cannot_call" };
-    if (stack <= toCall) return { ok: false, error: "insufficient_stack" };
+    if (stack < toCall) return { ok: false, error: "insufficient_stack" };
+    if (stack === toCall) return { ok: false, error: "all_in_not_supported" };
     actorSeat.stack -= toCall;
     actorSeat.betThisStreet += toCall;
     state.potTotal += toCall;
     state.actedThisStreet[actorSeat.seatNo] = true;
   } else if (actionType === "BET") {
     if (streetBet > 0) return { ok: false, error: "cannot_bet" };
-    if (normalizedAmount <= 0) return { ok: false, error: "invalid_bet" };
+    if (!Number.isInteger(normalizedAmount) || normalizedAmount <= 0) return { ok: false, error: "invalid_bet" };
     const toPay = normalizedAmount - betThisStreet;
     if (toPay <= 0) return { ok: false, error: "invalid_bet" };
-    if (stack <= toPay) return { ok: false, error: "insufficient_stack" };
+    if (stack < toPay) return { ok: false, error: "insufficient_stack" };
+    if (stack === toPay) return { ok: false, error: "all_in_not_supported" };
     actorSeat.stack -= toPay;
     actorSeat.betThisStreet = normalizedAmount;
     state.potTotal += toPay;
@@ -402,11 +406,12 @@ const applyAction = ({ currentState, actionType, amount, userId, stakes }) => {
     state.actedThisStreet = markAllAwaitingResponse(publicSeats, actorSeat.seatNo);
   } else if (actionType === "RAISE") {
     if (streetBet <= 0) return { ok: false, error: "cannot_raise" };
-    if (normalizedAmount <= streetBet) return { ok: false, error: "invalid_raise" };
+    if (!Number.isInteger(normalizedAmount) || normalizedAmount <= streetBet) return { ok: false, error: "invalid_raise" };
     if (normalizedAmount < (state.minRaiseTo || 0)) return { ok: false, error: "raise_too_small" };
     const toPay = normalizedAmount - betThisStreet;
     if (toPay <= toCall) return { ok: false, error: "invalid_raise" };
-    if (stack <= toPay) return { ok: false, error: "insufficient_stack" };
+    if (stack < toPay) return { ok: false, error: "insufficient_stack" };
+    if (stack === toPay) return { ok: false, error: "all_in_not_supported" };
     actorSeat.stack -= toPay;
     actorSeat.betThisStreet = normalizedAmount;
     state.potTotal += toPay;
@@ -427,7 +432,7 @@ const applyAction = ({ currentState, actionType, amount, userId, stakes }) => {
     state.phase = "SETTLED";
     const stacks = {};
     publicSeats.forEach((seat) => { stacks[seat.userId] = seat.stack; });
-    const result = settleHand(state, stacks);
+    const result = settleHand(state, stacks, holeCards);
     publicSeats.forEach((seat) => { seat.stack = stacks[seat.userId]; });
     state.public.seats = publicSeats;
     state.stacks = publicSeats.reduce((acc, seat) => {
@@ -445,20 +450,24 @@ const applyAction = ({ currentState, actionType, amount, userId, stakes }) => {
   const settled = allSettled(publicSeats, state.streetBet || 0);
   const acted = allActed(publicSeats, state.actedThisStreet);
   const nextSeat = advanceActor(publicSeats, state.actorSeat);
-  const shouldClose = state.lastAggressorSeat
-    ? settled && (nextSeat === state.closingSeat || state.actorSeat === state.closingSeat)
-    : settled && acted;
+  const shouldClose = settled && acted;
 
   if (shouldClose) {
-    const deck = Array.isArray(state.deck) ? state.deck : [];
+    const deck = getDeckForHand(state.deckSeed);
     if (state.phase === "PREFLOP") {
-      state.board = [...(state.board || []), ...dealBoard(deck, 3)];
+      const startIndex = Number.isFinite(state.deckIndex) ? state.deckIndex : 0;
+      state.board = [...(state.board || []), ...deck.slice(startIndex, startIndex + 3)];
+      state.deckIndex = startIndex + 3;
       state.phase = "FLOP";
     } else if (state.phase === "FLOP") {
-      state.board = [...(state.board || []), ...dealBoard(deck, 1)];
+      const startIndex = Number.isFinite(state.deckIndex) ? state.deckIndex : 0;
+      state.board = [...(state.board || []), ...deck.slice(startIndex, startIndex + 1)];
+      state.deckIndex = startIndex + 1;
       state.phase = "TURN";
     } else if (state.phase === "TURN") {
-      state.board = [...(state.board || []), ...dealBoard(deck, 1)];
+      const startIndex = Number.isFinite(state.deckIndex) ? state.deckIndex : 0;
+      state.board = [...(state.board || []), ...deck.slice(startIndex, startIndex + 1)];
+      state.deckIndex = startIndex + 1;
       state.phase = "RIVER";
     } else if (state.phase === "RIVER") {
       state.phase = "SHOWDOWN";
@@ -466,7 +475,7 @@ const applyAction = ({ currentState, actionType, amount, userId, stakes }) => {
     if (state.phase === "SHOWDOWN") {
       const stacks = {};
       publicSeats.forEach((seat) => { stacks[seat.userId] = seat.stack; });
-      const result = settleHand(state, stacks);
+      const result = settleHand(state, stacks, holeCards);
       publicSeats.forEach((seat) => { seat.stack = stacks[seat.userId]; });
       state.public.seats = publicSeats;
       state.stacks = publicSeats.reduce((acc, seat) => {
@@ -523,6 +532,7 @@ export {
   normalizeState,
   normalizeSeatRows,
   toPublicState,
+  getDeckForHand,
   initHand,
   applyAction,
   ensureAutoStart,

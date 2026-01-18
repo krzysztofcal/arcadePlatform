@@ -168,6 +168,16 @@ export async function handler(event) {
         startedAt: new Date().toISOString(),
       };
 
+      if (initResult.holeCards) {
+        const inserts = Object.entries(initResult.holeCards);
+        for (const [userId, cards] of inserts) {
+          await tx.unsafe(
+            "insert into public.poker_hole_cards (table_id, hand_id, user_id, cards) values ($1, $2, $3, $4::jsonb) on conflict do nothing;",
+            [tableId, updatedState.handId, userId, JSON.stringify(cards)]
+          );
+        }
+      }
+
       const updateRows = await tx.unsafe(
         "update public.poker_state set version = version + 1, state = $2::jsonb, updated_at = now() where table_id = $1 returning version;",
         [tableId, JSON.stringify(updatedState)]
@@ -183,6 +193,9 @@ export async function handler(event) {
       );
 
       const publicState = toPublicState(updatedState, auth.userId);
+      if (initResult.holeCards && initResult.holeCards[auth.userId]) {
+        publicState.hole = { [auth.userId]: initResult.holeCards[auth.userId] };
+      }
       return { tableId, version: newVersion, handId: updatedState.handId, buttonSeatNo: updatedState.dealerSeat, nextToActSeatNo: updatedState.actorSeat, publicState };
     });
 

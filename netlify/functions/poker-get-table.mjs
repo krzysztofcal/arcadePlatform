@@ -77,12 +77,23 @@ export async function handler(event) {
             userId: seat.user_id,
             seatNo: seat.seat_no,
             status: seat.status,
+            stack: seat.stack,
             lastSeenAt: seat.last_seen_at,
             joinedAt: seat.joined_at,
           }))
         : [];
 
-      return { table, seats, stateRow };
+      const currentState = normalizeState(stateRow.state);
+      let holeCards = null;
+      if (currentState?.handId) {
+        const holeRows = await tx.unsafe(
+          "select cards from public.poker_hole_cards where table_id = $1 and hand_id = $2 and user_id = $3 limit 1;",
+          [tableId, currentState.handId, auth.userId]
+        );
+        holeCards = holeRows?.[0]?.cards || null;
+      }
+
+      return { table, seats, stateRow, holeCards };
     });
 
     if (result?.error === "table_not_found") {
@@ -105,6 +116,9 @@ export async function handler(event) {
     };
 
     const publicState = toPublicState(normalizeState(stateRow.state), auth.userId);
+    if (result.holeCards) {
+      publicState.hole = { [auth.userId]: result.holeCards };
+    }
     const compatibility = {
       stacks: publicState.stacks || {},
       pot: publicState.potTotal != null ? publicState.potTotal : publicState.pot,
