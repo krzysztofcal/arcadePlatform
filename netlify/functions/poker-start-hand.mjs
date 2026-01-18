@@ -140,8 +140,8 @@ export async function handler(event) {
         "select user_id, seat_no, status, stack from public.poker_seats where table_id = $1 and status = 'ACTIVE' order by seat_no asc;",
         [tableId]
       );
-      const seats = normalizeSeatRows(seatRows);
-      if (seats.length < 2) {
+      const derivedSeats = normalizeSeatRows(seatRows);
+      if (derivedSeats.length < 2) {
         throw makeError(409, "not_enough_players");
       }
 
@@ -150,13 +150,19 @@ export async function handler(event) {
       }
 
       const currentStacks = parseStacks(currentState.stacks);
-      const nextStacks = seats.reduce((acc, seat) => {
+      const nextStacks = derivedSeats.reduce((acc, seat) => {
         const stackValue = Number.isFinite(seat.stack) ? seat.stack : currentStacks?.[seat.userId] || 0;
         acc[seat.userId] = stackValue;
         return acc;
       }, {});
 
-      const initResult = initHand({ tableId, seats, stacks: nextStacks, stakes: table.stakes || {}, prevState: currentState });
+      const initResult = initHand({
+        tableId,
+        seats: derivedSeats,
+        stacks: nextStacks,
+        stakes: table.stakes || {},
+        prevState: currentState,
+      });
       if (!initResult.ok) {
         throw makeError(409, initResult.error || "cannot_start");
       }
