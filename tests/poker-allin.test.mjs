@@ -1,0 +1,125 @@
+import { describe, expect, it } from "vitest";
+
+import { applyAction, buildSidePots } from "../netlify/functions/_shared/poker-engine.mjs";
+
+const makeBaseState = (overrides = {}) => ({
+  phase: "FLOP",
+  streetBet: 20,
+  minRaiseTo: 30,
+  lastFullRaiseSize: 10,
+  raiseClosed: false,
+  bbAmount: 10,
+  potTotal: 0,
+  contrib: {},
+  public: {
+    seats: [
+      {
+        userId: "actor",
+        seatNo: 1,
+        status: "ACTIVE",
+        stack: 25,
+        betThisStreet: 0,
+        hasFolded: false,
+        isAllIn: false,
+      },
+      {
+        userId: "next",
+        seatNo: 2,
+        status: "ACTIVE",
+        stack: 100,
+        betThisStreet: 20,
+        hasFolded: false,
+        isAllIn: false,
+      },
+    ],
+  },
+  actedThisStreet: { 1: false, 2: false },
+  actorSeat: 1,
+  actionRequiredFromUserId: "actor",
+  allowedActions: [],
+  ...overrides,
+});
+
+describe("poker all-in and side pot behavior", () => {
+  it("builds side pots with correct eligibility", () => {
+    const seats = [
+      { userId: "a", hasFolded: false },
+      { userId: "b", hasFolded: false },
+      { userId: "c", hasFolded: false },
+    ];
+    const contrib = { a: 5, b: 10, c: 20 };
+    const sidePots = buildSidePots(contrib, seats);
+
+    expect(sidePots).toEqual([
+      { amount: 15, eligibleUserIds: ["a", "b", "c"] },
+      { amount: 10, eligibleUserIds: ["b", "c"] },
+      { amount: 10, eligibleUserIds: ["c"] },
+    ]);
+  });
+
+  it("allows all-in call short without errors", () => {
+    const state = makeBaseState({
+      phase: "PREFLOP",
+      streetBet: 10,
+      minRaiseTo: 20,
+      public: {
+        seats: [
+          {
+            userId: "actor",
+            seatNo: 1,
+            status: "ACTIVE",
+            stack: 5,
+            betThisStreet: 0,
+            hasFolded: false,
+            isAllIn: false,
+          },
+          {
+            userId: "next",
+            seatNo: 2,
+            status: "ACTIVE",
+            stack: 50,
+            betThisStreet: 10,
+            hasFolded: false,
+            isAllIn: false,
+          },
+        ],
+      },
+      actedThisStreet: { 1: false, 2: false },
+      actionRequiredFromUserId: "actor",
+    });
+
+    const result = applyAction({
+      currentState: state,
+      actionType: "CALL",
+      amount: null,
+      userId: "actor",
+      stakes: { bb: 10 },
+      holeCards: {},
+    });
+
+    expect(result.ok).toBe(true);
+    const actorSeat = result.state.public.seats.find((seat) => seat.userId === "actor");
+    expect(actorSeat.stack).toBe(0);
+    expect(actorSeat.betThisStreet).toBe(5);
+    expect(actorSeat.isAllIn).toBe(true);
+  });
+
+  it("does not reopen betting after an insufficient all-in raise", () => {
+    const result = applyAction({
+      currentState: makeBaseState(),
+      actionType: "RAISE",
+      amount: 25,
+      userId: "actor",
+      stakes: { bb: 10 },
+      holeCards: {},
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.state.streetBet).toBe(25);
+    expect(result.state.raiseClosed).toBe(true);
+    expect(result.state.lastFullRaiseSize).toBe(10);
+    const nextActor = result.state.public.seats.find((seat) => seat.userId === "next");
+    expect(result.state.allowedActions).not.toContain("RAISE");
+    expect(nextActor).toBeTruthy();
+  });
+});
