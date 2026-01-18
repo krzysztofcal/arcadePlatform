@@ -112,11 +112,6 @@
     throw err;
   }
 
-  function isAbortError(err){
-    if (!err) return false;
-    return err.name === 'AbortError' || err.code === 'abort' || err.code === 'aborted';
-  }
-
   function isAuthError(err){
     return !!(err && (err.code === 'not_authenticated' || err.status === 401));
   }
@@ -884,9 +879,6 @@
         loadTable(false);
       } catch (err){
         clearJoinPending();
-        if (isAbortError(err)){
-          return;
-        }
         if (isAuthError(err)){
           handleAuthExpired({
             authMsg: authMsg,
@@ -939,9 +931,6 @@
         loadTable(false);
       } catch (err){
         clearLeavePending();
-        if (isAbortError(err)){
-          return;
-        }
         if (isAuthError(err)){
           handleAuthExpired({
             authMsg: authMsg,
@@ -986,7 +975,6 @@
       setPendingState('join', true);
       joinTable().catch(function(err){
         clearJoinPending();
-        if (isAbortError(err)) return;
         klog('poker_join_click_error', { message: err && (err.message || err.code) ? err.message || err.code : 'unknown_error' });
         setActionError('join', JOIN_URL, err && err.code ? err.code : 'request_failed', err && (err.message || err.code) ? err.message || err.code : t('pokerErrJoin', 'Failed to join'));
       });
@@ -1003,7 +991,6 @@
       setPendingState('leave', true);
       leaveTable().catch(function(err){
         clearLeavePending();
-        if (isAbortError(err)) return;
         klog('poker_leave_click_error', { message: err && (err.message || err.code) ? err.message || err.code : 'unknown_error' });
         setActionError('leave', LEAVE_URL, err && err.code ? err.code : 'request_failed', err && (err.message || err.code) ? err.message || err.code : t('pokerErrLeave', 'Failed to leave'));
       });
