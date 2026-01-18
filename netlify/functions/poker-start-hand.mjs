@@ -93,7 +93,9 @@ export async function handler(event) {
 
   try {
     const result = await beginSql(async (tx) => {
-      const tableRows = await tx.unsafe("select id, status from public.poker_tables where id = $1 limit 1;", [tableId]);
+      const tableRows = await tx.unsafe("select id, status, stakes from public.poker_tables where id = $1 limit 1;", [
+        tableId,
+      ]);
       const table = tableRows?.[0] || null;
       if (!table) {
         throw makeError(404, "table_not_found");

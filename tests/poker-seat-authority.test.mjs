@@ -14,6 +14,8 @@ vi.mock("../netlify/functions/_shared/supabase-admin.mjs", async () => {
   const actual = await vi.importActual("../netlify/functions/_shared/supabase-admin.mjs");
   return {
     ...actual,
+    baseHeaders: vi.fn(() => ({})),
+    corsHeaders: vi.fn(() => ({})),
     verifySupabaseJwt: vi.fn(async () => ({ valid: true, userId: "user-1" })),
     beginSql: vi.fn(async (fn) => {
       const responses = [
