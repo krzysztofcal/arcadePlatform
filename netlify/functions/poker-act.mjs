@@ -139,6 +139,45 @@ export async function handler(event) {
       const stateRow = stateRows?.[0] || null;
       if (!stateRow) throw new Error("poker_state_missing");
       const currentState = normalizeState(stateRow.state);
+      // Reconcile stacks and public seats with DB truth before acting.
+      const dbStacks = seats.reduce((acc, seat) => {
+        if (seat.status !== "ACTIVE") return acc;
+        const stackValue = Number.isFinite(seat.stack) ? seat.stack : 0;
+        acc[seat.userId] = stackValue;
+        return acc;
+      }, {});
+      const publicSeats = Array.isArray(currentState.public?.seats) ? currentState.public.seats : [];
+      const dbSeatMap = new Map(seats.map((seat) => [seat.userId, seat]));
+      const reconciledSeats = publicSeats
+        .filter((seat) => dbSeatMap.has(seat.userId))
+        .map((seat) => {
+          const dbSeat = dbSeatMap.get(seat.userId);
+          return {
+            userId: seat.userId,
+            seatNo: dbSeat?.seatNo ?? seat.seatNo,
+            status: dbSeat?.status || seat.status || "ACTIVE",
+            stack: Number.isFinite(dbStacks[seat.userId]) ? dbStacks[seat.userId] : 0,
+            betThisStreet: Number.isFinite(seat.betThisStreet) ? seat.betThisStreet : 0,
+            hasFolded: !!seat.hasFolded,
+            isAllIn: !!seat.isAllIn,
+          };
+        });
+      seats.forEach((seat) => {
+        if (seat.status !== "ACTIVE") return;
+        if (reconciledSeats.some((existing) => existing.userId === seat.userId)) return;
+        reconciledSeats.push({
+          userId: seat.userId,
+          seatNo: seat.seatNo,
+          status: seat.status || "ACTIVE",
+          stack: Number.isFinite(dbStacks[seat.userId]) ? dbStacks[seat.userId] : 0,
+          betThisStreet: 0,
+          hasFolded: false,
+          isAllIn: false,
+        });
+      });
+      reconciledSeats.sort((a, b) => a.seatNo - b.seatNo);
+      currentState.stacks = dbStacks;
+      currentState.public = { seats: reconciledSeats };
       const phase = currentState.phase || "WAITING";
       const activePhases = ["PREFLOP", "FLOP", "TURN", "RIVER", "SHOWDOWN"];
       if (!activePhases.includes(phase)) {
@@ -146,6 +185,7 @@ export async function handler(event) {
       }
 
       const requestMarker = `REQUEST:${requestId}`;
+      // Idempotency marker rows are stored as action_type = REQUEST:<requestId>.
       const existingRows = await tx.unsafe(
         "select id, version from public.poker_actions where table_id = $1 and user_id = $2 and action_type = $3 limit 1;",
         [tableId, auth.userId, requestMarker]
@@ -167,12 +207,6 @@ export async function handler(event) {
       }
 
       const stakes = table.stakes || {};
-      const stacks = seats.reduce((acc, seat) => {
-        const stackValue = Number.isFinite(seat.stack) ? seat.stack : 0;
-        acc[seat.userId] = stackValue;
-        return acc;
-      }, {});
-
       const baseState = currentState;
       const handId = baseState.handId;
       const holeCards = await loadHoleCardsForHand(tx, tableId, handId);

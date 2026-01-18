@@ -184,12 +184,12 @@ const allActed = (publicSeats, actedThisStreet) =>
   publicSeats.every((seat) => !isInHand(seat) || actedThisStreet?.[seat.seatNo]);
 
 const startStreetState = ({ state, publicSeats, streetNo, actorSeat, closingSeat, bbAmount }) => {
-  const resetBets = resetStreetBets(publicSeats);
-  publicSeats.forEach((seat) => { seat.betThisStreet = resetBets[seat.userId]; });
+  publicSeats.forEach((seat) => { seat.betThisStreet = 0; });
   state.streetBet = 0;
   state.minRaiseTo = bbAmount;
   state.streetNo = streetNo;
   state.bbAmount = bbAmount;
+  state.public = { ...state.public, seats: publicSeats };
   state.lastAggressorSeat = null;
   state.closingSeat = resolveClosingSeat(publicSeats, closingSeat);
   state.actedThisStreet = initActedThisStreet(publicSeats);

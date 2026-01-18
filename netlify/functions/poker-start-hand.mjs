@@ -124,16 +124,27 @@ export async function handler(event) {
       const sameRequest =
         currentState.lastStartHandRequestId === requestIdParsed.value && currentState.lastStartHandUserId === auth.userId;
       if (sameRequest) {
-        if (typeof currentState.handId === "string" && currentState.handId.trim()) {
-          return {
-            tableId,
-            version: normalizeVersion(stateRow.version),
-            handId: currentState.handId,
-            buttonSeatNo: normalizeSeatNo(currentState.buttonSeatNo),
-            nextToActSeatNo: normalizeSeatNo(currentState.nextToActSeatNo),
-          };
+        const publicState = toPublicState(normalizeState(stateRow.state), auth.userId);
+        const handId = publicState.handId || currentState.handId;
+        if (!handId || typeof handId !== "string") {
+          throw makeError(409, "state_invalid");
         }
-        throw makeError(409, "state_invalid");
+        const holeRows = await tx.unsafe(
+          "select cards from public.poker_hole_cards where table_id = $1 and hand_id = $2 and user_id = $3 limit 1;",
+          [tableId, handId, auth.userId]
+        );
+        const holeCards = holeRows?.[0]?.cards || null;
+        if (holeCards) {
+          publicState.hole = { [auth.userId]: holeCards };
+        }
+        return {
+          tableId,
+          version: normalizeVersion(stateRow.version),
+          handId,
+          buttonSeatNo: normalizeSeatNo(publicState.dealerSeat ?? currentState.buttonSeatNo),
+          nextToActSeatNo: normalizeSeatNo(publicState.actorSeat ?? currentState.nextToActSeatNo),
+          publicState,
+        };
       }
 
       const seatRows = await tx.unsafe(
