@@ -10,6 +10,8 @@
   var POLL_INTERVAL_BASE = 2000;
   var POLL_INTERVAL_MAX = 10000;
   var HEARTBEAT_INTERVAL_MS = 20000;
+  var PENDING_RETRY_DELAYS = [150, 300, 600, 900];
+  var PENDING_RETRY_BUDGET_MS = 2000;
   var UI_VERSION = '2025-02-19';
 
   var state = { token: null, polling: false, pollTimer: null, pollInterval: POLL_INTERVAL_BASE, pollErrors: 0 };
@@ -110,6 +112,11 @@
     throw err;
   }
 
+  function isAbortError(err){
+    if (!err) return false;
+    return err.name === 'AbortError' || err.code === 'abort' || err.code === 'aborted' || err.message === 'AbortError';
+  }
+
   function isAuthError(err){
     return !!(err && (err.code === 'not_authenticated' || err.status === 401));
   }
@@ -138,8 +145,15 @@
   }
 
   async function apiPost(url, data){
-    var res = await authedFetch(url, { method: 'POST', body: JSON.stringify(data || {}) });
-    return await parseResponse(res);
+    try {
+      var res = await authedFetch(url, { method: 'POST', body: JSON.stringify(data || {}) });
+      return await parseResponse(res);
+    } catch (err){
+      if (isAbortError(err)){
+        return { aborted: true };
+      }
+      throw err;
+    }
   }
 
   function shortId(id){
@@ -231,6 +245,25 @@
     setTimeout(function(){
       fn();
     }, delay);
+  }
+
+  function getPendingDelay(retries){
+    var idx = Math.max(0, retries - 1);
+    if (idx >= PENDING_RETRY_DELAYS.length) return PENDING_RETRY_DELAYS[PENDING_RETRY_DELAYS.length - 1];
+    return PENDING_RETRY_DELAYS[idx];
+  }
+
+  function shouldRetryPending(startedAt, delayMs){
+    if (!startedAt) return true;
+    var elapsed = Date.now() - startedAt;
+    return elapsed + delayMs <= PENDING_RETRY_BUDGET_MS;
+  }
+
+  function persistLastError(payload){
+    if (!payload) return;
+    try {
+      localStorage.setItem('poker:lastError', JSON.stringify(payload));
+    } catch (_err){}
   }
 
   // ========== LOBBY PAGE ==========
@@ -423,6 +456,8 @@
     var seatsGrid = document.getElementById('pokerSeatsGrid');
     var joinBtn = document.getElementById('pokerJoin');
     var leaveBtn = document.getElementById('pokerLeave');
+    var joinStatusEl = document.getElementById('pokerJoinStatus');
+    var leaveStatusEl = document.getElementById('pokerLeaveStatus');
     var seatNoInput = document.getElementById('pokerSeatNo');
     var buyInInput = document.getElementById('pokerBuyIn');
     var yourStackEl = document.getElementById('pokerYourStack');
@@ -445,7 +480,10 @@
     var pendingLeaveRequestId = null;
     var pendingJoinRetries = 0;
     var pendingLeaveRetries = 0;
-    var pendingMaxRetries = 8;
+    var pendingJoinStartedAt = null;
+    var pendingLeaveStartedAt = null;
+    var joinPending = false;
+    var leavePending = false;
     var heartbeatPendingRetries = 0;
     var heartbeatInFlight = false;
     var HEARTBEAT_PENDING_MAX_RETRIES = 8;
@@ -498,6 +536,88 @@
       if (tableContent) tableContent.hidden = false;
       stopAuthWatch();
       return true;
+    }
+
+    function updatePendingUi(){
+      var busy = joinPending || leavePending;
+      setLoading(joinBtn, busy);
+      setLoading(leaveBtn, busy);
+      if (seatNoInput) seatNoInput.disabled = busy;
+      if (buyInInput) buyInInput.disabled = busy;
+      if (joinStatusEl){
+        joinStatusEl.textContent = joinPending ? t('pokerJoinPending', 'Joining...') : '';
+        joinStatusEl.hidden = !joinPending;
+      }
+      if (leaveStatusEl){
+        leaveStatusEl.textContent = leavePending ? t('pokerLeavePending', 'Leaving...') : '';
+        leaveStatusEl.hidden = !leavePending;
+      }
+    }
+
+    function setPendingState(action, isPending){
+      if (action === 'join'){
+        joinPending = isPending;
+      } else if (action === 'leave'){
+        leavePending = isPending;
+      }
+      updatePendingUi();
+    }
+
+    function clearJoinPending(){
+      pendingJoinRequestId = null;
+      pendingJoinRetries = 0;
+      pendingJoinStartedAt = null;
+      setPendingState('join', false);
+    }
+
+    function clearLeavePending(){
+      pendingLeaveRequestId = null;
+      pendingLeaveRetries = 0;
+      pendingLeaveStartedAt = null;
+      setPendingState('leave', false);
+    }
+
+    function handlePendingTimeout(action){
+      var message = action === 'join' ? t('pokerErrJoinPending', 'Join still pending. Please try again.') : t('pokerErrLeavePending', 'Leave still pending. Please try again.');
+      var endpoint = action === 'join' ? JOIN_URL : LEAVE_URL;
+      if (action === 'join'){
+        clearJoinPending();
+      } else {
+        clearLeavePending();
+      }
+      setActionError(action, endpoint, 'pending_timeout', message);
+    }
+
+    function schedulePendingRetry(action, retryFn){
+      var startedAt = action === 'join' ? pendingJoinStartedAt : pendingLeaveStartedAt;
+      var retries = action === 'join' ? pendingJoinRetries : pendingLeaveRetries;
+      if (!startedAt) startedAt = Date.now();
+      retries += 1;
+      var delay = getPendingDelay(retries);
+      if (!shouldRetryPending(startedAt, delay)){
+        handlePendingTimeout(action);
+        return;
+      }
+      if (action === 'join'){
+        pendingJoinStartedAt = startedAt;
+        pendingJoinRetries = retries;
+      } else {
+        pendingLeaveStartedAt = startedAt;
+        pendingLeaveRetries = retries;
+      }
+      scheduleRetry(retryFn, delay);
+    }
+
+    function setActionError(action, endpoint, code, message){
+      if (!message) return;
+      setError(errorEl, message);
+      persistLastError({
+        ts: Date.now(),
+        action: action,
+        endpoint: endpoint,
+        code: code || 'unknown_error',
+        message: message
+      });
     }
 
     async function loadTable(isPolling){
@@ -595,9 +715,12 @@
         }
         var requestId = heartbeatRequestId;
         var data = await apiPost(HEARTBEAT_URL, { tableId: tableId, requestId: requestId });
+        if (data && data.aborted){
+          shouldReturn = true;
+          return;
+        }
         if (isPendingResponse(data)){
           heartbeatPendingRetries++;
-          heartbeatRequestId = normalizeRequestId(generateRequestId());
           if (heartbeatPendingRetries <= HEARTBEAT_PENDING_MAX_RETRIES){
             scheduleRetry(sendHeartbeat, getHeartbeatPendingDelay(heartbeatPendingRetries));
           }
@@ -698,29 +821,11 @@
 
     async function retryJoin(){
       if (!pendingJoinRequestId) return;
-      if (pendingJoinRetries >= pendingMaxRetries){
-        pendingJoinRequestId = null;
-        pendingJoinRetries = 0;
-        setLoading(joinBtn, false);
-        setLoading(leaveBtn, false);
-        setError(errorEl, t('pokerErrJoinPending', 'Join still pending. Please try again.'));
-        return;
-      }
-      pendingJoinRetries++;
       await joinTable(pendingJoinRequestId);
     }
 
     async function retryLeave(){
       if (!pendingLeaveRequestId) return;
-      if (pendingLeaveRetries >= pendingMaxRetries){
-        pendingLeaveRequestId = null;
-        pendingLeaveRetries = 0;
-        setLoading(joinBtn, false);
-        setLoading(leaveBtn, false);
-        setError(errorEl, t('pokerErrLeavePending', 'Leave still pending. Please try again.'));
-        return;
-      }
-      pendingLeaveRetries++;
       await leaveTable(pendingLeaveRequestId);
     }
 
@@ -733,13 +838,13 @@
       if (seatNo < 0) seatNo = 0;
       if (seatNo > maxSeat) seatNo = maxSeat;
       if (seatNoInput) seatNoInput.value = seatNo;
-      setLoading(joinBtn, true);
-      setLoading(leaveBtn, true);
+      setPendingState('join', true);
       try {
         var resolved = resolveRequestId(pendingJoinRequestId, requestIdOverride);
         if (resolved.nextPending){
           pendingJoinRequestId = resolved.nextPending;
           pendingJoinRetries = 0;
+          pendingJoinStartedAt = null;
         }
         var joinRequestId = resolved.requestId;
         var joinResult = await apiPost(JOIN_URL, {
@@ -748,16 +853,21 @@
           buyIn: buyIn,
           requestId: joinRequestId
         });
-        if (isPendingResponse(joinResult)){
-          scheduleRetry(retryJoin);
+        if (joinResult && joinResult.aborted){
+          clearJoinPending();
           return;
         }
-        pendingJoinRequestId = null;
-        pendingJoinRetries = 0;
+        if (isPendingResponse(joinResult)){
+          schedulePendingRetry('join', retryJoin);
+          return;
+        }
+        clearJoinPending();
         loadTable();
       } catch (err){
-        pendingJoinRequestId = null;
-        pendingJoinRetries = 0;
+        clearJoinPending();
+        if (isAbortError(err)){
+          return;
+        }
         if (isAuthError(err)){
           handleAuthExpired({
             authMsg: authMsg,
@@ -770,28 +880,27 @@
           return;
         }
         klog('poker_join_error', { tableId: tableId, error: err.message || err.code });
-        setError(errorEl, err.message || t('pokerErrJoin', 'Failed to join'));
-      } finally {
-        if (!pendingJoinRequestId){
-          setLoading(joinBtn, false);
-          setLoading(leaveBtn, false);
-        }
+        setActionError('join', JOIN_URL, err.code || 'request_failed', err.message || t('pokerErrJoin', 'Failed to join'));
       }
     }
 
     async function leaveTable(requestIdOverride){
       setError(errorEl, null);
-      setLoading(joinBtn, true);
-      setLoading(leaveBtn, true);
+      setPendingState('leave', true);
       try {
         var resolved = resolveRequestId(pendingLeaveRequestId, requestIdOverride);
         if (resolved.nextPending){
           pendingLeaveRequestId = resolved.nextPending;
           pendingLeaveRetries = 0;
+          pendingLeaveStartedAt = null;
         }
         var leaveRequestId = resolved.requestId;
         klog('poker_leave_request', { tableId: tableId, requestId: leaveRequestId, url: LEAVE_URL });
         var leaveResult = await apiPost(LEAVE_URL, { tableId: tableId, requestId: leaveRequestId });
+        if (leaveResult && leaveResult.aborted){
+          clearLeavePending();
+          return;
+        }
         var pendingResponse = isPendingResponse(leaveResult);
         klog('poker_leave_response', {
           ok: !!(leaveResult && leaveResult.ok),
@@ -799,21 +908,21 @@
           code: leaveResult && leaveResult.error ? leaveResult.error : null
         });
         if (pendingResponse){
-          scheduleRetry(retryLeave);
+          schedulePendingRetry('leave', retryLeave);
           return;
         }
         if (leaveResult && leaveResult.ok === false){
-          pendingLeaveRequestId = null;
-          pendingLeaveRetries = 0;
-          setError(errorEl, t('pokerErrLeave', 'Failed to leave'));
+          clearLeavePending();
+          setActionError('leave', LEAVE_URL, leaveResult.error || 'request_failed', t('pokerErrLeave', 'Failed to leave'));
           return;
         }
-        pendingLeaveRequestId = null;
-        pendingLeaveRetries = 0;
+        clearLeavePending();
         loadTable();
       } catch (err){
-        pendingLeaveRequestId = null;
-        pendingLeaveRetries = 0;
+        clearLeavePending();
+        if (isAbortError(err)){
+          return;
+        }
         if (isAuthError(err)){
           handleAuthExpired({
             authMsg: authMsg,
@@ -826,12 +935,7 @@
           return;
         }
         klog('poker_leave_error', { tableId: tableId, error: err.message || err.code });
-        setError(errorEl, err.message || t('pokerErrLeave', 'Failed to leave'));
-      } finally {
-        if (!pendingLeaveRequestId){
-          setLoading(joinBtn, false);
-          setLoading(leaveBtn, false);
-        }
+        setActionError('leave', LEAVE_URL, err.code || 'request_failed', err.message || t('pokerErrLeave', 'Failed to leave'));
       }
     }
 
@@ -853,14 +957,14 @@
         event.preventDefault();
         event.stopPropagation();
       }
+      if (joinPending || leavePending) return;
       klog('poker_join_click', { tableId: tableId, hasToken: !!state.token });
+      setPendingState('join', true);
       joinTable().catch(function(err){
-        pendingJoinRequestId = null;
-        pendingJoinRetries = 0;
-        setLoading(joinBtn, false);
-        setLoading(leaveBtn, false);
+        clearJoinPending();
+        if (isAbortError(err)) return;
         klog('poker_join_click_error', { message: err && (err.message || err.code) ? err.message || err.code : 'unknown_error' });
-        setError(errorEl, err && (err.message || err.code) ? err.message || err.code : t('pokerErrJoin', 'Failed to join'));
+        setActionError('join', JOIN_URL, err && err.code ? err.code : 'request_failed', err && (err.message || err.code) ? err.message || err.code : t('pokerErrJoin', 'Failed to join'));
       });
     }
 
@@ -869,14 +973,14 @@
         event.preventDefault();
         event.stopPropagation();
       }
+      if (joinPending || leavePending) return;
       klog('poker_leave_click', { tableId: tableId, hasToken: !!state.token });
+      setPendingState('leave', true);
       leaveTable().catch(function(err){
-        pendingLeaveRequestId = null;
-        pendingLeaveRetries = 0;
-        setLoading(joinBtn, false);
-        setLoading(leaveBtn, false);
+        clearLeavePending();
+        if (isAbortError(err)) return;
         klog('poker_leave_click_error', { message: err && (err.message || err.code) ? err.message || err.code : 'unknown_error' });
-        setError(errorEl, err && (err.message || err.code) ? err.message || err.code : t('pokerErrLeave', 'Failed to leave'));
+        setActionError('leave', LEAVE_URL, err && err.code ? err.code : 'request_failed', err && (err.message || err.code) ? err.message || err.code : t('pokerErrLeave', 'Failed to leave'));
       });
     }
 
