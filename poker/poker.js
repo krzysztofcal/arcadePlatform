@@ -598,6 +598,7 @@
     }
 
     function schedulePendingRetry(action, retryFn){
+      if (!isPageActive()) return;
       setPendingState(action, true);
       var startedAt = action === 'join' ? pendingJoinStartedAt : pendingLeaveStartedAt;
       var retries = action === 'join' ? pendingJoinRetries : pendingLeaveRetries;
@@ -630,6 +631,12 @@
         clearTimeout(pendingLeaveTimer);
         pendingLeaveTimer = null;
       }
+    }
+
+    function stopPendingAll(){
+      stopPendingRetries();
+      if (pendingJoinRequestId) pauseJoinPending();
+      if (pendingLeaveRequestId) pauseLeavePending();
     }
 
     function pauseJoinPending(){
@@ -982,7 +989,6 @@
       if (document.visibilityState === 'hidden'){
         stopPolling();
         stopHeartbeat();
-        stopPendingRetries();
         if (pendingJoinRequestId) pauseJoinPending();
         if (pendingLeaveRequestId) pauseLeavePending();
         if (!pendingHiddenAt) pendingHiddenAt = Date.now();
@@ -1012,11 +1018,11 @@
       klog('poker_join_click', { tableId: tableId, hasToken: !!state.token });
       setError(errorEl, null);
       joinTable().catch(function(err){
-        clearJoinPending();
         if (isAbortError(err)){
           pauseJoinPending();
           return;
         }
+        clearJoinPending();
         klog('poker_join_click_error', { message: err && (err.message || err.code) ? err.message || err.code : 'unknown_error' });
         setActionError('join', JOIN_URL, err && err.code ? err.code : 'request_failed', err && (err.message || err.code) ? err.message || err.code : t('pokerErrJoin', 'Failed to join'));
       });
@@ -1031,11 +1037,11 @@
       klog('poker_leave_click', { tableId: tableId, hasToken: !!state.token });
       setError(errorEl, null);
       leaveTable().catch(function(err){
-        clearLeavePending();
         if (isAbortError(err)){
           pauseLeavePending();
           return;
         }
+        clearLeavePending();
         klog('poker_leave_click_error', { message: err && (err.message || err.code) ? err.message || err.code : 'unknown_error' });
         setActionError('leave', LEAVE_URL, err && err.code ? err.code : 'request_failed', err && (err.message || err.code) ? err.message || err.code : t('pokerErrLeave', 'Failed to leave'));
       });
@@ -1055,7 +1061,7 @@
     document.addEventListener('visibilitychange', handleVisibility); // xp-lifecycle-allow:poker-table(2026-01-01)
     window.addEventListener('beforeunload', stopPolling); // xp-lifecycle-allow:poker-table(2026-01-01)
     window.addEventListener('beforeunload', stopHeartbeat); // xp-lifecycle-allow:poker-table-heartbeat(2026-01-01)
-    window.addEventListener('beforeunload', stopPendingRetries); // xp-lifecycle-allow:poker-table-pending(2026-01-01)
+    window.addEventListener('beforeunload', stopPendingAll); // xp-lifecycle-allow:poker-table-pending(2026-01-01)
     window.addEventListener('beforeunload', stopAuthWatch); // xp-lifecycle-allow:poker-table-auth(2026-01-01)
 
     checkAuth().then(function(authed){
