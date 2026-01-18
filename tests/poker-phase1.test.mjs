@@ -91,7 +91,10 @@ assert.ok(leaveSrc.includes("poker_leave_error"), "leave should log poker_leave_
 assert.ok(joinSrc.includes("poker_request_id_invalid"), "join should log invalid requestId inputs");
 assert.ok(leaveSrc.includes("poker_request_id_invalid"), "leave should log invalid requestId inputs");
 assert.ok(heartbeatSrc.includes("poker_request_id_invalid"), "heartbeat should log invalid requestId inputs");
-assert.ok(sweepSrc.includes("poker_requests_cleanup"), "sweep should log poker_requests_cleanup");
+assert.ok(
+  sweepSrc.includes("poker_requests_cleanup"),
+  "sweep should include conditional poker_requests_cleanup logging"
+);
 assert.ok(
   /select result_json, created_at from public\.poker_requests/.test(joinSrc),
   "join should query request created_at for pending checks"

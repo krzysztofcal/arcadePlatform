@@ -98,7 +98,7 @@ export async function handler(event) {
   }
 
   const tableIdRaw = payload && typeof payload.tableId === "string" ? payload.tableId.trim() : "";
-  const tableId = typeof tableIdRaw === "string" ? tableIdRaw.trim() : "";
+  const tableId = tableIdRaw;
   if (!tableId || !isValidUuid(tableId)) {
     return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "invalid_table_id" }) };
   }
