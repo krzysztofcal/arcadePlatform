@@ -114,10 +114,7 @@
 
   function isAbortError(err){
     if (!err) return false;
-    if (err.name === 'AbortError') return true;
-    if (err.code === 'abort' || err.code === 'aborted') return true;
-    if (typeof err.message === 'string' && err.message.toLowerCase().indexOf('abort') !== -1) return true;
-    return false;
+    return err.name === 'AbortError' || err.code === 'abort' || err.code === 'aborted';
   }
 
   function isAuthError(err){
@@ -894,6 +891,7 @@
         }
         clearJoinPending();
         setError(errorEl, null);
+        if (!isPageActive()) return;
         loadTable();
       } catch (err){
         clearJoinPending();
@@ -949,6 +947,7 @@
         }
         clearLeavePending();
         setError(errorEl, null);
+        if (!isPageActive()) return;
         loadTable();
       } catch (err){
         clearLeavePending();
@@ -994,6 +993,7 @@
       }
       if (joinPending || leavePending) return;
       klog('poker_join_click', { tableId: tableId, hasToken: !!state.token });
+      setError(errorEl, null);
       setPendingState('join', true);
       joinTable().catch(function(err){
         clearJoinPending();
@@ -1010,6 +1010,7 @@
       }
       if (joinPending || leavePending) return;
       klog('poker_leave_click', { tableId: tableId, hasToken: !!state.token });
+      setError(errorEl, null);
       setPendingState('leave', true);
       leaveTable().catch(function(err){
         clearLeavePending();
