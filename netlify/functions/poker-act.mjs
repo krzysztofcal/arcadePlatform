@@ -149,12 +149,19 @@ export async function handler(event) {
       if (activePhases.includes(phase)) {
         const missingInPublic = dbActiveIds.some((userId) => !publicIds.includes(userId));
         const missingInDb = publicIds.some((userId) => !dbSeatMap.has(userId));
-        if (!publicSeats.length || missingInPublic || missingInDb) {
+        const seatNoMismatch = publicSeats.some((seat) => {
+          const dbSeat = dbSeatMap.get(seat?.userId);
+          if (!dbSeat) return false;
+          if (!Number.isInteger(seat?.seatNo)) return true;
+          return seat.seatNo !== dbSeat.seatNo;
+        });
+        if (!publicSeats.length || missingInPublic || missingInDb || seatNoMismatch) {
           klog("poker_state_invariant_violation", {
             tableId,
             phase,
             dbSeats: dbActiveIds.length,
             publicSeats: publicIds.length,
+            seatNoMismatch,
           });
           throw makeError(409, "state_invalid");
         }

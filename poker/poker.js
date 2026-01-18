@@ -879,6 +879,12 @@
       var gameState = stateObj.state || {};
       var publicSeats = (gameState.public && gameState.public.seats) ? gameState.public.seats : [];
       var actorSeatNo = gameState.actorSeat;
+      var publicSeatMap = {};
+      publicSeats.forEach(function(seat){
+        if (seat && Number.isFinite(seat.seatNo)){
+          publicSeatMap[seat.seatNo] = seat;
+        }
+      });
 
       if (tableIdEl) tableIdEl.textContent = shortId(table.id || tableId);
       var stakes = table.stakes || {};
@@ -895,6 +901,13 @@
         seatsGrid.innerHTML = '';
         for (var i = 0; i < maxPlayers; i++){
           var seat = seats.find(function(s){ return s.seatNo === i; });
+          var publicSeat = publicSeatMap[i] || null;
+          var seatUserId = (publicSeat && publicSeat.userId) ? publicSeat.userId : (seat ? seat.userId : null);
+          var seatStack = publicSeat && Number.isFinite(publicSeat.stack)
+            ? publicSeat.stack
+            : (seat && Number.isFinite(seat.stack) ? seat.stack : null);
+          var seatFolded = !!(publicSeat && publicSeat.hasFolded);
+          var seatAllIn = !!(publicSeat && publicSeat.isAllIn);
           var div = document.createElement('div');
           var seatClass = 'poker-seat';
           if (!seat){
@@ -911,7 +924,7 @@
           seatNoEl.textContent = t('pokerSeatPrefix', 'Seat') + ' ' + i;
           var seatUserEl = document.createElement('div');
           seatUserEl.className = 'poker-seat-user';
-          seatUserEl.textContent = seat ? shortId(seat.userId) : t('pokerSeatEmpty', 'Empty');
+          seatUserEl.textContent = seat ? shortId(seatUserId) : t('pokerSeatEmpty', 'Empty');
           var seatStatusEl = document.createElement('div');
           seatStatusEl.className = 'poker-seat-status';
           if (!seat){
@@ -920,9 +933,18 @@
           } else if (seat.status && seat.status.toUpperCase() === 'INACTIVE'){
             seatStatusEl.className += ' poker-seat-status--inactive';
             seatStatusEl.textContent = t('pokerSeatInactive', 'Inactive');
+          } else if (seatFolded){
+            seatStatusEl.className += ' poker-seat-status--inactive';
+            seatStatusEl.textContent = t('pokerSeatFolded', 'Folded');
+          } else if (seatAllIn){
+            seatStatusEl.className += ' poker-seat-status--active';
+            seatStatusEl.textContent = t('pokerSeatAllIn', 'All-in');
           } else {
             seatStatusEl.className += ' poker-seat-status--active';
             seatStatusEl.textContent = t('pokerSeatActive', 'Active');
+          }
+          if (seatStack != null){
+            seatStatusEl.textContent += ' · ' + t('pokerSeatStack', 'Stack') + ' ' + seatStack;
           }
           div.appendChild(seatNoEl);
           div.appendChild(seatUserEl);

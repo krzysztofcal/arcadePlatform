@@ -112,20 +112,10 @@ export async function handler(event) {
       }
 
       const currentState = normalizeState(stateRow.state);
-      const authSeatRows = await tx.unsafe(
-        "select user_id from public.poker_seats where table_id = $1 and user_id = $2 and status = 'ACTIVE' limit 1;",
-        [tableId, auth.userId]
-      );
-      if (!authSeatRows?.[0]) {
-        throw makeError(403, "not_allowed");
-      }
-
-      // Idempotency does not bypass authorization.
-      const sameRequest =
-        currentState.lastStartHandRequestId === requestIdParsed.value && currentState.lastStartHandUserId === auth.userId;
-      if (sameRequest) {
-        const publicState = toPublicState(normalizeState(stateRow.state), auth.userId);
-        const handId = publicState.handId || currentState.handId;
+      const buildStartHandPayload = async (row) => {
+        const normalized = normalizeState(row?.state);
+        const publicState = toPublicState(normalized, auth.userId);
+        const handId = publicState.handId || normalized.handId;
         if (!handId || typeof handId !== "string") {
           throw makeError(409, "state_invalid");
         }
@@ -139,12 +129,40 @@ export async function handler(event) {
         }
         return {
           tableId,
-          version: normalizeVersion(stateRow.version),
+          version: normalizeVersion(row?.version),
           handId,
-          buttonSeatNo: normalizeSeatNo(publicState.dealerSeat ?? currentState.buttonSeatNo),
-          nextToActSeatNo: normalizeSeatNo(publicState.actorSeat ?? currentState.nextToActSeatNo),
+          buttonSeatNo: normalizeSeatNo(publicState.dealerSeat ?? normalized.buttonSeatNo),
+          nextToActSeatNo: normalizeSeatNo(publicState.actorSeat ?? normalized.nextToActSeatNo),
           publicState,
         };
+      };
+
+      const authSeatRows = await tx.unsafe(
+        "select user_id from public.poker_seats where table_id = $1 and user_id = $2 and status = 'ACTIVE' limit 1;",
+        [tableId, auth.userId]
+      );
+      if (!authSeatRows?.[0]) {
+        throw makeError(403, "not_allowed");
+      }
+
+      const requestMarker = `REQUEST:${requestIdParsed.value}`;
+      const markerRows = await tx.unsafe(
+        "select id, version from public.poker_actions where table_id = $1 and user_id = $2 and action_type = $3 limit 1;",
+        [tableId, auth.userId, requestMarker]
+      );
+      if (markerRows?.[0]?.version != null) {
+        const latestRows = await tx.unsafe("select version, state from public.poker_state where table_id = $1 limit 1;", [
+          tableId,
+        ]);
+        const latest = latestRows?.[0] || stateRow;
+        return await buildStartHandPayload(latest);
+      }
+
+      // Idempotency does not bypass authorization.
+      const sameRequest =
+        currentState.lastStartHandRequestId === requestIdParsed.value && currentState.lastStartHandUserId === auth.userId;
+      if (sameRequest) {
+        return await buildStartHandPayload(stateRow);
       }
 
       const seatRows = await tx.unsafe(
@@ -206,8 +224,8 @@ export async function handler(event) {
       }
 
       await tx.unsafe(
-        "insert into public.poker_actions (table_id, version, user_id, action_type, amount) values ($1, $2, $3, $4, $5);",
-        [tableId, newVersion, auth.userId, "START_HAND", null]
+        "insert into public.poker_actions (table_id, version, user_id, action_type, amount) values ($1, $2, $3, $4, $5), ($1, $2, $3, $6, $7);",
+        [tableId, newVersion, auth.userId, "START_HAND", null, requestMarker, null]
       );
 
       const publicState = toPublicState(updatedState, auth.userId);

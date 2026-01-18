@@ -415,6 +415,14 @@ const toPublicState = (state, currentUserId) => {
   delete publicState.contrib;
   delete publicState.lastFullRaiseSize;
   delete publicState.raiseClosed;
+  if (publicState?.settled?.revealed) {
+    const publicSeats = Array.isArray(publicState.public?.seats) ? publicState.public.seats : [];
+    const isViewerSeated = !!currentUserId && publicSeats.some((seat) => seat?.userId === currentUserId);
+    if (publicState.phase !== "SETTLED" || !isViewerSeated) {
+      publicState.settled = { ...publicState.settled };
+      delete publicState.settled.revealed;
+    }
+  }
   return publicState;
 };
 
