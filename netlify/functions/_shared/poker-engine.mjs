@@ -1,6 +1,9 @@
 import { evaluateHand, compareScores } from "./poker-hand-eval.mjs";
 
-// TODO(poker-tests): add Vitest coverage for engine transitions once Vitest is available.
+// TODO(poker-tests): add engine tests once Vitest is available:
+// - initHand sets actionRequiredFromUserId and non-empty allowedActions for the actor.
+// - settlement keeps potTotal intact after SETTLED.
+// - contenders predicate excludes stack <= 0 consistently for early-win and showdown.
 
 const PHASES = ["WAITING", "PREFLOP", "FLOP", "TURN", "RIVER", "SHOWDOWN", "SETTLED"];
 
@@ -137,10 +140,12 @@ const resolveClosingSeat = (publicSeats, preferredSeat) => {
   return activeSeatNos.length ? activeSeatNos[activeSeatNos.length - 1] : preferredSeat;
 };
 
+const isInHand = (seat) => !!(seat && !seat.hasFolded && seat.stack > 0);
+
 const initActedThisStreet = (publicSeats) => {
   const acted = {};
   publicSeats.forEach((seat) => {
-    if (!seat.hasFolded && seat.stack > 0) {
+    if (isInHand(seat)) {
       acted[seat.seatNo] = false;
     }
   });
@@ -150,7 +155,7 @@ const initActedThisStreet = (publicSeats) => {
 const markAllAwaitingResponse = (publicSeats, aggressorSeatNo) => {
   const acted = {};
   publicSeats.forEach((seat) => {
-    if (!seat.hasFolded && seat.stack > 0) {
+    if (isInHand(seat)) {
       acted[seat.seatNo] = seat.seatNo === aggressorSeatNo;
     }
   });
@@ -225,42 +230,46 @@ const initHand = ({ tableId, seats, stacks, stakes, prevState }) => {
   const actorUser = publicSeats.find((s) => s.seatNo === actionSeat);
   const streetBet = bbPaid;
   const actedThisStreet = initActedThisStreet(publicSeats);
+  const state = {
+    tableId,
+    handId,
+    handNo,
+    phase: "PREFLOP",
+    streetNo: 0,
+    dealerSeat,
+    sbSeat,
+    bbSeat,
+    actorSeat: actionSeat,
+    closingSeat: resolveClosingSeat(publicSeats, bbSeat),
+    lastAggressorSeat: bbSeat,
+    actedThisStreet,
+    deckSeed: seed,
+    deck,
+    board: [],
+    hole,
+    public: { seats: publicSeats },
+    stacks: stacksCopy,
+    potTotal,
+    sidePots: null,
+    streetBet,
+    minRaiseTo: streetBet + bbAmount,
+    actionRequiredFromUserId: actorUser ? actorUser.userId : null,
+    allowedActions: [],
+    lastMoveAt: nowIso(),
+    updatedAt: nowIso(),
+  };
+  if (actorUser) {
+    state.allowedActions = buildAllowedActions(actorUser, state);
+  }
   return {
     ok: true,
-    state: {
-      tableId,
-      handId,
-      handNo,
-      phase: "PREFLOP",
-      streetNo: 0,
-      dealerSeat,
-      sbSeat,
-      bbSeat,
-      actorSeat: actionSeat,
-      closingSeat: resolveClosingSeat(publicSeats, bbSeat),
-      lastAggressorSeat: null,
-      actedThisStreet,
-      deckSeed: seed,
-      deck,
-      board: [],
-      hole,
-      public: { seats: publicSeats },
-      stacks: stacksCopy,
-      potTotal,
-      sidePots: null,
-      streetBet,
-      minRaiseTo: streetBet + bbAmount,
-      actionRequiredFromUserId: actorUser ? actorUser.userId : null,
-      allowedActions: actorUser ? buildAllowedActions(actorUser, { streetBet }) : [],
-      lastMoveAt: nowIso(),
-      updatedAt: nowIso(),
-    },
+    state,
   };
 };
 
 const settleHand = (state, stacks) => {
   const publicSeats = state.public?.seats || [];
-  const active = publicSeats.filter((seat) => !seat.hasFolded);
+  const active = publicSeats.filter((seat) => isInHand(seat));
   if (active.length === 1) {
     const winner = active[0];
     stacks[winner.userId] = (stacks[winner.userId] || 0) + (state.potTotal || 0);
@@ -413,7 +422,7 @@ const applyAction = ({ currentState, actionType, amount, userId, stakes }) => {
     return { ok: false, error: "invalid_action" };
   }
 
-  const remaining = publicSeats.filter((seat) => !seat.hasFolded && seat.stack > 0);
+  const remaining = publicSeats.filter((seat) => isInHand(seat));
   if (remaining.length === 1) {
     state.phase = "SETTLED";
     const stacks = {};
@@ -425,7 +434,6 @@ const applyAction = ({ currentState, actionType, amount, userId, stakes }) => {
       acc[seat.userId] = seat.stack;
       return acc;
     }, {});
-    state.potTotal = 0;
     state.actionRequiredFromUserId = null;
     state.allowedActions = [];
     state.lastMoveAt = nowIso();
@@ -438,7 +446,7 @@ const applyAction = ({ currentState, actionType, amount, userId, stakes }) => {
   const acted = allActed(publicSeats, state.actedThisStreet);
   const nextSeat = advanceActor(publicSeats, state.actorSeat);
   const shouldClose = state.lastAggressorSeat
-    ? settled && nextSeat === state.closingSeat
+    ? settled && (nextSeat === state.closingSeat || state.actorSeat === state.closingSeat)
     : settled && acted;
 
   if (shouldClose) {
@@ -466,7 +474,6 @@ const applyAction = ({ currentState, actionType, amount, userId, stakes }) => {
         return acc;
       }, {});
       state.phase = "SETTLED";
-      state.potTotal = 0;
       state.actionRequiredFromUserId = null;
       state.allowedActions = [];
       state.settled = { winners: result.winners, revealed: result.revealed };
