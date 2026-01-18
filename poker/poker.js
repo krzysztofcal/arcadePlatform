@@ -1231,6 +1231,10 @@
       var amount = null;
       if (actionType === 'BET' || actionType === 'RAISE'){
         amount = parseActionAmount();
+        if (!amount){
+          setActionError('act', ACT_URL, 'invalid_amount', t('pokerErrActAmount', 'Enter a bet or raise amount.'));
+          return;
+        }
       }
       act(null, actionType, amount).catch(function(err){
         if (isAbortError(err)){

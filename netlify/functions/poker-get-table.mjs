@@ -1,6 +1,6 @@
 import { baseHeaders, beginSql, corsHeaders, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
 import { isValidUuid } from "./_shared/poker-utils.mjs";
-import { ensureAutoStart, normalizeSeatRows, normalizeState, toPublicState } from "./_shared/poker-engine.mjs";
+import { normalizeState, toPublicState } from "./_shared/poker-engine.mjs";
 
 const parseTableId = (event) => {
   const queryValue = event.queryStringParameters?.tableId;
@@ -63,7 +63,7 @@ export async function handler(event) {
       );
 
       const stateRows = await tx.unsafe(
-        "select version, state from public.poker_state where table_id = $1 for update;",
+        "select version, state from public.poker_state where table_id = $1 limit 1;",
         [tableId]
       );
       const stateRow = stateRows?.[0] || null;
@@ -81,25 +81,6 @@ export async function handler(event) {
             joinedAt: seat.joined_at,
           }))
         : [];
-
-      const normalizedSeats = normalizeSeatRows(seatRows);
-      const stacks = normalizedSeats.reduce((acc, seat) => {
-        acc[seat.userId] = Number.isFinite(seat.stack) ? seat.stack : 0;
-        return acc;
-      }, {});
-      const currentState = normalizeState(stateRow.state);
-      const stakes = table.stakes || {};
-      const autoStart = ensureAutoStart({ state: currentState, tableId, seats: normalizedSeats, stacks, stakes });
-      if (autoStart?.ok && autoStart?.state && autoStart.state !== currentState) {
-        const updatedRows = await tx.unsafe(
-          "update public.poker_state set version = version + 1, state = $2::jsonb, updated_at = now() where table_id = $1 returning version, state;",
-          [tableId, JSON.stringify(autoStart.state)]
-        );
-        const updatedRow = updatedRows?.[0];
-        if (updatedRow?.state) {
-          return { table, seats, stateRow: { version: updatedRow.version, state: updatedRow.state } };
-        }
-      }
 
       return { table, seats, stateRow };
     });

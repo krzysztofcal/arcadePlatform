@@ -119,8 +119,13 @@ export async function handler(event) {
       );
       const existing = existingRows?.[0];
       if (existing?.version != null) {
-        const refreshed = normalizeState(currentState);
-        return { ok: true, state: toPublicState(refreshed, auth.userId), version: Number(existing.version) };
+        const latestRows = await tx.unsafe(
+          "select version, state from public.poker_state where table_id = $1 limit 1;",
+          [tableId]
+        );
+        const latest = latestRows?.[0] || stateRow;
+        const latestState = normalizeState(latest?.state);
+        return { ok: true, state: toPublicState(latestState, auth.userId), version: Number(latest?.version) };
       }
 
       const stakes = table.stakes || {};
