@@ -634,9 +634,16 @@
     }
 
     function stopPendingAll(){
-      stopPendingRetries();
-      if (pendingJoinRequestId) pauseJoinPending();
-      if (pendingLeaveRequestId) pauseLeavePending();
+      var hadPending = false;
+      if (pendingJoinRequestId){
+        pauseJoinPending();
+        hadPending = true;
+      }
+      if (pendingLeaveRequestId){
+        pauseLeavePending();
+        hadPending = true;
+      }
+      if (!hadPending) stopPendingRetries();
     }
 
     function pauseJoinPending(){
@@ -676,9 +683,7 @@
         if (isPolling){ resetPollBackoff(); }
       } catch (err){
         if (isAuthError(err)){
-          stopPendingRetries();
-          if (pendingJoinRequestId) pauseJoinPending();
-          if (pendingLeaveRequestId) pauseLeavePending();
+          stopPendingAll();
           handleAuthExpired({
             authMsg: authMsg,
             content: tableContent,
@@ -892,6 +897,8 @@
           pendingJoinRequestId = resolved.nextPending;
           pendingJoinRetries = 0;
           pendingJoinStartedAt = null;
+        } else if (!pendingJoinRequestId) {
+          pendingJoinRequestId = resolved.requestId;
         }
         var joinRequestId = resolved.requestId;
         var joinResult = await apiPost(JOIN_URL, {
@@ -939,6 +946,8 @@
           pendingLeaveRequestId = resolved.nextPending;
           pendingLeaveRetries = 0;
           pendingLeaveStartedAt = null;
+        } else if (!pendingLeaveRequestId) {
+          pendingLeaveRequestId = resolved.requestId;
         }
         var leaveRequestId = resolved.requestId;
         klog('poker_leave_request', { tableId: tableId, requestId: leaveRequestId, url: LEAVE_URL });
@@ -989,8 +998,7 @@
       if (document.visibilityState === 'hidden'){
         stopPolling();
         stopHeartbeat();
-        if (pendingJoinRequestId) pauseJoinPending();
-        if (pendingLeaveRequestId) pauseLeavePending();
+        stopPendingAll();
         if (!pendingHiddenAt) pendingHiddenAt = Date.now();
       } else {
         if (pendingHiddenAt){
