@@ -187,6 +187,10 @@ describe("poker all-in and side pot behavior", () => {
 
     expect(second.ok).toBe(true);
     expect(second.state.phase).toBe("TURN");
+    expect(second.state.streetBet).toBe(0);
+    second.state.public.seats.forEach((seat) => {
+      expect(seat.betThisStreet).toBe(0);
+    });
   });
 
   it("closes the street when the closing seat folds", () => {

@@ -203,6 +203,7 @@ const startStreetState = ({ state, publicSeats, streetNo, actorSeat, closingSeat
   const actor = nextSeats.find((seat) => seat.seatNo === actorSeat);
   state.actionRequiredFromUserId = actor ? actor.userId : null;
   state.allowedActions = actor ? buildAllowedActions(actor, state) : [];
+  return nextSeats;
 };
 
 const initHand = ({ tableId, seats, stacks, stakes, prevState }) => {
@@ -620,7 +621,7 @@ const applyAction = ({ currentState, actionType, amount, userId, stakes, holeCar
     const dealerSeat = state.dealerSeat;
     const nextActorSeat = advanceActor(publicSeats, dealerSeat);
     const closingSeat = resolveClosingSeat(publicSeats, dealerSeat);
-    startStreetState({
+    const nextSeats = startStreetState({
       state,
       publicSeats,
       streetNo: state.phase === "FLOP" ? 1 : state.phase === "TURN" ? 2 : 3,
@@ -628,6 +629,7 @@ const applyAction = ({ currentState, actionType, amount, userId, stakes, holeCar
       closingSeat: closingSeat || dealerSeat,
       bbAmount,
     });
+    publicSeats = nextSeats;
     state.lastMoveAt = nowIso();
     state.updatedAt = nowIso();
     return { ok: true, state };
