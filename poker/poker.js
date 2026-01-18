@@ -976,6 +976,8 @@
         stopPolling();
         stopHeartbeat();
         stopPendingRetries();
+        clearJoinPending();
+        clearLeavePending();
       } else {
         state.pollInterval = POLL_INTERVAL_BASE;
         state.pollErrors = 0;
