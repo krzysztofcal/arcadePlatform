@@ -88,11 +88,11 @@ export async function handler(event) {
   }
 
   const parsed = parseBody(event.body);
-  const payload = parsed.ok ? parsed.value ?? {} : null;
   if (!parsed.ok) {
     return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "invalid_json" }) };
   }
 
+  const payload = parsed.value ?? {};
   if (payload && !isPlainObject(payload)) {
     return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "invalid_payload" }) };
   }
