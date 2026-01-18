@@ -451,6 +451,10 @@ const applyAction = ({ currentState, actionType, amount, userId, stakes, holeCar
   }
   const bbAmount = Number.isFinite(state.bbAmount) ? state.bbAmount : Math.max(1, Number(stakes?.bb) || 2);
   if (!Number.isFinite(state.bbAmount)) state.bbAmount = bbAmount;
+  if (!Number.isFinite(state.potTotal)) state.potTotal = 0;
+  if (!Number.isFinite(state.streetBet)) state.streetBet = 0;
+  if (!Number.isFinite(state.deckIndex)) state.deckIndex = 0;
+  if (!state.contrib || typeof state.contrib !== "object") state.contrib = {};
   if (!Number.isFinite(state.lastFullRaiseSize)) state.lastFullRaiseSize = bbAmount;
   if (state.raiseClosed == null) state.raiseClosed = false;
   if (state.lastAggressorSeat == null) state.lastAggressorSeat = null;
@@ -472,7 +476,7 @@ const applyAction = ({ currentState, actionType, amount, userId, stakes, holeCar
     return { ok: false, error: "hand_not_active" };
   }
   if (!PHASES.includes(state.phase)) return { ok: false, error: "invalid_phase" };
-  if (!state.contrib) return { ok: false, error: "state_invalid" };
+  if (!state.contrib || typeof state.contrib !== "object") state.contrib = {};
 
   const streetBet = Number.isFinite(state.streetBet) ? state.streetBet : 0;
   const minRaiseTo = Number.isFinite(state.minRaiseTo) ? state.minRaiseTo : streetBet + bbAmount;

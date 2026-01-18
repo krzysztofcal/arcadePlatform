@@ -295,12 +295,17 @@ export async function handler(event) {
            where table_id = $1
            returning version
          ),
-         ins as (
+         action_ins as (
            insert into public.poker_actions (table_id, version, user_id, action_type, amount)
-           select $1, updated.version, $3, data.action_type, data.amount
+           select $1, updated.version, $3, $4, $5
            from updated
-           join (values ($4, $5), ($6, $7)) as data(action_type, amount) on true
            returning version
+         ),
+         marker_ins as (
+           insert into public.poker_actions (table_id, version, user_id, action_type, amount)
+           select $1, updated.version, $3, $6, $7
+           from updated
+           on conflict do nothing
          )
          select version from updated;`,
         [tableId, JSON.stringify(nextState), auth.userId, actionType, amount ?? null, requestMarker, null]

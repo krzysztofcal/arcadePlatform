@@ -915,7 +915,7 @@
           } else if (seat.status && seat.status.toUpperCase() === 'INACTIVE'){
             seatClass += ' poker-seat--inactive';
           }
-          if (seat && actorSeatNo != null && seat.seatNo === actorSeatNo){
+          if (actorSeatNo != null && i === actorSeatNo){
             seatClass += ' poker-seat--actor';
           }
           div.className = seatClass;

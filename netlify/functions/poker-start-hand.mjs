@@ -226,8 +226,12 @@ export async function handler(event) {
       }
 
       await tx.unsafe(
-        "insert into public.poker_actions (table_id, version, user_id, action_type, amount) values ($1, $2, $3, $4, $5), ($1, $2, $3, $6, $7);",
-        [tableId, newVersion, auth.userId, "START_HAND", null, requestMarker, null]
+        "insert into public.poker_actions (table_id, version, user_id, action_type, amount) values ($1, $2, $3, $4, $5);",
+        [tableId, newVersion, auth.userId, "START_HAND", null]
+      );
+      await tx.unsafe(
+        "insert into public.poker_actions (table_id, version, user_id, action_type, amount) values ($1, $2, $3, $4, $5) on conflict do nothing;",
+        [tableId, newVersion, auth.userId, requestMarker, null]
       );
 
       const publicState = toPublicState(updatedState, auth.userId);

@@ -119,9 +119,10 @@ export async function handler(event) {
     if (result.holeCards) {
       publicState.hole = { [auth.userId]: result.holeCards };
     }
+    const potTotal = Number.isFinite(publicState.potTotal) ? publicState.potTotal : publicState.pot;
     const stateCompat = {
       stacks: publicState.stacks || {},
-      pot: publicState.pot != null ? publicState.pot : publicState.potTotal,
+      pot: Number.isFinite(potTotal) ? potTotal : 0,
       phase: publicState.phase || "-",
     };
 
