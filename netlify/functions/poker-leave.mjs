@@ -117,6 +117,16 @@ export async function handler(event) {
 
   const requestIdParsed = normalizeRequestId(payload?.requestId, { maxLen: 200 });
   if (!requestIdParsed.ok) {
+    const requestIdValue = payload?.requestId;
+    const requestIdType = typeof requestIdValue;
+    const requestIdPreview = typeof requestIdValue === "string" ? requestIdValue.trim().slice(0, 50) : null;
+    klog("poker_request_id_invalid", {
+      fn: "leave",
+      tableId,
+      requestIdType,
+      requestIdPreview,
+      reason: "normalize_failed",
+    });
     return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "invalid_request_id" }) };
   }
   const requestId = requestIdParsed.value;

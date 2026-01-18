@@ -14,6 +14,7 @@ const requestIdHelperSrc = read("netlify/functions/_shared/poker-request-id.mjs"
 const startHandSrc = read("netlify/functions/poker-start-hand.mjs");
 const pokerUiSrc = read("poker/poker.js");
 const phase1MigrationSrc = read("supabase/migrations/20260117090000_poker_phase1_authoritative_seats.sql");
+const requestIdMigrationSrc = read("supabase/migrations/20260201090000_poker_requests_request_id_unique.sql");
 const ciWorkflowSrc = read(".github/workflows/ci.yml");
 const testsWorkflowSrc = read(".github/workflows/tests.yml");
 const matrixWorkflowSrc = read(".github/workflows/playwright-matrix.yml");
@@ -74,7 +75,7 @@ assert.ok(pokerUiSrc.includes("apiPost(LEAVE_URL"), "poker UI should retry leave
 assert.ok(pokerUiSrc.includes("poker_leave_bind"), "poker UI should log leave bind state");
 assert.ok(pokerUiSrc.includes("poker_leave_click"), "poker UI should log leave click");
 const heartbeatCallRegex =
-  /apiPost\(\s*HEARTBEAT_URL[\s\S]*?\{[\s\S]*?tableId\s*:\s*tableId[\s\S]*?requestId\s*:\s*(?:requestId|heartbeatRequestId|String\(\s*heartbeatRequestId\s*\))[\s\S]*?\}[\s\S]*?\)/;
+  /apiPost\(\s*HEARTBEAT_URL[\s\S]*?\{[\s\S]*?tableId\s*:\s*tableId[\s\S]*?requestId\s*:\s*(?:requestId|heartbeatRequestId)[\s\S]*?\}[\s\S]*?\)/;
 assert.ok(heartbeatCallRegex.test(pokerUiSrc), "poker UI heartbeat should send requestId and tableId");
 assert.ok(!/tbl\.max_players/.test(pokerUiSrc), "poker UI should not read tbl.max_players");
 assert.ok(!/table\.max_players/.test(pokerUiSrc), "poker UI should not read table.max_players");
@@ -88,6 +89,10 @@ assert.ok(heartbeatSrc.includes("REQUEST_PENDING_STALE_SEC"), "heartbeat should 
 assert.ok(leaveSrc.includes("poker_leave_start"), "leave should log poker_leave_start");
 assert.ok(leaveSrc.includes("poker_leave_ok"), "leave should log poker_leave_ok");
 assert.ok(leaveSrc.includes("poker_leave_error"), "leave should log poker_leave_error");
+assert.ok(joinSrc.includes("poker_request_id_invalid"), "join should log invalid requestId inputs");
+assert.ok(leaveSrc.includes("poker_request_id_invalid"), "leave should log invalid requestId inputs");
+assert.ok(heartbeatSrc.includes("poker_request_id_invalid"), "heartbeat should log invalid requestId inputs");
+assert.ok(sweepSrc.includes("poker_requests_cleanup"), "sweep should log poker_requests_cleanup");
 assert.ok(
   /select result_json, created_at from public\.poker_requests/.test(joinSrc),
   "join should query request created_at for pending checks"
@@ -111,6 +116,36 @@ assert.ok(
 assert.ok(
   /table_id = \$1 and request_id = \$2/.test(heartbeatSrc),
   "heartbeat should scope request queries by table_id and request_id"
+);
+assert.ok(
+  /async function retryJoin\([\s\S]*?joinTable\(pendingJoinRequestId\)/.test(pokerUiSrc),
+  "poker UI should retry join with pendingJoinRequestId"
+);
+assert.ok(
+  /async function retryLeave\([\s\S]*?leaveTable\(pendingLeaveRequestId\)/.test(pokerUiSrc),
+  "poker UI should retry leave with pendingLeaveRequestId"
+);
+assert.ok(
+  /resolveRequestId\(\s*pendingJoinRequestId\s*,\s*requestIdOverride\s*\)/.test(pokerUiSrc),
+  "poker UI joinTable should resolve requestId using pendingJoinRequestId"
+);
+assert.ok(
+  /resolveRequestId\(\s*pendingLeaveRequestId\s*,\s*requestIdOverride\s*\)/.test(pokerUiSrc),
+  "poker UI leaveTable should resolve requestId using pendingLeaveRequestId"
+);
+assert.ok(
+  /apiPost\(\s*JOIN_URL[\s\S]*?requestId\s*:\s*joinRequestId/.test(pokerUiSrc),
+  "poker UI join should send joinRequestId as requestId"
+);
+assert.ok(!/String\(\s*joinRequestId\s*\)/.test(pokerUiSrc), "poker UI join should not stringify joinRequestId");
+assert.ok(
+  /apiPost\(\s*LEAVE_URL[\s\S]*?requestId\s*:\s*leaveRequestId/.test(pokerUiSrc),
+  "poker UI leave should send leaveRequestId as requestId"
+);
+assert.ok(!/String\(\s*leaveRequestId\s*\)/.test(pokerUiSrc), "poker UI leave should not stringify leaveRequestId");
+assert.ok(
+  /async function sendHeartbeat\([\s\S]*?getValidRequestId\(heartbeatRequestId\)/.test(pokerUiSrc),
+  "poker UI heartbeat should validate requestId before sending"
 );
 assert.ok(
   ciWorkflowSrc.includes("playwright install --with-deps"),
@@ -139,6 +174,14 @@ assert.ok(
 assert.ok(
   phase1MigrationSrc.includes("pg_constraint") && phase1MigrationSrc.includes("drop constraint %I"),
   "migration should dynamically drop legacy unique constraint"
+);
+assert.ok(
+  /row_number\(\)\s+over\s*\([\s\S]*?partition by table_id,\s*request_id/.test(requestIdMigrationSrc),
+  "requestId migration should de-dupe poker_requests by table_id and request_id"
+);
+assert.ok(
+  /create unique index if not exists poker_requests_table_id_request_id_key/.test(requestIdMigrationSrc),
+  "requestId migration should enforce poker_requests table_id/request_id uniqueness"
 );
 assert.ok(
   sweepSrc.includes("delete from public.poker_requests"),
