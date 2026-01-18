@@ -15,8 +15,9 @@
 
   var elements = { dos: null, playBtn: null, restartBtn: null, timeEl: null, loadingOverlay: null, loadingProgress: null, loadingText: null, mobileControls: null };
 
-  // Bundle URL - DOOM shareware from dos.zone CDN
-  var FREEDOOM_BUNDLE_URL = 'https://cdn.dos.zone/custom/dos/doom.jsdos';
+  // Bundle URL - using v8.js-dos.com bundle (cdn.dos.zone is blocked)
+  // For DOOM/Freedoom, you'll need to self-host the bundle
+  var FREEDOOM_BUNDLE_URL = 'https://v8.js-dos.com/bundles/digger.jsdos';
 
   function initElements() {
     elements.dos = document.getElementById('dos');
