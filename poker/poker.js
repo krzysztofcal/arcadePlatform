@@ -145,15 +145,8 @@
   }
 
   async function apiPost(url, data){
-    try {
-      var res = await authedFetch(url, { method: 'POST', body: JSON.stringify(data || {}) });
-      return await parseResponse(res);
-    } catch (err){
-      if (isAbortError(err)){
-        return { aborted: true };
-      }
-      throw err;
-    }
+    var res = await authedFetch(url, { method: 'POST', body: JSON.stringify(data || {}) });
+    return await parseResponse(res);
   }
 
   function shortId(id){
@@ -491,6 +484,7 @@
     var pendingLeaveTimer = null;
     var joinPending = false;
     var leavePending = false;
+    var needsRefreshOnVisible = false;
     var heartbeatPendingRetries = 0;
     var heartbeatInFlight = false;
     var HEARTBEAT_PENDING_MAX_RETRIES = 8;
@@ -744,10 +738,6 @@
         }
         var requestId = heartbeatRequestId;
         var data = await apiPost(HEARTBEAT_URL, { tableId: tableId, requestId: requestId });
-        if (data && data.aborted){
-          shouldReturn = true;
-          return;
-        }
         if (isPendingResponse(data)){
           heartbeatPendingRetries++;
           if (heartbeatPendingRetries <= HEARTBEAT_PENDING_MAX_RETRIES){
@@ -881,18 +871,17 @@
           buyIn: buyIn,
           requestId: joinRequestId
         });
-        if (joinResult && joinResult.aborted){
-          clearJoinPending();
-          return;
-        }
         if (isPendingResponse(joinResult)){
           schedulePendingRetry('join', retryJoin);
           return;
         }
         clearJoinPending();
         setError(errorEl, null);
-        if (!isPageActive()) return;
-        loadTable();
+        if (!isPageActive()){
+          needsRefreshOnVisible = true;
+          return;
+        }
+        loadTable(false);
       } catch (err){
         clearJoinPending();
         if (isAbortError(err)){
@@ -926,10 +915,6 @@
         var leaveRequestId = resolved.requestId;
         klog('poker_leave_request', { tableId: tableId, requestId: leaveRequestId, url: LEAVE_URL });
         var leaveResult = await apiPost(LEAVE_URL, { tableId: tableId, requestId: leaveRequestId });
-        if (leaveResult && leaveResult.aborted){
-          clearLeavePending();
-          return;
-        }
         var pendingResponse = isPendingResponse(leaveResult);
         klog('poker_leave_response', {
           ok: !!(leaveResult && leaveResult.ok),
@@ -947,8 +932,11 @@
         }
         clearLeavePending();
         setError(errorEl, null);
-        if (!isPageActive()) return;
-        loadTable();
+        if (!isPageActive()){
+          needsRefreshOnVisible = true;
+          return;
+        }
+        loadTable(false);
       } catch (err){
         clearLeavePending();
         if (isAbortError(err)){
@@ -982,6 +970,7 @@
         state.pollErrors = 0;
         startPolling();
         startHeartbeat();
+        if (needsRefreshOnVisible) needsRefreshOnVisible = false;
         loadTable(false);
       }
     }
