@@ -97,8 +97,9 @@ export async function handler(event) {
     return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "invalid_payload" }) };
   }
 
-  const tableIdRaw = payload && typeof payload.tableId === "string" ? payload.tableId.trim() : "";
-  const tableId = tableIdRaw;
+  const tableIdValue = payload?.tableId;
+  const tableIdRaw = typeof tableIdValue === "string" ? tableIdValue : "";
+  const tableId = typeof tableIdValue === "string" ? tableIdValue.trim() : "";
   if (!tableId || !isValidUuid(tableId)) {
     return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "invalid_table_id" }) };
   }
