@@ -1,5 +1,6 @@
 import { baseHeaders, beginSql, corsHeaders, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
 import { isValidUuid } from "./_shared/poker-utils.mjs";
+import { initHand, normalizeSeatRows, normalizeState, toPublicState } from "./_shared/poker-engine.mjs";
 
 const parseBody = (body) => {
   if (!body) return { ok: true, value: {} };
@@ -26,19 +27,6 @@ const parseRequestId = (value) => {
   const trimmed = value.trim();
   if (!trimmed) return { ok: false, value: null };
   return { ok: true, value: trimmed };
-};
-
-const normalizeState = (value) => {
-  if (!value) return {};
-  if (typeof value === "string") {
-    try {
-      return JSON.parse(value);
-    } catch {
-      return {};
-    }
-  }
-  if (typeof value === "object") return value;
-  return {};
 };
 
 const parseStacks = (value) => (value && typeof value === "object" && !Array.isArray(value) ? value : {});
@@ -149,47 +137,32 @@ export async function handler(event) {
       }
 
       const seatRows = await tx.unsafe(
-        "select user_id, seat_no from public.poker_seats where table_id = $1 and status = 'ACTIVE' order by seat_no asc;",
+        "select user_id, seat_no, status, stack from public.poker_seats where table_id = $1 and status = 'ACTIVE' order by seat_no asc;",
         [tableId]
       );
-      const seats = Array.isArray(seatRows) ? seatRows : [];
-      const validSeats = seats.filter((seat) => Number.isInteger(seat?.seat_no));
-      if (validSeats.length < 2) {
+      const seats = normalizeSeatRows(seatRows);
+      if (seats.length < 2) {
         throw makeError(409, "not_enough_players");
       }
 
-      if (currentState.phase && currentState.phase !== "INIT" && currentState.phase !== "HAND_DONE") {
+      if (currentState.phase && currentState.phase !== "WAITING" && currentState.phase !== "INIT" && currentState.phase !== "SETTLED") {
         throw makeError(409, "already_in_hand");
       }
 
-      const seatNos = validSeats.map((seat) => seat.seat_no);
-      const prevButton = normalizeSeatNo(currentState.buttonSeatNo);
-      const prevIndex = prevButton != null ? seatNos.indexOf(prevButton) : -1;
-      const buttonSeatNo = prevIndex >= 0 ? seatNos[(prevIndex + 1) % seatNos.length] : seatNos[0];
-      const buttonIndex = seatNos.indexOf(buttonSeatNo);
-      const nextToActSeatNo = seatNos[(buttonIndex + 1) % seatNos.length];
-
-      const handId = `hand_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
-      const derivedSeats = validSeats.map((seat) => ({ userId: seat.user_id, seatNo: seat.seat_no }));
-      const activeUserIds = new Set(validSeats.map((seat) => seat.user_id));
       const currentStacks = parseStacks(currentState.stacks);
-      const nextStacks = Object.entries(currentStacks).reduce((acc, [userId, amount]) => {
-        if (activeUserIds.has(userId)) {
-          acc[userId] = amount;
-        }
+      const nextStacks = seats.reduce((acc, seat) => {
+        const stackValue = Number.isFinite(seat.stack) ? seat.stack : currentStacks?.[seat.userId] || 0;
+        acc[seat.userId] = stackValue;
         return acc;
       }, {});
 
+      const initResult = initHand({ tableId, seats, stacks: nextStacks, stakes: table.stakes || {}, prevState: currentState });
+      if (!initResult.ok) {
+        throw makeError(409, initResult.error || "cannot_start");
+      }
+
       const updatedState = {
-        ...currentState,
-        tableId: currentState.tableId || tableId,
-        handId,
-        phase: "HAND_ACTIVE",
-        pot: 0,
-        seats: derivedSeats,
-        stacks: nextStacks,
-        buttonSeatNo,
-        nextToActSeatNo,
+        ...initResult.state,
         lastStartHandRequestId: requestIdParsed.value || null,
         lastStartHandUserId: auth.userId,
         startedAt: new Date().toISOString(),
@@ -209,7 +182,8 @@ export async function handler(event) {
         [tableId, newVersion, auth.userId, "START_HAND", null]
       );
 
-      return { tableId, version: newVersion, handId, buttonSeatNo, nextToActSeatNo };
+      const publicState = toPublicState(updatedState, auth.userId);
+      return { tableId, version: newVersion, handId: updatedState.handId, buttonSeatNo: updatedState.dealerSeat, nextToActSeatNo: updatedState.actorSeat, publicState };
     });
 
     return {
@@ -222,6 +196,7 @@ export async function handler(event) {
         handId: result.handId,
         buttonSeatNo: result.buttonSeatNo,
         nextToActSeatNo: result.nextToActSeatNo,
+        state: result.publicState,
       }),
     };
   } catch (error) {

@@ -87,7 +87,31 @@ returning id;
         throw new Error("poker_table_insert_failed");
       }
 
-      const state = { tableId, seats: [], stacks: {}, pot: 0, phase: "INIT" };
+      const now = new Date().toISOString();
+      const state = {
+        tableId,
+        handId: null,
+        handNo: 0,
+        phase: "WAITING",
+        dealerSeat: null,
+        sbSeat: null,
+        bbSeat: null,
+        actorSeat: null,
+        deckSeed: null,
+        deck: null,
+        board: [],
+        hole: null,
+        public: { seats: [] },
+        stacks: {},
+        potTotal: 0,
+        sidePots: null,
+        streetBet: 0,
+        minRaiseTo: 0,
+        actionRequiredFromUserId: null,
+        allowedActions: [],
+        lastMoveAt: now,
+        updatedAt: now,
+      };
       await tx.unsafe(
         "insert into public.poker_state (table_id, version, state) values ($1, 0, $2::jsonb);",
         [tableId, JSON.stringify(state)]

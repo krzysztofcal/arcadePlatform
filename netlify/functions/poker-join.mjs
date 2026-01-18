@@ -253,10 +253,10 @@ export async function handler(event) {
         try {
           await tx.unsafe(
             `
-insert into public.poker_seats (table_id, user_id, seat_no, status, last_seen_at, joined_at)
-values ($1, $2, $3, 'ACTIVE', now(), now());
+insert into public.poker_seats (table_id, user_id, seat_no, status, last_seen_at, joined_at, stack)
+values ($1, $2, $3, 'ACTIVE', now(), now(), $4);
             `,
-            [tableId, auth.userId, seatNo]
+            [tableId, auth.userId, seatNo, buyIn]
           );
         } catch (error) {
           const isUnique = error?.code === "23505";
@@ -329,14 +329,42 @@ values ($1, $2, $3, 'ACTIVE', now(), now());
         const seats = parseSeats(currentState.seats).filter((seat) => seat?.userId !== auth.userId);
         seats.push({ userId: auth.userId, seatNo });
         const stacks = { ...parseStacks(currentState.stacks), [auth.userId]: buyIn };
+        const publicSeats = seats.map((seat) => ({
+          userId: seat.userId,
+          seatNo: seat.seatNo,
+          status: "ACTIVE",
+          stack: Number.isFinite(stacks[seat.userId]) ? stacks[seat.userId] : 0,
+          betThisStreet: 0,
+          hasFolded: false,
+          isAllIn: false,
+        }));
+        const now = new Date().toISOString();
 
         const updatedState = {
           ...currentState,
           tableId: currentState.tableId || tableId,
+          handId: currentState.handId || null,
+          handNo: Number.isFinite(currentState.handNo) ? currentState.handNo : 0,
+          phase: currentState.phase || "WAITING",
+          dealerSeat: currentState.dealerSeat ?? null,
+          sbSeat: currentState.sbSeat ?? null,
+          bbSeat: currentState.bbSeat ?? null,
+          actorSeat: currentState.actorSeat ?? null,
+          deckSeed: currentState.deckSeed ?? null,
+          deck: currentState.deck ?? null,
+          board: Array.isArray(currentState.board) ? currentState.board : [],
+          hole: currentState.hole ?? null,
+          public: { seats: publicSeats },
           seats,
           stacks,
-          pot: Number.isFinite(currentState.pot) ? currentState.pot : 0,
-          phase: currentState.phase || "INIT",
+          potTotal: Number.isFinite(currentState.potTotal) ? currentState.potTotal : Number(currentState.pot) || 0,
+          sidePots: currentState.sidePots ?? null,
+          streetBet: Number.isFinite(currentState.streetBet) ? currentState.streetBet : 0,
+          minRaiseTo: Number.isFinite(currentState.minRaiseTo) ? currentState.minRaiseTo : 0,
+          actionRequiredFromUserId: currentState.actionRequiredFromUserId ?? null,
+          allowedActions: Array.isArray(currentState.allowedActions) ? currentState.allowedActions : [],
+          lastMoveAt: currentState.lastMoveAt || now,
+          updatedAt: now,
         };
 
         await tx.unsafe(

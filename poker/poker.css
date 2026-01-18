@@ -70,6 +70,8 @@
 
 .poker-seat--inactive{border-color:rgba(248,113,113,.5);}
 
+.poker-seat--actor{border-color:rgba(110,231,231,.7); box-shadow:0 0 0 1px rgba(110,231,231,.4) inset;}
+
 .poker-seat-no{font:700 11px Poppins, sans-serif; color:var(--muted); margin-bottom:4px;}
 
 .poker-seat-user{font:600 12px Poppins, sans-serif; color:#e8eeff; word-break:break-all;}
@@ -89,6 +91,10 @@
 .poker-state-item{font:600 13px Poppins, sans-serif; color:var(--muted);}
 
 .poker-state-item strong{color:var(--accent);}
+
+.poker-state-row .poker-state-item{min-width:140px;}
+
+.poker-board{font:600 12px Poppins, sans-serif; color:#e8eeff;}
 
 .poker-json-toggle{background:transparent; border:none; color:var(--accent); font:600 12px Poppins, sans-serif; cursor:pointer; padding:0; text-decoration:underline;}
 

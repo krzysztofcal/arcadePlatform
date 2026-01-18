@@ -26,6 +26,9 @@
       </a>
     </div>
     <div class="topbar-right">
+      <a id="xpBadge" class="xp-badge xp-badge--loading" aria-live="polite" aria-busy="true" href="/xp.html">
+        <span class="xp-badge__label">Syncing XP…</span>
+      </a>
       <div class="avatar-shell" id="avatarShell">
         <button type="button" class="avatar-btn" id="avatarButton" aria-haspopup="true" aria-expanded="false">
           <span class="avatar-circle" id="avatarInitials" aria-hidden="true">AH</span>
@@ -90,6 +93,24 @@
         </div>
       </div>
 
+      <div class="poker-panel">
+        <h3 data-i18n="actions">Actions</h3>
+        <div class="poker-state-row">
+          <div class="poker-state-item"><span data-i18n="currentActor">Actor</span>: <strong id="pokerActor">-</strong></div>
+          <div class="poker-state-item"><span data-i18n="toCall">To Call</span>: <strong id="pokerToCall">0</strong></div>
+          <div class="poker-state-item"><span data-i18n="streetBet">Street Bet</span>: <strong id="pokerStreetBet">0</strong></div>
+        </div>
+        <div class="poker-form-row">
+          <input type="number" id="pokerActionAmount" class="poker-input" value="0" min="0">
+          <button id="pokerActionFold" class="poker-btn">Fold</button>
+          <button id="pokerActionCheck" class="poker-btn">Check</button>
+          <button id="pokerActionCall" class="poker-btn">Call</button>
+          <button id="pokerActionBet" class="poker-btn">Bet</button>
+          <button id="pokerActionRaise" class="poker-btn">Raise</button>
+          <span id="pokerActionStatus" class="poker-inline-status" aria-live="polite" hidden></span>
+        </div>
+      </div>
+
       <div class="poker-state-panel">
         <h3 data-i18n="gameState">Game State</h3>
         <div class="poker-state-row">
@@ -97,6 +118,9 @@
           <div class="poker-state-item"><span data-i18n="pot">Pot</span>: <strong id="pokerPot">0</strong></div>
           <div class="poker-state-item"><span data-i18n="phase">Phase</span>: <strong id="pokerPhase">-</strong></div>
           <div class="poker-state-item"><span data-i18n="version">Version</span>: <strong id="pokerVersion">-</strong></div>
+        </div>
+        <div class="poker-state-row">
+          <div class="poker-state-item"><span data-i18n="board">Board</span>: <strong id="pokerBoard">-</strong></div>
         </div>
         <button id="pokerJsonToggle" class="poker-json-toggle" data-i18n="showRawJson">Show raw JSON</button>
         <pre id="pokerJsonBox" class="poker-json-box" hidden></pre>
