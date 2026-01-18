@@ -15,9 +15,8 @@
 
   var elements = { dos: null, playBtn: null, restartBtn: null, timeEl: null, loadingOverlay: null, loadingProgress: null, loadingText: null, mobileControls: null };
 
-  // Bundle URL - using js-dos official example bundle to verify integration works
-  // TODO: Replace with self-hosted doom.jsdos or freedoom.jsdos bundle
-  var FREEDOOM_BUNDLE_URL = 'https://v8.js-dos.com/bundles/digger.jsdos';
+  // Bundle URL - DOOM shareware from dos.zone CDN
+  var FREEDOOM_BUNDLE_URL = 'https://cdn.dos.zone/custom/dos/doom.jsdos';
 
   function initElements() {
     elements.dos = document.getElementById('dos');
@@ -141,18 +140,40 @@
   }
 
   function sendKey(code, pressed) {
-    if (!state.ci) return;
-    try {
-      if (pressed) { state.ci.simulateKeyPress(keyCodeFromString(code)); }
-      else { state.ci.simulateKeyRelease(keyCodeFromString(code)); }
-    } catch (e) {
-      try {
-        var event = new KeyboardEvent(pressed ? 'keydown' : 'keyup', { code: code, key: code, bubbles: true, cancelable: true });
-        elements.dos.dispatchEvent(event);
-      } catch (e2) {
-        klog('freedoom_key_error', { code: code, error: String(e2) });
-      }
+    // Find the canvas inside js-dos container and dispatch keyboard events
+    var target = null;
+    if (elements.dos) {
+      target = elements.dos.querySelector('canvas') || elements.dos;
     }
+    if (!target) target = document.activeElement || document.body;
+
+    try {
+      // Try CI method first if available
+      if (state.ci && typeof state.ci.simulateKeyPress === 'function') {
+        if (pressed) { state.ci.simulateKeyPress(keyCodeFromString(code)); }
+        else { state.ci.simulateKeyRelease(keyCodeFromString(code)); }
+        return;
+      }
+
+      // Dispatch keyboard event to canvas
+      var keyCode = keyCodeFromString(code);
+      var event = new KeyboardEvent(pressed ? 'keydown' : 'keyup', {
+        code: code,
+        key: codeToKey(code),
+        keyCode: keyCode,
+        which: keyCode,
+        bubbles: true,
+        cancelable: true
+      });
+      target.dispatchEvent(event);
+    } catch (e) {
+      klog('freedoom_key_error', { code: code, error: String(e) });
+    }
+  }
+
+  function codeToKey(code) {
+    var map = { 'KeyW': 'w', 'KeyA': 'a', 'KeyS': 's', 'KeyD': 'd', 'KeyE': 'e', 'Space': ' ', 'ControlLeft': 'Control', 'ControlRight': 'Control', 'ShiftLeft': 'Shift', 'Enter': 'Enter', 'Escape': 'Escape', 'ArrowUp': 'ArrowUp', 'ArrowDown': 'ArrowDown', 'ArrowLeft': 'ArrowLeft', 'ArrowRight': 'ArrowRight', 'Digit1': '1', 'Digit2': '2', 'Digit3': '3', 'Digit4': '4', 'Digit5': '5', 'Digit6': '6', 'Digit7': '7' };
+    return map[code] || code;
   }
 
   function keyCodeFromString(code) {
