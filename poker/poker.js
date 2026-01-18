@@ -893,7 +893,7 @@
         } else if (!pendingJoinRequestId) {
           pendingJoinRequestId = normalizeRequestId(resolved.requestId);
         }
-        var joinRequestId = resolved.requestId;
+        var joinRequestId = normalizeRequestId(resolved.requestId);
         var joinResult = await apiPost(JOIN_URL, {
           tableId: tableId,
           seatNo: seatNo,
@@ -919,7 +919,7 @@
           return;
         }
         if (isAuthError(err)){
-          pauseJoinPending();
+          stopPendingAll();
           handleAuthExpired({
             authMsg: authMsg,
             content: tableContent,
@@ -947,7 +947,7 @@
         } else if (!pendingLeaveRequestId) {
           pendingLeaveRequestId = normalizeRequestId(resolved.requestId);
         }
-        var leaveRequestId = resolved.requestId;
+        var leaveRequestId = normalizeRequestId(resolved.requestId);
         klog('poker_leave_request', { tableId: tableId, requestId: leaveRequestId, url: LEAVE_URL });
         var leaveResult = await apiPost(LEAVE_URL, { tableId: tableId, requestId: leaveRequestId });
         var pendingResponse = isPendingResponse(leaveResult);
@@ -975,7 +975,7 @@
           return;
         }
         if (isAuthError(err)){
-          pauseLeavePending();
+          stopPendingAll();
           handleAuthExpired({
             authMsg: authMsg,
             content: tableContent,
