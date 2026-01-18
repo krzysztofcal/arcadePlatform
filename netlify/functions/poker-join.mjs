@@ -326,6 +326,10 @@ values ($1, $2, $3, 'ACTIVE', now(), now(), $4);
         }
 
         const currentState = normalizeState(stateRow.state);
+        const activePhases = ["PREFLOP", "FLOP", "TURN", "RIVER", "SHOWDOWN"];
+        if (activePhases.includes(currentState.phase)) {
+          throw makeError(409, "hand_in_progress");
+        }
         const existingPublicSeats = parseSeats(currentState.public?.seats).filter((seat) => seat?.userId !== auth.userId);
         const stacks = { ...parseStacks(currentState.stacks), [auth.userId]: buyIn };
         const publicSeats = [

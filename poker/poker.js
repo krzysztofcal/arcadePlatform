@@ -472,6 +472,8 @@
     var actorEl = document.getElementById('pokerActor');
     var toCallEl = document.getElementById('pokerToCall');
     var streetBetEl = document.getElementById('pokerStreetBet');
+    var yourBetEl = document.getElementById('pokerYourBet');
+    var minRaiseEl = document.getElementById('pokerMinRaiseTo');
     var jsonToggle = document.getElementById('pokerJsonToggle');
     var jsonBox = document.getElementById('pokerJsonBox');
     var signInBtn = document.getElementById('pokerSignIn');
@@ -966,12 +968,25 @@
       }
       if (actorEl) actorEl.textContent = actorSeat ? shortId(actorSeat.userId) : '-';
       var streetBet = Number.isFinite(gameState.streetBet) ? gameState.streetBet : 0;
+      var minRaiseTo = Number.isFinite(gameState.minRaiseTo) ? gameState.minRaiseTo : 0;
+      var bbAmount = Number.isFinite(gameState.bbAmount) ? gameState.bbAmount : 0;
       var yourPublic = publicSeats.find(function(seat){ return seat.userId === currentUserId; });
       var yourBet = yourPublic && Number.isFinite(yourPublic.betThisStreet) ? yourPublic.betThisStreet : 0;
       var toCall = Math.max(0, streetBet - yourBet);
+      if (yourBetEl) yourBetEl.textContent = yourBet;
+      if (minRaiseEl) minRaiseEl.textContent = minRaiseTo;
       if (toCallEl) toCallEl.textContent = toCall;
       if (streetBetEl) streetBetEl.textContent = streetBet;
       var allowed = Array.isArray(gameState.allowedActions) ? gameState.allowedActions : [];
+      if (actionAmountInput){
+        var actionMin = 0;
+        if (allowed.indexOf('RAISE') >= 0 && minRaiseTo > 0){
+          actionMin = minRaiseTo;
+        } else if (allowed.indexOf('BET') >= 0 && bbAmount > 0){
+          actionMin = bbAmount;
+        }
+        actionAmountInput.min = actionMin;
+      }
       if (actionFoldBtn) actionFoldBtn.disabled = allowed.indexOf('FOLD') < 0 || actPending;
       if (actionCheckBtn) actionCheckBtn.disabled = allowed.indexOf('CHECK') < 0 || actPending;
       if (actionCallBtn) actionCallBtn.disabled = allowed.indexOf('CALL') < 0 || actPending;

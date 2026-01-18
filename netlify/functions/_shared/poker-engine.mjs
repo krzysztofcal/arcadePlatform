@@ -344,6 +344,13 @@ const settleHand = (state, stacks, holeCards) => {
   }
   const board = state.board || [];
   const sidePots = buildSidePots(state.contrib, publicSeats);
+  if (!sidePots.length && (state.potTotal || 0) > 0) {
+    const fallbackWinner = active[0];
+    if (fallbackWinner) {
+      stacks[fallbackWinner.userId] = (stacks[fallbackWinner.userId] || 0) + (state.potTotal || 0);
+      return { winners: [fallbackWinner.userId], stacks, revealed: {}, sidePots: [] };
+    }
+  }
   const revealed = {};
   const winners = new Set();
   for (const pot of sidePots) {

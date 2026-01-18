@@ -141,6 +141,28 @@ export async function handler(event) {
       const stateRow = stateRows?.[0] || null;
       if (!stateRow) throw new Error("poker_state_missing");
       const currentState = normalizeState(stateRow.state);
+      const requestMarker = `REQUEST:${requestId}`;
+      // Idempotency marker rows are stored as action_type = REQUEST:<requestId>.
+      const existingRows = await tx.unsafe(
+        "select id, version from public.poker_actions where table_id = $1 and user_id = $2 and action_type = $3 limit 1;",
+        [tableId, auth.userId, requestMarker]
+      );
+      const existing = existingRows?.[0];
+      if (existing?.version != null) {
+        const latestRows = await tx.unsafe(
+          "select version, state from public.poker_state where table_id = $1 limit 1;",
+          [tableId]
+        );
+        const latest = latestRows?.[0] || stateRow;
+        const latestState = normalizeState(latest?.state);
+        const publicState = toPublicState(latestState, auth.userId);
+        const userHoleCards = await loadHoleCardsForUser(tx, tableId, latestState?.handId, auth.userId);
+        if (userHoleCards) {
+          publicState.hole = { [auth.userId]: userHoleCards };
+        }
+        return { ok: true, state: publicState, version: Number(latest?.version) };
+      }
+
       const phase = currentState.phase || "WAITING";
       const activePhases = ["PREFLOP", "FLOP", "TURN", "RIVER", "SHOWDOWN"];
       const publicSeats = Array.isArray(currentState.public?.seats) ? currentState.public.seats : [];
@@ -157,13 +179,17 @@ export async function handler(event) {
           if (!Number.isInteger(seat?.seatNo)) return true;
           return seat.seatNo !== dbSeat.seatNo;
         });
-        if (!publicSeats.length || missingInPublic || missingInDb || seatNoMismatch) {
+        const seatCountMismatch = publicSeats.length !== dbActiveIds.length;
+        if (!publicSeats.length || missingInPublic || missingInDb || seatNoMismatch || seatCountMismatch) {
           klog("poker_state_invariant_violation", {
             tableId,
             phase,
             dbSeats: dbActiveIds.length,
             publicSeats: publicIds.length,
             seatNoMismatch,
+            seatCountMismatch,
+            missingInPublic: dbActiveIds.filter((userId) => !publicIds.includes(userId)),
+            missingInDb: publicIds.filter((userId) => !dbSeatMap.has(userId)),
           });
           throw makeError(409, "state_invalid");
         }
@@ -235,28 +261,6 @@ export async function handler(event) {
         throw makeError(409, "hand_not_active");
       }
 
-      const requestMarker = `REQUEST:${requestId}`;
-      // Idempotency marker rows are stored as action_type = REQUEST:<requestId>.
-      const existingRows = await tx.unsafe(
-        "select id, version from public.poker_actions where table_id = $1 and user_id = $2 and action_type = $3 limit 1;",
-        [tableId, auth.userId, requestMarker]
-      );
-      const existing = existingRows?.[0];
-      if (existing?.version != null) {
-        const latestRows = await tx.unsafe(
-          "select version, state from public.poker_state where table_id = $1 limit 1;",
-          [tableId]
-        );
-        const latest = latestRows?.[0] || stateRow;
-        const latestState = normalizeState(latest?.state);
-        const publicState = toPublicState(latestState, auth.userId);
-        const userHoleCards = await loadHoleCardsForUser(tx, tableId, latestState?.handId, auth.userId);
-        if (userHoleCards) {
-          publicState.hole = { [auth.userId]: userHoleCards };
-        }
-        return { ok: true, state: publicState, version: Number(latest?.version) };
-      }
-
       const stakes = table.stakes || {};
       const baseState = currentState;
       const handId = baseState.handId;
@@ -284,6 +288,14 @@ export async function handler(event) {
           tableId,
           effectiveHandId,
         ]);
+      }
+      const phaseValid = !nextState.phase || ["WAITING", "PREFLOP", "FLOP", "TURN", "RIVER", "SHOWDOWN", "SETTLED"].includes(nextState.phase);
+      const potValid = Number.isFinite(nextState.potTotal) && nextState.potTotal >= 0;
+      const stacksValid = Array.isArray(nextState.public?.seats)
+        ? nextState.public.seats.every((seat) => Number.isFinite(seat?.stack) && seat.stack >= 0)
+        : true;
+      if (!phaseValid || !potValid || !stacksValid) {
+        throw makeError(409, "state_invalid");
       }
 
       const updateRows = await tx.unsafe(

@@ -219,6 +219,10 @@ export async function handler(event) {
         }
 
         const currentState = normalizeState(stateRow.state);
+        const activePhases = ["PREFLOP", "FLOP", "TURN", "RIVER", "SHOWDOWN"];
+        if (activePhases.includes(currentState.phase)) {
+          throw makeError(409, "hand_in_progress");
+        }
         const stacks = parseStacks(currentState.stacks);
         const stackValue = parseStackValue(stacks?.[auth.userId]);
         if (!stackValue) {
