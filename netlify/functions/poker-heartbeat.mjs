@@ -73,8 +73,9 @@ export async function handler(event) {
   if (!requestIdParsed.ok) {
     const requestIdValue = payload?.requestId;
     const requestIdType = typeof requestIdValue;
-    const requestIdPreview = typeof requestIdValue === "string" ? requestIdValue.trim().slice(0, 50) : null;
-    const requestIdPresent = requestIdValue != null && requestIdValue !== "";
+    const requestIdTrimmed = typeof requestIdValue === "string" ? requestIdValue.trim() : "";
+    const requestIdPreview = requestIdTrimmed ? requestIdTrimmed.slice(0, 50) : null;
+    const requestIdPresent = requestIdTrimmed !== "";
     klog("poker_request_id_invalid", {
       fn: "heartbeat",
       tableId,

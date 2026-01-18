@@ -104,11 +104,12 @@ export async function handler(event) {
   }
 
   const requestIdValue = payload?.requestId;
-  const requestIdPresent = requestIdValue != null && requestIdValue !== "";
+  const requestIdTrimmed = typeof requestIdValue === "string" ? requestIdValue.trim() : "";
+  const requestIdPresent = requestIdTrimmed !== "";
   const requestIdParsed = normalizeRequestId(payload?.requestId, { maxLen: 200 });
   if (!requestIdParsed.ok) {
     const requestIdType = typeof requestIdValue;
-    const requestIdPreview = typeof requestIdValue === "string" ? requestIdValue.trim().slice(0, 50) : null;
+    const requestIdPreview = requestIdTrimmed ? requestIdTrimmed.slice(0, 50) : null;
     klog("poker_request_id_invalid", {
       fn: "leave",
       tableId,
