@@ -243,37 +243,78 @@
     }
 
     try {
-      var dosInit = window.Dos(elements.dos);
+      // js-dos v8 API: pass URL in options object
+      // Dos(element, { url: bundleUrl }) - this is the correct v8 API
+      var dosInstance = window.Dos(elements.dos, {
+        url: FREEDOOM_BUNDLE_URL
+      });
 
-      // Determine API shape and get a Promise that resolves to CI
-      var runPromise = null;
+      // The v8 Dos() call with url option auto-starts the game
+      // It returns an object with event handlers, not a Promise
+      // We need to detect when the game is ready via events or polling
 
-      if (dosInit && typeof dosInit.run === 'function') {
-        // Direct .run() method available
-        runPromise = dosInit.run(FREEDOOM_BUNDLE_URL);
-      } else if (dosInit && typeof dosInit.then === 'function') {
-        // dosInit is a Promise/thenable - wait for it then call .run()
-        runPromise = dosInit.then(function(instance) {
-          if (instance && typeof instance.run === 'function') {
-            return instance.run(FREEDOOM_BUNDLE_URL);
-          }
-          throw new Error('js-dos instance has no .run(): ' + Object.keys(instance || {}).join(','));
-        });
+      if (dosInstance) {
+        klog('dos_instance_created', { keys: Object.keys(dosInstance).join(',') });
+
+        // Check if there's an onReady or similar callback mechanism
+        if (typeof dosInstance.onReady === 'function') {
+          dosInstance.onReady(function(ci) {
+            onGameLoaded(ci);
+          });
+        } else if (typeof dosInstance.then === 'function') {
+          // Some versions return a Promise
+          dosInstance.then(function(ci) {
+            onGameLoaded(ci);
+          }).catch(function(err) {
+            onGameError(err, preflight);
+          });
+        } else {
+          // v8 auto-starts and manages its own UI
+          // The game should start automatically, hide our loading overlay
+          // Wait a moment for js-dos to initialize, then mark as loaded
+          setTimeout(function() {
+            // Check if js-dos has started rendering (canvas present in container)
+            var canvas = elements.dos.querySelector('canvas');
+            if (canvas) {
+              state.loaded = true;
+              state.running = true;
+              state.startTime = Date.now();
+              showLoading(false);
+              if (elements.restartBtn) elements.restartBtn.style.display = 'inline-flex';
+              initMobileControls();
+              if (state.timeInterval) clearInterval(state.timeInterval);
+              state.timeInterval = setInterval(updateTime, 1000);
+              setupGameEventListeners();
+              klog('freedoom_loaded', { success: true, method: 'canvas-detect' });
+            } else {
+              // Still loading, check again
+              var checkCount = 0;
+              var checkInterval = setInterval(function() {
+                checkCount++;
+                var c = elements.dos.querySelector('canvas');
+                if (c) {
+                  clearInterval(checkInterval);
+                  state.loaded = true;
+                  state.running = true;
+                  state.startTime = Date.now();
+                  showLoading(false);
+                  if (elements.restartBtn) elements.restartBtn.style.display = 'inline-flex';
+                  initMobileControls();
+                  if (state.timeInterval) clearInterval(state.timeInterval);
+                  state.timeInterval = setInterval(updateTime, 1000);
+                  setupGameEventListeners();
+                  klog('freedoom_loaded', { success: true, method: 'canvas-poll', checks: checkCount });
+                } else if (checkCount > 30) {
+                  // 30 seconds timeout
+                  clearInterval(checkInterval);
+                  onGameError('Timeout waiting for js-dos canvas', preflight);
+                }
+              }, 1000);
+            }
+          }, 2000);
+        }
       } else {
-        // Unknown API shape
-        var shape = dosInit ? Object.keys(dosInit).join(',') : 'null/undefined';
-        throw new Error('js-dos API mismatch: Dos() returned ' + typeof dosInit + ' with keys: ' + shape);
-      }
-
-      // Handle the promise
-      if (runPromise && typeof runPromise.then === 'function') {
-        runPromise.then(function(ci) {
-          onGameLoaded(ci);
-        }).catch(function(err) {
-          onGameError(err, preflight);
-        });
-      } else {
-        throw new Error('js-dos run did not return a Promise');
+        throw new Error('Dos() returned null/undefined');
       }
 
     } catch (err) {
