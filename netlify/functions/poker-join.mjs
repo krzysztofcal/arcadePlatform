@@ -326,18 +326,28 @@ values ($1, $2, $3, 'ACTIVE', now(), now(), $4);
         }
 
         const currentState = normalizeState(stateRow.state);
-        const seats = parseSeats(currentState.seats).filter((seat) => seat?.userId !== auth.userId);
-        seats.push({ userId: auth.userId, seatNo });
+        const existingPublicSeats = parseSeats(currentState.public?.seats).filter((seat) => seat?.userId !== auth.userId);
         const stacks = { ...parseStacks(currentState.stacks), [auth.userId]: buyIn };
-        const publicSeats = seats.map((seat) => ({
-          userId: seat.userId,
-          seatNo: seat.seatNo,
-          status: "ACTIVE",
-          stack: Number.isFinite(stacks[seat.userId]) ? stacks[seat.userId] : 0,
-          betThisStreet: 0,
-          hasFolded: false,
-          isAllIn: false,
-        }));
+        const publicSeats = [
+          ...existingPublicSeats.map((seat) => ({
+            userId: seat.userId,
+            seatNo: seat.seatNo,
+            status: seat.status || "ACTIVE",
+            stack: Number.isFinite(stacks[seat.userId]) ? stacks[seat.userId] : 0,
+            betThisStreet: Number.isFinite(seat.betThisStreet) ? seat.betThisStreet : 0,
+            hasFolded: !!seat.hasFolded,
+            isAllIn: !!seat.isAllIn,
+          })),
+          {
+            userId: auth.userId,
+            seatNo,
+            status: "ACTIVE",
+            stack: buyIn,
+            betThisStreet: 0,
+            hasFolded: false,
+            isAllIn: false,
+          },
+        ];
         const now = new Date().toISOString();
 
         const updatedState = {
@@ -358,7 +368,6 @@ values ($1, $2, $3, 'ACTIVE', now(), now(), $4);
           deckIndex: Number.isFinite(currentState.deckIndex) ? currentState.deckIndex : 0,
           board: Array.isArray(currentState.board) ? currentState.board : [],
           public: { seats: publicSeats },
-          seats,
           stacks,
           potTotal: Number.isFinite(currentState.potTotal) ? currentState.potTotal : Number(currentState.pot) || 0,
           sidePots: currentState.sidePots ?? null,

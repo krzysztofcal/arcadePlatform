@@ -245,18 +245,19 @@ export async function handler(event) {
           txId = txResult?.transaction?.id || null;
         }
 
-        const seats = parseSeats(currentState.seats).filter((seatItem) => seatItem?.userId !== auth.userId);
         const updatedStacks = { ...stacks };
         delete updatedStacks[auth.userId];
-        const publicSeats = seats.map((seat) => ({
-          userId: seat.userId,
-          seatNo: seat.seatNo,
-          status: "ACTIVE",
-          stack: Number.isFinite(updatedStacks[seat.userId]) ? updatedStacks[seat.userId] : 0,
-          betThisStreet: 0,
-          hasFolded: false,
-          isAllIn: false,
-        }));
+        const publicSeats = parseSeats(currentState.public?.seats)
+          .filter((seat) => seat?.userId !== auth.userId)
+          .map((seat) => ({
+            userId: seat.userId,
+            seatNo: seat.seatNo,
+            status: seat.status || "ACTIVE",
+            stack: Number.isFinite(updatedStacks[seat.userId]) ? updatedStacks[seat.userId] : 0,
+            betThisStreet: Number.isFinite(seat.betThisStreet) ? seat.betThisStreet : 0,
+            hasFolded: !!seat.hasFolded,
+            isAllIn: !!seat.isAllIn,
+          }));
         const now = new Date().toISOString();
 
         const updatedState = {
@@ -277,7 +278,6 @@ export async function handler(event) {
           deckIndex: Number.isFinite(currentState.deckIndex) ? currentState.deckIndex : 0,
           board: Array.isArray(currentState.board) ? currentState.board : [],
           public: { seats: publicSeats },
-          seats,
           stacks: updatedStacks,
           potTotal: Number.isFinite(currentState.potTotal) ? currentState.potTotal : Number(currentState.pot) || 0,
           sidePots: currentState.sidePots ?? null,

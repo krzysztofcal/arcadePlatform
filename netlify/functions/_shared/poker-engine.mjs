@@ -227,7 +227,7 @@ const initHand = ({ tableId, seats, stacks, stakes, prevState }) => {
   const bbAmount = Math.max(sbAmount * 2, Number(stakes?.bb) || sbAmount * 2);
   const sbStack = stacks?.[activeSeats.find((s) => s.seatNo === sbSeat)?.userId] || 0;
   const bbStack = stacks?.[activeSeats.find((s) => s.seatNo === bbSeat)?.userId] || 0;
-  if (sbStack <= sbAmount || bbStack <= bbAmount) {
+  if (sbStack < sbAmount || bbStack < bbAmount) {
     return { ok: false, error: "insufficient_blind_stack" };
   }
   const stacksCopy = { ...stacks };
@@ -348,6 +348,7 @@ const cleanStateForNextHand = (state) => ({
 });
 
 const toPublicState = (state, currentUserId) => {
+  // TODO(poker-compat): currentUserId is reserved for per-user filtering.
   if (!state || !isPlainObject(state)) return {};
   const publicState = { ...state };
   delete publicState.deck;
@@ -357,7 +358,9 @@ const toPublicState = (state, currentUserId) => {
 
 const applyAction = ({ currentState, actionType, amount, userId, stakes, holeCards }) => {
   const state = normalizeState(currentState);
+  // Clone public seats so applyAction can safely mutate in-place.
   let publicSeats = Array.isArray(state.public?.seats) ? state.public.seats.map((s) => ({ ...s })) : [];
+  // TODO(poker-compat): remove legacy state.seats fallback after one release.
   if (!publicSeats.length && Array.isArray(state.seats)) {
     const stacks = state.stacks || {};
     publicSeats = state.seats.map((seat) => ({
