@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { evaluateHand, compareScores } from "./poker-hand-eval.mjs";
 
 // TODO(poker-tests): add engine tests once Vitest is available:
@@ -116,7 +117,9 @@ const buildAllowedActions = (seat, state) => {
   if (streetBet === 0 && seat.stack > 0) actions.push("BET");
   if (!raiseClosed && streetBet > 0 && minRaiseTo > streetBet) {
     const maxToBet = betThisStreet + seat.stack;
-    if (maxToBet > streetBet) actions.push("RAISE");
+    const canMinRaise = maxToBet >= minRaiseTo;
+    const canAllInRaise = maxToBet > streetBet && maxToBet < minRaiseTo;
+    if (canMinRaise || canAllInRaise) actions.push("RAISE");
   }
   return actions;
 };
@@ -216,8 +219,8 @@ const initHand = ({ tableId, seats, stacks, stakes, prevState }) => {
   const bbSeat = nextSeatFrom(seatNos, sbSeat);
   const actorSeat = nextSeatFrom(seatNos, bbSeat);
   const handNo = Number.isFinite(prevState?.handNo) ? prevState.handNo + 1 : 1;
-  const handId = `hand_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
-  const seed = Math.floor(Math.random() * 1e9);
+  const handId = `hand_${Date.now()}_${randomBytes(8).toString("hex")}`;
+  const seed = randomBytes(4).readUInt32BE(0);
   const deck = getDeckForHand(seed);
   const holeCards = {};
   const bets = {};
@@ -232,11 +235,6 @@ const initHand = ({ tableId, seats, stacks, stakes, prevState }) => {
   }
   const sbAmount = Math.max(1, Number(stakes?.sb) || 1);
   const bbAmount = Math.max(sbAmount * 2, Number(stakes?.bb) || sbAmount * 2);
-  const sbStack = stacks?.[activeSeats.find((s) => s.seatNo === sbSeat)?.userId] || 0;
-  const bbStack = stacks?.[activeSeats.find((s) => s.seatNo === bbSeat)?.userId] || 0;
-  if (sbStack < sbAmount || bbStack < bbAmount) {
-    return { ok: false, error: "insufficient_blind_stack" };
-  }
   const stacksCopy = { ...stacks };
   const postBlind = (seatNo, amount) => {
     const seat = activeSeats.find((s) => s.seatNo === seatNo);
@@ -267,7 +265,8 @@ const initHand = ({ tableId, seats, stacks, stakes, prevState }) => {
   const actorSeatResolved = advanceActor(publicSeats, actorSeat);
   const actionSeat = actorSeatResolved != null ? actorSeatResolved : actorSeat;
   const actorUser = publicSeats.find((s) => s.seatNo === actionSeat);
-  const streetBet = bbPaid;
+  const streetBet = Math.max(sbPaid, bbPaid);
+  const lastFullRaiseSize = Math.max(1, streetBet);
   const actedThisStreet = initActedThisStreet(publicSeats);
   const state = {
     tableId,
@@ -290,8 +289,8 @@ const initHand = ({ tableId, seats, stacks, stakes, prevState }) => {
     potTotal,
     sidePots: null,
     streetBet,
-    minRaiseTo: streetBet + bbAmount,
-    lastFullRaiseSize: bbAmount,
+    minRaiseTo: streetBet + lastFullRaiseSize,
+    lastFullRaiseSize,
     raiseClosed: false,
     sbAmount,
     bbAmount,
@@ -473,6 +472,8 @@ const applyAction = ({ currentState, actionType, amount, userId, stakes, holeCar
   if (!state.contrib) return { ok: false, error: "state_invalid" };
 
   const streetBet = Number.isFinite(state.streetBet) ? state.streetBet : 0;
+  const minRaiseTo = Number.isFinite(state.minRaiseTo) ? state.minRaiseTo : streetBet + bbAmount;
+  if (!Number.isFinite(state.minRaiseTo)) state.minRaiseTo = minRaiseTo;
   const betThisStreet = Number.isFinite(actorSeat.betThisStreet) ? actorSeat.betThisStreet : 0;
   const stack = Number.isFinite(actorSeat.stack) ? actorSeat.stack : 0;
   const toCall = Math.max(0, streetBet - betThisStreet);
@@ -494,7 +495,9 @@ const applyAction = ({ currentState, actionType, amount, userId, stakes, holeCar
   } else if (actionType === "BET") {
     if (streetBet > 0) return { ok: false, error: "cannot_bet" };
     if (!Number.isInteger(normalizedAmount) || normalizedAmount <= 0) return { ok: false, error: "invalid_bet" };
-    if (normalizedAmount < bbAmount) return { ok: false, error: "bet_too_small" };
+    const maxToBet = betThisStreet + stack;
+    if (normalizedAmount > maxToBet) return { ok: false, error: "invalid_bet" };
+    if (normalizedAmount < bbAmount && normalizedAmount < maxToBet) return { ok: false, error: "bet_too_small" };
     const toPay = normalizedAmount - betThisStreet;
     if (toPay <= 0) return { ok: false, error: "invalid_bet" };
     const prevStreetBet = state.streetBet;
@@ -521,6 +524,9 @@ const applyAction = ({ currentState, actionType, amount, userId, stakes, holeCar
   } else if (actionType === "RAISE") {
     if (streetBet <= 0) return { ok: false, error: "cannot_raise" };
     if (!Number.isInteger(normalizedAmount) || normalizedAmount <= streetBet) return { ok: false, error: "invalid_raise" };
+    const maxToBet = betThisStreet + stack;
+    if (normalizedAmount > maxToBet) return { ok: false, error: "invalid_raise" };
+    if (normalizedAmount < minRaiseTo && normalizedAmount < maxToBet) return { ok: false, error: "invalid_raise" };
     const toPay = normalizedAmount - betThisStreet;
     if (toPay <= 0) return { ok: false, error: "invalid_raise" };
     const prevStreetBet = state.streetBet;

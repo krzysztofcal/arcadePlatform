@@ -307,12 +307,23 @@ export async function handler(event) {
       if (!Number.isFinite(newVersion)) throw makeError(409, "state_invalid");
 
       const nextSeats = Array.isArray(nextState.public?.seats) ? nextState.public.seats : [];
-      for (const seat of nextSeats) {
-        if (!seat.userId) continue;
-        const stackValue = Number.isFinite(seat.stack) ? seat.stack : 0;
+      const stackUpdates = nextSeats
+        .filter((seat) => seat?.userId)
+        .map((seat) => ({
+          userId: seat.userId,
+          stack: Number.isFinite(seat.stack) ? seat.stack : 0,
+        }));
+      if (stackUpdates.length) {
+        const valuesSql = stackUpdates
+          .map((_, idx) => `($${idx * 2 + 1}, $${idx * 2 + 2})`)
+          .join(", ");
+        const params = stackUpdates.flatMap((row) => [row.userId, row.stack]);
         await tx.unsafe(
-          "update public.poker_seats set stack = $3 where table_id = $1 and user_id = $2;",
-          [tableId, seat.userId, stackValue]
+          `update public.poker_seats as s
+           set stack = v.stack
+           from (values ${valuesSql}) as v(user_id, stack)
+           where s.table_id = $${params.length + 1} and s.user_id = v.user_id;`,
+          [...params, tableId]
         );
       }
 

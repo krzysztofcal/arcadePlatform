@@ -37,7 +37,7 @@ describe("poker-act idempotency marker handling", () => {
   it("returns latest state without applying action when marker exists", async () => {
     const response = await handler({
       httpMethod: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", origin: "https://example.netlify.app" },
       body: JSON.stringify({
         tableId: "00000000-0000-0000-0000-000000000000",
         requestId: "req-1",
