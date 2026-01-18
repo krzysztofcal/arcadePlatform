@@ -15,7 +15,17 @@ begin
     execute 'update public.poker_seats set stack = 0 where stack is null';
     execute 'alter table public.poker_seats alter column stack set default 0';
     execute 'alter table public.poker_seats alter column stack set not null';
-    execute 'alter table public.poker_seats add constraint if not exists poker_seats_stack_non_negative check (stack >= 0)';
+
+    if not exists (
+      select 1 from pg_constraint c
+      join pg_class t on t.oid = c.conrelid
+      join pg_namespace n on n.oid = t.relnamespace
+      where n.nspname = 'public'
+        and t.relname = 'poker_seats'
+        and c.conname = 'poker_seats_stack_non_negative'
+    ) then
+      execute 'alter table public.poker_seats add constraint poker_seats_stack_non_negative check (stack >= 0)';
+    end if;
   else
     raise notice 'poker_seats.stack has non-numeric type %, skipping default/not-null changes', col_type;
   end if;
