@@ -184,17 +184,17 @@ const allActed = (publicSeats, actedThisStreet) =>
   publicSeats.every((seat) => !isInHand(seat) || actedThisStreet?.[seat.seatNo]);
 
 const startStreetState = ({ state, publicSeats, streetNo, actorSeat, closingSeat, bbAmount }) => {
-  publicSeats.forEach((seat) => { seat.betThisStreet = 0; });
+  const nextSeats = publicSeats.map((seat) => ({ ...seat, betThisStreet: 0 }));
   state.streetBet = 0;
   state.minRaiseTo = bbAmount;
   state.streetNo = streetNo;
   state.bbAmount = bbAmount;
-  state.public = { ...state.public, seats: publicSeats };
+  state.public = { ...(state.public || {}), seats: nextSeats };
   state.lastAggressorSeat = null;
-  state.closingSeat = resolveClosingSeat(publicSeats, closingSeat);
-  state.actedThisStreet = initActedThisStreet(publicSeats);
+  state.closingSeat = resolveClosingSeat(nextSeats, closingSeat);
+  state.actedThisStreet = initActedThisStreet(nextSeats);
   state.actorSeat = actorSeat;
-  const actor = publicSeats.find((seat) => seat.seatNo === actorSeat);
+  const actor = nextSeats.find((seat) => seat.seatNo === actorSeat);
   state.actionRequiredFromUserId = actor ? actor.userId : null;
   state.allowedActions = actor ? buildAllowedActions(actor, state) : [];
 };
@@ -353,6 +353,11 @@ const toPublicState = (state, currentUserId) => {
   const publicState = { ...state };
   delete publicState.deck;
   delete publicState.hole;
+  delete publicState.actedThisStreet;
+  delete publicState.closingSeat;
+  delete publicState.lastAggressorSeat;
+  delete publicState.deckSeed;
+  delete publicState.deckIndex;
   return publicState;
 };
 
@@ -456,7 +461,7 @@ const applyAction = ({ currentState, actionType, amount, userId, stakes, holeCar
     publicSeats.forEach((seat) => { stacks[seat.userId] = seat.stack; });
     const result = settleHand(state, stacks, holeCards);
     publicSeats.forEach((seat) => { seat.stack = stacks[seat.userId]; });
-    state.public.seats = publicSeats;
+    state.public = { ...(state.public || {}), seats: publicSeats };
     state.stacks = publicSeats.reduce((acc, seat) => {
       acc[seat.userId] = seat.stack;
       return acc;
@@ -472,7 +477,8 @@ const applyAction = ({ currentState, actionType, amount, userId, stakes, holeCar
   const settled = allSettled(publicSeats, state.streetBet || 0);
   const acted = allActed(publicSeats, state.actedThisStreet);
   const nextSeat = advanceActor(publicSeats, state.actorSeat);
-  const shouldClose = settled && acted;
+  const hasClosedLoop = nextSeat == null || nextSeat === state.closingSeat;
+  const shouldClose = settled && acted && hasClosedLoop;
 
   if (shouldClose) {
     const deck = getDeckForHand(state.deckSeed);
@@ -499,7 +505,7 @@ const applyAction = ({ currentState, actionType, amount, userId, stakes, holeCar
       publicSeats.forEach((seat) => { stacks[seat.userId] = seat.stack; });
       const result = settleHand(state, stacks, holeCards);
       publicSeats.forEach((seat) => { seat.stack = stacks[seat.userId]; });
-      state.public.seats = publicSeats;
+      state.public = { ...(state.public || {}), seats: publicSeats };
       state.stacks = publicSeats.reduce((acc, seat) => {
         acc[seat.userId] = seat.stack;
         return acc;
@@ -534,7 +540,7 @@ const applyAction = ({ currentState, actionType, amount, userId, stakes, holeCar
   state.allowedActions = nextActor ? buildAllowedActions(nextActor, state) : [];
   state.lastMoveAt = nowIso();
   state.updatedAt = nowIso();
-  state.public.seats = publicSeats;
+  state.public = { ...(state.public || {}), seats: publicSeats };
   state.stacks = publicSeats.reduce((acc, seat) => {
     acc[seat.userId] = seat.stack;
     return acc;

@@ -178,6 +178,10 @@ export async function handler(event) {
       reconciledSeats.sort((a, b) => a.seatNo - b.seatNo);
       currentState.stacks = dbStacks;
       currentState.public = { seats: reconciledSeats };
+      if (currentState.actorSeat != null) {
+        const actorMatch = reconciledSeats.find((seat) => seat.seatNo === currentState.actorSeat);
+        currentState.actionRequiredFromUserId = actorMatch ? actorMatch.userId : null;
+      }
       const phase = currentState.phase || "WAITING";
       const activePhases = ["PREFLOP", "FLOP", "TURN", "RIVER", "SHOWDOWN"];
       if (!activePhases.includes(phase)) {
