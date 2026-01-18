@@ -108,14 +108,11 @@ const buildAllowedActions = (seat, state) => {
   const betThisStreet = Math.max(0, Number(seat.betThisStreet) || 0);
   const toCall = Math.max(0, streetBet - betThisStreet);
   const minRaiseTo = Number.isFinite(state.minRaiseTo) ? state.minRaiseTo : 0;
-  const baseBb = Number.isFinite(state.bbAmount) ? state.bbAmount : 0;
-  const fallbackBb = minRaiseTo && streetBet ? minRaiseTo - streetBet : 0;
-  const bbAmount = Math.max(1, baseBb || fallbackBb || 1);
-  const minBet = streetBet === 0 ? Math.max(1, Math.floor(baseBb || minRaiseTo || 0) || 1) : 1;
+  const bbAmount = Math.max(1, Number(state.bbAmount) || 0);
   const actions = ["FOLD"];
   if (toCall === 0) actions.push("CHECK");
   if (toCall > 0 && seat.stack > toCall) actions.push("CALL");
-  if (streetBet === 0 && seat.stack > 1 && seat.stack > minBet) actions.push("BET");
+  if (streetBet === 0 && seat.stack > bbAmount) actions.push("BET");
   if (streetBet > 0 && minRaiseTo > streetBet) {
     const minToPay = minRaiseTo - betThisStreet;
     if (minToPay > toCall && seat.stack > minToPay) actions.push("RAISE");
@@ -390,10 +387,10 @@ const applyAction = ({ currentState, actionType, amount, userId, stakes, holeCar
   const actorSeat = publicSeats.find((seat) => seat.userId === userId);
   if (!actorSeat) return { ok: false, error: "not_seated" };
   if (state.actionRequiredFromUserId !== userId) return { ok: false, error: "not_your_turn" };
-  if (!PHASES.includes(state.phase)) return { ok: false, error: "invalid_phase" };
   if (state.phase === "WAITING" || state.phase === "INIT" || state.phase === "SETTLED") {
     return { ok: false, error: "hand_not_active" };
   }
+  if (!PHASES.includes(state.phase)) return { ok: false, error: "invalid_phase" };
 
   const streetBet = Number.isFinite(state.streetBet) ? state.streetBet : 0;
   const betThisStreet = Number.isFinite(actorSeat.betThisStreet) ? actorSeat.betThisStreet : 0;
@@ -415,6 +412,7 @@ const applyAction = ({ currentState, actionType, amount, userId, stakes, holeCar
   } else if (actionType === "BET") {
     if (streetBet > 0) return { ok: false, error: "cannot_bet" };
     if (!Number.isInteger(normalizedAmount) || normalizedAmount <= 0) return { ok: false, error: "invalid_bet" };
+    if (normalizedAmount < bbAmount) return { ok: false, error: "bet_too_small" };
     const toPay = normalizedAmount - betThisStreet;
     if (toPay <= 0) return { ok: false, error: "invalid_bet" };
     if (stack < toPay) return { ok: false, error: "insufficient_stack" };
@@ -541,14 +539,6 @@ const applyAction = ({ currentState, actionType, amount, userId, stakes, holeCar
   return { ok: true, state };
 };
 
-const ensureAutoStart = ({ state, tableId, seats, stacks, stakes }) => {
-  const phase = state.phase || "WAITING";
-  if (phase !== "WAITING" && phase !== "INIT") return { ok: true, state };
-  const activeSeats = seats.filter((seat) => seat.status === "ACTIVE" && (stacks?.[seat.userId] || 0) > 0);
-  if (activeSeats.length < 2) return { ok: true, state };
-  return initHand({ tableId, seats, stacks, stakes, prevState: state });
-};
-
 export {
   normalizeState,
   normalizeSeatRows,
@@ -556,5 +546,4 @@ export {
   getDeckForHand,
   initHand,
   applyAction,
-  ensureAutoStart,
 };

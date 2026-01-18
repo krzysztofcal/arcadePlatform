@@ -119,9 +119,9 @@ export async function handler(event) {
     if (result.holeCards) {
       publicState.hole = { [auth.userId]: result.holeCards };
     }
-    const compatibility = {
+    const stateCompat = {
       stacks: publicState.stacks || {},
-      pot: publicState.potTotal != null ? publicState.potTotal : publicState.pot,
+      pot: publicState.pot != null ? publicState.pot : publicState.potTotal,
       phase: publicState.phase || "-",
     };
 
@@ -134,8 +134,9 @@ export async function handler(event) {
         seats,
         state: {
           version: stateRow.version,
-          state: { ...publicState, ...compatibility },
+          state: publicState,
         },
+        stateCompat,
       }),
     };
   } catch (error) {
