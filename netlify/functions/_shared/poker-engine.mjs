@@ -451,6 +451,7 @@ const applyAction = ({ currentState, actionType, amount, userId, stakes, holeCar
   }
   const actorSeat = publicSeats.find((seat) => seat.userId === userId);
   if (!actorSeat) return { ok: false, error: "not_seated" };
+  const actedSeatNo = actorSeat.seatNo;
   if (state.actionRequiredFromUserId !== userId) return { ok: false, error: "not_your_turn" };
   if (state.phase === "WAITING" || state.phase === "INIT" || state.phase === "SETTLED") {
     return { ok: false, error: "hand_not_active" };
@@ -539,6 +540,10 @@ const applyAction = ({ currentState, actionType, amount, userId, stakes, holeCar
     return { ok: false, error: "invalid_action" };
   }
 
+  if (!canAct(publicSeats.find((seat) => seat.seatNo === state.closingSeat))) {
+    state.closingSeat = resolveClosingSeat(publicSeats, state.closingSeat);
+  }
+
   const remaining = publicSeats.filter((seat) => isInHand(seat));
   if (remaining.length === 1) {
     state.phase = "SETTLED";
@@ -563,8 +568,8 @@ const applyAction = ({ currentState, actionType, amount, userId, stakes, holeCar
   const settled = allSettled(publicSeats, state.streetBet || 0);
   const acted = allActed(publicSeats, state.actedThisStreet);
   const nextSeat = advanceActor(publicSeats, state.actorSeat);
-  const hasClosedLoop = nextSeat == null || nextSeat === state.closingSeat;
-  const shouldClose = settled && acted && hasClosedLoop;
+  const closingSeatActed = state.closingSeat != null && actedSeatNo === state.closingSeat;
+  const shouldClose = settled && acted && closingSeatActed;
 
   if (shouldClose) {
     const deck = getDeckForHand(state.deckSeed);
