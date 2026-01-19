@@ -30,13 +30,15 @@ const handler = loadPokerHandler("netlify/functions/poker-leave.mjs", {
   verifySupabaseJwt: async () => ({ valid: true, userId }),
   isValidUuid: () => true,
   normalizeRequestId: () => ({ ok: true, value: null }),
-  beginSql: async (fn) =>
-    fn({
+  beginSql: async (fn) => {
+    const tx = mockTx();
+    return fn({
       unsafe: async (query, params) => {
         queries.push({ query: String(query), params });
-        return mockTx().unsafe(query, params);
+        return tx.unsafe(query, params);
       },
-    }),
+    });
+  },
   postTransaction: async (payload) => {
     postCalls.push(payload);
     return { transaction: { id: "tx-1" } };

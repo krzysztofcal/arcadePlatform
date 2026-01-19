@@ -5,6 +5,9 @@ const tableId = "22222222-2222-4222-8222-222222222222";
 const userId = "user-2";
 const seatNo = 3;
 
+let lockIdx = -1;
+let updIdx = -1;
+
 const makeHandler = (postCalls, queries) => {
   let beginCall = 0;
   const handler = loadPokerHandler("netlify/functions/poker-sweep.mjs", {
@@ -30,6 +33,7 @@ const makeHandler = (postCalls, queries) => {
             queries.push({ query: String(query), params });
             const text = String(query).toLowerCase();
             if (text.includes("select seat_no, status, stack, last_seen_at")) {
+              lockIdx = queries.length - 1;
               return [
                 {
                   seat_no: seatNo,
@@ -38,6 +42,9 @@ const makeHandler = (postCalls, queries) => {
                   last_seen_at: new Date(Date.now() - 60 * 60 * 1000),
                 },
               ];
+            }
+            if (text.includes("update public.poker_seats set status = 'inactive', stack = 0")) {
+              updIdx = queries.length - 1;
             }
             return [];
           },
@@ -87,6 +94,8 @@ const run = async () => {
     ),
     "sweep should inactivate seat and zero stack for the timed-out user"
   );
+  assert.ok(lockIdx >= 0, "sweep should lock seat before updating");
+  assert.ok(updIdx > lockIdx, "sweep should update seat after lock");
 };
 
 run().catch((error) => {
