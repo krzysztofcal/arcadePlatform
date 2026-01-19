@@ -41,10 +41,10 @@ const parseSeats = (value) => (Array.isArray(value) ? value : []);
 
 const parseStacks = (value) => (value && typeof value === "object" && !Array.isArray(value) ? value : {});
 
-const parseStackValue = (value) => {
+const normalizeSeatStack = (value) => {
   if (value == null) return null;
   const num = Number(value);
-  if (!Number.isFinite(num) || !Number.isInteger(num) || num <= 0) return null;
+  if (!Number.isFinite(num) || !Number.isInteger(num)) return null;
   if (Math.abs(num) > Number.MAX_SAFE_INTEGER) return null;
   return num;
 };
@@ -201,10 +201,11 @@ export async function handler(event) {
         }
 
         const seatRows = await tx.unsafe(
-          "select seat_no from public.poker_seats where table_id = $1 and user_id = $2 limit 1;",
+          "select seat_no, status, stack from public.poker_seats where table_id = $1 and user_id = $2 for update;",
           [tableId, auth.userId]
         );
-        const seatNo = seatRows?.[0]?.seat_no;
+        const seatRow = seatRows?.[0] || null;
+        const seatNo = seatRow?.seat_no;
         if (!Number.isInteger(seatNo)) {
           throw makeError(409, "not_seated");
         }
@@ -220,30 +221,38 @@ export async function handler(event) {
 
         const currentState = normalizeState(stateRow.state);
         const stacks = parseStacks(currentState.stacks);
-        const stackValue = parseStackValue(stacks?.[auth.userId]);
-        if (!stackValue) {
-          throw makeError(409, "nothing_to_cash_out");
+        const stackValue = normalizeSeatStack(seatRow?.stack);
+        const cashOutAmount = stackValue ?? 0;
+        if (!stackValue || cashOutAmount === 0) {
+          klog("poker_leave_stack_missing", { tableId, userId: auth.userId, seatNo });
         }
 
-        if (stackValue) {
+        if (cashOutAmount > 0) {
           const escrowSystemKey = `POKER_TABLE:${tableId}`;
           const idempotencyKey = requestId
             ? `poker:leave:${requestId}`
-            : `poker:leave:${tableId}:${auth.userId}:${stackValue}`;
+            : `poker:leave:${tableId}:${auth.userId}:${cashOutAmount}`;
 
           const txResult = await postTransaction({
             userId: auth.userId,
             txType: "TABLE_CASH_OUT",
             idempotencyKey,
             entries: [
-              { accountType: "ESCROW", systemKey: escrowSystemKey, amount: -stackValue },
-              { accountType: "USER", amount: stackValue },
+              { accountType: "ESCROW", systemKey: escrowSystemKey, amount: -cashOutAmount },
+              { accountType: "USER", amount: cashOutAmount },
             ],
             createdBy: auth.userId,
             tx,
           });
           txId = txResult?.transaction?.id || null;
         }
+        klog("poker_leave_cashout", {
+          tableId,
+          userId: auth.userId,
+          amount: cashOutAmount,
+          seatNo,
+          hadStack: stackValue != null,
+        });
 
         const seats = parseSeats(currentState.seats).filter((seatItem) => seatItem?.userId !== auth.userId);
         const updatedStacks = { ...stacks };
@@ -258,6 +267,10 @@ export async function handler(event) {
           phase: currentState.phase || "INIT",
         };
 
+        await tx.unsafe("update public.poker_seats set stack = 0 where table_id = $1 and user_id = $2;", [
+          tableId,
+          auth.userId,
+        ]);
         await tx.unsafe("delete from public.poker_seats where table_id = $1 and user_id = $2;", [tableId, auth.userId]);
         await tx.unsafe(
           "update public.poker_state set version = version + 1, state = $2::jsonb, updated_at = now() where table_id = $1;",
@@ -269,7 +282,7 @@ export async function handler(event) {
           [tableId]
         );
 
-        const resultPayload = { ok: true, tableId, cashedOut: stackValue || 0, seatNo: seatNo ?? null };
+        const resultPayload = { ok: true, tableId, cashedOut: cashOutAmount, seatNo: seatNo ?? null };
         if (requestId) {
           await tx.unsafe(
             "update public.poker_requests set result_json = $3::jsonb where table_id = $1 and request_id = $2;",

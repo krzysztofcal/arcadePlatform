@@ -220,8 +220,8 @@ export async function handler(event) {
             throw makeError(409, "table_closed");
           }
           await tx.unsafe(
-            "update public.poker_seats set status = 'ACTIVE', last_seen_at = now() where table_id = $1 and user_id = $2;",
-            [tableId, auth.userId]
+            "update public.poker_seats set status = 'ACTIVE', last_seen_at = now(), stack = coalesce(stack, $3) where table_id = $1 and user_id = $2;",
+            [tableId, auth.userId, buyIn]
           );
 
           await tx.unsafe(
@@ -236,6 +236,13 @@ export async function handler(event) {
               [tableId, requestId, JSON.stringify(resultPayload)]
             );
           }
+          klog("poker_join_stack_persisted", {
+            tableId,
+            userId: auth.userId,
+            seatNo: existingSeatNo,
+            stack: buyIn,
+            mode: "rejoin",
+          });
           klog("poker_join_ok", { tableId, userId: auth.userId, seatNo: existingSeatNo, rejoin: true });
           return resultPayload;
         }
@@ -255,10 +262,10 @@ export async function handler(event) {
         try {
           await tx.unsafe(
             `
-insert into public.poker_seats (table_id, user_id, seat_no, status, last_seen_at, joined_at)
-values ($1, $2, $3, 'ACTIVE', now(), now());
+insert into public.poker_seats (table_id, user_id, seat_no, status, last_seen_at, joined_at, stack)
+values ($1, $2, $3, 'ACTIVE', now(), now(), $4);
             `,
-            [tableId, auth.userId, seatNo]
+            [tableId, auth.userId, seatNo, buyIn]
           );
         } catch (error) {
           const isUnique = error?.code === "23505";
@@ -274,8 +281,8 @@ values ($1, $2, $3, 'ACTIVE', now(), now());
             const fallbackSeatNo = seatRow?.[0]?.seat_no;
             if (Number.isInteger(fallbackSeatNo)) {
               await tx.unsafe(
-                "update public.poker_seats set status = 'ACTIVE', last_seen_at = now() where table_id = $1 and user_id = $2;",
-                [tableId, auth.userId]
+                "update public.poker_seats set status = 'ACTIVE', last_seen_at = now(), stack = coalesce(stack, $3) where table_id = $1 and user_id = $2;",
+                [tableId, auth.userId, buyIn]
               );
               const resultPayload = { ok: true, tableId, seatNo: fallbackSeatNo, userId: auth.userId };
               if (requestId) {
@@ -284,6 +291,13 @@ values ($1, $2, $3, 'ACTIVE', now(), now());
                   [tableId, requestId, JSON.stringify(resultPayload)]
                 );
               }
+              klog("poker_join_stack_persisted", {
+                tableId,
+                userId: auth.userId,
+                seatNo: fallbackSeatNo,
+                stack: buyIn,
+                mode: "rejoin",
+              });
               klog("poker_join_ok", { tableId, userId: auth.userId, seatNo: fallbackSeatNo, rejoin: true });
               return resultPayload;
             }
@@ -358,6 +372,7 @@ values ($1, $2, $3, 'ACTIVE', now(), now());
             [tableId, requestId, JSON.stringify(resultPayload)]
           );
         }
+        klog("poker_join_stack_persisted", { tableId, userId: auth.userId, seatNo, stack: buyIn, mode: "insert" });
         klog("poker_join_ok", { tableId, userId: auth.userId, seatNo, rejoin: false });
         return resultPayload;
       } catch (error) {
