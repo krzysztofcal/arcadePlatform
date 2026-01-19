@@ -144,6 +144,8 @@ export async function handler(event) {
     return { statusCode: 401, headers: cors, body: JSON.stringify({ error: "unauthorized", reason: auth.reason }) };
   }
 
+  klog("poker_join_begin", { tableId, userId: auth.userId, seatNo, hasRequestId: !!requestId });
+
   try {
     const result = await beginSql(async (tx) => {
       if (requestId) {
@@ -301,7 +303,7 @@ values ($1, $2, $3, 'ACTIVE', now(), now());
         }
 
         const idempotencyKey = requestId
-          ? `poker:join:${requestId}`
+          ? `poker:join:${tableId}:${auth.userId}:${requestId}`
           : `poker:join:${tableId}:${auth.userId}:${seatNo}:${buyIn}`;
 
         await postTransaction({
