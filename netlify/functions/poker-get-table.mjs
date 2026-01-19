@@ -1,5 +1,6 @@
 import { baseHeaders, beginSql, corsHeaders, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
 import { isValidUuid } from "./_shared/poker-utils.mjs";
+import { normalizeState, toPublicState } from "./_shared/poker-engine.mjs";
 
 const parseTableId = (event) => {
   const queryValue = event.queryStringParameters?.tableId;
@@ -57,7 +58,7 @@ export async function handler(event) {
       }
 
       const seatRows = await tx.unsafe(
-        "select user_id, seat_no, status, last_seen_at, joined_at from public.poker_seats where table_id = $1 order by seat_no asc;",
+        "select user_id, seat_no, status, last_seen_at, joined_at, stack from public.poker_seats where table_id = $1 order by seat_no asc;",
         [tableId]
       );
 
@@ -76,12 +77,27 @@ export async function handler(event) {
             userId: seat.user_id,
             seatNo: seat.seat_no,
             status: seat.status,
+            stack: seat.stack,
             lastSeenAt: seat.last_seen_at,
             joinedAt: seat.joined_at,
           }))
         : [];
 
-      return { table, seats, stateRow };
+      const currentState = normalizeState(stateRow.state);
+      const isSeated = Array.isArray(seatRows)
+        ? seatRows.some((seat) => seat.user_id === auth.userId && seat.status === "ACTIVE")
+        : false;
+      let holeCards = null;
+      if (isSeated && currentState?.handId) {
+        // SECURITY NOTE: hole cards are server-only (service role). Clients must never access this table directly.
+        const holeRows = await tx.unsafe(
+          "select cards from public.poker_hole_cards where table_id = $1 and hand_id = $2 and user_id = $3 limit 1;",
+          [tableId, currentState.handId, auth.userId]
+        );
+        holeCards = holeRows?.[0]?.cards || null;
+      }
+
+      return { table, seats, stateRow, holeCards };
     });
 
     if (result?.error === "table_not_found") {
@@ -103,6 +119,17 @@ export async function handler(event) {
       lastActivityAt: table.last_activity_at,
     };
 
+    const publicState = toPublicState(normalizeState(stateRow.state), auth.userId);
+    if (result.holeCards) {
+      publicState.hole = { [auth.userId]: result.holeCards };
+    }
+    const potTotal = Number.isFinite(publicState.potTotal) ? publicState.potTotal : publicState.pot;
+    const stateCompat = {
+      stacks: publicState.stacks || {},
+      pot: Number.isFinite(potTotal) ? potTotal : 0,
+      phase: publicState.phase || "-",
+    };
+
     return {
       statusCode: 200,
       headers: cors,
@@ -112,8 +139,9 @@ export async function handler(event) {
         seats,
         state: {
           version: stateRow.version,
-          state: stateRow.state,
+          state: publicState,
         },
+        stateCompat,
       }),
     };
   } catch (error) {

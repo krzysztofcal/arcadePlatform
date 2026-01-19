@@ -219,6 +219,10 @@ export async function handler(event) {
         }
 
         const currentState = normalizeState(stateRow.state);
+        const activePhases = ["PREFLOP", "FLOP", "TURN", "RIVER", "SHOWDOWN"];
+        if (activePhases.includes(currentState.phase)) {
+          throw makeError(409, "hand_in_progress");
+        }
         const stacks = parseStacks(currentState.stacks);
         const stackValue = parseStackValue(stacks?.[auth.userId]);
         if (!stackValue) {
@@ -245,17 +249,48 @@ export async function handler(event) {
           txId = txResult?.transaction?.id || null;
         }
 
-        const seats = parseSeats(currentState.seats).filter((seatItem) => seatItem?.userId !== auth.userId);
         const updatedStacks = { ...stacks };
         delete updatedStacks[auth.userId];
+        const publicSeats = parseSeats(currentState.public?.seats)
+          .filter((seat) => seat?.userId !== auth.userId)
+          .map((seat) => ({
+            userId: seat.userId,
+            seatNo: seat.seatNo,
+            status: seat.status || "ACTIVE",
+            stack: Number.isFinite(updatedStacks[seat.userId]) ? updatedStacks[seat.userId] : 0,
+            betThisStreet: Number.isFinite(seat.betThisStreet) ? seat.betThisStreet : 0,
+            hasFolded: !!seat.hasFolded,
+            isAllIn: !!seat.isAllIn,
+          }));
+        const now = new Date().toISOString();
 
         const updatedState = {
           ...currentState,
           tableId: currentState.tableId || tableId,
-          seats,
+          handId: currentState.handId || null,
+          handNo: Number.isFinite(currentState.handNo) ? currentState.handNo : 0,
+          phase: currentState.phase || "WAITING",
+          streetNo: Number.isFinite(currentState.streetNo) ? currentState.streetNo : null,
+          dealerSeat: currentState.dealerSeat ?? null,
+          sbSeat: currentState.sbSeat ?? null,
+          bbSeat: currentState.bbSeat ?? null,
+          actorSeat: currentState.actorSeat ?? null,
+          closingSeat: currentState.closingSeat ?? null,
+          lastAggressorSeat: currentState.lastAggressorSeat ?? null,
+          actedThisStreet: currentState.actedThisStreet && typeof currentState.actedThisStreet === "object" ? currentState.actedThisStreet : {},
+          deckSeed: currentState.deckSeed ?? null,
+          deckIndex: Number.isFinite(currentState.deckIndex) ? currentState.deckIndex : 0,
+          board: Array.isArray(currentState.board) ? currentState.board : [],
+          public: { seats: publicSeats },
           stacks: updatedStacks,
-          pot: Number.isFinite(currentState.pot) ? currentState.pot : 0,
-          phase: currentState.phase || "INIT",
+          potTotal: Number.isFinite(currentState.potTotal) ? currentState.potTotal : Number(currentState.pot) || 0,
+          sidePots: currentState.sidePots ?? null,
+          streetBet: Number.isFinite(currentState.streetBet) ? currentState.streetBet : 0,
+          minRaiseTo: Number.isFinite(currentState.minRaiseTo) ? currentState.minRaiseTo : 0,
+          actionRequiredFromUserId: currentState.actionRequiredFromUserId ?? null,
+          allowedActions: Array.isArray(currentState.allowedActions) ? currentState.allowedActions : [],
+          lastMoveAt: currentState.lastMoveAt || now,
+          updatedAt: now,
         };
 
         await tx.unsafe("delete from public.poker_seats where table_id = $1 and user_id = $2;", [tableId, auth.userId]);

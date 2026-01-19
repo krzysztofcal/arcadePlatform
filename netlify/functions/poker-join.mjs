@@ -110,14 +110,7 @@ export async function handler(event) {
   }
 
   const seatNo = parseSeatNo(payload?.seatNo);
-  if (seatNo == null) {
-    return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "invalid_seat_no" }) };
-  }
-
   const buyIn = parseBuyIn(payload?.buyIn);
-  if (buyIn == null) {
-    return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "invalid_buy_in" }) };
-  }
 
   const requestIdParsed = normalizeRequestId(payload?.requestId, { maxLen: 200 });
   if (!requestIdParsed.ok) {
@@ -209,10 +202,11 @@ export async function handler(event) {
           throw makeError(404, "table_not_found");
         }
         const seatRows = await tx.unsafe(
-          "select seat_no from public.poker_seats where table_id = $1 and user_id = $2 limit 1;",
+          "select seat_no, status, stack from public.poker_seats where table_id = $1 and user_id = $2 limit 1;",
           [tableId, auth.userId]
         );
-        const existingSeatNo = seatRows?.[0]?.seat_no;
+        const existingSeat = seatRows?.[0] || null;
+        const existingSeatNo = existingSeat?.seat_no;
         if (Number.isInteger(existingSeatNo)) {
           if (table.status === "CLOSED") {
             throw makeError(409, "table_closed");
@@ -227,7 +221,15 @@ export async function handler(event) {
             [tableId]
           );
 
-          const resultPayload = { ok: true, tableId, seatNo: existingSeatNo, userId: auth.userId };
+          const resultPayload = {
+            ok: true,
+            tableId,
+            seatNo: existingSeatNo,
+            userId: auth.userId,
+            status: "ACTIVE",
+            stack: Number.isFinite(existingSeat?.stack) ? existingSeat.stack : 0,
+            heartbeatEverySec: HEARTBEAT_INTERVAL_SEC,
+          };
           if (requestId) {
             await tx.unsafe(
               "update public.poker_requests set result_json = $3::jsonb where table_id = $1 and request_id = $2;",
@@ -246,6 +248,14 @@ export async function handler(event) {
           throw makeError(409, "table_not_open");
         }
 
+        if (seatNo == null) {
+          throw makeError(400, "invalid_seat_no");
+        }
+
+        if (buyIn == null) {
+          throw makeError(400, "invalid_buy_in");
+        }
+
         if (seatNo >= Number(table.max_players)) {
           throw makeError(400, "invalid_seat_no");
         }
@@ -253,10 +263,10 @@ export async function handler(event) {
         try {
           await tx.unsafe(
             `
-insert into public.poker_seats (table_id, user_id, seat_no, status, last_seen_at, joined_at)
-values ($1, $2, $3, 'ACTIVE', now(), now());
+insert into public.poker_seats (table_id, user_id, seat_no, status, last_seen_at, joined_at, stack)
+values ($1, $2, $3, 'ACTIVE', now(), now(), $4);
             `,
-            [tableId, auth.userId, seatNo]
+            [tableId, auth.userId, seatNo, buyIn]
           );
         } catch (error) {
           const isUnique = error?.code === "23505";
@@ -266,7 +276,7 @@ values ($1, $2, $3, 'ACTIVE', now(), now());
           }
           if (isUnique && details.includes("user_id")) {
             const seatRow = await tx.unsafe(
-              "select seat_no from public.poker_seats where table_id = $1 and user_id = $2 limit 1;",
+              "select seat_no, stack from public.poker_seats where table_id = $1 and user_id = $2 limit 1;",
               [tableId, auth.userId]
             );
             const fallbackSeatNo = seatRow?.[0]?.seat_no;
@@ -275,7 +285,15 @@ values ($1, $2, $3, 'ACTIVE', now(), now());
                 "update public.poker_seats set status = 'ACTIVE', last_seen_at = now() where table_id = $1 and user_id = $2;",
                 [tableId, auth.userId]
               );
-              const resultPayload = { ok: true, tableId, seatNo: fallbackSeatNo, userId: auth.userId };
+              const resultPayload = {
+                ok: true,
+                tableId,
+                seatNo: fallbackSeatNo,
+                userId: auth.userId,
+                status: "ACTIVE",
+                stack: Number.isFinite(seatRow?.[0]?.stack) ? seatRow[0].stack : 0,
+                heartbeatEverySec: HEARTBEAT_INTERVAL_SEC,
+              };
               if (requestId) {
                 await tx.unsafe(
                   "update public.poker_requests set result_json = $3::jsonb where table_id = $1 and request_id = $2;",
@@ -326,17 +344,61 @@ values ($1, $2, $3, 'ACTIVE', now(), now());
         }
 
         const currentState = normalizeState(stateRow.state);
-        const seats = parseSeats(currentState.seats).filter((seat) => seat?.userId !== auth.userId);
-        seats.push({ userId: auth.userId, seatNo });
+        const activePhases = ["PREFLOP", "FLOP", "TURN", "RIVER", "SHOWDOWN"];
+        if (activePhases.includes(currentState.phase)) {
+          throw makeError(409, "hand_in_progress");
+        }
+        const existingPublicSeats = parseSeats(currentState.public?.seats).filter((seat) => seat?.userId !== auth.userId);
         const stacks = { ...parseStacks(currentState.stacks), [auth.userId]: buyIn };
+        const publicSeats = [
+          ...existingPublicSeats.map((seat) => ({
+            userId: seat.userId,
+            seatNo: seat.seatNo,
+            status: seat.status || "ACTIVE",
+            stack: Number.isFinite(stacks[seat.userId]) ? stacks[seat.userId] : 0,
+            betThisStreet: Number.isFinite(seat.betThisStreet) ? seat.betThisStreet : 0,
+            hasFolded: !!seat.hasFolded,
+            isAllIn: !!seat.isAllIn,
+          })),
+          {
+            userId: auth.userId,
+            seatNo,
+            status: "ACTIVE",
+            stack: buyIn,
+            betThisStreet: 0,
+            hasFolded: false,
+            isAllIn: false,
+          },
+        ];
+        const now = new Date().toISOString();
 
         const updatedState = {
           ...currentState,
           tableId: currentState.tableId || tableId,
-          seats,
+          handId: currentState.handId || null,
+          handNo: Number.isFinite(currentState.handNo) ? currentState.handNo : 0,
+          phase: currentState.phase || "WAITING",
+          streetNo: Number.isFinite(currentState.streetNo) ? currentState.streetNo : null,
+          dealerSeat: currentState.dealerSeat ?? null,
+          sbSeat: currentState.sbSeat ?? null,
+          bbSeat: currentState.bbSeat ?? null,
+          actorSeat: currentState.actorSeat ?? null,
+          closingSeat: currentState.closingSeat ?? null,
+          lastAggressorSeat: currentState.lastAggressorSeat ?? null,
+          actedThisStreet: currentState.actedThisStreet && typeof currentState.actedThisStreet === "object" ? currentState.actedThisStreet : {},
+          deckSeed: currentState.deckSeed ?? null,
+          deckIndex: Number.isFinite(currentState.deckIndex) ? currentState.deckIndex : 0,
+          board: Array.isArray(currentState.board) ? currentState.board : [],
+          public: { seats: publicSeats },
           stacks,
-          pot: Number.isFinite(currentState.pot) ? currentState.pot : 0,
-          phase: currentState.phase || "INIT",
+          potTotal: Number.isFinite(currentState.potTotal) ? currentState.potTotal : Number(currentState.pot) || 0,
+          sidePots: currentState.sidePots ?? null,
+          streetBet: Number.isFinite(currentState.streetBet) ? currentState.streetBet : 0,
+          minRaiseTo: Number.isFinite(currentState.minRaiseTo) ? currentState.minRaiseTo : 0,
+          actionRequiredFromUserId: currentState.actionRequiredFromUserId ?? null,
+          allowedActions: Array.isArray(currentState.allowedActions) ? currentState.allowedActions : [],
+          lastMoveAt: currentState.lastMoveAt || now,
+          updatedAt: now,
         };
 
         await tx.unsafe(
