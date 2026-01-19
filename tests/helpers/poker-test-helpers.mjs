@@ -8,8 +8,10 @@ const stripImports = (source) => source.replace(/^\s*import[\s\S]*?;\s*$/gm, "")
 export const loadPokerHandler = (filePath, mocks) => {
   const source = fs.readFileSync(path.join(root, filePath), "utf8");
   const withoutImports = stripImports(source);
-  const rewritten = withoutImports.replace(/export\s+(async\s+)?function\s+handler/, "async function handler");
-  if (!rewritten.includes("async function handler")) {
+  const rewritten = withoutImports.replace(/export\s+(async\s+)?function\s+handler\s*\(/, (_m, asyncKw) => {
+    return `${asyncKw ? "async " : ""}function handler(`;
+  });
+  if (!rewritten.includes("function handler(")) {
     throw new Error(`[poker-test-helpers] Failed to rewrite handler export in ${filePath}`);
   }
   const factory = new Function(
