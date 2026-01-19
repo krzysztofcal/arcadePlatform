@@ -1,7 +1,7 @@
 import { baseHeaders, beginSql, corsHeaders, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
 import { normalizeRequestId } from "./_shared/poker-request-id.mjs";
 import { isValidUuid } from "./_shared/poker-utils.mjs";
-import { applyAction, normalizeSeatRows, normalizeState, toPublicState } from "./_shared/poker-engine.mjs";
+import { applyAction, buildAllowedActions, normalizeSeatRows, normalizeState, toPublicState } from "./_shared/poker-engine.mjs";
 
 const parseBody = (body) => {
   if (!body) return { ok: true, value: {} };
@@ -177,15 +177,13 @@ export async function handler(event) {
           if (!Number.isInteger(seat?.seatNo)) return true;
           return seat.seatNo !== dbSeat.seatNo;
         });
-        const seatCountMismatch = publicSeats.length !== dbActiveIds.length;
-        if (!publicSeats.length || missingInPublic || missingInDb || seatNoMismatch || seatCountMismatch) {
+        if (!publicSeats.length || missingInPublic || missingInDb || seatNoMismatch) {
           klog("poker_state_invariant_violation", {
             tableId,
             phase,
             dbSeats: dbActiveIds.length,
             publicSeats: publicIds.length,
             seatNoMismatch,
-            seatCountMismatch,
             missingInPublic: dbActiveIds.filter((userId) => !publicIds.includes(userId)),
             missingInDb: publicIds.filter((userId) => !dbSeatMap.has(userId)),
           });
@@ -210,7 +208,34 @@ export async function handler(event) {
         currentState.public = { seats: reconciledSeats };
         if (currentState.actorSeat != null) {
           const actorMatch = reconciledSeats.find((seat) => seat.seatNo === currentState.actorSeat);
-          currentState.actionRequiredFromUserId = actorMatch ? actorMatch.userId : null;
+          const actorEligible = actorMatch && actorMatch.status === "ACTIVE" && !actorMatch.hasFolded && !actorMatch.isAllIn && actorMatch.stack > 0;
+          if (!actorEligible) {
+            const seatNos = reconciledSeats.map((seat) => seat.seatNo).sort((a, b) => a - b);
+            const startIndex = seatNos.indexOf(currentState.actorSeat);
+            let nextSeat = null;
+            if (startIndex >= 0) {
+              for (let i = 1; i <= seatNos.length; i += 1) {
+                const idx = (startIndex + i) % seatNos.length;
+                const candidateNo = seatNos[idx];
+                const candidate = reconciledSeats.find((seat) => seat.seatNo === candidateNo);
+                if (candidate && candidate.status === "ACTIVE" && !candidate.hasFolded && !candidate.isAllIn && candidate.stack > 0) {
+                  nextSeat = candidate;
+                  break;
+                }
+              }
+            }
+            if (nextSeat) {
+              currentState.actorSeat = nextSeat.seatNo;
+              currentState.actionRequiredFromUserId = nextSeat.userId;
+              currentState.allowedActions = buildAllowedActions(nextSeat, currentState);
+            } else {
+              currentState.actorSeat = null;
+              currentState.actionRequiredFromUserId = null;
+              currentState.allowedActions = [];
+            }
+          } else {
+            currentState.actionRequiredFromUserId = actorMatch.userId;
+          }
         }
       } else {
         // Reconcile stacks and public seats with DB truth when no active hand is running.

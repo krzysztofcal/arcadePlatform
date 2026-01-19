@@ -103,7 +103,7 @@ const buildPublicSeats = (seats, stacks, bets, folded, allIn, statuses) =>
 const getSeatNos = (publicSeats) => publicSeats.map((seat) => seat.seatNo).sort((a, b) => a - b);
 
 const buildAllowedActions = (seat, state) => {
-  if (!seat || seat.hasFolded || seat.isAllIn || seat.stack <= 0) return [];
+  if (!seat || seat.status !== "ACTIVE" || seat.hasFolded || seat.isAllIn || seat.stack <= 0) return [];
   if (state.actionRequiredFromUserId !== seat.userId) return [];
   const streetBet = Math.max(0, Number(state.streetBet) || 0);
   const betThisStreet = Math.max(0, Number(seat.betThisStreet) || 0);
@@ -162,7 +162,7 @@ const resolveClosingSeat = (publicSeats, preferredSeat) => {
 
 const isInHand = (seat) => !!(seat && !seat.hasFolded && seat.status === "ACTIVE" && seat.userId);
 
-const canAct = (seat) => !!(seat && !seat.hasFolded && !seat.isAllIn && seat.stack > 0);
+const canAct = (seat) => !!(seat && seat.status === "ACTIVE" && !seat.hasFolded && !seat.isAllIn && seat.stack > 0);
 
 const initActedThisStreet = (publicSeats) => {
   const acted = {};
@@ -502,7 +502,7 @@ const applyAction = ({ currentState, actionType, amount, userId, stakes, holeCar
   if (!actorSeat) return { ok: false, error: "not_seated" };
   const actedSeatNo = actorSeat.seatNo;
   if (state.actionRequiredFromUserId !== userId) return { ok: false, error: "not_your_turn" };
-  if (actorSeat.hasFolded || actorSeat.isAllIn || actorSeat.stack <= 0) {
+  if (actorSeat.status !== "ACTIVE" || actorSeat.hasFolded || actorSeat.isAllIn || actorSeat.stack <= 0) {
     return { ok: false, error: "cannot_act" };
   }
   if (state.phase === "WAITING" || state.phase === "INIT" || state.phase === "SETTLED") {
@@ -713,4 +713,5 @@ export {
   initHand,
   applyAction,
   buildSidePots,
+  buildAllowedActions,
 };
