@@ -15,7 +15,8 @@ const normalizeSeatStack = (value) => {
 };
 
 const isExpiredSeat = (value) => {
-  const lastSeenMs = Date.parse(value);
+  const lastSeenMs =
+    typeof value === "string" ? Date.parse(value) : value instanceof Date ? value.getTime() : Date.parse(String(value));
   if (!Number.isFinite(lastSeenMs)) return false;
   return Date.now() - lastSeenMs > PRESENCE_TTL_SEC * 1000;
 };

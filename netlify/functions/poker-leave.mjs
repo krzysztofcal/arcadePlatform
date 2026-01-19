@@ -269,10 +269,6 @@ export async function handler(event) {
           phase: currentState.phase || "INIT",
         };
 
-        await tx.unsafe("update public.poker_seats set stack = 0 where table_id = $1 and user_id = $2;", [
-          tableId,
-          auth.userId,
-        ]);
         await tx.unsafe("delete from public.poker_seats where table_id = $1 and user_id = $2;", [tableId, auth.userId]);
         await tx.unsafe(
           "update public.poker_state set version = version + 1, state = $2::jsonb, updated_at = now() where table_id = $1;",
