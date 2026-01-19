@@ -221,16 +221,18 @@ export async function handler(event) {
 
         const currentState = normalizeState(stateRow.state);
         const stacks = parseStacks(currentState.stacks);
-        const stackValue = normalizeSeatStack(seatRow?.stack);
+        const rawSeatStack = seatRow ? seatRow.stack : null;
+        const stackValue = normalizeSeatStack(rawSeatStack);
         const cashOutAmount = stackValue ?? 0;
-        if (!stackValue || cashOutAmount === 0) {
+        const isStackMissing = rawSeatStack == null;
+        if (isStackMissing) {
           klog("poker_leave_stack_missing", { tableId, userId: auth.userId, seatNo });
         }
 
         if (cashOutAmount > 0) {
           const escrowSystemKey = `POKER_TABLE:${tableId}`;
           const idempotencyKey = requestId
-            ? `poker:leave:${requestId}`
+            ? `poker:leave:${tableId}:${auth.userId}:${requestId}`
             : `poker:leave:${tableId}:${auth.userId}:${cashOutAmount}`;
 
           const txResult = await postTransaction({
