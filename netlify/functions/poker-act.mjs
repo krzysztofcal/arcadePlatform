@@ -142,12 +142,20 @@ export async function handler(event) {
       if (!stateRow) throw new Error("poker_state_missing");
       const currentState = normalizeState(stateRow.state);
       const requestMarker = `REQUEST:${requestId}`;
-      // Idempotency marker rows are stored as action_type = REQUEST:<requestId>.
       const existingRows = await tx.unsafe(
-        "select id, version from public.poker_actions where table_id = $1 and user_id = $2 and action_type = $3 limit 1;",
-        [tableId, auth.userId, requestMarker]
+        "select version from public.poker_actions where table_id = $1 and user_id = $2 and request_id = $3 limit 1;",
+        [tableId, auth.userId, requestId]
       );
       const existing = existingRows?.[0];
+      if (!existing?.version) {
+        const legacyRows = await tx.unsafe(
+          "select version from public.poker_actions where table_id = $1 and user_id = $2 and action_type = $3 limit 1;",
+          [tableId, auth.userId, requestMarker]
+        );
+        if (legacyRows?.[0]?.version) {
+          existing.version = legacyRows[0].version;
+        }
+      }
       if (existing?.version != null) {
         const latestRows = await tx.unsafe(
           "select version, state from public.poker_state where table_id = $1 limit 1;",
@@ -308,19 +316,13 @@ export async function handler(event) {
            returning version
          ),
          action_ins as (
-           insert into public.poker_actions (table_id, version, user_id, action_type, amount)
-           select $1, updated.version, $3, $4, $5
+           insert into public.poker_actions (table_id, version, user_id, action_type, amount, request_id)
+           select $1, updated.version, $3, $4, $5, $6
            from updated
            returning version
-         ),
-         marker_ins as (
-           insert into public.poker_actions (table_id, version, user_id, action_type, amount)
-           select $1, updated.version, $3, $6, $7
-           from updated
-           on conflict do nothing
          )
          select version from updated;`,
-        [tableId, JSON.stringify(nextState), auth.userId, actionType, amount ?? null, requestMarker, null]
+        [tableId, JSON.stringify(nextState), auth.userId, actionType, amount ?? null, requestId]
       );
       const newVersion = Number(updateRows?.[0]?.version);
       if (!Number.isFinite(newVersion)) throw makeError(409, "state_invalid");

@@ -149,10 +149,18 @@ export async function handler(event) {
 
       const requestMarker = `REQUEST:${requestIdParsed.value}`;
       const markerRows = await tx.unsafe(
-        "select id, version from public.poker_actions where table_id = $1 and user_id = $2 and action_type = $3 limit 1;",
-        [tableId, auth.userId, requestMarker]
+        "select version from public.poker_actions where table_id = $1 and user_id = $2 and request_id = $3 limit 1;",
+        [tableId, auth.userId, requestIdParsed.value]
       );
-      if (markerRows?.[0]?.version != null) {
+      let existingVersion = markerRows?.[0]?.version ?? null;
+      if (existingVersion == null) {
+        const legacyRows = await tx.unsafe(
+          "select version from public.poker_actions where table_id = $1 and user_id = $2 and action_type = $3 limit 1;",
+          [tableId, auth.userId, requestMarker]
+        );
+        existingVersion = legacyRows?.[0]?.version ?? null;
+      }
+      if (existingVersion != null) {
         const latestRows = await tx.unsafe("select version, state from public.poker_state where table_id = $1 limit 1;", [
           tableId,
         ]);
@@ -226,12 +234,8 @@ export async function handler(event) {
       }
 
       await tx.unsafe(
-        "insert into public.poker_actions (table_id, version, user_id, action_type, amount) values ($1, $2, $3, $4, $5);",
-        [tableId, newVersion, auth.userId, "START_HAND", null]
-      );
-      await tx.unsafe(
-        "insert into public.poker_actions (table_id, version, user_id, action_type, amount) values ($1, $2, $3, $4, $5) on conflict do nothing;",
-        [tableId, newVersion, auth.userId, requestMarker, null]
+        "insert into public.poker_actions (table_id, version, user_id, action_type, amount, request_id) values ($1, $2, $3, $4, $5, $6);",
+        [tableId, newVersion, auth.userId, "START_HAND", null, requestIdParsed.value]
       );
 
       const publicState = toPublicState(updatedState, auth.userId);
