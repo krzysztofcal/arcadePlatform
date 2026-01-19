@@ -21,6 +21,7 @@ const mockTx = () => ({
 });
 
 const postCalls = [];
+const queries = [];
 
 const handler = loadPokerHandler("netlify/functions/poker-leave.mjs", {
   baseHeaders: () => ({}),
@@ -29,7 +30,13 @@ const handler = loadPokerHandler("netlify/functions/poker-leave.mjs", {
   verifySupabaseJwt: async () => ({ valid: true, userId }),
   isValidUuid: () => true,
   normalizeRequestId: () => ({ ok: true, value: null }),
-  beginSql: async (fn) => fn(mockTx()),
+  beginSql: async (fn) =>
+    fn({
+      unsafe: async (query, params) => {
+        queries.push({ query: String(query), params });
+        return mockTx().unsafe(query, params);
+      },
+    }),
   postTransaction: async (payload) => {
     postCalls.push(payload);
     return { transaction: { id: "tx-1" } };
@@ -48,6 +55,21 @@ const run = async () => {
   assert.equal(body.ok, true);
   assert.equal(body.cashedOut, 0);
   assert.equal(postCalls.length, 0);
+  assert.ok(
+    queries.some((q) => q.query.toLowerCase().includes("delete from public.poker_seats")),
+    "leave should delete poker_seats row"
+  );
+  const stateUpdate = queries.find((q) =>
+    q.query.toLowerCase().includes("update public.poker_state set version = version + 1")
+  );
+  assert.ok(stateUpdate, "leave should update poker_state");
+  const updatedStateJson = stateUpdate.params?.[1];
+  assert.ok(updatedStateJson, "leave should pass updated state JSON as 2nd param");
+  const updatedState = JSON.parse(updatedStateJson);
+  assert.ok(Array.isArray(updatedState.seats), "updatedState.seats should be array");
+  assert.ok(!updatedState.seats.some((seat) => seat?.userId === userId), "user should be removed from seats");
+  assert.ok(updatedState.stacks && typeof updatedState.stacks === "object", "updatedState.stacks should be object");
+  assert.equal(updatedState.stacks[userId], undefined, "user should be removed from stacks");
 };
 
 run().catch((error) => {

@@ -5,7 +5,7 @@ const tableId = "22222222-2222-4222-8222-222222222222";
 const userId = "user-2";
 const seatNo = 3;
 
-const makeHandler = (postCalls) => {
+const makeHandler = (postCalls, queries) => {
   let beginCall = 0;
   const handler = loadPokerHandler("netlify/functions/poker-sweep.mjs", {
     baseHeaders: () => ({}),
@@ -26,7 +26,8 @@ const makeHandler = (postCalls) => {
       }
       if (beginCall === 2) {
         return fn({
-          unsafe: async (query) => {
+          unsafe: async (query, params) => {
+            queries.push({ query: String(query), params });
             const text = String(query).toLowerCase();
             if (text.includes("select seat_no, status, stack, last_seen_at")) {
               return [
@@ -65,7 +66,8 @@ const makeHandler = (postCalls) => {
 const run = async () => {
   process.env.POKER_SWEEP_SECRET = "secret";
   const postCalls = [];
-  const handler = makeHandler(postCalls);
+  const queries = [];
+  const handler = makeHandler(postCalls, queries);
   const response = await handler({ httpMethod: "POST", headers: { "x-sweep-secret": "secret" } });
   assert.equal(response.statusCode, 200);
   assert.equal(postCalls.length, 1);
@@ -76,6 +78,15 @@ const run = async () => {
     { accountType: "ESCROW", systemKey: `POKER_TABLE:${tableId}`, amount: -100 },
     { accountType: "USER", amount: 100 },
   ]);
+  assert.ok(
+    queries.some(
+      (q) =>
+        q.query.toLowerCase().includes("update public.poker_seats set status = 'inactive', stack = 0") &&
+        q.params?.[0] === tableId &&
+        q.params?.[1] === userId
+    ),
+    "sweep should inactivate seat and zero stack for the timed-out user"
+  );
 };
 
 run().catch((error) => {

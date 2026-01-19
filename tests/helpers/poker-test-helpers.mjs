@@ -9,6 +9,9 @@ export const loadPokerHandler = (filePath, mocks) => {
   const source = fs.readFileSync(path.join(root, filePath), "utf8");
   const withoutImports = stripImports(source);
   const rewritten = withoutImports.replace(/export\s+async\s+function\s+handler/, "async function handler");
+  if (!rewritten.includes("async function handler")) {
+    throw new Error(`[poker-test-helpers] Failed to rewrite handler export in ${filePath}`);
+  }
   const factory = new Function(
     "mocks",
     `"use strict";
@@ -28,5 +31,9 @@ const {
 ${rewritten}
 return handler;`
   );
-  return factory(mocks);
+  try {
+    return factory(mocks);
+  } catch (error) {
+    throw new Error(`[poker-test-helpers] Failed to compile ${filePath}: ${error?.message || error}`);
+  }
 };
