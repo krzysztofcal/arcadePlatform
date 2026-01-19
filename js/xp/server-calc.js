@@ -198,22 +198,22 @@
       visibilityStart = Date.now();
     }
 
-    document.addEventListener('visibilitychange', function () {
-      if (document.hidden) {
-        // Tab became hidden - record visible time
-        if (isVisible && visibilityStart > 0) {
-          const visibleMs = Date.now() - visibilityStart;
-          state.visibilitySeconds += visibleMs / 1000;
-        }
-        isVisible = false;
-      } else {
-        // Tab became visible
-        isVisible = true;
-        visibilityStart = Date.now();
+    document.addEventListener('xp:hidden', function () {
+      if (!isVisible) return;
+      if (visibilityStart > 0) {
+        const visibleMs = Date.now() - visibilityStart;
+        state.visibilitySeconds += visibleMs / 1000;
       }
-    });
+      isVisible = false;
+      visibilityStart = 0;
+    }, { passive: true });
 
-    // Note: beforeunload handling is done in core.js to comply with lifecycle guards
+    document.addEventListener('xp:visible', function () {
+      if (isVisible) return;
+      isVisible = true;
+      visibilityStart = Date.now();
+    }, { passive: true });
+      // Note: beforeunload handling is done in core.js to comply with lifecycle guards
   }
 
   /**
