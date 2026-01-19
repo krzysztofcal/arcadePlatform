@@ -1,6 +1,7 @@
 import { baseHeaders, beginSql, corsHeaders, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
 import { isValidUuid } from "./_shared/poker-utils.mjs";
 import { initHand, normalizeSeatRows, normalizeState, toPublicState } from "./_shared/poker-engine.mjs";
+import { normalizeRequestId } from "./_shared/poker-request-id.mjs";
 
 const parseBody = (body) => {
   if (!body) return { ok: true, value: {} };
@@ -19,14 +20,6 @@ const makeError = (status, code) => {
   err.status = status;
   err.code = code;
   return err;
-};
-
-const parseRequestId = (value) => {
-  if (value == null) return { ok: false, value: null };
-  if (typeof value !== "string") return { ok: false, value: null };
-  const trimmed = value.trim();
-  if (!trimmed) return { ok: false, value: null };
-  return { ok: true, value: trimmed };
 };
 
 const parseStacks = (value) => (value && typeof value === "object" && !Array.isArray(value) ? value : {});
@@ -123,8 +116,8 @@ export async function handler(event) {
     return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "invalid_table_id" }) };
   }
 
-  const requestIdParsed = parseRequestId(payload?.requestId);
-  if (!requestIdParsed.ok) {
+  const requestIdParsed = normalizeRequestId(payload?.requestId, { maxLen: 200 });
+  if (!requestIdParsed.ok || !requestIdParsed.value) {
     return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "invalid_request_id" }) };
   }
 
