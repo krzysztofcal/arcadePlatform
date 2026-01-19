@@ -141,21 +141,11 @@ export async function handler(event) {
       const stateRow = stateRows?.[0] || null;
       if (!stateRow) throw new Error("poker_state_missing");
       const currentState = normalizeState(stateRow.state);
-      const requestMarker = `REQUEST:${requestId}`;
       const existingRows = await tx.unsafe(
         "select version from public.poker_actions where table_id = $1 and user_id = $2 and request_id = $3 limit 1;",
         [tableId, auth.userId, requestId]
       );
       const existing = existingRows?.[0];
-      if (!existing?.version) {
-        const legacyRows = await tx.unsafe(
-          "select version from public.poker_actions where table_id = $1 and user_id = $2 and action_type = $3 limit 1;",
-          [tableId, auth.userId, requestMarker]
-        );
-        if (legacyRows?.[0]?.version) {
-          existing.version = legacyRows[0].version;
-        }
-      }
       if (existing?.version != null) {
         const latestRows = await tx.unsafe(
           "select version, state from public.poker_state where table_id = $1 limit 1;",

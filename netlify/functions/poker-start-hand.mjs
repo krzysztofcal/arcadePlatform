@@ -147,19 +147,11 @@ export async function handler(event) {
         throw makeError(403, "not_allowed");
       }
 
-      const requestMarker = `REQUEST:${requestIdParsed.value}`;
       const markerRows = await tx.unsafe(
         "select version from public.poker_actions where table_id = $1 and user_id = $2 and request_id = $3 limit 1;",
         [tableId, auth.userId, requestIdParsed.value]
       );
-      let existingVersion = markerRows?.[0]?.version ?? null;
-      if (existingVersion == null) {
-        const legacyRows = await tx.unsafe(
-          "select version from public.poker_actions where table_id = $1 and user_id = $2 and action_type = $3 limit 1;",
-          [tableId, auth.userId, requestMarker]
-        );
-        existingVersion = legacyRows?.[0]?.version ?? null;
-      }
+      const existingVersion = markerRows?.[0]?.version ?? null;
       if (existingVersion != null) {
         const latestRows = await tx.unsafe("select version, state from public.poker_state where table_id = $1 limit 1;", [
           tableId,
