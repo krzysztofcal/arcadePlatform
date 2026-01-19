@@ -268,6 +268,7 @@ const initHand = ({ tableId, seats, stacks, stakes, prevState }) => {
   const streetBet = Math.max(sbPaid, bbPaid);
   const lastFullRaiseSize = Math.max(1, streetBet);
   const actedThisStreet = initActedThisStreet(publicSeats);
+  const anyoneCanAct = publicSeats.some((seat) => isInHand(seat) && canAct(seat));
   const state = {
     tableId,
     handId,
@@ -300,6 +301,31 @@ const initHand = ({ tableId, seats, stacks, stakes, prevState }) => {
     lastMoveAt: nowIso(),
     updatedAt: nowIso(),
   };
+  if (!anyoneCanAct) {
+    const remainingDeck = getDeckForHand(seed);
+    while ((state.board || []).length < 5) {
+      const nextIndex = Number.isFinite(state.deckIndex) ? state.deckIndex : 0;
+      state.board = [...(state.board || []), remainingDeck[nextIndex]];
+      state.deckIndex = nextIndex + 1;
+    }
+    const stacks = {};
+    publicSeats.forEach((seat) => { stacks[seat.userId] = seat.stack; });
+    const result = settleHand(state, stacks, holeCards);
+    state.sidePots = result.sidePots;
+    publicSeats.forEach((seat) => { seat.stack = stacks[seat.userId]; });
+    state.public = { seats: publicSeats };
+    state.stacks = publicSeats.reduce((acc, seat) => {
+      acc[seat.userId] = seat.stack;
+      return acc;
+    }, {});
+    state.phase = "SETTLED";
+    state.actionRequiredFromUserId = null;
+    state.allowedActions = [];
+    state.settled = { winners: result.winners, revealed: result.revealed };
+    state.lastMoveAt = nowIso();
+    state.updatedAt = nowIso();
+    return { ok: true, state, holeCards };
+  }
   if (actorUser) {
     state.allowedActions = buildAllowedActions(actorUser, state);
   }

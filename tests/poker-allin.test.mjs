@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { applyAction, buildSidePots } from "../netlify/functions/_shared/poker-engine.mjs";
+import { applyAction, buildSidePots, initHand } from "../netlify/functions/_shared/poker-engine.mjs";
 
 const makeBaseState = (overrides = {}) => ({
   phase: "FLOP",
@@ -55,6 +55,31 @@ describe("poker all-in and side pot behavior", () => {
       { amount: 10, eligibleUserIds: ["b", "c"] },
       { amount: 10, eligibleUserIds: ["c"] },
     ]);
+  });
+
+  it("auto-settles when blinds leave no one able to act", () => {
+    const result = initHand({
+      tableId: "table-1",
+      seats: [
+        { userId: "a", seatNo: 0, status: "ACTIVE" },
+        { userId: "b", seatNo: 1, status: "ACTIVE" },
+      ],
+      stacks: { a: 1, b: 2 },
+      stakes: { sb: 1, bb: 2 },
+      prevState: {},
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.state.phase).toBe("SETTLED");
+    expect(result.state.actionRequiredFromUserId).toBeNull();
+    expect(result.state.allowedActions).toEqual([]);
+    expect(result.state.board.length).toBe(5);
+    expect(result.state.settled.winners.length).toBeGreaterThan(0);
+    expect(result.state.potTotal).toBeGreaterThan(0);
+    result.state.public.seats.forEach((seat) => {
+      expect(Number.isFinite(seat.stack)).toBe(true);
+      expect(seat.stack).toBeGreaterThanOrEqual(0);
+    });
   });
 
   it("allows all-in call short without errors", () => {
