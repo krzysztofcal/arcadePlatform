@@ -89,6 +89,7 @@ export async function handler(event) {
         : false;
       let holeCards = null;
       if (isSeated && currentState?.handId) {
+        // SECURITY NOTE: hole cards are server-only (service role). Clients must never access this table directly.
         const holeRows = await tx.unsafe(
           "select cards from public.poker_hole_cards where table_id = $1 and hand_id = $2 and user_id = $3 limit 1;",
           [tableId, currentState.handId, auth.userId]

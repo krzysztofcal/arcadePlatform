@@ -50,6 +50,7 @@ const mapHoleCards = (rows) =>
 
 const loadHoleCardsForHand = async (tx, tableId, handId) => {
   if (!handId) return {};
+  // SECURITY NOTE: hole cards are server-only (service role). Clients must never access this table directly.
   const rows = await tx.unsafe(
     "select user_id, cards from public.poker_hole_cards where table_id = $1 and hand_id = $2;",
     [tableId, handId]
@@ -59,6 +60,7 @@ const loadHoleCardsForHand = async (tx, tableId, handId) => {
 
 const loadHoleCardsForUser = async (tx, tableId, handId, userId) => {
   if (!handId || !userId) return null;
+  // SECURITY NOTE: hole cards are server-only (service role). Clients must never access this table directly.
   const rows = await tx.unsafe(
     "select cards from public.poker_hole_cards where table_id = $1 and hand_id = $2 and user_id = $3 limit 1;",
     [tableId, handId, userId]
@@ -330,6 +332,7 @@ export async function handler(event) {
 
       if (nextState.phase === "SETTLED" && effectiveHandId) {
         // Hole cards are server-only, relying on service-role access.
+        // SECURITY NOTE: cleanup must remain server-only; clients must never touch poker_hole_cards.
         await tx.unsafe("delete from public.poker_hole_cards where table_id = $1 and hand_id = $2;", [
           tableId,
           effectiveHandId,

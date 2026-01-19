@@ -49,6 +49,7 @@ const buildStartHandPayload = async (tx, tableId, userId, row) => {
   if (!handId || typeof handId !== "string") {
     throw makeError(409, "state_invalid");
   }
+  // SECURITY NOTE: hole cards are server-only (service role). Clients must never access this table directly.
   const holeRows = await tx.unsafe(
     "select cards from public.poker_hole_cards where table_id = $1 and hand_id = $2 and user_id = $3 limit 1;",
     [tableId, handId, userId]
@@ -222,6 +223,7 @@ export async function handler(event) {
         const inserts = Object.entries(initResult.holeCards);
         for (const [userId, cards] of inserts) {
           // Hole cards are server-only, relying on service-role access.
+          // SECURITY NOTE: inserts are server-only; clients must never access poker_hole_cards.
           await tx.unsafe(
             "insert into public.poker_hole_cards (table_id, hand_id, user_id, cards) values ($1, $2, $3, $4::jsonb) on conflict do nothing;",
             [tableId, updatedState.handId, userId, JSON.stringify(cards)]
