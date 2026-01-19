@@ -42,6 +42,9 @@ end $$;
 create index if not exists poker_hole_cards_user_id_table_id_idx
   on public.poker_hole_cards (user_id, table_id);
 
+create index if not exists poker_hole_cards_table_hand_idx
+  on public.poker_hole_cards (table_id, hand_id);
+
 alter table public.poker_hole_cards enable row level security;
 
 create policy "poker_hole_cards_read_own"

@@ -84,8 +84,11 @@ export async function handler(event) {
         : [];
 
       const currentState = normalizeState(stateRow.state);
+      const isSeated = Array.isArray(seatRows)
+        ? seatRows.some((seat) => seat.user_id === auth.userId && seat.status === "ACTIVE")
+        : false;
       let holeCards = null;
-      if (currentState?.handId) {
+      if (isSeated && currentState?.handId) {
         const holeRows = await tx.unsafe(
           "select cards from public.poker_hole_cards where table_id = $1 and hand_id = $2 and user_id = $3 limit 1;",
           [tableId, currentState.handId, auth.userId]
