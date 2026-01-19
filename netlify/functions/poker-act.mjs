@@ -66,6 +66,29 @@ const loadHoleCardsForUser = async (tx, tableId, handId, userId) => {
   return rows?.[0]?.cards || null;
 };
 
+const isRequestIdUniqueViolation = (error) => {
+  if (!error) return false;
+  const constraint = (error?.constraint || "").toLowerCase();
+  if (error?.code === "23505" && constraint === "poker_actions_request_id_unique") return true;
+  const combined = `${error?.message || ""} ${error?.detail || ""} ${error?.details || ""}`.toLowerCase();
+  return error?.code === "23505" && combined.includes("poker_actions_request_id_unique");
+};
+
+const fetchLatestPublicState = async (tableId, userId) =>
+  beginSql(async (tx) => {
+    const latestRows = await tx.unsafe("select version, state from public.poker_state where table_id = $1 limit 1;", [tableId]);
+    const latest = latestRows?.[0] || null;
+    const version = Number(latest?.version);
+    if (!latest || !Number.isFinite(version)) throw makeError(409, "state_invalid");
+    const latestState = normalizeState(latest.state);
+    const publicState = toPublicState(latestState, userId);
+    const userHoleCards = await loadHoleCardsForUser(tx, tableId, latestState?.handId, userId);
+    if (userHoleCards) {
+      publicState.hole = { [userId]: userHoleCards };
+    }
+    return { ok: true, state: publicState, version };
+  });
+
 export async function handler(event) {
   const origin = event.headers?.origin || event.headers?.Origin;
   const cors = corsHeaders(origin);
@@ -374,6 +397,14 @@ export async function handler(event) {
 
     return { statusCode: 200, headers: cors, body: JSON.stringify(result) };
   } catch (error) {
+    if (isRequestIdUniqueViolation(error)) {
+      try {
+        const latest = await fetchLatestPublicState(tableId, auth.userId);
+        return { statusCode: 200, headers: cors, body: JSON.stringify(latest) };
+      } catch (fetchError) {
+        klog("poker_act_unique_violation_error", { message: fetchError?.message || "unknown_error" });
+      }
+    }
     if (error?.status && error?.code) {
       return { statusCode: error.status, headers: cors, body: JSON.stringify({ error: error.code }) };
     }

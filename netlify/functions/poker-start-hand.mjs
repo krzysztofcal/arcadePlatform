@@ -41,6 +41,49 @@ const normalizeVersion = (value) => {
   return Number.isFinite(num) ? num : null;
 };
 
+const isRequestIdUniqueViolation = (error) => {
+  if (!error) return false;
+  const constraint = (error?.constraint || "").toLowerCase();
+  if (error?.code === "23505" && constraint === "poker_actions_request_id_unique") return true;
+  const combined = `${error?.message || ""} ${error?.detail || ""} ${error?.details || ""}`.toLowerCase();
+  return error?.code === "23505" && combined.includes("poker_actions_request_id_unique");
+};
+
+const buildStartHandPayload = async (tx, tableId, userId, row) => {
+  const normalized = normalizeState(row?.state);
+  const publicState = toPublicState(normalized, userId);
+  const handId = publicState.handId || normalized.handId;
+  if (!handId || typeof handId !== "string") {
+    throw makeError(409, "state_invalid");
+  }
+  const holeRows = await tx.unsafe(
+    "select cards from public.poker_hole_cards where table_id = $1 and hand_id = $2 and user_id = $3 limit 1;",
+    [tableId, handId, userId]
+  );
+  const holeCards = holeRows?.[0]?.cards || null;
+  if (holeCards) {
+    publicState.hole = { [userId]: holeCards };
+  }
+  return {
+    tableId,
+    version: normalizeVersion(row?.version),
+    handId,
+    buttonSeatNo: normalizeSeatNo(publicState.dealerSeat ?? normalized.buttonSeatNo),
+    nextToActSeatNo: normalizeSeatNo(publicState.actorSeat ?? normalized.nextToActSeatNo),
+    publicState,
+  };
+};
+
+const fetchLatestStartHandPayload = async (tableId, userId) =>
+  beginSql(async (tx) => {
+    const latestRows = await tx.unsafe("select version, state from public.poker_state where table_id = $1 limit 1;", [tableId]);
+    const latest = latestRows?.[0] || null;
+    if (!latest) throw makeError(409, "state_invalid");
+    const payload = await buildStartHandPayload(tx, tableId, userId, latest);
+    if (payload.version == null) throw makeError(409, "state_invalid");
+    return payload;
+  });
+
 export async function handler(event) {
   const origin = event.headers?.origin || event.headers?.Origin;
   const cors = corsHeaders(origin);
@@ -114,30 +157,7 @@ export async function handler(event) {
       }
 
       const currentState = normalizeState(stateRow.state);
-      const buildStartHandPayload = async (row) => {
-        const normalized = normalizeState(row?.state);
-        const publicState = toPublicState(normalized, auth.userId);
-        const handId = publicState.handId || normalized.handId;
-        if (!handId || typeof handId !== "string") {
-          throw makeError(409, "state_invalid");
-        }
-        const holeRows = await tx.unsafe(
-          "select cards from public.poker_hole_cards where table_id = $1 and hand_id = $2 and user_id = $3 limit 1;",
-          [tableId, handId, auth.userId]
-        );
-        const holeCards = holeRows?.[0]?.cards || null;
-        if (holeCards) {
-          publicState.hole = { [auth.userId]: holeCards };
-        }
-        return {
-          tableId,
-          version: normalizeVersion(row?.version),
-          handId,
-          buttonSeatNo: normalizeSeatNo(publicState.dealerSeat ?? normalized.buttonSeatNo),
-          nextToActSeatNo: normalizeSeatNo(publicState.actorSeat ?? normalized.nextToActSeatNo),
-          publicState,
-        };
-      };
+      const buildPayload = async (row) => buildStartHandPayload(tx, tableId, auth.userId, row);
 
       const authSeatRows = await tx.unsafe(
         "select user_id from public.poker_seats where table_id = $1 and user_id = $2 and status = 'ACTIVE' limit 1;",
@@ -157,14 +177,14 @@ export async function handler(event) {
           tableId,
         ]);
         const latest = latestRows?.[0] || stateRow;
-        return await buildStartHandPayload(latest);
+        return await buildPayload(latest);
       }
 
       // Idempotency does not bypass authorization.
       const sameRequest =
         currentState.lastStartHandRequestId === requestIdParsed.value && currentState.lastStartHandUserId === auth.userId;
       if (sameRequest) {
-        return await buildStartHandPayload(stateRow);
+        return await buildPayload(stateRow);
       }
 
       const seatRows = await tx.unsafe(
@@ -251,6 +271,26 @@ export async function handler(event) {
       }),
     };
   } catch (error) {
+    if (isRequestIdUniqueViolation(error)) {
+      try {
+        const latest = await fetchLatestStartHandPayload(tableId, auth.userId);
+        return {
+          statusCode: 200,
+          headers: cors,
+          body: JSON.stringify({
+            ok: true,
+            tableId: latest.tableId,
+            version: latest.version,
+            handId: latest.handId,
+            buttonSeatNo: latest.buttonSeatNo,
+            nextToActSeatNo: latest.nextToActSeatNo,
+            state: latest.publicState,
+          }),
+        };
+      } catch (fetchError) {
+        klog("poker_start_hand_unique_violation_error", { message: fetchError?.message || "unknown_error" });
+      }
+    }
     if (error?.status && error?.code) {
       return { statusCode: error.status, headers: cors, body: JSON.stringify({ error: error.code }) };
     }
