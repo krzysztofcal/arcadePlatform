@@ -90,6 +90,10 @@ const run = async () => {
   assert.ok(Array.isArray(updatedState.holeCardsByUserId[userId]), "caller should have hole cards stored");
   assert.equal(updatedState.holeCardsByUserId[userId].length, 2);
   assert.deepEqual(payload.myHoleCards, updatedState.holeCardsByUserId[userId]);
+  assert.ok(
+    queries.some((q) => q.query.toLowerCase().includes("insert into public.poker_actions")),
+    "expected start hand action insert"
+  );
 
   const cardKeys = payload.myHoleCards.map((card) => `${card.r}-${card.s}`);
   const uniqueKeys = new Set(cardKeys);
@@ -107,6 +111,15 @@ const run = async () => {
   assert.equal(replayPayload.state.state.phase, "PREFLOP");
   assert.ok(Array.isArray(replayPayload.myHoleCards));
   assert.equal(replayPayload.myHoleCards.length, 2);
+
+  const differentResponse = await handler({
+    httpMethod: "POST",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    body: JSON.stringify({ tableId, requestId: "req-2" }),
+  });
+  assert.equal(differentResponse.statusCode, 409);
+  const differentPayload = JSON.parse(differentResponse.body);
+  assert.equal(differentPayload.error, "already_in_hand");
 
   const updateCalls = queries.filter((q) => q.query.toLowerCase().includes("update public.poker_state"));
   assert.equal(updateCalls.length, 1);
