@@ -49,6 +49,7 @@ const runListTablesContract = async () => {
 };
 
 const runGetTableContract = async () => {
+  const toText = (q) => (typeof q === "string" ? q : q?.text || q?.sql || String(q));
   const handler = loadPokerHandler("netlify/functions/poker-get-table.mjs", {
     baseHeaders: () => ({}),
     corsHeaders: () => ({ "access-control-allow-origin": "http://localhost" }),
@@ -58,8 +59,8 @@ const runGetTableContract = async () => {
     isValidUuid: () => true,
     beginSql: async (fn) =>
       fn({
-        unsafe: async (query) => {
-          const text = String(query).toLowerCase();
+        unsafe: async (query, params) => {
+          const text = toText(query).toLowerCase();
           if (text.includes("from public.poker_tables")) {
             return [
               {
