@@ -17,6 +17,26 @@ const parseTableId = (event) => {
   return last;
 };
 
+const normalizeState = (value) => {
+  if (!value) return {};
+  if (typeof value === "string") {
+    try {
+      return JSON.parse(value);
+    } catch {
+      return {};
+    }
+  }
+  if (typeof value === "object") return value;
+  return {};
+};
+
+const withoutHoleCards = (state) => {
+  if (!state || typeof state !== "object" || Array.isArray(state)) return state;
+  if (!Object.prototype.hasOwnProperty.call(state, "holeCardsByUserId")) return state;
+  const { holeCardsByUserId, ...rest } = state;
+  return rest;
+};
+
 export async function handler(event) {
   const origin = event.headers?.origin || event.headers?.Origin;
   const cors = corsHeaders(origin);
@@ -91,6 +111,7 @@ export async function handler(event) {
     const table = result.table;
     const seats = result.seats;
     const stateRow = result.stateRow;
+    const publicState = withoutHoleCards(normalizeState(stateRow.state));
 
     const tablePayload = {
       id: table.id,
@@ -112,7 +133,7 @@ export async function handler(event) {
         seats,
         state: {
           version: stateRow.version,
-          state: stateRow.state,
+          state: publicState,
         },
       }),
     };
