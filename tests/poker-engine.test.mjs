@@ -3,6 +3,7 @@ import {
   createDeck,
   shuffle,
   dealHoleCards,
+  dealCommunity,
   evaluateHand7,
 } from "../netlify/functions/_shared/poker-engine.mjs";
 
@@ -84,14 +85,48 @@ const runEvaluateHand7Test = () => {
     { r: 6, s: "S" },
     { r: 3, s: "D" },
   ];
+  const threeKind = [
+    { r: 9, s: "S" },
+    { r: 9, s: "H" },
+    { r: 9, s: "D" },
+    { r: 13, s: "C" },
+    { r: 7, s: "S" },
+    { r: 4, s: "H" },
+    { r: 2, s: "D" },
+  ];
+  const fourKind = [
+    { r: 13, s: "S" },
+    { r: 13, s: "H" },
+    { r: 13, s: "D" },
+    { r: 13, s: "C" },
+    { r: 8, s: "H" },
+    { r: 5, s: "S" },
+    { r: 2, s: "C" },
+  ];
   const highRank = evaluateHand7(highCard);
   const pairRank = evaluateHand7(onePair);
   const twoPairRank = evaluateHand7(twoPair);
+  const threeKindRank = evaluateHand7(threeKind);
+  const fourKindRank = evaluateHand7(fourKind);
+  assert.ok(compareRank(fourKindRank, threeKindRank) > 0);
+  assert.ok(compareRank(threeKindRank, twoPairRank) > 0);
   assert.ok(compareRank(twoPairRank, pairRank) > 0);
   assert.ok(compareRank(pairRank, highRank) > 0);
+};
+
+const runDealCommunityTest = () => {
+  const deck = createDeck();
+  const deckSnapshot = deck.map((card) => ({ ...card }));
+  const { deck: d2, communityCards } = dealCommunity(deck, 5);
+  assert.equal(communityCards.length, 5);
+  assert.equal(d2.length, 47);
+  const seen = new Set(communityCards.map((card) => `${card.r}${card.s}`));
+  assert.equal(seen.size, 5);
+  assert.deepEqual(deck, deckSnapshot);
 };
 
 runCreateDeckTest();
 runShuffleDeterminismTest();
 runDealHoleCardsTest();
 runEvaluateHand7Test();
+runDealCommunityTest();

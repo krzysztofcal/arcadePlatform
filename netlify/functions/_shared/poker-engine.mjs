@@ -55,16 +55,34 @@ const dealCommunity = (deck, n) => {
 };
 
 const evaluateHand7 = (cards) => {
+  // Note: does not detect straights/flushes/full house yet.
   const counts = new Map();
   const ranks = cards.map((card) => card.r);
   for (const r of ranks) {
     counts.set(r, (counts.get(r) || 0) + 1);
   }
-  const pairs = Array.from(counts.entries())
-    .filter(([, count]) => count >= 2)
-    .map(([r]) => r)
-    .sort((a, b) => b - a);
+  const quads = [];
+  const trips = [];
+  const pairs = [];
+  counts.forEach((count, r) => {
+    if (count === 4) quads.push(r);
+    else if (count === 3) trips.push(r);
+    else if (count === 2) pairs.push(r);
+  });
+  quads.sort((a, b) => b - a);
+  trips.sort((a, b) => b - a);
+  pairs.sort((a, b) => b - a);
   const sortedRanks = ranks.slice().sort((a, b) => b - a);
+  if (quads.length >= 1) {
+    const quadRank = quads[0];
+    const kicker = sortedRanks.find((r) => r !== quadRank) || 0;
+    return { cat: 4, tiebreak: [quadRank, kicker] };
+  }
+  if (trips.length >= 1) {
+    const tripRank = trips[0];
+    const kickers = sortedRanks.filter((r) => r !== tripRank).slice(0, 2);
+    return { cat: 3, tiebreak: [tripRank, ...kickers] };
+  }
   if (pairs.length >= 2) {
     const highPair = pairs[0];
     const lowPair = pairs[1];
