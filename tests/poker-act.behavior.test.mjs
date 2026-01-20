@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import { advanceIfNeeded, applyAction } from "../netlify/functions/_shared/poker-reducer.mjs";
 import { normalizeRequestId } from "../netlify/functions/_shared/poker-request-id.mjs";
-import { normalizeJsonState, withoutPrivateState } from "../netlify/functions/_shared/poker-state-utils.mjs";
+import {
+  isPlainObject,
+  isStateStorageValid,
+  normalizeJsonState,
+  withoutPrivateState,
+} from "../netlify/functions/_shared/poker-state-utils.mjs";
 import { loadPokerHandler } from "./helpers/poker-test-helpers.mjs";
 
 const tableId = "11111111-1111-4111-8111-111111111111";
@@ -47,6 +52,8 @@ const makeHandler = (queries, storedState, userId, options = {}) =>
     verifySupabaseJwt: async () => ({ valid: true, userId }),
     isValidUuid: () => true,
     normalizeRequestId,
+    isPlainObject,
+    isStateStorageValid,
     normalizeJsonState,
     withoutPrivateState,
     advanceIfNeeded,
@@ -138,6 +145,14 @@ const run = async () => {
   assert.equal(invalidRaise.response.statusCode, 400);
   assert.equal(JSON.parse(invalidRaise.response.body).error, "invalid_action");
 
+  const validRaise = await runCase({
+    state: raiseState,
+    action: { type: "RAISE", amount: 12 },
+    requestId: "req-raise-ok",
+    userId: "user-1",
+  });
+  assert.equal(validRaise.response.statusCode, 200);
+
   const checkState = {
     ...baseState,
     toCallByUserId: { ...baseState.toCallByUserId, "user-1": 5 },
@@ -175,6 +190,12 @@ const run = async () => {
   assert.equal(corruptResponse.response.statusCode, 409);
   assert.equal(JSON.parse(corruptResponse.response.body).error, "state_invalid");
   assert.ok(corruptCalls.some((entry) => entry.kind === "poker_state_corrupt"));
+
+  const storageCheck = isStateStorageValid(
+    { phase: "HAND_DONE", seats: baseState.seats },
+    { requirePrivate: false }
+  );
+  assert.equal(storageCheck, true);
 
   const handlerUser2 = makeHandler(queries, storedState, "user-2");
   const notTurn = await handlerUser2({

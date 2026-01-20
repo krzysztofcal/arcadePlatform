@@ -1,7 +1,7 @@
 import { baseHeaders, beginSql, corsHeaders, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
 import { advanceIfNeeded, applyAction } from "./_shared/poker-reducer.mjs";
 import { normalizeRequestId } from "./_shared/poker-request-id.mjs";
-import { normalizeJsonState, withoutPrivateState } from "./_shared/poker-state-utils.mjs";
+import { isPlainObject, isStateStorageValid, normalizeJsonState, withoutPrivateState } from "./_shared/poker-state-utils.mjs";
 import { isValidUuid } from "./_shared/poker-utils.mjs";
 
 const ACTION_TYPES = new Set(["CHECK", "BET", "CALL", "RAISE", "FOLD"]);
@@ -41,9 +41,6 @@ const normalizeRequest = (value) => {
   return { ok: true, value: parsed.value };
 };
 
-const isPlainObject = (value) =>
-  value !== null && typeof value === "object" && !Array.isArray(value) && Object.getPrototypeOf(value) === Object.prototype;
-
 const hasRequiredState = (state) =>
   isPlainObject(state) &&
   typeof state.phase === "string" &&
@@ -59,20 +56,6 @@ const isActionPhase = (phase) => phase === "PREFLOP" || phase === "FLOP" || phas
 
 const getSeatForUser = (state, userId) => (Array.isArray(state.seats) ? state.seats.find((seat) => seat?.userId === userId) : null);
 
-const isStateStorageValid = (state) => {
-  const deck = state?.deck;
-  if (!Array.isArray(deck) || deck.length > 52) return false;
-  const holeCardsByUserId = state?.holeCardsByUserId;
-  if (!holeCardsByUserId || typeof holeCardsByUserId !== "object" || Array.isArray(holeCardsByUserId)) return false;
-  const seatCount = Array.isArray(state.seats) ? state.seats.length : 0;
-  const userIds = Object.keys(holeCardsByUserId);
-  if (userIds.length > seatCount) return false;
-  for (const cards of Object.values(holeCardsByUserId)) {
-    if (!Array.isArray(cards) || cards.length !== 2) return false;
-  }
-  return true;
-};
-
 const validateActionBounds = (state, action, userId) => {
   const toCall = Number(state.toCallByUserId?.[userId] || 0);
   const stack = Number(state.stacks?.[userId] ?? 0);
@@ -81,7 +64,14 @@ const validateActionBounds = (state, action, userId) => {
   if (action.type === "CHECK") return toCall === 0;
   if (action.type === "CALL") return toCall > 0;
   if (action.type === "BET") return toCall === 0 && action.amount <= stack;
-  if (action.type === "RAISE") return toCall > 0 && action.amount <= stack + currentBet;
+  if (action.type === "RAISE") {
+    // RAISE amount is treated as raise-to (total bet this round), matching applyAction.
+    if (!(toCall > 0)) return false;
+    const raiseTo = action.amount;
+    if (!(raiseTo > currentBet) || !(raiseTo >= toCall + 1)) return false;
+    const required = raiseTo - currentBet;
+    return required <= stack;
+  }
   return true;
 };
 
@@ -319,7 +309,8 @@ export async function handler(event) {
         },
       };
 
-      if (!isStateStorageValid(updatedState)) {
+      const requirePrivate = isActionPhase(updatedState.phase);
+      if (!isStateStorageValid(updatedState, { requirePrivate })) {
         klog("poker_state_corrupt", { tableId, phase: updatedState.phase });
         throw makeError(409, "state_invalid");
       }

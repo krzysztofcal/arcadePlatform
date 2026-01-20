@@ -28,6 +28,8 @@ const {
   executeSql,
   extractBearerToken,
   getRng,
+  isPlainObject,
+  isStateStorageValid,
   klog,
   normalizeJsonState,
   normalizeRequestId,

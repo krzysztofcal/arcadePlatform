@@ -1,6 +1,6 @@
 import { baseHeaders, beginSql, corsHeaders, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
 import { createDeck, dealHoleCards, shuffle } from "./_shared/poker-engine.mjs";
-import { getRng, normalizeJsonState, withoutPrivateState } from "./_shared/poker-state-utils.mjs";
+import { getRng, isPlainObject, isStateStorageValid, normalizeJsonState, withoutPrivateState } from "./_shared/poker-state-utils.mjs";
 import { isValidUuid } from "./_shared/poker-utils.mjs";
 
 const parseBody = (body) => {
@@ -11,9 +11,6 @@ const parseBody = (body) => {
     return { ok: false, value: null };
   }
 };
-
-const isPlainObject = (value) =>
-  value !== null && typeof value === "object" && !Array.isArray(value) && Object.getPrototypeOf(value) === Object.prototype;
 
 const makeError = (status, code) => {
   const err = new Error(code);
@@ -35,20 +32,6 @@ const parseStacks = (value) => (value && typeof value === "object" && !Array.isA
 const normalizeVersion = (value) => {
   const num = Number(value);
   return Number.isFinite(num) ? num : null;
-};
-
-const isStateStorageValid = (state) => {
-  const deck = state?.deck;
-  if (!Array.isArray(deck) || deck.length > 52) return false;
-  const holeCardsByUserId = state?.holeCardsByUserId;
-  if (!holeCardsByUserId || typeof holeCardsByUserId !== "object" || Array.isArray(holeCardsByUserId)) return false;
-  const seatCount = Array.isArray(state.seats) ? state.seats.length : 0;
-  const userIds = Object.keys(holeCardsByUserId);
-  if (userIds.length > seatCount) return false;
-  for (const cards of Object.values(holeCardsByUserId)) {
-    if (!Array.isArray(cards) || cards.length !== 2) return false;
-  }
-  return true;
 };
 
 export async function handler(event) {
@@ -193,7 +176,7 @@ export async function handler(event) {
         startedAt: new Date().toISOString(),
       };
 
-      if (!isStateStorageValid(updatedState)) {
+      if (!isStateStorageValid(updatedState, { requirePrivate: true })) {
         klog("poker_state_corrupt", { tableId, phase: updatedState.phase });
         throw makeError(409, "state_invalid");
       }
