@@ -147,7 +147,7 @@ const run = async () => {
 
   const validRaise = await runCase({
     state: raiseState,
-    action: { type: "RAISE", amount: 12 },
+    action: { type: "RAISE", amount: 20 },
     requestId: "req-raise-ok",
     userId: "user-1",
   });

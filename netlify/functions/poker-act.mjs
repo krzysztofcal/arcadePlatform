@@ -68,7 +68,7 @@ const validateActionBounds = (state, action, userId) => {
     // RAISE amount is treated as raise-to (total bet this round), matching applyAction.
     if (!(toCall > 0)) return false;
     const raiseTo = action.amount;
-    if (!(raiseTo > currentBet) || !(raiseTo >= toCall + 1)) return false;
+    if (!(raiseTo > currentBet)) return false;
     const required = raiseTo - currentBet;
     return required <= stack;
   }
