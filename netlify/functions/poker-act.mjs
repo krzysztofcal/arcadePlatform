@@ -173,10 +173,9 @@ export async function handler(event) {
         throw makeError(409, "state_invalid");
       }
 
-      const lastByUserId =
-        currentState.lastActionRequestIdByUserId && typeof currentState.lastActionRequestIdByUserId === "object"
-          ? currentState.lastActionRequestIdByUserId
-          : {};
+      const lastByUserId = isPlainObject(currentState.lastActionRequestIdByUserId)
+        ? currentState.lastActionRequestIdByUserId
+        : {};
 
       const seat = getSeatForUser(currentState, auth.userId);
       if (!seat) {

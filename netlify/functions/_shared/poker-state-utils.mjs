@@ -7,7 +7,7 @@ const normalizeJsonState = (value) => {
       return {};
     }
   }
-  if (typeof value === "object") return value;
+  if (typeof value === "object" && !Array.isArray(value)) return value;
   return {};
 };
 
