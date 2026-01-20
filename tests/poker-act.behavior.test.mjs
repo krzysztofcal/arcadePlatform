@@ -1,0 +1,143 @@
+import assert from "node:assert/strict";
+import { advanceIfNeeded, applyAction } from "../netlify/functions/_shared/poker-reducer.mjs";
+import { normalizeRequestId } from "../netlify/functions/_shared/poker-request-id.mjs";
+import { normalizeJsonState, withoutPrivateState } from "../netlify/functions/_shared/poker-state-utils.mjs";
+import { loadPokerHandler } from "./helpers/poker-test-helpers.mjs";
+
+const tableId = "11111111-1111-4111-8111-111111111111";
+
+const baseState = {
+  tableId,
+  phase: "PREFLOP",
+  seats: [
+    { userId: "user-1", seatNo: 1 },
+    { userId: "user-2", seatNo: 2 },
+    { userId: "user-3", seatNo: 3 },
+  ],
+  stacks: { "user-1": 100, "user-2": 100, "user-3": 100 },
+  pot: 0,
+  community: [],
+  dealerSeatNo: 1,
+  turnUserId: "user-1",
+  holeCardsByUserId: {
+    "user-1": [{ r: "A", s: "S" }, { r: "K", s: "S" }],
+    "user-2": [{ r: "Q", s: "H" }, { r: "J", s: "H" }],
+    "user-3": [{ r: "9", s: "D" }, { r: "9", s: "C" }],
+  },
+  deck: [
+    { r: "2", s: "S" },
+    { r: "3", s: "S" },
+    { r: "4", s: "S" },
+    { r: "5", s: "S" },
+    { r: "6", s: "S" },
+  ],
+  toCallByUserId: { "user-1": 0, "user-2": 0, "user-3": 0 },
+  betThisRoundByUserId: { "user-1": 0, "user-2": 0, "user-3": 0 },
+  actedThisRoundByUserId: { "user-1": false, "user-2": false, "user-3": false },
+  foldedByUserId: { "user-1": false, "user-2": false, "user-3": false },
+  lastAggressorUserId: null,
+  lastActionRequestIdByUserId: {},
+};
+
+const makeHandler = (queries, storedState, userId) =>
+  loadPokerHandler("netlify/functions/poker-act.mjs", {
+    baseHeaders: () => ({}),
+    corsHeaders: () => ({ "access-control-allow-origin": "https://example.test" }),
+    extractBearerToken: () => "token",
+    verifySupabaseJwt: async () => ({ valid: true, userId }),
+    isValidUuid: () => true,
+    normalizeRequestId,
+    normalizeJsonState,
+    withoutPrivateState,
+    advanceIfNeeded,
+    applyAction,
+    beginSql: async (fn) =>
+      fn({
+        unsafe: async (query, params) => {
+          const text = String(query).toLowerCase();
+          queries.push({ query: String(query), params });
+          if (text.includes("from public.poker_tables")) {
+            return [{ id: tableId, status: "OPEN" }];
+          }
+          if (text.includes("from public.poker_seats")) {
+            const userParam = params?.[1];
+            if (userParam === userId) {
+              return [{ user_id: userId }];
+            }
+            return [];
+          }
+          if (text.includes("from public.poker_state")) {
+            return [{ version: storedState.version, state: JSON.parse(storedState.value) }];
+          }
+          if (text.includes("update public.poker_state")) {
+            storedState.value = params?.[1] || storedState.value;
+            storedState.version += 1;
+            return [{ version: storedState.version }];
+          }
+          return [];
+        },
+      }),
+    klog: () => {},
+  });
+
+const run = async () => {
+  const queries = [];
+  const storedState = { value: JSON.stringify(baseState), version: 7 };
+
+  const handlerUser2 = makeHandler(queries, storedState, "user-2");
+  const notTurn = await handlerUser2({
+    httpMethod: "POST",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    body: JSON.stringify({ tableId, requestId: "req-1", action: { type: "CHECK" } }),
+  });
+  assert.equal(notTurn.statusCode, 403);
+  assert.equal(JSON.parse(notTurn.body).error, "not_your_turn");
+
+  const handlerUser1 = makeHandler(queries, storedState, "user-1");
+  const user1Check = await handlerUser1({
+    httpMethod: "POST",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    body: JSON.stringify({ tableId, requestId: "req-2", action: { type: "CHECK" } }),
+  });
+  assert.equal(user1Check.statusCode, 200);
+  const user1Payload = JSON.parse(user1Check.body);
+  assert.equal(user1Payload.ok, true);
+  assert.equal(user1Payload.state.state.holeCardsByUserId, undefined);
+  assert.equal(user1Payload.state.state.deck, undefined);
+  assert.ok(Array.isArray(user1Payload.myHoleCards));
+  assert.equal(user1Payload.myHoleCards.length, 2);
+
+  const handlerUser2Turn = makeHandler(queries, storedState, "user-2");
+  const user2Check = await handlerUser2Turn({
+    httpMethod: "POST",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    body: JSON.stringify({ tableId, requestId: "req-3", action: { type: "CHECK" } }),
+  });
+  assert.equal(user2Check.statusCode, 200);
+
+  const handlerUser3 = makeHandler(queries, storedState, "user-3");
+  const user3Check = await handlerUser3({
+    httpMethod: "POST",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    body: JSON.stringify({ tableId, requestId: "req-4", action: { type: "CHECK" } }),
+  });
+  assert.equal(user3Check.statusCode, 200);
+  const user3Payload = JSON.parse(user3Check.body);
+  assert.equal(user3Payload.state.state.phase, "FLOP");
+  assert.equal(user3Payload.state.state.community.length, 3);
+  assert.ok(user3Payload.events.some((event) => event.type === "STREET_ADVANCED"));
+  assert.ok(user3Payload.events.some((event) => event.type === "COMMUNITY_DEALT"));
+  assert.equal(user3Payload.state.state.holeCardsByUserId, undefined);
+  assert.equal(user3Payload.state.state.deck, undefined);
+
+  const updateCall = queries.find((entry) => entry.query.toLowerCase().includes("update public.poker_state"));
+  assert.ok(updateCall, "expected poker_state update");
+  const updatedState = JSON.parse(updateCall.params?.[1] || "{}");
+  assert.ok(updatedState.holeCardsByUserId, "state should persist hole cards");
+  assert.ok(Array.isArray(updatedState.deck), "state should persist deck");
+
+  const actionInserts = queries.filter((entry) => entry.query.toLowerCase().includes("insert into public.poker_actions"));
+  assert.equal(actionInserts.length, 3);
+};
+
+await run();

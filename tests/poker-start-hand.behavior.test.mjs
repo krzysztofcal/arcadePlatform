@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { createDeck, dealHoleCards, shuffle } from "../netlify/functions/_shared/poker-engine.mjs";
+import { getRng, normalizeJsonState, withoutPrivateState } from "../netlify/functions/_shared/poker-state-utils.mjs";
 import { loadPokerHandler } from "./helpers/poker-test-helpers.mjs";
 
 const tableId = "11111111-1111-4111-8111-111111111111";
@@ -20,9 +21,12 @@ const makeHandler = (queries, storedState) =>
     createDeck,
     dealHoleCards,
     extractBearerToken: () => "token",
+    getRng,
     shuffle,
     verifySupabaseJwt: async () => ({ valid: true, userId }),
     isValidUuid: () => true,
+    normalizeJsonState,
+    withoutPrivateState,
     beginSql: async (fn) =>
       fn({
         unsafe: async (query, params) => {

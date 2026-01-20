@@ -1,4 +1,5 @@
 import { baseHeaders, beginSql, corsHeaders, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
+import { normalizeJsonState, withoutPrivateState } from "./_shared/poker-state-utils.mjs";
 import { isValidUuid } from "./_shared/poker-utils.mjs";
 
 const parseTableId = (event) => {
@@ -15,26 +16,6 @@ const parseTableId = (event) => {
   if (!last || last === "poker-get-table" || last === ".netlify" || last === "functions") return "";
   if (last === "poker-get-table" || last === "poker-get-table.mjs") return "";
   return last;
-};
-
-const normalizeState = (value) => {
-  if (!value) return {};
-  if (typeof value === "string") {
-    try {
-      return JSON.parse(value);
-    } catch {
-      return {};
-    }
-  }
-  if (typeof value === "object") return value;
-  return {};
-};
-
-const withoutHoleCards = (state) => {
-  if (!state || typeof state !== "object" || Array.isArray(state)) return state;
-  if (!Object.prototype.hasOwnProperty.call(state, "holeCardsByUserId")) return state;
-  const { holeCardsByUserId, ...rest } = state;
-  return rest;
 };
 
 export async function handler(event) {
@@ -111,7 +92,7 @@ export async function handler(event) {
     const table = result.table;
     const seats = result.seats;
     const stateRow = result.stateRow;
-    const publicState = withoutHoleCards(normalizeState(stateRow.state));
+    const publicState = withoutPrivateState(normalizeJsonState(stateRow.state));
 
     const tablePayload = {
       id: table.id,

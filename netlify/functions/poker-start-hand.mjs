@@ -1,5 +1,6 @@
 import { baseHeaders, beginSql, corsHeaders, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
 import { createDeck, dealHoleCards, shuffle } from "./_shared/poker-engine.mjs";
+import { getRng, normalizeJsonState, withoutPrivateState } from "./_shared/poker-state-utils.mjs";
 import { isValidUuid } from "./_shared/poker-utils.mjs";
 
 const parseBody = (body) => {
@@ -29,36 +30,11 @@ const parseRequestId = (value) => {
   return { ok: true, value: trimmed };
 };
 
-const normalizeState = (value) => {
-  if (!value) return {};
-  if (typeof value === "string") {
-    try {
-      return JSON.parse(value);
-    } catch {
-      return {};
-    }
-  }
-  if (typeof value === "object") return value;
-  return {};
-};
-
 const parseStacks = (value) => (value && typeof value === "object" && !Array.isArray(value) ? value : {});
 
 const normalizeVersion = (value) => {
   const num = Number(value);
   return Number.isFinite(num) ? num : null;
-};
-
-const getRng = () => {
-  const testRng = globalThis.__TEST_RNG__;
-  return typeof testRng === "function" ? testRng : Math.random;
-};
-
-const withoutHoleCards = (state) => {
-  if (!state || typeof state !== "object" || Array.isArray(state)) return state;
-  if (!Object.prototype.hasOwnProperty.call(state, "holeCardsByUserId")) return state;
-  const { holeCardsByUserId, ...rest } = state;
-  return rest;
 };
 
 export async function handler(event) {
@@ -131,7 +107,7 @@ export async function handler(event) {
         throw new Error("poker_state_missing");
       }
 
-      const currentState = normalizeState(stateRow.state);
+      const currentState = normalizeJsonState(stateRow.state);
 
       const seatRows = await tx.unsafe(
         "select user_id, seat_no from public.poker_seats where table_id = $1 and status = 'ACTIVE' order by seat_no asc;",
@@ -153,7 +129,7 @@ export async function handler(event) {
           return {
             tableId,
             version: normalizeVersion(stateRow.version),
-            state: withoutHoleCards(currentState),
+            state: withoutPrivateState(currentState),
             myHoleCards: currentState.holeCardsByUserId?.[auth.userId] || [],
           };
         }
@@ -216,7 +192,7 @@ export async function handler(event) {
       return {
         tableId,
         version: newVersion,
-        state: withoutHoleCards(updatedState),
+        state: withoutPrivateState(updatedState),
         myHoleCards: dealResult.holeCardsByUserId[auth.userId] || [],
       };
     });
