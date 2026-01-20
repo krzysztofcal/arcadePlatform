@@ -163,6 +163,11 @@ export async function handler(event) {
         });
       }
     }
+    klog("poker_sweep_timeout_summary", {
+      scanned: expiredSeats.length,
+      processed: expiredCount,
+      limit: EXPIRED_SEATS_LIMIT,
+    });
 
     const closedResult = await beginSql(async (tx) => {
       const closedRows = await tx.unsafe(

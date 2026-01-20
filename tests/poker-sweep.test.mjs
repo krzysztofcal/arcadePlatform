@@ -38,3 +38,4 @@ assert.ok(
     sweepSrc.includes("poker_timeout_cashout_fail"),
   "sweep should log timeout cash-out outcomes"
 );
+assert.ok(sweepSrc.includes("poker_sweep_timeout_summary"), "sweep should log timeout summary");

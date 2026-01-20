@@ -220,12 +220,16 @@ export async function handler(event) {
         }
 
         const currentState = normalizeState(stateRow.state);
+        const stacks = parseStacks(currentState.stacks);
         const rawSeatStack = seatRow ? seatRow.stack : null;
         const stackValue = normalizeSeatStack(rawSeatStack);
-        const cashOutAmount = stackValue ?? 0;
+        const cashOutAmount = stackValue != null && stackValue > 0 ? stackValue : 0;
         const isStackMissing = rawSeatStack == null;
         if (isStackMissing) {
           klog("poker_leave_stack_missing", { tableId, userId: auth.userId, seatNo });
+        }
+        if (stackValue != null && stackValue < 0) {
+          klog("poker_leave_stack_negative", { tableId, userId: auth.userId, seatNo, stack: stackValue });
         }
 
         if (cashOutAmount > 0) {
@@ -256,12 +260,14 @@ export async function handler(event) {
         });
 
         const seats = parseSeats(currentState.seats).filter((seatItem) => seatItem?.userId !== auth.userId);
+        const updatedStacks = { ...stacks };
+        delete updatedStacks[auth.userId];
 
         const updatedState = {
           ...currentState,
           tableId: currentState.tableId || tableId,
           seats,
-          stacks: {},
+          stacks: updatedStacks,
           pot: Number.isFinite(currentState.pot) ? currentState.pot : 0,
           phase: currentState.phase || "INIT",
         };

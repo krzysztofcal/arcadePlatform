@@ -20,8 +20,8 @@ assert.ok(
   "leave should normalize stack from seat row"
 );
 assert.ok(
-  /const cashOutAmount = stackValue \?\? 0;/.test(leaveSrc),
-  "leave should default cashOutAmount to 0"
+  /const cashOutAmount = stackValue != null && stackValue > 0 \? stackValue : 0;/.test(leaveSrc),
+  "leave should clamp cashOutAmount to positive values"
 );
 assert.ok(
   /const isStackMissing = rawSeatStack == null;/.test(leaveSrc),
