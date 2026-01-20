@@ -220,7 +220,6 @@ export async function handler(event) {
         }
 
         const currentState = normalizeState(stateRow.state);
-        const stacks = parseStacks(currentState.stacks);
         const rawSeatStack = seatRow ? seatRow.stack : null;
         const stackValue = normalizeSeatStack(rawSeatStack);
         const cashOutAmount = stackValue ?? 0;
@@ -257,14 +256,12 @@ export async function handler(event) {
         });
 
         const seats = parseSeats(currentState.seats).filter((seatItem) => seatItem?.userId !== auth.userId);
-        const updatedStacks = { ...stacks };
-        delete updatedStacks[auth.userId];
 
         const updatedState = {
           ...currentState,
           tableId: currentState.tableId || tableId,
           seats,
-          stacks: updatedStacks,
+          stacks: {},
           pot: Number.isFinite(currentState.pot) ? currentState.pot : 0,
           phase: currentState.phase || "INIT",
         };
@@ -291,7 +288,7 @@ export async function handler(event) {
           tableId,
           userId: auth.userId,
           requestId: requestId || null,
-          cashedOut: !!stackValue,
+          cashedOut: cashOutAmount > 0,
           txId,
         });
         return resultPayload;

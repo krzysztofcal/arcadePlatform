@@ -71,7 +71,7 @@ const run = async () => {
   assert.ok(Array.isArray(updatedState.seats), "updatedState.seats should be array");
   assert.ok(!updatedState.seats.some((seat) => seat?.userId === userId), "user should be removed from seats");
   assert.ok(updatedState.stacks && typeof updatedState.stacks === "object", "updatedState.stacks should be object");
-  assert.equal(updatedState.stacks[userId], undefined, "user should be removed from stacks");
+  assert.equal(Object.keys(updatedState.stacks).length, 0, "updatedState.stacks should be empty cache");
 };
 
 run().catch((error) => {

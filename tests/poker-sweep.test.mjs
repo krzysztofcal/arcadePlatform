@@ -11,6 +11,11 @@ assert.ok(
   /select seat_no, status, stack, last_seen_at from public\.poker_seats[\s\S]*?for update;/.test(sweepSrc),
   "sweep should lock seat rows before timeout cash-out"
 );
+assert.ok(sweepSrc.includes("EXPIRED_SEATS_LIMIT"), "sweep should define EXPIRED_SEATS_LIMIT");
+assert.ok(
+  /order by last_seen_at asc[\s\S]*limit \$2/.test(sweepSrc),
+  "sweep should cap expired seat scan"
+);
 assert.ok(
   /const amount = normalizeSeatStack\(locked\.stack\) \?\? 0;/.test(sweepSrc),
   "sweep should coalesce stack to 0"

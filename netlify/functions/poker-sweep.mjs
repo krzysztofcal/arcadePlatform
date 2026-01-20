@@ -5,6 +5,7 @@ import { postTransaction } from "./_shared/chips-ledger.mjs";
 const STALE_PENDING_CUTOFF_MINUTES = 10;
 const STALE_PENDING_LIMIT = 500;
 const OLD_REQUESTS_LIMIT = 1000;
+const EXPIRED_SEATS_LIMIT = 200;
 
 const normalizeSeatStack = (value) => {
   if (value == null) return null;
@@ -60,8 +61,11 @@ export async function handler(event) {
       const expiredRows = await tx.unsafe(
         `select table_id, user_id, seat_no, stack, last_seen_at
          from public.poker_seats
-         where status = 'ACTIVE' and last_seen_at < now() - ($1::int * interval '1 second');`,
-        [PRESENCE_TTL_SEC]
+         where status = 'ACTIVE'
+           and last_seen_at < now() - ($1::int * interval '1 second')
+         order by last_seen_at asc
+         limit $2;`,
+        [PRESENCE_TTL_SEC, EXPIRED_SEATS_LIMIT]
       );
 
       await tx.unsafe(
@@ -87,6 +91,9 @@ export async function handler(event) {
     }
 
     const expiredSeats = Array.isArray(result.expiredRows) ? result.expiredRows : [];
+    if (expiredSeats.length === EXPIRED_SEATS_LIMIT) {
+      klog("poker_sweep_expired_seats_capped", { limit: EXPIRED_SEATS_LIMIT, returned: expiredSeats.length });
+    }
     let expiredCount = 0;
     for (const seat of expiredSeats) {
       const tableId = seat?.table_id;

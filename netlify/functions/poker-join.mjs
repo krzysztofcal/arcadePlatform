@@ -240,7 +240,7 @@ export async function handler(event) {
             tableId,
             userId: auth.userId,
             seatNo: existingSeatNo,
-            stack: buyIn,
+            attemptedStackFill: buyIn,
             mode: "rejoin",
           });
           klog("poker_join_ok", { tableId, userId: auth.userId, seatNo: existingSeatNo, rejoin: true });
@@ -295,7 +295,7 @@ values ($1, $2, $3, 'ACTIVE', now(), now(), $4);
                 tableId,
                 userId: auth.userId,
                 seatNo: fallbackSeatNo,
-                stack: buyIn,
+                attemptedStackFill: buyIn,
                 mode: "rejoin",
               });
               klog("poker_join_ok", { tableId, userId: auth.userId, seatNo: fallbackSeatNo, rejoin: true });
