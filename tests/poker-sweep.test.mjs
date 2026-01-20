@@ -25,8 +25,8 @@ assert.ok(
   "sweep should cash out only when stack is positive"
 );
 assert.ok(
-  sweepSrc.includes("poker:timeout_cashout:${tableId}:${userId}:v1"),
-  "sweep should use table/user-scoped idempotency key"
+  sweepSrc.includes("poker:timeout_cashout:${tableId}:${userId}:${locked.seat_no}:v1"),
+  "sweep should use table/user/seat-scoped idempotency key"
 );
 assert.ok(
   /update public\.poker_seats set status = 'INACTIVE', stack = 0/.test(sweepSrc),

@@ -80,7 +80,7 @@ const run = async () => {
   assert.equal(postCalls.length, 1);
   const call = postCalls[0];
   assert.equal(call.txType, "TABLE_CASH_OUT");
-  assert.equal(call.idempotencyKey, `poker:timeout_cashout:${tableId}:${userId}:v1`);
+  assert.equal(call.idempotencyKey, `poker:timeout_cashout:${tableId}:${userId}:${seatNo}:v1`);
   assert.deepEqual(call.entries, [
     { accountType: "ESCROW", systemKey: `POKER_TABLE:${tableId}`, amount: -100 },
     { accountType: "USER", amount: 100 },

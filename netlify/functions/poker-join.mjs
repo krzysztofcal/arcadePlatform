@@ -372,7 +372,13 @@ values ($1, $2, $3, 'ACTIVE', now(), now(), $4);
             [tableId, requestId, JSON.stringify(resultPayload)]
           );
         }
-        klog("poker_join_stack_persisted", { tableId, userId: auth.userId, seatNo, stack: buyIn, mode: "insert" });
+        klog("poker_join_stack_persisted", {
+          tableId,
+          userId: auth.userId,
+          seatNo,
+          persistedStack: buyIn,
+          mode: "insert",
+        });
         klog("poker_join_ok", { tableId, userId: auth.userId, seatNo, rejoin: false });
         return resultPayload;
       } catch (error) {

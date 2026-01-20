@@ -118,7 +118,7 @@ export async function handler(event) {
             await postTransaction({
               userId,
               txType: "TABLE_CASH_OUT",
-              idempotencyKey: `poker:timeout_cashout:${tableId}:${userId}:v1`,
+              idempotencyKey: `poker:timeout_cashout:${tableId}:${userId}:${locked.seat_no}:v1`,
               entries: [
                 { accountType: "ESCROW", systemKey: `POKER_TABLE:${tableId}`, amount: -amount },
                 { accountType: "USER", amount },
