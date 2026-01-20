@@ -31,11 +31,13 @@ run("node", ["tests/favorites-service.test.mjs"], "favorites-service");
 run("node", ["tests/poker-phase1.test.mjs"], "poker-phase1");
 run("node", ["tests/poker-engine.test.mjs"], "poker-engine");
 run("node", ["tests/poker-contract.phase1.test.mjs"], "poker-contract-phase1");
+run("node", ["tests/poker-reducer.test.mjs"], "poker-reducer");
 run("node", ["tests/poker-leave.test.mjs"], "poker-leave");
 run("node", ["tests/poker-join.test.mjs"], "poker-join");
 run("node", ["tests/poker-sweep.test.mjs"], "poker-sweep");
 run("node", ["tests/poker-invariants.test.mjs"], "poker-invariants");
 run("node", ["tests/poker-leave.behavior.test.mjs"], "poker-leave-behavior");
+run("node", ["tests/poker-start-hand.behavior.test.mjs"], "poker-start-hand-behavior");
 run("node", ["tests/poker-sweep.behavior.test.mjs"], "poker-sweep-behavior");
 
 try { run("npm", ["run", "-s", "lint:games"], "unit"); } catch { /* optional */ }
