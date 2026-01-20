@@ -5,6 +5,16 @@ const root = process.cwd();
 
 const stripImports = (source) => source.replace(/^\s*import[\s\S]*?;\s*$/gm, "");
 
+const getDeclaredIdentifiers = (src) => {
+  const declared = new Set();
+  const re = /\b(?:const|let|var|function)\s+([A-Za-z_$][\w$]*)\b/g;
+  let match;
+  while ((match = re.exec(src))) {
+    declared.add(match[1]);
+  }
+  return declared;
+};
+
 export const loadPokerHandler = (filePath, mocks) => {
   const source = fs.readFileSync(path.join(root, filePath), "utf8");
   const withoutImports = stripImports(source);
@@ -14,33 +24,37 @@ export const loadPokerHandler = (filePath, mocks) => {
   if (!rewritten.includes("function handler(")) {
     throw new Error(`[poker-test-helpers] Failed to rewrite handler export in ${filePath}`);
   }
+  const declared = getDeclaredIdentifiers(rewritten);
+  const injectable = [
+    "baseHeaders",
+    "beginSql",
+    "corsHeaders",
+    "createDeck",
+    "dealHoleCards",
+    "advanceIfNeeded",
+    "applyAction",
+    "executeSql",
+    "extractBearerToken",
+    "getRng",
+    "isPlainObject",
+    "isStateStorageValid",
+    "klog",
+    "normalizeJsonState",
+    "normalizeRequestId",
+    "postTransaction",
+    "shuffle",
+    "verifySupabaseJwt",
+    "withoutPrivateState",
+    "isValidUuid",
+    "PRESENCE_TTL_SEC",
+    "TABLE_EMPTY_CLOSE_SEC",
+  ];
+  const injectedNames = injectable.filter((name) => !declared.has(name));
+  const destructureLine = injectedNames.length ? `const { ${injectedNames.join(", ")} } = mocks;` : "";
   const factory = new Function(
     "mocks",
     `"use strict";
-const {
-  baseHeaders,
-  beginSql,
-  corsHeaders,
-  createDeck,
-  dealHoleCards,
-  advanceIfNeeded,
-  applyAction,
-  executeSql,
-  extractBearerToken,
-  getRng,
-  isPlainObject,
-  isStateStorageValid,
-  klog,
-  normalizeJsonState,
-  normalizeRequestId,
-  postTransaction,
-  shuffle,
-  verifySupabaseJwt,
-  withoutPrivateState,
-  isValidUuid,
-  PRESENCE_TTL_SEC,
-  TABLE_EMPTY_CLOSE_SEC,
-} = mocks;
+${destructureLine}
 ${rewritten}
 return handler;`
   );
