@@ -127,6 +127,9 @@ const runGetTableContract = async () => {
   assert.ok(payload.state);
   assert.equal(typeof payload.state.version, "number");
   assert.equal(typeof payload.state.state, "object");
+  const raw = JSON.stringify(payload);
+  assert.equal(raw.includes("holeCardsByUserId"), false);
+  assert.equal(raw.includes('"deck"'), false);
 };
 
 await runListTablesContract();

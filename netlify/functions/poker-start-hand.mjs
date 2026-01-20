@@ -37,6 +37,20 @@ const normalizeVersion = (value) => {
   return Number.isFinite(num) ? num : null;
 };
 
+const isStateStorageValid = (state) => {
+  const deck = state?.deck;
+  if (!Array.isArray(deck) || deck.length > 52) return false;
+  const holeCardsByUserId = state?.holeCardsByUserId;
+  if (!holeCardsByUserId || typeof holeCardsByUserId !== "object" || Array.isArray(holeCardsByUserId)) return false;
+  const seatCount = Array.isArray(state.seats) ? state.seats.length : 0;
+  const userIds = Object.keys(holeCardsByUserId);
+  if (userIds.length > seatCount) return false;
+  for (const cards of Object.values(holeCardsByUserId)) {
+    if (!Array.isArray(cards) || cards.length !== 2) return false;
+  }
+  return true;
+};
+
 export async function handler(event) {
   const origin = event.headers?.origin || event.headers?.Origin;
   const cors = corsHeaders(origin);
@@ -108,6 +122,9 @@ export async function handler(event) {
       }
 
       const currentState = normalizeJsonState(stateRow.state);
+      if (!isPlainObject(currentState)) {
+        throw makeError(409, "state_invalid");
+      }
 
       const seatRows = await tx.unsafe(
         "select user_id, seat_no from public.poker_seats where table_id = $1 and status = 'ACTIVE' order by seat_no asc;",
@@ -170,10 +187,16 @@ export async function handler(event) {
         dealerSeatNo,
         turnUserId,
         holeCardsByUserId: dealResult.holeCardsByUserId,
+        deck: dealResult.deck,
         lastStartHandRequestId: requestIdParsed.value || null,
         lastStartHandUserId: auth.userId,
         startedAt: new Date().toISOString(),
       };
+
+      if (!isStateStorageValid(updatedState)) {
+        klog("poker_state_corrupt", { tableId, phase: updatedState.phase });
+        throw makeError(409, "state_invalid");
+      }
 
       const updateRows = await tx.unsafe(
         "update public.poker_state set version = version + 1, state = $2::jsonb, updated_at = now() where table_id = $1 returning version;",

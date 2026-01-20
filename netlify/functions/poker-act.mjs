@@ -16,9 +16,6 @@ const parseBody = (body) => {
   }
 };
 
-const isPlainObject = (value) =>
-  value !== null && typeof value === "object" && !Array.isArray(value) && Object.getPrototypeOf(value) === Object.prototype;
-
 const makeError = (status, code) => {
   const err = new Error(code);
   err.status = status;
@@ -44,9 +41,49 @@ const normalizeRequest = (value) => {
   return { ok: true, value: parsed.value };
 };
 
+const isPlainObject = (value) =>
+  value !== null && typeof value === "object" && !Array.isArray(value) && Object.getPrototypeOf(value) === Object.prototype;
+
+const hasRequiredState = (state) =>
+  isPlainObject(state) &&
+  typeof state.phase === "string" &&
+  typeof state.turnUserId === "string" &&
+  Array.isArray(state.seats) &&
+  isPlainObject(state.stacks) &&
+  isPlainObject(state.toCallByUserId) &&
+  isPlainObject(state.betThisRoundByUserId) &&
+  isPlainObject(state.actedThisRoundByUserId) &&
+  isPlainObject(state.foldedByUserId);
+
 const isActionPhase = (phase) => phase === "PREFLOP" || phase === "FLOP" || phase === "TURN" || phase === "RIVER";
 
-const shouldAdvance = (events) => Array.isArray(events) && events.some((event) => event?.type === "STREET_ADVANCED");
+const getSeatForUser = (state, userId) => (Array.isArray(state.seats) ? state.seats.find((seat) => seat?.userId === userId) : null);
+
+const isStateStorageValid = (state) => {
+  const deck = state?.deck;
+  if (!Array.isArray(deck) || deck.length > 52) return false;
+  const holeCardsByUserId = state?.holeCardsByUserId;
+  if (!holeCardsByUserId || typeof holeCardsByUserId !== "object" || Array.isArray(holeCardsByUserId)) return false;
+  const seatCount = Array.isArray(state.seats) ? state.seats.length : 0;
+  const userIds = Object.keys(holeCardsByUserId);
+  if (userIds.length > seatCount) return false;
+  for (const cards of Object.values(holeCardsByUserId)) {
+    if (!Array.isArray(cards) || cards.length !== 2) return false;
+  }
+  return true;
+};
+
+const validateActionBounds = (state, action, userId) => {
+  const toCall = Number(state.toCallByUserId?.[userId] || 0);
+  const stack = Number(state.stacks?.[userId] ?? 0);
+  const currentBet = Number(state.betThisRoundByUserId?.[userId] || 0);
+  if (!Number.isFinite(toCall) || !Number.isFinite(stack) || !Number.isFinite(currentBet)) return false;
+  if (action.type === "CHECK") return toCall === 0;
+  if (action.type === "CALL") return toCall > 0;
+  if (action.type === "BET") return toCall === 0 && action.amount <= stack;
+  if (action.type === "RAISE") return toCall > 0 && action.amount <= stack + currentBet;
+  return true;
+};
 
 export async function handler(event) {
   const origin = event.headers?.origin || event.headers?.Origin;
@@ -127,10 +164,22 @@ export async function handler(event) {
       }
 
       const currentState = normalizeJsonState(stateRow.state);
-      if (!currentState || typeof currentState !== "object") {
+      if (!hasRequiredState(currentState)) {
+        klog("poker_act_rejected", {
+          tableId,
+          userId: auth.userId,
+          reason: "state_invalid",
+          phase: currentState?.phase || null,
+        });
         throw makeError(409, "state_invalid");
       }
       if (!isActionPhase(currentState.phase) || !currentState.turnUserId) {
+        klog("poker_act_rejected", {
+          tableId,
+          userId: auth.userId,
+          reason: "state_invalid",
+          phase: currentState?.phase || null,
+        });
         throw makeError(409, "state_invalid");
       }
 
@@ -139,9 +188,35 @@ export async function handler(event) {
           ? currentState.lastActionRequestIdByUserId
           : {};
 
+      const seat = getSeatForUser(currentState, auth.userId);
+      if (!seat) {
+        klog("poker_act_rejected", {
+          tableId,
+          userId: auth.userId,
+          reason: "state_drift",
+          phase: currentState.phase,
+        });
+        throw makeError(409, "state_invalid");
+      }
+      if (currentState.foldedByUserId?.[auth.userId]) {
+        klog("poker_act_rejected", {
+          tableId,
+          userId: auth.userId,
+          reason: "folded_player",
+          phase: currentState.phase,
+        });
+        throw makeError(403, "not_allowed");
+      }
+
       if (lastByUserId[auth.userId] === requestId) {
         const version = Number(stateRow.version);
         if (!Number.isFinite(version)) {
+          klog("poker_act_rejected", {
+            tableId,
+            userId: auth.userId,
+            reason: "state_invalid",
+            phase: currentState.phase,
+          });
           throw makeError(409, "state_invalid");
         }
         return {
@@ -150,12 +225,31 @@ export async function handler(event) {
           state: withoutPrivateState(currentState),
           myHoleCards: currentState.holeCardsByUserId?.[auth.userId] || [],
           events: [],
-          skipped: true,
+          replayed: true,
         };
       }
 
       if (currentState.turnUserId !== auth.userId) {
+        klog("poker_act_rejected", {
+          tableId,
+          userId: auth.userId,
+          reason: "not_your_turn",
+          phase: currentState.phase,
+          actionType: actionParsed.value.type,
+        });
         throw makeError(403, "not_your_turn");
+      }
+
+      if (!validateActionBounds(currentState, actionParsed.value, auth.userId)) {
+        klog("poker_act_rejected", {
+          tableId,
+          userId: auth.userId,
+          reason: "invalid_action",
+          phase: currentState.phase,
+          actionType: actionParsed.value.type,
+          amount: actionParsed.value.amount ?? null,
+        });
+        throw makeError(400, "invalid_action");
       }
 
       let applied;
@@ -164,12 +258,34 @@ export async function handler(event) {
       } catch (error) {
         const reason = error?.message || "invalid_action";
         if (reason === "not_your_turn") {
+          klog("poker_act_rejected", {
+            tableId,
+            userId: auth.userId,
+            reason: "not_your_turn",
+            phase: currentState.phase,
+            actionType: actionParsed.value.type,
+          });
           throw makeError(403, "not_your_turn");
         }
         if (reason === "invalid_player") {
+          klog("poker_act_rejected", {
+            tableId,
+            userId: auth.userId,
+            reason: "invalid_player",
+            phase: currentState.phase,
+            actionType: actionParsed.value.type,
+          });
           throw makeError(403, "not_allowed");
         }
         if (reason === "invalid_action") {
+          klog("poker_act_rejected", {
+            tableId,
+            userId: auth.userId,
+            reason: "invalid_action",
+            phase: currentState.phase,
+            actionType: actionParsed.value.type,
+            amount: actionParsed.value.amount ?? null,
+          });
           throw makeError(400, "invalid_action");
         }
         throw error;
@@ -178,15 +294,18 @@ export async function handler(event) {
       let nextState = applied.state;
       const events = Array.isArray(applied.events) ? applied.events.slice() : [];
       let loops = 0;
+      const advanceEvents = [];
       while (loops < ADVANCE_LIMIT) {
+        const prevPhase = nextState.phase;
         const advanced = advanceIfNeeded(nextState);
         if (!Array.isArray(advanced.events) || advanced.events.length === 0) {
           nextState = advanced.state;
           break;
         }
         events.push(...advanced.events);
+        advanceEvents.push(...advanced.events);
         nextState = advanced.state;
-        if (!shouldAdvance(advanced.events)) {
+        if (nextState.phase === prevPhase) {
           break;
         }
         loops += 1;
@@ -200,12 +319,23 @@ export async function handler(event) {
         },
       };
 
+      if (!isStateStorageValid(updatedState)) {
+        klog("poker_state_corrupt", { tableId, phase: updatedState.phase });
+        throw makeError(409, "state_invalid");
+      }
+
       const updateRows = await tx.unsafe(
         "update public.poker_state set version = version + 1, state = $2::jsonb, updated_at = now() where table_id = $1 returning version;",
         [tableId, JSON.stringify(updatedState)]
       );
       const newVersion = Number(updateRows?.[0]?.version);
       if (!Number.isFinite(newVersion)) {
+        klog("poker_act_rejected", {
+          tableId,
+          userId: auth.userId,
+          reason: "state_invalid",
+          phase: updatedState.phase,
+        });
         throw makeError(409, "state_invalid");
       }
 
@@ -214,12 +344,33 @@ export async function handler(event) {
         [tableId, newVersion, auth.userId, actionParsed.value.type, actionParsed.value.amount ?? null]
       );
 
+      if (advanceEvents.length > 0) {
+        klog("poker_act_advanced", {
+          tableId,
+          fromPhase: currentState.phase,
+          toPhase: updatedState.phase,
+          loops,
+          eventTypes: Array.from(new Set(advanceEvents.map((event) => event?.type).filter(Boolean))),
+        });
+      }
+
+      klog("poker_act_applied", {
+        tableId,
+        userId: auth.userId,
+        actionType: actionParsed.value.type,
+        amount: actionParsed.value.amount ?? null,
+        fromPhase: currentState.phase,
+        toPhase: updatedState.phase,
+        newVersion,
+      });
+
       return {
         tableId,
         version: newVersion,
         state: withoutPrivateState(updatedState),
         myHoleCards: updatedState.holeCardsByUserId?.[auth.userId] || [],
         events,
+        replayed: false,
       };
     });
 
@@ -235,6 +386,7 @@ export async function handler(event) {
         },
         myHoleCards: result.myHoleCards,
         events: result.events,
+        replayed: result.replayed,
       }),
     };
   } catch (error) {

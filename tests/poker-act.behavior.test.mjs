@@ -39,7 +39,7 @@ const baseState = {
   lastActionRequestIdByUserId: {},
 };
 
-const makeHandler = (queries, storedState, userId) =>
+const makeHandler = (queries, storedState, userId, options = {}) =>
   loadPokerHandler("netlify/functions/poker-act.mjs", {
     baseHeaders: () => ({}),
     corsHeaders: () => ({ "access-control-allow-origin": "https://example.test" }),
@@ -77,8 +77,22 @@ const makeHandler = (queries, storedState, userId) =>
           return [];
         },
       }),
-    klog: () => {},
+    klog: options.klog || (() => {}),
   });
+
+const runCase = async ({ state, action, requestId, userId, klogCalls }) => {
+  const queries = [];
+  const storedState = { value: JSON.stringify(state), version: 3 };
+  const handler = makeHandler(queries, storedState, userId, {
+    klog: klogCalls ? (kind, data) => klogCalls.push({ kind, data }) : undefined,
+  });
+  const response = await handler({
+    httpMethod: "POST",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    body: JSON.stringify({ tableId, requestId, action }),
+  });
+  return { response, queries };
+};
 
 const run = async () => {
   const queries = [];
@@ -99,6 +113,68 @@ const run = async () => {
   });
   assert.equal(invalidAmount.statusCode, 400);
   assert.equal(JSON.parse(invalidAmount.body).error, "invalid_action");
+
+  const invalidBet = await runCase({
+    state: baseState,
+    action: { type: "BET", amount: 1000 },
+    requestId: "req-too-big",
+    userId: "user-1",
+  });
+  assert.equal(invalidBet.response.statusCode, 400);
+  assert.equal(JSON.parse(invalidBet.response.body).error, "invalid_action");
+
+  const raiseState = {
+    ...baseState,
+    stacks: { ...baseState.stacks, "user-1": 20 },
+    toCallByUserId: { ...baseState.toCallByUserId, "user-1": 5 },
+    betThisRoundByUserId: { ...baseState.betThisRoundByUserId, "user-1": 2 },
+  };
+  const invalidRaise = await runCase({
+    state: raiseState,
+    action: { type: "RAISE", amount: 30 },
+    requestId: "req-raise-too-big",
+    userId: "user-1",
+  });
+  assert.equal(invalidRaise.response.statusCode, 400);
+  assert.equal(JSON.parse(invalidRaise.response.body).error, "invalid_action");
+
+  const checkState = {
+    ...baseState,
+    toCallByUserId: { ...baseState.toCallByUserId, "user-1": 5 },
+  };
+  const invalidCheck = await runCase({
+    state: checkState,
+    action: { type: "CHECK" },
+    requestId: "req-check",
+    userId: "user-1",
+  });
+  assert.equal(invalidCheck.response.statusCode, 400);
+  assert.equal(JSON.parse(invalidCheck.response.body).error, "invalid_action");
+
+  const invalidCall = await runCase({
+    state: baseState,
+    action: { type: "CALL" },
+    requestId: "req-call",
+    userId: "user-1",
+  });
+  assert.equal(invalidCall.response.statusCode, 400);
+  assert.equal(JSON.parse(invalidCall.response.body).error, "invalid_action");
+
+  const corruptCalls = [];
+  const corruptState = {
+    ...baseState,
+    deck: Array.from({ length: 100 }).map((_v, idx) => ({ r: idx + 1, s: "S" })),
+  };
+  const corruptResponse = await runCase({
+    state: corruptState,
+    action: { type: "CHECK" },
+    requestId: "req-corrupt",
+    userId: "user-1",
+    klogCalls: corruptCalls,
+  });
+  assert.equal(corruptResponse.response.statusCode, 409);
+  assert.equal(JSON.parse(corruptResponse.response.body).error, "state_invalid");
+  assert.ok(corruptCalls.some((entry) => entry.kind === "poker_state_corrupt"));
 
   const handlerUser2 = makeHandler(queries, storedState, "user-2");
   const notTurn = await handlerUser2({
@@ -122,11 +198,24 @@ const run = async () => {
   assert.equal(user1Payload.state.state.deck, undefined);
   assert.ok(Array.isArray(user1Payload.myHoleCards));
   assert.equal(user1Payload.myHoleCards.length, 2);
+  assert.equal(user1Payload.replayed, false);
   assert.equal(user1Payload.holeCardsByUserId, undefined);
   assert.equal(user1Payload.deck, undefined);
   assert.equal(user1Payload.state.holeCardsByUserId, undefined);
   assert.equal(JSON.stringify(user1Payload).includes("holeCardsByUserId"), false);
   assert.equal(JSON.stringify(user1Payload).includes('"deck"'), false);
+
+  const updateCountBeforeReplay = queries.filter((entry) => entry.query.toLowerCase().includes("update public.poker_state")).length;
+  const replayResponse = await handlerUser1({
+    httpMethod: "POST",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    body: JSON.stringify({ tableId, requestId: "req-2", action: { type: "CHECK" } }),
+  });
+  assert.equal(replayResponse.statusCode, 200);
+  const replayPayload = JSON.parse(replayResponse.body);
+  assert.equal(replayPayload.replayed, true);
+  const updateCountAfterReplay = queries.filter((entry) => entry.query.toLowerCase().includes("update public.poker_state")).length;
+  assert.equal(updateCountAfterReplay, updateCountBeforeReplay);
 
   const handlerUser2Turn = makeHandler(queries, storedState, "user-2");
   const user2Check = await handlerUser2Turn({
