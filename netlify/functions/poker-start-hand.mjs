@@ -1,4 +1,5 @@
 import { baseHeaders, beginSql, corsHeaders, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
+import { createDeck, dealHoleCards, shuffle } from "./_shared/poker-engine.mjs";
 import { isValidUuid } from "./_shared/poker-utils.mjs";
 
 const parseBody = (body) => {
@@ -43,14 +44,21 @@ const normalizeState = (value) => {
 
 const parseStacks = (value) => (value && typeof value === "object" && !Array.isArray(value) ? value : {});
 
-const normalizeSeatNo = (value) => {
-  if (typeof value !== "number" || !Number.isInteger(value)) return null;
-  return value;
-};
-
 const normalizeVersion = (value) => {
   const num = Number(value);
   return Number.isFinite(num) ? num : null;
+};
+
+const getRng = () => {
+  const testRng = globalThis.__TEST_RNG__;
+  return typeof testRng === "function" ? testRng : Math.random;
+};
+
+const withoutHoleCards = (state) => {
+  if (!state || typeof state !== "object" || Array.isArray(state)) return state;
+  if (!Object.prototype.hasOwnProperty.call(state, "holeCardsByUserId")) return state;
+  const { holeCardsByUserId, ...rest } = state;
+  return rest;
 };
 
 export async function handler(event) {
@@ -124,52 +132,43 @@ export async function handler(event) {
       }
 
       const currentState = normalizeState(stateRow.state);
-      const authSeatRows = await tx.unsafe(
-        "select user_id from public.poker_seats where table_id = $1 and user_id = $2 and status = 'ACTIVE' limit 1;",
-        [tableId, auth.userId]
-      );
-      if (!authSeatRows?.[0]) {
-        throw makeError(403, "not_allowed");
-      }
-
-      // Idempotency does not bypass authorization.
-      const sameRequest =
-        currentState.lastStartHandRequestId === requestIdParsed.value && currentState.lastStartHandUserId === auth.userId;
-      if (sameRequest) {
-        if (typeof currentState.handId === "string" && currentState.handId.trim()) {
-          return {
-            tableId,
-            version: normalizeVersion(stateRow.version),
-            handId: currentState.handId,
-            buttonSeatNo: normalizeSeatNo(currentState.buttonSeatNo),
-            nextToActSeatNo: normalizeSeatNo(currentState.nextToActSeatNo),
-          };
-        }
-        throw makeError(409, "state_invalid");
-      }
 
       const seatRows = await tx.unsafe(
         "select user_id, seat_no from public.poker_seats where table_id = $1 and status = 'ACTIVE' order by seat_no asc;",
         [tableId]
       );
       const seats = Array.isArray(seatRows) ? seatRows : [];
-      const validSeats = seats.filter((seat) => Number.isInteger(seat?.seat_no));
+      const validSeats = seats.filter((seat) => Number.isInteger(seat?.seat_no) && seat?.user_id);
       if (validSeats.length < 2) {
-        throw makeError(409, "not_enough_players");
+        throw makeError(400, "not_enough_players");
+      }
+      if (!validSeats.some((seat) => seat.user_id === auth.userId)) {
+        throw makeError(403, "not_allowed");
+      }
+
+      const sameRequest =
+        currentState.lastStartHandRequestId === requestIdParsed.value && currentState.lastStartHandUserId === auth.userId;
+      if (sameRequest) {
+        if (currentState.phase === "PREFLOP" && typeof currentState.handId === "string" && currentState.handId.trim()) {
+          return {
+            tableId,
+            version: normalizeVersion(stateRow.version),
+            state: withoutHoleCards(currentState),
+            myHoleCards: currentState.holeCardsByUserId?.[auth.userId] || [],
+          };
+        }
+        throw makeError(409, "state_invalid");
       }
 
       if (currentState.phase && currentState.phase !== "INIT" && currentState.phase !== "HAND_DONE") {
         throw makeError(409, "already_in_hand");
       }
 
-      const seatNos = validSeats.map((seat) => seat.seat_no);
-      const prevButton = normalizeSeatNo(currentState.buttonSeatNo);
-      const prevIndex = prevButton != null ? seatNos.indexOf(prevButton) : -1;
-      const buttonSeatNo = prevIndex >= 0 ? seatNos[(prevIndex + 1) % seatNos.length] : seatNos[0];
-      const buttonIndex = seatNos.indexOf(buttonSeatNo);
-      const nextToActSeatNo = seatNos[(buttonIndex + 1) % seatNos.length];
+      const dealerSeatNo = validSeats[0].seat_no;
+      const turnUserId = validSeats[1]?.user_id || validSeats[0].user_id;
 
-      const handId = `hand_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
+      const rng = getRng();
+      const handId = `hand_${Date.now()}_${Math.floor(rng() * 1e6)}`;
       const derivedSeats = validSeats.map((seat) => ({ userId: seat.user_id, seatNo: seat.seat_no }));
       const activeUserIds = new Set(validSeats.map((seat) => seat.user_id));
       const currentStacks = parseStacks(currentState.stacks);
@@ -180,16 +179,21 @@ export async function handler(event) {
         return acc;
       }, {});
 
+      const deck = shuffle(createDeck(), rng);
+      const dealResult = dealHoleCards(deck, validSeats.map((seat) => seat.user_id));
+
       const updatedState = {
         ...currentState,
         tableId: currentState.tableId || tableId,
         handId,
-        phase: "HAND_ACTIVE",
+        phase: "PREFLOP",
         pot: 0,
+        community: [],
         seats: derivedSeats,
         stacks: nextStacks,
-        buttonSeatNo,
-        nextToActSeatNo,
+        dealerSeatNo,
+        turnUserId,
+        holeCardsByUserId: dealResult.holeCardsByUserId,
         lastStartHandRequestId: requestIdParsed.value || null,
         lastStartHandUserId: auth.userId,
         startedAt: new Date().toISOString(),
@@ -209,7 +213,12 @@ export async function handler(event) {
         [tableId, newVersion, auth.userId, "START_HAND", null]
       );
 
-      return { tableId, version: newVersion, handId, buttonSeatNo, nextToActSeatNo };
+      return {
+        tableId,
+        version: newVersion,
+        state: withoutHoleCards(updatedState),
+        myHoleCards: dealResult.holeCardsByUserId[auth.userId] || [],
+      };
     });
 
     return {
@@ -218,10 +227,11 @@ export async function handler(event) {
       body: JSON.stringify({
         ok: true,
         tableId: result.tableId,
-        version: result.version,
-        handId: result.handId,
-        buttonSeatNo: result.buttonSeatNo,
-        nextToActSeatNo: result.nextToActSeatNo,
+        state: {
+          version: result.version,
+          state: result.state,
+        },
+        myHoleCards: result.myHoleCards,
       }),
     };
   } catch (error) {
