@@ -32,6 +32,9 @@ const makeHandler = (queries, storedState) =>
             return [{ id: tableId, status: "OPEN", max_players: 6 }];
           }
           if (text.includes("from public.poker_state")) {
+            if (storedState.value) {
+              return [{ version: 2, state: JSON.parse(storedState.value) }];
+            }
             return [{ version: 1, state: { phase: "INIT", stacks: {} } }];
           }
           if (text.includes("from public.poker_seats")) {
@@ -91,9 +94,22 @@ const run = async () => {
   const cardKeys = payload.myHoleCards.map((card) => `${card.r}-${card.s}`);
   const uniqueKeys = new Set(cardKeys);
   assert.equal(uniqueKeys.size, cardKeys.length, "hole cards should be unique");
+
+  const replayResponse = await handler({
+    httpMethod: "POST",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    body: JSON.stringify({ tableId, requestId: "req-1" }),
+  });
+  assert.equal(replayResponse.statusCode, 200);
+  const replayPayload = JSON.parse(replayResponse.body);
+  assert.equal(replayPayload.ok, true);
+  assert.equal(replayPayload.state.version, payload.state.version);
+  assert.equal(replayPayload.state.state.phase, "PREFLOP");
+  assert.ok(Array.isArray(replayPayload.myHoleCards));
+  assert.equal(replayPayload.myHoleCards.length, 2);
+
+  const updateCalls = queries.filter((q) => q.query.toLowerCase().includes("update public.poker_state"));
+  assert.equal(updateCalls.length, 1);
 };
 
-run().catch((error) => {
-  console.error(error);
-  process.exit(1);
-});
+await run();

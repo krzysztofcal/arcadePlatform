@@ -146,6 +146,20 @@ export async function handler(event) {
         throw makeError(403, "not_allowed");
       }
 
+      const sameRequest =
+        currentState.lastStartHandRequestId === requestIdParsed.value && currentState.lastStartHandUserId === auth.userId;
+      if (sameRequest) {
+        if (currentState.phase === "PREFLOP" && typeof currentState.handId === "string" && currentState.handId.trim()) {
+          return {
+            tableId,
+            version: normalizeVersion(stateRow.version),
+            state: withoutHoleCards(currentState),
+            myHoleCards: currentState.holeCardsByUserId?.[auth.userId] || [],
+          };
+        }
+        throw makeError(409, "state_invalid");
+      }
+
       if (currentState.phase && currentState.phase !== "INIT" && currentState.phase !== "HAND_DONE") {
         throw makeError(409, "already_in_hand");
       }
@@ -153,7 +167,8 @@ export async function handler(event) {
       const dealerSeatNo = validSeats[0].seat_no;
       const turnUserId = validSeats[1]?.user_id || validSeats[0].user_id;
 
-      const handId = `hand_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
+      const rng = getRng();
+      const handId = `hand_${Date.now()}_${Math.floor(rng() * 1e6)}`;
       const derivedSeats = validSeats.map((seat) => ({ userId: seat.user_id, seatNo: seat.seat_no }));
       const activeUserIds = new Set(validSeats.map((seat) => seat.user_id));
       const currentStacks = parseStacks(currentState.stacks);
@@ -164,7 +179,7 @@ export async function handler(event) {
         return acc;
       }, {});
 
-      const deck = shuffle(createDeck(), getRng());
+      const deck = shuffle(createDeck(), rng);
       const dealResult = dealHoleCards(deck, validSeats.map((seat) => seat.user_id));
 
       const updatedState = {
@@ -192,6 +207,11 @@ export async function handler(event) {
       if (newVersion == null) {
         throw makeError(409, "state_invalid");
       }
+
+      await tx.unsafe(
+        "insert into public.poker_actions (table_id, version, user_id, action_type, amount) values ($1, $2, $3, $4, $5);",
+        [tableId, newVersion, auth.userId, "START_HAND", null]
+      );
 
       return {
         tableId,
