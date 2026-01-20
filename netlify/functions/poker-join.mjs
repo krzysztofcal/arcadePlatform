@@ -137,6 +137,8 @@ export async function handler(event) {
     return { statusCode: 401, headers: cors, body: JSON.stringify({ error: "unauthorized", reason: auth.reason }) };
   }
 
+  klog("poker_join_begin", { tableId, userId: auth.userId, seatNo, hasRequestId: !!requestId });
+
   try {
     const result = await beginSql(async (tx) => {
       if (requestId) {
@@ -212,8 +214,8 @@ export async function handler(event) {
             throw makeError(409, "table_closed");
           }
           await tx.unsafe(
-            "update public.poker_seats set status = 'ACTIVE', last_seen_at = now() where table_id = $1 and user_id = $2;",
-            [tableId, auth.userId]
+            "update public.poker_seats set status = 'ACTIVE', last_seen_at = now(), stack = coalesce(stack, $3) where table_id = $1 and user_id = $2;",
+            [tableId, auth.userId, buyIn]
           );
 
           await tx.unsafe(
@@ -236,6 +238,13 @@ export async function handler(event) {
               [tableId, requestId, JSON.stringify(resultPayload)]
             );
           }
+          klog("poker_join_stack_persisted", {
+            tableId,
+            userId: auth.userId,
+            seatNo: existingSeatNo,
+            attemptedStackFill: buyIn,
+            mode: "rejoin",
+          });
           klog("poker_join_ok", { tableId, userId: auth.userId, seatNo: existingSeatNo, rejoin: true });
           return resultPayload;
         }
@@ -282,8 +291,8 @@ values ($1, $2, $3, 'ACTIVE', now(), now(), $4);
             const fallbackSeatNo = seatRow?.[0]?.seat_no;
             if (Number.isInteger(fallbackSeatNo)) {
               await tx.unsafe(
-                "update public.poker_seats set status = 'ACTIVE', last_seen_at = now() where table_id = $1 and user_id = $2;",
-                [tableId, auth.userId]
+                "update public.poker_seats set status = 'ACTIVE', last_seen_at = now(), stack = coalesce(stack, $3) where table_id = $1 and user_id = $2;",
+                [tableId, auth.userId, buyIn]
               );
               const resultPayload = {
                 ok: true,
@@ -300,6 +309,13 @@ values ($1, $2, $3, 'ACTIVE', now(), now(), $4);
                   [tableId, requestId, JSON.stringify(resultPayload)]
                 );
               }
+              klog("poker_join_stack_persisted", {
+                tableId,
+                userId: auth.userId,
+                seatNo: fallbackSeatNo,
+                attemptedStackFill: buyIn,
+                mode: "rejoin",
+              });
               klog("poker_join_ok", { tableId, userId: auth.userId, seatNo: fallbackSeatNo, rejoin: true });
               return resultPayload;
             }
@@ -319,7 +335,7 @@ values ($1, $2, $3, 'ACTIVE', now(), now(), $4);
         }
 
         const idempotencyKey = requestId
-          ? `poker:join:${requestId}`
+          ? `poker:join:${tableId}:${auth.userId}:${requestId}`
           : `poker:join:${tableId}:${auth.userId}:${seatNo}:${buyIn}`;
 
         await postTransaction({
@@ -418,6 +434,13 @@ values ($1, $2, $3, 'ACTIVE', now(), now(), $4);
             [tableId, requestId, JSON.stringify(resultPayload)]
           );
         }
+        klog("poker_join_stack_persisted", {
+          tableId,
+          userId: auth.userId,
+          seatNo,
+          persistedStack: buyIn,
+          mode: "insert",
+        });
         klog("poker_join_ok", { tableId, userId: auth.userId, seatNo, rejoin: false });
         return resultPayload;
       } catch (error) {

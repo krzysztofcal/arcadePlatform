@@ -1,9 +1,26 @@
 import { baseHeaders, beginSql, klog } from "./_shared/supabase-admin.mjs";
 import { PRESENCE_TTL_SEC, TABLE_EMPTY_CLOSE_SEC } from "./_shared/poker-utils.mjs";
+import { postTransaction } from "./_shared/chips-ledger.mjs";
 
 const STALE_PENDING_CUTOFF_MINUTES = 10;
 const STALE_PENDING_LIMIT = 500;
 const OLD_REQUESTS_LIMIT = 1000;
+const EXPIRED_SEATS_LIMIT = 200;
+
+const normalizeSeatStack = (value) => {
+  if (value == null) return null;
+  const num = Number(value);
+  if (!Number.isFinite(num) || !Number.isInteger(num)) return null;
+  if (Math.abs(num) > Number.MAX_SAFE_INTEGER) return null;
+  return num;
+};
+
+const isExpiredSeat = (value) => {
+  const lastSeenMs =
+    typeof value === "string" ? Date.parse(value) : value instanceof Date ? value.getTime() : Date.parse(String(value));
+  if (!Number.isFinite(lastSeenMs)) return false;
+  return Date.now() - lastSeenMs > PRESENCE_TTL_SEC * 1000;
+};
 
 export async function handler(event) {
   if (event.httpMethod === "OPTIONS") {
@@ -42,13 +59,117 @@ export async function handler(event) {
       const cleanupCount = Array.isArray(cleanupRows) ? cleanupRows.length : 0;
 
       const expiredRows = await tx.unsafe(
-        `update public.poker_seats set status = 'INACTIVE'
-         where status = 'ACTIVE' and last_seen_at < now() - ($1::int * interval '1 second')
-         returning table_id;`,
-        [PRESENCE_TTL_SEC]
+        `select table_id, user_id, seat_no, stack, last_seen_at
+         from public.poker_seats
+         where status = 'ACTIVE'
+           and last_seen_at < now() - ($1::int * interval '1 second')
+         order by last_seen_at asc
+         limit $2;`,
+        [PRESENCE_TTL_SEC, EXPIRED_SEATS_LIMIT]
       );
-      const expiredCount = Array.isArray(expiredRows) ? expiredRows.length : 0;
 
+      await tx.unsafe(
+        `with candidates as (
+          select ctid
+          from public.poker_requests
+          where created_at < now() - interval '24 hours'
+          limit $1
+        )
+        delete from public.poker_requests
+        where ctid in (select ctid from candidates);`,
+        [OLD_REQUESTS_LIMIT]
+      );
+      return { cleanupCount, expiredRows };
+    });
+
+    if (result.cleanupCount > 0) {
+      klog("poker_requests_cleanup", {
+        deleted: result.cleanupCount,
+        cutoffMinutes: STALE_PENDING_CUTOFF_MINUTES,
+        limit: STALE_PENDING_LIMIT,
+      });
+    }
+
+    const expiredSeats = Array.isArray(result.expiredRows) ? result.expiredRows : [];
+    if (expiredSeats.length === EXPIRED_SEATS_LIMIT) {
+      klog("poker_sweep_expired_seats_capped", { limit: EXPIRED_SEATS_LIMIT, returned: expiredSeats.length });
+    }
+    let expiredCount = 0;
+    for (const seat of expiredSeats) {
+      const tableId = seat?.table_id;
+      const userId = seat?.user_id;
+      if (!tableId || !userId) continue;
+      try {
+        const processed = await beginSql(async (tx) => {
+          const lockedRows = await tx.unsafe(
+            "select seat_no, status, stack, last_seen_at from public.poker_seats where table_id = $1 and user_id = $2 for update;",
+            [tableId, userId]
+          );
+          const locked = lockedRows?.[0] || null;
+          if (!locked || locked.status !== "ACTIVE") {
+            return { skipped: true, seatNo: locked?.seat_no ?? null };
+          }
+          if (!isExpiredSeat(locked.last_seen_at)) {
+            return { skipped: true, seatNo: locked.seat_no };
+          }
+
+          const amount = normalizeSeatStack(locked.stack) ?? 0;
+          if (amount > 0) {
+            await postTransaction({
+              userId,
+              txType: "TABLE_CASH_OUT",
+              idempotencyKey: `poker:timeout_cashout:${tableId}:${userId}:${locked.seat_no}:v1`,
+              entries: [
+                { accountType: "ESCROW", systemKey: `POKER_TABLE:${tableId}`, amount: -amount },
+                { accountType: "USER", amount },
+              ],
+              createdBy: userId,
+              tx,
+            });
+          }
+
+          await tx.unsafe(
+            "update public.poker_seats set status = 'INACTIVE', stack = 0 where table_id = $1 and user_id = $2;",
+            [tableId, userId]
+          );
+          return { seatNo: locked.seat_no, amount };
+        });
+
+        if (processed?.skipped) {
+          continue;
+        }
+        expiredCount += 1;
+        if (processed?.amount > 0) {
+          klog("poker_timeout_cashout_ok", {
+            tableId,
+            userId,
+            seatNo: processed.seatNo ?? null,
+            amount: processed.amount,
+          });
+        } else {
+          klog("poker_timeout_cashout_skip", {
+            tableId,
+            userId,
+            seatNo: processed?.seatNo ?? null,
+            amount: processed?.amount ?? 0,
+          });
+        }
+      } catch (error) {
+        klog("poker_timeout_cashout_fail", {
+          tableId,
+          userId,
+          seatNo: seat?.seat_no ?? null,
+          error: error?.message || "unknown_error",
+        });
+      }
+    }
+    klog("poker_sweep_timeout_summary", {
+      scanned: expiredSeats.length,
+      processed: expiredCount,
+      limit: EXPIRED_SEATS_LIMIT,
+    });
+
+    const closedResult = await beginSql(async (tx) => {
       const closedRows = await tx.unsafe(
         `
 update public.poker_tables t
@@ -63,33 +184,37 @@ returning t.id;
         `,
         [TABLE_EMPTY_CLOSE_SEC]
       );
-      const closedCount = Array.isArray(closedRows) ? closedRows.length : 0;
-
-      await tx.unsafe(
-        `with candidates as (
-          select ctid
-          from public.poker_requests
-          where created_at < now() - interval '24 hours'
-          limit $1
-        )
-        delete from public.poker_requests
-        where ctid in (select ctid from candidates);`,
-        [OLD_REQUESTS_LIMIT]
-      );
-      return { cleanupCount, expiredCount, closedCount };
+      return { closedCount: Array.isArray(closedRows) ? closedRows.length : 0 };
     });
 
-    if (result.cleanupCount > 0) {
-      klog("poker_requests_cleanup", {
-        deleted: result.cleanupCount,
-        cutoffMinutes: STALE_PENDING_CUTOFF_MINUTES,
-        limit: STALE_PENDING_LIMIT,
+    const orphanRows = await beginSql(async (tx) =>
+      tx.unsafe(
+        `
+select a.system_key, a.balance
+from public.chips_accounts a
+where a.account_type = 'ESCROW'
+  and a.system_key like 'POKER_TABLE:%'
+  and a.balance <> 0
+  and not exists (
+    select 1
+    from public.poker_seats s
+    where s.status = 'ACTIVE'
+      and ('POKER_TABLE:' || s.table_id) = a.system_key
+  );`
+      )
+    );
+    if (Array.isArray(orphanRows)) {
+      orphanRows.forEach((row) => {
+        const systemKey = row?.system_key || "";
+        const tableId = systemKey.startsWith("POKER_TABLE:") ? systemKey.slice("POKER_TABLE:".length) : null;
+        klog("poker_escrow_orphan_detected", { tableId, escrowBalance: row?.balance ?? null });
       });
     }
+
     return {
       statusCode: 200,
       headers: baseHeaders(),
-      body: JSON.stringify({ ok: true, expiredCount: result.expiredCount, closedCount: result.closedCount }),
+      body: JSON.stringify({ ok: true, expiredCount, closedCount: closedResult.closedCount }),
     };
   } catch (error) {
     klog("poker_sweep_error", { message: error?.message || "unknown_error" });

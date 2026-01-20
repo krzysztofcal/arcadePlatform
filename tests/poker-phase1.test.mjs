@@ -54,7 +54,8 @@ assert.ok(!sweepSrc.includes("forbidden_origin"), "sweep should not reject missi
 assert.ok(joinSrc.includes("table_not_open"), "join should return table_not_open when table is not OPEN");
 assert.ok(/table\.status\s*!==?\s*['"]OPEN['"]/.test(joinSrc), "join should guard new seats behind OPEN status");
 assert.ok(leaveSrc.includes("not_seated"), "leave should return not_seated when user is not seated");
-assert.ok(leaveSrc.includes("nothing_to_cash_out"), "leave should return nothing_to_cash_out when no stack");
+// Funds safety invariant: leave should not block when stack is missing; it returns ok with cashedOut: 0.
+assert.ok(!leaveSrc.includes("nothing_to_cash_out"), "leave should not error when stack is missing");
 assert.ok(!getTableSrc.includes("set last_activity_at"), "get-table should not update last_activity_at");
 assert.ok(!/update public\\.poker_seats set status = 'INACTIVE'/.test(getTableSrc), "get-table should not mark seats inactive");
 assert.ok(!/max_players\s*:/.test(getTableSrc), "get-table should not return max_players duplicate");

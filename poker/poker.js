@@ -1038,13 +1038,13 @@
           buyIn: buyIn,
           requestId: joinRequestId
         });
+        if (isPendingResponse(joinResult)){
+          schedulePendingRetry('join', retryJoin);
+          return;
+        }
         if (joinResult && joinResult.ok === false){
           clearJoinPending();
           setActionError('join', JOIN_URL, joinResult.error || 'request_failed', t('pokerErrJoin', 'Failed to join'));
-          return;
-        }
-        if (isPendingResponse(joinResult)){
-          schedulePendingRetry('join', retryJoin);
           return;
         }
         clearJoinPending();
