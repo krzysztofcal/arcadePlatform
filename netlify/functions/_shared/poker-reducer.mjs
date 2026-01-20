@@ -36,8 +36,6 @@ const buildDefaultMap = (seats, value) =>
     return acc;
   }, {});
 
-const countActive = (state) => getActiveSeats(state).length;
-
 const assertPlayer = (state, userId) => {
   if (!state.seats.some((seat) => seat.userId === userId)) {
     throw new Error("invalid_player");
@@ -109,11 +107,12 @@ const initHandState = ({ tableId, seats, stacks, rng }) => {
     foldedByUserId: buildDefaultMap(orderedSeats, false),
     lastAggressorUserId: null,
   };
-  return { state, myHoleCardsByUserId: dealt.holeCardsByUserId };
+  return { state };
 };
 
 const getLegalActions = (state, userId) => {
   assertPlayer(state, userId);
+  if (state.turnUserId && userId !== state.turnUserId) return [];
   const toCall = state.toCallByUserId?.[userId] || 0;
   const stack = state.stacks?.[userId] ?? 0;
   if (toCall > 0) {
@@ -160,7 +159,7 @@ const applyAction = (state, action) => {
     next.stacks[userId] = stack - pay;
     next.betThisRoundByUserId[userId] = currentBet + pay;
     next.pot += pay;
-    next.toCallByUserId[userId] = toCall - pay;
+    next.toCallByUserId[userId] = 0;
   } else if (action.type === "BET") {
     if (toCall > 0) throw new Error("invalid_action");
     const amount = Number(action.amount);
@@ -200,7 +199,7 @@ const applyAction = (state, action) => {
   return { state: done.state, events: done.events };
 };
 
-const advanceIfNeeded = (state, rng = Math.random) => {
+const advanceIfNeeded = (state) => {
   const events = [];
   if (state.phase === "HAND_DONE" || state.phase === "SHOWDOWN") {
     return { state, events };
@@ -217,7 +216,8 @@ const advanceIfNeeded = (state, rng = Math.random) => {
 
   const from = state.phase;
   const to = nextStreet(from);
-  let next = resetRoundState({ ...state, phase: to, turnUserId: getFirstActiveAfterDealer(state) });
+  let next = resetRoundState({ ...state, phase: to, turnUserId: null });
+  next = { ...next, turnUserId: getFirstActiveAfterDealer(next) };
 
   const n = cardsToDeal(from);
   if (n > 0) {
