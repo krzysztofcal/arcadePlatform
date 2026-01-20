@@ -21,6 +21,7 @@ const {
   baseHeaders,
   beginSql,
   corsHeaders,
+  executeSql,
   extractBearerToken,
   klog,
   normalizeRequestId,
