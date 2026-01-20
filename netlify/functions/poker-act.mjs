@@ -32,7 +32,7 @@ const normalizeAction = (action) => {
   if (!ACTION_TYPES.has(type)) return { ok: false, value: null };
   if (type === "BET" || type === "RAISE") {
     const amount = Number(action.amount);
-    if (!Number.isFinite(amount)) return { ok: false, value: null };
+    if (!Number.isFinite(amount) || !Number.isInteger(amount) || amount <= 0) return { ok: false, value: null };
     return { ok: true, value: { type, amount } };
   }
   return { ok: true, value: { type } };
@@ -83,7 +83,7 @@ export async function handler(event) {
 
   const requestIdParsed = normalizeRequest(payload?.requestId);
   if (!requestIdParsed.ok) {
-    return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "invalid_action" }) };
+    return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "invalid_request_id" }) };
   }
   const requestId = requestIdParsed.value;
 
@@ -140,9 +140,13 @@ export async function handler(event) {
           : {};
 
       if (lastByUserId[auth.userId] === requestId) {
+        const version = Number(stateRow.version);
+        if (!Number.isFinite(version)) {
+          throw makeError(409, "state_invalid");
+        }
         return {
           tableId,
-          version: Number(stateRow.version),
+          version,
           state: withoutPrivateState(currentState),
           myHoleCards: currentState.holeCardsByUserId?.[auth.userId] || [],
           events: [],

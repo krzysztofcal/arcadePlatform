@@ -84,6 +84,22 @@ const run = async () => {
   const queries = [];
   const storedState = { value: JSON.stringify(baseState), version: 7 };
 
+  const invalidRequest = await makeHandler(queries, storedState, "user-1")({
+    httpMethod: "POST",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    body: JSON.stringify({ tableId, requestId: "", action: { type: "CHECK" } }),
+  });
+  assert.equal(invalidRequest.statusCode, 400);
+  assert.equal(JSON.parse(invalidRequest.body).error, "invalid_request_id");
+
+  const invalidAmount = await makeHandler(queries, storedState, "user-1")({
+    httpMethod: "POST",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    body: JSON.stringify({ tableId, requestId: "req-bad", action: { type: "BET", amount: 0 } }),
+  });
+  assert.equal(invalidAmount.statusCode, 400);
+  assert.equal(JSON.parse(invalidAmount.body).error, "invalid_action");
+
   const handlerUser2 = makeHandler(queries, storedState, "user-2");
   const notTurn = await handlerUser2({
     httpMethod: "POST",
@@ -106,6 +122,11 @@ const run = async () => {
   assert.equal(user1Payload.state.state.deck, undefined);
   assert.ok(Array.isArray(user1Payload.myHoleCards));
   assert.equal(user1Payload.myHoleCards.length, 2);
+  assert.equal(user1Payload.holeCardsByUserId, undefined);
+  assert.equal(user1Payload.deck, undefined);
+  assert.equal(user1Payload.state.holeCardsByUserId, undefined);
+  assert.equal(JSON.stringify(user1Payload).includes("holeCardsByUserId"), false);
+  assert.equal(JSON.stringify(user1Payload).includes('"deck"'), false);
 
   const handlerUser2Turn = makeHandler(queries, storedState, "user-2");
   const user2Check = await handlerUser2Turn({
@@ -129,6 +150,11 @@ const run = async () => {
   assert.ok(user3Payload.events.some((event) => event.type === "COMMUNITY_DEALT"));
   assert.equal(user3Payload.state.state.holeCardsByUserId, undefined);
   assert.equal(user3Payload.state.state.deck, undefined);
+  assert.equal(user3Payload.holeCardsByUserId, undefined);
+  assert.equal(user3Payload.deck, undefined);
+  assert.equal(user3Payload.state.holeCardsByUserId, undefined);
+  assert.equal(JSON.stringify(user3Payload).includes("holeCardsByUserId"), false);
+  assert.equal(JSON.stringify(user3Payload).includes('"deck"'), false);
 
   const updateCall = queries.find((entry) => entry.query.toLowerCase().includes("update public.poker_state"));
   assert.ok(updateCall, "expected poker_state update");
