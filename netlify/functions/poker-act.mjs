@@ -78,6 +78,7 @@ const validateActionBounds = (state, action, userId) => {
 export async function handler(event) {
   const origin = event.headers?.origin || event.headers?.Origin;
   const cors = corsHeaders(origin);
+  const mergeHeaders = (next) => ({ ...baseHeaders(), ...(next || {}) });
   if (!cors) {
     return {
       statusCode: 403,
@@ -86,43 +87,47 @@ export async function handler(event) {
     };
   }
   if (event.httpMethod === "OPTIONS") {
-    return { statusCode: 204, headers: cors, body: "" };
+    return { statusCode: 204, headers: mergeHeaders(cors), body: "" };
   }
   if (event.httpMethod !== "POST") {
-    return { statusCode: 405, headers: cors, body: JSON.stringify({ error: "method_not_allowed" }) };
+    return { statusCode: 405, headers: mergeHeaders(cors), body: JSON.stringify({ error: "method_not_allowed" }) };
   }
 
   const parsed = parseBody(event.body);
   if (!parsed.ok) {
-    return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "invalid_json" }) };
+    return { statusCode: 400, headers: mergeHeaders(cors), body: JSON.stringify({ error: "invalid_json" }) };
   }
 
   const payload = parsed.value ?? {};
   if (payload && !isPlainObject(payload)) {
-    return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "invalid_json" }) };
+    return { statusCode: 400, headers: mergeHeaders(cors), body: JSON.stringify({ error: "invalid_json" }) };
   }
 
   const tableIdValue = payload?.tableId;
   const tableId = typeof tableIdValue === "string" ? tableIdValue.trim() : "";
   if (!tableId || !isValidUuid(tableId)) {
-    return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "invalid_table_id" }) };
+    return { statusCode: 400, headers: mergeHeaders(cors), body: JSON.stringify({ error: "invalid_table_id" }) };
   }
 
   const requestIdParsed = normalizeRequest(payload?.requestId);
   if (!requestIdParsed.ok) {
-    return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "invalid_request_id" }) };
+    return { statusCode: 400, headers: mergeHeaders(cors), body: JSON.stringify({ error: "invalid_request_id" }) };
   }
   const requestId = requestIdParsed.value;
 
   const actionParsed = normalizeAction(payload?.action);
   if (!actionParsed.ok) {
-    return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "invalid_action" }) };
+    return { statusCode: 400, headers: mergeHeaders(cors), body: JSON.stringify({ error: "invalid_action" }) };
   }
 
   const token = extractBearerToken(event.headers);
   const auth = await verifySupabaseJwt(token);
   if (!auth.valid || !auth.userId) {
-    return { statusCode: 401, headers: cors, body: JSON.stringify({ error: "unauthorized", reason: auth.reason }) };
+    return {
+      statusCode: 401,
+      headers: mergeHeaders(cors),
+      body: JSON.stringify({ error: "unauthorized", reason: auth.reason }),
+    };
   }
 
   try {
@@ -365,7 +370,7 @@ export async function handler(event) {
 
     return {
       statusCode: 200,
-      headers: cors,
+      headers: mergeHeaders(cors),
       body: JSON.stringify({
         ok: true,
         tableId: result.tableId,
@@ -380,9 +385,9 @@ export async function handler(event) {
     };
   } catch (error) {
     if (error?.status && error?.code) {
-      return { statusCode: error.status, headers: cors, body: JSON.stringify({ error: error.code }) };
+      return { statusCode: error.status, headers: mergeHeaders(cors), body: JSON.stringify({ error: error.code }) };
     }
     klog("poker_act_error", { message: error?.message || "unknown_error" });
-    return { statusCode: 500, headers: cors, body: JSON.stringify({ error: "server_error" }) };
+    return { statusCode: 500, headers: mergeHeaders(cors), body: JSON.stringify({ error: "server_error" }) };
   }
 }
