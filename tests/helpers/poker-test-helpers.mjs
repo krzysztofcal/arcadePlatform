@@ -29,6 +29,11 @@ const getDeclaredIdentifiers = (src) => {
       if (name) declared.add(name);
     }
   }
+  const exportDefault = /\bexport\s+default\s+([A-Za-z_$][\w$]*)\b/g;
+  let defMatch;
+  while ((defMatch = exportDefault.exec(src))) {
+    declared.add(defMatch[1]);
+  }
   return declared;
 };
 

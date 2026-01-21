@@ -105,9 +105,6 @@ export async function handler(event) {
       }
 
       const currentState = normalizeJsonState(stateRow.state);
-      if (!isPlainObject(currentState)) {
-        throw makeError(409, "state_invalid");
-      }
 
       const seatRows = await tx.unsafe(
         "select user_id, seat_no from public.poker_seats where table_id = $1 and status = 'ACTIVE' order by seat_no asc;",
