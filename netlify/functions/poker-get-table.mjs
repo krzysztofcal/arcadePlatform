@@ -21,6 +21,7 @@ const parseTableId = (event) => {
 export async function handler(event) {
   const origin = event.headers?.origin || event.headers?.Origin;
   const cors = corsHeaders(origin);
+  const mergeHeaders = (next) => ({ ...baseHeaders(), ...(next || {}) });
   if (!cors) {
     return {
       statusCode: 403,
@@ -29,21 +30,25 @@ export async function handler(event) {
     };
   }
   if (event.httpMethod === "OPTIONS") {
-    return { statusCode: 204, headers: cors, body: "" };
+    return { statusCode: 204, headers: mergeHeaders(cors), body: "" };
   }
   if (event.httpMethod !== "GET") {
-    return { statusCode: 405, headers: cors, body: JSON.stringify({ error: "method_not_allowed" }) };
+    return { statusCode: 405, headers: mergeHeaders(cors), body: JSON.stringify({ error: "method_not_allowed" }) };
   }
 
   const tableId = parseTableId(event);
   if (!tableId || !isValidUuid(tableId)) {
-    return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "invalid_table_id" }) };
+    return { statusCode: 400, headers: mergeHeaders(cors), body: JSON.stringify({ error: "invalid_table_id" }) };
   }
 
   const token = extractBearerToken(event.headers);
   const auth = await verifySupabaseJwt(token);
   if (!auth.valid || !auth.userId) {
-    return { statusCode: 401, headers: cors, body: JSON.stringify({ error: "unauthorized", reason: auth.reason }) };
+    return {
+      statusCode: 401,
+      headers: mergeHeaders(cors),
+      body: JSON.stringify({ error: "unauthorized", reason: auth.reason }),
+    };
   }
 
   try {
@@ -86,7 +91,7 @@ export async function handler(event) {
     });
 
     if (result?.error === "table_not_found") {
-      return { statusCode: 404, headers: cors, body: JSON.stringify({ error: "table_not_found" }) };
+      return { statusCode: 404, headers: mergeHeaders(cors), body: JSON.stringify({ error: "table_not_found" }) };
     }
 
     const table = result.table;
@@ -107,7 +112,7 @@ export async function handler(event) {
 
     return {
       statusCode: 200,
-      headers: cors,
+      headers: mergeHeaders(cors),
       body: JSON.stringify({
         ok: true,
         table: tablePayload,
@@ -120,6 +125,6 @@ export async function handler(event) {
     };
   } catch (error) {
     klog("poker_get_table_error", { message: error?.message || "unknown_error" });
-    return { statusCode: 500, headers: cors, body: JSON.stringify({ error: "server_error" }) };
+    return { statusCode: 500, headers: mergeHeaders(cors), body: JSON.stringify({ error: "server_error" }) };
   }
 }
