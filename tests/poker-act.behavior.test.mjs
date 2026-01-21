@@ -76,13 +76,16 @@ const makeHandler = (queries, storedState, userId, options = {}) =>
           if (text.includes("from public.poker_state")) {
             return [{ version: storedState.version, state: JSON.parse(storedState.value) }];
           }
-          if (text.includes("update public.poker_state")) {
-            storedState.value = params?.[1] || storedState.value;
-            storedState.version += 1;
-            return [{ version: storedState.version }];
-          }
-          return [];
-        },
+        if (text.includes("update public.poker_state")) {
+          storedState.value = params?.[1] || storedState.value;
+          storedState.version += 1;
+          return [{ version: storedState.version }];
+        }
+        if (text.includes("insert into public.poker_actions")) {
+          return [{ ok: true }];
+        }
+        return [];
+      },
       }),
     klog: options.klog || (() => {}),
   });

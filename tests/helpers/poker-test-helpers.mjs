@@ -7,10 +7,19 @@ const stripImports = (source) => source.replace(/^\s*import[\s\S]*?;\s*$/gm, "")
 
 const getDeclaredIdentifiers = (src) => {
   const declared = new Set();
-  const re = /\b(?:const|let|var|function)\s+([A-Za-z_$][\w$]*)\b/g;
+  const re = /\b(?:export\s+)?(?:const|let|var|function|class)\s+([A-Za-z_$][\w$]*)\b/g;
   let match;
   while ((match = re.exec(src))) {
     declared.add(match[1]);
+  }
+  const destr = /\b(?:export\s+)?(?:const|let|var)\s*\{\s*([^}]+)\s*\}\s*=/g;
+  let destrMatch;
+  while ((destrMatch = destr.exec(src))) {
+    const inside = destrMatch[1];
+    for (const part of inside.split(",")) {
+      const left = part.trim().split(":")[0].trim();
+      if (left) declared.add(left);
+    }
   }
   return declared;
 };
