@@ -287,16 +287,15 @@ export async function handler(event) {
       while (loops < ADVANCE_LIMIT) {
         const prevPhase = nextState.phase;
         const advanced = advanceIfNeeded(nextState);
-        if (!Array.isArray(advanced.events) || advanced.events.length === 0) {
-          nextState = advanced.state;
-          break;
-        }
-        events.push(...advanced.events);
-        advanceEvents.push(...advanced.events);
         nextState = advanced.state;
-        if (nextState.phase === prevPhase) {
-          break;
+
+        if (Array.isArray(advanced.events) && advanced.events.length > 0) {
+          events.push(...advanced.events);
+          advanceEvents.push(...advanced.events);
         }
+
+        if (!Array.isArray(advanced.events) || advanced.events.length === 0) break;
+        if (nextState.phase === prevPhase) break;
         loops += 1;
       }
 

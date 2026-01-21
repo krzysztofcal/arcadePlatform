@@ -1,3 +1,6 @@
+const isPlainObject = (value) =>
+  value !== null && typeof value === "object" && !Array.isArray(value) && Object.getPrototypeOf(value) === Object.prototype;
+
 const normalizeJsonState = (value) => {
   if (!value) return {};
   if (typeof value === "string") {
@@ -7,12 +10,9 @@ const normalizeJsonState = (value) => {
       return {};
     }
   }
-  if (typeof value === "object" && !Array.isArray(value)) return value;
+  if (isPlainObject(value)) return value;
   return {};
 };
-
-const isPlainObject = (value) =>
-  value !== null && typeof value === "object" && !Array.isArray(value) && Object.getPrototypeOf(value) === Object.prototype;
 
 const withoutPrivateState = (state) => {
   if (!state || typeof state !== "object" || Array.isArray(state)) return state;
