@@ -151,10 +151,9 @@ export async function handler(event) {
       const activeUserIds = new Set(validSeats.map((seat) => seat.user_id));
       const activeUserIdList = validSeats.map((seat) => seat.user_id);
       const currentStacks = parseStacks(currentState.stacks);
-      const nextStacks = Object.entries(currentStacks).reduce((acc, [userId, amount]) => {
-        if (activeUserIds.has(userId)) {
-          acc[userId] = amount;
-        }
+      const nextStacks = activeUserIdList.reduce((acc, userId) => {
+        const n = Number(currentStacks[userId]);
+        acc[userId] = Number.isFinite(n) && Number.isInteger(n) && n >= 0 ? n : 0;
         return acc;
       }, {});
       const toCallByUserId = Object.fromEntries(activeUserIdList.map((userId) => [userId, 0]));

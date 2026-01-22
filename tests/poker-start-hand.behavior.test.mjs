@@ -106,6 +106,8 @@ const run = async () => {
   assert.equal(typeof updatedState.actedThisRoundByUserId, "object");
   assert.equal(typeof updatedState.foldedByUserId, "object");
   assert.equal(typeof updatedState.lastActionRequestIdByUserId, "object");
+  assert.equal(Object.keys(updatedState.stacks).length, 3);
+  assert.equal(typeof updatedState.stacks[userId], "number");
   assert.equal(updatedState.toCallByUserId[userId], 0);
   assert.equal(updatedState.betThisRoundByUserId[userId], 0);
   assert.equal(updatedState.actedThisRoundByUserId[userId], false);
