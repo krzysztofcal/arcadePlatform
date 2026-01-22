@@ -4,15 +4,31 @@ const isPlainObject = (value) =>
 const RANKS = ["2", "3", "4", "5", "6", "7", "8", "9", "T", "J", "Q", "K", "A"];
 const SUITS = ["S", "H", "D", "C"];
 const RANK_SET = new Set(RANKS);
+const RANK_NUM_SET = new Set([2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]);
 const SUIT_SET = new Set(SUITS);
+
+const rankKey = (rank) => {
+  if (typeof rank === "string") return RANK_SET.has(rank) ? rank : "";
+  if (typeof rank !== "number" || !Number.isFinite(rank)) return "";
+  if (rank >= 2 && rank <= 9) return String(rank);
+  if (rank === 10) return "T";
+  if (rank === 11) return "J";
+  if (rank === 12) return "Q";
+  if (rank === 13) return "K";
+  if (rank === 14) return "A";
+  return "";
+};
 
 const isValidCard = (card) => {
   if (!isPlainObject(card)) return false;
-  if (typeof card.r !== "string" || typeof card.s !== "string") return false;
-  return RANK_SET.has(card.r) && SUIT_SET.has(card.s);
+  if (typeof card.s !== "string") return false;
+  if (!SUIT_SET.has(card.s)) return false;
+  if (typeof card.r === "string") return RANK_SET.has(card.r);
+  if (typeof card.r === "number") return RANK_NUM_SET.has(card.r);
+  return false;
 };
 
-const cardKey = (card) => `${card.r}${card.s}`;
+const cardKey = (card) => `${rankKey(card.r)}${card.s}`;
 
 const validateCardsArray = (cards, options = {}) => {
   if (!Array.isArray(cards)) return { ok: false, keys: [] };

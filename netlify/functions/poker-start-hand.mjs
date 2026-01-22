@@ -34,34 +34,6 @@ const normalizeVersion = (value) => {
   return Number.isFinite(num) ? num : null;
 };
 
-const normalizeRank = (rank) => {
-  if (typeof rank === "string") return rank;
-  const num = Number(rank);
-  if (!Number.isFinite(num)) return "";
-  if (num >= 2 && num <= 9) return String(num);
-  if (num === 10) return "T";
-  if (num === 11) return "J";
-  if (num === 12) return "Q";
-  if (num === 13) return "K";
-  if (num === 14) return "A";
-  return "";
-};
-
-const normalizeCard = (card) => ({
-  r: normalizeRank(card?.r),
-  s: typeof card?.s === "string" ? card.s : "",
-});
-
-const normalizeCardsArray = (cards) => (Array.isArray(cards) ? cards.map(normalizeCard) : []);
-
-const normalizeHoleCardsByUserId = (value) => {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
-  return Object.entries(value).reduce((acc, [userId, cards]) => {
-    acc[userId] = normalizeCardsArray(cards);
-    return acc;
-  }, {});
-};
-
 export async function handler(event) {
   const origin = event.headers?.origin || event.headers?.Origin;
   const cors = corsHeaders(origin);
@@ -187,8 +159,6 @@ export async function handler(event) {
 
       const deck = shuffle(createDeck(), rng);
       const dealResult = dealHoleCards(deck, validSeats.map((seat) => seat.user_id));
-      const normalizedDeck = normalizeCardsArray(dealResult.deck);
-      const normalizedHoleCards = normalizeHoleCardsByUserId(dealResult.holeCardsByUserId);
 
       const updatedState = {
         ...currentState,
@@ -201,8 +171,8 @@ export async function handler(event) {
         stacks: nextStacks,
         dealerSeatNo,
         turnUserId,
-        holeCardsByUserId: normalizedHoleCards,
-        deck: normalizedDeck,
+        holeCardsByUserId: dealResult.holeCardsByUserId,
+        deck: dealResult.deck,
         lastStartHandRequestId: requestIdParsed.value || null,
         lastStartHandUserId: auth.userId,
         startedAt: new Date().toISOString(),
@@ -231,7 +201,7 @@ export async function handler(event) {
         tableId,
         version: newVersion,
         state: withoutPrivateState(updatedState),
-        myHoleCards: normalizedHoleCards[auth.userId] || [],
+        myHoleCards: dealResult.holeCardsByUserId[auth.userId] || [],
       };
     });
 
