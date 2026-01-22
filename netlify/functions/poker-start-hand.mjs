@@ -149,6 +149,7 @@ export async function handler(event) {
       const handId = `hand_${Date.now()}_${Math.floor(rng() * 1e6)}`;
       const derivedSeats = validSeats.map((seat) => ({ userId: seat.user_id, seatNo: seat.seat_no }));
       const activeUserIds = new Set(validSeats.map((seat) => seat.user_id));
+      const activeUserIdList = validSeats.map((seat) => seat.user_id);
       const currentStacks = parseStacks(currentState.stacks);
       const nextStacks = Object.entries(currentStacks).reduce((acc, [userId, amount]) => {
         if (activeUserIds.has(userId)) {
@@ -156,6 +157,10 @@ export async function handler(event) {
         }
         return acc;
       }, {});
+      const toCallByUserId = Object.fromEntries(activeUserIdList.map((userId) => [userId, 0]));
+      const betThisRoundByUserId = Object.fromEntries(activeUserIdList.map((userId) => [userId, 0]));
+      const actedThisRoundByUserId = Object.fromEntries(activeUserIdList.map((userId) => [userId, false]));
+      const foldedByUserId = Object.fromEntries(activeUserIdList.map((userId) => [userId, false]));
 
       const deck = shuffle(createDeck(), rng);
       const dealResult = dealHoleCards(deck, validSeats.map((seat) => seat.user_id));
@@ -171,8 +176,13 @@ export async function handler(event) {
         stacks: nextStacks,
         dealerSeatNo,
         turnUserId,
+        toCallByUserId,
+        betThisRoundByUserId,
+        actedThisRoundByUserId,
+        foldedByUserId,
         holeCardsByUserId: dealResult.holeCardsByUserId,
         deck: dealResult.deck,
+        lastActionRequestIdByUserId: {},
         lastStartHandRequestId: requestIdParsed.value || null,
         lastStartHandUserId: auth.userId,
         startedAt: new Date().toISOString(),

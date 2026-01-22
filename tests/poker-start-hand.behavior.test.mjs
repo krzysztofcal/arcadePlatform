@@ -101,6 +101,15 @@ const run = async () => {
   assert.ok(updatedState.holeCardsByUserId, "state should include hole cards by user id");
   assert.ok(Array.isArray(updatedState.holeCardsByUserId[userId]), "caller should have hole cards stored");
   assert.equal(updatedState.holeCardsByUserId[userId].length, 2);
+  assert.equal(typeof updatedState.toCallByUserId, "object");
+  assert.equal(typeof updatedState.betThisRoundByUserId, "object");
+  assert.equal(typeof updatedState.actedThisRoundByUserId, "object");
+  assert.equal(typeof updatedState.foldedByUserId, "object");
+  assert.equal(typeof updatedState.lastActionRequestIdByUserId, "object");
+  assert.equal(updatedState.toCallByUserId[userId], 0);
+  assert.equal(updatedState.betThisRoundByUserId[userId], 0);
+  assert.equal(updatedState.actedThisRoundByUserId[userId], false);
+  assert.equal(updatedState.foldedByUserId[userId], false);
   assert.deepEqual(payload.myHoleCards, updatedState.holeCardsByUserId[userId]);
   assert.ok(
     queries.some((q) => q.query.toLowerCase().includes("insert into public.poker_actions")),
