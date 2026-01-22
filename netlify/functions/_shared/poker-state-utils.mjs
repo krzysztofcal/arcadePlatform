@@ -37,7 +37,9 @@ const validateCardsArray = (cards, options = {}) => {
   const keys = [];
   for (const card of cards) {
     if (!isValidCard(card)) return { ok: false, keys: [] };
-    keys.push(cardKey(card));
+    const key = cardKey(card);
+    if (!key) return { ok: false, keys: [] };
+    keys.push(key);
   }
   return { ok: true, keys };
 };
