@@ -98,6 +98,7 @@ const run = async () => {
   const updateCall = queries.find((q) => q.query.toLowerCase().includes("update public.poker_state"));
   assert.ok(updateCall, "expected update to poker_state");
   const updatedState = JSON.parse(updateCall.params?.[1] || "{}");
+  assert.ok(Array.isArray(updatedState.deck), "state should persist deck as an array");
   assert.ok(updatedState.holeCardsByUserId, "state should include hole cards by user id");
   assert.ok(Array.isArray(updatedState.holeCardsByUserId[userId]), "caller should have hole cards stored");
   assert.equal(updatedState.holeCardsByUserId[userId].length, 2);

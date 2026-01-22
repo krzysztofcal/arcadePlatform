@@ -163,6 +163,7 @@ export async function handler(event) {
 
       const deck = shuffle(createDeck(), rng);
       const dealResult = dealHoleCards(deck, validSeats.map((seat) => seat.user_id));
+      const remainingDeck = Array.isArray(dealResult?.deck) ? dealResult.deck : deck;
 
       const updatedState = {
         ...currentState,
@@ -180,7 +181,7 @@ export async function handler(event) {
         actedThisRoundByUserId,
         foldedByUserId,
         holeCardsByUserId: dealResult.holeCardsByUserId,
-        deck: dealResult.deck,
+        deck: remainingDeck,
         lastActionRequestIdByUserId: {},
         lastStartHandRequestId: requestIdParsed.value || null,
         lastStartHandUserId: auth.userId,
