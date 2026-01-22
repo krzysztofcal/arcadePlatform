@@ -177,9 +177,17 @@ const run = async () => {
   assert.equal(JSON.parse(invalidCall.response.body).error, "invalid_action");
 
   const corruptCalls = [];
+  const ranks = ["2", "3", "4", "5", "6", "7", "8", "9", "T", "J", "Q", "K", "A"];
+  const suits = ["S", "H", "D", "C"];
+  const allCards = [];
+  for (const r of ranks) {
+    for (const s of suits) {
+      allCards.push({ r, s });
+    }
+  }
   const corruptState = {
     ...baseState,
-    deck: Array.from({ length: 100 }).map((_v, idx) => ({ r: idx + 1, s: "S" })),
+    deck: allCards.slice(0, 53),
   };
   const corruptResponse = await runCase({
     state: corruptState,
@@ -197,6 +205,28 @@ const run = async () => {
     { requirePrivate: false }
   );
   assert.equal(storageCheck, true);
+
+  const unseatedCalls = [];
+  const unseatedState = {
+    ...baseState,
+    holeCardsByUserId: {
+      ...baseState.holeCardsByUserId,
+      "user-4": [
+        { r: "A", s: "H" },
+        { r: "K", s: "H" },
+      ],
+    },
+  };
+  const unseatedResponse = await runCase({
+    state: unseatedState,
+    action: { type: "CHECK" },
+    requestId: "req-unseated",
+    userId: "user-1",
+    klogCalls: unseatedCalls,
+  });
+  assert.equal(unseatedResponse.response.statusCode, 409);
+  assert.equal(JSON.parse(unseatedResponse.response.body).error, "state_invalid");
+  assert.ok(unseatedCalls.some((entry) => entry.kind === "poker_state_corrupt"));
 
   const handlerUser2 = makeHandler(queries, storedState, "user-2");
   const notTurn = await handlerUser2({
