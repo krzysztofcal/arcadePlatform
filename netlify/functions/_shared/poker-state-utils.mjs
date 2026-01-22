@@ -28,7 +28,11 @@ const isValidCard = (card) => {
   return false;
 };
 
-const cardKey = (card) => `${rankKey(card.r)}${card.s}`;
+const cardKey = (card) => {
+  const r = rankKey(card.r);
+  if (!r) return "";
+  return `${r}${card.s}`;
+};
 
 const validateCardsArray = (cards, options = {}) => {
   if (!Array.isArray(cards)) return { ok: false, keys: [] };
