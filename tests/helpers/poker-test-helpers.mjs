@@ -21,19 +21,6 @@ const getDeclaredIdentifiers = (src) => {
       if (left) declared.add(left);
     }
   }
-  const exportList = /\bexport\s*\{\s*([^}]+)\s*\}\s*;?/g;
-  let exportMatch;
-  while ((exportMatch = exportList.exec(src))) {
-    for (const part of exportMatch[1].split(",")) {
-      const name = part.trim().split(/\s+as\s+/)[0].trim();
-      if (name) declared.add(name);
-    }
-  }
-  const exportDefault = /\bexport\s+default\s+([A-Za-z_$][\w$]*)\b/g;
-  let defMatch;
-  while ((defMatch = exportDefault.exec(src))) {
-    declared.add(defMatch[1]);
-  }
   return declared;
 };
 

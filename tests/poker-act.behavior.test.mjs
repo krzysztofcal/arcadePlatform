@@ -67,8 +67,10 @@ const makeHandler = (queries, storedState, userId, options = {}) =>
             return [{ id: tableId, status: "OPEN" }];
           }
           if (text.includes("from public.poker_seats")) {
-            const userParam = params?.[1];
-            if (userParam === userId) return [{ user_id: userId }];
+            const hasActive = text.includes("status = 'active'");
+            const hasUserFilter = text.includes("user_id = $2");
+            const okParams = Array.isArray(params) && params.length >= 2 && params[0] === tableId && params[1] === userId;
+            if (hasActive && hasUserFilter && okParams) return [{ user_id: userId }];
             return [];
           }
           if (text.includes("from public.poker_state")) {
