@@ -82,6 +82,9 @@ const makeHandler = (queries, storedState, holeCardsStore, userId, options = {})
             storedState.version += 1;
             return [{ version: storedState.version }];
           }
+          if (text.includes("delete from public.poker_hole_cards")) {
+            return [{ ok: true }];
+          }
           if (text.includes("insert into public.poker_actions")) {
             return [{ ok: true }];
           }
@@ -352,6 +355,50 @@ const run = async () => {
   assert.equal(replayPayload.replayed, true);
   const updateCountAfterReplay = queries.filter((entry) => entry.query.toLowerCase().includes("update public.poker_state")).length;
   assert.equal(updateCountAfterReplay, updateCountBeforeReplay);
+
+  const cleanupState = {
+    ...baseState,
+    phase: "PREFLOP",
+    seats: [
+      { userId: "user-1", seatNo: 1 },
+      { userId: "user-2", seatNo: 2 },
+    ],
+    stacks: { "user-1": 100, "user-2": 100 },
+    toCallByUserId: { "user-1": 0, "user-2": 0 },
+    betThisRoundByUserId: { "user-1": 0, "user-2": 0 },
+    actedThisRoundByUserId: { "user-1": false, "user-2": false },
+    foldedByUserId: { "user-1": false, "user-2": false },
+    turnUserId: "user-1",
+  };
+  const cleanupHoleCardsStore = new Map();
+  cleanupHoleCardsStore.set(
+    `${tableId}|${cleanupState.handId}|user-1`,
+    [{ r: "A", s: "S" }, { r: "K", s: "S" }]
+  );
+  cleanupHoleCardsStore.set(
+    `${tableId}|${cleanupState.handId}|user-2`,
+    [{ r: "Q", s: "H" }, { r: "J", s: "H" }]
+  );
+  const cleanupQueries = [];
+  const cleanupStoredState = { value: JSON.stringify(cleanupState), version: 10 };
+  const cleanupLogs = [];
+  const handlerCleanup = makeHandler(cleanupQueries, cleanupStoredState, cleanupHoleCardsStore, "user-1", {
+    klog: (kind, data) => cleanupLogs.push({ kind, data }),
+  });
+  const cleanupResponse = await handlerCleanup({
+    httpMethod: "POST",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    body: JSON.stringify({ tableId, requestId: "req-cleanup", action: { type: "FOLD" } }),
+  });
+  assert.equal(cleanupResponse.statusCode, 200);
+  assert.ok(
+    cleanupQueries.some((entry) => entry.query.toLowerCase().includes("delete from public.poker_hole_cards")),
+    "expected hole cards cleanup delete"
+  );
+  assert.ok(
+    cleanupLogs.some((entry) => entry.kind === "poker_hole_cards_cleaned"),
+    "expected cleanup log"
+  );
 
   const handlerUser2Turn = makeHandler(queries, storedState, holeCardsStore, "user-2");
   const user2Check = await handlerUser2Turn({

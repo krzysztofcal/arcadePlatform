@@ -80,13 +80,13 @@ const getHandId = (state) => {
   return value ? value : null;
 };
 
-const maybeCleanupHoleCards = async (tx, prevState, nextState, tableId) => {
+const maybeCleanupHoleCards = async (tx, prevState, nextState, tableId, log) => {
   const prevHandId = getHandId(prevState);
   const nextHandId = getHandId(nextState);
   if (!prevHandId || !nextHandId) return;
   if (prevState?.phase !== "HAND_DONE" && nextState?.phase === "HAND_DONE") {
     await tx.unsafe("delete from public.poker_hole_cards where table_id = $1 and hand_id = $2;", [tableId, nextHandId]);
-    klog("poker_hole_cards_cleaned", { tableId, handId: nextHandId });
+    if (typeof log === "function") log("poker_hole_cards_cleaned", { tableId, handId: nextHandId });
   }
 };
 
@@ -368,7 +368,6 @@ export async function handler(event) {
         throw makeError(409, "state_invalid");
       }
 
-      await maybeCleanupHoleCards(tx, currentState, updatedState, tableId);
 
       const updateRows = await tx.unsafe(
         "update public.poker_state set version = version + 1, state = $2::jsonb, updated_at = now() where table_id = $1 returning version;",
@@ -384,6 +383,8 @@ export async function handler(event) {
         });
         throw makeError(409, "state_invalid");
       }
+
+      await maybeCleanupHoleCards(tx, currentState, updatedState, tableId, klog);
 
       await tx.unsafe(
         "insert into public.poker_actions (table_id, version, user_id, action_type, amount) values ($1, $2, $3, $4, $5);",
