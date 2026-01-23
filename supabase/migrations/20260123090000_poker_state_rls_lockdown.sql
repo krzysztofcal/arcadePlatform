@@ -17,6 +17,6 @@ begin
     where schemaname = 'public'
       and tablename = 'poker_state'
   loop
-    execute format('drop policy if exists %I on public.poker_state;', pol.polname);
+    execute format('drop policy if exists %I on %I.%I;', pol.polname, 'public', 'poker_state');
   end loop;
 end $$;

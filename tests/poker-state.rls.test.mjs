@@ -3,16 +3,23 @@ import fs from "node:fs";
 import path from "node:path";
 
 const migrationsDir = path.join(process.cwd(), "supabase", "migrations");
-const migrationFiles = fs.readdirSync(migrationsDir).filter((file) => file.endsWith(".sql"));
+const migrationFiles = fs
+  .readdirSync(migrationsDir)
+  .filter((file) => file.endsWith(".sql"))
+  .sort();
 
-let lockdownFile = "";
+let lockdownFile = migrationFiles.find((file) => file.includes("poker_state_rls_lockdown")) || "";
 let lockdownText = "";
-for (const file of migrationFiles) {
-  const text = fs.readFileSync(path.join(migrationsDir, file), "utf8");
-  if (text.toLowerCase().includes("alter table public.poker_state enable row level security")) {
-    lockdownFile = file;
-    lockdownText = text.toLowerCase();
-    break;
+if (lockdownFile) {
+  lockdownText = fs.readFileSync(path.join(migrationsDir, lockdownFile), "utf8").toLowerCase();
+} else {
+  for (const file of migrationFiles) {
+    const text = fs.readFileSync(path.join(migrationsDir, file), "utf8");
+    if (text.toLowerCase().includes("alter table public.poker_state enable row level security")) {
+      lockdownFile = file;
+      lockdownText = text.toLowerCase();
+      break;
+    }
   }
 }
 
