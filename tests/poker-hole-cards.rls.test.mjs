@@ -37,6 +37,10 @@ assert.ok(
   normalized.includes("revoke all on table public.poker_hole_cards from authenticated"),
   "migration should revoke authenticated grants on poker_hole_cards"
 );
+assert.ok(
+  normalized.includes("grant select, insert, update, delete on table public.poker_hole_cards to service_role"),
+  "migration should grant service_role access to poker_hole_cards"
+);
 const hasUniqueConstraint = normalized.includes("unique (table_id, hand_id, user_id)");
 const hasUniqueIndex = /unique\s+index[\s\S]*\(\s*table_id\s*,\s*hand_id\s*,\s*user_id\s*\)/.test(normalized);
 assert.ok(hasUniqueConstraint || hasUniqueIndex, "migration should enforce unique table_id/hand_id/user_id");

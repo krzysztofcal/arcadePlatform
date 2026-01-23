@@ -249,7 +249,7 @@ export async function handler(event) {
           idx += 4;
         }
         await tx.unsafe(
-          `insert into public.poker_hole_cards (table_id, hand_id, user_id, cards) values ${inserts.join(", ")};`,
+          `insert into public.poker_hole_cards (table_id, hand_id, user_id, cards) values ${inserts.join(", ")} on conflict (table_id, hand_id, user_id) do update set cards = excluded.cards;`,
           params
         );
       }

@@ -33,6 +33,10 @@ assert.ok(
   "poker_state RLS migration should revoke authenticated grants"
 );
 assert.ok(
+  lockdownText.includes("grant select, insert, update, delete on table public.poker_state to service_role"),
+  "poker_state RLS migration should grant service_role access"
+);
+assert.ok(
   lockdownText.includes("from pg_policies") && lockdownText.includes("drop policy"),
   "poker_state RLS migration should drop existing policies"
 );
