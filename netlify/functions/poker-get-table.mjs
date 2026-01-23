@@ -105,6 +105,7 @@ export async function handler(event) {
           throw makeError(409, "state_invalid");
         }
       }
+      if (!isActionPhase(normalizedState.phase)) myHoleCards = [];
 
       const seats = Array.isArray(seatRows)
         ? seatRows.map((seat) => ({

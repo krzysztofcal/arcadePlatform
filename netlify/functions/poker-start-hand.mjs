@@ -35,6 +35,8 @@ const normalizeVersion = (value) => {
   return Number.isFinite(num) ? num : null;
 };
 
+const isActionPhase = (phase) => phase === "PREFLOP" || phase === "FLOP" || phase === "TURN" || phase === "RIVER";
+
 export async function handler(event) {
   const origin = event.headers?.origin || event.headers?.Origin;
   const cors = corsHeaders(origin);
@@ -128,7 +130,7 @@ export async function handler(event) {
       const sameRequest =
         currentState.lastStartHandRequestId === requestIdParsed.value && currentState.lastStartHandUserId === auth.userId;
       if (sameRequest) {
-        if (currentState.phase === "PREFLOP" && typeof currentState.handId === "string" && currentState.handId.trim()) {
+        if (isActionPhase(currentState.phase) && typeof currentState.handId === "string" && currentState.handId.trim()) {
           const holeRows = await tx.unsafe(
             "select cards from public.poker_hole_cards where table_id = $1 and hand_id = $2 and user_id = $3 limit 1;",
             [tableId, currentState.handId, auth.userId]
@@ -266,7 +268,9 @@ export async function handler(event) {
         tableId,
         version: newVersion,
         state: withoutPrivateState(updatedState),
-        myHoleCards: holeCardValues.find((entry) => entry.userId === auth.userId)?.cards || [],
+        myHoleCards: isActionPhase(updatedState.phase)
+          ? holeCardValues.find((entry) => entry.userId === auth.userId)?.cards || []
+          : [],
         replayed: false,
       };
     });

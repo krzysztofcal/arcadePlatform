@@ -246,3 +246,32 @@ const runInvalidDeal = async () => {
 
 await run();
 await runInvalidDeal();
+
+const runReplayNotActionPhase = async () => {
+  const queries = [];
+  const storedState = {
+    value: JSON.stringify({
+      tableId,
+      handId: "hand-closed",
+      phase: "HAND_DONE",
+      lastStartHandRequestId: "req-closed",
+      lastStartHandUserId: userId,
+      seats: [
+        { userId: "user-1", seatNo: 1 },
+        { userId: "user-2", seatNo: 3 },
+      ],
+    }),
+  };
+  const holeCardsStore = new Map();
+  const handler = makeHandler(queries, storedState, holeCardsStore);
+  const response = await handler({
+    httpMethod: "POST",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    body: JSON.stringify({ tableId, requestId: "req-closed" }),
+  });
+  assert.equal(response.statusCode, 409);
+  const payload = JSON.parse(response.body);
+  assert.equal(payload.error, "state_invalid");
+};
+
+await runReplayNotActionPhase();

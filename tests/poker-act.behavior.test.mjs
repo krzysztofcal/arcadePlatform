@@ -439,6 +439,9 @@ const run = async () => {
     body: JSON.stringify({ tableId, requestId: "req-cleanup", action: { type: "CHECK" } }),
   });
   assert.equal(cleanupResponse.statusCode, 200);
+  const cleanupPayload = JSON.parse(cleanupResponse.body);
+  assert.ok(Array.isArray(cleanupPayload.myHoleCards));
+  assert.equal(cleanupPayload.myHoleCards.length, 0, "HAND_DONE response must not include hole cards");
   assert.ok(
     cleanupQueries.some((entry) => entry.query.toLowerCase().includes("delete from public.poker_hole_cards")),
     "expected hole cards cleanup delete"

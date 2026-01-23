@@ -90,6 +90,8 @@ const maybeCleanupHoleCards = async (tx, prevState, nextState, tableId, log) => 
   }
 };
 
+const shouldReturnHoleCards = ({ phase, authUserId, seat }) => Boolean(authUserId && seat && isActionPhase(phase));
+
 const loadMyHoleCards = async (tx, { state, phase, tableId, userId, log }) => {
   const handId = getHandId(state);
   if (!handId) {
@@ -261,13 +263,15 @@ export async function handler(event) {
           });
           throw makeError(409, "state_invalid");
         }
-        const myHoleCards = await loadMyHoleCards(tx, {
-          state: currentState,
-          phase: currentState.phase,
-          tableId,
-          userId: auth.userId,
-          log: klog,
-        });
+        const myHoleCards = shouldReturnHoleCards({ phase: currentState.phase, authUserId: auth.userId, seat })
+          ? await loadMyHoleCards(tx, {
+              state: currentState,
+              phase: currentState.phase,
+              tableId,
+              userId: auth.userId,
+              log: klog,
+            })
+          : [];
         return {
           tableId,
           version,
@@ -301,13 +305,15 @@ export async function handler(event) {
         throw makeError(400, "invalid_action");
       }
 
-      const myHoleCards = await loadMyHoleCards(tx, {
-        state: currentState,
-        phase: currentState.phase,
-        tableId,
-        userId: auth.userId,
-        log: klog,
-      });
+      const myHoleCards = shouldReturnHoleCards({ phase: currentState.phase, authUserId: auth.userId, seat })
+        ? await loadMyHoleCards(tx, {
+            state: currentState,
+            phase: currentState.phase,
+            tableId,
+            userId: auth.userId,
+            log: klog,
+          })
+        : [];
 
       let applied;
       try {
@@ -397,6 +403,7 @@ export async function handler(event) {
         throw makeError(409, "state_invalid");
       }
 
+      const endedHand = currentState?.phase !== "HAND_DONE" && updatedState?.phase === "HAND_DONE";
       await maybeCleanupHoleCards(tx, currentState, updatedState, tableId, klog);
 
       await tx.unsafe(
@@ -428,7 +435,7 @@ export async function handler(event) {
         tableId,
         version: newVersion,
         state: withoutPrivateState(updatedState),
-        myHoleCards,
+        myHoleCards: !endedHand && isActionPhase(updatedState.phase) ? myHoleCards : [],
         events,
         replayed: false,
       };
