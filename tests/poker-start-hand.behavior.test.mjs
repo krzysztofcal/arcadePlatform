@@ -44,6 +44,7 @@ const makeHandler = (queries, storedState, holeCardsStore, overrides = {}) =>
             return [{ id: tableId, status: "OPEN", max_players: 6 }];
           }
           if (text.includes("from public.poker_state")) {
+            assert.ok(text.includes("for update"), "poker-start-hand must lock poker_state row (FOR UPDATE)");
             if (storedState.value) {
               return [{ version: 2, state: JSON.parse(storedState.value) }];
             }
@@ -165,7 +166,10 @@ const run = async () => {
   assert.equal(replayPayload.state.version, payload.state.version);
   assert.equal(replayPayload.state.state.phase, "PREFLOP");
   assert.ok(Array.isArray(replayPayload.myHoleCards));
-  assert.equal(replayPayload.myHoleCards.length, 2);
+  assert.equal(replayPayload.myHoleCards.length, 0, "cheap replay returns no hole cards");
+  const replayNorm = queries.map((q) => String(q.query).toLowerCase());
+  const holeSelectCount = replayNorm.filter((q) => q.includes("from public.poker_hole_cards")).length;
+  assert.equal(holeSelectCount, 0, "start-hand replay must not query poker_hole_cards");
 
   const differentResponse = await handler({
     httpMethod: "POST",

@@ -144,6 +144,11 @@ export async function handler(event) {
     };
   }
 
+  const isValidTwoCards = (cards) => {
+    if (!Array.isArray(cards) || cards.length !== 2) return false;
+    return cards.every((card) => card && typeof card === "object" && typeof card.r === "string" && typeof card.s === "string");
+  };
+
   const loadMyHoleCards = async (tx, state, phase, tableId, userId) => {
     const handId = getHandId(state);
     if (!handId) {
@@ -158,9 +163,9 @@ export async function handler(event) {
       [tableId, handId, userId]
     );
     const holeCards = holeRows?.[0]?.cards;
-    if (!Array.isArray(holeCards)) {
+    if (!isValidTwoCards(holeCards)) {
       if (isActionPhase(phase)) {
-        klog("poker_state_corrupt", { tableId, phase, reason: "missing_hole_cards" });
+        klog("poker_state_corrupt", { tableId, phase, reason: "invalid_hole_cards_shape" });
         throw makeError(409, "state_invalid");
       }
       return [];

@@ -80,9 +80,10 @@ const makeHandler = (queries, storedState, holeCardsStore, userId, options = {})
           if (text.includes("delete from public.poker_hole_cards")) {
             const tId = String(params?.[0] ?? "");
             const hId = String(params?.[1] ?? "");
+            assert.ok(tId && hId, "expected delete to include table_id and hand_id params");
             const prefix = `${tId}|${hId}|`;
             for (const key of Array.from(holeCardsStore.keys())) {
-              if (!tId || !hId || String(key).startsWith(prefix)) holeCardsStore.delete(key);
+              if (String(key).startsWith(prefix)) holeCardsStore.delete(key);
             }
             return [{ ok: true }];
           }
@@ -412,9 +413,10 @@ const run = async () => {
           if (text.includes("delete from public.poker_hole_cards")) {
             const tId = String(params?.[0] ?? "");
             const hId = String(params?.[1] ?? "");
+            assert.ok(tId && hId, "expected delete to include table_id and hand_id params");
             const prefix = `${tId}|${hId}|`;
             for (const key of Array.from(cleanupHoleCardsStore.keys())) {
-              if (!tId || !hId || String(key).startsWith(prefix)) cleanupHoleCardsStore.delete(key);
+              if (String(key).startsWith(prefix)) cleanupHoleCardsStore.delete(key);
             }
             return [{ ok: true }];
           }

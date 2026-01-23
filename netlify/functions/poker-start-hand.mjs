@@ -128,20 +128,12 @@ export async function handler(event) {
         currentState.lastStartHandRequestId === requestIdParsed.value && currentState.lastStartHandUserId === auth.userId;
       if (sameRequest) {
         if (currentState.phase === "PREFLOP" && typeof currentState.handId === "string" && currentState.handId.trim()) {
-          const holeRows = await tx.unsafe(
-            "select cards from public.poker_hole_cards where table_id = $1 and hand_id = $2 and user_id = $3 limit 1;",
-            [tableId, currentState.handId, auth.userId]
-          );
-          const holeCards = holeRows?.[0]?.cards;
-          if (!Array.isArray(holeCards)) {
-            klog("poker_state_corrupt", { tableId, phase: currentState.phase, reason: "missing_hole_cards" });
-            throw makeError(409, "state_invalid");
-          }
           return {
             tableId,
             version: normalizeVersion(stateRow.version),
             state: withoutPrivateState(currentState),
-            myHoleCards: holeCards,
+            myHoleCards: [],
+            replayed: true,
           };
         }
         throw makeError(409, "state_invalid");
@@ -264,6 +256,7 @@ export async function handler(event) {
         version: newVersion,
         state: withoutPrivateState(updatedState),
         myHoleCards: holeCardValues.find((entry) => entry.userId === auth.userId)?.cards || [],
+        replayed: false,
       };
     });
 
@@ -278,6 +271,7 @@ export async function handler(event) {
           state: result.state,
         },
         myHoleCards: result.myHoleCards,
+        replayed: Boolean(result.replayed),
       }),
     };
   } catch (error) {
