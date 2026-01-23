@@ -230,15 +230,6 @@ export async function handler(event) {
         throw makeError(409, "state_invalid");
       }
 
-      const updateRows = await tx.unsafe(
-        "update public.poker_state set version = version + 1, state = $2::jsonb, updated_at = now() where table_id = $1 returning version;",
-        [tableId, JSON.stringify(updatedState)]
-      );
-      const newVersion = normalizeVersion(updateRows?.[0]?.version);
-      if (newVersion == null) {
-        throw makeError(409, "state_invalid");
-      }
-
       if (holeCardValues.length > 0) {
         const inserts = [];
         const params = [];
@@ -252,6 +243,15 @@ export async function handler(event) {
           `insert into public.poker_hole_cards (table_id, hand_id, user_id, cards) values ${inserts.join(", ")} on conflict (table_id, hand_id, user_id) do update set cards = excluded.cards;`,
           params
         );
+      }
+
+      const updateRows = await tx.unsafe(
+        "update public.poker_state set version = version + 1, state = $2::jsonb, updated_at = now() where table_id = $1 returning version;",
+        [tableId, JSON.stringify(updatedState)]
+      );
+      const newVersion = normalizeVersion(updateRows?.[0]?.version);
+      if (newVersion == null) {
+        throw makeError(409, "state_invalid");
       }
 
       await tx.unsafe(

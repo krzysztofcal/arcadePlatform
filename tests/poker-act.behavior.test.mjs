@@ -318,6 +318,9 @@ const run = async () => {
   assert.equal(JSON.stringify(user1Payload).includes('"deck"'), false);
 
   const updateCountBeforeReplay = queries.filter((entry) => entry.query.toLowerCase().includes("update public.poker_state")).length;
+  const holeCardsSelectCountBeforeReplay = queries.filter((entry) =>
+    entry.query.toLowerCase().includes("from public.poker_hole_cards")
+  ).length;
   const replayResponse = await handlerUser1({
     httpMethod: "POST",
     headers: { origin: "https://example.test", authorization: "Bearer token" },
@@ -326,8 +329,18 @@ const run = async () => {
   assert.equal(replayResponse.statusCode, 200);
   const replayPayload = JSON.parse(replayResponse.body);
   assert.equal(replayPayload.replayed, true);
+  assert.equal(Array.isArray(replayPayload.myHoleCards), true);
+  assert.equal(replayPayload.myHoleCards.length, 0, "cheap replay returns no hole cards");
   const updateCountAfterReplay = queries.filter((entry) => entry.query.toLowerCase().includes("update public.poker_state")).length;
   assert.equal(updateCountAfterReplay, updateCountBeforeReplay);
+  const holeCardsSelectCountAfterReplay = queries.filter((entry) =>
+    entry.query.toLowerCase().includes("from public.poker_hole_cards")
+  ).length;
+  assert.equal(
+    holeCardsSelectCountAfterReplay,
+    holeCardsSelectCountBeforeReplay,
+    "replay must not query poker_hole_cards"
+  );
 
   const cleanupState = {
     ...baseState,

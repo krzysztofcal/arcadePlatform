@@ -57,6 +57,14 @@ const makeHandler = (queries, storedState, holeCardsStore, overrides = {}) =>
             ];
           }
           if (text.includes("insert into public.poker_hole_cards")) {
+            assert.ok(
+              text.includes("on conflict"),
+              "expected poker_hole_cards insert to be idempotent (ON CONFLICT)"
+            );
+            assert.ok(
+              text.includes("on conflict (table_id, hand_id, user_id)"),
+              "expected ON CONFLICT target (table_id, hand_id, user_id)"
+            );
             for (let idx = 0; idx < params.length; idx += 4) {
               const key = `${params[idx]}|${params[idx + 1]}|${params[idx + 2]}`;
               holeCardsStore.set(key, JSON.parse(params[idx + 3] || "[]"));
