@@ -1,5 +1,12 @@
 import assert from "node:assert/strict";
 import { createDeck, dealHoleCards, shuffle } from "../netlify/functions/_shared/poker-engine.mjs";
+import {
+  getRng,
+  isPlainObject,
+  isStateStorageValid,
+  normalizeJsonState,
+  withoutPrivateState,
+} from "../netlify/functions/_shared/poker-state-utils.mjs";
 import { loadPokerHandler } from "./helpers/poker-test-helpers.mjs";
 
 const tableId = "11111111-1111-4111-8111-111111111111";
@@ -20,9 +27,14 @@ const makeHandler = (queries, storedState) =>
     createDeck,
     dealHoleCards,
     extractBearerToken: () => "token",
+    getRng,
+    isPlainObject,
+    isStateStorageValid,
     shuffle,
     verifySupabaseJwt: async () => ({ valid: true, userId }),
     isValidUuid: () => true,
+    normalizeJsonState,
+    withoutPrivateState,
     beginSql: async (fn) =>
       fn({
         unsafe: async (query, params) => {
@@ -86,9 +98,23 @@ const run = async () => {
   const updateCall = queries.find((q) => q.query.toLowerCase().includes("update public.poker_state"));
   assert.ok(updateCall, "expected update to poker_state");
   const updatedState = JSON.parse(updateCall.params?.[1] || "{}");
+  assert.ok(Array.isArray(updatedState.deck), "state should persist deck as an array");
   assert.ok(updatedState.holeCardsByUserId, "state should include hole cards by user id");
   assert.ok(Array.isArray(updatedState.holeCardsByUserId[userId]), "caller should have hole cards stored");
   assert.equal(updatedState.holeCardsByUserId[userId].length, 2);
+  assert.equal(typeof updatedState.toCallByUserId, "object");
+  assert.equal(typeof updatedState.betThisRoundByUserId, "object");
+  assert.equal(typeof updatedState.actedThisRoundByUserId, "object");
+  assert.equal(typeof updatedState.foldedByUserId, "object");
+  assert.equal(typeof updatedState.lastActionRequestIdByUserId, "object");
+  assert.equal(typeof updatedState.stacks, "object");
+  if (Object.prototype.hasOwnProperty.call(updatedState.stacks, userId)) {
+    assert.equal(typeof updatedState.stacks[userId], "number");
+  }
+  assert.equal(updatedState.toCallByUserId[userId], 0);
+  assert.equal(updatedState.betThisRoundByUserId[userId], 0);
+  assert.equal(updatedState.actedThisRoundByUserId[userId], false);
+  assert.equal(updatedState.foldedByUserId[userId], false);
   assert.deepEqual(payload.myHoleCards, updatedState.holeCardsByUserId[userId]);
   assert.ok(
     queries.some((q) => q.query.toLowerCase().includes("insert into public.poker_actions")),

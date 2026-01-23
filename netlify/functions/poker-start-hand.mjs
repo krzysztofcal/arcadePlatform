@@ -1,5 +1,6 @@
 import { baseHeaders, beginSql, corsHeaders, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
 import { createDeck, dealHoleCards, shuffle } from "./_shared/poker-engine.mjs";
+import { getRng, isPlainObject, isStateStorageValid, normalizeJsonState, withoutPrivateState } from "./_shared/poker-state-utils.mjs";
 import { isValidUuid } from "./_shared/poker-utils.mjs";
 
 const parseBody = (body) => {
@@ -10,9 +11,6 @@ const parseBody = (body) => {
     return { ok: false, value: null };
   }
 };
-
-const isPlainObject = (value) =>
-  value !== null && typeof value === "object" && !Array.isArray(value) && Object.getPrototypeOf(value) === Object.prototype;
 
 const makeError = (status, code) => {
   const err = new Error(code);
@@ -29,19 +27,6 @@ const parseRequestId = (value) => {
   return { ok: true, value: trimmed };
 };
 
-const normalizeState = (value) => {
-  if (!value) return {};
-  if (typeof value === "string") {
-    try {
-      return JSON.parse(value);
-    } catch {
-      return {};
-    }
-  }
-  if (typeof value === "object") return value;
-  return {};
-};
-
 const parseStacks = (value) => (value && typeof value === "object" && !Array.isArray(value) ? value : {});
 
 const normalizeVersion = (value) => {
@@ -49,21 +34,10 @@ const normalizeVersion = (value) => {
   return Number.isFinite(num) ? num : null;
 };
 
-const getRng = () => {
-  const testRng = globalThis.__TEST_RNG__;
-  return typeof testRng === "function" ? testRng : Math.random;
-};
-
-const withoutHoleCards = (state) => {
-  if (!state || typeof state !== "object" || Array.isArray(state)) return state;
-  if (!Object.prototype.hasOwnProperty.call(state, "holeCardsByUserId")) return state;
-  const { holeCardsByUserId, ...rest } = state;
-  return rest;
-};
-
 export async function handler(event) {
   const origin = event.headers?.origin || event.headers?.Origin;
   const cors = corsHeaders(origin);
+  const mergeHeaders = (next) => ({ ...baseHeaders(), ...(next || {}) });
   if (!cors) {
     const headers = {
       ...baseHeaders(),
@@ -78,37 +52,41 @@ export async function handler(event) {
     };
   }
   if (event.httpMethod === "OPTIONS") {
-    return { statusCode: 204, headers: cors, body: "" };
+    return { statusCode: 204, headers: mergeHeaders(cors), body: "" };
   }
   if (event.httpMethod !== "POST") {
-    return { statusCode: 405, headers: cors, body: JSON.stringify({ error: "method_not_allowed" }) };
+    return { statusCode: 405, headers: mergeHeaders(cors), body: JSON.stringify({ error: "method_not_allowed" }) };
   }
 
   const parsed = parseBody(event.body);
   if (!parsed.ok) {
-    return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "invalid_json" }) };
+    return { statusCode: 400, headers: mergeHeaders(cors), body: JSON.stringify({ error: "invalid_json" }) };
   }
 
   const payload = parsed.value ?? {};
   if (payload && !isPlainObject(payload)) {
-    return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "invalid_payload" }) };
+    return { statusCode: 400, headers: mergeHeaders(cors), body: JSON.stringify({ error: "invalid_payload" }) };
   }
 
   const tableIdValue = payload?.tableId;
   const tableId = typeof tableIdValue === "string" ? tableIdValue.trim() : "";
   if (!tableId || !isValidUuid(tableId)) {
-    return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "invalid_table_id" }) };
+    return { statusCode: 400, headers: mergeHeaders(cors), body: JSON.stringify({ error: "invalid_table_id" }) };
   }
 
   const requestIdParsed = parseRequestId(payload?.requestId);
   if (!requestIdParsed.ok) {
-    return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "invalid_request_id" }) };
+    return { statusCode: 400, headers: mergeHeaders(cors), body: JSON.stringify({ error: "invalid_request_id" }) };
   }
 
   const token = extractBearerToken(event.headers);
   const auth = await verifySupabaseJwt(token);
   if (!auth.valid || !auth.userId) {
-    return { statusCode: 401, headers: cors, body: JSON.stringify({ error: "unauthorized", reason: auth.reason }) };
+    return {
+      statusCode: 401,
+      headers: mergeHeaders(cors),
+      body: JSON.stringify({ error: "unauthorized", reason: auth.reason }),
+    };
   }
 
   try {
@@ -131,7 +109,7 @@ export async function handler(event) {
         throw new Error("poker_state_missing");
       }
 
-      const currentState = normalizeState(stateRow.state);
+      const currentState = normalizeJsonState(stateRow.state);
 
       const seatRows = await tx.unsafe(
         "select user_id, seat_no from public.poker_seats where table_id = $1 and status = 'ACTIVE' order by seat_no asc;",
@@ -153,7 +131,7 @@ export async function handler(event) {
           return {
             tableId,
             version: normalizeVersion(stateRow.version),
-            state: withoutHoleCards(currentState),
+            state: withoutPrivateState(currentState),
             myHoleCards: currentState.holeCardsByUserId?.[auth.userId] || [],
           };
         }
@@ -171,16 +149,22 @@ export async function handler(event) {
       const handId = `hand_${Date.now()}_${Math.floor(rng() * 1e6)}`;
       const derivedSeats = validSeats.map((seat) => ({ userId: seat.user_id, seatNo: seat.seat_no }));
       const activeUserIds = new Set(validSeats.map((seat) => seat.user_id));
+      const activeUserIdList = validSeats.map((seat) => seat.user_id);
       const currentStacks = parseStacks(currentState.stacks);
-      const nextStacks = Object.entries(currentStacks).reduce((acc, [userId, amount]) => {
-        if (activeUserIds.has(userId)) {
-          acc[userId] = amount;
-        }
+      const nextStacks = activeUserIdList.reduce((acc, userId) => {
+        if (!Object.prototype.hasOwnProperty.call(currentStacks, userId)) return acc;
+        const n = Number(currentStacks[userId]);
+        if (Number.isFinite(n) && Number.isInteger(n) && n >= 0) acc[userId] = n;
         return acc;
       }, {});
+      const toCallByUserId = Object.fromEntries(activeUserIdList.map((userId) => [userId, 0]));
+      const betThisRoundByUserId = Object.fromEntries(activeUserIdList.map((userId) => [userId, 0]));
+      const actedThisRoundByUserId = Object.fromEntries(activeUserIdList.map((userId) => [userId, false]));
+      const foldedByUserId = Object.fromEntries(activeUserIdList.map((userId) => [userId, false]));
 
       const deck = shuffle(createDeck(), rng);
       const dealResult = dealHoleCards(deck, validSeats.map((seat) => seat.user_id));
+      const remainingDeck = Array.isArray(dealResult?.deck) ? dealResult.deck : deck;
 
       const updatedState = {
         ...currentState,
@@ -193,11 +177,22 @@ export async function handler(event) {
         stacks: nextStacks,
         dealerSeatNo,
         turnUserId,
+        toCallByUserId,
+        betThisRoundByUserId,
+        actedThisRoundByUserId,
+        foldedByUserId,
         holeCardsByUserId: dealResult.holeCardsByUserId,
+        deck: remainingDeck,
+        lastActionRequestIdByUserId: {},
         lastStartHandRequestId: requestIdParsed.value || null,
         lastStartHandUserId: auth.userId,
         startedAt: new Date().toISOString(),
       };
+
+      if (!isStateStorageValid(updatedState, { requirePrivate: true })) {
+        klog("poker_state_corrupt", { tableId, phase: updatedState.phase });
+        throw makeError(409, "state_invalid");
+      }
 
       const updateRows = await tx.unsafe(
         "update public.poker_state set version = version + 1, state = $2::jsonb, updated_at = now() where table_id = $1 returning version;",
@@ -216,14 +211,14 @@ export async function handler(event) {
       return {
         tableId,
         version: newVersion,
-        state: withoutHoleCards(updatedState),
+        state: withoutPrivateState(updatedState),
         myHoleCards: dealResult.holeCardsByUserId[auth.userId] || [],
       };
     });
 
     return {
       statusCode: 200,
-      headers: cors,
+      headers: mergeHeaders(cors),
       body: JSON.stringify({
         ok: true,
         tableId: result.tableId,
@@ -236,9 +231,9 @@ export async function handler(event) {
     };
   } catch (error) {
     if (error?.status && error?.code) {
-      return { statusCode: error.status, headers: cors, body: JSON.stringify({ error: error.code }) };
+      return { statusCode: error.status, headers: mergeHeaders(cors), body: JSON.stringify({ error: error.code }) };
     }
     klog("poker_start_hand_error", { message: error?.message || "unknown_error" });
-    return { statusCode: 500, headers: cors, body: JSON.stringify({ error: "server_error" }) };
+    return { statusCode: 500, headers: mergeHeaders(cors), body: JSON.stringify({ error: "server_error" }) };
   }
 }
