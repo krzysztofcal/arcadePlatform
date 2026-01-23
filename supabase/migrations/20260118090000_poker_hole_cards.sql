@@ -14,8 +14,3 @@ alter table public.poker_hole_cards enable row level security;
 -- Defense-in-depth: prevent any direct client access.
 revoke all on table public.poker_hole_cards from anon;
 revoke all on table public.poker_hole_cards from authenticated;
-
-create policy poker_hole_cards_select_own
-  on public.poker_hole_cards
-  for select
-  using (auth.uid() = user_id);

@@ -231,7 +231,7 @@ export async function handler(event) {
         throw makeError(403, "not_allowed");
       }
 
-      await loadMyHoleCards(tx, currentState, currentState.phase, tableId, auth.userId);
+      const myHoleCards = await loadMyHoleCards(tx, currentState, currentState.phase, tableId, auth.userId);
 
       if (lastByUserId[auth.userId] === requestId) {
         const version = Number(stateRow.version);
@@ -244,12 +244,11 @@ export async function handler(event) {
           });
           throw makeError(409, "state_invalid");
         }
-        const holeCards = await loadMyHoleCards(tx, currentState, currentState.phase, tableId, auth.userId);
         return {
           tableId,
           version,
           state: withoutPrivateState(currentState),
-          myHoleCards: holeCards,
+          myHoleCards,
           events: [],
           replayed: true,
         };
@@ -390,13 +389,11 @@ export async function handler(event) {
         newVersion,
       });
 
-      const holeCards = await loadMyHoleCards(tx, updatedState, updatedState.phase, tableId, auth.userId);
-
       return {
         tableId,
         version: newVersion,
         state: withoutPrivateState(updatedState),
-        myHoleCards: holeCards,
+        myHoleCards,
         events,
         replayed: false,
       };

@@ -255,9 +255,18 @@ const run = async () => {
     userId: "user-1",
     holeCardsStore,
   });
-  assert.notEqual(missingHandIdDoneResponse.response.statusCode, 200);
+  assert.equal(missingHandIdDoneResponse.response.statusCode, 409);
+  assert.equal(JSON.parse(missingHandIdDoneResponse.response.body).error, "state_invalid");
   assert.equal(
     missingHandIdDoneResponse.queries.some((entry) => entry.query.toLowerCase().includes("from public.poker_hole_cards")),
+    false
+  );
+  assert.equal(
+    missingHandIdDoneResponse.queries.some((entry) => entry.query.toLowerCase().includes("update public.poker_state")),
+    false
+  );
+  assert.equal(
+    missingHandIdDoneResponse.queries.some((entry) => entry.query.toLowerCase().includes("insert into public.poker_actions")),
     false
   );
 
