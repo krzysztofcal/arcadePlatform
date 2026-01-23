@@ -80,6 +80,16 @@ const getHandId = (state) => {
   return value ? value : null;
 };
 
+const maybeCleanupHoleCards = async (tx, prevState, nextState, tableId) => {
+  const prevHandId = getHandId(prevState);
+  const nextHandId = getHandId(nextState);
+  if (!prevHandId || !nextHandId) return;
+  if (prevState?.phase !== "HAND_DONE" && nextState?.phase === "HAND_DONE") {
+    await tx.unsafe("delete from public.poker_hole_cards where table_id = $1 and hand_id = $2;", [tableId, nextHandId]);
+    klog("poker_hole_cards_cleaned", { tableId, handId: nextHandId });
+  }
+};
+
 export async function handler(event) {
   const origin = event.headers?.origin || event.headers?.Origin;
   const cors = corsHeaders(origin);
@@ -357,6 +367,8 @@ export async function handler(event) {
         klog("poker_state_corrupt", { tableId, phase: updatedState.phase });
         throw makeError(409, "state_invalid");
       }
+
+      await maybeCleanupHoleCards(tx, currentState, updatedState, tableId);
 
       const updateRows = await tx.unsafe(
         "update public.poker_state set version = version + 1, state = $2::jsonb, updated_at = now() where table_id = $1 returning version;",

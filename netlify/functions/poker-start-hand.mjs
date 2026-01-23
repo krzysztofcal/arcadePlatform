@@ -187,6 +187,17 @@ export async function handler(event) {
         throw makeError(409, "state_invalid");
       }
 
+      const overlapValidationState = {
+        seats: derivedSeats,
+        community: [],
+        deck: remainingDeck,
+        holeCardsByUserId: dealtHoleCards,
+      };
+      if (!isStateStorageValid(overlapValidationState, { requireDeck: true, requireHoleCards: true })) {
+        klog("poker_state_corrupt", { tableId, phase: "PREFLOP", reason: "deal_overlap" });
+        throw makeError(409, "state_invalid");
+      }
+
       const holeCardValues = activeUserIdList.map((userId) => ({
         userId,
         cards: dealtHoleCards[userId],
