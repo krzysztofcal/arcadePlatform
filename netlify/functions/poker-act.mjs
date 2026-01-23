@@ -83,7 +83,7 @@ const getHandId = (state) => {
 
 const maybeCleanupHoleCards = async (tx, prevState, nextState, tableId, log) => {
   if (prevState?.phase !== "HAND_DONE" && nextState?.phase === "HAND_DONE") {
-    const handId = getHandId(prevState);
+    const handId = getHandId(nextState) || getHandId(prevState);
     if (!handId) return;
     await tx.unsafe("delete from public.poker_hole_cards where table_id = $1 and hand_id = $2;", [tableId, handId]);
     if (typeof log === "function") log("poker_hole_cards_cleaned", { tableId, handId });

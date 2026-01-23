@@ -413,6 +413,7 @@ const run = async () => {
 
   const cleanupState = {
     ...baseState,
+    handId: "hand-prev",
     phase: "PREFLOP",
     seats: [
       { userId: "user-1", seatNo: 1 },
@@ -425,13 +426,14 @@ const run = async () => {
     foldedByUserId: { "user-1": false, "user-2": false },
     turnUserId: "user-1",
   };
+  const cleanupEndedHandId = "hand-ended";
   const cleanupHoleCardsStore = new Map();
   cleanupHoleCardsStore.set(
-    `${tableId}|${cleanupState.handId}|user-1`,
+    `${tableId}|${cleanupEndedHandId}|user-1`,
     [{ r: "A", s: "S" }, { r: "K", s: "S" }]
   );
   cleanupHoleCardsStore.set(
-    `${tableId}|${cleanupState.handId}|user-2`,
+    `${tableId}|${cleanupEndedHandId}|user-2`,
     [{ r: "Q", s: "H" }, { r: "J", s: "H" }]
   );
   const cleanupQueries = [];
@@ -449,7 +451,7 @@ const run = async () => {
     normalizeJsonState,
     withoutPrivateState,
     advanceIfNeeded: (state) => ({
-      state: { ...state, phase: "HAND_DONE" },
+      state: { ...state, phase: "HAND_DONE", handId: cleanupEndedHandId },
       events: [{ type: "HAND_DONE" }],
     }),
     applyAction,
@@ -476,7 +478,7 @@ const run = async () => {
             const tId = String(params?.[0] ?? "");
             const hId = String(params?.[1] ?? "");
             assert.ok(tId && hId, "expected delete to include table_id and hand_id params");
-            assert.equal(hId, cleanupState.handId);
+            assert.equal(hId, cleanupEndedHandId);
             const prefix = `${tId}|${hId}|`;
             for (const key of Array.from(cleanupHoleCardsStore.keys())) {
               if (String(key).startsWith(prefix)) cleanupHoleCardsStore.delete(key);
