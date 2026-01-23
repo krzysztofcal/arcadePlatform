@@ -317,6 +317,9 @@ const run = async () => {
   assert.equal(JSON.stringify(user1Payload).includes('"deck"'), false);
 
   const updateCountBeforeReplay = queries.filter((entry) => entry.query.toLowerCase().includes("update public.poker_state")).length;
+  const actionInsertCountBeforeReplay = queries.filter((entry) =>
+    entry.query.toLowerCase().includes("insert into public.poker_actions")
+  ).length;
   const holeCardsSelectCountBeforeReplay = queries.filter((entry) =>
     entry.query.toLowerCase().includes("from public.poker_hole_cards")
   ).length;
@@ -329,16 +332,20 @@ const run = async () => {
   const replayPayload = JSON.parse(replayResponse.body);
   assert.equal(replayPayload.replayed, true);
   assert.equal(Array.isArray(replayPayload.myHoleCards), true);
-  assert.equal(replayPayload.myHoleCards.length, 0, "cheap replay returns no hole cards");
+  assert.equal(replayPayload.myHoleCards.length, 2);
+  assert.deepEqual(replayPayload.myHoleCards, holeCardsStore.get(`${tableId}|${baseState.handId}|user-1`));
   const updateCountAfterReplay = queries.filter((entry) => entry.query.toLowerCase().includes("update public.poker_state")).length;
   assert.equal(updateCountAfterReplay, updateCountBeforeReplay);
+  const actionInsertCountAfterReplay = queries.filter((entry) =>
+    entry.query.toLowerCase().includes("insert into public.poker_actions")
+  ).length;
+  assert.equal(actionInsertCountAfterReplay, actionInsertCountBeforeReplay);
   const holeCardsSelectCountAfterReplay = queries.filter((entry) =>
     entry.query.toLowerCase().includes("from public.poker_hole_cards")
   ).length;
-  assert.equal(
-    holeCardsSelectCountAfterReplay,
-    holeCardsSelectCountBeforeReplay,
-    "replay must not query poker_hole_cards"
+  assert.ok(
+    holeCardsSelectCountAfterReplay > holeCardsSelectCountBeforeReplay,
+    "replay should query poker_hole_cards"
   );
 
   const cleanupState = {

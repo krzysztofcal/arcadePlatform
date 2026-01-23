@@ -146,7 +146,13 @@ export async function handler(event) {
 
   const isValidTwoCards = (cards) => {
     if (!Array.isArray(cards) || cards.length !== 2) return false;
-    return cards.every((card) => card && typeof card === "object" && typeof card.r === "string" && typeof card.s === "string");
+    return cards.every(
+      (card) =>
+        card &&
+        typeof card === "object" &&
+        typeof card.s === "string" &&
+        (typeof card.r === "string" || typeof card.r === "number")
+    );
   };
 
   const loadMyHoleCards = async (tx, state, phase, tableId, userId) => {
@@ -265,11 +271,12 @@ export async function handler(event) {
           });
           throw makeError(409, "state_invalid");
         }
+        const myHoleCards = await loadMyHoleCards(tx, currentState, currentState.phase, tableId, auth.userId);
         return {
           tableId,
           version,
           state: withoutPrivateState(currentState),
-          myHoleCards: [],
+          myHoleCards,
           events: [],
           replayed: true,
         };
@@ -366,7 +373,7 @@ export async function handler(event) {
         },
       };
 
-      const requireDeck = updatedState.deck != null;
+      const requireDeck = isActionPhase(updatedState.phase) || updatedState.deck != null;
       if (!isStateStorageValid(updatedState, { requireDeck })) {
         klog("poker_state_corrupt", { tableId, phase: updatedState.phase });
         throw makeError(409, "state_invalid");

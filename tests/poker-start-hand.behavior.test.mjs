@@ -57,6 +57,14 @@ const makeHandler = (queries, storedState, holeCardsStore, overrides = {}) =>
               { user_id: "user-3", seat_no: 5, status: "ACTIVE" },
             ];
           }
+          if (text.includes("delete from public.poker_hole_cards")) {
+            const tableParam = String(params?.[0] ?? "");
+            assert.ok(tableParam, "expected delete to include table_id");
+            for (const key of Array.from(holeCardsStore.keys())) {
+              if (String(key).startsWith(`${tableParam}|`)) holeCardsStore.delete(key);
+            }
+            return [{ ok: true }];
+          }
           if (text.includes("insert into public.poker_hole_cards")) {
             assert.ok(
               text.includes("on conflict"),
@@ -125,10 +133,13 @@ const run = async () => {
   const updateCall = queries.find((q) => q.query.toLowerCase().includes("update public.poker_state"));
   assert.ok(updateCall, "expected update to poker_state");
   const normQueries = queries.map((q) => String(q.query).toLowerCase());
+  const holeDeleteIdx = normQueries.findIndex((q) => q.includes("delete from public.poker_hole_cards"));
   const holeInsertIdx = normQueries.findIndex((q) => q.includes("insert into public.poker_hole_cards"));
   const stateUpdateIdx = normQueries.findIndex((q) => q.includes("update public.poker_state"));
+  assert.ok(holeDeleteIdx !== -1, "expected poker_hole_cards delete");
   assert.ok(holeInsertIdx !== -1, "expected poker_hole_cards insert");
   assert.ok(stateUpdateIdx !== -1, "expected poker_state update");
+  assert.ok(holeDeleteIdx < holeInsertIdx, "hole cards must be deleted before insert");
   assert.ok(holeInsertIdx < stateUpdateIdx, "hole cards must be upserted before poker_state update");
   const updatedState = JSON.parse(updateCall.params?.[1] || "{}");
   assert.ok(Array.isArray(updatedState.deck), "state should persist deck as an array");
@@ -156,6 +167,13 @@ const run = async () => {
   const uniqueKeys = new Set(cardKeys);
   assert.equal(uniqueKeys.size, cardKeys.length, "hole cards should be unique");
 
+  const updateCountBeforeReplay = queries.filter((q) => q.query.toLowerCase().includes("update public.poker_state")).length;
+  const actionInsertCountBeforeReplay = queries.filter((q) =>
+    q.query.toLowerCase().includes("insert into public.poker_actions")
+  ).length;
+  const holeSelectCountBeforeReplay = queries.filter((q) =>
+    q.query.toLowerCase().includes("from public.poker_hole_cards")
+  ).length;
   const replayResponse = await handler({
     httpMethod: "POST",
     headers: { origin: "https://example.test", authorization: "Bearer token" },
@@ -168,10 +186,18 @@ const run = async () => {
   assert.equal(replayPayload.state.version, payload.state.version);
   assert.equal(replayPayload.state.state.phase, "PREFLOP");
   assert.ok(Array.isArray(replayPayload.myHoleCards));
-  assert.equal(replayPayload.myHoleCards.length, 0, "cheap replay returns no hole cards");
-  const replayNorm = queries.map((q) => String(q.query).toLowerCase());
-  const holeSelectCount = replayNorm.filter((q) => q.includes("from public.poker_hole_cards")).length;
-  assert.equal(holeSelectCount, 0, "start-hand replay must not query poker_hole_cards");
+  assert.equal(replayPayload.myHoleCards.length, 2);
+  assert.deepEqual(replayPayload.myHoleCards, holeCardsStore.get(`${tableId}|${updatedState.handId}|${userId}`));
+  const updateCountAfterReplay = queries.filter((q) => q.query.toLowerCase().includes("update public.poker_state")).length;
+  const actionInsertCountAfterReplay = queries.filter((q) =>
+    q.query.toLowerCase().includes("insert into public.poker_actions")
+  ).length;
+  const holeSelectCountAfterReplay = queries.filter((q) =>
+    q.query.toLowerCase().includes("from public.poker_hole_cards")
+  ).length;
+  assert.equal(updateCountAfterReplay, updateCountBeforeReplay);
+  assert.equal(actionInsertCountAfterReplay, actionInsertCountBeforeReplay);
+  assert.ok(holeSelectCountAfterReplay > holeSelectCountBeforeReplay, "replay should query poker_hole_cards");
 
   const differentResponse = await handler({
     httpMethod: "POST",

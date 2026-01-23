@@ -34,6 +34,17 @@ const normalizeVersion = (value) => {
   return Number.isFinite(num) ? num : null;
 };
 
+const isValidTwoCards = (cards) => {
+  if (!Array.isArray(cards) || cards.length !== 2) return false;
+  return cards.every(
+    (card) =>
+      card &&
+      typeof card === "object" &&
+      typeof card.s === "string" &&
+      (typeof card.r === "string" || typeof card.r === "number")
+  );
+};
+
 export async function handler(event) {
   const origin = event.headers?.origin || event.headers?.Origin;
   const cors = corsHeaders(origin);
@@ -128,11 +139,20 @@ export async function handler(event) {
         currentState.lastStartHandRequestId === requestIdParsed.value && currentState.lastStartHandUserId === auth.userId;
       if (sameRequest) {
         if (currentState.phase === "PREFLOP" && typeof currentState.handId === "string" && currentState.handId.trim()) {
+          const holeRows = await tx.unsafe(
+            "select cards from public.poker_hole_cards where table_id = $1 and hand_id = $2 and user_id = $3 limit 1;",
+            [tableId, currentState.handId, auth.userId]
+          );
+          const holeCards = holeRows?.[0]?.cards;
+          if (!isValidTwoCards(holeCards)) {
+            klog("poker_state_corrupt", { tableId, phase: currentState.phase, reason: "invalid_hole_cards_shape" });
+            throw makeError(409, "state_invalid");
+          }
           return {
             tableId,
             version: normalizeVersion(stateRow.version),
             state: withoutPrivateState(currentState),
-            myHoleCards: [],
+            myHoleCards: holeCards,
             replayed: true,
           };
         }
@@ -222,6 +242,7 @@ export async function handler(event) {
         throw makeError(409, "state_invalid");
       }
 
+      await tx.unsafe("delete from public.poker_hole_cards where table_id = $1;", [tableId]);
       if (holeCardValues.length > 0) {
         const inserts = [];
         const params = [];

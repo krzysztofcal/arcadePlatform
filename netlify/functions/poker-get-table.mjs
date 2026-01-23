@@ -2,6 +2,19 @@ import { baseHeaders, beginSql, corsHeaders, extractBearerToken, klog, verifySup
 import { normalizeJsonState, withoutPrivateState } from "./_shared/poker-state-utils.mjs";
 import { isValidUuid } from "./_shared/poker-utils.mjs";
 
+const isActionPhase = (phase) => phase === "PREFLOP" || phase === "FLOP" || phase === "TURN" || phase === "RIVER";
+
+const isValidTwoCards = (cards) => {
+  if (!Array.isArray(cards) || cards.length !== 2) return false;
+  return cards.every(
+    (card) =>
+      card &&
+      typeof card === "object" &&
+      typeof card.s === "string" &&
+      (typeof card.r === "string" || typeof card.r === "number")
+  );
+};
+
 const parseTableId = (event) => {
   const queryValue = event.queryStringParameters?.tableId;
   if (typeof queryValue === "string" && queryValue.trim()) {
@@ -43,13 +56,7 @@ export async function handler(event) {
 
   const token = extractBearerToken(event.headers);
   const auth = await verifySupabaseJwt(token);
-  if (!auth.valid || !auth.userId) {
-    return {
-      statusCode: 401,
-      headers: mergeHeaders(cors),
-      body: JSON.stringify({ error: "unauthorized", reason: auth.reason }),
-    };
-  }
+  const authUserId = auth.valid && auth.userId ? auth.userId : null;
 
   try {
     const result = await beginSql(async (tx) => {
@@ -77,6 +84,26 @@ export async function handler(event) {
         throw new Error("poker_state_missing");
       }
 
+      const normalizedState = normalizeJsonState(stateRow.state);
+      const handId = typeof normalizedState.handId === "string" ? normalizedState.handId.trim() : "";
+      const isSeatedActive =
+        authUserId &&
+        Array.isArray(seatRows) &&
+        seatRows.some((seat) => seat.user_id === authUserId && seat.status === "ACTIVE");
+      let myHoleCards = [];
+      if (authUserId && isSeatedActive && handId && isActionPhase(normalizedState.phase)) {
+        const holeRows = await tx.unsafe(
+          "select cards from public.poker_hole_cards where table_id = $1 and hand_id = $2 and user_id = $3 limit 1;",
+          [tableId, handId, authUserId]
+        );
+        const holeCards = holeRows?.[0]?.cards;
+        if (isValidTwoCards(holeCards)) {
+          myHoleCards = holeCards;
+        } else {
+          klog("poker_state_corrupt", { tableId, phase: normalizedState.phase, reason: "invalid_hole_cards_shape" });
+        }
+      }
+
       const seats = Array.isArray(seatRows)
         ? seatRows.map((seat) => ({
             userId: seat.user_id,
@@ -87,7 +114,7 @@ export async function handler(event) {
           }))
         : [];
 
-      return { table, seats, stateRow };
+      return { table, seats, stateRow, normalizedState, myHoleCards };
     });
 
     if (result?.error === "table_not_found") {
@@ -97,7 +124,7 @@ export async function handler(event) {
     const table = result.table;
     const seats = result.seats;
     const stateRow = result.stateRow;
-    const publicState = withoutPrivateState(normalizeJsonState(stateRow.state));
+    const publicState = withoutPrivateState(result.normalizedState);
 
     const tablePayload = {
       id: table.id,
@@ -121,6 +148,7 @@ export async function handler(event) {
           version: stateRow.version,
           state: publicState,
         },
+        myHoleCards: result.myHoleCards || [],
       }),
     };
   } catch (error) {
