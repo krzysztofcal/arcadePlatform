@@ -14,3 +14,6 @@ alter table public.poker_hole_cards enable row level security;
 -- Defense-in-depth: prevent any direct client access.
 revoke all on table public.poker_hole_cards from anon;
 revoke all on table public.poker_hole_cards from authenticated;
+
+-- Allow server (service role) access. Service role bypasses RLS but still needs privileges.
+grant select, insert, update, delete on table public.poker_hole_cards to service_role;

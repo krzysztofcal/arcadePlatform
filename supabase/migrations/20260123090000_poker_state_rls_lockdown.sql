@@ -6,6 +6,9 @@ alter table public.poker_state enable row level security;
 revoke all on table public.poker_state from anon;
 revoke all on table public.poker_state from authenticated;
 
+-- Allow server (service role) access. Service role bypasses RLS but still needs privileges.
+grant select, insert, update, delete on table public.poker_state to service_role;
+
 -- Drop any existing policies (ensures no accidental select policy exists).
 do $$
 declare

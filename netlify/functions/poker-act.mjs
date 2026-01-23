@@ -81,12 +81,11 @@ const getHandId = (state) => {
 };
 
 const maybeCleanupHoleCards = async (tx, prevState, nextState, tableId, log) => {
-  const prevHandId = getHandId(prevState);
-  const nextHandId = getHandId(nextState);
-  if (!prevHandId || !nextHandId) return;
+  const handId = getHandId(nextState);
+  if (!handId) return;
   if (prevState?.phase !== "HAND_DONE" && nextState?.phase === "HAND_DONE") {
-    await tx.unsafe("delete from public.poker_hole_cards where table_id = $1 and hand_id = $2;", [tableId, nextHandId]);
-    if (typeof log === "function") log("poker_hole_cards_cleaned", { tableId, handId: nextHandId });
+    await tx.unsafe("delete from public.poker_hole_cards where table_id = $1 and hand_id = $2;", [tableId, handId]);
+    if (typeof log === "function") log("poker_hole_cards_cleaned", { tableId, handId });
   }
 };
 
