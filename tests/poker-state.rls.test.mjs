@@ -5,21 +5,38 @@ import path from "node:path";
 const migrationsDir = path.join(process.cwd(), "supabase", "migrations");
 const migrationFiles = fs.readdirSync(migrationsDir).filter((file) => file.endsWith(".sql"));
 
-let targetFile = "";
-let content = "";
+let lockdownFile = "";
+let lockdownText = "";
 for (const file of migrationFiles) {
   const text = fs.readFileSync(path.join(migrationsDir, file), "utf8");
   if (text.toLowerCase().includes("alter table public.poker_state enable row level security")) {
-    targetFile = file;
-    content = text;
+    lockdownFile = file;
+    lockdownText = text.toLowerCase();
     break;
   }
 }
 
-assert.ok(targetFile, "poker_state RLS migration not found in supabase/migrations");
-const normalized = content.toLowerCase();
-assert.equal(
-  /create\s+policy[\s\S]*for\s+select[\s\S]*public\.poker_state/.test(normalized),
-  false,
-  "poker_state RLS migration should not add select policies"
+assert.ok(lockdownFile, "poker_state RLS migration not found in supabase/migrations");
+assert.ok(
+  lockdownText.includes("revoke all on table public.poker_state from anon"),
+  "poker_state RLS migration should revoke anon grants"
 );
+assert.ok(
+  lockdownText.includes("revoke all on table public.poker_state from authenticated"),
+  "poker_state RLS migration should revoke authenticated grants"
+);
+assert.ok(
+  lockdownText.includes("from pg_policies") && lockdownText.includes("drop policy"),
+  "poker_state RLS migration should drop existing policies"
+);
+
+for (const file of migrationFiles) {
+  const text = fs.readFileSync(path.join(migrationsDir, file), "utf8").toLowerCase();
+  const hasSelectPolicy = /create\s+policy[\s\S]*on\s+public\.poker_state[\s\S]*for\s+select/.test(text);
+  const hasAllPolicy = /create\s+policy[\s\S]*on\s+public\.poker_state[\s\S]*for\s+all/.test(text);
+  assert.equal(
+    hasSelectPolicy || hasAllPolicy,
+    false,
+    `poker_state should not define select/all policies in migrations (found in ${file})`
+  );
+}
