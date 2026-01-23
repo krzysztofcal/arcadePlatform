@@ -1,5 +1,6 @@
 import { baseHeaders, beginSql, corsHeaders, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
 import { createDeck, dealHoleCards, shuffle } from "./_shared/poker-engine.mjs";
+import { isValidTwoCards } from "./_shared/poker-cards-utils.mjs";
 import { getRng, isPlainObject, isStateStorageValid, normalizeJsonState, withoutPrivateState } from "./_shared/poker-state-utils.mjs";
 import { isValidUuid } from "./_shared/poker-utils.mjs";
 
@@ -32,17 +33,6 @@ const parseStacks = (value) => (value && typeof value === "object" && !Array.isA
 const normalizeVersion = (value) => {
   const num = Number(value);
   return Number.isFinite(num) ? num : null;
-};
-
-const isValidTwoCards = (cards) => {
-  if (!Array.isArray(cards) || cards.length !== 2) return false;
-  return cards.every(
-    (card) =>
-      card &&
-      typeof card === "object" &&
-      typeof card.s === "string" &&
-      (typeof card.r === "string" || typeof card.r === "number")
-  );
 };
 
 export async function handler(event) {

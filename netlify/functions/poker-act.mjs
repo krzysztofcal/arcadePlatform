@@ -1,5 +1,6 @@
 import { baseHeaders, beginSql, corsHeaders, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
 import { advanceIfNeeded, applyAction } from "./_shared/poker-reducer.mjs";
+import { isValidTwoCards } from "./_shared/poker-cards-utils.mjs";
 import { normalizeRequestId } from "./_shared/poker-request-id.mjs";
 import { isPlainObject, isStateStorageValid, normalizeJsonState, withoutPrivateState } from "./_shared/poker-state-utils.mjs";
 import { isValidUuid } from "./_shared/poker-utils.mjs";
@@ -81,9 +82,9 @@ const getHandId = (state) => {
 };
 
 const maybeCleanupHoleCards = async (tx, prevState, nextState, tableId, log) => {
-  const handId = getHandId(nextState);
-  if (!handId) return;
   if (prevState?.phase !== "HAND_DONE" && nextState?.phase === "HAND_DONE") {
+    const handId = getHandId(prevState);
+    if (!handId) return;
     await tx.unsafe("delete from public.poker_hole_cards where table_id = $1 and hand_id = $2;", [tableId, handId]);
     if (typeof log === "function") log("poker_hole_cards_cleaned", { tableId, handId });
   }
@@ -144,18 +145,7 @@ export async function handler(event) {
     };
   }
 
-  const isValidTwoCards = (cards) => {
-    if (!Array.isArray(cards) || cards.length !== 2) return false;
-    return cards.every(
-      (card) =>
-        card &&
-        typeof card === "object" &&
-        typeof card.s === "string" &&
-        (typeof card.r === "string" || typeof card.r === "number")
-    );
-  };
-
-  const loadMyHoleCards = async (tx, state, phase, tableId, userId) => {
+const loadMyHoleCards = async (tx, state, phase, tableId, userId) => {
     const handId = getHandId(state);
     if (!handId) {
       if (isActionPhase(phase)) {

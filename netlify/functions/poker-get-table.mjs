@@ -1,18 +1,14 @@
 import { baseHeaders, beginSql, corsHeaders, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
 import { normalizeJsonState, withoutPrivateState } from "./_shared/poker-state-utils.mjs";
+import { isValidTwoCards } from "./_shared/poker-cards-utils.mjs";
 import { isValidUuid } from "./_shared/poker-utils.mjs";
 
 const isActionPhase = (phase) => phase === "PREFLOP" || phase === "FLOP" || phase === "TURN" || phase === "RIVER";
-
-const isValidTwoCards = (cards) => {
-  if (!Array.isArray(cards) || cards.length !== 2) return false;
-  return cards.every(
-    (card) =>
-      card &&
-      typeof card === "object" &&
-      typeof card.s === "string" &&
-      (typeof card.r === "string" || typeof card.r === "number")
-  );
+const makeError = (status, code) => {
+  const err = new Error(code);
+  err.status = status;
+  err.code = code;
+  return err;
 };
 
 const parseTableId = (event) => {
@@ -101,6 +97,7 @@ export async function handler(event) {
           myHoleCards = holeCards;
         } else {
           klog("poker_state_corrupt", { tableId, phase: normalizedState.phase, reason: "invalid_hole_cards_shape" });
+          throw makeError(409, "state_invalid");
         }
       }
 
@@ -152,6 +149,9 @@ export async function handler(event) {
       }),
     };
   } catch (error) {
+    if (error?.status && error?.code) {
+      return { statusCode: error.status, headers: mergeHeaders(cors), body: JSON.stringify({ error: error.code }) };
+    }
     klog("poker_get_table_error", { message: error?.message || "unknown_error" });
     return { statusCode: 500, headers: mergeHeaders(cors), body: JSON.stringify({ error: "server_error" }) };
   }

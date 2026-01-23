@@ -150,6 +150,21 @@ const runAnonymous = async () => {
   );
 };
 
+const runSeatedMissing = async () => {
+  const queries = [];
+  const holeCardsStore = new Map();
+  const handler = makeHandler(queries, holeCardsStore, "user-1");
+  const response = await handler({
+    httpMethod: "GET",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    queryStringParameters: { tableId },
+  });
+  assert.equal(response.statusCode, 409);
+  const payload = JSON.parse(response.body);
+  assert.equal(payload.error, "state_invalid");
+};
+
 await runSeated();
 await runNotSeated();
 await runAnonymous();
+await runSeatedMissing();

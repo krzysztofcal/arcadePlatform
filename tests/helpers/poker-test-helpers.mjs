@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { isValidTwoCards } from "../../netlify/functions/_shared/poker-cards-utils.mjs";
 
 const root = process.cwd();
 
@@ -25,6 +26,7 @@ const getDeclaredIdentifiers = (src) => {
 };
 
 export const loadPokerHandler = (filePath, mocks) => {
+  const mergedMocks = { isValidTwoCards, ...mocks };
   const source = fs.readFileSync(path.join(root, filePath), "utf8");
   const withoutImports = stripImports(source);
   const rewritten = withoutImports.replace(/export\s+(async\s+)?function\s+handler\s*\(/, (_m, asyncKw) => {
@@ -47,6 +49,7 @@ export const loadPokerHandler = (filePath, mocks) => {
     "getRng",
     "isPlainObject",
     "isStateStorageValid",
+    "isValidTwoCards",
     "klog",
     "normalizeJsonState",
     "normalizeRequestId",
@@ -68,7 +71,7 @@ ${rewritten}
 return handler;`
   );
   try {
-    return factory(mocks);
+    return factory(mergedMocks);
   } catch (error) {
     throw new Error(`[poker-test-helpers] Failed to compile ${filePath}: ${error?.message || error}`);
   }

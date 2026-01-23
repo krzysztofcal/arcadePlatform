@@ -413,6 +413,7 @@ const run = async () => {
             const tId = String(params?.[0] ?? "");
             const hId = String(params?.[1] ?? "");
             assert.ok(tId && hId, "expected delete to include table_id and hand_id params");
+            assert.equal(hId, cleanupState.handId);
             const prefix = `${tId}|${hId}|`;
             for (const key of Array.from(cleanupHoleCardsStore.keys())) {
               if (String(key).startsWith(prefix)) cleanupHoleCardsStore.delete(key);
