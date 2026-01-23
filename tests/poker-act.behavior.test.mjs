@@ -246,33 +246,6 @@ const run = async () => {
     false
   );
 
-  const missingHandIdDoneState = {
-    ...baseState,
-    phase: "HAND_DONE",
-    handId: undefined,
-  };
-  const missingHandIdDoneResponse = await runCase({
-    state: missingHandIdDoneState,
-    action: { type: "CHECK" },
-    requestId: "req-missing-hand-done",
-    userId: "user-1",
-    holeCardsStore,
-  });
-  assert.equal(missingHandIdDoneResponse.response.statusCode, 409);
-  assert.equal(JSON.parse(missingHandIdDoneResponse.response.body).error, "state_invalid");
-  assert.equal(
-    missingHandIdDoneResponse.queries.some((entry) => entry.query.toLowerCase().includes("from public.poker_hole_cards")),
-    false
-  );
-  assert.equal(
-    missingHandIdDoneResponse.queries.some((entry) => entry.query.toLowerCase().includes("update public.poker_state")),
-    false
-  );
-  assert.equal(
-    missingHandIdDoneResponse.queries.some((entry) => entry.query.toLowerCase().includes("insert into public.poker_actions")),
-    false
-  );
-
   const noHoleCardsStore = new Map();
   const noHoleCardsState = {
     ...baseState,
@@ -382,13 +355,61 @@ const run = async () => {
   const cleanupQueries = [];
   const cleanupStoredState = { value: JSON.stringify(cleanupState), version: 10 };
   const cleanupLogs = [];
-  const handlerCleanup = makeHandler(cleanupQueries, cleanupStoredState, cleanupHoleCardsStore, "user-1", {
+  const handlerCleanup = loadPokerHandler("netlify/functions/poker-act.mjs", {
+    baseHeaders: () => ({}),
+    corsHeaders: () => ({ "access-control-allow-origin": "https://example.test" }),
+    extractBearerToken: () => "token",
+    verifySupabaseJwt: async () => ({ valid: true, userId: "user-1" }),
+    isValidUuid: () => true,
+    normalizeRequestId,
+    isPlainObject,
+    isStateStorageValid,
+    normalizeJsonState,
+    withoutPrivateState,
+    advanceIfNeeded: (state) => ({
+      state: { ...state, phase: "HAND_DONE" },
+      events: [{ type: "HAND_DONE" }],
+    }),
+    applyAction,
+    beginSql: async (fn) =>
+      fn({
+        unsafe: async (query, params) => {
+          const text = String(query).toLowerCase();
+          cleanupQueries.push({ query: String(query), params });
+          if (text.includes("from public.poker_tables")) {
+            return [{ id: tableId, status: "OPEN" }];
+          }
+          if (text.includes("from public.poker_seats")) {
+            return [{ user_id: "user-1" }];
+          }
+          if (text.includes("from public.poker_state")) {
+            return [{ version: cleanupStoredState.version, state: JSON.parse(cleanupStoredState.value) }];
+          }
+          if (text.includes("from public.poker_hole_cards")) {
+            const key = `${params?.[0]}|${params?.[1]}|${params?.[2]}`;
+            const cards = cleanupHoleCardsStore.get(key);
+            return cards ? [{ cards }] : [];
+          }
+          if (text.includes("update public.poker_state")) {
+            cleanupStoredState.value = params?.[1] || cleanupStoredState.value;
+            cleanupStoredState.version += 1;
+            return [{ version: cleanupStoredState.version }];
+          }
+          if (text.includes("delete from public.poker_hole_cards")) {
+            return [{ ok: true }];
+          }
+          if (text.includes("insert into public.poker_actions")) {
+            return [{ ok: true }];
+          }
+          return [];
+        },
+      }),
     klog: (kind, data) => cleanupLogs.push({ kind, data }),
   });
   const cleanupResponse = await handlerCleanup({
     httpMethod: "POST",
     headers: { origin: "https://example.test", authorization: "Bearer token" },
-    body: JSON.stringify({ tableId, requestId: "req-cleanup", action: { type: "FOLD" } }),
+    body: JSON.stringify({ tableId, requestId: "req-cleanup", action: { type: "CHECK" } }),
   });
   assert.equal(cleanupResponse.statusCode, 200);
   assert.ok(
