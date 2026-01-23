@@ -90,6 +90,30 @@ const maybeCleanupHoleCards = async (tx, prevState, nextState, tableId, log) => 
   }
 };
 
+const loadMyHoleCards = async (tx, { state, phase, tableId, userId, log }) => {
+  const handId = getHandId(state);
+  if (!handId) {
+    if (isActionPhase(phase)) {
+      if (typeof log === "function") log("poker_state_corrupt", { tableId, phase, reason: "missing_hand_id" });
+      throw makeError(409, "state_invalid");
+    }
+    return [];
+  }
+  const holeRows = await tx.unsafe(
+    "select cards from public.poker_hole_cards where table_id = $1 and hand_id = $2 and user_id = $3 limit 1;",
+    [tableId, handId, userId]
+  );
+  const holeCards = holeRows?.[0]?.cards;
+  if (!isValidTwoCards(holeCards)) {
+    if (isActionPhase(phase)) {
+      if (typeof log === "function") log("poker_state_corrupt", { tableId, phase, reason: "invalid_hole_cards_shape" });
+      throw makeError(409, "state_invalid");
+    }
+    return [];
+  }
+  return holeCards;
+};
+
 export async function handler(event) {
   const origin = event.headers?.origin || event.headers?.Origin;
   const cors = corsHeaders(origin);
@@ -144,30 +168,6 @@ export async function handler(event) {
       body: JSON.stringify({ error: "unauthorized", reason: auth.reason }),
     };
   }
-
-const loadMyHoleCards = async (tx, state, phase, tableId, userId) => {
-    const handId = getHandId(state);
-    if (!handId) {
-      if (isActionPhase(phase)) {
-        klog("poker_state_corrupt", { tableId, phase, reason: "missing_hand_id" });
-        throw makeError(409, "state_invalid");
-      }
-      return [];
-    }
-    const holeRows = await tx.unsafe(
-      "select cards from public.poker_hole_cards where table_id = $1 and hand_id = $2 and user_id = $3 limit 1;",
-      [tableId, handId, userId]
-    );
-    const holeCards = holeRows?.[0]?.cards;
-    if (!isValidTwoCards(holeCards)) {
-      if (isActionPhase(phase)) {
-        klog("poker_state_corrupt", { tableId, phase, reason: "invalid_hole_cards_shape" });
-        throw makeError(409, "state_invalid");
-      }
-      return [];
-    }
-    return holeCards;
-  };
 
   try {
     const result = await beginSql(async (tx) => {
@@ -261,7 +261,13 @@ const loadMyHoleCards = async (tx, state, phase, tableId, userId) => {
           });
           throw makeError(409, "state_invalid");
         }
-        const myHoleCards = await loadMyHoleCards(tx, currentState, currentState.phase, tableId, auth.userId);
+        const myHoleCards = await loadMyHoleCards(tx, {
+          state: currentState,
+          phase: currentState.phase,
+          tableId,
+          userId: auth.userId,
+          log: klog,
+        });
         return {
           tableId,
           version,
@@ -295,7 +301,13 @@ const loadMyHoleCards = async (tx, state, phase, tableId, userId) => {
         throw makeError(400, "invalid_action");
       }
 
-      const myHoleCards = await loadMyHoleCards(tx, currentState, currentState.phase, tableId, auth.userId);
+      const myHoleCards = await loadMyHoleCards(tx, {
+        state: currentState,
+        phase: currentState.phase,
+        tableId,
+        userId: auth.userId,
+        log: klog,
+      });
 
       let applied;
       try {

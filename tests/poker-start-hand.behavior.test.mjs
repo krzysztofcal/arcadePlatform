@@ -59,9 +59,12 @@ const makeHandler = (queries, storedState, holeCardsStore, overrides = {}) =>
           }
           if (text.includes("delete from public.poker_hole_cards")) {
             const tableParam = String(params?.[0] ?? "");
+            const handParam = String(params?.[1] ?? "");
             assert.ok(tableParam, "expected delete to include table_id");
+            assert.ok(handParam, "expected delete to include hand_id");
+            const prefix = `${tableParam}|${handParam}|`;
             for (const key of Array.from(holeCardsStore.keys())) {
-              if (String(key).startsWith(`${tableParam}|`)) holeCardsStore.delete(key);
+              if (String(key).startsWith(prefix)) holeCardsStore.delete(key);
             }
             return [{ ok: true }];
           }

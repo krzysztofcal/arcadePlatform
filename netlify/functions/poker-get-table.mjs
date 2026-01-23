@@ -50,6 +50,7 @@ export async function handler(event) {
     return { statusCode: 400, headers: mergeHeaders(cors), body: JSON.stringify({ error: "invalid_table_id" }) };
   }
 
+  // Table info is public; myHoleCards only returned when authenticated + seated ACTIVE + action phase.
   const token = extractBearerToken(event.headers);
   const auth = await verifySupabaseJwt(token);
   const authUserId = auth.valid && auth.userId ? auth.userId : null;

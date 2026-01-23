@@ -232,7 +232,7 @@ export async function handler(event) {
         throw makeError(409, "state_invalid");
       }
 
-      await tx.unsafe("delete from public.poker_hole_cards where table_id = $1;", [tableId]);
+      await tx.unsafe("delete from public.poker_hole_cards where table_id = $1 and hand_id = $2;", [tableId, handId]);
       if (holeCardValues.length > 0) {
         const inserts = [];
         const params = [];
