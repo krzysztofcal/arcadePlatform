@@ -104,6 +104,7 @@ const run = async () => {
   assert.equal(response.statusCode, 200);
   const payload = JSON.parse(response.body);
   assert.equal(payload.ok, true);
+  assert.equal(payload.replayed, false);
   assert.equal(payload.tableId, tableId);
   assert.ok(payload.state);
   assert.equal(typeof payload.state.version, "number");
@@ -163,6 +164,7 @@ const run = async () => {
   assert.equal(replayResponse.statusCode, 200);
   const replayPayload = JSON.parse(replayResponse.body);
   assert.equal(replayPayload.ok, true);
+  assert.equal(replayPayload.replayed, true);
   assert.equal(replayPayload.state.version, payload.state.version);
   assert.equal(replayPayload.state.state.phase, "PREFLOP");
   assert.ok(Array.isArray(replayPayload.myHoleCards));

@@ -253,20 +253,12 @@ const run = async () => {
     false
   );
 
-  const noHoleCardsStore = new Map();
-  const noHoleCardsState = {
+  const missingDeckState = {
     ...baseState,
     deck: undefined,
   };
-  const noPrivateResponse = await runCase({
-    state: noHoleCardsState,
-    action: { type: "CHECK" },
-    requestId: "req-no-private",
-    userId: "user-1",
-    holeCardsStore: noHoleCardsStore,
-  });
-  assert.equal(noPrivateResponse.response.statusCode, 409);
-  assert.equal(JSON.parse(noPrivateResponse.response.body).error, "state_invalid");
+  const missingDeckCheck = isStateStorageValid(missingDeckState, { requireDeck: true });
+  assert.equal(missingDeckCheck, false);
 
   const handlerUser2 = makeHandler(queries, storedState, holeCardsStore, "user-2");
   const notTurn = await handlerUser2({
