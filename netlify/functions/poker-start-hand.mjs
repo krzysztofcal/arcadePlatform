@@ -152,8 +152,9 @@ export async function handler(event) {
       const activeUserIdList = validSeats.map((seat) => seat.user_id);
       const currentStacks = parseStacks(currentState.stacks);
       const nextStacks = activeUserIdList.reduce((acc, userId) => {
+        if (!Object.prototype.hasOwnProperty.call(currentStacks, userId)) return acc;
         const n = Number(currentStacks[userId]);
-        acc[userId] = Number.isFinite(n) && Number.isInteger(n) && n >= 0 ? n : 0;
+        if (Number.isFinite(n) && Number.isInteger(n) && n >= 0) acc[userId] = n;
         return acc;
       }, {});
       const toCallByUserId = Object.fromEntries(activeUserIdList.map((userId) => [userId, 0]));

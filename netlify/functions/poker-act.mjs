@@ -312,7 +312,7 @@ export async function handler(event) {
         },
       };
 
-      const requirePrivate = isActionPhase(updatedState.phase);
+      const requirePrivate = currentState.deck != null || currentState.holeCardsByUserId != null;
       if (!isStateStorageValid(updatedState, { requirePrivate })) {
         klog("poker_state_corrupt", { tableId, phase: updatedState.phase });
         throw makeError(409, "state_invalid");

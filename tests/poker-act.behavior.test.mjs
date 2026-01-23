@@ -208,6 +208,19 @@ const run = async () => {
   );
   assert.equal(storageCheck, true);
 
+  const noPrivateState = {
+    ...baseState,
+    holeCardsByUserId: undefined,
+    deck: undefined,
+  };
+  const noPrivateResponse = await runCase({
+    state: noPrivateState,
+    action: { type: "CHECK" },
+    requestId: "req-no-private",
+    userId: "user-1",
+  });
+  assert.equal(noPrivateResponse.response.statusCode, 200);
+
   const unseatedCalls = [];
   const unseatedState = {
     ...baseState,
