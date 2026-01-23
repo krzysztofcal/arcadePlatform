@@ -24,7 +24,19 @@ if (targetFile) {
 assert.ok(targetFile, "poker_hole_cards migration not found in supabase/migrations");
 const normalized = content.toLowerCase();
 assert.ok(normalized.includes("create table public.poker_hole_cards"), "migration should create poker_hole_cards table");
+assert.ok(
+  normalized.includes("references auth.users"),
+  "migration should reference auth.users for poker_hole_cards user_id"
+);
 assert.ok(normalized.includes("enable row level security"), "migration should enable row level security");
+assert.ok(
+  normalized.includes("revoke all on table public.poker_hole_cards from anon"),
+  "migration should revoke anon grants on poker_hole_cards"
+);
+assert.ok(
+  normalized.includes("revoke all on table public.poker_hole_cards from authenticated"),
+  "migration should revoke authenticated grants on poker_hole_cards"
+);
 assert.ok(
   /create\s+policy[\s\S]*for\s+select[\s\S]*auth\.uid\(\)\s*=\s*user_id/.test(normalized),
   "migration should include select policy scoped to auth.uid() = user_id"
