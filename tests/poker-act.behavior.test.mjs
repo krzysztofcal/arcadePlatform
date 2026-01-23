@@ -225,6 +225,43 @@ const run = async () => {
   const storageCheck = isStateStorageValid({ phase: "HAND_DONE", seats: baseState.seats }, { requireDeck: false });
   assert.equal(storageCheck, true);
 
+  const missingHandIdState = {
+    ...baseState,
+    handId: undefined,
+  };
+  const missingHandIdResponse = await runCase({
+    state: missingHandIdState,
+    action: { type: "CHECK" },
+    requestId: "req-missing-hand",
+    userId: "user-1",
+    holeCardsStore,
+  });
+  assert.equal(missingHandIdResponse.response.statusCode, 409);
+  assert.equal(JSON.parse(missingHandIdResponse.response.body).error, "state_invalid");
+  assert.equal(
+    missingHandIdResponse.queries.some((entry) => entry.query.toLowerCase().includes("from public.poker_hole_cards")),
+    false
+  );
+
+  const missingHandIdDoneState = {
+    ...baseState,
+    phase: "HAND_DONE",
+    handId: undefined,
+  };
+  const missingHandIdDoneResponse = await runCase({
+    state: missingHandIdDoneState,
+    action: { type: "CHECK" },
+    requestId: "req-missing-hand-done",
+    userId: "user-1",
+    holeCardsStore,
+  });
+  assert.equal(missingHandIdDoneResponse.response.statusCode, 409);
+  assert.equal(JSON.parse(missingHandIdDoneResponse.response.body).error, "state_invalid");
+  assert.equal(
+    missingHandIdDoneResponse.queries.some((entry) => entry.query.toLowerCase().includes("from public.poker_hole_cards")),
+    false
+  );
+
   const noHoleCardsStore = new Map();
   const noHoleCardsState = {
     ...baseState,

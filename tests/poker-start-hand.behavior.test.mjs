@@ -20,12 +20,12 @@ const makeRng = (seed) => {
   };
 };
 
-const makeHandler = (queries, storedState, holeCardsStore) =>
+const makeHandler = (queries, storedState, holeCardsStore, overrides = {}) =>
   loadPokerHandler("netlify/functions/poker-start-hand.mjs", {
     baseHeaders: () => ({}),
     corsHeaders: () => ({ "access-control-allow-origin": "https://example.test" }),
     createDeck,
-    dealHoleCards,
+    dealHoleCards: overrides.dealHoleCards || dealHoleCards,
     extractBearerToken: () => "token",
     getRng,
     isPlainObject,
@@ -166,4 +166,34 @@ const run = async () => {
   assert.equal(updateCalls.length, 1);
 };
 
+const runInvalidDeal = async () => {
+  const queries = [];
+  const storedState = { value: null };
+  const holeCardsStore = new Map();
+  const handler = makeHandler(queries, storedState, holeCardsStore, {
+    dealHoleCards: (deck) => ({
+      deck,
+      holeCardsByUserId: {
+        "user-1": [],
+        "user-2": [],
+        "user-3": [],
+      },
+    }),
+  });
+  const response = await handler({
+    httpMethod: "POST",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    body: JSON.stringify({ tableId, requestId: "req-invalid" }),
+  });
+  assert.equal(response.statusCode, 409);
+  const payload = JSON.parse(response.body);
+  assert.equal(payload.error, "state_invalid");
+  assert.equal(
+    queries.some((q) => q.query.toLowerCase().includes("insert into public.poker_hole_cards")),
+    false
+  );
+  assert.equal(queries.some((q) => q.query.toLowerCase().includes("update public.poker_state")), false);
+};
+
 await run();
+await runInvalidDeal();

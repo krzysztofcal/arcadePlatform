@@ -75,6 +75,11 @@ const validateActionBounds = (state, action, userId) => {
   return true;
 };
 
+const getHandId = (state) => {
+  const value = typeof state?.handId === "string" ? state.handId.trim() : "";
+  return value ? value : null;
+};
+
 export async function handler(event) {
   const origin = event.headers?.origin || event.headers?.Origin;
   const cors = corsHeaders(origin);
@@ -129,6 +134,30 @@ export async function handler(event) {
       body: JSON.stringify({ error: "unauthorized", reason: auth.reason }),
     };
   }
+
+  const loadMyHoleCards = async (tx, state, phase, tableId, userId) => {
+    const handId = getHandId(state);
+    if (!handId) {
+      if (isActionPhase(phase)) {
+        klog("poker_state_corrupt", { tableId, phase, reason: "missing_hand_id" });
+        throw makeError(409, "state_invalid");
+      }
+      return [];
+    }
+    const holeRows = await tx.unsafe(
+      "select cards from public.poker_hole_cards where table_id = $1 and hand_id = $2 and user_id = $3 limit 1;",
+      [tableId, handId, userId]
+    );
+    const holeCards = holeRows?.[0]?.cards;
+    if (!Array.isArray(holeCards)) {
+      if (isActionPhase(phase)) {
+        klog("poker_state_corrupt", { tableId, phase, reason: "missing_hole_cards" });
+        throw makeError(409, "state_invalid");
+      }
+      return [];
+    }
+    return holeCards;
+  };
 
   try {
     const result = await beginSql(async (tx) => {
@@ -213,21 +242,12 @@ export async function handler(event) {
           });
           throw makeError(409, "state_invalid");
         }
-        const handId = typeof currentState.handId === "string" ? currentState.handId : "";
-        const holeRows = await tx.unsafe(
-          "select cards from public.poker_hole_cards where table_id = $1 and hand_id = $2 and user_id = $3 limit 1;",
-          [tableId, handId, auth.userId]
-        );
-        const holeCards = holeRows?.[0]?.cards;
-        if (!Array.isArray(holeCards) && isActionPhase(currentState.phase)) {
-          klog("poker_state_corrupt", { tableId, phase: currentState.phase, reason: "missing_hole_cards" });
-          throw makeError(409, "state_invalid");
-        }
+        const holeCards = await loadMyHoleCards(tx, currentState, currentState.phase, tableId, auth.userId);
         return {
           tableId,
           version,
           state: withoutPrivateState(currentState),
-          myHoleCards: Array.isArray(holeCards) ? holeCards : [],
+          myHoleCards: holeCards,
           events: [],
           replayed: true,
         };
@@ -368,22 +388,13 @@ export async function handler(event) {
         newVersion,
       });
 
-      const handId = typeof updatedState.handId === "string" ? updatedState.handId : "";
-      const holeRows = await tx.unsafe(
-        "select cards from public.poker_hole_cards where table_id = $1 and hand_id = $2 and user_id = $3 limit 1;",
-        [tableId, handId, auth.userId]
-      );
-      const holeCards = holeRows?.[0]?.cards;
-      if (!Array.isArray(holeCards) && isActionPhase(updatedState.phase)) {
-        klog("poker_state_corrupt", { tableId, phase: updatedState.phase, reason: "missing_hole_cards" });
-        throw makeError(409, "state_invalid");
-      }
+      const holeCards = await loadMyHoleCards(tx, updatedState, updatedState.phase, tableId, auth.userId);
 
       return {
         tableId,
         version: newVersion,
         state: withoutPrivateState(updatedState),
-        myHoleCards: Array.isArray(holeCards) ? holeCards : [],
+        myHoleCards: holeCards,
         events,
         replayed: false,
       };

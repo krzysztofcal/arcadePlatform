@@ -174,10 +174,22 @@ export async function handler(event) {
       const deck = shuffle(createDeck(), rng);
       const dealResult = dealHoleCards(deck, validSeats.map((seat) => seat.user_id));
       const remainingDeck = Array.isArray(dealResult?.deck) ? dealResult.deck : deck;
+      const dealtHoleCards = isPlainObject(dealResult?.holeCardsByUserId) ? dealResult.holeCardsByUserId : {};
+      const missingHoleCards = activeUserIdList.some(
+        (userId) => !Array.isArray(dealtHoleCards[userId]) || dealtHoleCards[userId].length !== 2
+      );
+      const holeCardsState = {
+        seats: derivedSeats,
+        holeCardsByUserId: dealtHoleCards,
+      };
+      if (missingHoleCards || !isStateStorageValid(holeCardsState, { requireHoleCards: true })) {
+        klog("poker_state_corrupt", { tableId, phase: "PREFLOP", reason: "invalid_deal" });
+        throw makeError(409, "state_invalid");
+      }
 
       const holeCardValues = activeUserIdList.map((userId) => ({
         userId,
-        cards: dealResult.holeCardsByUserId?.[userId] || [],
+        cards: dealtHoleCards[userId],
       }));
 
       const updatedState = {
@@ -240,7 +252,7 @@ export async function handler(event) {
         tableId,
         version: newVersion,
         state: withoutPrivateState(updatedState),
-        myHoleCards: dealResult.holeCardsByUserId[auth.userId] || [],
+        myHoleCards: holeCardValues.find((entry) => entry.userId === auth.userId)?.cards || [],
       };
     });
 
