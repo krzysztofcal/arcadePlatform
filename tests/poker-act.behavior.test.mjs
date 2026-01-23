@@ -13,6 +13,7 @@ const tableId = "11111111-1111-4111-8111-111111111111";
 
 const baseState = {
   tableId,
+  handId: "hand-1",
   phase: "PREFLOP",
   seats: [
     { userId: "user-1", seatNo: 1 },
@@ -24,11 +25,6 @@ const baseState = {
   community: [],
   dealerSeatNo: 1,
   turnUserId: "user-1",
-  holeCardsByUserId: {
-    "user-1": [{ r: "A", s: "S" }, { r: "K", s: "S" }],
-    "user-2": [{ r: "Q", s: "H" }, { r: "J", s: "H" }],
-    "user-3": [{ r: "9", s: "D" }, { r: "9", s: "C" }],
-  },
   deck: [
     { r: "2", s: "S" },
     { r: "3", s: "S" },
@@ -44,7 +40,7 @@ const baseState = {
   lastActionRequestIdByUserId: {},
 };
 
-const makeHandler = (queries, storedState, userId, options = {}) =>
+const makeHandler = (queries, storedState, holeCardsStore, userId, options = {}) =>
   loadPokerHandler("netlify/functions/poker-act.mjs", {
     baseHeaders: () => ({}),
     corsHeaders: () => ({ "access-control-allow-origin": "https://example.test" }),
@@ -76,6 +72,11 @@ const makeHandler = (queries, storedState, userId, options = {}) =>
           if (text.includes("from public.poker_state")) {
             return [{ version: storedState.version, state: JSON.parse(storedState.value) }];
           }
+          if (text.includes("from public.poker_hole_cards")) {
+            const key = `${params?.[0]}|${params?.[1]}|${params?.[2]}`;
+            const cards = holeCardsStore.get(key);
+            return cards ? [{ cards }] : [];
+          }
           if (text.includes("update public.poker_state")) {
             storedState.value = params?.[1] || storedState.value;
             storedState.version += 1;
@@ -90,10 +91,10 @@ const makeHandler = (queries, storedState, userId, options = {}) =>
     klog: options.klog || (() => {}),
   });
 
-const runCase = async ({ state, action, requestId, userId, klogCalls }) => {
+const runCase = async ({ state, action, requestId, userId, klogCalls, holeCardsStore }) => {
   const queries = [];
   const storedState = { value: JSON.stringify(state), version: 3 };
-  const handler = makeHandler(queries, storedState, userId, {
+  const handler = makeHandler(queries, storedState, holeCardsStore, userId, {
     klog: klogCalls ? (kind, data) => klogCalls.push({ kind, data }) : undefined,
   });
   const response = await handler({
@@ -107,8 +108,21 @@ const runCase = async ({ state, action, requestId, userId, klogCalls }) => {
 const run = async () => {
   const queries = [];
   const storedState = { value: JSON.stringify(baseState), version: 7 };
+  const holeCardsStore = new Map();
+  holeCardsStore.set(
+    `${tableId}|${baseState.handId}|user-1`,
+    [{ r: "A", s: "S" }, { r: "K", s: "S" }]
+  );
+  holeCardsStore.set(
+    `${tableId}|${baseState.handId}|user-2`,
+    [{ r: "Q", s: "H" }, { r: "J", s: "H" }]
+  );
+  holeCardsStore.set(
+    `${tableId}|${baseState.handId}|user-3`,
+    [{ r: "9", s: "D" }, { r: "9", s: "C" }]
+  );
 
-  const invalidRequest = await makeHandler(queries, storedState, "user-1")({
+  const invalidRequest = await makeHandler(queries, storedState, holeCardsStore, "user-1")({
     httpMethod: "POST",
     headers: { origin: "https://example.test", authorization: "Bearer token" },
     body: JSON.stringify({ tableId, requestId: "", action: { type: "CHECK" } }),
@@ -116,7 +130,7 @@ const run = async () => {
   assert.equal(invalidRequest.statusCode, 400);
   assert.equal(JSON.parse(invalidRequest.body).error, "invalid_request_id");
 
-  const invalidAmount = await makeHandler(queries, storedState, "user-1")({
+  const invalidAmount = await makeHandler(queries, storedState, holeCardsStore, "user-1")({
     httpMethod: "POST",
     headers: { origin: "https://example.test", authorization: "Bearer token" },
     body: JSON.stringify({ tableId, requestId: "req-bad", action: { type: "BET", amount: 0 } }),
@@ -129,6 +143,7 @@ const run = async () => {
     action: { type: "BET", amount: 1000 },
     requestId: "req-too-big",
     userId: "user-1",
+    holeCardsStore,
   });
   assert.equal(invalidBet.response.statusCode, 400);
   assert.equal(JSON.parse(invalidBet.response.body).error, "invalid_action");
@@ -144,6 +159,7 @@ const run = async () => {
     action: { type: "RAISE", amount: 30 },
     requestId: "req-raise-too-big",
     userId: "user-1",
+    holeCardsStore,
   });
   assert.equal(invalidRaise.response.statusCode, 400);
   assert.equal(JSON.parse(invalidRaise.response.body).error, "invalid_action");
@@ -153,6 +169,7 @@ const run = async () => {
     action: { type: "RAISE", amount: 20 },
     requestId: "req-raise-ok",
     userId: "user-1",
+    holeCardsStore,
   });
   assert.equal(validRaise.response.statusCode, 200);
 
@@ -165,6 +182,7 @@ const run = async () => {
     action: { type: "CHECK" },
     requestId: "req-check",
     userId: "user-1",
+    holeCardsStore,
   });
   assert.equal(invalidCheck.response.statusCode, 400);
   assert.equal(JSON.parse(invalidCheck.response.body).error, "invalid_action");
@@ -174,6 +192,7 @@ const run = async () => {
     action: { type: "CALL" },
     requestId: "req-call",
     userId: "user-1",
+    holeCardsStore,
   });
   assert.equal(invalidCall.response.statusCode, 400);
   assert.equal(JSON.parse(invalidCall.response.body).error, "invalid_action");
@@ -189,7 +208,7 @@ const run = async () => {
   }
   const corruptState = {
     ...baseState,
-    deck: allCards.slice(0, 53),
+    deck: allCards.concat({ r: "A", s: "S" }),
   };
   const corruptResponse = await runCase({
     state: corruptState,
@@ -197,54 +216,31 @@ const run = async () => {
     requestId: "req-corrupt",
     userId: "user-1",
     klogCalls: corruptCalls,
+    holeCardsStore,
   });
   assert.equal(corruptResponse.response.statusCode, 409);
   assert.equal(JSON.parse(corruptResponse.response.body).error, "state_invalid");
   assert.ok(corruptCalls.some((entry) => entry.kind === "poker_state_corrupt"));
 
-  const storageCheck = isStateStorageValid(
-    { phase: "HAND_DONE", seats: baseState.seats },
-    { requirePrivate: false }
-  );
+  const storageCheck = isStateStorageValid({ phase: "HAND_DONE", seats: baseState.seats }, { requireDeck: false });
   assert.equal(storageCheck, true);
 
-  const noPrivateState = {
+  const noHoleCardsStore = new Map();
+  const noHoleCardsState = {
     ...baseState,
-    holeCardsByUserId: undefined,
     deck: undefined,
   };
   const noPrivateResponse = await runCase({
-    state: noPrivateState,
+    state: noHoleCardsState,
     action: { type: "CHECK" },
     requestId: "req-no-private",
     userId: "user-1",
+    holeCardsStore: noHoleCardsStore,
   });
   assert.equal(noPrivateResponse.response.statusCode, 409);
-assert.equal(JSON.parse(noPrivateResponse.response.body).error, "state_invalid");
+  assert.equal(JSON.parse(noPrivateResponse.response.body).error, "state_invalid");
 
-  const unseatedCalls = [];
-  const unseatedState = {
-    ...baseState,
-    holeCardsByUserId: {
-      ...baseState.holeCardsByUserId,
-      "user-4": [
-        { r: "A", s: "H" },
-        { r: "K", s: "H" },
-      ],
-    },
-  };
-  const unseatedResponse = await runCase({
-    state: unseatedState,
-    action: { type: "CHECK" },
-    requestId: "req-unseated",
-    userId: "user-1",
-    klogCalls: unseatedCalls,
-  });
-  assert.equal(unseatedResponse.response.statusCode, 409);
-  assert.equal(JSON.parse(unseatedResponse.response.body).error, "state_invalid");
-  assert.ok(unseatedCalls.some((entry) => entry.kind === "poker_state_corrupt"));
-
-  const handlerUser2 = makeHandler(queries, storedState, "user-2");
+  const handlerUser2 = makeHandler(queries, storedState, holeCardsStore, "user-2");
   const notTurn = await handlerUser2({
     httpMethod: "POST",
     headers: { origin: "https://example.test", authorization: "Bearer token" },
@@ -253,7 +249,7 @@ assert.equal(JSON.parse(noPrivateResponse.response.body).error, "state_invalid")
   assert.equal(notTurn.statusCode, 403);
   assert.equal(JSON.parse(notTurn.body).error, "not_your_turn");
 
-  const handlerUser1 = makeHandler(queries, storedState, "user-1");
+  const handlerUser1 = makeHandler(queries, storedState, holeCardsStore, "user-1");
   const user1Check = await handlerUser1({
     httpMethod: "POST",
     headers: { origin: "https://example.test", authorization: "Bearer token" },
@@ -285,7 +281,7 @@ assert.equal(JSON.parse(noPrivateResponse.response.body).error, "state_invalid")
   const updateCountAfterReplay = queries.filter((entry) => entry.query.toLowerCase().includes("update public.poker_state")).length;
   assert.equal(updateCountAfterReplay, updateCountBeforeReplay);
 
-  const handlerUser2Turn = makeHandler(queries, storedState, "user-2");
+  const handlerUser2Turn = makeHandler(queries, storedState, holeCardsStore, "user-2");
   const user2Check = await handlerUser2Turn({
     httpMethod: "POST",
     headers: { origin: "https://example.test", authorization: "Bearer token" },
@@ -293,7 +289,7 @@ assert.equal(JSON.parse(noPrivateResponse.response.body).error, "state_invalid")
   });
   assert.equal(user2Check.statusCode, 200);
 
-  const handlerUser3 = makeHandler(queries, storedState, "user-3");
+  const handlerUser3 = makeHandler(queries, storedState, holeCardsStore, "user-3");
   const user3Check = await handlerUser3({
     httpMethod: "POST",
     headers: { origin: "https://example.test", authorization: "Bearer token" },
@@ -316,7 +312,7 @@ assert.equal(JSON.parse(noPrivateResponse.response.body).error, "state_invalid")
   const updateCall = queries.find((entry) => entry.query.toLowerCase().includes("update public.poker_state"));
   assert.ok(updateCall, "expected poker_state update");
   const updatedState = JSON.parse(updateCall.params?.[1] || "{}");
-  assert.ok(updatedState.holeCardsByUserId, "state should persist hole cards");
+  assert.equal(updatedState.holeCardsByUserId, undefined);
   assert.ok(Array.isArray(updatedState.deck), "state should persist deck");
 
   const actionInserts = queries.filter((entry) => entry.query.toLowerCase().includes("insert into public.poker_actions"));

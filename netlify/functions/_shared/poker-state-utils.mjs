@@ -75,7 +75,8 @@ const isStateStorageValid = (state, options = {}) => {
   const seatUserIds = new Set(
     seats.map((seat) => (typeof seat?.userId === "string" && seat.userId.trim() ? seat.userId : null)).filter(Boolean)
   );
-  const requirePrivate = options.requirePrivate === true;
+  const requireDeck = options.requireDeck === true;
+  const requireHoleCards = options.requireHoleCards === true;
   const deck = state.deck;
   const holeCardsByUserId = state.holeCardsByUserId;
   const community = state.community;
@@ -89,14 +90,20 @@ const isStateStorageValid = (state, options = {}) => {
     communityKeys = communityCheck.keys;
     if (!validateNoDuplicates(communityKeys)) return false;
   }
-  if (seatUserIds.size === 0 && holeCardsByUserId && Object.keys(holeCardsByUserId).length > 0) return false;
+  const shouldValidateDeck = requireDeck || deck != null;
+  const shouldValidateHoleCards = requireHoleCards || holeCardsByUserId != null;
+  if (shouldValidateHoleCards && seatUserIds.size === 0 && holeCardsByUserId && Object.keys(holeCardsByUserId).length > 0) {
+    return false;
+  }
 
-  if (requirePrivate) {
+  if (shouldValidateDeck) {
     const deckCheck = validateCardsArray(deck, { maxLen: 52 });
     if (!deckCheck.ok) return false;
     deckKeys = deckCheck.keys;
     if (!validateNoDuplicates(deckKeys)) return false;
+  }
 
+  if (shouldValidateHoleCards) {
     if (!isPlainObject(holeCardsByUserId)) return false;
     const userIds = Object.keys(holeCardsByUserId);
     if (userIds.length > seatUserIds.size) return false;
@@ -107,25 +114,6 @@ const isStateStorageValid = (state, options = {}) => {
       holeCardKeys.push(...cardsCheck.keys);
     }
     if (!validateNoDuplicates(holeCardKeys)) return false;
-  } else {
-    if (deck != null) {
-      const deckCheck = validateCardsArray(deck, { maxLen: 52 });
-      if (!deckCheck.ok) return false;
-      deckKeys = deckCheck.keys;
-      if (!validateNoDuplicates(deckKeys)) return false;
-    }
-    if (holeCardsByUserId != null) {
-      if (!isPlainObject(holeCardsByUserId)) return false;
-      const userIds = Object.keys(holeCardsByUserId);
-      if (userIds.length > seatUserIds.size) return false;
-      for (const userId of userIds) {
-        if (typeof userId !== "string" || !userId.trim() || !seatUserIds.has(userId)) return false;
-        const cardsCheck = validateCardsArray(holeCardsByUserId[userId], { exactLen: 2 });
-        if (!cardsCheck.ok) return false;
-        holeCardKeys.push(...cardsCheck.keys);
-      }
-      if (!validateNoDuplicates(holeCardKeys)) return false;
-    }
   }
   if (communityKeys.length > 0 && holeCardKeys.length > 0) {
     if (communityKeys.some((key) => holeCardKeys.includes(key))) return false;

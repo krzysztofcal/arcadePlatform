@@ -128,11 +128,20 @@ export async function handler(event) {
         currentState.lastStartHandRequestId === requestIdParsed.value && currentState.lastStartHandUserId === auth.userId;
       if (sameRequest) {
         if (currentState.phase === "PREFLOP" && typeof currentState.handId === "string" && currentState.handId.trim()) {
+          const holeRows = await tx.unsafe(
+            "select cards from public.poker_hole_cards where table_id = $1 and hand_id = $2 and user_id = $3 limit 1;",
+            [tableId, currentState.handId, auth.userId]
+          );
+          const holeCards = holeRows?.[0]?.cards;
+          if (!Array.isArray(holeCards)) {
+            klog("poker_state_corrupt", { tableId, phase: currentState.phase, reason: "missing_hole_cards" });
+            throw makeError(409, "state_invalid");
+          }
           return {
             tableId,
             version: normalizeVersion(stateRow.version),
             state: withoutPrivateState(currentState),
-            myHoleCards: currentState.holeCardsByUserId?.[auth.userId] || [],
+            myHoleCards: holeCards,
           };
         }
         throw makeError(409, "state_invalid");
@@ -166,6 +175,11 @@ export async function handler(event) {
       const dealResult = dealHoleCards(deck, validSeats.map((seat) => seat.user_id));
       const remainingDeck = Array.isArray(dealResult?.deck) ? dealResult.deck : deck;
 
+      const holeCardValues = activeUserIdList.map((userId) => ({
+        userId,
+        cards: dealResult.holeCardsByUserId?.[userId] || [],
+      }));
+
       const updatedState = {
         ...currentState,
         tableId: currentState.tableId || tableId,
@@ -181,7 +195,6 @@ export async function handler(event) {
         betThisRoundByUserId,
         actedThisRoundByUserId,
         foldedByUserId,
-        holeCardsByUserId: dealResult.holeCardsByUserId,
         deck: remainingDeck,
         lastActionRequestIdByUserId: {},
         lastStartHandRequestId: requestIdParsed.value || null,
@@ -189,9 +202,24 @@ export async function handler(event) {
         startedAt: new Date().toISOString(),
       };
 
-      if (!isStateStorageValid(updatedState, { requirePrivate: true })) {
+      if (!isStateStorageValid(updatedState, { requireDeck: true })) {
         klog("poker_state_corrupt", { tableId, phase: updatedState.phase });
         throw makeError(409, "state_invalid");
+      }
+
+      if (holeCardValues.length > 0) {
+        const inserts = [];
+        const params = [];
+        let idx = 1;
+        for (const entry of holeCardValues) {
+          inserts.push(`($${idx}, $${idx + 1}, $${idx + 2}, $${idx + 3}::jsonb)`);
+          params.push(tableId, handId, entry.userId, JSON.stringify(entry.cards));
+          idx += 4;
+        }
+        await tx.unsafe(
+          `insert into public.poker_hole_cards (table_id, hand_id, user_id, cards) values ${inserts.join(", ")};`,
+          params
+        );
       }
 
       const updateRows = await tx.unsafe(

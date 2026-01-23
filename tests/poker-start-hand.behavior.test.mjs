@@ -20,7 +20,7 @@ const makeRng = (seed) => {
   };
 };
 
-const makeHandler = (queries, storedState) =>
+const makeHandler = (queries, storedState, holeCardsStore) =>
   loadPokerHandler("netlify/functions/poker-start-hand.mjs", {
     baseHeaders: () => ({}),
     corsHeaders: () => ({ "access-control-allow-origin": "https://example.test" }),
@@ -56,6 +56,18 @@ const makeHandler = (queries, storedState) =>
               { user_id: "user-3", seat_no: 5, status: "ACTIVE" },
             ];
           }
+          if (text.includes("insert into public.poker_hole_cards")) {
+            for (let idx = 0; idx < params.length; idx += 4) {
+              const key = `${params[idx]}|${params[idx + 1]}|${params[idx + 2]}`;
+              holeCardsStore.set(key, JSON.parse(params[idx + 3] || "[]"));
+            }
+            return [{ ok: true }];
+          }
+          if (text.includes("from public.poker_hole_cards")) {
+            const key = `${params?.[0]}|${params?.[1]}|${params?.[2]}`;
+            const cards = holeCardsStore.get(key);
+            return cards ? [{ cards }] : [];
+          }
           if (text.includes("update public.poker_state")) {
             storedState.value = params?.[1] || null;
             return [{ version: 2, state: storedState.value }];
@@ -71,7 +83,8 @@ const run = async () => {
   globalThis.__TEST_RNG__ = makeRng(42);
   const queries = [];
   const storedState = { value: null };
-  const handler = makeHandler(queries, storedState);
+  const holeCardsStore = new Map();
+  const handler = makeHandler(queries, storedState, holeCardsStore);
   const response = await handler({
     httpMethod: "POST",
     headers: { origin: "https://example.test", authorization: "Bearer token" },
@@ -94,14 +107,16 @@ const run = async () => {
   assert.equal(payload.myHoleCards.length, 2);
   assert.equal(payload.state.state.holeCardsByUserId, undefined);
   assert.equal(payload.holeCardsByUserId, undefined);
+  assert.equal(payload.state.state.deck, undefined);
+  assert.equal(payload.deck, undefined);
+  assert.equal(JSON.stringify(payload).includes("holeCardsByUserId"), false);
+  assert.equal(JSON.stringify(payload).includes('"deck"'), false);
 
   const updateCall = queries.find((q) => q.query.toLowerCase().includes("update public.poker_state"));
   assert.ok(updateCall, "expected update to poker_state");
   const updatedState = JSON.parse(updateCall.params?.[1] || "{}");
   assert.ok(Array.isArray(updatedState.deck), "state should persist deck as an array");
-  assert.ok(updatedState.holeCardsByUserId, "state should include hole cards by user id");
-  assert.ok(Array.isArray(updatedState.holeCardsByUserId[userId]), "caller should have hole cards stored");
-  assert.equal(updatedState.holeCardsByUserId[userId].length, 2);
+  assert.equal(updatedState.holeCardsByUserId, undefined);
   assert.equal(typeof updatedState.toCallByUserId, "object");
   assert.equal(typeof updatedState.betThisRoundByUserId, "object");
   assert.equal(typeof updatedState.actedThisRoundByUserId, "object");
@@ -115,7 +130,7 @@ const run = async () => {
   assert.equal(updatedState.betThisRoundByUserId[userId], 0);
   assert.equal(updatedState.actedThisRoundByUserId[userId], false);
   assert.equal(updatedState.foldedByUserId[userId], false);
-  assert.deepEqual(payload.myHoleCards, updatedState.holeCardsByUserId[userId]);
+  assert.deepEqual(payload.myHoleCards, holeCardsStore.get(`${tableId}|${updatedState.handId}|${userId}`));
   assert.ok(
     queries.some((q) => q.query.toLowerCase().includes("insert into public.poker_actions")),
     "expected start hand action insert"
