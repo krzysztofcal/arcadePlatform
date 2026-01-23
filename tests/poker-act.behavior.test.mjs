@@ -219,7 +219,8 @@ const run = async () => {
     requestId: "req-no-private",
     userId: "user-1",
   });
-  assert.equal(noPrivateResponse.response.statusCode, 200);
+  assert.equal(noPrivateResponse.response.statusCode, 409);
+assert.equal(JSON.parse(noPrivateResponse.response.body).error, "state_invalid");
 
   const unseatedCalls = [];
   const unseatedState = {
