@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { isValidTwoCards } from "../netlify/functions/_shared/poker-cards-utils.mjs";
 import { normalizeJsonState, withoutPrivateState } from "../netlify/functions/_shared/poker-state-utils.mjs";
 import { loadPokerHandler } from "./helpers/poker-test-helpers.mjs";
 
@@ -25,10 +26,11 @@ const makeHandler = (queries, holeCardsStore, authUserId, overrides = {}) =>
   loadPokerHandler("netlify/functions/poker-get-table.mjs", {
     baseHeaders: () => ({}),
     corsHeaders: () => ({ "access-control-allow-origin": "https://example.test" }),
-    extractBearerToken: () => "token",
+    extractBearerToken: (headers) => (headers?.authorization ? "token" : null),
     verifySupabaseJwt: overrides.verifySupabaseJwt
       ? overrides.verifySupabaseJwt
       : async () => (authUserId ? { valid: true, userId: authUserId } : { valid: false, reason: "missing_token" }),
+    isValidTwoCards,
     normalizeJsonState,
     withoutPrivateState,
     isValidUuid: () => true,
@@ -221,10 +223,9 @@ const runBadToken = async () => {
     headers: { origin: "https://example.test", authorization: "Bearer bad-token" },
     queryStringParameters: { tableId },
   });
-  assert.equal(response.statusCode, 200);
+  assert.equal(response.statusCode, 401);
   const payload = JSON.parse(response.body);
-  assert.ok(Array.isArray(payload.myHoleCards));
-  assert.equal(payload.myHoleCards.length, 0);
+  assert.equal(payload.error, "unauthorized");
   assert.equal(
     queries.some((entry) => entry.query.toLowerCase().includes("from public.poker_hole_cards")),
     false

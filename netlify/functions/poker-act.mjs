@@ -414,6 +414,9 @@ export async function handler(event) {
       }
 
       const endedHand = currentState?.phase !== "HAND_DONE" && updatedState?.phase === "HAND_DONE";
+      const currentHandId = getHandId(currentState);
+      const updatedHandId = getHandId(updatedState);
+      const isSameHand = currentHandId === updatedHandId;
       await maybeCleanupHoleCards(tx, currentState, updatedState, tableId, klog);
 
       await tx.unsafe(
@@ -445,7 +448,7 @@ export async function handler(event) {
         tableId,
         version: newVersion,
         state: withoutPrivateState(updatedState),
-        myHoleCards: !endedHand && isActionPhase(updatedState.phase) ? myHoleCards : [],
+        myHoleCards: !endedHand && isActionPhase(updatedState.phase) && isSameHand ? myHoleCards : [],
         events,
         replayed: false,
       };

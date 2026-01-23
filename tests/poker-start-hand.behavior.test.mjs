@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { isValidTwoCards } from "../netlify/functions/_shared/poker-cards-utils.mjs";
 import { createDeck, dealHoleCards, shuffle } from "../netlify/functions/_shared/poker-engine.mjs";
 import {
   getRng,
@@ -30,6 +31,7 @@ const makeHandler = (queries, storedState, holeCardsStore, overrides = {}) =>
     getRng,
     isPlainObject,
     isStateStorageValid,
+    isValidTwoCards,
     shuffle,
     verifySupabaseJwt: async () => ({ valid: true, userId }),
     isValidUuid: () => true,
@@ -289,6 +291,7 @@ const runMissingHoleCardsTable = async () => {
     getRng,
     isPlainObject,
     isStateStorageValid,
+    isValidTwoCards,
     shuffle,
     verifySupabaseJwt: async () => ({ valid: true, userId }),
     isValidUuid: () => true,

@@ -62,9 +62,12 @@ export async function handler(event) {
   if (token) {
     try {
       const auth = await verifySupabaseJwt(token);
-      authUserId = auth.valid && auth.userId ? auth.userId : null;
+      if (!auth?.valid || !auth?.userId) {
+        return { statusCode: 401, headers: mergeHeaders(cors), body: JSON.stringify({ error: "unauthorized" }) };
+      }
+      authUserId = auth.userId;
     } catch {
-      authUserId = null;
+      return { statusCode: 401, headers: mergeHeaders(cors), body: JSON.stringify({ error: "unauthorized" }) };
     }
   }
 

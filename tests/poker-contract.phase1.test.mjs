@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { isValidTwoCards } from "../netlify/functions/_shared/poker-cards-utils.mjs";
 import { loadPokerHandler } from "./helpers/poker-test-helpers.mjs";
 import { normalizeJsonState, withoutPrivateState } from "../netlify/functions/_shared/poker-state-utils.mjs";
 
@@ -8,6 +9,7 @@ const runListTablesContract = async () => {
     corsHeaders: () => ({ "access-control-allow-origin": "http://localhost" }),
     extractBearerToken: () => "token",
     verifySupabaseJwt: async () => ({ valid: true, userId: "user-1" }),
+    isValidTwoCards,
     klog: () => {},
     executeSql: async () => [
       {

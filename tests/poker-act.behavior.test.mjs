@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { isValidTwoCards } from "../netlify/functions/_shared/poker-cards-utils.mjs";
 import { advanceIfNeeded, applyAction } from "../netlify/functions/_shared/poker-reducer.mjs";
 import { normalizeRequestId } from "../netlify/functions/_shared/poker-request-id.mjs";
 import {
@@ -46,6 +47,7 @@ const makeHandler = (queries, storedState, holeCardsStore, userId, options = {})
     corsHeaders: () => ({ "access-control-allow-origin": "https://example.test" }),
     extractBearerToken: () => "token",
     verifySupabaseJwt: async () => ({ valid: true, userId }),
+    isValidTwoCards,
     isValidUuid: () => true,
     normalizeRequestId,
     isPlainObject,
@@ -165,6 +167,7 @@ const run = async () => {
     corsHeaders: () => ({ "access-control-allow-origin": "https://example.test" }),
     extractBearerToken: () => "token",
     verifySupabaseJwt: async () => ({ valid: true, userId: "user-1" }),
+    isValidTwoCards,
     isValidUuid: () => true,
     normalizeRequestId,
     isPlainObject,
@@ -245,6 +248,65 @@ const run = async () => {
     holeCardsStore,
   });
   assert.equal(validRaise.response.statusCode, 200);
+
+  const handShiftQueries = [];
+  const handShiftState = { value: JSON.stringify(baseState), version: 8 };
+  const nextHandId = "hand-next";
+  const handShiftHandler = loadPokerHandler("netlify/functions/poker-act.mjs", {
+    baseHeaders: () => ({}),
+    corsHeaders: () => ({ "access-control-allow-origin": "https://example.test" }),
+    extractBearerToken: () => "token",
+    verifySupabaseJwt: async () => ({ valid: true, userId: "user-1" }),
+    isValidTwoCards,
+    isValidUuid: () => true,
+    normalizeRequestId,
+    isPlainObject,
+    isStateStorageValid,
+    normalizeJsonState,
+    withoutPrivateState,
+    advanceIfNeeded: (state) => ({ state: { ...state, handId: nextHandId }, events: [] }),
+    applyAction,
+    beginSql: async (fn) =>
+      fn({
+        unsafe: async (query, params) => {
+          const text = String(query).toLowerCase();
+          handShiftQueries.push({ query: String(query), params });
+          if (text.includes("from public.poker_tables")) {
+            return [{ id: tableId, status: "OPEN" }];
+          }
+          if (text.includes("from public.poker_seats")) {
+            return [{ user_id: "user-1" }];
+          }
+          if (text.includes("from public.poker_state")) {
+            return [{ version: handShiftState.version, state: JSON.parse(handShiftState.value) }];
+          }
+          if (text.includes("update public.poker_state")) {
+            handShiftState.value = params?.[1] || handShiftState.value;
+            handShiftState.version += 1;
+            return [{ version: handShiftState.version }];
+          }
+          if (text.includes("from public.poker_hole_cards")) {
+            const key = `${params?.[0]}|${params?.[1]}|${params?.[2]}`;
+            const cards = holeCardsStore.get(key);
+            return cards ? [{ cards }] : [];
+          }
+          if (text.includes("insert into public.poker_actions")) {
+            return [{ ok: true }];
+          }
+          return [];
+        },
+      }),
+    klog: () => {},
+  });
+  const handShiftResponse = await handShiftHandler({
+    httpMethod: "POST",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    body: JSON.stringify({ tableId, requestId: "req-hand-shift", action: { type: "CHECK" } }),
+  });
+  assert.equal(handShiftResponse.statusCode, 200);
+  const handShiftPayload = JSON.parse(handShiftResponse.body);
+  assert.ok(Array.isArray(handShiftPayload.myHoleCards));
+  assert.equal(handShiftPayload.myHoleCards.length, 0);
 
   const checkState = {
     ...baseState,
@@ -436,6 +498,14 @@ const run = async () => {
     `${tableId}|${cleanupEndedHandId}|user-2`,
     [{ r: "Q", s: "H" }, { r: "J", s: "H" }]
   );
+  cleanupHoleCardsStore.set(
+    `${tableId}|${cleanupState.handId}|user-1`,
+    [{ r: "2", s: "S" }, { r: "3", s: "S" }]
+  );
+  cleanupHoleCardsStore.set(
+    `${tableId}|${cleanupState.handId}|user-2`,
+    [{ r: "4", s: "S" }, { r: "5", s: "S" }]
+  );
   const cleanupQueries = [];
   const cleanupStoredState = { value: JSON.stringify(cleanupState), version: 10 };
   const cleanupLogs = [];
@@ -444,6 +514,7 @@ const run = async () => {
     corsHeaders: () => ({ "access-control-allow-origin": "https://example.test" }),
     extractBearerToken: () => "token",
     verifySupabaseJwt: async () => ({ valid: true, userId: "user-1" }),
+    isValidTwoCards,
     isValidUuid: () => true,
     normalizeRequestId,
     isPlainObject,
@@ -515,7 +586,12 @@ const run = async () => {
     cleanupLogs.some((entry) => entry.kind === "poker_hole_cards_cleaned"),
     "expected cleanup log"
   );
-  assert.equal(cleanupHoleCardsStore.size, 0, "expected cleanupHoleCardsStore to be empty after HAND_DONE cleanup");
+  const remainingKeys = Array.from(cleanupHoleCardsStore.keys());
+  assert.equal(
+    remainingKeys.some((key) => String(key).includes(`|${cleanupEndedHandId}|`)),
+    false,
+    "expected HAND_DONE cleanup to remove ended handId entries"
+  );
 
   const handlerUser2Turn = makeHandler(queries, storedState, holeCardsStore, "user-2");
   const user2Check = await handlerUser2Turn({
