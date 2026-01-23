@@ -87,7 +87,11 @@ export async function handler(event) {
         Array.isArray(seatRows) &&
         seatRows.some((seat) => seat.user_id === authUserId && seat.status === "ACTIVE");
       let myHoleCards = [];
-      if (authUserId && isSeatedActive && handId && isActionPhase(normalizedState.phase)) {
+      if (authUserId && isSeatedActive && isActionPhase(normalizedState.phase)) {
+        if (!handId) {
+          klog("poker_state_corrupt", { tableId, phase: normalizedState.phase, reason: "missing_hand_id" });
+          throw makeError(409, "state_invalid");
+        }
         const holeRows = await tx.unsafe(
           "select cards from public.poker_hole_cards where table_id = $1 and hand_id = $2 and user_id = $3 limit 1;",
           [tableId, handId, authUserId]

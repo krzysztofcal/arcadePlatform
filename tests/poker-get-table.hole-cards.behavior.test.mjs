@@ -164,7 +164,29 @@ const runSeatedMissing = async () => {
   assert.equal(payload.error, "state_invalid");
 };
 
+const runSeatedMissingHandId = async () => {
+  const originalHandId = baseState.handId;
+  baseState.handId = "";
+  const queries = [];
+  const holeCardsStore = new Map();
+  const handler = makeHandler(queries, holeCardsStore, "user-1");
+  const response = await handler({
+    httpMethod: "GET",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    queryStringParameters: { tableId },
+  });
+  baseState.handId = originalHandId;
+  assert.equal(response.statusCode, 409);
+  const payload = JSON.parse(response.body);
+  assert.equal(payload.error, "state_invalid");
+  assert.equal(
+    queries.some((entry) => entry.query.toLowerCase().includes("from public.poker_hole_cards")),
+    false
+  );
+};
+
 await runSeated();
 await runNotSeated();
 await runAnonymous();
 await runSeatedMissing();
+await runSeatedMissingHandId();
