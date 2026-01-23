@@ -231,6 +231,8 @@ export async function handler(event) {
         throw makeError(403, "not_allowed");
       }
 
+      await loadMyHoleCards(tx, currentState, currentState.phase, tableId, auth.userId);
+
       if (lastByUserId[auth.userId] === requestId) {
         const version = Number(stateRow.version);
         if (!Number.isFinite(version)) {

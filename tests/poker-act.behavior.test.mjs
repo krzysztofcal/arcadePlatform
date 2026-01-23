@@ -285,6 +285,33 @@ const run = async () => {
   assert.equal(notTurn.statusCode, 403);
   assert.equal(JSON.parse(notTurn.body).error, "not_your_turn");
 
+  const missingHoleCardsStore = new Map();
+  missingHoleCardsStore.set(
+    `${tableId}|${baseState.handId}|user-2`,
+    [{ r: "Q", s: "H" }, { r: "J", s: "H" }]
+  );
+  missingHoleCardsStore.set(
+    `${tableId}|${baseState.handId}|user-3`,
+    [{ r: "9", s: "D" }, { r: "9", s: "C" }]
+  );
+  const missingHoleCards = await runCase({
+    state: baseState,
+    action: { type: "CHECK" },
+    requestId: "req-missing-hole-cards",
+    userId: "user-1",
+    holeCardsStore: missingHoleCardsStore,
+  });
+  assert.equal(missingHoleCards.response.statusCode, 409);
+  assert.equal(JSON.parse(missingHoleCards.response.body).error, "state_invalid");
+  assert.equal(
+    missingHoleCards.queries.some((entry) => entry.query.toLowerCase().includes("update public.poker_state")),
+    false
+  );
+  assert.equal(
+    missingHoleCards.queries.some((entry) => entry.query.toLowerCase().includes("insert into public.poker_actions")),
+    false
+  );
+
   const handlerUser1 = makeHandler(queries, storedState, holeCardsStore, "user-1");
   const user1Check = await handlerUser1({
     httpMethod: "POST",
