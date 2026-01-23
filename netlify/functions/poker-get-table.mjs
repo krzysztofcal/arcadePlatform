@@ -11,6 +11,12 @@ const makeError = (status, code) => {
   return err;
 };
 
+const isMissingTableError = (error) => {
+  if (!error) return false;
+  const message = String(error.message || "").toLowerCase();
+  return (error.code === "42P01" || message.includes("does not exist")) && message.includes("poker_hole_cards");
+};
+
 const parseTableId = (event) => {
   const queryValue = event.queryStringParameters?.tableId;
   if (typeof queryValue === "string" && queryValue.trim()) {
@@ -52,8 +58,15 @@ export async function handler(event) {
 
   // Table info is public; myHoleCards only returned when authenticated + seated ACTIVE + action phase.
   const token = extractBearerToken(event.headers);
-  const auth = await verifySupabaseJwt(token);
-  const authUserId = auth.valid && auth.userId ? auth.userId : null;
+  let authUserId = null;
+  if (token) {
+    try {
+      const auth = await verifySupabaseJwt(token);
+      authUserId = auth.valid && auth.userId ? auth.userId : null;
+    } catch {
+      authUserId = null;
+    }
+  }
 
   try {
     const result = await beginSql(async (tx) => {
@@ -93,10 +106,19 @@ export async function handler(event) {
           klog("poker_state_corrupt", { tableId, phase: normalizedState.phase, reason: "missing_hand_id" });
           throw makeError(409, "state_invalid");
         }
-        const holeRows = await tx.unsafe(
-          "select cards from public.poker_hole_cards where table_id = $1 and hand_id = $2 and user_id = $3 limit 1;",
-          [tableId, handId, authUserId]
-        );
+        let holeRows;
+        try {
+          holeRows = await tx.unsafe(
+            "select cards from public.poker_hole_cards where table_id = $1 and hand_id = $2 and user_id = $3 limit 1;",
+            [tableId, handId, authUserId]
+          );
+        } catch (error) {
+          if (isMissingTableError(error)) {
+            klog("poker_schema_not_ready", { table: "poker_hole_cards", tableId, phase: normalizedState.phase });
+            throw makeError(409, "state_invalid");
+          }
+          throw error;
+        }
         const holeCards = holeRows?.[0]?.cards;
         if (isValidTwoCards(holeCards)) {
           myHoleCards = holeCards;

@@ -101,10 +101,20 @@ const loadMyHoleCards = async (tx, { state, phase, tableId, userId, log }) => {
     }
     return [];
   }
-  const holeRows = await tx.unsafe(
-    "select cards from public.poker_hole_cards where table_id = $1 and hand_id = $2 and user_id = $3 limit 1;",
-    [tableId, handId, userId]
-  );
+  let holeRows;
+  try {
+    holeRows = await tx.unsafe(
+      "select cards from public.poker_hole_cards where table_id = $1 and hand_id = $2 and user_id = $3 limit 1;",
+      [tableId, handId, userId]
+    );
+  } catch (error) {
+    const message = String(error?.message || "").toLowerCase();
+    if (error?.code === "42P01" || (message.includes("does not exist") && message.includes("poker_hole_cards"))) {
+      if (typeof log === "function") log("poker_schema_not_ready", { table: "poker_hole_cards", tableId, phase });
+      throw makeError(409, "state_invalid");
+    }
+    throw error;
+  }
   const holeCards = holeRows?.[0]?.cards;
   if (!isValidTwoCards(holeCards)) {
     if (isActionPhase(phase)) {

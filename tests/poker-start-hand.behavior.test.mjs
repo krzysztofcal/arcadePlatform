@@ -275,3 +275,76 @@ const runReplayNotActionPhase = async () => {
 };
 
 await runReplayNotActionPhase();
+
+const runMissingHoleCardsTable = async () => {
+  const queries = [];
+  const storedState = { value: null };
+  const holeCardsStore = new Map();
+  const handler = loadPokerHandler("netlify/functions/poker-start-hand.mjs", {
+    baseHeaders: () => ({}),
+    corsHeaders: () => ({ "access-control-allow-origin": "https://example.test" }),
+    createDeck,
+    dealHoleCards,
+    extractBearerToken: () => "token",
+    getRng,
+    isPlainObject,
+    isStateStorageValid,
+    shuffle,
+    verifySupabaseJwt: async () => ({ valid: true, userId }),
+    isValidUuid: () => true,
+    normalizeJsonState,
+    withoutPrivateState,
+    beginSql: async (fn) =>
+      fn({
+        unsafe: async (query, params) => {
+          const text = String(query).toLowerCase();
+          queries.push({ query: String(query), params });
+          if (text.includes("from public.poker_tables")) {
+            return [{ id: tableId, status: "OPEN", max_players: 6 }];
+          }
+          if (text.includes("from public.poker_state")) {
+            if (storedState.value) {
+              return [{ version: 2, state: JSON.parse(storedState.value) }];
+            }
+            return [{ version: 1, state: { phase: "INIT", stacks: {} } }];
+          }
+          if (text.includes("from public.poker_seats")) {
+            return [
+              { user_id: "user-1", seat_no: 1, status: "ACTIVE" },
+              { user_id: "user-2", seat_no: 3, status: "ACTIVE" },
+            ];
+          }
+          if (text.includes("delete from public.poker_hole_cards")) {
+            const error = new Error('relation "public.poker_hole_cards" does not exist');
+            error.code = "42P01";
+            throw error;
+          }
+          if (text.includes("insert into public.poker_hole_cards")) {
+            holeCardsStore.set("noop", []);
+            return [{ ok: true }];
+          }
+          if (text.includes("update public.poker_state")) {
+            storedState.value = params?.[1] || null;
+            return [{ version: 2, state: storedState.value }];
+          }
+          if (text.includes("insert into public.poker_actions")) {
+            return [{ ok: true }];
+          }
+          return [];
+        },
+      }),
+    klog: () => {},
+  });
+  const response = await handler({
+    httpMethod: "POST",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    body: JSON.stringify({ tableId, requestId: "req-missing-table" }),
+  });
+  assert.equal(response.statusCode, 409);
+  const payload = JSON.parse(response.body);
+  assert.equal(payload.error, "state_invalid");
+  assert.equal(queries.some((q) => q.query.toLowerCase().includes("update public.poker_state")), false);
+  assert.equal(queries.some((q) => q.query.toLowerCase().includes("insert into public.poker_actions")), false);
+};
+
+await runMissingHoleCardsTable();

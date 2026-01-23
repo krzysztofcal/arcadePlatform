@@ -21,13 +21,14 @@ const baseState = {
   },
 };
 
-const makeHandler = (queries, holeCardsStore, authUserId) =>
+const makeHandler = (queries, holeCardsStore, authUserId, overrides = {}) =>
   loadPokerHandler("netlify/functions/poker-get-table.mjs", {
     baseHeaders: () => ({}),
     corsHeaders: () => ({ "access-control-allow-origin": "https://example.test" }),
     extractBearerToken: () => "token",
-    verifySupabaseJwt: async () =>
-      authUserId ? { valid: true, userId: authUserId } : { valid: false, reason: "missing_token" },
+    verifySupabaseJwt: overrides.verifySupabaseJwt
+      ? overrides.verifySupabaseJwt
+      : async () => (authUserId ? { valid: true, userId: authUserId } : { valid: false, reason: "missing_token" }),
     normalizeJsonState,
     withoutPrivateState,
     isValidUuid: () => true,
@@ -207,9 +208,33 @@ const runSeatedNonActionPhase = async () => {
   );
 };
 
+const runBadToken = async () => {
+  const queries = [];
+  const holeCardsStore = new Map();
+  const handler = makeHandler(queries, holeCardsStore, null, {
+    verifySupabaseJwt: async () => {
+      throw new Error("invalid_token");
+    },
+  });
+  const response = await handler({
+    httpMethod: "GET",
+    headers: { origin: "https://example.test", authorization: "Bearer bad-token" },
+    queryStringParameters: { tableId },
+  });
+  assert.equal(response.statusCode, 200);
+  const payload = JSON.parse(response.body);
+  assert.ok(Array.isArray(payload.myHoleCards));
+  assert.equal(payload.myHoleCards.length, 0);
+  assert.equal(
+    queries.some((entry) => entry.query.toLowerCase().includes("from public.poker_hole_cards")),
+    false
+  );
+};
+
 await runSeated();
 await runNotSeated();
 await runAnonymous();
 await runSeatedMissing();
 await runSeatedMissingHandId();
 await runSeatedNonActionPhase();
+await runBadToken();

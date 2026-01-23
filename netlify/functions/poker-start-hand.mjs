@@ -132,10 +132,20 @@ export async function handler(event) {
         currentState.lastStartHandRequestId === requestIdParsed.value && currentState.lastStartHandUserId === auth.userId;
       if (sameRequest) {
         if (isActionPhase(currentState.phase) && typeof currentState.handId === "string" && currentState.handId.trim()) {
-          const holeRows = await tx.unsafe(
-            "select cards from public.poker_hole_cards where table_id = $1 and hand_id = $2 and user_id = $3 limit 1;",
-            [tableId, currentState.handId, auth.userId]
-          );
+          let holeRows;
+          try {
+            holeRows = await tx.unsafe(
+              "select cards from public.poker_hole_cards where table_id = $1 and hand_id = $2 and user_id = $3 limit 1;",
+              [tableId, currentState.handId, auth.userId]
+            );
+          } catch (error) {
+            const message = String(error?.message || "").toLowerCase();
+            if (error?.code === "42P01" || (message.includes("does not exist") && message.includes("poker_hole_cards"))) {
+              klog("poker_schema_not_ready", { table: "poker_hole_cards", tableId, phase: currentState.phase });
+              throw makeError(409, "state_invalid");
+            }
+            throw error;
+          }
           const holeCards = holeRows?.[0]?.cards;
           if (!isValidTwoCards(holeCards)) {
             klog("poker_state_corrupt", { tableId, phase: currentState.phase, reason: "invalid_hole_cards_shape" });
@@ -235,7 +245,16 @@ export async function handler(event) {
         throw makeError(409, "state_invalid");
       }
 
-      await tx.unsafe("delete from public.poker_hole_cards where table_id = $1 and hand_id = $2;", [tableId, handId]);
+      try {
+        await tx.unsafe("delete from public.poker_hole_cards where table_id = $1 and hand_id = $2;", [tableId, handId]);
+      } catch (error) {
+        const message = String(error?.message || "").toLowerCase();
+        if (error?.code === "42P01" || (message.includes("does not exist") && message.includes("poker_hole_cards"))) {
+          klog("poker_schema_not_ready", { table: "poker_hole_cards", tableId, phase: updatedState.phase });
+          throw makeError(409, "state_invalid");
+        }
+        throw error;
+      }
       if (holeCardValues.length > 0) {
         const inserts = [];
         const params = [];
@@ -245,10 +264,19 @@ export async function handler(event) {
           params.push(tableId, handId, entry.userId, JSON.stringify(entry.cards));
           idx += 4;
         }
-        await tx.unsafe(
-          `insert into public.poker_hole_cards (table_id, hand_id, user_id, cards) values ${inserts.join(", ")} on conflict (table_id, hand_id, user_id) do update set cards = excluded.cards;`,
-          params
-        );
+        try {
+          await tx.unsafe(
+            `insert into public.poker_hole_cards (table_id, hand_id, user_id, cards) values ${inserts.join(", ")} on conflict (table_id, hand_id, user_id) do update set cards = excluded.cards;`,
+            params
+          );
+        } catch (error) {
+          const message = String(error?.message || "").toLowerCase();
+          if (error?.code === "42P01" || (message.includes("does not exist") && message.includes("poker_hole_cards"))) {
+            klog("poker_schema_not_ready", { table: "poker_hole_cards", tableId, phase: updatedState.phase });
+            throw makeError(409, "state_invalid");
+          }
+          throw error;
+        }
       }
 
       const updateRows = await tx.unsafe(

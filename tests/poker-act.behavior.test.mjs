@@ -158,6 +158,69 @@ const run = async () => {
   assert.equal(invalidBet.response.statusCode, 400);
   assert.equal(JSON.parse(invalidBet.response.body).error, "invalid_action");
 
+  const missingTableQueries = [];
+  const missingTableState = { value: JSON.stringify(baseState), version: 7 };
+  const missingTableHandler = loadPokerHandler("netlify/functions/poker-act.mjs", {
+    baseHeaders: () => ({}),
+    corsHeaders: () => ({ "access-control-allow-origin": "https://example.test" }),
+    extractBearerToken: () => "token",
+    verifySupabaseJwt: async () => ({ valid: true, userId: "user-1" }),
+    isValidUuid: () => true,
+    normalizeRequestId,
+    isPlainObject,
+    isStateStorageValid,
+    normalizeJsonState,
+    withoutPrivateState,
+    advanceIfNeeded,
+    applyAction,
+    beginSql: async (fn) =>
+      fn({
+        unsafe: async (query, params) => {
+          const text = String(query).toLowerCase();
+          missingTableQueries.push({ query: String(query), params });
+          if (text.includes("from public.poker_tables")) {
+            return [{ id: tableId, status: "OPEN" }];
+          }
+          if (text.includes("from public.poker_seats")) {
+            return [{ user_id: "user-1" }];
+          }
+          if (text.includes("from public.poker_state")) {
+            return [{ version: missingTableState.version, state: JSON.parse(missingTableState.value) }];
+          }
+          if (text.includes("from public.poker_hole_cards")) {
+            const error = new Error('relation "public.poker_hole_cards" does not exist');
+            error.code = "42P01";
+            throw error;
+          }
+          if (text.includes("update public.poker_state")) {
+            missingTableState.value = params?.[1] || missingTableState.value;
+            missingTableState.version += 1;
+            return [{ version: missingTableState.version }];
+          }
+          if (text.includes("insert into public.poker_actions")) {
+            return [{ ok: true }];
+          }
+          return [];
+        },
+      }),
+    klog: () => {},
+  });
+  const missingTableResponse = await missingTableHandler({
+    httpMethod: "POST",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    body: JSON.stringify({ tableId, requestId: "req-missing-table", action: { type: "CHECK" } }),
+  });
+  assert.equal(missingTableResponse.statusCode, 409);
+  assert.equal(JSON.parse(missingTableResponse.body).error, "state_invalid");
+  assert.equal(
+    missingTableQueries.some((entry) => entry.query.toLowerCase().includes("update public.poker_state")),
+    false
+  );
+  assert.equal(
+    missingTableQueries.some((entry) => entry.query.toLowerCase().includes("insert into public.poker_actions")),
+    false
+  );
+
   const raiseState = {
     ...baseState,
     stacks: { ...baseState.stacks, "user-1": 20 },
