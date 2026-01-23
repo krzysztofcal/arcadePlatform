@@ -197,7 +197,16 @@ export async function handler(event) {
         });
         throw makeError(409, "state_invalid");
       }
-      if (!isActionPhase(currentState.phase) || !currentState.turnUserId) {
+      if (!isActionPhase(currentState.phase)) {
+        klog("poker_act_rejected", {
+          tableId,
+          userId: auth.userId,
+          reason: "invalid_phase",
+          phase: currentState?.phase || null,
+        });
+        throw makeError(409, "state_invalid");
+      }
+      if (!currentState.turnUserId) {
         klog("poker_act_rejected", {
           tableId,
           userId: auth.userId,
