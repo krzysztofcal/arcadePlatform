@@ -72,18 +72,24 @@ const makeHandler = (queries, storedState, holeCardsStore, userId, options = {})
           if (text.includes("from public.poker_state")) {
             return [{ version: storedState.version, state: JSON.parse(storedState.value) }];
           }
-          if (text.includes("from public.poker_hole_cards")) {
-            const key = `${params?.[0]}|${params?.[1]}|${params?.[2]}`;
-            const cards = holeCardsStore.get(key);
-            return cards ? [{ cards }] : [];
-          }
           if (text.includes("update public.poker_state")) {
             storedState.value = params?.[1] || storedState.value;
             storedState.version += 1;
             return [{ version: storedState.version }];
           }
           if (text.includes("delete from public.poker_hole_cards")) {
+            const tId = String(params?.[0] ?? "");
+            const hId = String(params?.[1] ?? "");
+            const prefix = `${tId}|${hId}|`;
+            for (const key of Array.from(holeCardsStore.keys())) {
+              if (!tId || !hId || String(key).startsWith(prefix)) holeCardsStore.delete(key);
+            }
             return [{ ok: true }];
+          }
+          if (text.includes("from public.poker_hole_cards")) {
+            const key = `${params?.[0]}|${params?.[1]}|${params?.[2]}`;
+            const cards = holeCardsStore.get(key);
+            return cards ? [{ cards }] : [];
           }
           if (text.includes("insert into public.poker_actions")) {
             return [{ ok: true }];
@@ -398,18 +404,24 @@ const run = async () => {
           if (text.includes("from public.poker_state")) {
             return [{ version: cleanupStoredState.version, state: JSON.parse(cleanupStoredState.value) }];
           }
-          if (text.includes("from public.poker_hole_cards")) {
-            const key = `${params?.[0]}|${params?.[1]}|${params?.[2]}`;
-            const cards = cleanupHoleCardsStore.get(key);
-            return cards ? [{ cards }] : [];
-          }
           if (text.includes("update public.poker_state")) {
             cleanupStoredState.value = params?.[1] || cleanupStoredState.value;
             cleanupStoredState.version += 1;
             return [{ version: cleanupStoredState.version }];
           }
           if (text.includes("delete from public.poker_hole_cards")) {
+            const tId = String(params?.[0] ?? "");
+            const hId = String(params?.[1] ?? "");
+            const prefix = `${tId}|${hId}|`;
+            for (const key of Array.from(cleanupHoleCardsStore.keys())) {
+              if (!tId || !hId || String(key).startsWith(prefix)) cleanupHoleCardsStore.delete(key);
+            }
             return [{ ok: true }];
+          }
+          if (text.includes("from public.poker_hole_cards")) {
+            const key = `${params?.[0]}|${params?.[1]}|${params?.[2]}`;
+            const cards = cleanupHoleCardsStore.get(key);
+            return cards ? [{ cards }] : [];
           }
           if (text.includes("insert into public.poker_actions")) {
             return [{ ok: true }];
@@ -433,6 +445,7 @@ const run = async () => {
     cleanupLogs.some((entry) => entry.kind === "poker_hole_cards_cleaned"),
     "expected cleanup log"
   );
+  assert.equal(cleanupHoleCardsStore.size, 0, "expected cleanupHoleCardsStore to be empty after HAND_DONE cleanup");
 
   const handlerUser2Turn = makeHandler(queries, storedState, holeCardsStore, "user-2");
   const user2Check = await handlerUser2Turn({

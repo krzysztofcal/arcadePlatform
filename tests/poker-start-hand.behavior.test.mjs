@@ -122,6 +122,12 @@ const run = async () => {
 
   const updateCall = queries.find((q) => q.query.toLowerCase().includes("update public.poker_state"));
   assert.ok(updateCall, "expected update to poker_state");
+  const normQueries = queries.map((q) => String(q.query).toLowerCase());
+  const holeInsertIdx = normQueries.findIndex((q) => q.includes("insert into public.poker_hole_cards"));
+  const stateUpdateIdx = normQueries.findIndex((q) => q.includes("update public.poker_state"));
+  assert.ok(holeInsertIdx !== -1, "expected poker_hole_cards insert");
+  assert.ok(stateUpdateIdx !== -1, "expected poker_state update");
+  assert.ok(holeInsertIdx < stateUpdateIdx, "hole cards must be upserted before poker_state update");
   const updatedState = JSON.parse(updateCall.params?.[1] || "{}");
   assert.ok(Array.isArray(updatedState.deck), "state should persist deck as an array");
   assert.equal(updatedState.holeCardsByUserId, undefined);
