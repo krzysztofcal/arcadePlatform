@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import { baseHeaders, beginSql, corsHeaders, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
 import { createDeck, dealHoleCards, shuffle } from "./_shared/poker-engine.mjs";
 import { isValidTwoCards } from "./_shared/poker-cards-utils.mjs";
@@ -159,7 +160,7 @@ export async function handler(event) {
       const turnUserId = validSeats[1]?.user_id || validSeats[0].user_id;
 
       const rng = getRng();
-      const handId = `hand_${Date.now()}_${Math.floor(rng() * 1e6)}`;
+      const handId = crypto.randomUUID();
       const derivedSeats = validSeats.map((seat) => ({ userId: seat.user_id, seatNo: seat.seat_no }));
       const activeUserIds = new Set(validSeats.map((seat) => seat.user_id));
       const activeUserIdList = validSeats.map((seat) => seat.user_id);
