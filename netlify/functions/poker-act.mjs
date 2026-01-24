@@ -330,6 +330,16 @@ export async function handler(event) {
         });
         throw makeError(409, "state_invalid");
       }
+      if (isShowdownPhase(currentState.phase) && actionParsed.value.type !== "CHECK") {
+        klog("poker_act_rejected", {
+          tableId,
+          userId: auth.userId,
+          reason: "invalid_action",
+          phase: currentState.phase,
+          actionType: actionParsed.value.type,
+        });
+        throw makeError(400, "invalid_action");
+      }
       if (isActionPhase(currentState.phase) && !currentState.turnUserId) {
         klog("poker_act_rejected", {
           tableId,
@@ -690,7 +700,7 @@ export async function handler(event) {
         tableId,
         version: newVersion,
         state: withoutPrivateState(updatedState),
-        myHoleCards: isShowdownPhase(updatedState.phase) ? [] : holeCardsByUserId[auth.userId] || [],
+        myHoleCards: isShowdownPhase(updatedState.phase) ? [] : holeCardsByUserId?.[auth.userId] || [],
         events,
         replayed: false,
       };
