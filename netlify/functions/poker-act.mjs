@@ -81,8 +81,12 @@ const cardKey = (card) => {
 const cardsSameSet = (left, right) => {
   if (!Array.isArray(left) || !Array.isArray(right)) return false;
   if (left.length !== right.length) return false;
-  const leftKeys = left.map(cardKey).filter(Boolean).sort();
-  const rightKeys = right.map(cardKey).filter(Boolean).sort();
+  const leftKeys = left.map(cardKey);
+  if (leftKeys.some((key) => !key)) return false;
+  leftKeys.sort();
+  const rightKeys = right.map(cardKey);
+  if (rightKeys.some((key) => !key)) return false;
+  rightKeys.sort();
   if (leftKeys.length !== rightKeys.length) return false;
   for (let i = 0; i < leftKeys.length; i += 1) {
     if (leftKeys[i] !== rightKeys[i]) return false;
@@ -99,13 +103,14 @@ const arraysEqual = (left, right) => {
   return true;
 };
 
+const toSeatNo = (value) => {
+  const n = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(n) ? n : Number.POSITIVE_INFINITY;
+};
+
 const normalizeSeatOrderFromState = (seats) => {
   if (!Array.isArray(seats)) return [];
-  const ordered = seats.slice().sort((a, b) => {
-    const left = Number.isFinite(a?.seatNo) ? a.seatNo : Number.POSITIVE_INFINITY;
-    const right = Number.isFinite(b?.seatNo) ? b.seatNo : Number.POSITIVE_INFINITY;
-    return left - right;
-  });
+  const ordered = seats.slice().sort((a, b) => toSeatNo(a?.seatNo) - toSeatNo(b?.seatNo));
   const out = [];
   const seen = new Set();
   for (const seat of ordered) {
