@@ -113,8 +113,17 @@ const loadHandHoleCardsForShowdown = async (tx, { tableId, handId, userIds, klog
   if (!Array.isArray(userIds) || userIds.length === 0) {
     throw new Error("state_invalid");
   }
+  const invalid = userIds.filter((id) => !isValidUuid(id));
+  if (invalid.length > 0) {
+    klog("poker_showdown_invalid_user_ids", {
+      tableId,
+      handId,
+      invalidUserIds: takeList(invalid.map(hashUserId)),
+    });
+    throw new Error("state_invalid");
+  }
   const rows = await tx.unsafe(
-    "select user_id, cards from public.poker_hole_cards where table_id = $1 and hand_id = $2 and user_id = any($3);",
+    "select user_id, cards from public.poker_hole_cards where table_id = $1 and hand_id = $2 and user_id = any($3::uuid[]);",
     [tableId, handId, userIds]
   );
   const list = Array.isArray(rows) ? rows : [];

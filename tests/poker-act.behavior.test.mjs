@@ -83,6 +83,7 @@ const makeHandler = (queries, storedState, userId, options = {}) =>
             const okParams = Array.isArray(params) && params.length >= 2 && params[0] === tableId && params[1] === userId;
             if (hasActive && hasUserFilter && okParams) return [{ user_id: userId }];
             if (hasActive) {
+              if (options.activeSeatRowsOverride) return options.activeSeatRowsOverride;
               return [
                 { user_id: "user-1", seat_no: 1 },
                 { user_id: "user-2", seat_no: 2 },
@@ -460,6 +461,18 @@ const run = async () => {
   ).length;
   assert.equal(showdownUpdateCountAfter, showdownUpdateCount);
   assert.equal(showdownActionCountAfter, showdownActionCount);
+
+  const invalidSeatHandler = makeHandler(showdownQueries, showdownStoredState, "user-1", {
+    holeCardsByUserId: showdownHoleCards,
+    activeSeatRowsOverride: [{ user_id: "not-a-uuid", seat_no: 1 }],
+  });
+  const invalidSeatResponse = await invalidSeatHandler({
+    httpMethod: "POST",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    body: JSON.stringify({ tableId, requestId: "req-showdown-bad-seat", action: { type: "CHECK" } }),
+  });
+  assert.equal(invalidSeatResponse.statusCode, 409);
+  assert.equal(JSON.parse(invalidSeatResponse.body).error, "state_invalid");
 };
 
 await run();
