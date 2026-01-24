@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { isHoleCardsTableMissing, loadHoleCardsByUserId } from "../netlify/functions/_shared/poker-hole-cards-store.mjs";
 import { advanceIfNeeded, applyAction } from "../netlify/functions/_shared/poker-reducer.mjs";
 import { normalizeRequestId } from "../netlify/functions/_shared/poker-request-id.mjs";
 import {
@@ -24,11 +25,7 @@ const baseState = {
   community: [],
   dealerSeatNo: 1,
   turnUserId: "user-1",
-  holeCardsByUserId: {
-    "user-1": [{ r: "A", s: "S" }, { r: "K", s: "S" }],
-    "user-2": [{ r: "Q", s: "H" }, { r: "J", s: "H" }],
-    "user-3": [{ r: "9", s: "D" }, { r: "9", s: "C" }],
-  },
+  handId: "hand-1",
   deck: [
     { r: "2", s: "S" },
     { r: "3", s: "S" },
@@ -44,6 +41,12 @@ const baseState = {
   lastActionRequestIdByUserId: {},
 };
 
+const defaultHoleCards = {
+  "user-1": [{ r: "A", s: "S" }, { r: "K", s: "S" }],
+  "user-2": [{ r: "Q", s: "H" }, { r: "J", s: "H" }],
+  "user-3": [{ r: "9", s: "D" }, { r: "9", s: "C" }],
+};
+
 const makeHandler = (queries, storedState, userId, options = {}) =>
   loadPokerHandler("netlify/functions/poker-act.mjs", {
     baseHeaders: () => ({}),
@@ -57,7 +60,9 @@ const makeHandler = (queries, storedState, userId, options = {}) =>
     normalizeJsonState,
     withoutPrivateState,
     advanceIfNeeded,
-    applyAction,
+    applyAction: options.applyAction || applyAction,
+    isHoleCardsTableMissing,
+    loadHoleCardsByUserId,
     beginSql: async (fn) =>
       fn({
         unsafe: async (query, params) => {
@@ -71,10 +76,26 @@ const makeHandler = (queries, storedState, userId, options = {}) =>
             const hasUserFilter = text.includes("user_id = $2");
             const okParams = Array.isArray(params) && params.length >= 2 && params[0] === tableId && params[1] === userId;
             if (hasActive && hasUserFilter && okParams) return [{ user_id: userId }];
+            if (hasActive) {
+              return [
+                { user_id: "user-1", seat_no: 1 },
+                { user_id: "user-2", seat_no: 2 },
+                { user_id: "user-3", seat_no: 3 },
+              ];
+            }
             return [];
           }
           if (text.includes("from public.poker_state")) {
             return [{ version: storedState.version, state: JSON.parse(storedState.value) }];
+          }
+          if (text.includes("from public.poker_hole_cards")) {
+            if (options.holeCardsError) throw options.holeCardsError;
+            const rows = [];
+            const map = options.holeCardsByUserId || defaultHoleCards;
+            for (const [userIdValue, cards] of Object.entries(map)) {
+              rows.push({ user_id: userIdValue, cards });
+            }
+            return rows;
           }
           if (text.includes("update public.poker_state")) {
             storedState.value = params?.[1] || storedState.value;
@@ -90,11 +111,14 @@ const makeHandler = (queries, storedState, userId, options = {}) =>
     klog: options.klog || (() => {}),
   });
 
-const runCase = async ({ state, action, requestId, userId, klogCalls }) => {
+const runCase = async ({ state, action, requestId, userId, klogCalls, holeCardsByUserId, holeCardsError, applyAction: applyActionOverride }) => {
   const queries = [];
   const storedState = { value: JSON.stringify(state), version: 3 };
   const handler = makeHandler(queries, storedState, userId, {
     klog: klogCalls ? (kind, data) => klogCalls.push({ kind, data }) : undefined,
+    holeCardsByUserId,
+    holeCardsError,
+    applyAction: applyActionOverride,
   });
   const response = await handler({
     httpMethod: "POST",
@@ -187,9 +211,10 @@ const run = async () => {
       allCards.push({ r, s });
     }
   }
+  const corruptDeck = allCards.concat(allCards[0]);
   const corruptState = {
     ...baseState,
-    deck: allCards.slice(0, 53),
+    deck: corruptDeck,
   };
   const corruptResponse = await runCase({
     state: corruptState,
@@ -207,42 +232,6 @@ const run = async () => {
     { requirePrivate: false }
   );
   assert.equal(storageCheck, true);
-
-  const noPrivateState = {
-    ...baseState,
-    holeCardsByUserId: undefined,
-    deck: undefined,
-  };
-  const noPrivateResponse = await runCase({
-    state: noPrivateState,
-    action: { type: "CHECK" },
-    requestId: "req-no-private",
-    userId: "user-1",
-  });
-  assert.equal(noPrivateResponse.response.statusCode, 409);
-assert.equal(JSON.parse(noPrivateResponse.response.body).error, "state_invalid");
-
-  const unseatedCalls = [];
-  const unseatedState = {
-    ...baseState,
-    holeCardsByUserId: {
-      ...baseState.holeCardsByUserId,
-      "user-4": [
-        { r: "A", s: "H" },
-        { r: "K", s: "H" },
-      ],
-    },
-  };
-  const unseatedResponse = await runCase({
-    state: unseatedState,
-    action: { type: "CHECK" },
-    requestId: "req-unseated",
-    userId: "user-1",
-    klogCalls: unseatedCalls,
-  });
-  assert.equal(unseatedResponse.response.statusCode, 409);
-  assert.equal(JSON.parse(unseatedResponse.response.body).error, "state_invalid");
-  assert.ok(unseatedCalls.some((entry) => entry.kind === "poker_state_corrupt"));
 
   const handlerUser2 = makeHandler(queries, storedState, "user-2");
   const notTurn = await handlerUser2({
@@ -284,6 +273,8 @@ assert.equal(JSON.parse(noPrivateResponse.response.body).error, "state_invalid")
   assert.equal(replayPayload.replayed, true);
   const updateCountAfterReplay = queries.filter((entry) => entry.query.toLowerCase().includes("update public.poker_state")).length;
   assert.equal(updateCountAfterReplay, updateCountBeforeReplay);
+  const holeCardQueries = queries.filter((entry) => entry.query.toLowerCase().includes("from public.poker_hole_cards"));
+  assert.ok(holeCardQueries.length >= 1);
 
   const handlerUser2Turn = makeHandler(queries, storedState, "user-2");
   const user2Check = await handlerUser2Turn({
@@ -316,11 +307,71 @@ assert.equal(JSON.parse(noPrivateResponse.response.body).error, "state_invalid")
   const updateCall = queries.find((entry) => entry.query.toLowerCase().includes("update public.poker_state"));
   assert.ok(updateCall, "expected poker_state update");
   const updatedState = JSON.parse(updateCall.params?.[1] || "{}");
-  assert.ok(updatedState.holeCardsByUserId, "state should persist hole cards");
+  assert.equal(updatedState.holeCardsByUserId, undefined);
   assert.ok(Array.isArray(updatedState.deck), "state should persist deck");
 
   const actionInserts = queries.filter((entry) => entry.query.toLowerCase().includes("insert into public.poker_actions"));
   assert.equal(actionInserts.length, 3);
+
+  let capturedKeys = null;
+  const applyActionWrapped = (state, action) => {
+    capturedKeys = Object.keys(state.holeCardsByUserId || {}).sort();
+    return applyAction(state, action);
+  };
+  const filteredResponse = await runCase({
+    state: baseState,
+    action: { type: "CHECK" },
+    requestId: "req-filtered",
+    userId: "user-1",
+    holeCardsByUserId: {
+      ...defaultHoleCards,
+      "user-999": [
+        { r: "2", s: "H" },
+        { r: "3", s: "H" },
+      ],
+    },
+    applyAction: applyActionWrapped,
+  });
+  assert.equal(filteredResponse.response.statusCode, 200);
+  assert.deepEqual(capturedKeys, ["user-1", "user-2", "user-3"]);
+
+  const missingTableError = new Error("missing table");
+  missingTableError.code = "42P01";
+  const missingTableResponse = await runCase({
+    state: baseState,
+    action: { type: "CHECK" },
+    requestId: "req-missing-table",
+    userId: "user-1",
+    holeCardsError: missingTableError,
+  });
+  assert.equal(missingTableResponse.response.statusCode, 409);
+  assert.equal(JSON.parse(missingTableResponse.response.body).error, "state_invalid");
+
+  const invalidCardsResponse = await runCase({
+    state: baseState,
+    action: { type: "CHECK" },
+    requestId: "req-invalid-cards",
+    userId: "user-1",
+    holeCardsByUserId: {
+      ...defaultHoleCards,
+      "user-2": [],
+    },
+  });
+  assert.equal(invalidCardsResponse.response.statusCode, 409);
+  assert.equal(JSON.parse(invalidCardsResponse.response.body).error, "state_invalid");
+
+  const missingRowResponse = await runCase({
+    state: baseState,
+    action: { type: "CHECK" },
+    requestId: "req-missing-row",
+    userId: "user-1",
+    holeCardsByUserId: {
+      "user-1": defaultHoleCards["user-1"],
+      "user-2": defaultHoleCards["user-2"],
+    },
+  });
+  assert.equal(missingRowResponse.response.statusCode, 409);
+  assert.equal(JSON.parse(missingRowResponse.response.body).error, "state_invalid");
 };
 
 await run();

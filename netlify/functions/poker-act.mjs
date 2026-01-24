@@ -1,4 +1,5 @@
 import { baseHeaders, beginSql, corsHeaders, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
+import { isHoleCardsTableMissing, loadHoleCardsByUserId } from "./_shared/poker-hole-cards-store.mjs";
 import { advanceIfNeeded, applyAction } from "./_shared/poker-reducer.mjs";
 import { normalizeRequestId } from "./_shared/poker-request-id.mjs";
 import { isPlainObject, isStateStorageValid, normalizeJsonState, withoutPrivateState } from "./_shared/poker-state-utils.mjs";
@@ -177,6 +178,15 @@ export async function handler(event) {
         });
         throw makeError(409, "state_invalid");
       }
+      if (typeof currentState.handId !== "string" || !currentState.handId.trim()) {
+        klog("poker_act_rejected", {
+          tableId,
+          userId: auth.userId,
+          reason: "state_invalid",
+          phase: currentState?.phase || null,
+        });
+        throw makeError(409, "state_invalid");
+      }
 
       const lastByUserId = isPlainObject(currentState.lastActionRequestIdByUserId)
         ? currentState.lastActionRequestIdByUserId
@@ -202,6 +212,32 @@ export async function handler(event) {
         throw makeError(403, "not_allowed");
       }
 
+      const activeSeatRows = await tx.unsafe(
+        "select user_id from public.poker_seats where table_id = $1 and status = 'ACTIVE' order by seat_no asc;",
+        [tableId]
+      );
+      const activeUserIds = Array.isArray(activeSeatRows)
+        ? activeSeatRows.map((row) => row?.user_id).filter(Boolean)
+        : [];
+
+      let holeCardsByUserId;
+      try {
+        const holeCards = await loadHoleCardsByUserId(tx, {
+          tableId,
+          handId: currentState.handId,
+          activeUserIds,
+        });
+        holeCardsByUserId = holeCards.holeCardsByUserId;
+      } catch (error) {
+        if (error?.message === "state_invalid") {
+          throw makeError(409, "state_invalid");
+        }
+        if (isHoleCardsTableMissing(error)) {
+          throw makeError(409, "state_invalid");
+        }
+        throw error;
+      }
+
       if (lastByUserId[auth.userId] === requestId) {
         const version = Number(stateRow.version);
         if (!Number.isFinite(version)) {
@@ -217,7 +253,7 @@ export async function handler(event) {
           tableId,
           version,
           state: withoutPrivateState(currentState),
-          myHoleCards: currentState.holeCardsByUserId?.[auth.userId] || [],
+          myHoleCards: holeCardsByUserId[auth.userId] || [],
           events: [],
           replayed: true,
         };
@@ -246,9 +282,14 @@ export async function handler(event) {
         throw makeError(400, "invalid_action");
       }
 
+      const privateState = {
+        ...currentState,
+        holeCardsByUserId,
+      };
+
       let applied;
       try {
-        applied = applyAction(currentState, { ...actionParsed.value, userId: auth.userId });
+        applied = applyAction(privateState, { ...actionParsed.value, userId: auth.userId });
       } catch (error) {
         const reason = error?.message || "invalid_action";
         if (reason === "not_your_turn") {
@@ -304,16 +345,16 @@ export async function handler(event) {
         loops += 1;
       }
 
+      const { holeCardsByUserId: _ignoredHoleCards, ...stateBase } = nextState;
       const updatedState = {
-        ...nextState,
+        ...stateBase,
         lastActionRequestIdByUserId: {
           ...lastByUserId,
           [auth.userId]: requestId,
         },
       };
 
-      const requirePrivate = updatedState.deck != null || updatedState.holeCardsByUserId != null;
-      if (!isStateStorageValid(updatedState, { requirePrivate })) {
+      if (!isStateStorageValid(updatedState, { requireDeck: true })) {
         klog("poker_state_corrupt", { tableId, phase: updatedState.phase });
         throw makeError(409, "state_invalid");
       }
@@ -362,7 +403,7 @@ export async function handler(event) {
         tableId,
         version: newVersion,
         state: withoutPrivateState(updatedState),
-        myHoleCards: updatedState.holeCardsByUserId?.[auth.userId] || [],
+        myHoleCards: holeCardsByUserId[auth.userId] || [],
         events,
         replayed: false,
       };
