@@ -56,6 +56,8 @@ export const loadPokerHandler = (filePath, mocks) => {
     "verifySupabaseJwt",
     "withoutPrivateState",
     "isValidUuid",
+    "isHoleCardsTableMissing",
+    "loadHoleCardsByUserId",
     "PRESENCE_TTL_SEC",
     "TABLE_EMPTY_CLOSE_SEC",
   ];
