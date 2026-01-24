@@ -202,7 +202,15 @@ export async function handler(event) {
       const actedThisRoundByUserId = Object.fromEntries(activeUserIdList.map((userId) => [userId, false]));
       const foldedByUserId = Object.fromEntries(activeUserIdList.map((userId) => [userId, false]));
 
-      const deck = deriveDeck(handSeed);
+      let deck;
+      try {
+        deck = deriveDeck(handSeed);
+      } catch (error) {
+        if (error?.message === "deal_secret_missing") {
+          throw makeError(409, "state_invalid");
+        }
+        throw error;
+      }
       const dealResult = dealHoleCards(deck, activeUserIdList);
       const dealtHoleCards = isPlainObject(dealResult?.holeCardsByUserId) ? dealResult.holeCardsByUserId : {};
 

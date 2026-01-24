@@ -1,41 +1,72 @@
-import { createDeck, shuffle } from "./poker-engine.mjs";
+import crypto from "node:crypto";
+import { createDeck } from "./poker-engine.mjs";
 
-const xmur3 = (input) => {
-  let h = 1779033703 ^ input.length;
-  for (let i = 0; i < input.length; i += 1) {
-    h = Math.imul(h ^ input.charCodeAt(i), 3432918353);
-    h = (h << 13) | (h >>> 19);
+const DEAL_CONTEXT = "poker-deal:v1";
+
+const getDealSecret = () => {
+  const secret = process.env.POKER_DEAL_SECRET;
+  if (typeof secret !== "string" || !secret.trim()) {
+    throw new Error("deal_secret_missing");
   }
-  return () => {
-    h = Math.imul(h ^ (h >>> 16), 2246822507);
-    h = Math.imul(h ^ (h >>> 13), 3266489909);
-    h ^= h >>> 16;
-    return h >>> 0;
-  };
+  return secret;
 };
 
-const mulberry32 = (seed) => {
-  let a = seed >>> 0;
-  return () => {
-    a += 0x6d2b79f5;
-    let t = a;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+const createHmacStream = (handSeed) => {
+  const secret = getDealSecret();
+  let counter = 0;
+  let buffer = Buffer.alloc(0);
+  let offset = 0;
+  const fill = () => {
+    counter += 1;
+    const hmac = crypto.createHmac("sha256", secret);
+    hmac.update(`${DEAL_CONTEXT}:${handSeed}:${counter}`);
+    buffer = hmac.digest();
+    offset = 0;
   };
+  const nextBytes = (len) => {
+    const chunks = [];
+    let remaining = len;
+    while (remaining > 0) {
+      if (offset >= buffer.length) fill();
+      const take = Math.min(remaining, buffer.length - offset);
+      chunks.push(buffer.subarray(offset, offset + take));
+      offset += take;
+      remaining -= take;
+    }
+    return Buffer.concat(chunks, len);
+  };
+  return { nextBytes };
 };
 
-const makeSeededRng = (handSeed) => {
-  const seed = typeof handSeed === "string" ? handSeed : "";
-  const seedFn = xmur3(seed);
-  return mulberry32(seedFn());
+const rng32 = (stream) => stream.nextBytes(4).readUInt32BE(0);
+
+const randomInt = (maxInclusive, stream) => {
+  const range = maxInclusive + 1;
+  const limit = Math.floor(0x100000000 / range) * range;
+  let value = rng32(stream);
+  while (value >= limit) {
+    value = rng32(stream);
+  }
+  return value % range;
+};
+
+const shuffleDeterministic = (deck, handSeed) => {
+  const out = deck.slice();
+  const stream = createHmacStream(handSeed);
+  for (let i = out.length - 1; i > 0; i -= 1) {
+    const j = randomInt(i, stream);
+    const tmp = out[i];
+    out[i] = out[j];
+    out[j] = tmp;
+  }
+  return out;
 };
 
 const deriveDeck = (handSeed) => {
   if (typeof handSeed !== "string" || !handSeed.trim()) {
     throw new Error("hand_seed_required");
   }
-  return shuffle(createDeck(), makeSeededRng(handSeed));
+  return shuffleDeterministic(createDeck(), handSeed);
 };
 
 const normalizeSeatOrder = (value) => {
