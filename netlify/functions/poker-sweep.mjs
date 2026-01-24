@@ -1,6 +1,7 @@
 import { baseHeaders, beginSql, klog } from "./_shared/supabase-admin.mjs";
 import { PRESENCE_TTL_SEC, TABLE_EMPTY_CLOSE_SEC } from "./_shared/poker-utils.mjs";
 import { postTransaction } from "./_shared/chips-ledger.mjs";
+import { isHoleCardsTableMissing } from "./_shared/poker-hole-cards-store.mjs";
 
 const STALE_PENDING_CUTOFF_MINUTES = 10;
 const STALE_PENDING_LIMIT = 500;
@@ -184,7 +185,24 @@ returning t.id;
         `,
         [TABLE_EMPTY_CLOSE_SEC]
       );
-      return { closedCount: Array.isArray(closedRows) ? closedRows.length : 0 };
+      const closedTableIds = Array.isArray(closedRows)
+        ? closedRows.map((row) => row?.id).filter(Boolean)
+        : [];
+      if (closedTableIds.length) {
+        try {
+          await tx.unsafe("delete from public.poker_hole_cards where table_id = any($1::uuid[]);", [closedTableIds]);
+        } catch (error) {
+          if (isHoleCardsTableMissing(error)) {
+            klog("poker_hole_cards_missing", {
+              tableIds: closedTableIds,
+              error: error?.message || "unknown_error",
+            });
+          } else {
+            throw error;
+          }
+        }
+      }
+      return { closedCount: closedTableIds.length };
     });
 
     const orphanRows = await beginSql(async (tx) =>

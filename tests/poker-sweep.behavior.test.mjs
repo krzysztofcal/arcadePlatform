@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { loadPokerHandler } from "./helpers/poker-test-helpers.mjs";
+import { isHoleCardsTableMissing } from "../netlify/functions/_shared/poker-hole-cards-store.mjs";
 
 const tableId = "22222222-2222-4222-8222-222222222222";
 const userId = "user-2";
@@ -8,7 +9,8 @@ const seatNo = 3;
 let lockIdx = -1;
 let updIdx = -1;
 
-const makeHandler = (postCalls, queries) => {
+const makeHandler = (postCalls, queries, options = {}) => {
+  const { deleteHoleCardsError } = options;
   let beginCall = 0;
   const handler = loadPokerHandler("netlify/functions/poker-sweep.mjs", {
     baseHeaders: () => ({}),
@@ -52,7 +54,17 @@ const makeHandler = (postCalls, queries) => {
       }
       if (beginCall === 3) {
         return fn({
-          unsafe: async () => [],
+          unsafe: async (query, params) => {
+            queries.push({ query: String(query), params });
+            const text = String(query).toLowerCase();
+            if (text.includes("update public.poker_tables t")) {
+              return [{ id: tableId }];
+            }
+            if (text.includes("delete from public.poker_hole_cards")) {
+              if (deleteHoleCardsError) throw deleteHoleCardsError;
+            }
+            return [];
+          },
         });
       }
       return fn({
@@ -66,11 +78,14 @@ const makeHandler = (postCalls, queries) => {
     klog: () => {},
     PRESENCE_TTL_SEC: 10,
     TABLE_EMPTY_CLOSE_SEC: 10,
+    isHoleCardsTableMissing,
   });
   return handler;
 };
 
 const run = async () => {
+  lockIdx = -1;
+  updIdx = -1;
   process.env.POKER_SWEEP_SECRET = "secret";
   const postCalls = [];
   const queries = [];
@@ -96,9 +111,33 @@ const run = async () => {
   );
   assert.ok(lockIdx >= 0, "sweep should lock seat before updating");
   assert.ok(updIdx > lockIdx, "sweep should update seat after lock");
+  assert.ok(
+    queries.some(
+      (q) =>
+        q.query.toLowerCase().includes("delete from public.poker_hole_cards") &&
+        q.params?.[0]?.includes?.(tableId)
+    ),
+    "sweep should delete hole cards for closed tables"
+  );
 };
 
-run().catch((error) => {
-  console.error(error);
-  process.exit(1);
-});
+const runMissingHoleCardsTable = async () => {
+  lockIdx = -1;
+  updIdx = -1;
+  process.env.POKER_SWEEP_SECRET = "secret";
+  const postCalls = [];
+  const queries = [];
+  const missingError = new Error("relation \"public.poker_hole_cards\" does not exist");
+  missingError.code = "42P01";
+  const handler = makeHandler(postCalls, queries, { deleteHoleCardsError: missingError });
+  const response = await handler({ httpMethod: "POST", headers: { "x-sweep-secret": "secret" } });
+  assert.equal(response.statusCode, 200);
+};
+
+Promise.resolve()
+  .then(run)
+  .then(runMissingHoleCardsTable)
+  .catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });
