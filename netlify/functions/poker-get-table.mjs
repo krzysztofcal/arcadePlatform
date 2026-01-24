@@ -61,13 +61,6 @@ export async function handler(event) {
 
   const token = extractBearerToken(event.headers);
   const auth = await verifySupabaseJwt(token);
-  if (!auth.valid || !auth.userId) {
-    return {
-      statusCode: 401,
-      headers: mergeHeaders(cors),
-      body: JSON.stringify({ error: "unauthorized", reason: auth.reason }),
-    };
-  }
 
   try {
     const result = await beginSql(async (tx) => {
@@ -110,8 +103,14 @@ export async function handler(event) {
         : [];
 
       const currentState = normalizeJsonState(stateRow.state);
+      if (currentState.phase !== "SHOWDOWN" && (!auth.valid || !auth.userId)) {
+        return { error: "unauthorized" };
+      }
       let myHoleCards = [];
       if (isActionPhase(currentState.phase)) {
+        if (!auth.valid || !auth.userId) {
+          return { error: "unauthorized" };
+        }
         if (typeof currentState.handId !== "string" || !currentState.handId.trim()) {
           throw new Error("state_invalid");
         }
@@ -146,6 +145,13 @@ export async function handler(event) {
     if (result?.error === "table_not_found") {
       return { statusCode: 404, headers: mergeHeaders(cors), body: JSON.stringify({ error: "table_not_found" }) };
     }
+    if (result?.error === "unauthorized") {
+      return {
+        statusCode: 401,
+        headers: mergeHeaders(cors),
+        body: JSON.stringify({ error: "unauthorized", reason: auth.reason }),
+      };
+    }
 
     const table = result.table;
     const seats = result.seats;
@@ -174,7 +180,7 @@ export async function handler(event) {
           version: stateRow.version,
           state: publicState,
         },
-        myHoleCards: result.myHoleCards || [],
+        myHoleCards: result.currentState?.phase === "SHOWDOWN" ? [] : result.myHoleCards || [],
       }),
     };
   } catch (error) {

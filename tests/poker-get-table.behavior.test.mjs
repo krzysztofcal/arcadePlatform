@@ -169,6 +169,35 @@ const run = async () => {
     entry.query.toLowerCase().includes("from public.poker_hole_cards")
   );
   assert.equal(holeCardQueries.length, 0);
+
+  const showdownState = {
+    ...baseState,
+    phase: "SHOWDOWN",
+    turnUserId: null,
+    showdown: {
+      winners: ["user-1"],
+      handsByUserId: {
+        "user-1": { category: 9, name: "STRAIGHT_FLUSH", ranks: [14], best5: [], key: "9:14" },
+      },
+      revealedHoleCardsByUserId: {
+        "user-1": defaultHoleCards["user-1"],
+      },
+    },
+  };
+  const showdownQueries = [];
+  const showdownResponse = await makeHandler(showdownQueries, { value: JSON.stringify(showdownState), version: 5 }, "user-1")({
+    httpMethod: "GET",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    queryStringParameters: { tableId },
+  });
+  assert.equal(showdownResponse.statusCode, 200);
+  const showdownPayload = JSON.parse(showdownResponse.body);
+  assert.deepEqual(showdownPayload.myHoleCards, []);
+  assert.ok(showdownPayload.state.state.showdown);
+  const showdownHoleCardQueries = showdownQueries.filter((entry) =>
+    entry.query.toLowerCase().includes("from public.poker_hole_cards")
+  );
+  assert.equal(showdownHoleCardQueries.length, 0);
 };
 
 await run();

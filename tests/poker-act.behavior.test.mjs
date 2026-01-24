@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { deriveDeck } from "../netlify/functions/_shared/poker-deal-deterministic.mjs";
 import { dealHoleCards } from "../netlify/functions/_shared/poker-engine.mjs";
 import { isHoleCardsTableMissing, loadHoleCardsByUserId } from "../netlify/functions/_shared/poker-hole-cards-store.mjs";
+import { computeShowdown } from "../netlify/functions/_shared/poker-showdown.mjs";
 import { advanceIfNeeded, applyAction } from "../netlify/functions/_shared/poker-reducer.mjs";
 import { normalizeRequestId } from "../netlify/functions/_shared/poker-request-id.mjs";
 import {
@@ -61,6 +62,7 @@ const makeHandler = (queries, storedState, userId, options = {}) =>
     deriveRemainingDeck,
     isHoleCardsTableMissing,
     loadHoleCardsByUserId,
+    computeShowdown,
     beginSql: async (fn) =>
       fn({
         unsafe: async (query, params) => {
@@ -382,6 +384,81 @@ const run = async () => {
   });
   assert.equal(missingRowResponse.response.statusCode, 409);
   assert.equal(JSON.parse(missingRowResponse.response.body).error, "state_invalid");
+
+  const showdownCommunity = deriveCommunityCards({
+    handSeed: baseState.handSeed,
+    seatUserIdsInOrder: seatOrder,
+    communityDealt: 5,
+  });
+  const showdownState = {
+    ...baseState,
+    phase: "SHOWDOWN",
+    turnUserId: null,
+    community: showdownCommunity,
+    communityDealt: showdownCommunity.length,
+    foldedByUserId: { ...baseState.foldedByUserId, "user-3": true },
+  };
+  const showdownHoleCards = {
+    "user-1": [
+      { r: "A", s: "S" },
+      { r: "K", s: "S" },
+    ],
+    "user-2": [
+      { r: "Q", s: "H" },
+      { r: "J", s: "H" },
+    ],
+    "user-3": [
+      { r: "9", s: "D" },
+      { r: "9", s: "C" },
+    ],
+  };
+  const showdownQueries = [];
+  const showdownStoredState = { value: JSON.stringify(showdownState), version: 10 };
+  const showdownHandler = makeHandler(showdownQueries, showdownStoredState, "user-1", {
+    holeCardsByUserId: showdownHoleCards,
+  });
+  const showdownResponse = await showdownHandler({
+    httpMethod: "POST",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    body: JSON.stringify({ tableId, requestId: "req-showdown", action: { type: "CHECK" } }),
+  });
+  assert.equal(showdownResponse.statusCode, 200);
+  const showdownPayload = JSON.parse(showdownResponse.body);
+  assert.ok(showdownPayload.state.state.showdown);
+  assert.deepEqual(Object.keys(showdownPayload.state.state.showdown.revealedHoleCardsByUserId).sort(), ["user-1", "user-2"]);
+  assert.deepEqual(
+    showdownPayload.state.state.showdown.revealedHoleCardsByUserId["user-1"],
+    showdownHoleCards["user-1"]
+  );
+  assert.equal(showdownPayload.myHoleCards.length, 0);
+  const expectedShowdown = computeShowdown({
+    community: showdownCommunity,
+    players: [
+      { userId: "user-1", holeCards: showdownHoleCards["user-1"] },
+      { userId: "user-2", holeCards: showdownHoleCards["user-2"] },
+    ],
+  });
+  assert.deepEqual(showdownPayload.state.state.showdown.winners, expectedShowdown.winners);
+  const showdownUpdateCount = showdownQueries.filter((entry) =>
+    entry.query.toLowerCase().includes("update public.poker_state")
+  ).length;
+  const showdownActionCount = showdownQueries.filter((entry) =>
+    entry.query.toLowerCase().includes("insert into public.poker_actions")
+  ).length;
+  const showdownReplayResponse = await showdownHandler({
+    httpMethod: "POST",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    body: JSON.stringify({ tableId, requestId: "req-showdown", action: { type: "CHECK" } }),
+  });
+  assert.equal(showdownReplayResponse.statusCode, 200);
+  const showdownUpdateCountAfter = showdownQueries.filter((entry) =>
+    entry.query.toLowerCase().includes("update public.poker_state")
+  ).length;
+  const showdownActionCountAfter = showdownQueries.filter((entry) =>
+    entry.query.toLowerCase().includes("insert into public.poker_actions")
+  ).length;
+  assert.equal(showdownUpdateCountAfter, showdownUpdateCount);
+  assert.equal(showdownActionCountAfter, showdownActionCount);
 };
 
 await run();
