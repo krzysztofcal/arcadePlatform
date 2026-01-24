@@ -263,7 +263,7 @@ export async function handler(event) {
         startedAt: new Date().toISOString(),
       };
 
-      if (!isStateStorageValid(updatedState)) {
+      if (!isStateStorageValid(updatedState, { requireDeck: true })) {
         klog("poker_state_corrupt", { tableId, phase: updatedState.phase });
         throw makeError(409, "state_invalid");
       }
@@ -306,9 +306,6 @@ export async function handler(event) {
       }),
     };
   } catch (error) {
-    if (isHoleCardsTableMissing(error)) {
-      return { statusCode: 409, headers: mergeHeaders(cors), body: JSON.stringify({ error: "state_invalid" }) };
-    }
     if (error?.status && error?.code) {
       return { statusCode: error.status, headers: mergeHeaders(cors), body: JSON.stringify({ error: error.code }) };
     }
