@@ -115,7 +115,8 @@ const initHandState = ({ tableId, seats, stacks, rng }) => {
 
 const getLegalActions = (state, userId) => {
   assertPlayer(state, userId);
-  if (state.turnUserId && userId !== state.turnUserId) return [];
+  if (!state.turnUserId) return [];
+  if (userId !== state.turnUserId) return [];
   const toCall = state.toCallByUserId?.[userId] || 0;
   const stack = state.stacks?.[userId] ?? 0;
   if (toCall > 0) {
@@ -135,7 +136,10 @@ const applyAction = (state, action) => {
   if (state.phase === "HAND_DONE" || state.phase === "SHOWDOWN") {
     throw new Error("invalid_action");
   }
-  if (state.turnUserId && action?.userId !== state.turnUserId) {
+  if (!state.turnUserId) {
+    throw new Error("invalid_action");
+  }
+  if (action?.userId !== state.turnUserId) {
     throw new Error("invalid_action");
   }
   assertPlayer(state, action.userId);

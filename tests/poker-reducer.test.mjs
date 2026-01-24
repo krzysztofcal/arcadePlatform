@@ -50,6 +50,17 @@ const run = async () => {
 
   {
     const { seats, stacks } = makeBase();
+    const { state } = initHandState({ tableId: "t1", seats, stacks, rng: makeRng(5) });
+    const noTurnState = { ...state, turnUserId: null };
+    assert.deepEqual(getLegalActions(noTurnState, "user-1"), []);
+    assert.throws(
+      () => applyAction(noTurnState, { type: "CHECK", userId: "user-1" }),
+      (error) => error?.message === "invalid_action"
+    );
+  }
+
+  {
+    const { seats, stacks } = makeBase();
     const { state } = initHandState({ tableId: "t1", seats, stacks, rng: makeRng(8) });
     assert.throws(
       () => applyAction(state, { type: "CHECK", userId: "user-not-turn" }),
