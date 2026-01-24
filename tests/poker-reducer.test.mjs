@@ -42,10 +42,43 @@ const run = async () => {
   {
     const { seats, stacks } = makeBase();
     const { state } = initHandState({ tableId: "t1", seats, stacks, rng: makeRng(2) });
+    assert.deepEqual(getLegalActions(state, "user-3"), []);
     assert.throws(
       () => applyAction(state, { type: "CHECK", userId: "user-3" }),
-      (error) => error?.message === "not_your_turn"
+      (error) => error?.message === "invalid_action"
     );
+  }
+
+  {
+    const { seats, stacks } = makeBase();
+    const { state } = initHandState({ tableId: "t1", seats, stacks, rng: makeRng(5) });
+    const noTurnState = { ...state, turnUserId: null };
+    assert.deepEqual(getLegalActions(noTurnState, "user-1"), []);
+    assert.throws(
+      () => applyAction(noTurnState, { type: "CHECK", userId: "user-1" }),
+      (error) => error?.message === "invalid_action"
+    );
+  }
+
+  {
+    const { seats, stacks } = makeBase();
+    const { state } = initHandState({ tableId: "t1", seats, stacks, rng: makeRng(8) });
+    assert.throws(
+      () => applyAction(state, { type: "CHECK", userId: "user-not-turn" }),
+      (error) => error?.message === "invalid_action"
+    );
+  }
+
+  {
+    const seats = [
+      { userId: "user-1", seatNo: 1 },
+      { userId: "user-2", seatNo: 3 },
+      { userId: "user-3", seatNo: 5 },
+    ];
+    const stacks = { "user-1": 0, "user-2": 50, "user-3": 50 };
+    const { state } = initHandState({ tableId: "t1", seats, stacks, rng: makeRng(10) });
+    assert.notEqual(state.turnUserId, "user-1");
+    assert.ok(["user-2", "user-3"].includes(state.turnUserId));
   }
 
   {
@@ -102,6 +135,8 @@ const run = async () => {
     state = result.state;
     assert.equal(state.phase, "HAND_DONE");
     assert.ok(result.events.some((event) => event.type === "HAND_DONE" && event.winnerUserId === "user-3"));
+    assert.equal(result.state.phase, "HAND_DONE");
+    assert.equal(result.state.turnUserId, null);
   }
 
   {
@@ -125,6 +160,66 @@ const run = async () => {
     state = advanced.state;
     assert.equal(state.phase, "FLOP");
     assert.equal(state.community.length, 3);
+  }
+
+  {
+    const { seats, stacks } = makeBase();
+    const { state } = initHandState({ tableId: "t1", seats, stacks, rng: makeRng(9) });
+    const brokeUser = state.seats[0].userId;
+    const bettingUsers = state.seats.slice(1).map((seat) => seat.userId);
+    const nextState = {
+      ...state,
+      phase: "PREFLOP",
+      stacks: { ...state.stacks, [brokeUser]: 0 },
+      foldedByUserId: { ...state.foldedByUserId, [brokeUser]: false },
+      actedThisRoundByUserId: {
+        ...state.actedThisRoundByUserId,
+        [brokeUser]: false,
+        [bettingUsers[0]]: true,
+        [bettingUsers[1]]: true,
+      },
+      toCallByUserId: {
+        ...state.toCallByUserId,
+        [brokeUser]: 0,
+        [bettingUsers[0]]: 0,
+        [bettingUsers[1]]: 0,
+      },
+    };
+    const advanced = advanceIfNeeded(nextState);
+    assert.equal(advanced.state.phase, "FLOP");
+  }
+
+  {
+    const { seats } = makeBase();
+    const stacks = { "user-1": 0, "user-2": 0, "user-3": 0 };
+    const { state } = initHandState({ tableId: "t1", seats, stacks, rng: makeRng(11) });
+    const stuckState = {
+      ...state,
+      phase: "PREFLOP",
+      stacks,
+      foldedByUserId: {
+        ...state.foldedByUserId,
+        "user-1": false,
+        "user-2": false,
+        "user-3": false,
+      },
+      toCallByUserId: {
+        ...state.toCallByUserId,
+        "user-1": 0,
+        "user-2": 0,
+        "user-3": 0,
+      },
+      actedThisRoundByUserId: {
+        ...state.actedThisRoundByUserId,
+        "user-1": true,
+        "user-2": true,
+        "user-3": true,
+      },
+    };
+    const advanced = advanceIfNeeded(stuckState);
+    assert.equal(advanced.state.phase, "SHOWDOWN");
+    assert.equal(advanced.state.turnUserId, null);
+    assert.ok(advanced.events.some((event) => event.type === "SHOWDOWN_STARTED"));
   }
 };
 

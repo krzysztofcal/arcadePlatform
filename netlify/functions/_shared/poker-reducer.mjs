@@ -8,22 +8,25 @@ const orderSeats = (seats) =>
 const getActiveSeats = (state) =>
   orderSeats(state.seats).filter((seat) => seat?.userId && !state.foldedByUserId?.[seat.userId]);
 
-const getNextActiveUserId = (state, fromUserId) => {
-  const active = getActiveSeats(state);
-  if (active.length === 0) return null;
-  const idx = active.findIndex((seat) => seat.userId === fromUserId);
-  if (idx === -1) return active[0].userId;
-  return active[(idx + 1) % active.length].userId;
+const getBettingSeats = (state) =>
+  getActiveSeats(state).filter((seat) => (state.stacks?.[seat.userId] || 0) > 0);
+
+const getNextBettingUserId = (state, fromUserId) => {
+  const betting = getBettingSeats(state);
+  if (betting.length === 0) return null;
+  const idx = betting.findIndex((seat) => seat.userId === fromUserId);
+  if (idx === -1) return betting[0].userId;
+  return betting[(idx + 1) % betting.length].userId;
 };
 
-const getFirstActiveAfterDealer = (state) => {
+const getFirstBettingAfterDealer = (state) => {
   const ordered = orderSeats(state.seats);
   if (ordered.length === 0) return null;
   const startIndex = ordered.findIndex((seat) => seat.seatNo === state.dealerSeatNo);
   const start = startIndex >= 0 ? startIndex : 0;
   for (let offset = 1; offset <= ordered.length; offset += 1) {
     const seat = ordered[(start + offset) % ordered.length];
-    if (seat?.userId && !state.foldedByUserId?.[seat.userId]) {
+    if (seat?.userId && !state.foldedByUserId?.[seat.userId] && (state.stacks?.[seat.userId] || 0) > 0) {
       return seat.userId;
     }
   }
@@ -76,7 +79,7 @@ const checkHandDone = (state, events) => {
   const active = getActiveSeats(state);
   if (active.length === 1) {
     return {
-      state: { ...state, phase: "HAND_DONE" },
+      state: { ...state, phase: "HAND_DONE", turnUserId: null },
       events: ensureEvents(events, { type: "HAND_DONE", reason: "fold", winnerUserId: active[0].userId }),
     };
   }
@@ -89,7 +92,13 @@ const initHandState = ({ tableId, seats, stacks, rng }) => {
   const playerIds = orderedSeats.map((seat) => seat.userId).filter(Boolean);
   const dealt = dealHoleCards(deck, playerIds);
   const dealerSeatNo = orderedSeats[0]?.seatNo ?? 0;
-  const turnUserId = orderedSeats[1]?.userId || orderedSeats[0]?.userId || null;
+  const foldedByUserId = buildDefaultMap(orderedSeats, false);
+  const turnUserId = getFirstBettingAfterDealer({
+    seats: orderedSeats,
+    dealerSeatNo,
+    stacks: copyMap(stacks),
+    foldedByUserId,
+  });
   const state = {
     tableId,
     phase: "PREFLOP",
@@ -104,7 +113,7 @@ const initHandState = ({ tableId, seats, stacks, rng }) => {
     toCallByUserId: buildDefaultMap(orderedSeats, 0),
     betThisRoundByUserId: buildDefaultMap(orderedSeats, 0),
     actedThisRoundByUserId: buildDefaultMap(orderedSeats, false),
-    foldedByUserId: buildDefaultMap(orderedSeats, false),
+    foldedByUserId,
     lastAggressorUserId: null,
   };
   return { state };
@@ -112,7 +121,8 @@ const initHandState = ({ tableId, seats, stacks, rng }) => {
 
 const getLegalActions = (state, userId) => {
   assertPlayer(state, userId);
-  if (state.turnUserId && userId !== state.turnUserId) return [];
+  if (!state.turnUserId) return [];
+  if (userId !== state.turnUserId) return [];
   const toCall = state.toCallByUserId?.[userId] || 0;
   const stack = state.stacks?.[userId] ?? 0;
   if (toCall > 0) {
@@ -129,8 +139,14 @@ const getLegalActions = (state, userId) => {
 };
 
 const applyAction = (state, action) => {
-  if (!action?.userId || action.userId !== state.turnUserId) {
-    throw new Error("not_your_turn");
+  if (state.phase === "HAND_DONE" || state.phase === "SHOWDOWN") {
+    throw new Error("invalid_action");
+  }
+  if (!state.turnUserId) {
+    throw new Error("invalid_action");
+  }
+  if (action?.userId !== state.turnUserId) {
+    throw new Error("invalid_action");
   }
   assertPlayer(state, action.userId);
   const events = [{ type: "ACTION_APPLIED", action }];
@@ -193,7 +209,7 @@ const applyAction = (state, action) => {
   }
 
   next.actedThisRoundByUserId[userId] = true;
-  next.turnUserId = getNextActiveUserId(next, userId);
+  next.turnUserId = getNextBettingUserId(next, userId);
 
   const done = checkHandDone(next, events);
   return { state: done.state, events: done.events };
@@ -205,19 +221,25 @@ const advanceIfNeeded = (state) => {
     return { state, events };
   }
   const active = getActiveSeats(state);
+  const betting = getBettingSeats(state);
   if (active.length <= 1) {
     const done = checkHandDone(state, events);
     return { state: done.state, events: done.events };
   }
-  const allSettled = active.every(
-    (seat) => (state.toCallByUserId?.[seat.userId] || 0) === 0 && state.actedThisRoundByUserId?.[seat.userId]
-  );
+  if (betting.length === 0) {
+    const next = { ...state, phase: "SHOWDOWN", turnUserId: null };
+    events.push({ type: "SHOWDOWN_STARTED", reason: "no_betting_players" });
+    return { state: next, events };
+  }
+  const nobodyOwes = active.every((seat) => (state.toCallByUserId?.[seat.userId] || 0) === 0);
+  const allBettersActed = betting.every((seat) => state.actedThisRoundByUserId?.[seat.userId]);
+  const allSettled = nobodyOwes && allBettersActed;
   if (!allSettled) return { state, events };
 
   const from = state.phase;
   const to = nextStreet(from);
   let next = resetRoundState({ ...state, phase: to, turnUserId: null });
-  next = { ...next, turnUserId: getFirstActiveAfterDealer(next) };
+  next = { ...next, turnUserId: getFirstBettingAfterDealer(next) };
 
   const n = cardsToDeal(from);
   if (n > 0) {
