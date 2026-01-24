@@ -44,7 +44,16 @@ const run = async () => {
     const { state } = initHandState({ tableId: "t1", seats, stacks, rng: makeRng(2) });
     assert.throws(
       () => applyAction(state, { type: "CHECK", userId: "user-3" }),
-      (error) => error?.message === "not_your_turn"
+      (error) => error?.message === "invalid_action"
+    );
+  }
+
+  {
+    const { seats, stacks } = makeBase();
+    const { state } = initHandState({ tableId: "t1", seats, stacks, rng: makeRng(8) });
+    assert.throws(
+      () => applyAction(state, { type: "CHECK", userId: "user-not-turn" }),
+      (error) => error?.message === "invalid_action"
     );
   }
 
@@ -125,6 +134,33 @@ const run = async () => {
     state = advanced.state;
     assert.equal(state.phase, "FLOP");
     assert.equal(state.community.length, 3);
+  }
+
+  {
+    const { seats, stacks } = makeBase();
+    const { state } = initHandState({ tableId: "t1", seats, stacks, rng: makeRng(9) });
+    const brokeUser = state.seats[0].userId;
+    const bettingUsers = state.seats.slice(1).map((seat) => seat.userId);
+    const nextState = {
+      ...state,
+      phase: "PREFLOP",
+      stacks: { ...state.stacks, [brokeUser]: 0 },
+      foldedByUserId: { ...state.foldedByUserId, [brokeUser]: false },
+      actedThisRoundByUserId: {
+        ...state.actedThisRoundByUserId,
+        [brokeUser]: false,
+        [bettingUsers[0]]: true,
+        [bettingUsers[1]]: true,
+      },
+      toCallByUserId: {
+        ...state.toCallByUserId,
+        [brokeUser]: 0,
+        [bettingUsers[0]]: 0,
+        [bettingUsers[1]]: 0,
+      },
+    };
+    const advanced = advanceIfNeeded(nextState);
+    assert.equal(advanced.state.phase, "FLOP");
   }
 };
 
