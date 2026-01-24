@@ -52,6 +52,14 @@ const runInvalidInputTest = () => {
       }),
     (err) => err && err.message === "invalid_state",
   );
+  assert.throws(
+    () =>
+      computeShowdown({
+        community: [c("A", "S")],
+        players: [{ userId: "user-1", holeCards: [c("K", "S"), c("Q", "S")] }],
+      }),
+    (err) => err && err.message === "invalid_state",
+  );
 };
 
 runSingleWinnerTest();

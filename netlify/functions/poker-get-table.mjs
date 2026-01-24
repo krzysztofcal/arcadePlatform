@@ -5,6 +5,13 @@ import { isValidUuid } from "./_shared/poker-utils.mjs";
 
 const isActionPhase = (phase) => phase === "PREFLOP" || phase === "FLOP" || phase === "TURN" || phase === "RIVER";
 
+const isFinalShowdownPublic = (state) =>
+  state?.phase === "SHOWDOWN" &&
+  state?.showdown &&
+  Array.isArray(state?.community) &&
+  state.community.length === 5 &&
+  state.communityDealt === 5;
+
 const normalizeSeatUserIds = (seats) => {
   if (!Array.isArray(seats)) return [];
   return seats.map((seat) => seat?.userId).filter((userId) => typeof userId === "string" && userId.trim());
@@ -103,7 +110,8 @@ export async function handler(event) {
         : [];
 
       const currentState = normalizeJsonState(stateRow.state);
-      if (currentState.phase !== "SHOWDOWN" && (!auth.valid || !auth.userId)) {
+      const allowPublic = isFinalShowdownPublic(currentState);
+      if (!allowPublic && (!auth.valid || !auth.userId)) {
         return { error: "unauthorized" };
       }
       let myHoleCards = [];

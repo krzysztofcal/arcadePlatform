@@ -44,6 +44,12 @@ const seatOrder = baseState.seats.map((seat) => seat.userId);
 const dealt = dealHoleCards(deriveDeck(baseState.handSeed), seatOrder);
 const defaultHoleCards = dealt.holeCardsByUserId;
 
+const getHoleCardsRows = (options, fallback) => {
+  const byUserId = options?.holeCardsByUserId || fallback;
+  if (!byUserId || typeof byUserId !== "object") return [];
+  return Object.entries(byUserId).map(([userId, cards]) => ({ user_id: userId, cards }));
+};
+
 const makeHandler = (queries, storedState, userId, options = {}) =>
   loadPokerHandler("netlify/functions/poker-act.mjs", {
     baseHeaders: () => ({}),
@@ -90,12 +96,7 @@ const makeHandler = (queries, storedState, userId, options = {}) =>
           }
           if (text.includes("from public.poker_hole_cards")) {
             if (options.holeCardsError) throw options.holeCardsError;
-            const rows = [];
-            const map = options.holeCardsByUserId || defaultHoleCards;
-            for (const [userIdValue, cards] of Object.entries(map)) {
-              rows.push({ user_id: userIdValue, cards });
-            }
-            return rows;
+            return getHoleCardsRows(options, defaultHoleCards);
           }
           if (text.includes("update public.poker_state")) {
             storedState.value = params?.[1] || storedState.value;

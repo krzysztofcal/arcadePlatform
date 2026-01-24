@@ -34,7 +34,7 @@ const makeHandler = (queries, storedState, userId, options = {}) =>
     baseHeaders: () => ({}),
     corsHeaders: () => ({ "access-control-allow-origin": "https://example.test" }),
     extractBearerToken: () => "token",
-    verifySupabaseJwt: async () => ({ valid: true, userId }),
+    verifySupabaseJwt: async () => ({ valid: options.authValid ?? true, userId }),
     isValidUuid: () => true,
     normalizeJsonState,
     withoutPrivateState,
@@ -198,6 +198,23 @@ const run = async () => {
     entry.query.toLowerCase().includes("from public.poker_hole_cards")
   );
   assert.equal(showdownHoleCardQueries.length, 0);
+
+  const incompleteShowdownState = {
+    ...baseState,
+    phase: "SHOWDOWN",
+    turnUserId: null,
+    community: [{ r: "A", s: "S" }],
+    communityDealt: 1,
+    showdown: null,
+  };
+  const incompleteResponse = await makeHandler([], { value: JSON.stringify(incompleteShowdownState), version: 6 }, null, {
+    authValid: false,
+  })({
+    httpMethod: "GET",
+    headers: { origin: "https://example.test" },
+    queryStringParameters: { tableId },
+  });
+  assert.equal(incompleteResponse.statusCode, 401);
 };
 
 await run();

@@ -5,7 +5,7 @@ const ensureArray = (value) => (Array.isArray(value) ? value : null);
 
 const computeShowdown = ({ community, players }) => {
   const communityCards = ensureArray(community);
-  if (!communityCards) throw new Error("invalid_state");
+  if (!communityCards || communityCards.length !== 5) throw new Error("invalid_state");
   if (!Array.isArray(players)) throw new Error("invalid_state");
 
   const handsByUserId = {};
@@ -26,7 +26,8 @@ const computeShowdown = ({ community, players }) => {
       throw new Error("invalid_state");
     }
 
-    handsByUserId[userId] = hand;
+    const { category, name, ranks, best5, key } = hand || {};
+    handsByUserId[userId] = { category, name, ranks, best5, key };
     revealedHoleCardsByUserId[userId] = holeCards;
 
     if (!bestHand) {
