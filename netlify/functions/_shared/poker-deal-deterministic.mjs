@@ -38,18 +38,29 @@ const deriveDeck = (handSeed) => {
   return shuffle(createDeck(), makeSeededRng(handSeed));
 };
 
-const normalizeCount = (value) => (Number.isInteger(value) && value > 0 ? value : 0);
+const normalizeSeatOrder = (value) => {
+  if (!Array.isArray(value)) return [];
+  return value.filter((userId) => typeof userId === "string" && userId.trim());
+};
 
-const deriveCommunityCards = ({ handSeed, playerCount, communityDealt }) => {
+const deriveCommunityCards = ({ handSeed, seatUserIdsInOrder, communityDealt }) => {
   const deck = deriveDeck(handSeed);
-  const burn = normalizeCount(playerCount) * 2;
+  const seatOrder = normalizeSeatOrder(seatUserIdsInOrder);
+  if (seatOrder.length <= 0) {
+    throw new Error("invalid_seat_order");
+  }
+  const burn = seatOrder.length * 2;
   const dealt = Number.isInteger(communityDealt) ? communityDealt : 0;
   return deck.slice(burn, burn + dealt);
 };
 
-const deriveRemainingDeck = ({ handSeed, playerCount, communityDealt }) => {
+const deriveRemainingDeck = ({ handSeed, seatUserIdsInOrder, communityDealt }) => {
   const deck = deriveDeck(handSeed);
-  const burn = normalizeCount(playerCount) * 2;
+  const seatOrder = normalizeSeatOrder(seatUserIdsInOrder);
+  if (seatOrder.length <= 0) {
+    throw new Error("invalid_seat_order");
+  }
+  const burn = seatOrder.length * 2;
   const dealt = Number.isInteger(communityDealt) ? communityDealt : 0;
   return deck.slice(burn + dealt);
 };

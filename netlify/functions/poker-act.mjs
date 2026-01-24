@@ -87,8 +87,18 @@ const cardsMatch = (left, right) => {
   return true;
 };
 
-const getPlayerCount = (state) =>
-  Array.isArray(state.seats) ? state.seats.filter((seat) => typeof seat?.userId === "string" && seat.userId.trim()).length : 0;
+const normalizeSeatUserIds = (seats) =>
+  Array.isArray(seats) ? seats.map((seat) => seat?.userId).filter((userId) => typeof userId === "string" && userId.trim()) : [];
+
+const hasSameUserIds = (left, right) => {
+  if (left.length !== right.length) return false;
+  const leftSet = new Set(left);
+  if (leftSet.size !== left.length) return false;
+  for (const id of right) {
+    if (!leftSet.has(id)) return false;
+  }
+  return true;
+};
 
 const validateActionBounds = (state, action, userId) => {
   const toCall = Number(state.toCallByUserId?.[userId] || 0);
@@ -276,9 +286,10 @@ export async function handler(event) {
         "select user_id from public.poker_seats where table_id = $1 and status = 'ACTIVE' order by seat_no asc;",
         [tableId]
       );
-      const activeUserIds = Array.isArray(activeSeatRows)
+      const seatUserIdsInOrder = Array.isArray(activeSeatRows)
         ? activeSeatRows.map((row) => row?.user_id).filter(Boolean)
         : [];
+      const activeUserIds = seatUserIdsInOrder.slice();
 
       let holeCardsByUserId;
       try {
@@ -298,8 +309,17 @@ export async function handler(event) {
         throw error;
       }
 
-      const playerCount = getPlayerCount(currentState);
-      if (playerCount <= 0) {
+      if (seatUserIdsInOrder.length <= 0) {
+        klog("poker_act_rejected", {
+          tableId,
+          userId: auth.userId,
+          reason: "state_invalid",
+          phase: currentState.phase,
+        });
+        throw makeError(409, "state_invalid");
+      }
+      const stateSeatUserIds = normalizeSeatUserIds(currentState.seats);
+      if (!hasSameUserIds(seatUserIdsInOrder, stateSeatUserIds)) {
         klog("poker_act_rejected", {
           tableId,
           userId: auth.userId,
@@ -313,12 +333,12 @@ export async function handler(event) {
       try {
         derivedCommunity = deriveCommunityCards({
           handSeed: currentState.handSeed,
-          playerCount,
+          seatUserIdsInOrder,
           communityDealt: currentState.communityDealt,
         });
         derivedDeck = deriveRemainingDeck({
           handSeed: currentState.handSeed,
-          playerCount,
+          seatUserIdsInOrder,
           communityDealt: currentState.communityDealt,
         });
       } catch {
