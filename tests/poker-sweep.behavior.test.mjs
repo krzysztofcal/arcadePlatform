@@ -8,7 +8,8 @@ const seatNo = 3;
 let lockIdx = -1;
 let updIdx = -1;
 
-const makeHandler = (postCalls, queries) => {
+const makeHandler = (postCalls, queries, options = {}) => {
+  const { deleteHoleCardsError } = options;
   let beginCall = 0;
   const handler = loadPokerHandler("netlify/functions/poker-sweep.mjs", {
     baseHeaders: () => ({}),
@@ -52,7 +53,17 @@ const makeHandler = (postCalls, queries) => {
       }
       if (beginCall === 3) {
         return fn({
-          unsafe: async () => [],
+          unsafe: async (query, params) => {
+            queries.push({ query: String(query), params });
+            const text = String(query).toLowerCase();
+            if (text.includes("update public.poker_tables t")) {
+              return [{ id: tableId }];
+            }
+            if (text.includes("delete from public.poker_hole_cards")) {
+              if (deleteHoleCardsError) throw deleteHoleCardsError;
+            }
+            return [];
+          },
         });
       }
       return fn({
@@ -96,9 +107,31 @@ const run = async () => {
   );
   assert.ok(lockIdx >= 0, "sweep should lock seat before updating");
   assert.ok(updIdx > lockIdx, "sweep should update seat after lock");
+  assert.ok(
+    queries.some(
+      (q) =>
+        q.query.toLowerCase().includes("delete from public.poker_hole_cards") &&
+        q.params?.[0]?.includes?.(tableId)
+    ),
+    "sweep should delete hole cards for closed tables"
+  );
 };
 
-run().catch((error) => {
-  console.error(error);
-  process.exit(1);
-});
+const runMissingHoleCardsTable = async () => {
+  process.env.POKER_SWEEP_SECRET = "secret";
+  const postCalls = [];
+  const queries = [];
+  const missingError = new Error("relation \"public.poker_hole_cards\" does not exist");
+  missingError.code = "42P01";
+  const handler = makeHandler(postCalls, queries, { deleteHoleCardsError: missingError });
+  const response = await handler({ httpMethod: "POST", headers: { "x-sweep-secret": "secret" } });
+  assert.equal(response.statusCode, 200);
+};
+
+Promise.resolve()
+  .then(run)
+  .then(runMissingHoleCardsTable)
+  .catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });

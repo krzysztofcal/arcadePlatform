@@ -22,6 +22,13 @@ const isExpiredSeat = (value) => {
   return Date.now() - lastSeenMs > PRESENCE_TTL_SEC * 1000;
 };
 
+const isHoleCardsTableMissing = (error) => {
+  if (!error) return false;
+  if (error.code === "42P01") return true;
+  const message = String(error.message || "").toLowerCase();
+  return message.includes("poker_hole_cards") && message.includes("does not exist");
+};
+
 export async function handler(event) {
   if (event.httpMethod === "OPTIONS") {
     return { statusCode: 204, headers: baseHeaders(), body: "" };
@@ -184,7 +191,24 @@ returning t.id;
         `,
         [TABLE_EMPTY_CLOSE_SEC]
       );
-      return { closedCount: Array.isArray(closedRows) ? closedRows.length : 0 };
+      const closedTableIds = Array.isArray(closedRows)
+        ? closedRows.map((row) => row?.id).filter(Boolean)
+        : [];
+      if (closedTableIds.length) {
+        try {
+          await tx.unsafe("delete from public.poker_hole_cards where table_id = any($1::uuid[]);", [closedTableIds]);
+        } catch (error) {
+          if (isHoleCardsTableMissing(error)) {
+            klog("poker_hole_cards_missing", {
+              tableIds: closedTableIds,
+              error: error?.message || "unknown_error",
+            });
+          } else {
+            throw error;
+          }
+        }
+      }
+      return { closedCount: closedTableIds.length };
     });
 
     const orphanRows = await beginSql(async (tx) =>
