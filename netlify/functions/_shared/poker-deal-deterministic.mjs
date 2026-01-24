@@ -61,8 +61,11 @@ const deriveCommunityCards = ({ handSeed, seatUserIdsInOrder, communityDealt }) 
   if (seatOrder.length <= 0) {
     throw new Error("invalid_seat_order");
   }
+  if (!Number.isInteger(communityDealt) || communityDealt < 0 || communityDealt > 5) {
+    throw new Error("invalid_community_dealt");
+  }
   const burn = seatOrder.length * 2;
-  const dealt = Number.isInteger(communityDealt) ? communityDealt : 0;
+  const dealt = communityDealt;
   return deck.slice(burn, burn + dealt);
 };
 
@@ -72,8 +75,11 @@ const deriveRemainingDeck = ({ handSeed, seatUserIdsInOrder, communityDealt }) =
   if (seatOrder.length <= 0) {
     throw new Error("invalid_seat_order");
   }
+  if (!Number.isInteger(communityDealt) || communityDealt < 0 || communityDealt > 5) {
+    throw new Error("invalid_community_dealt");
+  }
   const burn = seatOrder.length * 2;
-  const dealt = Number.isInteger(communityDealt) ? communityDealt : 0;
+  const dealt = communityDealt;
   return deck.slice(burn + dealt);
 };
 

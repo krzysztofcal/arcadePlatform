@@ -229,7 +229,9 @@ const run = async () => {
   });
   assert.equal(corruptResponse.response.statusCode, 409);
   assert.equal(JSON.parse(corruptResponse.response.body).error, "state_invalid");
-  assert.ok(corruptCalls.some((entry) => entry.kind === "poker_act_rejected"));
+  const corruptEntry = corruptCalls.find((entry) => entry.kind === "poker_act_rejected");
+  assert.ok(corruptEntry);
+  assert.equal(corruptEntry.data?.code, "community_len_mismatch");
 
   const storageCheck = isStateStorageValid(
     { phase: "HAND_DONE", seats: baseState.seats },

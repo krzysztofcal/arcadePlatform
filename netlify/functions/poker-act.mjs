@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import { baseHeaders, beginSql, corsHeaders, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
 import { isHoleCardsTableMissing, loadHoleCardsByUserId } from "./_shared/poker-hole-cards-store.mjs";
 import { deriveCommunityCards, deriveRemainingDeck } from "./_shared/poker-deal-deterministic.mjs";
@@ -77,6 +78,33 @@ const cardKey = (card) => {
   if (!rank || !suit) return "";
   return `${rank}-${suit}`;
 };
+
+const safeHash = (value) => {
+  const input = String(value ?? "").slice(0, 200);
+  try {
+    if (crypto?.createHash) {
+      return crypto.createHash("sha256").update(input).digest("hex").slice(0, 12);
+    }
+  } catch {
+    // fall through
+  }
+  let hash = 2166136261;
+  for (let i = 0; i < input.length; i += 1) {
+    hash ^= input.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(16).slice(0, 12);
+};
+
+const hashUserId = (userId) => safeHash(`uid:${String(userId ?? "").slice(0, 200)}`);
+
+const hashCardKey = (card) => {
+  const key = cardKey(card);
+  if (!key) return "invalid";
+  return safeHash(`card:${key}`);
+};
+
+const hashList = (values, maxLen = 12) => values.slice(0, maxLen);
 
 const cardsSameSet = (left, right) => {
   if (!Array.isArray(left) || !Array.isArray(right)) return false;
@@ -236,6 +264,18 @@ export async function handler(event) {
         });
         throw makeError(409, "state_invalid");
       }
+
+      const rejectStateInvalid = (code, extra) => {
+        klog("poker_act_rejected", {
+          tableId,
+          userId: auth.userId,
+          reason: "state_invalid",
+          code,
+          phase: currentState?.phase ?? null,
+          ...(extra || {}),
+        });
+        throw makeError(409, "state_invalid");
+      };
       if (!isActionPhase(currentState.phase) || !currentState.turnUserId) {
         klog("poker_act_rejected", {
           tableId,
@@ -255,31 +295,16 @@ export async function handler(event) {
         throw makeError(409, "state_invalid");
       }
       if (typeof currentState.handSeed !== "string" || !currentState.handSeed.trim()) {
-        klog("poker_act_rejected", {
-          tableId,
-          userId: auth.userId,
-          reason: "state_invalid",
-          phase: currentState?.phase || null,
-        });
-        throw makeError(409, "state_invalid");
+        rejectStateInvalid("missing_hand_seed");
       }
       if (!Number.isInteger(currentState.communityDealt) || currentState.communityDealt < 0 || currentState.communityDealt > 5) {
-        klog("poker_act_rejected", {
-          tableId,
-          userId: auth.userId,
-          reason: "state_invalid",
-          phase: currentState?.phase || null,
-        });
-        throw makeError(409, "state_invalid");
+        rejectStateInvalid("invalid_community_dealt", { communityDealt: currentState.communityDealt });
       }
       if (!Array.isArray(currentState.community) || currentState.community.length !== currentState.communityDealt) {
-        klog("poker_act_rejected", {
-          tableId,
-          userId: auth.userId,
-          reason: "state_invalid",
-          phase: currentState?.phase || null,
+        rejectStateInvalid("community_len_mismatch", {
+          communityDealt: currentState.communityDealt,
+          communityLen: Array.isArray(currentState.community) ? currentState.community.length : null,
         });
-        throw makeError(409, "state_invalid");
       }
 
       const lastByUserId = isPlainObject(currentState.lastActionRequestIdByUserId)
@@ -334,23 +359,16 @@ export async function handler(event) {
       }
 
       if (seatUserIdsInOrder.length <= 0) {
-        klog("poker_act_rejected", {
-          tableId,
-          userId: auth.userId,
-          reason: "state_invalid",
-          phase: currentState.phase,
-        });
-        throw makeError(409, "state_invalid");
+        rejectStateInvalid("no_active_seats");
       }
       const stateSeatUserIdsInOrder = normalizeSeatOrderFromState(currentState.seats);
       if (!arraysEqual(seatUserIdsInOrder, stateSeatUserIdsInOrder)) {
-        klog("poker_act_rejected", {
-          tableId,
-          userId: auth.userId,
-          reason: "state_invalid",
-          phase: currentState.phase,
+        rejectStateInvalid("seat_order_mismatch", {
+          dbSeatCount: seatUserIdsInOrder.length,
+          stateSeatCount: stateSeatUserIdsInOrder.length,
+          dbSeatIds: hashList(seatUserIdsInOrder.map(hashUserId)),
+          stateSeatIds: hashList(stateSeatUserIdsInOrder.map(hashUserId)),
         });
-        throw makeError(409, "state_invalid");
       }
       let derivedCommunity;
       let derivedDeck;
@@ -366,22 +384,19 @@ export async function handler(event) {
           communityDealt: currentState.communityDealt,
         });
       } catch {
-        klog("poker_act_rejected", {
-          tableId,
-          userId: auth.userId,
-          reason: "state_invalid",
-          phase: currentState.phase,
-        });
-        throw makeError(409, "state_invalid");
+        rejectStateInvalid("derive_failed");
       }
       if (!cardsSameSet(currentState.community, derivedCommunity)) {
-        klog("poker_act_rejected", {
-          tableId,
-          userId: auth.userId,
-          reason: "state_invalid",
-          phase: currentState.phase,
+        const stateKeys = Array.isArray(currentState.community) ? currentState.community.map(hashCardKey) : [];
+        const derivedKeys = Array.isArray(derivedCommunity) ? derivedCommunity.map(hashCardKey) : [];
+        rejectStateInvalid("community_mismatch", {
+          communityDealt: currentState.communityDealt,
+          stateCommunityLen: Array.isArray(currentState.community) ? currentState.community.length : null,
+          derivedCommunityLen: Array.isArray(derivedCommunity) ? derivedCommunity.length : null,
+          stateCommunityKeys: hashList(stateKeys, 5),
+          derivedCommunityKeys: hashList(derivedKeys, 5),
+          invalidKeyFound: stateKeys.includes("invalid") || derivedKeys.includes("invalid"),
         });
-        throw makeError(409, "state_invalid");
       }
 
       if (lastByUserId[auth.userId] === requestId) {
