@@ -186,6 +186,39 @@ const run = async () => {
     const advanced = advanceIfNeeded(nextState);
     assert.equal(advanced.state.phase, "FLOP");
   }
+
+  {
+    const { seats } = makeBase();
+    const stacks = { "user-1": 0, "user-2": 0, "user-3": 0 };
+    const { state } = initHandState({ tableId: "t1", seats, stacks, rng: makeRng(11) });
+    const stuckState = {
+      ...state,
+      phase: "PREFLOP",
+      stacks,
+      foldedByUserId: {
+        ...state.foldedByUserId,
+        "user-1": false,
+        "user-2": false,
+        "user-3": false,
+      },
+      toCallByUserId: {
+        ...state.toCallByUserId,
+        "user-1": 0,
+        "user-2": 0,
+        "user-3": 0,
+      },
+      actedThisRoundByUserId: {
+        ...state.actedThisRoundByUserId,
+        "user-1": true,
+        "user-2": true,
+        "user-3": true,
+      },
+    };
+    const advanced = advanceIfNeeded(stuckState);
+    assert.equal(advanced.state.phase, "SHOWDOWN");
+    assert.equal(advanced.state.turnUserId, null);
+    assert.ok(advanced.events.some((event) => event.type === "SHOWDOWN_STARTED"));
+  }
 };
 
 await run();

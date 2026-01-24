@@ -227,8 +227,9 @@ const advanceIfNeeded = (state) => {
     return { state: done.state, events: done.events };
   }
   if (betting.length === 0) {
-    const done = checkHandDone(state, events);
-    return { state: done.state, events: done.events };
+    const next = { ...state, phase: "SHOWDOWN", turnUserId: null };
+    events.push({ type: "SHOWDOWN_STARTED", reason: "no_betting_players" });
+    return { state: next, events };
   }
   const nobodyOwes = active.every((seat) => (state.toCallByUserId?.[seat.userId] || 0) === 0);
   const allBettersActed = betting.every((seat) => state.actedThisRoundByUserId?.[seat.userId]);
