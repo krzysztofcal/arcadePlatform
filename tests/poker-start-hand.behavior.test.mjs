@@ -130,7 +130,9 @@ const runHappyPath = async () => {
   assert.ok(insertHoleCardsIndex < updateIndex, "expected hole cards insert before state update");
   const updatedState = JSON.parse(updateCall.params?.[1] || "{}");
   assert.ok(updatedState.handId, "state should include handId");
-  assert.ok(Array.isArray(updatedState.deck), "state should persist deck as an array");
+  assert.equal(updatedState.deck, undefined);
+  assert.equal(typeof updatedState.handSeed, "string");
+  assert.equal(updatedState.communityDealt, 0);
   assert.equal(updatedState.holeCardsByUserId, undefined);
   assert.equal(typeof updatedState.toCallByUserId, "object");
   assert.equal(typeof updatedState.betThisRoundByUserId, "object");

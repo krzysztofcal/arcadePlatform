@@ -1,5 +1,6 @@
 import { baseHeaders, beginSql, corsHeaders, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
 import { isHoleCardsTableMissing, loadHoleCardsByUserId } from "./_shared/poker-hole-cards-store.mjs";
+import { deriveCommunityCards, deriveRemainingDeck } from "./_shared/poker-deal-deterministic.mjs";
 import { advanceIfNeeded, applyAction } from "./_shared/poker-reducer.mjs";
 import { normalizeRequestId } from "./_shared/poker-request-id.mjs";
 import { isPlainObject, isStateStorageValid, normalizeJsonState, withoutPrivateState } from "./_shared/poker-state-utils.mjs";
@@ -56,6 +57,38 @@ const hasRequiredState = (state) =>
 const isActionPhase = (phase) => phase === "PREFLOP" || phase === "FLOP" || phase === "TURN" || phase === "RIVER";
 
 const getSeatForUser = (state, userId) => (Array.isArray(state.seats) ? state.seats.find((seat) => seat?.userId === userId) : null);
+
+const normalizeRank = (value) => {
+  if (typeof value === "number") return value;
+  if (typeof value !== "string") return null;
+  const upper = value.toUpperCase();
+  if (upper === "T") return 10;
+  if (upper === "J") return 11;
+  if (upper === "Q") return 12;
+  if (upper === "K") return 13;
+  if (upper === "A") return 14;
+  const num = Number(upper);
+  return Number.isInteger(num) ? num : null;
+};
+
+const cardKey = (card) => {
+  const rank = normalizeRank(card?.r);
+  const suit = typeof card?.s === "string" ? card.s.toUpperCase() : "";
+  if (!rank || !suit) return "";
+  return `${rank}-${suit}`;
+};
+
+const cardsMatch = (left, right) => {
+  if (!Array.isArray(left) || !Array.isArray(right)) return false;
+  if (left.length !== right.length) return false;
+  for (let i = 0; i < left.length; i += 1) {
+    if (cardKey(left[i]) !== cardKey(right[i])) return false;
+  }
+  return true;
+};
+
+const getPlayerCount = (state) =>
+  Array.isArray(state.seats) ? state.seats.filter((seat) => typeof seat?.userId === "string" && seat.userId.trim()).length : 0;
 
 const validateActionBounds = (state, action, userId) => {
   const toCall = Number(state.toCallByUserId?.[userId] || 0);
@@ -187,6 +220,33 @@ export async function handler(event) {
         });
         throw makeError(409, "state_invalid");
       }
+      if (typeof currentState.handSeed !== "string" || !currentState.handSeed.trim()) {
+        klog("poker_act_rejected", {
+          tableId,
+          userId: auth.userId,
+          reason: "state_invalid",
+          phase: currentState?.phase || null,
+        });
+        throw makeError(409, "state_invalid");
+      }
+      if (!Number.isInteger(currentState.communityDealt) || currentState.communityDealt < 0 || currentState.communityDealt > 5) {
+        klog("poker_act_rejected", {
+          tableId,
+          userId: auth.userId,
+          reason: "state_invalid",
+          phase: currentState?.phase || null,
+        });
+        throw makeError(409, "state_invalid");
+      }
+      if (!Array.isArray(currentState.community) || currentState.community.length !== currentState.communityDealt) {
+        klog("poker_act_rejected", {
+          tableId,
+          userId: auth.userId,
+          reason: "state_invalid",
+          phase: currentState?.phase || null,
+        });
+        throw makeError(409, "state_invalid");
+      }
 
       const lastByUserId = isPlainObject(currentState.lastActionRequestIdByUserId)
         ? currentState.lastActionRequestIdByUserId
@@ -238,6 +298,48 @@ export async function handler(event) {
         throw error;
       }
 
+      const playerCount = getPlayerCount(currentState);
+      if (playerCount <= 0) {
+        klog("poker_act_rejected", {
+          tableId,
+          userId: auth.userId,
+          reason: "state_invalid",
+          phase: currentState.phase,
+        });
+        throw makeError(409, "state_invalid");
+      }
+      let derivedCommunity;
+      let derivedDeck;
+      try {
+        derivedCommunity = deriveCommunityCards({
+          handSeed: currentState.handSeed,
+          playerCount,
+          communityDealt: currentState.communityDealt,
+        });
+        derivedDeck = deriveRemainingDeck({
+          handSeed: currentState.handSeed,
+          playerCount,
+          communityDealt: currentState.communityDealt,
+        });
+      } catch {
+        klog("poker_act_rejected", {
+          tableId,
+          userId: auth.userId,
+          reason: "state_invalid",
+          phase: currentState.phase,
+        });
+        throw makeError(409, "state_invalid");
+      }
+      if (!cardsMatch(currentState.community, derivedCommunity)) {
+        klog("poker_act_rejected", {
+          tableId,
+          userId: auth.userId,
+          reason: "state_invalid",
+          phase: currentState.phase,
+        });
+        throw makeError(409, "state_invalid");
+      }
+
       if (lastByUserId[auth.userId] === requestId) {
         const version = Number(stateRow.version);
         if (!Number.isFinite(version)) {
@@ -284,6 +386,8 @@ export async function handler(event) {
 
       const privateState = {
         ...currentState,
+        community: derivedCommunity,
+        deck: derivedDeck,
         holeCardsByUserId,
       };
 
@@ -345,16 +449,17 @@ export async function handler(event) {
         loops += 1;
       }
 
-      const { holeCardsByUserId: _ignoredHoleCards, ...stateBase } = nextState;
+      const { holeCardsByUserId: _ignoredHoleCards, deck: _ignoredDeck, ...stateBase } = nextState;
       const updatedState = {
         ...stateBase,
+        communityDealt: Array.isArray(nextState.community) ? nextState.community.length : 0,
         lastActionRequestIdByUserId: {
           ...lastByUserId,
           [auth.userId]: requestId,
         },
       };
 
-      if (!isStateStorageValid(updatedState, { requireDeck: true })) {
+      if (!isStateStorageValid(updatedState, { requireHandSeed: true, requireCommunityDealt: true, requireNoDeck: true })) {
         klog("poker_state_corrupt", { tableId, phase: updatedState.phase });
         throw makeError(409, "state_invalid");
       }

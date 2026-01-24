@@ -19,10 +19,8 @@ const baseState = {
   dealerSeatNo: 1,
   turnUserId: "user-1",
   handId: "hand-1",
-  deck: [{ r: "2", s: "S" }],
-  holeCardsByUserId: {
-    "user-1": [{ r: "A", s: "S" }, { r: "K", s: "S" }],
-  },
+  handSeed: "seed-1",
+  communityDealt: 0,
 };
 
 const defaultHoleCards = {

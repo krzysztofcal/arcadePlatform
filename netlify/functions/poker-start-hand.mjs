@@ -181,6 +181,10 @@ export async function handler(event) {
         typeof crypto.randomUUID === "function"
           ? crypto.randomUUID()
           : `hand_${Date.now()}_${Math.floor(rng() * 1e6)}`;
+      const handSeed =
+        typeof crypto.randomUUID === "function"
+          ? crypto.randomUUID()
+          : `seed_${Date.now()}_${Math.floor(rng() * 1e6)}`;
       const derivedSeats = validSeats.map((seat) => ({ userId: seat.user_id, seatNo: seat.seat_no }));
       const activeUserIds = new Set(validSeats.map((seat) => seat.user_id));
       const activeUserIdList = validSeats.map((seat) => seat.user_id);
@@ -198,7 +202,6 @@ export async function handler(event) {
 
       const deck = shuffle(createDeck(), rng);
       const dealResult = dealHoleCards(deck, validSeats.map((seat) => seat.user_id));
-      const remainingDeck = Array.isArray(dealResult?.deck) ? dealResult.deck : deck;
       const dealtHoleCards = isPlainObject(dealResult?.holeCardsByUserId) ? dealResult.holeCardsByUserId : {};
 
       if (!activeUserIdList.every((userId) => isValidTwoCards(dealtHoleCards[userId]))) {
@@ -206,13 +209,7 @@ export async function handler(event) {
         throw makeError(409, "state_invalid");
       }
 
-      if (
-        !isStateStorageValid({ seats: derivedSeats, holeCardsByUserId: dealtHoleCards }, { requireHoleCards: true }) ||
-        !isStateStorageValid(
-          { seats: derivedSeats, community: [], deck: remainingDeck, holeCardsByUserId: dealtHoleCards },
-          { requireDeck: true, requireHoleCards: true }
-        )
-      ) {
+      if (!isStateStorageValid({ seats: derivedSeats, holeCardsByUserId: dealtHoleCards }, { requireHoleCards: true })) {
         klog("poker_state_corrupt", { tableId, phase: "PREFLOP" });
         throw makeError(409, "state_invalid");
       }
@@ -245,9 +242,11 @@ export async function handler(event) {
         ...stateBase,
         tableId: currentState.tableId || tableId,
         handId,
+        handSeed,
         phase: "PREFLOP",
         pot: 0,
         community: [],
+        communityDealt: 0,
         seats: derivedSeats,
         stacks: nextStacks,
         dealerSeatNo,
@@ -256,14 +255,13 @@ export async function handler(event) {
         betThisRoundByUserId,
         actedThisRoundByUserId,
         foldedByUserId,
-        deck: remainingDeck,
         lastActionRequestIdByUserId: {},
         lastStartHandRequestId: requestIdParsed.value || null,
         lastStartHandUserId: auth.userId,
         startedAt: new Date().toISOString(),
       };
 
-      if (!isStateStorageValid(updatedState, { requireDeck: true })) {
+      if (!isStateStorageValid(updatedState, { requireHandSeed: true, requireCommunityDealt: true, requireNoDeck: true })) {
         klog("poker_state_corrupt", { tableId, phase: updatedState.phase });
         throw makeError(409, "state_invalid");
       }
