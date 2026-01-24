@@ -42,6 +42,7 @@ const run = async () => {
   {
     const { seats, stacks } = makeBase();
     const { state } = initHandState({ tableId: "t1", seats, stacks, rng: makeRng(2) });
+    assert.deepEqual(getLegalActions(state, "user-3"), []);
     assert.throws(
       () => applyAction(state, { type: "CHECK", userId: "user-3" }),
       (error) => error?.message === "invalid_action"
@@ -66,6 +67,18 @@ const run = async () => {
       () => applyAction(state, { type: "CHECK", userId: "user-not-turn" }),
       (error) => error?.message === "invalid_action"
     );
+  }
+
+  {
+    const seats = [
+      { userId: "user-1", seatNo: 1 },
+      { userId: "user-2", seatNo: 3 },
+      { userId: "user-3", seatNo: 5 },
+    ];
+    const stacks = { "user-1": 0, "user-2": 50, "user-3": 50 };
+    const { state } = initHandState({ tableId: "t1", seats, stacks, rng: makeRng(10) });
+    assert.notEqual(state.turnUserId, "user-1");
+    assert.ok(["user-2", "user-3"].includes(state.turnUserId));
   }
 
   {

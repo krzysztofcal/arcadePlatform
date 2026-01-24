@@ -92,7 +92,13 @@ const initHandState = ({ tableId, seats, stacks, rng }) => {
   const playerIds = orderedSeats.map((seat) => seat.userId).filter(Boolean);
   const dealt = dealHoleCards(deck, playerIds);
   const dealerSeatNo = orderedSeats[0]?.seatNo ?? 0;
-  const turnUserId = orderedSeats[1]?.userId || orderedSeats[0]?.userId || null;
+  const foldedByUserId = buildDefaultMap(orderedSeats, false);
+  const turnUserId = getFirstBettingAfterDealer({
+    seats: orderedSeats,
+    dealerSeatNo,
+    stacks: copyMap(stacks),
+    foldedByUserId,
+  });
   const state = {
     tableId,
     phase: "PREFLOP",
@@ -107,7 +113,7 @@ const initHandState = ({ tableId, seats, stacks, rng }) => {
     toCallByUserId: buildDefaultMap(orderedSeats, 0),
     betThisRoundByUserId: buildDefaultMap(orderedSeats, 0),
     actedThisRoundByUserId: buildDefaultMap(orderedSeats, false),
-    foldedByUserId: buildDefaultMap(orderedSeats, false),
+    foldedByUserId,
     lastAggressorUserId: null,
   };
   return { state };
@@ -217,6 +223,10 @@ const advanceIfNeeded = (state) => {
   const active = getActiveSeats(state);
   const betting = getBettingSeats(state);
   if (active.length <= 1) {
+    const done = checkHandDone(state, events);
+    return { state: done.state, events: done.events };
+  }
+  if (betting.length === 0) {
     const done = checkHandDone(state, events);
     return { state: done.state, events: done.events };
   }
