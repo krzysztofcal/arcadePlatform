@@ -293,7 +293,28 @@ const runMissingHoleCardsTable = async () => {
   assert.ok(!queries.some((q) => q.query.toLowerCase().includes("insert into public.poker_actions")));
 };
 
+const runMissingDealSecret = async () => {
+  const originalSecret = process.env.POKER_DEAL_SECRET;
+  delete process.env.POKER_DEAL_SECRET;
+  const queries = [];
+  const storedState = { value: null, holeCardsStore: new Map(), holeCardsInsertError: null };
+  const handler = makeHandler(queries, storedState);
+  const response = await handler({
+    httpMethod: "POST",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    body: JSON.stringify({ tableId, requestId: "req-missing-secret" }),
+  });
+  if (originalSecret) {
+    process.env.POKER_DEAL_SECRET = originalSecret;
+  } else {
+    delete process.env.POKER_DEAL_SECRET;
+  }
+  assert.equal(response.statusCode, 409);
+  assert.equal(JSON.parse(response.body).error, "state_invalid");
+};
+
 await runHappyPath();
 await runReplayPath();
 await runInvalidDeal();
 await runMissingHoleCardsTable();
+await runMissingDealSecret();

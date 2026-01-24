@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { deriveDeck } from "../netlify/functions/_shared/poker-deal-deterministic.mjs";
+import { dealHoleCards } from "../netlify/functions/_shared/poker-engine.mjs";
 import { isHoleCardsTableMissing, loadHoleCardsByUserId } from "../netlify/functions/_shared/poker-hole-cards-store.mjs";
 import { advanceIfNeeded, applyAction } from "../netlify/functions/_shared/poker-reducer.mjs";
 import { normalizeRequestId } from "../netlify/functions/_shared/poker-request-id.mjs";
@@ -38,24 +39,9 @@ const baseState = {
   lastActionRequestIdByUserId: {},
 };
 
-const dealHoleCardsFromSeed = (handSeed, userIdsInSeatOrder) => {
-  const deck = deriveDeck(handSeed);
-  const map = {};
-  for (const userId of userIdsInSeatOrder) {
-    map[userId] = [];
-  }
-  let idx = 0;
-  for (let round = 0; round < 2; round += 1) {
-    for (const userId of userIdsInSeatOrder) {
-      map[userId][round] = deck[idx];
-      idx += 1;
-    }
-  }
-  return map;
-};
-
 const seatOrder = baseState.seats.map((seat) => seat.userId);
-const defaultHoleCards = dealHoleCardsFromSeed(baseState.handSeed, seatOrder);
+const dealt = dealHoleCards(deriveDeck(baseState.handSeed), seatOrder);
+const defaultHoleCards = dealt.holeCardsByUserId;
 
 const makeHandler = (queries, storedState, userId, options = {}) =>
   loadPokerHandler("netlify/functions/poker-act.mjs", {
