@@ -114,7 +114,7 @@ const loadHandHoleCardsForShowdown = async (tx, { tableId, handId, userIds, klog
     throw new Error("state_invalid");
   }
   const rows = await tx.unsafe(
-    "select user_id, cards from public.poker_hole_cards where table_id = $1 and hand_id = $2 and user_id = any($3::uuid[]);",
+    "select user_id, cards from public.poker_hole_cards where table_id = $1 and hand_id = $2 and user_id = any($3);",
     [tableId, handId, userIds]
   );
   const list = Array.isArray(rows) ? rows : [];
@@ -648,7 +648,7 @@ export async function handler(event) {
           [tableId, newVersion, auth.userId, actionParsed.value.type, actionParsed.value.amount ?? null]
         );
       }
-      if (showdownEvaluated) {
+      if (showdownEvaluated && auth.userId) {
         await tx.unsafe(
           "insert into public.poker_actions (table_id, version, user_id, action_type, amount) values ($1, $2, $3, $4, $5);",
           [tableId, newVersion, auth.userId, "SHOWDOWN_EVALUATED", null]
