@@ -6,8 +6,13 @@ const migrationsDir = path.join(process.cwd(), "supabase", "migrations");
 const migrationFiles = fs.readdirSync(migrationsDir);
 
 function readMigration(label, requiredSubstring) {
-  const file = migrationFiles.find((name) => name.includes(requiredSubstring));
-  assert.ok(file, `${label} migration file should exist (matching "${requiredSubstring}")`);
+  const matches = migrationFiles.filter((name) => name.includes(requiredSubstring));
+  assert.equal(
+    matches.length,
+    1,
+    `${label} expected exactly 1 migration matching "${requiredSubstring}", got ${matches.length}: ${matches.join(", ")}`
+  );
+  const file = matches[0];
   assert.ok(file.toLowerCase().includes("lockdown"), `${label} migration filename must include "lockdown"`);
   return fs.readFileSync(path.join(migrationsDir, file), "utf8");
 }
@@ -27,6 +32,10 @@ function assertLockdown(sql, table) {
       "i"
     ).test(sql),
     `${table} should revoke authenticated`
+  );
+  assert.ok(
+    new RegExp(`revoke\\s+all\\s+on\\s+table\\s+${target}\\s+from\\s+public`, "i").test(sql),
+    `${table} should revoke PUBLIC`
   );
   assert.ok(
     new RegExp(
