@@ -1,7 +1,8 @@
 import crypto from "node:crypto";
 import { baseHeaders, beginSql, corsHeaders, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
 import { isValidTwoCards } from "./_shared/poker-cards-utils.mjs";
-import { createDeck, dealHoleCards, shuffle } from "./_shared/poker-engine.mjs";
+import { dealHoleCards } from "./_shared/poker-engine.mjs";
+import { deriveDeck } from "./_shared/poker-deal-deterministic.mjs";
 import { getRng, isPlainObject, isStateStorageValid, normalizeJsonState, withoutPrivateState } from "./_shared/poker-state-utils.mjs";
 import { isValidUuid } from "./_shared/poker-utils.mjs";
 
@@ -200,7 +201,7 @@ export async function handler(event) {
       const actedThisRoundByUserId = Object.fromEntries(activeUserIdList.map((userId) => [userId, false]));
       const foldedByUserId = Object.fromEntries(activeUserIdList.map((userId) => [userId, false]));
 
-      const deck = shuffle(createDeck(), rng);
+      const deck = deriveDeck(handSeed);
       const dealResult = dealHoleCards(deck, validSeats.map((seat) => seat.user_id));
       const dealtHoleCards = isPlainObject(dealResult?.holeCardsByUserId) ? dealResult.holeCardsByUserId : {};
 

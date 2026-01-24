@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { createDeck, dealHoleCards, shuffle } from "../netlify/functions/_shared/poker-engine.mjs";
+import { deriveDeck } from "../netlify/functions/_shared/poker-deal-deterministic.mjs";
 import {
   getRng,
   isPlainObject,
@@ -26,6 +27,7 @@ const makeHandler = (queries, storedState) =>
     corsHeaders: () => ({ "access-control-allow-origin": "https://example.test" }),
     createDeck,
     dealHoleCards,
+    deriveDeck,
     extractBearerToken: () => "token",
     getRng,
     isPlainObject,
@@ -147,6 +149,12 @@ const runHappyPath = async () => {
   assert.equal(updatedState.betThisRoundByUserId[userId], 0);
   assert.equal(updatedState.actedThisRoundByUserId[userId], false);
   assert.equal(updatedState.foldedByUserId[userId], false);
+  const seatOrder = ["user-1", "user-2", "user-3"];
+  const deck = deriveDeck(updatedState.handSeed);
+  const pos = seatOrder.indexOf(userId);
+  assert.ok(pos >= 0, "test assumes user is seated");
+  const expectedHoleCards = [deck[pos], deck[pos + seatOrder.length]];
+  assert.deepEqual(payload.myHoleCards, expectedHoleCards, "myHoleCards must match deterministic deck from handSeed");
   assert.ok(
     queries.some((q) => q.query.toLowerCase().includes("insert into public.poker_actions")),
     "expected start hand action insert"
@@ -204,6 +212,7 @@ const runInvalidDeal = async () => {
     corsHeaders: () => ({ "access-control-allow-origin": "https://example.test" }),
     createDeck,
     dealHoleCards: () => ({ holeCardsByUserId: { "user-1": [], "user-2": [], "user-3": [] }, deck: [] }),
+    deriveDeck,
     extractBearerToken: () => "token",
     getRng,
     isPlainObject,

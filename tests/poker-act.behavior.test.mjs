@@ -38,11 +38,24 @@ const baseState = {
   lastActionRequestIdByUserId: {},
 };
 
-const defaultHoleCards = {
-  "user-1": [{ r: "A", s: "S" }, { r: "K", s: "S" }],
-  "user-2": [{ r: "Q", s: "H" }, { r: "J", s: "H" }],
-  "user-3": [{ r: "9", s: "D" }, { r: "9", s: "C" }],
+const dealHoleCardsFromSeed = (handSeed, userIdsInSeatOrder) => {
+  const deck = deriveDeck(handSeed);
+  const map = {};
+  for (const userId of userIdsInSeatOrder) {
+    map[userId] = [];
+  }
+  let idx = 0;
+  for (let round = 0; round < 2; round += 1) {
+    for (const userId of userIdsInSeatOrder) {
+      map[userId][round] = deck[idx];
+      idx += 1;
+    }
+  }
+  return map;
 };
+
+const seatOrder = baseState.seats.map((seat) => seat.userId);
+const defaultHoleCards = dealHoleCardsFromSeed(baseState.handSeed, seatOrder);
 
 const makeHandler = (queries, storedState, userId, options = {}) =>
   loadPokerHandler("netlify/functions/poker-act.mjs", {
@@ -289,6 +302,14 @@ const run = async () => {
   const derivedDeck = deriveDeck(baseState.handSeed);
   const expectedCommunity = derivedDeck.slice(6, 9);
   assert.deepEqual(user3Payload.state.state.community, expectedCommunity);
+  const holeKeys = new Set(
+    Object.values(defaultHoleCards)
+      .flat()
+      .map((card) => `${card.r}-${card.s}`)
+  );
+  for (const card of user3Payload.state.state.community) {
+    assert.equal(holeKeys.has(`${card.r}-${card.s}`), false, "community must not overlap hole cards");
+  }
   assert.ok(user3Payload.events.some((event) => event.type === "STREET_ADVANCED"));
   assert.ok(user3Payload.events.some((event) => event.type === "COMMUNITY_DEALT"));
   assert.equal(user3Payload.state.state.holeCardsByUserId, undefined);
