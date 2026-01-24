@@ -174,8 +174,9 @@ export async function handler(event) {
         throw makeError(409, "already_in_hand");
       }
 
-      const dealerSeatNo = validSeats[0].seat_no;
-      const turnUserId = validSeats[1]?.user_id || validSeats[0].user_id;
+      const orderedSeats = validSeats.slice().sort((a, b) => Number(a.seat_no) - Number(b.seat_no));
+      const dealerSeatNo = orderedSeats[0].seat_no;
+      const turnUserId = orderedSeats[1]?.user_id || orderedSeats[0].user_id;
 
       const rng = getRng();
       const handId =
@@ -186,9 +187,9 @@ export async function handler(event) {
         typeof crypto.randomUUID === "function"
           ? crypto.randomUUID()
           : `seed_${Date.now()}_${Math.floor(rng() * 1e6)}`;
-      const derivedSeats = validSeats.map((seat) => ({ userId: seat.user_id, seatNo: seat.seat_no }));
-      const activeUserIds = new Set(validSeats.map((seat) => seat.user_id));
-      const activeUserIdList = validSeats.map((seat) => seat.user_id);
+      const derivedSeats = orderedSeats.map((seat) => ({ userId: seat.user_id, seatNo: seat.seat_no }));
+      const activeUserIds = new Set(orderedSeats.map((seat) => seat.user_id));
+      const activeUserIdList = orderedSeats.map((seat) => seat.user_id);
       const currentStacks = parseStacks(currentState.stacks);
       const nextStacks = activeUserIdList.reduce((acc, userId) => {
         if (!Object.prototype.hasOwnProperty.call(currentStacks, userId)) return acc;
@@ -202,7 +203,7 @@ export async function handler(event) {
       const foldedByUserId = Object.fromEntries(activeUserIdList.map((userId) => [userId, false]));
 
       const deck = deriveDeck(handSeed);
-      const dealResult = dealHoleCards(deck, validSeats.map((seat) => seat.user_id));
+      const dealResult = dealHoleCards(deck, activeUserIdList);
       const dealtHoleCards = isPlainObject(dealResult?.holeCardsByUserId) ? dealResult.holeCardsByUserId : {};
 
       if (!activeUserIdList.every((userId) => isValidTwoCards(dealtHoleCards[userId]))) {

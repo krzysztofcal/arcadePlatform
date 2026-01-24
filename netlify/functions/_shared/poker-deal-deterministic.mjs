@@ -40,7 +40,19 @@ const deriveDeck = (handSeed) => {
 
 const normalizeSeatOrder = (value) => {
   if (!Array.isArray(value)) return [];
-  return value.filter((userId) => typeof userId === "string" && userId.trim());
+  const out = [];
+  const seen = new Set();
+  for (const raw of value) {
+    if (typeof raw !== "string") continue;
+    const userId = raw.trim();
+    if (!userId) continue;
+    if (seen.has(userId)) {
+      throw new Error("duplicate_seat_user_id");
+    }
+    seen.add(userId);
+    out.push(userId);
+  }
+  return out;
 };
 
 const deriveCommunityCards = ({ handSeed, seatUserIdsInOrder, communityDealt }) => {
