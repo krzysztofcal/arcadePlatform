@@ -1,5 +1,7 @@
+import crypto from "node:crypto";
 import { baseHeaders, beginSql, corsHeaders, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
 import { isHoleCardsTableMissing, loadHoleCardsByUserId } from "./_shared/poker-hole-cards-store.mjs";
+import { deriveCommunityCards, deriveRemainingDeck } from "./_shared/poker-deal-deterministic.mjs";
 import { advanceIfNeeded, applyAction } from "./_shared/poker-reducer.mjs";
 import { normalizeRequestId } from "./_shared/poker-request-id.mjs";
 import { isPlainObject, isStateStorageValid, normalizeJsonState, withoutPrivateState } from "./_shared/poker-state-utils.mjs";
@@ -56,6 +58,99 @@ const hasRequiredState = (state) =>
 const isActionPhase = (phase) => phase === "PREFLOP" || phase === "FLOP" || phase === "TURN" || phase === "RIVER";
 
 const getSeatForUser = (state, userId) => (Array.isArray(state.seats) ? state.seats.find((seat) => seat?.userId === userId) : null);
+
+const normalizeRank = (value) => {
+  if (typeof value === "number") return value;
+  if (typeof value !== "string") return null;
+  const upper = value.toUpperCase();
+  if (upper === "T") return 10;
+  if (upper === "J") return 11;
+  if (upper === "Q") return 12;
+  if (upper === "K") return 13;
+  if (upper === "A") return 14;
+  const num = Number(upper);
+  return Number.isInteger(num) ? num : null;
+};
+
+const cardKey = (card) => {
+  const rank = normalizeRank(card?.r);
+  const suit = typeof card?.s === "string" ? card.s.toUpperCase() : "";
+  if (!rank || !suit) return "";
+  return `${rank}-${suit}`;
+};
+
+const safeHash = (value) => {
+  const input = String(value ?? "").slice(0, 200);
+  try {
+    if (crypto?.createHash) {
+      return crypto.createHash("sha256").update(input).digest("hex").slice(0, 12);
+    }
+  } catch {
+    // fall through
+  }
+  let hash = 2166136261;
+  for (let i = 0; i < input.length; i += 1) {
+    hash ^= input.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(16).slice(0, 12);
+};
+
+const hashUserId = (userId) => safeHash(`uid:${String(userId ?? "").slice(0, 200)}`);
+
+const hashCardKey = (card) => {
+  const key = cardKey(card);
+  if (!key) return "invalid";
+  return safeHash(`card:${key}`);
+};
+
+const takeList = (values, maxLen = 12) => (Array.isArray(values) ? values.slice(0, maxLen) : []);
+
+const cardsSameSet = (left, right) => {
+  if (!Array.isArray(left) || !Array.isArray(right)) return false;
+  if (left.length !== right.length) return false;
+  const leftKeys = left.map(cardKey);
+  if (leftKeys.some((key) => !key)) return false;
+  leftKeys.sort();
+  const rightKeys = right.map(cardKey);
+  if (rightKeys.some((key) => !key)) return false;
+  rightKeys.sort();
+  if (leftKeys.length !== rightKeys.length) return false;
+  for (let i = 0; i < leftKeys.length; i += 1) {
+    if (leftKeys[i] !== rightKeys[i]) return false;
+  }
+  return true;
+};
+
+const arraysEqual = (left, right) => {
+  if (!Array.isArray(left) || !Array.isArray(right)) return false;
+  if (left.length !== right.length) return false;
+  for (let i = 0; i < left.length; i += 1) {
+    if (left[i] !== right[i]) return false;
+  }
+  return true;
+};
+
+const toSeatNo = (value) => {
+  const n = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(n) ? n : Number.POSITIVE_INFINITY;
+};
+
+const normalizeSeatOrderFromState = (seats) => {
+  if (!Array.isArray(seats)) return [];
+  const ordered = seats.slice().sort((a, b) => toSeatNo(a?.seatNo) - toSeatNo(b?.seatNo));
+  const out = [];
+  const seen = new Set();
+  for (const seat of ordered) {
+    if (typeof seat?.userId !== "string") continue;
+    const userId = seat.userId.trim();
+    if (!userId) continue;
+    if (seen.has(userId)) return [];
+    seen.add(userId);
+    out.push(userId);
+  }
+  return out;
+};
 
 const validateActionBounds = (state, action, userId) => {
   const toCall = Number(state.toCallByUserId?.[userId] || 0);
@@ -169,6 +264,18 @@ export async function handler(event) {
         });
         throw makeError(409, "state_invalid");
       }
+
+      const rejectStateInvalid = (code, extra) => {
+        klog("poker_act_rejected", {
+          tableId,
+          userId: auth.userId,
+          reason: "state_invalid",
+          code,
+          phase: currentState?.phase ?? null,
+          ...(extra || {}),
+        });
+        throw makeError(409, "state_invalid");
+      };
       if (!isActionPhase(currentState.phase) || !currentState.turnUserId) {
         klog("poker_act_rejected", {
           tableId,
@@ -186,6 +293,18 @@ export async function handler(event) {
           phase: currentState?.phase || null,
         });
         throw makeError(409, "state_invalid");
+      }
+      if (typeof currentState.handSeed !== "string" || !currentState.handSeed.trim()) {
+        rejectStateInvalid("missing_hand_seed");
+      }
+      if (!Number.isInteger(currentState.communityDealt) || currentState.communityDealt < 0 || currentState.communityDealt > 5) {
+        rejectStateInvalid("invalid_community_dealt", { communityDealt: currentState.communityDealt });
+      }
+      if (!Array.isArray(currentState.community) || currentState.community.length !== currentState.communityDealt) {
+        rejectStateInvalid("community_len_mismatch", {
+          communityDealt: currentState.communityDealt,
+          communityLen: Array.isArray(currentState.community) ? currentState.community.length : null,
+        });
       }
 
       const lastByUserId = isPlainObject(currentState.lastActionRequestIdByUserId)
@@ -216,9 +335,10 @@ export async function handler(event) {
         "select user_id from public.poker_seats where table_id = $1 and status = 'ACTIVE' order by seat_no asc;",
         [tableId]
       );
-      const activeUserIds = Array.isArray(activeSeatRows)
+      const seatUserIdsInOrder = Array.isArray(activeSeatRows)
         ? activeSeatRows.map((row) => row?.user_id).filter(Boolean)
         : [];
+      const activeUserIds = seatUserIdsInOrder.slice();
 
       let holeCardsByUserId;
       try {
@@ -236,6 +356,47 @@ export async function handler(event) {
           throw makeError(409, "state_invalid");
         }
         throw error;
+      }
+
+      if (seatUserIdsInOrder.length <= 0) {
+        rejectStateInvalid("no_active_seats");
+      }
+      const stateSeatUserIdsInOrder = normalizeSeatOrderFromState(currentState.seats);
+      if (!arraysEqual(seatUserIdsInOrder, stateSeatUserIdsInOrder)) {
+        rejectStateInvalid("seat_order_mismatch", {
+          dbSeatCount: seatUserIdsInOrder.length,
+          stateSeatCount: stateSeatUserIdsInOrder.length,
+          dbSeatIds: takeList(seatUserIdsInOrder.map(hashUserId)),
+          stateSeatIds: takeList(stateSeatUserIdsInOrder.map(hashUserId)),
+        });
+      }
+      let derivedCommunity;
+      let derivedDeck;
+      try {
+        derivedCommunity = deriveCommunityCards({
+          handSeed: currentState.handSeed,
+          seatUserIdsInOrder,
+          communityDealt: currentState.communityDealt,
+        });
+        derivedDeck = deriveRemainingDeck({
+          handSeed: currentState.handSeed,
+          seatUserIdsInOrder,
+          communityDealt: currentState.communityDealt,
+        });
+      } catch {
+        rejectStateInvalid("derive_failed");
+      }
+      if (!cardsSameSet(currentState.community, derivedCommunity)) {
+        const stateKeys = Array.isArray(currentState.community) ? currentState.community.map(hashCardKey) : [];
+        const derivedKeys = Array.isArray(derivedCommunity) ? derivedCommunity.map(hashCardKey) : [];
+        rejectStateInvalid("community_mismatch", {
+          communityDealt: currentState.communityDealt,
+          stateCommunityLen: Array.isArray(currentState.community) ? currentState.community.length : null,
+          derivedCommunityLen: Array.isArray(derivedCommunity) ? derivedCommunity.length : null,
+          stateCommunityKeys: takeList(stateKeys, 5),
+          derivedCommunityKeys: takeList(derivedKeys, 5),
+          invalidKeyFound: stateKeys.includes("invalid") || derivedKeys.includes("invalid"),
+        });
       }
 
       if (lastByUserId[auth.userId] === requestId) {
@@ -284,6 +445,8 @@ export async function handler(event) {
 
       const privateState = {
         ...currentState,
+        community: derivedCommunity,
+        deck: derivedDeck,
         holeCardsByUserId,
       };
 
@@ -345,16 +508,17 @@ export async function handler(event) {
         loops += 1;
       }
 
-      const { holeCardsByUserId: _ignoredHoleCards, ...stateBase } = nextState;
+      const { holeCardsByUserId: _ignoredHoleCards, deck: _ignoredDeck, ...stateBase } = nextState;
       const updatedState = {
         ...stateBase,
+        communityDealt: Array.isArray(nextState.community) ? nextState.community.length : 0,
         lastActionRequestIdByUserId: {
           ...lastByUserId,
           [auth.userId]: requestId,
         },
       };
 
-      if (!isStateStorageValid(updatedState, { requireDeck: true })) {
+      if (!isStateStorageValid(updatedState, { requireHandSeed: true, requireCommunityDealt: true, requireNoDeck: true })) {
         klog("poker_state_corrupt", { tableId, phase: updatedState.phase });
         throw makeError(409, "state_invalid");
       }

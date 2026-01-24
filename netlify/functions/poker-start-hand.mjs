@@ -1,7 +1,8 @@
 import crypto from "node:crypto";
 import { baseHeaders, beginSql, corsHeaders, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
 import { isValidTwoCards } from "./_shared/poker-cards-utils.mjs";
-import { createDeck, dealHoleCards, shuffle } from "./_shared/poker-engine.mjs";
+import { dealHoleCards } from "./_shared/poker-engine.mjs";
+import { deriveDeck } from "./_shared/poker-deal-deterministic.mjs";
 import { getRng, isPlainObject, isStateStorageValid, normalizeJsonState, withoutPrivateState } from "./_shared/poker-state-utils.mjs";
 import { isValidUuid } from "./_shared/poker-utils.mjs";
 
@@ -173,17 +174,22 @@ export async function handler(event) {
         throw makeError(409, "already_in_hand");
       }
 
-      const dealerSeatNo = validSeats[0].seat_no;
-      const turnUserId = validSeats[1]?.user_id || validSeats[0].user_id;
+      const orderedSeats = validSeats.slice().sort((a, b) => Number(a.seat_no) - Number(b.seat_no));
+      const dealerSeatNo = orderedSeats[0].seat_no;
+      const turnUserId = orderedSeats[1]?.user_id || orderedSeats[0].user_id;
 
       const rng = getRng();
       const handId =
         typeof crypto.randomUUID === "function"
           ? crypto.randomUUID()
           : `hand_${Date.now()}_${Math.floor(rng() * 1e6)}`;
-      const derivedSeats = validSeats.map((seat) => ({ userId: seat.user_id, seatNo: seat.seat_no }));
-      const activeUserIds = new Set(validSeats.map((seat) => seat.user_id));
-      const activeUserIdList = validSeats.map((seat) => seat.user_id);
+      const handSeed =
+        typeof crypto.randomUUID === "function"
+          ? crypto.randomUUID()
+          : `seed_${Date.now()}_${Math.floor(rng() * 1e6)}`;
+      const derivedSeats = orderedSeats.map((seat) => ({ userId: seat.user_id, seatNo: seat.seat_no }));
+      const activeUserIds = new Set(orderedSeats.map((seat) => seat.user_id));
+      const activeUserIdList = orderedSeats.map((seat) => seat.user_id);
       const currentStacks = parseStacks(currentState.stacks);
       const nextStacks = activeUserIdList.reduce((acc, userId) => {
         if (!Object.prototype.hasOwnProperty.call(currentStacks, userId)) return acc;
@@ -196,9 +202,16 @@ export async function handler(event) {
       const actedThisRoundByUserId = Object.fromEntries(activeUserIdList.map((userId) => [userId, false]));
       const foldedByUserId = Object.fromEntries(activeUserIdList.map((userId) => [userId, false]));
 
-      const deck = shuffle(createDeck(), rng);
-      const dealResult = dealHoleCards(deck, validSeats.map((seat) => seat.user_id));
-      const remainingDeck = Array.isArray(dealResult?.deck) ? dealResult.deck : deck;
+      let deck;
+      try {
+        deck = deriveDeck(handSeed);
+      } catch (error) {
+        if (error?.message === "deal_secret_missing") {
+          throw makeError(409, "state_invalid");
+        }
+        throw error;
+      }
+      const dealResult = dealHoleCards(deck, activeUserIdList);
       const dealtHoleCards = isPlainObject(dealResult?.holeCardsByUserId) ? dealResult.holeCardsByUserId : {};
 
       if (!activeUserIdList.every((userId) => isValidTwoCards(dealtHoleCards[userId]))) {
@@ -206,13 +219,7 @@ export async function handler(event) {
         throw makeError(409, "state_invalid");
       }
 
-      if (
-        !isStateStorageValid({ seats: derivedSeats, holeCardsByUserId: dealtHoleCards }, { requireHoleCards: true }) ||
-        !isStateStorageValid(
-          { seats: derivedSeats, community: [], deck: remainingDeck, holeCardsByUserId: dealtHoleCards },
-          { requireDeck: true, requireHoleCards: true }
-        )
-      ) {
+      if (!isStateStorageValid({ seats: derivedSeats, holeCardsByUserId: dealtHoleCards }, { requireHoleCards: true })) {
         klog("poker_state_corrupt", { tableId, phase: "PREFLOP" });
         throw makeError(409, "state_invalid");
       }
@@ -245,9 +252,11 @@ export async function handler(event) {
         ...stateBase,
         tableId: currentState.tableId || tableId,
         handId,
+        handSeed,
         phase: "PREFLOP",
         pot: 0,
         community: [],
+        communityDealt: 0,
         seats: derivedSeats,
         stacks: nextStacks,
         dealerSeatNo,
@@ -256,14 +265,13 @@ export async function handler(event) {
         betThisRoundByUserId,
         actedThisRoundByUserId,
         foldedByUserId,
-        deck: remainingDeck,
         lastActionRequestIdByUserId: {},
         lastStartHandRequestId: requestIdParsed.value || null,
         lastStartHandUserId: auth.userId,
         startedAt: new Date().toISOString(),
       };
 
-      if (!isStateStorageValid(updatedState, { requireDeck: true })) {
+      if (!isStateStorageValid(updatedState, { requireHandSeed: true, requireCommunityDealt: true, requireNoDeck: true })) {
         klog("poker_state_corrupt", { tableId, phase: updatedState.phase });
         throw makeError(409, "state_invalid");
       }

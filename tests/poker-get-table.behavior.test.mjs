@@ -19,10 +19,8 @@ const baseState = {
   dealerSeatNo: 1,
   turnUserId: "user-1",
   handId: "hand-1",
-  deck: [{ r: "2", s: "S" }],
-  holeCardsByUserId: {
-    "user-1": [{ r: "A", s: "S" }, { r: "K", s: "S" }],
-  },
+  handSeed: "seed-1",
+  communityDealt: 0,
 };
 
 const defaultHoleCards = {
@@ -95,9 +93,11 @@ const run = async () => {
   assert.equal(happyPayload.myHoleCards.length, 2);
   assert.equal(happyPayload.state.state.deck, undefined);
   assert.equal(happyPayload.state.state.holeCardsByUserId, undefined);
+  assert.equal(happyPayload.state.state.handSeed, undefined);
   assert.equal(happyPayload.holeCardsByUserId, undefined);
   assert.equal(JSON.stringify(happyPayload).includes("holeCardsByUserId"), false);
   assert.equal(JSON.stringify(happyPayload).includes('"deck"'), false);
+  assert.equal(JSON.stringify(happyPayload).includes('"handSeed"'), false);
 
   const missingTableError = new Error("missing table");
   missingTableError.code = "42P01";

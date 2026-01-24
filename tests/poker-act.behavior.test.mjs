@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { deriveDeck } from "../netlify/functions/_shared/poker-deal-deterministic.mjs";
+import { dealHoleCards } from "../netlify/functions/_shared/poker-engine.mjs";
 import { isHoleCardsTableMissing, loadHoleCardsByUserId } from "../netlify/functions/_shared/poker-hole-cards-store.mjs";
 import { advanceIfNeeded, applyAction } from "../netlify/functions/_shared/poker-reducer.mjs";
 import { normalizeRequestId } from "../netlify/functions/_shared/poker-request-id.mjs";
@@ -8,6 +10,7 @@ import {
   normalizeJsonState,
   withoutPrivateState,
 } from "../netlify/functions/_shared/poker-state-utils.mjs";
+import { deriveCommunityCards, deriveRemainingDeck } from "../netlify/functions/_shared/poker-deal-deterministic.mjs";
 import { loadPokerHandler } from "./helpers/poker-test-helpers.mjs";
 
 const tableId = "11111111-1111-4111-8111-111111111111";
@@ -26,13 +29,8 @@ const baseState = {
   dealerSeatNo: 1,
   turnUserId: "user-1",
   handId: "hand-1",
-  deck: [
-    { r: "2", s: "S" },
-    { r: "3", s: "S" },
-    { r: "4", s: "S" },
-    { r: "5", s: "S" },
-    { r: "6", s: "S" },
-  ],
+  handSeed: "seed-1",
+  communityDealt: 0,
   toCallByUserId: { "user-1": 0, "user-2": 0, "user-3": 0 },
   betThisRoundByUserId: { "user-1": 0, "user-2": 0, "user-3": 0 },
   actedThisRoundByUserId: { "user-1": false, "user-2": false, "user-3": false },
@@ -41,11 +39,9 @@ const baseState = {
   lastActionRequestIdByUserId: {},
 };
 
-const defaultHoleCards = {
-  "user-1": [{ r: "A", s: "S" }, { r: "K", s: "S" }],
-  "user-2": [{ r: "Q", s: "H" }, { r: "J", s: "H" }],
-  "user-3": [{ r: "9", s: "D" }, { r: "9", s: "C" }],
-};
+const seatOrder = baseState.seats.map((seat) => seat.userId);
+const dealt = dealHoleCards(deriveDeck(baseState.handSeed), seatOrder);
+const defaultHoleCards = dealt.holeCardsByUserId;
 
 const makeHandler = (queries, storedState, userId, options = {}) =>
   loadPokerHandler("netlify/functions/poker-act.mjs", {
@@ -61,6 +57,8 @@ const makeHandler = (queries, storedState, userId, options = {}) =>
     withoutPrivateState,
     advanceIfNeeded,
     applyAction: options.applyAction || applyAction,
+    deriveCommunityCards,
+    deriveRemainingDeck,
     isHoleCardsTableMissing,
     loadHoleCardsByUserId,
     beginSql: async (fn) =>
@@ -203,18 +201,10 @@ const run = async () => {
   assert.equal(JSON.parse(invalidCall.response.body).error, "invalid_action");
 
   const corruptCalls = [];
-  const ranks = ["2", "3", "4", "5", "6", "7", "8", "9", "T", "J", "Q", "K", "A"];
-  const suits = ["S", "H", "D", "C"];
-  const allCards = [];
-  for (const r of ranks) {
-    for (const s of suits) {
-      allCards.push({ r, s });
-    }
-  }
-  const corruptDeck = allCards.concat(allCards[0]);
   const corruptState = {
     ...baseState,
-    deck: corruptDeck,
+    community: [{ r: "A", s: "S" }],
+    communityDealt: 0,
   };
   const corruptResponse = await runCase({
     state: corruptState,
@@ -225,7 +215,9 @@ const run = async () => {
   });
   assert.equal(corruptResponse.response.statusCode, 409);
   assert.equal(JSON.parse(corruptResponse.response.body).error, "state_invalid");
-  assert.ok(corruptCalls.some((entry) => entry.kind === "poker_state_corrupt"));
+  const corruptEntry = corruptCalls.find((entry) => entry.kind === "poker_act_rejected");
+  assert.ok(corruptEntry);
+  assert.equal(corruptEntry.data?.code, "community_len_mismatch");
 
   const storageCheck = isStateStorageValid(
     { phase: "HAND_DONE", seats: baseState.seats },
@@ -252,6 +244,7 @@ const run = async () => {
   const user1Payload = JSON.parse(user1Check.body);
   assert.equal(user1Payload.ok, true);
   assert.equal(user1Payload.state.state.holeCardsByUserId, undefined);
+  assert.equal(user1Payload.state.state.handSeed, undefined);
   assert.equal(user1Payload.state.state.deck, undefined);
   assert.ok(Array.isArray(user1Payload.myHoleCards));
   assert.equal(user1Payload.myHoleCards.length, 2);
@@ -261,6 +254,7 @@ const run = async () => {
   assert.equal(user1Payload.state.holeCardsByUserId, undefined);
   assert.equal(JSON.stringify(user1Payload).includes("holeCardsByUserId"), false);
   assert.equal(JSON.stringify(user1Payload).includes('"deck"'), false);
+  assert.equal(JSON.stringify(user1Payload).includes('"handSeed"'), false);
 
   const updateCountBeforeReplay = queries.filter((entry) => entry.query.toLowerCase().includes("update public.poker_state")).length;
   const replayResponse = await handlerUser1({
@@ -294,21 +288,37 @@ const run = async () => {
   const user3Payload = JSON.parse(user3Check.body);
   assert.equal(user3Payload.state.state.phase, "FLOP");
   assert.equal(user3Payload.state.state.community.length, 3);
+  assert.equal(user3Payload.state.state.communityDealt, 3);
+  const derivedDeck = deriveDeck(baseState.handSeed);
+  const expectedCommunity = derivedDeck.slice(6, 9);
+  assert.deepEqual(user3Payload.state.state.community, expectedCommunity);
+  const holeKeys = new Set(
+    Object.values(defaultHoleCards)
+      .flat()
+      .map((card) => `${card.r}-${card.s}`)
+  );
+  for (const card of user3Payload.state.state.community) {
+    assert.equal(holeKeys.has(`${card.r}-${card.s}`), false, "community must not overlap hole cards");
+  }
   assert.ok(user3Payload.events.some((event) => event.type === "STREET_ADVANCED"));
   assert.ok(user3Payload.events.some((event) => event.type === "COMMUNITY_DEALT"));
   assert.equal(user3Payload.state.state.holeCardsByUserId, undefined);
+  assert.equal(user3Payload.state.state.handSeed, undefined);
   assert.equal(user3Payload.state.state.deck, undefined);
   assert.equal(user3Payload.holeCardsByUserId, undefined);
   assert.equal(user3Payload.deck, undefined);
   assert.equal(user3Payload.state.holeCardsByUserId, undefined);
   assert.equal(JSON.stringify(user3Payload).includes("holeCardsByUserId"), false);
   assert.equal(JSON.stringify(user3Payload).includes('"deck"'), false);
+  assert.equal(JSON.stringify(user3Payload).includes('"handSeed"'), false);
 
   const updateCall = queries.find((entry) => entry.query.toLowerCase().includes("update public.poker_state"));
   assert.ok(updateCall, "expected poker_state update");
   const updatedState = JSON.parse(updateCall.params?.[1] || "{}");
   assert.equal(updatedState.holeCardsByUserId, undefined);
-  assert.ok(Array.isArray(updatedState.deck), "state should persist deck");
+  assert.equal(updatedState.deck, undefined);
+  assert.equal(updatedState.communityDealt, updatedState.community.length);
+  assert.equal(typeof updatedState.handSeed, "string");
 
   const actionInserts = queries.filter((entry) => entry.query.toLowerCase().includes("insert into public.poker_actions"));
   assert.equal(actionInserts.length, 3);

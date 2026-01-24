@@ -65,7 +65,7 @@ const normalizeJsonState = (value) => {
 
 const withoutPrivateState = (state) => {
   if (!state || typeof state !== "object" || Array.isArray(state)) return state;
-  const { holeCardsByUserId, deck, ...rest } = state;
+  const { holeCardsByUserId, deck, handSeed, ...rest } = state;
   return rest;
 };
 
@@ -75,13 +75,26 @@ const isStateStorageValid = (state, options = {}) => {
   const seatUserIds = new Set(
     seats.map((seat) => (typeof seat?.userId === "string" && seat.userId.trim() ? seat.userId : null)).filter(Boolean)
   );
-  const requirePrivate = options.requirePrivate === true;
+  const requirePrivate = options.requirePrivate === true || options.requireDeck === true;
+  const requireHoleCards = options.requireHoleCards === true;
+  const requireNoDeck = options.requireNoDeck === true;
+  const requireHandSeed = options.requireHandSeed === true;
+  const requireCommunityDealt = options.requireCommunityDealt === true;
   const deck = state.deck;
   const holeCardsByUserId = state.holeCardsByUserId;
   const community = state.community;
   const holeCardKeys = [];
   let deckKeys = [];
   let communityKeys = [];
+
+  if (requireHandSeed) {
+    if (typeof state.handSeed !== "string" || !state.handSeed.trim()) return false;
+  }
+  if (requireCommunityDealt) {
+    if (!Number.isInteger(state.communityDealt) || state.communityDealt < 0 || state.communityDealt > 5) return false;
+    if (!Array.isArray(community) || community.length !== state.communityDealt) return false;
+  }
+  if (requireNoDeck && deck != null) return false;
 
   if (community != null) {
     const communityCheck = validateCardsArray(community, { maxLen: 5 });
@@ -97,6 +110,17 @@ const isStateStorageValid = (state, options = {}) => {
     deckKeys = deckCheck.keys;
     if (!validateNoDuplicates(deckKeys)) return false;
 
+    if (!isPlainObject(holeCardsByUserId)) return false;
+    const userIds = Object.keys(holeCardsByUserId);
+    if (userIds.length > seatUserIds.size) return false;
+    for (const userId of userIds) {
+      if (typeof userId !== "string" || !userId.trim() || !seatUserIds.has(userId)) return false;
+      const cardsCheck = validateCardsArray(holeCardsByUserId[userId], { exactLen: 2 });
+      if (!cardsCheck.ok) return false;
+      holeCardKeys.push(...cardsCheck.keys);
+    }
+    if (!validateNoDuplicates(holeCardKeys)) return false;
+  } else if (requireHoleCards) {
     if (!isPlainObject(holeCardsByUserId)) return false;
     const userIds = Object.keys(holeCardsByUserId);
     if (userIds.length > seatUserIds.size) return false;

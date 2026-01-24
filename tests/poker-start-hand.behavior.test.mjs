@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { createDeck, dealHoleCards, shuffle } from "../netlify/functions/_shared/poker-engine.mjs";
+import { deriveDeck } from "../netlify/functions/_shared/poker-deal-deterministic.mjs";
 import {
   getRng,
   isPlainObject,
@@ -26,6 +27,7 @@ const makeHandler = (queries, storedState) =>
     corsHeaders: () => ({ "access-control-allow-origin": "https://example.test" }),
     createDeck,
     dealHoleCards,
+    deriveDeck,
     extractBearerToken: () => "token",
     getRng,
     isPlainObject,
@@ -118,9 +120,11 @@ const runHappyPath = async () => {
   assert.ok(Array.isArray(payload.myHoleCards));
   assert.equal(payload.myHoleCards.length, 2);
   assert.equal(payload.state.state.holeCardsByUserId, undefined);
+  assert.equal(payload.state.state.handSeed, undefined);
   assert.equal(payload.holeCardsByUserId, undefined);
   assert.ok(!response.body.includes("holeCardsByUserId"));
   assert.ok(!response.body.includes("\"deck\""));
+  assert.ok(!response.body.includes("\"handSeed\""));
 
   const insertHoleCardsIndex = queries.findIndex((q) => q.query.toLowerCase().includes("insert into public.poker_hole_cards"));
   const updateCall = queries.find((q) => q.query.toLowerCase().includes("update public.poker_state"));
@@ -130,7 +134,9 @@ const runHappyPath = async () => {
   assert.ok(insertHoleCardsIndex < updateIndex, "expected hole cards insert before state update");
   const updatedState = JSON.parse(updateCall.params?.[1] || "{}");
   assert.ok(updatedState.handId, "state should include handId");
-  assert.ok(Array.isArray(updatedState.deck), "state should persist deck as an array");
+  assert.equal(updatedState.deck, undefined);
+  assert.equal(typeof updatedState.handSeed, "string");
+  assert.equal(updatedState.communityDealt, 0);
   assert.equal(updatedState.holeCardsByUserId, undefined);
   assert.equal(typeof updatedState.toCallByUserId, "object");
   assert.equal(typeof updatedState.betThisRoundByUserId, "object");
@@ -145,6 +151,12 @@ const runHappyPath = async () => {
   assert.equal(updatedState.betThisRoundByUserId[userId], 0);
   assert.equal(updatedState.actedThisRoundByUserId[userId], false);
   assert.equal(updatedState.foldedByUserId[userId], false);
+  const seatOrder = ["user-1", "user-2", "user-3"];
+  const deck = deriveDeck(updatedState.handSeed);
+  const pos = seatOrder.indexOf(userId);
+  assert.ok(pos >= 0, "test assumes user is seated");
+  const expectedHoleCards = [deck[pos], deck[pos + seatOrder.length]];
+  assert.deepEqual(payload.myHoleCards, expectedHoleCards, "myHoleCards must match deterministic deck from handSeed");
   assert.ok(
     queries.some((q) => q.query.toLowerCase().includes("insert into public.poker_actions")),
     "expected start hand action insert"
@@ -202,6 +214,7 @@ const runInvalidDeal = async () => {
     corsHeaders: () => ({ "access-control-allow-origin": "https://example.test" }),
     createDeck,
     dealHoleCards: () => ({ holeCardsByUserId: { "user-1": [], "user-2": [], "user-3": [] }, deck: [] }),
+    deriveDeck,
     extractBearerToken: () => "token",
     getRng,
     isPlainObject,
@@ -280,7 +293,28 @@ const runMissingHoleCardsTable = async () => {
   assert.ok(!queries.some((q) => q.query.toLowerCase().includes("insert into public.poker_actions")));
 };
 
+const runMissingDealSecret = async () => {
+  const originalSecret = process.env.POKER_DEAL_SECRET;
+  delete process.env.POKER_DEAL_SECRET;
+  const queries = [];
+  const storedState = { value: null, holeCardsStore: new Map(), holeCardsInsertError: null };
+  const handler = makeHandler(queries, storedState);
+  const response = await handler({
+    httpMethod: "POST",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    body: JSON.stringify({ tableId, requestId: "req-missing-secret" }),
+  });
+  if (originalSecret) {
+    process.env.POKER_DEAL_SECRET = originalSecret;
+  } else {
+    delete process.env.POKER_DEAL_SECRET;
+  }
+  assert.equal(response.statusCode, 409);
+  assert.equal(JSON.parse(response.body).error, "state_invalid");
+};
+
 await runHappyPath();
 await runReplayPath();
 await runInvalidDeal();
 await runMissingHoleCardsTable();
+await runMissingDealSecret();
