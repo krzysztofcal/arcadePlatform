@@ -670,13 +670,6 @@ export async function handler(event) {
           [tableId, newVersion, auth.userId, actionParsed.value.type, actionParsed.value.amount ?? null]
         );
       }
-      if (showdownEvaluated && auth.userId) {
-        await tx.unsafe(
-          "insert into public.poker_actions (table_id, version, user_id, action_type, amount) values ($1, $2, $3, $4, $5);",
-          [tableId, newVersion, auth.userId, "SHOWDOWN_EVALUATED", null]
-        );
-      }
-
       if (advanceEvents.length > 0) {
         klog("poker_act_advanced", {
           tableId,
