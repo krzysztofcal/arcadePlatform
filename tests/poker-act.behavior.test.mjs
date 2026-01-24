@@ -60,7 +60,7 @@ const makeHandler = (queries, storedState, userId, options = {}) =>
     normalizeJsonState,
     withoutPrivateState,
     advanceIfNeeded,
-    applyAction,
+    applyAction: options.applyAction || applyAction,
     isHoleCardsTableMissing,
     loadHoleCardsByUserId,
     beginSql: async (fn) =>
@@ -111,13 +111,14 @@ const makeHandler = (queries, storedState, userId, options = {}) =>
     klog: options.klog || (() => {}),
   });
 
-const runCase = async ({ state, action, requestId, userId, klogCalls, holeCardsByUserId, holeCardsError }) => {
+const runCase = async ({ state, action, requestId, userId, klogCalls, holeCardsByUserId, holeCardsError, applyAction: applyActionOverride }) => {
   const queries = [];
   const storedState = { value: JSON.stringify(state), version: 3 };
   const handler = makeHandler(queries, storedState, userId, {
     klog: klogCalls ? (kind, data) => klogCalls.push({ kind, data }) : undefined,
     holeCardsByUserId,
     holeCardsError,
+    applyAction: applyActionOverride,
   });
   const response = await handler({
     httpMethod: "POST",
@@ -311,6 +312,28 @@ const run = async () => {
 
   const actionInserts = queries.filter((entry) => entry.query.toLowerCase().includes("insert into public.poker_actions"));
   assert.equal(actionInserts.length, 3);
+
+  let capturedKeys = null;
+  const applyActionWrapped = (state, action) => {
+    capturedKeys = Object.keys(state.holeCardsByUserId || {}).sort();
+    return applyAction(state, action);
+  };
+  const filteredResponse = await runCase({
+    state: baseState,
+    action: { type: "CHECK" },
+    requestId: "req-filtered",
+    userId: "user-1",
+    holeCardsByUserId: {
+      ...defaultHoleCards,
+      "user-999": [
+        { r: "2", s: "H" },
+        { r: "3", s: "H" },
+      ],
+    },
+    applyAction: applyActionWrapped,
+  });
+  assert.equal(filteredResponse.response.statusCode, 200);
+  assert.deepEqual(capturedKeys, ["user-1", "user-2", "user-3"]);
 
   const missingTableError = new Error("missing table");
   missingTableError.code = "42P01";

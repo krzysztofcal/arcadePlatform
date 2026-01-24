@@ -354,7 +354,7 @@ export async function handler(event) {
         },
       };
 
-      if (!isStateStorageValid(updatedState, { requirePrivate: false })) {
+      if (!isStateStorageValid(updatedState, { requireDeck: true })) {
         klog("poker_state_corrupt", { tableId, phase: updatedState.phase });
         throw makeError(409, "state_invalid");
       }
