@@ -5,13 +5,6 @@ import { isValidUuid } from "./_shared/poker-utils.mjs";
 
 const isActionPhase = (phase) => phase === "PREFLOP" || phase === "FLOP" || phase === "TURN" || phase === "RIVER";
 
-const isFinalShowdownPublic = (state) =>
-  state?.phase === "SHOWDOWN" &&
-  state?.showdown &&
-  Array.isArray(state?.community) &&
-  state.community.length === 5 &&
-  state.communityDealt === 5;
-
 const normalizeSeatUserIds = (seats) => {
   if (!Array.isArray(seats)) return [];
   return seats.map((seat) => seat?.userId).filter((userId) => typeof userId === "string" && userId.trim());
@@ -68,6 +61,13 @@ export async function handler(event) {
 
   const token = extractBearerToken(event.headers);
   const auth = await verifySupabaseJwt(token);
+  if (!auth.valid || !auth.userId) {
+    return {
+      statusCode: 401,
+      headers: mergeHeaders(cors),
+      body: JSON.stringify({ error: "unauthorized", reason: auth.reason }),
+    };
+  }
 
   try {
     const result = await beginSql(async (tx) => {
@@ -110,15 +110,8 @@ export async function handler(event) {
         : [];
 
       const currentState = normalizeJsonState(stateRow.state);
-      const allowPublic = isFinalShowdownPublic(currentState);
-      if (!allowPublic && (!auth.valid || !auth.userId)) {
-        return { error: "unauthorized" };
-      }
       let myHoleCards = [];
       if (isActionPhase(currentState.phase)) {
-        if (!auth.valid || !auth.userId) {
-          return { error: "unauthorized" };
-        }
         if (typeof currentState.handId !== "string" || !currentState.handId.trim()) {
           throw new Error("state_invalid");
         }
@@ -153,14 +146,6 @@ export async function handler(event) {
     if (result?.error === "table_not_found") {
       return { statusCode: 404, headers: mergeHeaders(cors), body: JSON.stringify({ error: "table_not_found" }) };
     }
-    if (result?.error === "unauthorized") {
-      return {
-        statusCode: 401,
-        headers: mergeHeaders(cors),
-        body: JSON.stringify({ error: "unauthorized", reason: auth.reason }),
-      };
-    }
-
     const table = result.table;
     const seats = result.seats;
     const stateRow = result.stateRow;

@@ -215,6 +215,15 @@ const run = async () => {
     queryStringParameters: { tableId },
   });
   assert.equal(incompleteResponse.statusCode, 401);
+
+  const finalShowdownResponse = await makeHandler([], { value: JSON.stringify(showdownState), version: 7 }, null, {
+    authValid: false,
+  })({
+    httpMethod: "GET",
+    headers: { origin: "https://example.test" },
+    queryStringParameters: { tableId },
+  });
+  assert.equal(finalShowdownResponse.statusCode, 401);
 };
 
 await run();
