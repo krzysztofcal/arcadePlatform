@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { loadPokerHandler } from "./helpers/poker-test-helpers.mjs";
+import { isHoleCardsTableMissing } from "../netlify/functions/_shared/poker-hole-cards-store.mjs";
 
 const tableId = "22222222-2222-4222-8222-222222222222";
 const userId = "user-2";
@@ -77,11 +78,14 @@ const makeHandler = (postCalls, queries, options = {}) => {
     klog: () => {},
     PRESENCE_TTL_SEC: 10,
     TABLE_EMPTY_CLOSE_SEC: 10,
+    isHoleCardsTableMissing,
   });
   return handler;
 };
 
 const run = async () => {
+  lockIdx = -1;
+  updIdx = -1;
   process.env.POKER_SWEEP_SECRET = "secret";
   const postCalls = [];
   const queries = [];
@@ -118,6 +122,8 @@ const run = async () => {
 };
 
 const runMissingHoleCardsTable = async () => {
+  lockIdx = -1;
+  updIdx = -1;
   process.env.POKER_SWEEP_SECRET = "secret";
   const postCalls = [];
   const queries = [];
