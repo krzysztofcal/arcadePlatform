@@ -104,7 +104,7 @@ const hashCardKey = (card) => {
   return safeHash(`card:${key}`);
 };
 
-const hashList = (values, maxLen = 12) => values.slice(0, maxLen);
+const takeList = (values, maxLen = 12) => (Array.isArray(values) ? values.slice(0, maxLen) : []);
 
 const cardsSameSet = (left, right) => {
   if (!Array.isArray(left) || !Array.isArray(right)) return false;
@@ -366,8 +366,8 @@ export async function handler(event) {
         rejectStateInvalid("seat_order_mismatch", {
           dbSeatCount: seatUserIdsInOrder.length,
           stateSeatCount: stateSeatUserIdsInOrder.length,
-          dbSeatIds: hashList(seatUserIdsInOrder.map(hashUserId)),
-          stateSeatIds: hashList(stateSeatUserIdsInOrder.map(hashUserId)),
+          dbSeatIds: takeList(seatUserIdsInOrder.map(hashUserId)),
+          stateSeatIds: takeList(stateSeatUserIdsInOrder.map(hashUserId)),
         });
       }
       let derivedCommunity;
@@ -393,8 +393,8 @@ export async function handler(event) {
           communityDealt: currentState.communityDealt,
           stateCommunityLen: Array.isArray(currentState.community) ? currentState.community.length : null,
           derivedCommunityLen: Array.isArray(derivedCommunity) ? derivedCommunity.length : null,
-          stateCommunityKeys: hashList(stateKeys, 5),
-          derivedCommunityKeys: hashList(derivedKeys, 5),
+          stateCommunityKeys: takeList(stateKeys, 5),
+          derivedCommunityKeys: takeList(derivedKeys, 5),
           invalidKeyFound: stateKeys.includes("invalid") || derivedKeys.includes("invalid"),
         });
       }
