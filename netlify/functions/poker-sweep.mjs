@@ -1,6 +1,7 @@
 import { baseHeaders, beginSql, klog } from "./_shared/supabase-admin.mjs";
 import { PRESENCE_TTL_SEC, TABLE_EMPTY_CLOSE_SEC } from "./_shared/poker-utils.mjs";
 import { postTransaction } from "./_shared/chips-ledger.mjs";
+import { isHoleCardsTableMissing } from "./_shared/poker-hole-cards-store.mjs";
 
 const STALE_PENDING_CUTOFF_MINUTES = 10;
 const STALE_PENDING_LIMIT = 500;
@@ -20,13 +21,6 @@ const isExpiredSeat = (value) => {
     typeof value === "string" ? Date.parse(value) : value instanceof Date ? value.getTime() : Date.parse(String(value));
   if (!Number.isFinite(lastSeenMs)) return false;
   return Date.now() - lastSeenMs > PRESENCE_TTL_SEC * 1000;
-};
-
-const isHoleCardsTableMissing = (error) => {
-  if (!error) return false;
-  if (error.code === "42P01") return true;
-  const message = String(error.message || "").toLowerCase();
-  return message.includes("poker_hole_cards") && message.includes("does not exist");
 };
 
 export async function handler(event) {
