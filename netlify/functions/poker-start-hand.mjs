@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { baseHeaders, beginSql, corsHeaders, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
+import { isValidTwoCards } from "./_shared/poker-cards-utils.mjs";
 import { createDeck, dealHoleCards, shuffle } from "./_shared/poker-engine.mjs";
 import { getRng, isPlainObject, isStateStorageValid, normalizeJsonState, withoutPrivateState } from "./_shared/poker-state-utils.mjs";
 import { isValidUuid } from "./_shared/poker-utils.mjs";
@@ -33,6 +34,13 @@ const parseStacks = (value) => (value && typeof value === "object" && !Array.isA
 const normalizeVersion = (value) => {
   const num = Number(value);
   return Number.isFinite(num) ? num : null;
+};
+
+const isHoleCardsTableMissing = (error) => {
+  if (!error) return false;
+  if (error.code === "42P01") return true;
+  const message = String(error.message || "").toLowerCase();
+  return message.includes("poker_hole_cards") && message.includes("does not exist");
 };
 
 export async function handler(event) {
@@ -128,12 +136,34 @@ export async function handler(event) {
       const sameRequest =
         currentState.lastStartHandRequestId === requestIdParsed.value && currentState.lastStartHandUserId === auth.userId;
       if (sameRequest) {
-        if (currentState.phase === "PREFLOP" && typeof currentState.handId === "string" && currentState.handId.trim()) {
+        const isActionPhase =
+          currentState.phase === "PREFLOP" ||
+          currentState.phase === "FLOP" ||
+          currentState.phase === "TURN" ||
+          currentState.phase === "RIVER";
+        if (isActionPhase && typeof currentState.handId === "string" && currentState.handId.trim()) {
+          let holeCardRows;
+          try {
+            holeCardRows = await tx.unsafe(
+              "select cards from public.poker_hole_cards where table_id = $1 and hand_id = $2 and user_id = $3 limit 1;",
+              [tableId, currentState.handId, auth.userId]
+            );
+          } catch (error) {
+            if (isHoleCardsTableMissing(error)) {
+              throw makeError(409, "state_invalid");
+            }
+            throw error;
+          }
+          const myHoleCards = holeCardRows?.[0]?.cards || null;
+          if (!isValidTwoCards(myHoleCards)) {
+            throw makeError(409, "state_invalid");
+          }
           return {
             tableId,
             version: normalizeVersion(stateRow.version),
             state: withoutPrivateState(currentState),
-            myHoleCards: currentState.holeCardsByUserId?.[auth.userId] || [],
+            myHoleCards,
+            replayed: true,
           };
         }
         throw makeError(409, "state_invalid");
@@ -169,9 +199,50 @@ export async function handler(event) {
       const deck = shuffle(createDeck(), rng);
       const dealResult = dealHoleCards(deck, validSeats.map((seat) => seat.user_id));
       const remainingDeck = Array.isArray(dealResult?.deck) ? dealResult.deck : deck;
+      const dealtHoleCards = isPlainObject(dealResult?.holeCardsByUserId) ? dealResult.holeCardsByUserId : {};
 
+      if (!activeUserIdList.every((userId) => isValidTwoCards(dealtHoleCards[userId]))) {
+        klog("poker_state_corrupt", { tableId, phase: "PREFLOP" });
+        throw makeError(409, "state_invalid");
+      }
+
+      if (
+        !isStateStorageValid({ seats: derivedSeats, holeCardsByUserId: dealtHoleCards }, { requireHoleCards: true }) ||
+        !isStateStorageValid(
+          { seats: derivedSeats, community: [], deck: remainingDeck, holeCardsByUserId: dealtHoleCards },
+          { requireDeck: true, requireHoleCards: true }
+        )
+      ) {
+        klog("poker_state_corrupt", { tableId, phase: "PREFLOP" });
+        throw makeError(409, "state_invalid");
+      }
+
+      const holeCardValues = activeUserIdList.map((userId) => ({ userId, cards: dealtHoleCards[userId] }));
+      const holeCardPlaceholders = holeCardValues
+        .map((_, index) => `($${index * 4 + 1}, $${index * 4 + 2}, $${index * 4 + 3}, $${index * 4 + 4}::jsonb)`)
+        .join(", ");
+      const holeCardParams = holeCardValues.flatMap((entry) => [
+        tableId,
+        handId,
+        entry.userId,
+        JSON.stringify(entry.cards),
+      ]);
+
+      try {
+        await tx.unsafe(
+          `insert into public.poker_hole_cards (table_id, hand_id, user_id, cards) values ${holeCardPlaceholders} on conflict (table_id, hand_id, user_id) do update set cards = excluded.cards;`,
+          holeCardParams
+        );
+      } catch (error) {
+        if (isHoleCardsTableMissing(error)) {
+          throw makeError(409, "state_invalid");
+        }
+        throw error;
+      }
+
+      const { holeCardsByUserId: _ignoredHoleCards, ...stateBase } = currentState;
       const updatedState = {
-        ...currentState,
+        ...stateBase,
         tableId: currentState.tableId || tableId,
         handId,
         phase: "PREFLOP",
@@ -185,7 +256,6 @@ export async function handler(event) {
         betThisRoundByUserId,
         actedThisRoundByUserId,
         foldedByUserId,
-        holeCardsByUserId: dealResult.holeCardsByUserId,
         deck: remainingDeck,
         lastActionRequestIdByUserId: {},
         lastStartHandRequestId: requestIdParsed.value || null,
@@ -193,7 +263,7 @@ export async function handler(event) {
         startedAt: new Date().toISOString(),
       };
 
-      if (!isStateStorageValid(updatedState, { requirePrivate: true })) {
+      if (!isStateStorageValid(updatedState)) {
         klog("poker_state_corrupt", { tableId, phase: updatedState.phase });
         throw makeError(409, "state_invalid");
       }
@@ -216,7 +286,8 @@ export async function handler(event) {
         tableId,
         version: newVersion,
         state: withoutPrivateState(updatedState),
-        myHoleCards: dealResult.holeCardsByUserId[auth.userId] || [],
+        myHoleCards: dealtHoleCards[auth.userId] || [],
+        replayed: false,
       };
     });
 
@@ -231,9 +302,13 @@ export async function handler(event) {
           state: result.state,
         },
         myHoleCards: result.myHoleCards,
+        replayed: result.replayed,
       }),
     };
   } catch (error) {
+    if (isHoleCardsTableMissing(error)) {
+      return { statusCode: 409, headers: mergeHeaders(cors), body: JSON.stringify({ error: "state_invalid" }) };
+    }
     if (error?.status && error?.code) {
       return { statusCode: error.status, headers: mergeHeaders(cors), body: JSON.stringify({ error: error.code }) };
     }
