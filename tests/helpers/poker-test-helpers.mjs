@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { isValidTwoCards } from "../../netlify/functions/_shared/poker-cards-utils.mjs";
 
 const root = process.cwd();
 
@@ -47,7 +48,6 @@ export const loadPokerHandler = (filePath, mocks) => {
     "getRng",
     "isPlainObject",
     "isStateStorageValid",
-    "isValidTwoCards",
     "klog",
     "normalizeJsonState",
     "normalizeRequestId",
@@ -61,15 +61,18 @@ export const loadPokerHandler = (filePath, mocks) => {
   ];
   const injectedNames = injectable.filter((name) => !declared.has(name));
   const destructureLine = injectedNames.length ? `const { ${injectedNames.join(", ")} } = mocks;` : "";
+  const helperLines = declared.has("isValidTwoCards") ? "" : "const isValidTwoCards = isValidTwoCardsImpl;";
   const factory = new Function(
     "mocks",
+    "isValidTwoCardsImpl",
     `"use strict";
 ${destructureLine}
+${helperLines}
 ${rewritten}
 return handler;`
   );
   try {
-    return factory(mocks);
+    return factory(mocks, isValidTwoCards);
   } catch (error) {
     throw new Error(`[poker-test-helpers] Failed to compile ${filePath}: ${error?.message || error}`);
   }

@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { isValidTwoCards } from "../netlify/functions/_shared/poker-cards-utils.mjs";
 import { normalizeJsonState, withoutPrivateState } from "../netlify/functions/_shared/poker-state-utils.mjs";
 import { loadPokerHandler } from "./helpers/poker-test-helpers.mjs";
 
@@ -30,7 +29,6 @@ const makeHandler = (queries, holeCardsStore, authUserId, overrides = {}) =>
     verifySupabaseJwt: overrides.verifySupabaseJwt
       ? overrides.verifySupabaseJwt
       : async () => (authUserId ? { valid: true, userId: authUserId } : { valid: false, reason: "missing_token" }),
-    isValidTwoCards,
     normalizeJsonState,
     withoutPrivateState,
     isValidUuid: () => true,

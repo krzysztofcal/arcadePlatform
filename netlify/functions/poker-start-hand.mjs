@@ -170,7 +170,10 @@ export async function handler(event) {
       const turnUserId = validSeats[1]?.user_id || validSeats[0].user_id;
 
       const rng = getRng();
-      const handId = crypto.randomUUID();
+      const handId =
+        typeof crypto.randomUUID === "function"
+          ? crypto.randomUUID()
+          : `hand_${Date.now()}_${Math.floor(rng() * 1e6)}`;
       const derivedSeats = validSeats.map((seat) => ({ userId: seat.user_id, seatNo: seat.seat_no }));
       const activeUserIds = new Set(validSeats.map((seat) => seat.user_id));
       const activeUserIdList = validSeats.map((seat) => seat.user_id);

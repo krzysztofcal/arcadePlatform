@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { isValidTwoCards } from "../netlify/functions/_shared/poker-cards-utils.mjs";
 import { advanceIfNeeded, applyAction } from "../netlify/functions/_shared/poker-reducer.mjs";
 import { normalizeRequestId } from "../netlify/functions/_shared/poker-request-id.mjs";
 import {
@@ -47,7 +46,6 @@ const makeHandler = (queries, storedState, holeCardsStore, userId, options = {})
     corsHeaders: () => ({ "access-control-allow-origin": "https://example.test" }),
     extractBearerToken: () => "token",
     verifySupabaseJwt: async () => ({ valid: true, userId }),
-    isValidTwoCards,
     isValidUuid: () => true,
     normalizeRequestId,
     isPlainObject,
@@ -167,7 +165,6 @@ const run = async () => {
     corsHeaders: () => ({ "access-control-allow-origin": "https://example.test" }),
     extractBearerToken: () => "token",
     verifySupabaseJwt: async () => ({ valid: true, userId: "user-1" }),
-    isValidTwoCards,
     isValidUuid: () => true,
     normalizeRequestId,
     isPlainObject,
@@ -257,7 +254,6 @@ const run = async () => {
     corsHeaders: () => ({ "access-control-allow-origin": "https://example.test" }),
     extractBearerToken: () => "token",
     verifySupabaseJwt: async () => ({ valid: true, userId: "user-1" }),
-    isValidTwoCards,
     isValidUuid: () => true,
     normalizeRequestId,
     isPlainObject,
@@ -514,7 +510,6 @@ const run = async () => {
     corsHeaders: () => ({ "access-control-allow-origin": "https://example.test" }),
     extractBearerToken: () => "token",
     verifySupabaseJwt: async () => ({ valid: true, userId: "user-1" }),
-    isValidTwoCards,
     isValidUuid: () => true,
     normalizeRequestId,
     isPlainObject,
