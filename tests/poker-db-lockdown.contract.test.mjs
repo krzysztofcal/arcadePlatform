@@ -5,11 +5,10 @@ import path from "node:path";
 const migrationsDir = path.join(process.cwd(), "supabase", "migrations");
 const migrationFiles = fs.readdirSync(migrationsDir);
 
-function readMigration(label, matchers) {
-  const file = matchers
-    .map((matcher) => migrationFiles.find((name) => name.includes(matcher)))
-    .find(Boolean);
-  assert.ok(file, `${label} migration file should exist`);
+function readMigration(label, requiredSubstring) {
+  const file = migrationFiles.find((name) => name.includes(requiredSubstring));
+  assert.ok(file, `${label} migration file should exist (matching "${requiredSubstring}")`);
+  assert.ok(file.toLowerCase().includes("lockdown"), `${label} migration filename must include "lockdown"`);
   return fs.readFileSync(path.join(migrationsDir, file), "utf8");
 }
 
@@ -38,11 +37,8 @@ function assertLockdown(sql, table) {
   );
 }
 
-const pokerStateSql = readMigration("poker_state lockdown", ["poker_state_lockdown", "poker_state"]);
-const pokerHoleCardsSql = readMigration("poker_hole_cards lockdown", [
-  "poker_hole_cards_lockdown",
-  "poker_hole_cards",
-]);
+const pokerStateSql = readMigration("poker_state lockdown", "poker_state_lockdown");
+const pokerHoleCardsSql = readMigration("poker_hole_cards lockdown", "poker_hole_cards_lockdown");
 
 assertLockdown(pokerStateSql, "poker_state");
 assertLockdown(pokerHoleCardsSql, "poker_hole_cards");
