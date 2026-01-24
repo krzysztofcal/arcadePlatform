@@ -1,7 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
+import { isValidTwoCards } from "../../netlify/functions/_shared/poker-cards-utils.mjs";
 
 const root = process.cwd();
+if (!globalThis.isValidTwoCards) globalThis.isValidTwoCards = isValidTwoCards;
 
 const stripImports = (source) => source.replace(/^\s*import[\s\S]*?;\s*$/gm, "");
 
@@ -47,7 +49,6 @@ export const loadPokerHandler = (filePath, mocks) => {
     "getRng",
     "isPlainObject",
     "isStateStorageValid",
-    "isValidTwoCards",
     "klog",
     "normalizeJsonState",
     "normalizeRequestId",

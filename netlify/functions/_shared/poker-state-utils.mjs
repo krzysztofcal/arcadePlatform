@@ -75,9 +75,8 @@ const isStateStorageValid = (state, options = {}) => {
   const seatUserIds = new Set(
     seats.map((seat) => (typeof seat?.userId === "string" && seat.userId.trim() ? seat.userId : null)).filter(Boolean)
   );
-  const requirePrivate = options.requirePrivate === true;
-  const requireDeck = options.requireDeck === true || requirePrivate;
-  const requireHoleCards = options.requireHoleCards === true || requirePrivate;
+  const requireDeck = options.requireDeck === true;
+  const requireHoleCards = options.requireHoleCards === true;
   const deck = state.deck;
   const holeCardsByUserId = state.holeCardsByUserId;
   const community = state.community;

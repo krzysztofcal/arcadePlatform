@@ -59,17 +59,6 @@ const makeHandler = (queries, storedState, holeCardsStore, overrides = {}) =>
               { user_id: "user-3", seat_no: 5, status: "ACTIVE" },
             ];
           }
-          if (text.includes("delete from public.poker_hole_cards")) {
-            const tableParam = String(params?.[0] ?? "");
-            const handParam = String(params?.[1] ?? "");
-            assert.ok(tableParam, "expected delete to include table_id");
-            assert.ok(handParam, "expected delete to include hand_id");
-            const prefix = `${tableParam}|${handParam}|`;
-            for (const key of Array.from(holeCardsStore.keys())) {
-              if (String(key).startsWith(prefix)) holeCardsStore.delete(key);
-            }
-            return [{ ok: true }];
-          }
           if (text.includes("insert into public.poker_hole_cards")) {
             assert.ok(
               text.includes("on conflict"),
@@ -138,13 +127,10 @@ const run = async () => {
   const updateCall = queries.find((q) => q.query.toLowerCase().includes("update public.poker_state"));
   assert.ok(updateCall, "expected update to poker_state");
   const normQueries = queries.map((q) => String(q.query).toLowerCase());
-  const holeDeleteIdx = normQueries.findIndex((q) => q.includes("delete from public.poker_hole_cards"));
   const holeInsertIdx = normQueries.findIndex((q) => q.includes("insert into public.poker_hole_cards"));
   const stateUpdateIdx = normQueries.findIndex((q) => q.includes("update public.poker_state"));
-  assert.ok(holeDeleteIdx !== -1, "expected poker_hole_cards delete");
   assert.ok(holeInsertIdx !== -1, "expected poker_hole_cards insert");
   assert.ok(stateUpdateIdx !== -1, "expected poker_state update");
-  assert.ok(holeDeleteIdx < holeInsertIdx, "hole cards must be deleted before insert");
   assert.ok(holeInsertIdx < stateUpdateIdx, "hole cards must be upserted before poker_state update");
   const updatedState = JSON.parse(updateCall.params?.[1] || "{}");
   assert.ok(Array.isArray(updatedState.deck), "state should persist deck as an array");
@@ -317,14 +303,10 @@ const runMissingHoleCardsTable = async () => {
               { user_id: "user-2", seat_no: 3, status: "ACTIVE" },
             ];
           }
-          if (text.includes("delete from public.poker_hole_cards")) {
+          if (text.includes("insert into public.poker_hole_cards")) {
             const error = new Error('relation "public.poker_hole_cards" does not exist');
             error.code = "42P01";
             throw error;
-          }
-          if (text.includes("insert into public.poker_hole_cards")) {
-            holeCardsStore.set("noop", []);
-            return [{ ok: true }];
           }
           if (text.includes("update public.poker_state")) {
             storedState.value = params?.[1] || null;

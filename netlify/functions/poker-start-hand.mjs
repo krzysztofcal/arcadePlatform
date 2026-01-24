@@ -245,16 +245,6 @@ export async function handler(event) {
         throw makeError(409, "state_invalid");
       }
 
-      try {
-        await tx.unsafe("delete from public.poker_hole_cards where table_id = $1 and hand_id = $2;", [tableId, handId]);
-      } catch (error) {
-        const message = String(error?.message || "").toLowerCase();
-        if (error?.code === "42P01" || (message.includes("does not exist") && message.includes("poker_hole_cards"))) {
-          klog("poker_schema_not_ready", { table: "poker_hole_cards", tableId, phase: updatedState.phase });
-          throw makeError(409, "state_invalid");
-        }
-        throw error;
-      }
       if (holeCardValues.length > 0) {
         const inserts = [];
         const params = [];
