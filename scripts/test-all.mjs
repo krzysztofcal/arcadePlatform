@@ -31,6 +31,7 @@ run("node", ["tests/favorites-service.test.mjs"], "favorites-service");
 run("node", ["tests/poker-phase1.test.mjs"], "poker-phase1");
 run("node", ["tests/poker-engine.test.mjs"], "poker-engine");
 run("node", ["tests/poker-contract.phase1.test.mjs"], "poker-contract-phase1");
+run("node", ["tests/poker-hole-cards.rls.test.mjs"], "poker-hole-cards-rls");
 run("node", ["tests/poker-reducer.test.mjs"], "poker-reducer");
 run("node", ["tests/poker-leave.test.mjs"], "poker-leave");
 run("node", ["tests/poker-join.test.mjs"], "poker-join");
