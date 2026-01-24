@@ -65,7 +65,7 @@ const normalizeJsonState = (value) => {
 
 const withoutPrivateState = (state) => {
   if (!state || typeof state !== "object" || Array.isArray(state)) return state;
-  const { holeCardsByUserId, deck, ...rest } = state;
+  const { holeCardsByUserId, deck, handSeed, ...rest } = state;
   return rest;
 };
 
@@ -75,7 +75,7 @@ const isStateStorageValid = (state, options = {}) => {
   const seatUserIds = new Set(
     seats.map((seat) => (typeof seat?.userId === "string" && seat.userId.trim() ? seat.userId : null)).filter(Boolean)
   );
-  const requirePrivate = options.requirePrivate === true;
+  const requirePrivate = options.requirePrivate === true || options.requireDeck === true;
   const requireHoleCards = options.requireHoleCards === true;
   const requireNoDeck = options.requireNoDeck === true;
   const requireHandSeed = options.requireHandSeed === true;

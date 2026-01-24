@@ -256,6 +256,7 @@ const run = async () => {
   const user1Payload = JSON.parse(user1Check.body);
   assert.equal(user1Payload.ok, true);
   assert.equal(user1Payload.state.state.holeCardsByUserId, undefined);
+  assert.equal(user1Payload.state.state.handSeed, undefined);
   assert.equal(user1Payload.state.state.deck, undefined);
   assert.ok(Array.isArray(user1Payload.myHoleCards));
   assert.equal(user1Payload.myHoleCards.length, 2);
@@ -265,6 +266,7 @@ const run = async () => {
   assert.equal(user1Payload.state.holeCardsByUserId, undefined);
   assert.equal(JSON.stringify(user1Payload).includes("holeCardsByUserId"), false);
   assert.equal(JSON.stringify(user1Payload).includes('"deck"'), false);
+  assert.equal(JSON.stringify(user1Payload).includes('"handSeed"'), false);
 
   const updateCountBeforeReplay = queries.filter((entry) => entry.query.toLowerCase().includes("update public.poker_state")).length;
   const replayResponse = await handlerUser1({
@@ -313,12 +315,14 @@ const run = async () => {
   assert.ok(user3Payload.events.some((event) => event.type === "STREET_ADVANCED"));
   assert.ok(user3Payload.events.some((event) => event.type === "COMMUNITY_DEALT"));
   assert.equal(user3Payload.state.state.holeCardsByUserId, undefined);
+  assert.equal(user3Payload.state.state.handSeed, undefined);
   assert.equal(user3Payload.state.state.deck, undefined);
   assert.equal(user3Payload.holeCardsByUserId, undefined);
   assert.equal(user3Payload.deck, undefined);
   assert.equal(user3Payload.state.holeCardsByUserId, undefined);
   assert.equal(JSON.stringify(user3Payload).includes("holeCardsByUserId"), false);
   assert.equal(JSON.stringify(user3Payload).includes('"deck"'), false);
+  assert.equal(JSON.stringify(user3Payload).includes('"handSeed"'), false);
 
   const updateCall = queries.find((entry) => entry.query.toLowerCase().includes("update public.poker_state"));
   assert.ok(updateCall, "expected poker_state update");

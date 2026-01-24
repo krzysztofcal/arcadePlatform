@@ -120,9 +120,11 @@ const runHappyPath = async () => {
   assert.ok(Array.isArray(payload.myHoleCards));
   assert.equal(payload.myHoleCards.length, 2);
   assert.equal(payload.state.state.holeCardsByUserId, undefined);
+  assert.equal(payload.state.state.handSeed, undefined);
   assert.equal(payload.holeCardsByUserId, undefined);
   assert.ok(!response.body.includes("holeCardsByUserId"));
   assert.ok(!response.body.includes("\"deck\""));
+  assert.ok(!response.body.includes("\"handSeed\""));
 
   const insertHoleCardsIndex = queries.findIndex((q) => q.query.toLowerCase().includes("insert into public.poker_hole_cards"));
   const updateCall = queries.find((q) => q.query.toLowerCase().includes("update public.poker_state"));

@@ -93,9 +93,11 @@ const run = async () => {
   assert.equal(happyPayload.myHoleCards.length, 2);
   assert.equal(happyPayload.state.state.deck, undefined);
   assert.equal(happyPayload.state.state.holeCardsByUserId, undefined);
+  assert.equal(happyPayload.state.state.handSeed, undefined);
   assert.equal(happyPayload.holeCardsByUserId, undefined);
   assert.equal(JSON.stringify(happyPayload).includes("holeCardsByUserId"), false);
   assert.equal(JSON.stringify(happyPayload).includes('"deck"'), false);
+  assert.equal(JSON.stringify(happyPayload).includes('"handSeed"'), false);
 
   const missingTableError = new Error("missing table");
   missingTableError.code = "42P01";
