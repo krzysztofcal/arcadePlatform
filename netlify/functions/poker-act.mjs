@@ -78,26 +78,45 @@ const cardKey = (card) => {
   return `${rank}-${suit}`;
 };
 
-const cardsMatch = (left, right) => {
+const cardsSameSet = (left, right) => {
   if (!Array.isArray(left) || !Array.isArray(right)) return false;
   if (left.length !== right.length) return false;
-  for (let i = 0; i < left.length; i += 1) {
-    if (cardKey(left[i]) !== cardKey(right[i])) return false;
+  const leftKeys = left.map(cardKey).filter(Boolean).sort();
+  const rightKeys = right.map(cardKey).filter(Boolean).sort();
+  if (leftKeys.length !== rightKeys.length) return false;
+  for (let i = 0; i < leftKeys.length; i += 1) {
+    if (leftKeys[i] !== rightKeys[i]) return false;
   }
   return true;
 };
 
-const normalizeSeatUserIds = (seats) =>
-  Array.isArray(seats) ? seats.map((seat) => seat?.userId).filter((userId) => typeof userId === "string" && userId.trim()) : [];
-
-const hasSameUserIds = (left, right) => {
+const arraysEqual = (left, right) => {
+  if (!Array.isArray(left) || !Array.isArray(right)) return false;
   if (left.length !== right.length) return false;
-  const leftSet = new Set(left);
-  if (leftSet.size !== left.length) return false;
-  for (const id of right) {
-    if (!leftSet.has(id)) return false;
+  for (let i = 0; i < left.length; i += 1) {
+    if (left[i] !== right[i]) return false;
   }
   return true;
+};
+
+const normalizeSeatOrderFromState = (seats) => {
+  if (!Array.isArray(seats)) return [];
+  const ordered = seats.slice().sort((a, b) => {
+    const left = Number.isFinite(a?.seatNo) ? a.seatNo : Number.POSITIVE_INFINITY;
+    const right = Number.isFinite(b?.seatNo) ? b.seatNo : Number.POSITIVE_INFINITY;
+    return left - right;
+  });
+  const out = [];
+  const seen = new Set();
+  for (const seat of ordered) {
+    if (typeof seat?.userId !== "string") continue;
+    const userId = seat.userId.trim();
+    if (!userId) continue;
+    if (seen.has(userId)) return [];
+    seen.add(userId);
+    out.push(userId);
+  }
+  return out;
 };
 
 const validateActionBounds = (state, action, userId) => {
@@ -318,8 +337,8 @@ export async function handler(event) {
         });
         throw makeError(409, "state_invalid");
       }
-      const stateSeatUserIds = normalizeSeatUserIds(currentState.seats);
-      if (!hasSameUserIds(seatUserIdsInOrder, stateSeatUserIds)) {
+      const stateSeatUserIdsInOrder = normalizeSeatOrderFromState(currentState.seats);
+      if (!arraysEqual(seatUserIdsInOrder, stateSeatUserIdsInOrder)) {
         klog("poker_act_rejected", {
           tableId,
           userId: auth.userId,
@@ -350,7 +369,7 @@ export async function handler(event) {
         });
         throw makeError(409, "state_invalid");
       }
-      if (!cardsMatch(currentState.community, derivedCommunity)) {
+      if (!cardsSameSet(currentState.community, derivedCommunity)) {
         klog("poker_act_rejected", {
           tableId,
           userId: auth.userId,
