@@ -79,7 +79,7 @@ const checkHandDone = (state, events) => {
   const active = getActiveSeats(state);
   if (active.length === 1) {
     return {
-      state: { ...state, phase: "HAND_DONE" },
+      state: { ...state, phase: "HAND_DONE", turnUserId: null },
       events: ensureEvents(events, { type: "HAND_DONE", reason: "fold", winnerUserId: active[0].userId }),
     };
   }

@@ -135,6 +135,8 @@ const run = async () => {
     state = result.state;
     assert.equal(state.phase, "HAND_DONE");
     assert.ok(result.events.some((event) => event.type === "HAND_DONE" && event.winnerUserId === "user-3"));
+    assert.equal(result.state.phase, "HAND_DONE");
+    assert.equal(result.state.turnUserId, null);
   }
 
   {
