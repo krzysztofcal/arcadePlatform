@@ -76,7 +76,7 @@ const run = async () => {
   const response = await handler({
     httpMethod: "POST",
     headers: { origin: "https://example.test", authorization: "Bearer token" },
-    body: JSON.stringify({ tableId, requestId: "req-init", action: { type: "CHECK" } }),
+    body: JSON.stringify({ tableId, requestId: "req-1", action: { type: "CHECK" } }),
   });
 
   assert.equal(response.statusCode, 409);

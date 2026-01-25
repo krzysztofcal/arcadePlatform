@@ -43,6 +43,7 @@ run("node", ["tests/poker-invariants.test.mjs"], "poker-invariants");
 run("node", ["tests/poker-leave.behavior.test.mjs"], "poker-leave-behavior");
 run("node", ["tests/poker-start-hand.behavior.test.mjs"], "poker-start-hand-behavior");
 run("node", ["tests/poker-act.behavior.test.mjs"], "poker-act-behavior");
+run("node", ["tests/poker-act.init-phase.test.mjs"], "poker-act-init-phase");
 run("node", ["tests/poker-sweep.behavior.test.mjs"], "poker-sweep-behavior");
 run("node", ["tests/poker-get-table.behavior.test.mjs"], "poker-get-table-behavior");
 
