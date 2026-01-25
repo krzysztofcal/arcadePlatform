@@ -1,7 +1,10 @@
 import crypto from "node:crypto";
 import { baseHeaders, beginSql, corsHeaders, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
 import { isHoleCardsTableMissing, loadHoleCardsByUserId } from "./_shared/poker-hole-cards-store.mjs";
+import { isValidTwoCards } from "./_shared/poker-cards-utils.mjs";
 import { deriveCommunityCards, deriveRemainingDeck } from "./_shared/poker-deal-deterministic.mjs";
+import { computeShowdown } from "./_shared/poker-showdown.mjs";
+import { redactShowdownForViewer } from "./_shared/poker-showdown-visibility.mjs";
 import { advanceIfNeeded, applyAction } from "./_shared/poker-reducer.mjs";
 import { normalizeRequestId } from "./_shared/poker-request-id.mjs";
 import { isPlainObject, isStateStorageValid, normalizeJsonState, withoutPrivateState } from "./_shared/poker-state-utils.mjs";
@@ -47,7 +50,7 @@ const normalizeRequest = (value) => {
 const hasRequiredState = (state) =>
   isPlainObject(state) &&
   typeof state.phase === "string" &&
-  typeof state.turnUserId === "string" &&
+  (typeof state.turnUserId === "string" || state.turnUserId === null) &&
   Array.isArray(state.seats) &&
   isPlainObject(state.stacks) &&
   isPlainObject(state.toCallByUserId) &&
@@ -56,6 +59,7 @@ const hasRequiredState = (state) =>
   isPlainObject(state.foldedByUserId);
 
 const isActionPhase = (phase) => phase === "PREFLOP" || phase === "FLOP" || phase === "TURN" || phase === "RIVER";
+const isShowdownPhase = (phase) => phase === "SHOWDOWN";
 
 const getSeatForUser = (state, userId) => (Array.isArray(state.seats) ? state.seats.find((seat) => seat?.userId === userId) : null);
 
@@ -105,6 +109,57 @@ const hashCardKey = (card) => {
 };
 
 const takeList = (values, maxLen = 12) => (Array.isArray(values) ? values.slice(0, maxLen) : []);
+
+const maybeRedactShowdownForViewer = (state, ctx) => {
+  if (typeof redactShowdownForViewer !== "function") return state;
+  try {
+    return redactShowdownForViewer(state, ctx);
+  } catch {
+    return state;
+  }
+};
+
+const loadHandHoleCardsForShowdown = async (tx, { tableId, handId, userIds, klog }) => {
+  if (!Array.isArray(userIds) || userIds.length === 0) {
+    throw new Error("state_invalid");
+  }
+  const invalid = userIds.filter((id) => !isValidUuid(id));
+  if (invalid.length > 0) {
+    klog("poker_showdown_invalid_user_ids", {
+      tableId,
+      handId,
+      invalidUserIds: takeList(invalid.map(hashUserId)),
+    });
+    throw new Error("state_invalid");
+  }
+  const rows = await tx.unsafe(
+    "select user_id, cards from public.poker_hole_cards where table_id = $1 and hand_id = $2 and user_id = any($3::uuid[]);",
+    [tableId, handId, userIds]
+  );
+  const list = Array.isArray(rows) ? rows : [];
+  const wanted = new Set(userIds);
+  const holeCardsByUserId = {};
+  for (const row of list) {
+    const userId = row?.user_id;
+    if (!wanted.has(userId)) continue;
+    holeCardsByUserId[userId] = row.cards;
+  }
+  const missing = [];
+  for (const userId of userIds) {
+    if (!isValidTwoCards(holeCardsByUserId[userId])) {
+      missing.push(userId);
+    }
+  }
+  if (missing.length > 0) {
+    klog("poker_hole_cards_missing_for_showdown", {
+      tableId,
+      handId,
+      missingUserIds: takeList(missing.map(hashUserId)),
+    });
+    throw new Error("state_invalid");
+  }
+  return { holeCardsByUserId };
+};
 
 const cardsSameSet = (left, right) => {
   if (!Array.isArray(left) || !Array.isArray(right)) return false;
@@ -287,7 +342,26 @@ export async function handler(event) {
         });
         throw makeError(409, "state_invalid");
       };
-      if (!isActionPhase(currentState.phase) || !currentState.turnUserId) {
+      if (!isActionPhase(currentState.phase) && !isShowdownPhase(currentState.phase)) {
+        klog("poker_act_rejected", {
+          tableId,
+          userId: auth.userId,
+          reason: "state_invalid",
+          phase: currentState?.phase || null,
+        });
+        throw makeError(409, "state_invalid");
+      }
+      if (isShowdownPhase(currentState.phase) && actionParsed.value.type !== "CHECK") {
+        klog("poker_act_rejected", {
+          tableId,
+          userId: auth.userId,
+          reason: "invalid_action",
+          phase: currentState.phase,
+          actionType: actionParsed.value.type,
+        });
+        throw makeError(400, "invalid_action");
+      }
+      if (isActionPhase(currentState.phase) && !currentState.turnUserId) {
         klog("poker_act_rejected", {
           tableId,
           userId: auth.userId,
@@ -352,21 +426,23 @@ export async function handler(event) {
       const activeUserIds = seatUserIdsInOrder.slice();
 
       let holeCardsByUserId;
-      try {
-        const holeCards = await loadHoleCardsByUserId(tx, {
-          tableId,
-          handId: currentState.handId,
-          activeUserIds,
-        });
-        holeCardsByUserId = holeCards.holeCardsByUserId;
-      } catch (error) {
-        if (error?.message === "state_invalid") {
-          throw makeError(409, "state_invalid");
+      if (isActionPhase(currentState.phase)) {
+        try {
+          const holeCards = await loadHoleCardsByUserId(tx, {
+            tableId,
+            handId: currentState.handId,
+            activeUserIds,
+          });
+          holeCardsByUserId = holeCards.holeCardsByUserId;
+        } catch (error) {
+          if (error?.message === "state_invalid") {
+            throw makeError(409, "state_invalid");
+          }
+          if (isHoleCardsTableMissing(error)) {
+            throw makeError(409, "state_invalid");
+          }
+          throw error;
         }
-        if (isHoleCardsTableMissing(error)) {
-          throw makeError(409, "state_invalid");
-        }
-        throw error;
       }
 
       if (seatUserIdsInOrder.length <= 0) {
@@ -410,7 +486,8 @@ export async function handler(event) {
         });
       }
 
-      if (lastByUserId[auth.userId] === requestId) {
+      const isReplay = lastByUserId[auth.userId] === requestId;
+      if (isReplay) {
         const version = Number(stateRow.version);
         if (!Number.isFinite(version)) {
           klog("poker_act_rejected", {
@@ -421,17 +498,21 @@ export async function handler(event) {
           });
           throw makeError(409, "state_invalid");
         }
+        const safeState = maybeRedactShowdownForViewer(currentState, {
+          viewerUserId: auth.userId,
+          activeUserIds,
+        });
         return {
           tableId,
           version,
-          state: withoutPrivateState(currentState),
-          myHoleCards: holeCardsByUserId[auth.userId] || [],
+          state: withoutPrivateState(safeState),
+          myHoleCards: isShowdownPhase(currentState.phase) ? [] : holeCardsByUserId?.[auth.userId] || [],
           events: [],
           replayed: true,
         };
       }
 
-      if (currentState.turnUserId !== auth.userId) {
+      if (isActionPhase(currentState.phase) && currentState.turnUserId !== auth.userId) {
         klog("poker_act_rejected", {
           tableId,
           userId: auth.userId,
@@ -442,7 +523,7 @@ export async function handler(event) {
         throw makeError(403, "not_your_turn");
       }
 
-      if (!validateActionBounds(currentState, actionParsed.value, auth.userId)) {
+      if (isActionPhase(currentState.phase) && !validateActionBounds(currentState, actionParsed.value, auth.userId)) {
         klog("poker_act_rejected", {
           tableId,
           userId: auth.userId,
@@ -454,69 +535,143 @@ export async function handler(event) {
         throw makeError(400, "invalid_action");
       }
 
-      const privateState = {
-        ...currentState,
-        community: derivedCommunity,
-        deck: derivedDeck,
-        holeCardsByUserId,
-      };
-
-      let applied;
-      try {
-        applied = applyAction(privateState, { ...actionParsed.value, userId: auth.userId });
-      } catch (error) {
-        const reason = error?.message || "invalid_action";
-        if (reason === "not_your_turn") {
+      if (isShowdownPhase(currentState.phase) && currentState.showdown) {
+        const version = Number(stateRow.version);
+        if (!Number.isFinite(version)) {
           klog("poker_act_rejected", {
             tableId,
             userId: auth.userId,
-            reason: "not_your_turn",
+            reason: "state_invalid",
             phase: currentState.phase,
-            actionType: actionParsed.value.type,
           });
-          throw makeError(403, "not_your_turn");
+          throw makeError(409, "state_invalid");
         }
-        if (reason === "invalid_player") {
-          klog("poker_act_rejected", {
-            tableId,
-            userId: auth.userId,
-            reason: "invalid_player",
-            phase: currentState.phase,
-            actionType: actionParsed.value.type,
-          });
-          throw makeError(403, "not_allowed");
-        }
-        if (reason === "invalid_action") {
-          klog("poker_act_rejected", {
-            tableId,
-            userId: auth.userId,
-            reason: "invalid_action",
-            phase: currentState.phase,
-            actionType: actionParsed.value.type,
-            amount: actionParsed.value.amount ?? null,
-          });
-          throw makeError(400, "invalid_action");
-        }
-        throw error;
+        const safeState = maybeRedactShowdownForViewer(currentState, {
+          viewerUserId: auth.userId,
+          activeUserIds,
+        });
+        return {
+          tableId,
+          version,
+          state: withoutPrivateState(safeState),
+          myHoleCards: [],
+          events: [],
+          replayed: isReplay,
+        };
       }
 
-      let nextState = applied.state;
-      const events = Array.isArray(applied.events) ? applied.events.slice() : [];
+      let nextState = currentState;
+      let events = [];
+      let advanceEvents = [];
+      let showdownEvaluated = false;
       let loops = 0;
-      const advanceEvents = [];
-      while (loops < ADVANCE_LIMIT) {
-        const prevPhase = nextState.phase;
-        const advanced = advanceIfNeeded(nextState);
-        nextState = advanced.state;
 
-        if (Array.isArray(advanced.events) && advanced.events.length > 0) {
-          events.push(...advanced.events);
-          advanceEvents.push(...advanced.events);
+      if (isActionPhase(currentState.phase)) {
+        const privateState = {
+          ...currentState,
+          community: derivedCommunity,
+          deck: derivedDeck,
+          holeCardsByUserId,
+        };
+
+        let applied;
+        try {
+          applied = applyAction(privateState, { ...actionParsed.value, userId: auth.userId });
+        } catch (error) {
+          const reason = error?.message || "invalid_action";
+          if (reason === "not_your_turn") {
+            klog("poker_act_rejected", {
+              tableId,
+              userId: auth.userId,
+              reason: "not_your_turn",
+              phase: currentState.phase,
+              actionType: actionParsed.value.type,
+            });
+            throw makeError(403, "not_your_turn");
+          }
+          if (reason === "invalid_player") {
+            klog("poker_act_rejected", {
+              tableId,
+              userId: auth.userId,
+              reason: "invalid_player",
+              phase: currentState.phase,
+              actionType: actionParsed.value.type,
+            });
+            throw makeError(403, "not_allowed");
+          }
+          if (reason === "invalid_action") {
+            klog("poker_act_rejected", {
+              tableId,
+              userId: auth.userId,
+              reason: "invalid_action",
+              phase: currentState.phase,
+              actionType: actionParsed.value.type,
+              amount: actionParsed.value.amount ?? null,
+            });
+            throw makeError(400, "invalid_action");
+          }
+          throw error;
         }
 
-        if (!Array.isArray(advanced.events) || advanced.events.length === 0) break;
-        if (nextState.phase === prevPhase) break;
-        loops += 1;
+        nextState = applied.state;
+        events = Array.isArray(applied.events) ? applied.events.slice() : [];
+        advanceEvents = [];
+        while (loops < ADVANCE_LIMIT) {
+          const prevPhase = nextState.phase;
+          const advanced = advanceIfNeeded(nextState);
+          nextState = advanced.state;
+
+          if (Array.isArray(advanced.events) && advanced.events.length > 0) {
+            events.push(...advanced.events);
+            advanceEvents.push(...advanced.events);
+          }
+
+          if (!Array.isArray(advanced.events) || advanced.events.length === 0) break;
+          if (nextState.phase === prevPhase) break;
+          loops += 1;
+        }
+      }
+
+      if (isShowdownPhase(nextState.phase) && !nextState.showdown) {
+        const communityForShowdown = Array.isArray(nextState.community) ? nextState.community : derivedCommunity;
+        if (!Array.isArray(communityForShowdown) || communityForShowdown.length !== 5) {
+          rejectStateInvalid("showdown_requires_5_community", { communityDealt: nextState.communityDealt });
+        }
+        const showdownUserIds = seatUserIdsInOrder.filter((userId) => !nextState.foldedByUserId?.[userId]);
+        if (showdownUserIds.length === 0) {
+          rejectStateInvalid("no_showdown_players");
+        }
+        let showdownHoleCards;
+        try {
+          showdownHoleCards = await loadHandHoleCardsForShowdown(tx, {
+            tableId,
+            handId: currentState.handId,
+            userIds: showdownUserIds,
+            klog,
+          });
+        } catch (error) {
+          if (error?.message === "state_invalid") {
+            throw makeError(409, "state_invalid");
+          }
+          if (isHoleCardsTableMissing(error)) {
+            throw makeError(409, "state_invalid");
+          }
+          throw error;
+        }
+        let showdown;
+        try {
+          showdown = computeShowdown({
+            community: communityForShowdown,
+            players: showdownUserIds.map((userId) => ({
+              userId,
+              holeCards: showdownHoleCards.holeCardsByUserId[userId],
+            })),
+          });
+        } catch {
+          rejectStateInvalid("showdown_invalid");
+        }
+        nextState = { ...nextState, showdown };
+        showdownEvaluated = true;
       }
 
       const { holeCardsByUserId: _ignoredHoleCards, deck: _ignoredDeck, ...stateBase } = nextState;
@@ -534,12 +689,50 @@ export async function handler(event) {
         throw makeError(409, "state_invalid");
       }
 
-      const updateRows = await tx.unsafe(
-        "update public.poker_state set version = version + 1, state = $2::jsonb, updated_at = now() where table_id = $1 returning version;",
-        [tableId, JSON.stringify(updatedState)]
-      );
+      let updateRows;
+      if (showdownEvaluated) {
+        updateRows = await tx.unsafe(
+          "update public.poker_state set version = version + 1, state = $2::jsonb, updated_at = now() where table_id = $1 and (state->'showdown') is null returning version;",
+          [tableId, JSON.stringify(updatedState)]
+        );
+      } else {
+        updateRows = await tx.unsafe(
+          "update public.poker_state set version = version + 1, state = $2::jsonb, updated_at = now() where table_id = $1 returning version;",
+          [tableId, JSON.stringify(updatedState)]
+        );
+      }
       const newVersion = Number(updateRows?.[0]?.version);
       if (!Number.isFinite(newVersion)) {
+        if (showdownEvaluated) {
+          const latestRows = await tx.unsafe(
+            "select version, state from public.poker_state where table_id = $1 limit 1;",
+            [tableId]
+          );
+          const latest = latestRows?.[0] || null;
+          const latestVersion = Number(latest?.version);
+          const latestState = normalizeJsonState(latest?.state);
+          if (!Number.isFinite(latestVersion) || !latestState || !isPlainObject(latestState)) {
+            klog("poker_act_rejected", {
+              tableId,
+              userId: auth.userId,
+              reason: "state_invalid",
+              phase: updatedState.phase,
+            });
+            throw makeError(409, "state_invalid");
+          }
+          const safeLatest = maybeRedactShowdownForViewer(latestState, {
+            viewerUserId: auth.userId,
+            activeUserIds,
+          });
+          return {
+            tableId,
+            version: latestVersion,
+            state: withoutPrivateState(safeLatest),
+            myHoleCards: [],
+            events: [],
+            replayed: true,
+          };
+        }
         klog("poker_act_rejected", {
           tableId,
           userId: auth.userId,
@@ -549,11 +742,12 @@ export async function handler(event) {
         throw makeError(409, "state_invalid");
       }
 
-      await tx.unsafe(
-        "insert into public.poker_actions (table_id, version, user_id, action_type, amount) values ($1, $2, $3, $4, $5);",
-        [tableId, newVersion, auth.userId, actionParsed.value.type, actionParsed.value.amount ?? null]
-      );
-
+      if (isActionPhase(currentState.phase)) {
+        await tx.unsafe(
+          "insert into public.poker_actions (table_id, version, user_id, action_type, amount) values ($1, $2, $3, $4, $5);",
+          [tableId, newVersion, auth.userId, actionParsed.value.type, actionParsed.value.amount ?? null]
+        );
+      }
       if (advanceEvents.length > 0) {
         klog("poker_act_advanced", {
           tableId,
@@ -564,21 +758,27 @@ export async function handler(event) {
         });
       }
 
-      klog("poker_act_applied", {
-        tableId,
-        userId: auth.userId,
-        actionType: actionParsed.value.type,
-        amount: actionParsed.value.amount ?? null,
-        fromPhase: currentState.phase,
-        toPhase: updatedState.phase,
-        newVersion,
-      });
+      if (isActionPhase(currentState.phase)) {
+        klog("poker_act_applied", {
+          tableId,
+          userId: auth.userId,
+          actionType: actionParsed.value.type,
+          amount: actionParsed.value.amount ?? null,
+          fromPhase: currentState.phase,
+          toPhase: updatedState.phase,
+          newVersion,
+        });
+      }
 
+      const safeState = maybeRedactShowdownForViewer(updatedState, {
+        viewerUserId: auth.userId,
+        activeUserIds,
+      });
       return {
         tableId,
         version: newVersion,
-        state: withoutPrivateState(updatedState),
-        myHoleCards: holeCardsByUserId[auth.userId] || [],
+        state: withoutPrivateState(safeState),
+        myHoleCards: isShowdownPhase(updatedState.phase) ? [] : holeCardsByUserId?.[auth.userId] || [],
         events,
         replayed: false,
       };

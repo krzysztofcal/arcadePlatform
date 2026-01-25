@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { isHoleCardsTableMissing, loadHoleCardsByUserId } from "../netlify/functions/_shared/poker-hole-cards-store.mjs";
+import { redactShowdownForViewer } from "../netlify/functions/_shared/poker-showdown-visibility.mjs";
 import { normalizeJsonState, withoutPrivateState } from "../netlify/functions/_shared/poker-state-utils.mjs";
 import { loadPokerHandler } from "./helpers/poker-test-helpers.mjs";
 
@@ -34,12 +35,13 @@ const makeHandler = (queries, storedState, userId, options = {}) =>
     baseHeaders: () => ({}),
     corsHeaders: () => ({ "access-control-allow-origin": "https://example.test" }),
     extractBearerToken: () => "token",
-    verifySupabaseJwt: async () => ({ valid: true, userId }),
+    verifySupabaseJwt: async () => ({ valid: options.authValid ?? true, userId }),
     isValidUuid: () => true,
     normalizeJsonState,
     withoutPrivateState,
     isHoleCardsTableMissing,
     loadHoleCardsByUserId,
+    redactShowdownForViewer,
     beginSql: async (fn) =>
       fn({
         unsafe: async (query, params) => {
@@ -111,6 +113,15 @@ const run = async () => {
   assert.equal(missingTableResponse.statusCode, 409);
   assert.equal(JSON.parse(missingTableResponse.body).error, "state_invalid");
 
+  const unauthQueries = [];
+  const unauthResponse = await makeHandler(unauthQueries, storedState, null, { authValid: false })({
+    httpMethod: "GET",
+    headers: { origin: "https://example.test" },
+    queryStringParameters: { tableId },
+  });
+  assert.equal(unauthResponse.statusCode, 401);
+  assert.equal(unauthQueries.length, 0);
+
   const missingRowResponse = await makeHandler([], storedState, "user-1", {
     holeCardsByUserId: {
       "user-1": defaultHoleCards["user-1"],
@@ -169,6 +180,91 @@ const run = async () => {
     entry.query.toLowerCase().includes("from public.poker_hole_cards")
   );
   assert.equal(holeCardQueries.length, 0);
+
+  const showdownState = {
+    ...baseState,
+    phase: "SHOWDOWN",
+    turnUserId: null,
+    showdown: {
+      winners: ["user-1"],
+      handsByUserId: {
+        "user-1": { category: 9, name: "STRAIGHT_FLUSH", ranks: [14], best5: [], key: "9:14" },
+      },
+      revealedHoleCardsByUserId: {
+        "user-1": defaultHoleCards["user-1"],
+      },
+    },
+  };
+  const showdownQueries = [];
+  const showdownResponse = await makeHandler(showdownQueries, { value: JSON.stringify(showdownState), version: 5 }, "user-1")({
+    httpMethod: "GET",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    queryStringParameters: { tableId },
+  });
+  assert.equal(showdownResponse.statusCode, 200);
+  const showdownPayload = JSON.parse(showdownResponse.body);
+  assert.deepEqual(showdownPayload.myHoleCards, []);
+  assert.ok(showdownPayload.state.state.showdown);
+  const showdownHoleCardQueries = showdownQueries.filter((entry) =>
+    entry.query.toLowerCase().includes("from public.poker_hole_cards")
+  );
+  assert.equal(showdownHoleCardQueries.length, 0);
+
+  const incompleteShowdownState = {
+    ...baseState,
+    phase: "SHOWDOWN",
+    turnUserId: null,
+    community: [{ r: "A", s: "S" }],
+    communityDealt: 1,
+    showdown: null,
+  };
+  const incompleteResponse = await makeHandler([], { value: JSON.stringify(incompleteShowdownState), version: 6 }, null, {
+    authValid: false,
+  })({
+    httpMethod: "GET",
+    headers: { origin: "https://example.test" },
+    queryStringParameters: { tableId },
+  });
+  assert.equal(incompleteResponse.statusCode, 401);
+
+  const finalShowdownResponse = await makeHandler([], { value: JSON.stringify(showdownState), version: 7 }, null, {
+    authValid: false,
+  })({
+    httpMethod: "GET",
+    headers: { origin: "https://example.test" },
+    queryStringParameters: { tableId },
+  });
+  assert.equal(finalShowdownResponse.statusCode, 401);
+
+  const redactedResponse = await makeHandler([], { value: JSON.stringify(showdownState), version: 8 }, "user-999", {
+    activeUserIds: ["user-1", "user-2", "user-3"],
+  })({
+    httpMethod: "GET",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    queryStringParameters: { tableId },
+  });
+  assert.equal(redactedResponse.statusCode, 200);
+  const redactedPayload = JSON.parse(redactedResponse.body);
+  assert.ok(redactedPayload.state.state.showdown);
+  assert.deepEqual(redactedPayload.state.state.showdown.revealedHoleCardsByUserId, {});
+
+  const seatedResponse = await makeHandler([], { value: JSON.stringify(showdownState), version: 9 }, "user-1")({
+    httpMethod: "GET",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    queryStringParameters: { tableId },
+  });
+  assert.equal(seatedResponse.statusCode, 200);
+  const seatedPayload = JSON.parse(seatedResponse.body);
+  assert.ok(seatedPayload.state.state.showdown.revealedHoleCardsByUserId["user-1"]);
+
+  const blankAuthResponse = await makeHandler([], { value: JSON.stringify(showdownState), version: 10 }, "   ")({
+    httpMethod: "GET",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    queryStringParameters: { tableId },
+  });
+  assert.equal(blankAuthResponse.statusCode, 200);
+  const blankAuthPayload = JSON.parse(blankAuthResponse.body);
+  assert.deepEqual(blankAuthPayload.state.state.showdown.revealedHoleCardsByUserId, {});
 };
 
 await run();

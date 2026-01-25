@@ -61,6 +61,8 @@ export const loadPokerHandler = (filePath, mocks) => {
     "isValidUuid",
     "isHoleCardsTableMissing",
     "loadHoleCardsByUserId",
+    "computeShowdown",
+    "redactShowdownForViewer",
     "PRESENCE_TTL_SEC",
     "TABLE_EMPTY_CLOSE_SEC",
   ];

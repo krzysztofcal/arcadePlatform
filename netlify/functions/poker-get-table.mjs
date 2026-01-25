@@ -1,9 +1,19 @@
 import { baseHeaders, beginSql, corsHeaders, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
 import { isHoleCardsTableMissing, loadHoleCardsByUserId } from "./_shared/poker-hole-cards-store.mjs";
+import { redactShowdownForViewer } from "./_shared/poker-showdown-visibility.mjs";
 import { normalizeJsonState, withoutPrivateState } from "./_shared/poker-state-utils.mjs";
 import { isValidUuid } from "./_shared/poker-utils.mjs";
 
 const isActionPhase = (phase) => phase === "PREFLOP" || phase === "FLOP" || phase === "TURN" || phase === "RIVER";
+
+const maybeRedactShowdownForViewer = (state, ctx) => {
+  if (typeof redactShowdownForViewer !== "function") return state;
+  try {
+    return redactShowdownForViewer(state, ctx);
+  } catch {
+    return state;
+  }
+};
 
 const normalizeSeatUserIds = (seats) => {
   if (!Array.isArray(seats)) return [];
@@ -65,7 +75,7 @@ export async function handler(event) {
     return {
       statusCode: 401,
       headers: mergeHeaders(cors),
-      body: JSON.stringify({ error: "unauthorized", reason: auth.reason }),
+      body: JSON.stringify({ error: "unauthorized" }),
     };
   }
 
@@ -111,13 +121,13 @@ export async function handler(event) {
 
       const currentState = normalizeJsonState(stateRow.state);
       let myHoleCards = [];
+      const activeUserIds = Array.isArray(activeSeatRows)
+        ? activeSeatRows.map((row) => row?.user_id).filter(Boolean)
+        : [];
       if (isActionPhase(currentState.phase)) {
         if (typeof currentState.handId !== "string" || !currentState.handId.trim()) {
           throw new Error("state_invalid");
         }
-        const activeUserIds = Array.isArray(activeSeatRows)
-          ? activeSeatRows.map((row) => row?.user_id).filter(Boolean)
-          : [];
         const stateSeatUserIds = normalizeSeatUserIds(currentState.seats);
         if (!hasSameUserIds(activeUserIds, stateSeatUserIds)) {
           throw new Error("state_invalid");
@@ -140,17 +150,20 @@ export async function handler(event) {
         }
       }
 
-      return { table, seats, stateRow, currentState, myHoleCards };
+      return { table, seats, stateRow, currentState, myHoleCards, activeUserIds };
     });
 
     if (result?.error === "table_not_found") {
       return { statusCode: 404, headers: mergeHeaders(cors), body: JSON.stringify({ error: "table_not_found" }) };
     }
-
     const table = result.table;
     const seats = result.seats;
     const stateRow = result.stateRow;
-    const publicState = withoutPrivateState(result.currentState);
+    const safeState = maybeRedactShowdownForViewer(result.currentState, {
+      viewerUserId: auth?.valid ? auth.userId : null,
+      activeUserIds: result.activeUserIds,
+    });
+    const publicState = withoutPrivateState(safeState);
 
     const tablePayload = {
       id: table.id,
@@ -174,11 +187,14 @@ export async function handler(event) {
           version: stateRow.version,
           state: publicState,
         },
-        myHoleCards: result.myHoleCards || [],
+        myHoleCards: result.currentState?.phase === "SHOWDOWN" ? [] : result.myHoleCards || [],
       }),
     };
   } catch (error) {
-    if (error?.message === "state_invalid" || isHoleCardsTableMissing(error)) {
+    if (
+      error?.message === "state_invalid" ||
+      (typeof isHoleCardsTableMissing === "function" && isHoleCardsTableMissing(error))
+    ) {
       return { statusCode: 409, headers: mergeHeaders(cors), body: JSON.stringify({ error: "state_invalid" }) };
     }
     klog("poker_get_table_error", { message: error?.message || "unknown_error" });

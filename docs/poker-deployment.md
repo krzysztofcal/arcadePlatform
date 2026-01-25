@@ -46,6 +46,13 @@ After clicking Leave once, Netlify logs must show:
 
 If you still don’t see `poker_leave_start`, the issue is client-side (no request sent / blocked / wrong URL).
 
+## SHOWDOWN data exposure
+
+- `showdown.winners` and `showdown.handsByUserId` are returned to authenticated viewers of the table state.
+- `showdown.revealedHoleCardsByUserId` is only visible to ACTIVE seated players.
+- Non-seated viewers receive `showdown.revealedHoleCardsByUserId: {}`.
+- During SHOWDOWN, `myHoleCards` is always `[]`.
+
 ### Optional CSP check (only if client logs show request but server logs are empty)
 
 Run these from Termux (or anywhere) and confirm headers look sane:
