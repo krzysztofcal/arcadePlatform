@@ -105,9 +105,20 @@ const makeHandler = (queries, storedState, userId, options = {}) =>
             return getHoleCardsRows(options, defaultHoleCards);
           }
           if (text.includes("update public.poker_state")) {
+            const isConditional = text.includes("(state->'showdown') is null");
+            let current = {};
+            try {
+              current = JSON.parse(storedState.value || "{}");
+            } catch {
+              current = {};
+            }
+            if (isConditional && current && current.showdown) return [];
             storedState.value = params?.[1] || storedState.value;
             storedState.version += 1;
             return [{ version: storedState.version }];
+          }
+          if (text.includes("select version, state from public.poker_state")) {
+            return [{ version: storedState.version, state: JSON.parse(storedState.value) }];
           }
           if (text.includes("insert into public.poker_actions")) {
             return [{ ok: true }];
@@ -470,6 +481,24 @@ const run = async () => {
   ).length;
   assert.equal(showdownUpdateCountAfter, showdownUpdateCount);
   assert.equal(showdownActionCountAfter, showdownActionCount);
+
+  const showdownUpdateCountBeforeRace = showdownQueries.filter((entry) =>
+    entry.query.toLowerCase().includes("update public.poker_state")
+  ).length;
+  const showdownRaceResponse = await showdownHandler({
+    httpMethod: "POST",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    body: JSON.stringify({ tableId, requestId: "req-showdown-2", action: { type: "CHECK" } }),
+  });
+  assert.equal(showdownRaceResponse.statusCode, 200);
+  const showdownRacePayload = JSON.parse(showdownRaceResponse.body);
+  assert.equal(showdownRacePayload.ok, true);
+  assert.ok(showdownRacePayload.state.state.showdown);
+  assert.deepEqual(showdownRacePayload.myHoleCards, []);
+  const showdownUpdateCountAfterRace = showdownQueries.filter((entry) =>
+    entry.query.toLowerCase().includes("update public.poker_state")
+  ).length;
+  assert.equal(showdownUpdateCountAfterRace, showdownUpdateCountBeforeRace);
 
   const invalidSeatHandler = makeHandler(showdownQueries, showdownStoredState, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", {
     holeCardsByUserId: showdownHoleCards,
