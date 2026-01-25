@@ -182,7 +182,10 @@ export async function handler(event) {
       }),
     };
   } catch (error) {
-    if (error?.message === "state_invalid" || isHoleCardsTableMissing(error)) {
+    if (
+      error?.message === "state_invalid" ||
+      (typeof isHoleCardsTableMissing === "function" && isHoleCardsTableMissing(error))
+    ) {
       return { statusCode: 409, headers: mergeHeaders(cors), body: JSON.stringify({ error: "state_invalid" }) };
     }
     klog("poker_get_table_error", { message: error?.message || "unknown_error" });
