@@ -224,6 +224,18 @@ const run = async () => {
     queryStringParameters: { tableId },
   });
   assert.equal(finalShowdownResponse.statusCode, 401);
+
+  const redactedResponse = await makeHandler([], { value: JSON.stringify(showdownState), version: 8 }, "user-999", {
+    activeUserIds: ["user-1", "user-2", "user-3"],
+  })({
+    httpMethod: "GET",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    queryStringParameters: { tableId },
+  });
+  assert.equal(redactedResponse.statusCode, 200);
+  const redactedPayload = JSON.parse(redactedResponse.body);
+  assert.ok(redactedPayload.state.state.showdown);
+  assert.deepEqual(redactedPayload.state.state.showdown.revealedHoleCardsByUserId, {});
 };
 
 await run();

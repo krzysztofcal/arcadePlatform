@@ -475,6 +475,7 @@ const run = async () => {
   });
   assert.equal(invalidSeatResponse.statusCode, 409);
   assert.equal(JSON.parse(invalidSeatResponse.body).error, "state_invalid");
+
 };
 
 await run();

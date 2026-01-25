@@ -109,6 +109,16 @@ const hashCardKey = (card) => {
 
 const takeList = (values, maxLen = 12) => (Array.isArray(values) ? values.slice(0, maxLen) : []);
 
+const redactShowdownForViewer = (state, { viewerUserId, activeUserIds }) => {
+  if (!state || state.phase !== "SHOWDOWN" || !state.showdown) return state;
+  if (!viewerUserId) return { ...state, showdown: { ...state.showdown, revealedHoleCardsByUserId: {} } };
+  if (!Array.isArray(activeUserIds)) return { ...state, showdown: { ...state.showdown, revealedHoleCardsByUserId: {} } };
+  if (!activeUserIds.includes(viewerUserId)) {
+    return { ...state, showdown: { ...state.showdown, revealedHoleCardsByUserId: {} } };
+  }
+  return state;
+};
+
 const loadHandHoleCardsForShowdown = async (tx, { tableId, handId, userIds, klog }) => {
   if (!Array.isArray(userIds) || userIds.length === 0) {
     throw new Error("state_invalid");
@@ -476,10 +486,14 @@ export async function handler(event) {
           });
           throw makeError(409, "state_invalid");
         }
+        const safeState = redactShowdownForViewer(currentState, {
+          viewerUserId: auth.userId,
+          activeUserIds,
+        });
         return {
           tableId,
           version,
-          state: withoutPrivateState(currentState),
+          state: withoutPrivateState(safeState),
           myHoleCards: isShowdownPhase(currentState.phase) ? [] : holeCardsByUserId?.[auth.userId] || [],
           events: [],
           replayed: true,
@@ -511,10 +525,14 @@ export async function handler(event) {
 
       if (isShowdownPhase(currentState.phase) && currentState.showdown) {
         const version = Number(stateRow.version);
+        const safeState = redactShowdownForViewer(currentState, {
+          viewerUserId: auth.userId,
+          activeUserIds,
+        });
         return {
           tableId,
           version: Number.isFinite(version) ? version : 0,
-          state: withoutPrivateState(currentState),
+          state: withoutPrivateState(safeState),
           myHoleCards: [],
           events: [],
           replayed: false,
@@ -692,10 +710,14 @@ export async function handler(event) {
         });
       }
 
+      const safeState = redactShowdownForViewer(updatedState, {
+        viewerUserId: auth.userId,
+        activeUserIds,
+      });
       return {
         tableId,
         version: newVersion,
-        state: withoutPrivateState(updatedState),
+        state: withoutPrivateState(safeState),
         myHoleCards: isShowdownPhase(updatedState.phase) ? [] : holeCardsByUserId?.[auth.userId] || [],
         events,
         replayed: false,
