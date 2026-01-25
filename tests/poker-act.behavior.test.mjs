@@ -428,6 +428,7 @@ const run = async () => {
   });
   assert.equal(showdownResponse.statusCode, 200);
   const showdownPayload = JSON.parse(showdownResponse.body);
+  assert.equal(showdownPayload.replayed, false);
   assert.ok(showdownPayload.state.state.showdown);
   assert.deepEqual(Object.keys(showdownPayload.state.state.showdown.revealedHoleCardsByUserId).sort(), ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"]);
   assert.deepEqual(
@@ -456,6 +457,8 @@ const run = async () => {
     body: JSON.stringify({ tableId, requestId: "req-showdown", action: { type: "CHECK" } }),
   });
   assert.equal(showdownReplayResponse.statusCode, 200);
+  const showdownReplayPayload = JSON.parse(showdownReplayResponse.body);
+  assert.equal(showdownReplayPayload.replayed, true);
   const showdownUpdateCountAfter = showdownQueries.filter((entry) =>
     entry.query.toLowerCase().includes("update public.poker_state")
   ).length;

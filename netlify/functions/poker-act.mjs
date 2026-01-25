@@ -475,7 +475,8 @@ export async function handler(event) {
         });
       }
 
-      if (lastByUserId[auth.userId] === requestId) {
+      const isReplay = lastByUserId[auth.userId] === requestId;
+      if (isReplay) {
         const version = Number(stateRow.version);
         if (!Number.isFinite(version)) {
           klog("poker_act_rejected", {
@@ -535,7 +536,7 @@ export async function handler(event) {
           state: withoutPrivateState(safeState),
           myHoleCards: [],
           events: [],
-          replayed: false,
+          replayed: isReplay,
         };
       }
 

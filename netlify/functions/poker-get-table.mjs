@@ -75,7 +75,7 @@ export async function handler(event) {
     return {
       statusCode: 401,
       headers: mergeHeaders(cors),
-      body: JSON.stringify({ error: "unauthorized", reason: auth.reason }),
+      body: JSON.stringify({ error: "unauthorized" }),
     };
   }
 

@@ -111,6 +111,15 @@ const run = async () => {
   assert.equal(missingTableResponse.statusCode, 409);
   assert.equal(JSON.parse(missingTableResponse.body).error, "state_invalid");
 
+  const unauthQueries = [];
+  const unauthResponse = await makeHandler(unauthQueries, storedState, null, { authValid: false })({
+    httpMethod: "GET",
+    headers: { origin: "https://example.test" },
+    queryStringParameters: { tableId },
+  });
+  assert.equal(unauthResponse.statusCode, 401);
+  assert.equal(unauthQueries.length, 0);
+
   const missingRowResponse = await makeHandler([], storedState, "user-1", {
     holeCardsByUserId: {
       "user-1": defaultHoleCards["user-1"],
