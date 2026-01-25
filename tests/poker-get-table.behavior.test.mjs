@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { isHoleCardsTableMissing, loadHoleCardsByUserId } from "../netlify/functions/_shared/poker-hole-cards-store.mjs";
+import { redactShowdownForViewer } from "../netlify/functions/_shared/poker-showdown-visibility.mjs";
 import { normalizeJsonState, withoutPrivateState } from "../netlify/functions/_shared/poker-state-utils.mjs";
 import { loadPokerHandler } from "./helpers/poker-test-helpers.mjs";
 
@@ -40,6 +41,7 @@ const makeHandler = (queries, storedState, userId, options = {}) =>
     withoutPrivateState,
     isHoleCardsTableMissing,
     loadHoleCardsByUserId,
+    redactShowdownForViewer,
     beginSql: async (fn) =>
       fn({
         unsafe: async (query, params) => {

@@ -1,21 +1,10 @@
 import { baseHeaders, beginSql, corsHeaders, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
 import { isHoleCardsTableMissing, loadHoleCardsByUserId } from "./_shared/poker-hole-cards-store.mjs";
+import { redactShowdownForViewer } from "./_shared/poker-showdown-visibility.mjs";
 import { normalizeJsonState, withoutPrivateState } from "./_shared/poker-state-utils.mjs";
 import { isValidUuid } from "./_shared/poker-utils.mjs";
 
 const isActionPhase = (phase) => phase === "PREFLOP" || phase === "FLOP" || phase === "TURN" || phase === "RIVER";
-
-const redactShowdownForViewer = (state, { viewerUserId, activeUserIds }) => {
-  if (!state || state.phase !== "SHOWDOWN" || !state.showdown) return state;
-  const safeViewerId = typeof viewerUserId === "string" ? viewerUserId.trim() : "";
-  if (!safeViewerId) return { ...state, showdown: { ...state.showdown, revealedHoleCardsByUserId: {} } };
-  if (!Array.isArray(activeUserIds)) return { ...state, showdown: { ...state.showdown, revealedHoleCardsByUserId: {} } };
-  const activeList = activeUserIds.map((id) => (typeof id === "string" ? id.trim() : "")).filter(Boolean);
-  if (!activeList.includes(safeViewerId)) {
-    return { ...state, showdown: { ...state.showdown, revealedHoleCardsByUserId: {} } };
-  }
-  return state;
-};
 
 const normalizeSeatUserIds = (seats) => {
   if (!Array.isArray(seats)) return [];

@@ -4,6 +4,7 @@ import { isHoleCardsTableMissing, loadHoleCardsByUserId } from "./_shared/poker-
 import { isValidTwoCards } from "./_shared/poker-cards-utils.mjs";
 import { deriveCommunityCards, deriveRemainingDeck } from "./_shared/poker-deal-deterministic.mjs";
 import { computeShowdown } from "./_shared/poker-showdown.mjs";
+import { redactShowdownForViewer } from "./_shared/poker-showdown-visibility.mjs";
 import { advanceIfNeeded, applyAction } from "./_shared/poker-reducer.mjs";
 import { normalizeRequestId } from "./_shared/poker-request-id.mjs";
 import { isPlainObject, isStateStorageValid, normalizeJsonState, withoutPrivateState } from "./_shared/poker-state-utils.mjs";
@@ -108,18 +109,6 @@ const hashCardKey = (card) => {
 };
 
 const takeList = (values, maxLen = 12) => (Array.isArray(values) ? values.slice(0, maxLen) : []);
-
-const redactShowdownForViewer = (state, { viewerUserId, activeUserIds }) => {
-  if (!state || state.phase !== "SHOWDOWN" || !state.showdown) return state;
-  const safeViewerId = typeof viewerUserId === "string" ? viewerUserId.trim() : "";
-  if (!safeViewerId) return { ...state, showdown: { ...state.showdown, revealedHoleCardsByUserId: {} } };
-  if (!Array.isArray(activeUserIds)) return { ...state, showdown: { ...state.showdown, revealedHoleCardsByUserId: {} } };
-  const activeList = activeUserIds.map((id) => (typeof id === "string" ? id.trim() : "")).filter(Boolean);
-  if (!activeList.includes(safeViewerId)) {
-    return { ...state, showdown: { ...state.showdown, revealedHoleCardsByUserId: {} } };
-  }
-  return state;
-};
 
 const loadHandHoleCardsForShowdown = async (tx, { tableId, handId, userIds, klog }) => {
   if (!Array.isArray(userIds) || userIds.length === 0) {
