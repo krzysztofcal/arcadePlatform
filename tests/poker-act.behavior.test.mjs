@@ -446,6 +446,7 @@ const run = async () => {
   const showdownUpdateCount = showdownQueries.filter((entry) =>
     entry.query.toLowerCase().includes("update public.poker_state")
   ).length;
+  assert.equal(showdownUpdateCount, 1);
   const showdownActionCount = showdownQueries.filter((entry) =>
     entry.query.toLowerCase().includes("insert into public.poker_actions")
   ).length;

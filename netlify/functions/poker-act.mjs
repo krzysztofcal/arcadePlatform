@@ -612,8 +612,9 @@ export async function handler(event) {
       }
 
       if (isShowdownPhase(nextState.phase) && !nextState.showdown) {
-        if (currentState.communityDealt !== 5 || !Array.isArray(derivedCommunity) || derivedCommunity.length !== 5) {
-          rejectStateInvalid("showdown_requires_5_community", { communityDealt: currentState.communityDealt });
+        const communityForShowdown = Array.isArray(nextState.community) ? nextState.community : derivedCommunity;
+        if (!Array.isArray(communityForShowdown) || communityForShowdown.length !== 5) {
+          rejectStateInvalid("showdown_requires_5_community", { communityDealt: nextState.communityDealt });
         }
         const showdownUserIds = seatUserIdsInOrder.filter((userId) => !nextState.foldedByUserId?.[userId]);
         if (showdownUserIds.length === 0) {
@@ -639,7 +640,7 @@ export async function handler(event) {
         let showdown;
         try {
           showdown = computeShowdown({
-            community: derivedCommunity,
+            community: communityForShowdown,
             players: showdownUserIds.map((userId) => ({
               userId,
               holeCards: showdownHoleCards.holeCardsByUserId[userId],
