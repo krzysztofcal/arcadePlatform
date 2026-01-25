@@ -18,7 +18,10 @@ const assertPlayerDetails = (result, userId) => {
 const runOracle = ({ name, community, players, winners }) => {
   const result = computeShowdown({ community, players });
   assert.deepEqual(sortIds(result.winners), sortIds(winners), `oracle:${name}`);
-  winners.forEach((userId) => assertPlayerDetails(result, userId));
+  players.forEach((player) => assertPlayerDetails(result, player.userId));
+  if (name === "board_straight_tie") {
+    assert.equal(result.handsByUserId.u1.key, result.handsByUserId.u2.key);
+  }
 };
 
 const runInvalidInputTests = () => {
