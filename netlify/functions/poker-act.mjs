@@ -110,6 +110,15 @@ const hashCardKey = (card) => {
 
 const takeList = (values, maxLen = 12) => (Array.isArray(values) ? values.slice(0, maxLen) : []);
 
+const maybeRedactShowdownForViewer = (state, ctx) => {
+  if (typeof redactShowdownForViewer !== "function") return state;
+  try {
+    return redactShowdownForViewer(state, ctx);
+  } catch {
+    return state;
+  }
+};
+
 const loadHandHoleCardsForShowdown = async (tx, { tableId, handId, userIds, klog }) => {
   if (!Array.isArray(userIds) || userIds.length === 0) {
     throw new Error("state_invalid");
@@ -478,7 +487,7 @@ export async function handler(event) {
           });
           throw makeError(409, "state_invalid");
         }
-        const safeState = redactShowdownForViewer(currentState, {
+        const safeState = maybeRedactShowdownForViewer(currentState, {
           viewerUserId: auth.userId,
           activeUserIds,
         });
@@ -526,7 +535,7 @@ export async function handler(event) {
           });
           throw makeError(409, "state_invalid");
         }
-        const safeState = redactShowdownForViewer(currentState, {
+        const safeState = maybeRedactShowdownForViewer(currentState, {
           viewerUserId: auth.userId,
           activeUserIds,
         });
@@ -669,12 +678,50 @@ export async function handler(event) {
         throw makeError(409, "state_invalid");
       }
 
-      const updateRows = await tx.unsafe(
-        "update public.poker_state set version = version + 1, state = $2::jsonb, updated_at = now() where table_id = $1 returning version;",
-        [tableId, JSON.stringify(updatedState)]
-      );
+      let updateRows;
+      if (showdownEvaluated) {
+        updateRows = await tx.unsafe(
+          "update public.poker_state set version = version + 1, state = $2::jsonb, updated_at = now() where table_id = $1 and (state->'showdown') is null returning version;",
+          [tableId, JSON.stringify(updatedState)]
+        );
+      } else {
+        updateRows = await tx.unsafe(
+          "update public.poker_state set version = version + 1, state = $2::jsonb, updated_at = now() where table_id = $1 returning version;",
+          [tableId, JSON.stringify(updatedState)]
+        );
+      }
       const newVersion = Number(updateRows?.[0]?.version);
       if (!Number.isFinite(newVersion)) {
+        if (showdownEvaluated) {
+          const latestRows = await tx.unsafe(
+            "select version, state from public.poker_state where table_id = $1 limit 1;",
+            [tableId]
+          );
+          const latest = latestRows?.[0] || null;
+          const latestVersion = Number(latest?.version);
+          const latestState = normalizeJsonState(latest?.state);
+          if (!Number.isFinite(latestVersion) || !latestState || !isPlainObject(latestState)) {
+            klog("poker_act_rejected", {
+              tableId,
+              userId: auth.userId,
+              reason: "state_invalid",
+              phase: updatedState.phase,
+            });
+            throw makeError(409, "state_invalid");
+          }
+          const safeLatest = maybeRedactShowdownForViewer(latestState, {
+            viewerUserId: auth.userId,
+            activeUserIds,
+          });
+          return {
+            tableId,
+            version: latestVersion,
+            state: withoutPrivateState(safeLatest),
+            myHoleCards: [],
+            events: [],
+            replayed: true,
+          };
+        }
         klog("poker_act_rejected", {
           tableId,
           userId: auth.userId,
@@ -712,7 +759,7 @@ export async function handler(event) {
         });
       }
 
-      const safeState = redactShowdownForViewer(updatedState, {
+      const safeState = maybeRedactShowdownForViewer(updatedState, {
         viewerUserId: auth.userId,
         activeUserIds,
       });

@@ -6,6 +6,15 @@ import { isValidUuid } from "./_shared/poker-utils.mjs";
 
 const isActionPhase = (phase) => phase === "PREFLOP" || phase === "FLOP" || phase === "TURN" || phase === "RIVER";
 
+const maybeRedactShowdownForViewer = (state, ctx) => {
+  if (typeof redactShowdownForViewer !== "function") return state;
+  try {
+    return redactShowdownForViewer(state, ctx);
+  } catch {
+    return state;
+  }
+};
+
 const normalizeSeatUserIds = (seats) => {
   if (!Array.isArray(seats)) return [];
   return seats.map((seat) => seat?.userId).filter((userId) => typeof userId === "string" && userId.trim());
@@ -150,7 +159,7 @@ export async function handler(event) {
     const table = result.table;
     const seats = result.seats;
     const stateRow = result.stateRow;
-    const safeState = redactShowdownForViewer(result.currentState, {
+    const safeState = maybeRedactShowdownForViewer(result.currentState, {
       viewerUserId: auth?.valid ? auth.userId : null,
       activeUserIds: result.activeUserIds,
     });
