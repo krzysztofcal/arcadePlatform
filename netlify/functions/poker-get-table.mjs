@@ -7,9 +7,11 @@ const isActionPhase = (phase) => phase === "PREFLOP" || phase === "FLOP" || phas
 
 const redactShowdownForViewer = (state, { viewerUserId, activeUserIds }) => {
   if (!state || state.phase !== "SHOWDOWN" || !state.showdown) return state;
-  if (!viewerUserId) return { ...state, showdown: { ...state.showdown, revealedHoleCardsByUserId: {} } };
+  const safeViewerId = typeof viewerUserId === "string" ? viewerUserId.trim() : "";
+  if (!safeViewerId) return { ...state, showdown: { ...state.showdown, revealedHoleCardsByUserId: {} } };
   if (!Array.isArray(activeUserIds)) return { ...state, showdown: { ...state.showdown, revealedHoleCardsByUserId: {} } };
-  if (!activeUserIds.includes(viewerUserId)) {
+  const activeList = activeUserIds.map((id) => (typeof id === "string" ? id.trim() : "")).filter(Boolean);
+  if (!activeList.includes(safeViewerId)) {
     return { ...state, showdown: { ...state.showdown, revealedHoleCardsByUserId: {} } };
   }
   return state;

@@ -95,7 +95,8 @@ const makeHandler = (queries, storedState, userId, options = {}) =>
             return [];
           }
           if (text.includes("from public.poker_state")) {
-            return [{ version: storedState.version, state: JSON.parse(storedState.value) }];
+            const version = options.stateVersionOverride ?? storedState.version;
+            return [{ version, state: JSON.parse(storedState.value) }];
           }
           if (text.includes("from public.poker_hole_cards")) {
             if (options.holeCardsError) throw options.holeCardsError;
@@ -479,6 +480,24 @@ const run = async () => {
   });
   assert.equal(invalidSeatResponse.statusCode, 409);
   assert.equal(JSON.parse(invalidSeatResponse.body).error, "state_invalid");
+
+  const showdownStateWithResult = {
+    ...showdownState,
+    showdown: expectedShowdown,
+  };
+  const invalidVersionHandler = makeHandler(
+    showdownQueries,
+    { value: JSON.stringify(showdownStateWithResult), version: 12 },
+    "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    { stateVersionOverride: "bad-version" }
+  );
+  const invalidVersionResponse = await invalidVersionHandler({
+    httpMethod: "POST",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    body: JSON.stringify({ tableId, requestId: "req-showdown-bad-version", action: { type: "CHECK" } }),
+  });
+  assert.equal(invalidVersionResponse.statusCode, 409);
+  assert.equal(JSON.parse(invalidVersionResponse.body).error, "state_invalid");
 
 };
 

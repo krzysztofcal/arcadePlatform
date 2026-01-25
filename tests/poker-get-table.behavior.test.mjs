@@ -245,6 +245,24 @@ const run = async () => {
   const redactedPayload = JSON.parse(redactedResponse.body);
   assert.ok(redactedPayload.state.state.showdown);
   assert.deepEqual(redactedPayload.state.state.showdown.revealedHoleCardsByUserId, {});
+
+  const seatedResponse = await makeHandler([], { value: JSON.stringify(showdownState), version: 9 }, "user-1")({
+    httpMethod: "GET",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    queryStringParameters: { tableId },
+  });
+  assert.equal(seatedResponse.statusCode, 200);
+  const seatedPayload = JSON.parse(seatedResponse.body);
+  assert.ok(seatedPayload.state.state.showdown.revealedHoleCardsByUserId["user-1"]);
+
+  const blankAuthResponse = await makeHandler([], { value: JSON.stringify(showdownState), version: 10 }, "   ")({
+    httpMethod: "GET",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    queryStringParameters: { tableId },
+  });
+  assert.equal(blankAuthResponse.statusCode, 200);
+  const blankAuthPayload = JSON.parse(blankAuthResponse.body);
+  assert.deepEqual(blankAuthPayload.state.state.showdown.revealedHoleCardsByUserId, {});
 };
 
 await run();
