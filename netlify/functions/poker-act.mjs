@@ -265,6 +265,17 @@ export async function handler(event) {
         throw makeError(409, "state_invalid");
       }
 
+      if (currentState?.phase === "INIT") {
+        klog("poker_act_rejected", {
+          tableId,
+          userId: auth.userId,
+          reason: "hand_not_started",
+          phase: currentState.phase,
+          actionType: actionParsed?.value?.type ?? null,
+        });
+        throw makeError(409, "hand_not_started");
+      }
+
       const rejectStateInvalid = (code, extra) => {
         klog("poker_act_rejected", {
           tableId,
