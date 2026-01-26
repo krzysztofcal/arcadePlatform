@@ -119,7 +119,10 @@ export async function handler(event) {
           ? activeSeatRows.map((row) => row?.user_id).filter(Boolean)
           : [];
         const seatRowsActiveUserIds = Array.isArray(seatRows)
-          ? seatRows.map((row) => (row?.status === "ACTIVE" ? row?.user_id : null)).filter(Boolean)
+          ? seatRows
+              .filter((row) => row?.status === "ACTIVE")
+              .map((row) => row?.user_id)
+              .filter(Boolean)
           : [];
         const stateSeatUserIds = normalizeSeatUserIds(currentState.seats);
         if (stateSeatUserIds.length <= 0) {
@@ -145,7 +148,7 @@ export async function handler(event) {
         if (candidateActiveUserIds.length) {
           const overlap = candidateActiveUserIds.filter((userId) => stateSeatUserIds.includes(userId));
           if (overlap.length) {
-            effectiveUserIdsForHoleCards = overlap;
+            effectiveUserIdsForHoleCards = overlap.includes(auth.userId) ? overlap : [...overlap, auth.userId];
           }
         }
         try {
