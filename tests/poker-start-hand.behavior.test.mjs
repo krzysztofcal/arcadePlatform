@@ -6,6 +6,7 @@ import {
   isPlainObject,
   isStateStorageValid,
   normalizeJsonState,
+  upgradeLegacyInitStateWithSeats,
   withoutPrivateState,
 } from "../netlify/functions/_shared/poker-state-utils.mjs";
 import { loadPokerHandler } from "./helpers/poker-test-helpers.mjs";
@@ -36,6 +37,7 @@ const makeHandler = (queries, storedState) =>
     verifySupabaseJwt: async () => ({ valid: true, userId }),
     isValidUuid: () => true,
     normalizeJsonState,
+    upgradeLegacyInitStateWithSeats,
     withoutPrivateState,
     beginSql: async (fn) =>
       fn({
@@ -127,8 +129,8 @@ const runHappyPath = async () => {
   assert.ok(!response.body.includes("\"handSeed\""));
 
   const insertHoleCardsIndex = queries.findIndex((q) => q.query.toLowerCase().includes("insert into public.poker_hole_cards"));
-  const updateCall = queries.find((q) => q.query.toLowerCase().includes("update public.poker_state"));
-  const updateIndex = queries.findIndex((q) => q.query.toLowerCase().includes("update public.poker_state"));
+  const updateCall = queries.find((q) => q.query.toLowerCase().includes("version = version + 1"));
+  const updateIndex = queries.findIndex((q) => q.query.toLowerCase().includes("version = version + 1"));
   assert.ok(updateCall, "expected update to poker_state");
   assert.ok(insertHoleCardsIndex !== -1, "expected insert into poker_hole_cards");
   assert.ok(insertHoleCardsIndex < updateIndex, "expected hole cards insert before state update");
@@ -223,6 +225,7 @@ const runInvalidDeal = async () => {
     verifySupabaseJwt: async () => ({ valid: true, userId }),
     isValidUuid: () => true,
     normalizeJsonState,
+    upgradeLegacyInitStateWithSeats,
     withoutPrivateState,
     beginSql: async (fn) =>
       fn({
@@ -266,7 +269,7 @@ const runInvalidDeal = async () => {
   const payload = JSON.parse(response.body);
   assert.equal(payload.error, "state_invalid");
   assert.ok(!queries.some((q) => q.query.toLowerCase().includes("insert into public.poker_hole_cards")));
-  assert.ok(!queries.some((q) => q.query.toLowerCase().includes("update public.poker_state")));
+  assert.ok(!queries.some((q) => q.query.toLowerCase().includes("version = version + 1")));
 };
 
 const runMissingHoleCardsTable = async () => {
@@ -289,7 +292,7 @@ const runMissingHoleCardsTable = async () => {
   assert.equal(response.statusCode, 409);
   const payload = JSON.parse(response.body);
   assert.equal(payload.error, "state_invalid");
-  assert.ok(!queries.some((q) => q.query.toLowerCase().includes("update public.poker_state")));
+  assert.ok(!queries.some((q) => q.query.toLowerCase().includes("version = version + 1")));
   assert.ok(!queries.some((q) => q.query.toLowerCase().includes("insert into public.poker_actions")));
 };
 

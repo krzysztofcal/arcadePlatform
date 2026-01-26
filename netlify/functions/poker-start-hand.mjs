@@ -3,7 +3,14 @@ import { baseHeaders, beginSql, corsHeaders, extractBearerToken, klog, verifySup
 import { isValidTwoCards } from "./_shared/poker-cards-utils.mjs";
 import { dealHoleCards } from "./_shared/poker-engine.mjs";
 import { deriveDeck } from "./_shared/poker-deal-deterministic.mjs";
-import { getRng, isPlainObject, isStateStorageValid, normalizeJsonState, withoutPrivateState } from "./_shared/poker-state-utils.mjs";
+import {
+  getRng,
+  isPlainObject,
+  isStateStorageValid,
+  normalizeJsonState,
+  upgradeLegacyInitStateWithSeats,
+  withoutPrivateState,
+} from "./_shared/poker-state-utils.mjs";
 import { isValidUuid } from "./_shared/poker-utils.mjs";
 
 const parseBody = (body) => {
@@ -119,7 +126,7 @@ export async function handler(event) {
         throw new Error("poker_state_missing");
       }
 
-      const currentState = normalizeJsonState(stateRow.state);
+      let currentState = normalizeJsonState(stateRow.state);
 
       const seatRows = await tx.unsafe(
         "select user_id, seat_no from public.poker_seats where table_id = $1 and status = 'ACTIVE' order by seat_no asc;",
@@ -132,6 +139,29 @@ export async function handler(event) {
       }
       if (!validSeats.some((seat) => seat.user_id === auth.userId)) {
         throw makeError(403, "not_allowed");
+      }
+      if (currentState?.phase === "INIT") {
+        const seatsSorted = validSeats.map((seat) => ({ userId: seat.user_id, seatNo: seat.seat_no }));
+        const hasAllUserKeys = (obj) =>
+          isPlainObject(obj) && seatsSorted.every((seat) => Object.prototype.hasOwnProperty.call(obj, seat.userId));
+        const upgradedState = upgradeLegacyInitStateWithSeats(currentState, seatsSorted);
+        const isLegacy =
+          upgradedState?.phase === "INIT" &&
+          (!Number.isInteger(currentState.communityDealt) ||
+            !Number.isInteger(currentState.dealerSeatNo) ||
+            typeof currentState.turnUserId !== "string" ||
+            !currentState.turnUserId.trim() ||
+            !hasAllUserKeys(currentState.toCallByUserId) ||
+            !hasAllUserKeys(currentState.betThisRoundByUserId) ||
+            !hasAllUserKeys(currentState.actedThisRoundByUserId) ||
+            !hasAllUserKeys(currentState.foldedByUserId));
+        if (isLegacy) {
+          await tx.unsafe("update public.poker_state set state = $2::jsonb, updated_at = now() where table_id = $1;", [
+            tableId,
+            JSON.stringify(upgradedState),
+          ]);
+        }
+        currentState = upgradedState;
       }
 
       const sameRequest =
