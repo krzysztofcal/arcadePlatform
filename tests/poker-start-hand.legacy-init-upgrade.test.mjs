@@ -92,14 +92,20 @@ const run = async () => {
   assert.equal(response.statusCode, 200);
   assert.equal(payload.ok, true);
 
-  const upgradeUpdate = updates.find((entry) => entry.state?.phase === "INIT");
+  const upgradeUpdate = updates.find(
+    (entry) =>
+      entry.state?.phase === "INIT" && !String(entry.query).toLowerCase().includes("version = version + 1")
+  );
   assert.ok(upgradeUpdate, "expected INIT upgrade update");
   const upgradedState = upgradeUpdate.state;
   assert.ok(Array.isArray(upgradedState.community));
+  assert.equal(Number.isInteger(upgradedState.communityDealt), true);
   assert.equal(upgradedState.toCallByUserId.u1, 0);
   assert.equal(upgradedState.toCallByUserId.u2, 0);
   assert.equal(upgradedState.dealerSeatNo, 0);
   assert.equal(upgradedState.turnUserId, "u1");
+  assert.equal(typeof upgradedState.turnUserId, "string");
+  assert.ok(upgradedState.turnUserId.trim());
   assert.deepEqual(Object.keys(upgradedState.toCallByUserId).sort(), ["u1", "u2"]);
 };
 

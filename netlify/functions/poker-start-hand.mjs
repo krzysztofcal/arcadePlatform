@@ -142,16 +142,19 @@ export async function handler(event) {
       }
       if (currentState?.phase === "INIT") {
         const seatsSorted = validSeats.map((seat) => ({ userId: seat.user_id, seatNo: seat.seat_no }));
+        const hasAllUserKeys = (obj) =>
+          isPlainObject(obj) && seatsSorted.every((seat) => Object.prototype.hasOwnProperty.call(obj, seat.userId));
         const upgradedState = upgradeLegacyInitStateWithSeats(currentState, seatsSorted);
         const isLegacy =
           upgradedState?.phase === "INIT" &&
-          (!isPlainObject(currentState.toCallByUserId) ||
-            !isPlainObject(currentState.betThisRoundByUserId) ||
-            !isPlainObject(currentState.actedThisRoundByUserId) ||
-            !isPlainObject(currentState.foldedByUserId) ||
-            !Number.isInteger(currentState.communityDealt) ||
+          (!Number.isInteger(currentState.communityDealt) ||
             !Number.isInteger(currentState.dealerSeatNo) ||
-            typeof currentState.turnUserId !== "string");
+            typeof currentState.turnUserId !== "string" ||
+            !currentState.turnUserId.trim() ||
+            !hasAllUserKeys(currentState.toCallByUserId) ||
+            !hasAllUserKeys(currentState.betThisRoundByUserId) ||
+            !hasAllUserKeys(currentState.actedThisRoundByUserId) ||
+            !hasAllUserKeys(currentState.foldedByUserId));
         if (isLegacy) {
           await tx.unsafe("update public.poker_state set state = $2::jsonb, updated_at = now() where table_id = $1;", [
             tableId,
