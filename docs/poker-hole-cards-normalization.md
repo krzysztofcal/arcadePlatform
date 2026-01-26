@@ -49,4 +49,10 @@ If you want CI coverage, add a workflow that only runs via `workflow_dispatch` (
    npm run poker:smoke
    ```
 
+   If `BASE` points to production, run with an explicit opt-in:
+
+   ```bash
+   POKER_SMOKE_ALLOW_PROD=1 npm run poker:smoke
+   ```
+
 The script creates a table, seats two users, starts a hand, validates `poker-get-table`, performs one `CHECK`, and prints a UI link plus the final table ID for manual inspection.

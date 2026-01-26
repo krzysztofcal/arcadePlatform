@@ -19,6 +19,12 @@ const base = process.env.BASE;
 const origin = process.env.ORIGIN;
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
+const allowProd = process.env.POKER_SMOKE_ALLOW_PROD === "1";
+
+if (typeof base === "string" && base.includes("play.kcswh.pl") && !allowProd) {
+  console.error("Refusing to run smoke test against production. Set POKER_SMOKE_ALLOW_PROD=1 to proceed.");
+  process.exit(1);
+}
 
 const requestId = (prefix) => `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
 
