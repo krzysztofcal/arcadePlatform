@@ -99,6 +99,28 @@ const run = async () => {
   assert.equal(JSON.stringify(happyPayload).includes('"deck"'), false);
   assert.equal(JSON.stringify(happyPayload).includes('"handSeed"'), false);
 
+  const stringCardResponse = await makeHandler([], storedState, "user-1", {
+    holeCardsByUserId: {
+      "user-1": JSON.stringify(defaultHoleCards["user-1"]),
+      "user-2": JSON.stringify(defaultHoleCards["user-2"]),
+      "user-3": JSON.stringify(defaultHoleCards["user-3"]),
+    },
+  })({
+    httpMethod: "GET",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    queryStringParameters: { tableId },
+  });
+  assert.equal(stringCardResponse.statusCode, 200);
+  const stringCardPayload = JSON.parse(stringCardResponse.body);
+  assert.equal(stringCardPayload.ok, true);
+  assert.ok(Array.isArray(stringCardPayload.myHoleCards));
+  assert.equal(stringCardPayload.myHoleCards.length, 2);
+  assert.equal(stringCardPayload.state.state.deck, undefined);
+  assert.equal(stringCardPayload.state.state.holeCardsByUserId, undefined);
+  assert.equal(stringCardPayload.holeCardsByUserId, undefined);
+  assert.equal(JSON.stringify(stringCardPayload).includes("holeCardsByUserId"), false);
+  assert.equal(JSON.stringify(stringCardPayload).includes('"deck"'), false);
+
   const missingTableError = new Error("missing table");
   missingTableError.code = "42P01";
   const missingTableResponse = await makeHandler([], storedState, "user-1", {

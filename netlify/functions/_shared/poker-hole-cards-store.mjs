@@ -7,6 +7,19 @@ const isHoleCardsTableMissing = (error) => {
   return message.includes("poker_hole_cards") && message.includes("does not exist");
 };
 
+const normalizeCards = (value) => {
+  if (Array.isArray(value)) return value;
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? parsed : null;
+    } catch {
+      return null;
+    }
+  }
+  return null;
+};
+
 const loadHoleCardsByUserId = async (tx, { tableId, handId, activeUserIds }) => {
   if (!Array.isArray(activeUserIds) || activeUserIds.length === 0) {
     throw new Error("state_invalid");
@@ -21,7 +34,7 @@ const loadHoleCardsByUserId = async (tx, { tableId, handId, activeUserIds }) => 
   for (const row of list) {
     const userId = row?.user_id;
     if (!activeSet.has(userId)) continue;
-    map[userId] = row.cards;
+    map[userId] = normalizeCards(row.cards);
   }
   for (const userId of activeUserIds) {
     const cards = map[userId];
