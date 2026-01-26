@@ -8,7 +8,7 @@ import {
   isPlainObject,
   isStateStorageValid,
   normalizeJsonState,
-  upgradeLegacyInitState,
+  upgradeLegacyInitStateWithSeats,
   withoutPrivateState,
 } from "./_shared/poker-state-utils.mjs";
 import { isValidUuid } from "./_shared/poker-utils.mjs";
@@ -127,16 +127,6 @@ export async function handler(event) {
       }
 
       let currentState = normalizeJsonState(stateRow.state);
-      if (currentState.phase === "INIT") {
-        const upgradedState = upgradeLegacyInitState(currentState);
-        if (JSON.stringify(upgradedState) !== JSON.stringify(currentState)) {
-          await tx.unsafe("update public.poker_state set state = $2::jsonb, updated_at = now() where table_id = $1;", [
-            tableId,
-            JSON.stringify(upgradedState),
-          ]);
-        }
-        currentState = upgradedState;
-      }
 
       const seatRows = await tx.unsafe(
         "select user_id, seat_no from public.poker_seats where table_id = $1 and status = 'ACTIVE' order by seat_no asc;",
@@ -149,6 +139,26 @@ export async function handler(event) {
       }
       if (!validSeats.some((seat) => seat.user_id === auth.userId)) {
         throw makeError(403, "not_allowed");
+      }
+      if (currentState?.phase === "INIT") {
+        const seatsSorted = validSeats.map((seat) => ({ userId: seat.user_id, seatNo: seat.seat_no }));
+        const upgradedState = upgradeLegacyInitStateWithSeats(currentState, seatsSorted);
+        const isLegacy =
+          upgradedState?.phase === "INIT" &&
+          (!isPlainObject(currentState.toCallByUserId) ||
+            !isPlainObject(currentState.betThisRoundByUserId) ||
+            !isPlainObject(currentState.actedThisRoundByUserId) ||
+            !isPlainObject(currentState.foldedByUserId) ||
+            !Number.isInteger(currentState.communityDealt) ||
+            !Number.isInteger(currentState.dealerSeatNo) ||
+            typeof currentState.turnUserId !== "string");
+        if (isLegacy) {
+          await tx.unsafe("update public.poker_state set state = $2::jsonb, updated_at = now() where table_id = $1;", [
+            tableId,
+            JSON.stringify(upgradedState),
+          ]);
+        }
+        currentState = upgradedState;
       }
 
       const sameRequest =

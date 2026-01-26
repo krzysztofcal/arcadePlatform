@@ -6,7 +6,7 @@ import {
   isPlainObject,
   isStateStorageValid,
   normalizeJsonState,
-  upgradeLegacyInitState,
+  upgradeLegacyInitStateWithSeats,
   withoutPrivateState,
 } from "../netlify/functions/_shared/poker-state-utils.mjs";
 import { loadPokerHandler } from "./helpers/poker-test-helpers.mjs";
@@ -37,7 +37,7 @@ const makeHandler = (queries, storedState) =>
     verifySupabaseJwt: async () => ({ valid: true, userId }),
     isValidUuid: () => true,
     normalizeJsonState,
-    upgradeLegacyInitState,
+    upgradeLegacyInitStateWithSeats,
     withoutPrivateState,
     beginSql: async (fn) =>
       fn({
@@ -225,7 +225,7 @@ const runInvalidDeal = async () => {
     verifySupabaseJwt: async () => ({ valid: true, userId }),
     isValidUuid: () => true,
     normalizeJsonState,
-    upgradeLegacyInitState,
+    upgradeLegacyInitStateWithSeats,
     withoutPrivateState,
     beginSql: async (fn) =>
       fn({
