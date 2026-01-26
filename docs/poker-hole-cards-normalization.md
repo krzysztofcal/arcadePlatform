@@ -35,6 +35,7 @@ If you want CI coverage, add a workflow that only runs via `workflow_dispatch` (
 1. Add env vars to `./.local/poker-test.env`:
    - `BASE`, `ORIGIN`, `SUPABASE_URL`, `SUPABASE_ANON_KEY`
    - `U1_EMAIL`, `U1_PASS`, `U2_EMAIL`, `U2_PASS`
+   - Requires Node 18+ (global `fetch`).
 2. Load env:
 
    ```bash

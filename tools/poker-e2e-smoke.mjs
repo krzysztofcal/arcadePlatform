@@ -21,7 +21,15 @@ const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
 const allowProd = process.env.POKER_SMOKE_ALLOW_PROD === "1";
 
-if (typeof base === "string" && base.includes("play.kcswh.pl") && !allowProd) {
+let baseHost = null;
+try {
+  baseHost = new URL(base).hostname;
+} catch {
+  console.error(`Invalid BASE url: ${base}`);
+  process.exit(1);
+}
+
+if (baseHost === "play.kcswh.pl" && !allowProd) {
   console.error("Refusing to run smoke test against production. Set POKER_SMOKE_ALLOW_PROD=1 to proceed.");
   process.exit(1);
 }
