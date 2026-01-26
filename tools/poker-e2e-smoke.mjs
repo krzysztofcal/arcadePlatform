@@ -15,6 +15,8 @@ if (missing.length) {
   process.exit(1);
 }
 
+const FETCH_TIMEOUT_MS = 15000;
+
 const base = process.env.BASE;
 const origin = process.env.ORIGIN;
 const supabaseUrl = process.env.SUPABASE_URL;
@@ -48,10 +50,21 @@ const parseJson = (text) => {
 };
 
 const fetchJson = async (url, options) => {
-  const response = await fetch(url, options);
-  const text = await response.text();
-  const json = parseJson(text);
-  return { response, text, json };
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  try {
+    const response = await fetch(url, { ...options, signal: controller.signal });
+    const text = await response.text();
+    const json = parseJson(text);
+    return { response, text, json };
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      throw new Error(`fetch_timeout:${FETCH_TIMEOUT_MS}ms`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 };
 
 const decodeUserId = (token) => {
