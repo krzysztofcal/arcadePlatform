@@ -42,7 +42,7 @@ const KNOWN_ERROR_CODES = new Set([
 const toErrorPayload = (err) => {
   if (typeof err?.code === "string") return { code: err.code };
   if (typeof err?.message === "string" && KNOWN_ERROR_CODES.has(err.message)) return { code: err.message };
-  return { code: "internal" };
+  return { code: "server_error" };
 };
 
 const parseRequestId = (value) => {
@@ -70,10 +70,10 @@ const isHoleCardsTableMissing = (error) => {
 export async function handler(event) {
   const origin = event.headers?.origin || event.headers?.Origin;
   const cors = corsHeaders(origin);
-  const mergeHeaders = (next) => ({ ...baseHeaders(), ...(next || {}) });
+  const headersWithCors = () => ({ ...baseHeaders(), ...(cors || {}) });
   const respondError = (statusCode, code, extra) => ({
     statusCode,
-    headers: mergeHeaders(cors),
+    headers: headersWithCors(),
     body: JSON.stringify({ error: code, ...(extra || {}) }),
   });
   if (!cors) {
@@ -90,31 +90,31 @@ export async function handler(event) {
     };
   }
   if (event.httpMethod === "OPTIONS") {
-    return { statusCode: 204, headers: mergeHeaders(cors), body: "" };
+    return { statusCode: 204, headers: headersWithCors(), body: "" };
   }
   if (event.httpMethod !== "POST") {
-    return { statusCode: 405, headers: mergeHeaders(cors), body: JSON.stringify({ error: "method_not_allowed" }) };
+    return { statusCode: 405, headers: headersWithCors(), body: JSON.stringify({ error: "method_not_allowed" }) };
   }
 
   const parsed = parseBody(event.body);
   if (!parsed.ok) {
-    return { statusCode: 400, headers: mergeHeaders(cors), body: JSON.stringify({ error: "invalid_json" }) };
+    return { statusCode: 400, headers: headersWithCors(), body: JSON.stringify({ error: "invalid_json" }) };
   }
 
   const payload = parsed.value ?? {};
   if (payload && !isPlainObject(payload)) {
-    return { statusCode: 400, headers: mergeHeaders(cors), body: JSON.stringify({ error: "invalid_payload" }) };
+    return { statusCode: 400, headers: headersWithCors(), body: JSON.stringify({ error: "invalid_payload" }) };
   }
 
   const tableIdValue = payload?.tableId;
   const tableId = typeof tableIdValue === "string" ? tableIdValue.trim() : "";
   if (!tableId || !isValidUuid(tableId)) {
-    return { statusCode: 400, headers: mergeHeaders(cors), body: JSON.stringify({ error: "invalid_table_id" }) };
+    return { statusCode: 400, headers: headersWithCors(), body: JSON.stringify({ error: "invalid_table_id" }) };
   }
 
   const requestIdParsed = parseRequestId(payload?.requestId);
   if (!requestIdParsed.ok) {
-    return { statusCode: 400, headers: mergeHeaders(cors), body: JSON.stringify({ error: "invalid_request_id" }) };
+    return { statusCode: 400, headers: headersWithCors(), body: JSON.stringify({ error: "invalid_request_id" }) };
   }
 
   const token = extractBearerToken(event.headers);
@@ -122,7 +122,7 @@ export async function handler(event) {
   if (!auth.valid || !auth.userId) {
     return {
       statusCode: 401,
-      headers: mergeHeaders(cors),
+      headers: headersWithCors(),
       body: JSON.stringify({ error: "unauthorized", reason: auth.reason }),
     };
   }
@@ -357,7 +357,7 @@ export async function handler(event) {
 
     return {
       statusCode: 200,
-      headers: mergeHeaders(cors),
+      headers: headersWithCors(),
       body: JSON.stringify({
         ok: true,
         tableId: result.tableId,
