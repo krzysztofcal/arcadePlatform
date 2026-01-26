@@ -117,9 +117,25 @@ const run = async () => {
   assert.equal(stringCardPayload.myHoleCards.length, 2);
   assert.equal(stringCardPayload.state.state.deck, undefined);
   assert.equal(stringCardPayload.state.state.holeCardsByUserId, undefined);
+  assert.equal(stringCardPayload.state.state.handSeed, undefined);
   assert.equal(stringCardPayload.holeCardsByUserId, undefined);
   assert.equal(JSON.stringify(stringCardPayload).includes("holeCardsByUserId"), false);
   assert.equal(JSON.stringify(stringCardPayload).includes('"deck"'), false);
+  assert.equal(JSON.stringify(stringCardPayload).includes('"handSeed"'), false);
+
+  const malformedCardResponse = await makeHandler([], storedState, "user-1", {
+    holeCardsByUserId: {
+      "user-1": JSON.stringify(defaultHoleCards["user-1"]),
+      "user-2": "not-json",
+      "user-3": JSON.stringify(defaultHoleCards["user-3"]),
+    },
+  })({
+    httpMethod: "GET",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    queryStringParameters: { tableId },
+  });
+  assert.equal(malformedCardResponse.statusCode, 409);
+  assert.equal(JSON.parse(malformedCardResponse.body).error, "state_invalid");
 
   const missingTableError = new Error("missing table");
   missingTableError.code = "42P01";

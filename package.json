@@ -20,7 +20,8 @@
     "test:chips": "node tests/chips/chips.integration.test.mjs",
     "test:cli": "node scripts/test-cli.mjs",
     "serve:xp": "XP_DEBUG=1 node scripts/serve-award-xp.mjs",
-    "wire:xp": "node scripts/wire-xp.mjs"
+    "wire:xp": "node scripts/wire-xp.mjs",
+    "poker:smoke": "node tools/poker-e2e-smoke.mjs"
   },
   "dependencies": {
     "postgres": "^3.4.5"
