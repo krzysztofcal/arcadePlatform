@@ -36,7 +36,6 @@ const KNOWN_ERROR_CODES = new Set([
   "not_enough_players",
   "state_invalid",
   "already_in_hand",
-  "unauthorized",
 ]);
 
 const toErrorPayload = (err) => {
@@ -370,9 +369,9 @@ export async function handler(event) {
       }),
     };
   } catch (error) {
-    const status = Number.isInteger(error?.status) ? error.status : 500;
-    const payload = toErrorPayload(error);
-    const code = payload.code;
+    const isAppError = Number.isInteger(error?.status) && typeof error?.code === "string";
+    const status = isAppError ? error.status : 500;
+    const code = isAppError ? error.code : toErrorPayload(error).code;
     klog("poker_start_hand_error", { tableId, userId: auth?.userId ?? null, status, code });
     return respondError(status, code);
   }
