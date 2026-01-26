@@ -118,7 +118,11 @@ const run = async () => {
       path: "/.netlify/functions/poker-create-table",
       method: "POST",
       token: u1Token,
-      body: {},
+      body: {
+        requestId: requestId("create"),
+        stakes: { sb: 1, bb: 2 },
+        maxPlayers: 6,
+      },
     });
     assertResponse(create.response, create.text, 200, "poker-create-table");
     const tableId = create.json?.tableId;
@@ -231,10 +235,10 @@ const run = async () => {
     assertResponse(tableU1After.response, tableU1After.text, 200, "poker-get-table u1 post-act");
     const afterPayload = tableU1After.json;
     assertOk(afterPayload?.ok === true, "poker-get-table u1 post-act ok:false");
+    const v0 = Number(tableU1?.state?.version);
+    const v1 = Number(afterPayload?.state?.version);
     assertOk(
-      Number.isFinite(afterPayload?.state?.version) &&
-        Number.isFinite(tableU1?.state?.version) &&
-        afterPayload.state.version > tableU1.state.version,
+      Number.isFinite(v0) && Number.isFinite(v1) && v1 > v0,
       "poker-get-table u1 post-act version did not increase"
     );
     assertOk(phaseAllowed.has(afterPayload?.state?.state?.phase), "poker-get-table u1 post-act unexpected phase");
@@ -251,7 +255,7 @@ const run = async () => {
       throw heartbeatError;
     }
 
-    const uiLink = `${origin.replace(/\\/$/, "")}/poker/table.html?tableId=${encodeURIComponent(tableId)}`;
+    const uiLink = `${origin.replace(/\/$/, "")}/poker/table.html?tableId=${encodeURIComponent(tableId)}`;
     console.log(`Smoke test complete. tableId=${tableId}`);
     console.log(`UI: ${uiLink}`);
   } finally {
