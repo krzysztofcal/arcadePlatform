@@ -346,7 +346,8 @@ export async function handler(event) {
         "select user_id from public.poker_seats where table_id = $1 and status = 'ACTIVE' order by seat_no asc;",
         [tableId]
       );
-      const seatUserIdsInOrder = Array.isArray(activeSeatRows)
+      const seatUserIdsInOrder = normalizeSeatOrderFromState(currentState.seats);
+      const dbActiveUserIds = Array.isArray(activeSeatRows)
         ? activeSeatRows.map((row) => row?.user_id).filter(Boolean)
         : [];
       const activeUserIds = seatUserIdsInOrder.slice();
@@ -372,13 +373,13 @@ export async function handler(event) {
       if (seatUserIdsInOrder.length <= 0) {
         rejectStateInvalid("no_active_seats");
       }
-      const stateSeatUserIdsInOrder = normalizeSeatOrderFromState(currentState.seats);
-      if (!arraysEqual(seatUserIdsInOrder, stateSeatUserIdsInOrder)) {
-        rejectStateInvalid("seat_order_mismatch", {
-          dbSeatCount: seatUserIdsInOrder.length,
-          stateSeatCount: stateSeatUserIdsInOrder.length,
-          dbSeatIds: takeList(seatUserIdsInOrder.map(hashUserId)),
-          stateSeatIds: takeList(stateSeatUserIdsInOrder.map(hashUserId)),
+      if (!arraysEqual(dbActiveUserIds, seatUserIdsInOrder)) {
+        klog("poker_act_active_mismatch", {
+          tableId,
+          dbSeatCount: dbActiveUserIds.length,
+          stateSeatCount: seatUserIdsInOrder.length,
+          dbSeatIds: takeList(dbActiveUserIds.map(hashUserId)),
+          stateSeatIds: takeList(seatUserIdsInOrder.map(hashUserId)),
         });
       }
       let derivedCommunity;

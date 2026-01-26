@@ -119,14 +119,24 @@ export async function handler(event) {
           ? activeSeatRows.map((row) => row?.user_id).filter(Boolean)
           : [];
         const stateSeatUserIds = normalizeSeatUserIds(currentState.seats);
-        if (!hasSameUserIds(activeUserIds, stateSeatUserIds)) {
+        if (stateSeatUserIds.length <= 0) {
           throw new Error("state_invalid");
+        }
+        if (!stateSeatUserIds.includes(auth.userId)) {
+          throw new Error("state_invalid");
+        }
+        if (!hasSameUserIds(activeUserIds, stateSeatUserIds)) {
+          klog("poker_get_table_active_mismatch", {
+            tableId,
+            dbActiveCount: activeUserIds.length,
+            stateCount: stateSeatUserIds.length,
+          });
         }
         try {
           const holeCards = await loadHoleCardsByUserId(tx, {
             tableId,
             handId: currentState.handId,
-            activeUserIds,
+            activeUserIds: stateSeatUserIds,
           });
           myHoleCards = holeCards.holeCardsByUserId[auth.userId] || [];
         } catch (error) {

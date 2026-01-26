@@ -138,14 +138,17 @@ const run = async () => {
   assert.equal(JSON.parse(invalidCardsResponse.body).error, "state_invalid");
 
   const mismatchResponse = await makeHandler([], storedState, "user-1", {
-    activeUserIds: ["user-1", "user-2"],
+    activeUserIds: ["user-1"],
   })({
     httpMethod: "GET",
     headers: { origin: "https://example.test", authorization: "Bearer token" },
     queryStringParameters: { tableId },
   });
-  assert.equal(mismatchResponse.statusCode, 409);
-  assert.equal(JSON.parse(mismatchResponse.body).error, "state_invalid");
+  assert.equal(mismatchResponse.statusCode, 200);
+  const mismatchPayload = JSON.parse(mismatchResponse.body);
+  assert.equal(mismatchPayload.state.state.phase, "PREFLOP");
+  assert.ok(Array.isArray(mismatchPayload.myHoleCards));
+  assert.equal(mismatchPayload.myHoleCards.length, 2);
 
   const initState = {
     ...baseState,

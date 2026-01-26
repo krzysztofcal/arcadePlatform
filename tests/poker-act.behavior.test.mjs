@@ -75,11 +75,8 @@ const makeHandler = (queries, storedState, userId, options = {}) =>
             const okParams = Array.isArray(params) && params.length >= 2 && params[0] === tableId && params[1] === userId;
             if (hasActive && hasUserFilter && okParams) return [{ user_id: userId }];
             if (hasActive) {
-              return [
-                { user_id: "user-1", seat_no: 1 },
-                { user_id: "user-2", seat_no: 2 },
-                { user_id: "user-3", seat_no: 3 },
-              ];
+              const activeSeatUserIds = options.activeSeatUserIds || ["user-1", "user-2", "user-3"];
+              return activeSeatUserIds.map((id, index) => ({ user_id: id, seat_no: index + 1 }));
             }
             return [];
           }
@@ -109,7 +106,17 @@ const makeHandler = (queries, storedState, userId, options = {}) =>
     klog: options.klog || (() => {}),
   });
 
-const runCase = async ({ state, action, requestId, userId, klogCalls, holeCardsByUserId, holeCardsError, applyAction: applyActionOverride }) => {
+const runCase = async ({
+  state,
+  action,
+  requestId,
+  userId,
+  klogCalls,
+  holeCardsByUserId,
+  holeCardsError,
+  applyAction: applyActionOverride,
+  activeSeatUserIds,
+}) => {
   const queries = [];
   const storedState = { value: JSON.stringify(state), version: 3 };
   const handler = makeHandler(queries, storedState, userId, {
@@ -117,6 +124,7 @@ const runCase = async ({ state, action, requestId, userId, klogCalls, holeCardsB
     holeCardsByUserId,
     holeCardsError,
     applyAction: applyActionOverride,
+    activeSeatUserIds,
   });
   const response = await handler({
     httpMethod: "POST",
@@ -344,6 +352,15 @@ const run = async () => {
   });
   assert.equal(filteredResponse.response.statusCode, 200);
   assert.deepEqual(capturedKeys, ["user-1", "user-2", "user-3"]);
+
+  const inactiveSeatResponse = await runCase({
+    state: baseState,
+    action: { type: "CHECK" },
+    requestId: "req-missing-seat",
+    userId: "user-1",
+    activeSeatUserIds: ["user-1", "user-2"],
+  });
+  assert.equal(inactiveSeatResponse.response.statusCode, 200);
 
   const missingTableError = new Error("missing table");
   missingTableError.code = "42P01";
