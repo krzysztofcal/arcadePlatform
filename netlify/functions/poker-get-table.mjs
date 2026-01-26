@@ -115,8 +115,14 @@ export async function handler(event) {
         if (typeof currentState.handId !== "string" || !currentState.handId.trim()) {
           throw new Error("state_invalid");
         }
-        const activeUserIds = Array.isArray(activeSeatRows)
+        const dbActiveUserIds = Array.isArray(activeSeatRows)
           ? activeSeatRows.map((row) => row?.user_id).filter(Boolean)
+          : [];
+        const seatRowsActiveUserIds = Array.isArray(seatRows)
+          ? seatRows
+              .filter((row) => row?.status === "ACTIVE")
+              .map((row) => row?.user_id)
+              .filter(Boolean)
           : [];
         const stateSeatUserIds = normalizeSeatUserIds(currentState.seats);
         if (stateSeatUserIds.length <= 0) {
@@ -125,25 +131,50 @@ export async function handler(event) {
         if (!stateSeatUserIds.includes(auth.userId)) {
           throw new Error("state_invalid");
         }
-        if (!hasSameUserIds(activeUserIds, stateSeatUserIds)) {
+        let candidateActiveUserIds = dbActiveUserIds.length ? dbActiveUserIds : seatRowsActiveUserIds;
+        if (candidateActiveUserIds.length <= 0) {
+          candidateActiveUserIds = stateSeatUserIds;
+        }
+        if (!hasSameUserIds(candidateActiveUserIds, stateSeatUserIds)) {
           klog("poker_get_table_active_mismatch", {
             tableId,
-            dbActiveCount: activeUserIds.length,
+            dbActiveCount: dbActiveUserIds.length,
+            seatRowsActiveCount: seatRowsActiveUserIds.length,
+            candidateActiveCount: candidateActiveUserIds.length,
             stateCount: stateSeatUserIds.length,
           });
+        }
+        let effectiveUserIdsForHoleCards = stateSeatUserIds;
+        if (candidateActiveUserIds.length) {
+          const overlap = candidateActiveUserIds.filter((userId) => stateSeatUserIds.includes(userId));
+          if (overlap.length) {
+            effectiveUserIdsForHoleCards = overlap.includes(auth.userId) ? overlap : [...overlap, auth.userId];
+          }
         }
         try {
           const holeCards = await loadHoleCardsByUserId(tx, {
             tableId,
             handId: currentState.handId,
-            activeUserIds: stateSeatUserIds,
+            activeUserIds: effectiveUserIdsForHoleCards,
           });
           myHoleCards = holeCards.holeCardsByUserId[auth.userId] || [];
         } catch (error) {
           if (error?.message === "state_invalid") {
+            klog("poker_get_table_hole_cards_invalid", {
+              tableId,
+              handId: currentState.handId,
+              userId: auth.userId,
+              effectiveCount: effectiveUserIdsForHoleCards.length,
+            });
             throw new Error("state_invalid");
           }
           if (isHoleCardsTableMissing(error)) {
+            klog("poker_get_table_hole_cards_invalid", {
+              tableId,
+              handId: currentState.handId,
+              userId: auth.userId,
+              effectiveCount: effectiveUserIdsForHoleCards.length,
+            });
             throw new Error("state_invalid");
           }
           throw error;
