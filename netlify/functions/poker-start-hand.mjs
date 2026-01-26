@@ -29,6 +29,28 @@ const makeError = (status, code) => {
   return err;
 };
 
+const KNOWN_ERROR_CODES = new Set([
+  "table_not_found",
+  "table_not_open",
+  "not_allowed",
+  "not_enough_players",
+  "state_invalid",
+  "already_in_hand",
+  "unauthorized",
+]);
+
+const toErrorPayload = (err) => {
+  if (typeof err?.code === "string") return { code: err.code };
+  if (typeof err?.message === "string" && KNOWN_ERROR_CODES.has(err.message)) return { code: err.message };
+  return { code: "internal" };
+};
+
+const respondError = (cors, statusCode, code, extra) => ({
+  statusCode,
+  headers: { ...baseHeaders(), ...(cors || {}) },
+  body: JSON.stringify({ error: code, ...(extra || {}) }),
+});
+
 const parseRequestId = (value) => {
   if (value == null) return { ok: false, value: null };
   if (typeof value !== "string") return { ok: false, value: null };
@@ -123,7 +145,7 @@ export async function handler(event) {
       );
       const stateRow = stateRows?.[0] || null;
       if (!stateRow) {
-        throw new Error("poker_state_missing");
+        throw makeError(409, "state_invalid");
       }
 
       let currentState = normalizeJsonState(stateRow.state);
@@ -156,10 +178,15 @@ export async function handler(event) {
             !hasAllUserKeys(currentState.actedThisRoundByUserId) ||
             !hasAllUserKeys(currentState.foldedByUserId));
         if (isLegacy) {
-          await tx.unsafe("update public.poker_state set state = $2::jsonb, updated_at = now() where table_id = $1;", [
-            tableId,
-            JSON.stringify(upgradedState),
-          ]);
+          try {
+            await tx.unsafe("update public.poker_state set state = $2::jsonb, updated_at = now() where table_id = $1;", [
+              tableId,
+              JSON.stringify(upgradedState),
+            ]);
+          } catch (error) {
+            klog("poker_start_hand_error", { tableId, reason: "legacy_init_upgrade_failed" });
+            throw makeError(409, "state_invalid");
+          }
         }
         currentState = upgradedState;
       }
@@ -344,10 +371,10 @@ export async function handler(event) {
       }),
     };
   } catch (error) {
-    if (error?.status && error?.code) {
-      return { statusCode: error.status, headers: mergeHeaders(cors), body: JSON.stringify({ error: error.code }) };
-    }
-    klog("poker_start_hand_error", { message: error?.message || "unknown_error" });
-    return { statusCode: 500, headers: mergeHeaders(cors), body: JSON.stringify({ error: "server_error" }) };
+    const status = Number.isInteger(error?.status) ? error.status : 500;
+    const payload = toErrorPayload(error);
+    const code = payload.code;
+    klog("poker_start_hand_error", { tableId, userId: auth?.userId ?? null, status, code });
+    return respondError(cors, status, code);
   }
 }
