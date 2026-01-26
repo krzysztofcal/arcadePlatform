@@ -266,6 +266,7 @@ const runInvalidDeal = async () => {
   globalThis.__TEST_RNG__ = originalRng;
 
   assert.equal(response.statusCode, 409);
+  assert.ok(response.body, "response body should not be empty");
   const payload = JSON.parse(response.body);
   assert.equal(payload.error, "state_invalid");
   assert.ok(!queries.some((q) => q.query.toLowerCase().includes("insert into public.poker_hole_cards")));
@@ -316,8 +317,61 @@ const runMissingDealSecret = async () => {
   assert.equal(JSON.parse(response.body).error, "state_invalid");
 };
 
+const runMissingStateRow = async () => {
+  const queries = [];
+  const handler = loadPokerHandler("netlify/functions/poker-start-hand.mjs", {
+    baseHeaders: () => ({}),
+    corsHeaders: () => ({ "access-control-allow-origin": "https://example.test" }),
+    createDeck,
+    dealHoleCards,
+    deriveDeck,
+    extractBearerToken: () => "token",
+    getRng,
+    isPlainObject,
+    isStateStorageValid,
+    shuffle,
+    verifySupabaseJwt: async () => ({ valid: true, userId }),
+    isValidUuid: () => true,
+    normalizeJsonState,
+    upgradeLegacyInitStateWithSeats,
+    withoutPrivateState,
+    beginSql: async (fn) =>
+      fn({
+        unsafe: async (query, params) => {
+          const text = String(query).toLowerCase();
+          queries.push({ query: String(query), params });
+          if (text.includes("from public.poker_tables")) {
+            return [{ id: tableId, status: "OPEN", max_players: 6 }];
+          }
+          if (text.includes("from public.poker_state")) {
+            return [];
+          }
+          if (text.includes("from public.poker_seats")) {
+            return [
+              { user_id: "user-1", seat_no: 1, status: "ACTIVE" },
+              { user_id: "user-2", seat_no: 3, status: "ACTIVE" },
+            ];
+          }
+          return [];
+        },
+      }),
+    klog: () => {},
+  });
+  const response = await handler({
+    httpMethod: "POST",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    body: JSON.stringify({ tableId, requestId: "req-missing-state" }),
+  });
+
+  assert.equal(response.statusCode, 409);
+  assert.ok(response.body, "response body should not be empty");
+  const payload = JSON.parse(response.body);
+  assert.equal(payload.error, "state_invalid");
+};
+
 await runHappyPath();
 await runReplayPath();
 await runInvalidDeal();
 await runMissingHoleCardsTable();
 await runMissingDealSecret();
+await runMissingStateRow();

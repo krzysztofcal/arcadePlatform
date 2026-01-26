@@ -29,6 +29,21 @@ const makeError = (status, code) => {
   return err;
 };
 
+const KNOWN_ERROR_CODES = new Set([
+  "table_not_found",
+  "table_not_open",
+  "not_allowed",
+  "not_enough_players",
+  "state_invalid",
+  "already_in_hand",
+]);
+
+const toErrorPayload = (err) => {
+  if (typeof err?.code === "string") return { code: err.code };
+  if (typeof err?.message === "string" && KNOWN_ERROR_CODES.has(err.message)) return { code: err.message };
+  return { code: "server_error" };
+};
+
 const parseRequestId = (value) => {
   if (value == null) return { ok: false, value: null };
   if (typeof value !== "string") return { ok: false, value: null };
@@ -54,7 +69,12 @@ const isHoleCardsTableMissing = (error) => {
 export async function handler(event) {
   const origin = event.headers?.origin || event.headers?.Origin;
   const cors = corsHeaders(origin);
-  const mergeHeaders = (next) => ({ ...baseHeaders(), ...(next || {}) });
+  const headersWithCors = () => ({ ...baseHeaders(), ...(cors || {}) });
+  const respondError = (statusCode, code, extra) => ({
+    statusCode,
+    headers: headersWithCors(),
+    body: JSON.stringify({ error: code, ...(extra || {}) }),
+  });
   if (!cors) {
     const headers = {
       ...baseHeaders(),
@@ -69,31 +89,31 @@ export async function handler(event) {
     };
   }
   if (event.httpMethod === "OPTIONS") {
-    return { statusCode: 204, headers: mergeHeaders(cors), body: "" };
+    return { statusCode: 204, headers: headersWithCors(), body: "" };
   }
   if (event.httpMethod !== "POST") {
-    return { statusCode: 405, headers: mergeHeaders(cors), body: JSON.stringify({ error: "method_not_allowed" }) };
+    return { statusCode: 405, headers: headersWithCors(), body: JSON.stringify({ error: "method_not_allowed" }) };
   }
 
   const parsed = parseBody(event.body);
   if (!parsed.ok) {
-    return { statusCode: 400, headers: mergeHeaders(cors), body: JSON.stringify({ error: "invalid_json" }) };
+    return { statusCode: 400, headers: headersWithCors(), body: JSON.stringify({ error: "invalid_json" }) };
   }
 
   const payload = parsed.value ?? {};
   if (payload && !isPlainObject(payload)) {
-    return { statusCode: 400, headers: mergeHeaders(cors), body: JSON.stringify({ error: "invalid_payload" }) };
+    return { statusCode: 400, headers: headersWithCors(), body: JSON.stringify({ error: "invalid_payload" }) };
   }
 
   const tableIdValue = payload?.tableId;
   const tableId = typeof tableIdValue === "string" ? tableIdValue.trim() : "";
   if (!tableId || !isValidUuid(tableId)) {
-    return { statusCode: 400, headers: mergeHeaders(cors), body: JSON.stringify({ error: "invalid_table_id" }) };
+    return { statusCode: 400, headers: headersWithCors(), body: JSON.stringify({ error: "invalid_table_id" }) };
   }
 
   const requestIdParsed = parseRequestId(payload?.requestId);
   if (!requestIdParsed.ok) {
-    return { statusCode: 400, headers: mergeHeaders(cors), body: JSON.stringify({ error: "invalid_request_id" }) };
+    return { statusCode: 400, headers: headersWithCors(), body: JSON.stringify({ error: "invalid_request_id" }) };
   }
 
   const token = extractBearerToken(event.headers);
@@ -101,7 +121,7 @@ export async function handler(event) {
   if (!auth.valid || !auth.userId) {
     return {
       statusCode: 401,
-      headers: mergeHeaders(cors),
+      headers: headersWithCors(),
       body: JSON.stringify({ error: "unauthorized", reason: auth.reason }),
     };
   }
@@ -123,7 +143,7 @@ export async function handler(event) {
       );
       const stateRow = stateRows?.[0] || null;
       if (!stateRow) {
-        throw new Error("poker_state_missing");
+        throw makeError(409, "state_invalid");
       }
 
       let currentState = normalizeJsonState(stateRow.state);
@@ -156,10 +176,15 @@ export async function handler(event) {
             !hasAllUserKeys(currentState.actedThisRoundByUserId) ||
             !hasAllUserKeys(currentState.foldedByUserId));
         if (isLegacy) {
-          await tx.unsafe("update public.poker_state set state = $2::jsonb, updated_at = now() where table_id = $1;", [
-            tableId,
-            JSON.stringify(upgradedState),
-          ]);
+          try {
+            await tx.unsafe("update public.poker_state set state = $2::jsonb, updated_at = now() where table_id = $1;", [
+              tableId,
+              JSON.stringify(upgradedState),
+            ]);
+          } catch (error) {
+            klog("poker_start_hand_upgrade_failed", { tableId, reason: "legacy_init_upgrade_failed" });
+            throw makeError(409, "state_invalid");
+          }
         }
         currentState = upgradedState;
       }
@@ -331,7 +356,7 @@ export async function handler(event) {
 
     return {
       statusCode: 200,
-      headers: mergeHeaders(cors),
+      headers: headersWithCors(),
       body: JSON.stringify({
         ok: true,
         tableId: result.tableId,
@@ -344,10 +369,10 @@ export async function handler(event) {
       }),
     };
   } catch (error) {
-    if (error?.status && error?.code) {
-      return { statusCode: error.status, headers: mergeHeaders(cors), body: JSON.stringify({ error: error.code }) };
-    }
-    klog("poker_start_hand_error", { message: error?.message || "unknown_error" });
-    return { statusCode: 500, headers: mergeHeaders(cors), body: JSON.stringify({ error: "server_error" }) };
+    const isAppError = Number.isInteger(error?.status) && typeof error?.code === "string";
+    const status = isAppError ? error.status : 500;
+    const code = isAppError ? error.code : toErrorPayload(error).code;
+    klog("poker_start_hand_error", { tableId, userId: auth?.userId ?? null, status, code });
+    return respondError(status, code);
   }
 }
