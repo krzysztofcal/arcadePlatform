@@ -45,12 +45,6 @@ const toErrorPayload = (err) => {
   return { code: "internal" };
 };
 
-const respondError = (cors, statusCode, code, extra) => ({
-  statusCode,
-  headers: { ...baseHeaders(), ...(cors || {}) },
-  body: JSON.stringify({ error: code, ...(extra || {}) }),
-});
-
 const parseRequestId = (value) => {
   if (value == null) return { ok: false, value: null };
   if (typeof value !== "string") return { ok: false, value: null };
@@ -77,6 +71,11 @@ export async function handler(event) {
   const origin = event.headers?.origin || event.headers?.Origin;
   const cors = corsHeaders(origin);
   const mergeHeaders = (next) => ({ ...baseHeaders(), ...(next || {}) });
+  const respondError = (statusCode, code, extra) => ({
+    statusCode,
+    headers: mergeHeaders(cors),
+    body: JSON.stringify({ error: code, ...(extra || {}) }),
+  });
   if (!cors) {
     const headers = {
       ...baseHeaders(),
@@ -184,7 +183,7 @@ export async function handler(event) {
               JSON.stringify(upgradedState),
             ]);
           } catch (error) {
-            klog("poker_start_hand_error", { tableId, reason: "legacy_init_upgrade_failed" });
+            klog("poker_start_hand_upgrade_failed", { tableId, reason: "legacy_init_upgrade_failed" });
             throw makeError(409, "state_invalid");
           }
         }
@@ -375,6 +374,6 @@ export async function handler(event) {
     const payload = toErrorPayload(error);
     const code = payload.code;
     klog("poker_start_hand_error", { tableId, userId: auth?.userId ?? null, status, code });
-    return respondError(cors, status, code);
+    return respondError(status, code);
   }
 }
