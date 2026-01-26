@@ -63,6 +63,61 @@ const normalizeJsonState = (value) => {
   return {};
 };
 
+const sanitizeUserMap = (source, userIds, fallbackValue) => {
+  const from = isPlainObject(source) ? source : {};
+  return Object.fromEntries(
+    userIds.map((userId) => {
+      const value = Object.prototype.hasOwnProperty.call(from, userId) ? from[userId] : fallbackValue;
+      return [userId, value];
+    })
+  );
+};
+
+const sanitizeOptionalUserMap = (source, userIds) => {
+  if (!isPlainObject(source)) return {};
+  const entries = [];
+  for (const userId of userIds) {
+    if (Object.prototype.hasOwnProperty.call(source, userId)) {
+      entries.push([userId, source[userId]]);
+    }
+  }
+  return Object.fromEntries(entries);
+};
+
+const upgradeLegacyInitState = (state) => {
+  if (state?.phase !== "INIT") return state;
+  const seats = Array.isArray(state?.seats) ? state.seats : [];
+  const seatsSorted = seats
+    .filter(
+      (seat) =>
+        seat &&
+        typeof seat.userId === "string" &&
+        seat.userId.trim() &&
+        Number.isInteger(seat.seatNo)
+    )
+    .slice()
+    .sort((a, b) => Number(a.seatNo) - Number(b.seatNo));
+  const userIds = seatsSorted.map((seat) => seat.userId);
+  const dealerSeatFallback = seatsSorted[0]?.seatNo ?? 0;
+  const turnUserFallback = seatsSorted[0]?.userId ?? null;
+
+  return {
+    ...state,
+    community: Array.isArray(state.community) ? state.community : [],
+    communityDealt: Number.isInteger(state.communityDealt) ? state.communityDealt : 0,
+    dealerSeatNo: Number.isInteger(state.dealerSeatNo) ? state.dealerSeatNo : dealerSeatFallback,
+    turnUserId: typeof state.turnUserId === "string" ? state.turnUserId : turnUserFallback,
+    handId: typeof state.handId === "string" ? state.handId : "",
+    handSeed: typeof state.handSeed === "string" ? state.handSeed : "",
+    toCallByUserId: sanitizeUserMap(state.toCallByUserId, userIds, 0),
+    betThisRoundByUserId: sanitizeUserMap(state.betThisRoundByUserId, userIds, 0),
+    actedThisRoundByUserId: sanitizeUserMap(state.actedThisRoundByUserId, userIds, false),
+    foldedByUserId: sanitizeUserMap(state.foldedByUserId, userIds, false),
+    lastAggressorUserId: state.lastAggressorUserId ?? null,
+    lastActionRequestIdByUserId: sanitizeOptionalUserMap(state.lastActionRequestIdByUserId, userIds),
+  };
+};
+
 const withoutPrivateState = (state) => {
   if (!state || typeof state !== "object" || Array.isArray(state)) return state;
   const { holeCardsByUserId, deck, handSeed, ...rest } = state;
@@ -168,4 +223,4 @@ const getRng = () => {
   return typeof testRng === "function" ? testRng : Math.random;
 };
 
-export { normalizeJsonState, withoutPrivateState, getRng, isPlainObject, isStateStorageValid };
+export { normalizeJsonState, withoutPrivateState, getRng, isPlainObject, isStateStorageValid, upgradeLegacyInitState };

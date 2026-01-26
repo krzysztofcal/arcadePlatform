@@ -3,7 +3,14 @@ import { baseHeaders, beginSql, corsHeaders, extractBearerToken, klog, verifySup
 import { isValidTwoCards } from "./_shared/poker-cards-utils.mjs";
 import { dealHoleCards } from "./_shared/poker-engine.mjs";
 import { deriveDeck } from "./_shared/poker-deal-deterministic.mjs";
-import { getRng, isPlainObject, isStateStorageValid, normalizeJsonState, withoutPrivateState } from "./_shared/poker-state-utils.mjs";
+import {
+  getRng,
+  isPlainObject,
+  isStateStorageValid,
+  normalizeJsonState,
+  upgradeLegacyInitState,
+  withoutPrivateState,
+} from "./_shared/poker-state-utils.mjs";
 import { isValidUuid } from "./_shared/poker-utils.mjs";
 
 const parseBody = (body) => {
@@ -119,7 +126,17 @@ export async function handler(event) {
         throw new Error("poker_state_missing");
       }
 
-      const currentState = normalizeJsonState(stateRow.state);
+      let currentState = normalizeJsonState(stateRow.state);
+      if (currentState.phase === "INIT") {
+        const upgradedState = upgradeLegacyInitState(currentState);
+        if (JSON.stringify(upgradedState) !== JSON.stringify(currentState)) {
+          await tx.unsafe("update public.poker_state set state = $2::jsonb, updated_at = now() where table_id = $1;", [
+            tableId,
+            JSON.stringify(upgradedState),
+          ]);
+        }
+        currentState = upgradedState;
+      }
 
       const seatRows = await tx.unsafe(
         "select user_id, seat_no from public.poker_seats where table_id = $1 and status = 'ACTIVE' order by seat_no asc;",
