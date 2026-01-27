@@ -650,6 +650,34 @@ const run = async () => {
     assert.equal(winners.includes("user-3"), false);
   }
 
+  {
+    const showdownState = {
+      ...baseState,
+      phase: "RIVER",
+      pot: 20,
+      community: deriveCommunityCards({ handSeed: baseState.handSeed, seatUserIdsInOrder: seatOrder, communityDealt: 4 }),
+      communityDealt: 4,
+      turnUserId: "user-1",
+      actedThisRoundByUserId: { "user-1": false, "user-2": true, "user-3": true },
+      foldedByUserId: { "user-1": false, "user-2": false, "user-3": true },
+      toCallByUserId: { "user-1": 0, "user-2": 0, "user-3": 0 },
+      betThisRoundByUserId: { "user-1": 0, "user-2": 0, "user-3": 0 },
+      contributionsByUserId: { "user-1": 10, "user-2": 5, "user-3": 5 },
+    };
+    const klogCalls = [];
+    const showdownResponse = await runCase({
+      state: showdownState,
+      action: { type: "CHECK" },
+      requestId: "req-showdown-sidepot",
+      userId: "user-1",
+      klogCalls,
+    });
+    assert.equal(showdownResponse.response.statusCode, 409);
+    assert.equal(JSON.parse(showdownResponse.response.body).error, "state_invalid");
+    const sidePotLog = klogCalls.find((entry) => entry.kind === "poker_act_rejected");
+    assert.equal(sidePotLog?.data?.code, "showdown_side_pots_unsupported");
+  }
+
   const inactiveSeatResponse = await runCase({
     state: baseState,
     action: { type: "CHECK" },

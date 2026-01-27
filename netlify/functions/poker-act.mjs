@@ -132,6 +132,16 @@ const arraysEqual = (left, right) => {
   return true;
 };
 
+const allEqualNumbers = (values) => {
+  if (!Array.isArray(values) || values.length === 0) return true;
+  const first = values[0];
+  if (!Number.isFinite(first)) return false;
+  for (let i = 1; i < values.length; i += 1) {
+    if (!Number.isFinite(values[i]) || values[i] !== first) return false;
+  }
+  return true;
+};
+
 const toSeatNo = (value) => {
   const n = typeof value === "number" ? value : Number(value);
   return Number.isFinite(n) ? n : Number.POSITIVE_INFINITY;
@@ -567,6 +577,16 @@ export async function handler(event) {
         const winnersInSeatOrder = seatUserIdsInOrder.filter((userId) => winners.includes(userId));
         if (winnersInSeatOrder.length === 0) {
           rejectStateInvalid("showdown_winners_invalid");
+        }
+
+        const hasSidePots = Array.isArray(nextState.sidePots) && nextState.sidePots.length > 0;
+        const contributions = nextState.contributionsByUserId;
+        const hasUnequalContrib =
+          isPlainObject(contributions) &&
+          showdownUserIds.length > 1 &&
+          !allEqualNumbers(showdownUserIds.map((userId) => Number(contributions[userId])));
+        if (hasSidePots || hasUnequalContrib) {
+          rejectStateInvalid("showdown_side_pots_unsupported", { hasSidePots, hasUnequalContrib });
         }
 
         const potValue = Number(nextState.pot ?? 0);
