@@ -15,6 +15,8 @@ import {
 import { deriveCommunityCards, deriveRemainingDeck } from "../netlify/functions/_shared/poker-deal-deterministic.mjs";
 import { loadPokerHandler } from "./helpers/poker-test-helpers.mjs";
 
+process.env.POKER_DEAL_SECRET = process.env.POKER_DEAL_SECRET || "test-secret";
+
 const tableId = "11111111-1111-4111-8111-111111111111";
 
 const baseState = {
@@ -437,6 +439,91 @@ const run = async () => {
     assert.ok(secondPayload.state.version > 1);
     assert.ok(Array.isArray(secondPayload.myHoleCards));
     assert.equal(secondPayload.myHoleCards.length, 2);
+  }
+
+  {
+    const startQueries = [];
+    const startState = { value: null, holeCardsStore: new Map() };
+    const startHandler = makeStartHandHandler(startQueries, startState, "user-1", ["user-1", "user-2"]);
+    const startResponse = await startHandler({
+      httpMethod: "POST",
+      headers: { origin: "https://example.test", authorization: "Bearer token" },
+      body: JSON.stringify({ tableId, requestId: "req-start-2" }),
+    });
+    assert.equal(startResponse.statusCode, 200);
+    const startedState = JSON.parse(startState.value);
+    const holeCardsByUserId = {};
+    for (const [key, cards] of startState.holeCardsStore.entries()) {
+      const [, handKey, userKey] = key.split("|");
+      if (handKey === startedState.handId) {
+        holeCardsByUserId[userKey] = cards;
+      }
+    }
+    const storedActState = { value: JSON.stringify(startedState), version: 1 };
+    const firstUserId = startedState.turnUserId;
+    const secondUserId = firstUserId === "user-1" ? "user-2" : "user-1";
+    const actQueries = [];
+    const handlerFirst = makeHandler(actQueries, storedActState, firstUserId, {
+      holeCardsByUserId,
+      activeSeatUserIds: ["user-1", "user-2"],
+    });
+    const firstCheck = await handlerFirst({
+      httpMethod: "POST",
+      headers: { origin: "https://example.test", authorization: "Bearer token" },
+      body: JSON.stringify({ tableId, requestId: "req-preflop-1", action: { type: "CHECK" } }),
+    });
+    assert.equal(firstCheck.statusCode, 200);
+    const handlerSecond = makeHandler(actQueries, storedActState, secondUserId, {
+      holeCardsByUserId,
+      activeSeatUserIds: ["user-1", "user-2"],
+    });
+    const secondCheck = await handlerSecond({
+      httpMethod: "POST",
+      headers: { origin: "https://example.test", authorization: "Bearer token" },
+      body: JSON.stringify({ tableId, requestId: "req-preflop-2", action: { type: "CHECK" } }),
+    });
+    assert.equal(secondCheck.statusCode, 200);
+    const secondPayload = JSON.parse(secondCheck.body);
+    assert.equal(secondPayload.state.state.phase, "FLOP");
+    assert.equal(secondPayload.state.state.community.length, 3);
+    const flopVersion = secondPayload.state.version;
+    const flopTurnUserId = secondPayload.state.state.turnUserId;
+    const flopSecondUserId = flopTurnUserId === firstUserId ? secondUserId : firstUserId;
+    const handlerFlopFirst = makeHandler(actQueries, storedActState, flopTurnUserId, {
+      holeCardsByUserId,
+      activeSeatUserIds: ["user-1", "user-2"],
+    });
+    const flopCheck = await handlerFlopFirst({
+      httpMethod: "POST",
+      headers: { origin: "https://example.test", authorization: "Bearer token" },
+      body: JSON.stringify({ tableId, requestId: "req-flop-1", action: { type: "CHECK" } }),
+    });
+    assert.equal(flopCheck.statusCode, 200);
+    const handlerFlopSecond = makeHandler(actQueries, storedActState, flopSecondUserId, {
+      holeCardsByUserId,
+      activeSeatUserIds: ["user-1", "user-2"],
+    });
+    const flopSecondCheck = await handlerFlopSecond({
+      httpMethod: "POST",
+      headers: { origin: "https://example.test", authorization: "Bearer token" },
+      body: JSON.stringify({ tableId, requestId: "req-flop-2", action: { type: "CHECK" } }),
+    });
+    assert.equal(flopSecondCheck.statusCode, 200);
+    const flopPayload = JSON.parse(flopSecondCheck.body);
+    assert.equal(flopPayload.state.state.phase, "TURN");
+    assert.equal(flopPayload.state.state.community.length, 4);
+    assert.ok(typeof flopPayload.state.version === "number");
+    assert.ok(flopPayload.state.version > flopVersion);
+    assert.ok(Array.isArray(flopPayload.myHoleCards));
+    assert.equal(flopPayload.myHoleCards.length, 2);
+    assert.equal(flopPayload.state.state.holeCardsByUserId, undefined);
+    assert.equal(flopPayload.state.state.handSeed, undefined);
+    assert.equal(flopPayload.state.state.deck, undefined);
+    assert.equal(flopPayload.holeCardsByUserId, undefined);
+    assert.equal(flopPayload.deck, undefined);
+    assert.equal(JSON.stringify(flopPayload).includes("holeCardsByUserId"), false);
+    assert.equal(JSON.stringify(flopPayload).includes('"deck"'), false);
+    assert.equal(JSON.stringify(flopPayload).includes('"handSeed"'), false);
   }
 
   const updateCall = queries.find((entry) => entry.query.toLowerCase().includes("update public.poker_state"));
