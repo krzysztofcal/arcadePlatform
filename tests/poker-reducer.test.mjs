@@ -190,15 +190,18 @@ const run = async () => {
   }
 
   {
-    const { seats, stacks } = makeBase();
+    const seats = [
+      { userId: "user-3", seatNo: 1 },
+      { userId: "user-1", seatNo: 3 },
+      { userId: "user-2", seatNo: 5 },
+    ];
+    const stacks = { "user-1": 100, "user-2": 100, "user-3": 100 };
     let result = initHandState({ tableId: "t5", seats, stacks, rng: makeRng(15) });
     let state = { ...result.state, turnUserId: "user-1" };
 
     result = applyAction(state, { type: "BET", userId: "user-1", amount: 10 });
     state = result.state;
     result = applyAction(state, { type: "FOLD", userId: "user-2" });
-    state = result.state;
-    result = applyAction(state, { type: "CHECK", userId: "user-1" });
     state = result.state;
     result = applyAction(state, { type: "CALL", userId: "user-3" });
     state = result.state;
@@ -207,6 +210,7 @@ const run = async () => {
     state = advanced.state;
     assert.equal(state.phase, "FLOP");
     assert.equal(state.foldedByUserId["user-2"], true);
+    assert.equal(state.community.length, 3);
   }
 
   {
@@ -234,6 +238,7 @@ const run = async () => {
     let state = { ...result.state };
     state = {
       ...state,
+      foldedByUserId: { "user-1": false, "user-2": false },
       actedThisRoundByUserId: { "user-1": true, "user-2": true },
       toCallByUserId: { "user-1": 0, "user-2": 0 },
     };
