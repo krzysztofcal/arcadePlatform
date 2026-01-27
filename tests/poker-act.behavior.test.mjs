@@ -595,6 +595,11 @@ const run = async () => {
     assert.ok(Array.isArray(showdownPayload.state.state.showdown?.winners));
     assert.ok(showdownPayload.state.state.showdown.winners.length > 0);
     assert.equal(showdownPayload.state.state.pot, 0);
+    const showdownPayloadText = JSON.stringify(showdownPayload);
+    assert.equal(showdownPayloadText.includes("revealedHoleCardsByUserId"), false);
+    assert.equal(showdownPayloadText.includes("holeCardsByUserId"), false);
+    assert.equal(showdownPayloadText.includes('"deck"'), false);
+    assert.equal(showdownPayloadText.includes('"handSeed"'), false);
     const fullCommunity = deriveCommunityCards({ handSeed: baseState.handSeed, seatUserIdsInOrder: seatOrder, communityDealt: 5 });
     assert.deepEqual(showdownPayload.state.state.community, fullCommunity);
     const expectedShowdown = computeShowdown({

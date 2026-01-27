@@ -21,10 +21,12 @@ const normalizeRank = (value) => {
   return null;
 };
 
+const SUIT_SET = new Set(["H", "D", "C", "S"]);
+
 const normalizeSuit = (value) => {
   if (typeof value !== "string") return null;
   const v = value.trim().toUpperCase();
-  return v ? v : null;
+  return SUIT_SET.has(v) ? v : null;
 };
 
 const cardKey = (card) => {
@@ -68,7 +70,6 @@ const computeShowdown = ({ community, players }) => {
     if (!validatePlayers(players, seenCards).ok) throw new Error("invalid_state");
 
     const handsByUserId = {};
-    const revealedHoleCardsByUserId = {};
     let bestHand = null;
     const winners = [];
 
@@ -83,7 +84,6 @@ const computeShowdown = ({ community, players }) => {
         best5: hand.best5,
         key: hand.key,
       };
-      revealedHoleCardsByUserId[player.userId] = holeCards;
       if (!bestHand) {
         bestHand = hand;
         winners.push(player.userId);
@@ -104,7 +104,6 @@ const computeShowdown = ({ community, players }) => {
     return {
       winners,
       handsByUserId,
-      revealedHoleCardsByUserId,
     };
   } catch (error) {
     if (error?.message === "invalid_state") {

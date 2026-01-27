@@ -356,7 +356,7 @@ export async function handler(event) {
       const dbActiveUserIds = Array.isArray(activeSeatRows)
         ? activeSeatRows.map((row) => row?.user_id).filter(Boolean)
         : [];
-      const activeUserIds = getActiveShowdownUserIds(currentState, seatUserIdsInOrder);
+      const activeUserIds = seatUserIdsInOrder.slice();
 
       let holeCardsByUserId;
       try {
