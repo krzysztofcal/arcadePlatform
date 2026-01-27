@@ -85,6 +85,17 @@ export async function handler(event) {
   if (!idempotencyKey || typeof idempotencyKey !== "string") {
     return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "missing_idempotency_key" }) };
   }
+  if (txType === "BUY_IN") {
+    const adminSecret = process.env.CHIPS_ADMIN_SECRET;
+    if (!adminSecret) {
+      return { statusCode: 500, headers: cors, body: JSON.stringify({ error: "server_misconfigured" }) };
+    }
+    const headerSecret = event.headers?.["x-chips-admin-secret"] || event.headers?.["X-Chips-Admin-Secret"];
+    if (headerSecret !== adminSecret) {
+      klog("chips_tx_admin_required", { userId: auth.userId, txType });
+      return { statusCode: 403, headers: cors, body: JSON.stringify({ error: "admin_required" }) };
+    }
+  }
 
   let entriesToPost;
   if (entries != null) {
