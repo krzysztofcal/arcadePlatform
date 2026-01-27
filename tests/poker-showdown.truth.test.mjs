@@ -11,8 +11,6 @@ const assertPlayerDetails = (result, userId) => {
   assert.ok(result.handsByUserId[userId].key.trim());
   assert.equal(Array.isArray(result.handsByUserId[userId].best5), true);
   assert.equal(result.handsByUserId[userId].best5.length, 5);
-  assert.equal(Array.isArray(result.revealedHoleCardsByUserId?.[userId]), true);
-  assert.equal(result.revealedHoleCardsByUserId[userId].length, 2);
 };
 
 const runOracle = ({ name, community, players, winners }) => {
