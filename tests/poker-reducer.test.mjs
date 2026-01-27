@@ -225,6 +225,51 @@ const run = async () => {
       { userId: "user-2", seatNo: 2 },
     ];
     const stacks = { "user-1": 100, "user-2": 100 };
+    let result = initHandState({ tableId: "t8", seats, stacks, rng: makeRng(18) });
+    let state = { ...result.state, turnUserId: "user-1" };
+
+    result = applyAction(state, { type: "CHECK", userId: "user-1" });
+    state = result.state;
+    result = applyAction(state, { type: "CHECK", userId: "user-2" });
+    state = result.state;
+
+    let advanced = advanceIfNeeded(state);
+    state = advanced.state;
+    assert.equal(state.phase, "FLOP");
+    assert.equal(state.community.length, 3);
+
+    const firstUserId = state.turnUserId;
+    const secondUserId = firstUserId === "user-1" ? "user-2" : "user-1";
+    result = applyAction(state, { type: "CHECK", userId: firstUserId });
+    state = result.state;
+    result = applyAction(state, { type: "CHECK", userId: secondUserId });
+    state = result.state;
+
+    advanced = advanceIfNeeded(state);
+    state = advanced.state;
+    assert.equal(state.phase, "TURN");
+    assert.equal(state.community.length, 4);
+
+    const turnFirstUserId = state.turnUserId;
+    const turnSecondUserId = turnFirstUserId === "user-1" ? "user-2" : "user-1";
+    result = applyAction(state, { type: "CHECK", userId: turnFirstUserId });
+    state = result.state;
+    result = applyAction(state, { type: "CHECK", userId: turnSecondUserId });
+    state = result.state;
+
+    advanced = advanceIfNeeded(state);
+    state = advanced.state;
+    assert.equal(state.phase, "RIVER");
+    assert.equal(state.community.length, 5);
+    assert.equal(state.communityDealt, 5);
+  }
+
+  {
+    const seats = [
+      { userId: "user-1", seatNo: 1 },
+      { userId: "user-2", seatNo: 2 },
+    ];
+    const stacks = { "user-1": 100, "user-2": 100 };
     let result = initHandState({ tableId: "t3", seats, stacks, rng: makeRng(13) });
     let state = { ...result.state, turnUserId: "user-1" };
 
@@ -410,6 +455,49 @@ const run = async () => {
     assert.equal(advanced.state.phase, "SHOWDOWN");
     assert.equal(advanced.state.turnUserId, null);
     assert.ok(advanced.events.some((event) => event.type === "SHOWDOWN_STARTED"));
+  }
+
+  {
+    const seats = [
+      { userId: "user-1", seatNo: 1 },
+      { userId: "user-2", seatNo: 2 },
+    ];
+    const stacks = { "user-1": 100, "user-2": 100 };
+    let result = initHandState({ tableId: "t9", seats, stacks, rng: makeRng(19) });
+    let state = { ...result.state, turnUserId: "user-1" };
+
+    result = applyAction(state, { type: "CHECK", userId: "user-1" });
+    state = result.state;
+    result = applyAction(state, { type: "CHECK", userId: "user-2" });
+    state = result.state;
+
+    let advanced = advanceIfNeeded(state);
+    state = advanced.state;
+    assert.equal(state.phase, "FLOP");
+
+    const flopFirstUserId = state.turnUserId;
+    const flopSecondUserId = flopFirstUserId === "user-1" ? "user-2" : "user-1";
+    result = applyAction(state, { type: "CHECK", userId: flopFirstUserId });
+    state = result.state;
+    result = applyAction(state, { type: "CHECK", userId: flopSecondUserId });
+    state = result.state;
+
+    advanced = advanceIfNeeded(state);
+    state = advanced.state;
+    assert.equal(state.phase, "TURN");
+    assert.equal(state.community.length, 4);
+
+    const brokenRiver = {
+      ...state,
+      phase: "RIVER",
+      community: state.community.slice(0, 4),
+      communityDealt: 4,
+      toCallByUserId: { "user-1": 0, "user-2": 0 },
+      actedThisRoundByUserId: { "user-1": true, "user-2": true },
+    };
+    const normalized = advanceIfNeeded(brokenRiver);
+    assert.equal(normalized.state.communityDealt, 5);
+    assert.equal(normalized.state.community.length, 5);
   }
 };
 

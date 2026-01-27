@@ -63,6 +63,43 @@ const cardsToDeal = (phase) => {
   return 0;
 };
 
+const expectedCommunityCountForPhase = (phase) => {
+  if (phase === "PREFLOP") return 0;
+  if (phase === "FLOP") return 3;
+  if (phase === "TURN") return 4;
+  if (phase === "RIVER") return 5;
+  return null;
+};
+
+const normalizeCommunityForPhase = (state) => {
+  const expected = expectedCommunityCountForPhase(state.phase);
+  if (expected === null) return state;
+  const hasCommunity = Array.isArray(state.community);
+  const community = hasCommunity ? state.community : [];
+  const deck = Array.isArray(state.deck) ? state.deck : [];
+  let nextCommunity = community;
+  let nextDeck = deck;
+  if (community.length < expected) {
+    const dealt = dealCommunity(deck, expected - community.length);
+    nextDeck = dealt.deck;
+    nextCommunity = community.concat(dealt.communityCards);
+  } else if (community.length > expected) {
+    nextCommunity = community.slice(0, expected);
+  }
+  const needsUpdate =
+    !hasCommunity ||
+    nextCommunity !== community ||
+    nextDeck !== deck ||
+    state.communityDealt !== expected;
+  if (!needsUpdate) return state;
+  return {
+    ...state,
+    community: nextCommunity,
+    communityDealt: expected,
+    deck: nextDeck,
+  };
+};
+
 const resetRoundState = (state) => ({
   ...state,
   toCallByUserId: buildDefaultMap(state.seats, 0),
@@ -117,6 +154,7 @@ const initHandState = ({ tableId, seats, stacks, rng }) => {
     stacks: copyMap(stacks),
     pot: 0,
     community: [],
+    communityDealt: 0,
     dealerSeatNo,
     turnUserId,
     holeCardsByUserId: dealt.holeCardsByUserId,
@@ -244,9 +282,10 @@ const advanceIfNeeded = (state) => {
   }
   if (!isBettingRoundComplete(state)) return { state, events };
 
-  const from = state.phase;
+  const normalizedState = state.phase === "RIVER" ? normalizeCommunityForPhase(state) : state;
+  const from = normalizedState.phase;
   const to = nextStreet(from);
-  let next = resetRoundState({ ...state, phase: to, turnUserId: null });
+  let next = resetRoundState({ ...normalizedState, phase: to, turnUserId: null });
   next = { ...next, turnUserId: getFirstBettingAfterDealer(next) };
 
   const n = cardsToDeal(from);
@@ -255,6 +294,7 @@ const advanceIfNeeded = (state) => {
     next = { ...next, deck: dealt.deck, community: next.community.concat(dealt.communityCards) };
     events.push({ type: "COMMUNITY_DEALT", n });
   }
+  next = normalizeCommunityForPhase(next);
   events.push({ type: "STREET_ADVANCED", from, to });
   return { state: next, events };
 };
