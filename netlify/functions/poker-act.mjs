@@ -153,11 +153,6 @@ const normalizeSeatOrderFromState = (seats) => {
   return out;
 };
 
-const getActiveShowdownUserIds = (state, seatUserIdsInOrder) =>
-  Array.isArray(seatUserIdsInOrder)
-    ? seatUserIdsInOrder.filter((userId) => typeof userId === "string" && !state.foldedByUserId?.[userId])
-    : [];
-
 const validateActionBounds = (state, action, userId) => {
   const toCall = Number(state.toCallByUserId?.[userId] || 0);
   const stack = Number(state.stacks?.[userId] ?? 0);
@@ -356,14 +351,14 @@ export async function handler(event) {
       const dbActiveUserIds = Array.isArray(activeSeatRows)
         ? activeSeatRows.map((row) => row?.user_id).filter(Boolean)
         : [];
-      const activeUserIds = seatUserIdsInOrder.slice();
+      const activeUserIdsForHoleCards = seatUserIdsInOrder.slice();
 
       let holeCardsByUserId;
       try {
         const holeCards = await loadHoleCardsByUserId(tx, {
           tableId,
           handId: currentState.handId,
-          activeUserIds,
+          activeUserIds: activeUserIdsForHoleCards,
         });
         holeCardsByUserId = holeCards.holeCardsByUserId;
       } catch (error) {
@@ -527,7 +522,9 @@ export async function handler(event) {
       }
 
       if (nextState.phase === "SHOWDOWN" && !nextState.showdown) {
-        const showdownUserIds = getActiveShowdownUserIds(nextState, seatUserIdsInOrder);
+        const showdownUserIds = seatUserIdsInOrder.filter(
+          (userId) => typeof userId === "string" && !nextState.foldedByUserId?.[userId]
+        );
         if (showdownUserIds.length === 0) {
           rejectStateInvalid("showdown_no_players");
         }
