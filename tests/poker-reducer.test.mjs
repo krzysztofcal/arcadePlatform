@@ -197,7 +197,7 @@ const run = async () => {
     ];
     const stacks = { "user-1": 100, "user-2": 100, "user-3": 100 };
     let result = initHandState({ tableId: "t5", seats, stacks, rng: makeRng(15) });
-    let state = { ...result.state, turnUserId: "user-1" };
+    let state = { ...result.state };
 
     result = applyAction(state, { type: "BET", userId: "user-1", amount: 10 });
     state = result.state;
