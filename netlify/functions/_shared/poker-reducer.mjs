@@ -70,6 +70,17 @@ const resetRoundState = (state) => ({
   actedThisRoundByUserId: buildDefaultMap(state.seats, false),
 });
 
+const isBettingRoundComplete = (state) => {
+  const eligible = getBettingSeats(state);
+  if (eligible.length === 0) return true;
+  for (const seat of eligible) {
+    const userId = seat.userId;
+    if (!state.actedThisRoundByUserId?.[userId]) return false;
+    if ((state.toCallByUserId?.[userId] || 0) !== 0) return false;
+  }
+  return true;
+};
+
 const ensureEvents = (events, entry) => {
   events.push(entry);
   return events;
@@ -231,10 +242,7 @@ const advanceIfNeeded = (state) => {
     events.push({ type: "SHOWDOWN_STARTED", reason: "no_betting_players" });
     return { state: next, events };
   }
-  const nobodyOwes = active.every((seat) => (state.toCallByUserId?.[seat.userId] || 0) === 0);
-  const allBettersActed = betting.every((seat) => state.actedThisRoundByUserId?.[seat.userId]);
-  const allSettled = nobodyOwes && allBettersActed;
-  if (!allSettled) return { state, events };
+  if (!isBettingRoundComplete(state)) return { state, events };
 
   const from = state.phase;
   const to = nextStreet(from);
@@ -251,4 +259,4 @@ const advanceIfNeeded = (state) => {
   return { state: next, events };
 };
 
-export { initHandState, getLegalActions, applyAction, advanceIfNeeded };
+export { initHandState, getLegalActions, applyAction, advanceIfNeeded, isBettingRoundComplete };
