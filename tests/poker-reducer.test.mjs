@@ -497,6 +497,24 @@ const run = async () => {
     };
     assert.throws(() => advanceIfNeeded(brokenRiver), /invalid_state/);
   }
+
+  {
+    const seats = [
+      { userId: "user-1", seatNo: 1 },
+      { userId: "user-2", seatNo: 2 },
+    ];
+    const stacks = { "user-1": 100, "user-2": 100 };
+    let result = initHandState({ tableId: "t10", seats, stacks, rng: makeRng(20) });
+    let state = {
+      ...result.state,
+      phase: "TURN",
+      community: result.state.community.slice(0, 3),
+      communityDealt: 3,
+      toCallByUserId: { "user-1": 0, "user-2": 0 },
+      actedThisRoundByUserId: { "user-1": true, "user-2": true },
+    };
+    assert.throws(() => advanceIfNeeded(state), /invalid_state/);
+  }
 };
 
 await run();

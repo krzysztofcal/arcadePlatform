@@ -267,9 +267,10 @@ const advanceIfNeeded = (state) => {
   }
   if (!isBettingRoundComplete(state)) return { state, events };
 
-  const from = state.phase;
+  const validatedState = assertCommunityCountForPhase(state);
+  const from = validatedState.phase;
   const to = nextStreet(from);
-  let next = resetRoundState({ ...state, phase: to, turnUserId: null });
+  let next = resetRoundState({ ...validatedState, phase: to, turnUserId: null });
   next = { ...next, turnUserId: getFirstBettingAfterDealer(next) };
 
   const n = cardsToDeal(from);
