@@ -223,6 +223,30 @@
     el.disabled = loading;
   }
 
+  function renderPhaseLabel(state){
+    var phaseLabelEl = document.getElementById('pokerPhaseLabel');
+    if (!phaseLabelEl) return;
+    var phase = state && typeof state.phase === 'string' && state.phase ? state.phase : 'UNKNOWN';
+    phaseLabelEl.textContent = 'Phase: ' + phase;
+  }
+
+  function renderCommunityBoard(state){
+    var boardEl = document.getElementById('pokerBoard');
+    if (!boardEl) return;
+    var suitMap = { S: '♠', H: '♥', D: '♦', C: '♣' };
+    var cards = state && Array.isArray(state.community) ? state.community.slice(0, 5) : [];
+    boardEl.innerHTML = '';
+    for (var i = 0; i < cards.length; i++){
+      var card = cards[i] || {};
+      var rank = card.r == null ? '?' : String(card.r);
+      var suit = suitMap[card.s] || '?';
+      var cardEl = document.createElement('div');
+      cardEl.className = 'poker-card';
+      cardEl.textContent = rank + suit;
+      boardEl.appendChild(cardEl);
+    }
+  }
+
   function isPendingResponse(data){
     return !!(data && data.pending);
   }
@@ -859,6 +883,8 @@
       if (yourStackEl) yourStackEl.textContent = yourStack;
       if (potEl) potEl.textContent = gameState.pot != null ? gameState.pot : 0;
       if (phaseEl) phaseEl.textContent = gameState.phase || '-';
+      renderPhaseLabel(gameState);
+      renderCommunityBoard(gameState);
       if (versionEl) versionEl.textContent = stateObj.version != null ? stateObj.version : '-';
       if (jsonBox) jsonBox.textContent = JSON.stringify(gameState, null, 2);
     }
