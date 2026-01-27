@@ -495,9 +495,7 @@ const run = async () => {
       toCallByUserId: { "user-1": 0, "user-2": 0 },
       actedThisRoundByUserId: { "user-1": true, "user-2": true },
     };
-    const normalized = advanceIfNeeded(brokenRiver);
-    assert.equal(normalized.state.communityDealt, 5);
-    assert.equal(normalized.state.community.length, 5);
+    assert.throws(() => advanceIfNeeded(brokenRiver), /invalid_state/);
   }
 };
 

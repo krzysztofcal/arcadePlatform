@@ -71,33 +71,18 @@ const expectedCommunityCountForPhase = (phase) => {
   return null;
 };
 
-const normalizeCommunityForPhase = (state) => {
+const assertCommunityCountForPhase = (state) => {
   const expected = expectedCommunityCountForPhase(state.phase);
   if (expected === null) return state;
   const hasCommunity = Array.isArray(state.community);
   const community = hasCommunity ? state.community : [];
-  const deck = Array.isArray(state.deck) ? state.deck : [];
-  let nextCommunity = community;
-  let nextDeck = deck;
-  if (community.length < expected) {
-    const dealt = dealCommunity(deck, expected - community.length);
-    nextDeck = dealt.deck;
-    nextCommunity = community.concat(dealt.communityCards);
-  } else if (community.length > expected) {
-    nextCommunity = community.slice(0, expected);
+  if (community.length !== expected) {
+    throw new Error("invalid_state");
   }
-  const needsUpdate =
-    !hasCommunity ||
-    nextCommunity !== community ||
-    nextDeck !== deck ||
-    state.communityDealt !== expected;
-  if (!needsUpdate) return state;
-  return {
-    ...state,
-    community: nextCommunity,
-    communityDealt: expected,
-    deck: nextDeck,
-  };
+  if (state.communityDealt !== expected || !hasCommunity) {
+    return { ...state, community, communityDealt: expected };
+  }
+  return state;
 };
 
 const resetRoundState = (state) => ({
@@ -282,19 +267,21 @@ const advanceIfNeeded = (state) => {
   }
   if (!isBettingRoundComplete(state)) return { state, events };
 
-  const normalizedState = state.phase === "RIVER" ? normalizeCommunityForPhase(state) : state;
-  const from = normalizedState.phase;
+  const from = state.phase;
   const to = nextStreet(from);
-  let next = resetRoundState({ ...normalizedState, phase: to, turnUserId: null });
+  let next = resetRoundState({ ...state, phase: to, turnUserId: null });
   next = { ...next, turnUserId: getFirstBettingAfterDealer(next) };
 
   const n = cardsToDeal(from);
+  if (n === 0) {
+    assertCommunityCountForPhase(state);
+  }
   if (n > 0) {
     const dealt = dealCommunity(next.deck || [], n);
     next = { ...next, deck: dealt.deck, community: next.community.concat(dealt.communityCards) };
     events.push({ type: "COMMUNITY_DEALT", n });
   }
-  next = normalizeCommunityForPhase(next);
+  next = assertCommunityCountForPhase(next);
   events.push({ type: "STREET_ADVANCED", from, to });
   return { state: next, events };
 };
