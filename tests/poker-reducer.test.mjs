@@ -489,9 +489,9 @@ const run = async () => {
 
     const brokenRiver = {
       ...state,
-      phase: "TURN",
-      community: state.community.concat(state.community[0]),
-      communityDealt: 5,
+      phase: "RIVER",
+      community: state.community.slice(0, 4),
+      communityDealt: 4,
       toCallByUserId: { "user-1": 0, "user-2": 0 },
       actedThisRoundByUserId: { "user-1": true, "user-2": true },
     };

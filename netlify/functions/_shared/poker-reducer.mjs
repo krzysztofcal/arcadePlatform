@@ -67,7 +67,7 @@ const expectedCommunityCountForPhase = (phase) => {
   if (phase === "PREFLOP") return 0;
   if (phase === "FLOP") return 3;
   if (phase === "TURN") return 4;
-  if (phase === "RIVER") return 5;
+  if (phase === "RIVER" || phase === "SHOWDOWN") return 5;
   return null;
 };
 
