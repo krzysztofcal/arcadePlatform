@@ -5,9 +5,11 @@ import { isHoleCardsTableMissing, loadHoleCardsByUserId } from "../netlify/funct
 import { advanceIfNeeded, applyAction } from "../netlify/functions/_shared/poker-reducer.mjs";
 import { normalizeRequestId } from "../netlify/functions/_shared/poker-request-id.mjs";
 import {
+  getRng,
   isPlainObject,
   isStateStorageValid,
   normalizeJsonState,
+  upgradeLegacyInitStateWithSeats,
   withoutPrivateState,
 } from "../netlify/functions/_shared/poker-state-utils.mjs";
 import { deriveCommunityCards, deriveRemainingDeck } from "../netlify/functions/_shared/poker-deal-deterministic.mjs";
@@ -105,6 +107,72 @@ const makeHandler = (queries, storedState, userId, options = {}) =>
       }),
     klog: options.klog || (() => {}),
   });
+
+const makeStartHandHandler = (queries, storedState, userId, seatUserIds) => {
+  const initialStacks = seatUserIds.reduce((acc, id) => {
+    acc[id] = 100;
+    return acc;
+  }, {});
+  return loadPokerHandler("netlify/functions/poker-start-hand.mjs", {
+    baseHeaders: () => ({}),
+    corsHeaders: () => ({ "access-control-allow-origin": "https://example.test" }),
+    dealHoleCards,
+    deriveDeck,
+    extractBearerToken: () => "token",
+    getRng,
+    isPlainObject,
+    isStateStorageValid,
+    normalizeJsonState,
+    upgradeLegacyInitStateWithSeats,
+    verifySupabaseJwt: async () => ({ valid: true, userId }),
+    isValidUuid: () => true,
+    withoutPrivateState,
+    beginSql: async (fn) =>
+      fn({
+        unsafe: async (query, params) => {
+          const text = String(query).toLowerCase();
+          queries.push({ query: String(query), params });
+          if (text.includes("from public.poker_tables")) {
+            return [{ id: tableId, status: "OPEN", max_players: 6 }];
+          }
+          if (text.includes("from public.poker_state")) {
+            if (storedState.value) {
+              return [{ version: 1, state: JSON.parse(storedState.value) }];
+            }
+            return [{ version: 1, state: { phase: "INIT", stacks: initialStacks } }];
+          }
+          if (text.includes("from public.poker_seats")) {
+            return seatUserIds.map((id, index) => ({ user_id: id, seat_no: index + 1, status: "ACTIVE" }));
+          }
+          if (text.includes("insert into public.poker_hole_cards")) {
+            const holeCardsStore = storedState.holeCardsStore;
+            for (let i = 0; i < params.length; i += 4) {
+              const tableKey = params[i];
+              const handKey = params[i + 1];
+              const userKey = params[i + 2];
+              const cards = JSON.parse(params[i + 3]);
+              holeCardsStore.set(`${tableKey}|${handKey}|${userKey}`, cards);
+            }
+            return [];
+          }
+          if (text.includes("from public.poker_hole_cards")) {
+            const holeCardsStore = storedState.holeCardsStore;
+            const key = `${params?.[0]}|${params?.[1]}|${params?.[2]}`;
+            if (holeCardsStore.has(key)) {
+              return [{ cards: holeCardsStore.get(key) }];
+            }
+            return [];
+          }
+          if (text.includes("update public.poker_state")) {
+            storedState.value = params?.[1] || null;
+            return [{ version: 2, state: storedState.value }];
+          }
+          return [];
+        },
+      }),
+    klog: () => {},
+  });
+};
 
 const runCase = async ({
   state,
@@ -319,6 +387,57 @@ const run = async () => {
   assert.equal(JSON.stringify(user3Payload).includes("holeCardsByUserId"), false);
   assert.equal(JSON.stringify(user3Payload).includes('"deck"'), false);
   assert.equal(JSON.stringify(user3Payload).includes('"handSeed"'), false);
+
+  {
+    const startQueries = [];
+    const startState = { value: null, holeCardsStore: new Map() };
+    const startHandler = makeStartHandHandler(startQueries, startState, "user-1", ["user-1", "user-2"]);
+    const startResponse = await startHandler({
+      httpMethod: "POST",
+      headers: { origin: "https://example.test", authorization: "Bearer token" },
+      body: JSON.stringify({ tableId, requestId: "req-start-1" }),
+    });
+    assert.equal(startResponse.statusCode, 200);
+    const startedState = JSON.parse(startState.value);
+    const holeCardsByUserId = {};
+    for (const [key, cards] of startState.holeCardsStore.entries()) {
+      const [, handKey, userKey] = key.split("|");
+      if (handKey === startedState.handId) {
+        holeCardsByUserId[userKey] = cards;
+      }
+    }
+    const storedActState = { value: JSON.stringify(startedState), version: 1 };
+    const firstUserId = startedState.turnUserId;
+    const secondUserId = firstUserId === "user-1" ? "user-2" : "user-1";
+    const actQueries = [];
+    const handlerFirst = makeHandler(actQueries, storedActState, firstUserId, {
+      holeCardsByUserId,
+      activeSeatUserIds: ["user-1", "user-2"],
+    });
+    const firstCheck = await handlerFirst({
+      httpMethod: "POST",
+      headers: { origin: "https://example.test", authorization: "Bearer token" },
+      body: JSON.stringify({ tableId, requestId: "req-check-1", action: { type: "CHECK" } }),
+    });
+    assert.equal(firstCheck.statusCode, 200);
+    const handlerSecond = makeHandler(actQueries, storedActState, secondUserId, {
+      holeCardsByUserId,
+      activeSeatUserIds: ["user-1", "user-2"],
+    });
+    const secondCheck = await handlerSecond({
+      httpMethod: "POST",
+      headers: { origin: "https://example.test", authorization: "Bearer token" },
+      body: JSON.stringify({ tableId, requestId: "req-check-2", action: { type: "CHECK" } }),
+    });
+    assert.equal(secondCheck.statusCode, 200);
+    const secondPayload = JSON.parse(secondCheck.body);
+    assert.equal(secondPayload.state.state.phase, "FLOP");
+    assert.equal(secondPayload.state.state.community.length, 3);
+    assert.equal(typeof secondPayload.state.version, "number");
+    assert.ok(secondPayload.state.version > 1);
+    assert.ok(Array.isArray(secondPayload.myHoleCards));
+    assert.equal(secondPayload.myHoleCards.length, 2);
+  }
 
   const updateCall = queries.find((entry) => entry.query.toLowerCase().includes("update public.poker_state"));
   assert.ok(updateCall, "expected poker_state update");
