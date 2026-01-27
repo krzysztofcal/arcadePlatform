@@ -4,6 +4,7 @@ import { isHoleCardsTableMissing, loadHoleCardsByUserId } from "./_shared/poker-
 import { deriveCommunityCards, deriveRemainingDeck } from "./_shared/poker-deal-deterministic.mjs";
 import { advanceIfNeeded, applyAction } from "./_shared/poker-reducer.mjs";
 import { normalizeRequestId } from "./_shared/poker-request-id.mjs";
+import { computeShowdown } from "./_shared/poker-showdown.mjs";
 import { isPlainObject, isStateStorageValid, normalizeJsonState, withoutPrivateState } from "./_shared/poker-state-utils.mjs";
 import { isValidUuid } from "./_shared/poker-utils.mjs";
 
@@ -151,6 +152,11 @@ const normalizeSeatOrderFromState = (seats) => {
   }
   return out;
 };
+
+const getActiveShowdownUserIds = (state, seatUserIdsInOrder) =>
+  Array.isArray(seatUserIdsInOrder)
+    ? seatUserIdsInOrder.filter((userId) => typeof userId === "string" && !state.foldedByUserId?.[userId])
+    : [];
 
 const validateActionBounds = (state, action, userId) => {
   const toCall = Number(state.toCallByUserId?.[userId] || 0);
@@ -350,7 +356,7 @@ export async function handler(event) {
       const dbActiveUserIds = Array.isArray(activeSeatRows)
         ? activeSeatRows.map((row) => row?.user_id).filter(Boolean)
         : [];
-      const activeUserIds = seatUserIdsInOrder.slice();
+      const activeUserIds = getActiveShowdownUserIds(currentState, seatUserIdsInOrder);
 
       let holeCardsByUserId;
       try {
@@ -518,6 +524,86 @@ export async function handler(event) {
         if (!Array.isArray(advanced.events) || advanced.events.length === 0) break;
         if (nextState.phase === prevPhase) break;
         loops += 1;
+      }
+
+      if (nextState.phase === "SHOWDOWN" && !nextState.showdown) {
+        const showdownUserIds = getActiveShowdownUserIds(nextState, seatUserIdsInOrder);
+        if (showdownUserIds.length === 0) {
+          rejectStateInvalid("showdown_no_players");
+        }
+
+        let showdownCommunity = Array.isArray(nextState.community) ? nextState.community.slice() : [];
+        if (showdownCommunity.length > 5) {
+          rejectStateInvalid("showdown_invalid_community", { communityLen: showdownCommunity.length });
+        }
+        if (showdownCommunity.length < 5) {
+          try {
+            showdownCommunity = deriveCommunityCards({
+              handSeed: currentState.handSeed,
+              seatUserIdsInOrder,
+              communityDealt: 5,
+            });
+          } catch {
+            rejectStateInvalid("showdown_community_derive_failed");
+          }
+        }
+
+        const players = showdownUserIds.map((userId) => {
+          const holeCards = holeCardsByUserId?.[userId];
+          if (!Array.isArray(holeCards) || holeCards.length !== 2) {
+            rejectStateInvalid("showdown_missing_hole_cards", { userId: hashUserId(userId) });
+          }
+          return { userId, holeCards };
+        });
+
+        let showdownResult;
+        try {
+          showdownResult = computeShowdown({ community: showdownCommunity, players });
+        } catch (error) {
+          rejectStateInvalid("showdown_failed", { reason: error?.message || null });
+        }
+
+        const winners = Array.isArray(showdownResult?.winners) ? showdownResult.winners : [];
+        if (winners.length === 0) {
+          rejectStateInvalid("showdown_no_winners");
+        }
+        const winnersInSeatOrder = seatUserIdsInOrder.filter((userId) => winners.includes(userId));
+        if (winnersInSeatOrder.length === 0) {
+          rejectStateInvalid("showdown_winners_invalid");
+        }
+
+        const potValue = Number(nextState.pot ?? 0);
+        if (!Number.isFinite(potValue) || potValue < 0) {
+          rejectStateInvalid("showdown_invalid_pot", { pot: nextState.pot ?? null });
+        }
+        const nextStacks = { ...nextState.stacks };
+        if (potValue > 0) {
+          const share = Math.floor(potValue / winnersInSeatOrder.length);
+          let remainder = potValue - share * winnersInSeatOrder.length;
+          for (const userId of winnersInSeatOrder) {
+            const baseStack = Number(nextStacks[userId] ?? 0);
+            if (!Number.isFinite(baseStack)) {
+              rejectStateInvalid("showdown_invalid_stack", { userId: hashUserId(userId) });
+            }
+            const bonus = remainder > 0 ? 1 : 0;
+            if (remainder > 0) remainder -= 1;
+            nextStacks[userId] = baseStack + share + bonus;
+          }
+        }
+
+        nextState = {
+          ...nextState,
+          community: showdownCommunity,
+          communityDealt: showdownCommunity.length,
+          stacks: potValue > 0 ? nextStacks : nextState.stacks,
+          pot: 0,
+          showdown: {
+            winners: winnersInSeatOrder,
+            reason: "computed",
+            potAwarded: potValue,
+            awardedAt: new Date().toISOString(),
+          },
+        };
       }
 
       const { holeCardsByUserId: _ignoredHoleCards, deck: _ignoredDeck, ...stateBase } = nextState;

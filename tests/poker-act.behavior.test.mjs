@@ -4,6 +4,7 @@ import { dealHoleCards } from "../netlify/functions/_shared/poker-engine.mjs";
 import { isHoleCardsTableMissing, loadHoleCardsByUserId } from "../netlify/functions/_shared/poker-hole-cards-store.mjs";
 import { advanceIfNeeded, applyAction } from "../netlify/functions/_shared/poker-reducer.mjs";
 import { normalizeRequestId } from "../netlify/functions/_shared/poker-request-id.mjs";
+import { computeShowdown } from "../netlify/functions/_shared/poker-showdown.mjs";
 import {
   getRng,
   isPlainObject,
@@ -49,6 +50,7 @@ const makeHandler = (queries, storedState, userId, options = {}) =>
   loadPokerHandler("netlify/functions/poker-act.mjs", {
     baseHeaders: () => ({}),
     corsHeaders: () => ({ "access-control-allow-origin": "https://example.test" }),
+    computeShowdown,
     extractBearerToken: () => "token",
     verifySupabaseJwt: async () => ({ valid: true, userId }),
     isValidUuid: () => true,
@@ -566,6 +568,47 @@ const run = async () => {
   });
   assert.equal(filteredResponse.response.statusCode, 200);
   assert.deepEqual(capturedKeys, ["user-1", "user-2", "user-3"]);
+
+  {
+    const showdownState = {
+      ...baseState,
+      phase: "RIVER",
+      pot: 25,
+      community: deriveCommunityCards({ handSeed: baseState.handSeed, seatUserIdsInOrder: seatOrder, communityDealt: 4 }),
+      communityDealt: 4,
+      turnUserId: "user-1",
+      actedThisRoundByUserId: { "user-1": false, "user-2": true, "user-3": true },
+      foldedByUserId: { "user-1": false, "user-2": false, "user-3": true },
+      toCallByUserId: { "user-1": 0, "user-2": 0, "user-3": 0 },
+      betThisRoundByUserId: { "user-1": 0, "user-2": 0, "user-3": 0 },
+    };
+    const totalBefore = Object.values(showdownState.stacks).reduce((sum, value) => sum + value, 0) + showdownState.pot;
+    const showdownResponse = await runCase({
+      state: showdownState,
+      action: { type: "CHECK" },
+      requestId: "req-showdown",
+      userId: "user-1",
+    });
+    assert.equal(showdownResponse.response.statusCode, 200);
+    const showdownPayload = JSON.parse(showdownResponse.response.body);
+    assert.equal(showdownPayload.state.state.phase, "SHOWDOWN");
+    assert.ok(Array.isArray(showdownPayload.state.state.showdown?.winners));
+    assert.ok(showdownPayload.state.state.showdown.winners.length > 0);
+    assert.equal(showdownPayload.state.state.pot, 0);
+    const fullCommunity = deriveCommunityCards({ handSeed: baseState.handSeed, seatUserIdsInOrder: seatOrder, communityDealt: 5 });
+    assert.deepEqual(showdownPayload.state.state.community, fullCommunity);
+    const expectedShowdown = computeShowdown({
+      community: fullCommunity,
+      players: [
+        { userId: "user-1", holeCards: defaultHoleCards["user-1"] },
+        { userId: "user-2", holeCards: defaultHoleCards["user-2"] },
+      ],
+    });
+    const expectedWinners = seatOrder.filter((userId) => expectedShowdown.winners.includes(userId));
+    assert.deepEqual(showdownPayload.state.state.showdown.winners, expectedWinners);
+    const totalAfter = Object.values(showdownPayload.state.state.stacks).reduce((sum, value) => sum + value, 0);
+    assert.equal(totalAfter, totalBefore);
+  }
 
   const inactiveSeatResponse = await runCase({
     state: baseState,
