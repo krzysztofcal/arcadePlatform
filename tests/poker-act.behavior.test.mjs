@@ -64,7 +64,7 @@ const makeHandler = (queries, storedState, userId, options = {}) =>
     deriveCommunityCards,
     deriveRemainingDeck,
     isHoleCardsTableMissing,
-    loadHoleCardsByUserId,
+    loadHoleCardsByUserId: options.loadHoleCardsByUserId || loadHoleCardsByUserId,
     beginSql: async (fn) =>
       fn({
         unsafe: async (query, params) => {
@@ -186,6 +186,7 @@ const runCase = async ({
   holeCardsError,
   applyAction: applyActionOverride,
   activeSeatUserIds,
+  loadHoleCardsByUserId: loadHoleCardsByUserIdOverride,
 }) => {
   const queries = [];
   const storedState = { value: JSON.stringify(state), version: 3 };
@@ -195,6 +196,7 @@ const runCase = async ({
     holeCardsError,
     applyAction: applyActionOverride,
     activeSeatUserIds,
+    loadHoleCardsByUserId: loadHoleCardsByUserIdOverride,
   });
   const response = await handler({
     httpMethod: "POST",
@@ -613,6 +615,39 @@ const run = async () => {
     assert.deepEqual(showdownPayload.state.state.showdown.winners, expectedWinners);
     const totalAfter = Object.values(showdownPayload.state.state.stacks).reduce((sum, value) => sum + value, 0);
     assert.equal(totalAfter, totalBefore);
+  }
+
+  {
+    const showdownState = {
+      ...baseState,
+      phase: "RIVER",
+      pot: 10,
+      community: deriveCommunityCards({ handSeed: baseState.handSeed, seatUserIdsInOrder: seatOrder, communityDealt: 4 }),
+      communityDealt: 4,
+      turnUserId: "user-1",
+      actedThisRoundByUserId: { "user-1": false, "user-2": true, "user-3": true },
+      foldedByUserId: { "user-1": false, "user-2": false, "user-3": true },
+      toCallByUserId: { "user-1": 0, "user-2": 0, "user-3": 0 },
+      betThisRoundByUserId: { "user-1": 0, "user-2": 0, "user-3": 0 },
+    };
+    let capturedActiveUserIds = null;
+    const holeCardsLoader = async (_tx, { activeUserIds }) => {
+      capturedActiveUserIds = activeUserIds.slice();
+      return { holeCardsByUserId: defaultHoleCards };
+    };
+    const showdownResponse = await runCase({
+      state: showdownState,
+      action: { type: "CHECK" },
+      requestId: "req-showdown-hole-cards",
+      userId: "user-1",
+      loadHoleCardsByUserId: holeCardsLoader,
+    });
+    assert.equal(showdownResponse.response.statusCode, 200);
+    assert.deepEqual(capturedActiveUserIds, ["user-1", "user-2", "user-3"]);
+    const payload = JSON.parse(showdownResponse.response.body);
+    const winners = payload.state.state.showdown?.winners || [];
+    assert.ok(winners.length > 0);
+    assert.equal(winners.includes("user-3"), false);
   }
 
   const inactiveSeatResponse = await runCase({
