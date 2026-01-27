@@ -273,9 +273,6 @@ const advanceIfNeeded = (state) => {
   next = { ...next, turnUserId: getFirstBettingAfterDealer(next) };
 
   const n = cardsToDeal(from);
-  if (n === 0) {
-    assertCommunityCountForPhase(state);
-  }
   if (n > 0) {
     const dealt = dealCommunity(next.deck || [], n);
     next = { ...next, deck: dealt.deck, community: next.community.concat(dealt.communityCards) };
