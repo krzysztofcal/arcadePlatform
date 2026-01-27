@@ -14,3 +14,4 @@
 
   # Feature policy / Permissions policy
   Permissions-Policy: geolocation=(), microphone=(), camera=(), payment=()
+
