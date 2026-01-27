@@ -3,6 +3,14 @@ test-results/
 playwright-report/
 .cache/
 
+# --- local / secrets ---
+.local/
+.env
+.env.*
+
+# --- local test & scratch tools ---
+tools/poker-e2e-*.mjs
+
 # Local Netlify folder
 .netlify
 
