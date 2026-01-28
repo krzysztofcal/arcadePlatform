@@ -424,6 +424,10 @@ const run = async () => {
   assert.ok(Array.isArray(user1Payload.myHoleCards));
   assert.equal(user1Payload.myHoleCards.length, 2);
   assert.equal(user1Payload.replayed, false);
+  assert.ok(user1Payload.hand);
+  assert.equal(typeof user1Payload.hand.handId, "string");
+  assert.equal(user1Payload.hand.phase, user1Payload.state.state.phase);
+  assert.equal(Array.isArray(user1Payload.events), true);
   assert.equal(user1Payload.holeCardsByUserId, undefined);
   assert.equal(user1Payload.deck, undefined);
   assert.equal(user1Payload.state.holeCardsByUserId, undefined);
@@ -855,7 +859,40 @@ const run = async () => {
     assert.equal(timeoutResult.applied, true);
     assert.equal(timeoutResult.state.phase, "SHOWDOWN");
     assert.equal(timeoutResult.state.pot, 0);
-    assert.ok(timeoutResult.state.showdown);
+  assert.ok(timeoutResult.state.showdown);
+  }
+
+  {
+    const resetState = {
+      ...baseState,
+      seats: [
+        { userId: "user-1", seatNo: 1 },
+        { userId: "user-2", seatNo: 2 },
+      ],
+      stacks: { "user-1": 10, "user-2": 10 },
+      pot: 5,
+      dealerSeatNo: 1,
+      turnUserId: "user-1",
+      handId: "hand-reset-1",
+      handSeed: "seed-reset-1",
+      toCallByUserId: { "user-1": 0, "user-2": 0 },
+      betThisRoundByUserId: { "user-1": 0, "user-2": 0 },
+      actedThisRoundByUserId: { "user-1": false, "user-2": false },
+      foldedByUserId: { "user-1": false, "user-2": false },
+    };
+    const resetResponse = await runCase({
+      state: resetState,
+      action: { type: "FOLD" },
+      requestId: "req-reset",
+      userId: "user-1",
+    });
+    assert.equal(resetResponse.response.statusCode, 200);
+    const resetPayload = JSON.parse(resetResponse.response.body);
+    assert.equal(Array.isArray(resetPayload.events), true);
+    assert.ok(resetPayload.events.some((event) => event?.type === "HAND_RESET"));
+    assert.equal(typeof resetPayload.hand.handId, "string");
+    assert.notEqual(resetPayload.hand.handId, resetState.handId);
+    assert.equal(resetPayload.hand.phase, "PREFLOP");
   }
 
   {

@@ -15,6 +15,16 @@ const ADVANCE_LIMIT = 4;
 const isPlainObjectValue = (value) => value && typeof value === "object" && !Array.isArray(value);
 const isPlainObject = isPlainObjectValue;
 
+const buildHandSnapshot = (publicState) => ({
+  handId: typeof publicState?.handId === "string" ? publicState.handId : null,
+  phase: typeof publicState?.phase === "string" ? publicState.phase : null,
+  dealerSeatNo: Number.isFinite(publicState?.dealerSeatNo) ? publicState.dealerSeatNo : null,
+  turnUserId: typeof publicState?.turnUserId === "string" ? publicState.turnUserId : null,
+  turnNo: Number.isInteger(publicState?.turnNo) ? publicState.turnNo : null,
+  turnStartedAt: Number.isFinite(publicState?.turnStartedAt) ? publicState.turnStartedAt : null,
+  turnDeadlineAt: Number.isFinite(publicState?.turnDeadlineAt) ? publicState.turnDeadlineAt : null,
+});
+
 const parseBody = (body) => {
   if (!body) return { ok: true, value: {} };
   try {
@@ -700,8 +710,9 @@ export async function handler(event) {
           version: result.version,
           state: result.state,
         },
+        hand: buildHandSnapshot(result.state),
         myHoleCards: result.myHoleCards,
-        events: result.events,
+        events: Array.isArray(result.events) ? result.events : [],
         replayed: result.replayed,
       }),
     };

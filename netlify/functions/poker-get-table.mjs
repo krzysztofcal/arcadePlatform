@@ -22,6 +22,16 @@ const hasSameUserIds = (left, right) => {
   return true;
 };
 
+const buildHandSnapshot = (publicState) => ({
+  handId: typeof publicState?.handId === "string" ? publicState.handId : null,
+  phase: typeof publicState?.phase === "string" ? publicState.phase : null,
+  dealerSeatNo: Number.isFinite(publicState?.dealerSeatNo) ? publicState.dealerSeatNo : null,
+  turnUserId: typeof publicState?.turnUserId === "string" ? publicState.turnUserId : null,
+  turnNo: Number.isInteger(publicState?.turnNo) ? publicState.turnNo : null,
+  turnStartedAt: Number.isFinite(publicState?.turnStartedAt) ? publicState.turnStartedAt : null,
+  turnDeadlineAt: Number.isFinite(publicState?.turnDeadlineAt) ? publicState.turnDeadlineAt : null,
+});
+
 const parseTableId = (event) => {
   const queryValue = event.queryStringParameters?.tableId;
   if (typeof queryValue === "string" && queryValue.trim()) {
@@ -293,6 +303,7 @@ export async function handler(event) {
     const seats = result.seats;
     const stateVersion = result.stateVersion;
     const publicState = withoutPrivateState(result.currentState);
+    const hand = buildHandSnapshot(publicState);
 
     const tablePayload = {
       id: table.id,
@@ -316,7 +327,9 @@ export async function handler(event) {
           version: stateVersion,
           state: publicState,
         },
+        hand,
         myHoleCards: result.myHoleCards || [],
+        events: [],
       }),
     };
   } catch (error) {

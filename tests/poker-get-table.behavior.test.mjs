@@ -98,6 +98,11 @@ const run = async () => {
   assert.equal(JSON.stringify(happyPayload).includes("holeCardsByUserId"), false);
   assert.equal(JSON.stringify(happyPayload).includes('"deck"'), false);
   assert.equal(JSON.stringify(happyPayload).includes('"handSeed"'), false);
+  assert.ok(happyPayload.hand);
+  assert.equal(typeof happyPayload.hand.handId, "string");
+  assert.equal(happyPayload.hand.phase, happyPayload.state.state.phase);
+  assert.equal(Array.isArray(happyPayload.events), true);
+  assert.deepEqual(happyPayload.events, []);
 
   const stringCardResponse = await makeHandler([], storedState, "user-1", {
     holeCardsByUserId: {
