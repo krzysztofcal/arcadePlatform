@@ -380,7 +380,7 @@ const run = async () => {
       { userId: "user-2", seatNo: 3 },
       { userId: "user-3", seatNo: 5 },
     ];
-    const stacks = { "user-1": 100, "user-2": 100, "user-3": 3 };
+    const stacks = { "user-1": 100, "user-2": 100, "user-3": 20 };
     let result = initHandState({ tableId: "t1", seats, stacks, rng: makeRng(7) });
     let state = { ...result.state, turnUserId: "user-1" };
 
@@ -455,6 +455,50 @@ const run = async () => {
     assert.equal(advanced.state.phase, "SHOWDOWN");
     assert.equal(advanced.state.turnUserId, null);
     assert.ok(advanced.events.some((event) => event.type === "SHOWDOWN_STARTED"));
+  }
+
+  {
+    const seats = [
+      { userId: "user-1", seatNo: 1 },
+      { userId: "user-2", seatNo: 2 },
+    ];
+    const stacks = { "user-1": 100, "user-2": 50 };
+    let result = initHandState({ tableId: "t11", seats, stacks, rng: makeRng(21) });
+    let state = { ...result.state, turnUserId: "user-2" };
+
+    result = applyAction(state, { type: "CHECK", userId: "user-2" });
+    state = result.state;
+    result = applyAction(state, { type: "CHECK", userId: "user-1" });
+    state = result.state;
+
+    let advanced = advanceIfNeeded(state);
+    state = advanced.state;
+    assert.equal(state.phase, "FLOP");
+
+    const firstUserId = state.turnUserId;
+    const secondUserId = firstUserId === "user-1" ? "user-2" : "user-1";
+    const allInAmount = state.stacks[firstUserId];
+    result = applyAction(state, { type: "BET", userId: firstUserId, amount: allInAmount });
+    state = result.state;
+    result = applyAction(state, { type: "CALL", userId: secondUserId });
+    state = result.state;
+
+    assert.throws(() => advanceIfNeeded(state), /all_in_side_pots_unsupported/);
+  }
+
+  {
+    const seats = [
+      { userId: "user-1", seatNo: 1 },
+      { userId: "user-2", seatNo: 2 },
+    ];
+    const stacks = { "user-1": 100, "user-2": 100 };
+    const { state } = initHandState({ tableId: "t12", seats, stacks, rng: makeRng(22) });
+    const legacyState = { ...state };
+    delete legacyState.allInByUserId;
+
+    const result = applyAction(legacyState, { type: "CHECK", userId: legacyState.turnUserId });
+    assert.ok(result?.state?.allInByUserId);
+    assert.equal(result.state.allInByUserId[legacyState.turnUserId], false);
   }
 
   {
