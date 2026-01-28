@@ -63,6 +63,28 @@ const cardsToDeal = (phase) => {
   return 0;
 };
 
+const expectedCommunityCountForPhase = (phase) => {
+  if (phase === "PREFLOP") return 0;
+  if (phase === "FLOP") return 3;
+  if (phase === "TURN") return 4;
+  if (phase === "RIVER" || phase === "SHOWDOWN") return 5;
+  return null;
+};
+
+const assertCommunityCountForPhase = (state) => {
+  const expected = expectedCommunityCountForPhase(state.phase);
+  if (expected === null) return state;
+  const hasCommunity = Array.isArray(state.community);
+  const community = hasCommunity ? state.community : [];
+  if (community.length !== expected) {
+    throw new Error("invalid_state");
+  }
+  if (state.communityDealt !== expected || !hasCommunity) {
+    return { ...state, community, communityDealt: expected };
+  }
+  return state;
+};
+
 const resetRoundState = (state) => ({
   ...state,
   toCallByUserId: buildDefaultMap(state.seats, 0),
@@ -117,6 +139,7 @@ const initHandState = ({ tableId, seats, stacks, rng }) => {
     stacks: copyMap(stacks),
     pot: 0,
     community: [],
+    communityDealt: 0,
     dealerSeatNo,
     turnUserId,
     holeCardsByUserId: dealt.holeCardsByUserId,
@@ -244,9 +267,10 @@ const advanceIfNeeded = (state) => {
   }
   if (!isBettingRoundComplete(state)) return { state, events };
 
-  const from = state.phase;
+  const validatedState = assertCommunityCountForPhase(state);
+  const from = validatedState.phase;
   const to = nextStreet(from);
-  let next = resetRoundState({ ...state, phase: to, turnUserId: null });
+  let next = resetRoundState({ ...validatedState, phase: to, turnUserId: null });
   next = { ...next, turnUserId: getFirstBettingAfterDealer(next) };
 
   const n = cardsToDeal(from);
@@ -255,6 +279,7 @@ const advanceIfNeeded = (state) => {
     next = { ...next, deck: dealt.deck, community: next.community.concat(dealt.communityCards) };
     events.push({ type: "COMMUNITY_DEALT", n });
   }
+  next = assertCommunityCountForPhase(next);
   events.push({ type: "STREET_ADVANCED", from, to });
   return { state: next, events };
 };
