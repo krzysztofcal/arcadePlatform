@@ -38,6 +38,8 @@ export const loadPokerHandler = (filePath, mocks) => {
   const injectable = [
     "baseHeaders",
     "beginSql",
+    "awardPotsAtShowdown",
+    "buildSidePots",
     "corsHeaders",
     "computeShowdown",
     "createDeck",

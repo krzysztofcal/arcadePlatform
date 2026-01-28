@@ -1,5 +1,6 @@
 import { deriveCommunityCards } from "./poker-deal-deterministic.mjs";
 import { advanceIfNeeded, applyAction } from "./poker-reducer.mjs";
+import { awardPotsAtShowdown } from "./poker-payout.mjs";
 import { computeShowdown } from "./poker-showdown.mjs";
 import { isPlainObject } from "./poker-state-utils.mjs";
 
@@ -21,16 +22,6 @@ const normalizeSeatOrderFromState = (seats) => {
     out.push(userId);
   }
   return out;
-};
-
-const allEqualNumbers = (values) => {
-  if (!Array.isArray(values) || values.length === 0) return true;
-  const first = values[0];
-  if (!Number.isFinite(first)) return false;
-  for (let i = 1; i < values.length; i += 1) {
-    if (!Number.isFinite(values[i]) || values[i] !== first) return false;
-  }
-  return true;
 };
 
 const getTimeoutAction = (state) => {
@@ -61,66 +52,16 @@ const ensureShowdown = ({ state, seatUserIdsInOrder }) => {
     });
   }
 
-  const players = showdownUserIds.map((userId) => {
-    const holeCards = state.holeCardsByUserId?.[userId];
-    if (!Array.isArray(holeCards) || holeCards.length !== 2) {
-      throw new Error("showdown_missing_hole_cards");
-    }
-    return { userId, holeCards };
-  });
-
-  const showdownResult = computeShowdown({ community: showdownCommunity, players });
-  const winners = Array.isArray(showdownResult?.winners) ? showdownResult.winners : [];
-  if (winners.length === 0) {
-    throw new Error("showdown_no_winners");
-  }
-  const winnersInSeatOrder = seatUserIdsInOrder.filter((userId) => winners.includes(userId));
-  if (winnersInSeatOrder.length === 0) {
-    throw new Error("showdown_winners_invalid");
-  }
-
-  const hasSidePots = Array.isArray(state.sidePots) && state.sidePots.length > 0;
-  const contributions = state.contributionsByUserId;
-  const hasUnequalContrib =
-    isPlainObject(contributions) &&
-    showdownUserIds.length > 1 &&
-    !allEqualNumbers(showdownUserIds.map((userId) => Number(contributions[userId])));
-  if (hasSidePots || hasUnequalContrib) {
-    throw new Error("showdown_side_pots_unsupported");
-  }
-
-  const potValue = Number(state.pot ?? 0);
-  if (!Number.isFinite(potValue) || potValue < 0) {
-    throw new Error("showdown_invalid_pot");
-  }
-  const nextStacks = { ...state.stacks };
-  if (potValue > 0) {
-    const share = Math.floor(potValue / winnersInSeatOrder.length);
-    let remainder = potValue - share * winnersInSeatOrder.length;
-    for (const userId of winnersInSeatOrder) {
-      const baseStack = Number(nextStacks[userId] ?? 0);
-      if (!Number.isFinite(baseStack)) {
-        throw new Error("showdown_invalid_stack");
-      }
-      const bonus = remainder > 0 ? 1 : 0;
-      if (remainder > 0) remainder -= 1;
-      nextStacks[userId] = baseStack + share + bonus;
-    }
-  }
-
-  return {
-    ...state,
-    community: showdownCommunity,
-    communityDealt: showdownCommunity.length,
-    stacks: potValue > 0 ? nextStacks : state.stacks,
-    pot: 0,
-    showdown: {
-      winners: winnersInSeatOrder,
-      reason: "computed",
-      potAwarded: potValue,
-      awardedAt: new Date().toISOString(),
+  const { nextState } = awardPotsAtShowdown({
+    state: {
+      ...state,
+      community: showdownCommunity,
+      communityDealt: showdownCommunity.length,
     },
-  };
+    seatUserIdsInOrder,
+    computeShowdown,
+  });
+  return nextState;
 };
 
 const maybeApplyTurnTimeout = ({ tableId, state, privateState, nowMs }) => {
