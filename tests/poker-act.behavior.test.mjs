@@ -370,8 +370,10 @@ const run = async () => {
     requestId: "req-all-in",
     userId: "user-1",
   });
-  assert.equal(allInBet.response.statusCode, 409);
-  assert.equal(JSON.parse(allInBet.response.body).error, "all_in_unsupported");
+  assert.equal(allInBet.response.statusCode, 200);
+  const allInPayload = JSON.parse(allInBet.response.body);
+  assert.equal(allInPayload.state.state.stacks["user-1"], 0);
+  assert.equal(allInPayload.state.state.contributionsByUserId["user-1"], 10);
 
   const corruptCalls = [];
   const corruptState = {
@@ -817,6 +819,44 @@ const run = async () => {
   });
   assert.equal(missingRowResponse.response.statusCode, 409);
   assert.equal(JSON.parse(missingRowResponse.response.body).error, "state_invalid");
+
+  {
+    const seatUserIdsInOrder = seatOrder.slice();
+    const timeoutState = {
+      ...baseState,
+      phase: "FLOP",
+      pot: 20,
+      stacks: { ...baseState.stacks, "user-1": 0 },
+      community: deriveCommunityCards({ handSeed: baseState.handSeed, seatUserIdsInOrder, communityDealt: 3 }),
+      communityDealt: 3,
+      turnNo: 2,
+      turnUserId: "user-2",
+      turnStartedAt: Date.now() - 30000,
+      turnDeadlineAt: Date.now() - 1000,
+      actedThisRoundByUserId: { "user-1": false, "user-2": false, "user-3": true },
+      toCallByUserId: { "user-1": 0, "user-2": 0, "user-3": 0 },
+      betThisRoundByUserId: { "user-1": 0, "user-2": 0, "user-3": 0 },
+    };
+    const privateState = {
+      ...timeoutState,
+      deck: deriveRemainingDeck({
+        handSeed: baseState.handSeed,
+        seatUserIdsInOrder,
+        communityDealt: timeoutState.communityDealt,
+      }),
+      holeCardsByUserId: defaultHoleCards,
+    };
+    const timeoutResult = maybeApplyTurnTimeout({
+      tableId,
+      state: timeoutState,
+      privateState,
+      nowMs: Date.now(),
+    });
+    assert.equal(timeoutResult.applied, true);
+    assert.equal(timeoutResult.state.phase, "SHOWDOWN");
+    assert.equal(timeoutResult.state.pot, 0);
+    assert.ok(timeoutResult.state.showdown);
+  }
 
   {
     const timeoutState = {

@@ -105,7 +105,6 @@
     pokerErrLoadTable: { en: 'Failed to load table', pl: 'Nie udało się załadować stołu' },
     pokerErrJoin: { en: 'Failed to join', pl: 'Nie udało się dołączyć' },
     pokerErrLeave: { en: 'Failed to leave', pl: 'Nie udało się opuścić stołu' },
-    pokerAllInUnsupported: { en: 'All-in is not supported yet. Keep at least 1 chip.', pl: 'All-in nie jest jeszcze obsługiwany. Zostaw co najmniej 1 żeton.' },
     pokerErrJoinPending: { en: 'Join still pending. Please try again.', pl: 'Dołączanie wciąż trwa. Spróbuj ponownie.' },
     pokerErrLeavePending: { en: 'Leave still pending. Please try again.', pl: 'Opuszczanie wciąż trwa. Spróbuj ponownie.' },
     pokerJoinPending: { en: 'Joining...', pl: 'Dołączanie...' },

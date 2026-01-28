@@ -41,6 +41,17 @@ const buildDefaultMap = (seats, value) =>
     return acc;
   }, {});
 
+const deriveAllInByUserId = (state) => {
+  const seats = Array.isArray(state.seats) ? state.seats : [];
+  return orderSeats(seats).reduce((acc, seat) => {
+    if (!seat?.userId) return acc;
+    const userId = seat.userId;
+    const stack = state.stacks?.[userId] ?? 0;
+    acc[userId] = !state.foldedByUserId?.[userId] && stack === 0;
+    return acc;
+  }, {});
+};
+
 const assertPlayer = (state, userId) => {
   if (!state.seats.some((seat) => seat.userId === userId)) {
     throw new Error("invalid_player");
@@ -139,6 +150,7 @@ const initHandState = ({ tableId, seats, stacks, rng }) => {
   const dealerSeatNo = orderedSeats[0]?.seatNo ?? 0;
   const foldedByUserId = buildDefaultMap(orderedSeats, false);
   const allInByUserId = buildDefaultMap(orderedSeats, false);
+  const contributionsByUserId = buildDefaultMap(orderedSeats, 0);
   const turnUserId = getFirstBettingAfterDealer({
     seats: orderedSeats,
     dealerSeatNo,
@@ -162,10 +174,11 @@ const initHandState = ({ tableId, seats, stacks, rng }) => {
     actedThisRoundByUserId: buildDefaultMap(orderedSeats, false),
     foldedByUserId,
     allInByUserId,
+    contributionsByUserId,
     lastAggressorUserId: null,
   };
   const now = Date.now();
-  const nextState = stampTurnTimer({ ...state, turnNo: 1 }, now);
+  const nextState = stampTurnTimer({ ...state, allInByUserId: deriveAllInByUserId(state), turnNo: 1 }, now);
   return { state: nextState };
 };
 
@@ -175,6 +188,7 @@ const getLegalActions = (state, userId) => {
   if (userId !== state.turnUserId) return [];
   const toCall = state.toCallByUserId?.[userId] || 0;
   const stack = state.stacks?.[userId] ?? 0;
+  if (stack === 0) return [];
   if (toCall > 0) {
     return [
       { type: "FOLD" },
@@ -209,6 +223,7 @@ const applyAction = (state, action) => {
     actedThisRoundByUserId: copyMap(state.actedThisRoundByUserId),
     foldedByUserId: copyMap(state.foldedByUserId),
     allInByUserId: copyMap(state.allInByUserId || buildDefaultMap(safeSeats, false)),
+    contributionsByUserId: copyMap(state.contributionsByUserId || buildDefaultMap(safeSeats, 0)),
     community: Array.isArray(state.community) ? state.community.slice() : [],
     deck: Array.isArray(state.deck) ? state.deck.slice() : [],
   };
@@ -227,10 +242,8 @@ const applyAction = (state, action) => {
     next.stacks[userId] = stack - pay;
     next.betThisRoundByUserId[userId] = currentBet + pay;
     next.pot += pay;
+    next.contributionsByUserId[userId] = (next.contributionsByUserId[userId] || 0) + pay;
     next.toCallByUserId[userId] = 0;
-    if (next.stacks[userId] === 0) {
-      next.allInByUserId[userId] = true;
-    }
   } else if (action.type === "BET") {
     if (toCall > 0) throw new Error("invalid_action");
     const amount = Number(action.amount);
@@ -238,9 +251,7 @@ const applyAction = (state, action) => {
     next.stacks[userId] = stack - amount;
     next.betThisRoundByUserId[userId] = currentBet + amount;
     next.pot += amount;
-    if (next.stacks[userId] === 0) {
-      next.allInByUserId[userId] = true;
-    }
+    next.contributionsByUserId[userId] = (next.contributionsByUserId[userId] || 0) + amount;
     next.lastAggressorUserId = userId;
     for (const seat of getActiveSeats(next)) {
       if (seat.userId !== userId) {
@@ -256,9 +267,7 @@ const applyAction = (state, action) => {
     next.stacks[userId] = stack - pay;
     next.betThisRoundByUserId[userId] = amount;
     next.pot += pay;
-    if (next.stacks[userId] === 0) {
-      next.allInByUserId[userId] = true;
-    }
+    next.contributionsByUserId[userId] = (next.contributionsByUserId[userId] || 0) + pay;
     next.lastAggressorUserId = userId;
     for (const seat of getActiveSeats(next)) {
       if (seat.userId !== userId) {
@@ -269,6 +278,7 @@ const applyAction = (state, action) => {
     throw new Error("invalid_action");
   }
 
+  next.allInByUserId = deriveAllInByUserId(next);
   next.actedThisRoundByUserId[userId] = true;
   next.turnUserId = getNextBettingUserId(next, userId);
 
@@ -302,8 +312,29 @@ const advanceIfNeeded = (state) => {
   }
   if (!isBettingRoundComplete(state)) return { state, events };
 
-  if (active.some((seat) => state.allInByUserId?.[seat.userId])) {
-    throw new Error("all_in_side_pots_unsupported");
+  if (active.some((seat) => (state.stacks?.[seat.userId] || 0) === 0)) {
+    const validatedState = assertCommunityCountForPhase(state);
+    const baseTurnNo = Number.isInteger(state.turnNo) ? state.turnNo : 0;
+    let next = resetRoundState({ ...validatedState, turnUserId: null });
+    let turnNo = baseTurnNo;
+    while (next.phase !== "SHOWDOWN") {
+      const from = next.phase;
+      const to = nextStreet(from);
+      next = resetRoundState({ ...next, phase: to, turnUserId: null });
+      const n = cardsToDeal(from);
+      if (n > 0) {
+        const dealt = dealCommunity(next.deck || [], n);
+        next = { ...next, deck: dealt.deck, community: next.community.concat(dealt.communityCards) };
+        events.push({ type: "COMMUNITY_DEALT", n });
+      }
+      next = assertCommunityCountForPhase(next);
+      turnNo += 1;
+      next = resetRoundState({ ...next, turnUserId: null, turnNo });
+      events.push({ type: "STREET_ADVANCED", from, to });
+      if (to === "SHOWDOWN") break;
+    }
+    const stamped = stampTurnTimer({ ...next, turnUserId: null }, Date.now());
+    return { state: stamped, events };
   }
 
   const validatedState = assertCommunityCountForPhase(state);

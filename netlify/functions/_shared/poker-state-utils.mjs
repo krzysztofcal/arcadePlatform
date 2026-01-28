@@ -50,6 +50,29 @@ const validateCardsArray = (cards, options = {}) => {
 
 const validateNoDuplicates = (keys) => new Set(keys).size === keys.length;
 
+const isValidContributionMap = (value) => {
+  if (value == null) return true;
+  if (!isPlainObject(value)) return false;
+  for (const amount of Object.values(value)) {
+    const num = Number(amount);
+    if (!Number.isFinite(num) || num < 0) return false;
+  }
+  return true;
+};
+
+const isValidSidePots = (value) => {
+  if (value == null) return true;
+  if (!Array.isArray(value)) return false;
+  for (const pot of value) {
+    if (!isPlainObject(pot)) return false;
+    const amount = Number(pot.amount);
+    if (!Number.isFinite(amount) || amount < 0) return false;
+    if (!Array.isArray(pot.eligibleUserIds)) return false;
+    if (pot.eligibleUserIds.some((userId) => typeof userId !== "string" || !userId.trim())) return false;
+  }
+  return true;
+};
+
 const normalizeJsonState = (value) => {
   if (!value) return {};
   if (typeof value === "string") {
@@ -252,6 +275,8 @@ const isStateStorageValid = (state, options = {}) => {
   if (holeCardKeys.length > 0 && deckKeys.length > 0) {
     if (holeCardKeys.some((key) => deckKeys.includes(key))) return false;
   }
+  if (!isValidContributionMap(state.contributionsByUserId)) return false;
+  if (!isValidSidePots(state.sidePots)) return false;
   return true;
 };
 

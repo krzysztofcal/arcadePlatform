@@ -64,12 +64,6 @@ const isActionPhase = (phase) => phase === "PREFLOP" || phase === "FLOP" || phas
 
 const getSeatForUser = (state, userId) => (Array.isArray(state.seats) ? state.seats.find((seat) => seat?.userId === userId) : null);
 
-const hasAnyAllIn = (state) => {
-  if (!state || typeof state !== "object") return false;
-  const values = Object.values(state.allInByUserId || {});
-  return values.some((value) => value === true);
-};
-
 const normalizeRank = (value) => {
   if (typeof value === "number") return value;
   if (typeof value !== "string") return null;
@@ -329,9 +323,9 @@ export async function handler(event) {
         });
       }
 
-  const lastByUserId = isPlainObjectValue(currentState.lastActionRequestIdByUserId)
-    ? currentState.lastActionRequestIdByUserId
-    : {};
+      const lastByUserId = isPlainObjectValue(currentState.lastActionRequestIdByUserId)
+        ? currentState.lastActionRequestIdByUserId
+        : {};
 
       const seat = getSeatForUser(currentState, auth.userId);
       if (!seat) {
@@ -506,19 +500,6 @@ export async function handler(event) {
         throw makeError(403, "not_your_turn");
       }
 
-      const logAllInUnsupported = (extra) => {
-        klog("poker_act_rejected", {
-          tableId,
-          userId: auth.userId,
-          reason: "all_in_unsupported",
-          code: "all_in_unsupported",
-          phase: currentState?.phase ?? null,
-          actionType: actionParsed.value.type,
-          amount: actionParsed.value.amount ?? null,
-          ...(extra || {}),
-        });
-      };
-
       if (!validateActionBounds(currentState, actionParsed.value, auth.userId)) {
         klog("poker_act_rejected", {
           tableId,
@@ -570,13 +551,6 @@ export async function handler(event) {
         throw error;
       }
 
-      const prevStack = Number(currentState.stacks?.[auth.userId] ?? 0);
-      const nextStack = Number(applied?.state?.stacks?.[auth.userId] ?? 0);
-      if (Number.isFinite(prevStack) && Number.isFinite(nextStack) && prevStack > 0 && nextStack === 0) {
-        logAllInUnsupported({ reason: "stack_zero" });
-        throw makeError(409, "all_in_unsupported");
-      }
-
       let nextState = applied.state;
       const events = Array.isArray(applied.events) ? applied.events.slice() : [];
       let loops = 0;
@@ -587,11 +561,6 @@ export async function handler(event) {
         try {
           advanced = advanceIfNeeded(nextState);
         } catch (error) {
-          const reason = error?.message || null;
-          if (reason === "all_in_side_pots_unsupported" || (reason === "invalid_state" && hasAnyAllIn(nextState))) {
-            logAllInUnsupported({ reason: reason || "all_in_side_pots_unsupported", phase: nextState?.phase ?? null });
-            throw makeError(409, "all_in_unsupported");
-          }
           throw error;
         }
         nextState = advanced.state;
