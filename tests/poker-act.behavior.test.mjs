@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { deriveDeck } from "../netlify/functions/_shared/poker-deal-deterministic.mjs";
 import { dealHoleCards } from "../netlify/functions/_shared/poker-engine.mjs";
 import { isHoleCardsTableMissing, loadHoleCardsByUserId } from "../netlify/functions/_shared/poker-hole-cards-store.mjs";
+import { awardPotsAtShowdown } from "../netlify/functions/_shared/poker-payout.mjs";
 import { TURN_MS, advanceIfNeeded, applyAction } from "../netlify/functions/_shared/poker-reducer.mjs";
 import { normalizeRequestId } from "../netlify/functions/_shared/poker-request-id.mjs";
 import { computeShowdown } from "../netlify/functions/_shared/poker-showdown.mjs";
@@ -51,6 +52,7 @@ const makeHandler = (queries, storedState, userId, options = {}) =>
   loadPokerHandler("netlify/functions/poker-act.mjs", {
     baseHeaders: () => ({}),
     corsHeaders: () => ({ "access-control-allow-origin": "https://example.test" }),
+    awardPotsAtShowdown,
     computeShowdown,
     extractBearerToken: () => "token",
     verifySupabaseJwt: async () => ({ valid: true, userId }),
@@ -514,7 +516,7 @@ const run = async () => {
       headers: { origin: "https://example.test", authorization: "Bearer token" },
       body: JSON.stringify({ tableId, requestId: "req-check-1", action: { type: "CHECK" } }),
     });
-    assert.equal(firstCheck.statusCode, 200);
+    assert.equal(firstCheck.statusCode, 200, firstCheck.body);
     const handlerSecond = makeHandler(actQueries, storedActState, secondUserId, {
       holeCardsByUserId,
       activeSeatUserIds: ["user-1", "user-2"],
@@ -755,18 +757,18 @@ const run = async () => {
       betThisRoundByUserId: { "user-1": 0, "user-2": 0, "user-3": 0 },
       contributionsByUserId: { "user-1": 10, "user-2": 5, "user-3": 5 },
     };
-    const klogCalls = [];
     const showdownResponse = await runCase({
       state: showdownState,
       action: { type: "CHECK" },
       requestId: "req-showdown-sidepot",
       userId: "user-1",
-      klogCalls,
     });
-    assert.equal(showdownResponse.response.statusCode, 409);
-    assert.equal(JSON.parse(showdownResponse.response.body).error, "state_invalid");
-    const sidePotLog = klogCalls.find((entry) => entry.kind === "poker_act_rejected");
-    assert.equal(sidePotLog?.data?.code, "showdown_side_pots_unsupported");
+    assert.equal(showdownResponse.response.statusCode, 200);
+    const payload = JSON.parse(showdownResponse.response.body);
+    assert.equal(payload.state.state.pot, 0);
+    assert.ok(Array.isArray(payload.state.state.showdown?.potsAwarded));
+    assert.ok(payload.state.state.showdown.potsAwarded.length > 0);
+    assert.equal(payload.state.state.showdown.potAwardedTotal, 15);
   }
 
   const inactiveSeatResponse = await runCase({

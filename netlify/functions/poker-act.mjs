@@ -4,13 +4,16 @@ import { isHoleCardsTableMissing, loadHoleCardsByUserId } from "./_shared/poker-
 import { deriveCommunityCards, deriveRemainingDeck } from "./_shared/poker-deal-deterministic.mjs";
 import { advanceIfNeeded, applyAction } from "./_shared/poker-reducer.mjs";
 import { normalizeRequestId } from "./_shared/poker-request-id.mjs";
+import { awardPotsAtShowdown } from "./_shared/poker-payout.mjs";
 import { computeShowdown } from "./_shared/poker-showdown.mjs";
-import { isPlainObject, isStateStorageValid, normalizeJsonState, withoutPrivateState } from "./_shared/poker-state-utils.mjs";
+import { isStateStorageValid, normalizeJsonState, withoutPrivateState } from "./_shared/poker-state-utils.mjs";
 import { maybeApplyTurnTimeout } from "./_shared/poker-turn-timeout.mjs";
 import { isValidUuid } from "./_shared/poker-utils.mjs";
 
 const ACTION_TYPES = new Set(["CHECK", "BET", "CALL", "RAISE", "FOLD"]);
 const ADVANCE_LIMIT = 4;
+const isPlainObjectValue = (value) => value && typeof value === "object" && !Array.isArray(value);
+const isPlainObject = isPlainObjectValue;
 
 const parseBody = (body) => {
   if (!body) return { ok: true, value: {} };
@@ -47,15 +50,15 @@ const normalizeRequest = (value) => {
 };
 
 const hasRequiredState = (state) =>
-  isPlainObject(state) &&
+  isPlainObjectValue(state) &&
   typeof state.phase === "string" &&
   typeof state.turnUserId === "string" &&
   Array.isArray(state.seats) &&
-  isPlainObject(state.stacks) &&
-  isPlainObject(state.toCallByUserId) &&
-  isPlainObject(state.betThisRoundByUserId) &&
-  isPlainObject(state.actedThisRoundByUserId) &&
-  isPlainObject(state.foldedByUserId);
+  isPlainObjectValue(state.stacks) &&
+  isPlainObjectValue(state.toCallByUserId) &&
+  isPlainObjectValue(state.betThisRoundByUserId) &&
+  isPlainObjectValue(state.actedThisRoundByUserId) &&
+  isPlainObjectValue(state.foldedByUserId);
 
 const isActionPhase = (phase) => phase === "PREFLOP" || phase === "FLOP" || phase === "TURN" || phase === "RIVER";
 
@@ -139,16 +142,6 @@ const arraysEqual = (left, right) => {
   return true;
 };
 
-const allEqualNumbers = (values) => {
-  if (!Array.isArray(values) || values.length === 0) return true;
-  const first = values[0];
-  if (!Number.isFinite(first)) return false;
-  for (let i = 1; i < values.length; i += 1) {
-    if (!Number.isFinite(values[i]) || values[i] !== first) return false;
-  }
-  return true;
-};
-
 const toSeatNo = (value) => {
   const n = typeof value === "number" ? value : Number(value);
   return Number.isFinite(n) ? n : Number.POSITIVE_INFINITY;
@@ -213,7 +206,7 @@ export async function handler(event) {
   }
 
   const payload = parsed.value ?? {};
-  if (payload && !isPlainObject(payload)) {
+  if (payload && !isPlainObjectValue(payload)) {
     return { statusCode: 400, headers: mergeHeaders(cors), body: JSON.stringify({ error: "invalid_json" }) };
   }
 
@@ -336,9 +329,9 @@ export async function handler(event) {
         });
       }
 
-      const lastByUserId = isPlainObject(currentState.lastActionRequestIdByUserId)
-        ? currentState.lastActionRequestIdByUserId
-        : {};
+  const lastByUserId = isPlainObjectValue(currentState.lastActionRequestIdByUserId)
+    ? currentState.lastActionRequestIdByUserId
+    : {};
 
       const seat = getSeatForUser(currentState, auth.userId);
       if (!seat) {
@@ -637,72 +630,30 @@ export async function handler(event) {
           }
         }
 
-        const players = showdownUserIds.map((userId) => {
-          const holeCards = holeCardsByUserId?.[userId];
-          if (!Array.isArray(holeCards) || holeCards.length !== 2) {
-            rejectStateInvalid("showdown_missing_hole_cards", { userId: hashUserId(userId) });
-          }
-          return { userId, holeCards };
-        });
-
-        let showdownResult;
+        let awardResult;
         try {
-          showdownResult = computeShowdown({ community: showdownCommunity, players });
+          awardResult = awardPotsAtShowdown({
+            state: {
+              ...nextState,
+              community: showdownCommunity,
+              communityDealt: showdownCommunity.length,
+              holeCardsByUserId,
+            },
+            seatUserIdsInOrder,
+            computeShowdown,
+          });
         } catch (error) {
-          rejectStateInvalid("showdown_failed", { reason: error?.message || null });
-        }
-
-        const winners = Array.isArray(showdownResult?.winners) ? showdownResult.winners : [];
-        if (winners.length === 0) {
-          rejectStateInvalid("showdown_no_winners");
-        }
-        const winnersInSeatOrder = seatUserIdsInOrder.filter((userId) => winners.includes(userId));
-        if (winnersInSeatOrder.length === 0) {
-          rejectStateInvalid("showdown_winners_invalid");
-        }
-
-        const hasSidePots = Array.isArray(nextState.sidePots) && nextState.sidePots.length > 0;
-        const contributions = nextState.contributionsByUserId;
-        const hasUnequalContrib =
-          isPlainObject(contributions) &&
-          showdownUserIds.length > 1 &&
-          !allEqualNumbers(showdownUserIds.map((userId) => Number(contributions[userId])));
-        if (hasSidePots || hasUnequalContrib) {
-          rejectStateInvalid("showdown_side_pots_unsupported", { hasSidePots, hasUnequalContrib });
-        }
-
-        const potValue = Number(nextState.pot ?? 0);
-        if (!Number.isFinite(potValue) || potValue < 0) {
-          rejectStateInvalid("showdown_invalid_pot", { pot: nextState.pot ?? null });
-        }
-        const nextStacks = { ...nextState.stacks };
-        if (potValue > 0) {
-          const share = Math.floor(potValue / winnersInSeatOrder.length);
-          let remainder = potValue - share * winnersInSeatOrder.length;
-          for (const userId of winnersInSeatOrder) {
-            const baseStack = Number(nextStacks[userId] ?? 0);
-            if (!Number.isFinite(baseStack)) {
-              rejectStateInvalid("showdown_invalid_stack", { userId: hashUserId(userId) });
-            }
-            const bonus = remainder > 0 ? 1 : 0;
-            if (remainder > 0) remainder -= 1;
-            nextStacks[userId] = baseStack + share + bonus;
+          const reason = error?.message || null;
+          if (reason === "showdown_missing_hole_cards") {
+            rejectStateInvalid("showdown_missing_hole_cards");
           }
+          if (reason === "showdown_invalid_pot") {
+            rejectStateInvalid("showdown_invalid_pot", { pot: nextState.pot ?? null });
+          }
+          rejectStateInvalid("showdown_failed", { reason });
         }
 
-        nextState = {
-          ...nextState,
-          community: showdownCommunity,
-          communityDealt: showdownCommunity.length,
-          stacks: potValue > 0 ? nextStacks : nextState.stacks,
-          pot: 0,
-          showdown: {
-            winners: winnersInSeatOrder,
-            reason: "computed",
-            potAwarded: potValue,
-            awardedAt: new Date().toISOString(),
-          },
-        };
+        nextState = awardResult.nextState;
       }
 
       const { holeCardsByUserId: _ignoredHoleCards, deck: _ignoredDeck, ...stateBase } = nextState;
