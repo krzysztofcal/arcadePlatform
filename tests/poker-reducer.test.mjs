@@ -442,7 +442,8 @@ const run = async () => {
       },
     };
     const advanced = advanceIfNeeded(nextState);
-    assert.equal(advanced.state.phase, "FLOP");
+    assert.equal(advanced.state.phase, "SHOWDOWN");
+    assert.equal(advanced.state.community.length, 5);
   }
 
   {
@@ -504,7 +505,54 @@ const run = async () => {
     result = applyAction(state, { type: "CALL", userId: secondUserId });
     state = result.state;
 
-    assert.throws(() => advanceIfNeeded(state), /all_in_side_pots_unsupported/);
+    advanced = advanceIfNeeded(state);
+    state = advanced.state;
+    assert.equal(state.phase, "SHOWDOWN");
+    assert.equal(state.community.length, 5);
+  }
+
+  {
+    const seats = [
+      { userId: "user-1", seatNo: 1 },
+      { userId: "user-2", seatNo: 2 },
+    ];
+    const stacks = { "user-1": 5, "user-2": 50 };
+    let result = initHandState({ tableId: "t-allin-call", seats, stacks, rng: makeRng(23) });
+    let state = {
+      ...result.state,
+      turnUserId: "user-1",
+      toCallByUserId: { ...result.state.toCallByUserId, "user-1": 10 },
+    };
+    result = applyAction(state, { type: "CALL", userId: "user-1" });
+    state = result.state;
+    assert.equal(state.stacks["user-1"], 0);
+    assert.equal(state.pot, 5);
+    assert.equal(state.contributionsByUserId["user-1"], 5);
+    assert.equal(state.allInByUserId["user-1"], true);
+  }
+
+  {
+    const { seats, stacks } = makeBase();
+    const { state } = initHandState({ tableId: "t-round-allin", seats, stacks, rng: makeRng(24) });
+    const allInUserId = state.seats[0].userId;
+    const activeUserIds = state.seats.slice(1).map((seat) => seat.userId);
+    const nextState = {
+      ...state,
+      stacks: { ...state.stacks, [allInUserId]: 0 },
+      actedThisRoundByUserId: {
+        ...state.actedThisRoundByUserId,
+        [allInUserId]: false,
+        [activeUserIds[0]]: true,
+        [activeUserIds[1]]: true,
+      },
+      toCallByUserId: {
+        ...state.toCallByUserId,
+        [allInUserId]: 0,
+        [activeUserIds[0]]: 0,
+        [activeUserIds[1]]: 0,
+      },
+    };
+    assert.equal(isBettingRoundComplete(nextState), true);
   }
 
   {

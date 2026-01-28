@@ -65,6 +65,9 @@ const awardPotsAtShowdown = ({ state, seatUserIdsInOrder, computeShowdown, nowIs
   if (!pots && isPlainObject(state.contributionsByUserId)) {
     pots = buildSidePots({ contributionsByUserId: state.contributionsByUserId, eligibleUserIds: showdownUserIds })
       .map((pot) => ({ amount: normalizePotAmount(pot.amount), eligibleUserIds: pot.eligibleUserIds.slice() }));
+    if (pots.length === 0) {
+      pots = null;
+    }
   }
   if (!pots) {
     pots = [{ amount: normalizePotAmount(state.pot ?? 0), eligibleUserIds: showdownUserIds.slice() }];

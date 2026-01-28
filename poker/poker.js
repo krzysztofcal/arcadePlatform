@@ -681,23 +681,15 @@
       setPendingState('leave', false);
     }
 
-    function resolveActionErrorMessage(code, message){
-      if (code === 'all_in_unsupported'){
-        return t('pokerAllInUnsupported', 'All-in is not supported yet. Keep at least 1 chip.');
-      }
-      return message;
-    }
-
     function setActionError(action, endpoint, code, message){
-      var resolvedMessage = resolveActionErrorMessage(code, message);
-      if (!resolvedMessage) return;
-      setError(errorEl, resolvedMessage);
+      if (!message) return;
+      setError(errorEl, message);
       persistLastError({
         ts: Date.now(),
         action: action,
         endpoint: endpoint,
         code: code || 'unknown_error',
-        message: resolvedMessage
+        message: message
       });
     }
 
