@@ -416,6 +416,12 @@ const applyAction = (state, action) => {
   } else {
     updated = stampTurnTimer(updated, now);
   }
+  // IMPORTANT: If the action ended the hand (fold winner), keep HAND_DONE observable.
+  // advanceIfNeeded() would immediately reset to next hand, which breaks reducer expectations/tests.
+  if (updated.phase === "HAND_DONE") {
+    return { state: updated, events: done.events };
+  }
+
   // If this action ends betting (e.g. everyone is all-in and no one can act),
   // auto-advance streets/showdown immediately so callers don't have to.
   if (!updated.turnUserId || getBettingSeats(updated).length === 0 || isBettingRoundComplete(updated)) {
