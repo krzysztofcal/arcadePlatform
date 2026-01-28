@@ -280,6 +280,19 @@ const run = async () => {
   assert.equal(invalidCall.response.statusCode, 400);
   assert.equal(JSON.parse(invalidCall.response.body).error, "invalid_action");
 
+  const allInState = {
+    ...baseState,
+    stacks: { ...baseState.stacks, "user-1": 10 },
+  };
+  const allInBet = await runCase({
+    state: allInState,
+    action: { type: "BET", amount: 10 },
+    requestId: "req-all-in",
+    userId: "user-1",
+  });
+  assert.equal(allInBet.response.statusCode, 409);
+  assert.equal(JSON.parse(allInBet.response.body).error, "all_in_unsupported");
+
   const corruptCalls = [];
   const corruptState = {
     ...baseState,
