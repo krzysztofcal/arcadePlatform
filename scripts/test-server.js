@@ -31,7 +31,7 @@ const mimeTypes = {
 
 // Minimal set of security headers to enforce during tests
 const defaultSecurityHeaders = {
-  'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://consent.cookiebot.com https://consentcdn.cookiebot.com https://www.googletagmanager.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data:; connect-src 'self' https://*.supabase.co; frame-ancestors 'none'; base-uri 'self'",
+  'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://consent.cookiebot.com https://consentcdn.cookiebot.com https://www.googletagmanager.com; script-src-elem 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://consent.cookiebot.com https://consentcdn.cookiebot.com https://www.googletagmanager.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; style-src-elem 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data:; connect-src 'self' https://*.supabase.co wss://*.supabase.co; frame-ancestors 'none'; base-uri 'self'",
   'X-Frame-Options': 'DENY',
   'X-Content-Type-Options': 'nosniff',
   'Referrer-Policy': 'strict-origin-when-cross-origin',
@@ -104,7 +104,7 @@ function getHeadersForPath(pathname) {
   // Keep other security headers for testing, but simplify CSP
   if (headers['Content-Security-Policy']) {
     // Simplify CSP for test environment while allowing required third-party assets.
-    headers['Content-Security-Policy'] = "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://consent.cookiebot.com https://consentcdn.cookiebot.com https://www.googletagmanager.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data:; connect-src 'self' https://*.supabase.co; frame-ancestors 'none'; base-uri 'self'";
+    headers['Content-Security-Policy'] = "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://consent.cookiebot.com https://consentcdn.cookiebot.com https://www.googletagmanager.com; script-src-elem 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://consent.cookiebot.com https://consentcdn.cookiebot.com https://www.googletagmanager.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; style-src-elem 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data:; connect-src 'self' https://*.supabase.co wss://*.supabase.co; frame-ancestors 'none'; base-uri 'self'";
   }
 
   return headers;

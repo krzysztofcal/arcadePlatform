@@ -349,8 +349,10 @@ const keyTotal = (u) => `${KEY_NS}:total:${u}`;
 const keySession = (u, s) => `${KEY_NS}:session:${hash(`${u}|${s}`)}`;
 const keySessionSync = (u, s) => `${KEY_NS}:session:last:${hash(`${u}|${s}`)}`;
 const keyLock = (u, s) => `${LOCK_KEY_PREFIX}${hash(`${u}|${s}`)}`;
-const keyRateLimitUser = (userId) => `${KEY_NS}:ratelimit:user:${userId}`;
-const keyRateLimitIp = (ip) => `${KEY_NS}:ratelimit:ip:${hash(ip)}`;
+const rateLimitWindowKey = () => Math.floor(Date.now() / 60000);
+const RATE_LIMIT_WINDOW_TTL_SEC = 70;
+const keyRateLimitUser = (userId) => `${KEY_NS}:ratelimit:user:${userId}:${rateLimitWindowKey()}`;
+const keyRateLimitIp = (ip) => `${KEY_NS}:ratelimit:ip:${hash(ip)}:${rateLimitWindowKey()}`;
 const keySessionRegistry = (userId, sessionId) => `${KEY_NS}:registry:${hash(`${userId}|${sessionId}`)}`;
 const keyMigration = (anonId, userId) => `${KEY_NS}:migration:${hash(`${anonId}|${userId}`)}`;
 
@@ -391,7 +393,7 @@ async function checkRateLimit({ userId, ip }) {
   if (userId && RATE_LIMIT_PER_USER_PER_MIN > 0) {
     const userKey = keyRateLimitUser(userId);
     checks.push(
-      atomicRateLimitIncr(userKey, 60)
+      atomicRateLimitIncr(userKey, RATE_LIMIT_WINDOW_TTL_SEC)
         .then(({ count }) => ({
           type: 'user',
           count,
@@ -409,7 +411,7 @@ async function checkRateLimit({ userId, ip }) {
   if (ip && RATE_LIMIT_PER_IP_PER_MIN > 0) {
     const ipKey = keyRateLimitIp(ip);
     checks.push(
-      atomicRateLimitIncr(ipKey, 60)
+      atomicRateLimitIncr(ipKey, RATE_LIMIT_WINDOW_TTL_SEC)
         .then(({ count }) => ({
           type: 'ip',
           count,
