@@ -126,6 +126,7 @@ const initHandState = ({ tableId, seats, stacks, rng }) => {
   const dealt = dealHoleCards(deck, playerIds);
   const dealerSeatNo = orderedSeats[0]?.seatNo ?? 0;
   const foldedByUserId = buildDefaultMap(orderedSeats, false);
+  const allInByUserId = buildDefaultMap(orderedSeats, false);
   const turnUserId = getFirstBettingAfterDealer({
     seats: orderedSeats,
     dealerSeatNo,
@@ -148,6 +149,7 @@ const initHandState = ({ tableId, seats, stacks, rng }) => {
     betThisRoundByUserId: buildDefaultMap(orderedSeats, 0),
     actedThisRoundByUserId: buildDefaultMap(orderedSeats, false),
     foldedByUserId,
+    allInByUserId,
     lastAggressorUserId: null,
   };
   return { state };
@@ -191,6 +193,7 @@ const applyAction = (state, action) => {
     betThisRoundByUserId: copyMap(state.betThisRoundByUserId),
     actedThisRoundByUserId: copyMap(state.actedThisRoundByUserId),
     foldedByUserId: copyMap(state.foldedByUserId),
+    allInByUserId: copyMap(state.allInByUserId),
     community: Array.isArray(state.community) ? state.community.slice() : [],
     deck: Array.isArray(state.deck) ? state.deck.slice() : [],
   };
@@ -210,6 +213,9 @@ const applyAction = (state, action) => {
     next.betThisRoundByUserId[userId] = currentBet + pay;
     next.pot += pay;
     next.toCallByUserId[userId] = 0;
+    if (next.stacks[userId] === 0) {
+      next.allInByUserId[userId] = true;
+    }
   } else if (action.type === "BET") {
     if (toCall > 0) throw new Error("invalid_action");
     const amount = Number(action.amount);
@@ -217,6 +223,9 @@ const applyAction = (state, action) => {
     next.stacks[userId] = stack - amount;
     next.betThisRoundByUserId[userId] = currentBet + amount;
     next.pot += amount;
+    if (next.stacks[userId] === 0) {
+      next.allInByUserId[userId] = true;
+    }
     next.lastAggressorUserId = userId;
     for (const seat of getActiveSeats(next)) {
       if (seat.userId !== userId) {
@@ -232,6 +241,9 @@ const applyAction = (state, action) => {
     next.stacks[userId] = stack - pay;
     next.betThisRoundByUserId[userId] = amount;
     next.pot += pay;
+    if (next.stacks[userId] === 0) {
+      next.allInByUserId[userId] = true;
+    }
     next.lastAggressorUserId = userId;
     for (const seat of getActiveSeats(next)) {
       if (seat.userId !== userId) {
@@ -266,6 +278,11 @@ const advanceIfNeeded = (state) => {
     return { state: next, events };
   }
   if (!isBettingRoundComplete(state)) return { state, events };
+
+  const hasAllIn = active.some((seat) => state.allInByUserId?.[seat.userId]);
+  if (hasAllIn && active.length >= 2) {
+    throw new Error("all_in_side_pots_unsupported");
+  }
 
   const validatedState = assertCommunityCountForPhase(state);
   const from = validatedState.phase;
