@@ -416,10 +416,20 @@ const applyAction = (state, action) => {
   } else {
     updated = stampTurnTimer(updated, now);
   }
+  // If this action ends betting (e.g. everyone is all-in and no one can act),
+  // auto-advance streets/showdown immediately so callers don't have to.
+  if (!updated.turnUserId || getBettingSeats(updated).length === 0 || isBettingRoundComplete(updated)) {
+    const advanced = advanceIfNeeded(updated);
+    return {
+      state: advanced.state,
+      events: done.events.concat(advanced.events || []),
+    };
+  }
+
   return { state: updated, events: done.events };
 };
 
-const advanceIfNeeded = (state) => {
+function advanceIfNeeded(state) {
   const events = [];
 // Hand reset is automatic and immediate.
 // UI must not rely on a stable "finished hand" state.
@@ -483,6 +493,6 @@ const advanceIfNeeded = (state) => {
   next = assertCommunityCountForPhase(next);
   events.push({ type: "STREET_ADVANCED", from, to });
   return { state: stampTurnTimer(next, Date.now()), events };
-};
+}
 
 export { TURN_MS, initHandState, getLegalActions, applyAction, advanceIfNeeded, isBettingRoundComplete };
