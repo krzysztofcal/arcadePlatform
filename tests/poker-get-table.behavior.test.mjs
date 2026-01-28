@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { isHoleCardsTableMissing, loadHoleCardsByUserId } from "../netlify/functions/_shared/poker-hole-cards-store.mjs";
-import { normalizeJsonState, withoutPrivateState } from "../netlify/functions/_shared/poker-state-utils.mjs";
+import { buildHandSnapshot, normalizeJsonState, withoutPrivateState } from "../netlify/functions/_shared/poker-state-utils.mjs";
 import { loadPokerHandler } from "./helpers/poker-test-helpers.mjs";
 
 const tableId = "11111111-1111-4111-8111-111111111111";
@@ -37,6 +37,7 @@ const makeHandler = (queries, storedState, userId, options = {}) =>
     verifySupabaseJwt: async () => ({ valid: true, userId }),
     isValidUuid: () => true,
     normalizeJsonState,
+    buildHandSnapshot,
     withoutPrivateState,
     isHoleCardsTableMissing,
     loadHoleCardsByUserId,

@@ -1,7 +1,7 @@
 import { baseHeaders, beginSql, corsHeaders, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
 import { deriveCommunityCards, deriveRemainingDeck } from "./_shared/poker-deal-deterministic.mjs";
 import { isHoleCardsTableMissing, loadHoleCardsByUserId } from "./_shared/poker-hole-cards-store.mjs";
-import { isStateStorageValid, normalizeJsonState, withoutPrivateState } from "./_shared/poker-state-utils.mjs";
+import { buildHandSnapshot, isStateStorageValid, normalizeJsonState, withoutPrivateState } from "./_shared/poker-state-utils.mjs";
 import { maybeApplyTurnTimeout, normalizeSeatOrderFromState } from "./_shared/poker-turn-timeout.mjs";
 import { isValidUuid } from "./_shared/poker-utils.mjs";
 
@@ -21,16 +21,6 @@ const hasSameUserIds = (left, right) => {
   }
   return true;
 };
-
-const buildHandSnapshot = (publicState) => ({
-  handId: typeof publicState?.handId === "string" ? publicState.handId : null,
-  phase: typeof publicState?.phase === "string" ? publicState.phase : null,
-  dealerSeatNo: Number.isFinite(publicState?.dealerSeatNo) ? publicState.dealerSeatNo : null,
-  turnUserId: typeof publicState?.turnUserId === "string" ? publicState.turnUserId : null,
-  turnNo: Number.isInteger(publicState?.turnNo) ? publicState.turnNo : null,
-  turnStartedAt: Number.isFinite(publicState?.turnStartedAt) ? publicState.turnStartedAt : null,
-  turnDeadlineAt: Number.isFinite(publicState?.turnDeadlineAt) ? publicState.turnDeadlineAt : null,
-});
 
 const parseTableId = (event) => {
   const queryValue = event.queryStringParameters?.tableId;

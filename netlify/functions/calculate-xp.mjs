@@ -334,8 +334,8 @@ const keyTotal = (u) => `${KEY_NS}:total:${u}`;
 const keySession = (u, s) => `${KEY_NS}:session:${hash(`${u}|${s}`)}`;
 const keySessionSync = (u, s) => `${KEY_NS}:session:last:${hash(`${u}|${s}`)}`;
 const keySessionState = (u, s) => `${KEY_NS}:session:state:${hash(`${u}|${s}`)}`;
-const keyRateLimitUser = (userId) => `${KEY_NS}:ratelimit:user:${userId}:${Math.floor(Date.now() / 60000)}`;
-const keyRateLimitIp = (ip) => `${KEY_NS}:ratelimit:ip:${hash(ip)}:${Math.floor(Date.now() / 60000)}`;
+const keyRateLimitUser = (userId) => `${KEY_NS}:ratelimit:user:${userId}`;
+const keyRateLimitIp = (ip) => `${KEY_NS}:ratelimit:ip:${hash(ip)}`;
 
 async function getTotals({ userId, sessionId, now }) {
   if (!userId) {

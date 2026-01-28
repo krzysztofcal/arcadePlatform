@@ -6,7 +6,7 @@ import { advanceIfNeeded, applyAction } from "./_shared/poker-reducer.mjs";
 import { normalizeRequestId } from "./_shared/poker-request-id.mjs";
 import { awardPotsAtShowdown } from "./_shared/poker-payout.mjs";
 import { computeShowdown } from "./_shared/poker-showdown.mjs";
-import { isStateStorageValid, normalizeJsonState, withoutPrivateState } from "./_shared/poker-state-utils.mjs";
+import { buildHandSnapshot, isStateStorageValid, normalizeJsonState, withoutPrivateState } from "./_shared/poker-state-utils.mjs";
 import { maybeApplyTurnTimeout } from "./_shared/poker-turn-timeout.mjs";
 import { isValidUuid } from "./_shared/poker-utils.mjs";
 
@@ -14,16 +14,6 @@ const ACTION_TYPES = new Set(["CHECK", "BET", "CALL", "RAISE", "FOLD"]);
 const ADVANCE_LIMIT = 4;
 const isPlainObjectValue = (value) => value && typeof value === "object" && !Array.isArray(value);
 const isPlainObject = isPlainObjectValue;
-
-const buildHandSnapshot = (publicState) => ({
-  handId: typeof publicState?.handId === "string" ? publicState.handId : null,
-  phase: typeof publicState?.phase === "string" ? publicState.phase : null,
-  dealerSeatNo: Number.isFinite(publicState?.dealerSeatNo) ? publicState.dealerSeatNo : null,
-  turnUserId: typeof publicState?.turnUserId === "string" ? publicState.turnUserId : null,
-  turnNo: Number.isInteger(publicState?.turnNo) ? publicState.turnNo : null,
-  turnStartedAt: Number.isFinite(publicState?.turnStartedAt) ? publicState.turnStartedAt : null,
-  turnDeadlineAt: Number.isFinite(publicState?.turnDeadlineAt) ? publicState.turnDeadlineAt : null,
-});
 
 const parseBody = (body) => {
   if (!body) return { ok: true, value: {} };
