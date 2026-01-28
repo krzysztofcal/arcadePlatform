@@ -306,12 +306,21 @@ const getLegalActions = (state, userId) => {
   const stack = state.stacks?.[userId] ?? 0;
   if (stack === 0) return [];
   if (toCall > 0) {
-    return [
-      { type: "FOLD" },
-      { type: "CALL", max: stack },
-      { type: "RAISE", min: toCall + 1, max: stack + (state.betThisRoundByUserId?.[userId] || 0) },
-    ];
+  const actions = [
+    { type: "FOLD" },
+    { type: "CALL", max: stack },
+  ];
+
+  const raiseMin = toCall + 1;
+  const raiseMax = stack + (state.betThisRoundByUserId?.[userId] || 0);
+
+  // Only include RAISE if it is actually possible.
+  if (raiseMax >= raiseMin) {
+    actions.push({ type: "RAISE", min: raiseMin, max: raiseMax });
   }
+
+  return actions;
+}
   return [
     { type: "CHECK" },
     { type: "BET", min: 1, max: stack },
