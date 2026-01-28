@@ -193,7 +193,7 @@ const applyAction = (state, action) => {
     betThisRoundByUserId: copyMap(state.betThisRoundByUserId),
     actedThisRoundByUserId: copyMap(state.actedThisRoundByUserId),
     foldedByUserId: copyMap(state.foldedByUserId),
-    allInByUserId: copyMap(state.allInByUserId),
+    allInByUserId: copyMap(state.allInByUserId || buildDefaultMap(state.seats || [], false)),
     community: Array.isArray(state.community) ? state.community.slice() : [],
     deck: Array.isArray(state.deck) ? state.deck.slice() : [],
   };
@@ -279,8 +279,7 @@ const advanceIfNeeded = (state) => {
   }
   if (!isBettingRoundComplete(state)) return { state, events };
 
-  const hasAllIn = active.some((seat) => state.allInByUserId?.[seat.userId]);
-  if (hasAllIn && active.length >= 2) {
+  if (active.some((seat) => state.allInByUserId?.[seat.userId])) {
     throw new Error("all_in_side_pots_unsupported");
   }
 

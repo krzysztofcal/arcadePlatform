@@ -492,6 +492,21 @@ const run = async () => {
       { userId: "user-2", seatNo: 2 },
     ];
     const stacks = { "user-1": 100, "user-2": 100 };
+    const { state } = initHandState({ tableId: "t12", seats, stacks, rng: makeRng(22) });
+    const legacyState = { ...state };
+    delete legacyState.allInByUserId;
+
+    assert.doesNotThrow(() => applyAction(legacyState, { type: "CHECK", userId: legacyState.turnUserId }));
+    const result = applyAction(legacyState, { type: "CHECK", userId: legacyState.turnUserId });
+    assert.equal(result.state.allInByUserId[legacyState.turnUserId], false);
+  }
+
+  {
+    const seats = [
+      { userId: "user-1", seatNo: 1 },
+      { userId: "user-2", seatNo: 2 },
+    ];
+    const stacks = { "user-1": 100, "user-2": 100 };
     let result = initHandState({ tableId: "t9", seats, stacks, rng: makeRng(19) });
     let state = { ...result.state, turnUserId: "user-1" };
 
