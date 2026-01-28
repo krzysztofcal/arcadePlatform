@@ -6,7 +6,7 @@ import {
   initHandState,
   isBettingRoundComplete,
 } from "../netlify/functions/_shared/poker-reducer.mjs";
-import { getTimeoutAction } from "../netlify/functions/_shared/poker-turn-timeout.mjs";
+import { getTimeoutAction, maybeApplyTurnTimeout } from "../netlify/functions/_shared/poker-turn-timeout.mjs";
 
 const makeRng = (seed) => {
   let value = seed;
@@ -627,6 +627,123 @@ const run = async () => {
       actedThisRoundByUserId: { "user-1": true, "user-2": true },
     };
     assert.throws(() => advanceIfNeeded(state), /invalid_state/);
+  }
+
+  {
+    const { seats, stacks } = makeBase();
+    const { state } = initHandState({ tableId: "t-reset-1", seats, stacks, rng: makeRng(25) });
+    const ended = {
+      ...state,
+      phase: "HAND_DONE",
+      handId: "hand-1",
+      handSeed: "seed-1",
+      dealerSeatNo: 1,
+      turnUserId: null,
+      pot: 55,
+      community: [{ r: "A", s: "S" }],
+      contributionsByUserId: { "user-1": 10, "user-2": 20, "user-3": 25 },
+    };
+    const advanced = advanceIfNeeded(ended);
+    const next = advanced.state;
+    assert.equal(next.phase, "PREFLOP");
+    assert.equal(next.pot, 0);
+    assert.equal(next.community.length, 0);
+    assert.ok(typeof next.handId === "string" && next.handId !== "hand-1");
+    assert.equal(next.dealerSeatNo, 3);
+    assert.ok(["user-1", "user-2", "user-3"].includes(next.turnUserId));
+    assert.deepEqual(next.contributionsByUserId, { "user-1": 0, "user-2": 0, "user-3": 0 });
+    assert.deepEqual(next.actedThisRoundByUserId, { "user-1": false, "user-2": false, "user-3": false });
+    assert.ok(advanced.events.some((event) => event.type === "HAND_RESET"));
+  }
+
+  {
+    const { seats, stacks } = makeBase();
+    const { state } = initHandState({ tableId: "t-reset-2", seats, stacks, rng: makeRng(26) });
+    const ended = {
+      ...state,
+      phase: "SHOWDOWN",
+      handId: "hand-2",
+      handSeed: "seed-2",
+      showdown: { winners: ["user-1"] },
+      dealerSeatNo: 1,
+      turnUserId: null,
+    };
+    const advanced = advanceIfNeeded(ended);
+    assert.equal(advanced.state.phase, "PREFLOP");
+    assert.ok(advanced.events.some((event) => event.type === "HAND_RESET"));
+  }
+
+  {
+    const seats = [
+      { userId: "user-1", seatNo: 1 },
+      { userId: "user-2", seatNo: 2 },
+    ];
+    const stacks = { "user-1": 0, "user-2": 100 };
+    const { state } = initHandState({ tableId: "t-reset-3", seats, stacks, rng: makeRng(27) });
+    const ended = {
+      ...state,
+      phase: "SHOWDOWN",
+      handId: "hand-3",
+      handSeed: "seed-3",
+      showdown: { winners: ["user-2"] },
+      dealerSeatNo: 1,
+      turnUserId: null,
+      stacks,
+    };
+    const advanced = advanceIfNeeded(ended);
+    assert.equal(advanced.state.phase, "SHOWDOWN");
+    assert.ok(advanced.events.some((event) => event.type === "HAND_RESET_SKIPPED"));
+  }
+
+  {
+    const seats = [
+      { userId: "user-a", seatNo: 1 },
+      { userId: "", seatNo: 2 },
+      { userId: "user-b", seatNo: 3 },
+    ];
+    const stacks = { "user-a": 100, "user-b": 100 };
+    const { state } = initHandState({ tableId: "t-reset-4", seats, stacks, rng: makeRng(28) });
+    const ended = {
+      ...state,
+      phase: "HAND_DONE",
+      handId: "hand-4",
+      handSeed: "seed-4",
+      dealerSeatNo: 1,
+      turnUserId: null,
+      seats,
+      stacks,
+    };
+    const advanced = advanceIfNeeded(ended);
+    assert.equal(advanced.state.dealerSeatNo, 3);
+  }
+
+  {
+    const seats = [
+      { userId: "user-1", seatNo: 1 },
+      { userId: "user-2", seatNo: 2 },
+    ];
+    const stacks = { "user-1": 100, "user-2": 100 };
+    const { state } = initHandState({ tableId: "t-reset-5", seats, stacks, rng: makeRng(29) });
+    const expired = {
+      ...state,
+      handId: "hand-timeout",
+      handSeed: "seed-timeout",
+      turnUserId: "user-1",
+      turnDeadlineAt: Date.now() - 1000,
+      toCallByUserId: { "user-1": 5, "user-2": 0 },
+      betThisRoundByUserId: { "user-1": 0, "user-2": 0 },
+      actedThisRoundByUserId: { "user-1": false, "user-2": false },
+      foldedByUserId: { "user-1": false, "user-2": false },
+    };
+    const timeoutResult = maybeApplyTurnTimeout({
+      tableId: "t-reset-5",
+      state: expired,
+      privateState: expired,
+      nowMs: Date.now(),
+    });
+    assert.equal(timeoutResult.applied, true);
+    assert.equal(timeoutResult.state.phase, "PREFLOP");
+    assert.ok(timeoutResult.events.some((event) => event.type === "HAND_RESET"));
   }
 };
 

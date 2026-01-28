@@ -1,5 +1,25 @@
 import { createDeck, dealCommunity, dealHoleCards, shuffle } from "./poker-engine.mjs";
 
+// =============================================================================
+// HAND LIFECYCLE CONTRACT (ENGINE ↔ UI)
+//
+// The poker engine resets hands AUTOMATICALLY and IMMEDIATELY after:
+// - phase === "HAND_DONE"
+// - phase === "SHOWDOWN" (when showdown data is present)
+//
+// There is NO "Next hand" confirmation step.
+//
+// UI MUST assume that finished-hand states are transient.
+// Any delays, animations, summaries (e.g. "You won X") or countdowns
+// must be handled entirely client-side.
+//
+// Turn timers are authoritative server-side. UI may display a shorter
+// visible timer, but the engine will auto-apply actions on timeout.
+//
+// This behavior is intentional to prevent inactive or lagging players
+// from blocking the table.
+// =============================================================================
+
 const TURN_MS = 20000;
 
 const copyMap = (value) => ({ ...(value || {}) });
@@ -40,6 +60,31 @@ const buildDefaultMap = (seats, value) =>
     if (seat?.userId) acc[seat.userId] = value;
     return acc;
   }, {});
+
+const makeHandId = () => {
+  if (globalThis.crypto && typeof globalThis.crypto.randomUUID === "function") {
+    return globalThis.crypto.randomUUID();
+  }
+  const now = Date.now();
+  const rand = Math.random().toString(16).slice(2, 10);
+  return `${now}-${rand}`;
+};
+
+const rotateDealerSeatNo = (state) => {
+  const ordered = orderSeats(state.seats);
+  const seatsWithUsers = ordered.filter((seat) => seat?.userId);
+  if (seatsWithUsers.length === 0) {
+    return Number.isInteger(state.dealerSeatNo) ? state.dealerSeatNo : 0;
+  }
+  const currentIndex = ordered.findIndex((seat) => seat?.seatNo === state.dealerSeatNo);
+  const fallbackIndex = ordered.findIndex((seat) => seat?.userId);
+  const startIndex = currentIndex >= 0 ? currentIndex : Math.max(fallbackIndex, 0);
+  for (let offset = 1; offset <= ordered.length; offset += 1) {
+    const seat = ordered[(startIndex + offset) % ordered.length];
+    if (seat?.userId) return seat.seatNo;
+  }
+  return seatsWithUsers[0]?.seatNo ?? state.dealerSeatNo ?? 0;
+};
 
 const deriveAllInByUserId = (state) => {
   const seats = Array.isArray(state.seats) ? state.seats : [];
@@ -182,6 +227,77 @@ const initHandState = ({ tableId, seats, stacks, rng }) => {
   return { state: nextState };
 };
 
+const resetToNextHand = (state, options = {}) => {
+  const orderedSeats = orderSeats(state.seats);
+  const seats = Array.isArray(state.seats) ? state.seats.slice() : [];
+  const stacks = copyMap(state.stacks);
+  const seatedUserIds = orderedSeats.map((seat) => seat.userId).filter(Boolean);
+  if (seatedUserIds.length === 0) {
+    return {
+      state: stampTurnTimer(state, Date.now()),
+      events: [{ type: "HAND_RESET_SKIPPED", reason: "not_enough_players" }],
+    };
+  }
+  const fundedUserIds = seatedUserIds.filter((userId) => (stacks?.[userId] ?? 0) > 0);
+  if (fundedUserIds.length < 2) {
+    return {
+      state: stampTurnTimer(state, Date.now()),
+      events: [{ type: "HAND_RESET_SKIPPED", reason: "not_enough_players" }],
+    };
+  }
+  const dealerSeatNo = rotateDealerSeatNo(state);
+  const foldedByUserId = buildDefaultMap(seats, false);
+  const turnUserId = getFirstBettingAfterDealer({
+    seats: orderedSeats,
+    dealerSeatNo,
+    stacks,
+    foldedByUserId,
+  });
+  if (!turnUserId) {
+    return {
+      state: stampTurnTimer(state, Date.now()),
+      events: [{ type: "HAND_RESET_SKIPPED", reason: "not_enough_players" }],
+    };
+  }
+  const handId = makeHandId();
+  const handSeed = makeHandId();
+  const rng = typeof options.rng === "function" ? options.rng : Math.random;
+  const deck = shuffle(createDeck(), rng);
+  const dealt = dealHoleCards(deck, seatedUserIds);
+  const baseTurnNo = Number.isInteger(state.turnNo) ? state.turnNo : 0;
+  const nextState = {
+    tableId: state.tableId,
+    phase: "PREFLOP",
+    seats,
+    stacks,
+    pot: 0,
+    community: [],
+    communityDealt: 0,
+    dealerSeatNo,
+    turnUserId,
+    turnNo: baseTurnNo + 1,
+    handId,
+    handSeed,
+    holeCardsByUserId: dealt.holeCardsByUserId,
+    deck: dealt.deck,
+    toCallByUserId: buildDefaultMap(seats, 0),
+    betThisRoundByUserId: buildDefaultMap(seats, 0),
+    actedThisRoundByUserId: buildDefaultMap(seats, false),
+    foldedByUserId,
+    contributionsByUserId: buildDefaultMap(seats, 0),
+    lastAggressorUserId: null,
+    lastActionRequestIdByUserId: {},
+    showdown: null,
+    sidePots: null,
+  };
+  const nextWithAllIn = { ...nextState, allInByUserId: deriveAllInByUserId(nextState) };
+  const stamped = stampTurnTimer(nextWithAllIn, Date.now());
+  return {
+    state: stamped,
+    events: [{ type: "HAND_RESET", fromPhase: state.phase, toPhase: "PREFLOP", dealerSeatNo }],
+  };
+};
+
 const getLegalActions = (state, userId) => {
   assertPlayer(state, userId);
   if (!state.turnUserId) return [];
@@ -296,8 +412,13 @@ const applyAction = (state, action) => {
 
 const advanceIfNeeded = (state) => {
   const events = [];
-  if (state.phase === "HAND_DONE" || state.phase === "SHOWDOWN") {
-    return { state: stampTurnTimer(state, Date.now()), events };
+// Hand reset is automatic and immediate.
+// UI must not rely on a stable "finished hand" state.
+  if (state.phase === "HAND_DONE") {
+    return resetToNextHand(state);
+  }
+  if (state.phase === "SHOWDOWN" && state.showdown) {
+    return resetToNextHand(state);
   }
   const active = getActiveSeats(state);
   const betting = getBettingSeats(state);
