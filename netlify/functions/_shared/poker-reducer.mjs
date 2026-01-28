@@ -1,5 +1,7 @@
 import { createDeck, dealCommunity, dealHoleCards, shuffle } from "./poker-engine.mjs";
 
+const TURN_MS = 20000;
+
 const copyMap = (value) => ({ ...(value || {}) });
 
 const orderSeats = (seats) =>
@@ -92,6 +94,16 @@ const resetRoundState = (state) => ({
   actedThisRoundByUserId: buildDefaultMap(state.seats, false),
 });
 
+const stampTurnTimer = (state, nowMs) => {
+  const now = Number.isFinite(nowMs) ? nowMs : Date.now();
+  const hasTurn = typeof state.turnUserId === "string" && state.turnUserId.trim();
+  if (!hasTurn) {
+    return { ...state, turnStartedAt: null, turnDeadlineAt: null };
+  }
+  const turnNo = Number.isInteger(state.turnNo) ? state.turnNo : 1;
+  return { ...state, turnNo, turnStartedAt: now, turnDeadlineAt: now + TURN_MS };
+};
+
 const isBettingRoundComplete = (state) => {
   const eligible = getBettingSeats(state);
   if (eligible.length === 0) return true;
@@ -152,7 +164,9 @@ const initHandState = ({ tableId, seats, stacks, rng }) => {
     allInByUserId,
     lastAggressorUserId: null,
   };
-  return { state };
+  const now = Date.now();
+  const nextState = stampTurnTimer({ ...state, turnNo: 1 }, now);
+  return { state: nextState };
 };
 
 const getLegalActions = (state, userId) => {
@@ -259,22 +273,30 @@ const applyAction = (state, action) => {
   next.turnUserId = getNextBettingUserId(next, userId);
 
   const done = checkHandDone(next, events);
-  return { state: done.state, events: done.events };
+  const now = Date.now();
+  const baseTurnNo = Number.isInteger(state.turnNo) ? state.turnNo : 0;
+  let updated = { ...done.state, turnNo: baseTurnNo };
+  if (updated.turnUserId) {
+    updated = stampTurnTimer({ ...updated, turnNo: baseTurnNo + 1 }, now);
+  } else {
+    updated = stampTurnTimer(updated, now);
+  }
+  return { state: updated, events: done.events };
 };
 
 const advanceIfNeeded = (state) => {
   const events = [];
   if (state.phase === "HAND_DONE" || state.phase === "SHOWDOWN") {
-    return { state, events };
+    return { state: stampTurnTimer(state, Date.now()), events };
   }
   const active = getActiveSeats(state);
   const betting = getBettingSeats(state);
   if (active.length <= 1) {
     const done = checkHandDone(state, events);
-    return { state: done.state, events: done.events };
+    return { state: stampTurnTimer(done.state, Date.now()), events: done.events };
   }
   if (betting.length === 0) {
-    const next = { ...state, phase: "SHOWDOWN", turnUserId: null };
+    const next = stampTurnTimer({ ...state, phase: "SHOWDOWN", turnUserId: null }, Date.now());
     events.push({ type: "SHOWDOWN_STARTED", reason: "no_betting_players" });
     return { state: next, events };
   }
@@ -287,8 +309,9 @@ const advanceIfNeeded = (state) => {
   const validatedState = assertCommunityCountForPhase(state);
   const from = validatedState.phase;
   const to = nextStreet(from);
+  const baseTurnNo = Number.isInteger(state.turnNo) ? state.turnNo : 0;
   let next = resetRoundState({ ...validatedState, phase: to, turnUserId: null });
-  next = { ...next, turnUserId: getFirstBettingAfterDealer(next) };
+  next = { ...next, turnUserId: getFirstBettingAfterDealer(next), turnNo: baseTurnNo + 1 };
 
   const n = cardsToDeal(from);
   if (n > 0) {
@@ -298,7 +321,7 @@ const advanceIfNeeded = (state) => {
   }
   next = assertCommunityCountForPhase(next);
   events.push({ type: "STREET_ADVANCED", from, to });
-  return { state: next, events };
+  return { state: stampTurnTimer(next, Date.now()), events };
 };
 
-export { initHandState, getLegalActions, applyAction, advanceIfNeeded, isBettingRoundComplete };
+export { TURN_MS, initHandState, getLegalActions, applyAction, advanceIfNeeded, isBettingRoundComplete };

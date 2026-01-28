@@ -6,6 +6,7 @@ import { advanceIfNeeded, applyAction } from "./_shared/poker-reducer.mjs";
 import { normalizeRequestId } from "./_shared/poker-request-id.mjs";
 import { computeShowdown } from "./_shared/poker-showdown.mjs";
 import { isPlainObject, isStateStorageValid, normalizeJsonState, withoutPrivateState } from "./_shared/poker-state-utils.mjs";
+import { maybeApplyTurnTimeout } from "./_shared/poker-turn-timeout.mjs";
 import { isValidUuid } from "./_shared/poker-utils.mjs";
 
 const ACTION_TYPES = new Set(["CHECK", "BET", "CALL", "RAISE", "FOLD"]);
@@ -428,6 +429,58 @@ export async function handler(event) {
         });
       }
 
+      const privateState = {
+        ...currentState,
+        community: derivedCommunity,
+        deck: derivedDeck,
+        holeCardsByUserId,
+      };
+
+      const timeoutResult = maybeApplyTurnTimeout({ tableId, state: currentState, privateState, nowMs: Date.now() });
+      if (timeoutResult.applied) {
+        const updatedState = timeoutResult.state;
+        if (!isStateStorageValid(updatedState, { requireHandSeed: true, requireCommunityDealt: true, requireNoDeck: true })) {
+          klog("poker_state_corrupt", { tableId, phase: updatedState.phase });
+          throw makeError(409, "state_invalid");
+        }
+
+        const updateRows = await tx.unsafe(
+          "update public.poker_state set version = version + 1, state = $2::jsonb, updated_at = now() where table_id = $1 returning version;",
+          [tableId, JSON.stringify(updatedState)]
+        );
+        const newVersion = Number(updateRows?.[0]?.version);
+        if (!Number.isFinite(newVersion)) {
+          klog("poker_act_rejected", {
+            tableId,
+            userId: auth.userId,
+            reason: "state_invalid",
+            phase: updatedState.phase,
+          });
+          throw makeError(409, "state_invalid");
+        }
+
+        await tx.unsafe(
+          "insert into public.poker_actions (table_id, version, user_id, action_type, amount) values ($1, $2, $3, $4, $5);",
+          [tableId, newVersion, timeoutResult.action.userId, timeoutResult.action.type, timeoutResult.action.amount ?? null]
+        );
+
+        klog("poker_turn_timeout", {
+          tableId,
+          turnUserId: timeoutResult.action.userId,
+          actionType: timeoutResult.action.type,
+          newVersion,
+        });
+
+        return {
+          tableId,
+          version: newVersion,
+          state: withoutPrivateState(updatedState),
+          myHoleCards: holeCardsByUserId[auth.userId] || [],
+          events: timeoutResult.events || [],
+          replayed: false,
+        };
+      }
+
       if (lastByUserId[auth.userId] === requestId) {
         const version = Number(stateRow.version);
         if (!Number.isFinite(version)) {
@@ -484,13 +537,6 @@ export async function handler(event) {
         });
         throw makeError(400, "invalid_action");
       }
-
-      const privateState = {
-        ...currentState,
-        community: derivedCommunity,
-        deck: derivedDeck,
-        holeCardsByUserId,
-      };
 
       let applied;
       try {

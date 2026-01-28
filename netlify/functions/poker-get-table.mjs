@@ -1,6 +1,8 @@
 import { baseHeaders, beginSql, corsHeaders, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
+import { deriveCommunityCards, deriveRemainingDeck } from "./_shared/poker-deal-deterministic.mjs";
 import { isHoleCardsTableMissing, loadHoleCardsByUserId } from "./_shared/poker-hole-cards-store.mjs";
-import { normalizeJsonState, withoutPrivateState } from "./_shared/poker-state-utils.mjs";
+import { isStateStorageValid, normalizeJsonState, withoutPrivateState } from "./_shared/poker-state-utils.mjs";
+import { maybeApplyTurnTimeout, normalizeSeatOrderFromState } from "./_shared/poker-turn-timeout.mjs";
 import { isValidUuid } from "./_shared/poker-utils.mjs";
 
 const isActionPhase = (phase) => phase === "PREFLOP" || phase === "FLOP" || phase === "TURN" || phase === "RIVER";
@@ -34,6 +36,42 @@ const parseTableId = (event) => {
   if (!last || last === "poker-get-table" || last === ".netlify" || last === "functions") return "";
   if (last === "poker-get-table" || last === "poker-get-table.mjs") return "";
   return last;
+};
+
+const normalizeRank = (value) => {
+  if (typeof value === "number") return value;
+  if (typeof value !== "string") return null;
+  const upper = value.toUpperCase();
+  if (upper === "T") return 10;
+  if (upper === "J") return 11;
+  if (upper === "Q") return 12;
+  if (upper === "K") return 13;
+  if (upper === "A") return 14;
+  const num = Number(upper);
+  return Number.isInteger(num) ? num : null;
+};
+
+const cardKey = (card) => {
+  const rank = normalizeRank(card?.r);
+  const suit = typeof card?.s === "string" ? card.s.toUpperCase() : "";
+  if (!rank || !suit) return "";
+  return `${rank}-${suit}`;
+};
+
+const cardsSameSet = (left, right) => {
+  if (!Array.isArray(left) || !Array.isArray(right)) return false;
+  if (left.length !== right.length) return false;
+  const leftKeys = left.map(cardKey);
+  if (leftKeys.some((key) => !key)) return false;
+  leftKeys.sort();
+  const rightKeys = right.map(cardKey);
+  if (rightKeys.some((key) => !key)) return false;
+  rightKeys.sort();
+  if (leftKeys.length !== rightKeys.length) return false;
+  for (let i = 0; i < leftKeys.length; i += 1) {
+    if (leftKeys[i] !== rightKeys[i]) return false;
+  }
+  return true;
 };
 
 export async function handler(event) {
@@ -98,6 +136,7 @@ export async function handler(event) {
         klog("poker_state_missing", { tableId });
         throw new Error("poker_state_missing");
       }
+      let stateVersion = stateRow.version;
 
       const seats = Array.isArray(seatRows)
         ? seatRows.map((seat) => ({
@@ -111,10 +150,16 @@ export async function handler(event) {
 
       const currentState = normalizeJsonState(stateRow.state);
       let myHoleCards = [];
+      let updatedState = currentState;
       if (isActionPhase(currentState.phase)) {
         if (typeof currentState.handId !== "string" || !currentState.handId.trim()) {
           throw new Error("state_invalid");
         }
+        if (typeof currentState.handSeed !== "string" || !currentState.handSeed.trim()) {
+          throw new Error("state_invalid");
+        }
+        const nowMs = Date.now();
+        const shouldApplyTimeout = Number.isFinite(Number(currentState.turnDeadlineAt)) && nowMs > currentState.turnDeadlineAt;
         const dbActiveUserIds = Array.isArray(activeSeatRows)
           ? activeSeatRows.map((row) => row?.user_id).filter(Boolean)
           : [];
@@ -145,7 +190,7 @@ export async function handler(event) {
           });
         }
         let effectiveUserIdsForHoleCards = stateSeatUserIds;
-        if (candidateActiveUserIds.length) {
+        if (!shouldApplyTimeout && candidateActiveUserIds.length) {
           const overlap = candidateActiveUserIds.filter((userId) => stateSeatUserIds.includes(userId));
           if (overlap.length) {
             effectiveUserIdsForHoleCards = overlap.includes(auth.userId) ? overlap : [...overlap, auth.userId];
@@ -158,6 +203,62 @@ export async function handler(event) {
             activeUserIds: effectiveUserIdsForHoleCards,
           });
           myHoleCards = holeCards.holeCardsByUserId[auth.userId] || [];
+          if (shouldApplyTimeout) {
+            const seatUserIdsInOrder = normalizeSeatOrderFromState(currentState.seats);
+            if (seatUserIdsInOrder.length <= 0) {
+              throw new Error("state_invalid");
+            }
+            const derivedCommunity = deriveCommunityCards({
+              handSeed: currentState.handSeed,
+              seatUserIdsInOrder,
+              communityDealt: currentState.communityDealt,
+            });
+            if (!cardsSameSet(currentState.community, derivedCommunity)) {
+              throw new Error("state_invalid");
+            }
+            const derivedDeck = deriveRemainingDeck({
+              handSeed: currentState.handSeed,
+              seatUserIdsInOrder,
+              communityDealt: currentState.communityDealt,
+            });
+            const privateState = {
+              ...currentState,
+              community: derivedCommunity,
+              deck: derivedDeck,
+              holeCardsByUserId: holeCards.holeCardsByUserId,
+            };
+            const timeoutResult = maybeApplyTurnTimeout({
+              tableId,
+              state: currentState,
+              privateState,
+              nowMs,
+            });
+            if (timeoutResult.applied) {
+              if (
+                !isStateStorageValid(timeoutResult.state, {
+                  requireHandSeed: true,
+                  requireCommunityDealt: true,
+                  requireNoDeck: true,
+                })
+              ) {
+                throw new Error("state_invalid");
+              }
+              const updateRows = await tx.unsafe(
+                "update public.poker_state set version = version + 1, state = $2::jsonb, updated_at = now() where table_id = $1 returning version;",
+                [tableId, JSON.stringify(timeoutResult.state)]
+              );
+              const newVersion = Number(updateRows?.[0]?.version);
+              if (!Number.isFinite(newVersion)) {
+                throw new Error("state_invalid");
+              }
+              stateVersion = newVersion;
+              await tx.unsafe(
+                "insert into public.poker_actions (table_id, version, user_id, action_type, amount) values ($1, $2, $3, $4, $5);",
+                [tableId, newVersion, timeoutResult.action.userId, timeoutResult.action.type, timeoutResult.action.amount ?? null]
+              );
+              updatedState = timeoutResult.state;
+            }
+          }
         } catch (error) {
           if (error?.message === "state_invalid") {
             klog("poker_get_table_hole_cards_invalid", {
@@ -181,7 +282,7 @@ export async function handler(event) {
         }
       }
 
-      return { table, seats, stateRow, currentState, myHoleCards };
+      return { table, seats, stateVersion, currentState: updatedState, myHoleCards };
     });
 
     if (result?.error === "table_not_found") {
@@ -190,7 +291,7 @@ export async function handler(event) {
 
     const table = result.table;
     const seats = result.seats;
-    const stateRow = result.stateRow;
+    const stateVersion = result.stateVersion;
     const publicState = withoutPrivateState(result.currentState);
 
     const tablePayload = {
@@ -212,7 +313,7 @@ export async function handler(event) {
         table: tablePayload,
         seats,
         state: {
-          version: stateRow.version,
+          version: stateVersion,
           state: publicState,
         },
         myHoleCards: result.myHoleCards || [],

@@ -3,6 +3,7 @@ import { baseHeaders, beginSql, corsHeaders, extractBearerToken, klog, verifySup
 import { isValidTwoCards } from "./_shared/poker-cards-utils.mjs";
 import { dealHoleCards } from "./_shared/poker-engine.mjs";
 import { deriveDeck } from "./_shared/poker-deal-deterministic.mjs";
+import { TURN_MS } from "./_shared/poker-reducer.mjs";
 import {
   getRng,
   isPlainObject,
@@ -325,6 +326,10 @@ export async function handler(event) {
         lastStartHandUserId: auth.userId,
         startedAt: new Date().toISOString(),
       };
+      const nowMs = Date.now();
+      updatedState.turnNo = 1;
+      updatedState.turnStartedAt = nowMs;
+      updatedState.turnDeadlineAt = nowMs + TURN_MS;
 
       if (!isStateStorageValid(updatedState, { requireHandSeed: true, requireCommunityDealt: true, requireNoDeck: true })) {
         klog("poker_state_corrupt", { tableId, phase: updatedState.phase });
