@@ -1,5 +1,25 @@
 import { createDeck, dealCommunity, dealHoleCards, shuffle } from "./poker-engine.mjs";
 
+// =============================================================================
+// HAND LIFECYCLE CONTRACT (ENGINE ↔ UI)
+//
+// The poker engine resets hands AUTOMATICALLY and IMMEDIATELY after:
+// - phase === "HAND_DONE"
+// - phase === "SHOWDOWN" (when showdown data is present)
+//
+// There is NO "Next hand" confirmation step.
+//
+// UI MUST assume that finished-hand states are transient.
+// Any delays, animations, summaries (e.g. "You won X") or countdowns
+// must be handled entirely client-side.
+//
+// Turn timers are authoritative server-side. UI may display a shorter
+// visible timer, but the engine will auto-apply actions on timeout.
+//
+// This behavior is intentional to prevent inactive or lagging players
+// from blocking the table.
+// =============================================================================
+
 const TURN_MS = 20000;
 
 const copyMap = (value) => ({ ...(value || {}) });
@@ -392,6 +412,8 @@ const applyAction = (state, action) => {
 
 const advanceIfNeeded = (state) => {
   const events = [];
+// Hand reset is automatic and immediate.
+// UI must not rely on a stable "finished hand" state.
   if (state.phase === "HAND_DONE") {
     return resetToNextHand(state);
   }
