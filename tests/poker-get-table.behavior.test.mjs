@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { isHoleCardsTableMissing, loadHoleCardsByUserId } from "../netlify/functions/_shared/poker-hole-cards-store.mjs";
-import { normalizeJsonState, withoutPrivateState } from "../netlify/functions/_shared/poker-state-utils.mjs";
+import { buildHandSnapshot, normalizeJsonState, withoutPrivateState } from "../netlify/functions/_shared/poker-state-utils.mjs";
 import { loadPokerHandler } from "./helpers/poker-test-helpers.mjs";
 
 const tableId = "11111111-1111-4111-8111-111111111111";
@@ -37,6 +37,7 @@ const makeHandler = (queries, storedState, userId, options = {}) =>
     verifySupabaseJwt: async () => ({ valid: true, userId }),
     isValidUuid: () => true,
     normalizeJsonState,
+    buildHandSnapshot,
     withoutPrivateState,
     isHoleCardsTableMissing,
     loadHoleCardsByUserId,
@@ -98,6 +99,11 @@ const run = async () => {
   assert.equal(JSON.stringify(happyPayload).includes("holeCardsByUserId"), false);
   assert.equal(JSON.stringify(happyPayload).includes('"deck"'), false);
   assert.equal(JSON.stringify(happyPayload).includes('"handSeed"'), false);
+  assert.ok(happyPayload.hand);
+  assert.equal(typeof happyPayload.hand.handId, "string");
+  assert.equal(happyPayload.hand.phase, happyPayload.state.state.phase);
+  assert.equal(Array.isArray(happyPayload.events), true);
+  assert.deepEqual(happyPayload.events, []);
 
   const stringCardResponse = await makeHandler([], storedState, "user-1", {
     holeCardsByUserId: {
