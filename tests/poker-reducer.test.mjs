@@ -6,6 +6,7 @@ import {
   initHandState,
   isBettingRoundComplete,
 } from "../netlify/functions/_shared/poker-reducer.mjs";
+import { getTimeoutAction } from "../netlify/functions/_shared/poker-turn-timeout.mjs";
 
 const makeRng = (seed) => {
   let value = seed;
@@ -282,6 +283,26 @@ const run = async () => {
     state = advanced.state;
     assert.equal(state.phase, "FLOP");
     assert.equal(state.community.length, 3);
+  }
+
+  {
+    const { seats, stacks } = makeBase();
+    const { state } = initHandState({ tableId: "t-timeout-1", seats, stacks, rng: makeRng(21) });
+    const expired = { ...state, turnDeadlineAt: Date.now() - 1000 };
+    const action = getTimeoutAction(expired);
+    assert.deepEqual(action, { type: "CHECK", userId: expired.turnUserId });
+  }
+
+  {
+    const { seats, stacks } = makeBase();
+    const { state } = initHandState({ tableId: "t-timeout-2", seats, stacks, rng: makeRng(22) });
+    const expired = {
+      ...state,
+      turnDeadlineAt: Date.now() - 1000,
+      toCallByUserId: { ...state.toCallByUserId, [state.turnUserId]: 5 },
+    };
+    const action = getTimeoutAction(expired);
+    assert.deepEqual(action, { type: "FOLD", userId: expired.turnUserId });
   }
 
   {

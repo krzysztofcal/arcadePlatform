@@ -474,6 +474,7 @@
     var stakesEl = document.getElementById('pokerStakes');
     var statusEl = document.getElementById('pokerStatus');
     var seatsGrid = document.getElementById('pokerSeatsGrid');
+    var turnTimerEl = document.getElementById('pokerTurnTimer');
     var joinBtn = document.getElementById('pokerJoin');
     var leaveBtn = document.getElementById('pokerLeave');
     var joinStatusEl = document.getElementById('pokerJoinStatus');
@@ -509,6 +510,7 @@
     var pendingHiddenAt = null;
     var heartbeatPendingRetries = 0;
     var heartbeatInFlight = false;
+    var turnTimerInterval = null;
     var HEARTBEAT_PENDING_MAX_RETRIES = 8;
 
     if (joinBtn){
@@ -761,6 +763,10 @@
         clearTimeout(state.pollTimer);
         state.pollTimer = null;
       }
+      if (turnTimerInterval){
+        clearInterval(turnTimerInterval);
+        turnTimerInterval = null;
+      }
     }
 
     function stopHeartbeat(){
@@ -893,8 +899,34 @@
       if (phaseEl) phaseEl.textContent = gameState.phase || '-';
       renderPhaseLabel(gameState);
       renderCommunityBoard(gameState);
+      renderTurnTimer(gameState);
       if (versionEl) versionEl.textContent = stateObj.version != null ? stateObj.version : '-';
       if (jsonBox) jsonBox.textContent = JSON.stringify(gameState, null, 2);
+    }
+
+    function renderTurnTimer(gameState){
+      if (!turnTimerEl) return;
+      var deadline = Number(gameState.turnDeadlineAt);
+      if (!deadline || !isFinite(deadline)){
+        turnTimerEl.hidden = true;
+        turnTimerEl.textContent = '';
+        if (turnTimerInterval){
+          clearInterval(turnTimerInterval);
+          turnTimerInterval = null;
+        }
+        return;
+      }
+      function update(){
+        var remainingMs = Math.max(0, deadline - Date.now());
+        var seconds = Math.ceil(remainingMs / 1000);
+        turnTimerEl.textContent = t('pokerTurnTimer', 'Time left') + ': ' + seconds + 's';
+        turnTimerEl.hidden = false;
+      }
+      update();
+      if (turnTimerInterval){
+        clearInterval(turnTimerInterval);
+      }
+      turnTimerInterval = setInterval(update, 1000);
     }
 
     async function retryJoin(){

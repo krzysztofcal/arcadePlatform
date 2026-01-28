@@ -62,6 +62,8 @@
 
 .poker-info-item strong{color:#e8eeff;}
 
+.poker-turn-timer{font:600 12px Poppins, sans-serif; color:var(--muted); margin-bottom:10px;}
+
 .poker-seats-grid{display:grid; grid-template-columns:repeat(auto-fill, minmax(120px, 1fr)); gap:10px; margin-bottom:16px;}
 
 .poker-seat{background:var(--card-2); border:1px solid var(--border); border-radius:10px; padding:12px; text-align:center;}

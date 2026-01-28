@@ -53,8 +53,10 @@ export const loadPokerHandler = (filePath, mocks) => {
     "isPlainObject",
     "isStateStorageValid",
     "klog",
+    "maybeApplyTurnTimeout",
     "normalizeJsonState",
     "normalizeRequestId",
+    "normalizeSeatOrderFromState",
     "postTransaction",
     "shuffle",
     "verifySupabaseJwt",
@@ -66,6 +68,7 @@ export const loadPokerHandler = (filePath, mocks) => {
     "upgradeLegacyInitStateWithSeats",
     "PRESENCE_TTL_SEC",
     "TABLE_EMPTY_CLOSE_SEC",
+    "TURN_MS",
   ];
   const injectedNames = injectable.filter((name) => !declared.has(name));
   const destructureLine = injectedNames.length ? `const { ${injectedNames.join(", ")} } = mocks;` : "";
