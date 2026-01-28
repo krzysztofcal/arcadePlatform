@@ -186,6 +186,7 @@ const applyAction = (state, action) => {
   }
   assertPlayer(state, action.userId);
   const events = [{ type: "ACTION_APPLIED", action }];
+  const safeSeats = Array.isArray(state.seats) ? state.seats : [];
   const next = {
     ...state,
     stacks: copyMap(state.stacks),
@@ -193,7 +194,7 @@ const applyAction = (state, action) => {
     betThisRoundByUserId: copyMap(state.betThisRoundByUserId),
     actedThisRoundByUserId: copyMap(state.actedThisRoundByUserId),
     foldedByUserId: copyMap(state.foldedByUserId),
-    allInByUserId: copyMap(state.allInByUserId || buildDefaultMap(state.seats || [], false)),
+    allInByUserId: copyMap(state.allInByUserId || buildDefaultMap(safeSeats, false)),
     community: Array.isArray(state.community) ? state.community.slice() : [],
     deck: Array.isArray(state.deck) ? state.deck.slice() : [],
   };

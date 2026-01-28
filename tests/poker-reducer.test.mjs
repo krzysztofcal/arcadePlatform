@@ -496,8 +496,8 @@ const run = async () => {
     const legacyState = { ...state };
     delete legacyState.allInByUserId;
 
-    assert.doesNotThrow(() => applyAction(legacyState, { type: "CHECK", userId: legacyState.turnUserId }));
     const result = applyAction(legacyState, { type: "CHECK", userId: legacyState.turnUserId });
+    assert.ok(result?.state?.allInByUserId);
     assert.equal(result.state.allInByUserId[legacyState.turnUserId], false);
   }
 
