@@ -28,6 +28,9 @@ jobs:
       - name: Install deps
         run: npm ci
 
+      - name: Install supabase-js for E2E scripts
+        run: npm i --no-save @supabase/supabase-js
+
       - name: Unit tests (fast)
         run: npm test --silent
         env:
