@@ -1,4 +1,5 @@
 // tools/poker-e2e-flop-bet-call-turn.mjs
+import { api, fetchJson, retry, snippet, waitFor } from "./_shared/poker-e2e-http.mjs";
 //
 // E2E: 2 players
 // - PREFLOP: CHECK/CHECK -> FLOP
@@ -27,7 +28,6 @@ if (missing.length) {
   process.exit(1);
 }
 
-const FETCH_TIMEOUT_MS = 30000;
 const HEARTBEAT_MS = 15000;
 
 const base = process.env.BASE;
@@ -49,117 +49,8 @@ if (baseHost === "play.kcswh.pl" && !allowProd) {
   process.exit(1);
 }
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
 const requestId = (prefix) => `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
-const buildUrl = (path) => new URL(path, base).toString();
-
-const parseJson = (text) => {
-  try {
-    return text ? JSON.parse(text) : null;
-  } catch {
-    return null;
-  }
-};
-
-const snippet = (text, n = 240) => {
-  if (!text) return "";
-  const t = String(text);
-  return t.length > n ? `${t.slice(0, n)}…` : t;
-};
-
-const retry = async (label, fn, { tries = 6, baseDelayMs = 350, maxDelayMs = 3000 } = {}) => {
-  let lastErr = null;
-  for (let i = 0; i < tries; i++) {
-    try {
-      return await fn(i);
-    } catch (e) {
-      lastErr = e;
-      const backoff = Math.min(maxDelayMs, baseDelayMs * Math.pow(2, i));
-      const jitter = Math.floor(Math.random() * 150);
-      const delay = backoff + jitter;
-      console.warn(`[retry] ${label} failed (try ${i + 1}/${tries}): ${e?.message || e}. sleeping ${delay}ms`);
-      await sleep(delay);
-    }
-  }
-  throw lastErr || new Error(`retry_failed:${label}`);
-};
-
-const waitFor = async (
-  label,
-  predicate,
-  { timeoutMs = 25000, pollMs = 650, minPollMs = 250, maxPollMs = 1500 } = {}
-) => {
-  const started = Date.now();
-  let attempt = 0;
-  let lastErr = null;
-
-  while (Date.now() - started < timeoutMs) {
-    try {
-      const out = await predicate(attempt++);
-      if (out) return out;
-      lastErr = null;
-    } catch (e) {
-      lastErr = e;
-    }
-
-    const growth = pollMs + attempt * 80;
-    const delay = Math.max(minPollMs, Math.min(maxPollMs, growth));
-    await sleep(delay);
-  }
-
-  throw new Error(`wait_timeout:${label} timeoutMs=${timeoutMs}${lastErr ? ` lastErr=${lastErr?.message || lastErr}` : ""}`);
-};
-
-const fetchJson = async (url, options) => {
-  const maxAttempts = 3;
-  const shouldRetryStatus = (status) => status === 429 || status === 502 || status === 503 || status === 504 || status >= 500;
-
-  let lastErr = null;
-
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-
-    try {
-      const res = await fetch(url, { ...options, signal: controller.signal });
-      const text = await res.text();
-      const json = parseJson(text);
-
-      if (!res.ok && shouldRetryStatus(res.status) && attempt < maxAttempts) {
-        const backoff = attempt === 1 ? 350 : attempt === 2 ? 900 : 1600;
-        console.warn(
-          `[fetchJson] retrying ${url} status=${res.status} attempt=${attempt}/${maxAttempts} backoff=${backoff}ms body=${snippet(
-            text
-          )}`
-        );
-        await sleep(backoff);
-        continue;
-      }
-
-      return { res, text, json };
-    } catch (e) {
-      lastErr = e;
-      const isAbort = e?.name === "AbortError";
-
-      if (isAbort && attempt < maxAttempts) {
-        const backoff = attempt === 1 ? 350 : attempt === 2 ? 900 : 1600;
-        console.warn(
-          `[fetchJson] timeout retrying ${url} attempt=${attempt}/${maxAttempts} backoff=${backoff}ms timeout=${FETCH_TIMEOUT_MS}ms`
-        );
-        await sleep(backoff);
-        continue;
-      }
-
-      if (isAbort) throw new Error(`fetch_timeout:${FETCH_TIMEOUT_MS}ms url=${url}`);
-      throw e;
-    } finally {
-      clearTimeout(timeoutId);
-    }
-  }
-
-  throw lastErr || new Error(`fetch_failed url=${url}`);
-};
+const callApi = ({ label, ...req }) => api({ base, origin, label, ...req });
 
 const decodeUserId = (token) => {
   if (typeof token !== "string") return null;
@@ -189,7 +80,7 @@ const getSupabaseToken = async (email, password) => {
           "content-type": "application/json",
         },
         body: JSON.stringify({ email, password }),
-      });
+      }, { label: "supabase-auth" });
 
       if (!res.ok) {
         const msg = json?.error_description || json?.error || text || res.statusText;
@@ -202,37 +93,15 @@ const getSupabaseToken = async (email, password) => {
   );
 };
 
-const callJsonOnce = async ({ path, method, token, body }) => {
-  const url = buildUrl(path);
-  const headers = { origin, authorization: `Bearer ${token}` };
-  if (body) headers["content-type"] = "application/json";
-  return fetchJson(url, { method, headers, body: body ? JSON.stringify(body) : undefined });
-};
-
-// Higher-level retry for transient HTTP problems / races.
-// NOTE: we *don't* retry on 4xx except a small allowlist (408/425/429/409 in some cases handled by callers).
-const callJson = async ({ label, ...req }) => {
-  const transient = new Set([408, 425, 429, 500, 502, 503, 504]);
-  return retry(
-    label || `${req.method || "GET"} ${req.path}`,
-    async () => {
-      const out = await callJsonOnce(req);
-      if (!out.res?.ok && transient.has(out.res.status)) {
-        throw new Error(`http_${out.res.status}:${snippet(out.text)}`);
-      }
-      return out;
-    },
-    { tries: 5, baseDelayMs: 350, maxDelayMs: 2500 }
-  );
-};
+const callJsonOnce = async ({ label, ...req }) => callApi({ label, ...req });
 
 const assertOk = (cond, msg) => {
   if (!cond) throw new Error(msg);
 };
 
-const assertStatus = (res, text, want, label) => {
-  if (res.status !== want) {
-    throw new Error(`${label} status=${res.status} body=${snippet(text, 220)}`.trim());
+const assertStatus = (status, text, want, label) => {
+  if (status !== want) {
+    throw new Error(`${label} status=${status} body=${snippet(text, 220)}`.trim());
   }
 };
 
@@ -262,16 +131,16 @@ const run = async () => {
 
   const heartbeatOnce = async (label, token, tableId) => {
     try {
-      const hb = await callJson({
+      const hb = await callApi({
         label: `heartbeat:${label}`,
         path: "/.netlify/functions/poker-heartbeat",
         method: "POST",
         token,
         body: { tableId, requestId: requestId(`hb-${label}`) },
       });
-      if (hb.res.status !== 200) {
+      if (hb.status !== 200) {
         heartbeatError = new Error(
-          `poker-heartbeat ${label} status=${hb.res.status} body=${snippet(hb.text, 220)}`.trim()
+          `poker-heartbeat ${label} status=${hb.status} body=${snippet(hb.text, 220)}`.trim()
         );
       }
     } catch (e) {
@@ -280,57 +149,51 @@ const run = async () => {
   };
 
   const getTableOnce = async (label, token, tableId) => {
-    const gt = await callJson({
+    const gt = await callApi({
       label: `get-table:${label}`,
       path: `/.netlify/functions/poker-get-table?tableId=${encodeURIComponent(tableId)}&t=${Date.now()}`,
       method: "GET",
       token,
     });
-    assertStatus(gt.res, gt.text, 200, `poker-get-table ${label}`);
+    assertStatus(gt.status, gt.text, 200, `poker-get-table ${label}`);
     assertOk(gt.json?.ok === true, `poker-get-table ${label} ok:false`);
     mustNotLeakPrivate(gt.json, `poker-get-table ${label}`);
     return gt.json;
   };
 
-  // In case /poker-get-table itself flakes (timeouts, 5xx), wrap as retry too.
-  const getTable = async (label, token, tableId) =>
-    retry(
-      `get-table:${label}`,
-      async () => getTableOnce(label, token, tableId),
-      { tries: 5, baseDelayMs: 350, maxDelayMs: 2500 }
-    );
+  const getTable = async (label, token, tableId) => getTableOnce(label, token, tableId);
 
   try {
     // 1) create table (u1)
-    const create = await callJson({
+    const create = await callApi({
       label: "create-table",
       path: "/.netlify/functions/poker-create-table",
       method: "POST",
       token: u1Token,
       body: { requestId: requestId("create"), stakes: { sb: 1, bb: 2 }, maxPlayers: 6 },
     });
-    assertStatus(create.res, create.text, 200, "poker-create-table");
+    assertStatus(create.status, create.text, 200, "poker-create-table");
     const tableId = create.json?.tableId;
     assertOk(typeof tableId === "string" && tableId.length > 0, "poker-create-table missing tableId");
 
     // 2) join seats
-    const join1 = await callJson({
+    const join1 = await callApi({
       label: "join-u1",
       path: "/.netlify/functions/poker-join",
       method: "POST",
       token: u1Token,
       body: { tableId, seatNo: 0, buyIn: 100, requestId: requestId("join-u1") },
     });
-    assertStatus(join1.res, join1.text, 200, "poker-join u1");
+    assertStatus(join1.status, join1.text, 200, "poker-join u1");
 
-    const join2 = await callJson({
+    const join2 = await callApi({
       label: "join-u2",
       path: "/.netlify/functions/poker-join",
       method: "POST",
       token: u2Token,
       body: { tableId, seatNo: 1, buyIn: 100, requestId: requestId("join-u2") },
     });
-    assertStatus(join2.res, join2.text, 200, "poker-join u2");
+    assertStatus(join2.status, join2.text, 200, "poker-join u2");
 
     // 3) heartbeats (once + background)
     await heartbeatOnce("u1", u1Token, tableId);
@@ -361,11 +224,11 @@ const run = async () => {
           body: { tableId, requestId: requestId(`start-${attempt}`) },
         });
 
-        if (res.res.status !== 200) {
-          if ([409, 425, 429, 500, 502, 503, 504].includes(res.res.status)) {
-            throw new Error(`start-hand transient status=${res.res.status} body=${snippet(res.text)}`);
+        if (res.status !== 200) {
+          if ([409, 425, 429, 500, 502, 503, 504].includes(res.status)) {
+            throw new Error(`start-hand transient status=${res.status} body=${snippet(res.text)}`);
           }
-          assertStatus(res.res, res.text, 200, "poker-start-hand");
+          assertStatus(res.status, res.text, 200, "poker-start-hand");
         }
 
         assertOk(res.json?.ok === true, `poker-start-hand ok:false body=${snippet(res.text)}`);
@@ -373,7 +236,7 @@ const run = async () => {
       },
       { tries: 6, baseDelayMs: 450, maxDelayMs: 3000 }
     );
-    assertStatus(start.res, start.text, 200, "poker-start-hand");
+    assertStatus(start.status, start.text, 200, "poker-start-hand");
 
     // 5) wait until PREFLOP is visible and both users have hole cards
     const tU1_0 = await waitFor(
@@ -423,16 +286,16 @@ const run = async () => {
           });
 
           // If the turn advanced between get-table and act, retry.
-          if (res.res.status === 403 && res.json?.error === "not_your_turn") {
+          if (res.status === 403 && res.json?.error === "not_your_turn") {
             throw new Error("race:not_your_turn");
           }
 
           // Some backends may use these for concurrency / readiness.
-          if ([409, 425, 429, 500, 502, 503, 504].includes(res.res.status)) {
-            throw new Error(`transient_status:${res.res.status} body=${snippet(res.text)}`);
+          if ([409, 425, 429, 500, 502, 503, 504].includes(res.status)) {
+            throw new Error(`transient_status:${res.status} body=${snippet(res.text)}`);
           }
 
-          assertStatus(res.res, res.text, 200, `poker-act ${label}`);
+          assertStatus(res.status, res.text, 200, `poker-act ${label}`);
           assertOk(res.json?.ok === true, `poker-act ${label} ok:false body=${snippet(res.text)}`);
           mustNotLeakPrivate(res.json, `poker-act ${label}`);
           return res;
