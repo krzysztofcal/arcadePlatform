@@ -76,7 +76,7 @@ jobs:
             echo "=============================="
             echo "▶ START E2E: $name"
             echo "=============================="
-            node "tools/$name"
+            node "tools/$name" || { echo "❌ FAILED SCRIPT: $name"; exit 1; }
             echo "✔ OK: $name"
           }
 
