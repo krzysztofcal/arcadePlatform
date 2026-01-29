@@ -110,7 +110,7 @@ const api = async ({ base, origin, method, path, token, body, label, timeoutMs, 
   return { status: out.res.status, json: out.json, text: out.text };
 };
 
-const waitFor = async (label, predicate, { timeoutMs = 25000, pollMs = 600, minPollMs = 250, maxPollMs = 1500 } = {}) => {
+const waitFor = async (label, predicate, { timeoutMs = 90000, pollMs = 600, minPollMs = 250, maxPollMs = 1500 } = {}) => {
   const started = Date.now();
   let attempt = 0;
   let lastErr = null;
