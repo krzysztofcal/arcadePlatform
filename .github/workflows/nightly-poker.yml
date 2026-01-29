@@ -51,6 +51,20 @@ jobs:
           MONEY_HANDS: "100"
           MONEY_STEPS: "400"
 
+      - name: Sweep poker test users (reset chips)
+        run: |
+          set -euo pipefail
+          echo "Running poker sweep..."
+          curl -fsS -X POST "${BASE}/.netlify/functions/poker-sweep" \
+            -H "x-sweep-secret: ${POKER_SWEEP_SECRET}" \
+            -H "content-type: application/json" \
+            --data '{}' | tee sweep.json
+
+          node -e "const fs=require('fs'); const j=JSON.parse(fs.readFileSync('sweep.json','utf8')); if(!j || j.ok!==true){ console.error('Sweep returned ok!=true:', j); process.exit(1);} console.log('Sweep ok:', j);"
+        env:
+          BASE: ${{ secrets.POKER_E2E_BASE }}
+          POKER_SWEEP_SECRET: ${{ secrets.POKER_SWEEP_SECRET }}
+
       - name: Run poker E2E scripts (PROD TEMPORARILY ALLOWED)
         run: |
           set -euo pipefail
