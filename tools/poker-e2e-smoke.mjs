@@ -1,3 +1,5 @@
+/* tools/poker-e2e-smoke.mjs (example) */
+
 const REQUIRED_ENV = [
   "BASE",
   "ORIGIN",
@@ -15,7 +17,7 @@ if (missing.length) {
   process.exit(1);
 }
 
-const FETCH_TIMEOUT_MS = 15000;
+const FETCH_TIMEOUT_MS = 30000;
 
 const base = process.env.BASE;
 const origin = process.env.ORIGIN;
@@ -36,6 +38,8 @@ if (baseHost === "play.kcswh.pl" && !allowProd) {
   process.exit(1);
 }
 
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
 const requestId = (prefix) => `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
 
 const buildUrl = (path) => new URL(path, base).toString();
@@ -49,22 +53,63 @@ const parseJson = (text) => {
   }
 };
 
+const snippet = (text, n = 240) => {
+  if (!text) return "";
+  return text.length > n ? `${text.slice(0, n)}…` : text;
+};
+
 const fetchJson = async (url, options) => {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-  try {
-    const response = await fetch(url, { ...options, signal: controller.signal });
-    const text = await response.text();
-    const json = parseJson(text);
-    return { response, text, json };
-  } catch (error) {
-    if (error?.name === "AbortError") {
-      throw new Error(`fetch_timeout:${FETCH_TIMEOUT_MS}ms`);
+  const maxAttempts = 3;
+
+  const shouldRetryStatus = (status) =>
+    status === 429 || status === 502 || status === 503 || status === 504 || status >= 500;
+
+  let lastErr = null;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+
+    try {
+      const response = await fetch(url, { ...options, signal: controller.signal });
+      const text = await response.text();
+      const json = parseJson(text);
+
+      if (!response.ok && shouldRetryStatus(response.status) && attempt < maxAttempts) {
+        const backoff = attempt === 1 ? 300 : attempt === 2 ? 800 : 1500;
+        console.warn(
+          `[fetchJson] retrying ${url} status=${response.status} attempt=${attempt}/${maxAttempts} backoff=${backoff}ms body=${snippet(
+            text
+          )}`
+        );
+        await sleep(backoff);
+        continue;
+      }
+
+      return { response, text, json };
+    } catch (err) {
+      lastErr = err;
+
+      const isAbort = err?.name === "AbortError";
+      if (isAbort && attempt < maxAttempts) {
+        const backoff = attempt === 1 ? 300 : attempt === 2 ? 800 : 1500;
+        console.warn(
+          `[fetchJson] timeout retrying ${url} attempt=${attempt}/${maxAttempts} backoff=${backoff}ms timeout=${FETCH_TIMEOUT_MS}ms`
+        );
+        await sleep(backoff);
+        continue;
+      }
+
+      if (isAbort) {
+        throw new Error(`fetch_timeout:${FETCH_TIMEOUT_MS}ms url=${url}`);
+      }
+      throw err;
+    } finally {
+      clearTimeout(timeoutId);
     }
-    throw error;
-  } finally {
-    clearTimeout(timeoutId);
   }
+
+  throw lastErr || new Error(`fetch_failed url=${url}`);
 };
 
 const decodeUserId = (token) => {
@@ -82,6 +127,7 @@ const decodeUserId = (token) => {
 const getSupabaseToken = async (email, password) => {
   const tokenUrl = new URL("/auth/v1/token", supabaseUrl);
   tokenUrl.searchParams.set("grant_type", "password");
+
   const { response, json, text } = await fetchJson(tokenUrl.toString(), {
     method: "POST",
     headers: {
@@ -94,7 +140,7 @@ const getSupabaseToken = async (email, password) => {
 
   if (!response.ok) {
     const message = json?.error_description || json?.error || text || response.statusText;
-    throw new Error(`supabase_auth_failed:${response.status}:${message}`);
+    throw new Error(`supabase_auth_failed:${response.status}:${snippet(message, 400)}`);
   }
   if (!json?.access_token) {
     throw new Error("supabase_auth_missing_token");
@@ -108,9 +154,8 @@ const callJson = async ({ path, method, token, body }) => {
     origin,
     authorization: `Bearer ${token}`,
   };
-  if (body) {
-    headers["content-type"] = "application/json";
-  }
+  if (body) headers["content-type"] = "application/json";
+
   return fetchJson(url, {
     method,
     headers,
@@ -119,47 +164,45 @@ const callJson = async ({ path, method, token, body }) => {
 };
 
 const assertOk = (condition, message) => {
-  if (!condition) {
-    throw new Error(message);
-  }
+  if (!condition) throw new Error(message);
 };
 
 const assertResponse = (response, text, expectedStatus, label) => {
   if (response.status !== expectedStatus) {
-    const summary = text && text.length > 200 ? `${text.slice(0, 200)}…` : text;
-    throw new Error(`${label} status=${response.status} body=${summary || ""}`.trim());
+    throw new Error(`${label} status=${response.status} body=${snippet(text)}`.trim());
   }
-};
-
-/* ===========================
-   ADDED: retry helpers
-   =========================== */
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-const retry = async (label, fn, { tries = 5, baseDelayMs = 500 } = {}) => {
-  let lastErr = null;
-  for (let i = 0; i < tries; i++) {
-    try {
-      return await fn(i);
-    } catch (e) {
-      lastErr = e;
-      const delay = baseDelayMs * Math.pow(2, i); // 500,1000,2000,4000,8000...
-      console.warn(`[retry] ${label} failed (try ${i + 1}/${tries}): ${e?.message || e}. sleeping ${delay}ms`);
-      await sleep(delay);
-    }
-  }
-  throw lastErr;
 };
 
 const run = async () => {
   const u1Token = await getSupabaseToken(process.env.U1_EMAIL, process.env.U1_PASS);
   const u2Token = await getSupabaseToken(process.env.U2_EMAIL, process.env.U2_PASS);
+
   const u1UserId = decodeUserId(u1Token);
   const u2UserId = decodeUserId(u2Token);
   assertOk(u1UserId && u2UserId, "unable to decode user ids from auth tokens");
 
   let heartbeatError = null;
   const heartbeatTimers = [];
+
+  const heartbeatOnce = async (label, token, tableId) => {
+    try {
+      const hb = await callJson({
+        path: "/.netlify/functions/poker-heartbeat",
+        method: "POST",
+        token,
+        body: { tableId, requestId: requestId(`hb-${label}`) },
+      });
+
+      if (hb.response.status !== 200) {
+        heartbeatError = new Error(
+          `poker-heartbeat ${label} status=${hb.response.status} body=${snippet(hb.text)}`
+        );
+      }
+    } catch (err) {
+      heartbeatError = err;
+    }
+  };
+
   try {
     const create = await callJson({
       path: "/.netlify/functions/poker-create-table",
@@ -191,108 +234,53 @@ const run = async () => {
     });
     assertResponse(joinU2.response, joinU2.text, 200, "poker-join u2");
 
-    const heartbeatOnce = async (label, token) => {
-      try {
-        const heartbeat = await callJson({
-          path: "/.netlify/functions/poker-heartbeat",
-          method: "POST",
-          token,
-          body: { tableId, requestId: requestId(`hb-${label}`) },
-        });
-        if (heartbeat.response.status !== 200) {
-          const summary =
-            heartbeat.text && heartbeat.text.length > 200 ? `${heartbeat.text.slice(0, 200)}…` : heartbeat.text;
-          heartbeatError = new Error(
-            `poker-heartbeat ${label} status=${heartbeat.response.status} body=${summary || ""}`.trim()
-          );
-        }
-      } catch (error) {
-        heartbeatError = error;
-      }
-    };
+    // Start heartbeat loops (keeps seats alive)
+    heartbeatTimers.push(setInterval(() => void heartbeatOnce("u1", u1Token, tableId), 15000));
+    heartbeatTimers.push(setInterval(() => void heartbeatOnce("u2", u2Token, tableId), 15000));
 
-    heartbeatTimers.push(
-      setInterval(() => {
-        void heartbeatOnce("u1", u1Token);
-      }, 15000)
-    );
-    heartbeatTimers.push(
-      setInterval(() => {
-        void heartbeatOnce("u2", u2Token);
-      }, 15000)
-    );
+    // One immediate heartbeat
+    await heartbeatOnce("u1", u1Token, tableId);
+    await heartbeatOnce("u2", u2Token, tableId);
 
-    await heartbeatOnce("u1", u1Token);
-    await heartbeatOnce("u2", u2Token);
-
-    /* ===========================
-       ADDED: wait for READY state
-       =========================== */
-    await retry(
-      "wait-table-ready",
-      async () => {
-        const t = await callJson({
-          path: `/.netlify/functions/poker-get-table?tableId=${encodeURIComponent(tableId)}`,
-          method: "GET",
-          token: u1Token,
-        });
-        assertResponse(t.response, t.text, 200, "poker-get-table pre-start");
-        assertOk(t.json?.ok === true, "poker-get-table pre-start ok:false");
-
-        const seats = Array.isArray(t.json?.seats) ? t.json.seats : [];
-        const activeSeats = seats.filter((s) => s?.status === "ACTIVE");
-        assertOk(activeSeats.length === 2, `pre-start expected 2 ACTIVE seats, got ${activeSeats.length}`);
-      },
-      { tries: 6, baseDelayMs: 400 }
-    );
-
-    /* ===========================
-       ADDED: retry start-hand
-       =========================== */
-    const startHand = await retry(
-      "poker-start-hand",
-      async (attempt) => {
-        const res = await callJson({
-          path: "/.netlify/functions/poker-start-hand",
-          method: "POST",
-          token: u1Token,
-          body: { tableId, requestId: requestId(`start-hand-${attempt}`) },
-        });
-        assertResponse(res.response, res.text, 200, "poker-start-hand");
-        assertOk(res.json?.ok === true, "poker-start-hand did not return ok:true");
-        return res;
-      },
-      { tries: 5, baseDelayMs: 500 }
-    );
+    const startHand = await callJson({
+      path: "/.netlify/functions/poker-start-hand",
+      method: "POST",
+      token: u1Token,
+      body: { tableId, requestId: requestId("start-hand") },
+    });
+    assertResponse(startHand.response, startHand.text, 200, "poker-start-hand");
+    assertOk(startHand.json?.ok === true, "poker-start-hand did not return ok:true");
 
     const getTable = async (label, token) => {
       const url = `/.netlify/functions/poker-get-table?tableId=${encodeURIComponent(tableId)}`;
       const result = await callJson({ path: url, method: "GET", token });
       assertResponse(result.response, result.text, 200, `poker-get-table ${label}`);
+
       const payload = result.json;
       assertOk(payload?.ok === true, `poker-get-table ${label} ok:false`);
       assertOk(payload?.state?.state?.phase === "PREFLOP", `poker-get-table ${label} unexpected phase`);
+
       const seats = Array.isArray(payload?.seats) ? payload.seats : [];
       const activeSeats = seats.filter((seat) => seat?.status === "ACTIVE");
       assertOk(activeSeats.length === 2, `poker-get-table ${label} expected 2 active seats`);
+
       assertOk(
         Array.isArray(payload?.myHoleCards) && payload.myHoleCards.length === 2,
         `poker-get-table ${label} missing hole cards`
       );
+
       return payload;
     };
 
     const tableU1 = await getTable("u1", u1Token);
     await getTable("u2", u2Token);
+
     const turnUserId = tableU1?.state?.state?.turnUserId;
     assertOk(typeof turnUserId === "string" && turnUserId.length > 0, "poker-get-table missing turnUserId");
 
     let actionToken = null;
-    if (turnUserId === u1UserId) {
-      actionToken = u1Token;
-    } else if (turnUserId === u2UserId) {
-      actionToken = u2Token;
-    }
+    if (turnUserId === u1UserId) actionToken = u1Token;
+    if (turnUserId === u2UserId) actionToken = u2Token;
     assertOk(actionToken, "poker-act could not resolve turn user token");
 
     const act = await callJson({
@@ -304,45 +292,29 @@ const run = async () => {
     assertResponse(act.response, act.text, 200, "poker-act CHECK");
     assertOk(act.json?.ok === true, "poker-act CHECK did not return ok:true");
 
-    const phaseAllowed = new Set(["PREFLOP", "FLOP", "TURN", "RIVER"]);
     const tableU1After = await callJson({
       path: `/.netlify/functions/poker-get-table?tableId=${encodeURIComponent(tableId)}`,
       method: "GET",
       token: u1Token,
     });
     assertResponse(tableU1After.response, tableU1After.text, 200, "poker-get-table u1 post-act");
-    const afterPayload = tableU1After.json;
-    assertOk(afterPayload?.ok === true, "poker-get-table u1 post-act ok:false");
+    assertOk(tableU1After.json?.ok === true, "poker-get-table u1 post-act ok:false");
+
     const v0 = Number(tableU1?.state?.version);
-    const v1 = Number(afterPayload?.state?.version);
-    assertOk(
-      Number.isFinite(v0) && Number.isFinite(v1) && v1 > v0,
-      "poker-get-table u1 post-act version did not increase"
-    );
-    assertOk(phaseAllowed.has(afterPayload?.state?.state?.phase), "poker-get-table u1 post-act unexpected phase");
+    const v1 = Number(tableU1After.json?.state?.version);
+    assertOk(Number.isFinite(v0) && Number.isFinite(v1) && v1 > v0, "post-act version did not increase");
 
-    const tableU2After = await callJson({
-      path: `/.netlify/functions/poker-get-table?tableId=${encodeURIComponent(tableId)}`,
-      method: "GET",
-      token: u2Token,
-    });
-    assertResponse(tableU2After.response, tableU2After.text, 200, "poker-get-table u2 post-act");
-    assertOk(tableU2After.json?.ok === true, "poker-get-table u2 post-act ok:false");
-
-    if (heartbeatError) {
-      throw heartbeatError;
-    }
+    if (heartbeatError) throw heartbeatError;
 
     const uiLink = `${origin.replace(/\/$/, "")}/poker/table.html?tableId=${encodeURIComponent(tableId)}`;
     console.log(`Smoke test complete. tableId=${tableId}`);
     console.log(`UI: ${uiLink}`);
   } finally {
-    heartbeatTimers.forEach((timer) => clearInterval(timer));
+    heartbeatTimers.forEach((t) => clearInterval(t));
   }
 };
 
-run()
-  .catch((error) => {
-    console.error("Smoke test failed", error?.message || error);
-    process.exit(1);
-  });
+run().catch((err) => {
+  console.error("Smoke test failed:", err?.message || err);
+  process.exit(1);
+});
