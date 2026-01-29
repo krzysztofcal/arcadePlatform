@@ -68,24 +68,25 @@ jobs:
       - name: Run poker E2E scripts (PROD TEMPORARILY ALLOWED)
         run: |
           set -euo pipefail
+          trap 'echo "❌ FAILED AT: $BASH_COMMAND"' ERR
 
-          echo "BASE=$BASE"
-          echo "ORIGIN=$ORIGIN"
-          echo "SUPABASE_URL=$SUPABASE_URL"
+          run_test () {
+            name="$1"
+            echo ""
+            echo "=============================="
+            echo "▶ START E2E: $name"
+            echo "=============================="
+            node "tools/$name"
+            echo "✔ OK: $name"
+          }
 
-          echo "Preflight BASE (GET):"
-          curl -sS -i --max-time 20 "$BASE" | sed -n '1,25p' || true
-
-          echo "Preflight ORIGIN (GET):"
-          curl -sS -i --max-time 20 "$ORIGIN" | sed -n '1,25p' || true
-
-          node tools/poker-e2e-smoke.mjs
-          node tools/poker-e2e-termux.mjs
-          node tools/poker-e2e-preflofp-flop.mjs
-          node tools/poker-e2e-preflofp-flop-turn.mjs
-          node tools/poker-e2e-flop-bet-call-turn.mjs
-          node tools/poker-e2e-flop-check-bet-call-turn.mjs
-          node tools/poker-e2e-3p-bet-fold-call-flop.mjs
+          run_test poker-e2e-smoke.mjs
+          run_test poker-e2e-termux.mjs
+          run_test poker-e2e-preflofp-flop.mjs
+          run_test poker-e2e-preflofp-flop-turn.mjs
+          run_test poker-e2e-flop-bet-call-turn.mjs
+          run_test poker-e2e-flop-check-bet-call-turn.mjs
+          run_test poker-e2e-3p-bet-fold-call-flop.mjs
         env:
           CI: "true"
 
