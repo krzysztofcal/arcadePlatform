@@ -1,11 +1,14 @@
 import { baseHeaders, beginSql, corsHeaders, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
-import { deriveCommunityCards, deriveRemainingDeck } from "./_shared/poker-deal-deterministic.mjs";
+import { deriveCommunityCards, deriveDeck, deriveRemainingDeck } from "./_shared/poker-deal-deterministic.mjs";
+import { isValidTwoCards } from "./_shared/poker-cards-utils.mjs";
+import { dealHoleCards } from "./_shared/poker-engine.mjs";
 import { isHoleCardsTableMissing, loadHoleCardsByUserId } from "./_shared/poker-hole-cards-store.mjs";
 import { isStateStorageValid, normalizeJsonState, withoutPrivateState } from "./_shared/poker-state-utils.mjs";
 import { maybeApplyTurnTimeout, normalizeSeatOrderFromState } from "./_shared/poker-turn-timeout.mjs";
 import { isValidUuid } from "./_shared/poker-utils.mjs";
 
 const isActionPhase = (phase) => phase === "PREFLOP" || phase === "FLOP" || phase === "TURN" || phase === "RIVER";
+const isRepairableHoleCardsError = (error) => error?.message === "state_invalid" || isHoleCardsTableMissing(error);
 
 const normalizeSeatUserIds = (seats) => {
   if (!Array.isArray(seats)) return [];
@@ -72,6 +75,56 @@ const cardsSameSet = (left, right) => {
     if (leftKeys[i] !== rightKeys[i]) return false;
   }
   return true;
+};
+
+const buildHoleCardUpsert = ({ tableId, handId, seatUserIdsInOrder, holeCardsByUserId }) => {
+  const values = seatUserIdsInOrder.map((userId) => ({ userId, cards: holeCardsByUserId[userId] }));
+  const placeholders = values
+    .map((_, index) => `($${index * 4 + 1}, $${index * 4 + 2}, $${index * 4 + 3}, $${index * 4 + 4}::jsonb)`)
+    .join(", ");
+  const params = values.flatMap((entry) => [tableId, handId, entry.userId, JSON.stringify(entry.cards)]);
+  return { placeholders, params };
+};
+
+const repairHoleCards = async ({ tx, tableId, handId, handSeed, seats }) => {
+  const seatUserIdsInOrder = normalizeSeatOrderFromState(seats);
+  if (seatUserIdsInOrder.length <= 0) {
+    throw new Error("state_invalid");
+  }
+  if (typeof handSeed !== "string" || !handSeed.trim()) {
+    throw new Error("state_invalid");
+  }
+
+  let deck;
+  try {
+    deck = deriveDeck(handSeed);
+  } catch (error) {
+    if (error?.message === "hand_seed_required" || error?.message === "deal_secret_missing") {
+      throw new Error("state_invalid");
+    }
+    throw error;
+  }
+
+  const dealResult = dealHoleCards(deck, seatUserIdsInOrder);
+  const holeCardsByUserId = dealResult?.holeCardsByUserId || {};
+  if (!seatUserIdsInOrder.every((userId) => isValidTwoCards(holeCardsByUserId[userId]))) {
+    throw new Error("state_invalid");
+  }
+
+  const upsert = buildHoleCardUpsert({ tableId, handId, seatUserIdsInOrder, holeCardsByUserId });
+  try {
+    await tx.unsafe(
+      `insert into public.poker_hole_cards (table_id, hand_id, user_id, cards) values ${upsert.placeholders} on conflict (table_id, hand_id, user_id) do update set cards = excluded.cards;`,
+      upsert.params
+    );
+  } catch (error) {
+    if (isHoleCardsTableMissing(error)) {
+      throw new Error("state_invalid");
+    }
+    throw error;
+  }
+
+  return { holeCardsByUserId, seatCount: seatUserIdsInOrder.length };
 };
 
 export async function handler(event) {
@@ -197,11 +250,33 @@ export async function handler(event) {
           }
         }
         try {
-          const holeCards = await loadHoleCardsByUserId(tx, {
-            tableId,
-            handId: currentState.handId,
-            activeUserIds: effectiveUserIdsForHoleCards,
-          });
+          let holeCards;
+          try {
+            holeCards = await loadHoleCardsByUserId(tx, {
+              tableId,
+              handId: currentState.handId,
+              activeUserIds: effectiveUserIdsForHoleCards,
+            });
+          } catch (error) {
+            if (!isRepairableHoleCardsError(error)) throw error;
+            const repairResult = await repairHoleCards({
+              tx,
+              tableId,
+              handId: currentState.handId,
+              handSeed: currentState.handSeed,
+              seats: currentState.seats,
+            });
+            klog("poker_get_table_hole_cards_repaired", {
+              tableId,
+              handId: currentState.handId,
+              seatCount: repairResult.seatCount,
+            });
+            holeCards = await loadHoleCardsByUserId(tx, {
+              tableId,
+              handId: currentState.handId,
+              activeUserIds: effectiveUserIdsForHoleCards,
+            });
+          }
           myHoleCards = holeCards.holeCardsByUserId[auth.userId] || [];
           if (shouldApplyTimeout) {
             const seatUserIdsInOrder = normalizeSeatOrderFromState(currentState.seats);
