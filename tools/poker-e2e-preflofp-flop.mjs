@@ -15,7 +15,7 @@ if (missing.length) {
   process.exit(1);
 }
 
-const FETCH_TIMEOUT_MS = 15000;
+const FETCH_TIMEOUT_MS = 30000;
 const HEARTBEAT_MS = 15000;
 
 const base = process.env.BASE;
