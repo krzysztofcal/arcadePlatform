@@ -131,6 +131,26 @@ const assertResponse = (response, text, expectedStatus, label) => {
   }
 };
 
+/* ===========================
+   ADDED: retry helpers
+   =========================== */
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+const retry = async (label, fn, { tries = 5, baseDelayMs = 500 } = {}) => {
+  let lastErr = null;
+  for (let i = 0; i < tries; i++) {
+    try {
+      return await fn(i);
+    } catch (e) {
+      lastErr = e;
+      const delay = baseDelayMs * Math.pow(2, i); // 500,1000,2000,4000,8000...
+      console.warn(`[retry] ${label} failed (try ${i + 1}/${tries}): ${e?.message || e}. sleeping ${delay}ms`);
+      await sleep(delay);
+    }
+  }
+  throw lastErr;
+};
+
 const run = async () => {
   const u1Token = await getSupabaseToken(process.env.U1_EMAIL, process.env.U1_PASS);
   const u2Token = await getSupabaseToken(process.env.U2_EMAIL, process.env.U2_PASS);
@@ -205,14 +225,45 @@ const run = async () => {
     await heartbeatOnce("u1", u1Token);
     await heartbeatOnce("u2", u2Token);
 
-    const startHand = await callJson({
-      path: "/.netlify/functions/poker-start-hand",
-      method: "POST",
-      token: u1Token,
-      body: { tableId, requestId: requestId("start-hand") },
-    });
-    assertResponse(startHand.response, startHand.text, 200, "poker-start-hand");
-    assertOk(startHand.json?.ok === true, "poker-start-hand did not return ok:true");
+    /* ===========================
+       ADDED: wait for READY state
+       =========================== */
+    await retry(
+      "wait-table-ready",
+      async () => {
+        const t = await callJson({
+          path: `/.netlify/functions/poker-get-table?tableId=${encodeURIComponent(tableId)}`,
+          method: "GET",
+          token: u1Token,
+        });
+        assertResponse(t.response, t.text, 200, "poker-get-table pre-start");
+        assertOk(t.json?.ok === true, "poker-get-table pre-start ok:false");
+
+        const seats = Array.isArray(t.json?.seats) ? t.json.seats : [];
+        const activeSeats = seats.filter((s) => s?.status === "ACTIVE");
+        assertOk(activeSeats.length === 2, `pre-start expected 2 ACTIVE seats, got ${activeSeats.length}`);
+      },
+      { tries: 6, baseDelayMs: 400 }
+    );
+
+    /* ===========================
+       ADDED: retry start-hand
+       =========================== */
+    const startHand = await retry(
+      "poker-start-hand",
+      async (attempt) => {
+        const res = await callJson({
+          path: "/.netlify/functions/poker-start-hand",
+          method: "POST",
+          token: u1Token,
+          body: { tableId, requestId: requestId(`start-hand-${attempt}`) },
+        });
+        assertResponse(res.response, res.text, 200, "poker-start-hand");
+        assertOk(res.json?.ok === true, "poker-start-hand did not return ok:true");
+        return res;
+      },
+      { tries: 5, baseDelayMs: 500 }
+    );
 
     const getTable = async (label, token) => {
       const url = `/.netlify/functions/poker-get-table?tableId=${encodeURIComponent(tableId)}`;
