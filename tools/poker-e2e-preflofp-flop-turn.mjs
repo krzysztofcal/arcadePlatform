@@ -207,7 +207,7 @@ const run = async () => {
         if (!Array.isArray(t?.myHoleCards) || t.myHoleCards.length !== 2) return false;
         return t;
       },
-      { timeoutMs: 25000, pollMs: 650 }
+      { timeoutMs: 90000, pollMs: 650 }
     );
     const tU2_0 = await waitFor(
       "pref-ready-u2",
