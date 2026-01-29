@@ -5,6 +5,9 @@ on:
     - cron: "17 2 * * *" # 02:17 UTC daily
   workflow_dispatch: {}
 
+permissions:
+  contents: read
+
 concurrency:
   group: nightly-poker
   cancel-in-progress: true
