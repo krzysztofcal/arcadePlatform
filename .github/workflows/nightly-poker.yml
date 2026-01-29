@@ -7,6 +7,9 @@ concurrency:
   group: nightly-poker
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   poker-nightly:
     runs-on: ubuntu-latest
@@ -16,7 +19,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Use Node.js (fallback if .nvmrc missing)
+      - name: Use Node.js 20
         uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -25,7 +28,6 @@ jobs:
       - name: Install deps
         run: npm ci
 
-      # Fast sanity check
       - name: Unit tests (fast)
         run: npm test --silent
         env:
@@ -70,10 +72,10 @@ jobs:
           SUPABASE_ANON_KEY: ${{ secrets.POKER_E2E_SUPABASE_ANON_KEY }}
 
           U1_EMAIL: ${{ secrets.POKER_E2E_U1_EMAIL }}
-          U1_PASS:  ${{ secrets.POKER_E2E_U1_PASS }}
+          U1_PASS: ${{ secrets.POKER_E2E_U1_PASS }}
           U2_EMAIL: ${{ secrets.POKER_E2E_U2_EMAIL }}
-          U2_PASS:  ${{ secrets.POKER_E2E_U2_PASS }}
+          U2_PASS: ${{ secrets.POKER_E2E_U2_PASS }}
           U3_EMAIL: ${{ secrets.POKER_E2E_U3_EMAIL }}
-          U3_PASS:  ${{ secrets.POKER_E2E_U3_PASS }}
+          U3_PASS: ${{ secrets.POKER_E2E_U3_PASS }}
 
           POKER_DEAL_SECRET: ${{ secrets.POKER_DEAL_SECRET }}
