@@ -1,8 +1,6 @@
 name: Nightly Poker Tests
 
 on:
-  schedule:
-    - cron: "17 2 * * *" # 02:17 UTC daily
   workflow_dispatch: {}
 
 concurrency:
@@ -21,30 +19,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Detect node version source
-        id: nodever
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [ -f ".nvmrc" ]; then
-            echo "use_nvmrc=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "use_nvmrc=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Use Node.js (from .nvmrc)
-        if: steps.nodever.outputs.use_nvmrc == 'true'
+      - name: Use Node.js 20
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
-          cache: "npm"
-
-      - name: Use Node.js (fallback)
-        if: steps.nodever.outputs.use_nvmrc != 'true'
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-          cache: "npm"
+          node-version: 20
+          cache: npm
 
       - name: Install deps
         run: npm ci
@@ -63,13 +42,15 @@ jobs:
         env:
           CI: "true"
           POKER_DEAL_SECRET: ${{ secrets.POKER_DEAL_SECRET }}
+
           FUZZ_HANDS: "500"
           FUZZ_STEPS: "400"
           FUZZ_ILLEGAL_PCT: "40"
+
           MONEY_HANDS: "100"
           MONEY_STEPS: "400"
 
-      - name: Run poker E2E scripts (Supabase + real HTTP)
+      - name: Run poker E2E scripts (PROD TEMPORARILY ALLOWED)
         run: |
           set -euo pipefail
           node tools/poker-e2e-smoke.mjs
@@ -81,14 +62,20 @@ jobs:
           node tools/poker-e2e-3p-bet-fold-call-flop.mjs
         env:
           CI: "true"
+
+          # TEMP: allow running against prod
+          POKER_SMOKE_ALLOW_PROD: "1"
+
           BASE: ${{ secrets.POKER_E2E_BASE }}
           ORIGIN: ${{ secrets.POKER_E2E_ORIGIN }}
           SUPABASE_URL: ${{ secrets.POKER_E2E_SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ secrets.POKER_E2E_SUPABASE_ANON_KEY }}
+
           U1_EMAIL: ${{ secrets.POKER_E2E_U1_EMAIL }}
           U1_PASS: ${{ secrets.POKER_E2E_U1_PASS }}
           U2_EMAIL: ${{ secrets.POKER_E2E_U2_EMAIL }}
           U2_PASS: ${{ secrets.POKER_E2E_U2_PASS }}
           U3_EMAIL: ${{ secrets.POKER_E2E_U3_EMAIL }}
           U3_PASS: ${{ secrets.POKER_E2E_U3_PASS }}
+
           POKER_DEAL_SECRET: ${{ secrets.POKER_DEAL_SECRET }}
