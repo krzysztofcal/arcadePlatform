@@ -93,17 +93,19 @@ const fetchJson = async (url, options = {}, { label, tries = DEFAULT_TRIES, time
 
 const api = async ({ base, origin, method, path, token, body, label, timeoutMs, tries } = {}) => {
   const url = new URL(path, base).toString();
+  const methodUpper = String(method ?? "GET").toUpperCase();
+  const allowBody = methodUpper !== "GET" && methodUpper !== "HEAD";
+  const hasBody = allowBody && body !== undefined;
   const headers = {
     origin,
   };
   if (typeof token === "string" && token.trim()) headers.authorization = `Bearer ${token}`;
-  if (body !== undefined) headers["content-type"] = "application/json";
+  if (hasBody) headers["content-type"] = "application/json";
 
-  const out = await fetchJson(
-    url,
-    { method, headers, body: body === undefined ? undefined : JSON.stringify(body) },
-    { label, timeoutMs, tries }
-  );
+  const options = { method, headers };
+  if (hasBody) options.body = JSON.stringify(body);
+
+  const out = await fetchJson(url, options, { label, timeoutMs, tries });
 
   return { status: out.res.status, json: out.json, text: out.text };
 };
