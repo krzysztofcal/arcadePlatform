@@ -42,17 +42,26 @@ jobs:
         env:
           CI: "true"
           POKER_DEAL_SECRET: ${{ secrets.POKER_DEAL_SECRET }}
-
           FUZZ_HANDS: "500"
           FUZZ_STEPS: "400"
           FUZZ_ILLEGAL_PCT: "40"
-
           MONEY_HANDS: "100"
           MONEY_STEPS: "400"
 
       - name: Run poker E2E scripts (PROD TEMPORARILY ALLOWED)
         run: |
           set -euo pipefail
+
+          echo "BASE=$BASE"
+          echo "ORIGIN=$ORIGIN"
+          echo "SUPABASE_URL=$SUPABASE_URL"
+
+          echo "Preflight BASE (GET):"
+          curl -sS -i --max-time 20 "$BASE" | sed -n '1,25p' || true
+
+          echo "Preflight ORIGIN (GET):"
+          curl -sS -i --max-time 20 "$ORIGIN" | sed -n '1,25p' || true
+
           node tools/poker-e2e-smoke.mjs
           node tools/poker-e2e-termux.mjs
           node tools/poker-e2e-preflofp-flop.mjs
