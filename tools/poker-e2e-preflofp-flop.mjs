@@ -1,3 +1,5 @@
+import { api, fetchJson, snippet, waitFor } from "./_shared/poker-e2e-http.mjs";
+
 const REQUIRED_ENV = [
   "BASE",
   "ORIGIN",
@@ -279,4 +281,3 @@ run().catch((e) => {
   console.error("Smoke test failed:", e?.message || e);
   process.exit(1);
 });
-import { api, fetchJson, snippet, waitFor } from "./_shared/poker-e2e-http.mjs";

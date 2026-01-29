@@ -78,22 +78,6 @@ const getSupabaseToken = async (email, password) => {
 
 const callJsonOnce = async ({ label, ...req }) => callApi({ label, ...req });
 
-// Higher-level retry for transient HTTP problems / races
-const callJson = async ({ label, ...req }) => {
-  const transient = new Set([408, 425, 429, 500, 502, 503, 504]);
-  return retry(
-    label || `${req.method || "GET"} ${req.path}`,
-    async () => {
-      const out = await callJsonOnce({ label, ...req });
-      if (out.status && out.status !== 200 && transient.has(out.status)) {
-        throw new Error(`http_${out.status}:${snippet(out.text)}`);
-      }
-      return out;
-    },
-    { tries: 5, baseDelayMs: 350, maxDelayMs: 2500 }
-  );
-};
-
 const assertOk = (condition, message) => {
   if (!condition) throw new Error(message);
 };
@@ -117,7 +101,7 @@ const run = async () => {
 
   const heartbeatOnce = async (label, token, tableId) => {
     try {
-      const hb = await callJson({
+      const hb = await callApi({
         label: `heartbeat:${label}`,
         path: "/.netlify/functions/poker-heartbeat",
         method: "POST",
@@ -136,7 +120,7 @@ const run = async () => {
   };
 
   try {
-    const create = await callJson({
+    const create = await callApi({
       label: "create-table",
       path: "/.netlify/functions/poker-create-table",
       method: "POST",
@@ -148,7 +132,7 @@ const run = async () => {
     const tableId = create.json?.tableId;
     assertOk(typeof tableId === "string" && tableId.length > 0, "poker-create-table missing tableId");
 
-    const joinU1 = await callJson({
+    const joinU1 = await callApi({
       label: "join-u1",
       path: "/.netlify/functions/poker-join",
       method: "POST",
@@ -157,7 +141,7 @@ const run = async () => {
     });
     assertResponse(joinU1.status, joinU1.text, 200, "poker-join u1");
 
-    const joinU2 = await callJson({
+    const joinU2 = await callApi({
       label: "join-u2",
       path: "/.netlify/functions/poker-join",
       method: "POST",
@@ -178,7 +162,7 @@ const run = async () => {
     await waitFor(
       "seats-active",
       async () => {
-        const t = await callJson({
+        const t = await callApi({
           label: "get-table:pre-start",
           path: `/.netlify/functions/poker-get-table?tableId=${encodeURIComponent(tableId)}&t=${Date.now()}`,
           method: "GET",
@@ -221,7 +205,7 @@ const run = async () => {
 
     const getTable = async (label, token) => {
       const url = `/.netlify/functions/poker-get-table?tableId=${encodeURIComponent(tableId)}&t=${Date.now()}`;
-      const result = await callJson({ label: `get-table:${label}`, path: url, method: "GET", token });
+      const result = await callApi({ label: `get-table:${label}`, path: url, method: "GET", token });
       assertResponse(result.status, result.text, 200, `poker-get-table ${label}`);
 
       const payload = result.json;
@@ -242,7 +226,7 @@ const run = async () => {
     const tableU1 = await waitFor(
       "table-ready-u1",
       async () => {
-        const t = await callJson({
+        const t = await callApi({
           label: "get-table:u1-ready",
           path: `/.netlify/functions/poker-get-table?tableId=${encodeURIComponent(tableId)}&t=${Date.now()}`,
           method: "GET",
@@ -264,7 +248,7 @@ const run = async () => {
     await waitFor(
       "table-ready-u2",
       async () => {
-        const t = await callJson({
+        const t = await callApi({
           label: "get-table:u2-ready",
           path: `/.netlify/functions/poker-get-table?tableId=${encodeURIComponent(tableId)}&t=${Date.now()}`,
           method: "GET",
@@ -288,7 +272,7 @@ const run = async () => {
     const actCheck = await retry(
       "act-check",
       async (attempt) => {
-        const current = await callJson({
+        const current = await callApi({
           label: `get-table:before-act-${attempt}`,
           path: `/.netlify/functions/poker-get-table?tableId=${encodeURIComponent(tableId)}&t=${Date.now()}`,
           method: "GET",
@@ -325,7 +309,7 @@ const run = async () => {
 
     void actCheck; // keep lint calm if you add lint later
 
-    const tableU1After = await callJson({
+    const tableU1After = await callApi({
       label: "get-table:post-act",
       path: `/.netlify/functions/poker-get-table?tableId=${encodeURIComponent(tableId)}&t=${Date.now()}`,
       method: "GET",

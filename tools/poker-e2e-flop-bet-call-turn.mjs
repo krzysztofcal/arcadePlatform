@@ -95,23 +95,6 @@ const getSupabaseToken = async (email, password) => {
 
 const callJsonOnce = async ({ label, ...req }) => callApi({ label, ...req });
 
-// Higher-level retry for transient HTTP problems / races.
-// NOTE: we *don't* retry on 4xx except a small allowlist (408/425/429/409 in some cases handled by callers).
-const callJson = async ({ label, ...req }) => {
-  const transient = new Set([408, 425, 429, 500, 502, 503, 504]);
-  return retry(
-    label || `${req.method || "GET"} ${req.path}`,
-    async () => {
-      const out = await callJsonOnce({ label, ...req });
-      if (out.status && out.status !== 200 && transient.has(out.status)) {
-        throw new Error(`http_${out.status}:${snippet(out.text)}`);
-      }
-      return out;
-    },
-    { tries: 5, baseDelayMs: 350, maxDelayMs: 2500 }
-  );
-};
-
 const assertOk = (cond, msg) => {
   if (!cond) throw new Error(msg);
 };
@@ -148,7 +131,7 @@ const run = async () => {
 
   const heartbeatOnce = async (label, token, tableId) => {
     try {
-      const hb = await callJson({
+      const hb = await callApi({
         label: `heartbeat:${label}`,
         path: "/.netlify/functions/poker-heartbeat",
         method: "POST",
@@ -166,7 +149,7 @@ const run = async () => {
   };
 
   const getTableOnce = async (label, token, tableId) => {
-    const gt = await callJson({
+    const gt = await callApi({
       label: `get-table:${label}`,
       path: `/.netlify/functions/poker-get-table?tableId=${encodeURIComponent(tableId)}&t=${Date.now()}`,
       method: "GET",
@@ -188,7 +171,7 @@ const run = async () => {
 
   try {
     // 1) create table (u1)
-    const create = await callJson({
+    const create = await callApi({
       label: "create-table",
       path: "/.netlify/functions/poker-create-table",
       method: "POST",
@@ -200,7 +183,7 @@ const run = async () => {
     assertOk(typeof tableId === "string" && tableId.length > 0, "poker-create-table missing tableId");
 
     // 2) join seats
-    const join1 = await callJson({
+    const join1 = await callApi({
       label: "join-u1",
       path: "/.netlify/functions/poker-join",
       method: "POST",
@@ -209,7 +192,7 @@ const run = async () => {
     });
     assertStatus(join1.status, join1.text, 200, "poker-join u1");
 
-    const join2 = await callJson({
+    const join2 = await callApi({
       label: "join-u2",
       path: "/.netlify/functions/poker-join",
       method: "POST",

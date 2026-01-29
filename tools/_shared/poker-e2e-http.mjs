@@ -73,7 +73,7 @@ const fetchJson = async (url, options = {}, { label, tries = DEFAULT_TRIES, time
     } catch (e) {
       lastErr = e;
       if (e?.name === "AbortError") {
-        throw new Error(`fetch_timeout:${timeoutMs}ms url=${url}`);
+        throw new Error(`fetch_timeout:${timeoutMs}ms label=${safeLabel} url=${url}`);
       }
       const code = e?.cause?.code || e?.code;
       if (RETRY_ERROR_CODES.has(code) && attempt < tries) {
@@ -95,9 +95,9 @@ const api = async ({ base, origin, method, path, token, body, label, timeoutMs, 
   const url = new URL(path, base).toString();
   const headers = {
     origin,
-    authorization: `Bearer ${token}`,
   };
-  if (body) headers["content-type"] = "application/json";
+  if (typeof token === "string" && token.trim()) headers.authorization = `Bearer ${token}`;
+  if (body !== undefined) headers["content-type"] = "application/json";
 
   const out = await fetchJson(
     url,
