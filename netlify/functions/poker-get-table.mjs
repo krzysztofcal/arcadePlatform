@@ -8,7 +8,11 @@ import { maybeApplyTurnTimeout, normalizeSeatOrderFromState } from "./_shared/po
 import { isValidUuid } from "./_shared/poker-utils.mjs";
 
 const isActionPhase = (phase) => phase === "PREFLOP" || phase === "FLOP" || phase === "TURN" || phase === "RIVER";
-const isRepairableHoleCardsError = (error) => error?.message === "state_invalid" || isHoleCardsTableMissing(error);
+const isRepairableHoleCardsError = (error) => {
+  if (!error || isHoleCardsTableMissing(error)) return false;
+  const message = String(error?.message || "");
+  return message.includes("state_invalid");
+};
 
 const normalizeSeatUserIds = (seats) => {
   if (!Array.isArray(seats)) return [];
@@ -258,6 +262,9 @@ export async function handler(event) {
               activeUserIds: effectiveUserIdsForHoleCards,
             });
           } catch (error) {
+            if (isHoleCardsTableMissing(error)) {
+              throw new Error("state_invalid");
+            }
             if (!isRepairableHoleCardsError(error)) throw error;
             const repairResult = await repairHoleCards({
               tx,

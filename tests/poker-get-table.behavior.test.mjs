@@ -170,7 +170,8 @@ const run = async () => {
 
   const missingTableError = new Error("missing table");
   missingTableError.code = "42P01";
-  const missingTableResponse = await makeHandler([], storedState, "user-1", {
+  const missingTableQueries = [];
+  const missingTableResponse = await makeHandler(missingTableQueries, storedState, "user-1", {
     holeCardsError: missingTableError,
   })({
     httpMethod: "GET",
@@ -179,6 +180,10 @@ const run = async () => {
   });
   assert.equal(missingTableResponse.statusCode, 409);
   assert.equal(JSON.parse(missingTableResponse.body).error, "state_invalid");
+  const missingTableInserts = missingTableQueries.filter((entry) =>
+    entry.query.toLowerCase().includes("insert into public.poker_hole_cards")
+  );
+  assert.equal(missingTableInserts.length, 0);
 
   const missingRowResponse = await makeHandler([], storedState, "user-1", {
     holeCardsByUserId: {
@@ -248,15 +253,23 @@ const run = async () => {
   assert.ok(repairLogs.some((entry) => entry.event === "poker_get_table_hole_cards_repaired"));
 
   const missingSeedState = { ...baseState, handSeed: "" };
-  const missingSeedResponse = await makeHandler([], { value: JSON.stringify(missingSeedState), version: 3 }, "user-1", {
-    holeCardsByUserId: {},
-  })({
+  const missingSeedQueries = [];
+  const missingSeedResponse = await makeHandler(
+    missingSeedQueries,
+    { value: JSON.stringify(missingSeedState), version: 3 },
+    "user-1",
+    { holeCardsByUserId: {} }
+  )({
     httpMethod: "GET",
     headers: { origin: "https://example.test", authorization: "Bearer token" },
     queryStringParameters: { tableId },
   });
   assert.equal(missingSeedResponse.statusCode, 409);
   assert.equal(JSON.parse(missingSeedResponse.body).error, "state_invalid");
+  const missingSeedInserts = missingSeedQueries.filter((entry) =>
+    entry.query.toLowerCase().includes("insert into public.poker_hole_cards")
+  );
+  assert.equal(missingSeedInserts.length, 0);
 
   const mismatchResponse = await makeHandler([], storedState, "user-1", {
     activeUserIds: ["user-1"],
