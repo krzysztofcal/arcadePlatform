@@ -101,7 +101,7 @@ const api = async ({ base, origin, method, path, token, body, label, timeoutMs, 
 
   const out = await fetchJson(
     url,
-    { method, headers, body: body ? JSON.stringify(body) : undefined },
+    { method, headers, body: body === undefined ? undefined : JSON.stringify(body) },
     { label, timeoutMs, tries }
   );
 

@@ -161,13 +161,7 @@ const run = async () => {
     return gt.json;
   };
 
-  // In case /poker-get-table itself flakes (timeouts, 5xx), wrap as retry too.
-  const getTable = async (label, token, tableId) =>
-    retry(
-      `get-table:${label}`,
-      async () => getTableOnce(label, token, tableId),
-      { tries: 5, baseDelayMs: 350, maxDelayMs: 2500 }
-    );
+  const getTable = async (label, token, tableId) => getTableOnce(label, token, tableId);
 
   try {
     // 1) create table (u1)
