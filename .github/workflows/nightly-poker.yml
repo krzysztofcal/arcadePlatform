@@ -1,0 +1,108 @@
+name: Nightly Poker Tests
+
+on:
+  workflow_dispatch: {}
+
+concurrency:
+  group: nightly-poker
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  poker-nightly:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Install supabase-js for E2E scripts
+        run: npm i --no-save @supabase/supabase-js
+
+      - name: Unit tests (fast)
+        run: npm test --silent
+        env:
+          CI: "true"
+
+      - name: Run poker engine pentests (no external deps)
+        run: |
+          set -euo pipefail
+          node tools/poker/pentest-fuzz.mjs
+          node tools/poker/pentest-money-invariants.mjs
+          node tools/poker/pentest-sidepots.mjs
+        env:
+          CI: "true"
+          POKER_DEAL_SECRET: ${{ secrets.POKER_DEAL_SECRET }}
+          FUZZ_HANDS: "500"
+          FUZZ_STEPS: "400"
+          FUZZ_ILLEGAL_PCT: "40"
+          MONEY_HANDS: "100"
+          MONEY_STEPS: "400"
+
+      - name: Sweep poker test users (reset chips)
+        run: |
+          set -euo pipefail
+          echo "Running poker sweep..."
+          curl -fsS -X POST "${BASE}/.netlify/functions/poker-sweep" \
+            -H "x-sweep-secret: ${POKER_SWEEP_SECRET}" \
+            -H "content-type: application/json" \
+            --data '{}' | tee sweep.json
+
+          node -e "const fs=require('fs'); const j=JSON.parse(fs.readFileSync('sweep.json','utf8')); if(!j || j.ok!==true){ console.error('Sweep returned ok!=true:', j); process.exit(1);} console.log('Sweep ok:', j);"
+        env:
+          BASE: ${{ secrets.POKER_E2E_BASE }}
+          POKER_SWEEP_SECRET: ${{ secrets.POKER_SWEEP_SECRET }}
+
+      - name: Run poker E2E scripts (PROD TEMPORARILY ALLOWED)
+        run: |
+          set -euo pipefail
+          trap 'echo "❌ FAILED AT: $BASH_COMMAND"' ERR
+
+          run_test () {
+            name="$1"
+            echo ""
+            echo "=============================="
+            echo "▶ START E2E: $name"
+            echo "=============================="
+            node "tools/$name" || { echo "❌ FAILED SCRIPT: $name"; exit 1; }
+            echo "✔ OK: $name"
+          }
+
+          run_test poker-e2e-smoke.mjs
+          run_test poker-e2e-termux.mjs
+          run_test poker-e2e-preflofp-flop.mjs
+          run_test poker-e2e-preflofp-flop-turn.mjs
+          run_test poker-e2e-flop-bet-call-turn.mjs
+          run_test poker-e2e-flop-check-bet-call-turn.mjs
+          run_test poker-e2e-3p-bet-fold-call-flop.mjs
+        env:
+          CI: "true"
+
+          # TEMP: allow running against prod
+          POKER_SMOKE_ALLOW_PROD: "1"
+
+          BASE: ${{ secrets.POKER_E2E_BASE }}
+          ORIGIN: ${{ secrets.POKER_E2E_ORIGIN }}
+          SUPABASE_URL: ${{ secrets.POKER_E2E_SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.POKER_E2E_SUPABASE_ANON_KEY }}
+
+          U1_EMAIL: ${{ secrets.POKER_E2E_U1_EMAIL }}
+          U1_PASS: ${{ secrets.POKER_E2E_U1_PASS }}
+          U2_EMAIL: ${{ secrets.POKER_E2E_U2_EMAIL }}
+          U2_PASS: ${{ secrets.POKER_E2E_U2_PASS }}
+          U3_EMAIL: ${{ secrets.POKER_E2E_U3_EMAIL }}
+          U3_PASS: ${{ secrets.POKER_E2E_U3_PASS }}
+
+          POKER_DEAL_SECRET: ${{ secrets.POKER_DEAL_SECRET }}

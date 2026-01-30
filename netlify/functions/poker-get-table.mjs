@@ -1,11 +1,17 @@
 import { baseHeaders, beginSql, corsHeaders, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
-import { deriveCommunityCards, deriveRemainingDeck } from "./_shared/poker-deal-deterministic.mjs";
+import { deriveCommunityCards, deriveDeck, deriveRemainingDeck } from "./_shared/poker-deal-deterministic.mjs";
+import { isValidTwoCards } from "./_shared/poker-cards-utils.mjs";
 import { isHoleCardsTableMissing, loadHoleCardsByUserId } from "./_shared/poker-hole-cards-store.mjs";
 import { buildHandSnapshot, isStateStorageValid, normalizeJsonState, withoutPrivateState } from "./_shared/poker-state-utils.mjs";
 import { maybeApplyTurnTimeout, normalizeSeatOrderFromState } from "./_shared/poker-turn-timeout.mjs";
 import { isValidUuid } from "./_shared/poker-utils.mjs";
 
 const isActionPhase = (phase) => phase === "PREFLOP" || phase === "FLOP" || phase === "TURN" || phase === "RIVER";
+const isRepairableHoleCardsError = (error) => {
+  if (!error || isHoleCardsTableMissing(error)) return false;
+  const message = String(error?.message || "");
+  return message === "state_invalid";
+};
 
 const normalizeSeatUserIds = (seats) => {
   if (!Array.isArray(seats)) return [];
@@ -20,6 +26,14 @@ const hasSameUserIds = (left, right) => {
     if (!leftSet.has(id)) return false;
   }
   return true;
+};
+
+const canRepairHoleCards = (state) => {
+  if (!state || !isActionPhase(state.phase)) return false;
+  if (typeof state.handId !== "string" || !state.handId.trim()) return false;
+  if (typeof state.handSeed !== "string" || !state.handSeed.trim()) return false;
+  const seatUserIdsInOrder = normalizeSeatOrderFromState(state.seats);
+  return seatUserIdsInOrder.length > 0;
 };
 
 const parseTableId = (event) => {
@@ -72,6 +86,63 @@ const cardsSameSet = (left, right) => {
     if (leftKeys[i] !== rightKeys[i]) return false;
   }
   return true;
+};
+
+const buildHoleCardUpsert = ({ tableId, handId, seatUserIdsInOrder, holeCardsByUserId }) => {
+  const values = seatUserIdsInOrder.map((userId) => ({ userId, cards: holeCardsByUserId[userId] }));
+  const placeholders = values
+    .map((_, index) => `($${index * 4 + 1}, $${index * 4 + 2}, $${index * 4 + 3}, $${index * 4 + 4}::jsonb)`)
+    .join(", ");
+  const params = values.flatMap((entry) => [tableId, handId, entry.userId, JSON.stringify(entry.cards)]);
+  return { placeholders, params };
+};
+
+const repairHoleCards = async ({ tx, tableId, handId, handSeed, seats }) => {
+  const seatUserIdsInOrder = normalizeSeatOrderFromState(seats);
+  if (seatUserIdsInOrder.length <= 0) {
+    throw new Error("state_invalid");
+  }
+  if (typeof handSeed !== "string" || !handSeed.trim()) {
+    throw new Error("state_invalid");
+  }
+
+  let deck;
+  try {
+    deck = deriveDeck(handSeed);
+  } catch (error) {
+    if (error?.message === "hand_seed_required" || error?.message === "deal_secret_missing") {
+      throw new Error("state_invalid");
+    }
+    throw error;
+  }
+
+  const needed = seatUserIdsInOrder.length * 2;
+  if (deck.length < needed) {
+    throw new Error("state_invalid");
+  }
+  const holeCardsByUserId = {};
+  for (let i = 0; i < seatUserIdsInOrder.length; i += 1) {
+    const userId = seatUserIdsInOrder[i];
+    holeCardsByUserId[userId] = [deck[i * 2], deck[i * 2 + 1]];
+  }
+  if (!seatUserIdsInOrder.every((userId) => isValidTwoCards(holeCardsByUserId[userId]))) {
+    throw new Error("state_invalid");
+  }
+
+  const upsert = buildHoleCardUpsert({ tableId, handId, seatUserIdsInOrder, holeCardsByUserId });
+  try {
+    await tx.unsafe(
+      `insert into public.poker_hole_cards (table_id, hand_id, user_id, cards) values ${upsert.placeholders} on conflict (table_id, hand_id, user_id) do update set cards = excluded.cards;`,
+      upsert.params
+    );
+  } catch (error) {
+    if (isHoleCardsTableMissing(error)) {
+      throw new Error("state_invalid");
+    }
+    throw error;
+  }
+
+  return { seatCount: seatUserIdsInOrder.length };
 };
 
 export async function handler(event) {
@@ -127,10 +198,9 @@ export async function handler(event) {
         [tableId]
       );
 
-      const stateRows = await tx.unsafe(
-        "select version, state from public.poker_state where table_id = $1 limit 1;",
-        [tableId]
-      );
+      const stateRows = await tx.unsafe("select version, state from public.poker_state where table_id = $1 limit 1;", [
+        tableId,
+      ]);
       const stateRow = stateRows?.[0] || null;
       if (!stateRow) {
         klog("poker_state_missing", { tableId });
@@ -151,6 +221,7 @@ export async function handler(event) {
       const currentState = normalizeJsonState(stateRow.state);
       let myHoleCards = [];
       let updatedState = currentState;
+
       if (isActionPhase(currentState.phase)) {
         if (typeof currentState.handId !== "string" || !currentState.handId.trim()) {
           throw new Error("state_invalid");
@@ -158,17 +229,22 @@ export async function handler(event) {
         if (typeof currentState.handSeed !== "string" || !currentState.handSeed.trim()) {
           throw new Error("state_invalid");
         }
+
         const nowMs = Date.now();
-        const shouldApplyTimeout = Number.isFinite(Number(currentState.turnDeadlineAt)) && nowMs > currentState.turnDeadlineAt;
+        const shouldApplyTimeout =
+          Number.isFinite(Number(currentState.turnDeadlineAt)) && nowMs > currentState.turnDeadlineAt;
+
         const dbActiveUserIds = Array.isArray(activeSeatRows)
           ? activeSeatRows.map((row) => row?.user_id).filter(Boolean)
           : [];
+
         const seatRowsActiveUserIds = Array.isArray(seatRows)
           ? seatRows
               .filter((row) => row?.status === "ACTIVE")
               .map((row) => row?.user_id)
               .filter(Boolean)
           : [];
+
         const stateSeatUserIds = normalizeSeatUserIds(currentState.seats);
         if (stateSeatUserIds.length <= 0) {
           throw new Error("state_invalid");
@@ -176,6 +252,7 @@ export async function handler(event) {
         if (!stateSeatUserIds.includes(auth.userId)) {
           throw new Error("state_invalid");
         }
+
         let candidateActiveUserIds = dbActiveUserIds.length ? dbActiveUserIds : seatRowsActiveUserIds;
         if (candidateActiveUserIds.length <= 0) {
           candidateActiveUserIds = stateSeatUserIds;
@@ -189,6 +266,7 @@ export async function handler(event) {
             stateCount: stateSeatUserIds.length,
           });
         }
+
         let effectiveUserIdsForHoleCards = stateSeatUserIds;
         if (!shouldApplyTimeout && candidateActiveUserIds.length) {
           const overlap = candidateActiveUserIds.filter((userId) => stateSeatUserIds.includes(userId));
@@ -196,43 +274,90 @@ export async function handler(event) {
             effectiveUserIdsForHoleCards = overlap.includes(auth.userId) ? overlap : [...overlap, auth.userId];
           }
         }
+
         try {
-          const holeCards = await loadHoleCardsByUserId(tx, {
-            tableId,
-            handId: currentState.handId,
-            activeUserIds: effectiveUserIdsForHoleCards,
-          });
+          let holeCards;
+          try {
+            holeCards = await loadHoleCardsByUserId(tx, {
+              tableId,
+              handId: currentState.handId,
+              activeUserIds: effectiveUserIdsForHoleCards,
+            });
+          } catch (error) {
+            if (isHoleCardsTableMissing(error)) {
+              throw new Error("state_invalid");
+            }
+            if (!isRepairableHoleCardsError(error)) throw error;
+
+            // IMPORTANT: never attempt DB repair unless explicitly enabled.
+            // Default OFF in prod to avoid lock waits/timeouts in get-table.
+            if (process.env.POKER_GET_TABLE_REPAIR !== "1") {
+              throw new Error("state_invalid");
+            }
+
+            if (!canRepairHoleCards(currentState)) {
+              throw new Error("state_invalid");
+            }
+
+            const repairResult = await repairHoleCards({
+              tx,
+              tableId,
+              handId: currentState.handId,
+              handSeed: currentState.handSeed,
+              seats: currentState.seats,
+            });
+
+            klog("poker_get_table_hole_cards_repaired", {
+              tableId,
+              handId: currentState.handId,
+              seatCount: repairResult.seatCount,
+            });
+
+            holeCards = await loadHoleCardsByUserId(tx, {
+              tableId,
+              handId: currentState.handId,
+              activeUserIds: effectiveUserIdsForHoleCards,
+            });
+          }
+
           myHoleCards = holeCards.holeCardsByUserId[auth.userId] || [];
+
           if (shouldApplyTimeout) {
             const seatUserIdsInOrder = normalizeSeatOrderFromState(currentState.seats);
             if (seatUserIdsInOrder.length <= 0) {
               throw new Error("state_invalid");
             }
+
             const derivedCommunity = deriveCommunityCards({
               handSeed: currentState.handSeed,
               seatUserIdsInOrder,
               communityDealt: currentState.communityDealt,
             });
+
             if (!cardsSameSet(currentState.community, derivedCommunity)) {
               throw new Error("state_invalid");
             }
+
             const derivedDeck = deriveRemainingDeck({
               handSeed: currentState.handSeed,
               seatUserIdsInOrder,
               communityDealt: currentState.communityDealt,
             });
+
             const privateState = {
               ...currentState,
               community: derivedCommunity,
               deck: derivedDeck,
               holeCardsByUserId: holeCards.holeCardsByUserId,
             };
+
             const timeoutResult = maybeApplyTurnTimeout({
               tableId,
               state: currentState,
               privateState,
               nowMs,
             });
+
             if (timeoutResult.applied) {
               if (
                 !isStateStorageValid(timeoutResult.state, {
@@ -243,20 +368,48 @@ export async function handler(event) {
               ) {
                 throw new Error("state_invalid");
               }
-              const updateRows = await tx.unsafe(
-                "update public.poker_state set version = version + 1, state = $2::jsonb, updated_at = now() where table_id = $1 returning version;",
-                [tableId, JSON.stringify(timeoutResult.state)]
-              );
-              const newVersion = Number(updateRows?.[0]?.version);
-              if (!Number.isFinite(newVersion)) {
-                throw new Error("state_invalid");
+
+              // Prevent get-table from hanging on locks during concurrent act/timeout.
+              // If we can't acquire locks fast, skip applying timeout in this poll.
+              await tx.unsafe("select set_config('lock_timeout', '200ms', true);");
+              await tx.unsafe("select set_config('statement_timeout', '4000ms', true);");
+
+              try {
+                const updateRows = await tx.unsafe(
+                  "update public.poker_state set version = version + 1, state = $2::jsonb, updated_at = now() where table_id = $1 returning version;",
+                  [tableId, JSON.stringify(timeoutResult.state)]
+                );
+                const newVersion = Number(updateRows?.[0]?.version);
+                if (!Number.isFinite(newVersion)) {
+                  throw new Error("state_invalid");
+                }
+                stateVersion = newVersion;
+
+                await tx.unsafe(
+                  "insert into public.poker_actions (table_id, version, user_id, action_type, amount) values ($1, $2, $3, $4, $5);",
+                  [
+                    tableId,
+                    newVersion,
+                    timeoutResult.action.userId,
+                    timeoutResult.action.type,
+                    timeoutResult.action.amount ?? null,
+                  ]
+                );
+
+                updatedState = timeoutResult.state;
+              } catch (e) {
+                const code = String(e?.code || "");
+                if (code === "55P03" || code === "57014") {
+                  klog("poker_get_table_timeout_apply_skipped", {
+                    tableId,
+                    handId: currentState.handId,
+                    code,
+                  });
+                  // Skip applying timeout this request; return current state.
+                } else {
+                  throw e;
+                }
               }
-              stateVersion = newVersion;
-              await tx.unsafe(
-                "insert into public.poker_actions (table_id, version, user_id, action_type, amount) values ($1, $2, $3, $4, $5);",
-                [tableId, newVersion, timeoutResult.action.userId, timeoutResult.action.type, timeoutResult.action.amount ?? null]
-              );
-              updatedState = timeoutResult.state;
             }
           }
         } catch (error) {
