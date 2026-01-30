@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
+import { deriveDeck } from "../netlify/functions/_shared/poker-deal-deterministic.mjs";
 import { isHoleCardsTableMissing, loadHoleCardsByUserId } from "../netlify/functions/_shared/poker-hole-cards-store.mjs";
 import { normalizeJsonState, withoutPrivateState } from "../netlify/functions/_shared/poker-state-utils.mjs";
+import { normalizeSeatOrderFromState } from "../netlify/functions/_shared/poker-turn-timeout.mjs";
 import { loadPokerHandler } from "./helpers/poker-test-helpers.mjs";
 
 const tableId = "11111111-1111-4111-8111-111111111111";
+process.env.POKER_DEAL_SECRET = process.env.POKER_DEAL_SECRET || "test-deal-secret";
 
 const baseState = {
   tableId,
@@ -29,8 +32,11 @@ const defaultHoleCards = {
   "user-3": [{ r: "9", s: "D" }, { r: "9", s: "C" }],
 };
 
-const makeHandler = (queries, storedState, userId, options = {}) =>
-  loadPokerHandler("netlify/functions/poker-get-table.mjs", {
+const makeHandler = (queries, storedState, userId, options = {}) => {
+  const holeCardsMap =
+    options.holeCardsByUserId !== undefined ? { ...options.holeCardsByUserId } : { ...defaultHoleCards };
+
+  return loadPokerHandler("netlify/functions/poker-get-table.mjs", {
     baseHeaders: () => ({}),
     corsHeaders: () => ({ "access-control-allow-origin": "https://example.test" }),
     extractBearerToken: () => "token",
@@ -38,13 +44,16 @@ const makeHandler = (queries, storedState, userId, options = {}) =>
     isValidUuid: () => true,
     normalizeJsonState,
     withoutPrivateState,
+    normalizeSeatOrderFromState,
     isHoleCardsTableMissing,
     loadHoleCardsByUserId,
+    deriveDeck,
     beginSql: async (fn) =>
       fn({
         unsafe: async (query, params) => {
           const text = String(query).toLowerCase();
           queries.push({ query: String(query), params });
+
           if (text.includes("from public.poker_tables")) {
             return [{ id: tableId, stakes: "1/2", max_players: 6, status: "OPEN" }];
           }
@@ -63,19 +72,41 @@ const makeHandler = (queries, storedState, userId, options = {}) =>
             return [{ version: storedState.version, state: JSON.parse(storedState.value) }];
           }
           if (text.includes("from public.poker_hole_cards")) {
-            if (options.holeCardsError) throw options.holeCardsError;
+            if (options.holeCardsSelectError) throw options.holeCardsSelectError;
             const rows = [];
-            const map = options.holeCardsByUserId || defaultHoleCards;
-            for (const [userIdValue, cards] of Object.entries(map)) {
+            for (const [userIdValue, cards] of Object.entries(holeCardsMap)) {
               rows.push({ user_id: userIdValue, cards });
             }
             return rows;
           }
+          if (text.includes("insert into public.poker_hole_cards")) {
+            if (options.holeCardsInsertError) throw options.holeCardsInsertError;
+
+            const paramsList = Array.isArray(params) ? params : [];
+            for (let i = 0; i < paramsList.length; i += 4) {
+              const userIdValue = paramsList[i + 2];
+              const rawCards = paramsList[i + 3];
+              if (!userIdValue) continue;
+
+              let cards = rawCards;
+              if (typeof rawCards === "string") {
+                try {
+                  cards = JSON.parse(rawCards);
+                } catch {
+                  cards = rawCards;
+                }
+              }
+              holeCardsMap[userIdValue] = cards;
+            }
+            return [];
+          }
+
           return [];
         },
       }),
     klog: options.klog || (() => {}),
   });
+};
 
 const run = async () => {
   const happyQueries = [];
@@ -98,6 +129,10 @@ const run = async () => {
   assert.equal(JSON.stringify(happyPayload).includes("holeCardsByUserId"), false);
   assert.equal(JSON.stringify(happyPayload).includes('"deck"'), false);
   assert.equal(JSON.stringify(happyPayload).includes('"handSeed"'), false);
+  const happyInserts = happyQueries.filter((entry) =>
+    entry.query.toLowerCase().includes("insert into public.poker_hole_cards")
+  );
+  assert.equal(happyInserts.length, 0);
 
   const stringCardResponse = await makeHandler([], storedState, "user-1", {
     holeCardsByUserId: {
@@ -134,13 +169,17 @@ const run = async () => {
     headers: { origin: "https://example.test", authorization: "Bearer token" },
     queryStringParameters: { tableId },
   });
-  assert.equal(malformedCardResponse.statusCode, 409);
-  assert.equal(JSON.parse(malformedCardResponse.body).error, "state_invalid");
+  assert.equal(malformedCardResponse.statusCode, 200);
+  const malformedCardPayload = JSON.parse(malformedCardResponse.body);
+  assert.equal(malformedCardPayload.ok, true);
+  assert.ok(Array.isArray(malformedCardPayload.myHoleCards));
+  assert.equal(malformedCardPayload.myHoleCards.length, 2);
 
   const missingTableError = new Error("missing table");
   missingTableError.code = "42P01";
-  const missingTableResponse = await makeHandler([], storedState, "user-1", {
-    holeCardsError: missingTableError,
+  const missingTableQueries = [];
+  const missingTableResponse = await makeHandler(missingTableQueries, storedState, "user-1", {
+    holeCardsSelectError: missingTableError,
   })({
     httpMethod: "GET",
     headers: { origin: "https://example.test", authorization: "Bearer token" },
@@ -148,6 +187,10 @@ const run = async () => {
   });
   assert.equal(missingTableResponse.statusCode, 409);
   assert.equal(JSON.parse(missingTableResponse.body).error, "state_invalid");
+  const missingTableInserts = missingTableQueries.filter((entry) =>
+    entry.query.toLowerCase().includes("insert into public.poker_hole_cards")
+  );
+  assert.equal(missingTableInserts.length, 0);
 
   const missingRowResponse = await makeHandler([], storedState, "user-1", {
     holeCardsByUserId: {
@@ -159,8 +202,11 @@ const run = async () => {
     headers: { origin: "https://example.test", authorization: "Bearer token" },
     queryStringParameters: { tableId },
   });
-  assert.equal(missingRowResponse.statusCode, 409);
-  assert.equal(JSON.parse(missingRowResponse.body).error, "state_invalid");
+  assert.equal(missingRowResponse.statusCode, 200);
+  const missingRowPayload = JSON.parse(missingRowResponse.body);
+  assert.equal(missingRowPayload.ok, true);
+  assert.ok(Array.isArray(missingRowPayload.myHoleCards));
+  assert.equal(missingRowPayload.myHoleCards.length, 2);
 
   const invalidCardsResponse = await makeHandler([], storedState, "user-1", {
     holeCardsByUserId: {
@@ -172,8 +218,94 @@ const run = async () => {
     headers: { origin: "https://example.test", authorization: "Bearer token" },
     queryStringParameters: { tableId },
   });
-  assert.equal(invalidCardsResponse.statusCode, 409);
-  assert.equal(JSON.parse(invalidCardsResponse.body).error, "state_invalid");
+  assert.equal(invalidCardsResponse.statusCode, 200);
+  const invalidCardsPayload = JSON.parse(invalidCardsResponse.body);
+  assert.equal(invalidCardsPayload.ok, true);
+  assert.ok(Array.isArray(invalidCardsPayload.myHoleCards));
+  assert.equal(invalidCardsPayload.myHoleCards.length, 2);
+
+  const repairQueries = [];
+  const repairState = {
+    ...baseState,
+    phase: "FLOP",
+    community: [{ r: "2", s: "S" }, { r: "3", s: "H" }, { r: "4", s: "D" }],
+    communityDealt: 3,
+  };
+  const repairLogs = [];
+  const repairResponse = await makeHandler(
+    repairQueries,
+    { value: JSON.stringify(repairState), version: 7 },
+    "user-1",
+    {
+      holeCardsByUserId: {},
+      klog: (event, payload) => repairLogs.push({ event, payload }),
+    }
+  )({
+    httpMethod: "GET",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    queryStringParameters: { tableId },
+  });
+  assert.equal(repairResponse.statusCode, 200);
+  const repairPayload = JSON.parse(repairResponse.body);
+  assert.equal(repairPayload.ok, true);
+  assert.ok(Array.isArray(repairPayload.myHoleCards));
+  assert.equal(repairPayload.myHoleCards.length, 2);
+  assert.equal(JSON.stringify(repairPayload).includes("holeCardsByUserId"), false);
+  assert.equal(JSON.stringify(repairPayload).includes('"deck"'), false);
+  assert.equal(JSON.stringify(repairPayload).includes('"handSeed"'), false);
+  const repairInserts = repairQueries.filter((entry) =>
+    entry.query.toLowerCase().includes("insert into public.poker_hole_cards")
+  );
+  assert.equal(repairInserts.length, 1);
+  assert.ok(repairLogs.some((entry) => entry.event === "poker_get_table_hole_cards_repaired"));
+
+  const missingSeedState = { ...baseState, handSeed: "" };
+  const missingSeedQueries = [];
+  const missingSeedResponse = await makeHandler(
+    missingSeedQueries,
+    { value: JSON.stringify(missingSeedState), version: 3 },
+    "user-1",
+    { holeCardsByUserId: {} }
+  )({
+    httpMethod: "GET",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    queryStringParameters: { tableId },
+  });
+  assert.equal(missingSeedResponse.statusCode, 409);
+  assert.equal(JSON.parse(missingSeedResponse.body).error, "state_invalid");
+  const missingSeedInserts = missingSeedQueries.filter((entry) =>
+    entry.query.toLowerCase().includes("insert into public.poker_hole_cards")
+  );
+  assert.equal(missingSeedInserts.length, 0);
+
+  // CHANGED: phase INIT means poker-get-table will NOT load hole cards at all.
+  // So the expected status is 200, and there must be no hole-cards SELECT/INSERT queries.
+  const initNoRepairState = { ...baseState, phase: "INIT" };
+  const initNoRepairQueries = [];
+  const initNoRepairResponse = await makeHandler(
+    initNoRepairQueries,
+    { value: JSON.stringify(initNoRepairState), version: 1 },
+    "user-1",
+    { holeCardsSelectError: new Error("state_invalid") }
+  )({
+    httpMethod: "GET",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    queryStringParameters: { tableId },
+  });
+  assert.equal(initNoRepairResponse.statusCode, 200);
+  const initNoRepairPayload = JSON.parse(initNoRepairResponse.body);
+  assert.equal(initNoRepairPayload.ok, true);
+  assert.deepEqual(initNoRepairPayload.myHoleCards, []);
+
+  const initNoRepairHoleCardSelects = initNoRepairQueries.filter((entry) =>
+    entry.query.toLowerCase().includes("from public.poker_hole_cards")
+  );
+  assert.equal(initNoRepairHoleCardSelects.length, 0);
+
+  const initNoRepairInserts = initNoRepairQueries.filter((entry) =>
+    entry.query.toLowerCase().includes("insert into public.poker_hole_cards")
+  );
+  assert.equal(initNoRepairInserts.length, 0);
 
   const mismatchResponse = await makeHandler([], storedState, "user-1", {
     activeUserIds: ["user-1"],
