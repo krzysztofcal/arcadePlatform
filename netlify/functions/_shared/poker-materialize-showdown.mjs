@@ -94,8 +94,6 @@ const materializeShowdownAndPayout = ({
     return { nextState: state };
   }
 
-  ensureCommunityComplete(state);
-
   if (eligibleUserIds.length === 1) {
     const winnerUserId = eligibleUserIds[0];
     const potAmount = normalizeChipAmount("pot", state.pot);

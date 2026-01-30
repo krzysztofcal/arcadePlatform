@@ -207,7 +207,10 @@ const runCase = async ({ state, action, requestId, userId, computeShowdown, stor
     userId: "user-2",
     storedState,
   });
-  assert.equal(second.response.statusCode, 409);
+  assert.equal(second.response.statusCode, 200);
+  const secondPayload = JSON.parse(second.response.body);
+  assert.equal(secondPayload.replayed, true);
+  assert.equal(secondPayload.state.state.pot, 0);
   assert.equal(storedState.value, storedAfterFirst);
   const updateCalls = second.queries.filter((entry) => entry.query.toLowerCase().includes("update public.poker_state"));
   assert.equal(updateCalls.length, 0);
