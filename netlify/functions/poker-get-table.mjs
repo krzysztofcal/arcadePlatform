@@ -10,7 +10,7 @@ const isActionPhase = (phase) => phase === "PREFLOP" || phase === "FLOP" || phas
 const isRepairableHoleCardsError = (error) => {
   if (!error || isHoleCardsTableMissing(error)) return false;
   const message = String(error?.message || "");
-  return message.includes("state_invalid");
+  return message === "state_invalid" || message.includes("hole") || message.includes("cards");
 };
 
 const normalizeSeatUserIds = (seats) => {
@@ -26,6 +26,14 @@ const hasSameUserIds = (left, right) => {
     if (!leftSet.has(id)) return false;
   }
   return true;
+};
+
+const canRepairHoleCards = (state) => {
+  if (!state || !isActionPhase(state.phase)) return false;
+  if (typeof state.handId !== "string" || !state.handId.trim()) return false;
+  if (typeof state.handSeed !== "string" || !state.handSeed.trim()) return false;
+  const seatUserIdsInOrder = normalizeSeatOrderFromState(state.seats);
+  return seatUserIdsInOrder.length > 0;
 };
 
 const parseTableId = (event) => {
@@ -272,6 +280,9 @@ export async function handler(event) {
               throw new Error("state_invalid");
             }
             if (!isRepairableHoleCardsError(error)) throw error;
+            if (!canRepairHoleCards(currentState)) {
+              throw new Error("state_invalid");
+            }
             const repairResult = await repairHoleCards({
               tx,
               tableId,

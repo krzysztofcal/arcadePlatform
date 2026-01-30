@@ -124,6 +124,10 @@ const run = async () => {
   assert.equal(JSON.stringify(happyPayload).includes("holeCardsByUserId"), false);
   assert.equal(JSON.stringify(happyPayload).includes('"deck"'), false);
   assert.equal(JSON.stringify(happyPayload).includes('"handSeed"'), false);
+  const happyInserts = happyQueries.filter((entry) =>
+    entry.query.toLowerCase().includes("insert into public.poker_hole_cards")
+  );
+  assert.equal(happyInserts.length, 0);
 
   const stringCardResponse = await makeHandler([], storedState, "user-1", {
     holeCardsByUserId: {
@@ -268,6 +272,20 @@ const run = async () => {
     entry.query.toLowerCase().includes("insert into public.poker_hole_cards")
   );
   assert.equal(missingSeedInserts.length, 0);
+
+  const initNoRepairState = { ...baseState, seats: [] };
+  const initNoRepairQueries = [];
+  const initNoRepairResponse = await makeHandler(initNoRepairQueries, { value: JSON.stringify(initNoRepairState), version: 1 }, "user-1")({
+    httpMethod: "GET",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    queryStringParameters: { tableId },
+  });
+  assert.equal(initNoRepairResponse.statusCode, 409);
+  assert.equal(JSON.parse(initNoRepairResponse.body).error, "state_invalid");
+  const initNoRepairInserts = initNoRepairQueries.filter((entry) =>
+    entry.query.toLowerCase().includes("insert into public.poker_hole_cards")
+  );
+  assert.equal(initNoRepairInserts.length, 0);
 
   const mismatchResponse = await makeHandler([], storedState, "user-1", {
     activeUserIds: ["user-1"],
