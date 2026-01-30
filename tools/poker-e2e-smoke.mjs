@@ -1,4 +1,5 @@
 /* tools/poker-e2e-smoke.mjs */
+import { cleanupPokerTable } from "./_shared/poker-e2e-cleanup.mjs";
 import { api, fetchJson, retry, snippet, waitFor } from "./_shared/poker-e2e-http.mjs";
 
 const REQUIRED_ENV = [
@@ -41,6 +42,11 @@ if (baseHost === "play.kcswh.pl" && !allowProd) {
 
 const requestId = (prefix) => `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
 const callApi = ({ label, ...req }) => api({ base, origin, label, ...req });
+const klog = (line) => {
+  try {
+    console.warn(line);
+  } catch {}
+};
 
 const decodeUserId = (token) => {
   if (typeof token !== "string") return null;
@@ -98,15 +104,20 @@ const run = async () => {
 
   let heartbeatError = null;
   const heartbeatTimers = [];
+  let tableId = null;
+  const users = [
+    { label: "u1", token: u1Token, joined: false },
+    { label: "u2", token: u2Token, joined: false },
+  ];
 
-  const heartbeatOnce = async (label, token, tableId) => {
+  const heartbeatOnce = async (label, token, activeTableId) => {
     try {
       const hb = await callApi({
         label: `heartbeat:${label}`,
         path: "/.netlify/functions/poker-heartbeat",
         method: "POST",
         token,
-        body: { tableId, requestId: requestId(`hb-${label}`) },
+        body: { tableId: activeTableId, requestId: requestId(`hb-${label}`) },
       });
 
       if (hb.status !== 200) {
@@ -119,6 +130,7 @@ const run = async () => {
     }
   };
 
+  let runError = null;
   try {
     const create = await callApi({
       label: "create-table",
@@ -129,9 +141,10 @@ const run = async () => {
     });
     assertResponse(create.status, create.text, 200, "poker-create-table");
 
-    const tableId = create.json?.tableId;
+    tableId = create.json?.tableId;
     assertOk(typeof tableId === "string" && tableId.length > 0, "poker-create-table missing tableId");
 
+    users[0].attempted = true;
     const joinU1 = await callApi({
       label: "join-u1",
       path: "/.netlify/functions/poker-join",
@@ -140,7 +153,9 @@ const run = async () => {
       body: { tableId, seatNo: 0, buyIn: 100, requestId: requestId("join-u1") },
     });
     assertResponse(joinU1.status, joinU1.text, 200, "poker-join u1");
+    if (joinU1.status === 200) users[0].joined = true;
 
+    users[1].attempted = true;
     const joinU2 = await callApi({
       label: "join-u2",
       path: "/.netlify/functions/poker-join",
@@ -149,6 +164,7 @@ const run = async () => {
       body: { tableId, seatNo: 1, buyIn: 100, requestId: requestId("join-u2") },
     });
     assertResponse(joinU2.status, joinU2.text, 200, "poker-join u2");
+    if (joinU2.status === 200) users[1].joined = true;
 
     // Start heartbeat loops (keeps seats alive)
     heartbeatTimers.push(setInterval(() => void heartbeatOnce("u1", u1Token, tableId), HEARTBEAT_MS));
@@ -327,9 +343,19 @@ const run = async () => {
     const uiLink = `${origin.replace(/\/$/, "")}/poker/table.html?tableId=${encodeURIComponent(tableId)}`;
     console.log(`Smoke test complete. tableId=${tableId}`);
     console.log(`UI: ${uiLink}`);
+  } catch (err) {
+    runError = err;
   } finally {
-    heartbeatTimers.forEach((t) => clearInterval(t));
+    await cleanupPokerTable({
+      baseUrl: base,
+      origin,
+      tableId,
+      users,
+      timers: heartbeatTimers,
+      klog,
+    });
   }
+  if (runError) throw runError;
 };
 
 run().catch((err) => {

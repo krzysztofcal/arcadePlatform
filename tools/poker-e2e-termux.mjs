@@ -1,5 +1,6 @@
 // tools/poker-e2e-termux.mjs
 import { createClient } from "@supabase/supabase-js";
+import { cleanupPokerTable } from "./_shared/poker-e2e-cleanup.mjs";
 import { api, retry, snippet, waitFor } from "./_shared/poker-e2e-http.mjs";
 
 const {
@@ -24,7 +25,11 @@ const HEARTBEAT_MS = 15000;
 const MAX_FETCH_TRIES = 5;
 
 const rid = (prefix) => `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
-
+const klog = (line) => {
+  try {
+    console.warn(line);
+  } catch {}
+};
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   auth: { persistSession: false, autoRefreshToken: false },
@@ -69,15 +74,12 @@ const assertStatus = (status, text, want, label) => {
 async function main() {
   const t1 = await login(U1_EMAIL, U1_PASS);
   const t2 = await login(U2_EMAIL, U2_PASS);
+  const users = [
+    { label: "u1", token: t1, joined: false },
+    { label: "u2", token: t2, joined: false },
+  ];
 
-  // 1) create table (user1)
-  const create = await apiCall("POST", "/.netlify/functions/poker-create-table", t1, { requestId: rid("create") }, { label: "create-table" });
-  assertStatus(create.status, create.text, 200, "create-table");
-  assertOk(create.json?.tableId, `create-table missing tableId body=${snippet(create.text)}`);
-
-  const tableId = create.json.tableId;
-  console.log("tableId=", tableId);
-
+  let tableId = null;
   let heartbeatError = null;
   const timers = [];
 
@@ -110,8 +112,18 @@ async function main() {
     return gt.json;
   };
 
+  let runError = null;
   try {
+    // 1) create table (user1)
+    const create = await apiCall("POST", "/.netlify/functions/poker-create-table", t1, { requestId: rid("create") }, { label: "create-table" });
+    assertStatus(create.status, create.text, 200, "create-table");
+    assertOk(create.json?.tableId, `create-table missing tableId body=${snippet(create.text)}`);
+
+    tableId = create.json.tableId;
+    console.log("tableId=", tableId);
+
     // 2) join seat 0 (user1) + seat 1 (user2)
+    users[0].attempted = true;
     const join1 = await apiCall(
       "POST",
       "/.netlify/functions/poker-join",
@@ -121,7 +133,9 @@ async function main() {
     );
     console.log("join1:", join1.status, join1.json || join1.text);
     assertStatus(join1.status, join1.text, 200, "join-u1");
+    if (join1.status === 200) users[0].joined = true;
 
+    users[1].attempted = true;
     const join2 = await apiCall(
       "POST",
       "/.netlify/functions/poker-join",
@@ -131,6 +145,7 @@ async function main() {
     );
     console.log("join2:", join2.status, join2.json || join2.text);
     assertStatus(join2.status, join2.text, 200, "join-u2");
+    if (join2.status === 200) users[1].joined = true;
 
     // 3) heartbeats (once + background)
     await heartbeatOnce("u1", t1);
@@ -256,9 +271,19 @@ async function main() {
 
     console.log("\nOpen UI:");
     console.log(`${BASE}/poker/table.html?tableId=${tableId}`);
+  } catch (err) {
+    runError = err;
   } finally {
-    timers.forEach((t) => clearInterval(t));
+    await cleanupPokerTable({
+      baseUrl: BASE,
+      origin: ORIGIN,
+      tableId,
+      users,
+      timers,
+      klog,
+    });
   }
+  if (runError) throw runError;
 }
 
 main().catch((e) => {
