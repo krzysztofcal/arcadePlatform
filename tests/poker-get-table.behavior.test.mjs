@@ -273,9 +273,20 @@ const run = async () => {
   );
   assert.equal(missingSeedInserts.length, 0);
 
-  const initNoRepairState = { ...baseState, seats: [] };
+  const initNoRepairState = {
+    ...baseState,
+    seats: [
+      { userId: "user-1", seatNo: 1 },
+      { userId: "user-1", seatNo: 2 },
+    ],
+  };
   const initNoRepairQueries = [];
-  const initNoRepairResponse = await makeHandler(initNoRepairQueries, { value: JSON.stringify(initNoRepairState), version: 1 }, "user-1")({
+  const initNoRepairResponse = await makeHandler(
+    initNoRepairQueries,
+    { value: JSON.stringify(initNoRepairState), version: 1 },
+    "user-1",
+    { holeCardsError: new Error("state_invalid") }
+  )({
     httpMethod: "GET",
     headers: { origin: "https://example.test", authorization: "Bearer token" },
     queryStringParameters: { tableId },

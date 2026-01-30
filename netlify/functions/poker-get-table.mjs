@@ -10,7 +10,7 @@ const isActionPhase = (phase) => phase === "PREFLOP" || phase === "FLOP" || phas
 const isRepairableHoleCardsError = (error) => {
   if (!error || isHoleCardsTableMissing(error)) return false;
   const message = String(error?.message || "");
-  return message === "state_invalid" || message.includes("hole") || message.includes("cards");
+  return message === "state_invalid";
 };
 
 const normalizeSeatUserIds = (seats) => {
