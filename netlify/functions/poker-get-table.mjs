@@ -1,7 +1,7 @@
 import { baseHeaders, beginSql, corsHeaders, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
 import { deriveCommunityCards, deriveRemainingDeck } from "./_shared/poker-deal-deterministic.mjs";
 import { isHoleCardsTableMissing, loadHoleCardsByUserId } from "./_shared/poker-hole-cards-store.mjs";
-import { isStateStorageValid, normalizeJsonState, withoutPrivateState } from "./_shared/poker-state-utils.mjs";
+import { buildHandSnapshot, isStateStorageValid, normalizeJsonState, withoutPrivateState } from "./_shared/poker-state-utils.mjs";
 import { maybeApplyTurnTimeout, normalizeSeatOrderFromState } from "./_shared/poker-turn-timeout.mjs";
 import { isValidUuid } from "./_shared/poker-utils.mjs";
 
@@ -293,6 +293,7 @@ export async function handler(event) {
     const seats = result.seats;
     const stateVersion = result.stateVersion;
     const publicState = withoutPrivateState(result.currentState);
+    const hand = buildHandSnapshot(publicState);
 
     const tablePayload = {
       id: table.id,
@@ -316,7 +317,9 @@ export async function handler(event) {
           version: stateVersion,
           state: publicState,
         },
+        hand,
         myHoleCards: result.myHoleCards || [],
+        events: [],
       }),
     };
   } catch (error) {

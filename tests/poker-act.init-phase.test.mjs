@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { normalizeRequestId } from "../netlify/functions/_shared/poker-request-id.mjs";
-import { isPlainObject, isStateStorageValid, normalizeJsonState, withoutPrivateState } from "../netlify/functions/_shared/poker-state-utils.mjs";
+import { buildHandSnapshot, isPlainObject, isStateStorageValid, normalizeJsonState, withoutPrivateState } from "../netlify/functions/_shared/poker-state-utils.mjs";
 import { loadPokerHandler } from "./helpers/poker-test-helpers.mjs";
 
 const tableId = "11111111-1111-4111-8111-111111111111";
@@ -39,6 +39,7 @@ const makeHandler = (storedState, klogCalls) =>
     isPlainObject,
     isStateStorageValid,
     normalizeJsonState,
+    buildHandSnapshot,
     withoutPrivateState,
     beginSql: async (fn) =>
       fn({
