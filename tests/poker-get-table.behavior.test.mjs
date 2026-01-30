@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { deriveDeck } from "../netlify/functions/_shared/poker-deal-deterministic.mjs";
-import { dealHoleCards } from "../netlify/functions/_shared/poker-engine.mjs";
 import { isHoleCardsTableMissing, loadHoleCardsByUserId } from "../netlify/functions/_shared/poker-hole-cards-store.mjs";
 import { normalizeJsonState, withoutPrivateState } from "../netlify/functions/_shared/poker-state-utils.mjs";
 import { normalizeSeatOrderFromState } from "../netlify/functions/_shared/poker-turn-timeout.mjs";
@@ -48,7 +47,6 @@ const makeHandler = (queries, storedState, userId, options = {}) => {
     isHoleCardsTableMissing,
     loadHoleCardsByUserId,
     deriveDeck,
-    dealHoleCards,
     beginSql: async (fn) =>
       fn({
         unsafe: async (query, params) => {

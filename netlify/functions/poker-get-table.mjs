@@ -1,7 +1,6 @@
 import { baseHeaders, beginSql, corsHeaders, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
 import { deriveCommunityCards, deriveDeck, deriveRemainingDeck } from "./_shared/poker-deal-deterministic.mjs";
 import { isValidTwoCards } from "./_shared/poker-cards-utils.mjs";
-import { dealHoleCards } from "./_shared/poker-engine.mjs";
 import { isHoleCardsTableMissing, loadHoleCardsByUserId } from "./_shared/poker-hole-cards-store.mjs";
 import { isStateStorageValid, normalizeJsonState, withoutPrivateState } from "./_shared/poker-state-utils.mjs";
 import { maybeApplyTurnTimeout, normalizeSeatOrderFromState } from "./_shared/poker-turn-timeout.mjs";
@@ -109,8 +108,15 @@ const repairHoleCards = async ({ tx, tableId, handId, handSeed, seats }) => {
     throw error;
   }
 
-  const dealResult = dealHoleCards(deck, seatUserIdsInOrder);
-  const holeCardsByUserId = dealResult?.holeCardsByUserId || {};
+  const needed = seatUserIdsInOrder.length * 2;
+  if (deck.length < needed) {
+    throw new Error("state_invalid");
+  }
+  const holeCardsByUserId = {};
+  for (let i = 0; i < seatUserIdsInOrder.length; i += 1) {
+    const userId = seatUserIdsInOrder[i];
+    holeCardsByUserId[userId] = [deck[i * 2], deck[i * 2 + 1]];
+  }
   if (!seatUserIdsInOrder.every((userId) => isValidTwoCards(holeCardsByUserId[userId]))) {
     throw new Error("state_invalid");
   }
