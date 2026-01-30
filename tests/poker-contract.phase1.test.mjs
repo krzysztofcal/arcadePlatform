@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { loadPokerHandler } from "./helpers/poker-test-helpers.mjs";
-import { normalizeJsonState, withoutPrivateState } from "../netlify/functions/_shared/poker-state-utils.mjs";
+import { isHoleCardsTableMissing } from "../netlify/functions/_shared/poker-hole-cards-store.mjs";
+import { buildHandSnapshot, normalizeJsonState, withoutPrivateState } from "../netlify/functions/_shared/poker-state-utils.mjs";
 
 const runListTablesContract = async () => {
   const handler = loadPokerHandler("netlify/functions/poker-list-tables.mjs", {
@@ -60,6 +61,8 @@ const runGetTableContract = async () => {
     isValidUuid: () => true,
     normalizeJsonState,
     withoutPrivateState,
+    buildHandSnapshot,
+    isHoleCardsTableMissing,
     beginSql: async (fn) =>
       fn({
         unsafe: async (query, params) => {

@@ -700,7 +700,7 @@ export async function handler(event) {
           version: result.version,
           state: result.state,
         },
-        hand: buildHandSnapshot(withoutPrivateState(result.state)),
+        hand: buildHandSnapshot(result.state),
         myHoleCards: result.myHoleCards,
         events: Array.isArray(result.events) ? result.events : [],
         replayed: result.replayed,
