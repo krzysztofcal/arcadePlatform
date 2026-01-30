@@ -43,7 +43,7 @@ const makeHandler = (queries, storedState, userId, options = {}) => {
     isValidUuid: () => true,
     normalizeJsonState,
     withoutPrivateState,
-    normalizeSeatOrderFromState,
+    normalizeSeatOrderFromState: options.normalizeSeatOrderFromState || normalizeSeatOrderFromState,
     isHoleCardsTableMissing,
     loadHoleCardsByUserId,
     deriveDeck,
@@ -70,7 +70,7 @@ const makeHandler = (queries, storedState, userId, options = {}) => {
             return [{ version: storedState.version, state: JSON.parse(storedState.value) }];
           }
           if (text.includes("from public.poker_hole_cards")) {
-            if (options.holeCardsError) throw options.holeCardsError;
+            if (options.holeCardsSelectError) throw options.holeCardsSelectError;
             const rows = [];
             for (const [userIdValue, cards] of Object.entries(holeCardsMap)) {
               rows.push({ user_id: userIdValue, cards });
@@ -78,7 +78,7 @@ const makeHandler = (queries, storedState, userId, options = {}) => {
             return rows;
           }
           if (text.includes("insert into public.poker_hole_cards")) {
-            if (options.holeCardsError) throw options.holeCardsError;
+            if (options.holeCardsInsertError) throw options.holeCardsInsertError;
             const paramsList = Array.isArray(params) ? params : [];
             for (let i = 0; i < paramsList.length; i += 4) {
               const userIdValue = paramsList[i + 2];
@@ -174,7 +174,7 @@ const run = async () => {
   missingTableError.code = "42P01";
   const missingTableQueries = [];
   const missingTableResponse = await makeHandler(missingTableQueries, storedState, "user-1", {
-    holeCardsError: missingTableError,
+    holeCardsSelectError: missingTableError,
   })({
     httpMethod: "GET",
     headers: { origin: "https://example.test", authorization: "Bearer token" },
@@ -273,19 +273,16 @@ const run = async () => {
   );
   assert.equal(missingSeedInserts.length, 0);
 
-  const initNoRepairState = {
-    ...baseState,
-    seats: [
-      { userId: "user-1", seatNo: 1 },
-      { userId: "user-1", seatNo: 2 },
-    ],
-  };
+  const initNoRepairState = { ...baseState, phase: "PREFLOP" };
   const initNoRepairQueries = [];
   const initNoRepairResponse = await makeHandler(
     initNoRepairQueries,
     { value: JSON.stringify(initNoRepairState), version: 1 },
     "user-1",
-    { holeCardsError: new Error("state_invalid") }
+    {
+      holeCardsSelectError: new Error("state_invalid"),
+      normalizeSeatOrderFromState: () => [],
+    }
   )({
     httpMethod: "GET",
     headers: { origin: "https://example.test", authorization: "Bearer token" },

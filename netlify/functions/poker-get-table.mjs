@@ -142,7 +142,7 @@ const repairHoleCards = async ({ tx, tableId, handId, handSeed, seats }) => {
     throw error;
   }
 
-  return { holeCardsByUserId, seatCount: seatUserIdsInOrder.length };
+  return { seatCount: seatUserIdsInOrder.length };
 };
 
 export async function handler(event) {
