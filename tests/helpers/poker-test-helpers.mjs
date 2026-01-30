@@ -1,6 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { isValidTwoCards } from "../../netlify/functions/_shared/poker-cards-utils.mjs";
+import { isHoleCardsTableMissing } from "../../netlify/functions/_shared/poker-hole-cards-store.mjs";
+import { buildHandSnapshot } from "../../netlify/functions/_shared/poker-state-utils.mjs";
 
 const root = process.cwd();
 
@@ -35,11 +37,13 @@ export const loadPokerHandler = (filePath, mocks) => {
     throw new Error(`[poker-test-helpers] Failed to rewrite handler export in ${filePath}`);
   }
   const declared = getDeclaredIdentifiers(rewritten);
+  const resolvedMocks = { buildHandSnapshot, isHoleCardsTableMissing, ...mocks };
   const injectable = [
     "baseHeaders",
     "beginSql",
     "awardPotsAtShowdown",
     "buildSidePots",
+    "buildHandSnapshot",
     "corsHeaders",
     "computeShowdown",
     "createDeck",
@@ -87,7 +91,7 @@ ${rewritten}
 return handler;`
   );
   try {
-    return factory(mocks, isValidTwoCards);
+    return factory(resolvedMocks, isValidTwoCards);
   } catch (error) {
     throw new Error(`[poker-test-helpers] Failed to compile ${filePath}: ${error?.message || error}`);
   }

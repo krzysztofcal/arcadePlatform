@@ -2,7 +2,7 @@ import { baseHeaders, beginSql, corsHeaders, extractBearerToken, klog, verifySup
 import { deriveCommunityCards, deriveDeck, deriveRemainingDeck } from "./_shared/poker-deal-deterministic.mjs";
 import { isValidTwoCards } from "./_shared/poker-cards-utils.mjs";
 import { isHoleCardsTableMissing, loadHoleCardsByUserId } from "./_shared/poker-hole-cards-store.mjs";
-import { isStateStorageValid, normalizeJsonState, withoutPrivateState } from "./_shared/poker-state-utils.mjs";
+import { buildHandSnapshot, isStateStorageValid, normalizeJsonState, withoutPrivateState } from "./_shared/poker-state-utils.mjs";
 import { maybeApplyTurnTimeout, normalizeSeatOrderFromState } from "./_shared/poker-turn-timeout.mjs";
 import { isValidUuid } from "./_shared/poker-utils.mjs";
 
@@ -446,6 +446,7 @@ export async function handler(event) {
     const seats = result.seats;
     const stateVersion = result.stateVersion;
     const publicState = withoutPrivateState(result.currentState);
+    const hand = buildHandSnapshot(publicState);
 
     const tablePayload = {
       id: table.id,
@@ -470,6 +471,8 @@ export async function handler(event) {
           state: publicState,
         },
         myHoleCards: result.myHoleCards || [],
+        hand,
+        events: [],
       }),
     };
   } catch (error) {

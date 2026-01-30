@@ -8,6 +8,7 @@ import { normalizeRequestId } from "../netlify/functions/_shared/poker-request-i
 import { computeShowdown } from "../netlify/functions/_shared/poker-showdown.mjs";
 import { maybeApplyTurnTimeout, normalizeSeatOrderFromState } from "../netlify/functions/_shared/poker-turn-timeout.mjs";
 import {
+  buildHandSnapshot,
   getRng,
   isPlainObject,
   isStateStorageValid,
@@ -63,6 +64,7 @@ const makeHandler = (queries, storedState, userId, options = {}) =>
     TURN_MS,
     normalizeJsonState,
     withoutPrivateState,
+    buildHandSnapshot,
     maybeApplyTurnTimeout,
     advanceIfNeeded,
     applyAction: options.applyAction || applyAction,
@@ -193,6 +195,7 @@ const makeGetTableHandler = (queries, storedState, userId) =>
     isValidUuid: () => true,
     normalizeJsonState,
     withoutPrivateState,
+    buildHandSnapshot,
     isStateStorageValid,
     maybeApplyTurnTimeout,
     normalizeSeatOrderFromState,
@@ -418,6 +421,10 @@ const run = async () => {
   assert.equal(user1Check.statusCode, 200);
   const user1Payload = JSON.parse(user1Check.body);
   assert.equal(user1Payload.ok, true);
+  assert.ok(user1Payload.hand);
+  assert.equal(typeof user1Payload.hand.handId, "string");
+  assert.equal(user1Payload.hand.phase, user1Payload.state.state.phase);
+  assert.equal(Array.isArray(user1Payload.events), true);
   assert.equal(user1Payload.state.state.holeCardsByUserId, undefined);
   assert.equal(user1Payload.state.state.handSeed, undefined);
   assert.equal(user1Payload.state.state.deck, undefined);
@@ -486,6 +493,27 @@ const run = async () => {
   assert.equal(JSON.stringify(user3Payload).includes("holeCardsByUserId"), false);
   assert.equal(JSON.stringify(user3Payload).includes('"deck"'), false);
   assert.equal(JSON.stringify(user3Payload).includes('"handSeed"'), false);
+
+  const resetState = {
+    ...baseState,
+    foldedByUserId: { "user-1": false, "user-2": false, "user-3": true },
+    actedThisRoundByUserId: { "user-1": false, "user-2": true, "user-3": true },
+    toCallByUserId: { "user-1": 0, "user-2": 0, "user-3": 0 },
+    betThisRoundByUserId: { "user-1": 0, "user-2": 0, "user-3": 0 },
+  };
+  const resetResponse = await runCase({
+    state: resetState,
+    action: { type: "FOLD" },
+    requestId: "req-reset",
+    userId: "user-1",
+  });
+  assert.equal(resetResponse.response.statusCode, 200);
+  const resetPayload = JSON.parse(resetResponse.response.body);
+  assert.ok(Array.isArray(resetPayload.events));
+  assert.equal(resetPayload.events.some((event) => event?.type === "HAND_RESET"), true);
+  assert.ok(resetPayload.hand);
+  assert.equal(typeof resetPayload.hand.handId, "string");
+  assert.notEqual(resetPayload.hand.handId, baseState.handId);
 
   {
     const startQueries = [];

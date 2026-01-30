@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { deriveDeck } from "../netlify/functions/_shared/poker-deal-deterministic.mjs";
 import { isHoleCardsTableMissing, loadHoleCardsByUserId } from "../netlify/functions/_shared/poker-hole-cards-store.mjs";
-import { normalizeJsonState, withoutPrivateState } from "../netlify/functions/_shared/poker-state-utils.mjs";
+import { buildHandSnapshot, normalizeJsonState, withoutPrivateState } from "../netlify/functions/_shared/poker-state-utils.mjs";
 import { normalizeSeatOrderFromState } from "../netlify/functions/_shared/poker-turn-timeout.mjs";
 import { loadPokerHandler } from "./helpers/poker-test-helpers.mjs";
 
@@ -45,6 +45,7 @@ const makeHandler = (queries, storedState, userId, options = {}) => {
     isValidUuid: () => true,
     normalizeJsonState,
     withoutPrivateState,
+    buildHandSnapshot,
     normalizeSeatOrderFromState,
     isHoleCardsTableMissing,
     loadHoleCardsByUserId,
@@ -121,6 +122,11 @@ const run = async () => {
   assert.equal(happyResponse.statusCode, 200);
   const happyPayload = JSON.parse(happyResponse.body);
   assert.equal(happyPayload.ok, true);
+  assert.ok(happyPayload.hand);
+  assert.equal(typeof happyPayload.hand.handId, "string");
+  assert.equal(happyPayload.hand.phase, happyPayload.state.state.phase);
+  assert.equal(Array.isArray(happyPayload.events), true);
+  assert.deepEqual(happyPayload.events, []);
   assert.ok(Array.isArray(happyPayload.myHoleCards));
   assert.equal(happyPayload.myHoleCards.length, 2);
   assert.equal(happyPayload.state.state.deck, undefined);

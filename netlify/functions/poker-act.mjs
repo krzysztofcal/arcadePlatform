@@ -6,7 +6,7 @@ import { advanceIfNeeded, applyAction } from "./_shared/poker-reducer.mjs";
 import { normalizeRequestId } from "./_shared/poker-request-id.mjs";
 import { awardPotsAtShowdown } from "./_shared/poker-payout.mjs";
 import { computeShowdown } from "./_shared/poker-showdown.mjs";
-import { isStateStorageValid, normalizeJsonState, withoutPrivateState } from "./_shared/poker-state-utils.mjs";
+import { buildHandSnapshot, isStateStorageValid, normalizeJsonState, withoutPrivateState } from "./_shared/poker-state-utils.mjs";
 import { maybeApplyTurnTimeout } from "./_shared/poker-turn-timeout.mjs";
 import { isValidUuid } from "./_shared/poker-utils.mjs";
 
@@ -700,8 +700,9 @@ export async function handler(event) {
           version: result.version,
           state: result.state,
         },
+        hand: buildHandSnapshot(withoutPrivateState(result.state)),
         myHoleCards: result.myHoleCards,
-        events: result.events,
+        events: Array.isArray(result.events) ? result.events : [],
         replayed: result.replayed,
       }),
     };

@@ -285,10 +285,21 @@ const getRng = () => {
   return typeof testRng === "function" ? testRng : Math.random;
 };
 
+const buildHandSnapshot = (publicState) => ({
+  handId: typeof publicState?.handId === "string" ? publicState.handId : null,
+  phase: typeof publicState?.phase === "string" ? publicState.phase : null,
+  dealerSeatNo: Number.isFinite(publicState?.dealerSeatNo) ? publicState.dealerSeatNo : null,
+  turnUserId: typeof publicState?.turnUserId === "string" ? publicState.turnUserId : null,
+  turnNo: Number.isInteger(publicState?.turnNo) ? publicState.turnNo : null,
+  turnStartedAt: Number.isFinite(publicState?.turnStartedAt) ? publicState.turnStartedAt : null,
+  turnDeadlineAt: Number.isFinite(publicState?.turnDeadlineAt) ? publicState.turnDeadlineAt : null,
+});
+
 export {
   normalizeJsonState,
   withoutPrivateState,
   getRng,
+  buildHandSnapshot,
   isPlainObject,
   isStateStorageValid,
   upgradeLegacyInitState,
