@@ -70,14 +70,15 @@ const maybeApplyTurnTimeout = ({ tableId, state, privateState, nowMs }) => {
   if (seatUserIdsInOrder.length === 0) {
     throw new Error("showdown_no_players");
   }
-  const showdownAlreadyMaterialized =
-    nextState.showdown && (nextState.showdown.handId === nextState.handId || !nextState.showdown.handId);
+  const currentHandId = typeof nextState.handId === "string" ? nextState.handId.trim() : "";
+  const showdownHandId =
+    typeof nextState.showdown?.handId === "string" && nextState.showdown.handId.trim() ? nextState.showdown.handId.trim() : "";
+  const showdownAlreadyMaterialized = !!currentHandId && !!showdownHandId && showdownHandId === currentHandId;
   const eligibleUserIds = seatUserIdsInOrder.filter(
     (userId) => typeof userId === "string" && !nextState.foldedByUserId?.[userId]
   );
   const shouldMaterializeShowdown =
-    !showdownAlreadyMaterialized &&
-    (eligibleUserIds.length <= 1 || nextState.phase === "SHOWDOWN" || nextState.phase === "HAND_DONE");
+    !showdownAlreadyMaterialized && (eligibleUserIds.length <= 1 || nextState.phase === "SHOWDOWN");
 
   if (shouldMaterializeShowdown) {
     const materialized = materializeShowdownAndPayout({

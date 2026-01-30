@@ -1,40 +1,58 @@
-import { deriveCommunityCards } from "./poker-deal-deterministic.mjs";
+const getHandId = (state) => (typeof state?.handId === "string" && state.handId.trim() ? state.handId.trim() : "");
 
-const listEligibleUserIds = ({ state, seatUserIdsInOrder }) =>
-  seatUserIdsInOrder.filter((userId) => typeof userId === "string" && !state.foldedByUserId?.[userId]);
-
-const normalizePotAmount = (value) => {
+const normalizeChipAmount = (name, value) => {
   const amount = Number(value ?? 0);
-  if (!Number.isFinite(amount) || amount < 0) {
-    throw new Error("showdown_invalid_pot");
+  if (!Number.isFinite(amount) || amount < 0 || Math.floor(amount) !== amount) {
+    throw new Error(`showdown_invalid_${name}`);
   }
-  return Math.floor(amount);
+  return amount;
 };
 
-const normalizeStack = (value) => {
-  const stack = Number(value ?? 0);
-  if (!Number.isFinite(stack)) {
-    throw new Error("showdown_invalid_stack");
+const getSeatUserIdsInOrder = (seats) => {
+  if (!Array.isArray(seats)) return [];
+  const ordered = seats.slice().sort((a, b) => Number(a?.seatNo ?? 0) - Number(b?.seatNo ?? 0));
+  const out = [];
+  const seen = new Set();
+  for (const seat of ordered) {
+    if (typeof seat?.userId !== "string") continue;
+    const userId = seat.userId.trim();
+    if (!userId) continue;
+    if (seen.has(userId)) {
+      throw new Error("showdown_invalid_seats");
+    }
+    seen.add(userId);
+    out.push(userId);
   }
-  return stack;
+  return out;
 };
 
-const ensureCommunity = ({ state, seatUserIdsInOrder }) => {
-  let community = Array.isArray(state.community) ? state.community.slice() : [];
-  if (community.length > 5) {
+const listEligibleUserIds = ({ state }) => {
+  const seatUserIdsInOrder = getSeatUserIdsInOrder(state.seats);
+  if (seatUserIdsInOrder.length === 0) {
+    throw new Error("showdown_invalid_seats");
+  }
+  const stacks = state.stacks || {};
+  const eligible = [];
+  for (const userId of seatUserIdsInOrder) {
+    if (state.foldedByUserId?.[userId]) continue;
+    if (!Object.prototype.hasOwnProperty.call(stacks, userId)) continue;
+    normalizeChipAmount("stack", stacks[userId]);
+    eligible.push(userId);
+  }
+  return { eligibleUserIds: eligible, seatUserIdsInOrder };
+};
+
+const ensureCommunityComplete = (state) => {
+  if (!Array.isArray(state.community)) {
+    throw new Error("showdown_incomplete_community");
+  }
+  if (state.community.length > 5) {
     throw new Error("showdown_invalid_community");
   }
-  if (community.length < 5) {
-    if (!state.handSeed) {
-      throw new Error("showdown_community_derive_failed");
-    }
-    community = deriveCommunityCards({
-      handSeed: state.handSeed,
-      seatUserIdsInOrder,
-      communityDealt: 5,
-    });
+  if (state.community.length !== 5) {
+    throw new Error("showdown_incomplete_community");
   }
-  return community;
+  return state.community.slice();
 };
 
 const materializeShowdownAndPayout = ({
@@ -46,9 +64,29 @@ const materializeShowdownAndPayout = ({
   klog,
 }) => {
   if (!state || typeof state !== "object" || Array.isArray(state)) return { nextState: state };
-  if (!Array.isArray(seatUserIdsInOrder) || seatUserIdsInOrder.length === 0) return { nextState: state };
 
-  const eligibleUserIds = listEligibleUserIds({ state, seatUserIdsInOrder });
+  const handId = getHandId(state);
+  const showdownHandId =
+    typeof state.showdown?.handId === "string" && state.showdown.handId.trim() ? state.showdown.handId.trim() : "";
+
+  if (state.showdown) {
+    if (!handId) {
+      return { nextState: state };
+    }
+    if (!showdownHandId || showdownHandId !== handId) {
+      throw new Error("showdown_hand_mismatch");
+    }
+    if (normalizeChipAmount("pot", state.pot) > 0) {
+      throw new Error("showdown_pot_not_zero");
+    }
+    return { nextState: state };
+  }
+
+  if (!handId) {
+    throw new Error("showdown_missing_hand_id");
+  }
+
+  const { eligibleUserIds, seatUserIdsInOrder: resolvedSeatOrder } = listEligibleUserIds({ state });
   if (eligibleUserIds.length === 0) {
     if (typeof klog === "function") {
       klog("poker_showdown_no_eligible", { handId: state.handId ?? null });
@@ -56,13 +94,13 @@ const materializeShowdownAndPayout = ({
     return { nextState: state };
   }
 
-  const handId = typeof state.handId === "string" ? state.handId : "";
+  ensureCommunityComplete(state);
 
   if (eligibleUserIds.length === 1) {
     const winnerUserId = eligibleUserIds[0];
-    const potAmount = normalizePotAmount(state.pot);
+    const potAmount = normalizeChipAmount("pot", state.pot);
     const nextStacks = { ...state.stacks };
-    nextStacks[winnerUserId] = normalizeStack(nextStacks[winnerUserId]) + potAmount;
+    nextStacks[winnerUserId] = normalizeChipAmount("stack", nextStacks[winnerUserId]) + potAmount;
     const awardedAt = new Date().toISOString();
     const showdown = {
       winners: [winnerUserId],
@@ -92,7 +130,7 @@ const materializeShowdownAndPayout = ({
   if (typeof awardPotsAtShowdown !== "function") {
     throw new Error("showdown_invalid_compute");
   }
-  const community = ensureCommunity({ state, seatUserIdsInOrder });
+  const community = ensureCommunityComplete(state);
   const awardResult = awardPotsAtShowdown({
     state: {
       ...state,
@@ -100,12 +138,13 @@ const materializeShowdownAndPayout = ({
       communityDealt: community.length,
       holeCardsByUserId,
     },
-    seatUserIdsInOrder,
+    seatUserIdsInOrder: resolvedSeatOrder,
     computeShowdown,
   });
-  const nextShowdown = awardResult.nextState.showdown
-    ? { ...awardResult.nextState.showdown, handId }
-    : { winners: [], reason: "computed", handId };
+  if (!awardResult.nextState.showdown || !Array.isArray(awardResult.nextState.showdown.winners)) {
+    throw new Error("showdown_missing_result");
+  }
+  const nextShowdown = { ...awardResult.nextState.showdown, handId };
   return {
     nextState: {
       ...awardResult.nextState,

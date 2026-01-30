@@ -22,22 +22,22 @@ const handSeed = "seed-2";
 
 const baseState = {
   tableId,
-  phase: "TURN",
+  phase: "RIVER",
   seats: [
     { userId: "user-1", seatNo: 1 },
     { userId: "user-2", seatNo: 2 },
   ],
   stacks: { "user-1": 80, "user-2": 70 },
   pot: 30,
-  community: deriveCommunityCards({ handSeed, seatUserIdsInOrder: seatOrder, communityDealt: 4 }),
-  communityDealt: 4,
+  community: deriveCommunityCards({ handSeed, seatUserIdsInOrder: seatOrder, communityDealt: 5 }),
+  communityDealt: 5,
   dealerSeatNo: 1,
   turnUserId: "user-2",
   handId: "hand-2",
   handSeed,
   toCallByUserId: { "user-1": 0, "user-2": 0 },
   betThisRoundByUserId: { "user-1": 0, "user-2": 0 },
-  actedThisRoundByUserId: { "user-1": false, "user-2": false },
+  actedThisRoundByUserId: { "user-1": true, "user-2": false },
   foldedByUserId: { "user-1": false, "user-2": false },
   lastAggressorUserId: null,
   lastActionRequestIdByUserId: {},
@@ -118,16 +118,16 @@ const makeHandler = (queries, storedState, userId, options = {}) =>
     klog: options.klog || (() => {}),
   });
 
-const runCase = async ({ state, action, requestId, userId, computeShowdown }) => {
+const runCase = async ({ state, action, requestId, userId, computeShowdown, storedState }) => {
   const queries = [];
-  const storedState = { version: 3, value: JSON.stringify(state) };
-  const handler = makeHandler(queries, storedState, userId, { computeShowdown });
+  const stored = storedState || { version: 3, value: JSON.stringify(state) };
+  const handler = makeHandler(queries, stored, userId, { computeShowdown });
   const response = await handler({
     httpMethod: "POST",
     headers: { origin: "https://example.test", authorization: "Bearer token" },
     body: JSON.stringify({ tableId, requestId, action }),
   });
-  return { response, queries, storedState };
+  return { response, queries, storedState: stored };
 };
 
 {
@@ -186,4 +186,122 @@ const runCase = async ({ state, action, requestId, userId, computeShowdown }) =>
   const updatedState = JSON.parse(updateCall.params?.[1] || "{}");
   assert.equal(updatedState.pot, 0);
   assert.ok(updatedState.showdown);
+}
+
+{
+  const storedState = { version: 7, value: JSON.stringify(baseState) };
+  const first = await runCase({
+    state: baseState,
+    action: { type: "FOLD" },
+    requestId: "req-fold-win",
+    userId: "user-2",
+    storedState,
+  });
+  assert.equal(first.response.statusCode, 200);
+  const firstPayload = JSON.parse(first.response.body);
+  const storedAfterFirst = storedState.value;
+  const second = await runCase({
+    state: JSON.parse(storedState.value),
+    action: { type: "FOLD" },
+    requestId: "req-fold-win",
+    userId: "user-2",
+    storedState,
+  });
+  assert.equal(second.response.statusCode, 409);
+  assert.equal(storedState.value, storedAfterFirst);
+  const updateCalls = second.queries.filter((entry) => entry.query.toLowerCase().includes("update public.poker_state"));
+  assert.equal(updateCalls.length, 0);
+}
+
+{
+  const riverState = {
+    ...baseState,
+    pot: 20,
+    turnUserId: "user-1",
+    actedThisRoundByUserId: { "user-1": false, "user-2": true },
+    foldedByUserId: { "user-1": false, "user-2": false },
+  };
+  const storedState = { version: 9, value: JSON.stringify(riverState) };
+  const computeShowdown = () => ({ winners: ["user-2"] });
+  const first = await runCase({
+    state: riverState,
+    action: { type: "CHECK" },
+    requestId: "req-river-showdown",
+    userId: "user-1",
+    computeShowdown,
+    storedState,
+  });
+  assert.equal(first.response.statusCode, 200);
+  const firstPayload = JSON.parse(first.response.body);
+  const storedAfterFirst = storedState.value;
+  const second = await runCase({
+    state: JSON.parse(storedState.value),
+    action: { type: "CHECK" },
+    requestId: "req-river-showdown",
+    userId: "user-1",
+    computeShowdown,
+    storedState,
+  });
+  assert.equal(second.response.statusCode, 200);
+  const secondPayload = JSON.parse(second.response.body);
+  assert.equal(secondPayload.replayed, true);
+  assert.deepEqual(secondPayload.state.state.stacks, firstPayload.state.state.stacks);
+  assert.equal(secondPayload.state.state.pot, 0);
+  const updateCalls = second.queries.filter((entry) => entry.query.toLowerCase().includes("update public.poker_state"));
+  assert.equal(updateCalls.length, 0);
+}
+
+{
+  const incompleteState = {
+    ...baseState,
+    phase: "TURN",
+    pot: 10,
+    community: deriveCommunityCards({ handSeed, seatUserIdsInOrder: seatOrder, communityDealt: 4 }),
+    communityDealt: 4,
+    turnUserId: "user-1",
+    foldedByUserId: { "user-1": false, "user-2": true },
+    actedThisRoundByUserId: { "user-1": false, "user-2": true },
+  };
+  const result = await runCase({
+    state: incompleteState,
+    action: { type: "CHECK" },
+    requestId: "req-incomplete-community",
+    userId: "user-1",
+  });
+  assert.equal(result.response.statusCode, 409);
+  assert.equal(JSON.parse(result.response.body).error, "state_invalid");
+}
+
+{
+  const mismatchState = {
+    ...baseState,
+    showdown: { handId: "other-hand", winners: ["user-1"], reason: "computed" },
+    pot: 0,
+    turnUserId: "user-2",
+  };
+  const result = await runCase({
+    state: mismatchState,
+    action: { type: "CHECK" },
+    requestId: "req-showdown-mismatch",
+    userId: "user-2",
+  });
+  assert.equal(result.response.statusCode, 409);
+  assert.equal(JSON.parse(result.response.body).error, "state_invalid");
+}
+
+{
+  const potState = {
+    ...baseState,
+    showdown: { handId: baseState.handId, winners: ["user-1"], reason: "computed" },
+    pot: 5,
+    turnUserId: "user-2",
+  };
+  const result = await runCase({
+    state: potState,
+    action: { type: "CHECK" },
+    requestId: "req-showdown-pot",
+    userId: "user-2",
+  });
+  assert.equal(result.response.statusCode, 409);
+  assert.equal(JSON.parse(result.response.body).error, "state_invalid");
 }

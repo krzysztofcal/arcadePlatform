@@ -293,15 +293,6 @@ export async function handler(event) {
         });
         throw makeError(409, "state_invalid");
       };
-      if (!isActionPhase(currentState.phase) || !currentState.turnUserId) {
-        klog("poker_act_rejected", {
-          tableId,
-          userId: auth.userId,
-          reason: "state_invalid",
-          phase: currentState?.phase || null,
-        });
-        throw makeError(409, "state_invalid");
-      }
       if (typeof currentState.handId !== "string" || !currentState.handId.trim()) {
         klog("poker_act_rejected", {
           tableId,
@@ -338,16 +329,6 @@ export async function handler(event) {
         });
         throw makeError(409, "state_invalid");
       }
-      if (currentState.foldedByUserId?.[auth.userId]) {
-        klog("poker_act_rejected", {
-          tableId,
-          userId: auth.userId,
-          reason: "folded_player",
-          phase: currentState.phase,
-        });
-        throw makeError(403, "not_allowed");
-      }
-
       const activeSeatRows = await tx.unsafe(
         "select user_id from public.poker_seats where table_id = $1 and status = 'ACTIVE' order by seat_no asc;",
         [tableId]
@@ -374,6 +355,67 @@ export async function handler(event) {
           throw makeError(409, "state_invalid");
         }
         throw error;
+      }
+
+      const currentHandId = typeof currentState.handId === "string" ? currentState.handId.trim() : "";
+      const currentShowdownHandId =
+        typeof currentState.showdown?.handId === "string" && currentState.showdown.handId.trim()
+          ? currentState.showdown.handId.trim()
+          : "";
+      if (currentState.showdown && currentHandId) {
+        if (!currentShowdownHandId || currentShowdownHandId !== currentHandId) {
+          rejectStateInvalid("showdown_hand_mismatch");
+        }
+        const potValue = Number(currentState.pot ?? 0);
+        if (!Number.isFinite(potValue) || potValue < 0 || Math.floor(potValue) !== potValue) {
+          rejectStateInvalid("showdown_invalid_pot", { pot: currentState.pot ?? null });
+        }
+        if (potValue > 0) {
+          rejectStateInvalid("showdown_pot_not_zero", { pot: currentState.pot ?? null });
+        }
+      }
+
+      const lastRequestId = Object.prototype.hasOwnProperty.call(lastByUserId, auth.userId)
+        ? lastByUserId[auth.userId]
+        : null;
+      if (lastRequestId != null && requestId != null && String(lastRequestId) === String(requestId)) {
+        const version = Number(stateRow.version);
+        if (!Number.isFinite(version)) {
+          klog("poker_act_rejected", {
+            tableId,
+            userId: auth.userId,
+            reason: "state_invalid",
+            phase: currentState.phase,
+          });
+          throw makeError(409, "state_invalid");
+        }
+        return {
+          tableId,
+          version,
+          state: withoutPrivateState(currentState),
+          myHoleCards: holeCardsByUserId[auth.userId] || [],
+          events: [],
+          replayed: true,
+        };
+      }
+
+      if (!isActionPhase(currentState.phase) || !currentState.turnUserId) {
+        klog("poker_act_rejected", {
+          tableId,
+          userId: auth.userId,
+          reason: "state_invalid",
+          phase: currentState?.phase || null,
+        });
+        throw makeError(409, "state_invalid");
+      }
+      if (currentState.foldedByUserId?.[auth.userId]) {
+        klog("poker_act_rejected", {
+          tableId,
+          userId: auth.userId,
+          reason: "folded_player",
+          phase: currentState.phase,
+        });
+        throw makeError(403, "not_allowed");
       }
 
       if (seatUserIdsInOrder.length <= 0) {
@@ -469,27 +511,6 @@ export async function handler(event) {
         };
       }
 
-      if (lastByUserId[auth.userId] === requestId) {
-        const version = Number(stateRow.version);
-        if (!Number.isFinite(version)) {
-          klog("poker_act_rejected", {
-            tableId,
-            userId: auth.userId,
-            reason: "state_invalid",
-            phase: currentState.phase,
-          });
-          throw makeError(409, "state_invalid");
-        }
-        return {
-          tableId,
-          version,
-          state: withoutPrivateState(currentState),
-          myHoleCards: holeCardsByUserId[auth.userId] || [],
-          events: [],
-          replayed: true,
-        };
-      }
-
       if (currentState.turnUserId !== auth.userId) {
         klog("poker_act_rejected", {
           tableId,
@@ -577,15 +598,27 @@ export async function handler(event) {
         loops += 1;
       }
 
-      const showdownAlreadyMaterialized =
-        nextState.showdown &&
-        (nextState.showdown.handId === nextState.handId || !nextState.showdown.handId);
+      const handId = typeof nextState.handId === "string" ? nextState.handId.trim() : "";
+      const showdownHandId =
+        typeof nextState.showdown?.handId === "string" && nextState.showdown.handId.trim() ? nextState.showdown.handId.trim() : "";
+      const showdownAlreadyMaterialized = !!handId && !!showdownHandId && showdownHandId === handId;
+      if (nextState.showdown && handId && (!showdownHandId || showdownHandId !== handId)) {
+        rejectStateInvalid("showdown_hand_mismatch");
+      }
+      if (nextState.showdown && showdownAlreadyMaterialized) {
+        const potValue = Number(nextState.pot ?? 0);
+        if (!Number.isFinite(potValue) || potValue < 0 || Math.floor(potValue) !== potValue) {
+          rejectStateInvalid("showdown_invalid_pot", { pot: nextState.pot ?? null });
+        }
+        if (potValue > 0) {
+          rejectStateInvalid("showdown_pot_not_zero", { pot: nextState.pot ?? null });
+        }
+      }
       const eligibleUserIds = seatUserIdsInOrder.filter(
         (userId) => typeof userId === "string" && !nextState.foldedByUserId?.[userId]
       );
       const shouldMaterializeShowdown =
-        !showdownAlreadyMaterialized &&
-        (eligibleUserIds.length <= 1 || nextState.phase === "SHOWDOWN" || nextState.phase === "HAND_DONE");
+        !showdownAlreadyMaterialized && (eligibleUserIds.length <= 1 || nextState.phase === "SHOWDOWN");
 
       if (shouldMaterializeShowdown) {
         let materialized;
@@ -609,8 +642,23 @@ export async function handler(event) {
           if (reason === "showdown_invalid_community") {
             rejectStateInvalid("showdown_invalid_community", { communityLen: nextState.community?.length ?? null });
           }
-          if (reason === "showdown_community_derive_failed") {
-            rejectStateInvalid("showdown_community_derive_failed");
+          if (reason === "showdown_incomplete_community") {
+            rejectStateInvalid("showdown_incomplete_community", { communityLen: nextState.community?.length ?? null });
+          }
+          if (reason === "showdown_hand_mismatch") {
+            rejectStateInvalid("showdown_hand_mismatch");
+          }
+          if (reason === "showdown_pot_not_zero") {
+            rejectStateInvalid("showdown_pot_not_zero", { pot: nextState.pot ?? null });
+          }
+          if (reason === "showdown_missing_hand_id") {
+            rejectStateInvalid("showdown_missing_hand_id");
+          }
+          if (reason === "showdown_invalid_seats") {
+            rejectStateInvalid("showdown_invalid_seats");
+          }
+          if (reason === "showdown_invalid_stack") {
+            rejectStateInvalid("showdown_invalid_stack");
           }
           rejectStateInvalid("showdown_failed", { reason });
         }
