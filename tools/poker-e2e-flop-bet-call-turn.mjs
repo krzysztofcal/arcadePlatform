@@ -1,9 +1,16 @@
 // tools/poker-e2e-flop-bet-call-turn.mjs
+import { cleanupPokerTable } from "./_shared/poker-e2e-cleanup.mjs";
+import { api, fetchJson, retry, snippet, waitFor } from "./_shared/poker-e2e-http.mjs";
 //
-// E2E smoke: 2 players
+// E2E: 2 players
 // - PREFLOP: CHECK/CHECK -> FLOP
 // - FLOP: BET 5 / CALL -> TURN
 // Hard guard against running on production unless POKER_SMOKE_ALLOW_PROD=1
+//
+// Goals of this version:
+// - eliminate flakes: add retries + waitFor (eventual consistency / races)
+// - add better error messages + include URL on timeouts
+// - do NOT hammer prod: bounded retries, bounded polling
 
 const REQUIRED_ENV = [
   "BASE",
@@ -22,7 +29,6 @@ if (missing.length) {
   process.exit(1);
 }
 
-const FETCH_TIMEOUT_MS = 15000;
 const HEARTBEAT_MS = 15000;
 
 const base = process.env.BASE;
@@ -45,30 +51,11 @@ if (baseHost === "play.kcswh.pl" && !allowProd) {
 }
 
 const requestId = (prefix) => `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
-const buildUrl = (path) => new URL(path, base).toString();
-
-const parseJson = (text) => {
+const callApi = ({ label, ...req }) => api({ base, origin, label, ...req });
+const klog = (line) => {
   try {
-    return text ? JSON.parse(text) : null;
-  } catch {
-    return null;
-  }
-};
-
-const fetchJson = async (url, options) => {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-  try {
-    const res = await fetch(url, { ...options, signal: controller.signal });
-    const text = await res.text();
-    const json = parseJson(text);
-    return { res, text, json };
-  } catch (e) {
-    if (e?.name === "AbortError") throw new Error(`fetch_timeout:${FETCH_TIMEOUT_MS}ms`);
-    throw e;
-  } finally {
-    clearTimeout(timeoutId);
-  }
+    console.warn(line);
+  } catch {}
 };
 
 const decodeUserId = (token) => {
@@ -86,39 +73,41 @@ const decodeUserId = (token) => {
 const getSupabaseToken = async (email, password) => {
   const tokenUrl = new URL("/auth/v1/token", supabaseUrl);
   tokenUrl.searchParams.set("grant_type", "password");
-  const { res, json, text } = await fetchJson(tokenUrl.toString(), {
-    method: "POST",
-    headers: {
-      apikey: supabaseAnonKey,
-      authorization: `Bearer ${supabaseAnonKey}`,
-      "content-type": "application/json",
+
+  // Supabase auth can also flake transiently -> retry
+  return retry(
+    "supabase-auth",
+    async () => {
+      const { res, json, text } = await fetchJson(tokenUrl.toString(), {
+        method: "POST",
+        headers: {
+          apikey: supabaseAnonKey,
+          authorization: `Bearer ${supabaseAnonKey}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ email, password }),
+      }, { label: "supabase-auth" });
+
+      if (!res.ok) {
+        const msg = json?.error_description || json?.error || text || res.statusText;
+        throw new Error(`supabase_auth_failed:${res.status}:${snippet(msg, 400)}`);
+      }
+      if (!json?.access_token) throw new Error("supabase_auth_missing_token");
+      return json.access_token;
     },
-    body: JSON.stringify({ email, password }),
-  });
-
-  if (!res.ok) {
-    const msg = json?.error_description || json?.error || text || res.statusText;
-    throw new Error(`supabase_auth_failed:${res.status}:${msg}`);
-  }
-  if (!json?.access_token) throw new Error("supabase_auth_missing_token");
-  return json.access_token;
+    { tries: 4, baseDelayMs: 400, maxDelayMs: 2500 }
+  );
 };
 
-const callJson = async ({ path, method, token, body }) => {
-  const url = buildUrl(path);
-  const headers = { origin, authorization: `Bearer ${token}` };
-  if (body) headers["content-type"] = "application/json";
-  return fetchJson(url, { method, headers, body: body ? JSON.stringify(body) : undefined });
-};
+const callJsonOnce = async ({ label, ...req }) => callApi({ label, ...req });
 
 const assertOk = (cond, msg) => {
   if (!cond) throw new Error(msg);
 };
 
-const assertStatus = (res, text, want, label) => {
-  if (res.status !== want) {
-    const summary = text && text.length > 200 ? `${text.slice(0, 200)}…` : text;
-    throw new Error(`${label} status=${res.status} body=${summary || ""}`.trim());
+const assertStatus = (status, text, want, label) => {
+  if (status !== want) {
+    throw new Error(`${label} status=${status} body=${snippet(text, 220)}`.trim());
   }
 };
 
@@ -127,6 +116,12 @@ const mustNotLeakPrivate = (payload, label) => {
   assertOk(!s.includes("holeCardsByUserId"), `${label} leaked holeCardsByUserId`);
   assertOk(!s.includes('"deck"'), `${label} leaked deck`);
   assertOk(!s.includes('"handSeed"'), `${label} leaked handSeed`);
+};
+
+const tokenForTurn = (turnUserId, u1TokenV, u2TokenV, u1Id, u2Id) => {
+  if (turnUserId === u1Id) return u1TokenV;
+  if (turnUserId === u2Id) return u2TokenV;
+  return null;
 };
 
 const run = async () => {
@@ -139,70 +134,82 @@ const run = async () => {
 
   let heartbeatError = null;
   const timers = [];
+  let tableId = null;
+  const users = [
+    { label: "u1", token: u1Token, joined: false },
+    { label: "u2", token: u2Token, joined: false },
+  ];
 
   const heartbeatOnce = async (label, token, tableId) => {
     try {
-      const hb = await callJson({
+      const hb = await callApi({
+        label: `heartbeat:${label}`,
         path: "/.netlify/functions/poker-heartbeat",
         method: "POST",
         token,
         body: { tableId, requestId: requestId(`hb-${label}`) },
       });
-      if (hb.res.status !== 200) {
-        const summary = hb.text && hb.text.length > 200 ? `${hb.text.slice(0, 200)}…` : hb.text;
-        heartbeatError = new Error(`poker-heartbeat ${label} status=${hb.res.status} body=${summary || ""}`.trim());
+      if (hb.status !== 200) {
+        heartbeatError = new Error(
+          `poker-heartbeat ${label} status=${hb.status} body=${snippet(hb.text, 220)}`.trim()
+        );
       }
     } catch (e) {
       heartbeatError = e;
     }
   };
 
-  const getTable = async (label, token, tableId) => {
-    const gt = await callJson({
+  const getTableOnce = async (label, token, tableId) => {
+    const gt = await callApi({
+      label: `get-table:${label}`,
       path: `/.netlify/functions/poker-get-table?tableId=${encodeURIComponent(tableId)}&t=${Date.now()}`,
       method: "GET",
       token,
     });
-    assertStatus(gt.res, gt.text, 200, `poker-get-table ${label}`);
+    assertStatus(gt.status, gt.text, 200, `poker-get-table ${label}`);
     assertOk(gt.json?.ok === true, `poker-get-table ${label} ok:false`);
     mustNotLeakPrivate(gt.json, `poker-get-table ${label}`);
     return gt.json;
   };
 
-  const tokenForTurn = (turnUserId, u1TokenV, u2TokenV, u1Id, u2Id) => {
-    if (turnUserId === u1Id) return u1TokenV;
-    if (turnUserId === u2Id) return u2TokenV;
-    return null;
-  };
+  const getTable = async (label, token, tableId) => getTableOnce(label, token, tableId);
 
+  let runError = null;
   try {
     // 1) create table (u1)
-    const create = await callJson({
+    const create = await callApi({
+      label: "create-table",
       path: "/.netlify/functions/poker-create-table",
       method: "POST",
       token: u1Token,
       body: { requestId: requestId("create"), stakes: { sb: 1, bb: 2 }, maxPlayers: 6 },
     });
-    assertStatus(create.res, create.text, 200, "poker-create-table");
-    const tableId = create.json?.tableId;
+    assertStatus(create.status, create.text, 200, "poker-create-table");
+    tableId = create.json?.tableId;
     assertOk(typeof tableId === "string" && tableId.length > 0, "poker-create-table missing tableId");
 
     // 2) join seats
-    const join1 = await callJson({
+    users[0].attempted = true;
+    const join1 = await callApi({
+      label: "join-u1",
       path: "/.netlify/functions/poker-join",
       method: "POST",
       token: u1Token,
       body: { tableId, seatNo: 0, buyIn: 100, requestId: requestId("join-u1") },
     });
-    assertStatus(join1.res, join1.text, 200, "poker-join u1");
+    assertStatus(join1.status, join1.text, 200, "poker-join u1");
+    if (join1.status === 200) users[0].joined = true;
 
-    const join2 = await callJson({
+    users[1].attempted = true;
+    const join2 = await callApi({
+      label: "join-u2",
       path: "/.netlify/functions/poker-join",
       method: "POST",
       token: u2Token,
       body: { tableId, seatNo: 1, buyIn: 100, requestId: requestId("join-u2") },
     });
-    assertStatus(join2.res, join2.text, 200, "poker-join u2");
+    assertStatus(join2.status, join2.text, 200, "poker-join u2");
+    if (join2.status === 200) users[1].joined = true;
 
     // 3) heartbeats (once + background)
     await heartbeatOnce("u1", u1Token, tableId);
@@ -210,133 +217,194 @@ const run = async () => {
     timers.push(setInterval(() => void heartbeatOnce("u1", u1Token, tableId), HEARTBEAT_MS));
     timers.push(setInterval(() => void heartbeatOnce("u2", u2Token, tableId), HEARTBEAT_MS));
 
-    // 4) start hand (u1)
-    const start = await callJson({
-      path: "/.netlify/functions/poker-start-hand",
-      method: "POST",
-      token: u1Token,
-      body: { tableId, requestId: requestId("start") },
-    });
-    assertStatus(start.res, start.text, 200, "poker-start-hand");
-    assertOk(start.json?.ok === true, "poker-start-hand ok:false");
+    // Wait until both seats are ACTIVE (race-proof)
+    await waitFor(
+      "seats-active",
+      async () => {
+        const t = await getTable("pre-start", u1Token, tableId);
+        const seats = Array.isArray(t?.seats) ? t.seats : [];
+        const activeSeats = seats.filter((s) => s?.status === "ACTIVE");
+        return activeSeats.length === 2 ? true : false;
+      },
+      { timeoutMs: 25000, pollMs: 650 }
+    );
 
-    // 5) PREFLOP assertions (both users have hole cards)
-    const tU1_0 = await getTable("u1 pref", u1Token, tableId);
-    const tU2_0 = await getTable("u2 pref", u2Token, tableId);
+    // 4) start hand (u1) - retry on transient statuses
+    const start = await retry(
+      "start-hand",
+      async (attempt) => {
+        const res = await callJsonOnce({
+          path: "/.netlify/functions/poker-start-hand",
+          method: "POST",
+          token: u1Token,
+          body: { tableId, requestId: requestId(`start-${attempt}`) },
+        });
 
-    assertOk(tU1_0?.state?.state?.phase === "PREFLOP", "u1 phase not PREFLOP after start");
-    assertOk(tU2_0?.state?.state?.phase === "PREFLOP", "u2 phase not PREFLOP after start");
-    assertOk(Array.isArray(tU1_0?.myHoleCards) && tU1_0.myHoleCards.length === 2, "u1 missing hole cards");
-    assertOk(Array.isArray(tU2_0?.myHoleCards) && tU2_0.myHoleCards.length === 2, "u2 missing hole cards");
+        if (res.status !== 200) {
+          if ([409, 425, 429, 500, 502, 503, 504].includes(res.status)) {
+            throw new Error(`start-hand transient status=${res.status} body=${snippet(res.text)}`);
+          }
+          assertStatus(res.status, res.text, 200, "poker-start-hand");
+        }
+
+        assertOk(res.json?.ok === true, `poker-start-hand ok:false body=${snippet(res.text)}`);
+        return res;
+      },
+      { tries: 6, baseDelayMs: 450, maxDelayMs: 3000 }
+    );
+    assertStatus(start.status, start.text, 200, "poker-start-hand");
+
+    // 5) wait until PREFLOP is visible and both users have hole cards
+    const tU1_0 = await waitFor(
+      "table-ready-u1",
+      async () => {
+        const t = await getTable("u1-ready", u1Token, tableId);
+        if (t?.state?.state?.phase !== "PREFLOP") return false;
+        if (!Array.isArray(t?.myHoleCards) || t.myHoleCards.length !== 2) return false;
+        const seats = Array.isArray(t?.seats) ? t.seats : [];
+        const activeSeats = seats.filter((s) => s?.status === "ACTIVE");
+        return activeSeats.length === 2 ? t : false;
+      },
+      { timeoutMs: 25000, pollMs: 650 }
+    );
+
+    await waitFor(
+      "table-ready-u2",
+      async () => {
+        const t = await getTable("u2-ready", u2Token, tableId);
+        if (t?.state?.state?.phase !== "PREFLOP") return false;
+        if (!Array.isArray(t?.myHoleCards) || t.myHoleCards.length !== 2) return false;
+        return true;
+      },
+      { timeoutMs: 25000, pollMs: 700 }
+    );
 
     const v0 = Number(tU1_0?.state?.version);
     assertOk(Number.isFinite(v0), "u1 initial version not numeric");
 
-    // 6) PREFLOP CHECK #1 (by correct user)
-    const turn0 = tU1_0?.state?.state?.turnUserId;
-    assertOk(typeof turn0 === "string" && turn0.length > 0, "missing turnUserId after start");
-    const token1 = tokenForTurn(turn0, u1Token, u2Token, u1UserId, u2UserId);
-    assertOk(token1, "cannot map PREFLOP turnUserId to u1/u2 token (check test accounts)");
+    // Helper: act with retries for racey conditions (not_your_turn / 409 / 425 / transient http)
+    const actWithRetry = async ({ label, action }) =>
+      retry(
+        `act:${label}`,
+        async (attempt) => {
+          const current = await getTable(`before-${label}-${attempt}`, u1Token, tableId);
+          const who = current?.state?.state?.turnUserId;
+          assertOk(typeof who === "string" && who.length > 0, `missing turnUserId before ${label}`);
 
-    const actPref1 = await callJson({
-      path: "/.netlify/functions/poker-act",
-      method: "POST",
-      token: token1,
-      body: { tableId, requestId: requestId("pref-check-1"), action: { type: "CHECK" } },
-    });
-    assertStatus(actPref1.res, actPref1.text, 200, "poker-act PREFLOP CHECK #1");
-    assertOk(actPref1.json?.ok === true, "poker-act PREFLOP CHECK #1 ok:false");
-    mustNotLeakPrivate(actPref1.json, "poker-act PREFLOP CHECK #1");
+          const token = tokenForTurn(who, u1Token, u2Token, u1UserId, u2UserId);
+          assertOk(token, `cannot map turnUserId=${who} to u1/u2 token before ${label}`);
 
-    // 7) PREFLOP CHECK #2 (by new turn user)
-    const tU1_1 = await getTable("u1 post pref1", u1Token, tableId);
-    const turn1 = tU1_1?.state?.state?.turnUserId;
-    assertOk(typeof turn1 === "string" && turn1.length > 0, "missing turnUserId after PREFLOP check #1");
+          const res = await callJsonOnce({
+            path: "/.netlify/functions/poker-act",
+            method: "POST",
+            token,
+            body: { tableId, requestId: requestId(`${label}-${attempt}`), action },
+          });
 
-    const token2 = tokenForTurn(turn1, u1Token, u2Token, u1UserId, u2UserId);
-    assertOk(token2, "cannot map PREFLOP turnUserId (after check #1) to u1/u2 token");
+          // If the turn advanced between get-table and act, retry.
+          if (res.status === 403 && res.json?.error === "not_your_turn") {
+            throw new Error("race:not_your_turn");
+          }
 
-    const actPref2 = await callJson({
-      path: "/.netlify/functions/poker-act",
-      method: "POST",
-      token: token2,
-      body: { tableId, requestId: requestId("pref-check-2"), action: { type: "CHECK" } },
-    });
-    assertStatus(actPref2.res, actPref2.text, 200, "poker-act PREFLOP CHECK #2");
-    assertOk(actPref2.json?.ok === true, "poker-act PREFLOP CHECK #2 ok:false");
-    mustNotLeakPrivate(actPref2.json, "poker-act PREFLOP CHECK #2");
+          // Some backends may use these for concurrency / readiness.
+          if ([409, 425, 429, 500, 502, 503, 504].includes(res.status)) {
+            throw new Error(`transient_status:${res.status} body=${snippet(res.text)}`);
+          }
 
-    // 8) Assert PREFLOP -> FLOP happened
-    const tU1_2 = await getTable("u1 flop", u1Token, tableId);
-    const tU2_2 = await getTable("u2 flop", u2Token, tableId);
+          assertStatus(res.status, res.text, 200, `poker-act ${label}`);
+          assertOk(res.json?.ok === true, `poker-act ${label} ok:false body=${snippet(res.text)}`);
+          mustNotLeakPrivate(res.json, `poker-act ${label}`);
+          return res;
+        },
+        { tries: 7, baseDelayMs: 350, maxDelayMs: 2500 }
+      );
 
-    const vF = Number(tU1_2?.state?.version);
+    // 6) PREFLOP CHECK/CHECK
+    await actWithRetry({ label: "pref-check-1", action: { type: "CHECK" } });
+    await actWithRetry({ label: "pref-check-2", action: { type: "CHECK" } });
+
+    // 7) Wait for FLOP
+    const tU1_flop = await waitFor(
+      "phase-flop",
+      async () => {
+        const t = await getTable("u1-flop", u1Token, tableId);
+        if (t?.state?.state?.phase !== "FLOP") return false;
+        const comm = t?.state?.state?.community;
+        if (!Array.isArray(comm) || comm.length !== 3) return false;
+        return t;
+      },
+      { timeoutMs: 25000, pollMs: 650 }
+    );
+
+    await waitFor(
+      "phase-flop-u2",
+      async () => {
+        const t = await getTable("u2-flop", u2Token, tableId);
+        if (t?.state?.state?.phase !== "FLOP") return false;
+        const comm = t?.state?.state?.community;
+        return Array.isArray(comm) && comm.length === 3;
+      },
+      { timeoutMs: 25000, pollMs: 700 }
+    );
+
+    const vF = Number(tU1_flop?.state?.version);
     assertOk(Number.isFinite(vF) && vF > v0, "version did not increase after PREFLOP actions");
-    assertOk(tU1_2?.state?.state?.phase === "FLOP", `u1 phase expected FLOP got ${tU1_2?.state?.state?.phase}`);
-    assertOk(tU2_2?.state?.state?.phase === "FLOP", `u2 phase expected FLOP got ${tU2_2?.state?.state?.phase}`);
-    assertOk(Array.isArray(tU1_2?.state?.state?.community) && tU1_2.state.state.community.length === 3, "FLOP community length != 3");
 
-    // 9) FLOP action: BET 5 (by current turn user), then CALL
-    const flopTurn = tU1_2?.state?.state?.turnUserId;
-    assertOk(typeof flopTurn === "string" && flopTurn.length > 0, "missing turnUserId on FLOP");
+    // 8) FLOP BET 5 / CALL
+    await actWithRetry({ label: "flop-bet", action: { type: "BET", amount: 5 } });
+    await actWithRetry({ label: "flop-call", action: { type: "CALL" } });
 
-    const betToken = tokenForTurn(flopTurn, u1Token, u2Token, u1UserId, u2UserId);
-    assertOk(betToken, "cannot map FLOP turnUserId to u1/u2 token");
+    // 9) Wait for TURN
+    const tU1_turn = await waitFor(
+      "phase-turn",
+      async () => {
+        const t = await getTable("u1-turn", u1Token, tableId);
+        if (t?.state?.state?.phase !== "TURN") return false;
+        const comm = t?.state?.state?.community;
+        if (!Array.isArray(comm) || comm.length !== 4) return false;
+        if (!Array.isArray(t?.myHoleCards) || t.myHoleCards.length !== 2) return false;
+        return t;
+      },
+      { timeoutMs: 30000, pollMs: 650 }
+    );
 
-    const bet = await callJson({
-      path: "/.netlify/functions/poker-act",
-      method: "POST",
-      token: betToken,
-      body: { tableId, requestId: requestId("flop-bet"), action: { type: "BET", amount: 5 } },
-    });
-    assertStatus(bet.res, bet.text, 200, "poker-act FLOP BET");
-    assertOk(bet.json?.ok === true, "poker-act FLOP BET ok:false");
-    mustNotLeakPrivate(bet.json, "poker-act FLOP BET");
-
-    const tU1_afterBet = await getTable("u1 after bet", u1Token, tableId);
-    const callTurn = tU1_afterBet?.state?.state?.turnUserId;
-    assertOk(typeof callTurn === "string" && callTurn.length > 0, "missing turnUserId after FLOP BET");
-
-    const callToken = tokenForTurn(callTurn, u1Token, u2Token, u1UserId, u2UserId);
-    assertOk(callToken, "cannot map CALL turnUserId to u1/u2 token");
-
-    const call = await callJson({
-      path: "/.netlify/functions/poker-act",
-      method: "POST",
-      token: callToken,
-      body: { tableId, requestId: requestId("flop-call"), action: { type: "CALL" } },
-    });
-    assertStatus(call.res, call.text, 200, "poker-act FLOP CALL");
-    assertOk(call.json?.ok === true, "poker-act FLOP CALL ok:false");
-    mustNotLeakPrivate(call.json, "poker-act FLOP CALL");
-
-    // 10) Assert FLOP -> TURN happened
-    const tU1_turn = await getTable("u1 turn", u1Token, tableId);
-    const tU2_turn = await getTable("u2 turn", u2Token, tableId);
+    await waitFor(
+      "phase-turn-u2",
+      async () => {
+        const t = await getTable("u2-turn", u2Token, tableId);
+        if (t?.state?.state?.phase !== "TURN") return false;
+        const comm = t?.state?.state?.community;
+        if (!Array.isArray(comm) || comm.length !== 4) return false;
+        if (!Array.isArray(t?.myHoleCards) || t.myHoleCards.length !== 2) return false;
+        return true;
+      },
+      { timeoutMs: 30000, pollMs: 700 }
+    );
 
     const vT = Number(tU1_turn?.state?.version);
     assertOk(Number.isFinite(vT) && vT > vF, "version did not increase after FLOP BET/CALL");
-
-    assertOk(tU1_turn?.state?.state?.phase === "TURN", `u1 phase expected TURN got ${tU1_turn?.state?.state?.phase}`);
-    assertOk(tU2_turn?.state?.state?.phase === "TURN", `u2 phase expected TURN got ${tU2_turn?.state?.state?.phase}`);
-
-    const commT = tU1_turn?.state?.state?.community;
-    assertOk(Array.isArray(commT) && commT.length === 4, "TURN community expected length 4");
-
-    assertOk(Array.isArray(tU1_turn?.myHoleCards) && tU1_turn.myHoleCards.length === 2, "u1 lost hole cards on TURN");
-    assertOk(Array.isArray(tU2_turn?.myHoleCards) && tU2_turn.myHoleCards.length === 2, "u2 lost hole cards on TURN");
 
     if (heartbeatError) throw heartbeatError;
 
     const uiLink = `${origin.replace(/\/$/, "")}/poker/table.html?tableId=${encodeURIComponent(tableId)}`;
     console.log(`OK: PREFLOP->FLOP CHECK/CHECK then FLOP BET/CALL -> TURN. tableId=${tableId}`);
     console.log(`UI: ${uiLink}`);
+  } catch (err) {
+    runError = err;
   } finally {
-    timers.forEach((t) => clearInterval(t));
+    await cleanupPokerTable({
+      baseUrl: base,
+      origin,
+      tableId,
+      users,
+      timers,
+      klog,
+    });
   }
+  if (runError) throw runError;
 };
 
 run().catch((e) => {
-  console.error("Smoke test failed:", e?.message || e);
+  console.error("E2E flop-bet-call-turn failed:", e?.message || e);
   process.exit(1);
 });

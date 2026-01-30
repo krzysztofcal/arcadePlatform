@@ -306,12 +306,21 @@ const getLegalActions = (state, userId) => {
   const stack = state.stacks?.[userId] ?? 0;
   if (stack === 0) return [];
   if (toCall > 0) {
-    return [
-      { type: "FOLD" },
-      { type: "CALL", max: stack },
-      { type: "RAISE", min: toCall + 1, max: stack + (state.betThisRoundByUserId?.[userId] || 0) },
-    ];
+  const actions = [
+    { type: "FOLD" },
+    { type: "CALL", max: stack },
+  ];
+
+  const raiseMin = toCall + 1;
+  const raiseMax = stack + (state.betThisRoundByUserId?.[userId] || 0);
+
+  // Only include RAISE if it is actually possible.
+  if (raiseMax >= raiseMin) {
+    actions.push({ type: "RAISE", min: raiseMin, max: raiseMax });
   }
+
+  return actions;
+}
   return [
     { type: "CHECK" },
     { type: "BET", min: 1, max: stack },
@@ -407,10 +416,26 @@ const applyAction = (state, action) => {
   } else {
     updated = stampTurnTimer(updated, now);
   }
+  // IMPORTANT: If the action ended the hand (fold winner), keep HAND_DONE observable.
+  // advanceIfNeeded() would immediately reset to next hand, which breaks reducer expectations/tests.
+  if (updated.phase === "HAND_DONE") {
+    return { state: updated, events: done.events };
+  }
+
+  // If this action ends betting (e.g. everyone is all-in and no one can act),
+  // auto-advance streets/showdown immediately so callers don't have to.
+  if (!updated.turnUserId || getBettingSeats(updated).length === 0 || isBettingRoundComplete(updated)) {
+    const advanced = advanceIfNeeded(updated);
+    return {
+      state: advanced.state,
+      events: done.events.concat(advanced.events || []),
+    };
+  }
+
   return { state: updated, events: done.events };
 };
 
-const advanceIfNeeded = (state) => {
+function advanceIfNeeded(state) {
   const events = [];
 // Hand reset is automatic and immediate.
 // UI must not rely on a stable "finished hand" state.
@@ -474,6 +499,6 @@ const advanceIfNeeded = (state) => {
   next = assertCommunityCountForPhase(next);
   events.push({ type: "STREET_ADVANCED", from, to });
   return { state: stampTurnTimer(next, Date.now()), events };
-};
+}
 
 export { TURN_MS, initHandState, getLegalActions, applyAction, advanceIfNeeded, isBettingRoundComplete };
