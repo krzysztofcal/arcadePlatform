@@ -123,6 +123,7 @@ async function main() {
     console.log("tableId=", tableId);
 
     // 2) join seat 0 (user1) + seat 1 (user2)
+    users[0].attempted = true;
     const join1 = await apiCall(
       "POST",
       "/.netlify/functions/poker-join",
@@ -132,8 +133,9 @@ async function main() {
     );
     console.log("join1:", join1.status, join1.json || join1.text);
     assertStatus(join1.status, join1.text, 200, "join-u1");
-    users[0].joined = true;
+    if (join1.status === 200) users[0].joined = true;
 
+    users[1].attempted = true;
     const join2 = await apiCall(
       "POST",
       "/.netlify/functions/poker-join",
@@ -143,7 +145,7 @@ async function main() {
     );
     console.log("join2:", join2.status, join2.json || join2.text);
     assertStatus(join2.status, join2.text, 200, "join-u2");
-    users[1].joined = true;
+    if (join2.status === 200) users[1].joined = true;
 
     // 3) heartbeats (once + background)
     await heartbeatOnce("u1", t1);

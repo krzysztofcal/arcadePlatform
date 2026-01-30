@@ -137,6 +137,7 @@ const assertStatus = (status, text, want, label) => {
     tableId = create.json.tableId;
 
     // join
+    users[0].attempted = true;
     const join1 = await callApi({
       label: "join-u1",
       path: "/.netlify/functions/poker-join",
@@ -145,6 +146,7 @@ const assertStatus = (status, text, want, label) => {
       body: { tableId, seatNo: 0, buyIn: 100, requestId: requestId("join1") },
     });
     users[0].joined = join1.status === 200;
+    users[1].attempted = true;
     const join2 = await callApi({
       label: "join-u2",
       path: "/.netlify/functions/poker-join",

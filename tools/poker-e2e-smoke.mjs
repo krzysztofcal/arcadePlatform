@@ -144,6 +144,7 @@ const run = async () => {
     tableId = create.json?.tableId;
     assertOk(typeof tableId === "string" && tableId.length > 0, "poker-create-table missing tableId");
 
+    users[0].attempted = true;
     const joinU1 = await callApi({
       label: "join-u1",
       path: "/.netlify/functions/poker-join",
@@ -152,8 +153,9 @@ const run = async () => {
       body: { tableId, seatNo: 0, buyIn: 100, requestId: requestId("join-u1") },
     });
     assertResponse(joinU1.status, joinU1.text, 200, "poker-join u1");
-    users[0].joined = true;
+    if (joinU1.status === 200) users[0].joined = true;
 
+    users[1].attempted = true;
     const joinU2 = await callApi({
       label: "join-u2",
       path: "/.netlify/functions/poker-join",
@@ -162,7 +164,7 @@ const run = async () => {
       body: { tableId, seatNo: 1, buyIn: 100, requestId: requestId("join-u2") },
     });
     assertResponse(joinU2.status, joinU2.text, 200, "poker-join u2");
-    users[1].joined = true;
+    if (joinU2.status === 200) users[1].joined = true;
 
     // Start heartbeat loops (keeps seats alive)
     heartbeatTimers.push(setInterval(() => void heartbeatOnce("u1", u1Token, tableId), HEARTBEAT_MS));

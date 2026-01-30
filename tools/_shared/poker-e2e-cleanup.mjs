@@ -6,6 +6,19 @@ const fallbackKlog = (line) => {
   } catch {}
 };
 
+const withTimeout = (promise, ms, label) =>
+  Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      const id = setTimeout(() => {
+        clearTimeout(id);
+        const err = new Error(`timeout:${label || "leave"}:${ms}ms`);
+        err.code = "TIMEOUT";
+        reject(err);
+      }, ms);
+    }),
+  ]);
+
 const requestId = (prefix) => `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
 
 const apiLeave = async ({ baseUrl, origin, token, tableId, label, klog }) => {
@@ -39,21 +52,29 @@ const cleanupPokerTable = async ({ baseUrl, origin, tableId, users, timers, klog
 
   if (!tableId) return;
 
-  for (const user of list) {
-    if (!user?.joined || !user?.token) continue;
-    try {
-      await apiLeave({
-        baseUrl,
-        origin,
-        token: user.token,
-        tableId,
-        label: user.label || "user",
-        klog: log,
+  const leaveTasks = list
+    .filter((user) => user?.token && (user?.attempted || user?.joined))
+    .map((user) => {
+      const label = user?.label || "user";
+      return withTimeout(
+        apiLeave({
+          baseUrl,
+          origin,
+          token: user.token,
+          tableId,
+          label,
+          klog: log,
+        }),
+        8000,
+        `leave:${label}`
+      ).catch((err) => {
+        const reason = err?.code === "TIMEOUT" ? "timeout" : "failed";
+        log(`[cleanup] poker-leave ${label} ${reason}: ${err?.message || err}`);
+        return null;
       });
-    } catch (err) {
-      log(`[cleanup] poker-leave ${user?.label || "user"} failed: ${err?.message || err}`);
-    }
-  }
+    });
+
+  await Promise.allSettled(leaveTasks);
 };
 
 export { apiLeave, cleanupPokerTable };

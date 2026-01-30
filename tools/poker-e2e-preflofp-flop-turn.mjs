@@ -160,6 +160,7 @@ const run = async () => {
     assertOk(typeof tableId === "string" && tableId.length > 0, "poker-create-table missing tableId");
 
     // 2) join seats
+    users[0].attempted = true;
     const join1 = await callApi({
       label: "join-u1",
       path: "/.netlify/functions/poker-join",
@@ -168,8 +169,9 @@ const run = async () => {
       body: { tableId, seatNo: 0, buyIn: 100, requestId: requestId("join-u1") },
     });
     assertStatus(join1.status, join1.text, 200, "poker-join u1");
-    users[0].joined = true;
+    if (join1.status === 200) users[0].joined = true;
 
+    users[1].attempted = true;
     const join2 = await callApi({
       label: "join-u2",
       path: "/.netlify/functions/poker-join",
@@ -178,7 +180,7 @@ const run = async () => {
       body: { tableId, seatNo: 1, buyIn: 100, requestId: requestId("join-u2") },
     });
     assertStatus(join2.status, join2.text, 200, "poker-join u2");
-    users[1].joined = true;
+    if (join2.status === 200) users[1].joined = true;
 
     // 3) heartbeats
     await heartbeatOnce("u1", u1Token, tableId);
