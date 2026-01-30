@@ -5,6 +5,7 @@ import { deriveCommunityCards, deriveRemainingDeck } from "./_shared/poker-deal-
 import { advanceIfNeeded, applyAction } from "./_shared/poker-reducer.mjs";
 import { normalizeRequestId } from "./_shared/poker-request-id.mjs";
 import { awardPotsAtShowdown } from "./_shared/poker-payout.mjs";
+import { materializeShowdownAndPayout } from "./_shared/poker-materialize-showdown.mjs";
 import { computeShowdown } from "./_shared/poker-showdown.mjs";
 import { isStateStorageValid, normalizeJsonState, withoutPrivateState } from "./_shared/poker-state-utils.mjs";
 import { maybeApplyTurnTimeout } from "./_shared/poker-turn-timeout.mjs";
@@ -556,6 +557,7 @@ export async function handler(event) {
       let loops = 0;
       const advanceEvents = [];
       while (loops < ADVANCE_LIMIT) {
+        if (nextState.phase === "HAND_DONE") break;
         const prevPhase = nextState.phase;
         let advanced;
         try {
@@ -575,41 +577,26 @@ export async function handler(event) {
         loops += 1;
       }
 
-      if (nextState.phase === "SHOWDOWN" && !nextState.showdown) {
-        const showdownUserIds = seatUserIdsInOrder.filter(
-          (userId) => typeof userId === "string" && !nextState.foldedByUserId?.[userId]
-        );
-        if (showdownUserIds.length === 0) {
-          rejectStateInvalid("showdown_no_players");
-        }
+      const showdownAlreadyMaterialized =
+        nextState.showdown &&
+        (nextState.showdown.handId === nextState.handId || !nextState.showdown.handId);
+      const eligibleUserIds = seatUserIdsInOrder.filter(
+        (userId) => typeof userId === "string" && !nextState.foldedByUserId?.[userId]
+      );
+      const shouldMaterializeShowdown =
+        !showdownAlreadyMaterialized &&
+        (eligibleUserIds.length <= 1 || nextState.phase === "SHOWDOWN" || nextState.phase === "HAND_DONE");
 
-        let showdownCommunity = Array.isArray(nextState.community) ? nextState.community.slice() : [];
-        if (showdownCommunity.length > 5) {
-          rejectStateInvalid("showdown_invalid_community", { communityLen: showdownCommunity.length });
-        }
-        if (showdownCommunity.length < 5) {
-          try {
-            showdownCommunity = deriveCommunityCards({
-              handSeed: currentState.handSeed,
-              seatUserIdsInOrder,
-              communityDealt: 5,
-            });
-          } catch {
-            rejectStateInvalid("showdown_community_derive_failed");
-          }
-        }
-
-        let awardResult;
+      if (shouldMaterializeShowdown) {
+        let materialized;
         try {
-          awardResult = awardPotsAtShowdown({
-            state: {
-              ...nextState,
-              community: showdownCommunity,
-              communityDealt: showdownCommunity.length,
-              holeCardsByUserId,
-            },
+          materialized = materializeShowdownAndPayout({
+            state: nextState,
             seatUserIdsInOrder,
+            holeCardsByUserId,
             computeShowdown,
+            awardPotsAtShowdown,
+            klog,
           });
         } catch (error) {
           const reason = error?.message || null;
@@ -619,10 +606,15 @@ export async function handler(event) {
           if (reason === "showdown_invalid_pot") {
             rejectStateInvalid("showdown_invalid_pot", { pot: nextState.pot ?? null });
           }
+          if (reason === "showdown_invalid_community") {
+            rejectStateInvalid("showdown_invalid_community", { communityLen: nextState.community?.length ?? null });
+          }
+          if (reason === "showdown_community_derive_failed") {
+            rejectStateInvalid("showdown_community_derive_failed");
+          }
           rejectStateInvalid("showdown_failed", { reason });
         }
-
-        nextState = awardResult.nextState;
+        nextState = materialized.nextState;
       }
 
       const { holeCardsByUserId: _ignoredHoleCards, deck: _ignoredDeck, ...stateBase } = nextState;

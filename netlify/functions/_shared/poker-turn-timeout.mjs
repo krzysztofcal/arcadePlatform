@@ -1,6 +1,6 @@
-import { deriveCommunityCards } from "./poker-deal-deterministic.mjs";
 import { advanceIfNeeded, applyAction } from "./poker-reducer.mjs";
 import { awardPotsAtShowdown } from "./poker-payout.mjs";
+import { materializeShowdownAndPayout } from "./poker-materialize-showdown.mjs";
 import { computeShowdown } from "./poker-showdown.mjs";
 import { isPlainObject } from "./poker-state-utils.mjs";
 
@@ -31,39 +31,6 @@ const getTimeoutAction = (state) => {
   return { type: toCall > 0 ? "FOLD" : "CHECK", userId: state.turnUserId };
 };
 
-const ensureShowdown = ({ state, seatUserIdsInOrder }) => {
-  if (state.phase !== "SHOWDOWN" || state.showdown) return state;
-  const showdownUserIds = seatUserIdsInOrder.filter(
-    (userId) => typeof userId === "string" && !state.foldedByUserId?.[userId]
-  );
-  if (showdownUserIds.length === 0) {
-    throw new Error("showdown_no_players");
-  }
-
-  let showdownCommunity = Array.isArray(state.community) ? state.community.slice() : [];
-  if (showdownCommunity.length > 5) {
-    throw new Error("showdown_invalid_community");
-  }
-  if (showdownCommunity.length < 5) {
-    showdownCommunity = deriveCommunityCards({
-      handSeed: state.handSeed,
-      seatUserIdsInOrder,
-      communityDealt: 5,
-    });
-  }
-
-  const { nextState } = awardPotsAtShowdown({
-    state: {
-      ...state,
-      community: showdownCommunity,
-      communityDealt: showdownCommunity.length,
-    },
-    seatUserIdsInOrder,
-    computeShowdown,
-  });
-  return nextState;
-};
-
 const maybeApplyTurnTimeout = ({ tableId, state, privateState, nowMs }) => {
   if (!state || typeof state !== "object" || Array.isArray(state)) return { applied: false, state };
   if (!isActionPhase(state.phase) || !state.turnUserId) return { applied: false, state };
@@ -87,6 +54,7 @@ const maybeApplyTurnTimeout = ({ tableId, state, privateState, nowMs }) => {
   const events = Array.isArray(applied.events) ? applied.events.slice() : [];
   let loops = 0;
   while (loops < ADVANCE_LIMIT) {
+    if (nextState.phase === "HAND_DONE") break;
     const prevPhase = nextState.phase;
     const advanced = advanceIfNeeded(nextState);
     nextState = advanced.state;
@@ -98,12 +66,28 @@ const maybeApplyTurnTimeout = ({ tableId, state, privateState, nowMs }) => {
     loops += 1;
   }
 
-  if (nextState.phase === "SHOWDOWN" && !nextState.showdown) {
-    const seatUserIdsInOrder = normalizeSeatOrderFromState(nextState.seats);
-    if (seatUserIdsInOrder.length === 0) {
-      throw new Error("showdown_no_players");
-    }
-    nextState = ensureShowdown({ state: nextState, seatUserIdsInOrder });
+  const seatUserIdsInOrder = normalizeSeatOrderFromState(nextState.seats);
+  if (seatUserIdsInOrder.length === 0) {
+    throw new Error("showdown_no_players");
+  }
+  const showdownAlreadyMaterialized =
+    nextState.showdown && (nextState.showdown.handId === nextState.handId || !nextState.showdown.handId);
+  const eligibleUserIds = seatUserIdsInOrder.filter(
+    (userId) => typeof userId === "string" && !nextState.foldedByUserId?.[userId]
+  );
+  const shouldMaterializeShowdown =
+    !showdownAlreadyMaterialized &&
+    (eligibleUserIds.length <= 1 || nextState.phase === "SHOWDOWN" || nextState.phase === "HAND_DONE");
+
+  if (shouldMaterializeShowdown) {
+    const materialized = materializeShowdownAndPayout({
+      state: nextState,
+      seatUserIdsInOrder,
+      holeCardsByUserId: nextState.holeCardsByUserId,
+      computeShowdown,
+      awardPotsAtShowdown,
+    });
+    nextState = materialized.nextState;
   }
 
   const { holeCardsByUserId: _ignoredHoleCards, deck: _ignoredDeck, ...stateBase } = nextState;

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { materializeShowdownAndPayout } from "../netlify/functions/_shared/poker-materialize-showdown.mjs";
 import { normalizeRequestId } from "../netlify/functions/_shared/poker-request-id.mjs";
 import { isPlainObject, isStateStorageValid, normalizeJsonState, withoutPrivateState } from "../netlify/functions/_shared/poker-state-utils.mjs";
 import { loadPokerHandler } from "./helpers/poker-test-helpers.mjs";
@@ -32,6 +33,7 @@ const makeHandler = (storedState, klogCalls) =>
   loadPokerHandler("netlify/functions/poker-act.mjs", {
     baseHeaders: () => ({}),
     corsHeaders: () => ({ "access-control-allow-origin": "https://example.test" }),
+    materializeShowdownAndPayout,
     extractBearerToken: () => "token",
     verifySupabaseJwt: async () => ({ valid: true, userId: "user-1" }),
     isValidUuid: () => true,
