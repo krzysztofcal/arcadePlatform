@@ -198,10 +198,9 @@ export async function handler(event) {
         [tableId]
       );
 
-      const stateRows = await tx.unsafe(
-        "select version, state from public.poker_state where table_id = $1 limit 1;",
-        [tableId]
-      );
+      const stateRows = await tx.unsafe("select version, state from public.poker_state where table_id = $1 limit 1;", [
+        tableId,
+      ]);
       const stateRow = stateRows?.[0] || null;
       if (!stateRow) {
         klog("poker_state_missing", { tableId });
@@ -230,10 +229,9 @@ export async function handler(event) {
           throw new Error("state_invalid");
         }
         const nowMs = Date.now();
-        const shouldApplyTimeout = Number.isFinite(Number(currentState.turnDeadlineAt)) && nowMs > currentState.turnDeadlineAt;
-        const dbActiveUserIds = Array.isArray(activeSeatRows)
-          ? activeSeatRows.map((row) => row?.user_id).filter(Boolean)
-          : [];
+        const shouldApplyTimeout =
+          Number.isFinite(Number(currentState.turnDeadlineAt)) && nowMs > currentState.turnDeadlineAt;
+        const dbActiveUserIds = Array.isArray(activeSeatRows) ? activeSeatRows.map((row) => row?.user_id).filter(Boolean) : [];
         const seatRowsActiveUserIds = Array.isArray(seatRows)
           ? seatRows
               .filter((row) => row?.status === "ACTIVE")
@@ -280,6 +278,13 @@ export async function handler(event) {
               throw new Error("state_invalid");
             }
             if (!isRepairableHoleCardsError(error)) throw error;
+
+            // IMPORTANT: never attempt DB repair unless explicitly enabled.
+            // Default OFF in prod to avoid lock waits/timeouts in get-table.
+            if (process.env.POKER_GET_TABLE_REPAIR !== "1") {
+              throw new Error("state_invalid");
+            }
+
             if (!canRepairHoleCards(currentState)) {
               throw new Error("state_invalid");
             }

@@ -7,6 +7,7 @@ import { loadPokerHandler } from "./helpers/poker-test-helpers.mjs";
 
 const tableId = "11111111-1111-4111-8111-111111111111";
 process.env.POKER_DEAL_SECRET = process.env.POKER_DEAL_SECRET || "test-deal-secret";
+process.env.POKER_GET_TABLE_REPAIR = "1";
 
 const baseState = {
   tableId,
