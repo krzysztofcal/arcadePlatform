@@ -6,18 +6,24 @@ const fallbackKlog = (line) => {
   } catch {}
 };
 
-const withTimeout = (promise, ms, label) =>
-  Promise.race([
-    promise,
-    new Promise((_, reject) => {
-      const id = setTimeout(() => {
+const withTimeout = (promise, ms, label) => {
+  let id = null;
+  const timeout = new Promise((_, reject) => {
+    id = setTimeout(() => {
+      const err = new Error(`timeout:${label || "op"}:${ms}ms`);
+      err.code = "TIMEOUT";
+      reject(err);
+    }, ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => {
+    if (id) {
+      try {
         clearTimeout(id);
-        const err = new Error(`timeout:${label || "leave"}:${ms}ms`);
-        err.code = "TIMEOUT";
-        reject(err);
-      }, ms);
-    }),
-  ]);
+      } catch {}
+      id = null;
+    }
+  });
+};
 
 const requestId = (prefix) => `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
 
@@ -42,24 +48,24 @@ const cleanupPokerTable = async ({ baseUrl, origin, tableId, users, timers, klog
   const log = klog || fallbackKlog;
   const list = Array.isArray(users) ? users : [];
   const handles = Array.isArray(timers) ? timers : [];
+  const effectiveOrigin = origin || baseUrl;
 
-  handles.forEach((handle) => {
+  for (const handle of handles) {
     try {
       clearInterval(handle);
-      clearTimeout(handle);
     } catch {}
-  });
+  }
 
   if (!tableId) return;
 
   const leaveTasks = list
-    .filter((user) => user?.token && (user?.attempted || user?.joined))
+    .filter((user) => user?.token && user?.joined)
     .map((user) => {
       const label = user?.label || "user";
       return withTimeout(
         apiLeave({
           baseUrl,
-          origin,
+          origin: effectiveOrigin,
           token: user.token,
           tableId,
           label,
