@@ -35,6 +35,7 @@ const defaultHoleCards = {
 const makeHandler = (queries, storedState, userId, options = {}) => {
   const holeCardsMap =
     options.holeCardsByUserId !== undefined ? { ...options.holeCardsByUserId } : { ...defaultHoleCards };
+
   return loadPokerHandler("netlify/functions/poker-get-table.mjs", {
     baseHeaders: () => ({}),
     corsHeaders: () => ({ "access-control-allow-origin": "https://example.test" }),
@@ -52,6 +53,7 @@ const makeHandler = (queries, storedState, userId, options = {}) => {
         unsafe: async (query, params) => {
           const text = String(query).toLowerCase();
           queries.push({ query: String(query), params });
+
           if (text.includes("from public.poker_tables")) {
             return [{ id: tableId, stakes: "1/2", max_players: 6, status: "OPEN" }];
           }
@@ -79,11 +81,13 @@ const makeHandler = (queries, storedState, userId, options = {}) => {
           }
           if (text.includes("insert into public.poker_hole_cards")) {
             if (options.holeCardsInsertError) throw options.holeCardsInsertError;
+
             const paramsList = Array.isArray(params) ? params : [];
             for (let i = 0; i < paramsList.length; i += 4) {
               const userIdValue = paramsList[i + 2];
               const rawCards = paramsList[i + 3];
               if (!userIdValue) continue;
+
               let cards = rawCards;
               if (typeof rawCards === "string") {
                 try {
@@ -96,6 +100,7 @@ const makeHandler = (queries, storedState, userId, options = {}) => {
             }
             return [];
           }
+
           return [];
         },
       }),
@@ -273,9 +278,9 @@ const run = async () => {
   );
   assert.equal(missingSeedInserts.length, 0);
 
-  // CHANGED: make this state *not repairable* (phase INIT => canRepairHoleCards() false)
+  // CHANGED: phase INIT means poker-get-table will NOT load hole cards at all.
+  // So the expected status is 200, and there must be no hole-cards SELECT/INSERT queries.
   const initNoRepairState = { ...baseState, phase: "INIT" };
-
   const initNoRepairQueries = [];
   const initNoRepairResponse = await makeHandler(
     initNoRepairQueries,
@@ -287,8 +292,16 @@ const run = async () => {
     headers: { origin: "https://example.test", authorization: "Bearer token" },
     queryStringParameters: { tableId },
   });
-  assert.equal(initNoRepairResponse.statusCode, 409);
-  assert.equal(JSON.parse(initNoRepairResponse.body).error, "state_invalid");
+  assert.equal(initNoRepairResponse.statusCode, 200);
+  const initNoRepairPayload = JSON.parse(initNoRepairResponse.body);
+  assert.equal(initNoRepairPayload.ok, true);
+  assert.deepEqual(initNoRepairPayload.myHoleCards, []);
+
+  const initNoRepairHoleCardSelects = initNoRepairQueries.filter((entry) =>
+    entry.query.toLowerCase().includes("from public.poker_hole_cards")
+  );
+  assert.equal(initNoRepairHoleCardSelects.length, 0);
+
   const initNoRepairInserts = initNoRepairQueries.filter((entry) =>
     entry.query.toLowerCase().includes("insert into public.poker_hole_cards")
   );
