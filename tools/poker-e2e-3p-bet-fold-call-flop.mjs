@@ -9,6 +9,7 @@
  * Safety:
  * - Refuses to run against play.kcswh.pl unless POKER_SMOKE_ALLOW_PROD=1
  */
+import { cleanupPokerTable } from "./_shared/poker-e2e-cleanup.mjs";
 import { api, fetchJson, snippet, waitFor } from "./_shared/poker-e2e-http.mjs";
 
 const REQUIRED_ENV = [
@@ -52,6 +53,11 @@ if (baseHost === "play.kcswh.pl" && !allowProd) {
 
 const requestId = (prefix) => `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
 const callApi = ({ label, ...req }) => api({ base, origin, label, ...req });
+const klog = (line) => {
+  try {
+    console.warn(line);
+  } catch {}
+};
 
 const decodeUserId = (token) => {
   if (typeof token !== "string") return null;
@@ -111,6 +117,12 @@ const run = async () => {
 
   let heartbeatError = null;
   const timers = [];
+  let tableId = null;
+  const users = [
+    { label: "u1", token: u1Token, joined: false },
+    { label: "u2", token: u2Token, joined: false },
+    { label: "u3", token: u3Token, joined: false },
+  ];
 
   const heartbeatOnce = async (label, token, tableId) => {
     try {
@@ -149,6 +161,7 @@ const run = async () => {
     return null;
   };
 
+  let runError = null;
   try {
     // 1) create table (u1)
     const create = await callApi({
@@ -159,10 +172,11 @@ const run = async () => {
       body: { requestId: requestId("create"), stakes: { sb: 1, bb: 2 }, maxPlayers: 6 },
     });
     assertStatus(create.status, create.text, 200, "poker-create-table");
-    const tableId = create.json?.tableId;
+    tableId = create.json?.tableId;
     assertOk(typeof tableId === "string" && tableId.length > 0, "poker-create-table missing tableId");
 
     // 2) join seats (0,1,2)
+    users[0].attempted = true;
     const join1 = await callApi({
       label: "join-u1",
       path: "/.netlify/functions/poker-join",
@@ -171,7 +185,9 @@ const run = async () => {
       body: { tableId, seatNo: 0, buyIn: 100, requestId: requestId("join-u1") },
     });
     assertStatus(join1.status, join1.text, 200, "poker-join u1");
+    if (join1.status === 200) users[0].joined = true;
 
+    users[1].attempted = true;
     const join2 = await callApi({
       label: "join-u2",
       path: "/.netlify/functions/poker-join",
@@ -180,7 +196,9 @@ const run = async () => {
       body: { tableId, seatNo: 1, buyIn: 100, requestId: requestId("join-u2") },
     });
     assertStatus(join2.status, join2.text, 200, "poker-join u2");
+    if (join2.status === 200) users[1].joined = true;
 
+    users[2].attempted = true;
     const join3 = await callApi({
       label: "join-u3",
       path: "/.netlify/functions/poker-join",
@@ -189,6 +207,7 @@ const run = async () => {
       body: { tableId, seatNo: 2, buyIn: 100, requestId: requestId("join-u3") },
     });
     assertStatus(join3.status, join3.text, 200, "poker-join u3");
+    if (join3.status === 200) users[2].joined = true;
 
     // 3) heartbeats
     await heartbeatOnce("u1", u1Token, tableId);
@@ -364,9 +383,19 @@ const run = async () => {
     const uiLink = `${origin.replace(/\/$/, "")}/poker/table.html?tableId=${encodeURIComponent(tableId)}`;
     console.log(`OK: 3P PREFLOP BET/FOLD/CALL -> FLOP. tableId=${tableId}`);
     console.log(`UI: ${uiLink}`);
+  } catch (err) {
+    runError = err;
   } finally {
-    timers.forEach((t) => clearInterval(t));
+    await cleanupPokerTable({
+      baseUrl: base,
+      origin,
+      tableId,
+      users,
+      timers,
+      klog,
+    });
   }
+  if (runError) throw runError;
 };
 
 run().catch((e) => {

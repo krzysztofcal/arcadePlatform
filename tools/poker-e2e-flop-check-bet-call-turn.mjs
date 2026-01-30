@@ -1,4 +1,5 @@
 // tools/poker-e2e-flop-check-bet-call-turn.mjs
+import { cleanupPokerTable } from "./_shared/poker-e2e-cleanup.mjs";
 import { api, fetchJson, retry, snippet, waitFor } from "./_shared/poker-e2e-http.mjs";
 const REQUIRED_ENV = [
   "BASE",
@@ -38,6 +39,11 @@ if (baseHost === "play.kcswh.pl" && !allowProd) {
 
 const requestId = (prefix) => `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
 const callApi = ({ label, ...req }) => api({ base, origin, label, ...req });
+const klog = (line) => {
+  try {
+    console.warn(line);
+  } catch {}
+};
 
 const decodeUserId = (token) => {
   const parts = token.split(".");
@@ -81,9 +87,14 @@ const assertStatus = (status, text, want, label) => {
   const u1UserId = decodeUserId(u1Token);
   const u2UserId = decodeUserId(u2Token);
   assertOk(u1UserId && u2UserId, "failed to decode user ids");
+  const users = [
+    { label: "u1", token: u1Token, joined: false },
+    { label: "u2", token: u2Token, joined: false },
+  ];
 
   let heartbeatError = null;
   const timers = [];
+  let tableId = null;
 
   const heartbeatOnce = async (label, token, tableId) => {
     try {
@@ -112,6 +123,7 @@ const assertStatus = (status, text, want, label) => {
     return gt.json;
   };
 
+  let runError = null;
   try {
     // create table
     const create = await callApi({
@@ -122,23 +134,27 @@ const assertStatus = (status, text, want, label) => {
       body: { requestId: requestId("create") },
     });
     assertStatus(create.status, create.text, 200, "create-table");
-    const tableId = create.json.tableId;
+    tableId = create.json.tableId;
 
     // join
-    await callApi({
+    users[0].attempted = true;
+    const join1 = await callApi({
       label: "join-u1",
       path: "/.netlify/functions/poker-join",
       method: "POST",
       token: u1Token,
       body: { tableId, seatNo: 0, buyIn: 100, requestId: requestId("join1") },
     });
-    await callApi({
+    users[0].joined = join1.status === 200;
+    users[1].attempted = true;
+    const join2 = await callApi({
       label: "join-u2",
       path: "/.netlify/functions/poker-join",
       method: "POST",
       token: u2Token,
       body: { tableId, seatNo: 1, buyIn: 100, requestId: requestId("join2") },
     });
+    users[1].joined = join2.status === 200;
 
     // heartbeat
     await heartbeatOnce("u1", u1Token, tableId);
@@ -329,9 +345,19 @@ const assertStatus = (status, text, want, label) => {
     console.log(`OK: PREFLOP->FLOP CHECK/CHECK then FLOP CHECK/BET/CALL -> TURN. tableId=${tableId}`);
     console.log(`UI: ${origin.replace(/\/$/, "")}/poker/table.html?tableId=${tableId}`);
   } catch (e) {
-    console.error("Smoke test failed:", e.message || e);
-    process.exit(1);
+    runError = e;
   } finally {
-    timers.forEach(clearInterval);
+    await cleanupPokerTable({
+      baseUrl: base,
+      origin,
+      tableId,
+      users,
+      timers,
+      klog,
+    });
+  }
+  if (runError) {
+    console.error("Smoke test failed:", runError.message || runError);
+    process.exit(1);
   }
 })();
