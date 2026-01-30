@@ -273,14 +273,9 @@ const run = async () => {
   );
   assert.equal(missingSeedInserts.length, 0);
 
-  const initNoRepairState = {
-    ...baseState,
-    phase: "PREFLOP",
-    seats: [
-      { userId: "user-1", seatNo: 1 },
-      { userId: "user-1", seatNo: 2 },
-    ],
-  };
+  // CHANGED: make this state *not repairable* (phase INIT => canRepairHoleCards() false)
+  const initNoRepairState = { ...baseState, phase: "INIT" };
+
   const initNoRepairQueries = [];
   const initNoRepairResponse = await makeHandler(
     initNoRepairQueries,
