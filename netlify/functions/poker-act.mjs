@@ -337,6 +337,25 @@ export async function handler(event) {
         }
         return materialized.nextState;
       };
+      const runAdvanceLoop = (stateToAdvance, eventsList, advanceEventsList) => {
+        let next = stateToAdvance;
+        let loopCount = 0;
+        while (loopCount < ADVANCE_LIMIT) {
+          const prevPhase = next.phase;
+          const advanced = advanceIfNeeded(next);
+          next = advanced.state;
+
+          if (Array.isArray(advanced.events) && advanced.events.length > 0) {
+            eventsList.push(...advanced.events);
+            advanceEventsList.push(...advanced.events);
+          }
+
+          if (!Array.isArray(advanced.events) || advanced.events.length === 0) break;
+          if (next.phase === prevPhase) break;
+          loopCount += 1;
+        }
+        return { nextState: next, loops: loopCount };
+      };
       if (typeof currentState.handId !== "string" || !currentState.handId.trim()) {
         klog("poker_act_rejected", {
           tableId,
@@ -618,28 +637,34 @@ export async function handler(event) {
       }
 
       let nextState = applied.state;
-      const events = Array.isArray(applied.events) ? applied.events.slice() : [];
-      let loops = 0;
+      let events = Array.isArray(applied.events) ? applied.events.slice() : [];
+      const baseEvents = events.slice();
       const advanceEvents = [];
-      const eligibleAfterAction = seatUserIdsInOrder.filter(
-        (userId) => typeof userId === "string" && !nextState.foldedByUserId?.[userId]
+      const preAdvanceState = nextState;
+      const initialAdvance = runAdvanceLoop(nextState, events, advanceEvents);
+      nextState = initialAdvance.nextState;
+      let loops = initialAdvance.loops;
+
+      const preAdvanceHandId = typeof preAdvanceState.handId === "string" ? preAdvanceState.handId.trim() : "";
+      const preAdvanceShowdownHandId =
+        typeof preAdvanceState.showdown?.handId === "string" && preAdvanceState.showdown.handId.trim()
+          ? preAdvanceState.showdown.handId.trim()
+          : "";
+      const preAdvanceShowdownAlreadyMaterialized =
+        !!preAdvanceHandId && !!preAdvanceShowdownHandId && preAdvanceShowdownHandId === preAdvanceHandId;
+      const eligibleBeforeAdvance = seatUserIdsInOrder.filter(
+        (userId) => typeof userId === "string" && !preAdvanceState.foldedByUserId?.[userId]
       );
-      if (eligibleAfterAction.length <= 1) {
-        nextState = materializeShowdownState(nextState, seatUserIdsInOrder, holeCardsByUserId);
-      }
-      while (loops < ADVANCE_LIMIT) {
-        const prevPhase = nextState.phase;
-        const advanced = advanceIfNeeded(nextState);
-        nextState = advanced.state;
+      const shouldMaterializeBeforeAdvance =
+        !preAdvanceShowdownAlreadyMaterialized && eligibleBeforeAdvance.length <= 1;
 
-        if (Array.isArray(advanced.events) && advanced.events.length > 0) {
-          events.push(...advanced.events);
-          advanceEvents.push(...advanced.events);
-        }
-
-        if (!Array.isArray(advanced.events) || advanced.events.length === 0) break;
-        if (nextState.phase === prevPhase) break;
-        loops += 1;
+      if (shouldMaterializeBeforeAdvance) {
+        nextState = materializeShowdownState(preAdvanceState, seatUserIdsInOrder, holeCardsByUserId);
+        events = baseEvents.slice();
+        advanceEvents.length = 0;
+        const reAdvance = runAdvanceLoop(nextState, events, advanceEvents);
+        nextState = reAdvance.nextState;
+        loops = reAdvance.loops;
       }
 
       const handId = typeof nextState.handId === "string" ? nextState.handId.trim() : "";
