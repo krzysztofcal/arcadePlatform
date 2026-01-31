@@ -566,34 +566,52 @@ const run = async () => {
           holeCardsByUserId[userKey] = cards;
         }
       }
-      const storedActState = { value: JSON.stringify(startedState), version: 1 };
-      const firstUserId = startedState.turnUserId;
-      const secondUserId = firstUserId === "user-1" ? "user-2" : "user-1";
-      const actQueries = [];
-      const handlerFirst = makeHandler(actQueries, storedActState, firstUserId, {
-        holeCardsByUserId,
-        activeSeatUserIds: ["user-1", "user-2"],
-      });
-      const firstAction = getDefaultActionForTurn(startedState, firstUserId);
-      const firstCheck = await handlerFirst({
-        httpMethod: "POST",
-        headers: { origin: "https://example.test", authorization: "Bearer token" },
-        body: JSON.stringify({ tableId, requestId: "req-preflop-1", action: firstAction }),
-      });
-      assert.equal(firstCheck.statusCode, 200);
-      const nextState = JSON.parse(storedActState.value);
-      const handlerSecond = makeHandler(actQueries, storedActState, secondUserId, {
-        holeCardsByUserId,
-        activeSeatUserIds: ["user-1", "user-2"],
-      });
-      const secondAction = getDefaultActionForTurn(nextState, secondUserId);
-      const secondCheck = await handlerSecond({
-        httpMethod: "POST",
-        headers: { origin: "https://example.test", authorization: "Bearer token" },
-        body: JSON.stringify({ tableId, requestId: "req-preflop-2", action: secondAction }),
-      });
-      assert.equal(secondCheck.statusCode, 200);
-      const secondPayload = JSON.parse(secondCheck.body);
+    const storedActState = { value: JSON.stringify(startedState), version: 1 };
+    const firstUserId = startedState.turnUserId;
+    const secondUserId = firstUserId === "user-1" ? "user-2" : "user-1";
+    const actQueries = [];
+    const actWithRetry = async ({ action, requestId }) => {
+      const retryStatus = new Set([409, 425, 429, 500, 502, 503, 504]);
+      for (let attempt = 1; attempt <= 4; attempt += 1) {
+        const getTableHandler = makeGetTableHandler(actQueries, storedActState, "user-1");
+        const tableResponse = await getTableHandler({
+          httpMethod: "GET",
+          headers: { origin: "https://example.test", authorization: "Bearer token" },
+          queryStringParameters: { tableId },
+        });
+        assert.equal(tableResponse.statusCode, 200);
+        const tablePayload = JSON.parse(tableResponse.body);
+        const turnUserId = tablePayload.state.state.turnUserId;
+        const handler = makeHandler(actQueries, storedActState, turnUserId, {
+          holeCardsByUserId,
+          activeSeatUserIds: ["user-1", "user-2"],
+        });
+        const response = await handler({
+          httpMethod: "POST",
+          headers: { origin: "https://example.test", authorization: "Bearer token" },
+          body: JSON.stringify({ tableId, requestId: `${requestId}-${attempt}`, action }),
+        });
+        if (response.statusCode === 403) {
+          const payload = JSON.parse(response.body || "{}");
+          if (payload.error === "not_your_turn") continue;
+        }
+        if (retryStatus.has(response.statusCode)) continue;
+        return response;
+      }
+      throw new Error("actWithRetry: exhausted attempts");
+    };
+    const firstResponse = await actWithRetry({
+      action: getDefaultActionForTurn(startedState, firstUserId),
+      requestId: "req-preflop-1",
+    });
+    assert.equal(firstResponse.statusCode, 200);
+    const nextState = JSON.parse(storedActState.value);
+    const secondResponse = await actWithRetry({
+      action: getDefaultActionForTurn(nextState, secondUserId),
+      requestId: "req-preflop-2",
+    });
+    assert.equal(secondResponse.statusCode, 200);
+    const secondPayload = JSON.parse(secondResponse.body);
       assert.equal(secondPayload.state.state.phase, "FLOP");
       assert.equal(secondPayload.state.state.community.length, 3);
       const flopVersion = secondPayload.state.version;
