@@ -149,6 +149,54 @@
     return id.substring(0, 8);
   }
 
+  function isPlainObject(value){
+    return !!(value && typeof value === 'object' && !Array.isArray(value));
+  }
+
+  function formatChips(amount){
+    if (amount == null) return '—';
+    var num = typeof amount === 'number' ? amount : parseInt(amount, 10);
+    if (!isFinite(num)) return '—';
+    return String(Math.trunc(num));
+  }
+
+  function getSeatDisplayName(seat){
+    if (!seat) return '';
+    return seat.displayName || seat.name || seat.username || seat.userName || seat.handle || '';
+  }
+
+  function buildPlayersById(seats){
+    var map = {};
+    if (!Array.isArray(seats)) return map;
+    seats.forEach(function(seat){
+      if (!seat || !seat.userId) return;
+      var name = getSeatDisplayName(seat);
+      if (name) map[seat.userId] = name;
+    });
+    return map;
+  }
+
+  function resolveUserLabel(entry, playersById){
+    var userId = null;
+    if (typeof entry === 'string'){
+      userId = entry;
+    } else if (entry && typeof entry === 'object'){
+      userId = entry.userId || entry.id || entry.uid;
+    }
+    if (!userId) return t('pokerUnknownUser', 'Unknown');
+    if (playersById && playersById[userId]) return playersById[userId];
+    var short = shortId(userId);
+    return short || t('pokerUnknownUser', 'Unknown');
+  }
+
+  function formatWinnerList(winners, playersById){
+    if (!Array.isArray(winners) || winners.length === 0) return '—';
+    var labels = winners.map(function(winner){
+      return resolveUserLabel(winner, playersById);
+    }).filter(function(label){ return !!label; });
+    return labels.length ? labels.join(', ') : '—';
+  }
+
   function generateRequestId(){
     return 'ui-' + Date.now() + '-' + Math.random().toString(36).substring(2, 8);
   }
@@ -244,6 +292,99 @@
       cardEl.className = 'poker-card';
       cardEl.textContent = rank + suit;
       boardEl.appendChild(cardEl);
+    }
+  }
+
+  function renderShowdownPanel(opts){
+    var panel = document.getElementById('showdownPanel');
+    if (!panel) return;
+    var winnersEl = document.getElementById('showdownWinners');
+    var potsEl = document.getElementById('showdownPots');
+    var totalEl = document.getElementById('showdownTotal');
+    var totalRowEl = document.getElementById('showdownTotalRow');
+    var metaEl = document.getElementById('showdownMeta');
+    var viewState = opts && opts.state ? opts.state : {};
+    var playersById = opts && opts.playersById ? opts.playersById : {};
+    var showdown = viewState && isPlainObject(viewState.showdown) ? viewState.showdown : null;
+    var shouldShow = !!showdown || (viewState && viewState.phase === 'HAND_DONE');
+    if (!shouldShow){
+      panel.hidden = true;
+      if (winnersEl) winnersEl.textContent = '';
+      if (potsEl) potsEl.textContent = '';
+      if (totalEl) totalEl.textContent = '';
+      if (totalRowEl) totalRowEl.hidden = true;
+      if (metaEl) metaEl.hidden = true;
+      if (metaEl) metaEl.textContent = '';
+      return;
+    }
+    panel.hidden = false;
+
+    if (winnersEl){
+      winnersEl.textContent = '';
+      var winners = showdown && Array.isArray(showdown.winners) ? showdown.winners : [];
+      if (!winners.length){
+        winnersEl.textContent = t('pokerNoWinners', 'No winners');
+      } else {
+        var winnersList = document.createElement('div');
+        winnersList.className = 'poker-showdown-list';
+        winners.forEach(function(winner){
+          var row = document.createElement('div');
+          row.className = 'poker-showdown-row';
+          row.textContent = resolveUserLabel(winner, playersById);
+          winnersList.appendChild(row);
+        });
+        winnersEl.appendChild(winnersList);
+      }
+    }
+
+    if (potsEl){
+      potsEl.textContent = '';
+      var pots = showdown && Array.isArray(showdown.potsAwarded) ? showdown.potsAwarded : [];
+      if (!pots.length){
+        potsEl.textContent = t('pokerNoPots', 'No pot award data');
+      } else {
+        var potList = document.createElement('div');
+        potList.className = 'poker-showdown-list';
+        pots.forEach(function(pot, idx){
+          var row = document.createElement('div');
+          row.className = 'poker-showdown-row';
+          var amount = formatChips(pot && pot.amount != null ? pot.amount : null);
+          var winnersLabel = formatWinnerList(pot && pot.winners ? pot.winners : [], playersById);
+          row.textContent = 'Pot #' + (idx + 1) + ': ' + amount + ' \u2192 ' + winnersLabel;
+          potList.appendChild(row);
+        });
+        potsEl.appendChild(potList);
+      }
+    }
+
+    var totalAmount = showdown && showdown.potAwardedTotal != null ? showdown.potAwardedTotal : (showdown && showdown.potAwarded != null ? showdown.potAwarded : null);
+    if (totalRowEl){
+      if (totalAmount == null){
+        totalRowEl.hidden = true;
+      } else {
+        totalRowEl.hidden = false;
+      }
+    }
+    if (totalEl){
+      totalEl.textContent = totalAmount == null ? '—' : formatChips(totalAmount);
+    }
+
+    if (metaEl){
+      metaEl.textContent = '';
+      var metaLines = [];
+      if (showdown && showdown.handId) metaLines.push('Hand ID: ' + showdown.handId);
+      if (showdown && showdown.awardedAt) metaLines.push('Awarded: ' + showdown.awardedAt);
+      if (showdown && showdown.reason) metaLines.push('Reason: ' + showdown.reason);
+      if (metaLines.length){
+        metaLines.forEach(function(line){
+          var row = document.createElement('div');
+          row.textContent = line;
+          metaEl.appendChild(row);
+        });
+        metaEl.hidden = false;
+      } else {
+        metaEl.hidden = true;
+      }
     }
   }
 
@@ -891,6 +1032,7 @@
       if (phaseEl) phaseEl.textContent = gameState.phase || '-';
       renderPhaseLabel(gameState);
       renderCommunityBoard(gameState);
+      renderShowdownPanel({ state: gameState, playersById: buildPlayersById(seats) });
       renderTurnTimer(gameState);
       if (versionEl) versionEl.textContent = stateObj.version != null ? stateObj.version : '-';
       if (jsonBox) jsonBox.textContent = JSON.stringify(gameState, null, 2);
