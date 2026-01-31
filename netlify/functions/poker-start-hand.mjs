@@ -68,6 +68,8 @@ const isHoleCardsTableMissing = (error) => {
   return message.includes("poker_hole_cards") && message.includes("does not exist");
 };
 
+const DEFAULT_STAKES = { sb: 1, bb: 2 };
+
 const parseStakeAmount = (value) => {
   if (value == null || value === "") return null;
   const num = Number(value);
@@ -79,6 +81,13 @@ const parseStakeAmount = (value) => {
 const resolveStakeValue = (stakes, key) => {
   if (!stakes || typeof stakes !== "object") return null;
   return stakes[key];
+};
+
+const isMissingOrEmptyStakes = (stakes) => {
+  if (stakes == null) return true;
+  if (typeof stakes !== "object") return false;
+  if (Array.isArray(stakes)) return false;
+  return Object.keys(stakes).length === 0;
 };
 
 const buildValidatedStacks = (activeUserIdList, currentStacks) => {
@@ -170,10 +179,15 @@ export async function handler(event) {
       }
       const sbValue = resolveStakeValue(table.stakes, "sb");
       const bbValue = resolveStakeValue(table.stakes, "bb");
-      const smallBlind = parseStakeAmount(sbValue);
-      const bigBlind = parseStakeAmount(bbValue);
+      let smallBlind = parseStakeAmount(sbValue);
+      let bigBlind = parseStakeAmount(bbValue);
       if (smallBlind == null || bigBlind == null || bigBlind < smallBlind) {
-        throw makeError(400, "invalid_stakes");
+        if (isMissingOrEmptyStakes(table.stakes)) {
+          smallBlind = DEFAULT_STAKES.sb;
+          bigBlind = DEFAULT_STAKES.bb;
+        } else {
+          throw makeError(400, "invalid_stakes");
+        }
       }
 
       const stateRows = await tx.unsafe(
