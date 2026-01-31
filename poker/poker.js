@@ -157,7 +157,9 @@
     if (amount == null) return '—';
     var num = typeof amount === 'number' ? amount : parseInt(amount, 10);
     if (!isFinite(num)) return '—';
-    return String(Math.trunc(num));
+    num = Math.trunc(num);
+    if (num < 0) return '—';
+    return String(num);
   }
 
   function getSeatDisplayName(seat){
@@ -170,8 +172,10 @@
     if (!Array.isArray(seats)) return map;
     seats.forEach(function(seat){
       if (!seat || !seat.userId) return;
+      var uid = typeof seat.userId === 'string' ? seat.userId.trim() : '';
+      if (!uid) return;
       var name = getSeatDisplayName(seat);
-      if (name) map[seat.userId] = name;
+      if (name) map[uid] = name;
     });
     return map;
   }
@@ -179,11 +183,12 @@
   function resolveUserLabel(entry, playersById){
     var userId = null;
     if (typeof entry === 'string'){
-      userId = entry;
+      userId = entry.trim();
     } else if (entry && typeof entry === 'object'){
       userId = entry.userId || entry.id || entry.uid;
     }
-    if (!userId) return t('pokerUnknownUser', 'Unknown');
+    if (typeof userId === 'string') userId = userId.trim();
+    if (!userId) return t('pokerShowdownUnknownUser', 'Unknown');
     if (playersById && playersById[userId]) return playersById[userId];
     var short = shortId(userId);
     return short || t('pokerUnknownUser', 'Unknown');
@@ -306,7 +311,7 @@
     var viewState = opts && opts.state ? opts.state : {};
     var playersById = opts && opts.playersById ? opts.playersById : {};
     var showdown = viewState && isPlainObject(viewState.showdown) ? viewState.showdown : null;
-    var shouldShow = !!showdown || (viewState && viewState.phase === 'HAND_DONE');
+    var shouldShow = !!showdown;
     if (!shouldShow){
       panel.hidden = true;
       if (winnersEl) winnersEl.textContent = '';
@@ -323,7 +328,7 @@
       winnersEl.textContent = '';
       var winners = showdown && Array.isArray(showdown.winners) ? showdown.winners : [];
       if (!winners.length){
-        winnersEl.textContent = t('pokerNoWinners', 'No winners');
+        winnersEl.textContent = t('pokerShowdownNoWinners', 'No winners');
       } else {
         var winnersList = document.createElement('div');
         winnersList.className = 'poker-showdown-list';
@@ -341,7 +346,7 @@
       potsEl.textContent = '';
       var pots = showdown && Array.isArray(showdown.potsAwarded) ? showdown.potsAwarded : [];
       if (!pots.length){
-        potsEl.textContent = t('pokerNoPots', 'No pot award data');
+        potsEl.textContent = t('pokerShowdownNoPots', 'No pot award data');
       } else {
         var potList = document.createElement('div');
         potList.className = 'poker-showdown-list';
@@ -372,9 +377,9 @@
     if (metaEl){
       metaEl.textContent = '';
       var metaLines = [];
-      if (showdown && showdown.handId) metaLines.push('Hand ID: ' + showdown.handId);
-      if (showdown && showdown.awardedAt) metaLines.push('Awarded: ' + showdown.awardedAt);
-      if (showdown && showdown.reason) metaLines.push('Reason: ' + showdown.reason);
+      if (showdown && showdown.handId) metaLines.push(t('pokerShowdownHandId', 'Hand ID') + ': ' + showdown.handId);
+      if (showdown && showdown.awardedAt) metaLines.push(t('pokerShowdownAwardedAt', 'Awarded') + ': ' + showdown.awardedAt);
+      if (showdown && showdown.reason) metaLines.push(t('pokerShowdownReason', 'Reason') + ': ' + showdown.reason);
       if (metaLines.length){
         metaLines.forEach(function(line){
           var row = document.createElement('div');
