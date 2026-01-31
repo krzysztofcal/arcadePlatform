@@ -100,8 +100,8 @@ const run = async () => {
   const upgradedState = upgradeUpdate.state;
   assert.ok(Array.isArray(upgradedState.community));
   assert.equal(Number.isInteger(upgradedState.communityDealt), true);
-  assert.equal(upgradedState.toCallByUserId.u1, 0);
-  assert.equal(upgradedState.toCallByUserId.u2, 1);
+  assert.equal(upgradedState.toCallByUserId.u1, 1);
+  assert.equal(upgradedState.toCallByUserId.u2, 0);
   assert.equal(upgradedState.pot, 3);
   assert.equal(upgradedState.dealerSeatNo, 0);
   assert.equal(upgradedState.turnUserId, "u1");

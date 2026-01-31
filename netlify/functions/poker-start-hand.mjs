@@ -185,6 +185,14 @@ export async function handler(event) {
         if (isMissingOrEmptyStakes(table.stakes)) {
           smallBlind = DEFAULT_STAKES.sb;
           bigBlind = DEFAULT_STAKES.bb;
+          try {
+            await tx.unsafe("update public.poker_tables set stakes = $2::jsonb where id = $1;", [
+              tableId,
+              JSON.stringify(DEFAULT_STAKES),
+            ]);
+          } catch (error) {
+            klog("poker_start_hand_stakes_upgrade_failed", { tableId, message: error?.message || "unknown_error" });
+          }
         } else {
           throw makeError(400, "invalid_stakes");
         }
