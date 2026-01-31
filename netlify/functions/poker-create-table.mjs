@@ -20,6 +20,8 @@ const parseMaxPlayers = (value) => {
   return num;
 };
 
+const DEFAULT_STAKES = { sb: 1, bb: 2 };
+
 const parseStakeAmount = (value) => {
   if (value == null || value === "") return null;
   const num = Number(value);
@@ -56,8 +58,12 @@ export async function handler(event) {
   }
 
   const stakesValue = payload?.stakes;
-  if (!isPlainObject(stakesValue)) {
-    return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "invalid_stakes" }) };
+  let stakesInput = DEFAULT_STAKES;
+  if (stakesValue != null && stakesValue !== "") {
+    if (!isPlainObject(stakesValue)) {
+      return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "invalid_stakes" }) };
+    }
+    stakesInput = stakesValue;
   }
 
   const maxPlayers = parseMaxPlayers(payload?.maxPlayers);
@@ -65,8 +71,8 @@ export async function handler(event) {
     return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "invalid_max_players" }) };
   }
 
-  const sb = parseStakeAmount(stakesValue?.sb);
-  const bb = parseStakeAmount(stakesValue?.bb);
+  const sb = parseStakeAmount(stakesInput?.sb);
+  const bb = parseStakeAmount(stakesInput?.bb);
   if (sb == null || bb == null || bb < sb) {
     return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "invalid_stakes" }) };
   }
