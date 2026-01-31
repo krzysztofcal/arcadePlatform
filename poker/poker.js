@@ -7,6 +7,8 @@
   var JOIN_URL = '/.netlify/functions/poker-join';
   var LEAVE_URL = '/.netlify/functions/poker-leave';
   var HEARTBEAT_URL = '/.netlify/functions/poker-heartbeat';
+  var START_HAND_URL = '/.netlify/functions/poker-start-hand';
+  var ACT_URL = '/.netlify/functions/poker-act';
   var POLL_INTERVAL_BASE = 2000;
   var POLL_INTERVAL_MAX = 10000;
   var HEARTBEAT_INTERVAL_MS = 20000;
@@ -272,6 +274,21 @@
       el.hidden = false;
     } else {
       el.hidden = true;
+    }
+  }
+
+  function setInlineStatus(el, msg, tone){
+    if (!el) return;
+    if (msg){
+      el.textContent = msg;
+      el.hidden = false;
+      el.classList.remove('poker-inline-status--error', 'poker-inline-status--success');
+      if (tone === 'error') el.classList.add('poker-inline-status--error');
+      if (tone === 'success') el.classList.add('poker-inline-status--success');
+    } else {
+      el.textContent = '';
+      el.hidden = true;
+      el.classList.remove('poker-inline-status--error', 'poker-inline-status--success');
     }
   }
 
@@ -638,25 +655,42 @@
     var jsonToggle = document.getElementById('pokerJsonToggle');
     var jsonBox = document.getElementById('pokerJsonBox');
     var signInBtn = document.getElementById('pokerSignIn');
+    var startHandBtn = document.getElementById('pokerStartHandBtn');
+    var startHandStatusEl = document.getElementById('pokerStartHandStatus');
+    var actTypeSelect = document.getElementById('pokerActType');
+    var actAmountInput = document.getElementById('pokerActAmount');
+    var actBtn = document.getElementById('pokerActBtn');
+    var actStatusEl = document.getElementById('pokerActStatus');
     var leaveSelector = '#pokerLeave';
     var joinSelector = '#pokerJoin';
 
     var currentUserId = null;
     var tableData = null;
     var tableMaxPlayers = 6;
+    var devActionsEnabled = false;
     var authTimer = null;
     var heartbeatTimer = null;
     var heartbeatRequestId = null;
     var pendingJoinRequestId = null;
     var pendingLeaveRequestId = null;
+    var pendingStartHandRequestId = null;
+    var pendingActRequestId = null;
     var pendingJoinRetries = 0;
     var pendingLeaveRetries = 0;
+    var pendingStartHandRetries = 0;
+    var pendingActRetries = 0;
     var pendingJoinStartedAt = null;
     var pendingLeaveStartedAt = null;
+    var pendingStartHandStartedAt = null;
+    var pendingActStartedAt = null;
     var pendingJoinTimer = null;
     var pendingLeaveTimer = null;
+    var pendingStartHandTimer = null;
+    var pendingActTimer = null;
     var joinPending = false;
     var leavePending = false;
+    var startHandPending = false;
+    var actPending = false;
     var pendingHiddenAt = null;
     var heartbeatPendingRetries = 0;
     var heartbeatInFlight = false;
@@ -703,14 +737,21 @@
       if (!token){
         if (authMsg) authMsg.hidden = false;
         if (tableContent) tableContent.hidden = true;
+        setDevActionsEnabled(false);
         startAuthWatch();
         return false;
       }
       currentUserId = getUserIdFromToken(token);
       if (authMsg) authMsg.hidden = true;
       if (tableContent) tableContent.hidden = false;
+      setDevActionsEnabled(true);
       stopAuthWatch();
       return true;
+    }
+
+    function handleTableAuthExpired(opts){
+      setDevActionsEnabled(false);
+      handleAuthExpired(opts);
     }
 
     function updatePendingUi(){
@@ -729,6 +770,30 @@
       }
     }
 
+    function shouldEnableDevActions(){
+      return devActionsEnabled && !!tableId;
+    }
+
+    function updateActAmountState(){
+      if (!actAmountInput) return;
+      var type = actTypeSelect ? String(actTypeSelect.value || '') : '';
+      var needsAmount = type === 'BET' || type === 'RAISE';
+      actAmountInput.disabled = !shouldEnableDevActions() || actPending || !needsAmount;
+    }
+
+    function updateDevActionsUi(){
+      var enabled = shouldEnableDevActions();
+      setLoading(startHandBtn, startHandPending || !enabled);
+      setLoading(actBtn, actPending || !enabled);
+      if (actTypeSelect) actTypeSelect.disabled = !enabled || actPending;
+      updateActAmountState();
+    }
+
+    function setDevActionsEnabled(enabled){
+      devActionsEnabled = !!enabled;
+      updateDevActionsUi();
+    }
+
     function setPendingState(action, isPending){
       if (action === 'join'){
         joinPending = isPending;
@@ -736,6 +801,21 @@
         leavePending = isPending;
       }
       updatePendingUi();
+    }
+
+    function setDevPendingState(action, isPending){
+      if (action === 'startHand'){
+        startHandPending = isPending;
+        if (startHandStatusEl){
+          setInlineStatus(startHandStatusEl, isPending ? t('pokerStartHandPending', 'Starting...') : null, null);
+        }
+      } else if (action === 'act'){
+        actPending = isPending;
+        if (actStatusEl){
+          setInlineStatus(actStatusEl, isPending ? t('pokerActPending', 'Sending...') : null, null);
+        }
+      }
+      updateDevActionsUi();
     }
 
     function clearJoinPending(){
@@ -758,6 +838,28 @@
         pendingLeaveTimer = null;
       }
       setPendingState('leave', false);
+    }
+
+    function clearStartHandPending(){
+      pendingStartHandRequestId = null;
+      pendingStartHandRetries = 0;
+      pendingStartHandStartedAt = null;
+      if (pendingStartHandTimer){
+        clearTimeout(pendingStartHandTimer);
+        pendingStartHandTimer = null;
+      }
+      setDevPendingState('startHand', false);
+    }
+
+    function clearActPending(){
+      pendingActRequestId = null;
+      pendingActRetries = 0;
+      pendingActStartedAt = null;
+      if (pendingActTimer){
+        clearTimeout(pendingActTimer);
+        pendingActTimer = null;
+      }
+      setDevPendingState('act', false);
     }
 
     function handlePendingTimeout(action){
@@ -798,6 +900,42 @@
       }
     }
 
+    function handleDevPendingTimeout(action){
+      var message = action === 'startHand' ? t('pokerErrStartHandPending', 'Start hand still pending. Please try again.') : t('pokerErrActPending', 'Action still pending. Please try again.');
+      var statusEl = action === 'startHand' ? startHandStatusEl : actStatusEl;
+      if (action === 'startHand'){
+        clearStartHandPending();
+      } else {
+        clearActPending();
+      }
+      setInlineStatus(statusEl, message, 'error');
+    }
+
+    function scheduleDevPendingRetry(action, retryFn){
+      if (!isPageActive()) return;
+      setDevPendingState(action, true);
+      var startedAt = action === 'startHand' ? pendingStartHandStartedAt : pendingActStartedAt;
+      var retries = action === 'startHand' ? pendingStartHandRetries : pendingActRetries;
+      if (!startedAt) startedAt = Date.now();
+      retries += 1;
+      var delay = getPendingDelay(retries);
+      if (!shouldRetryPending(startedAt, delay)){
+        handleDevPendingTimeout(action);
+        return;
+      }
+      if (action === 'startHand'){
+        pendingStartHandStartedAt = startedAt;
+        pendingStartHandRetries = retries;
+        if (pendingStartHandTimer) clearTimeout(pendingStartHandTimer);
+        pendingStartHandTimer = scheduleRetry(retryFn, delay);
+      } else {
+        pendingActStartedAt = startedAt;
+        pendingActRetries = retries;
+        if (pendingActTimer) clearTimeout(pendingActTimer);
+        pendingActTimer = scheduleRetry(retryFn, delay);
+      }
+    }
+
     function stopPendingRetries(){
       if (pendingJoinTimer){
         clearTimeout(pendingJoinTimer);
@@ -807,12 +945,22 @@
         clearTimeout(pendingLeaveTimer);
         pendingLeaveTimer = null;
       }
+      if (pendingStartHandTimer){
+        clearTimeout(pendingStartHandTimer);
+        pendingStartHandTimer = null;
+      }
+      if (pendingActTimer){
+        clearTimeout(pendingActTimer);
+        pendingActTimer = null;
+      }
     }
 
     // stopPendingAll cancels pending operations (clears request ids) — used for unload and auth expiry.
     function stopPendingAll(){
       clearJoinPending();
       clearLeavePending();
+      clearStartHandPending();
+      clearActPending();
     }
 
     function pauseJoinPending(){
@@ -829,6 +977,22 @@
         pendingLeaveTimer = null;
       }
       setPendingState('leave', false);
+    }
+
+    function pauseStartHandPending(){
+      if (pendingStartHandTimer){
+        clearTimeout(pendingStartHandTimer);
+        pendingStartHandTimer = null;
+      }
+      setDevPendingState('startHand', false);
+    }
+
+    function pauseActPending(){
+      if (pendingActTimer){
+        clearTimeout(pendingActTimer);
+        pendingActTimer = null;
+      }
+      setDevPendingState('act', false);
     }
 
     function setActionError(action, endpoint, code, message){
@@ -853,7 +1017,7 @@
       } catch (err){
         if (isAuthError(err)){
           stopPendingAll();
-          handleAuthExpired({
+          handleTableAuthExpired({
             authMsg: authMsg,
             content: tableContent,
             errorEl: errorEl,
@@ -961,7 +1125,7 @@
         }
       } catch (err){
         if (isAuthError(err)){
-          handleAuthExpired({
+          handleTableAuthExpired({
             authMsg: authMsg,
             content: tableContent,
             errorEl: errorEl,
@@ -1084,6 +1248,18 @@
       await leaveTable(pendingLeaveRequestId);
     }
 
+    async function retryStartHand(){
+      if (!isPageActive()) return;
+      if (!pendingStartHandRequestId) return;
+      await startHand(pendingStartHandRequestId);
+    }
+
+    async function retryAct(){
+      if (!isPageActive()) return;
+      if (!pendingActRequestId) return;
+      await sendAct(pendingActRequestId);
+    }
+
     async function joinTable(requestIdOverride){
       var seatNo = parseInt(seatNoInput ? seatNoInput.value : 0, 10);
       var buyIn = parseInt(buyInInput ? buyInInput.value : 100, 10) || 100;
@@ -1129,7 +1305,7 @@
         }
         if (isAuthError(err)){
           stopPendingAll();
-          handleAuthExpired({
+          handleTableAuthExpired({
             authMsg: authMsg,
             content: tableContent,
             errorEl: errorEl,
@@ -1142,6 +1318,134 @@
         clearJoinPending();
         klog('poker_join_error', { tableId: tableId, error: err.message || err.code });
         setActionError('join', JOIN_URL, err.code || 'request_failed', err.message || t('pokerErrJoin', 'Failed to join'));
+      }
+    }
+
+    async function startHand(requestIdOverride){
+      if (!shouldEnableDevActions()) return;
+      setInlineStatus(startHandStatusEl, null, null);
+      setDevPendingState('startHand', true);
+      try {
+        var resolved = resolveRequestId(pendingStartHandRequestId, requestIdOverride);
+        if (resolved.nextPending){
+          pendingStartHandRequestId = normalizeRequestId(resolved.nextPending);
+          pendingStartHandRetries = 0;
+          pendingStartHandStartedAt = null;
+        } else if (!pendingStartHandRequestId){
+          pendingStartHandRequestId = normalizeRequestId(resolved.requestId);
+        }
+        var startRequestId = normalizeRequestId(resolved.requestId);
+        var result = await apiPost(START_HAND_URL, { tableId: tableId, requestId: startRequestId });
+        if (isPendingResponse(result)){
+          scheduleDevPendingRetry('startHand', retryStartHand);
+          return;
+        }
+        if (result && result.ok === false){
+          clearStartHandPending();
+          setInlineStatus(startHandStatusEl, t('pokerErrStartHand', 'Failed to start hand'), 'error');
+          return;
+        }
+        clearStartHandPending();
+        setInlineStatus(startHandStatusEl, t('pokerStartHandOk', 'Hand started'), 'success');
+        if (!isPageActive()) return;
+        loadTable(false);
+      } catch (err){
+        if (isAbortError(err)){
+          pauseStartHandPending();
+          return;
+        }
+        if (isAuthError(err)){
+          stopPendingAll();
+          handleTableAuthExpired({
+            authMsg: authMsg,
+            content: tableContent,
+            errorEl: errorEl,
+            stopPolling: stopPolling,
+            stopHeartbeat: stopHeartbeat,
+            onAuthExpired: startAuthWatch
+          });
+          return;
+        }
+        clearStartHandPending();
+        klog('poker_start_hand_error', { tableId: tableId, error: err.message || err.code });
+        setInlineStatus(startHandStatusEl, err.message || t('pokerErrStartHand', 'Failed to start hand'), 'error');
+      }
+    }
+
+    function getActPayload(actionType){
+      var payload = { type: actionType };
+      if (actionType === 'BET' || actionType === 'RAISE'){
+        var amount = parseInt(actAmountInput ? actAmountInput.value : '', 10);
+        if (!isFinite(amount) || amount <= 0){
+          return { error: t('pokerActAmountRequired', 'Enter an amount for bet/raise') };
+        }
+        payload.amount = Math.trunc(amount);
+      }
+      return { action: payload };
+    }
+
+    async function sendAct(requestIdOverride){
+      if (!shouldEnableDevActions()) return;
+      var actionType = actTypeSelect ? String(actTypeSelect.value || 'CHECK') : 'CHECK';
+      var actionResult = getActPayload(actionType);
+      if (actionResult.error){
+        setInlineStatus(actStatusEl, actionResult.error, 'error');
+        return;
+      }
+      setInlineStatus(actStatusEl, null, null);
+      setDevPendingState('act', true);
+      try {
+        var resolved = resolveRequestId(pendingActRequestId, requestIdOverride);
+        if (resolved.nextPending){
+          pendingActRequestId = normalizeRequestId(resolved.nextPending);
+          pendingActRetries = 0;
+          pendingActStartedAt = null;
+        } else if (!pendingActRequestId){
+          pendingActRequestId = normalizeRequestId(resolved.requestId);
+        }
+        var actRequestId = normalizeRequestId(resolved.requestId);
+        var result = await apiPost(ACT_URL, {
+          tableId: tableId,
+          requestId: actRequestId,
+          action: actionResult.action
+        });
+        if (isPendingResponse(result)){
+          scheduleDevPendingRetry('act', retryAct);
+          return;
+        }
+        if (result && result.ok === false){
+          clearActPending();
+          setInlineStatus(actStatusEl, t('pokerErrAct', 'Failed to send action'), 'error');
+          return;
+        }
+        clearActPending();
+        setInlineStatus(actStatusEl, t('pokerActOk', 'Action sent'), 'success');
+        if (!isPageActive()) return;
+        loadTable(false);
+      } catch (err){
+        if (isAbortError(err)){
+          pauseActPending();
+          return;
+        }
+        if (isAuthError(err)){
+          stopPendingAll();
+          handleTableAuthExpired({
+            authMsg: authMsg,
+            content: tableContent,
+            errorEl: errorEl,
+            stopPolling: stopPolling,
+            stopHeartbeat: stopHeartbeat,
+            onAuthExpired: startAuthWatch
+          });
+          return;
+        }
+        clearActPending();
+        if (err && (err.code === 'not_your_turn' || err.status === 403)){
+          setInlineStatus(actStatusEl, t('pokerErrNotYourTurn', 'Not your turn'), 'error');
+          return;
+        }
+        klog('poker_act_error', { tableId: tableId, error: err.message || err.code });
+        setInlineStatus(actStatusEl, err.message || t('pokerErrAct', 'Failed to send action'), 'error');
       }
     }
 
@@ -1185,7 +1489,7 @@
         }
         if (isAuthError(err)){
           stopPendingAll();
-          handleAuthExpired({
+          handleTableAuthExpired({
             authMsg: authMsg,
             content: tableContent,
             errorEl: errorEl,
@@ -1212,6 +1516,8 @@
           var hiddenDuration = Date.now() - pendingHiddenAt;
           if (pendingJoinStartedAt) pendingJoinStartedAt += hiddenDuration;
           if (pendingLeaveStartedAt) pendingLeaveStartedAt += hiddenDuration;
+          if (pendingStartHandStartedAt) pendingStartHandStartedAt += hiddenDuration;
+          if (pendingActStartedAt) pendingActStartedAt += hiddenDuration;
           pendingHiddenAt = null;
         }
         state.pollInterval = POLL_INTERVAL_BASE;
@@ -1220,6 +1526,8 @@
         startHeartbeat();
         if (pendingJoinRequestId) schedulePendingRetry('join', retryJoin);
         if (pendingLeaveRequestId) schedulePendingRetry('leave', retryLeave);
+        if (pendingStartHandRequestId) scheduleDevPendingRetry('startHand', retryStartHand);
+        if (pendingActRequestId) scheduleDevPendingRetry('act', retryAct);
         if (!pendingJoinRequestId && !pendingLeaveRequestId) loadTable(false);
       }
     }
@@ -1262,8 +1570,53 @@
       });
     }
 
+    function handleStartHandClick(event){
+      if (event){
+        event.preventDefault();
+        event.stopPropagation();
+      }
+      if (startHandPending || !shouldEnableDevActions()) return;
+      klog('poker_start_hand_click', { tableId: tableId, hasToken: !!state.token });
+      setInlineStatus(startHandStatusEl, null, null);
+      startHand().catch(function(err){
+        if (isAbortError(err)){
+          pauseStartHandPending();
+          return;
+        }
+        clearStartHandPending();
+        klog('poker_start_hand_click_error', { message: err && (err.message || err.code) ? err.message || err.code : 'unknown_error' });
+        setInlineStatus(startHandStatusEl, err && (err.message || err.code) ? err.message || err.code : t('pokerErrStartHand', 'Failed to start hand'), 'error');
+      });
+    }
+
+    function handleActClick(event){
+      if (event){
+        event.preventDefault();
+        event.stopPropagation();
+      }
+      if (actPending || !shouldEnableDevActions()) return;
+      klog('poker_act_click', { tableId: tableId, hasToken: !!state.token });
+      setInlineStatus(actStatusEl, null, null);
+      sendAct().catch(function(err){
+        if (isAbortError(err)){
+          pauseActPending();
+          return;
+        }
+        clearActPending();
+        klog('poker_act_click_error', { message: err && (err.message || err.code) ? err.message || err.code : 'unknown_error' });
+        setInlineStatus(actStatusEl, err && (err.message || err.code) ? err.message || err.code : t('pokerErrAct', 'Failed to send action'), 'error');
+      });
+    }
+
     if (joinBtn) joinBtn.addEventListener('click', handleJoinClick);
     if (leaveBtn) leaveBtn.addEventListener('click', handleLeaveClick);
+    if (startHandBtn) startHandBtn.addEventListener('click', handleStartHandClick);
+    if (actBtn) actBtn.addEventListener('click', handleActClick);
+    if (actTypeSelect){
+      actTypeSelect.addEventListener('change', function(){
+        updateActAmountState();
+      });
+    }
     if (jsonToggle){
       jsonToggle.addEventListener('click', function(){
         if (jsonBox) jsonBox.hidden = !jsonBox.hidden;
@@ -1278,6 +1631,8 @@
     window.addEventListener('beforeunload', stopHeartbeat); // xp-lifecycle-allow:poker-table-heartbeat(2026-01-01)
     window.addEventListener('beforeunload', stopPendingAll); // xp-lifecycle-allow:poker-table-pending(2026-01-01)
     window.addEventListener('beforeunload', stopAuthWatch); // xp-lifecycle-allow:poker-table-auth(2026-01-01)
+
+    setDevActionsEnabled(false);
 
     checkAuth().then(function(authed){
       if (authed){
