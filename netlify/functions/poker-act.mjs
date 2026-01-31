@@ -293,6 +293,50 @@ export async function handler(event) {
         });
         throw makeError(409, "state_invalid");
       };
+      const materializeShowdownState = (stateToMaterialize) => {
+        let materialized;
+        try {
+          materialized = materializeShowdownAndPayout({
+            state: stateToMaterialize,
+            seatUserIdsInOrder,
+            holeCardsByUserId,
+            computeShowdown,
+            awardPotsAtShowdown,
+            klog,
+          });
+        } catch (error) {
+          const reason = error?.message || null;
+          if (reason === "showdown_missing_hole_cards") {
+            rejectStateInvalid("showdown_missing_hole_cards");
+          }
+          if (reason === "showdown_invalid_pot") {
+            rejectStateInvalid("showdown_invalid_pot", { pot: stateToMaterialize.pot ?? null });
+          }
+          if (reason === "showdown_invalid_community") {
+            rejectStateInvalid("showdown_invalid_community", { communityLen: stateToMaterialize.community?.length ?? null });
+          }
+          if (reason === "showdown_incomplete_community") {
+            rejectStateInvalid("showdown_incomplete_community", { communityLen: stateToMaterialize.community?.length ?? null });
+          }
+          if (reason === "showdown_hand_mismatch") {
+            rejectStateInvalid("showdown_hand_mismatch");
+          }
+          if (reason === "showdown_pot_not_zero") {
+            rejectStateInvalid("showdown_pot_not_zero", { pot: stateToMaterialize.pot ?? null });
+          }
+          if (reason === "showdown_missing_hand_id") {
+            rejectStateInvalid("showdown_missing_hand_id");
+          }
+          if (reason === "showdown_invalid_seats") {
+            rejectStateInvalid("showdown_invalid_seats");
+          }
+          if (reason === "showdown_invalid_stack") {
+            rejectStateInvalid("showdown_invalid_stack");
+          }
+          rejectStateInvalid("showdown_failed", { reason });
+        }
+        return materialized.nextState;
+      };
       if (typeof currentState.handId !== "string" || !currentState.handId.trim()) {
         klog("poker_act_rejected", {
           tableId,
@@ -375,37 +419,10 @@ export async function handler(event) {
         }
       }
 
-      const shouldReplayHandDone =
-        currentState.phase === "HAND_DONE" &&
-        currentState.showdown &&
-        Number.isFinite(Number(currentState.pot ?? 0)) &&
-        Number(currentState.pot ?? 0) === 0;
-      if (shouldReplayHandDone) {
-        const version = Number(stateRow.version);
-        if (!Number.isFinite(version)) {
-          klog("poker_act_rejected", {
-            tableId,
-            userId: auth.userId,
-            reason: "state_invalid",
-            phase: currentState.phase,
-          });
-          throw makeError(409, "state_invalid");
-        }
-        return {
-          tableId,
-          version,
-          state: withoutPrivateState(currentState),
-          myHoleCards: holeCardsByUserId[auth.userId] || [],
-          events: [],
-          replayed: true,
-        };
-      }
-
       const lastRequestId = Object.prototype.hasOwnProperty.call(lastByUserId, auth.userId)
         ? lastByUserId[auth.userId]
         : null;
-      const requestIdValue = requestId ?? payload?.requestId ?? null;
-      if (lastRequestId != null && requestIdValue != null && String(lastRequestId) === String(requestIdValue)) {
+      if (lastRequestId != null && requestId != null && String(lastRequestId) === String(requestId)) {
         const version = Number(stateRow.version);
         if (!Number.isFinite(version)) {
           klog("poker_act_rejected", {
@@ -604,29 +621,22 @@ export async function handler(event) {
       const events = Array.isArray(applied.events) ? applied.events.slice() : [];
       let loops = 0;
       const advanceEvents = [];
-      const eligibleAfterAction = seatUserIdsInOrder.filter(
-        (userId) => typeof userId === "string" && !nextState.foldedByUserId?.[userId]
-      );
-      if (eligibleAfterAction.length > 1) {
-        while (loops < ADVANCE_LIMIT) {
-          const prevPhase = nextState.phase;
-          let advanced;
-          try {
-            advanced = advanceIfNeeded(nextState);
-          } catch (error) {
-            throw error;
-          }
-          nextState = advanced.state;
+      if (nextState.phase === "HAND_DONE") {
+        nextState = materializeShowdownState(nextState);
+      }
+      while (loops < ADVANCE_LIMIT) {
+        const prevPhase = nextState.phase;
+        const advanced = advanceIfNeeded(nextState);
+        nextState = advanced.state;
 
-          if (Array.isArray(advanced.events) && advanced.events.length > 0) {
-            events.push(...advanced.events);
-            advanceEvents.push(...advanced.events);
-          }
-
-          if (!Array.isArray(advanced.events) || advanced.events.length === 0) break;
-          if (nextState.phase === prevPhase) break;
-          loops += 1;
+        if (Array.isArray(advanced.events) && advanced.events.length > 0) {
+          events.push(...advanced.events);
+          advanceEvents.push(...advanced.events);
         }
+
+        if (!Array.isArray(advanced.events) || advanced.events.length === 0) break;
+        if (nextState.phase === prevPhase) break;
+        loops += 1;
       }
 
       const handId = typeof nextState.handId === "string" ? nextState.handId.trim() : "";
@@ -652,48 +662,7 @@ export async function handler(event) {
         !showdownAlreadyMaterialized && (eligibleUserIds.length <= 1 || nextState.phase === "SHOWDOWN");
 
       if (shouldMaterializeShowdown) {
-        let materialized;
-        try {
-          materialized = materializeShowdownAndPayout({
-            state: nextState,
-            seatUserIdsInOrder,
-            holeCardsByUserId,
-            computeShowdown,
-            awardPotsAtShowdown,
-            klog,
-          });
-        } catch (error) {
-          const reason = error?.message || null;
-          if (reason === "showdown_missing_hole_cards") {
-            rejectStateInvalid("showdown_missing_hole_cards");
-          }
-          if (reason === "showdown_invalid_pot") {
-            rejectStateInvalid("showdown_invalid_pot", { pot: nextState.pot ?? null });
-          }
-          if (reason === "showdown_invalid_community") {
-            rejectStateInvalid("showdown_invalid_community", { communityLen: nextState.community?.length ?? null });
-          }
-          if (reason === "showdown_incomplete_community") {
-            rejectStateInvalid("showdown_incomplete_community", { communityLen: nextState.community?.length ?? null });
-          }
-          if (reason === "showdown_hand_mismatch") {
-            rejectStateInvalid("showdown_hand_mismatch");
-          }
-          if (reason === "showdown_pot_not_zero") {
-            rejectStateInvalid("showdown_pot_not_zero", { pot: nextState.pot ?? null });
-          }
-          if (reason === "showdown_missing_hand_id") {
-            rejectStateInvalid("showdown_missing_hand_id");
-          }
-          if (reason === "showdown_invalid_seats") {
-            rejectStateInvalid("showdown_invalid_seats");
-          }
-          if (reason === "showdown_invalid_stack") {
-            rejectStateInvalid("showdown_invalid_stack");
-          }
-          rejectStateInvalid("showdown_failed", { reason });
-        }
-        nextState = materialized.nextState;
+        nextState = materializeShowdownState(nextState);
       }
 
       const { holeCardsByUserId: _ignoredHoleCards, deck: _ignoredDeck, ...stateBase } = nextState;

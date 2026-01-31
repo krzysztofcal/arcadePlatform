@@ -140,8 +140,7 @@ const runCase = async ({ state, action, requestId, userId, computeShowdown, stor
   });
   assert.equal(result.response.statusCode, 200);
   const payload = JSON.parse(result.response.body);
-  assert.deepEqual(payload.state.state.showdown.winners, ["user-1"]);
-  assert.equal(payload.state.state.showdown.reason, "all_folded");
+  assert.equal(payload.state.state.phase, "PREFLOP");
   assert.equal(payload.state.state.pot, 0);
   assert.equal(payload.state.state.stacks["user-1"], baseState.stacks["user-1"] + baseState.pot);
   const totalAfter = Object.values(payload.state.state.stacks).reduce((sum, value) => sum + value, 0);
@@ -150,7 +149,7 @@ const runCase = async ({ state, action, requestId, userId, computeShowdown, stor
   assert.ok(updateCall);
   const updatedState = JSON.parse(updateCall.params?.[1] || "{}");
   assert.equal(updatedState.pot, 0);
-  assert.ok(updatedState.showdown);
+  assert.equal(updatedState.phase, "PREFLOP");
 }
 
 {
@@ -304,6 +303,22 @@ const runCase = async ({ state, action, requestId, userId, computeShowdown, stor
     action: { type: "CHECK" },
     requestId: "req-showdown-pot",
     userId: "user-2",
+  });
+  assert.equal(result.response.statusCode, 409);
+  assert.equal(JSON.parse(result.response.body).error, "state_invalid");
+}
+
+{
+  const handDoneState = {
+    ...baseState,
+    phase: "HAND_DONE",
+    lastActionRequestIdByUserId: { "user-1": "req-old" },
+  };
+  const result = await runCase({
+    state: handDoneState,
+    action: { type: "CHECK" },
+    requestId: "req-new",
+    userId: "user-1",
   });
   assert.equal(result.response.statusCode, 409);
   assert.equal(JSON.parse(result.response.body).error, "state_invalid");
