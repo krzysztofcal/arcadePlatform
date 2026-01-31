@@ -634,6 +634,7 @@
   function initTable(){
     var params = new URLSearchParams(window.location.search);
     var tableId = params.get('tableId');
+    var devFlagEnabled = params.get('dev') === '1';
     if (!tableId){
       document.body.innerHTML = '<div class="poker-page"><p class="poker-error">' + t('pokerErrMissingTableId', 'No tableId provided') + '</p><a href="/poker/" class="poker-back">&larr; ' + t('backToLobby', 'Back to lobby') + '</a></div>';
       return;
@@ -642,6 +643,7 @@
     var errorEl = document.getElementById('pokerError');
     var authMsg = document.getElementById('pokerAuthMsg');
     var tableContent = document.getElementById('pokerTableContent');
+    var devPanel = document.getElementById('pokerDevActionsPanel');
     var tableIdEl = document.getElementById('pokerTableId');
     var stakesEl = document.getElementById('pokerStakes');
     var statusEl = document.getElementById('pokerStatus');
@@ -742,6 +744,7 @@
       if (!token){
         if (authMsg) authMsg.hidden = false;
         if (tableContent) tableContent.hidden = true;
+        if (devPanel) devPanel.hidden = true;
         setDevActionsEnabled(false);
         startAuthWatch();
         return false;
@@ -749,12 +752,14 @@
       currentUserId = getUserIdFromToken(token);
       if (authMsg) authMsg.hidden = true;
       if (tableContent) tableContent.hidden = false;
-      setDevActionsEnabled(true);
+      if (devPanel) devPanel.hidden = !devFlagEnabled;
+      setDevActionsEnabled(devFlagEnabled);
       stopAuthWatch();
       return true;
     }
 
     function handleTableAuthExpired(opts){
+      if (devPanel) devPanel.hidden = true;
       setDevActionsEnabled(false);
       handleAuthExpired(opts);
     }
@@ -1540,8 +1545,10 @@
         startHeartbeat();
         if (pendingJoinRequestId) schedulePendingRetry('join', retryJoin);
         if (pendingLeaveRequestId) schedulePendingRetry('leave', retryLeave);
-        if (pendingStartHandRequestId) scheduleDevPendingRetry('startHand', retryStartHand);
-        if (pendingActRequestId) scheduleDevPendingRetry('act', retryAct);
+        if (devFlagEnabled){
+          if (pendingStartHandRequestId) scheduleDevPendingRetry('startHand', retryStartHand);
+          if (pendingActRequestId) scheduleDevPendingRetry('act', retryAct);
+        }
         if (!pendingJoinRequestId && !pendingLeaveRequestId) loadTable(false);
       }
     }
@@ -1646,6 +1653,7 @@
     window.addEventListener('beforeunload', stopPendingAll); // xp-lifecycle-allow:poker-table-pending(2026-01-01)
     window.addEventListener('beforeunload', stopAuthWatch); // xp-lifecycle-allow:poker-table-auth(2026-01-01)
 
+    if (devPanel) devPanel.hidden = !devFlagEnabled;
     setDevActionsEnabled(false);
 
     checkAuth().then(function(authed){
