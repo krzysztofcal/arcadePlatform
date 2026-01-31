@@ -104,11 +104,11 @@
       <div class="poker-panel">
         <h3 data-i18n="pokerDevActionsTitle">Dev Actions</h3>
         <div class="poker-form-row">
-          <button id="pokerStartHandBtn" class="poker-btn">Start hand</button>
+          <button id="pokerStartHandBtn" class="poker-btn" data-i18n="pokerDevActionsStartHand">Start hand</button>
           <span id="pokerStartHandStatus" class="poker-inline-status" aria-live="polite" hidden></span>
         </div>
         <div class="poker-form-row">
-          <label class="poker-label" for="pokerActType">Action</label>
+          <label class="poker-label" for="pokerActType"><span data-i18n="pokerDevActionsActionLabel">Action</span></label>
           <select id="pokerActType" class="poker-input">
             <option value="CHECK">CHECK</option>
             <option value="CALL">CALL</option>
@@ -116,9 +116,9 @@
             <option value="BET">BET</option>
             <option value="RAISE">RAISE</option>
           </select>
-          <label class="poker-label" for="pokerActAmount">Amount</label>
+          <label class="poker-label" for="pokerActAmount"><span data-i18n="pokerDevActionsAmountLabel">Amount</span></label>
           <input type="number" id="pokerActAmount" class="poker-input" min="1" placeholder="0" disabled>
-          <button id="pokerActBtn" class="poker-btn">Send action</button>
+          <button id="pokerActBtn" class="poker-btn" data-i18n="pokerDevActionsSendAction">Send action</button>
           <span id="pokerActStatus" class="poker-inline-status" aria-live="polite" hidden></span>
         </div>
       </div>

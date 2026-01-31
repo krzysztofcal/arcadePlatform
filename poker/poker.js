@@ -297,6 +297,11 @@
     el.disabled = loading;
   }
 
+  function setDisabled(el, disabled){
+    if (!el) return;
+    el.disabled = !!disabled;
+  }
+
   function renderPhaseLabel(state){
     var phaseLabelEl = document.getElementById('pokerPhaseLabel');
     if (!phaseLabelEl) return;
@@ -758,8 +763,8 @@
       var busy = joinPending || leavePending;
       setLoading(joinBtn, busy);
       setLoading(leaveBtn, busy);
-      if (seatNoInput) seatNoInput.disabled = busy;
-      if (buyInInput) buyInInput.disabled = busy;
+      if (seatNoInput) setDisabled(seatNoInput, busy);
+      if (buyInInput) setDisabled(buyInInput, busy);
       if (joinStatusEl){
         joinStatusEl.textContent = joinPending ? t('pokerJoinPending', 'Joining...') : '';
         joinStatusEl.hidden = !joinPending;
@@ -768,24 +773,27 @@
         leaveStatusEl.textContent = leavePending ? t('pokerLeavePending', 'Leaving...') : '';
         leaveStatusEl.hidden = !leavePending;
       }
+      updateDevActionsUi();
     }
 
     function shouldEnableDevActions(){
-      return devActionsEnabled && !!tableId;
+      return devActionsEnabled && !!tableId && !joinPending && !leavePending;
     }
 
     function updateActAmountState(){
       if (!actAmountInput) return;
       var type = actTypeSelect ? String(actTypeSelect.value || '') : '';
       var needsAmount = type === 'BET' || type === 'RAISE';
-      actAmountInput.disabled = !shouldEnableDevActions() || actPending || !needsAmount;
+      setDisabled(actAmountInput, !shouldEnableDevActions() || actPending || !needsAmount);
     }
 
     function updateDevActionsUi(){
       var enabled = shouldEnableDevActions();
-      setLoading(startHandBtn, startHandPending || !enabled);
-      setLoading(actBtn, actPending || !enabled);
-      if (actTypeSelect) actTypeSelect.disabled = !enabled || actPending;
+      setLoading(startHandBtn, startHandPending);
+      setDisabled(startHandBtn, !enabled || startHandPending);
+      setLoading(actBtn, actPending);
+      setDisabled(actBtn, !enabled || actPending);
+      if (actTypeSelect) setDisabled(actTypeSelect, !enabled || actPending);
       updateActAmountState();
     }
 
@@ -1440,7 +1448,9 @@
           return;
         }
         clearActPending();
-        if (err && (err.code === 'not_your_turn' || err.status === 403)){
+        var errMessage = err && (err.message || err.code) ? String(err.message || err.code) : '';
+        var loweredMessage = errMessage.toLowerCase();
+        if (err && (err.status === 403 || err.code === 'not_your_turn' || loweredMessage.indexOf('not your turn') !== -1)){
           setInlineStatus(actStatusEl, t('pokerErrNotYourTurn', 'Not your turn'), 'error');
           return;
         }
