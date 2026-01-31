@@ -20,6 +20,14 @@ const parseMaxPlayers = (value) => {
   return num;
 };
 
+const parseStakeAmount = (value) => {
+  if (value == null || value === "") return null;
+  const num = Number(value);
+  if (!Number.isFinite(num) || !Number.isInteger(num)) return null;
+  if (num < 1) return null;
+  return num;
+};
+
 export async function handler(event) {
   const origin = event.headers?.origin || event.headers?.Origin;
   const cors = corsHeaders(origin);
@@ -48,7 +56,7 @@ export async function handler(event) {
   }
 
   const stakesValue = payload?.stakes;
-  if (stakesValue != null && !isPlainObject(stakesValue)) {
+  if (!isPlainObject(stakesValue)) {
     return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "invalid_stakes" }) };
   }
 
@@ -57,13 +65,19 @@ export async function handler(event) {
     return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "invalid_max_players" }) };
   }
 
+  const sb = parseStakeAmount(stakesValue?.sb);
+  const bb = parseStakeAmount(stakesValue?.bb);
+  if (sb == null || bb == null || bb < sb) {
+    return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "invalid_stakes" }) };
+  }
+
   const token = extractBearerToken(event.headers);
   const auth = await verifySupabaseJwt(token);
   if (!auth.valid || !auth.userId) {
     return { statusCode: 401, headers: cors, body: JSON.stringify({ error: "unauthorized", reason: auth.reason }) };
   }
 
-  const stakes = stakesValue ?? {};
+  const stakes = { sb, bb };
   let stakesJson = "{}";
   try {
     stakesJson = JSON.stringify(stakes);
