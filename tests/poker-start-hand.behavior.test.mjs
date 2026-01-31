@@ -13,6 +13,7 @@ import { loadPokerHandler } from "./helpers/poker-test-helpers.mjs";
 
 const tableId = "11111111-1111-4111-8111-111111111111";
 const userId = "user-1";
+const DEFAULT_STAKES = { sb: 1, bb: 2 };
 
 const makeRng = (seed) => {
   let value = seed;
@@ -45,7 +46,7 @@ const makeHandler = (queries, storedState) =>
           const text = String(query).toLowerCase();
           queries.push({ query: String(query), params });
           if (text.includes("from public.poker_tables")) {
-            return [{ id: tableId, status: "OPEN", max_players: 6 }];
+            return [{ id: tableId, status: "OPEN", max_players: 6, stakes: DEFAULT_STAKES }];
           }
           if (text.includes("from public.poker_state")) {
             if (storedState.value) {
@@ -117,8 +118,8 @@ const runHappyPath = async () => {
   assert.equal(payload.state.state.phase, "PREFLOP");
   assert.ok(Array.isArray(payload.state.state.community));
   assert.equal(payload.state.state.community.length, 0);
-  assert.equal(payload.state.state.pot, 0);
-  assert.ok(["user-1", "user-2", "user-3"].includes(payload.state.state.turnUserId));
+  assert.equal(payload.state.state.pot, 3);
+  assert.equal(payload.state.state.turnUserId, "user-1");
   assert.ok(Array.isArray(payload.myHoleCards));
   assert.equal(payload.myHoleCards.length, 2);
   assert.equal(payload.state.state.holeCardsByUserId, undefined);
@@ -144,15 +145,22 @@ const runHappyPath = async () => {
   assert.equal(typeof updatedState.betThisRoundByUserId, "object");
   assert.equal(typeof updatedState.actedThisRoundByUserId, "object");
   assert.equal(typeof updatedState.foldedByUserId, "object");
+  assert.equal(typeof updatedState.contributionsByUserId, "object");
+  assert.equal(typeof updatedState.allInByUserId, "object");
   assert.equal(typeof updatedState.lastActionRequestIdByUserId, "object");
   assert.equal(typeof updatedState.stacks, "object");
   if (Object.prototype.hasOwnProperty.call(updatedState.stacks, userId)) {
     assert.equal(typeof updatedState.stacks[userId], "number");
   }
-  assert.equal(updatedState.toCallByUserId[userId], 0);
+  assert.equal(updatedState.toCallByUserId[userId], 2);
   assert.equal(updatedState.betThisRoundByUserId[userId], 0);
   assert.equal(updatedState.actedThisRoundByUserId[userId], false);
   assert.equal(updatedState.foldedByUserId[userId], false);
+  assert.equal(updatedState.contributionsByUserId[userId], 0);
+  assert.equal(updatedState.betThisRoundByUserId["user-2"], 1);
+  assert.equal(updatedState.betThisRoundByUserId["user-3"], 2);
+  assert.equal(updatedState.toCallByUserId["user-2"], 1);
+  assert.equal(updatedState.toCallByUserId["user-3"], 0);
   const seatOrder = ["user-1", "user-2", "user-3"];
   const deck = deriveDeck(updatedState.handSeed);
   const pos = seatOrder.indexOf(userId);
@@ -233,7 +241,7 @@ const runInvalidDeal = async () => {
           const text = String(query).toLowerCase();
           queries.push({ query: String(query), params });
           if (text.includes("from public.poker_tables")) {
-            return [{ id: tableId, status: "OPEN", max_players: 6 }];
+            return [{ id: tableId, status: "OPEN", max_players: 6, stakes: DEFAULT_STAKES }];
           }
           if (text.includes("from public.poker_state")) {
             return [{ version: 1, state: { phase: "INIT", stacks: {} } }];
@@ -341,7 +349,7 @@ const runMissingStateRow = async () => {
           const text = String(query).toLowerCase();
           queries.push({ query: String(query), params });
           if (text.includes("from public.poker_tables")) {
-            return [{ id: tableId, status: "OPEN", max_players: 6 }];
+            return [{ id: tableId, status: "OPEN", max_players: 6, stakes: DEFAULT_STAKES }];
           }
           if (text.includes("from public.poker_state")) {
             return [];
@@ -369,9 +377,61 @@ const runMissingStateRow = async () => {
   assert.equal(payload.error, "state_invalid");
 };
 
+const runInvalidStakes = async () => {
+  const queries = [];
+  const handler = loadPokerHandler("netlify/functions/poker-start-hand.mjs", {
+    baseHeaders: () => ({}),
+    corsHeaders: () => ({ "access-control-allow-origin": "https://example.test" }),
+    createDeck,
+    dealHoleCards,
+    deriveDeck,
+    extractBearerToken: () => "token",
+    getRng,
+    isPlainObject,
+    isStateStorageValid,
+    shuffle,
+    verifySupabaseJwt: async () => ({ valid: true, userId }),
+    isValidUuid: () => true,
+    normalizeJsonState,
+    upgradeLegacyInitStateWithSeats,
+    withoutPrivateState,
+    beginSql: async (fn) =>
+      fn({
+        unsafe: async (query, params) => {
+          const text = String(query).toLowerCase();
+          queries.push({ query: String(query), params });
+          if (text.includes("from public.poker_tables")) {
+            return [{ id: tableId, status: "OPEN", max_players: 6, stakes: { sb: 0, bb: 0 } }];
+          }
+          if (text.includes("from public.poker_state")) {
+            return [{ version: 1, state: { phase: "INIT", stacks: {} } }];
+          }
+          if (text.includes("from public.poker_seats")) {
+            return [
+              { user_id: "user-1", seat_no: 1, status: "ACTIVE" },
+              { user_id: "user-2", seat_no: 3, status: "ACTIVE" },
+            ];
+          }
+          return [];
+        },
+      }),
+    klog: () => {},
+  });
+  const response = await handler({
+    httpMethod: "POST",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    body: JSON.stringify({ tableId, requestId: "req-invalid-stakes" }),
+  });
+
+  assert.equal(response.statusCode, 400);
+  const payload = JSON.parse(response.body);
+  assert.equal(payload.error, "invalid_stakes");
+};
+
 await runHappyPath();
 await runReplayPath();
 await runInvalidDeal();
 await runMissingHoleCardsTable();
 await runMissingDealSecret();
 await runMissingStateRow();
+await runInvalidStakes();
