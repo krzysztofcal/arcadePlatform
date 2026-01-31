@@ -66,9 +66,6 @@ const maybeApplyTurnTimeout = ({ tableId, state, privateState, nowMs }) => {
   }
 
   const seatUserIdsInOrder = normalizeSeatOrderFromState(nextState.seats);
-  if (seatUserIdsInOrder.length === 0) {
-    throw new Error("showdown_no_players");
-  }
   const currentHandId = typeof nextState.handId === "string" ? nextState.handId.trim() : "";
   const showdownHandId =
     typeof nextState.showdown?.handId === "string" && nextState.showdown.handId.trim() ? nextState.showdown.handId.trim() : "";
@@ -77,7 +74,13 @@ const maybeApplyTurnTimeout = ({ tableId, state, privateState, nowMs }) => {
     (userId) => typeof userId === "string" && !nextState.foldedByUserId?.[userId]
   );
   const shouldMaterializeShowdown =
-    !showdownAlreadyMaterialized && (eligibleUserIds.length <= 1 || nextState.phase === "SHOWDOWN");
+    seatUserIdsInOrder.length > 0 &&
+    !showdownAlreadyMaterialized &&
+    (eligibleUserIds.length <= 1 || nextState.phase === "SHOWDOWN");
+
+  if (nextState.phase === "SHOWDOWN" && seatUserIdsInOrder.length === 0) {
+    throw new Error("showdown_no_players");
+  }
 
   if (shouldMaterializeShowdown) {
     const materialized = materializeShowdownAndPayout({

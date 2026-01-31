@@ -53,7 +53,7 @@ const normalizeRequest = (value) => {
 const hasRequiredState = (state) =>
   isPlainObjectValue(state) &&
   typeof state.phase === "string" &&
-  (typeof state.turnUserId === "string" || state.phase === "HAND_DONE") &&
+  typeof state.turnUserId === "string" &&
   Array.isArray(state.seats) &&
   isPlainObjectValue(state.stacks) &&
   isPlainObjectValue(state.toCallByUserId) &&
@@ -293,13 +293,13 @@ export async function handler(event) {
         });
         throw makeError(409, "state_invalid");
       };
-      const materializeShowdownState = (stateToMaterialize) => {
+      const materializeShowdownState = (stateToMaterialize, seatOrder, holeCards) => {
         let materialized;
         try {
           materialized = materializeShowdownAndPayout({
             state: stateToMaterialize,
-            seatUserIdsInOrder,
-            holeCardsByUserId,
+            seatUserIdsInOrder: seatOrder,
+            holeCardsByUserId: holeCards,
             computeShowdown,
             awardPotsAtShowdown,
             klog,
@@ -621,8 +621,11 @@ export async function handler(event) {
       const events = Array.isArray(applied.events) ? applied.events.slice() : [];
       let loops = 0;
       const advanceEvents = [];
-      if (nextState.phase === "HAND_DONE") {
-        nextState = materializeShowdownState(nextState);
+      const eligibleAfterAction = seatUserIdsInOrder.filter(
+        (userId) => typeof userId === "string" && !nextState.foldedByUserId?.[userId]
+      );
+      if (eligibleAfterAction.length <= 1) {
+        nextState = materializeShowdownState(nextState, seatUserIdsInOrder, holeCardsByUserId);
       }
       while (loops < ADVANCE_LIMIT) {
         const prevPhase = nextState.phase;
@@ -662,7 +665,7 @@ export async function handler(event) {
         !showdownAlreadyMaterialized && (eligibleUserIds.length <= 1 || nextState.phase === "SHOWDOWN");
 
       if (shouldMaterializeShowdown) {
-        nextState = materializeShowdownState(nextState);
+        nextState = materializeShowdownState(nextState, seatUserIdsInOrder, holeCardsByUserId);
       }
 
       const { holeCardsByUserId: _ignoredHoleCards, deck: _ignoredDeck, ...stateBase } = nextState;
