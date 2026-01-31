@@ -789,9 +789,7 @@
 
     function updateDevActionsUi(){
       var enabled = shouldEnableDevActions();
-      setLoading(startHandBtn, startHandPending);
       setDisabled(startHandBtn, !enabled || startHandPending);
-      setLoading(actBtn, actPending);
       setDisabled(actBtn, !enabled || actPending);
       if (actTypeSelect) setDisabled(actTypeSelect, !enabled || actPending);
       updateActAmountState();
@@ -1423,7 +1421,11 @@
         }
         if (result && result.ok === false){
           clearActPending();
-          setInlineStatus(actStatusEl, t('pokerErrAct', 'Failed to send action'), 'error');
+          if (result.error === 'not_your_turn'){
+            setInlineStatus(actStatusEl, t('pokerErrNotYourTurn', 'Not your turn'), 'error');
+          } else {
+            setInlineStatus(actStatusEl, t('pokerErrAct', 'Failed to send action'), 'error');
+          }
           return;
         }
         clearActPending();
