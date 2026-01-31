@@ -49,6 +49,7 @@ export const loadPokerHandler = (filePath, mocks) => {
     "deriveRemainingDeck",
     "advanceIfNeeded",
     "applyAction",
+    "materializeShowdownAndPayout",
     "executeSql",
     "extractBearerToken",
     "getRng",

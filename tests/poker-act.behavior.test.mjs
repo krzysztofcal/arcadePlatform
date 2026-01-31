@@ -3,6 +3,7 @@ import { deriveDeck } from "../netlify/functions/_shared/poker-deal-deterministi
 import { dealHoleCards } from "../netlify/functions/_shared/poker-engine.mjs";
 import { isHoleCardsTableMissing, loadHoleCardsByUserId } from "../netlify/functions/_shared/poker-hole-cards-store.mjs";
 import { awardPotsAtShowdown } from "../netlify/functions/_shared/poker-payout.mjs";
+import { materializeShowdownAndPayout } from "../netlify/functions/_shared/poker-materialize-showdown.mjs";
 import { TURN_MS, advanceIfNeeded, applyAction } from "../netlify/functions/_shared/poker-reducer.mjs";
 import { normalizeRequestId } from "../netlify/functions/_shared/poker-request-id.mjs";
 import { computeShowdown } from "../netlify/functions/_shared/poker-showdown.mjs";
@@ -53,6 +54,7 @@ const makeHandler = (queries, storedState, userId, options = {}) =>
     baseHeaders: () => ({}),
     corsHeaders: () => ({ "access-control-allow-origin": "https://example.test" }),
     awardPotsAtShowdown,
+    materializeShowdownAndPayout,
     computeShowdown,
     extractBearerToken: () => "token",
     verifySupabaseJwt: async () => ({ valid: true, userId }),
