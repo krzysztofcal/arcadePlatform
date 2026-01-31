@@ -3,6 +3,7 @@ import { awardPotsAtShowdown } from "./poker-payout.mjs";
 import { materializeShowdownAndPayout } from "./poker-materialize-showdown.mjs";
 import { computeShowdown } from "./poker-showdown.mjs";
 import { isPlainObject } from "./poker-state-utils.mjs";
+import { klog } from "./supabase-admin.mjs";
 
 const ADVANCE_LIMIT = 4;
 
@@ -83,14 +84,27 @@ const maybeApplyTurnTimeout = ({ tableId, state, privateState, nowMs }) => {
   }
 
   if (shouldMaterializeShowdown) {
-    const materialized = materializeShowdownAndPayout({
-      state: nextState,
-      seatUserIdsInOrder,
-      holeCardsByUserId: nextState.holeCardsByUserId,
-      computeShowdown,
-      awardPotsAtShowdown,
-    });
-    nextState = materialized.nextState;
+    try {
+      const materialized = materializeShowdownAndPayout({
+        state: nextState,
+        seatUserIdsInOrder,
+        holeCardsByUserId: nextState.holeCardsByUserId,
+        computeShowdown,
+        awardPotsAtShowdown,
+      });
+      nextState = materialized.nextState;
+    } catch (error) {
+      const reason = error?.message || "unknown";
+      if (typeof klog === "function") {
+        klog("poker_showdown_materialize_failed", {
+          tableId,
+          handId: typeof nextState.handId === "string" ? nextState.handId : null,
+          phase: nextState.phase ?? null,
+          reason,
+        });
+      }
+      throw error;
+    }
   }
 
   const { holeCardsByUserId: _ignoredHoleCards, deck: _ignoredDeck, ...stateBase } = nextState;
