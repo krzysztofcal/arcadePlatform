@@ -49,6 +49,11 @@ const seatOrder = baseState.seats.map((seat) => seat.userId);
 const dealt = dealHoleCards(deriveDeck(baseState.handSeed), seatOrder);
 const defaultHoleCards = dealt.holeCardsByUserId;
 
+const getDefaultActionForTurn = (state, userId) => {
+  const toCall = Number(state?.toCallByUserId?.[userId] || 0);
+  return toCall > 0 ? { type: "CALL" } : { type: "CHECK" };
+};
+
 const makeHandler = (queries, storedState, userId, options = {}) =>
   loadPokerHandler("netlify/functions/poker-act.mjs", {
     baseHeaders: () => ({}),
@@ -569,20 +574,23 @@ const run = async () => {
         holeCardsByUserId,
         activeSeatUserIds: ["user-1", "user-2"],
       });
+      const firstAction = getDefaultActionForTurn(startedState, firstUserId);
       const firstCheck = await handlerFirst({
         httpMethod: "POST",
         headers: { origin: "https://example.test", authorization: "Bearer token" },
-        body: JSON.stringify({ tableId, requestId: "req-preflop-1", action: { type: "CHECK" } }),
+        body: JSON.stringify({ tableId, requestId: "req-preflop-1", action: firstAction }),
       });
       assert.equal(firstCheck.statusCode, 200);
+      const nextState = JSON.parse(storedActState.value);
       const handlerSecond = makeHandler(actQueries, storedActState, secondUserId, {
         holeCardsByUserId,
         activeSeatUserIds: ["user-1", "user-2"],
       });
+      const secondAction = getDefaultActionForTurn(nextState, secondUserId);
       const secondCheck = await handlerSecond({
         httpMethod: "POST",
         headers: { origin: "https://example.test", authorization: "Bearer token" },
-        body: JSON.stringify({ tableId, requestId: "req-preflop-2", action: { type: "CHECK" } }),
+        body: JSON.stringify({ tableId, requestId: "req-preflop-2", action: secondAction }),
       });
       assert.equal(secondCheck.statusCode, 200);
       const secondPayload = JSON.parse(secondCheck.body);
