@@ -789,7 +789,7 @@
       if (!actAmountInput) return;
       var type = actTypeSelect ? String(actTypeSelect.value || '') : '';
       var needsAmount = type === 'BET' || type === 'RAISE';
-      setDisabled(actAmountInput, !shouldEnableDevActions() || actPending || !needsAmount);
+      setDisabled(actAmountInput, !shouldEnableDevActions() || !needsAmount);
     }
 
     function updateDevActionsUi(){
@@ -804,6 +804,12 @@
 
     function setDevActionsEnabled(enabled){
       devActionsEnabled = !!enabled;
+      if (!devActionsEnabled){
+        clearStartHandPending();
+        clearActPending();
+        setInlineStatus(startHandStatusEl, null, null);
+        setInlineStatus(actStatusEl, null, null);
+      }
       updateDevActionsUi();
     }
 
