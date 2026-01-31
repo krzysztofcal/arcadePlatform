@@ -16,6 +16,22 @@
 
 .poker-panel h3{margin:0 0 12px; font:600 15px Poppins, sans-serif; color:#cdd6ff;}
 
+.poker-showdown-panel{background:rgba(12,18,34,.55);}
+
+.poker-showdown-section{display:flex; flex-direction:column; gap:6px; margin-bottom:10px;}
+
+.poker-showdown-section:last-child{margin-bottom:0;}
+
+.poker-showdown-label{font:600 12px Poppins, sans-serif; color:var(--muted); text-transform:uppercase; letter-spacing:.04em;}
+
+.poker-showdown-body{font:600 13px Poppins, sans-serif; color:#e8eeff; word-break:break-word;}
+
+.poker-showdown-list{display:flex; flex-direction:column; gap:4px;}
+
+.poker-showdown-row{font:600 13px Poppins, sans-serif; color:#e8eeff;}
+
+.poker-showdown-meta{font:600 12px Poppins, sans-serif; color:var(--muted); display:flex; flex-direction:column; gap:4px;}
+
 .poker-input{background:var(--card-2); border:1px solid var(--border); border-radius:8px; padding:8px 12px; color:#e8eeff; font:600 13px Poppins, sans-serif; width:80px; margin-right:8px;}
 
 .poker-input:focus{outline:none; border-color:rgba(110,231,231,.45);}
