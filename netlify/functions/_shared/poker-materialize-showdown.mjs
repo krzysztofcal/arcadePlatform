@@ -1,4 +1,7 @@
-const getHandId = (state) => (typeof state?.handId === "string" && state.handId.trim() ? state.handId.trim() : "");
+const getHandId = (state) =>
+  typeof state?.handId === "string" && state.handId.trim()
+    ? state.handId.trim()
+    : "";
 
 const normalizeChipAmount = (name, value) => {
   const amount = Number(value ?? 0);
@@ -15,23 +18,24 @@ const normalizeSeatOrder = (seatUserIdsInOrder, state) => {
     for (const raw of seatUserIdsInOrder) {
       if (typeof raw !== "string") throw new Error("showdown_invalid_seats");
       const userId = raw.trim();
-      if (!userId || seen.has(userId)) throw new Error("showdown_invalid_seats");
+      if (!userId || seen.has(userId))
+        throw new Error("showdown_invalid_seats");
       seen.add(userId);
       out.push(userId);
     }
     return out;
   }
   if (!Array.isArray(state?.seats)) return [];
-  const ordered = state.seats.slice().sort((a, b) => Number(a?.seatNo ?? 0) - Number(b?.seatNo ?? 0));
+  const ordered = state.seats
+    .slice()
+    .sort((a, b) => Number(a?.seatNo ?? 0) - Number(b?.seatNo ?? 0));
   const out = [];
   const seen = new Set();
   for (const seat of ordered) {
     if (typeof seat?.userId !== "string") continue;
     const userId = seat.userId.trim();
     if (!userId) continue;
-    if (seen.has(userId)) {
-      throw new Error("showdown_invalid_seats");
-    }
+    if (seen.has(userId)) throw new Error("showdown_invalid_seats");
     seen.add(userId);
     out.push(userId);
   }
@@ -40,9 +44,8 @@ const normalizeSeatOrder = (seatUserIdsInOrder, state) => {
 
 const listEligibleUserIds = ({ state, seatUserIdsInOrder }) => {
   const seatOrder = normalizeSeatOrder(seatUserIdsInOrder, state);
-  if (seatOrder.length === 0) {
-    throw new Error("showdown_invalid_seats");
-  }
+  if (seatOrder.length === 0) throw new Error("showdown_invalid_seats");
+
   const stacks = state.stacks || {};
   const eligible = [];
   for (const userId of seatOrder) {
@@ -55,15 +58,11 @@ const listEligibleUserIds = ({ state, seatUserIdsInOrder }) => {
 };
 
 const ensureCommunityComplete = (state) => {
-  if (!Array.isArray(state.community)) {
+  if (!Array.isArray(state.community))
     throw new Error("showdown_incomplete_community");
-  }
-  if (state.community.length > 5) {
-    throw new Error("showdown_invalid_community");
-  }
-  if (state.community.length !== 5) {
+  if (state.community.length > 5) throw new Error("showdown_invalid_community");
+  if (state.community.length !== 5)
     throw new Error("showdown_incomplete_community");
-  }
   return state.community.slice();
 };
 
@@ -75,72 +74,76 @@ const materializeShowdownAndPayout = ({
   awardPotsAtShowdown,
   klog,
 }) => {
-  if (!state || typeof state !== "object" || Array.isArray(state)) return { nextState: state };
+  if (!state || typeof state !== "object" || Array.isArray(state))
+    return { nextState: state };
 
   const handId = getHandId(state);
   const showdownHandId =
-    typeof state.showdown?.handId === "string" && state.showdown.handId.trim() ? state.showdown.handId.trim() : "";
+    typeof state.showdown?.handId === "string" && state.showdown.handId.trim()
+      ? state.showdown.handId.trim()
+      : "";
 
+  // Idempotent: if showdown already exists, validate invariants and return state unchanged.
   if (state.showdown) {
-    if (!handId) {
-      return { nextState: state };
-    }
-    if (!showdownHandId || showdownHandId !== handId) {
+    if (!handId) return { nextState: state };
+    if (!showdownHandId || showdownHandId !== handId)
       throw new Error("showdown_hand_mismatch");
-    }
-    if (normalizeChipAmount("pot", state.pot) > 0) {
+    if (normalizeChipAmount("pot", state.pot) > 0)
       throw new Error("showdown_pot_not_zero");
-    }
     return { nextState: state };
   }
 
-  if (!handId) {
-    throw new Error("showdown_missing_hand_id");
-  }
+  if (!handId) throw new Error("showdown_missing_hand_id");
 
-  const { eligibleUserIds, seatOrder } = listEligibleUserIds({ state, seatUserIdsInOrder });
+  const { eligibleUserIds, seatOrder } = listEligibleUserIds({
+    state,
+    seatUserIdsInOrder,
+  });
   if (eligibleUserIds.length === 0) {
-    if (typeof klog === "function") {
+    if (typeof klog === "function")
       klog("poker_showdown_no_eligible", { handId: state.handId ?? null });
-    }
     return { nextState: state };
   }
 
+  // Fast path: everyone folded except one → award whole pot without needing hole cards / compute.
   if (eligibleUserIds.length === 1) {
     const winnerUserId = eligibleUserIds[0];
     const potAmount = normalizeChipAmount("pot", state.pot);
+
     const nextStacks = { ...state.stacks };
-    nextStacks[winnerUserId] = normalizeChipAmount("stack", nextStacks[winnerUserId]) + potAmount;
+    nextStacks[winnerUserId] =
+      normalizeChipAmount("stack", nextStacks[winnerUserId]) + potAmount;
+
     const awardedAt = new Date().toISOString();
-    const showdown = {
-      winners: [winnerUserId],
-      potsAwarded: [
-        {
-          amount: potAmount,
-          winners: [winnerUserId],
-          eligibleUserIds: [winnerUserId],
-        },
-      ],
-      potAwardedTotal: potAmount,
-      potAwarded: potAmount,
-      reason: "all_folded",
-      awardedAt,
-      handId,
-    };
     return {
       nextState: {
         ...state,
         stacks: nextStacks,
         pot: 0,
-        showdown,
+        showdown: {
+          winners: [winnerUserId],
+          potsAwarded: [
+            {
+              amount: potAmount,
+              winners: [winnerUserId],
+              eligibleUserIds: [winnerUserId],
+            },
+          ],
+          potAwardedTotal: potAmount,
+          potAwarded: potAmount,
+          reason: "all_folded",
+          awardedAt,
+          handId,
+        },
       },
     };
   }
 
-  if (typeof awardPotsAtShowdown !== "function") {
+  if (typeof awardPotsAtShowdown !== "function")
     throw new Error("showdown_invalid_compute");
-  }
+
   const community = ensureCommunityComplete(state);
+
   const awardResult = awardPotsAtShowdown({
     state: {
       ...state,
@@ -151,15 +154,19 @@ const materializeShowdownAndPayout = ({
     seatUserIdsInOrder: seatOrder,
     computeShowdown,
   });
-  if (!awardResult.nextState.showdown || !Array.isArray(awardResult.nextState.showdown.winners)) {
+
+  if (
+    !awardResult?.nextState?.showdown ||
+    !Array.isArray(awardResult.nextState.showdown.winners)
+  ) {
     throw new Error("showdown_missing_result");
   }
-  const nextShowdown = { ...awardResult.nextState.showdown, handId };
+
   return {
     nextState: {
       ...awardResult.nextState,
       pot: 0,
-      showdown: nextShowdown,
+      showdown: { ...awardResult.nextState.showdown, handId },
     },
   };
 };
