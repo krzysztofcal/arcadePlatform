@@ -187,8 +187,12 @@
     } else if (entry && typeof entry === 'object'){
       userId = entry.userId || entry.id || entry.uid;
     }
-    if (typeof userId === 'string') userId = userId.trim();
-    if (!userId) return t('pokerShowdownUnknownUser', 'Unknown');
+    if (typeof userId !== 'string'){
+      userId = null;
+    } else {
+      userId = userId.trim();
+    }
+    if (!userId) return t('pokerUnknownUser', 'Unknown');
     if (playersById && playersById[userId]) return playersById[userId];
     var short = shortId(userId);
     return short || t('pokerUnknownUser', 'Unknown');
@@ -355,7 +359,7 @@
           row.className = 'poker-showdown-row';
           var amount = formatChips(pot && pot.amount != null ? pot.amount : null);
           var winnersLabel = formatWinnerList(pot && pot.winners ? pot.winners : [], playersById);
-          row.textContent = 'Pot #' + (idx + 1) + ': ' + amount + ' \u2192 ' + winnersLabel;
+          row.textContent = t('pokerShowdownPotPrefix', 'Pot #') + (idx + 1) + ': ' + amount + ' \u2192 ' + winnersLabel;
           potList.appendChild(row);
         });
         potsEl.appendChild(potList);
