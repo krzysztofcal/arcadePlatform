@@ -35,6 +35,7 @@ const KNOWN_ERROR_CODES = new Set([
   "table_not_open",
   "not_allowed",
   "not_enough_players",
+  "invalid_stakes",
   "state_invalid",
   "already_in_hand",
 ]);
@@ -65,6 +66,43 @@ const isHoleCardsTableMissing = (error) => {
   if (error.code === "42P01") return true;
   const message = String(error.message || "").toLowerCase();
   return message.includes("poker_hole_cards") && message.includes("does not exist");
+};
+
+const DEFAULT_STAKES = { sb: 1, bb: 2 };
+
+const parseStakeAmount = (value) => {
+  if (value == null || value === "") return null;
+  const num = Number(value);
+  if (!Number.isFinite(num) || !Number.isInteger(num)) return null;
+  if (num < 1) return null;
+  return num;
+};
+
+const resolveStakeValue = (stakes, key) => {
+  if (!stakes || typeof stakes !== "object") return null;
+  return stakes[key];
+};
+
+const isMissingOrEmptyStakes = (stakes) => {
+  if (stakes == null) return true;
+  if (typeof stakes !== "object") return false;
+  if (Array.isArray(stakes)) return false;
+  return Object.keys(stakes).length === 0;
+};
+
+const buildValidatedStacks = (activeUserIdList, currentStacks) => {
+  const nextStacks = {};
+  for (const userId of activeUserIdList) {
+    if (!Object.prototype.hasOwnProperty.call(currentStacks, userId)) {
+      return { ok: false, stacks: {} };
+    }
+    const n = Number(currentStacks[userId]);
+    if (!Number.isFinite(n) || !Number.isInteger(n) || n < 0) {
+      return { ok: false, stacks: {} };
+    }
+    nextStacks[userId] = n;
+  }
+  return { ok: true, stacks: nextStacks };
 };
 
 export async function handler(event) {
@@ -129,13 +167,35 @@ export async function handler(event) {
 
   try {
     const result = await beginSql(async (tx) => {
-      const tableRows = await tx.unsafe("select id, status from public.poker_tables where id = $1 limit 1;", [tableId]);
+      const tableRows = await tx.unsafe("select id, status, stakes from public.poker_tables where id = $1 limit 1;", [
+        tableId,
+      ]);
       const table = tableRows?.[0] || null;
       if (!table) {
         throw makeError(404, "table_not_found");
       }
       if (table.status !== "OPEN") {
         throw makeError(409, "table_not_open");
+      }
+      const sbValue = resolveStakeValue(table.stakes, "sb");
+      const bbValue = resolveStakeValue(table.stakes, "bb");
+      let smallBlind = parseStakeAmount(sbValue);
+      let bigBlind = parseStakeAmount(bbValue);
+      if (smallBlind == null || bigBlind == null || bigBlind < smallBlind) {
+        if (isMissingOrEmptyStakes(table.stakes)) {
+          smallBlind = DEFAULT_STAKES.sb;
+          bigBlind = DEFAULT_STAKES.bb;
+          try {
+            await tx.unsafe("update public.poker_tables set stakes = $2::jsonb where id = $1;", [
+              tableId,
+              JSON.stringify(DEFAULT_STAKES),
+            ]);
+          } catch (error) {
+            klog("poker_start_hand_stakes_upgrade_failed", { tableId, message: error?.message || "unknown_error" });
+          }
+        } else {
+          throw makeError(400, "invalid_stakes");
+        }
       }
 
       const stateRows = await tx.unsafe(
@@ -232,7 +292,6 @@ export async function handler(event) {
 
       const orderedSeats = validSeats.slice().sort((a, b) => Number(a.seat_no) - Number(b.seat_no));
       const dealerSeatNo = orderedSeats[0].seat_no;
-      const turnUserId = orderedSeats[1]?.user_id || orderedSeats[0].user_id;
 
       const rng = getRng();
       const handId =
@@ -247,16 +306,47 @@ export async function handler(event) {
       const activeUserIds = new Set(orderedSeats.map((seat) => seat.user_id));
       const activeUserIdList = orderedSeats.map((seat) => seat.user_id);
       const currentStacks = parseStacks(currentState.stacks);
-      const nextStacks = activeUserIdList.reduce((acc, userId) => {
-        if (!Object.prototype.hasOwnProperty.call(currentStacks, userId)) return acc;
-        const n = Number(currentStacks[userId]);
-        if (Number.isFinite(n) && Number.isInteger(n) && n >= 0) acc[userId] = n;
-        return acc;
-      }, {});
+      const validatedStacks = buildValidatedStacks(activeUserIdList, currentStacks);
+      if (!validatedStacks.ok) {
+        throw makeError(409, "state_invalid");
+      }
+      const nextStacks = validatedStacks.stacks;
       const toCallByUserId = Object.fromEntries(activeUserIdList.map((userId) => [userId, 0]));
       const betThisRoundByUserId = Object.fromEntries(activeUserIdList.map((userId) => [userId, 0]));
       const actedThisRoundByUserId = Object.fromEntries(activeUserIdList.map((userId) => [userId, false]));
       const foldedByUserId = Object.fromEntries(activeUserIdList.map((userId) => [userId, false]));
+      const allInByUserId = Object.fromEntries(activeUserIdList.map((userId) => [userId, false]));
+      const contributionsByUserId = Object.fromEntries(activeUserIdList.map((userId) => [userId, 0]));
+      const seatCount = orderedSeats.length;
+      const dealerIndex = 0;
+      const sbIndex = seatCount === 2 ? dealerIndex : (dealerIndex + 1) % seatCount;
+      const bbIndex = seatCount === 2 ? (dealerIndex + 1) % seatCount : (dealerIndex + 2) % seatCount;
+      const firstToActIndex = seatCount === 2 ? sbIndex : (bbIndex + 1) % seatCount;
+      const sbUserId = orderedSeats[sbIndex]?.user_id || null;
+      const bbUserId = orderedSeats[bbIndex]?.user_id || null;
+      const turnUserId = orderedSeats[firstToActIndex]?.user_id || orderedSeats[0].user_id;
+      const postBlind = (userId, amount) => {
+        if (!userId) return 0;
+        const stack = Number(nextStacks[userId] ?? 0);
+        if (!Number.isFinite(stack) || stack <= 0) return 0;
+        const pay = Math.min(amount, stack);
+        nextStacks[userId] = stack - pay;
+        betThisRoundByUserId[userId] = (betThisRoundByUserId[userId] || 0) + pay;
+        contributionsByUserId[userId] = (contributionsByUserId[userId] || 0) + pay;
+        if (nextStacks[userId] === 0) allInByUserId[userId] = true;
+        return pay;
+      };
+      let pot = 0;
+      pot += postBlind(sbUserId, smallBlind);
+      pot += postBlind(bbUserId, bigBlind);
+      if (pot <= 0) {
+        throw makeError(409, "state_invalid");
+      }
+      const maxBet = Math.max(...Object.values(betThisRoundByUserId));
+      for (const userId of activeUserIdList) {
+        const currentBet = Number(betThisRoundByUserId[userId] || 0);
+        toCallByUserId[userId] = Math.max(0, maxBet - currentBet);
+      }
 
       let deck;
       try {
@@ -310,7 +400,7 @@ export async function handler(event) {
         handId,
         handSeed,
         phase: "PREFLOP",
-        pot: 0,
+        pot,
         community: [],
         communityDealt: 0,
         seats: derivedSeats,
@@ -321,6 +411,10 @@ export async function handler(event) {
         betThisRoundByUserId,
         actedThisRoundByUserId,
         foldedByUserId,
+        allInByUserId,
+        contributionsByUserId,
+        lastAggressorUserId: bbUserId,
+        sidePots: null,
         lastActionRequestIdByUserId: {},
         lastStartHandRequestId: requestIdParsed.value || null,
         lastStartHandUserId: auth.userId,

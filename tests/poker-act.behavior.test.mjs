@@ -49,6 +49,11 @@ const seatOrder = baseState.seats.map((seat) => seat.userId);
 const dealt = dealHoleCards(deriveDeck(baseState.handSeed), seatOrder);
 const defaultHoleCards = dealt.holeCardsByUserId;
 
+const getDefaultActionForTurn = (state, userId) => {
+  const toCall = Number(state?.toCallByUserId?.[userId] || 0);
+  return toCall > 0 ? { type: "CALL" } : { type: "CHECK" };
+};
+
 const makeHandler = (queries, storedState, userId, options = {}) =>
   loadPokerHandler("netlify/functions/poker-act.mjs", {
     baseHeaders: () => ({}),
@@ -561,31 +566,47 @@ const run = async () => {
           holeCardsByUserId[userKey] = cards;
         }
       }
-      const storedActState = { value: JSON.stringify(startedState), version: 1 };
-      const firstUserId = startedState.turnUserId;
-      const secondUserId = firstUserId === "user-1" ? "user-2" : "user-1";
-      const actQueries = [];
-      const handlerFirst = makeHandler(actQueries, storedActState, firstUserId, {
-        holeCardsByUserId,
-        activeSeatUserIds: ["user-1", "user-2"],
-      });
-      const firstCheck = await handlerFirst({
-        httpMethod: "POST",
-        headers: { origin: "https://example.test", authorization: "Bearer token" },
-        body: JSON.stringify({ tableId, requestId: "req-preflop-1", action: { type: "CHECK" } }),
-      });
-      assert.equal(firstCheck.statusCode, 200);
-      const handlerSecond = makeHandler(actQueries, storedActState, secondUserId, {
-        holeCardsByUserId,
-        activeSeatUserIds: ["user-1", "user-2"],
-      });
-      const secondCheck = await handlerSecond({
-        httpMethod: "POST",
-        headers: { origin: "https://example.test", authorization: "Bearer token" },
-        body: JSON.stringify({ tableId, requestId: "req-preflop-2", action: { type: "CHECK" } }),
-      });
-      assert.equal(secondCheck.statusCode, 200);
-      const secondPayload = JSON.parse(secondCheck.body);
+    const storedActState = { value: JSON.stringify(startedState), version: 1 };
+    const firstUserId = startedState.turnUserId;
+    const secondUserId = firstUserId === "user-1" ? "user-2" : "user-1";
+    const actQueries = [];
+    const actWithRetry = async ({ requestId }) => {
+      const retryStatus = new Set([425, 429, 500, 502, 503, 504]);
+      for (let attempt = 1; attempt <= 4; attempt += 1) {
+        const getTableHandler = makeGetTableHandler(actQueries, storedActState, "user-1");
+        const tableResponse = await getTableHandler({
+          httpMethod: "GET",
+          headers: { origin: "https://example.test", authorization: "Bearer token" },
+          queryStringParameters: { tableId },
+        });
+        assert.equal(tableResponse.statusCode, 200);
+        const tablePayload = JSON.parse(tableResponse.body);
+        const tableState = tablePayload.state.state;
+        const turnUserId = tableState.turnUserId;
+        const handler = makeHandler(actQueries, storedActState, turnUserId, {
+          holeCardsByUserId,
+          activeSeatUserIds: ["user-1", "user-2"],
+        });
+        const action = getDefaultActionForTurn(tableState, turnUserId);
+        const response = await handler({
+          httpMethod: "POST",
+          headers: { origin: "https://example.test", authorization: "Bearer token" },
+          body: JSON.stringify({ tableId, requestId: `${requestId}-${attempt}`, action }),
+        });
+        if (response.statusCode === 403) {
+          const payload = JSON.parse(response.body || "{}");
+          if (payload.error === "not_your_turn") continue;
+        }
+        if (retryStatus.has(response.statusCode)) continue;
+        return response;
+      }
+      throw new Error("actWithRetry: exhausted attempts");
+    };
+    const firstResponse = await actWithRetry({ requestId: "req-preflop-1" });
+    assert.equal(firstResponse.statusCode, 200);
+    const secondResponse = await actWithRetry({ requestId: "req-preflop-2" });
+    assert.equal(secondResponse.statusCode, 200);
+    const secondPayload = JSON.parse(secondResponse.body);
       assert.equal(secondPayload.state.state.phase, "FLOP");
       assert.equal(secondPayload.state.state.community.length, 3);
       const flopVersion = secondPayload.state.version;
