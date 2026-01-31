@@ -81,6 +81,21 @@ const resolveStakeValue = (stakes, key) => {
   return stakes[key];
 };
 
+const buildValidatedStacks = (activeUserIdList, currentStacks) => {
+  const nextStacks = {};
+  for (const userId of activeUserIdList) {
+    if (!Object.prototype.hasOwnProperty.call(currentStacks, userId)) {
+      return { ok: false, stacks: {} };
+    }
+    const n = Number(currentStacks[userId]);
+    if (!Number.isFinite(n) || !Number.isInteger(n) || n < 0) {
+      return { ok: false, stacks: {} };
+    }
+    nextStacks[userId] = n;
+  }
+  return { ok: true, stacks: nextStacks };
+};
+
 export async function handler(event) {
   const origin = event.headers?.origin || event.headers?.Origin;
   const cors = corsHeaders(origin);
@@ -269,15 +284,11 @@ export async function handler(event) {
       const activeUserIds = new Set(orderedSeats.map((seat) => seat.user_id));
       const activeUserIdList = orderedSeats.map((seat) => seat.user_id);
       const currentStacks = parseStacks(currentState.stacks);
-      const nextStacks = activeUserIdList.reduce((acc, userId) => {
-        const n = Number(currentStacks[userId]);
-        if (Number.isFinite(n) && Number.isInteger(n) && n >= 0) {
-          acc[userId] = n;
-        } else {
-          acc[userId] = 0;
-        }
-        return acc;
-      }, {});
+      const validatedStacks = buildValidatedStacks(activeUserIdList, currentStacks);
+      if (!validatedStacks.ok) {
+        throw makeError(409, "state_invalid");
+      }
+      const nextStacks = validatedStacks.stacks;
       const toCallByUserId = Object.fromEntries(activeUserIdList.map((userId) => [userId, 0]));
       const betThisRoundByUserId = Object.fromEntries(activeUserIdList.map((userId) => [userId, 0]));
       const actedThisRoundByUserId = Object.fromEntries(activeUserIdList.map((userId) => [userId, false]));
@@ -307,7 +318,7 @@ export async function handler(event) {
       pot += postBlind(sbUserId, smallBlind);
       pot += postBlind(bbUserId, bigBlind);
       if (pot <= 0) {
-        throw makeError(400, "invalid_stakes");
+        throw makeError(409, "state_invalid");
       }
       const maxBet = Math.max(...Object.values(betThisRoundByUserId));
       for (const userId of activeUserIdList) {

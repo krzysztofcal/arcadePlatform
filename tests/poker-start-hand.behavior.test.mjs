@@ -14,6 +14,7 @@ import { loadPokerHandler } from "./helpers/poker-test-helpers.mjs";
 const tableId = "11111111-1111-4111-8111-111111111111";
 const userId = "user-1";
 const DEFAULT_STAKES = { sb: 1, bb: 2 };
+const DEFAULT_STACKS = { "user-1": 100, "user-2": 100, "user-3": 100 };
 
 const makeRng = (seed) => {
   let value = seed;
@@ -52,7 +53,7 @@ const makeHandler = (queries, storedState) =>
             if (storedState.value) {
               return [{ version: 2, state: JSON.parse(storedState.value) }];
             }
-            return [{ version: 1, state: { phase: "INIT", stacks: {} } }];
+            return [{ version: 1, state: { phase: "INIT", stacks: DEFAULT_STACKS } }];
           }
           if (text.includes("from public.poker_seats")) {
             return [
@@ -244,7 +245,7 @@ const runInvalidDeal = async () => {
             return [{ id: tableId, status: "OPEN", max_players: 6, stakes: DEFAULT_STAKES }];
           }
           if (text.includes("from public.poker_state")) {
-            return [{ version: 1, state: { phase: "INIT", stacks: {} } }];
+            return [{ version: 1, state: { phase: "INIT", stacks: DEFAULT_STACKS } }];
           }
           if (text.includes("from public.poker_seats")) {
             return [
@@ -377,6 +378,57 @@ const runMissingStateRow = async () => {
   assert.equal(payload.error, "state_invalid");
 };
 
+const runMissingStacks = async () => {
+  const queries = [];
+  const handler = loadPokerHandler("netlify/functions/poker-start-hand.mjs", {
+    baseHeaders: () => ({}),
+    corsHeaders: () => ({ "access-control-allow-origin": "https://example.test" }),
+    createDeck,
+    dealHoleCards,
+    deriveDeck,
+    extractBearerToken: () => "token",
+    getRng,
+    isPlainObject,
+    isStateStorageValid,
+    shuffle,
+    verifySupabaseJwt: async () => ({ valid: true, userId }),
+    isValidUuid: () => true,
+    normalizeJsonState,
+    upgradeLegacyInitStateWithSeats,
+    withoutPrivateState,
+    beginSql: async (fn) =>
+      fn({
+        unsafe: async (query, params) => {
+          const text = String(query).toLowerCase();
+          queries.push({ query: String(query), params });
+          if (text.includes("from public.poker_tables")) {
+            return [{ id: tableId, status: "OPEN", max_players: 6, stakes: DEFAULT_STAKES }];
+          }
+          if (text.includes("from public.poker_state")) {
+            return [{ version: 1, state: { phase: "INIT", stacks: { "user-1": 100 } } }];
+          }
+          if (text.includes("from public.poker_seats")) {
+            return [
+              { user_id: "user-1", seat_no: 1, status: "ACTIVE" },
+              { user_id: "user-2", seat_no: 3, status: "ACTIVE" },
+            ];
+          }
+          return [];
+        },
+      }),
+    klog: () => {},
+  });
+  const response = await handler({
+    httpMethod: "POST",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    body: JSON.stringify({ tableId, requestId: "req-missing-stacks" }),
+  });
+
+  assert.equal(response.statusCode, 409);
+  const payload = JSON.parse(response.body);
+  assert.equal(payload.error, "state_invalid");
+};
+
 const runInvalidStakes = async () => {
   const queries = [];
   const handler = loadPokerHandler("netlify/functions/poker-start-hand.mjs", {
@@ -404,7 +456,7 @@ const runInvalidStakes = async () => {
             return [{ id: tableId, status: "OPEN", max_players: 6, stakes: { sb: 0, bb: 0 } }];
           }
           if (text.includes("from public.poker_state")) {
-            return [{ version: 1, state: { phase: "INIT", stacks: {} } }];
+            return [{ version: 1, state: { phase: "INIT", stacks: DEFAULT_STACKS } }];
           }
           if (text.includes("from public.poker_seats")) {
             return [
@@ -434,4 +486,5 @@ await runInvalidDeal();
 await runMissingHoleCardsTable();
 await runMissingDealSecret();
 await runMissingStateRow();
+await runMissingStacks();
 await runInvalidStakes();
