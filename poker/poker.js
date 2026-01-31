@@ -789,9 +789,11 @@
 
     function updateDevActionsUi(){
       var enabled = shouldEnableDevActions();
-      setDisabled(startHandBtn, !enabled || startHandPending);
-      setDisabled(actBtn, !enabled || actPending);
-      if (actTypeSelect) setDisabled(actTypeSelect, !enabled || actPending);
+      setLoading(startHandBtn, startHandPending);
+      setLoading(actBtn, actPending);
+      setDisabled(startHandBtn, !enabled);
+      setDisabled(actBtn, !enabled);
+      if (actTypeSelect) setDisabled(actTypeSelect, !enabled);
       updateActAmountState();
     }
 
