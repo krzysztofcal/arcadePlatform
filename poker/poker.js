@@ -777,14 +777,14 @@
     }
 
     function shouldEnableDevActions(){
-      return devActionsEnabled && !!tableId && !joinPending && !leavePending;
+      return devActionsEnabled && !!tableId && !joinPending && !leavePending && !startHandPending && !actPending;
     }
 
     function updateActAmountState(){
       if (!actAmountInput) return;
       var type = actTypeSelect ? String(actTypeSelect.value || '') : '';
       var needsAmount = type === 'BET' || type === 'RAISE';
-      setDisabled(actAmountInput, !shouldEnableDevActions() || actPending || !needsAmount);
+      setDisabled(actAmountInput, !shouldEnableDevActions() || !needsAmount);
     }
 
     function updateDevActionsUi(){
