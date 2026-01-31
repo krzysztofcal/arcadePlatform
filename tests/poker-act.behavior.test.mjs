@@ -570,8 +570,8 @@ const run = async () => {
     const firstUserId = startedState.turnUserId;
     const secondUserId = firstUserId === "user-1" ? "user-2" : "user-1";
     const actQueries = [];
-    const actWithRetry = async ({ action, requestId }) => {
-      const retryStatus = new Set([409, 425, 429, 500, 502, 503, 504]);
+    const actWithRetry = async ({ requestId }) => {
+      const retryStatus = new Set([425, 429, 500, 502, 503, 504]);
       for (let attempt = 1; attempt <= 4; attempt += 1) {
         const getTableHandler = makeGetTableHandler(actQueries, storedActState, "user-1");
         const tableResponse = await getTableHandler({
@@ -581,11 +581,13 @@ const run = async () => {
         });
         assert.equal(tableResponse.statusCode, 200);
         const tablePayload = JSON.parse(tableResponse.body);
-        const turnUserId = tablePayload.state.state.turnUserId;
+        const tableState = tablePayload.state.state;
+        const turnUserId = tableState.turnUserId;
         const handler = makeHandler(actQueries, storedActState, turnUserId, {
           holeCardsByUserId,
           activeSeatUserIds: ["user-1", "user-2"],
         });
+        const action = getDefaultActionForTurn(tableState, turnUserId);
         const response = await handler({
           httpMethod: "POST",
           headers: { origin: "https://example.test", authorization: "Bearer token" },
@@ -600,16 +602,9 @@ const run = async () => {
       }
       throw new Error("actWithRetry: exhausted attempts");
     };
-    const firstResponse = await actWithRetry({
-      action: getDefaultActionForTurn(startedState, firstUserId),
-      requestId: "req-preflop-1",
-    });
+    const firstResponse = await actWithRetry({ requestId: "req-preflop-1" });
     assert.equal(firstResponse.statusCode, 200);
-    const nextState = JSON.parse(storedActState.value);
-    const secondResponse = await actWithRetry({
-      action: getDefaultActionForTurn(nextState, secondUserId),
-      requestId: "req-preflop-2",
-    });
+    const secondResponse = await actWithRetry({ requestId: "req-preflop-2" });
     assert.equal(secondResponse.statusCode, 200);
     const secondPayload = JSON.parse(secondResponse.body);
       assert.equal(secondPayload.state.state.phase, "FLOP");
