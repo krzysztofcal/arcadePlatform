@@ -8,9 +8,21 @@ const normalizeChipAmount = (name, value) => {
   return amount;
 };
 
-const getSeatUserIdsInOrder = (seats) => {
-  if (!Array.isArray(seats)) return [];
-  const ordered = seats.slice().sort((a, b) => Number(a?.seatNo ?? 0) - Number(b?.seatNo ?? 0));
+const normalizeSeatOrder = (seatUserIdsInOrder, state) => {
+  if (Array.isArray(seatUserIdsInOrder) && seatUserIdsInOrder.length > 0) {
+    const seen = new Set();
+    const out = [];
+    for (const raw of seatUserIdsInOrder) {
+      if (typeof raw !== "string") throw new Error("showdown_invalid_seats");
+      const userId = raw.trim();
+      if (!userId || seen.has(userId)) throw new Error("showdown_invalid_seats");
+      seen.add(userId);
+      out.push(userId);
+    }
+    return out;
+  }
+  if (!Array.isArray(state?.seats)) return [];
+  const ordered = state.seats.slice().sort((a, b) => Number(a?.seatNo ?? 0) - Number(b?.seatNo ?? 0));
   const out = [];
   const seen = new Set();
   for (const seat of ordered) {
@@ -26,20 +38,20 @@ const getSeatUserIdsInOrder = (seats) => {
   return out;
 };
 
-const listEligibleUserIds = ({ state }) => {
-  const seatUserIdsInOrder = getSeatUserIdsInOrder(state.seats);
-  if (seatUserIdsInOrder.length === 0) {
+const listEligibleUserIds = ({ state, seatUserIdsInOrder }) => {
+  const seatOrder = normalizeSeatOrder(seatUserIdsInOrder, state);
+  if (seatOrder.length === 0) {
     throw new Error("showdown_invalid_seats");
   }
   const stacks = state.stacks || {};
   const eligible = [];
-  for (const userId of seatUserIdsInOrder) {
+  for (const userId of seatOrder) {
     if (state.foldedByUserId?.[userId]) continue;
     if (!Object.prototype.hasOwnProperty.call(stacks, userId)) continue;
     normalizeChipAmount("stack", stacks[userId]);
     eligible.push(userId);
   }
-  return { eligibleUserIds: eligible, seatUserIdsInOrder };
+  return { eligibleUserIds: eligible, seatOrder };
 };
 
 const ensureCommunityComplete = (state) => {
@@ -86,7 +98,7 @@ const materializeShowdownAndPayout = ({
     throw new Error("showdown_missing_hand_id");
   }
 
-  const { eligibleUserIds, seatUserIdsInOrder: resolvedSeatOrder } = listEligibleUserIds({ state });
+  const { eligibleUserIds, seatOrder } = listEligibleUserIds({ state, seatUserIdsInOrder });
   if (eligibleUserIds.length === 0) {
     if (typeof klog === "function") {
       klog("poker_showdown_no_eligible", { handId: state.handId ?? null });
@@ -136,7 +148,7 @@ const materializeShowdownAndPayout = ({
       communityDealt: community.length,
       holeCardsByUserId,
     },
-    seatUserIdsInOrder: resolvedSeatOrder,
+    seatUserIdsInOrder: seatOrder,
     computeShowdown,
   });
   if (!awardResult.nextState.showdown || !Array.isArray(awardResult.nextState.showdown.winners)) {

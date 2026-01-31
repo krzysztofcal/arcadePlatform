@@ -257,13 +257,13 @@ const runCase = async ({ state, action, requestId, userId, computeShowdown, stor
 {
   const incompleteState = {
     ...baseState,
-    phase: "TURN",
+    phase: "SHOWDOWN",
     pot: 10,
     community: deriveCommunityCards({ handSeed, seatUserIdsInOrder: seatOrder, communityDealt: 4 }),
     communityDealt: 4,
     turnUserId: "user-1",
-    foldedByUserId: { "user-1": false, "user-2": true },
-    actedThisRoundByUserId: { "user-1": false, "user-2": true },
+    foldedByUserId: { "user-1": false, "user-2": false },
+    actedThisRoundByUserId: { "user-1": true, "user-2": true },
   };
   const result = await runCase({
     state: incompleteState,

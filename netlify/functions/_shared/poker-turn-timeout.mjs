@@ -54,7 +54,6 @@ const maybeApplyTurnTimeout = ({ tableId, state, privateState, nowMs }) => {
   const events = Array.isArray(applied.events) ? applied.events.slice() : [];
   let loops = 0;
   while (loops < ADVANCE_LIMIT) {
-    if (nextState.phase === "HAND_DONE") break;
     const prevPhase = nextState.phase;
     const advanced = advanceIfNeeded(nextState);
     nextState = advanced.state;

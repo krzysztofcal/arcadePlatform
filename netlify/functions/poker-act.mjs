@@ -53,7 +53,7 @@ const normalizeRequest = (value) => {
 const hasRequiredState = (state) =>
   isPlainObjectValue(state) &&
   typeof state.phase === "string" &&
-  typeof state.turnUserId === "string" &&
+  (typeof state.turnUserId === "string" || state.phase === "HAND_DONE") &&
   Array.isArray(state.seats) &&
   isPlainObjectValue(state.stacks) &&
   isPlainObjectValue(state.toCallByUserId) &&
@@ -375,10 +375,37 @@ export async function handler(event) {
         }
       }
 
+      const shouldReplayHandDone =
+        currentState.phase === "HAND_DONE" &&
+        currentState.showdown &&
+        Number.isFinite(Number(currentState.pot ?? 0)) &&
+        Number(currentState.pot ?? 0) === 0;
+      if (shouldReplayHandDone) {
+        const version = Number(stateRow.version);
+        if (!Number.isFinite(version)) {
+          klog("poker_act_rejected", {
+            tableId,
+            userId: auth.userId,
+            reason: "state_invalid",
+            phase: currentState.phase,
+          });
+          throw makeError(409, "state_invalid");
+        }
+        return {
+          tableId,
+          version,
+          state: withoutPrivateState(currentState),
+          myHoleCards: holeCardsByUserId[auth.userId] || [],
+          events: [],
+          replayed: true,
+        };
+      }
+
       const lastRequestId = Object.prototype.hasOwnProperty.call(lastByUserId, auth.userId)
         ? lastByUserId[auth.userId]
         : null;
-      if (lastRequestId != null && requestId != null && String(lastRequestId) === String(requestId)) {
+      const requestIdValue = requestId ?? payload?.requestId ?? null;
+      if (lastRequestId != null && requestIdValue != null && String(lastRequestId) === String(requestIdValue)) {
         const version = Number(stateRow.version);
         if (!Number.isFinite(version)) {
           klog("poker_act_rejected", {
@@ -577,25 +604,29 @@ export async function handler(event) {
       const events = Array.isArray(applied.events) ? applied.events.slice() : [];
       let loops = 0;
       const advanceEvents = [];
-      while (loops < ADVANCE_LIMIT) {
-        if (nextState.phase === "HAND_DONE") break;
-        const prevPhase = nextState.phase;
-        let advanced;
-        try {
-          advanced = advanceIfNeeded(nextState);
-        } catch (error) {
-          throw error;
-        }
-        nextState = advanced.state;
+      const eligibleAfterAction = seatUserIdsInOrder.filter(
+        (userId) => typeof userId === "string" && !nextState.foldedByUserId?.[userId]
+      );
+      if (eligibleAfterAction.length > 1) {
+        while (loops < ADVANCE_LIMIT) {
+          const prevPhase = nextState.phase;
+          let advanced;
+          try {
+            advanced = advanceIfNeeded(nextState);
+          } catch (error) {
+            throw error;
+          }
+          nextState = advanced.state;
 
-        if (Array.isArray(advanced.events) && advanced.events.length > 0) {
-          events.push(...advanced.events);
-          advanceEvents.push(...advanced.events);
-        }
+          if (Array.isArray(advanced.events) && advanced.events.length > 0) {
+            events.push(...advanced.events);
+            advanceEvents.push(...advanced.events);
+          }
 
-        if (!Array.isArray(advanced.events) || advanced.events.length === 0) break;
-        if (nextState.phase === prevPhase) break;
-        loops += 1;
+          if (!Array.isArray(advanced.events) || advanced.events.length === 0) break;
+          if (nextState.phase === prevPhase) break;
+          loops += 1;
+        }
       }
 
       const handId = typeof nextState.handId === "string" ? nextState.handId.trim() : "";
