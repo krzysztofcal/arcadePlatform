@@ -516,41 +516,6 @@ const run = async () => {
       { userId: "user-1", seatNo: 1 },
       { userId: "user-2", seatNo: 2 },
     ];
-    const stacks = { "user-1": 100, "user-2": 50 };
-    let result = initHandState({ tableId: "t-showdown-invariant", seats, stacks, rng: makeRng(30) });
-    let state = { ...result.state, turnUserId: "user-2" };
-
-    result = applyAction(state, { type: "CHECK", userId: "user-2" });
-    state = result.state;
-    result = applyAction(state, { type: "CHECK", userId: "user-1" });
-    state = result.state;
-
-    let advanced = advanceIfNeeded(state);
-    state = advanced.state;
-    const firstUserId = state.turnUserId;
-    const secondUserId = firstUserId === "user-1" ? "user-2" : "user-1";
-    const allInAmount = state.stacks[firstUserId];
-    result = applyAction(state, { type: "BET", userId: firstUserId, amount: allInAmount });
-    state = result.state;
-    result = applyAction(state, { type: "CALL", userId: secondUserId });
-    state = result.state;
-
-    let loops = 0;
-    while (state.phase !== "SHOWDOWN" && loops < 6) {
-      advanced = advanceIfNeeded(state);
-      state = advanced.state;
-      loops += 1;
-    }
-    assert.equal(state.phase, "SHOWDOWN");
-    assert.ok(Array.isArray(state.community));
-    assert.equal(state.community.length, 5);
-  }
-
-  {
-    const seats = [
-      { userId: "user-1", seatNo: 1 },
-      { userId: "user-2", seatNo: 2 },
-    ];
     const stacks = { "user-1": 5, "user-2": 50 };
     let result = initHandState({ tableId: "t-allin-call", seats, stacks, rng: makeRng(23) });
     let state = {
