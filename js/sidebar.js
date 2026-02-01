@@ -17,7 +17,10 @@
     item.className = 'sb-item';
 
     const link = doc.createElement('a');
-    link.className = favoritesLink.className;
+    link.className = 'sb-link';
+    if (window.location && typeof window.location.pathname === 'string' && window.location.pathname.indexOf('/poker') === 0){
+      link.classList.add('is-active');
+    }
     link.setAttribute('href', '/poker/');
     link.setAttribute('aria-label', 'Poker');
     link.setAttribute('tabindex', '0');
