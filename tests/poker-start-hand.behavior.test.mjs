@@ -163,6 +163,18 @@ const runHappyPath = async () => {
     queries.some((q) => q.query.toLowerCase().includes("insert into public.poker_actions")),
     "expected start hand action insert"
   );
+  const actionInsert = queries.find((q) => q.query.toLowerCase().includes("insert into public.poker_actions"));
+  assert.ok(actionInsert, "expected start hand action insert payload");
+  const actionParams = actionInsert.params || [];
+  assert.equal(actionParams.length, 10);
+  assert.equal(actionParams[0], tableId);
+  assert.equal(actionParams[3], "START_HAND");
+  assert.equal(actionParams[5], updatedState.handId);
+  assert.equal(actionParams[6], "req-1");
+  assert.equal(actionParams[7], "INIT");
+  assert.equal(actionParams[8], "PREFLOP");
+  const actionMeta = JSON.parse(actionParams[9] || "{}");
+  assert.equal(actionMeta?.determinism?.handSeed, updatedState.handSeed);
 
   const cardKeys = payload.myHoleCards.map((card) => `${card.r}-${card.s}`);
   const uniqueKeys = new Set(cardKeys);

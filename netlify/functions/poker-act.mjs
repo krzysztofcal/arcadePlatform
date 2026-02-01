@@ -553,9 +553,23 @@ export async function handler(event) {
           throw makeError(409, "state_invalid");
         }
 
+        const timeoutHandId =
+          typeof updatedState.handId === "string" && updatedState.handId.trim() ? updatedState.handId.trim() : null;
+        const timeoutRequestId = `timeout-${newVersion}`;
         await tx.unsafe(
-          "insert into public.poker_actions (table_id, version, user_id, action_type, amount) values ($1, $2, $3, $4, $5);",
-          [tableId, newVersion, timeoutResult.action.userId, timeoutResult.action.type, timeoutResult.action.amount ?? null]
+          "insert into public.poker_actions (table_id, version, user_id, action_type, amount, hand_id, request_id, phase_from, phase_to, meta) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb);",
+          [
+            tableId,
+            newVersion,
+            timeoutResult.action.userId,
+            timeoutResult.action.type,
+            timeoutResult.action.amount ?? null,
+            timeoutHandId,
+            timeoutRequestId,
+            currentState.phase || null,
+            updatedState.phase || null,
+            null,
+          ]
         );
 
         klog("poker_turn_timeout", {
@@ -700,9 +714,21 @@ export async function handler(event) {
         throw makeError(409, "state_invalid");
       }
 
+      const actionHandId = typeof updatedState.handId === "string" && updatedState.handId.trim() ? updatedState.handId.trim() : null;
       await tx.unsafe(
-        "insert into public.poker_actions (table_id, version, user_id, action_type, amount) values ($1, $2, $3, $4, $5);",
-        [tableId, newVersion, auth.userId, actionParsed.value.type, actionParsed.value.amount ?? null]
+        "insert into public.poker_actions (table_id, version, user_id, action_type, amount, hand_id, request_id, phase_from, phase_to, meta) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb);",
+        [
+          tableId,
+          newVersion,
+          auth.userId,
+          actionParsed.value.type,
+          actionParsed.value.amount ?? null,
+          actionHandId,
+          requestId,
+          currentState.phase || null,
+          updatedState.phase || null,
+          null,
+        ]
       );
 
       if (advanceEvents.length > 0) {

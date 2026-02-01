@@ -9,6 +9,7 @@
   var HEARTBEAT_URL = '/.netlify/functions/poker-heartbeat';
   var START_HAND_URL = '/.netlify/functions/poker-start-hand';
   var ACT_URL = '/.netlify/functions/poker-act';
+  var EXPORT_LOG_URL = '/.netlify/functions/poker-export-log';
   var POLL_INTERVAL_BASE = 2000;
   var POLL_INTERVAL_MAX = 10000;
   var HEARTBEAT_INTERVAL_MS = 20000;
@@ -671,6 +672,8 @@
     var actBetBtn = document.getElementById('pokerActBetBtn');
     var actRaiseBtn = document.getElementById('pokerActRaiseBtn');
     var actStatusEl = document.getElementById('pokerActStatus');
+    var copyLogBtn = document.getElementById('pokerCopyLogBtn');
+    var copyLogStatusEl = document.getElementById('pokerCopyLogStatus');
     var leaveSelector = '#pokerLeave';
     var joinSelector = '#pokerJoin';
 
@@ -702,6 +705,7 @@
     var leavePending = false;
     var startHandPending = false;
     var actPending = false;
+    var copyLogPending = false;
     var pendingHiddenAt = null;
     var heartbeatPendingRetries = 0;
     var heartbeatInFlight = false;
@@ -787,7 +791,7 @@
     }
 
     function shouldEnableDevActions(){
-      return devActionsEnabled && !!tableId && !joinPending && !leavePending && !startHandPending && !actPending;
+      return devActionsEnabled && !!tableId && !joinPending && !leavePending && !startHandPending && !actPending && !copyLogPending;
     }
 
     function toggleHidden(el, hidden){
@@ -954,6 +958,10 @@
       var enabled = shouldEnableDevActions();
       setLoading(startHandBtn, startHandPending);
       setDisabled(startHandBtn, !enabled || startHandPending);
+      setLoading(copyLogBtn, copyLogPending);
+      setDisabled(copyLogBtn, !enabled || copyLogPending);
+      toggleHidden(copyLogBtn, !devActionsEnabled);
+      toggleHidden(copyLogStatusEl, !devActionsEnabled);
       renderAllowedActionButtons();
     }
 
@@ -964,6 +972,8 @@
         clearActPending();
         setInlineStatus(startHandStatusEl, null, null);
         setInlineStatus(actStatusEl, null, null);
+        setInlineStatus(copyLogStatusEl, null, null);
+        copyLogPending = false;
       }
       updateDevActionsUi();
     }
@@ -972,6 +982,7 @@
       var message = authed ? null : t('pokerDevActionsSignIn', 'Sign in to use Dev Actions');
       setInlineStatus(startHandStatusEl, message, null);
       setInlineStatus(actStatusEl, message, null);
+      setInlineStatus(copyLogStatusEl, message, null);
       renderAllowedActionButtons();
     }
 
@@ -994,6 +1005,11 @@
         actPending = isPending;
         if (actStatusEl){
           setInlineStatus(actStatusEl, isPending ? t('pokerActPending', 'Sending...') : null, null);
+        }
+      } else if (action === 'copyLog'){
+        copyLogPending = isPending;
+        if (copyLogStatusEl){
+          setInlineStatus(copyLogStatusEl, isPending ? t('pokerCopyLogPending', 'Copying...') : null, null);
         }
       }
       updateDevActionsUi();
@@ -1042,6 +1058,10 @@
         pendingActTimer = null;
       }
       setDevPendingState('act', false);
+    }
+
+    function clearCopyLogPending(){
+      setDevPendingState('copyLog', false);
     }
 
     function handlePendingTimeout(action){
@@ -1143,6 +1163,7 @@
       clearLeavePending();
       clearStartHandPending();
       clearActPending();
+      clearCopyLogPending();
     }
 
     function pauseJoinPending(){
@@ -1567,6 +1588,22 @@
       return { action: payload };
     }
 
+    function resolveCurrentHandId(){
+      var stateObj = tableData && tableData.state ? tableData.state : null;
+      var state = stateObj && stateObj.state ? stateObj.state : null;
+      var handId = state && typeof state.handId === 'string' ? state.handId.trim() : '';
+      return handId || '';
+    }
+
+    function buildExportLogUrl(){
+      var url = EXPORT_LOG_URL + '?tableId=' + encodeURIComponent(tableId);
+      var handId = resolveCurrentHandId();
+      if (handId){
+        url += '&handId=' + encodeURIComponent(handId);
+      }
+      return url;
+    }
+
     async function sendAct(actionType, requestIdOverride){
       if (!shouldEnableDevActions()) return;
       var normalized = normalizeActionType(actionType);
@@ -1653,6 +1690,47 @@
         }
         klog('poker_act_error', { tableId: tableId, error: err.message || err.code });
         setInlineStatus(actStatusEl, err.message || t('pokerErrAct', 'Failed to send action'), 'error');
+      }
+    }
+
+    async function copyHandLog(){
+      if (!shouldEnableDevActions()) return;
+      setInlineStatus(copyLogStatusEl, null, null);
+      setDevPendingState('copyLog', true);
+      try {
+        var url = buildExportLogUrl();
+        var result = await apiGet(url);
+        if (!result || !result.schema){
+          clearCopyLogPending();
+          setInlineStatus(copyLogStatusEl, t('pokerCopyLogFail', 'Failed to export log'), 'error');
+          return;
+        }
+        var text = JSON.stringify(result, null, 2);
+        if (navigator && navigator.clipboard && typeof navigator.clipboard.writeText === 'function'){
+          await navigator.clipboard.writeText(text);
+        } else {
+          throw new Error('clipboard_unavailable');
+        }
+        clearCopyLogPending();
+        setInlineStatus(copyLogStatusEl, t('pokerCopyLogOk', 'Log copied'), 'success');
+      } catch (err){
+        if (isAuthError(err)){
+          stopPendingAll();
+          handleTableAuthExpired({
+            authMsg: authMsg,
+            content: tableContent,
+            errorEl: errorEl,
+            stopPolling: stopPolling,
+            stopHeartbeat: stopHeartbeat,
+            onAuthExpired: startAuthWatch
+          });
+          return;
+        }
+        clearCopyLogPending();
+        klog('poker_copy_log_error', { tableId: tableId, error: err.message || err.code });
+        var errCode = err && (err.message || err.code) ? String(err.message || err.code) : '';
+        var errMsg = errCode === 'clipboard_unavailable' ? '' : errCode;
+        setInlineStatus(copyLogStatusEl, errMsg || t('pokerCopyLogFail', 'Failed to export log'), 'error');
       }
     }
 
@@ -1796,6 +1874,21 @@
       });
     }
 
+    function handleCopyLogClick(event){
+      if (event){
+        event.preventDefault();
+        event.stopPropagation();
+      }
+      if (copyLogPending || !shouldEnableDevActions()) return;
+      klog('poker_copy_log_click', { tableId: tableId, hasToken: !!state.token });
+      setInlineStatus(copyLogStatusEl, null, null);
+      copyHandLog().catch(function(err){
+        clearCopyLogPending();
+        klog('poker_copy_log_click_error', { message: err && (err.message || err.code) ? err.message || err.code : 'unknown_error' });
+        setInlineStatus(copyLogStatusEl, err && (err.message || err.code) ? err.message || err.code : t('pokerCopyLogFail', 'Failed to export log'), 'error');
+      });
+    }
+
     function handleActionClick(actionType, event){
       if (event){
         event.preventDefault();
@@ -1845,6 +1938,7 @@
     if (joinBtn) joinBtn.addEventListener('click', handleJoinClick);
     if (leaveBtn) leaveBtn.addEventListener('click', handleLeaveClick);
     if (startHandBtn) startHandBtn.addEventListener('click', handleStartHandClick);
+    if (copyLogBtn) copyLogBtn.addEventListener('click', handleCopyLogClick);
     if (actCheckBtn) actCheckBtn.addEventListener('click', handleActCheckClick);
     if (actCallBtn) actCallBtn.addEventListener('click', handleActCallClick);
     if (actFoldBtn) actFoldBtn.addEventListener('click', handleActFoldClick);

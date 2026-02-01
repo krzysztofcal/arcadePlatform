@@ -645,6 +645,17 @@ const run = async () => {
 
   const actionInserts = queries.filter((entry) => entry.query.toLowerCase().includes("insert into public.poker_actions"));
   assert.equal(actionInserts.length, 3);
+  actionInserts.forEach((entry) => {
+    const params = entry.params || [];
+    assert.equal(params.length, 10);
+    assert.equal(params[0], tableId);
+    assert.equal(typeof params[5], "string");
+    assert.ok(params[5]);
+    assert.equal(typeof params[6], "string");
+    assert.ok(params[6]);
+    assert.equal(typeof params[7], "string");
+    assert.equal(typeof params[8], "string");
+  });
 
   let capturedKeys = null;
   const applyActionWrapped = (state, action) => {

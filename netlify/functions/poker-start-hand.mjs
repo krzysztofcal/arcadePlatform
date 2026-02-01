@@ -345,9 +345,26 @@ export async function handler(event) {
         throw makeError(409, "state_invalid");
       }
 
+      const actionMeta = {
+        determinism: {
+          handSeed,
+          dealContext: "poker-deal:v1",
+        },
+      };
       await tx.unsafe(
-        "insert into public.poker_actions (table_id, version, user_id, action_type, amount) values ($1, $2, $3, $4, $5);",
-        [tableId, newVersion, auth.userId, "START_HAND", null]
+        "insert into public.poker_actions (table_id, version, user_id, action_type, amount, hand_id, request_id, phase_from, phase_to, meta) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb);",
+        [
+          tableId,
+          newVersion,
+          auth.userId,
+          "START_HAND",
+          null,
+          handId,
+          requestIdParsed.value,
+          currentState.phase || null,
+          updatedState.phase || null,
+          JSON.stringify(actionMeta),
+        ]
       );
 
       return {
