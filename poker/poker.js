@@ -878,6 +878,29 @@
           break;
         }
       }
+      if (allowed.size === 0){
+        var stack = Number(state.stacks && state.stacks[userId]);
+        var folded = !!(state.foldedByUserId && state.foldedByUserId[userId]);
+        var allIn = !!(state.allInByUserId && state.allInByUserId[userId]);
+        if (isFinite(stack) && stack > 0 && !folded && !allIn){
+          var toCall = Number(state.toCallByUserId && state.toCallByUserId[userId]);
+          if (!isFinite(toCall)) toCall = 0;
+          var betThisRound = Number(state.betThisRoundByUserId && state.betThisRoundByUserId[userId]);
+          if (!isFinite(betThisRound)) betThisRound = 0;
+          if (toCall > 0){
+            allowed.add('FOLD');
+            allowed.add('CALL');
+            if (stack + betThisRound >= toCall + 1){
+              allowed.add('RAISE');
+            }
+          } else {
+            allowed.add('CHECK');
+            if (stack > 0){
+              allowed.add('BET');
+            }
+          }
+        }
+      }
       info.needsAmount = allowed.has('BET') || allowed.has('RAISE');
       return info;
     }
@@ -900,7 +923,7 @@
         var item = actions[i];
         var isAllowed = allowed.has(item.type);
         toggleHidden(item.el, !hasActions || !isAllowed);
-        setDisabled(item.el, !enabled || actPending);
+        setDisabled(item.el, !enabled || actPending || !isAllowed);
       }
       if (actAmountInput){
         setDisabled(actAmountInput, !enabled || actPending || !allowedInfo.needsAmount);
@@ -1530,7 +1553,7 @@
       if (!normalized) return;
       var allowedInfo = getAllowedActionsForUser(tableData, currentUserId);
       if (!allowedInfo.allowed.has(normalized)){
-        setInlineStatus(actStatusEl, t('pokerErrNotYourTurn', 'Not your turn'), 'error');
+        setInlineStatus(actStatusEl, t('pokerErrActionNotAllowed', 'Action not allowed right now'), 'error');
         return;
       }
       var actionResult = getActPayload(normalized);
@@ -1755,7 +1778,7 @@
       if (!normalized) return;
       var allowedInfo = getAllowedActionsForUser(tableData, currentUserId);
       if (!allowedInfo.allowed.has(normalized)){
-        setInlineStatus(actStatusEl, t('pokerErrNotYourTurn', 'Not your turn'), 'error');
+        setInlineStatus(actStatusEl, t('pokerErrActionNotAllowed', 'Action not allowed right now'), 'error');
         return;
       }
       klog('poker_act_click', { tableId: tableId, hasToken: !!state.token, type: normalized });
