@@ -111,7 +111,11 @@
     pokerErrJoinPending: { en: 'Join still pending. Please try again.', pl: 'Dołączanie wciąż trwa. Spróbuj ponownie.' },
     pokerErrLeavePending: { en: 'Leave still pending. Please try again.', pl: 'Opuszczanie wciąż trwa. Spróbuj ponownie.' },
     pokerJoinPending: { en: 'Joining...', pl: 'Dołączanie...' },
-    pokerLeavePending: { en: 'Leaving...', pl: 'Opuszczanie...' }
+    pokerLeavePending: { en: 'Leaving...', pl: 'Opuszczanie...' },
+    pokerCopyLog: { en: 'Copy hand log', pl: 'Kopiuj log rozdania' },
+    pokerCopyLogPending: { en: 'Copying...', pl: 'Kopiowanie...' },
+    pokerCopyLogOk: { en: 'Log copied', pl: 'Log skopiowany' },
+    pokerCopyLogFail: { en: 'Failed to export log', pl: 'Nie udało się wyeksportować logu' }
   };
 
   let currentLang = 'en';
