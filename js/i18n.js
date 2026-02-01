@@ -65,6 +65,7 @@
     signIn: { en: 'Sign In', pl: 'Zaloguj się' },
     addToFavorites: { en: 'Add to favorites', pl: 'Dodaj do ulubionych' },
     removeFromFavorites: { en: 'Remove from favorites', pl: 'Usuń z ulubionych' },
+    navPoker: { en: 'Poker', pl: 'Poker' },
     poker: { en: 'Poker', pl: 'Poker' },
     pokerTables: { en: 'Poker Tables', pl: 'Stoły pokerowe' },
     refresh: { en: 'Refresh', pl: 'Odśwież' },
