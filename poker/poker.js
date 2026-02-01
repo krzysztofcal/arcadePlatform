@@ -662,9 +662,14 @@
     var signInBtn = document.getElementById('pokerSignIn');
     var startHandBtn = document.getElementById('pokerStartHandBtn');
     var startHandStatusEl = document.getElementById('pokerStartHandStatus');
-    var actTypeSelect = document.getElementById('pokerActType');
+    var actRow = document.getElementById('pokerActionsRow');
+    var actAmountWrap = document.getElementById('pokerActAmountWrap');
     var actAmountInput = document.getElementById('pokerActAmount');
-    var actBtn = document.getElementById('pokerActBtn');
+    var actCheckBtn = document.getElementById('pokerActCheckBtn');
+    var actCallBtn = document.getElementById('pokerActCallBtn');
+    var actFoldBtn = document.getElementById('pokerActFoldBtn');
+    var actBetBtn = document.getElementById('pokerActBetBtn');
+    var actRaiseBtn = document.getElementById('pokerActRaiseBtn');
     var actStatusEl = document.getElementById('pokerActStatus');
     var leaveSelector = '#pokerLeave';
     var joinSelector = '#pokerJoin';
@@ -680,6 +685,7 @@
     var pendingLeaveRequestId = null;
     var pendingStartHandRequestId = null;
     var pendingActRequestId = null;
+    var pendingActType = null;
     var pendingJoinRetries = 0;
     var pendingLeaveRetries = 0;
     var pendingStartHandRetries = 0;
@@ -740,6 +746,7 @@
     async function checkAuth(){
       var token = await getAccessToken();
       if (!token){
+        currentUserId = null;
         if (authMsg) authMsg.hidden = false;
         if (tableContent) tableContent.hidden = true;
         setDevActionsEnabled(false);
@@ -783,21 +790,171 @@
       return devActionsEnabled && !!tableId && !joinPending && !leavePending && !startHandPending && !actPending;
     }
 
-    function updateActAmountState(){
-      if (!actAmountInput) return;
-      var type = actTypeSelect ? String(actTypeSelect.value || '') : '';
-      var needsAmount = type === 'BET' || type === 'RAISE';
-      setDisabled(actAmountInput, !shouldEnableDevActions() || !needsAmount);
+    function toggleHidden(el, hidden){
+      if (!el) return;
+      el.hidden = !!hidden;
+    }
+
+    function normalizeActionType(value){
+      if (typeof value !== 'string') return '';
+      return value.trim().toUpperCase();
+    }
+
+    function isActionablePhase(phase){
+      return phase === 'PREFLOP' || phase === 'FLOP' || phase === 'TURN' || phase === 'RIVER';
+    }
+
+    function resolvePhase(data, stateObj, state){
+      var sources = [
+        state && state.phase,
+        stateObj && stateObj.phase,
+        data && data.phase
+      ];
+      for (var i = 0; i < sources.length; i++){
+        if (typeof sources[i] === 'string' && sources[i].trim()){
+          return normalizeActionType(sources[i]);
+        }
+      }
+      return null;
+    }
+
+    function addAllowedFromSource(source, allowed){
+      if (!source) return false;
+      var list = null;
+      if (Array.isArray(source)){
+        list = source;
+      } else if (Array.isArray(source.actions)){
+        list = source.actions;
+      } else if (Array.isArray(source.allowedActions)){
+        list = source.allowedActions;
+      } else if (Array.isArray(source.availableActions)){
+        list = source.availableActions;
+      } else if (Array.isArray(source.legalActions)){
+        list = source.legalActions;
+      }
+      if (!list) return false;
+      for (var i = 0; i < list.length; i++){
+        var entry = list[i];
+        var type = '';
+        if (typeof entry === 'string'){
+          type = entry;
+        } else if (entry && typeof entry.type === 'string'){
+          type = entry.type;
+        } else if (entry && typeof entry.actionType === 'string'){
+          type = entry.actionType;
+        } else if (entry && entry.action && typeof entry.action.type === 'string'){
+          type = entry.action.type;
+        }
+        type = normalizeActionType(type);
+        if (type) allowed.add(type);
+      }
+      return allowed.size > 0;
+    }
+
+    function resolveTurnUserId(data, state){
+      if (!state) return null;
+      var candidate = typeof state.turnUserId === 'string' && state.turnUserId.trim() ? state.turnUserId.trim() : null;
+      if (!candidate && typeof state.toActUserId === 'string' && state.toActUserId.trim()){
+        candidate = state.toActUserId.trim();
+      }
+      if (candidate) return candidate;
+      var seatFields = ['turnSeatNo', 'toActSeatNo', 'currentSeatNo', 'actingSeatNo'];
+      var seatNo = null;
+      for (var i = 0; i < seatFields.length; i++){
+        var value = state[seatFields[i]];
+        if (typeof value === 'number' && isFinite(value)){
+          seatNo = value;
+          break;
+        }
+      }
+      if (seatNo == null) return null;
+      var seats = data && Array.isArray(data.seats) ? data.seats : [];
+      for (var s = 0; s < seats.length; s++){
+        var seat = seats[s];
+        if (seat && seat.seatNo === seatNo && typeof seat.userId === 'string' && seat.userId.trim()){
+          return seat.userId.trim();
+        }
+      }
+      return null;
+    }
+
+    function getAllowedActionsForUser(data, userId){
+      var info = { allowed: new Set(), needsAmount: false };
+      if (!data || !userId) return info;
+      var stateObj = data.state || {};
+      var state = stateObj.state || {};
+      var phase = resolvePhase(data, stateObj, state);
+      if (!isActionablePhase(phase)) return info;
+      var turnUserId = resolveTurnUserId(data, state);
+      if (!turnUserId || turnUserId !== userId) return info;
+      var allowed = info.allowed;
+      addAllowedFromSource(stateObj, allowed);
+      addAllowedFromSource(state, allowed);
+      var seats = Array.isArray(data.seats) ? data.seats : [];
+      for (var i = 0; i < seats.length; i++){
+        var seat = seats[i];
+        if (seat && seat.userId === userId){
+          addAllowedFromSource(seat, allowed);
+          break;
+        }
+      }
+      if (allowed.size === 0){
+        var stack = Number(state.stacks && state.stacks[userId]);
+        var folded = !!(state.foldedByUserId && state.foldedByUserId[userId]);
+        var allIn = !!(state.allInByUserId && state.allInByUserId[userId]);
+        if (isFinite(stack) && stack > 0 && !folded && !allIn){
+          var toCall = Number(state.toCallByUserId && state.toCallByUserId[userId]);
+          if (!isFinite(toCall)) toCall = 0;
+          var betThisRound = Number(state.betThisRoundByUserId && state.betThisRoundByUserId[userId]);
+          if (!isFinite(betThisRound)) betThisRound = 0;
+          if (toCall > 0){
+            allowed.add('FOLD');
+            allowed.add('CALL');
+            if (stack + betThisRound >= toCall + 1){
+              allowed.add('RAISE');
+            }
+          } else {
+            allowed.add('CHECK');
+            if (stack > 0){
+              allowed.add('BET');
+            }
+          }
+        }
+      }
+      info.needsAmount = allowed.has('BET') || allowed.has('RAISE');
+      return info;
+    }
+
+    function renderAllowedActionButtons(){
+      var allowedInfo = getAllowedActionsForUser(tableData, currentUserId);
+      var allowed = allowedInfo.allowed;
+      var enabled = shouldEnableDevActions();
+      var hasActions = !!currentUserId && allowed.size > 0;
+      toggleHidden(actRow, !hasActions);
+      toggleHidden(actAmountWrap, !hasActions || !allowedInfo.needsAmount);
+      var actions = [
+        { type: 'CHECK', el: actCheckBtn },
+        { type: 'CALL', el: actCallBtn },
+        { type: 'FOLD', el: actFoldBtn },
+        { type: 'BET', el: actBetBtn },
+        { type: 'RAISE', el: actRaiseBtn }
+      ];
+      for (var i = 0; i < actions.length; i++){
+        var item = actions[i];
+        var isAllowed = allowed.has(item.type);
+        toggleHidden(item.el, !hasActions || !isAllowed);
+        setDisabled(item.el, !enabled || actPending || !isAllowed);
+      }
+      if (actAmountInput){
+        setDisabled(actAmountInput, !enabled || actPending || !allowedInfo.needsAmount);
+      }
     }
 
     function updateDevActionsUi(){
       var enabled = shouldEnableDevActions();
       setLoading(startHandBtn, startHandPending);
-      setLoading(actBtn, actPending);
       setDisabled(startHandBtn, !enabled || startHandPending);
-      setDisabled(actBtn, !enabled || actPending);
-      if (actTypeSelect) setDisabled(actTypeSelect, !enabled || actPending);
-      updateActAmountState();
+      renderAllowedActionButtons();
     }
 
     function setDevActionsEnabled(enabled){
@@ -815,6 +972,7 @@
       var message = authed ? null : t('pokerDevActionsSignIn', 'Sign in to use Dev Actions');
       setInlineStatus(startHandStatusEl, message, null);
       setInlineStatus(actStatusEl, message, null);
+      renderAllowedActionButtons();
     }
 
     function setPendingState(action, isPending){
@@ -876,6 +1034,7 @@
 
     function clearActPending(){
       pendingActRequestId = null;
+      pendingActType = null;
       pendingActRetries = 0;
       pendingActStartedAt = null;
       if (pendingActTimer){
@@ -1232,6 +1391,7 @@
       renderTurnTimer(gameState);
       if (versionEl) versionEl.textContent = stateObj.version != null ? stateObj.version : '-';
       if (jsonBox) jsonBox.textContent = JSON.stringify(gameState, null, 2);
+      renderAllowedActionButtons();
     }
 
     function renderTurnTimer(gameState){
@@ -1279,8 +1439,8 @@
 
     async function retryAct(){
       if (!isPageActive()) return;
-      if (!pendingActRequestId) return;
-      await sendAct(pendingActRequestId);
+      if (!pendingActRequestId || !pendingActType) return;
+      await sendAct(pendingActType, pendingActRequestId);
     }
 
     async function joinTable(requestIdOverride){
@@ -1407,10 +1567,16 @@
       return { action: payload };
     }
 
-    async function sendAct(requestIdOverride){
+    async function sendAct(actionType, requestIdOverride){
       if (!shouldEnableDevActions()) return;
-      var actionType = actTypeSelect ? String(actTypeSelect.value || 'CHECK') : 'CHECK';
-      var actionResult = getActPayload(actionType);
+      var normalized = normalizeActionType(actionType);
+      if (!normalized) return;
+      var allowedInfo = getAllowedActionsForUser(tableData, currentUserId);
+      if (!allowedInfo.allowed.has(normalized)){
+        setInlineStatus(actStatusEl, t('pokerErrActionNotAllowed', 'Action not allowed right now'), 'error');
+        return;
+      }
+      var actionResult = getActPayload(normalized);
       if (actionResult.error){
         setInlineStatus(actStatusEl, actionResult.error, 'error');
         return;
@@ -1421,10 +1587,14 @@
         var resolved = resolveRequestId(pendingActRequestId, requestIdOverride);
         if (resolved.nextPending){
           pendingActRequestId = normalizeRequestId(resolved.nextPending);
+          pendingActType = normalized;
           pendingActRetries = 0;
           pendingActStartedAt = null;
         } else if (!pendingActRequestId){
           pendingActRequestId = normalizeRequestId(resolved.requestId);
+          pendingActType = normalized;
+        } else if (!pendingActType){
+          pendingActType = normalized;
         }
         var actRequestId = normalizeRequestId(resolved.requestId);
         var result = await apiPost(ACT_URL, {
@@ -1440,6 +1610,9 @@
           clearActPending();
           if (result.error === 'not_your_turn'){
             setInlineStatus(actStatusEl, t('pokerErrNotYourTurn', 'Not your turn'), 'error');
+          } else if (result.error === 'state_invalid'){
+            setInlineStatus(actStatusEl, t('pokerErrStateChanged', 'State changed. Refreshing...'), 'error');
+            if (isPageActive()) loadTable(false);
           } else {
             setInlineStatus(actStatusEl, t('pokerErrAct', 'Failed to send action'), 'error');
           }
@@ -1471,6 +1644,11 @@
         var loweredMessage = errMessage.toLowerCase();
         if (err && (err.status === 403 || err.code === 'not_your_turn' || loweredMessage.indexOf('not your turn') !== -1)){
           setInlineStatus(actStatusEl, t('pokerErrNotYourTurn', 'Not your turn'), 'error');
+          return;
+        }
+        if (err && err.code === 'state_invalid'){
+          setInlineStatus(actStatusEl, t('pokerErrStateChanged', 'State changed. Refreshing...'), 'error');
+          if (isPageActive()) loadTable(false);
           return;
         }
         klog('poker_act_error', { tableId: tableId, error: err.message || err.code });
@@ -1618,15 +1796,22 @@
       });
     }
 
-    function handleActClick(event){
+    function handleActionClick(actionType, event){
       if (event){
         event.preventDefault();
         event.stopPropagation();
       }
       if (actPending || !shouldEnableDevActions()) return;
-      klog('poker_act_click', { tableId: tableId, hasToken: !!state.token });
+      var normalized = normalizeActionType(actionType);
+      if (!normalized) return;
+      var allowedInfo = getAllowedActionsForUser(tableData, currentUserId);
+      if (!allowedInfo.allowed.has(normalized)){
+        setInlineStatus(actStatusEl, t('pokerErrActionNotAllowed', 'Action not allowed right now'), 'error');
+        return;
+      }
+      klog('poker_act_click', { tableId: tableId, hasToken: !!state.token, type: normalized });
       setInlineStatus(actStatusEl, null, null);
-      sendAct().catch(function(err){
+      sendAct(normalized).catch(function(err){
         if (isAbortError(err)){
           pauseActPending();
           return;
@@ -1637,15 +1822,34 @@
       });
     }
 
+    function handleActCheckClick(event){
+      handleActionClick('CHECK', event);
+    }
+
+    function handleActCallClick(event){
+      handleActionClick('CALL', event);
+    }
+
+    function handleActFoldClick(event){
+      handleActionClick('FOLD', event);
+    }
+
+    function handleActBetClick(event){
+      handleActionClick('BET', event);
+    }
+
+    function handleActRaiseClick(event){
+      handleActionClick('RAISE', event);
+    }
+
     if (joinBtn) joinBtn.addEventListener('click', handleJoinClick);
     if (leaveBtn) leaveBtn.addEventListener('click', handleLeaveClick);
     if (startHandBtn) startHandBtn.addEventListener('click', handleStartHandClick);
-    if (actBtn) actBtn.addEventListener('click', handleActClick);
-    if (actTypeSelect){
-      actTypeSelect.addEventListener('change', function(){
-        updateActAmountState();
-      });
-    }
+    if (actCheckBtn) actCheckBtn.addEventListener('click', handleActCheckClick);
+    if (actCallBtn) actCallBtn.addEventListener('click', handleActCallClick);
+    if (actFoldBtn) actFoldBtn.addEventListener('click', handleActFoldClick);
+    if (actBetBtn) actBetBtn.addEventListener('click', handleActBetClick);
+    if (actRaiseBtn) actRaiseBtn.addEventListener('click', handleActRaiseClick);
     if (jsonToggle){
       jsonToggle.addEventListener('click', function(){
         if (jsonBox) jsonBox.hidden = !jsonBox.hidden;
