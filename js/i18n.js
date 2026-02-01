@@ -107,6 +107,7 @@
     pokerErrJoin: { en: 'Failed to join', pl: 'Nie udało się dołączyć' },
     pokerErrLeave: { en: 'Failed to leave', pl: 'Nie udało się opuścić stołu' },
     pokerErrActionNotAllowed: { en: 'Action not allowed right now', pl: 'Akcja jest teraz niedozwolona' },
+    pokerErrStateChanged: { en: 'State changed. Refreshing...', pl: 'Stan gry się zmienił. Odświeżam...' },
     pokerErrJoinPending: { en: 'Join still pending. Please try again.', pl: 'Dołączanie wciąż trwa. Spróbuj ponownie.' },
     pokerErrLeavePending: { en: 'Leave still pending. Please try again.', pl: 'Opuszczanie wciąż trwa. Spróbuj ponownie.' },
     pokerJoinPending: { en: 'Joining...', pl: 'Dołączanie...' },

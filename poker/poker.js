@@ -800,6 +800,10 @@
       return value.trim().toUpperCase();
     }
 
+    function isActionablePhase(phase){
+      return phase === 'PREFLOP' || phase === 'FLOP' || phase === 'TURN' || phase === 'RIVER';
+    }
+
     function addAllowedFromSource(source, allowed){
       if (!source) return false;
       var list = null;
@@ -865,6 +869,8 @@
       if (!data || !userId) return info;
       var stateObj = data.state || {};
       var state = stateObj.state || {};
+      var phase = state && typeof state.phase === 'string' ? normalizeActionType(state.phase) : null;
+      if (!isActionablePhase(phase)) return info;
       var turnUserId = resolveTurnUserId(data, state);
       if (!turnUserId || turnUserId !== userId) return info;
       var allowed = info.allowed;
@@ -1590,6 +1596,9 @@
           clearActPending();
           if (result.error === 'not_your_turn'){
             setInlineStatus(actStatusEl, t('pokerErrNotYourTurn', 'Not your turn'), 'error');
+          } else if (result.error === 'state_invalid'){
+            setInlineStatus(actStatusEl, t('pokerErrStateChanged', 'State changed. Refreshing...'), 'error');
+            if (isPageActive()) loadTable(false);
           } else {
             setInlineStatus(actStatusEl, t('pokerErrAct', 'Failed to send action'), 'error');
           }
@@ -1621,6 +1630,11 @@
         var loweredMessage = errMessage.toLowerCase();
         if (err && (err.status === 403 || err.code === 'not_your_turn' || loweredMessage.indexOf('not your turn') !== -1)){
           setInlineStatus(actStatusEl, t('pokerErrNotYourTurn', 'Not your turn'), 'error');
+          return;
+        }
+        if (err && err.code === 'state_invalid'){
+          setInlineStatus(actStatusEl, t('pokerErrStateChanged', 'State changed. Refreshing...'), 'error');
+          if (isPageActive()) loadTable(false);
           return;
         }
         klog('poker_act_error', { tableId: tableId, error: err.message || err.code });
