@@ -804,6 +804,20 @@
       return phase === 'PREFLOP' || phase === 'FLOP' || phase === 'TURN' || phase === 'RIVER';
     }
 
+    function resolvePhase(data, stateObj, state){
+      var sources = [
+        state && state.phase,
+        stateObj && stateObj.phase,
+        data && data.phase
+      ];
+      for (var i = 0; i < sources.length; i++){
+        if (typeof sources[i] === 'string' && sources[i].trim()){
+          return normalizeActionType(sources[i]);
+        }
+      }
+      return null;
+    }
+
     function addAllowedFromSource(source, allowed){
       if (!source) return false;
       var list = null;
@@ -869,7 +883,7 @@
       if (!data || !userId) return info;
       var stateObj = data.state || {};
       var state = stateObj.state || {};
-      var phase = state && typeof state.phase === 'string' ? normalizeActionType(state.phase) : null;
+      var phase = resolvePhase(data, stateObj, state);
       if (!isActionablePhase(phase)) return info;
       var turnUserId = resolveTurnUserId(data, state);
       if (!turnUserId || turnUserId !== userId) return info;
