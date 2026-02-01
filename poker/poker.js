@@ -792,11 +792,7 @@
 
     function toggleHidden(el, hidden){
       if (!el) return;
-      if (hidden){
-        el.classList.add('is-hidden');
-      } else {
-        el.classList.remove('is-hidden');
-      }
+      el.hidden = !!hidden;
     }
 
     function normalizeActionType(value){
@@ -843,9 +839,6 @@
       if (!candidate && typeof state.toActUserId === 'string' && state.toActUserId.trim()){
         candidate = state.toActUserId.trim();
       }
-      if (!candidate && typeof state.currentUserId === 'string' && state.currentUserId.trim()){
-        candidate = state.currentUserId.trim();
-      }
       if (candidate) return candidate;
       var seatFields = ['turnSeatNo', 'toActSeatNo', 'currentSeatNo', 'actingSeatNo'];
       var seatNo = null;
@@ -867,30 +860,6 @@
       return null;
     }
 
-    function deriveAllowedFromState(state, userId){
-      var actions = [];
-      if (!state || !userId) return actions;
-      var toCall = Number(state.toCallByUserId && state.toCallByUserId[userId]);
-      if (!isFinite(toCall)) toCall = 0;
-      var stack = Number(state.stacks && state.stacks[userId]);
-      if (!isFinite(stack) || stack <= 0) return actions;
-      if (toCall > 0){
-        actions.push('FOLD');
-        actions.push('CALL');
-        var currentBet = Number(state.betThisRoundByUserId && state.betThisRoundByUserId[userId]);
-        if (!isFinite(currentBet)) currentBet = 0;
-        var raiseMin = toCall + 1;
-        var raiseMax = stack + currentBet;
-        if (raiseMax >= raiseMin){
-          actions.push('RAISE');
-        }
-        return actions;
-      }
-      actions.push('CHECK');
-      actions.push('BET');
-      return actions;
-    }
-
     function getAllowedActionsForUser(data, userId){
       var info = { allowed: new Set(), needsAmount: false };
       if (!data || !userId) return info;
@@ -899,7 +868,6 @@
       var turnUserId = resolveTurnUserId(data, state);
       if (!turnUserId || turnUserId !== userId) return info;
       var allowed = info.allowed;
-      addAllowedFromSource(data, allowed);
       addAllowedFromSource(stateObj, allowed);
       addAllowedFromSource(state, allowed);
       var seats = Array.isArray(data.seats) ? data.seats : [];
@@ -910,12 +878,6 @@
           break;
         }
       }
-      if (allowed.size === 0){
-        var derived = deriveAllowedFromState(state, userId);
-        for (var j = 0; j < derived.length; j++){
-          allowed.add(derived[j]);
-        }
-      }
       info.needsAmount = allowed.has('BET') || allowed.has('RAISE');
       return info;
     }
@@ -924,7 +886,7 @@
       var allowedInfo = getAllowedActionsForUser(tableData, currentUserId);
       var allowed = allowedInfo.allowed;
       var enabled = shouldEnableDevActions();
-      var hasActions = allowed.size > 0;
+      var hasActions = !!currentUserId && allowed.size > 0;
       toggleHidden(actRow, !hasActions);
       toggleHidden(actAmountWrap, !hasActions || !allowedInfo.needsAmount);
       var actions = [
@@ -937,8 +899,8 @@
       for (var i = 0; i < actions.length; i++){
         var item = actions[i];
         var isAllowed = allowed.has(item.type);
-        toggleHidden(item.el, !isAllowed);
-        setDisabled(item.el, !enabled || actPending || !isAllowed);
+        toggleHidden(item.el, !hasActions || !isAllowed);
+        setDisabled(item.el, !enabled || actPending);
       }
       if (actAmountInput){
         setDisabled(actAmountInput, !enabled || actPending || !allowedInfo.needsAmount);

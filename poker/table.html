@@ -75,14 +75,14 @@
         <span id="pokerStartHandStatus" class="poker-inline-status" aria-live="polite" hidden></span>
       </div>
       <div class="poker-form-row">
-        <div class="poker-actions-row" id="pokerActionsRow">
+        <div class="poker-actions-row" id="pokerActionsRow" hidden>
           <button type="button" id="pokerActCheckBtn" class="poker-btn">CHECK</button>
           <button type="button" id="pokerActCallBtn" class="poker-btn">CALL</button>
           <button type="button" id="pokerActFoldBtn" class="poker-btn">FOLD</button>
           <button type="button" id="pokerActBetBtn" class="poker-btn">BET</button>
           <button type="button" id="pokerActRaiseBtn" class="poker-btn">RAISE</button>
         </div>
-        <div class="poker-action-amount" id="pokerActAmountWrap">
+        <div class="poker-action-amount" id="pokerActAmountWrap" hidden>
           <label class="poker-label" for="pokerActAmount"><span data-i18n="pokerDevActionsAmountLabel">Amount</span></label>
           <input type="number" id="pokerActAmount" class="poker-input" min="1" placeholder="0" disabled>
         </div>
