@@ -44,6 +44,10 @@
 
 .poker-inline-status{font:600 12px Poppins, sans-serif; color:var(--muted);}
 
+.poker-inline-status--error{color:#fca5a5;}
+
+.poker-inline-status--success{color:#a7f3d0;}
+
 .poker-table-list{display:flex; flex-direction:column; gap:8px;}
 
 .poker-table-row{display:flex; align-items:center; gap:12px; padding:10px 14px; background:var(--card-2); border:1px solid var(--border); border-radius:10px;}
