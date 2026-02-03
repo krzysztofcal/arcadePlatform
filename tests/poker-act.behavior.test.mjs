@@ -4,7 +4,7 @@ import { dealHoleCards } from "../netlify/functions/_shared/poker-engine.mjs";
 import { isHoleCardsTableMissing, loadHoleCardsByUserId } from "../netlify/functions/_shared/poker-hole-cards-store.mjs";
 import { awardPotsAtShowdown } from "../netlify/functions/_shared/poker-payout.mjs";
 import { materializeShowdownAndPayout } from "../netlify/functions/_shared/poker-materialize-showdown.mjs";
-import { TURN_MS, advanceIfNeeded, applyAction } from "../netlify/functions/_shared/poker-reducer.mjs";
+import { TURN_MS, advanceIfNeeded, applyAction, computeNextDealerSeatNo } from "../netlify/functions/_shared/poker-reducer.mjs";
 import { normalizeRequestId } from "../netlify/functions/_shared/poker-request-id.mjs";
 import { computeShowdown } from "../netlify/functions/_shared/poker-showdown.mjs";
 import { maybeApplyTurnTimeout, normalizeSeatOrderFromState } from "../netlify/functions/_shared/poker-turn-timeout.mjs";
@@ -71,6 +71,7 @@ const makeHandler = (queries, storedState, userId, options = {}) =>
     maybeApplyTurnTimeout,
     advanceIfNeeded,
     applyAction: options.applyAction || applyAction,
+    computeNextDealerSeatNo,
     deriveCommunityCards,
     deriveRemainingDeck,
     computeLegalActions,
@@ -141,6 +142,7 @@ const makeStartHandHandler = (queries, storedState, userId, seatUserIds) => {
     verifySupabaseJwt: async () => ({ valid: true, userId }),
     isValidUuid: () => true,
     withoutPrivateState,
+    computeNextDealerSeatNo,
     computeLegalActions,
     buildActionConstraints,
     TURN_MS,
@@ -317,6 +319,31 @@ const run = async () => {
   });
   assert.equal(invalidAmount.statusCode, 400);
   assert.equal(JSON.parse(invalidAmount.body).error, "invalid_action");
+
+  const nonContiguousSeats = [
+    { userId: "user-1", seatNo: 1 },
+    { userId: "user-2", seatNo: 3 },
+    { userId: "user-3", seatNo: 5 },
+  ];
+  const nonContiguousState = {
+    ...baseState,
+    seats: nonContiguousSeats,
+    dealerSeatNo: 2,
+    turnUserId: "user-1",
+  };
+  const nonContiguousOrder = nonContiguousSeats.map((seat) => seat.userId);
+  const nonContiguousHoleCards = dealHoleCards(deriveDeck(nonContiguousState.handSeed), nonContiguousOrder).holeCardsByUserId;
+  const invalidDealerResponse = await runCase({
+    state: nonContiguousState,
+    action: { type: "CHECK" },
+    requestId: "req-invalid-dealer",
+    userId: "user-1",
+    holeCardsByUserId: nonContiguousHoleCards,
+    activeSeatUserIds: nonContiguousOrder,
+  });
+  assert.equal(invalidDealerResponse.response.statusCode, 200, invalidDealerResponse.response.body);
+  const invalidDealerPayload = JSON.parse(invalidDealerResponse.response.body);
+  assert.ok([1, 3, 5].includes(invalidDealerPayload.state.state.dealerSeatNo));
 
   const invalidBet = await runCase({
     state: baseState,
