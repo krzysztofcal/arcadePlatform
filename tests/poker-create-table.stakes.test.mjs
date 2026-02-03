@@ -2,14 +2,31 @@ import assert from "node:assert/strict";
 import { loadPokerHandler } from "./helpers/poker-test-helpers.mjs";
 import { formatStakes, parseStakes } from "../netlify/functions/_shared/poker-stakes.mjs";
 
+const setStakesGlobals = () => {
+  const prevParse = globalThis.parseStakes;
+  const prevFormat = globalThis.formatStakes;
+  globalThis.parseStakes = parseStakes;
+  globalThis.formatStakes = formatStakes;
+  return () => {
+    if (prevParse === undefined) {
+      delete globalThis.parseStakes;
+    } else {
+      globalThis.parseStakes = prevParse;
+    }
+    if (prevFormat === undefined) {
+      delete globalThis.formatStakes;
+    } else {
+      globalThis.formatStakes = prevFormat;
+    }
+  };
+};
+
 const makeHandler = (queries, options = {}) =>
   loadPokerHandler("netlify/functions/poker-create-table.mjs", {
     baseHeaders: () => ({}),
     corsHeaders: () => ({ "access-control-allow-origin": "https://example.test" }),
     extractBearerToken: () => "token",
     verifySupabaseJwt: async () => ({ valid: true, userId: "user-1" }),
-    parseStakes,
-    formatStakes,
     klog: options.klog || (() => {}),
     beginSql: async (fn) =>
       fn({
@@ -72,9 +89,14 @@ const runSlashStakes = async () => {
   assert.equal(payload.tableId, "table-1");
   const insertCall = queries.find((entry) => entry.query.toLowerCase().includes("insert into public.poker_tables"));
   assert.ok(insertCall, "expected insert into poker_tables");
-  assert.equal(insertCall.params?.[0], JSON.stringify({ sb: 1, bb: 2 }));
+  assert.deepEqual(JSON.parse(insertCall.params?.[0]), { sb: 1, bb: 2 });
 };
 
-await runMissingStakes();
-await runInvalidStakes();
-await runSlashStakes();
+const restoreGlobals = setStakesGlobals();
+try {
+  await runMissingStakes();
+  await runInvalidStakes();
+  await runSlashStakes();
+} finally {
+  restoreGlobals();
+}

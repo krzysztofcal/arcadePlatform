@@ -13,7 +13,7 @@ const normalizeInt = (value) => {
 
 const invalid = (reason, details = {}) => ({
   ok: false,
-  error: "stakes_invalid",
+  error: "invalid_stakes",
   details: { reason, ...details },
 });
 
@@ -42,7 +42,8 @@ export const parseStakes = (raw) => {
   if (isPlainObject(raw)) {
     return validateStakes(raw);
   }
-  if (typeof raw !== "string") return invalid("stakes_not_object");
+  if (Array.isArray(raw)) return invalid("stakes_array");
+  if (typeof raw !== "string") return invalid("stakes_wrong_type", { type: typeof raw });
   const trimmed = raw.trim();
   if (!trimmed) return invalid("stakes_missing");
 

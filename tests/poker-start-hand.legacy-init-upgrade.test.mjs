@@ -12,6 +12,18 @@ import {
   withoutPrivateState,
 } from "../netlify/functions/_shared/poker-state-utils.mjs";
 import { parseStakes } from "../netlify/functions/_shared/poker-stakes.mjs";
+
+const setStakesGlobals = () => {
+  const prevParse = globalThis.parseStakes;
+  globalThis.parseStakes = parseStakes;
+  return () => {
+    if (prevParse === undefined) {
+      delete globalThis.parseStakes;
+    } else {
+      globalThis.parseStakes = prevParse;
+    }
+  };
+};
 import { loadPokerHandler } from "./helpers/poker-test-helpers.mjs";
 
 const tableId = "11111111-1111-4111-8111-111111111111";
@@ -38,7 +50,6 @@ const makeHandler = (storedState, updates) =>
     getRng,
     isPlainObject,
     isStateStorageValid,
-    parseStakes,
     verifySupabaseJwt: async () => ({ valid: true, userId }),
     isValidUuid: () => true,
     normalizeJsonState,
@@ -117,4 +128,9 @@ const run = async () => {
   assert.deepEqual(Object.keys(upgradedState.toCallByUserId).sort(), ["u1", "u2"]);
 };
 
-await run();
+const restoreGlobals = setStakesGlobals();
+try {
+  await run();
+} finally {
+  restoreGlobals();
+}

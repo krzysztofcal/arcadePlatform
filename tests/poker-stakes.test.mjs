@@ -10,7 +10,7 @@ const expectOk = (input, expected) => {
 const expectFail = (input) => {
   const result = parseStakes(input);
   assert.equal(result.ok, false);
-  assert.equal(result.error, "stakes_invalid");
+  assert.equal(result.error, "invalid_stakes");
 };
 
 expectOk({ sb: 1, bb: 2 }, { sb: 1, bb: 2 });

@@ -4,6 +4,18 @@ import { isHoleCardsTableMissing, loadHoleCardsByUserId } from "../netlify/funct
 import { buildActionConstraints, computeLegalActions } from "../netlify/functions/_shared/poker-legal-actions.mjs";
 import { normalizeJsonState, withoutPrivateState } from "../netlify/functions/_shared/poker-state-utils.mjs";
 import { parseStakes } from "../netlify/functions/_shared/poker-stakes.mjs";
+
+const setStakesGlobals = () => {
+  const prevParse = globalThis.parseStakes;
+  globalThis.parseStakes = parseStakes;
+  return () => {
+    if (prevParse === undefined) {
+      delete globalThis.parseStakes;
+    } else {
+      globalThis.parseStakes = prevParse;
+    }
+  };
+};
 import { normalizeSeatOrderFromState } from "../netlify/functions/_shared/poker-turn-timeout.mjs";
 import { loadPokerHandler } from "./helpers/poker-test-helpers.mjs";
 
@@ -53,7 +65,6 @@ const makeHandler = (queries, storedState, userId, options = {}) => {
     isHoleCardsTableMissing,
     loadHoleCardsByUserId,
     deriveDeck,
-    parseStakes,
     beginSql: async (fn) =>
       fn({
         unsafe: async (query, params) => {
@@ -356,4 +367,9 @@ const run = async () => {
   assert.equal(holeCardQueries.length, 0);
 };
 
-await run();
+const restoreGlobals = setStakesGlobals();
+try {
+  await run();
+} finally {
+  restoreGlobals();
+}

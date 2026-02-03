@@ -4,6 +4,18 @@ import { buildActionConstraints, computeLegalActions } from "../netlify/function
 import { normalizeJsonState, withoutPrivateState } from "../netlify/functions/_shared/poker-state-utils.mjs";
 import { parseStakes } from "../netlify/functions/_shared/poker-stakes.mjs";
 
+const setStakesGlobals = () => {
+  const prevParse = globalThis.parseStakes;
+  globalThis.parseStakes = parseStakes;
+  return () => {
+    if (prevParse === undefined) {
+      delete globalThis.parseStakes;
+    } else {
+      globalThis.parseStakes = prevParse;
+    }
+  };
+};
+
 const runListTablesContract = async () => {
   const handler = loadPokerHandler("netlify/functions/poker-list-tables.mjs", {
     baseHeaders: () => ({}),
@@ -11,7 +23,6 @@ const runListTablesContract = async () => {
     extractBearerToken: () => "token",
     verifySupabaseJwt: async () => ({ valid: true, userId: "user-1" }),
     klog: () => {},
-    parseStakes,
     executeSql: async () => [
       {
         id: "t1",
@@ -69,7 +80,6 @@ const runGetTableContract = async () => {
     withoutPrivateState,
     computeLegalActions,
     buildActionConstraints,
-    parseStakes,
     beginSql: async (fn) =>
       fn({
         unsafe: async (query, params) => {
@@ -145,5 +155,10 @@ const runGetTableContract = async () => {
   assert.equal(raw.includes('"deck"'), false);
 };
 
-await runListTablesContract();
-await runGetTableContract();
+const restoreGlobals = setStakesGlobals();
+try {
+  await runListTablesContract();
+  await runGetTableContract();
+} finally {
+  restoreGlobals();
+}
