@@ -6,6 +6,31 @@ const toSafeInt = (value, fallback = 0) => {
   return Math.trunc(num);
 };
 
+const maxFromMap = (value) => {
+  if (!value || typeof value !== "object") return 0;
+  const nums = Object.values(value)
+    .map((entry) => toSafeInt(entry, 0))
+    .filter((entry) => entry > 0);
+  if (nums.length === 0) return 0;
+  return Math.max(...nums);
+};
+
+const deriveCurrentBet = (state) => {
+  const currentBet = toSafeInt(state.currentBet, null);
+  if (currentBet == null || currentBet < 0) {
+    return maxFromMap(state.betThisRoundByUserId);
+  }
+  return currentBet;
+};
+
+const deriveLastRaiseSize = (state, currentBet) => {
+  const lastRaiseSize = toSafeInt(state.lastRaiseSize, null);
+  if (lastRaiseSize == null || lastRaiseSize <= 0) {
+    return currentBet > 0 ? currentBet : 0;
+  }
+  return lastRaiseSize;
+};
+
 const isActivePlayer = (state, userId) => {
   if (!state || !userId) return false;
   const folded = !!(state.foldedByUserId && state.foldedByUserId[userId]);
@@ -34,22 +59,24 @@ const computeLegalActions = ({ statePublic, userId } = {}) => {
   }
 
   const stack = toSafeInt(state.stacks?.[userId], 0);
-  const toCall = toSafeInt(state.toCallByUserId?.[userId], 0);
-  const currentBet = toSafeInt(state.betThisRoundByUserId?.[userId], 0);
+  const currentUserBet = toSafeInt(state.betThisRoundByUserId?.[userId], 0);
+  const currentBet = deriveCurrentBet(state);
+  const lastRaiseSize = deriveLastRaiseSize(state, currentBet);
+  const toCall = Math.max(0, currentBet - currentUserBet);
   if (stack <= 0) {
     return { actions: [], toCall, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null };
   }
 
   if (toCall > 0) {
     const actions = ["FOLD", "CALL"];
-    // MVP placeholder: real min-raise requires tracking last raise size.
-    const minRaiseTo = toCall + 1;
-    const maxRaiseTo = stack + currentBet;
-    if (maxRaiseTo >= minRaiseTo) actions.push("RAISE");
+    const maxRaiseTo = stack + currentUserBet;
+    const rawMinRaiseTo = currentBet + lastRaiseSize;
+    const minRaiseTo = maxRaiseTo > 0 ? Math.min(rawMinRaiseTo, maxRaiseTo) : rawMinRaiseTo;
+    if (maxRaiseTo > currentBet) actions.push("RAISE");
     return {
       actions,
       toCall,
-      minRaiseTo: maxRaiseTo >= minRaiseTo ? minRaiseTo : null,
+      minRaiseTo: maxRaiseTo > currentBet ? minRaiseTo : null,
       maxRaiseTo,
       maxBetAmount: null,
     };

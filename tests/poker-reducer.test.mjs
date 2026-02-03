@@ -36,6 +36,7 @@ const run = async () => {
     const nextState = {
       ...state,
       toCallByUserId: { ...state.toCallByUserId, [state.turnUserId]: 5 },
+      currentBet: 5,
     };
     const actionsCall = getLegalActions(nextState, state.turnUserId).map((action) => action.type);
     assert.deepEqual(actionsCall, ["FOLD", "CALL", "RAISE"]);
@@ -522,6 +523,7 @@ const run = async () => {
       ...result.state,
       turnUserId: "user-1",
       toCallByUserId: { ...result.state.toCallByUserId, "user-1": 10 },
+      currentBet: 10,
     };
     result = applyAction(state, { type: "CALL", userId: "user-1" });
     state = result.state;

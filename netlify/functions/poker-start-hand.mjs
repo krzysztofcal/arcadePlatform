@@ -56,6 +56,20 @@ const parseRequestId = (value) => {
 
 const parseStacks = (value) => (value && typeof value === "object" && !Array.isArray(value) ? value : {});
 
+const toSafeInt = (value, fallback = 0) => {
+  const num = Number(value);
+  if (!Number.isFinite(num) || !Number.isInteger(num) || num < 0) return fallback;
+  return num;
+};
+
+const parseStakes = (value) => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return { sb: 0, bb: 0 };
+  return {
+    sb: toSafeInt(value.sb, 0),
+    bb: toSafeInt(value.bb, 0),
+  };
+};
+
 const normalizeVersion = (value) => {
   const num = Number(value);
   return Number.isFinite(num) ? num : null;
@@ -129,8 +143,8 @@ export async function handler(event) {
   }
 
   try {
-    const result = await beginSql(async (tx) => {
-      const tableRows = await tx.unsafe("select id, status from public.poker_tables where id = $1 limit 1;", [tableId]);
+      const result = await beginSql(async (tx) => {
+      const tableRows = await tx.unsafe("select id, status, stakes from public.poker_tables where id = $1 limit 1;", [tableId]);
       const table = tableRows?.[0] || null;
       if (!table) {
         throw makeError(404, "table_not_found");
@@ -237,7 +251,15 @@ export async function handler(event) {
 
       const orderedSeats = validSeats.slice().sort((a, b) => Number(a.seat_no) - Number(b.seat_no));
       const dealerSeatNo = orderedSeats[0].seat_no;
-      const turnUserId = orderedSeats[1]?.user_id || orderedSeats[0].user_id;
+      const dealerIndex = 0;
+      const seatCount = orderedSeats.length;
+      const isHeadsUp = seatCount === 2;
+      const sbIndex = isHeadsUp ? dealerIndex : (dealerIndex + 1) % seatCount;
+      const bbIndex = (sbIndex + 1) % seatCount;
+      const utgIndex = isHeadsUp ? dealerIndex : (bbIndex + 1) % seatCount;
+      const sbUserId = orderedSeats[sbIndex]?.user_id || null;
+      const bbUserId = orderedSeats[bbIndex]?.user_id || null;
+      const turnUserId = orderedSeats[utgIndex]?.user_id || orderedSeats[0].user_id;
 
       const rng = getRng();
       const handId =
@@ -262,6 +284,28 @@ export async function handler(event) {
       const betThisRoundByUserId = Object.fromEntries(activeUserIdList.map((userId) => [userId, 0]));
       const actedThisRoundByUserId = Object.fromEntries(activeUserIdList.map((userId) => [userId, false]));
       const foldedByUserId = Object.fromEntries(activeUserIdList.map((userId) => [userId, false]));
+      const contributionsByUserId = Object.fromEntries(activeUserIdList.map((userId) => [userId, 0]));
+      const stakes = parseStakes(table?.stakes);
+      const sbAmount = stakes.sb;
+      const bbAmount = stakes.bb;
+      const postBlind = (userId, blindAmount) => {
+        if (!userId) return 0;
+        const stack = nextStacks[userId] ?? 0;
+        const posted = Math.min(stack, blindAmount);
+        nextStacks[userId] = stack - posted;
+        betThisRoundByUserId[userId] = posted;
+        contributionsByUserId[userId] = posted;
+        return posted;
+      };
+      const sbPosted = postBlind(sbUserId, sbAmount);
+      const bbPosted = postBlind(bbUserId, bbAmount);
+      const currentBet = bbPosted;
+      const blindRaiseSize = bbPosted - sbPosted;
+      const lastRaiseSize = bbPosted > 0 ? (blindRaiseSize > 0 ? blindRaiseSize : bbPosted) : 0;
+      activeUserIdList.forEach((userId) => {
+        const bet = betThisRoundByUserId[userId] || 0;
+        toCallByUserId[userId] = Math.max(0, currentBet - bet);
+      });
 
       let deck;
       try {
@@ -315,7 +359,7 @@ export async function handler(event) {
         handId,
         handSeed,
         phase: "PREFLOP",
-        pot: 0,
+        pot: sbPosted + bbPosted,
         community: [],
         communityDealt: 0,
         seats: derivedSeats,
@@ -326,6 +370,9 @@ export async function handler(event) {
         betThisRoundByUserId,
         actedThisRoundByUserId,
         foldedByUserId,
+        contributionsByUserId,
+        currentBet,
+        lastRaiseSize,
         lastActionRequestIdByUserId: {},
         lastStartHandRequestId: requestIdParsed.value || null,
         lastStartHandUserId: auth.userId,
@@ -371,6 +418,28 @@ export async function handler(event) {
           JSON.stringify(actionMeta),
         ]
       );
+      const blindActions = [
+        { type: "POST_SB", userId: sbUserId, amount: sbPosted },
+        { type: "POST_BB", userId: bbUserId, amount: bbPosted },
+      ];
+      for (const blindAction of blindActions) {
+        if (!blindAction.userId) continue;
+        await tx.unsafe(
+          "insert into public.poker_actions (table_id, version, user_id, action_type, amount, hand_id, request_id, phase_from, phase_to, meta) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb);",
+          [
+            tableId,
+            newVersion,
+            blindAction.userId,
+            blindAction.type,
+            blindAction.amount,
+            handId,
+            requestIdParsed.value,
+            currentState.phase || null,
+            updatedState.phase || null,
+            JSON.stringify({}),
+          ]
+        );
+      }
 
       const responseState = withoutPrivateState(updatedState);
       const legalInfo = computeLegalActions({ statePublic: responseState, userId: auth.userId });
