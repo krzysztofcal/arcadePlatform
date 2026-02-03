@@ -935,6 +935,29 @@
       }
       if (actAmountInput){
         setDisabled(actAmountInput, !enabled || actPending || !allowedInfo.needsAmount);
+        updateActAmountConstraints(allowedInfo);
+      }
+    }
+
+    function updateActAmountConstraints(allowedInfo){
+      if (!actAmountInput) return;
+      actAmountInput.removeAttribute('min');
+      actAmountInput.removeAttribute('max');
+      var constraints = tableData && tableData._actionConstraints ? tableData._actionConstraints : null;
+      if (!constraints || !allowedInfo || !allowedInfo.allowed) return;
+      var allowed = allowedInfo.allowed;
+      if (allowed.has('RAISE')){
+        if (constraints.minRaiseTo != null){
+          actAmountInput.setAttribute('min', String(constraints.minRaiseTo));
+        }
+        if (constraints.maxRaiseTo != null){
+          actAmountInput.setAttribute('max', String(constraints.maxRaiseTo));
+        }
+        return;
+      }
+      if (allowed.has('BET') && constraints.maxBetAmount != null){
+        actAmountInput.setAttribute('min', '1');
+        actAmountInput.setAttribute('max', String(constraints.maxBetAmount));
       }
     }
 
@@ -1577,6 +1600,20 @@
         var amount = parseInt(actAmountInput ? actAmountInput.value : '', 10);
         if (!isFinite(amount) || amount <= 0){
           return { error: t('pokerActAmountRequired', 'Enter an amount for bet/raise') };
+        }
+        var constraints = tableData && tableData._actionConstraints ? tableData._actionConstraints : null;
+        if (constraints){
+          if (actionType === 'BET' && constraints.maxBetAmount != null && amount > constraints.maxBetAmount){
+            return { error: t('pokerErrActAmount', 'Invalid amount') };
+          }
+          if (actionType === 'RAISE'){
+            if (constraints.minRaiseTo != null && amount < constraints.minRaiseTo){
+              return { error: t('pokerErrActAmount', 'Invalid amount') };
+            }
+            if (constraints.maxRaiseTo != null && amount > constraints.maxRaiseTo){
+              return { error: t('pokerErrActAmount', 'Invalid amount') };
+            }
+          }
         }
         payload.amount = Math.trunc(amount);
       }
