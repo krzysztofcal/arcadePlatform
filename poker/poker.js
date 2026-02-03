@@ -173,8 +173,8 @@
     return n;
   }
 
-  function getActionConstraints(data){
-    var constraints = data && isPlainObject(data.actionConstraints) ? data.actionConstraints : null;
+  function getSafeConstraints(data){
+    var constraints = data && isPlainObject(data._actionConstraints) ? data._actionConstraints : null;
     return {
       toCall: toFiniteOrNull(constraints ? constraints.toCall : null),
       minRaiseTo: toFiniteOrNull(constraints ? constraints.minRaiseTo : null),
@@ -1199,7 +1199,7 @@
       try {
         var data = await apiGet(GET_URL + '?tableId=' + encodeURIComponent(tableId));
         tableData = data || {};
-        tableData._actionConstraints = getActionConstraints(tableData);
+        tableData._actionConstraints = getSafeConstraints(tableData);
         renderTable(tableData);
         if (isPolling){ resetPollBackoff(); }
       } catch (err){
