@@ -174,7 +174,7 @@
   }
 
   function getSafeConstraints(data){
-    var constraints = data && isPlainObject(data._actionConstraints) ? data._actionConstraints : null;
+    var constraints = data && isPlainObject(data.actionConstraints) ? data.actionConstraints : null;
     return {
       toCall: toFiniteOrNull(constraints ? constraints.toCall : null),
       minRaiseTo: toFiniteOrNull(constraints ? constraints.minRaiseTo : null),
