@@ -684,6 +684,7 @@
     var actRow = document.getElementById('pokerActionsRow');
     var actAmountWrap = document.getElementById('pokerActAmountWrap');
     var actAmountInput = document.getElementById('pokerActAmount');
+    var actAmountHintEl = null;
     var actCheckBtn = document.getElementById('pokerActCheckBtn');
     var actCallBtn = document.getElementById('pokerActCallBtn');
     var actFoldBtn = document.getElementById('pokerActFoldBtn');
@@ -694,6 +695,17 @@
     var copyLogStatusEl = document.getElementById('pokerCopyLogStatus');
     var leaveSelector = '#pokerLeave';
     var joinSelector = '#pokerJoin';
+
+    if (actAmountWrap && actAmountWrap.parentNode){
+      actAmountHintEl = document.getElementById('pokerActAmountHint');
+      if (!actAmountHintEl){
+        actAmountHintEl = document.createElement('div');
+        actAmountHintEl.id = 'pokerActAmountHint';
+        actAmountHintEl.className = 'poker-act-hint';
+        actAmountHintEl.hidden = true;
+        actAmountWrap.parentNode.insertBefore(actAmountHintEl, actAmountWrap.nextSibling);
+      }
+    }
 
     var currentUserId = null;
     var tableData = null;
@@ -933,10 +945,26 @@
         toggleHidden(item.el, !hasActions || !isAllowed);
         setDisabled(item.el, !enabled || actPending || !isAllowed);
       }
+      if (actCallBtn){
+        if (!actCallBtn.dataset.baseLabel){
+          actCallBtn.dataset.baseLabel = actCallBtn.textContent || t('pokerActCall', 'CALL');
+        }
+        var baseLabel = actCallBtn.dataset.baseLabel || t('pokerActCall', 'CALL');
+        var constraints = tableData && tableData._actionConstraints ? tableData._actionConstraints : null;
+        var toCall = constraints ? toFiniteOrNull(constraints.toCall) : null;
+        var callAllowed = allowed.has('CALL');
+        if (callAllowed && toCall != null && toCall > 0){
+          var callTemplate = t('pokerCallWithAmount', 'CALL ({amount})');
+          actCallBtn.textContent = callTemplate.replace('{amount}', String(toCall));
+        } else {
+          actCallBtn.textContent = baseLabel;
+        }
+      }
       if (actAmountInput){
         setDisabled(actAmountInput, !enabled || actPending || !allowedInfo.needsAmount);
         updateActAmountConstraints(allowedInfo, pendingActType);
       }
+      updateActAmountHint(allowedInfo, pendingActType);
     }
 
     function updateActAmountConstraints(allowedInfo, selectedType){
@@ -958,6 +986,50 @@
       }
       if (normalized === 'BET' && constraints.maxBetAmount != null){
         actAmountInput.setAttribute('max', String(constraints.maxBetAmount));
+      }
+    }
+
+    function updateActAmountHint(allowedInfo, selectedType){
+      if (!actAmountHintEl) return;
+      if (!allowedInfo || !allowedInfo.needsAmount || !shouldEnableDevActions()){
+        actAmountHintEl.textContent = '';
+        actAmountHintEl.hidden = true;
+        return;
+      }
+      var constraints = tableData && tableData._actionConstraints ? tableData._actionConstraints : null;
+      var normalized = normalizeActionType(selectedType);
+      if (!constraints || !normalized){
+        actAmountHintEl.textContent = '';
+        actAmountHintEl.hidden = true;
+        return;
+      }
+      var hint = '';
+      if (normalized === 'RAISE'){
+        var minRaiseTo = toFiniteOrNull(constraints.minRaiseTo);
+        var maxRaiseTo = toFiniteOrNull(constraints.maxRaiseTo);
+        if (minRaiseTo != null && maxRaiseTo != null){
+          var rangeTemplate = t('pokerRaiseRange', 'Raise-to range: {min}–{max}');
+          hint = rangeTemplate.replace('{min}', String(minRaiseTo)).replace('{max}', String(maxRaiseTo));
+        } else if (minRaiseTo != null){
+          var minTemplate = t('pokerRaiseMin', 'Raise-to min: {min}');
+          hint = minTemplate.replace('{min}', String(minRaiseTo));
+        } else if (maxRaiseTo != null){
+          var maxTemplate = t('pokerRaiseMax', 'Raise-to max: {max}');
+          hint = maxTemplate.replace('{max}', String(maxRaiseTo));
+        }
+      } else if (normalized === 'BET'){
+        var maxBetAmount = toFiniteOrNull(constraints.maxBetAmount);
+        if (maxBetAmount != null){
+          var betTemplate = t('pokerBetMax', 'Bet max: {max}');
+          hint = betTemplate.replace('{max}', String(maxBetAmount));
+        }
+      }
+      if (hint){
+        actAmountHintEl.textContent = hint;
+        actAmountHintEl.hidden = false;
+      } else {
+        actAmountHintEl.textContent = '';
+        actAmountHintEl.hidden = true;
       }
     }
 
@@ -1948,6 +2020,7 @@
       }
       pendingActType = normalized;
       updateActAmountConstraints(allowedInfo, pendingActType);
+      updateActAmountHint(allowedInfo, pendingActType);
       klog('poker_act_click', { tableId: tableId, hasToken: !!state.token, type: normalized });
       setInlineStatus(actStatusEl, null, null);
       sendAct(normalized).catch(function(err){
