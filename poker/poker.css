@@ -128,7 +128,7 @@
 
 .poker-loading{color:var(--muted); font:600 13px Poppins, sans-serif; padding:20px; text-align:center;}
 
-.poker-card--red{color:#ef4444;}
+.poker-card.poker-card--red{color:#ef4444;}
 
 .poker-card__rank{margin-right:2px;}
 
