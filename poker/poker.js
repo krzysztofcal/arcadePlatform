@@ -328,20 +328,45 @@
     phaseLabelEl.textContent = 'Phase: ' + phase;
   }
 
+  function getSuitSymbol(suit){
+    var key = typeof suit === 'string' ? suit.toUpperCase() : '';
+    if (key === 'S') return '♠';
+    if (key === 'H') return '♥';
+    if (key === 'D') return '♦';
+    if (key === 'C') return '♣';
+    return '?';
+  }
+
+  function isRedSuit(suit){
+    var key = typeof suit === 'string' ? suit.toUpperCase() : '';
+    return key === 'H' || key === 'D';
+  }
+
+  function buildCardElement(card){
+    var rank = card && card.r != null ? String(card.r) : '?';
+    var suitKey = card && card.s != null ? String(card.s).toUpperCase() : '';
+    var suit = getSuitSymbol(suitKey);
+    var cardEl = document.createElement('div');
+    cardEl.className = 'poker-card' + (isRedSuit(suitKey) ? ' poker-card--red' : '');
+    var rankEl = document.createElement('span');
+    rankEl.className = 'poker-card__rank';
+    rankEl.textContent = rank;
+    var suitEl = document.createElement('span');
+    suitEl.className = 'poker-card__suit';
+    suitEl.textContent = suit;
+    cardEl.appendChild(rankEl);
+    cardEl.appendChild(suitEl);
+    return cardEl;
+  }
+
   function renderCommunityBoard(state){
     var boardEl = document.getElementById('pokerBoard');
     if (!boardEl) return;
-    var suitMap = { S: '♠', H: '♥', D: '♦', C: '♣' };
     var cards = state && Array.isArray(state.community) ? state.community.slice(0, 5) : [];
     boardEl.innerHTML = '';
     for (var i = 0; i < cards.length; i++){
       var card = cards[i] || {};
-      var rank = card.r == null ? '?' : String(card.r);
-      var suit = suitMap[card.s] || '?';
-      var cardEl = document.createElement('div');
-      cardEl.className = 'poker-card';
-      cardEl.textContent = rank + suit;
-      boardEl.appendChild(cardEl);
+      boardEl.appendChild(buildCardElement(card));
     }
   }
 
@@ -676,6 +701,8 @@
     var potEl = document.getElementById('pokerPot');
     var phaseEl = document.getElementById('pokerPhase');
     var versionEl = document.getElementById('pokerVersion');
+    var myCardsEl = document.getElementById('pokerMyCards');
+    var myCardsStatusEl = document.getElementById('pokerMyCardsStatus');
     var jsonToggle = document.getElementById('pokerJsonToggle');
     var jsonBox = document.getElementById('pokerJsonBox');
     var signInBtn = document.getElementById('pokerSignIn');
@@ -783,6 +810,7 @@
         currentUserId = null;
         if (authMsg) authMsg.hidden = false;
         if (tableContent) tableContent.hidden = true;
+        renderHoleCards(null);
         setDevActionsEnabled(false);
         setDevActionsAuthStatus(false);
         startAuthWatch();
@@ -800,6 +828,7 @@
     function handleTableAuthExpired(opts){
       setDevActionsEnabled(false);
       setDevActionsAuthStatus(false);
+      renderHoleCards(null);
       handleAuthExpired(opts);
     }
 
@@ -1499,11 +1528,26 @@
       if (phaseEl) phaseEl.textContent = gameState.phase || '-';
       renderPhaseLabel(gameState);
       renderCommunityBoard(gameState);
+      renderHoleCards(data.myHoleCards);
       renderShowdownPanel({ state: gameState, playersById: buildPlayersById(seats) });
       renderTurnTimer(gameState);
       if (versionEl) versionEl.textContent = stateObj.version != null ? stateObj.version : '-';
       if (jsonBox) jsonBox.textContent = JSON.stringify(gameState, null, 2);
       renderAllowedActionButtons();
+    }
+
+    function renderHoleCards(cards){
+      if (!myCardsEl) return;
+      myCardsEl.innerHTML = '';
+      var isValid = Array.isArray(cards) && cards.length === 2;
+      if (!isValid){
+        setInlineStatus(myCardsStatusEl, t('pokerMyCardsHidden', 'Sign in to see your cards.'), null);
+        return;
+      }
+      for (var i = 0; i < cards.length; i++){
+        myCardsEl.appendChild(buildCardElement(cards[i] || {}));
+      }
+      setInlineStatus(myCardsStatusEl, null, null);
     }
 
     function renderTurnTimer(gameState){
