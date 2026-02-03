@@ -3,7 +3,7 @@ import { baseHeaders, beginSql, corsHeaders, extractBearerToken, klog, verifySup
 import { isValidTwoCards } from "./_shared/poker-cards-utils.mjs";
 import { dealHoleCards } from "./_shared/poker-engine.mjs";
 import { deriveDeck } from "./_shared/poker-deal-deterministic.mjs";
-import { TURN_MS } from "./_shared/poker-reducer.mjs";
+import { TURN_MS, computeNextDealerSeatNo } from "./_shared/poker-reducer.mjs";
 import { buildActionConstraints, computeLegalActions } from "./_shared/poker-legal-actions.mjs";
 import {
   getRng,
@@ -163,6 +163,7 @@ export async function handler(event) {
       }
 
       let currentState = normalizeJsonState(stateRow.state);
+      const previousDealerSeatNo = Number.isInteger(currentState?.dealerSeatNo) ? currentState.dealerSeatNo : null;
 
       const seatRows = await tx.unsafe(
         "select user_id, seat_no from public.poker_seats where table_id = $1 and status = 'ACTIVE' order by seat_no asc;",
@@ -250,8 +251,15 @@ export async function handler(event) {
       }
 
       const orderedSeats = validSeats.slice().sort((a, b) => Number(a.seat_no) - Number(b.seat_no));
-      const dealerSeatNo = orderedSeats[0].seat_no;
-      const dealerIndex = 0;
+      const orderedSeatList = orderedSeats.map((seat) => ({ userId: seat.user_id, seatNo: seat.seat_no }));
+      let dealerSeatNo = computeNextDealerSeatNo(orderedSeatList, previousDealerSeatNo);
+      if (!orderedSeats.some((seat) => seat.seat_no === dealerSeatNo)) {
+        dealerSeatNo = orderedSeats[0].seat_no;
+      }
+      const dealerIndex = Math.max(
+        orderedSeats.findIndex((seat) => seat.seat_no === dealerSeatNo),
+        0
+      );
       const seatCount = orderedSeats.length;
       const isHeadsUp = seatCount === 2;
       const sbIndex = isHeadsUp ? dealerIndex : (dealerIndex + 1) % seatCount;
@@ -259,7 +267,8 @@ export async function handler(event) {
       const utgIndex = isHeadsUp ? dealerIndex : (bbIndex + 1) % seatCount;
       const sbUserId = orderedSeats[sbIndex]?.user_id || null;
       const bbUserId = orderedSeats[bbIndex]?.user_id || null;
-      const turnUserId = orderedSeats[utgIndex]?.user_id || orderedSeats[0].user_id;
+      const turnUserId =
+        orderedSeats[utgIndex]?.user_id || orderedSeats[dealerIndex]?.user_id || orderedSeats[0].user_id;
 
       const rng = getRng();
       const handId =
@@ -270,7 +279,7 @@ export async function handler(event) {
         typeof crypto.randomUUID === "function"
           ? crypto.randomUUID()
           : `seed_${Date.now()}_${Math.floor(rng() * 1e6)}`;
-      const derivedSeats = orderedSeats.map((seat) => ({ userId: seat.user_id, seatNo: seat.seat_no }));
+      const derivedSeats = orderedSeatList.slice();
       const activeUserIds = new Set(orderedSeats.map((seat) => seat.user_id));
       const activeUserIdList = orderedSeats.map((seat) => seat.user_id);
       const currentStacks = parseStacks(currentState.stacks);

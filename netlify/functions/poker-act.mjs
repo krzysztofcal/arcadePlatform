@@ -190,6 +190,24 @@ const normalizeSeatOrderFromState = (seats) => {
   return out;
 };
 
+const repairDealerSeatNo = (state) => {
+  const ordered = Array.isArray(state?.seats)
+    ? state.seats.slice().sort((a, b) => toSeatNo(a?.seatNo) - toSeatNo(b?.seatNo))
+    : [];
+  const occupiedSeats = ordered
+    .filter((seat) => typeof seat?.userId === "string" && seat.userId.trim())
+    .map((seat) => {
+      const seatNo = toSeatNo(seat?.seatNo);
+      if (!Number.isFinite(seatNo)) return null;
+      return { seatNo: Math.trunc(seatNo) };
+    })
+    .filter(Boolean);
+  const dealerSeatNo = Number.isInteger(state?.dealerSeatNo) ? state.dealerSeatNo : null;
+  if (occupiedSeats.length === 0) return dealerSeatNo ?? null;
+  if (dealerSeatNo != null && occupiedSeats.some((seat) => seat.seatNo === dealerSeatNo)) return dealerSeatNo;
+  return occupiedSeats[0].seatNo;
+};
+
 const validateActionAmount = (state, action, userId, legalInfo) => {
   const stack = Number(state.stacks?.[userId] ?? 0);
   const currentUserBet = Number(state.betThisRoundByUserId?.[userId] || 0);
@@ -296,7 +314,7 @@ export async function handler(event) {
         throw makeError(409, "state_invalid");
       }
 
-      const currentState = normalizeJsonState(stateRow.state);
+      let currentState = normalizeJsonState(stateRow.state);
       if (!hasRequiredState(currentState)) {
         klog("poker_act_rejected", {
           tableId,
@@ -305,6 +323,10 @@ export async function handler(event) {
           phase: currentState?.phase || null,
         });
         throw makeError(409, "state_invalid");
+      }
+      const repairedDealerSeatNo = repairDealerSeatNo(currentState);
+      if (repairedDealerSeatNo != null && repairedDealerSeatNo !== currentState.dealerSeatNo) {
+        currentState = { ...currentState, dealerSeatNo: repairedDealerSeatNo };
       }
 
       if (currentState?.phase === "INIT") {
