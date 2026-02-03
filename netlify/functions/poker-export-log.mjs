@@ -133,6 +133,7 @@ export async function handler(event) {
       stateVersion: result.stateVersion,
       table: {
         stakes: stakesParsed.ok ? stakesParsed.value : null,
+        stakesRaw: result.table?.stakes ?? null,
         maxPlayers: result.table?.max_players ?? null,
       },
       seats: result.seats.map((seat) => ({ seatNo: seat.seat_no, userId: seat.user_id })),

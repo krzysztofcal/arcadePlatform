@@ -30,6 +30,8 @@ run("node", ["tests/recorder-admin-only.test.mjs"], "recorder-admin-only");
 run("node", ["tests/secureStorage.test.mjs"], "secure-storage");
 run("node", ["tests/favorites-service.test.mjs"], "favorites-service");
 run("node", ["tests/poker-stakes.test.mjs"], "poker-stakes");
+run("node", ["tests/poker-stakes-ui.test.mjs"], "poker-stakes-ui");
+run("node", ["tests/poker-create-table.stakes.test.mjs"], "poker-create-table-stakes");
 run("node", ["tests/poker-phase1.test.mjs"], "poker-phase1");
 run("node", ["tests/poker-engine.test.mjs"], "poker-engine");
 run("node", ["tests/poker-eval.test.mjs"], "poker-eval");

@@ -69,6 +69,8 @@ const run = async () => {
   assert.equal(payload.handId, handId);
   assert.equal(payload.stateVersion, 12);
   assert.equal(payload.table.maxPlayers, 6);
+  assert.deepEqual(payload.table.stakes, { sb: 1, bb: 2 });
+  assert.deepEqual(payload.table.stakesRaw, { sb: 1, bb: 2 });
   assert.equal(payload.seats.length, 1);
   assert.equal(payload.seats[0].userId, userId);
   assert.equal(payload.actions.length, 1);

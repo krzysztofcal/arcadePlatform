@@ -165,6 +165,33 @@
     return String(num);
   }
 
+  function getStakesUiHelper(){
+    if (window.PokerStakesUi && typeof window.PokerStakesUi.format === 'function'){
+      return window.PokerStakesUi;
+    }
+    return null;
+  }
+
+  function parseStakesUi(stakes){
+    var helper = getStakesUiHelper();
+    if (helper && typeof helper.parse === 'function') return helper.parse(stakes);
+    if (!stakes || typeof stakes !== 'object' || Array.isArray(stakes)) return null;
+    var sb = parseInt(stakes.sb, 10);
+    var bb = parseInt(stakes.bb, 10);
+    if (!isFinite(sb) || !isFinite(bb)) return null;
+    if (Math.floor(sb) !== sb || Math.floor(bb) !== bb) return null;
+    if (sb < 0 || bb <= 0 || sb >= bb) return null;
+    return { sb: sb, bb: bb };
+  }
+
+  function formatStakesUi(stakes){
+    var helper = getStakesUiHelper();
+    if (helper && typeof helper.format === 'function') return helper.format(stakes);
+    var parsed = parseStakesUi(stakes);
+    if (!parsed) return '—';
+    return parsed.sb + '/' + parsed.bb;
+  }
+
   function toFiniteOrNull(value){
     var n = Number(value);
     if (!Number.isFinite(n)) return null;
@@ -583,7 +610,7 @@
       tables.forEach(function(tbl){
         var row = document.createElement('div');
         row.className = 'poker-table-row';
-        var stakes = tbl.stakes || {};
+        var stakes = tbl.stakes;
         var maxPlayers = tbl.maxPlayers != null ? tbl.maxPlayers : 6;
         var seatCount = tbl.seatCount != null ? tbl.seatCount : 0;
         var tid = document.createElement('span');
@@ -591,7 +618,7 @@
         tid.textContent = shortId(tbl.id);
         var stakesEl = document.createElement('span');
         stakesEl.className = 'stakes';
-        stakesEl.textContent = (stakes.sb != null ? stakes.sb : 0) + '/' + (stakes.bb != null ? stakes.bb : 0);
+        stakesEl.textContent = formatStakesUi(stakes);
         var seatsEl = document.createElement('span');
         seatsEl.className = 'seats';
         seatsEl.textContent = seatCount + '/' + maxPlayers;
@@ -613,8 +640,14 @@
 
     async function createTable(){
       setError(errorEl, null);
-      var sb = parseInt(sbInput ? sbInput.value : 1, 10) || 1;
-      var bb = parseInt(bbInput ? bbInput.value : 2, 10) || 2;
+      var sbRaw = sbInput ? sbInput.value : 1;
+      var bbRaw = bbInput ? bbInput.value : 2;
+      var sb = parseInt(sbRaw, 10);
+      var bb = parseInt(bbRaw, 10);
+      if (!isFinite(sb) || !isFinite(bb) || Math.floor(sb) !== sb || Math.floor(bb) !== bb || sb < 0 || bb <= 0 || sb >= bb){
+        setError(errorEl, t('pokerErrInvalidStakes', 'Invalid stakes'));
+        return;
+      }
       var maxPlayers = parseInt(maxPlayersInput ? maxPlayersInput.value : 6, 10) || 6;
       setLoading(createBtn, true);
       try {
@@ -737,6 +770,7 @@
     var currentUserId = null;
     var tableData = null;
     var tableMaxPlayers = 6;
+    var stakesValid = true;
     var devActionsEnabled = false;
     var authTimer = null;
     var heartbeatTimer = null;
@@ -1474,8 +1508,20 @@
       var gameState = stateObj.state || {};
 
       if (tableIdEl) tableIdEl.textContent = shortId(table.id || tableId);
-      var stakes = table.stakes || {};
-      if (stakesEl) stakesEl.textContent = (stakes.sb || 0) + '/' + (stakes.bb || 0);
+      var stakes = table.stakes;
+      var parsedStakes = parseStakesUi(stakes);
+      stakesValid = !!parsedStakes;
+      if (stakesEl) stakesEl.textContent = formatStakesUi(stakes);
+      if (startHandBtn) startHandBtn.disabled = !stakesValid;
+      if (startHandStatusEl){
+        if (!stakesValid){
+          startHandStatusEl.dataset.stakesInvalid = '1';
+          setInlineStatus(startHandStatusEl, t('pokerErrInvalidStakes', 'Invalid stakes'), 'error');
+        } else if (startHandStatusEl.dataset.stakesInvalid === '1') {
+          startHandStatusEl.dataset.stakesInvalid = '';
+          setInlineStatus(startHandStatusEl, null, null);
+        }
+      }
       if (statusEl) statusEl.textContent = table.status || '-';
 
       var maxPlayers = table.maxPlayers != null ? table.maxPlayers : 6;
@@ -1662,6 +1708,10 @@
 
     async function startHand(requestIdOverride){
       if (!shouldEnableDevActions()) return;
+      if (!stakesValid){
+        setInlineStatus(startHandStatusEl, t('pokerErrInvalidStakes', 'Invalid stakes'), 'error');
+        return;
+      }
       setInlineStatus(startHandStatusEl, null, null);
       setDevPendingState('startHand', true);
       try {
