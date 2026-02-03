@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createDeck, dealHoleCards, shuffle } from "../netlify/functions/_shared/poker-engine.mjs";
 import { deriveDeck } from "../netlify/functions/_shared/poker-deal-deterministic.mjs";
 import { buildActionConstraints, computeLegalActions } from "../netlify/functions/_shared/poker-legal-actions.mjs";
-import { TURN_MS } from "../netlify/functions/_shared/poker-reducer.mjs";
+import { TURN_MS, computeNextDealerSeatNo } from "../netlify/functions/_shared/poker-reducer.mjs";
 import {
   getRng,
   isPlainObject,
@@ -43,6 +43,7 @@ const makeHandler = (queries, storedState) =>
     upgradeLegacyInitStateWithSeats,
     withoutPrivateState,
     computeLegalActions,
+    computeNextDealerSeatNo,
     buildActionConstraints,
     TURN_MS,
     beginSql: async (fn) =>
@@ -265,6 +266,7 @@ const runHeadsUpBlinds = async () => {
     upgradeLegacyInitStateWithSeats,
     withoutPrivateState,
     computeLegalActions,
+    computeNextDealerSeatNo,
     buildActionConstraints,
     TURN_MS,
     beginSql: async (fn) =>
@@ -276,6 +278,9 @@ const runHeadsUpBlinds = async () => {
             return [{ id: tableId, status: "OPEN", max_players: 6, stakes: { sb: 1, bb: 2 } }];
           }
           if (text.includes("from public.poker_state")) {
+            if (storedState.value) {
+              return [{ version: 2, state: JSON.parse(storedState.value) }];
+            }
             return [{ version: 1, state: { phase: "INIT", stacks: { "user-1": 100, "user-2": 100 } } }];
           }
           if (text.includes("from public.poker_seats")) {
@@ -326,6 +331,78 @@ const runHeadsUpBlinds = async () => {
   const actionInserts = queries.filter((q) => q.query.toLowerCase().includes("insert into public.poker_actions"));
   assert.ok(actionInserts.some((entry) => entry.params?.[3] === "POST_SB"));
   assert.ok(actionInserts.some((entry) => entry.params?.[3] === "POST_BB"));
+
+  const nextStored = JSON.parse(storedState.value || "{}");
+  storedState.value = JSON.stringify({ ...nextStored, phase: "HAND_DONE" });
+  const rotatedResponse = await handler({
+    httpMethod: "POST",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    body: JSON.stringify({ tableId, requestId: "req-heads-up-2" }),
+  });
+  assert.equal(rotatedResponse.statusCode, 200);
+  const rotatedPayload = JSON.parse(rotatedResponse.body);
+  const rotatedState = rotatedPayload.state.state;
+  assert.equal(rotatedState.turnUserId, "user-2");
+  assert.equal(rotatedState.pot, 3);
+  assert.equal(rotatedState.betThisRoundByUserId["user-1"], 2);
+  assert.equal(rotatedState.betThisRoundByUserId["user-2"], 1);
+  assert.equal(rotatedState.toCallByUserId["user-1"], 0);
+  assert.equal(rotatedState.toCallByUserId["user-2"], 1);
+};
+
+const runDealerRotation = async () => {
+  const queries = [];
+  const storedState = { value: null, holeCardsStore: new Map(), holeCardsInsertError: null };
+  const handler = makeHandler(queries, storedState);
+  const firstResponse = await handler({
+    httpMethod: "POST",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    body: JSON.stringify({ tableId, requestId: "req-rotate-1" }),
+  });
+  assert.equal(firstResponse.statusCode, 200);
+  const firstPayload = JSON.parse(firstResponse.body);
+  const firstDealer = firstPayload.state.state.dealerSeatNo;
+  const nextStored = JSON.parse(storedState.value || "{}");
+  storedState.value = JSON.stringify({ ...nextStored, phase: "HAND_DONE" });
+  const secondResponse = await handler({
+    httpMethod: "POST",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    body: JSON.stringify({ tableId, requestId: "req-rotate-2" }),
+  });
+  assert.equal(secondResponse.statusCode, 200);
+  const secondPayload = JSON.parse(secondResponse.body);
+  const expectedOrder = [1, 3, 5];
+  const startIndex = expectedOrder.indexOf(firstDealer);
+  assert.ok(startIndex >= 0, "test assumes dealer is seated");
+  const expectedSecondDealer = expectedOrder[(startIndex + 1) % expectedOrder.length];
+  assert.notEqual(secondPayload.state.state.dealerSeatNo, firstDealer);
+  assert.equal(secondPayload.state.state.dealerSeatNo, expectedSecondDealer);
+};
+
+const runDealerBasedBlinds = async () => {
+  const queries = [];
+  const storedState = {
+    value: JSON.stringify({ phase: "HAND_DONE", stacks: initialStacks, dealerSeatNo: 3 }),
+    holeCardsStore: new Map(),
+    holeCardsInsertError: null,
+  };
+  const handler = makeHandler(queries, storedState);
+  const response = await handler({
+    httpMethod: "POST",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    body: JSON.stringify({ tableId, requestId: "req-blinds" }),
+  });
+  assert.equal(response.statusCode, 200);
+  const payload = JSON.parse(response.body);
+  const state = payload.state.state;
+  assert.equal(state.dealerSeatNo, 5);
+  assert.equal(state.turnUserId, "user-3");
+  assert.equal(state.betThisRoundByUserId["user-1"], 1);
+  assert.equal(state.betThisRoundByUserId["user-2"], 2);
+  assert.equal(state.betThisRoundByUserId["user-3"], 0);
+  assert.equal(state.toCallByUserId["user-1"], 1);
+  assert.equal(state.toCallByUserId["user-2"], 0);
+  assert.equal(state.toCallByUserId["user-3"], 2);
 };
 
 const runInvalidDeal = async () => {
@@ -350,6 +427,7 @@ const runInvalidDeal = async () => {
     upgradeLegacyInitStateWithSeats,
     withoutPrivateState,
     computeLegalActions,
+    computeNextDealerSeatNo,
     buildActionConstraints,
     TURN_MS,
     beginSql: async (fn) =>
@@ -461,6 +539,7 @@ const runMissingStateRow = async () => {
     upgradeLegacyInitStateWithSeats,
     withoutPrivateState,
     computeLegalActions,
+    computeNextDealerSeatNo,
     buildActionConstraints,
     TURN_MS,
     beginSql: async (fn) =>
@@ -500,6 +579,8 @@ const runMissingStateRow = async () => {
 await runHappyPath();
 await runReplayPath();
 await runHeadsUpBlinds();
+await runDealerRotation();
+await runDealerBasedBlinds();
 await runInvalidDeal();
 await runMissingHoleCardsTable();
 await runMissingDealSecret();

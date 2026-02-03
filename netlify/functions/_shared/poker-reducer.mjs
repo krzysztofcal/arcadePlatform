@@ -101,21 +101,24 @@ const makeHandId = () => {
   return `${now}-${rand}`;
 };
 
-const rotateDealerSeatNo = (state) => {
-  const ordered = orderSeats(state.seats);
+const computeNextDealerSeatNo = (seats, prevDealerSeatNo) => {
+  const ordered = orderSeats(seats);
   const seatsWithUsers = ordered.filter((seat) => seat?.userId);
   if (seatsWithUsers.length === 0) {
-    return Number.isInteger(state.dealerSeatNo) ? state.dealerSeatNo : 0;
+    return Number.isInteger(prevDealerSeatNo) ? prevDealerSeatNo : 0;
   }
-  const currentIndex = ordered.findIndex((seat) => seat?.seatNo === state.dealerSeatNo);
-  const fallbackIndex = ordered.findIndex((seat) => seat?.userId);
-  const startIndex = currentIndex >= 0 ? currentIndex : Math.max(fallbackIndex, 0);
+  const currentIndex = ordered.findIndex((seat) => seat?.seatNo === prevDealerSeatNo);
+  if (currentIndex === -1) {
+    return seatsWithUsers[0]?.seatNo ?? prevDealerSeatNo ?? 0;
+  }
   for (let offset = 1; offset <= ordered.length; offset += 1) {
-    const seat = ordered[(startIndex + offset) % ordered.length];
+    const seat = ordered[(currentIndex + offset) % ordered.length];
     if (seat?.userId) return seat.seatNo;
   }
-  return seatsWithUsers[0]?.seatNo ?? state.dealerSeatNo ?? 0;
+  return seatsWithUsers[0]?.seatNo ?? prevDealerSeatNo ?? 0;
 };
+
+const rotateDealerSeatNo = (state) => computeNextDealerSeatNo(state.seats, state.dealerSeatNo);
 
 const deriveAllInByUserId = (state) => {
   const seats = Array.isArray(state.seats) ? state.seats : [];
@@ -557,4 +560,4 @@ function advanceIfNeeded(state) {
   return { state: stampTurnTimer(next, Date.now()), events };
 }
 
-export { TURN_MS, initHandState, getLegalActions, applyAction, advanceIfNeeded, isBettingRoundComplete };
+export { TURN_MS, computeNextDealerSeatNo, initHandState, getLegalActions, applyAction, advanceIfNeeded, isBettingRoundComplete };
