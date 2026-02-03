@@ -935,18 +935,19 @@
       }
       if (actAmountInput){
         setDisabled(actAmountInput, !enabled || actPending || !allowedInfo.needsAmount);
-        updateActAmountConstraints(allowedInfo);
+        updateActAmountConstraints(allowedInfo, pendingActType);
       }
     }
 
-    function updateActAmountConstraints(allowedInfo){
+    function updateActAmountConstraints(allowedInfo, selectedType){
       if (!actAmountInput) return;
       actAmountInput.removeAttribute('min');
       actAmountInput.removeAttribute('max');
       var constraints = tableData && tableData._actionConstraints ? tableData._actionConstraints : null;
-      if (!constraints || !allowedInfo || !allowedInfo.allowed) return;
-      var allowed = allowedInfo.allowed;
-      if (allowed.has('RAISE')){
+      if (!constraints || !selectedType) return;
+      var normalized = normalizeActionType(selectedType);
+      if (!normalized) return;
+      if (normalized === 'RAISE'){
         if (constraints.minRaiseTo != null){
           actAmountInput.setAttribute('min', String(constraints.minRaiseTo));
         }
@@ -955,7 +956,7 @@
         }
         return;
       }
-      if (allowed.has('BET') && constraints.maxBetAmount != null){
+      if (normalized === 'BET' && constraints.maxBetAmount != null){
         actAmountInput.setAttribute('max', String(constraints.maxBetAmount));
       }
     }
@@ -1945,6 +1946,8 @@
         setInlineStatus(actStatusEl, t('pokerErrActionNotAllowed', 'Action not allowed right now'), 'error');
         return;
       }
+      pendingActType = normalized;
+      updateActAmountConstraints(allowedInfo, pendingActType);
       klog('poker_act_click', { tableId: tableId, hasToken: !!state.token, type: normalized });
       setInlineStatus(actStatusEl, null, null);
       sendAct(normalized).catch(function(err){
