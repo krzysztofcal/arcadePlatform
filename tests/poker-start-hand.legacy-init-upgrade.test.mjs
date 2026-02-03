@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { dealHoleCards } from "../netlify/functions/_shared/poker-engine.mjs";
 import { deriveDeck } from "../netlify/functions/_shared/poker-deal-deterministic.mjs";
 import { buildActionConstraints, computeLegalActions } from "../netlify/functions/_shared/poker-legal-actions.mjs";
+import { TURN_MS } from "../netlify/functions/_shared/poker-reducer.mjs";
 import {
   getRng,
   isPlainObject,
@@ -43,12 +44,13 @@ const makeHandler = (storedState, updates) =>
     withoutPrivateState,
     computeLegalActions,
     buildActionConstraints,
+    TURN_MS,
     beginSql: async (fn) =>
       fn({
         unsafe: async (query, params) => {
           const text = String(query).toLowerCase();
           if (text.includes("from public.poker_tables")) {
-            return [{ id: tableId, status: "OPEN" }];
+            return [{ id: tableId, status: "OPEN", stakes: { sb: 1, bb: 2 } }];
           }
           if (text.includes("from public.poker_state")) {
             return [{ version: 1, state: JSON.parse(storedState.value) }];

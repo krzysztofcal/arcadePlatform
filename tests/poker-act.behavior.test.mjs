@@ -43,6 +43,8 @@ const baseState = {
   actedThisRoundByUserId: { "user-1": false, "user-2": false, "user-3": false },
   foldedByUserId: { "user-1": false, "user-2": false, "user-3": false },
   lastAggressorUserId: null,
+  currentBet: 0,
+  lastRaiseSize: 0,
   lastActionRequestIdByUserId: {},
 };
 
@@ -141,13 +143,14 @@ const makeStartHandHandler = (queries, storedState, userId, seatUserIds) => {
     withoutPrivateState,
     computeLegalActions,
     buildActionConstraints,
+    TURN_MS,
     beginSql: async (fn) =>
       fn({
         unsafe: async (query, params) => {
           const text = String(query).toLowerCase();
           queries.push({ query: String(query), params });
           if (text.includes("from public.poker_tables")) {
-            return [{ id: tableId, status: "OPEN", max_players: 6 }];
+            return [{ id: tableId, status: "OPEN", max_players: 6, stakes: { sb: 1, bb: 2 } }];
           }
           if (text.includes("from public.poker_state")) {
             if (storedState.value) {
@@ -329,6 +332,8 @@ const run = async () => {
     stacks: { ...baseState.stacks, "user-1": 20 },
     toCallByUserId: { ...baseState.toCallByUserId, "user-1": 5 },
     betThisRoundByUserId: { ...baseState.betThisRoundByUserId, "user-1": 2 },
+    currentBet: 7,
+    lastRaiseSize: 2,
   };
   const invalidRaise = await runCase({
     state: raiseState,
@@ -347,9 +352,35 @@ const run = async () => {
   });
   assert.equal(validRaise.response.statusCode, 200);
 
+  const minRaiseState = {
+    ...baseState,
+    stacks: { ...baseState.stacks, "user-1": 6 },
+    betThisRoundByUserId: { ...baseState.betThisRoundByUserId, "user-1": 6 },
+    toCallByUserId: { ...baseState.toCallByUserId, "user-1": 4 },
+    currentBet: 10,
+    lastRaiseSize: 4,
+  };
+  const shortRaise = await runCase({
+    state: minRaiseState,
+    action: { type: "RAISE", amount: 11 },
+    requestId: "req-raise-short",
+    userId: "user-1",
+  });
+  assert.equal(shortRaise.response.statusCode, 400);
+  assert.equal(JSON.parse(shortRaise.response.body).error, "invalid_amount");
+
+  const allInRaise = await runCase({
+    state: minRaiseState,
+    action: { type: "RAISE", amount: 12 },
+    requestId: "req-raise-all-in",
+    userId: "user-1",
+  });
+  assert.equal(allInRaise.response.statusCode, 200);
+
   const checkState = {
     ...baseState,
     toCallByUserId: { ...baseState.toCallByUserId, "user-1": 5 },
+    currentBet: 5,
   };
   const invalidCheck = await runCase({
     state: checkState,
@@ -537,7 +568,7 @@ const run = async () => {
     const firstCheck = await handlerFirst({
       httpMethod: "POST",
       headers: { origin: "https://example.test", authorization: "Bearer token" },
-      body: JSON.stringify({ tableId, requestId: "req-check-1", action: { type: "CHECK" } }),
+      body: JSON.stringify({ tableId, requestId: "req-check-1", action: { type: "CALL" } }),
     });
     assert.equal(firstCheck.statusCode, 200, firstCheck.body);
     const handlerSecond = makeHandler(actQueries, storedActState, secondUserId, {
@@ -591,7 +622,7 @@ const run = async () => {
       const firstCheck = await handlerFirst({
         httpMethod: "POST",
         headers: { origin: "https://example.test", authorization: "Bearer token" },
-        body: JSON.stringify({ tableId, requestId: "req-preflop-1", action: { type: "CHECK" } }),
+        body: JSON.stringify({ tableId, requestId: "req-preflop-1", action: { type: "CALL" } }),
       });
       assert.equal(firstCheck.statusCode, 200);
       const handlerSecond = makeHandler(actQueries, storedActState, secondUserId, {

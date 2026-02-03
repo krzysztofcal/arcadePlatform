@@ -24,6 +24,12 @@ const TURN_MS = 20000;
 
 const copyMap = (value) => ({ ...(value || {}) });
 
+const toSafeInt = (value, fallback = 0) => {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return fallback;
+  return Math.trunc(num);
+};
+
 const orderSeats = (seats) =>
   (Array.isArray(seats) ? seats.slice() : []).sort((a, b) => (a?.seatNo ?? 0) - (b?.seatNo ?? 0));
 
@@ -60,6 +66,31 @@ const buildDefaultMap = (seats, value) =>
     if (seat?.userId) acc[seat.userId] = value;
     return acc;
   }, {});
+
+const maxFromMap = (value) => {
+  if (!value || typeof value !== "object") return 0;
+  const nums = Object.values(value)
+    .map((entry) => toSafeInt(entry, 0))
+    .filter((entry) => entry > 0);
+  if (nums.length === 0) return 0;
+  return Math.max(...nums);
+};
+
+const deriveCurrentBet = (state) => {
+  const currentBet = toSafeInt(state.currentBet, null);
+  if (currentBet == null || currentBet < 0) {
+    return maxFromMap(state.betThisRoundByUserId);
+  }
+  return currentBet;
+};
+
+const deriveLastRaiseSize = (state, currentBet) => {
+  const lastRaiseSize = toSafeInt(state.lastRaiseSize, null);
+  if (lastRaiseSize == null || lastRaiseSize <= 0) {
+    return currentBet > 0 ? currentBet : 0;
+  }
+  return lastRaiseSize;
+};
 
 const makeHandId = () => {
   if (globalThis.crypto && typeof globalThis.crypto.randomUUID === "function") {
@@ -148,6 +179,8 @@ const resetRoundState = (state) => ({
   toCallByUserId: buildDefaultMap(state.seats, 0),
   betThisRoundByUserId: buildDefaultMap(state.seats, 0),
   actedThisRoundByUserId: buildDefaultMap(state.seats, false),
+  currentBet: 0,
+  lastRaiseSize: null,
 });
 
 const stampTurnTimer = (state, nowMs) => {
@@ -221,6 +254,8 @@ const initHandState = ({ tableId, seats, stacks, rng }) => {
     allInByUserId,
     contributionsByUserId,
     lastAggressorUserId: null,
+    currentBet: 0,
+    lastRaiseSize: null,
   };
   const now = Date.now();
   const nextState = stampTurnTimer({ ...state, allInByUserId: deriveAllInByUserId(state), turnNo: 1 }, now);
@@ -289,6 +324,8 @@ const resetToNextHand = (state, options = {}) => {
     lastActionRequestIdByUserId: {},
     showdown: null,
     sidePots: null,
+    currentBet: 0,
+    lastRaiseSize: null,
   };
   const nextWithAllIn = { ...nextState, allInByUserId: deriveAllInByUserId(nextState) };
   const stamped = stampTurnTimer(nextWithAllIn, Date.now());
@@ -302,25 +339,28 @@ const getLegalActions = (state, userId) => {
   assertPlayer(state, userId);
   if (!state.turnUserId) return [];
   if (userId !== state.turnUserId) return [];
-  const toCall = state.toCallByUserId?.[userId] || 0;
   const stack = state.stacks?.[userId] ?? 0;
+  const currentBet = deriveCurrentBet(state);
+  const lastRaiseSize = deriveLastRaiseSize(state, currentBet);
+  const currentUserBet = state.betThisRoundByUserId?.[userId] || 0;
+  const toCall = Math.max(0, currentBet - currentUserBet);
   if (stack === 0) return [];
   if (toCall > 0) {
-  const actions = [
-    { type: "FOLD" },
-    { type: "CALL", max: stack },
-  ];
+    const actions = [
+      { type: "FOLD" },
+      { type: "CALL", max: stack },
+    ];
 
-  const raiseMin = toCall + 1;
-  const raiseMax = stack + (state.betThisRoundByUserId?.[userId] || 0);
+    const raiseMax = stack + currentUserBet;
+    const raiseMin = Math.min(currentBet + lastRaiseSize, raiseMax);
 
-  // Only include RAISE if it is actually possible.
-  if (raiseMax >= raiseMin) {
-    actions.push({ type: "RAISE", min: raiseMin, max: raiseMax });
+    // Only include RAISE if it is actually possible.
+    if (raiseMax > currentBet) {
+      actions.push({ type: "RAISE", min: raiseMin, max: raiseMax });
+    }
+
+    return actions;
   }
-
-  return actions;
-}
   return [
     { type: "CHECK" },
     { type: "BET", min: 1, max: stack },
@@ -353,8 +393,10 @@ const applyAction = (state, action) => {
     deck: Array.isArray(state.deck) ? state.deck.slice() : [],
   };
   const userId = action.userId;
-  const toCall = next.toCallByUserId[userId] || 0;
+  const roundCurrentBet = deriveCurrentBet(next);
+  const roundLastRaiseSize = deriveLastRaiseSize(next, roundCurrentBet);
   const currentBet = next.betThisRoundByUserId[userId] || 0;
+  const toCall = Math.max(0, roundCurrentBet - currentBet);
   const stack = next.stacks[userId] ?? 0;
 
   if (action.type === "FOLD") {
@@ -377,28 +419,42 @@ const applyAction = (state, action) => {
     next.betThisRoundByUserId[userId] = currentBet + amount;
     next.pot += amount;
     next.contributionsByUserId[userId] = (next.contributionsByUserId[userId] || 0) + amount;
+    next.currentBet = amount;
+    next.lastRaiseSize = amount;
     next.lastAggressorUserId = userId;
     for (const seat of getActiveSeats(next)) {
       if (seat.userId !== userId) {
         next.toCallByUserId[seat.userId] = amount - (next.betThisRoundByUserId[seat.userId] || 0);
       }
     }
+    next.toCallByUserId[userId] = 0;
   } else if (action.type === "RAISE") {
     if (toCall <= 0) throw new Error("invalid_action");
     const amount = Number(action.amount);
     const available = stack + currentBet;
-    if (!Number.isFinite(amount) || amount < toCall + 1 || amount > available) throw new Error("invalid_action");
+    const rawMinRaiseTo = roundCurrentBet + roundLastRaiseSize;
+    if (!Number.isFinite(amount) || amount <= roundCurrentBet || amount > available) throw new Error("invalid_action");
     const pay = amount - currentBet;
+    const raiseSize = amount - roundCurrentBet;
+    const isAllIn = pay >= stack;
+    if (amount < rawMinRaiseTo && !isAllIn) throw new Error("invalid_action");
     next.stacks[userId] = stack - pay;
     next.betThisRoundByUserId[userId] = amount;
     next.pot += pay;
     next.contributionsByUserId[userId] = (next.contributionsByUserId[userId] || 0) + pay;
+    next.currentBet = amount;
+    if (raiseSize >= roundLastRaiseSize) {
+      next.lastRaiseSize = raiseSize;
+    } else if (next.lastRaiseSize == null) {
+      next.lastRaiseSize = roundLastRaiseSize;
+    }
     next.lastAggressorUserId = userId;
     for (const seat of getActiveSeats(next)) {
       if (seat.userId !== userId) {
         next.toCallByUserId[seat.userId] = amount - (next.betThisRoundByUserId[seat.userId] || 0);
       }
     }
+    next.toCallByUserId[userId] = 0;
   } else {
     throw new Error("invalid_action");
   }

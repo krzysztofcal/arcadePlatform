@@ -17,6 +17,37 @@ const ADVANCE_LIMIT = 4;
 const isPlainObjectValue = (value) => value && typeof value === "object" && !Array.isArray(value);
 const isPlainObject = isPlainObjectValue;
 
+const toSafeInt = (value, fallback = 0) => {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return fallback;
+  return Math.trunc(num);
+};
+
+const maxFromMap = (value) => {
+  if (!value || typeof value !== "object") return 0;
+  const nums = Object.values(value)
+    .map((entry) => toSafeInt(entry, 0))
+    .filter((entry) => entry > 0);
+  if (nums.length === 0) return 0;
+  return Math.max(...nums);
+};
+
+const deriveCurrentBet = (state) => {
+  const currentBet = toSafeInt(state.currentBet, null);
+  if (currentBet == null || currentBet < 0) {
+    return maxFromMap(state.betThisRoundByUserId);
+  }
+  return currentBet;
+};
+
+const deriveLastRaiseSize = (state, currentBet) => {
+  const lastRaiseSize = toSafeInt(state.lastRaiseSize, null);
+  if (lastRaiseSize == null || lastRaiseSize <= 0) {
+    return currentBet > 0 ? currentBet : 0;
+  }
+  return lastRaiseSize;
+};
+
 const parseBody = (body) => {
   if (!body) return { ok: true, value: {} };
   try {
@@ -160,10 +191,12 @@ const normalizeSeatOrderFromState = (seats) => {
 };
 
 const validateActionAmount = (state, action, userId, legalInfo) => {
-  const toCall = Number(legalInfo?.toCall ?? state.toCallByUserId?.[userId] ?? 0);
   const stack = Number(state.stacks?.[userId] ?? 0);
-  const currentBet = Number(state.betThisRoundByUserId?.[userId] || 0);
-  if (!Number.isFinite(toCall) || !Number.isFinite(stack) || !Number.isFinite(currentBet)) return false;
+  const currentUserBet = Number(state.betThisRoundByUserId?.[userId] || 0);
+  const currentBet = deriveCurrentBet(state);
+  const lastRaiseSize = deriveLastRaiseSize(state, currentBet);
+  const toCall = Math.max(0, currentBet - currentUserBet);
+  if (!Number.isFinite(stack) || !Number.isFinite(currentUserBet) || !Number.isFinite(currentBet)) return false;
   if (action.type === "CHECK" || action.type === "CALL" || action.type === "FOLD") return true;
   if (action.type === "BET") {
     return toCall === 0 && action.amount <= stack;
@@ -171,9 +204,11 @@ const validateActionAmount = (state, action, userId, legalInfo) => {
   if (action.type === "RAISE") {
     if (!(toCall > 0)) return false;
     const raiseTo = action.amount;
-    const minRaiseTo = Number.isFinite(legalInfo?.minRaiseTo) ? legalInfo.minRaiseTo : toCall + 1;
-    const maxRaiseTo = Number.isFinite(legalInfo?.maxRaiseTo) ? legalInfo.maxRaiseTo : stack + currentBet;
-    return raiseTo >= minRaiseTo && raiseTo <= maxRaiseTo;
+    const maxRaiseTo = Number.isFinite(legalInfo?.maxRaiseTo) ? legalInfo.maxRaiseTo : stack + currentUserBet;
+    const rawMinRaiseTo = currentBet + lastRaiseSize;
+    if (raiseTo > maxRaiseTo || raiseTo <= currentBet) return false;
+    if (raiseTo >= rawMinRaiseTo) return true;
+    return raiseTo === maxRaiseTo;
   }
   return true;
 };
