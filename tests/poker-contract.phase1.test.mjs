@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { loadPokerHandler } from "./helpers/poker-test-helpers.mjs";
+import { buildActionConstraints, computeLegalActions } from "../netlify/functions/_shared/poker-legal-actions.mjs";
 import { normalizeJsonState, withoutPrivateState } from "../netlify/functions/_shared/poker-state-utils.mjs";
 
 const runListTablesContract = async () => {
@@ -58,8 +59,11 @@ const runGetTableContract = async () => {
     verifySupabaseJwt: async () => ({ valid: true, userId: "user-1" }),
     klog: () => {},
     isValidUuid: () => true,
+    isHoleCardsTableMissing: () => false,
     normalizeJsonState,
     withoutPrivateState,
+    computeLegalActions,
+    buildActionConstraints,
     beginSql: async (fn) =>
       fn({
         unsafe: async (query, params) => {

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { materializeShowdownAndPayout } from "../netlify/functions/_shared/poker-materialize-showdown.mjs";
 import { normalizeRequestId } from "../netlify/functions/_shared/poker-request-id.mjs";
+import { buildActionConstraints, computeLegalActions } from "../netlify/functions/_shared/poker-legal-actions.mjs";
 import { isPlainObject, isStateStorageValid, normalizeJsonState, withoutPrivateState } from "../netlify/functions/_shared/poker-state-utils.mjs";
 import { loadPokerHandler } from "./helpers/poker-test-helpers.mjs";
 
@@ -42,6 +43,8 @@ const makeHandler = (storedState, klogCalls) =>
     isStateStorageValid,
     normalizeJsonState,
     withoutPrivateState,
+    computeLegalActions,
+    buildActionConstraints,
     beginSql: async (fn) =>
       fn({
         unsafe: async (query, params) => {

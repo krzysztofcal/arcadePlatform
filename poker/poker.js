@@ -885,45 +885,11 @@
     function getAllowedActionsForUser(data, userId){
       var info = { allowed: new Set(), needsAmount: false };
       if (!data || !userId) return info;
-      var stateObj = data.state || {};
-      var state = stateObj.state || {};
-      var phase = resolvePhase(data, stateObj, state);
-      if (!isActionablePhase(phase)) return info;
-      var turnUserId = resolveTurnUserId(data, state);
-      if (!turnUserId || turnUserId !== userId) return info;
       var allowed = info.allowed;
-      addAllowedFromSource(stateObj, allowed);
-      addAllowedFromSource(state, allowed);
-      var seats = Array.isArray(data.seats) ? data.seats : [];
-      for (var i = 0; i < seats.length; i++){
-        var seat = seats[i];
-        if (seat && seat.userId === userId){
-          addAllowedFromSource(seat, allowed);
-          break;
-        }
-      }
-      if (allowed.size === 0){
-        var stack = Number(state.stacks && state.stacks[userId]);
-        var folded = !!(state.foldedByUserId && state.foldedByUserId[userId]);
-        var allIn = !!(state.allInByUserId && state.allInByUserId[userId]);
-        if (isFinite(stack) && stack > 0 && !folded && !allIn){
-          var toCall = Number(state.toCallByUserId && state.toCallByUserId[userId]);
-          if (!isFinite(toCall)) toCall = 0;
-          var betThisRound = Number(state.betThisRoundByUserId && state.betThisRoundByUserId[userId]);
-          if (!isFinite(betThisRound)) betThisRound = 0;
-          if (toCall > 0){
-            allowed.add('FOLD');
-            allowed.add('CALL');
-            if (stack + betThisRound >= toCall + 1){
-              allowed.add('RAISE');
-            }
-          } else {
-            allowed.add('CHECK');
-            if (stack > 0){
-              allowed.add('BET');
-            }
-          }
-        }
+      var list = Array.isArray(data.legalActions) ? data.legalActions : [];
+      for (var i = 0; i < list.length; i++){
+        var type = normalizeActionType(list[i]);
+        if (type) allowed.add(type);
       }
       info.needsAmount = allowed.has('BET') || allowed.has('RAISE');
       return info;
@@ -1228,6 +1194,11 @@
             stopHeartbeat: stopHeartbeat,
             onAuthExpired: startAuthWatch
           });
+          return;
+        }
+        if (err && err.code === 'state_invalid'){
+          setError(errorEl, t('pokerErrStateChanged', 'State changed. Refreshing...'));
+          scheduleRetry(function(){ loadTable(false); }, 300);
           return;
         }
         klog('poker_table_load_error', { tableId: tableId, error: err.message || err.code });
@@ -1546,6 +1517,11 @@
         }
         if (result && result.ok === false){
           clearStartHandPending();
+          if (result.error === 'state_invalid'){
+            setInlineStatus(startHandStatusEl, t('pokerErrStateChanged', 'State changed. Refreshing...'), 'error');
+            if (isPageActive()) loadTable(false);
+            return;
+          }
           setInlineStatus(startHandStatusEl, t('pokerErrStartHand', 'Failed to start hand'), 'error');
           return;
         }
@@ -1647,6 +1623,10 @@
           clearActPending();
           if (result.error === 'not_your_turn'){
             setInlineStatus(actStatusEl, t('pokerErrNotYourTurn', 'Not your turn'), 'error');
+          } else if (result.error === 'action_not_allowed'){
+            setInlineStatus(actStatusEl, t('pokerErrActionNotAllowed', 'Action not allowed right now'), 'error');
+          } else if (result.error === 'invalid_amount'){
+            setInlineStatus(actStatusEl, t('pokerErrActAmount', 'Invalid amount'), 'error');
           } else if (result.error === 'state_invalid'){
             setInlineStatus(actStatusEl, t('pokerErrStateChanged', 'State changed. Refreshing...'), 'error');
             if (isPageActive()) loadTable(false);
@@ -1681,6 +1661,14 @@
         var loweredMessage = errMessage.toLowerCase();
         if (err && (err.status === 403 || err.code === 'not_your_turn' || loweredMessage.indexOf('not your turn') !== -1)){
           setInlineStatus(actStatusEl, t('pokerErrNotYourTurn', 'Not your turn'), 'error');
+          return;
+        }
+        if (err && err.code === 'action_not_allowed'){
+          setInlineStatus(actStatusEl, t('pokerErrActionNotAllowed', 'Action not allowed right now'), 'error');
+          return;
+        }
+        if (err && err.code === 'invalid_amount'){
+          setInlineStatus(actStatusEl, t('pokerErrActAmount', 'Invalid amount'), 'error');
           return;
         }
         if (err && err.code === 'state_invalid'){

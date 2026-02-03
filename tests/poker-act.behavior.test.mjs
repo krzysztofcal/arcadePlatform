@@ -17,6 +17,7 @@ import {
   withoutPrivateState,
 } from "../netlify/functions/_shared/poker-state-utils.mjs";
 import { deriveCommunityCards, deriveRemainingDeck } from "../netlify/functions/_shared/poker-deal-deterministic.mjs";
+import { buildActionConstraints, computeLegalActions } from "../netlify/functions/_shared/poker-legal-actions.mjs";
 import { loadPokerHandler } from "./helpers/poker-test-helpers.mjs";
 
 const tableId = "11111111-1111-4111-8111-111111111111";
@@ -70,6 +71,8 @@ const makeHandler = (queries, storedState, userId, options = {}) =>
     applyAction: options.applyAction || applyAction,
     deriveCommunityCards,
     deriveRemainingDeck,
+    computeLegalActions,
+    buildActionConstraints,
     isHoleCardsTableMissing,
     loadHoleCardsByUserId: options.loadHoleCardsByUserId || loadHoleCardsByUserId,
     beginSql: async (fn) =>
@@ -136,6 +139,8 @@ const makeStartHandHandler = (queries, storedState, userId, seatUserIds) => {
     verifySupabaseJwt: async () => ({ valid: true, userId }),
     isValidUuid: () => true,
     withoutPrivateState,
+    computeLegalActions,
+    buildActionConstraints,
     beginSql: async (fn) =>
       fn({
         unsafe: async (query, params) => {
@@ -199,6 +204,8 @@ const makeGetTableHandler = (queries, storedState, userId) =>
     maybeApplyTurnTimeout,
     normalizeSeatOrderFromState,
     isHoleCardsTableMissing,
+    computeLegalActions,
+    buildActionConstraints,
     loadHoleCardsByUserId,
     beginSql: async (fn) =>
       fn({
@@ -315,7 +322,7 @@ const run = async () => {
     userId: "user-1",
   });
   assert.equal(invalidBet.response.statusCode, 400);
-  assert.equal(JSON.parse(invalidBet.response.body).error, "invalid_action");
+  assert.equal(JSON.parse(invalidBet.response.body).error, "invalid_amount");
 
   const raiseState = {
     ...baseState,
@@ -330,7 +337,7 @@ const run = async () => {
     userId: "user-1",
   });
   assert.equal(invalidRaise.response.statusCode, 400);
-  assert.equal(JSON.parse(invalidRaise.response.body).error, "invalid_action");
+  assert.equal(JSON.parse(invalidRaise.response.body).error, "invalid_amount");
 
   const validRaise = await runCase({
     state: raiseState,
@@ -350,8 +357,8 @@ const run = async () => {
     requestId: "req-check",
     userId: "user-1",
   });
-  assert.equal(invalidCheck.response.statusCode, 400);
-  assert.equal(JSON.parse(invalidCheck.response.body).error, "invalid_action");
+  assert.equal(invalidCheck.response.statusCode, 403);
+  assert.equal(JSON.parse(invalidCheck.response.body).error, "action_not_allowed");
 
   const invalidCall = await runCase({
     state: baseState,
@@ -359,8 +366,8 @@ const run = async () => {
     requestId: "req-call",
     userId: "user-1",
   });
-  assert.equal(invalidCall.response.statusCode, 400);
-  assert.equal(JSON.parse(invalidCall.response.body).error, "invalid_action");
+  assert.equal(invalidCall.response.statusCode, 403);
+  assert.equal(JSON.parse(invalidCall.response.body).error, "action_not_allowed");
 
   const allInState = {
     ...baseState,
@@ -426,6 +433,12 @@ const run = async () => {
   assert.ok(Array.isArray(user1Payload.myHoleCards));
   assert.equal(user1Payload.myHoleCards.length, 2);
   assert.equal(user1Payload.replayed, false);
+  assert.ok(Array.isArray(user1Payload.legalActions));
+  assert.ok(user1Payload.actionConstraints);
+  assert.ok("toCall" in user1Payload.actionConstraints);
+  assert.ok("minRaiseTo" in user1Payload.actionConstraints);
+  assert.ok("maxRaiseTo" in user1Payload.actionConstraints);
+  assert.ok("maxBetAmount" in user1Payload.actionConstraints);
   assert.equal(user1Payload.holeCardsByUserId, undefined);
   assert.equal(user1Payload.deck, undefined);
   assert.equal(user1Payload.state.holeCardsByUserId, undefined);
@@ -442,6 +455,12 @@ const run = async () => {
   assert.equal(replayResponse.statusCode, 200);
   const replayPayload = JSON.parse(replayResponse.body);
   assert.equal(replayPayload.replayed, true);
+  assert.ok(Array.isArray(replayPayload.legalActions));
+  assert.ok(replayPayload.actionConstraints);
+  assert.ok("toCall" in replayPayload.actionConstraints);
+  assert.ok("minRaiseTo" in replayPayload.actionConstraints);
+  assert.ok("maxRaiseTo" in replayPayload.actionConstraints);
+  assert.ok("maxBetAmount" in replayPayload.actionConstraints);
   const updateCountAfterReplay = queries.filter((entry) => entry.query.toLowerCase().includes("update public.poker_state")).length;
   assert.equal(updateCountAfterReplay, updateCountBeforeReplay);
   const holeCardQueries = queries.filter((entry) => entry.query.toLowerCase().includes("from public.poker_hole_cards"));

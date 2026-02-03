@@ -5,6 +5,7 @@ import { materializeShowdownAndPayout } from "../netlify/functions/_shared/poker
 import { advanceIfNeeded, applyAction, TURN_MS } from "../netlify/functions/_shared/poker-reducer.mjs";
 import { normalizeRequestId } from "../netlify/functions/_shared/poker-request-id.mjs";
 import { maybeApplyTurnTimeout } from "../netlify/functions/_shared/poker-turn-timeout.mjs";
+import { buildActionConstraints, computeLegalActions } from "../netlify/functions/_shared/poker-legal-actions.mjs";
 import {
   isPlainObject,
   isStateStorageValid,
@@ -70,6 +71,8 @@ const makeHandler = (queries, storedState, userId, options = {}) =>
     TURN_MS,
     normalizeJsonState,
     withoutPrivateState,
+    computeLegalActions,
+    buildActionConstraints,
     maybeApplyTurnTimeout,
     advanceIfNeeded,
     applyAction,

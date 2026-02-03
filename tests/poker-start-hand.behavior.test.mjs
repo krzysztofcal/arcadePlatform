@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { createDeck, dealHoleCards, shuffle } from "../netlify/functions/_shared/poker-engine.mjs";
 import { deriveDeck } from "../netlify/functions/_shared/poker-deal-deterministic.mjs";
+import { buildActionConstraints, computeLegalActions } from "../netlify/functions/_shared/poker-legal-actions.mjs";
 import {
   getRng,
   isPlainObject,
@@ -39,6 +40,8 @@ const makeHandler = (queries, storedState) =>
     normalizeJsonState,
     upgradeLegacyInitStateWithSeats,
     withoutPrivateState,
+    computeLegalActions,
+    buildActionConstraints,
     beginSql: async (fn) =>
       fn({
         unsafe: async (query, params) => {
@@ -121,6 +124,12 @@ const runHappyPath = async () => {
   assert.ok(["user-1", "user-2", "user-3"].includes(payload.state.state.turnUserId));
   assert.ok(Array.isArray(payload.myHoleCards));
   assert.equal(payload.myHoleCards.length, 2);
+  assert.ok(Array.isArray(payload.legalActions));
+  assert.ok(payload.actionConstraints);
+  assert.ok("toCall" in payload.actionConstraints);
+  assert.ok("minRaiseTo" in payload.actionConstraints);
+  assert.ok("maxRaiseTo" in payload.actionConstraints);
+  assert.ok("maxBetAmount" in payload.actionConstraints);
   assert.equal(payload.state.state.holeCardsByUserId, undefined);
   assert.equal(payload.state.state.handSeed, undefined);
   assert.equal(payload.holeCardsByUserId, undefined);
@@ -201,6 +210,12 @@ const runReplayPath = async () => {
   assert.equal(replayPayload.state.version, payload.state.version);
   assert.equal(replayPayload.state.state.phase, "PREFLOP");
   assert.deepEqual(replayPayload.myHoleCards, storedState.holeCardsStore.get(holeCardKey));
+  assert.ok(Array.isArray(replayPayload.legalActions));
+  assert.ok(replayPayload.actionConstraints);
+  assert.ok("toCall" in replayPayload.actionConstraints);
+  assert.ok("minRaiseTo" in replayPayload.actionConstraints);
+  assert.ok("maxRaiseTo" in replayPayload.actionConstraints);
+  assert.ok("maxBetAmount" in replayPayload.actionConstraints);
 
   const updateCalls = queries.filter((q) => q.query.toLowerCase().includes("update public.poker_state"));
   const actionCalls = queries.filter((q) => q.query.toLowerCase().includes("insert into public.poker_actions"));
@@ -239,6 +254,8 @@ const runInvalidDeal = async () => {
     normalizeJsonState,
     upgradeLegacyInitStateWithSeats,
     withoutPrivateState,
+    computeLegalActions,
+    buildActionConstraints,
     beginSql: async (fn) =>
       fn({
         unsafe: async (query, params) => {
@@ -347,6 +364,8 @@ const runMissingStateRow = async () => {
     normalizeJsonState,
     upgradeLegacyInitStateWithSeats,
     withoutPrivateState,
+    computeLegalActions,
+    buildActionConstraints,
     beginSql: async (fn) =>
       fn({
         unsafe: async (query, params) => {

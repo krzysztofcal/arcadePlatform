@@ -7,6 +7,7 @@ import { normalizeRequestId } from "./_shared/poker-request-id.mjs";
 import { awardPotsAtShowdown } from "./_shared/poker-payout.mjs";
 import { materializeShowdownAndPayout } from "./_shared/poker-materialize-showdown.mjs";
 import { computeShowdown } from "./_shared/poker-showdown.mjs";
+import { buildActionConstraints, computeLegalActions } from "./_shared/poker-legal-actions.mjs";
 import { isStateStorageValid, normalizeJsonState, withoutPrivateState } from "./_shared/poker-state-utils.mjs";
 import { maybeApplyTurnTimeout } from "./_shared/poker-turn-timeout.mjs";
 import { isValidUuid } from "./_shared/poker-utils.mjs";
@@ -158,21 +159,21 @@ const normalizeSeatOrderFromState = (seats) => {
   return out;
 };
 
-const validateActionBounds = (state, action, userId) => {
-  const toCall = Number(state.toCallByUserId?.[userId] || 0);
+const validateActionAmount = (state, action, userId, legalInfo) => {
+  const toCall = Number(legalInfo?.toCall ?? state.toCallByUserId?.[userId] ?? 0);
   const stack = Number(state.stacks?.[userId] ?? 0);
   const currentBet = Number(state.betThisRoundByUserId?.[userId] || 0);
   if (!Number.isFinite(toCall) || !Number.isFinite(stack) || !Number.isFinite(currentBet)) return false;
-  if (action.type === "CHECK") return toCall === 0;
-  if (action.type === "CALL") return toCall > 0;
-  if (action.type === "BET") return toCall === 0 && action.amount <= stack;
+  if (action.type === "CHECK" || action.type === "CALL" || action.type === "FOLD") return true;
+  if (action.type === "BET") {
+    return toCall === 0 && action.amount <= stack;
+  }
   if (action.type === "RAISE") {
-    // RAISE amount is treated as raise-to (total bet this round), matching applyAction.
     if (!(toCall > 0)) return false;
     const raiseTo = action.amount;
-    if (!(raiseTo > currentBet)) return false;
-    const required = raiseTo - currentBet;
-    return required <= stack;
+    const minRaiseTo = Number.isFinite(legalInfo?.minRaiseTo) ? legalInfo.minRaiseTo : toCall + 1;
+    const maxRaiseTo = Number.isFinite(legalInfo?.maxRaiseTo) ? legalInfo.maxRaiseTo : stack + currentBet;
+    return raiseTo >= minRaiseTo && raiseTo <= maxRaiseTo;
   }
   return true;
 };
@@ -453,13 +454,17 @@ export async function handler(event) {
           });
           throw makeError(409, "state_invalid");
         }
+        const replayPublicState = withoutPrivateState(currentState);
+        const replayLegalInfo = computeLegalActions({ statePublic: replayPublicState, userId: auth.userId });
         return {
           tableId,
           version,
-          state: withoutPrivateState(currentState),
+          state: replayPublicState,
           myHoleCards: holeCardsByUserId[auth.userId] || [],
           events: [],
           replayed: true,
+          legalActions: replayLegalInfo.actions,
+          actionConstraints: buildActionConstraints(replayLegalInfo),
         };
       }
 
@@ -579,13 +584,17 @@ export async function handler(event) {
           newVersion,
         });
 
+        const timeoutPublicState = withoutPrivateState(updatedState);
+        const timeoutLegalInfo = computeLegalActions({ statePublic: timeoutPublicState, userId: auth.userId });
         return {
           tableId,
           version: newVersion,
-          state: withoutPrivateState(updatedState),
+          state: timeoutPublicState,
           myHoleCards: holeCardsByUserId[auth.userId] || [],
           events: timeoutResult.events || [],
           replayed: false,
+          legalActions: timeoutLegalInfo.actions,
+          actionConstraints: buildActionConstraints(timeoutLegalInfo),
         };
       }
 
@@ -600,16 +609,27 @@ export async function handler(event) {
         throw makeError(403, "not_your_turn");
       }
 
-      if (!validateActionBounds(currentState, actionParsed.value, auth.userId)) {
+      const legalInfo = computeLegalActions({ statePublic: withoutPrivateState(currentState), userId: auth.userId });
+      if (!legalInfo.actions.includes(actionParsed.value.type)) {
         klog("poker_act_rejected", {
           tableId,
           userId: auth.userId,
-          reason: "invalid_action",
+          reason: "action_not_allowed",
+          phase: currentState.phase,
+          actionType: actionParsed.value.type,
+        });
+        throw makeError(403, "action_not_allowed");
+      }
+      if (!validateActionAmount(currentState, actionParsed.value, auth.userId, legalInfo)) {
+        klog("poker_act_rejected", {
+          tableId,
+          userId: auth.userId,
+          reason: "invalid_amount",
           phase: currentState.phase,
           actionType: actionParsed.value.type,
           amount: actionParsed.value.amount ?? null,
         });
-        throw makeError(400, "invalid_action");
+        throw makeError(400, "invalid_amount");
       }
 
       let applied;
@@ -751,13 +771,17 @@ export async function handler(event) {
         newVersion,
       });
 
+      const responseState = withoutPrivateState(updatedState);
+      const nextLegalInfo = computeLegalActions({ statePublic: responseState, userId: auth.userId });
       return {
         tableId,
         version: newVersion,
-        state: withoutPrivateState(updatedState),
+        state: responseState,
         myHoleCards: holeCardsByUserId[auth.userId] || [],
         events,
         replayed: false,
+        legalActions: nextLegalInfo.actions,
+        actionConstraints: buildActionConstraints(nextLegalInfo),
       };
     });
 
@@ -774,6 +798,8 @@ export async function handler(event) {
         myHoleCards: result.myHoleCards,
         events: result.events,
         replayed: result.replayed,
+        legalActions: result.legalActions,
+        actionConstraints: result.actionConstraints,
       }),
     };
   } catch (error) {

@@ -72,6 +72,7 @@ const run = async () => {
   assert.equal(payload.actions.length, 1);
   assert.equal(payload.actions[0].type, "START_HAND");
   assert.deepEqual(payload.actions[0].meta, { source: "server" });
+  assert.equal(JSON.stringify(payload).includes("handSeed"), false);
 
   const prev = process.env.POKER_DEBUG_EXPORT;
   process.env.POKER_DEBUG_EXPORT = "true";
@@ -85,6 +86,7 @@ const run = async () => {
     assert.equal(debugResponse.statusCode, 200);
     const debugPayload = JSON.parse(debugResponse.body);
     assert.deepEqual(debugPayload.actions[0].meta, { determinism: { handSeed: "seed-1" }, source: "server" });
+    assert.ok(JSON.stringify(debugPayload).includes("handSeed"));
   } finally {
     if (prev === undefined) {
       delete process.env.POKER_DEBUG_EXPORT;

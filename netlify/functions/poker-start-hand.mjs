@@ -4,6 +4,7 @@ import { isValidTwoCards } from "./_shared/poker-cards-utils.mjs";
 import { dealHoleCards } from "./_shared/poker-engine.mjs";
 import { deriveDeck } from "./_shared/poker-deal-deterministic.mjs";
 import { TURN_MS } from "./_shared/poker-reducer.mjs";
+import { buildActionConstraints, computeLegalActions } from "./_shared/poker-legal-actions.mjs";
 import {
   getRng,
   isPlainObject,
@@ -215,12 +216,16 @@ export async function handler(event) {
           if (!isValidTwoCards(myHoleCards)) {
             throw makeError(409, "state_invalid");
           }
+          const replayPublicState = withoutPrivateState(currentState);
+          const replayLegalInfo = computeLegalActions({ statePublic: replayPublicState, userId: auth.userId });
           return {
             tableId,
             version: normalizeVersion(stateRow.version),
-            state: withoutPrivateState(currentState),
+            state: replayPublicState,
             myHoleCards,
             replayed: true,
+            legalActions: replayLegalInfo.actions,
+            actionConstraints: buildActionConstraints(replayLegalInfo),
           };
         }
         throw makeError(409, "state_invalid");
@@ -367,12 +372,16 @@ export async function handler(event) {
         ]
       );
 
+      const responseState = withoutPrivateState(updatedState);
+      const legalInfo = computeLegalActions({ statePublic: responseState, userId: auth.userId });
       return {
         tableId,
         version: newVersion,
-        state: withoutPrivateState(updatedState),
+        state: responseState,
         myHoleCards: dealtHoleCards[auth.userId] || [],
         replayed: false,
+        legalActions: legalInfo.actions,
+        actionConstraints: buildActionConstraints(legalInfo),
       };
     });
 
@@ -388,6 +397,8 @@ export async function handler(event) {
         },
         myHoleCards: result.myHoleCards,
         replayed: result.replayed,
+        legalActions: result.legalActions,
+        actionConstraints: result.actionConstraints,
       }),
     };
   } catch (error) {

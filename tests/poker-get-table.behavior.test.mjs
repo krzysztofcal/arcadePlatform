@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { deriveDeck } from "../netlify/functions/_shared/poker-deal-deterministic.mjs";
 import { isHoleCardsTableMissing, loadHoleCardsByUserId } from "../netlify/functions/_shared/poker-hole-cards-store.mjs";
+import { buildActionConstraints, computeLegalActions } from "../netlify/functions/_shared/poker-legal-actions.mjs";
 import { normalizeJsonState, withoutPrivateState } from "../netlify/functions/_shared/poker-state-utils.mjs";
 import { normalizeSeatOrderFromState } from "../netlify/functions/_shared/poker-turn-timeout.mjs";
 import { loadPokerHandler } from "./helpers/poker-test-helpers.mjs";
@@ -45,6 +46,8 @@ const makeHandler = (queries, storedState, userId, options = {}) => {
     isValidUuid: () => true,
     normalizeJsonState,
     withoutPrivateState,
+    computeLegalActions,
+    buildActionConstraints,
     normalizeSeatOrderFromState,
     isHoleCardsTableMissing,
     loadHoleCardsByUserId,
@@ -130,6 +133,12 @@ const run = async () => {
   assert.equal(JSON.stringify(happyPayload).includes("holeCardsByUserId"), false);
   assert.equal(JSON.stringify(happyPayload).includes('"deck"'), false);
   assert.equal(JSON.stringify(happyPayload).includes('"handSeed"'), false);
+  assert.ok(Array.isArray(happyPayload.legalActions));
+  assert.ok(happyPayload.actionConstraints);
+  assert.ok("toCall" in happyPayload.actionConstraints);
+  assert.ok("minRaiseTo" in happyPayload.actionConstraints);
+  assert.ok("maxRaiseTo" in happyPayload.actionConstraints);
+  assert.ok("maxBetAmount" in happyPayload.actionConstraints);
   const happyInserts = happyQueries.filter((entry) =>
     entry.query.toLowerCase().includes("insert into public.poker_hole_cards")
   );

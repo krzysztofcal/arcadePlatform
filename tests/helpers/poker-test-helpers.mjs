@@ -42,6 +42,8 @@ export const loadPokerHandler = (filePath, mocks) => {
     "buildSidePots",
     "corsHeaders",
     "computeShowdown",
+    "computeLegalActions",
+    "buildActionConstraints",
     "createDeck",
     "dealHoleCards",
     "deriveDeck",
