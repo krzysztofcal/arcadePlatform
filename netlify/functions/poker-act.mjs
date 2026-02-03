@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import { baseHeaders, beginSql, corsHeaders, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
 import { isHoleCardsTableMissing, loadHoleCardsByUserId } from "./_shared/poker-hole-cards-store.mjs";
 import { deriveCommunityCards, deriveRemainingDeck } from "./_shared/poker-deal-deterministic.mjs";
-import { advanceIfNeeded, applyAction, computeNextDealerSeatNo } from "./_shared/poker-reducer.mjs";
+import { advanceIfNeeded, applyAction } from "./_shared/poker-reducer.mjs";
 import { normalizeRequestId } from "./_shared/poker-request-id.mjs";
 import { awardPotsAtShowdown } from "./_shared/poker-payout.mjs";
 import { materializeShowdownAndPayout } from "./_shared/poker-materialize-showdown.mjs";
@@ -190,22 +190,15 @@ const normalizeSeatOrderFromState = (seats) => {
   return out;
 };
 
-const normalizeDealerSeatNo = (state) => {
+const repairDealerSeatNo = (state) => {
   const ordered = Array.isArray(state?.seats)
     ? state.seats.slice().sort((a, b) => toSeatNo(a?.seatNo) - toSeatNo(b?.seatNo))
     : [];
-  const orderedSeatList = ordered
-    .filter((seat) => seat?.userId)
-    .map((seat) => ({ userId: seat.userId, seatNo: seat.seatNo }));
-  if (orderedSeatList.length === 0) return state?.dealerSeatNo ?? null;
-  let dealerSeatNo = Number.isInteger(state?.dealerSeatNo) ? state.dealerSeatNo : null;
-  if (!orderedSeatList.some((seat) => seat.seatNo === dealerSeatNo)) {
-    dealerSeatNo = computeNextDealerSeatNo(orderedSeatList, dealerSeatNo);
-  }
-  if (!orderedSeatList.some((seat) => seat.seatNo === dealerSeatNo)) {
-    dealerSeatNo = orderedSeatList[0].seatNo;
-  }
-  return dealerSeatNo;
+  const occupiedSeats = ordered.filter((seat) => typeof seat?.userId === "string" && seat.userId.trim());
+  if (occupiedSeats.length === 0) return state?.dealerSeatNo ?? null;
+  const dealerSeatNo = Number.isInteger(state?.dealerSeatNo) ? state.dealerSeatNo : null;
+  if (occupiedSeats.some((seat) => seat.seatNo === dealerSeatNo)) return dealerSeatNo;
+  return occupiedSeats[0].seatNo;
 };
 
 const validateActionAmount = (state, action, userId, legalInfo) => {
@@ -324,9 +317,9 @@ export async function handler(event) {
         });
         throw makeError(409, "state_invalid");
       }
-      const normalizedDealerSeatNo = normalizeDealerSeatNo(currentState);
-      if (normalizedDealerSeatNo != null && normalizedDealerSeatNo !== currentState.dealerSeatNo) {
-        currentState = { ...currentState, dealerSeatNo: normalizedDealerSeatNo };
+      const repairedDealerSeatNo = repairDealerSeatNo(currentState);
+      if (repairedDealerSeatNo != null && repairedDealerSeatNo !== currentState.dealerSeatNo) {
+        currentState = { ...currentState, dealerSeatNo: repairedDealerSeatNo };
       }
 
       if (currentState?.phase === "INIT") {

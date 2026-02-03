@@ -71,7 +71,6 @@ const makeHandler = (queries, storedState, userId, options = {}) =>
     maybeApplyTurnTimeout,
     advanceIfNeeded,
     applyAction: options.applyAction || applyAction,
-    computeNextDealerSeatNo,
     deriveCommunityCards,
     deriveRemainingDeck,
     computeLegalActions,
@@ -343,7 +342,7 @@ const run = async () => {
   });
   assert.equal(invalidDealerResponse.response.statusCode, 200, invalidDealerResponse.response.body);
   const invalidDealerPayload = JSON.parse(invalidDealerResponse.response.body);
-  assert.ok([1, 3, 5].includes(invalidDealerPayload.state.state.dealerSeatNo));
+  assert.equal(invalidDealerPayload.state.state.dealerSeatNo, 1);
 
   const invalidBet = await runCase({
     state: baseState,
