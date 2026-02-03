@@ -992,7 +992,7 @@
 
     function updateActAmountHint(allowedInfo, selectedType){
       if (!actAmountHintEl) return;
-      if (!allowedInfo || !allowedInfo.needsAmount || !shouldEnableDevActions()){
+      if (!allowedInfo || !allowedInfo.needsAmount || !shouldEnableDevActions() || !selectedType){
         actAmountHintEl.textContent = '';
         actAmountHintEl.hidden = true;
         return;
