@@ -252,7 +252,10 @@ export async function handler(event) {
 
       const orderedSeats = validSeats.slice().sort((a, b) => Number(a.seat_no) - Number(b.seat_no));
       const orderedSeatList = orderedSeats.map((seat) => ({ userId: seat.user_id, seatNo: seat.seat_no }));
-      const dealerSeatNo = computeNextDealerSeatNo(orderedSeatList, previousDealerSeatNo);
+      let dealerSeatNo = computeNextDealerSeatNo(orderedSeatList, previousDealerSeatNo);
+      if (!orderedSeats.some((seat) => seat.seat_no === dealerSeatNo)) {
+        dealerSeatNo = orderedSeats[0].seat_no;
+      }
       const dealerIndex = Math.max(
         orderedSeats.findIndex((seat) => seat.seat_no === dealerSeatNo),
         0
