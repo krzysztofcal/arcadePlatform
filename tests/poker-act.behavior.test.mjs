@@ -18,9 +18,23 @@ import {
 } from "../netlify/functions/_shared/poker-state-utils.mjs";
 import { deriveCommunityCards, deriveRemainingDeck } from "../netlify/functions/_shared/poker-deal-deterministic.mjs";
 import { buildActionConstraints, computeLegalActions } from "../netlify/functions/_shared/poker-legal-actions.mjs";
+import { parseStakes } from "../netlify/functions/_shared/poker-stakes.mjs";
 import { loadPokerHandler } from "./helpers/poker-test-helpers.mjs";
 
+const setStakesGlobals = () => {
+  const prevParse = globalThis.parseStakes;
+  globalThis.parseStakes = parseStakes;
+  return () => {
+    if (prevParse === undefined) {
+      delete globalThis.parseStakes;
+    } else {
+      globalThis.parseStakes = prevParse;
+    }
+  };
+};
+
 const tableId = "11111111-1111-4111-8111-111111111111";
+process.env.POKER_DEAL_SECRET = process.env.POKER_DEAL_SECRET || "test-deal-secret";
 
 const baseState = {
   tableId,
@@ -83,7 +97,7 @@ const makeHandler = (queries, storedState, userId, options = {}) =>
           const text = String(query).toLowerCase();
           queries.push({ query: String(query), params });
           if (text.includes("from public.poker_tables")) {
-            return [{ id: tableId, status: "OPEN" }];
+            return [{ id: tableId, status: "OPEN", stakes: "{\"sb\":1,\"bb\":2}" }];
           }
           if (text.includes("from public.poker_seats")) {
             const hasActive = text.includes("status = 'active'");
@@ -302,6 +316,77 @@ const runCase = async ({
 const run = async () => {
   const queries = [];
   const storedState = { value: JSON.stringify(baseState), version: 7 };
+
+  {
+    const invalidStakesQueries = [];
+    const invalidHandler = loadPokerHandler("netlify/functions/poker-act.mjs", {
+      baseHeaders: () => ({}),
+      corsHeaders: () => ({ "access-control-allow-origin": "https://example.test" }),
+      awardPotsAtShowdown,
+      materializeShowdownAndPayout,
+      computeShowdown,
+      extractBearerToken: () => "token",
+      verifySupabaseJwt: async () => ({ valid: true, userId: "user-1" }),
+      isValidUuid: () => true,
+      normalizeRequestId,
+      isPlainObject,
+      isStateStorageValid,
+      TURN_MS,
+      normalizeJsonState,
+      withoutPrivateState,
+      maybeApplyTurnTimeout,
+      advanceIfNeeded,
+      applyAction,
+      deriveCommunityCards,
+      deriveRemainingDeck,
+      computeLegalActions,
+      buildActionConstraints,
+      isHoleCardsTableMissing,
+      loadHoleCardsByUserId,
+      beginSql: async (fn) =>
+        fn({
+          unsafe: async (query, params) => {
+            const text = String(query).toLowerCase();
+            invalidStakesQueries.push({ query: String(query), params });
+            if (text.includes("from public.poker_tables")) {
+              return [{ id: tableId, status: "OPEN", stakes: "{\"sb\":0,\"bb\":0}" }];
+            }
+            if (text.includes("from public.poker_seats")) {
+              const hasActive = text.includes("status = 'active'");
+              const hasUserFilter = text.includes("user_id = $2");
+              const okParams = Array.isArray(params) && params.length >= 2 && params[0] === tableId && params[1] === "user-1";
+              if (hasActive && hasUserFilter && okParams) return [{ user_id: "user-1" }];
+              if (hasActive) return [{ user_id: "user-1", seat_no: 1 }];
+              return [];
+            }
+            if (text.includes("from public.poker_state")) {
+              return [{ version: 1, state: JSON.parse(storedState.value) }];
+            }
+            if (text.includes("from public.poker_hole_cards")) {
+              return [];
+            }
+            if (text.includes("update public.poker_state")) {
+              return [{ version: 2 }];
+            }
+            if (text.includes("insert into public.poker_actions")) {
+              return [{ ok: true }];
+            }
+            return [];
+          },
+        }),
+      klog: () => {},
+    });
+
+    const invalidStakesResponse = await invalidHandler({
+      httpMethod: "POST",
+      headers: { origin: "https://example.test", authorization: "Bearer token" },
+      body: JSON.stringify({ tableId, requestId: "req-invalid-stakes", action: { type: "CHECK" } }),
+    });
+    assert.equal(invalidStakesResponse.statusCode, 409);
+    assert.equal(JSON.parse(invalidStakesResponse.body).error, "invalid_stakes");
+    assert.ok(!invalidStakesQueries.some((entry) => entry.query.toLowerCase().includes("insert into public.poker_actions")));
+    assert.ok(!invalidStakesQueries.some((entry) => entry.query.toLowerCase().includes("update public.poker_state")));
+  }
 
   const invalidRequest = await makeHandler(queries, storedState, "user-1")({
     httpMethod: "POST",
@@ -970,4 +1055,9 @@ const run = async () => {
   }
 };
 
-await run();
+const restoreGlobals = setStakesGlobals();
+try {
+  await run();
+} finally {
+  restoreGlobals();
+}

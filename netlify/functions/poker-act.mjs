@@ -9,6 +9,7 @@ import { materializeShowdownAndPayout } from "./_shared/poker-materialize-showdo
 import { computeShowdown } from "./_shared/poker-showdown.mjs";
 import { buildActionConstraints, computeLegalActions } from "./_shared/poker-legal-actions.mjs";
 import { isStateStorageValid, normalizeJsonState, withoutPrivateState } from "./_shared/poker-state-utils.mjs";
+import { parseStakes } from "./_shared/poker-stakes.mjs";
 import { maybeApplyTurnTimeout } from "./_shared/poker-turn-timeout.mjs";
 import { isValidUuid } from "./_shared/poker-utils.mjs";
 
@@ -288,13 +289,20 @@ export async function handler(event) {
 
   try {
     const result = await beginSql(async (tx) => {
-      const tableRows = await tx.unsafe("select id, status from public.poker_tables where id = $1 limit 1;", [tableId]);
+      const tableRows = await tx.unsafe("select id, status, stakes from public.poker_tables where id = $1 limit 1;", [
+        tableId,
+      ]);
       const table = tableRows?.[0] || null;
       if (!table) {
         throw makeError(404, "table_not_found");
       }
       if (table.status !== "OPEN") {
         throw makeError(409, "table_not_open");
+      }
+      const stakesParsed = parseStakes(table?.stakes);
+      if (!stakesParsed.ok) {
+        klog("poker_act_invalid_stakes", { tableId, reason: stakesParsed.details?.reason || "invalid_stakes" });
+        throw makeError(409, "invalid_stakes");
       }
 
       const seatRows = await tx.unsafe(
