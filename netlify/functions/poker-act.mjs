@@ -160,11 +160,14 @@ const normalizeSeatOrderFromState = (seats) => {
 };
 
 const buildActionConstraints = (legalInfo) => {
-  if (!legalInfo) return { toCall: null, minRaise: null, maxBet: null };
+  if (!legalInfo) {
+    return { toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null };
+  }
   const toCall = Number.isFinite(legalInfo.toCall) ? legalInfo.toCall : null;
-  const minRaise = Number.isFinite(legalInfo.minRaise) ? legalInfo.minRaise : null;
-  const maxBet = Number.isFinite(legalInfo.maxBet) ? legalInfo.maxBet : null;
-  return { toCall, minRaise, maxBet };
+  const minRaiseTo = Number.isFinite(legalInfo.minRaiseTo) ? legalInfo.minRaiseTo : null;
+  const maxRaiseTo = Number.isFinite(legalInfo.maxRaiseTo) ? legalInfo.maxRaiseTo : null;
+  const maxBetAmount = Number.isFinite(legalInfo.maxBetAmount) ? legalInfo.maxBetAmount : null;
+  return { toCall, minRaiseTo, maxRaiseTo, maxBetAmount };
 };
 
 const validateActionAmount = (state, action, userId, legalInfo) => {
@@ -178,9 +181,9 @@ const validateActionAmount = (state, action, userId, legalInfo) => {
   if (action.type === "RAISE") {
     if (!(toCall > 0)) return false;
     const raiseTo = action.amount;
-    const minRaise = Number.isFinite(legalInfo?.minRaise) ? legalInfo.minRaise : toCall + 1;
-    const maxBet = Number.isFinite(legalInfo?.maxBet) ? legalInfo.maxBet : stack + currentBet;
-    return raiseTo >= minRaise && raiseTo <= maxBet;
+    const minRaiseTo = Number.isFinite(legalInfo?.minRaiseTo) ? legalInfo.minRaiseTo : toCall + 1;
+    const maxRaiseTo = Number.isFinite(legalInfo?.maxRaiseTo) ? legalInfo.maxRaiseTo : stack + currentBet;
+    return raiseTo >= minRaiseTo && raiseTo <= maxRaiseTo;
   }
   return true;
 };

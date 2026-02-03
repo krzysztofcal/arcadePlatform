@@ -134,6 +134,10 @@ const run = async () => {
   assert.equal(JSON.stringify(happyPayload).includes('"handSeed"'), false);
   assert.ok(Array.isArray(happyPayload.legalActions));
   assert.ok(happyPayload.actionConstraints);
+  assert.ok("toCall" in happyPayload.actionConstraints);
+  assert.ok("minRaiseTo" in happyPayload.actionConstraints);
+  assert.ok("maxRaiseTo" in happyPayload.actionConstraints);
+  assert.ok("maxBetAmount" in happyPayload.actionConstraints);
   const happyInserts = happyQueries.filter((entry) =>
     entry.query.toLowerCase().includes("insert into public.poker_hole_cards")
   );

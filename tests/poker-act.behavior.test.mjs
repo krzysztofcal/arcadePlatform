@@ -432,6 +432,10 @@ const run = async () => {
   assert.equal(user1Payload.replayed, false);
   assert.ok(Array.isArray(user1Payload.legalActions));
   assert.ok(user1Payload.actionConstraints);
+  assert.ok("toCall" in user1Payload.actionConstraints);
+  assert.ok("minRaiseTo" in user1Payload.actionConstraints);
+  assert.ok("maxRaiseTo" in user1Payload.actionConstraints);
+  assert.ok("maxBetAmount" in user1Payload.actionConstraints);
   assert.equal(user1Payload.holeCardsByUserId, undefined);
   assert.equal(user1Payload.deck, undefined);
   assert.equal(user1Payload.state.holeCardsByUserId, undefined);
@@ -450,6 +454,10 @@ const run = async () => {
   assert.equal(replayPayload.replayed, true);
   assert.ok(Array.isArray(replayPayload.legalActions));
   assert.ok(replayPayload.actionConstraints);
+  assert.ok("toCall" in replayPayload.actionConstraints);
+  assert.ok("minRaiseTo" in replayPayload.actionConstraints);
+  assert.ok("maxRaiseTo" in replayPayload.actionConstraints);
+  assert.ok("maxBetAmount" in replayPayload.actionConstraints);
   const updateCountAfterReplay = queries.filter((entry) => entry.query.toLowerCase().includes("update public.poker_state")).length;
   assert.equal(updateCountAfterReplay, updateCountBeforeReplay);
   const holeCardQueries = queries.filter((entry) => entry.query.toLowerCase().includes("from public.poker_hole_cards"));

@@ -69,11 +69,14 @@ const isHoleCardsTableMissing = (error) => {
 };
 
 const buildActionConstraints = (legalInfo) => {
-  if (!legalInfo) return { toCall: null, minRaise: null, maxBet: null };
+  if (!legalInfo) {
+    return { toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null };
+  }
   const toCall = Number.isFinite(legalInfo.toCall) ? legalInfo.toCall : null;
-  const minRaise = Number.isFinite(legalInfo.minRaise) ? legalInfo.minRaise : null;
-  const maxBet = Number.isFinite(legalInfo.maxBet) ? legalInfo.maxBet : null;
-  return { toCall, minRaise, maxBet };
+  const minRaiseTo = Number.isFinite(legalInfo.minRaiseTo) ? legalInfo.minRaiseTo : null;
+  const maxRaiseTo = Number.isFinite(legalInfo.maxRaiseTo) ? legalInfo.maxRaiseTo : null;
+  const maxBetAmount = Number.isFinite(legalInfo.maxBetAmount) ? legalInfo.maxBetAmount : null;
+  return { toCall, minRaiseTo, maxRaiseTo, maxBetAmount };
 };
 
 export async function handler(event) {
