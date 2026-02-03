@@ -972,9 +972,10 @@
       actAmountInput.removeAttribute('min');
       actAmountInput.removeAttribute('max');
       var constraints = tableData && tableData._actionConstraints ? tableData._actionConstraints : null;
-      if (!constraints || !selectedType) return;
+      if (!constraints || !selectedType || !allowedInfo || !allowedInfo.allowed) return;
       var normalized = normalizeActionType(selectedType);
       if (!normalized) return;
+      if (!allowedInfo.allowed.has(normalized)) return;
       if (normalized === 'RAISE'){
         if (constraints.minRaiseTo != null){
           actAmountInput.setAttribute('min', String(constraints.minRaiseTo));
@@ -998,7 +999,12 @@
       }
       var constraints = tableData && tableData._actionConstraints ? tableData._actionConstraints : null;
       var normalized = normalizeActionType(selectedType);
-      if (!constraints || !normalized){
+      if (!constraints || !normalized || !allowedInfo.allowed){
+        actAmountHintEl.textContent = '';
+        actAmountHintEl.hidden = true;
+        return;
+      }
+      if (!allowedInfo.allowed.has(normalized)){
         actAmountHintEl.textContent = '';
         actAmountHintEl.hidden = true;
         return;
