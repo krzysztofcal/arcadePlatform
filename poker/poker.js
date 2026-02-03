@@ -165,6 +165,24 @@
     return String(num);
   }
 
+  function toFiniteOrNull(value){
+    var n = Number(value);
+    if (!Number.isFinite(n)) return null;
+    if (Math.floor(n) !== n) return null;
+    if (n < 0) return null;
+    return n;
+  }
+
+  function getActionConstraints(data){
+    var constraints = data && isPlainObject(data.actionConstraints) ? data.actionConstraints : null;
+    return {
+      toCall: toFiniteOrNull(constraints ? constraints.toCall : null),
+      minRaiseTo: toFiniteOrNull(constraints ? constraints.minRaiseTo : null),
+      maxRaiseTo: toFiniteOrNull(constraints ? constraints.maxRaiseTo : null),
+      maxBetAmount: toFiniteOrNull(constraints ? constraints.maxBetAmount : null)
+    };
+  }
+
   function getSeatDisplayName(seat){
     if (!seat) return '';
     return seat.displayName || seat.name || seat.username || seat.userName || seat.handle || '';
@@ -1180,8 +1198,9 @@
       setError(errorEl, null);
       try {
         var data = await apiGet(GET_URL + '?tableId=' + encodeURIComponent(tableId));
-        tableData = data;
-        renderTable(data);
+        tableData = data || {};
+        tableData._actionConstraints = getActionConstraints(tableData);
+        renderTable(tableData);
         if (isPolling){ resetPollBackoff(); }
       } catch (err){
         if (isAuthError(err)){
