@@ -4,6 +4,7 @@ import { isValidTwoCards } from "./_shared/poker-cards-utils.mjs";
 import { dealHoleCards } from "./_shared/poker-engine.mjs";
 import { deriveDeck } from "./_shared/poker-deal-deterministic.mjs";
 import { TURN_MS } from "./_shared/poker-reducer.mjs";
+import { computeLegalActions } from "./_shared/poker-legal-actions.mjs";
 import {
   getRng,
   isPlainObject,
@@ -65,6 +66,14 @@ const isHoleCardsTableMissing = (error) => {
   if (error.code === "42P01") return true;
   const message = String(error.message || "").toLowerCase();
   return message.includes("poker_hole_cards") && message.includes("does not exist");
+};
+
+const buildActionConstraints = (legalInfo) => {
+  if (!legalInfo) return { toCall: null, minRaise: null, maxBet: null };
+  const toCall = Number.isFinite(legalInfo.toCall) ? legalInfo.toCall : null;
+  const minRaise = Number.isFinite(legalInfo.minRaise) ? legalInfo.minRaise : null;
+  const maxBet = Number.isFinite(legalInfo.maxBet) ? legalInfo.maxBet : null;
+  return { toCall, minRaise, maxBet };
 };
 
 export async function handler(event) {
@@ -215,12 +224,16 @@ export async function handler(event) {
           if (!isValidTwoCards(myHoleCards)) {
             throw makeError(409, "state_invalid");
           }
+          const replayPublicState = withoutPrivateState(currentState);
+          const replayLegalInfo = computeLegalActions({ statePublic: replayPublicState, userId: auth.userId });
           return {
             tableId,
             version: normalizeVersion(stateRow.version),
-            state: withoutPrivateState(currentState),
+            state: replayPublicState,
             myHoleCards,
             replayed: true,
+            legalActions: replayLegalInfo.actions,
+            actionConstraints: buildActionConstraints(replayLegalInfo),
           };
         }
         throw makeError(409, "state_invalid");
@@ -367,12 +380,16 @@ export async function handler(event) {
         ]
       );
 
+      const responseState = withoutPrivateState(updatedState);
+      const legalInfo = computeLegalActions({ statePublic: responseState, userId: auth.userId });
       return {
         tableId,
         version: newVersion,
-        state: withoutPrivateState(updatedState),
+        state: responseState,
         myHoleCards: dealtHoleCards[auth.userId] || [],
         replayed: false,
+        legalActions: legalInfo.actions,
+        actionConstraints: buildActionConstraints(legalInfo),
       };
     });
 
@@ -388,6 +405,8 @@ export async function handler(event) {
         },
         myHoleCards: result.myHoleCards,
         replayed: result.replayed,
+        legalActions: result.legalActions,
+        actionConstraints: result.actionConstraints,
       }),
     };
   } catch (error) {

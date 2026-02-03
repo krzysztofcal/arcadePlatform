@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { dealHoleCards } from "../netlify/functions/_shared/poker-engine.mjs";
 import { deriveDeck } from "../netlify/functions/_shared/poker-deal-deterministic.mjs";
+import { computeLegalActions } from "../netlify/functions/_shared/poker-legal-actions.mjs";
 import {
   getRng,
   isPlainObject,
@@ -40,6 +41,7 @@ const makeHandler = (storedState, updates) =>
     normalizeJsonState,
     upgradeLegacyInitStateWithSeats,
     withoutPrivateState,
+    computeLegalActions,
     beginSql: async (fn) =>
       fn({
         unsafe: async (query, params) => {

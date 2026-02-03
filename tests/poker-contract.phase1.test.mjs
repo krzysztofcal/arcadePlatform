@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { loadPokerHandler } from "./helpers/poker-test-helpers.mjs";
+import { computeLegalActions } from "../netlify/functions/_shared/poker-legal-actions.mjs";
 import { normalizeJsonState, withoutPrivateState } from "../netlify/functions/_shared/poker-state-utils.mjs";
 
 const runListTablesContract = async () => {
@@ -60,6 +61,7 @@ const runGetTableContract = async () => {
     isValidUuid: () => true,
     normalizeJsonState,
     withoutPrivateState,
+    computeLegalActions,
     beginSql: async (fn) =>
       fn({
         unsafe: async (query, params) => {
