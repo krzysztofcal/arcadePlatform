@@ -3,6 +3,7 @@ import { deriveDeck } from "../netlify/functions/_shared/poker-deal-deterministi
 import { isHoleCardsTableMissing, loadHoleCardsByUserId } from "../netlify/functions/_shared/poker-hole-cards-store.mjs";
 import { buildActionConstraints, computeLegalActions } from "../netlify/functions/_shared/poker-legal-actions.mjs";
 import { normalizeJsonState, withoutPrivateState } from "../netlify/functions/_shared/poker-state-utils.mjs";
+import { parseStakes } from "../netlify/functions/_shared/poker-stakes.mjs";
 import { normalizeSeatOrderFromState } from "../netlify/functions/_shared/poker-turn-timeout.mjs";
 import { loadPokerHandler } from "./helpers/poker-test-helpers.mjs";
 
@@ -52,6 +53,7 @@ const makeHandler = (queries, storedState, userId, options = {}) => {
     isHoleCardsTableMissing,
     loadHoleCardsByUserId,
     deriveDeck,
+    parseStakes,
     beginSql: async (fn) =>
       fn({
         unsafe: async (query, params) => {

@@ -13,6 +13,7 @@ import {
   upgradeLegacyInitStateWithSeats,
   withoutPrivateState,
 } from "./_shared/poker-state-utils.mjs";
+import { parseStakes } from "./_shared/poker-stakes.mjs";
 import { isValidUuid } from "./_shared/poker-utils.mjs";
 
 const parseBody = (body) => {
@@ -38,6 +39,7 @@ const KNOWN_ERROR_CODES = new Set([
   "not_enough_players",
   "state_invalid",
   "already_in_hand",
+  "invalid_stakes",
 ]);
 
 const toErrorPayload = (err) => {
@@ -55,20 +57,6 @@ const parseRequestId = (value) => {
 };
 
 const parseStacks = (value) => (value && typeof value === "object" && !Array.isArray(value) ? value : {});
-
-const toSafeInt = (value, fallback = 0) => {
-  const num = Number(value);
-  if (!Number.isFinite(num) || !Number.isInteger(num) || num < 0) return fallback;
-  return num;
-};
-
-const parseStakes = (value) => {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return { sb: 0, bb: 0 };
-  return {
-    sb: toSafeInt(value.sb, 0),
-    bb: toSafeInt(value.bb, 0),
-  };
-};
 
 const normalizeVersion = (value) => {
   const num = Number(value);
@@ -294,9 +282,13 @@ export async function handler(event) {
       const actedThisRoundByUserId = Object.fromEntries(activeUserIdList.map((userId) => [userId, false]));
       const foldedByUserId = Object.fromEntries(activeUserIdList.map((userId) => [userId, false]));
       const contributionsByUserId = Object.fromEntries(activeUserIdList.map((userId) => [userId, 0]));
-      const stakes = parseStakes(table?.stakes);
-      const sbAmount = stakes.sb;
-      const bbAmount = stakes.bb;
+      const stakesParsed = parseStakes(table?.stakes);
+      if (!stakesParsed.ok) {
+        klog("poker_start_hand_invalid_stakes", { tableId, reason: stakesParsed.details?.reason || "stakes_invalid" });
+        throw makeError(409, "invalid_stakes");
+      }
+      const sbAmount = stakesParsed.value.sb;
+      const bbAmount = stakesParsed.value.bb;
       const postBlind = (userId, blindAmount) => {
         if (!userId) return 0;
         const stack = nextStacks[userId] ?? 0;

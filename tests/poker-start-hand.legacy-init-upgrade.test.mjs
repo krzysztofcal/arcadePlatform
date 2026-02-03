@@ -11,6 +11,7 @@ import {
   upgradeLegacyInitStateWithSeats,
   withoutPrivateState,
 } from "../netlify/functions/_shared/poker-state-utils.mjs";
+import { parseStakes } from "../netlify/functions/_shared/poker-stakes.mjs";
 import { loadPokerHandler } from "./helpers/poker-test-helpers.mjs";
 
 const tableId = "11111111-1111-4111-8111-111111111111";
@@ -37,6 +38,7 @@ const makeHandler = (storedState, updates) =>
     getRng,
     isPlainObject,
     isStateStorageValid,
+    parseStakes,
     verifySupabaseJwt: async () => ({ valid: true, userId }),
     isValidUuid: () => true,
     normalizeJsonState,

@@ -1,5 +1,6 @@
 import { baseHeaders, beginSql, corsHeaders, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
 import { normalizeJsonState } from "./_shared/poker-state-utils.mjs";
+import { parseStakes } from "./_shared/poker-stakes.mjs";
 import { isValidUuid } from "./_shared/poker-utils.mjs";
 
 const parseTableId = (event) => {
@@ -123,6 +124,7 @@ export async function handler(event) {
       };
     });
 
+    const stakesParsed = parseStakes(result.table?.stakes);
     const payload = {
       schema: "poker-hand-history@1",
       exportedAt: new Date().toISOString(),
@@ -130,7 +132,7 @@ export async function handler(event) {
       handId: result.handId,
       stateVersion: result.stateVersion,
       table: {
-        stakes: result.table?.stakes ?? null,
+        stakes: stakesParsed.ok ? stakesParsed.value : null,
         maxPlayers: result.table?.max_players ?? null,
       },
       seats: result.seats.map((seat) => ({ seatNo: seat.seat_no, userId: seat.user_id })),
