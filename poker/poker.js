@@ -1199,7 +1199,7 @@
       try {
         var data = await apiGet(GET_URL + '?tableId=' + encodeURIComponent(tableId));
         tableData = data || {};
-        tableData.actionConstraints = getActionConstraints(tableData);
+        tableData._actionConstraints = getActionConstraints(tableData);
         renderTable(tableData);
         if (isPolling){ resetPollBackoff(); }
       } catch (err){
