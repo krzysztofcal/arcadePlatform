@@ -194,10 +194,17 @@ const repairDealerSeatNo = (state) => {
   const ordered = Array.isArray(state?.seats)
     ? state.seats.slice().sort((a, b) => toSeatNo(a?.seatNo) - toSeatNo(b?.seatNo))
     : [];
-  const occupiedSeats = ordered.filter((seat) => typeof seat?.userId === "string" && seat.userId.trim());
-  if (occupiedSeats.length === 0) return state?.dealerSeatNo ?? null;
+  const occupiedSeats = ordered
+    .filter((seat) => typeof seat?.userId === "string" && seat.userId.trim())
+    .map((seat) => {
+      const seatNo = toSeatNo(seat?.seatNo);
+      if (!Number.isFinite(seatNo)) return null;
+      return { seatNo: Math.trunc(seatNo) };
+    })
+    .filter(Boolean);
   const dealerSeatNo = Number.isInteger(state?.dealerSeatNo) ? state.dealerSeatNo : null;
-  if (occupiedSeats.some((seat) => seat.seatNo === dealerSeatNo)) return dealerSeatNo;
+  if (occupiedSeats.length === 0) return dealerSeatNo ?? null;
+  if (dealerSeatNo != null && occupiedSeats.some((seat) => seat.seatNo === dealerSeatNo)) return dealerSeatNo;
   return occupiedSeats[0].seatNo;
 };
 
