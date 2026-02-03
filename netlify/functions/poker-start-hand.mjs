@@ -4,7 +4,7 @@ import { isValidTwoCards } from "./_shared/poker-cards-utils.mjs";
 import { dealHoleCards } from "./_shared/poker-engine.mjs";
 import { deriveDeck } from "./_shared/poker-deal-deterministic.mjs";
 import { TURN_MS } from "./_shared/poker-reducer.mjs";
-import { computeLegalActions } from "./_shared/poker-legal-actions.mjs";
+import { buildActionConstraints, computeLegalActions } from "./_shared/poker-legal-actions.mjs";
 import {
   getRng,
   isPlainObject,
@@ -66,17 +66,6 @@ const isHoleCardsTableMissing = (error) => {
   if (error.code === "42P01") return true;
   const message = String(error.message || "").toLowerCase();
   return message.includes("poker_hole_cards") && message.includes("does not exist");
-};
-
-const buildActionConstraints = (legalInfo) => {
-  if (!legalInfo) {
-    return { toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null };
-  }
-  const toCall = Number.isFinite(legalInfo.toCall) ? legalInfo.toCall : null;
-  const minRaiseTo = Number.isFinite(legalInfo.minRaiseTo) ? legalInfo.minRaiseTo : null;
-  const maxRaiseTo = Number.isFinite(legalInfo.maxRaiseTo) ? legalInfo.maxRaiseTo : null;
-  const maxBetAmount = Number.isFinite(legalInfo.maxBetAmount) ? legalInfo.maxBetAmount : null;
-  return { toCall, minRaiseTo, maxRaiseTo, maxBetAmount };
 };
 
 export async function handler(event) {

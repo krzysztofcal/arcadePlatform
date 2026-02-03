@@ -2,7 +2,7 @@ import { baseHeaders, beginSql, corsHeaders, extractBearerToken, klog, verifySup
 import { deriveCommunityCards, deriveDeck, deriveRemainingDeck } from "./_shared/poker-deal-deterministic.mjs";
 import { isValidTwoCards } from "./_shared/poker-cards-utils.mjs";
 import { isHoleCardsTableMissing, loadHoleCardsByUserId } from "./_shared/poker-hole-cards-store.mjs";
-import { computeLegalActions } from "./_shared/poker-legal-actions.mjs";
+import { buildActionConstraints, computeLegalActions } from "./_shared/poker-legal-actions.mjs";
 import { isStateStorageValid, normalizeJsonState, withoutPrivateState } from "./_shared/poker-state-utils.mjs";
 import { maybeApplyTurnTimeout, normalizeSeatOrderFromState } from "./_shared/poker-turn-timeout.mjs";
 import { isValidUuid } from "./_shared/poker-utils.mjs";
@@ -96,17 +96,6 @@ const buildHoleCardUpsert = ({ tableId, handId, seatUserIdsInOrder, holeCardsByU
     .join(", ");
   const params = values.flatMap((entry) => [tableId, handId, entry.userId, JSON.stringify(entry.cards)]);
   return { placeholders, params };
-};
-
-const buildActionConstraints = (legalInfo) => {
-  if (!legalInfo) {
-    return { toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null };
-  }
-  const toCall = Number.isFinite(legalInfo.toCall) ? legalInfo.toCall : null;
-  const minRaiseTo = Number.isFinite(legalInfo.minRaiseTo) ? legalInfo.minRaiseTo : null;
-  const maxRaiseTo = Number.isFinite(legalInfo.maxRaiseTo) ? legalInfo.maxRaiseTo : null;
-  const maxBetAmount = Number.isFinite(legalInfo.maxBetAmount) ? legalInfo.maxBetAmount : null;
-  return { toCall, minRaiseTo, maxRaiseTo, maxBetAmount };
 };
 
 const repairHoleCards = async ({ tx, tableId, handId, handSeed, seats }) => {

@@ -7,7 +7,7 @@ import { normalizeRequestId } from "./_shared/poker-request-id.mjs";
 import { awardPotsAtShowdown } from "./_shared/poker-payout.mjs";
 import { materializeShowdownAndPayout } from "./_shared/poker-materialize-showdown.mjs";
 import { computeShowdown } from "./_shared/poker-showdown.mjs";
-import { computeLegalActions } from "./_shared/poker-legal-actions.mjs";
+import { buildActionConstraints, computeLegalActions } from "./_shared/poker-legal-actions.mjs";
 import { isStateStorageValid, normalizeJsonState, withoutPrivateState } from "./_shared/poker-state-utils.mjs";
 import { maybeApplyTurnTimeout } from "./_shared/poker-turn-timeout.mjs";
 import { isValidUuid } from "./_shared/poker-utils.mjs";
@@ -159,22 +159,12 @@ const normalizeSeatOrderFromState = (seats) => {
   return out;
 };
 
-const buildActionConstraints = (legalInfo) => {
-  if (!legalInfo) {
-    return { toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null };
-  }
-  const toCall = Number.isFinite(legalInfo.toCall) ? legalInfo.toCall : null;
-  const minRaiseTo = Number.isFinite(legalInfo.minRaiseTo) ? legalInfo.minRaiseTo : null;
-  const maxRaiseTo = Number.isFinite(legalInfo.maxRaiseTo) ? legalInfo.maxRaiseTo : null;
-  const maxBetAmount = Number.isFinite(legalInfo.maxBetAmount) ? legalInfo.maxBetAmount : null;
-  return { toCall, minRaiseTo, maxRaiseTo, maxBetAmount };
-};
-
 const validateActionAmount = (state, action, userId, legalInfo) => {
   const toCall = Number(legalInfo?.toCall ?? state.toCallByUserId?.[userId] ?? 0);
   const stack = Number(state.stacks?.[userId] ?? 0);
   const currentBet = Number(state.betThisRoundByUserId?.[userId] || 0);
   if (!Number.isFinite(toCall) || !Number.isFinite(stack) || !Number.isFinite(currentBet)) return false;
+  if (action.type === "CHECK" || action.type === "CALL" || action.type === "FOLD") return true;
   if (action.type === "BET") {
     return toCall === 0 && action.amount <= stack;
   }

@@ -17,7 +17,7 @@ import {
   withoutPrivateState,
 } from "../netlify/functions/_shared/poker-state-utils.mjs";
 import { deriveCommunityCards, deriveRemainingDeck } from "../netlify/functions/_shared/poker-deal-deterministic.mjs";
-import { computeLegalActions } from "../netlify/functions/_shared/poker-legal-actions.mjs";
+import { buildActionConstraints, computeLegalActions } from "../netlify/functions/_shared/poker-legal-actions.mjs";
 import { loadPokerHandler } from "./helpers/poker-test-helpers.mjs";
 
 const tableId = "11111111-1111-4111-8111-111111111111";
@@ -72,6 +72,7 @@ const makeHandler = (queries, storedState, userId, options = {}) =>
     deriveCommunityCards,
     deriveRemainingDeck,
     computeLegalActions,
+    buildActionConstraints,
     isHoleCardsTableMissing,
     loadHoleCardsByUserId: options.loadHoleCardsByUserId || loadHoleCardsByUserId,
     beginSql: async (fn) =>
@@ -139,6 +140,7 @@ const makeStartHandHandler = (queries, storedState, userId, seatUserIds) => {
     isValidUuid: () => true,
     withoutPrivateState,
     computeLegalActions,
+    buildActionConstraints,
     beginSql: async (fn) =>
       fn({
         unsafe: async (query, params) => {
@@ -203,6 +205,7 @@ const makeGetTableHandler = (queries, storedState, userId) =>
     normalizeSeatOrderFromState,
     isHoleCardsTableMissing,
     computeLegalActions,
+    buildActionConstraints,
     loadHoleCardsByUserId,
     beginSql: async (fn) =>
       fn({

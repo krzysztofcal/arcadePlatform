@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createDeck, dealHoleCards, shuffle } from "../netlify/functions/_shared/poker-engine.mjs";
 import { deriveDeck } from "../netlify/functions/_shared/poker-deal-deterministic.mjs";
-import { computeLegalActions } from "../netlify/functions/_shared/poker-legal-actions.mjs";
+import { buildActionConstraints, computeLegalActions } from "../netlify/functions/_shared/poker-legal-actions.mjs";
 import {
   getRng,
   isPlainObject,
@@ -41,6 +41,7 @@ const makeHandler = (queries, storedState) =>
     upgradeLegacyInitStateWithSeats,
     withoutPrivateState,
     computeLegalActions,
+    buildActionConstraints,
     beginSql: async (fn) =>
       fn({
         unsafe: async (query, params) => {
@@ -254,6 +255,7 @@ const runInvalidDeal = async () => {
     upgradeLegacyInitStateWithSeats,
     withoutPrivateState,
     computeLegalActions,
+    buildActionConstraints,
     beginSql: async (fn) =>
       fn({
         unsafe: async (query, params) => {
@@ -363,6 +365,7 @@ const runMissingStateRow = async () => {
     upgradeLegacyInitStateWithSeats,
     withoutPrivateState,
     computeLegalActions,
+    buildActionConstraints,
     beginSql: async (fn) =>
       fn({
         unsafe: async (query, params) => {

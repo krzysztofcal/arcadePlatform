@@ -60,4 +60,15 @@ const computeLegalActions = ({ statePublic, userId } = {}) => {
   return { actions, toCall, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: stack };
 };
 
-export { computeLegalActions };
+const buildActionConstraints = (legalInfo) => {
+  if (!legalInfo) {
+    return { toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null };
+  }
+  const toCall = Number.isFinite(legalInfo.toCall) ? legalInfo.toCall : null;
+  const minRaiseTo = Number.isFinite(legalInfo.minRaiseTo) ? legalInfo.minRaiseTo : null;
+  const maxRaiseTo = Number.isFinite(legalInfo.maxRaiseTo) ? legalInfo.maxRaiseTo : null;
+  const maxBetAmount = Number.isFinite(legalInfo.maxBetAmount) ? legalInfo.maxBetAmount : null;
+  return { toCall, minRaiseTo, maxRaiseTo, maxBetAmount };
+};
+
+export { buildActionConstraints, computeLegalActions };
