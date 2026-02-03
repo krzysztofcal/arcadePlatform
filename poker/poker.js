@@ -935,6 +935,29 @@
       }
       if (actAmountInput){
         setDisabled(actAmountInput, !enabled || actPending || !allowedInfo.needsAmount);
+        updateActAmountConstraints(allowedInfo, pendingActType);
+      }
+    }
+
+    function updateActAmountConstraints(allowedInfo, selectedType){
+      if (!actAmountInput) return;
+      actAmountInput.removeAttribute('min');
+      actAmountInput.removeAttribute('max');
+      var constraints = tableData && tableData._actionConstraints ? tableData._actionConstraints : null;
+      if (!constraints || !selectedType) return;
+      var normalized = normalizeActionType(selectedType);
+      if (!normalized) return;
+      if (normalized === 'RAISE'){
+        if (constraints.minRaiseTo != null){
+          actAmountInput.setAttribute('min', String(constraints.minRaiseTo));
+        }
+        if (constraints.maxRaiseTo != null){
+          actAmountInput.setAttribute('max', String(constraints.maxRaiseTo));
+        }
+        return;
+      }
+      if (normalized === 'BET' && constraints.maxBetAmount != null){
+        actAmountInput.setAttribute('max', String(constraints.maxBetAmount));
       }
     }
 
@@ -1578,6 +1601,20 @@
         if (!isFinite(amount) || amount <= 0){
           return { error: t('pokerActAmountRequired', 'Enter an amount for bet/raise') };
         }
+        var constraints = tableData && tableData._actionConstraints ? tableData._actionConstraints : null;
+        if (constraints){
+          if (actionType === 'BET' && constraints.maxBetAmount != null && amount > constraints.maxBetAmount){
+            return { error: t('pokerErrActAmount', 'Invalid amount') };
+          }
+          if (actionType === 'RAISE'){
+            if (constraints.minRaiseTo != null && amount < constraints.minRaiseTo){
+              return { error: t('pokerErrActAmount', 'Invalid amount') };
+            }
+            if (constraints.maxRaiseTo != null && amount > constraints.maxRaiseTo){
+              return { error: t('pokerErrActAmount', 'Invalid amount') };
+            }
+          }
+        }
         payload.amount = Math.trunc(amount);
       }
       return { action: payload };
@@ -1909,6 +1946,8 @@
         setInlineStatus(actStatusEl, t('pokerErrActionNotAllowed', 'Action not allowed right now'), 'error');
         return;
       }
+      pendingActType = normalized;
+      updateActAmountConstraints(allowedInfo, pendingActType);
       klog('poker_act_click', { tableId: tableId, hasToken: !!state.token, type: normalized });
       setInlineStatus(actStatusEl, null, null);
       sendAct(normalized).catch(function(err){
