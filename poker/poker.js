@@ -956,7 +956,6 @@
         return;
       }
       if (allowed.has('BET') && constraints.maxBetAmount != null){
-        actAmountInput.setAttribute('min', '1');
         actAmountInput.setAttribute('max', String(constraints.maxBetAmount));
       }
     }
