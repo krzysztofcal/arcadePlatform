@@ -88,7 +88,6 @@
       var filter = 'table_id=eq.' + tableId;
       channel = window.supabaseClient.channel('poker_actions:' + tableId);
       channel.on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'poker_actions', filter: filter }, handlePayload);
-      channel.on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'poker_actions', filter: filter }, handlePayload);
       channel.subscribe(function(status, err){
         if (status === 'SUBSCRIBED'){
           logEvent('poker_rt_subscribe_ok', { tableId: tableId });
