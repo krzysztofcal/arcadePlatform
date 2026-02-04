@@ -20,8 +20,13 @@ const normalizeCards = (value) => {
   return null;
 };
 
-const loadHoleCardsByUserId = async (tx, { tableId, handId, activeUserIds }) => {
+const loadHoleCardsByUserId = async (tx, { tableId, handId, activeUserIds, requiredUserIds }) => {
   if (!Array.isArray(activeUserIds) || activeUserIds.length === 0) {
+    throw new Error("state_invalid");
+  }
+  const requiredIds =
+    Array.isArray(requiredUserIds) && requiredUserIds.length > 0 ? requiredUserIds : activeUserIds;
+  if (!Array.isArray(requiredIds) || requiredIds.length === 0) {
     throw new Error("state_invalid");
   }
   const rows = await tx.unsafe(
@@ -36,7 +41,7 @@ const loadHoleCardsByUserId = async (tx, { tableId, handId, activeUserIds }) => 
     if (!activeSet.has(userId)) continue;
     map[userId] = normalizeCards(row.cards);
   }
-  for (const userId of activeUserIds) {
+  for (const userId of requiredIds) {
     const cards = map[userId];
     if (!isValidTwoCards(cards)) {
       throw new Error("state_invalid");

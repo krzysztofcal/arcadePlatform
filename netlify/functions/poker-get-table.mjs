@@ -233,7 +233,7 @@ export async function handler(event) {
         }
 
         const nowMs = Date.now();
-        const shouldApplyTimeout =
+        let shouldApplyTimeout =
           Number.isFinite(Number(currentState.turnDeadlineAt)) && nowMs > currentState.turnDeadlineAt;
 
         const dbActiveUserIds = Array.isArray(activeSeatRows)
@@ -284,6 +284,7 @@ export async function handler(event) {
               tableId,
               handId: currentState.handId,
               activeUserIds: effectiveUserIdsForHoleCards,
+              requiredUserIds: [auth.userId],
             });
           } catch (error) {
             if (isHoleCardsTableMissing(error)) {
@@ -319,10 +320,26 @@ export async function handler(event) {
               tableId,
               handId: currentState.handId,
               activeUserIds: effectiveUserIdsForHoleCards,
+              requiredUserIds: [auth.userId],
             });
           }
 
           myHoleCards = holeCards.holeCardsByUserId[auth.userId] || [];
+
+          if (shouldApplyTimeout) {
+            const fullHoleCardsReady = stateSeatUserIds.every((userId) =>
+              isValidTwoCards(holeCards.holeCardsByUserId[userId])
+            );
+            if (!fullHoleCardsReady) {
+              klog("poker_get_table_timeout_missing_hole_cards", {
+                tableId,
+                handId: currentState.handId,
+                expectedCount: stateSeatUserIds.length,
+                availableCount: Object.keys(holeCards.holeCardsByUserId || {}).length,
+              });
+              shouldApplyTimeout = false;
+            }
+          }
 
           if (shouldApplyTimeout) {
             const seatUserIdsInOrder = normalizeSeatOrderFromState(currentState.seats);

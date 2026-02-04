@@ -330,6 +330,20 @@ const run = async () => {
   assert.ok(Array.isArray(mismatchPayload.myHoleCards));
   assert.equal(mismatchPayload.myHoleCards.length, 2);
 
+  const missingOtherResponse = await makeHandler([], storedState, "user-1", {
+    holeCardsByUserId: {
+      "user-1": defaultHoleCards["user-1"],
+    },
+  })({
+    httpMethod: "GET",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    queryStringParameters: { tableId },
+  });
+  assert.equal(missingOtherResponse.statusCode, 200);
+  const missingOtherPayload = JSON.parse(missingOtherResponse.body);
+  assert.ok(Array.isArray(missingOtherPayload.myHoleCards));
+  assert.equal(missingOtherPayload.myHoleCards.length, 2);
+
   const initState = {
     ...baseState,
     phase: "INIT",
