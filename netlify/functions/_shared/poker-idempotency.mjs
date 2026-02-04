@@ -57,6 +57,7 @@ export const ensurePokerRequest = async (tx, { tableId, userId, requestId, kind,
 
   const conflictRows = await readPokerRequest(tx, { tableId, userId, requestId, kind, readSql });
   const conflictRow = conflictRows?.[0];
+  if (!conflictRow) return { status: "created" };
   const conflictStored = parseResultJson(conflictRow?.result_json);
   if (conflictStored) return { status: "stored", result: conflictStored };
   if (conflictRow && isRequestPendingStale(conflictRow, pendingStaleSec)) {
