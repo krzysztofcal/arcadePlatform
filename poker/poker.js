@@ -1448,11 +1448,13 @@
     function handleRealtimeEvent(_payload){
       if (!isPageActive()) return;
       if (!tableId) return;
+      if (joinPending || leavePending || startHandPending || actPending) return;
       loadTable(false);
     }
 
     function startRealtime(){
       if (realtimeSub) return;
+      if (!tableId) return;
       if (!window.PokerRealtime || typeof window.PokerRealtime.subscribeToTableActions !== 'function') return;
       realtimeSub = window.PokerRealtime.subscribeToTableActions({
         tableId: tableId,
