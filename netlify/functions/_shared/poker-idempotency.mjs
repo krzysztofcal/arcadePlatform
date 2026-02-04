@@ -18,11 +18,11 @@ const isRequestPendingStale = (row, staleSec) => {
   return Date.now() - createdAtMs > staleSec * 1000;
 };
 
-const readPokerRequest = async (tx, { tableId, userId, requestId, kind }) =>
-  tx.unsafe(
-    "select result_json, created_at from public.poker_requests where table_id = $1 and user_id = $2 and request_id = $3 and kind = $4 limit 1;",
-    [tableId, userId, requestId, kind]
-  );
+const defaultReadSql =
+  "select result_json, created_at from public.poker_requests where table_id = $1 and user_id = $2 and request_id = $3 and kind = $4 limit 1;";
+
+const readPokerRequest = async (tx, { tableId, userId, requestId, kind, readSql }) =>
+  tx.unsafe(readSql || defaultReadSql, [tableId, userId, requestId, kind]);
 
 const insertPokerRequest = async (tx, { tableId, userId, requestId, kind }) =>
   tx.unsafe(
@@ -41,9 +41,9 @@ export const deletePokerRequest = async (tx, { tableId, userId, requestId, kind 
   );
 };
 
-export const ensurePokerRequest = async (tx, { tableId, userId, requestId, kind, pendingStaleSec }) => {
+export const ensurePokerRequest = async (tx, { tableId, userId, requestId, kind, pendingStaleSec, readSql }) => {
   if (!requestId) return { status: "none" };
-  const rows = await readPokerRequest(tx, { tableId, userId, requestId, kind });
+  const rows = await readPokerRequest(tx, { tableId, userId, requestId, kind, readSql });
   const existingRow = rows?.[0];
   const stored = parseResultJson(existingRow?.result_json);
   if (stored) return { status: "stored", result: stored };
@@ -55,7 +55,7 @@ export const ensurePokerRequest = async (tx, { tableId, userId, requestId, kind,
   let insertedRows = await insertPokerRequest(tx, { tableId, userId, requestId, kind });
   if (insertedRows?.[0]?.request_id) return { status: "created" };
 
-  const conflictRows = await readPokerRequest(tx, { tableId, userId, requestId, kind });
+  const conflictRows = await readPokerRequest(tx, { tableId, userId, requestId, kind, readSql });
   const conflictRow = conflictRows?.[0];
   const conflictStored = parseResultJson(conflictRow?.result_json);
   if (conflictStored) return { status: "stored", result: conflictStored };

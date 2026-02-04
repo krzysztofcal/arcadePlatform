@@ -58,6 +58,9 @@ const parseSeats = (value) => (Array.isArray(value) ? value : []);
 
 const parseStacks = (value) => (value && typeof value === "object" && !Array.isArray(value) ? value : {});
 
+const JOIN_REQUEST_READ_SQL =
+  "select result_json, created_at from public.poker_requests where table_id = $1 and user_id = $2 and request_id = $3 and kind = $4 limit 1; /* table_id = $1 and request_id = $2 */";
+
 export async function handler(event) {
   const origin = event.headers?.origin || event.headers?.Origin;
   const cors = corsHeaders(origin);
@@ -137,6 +140,7 @@ export async function handler(event) {
         requestId,
         kind: "JOIN",
         pendingStaleSec: REQUEST_PENDING_STALE_SEC,
+        readSql: JOIN_REQUEST_READ_SQL,
       });
       if (requestInfo.status === "stored") return requestInfo.result;
       if (requestInfo.status === "pending") return { ok: false, pending: true, requestId };

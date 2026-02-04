@@ -35,6 +35,35 @@ const mockTx = (seatStack) => ({
   },
 });
 
+const mockConflictTx = (seatStack) => ({
+  unsafe: async (query, params) => {
+    const text = String(query).toLowerCase();
+    if (text.includes("from public.poker_tables")) {
+      return [{ id: tableId, status: "OPEN" }];
+    }
+    if (text.includes("from public.poker_seats") && text.includes("for update")) {
+      return [{ seat_no: 1, status: "ACTIVE", stack: seatStack }];
+    }
+    if (text.includes("from public.poker_state")) {
+      return [
+        {
+          version: 2,
+          state: JSON.stringify({
+            tableId,
+            seats: [{ userId, seatNo: 1 }, { userId: "user-2", seatNo: 2 }],
+            stacks: { "someone-else": 123, "user-2": 50 },
+            pot: 0,
+          }),
+        },
+      ];
+    }
+    if (text.includes("update public.poker_state") && text.includes("version = version + 1")) {
+      return [];
+    }
+    return [];
+  },
+});
+
 const makeHandler = (seatStack, postCalls, queries) =>
   loadPokerHandler("netlify/functions/poker-leave.mjs", {
     baseHeaders: () => ({}),
@@ -188,6 +217,27 @@ const run = async () => {
   });
   assert.equal(second.statusCode, 200);
   assert.deepEqual(JSON.parse(second.body), firstBody);
+
+  const conflictHandler = loadPokerHandler("netlify/functions/poker-leave.mjs", {
+    baseHeaders: () => ({}),
+    corsHeaders: () => ({ "access-control-allow-origin": "https://example.test" }),
+    extractBearerToken: () => "token",
+    verifySupabaseJwt: async () => ({ valid: true, userId }),
+    isValidUuid: () => true,
+    normalizeRequestId: () => ({ ok: true, value: null }),
+    updatePokerStateOptimistic,
+    beginSql: async (fn) => fn(mockConflictTx(null)),
+    postTransaction: async () => ({ transaction: { id: "tx-1" } }),
+    klog: () => {},
+  });
+  const conflictResponse = await conflictHandler({
+    httpMethod: "POST",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    body: JSON.stringify({ tableId }),
+  });
+  assert.equal(conflictResponse.statusCode, 409);
+  const conflictBody = JSON.parse(conflictResponse.body);
+  assert.equal(conflictBody.error, "state_conflict");
 };
 
 run().catch((error) => {
