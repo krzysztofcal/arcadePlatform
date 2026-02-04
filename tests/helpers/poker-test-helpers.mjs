@@ -65,6 +65,7 @@ export const loadPokerHandler = (filePath, mocks) => {
     "normalizeRequestId",
     "normalizeSeatOrderFromState",
     "postTransaction",
+    "resetTurnTimer",
     "shuffle",
     "verifySupabaseJwt",
     "withoutPrivateState",

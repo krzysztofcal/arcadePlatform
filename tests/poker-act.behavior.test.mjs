@@ -18,6 +18,7 @@ import {
 } from "../netlify/functions/_shared/poker-state-utils.mjs";
 import { deriveCommunityCards, deriveRemainingDeck } from "../netlify/functions/_shared/poker-deal-deterministic.mjs";
 import { buildActionConstraints, computeLegalActions } from "../netlify/functions/_shared/poker-legal-actions.mjs";
+import { resetTurnTimer } from "../netlify/functions/_shared/poker-turn-timer.mjs";
 import { loadPokerHandler } from "./helpers/poker-test-helpers.mjs";
 
 const tableId = "11111111-1111-4111-8111-111111111111";
@@ -77,6 +78,7 @@ const makeHandler = (queries, storedState, userId, options = {}) =>
     computeLegalActions,
     buildActionConstraints,
     isHoleCardsTableMissing,
+    resetTurnTimer,
     loadHoleCardsByUserId: options.loadHoleCardsByUserId || loadHoleCardsByUserId,
     beginSql: async (fn) =>
       fn({
@@ -486,6 +488,102 @@ const run = async () => {
     { requirePrivate: false }
   );
   assert.equal(storageCheck, true);
+
+  {
+    const timerStart = Date.now() - 2000;
+    const timerState = {
+      ...baseState,
+      turnUserId: "user-1",
+      turnStartedAt: timerStart,
+      turnDeadlineAt: timerStart + TURN_MS,
+    };
+    const timerQueries = [];
+    const timerStoredState = { value: JSON.stringify(timerState), version: 1 };
+    const timerHandler = makeHandler(timerQueries, timerStoredState, "user-1");
+    const firstResponse = await timerHandler({
+      httpMethod: "POST",
+      headers: { origin: "https://example.test", authorization: "Bearer token" },
+      body: JSON.stringify({ tableId, requestId: "req-timer-1", action: { type: "CHECK" } }),
+    });
+    assert.equal(firstResponse.statusCode, 200);
+    const firstPayload = JSON.parse(firstResponse.body);
+    const firstState = firstPayload.state.state;
+    assert.equal(firstState.turnUserId, "user-2");
+    assert.ok(firstState.turnStartedAt > timerStart);
+    assert.equal(firstState.turnDeadlineAt - firstState.turnStartedAt, TURN_MS);
+
+    const secondResponse = await timerHandler({
+      httpMethod: "POST",
+      headers: { origin: "https://example.test", authorization: "Bearer token" },
+      body: JSON.stringify({ tableId, requestId: "req-timer-1", action: { type: "CHECK" } }),
+    });
+    assert.equal(secondResponse.statusCode, 200);
+    const secondPayload = JSON.parse(secondResponse.body);
+    assert.equal(secondPayload.replayed, true);
+    assert.equal(secondPayload.state.state.turnStartedAt, firstState.turnStartedAt);
+    assert.equal(secondPayload.state.state.turnDeadlineAt, firstState.turnDeadlineAt);
+  }
+
+  {
+    const timerStart = Date.now() - 2000;
+    const rejectState = {
+      ...baseState,
+      turnUserId: "user-1",
+      turnStartedAt: timerStart,
+      turnDeadlineAt: timerStart + TURN_MS,
+    };
+    const rejectQueries = [];
+    const rejectStoredState = { value: JSON.stringify(rejectState), version: 1 };
+    const rejectHandler = makeHandler(rejectQueries, rejectStoredState, "user-2");
+    const rejectResponse = await rejectHandler({
+      httpMethod: "POST",
+      headers: { origin: "https://example.test", authorization: "Bearer token" },
+      body: JSON.stringify({ tableId, requestId: "req-not-your-turn", action: { type: "CHECK" } }),
+    });
+    assert.equal(rejectResponse.statusCode, 403);
+    assert.equal(JSON.parse(rejectResponse.body).error, "not_your_turn");
+    assert.equal(rejectStoredState.value, JSON.stringify(rejectState));
+  }
+
+  {
+    const foldState = {
+      ...baseState,
+      seats: [
+        { userId: "user-1", seatNo: 1 },
+        { userId: "user-2", seatNo: 2 },
+      ],
+      stacks: { "user-1": 100, "user-2": 100 },
+      toCallByUserId: { "user-1": 1, "user-2": 0 },
+      betThisRoundByUserId: { "user-1": 0, "user-2": 1 },
+      actedThisRoundByUserId: { "user-1": false, "user-2": true },
+      foldedByUserId: { "user-1": false, "user-2": false },
+      currentBet: 1,
+      lastRaiseSize: 1,
+      turnUserId: "user-1",
+      turnStartedAt: Date.now() - 1500,
+      turnDeadlineAt: Date.now() + 5000,
+      handId: "hand-fold",
+      handSeed: "seed-fold",
+    };
+    const foldSeatOrder = foldState.seats.map((seat) => seat.userId);
+    const foldHoleCards = dealHoleCards(deriveDeck(foldState.handSeed), foldSeatOrder).holeCardsByUserId;
+    const foldLogs = [];
+    const foldResponse = await runCase({
+      state: foldState,
+      action: { type: "FOLD" },
+      requestId: "req-fold-hand-done",
+      userId: "user-1",
+      holeCardsByUserId: foldHoleCards,
+      klogCalls: foldLogs,
+    });
+    assert.equal(foldResponse.response.statusCode, 200);
+    const foldPayload = JSON.parse(foldResponse.response.body);
+    assert.equal(foldPayload.state.state.phase, "HAND_DONE");
+    assert.equal(foldPayload.state.state.turnStartedAt, null);
+    assert.equal(foldPayload.state.state.turnDeadlineAt, null);
+    assert.ok(foldLogs.some((entry) => entry.kind === "poker_turn_timer_skipped"));
+    assert.ok(!foldLogs.some((entry) => entry.kind === "poker_turn_timer_reset"));
+  }
 
   const handlerUser2 = makeHandler(queries, storedState, "user-2");
   const notTurn = await handlerUser2({

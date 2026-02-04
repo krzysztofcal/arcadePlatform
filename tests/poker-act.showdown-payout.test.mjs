@@ -6,6 +6,7 @@ import { advanceIfNeeded, applyAction, TURN_MS } from "../netlify/functions/_sha
 import { normalizeRequestId } from "../netlify/functions/_shared/poker-request-id.mjs";
 import { maybeApplyTurnTimeout } from "../netlify/functions/_shared/poker-turn-timeout.mjs";
 import { buildActionConstraints, computeLegalActions } from "../netlify/functions/_shared/poker-legal-actions.mjs";
+import { resetTurnTimer } from "../netlify/functions/_shared/poker-turn-timer.mjs";
 import {
   isPlainObject,
   isStateStorageValid,
@@ -74,6 +75,7 @@ const makeHandler = (queries, storedState, userId, options = {}) =>
     computeLegalActions,
     buildActionConstraints,
     maybeApplyTurnTimeout,
+    resetTurnTimer,
     advanceIfNeeded,
     applyAction,
     deriveCommunityCards,

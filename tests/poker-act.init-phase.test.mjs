@@ -3,6 +3,7 @@ import { materializeShowdownAndPayout } from "../netlify/functions/_shared/poker
 import { normalizeRequestId } from "../netlify/functions/_shared/poker-request-id.mjs";
 import { buildActionConstraints, computeLegalActions } from "../netlify/functions/_shared/poker-legal-actions.mjs";
 import { isPlainObject, isStateStorageValid, normalizeJsonState, withoutPrivateState } from "../netlify/functions/_shared/poker-state-utils.mjs";
+import { resetTurnTimer } from "../netlify/functions/_shared/poker-turn-timer.mjs";
 import { loadPokerHandler } from "./helpers/poker-test-helpers.mjs";
 
 const tableId = "11111111-1111-4111-8111-111111111111";
@@ -45,6 +46,7 @@ const makeHandler = (storedState, klogCalls, options = {}) =>
     withoutPrivateState,
     computeLegalActions,
     buildActionConstraints,
+    resetTurnTimer,
     beginSql: async (fn) =>
       fn({
         unsafe: async (query, params) => {

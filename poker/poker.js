@@ -1629,6 +1629,16 @@
 
     function renderTurnTimer(gameState){
       if (!turnTimerEl) return;
+      var phase = gameState ? gameState.phase : null;
+      if (!isActionablePhase(phase)){
+        turnTimerEl.hidden = true;
+        turnTimerEl.textContent = '';
+        if (turnTimerInterval){
+          clearInterval(turnTimerInterval);
+          turnTimerInterval = null;
+        }
+        return;
+      }
       var deadline = Number(gameState.turnDeadlineAt);
       if (!deadline || !isFinite(deadline)){
         turnTimerEl.hidden = true;
