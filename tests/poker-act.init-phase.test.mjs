@@ -30,7 +30,7 @@ const initState = {
   lastActionRequestIdByUserId: {},
 };
 
-const makeHandler = (storedState, klogCalls) =>
+const makeHandler = (storedState, klogCalls, options = {}) =>
   loadPokerHandler("netlify/functions/poker-act.mjs", {
     baseHeaders: () => ({}),
     corsHeaders: () => ({ "access-control-allow-origin": "https://example.test" }),
@@ -49,8 +49,9 @@ const makeHandler = (storedState, klogCalls) =>
       fn({
         unsafe: async (query, params) => {
           const text = String(query).toLowerCase();
+          if (options.queries) options.queries.push({ query: String(query), params });
           if (text.includes("from public.poker_tables")) {
-            return [{ id: tableId, status: "OPEN" }];
+            return [{ id: tableId, status: "OPEN", stakes: options.tableStakes }];
           }
           if (text.includes("from public.poker_seats")) {
             const hasActive = text.includes("status = 'active'");
@@ -68,6 +69,12 @@ const makeHandler = (storedState, klogCalls) =>
           if (text.includes("from public.poker_state")) {
             return [{ version: storedState.version, state: JSON.parse(storedState.value) }];
           }
+          if (text.includes("update public.poker_state")) {
+            return [{ version: storedState.version + 1 }];
+          }
+          if (text.includes("insert into public.poker_actions")) {
+            return [{ ok: true }];
+          }
           return [];
         },
       }),
@@ -76,19 +83,37 @@ const makeHandler = (storedState, klogCalls) =>
 
 const run = async () => {
   const storedState = { value: JSON.stringify(initState), version: 1 };
-  const klogCalls = [];
-  const handler = makeHandler(storedState, klogCalls);
-  const response = await handler({
-    httpMethod: "POST",
-    headers: { origin: "https://example.test", authorization: "Bearer token" },
-    body: JSON.stringify({ tableId, requestId: "req-1", action: { type: "CHECK" } }),
-  });
+  {
+    const klogCalls = [];
+    const queries = [];
+    const handler = makeHandler(storedState, klogCalls, { tableStakes: "{\"sb\":0,\"bb\":0}", queries });
+    const response = await handler({
+      httpMethod: "POST",
+      headers: { origin: "https://example.test", authorization: "Bearer token" },
+      body: JSON.stringify({ tableId, requestId: "req-invalid", action: { type: "CHECK" } }),
+    });
 
-  assert.equal(response.statusCode, 409);
-  assert.equal(JSON.parse(response.body).error, "hand_not_started");
-  assert.ok(
-    klogCalls.some((entry) => entry.kind === "poker_act_rejected" && entry.data?.reason === "hand_not_started")
-  );
+    assert.equal(response.statusCode, 409);
+    assert.equal(JSON.parse(response.body).error, "invalid_stakes");
+    assert.ok(!queries.some((entry) => entry.query.toLowerCase().includes("insert into public.poker_actions")));
+    assert.ok(!queries.some((entry) => entry.query.toLowerCase().includes("update public.poker_state")));
+  }
+
+  {
+    const klogCalls = [];
+    const handler = makeHandler(storedState, klogCalls, { tableStakes: "{\"sb\":1,\"bb\":2}" });
+    const response = await handler({
+      httpMethod: "POST",
+      headers: { origin: "https://example.test", authorization: "Bearer token" },
+      body: JSON.stringify({ tableId, requestId: "req-1", action: { type: "CHECK" } }),
+    });
+
+    assert.equal(response.statusCode, 409);
+    assert.equal(JSON.parse(response.body).error, "hand_not_started");
+    assert.ok(
+      klogCalls.some((entry) => entry.kind === "poker_act_rejected" && entry.data?.reason === "hand_not_started")
+    );
+  }
 };
 
 await run();
