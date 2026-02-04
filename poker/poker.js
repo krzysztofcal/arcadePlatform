@@ -802,6 +802,7 @@
     var heartbeatInFlight = false;
     var turnTimerInterval = null;
     var HEARTBEAT_PENDING_MAX_RETRIES = 8;
+    var realtimeSub = null;
 
     if (joinBtn){
       klog('poker_join_bind', { found: true, selector: joinSelector, page: 'table' });
@@ -833,6 +834,7 @@
             loadTable(false);
             startPolling();
             startHeartbeat();
+            startRealtime();
           }
         });
       }, 3000);
@@ -842,6 +844,7 @@
       var token = await getAccessToken();
       if (!token){
         currentUserId = null;
+        stopRealtime();
         if (authMsg) authMsg.hidden = false;
         if (tableContent) tableContent.hidden = true;
         renderHoleCards(null);
@@ -856,13 +859,16 @@
       setDevActionsEnabled(true);
       setDevActionsAuthStatus(true);
       stopAuthWatch();
+      startRealtime();
       return true;
     }
 
     function handleTableAuthExpired(opts){
+      currentUserId = null;
       setDevActionsEnabled(false);
       setDevActionsAuthStatus(false);
       renderHoleCards(null);
+      stopRealtime();
       handleAuthExpired(opts);
     }
 
@@ -1439,6 +1445,31 @@
       }
     }
 
+    function handleRealtimeEvent(_payload){
+      if (!isPageActive()) return;
+      if (!tableId) return;
+      if (joinPending || leavePending || startHandPending || actPending) return;
+      loadTable(false);
+    }
+
+    function startRealtime(){
+      if (realtimeSub) return;
+      if (!tableId) return;
+      if (!window.PokerRealtime || typeof window.PokerRealtime.subscribeToTableActions !== 'function') return;
+      realtimeSub = window.PokerRealtime.subscribeToTableActions({
+        tableId: tableId,
+        onEvent: handleRealtimeEvent,
+        klog: klog
+      });
+    }
+
+    function stopRealtime(){
+      if (realtimeSub && typeof realtimeSub.stop === 'function'){
+        realtimeSub.stop();
+      }
+      realtimeSub = null;
+    }
+
     function startHeartbeat(){
       if (heartbeatTimer) return;
       if (!heartbeatRequestId){
@@ -2010,6 +2041,7 @@
       if (document.visibilityState === 'hidden'){
         stopPolling();
         stopHeartbeat();
+        stopRealtime();
         stopPendingRetries();
         if (!pendingHiddenAt) pendingHiddenAt = Date.now();
       } else {
@@ -2025,6 +2057,7 @@
         state.pollErrors = 0;
         startPolling();
         startHeartbeat();
+        if (currentUserId) startRealtime();
         if (pendingJoinRequestId) schedulePendingRetry('join', retryJoin);
         if (pendingLeaveRequestId) schedulePendingRetry('leave', retryLeave);
         if (pendingStartHandRequestId) scheduleDevPendingRetry('startHand', retryStartHand);
@@ -2175,6 +2208,7 @@
     document.addEventListener('visibilitychange', handleVisibility); // xp-lifecycle-allow:poker-table(2026-01-01)
     window.addEventListener('beforeunload', stopPolling); // xp-lifecycle-allow:poker-table(2026-01-01)
     window.addEventListener('beforeunload', stopHeartbeat); // xp-lifecycle-allow:poker-table-heartbeat(2026-01-01)
+    window.addEventListener('beforeunload', stopRealtime); // xp-lifecycle-allow:poker-table-realtime(2026-01-01)
     window.addEventListener('beforeunload', stopPendingAll); // xp-lifecycle-allow:poker-table-pending(2026-01-01)
     window.addEventListener('beforeunload', stopAuthWatch); // xp-lifecycle-allow:poker-table-auth(2026-01-01)
 
@@ -2186,6 +2220,7 @@
         loadTable(false);
         startPolling();
         startHeartbeat();
+        startRealtime();
       }
     });
   }
