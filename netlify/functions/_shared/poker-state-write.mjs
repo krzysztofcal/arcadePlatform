@@ -2,6 +2,9 @@ export const updatePokerStateOptimistic = async (tx, { tableId, expectedVersion,
   if (!tableId || !Number.isFinite(expectedVersion) || !Number.isInteger(expectedVersion) || expectedVersion < 0) {
     return { ok: false, reason: "invalid" };
   }
+  if (!nextState || typeof nextState !== "object" || Array.isArray(nextState)) {
+    return { ok: false, reason: "invalid" };
+  }
   let payload;
   try {
     payload = JSON.stringify(nextState);

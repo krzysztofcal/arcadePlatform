@@ -11,10 +11,13 @@ import {
   upgradeLegacyInitStateWithSeats,
   withoutPrivateState,
 } from "../netlify/functions/_shared/poker-state-utils.mjs";
+import { normalizeRequestId } from "../netlify/functions/_shared/poker-request-id.mjs";
+import { updatePokerStateOptimistic } from "../netlify/functions/_shared/poker-state-write.mjs";
 import { loadPokerHandler } from "./helpers/poker-test-helpers.mjs";
 
 const tableId = "11111111-1111-4111-8111-111111111111";
 const userId = "u1";
+process.env.POKER_DEAL_SECRET = process.env.POKER_DEAL_SECRET || "test-deal-secret";
 
 const legacyInitState = {
   tableId,
@@ -40,16 +43,19 @@ const makeHandler = (storedState, updates) =>
     verifySupabaseJwt: async () => ({ valid: true, userId }),
     isValidUuid: () => true,
     normalizeJsonState,
+    normalizeRequestId,
     upgradeLegacyInitStateWithSeats,
     withoutPrivateState,
     computeLegalActions,
     computeNextDealerSeatNo,
     buildActionConstraints,
+    updatePokerStateOptimistic,
     TURN_MS,
     beginSql: async (fn) =>
       fn({
         unsafe: async (query, params) => {
           const text = String(query).toLowerCase();
+          const requestStore = storedState.requests || (storedState.requests = new Map());
           if (text.includes("from public.poker_tables")) {
             return [{ id: tableId, status: "OPEN", stakes: { sb: 1, bb: 2 } }];
           }
@@ -62,8 +68,32 @@ const makeHandler = (storedState, updates) =>
               { user_id: "u2", seat_no: 1, status: "ACTIVE" },
             ];
           }
+          if (text.includes("from public.poker_requests")) {
+            const requestKey = `${params?.[0]}|${params?.[1]}`;
+            const entry = requestStore.get(requestKey);
+            if (!entry) return [];
+            return [{ result_json: entry.resultJson, created_at: entry.createdAt }];
+          }
+          if (text.includes("insert into public.poker_requests")) {
+            const requestKey = `${params?.[0]}|${params?.[2]}`;
+            if (requestStore.has(requestKey)) return [];
+            requestStore.set(requestKey, { resultJson: null, createdAt: new Date().toISOString() });
+            return [{ request_id: params?.[2] }];
+          }
+          if (text.includes("update public.poker_requests")) {
+            const requestKey = `${params?.[0]}|${params?.[1]}`;
+            const entry = requestStore.get(requestKey) || { createdAt: new Date().toISOString() };
+            entry.resultJson = params?.[2] ?? null;
+            requestStore.set(requestKey, entry);
+            return [{ request_id: params?.[1] }];
+          }
+          if (text.includes("delete from public.poker_requests")) {
+            const requestKey = `${params?.[0]}|${params?.[1]}`;
+            requestStore.delete(requestKey);
+            return [];
+          }
           if (text.includes("update public.poker_state")) {
-            storedState.value = params?.[1] || null;
+            storedState.value = params?.[2] || params?.[1] || null;
             const parsedState = storedState.value ? JSON.parse(storedState.value) : null;
             updates.push({ query: String(query), params, state: parsedState });
             if (text.includes("version = version + 1")) {
@@ -103,10 +133,7 @@ const run = async () => {
   assert.equal(response.statusCode, 200);
   assert.equal(payload.ok, true);
 
-  const upgradeUpdate = updates.find(
-    (entry) =>
-      entry.state?.phase === "INIT" && !String(entry.query).toLowerCase().includes("version = version + 1")
-  );
+  const upgradeUpdate = updates.find((entry) => entry.state?.phase === "INIT");
   assert.ok(upgradeUpdate, "expected INIT upgrade update");
   const upgradedState = upgradeUpdate.state;
   assert.ok(Array.isArray(upgradedState.community));

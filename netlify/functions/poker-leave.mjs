@@ -142,6 +142,7 @@ export async function handler(event) {
   try {
     let txId = null;
     const result = await beginSql(async (tx) => {
+      let mutated = false;
       if (requestId) {
         const requestRows = await tx.unsafe(
           "select result_json, created_at from public.poker_requests where table_id = $1 and request_id = $2 limit 1;",
@@ -255,6 +256,7 @@ export async function handler(event) {
             tx,
           });
           txId = txResult?.transaction?.id || null;
+          mutated = true;
         }
         klog("poker_leave_cashout", {
           tableId,
@@ -278,6 +280,7 @@ export async function handler(event) {
         };
 
         await tx.unsafe("delete from public.poker_seats where table_id = $1 and user_id = $2;", [tableId, auth.userId]);
+        mutated = true;
         const updateResult = await updatePokerStateOptimistic(tx, {
           tableId,
           expectedVersion,
@@ -312,11 +315,13 @@ export async function handler(event) {
         });
         return resultPayload;
       } catch (error) {
-        if (requestId) {
+        if (requestId && !mutated) {
           await tx.unsafe("delete from public.poker_requests where table_id = $1 and request_id = $2;", [
             tableId,
             requestId,
           ]);
+        } else if (requestId && mutated) {
+          klog("poker_leave_request_retained", { tableId, userId: auth.userId, requestId });
         }
         throw error;
       }

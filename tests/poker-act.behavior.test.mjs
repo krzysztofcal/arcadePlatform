@@ -116,6 +116,10 @@ const makeHandler = (queries, storedState, userId, options = {}) =>
           }
           if (text.includes("update public.poker_requests")) {
             const requestKey = `${params?.[0]}|${params?.[1]}`;
+            if (options.failRequestWriteOnce && !storedState.requestWriteFailed) {
+              storedState.requestWriteFailed = true;
+              throw new Error("request_write_failed");
+            }
             const entry = requestStore.get(requestKey) || { createdAt: new Date().toISOString() };
             entry.resultJson = params?.[2] ?? null;
             requestStore.set(requestKey, entry);
@@ -757,6 +761,30 @@ const run = async () => {
     assert.equal(secondPayload.replayed, true);
     const updateCountAfter = idemQueries.filter((entry) => entry.query.toLowerCase().includes("update public.poker_state")).length;
     assert.equal(updateCountAfter, updateCountBefore);
+  }
+
+  {
+    const failQueries = [];
+    const failStored = { value: JSON.stringify(baseState), version: 4, requests: new Map() };
+    const failHandler = makeHandler(failQueries, failStored, "user-1", { failRequestWriteOnce: true });
+    const firstResponse = await failHandler({
+      httpMethod: "POST",
+      headers: { origin: "https://example.test", authorization: "Bearer token" },
+      body: JSON.stringify({ tableId, requestId: "req-write-fail", action: { type: "CHECK" } }),
+    });
+    assert.equal(firstResponse.statusCode, 500);
+    const updateCountAfterFirst = failQueries.filter((entry) => entry.query.toLowerCase().includes("update public.poker_state")).length;
+    const secondResponse = await failHandler({
+      httpMethod: "POST",
+      headers: { origin: "https://example.test", authorization: "Bearer token" },
+      body: JSON.stringify({ tableId, requestId: "req-write-fail", action: { type: "CHECK" } }),
+    });
+    assert.equal(secondResponse.statusCode, 202);
+    const secondPayload = JSON.parse(secondResponse.body);
+    assert.equal(secondPayload.error, "request_pending");
+    assert.equal(secondPayload.requestId, "req-write-fail");
+    const updateCountAfterSecond = failQueries.filter((entry) => entry.query.toLowerCase().includes("update public.poker_state")).length;
+    assert.equal(updateCountAfterSecond, updateCountAfterFirst);
   }
 
   const handlerUser2Turn = makeHandler(queries, storedState, "user-2");

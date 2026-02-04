@@ -149,6 +149,7 @@ export async function handler(event) {
 
   try {
     const result = await beginSql(async (tx) => {
+      let mutated = false;
       if (requestId) {
         const requestRows = await tx.unsafe(
           "select result_json, created_at from public.poker_requests where table_id = $1 and request_id = $2 limit 1;",
@@ -224,6 +225,7 @@ export async function handler(event) {
             "update public.poker_seats set status = 'ACTIVE', last_seen_at = now(), stack = coalesce(stack, $3) where table_id = $1 and user_id = $2;",
             [tableId, auth.userId, buyIn]
           );
+          mutated = true;
 
           await tx.unsafe(
             "update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1;",
@@ -268,6 +270,7 @@ values ($1, $2, $3, 'ACTIVE', now(), now(), $4);
             `,
             [tableId, auth.userId, seatNo, buyIn]
           );
+          mutated = true;
         } catch (error) {
           const isUnique = error?.code === "23505";
           const details = `${error?.constraint || ""} ${error?.detail || ""}`.toLowerCase();
@@ -285,6 +288,7 @@ values ($1, $2, $3, 'ACTIVE', now(), now(), $4);
                 "update public.poker_seats set status = 'ACTIVE', last_seen_at = now(), stack = coalesce(stack, $3) where table_id = $1 and user_id = $2;",
                 [tableId, auth.userId, buyIn]
               );
+              mutated = true;
               const resultPayload = { ok: true, tableId, seatNo: fallbackSeatNo, userId: auth.userId };
               if (requestId) {
                 await tx.unsafe(
@@ -332,6 +336,7 @@ values ($1, $2, $3, 'ACTIVE', now(), now(), $4);
           createdBy: auth.userId,
           tx,
         });
+        mutated = true;
 
         const stateRows = await tx.unsafe(
           "select version, state from public.poker_state where table_id = $1 for update;",
@@ -395,11 +400,13 @@ values ($1, $2, $3, 'ACTIVE', now(), now(), $4);
         klog("poker_join_ok", { tableId, userId: auth.userId, seatNo, rejoin: false });
         return resultPayload;
       } catch (error) {
-        if (requestId) {
+        if (requestId && !mutated) {
           await tx.unsafe("delete from public.poker_requests where table_id = $1 and request_id = $2;", [
             tableId,
             requestId,
           ]);
+        } else if (requestId && mutated) {
+          klog("poker_join_request_retained", { tableId, userId: auth.userId, requestId });
         }
         throw error;
       }

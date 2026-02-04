@@ -156,6 +156,7 @@ export async function handler(event) {
 
   try {
     const result = await beginSql(async (tx) => {
+      let mutated = false;
       if (requestIdParsed.value) {
         const requestRows = await tx.unsafe(
           "select result_json, created_at from public.poker_requests where table_id = $1 and request_id = $2 limit 1;",
@@ -180,7 +181,7 @@ export async function handler(event) {
               requestIdParsed.value,
             ]);
           } else {
-            return { ok: false, pending: true, requestId: requestIdParsed.value };
+            return { pending: true, requestId: requestIdParsed.value };
           }
         }
 
@@ -219,10 +220,10 @@ export async function handler(event) {
             insertedRows = await insertRequest();
             hasRequest = !!insertedRows?.[0]?.request_id;
             if (!hasRequest) {
-              return { ok: false, pending: true, requestId: requestIdParsed.value };
+              return { pending: true, requestId: requestIdParsed.value };
             }
           } else {
-            return { ok: false, pending: true, requestId: requestIdParsed.value };
+            return { pending: true, requestId: requestIdParsed.value };
           }
         }
       }
@@ -237,10 +238,9 @@ export async function handler(event) {
           throw makeError(409, "table_not_open");
         }
 
-        const stateRows = await tx.unsafe(
-          "select version, state from public.poker_state where table_id = $1 for update;",
-          [tableId]
-        );
+        const stateRows = await tx.unsafe("select version, state from public.poker_state where table_id = $1 limit 1;", [
+          tableId,
+        ]);
         const stateRow = stateRows?.[0] || null;
         if (!stateRow) {
           throw makeError(409, "state_invalid");
@@ -295,6 +295,7 @@ export async function handler(event) {
               throw makeError(409, "state_invalid");
             }
             expectedVersion = upgradeResult.newVersion;
+            mutated = true;
           }
           currentState = upgradedState;
         }
@@ -544,6 +545,7 @@ export async function handler(event) {
         throw makeError(409, "state_invalid");
       }
       const newVersion = updateResult.newVersion;
+      mutated = true;
 
       const actionMeta = {
         determinism: {
@@ -612,16 +614,25 @@ export async function handler(event) {
       }
       return resultPayload;
       } catch (error) {
-        if (requestIdParsed.value) {
+        if (requestIdParsed.value && !mutated) {
           await tx.unsafe("delete from public.poker_requests where table_id = $1 and request_id = $2;", [
             tableId,
             requestIdParsed.value,
           ]);
+        } else if (requestIdParsed.value && mutated) {
+          klog("poker_start_hand_request_retained", { tableId, userId: auth.userId, requestId: requestIdParsed.value });
         }
         throw error;
       }
     });
 
+    if (result?.pending) {
+      return {
+        statusCode: 202,
+        headers: headersWithCors(),
+        body: JSON.stringify({ error: "request_pending", requestId: result.requestId || requestIdParsed.value }),
+      };
+    }
     return { statusCode: 200, headers: headersWithCors(), body: JSON.stringify(result) };
   } catch (error) {
     const isAppError = Number.isInteger(error?.status) && typeof error?.code === "string";

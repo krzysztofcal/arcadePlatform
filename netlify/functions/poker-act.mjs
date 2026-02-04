@@ -312,6 +312,7 @@ export async function handler(event) {
 
   try {
     const result = await beginSql(async (tx) => {
+      let mutated = false;
       if (requestId) {
         const requestRows = await tx.unsafe(
           "select result_json, created_at from public.poker_requests where table_id = $1 and request_id = $2 limit 1;",
@@ -336,7 +337,7 @@ export async function handler(event) {
               requestId,
             ]);
           } else {
-            return { ok: false, pending: true, requestId };
+            return { pending: true, requestId };
           }
         }
 
@@ -375,10 +376,10 @@ export async function handler(event) {
             insertedRows = await insertRequest();
             hasRequest = !!insertedRows?.[0]?.request_id;
             if (!hasRequest) {
-              return { ok: false, pending: true, requestId };
+              return { pending: true, requestId };
             }
           } else {
-            return { ok: false, pending: true, requestId };
+            return { pending: true, requestId };
           }
         }
       }
@@ -408,10 +409,9 @@ export async function handler(event) {
           throw makeError(403, "not_allowed");
         }
 
-        const stateRows = await tx.unsafe(
-          "select version, state from public.poker_state where table_id = $1 for update;",
-          [tableId]
-        );
+        const stateRows = await tx.unsafe("select version, state from public.poker_state where table_id = $1 limit 1;", [
+          tableId,
+        ]);
         const stateRow = stateRows?.[0] || null;
         if (!stateRow) {
           throw makeError(409, "state_invalid");
@@ -737,6 +737,7 @@ export async function handler(event) {
           throw makeError(409, "state_invalid");
         }
         const newVersion = updateResult.newVersion;
+        mutated = true;
 
         const timeoutHandId =
           typeof updatedState.handId === "string" && updatedState.handId.trim() ? updatedState.handId.trim() : null;
@@ -756,6 +757,7 @@ export async function handler(event) {
             null,
           ]
         );
+        mutated = true;
 
         klog("poker_turn_timeout", {
           tableId,
@@ -933,12 +935,12 @@ export async function handler(event) {
         throw makeError(409, "state_invalid");
       }
 
-      const updateResult = await updatePokerStateOptimistic(tx, {
-        tableId,
-        expectedVersion,
-        nextState: timerResetState,
-      });
-      if (!updateResult.ok) {
+        const updateResult = await updatePokerStateOptimistic(tx, {
+          tableId,
+          expectedVersion,
+          nextState: timerResetState,
+        });
+        if (!updateResult.ok) {
         if (updateResult.reason === "conflict") {
           klog("poker_act_conflict", { tableId, userId: auth.userId, expectedVersion, requestId });
           throw makeError(409, "state_conflict");
@@ -951,7 +953,8 @@ export async function handler(event) {
         });
         throw makeError(409, "state_invalid");
       }
-      const newVersion = updateResult.newVersion;
+        const newVersion = updateResult.newVersion;
+        mutated = true;
 
       const actionHandId =
         typeof timerResetState.handId === "string" && timerResetState.handId.trim() ? timerResetState.handId.trim() : null;
@@ -1015,16 +1018,25 @@ export async function handler(event) {
       }
       return resultPayload;
       } catch (error) {
-        if (requestId) {
+        if (requestId && !mutated) {
           await tx.unsafe("delete from public.poker_requests where table_id = $1 and request_id = $2;", [
             tableId,
             requestId,
           ]);
+        } else if (requestId && mutated) {
+          klog("poker_act_request_retained", { tableId, userId: auth.userId, requestId });
         }
         throw error;
       }
     });
 
+    if (result?.pending) {
+      return {
+        statusCode: 202,
+        headers: mergeHeaders(cors),
+        body: JSON.stringify({ error: "request_pending", requestId: result.requestId || requestId }),
+      };
+    }
     return { statusCode: 200, headers: mergeHeaders(cors), body: JSON.stringify(result) };
   } catch (error) {
     if (error?.status && error?.code) {
