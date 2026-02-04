@@ -18,20 +18,7 @@ import {
 } from "../netlify/functions/_shared/poker-state-utils.mjs";
 import { deriveCommunityCards, deriveRemainingDeck } from "../netlify/functions/_shared/poker-deal-deterministic.mjs";
 import { buildActionConstraints, computeLegalActions } from "../netlify/functions/_shared/poker-legal-actions.mjs";
-import { parseStakes } from "../netlify/functions/_shared/poker-stakes.mjs";
 import { loadPokerHandler } from "./helpers/poker-test-helpers.mjs";
-
-const setStakesGlobals = () => {
-  const prevParse = globalThis.parseStakes;
-  globalThis.parseStakes = parseStakes;
-  return () => {
-    if (prevParse === undefined) {
-      delete globalThis.parseStakes;
-    } else {
-      globalThis.parseStakes = prevParse;
-    }
-  };
-};
 
 const tableId = "11111111-1111-4111-8111-111111111111";
 process.env.POKER_DEAL_SECRET = process.env.POKER_DEAL_SECRET || "test-deal-secret";
@@ -1055,9 +1042,4 @@ const run = async () => {
   }
 };
 
-const restoreGlobals = setStakesGlobals();
-try {
-  await run();
-} finally {
-  restoreGlobals();
-}
+await run();

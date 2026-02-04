@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { isValidTwoCards } from "../../netlify/functions/_shared/poker-cards-utils.mjs";
+import { formatStakes, parseStakes } from "../../netlify/functions/_shared/poker-stakes.mjs";
 
 const root = process.cwd();
 
@@ -70,6 +71,8 @@ export const loadPokerHandler = (filePath, mocks) => {
     "isValidUuid",
     "isHoleCardsTableMissing",
     "loadHoleCardsByUserId",
+    "parseStakes",
+    "formatStakes",
     "upgradeLegacyInitState",
     "upgradeLegacyInitStateWithSeats",
     "PRESENCE_TTL_SEC",
@@ -91,7 +94,8 @@ ${rewritten}
 return handler;`
   );
   try {
-    return factory(mocks, isValidTwoCards);
+    const resolvedMocks = { parseStakes, formatStakes, ...mocks };
+    return factory(resolvedMocks, isValidTwoCards);
   } catch (error) {
     throw new Error(`[poker-test-helpers] Failed to compile ${filePath}: ${error?.message || error}`);
   }

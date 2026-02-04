@@ -1,25 +1,5 @@
 import assert from "node:assert/strict";
 import { loadPokerHandler } from "./helpers/poker-test-helpers.mjs";
-import { formatStakes, parseStakes } from "../netlify/functions/_shared/poker-stakes.mjs";
-
-const setStakesGlobals = () => {
-  const prevParse = globalThis.parseStakes;
-  const prevFormat = globalThis.formatStakes;
-  globalThis.parseStakes = parseStakes;
-  globalThis.formatStakes = formatStakes;
-  return () => {
-    if (prevParse === undefined) {
-      delete globalThis.parseStakes;
-    } else {
-      globalThis.parseStakes = prevParse;
-    }
-    if (prevFormat === undefined) {
-      delete globalThis.formatStakes;
-    } else {
-      globalThis.formatStakes = prevFormat;
-    }
-  };
-};
 
 const makeHandler = (queries, options = {}) =>
   loadPokerHandler("netlify/functions/poker-create-table.mjs", {
@@ -92,11 +72,6 @@ const runSlashStakes = async () => {
   assert.deepEqual(JSON.parse(insertCall.params?.[0]), { sb: 1, bb: 2 });
 };
 
-const restoreGlobals = setStakesGlobals();
-try {
-  await runMissingStakes();
-  await runInvalidStakes();
-  await runSlashStakes();
-} finally {
-  restoreGlobals();
-}
+await runMissingStakes();
+await runInvalidStakes();
+await runSlashStakes();

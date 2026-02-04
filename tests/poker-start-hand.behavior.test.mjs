@@ -11,20 +11,7 @@ import {
   upgradeLegacyInitStateWithSeats,
   withoutPrivateState,
 } from "../netlify/functions/_shared/poker-state-utils.mjs";
-import { parseStakes } from "../netlify/functions/_shared/poker-stakes.mjs";
 import { loadPokerHandler } from "./helpers/poker-test-helpers.mjs";
-
-const setStakesGlobals = () => {
-  const prevParse = globalThis.parseStakes;
-  globalThis.parseStakes = parseStakes;
-  return () => {
-    if (prevParse === undefined) {
-      delete globalThis.parseStakes;
-    } else {
-      globalThis.parseStakes = prevParse;
-    }
-  };
-};
 
 const tableId = "11111111-1111-4111-8111-111111111111";
 const userId = "user-1";
@@ -649,18 +636,13 @@ const runInvalidStakes = async () => {
   assert.ok(!queries.some((q) => q.query.toLowerCase().includes("version = version + 1")));
 };
 
-const restoreGlobals = setStakesGlobals();
-try {
-  await runHappyPath();
-  await runReplayPath();
-  await runHeadsUpBlinds();
-  await runDealerRotation();
-  await runDealerBasedBlinds();
-  await runInvalidDeal();
-  await runMissingHoleCardsTable();
-  await runMissingDealSecret();
-  await runInvalidStakes();
-  await runMissingStateRow();
-} finally {
-  restoreGlobals();
-}
+await runHappyPath();
+await runReplayPath();
+await runHeadsUpBlinds();
+await runDealerRotation();
+await runDealerBasedBlinds();
+await runInvalidDeal();
+await runMissingHoleCardsTable();
+await runMissingDealSecret();
+await runInvalidStakes();
+await runMissingStateRow();
