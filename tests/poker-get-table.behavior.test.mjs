@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
-import { deriveDeck } from "../netlify/functions/_shared/poker-deal-deterministic.mjs";
+import { deriveCommunityCards, deriveDeck, deriveRemainingDeck } from "../netlify/functions/_shared/poker-deal-deterministic.mjs";
 import { isHoleCardsTableMissing, loadHoleCardsByUserId } from "../netlify/functions/_shared/poker-hole-cards-store.mjs";
 import { buildActionConstraints, computeLegalActions } from "../netlify/functions/_shared/poker-legal-actions.mjs";
 import { normalizeJsonState, withoutPrivateState } from "../netlify/functions/_shared/poker-state-utils.mjs";
-import { normalizeSeatOrderFromState } from "../netlify/functions/_shared/poker-turn-timeout.mjs";
+import { maybeApplyTurnTimeout, normalizeSeatOrderFromState } from "../netlify/functions/_shared/poker-turn-timeout.mjs";
 import { loadPokerHandler } from "./helpers/poker-test-helpers.mjs";
 
 const tableId = "11111111-1111-4111-8111-111111111111";
@@ -51,7 +51,10 @@ const makeHandler = (queries, storedState, userId, options = {}) => {
     normalizeSeatOrderFromState,
     isHoleCardsTableMissing,
     loadHoleCardsByUserId,
+    maybeApplyTurnTimeout: options.maybeApplyTurnTimeout || maybeApplyTurnTimeout,
     deriveDeck,
+    deriveCommunityCards,
+    deriveRemainingDeck,
     beginSql: async (fn) =>
       fn({
         unsafe: async (query, params) => {
@@ -329,6 +332,99 @@ const run = async () => {
   assert.equal(mismatchPayload.state.state.phase, "PREFLOP");
   assert.ok(Array.isArray(mismatchPayload.myHoleCards));
   assert.equal(mismatchPayload.myHoleCards.length, 2);
+
+  const missingOtherResponse = await makeHandler([], storedState, "user-1", {
+    holeCardsByUserId: {
+      "user-1": defaultHoleCards["user-1"],
+    },
+  })({
+    httpMethod: "GET",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    queryStringParameters: { tableId },
+  });
+  assert.equal(missingOtherResponse.statusCode, 200);
+  const missingOtherPayload = JSON.parse(missingOtherResponse.body);
+  assert.ok(Array.isArray(missingOtherPayload.myHoleCards));
+  assert.equal(missingOtherPayload.myHoleCards.length, 2);
+
+  const notSeatedState = {
+    ...baseState,
+    seats: [
+      { userId: "user-2", seatNo: 2 },
+      { userId: "user-3", seatNo: 3 },
+    ],
+  };
+  const notSeatedQueries = [];
+  const notSeatedLogs = [];
+  const notSeatedResponse = await makeHandler(
+    notSeatedQueries,
+    { value: JSON.stringify(notSeatedState), version: 5 },
+    "user-1",
+    { klog: (event, payload) => notSeatedLogs.push({ event, payload }) }
+  )({
+    httpMethod: "GET",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    queryStringParameters: { tableId },
+  });
+  assert.equal(notSeatedResponse.statusCode, 200);
+  const notSeatedPayload = JSON.parse(notSeatedResponse.body);
+  assert.deepEqual(notSeatedPayload.myHoleCards, []);
+  assert.ok(notSeatedLogs.some((entry) => entry.event === "poker_get_table_user_not_seated"));
+  const notSeatedHoleCardSelects = notSeatedQueries.filter((entry) =>
+    entry.query.toLowerCase().includes("from public.poker_hole_cards")
+  );
+  assert.equal(notSeatedHoleCardSelects.length, 0);
+
+  const timeoutState = {
+    ...baseState,
+    turnDeadlineAt: Date.now() - 1000,
+  };
+  let timeoutCalled = false;
+  const timeoutQueries = [];
+  const timeoutResponse = await makeHandler(
+    timeoutQueries,
+    { value: JSON.stringify(timeoutState), version: 6 },
+    "user-1",
+    {
+      holeCardsByUserId: {
+        "user-1": defaultHoleCards["user-1"],
+      },
+      maybeApplyTurnTimeout: () => {
+        timeoutCalled = true;
+        return { applied: false };
+      },
+    }
+  )({
+    httpMethod: "GET",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    queryStringParameters: { tableId },
+  });
+  assert.equal(timeoutResponse.statusCode, 200);
+  assert.equal(timeoutCalled, false);
+  const timeoutUpdates = timeoutQueries.filter((entry) =>
+    entry.query.toLowerCase().includes("update public.poker_state")
+  );
+  assert.equal(timeoutUpdates.length, 0);
+
+  let timeoutAppliedCalled = false;
+  const timeoutAppliedQueries = [];
+  const timeoutAppliedResponse = await makeHandler(
+    timeoutAppliedQueries,
+    { value: JSON.stringify(timeoutState), version: 6 },
+    "user-1",
+    {
+      maybeApplyTurnTimeout: () => {
+        timeoutAppliedCalled = true;
+        return { applied: false };
+      },
+    }
+  )({
+    httpMethod: "GET",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    queryStringParameters: { tableId },
+  });
+  assert.equal(timeoutAppliedResponse.statusCode, 200);
+  assert.equal(timeoutAppliedCalled, true);
 
   const initState = {
     ...baseState,

@@ -72,7 +72,12 @@ const makeHandler = (storedState, updates) =>
             return [];
           }
           if (text.includes("insert into public.poker_hole_cards")) {
-            return [];
+            const insertedRows = [];
+            const paramsList = Array.isArray(params) ? params : [];
+            for (let i = 0; i < paramsList.length; i += 4) {
+              insertedRows.push({ user_id: paramsList[i + 2] });
+            }
+            return insertedRows;
           }
           if (text.includes("insert into public.poker_actions")) {
             return [];

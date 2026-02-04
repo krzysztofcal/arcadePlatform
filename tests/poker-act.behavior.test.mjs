@@ -165,14 +165,16 @@ const makeStartHandHandler = (queries, storedState, userId, seatUserIds) => {
           }
           if (text.includes("insert into public.poker_hole_cards")) {
             const holeCardsStore = storedState.holeCardsStore;
+            const insertedRows = [];
             for (let i = 0; i < params.length; i += 4) {
               const tableKey = params[i];
               const handKey = params[i + 1];
               const userKey = params[i + 2];
               const cards = JSON.parse(params[i + 3]);
               holeCardsStore.set(`${tableKey}|${handKey}|${userKey}`, cards);
+              insertedRows.push({ user_id: userKey });
             }
-            return [];
+            return insertedRows;
           }
           if (text.includes("from public.poker_hole_cards")) {
             const holeCardsStore = storedState.holeCardsStore;

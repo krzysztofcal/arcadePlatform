@@ -75,14 +75,16 @@ const makeHandler = (queries, storedState) =>
               err.code = storedState.holeCardsInsertError.code;
               throw err;
             }
+            const insertedRows = [];
             for (let i = 0; i < params.length; i += 4) {
               const tableKey = params[i];
               const handKey = params[i + 1];
               const userKey = params[i + 2];
               const cards = JSON.parse(params[i + 3]);
               holeCardsStore.set(`${tableKey}|${handKey}|${userKey}`, cards);
+              insertedRows.push({ user_id: userKey });
             }
-            return [];
+            return insertedRows;
           }
           if (text.includes("from public.poker_hole_cards")) {
             const holeCardsStore = storedState.holeCardsStore;
@@ -147,9 +149,17 @@ const runHappyPath = async () => {
   const insertHoleCardsIndex = queries.findIndex((q) => q.query.toLowerCase().includes("insert into public.poker_hole_cards"));
   const updateCall = queries.find((q) => q.query.toLowerCase().includes("version = version + 1"));
   const updateIndex = queries.findIndex((q) => q.query.toLowerCase().includes("version = version + 1"));
+  const insertCall = queries[insertHoleCardsIndex];
+  const seatOrder = ["user-1", "user-2", "user-3"];
   assert.ok(updateCall, "expected update to poker_state");
   assert.ok(insertHoleCardsIndex !== -1, "expected insert into poker_hole_cards");
   assert.ok(insertHoleCardsIndex < updateIndex, "expected hole cards insert before state update");
+  const insertParams = insertCall?.params || [];
+  assert.equal(insertParams.length / 4, seatOrder.length);
+  for (let i = 0; i < insertParams.length; i += 4) {
+    const cards = JSON.parse(insertParams[i + 3]);
+    assert.equal(cards.length, 2);
+  }
   const updatedState = JSON.parse(updateCall.params?.[1] || "{}");
   assert.ok(updatedState.handId, "state should include handId");
   assert.equal(updatedState.deck, undefined);
@@ -171,7 +181,6 @@ const runHappyPath = async () => {
   assert.equal(updatedState.foldedByUserId[userId], false);
   assert.equal(updatedState.currentBet, 2);
   assert.equal(updatedState.lastRaiseSize, 1);
-  const seatOrder = ["user-1", "user-2", "user-3"];
   const deck = deriveDeck(updatedState.handSeed);
   const pos = seatOrder.indexOf(userId);
   assert.ok(pos >= 0, "test assumes user is seated");
@@ -293,14 +302,16 @@ const runHeadsUpBlinds = async () => {
             ];
           }
           if (text.includes("insert into public.poker_hole_cards")) {
+            const insertedRows = [];
             for (let i = 0; i < params.length; i += 4) {
               const tableKey = params[i];
               const handKey = params[i + 1];
               const userKey = params[i + 2];
               const cards = JSON.parse(params[i + 3]);
               storedState.holeCardsStore.set(`${tableKey}|${handKey}|${userKey}`, cards);
+              insertedRows.push({ user_id: userKey });
             }
-            return [];
+            return insertedRows;
           }
           if (text.includes("update public.poker_state")) {
             storedState.value = params?.[1] || null;
@@ -453,7 +464,12 @@ const runInvalidDeal = async () => {
           }
           if (text.includes("insert into public.poker_hole_cards")) {
             storedState.holeCardsStore.set("unexpected", params);
-            return [];
+            const insertedRows = [];
+            const paramsList = Array.isArray(params) ? params : [];
+            for (let i = 0; i < paramsList.length; i += 4) {
+              insertedRows.push({ user_id: paramsList[i + 2] });
+            }
+            return insertedRows;
           }
           if (text.includes("update public.poker_state")) {
             storedState.value = params?.[1] || null;

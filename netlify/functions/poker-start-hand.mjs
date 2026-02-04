@@ -40,6 +40,7 @@ const KNOWN_ERROR_CODES = new Set([
   "state_invalid",
   "already_in_hand",
   "invalid_stakes",
+  "hole_cards_write_failed",
 ]);
 
 const toErrorPayload = (err) => {
@@ -341,9 +342,10 @@ export async function handler(event) {
         JSON.stringify(entry.cards),
       ]);
 
+      let holeCardInsertRows;
       try {
-        await tx.unsafe(
-          `insert into public.poker_hole_cards (table_id, hand_id, user_id, cards) values ${holeCardPlaceholders} on conflict (table_id, hand_id, user_id) do update set cards = excluded.cards;`,
+        holeCardInsertRows = await tx.unsafe(
+          `insert into public.poker_hole_cards (table_id, hand_id, user_id, cards) values ${holeCardPlaceholders} on conflict (table_id, hand_id, user_id) do update set cards = excluded.cards returning user_id;`,
           holeCardParams
         );
       } catch (error) {
@@ -352,6 +354,31 @@ export async function handler(event) {
         }
         throw error;
       }
+      const insertedUserIds = Array.isArray(holeCardInsertRows)
+        ? holeCardInsertRows.map((row) => row?.user_id).filter(Boolean)
+        : [];
+      const expectedSeatCount = activeUserIdList.length;
+      const insertedCount = insertedUserIds.length;
+      const insertedSet = new Set(insertedUserIds);
+      const missingUserIds = activeUserIdList.filter((userId) => !insertedSet.has(userId));
+      if (insertedCount !== expectedSeatCount || missingUserIds.length > 0) {
+        klog("poker_start_hand_hole_cards_write_failed", {
+          tableId,
+          handId,
+          expectedSeatCount,
+          insertedCount,
+          missingUserIds,
+          userIds: activeUserIdList,
+        });
+        throw makeError(500, "hole_cards_write_failed");
+      }
+      klog("poker_start_hand_hole_cards_written", {
+        tableId,
+        handId,
+        expectedSeatCount,
+        insertedCount,
+        userIds: activeUserIdList,
+      });
 
       const { holeCardsByUserId: _ignoredHoleCards, ...stateBase } = currentState;
       const updatedState = {
