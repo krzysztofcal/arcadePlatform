@@ -38,6 +38,9 @@ const runListTablesContract = async () => {
   assert.ok(table);
   assert.ok("id" in table);
   assert.ok("stakes" in table);
+  assert.equal(typeof table.stakes, "object");
+  assert.equal(table.stakes.sb, 1);
+  assert.equal(table.stakes.bb, 2);
   assert.ok("maxPlayers" in table);
   assert.ok("status" in table);
   assert.ok("createdBy" in table);
@@ -112,6 +115,9 @@ const runGetTableContract = async () => {
   assert.ok(payload.table);
   assert.ok("id" in payload.table);
   assert.ok("stakes" in payload.table);
+  assert.equal(typeof payload.table.stakes, "object");
+  assert.equal(payload.table.stakes.sb, 1);
+  assert.equal(payload.table.stakes.bb, 2);
   assert.ok("maxPlayers" in payload.table);
   assert.ok("status" in payload.table);
   assert.ok("createdBy" in payload.table);

@@ -21,6 +21,7 @@ import { buildActionConstraints, computeLegalActions } from "../netlify/function
 import { loadPokerHandler } from "./helpers/poker-test-helpers.mjs";
 
 const tableId = "11111111-1111-4111-8111-111111111111";
+process.env.POKER_DEAL_SECRET = process.env.POKER_DEAL_SECRET || "test-deal-secret";
 
 const baseState = {
   tableId,
@@ -83,7 +84,7 @@ const makeHandler = (queries, storedState, userId, options = {}) =>
           const text = String(query).toLowerCase();
           queries.push({ query: String(query), params });
           if (text.includes("from public.poker_tables")) {
-            return [{ id: tableId, status: "OPEN" }];
+            return [{ id: tableId, status: "OPEN", stakes: options.tableStakes ?? "{\"sb\":1,\"bb\":2}" }];
           }
           if (text.includes("from public.poker_seats")) {
             const hasActive = text.includes("status = 'active'");
@@ -302,6 +303,24 @@ const runCase = async ({
 const run = async () => {
   const queries = [];
   const storedState = { value: JSON.stringify(baseState), version: 7 };
+
+  {
+    const invalidStakesQueries = [];
+    const invalidHandler = makeHandler(invalidStakesQueries, storedState, "user-1", {
+      tableStakes: "{\"sb\":0,\"bb\":0}",
+      holeCardsByUserId: defaultHoleCards,
+      activeSeatUserIds: ["user-1", "user-2", "user-3"],
+    });
+    const invalidStakesResponse = await invalidHandler({
+      httpMethod: "POST",
+      headers: { origin: "https://example.test", authorization: "Bearer token" },
+      body: JSON.stringify({ tableId, requestId: "req-invalid-stakes", action: { type: "CHECK" } }),
+    });
+    assert.equal(invalidStakesResponse.statusCode, 409);
+    assert.equal(JSON.parse(invalidStakesResponse.body).error, "invalid_stakes");
+    assert.ok(!invalidStakesQueries.some((entry) => entry.query.toLowerCase().includes("insert into public.poker_actions")));
+    assert.ok(!invalidStakesQueries.some((entry) => entry.query.toLowerCase().includes("update public.poker_state")));
+  }
 
   const invalidRequest = await makeHandler(queries, storedState, "user-1")({
     httpMethod: "POST",

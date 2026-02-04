@@ -1,4 +1,5 @@
 import { baseHeaders, beginSql, corsHeaders, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
+import { formatStakes, parseStakes } from "./_shared/poker-stakes.mjs";
 
 const parseBody = (body) => {
   if (!body) return { ok: true, value: {} };
@@ -47,11 +48,6 @@ export async function handler(event) {
     return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "invalid_payload" }) };
   }
 
-  const stakesValue = payload?.stakes;
-  if (stakesValue != null && !isPlainObject(stakesValue)) {
-    return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "invalid_stakes" }) };
-  }
-
   const maxPlayers = parseMaxPlayers(payload?.maxPlayers);
   if (maxPlayers == null) {
     return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "invalid_max_players" }) };
@@ -63,13 +59,12 @@ export async function handler(event) {
     return { statusCode: 401, headers: cors, body: JSON.stringify({ error: "unauthorized", reason: auth.reason }) };
   }
 
-  const stakes = stakesValue ?? {};
-  let stakesJson = "{}";
-  try {
-    stakesJson = JSON.stringify(stakes);
-  } catch {
+  const stakesParsed = parseStakes(payload?.stakes);
+  if (!stakesParsed.ok) {
+    klog("poker_create_table_invalid_stakes", { reason: stakesParsed.details?.reason || "stakes_invalid" });
     return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "invalid_stakes" }) };
   }
+  const stakesJson = formatStakes(stakesParsed.value);
 
   let tableId = null;
   try {

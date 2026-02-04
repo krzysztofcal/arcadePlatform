@@ -4,6 +4,7 @@ import { isValidTwoCards } from "./_shared/poker-cards-utils.mjs";
 import { isHoleCardsTableMissing, loadHoleCardsByUserId } from "./_shared/poker-hole-cards-store.mjs";
 import { buildActionConstraints, computeLegalActions } from "./_shared/poker-legal-actions.mjs";
 import { isStateStorageValid, normalizeJsonState, withoutPrivateState } from "./_shared/poker-state-utils.mjs";
+import { parseStakes } from "./_shared/poker-stakes.mjs";
 import { maybeApplyTurnTimeout, normalizeSeatOrderFromState } from "./_shared/poker-turn-timeout.mjs";
 import { isValidUuid } from "./_shared/poker-utils.mjs";
 
@@ -449,9 +450,10 @@ export async function handler(event) {
     const publicState = withoutPrivateState(result.currentState);
     const legalInfo = computeLegalActions({ statePublic: publicState, userId: auth.userId });
 
+    const stakesParsed = parseStakes(table.stakes);
     const tablePayload = {
       id: table.id,
-      stakes: table.stakes,
+      stakes: stakesParsed.ok ? stakesParsed.value : null,
       maxPlayers: table.max_players,
       status: table.status,
       createdBy: table.created_by,

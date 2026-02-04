@@ -1,4 +1,5 @@
 import { baseHeaders, corsHeaders, executeSql, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
+import { parseStakes } from "./_shared/poker-stakes.mjs";
 
 const parseLimit = (value) => {
   if (value == null || value === "") return { ok: true, value: 20 };
@@ -68,17 +69,20 @@ limit $1;
   try {
     const rows = await executeSql(query, [limit]);
     const tables = Array.isArray(rows)
-      ? rows.map((row) => ({
-          id: row.id,
-          stakes: row.stakes,
-          maxPlayers: row.max_players,
-          status: row.status,
-          createdBy: row.created_by,
-          createdAt: row.created_at,
-          updatedAt: row.updated_at,
-          lastActivityAt: row.last_activity_at,
-          seatCount: row.seat_count ?? 0,
-        }))
+      ? rows.map((row) => {
+          const stakesParsed = parseStakes(row.stakes);
+          return {
+            id: row.id,
+            stakes: stakesParsed.ok ? stakesParsed.value : null,
+            maxPlayers: row.max_players,
+            status: row.status,
+            createdBy: row.created_by,
+            createdAt: row.created_at,
+            updatedAt: row.updated_at,
+            lastActivityAt: row.last_activity_at,
+            seatCount: row.seat_count ?? 0,
+          };
+        })
       : [];
 
     return { statusCode: 200, headers: cors, body: JSON.stringify({ ok: true, tables }) };
