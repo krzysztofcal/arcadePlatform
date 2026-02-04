@@ -1,5 +1,6 @@
 (function(){
   var DASH = '—';
+  var MAX_STAKES = 1000000;
 
   function toInt(value){
     if (value == null) return null;
@@ -15,6 +16,7 @@
     var bb = toInt(value.bb);
     if (sb == null || bb == null) return null;
     if (sb < 0 || bb <= 0 || sb >= bb) return null;
+    if (sb > MAX_STAKES || bb > MAX_STAKES) return null;
     return { sb: sb, bb: bb };
   }
 

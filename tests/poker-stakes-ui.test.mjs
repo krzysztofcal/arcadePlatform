@@ -14,3 +14,4 @@ assert.equal(context.PokerStakesUi.format({ sb: 1, bb: 2 }), "1/2");
 assert.equal(context.PokerStakesUi.format("1/2"), "1/2");
 assert.equal(context.PokerStakesUi.format('{"sb":1,"bb":2}'), "1/2");
 assert.equal(context.PokerStakesUi.format({ sb: 2, bb: 2 }), "—");
+assert.equal(context.PokerStakesUi.format({ sb: 1, bb: 1000001 }), "—");

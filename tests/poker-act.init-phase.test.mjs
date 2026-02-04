@@ -51,7 +51,7 @@ const makeHandler = (storedState, klogCalls, options = {}) =>
           const text = String(query).toLowerCase();
           if (options.queries) options.queries.push({ query: String(query), params });
           if (text.includes("from public.poker_tables")) {
-            return [{ id: tableId, status: "OPEN", stakes: options.tableStakes }];
+            return [{ id: tableId, status: "OPEN", stakes: options.tableStakes ?? "{\"sb\":1,\"bb\":2}" }];
           }
           if (text.includes("from public.poker_seats")) {
             const hasActive = text.includes("status = 'active'");
