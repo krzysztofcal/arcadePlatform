@@ -1,6 +1,5 @@
 import { baseHeaders, beginSql, corsHeaders, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
 import { deriveCommunityCards, deriveDeck, deriveRemainingDeck } from "./_shared/poker-deal-deterministic.mjs";
-import { isValidTwoCards } from "./_shared/poker-cards-utils.mjs";
 import { isHoleCardsTableMissing, loadHoleCardsByUserId } from "./_shared/poker-hole-cards-store.mjs";
 import { buildActionConstraints, computeLegalActions } from "./_shared/poker-legal-actions.mjs";
 import { isStateStorageValid, normalizeJsonState, withoutPrivateState } from "./_shared/poker-state-utils.mjs";
@@ -251,9 +250,7 @@ export async function handler(event) {
         if (stateSeatUserIds.length <= 0) {
           throw new Error("state_invalid");
         }
-        if (!stateSeatUserIds.includes(auth.userId)) {
-          throw new Error("state_invalid");
-        }
+        const amSeated = stateSeatUserIds.includes(auth.userId);
 
         let candidateActiveUserIds = dbActiveUserIds.length ? dbActiveUserIds : seatRowsActiveUserIds;
         if (candidateActiveUserIds.length <= 0) {
@@ -267,6 +264,18 @@ export async function handler(event) {
             candidateActiveCount: candidateActiveUserIds.length,
             stateCount: stateSeatUserIds.length,
           });
+        }
+
+        if (!amSeated) {
+          klog("poker_get_table_user_not_seated", {
+            tableId,
+            handId: currentState.handId,
+            userId: auth.userId,
+            stateSeatCount: stateSeatUserIds.length,
+            dbActiveCount: dbActiveUserIds.length,
+            seatRowsActiveCount: seatRowsActiveUserIds.length,
+          });
+          return { table, seats, stateVersion, currentState: updatedState, myHoleCards: [] };
         }
 
         let effectiveUserIdsForHoleCards = stateSeatUserIds;
@@ -327,10 +336,15 @@ export async function handler(event) {
           myHoleCards = holeCards.holeCardsByUserId[auth.userId] || [];
 
           if (shouldApplyTimeout) {
-            const fullHoleCardsReady = stateSeatUserIds.every((userId) =>
-              isValidTwoCards(holeCards.holeCardsByUserId[userId])
-            );
-            if (!fullHoleCardsReady) {
+            let allHoleCards;
+            try {
+              allHoleCards = await loadHoleCardsByUserId(tx, {
+                tableId,
+                handId: currentState.handId,
+                activeUserIds: stateSeatUserIds,
+                requiredUserIds: stateSeatUserIds,
+              });
+            } catch (error) {
               klog("poker_get_table_timeout_missing_hole_cards", {
                 tableId,
                 handId: currentState.handId,
@@ -338,6 +352,10 @@ export async function handler(event) {
                 availableCount: Object.keys(holeCards.holeCardsByUserId || {}).length,
               });
               shouldApplyTimeout = false;
+            }
+
+            if (shouldApplyTimeout) {
+              holeCards = allHoleCards;
             }
           }
 
