@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import { baseHeaders, beginSql, corsHeaders, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
 import { isHoleCardsTableMissing, loadHoleCardsByUserId } from "./_shared/poker-hole-cards-store.mjs";
 import { deriveCommunityCards, deriveRemainingDeck } from "./_shared/poker-deal-deterministic.mjs";
-import { advanceIfNeeded, applyAction } from "./_shared/poker-reducer.mjs";
+import { TURN_MS, advanceIfNeeded, applyAction } from "./_shared/poker-reducer.mjs";
 import { normalizeRequestId } from "./_shared/poker-request-id.mjs";
 import { awardPotsAtShowdown } from "./_shared/poker-payout.mjs";
 import { materializeShowdownAndPayout } from "./_shared/poker-materialize-showdown.mjs";
@@ -10,6 +10,7 @@ import { computeShowdown } from "./_shared/poker-showdown.mjs";
 import { buildActionConstraints, computeLegalActions } from "./_shared/poker-legal-actions.mjs";
 import { isStateStorageValid, normalizeJsonState, withoutPrivateState } from "./_shared/poker-state-utils.mjs";
 import { parseStakes } from "./_shared/poker-stakes.mjs";
+import { resetTurnTimer } from "./_shared/poker-turn-timer.mjs";
 import { maybeApplyTurnTimeout } from "./_shared/poker-turn-timeout.mjs";
 import { isValidUuid } from "./_shared/poker-utils.mjs";
 
@@ -778,15 +779,27 @@ export async function handler(event) {
           [auth.userId]: requestId,
         },
       };
+      const nowMs = Date.now();
+      const turnSeconds = Math.max(1, Math.round(TURN_MS / 1000));
+      const timerResetState = resetTurnTimer(updatedState, nowMs, turnSeconds);
 
-      if (!isStateStorageValid(updatedState, { requireHandSeed: true, requireCommunityDealt: true, requireNoDeck: true })) {
-        klog("poker_state_corrupt", { tableId, phase: updatedState.phase });
+      klog("poker_turn_timer_reset", {
+        tableId,
+        fromUserId: auth.userId,
+        toUserId: timerResetState.turnUserId ?? null,
+        turnNo: timerResetState.turnNo ?? null,
+        nowMs,
+        deadlineMs: timerResetState.turnDeadlineAt ?? null,
+      });
+
+      if (!isStateStorageValid(timerResetState, { requireHandSeed: true, requireCommunityDealt: true, requireNoDeck: true })) {
+        klog("poker_state_corrupt", { tableId, phase: timerResetState.phase });
         throw makeError(409, "state_invalid");
       }
 
       const updateRows = await tx.unsafe(
         "update public.poker_state set version = version + 1, state = $2::jsonb, updated_at = now() where table_id = $1 returning version;",
-        [tableId, JSON.stringify(updatedState)]
+        [tableId, JSON.stringify(timerResetState)]
       );
       const newVersion = Number(updateRows?.[0]?.version);
       if (!Number.isFinite(newVersion)) {
@@ -794,12 +807,13 @@ export async function handler(event) {
           tableId,
           userId: auth.userId,
           reason: "state_invalid",
-          phase: updatedState.phase,
+          phase: timerResetState.phase,
         });
         throw makeError(409, "state_invalid");
       }
 
-      const actionHandId = typeof updatedState.handId === "string" && updatedState.handId.trim() ? updatedState.handId.trim() : null;
+      const actionHandId =
+        typeof timerResetState.handId === "string" && timerResetState.handId.trim() ? timerResetState.handId.trim() : null;
       await tx.unsafe(
         "insert into public.poker_actions (table_id, version, user_id, action_type, amount, hand_id, request_id, phase_from, phase_to, meta) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb);",
         [
@@ -811,7 +825,7 @@ export async function handler(event) {
           actionHandId,
           requestId,
           currentState.phase || null,
-          updatedState.phase || null,
+          timerResetState.phase || null,
           null,
         ]
       );
@@ -820,7 +834,7 @@ export async function handler(event) {
         klog("poker_act_advanced", {
           tableId,
           fromPhase: currentState.phase,
-          toPhase: updatedState.phase,
+          toPhase: timerResetState.phase,
           loops,
           eventTypes: Array.from(new Set(advanceEvents.map((event) => event?.type).filter(Boolean))),
         });
@@ -832,11 +846,11 @@ export async function handler(event) {
         actionType: actionParsed.value.type,
         amount: actionParsed.value.amount ?? null,
         fromPhase: currentState.phase,
-        toPhase: updatedState.phase,
+        toPhase: timerResetState.phase,
         newVersion,
       });
 
-      const responseState = withoutPrivateState(updatedState);
+      const responseState = withoutPrivateState(timerResetState);
       const nextLegalInfo = computeLegalActions({ statePublic: responseState, userId: auth.userId });
       return {
         tableId,
