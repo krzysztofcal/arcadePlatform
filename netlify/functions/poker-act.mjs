@@ -781,16 +781,28 @@ export async function handler(event) {
       };
       const nowMs = Date.now();
       const turnSeconds = Math.max(1, Math.round(TURN_MS / 1000));
-      const timerResetState = resetTurnTimer(updatedState, nowMs, turnSeconds);
+      const hasTurnUserId = typeof updatedState.turnUserId === "string" && updatedState.turnUserId.trim();
+      const shouldResetTimer = isActionPhase(updatedState.phase) && hasTurnUserId;
+      const timerResetState = shouldResetTimer
+        ? resetTurnTimer(updatedState, nowMs, turnSeconds)
+        : { ...updatedState, turnStartedAt: null, turnDeadlineAt: null };
 
-      klog("poker_turn_timer_reset", {
-        tableId,
-        fromUserId: auth.userId,
-        toUserId: timerResetState.turnUserId ?? null,
-        turnNo: timerResetState.turnNo ?? null,
-        nowMs,
-        deadlineMs: timerResetState.turnDeadlineAt ?? null,
-      });
+      if (shouldResetTimer) {
+        klog("poker_turn_timer_reset", {
+          tableId,
+          fromUserId: auth.userId,
+          toUserId: timerResetState.turnUserId ?? null,
+          turnNo: timerResetState.turnNo ?? null,
+          nowMs,
+          deadlineMs: timerResetState.turnDeadlineAt ?? null,
+        });
+      } else {
+        klog("poker_turn_timer_skipped", {
+          tableId,
+          phase: timerResetState.phase ?? null,
+          reason: "non_action_phase",
+        });
+      }
 
       if (!isStateStorageValid(timerResetState, { requireHandSeed: true, requireCommunityDealt: true, requireNoDeck: true })) {
         klog("poker_state_corrupt", { tableId, phase: timerResetState.phase });

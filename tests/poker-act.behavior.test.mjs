@@ -545,6 +545,46 @@ const run = async () => {
     assert.equal(rejectStoredState.value, JSON.stringify(rejectState));
   }
 
+  {
+    const foldState = {
+      ...baseState,
+      seats: [
+        { userId: "user-1", seatNo: 1 },
+        { userId: "user-2", seatNo: 2 },
+      ],
+      stacks: { "user-1": 100, "user-2": 100 },
+      toCallByUserId: { "user-1": 1, "user-2": 0 },
+      betThisRoundByUserId: { "user-1": 0, "user-2": 1 },
+      actedThisRoundByUserId: { "user-1": false, "user-2": true },
+      foldedByUserId: { "user-1": false, "user-2": false },
+      currentBet: 1,
+      lastRaiseSize: 1,
+      turnUserId: "user-1",
+      turnStartedAt: Date.now() - 1500,
+      turnDeadlineAt: Date.now() + 5000,
+      handId: "hand-fold",
+      handSeed: "seed-fold",
+    };
+    const foldSeatOrder = foldState.seats.map((seat) => seat.userId);
+    const foldHoleCards = dealHoleCards(deriveDeck(foldState.handSeed), foldSeatOrder).holeCardsByUserId;
+    const foldLogs = [];
+    const foldResponse = await runCase({
+      state: foldState,
+      action: { type: "FOLD" },
+      requestId: "req-fold-hand-done",
+      userId: "user-1",
+      holeCardsByUserId: foldHoleCards,
+      klogCalls: foldLogs,
+    });
+    assert.equal(foldResponse.response.statusCode, 200);
+    const foldPayload = JSON.parse(foldResponse.response.body);
+    assert.equal(foldPayload.state.state.phase, "HAND_DONE");
+    assert.equal(foldPayload.state.state.turnStartedAt, null);
+    assert.equal(foldPayload.state.state.turnDeadlineAt, null);
+    assert.ok(foldLogs.some((entry) => entry.kind === "poker_turn_timer_skipped"));
+    assert.ok(!foldLogs.some((entry) => entry.kind === "poker_turn_timer_reset"));
+  }
+
   const handlerUser2 = makeHandler(queries, storedState, "user-2");
   const notTurn = await handlerUser2({
     httpMethod: "POST",
