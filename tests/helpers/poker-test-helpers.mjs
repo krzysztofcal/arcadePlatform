@@ -67,6 +67,7 @@ export const loadPokerHandler = (filePath, mocks) => {
     "postTransaction",
     "resetTurnTimer",
     "shuffle",
+    "updatePokerStateOptimistic",
     "verifySupabaseJwt",
     "withoutPrivateState",
     "isValidUuid",

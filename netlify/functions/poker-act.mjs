@@ -9,6 +9,7 @@ import { materializeShowdownAndPayout } from "./_shared/poker-materialize-showdo
 import { computeShowdown } from "./_shared/poker-showdown.mjs";
 import { buildActionConstraints, computeLegalActions } from "./_shared/poker-legal-actions.mjs";
 import { isStateStorageValid, normalizeJsonState, withoutPrivateState } from "./_shared/poker-state-utils.mjs";
+import { updatePokerStateOptimistic } from "./_shared/poker-state-write.mjs";
 import { parseStakes } from "./_shared/poker-stakes.mjs";
 import { resetTurnTimer } from "./_shared/poker-turn-timer.mjs";
 import { maybeApplyTurnTimeout } from "./_shared/poker-turn-timeout.mjs";
@@ -16,6 +17,7 @@ import { isValidUuid } from "./_shared/poker-utils.mjs";
 
 const ACTION_TYPES = new Set(["CHECK", "BET", "CALL", "RAISE", "FOLD"]);
 const ADVANCE_LIMIT = 4;
+const REQUEST_PENDING_STALE_SEC = 30;
 const isPlainObjectValue = (value) => value && typeof value === "object" && !Array.isArray(value);
 const isPlainObject = isPlainObjectValue;
 
@@ -82,6 +84,26 @@ const normalizeRequest = (value) => {
   const parsed = normalizeRequestId(value, { maxLen: 200 });
   if (!parsed.ok || !parsed.value) return { ok: false, value: null };
   return { ok: true, value: parsed.value };
+};
+
+const parseResultJson = (value) => {
+  if (!value) return null;
+  if (typeof value === "string") {
+    try {
+      return JSON.parse(value);
+    } catch {
+      return null;
+    }
+  }
+  if (typeof value === "object") return value;
+  return null;
+};
+
+const isRequestPendingStale = (row) => {
+  if (!row?.created_at) return false;
+  const createdAtMs = Date.parse(row.created_at);
+  if (!Number.isFinite(createdAtMs)) return false;
+  return Date.now() - createdAtMs > REQUEST_PENDING_STALE_SEC * 1000;
 };
 
 const hasRequiredState = (state) =>
@@ -290,49 +312,125 @@ export async function handler(event) {
 
   try {
     const result = await beginSql(async (tx) => {
-      const tableRows = await tx.unsafe("select id, status, stakes from public.poker_tables where id = $1 limit 1;", [
-        tableId,
-      ]);
-      const table = tableRows?.[0] || null;
-      if (!table) {
-        throw makeError(404, "table_not_found");
-      }
-      if (table.status !== "OPEN") {
-        throw makeError(409, "table_not_open");
-      }
-      const stakesParsed = parseStakes(table?.stakes);
-      if (!stakesParsed.ok) {
-        klog("poker_act_invalid_stakes", { tableId, reason: stakesParsed.details?.reason || "invalid_stakes" });
-        throw makeError(409, "invalid_stakes");
+      if (requestId) {
+        const requestRows = await tx.unsafe(
+          "select result_json, created_at from public.poker_requests where table_id = $1 and request_id = $2 limit 1;",
+          [tableId, requestId]
+        );
+        const existingRow = requestRows?.[0];
+        if (existingRow) {
+          const stored = parseResultJson(existingRow.result_json);
+          if (stored) {
+            if (stored.replayed) return stored;
+            const replayed = { ...stored, replayed: true };
+            await tx.unsafe("update public.poker_requests set result_json = $3::jsonb where table_id = $1 and request_id = $2;", [
+              tableId,
+              requestId,
+              JSON.stringify(replayed),
+            ]);
+            return replayed;
+          }
+          if (isRequestPendingStale(existingRow)) {
+            await tx.unsafe("delete from public.poker_requests where table_id = $1 and request_id = $2;", [
+              tableId,
+              requestId,
+            ]);
+          } else {
+            return { ok: false, pending: true, requestId };
+          }
+        }
+
+        const insertRequest = () =>
+          tx.unsafe(
+            `insert into public.poker_requests (table_id, user_id, request_id, kind)
+           values ($1, $2, $3, 'ACT')
+           on conflict (table_id, request_id) do nothing
+           returning request_id;`,
+            [tableId, auth.userId, requestId]
+          );
+        let insertedRows = await insertRequest();
+        let hasRequest = !!insertedRows?.[0]?.request_id;
+        if (!hasRequest) {
+          const existingRows = await tx.unsafe(
+            "select result_json, created_at from public.poker_requests where table_id = $1 and request_id = $2 limit 1;",
+            [tableId, requestId]
+          );
+          const existingConflict = existingRows?.[0];
+          const stored = parseResultJson(existingConflict?.result_json);
+          if (stored) {
+            if (stored.replayed) return stored;
+            const replayed = { ...stored, replayed: true };
+            await tx.unsafe("update public.poker_requests set result_json = $3::jsonb where table_id = $1 and request_id = $2;", [
+              tableId,
+              requestId,
+              JSON.stringify(replayed),
+            ]);
+            return replayed;
+          }
+          if (existingConflict && isRequestPendingStale(existingConflict)) {
+            await tx.unsafe("delete from public.poker_requests where table_id = $1 and request_id = $2;", [
+              tableId,
+              requestId,
+            ]);
+            insertedRows = await insertRequest();
+            hasRequest = !!insertedRows?.[0]?.request_id;
+            if (!hasRequest) {
+              return { ok: false, pending: true, requestId };
+            }
+          } else {
+            return { ok: false, pending: true, requestId };
+          }
+        }
       }
 
-      const seatRows = await tx.unsafe(
-        "select user_id from public.poker_seats where table_id = $1 and status = 'ACTIVE' and user_id = $2 limit 1;",
-        [tableId, auth.userId]
-      );
-      if (!seatRows?.[0]?.user_id) {
-        throw makeError(403, "not_allowed");
-      }
-
-      const stateRows = await tx.unsafe(
-        "select version, state from public.poker_state where table_id = $1 for update;",
-        [tableId]
-      );
-      const stateRow = stateRows?.[0] || null;
-      if (!stateRow) {
-        throw makeError(409, "state_invalid");
-      }
-
-      let currentState = normalizeJsonState(stateRow.state);
-      if (!hasRequiredState(currentState)) {
-        klog("poker_act_rejected", {
+      try {
+        const tableRows = await tx.unsafe("select id, status, stakes from public.poker_tables where id = $1 limit 1;", [
           tableId,
-          userId: auth.userId,
-          reason: "state_invalid",
-          phase: currentState?.phase || null,
-        });
-        throw makeError(409, "state_invalid");
-      }
+        ]);
+        const table = tableRows?.[0] || null;
+        if (!table) {
+          throw makeError(404, "table_not_found");
+        }
+        if (table.status !== "OPEN") {
+          throw makeError(409, "table_not_open");
+        }
+        const stakesParsed = parseStakes(table?.stakes);
+        if (!stakesParsed.ok) {
+          klog("poker_act_invalid_stakes", { tableId, reason: stakesParsed.details?.reason || "invalid_stakes" });
+          throw makeError(409, "invalid_stakes");
+        }
+
+        const seatRows = await tx.unsafe(
+          "select user_id from public.poker_seats where table_id = $1 and status = 'ACTIVE' and user_id = $2 limit 1;",
+          [tableId, auth.userId]
+        );
+        if (!seatRows?.[0]?.user_id) {
+          throw makeError(403, "not_allowed");
+        }
+
+        const stateRows = await tx.unsafe(
+          "select version, state from public.poker_state where table_id = $1 for update;",
+          [tableId]
+        );
+        const stateRow = stateRows?.[0] || null;
+        if (!stateRow) {
+          throw makeError(409, "state_invalid");
+        }
+        const expectedVersion = Number(stateRow.version);
+        if (!Number.isInteger(expectedVersion) || expectedVersion < 0) {
+          throw makeError(409, "state_invalid");
+        }
+
+        let currentState = normalizeJsonState(stateRow.state);
+        if (!hasRequiredState(currentState)) {
+          klog("poker_act_rejected", {
+            tableId,
+            userId: auth.userId,
+            reason: "state_invalid",
+            phase: currentState?.phase || null,
+          });
+          throw makeError(409, "state_invalid");
+        }
       const repairedDealerSeatNo = repairDealerSeatNo(currentState);
       if (repairedDealerSeatNo != null && repairedDealerSeatNo !== currentState.dealerSeatNo) {
         currentState = { ...currentState, dealerSeatNo: repairedDealerSeatNo };
@@ -522,16 +620,27 @@ export async function handler(event) {
         }
         const replayPublicState = withoutPrivateState(currentState);
         const replayLegalInfo = computeLegalActions({ statePublic: replayPublicState, userId: auth.userId });
-        return {
+        const resultPayload = {
+          ok: true,
           tableId,
-          version,
-          state: replayPublicState,
+          state: {
+            version,
+            state: replayPublicState,
+          },
           myHoleCards: holeCardsByUserId[auth.userId] || [],
           events: [],
           replayed: true,
           legalActions: replayLegalInfo.actions,
           actionConstraints: buildActionConstraints(replayLegalInfo),
         };
+        if (requestId) {
+          await tx.unsafe("update public.poker_requests set result_json = $3::jsonb where table_id = $1 and request_id = $2;", [
+            tableId,
+            requestId,
+            JSON.stringify(resultPayload),
+          ]);
+        }
+        return resultPayload;
       }
 
       if (!isActionPhase(currentState.phase) || !currentState.turnUserId) {
@@ -609,12 +718,16 @@ export async function handler(event) {
           throw makeError(409, "state_invalid");
         }
 
-        const updateRows = await tx.unsafe(
-          "update public.poker_state set version = version + 1, state = $2::jsonb, updated_at = now() where table_id = $1 returning version;",
-          [tableId, JSON.stringify(updatedState)]
-        );
-        const newVersion = Number(updateRows?.[0]?.version);
-        if (!Number.isFinite(newVersion)) {
+        const updateResult = await updatePokerStateOptimistic(tx, {
+          tableId,
+          expectedVersion,
+          nextState: updatedState,
+        });
+        if (!updateResult.ok) {
+          if (updateResult.reason === "conflict") {
+            klog("poker_act_conflict", { tableId, userId: auth.userId, expectedVersion, requestId });
+            throw makeError(409, "state_conflict");
+          }
           klog("poker_act_rejected", {
             tableId,
             userId: auth.userId,
@@ -623,6 +736,7 @@ export async function handler(event) {
           });
           throw makeError(409, "state_invalid");
         }
+        const newVersion = updateResult.newVersion;
 
         const timeoutHandId =
           typeof updatedState.handId === "string" && updatedState.handId.trim() ? updatedState.handId.trim() : null;
@@ -652,16 +766,27 @@ export async function handler(event) {
 
         const timeoutPublicState = withoutPrivateState(updatedState);
         const timeoutLegalInfo = computeLegalActions({ statePublic: timeoutPublicState, userId: auth.userId });
-        return {
+        const resultPayload = {
+          ok: true,
           tableId,
-          version: newVersion,
-          state: timeoutPublicState,
+          state: {
+            version: newVersion,
+            state: timeoutPublicState,
+          },
           myHoleCards: holeCardsByUserId[auth.userId] || [],
           events: timeoutResult.events || [],
           replayed: false,
           legalActions: timeoutLegalInfo.actions,
           actionConstraints: buildActionConstraints(timeoutLegalInfo),
         };
+        if (requestId) {
+          await tx.unsafe("update public.poker_requests set result_json = $3::jsonb where table_id = $1 and request_id = $2;", [
+            tableId,
+            requestId,
+            JSON.stringify(resultPayload),
+          ]);
+        }
+        return resultPayload;
       }
 
       if (currentState.turnUserId !== auth.userId) {
@@ -808,12 +933,16 @@ export async function handler(event) {
         throw makeError(409, "state_invalid");
       }
 
-      const updateRows = await tx.unsafe(
-        "update public.poker_state set version = version + 1, state = $2::jsonb, updated_at = now() where table_id = $1 returning version;",
-        [tableId, JSON.stringify(timerResetState)]
-      );
-      const newVersion = Number(updateRows?.[0]?.version);
-      if (!Number.isFinite(newVersion)) {
+      const updateResult = await updatePokerStateOptimistic(tx, {
+        tableId,
+        expectedVersion,
+        nextState: timerResetState,
+      });
+      if (!updateResult.ok) {
+        if (updateResult.reason === "conflict") {
+          klog("poker_act_conflict", { tableId, userId: auth.userId, expectedVersion, requestId });
+          throw makeError(409, "state_conflict");
+        }
         klog("poker_act_rejected", {
           tableId,
           userId: auth.userId,
@@ -822,6 +951,7 @@ export async function handler(event) {
         });
         throw makeError(409, "state_invalid");
       }
+      const newVersion = updateResult.newVersion;
 
       const actionHandId =
         typeof timerResetState.handId === "string" && timerResetState.handId.trim() ? timerResetState.handId.trim() : null;
@@ -863,35 +993,39 @@ export async function handler(event) {
 
       const responseState = withoutPrivateState(timerResetState);
       const nextLegalInfo = computeLegalActions({ statePublic: responseState, userId: auth.userId });
-      return {
+      const resultPayload = {
+        ok: true,
         tableId,
-        version: newVersion,
-        state: responseState,
+        state: {
+          version: newVersion,
+          state: responseState,
+        },
         myHoleCards: holeCardsByUserId[auth.userId] || [],
         events,
         replayed: false,
         legalActions: nextLegalInfo.actions,
         actionConstraints: buildActionConstraints(nextLegalInfo),
       };
+      if (requestId) {
+        await tx.unsafe("update public.poker_requests set result_json = $3::jsonb where table_id = $1 and request_id = $2;", [
+          tableId,
+          requestId,
+          JSON.stringify(resultPayload),
+        ]);
+      }
+      return resultPayload;
+      } catch (error) {
+        if (requestId) {
+          await tx.unsafe("delete from public.poker_requests where table_id = $1 and request_id = $2;", [
+            tableId,
+            requestId,
+          ]);
+        }
+        throw error;
+      }
     });
 
-    return {
-      statusCode: 200,
-      headers: mergeHeaders(cors),
-      body: JSON.stringify({
-        ok: true,
-        tableId: result.tableId,
-        state: {
-          version: result.version,
-          state: result.state,
-        },
-        myHoleCards: result.myHoleCards,
-        events: result.events,
-        replayed: result.replayed,
-        legalActions: result.legalActions,
-        actionConstraints: result.actionConstraints,
-      }),
-    };
+    return { statusCode: 200, headers: mergeHeaders(cors), body: JSON.stringify(result) };
   } catch (error) {
     if (error?.status && error?.code) {
       return { statusCode: error.status, headers: mergeHeaders(cors), body: JSON.stringify({ error: error.code }) };

@@ -3,6 +3,7 @@ import { deriveCommunityCards, deriveDeck, deriveRemainingDeck } from "./_shared
 import { isHoleCardsTableMissing, loadHoleCardsByUserId } from "./_shared/poker-hole-cards-store.mjs";
 import { buildActionConstraints, computeLegalActions } from "./_shared/poker-legal-actions.mjs";
 import { isStateStorageValid, normalizeJsonState, withoutPrivateState } from "./_shared/poker-state-utils.mjs";
+import { updatePokerStateOptimistic } from "./_shared/poker-state-write.mjs";
 import { parseStakes } from "./_shared/poker-stakes.mjs";
 import { maybeApplyTurnTimeout, normalizeSeatOrderFromState } from "./_shared/poker-turn-timeout.mjs";
 import { isValidUuid } from "./_shared/poker-utils.mjs";
@@ -208,6 +209,10 @@ export async function handler(event) {
         throw new Error("poker_state_missing");
       }
       let stateVersion = stateRow.version;
+      const expectedVersion = Number(stateVersion);
+      if (!Number.isInteger(expectedVersion) || expectedVersion < 0) {
+        throw new Error("state_invalid");
+      }
 
       const seats = Array.isArray(seatRows)
         ? seatRows.map((seat) => ({
@@ -415,28 +420,34 @@ export async function handler(event) {
                 await tx.unsafe("select set_config('statement_timeout', '4000ms', true);");
 
                 try {
-                  const updateRows = await tx.unsafe(
-                    "update public.poker_state set version = version + 1, state = $2::jsonb, updated_at = now() where table_id = $1 returning version;",
-                    [tableId, JSON.stringify(timeoutResult.state)]
-                  );
-                  const newVersion = Number(updateRows?.[0]?.version);
-                  if (!Number.isFinite(newVersion)) {
-                    throw new Error("state_invalid");
+                  const updateResult = await updatePokerStateOptimistic(tx, {
+                    tableId,
+                    expectedVersion,
+                    nextState: timeoutResult.state,
+                  });
+                  if (!updateResult.ok) {
+                    if (updateResult.reason === "conflict") {
+                      klog("poker_get_table_timeout_conflict", { tableId, expectedVersion });
+                    } else {
+                      throw new Error("state_invalid");
+                    }
+                  } else {
+                    const newVersion = updateResult.newVersion;
+                    stateVersion = newVersion;
+
+                    await tx.unsafe(
+                      "insert into public.poker_actions (table_id, version, user_id, action_type, amount) values ($1, $2, $3, $4, $5);",
+                      [
+                        tableId,
+                        newVersion,
+                        timeoutResult.action.userId,
+                        timeoutResult.action.type,
+                        timeoutResult.action.amount ?? null,
+                      ]
+                    );
+
+                    updatedState = timeoutResult.state;
                   }
-                  stateVersion = newVersion;
-
-                  await tx.unsafe(
-                    "insert into public.poker_actions (table_id, version, user_id, action_type, amount) values ($1, $2, $3, $4, $5);",
-                    [
-                      tableId,
-                      newVersion,
-                      timeoutResult.action.userId,
-                      timeoutResult.action.type,
-                      timeoutResult.action.amount ?? null,
-                    ]
-                  );
-
-                  updatedState = timeoutResult.state;
                 } catch (e) {
                   const code = String(e?.code || "");
                   if (code === "55P03" || code === "57014") {

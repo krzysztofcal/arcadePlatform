@@ -2,6 +2,7 @@ import { baseHeaders, beginSql, corsHeaders, extractBearerToken, klog, verifySup
 import { HEARTBEAT_INTERVAL_SEC, isValidUuid } from "./_shared/poker-utils.mjs";
 import { postTransaction } from "./_shared/chips-ledger.mjs";
 import { normalizeRequestId } from "./_shared/poker-request-id.mjs";
+import { updatePokerStateOptimistic } from "./_shared/poker-state-write.mjs";
 
 const REQUEST_PENDING_STALE_SEC = 30;
 
@@ -340,6 +341,10 @@ values ($1, $2, $3, 'ACTIVE', now(), now(), $4);
         if (!stateRow) {
           throw new Error("poker_state_missing");
         }
+        const expectedVersion = Number(stateRow.version);
+        if (!Number.isInteger(expectedVersion) || expectedVersion < 0) {
+          throw makeError(409, "state_invalid");
+        }
 
         const currentState = normalizeState(stateRow.state);
         const seats = parseSeats(currentState.seats).filter((seat) => seat?.userId !== auth.userId);
@@ -355,10 +360,18 @@ values ($1, $2, $3, 'ACTIVE', now(), now(), $4);
           phase: currentState.phase || "INIT",
         };
 
-        await tx.unsafe(
-          "update public.poker_state set version = version + 1, state = $2::jsonb, updated_at = now() where table_id = $1;",
-          [tableId, JSON.stringify(updatedState)]
-        );
+        const updateResult = await updatePokerStateOptimistic(tx, {
+          tableId,
+          expectedVersion,
+          nextState: updatedState,
+        });
+        if (!updateResult.ok) {
+          if (updateResult.reason === "conflict") {
+            klog("poker_join_conflict", { tableId, userId: auth.userId, expectedVersion });
+            throw makeError(409, "state_conflict");
+          }
+          throw makeError(409, "state_invalid");
+        }
 
         await tx.unsafe(
           "update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1;",
