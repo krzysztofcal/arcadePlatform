@@ -780,11 +780,10 @@ export async function handler(event) {
         },
       };
       const nowMs = Date.now();
-      const turnSeconds = Math.max(1, Math.round(TURN_MS / 1000));
       const hasTurnUserId = typeof updatedState.turnUserId === "string" && updatedState.turnUserId.trim();
       const shouldResetTimer = isActionPhase(updatedState.phase) && hasTurnUserId;
       const timerResetState = shouldResetTimer
-        ? resetTurnTimer(updatedState, nowMs, turnSeconds)
+        ? resetTurnTimer(updatedState, nowMs, TURN_MS)
         : { ...updatedState, turnStartedAt: null, turnDeadlineAt: null };
 
       if (shouldResetTimer) {
