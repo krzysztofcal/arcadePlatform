@@ -170,6 +170,99 @@ export async function handler(event) {
       limit: EXPIRED_SEATS_LIMIT,
     });
 
+    const closeCashoutTables = await beginSql(async (tx) =>
+      tx.unsafe(
+        `
+select t.id
+from public.poker_tables t
+where (
+    t.status = 'CLOSED'
+    or not exists (
+      select 1 from public.poker_seats s
+      where s.table_id = t.id and s.status = 'ACTIVE'
+    )
+  )
+  and exists (
+    select 1 from public.poker_seats s
+    where s.table_id = t.id and s.stack > 0
+  );`
+      )
+    );
+    const closeCashoutTableIds = Array.isArray(closeCashoutTables)
+      ? closeCashoutTables.map((row) => row?.id).filter(Boolean)
+      : [];
+    let closeCashoutProcessed = 0;
+    let closeCashoutSkipped = 0;
+    for (const tableId of closeCashoutTableIds) {
+      try {
+        const result = await beginSql(async (tx) => {
+          const lockedRows = await tx.unsafe(
+            "select seat_no, status, stack, user_id from public.poker_seats where table_id = $1 for update;",
+            [tableId]
+          );
+          for (const locked of lockedRows || []) {
+            const userId = locked?.user_id;
+            const seatNo = locked?.seat_no ?? null;
+            if (!userId) continue;
+            const amount = normalizeSeatStack(locked.stack) ?? 0;
+            if (amount > 0) {
+              try {
+                await postTransaction({
+                  userId,
+                  txType: "TABLE_CASH_OUT",
+                  idempotencyKey: `poker:close_cashout:${tableId}:${userId}:${seatNo}:v1`,
+                  reference: `table:${tableId}`,
+                  metadata: { tableId, seatNo, reason: "table_close" },
+                  entries: [
+                    { accountType: "ESCROW", systemKey: `POKER_TABLE:${tableId}`, amount: -amount },
+                    { accountType: "USER", amount },
+                  ],
+                  createdBy: userId,
+                  tx,
+                });
+              } catch (error) {
+                klog("poker_close_cashout_fail", {
+                  tableId,
+                  userId,
+                  seatNo,
+                  error: error?.message || "unknown_error",
+                });
+                if (error && typeof error === "object") {
+                  error.closeCashoutLogged = true;
+                }
+                throw error;
+              }
+              klog("poker_close_cashout_ok", { tableId, userId, seatNo, amount });
+              closeCashoutProcessed += 1;
+            } else {
+              klog("poker_close_cashout_skip", { tableId, userId, seatNo, amount });
+              closeCashoutSkipped += 1;
+            }
+            await tx.unsafe(
+              "update public.poker_seats set status = 'INACTIVE', stack = 0 where table_id = $1 and user_id = $2;",
+              [tableId, userId]
+            );
+          }
+          return { seatCount: lockedRows?.length ?? 0 };
+        });
+        if (result?.seatCount === 0) {
+          closeCashoutSkipped += 1;
+        }
+      } catch (error) {
+        if (!error?.closeCashoutLogged) {
+          klog("poker_close_cashout_fail", {
+            tableId,
+            error: error?.message || "unknown_error",
+          });
+        }
+      }
+    }
+    klog("poker_sweep_close_cashout_summary", {
+      tables: closeCashoutTableIds.length,
+      processed: closeCashoutProcessed,
+      skipped: closeCashoutSkipped,
+    });
+
     const closedResult = await beginSql(async (tx) => {
       const closedRows = await tx.unsafe(
         `

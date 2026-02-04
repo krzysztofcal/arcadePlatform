@@ -39,3 +39,18 @@ assert.ok(
   "sweep should log timeout cash-out outcomes"
 );
 assert.ok(sweepSrc.includes("poker_sweep_timeout_summary"), "sweep should log timeout summary");
+assert.ok(
+  sweepSrc.includes("poker:close_cashout:${tableId}:${userId}:${seatNo}:v1"),
+  "sweep should use close cashout idempotency key"
+);
+assert.ok(
+  sweepSrc.includes("poker_close_cashout_ok") &&
+    sweepSrc.includes("poker_close_cashout_skip") &&
+    sweepSrc.includes("poker_close_cashout_fail"),
+  "sweep should log close cash-out outcomes"
+);
+assert.ok(
+  /poker_close_cashout[\s\S]*?update public\.poker_seats set status = 'INACTIVE', stack = 0/.test(sweepSrc),
+  "sweep should zero stacks after close cash-out settlement"
+);
+assert.ok(sweepSrc.includes("poker_sweep_close_cashout_summary"), "sweep should log close cash-out summary");
