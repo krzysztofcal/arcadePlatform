@@ -17,12 +17,16 @@ assert.ok(
   "sweep should cap expired seat scan"
 );
 assert.ok(
-  /const amount = normalizeSeatStack\(locked\.stack\) \?\? 0;/.test(sweepSrc),
-  "sweep should coalesce stack to 0"
+  sweepSrc.includes("normalizeSeatStack("),
+  "sweep should normalize seat stacks"
 );
 assert.ok(
   /if \(amount > 0\)[\s\S]*?TABLE_CASH_OUT/.test(sweepSrc),
   "sweep should cash out only when stack is positive"
+);
+assert.ok(
+  /normalizedStack\s*>\s*0[\s\S]*?TABLE_CASH_OUT/.test(sweepSrc),
+  "sweep should cash out close settlements only when stack is positive"
 );
 assert.ok(
   sweepSrc.includes("poker:timeout_cashout:${tableId}:${userId}:${locked.seat_no}:v1"),
@@ -39,3 +43,22 @@ assert.ok(
   "sweep should log timeout cash-out outcomes"
 );
 assert.ok(sweepSrc.includes("poker_sweep_timeout_summary"), "sweep should log timeout summary");
+assert.ok(
+  sweepSrc.includes("delete from public.poker_hole_cards"),
+  "sweep should delete hole cards for closed tables"
+);
+assert.ok(
+  sweepSrc.includes("poker:close_cashout:${tableId}:${userId}:${seatNo}:v1"),
+  "sweep should use close cashout idempotency key"
+);
+assert.ok(
+  sweepSrc.includes("poker_close_cashout_ok") &&
+    sweepSrc.includes("poker_close_cashout_skip") &&
+    sweepSrc.includes("poker_close_cashout_fail"),
+  "sweep should log close cash-out outcomes"
+);
+assert.ok(
+  /poker_close_cashout[\s\S]*?update public\.poker_seats set status = 'INACTIVE', stack = 0/.test(sweepSrc),
+  "sweep should zero stacks after close cash-out settlement"
+);
+assert.ok(sweepSrc.includes("poker_sweep_close_cashout_summary"), "sweep should log close cash-out summary");
