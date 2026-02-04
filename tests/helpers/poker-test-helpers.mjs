@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { isValidTwoCards } from "../../netlify/functions/_shared/poker-cards-utils.mjs";
+import { deletePokerRequest, ensurePokerRequest, storePokerRequestResult } from "../../netlify/functions/_shared/poker-idempotency.mjs";
 import { formatStakes, parseStakes } from "../../netlify/functions/_shared/poker-stakes.mjs";
 
 const root = process.cwd();
@@ -46,11 +47,13 @@ export const loadPokerHandler = (filePath, mocks) => {
     "computeLegalActions",
     "computeNextDealerSeatNo",
     "buildActionConstraints",
+    "deletePokerRequest",
     "createDeck",
     "dealHoleCards",
     "deriveDeck",
     "deriveCommunityCards",
     "deriveRemainingDeck",
+    "ensurePokerRequest",
     "advanceIfNeeded",
     "applyAction",
     "materializeShowdownAndPayout",
@@ -78,6 +81,7 @@ export const loadPokerHandler = (filePath, mocks) => {
     "upgradeLegacyInitState",
     "upgradeLegacyInitStateWithSeats",
     "PRESENCE_TTL_SEC",
+    "storePokerRequestResult",
     "TABLE_EMPTY_CLOSE_SEC",
     "TURN_MS",
   ];
@@ -96,7 +100,7 @@ ${rewritten}
 return handler;`
   );
   try {
-    const resolvedMocks = { parseStakes, formatStakes, ...mocks };
+    const resolvedMocks = { parseStakes, formatStakes, ensurePokerRequest, storePokerRequestResult, deletePokerRequest, ...mocks };
     return factory(resolvedMocks, isValidTwoCards);
   } catch (error) {
     throw new Error(`[poker-test-helpers] Failed to compile ${filePath}: ${error?.message || error}`);

@@ -103,30 +103,30 @@ const makeHandler = (queries, storedState, userId, options = {}) =>
             return [];
           }
           if (text.includes("from public.poker_requests")) {
-            const requestKey = `${params?.[0]}|${params?.[1]}`;
+            const requestKey = `${params?.[0]}|${params?.[1]}|${params?.[2]}|${params?.[3]}`;
             const entry = requestStore.get(requestKey);
             if (!entry) return [];
             return [{ result_json: entry.resultJson, created_at: entry.createdAt }];
           }
           if (text.includes("insert into public.poker_requests")) {
-            const requestKey = `${params?.[0]}|${params?.[2]}`;
+            const requestKey = `${params?.[0]}|${params?.[1]}|${params?.[2]}|${params?.[3]}`;
             if (requestStore.has(requestKey)) return [];
             requestStore.set(requestKey, { resultJson: null, createdAt: new Date().toISOString() });
             return [{ request_id: params?.[2] }];
           }
           if (text.includes("update public.poker_requests")) {
-            const requestKey = `${params?.[0]}|${params?.[1]}`;
+            const requestKey = `${params?.[0]}|${params?.[1]}|${params?.[2]}|${params?.[3]}`;
             if (options.failRequestWriteOnce && !storedState.requestWriteFailed) {
               storedState.requestWriteFailed = true;
               throw new Error("request_write_failed");
             }
             const entry = requestStore.get(requestKey) || { createdAt: new Date().toISOString() };
-            entry.resultJson = params?.[2] ?? null;
+            entry.resultJson = params?.[4] ?? null;
             requestStore.set(requestKey, entry);
-            return [{ request_id: params?.[1] }];
+            return [{ request_id: params?.[2] }];
           }
           if (text.includes("delete from public.poker_requests")) {
-            const requestKey = `${params?.[0]}|${params?.[1]}`;
+            const requestKey = `${params?.[0]}|${params?.[1]}|${params?.[2]}|${params?.[3]}`;
             requestStore.delete(requestKey);
             return [];
           }
@@ -206,26 +206,26 @@ const makeStartHandHandler = (queries, storedState, userId, seatUserIds) => {
             return seatUserIds.map((id, index) => ({ user_id: id, seat_no: index + 1, status: "ACTIVE" }));
           }
           if (text.includes("from public.poker_requests")) {
-            const requestKey = `${params?.[0]}|${params?.[1]}`;
+            const requestKey = `${params?.[0]}|${params?.[1]}|${params?.[2]}|${params?.[3]}`;
             const entry = requestStore.get(requestKey);
             if (!entry) return [];
             return [{ result_json: entry.resultJson, created_at: entry.createdAt }];
           }
           if (text.includes("insert into public.poker_requests")) {
-            const requestKey = `${params?.[0]}|${params?.[2]}`;
+            const requestKey = `${params?.[0]}|${params?.[1]}|${params?.[2]}|${params?.[3]}`;
             if (requestStore.has(requestKey)) return [];
             requestStore.set(requestKey, { resultJson: null, createdAt: new Date().toISOString() });
             return [{ request_id: params?.[2] }];
           }
           if (text.includes("update public.poker_requests")) {
-            const requestKey = `${params?.[0]}|${params?.[1]}`;
+            const requestKey = `${params?.[0]}|${params?.[1]}|${params?.[2]}|${params?.[3]}`;
             const entry = requestStore.get(requestKey) || { createdAt: new Date().toISOString() };
-            entry.resultJson = params?.[2] ?? null;
+            entry.resultJson = params?.[4] ?? null;
             requestStore.set(requestKey, entry);
-            return [{ request_id: params?.[1] }];
+            return [{ request_id: params?.[2] }];
           }
           if (text.includes("delete from public.poker_requests")) {
-            const requestKey = `${params?.[0]}|${params?.[1]}`;
+            const requestKey = `${params?.[0]}|${params?.[1]}|${params?.[2]}|${params?.[3]}`;
             requestStore.delete(requestKey);
             return [];
           }

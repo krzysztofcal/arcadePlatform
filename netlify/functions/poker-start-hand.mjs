@@ -13,6 +13,7 @@ import {
   upgradeLegacyInitStateWithSeats,
   withoutPrivateState,
 } from "./_shared/poker-state-utils.mjs";
+import { deletePokerRequest, ensurePokerRequest, storePokerRequestResult } from "./_shared/poker-idempotency.mjs";
 import { updatePokerStateOptimistic } from "./_shared/poker-state-write.mjs";
 import { parseStakes } from "./_shared/poker-stakes.mjs";
 import { isValidUuid } from "./_shared/poker-utils.mjs";
@@ -65,26 +66,6 @@ const parseStacks = (value) => (value && typeof value === "object" && !Array.isA
 const normalizeVersion = (value) => {
   const num = Number(value);
   return Number.isFinite(num) ? num : null;
-};
-
-const parseResultJson = (value) => {
-  if (!value) return null;
-  if (typeof value === "string") {
-    try {
-      return JSON.parse(value);
-    } catch {
-      return null;
-    }
-  }
-  if (typeof value === "object") return value;
-  return null;
-};
-
-const isRequestPendingStale = (row) => {
-  if (!row?.created_at) return false;
-  const createdAtMs = Date.parse(row.created_at);
-  if (!Number.isFinite(createdAtMs)) return false;
-  return Date.now() - createdAtMs > REQUEST_PENDING_STALE_SEC * 1000;
 };
 
 const isHoleCardsTableMissing = (error) => {
@@ -157,76 +138,30 @@ export async function handler(event) {
   try {
     const result = await beginSql(async (tx) => {
       let mutated = false;
-      if (requestIdParsed.value) {
-        const requestRows = await tx.unsafe(
-          "select result_json, created_at from public.poker_requests where table_id = $1 and request_id = $2 limit 1;",
-          [tableId, requestIdParsed.value]
-        );
-        const existingRow = requestRows?.[0];
-        if (existingRow) {
-          const stored = parseResultJson(existingRow.result_json);
-          if (stored) {
-            if (stored.replayed) return stored;
-            const replayed = { ...stored, replayed: true };
-            await tx.unsafe("update public.poker_requests set result_json = $3::jsonb where table_id = $1 and request_id = $2;", [
-              tableId,
-              requestIdParsed.value,
-              JSON.stringify(replayed),
-            ]);
-            return replayed;
-          }
-          if (isRequestPendingStale(existingRow)) {
-            await tx.unsafe("delete from public.poker_requests where table_id = $1 and request_id = $2;", [
-              tableId,
-              requestIdParsed.value,
-            ]);
-          } else {
-            return { pending: true, requestId: requestIdParsed.value };
-          }
+      const requestInfo = await ensurePokerRequest(tx, {
+        tableId,
+        userId: auth.userId,
+        requestId: requestIdParsed.value,
+        kind: "START_HAND",
+        pendingStaleSec: REQUEST_PENDING_STALE_SEC,
+      });
+      if (requestInfo.status === "stored") {
+        const stored = requestInfo.result;
+        if (stored?.replayed) return stored;
+        if (stored?.ok) {
+          const replayed = { ...stored, replayed: true };
+          await storePokerRequestResult(tx, {
+            tableId,
+            userId: auth.userId,
+            requestId: requestIdParsed.value,
+            kind: "START_HAND",
+            result: replayed,
+          });
+          return replayed;
         }
-
-        const insertRequest = () =>
-          tx.unsafe(
-            `insert into public.poker_requests (table_id, user_id, request_id, kind)
-           values ($1, $2, $3, 'START_HAND')
-           on conflict (table_id, request_id) do nothing
-           returning request_id;`,
-            [tableId, auth.userId, requestIdParsed.value]
-          );
-        let insertedRows = await insertRequest();
-        let hasRequest = !!insertedRows?.[0]?.request_id;
-        if (!hasRequest) {
-          const existingRows = await tx.unsafe(
-            "select result_json, created_at from public.poker_requests where table_id = $1 and request_id = $2 limit 1;",
-            [tableId, requestIdParsed.value]
-          );
-          const existingConflict = existingRows?.[0];
-          const stored = parseResultJson(existingConflict?.result_json);
-          if (stored) {
-            if (stored.replayed) return stored;
-            const replayed = { ...stored, replayed: true };
-            await tx.unsafe("update public.poker_requests set result_json = $3::jsonb where table_id = $1 and request_id = $2;", [
-              tableId,
-              requestIdParsed.value,
-              JSON.stringify(replayed),
-            ]);
-            return replayed;
-          }
-          if (existingConflict && isRequestPendingStale(existingConflict)) {
-            await tx.unsafe("delete from public.poker_requests where table_id = $1 and request_id = $2;", [
-              tableId,
-              requestIdParsed.value,
-            ]);
-            insertedRows = await insertRequest();
-            hasRequest = !!insertedRows?.[0]?.request_id;
-            if (!hasRequest) {
-              return { pending: true, requestId: requestIdParsed.value };
-            }
-          } else {
-            return { pending: true, requestId: requestIdParsed.value };
-          }
-        }
+        return stored;
       }
+      if (requestInfo.status === "pending") return { pending: true, requestId: requestIdParsed.value };
 
       try {
         const tableRows = await tx.unsafe("select id, status, stakes from public.poker_tables where id = $1 limit 1;", [tableId]);
@@ -339,13 +274,13 @@ export async function handler(event) {
               legalActions: replayLegalInfo.actions,
               actionConstraints: buildActionConstraints(replayLegalInfo),
             };
-            if (requestIdParsed.value) {
-              await tx.unsafe("update public.poker_requests set result_json = $3::jsonb where table_id = $1 and request_id = $2;", [
-                tableId,
-                requestIdParsed.value,
-                JSON.stringify(resultPayload),
-              ]);
-            }
+            await storePokerRequestResult(tx, {
+              tableId,
+              userId: auth.userId,
+              requestId: requestIdParsed.value,
+              kind: "START_HAND",
+              result: resultPayload,
+            });
             return resultPayload;
           }
           throw makeError(409, "state_invalid");
@@ -538,6 +473,9 @@ export async function handler(event) {
         nextState: updatedState,
       });
       if (!updateResult.ok) {
+        if (updateResult.reason === "not_found") {
+          throw makeError(404, "state_missing");
+        }
         if (updateResult.reason === "conflict") {
           klog("poker_start_hand_conflict", { tableId, userId: auth.userId, expectedVersion });
           throw makeError(409, "state_conflict");
@@ -605,20 +543,17 @@ export async function handler(event) {
         legalActions: legalInfo.actions,
         actionConstraints: buildActionConstraints(legalInfo),
       };
-      if (requestIdParsed.value) {
-        await tx.unsafe("update public.poker_requests set result_json = $3::jsonb where table_id = $1 and request_id = $2;", [
-          tableId,
-          requestIdParsed.value,
-          JSON.stringify(resultPayload),
-        ]);
-      }
+      await storePokerRequestResult(tx, {
+        tableId,
+        userId: auth.userId,
+        requestId: requestIdParsed.value,
+        kind: "START_HAND",
+        result: resultPayload,
+      });
       return resultPayload;
       } catch (error) {
         if (requestIdParsed.value && !mutated) {
-          await tx.unsafe("delete from public.poker_requests where table_id = $1 and request_id = $2;", [
-            tableId,
-            requestIdParsed.value,
-          ]);
+          await deletePokerRequest(tx, { tableId, userId: auth.userId, requestId: requestIdParsed.value, kind: "START_HAND" });
         } else if (requestIdParsed.value && mutated) {
           klog("poker_start_hand_request_retained", { tableId, userId: auth.userId, requestId: requestIdParsed.value });
         }

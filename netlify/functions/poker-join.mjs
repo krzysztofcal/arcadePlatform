@@ -2,6 +2,7 @@ import { baseHeaders, beginSql, corsHeaders, extractBearerToken, klog, verifySup
 import { HEARTBEAT_INTERVAL_SEC, isValidUuid } from "./_shared/poker-utils.mjs";
 import { postTransaction } from "./_shared/chips-ledger.mjs";
 import { normalizeRequestId } from "./_shared/poker-request-id.mjs";
+import { deletePokerRequest, ensurePokerRequest, storePokerRequestResult } from "./_shared/poker-idempotency.mjs";
 import { updatePokerStateOptimistic } from "./_shared/poker-state-write.mjs";
 
 const REQUEST_PENDING_STALE_SEC = 30;
@@ -38,26 +39,6 @@ const parseBuyIn = (value) => {
   if (!Number.isFinite(num) || !Number.isInteger(num) || num <= 0) return null;
   if (Math.abs(num) > Number.MAX_SAFE_INTEGER) return null;
   return num;
-};
-
-const parseResultJson = (value) => {
-  if (!value) return null;
-  if (typeof value === "string") {
-    try {
-      return JSON.parse(value);
-    } catch {
-      return null;
-    }
-  }
-  if (typeof value === "object") return value;
-  return null;
-};
-
-const isRequestPendingStale = (row) => {
-  if (!row?.created_at) return false;
-  const createdAtMs = Date.parse(row.created_at);
-  if (!Number.isFinite(createdAtMs)) return false;
-  return Date.now() - createdAtMs > REQUEST_PENDING_STALE_SEC * 1000;
 };
 
 const normalizeState = (value) => {
@@ -150,58 +131,15 @@ export async function handler(event) {
   try {
     const result = await beginSql(async (tx) => {
       let mutated = false;
-      if (requestId) {
-        const requestRows = await tx.unsafe(
-          "select result_json, created_at from public.poker_requests where table_id = $1 and request_id = $2 limit 1;",
-          [tableId, requestId]
-        );
-        const existingRow = requestRows?.[0];
-        if (existingRow) {
-          const stored = parseResultJson(existingRow.result_json);
-          if (stored) return stored;
-          if (isRequestPendingStale(existingRow)) {
-            await tx.unsafe("delete from public.poker_requests where table_id = $1 and request_id = $2;", [
-              tableId,
-              requestId,
-            ]);
-          } else {
-            return { ok: false, pending: true, requestId };
-          }
-        }
-
-        const insertRequest = () =>
-          tx.unsafe(
-            `insert into public.poker_requests (table_id, user_id, request_id, kind)
-           values ($1, $2, $3, 'JOIN')
-           on conflict (table_id, request_id) do nothing
-           returning request_id;`,
-            [tableId, auth.userId, requestId]
-          );
-        let insertedRows = await insertRequest();
-        let hasRequest = !!insertedRows?.[0]?.request_id;
-        if (!hasRequest) {
-          const existingRows = await tx.unsafe(
-            "select result_json, created_at from public.poker_requests where table_id = $1 and request_id = $2 limit 1;",
-            [tableId, requestId]
-          );
-          const existingConflict = existingRows?.[0];
-          const stored = parseResultJson(existingConflict?.result_json);
-          if (stored) return stored;
-          if (existingConflict && isRequestPendingStale(existingConflict)) {
-            await tx.unsafe("delete from public.poker_requests where table_id = $1 and request_id = $2;", [
-              tableId,
-              requestId,
-            ]);
-            insertedRows = await insertRequest();
-            hasRequest = !!insertedRows?.[0]?.request_id;
-            if (!hasRequest) {
-              return { ok: false, pending: true, requestId };
-            }
-          } else {
-            return { ok: false, pending: true, requestId };
-          }
-        }
-      }
+      const requestInfo = await ensurePokerRequest(tx, {
+        tableId,
+        userId: auth.userId,
+        requestId,
+        kind: "JOIN",
+        pendingStaleSec: REQUEST_PENDING_STALE_SEC,
+      });
+      if (requestInfo.status === "stored") return requestInfo.result;
+      if (requestInfo.status === "pending") return { ok: false, pending: true, requestId };
 
       try {
         const tableRows = await tx.unsafe(
@@ -233,12 +171,13 @@ export async function handler(event) {
           );
 
           const resultPayload = { ok: true, tableId, seatNo: existingSeatNo, userId: auth.userId };
-          if (requestId) {
-            await tx.unsafe(
-              "update public.poker_requests set result_json = $3::jsonb where table_id = $1 and request_id = $2;",
-              [tableId, requestId, JSON.stringify(resultPayload)]
-            );
-          }
+          await storePokerRequestResult(tx, {
+            tableId,
+            userId: auth.userId,
+            requestId,
+            kind: "JOIN",
+            result: resultPayload,
+          });
           klog("poker_join_stack_persisted", {
             tableId,
             userId: auth.userId,
@@ -290,12 +229,13 @@ values ($1, $2, $3, 'ACTIVE', now(), now(), $4);
               );
               mutated = true;
               const resultPayload = { ok: true, tableId, seatNo: fallbackSeatNo, userId: auth.userId };
-              if (requestId) {
-                await tx.unsafe(
-                  "update public.poker_requests set result_json = $3::jsonb where table_id = $1 and request_id = $2;",
-                  [tableId, requestId, JSON.stringify(resultPayload)]
-                );
-              }
+              await storePokerRequestResult(tx, {
+                tableId,
+                userId: auth.userId,
+                requestId,
+                kind: "JOIN",
+                result: resultPayload,
+              });
               klog("poker_join_stack_persisted", {
                 tableId,
                 userId: auth.userId,
@@ -371,6 +311,9 @@ values ($1, $2, $3, 'ACTIVE', now(), now(), $4);
           nextState: updatedState,
         });
         if (!updateResult.ok) {
+          if (updateResult.reason === "not_found") {
+            throw makeError(404, "state_missing");
+          }
           if (updateResult.reason === "conflict") {
             klog("poker_join_conflict", { tableId, userId: auth.userId, expectedVersion });
             throw makeError(409, "state_conflict");
@@ -384,12 +327,13 @@ values ($1, $2, $3, 'ACTIVE', now(), now(), $4);
         );
 
         const resultPayload = { ok: true, tableId, seatNo, userId: auth.userId, heartbeatEverySec: HEARTBEAT_INTERVAL_SEC };
-        if (requestId) {
-          await tx.unsafe(
-            "update public.poker_requests set result_json = $3::jsonb where table_id = $1 and request_id = $2;",
-            [tableId, requestId, JSON.stringify(resultPayload)]
-          );
-        }
+        await storePokerRequestResult(tx, {
+          tableId,
+          userId: auth.userId,
+          requestId,
+          kind: "JOIN",
+          result: resultPayload,
+        });
         klog("poker_join_stack_persisted", {
           tableId,
           userId: auth.userId,
@@ -401,10 +345,7 @@ values ($1, $2, $3, 'ACTIVE', now(), now(), $4);
         return resultPayload;
       } catch (error) {
         if (requestId && !mutated) {
-          await tx.unsafe("delete from public.poker_requests where table_id = $1 and request_id = $2;", [
-            tableId,
-            requestId,
-          ]);
+          await deletePokerRequest(tx, { tableId, userId: auth.userId, requestId, kind: "JOIN" });
         } else if (requestId && mutated) {
           klog("poker_join_request_retained", { tableId, userId: auth.userId, requestId });
         }

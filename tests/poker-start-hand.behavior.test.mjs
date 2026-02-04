@@ -74,26 +74,26 @@ const makeHandler = (queries, storedState) =>
             ];
           }
           if (text.includes("from public.poker_requests")) {
-            const requestKey = `${params?.[0]}|${params?.[1]}`;
+            const requestKey = `${params?.[0]}|${params?.[1]}|${params?.[2]}|${params?.[3]}`;
             const entry = requestStore.get(requestKey);
             if (!entry) return [];
             return [{ result_json: entry.resultJson, created_at: entry.createdAt }];
           }
           if (text.includes("insert into public.poker_requests")) {
-            const requestKey = `${params?.[0]}|${params?.[2]}`;
+            const requestKey = `${params?.[0]}|${params?.[1]}|${params?.[2]}|${params?.[3]}`;
             if (requestStore.has(requestKey)) return [];
             requestStore.set(requestKey, { resultJson: null, createdAt: new Date().toISOString() });
             return [{ request_id: params?.[2] }];
           }
           if (text.includes("update public.poker_requests")) {
-            const requestKey = `${params?.[0]}|${params?.[1]}`;
+            const requestKey = `${params?.[0]}|${params?.[1]}|${params?.[2]}|${params?.[3]}`;
             const entry = requestStore.get(requestKey) || { createdAt: new Date().toISOString() };
-            entry.resultJson = params?.[2] ?? null;
+            entry.resultJson = params?.[4] ?? null;
             requestStore.set(requestKey, entry);
-            return [{ request_id: params?.[1] }];
+            return [{ request_id: params?.[2] }];
           }
           if (text.includes("delete from public.poker_requests")) {
-            const requestKey = `${params?.[0]}|${params?.[1]}`;
+            const requestKey = `${params?.[0]}|${params?.[1]}|${params?.[2]}|${params?.[3]}`;
             requestStore.delete(requestKey);
             return [];
           }
@@ -347,26 +347,26 @@ const runHeadsUpBlinds = async () => {
             ];
           }
           if (text.includes("from public.poker_requests")) {
-            const requestKey = `${params?.[0]}|${params?.[1]}`;
+            const requestKey = `${params?.[0]}|${params?.[1]}|${params?.[2]}|${params?.[3]}`;
             const entry = requestStore.get(requestKey);
             if (!entry) return [];
             return [{ result_json: entry.resultJson, created_at: entry.createdAt }];
           }
           if (text.includes("insert into public.poker_requests")) {
-            const requestKey = `${params?.[0]}|${params?.[2]}`;
+            const requestKey = `${params?.[0]}|${params?.[1]}|${params?.[2]}|${params?.[3]}`;
             if (requestStore.has(requestKey)) return [];
             requestStore.set(requestKey, { resultJson: null, createdAt: new Date().toISOString() });
             return [{ request_id: params?.[2] }];
           }
           if (text.includes("update public.poker_requests")) {
-            const requestKey = `${params?.[0]}|${params?.[1]}`;
+            const requestKey = `${params?.[0]}|${params?.[1]}|${params?.[2]}|${params?.[3]}`;
             const entry = requestStore.get(requestKey) || { createdAt: new Date().toISOString() };
-            entry.resultJson = params?.[2] ?? null;
+            entry.resultJson = params?.[4] ?? null;
             requestStore.set(requestKey, entry);
-            return [{ request_id: params?.[1] }];
+            return [{ request_id: params?.[2] }];
           }
           if (text.includes("delete from public.poker_requests")) {
-            const requestKey = `${params?.[0]}|${params?.[1]}`;
+            const requestKey = `${params?.[0]}|${params?.[1]}|${params?.[2]}|${params?.[3]}`;
             requestStore.delete(requestKey);
             return [];
           }
@@ -541,26 +541,26 @@ const runInvalidDeal = async () => {
             ];
           }
           if (text.includes("from public.poker_requests")) {
-            const requestKey = `${params?.[0]}|${params?.[1]}`;
+            const requestKey = `${params?.[0]}|${params?.[1]}|${params?.[2]}|${params?.[3]}`;
             const entry = requestStore.get(requestKey);
             if (!entry) return [];
             return [{ result_json: entry.resultJson, created_at: entry.createdAt }];
           }
           if (text.includes("insert into public.poker_requests")) {
-            const requestKey = `${params?.[0]}|${params?.[2]}`;
+            const requestKey = `${params?.[0]}|${params?.[1]}|${params?.[2]}|${params?.[3]}`;
             if (requestStore.has(requestKey)) return [];
             requestStore.set(requestKey, { resultJson: null, createdAt: new Date().toISOString() });
             return [{ request_id: params?.[2] }];
           }
           if (text.includes("update public.poker_requests")) {
-            const requestKey = `${params?.[0]}|${params?.[1]}`;
+            const requestKey = `${params?.[0]}|${params?.[1]}|${params?.[2]}|${params?.[3]}`;
             const entry = requestStore.get(requestKey) || { createdAt: new Date().toISOString() };
-            entry.resultJson = params?.[2] ?? null;
+            entry.resultJson = params?.[4] ?? null;
             requestStore.set(requestKey, entry);
-            return [{ request_id: params?.[1] }];
+            return [{ request_id: params?.[2] }];
           }
           if (text.includes("delete from public.poker_requests")) {
-            const requestKey = `${params?.[0]}|${params?.[1]}`;
+            const requestKey = `${params?.[0]}|${params?.[1]}|${params?.[2]}|${params?.[3]}`;
             requestStore.delete(requestKey);
             return [];
           }
@@ -680,26 +680,26 @@ const runMissingStateRow = async () => {
           const text = String(query).toLowerCase();
           queries.push({ query: String(query), params });
           if (text.includes("from public.poker_requests")) {
-            const requestKey = `${params?.[0]}|${params?.[1]}`;
+            const requestKey = `${params?.[0]}|${params?.[1]}|${params?.[2]}|${params?.[3]}`;
             const entry = requestStore.get(requestKey);
             if (!entry) return [];
             return [{ result_json: entry.resultJson, created_at: entry.createdAt }];
           }
           if (text.includes("insert into public.poker_requests")) {
-            const requestKey = `${params?.[0]}|${params?.[2]}`;
+            const requestKey = `${params?.[0]}|${params?.[1]}|${params?.[2]}|${params?.[3]}`;
             if (requestStore.has(requestKey)) return [];
             requestStore.set(requestKey, { resultJson: null, createdAt: new Date().toISOString() });
             return [{ request_id: params?.[2] }];
           }
           if (text.includes("update public.poker_requests")) {
-            const requestKey = `${params?.[0]}|${params?.[1]}`;
+            const requestKey = `${params?.[0]}|${params?.[1]}|${params?.[2]}|${params?.[3]}`;
             const entry = requestStore.get(requestKey) || { createdAt: new Date().toISOString() };
-            entry.resultJson = params?.[2] ?? null;
+            entry.resultJson = params?.[4] ?? null;
             requestStore.set(requestKey, entry);
-            return [{ request_id: params?.[1] }];
+            return [{ request_id: params?.[2] }];
           }
           if (text.includes("delete from public.poker_requests")) {
-            const requestKey = `${params?.[0]}|${params?.[1]}`;
+            const requestKey = `${params?.[0]}|${params?.[1]}|${params?.[2]}|${params?.[3]}`;
             requestStore.delete(requestKey);
             return [];
           }
@@ -737,7 +737,7 @@ const runRequestPending = async () => {
   const storedState = {
     value: JSON.stringify({ phase: "INIT", stacks: initialStacks }),
     holeCardsStore: new Map(),
-    requests: new Map([[`${tableId}|req-pending`, { resultJson: null, createdAt: new Date().toISOString() }]]),
+    requests: new Map([[`${tableId}|${userId}|req-pending|START_HAND`, { resultJson: null, createdAt: new Date().toISOString() }]]),
   };
   const handler = makeHandler(queries, storedState);
   const response = await handler({
@@ -785,26 +785,26 @@ const runInvalidStakes = async () => {
           const text = String(query).toLowerCase();
           queries.push({ query: String(query), params });
           if (text.includes("from public.poker_requests")) {
-            const requestKey = `${params?.[0]}|${params?.[1]}`;
+            const requestKey = `${params?.[0]}|${params?.[1]}|${params?.[2]}|${params?.[3]}`;
             const entry = requestStore.get(requestKey);
             if (!entry) return [];
             return [{ result_json: entry.resultJson, created_at: entry.createdAt }];
           }
           if (text.includes("insert into public.poker_requests")) {
-            const requestKey = `${params?.[0]}|${params?.[2]}`;
+            const requestKey = `${params?.[0]}|${params?.[1]}|${params?.[2]}|${params?.[3]}`;
             if (requestStore.has(requestKey)) return [];
             requestStore.set(requestKey, { resultJson: null, createdAt: new Date().toISOString() });
             return [{ request_id: params?.[2] }];
           }
           if (text.includes("update public.poker_requests")) {
-            const requestKey = `${params?.[0]}|${params?.[1]}`;
+            const requestKey = `${params?.[0]}|${params?.[1]}|${params?.[2]}|${params?.[3]}`;
             const entry = requestStore.get(requestKey) || { createdAt: new Date().toISOString() };
-            entry.resultJson = params?.[2] ?? null;
+            entry.resultJson = params?.[4] ?? null;
             requestStore.set(requestKey, entry);
-            return [{ request_id: params?.[1] }];
+            return [{ request_id: params?.[2] }];
           }
           if (text.includes("delete from public.poker_requests")) {
-            const requestKey = `${params?.[0]}|${params?.[1]}`;
+            const requestKey = `${params?.[0]}|${params?.[1]}|${params?.[2]}|${params?.[3]}`;
             requestStore.delete(requestKey);
             return [];
           }

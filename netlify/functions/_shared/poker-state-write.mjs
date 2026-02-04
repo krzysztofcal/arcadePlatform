@@ -1,3 +1,16 @@
+import { normalizeJsonState } from "./poker-state-utils.mjs";
+
+const stableStringify = (value) =>
+  JSON.stringify(value, (_key, val) => {
+    if (!val || typeof val !== "object" || Array.isArray(val)) return val;
+    return Object.keys(val)
+      .sort()
+      .reduce((acc, key) => {
+        acc[key] = val[key];
+        return acc;
+      }, {});
+  });
+
 export const updatePokerStateOptimistic = async (tx, { tableId, expectedVersion, nextState }) => {
   if (!tableId || !Number.isFinite(expectedVersion) || !Number.isInteger(expectedVersion) || expectedVersion < 0) {
     return { ok: false, reason: "invalid" };
@@ -17,6 +30,22 @@ export const updatePokerStateOptimistic = async (tx, { tableId, expectedVersion,
   );
   const newVersion = Number(rows?.[0]?.version);
   if (!Number.isFinite(newVersion)) {
+    const stateRows = await tx.unsafe("select version, state from public.poker_state where table_id = $1 limit 1;", [
+      tableId,
+    ]);
+    const currentRow = stateRows?.[0];
+    const currentVersion = Number(currentRow?.version);
+    if (!currentRow) return { ok: false, reason: "not_found" };
+    let currentState = normalizeJsonState(currentRow?.state);
+    let matches = false;
+    try {
+      matches = stableStringify(currentState) === stableStringify(nextState);
+    } catch {
+      matches = false;
+    }
+    if (matches) {
+      return { ok: true, newVersion: Number.isFinite(currentVersion) ? currentVersion : expectedVersion, alreadyApplied: true };
+    }
     return { ok: false, reason: "conflict" };
   }
   return { ok: true, newVersion };
