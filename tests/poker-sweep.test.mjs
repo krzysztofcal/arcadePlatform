@@ -40,6 +40,10 @@ assert.ok(
 );
 assert.ok(sweepSrc.includes("poker_sweep_timeout_summary"), "sweep should log timeout summary");
 assert.ok(
+  sweepSrc.includes("delete from public.poker_hole_cards"),
+  "sweep should delete hole cards for closed tables"
+);
+assert.ok(
   sweepSrc.includes("poker:close_cashout:${tableId}:${userId}:${seatNo}:v1"),
   "sweep should use close cashout idempotency key"
 );

@@ -9,73 +9,63 @@ const seatNo = 3;
 let lockIdx = -1;
 let updIdx = -1;
 
-const makeHandler = (postCalls, queries, options = {}) => {
-  const { deleteHoleCardsError } = options;
-  let beginCall = 0;
+const makeHandler = (postCalls, queries, klogEvents, options = {}) => {
+  const {
+    deleteHoleCardsError,
+    expiredSeats = [{ table_id: tableId, user_id: userId, seat_no: seatNo, stack: 100, last_seen_at: new Date(0) }],
+    closeCashoutTables = [],
+    closeCashoutSeats = [],
+    closedTables = [tableId],
+  } = options;
   const handler = loadPokerHandler("netlify/functions/poker-sweep.mjs", {
     baseHeaders: () => ({}),
     beginSql: async (fn) => {
-      beginCall += 1;
-      if (beginCall === 1) {
-        return fn({
-          unsafe: async (query) => {
-            const text = String(query).toLowerCase();
-            if (text.includes("from public.poker_requests") && text.includes("result_json is null")) return [];
-            if (text.includes("from public.poker_seats") && text.includes("last_seen_at < now()")) {
-              return [{ table_id: tableId, user_id: userId, seat_no: seatNo, stack: 100, last_seen_at: new Date(0) }];
-            }
-            if (text.includes("delete from public.poker_requests")) return [];
-            return [];
-          },
-        });
-      }
-      if (beginCall === 2) {
-        return fn({
-          unsafe: async (query, params) => {
-            queries.push({ query: String(query), params });
-            const text = String(query).toLowerCase();
-            if (text.includes("select seat_no, status, stack, last_seen_at")) {
-              lockIdx = queries.length - 1;
-              return [
-                {
-                  seat_no: seatNo,
-                  status: "ACTIVE",
-                  stack: 100,
-                  last_seen_at: new Date(Date.now() - 60 * 60 * 1000),
-                },
-              ];
-            }
-            if (text.includes("update public.poker_seats set status = 'inactive', stack = 0")) {
-              updIdx = queries.length - 1;
-            }
-            return [];
-          },
-        });
-      }
-      if (beginCall === 3) {
-        return fn({
-          unsafe: async (query, params) => {
-            queries.push({ query: String(query), params });
-            const text = String(query).toLowerCase();
-            if (text.includes("update public.poker_tables t")) {
-              return [{ id: tableId }];
-            }
-            if (text.includes("delete from public.poker_hole_cards")) {
-              if (deleteHoleCardsError) throw deleteHoleCardsError;
-            }
-            return [];
-          },
-        });
-      }
       return fn({
-        unsafe: async () => [],
+        unsafe: async (query, params) => {
+          queries.push({ query: String(query), params });
+          const text = String(query).toLowerCase();
+          if (text.includes("from public.poker_requests") && text.includes("result_json is null")) return [];
+          if (text.includes("from public.poker_seats") && text.includes("last_seen_at < now()")) {
+            return expiredSeats;
+          }
+          if (text.includes("delete from public.poker_requests")) return [];
+          if (text.includes("select seat_no, status, stack, last_seen_at")) {
+            lockIdx = queries.length - 1;
+            return [
+              {
+                seat_no: seatNo,
+                status: "ACTIVE",
+                stack: 100,
+                last_seen_at: new Date(Date.now() - 60 * 60 * 1000),
+              },
+            ];
+          }
+          if (text.includes("select t.id") && text.includes("stack > 0")) {
+            return closeCashoutTables.map((id) => ({ id }));
+          }
+          if (text.includes("select seat_no, status, stack, user_id")) {
+            return closeCashoutSeats;
+          }
+          if (text.includes("update public.poker_seats set status = 'inactive', stack = 0")) {
+            updIdx = queries.length - 1;
+          }
+          if (text.includes("update public.poker_tables t")) {
+            return closedTables.map((id) => ({ id }));
+          }
+          if (text.includes("delete from public.poker_hole_cards")) {
+            if (deleteHoleCardsError) throw deleteHoleCardsError;
+          }
+          return [];
+        },
       });
     },
     postTransaction: async (payload) => {
       postCalls.push(payload);
       return { transaction: { id: "tx-sweep" } };
     },
-    klog: () => {},
+    klog: (event, payload) => {
+      klogEvents.push({ event, payload });
+    },
     PRESENCE_TTL_SEC: 10,
     TABLE_EMPTY_CLOSE_SEC: 10,
     isHoleCardsTableMissing,
@@ -89,7 +79,8 @@ const run = async () => {
   process.env.POKER_SWEEP_SECRET = "secret";
   const postCalls = [];
   const queries = [];
-  const handler = makeHandler(postCalls, queries);
+  const klogEvents = [];
+  const handler = makeHandler(postCalls, queries, klogEvents);
   const response = await handler({ httpMethod: "POST", headers: { "x-sweep-secret": "secret" } });
   assert.equal(response.statusCode, 200);
   assert.equal(postCalls.length, 1);
@@ -129,14 +120,68 @@ const runMissingHoleCardsTable = async () => {
   const queries = [];
   const missingError = new Error("relation \"public.poker_hole_cards\" does not exist");
   missingError.code = "42P01";
-  const handler = makeHandler(postCalls, queries, { deleteHoleCardsError: missingError });
+  const klogEvents = [];
+  const handler = makeHandler(postCalls, queries, klogEvents, { deleteHoleCardsError: missingError });
   const response = await handler({ httpMethod: "POST", headers: { "x-sweep-secret": "secret" } });
   assert.equal(response.statusCode, 200);
+};
+
+const runCloseCashoutInvalidStack = async () => {
+  process.env.POKER_SWEEP_SECRET = "secret";
+  const postCalls = [];
+  const queries = [];
+  const klogEvents = [];
+  const handler = makeHandler(postCalls, queries, klogEvents, {
+    expiredSeats: [],
+    closeCashoutTables: [tableId],
+    closeCashoutSeats: [{ seat_no: seatNo, status: "INACTIVE", stack: "nope", user_id: userId }],
+    closedTables: [],
+  });
+  const response = await handler({ httpMethod: "POST", headers: { "x-sweep-secret": "secret" } });
+  assert.equal(response.statusCode, 200);
+  assert.equal(postCalls.length, 0);
+  assert.ok(
+    !queries.some((q) => q.query.toLowerCase().includes("update public.poker_seats set status = 'inactive', stack = 0")),
+    "sweep should not clear stacks when stack is invalid"
+  );
+  assert.ok(
+    klogEvents.some((entry) => entry.event === "poker_close_cashout_stack_invalid"),
+    "sweep should log invalid close cashout stacks"
+  );
+};
+
+const runCloseCashoutUsesSeatNo = async () => {
+  process.env.POKER_SWEEP_SECRET = "secret";
+  const postCalls = [];
+  const queries = [];
+  const klogEvents = [];
+  const handler = makeHandler(postCalls, queries, klogEvents, {
+    expiredSeats: [],
+    closeCashoutTables: [tableId],
+    closeCashoutSeats: [{ seat_no: seatNo, status: "INACTIVE", stack: 55, user_id: userId }],
+    closedTables: [],
+  });
+  const response = await handler({ httpMethod: "POST", headers: { "x-sweep-secret": "secret" } });
+  assert.equal(response.statusCode, 200);
+  assert.equal(postCalls.length, 1);
+  assert.equal(postCalls[0].idempotencyKey, `poker:close_cashout:${tableId}:${userId}:${seatNo}:v1`);
+  assert.ok(
+    queries.some(
+      (q) =>
+        q.query.toLowerCase().includes("update public.poker_seats set status = 'inactive', stack = 0") &&
+        q.query.toLowerCase().includes("seat_no") &&
+        q.params?.[0] === tableId &&
+        q.params?.[1] === seatNo
+    ),
+    "sweep should update close cashout seats by table_id + seat_no"
+  );
 };
 
 Promise.resolve()
   .then(run)
   .then(runMissingHoleCardsTable)
+  .then(runCloseCashoutInvalidStack)
+  .then(runCloseCashoutUsesSeatNo)
   .catch((error) => {
     console.error(error);
     process.exit(1);
