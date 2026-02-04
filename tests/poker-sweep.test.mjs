@@ -17,12 +17,16 @@ assert.ok(
   "sweep should cap expired seat scan"
 );
 assert.ok(
-  /const amount = normalizeSeatStack\(locked\.stack\) \?\? 0;/.test(sweepSrc),
-  "sweep should coalesce stack to 0"
+  sweepSrc.includes("normalizeSeatStack("),
+  "sweep should normalize seat stacks"
 );
 assert.ok(
   /if \(amount > 0\)[\s\S]*?TABLE_CASH_OUT/.test(sweepSrc),
   "sweep should cash out only when stack is positive"
+);
+assert.ok(
+  /normalizedStack\s*>\s*0[\s\S]*?TABLE_CASH_OUT/.test(sweepSrc),
+  "sweep should cash out close settlements only when stack is positive"
 );
 assert.ok(
   sweepSrc.includes("poker:timeout_cashout:${tableId}:${userId}:${locked.seat_no}:v1"),

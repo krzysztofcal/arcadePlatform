@@ -176,12 +176,9 @@ export async function handler(event) {
         `
 select t.id
 from public.poker_tables t
-where (
-    t.status = 'CLOSED'
-    or not exists (
-      select 1 from public.poker_seats s
-      where s.table_id = t.id and s.status = 'ACTIVE'
-    )
+where not exists (
+    select 1 from public.poker_seats s
+    where s.table_id = t.id and s.status = 'ACTIVE'
   )
   and exists (
     select 1 from public.poker_seats s
@@ -213,6 +210,10 @@ limit $1;`,
                 userId: userId ?? null,
                 seatNo,
               });
+              continue;
+            }
+            if (locked?.status === "ACTIVE") {
+              klog("poker_close_cashout_skip_active_seat", { tableId, userId, seatNo });
               continue;
             }
             const normalizedStack = normalizeSeatStack(locked.stack);

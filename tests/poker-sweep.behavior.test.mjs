@@ -29,7 +29,7 @@ const makeHandler = (postCalls, queries, klogEvents, options = {}) => {
             return expiredSeats;
           }
           if (text.includes("delete from public.poker_requests")) return [];
-          if (text.includes("select seat_no, status, stack, last_seen_at")) {
+          if (text.includes("from public.poker_seats") && text.includes("for update") && text.includes("last_seen_at")) {
             lockIdx = queries.length - 1;
             return [
               {
@@ -150,6 +150,30 @@ const runCloseCashoutInvalidStack = async () => {
   );
 };
 
+const runCloseCashoutSkipsActiveSeat = async () => {
+  process.env.POKER_SWEEP_SECRET = "secret";
+  const postCalls = [];
+  const queries = [];
+  const klogEvents = [];
+  const handler = makeHandler(postCalls, queries, klogEvents, {
+    expiredSeats: [],
+    closeCashoutTables: [tableId],
+    closeCashoutSeats: [{ seat_no: seatNo, status: "ACTIVE", stack: 55, user_id: userId }],
+    closedTables: [],
+  });
+  const response = await handler({ httpMethod: "POST", headers: { "x-sweep-secret": "secret" } });
+  assert.equal(response.statusCode, 200);
+  assert.equal(postCalls.length, 0);
+  assert.ok(
+    !queries.some((q) => q.query.toLowerCase().includes("update public.poker_seats set status = 'inactive', stack = 0")),
+    "sweep should not clear stacks for active close-cashout seats"
+  );
+  assert.ok(
+    klogEvents.some((entry) => entry.event === "poker_close_cashout_skip_active_seat"),
+    "sweep should log active seat skips"
+  );
+};
+
 const runCloseCashoutUsesSeatNo = async () => {
   process.env.POKER_SWEEP_SECRET = "secret";
   const postCalls = [];
@@ -181,6 +205,7 @@ Promise.resolve()
   .then(run)
   .then(runMissingHoleCardsTable)
   .then(runCloseCashoutInvalidStack)
+  .then(runCloseCashoutSkipsActiveSeat)
   .then(runCloseCashoutUsesSeatNo)
   .catch((error) => {
     console.error(error);
