@@ -367,6 +367,7 @@ export async function handler(event) {
           handId,
           expectedSeatCount,
           insertedCount,
+          missingUserIds,
           userIds: activeUserIdList,
         });
         throw makeError(500, "hole_cards_write_failed");
