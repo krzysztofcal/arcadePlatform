@@ -17,6 +17,22 @@ const normalizeSeatStack = (value) => {
   return num;
 };
 
+const normalizeNonNegativeInt = (n) =>
+  Number.isInteger(n) && n >= 0 && Math.abs(n) <= Number.MAX_SAFE_INTEGER ? n : null;
+
+const normalizeState = (value) => {
+  if (!value) return {};
+  if (typeof value === "string") {
+    try {
+      return JSON.parse(value);
+    } catch {
+      return {};
+    }
+  }
+  if (typeof value === "object") return value;
+  return {};
+};
+
 const isExpiredSeat = (value) => {
   const lastSeenMs =
     typeof value === "string" ? Date.parse(value) : value instanceof Date ? value.getTime() : Date.parse(String(value));
@@ -115,12 +131,30 @@ export async function handler(event) {
             return { skipped: true, seatNo: locked.seat_no };
           }
 
-          const amount = normalizeSeatStack(locked.stack) ?? 0;
+          const stateRows = await tx.unsafe("select state from public.poker_state where table_id = $1 for update;", [tableId]);
+          const stateRow = stateRows?.[0] || null;
+          const currentState = normalizeState(stateRow?.state);
+          const stateStack = normalizeNonNegativeInt(Number(currentState?.stacks?.[userId]));
+          const seatStack = normalizeNonNegativeInt(Number(locked.stack));
+          const amount = stateStack ?? seatStack ?? 0;
+          const stackSource = stateStack != null ? "state" : seatStack != null ? "seat" : "none";
+
+          if (stateRow && currentState?.stacks && typeof currentState.stacks === "object") {
+            const nextStacks = { ...currentState.stacks };
+            if (Object.prototype.hasOwnProperty.call(nextStacks, userId)) {
+              delete nextStacks[userId];
+              const nextState = { ...currentState, stacks: nextStacks };
+              await tx.unsafe("update public.poker_state set state = $2 where table_id = $1;", [tableId, nextState]);
+            }
+          }
+
           if (amount > 0) {
             await postTransaction({
               userId,
               txType: "TABLE_CASH_OUT",
               idempotencyKey: `poker:timeout_cashout:${tableId}:${userId}:${locked.seat_no}:v1`,
+              reference: `table:${tableId}`,
+              metadata: { tableId, seatNo: locked.seat_no, reason: "timeout_inactive", stackSource },
               entries: [
                 { accountType: "ESCROW", systemKey: `POKER_TABLE:${tableId}`, amount: -amount },
                 { accountType: "USER", amount },
@@ -134,7 +168,7 @@ export async function handler(event) {
             "update public.poker_seats set status = 'INACTIVE', stack = 0 where table_id = $1 and user_id = $2;",
             [tableId, userId]
           );
-          return { seatNo: locked.seat_no, amount };
+          return { seatNo: locked.seat_no, amount, stackSource };
         });
 
         if (processed?.skipped) {
@@ -147,6 +181,7 @@ export async function handler(event) {
             userId,
             seatNo: processed.seatNo ?? null,
             amount: processed.amount,
+            stackSource: processed.stackSource ?? "none",
           });
         } else {
           klog("poker_timeout_cashout_skip", {
@@ -154,6 +189,7 @@ export async function handler(event) {
             userId,
             seatNo: processed?.seatNo ?? null,
             amount: processed?.amount ?? 0,
+            stackSource: processed?.stackSource ?? "none",
           });
         }
       } catch (error) {
@@ -201,6 +237,15 @@ limit $1;`,
             "select seat_no, status, stack, user_id from public.poker_seats where table_id = $1 for update;",
             [tableId]
           );
+          const stateRows = await tx.unsafe("select state from public.poker_state where table_id = $1 for update;", [tableId]);
+          const stateRow = stateRows?.[0] || null;
+          const currentState = normalizeState(stateRow?.state);
+          const currentStacks =
+            currentState?.stacks && typeof currentState.stacks === "object" && !Array.isArray(currentState.stacks)
+              ? currentState.stacks
+              : {};
+          let stateChanged = false;
+          const nextStacks = { ...currentStacks };
           for (const locked of lockedRows || []) {
             const userId = locked?.user_id;
             const seatNo = locked?.seat_no ?? null;
@@ -216,25 +261,10 @@ limit $1;`,
               klog("poker_close_cashout_skip_active_seat", { tableId, userId, seatNo });
               continue;
             }
-            const normalizedStack = normalizeSeatStack(locked.stack);
-            if (normalizedStack == null) {
-              klog("poker_close_cashout_stack_invalid", {
-                tableId,
-                userId,
-                seatNo,
-                stack: locked?.stack ?? null,
-              });
-              continue;
-            }
-            if (normalizedStack < 0) {
-              klog("poker_close_cashout_stack_negative", {
-                tableId,
-                userId,
-                seatNo,
-                stack: normalizedStack,
-              });
-              continue;
-            }
+            const stateStack = normalizeNonNegativeInt(Number(currentStacks?.[userId]));
+            const seatStack = normalizeNonNegativeInt(Number(locked.stack));
+            const normalizedStack = stateStack ?? seatStack ?? 0;
+            const stackSource = stateStack != null ? "state" : seatStack != null ? "seat" : "none";
             if (normalizedStack > 0) {
               try {
                 await postTransaction({
@@ -242,7 +272,7 @@ limit $1;`,
                   txType: "TABLE_CASH_OUT",
                   idempotencyKey: `poker:close_cashout:${tableId}:${userId}:${seatNo}:v1`,
                   reference: `table:${tableId}`,
-                  metadata: { tableId, seatNo, reason: "table_close" },
+                  metadata: { tableId, seatNo, reason: "table_close", stackSource },
                   entries: [
                     { accountType: "ESCROW", systemKey: `POKER_TABLE:${tableId}`, amount: -normalizedStack },
                     { accountType: "USER", amount: normalizedStack },
@@ -262,16 +292,24 @@ limit $1;`,
                 }
                 throw error;
               }
-              klog("poker_close_cashout_ok", { tableId, userId, seatNo, amount: normalizedStack });
+              klog("poker_close_cashout_ok", { tableId, userId, seatNo, amount: normalizedStack, stackSource });
               closeCashoutProcessed += 1;
             } else {
-              klog("poker_close_cashout_skip", { tableId, userId, seatNo, amount: normalizedStack });
+              klog("poker_close_cashout_skip", { tableId, userId, seatNo, amount: normalizedStack, stackSource });
               closeCashoutSkipped += 1;
+            }
+            if (Object.prototype.hasOwnProperty.call(nextStacks, userId)) {
+              delete nextStacks[userId];
+              stateChanged = true;
             }
             await tx.unsafe(
               "update public.poker_seats set status = 'INACTIVE', stack = 0 where table_id = $1 and seat_no = $2;",
               [tableId, seatNo]
             );
+          }
+          if (stateRow && stateChanged) {
+            const nextState = { ...currentState, stacks: nextStacks };
+            await tx.unsafe("update public.poker_state set state = $2 where table_id = $1;", [tableId, nextState]);
           }
           return { seatCount: lockedRows?.length ?? 0 };
         });
