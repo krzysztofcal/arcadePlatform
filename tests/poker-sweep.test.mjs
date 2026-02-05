@@ -17,8 +17,36 @@ assert.ok(
   "sweep should cap expired seat scan"
 );
 assert.ok(
-  sweepSrc.includes("normalizeSeatStack("),
-  "sweep should normalize seat stacks"
+  sweepSrc.includes("const normalizeNonNegativeInt ="),
+  "sweep should define non-negative integer normalization helper"
+);
+assert.ok(
+  /select state from public\.poker_state where table_id = \$1 for update;/.test(sweepSrc),
+  "sweep should lock poker_state during auto-cashout"
+);
+assert.ok(
+  /const currentState = normalizeState\(stateRow\?\.state\);/.test(sweepSrc),
+  "sweep should normalize poker_state payload"
+);
+assert.ok(
+  /const stateStack = normalizeNonNegativeInt\(Number\(currentState\?\.stacks\?\.\[userId\]\)\);/.test(sweepSrc),
+  "sweep should prefer authoritative state stack"
+);
+assert.ok(
+  /const seatStack = normalizeNonNegativeInt\(Number\(locked\.stack\)\);/.test(sweepSrc),
+  "sweep should normalize seat fallback stack"
+);
+assert.ok(
+  /const amount = stateStack \?\? seatStack \?\? 0;/.test(sweepSrc),
+  "sweep should choose state stack first, then seat stack, then zero"
+);
+assert.ok(
+  /delete nextStacks\[userId\]/.test(sweepSrc),
+  "sweep should clear authoritative stack entry for removed users"
+);
+assert.ok(
+  /JSON\.stringify\(nextState\)/.test(sweepSrc),
+  "sweep should serialize poker_state updates as JSON"
 );
 assert.ok(
   /if \(amount > 0\)[\s\S]*?TABLE_CASH_OUT/.test(sweepSrc),

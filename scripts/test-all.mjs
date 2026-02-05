@@ -52,6 +52,7 @@ run("node", ["tests/poker-start-hand.legacy-init-upgrade.test.mjs"], "poker-star
 run("node", ["tests/poker-act.behavior.test.mjs"], "poker-act-behavior");
 run("node", ["tests/poker-act.init-phase.test.mjs"], "poker-act-init-phase");
 run("node", ["tests/poker-sweep.behavior.test.mjs"], "poker-sweep-behavior");
+run("node", ["tests/poker-sweep.cashout-authoritative.behavior.test.mjs"], "poker-sweep-cashout-authoritative");
 run("node", ["tests/poker-get-table.behavior.test.mjs"], "poker-get-table-behavior");
 
 try { run("npm", ["run", "-s", "lint:games"], "unit"); } catch { /* optional */ }

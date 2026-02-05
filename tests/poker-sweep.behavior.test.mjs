@@ -141,12 +141,12 @@ const runCloseCashoutInvalidStack = async () => {
   assert.equal(response.statusCode, 200);
   assert.equal(postCalls.length, 0);
   assert.ok(
-    !queries.some((q) => q.query.toLowerCase().includes("update public.poker_seats set status = 'inactive', stack = 0")),
-    "sweep should not clear stacks when stack is invalid"
+    queries.some((q) => q.query.toLowerCase().includes("update public.poker_seats set status = 'inactive', stack = 0")),
+    "sweep should still clear seats when stack is missing/invalid"
   );
   assert.ok(
-    klogEvents.some((entry) => entry.event === "poker_close_cashout_stack_invalid"),
-    "sweep should log invalid close cashout stacks"
+    klogEvents.some((entry) => entry.event === "poker_close_cashout_skip" && entry.payload?.stackSource === "none"),
+    "sweep should log skipped close cashout with stack source"
   );
 };
 
