@@ -120,6 +120,7 @@ const holeCardsByUserId = {
         state,
         seatUserIdsInOrder,
         holeCardsByUserId,
+        computeShowdown: () => ({ winners: ["u2"] }),
         awardPotsAtShowdown: () => ({
           nextState: {
             ...state,
@@ -288,5 +289,34 @@ const holeCardsByUserId = {
         awardPotsAtShowdown,
       }),
     /showdown_invalid_settlement_total/
+  );
+}
+
+
+{
+  const missingCompute = {
+    tableId,
+    handId: "h-missing-compute",
+    phase: "RIVER",
+    seats: [
+      { userId: "u1", seatNo: 1 },
+      { userId: "u2", seatNo: 2 },
+    ],
+    stacks: { u1: 80, u2: 70 },
+    pot: 20,
+    foldedByUserId: { u1: false, u2: false },
+    community: deriveCommunityCards({ handSeed, seatUserIdsInOrder, communityDealt: 5 }),
+    communityDealt: 5,
+  };
+  assert.throws(
+    () =>
+      materializeShowdownAndPayout({
+        state: missingCompute,
+        seatUserIdsInOrder,
+        holeCardsByUserId,
+        computeShowdown: undefined,
+        awardPotsAtShowdown,
+      }),
+    /showdown_invalid_compute/
   );
 }

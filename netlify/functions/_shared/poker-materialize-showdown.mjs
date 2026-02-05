@@ -248,6 +248,7 @@ const materializeShowdownAndPayout = ({
   }
 
   if (typeof awardPotsAtShowdown !== "function") throw new Error("showdown_invalid_compute");
+  if (typeof computeShowdown !== "function") throw new Error("showdown_invalid_compute");
 
   const community = ensureCommunityComplete(state);
   const prevStacks = copyStacks(state.stacks);
