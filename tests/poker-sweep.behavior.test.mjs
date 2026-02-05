@@ -338,6 +338,69 @@ const runInvalidSettlementFallsBackLegacyCashout = async () => {
   assert.equal(postCalls[0].metadata?.stackSource, "state");
 };
 
+const runSettlementPostFailureDoesNotWedge = async () => {
+  process.env.POKER_SWEEP_SECRET = "secret";
+  const postCalls = [];
+  const queries = [];
+  const klogEvents = [];
+  const handler = loadPokerHandler("netlify/functions/poker-sweep.mjs", {
+    baseHeaders: () => ({}),
+    beginSql: async (fn) =>
+      fn({
+        unsafe: async (query, params) => {
+          queries.push({ query: String(query), params });
+          const text = String(query).toLowerCase();
+          if (text.includes("from public.poker_requests") && text.includes("result_json is null")) return [];
+          if (text.includes("delete from public.poker_requests")) return [];
+          if (text.includes("from public.poker_seats") && text.includes("last_seen_at < now()") && !text.includes("for update")) {
+            return [{ table_id: tableId, user_id: userId, seat_no: seatNo, stack: 100, last_seen_at: new Date(0) }];
+          }
+          if (text.includes("from public.poker_seats") && text.includes("for update") && text.includes("last_seen_at")) {
+            return [{ seat_no: seatNo, status: "ACTIVE", stack: 100, last_seen_at: new Date(0) }];
+          }
+          if (text.includes("select state from public.poker_state where table_id") && text.includes("for update")) {
+            return [{ state: JSON.stringify({ handSettlement: { handId: "h-boom", payouts: { [userId]: 50 } }, stacks: { [userId]: 100 } }) }];
+          }
+          if (text.includes("update public.poker_seats set status = 'inactive', stack = 0")) return [];
+          if (text.includes("select t.id") && text.includes("stack > 0")) return [];
+          if (text.includes("update public.poker_tables t")) return [];
+          if (text.includes("delete from public.poker_hole_cards")) return [];
+          return [];
+        },
+      }),
+    postTransaction: async (payload) => {
+      postCalls.push(payload);
+      return { transaction: { id: "tx-no-legacy" } };
+    },
+    postHandSettlementToLedger: async () => {
+      throw new Error("boom");
+    },
+    klog: (event, payload) => {
+      klogEvents.push({ event, payload });
+    },
+    PRESENCE_TTL_SEC: 10,
+    TABLE_EMPTY_CLOSE_SEC: 10,
+    isHoleCardsTableMissing,
+  });
+
+  const response = await handler({ httpMethod: "POST", headers: { "x-sweep-secret": "secret" } });
+  assert.equal(response.statusCode, 200);
+  assert.ok(
+    queries.some((q) => q.query.toLowerCase().includes("update public.poker_seats set status = 'inactive', stack = 0")),
+    "sweep should still inactivate seat when settlement post fails"
+  );
+  assert.equal(
+    postCalls.filter((c) => c.txType === "TABLE_CASH_OUT").length,
+    0,
+    "sweep should still skip legacy cashout when usable settlement exists"
+  );
+  assert.ok(
+    klogEvents.some((entry) => entry.event === "poker_settlement_ledger_post_failed" && entry.payload?.handId === "h-boom"),
+    "sweep should log settlement posting failure"
+  );
+};
+
+
 Promise.resolve()
   .then(run)
   .then(runMissingHoleCardsTable)
@@ -346,6 +409,7 @@ Promise.resolve()
   .then(runCloseCashoutUsesSeatNo)
   .then(runSettlementSkipsLegacyCashout)
   .then(runInvalidSettlementFallsBackLegacyCashout)
+  .then(runSettlementPostFailureDoesNotWedge)
   .catch((error) => {
     console.error(error);
     process.exit(1);

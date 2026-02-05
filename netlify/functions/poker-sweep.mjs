@@ -156,7 +156,16 @@ export async function handler(event) {
                 : "none";
 
           if (usableSettlement) {
-            await postHandSettlementToLedger({ tableId, handSettlement, postTransaction, klog, tx });
+            try {
+              await postHandSettlementToLedger({ tableId, handSettlement, postTransaction, klog, tx });
+            } catch (error) {
+              klog("poker_settlement_ledger_post_failed", {
+                tableId,
+                handId: handSettlement?.handId || null,
+                error: error?.message || "unknown_error",
+                source: "timeout_cashout",
+              });
+            }
           } else if (amount > 0) {
             await postTransaction({
               userId,
@@ -273,7 +282,16 @@ limit $1;`,
             typeof handSettlement.payouts === "object" &&
             !Array.isArray(handSettlement.payouts);
           if (usableSettlement) {
-            await postHandSettlementToLedger({ tableId, handSettlement, postTransaction, klog, tx });
+            try {
+              await postHandSettlementToLedger({ tableId, handSettlement, postTransaction, klog, tx });
+            } catch (error) {
+              klog("poker_settlement_ledger_post_failed", {
+                tableId,
+                handId: handSettlement?.handId || null,
+                error: error?.message || "unknown_error",
+                source: "close_cashout",
+              });
+            }
           }
           let stateChanged = false;
           const nextStacks = { ...currentStacks };

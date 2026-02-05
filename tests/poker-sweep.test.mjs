@@ -37,7 +37,11 @@ assert.ok(
   "sweep should normalize seat fallback stack"
 );
 assert.ok(
-  /const amount = stateStack \?\? seatStack \?\? 0;/.test(sweepSrc),
+  /const usableSettlement =[\s\S]*handSettlement\?\.payouts[\s\S]*!Array\.isArray\(handSettlement\.payouts\);/.test(sweepSrc),
+  "sweep should require payouts object for usable settlement"
+);
+assert.ok(
+  /const amount = usableSettlement \? 0 : stateStack \?\? seatStack \?\? 0;/.test(sweepSrc),
   "sweep should choose state stack first, then seat stack, then zero"
 );
 assert.ok(
@@ -47,6 +51,10 @@ assert.ok(
 assert.ok(
   /JSON\.stringify\(nextState\)/.test(sweepSrc),
   "sweep should serialize poker_state updates as JSON"
+);
+assert.ok(
+  /if \(usableSettlement\) \{[\s\S]*try \{[\s\S]*postHandSettlementToLedger[\s\S]*\} catch \(error\) \{[\s\S]*poker_settlement_ledger_post_failed/.test(sweepSrc),
+  "sweep should catch settlement post failures and log them"
 );
 assert.ok(
   /if \(amount > 0\)[\s\S]*?TABLE_CASH_OUT/.test(sweepSrc),
