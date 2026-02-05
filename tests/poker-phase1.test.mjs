@@ -11,6 +11,7 @@ const joinSrc = read("netlify/functions/poker-join.mjs");
 const leaveSrc = read("netlify/functions/poker-leave.mjs");
 const heartbeatSrc = read("netlify/functions/poker-heartbeat.mjs");
 const requestIdHelperSrc = read("netlify/functions/_shared/poker-request-id.mjs");
+const idempotencyHelperSrc = read("netlify/functions/_shared/poker-idempotency.mjs");
 const startHandSrc = read("netlify/functions/poker-start-hand.mjs");
 const pokerUiSrc = read("poker/poker.js");
 const phase1MigrationSrc = read("supabase/migrations/20260117090000_poker_phase1_authoritative_seats.sql");
@@ -98,28 +99,24 @@ assert.ok(
   "sweep should include conditional poker_requests_cleanup logging"
 );
 assert.ok(
-  /select result_json, created_at from public\.poker_requests/.test(joinSrc),
-  "join should query request created_at for pending checks"
+  /select result_json, created_at from public\.poker_requests/.test(idempotencyHelperSrc),
+  "idempotency helper should query request created_at for pending checks"
 );
 assert.ok(
-  /select result_json, created_at from public\.poker_requests/.test(leaveSrc),
-  "leave should query request created_at for pending checks"
+  /table_id = \$1 and user_id = \$2 and request_id = \$3 and kind = \$4/.test(idempotencyHelperSrc),
+  "idempotency helper should scope request queries by table_id, user_id, request_id, and kind"
 );
 assert.ok(
-  /select result_json, created_at from public\.poker_requests/.test(heartbeatSrc),
-  "heartbeat should query request created_at for pending checks"
+  joinSrc.includes("ensurePokerRequest") && joinSrc.includes("storePokerRequestResult"),
+  "join should use shared poker idempotency helper"
 );
 assert.ok(
-  /table_id = \$1 and request_id = \$2/.test(joinSrc),
-  "join should scope request queries by table_id and request_id"
+  leaveSrc.includes("ensurePokerRequest") && leaveSrc.includes("storePokerRequestResult"),
+  "leave should use shared poker idempotency helper"
 );
 assert.ok(
-  /table_id = \$1 and request_id = \$2/.test(leaveSrc),
-  "leave should scope request queries by table_id and request_id"
-);
-assert.ok(
-  /table_id = \$1 and request_id = \$2/.test(heartbeatSrc),
-  "heartbeat should scope request queries by table_id and request_id"
+  heartbeatSrc.includes("ensurePokerRequest") && heartbeatSrc.includes("storePokerRequestResult"),
+  "heartbeat should use shared poker idempotency helper"
 );
 assert.ok(
   /async function retryJoin\([\s\S]*?joinTable\(pendingJoinRequestId\)/.test(pokerUiSrc),
@@ -170,6 +167,14 @@ assert.ok(
 assert.ok(
   idempotencyMigrationSrc.includes("poker_requests_table_kind_request_id_user_id_key"),
   "migration should scope poker_requests uniqueness to table/kind/request/user"
+);
+assert.ok(
+  /on conflict \(table_id, kind, request_id, user_id\)/.test(idempotencyHelperSrc),
+  "idempotency helper upsert should use table/kind/request/user conflict scope"
+);
+assert.ok(
+  !/on conflict \(table_id, request_id\)/.test(idempotencyHelperSrc),
+  "idempotency helper should not use legacy table/request conflict scope"
 );
 assert.ok(
   idempotencyMigrationSrc.includes("drop index") && idempotencyMigrationSrc.includes("drop constraint"),

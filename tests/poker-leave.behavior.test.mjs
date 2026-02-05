@@ -201,7 +201,7 @@ const run = async () => {
   const requestStore = new Map();
   const idempotentCalls = [];
   const idempotentQueries = [];
-  const idempotentHandler = makeHandlerWithRequests(null, idempotentCalls, idempotentQueries, requestStore);
+  const idempotentHandler = makeHandlerWithRequests(250, idempotentCalls, idempotentQueries, requestStore);
   const requestId = "request-1";
   const first = await idempotentHandler({
     httpMethod: "POST",
@@ -210,6 +210,7 @@ const run = async () => {
   });
   assert.equal(first.statusCode, 200);
   const firstBody = JSON.parse(first.body);
+  assert.equal(idempotentCalls.length, 1, "first idempotent leave should perform one cashout side effect");
   const second = await idempotentHandler({
     httpMethod: "POST",
     headers: { origin: "https://example.test", authorization: "Bearer token" },
@@ -217,6 +218,25 @@ const run = async () => {
   });
   assert.equal(second.statusCode, 200);
   assert.deepEqual(JSON.parse(second.body), firstBody);
+  assert.equal(idempotentCalls.length, 1, "replayed leave should not execute cashout side effect twice");
+  const requestScopedRead = idempotentQueries.find((q) =>
+    q.query.toLowerCase().includes("from public.poker_requests where table_id = $1 and user_id = $2 and request_id = $3 and kind = $4")
+  );
+  assert.ok(requestScopedRead, "leave should scope poker_requests reads by table/user/request/kind");
+
+  const pendingStore = new Map();
+  pendingStore.set(`${tableId}|${userId}|request-pending|LEAVE`, { resultJson: null, createdAt: new Date().toISOString() });
+  const pendingCalls = [];
+  const pendingQueries = [];
+  const pendingHandler = makeHandlerWithRequests(250, pendingCalls, pendingQueries, pendingStore);
+  const pendingResponse = await pendingHandler({
+    httpMethod: "POST",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    body: JSON.stringify({ tableId, requestId: "request-pending" }),
+  });
+  assert.equal(pendingResponse.statusCode, 202);
+  assert.deepEqual(JSON.parse(pendingResponse.body), { error: "request_pending", requestId: "request-pending" });
+  assert.equal(pendingCalls.length, 0, "pending leave should not execute side effects");
 
   const conflictHandler = loadPokerHandler("netlify/functions/poker-leave.mjs", {
     baseHeaders: () => ({}),

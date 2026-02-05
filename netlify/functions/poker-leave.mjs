@@ -43,9 +43,6 @@ const parseSeats = (value) => (Array.isArray(value) ? value : []);
 
 const parseStacks = (value) => (value && typeof value === "object" && !Array.isArray(value) ? value : {});
 
-const LEAVE_REQUEST_READ_SQL =
-  "select result_json, created_at from public.poker_requests where table_id = $1 and user_id = $2 and request_id = $3 and kind = $4 limit 1; /* table_id = $1 and request_id = $2 */";
-
 const normalizeSeatStack = (value) => {
   if (value == null) return null;
   const num = Number(value);
@@ -133,7 +130,6 @@ export async function handler(event) {
         requestId,
         kind: "LEAVE",
         pendingStaleSec: REQUEST_PENDING_STALE_SEC,
-        readSql: LEAVE_REQUEST_READ_SQL,
       });
       if (requestInfo.status === "stored") return requestInfo.result;
       if (requestInfo.status === "pending") return { ok: false, pending: true, requestId };
@@ -297,6 +293,14 @@ export async function handler(event) {
         throw error;
       }
     });
+
+    if (result?.pending) {
+      return {
+        statusCode: 202,
+        headers: cors,
+        body: JSON.stringify({ error: "request_pending", requestId: result.requestId || requestId }),
+      };
+    }
 
     return {
       statusCode: 200,
