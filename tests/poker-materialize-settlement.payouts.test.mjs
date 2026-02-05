@@ -190,3 +190,35 @@ const holeCardsByUserId = {
     /showdown_settlement_hand_mismatch/
   );
 }
+
+
+{
+  const showdownOnlyWithDuplicateWinners = {
+    tableId,
+    handId: "h-backfill-dup",
+    phase: "SHOWDOWN",
+    seats: [
+      { userId: "u1", seatNo: 1 },
+      { userId: "u2", seatNo: 2 },
+    ],
+    stacks: { u1: 100, u2: 100 },
+    pot: 0,
+    foldedByUserId: { u1: false, u2: false },
+    showdown: {
+      handId: "h-backfill-dup",
+      winners: ["u2"],
+      potsAwarded: [{ amount: 21, winners: ["u2", "u2", "u1"], eligibleUserIds: ["u1", "u2"] }],
+      reason: "computed",
+    },
+  };
+  const next = materializeShowdownAndPayout({
+    state: showdownOnlyWithDuplicateWinners,
+    seatUserIdsInOrder,
+    holeCardsByUserId,
+    awardPotsAtShowdown,
+  }).nextState;
+  assert.equal(next.phase, "SETTLED");
+  assert.equal(next.handSettlement.payouts.u2, 11);
+  assert.equal(next.handSettlement.payouts.u1, 10);
+  assert.equal((next.handSettlement.payouts.u1 || 0) + (next.handSettlement.payouts.u2 || 0), 21);
+}

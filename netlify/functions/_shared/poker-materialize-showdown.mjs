@@ -84,20 +84,38 @@ const diffPayouts = (prevStacks, nextStacks) => {
 };
 
 
+const normalizeWinnerIds = (raw) => {
+  if (!Array.isArray(raw)) return [];
+  const out = [];
+  const seen = new Set();
+  for (const value of raw) {
+    if (typeof value !== "string") continue;
+    const userId = value.trim();
+    if (!userId || seen.has(userId)) continue;
+    seen.add(userId);
+    out.push(userId);
+  }
+  return out;
+};
+
 const buildPayoutsFromPotsAwarded = (potsAwarded) => {
   const payouts = {};
   if (!Array.isArray(potsAwarded)) return payouts;
   for (const pot of potsAwarded) {
     const amount = normalizeChipAmount("pot", pot?.amount ?? 0);
-    const winners = Array.isArray(pot?.winners) ? pot.winners.filter((userId) => typeof userId === "string" && userId.trim()) : [];
+    const winners = normalizeWinnerIds(pot?.winners);
     if (winners.length === 0 || amount === 0) continue;
     const share = Math.floor(amount / winners.length);
     let remainder = amount - share * winners.length;
+    let distributed = 0;
     for (const userId of winners) {
       const bonus = remainder > 0 ? 1 : 0;
       if (remainder > 0) remainder -= 1;
-      payouts[userId] = (payouts[userId] || 0) + share + bonus;
+      const add = share + bonus;
+      payouts[userId] = (payouts[userId] || 0) + add;
+      distributed += add;
     }
+    if (distributed !== amount) throw new Error("showdown_invalid_pot_distribution");
   }
   return payouts;
 };
