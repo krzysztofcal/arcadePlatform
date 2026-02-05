@@ -144,7 +144,7 @@ export async function handler(event) {
             if (Object.prototype.hasOwnProperty.call(nextStacks, userId)) {
               delete nextStacks[userId];
               const nextState = { ...currentState, stacks: nextStacks };
-              await tx.unsafe("update public.poker_state set state = $2 where table_id = $1;", [tableId, nextState]);
+              await tx.unsafe("update public.poker_state set state = $2 where table_id = $1;", [tableId, JSON.stringify(nextState)]);
             }
           }
 
@@ -309,7 +309,7 @@ limit $1;`,
           }
           if (stateRow && stateChanged) {
             const nextState = { ...currentState, stacks: nextStacks };
-            await tx.unsafe("update public.poker_state set state = $2 where table_id = $1;", [tableId, nextState]);
+            await tx.unsafe("update public.poker_state set state = $2 where table_id = $1;", [tableId, JSON.stringify(nextState)]);
           }
           return { seatCount: lockedRows?.length ?? 0 };
         });
