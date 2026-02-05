@@ -51,6 +51,9 @@ const normalizeSeatStack = (value) => {
   return num;
 };
 
+const normalizeNonNegativeInt = (n) =>
+  Number.isInteger(n) && n >= 0 && Math.abs(n) <= Number.MAX_SAFE_INTEGER ? n : null;
+
 export async function handler(event) {
   const origin = event.headers?.origin || event.headers?.Origin;
   const cors = corsHeaders(origin);
@@ -192,7 +195,10 @@ export async function handler(event) {
         }
         const rawSeatStack = seatRow ? seatRow.stack : null;
         const stackValue = normalizeSeatStack(rawSeatStack);
-        const cashOutAmount = stackValue != null && stackValue > 0 ? stackValue : 0;
+        const stateStackRaw = currentState?.stacks?.[auth.userId];
+        const stateStack = normalizeNonNegativeInt(Number(stateStackRaw));
+        const seatStack = normalizeNonNegativeInt(Number(rawSeatStack));
+        const cashOutAmount = stateStack ?? seatStack ?? 0;
         const isStackMissing = rawSeatStack == null;
         if (isStackMissing) {
           klog("poker_leave_stack_missing", { tableId, userId: auth.userId, seatNo });
@@ -226,6 +232,7 @@ export async function handler(event) {
           userId: auth.userId,
           amount: cashOutAmount,
           seatNo,
+          stackSource: stateStack != null ? "state" : seatStack != null ? "seat" : "none",
           hadStack: stackValue != null,
         });
 
