@@ -2,6 +2,7 @@ import { baseHeaders, beginSql, klog } from "./_shared/supabase-admin.mjs";
 import { PRESENCE_TTL_SEC, TABLE_EMPTY_CLOSE_SEC } from "./_shared/poker-utils.mjs";
 import { postTransaction } from "./_shared/chips-ledger.mjs";
 import { isHoleCardsTableMissing } from "./_shared/poker-hole-cards-store.mjs";
+import { postHandSettlementToLedger } from "./_shared/poker-ledger-settlement.mjs";
 
 const STALE_PENDING_CUTOFF_MINUTES = 10;
 const STALE_PENDING_LIMIT = 500;
@@ -134,12 +135,25 @@ export async function handler(event) {
           const stateRows = await tx.unsafe("select state from public.poker_state where table_id = $1 for update;", [tableId]);
           const stateRow = stateRows?.[0] || null;
           const currentState = normalizeState(stateRow?.state);
+          const handSettlement =
+            currentState?.handSettlement && typeof currentState.handSettlement === "object"
+              ? currentState.handSettlement
+              : null;
+          const hasSettlement = Boolean(handSettlement?.handId);
           const stateStack = normalizeNonNegativeInt(Number(currentState?.stacks?.[userId]));
           const seatStack = normalizeNonNegativeInt(Number(locked.stack));
-          const amount = stateStack ?? seatStack ?? 0;
-          const stackSource = stateStack != null ? "state" : seatStack != null ? "seat" : "none";
+          const amount = hasSettlement ? 0 : stateStack ?? seatStack ?? 0;
+          const stackSource = hasSettlement
+            ? "settlement"
+            : stateStack != null
+              ? "state"
+              : seatStack != null
+                ? "seat"
+                : "none";
 
-          if (amount > 0) {
+          if (hasSettlement) {
+            await postHandSettlementToLedger({ tableId, handSettlement, postTransaction, klog, tx });
+          } else if (amount > 0) {
             await postTransaction({
               userId,
               txType: "TABLE_CASH_OUT",
@@ -245,6 +259,14 @@ limit $1;`,
             currentState?.stacks && typeof currentState.stacks === "object" && !Array.isArray(currentState.stacks)
               ? currentState.stacks
               : {};
+          const handSettlement =
+            currentState?.handSettlement && typeof currentState.handSettlement === "object"
+              ? currentState.handSettlement
+              : null;
+          const hasSettlement = Boolean(handSettlement?.handId);
+          if (hasSettlement) {
+            await postHandSettlementToLedger({ tableId, handSettlement, postTransaction, klog, tx });
+          }
           let stateChanged = false;
           const nextStacks = { ...currentStacks };
           for (const locked of lockedRows || []) {
@@ -264,8 +286,14 @@ limit $1;`,
             }
             const stateStack = normalizeNonNegativeInt(Number(currentStacks?.[userId]));
             const seatStack = normalizeNonNegativeInt(Number(locked.stack));
-            const normalizedStack = stateStack ?? seatStack ?? 0;
-            const stackSource = stateStack != null ? "state" : seatStack != null ? "seat" : "none";
+            const normalizedStack = hasSettlement ? 0 : stateStack ?? seatStack ?? 0;
+            const stackSource = hasSettlement
+              ? "settlement"
+              : stateStack != null
+                ? "state"
+                : seatStack != null
+                  ? "seat"
+                  : "none";
             if (normalizedStack > 0) {
               try {
                 await postTransaction({

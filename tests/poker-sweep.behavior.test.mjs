@@ -16,6 +16,7 @@ const makeHandler = (postCalls, queries, klogEvents, options = {}) => {
     closeCashoutTables = [],
     closeCashoutSeats = [],
     closedTables = [tableId],
+    postSettlementCalls = [],
   } = options;
   const handler = loadPokerHandler("netlify/functions/poker-sweep.mjs", {
     baseHeaders: () => ({}),
@@ -62,6 +63,24 @@ const makeHandler = (postCalls, queries, klogEvents, options = {}) => {
     postTransaction: async (payload) => {
       postCalls.push(payload);
       return { transaction: { id: "tx-sweep" } };
+    },
+    postHandSettlementToLedger: async (payload) => {
+      postSettlementCalls.push(payload);
+      const payouts = payload?.handSettlement?.payouts || {};
+      for (const [uid, amt] of Object.entries(payouts)) {
+        if (Number(amt) > 0) {
+          await payload.postTransaction({
+            userId: uid,
+            txType: "HAND_SETTLEMENT",
+            idempotencyKey: `poker:settlement:${payload.tableId}:${payload.handSettlement.handId}:${uid}`,
+            entries: [
+              { accountType: "ESCROW", systemKey: `POKER_TABLE:${payload.tableId}`, amount: -Number(amt) },
+              { accountType: "USER", amount: Number(amt) },
+            ],
+          });
+        }
+      }
+      return { count: 1, total: 0 };
     },
     klog: (event, payload) => {
       klogEvents.push({ event, payload });
@@ -201,12 +220,86 @@ const runCloseCashoutUsesSeatNo = async () => {
   );
 };
 
+
+const runSettlementSkipsLegacyCashout = async () => {
+  process.env.POKER_SWEEP_SECRET = "secret";
+  const postCalls = [];
+  const queries = [];
+  const klogEvents = [];
+  const postSettlementCalls = [];
+  const settledState = {
+    phase: "SETTLED",
+    handSettlement: {
+      handId: "h-settled",
+      settledAt: "2026-01-01T00:00:00.000Z",
+      payouts: { [userId]: 77 },
+    },
+    stacks: { [userId]: 77 },
+  };
+  const handler = loadPokerHandler("netlify/functions/poker-sweep.mjs", {
+    baseHeaders: () => ({}),
+    beginSql: async (fn) =>
+      fn({
+        unsafe: async (query, params) => {
+          queries.push({ query: String(query), params });
+          const text = String(query).toLowerCase();
+          if (text.includes("from public.poker_requests") && text.includes("result_json is null")) return [];
+          if (text.includes("from public.poker_seats") && text.includes("last_seen_at < now()") && !text.includes("for update")) {
+            return [{ table_id: tableId, user_id: userId, seat_no: seatNo, stack: 123, last_seen_at: new Date(0) }];
+          }
+          if (text.includes("from public.poker_seats") && text.includes("for update") && text.includes("last_seen_at")) {
+            return [{ seat_no: seatNo, status: "ACTIVE", stack: 123, last_seen_at: new Date(0) }];
+          }
+          if (text.includes("select state from public.poker_state where table_id") && text.includes("for update")) {
+            return [{ state: JSON.stringify(settledState) }];
+          }
+          if (text.includes("delete from public.poker_requests")) return [];
+          if (text.includes("update public.poker_seats set status = 'inactive', stack = 0")) return [];
+          if (text.includes("select t.id") && text.includes("stack > 0")) return [];
+          if (text.includes("update public.poker_tables t")) return [];
+          if (text.includes("delete from public.poker_hole_cards")) return [];
+          return [];
+        },
+      }),
+    postTransaction: async (payload) => {
+      postCalls.push(payload);
+      return { transaction: { id: "tx-sweep" } };
+    },
+    postHandSettlementToLedger: async (payload) => {
+      postSettlementCalls.push(payload);
+      return { count: 1, total: 77 };
+    },
+    klog: (event, payload) => {
+      klogEvents.push({ event, payload });
+    },
+    PRESENCE_TTL_SEC: 10,
+    TABLE_EMPTY_CLOSE_SEC: 10,
+    isHoleCardsTableMissing,
+  });
+
+  const first = await handler({ httpMethod: "POST", headers: { "x-sweep-secret": "secret" } });
+  const second = await handler({ httpMethod: "POST", headers: { "x-sweep-secret": "secret" } });
+  assert.equal(first.statusCode, 200);
+  assert.equal(second.statusCode, 200);
+  assert.equal(postSettlementCalls.length, 2, "sweep should attempt settlement posting on retries");
+  assert.equal(
+    postCalls.filter((c) => c.txType === "TABLE_CASH_OUT").length,
+    0,
+    "sweep should skip legacy TABLE_CASH_OUT path when settlement exists"
+  );
+  assert.ok(
+    klogEvents.some((entry) => entry.event === "poker_timeout_cashout_skip" && entry.payload?.stackSource === "settlement"),
+    "sweep should report settlement source when skipping legacy timeout cashout"
+  );
+};
+
 Promise.resolve()
   .then(run)
   .then(runMissingHoleCardsTable)
   .then(runCloseCashoutInvalidStack)
   .then(runCloseCashoutSkipsActiveSeat)
   .then(runCloseCashoutUsesSeatNo)
+  .then(runSettlementSkipsLegacyCashout)
   .catch((error) => {
     console.error(error);
     process.exit(1);
