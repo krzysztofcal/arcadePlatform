@@ -139,11 +139,15 @@ export async function handler(event) {
             currentState?.handSettlement && typeof currentState.handSettlement === "object"
               ? currentState.handSettlement
               : null;
-          const hasSettlement = Boolean(handSettlement?.handId);
+          const usableSettlement =
+            Boolean(handSettlement?.handId) &&
+            handSettlement?.payouts &&
+            typeof handSettlement.payouts === "object" &&
+            !Array.isArray(handSettlement.payouts);
           const stateStack = normalizeNonNegativeInt(Number(currentState?.stacks?.[userId]));
           const seatStack = normalizeNonNegativeInt(Number(locked.stack));
-          const amount = hasSettlement ? 0 : stateStack ?? seatStack ?? 0;
-          const stackSource = hasSettlement
+          const amount = usableSettlement ? 0 : stateStack ?? seatStack ?? 0;
+          const stackSource = usableSettlement
             ? "settlement"
             : stateStack != null
               ? "state"
@@ -151,7 +155,7 @@ export async function handler(event) {
                 ? "seat"
                 : "none";
 
-          if (hasSettlement) {
+          if (usableSettlement) {
             await postHandSettlementToLedger({ tableId, handSettlement, postTransaction, klog, tx });
           } else if (amount > 0) {
             await postTransaction({
@@ -263,8 +267,12 @@ limit $1;`,
             currentState?.handSettlement && typeof currentState.handSettlement === "object"
               ? currentState.handSettlement
               : null;
-          const hasSettlement = Boolean(handSettlement?.handId);
-          if (hasSettlement) {
+          const usableSettlement =
+            Boolean(handSettlement?.handId) &&
+            handSettlement?.payouts &&
+            typeof handSettlement.payouts === "object" &&
+            !Array.isArray(handSettlement.payouts);
+          if (usableSettlement) {
             await postHandSettlementToLedger({ tableId, handSettlement, postTransaction, klog, tx });
           }
           let stateChanged = false;
@@ -286,8 +294,8 @@ limit $1;`,
             }
             const stateStack = normalizeNonNegativeInt(Number(currentStacks?.[userId]));
             const seatStack = normalizeNonNegativeInt(Number(locked.stack));
-            const normalizedStack = hasSettlement ? 0 : stateStack ?? seatStack ?? 0;
-            const stackSource = hasSettlement
+            const normalizedStack = usableSettlement ? 0 : stateStack ?? seatStack ?? 0;
+            const stackSource = usableSettlement
               ? "settlement"
               : stateStack != null
                 ? "state"
