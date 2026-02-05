@@ -222,3 +222,35 @@ const holeCardsByUserId = {
   assert.equal(next.handSettlement.payouts.u1, 10);
   assert.equal((next.handSettlement.payouts.u1 || 0) + (next.handSettlement.payouts.u2 || 0), 21);
 }
+
+
+{
+  const klogCalls = [];
+  const showdownOnly = {
+    tableId,
+    handId: "h-backfill-log",
+    phase: "SHOWDOWN",
+    seats: [
+      { userId: "u1", seatNo: 1 },
+      { userId: "u2", seatNo: 2 },
+    ],
+    stacks: { u1: 90, u2: 110 },
+    pot: 0,
+    foldedByUserId: { u1: false, u2: false },
+    showdown: {
+      handId: "h-backfill-log",
+      winners: ["u2"],
+      potsAwarded: [{ amount: 20, winners: ["u2"], eligibleUserIds: ["u1", "u2"] }],
+      reason: "computed",
+    },
+  };
+  const next = materializeShowdownAndPayout({
+    state: showdownOnly,
+    seatUserIdsInOrder,
+    holeCardsByUserId,
+    awardPotsAtShowdown,
+    klog: (kind, payload) => klogCalls.push({ kind, payload }),
+  }).nextState;
+  assert.equal(next.phase, "SETTLED");
+  assert.ok(klogCalls.some((entry) => entry.kind === "poker_settlement_backfilled"));
+}

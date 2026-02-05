@@ -182,6 +182,13 @@ const materializeShowdownAndPayout = ({
       return { nextState: state };
     }
     const payouts = buildPayoutsFromPotsAwarded(state.showdown?.potsAwarded);
+    if (typeof klog === "function") {
+      klog("poker_settlement_backfilled", {
+        tableId: state?.tableId ?? null,
+        handId,
+        reason: "missing_handSettlement",
+      });
+    }
     return {
       nextState: finalizeSettlement({
         state,

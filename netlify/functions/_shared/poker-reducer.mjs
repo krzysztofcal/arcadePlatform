@@ -7,7 +7,7 @@ import { createDeck, dealCommunity, dealHoleCards, shuffle } from "./poker-engin
 // - phase === "HAND_DONE"
 //
 // Showdown settlement is materialized separately and persisted as phase === "SETTLED".
-// There is NO automatic next-hand transition from SETTLED in this reducer.
+// SETTLED transitions to the next hand through advanceIfNeeded() using existing hand-reset logic.
 //
 // UI MUST assume that finished-hand states are transient.
 // Any delays, animations, summaries (e.g. "You won X") or countdowns
@@ -502,6 +502,9 @@ function advanceIfNeeded(state) {
     return resetToNextHand(state);
   }
   if (state.phase === "SHOWDOWN" && state.showdown) {
+    return resetToNextHand(state);
+  }
+  if (state.phase === "SETTLED") {
     return resetToNextHand(state);
   }
   const active = getActiveSeats(state);
