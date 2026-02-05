@@ -66,6 +66,46 @@ const ensureCommunityComplete = (state) => {
   return state.community.slice();
 };
 
+const buildPayoutsFromPotsAwarded = (potsAwarded) => {
+  const payouts = {};
+  if (!Array.isArray(potsAwarded)) return payouts;
+  for (const pot of potsAwarded) {
+    const amount = normalizeChipAmount("pot", pot?.amount ?? 0);
+    const winners = Array.isArray(pot?.winners) ? pot.winners.filter((userId) => typeof userId === "string" && userId.trim()) : [];
+    if (winners.length === 0 || amount === 0) continue;
+    const share = Math.floor(amount / winners.length);
+    let remainder = amount - share * winners.length;
+    for (const userId of winners) {
+      const bonus = remainder > 0 ? 1 : 0;
+      if (remainder > 0) remainder -= 1;
+      payouts[userId] = (payouts[userId] || 0) + share + bonus;
+    }
+  }
+  return payouts;
+};
+
+const withSettlement = ({ state, handId, nowIso, klog }) => {
+  if (state?.handSettlement) return state;
+  const settledAt = typeof nowIso === "string" ? nowIso : new Date().toISOString();
+  const payouts = buildPayoutsFromPotsAwarded(state?.showdown?.potsAwarded);
+  if (typeof klog === "function") {
+    klog("poker_hand_settled", {
+      tableId: state?.tableId ?? null,
+      handId,
+      payouts,
+    });
+  }
+  return {
+    ...state,
+    phase: "SETTLED",
+    handSettlement: {
+      handId,
+      settledAt,
+      payouts,
+    },
+  };
+};
+
 const materializeShowdownAndPayout = ({
   state,
   seatUserIdsInOrder,
@@ -73,6 +113,7 @@ const materializeShowdownAndPayout = ({
   computeShowdown,
   awardPotsAtShowdown,
   klog,
+  nowIso,
 }) => {
   if (!state || typeof state !== "object" || Array.isArray(state))
     return { nextState: state };
@@ -90,7 +131,7 @@ const materializeShowdownAndPayout = ({
       throw new Error("showdown_hand_mismatch");
     if (normalizeChipAmount("pot", state.pot) > 0)
       throw new Error("showdown_pot_not_zero");
-    return { nextState: state };
+    return { nextState: withSettlement({ state, handId, nowIso, klog }) };
   }
 
   if (!handId) throw new Error("showdown_missing_hand_id");
@@ -115,11 +156,13 @@ const materializeShowdownAndPayout = ({
       normalizeChipAmount("stack", nextStacks[winnerUserId]) + potAmount;
 
     const awardedAt = new Date().toISOString();
+    const settledAt = typeof nowIso === "string" ? nowIso : awardedAt;
     return {
       nextState: {
         ...state,
         stacks: nextStacks,
         pot: 0,
+        phase: "SETTLED",
         showdown: {
           winners: [winnerUserId],
           potsAwarded: [
@@ -134,6 +177,11 @@ const materializeShowdownAndPayout = ({
           reason: "all_folded",
           awardedAt,
           handId,
+        },
+        handSettlement: {
+          handId,
+          settledAt,
+          payouts: { [winnerUserId]: potAmount },
         },
       },
     };
@@ -163,11 +211,16 @@ const materializeShowdownAndPayout = ({
   }
 
   return {
-    nextState: {
+    nextState: withSettlement({
+      state: {
       ...awardResult.nextState,
       pot: 0,
       showdown: { ...awardResult.nextState.showdown, handId },
-    },
+      },
+      handId,
+      nowIso,
+      klog,
+    }),
   };
 };
 

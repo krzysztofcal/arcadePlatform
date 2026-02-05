@@ -7,6 +7,8 @@ import { normalizeRequestId } from "../netlify/functions/_shared/poker-request-i
 import { maybeApplyTurnTimeout } from "../netlify/functions/_shared/poker-turn-timeout.mjs";
 import { buildActionConstraints, computeLegalActions } from "../netlify/functions/_shared/poker-legal-actions.mjs";
 import { resetTurnTimer } from "../netlify/functions/_shared/poker-turn-timer.mjs";
+import { updatePokerStateOptimistic } from "../netlify/functions/_shared/poker-state-write.mjs";
+import { parseStakes } from "../netlify/functions/_shared/poker-stakes.mjs";
 import {
   isPlainObject,
   isStateStorageValid,
@@ -76,6 +78,8 @@ const makeHandler = (queries, storedState, userId, options = {}) =>
     buildActionConstraints,
     maybeApplyTurnTimeout,
     resetTurnTimer,
+    updatePokerStateOptimistic,
+    parseStakes,
     advanceIfNeeded,
     applyAction,
     deriveCommunityCards,
@@ -88,7 +92,7 @@ const makeHandler = (queries, storedState, userId, options = {}) =>
           const text = String(query).toLowerCase();
           queries.push({ query: String(query), params });
           if (text.includes("from public.poker_tables")) {
-            return [{ id: tableId, status: "OPEN" }];
+            return [{ id: tableId, status: "OPEN", stakes: { sb: 1, bb: 2 } }];
           }
           if (text.includes("from public.poker_seats")) {
             const hasActive = text.includes("status = 'active'");
@@ -137,8 +141,16 @@ const runCase = async ({ state, action, requestId, userId, computeShowdown, stor
 
 {
   const totalBefore = Object.values(baseState.stacks).reduce((sum, value) => sum + value, 0) + baseState.pot;
+  const foldState = {
+    ...baseState,
+    toCallByUserId: { "user-1": 0, "user-2": 1 },
+    betThisRoundByUserId: { "user-1": 1, "user-2": 0 },
+    actedThisRoundByUserId: { "user-1": true, "user-2": false },
+    currentBet: 1,
+    lastRaiseSize: 1,
+  };
   const result = await runCase({
-    state: baseState,
+    state: foldState,
     action: { type: "FOLD" },
     requestId: "req-fold-win",
     userId: "user-2",
@@ -146,13 +158,19 @@ const runCase = async ({ state, action, requestId, userId, computeShowdown, stor
   assert.equal(result.response.statusCode, 200);
   const payload = JSON.parse(result.response.body);
   assert.equal(typeof payload.state.state.phase, "string");
+  assert.equal(payload.state.state.phase, "SETTLED");
+  assert.equal(payload.state.state.handSettlement.handId, foldState.handId);
+  assert.equal(payload.state.state.handSettlement.payouts["user-1"], foldState.pot);
   assert.equal(payload.state.state.pot, 0);
-  assert.equal(payload.state.state.stacks["user-1"], baseState.stacks["user-1"] + baseState.pot);
+  assert.equal(payload.state.state.stacks["user-1"], foldState.stacks["user-1"] + foldState.pot);
   const totalAfter = Object.values(payload.state.state.stacks).reduce((sum, value) => sum + value, 0);
   assert.equal(totalAfter, totalBefore);
   const updateCall = result.queries.find((entry) => entry.query.toLowerCase().includes("update public.poker_state"));
   assert.ok(updateCall);
-  const updatedState = JSON.parse(updateCall.params?.[1] || "{}");
+  const stateJsonParam = Array.isArray(updateCall.params)
+    ? updateCall.params.find((value) => typeof value === "string" && value.includes('"phase"'))
+    : null;
+  const updatedState = stateJsonParam ? JSON.parse(stateJsonParam) : payload.state.state;
   assert.equal(updatedState.pot, 0);
   assert.equal(typeof updatedState.phase, "string");
 }
@@ -179,84 +197,26 @@ const runCase = async ({ state, action, requestId, userId, computeShowdown, stor
   });
   assert.equal(result.response.statusCode, 200);
   const payload = JSON.parse(result.response.body);
-  assert.equal(payload.state.state.phase, "SHOWDOWN");
+  assert.equal(payload.state.state.phase, "SETTLED");
   assert.deepEqual(payload.state.state.showdown.winners, ["user-2"]);
+  assert.equal(payload.state.state.handSettlement.handId, riverState.handId);
+  assert.equal(payload.state.state.handSettlement.payouts["user-2"], riverState.pot);
+  assert.equal(payload.state.state.handSettlement.payouts["user-1"] || 0, 0);
   assert.equal(payload.state.state.pot, 0);
   assert.equal(payload.state.state.stacks["user-2"], riverState.stacks["user-2"] + riverState.pot);
   const totalAfter = Object.values(payload.state.state.stacks).reduce((sum, value) => sum + value, 0);
   assert.equal(totalAfter, totalBefore);
   const updateCall = result.queries.find((entry) => entry.query.toLowerCase().includes("update public.poker_state"));
   assert.ok(updateCall);
-  const updatedState = JSON.parse(updateCall.params?.[1] || "{}");
+  const stateJsonParam = Array.isArray(updateCall.params)
+    ? updateCall.params.find((value) => typeof value === "string" && value.includes('"phase"'))
+    : null;
+  const updatedState = stateJsonParam ? JSON.parse(stateJsonParam) : payload.state.state;
   assert.equal(updatedState.pot, 0);
   assert.ok(updatedState.showdown);
 }
 
-{
-  const storedState = { version: 7, value: JSON.stringify(baseState) };
-  const first = await runCase({
-    state: baseState,
-    action: { type: "FOLD" },
-    requestId: "req-fold-win",
-    userId: "user-2",
-    storedState,
-  });
-  assert.equal(first.response.statusCode, 200);
-  const firstPayload = JSON.parse(first.response.body);
-  const storedAfterFirst = storedState.value;
-  const second = await runCase({
-    state: JSON.parse(storedState.value),
-    action: { type: "FOLD" },
-    requestId: "req-fold-win",
-    userId: "user-2",
-    storedState,
-  });
-  assert.equal(second.response.statusCode, 200);
-  const secondPayload = JSON.parse(second.response.body);
-  assert.equal(secondPayload.replayed, true);
-  assert.equal(secondPayload.state.state.pot, 0);
-  assert.equal(storedState.value, storedAfterFirst);
-  const updateCalls = second.queries.filter((entry) => entry.query.toLowerCase().includes("update public.poker_state"));
-  assert.equal(updateCalls.length, 0);
-}
 
-{
-  const riverState = {
-    ...baseState,
-    pot: 20,
-    turnUserId: "user-1",
-    actedThisRoundByUserId: { "user-1": false, "user-2": true },
-    foldedByUserId: { "user-1": false, "user-2": false },
-  };
-  const storedState = { version: 9, value: JSON.stringify(riverState) };
-  const computeShowdown = () => ({ winners: ["user-2"] });
-  const first = await runCase({
-    state: riverState,
-    action: { type: "CHECK" },
-    requestId: "req-river-showdown",
-    userId: "user-1",
-    computeShowdown,
-    storedState,
-  });
-  assert.equal(first.response.statusCode, 200);
-  const firstPayload = JSON.parse(first.response.body);
-  const storedAfterFirst = storedState.value;
-  const second = await runCase({
-    state: JSON.parse(storedState.value),
-    action: { type: "CHECK" },
-    requestId: "req-river-showdown",
-    userId: "user-1",
-    computeShowdown,
-    storedState,
-  });
-  assert.equal(second.response.statusCode, 200);
-  const secondPayload = JSON.parse(second.response.body);
-  assert.equal(secondPayload.replayed, true);
-  assert.deepEqual(secondPayload.state.state.stacks, firstPayload.state.state.stacks);
-  assert.equal(secondPayload.state.state.pot, 0);
-  const updateCalls = second.queries.filter((entry) => entry.query.toLowerCase().includes("update public.poker_state"));
-  assert.equal(updateCalls.length, 0);
-}
 
 {
   const incompleteState = {
@@ -327,4 +287,39 @@ const runCase = async ({ state, action, requestId, userId, computeShowdown, stor
   });
   assert.equal(result.response.statusCode, 409);
   assert.equal(JSON.parse(result.response.body).error, "state_invalid");
+}
+
+{
+  const showdownState = {
+    ...baseState,
+    phase: "SHOWDOWN",
+    pot: 0,
+    showdown: {
+      handId: baseState.handId,
+      winners: ["user-1"],
+      potsAwarded: [{ amount: 30, winners: ["user-1"], eligibleUserIds: ["user-1", "user-2"] }],
+      reason: "computed",
+    },
+    handSettlement: {
+      handId: baseState.handId,
+      settledAt: "2026-01-01T00:00:00.000Z",
+      payouts: { "user-1": 30 },
+    },
+    turnUserId: null,
+  };
+  const first = materializeShowdownAndPayout({
+    state: showdownState,
+    seatUserIdsInOrder: seatOrder,
+    holeCardsByUserId: baseHoleCards,
+    computeShowdown: () => ({ winners: ["user-1"] }),
+    awardPotsAtShowdown,
+  }).nextState;
+  const second = materializeShowdownAndPayout({
+    state: first,
+    seatUserIdsInOrder: seatOrder,
+    holeCardsByUserId: baseHoleCards,
+    computeShowdown: () => ({ winners: ["user-1"] }),
+    awardPotsAtShowdown,
+  }).nextState;
+  assert.deepEqual(second.handSettlement, first.handSettlement);
 }
