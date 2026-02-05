@@ -182,6 +182,14 @@ const materializeShowdownAndPayout = ({
       return { nextState: state };
     }
     const payouts = buildPayoutsFromPotsAwarded(state.showdown?.potsAwarded);
+    const payoutTotal = Object.values(payouts).reduce((sum, value) => sum + normalizeChipAmount("pot", value), 0);
+    const expectedTotal = normalizeChipAmount(
+      "pot",
+      state.showdown?.potAwardedTotal ??
+      state.showdown?.potAwarded ??
+      0
+    );
+    if (payoutTotal !== expectedTotal) throw new Error("showdown_invalid_settlement_total");
     if (typeof klog === "function") {
       klog("poker_settlement_backfilled", {
         tableId: state?.tableId ?? null,

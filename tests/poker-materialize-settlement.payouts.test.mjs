@@ -153,6 +153,7 @@ const holeCardsByUserId = {
       handId: "h-backfill",
       winners: ["u2"],
       potsAwarded: [{ amount: 20, winners: ["u2"], eligibleUserIds: ["u1", "u2"] }],
+      potAwardedTotal: 20,
       reason: "computed",
     },
   };
@@ -208,6 +209,7 @@ const holeCardsByUserId = {
       handId: "h-backfill-dup",
       winners: ["u2"],
       potsAwarded: [{ amount: 21, winners: ["u2", "u2", "u1"], eligibleUserIds: ["u1", "u2"] }],
+      potAwardedTotal: 21,
       reason: "computed",
     },
   };
@@ -241,6 +243,7 @@ const holeCardsByUserId = {
       handId: "h-backfill-log",
       winners: ["u2"],
       potsAwarded: [{ amount: 20, winners: ["u2"], eligibleUserIds: ["u1", "u2"] }],
+      potAwardedTotal: 20,
       reason: "computed",
     },
   };
@@ -253,4 +256,37 @@ const holeCardsByUserId = {
   }).nextState;
   assert.equal(next.phase, "SETTLED");
   assert.ok(klogCalls.some((entry) => entry.kind === "poker_settlement_backfilled"));
+}
+
+
+{
+  const invalidTotals = {
+    tableId,
+    handId: "h-backfill-bad-total",
+    phase: "SHOWDOWN",
+    seats: [
+      { userId: "u1", seatNo: 1 },
+      { userId: "u2", seatNo: 2 },
+    ],
+    stacks: { u1: 90, u2: 110 },
+    pot: 0,
+    foldedByUserId: { u1: false, u2: false },
+    showdown: {
+      handId: "h-backfill-bad-total",
+      winners: ["u2"],
+      potsAwarded: [{ amount: 20, winners: ["u2"], eligibleUserIds: ["u1", "u2"] }],
+      potAwardedTotal: 21,
+      reason: "computed",
+    },
+  };
+  assert.throws(
+    () =>
+      materializeShowdownAndPayout({
+        state: invalidTotals,
+        seatUserIdsInOrder,
+        holeCardsByUserId,
+        awardPotsAtShowdown,
+      }),
+    /showdown_invalid_settlement_total/
+  );
 }
