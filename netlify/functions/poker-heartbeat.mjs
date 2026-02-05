@@ -1,7 +1,7 @@
 import { baseHeaders, beginSql, corsHeaders, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
 import { isValidUuid } from "./_shared/poker-utils.mjs";
 import { normalizeRequestId } from "./_shared/poker-request-id.mjs";
-import { ensurePokerRequest, storePokerRequestResult } from "./_shared/poker-idempotency.mjs";
+import { deletePokerRequest, ensurePokerRequest, storePokerRequestResult } from "./_shared/poker-idempotency.mjs";
 
 const REQUEST_PENDING_STALE_SEC = 30;
 
@@ -16,9 +16,6 @@ const parseBody = (body) => {
 
 const isPlainObject = (value) =>
   value !== null && typeof value === "object" && !Array.isArray(value) && Object.getPrototypeOf(value) === Object.prototype;
-
-const HEARTBEAT_REQUEST_READ_SQL =
-  "select result_json, created_at from public.poker_requests where table_id = $1 and user_id = $2 and request_id = $3 and kind = $4 limit 1; /* table_id = $1 and request_id = $2 */";
 
 export async function handler(event) {
   const origin = event.headers?.origin || event.headers?.Origin;
@@ -80,35 +77,59 @@ export async function handler(event) {
 
   try {
     const result = await beginSql(async (tx) => {
+      let mutated = false;
       const requestInfo = await ensurePokerRequest(tx, {
         tableId,
         userId: auth.userId,
         requestId,
         kind: "HEARTBEAT",
         pendingStaleSec: REQUEST_PENDING_STALE_SEC,
-        readSql: HEARTBEAT_REQUEST_READ_SQL,
       });
       if (requestInfo.status === "stored") return requestInfo.result;
       if (requestInfo.status === "pending") return { ok: false, pending: true, requestId };
 
-      const tableRows = await tx.unsafe("select status from public.poker_tables where id = $1 limit 1;", [tableId]);
-      const tableStatus = tableRows?.[0]?.status;
-      if (!tableStatus) {
-        return { error: "table_not_found", statusCode: 404 };
-      }
-
-      const seatRows = await tx.unsafe(
-        "select seat_no from public.poker_seats where table_id = $1 and user_id = $2 limit 1;",
-        [tableId, auth.userId]
-      );
-      const seatNo = seatRows?.[0]?.seat_no;
-      const isSeated = Number.isInteger(seatNo);
-
-      if (tableStatus === "CLOSED") {
-        const resultPayload = { ok: true, seated: isSeated, seatNo: isSeated ? seatNo : null };
-        if (isSeated) {
-          resultPayload.closed = true;
+      try {
+        const tableRows = await tx.unsafe("select status from public.poker_tables where id = $1 limit 1;", [tableId]);
+        const tableStatus = tableRows?.[0]?.status;
+        if (!tableStatus) {
+          return { error: "table_not_found", statusCode: 404 };
         }
+
+        const seatRows = await tx.unsafe(
+          "select seat_no from public.poker_seats where table_id = $1 and user_id = $2 limit 1;",
+          [tableId, auth.userId]
+        );
+        const seatNo = seatRows?.[0]?.seat_no;
+        const isSeated = Number.isInteger(seatNo);
+
+        if (tableStatus === "CLOSED") {
+          const resultPayload = { ok: true, seated: isSeated, seatNo: isSeated ? seatNo : null };
+          if (isSeated) {
+            resultPayload.closed = true;
+          }
+          await storePokerRequestResult(tx, {
+            tableId,
+            userId: auth.userId,
+            requestId,
+            kind: "HEARTBEAT",
+            result: resultPayload,
+          });
+          return resultPayload;
+        }
+
+        if (isSeated) {
+          await tx.unsafe(
+            "update public.poker_seats set status = 'ACTIVE', last_seen_at = now() where table_id = $1 and user_id = $2;",
+            [tableId, auth.userId]
+          );
+          await tx.unsafe(
+            "update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1;",
+            [tableId]
+          );
+          mutated = true;
+        }
+
+        const resultPayload = { ok: true, seated: isSeated, seatNo: isSeated ? seatNo : null };
         await storePokerRequestResult(tx, {
           tableId,
           userId: auth.userId,
@@ -117,29 +138,23 @@ export async function handler(event) {
           result: resultPayload,
         });
         return resultPayload;
+      } catch (error) {
+        if (requestId && !mutated) {
+          await deletePokerRequest(tx, { tableId, userId: auth.userId, requestId, kind: "HEARTBEAT" });
+        } else if (requestId && mutated) {
+          klog("poker_heartbeat_request_retained", { tableId, userId: auth.userId, requestId });
+        }
+        throw error;
       }
-
-      if (isSeated) {
-        await tx.unsafe(
-          "update public.poker_seats set status = 'ACTIVE', last_seen_at = now() where table_id = $1 and user_id = $2;",
-          [tableId, auth.userId]
-        );
-        await tx.unsafe(
-          "update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1;",
-          [tableId]
-        );
-      }
-
-      const resultPayload = { ok: true, seated: isSeated, seatNo: isSeated ? seatNo : null };
-      await storePokerRequestResult(tx, {
-        tableId,
-        userId: auth.userId,
-        requestId,
-        kind: "HEARTBEAT",
-        result: resultPayload,
-      });
-      return resultPayload;
     });
+
+    if (result?.pending) {
+      return {
+        statusCode: 202,
+        headers: cors,
+        body: JSON.stringify({ error: "request_pending", requestId: result.requestId || requestId }),
+      };
+    }
 
     if (result?.error) {
       return {

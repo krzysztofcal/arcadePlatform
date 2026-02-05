@@ -81,6 +81,7 @@ export const loadPokerHandler = (filePath, mocks) => {
     "upgradeLegacyInitState",
     "upgradeLegacyInitStateWithSeats",
     "PRESENCE_TTL_SEC",
+    "HEARTBEAT_INTERVAL_SEC",
     "storePokerRequestResult",
     "TABLE_EMPTY_CLOSE_SEC",
     "TURN_MS",
