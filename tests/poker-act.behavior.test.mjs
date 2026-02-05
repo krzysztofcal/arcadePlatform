@@ -19,6 +19,7 @@ import {
 import { deriveCommunityCards, deriveRemainingDeck } from "../netlify/functions/_shared/poker-deal-deterministic.mjs";
 import { buildActionConstraints, computeLegalActions } from "../netlify/functions/_shared/poker-legal-actions.mjs";
 import { resetTurnTimer } from "../netlify/functions/_shared/poker-turn-timer.mjs";
+import { updatePokerStateOptimistic } from "../netlify/functions/_shared/poker-state-write.mjs";
 import { loadPokerHandler } from "./helpers/poker-test-helpers.mjs";
 
 const tableId = "11111111-1111-4111-8111-111111111111";
@@ -79,12 +80,14 @@ const makeHandler = (queries, storedState, userId, options = {}) =>
     buildActionConstraints,
     isHoleCardsTableMissing,
     resetTurnTimer,
+    updatePokerStateOptimistic,
     loadHoleCardsByUserId: options.loadHoleCardsByUserId || loadHoleCardsByUserId,
     beginSql: async (fn) =>
       fn({
         unsafe: async (query, params) => {
           const text = String(query).toLowerCase();
           queries.push({ query: String(query), params });
+          const requestStore = storedState.requests || (storedState.requests = new Map());
           if (text.includes("from public.poker_tables")) {
             return [{ id: tableId, status: "OPEN", stakes: options.tableStakes ?? "{\"sb\":1,\"bb\":2}" }];
           }
@@ -97,6 +100,34 @@ const makeHandler = (queries, storedState, userId, options = {}) =>
               const activeSeatUserIds = options.activeSeatUserIds || ["user-1", "user-2", "user-3"];
               return activeSeatUserIds.map((id, index) => ({ user_id: id, seat_no: index + 1 }));
             }
+            return [];
+          }
+          if (text.includes("from public.poker_requests")) {
+            const requestKey = `${params?.[0]}|${params?.[1]}|${params?.[2]}|${params?.[3]}`;
+            const entry = requestStore.get(requestKey);
+            if (!entry) return [];
+            return [{ result_json: entry.resultJson, created_at: entry.createdAt }];
+          }
+          if (text.includes("insert into public.poker_requests")) {
+            const requestKey = `${params?.[0]}|${params?.[1]}|${params?.[2]}|${params?.[3]}`;
+            if (requestStore.has(requestKey)) return [];
+            requestStore.set(requestKey, { resultJson: null, createdAt: new Date().toISOString() });
+            return [{ request_id: params?.[2] }];
+          }
+          if (text.includes("update public.poker_requests")) {
+            const requestKey = `${params?.[0]}|${params?.[1]}|${params?.[2]}|${params?.[3]}`;
+            if (options.failRequestWriteOnce && !storedState.requestWriteFailed) {
+              storedState.requestWriteFailed = true;
+              throw new Error("request_write_failed");
+            }
+            const entry = requestStore.get(requestKey) || { createdAt: new Date().toISOString() };
+            entry.resultJson = params?.[4] ?? null;
+            requestStore.set(requestKey, entry);
+            return [{ request_id: params?.[2] }];
+          }
+          if (text.includes("delete from public.poker_requests")) {
+            const requestKey = `${params?.[0]}|${params?.[1]}|${params?.[2]}|${params?.[3]}`;
+            requestStore.delete(requestKey);
             return [];
           }
           if (text.includes("from public.poker_state")) {
@@ -112,8 +143,14 @@ const makeHandler = (queries, storedState, userId, options = {}) =>
             return rows;
           }
           if (text.includes("update public.poker_state")) {
+            if (text.includes("version = version + 1")) {
+              if (options.updatePokerStateConflict) return [];
+              storedState.value = params?.[2] || storedState.value;
+              const baseVersion = Number(params?.[1]);
+              storedState.version = Number.isFinite(baseVersion) ? baseVersion + 1 : storedState.version + 1;
+              return [{ version: storedState.version }];
+            }
             storedState.value = params?.[1] || storedState.value;
-            storedState.version += 1;
             return [{ version: storedState.version }];
           }
           if (text.includes("insert into public.poker_actions")) {
@@ -140,6 +177,7 @@ const makeStartHandHandler = (queries, storedState, userId, seatUserIds) => {
     isPlainObject,
     isStateStorageValid,
     normalizeJsonState,
+    normalizeRequestId,
     upgradeLegacyInitStateWithSeats,
     verifySupabaseJwt: async () => ({ valid: true, userId }),
     isValidUuid: () => true,
@@ -148,11 +186,13 @@ const makeStartHandHandler = (queries, storedState, userId, seatUserIds) => {
     computeLegalActions,
     buildActionConstraints,
     TURN_MS,
+    updatePokerStateOptimistic,
     beginSql: async (fn) =>
       fn({
         unsafe: async (query, params) => {
           const text = String(query).toLowerCase();
           queries.push({ query: String(query), params });
+          const requestStore = storedState.requests || (storedState.requests = new Map());
           if (text.includes("from public.poker_tables")) {
             return [{ id: tableId, status: "OPEN", max_players: 6, stakes: { sb: 1, bb: 2 } }];
           }
@@ -164,6 +204,30 @@ const makeStartHandHandler = (queries, storedState, userId, seatUserIds) => {
           }
           if (text.includes("from public.poker_seats")) {
             return seatUserIds.map((id, index) => ({ user_id: id, seat_no: index + 1, status: "ACTIVE" }));
+          }
+          if (text.includes("from public.poker_requests")) {
+            const requestKey = `${params?.[0]}|${params?.[1]}|${params?.[2]}|${params?.[3]}`;
+            const entry = requestStore.get(requestKey);
+            if (!entry) return [];
+            return [{ result_json: entry.resultJson, created_at: entry.createdAt }];
+          }
+          if (text.includes("insert into public.poker_requests")) {
+            const requestKey = `${params?.[0]}|${params?.[1]}|${params?.[2]}|${params?.[3]}`;
+            if (requestStore.has(requestKey)) return [];
+            requestStore.set(requestKey, { resultJson: null, createdAt: new Date().toISOString() });
+            return [{ request_id: params?.[2] }];
+          }
+          if (text.includes("update public.poker_requests")) {
+            const requestKey = `${params?.[0]}|${params?.[1]}|${params?.[2]}|${params?.[3]}`;
+            const entry = requestStore.get(requestKey) || { createdAt: new Date().toISOString() };
+            entry.resultJson = params?.[4] ?? null;
+            requestStore.set(requestKey, entry);
+            return [{ request_id: params?.[2] }];
+          }
+          if (text.includes("delete from public.poker_requests")) {
+            const requestKey = `${params?.[0]}|${params?.[1]}|${params?.[2]}|${params?.[3]}`;
+            requestStore.delete(requestKey);
+            return [];
           }
           if (text.includes("insert into public.poker_hole_cards")) {
             const holeCardsStore = storedState.holeCardsStore;
@@ -187,8 +251,14 @@ const makeStartHandHandler = (queries, storedState, userId, seatUserIds) => {
             return [];
           }
           if (text.includes("update public.poker_state")) {
+            if (text.includes("version = version + 1")) {
+              storedState.value = params?.[2] || null;
+              const baseVersion = Number(params?.[1]);
+              storedState.version = Number.isFinite(baseVersion) ? baseVersion + 1 : (storedState.version || 1) + 1;
+              return [{ version: storedState.version, state: storedState.value }];
+            }
             storedState.value = params?.[1] || null;
-            return [{ version: 2, state: storedState.value }];
+            return [{ version: storedState.version || 1, state: storedState.value }];
           }
           return [];
         },
@@ -197,7 +267,7 @@ const makeStartHandHandler = (queries, storedState, userId, seatUserIds) => {
   });
 };
 
-const makeGetTableHandler = (queries, storedState, userId) =>
+const makeGetTableHandler = (queries, storedState, userId, options = {}) =>
   loadPokerHandler("netlify/functions/poker-get-table.mjs", {
     baseHeaders: () => ({}),
     corsHeaders: () => ({ "access-control-allow-origin": "https://example.test" }),
@@ -216,6 +286,7 @@ const makeGetTableHandler = (queries, storedState, userId) =>
     computeLegalActions,
     buildActionConstraints,
     loadHoleCardsByUserId,
+    updatePokerStateOptimistic,
     beginSql: async (fn) =>
       fn({
         unsafe: async (query, params) => {
@@ -261,8 +332,14 @@ const makeGetTableHandler = (queries, storedState, userId) =>
             return rows;
           }
           if (text.includes("update public.poker_state")) {
+            if (text.includes("version = version + 1")) {
+              if (options.updatePokerStateConflict) return [];
+              storedState.value = params?.[2] || storedState.value;
+              const baseVersion = Number(params?.[1]);
+              storedState.version = Number.isFinite(baseVersion) ? baseVersion + 1 : storedState.version + 1;
+              return [{ version: storedState.version }];
+            }
             storedState.value = params?.[1] || storedState.value;
-            storedState.version += 1;
             return [{ version: storedState.version }];
           }
           if (text.includes("insert into public.poker_actions")) {
@@ -285,6 +362,7 @@ const runCase = async ({
   applyAction: applyActionOverride,
   activeSeatUserIds,
   loadHoleCardsByUserId: loadHoleCardsByUserIdOverride,
+  updatePokerStateConflict,
 }) => {
   const queries = [];
   const storedState = { value: JSON.stringify(state), version: 3 };
@@ -295,6 +373,7 @@ const runCase = async ({
     applyAction: applyActionOverride,
     activeSeatUserIds,
     loadHoleCardsByUserId: loadHoleCardsByUserIdOverride,
+    updatePokerStateConflict,
   });
   const response = await handler({
     httpMethod: "POST",
@@ -341,6 +420,21 @@ const run = async () => {
   });
   assert.equal(invalidAmount.statusCode, 400);
   assert.equal(JSON.parse(invalidAmount.body).error, "invalid_action");
+
+  {
+    const conflictResponse = await runCase({
+      state: baseState,
+      action: { type: "CHECK" },
+      requestId: "req-conflict",
+      userId: "user-1",
+      updatePokerStateConflict: true,
+    });
+    assert.equal(conflictResponse.response.statusCode, 409);
+    assert.equal(JSON.parse(conflictResponse.response.body).error, "state_conflict");
+    assert.ok(
+      !conflictResponse.queries.some((entry) => entry.query.toLowerCase().includes("insert into public.poker_actions"))
+    );
+  }
 
   const nonContiguousSeats = [
     { userId: "user-1", seatNo: 1 },
@@ -642,6 +736,57 @@ const run = async () => {
   const holeCardQueries = queries.filter((entry) => entry.query.toLowerCase().includes("from public.poker_hole_cards"));
   assert.ok(holeCardQueries.length >= 1);
 
+  {
+    const idemQueries = [];
+    const idemStored = { value: JSON.stringify(baseState), version: 4, requests: new Map() };
+    const idemHandler = makeHandler(idemQueries, idemStored, "user-1");
+    const firstResponse = await idemHandler({
+      httpMethod: "POST",
+      headers: { origin: "https://example.test", authorization: "Bearer token" },
+      body: JSON.stringify({ tableId, requestId: "req-idem-1", action: { type: "CHECK" } }),
+    });
+    assert.equal(firstResponse.statusCode, 200);
+    const firstPayload = JSON.parse(firstResponse.body);
+    assert.equal(firstPayload.replayed, false);
+    const updateCountBefore = idemQueries.filter((entry) => entry.query.toLowerCase().includes("update public.poker_state")).length;
+    idemStored.value = JSON.stringify(baseState);
+    idemStored.version = 4;
+    const secondResponse = await idemHandler({
+      httpMethod: "POST",
+      headers: { origin: "https://example.test", authorization: "Bearer token" },
+      body: JSON.stringify({ tableId, requestId: "req-idem-1", action: { type: "CHECK" } }),
+    });
+    assert.equal(secondResponse.statusCode, 200);
+    const secondPayload = JSON.parse(secondResponse.body);
+    assert.equal(secondPayload.replayed, true);
+    const updateCountAfter = idemQueries.filter((entry) => entry.query.toLowerCase().includes("update public.poker_state")).length;
+    assert.equal(updateCountAfter, updateCountBefore);
+  }
+
+  {
+    const failQueries = [];
+    const failStored = { value: JSON.stringify(baseState), version: 4, requests: new Map() };
+    const failHandler = makeHandler(failQueries, failStored, "user-1", { failRequestWriteOnce: true });
+    const firstResponse = await failHandler({
+      httpMethod: "POST",
+      headers: { origin: "https://example.test", authorization: "Bearer token" },
+      body: JSON.stringify({ tableId, requestId: "req-write-fail", action: { type: "CHECK" } }),
+    });
+    assert.equal(firstResponse.statusCode, 500);
+    const updateCountAfterFirst = failQueries.filter((entry) => entry.query.toLowerCase().includes("update public.poker_state")).length;
+    const secondResponse = await failHandler({
+      httpMethod: "POST",
+      headers: { origin: "https://example.test", authorization: "Bearer token" },
+      body: JSON.stringify({ tableId, requestId: "req-write-fail", action: { type: "CHECK" } }),
+    });
+    assert.equal(secondResponse.statusCode, 202);
+    const secondPayload = JSON.parse(secondResponse.body);
+    assert.equal(secondPayload.error, "request_pending");
+    assert.equal(secondPayload.requestId, "req-write-fail");
+    const updateCountAfterSecond = failQueries.filter((entry) => entry.query.toLowerCase().includes("update public.poker_state")).length;
+    assert.equal(updateCountAfterSecond, updateCountAfterFirst);
+  }
+
   const handlerUser2Turn = makeHandler(queries, storedState, "user-2");
   const user2Check = await handlerUser2Turn({
     httpMethod: "POST",
@@ -832,7 +977,8 @@ const run = async () => {
 
   const updateCall = queries.find((entry) => entry.query.toLowerCase().includes("update public.poker_state"));
   assert.ok(updateCall, "expected poker_state update");
-  const updatedState = JSON.parse(updateCall.params?.[1] || "{}");
+  assert.ok(updateCall.query.toLowerCase().includes("where table_id = $1 and version = $2"));
+  const updatedState = JSON.parse(updateCall.params?.[2] || "{}");
   assert.equal(updatedState.holeCardsByUserId, undefined);
   assert.equal(updatedState.deck, undefined);
   assert.equal(updatedState.communityDealt, updatedState.community.length);
@@ -981,6 +1127,23 @@ const run = async () => {
     assert.equal(payload.state.state.showdown.potAwardedTotal, 15);
   }
 
+  {
+    const versionQueries = [];
+    const versionState = { ...baseState };
+    const versionStored = { value: JSON.stringify(versionState), version: 5 };
+    const versionHandler = makeHandler(versionQueries, versionStored, "user-1");
+    const versionResponse = await versionHandler({
+      httpMethod: "POST",
+      headers: { origin: "https://example.test", authorization: "Bearer token" },
+      body: JSON.stringify({ tableId, requestId: "req-version-1", action: { type: "CHECK" } }),
+    });
+    assert.equal(versionResponse.statusCode, 200);
+    const updateEntry = versionQueries.find((entry) => entry.query.toLowerCase().includes("update public.poker_state"));
+    assert.ok(updateEntry);
+    assert.ok(updateEntry.query.toLowerCase().includes("where table_id = $1 and version = $2"));
+    assert.equal(updateEntry.params?.[1], 5);
+  }
+
   const inactiveSeatResponse = await runCase({
     state: baseState,
     action: { type: "CHECK" },
@@ -1086,6 +1249,30 @@ const run = async () => {
     const timeoutBody = JSON.parse(timeoutResponse.body);
     assert.equal(timeoutBody.state.state.turnUserId, "user-2");
     assert.equal(timeoutBody.state.version, 2);
+  }
+
+  {
+    const timeoutState = {
+      ...baseState,
+      turnNo: 1,
+      turnStartedAt: Date.now() - 30000,
+      turnDeadlineAt: Date.now() - 1000,
+    };
+    const queriesTimeout = [];
+    const storedTimeout = { value: JSON.stringify(timeoutState), version: 1 };
+    const getTableHandler = makeGetTableHandler(queriesTimeout, storedTimeout, "user-2", {
+      updatePokerStateConflict: true,
+    });
+    const timeoutResponse = await getTableHandler({
+      httpMethod: "GET",
+      headers: { origin: "https://example.test", authorization: "Bearer token" },
+      queryStringParameters: { tableId },
+      path: `/poker-get-table/${tableId}`,
+    });
+    assert.equal(timeoutResponse.statusCode, 200);
+    const timeoutBody = JSON.parse(timeoutResponse.body);
+    assert.equal(timeoutBody.state.state.turnUserId, "user-1");
+    assert.equal(timeoutBody.state.version, 1);
   }
 };
 

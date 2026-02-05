@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import { loadPokerHandler } from "./helpers/poker-test-helpers.mjs";
+import { updatePokerStateOptimistic } from "../netlify/functions/_shared/poker-state-write.mjs";
 
 const tableId = "11111111-1111-4111-8111-111111111111";
 const userId = "user-1";
 
 const mockTx = (seatStack) => ({
-  unsafe: async (query) => {
+  unsafe: async (query, params) => {
     const text = String(query).toLowerCase();
     if (text.includes("from public.poker_tables")) {
       return [{ id: tableId, status: "OPEN" }];
@@ -26,6 +27,39 @@ const mockTx = (seatStack) => ({
         },
       ];
     }
+    if (text.includes("update public.poker_state") && text.includes("version = version + 1")) {
+      const baseVersion = Number(params?.[1] ?? 1);
+      return [{ version: Number.isFinite(baseVersion) ? baseVersion + 1 : 2 }];
+    }
+    return [];
+  },
+});
+
+const mockConflictTx = (seatStack) => ({
+  unsafe: async (query, params) => {
+    const text = String(query).toLowerCase();
+    if (text.includes("from public.poker_tables")) {
+      return [{ id: tableId, status: "OPEN" }];
+    }
+    if (text.includes("from public.poker_seats") && text.includes("for update")) {
+      return [{ seat_no: 1, status: "ACTIVE", stack: seatStack }];
+    }
+    if (text.includes("from public.poker_state")) {
+      return [
+        {
+          version: 2,
+          state: JSON.stringify({
+            tableId,
+            seats: [{ userId, seatNo: 1 }, { userId: "user-2", seatNo: 2 }],
+            stacks: { "someone-else": 123, "user-2": 50 },
+            pot: 0,
+          }),
+        },
+      ];
+    }
+    if (text.includes("update public.poker_state") && text.includes("version = version + 1")) {
+      return [];
+    }
     return [];
   },
 });
@@ -38,11 +72,62 @@ const makeHandler = (seatStack, postCalls, queries) =>
     verifySupabaseJwt: async () => ({ valid: true, userId }),
     isValidUuid: () => true,
     normalizeRequestId: () => ({ ok: true, value: null }),
+    updatePokerStateOptimistic,
     beginSql: async (fn) => {
       const tx = mockTx(seatStack);
       return fn({
         unsafe: async (query, params) => {
           queries.push({ query: String(query), params });
+          return tx.unsafe(query, params);
+        },
+      });
+    },
+    postTransaction: async (payload) => {
+      postCalls.push(payload);
+      return { transaction: { id: "tx-1" } };
+    },
+    klog: () => {},
+  });
+
+const makeHandlerWithRequests = (seatStack, postCalls, queries, requestStore) =>
+  loadPokerHandler("netlify/functions/poker-leave.mjs", {
+    baseHeaders: () => ({}),
+    corsHeaders: () => ({ "access-control-allow-origin": "https://example.test" }),
+    extractBearerToken: () => "token",
+    verifySupabaseJwt: async () => ({ valid: true, userId }),
+    isValidUuid: () => true,
+    normalizeRequestId: (value) => ({ ok: true, value: value ?? null }),
+    updatePokerStateOptimistic,
+    beginSql: async (fn) => {
+      const tx = mockTx(seatStack);
+      return fn({
+        unsafe: async (query, params) => {
+          queries.push({ query: String(query), params });
+          const text = String(query).toLowerCase();
+          if (text.includes("from public.poker_requests")) {
+            const key = `${params?.[0]}|${params?.[1]}|${params?.[2]}|${params?.[3]}`;
+            const entry = requestStore.get(key);
+            if (!entry) return [];
+            return [{ result_json: entry.resultJson, created_at: entry.createdAt }];
+          }
+          if (text.includes("insert into public.poker_requests")) {
+            const key = `${params?.[0]}|${params?.[1]}|${params?.[2]}|${params?.[3]}`;
+            if (requestStore.has(key)) return [];
+            requestStore.set(key, { resultJson: null, createdAt: new Date().toISOString() });
+            return [{ request_id: params?.[2] }];
+          }
+          if (text.includes("update public.poker_requests")) {
+            const key = `${params?.[0]}|${params?.[1]}|${params?.[2]}|${params?.[3]}`;
+            const entry = requestStore.get(key) || { createdAt: new Date().toISOString() };
+            entry.resultJson = params?.[4] ?? null;
+            requestStore.set(key, entry);
+            return [{ request_id: params?.[2] }];
+          }
+          if (text.includes("delete from public.poker_requests")) {
+            const key = `${params?.[0]}|${params?.[1]}|${params?.[2]}|${params?.[3]}`;
+            requestStore.delete(key);
+            return [];
+          }
           return tx.unsafe(query, params);
         },
       });
@@ -76,7 +161,7 @@ const run = async () => {
     q.query.toLowerCase().includes("update public.poker_state set version = version + 1")
   );
   assert.ok(stateUpdate, "leave should update poker_state");
-  const updatedStateJson = stateUpdate.params?.[1];
+  const updatedStateJson = stateUpdate.params?.[2];
   assert.ok(updatedStateJson, "leave should pass updated state JSON as 2nd param");
   const updatedState = JSON.parse(updatedStateJson);
   assert.ok(Array.isArray(updatedState.seats), "updatedState.seats should be array");
@@ -102,6 +187,57 @@ const run = async () => {
     negativeQueries.some((q) => q.query.toLowerCase().includes("delete from public.poker_seats")),
     "leave should delete poker_seats row when stack is negative"
   );
+
+  const repeatCalls = [];
+  const repeatQueries = [];
+  const repeatHandler = makeHandler(null, repeatCalls, repeatQueries);
+  const repeatResponse = await repeatHandler({
+    httpMethod: "POST",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    body: JSON.stringify({ tableId }),
+  });
+  assert.equal(repeatResponse.statusCode, 200);
+
+  const requestStore = new Map();
+  const idempotentCalls = [];
+  const idempotentQueries = [];
+  const idempotentHandler = makeHandlerWithRequests(null, idempotentCalls, idempotentQueries, requestStore);
+  const requestId = "request-1";
+  const first = await idempotentHandler({
+    httpMethod: "POST",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    body: JSON.stringify({ tableId, requestId }),
+  });
+  assert.equal(first.statusCode, 200);
+  const firstBody = JSON.parse(first.body);
+  const second = await idempotentHandler({
+    httpMethod: "POST",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    body: JSON.stringify({ tableId, requestId }),
+  });
+  assert.equal(second.statusCode, 200);
+  assert.deepEqual(JSON.parse(second.body), firstBody);
+
+  const conflictHandler = loadPokerHandler("netlify/functions/poker-leave.mjs", {
+    baseHeaders: () => ({}),
+    corsHeaders: () => ({ "access-control-allow-origin": "https://example.test" }),
+    extractBearerToken: () => "token",
+    verifySupabaseJwt: async () => ({ valid: true, userId }),
+    isValidUuid: () => true,
+    normalizeRequestId: () => ({ ok: true, value: null }),
+    updatePokerStateOptimistic,
+    beginSql: async (fn) => fn(mockConflictTx(null)),
+    postTransaction: async () => ({ transaction: { id: "tx-1" } }),
+    klog: () => {},
+  });
+  const conflictResponse = await conflictHandler({
+    httpMethod: "POST",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    body: JSON.stringify({ tableId }),
+  });
+  assert.equal(conflictResponse.statusCode, 409);
+  const conflictBody = JSON.parse(conflictResponse.body);
+  assert.equal(conflictBody.error, "state_conflict");
 };
 
 run().catch((error) => {

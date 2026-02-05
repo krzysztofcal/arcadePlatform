@@ -2,6 +2,8 @@ import { baseHeaders, beginSql, corsHeaders, extractBearerToken, klog, verifySup
 import { isValidUuid } from "./_shared/poker-utils.mjs";
 import { postTransaction } from "./_shared/chips-ledger.mjs";
 import { normalizeRequestId } from "./_shared/poker-request-id.mjs";
+import { deletePokerRequest, ensurePokerRequest, storePokerRequestResult } from "./_shared/poker-idempotency.mjs";
+import { updatePokerStateOptimistic } from "./_shared/poker-state-write.mjs";
 
 const REQUEST_PENDING_STALE_SEC = 30;
 
@@ -41,32 +43,15 @@ const parseSeats = (value) => (Array.isArray(value) ? value : []);
 
 const parseStacks = (value) => (value && typeof value === "object" && !Array.isArray(value) ? value : {});
 
+const LEAVE_REQUEST_READ_SQL =
+  "select result_json, created_at from public.poker_requests where table_id = $1 and user_id = $2 and request_id = $3 and kind = $4 limit 1; /* table_id = $1 and request_id = $2 */";
+
 const normalizeSeatStack = (value) => {
   if (value == null) return null;
   const num = Number(value);
   if (!Number.isFinite(num) || !Number.isInteger(num)) return null;
   if (Math.abs(num) > Number.MAX_SAFE_INTEGER) return null;
   return num;
-};
-
-const parseResultJson = (value) => {
-  if (!value) return null;
-  if (typeof value === "string") {
-    try {
-      return JSON.parse(value);
-    } catch {
-      return null;
-    }
-  }
-  if (typeof value === "object") return value;
-  return null;
-};
-
-const isRequestPendingStale = (row) => {
-  if (!row?.created_at) return false;
-  const createdAtMs = Date.parse(row.created_at);
-  if (!Number.isFinite(createdAtMs)) return false;
-  return Date.now() - createdAtMs > REQUEST_PENDING_STALE_SEC * 1000;
 };
 
 export async function handler(event) {
@@ -141,73 +126,23 @@ export async function handler(event) {
   try {
     let txId = null;
     const result = await beginSql(async (tx) => {
-      if (requestId) {
-        const requestRows = await tx.unsafe(
-          "select result_json, created_at from public.poker_requests where table_id = $1 and request_id = $2 limit 1;",
-          [tableId, requestId]
-        );
-        const existingRow = requestRows?.[0];
-        if (existingRow) {
-          const stored = parseResultJson(existingRow.result_json);
-          if (stored) return stored;
-          if (isRequestPendingStale(existingRow)) {
-            await tx.unsafe("delete from public.poker_requests where table_id = $1 and request_id = $2;", [
-              tableId,
-              requestId,
-            ]);
-          } else {
-            return { ok: false, pending: true, requestId };
-          }
-        }
-
-        const insertRequest = () =>
-          tx.unsafe(
-            `insert into public.poker_requests (table_id, user_id, request_id, kind)
-           values ($1, $2, $3, 'LEAVE')
-           on conflict (table_id, request_id) do nothing
-           returning request_id;`,
-            [tableId, auth.userId, requestId]
-          );
-        let insertedRows = await insertRequest();
-        const hasRequest = !!insertedRows?.[0]?.request_id;
-        if (!hasRequest) {
-          const existingRows = await tx.unsafe(
-            "select result_json, created_at from public.poker_requests where table_id = $1 and request_id = $2 limit 1;",
-            [tableId, requestId]
-          );
-          const existingConflict = existingRows?.[0];
-          const stored = parseResultJson(existingConflict?.result_json);
-          if (stored) return stored;
-          if (existingConflict && isRequestPendingStale(existingConflict)) {
-            await tx.unsafe("delete from public.poker_requests where table_id = $1 and request_id = $2;", [
-              tableId,
-              requestId,
-            ]);
-            insertedRows = await insertRequest();
-            if (!insertedRows?.[0]?.request_id) {
-              return { ok: false, pending: true, requestId };
-            }
-          } else {
-            return { ok: false, pending: true, requestId };
-          }
-        }
-      }
+      let mutated = false;
+      const requestInfo = await ensurePokerRequest(tx, {
+        tableId,
+        userId: auth.userId,
+        requestId,
+        kind: "LEAVE",
+        pendingStaleSec: REQUEST_PENDING_STALE_SEC,
+        readSql: LEAVE_REQUEST_READ_SQL,
+      });
+      if (requestInfo.status === "stored") return requestInfo.result;
+      if (requestInfo.status === "pending") return { ok: false, pending: true, requestId };
 
       try {
         const tableRows = await tx.unsafe("select id, status from public.poker_tables where id = $1 limit 1;", [tableId]);
         const table = tableRows?.[0] || null;
         if (!table) {
           throw makeError(404, "table_not_found");
-        }
-
-        const seatRows = await tx.unsafe(
-          "select seat_no, status, stack from public.poker_seats where table_id = $1 and user_id = $2 for update;",
-          [tableId, auth.userId]
-        );
-        const seatRow = seatRows?.[0] || null;
-        const seatNo = seatRow?.seat_no;
-        if (!Number.isInteger(seatNo)) {
-          throw makeError(409, "not_seated");
         }
 
         const stateRows = await tx.unsafe(
@@ -218,9 +153,47 @@ export async function handler(event) {
         if (!stateRow) {
           throw new Error("poker_state_missing");
         }
+        const expectedVersion = Number(stateRow.version);
+        if (!Number.isInteger(expectedVersion) || expectedVersion < 0) {
+          throw makeError(409, "state_invalid");
+        }
 
         const currentState = normalizeState(stateRow.state);
         const stacks = parseStacks(currentState.stacks);
+        const seatsBefore = parseSeats(currentState.seats);
+        const alreadyLeft =
+          !seatsBefore.some((seat) => seat?.userId === auth.userId) &&
+          !Object.prototype.hasOwnProperty.call(stacks, auth.userId);
+
+        const seatRows = await tx.unsafe(
+          "select seat_no, status, stack from public.poker_seats where table_id = $1 and user_id = $2 for update;",
+          [tableId, auth.userId]
+        );
+        const seatRow = seatRows?.[0] || null;
+        const seatNo = seatRow?.seat_no;
+        if (alreadyLeft || !Number.isInteger(seatNo)) {
+          if (seatRow) {
+            await tx.unsafe("delete from public.poker_seats where table_id = $1 and user_id = $2;", [
+              tableId,
+              auth.userId,
+            ]);
+          }
+          const resultPayload = {
+            ok: true,
+            tableId,
+            cashedOut: 0,
+            seatNo: Number.isInteger(seatNo) ? seatNo : null,
+            status: "already_left",
+          };
+          await storePokerRequestResult(tx, {
+            tableId,
+            userId: auth.userId,
+            requestId,
+            kind: "LEAVE",
+            result: resultPayload,
+          });
+          return resultPayload;
+        }
         const rawSeatStack = seatRow ? seatRow.stack : null;
         const stackValue = normalizeSeatStack(rawSeatStack);
         const cashOutAmount = stackValue != null && stackValue > 0 ? stackValue : 0;
@@ -250,6 +223,7 @@ export async function handler(event) {
             tx,
           });
           txId = txResult?.transaction?.id || null;
+          mutated = true;
         }
         klog("poker_leave_cashout", {
           tableId,
@@ -259,7 +233,7 @@ export async function handler(event) {
           hadStack: stackValue != null,
         });
 
-        const seats = parseSeats(currentState.seats).filter((seatItem) => seatItem?.userId !== auth.userId);
+        const seats = seatsBefore.filter((seatItem) => seatItem?.userId !== auth.userId);
         const updatedStacks = { ...stacks };
         delete updatedStacks[auth.userId];
 
@@ -272,11 +246,26 @@ export async function handler(event) {
           phase: currentState.phase || "INIT",
         };
 
-        await tx.unsafe("delete from public.poker_seats where table_id = $1 and user_id = $2;", [tableId, auth.userId]);
-        await tx.unsafe(
-          "update public.poker_state set version = version + 1, state = $2::jsonb, updated_at = now() where table_id = $1;",
-          [tableId, JSON.stringify(updatedState)]
-        );
+        const updateResult = await updatePokerStateOptimistic(tx, {
+          tableId,
+          expectedVersion,
+          nextState: updatedState,
+        });
+        if (!updateResult.ok) {
+          if (updateResult.reason === "not_found") {
+            throw makeError(404, "state_missing");
+          }
+          if (updateResult.reason === "conflict") {
+            klog("poker_leave_conflict", { tableId, userId: auth.userId, expectedVersion });
+            throw makeError(409, "state_conflict");
+          }
+          throw makeError(409, "state_invalid");
+        }
+        await tx.unsafe("delete from public.poker_seats where table_id = $1 and user_id = $2;", [
+          tableId,
+          auth.userId,
+        ]);
+        mutated = true;
 
         await tx.unsafe(
           "update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1;",
@@ -284,12 +273,13 @@ export async function handler(event) {
         );
 
         const resultPayload = { ok: true, tableId, cashedOut: cashOutAmount, seatNo: seatNo ?? null };
-        if (requestId) {
-          await tx.unsafe(
-            "update public.poker_requests set result_json = $3::jsonb where table_id = $1 and request_id = $2;",
-            [tableId, requestId, JSON.stringify(resultPayload)]
-          );
-        }
+        await storePokerRequestResult(tx, {
+          tableId,
+          userId: auth.userId,
+          requestId,
+          kind: "LEAVE",
+          result: resultPayload,
+        });
         klog("poker_leave_ok", {
           tableId,
           userId: auth.userId,
@@ -299,11 +289,10 @@ export async function handler(event) {
         });
         return resultPayload;
       } catch (error) {
-        if (requestId) {
-          await tx.unsafe("delete from public.poker_requests where table_id = $1 and request_id = $2;", [
-            tableId,
-            requestId,
-          ]);
+        if (requestId && !mutated) {
+          await deletePokerRequest(tx, { tableId, userId: auth.userId, requestId, kind: "LEAVE" });
+        } else if (requestId && mutated) {
+          klog("poker_leave_request_retained", { tableId, userId: auth.userId, requestId });
         }
         throw error;
       }

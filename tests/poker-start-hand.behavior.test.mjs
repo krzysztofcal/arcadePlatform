@@ -11,6 +11,8 @@ import {
   upgradeLegacyInitStateWithSeats,
   withoutPrivateState,
 } from "../netlify/functions/_shared/poker-state-utils.mjs";
+import { normalizeRequestId } from "../netlify/functions/_shared/poker-request-id.mjs";
+import { updatePokerStateOptimistic } from "../netlify/functions/_shared/poker-state-write.mjs";
 import { loadPokerHandler } from "./helpers/poker-test-helpers.mjs";
 
 const tableId = "11111111-1111-4111-8111-111111111111";
@@ -41,17 +43,20 @@ const makeHandler = (queries, storedState) =>
     verifySupabaseJwt: async () => ({ valid: true, userId }),
     isValidUuid: () => true,
     normalizeJsonState,
+    normalizeRequestId,
     upgradeLegacyInitStateWithSeats,
     withoutPrivateState,
     computeLegalActions,
     computeNextDealerSeatNo,
     buildActionConstraints,
+    updatePokerStateOptimistic,
     TURN_MS,
     beginSql: async (fn) =>
       fn({
         unsafe: async (query, params) => {
           const text = String(query).toLowerCase();
           queries.push({ query: String(query), params });
+          const requestStore = storedState.requests || (storedState.requests = new Map());
           if (text.includes("from public.poker_tables")) {
             return [{ id: tableId, status: "OPEN", max_players: 6, stakes: "{\"sb\":1,\"bb\":2}" }];
           }
@@ -67,6 +72,30 @@ const makeHandler = (queries, storedState) =>
               { user_id: "user-2", seat_no: 3, status: "ACTIVE" },
               { user_id: "user-3", seat_no: 5, status: "ACTIVE" },
             ];
+          }
+          if (text.includes("from public.poker_requests")) {
+            const requestKey = `${params?.[0]}|${params?.[1]}|${params?.[2]}|${params?.[3]}`;
+            const entry = requestStore.get(requestKey);
+            if (!entry) return [];
+            return [{ result_json: entry.resultJson, created_at: entry.createdAt }];
+          }
+          if (text.includes("insert into public.poker_requests")) {
+            const requestKey = `${params?.[0]}|${params?.[1]}|${params?.[2]}|${params?.[3]}`;
+            if (requestStore.has(requestKey)) return [];
+            requestStore.set(requestKey, { resultJson: null, createdAt: new Date().toISOString() });
+            return [{ request_id: params?.[2] }];
+          }
+          if (text.includes("update public.poker_requests")) {
+            const requestKey = `${params?.[0]}|${params?.[1]}|${params?.[2]}|${params?.[3]}`;
+            const entry = requestStore.get(requestKey) || { createdAt: new Date().toISOString() };
+            entry.resultJson = params?.[4] ?? null;
+            requestStore.set(requestKey, entry);
+            return [{ request_id: params?.[2] }];
+          }
+          if (text.includes("delete from public.poker_requests")) {
+            const requestKey = `${params?.[0]}|${params?.[1]}|${params?.[2]}|${params?.[3]}`;
+            requestStore.delete(requestKey);
+            return [];
           }
           if (text.includes("insert into public.poker_hole_cards")) {
             const holeCardsStore = storedState.holeCardsStore;
@@ -95,8 +124,14 @@ const makeHandler = (queries, storedState) =>
             return [];
           }
           if (text.includes("update public.poker_state")) {
+            if (text.includes("version = version + 1")) {
+              storedState.value = params?.[2] || null;
+              const baseVersion = Number(params?.[1]);
+              storedState.version = Number.isFinite(baseVersion) ? baseVersion + 1 : (storedState.version || 1) + 1;
+              return [{ version: storedState.version, state: storedState.value }];
+            }
             storedState.value = params?.[1] || null;
-            return [{ version: 2, state: storedState.value }];
+            return [{ version: storedState.version || 1, state: storedState.value }];
           }
           return [];
         },
@@ -147,8 +182,12 @@ const runHappyPath = async () => {
   assert.ok(!response.body.includes("\"handSeed\""));
 
   const insertHoleCardsIndex = queries.findIndex((q) => q.query.toLowerCase().includes("insert into public.poker_hole_cards"));
-  const updateCall = queries.find((q) => q.query.toLowerCase().includes("version = version + 1"));
-  const updateIndex = queries.findIndex((q) => q.query.toLowerCase().includes("version = version + 1"));
+  const updateCalls = queries.filter((q) => q.query.toLowerCase().includes("version = version + 1"));
+  const updateCall = updateCalls[updateCalls.length - 1];
+  const updateIndex = queries.reduce((acc, entry, index) => {
+    if (entry.query.toLowerCase().includes("version = version + 1")) return index;
+    return acc;
+  }, -1);
   const insertCall = queries[insertHoleCardsIndex];
   const seatOrder = ["user-1", "user-2", "user-3"];
   assert.ok(updateCall, "expected update to poker_state");
@@ -160,7 +199,8 @@ const runHappyPath = async () => {
     const cards = JSON.parse(insertParams[i + 3]);
     assert.equal(cards.length, 2);
   }
-  const updatedState = JSON.parse(updateCall.params?.[1] || "{}");
+  assert.ok(updateCall.query.toLowerCase().includes("where table_id = $1 and version = $2"));
+  const updatedState = JSON.parse(updateCall.params?.[2] || "{}");
   assert.ok(updatedState.handId, "state should include handId");
   assert.equal(updatedState.deck, undefined);
   assert.equal(typeof updatedState.handSeed, "string");
@@ -221,6 +261,7 @@ const runReplayPath = async () => {
   const { handler, queries, storedState, payload } = await runHappyPath();
   const updateCount = queries.filter((q) => q.query.toLowerCase().includes("update public.poker_state")).length;
   const actionCount = queries.filter((q) => q.query.toLowerCase().includes("insert into public.poker_actions")).length;
+  const holeCardQueryCount = queries.filter((q) => q.query.toLowerCase().includes("from public.poker_hole_cards")).length;
   const replayResponse = await handler({
     httpMethod: "POST",
     headers: { origin: "https://example.test", authorization: "Bearer token" },
@@ -244,9 +285,10 @@ const runReplayPath = async () => {
 
   const updateCalls = queries.filter((q) => q.query.toLowerCase().includes("update public.poker_state"));
   const actionCalls = queries.filter((q) => q.query.toLowerCase().includes("insert into public.poker_actions"));
+  const holeCardQueries = queries.filter((q) => q.query.toLowerCase().includes("from public.poker_hole_cards"));
   assert.equal(updateCalls.length, updateCount);
   assert.equal(actionCalls.length, actionCount);
-  assert.ok(queries.some((q) => q.query.toLowerCase().includes("from public.poker_hole_cards")));
+  assert.equal(holeCardQueries.length, holeCardQueryCount);
 
   const differentResponse = await handler({
     httpMethod: "POST",
@@ -280,12 +322,15 @@ const runHeadsUpBlinds = async () => {
     computeLegalActions,
     computeNextDealerSeatNo,
     buildActionConstraints,
+    normalizeRequestId,
+    updatePokerStateOptimistic,
     TURN_MS,
     beginSql: async (fn) =>
       fn({
         unsafe: async (query, params) => {
           const text = String(query).toLowerCase();
           queries.push({ query: String(query), params });
+          const requestStore = storedState.requests || (storedState.requests = new Map());
           if (text.includes("from public.poker_tables")) {
             return [{ id: tableId, status: "OPEN", max_players: 6, stakes: "1/2" }];
           }
@@ -301,6 +346,30 @@ const runHeadsUpBlinds = async () => {
               { user_id: "user-2", seat_no: 2, status: "ACTIVE" },
             ];
           }
+          if (text.includes("from public.poker_requests")) {
+            const requestKey = `${params?.[0]}|${params?.[1]}|${params?.[2]}|${params?.[3]}`;
+            const entry = requestStore.get(requestKey);
+            if (!entry) return [];
+            return [{ result_json: entry.resultJson, created_at: entry.createdAt }];
+          }
+          if (text.includes("insert into public.poker_requests")) {
+            const requestKey = `${params?.[0]}|${params?.[1]}|${params?.[2]}|${params?.[3]}`;
+            if (requestStore.has(requestKey)) return [];
+            requestStore.set(requestKey, { resultJson: null, createdAt: new Date().toISOString() });
+            return [{ request_id: params?.[2] }];
+          }
+          if (text.includes("update public.poker_requests")) {
+            const requestKey = `${params?.[0]}|${params?.[1]}|${params?.[2]}|${params?.[3]}`;
+            const entry = requestStore.get(requestKey) || { createdAt: new Date().toISOString() };
+            entry.resultJson = params?.[4] ?? null;
+            requestStore.set(requestKey, entry);
+            return [{ request_id: params?.[2] }];
+          }
+          if (text.includes("delete from public.poker_requests")) {
+            const requestKey = `${params?.[0]}|${params?.[1]}|${params?.[2]}|${params?.[3]}`;
+            requestStore.delete(requestKey);
+            return [];
+          }
           if (text.includes("insert into public.poker_hole_cards")) {
             const insertedRows = [];
             for (let i = 0; i < params.length; i += 4) {
@@ -314,8 +383,14 @@ const runHeadsUpBlinds = async () => {
             return insertedRows;
           }
           if (text.includes("update public.poker_state")) {
+            if (text.includes("version = version + 1")) {
+              storedState.value = params?.[2] || null;
+              const baseVersion = Number(params?.[1]);
+              storedState.version = Number.isFinite(baseVersion) ? baseVersion + 1 : (storedState.version || 1) + 1;
+              return [{ version: storedState.version, state: storedState.value }];
+            }
             storedState.value = params?.[1] || null;
-            return [{ version: 2, state: storedState.value }];
+            return [{ version: storedState.version || 1, state: storedState.value }];
           }
           if (text.includes("insert into public.poker_actions")) {
             return [];
@@ -443,12 +518,15 @@ const runInvalidDeal = async () => {
     computeLegalActions,
     computeNextDealerSeatNo,
     buildActionConstraints,
+    normalizeRequestId,
+    updatePokerStateOptimistic,
     TURN_MS,
     beginSql: async (fn) =>
       fn({
         unsafe: async (query, params) => {
           const text = String(query).toLowerCase();
           queries.push({ query: String(query), params });
+          const requestStore = storedState.requests || (storedState.requests = new Map());
           if (text.includes("from public.poker_tables")) {
             return [{ id: tableId, status: "OPEN", max_players: 6, stakes: "{\"sb\":1,\"bb\":2}" }];
           }
@@ -462,6 +540,30 @@ const runInvalidDeal = async () => {
               { user_id: "user-3", seat_no: 5, status: "ACTIVE" },
             ];
           }
+          if (text.includes("from public.poker_requests")) {
+            const requestKey = `${params?.[0]}|${params?.[1]}|${params?.[2]}|${params?.[3]}`;
+            const entry = requestStore.get(requestKey);
+            if (!entry) return [];
+            return [{ result_json: entry.resultJson, created_at: entry.createdAt }];
+          }
+          if (text.includes("insert into public.poker_requests")) {
+            const requestKey = `${params?.[0]}|${params?.[1]}|${params?.[2]}|${params?.[3]}`;
+            if (requestStore.has(requestKey)) return [];
+            requestStore.set(requestKey, { resultJson: null, createdAt: new Date().toISOString() });
+            return [{ request_id: params?.[2] }];
+          }
+          if (text.includes("update public.poker_requests")) {
+            const requestKey = `${params?.[0]}|${params?.[1]}|${params?.[2]}|${params?.[3]}`;
+            const entry = requestStore.get(requestKey) || { createdAt: new Date().toISOString() };
+            entry.resultJson = params?.[4] ?? null;
+            requestStore.set(requestKey, entry);
+            return [{ request_id: params?.[2] }];
+          }
+          if (text.includes("delete from public.poker_requests")) {
+            const requestKey = `${params?.[0]}|${params?.[1]}|${params?.[2]}|${params?.[3]}`;
+            requestStore.delete(requestKey);
+            return [];
+          }
           if (text.includes("insert into public.poker_hole_cards")) {
             storedState.holeCardsStore.set("unexpected", params);
             const insertedRows = [];
@@ -472,8 +574,14 @@ const runInvalidDeal = async () => {
             return insertedRows;
           }
           if (text.includes("update public.poker_state")) {
+            if (text.includes("version = version + 1")) {
+              storedState.value = params?.[2] || null;
+              const baseVersion = Number(params?.[1]);
+              storedState.version = Number.isFinite(baseVersion) ? baseVersion + 1 : (storedState.version || 1) + 1;
+              return [{ version: storedState.version, state: storedState.value }];
+            }
             storedState.value = params?.[1] || null;
-            return [{ version: 2, state: storedState.value }];
+            return [{ version: storedState.version || 1, state: storedState.value }];
           }
           return [];
         },
@@ -492,7 +600,8 @@ const runInvalidDeal = async () => {
   const payload = JSON.parse(response.body);
   assert.equal(payload.error, "state_invalid");
   assert.ok(!queries.some((q) => q.query.toLowerCase().includes("insert into public.poker_hole_cards")));
-  assert.ok(!queries.some((q) => q.query.toLowerCase().includes("version = version + 1")));
+  const updateCalls = queries.filter((q) => q.query.toLowerCase().includes("version = version + 1"));
+  assert.equal(updateCalls.length, 1);
 };
 
 const runMissingHoleCardsTable = async () => {
@@ -515,7 +624,8 @@ const runMissingHoleCardsTable = async () => {
   assert.equal(response.statusCode, 409);
   const payload = JSON.parse(response.body);
   assert.equal(payload.error, "state_invalid");
-  assert.ok(!queries.some((q) => q.query.toLowerCase().includes("version = version + 1")));
+  const updateCalls = queries.filter((q) => q.query.toLowerCase().includes("version = version + 1"));
+  assert.equal(updateCalls.length, 1);
   assert.ok(!queries.some((q) => q.query.toLowerCase().includes("insert into public.poker_actions")));
 };
 
@@ -541,6 +651,7 @@ const runMissingDealSecret = async () => {
 
 const runMissingStateRow = async () => {
   const queries = [];
+  const requestStore = new Map();
   const handler = loadPokerHandler("netlify/functions/poker-start-hand.mjs", {
     baseHeaders: () => ({}),
     corsHeaders: () => ({ "access-control-allow-origin": "https://example.test" }),
@@ -555,17 +666,43 @@ const runMissingStateRow = async () => {
     verifySupabaseJwt: async () => ({ valid: true, userId }),
     isValidUuid: () => true,
     normalizeJsonState,
+    normalizeRequestId,
     upgradeLegacyInitStateWithSeats,
     withoutPrivateState,
     computeLegalActions,
     computeNextDealerSeatNo,
     buildActionConstraints,
+    updatePokerStateOptimistic,
     TURN_MS,
     beginSql: async (fn) =>
       fn({
         unsafe: async (query, params) => {
           const text = String(query).toLowerCase();
           queries.push({ query: String(query), params });
+          if (text.includes("from public.poker_requests")) {
+            const requestKey = `${params?.[0]}|${params?.[1]}|${params?.[2]}|${params?.[3]}`;
+            const entry = requestStore.get(requestKey);
+            if (!entry) return [];
+            return [{ result_json: entry.resultJson, created_at: entry.createdAt }];
+          }
+          if (text.includes("insert into public.poker_requests")) {
+            const requestKey = `${params?.[0]}|${params?.[1]}|${params?.[2]}|${params?.[3]}`;
+            if (requestStore.has(requestKey)) return [];
+            requestStore.set(requestKey, { resultJson: null, createdAt: new Date().toISOString() });
+            return [{ request_id: params?.[2] }];
+          }
+          if (text.includes("update public.poker_requests")) {
+            const requestKey = `${params?.[0]}|${params?.[1]}|${params?.[2]}|${params?.[3]}`;
+            const entry = requestStore.get(requestKey) || { createdAt: new Date().toISOString() };
+            entry.resultJson = params?.[4] ?? null;
+            requestStore.set(requestKey, entry);
+            return [{ request_id: params?.[2] }];
+          }
+          if (text.includes("delete from public.poker_requests")) {
+            const requestKey = `${params?.[0]}|${params?.[1]}|${params?.[2]}|${params?.[3]}`;
+            requestStore.delete(requestKey);
+            return [];
+          }
           if (text.includes("from public.poker_tables")) {
             return [{ id: tableId, status: "OPEN", max_players: 6, stakes: "{\"sb\":1,\"bb\":2}" }];
           }
@@ -595,8 +732,31 @@ const runMissingStateRow = async () => {
   assert.equal(payload.error, "state_invalid");
 };
 
+const runRequestPending = async () => {
+  const queries = [];
+  const storedState = {
+    value: JSON.stringify({ phase: "INIT", stacks: initialStacks }),
+    holeCardsStore: new Map(),
+    requests: new Map([[`${tableId}|${userId}|req-pending|START_HAND`, { resultJson: null, createdAt: new Date().toISOString() }]]),
+  };
+  const handler = makeHandler(queries, storedState);
+  const response = await handler({
+    httpMethod: "POST",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    body: JSON.stringify({ tableId, requestId: "req-pending" }),
+  });
+
+  assert.equal(response.statusCode, 202);
+  const payload = JSON.parse(response.body);
+  assert.equal(payload.error, "request_pending");
+  assert.equal(payload.requestId, "req-pending");
+  assert.ok(!queries.some((q) => q.query.toLowerCase().includes("version = version + 1")));
+};
+
 const runInvalidStakes = async () => {
   const queries = [];
+  const requestStore = new Map();
+  const storedState = { value: null, version: 1 };
   const handler = loadPokerHandler("netlify/functions/poker-start-hand.mjs", {
     baseHeaders: () => ({}),
     corsHeaders: () => ({ "access-control-allow-origin": "https://example.test" }),
@@ -611,17 +771,43 @@ const runInvalidStakes = async () => {
     verifySupabaseJwt: async () => ({ valid: true, userId }),
     isValidUuid: () => true,
     normalizeJsonState,
+    normalizeRequestId,
     upgradeLegacyInitStateWithSeats,
     withoutPrivateState,
     computeLegalActions,
     computeNextDealerSeatNo,
     buildActionConstraints,
+    updatePokerStateOptimistic,
     TURN_MS,
     beginSql: async (fn) =>
       fn({
         unsafe: async (query, params) => {
           const text = String(query).toLowerCase();
           queries.push({ query: String(query), params });
+          if (text.includes("from public.poker_requests")) {
+            const requestKey = `${params?.[0]}|${params?.[1]}|${params?.[2]}|${params?.[3]}`;
+            const entry = requestStore.get(requestKey);
+            if (!entry) return [];
+            return [{ result_json: entry.resultJson, created_at: entry.createdAt }];
+          }
+          if (text.includes("insert into public.poker_requests")) {
+            const requestKey = `${params?.[0]}|${params?.[1]}|${params?.[2]}|${params?.[3]}`;
+            if (requestStore.has(requestKey)) return [];
+            requestStore.set(requestKey, { resultJson: null, createdAt: new Date().toISOString() });
+            return [{ request_id: params?.[2] }];
+          }
+          if (text.includes("update public.poker_requests")) {
+            const requestKey = `${params?.[0]}|${params?.[1]}|${params?.[2]}|${params?.[3]}`;
+            const entry = requestStore.get(requestKey) || { createdAt: new Date().toISOString() };
+            entry.resultJson = params?.[4] ?? null;
+            requestStore.set(requestKey, entry);
+            return [{ request_id: params?.[2] }];
+          }
+          if (text.includes("delete from public.poker_requests")) {
+            const requestKey = `${params?.[0]}|${params?.[1]}|${params?.[2]}|${params?.[3]}`;
+            requestStore.delete(requestKey);
+            return [];
+          }
           if (text.includes("from public.poker_tables")) {
             return [{ id: tableId, status: "OPEN", max_players: 6, stakes: "{\"sb\":0,\"bb\":0}" }];
           }
@@ -633,6 +819,16 @@ const runInvalidStakes = async () => {
               { user_id: "user-1", seat_no: 1, status: "ACTIVE" },
               { user_id: "user-2", seat_no: 3, status: "ACTIVE" },
             ];
+          }
+          if (text.includes("update public.poker_state")) {
+            if (text.includes("version = version + 1")) {
+              storedState.value = params?.[2] || null;
+              const baseVersion = Number(params?.[1]);
+              storedState.version = Number.isFinite(baseVersion) ? baseVersion + 1 : (storedState.version || 1) + 1;
+              return [{ version: storedState.version, state: storedState.value }];
+            }
+            storedState.value = params?.[1] || null;
+            return [{ version: storedState.version || 1, state: storedState.value }];
           }
           return [];
         },
@@ -649,7 +845,8 @@ const runInvalidStakes = async () => {
   const payload = JSON.parse(response.body);
   assert.equal(payload.error, "invalid_stakes");
   assert.ok(!queries.some((q) => q.query.toLowerCase().includes("insert into public.poker_actions")));
-  assert.ok(!queries.some((q) => q.query.toLowerCase().includes("version = version + 1")));
+  const updateCalls = queries.filter((q) => q.query.toLowerCase().includes("version = version + 1"));
+  assert.equal(updateCalls.length, 1);
 };
 
 await runHappyPath();
@@ -660,5 +857,6 @@ await runDealerBasedBlinds();
 await runInvalidDeal();
 await runMissingHoleCardsTable();
 await runMissingDealSecret();
+await runRequestPending();
 await runInvalidStakes();
 await runMissingStateRow();

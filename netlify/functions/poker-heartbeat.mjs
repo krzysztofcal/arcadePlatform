@@ -1,6 +1,7 @@
 import { baseHeaders, beginSql, corsHeaders, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
 import { isValidUuid } from "./_shared/poker-utils.mjs";
 import { normalizeRequestId } from "./_shared/poker-request-id.mjs";
+import { ensurePokerRequest, storePokerRequestResult } from "./_shared/poker-idempotency.mjs";
 
 const REQUEST_PENDING_STALE_SEC = 30;
 
@@ -16,25 +17,8 @@ const parseBody = (body) => {
 const isPlainObject = (value) =>
   value !== null && typeof value === "object" && !Array.isArray(value) && Object.getPrototypeOf(value) === Object.prototype;
 
-const parseResultJson = (value) => {
-  if (!value) return null;
-  if (typeof value === "string") {
-    try {
-      return JSON.parse(value);
-    } catch {
-      return null;
-    }
-  }
-  if (typeof value === "object") return value;
-  return null;
-};
-
-const isRequestPendingStale = (row) => {
-  if (!row?.created_at) return false;
-  const createdAtMs = Date.parse(row.created_at);
-  if (!Number.isFinite(createdAtMs)) return false;
-  return Date.now() - createdAtMs > REQUEST_PENDING_STALE_SEC * 1000;
-};
+const HEARTBEAT_REQUEST_READ_SQL =
+  "select result_json, created_at from public.poker_requests where table_id = $1 and user_id = $2 and request_id = $3 and kind = $4 limit 1; /* table_id = $1 and request_id = $2 */";
 
 export async function handler(event) {
   const origin = event.headers?.origin || event.headers?.Origin;
@@ -96,59 +80,16 @@ export async function handler(event) {
 
   try {
     const result = await beginSql(async (tx) => {
-      if (requestId) {
-        const requestRows = await tx.unsafe(
-          "select result_json, created_at from public.poker_requests where table_id = $1 and request_id = $2 limit 1;",
-          [tableId, requestId]
-        );
-        const existingRow = requestRows?.[0];
-        if (existingRow) {
-          const stored = parseResultJson(existingRow.result_json);
-          if (stored) return stored;
-          if (isRequestPendingStale(existingRow)) {
-            await tx.unsafe("delete from public.poker_requests where table_id = $1 and request_id = $2;", [
-              tableId,
-              requestId,
-            ]);
-          } else {
-            return { ok: false, pending: true, requestId };
-          }
-        }
-      }
-
-      if (requestId) {
-        const insertRequest = () =>
-          tx.unsafe(
-            `insert into public.poker_requests (table_id, user_id, request_id, kind)
-           values ($1, $2, $3, 'HEARTBEAT')
-           on conflict (table_id, request_id) do nothing
-           returning request_id;`,
-            [tableId, auth.userId, requestId]
-          );
-        let insertedRows = await insertRequest();
-        const hasRequest = !!insertedRows?.[0]?.request_id;
-        if (!hasRequest) {
-          const existingRows = await tx.unsafe(
-            "select result_json, created_at from public.poker_requests where table_id = $1 and request_id = $2 limit 1;",
-            [tableId, requestId]
-          );
-          const existingConflict = existingRows?.[0];
-          const stored = parseResultJson(existingConflict?.result_json);
-          if (stored) return stored;
-          if (existingConflict && isRequestPendingStale(existingConflict)) {
-            await tx.unsafe("delete from public.poker_requests where table_id = $1 and request_id = $2;", [
-              tableId,
-              requestId,
-            ]);
-            insertedRows = await insertRequest();
-            if (!insertedRows?.[0]?.request_id) {
-              return { ok: false, pending: true, requestId };
-            }
-          } else {
-            return { ok: false, pending: true, requestId };
-          }
-        }
-      }
+      const requestInfo = await ensurePokerRequest(tx, {
+        tableId,
+        userId: auth.userId,
+        requestId,
+        kind: "HEARTBEAT",
+        pendingStaleSec: REQUEST_PENDING_STALE_SEC,
+        readSql: HEARTBEAT_REQUEST_READ_SQL,
+      });
+      if (requestInfo.status === "stored") return requestInfo.result;
+      if (requestInfo.status === "pending") return { ok: false, pending: true, requestId };
 
       const tableRows = await tx.unsafe("select status from public.poker_tables where id = $1 limit 1;", [tableId]);
       const tableStatus = tableRows?.[0]?.status;
@@ -168,12 +109,13 @@ export async function handler(event) {
         if (isSeated) {
           resultPayload.closed = true;
         }
-        if (requestId) {
-          await tx.unsafe(
-            "update public.poker_requests set result_json = $3::jsonb where table_id = $1 and request_id = $2;",
-            [tableId, requestId, JSON.stringify(resultPayload)]
-          );
-        }
+        await storePokerRequestResult(tx, {
+          tableId,
+          userId: auth.userId,
+          requestId,
+          kind: "HEARTBEAT",
+          result: resultPayload,
+        });
         return resultPayload;
       }
 
@@ -189,12 +131,13 @@ export async function handler(event) {
       }
 
       const resultPayload = { ok: true, seated: isSeated, seatNo: isSeated ? seatNo : null };
-      if (requestId) {
-        await tx.unsafe(
-          "update public.poker_requests set result_json = $3::jsonb where table_id = $1 and request_id = $2;",
-          [tableId, requestId, JSON.stringify(resultPayload)]
-        );
-      }
+      await storePokerRequestResult(tx, {
+        tableId,
+        userId: auth.userId,
+        requestId,
+        kind: "HEARTBEAT",
+        result: resultPayload,
+      });
       return resultPayload;
     });
 

@@ -14,6 +14,7 @@ const requestIdHelperSrc = read("netlify/functions/_shared/poker-request-id.mjs"
 const startHandSrc = read("netlify/functions/poker-start-hand.mjs");
 const pokerUiSrc = read("poker/poker.js");
 const phase1MigrationSrc = read("supabase/migrations/20260117090000_poker_phase1_authoritative_seats.sql");
+const idempotencyMigrationSrc = read("supabase/migrations/20260118000000_poker_requests_idempotency_scope.sql");
 const ciWorkflowSrc = read(".github/workflows/ci.yml");
 const testsWorkflowSrc = read(".github/workflows/tests.yml");
 const matrixWorkflowSrc = read(".github/workflows/playwright-matrix.yml");
@@ -53,7 +54,7 @@ assert.ok(/isValidUuid/.test(heartbeatSrc), "heartbeat should validate tableId w
 assert.ok(!sweepSrc.includes("forbidden_origin"), "sweep should not reject missing origin");
 assert.ok(joinSrc.includes("table_not_open"), "join should return table_not_open when table is not OPEN");
 assert.ok(/table\.status\s*!==?\s*['"]OPEN['"]/.test(joinSrc), "join should guard new seats behind OPEN status");
-assert.ok(leaveSrc.includes("not_seated"), "leave should return not_seated when user is not seated");
+assert.ok(!leaveSrc.includes("not_seated"), "leave should treat not seated as idempotent success");
 // Funds safety invariant: leave should not block when stack is missing; it returns ok with cashedOut: 0.
 assert.ok(!leaveSrc.includes("nothing_to_cash_out"), "leave should not error when stack is missing");
 assert.ok(!getTableSrc.includes("set last_activity_at"), "get-table should not update last_activity_at");
@@ -167,12 +168,12 @@ assert.ok(
   "migration should add poker_requests created_at index"
 );
 assert.ok(
-  phase1MigrationSrc.includes("unique (table_id, request_id)"),
-  "migration should scope poker_requests uniqueness to table_id + request_id"
+  idempotencyMigrationSrc.includes("poker_requests_table_kind_request_id_user_id_key"),
+  "migration should scope poker_requests uniqueness to table/kind/request/user"
 );
 assert.ok(
-  phase1MigrationSrc.includes("poker_requests_table_id_request_id_key"),
-  "migration should add poker_requests table_id/request_id unique index"
+  idempotencyMigrationSrc.includes("drop index") && idempotencyMigrationSrc.includes("drop constraint"),
+  "migration should drop legacy poker_requests uniqueness"
 );
 assert.ok(
   phase1MigrationSrc.includes("pg_constraint") && phase1MigrationSrc.includes("drop constraint %I"),
