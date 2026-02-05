@@ -20,8 +20,20 @@ assert.ok(
   "leave should normalize stack from seat row"
 );
 assert.ok(
-  /const cashOutAmount = stackValue != null && stackValue > 0 \? stackValue : 0;/.test(leaveSrc),
-  "leave should clamp cashOutAmount to positive values"
+  /const stateStackRaw = currentState\?\.stacks\?\.\[auth\.userId\];/.test(leaveSrc),
+  "leave should read authoritative stack from poker_state"
+);
+assert.ok(
+  /const stateStack = normalizeNonNegativeInt\(Number\(stateStackRaw\)\);/.test(leaveSrc),
+  "leave should normalize authoritative stack to a non-negative integer"
+);
+assert.ok(
+  /const seatStack = normalizeNonNegativeInt\(Number\(rawSeatStack\)\);/.test(leaveSrc),
+  "leave should normalize seat stack as fallback"
+);
+assert.ok(
+  /const cashOutAmount = stateStack \?\? seatStack \?\? 0;/.test(leaveSrc),
+  "leave should prefer state stack over seat stack and default to 0"
 );
 assert.ok(
   /const isStackMissing = rawSeatStack == null;/.test(leaveSrc),
