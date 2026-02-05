@@ -139,15 +139,6 @@ export async function handler(event) {
           const amount = stateStack ?? seatStack ?? 0;
           const stackSource = stateStack != null ? "state" : seatStack != null ? "seat" : "none";
 
-          if (stateRow && currentState?.stacks && typeof currentState.stacks === "object") {
-            const nextStacks = { ...currentState.stacks };
-            if (Object.prototype.hasOwnProperty.call(nextStacks, userId)) {
-              delete nextStacks[userId];
-              const nextState = { ...currentState, stacks: nextStacks };
-              await tx.unsafe("update public.poker_state set state = $2 where table_id = $1;", [tableId, JSON.stringify(nextState)]);
-            }
-          }
-
           if (amount > 0) {
             await postTransaction({
               userId,
@@ -168,6 +159,16 @@ export async function handler(event) {
             "update public.poker_seats set status = 'INACTIVE', stack = 0 where table_id = $1 and user_id = $2;",
             [tableId, userId]
           );
+
+          if (amount > 0 && stateRow && currentState?.stacks && typeof currentState.stacks === "object") {
+            const nextStacks = { ...currentState.stacks };
+            if (Object.prototype.hasOwnProperty.call(nextStacks, userId)) {
+              delete nextStacks[userId];
+              const nextState = { ...currentState, stacks: nextStacks };
+              await tx.unsafe("update public.poker_state set state = $2 where table_id = $1;", [tableId, JSON.stringify(nextState)]);
+            }
+          }
+
           return { seatNo: locked.seat_no, amount, stackSource };
         });
 
@@ -292,13 +293,17 @@ limit $1;`,
                 }
                 throw error;
               }
+              if (Object.prototype.hasOwnProperty.call(nextStacks, userId)) {
+                delete nextStacks[userId];
+                stateChanged = true;
+              }
               klog("poker_close_cashout_ok", { tableId, userId, seatNo, amount: normalizedStack, stackSource });
               closeCashoutProcessed += 1;
             } else {
               klog("poker_close_cashout_skip", { tableId, userId, seatNo, amount: normalizedStack, stackSource });
               closeCashoutSkipped += 1;
             }
-            if (Object.prototype.hasOwnProperty.call(nextStacks, userId)) {
+            if (normalizedStack === 0 && Object.prototype.hasOwnProperty.call(nextStacks, userId)) {
               delete nextStacks[userId];
               stateChanged = true;
             }

@@ -50,11 +50,12 @@ const makeStatefulHandler = ({ postCalls, klogEvents }) => {
           }
 
           if (text.includes("select state from public.poker_state where table_id") && text.includes("for update")) {
-            return [{ state: { stacks: { ...db.stateStacks } } }];
+            return [{ state: JSON.stringify({ stacks: { ...db.stateStacks } }) }];
           }
 
           if (text.includes("update public.poker_state set state")) {
-            const nextState = params?.[1] || {};
+            const raw = params?.[1];
+            const nextState = typeof raw === "string" ? JSON.parse(raw) : raw || {};
             const nextStacks = nextState?.stacks && typeof nextState.stacks === "object" ? nextState.stacks : {};
             db.stateStacks = { ...nextStacks };
             return [];
