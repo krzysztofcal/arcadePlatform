@@ -747,6 +747,32 @@ const run = async () => {
     assert.equal(timeoutResult.state.phase, "PREFLOP");
     assert.ok(timeoutResult.events.some((event) => event.type === "HAND_RESET"));
   }
+
+  {
+    const { seats, stacks } = makeBase();
+    const { state } = initHandState({ tableId: "t-reset-settled", seats, stacks, rng: makeRng(30) });
+    const settled = {
+      ...state,
+      phase: "SETTLED",
+      handId: "hand-settled",
+      handSeed: "seed-settled",
+      turnUserId: null,
+      handSettlement: {
+        handId: "hand-settled",
+        settledAt: "2026-01-01T00:00:00.000Z",
+        payouts: { "user-1": 10 },
+      },
+    };
+    const beforeStacks = { ...settled.stacks };
+    const advanced = advanceIfNeeded(settled);
+    const next = advanced.state;
+    assert.equal(next.phase, "PREFLOP");
+    assert.ok(typeof next.handId === "string" && next.handId !== "hand-settled");
+    assert.equal(next.handSettlement, undefined);
+    assert.deepEqual(next.stacks, beforeStacks);
+    assert.ok(advanced.events.some((event) => event.type === "HAND_RESET"));
+  }
+
 };
 
 await run();

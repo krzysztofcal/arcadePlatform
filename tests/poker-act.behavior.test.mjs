@@ -672,7 +672,7 @@ const run = async () => {
     });
     assert.equal(foldResponse.response.statusCode, 200);
     const foldPayload = JSON.parse(foldResponse.response.body);
-    assert.equal(foldPayload.state.state.phase, "HAND_DONE");
+    assert.equal(foldPayload.state.state.phase, "SETTLED");
     assert.equal(foldPayload.state.state.turnStartedAt, null);
     assert.equal(foldPayload.state.state.turnDeadlineAt, null);
     assert.ok(foldLogs.some((entry) => entry.kind === "poker_turn_timer_skipped"));
@@ -1042,7 +1042,7 @@ const run = async () => {
     });
     assert.equal(showdownResponse.response.statusCode, 200);
     const showdownPayload = JSON.parse(showdownResponse.response.body);
-    assert.equal(showdownPayload.state.state.phase, "SHOWDOWN");
+    assert.equal(showdownPayload.state.state.phase, "SETTLED");
     assert.ok(Array.isArray(showdownPayload.state.state.showdown?.winners));
     assert.ok(showdownPayload.state.state.showdown.winners.length > 0);
     assert.equal(showdownPayload.state.state.pot, 0);
@@ -1224,7 +1224,7 @@ const run = async () => {
       nowMs: Date.now(),
     });
     assert.equal(timeoutResult.applied, true);
-    assert.equal(timeoutResult.state.phase, "SHOWDOWN");
+    assert.equal(timeoutResult.state.phase, "SETTLED");
     assert.equal(timeoutResult.state.pot, 0);
     assert.ok(timeoutResult.state.showdown);
   }

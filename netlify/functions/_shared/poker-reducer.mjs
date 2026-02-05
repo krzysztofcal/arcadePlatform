@@ -5,9 +5,9 @@ import { createDeck, dealCommunity, dealHoleCards, shuffle } from "./poker-engin
 //
 // The poker engine resets hands AUTOMATICALLY and IMMEDIATELY after:
 // - phase === "HAND_DONE"
-// - phase === "SHOWDOWN" (when showdown data is present)
 //
-// There is NO "Next hand" confirmation step.
+// Showdown settlement is materialized separately and persisted as phase === "SETTLED".
+// SETTLED transitions to the next hand through advanceIfNeeded() using existing hand-reset logic.
 //
 // UI MUST assume that finished-hand states are transient.
 // Any delays, animations, summaries (e.g. "You won X") or countdowns
@@ -159,7 +159,7 @@ const expectedCommunityCountForPhase = (phase) => {
   if (phase === "PREFLOP") return 0;
   if (phase === "FLOP") return 3;
   if (phase === "TURN") return 4;
-  if (phase === "RIVER" || phase === "SHOWDOWN") return 5;
+  if (phase === "RIVER" || phase === "SHOWDOWN" || phase === "SETTLED") return 5;
   return null;
 };
 
@@ -371,7 +371,7 @@ const getLegalActions = (state, userId) => {
 };
 
 const applyAction = (state, action) => {
-  if (state.phase === "HAND_DONE" || state.phase === "SHOWDOWN") {
+  if (state.phase === "HAND_DONE" || state.phase === "SHOWDOWN" || state.phase === "SETTLED") {
     throw new Error("invalid_action");
   }
   if (!state.turnUserId) {
@@ -502,6 +502,9 @@ function advanceIfNeeded(state) {
     return resetToNextHand(state);
   }
   if (state.phase === "SHOWDOWN" && state.showdown) {
+    return resetToNextHand(state);
+  }
+  if (state.phase === "SETTLED") {
     return resetToNextHand(state);
   }
   const active = getActiveSeats(state);
