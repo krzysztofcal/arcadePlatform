@@ -77,6 +77,7 @@ const diffPayouts = (prevStacks, nextStacks) => {
     const before = normalizeChipAmount("stack", prevStacks?.[userId] ?? 0);
     const after = normalizeChipAmount("stack", nextStacks?.[userId] ?? 0);
     const delta = after - before;
+    if (delta < 0) throw new Error("showdown_invalid_stack_delta");
     if (delta > 0) payouts[userId] = delta;
   }
   return payouts;

@@ -187,6 +187,7 @@ const runCase = async ({ state, action, requestId, userId, computeShowdown, stor
   assert.equal(payload.state.state.pot, 0);
   assert.equal(payload.state.state.handSettlement.handId, foldState.handId);
   assert.equal(payload.state.state.handSettlement.payouts["user-1"], foldState.pot);
+  assert.equal(payload.state.state.stacks["user-1"], foldState.stacks["user-1"] + foldState.pot);
   assert.equal(payload.state.state.turnUserId, null);
   assert.equal(payload.state.state.turnStartedAt, null);
   assert.equal(payload.state.state.turnDeadlineAt, null);
@@ -223,6 +224,10 @@ const runCase = async ({ state, action, requestId, userId, computeShowdown, stor
   assert.equal(payload.state.state.handSettlement.handId, riverState.handId);
   assert.equal(payload.state.state.handSettlement.payouts["user-2"], riverState.pot);
   assert.equal(payload.state.state.handSettlement.payouts["user-1"] || 0, 0);
+  assert.equal(payload.state.state.pot, 0);
+  assert.equal(payload.state.state.stacks["user-2"], riverState.stacks["user-2"] + riverState.pot);
+  assert.ok(payload.state.state.showdown);
+  assert.equal(payload.state.state.showdown.handId, riverState.handId);
   assert.equal(payload.state.state.turnUserId, null);
   assert.equal(payload.state.state.turnStartedAt, null);
   assert.equal(payload.state.state.turnDeadlineAt, null);

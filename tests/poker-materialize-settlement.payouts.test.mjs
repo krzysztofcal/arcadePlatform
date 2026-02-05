@@ -32,6 +32,7 @@ const holeCardsByUserId = {
     pot: 30,
     foldedByUserId: { u1: false, u2: true },
     community: deriveCommunityCards({ handSeed, seatUserIdsInOrder, communityDealt: 5 }),
+    communityDealt: 5,
   };
   const next = materializeShowdownAndPayout({ state, seatUserIdsInOrder, holeCardsByUserId, awardPotsAtShowdown }).nextState;
   assert.equal(next.phase, "SETTLED");
@@ -43,7 +44,7 @@ const holeCardsByUserId = {
   const state = {
     tableId,
     handId: "h-showdown",
-    phase: "SHOWDOWN",
+    phase: "RIVER",
     seats: [
       { userId: "u1", seatNo: 1 },
       { userId: "u2", seatNo: 2 },
@@ -52,6 +53,7 @@ const holeCardsByUserId = {
     pot: 20,
     foldedByUserId: { u1: false, u2: false },
     community: deriveCommunityCards({ handSeed, seatUserIdsInOrder, communityDealt: 5 }),
+    communityDealt: 5,
   };
   const next = materializeShowdownAndPayout({
     state,
@@ -94,4 +96,39 @@ const holeCardsByUserId = {
   const first = materializeShowdownAndPayout({ state, seatUserIdsInOrder, holeCardsByUserId, awardPotsAtShowdown }).nextState;
   const second = materializeShowdownAndPayout({ state: first, seatUserIdsInOrder, holeCardsByUserId, awardPotsAtShowdown }).nextState;
   assert.deepEqual(second, first);
+}
+
+
+{
+  const state = {
+    tableId,
+    handId: "h-negative-delta",
+    phase: "RIVER",
+    seats: [
+      { userId: "u1", seatNo: 1 },
+      { userId: "u2", seatNo: 2 },
+    ],
+    stacks: { u1: 100, u2: 100 },
+    pot: 10,
+    foldedByUserId: { u1: false, u2: false },
+    community: deriveCommunityCards({ handSeed, seatUserIdsInOrder, communityDealt: 5 }),
+    communityDealt: 5,
+  };
+  assert.throws(
+    () =>
+      materializeShowdownAndPayout({
+        state,
+        seatUserIdsInOrder,
+        holeCardsByUserId,
+        awardPotsAtShowdown: () => ({
+          nextState: {
+            ...state,
+            pot: 0,
+            stacks: { u1: 90, u2: 120 },
+            showdown: { handId: "h-negative-delta", winners: ["u2"], potsAwarded: [], reason: "computed" },
+          },
+        }),
+      }),
+    /showdown_invalid_stack_delta/
+  );
 }
