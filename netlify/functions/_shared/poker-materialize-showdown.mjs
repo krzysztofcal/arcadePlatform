@@ -83,6 +83,25 @@ const diffPayouts = (prevStacks, nextStacks) => {
   return payouts;
 };
 
+
+const buildPayoutsFromPotsAwarded = (potsAwarded) => {
+  const payouts = {};
+  if (!Array.isArray(potsAwarded)) return payouts;
+  for (const pot of potsAwarded) {
+    const amount = normalizeChipAmount("pot", pot?.amount ?? 0);
+    const winners = Array.isArray(pot?.winners) ? pot.winners.filter((userId) => typeof userId === "string" && userId.trim()) : [];
+    if (winners.length === 0 || amount === 0) continue;
+    const share = Math.floor(amount / winners.length);
+    let remainder = amount - share * winners.length;
+    for (const userId of winners) {
+      const bonus = remainder > 0 ? 1 : 0;
+      if (remainder > 0) remainder -= 1;
+      payouts[userId] = (payouts[userId] || 0) + share + bonus;
+    }
+  }
+  return payouts;
+};
+
 const ensureExistingSettlementMatches = ({ state, handId }) => {
   const settlementHandId =
     typeof state?.handSettlement?.handId === "string" && state.handSettlement.handId.trim()
@@ -140,8 +159,20 @@ const materializeShowdownAndPayout = ({
     if (!handId) return { nextState: state };
     if (!showdownHandId || showdownHandId !== handId) throw new Error("showdown_hand_mismatch");
     if (normalizeChipAmount("pot", state.pot) > 0) throw new Error("showdown_pot_not_zero");
-    if (state.handSettlement) ensureExistingSettlementMatches({ state, handId });
-    return { nextState: state };
+    if (state.handSettlement) {
+      ensureExistingSettlementMatches({ state, handId });
+      return { nextState: state };
+    }
+    const payouts = buildPayoutsFromPotsAwarded(state.showdown?.potsAwarded);
+    return {
+      nextState: finalizeSettlement({
+        state,
+        handId,
+        payouts,
+        nowIso,
+        klog,
+      }),
+    };
   }
 
   if (!handId) throw new Error("showdown_missing_hand_id");

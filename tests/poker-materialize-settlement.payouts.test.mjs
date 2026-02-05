@@ -132,3 +132,61 @@ const holeCardsByUserId = {
     /showdown_invalid_stack_delta/
   );
 }
+
+
+{
+  const showdownOnly = {
+    tableId,
+    handId: "h-backfill",
+    phase: "SHOWDOWN",
+    seats: [
+      { userId: "u1", seatNo: 1 },
+      { userId: "u2", seatNo: 2 },
+    ],
+    stacks: { u1: 90, u2: 110 },
+    pot: 0,
+    turnUserId: "u2",
+    turnStartedAt: 123,
+    turnDeadlineAt: 456,
+    foldedByUserId: { u1: false, u2: false },
+    showdown: {
+      handId: "h-backfill",
+      winners: ["u2"],
+      potsAwarded: [{ amount: 20, winners: ["u2"], eligibleUserIds: ["u1", "u2"] }],
+      reason: "computed",
+    },
+  };
+  const next = materializeShowdownAndPayout({
+    state: showdownOnly,
+    seatUserIdsInOrder,
+    holeCardsByUserId,
+    awardPotsAtShowdown,
+  }).nextState;
+  assert.equal(next.phase, "SETTLED");
+  assert.equal(next.handSettlement.handId, "h-backfill");
+  assert.equal(next.handSettlement.payouts.u2, 20);
+  assert.equal(next.turnUserId, null);
+  assert.equal(next.turnStartedAt, null);
+  assert.equal(next.turnDeadlineAt, null);
+}
+
+{
+  const mismatch = {
+    tableId,
+    handId: "h-mismatch",
+    phase: "SETTLED",
+    seats: [
+      { userId: "u1", seatNo: 1 },
+      { userId: "u2", seatNo: 2 },
+    ],
+    stacks: { u1: 90, u2: 110 },
+    pot: 0,
+    foldedByUserId: { u1: false, u2: false },
+    showdown: { handId: "h-mismatch", winners: ["u2"], potsAwarded: [], reason: "computed" },
+    handSettlement: { handId: "other-hand", settledAt: "2026-01-01T00:00:00.000Z", payouts: {} },
+  };
+  assert.throws(
+    () => materializeShowdownAndPayout({ state: mismatch, seatUserIdsInOrder, holeCardsByUserId, awardPotsAtShowdown }),
+    /showdown_settlement_hand_mismatch/
+  );
+}
