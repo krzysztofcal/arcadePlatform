@@ -301,11 +301,12 @@ const initHandState = ({ tableId, seats, stacks, rng }) => {
   const foldedByUserId = buildDefaultMap(orderedSeats, false);
   const allInByUserId = buildDefaultMap(orderedSeats, false);
   const contributionsByUserId = buildDefaultMap(orderedSeats, 0);
-  const turnUserId = getFirstBettingAfterDealer({
-    seats: orderedSeats,
+  const turnUserId = getFirstBettingAfterDealerEligible({
+    orderedSeats,
     dealerSeatNo,
     stacks: copyMap(stacks),
-    foldedByUserId,
+    sitOutByUserId,
+    leftTableByUserId,
   });
   const state = {
     tableId,
@@ -642,30 +643,16 @@ const applyLeaveTable = (state, { userId, requestId } = {}) => {
     return { state: next, events };
   }
 
-  const orderedSeats = orderSeats(safeSeats);
-  const startIndex = orderedSeats.findIndex((seat) => seat?.userId === userId);
-  const start = startIndex >= 0 ? startIndex : 0;
-  let nextUserId = null;
-  for (let offset = 1; offset <= orderedSeats.length; offset += 1) {
-    const seat = orderedSeats[(start + offset) % orderedSeats.length];
-    if (!seat?.userId) continue;
-    if (next.foldedByUserId?.[seat.userId]) continue;
-    if ((next.stacks?.[seat.userId] ?? 0) <= 0) continue;
-    if (next.sitOutByUserId?.[seat.userId]) continue;
-    if (next.leftTableByUserId?.[seat.userId]) continue;
-    nextUserId = seat.userId;
-    break;
-  }
-
+  const nextUserId = getNextBettingUserId(next, userId);
   const baseTurnNo = Number.isInteger(state.turnNo) ? state.turnNo : 0;
   if (nextUserId) {
     next.turnUserId = nextUserId;
     events.push({ type: "TURN_SKIPPED_BY_LEAVE", fromUserId: userId, toUserId: nextUserId });
-    return { state: stampTurnTimer({ ...next, turnNo: baseTurnNo + 1 }, Date.now()), events };
+    return { state: { ...next, turnNo: baseTurnNo + 1 }, events };
   }
 
   next.turnUserId = null;
-  return { state: stampTurnTimer({ ...next, turnNo: baseTurnNo }, Date.now()), events };
+  return { state: { ...next, turnNo: baseTurnNo }, events };
 };
 
 function advanceIfNeeded(state) {

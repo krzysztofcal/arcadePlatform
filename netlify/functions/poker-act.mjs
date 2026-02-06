@@ -78,6 +78,7 @@ const normalizeAction = (action) => {
     if (!Number.isFinite(amount) || !Number.isInteger(amount) || amount <= 0) return { ok: false, value: null };
     return { ok: true, value: { type, amount } };
   }
+  if (type === "LEAVE_TABLE") return { ok: true, value: { type } };
   return { ok: true, value: { type } };
 };
 
