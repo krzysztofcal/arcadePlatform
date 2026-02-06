@@ -367,7 +367,7 @@ const resetToNextHand = (state, options = {}) => {
     nextSitOutByUserId[userId] = true;
     hasPending = true;
   }
-  const nextPendingAutoSitOutByUserId = hasPending ? {} : pendingAutoSitOutByUserId;
+  const nextPendingAutoSitOutByUserId = {};
   const leftTableByUserId = sanitizeLeftTableByUserId(state.leftTableByUserId, seats);
   const seatedUserIds = orderedSeats.map((seat) => seat.userId).filter(Boolean);
   if (seatedUserIds.length === 0) {

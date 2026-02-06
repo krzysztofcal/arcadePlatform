@@ -45,6 +45,75 @@ const getTimeoutDefaultAction = (state) => {
 
 const getTimeoutAction = (state) => getTimeoutDefaultAction(state);
 
+const stripPrivate = (state) => {
+  if (!state || typeof state !== "object" || Array.isArray(state)) {
+    return { publicState: state, privateHoleCards: null };
+  }
+  const { holeCardsByUserId, deck, ...publicState } = state;
+  return { publicState, privateHoleCards: holeCardsByUserId || null };
+};
+
+const assertShowdownConsistency = (state) => {
+  const handId = typeof state?.handId === "string" ? state.handId.trim() : "";
+  const showdownHandId =
+    typeof state?.showdown?.handId === "string" && state.showdown.handId.trim() ? state.showdown.handId.trim() : "";
+  const showdownAlreadyMaterialized = !!handId && !!showdownHandId && showdownHandId === handId;
+  if (showdownAlreadyMaterialized) {
+    const potValue = Number(state.pot ?? 0);
+    if (!Number.isFinite(potValue) || potValue < 0 || Math.floor(potValue) !== potValue) {
+      throw new Error("showdown_invalid_pot");
+    }
+    if (potValue > 0) {
+      throw new Error("showdown_pot_not_zero");
+    }
+  }
+  if ((state.phase === "SHOWDOWN" || state.phase === "SETTLED") && Number(state.pot ?? 0) > 0) {
+    throw new Error("showdown_pot_not_zero");
+  }
+};
+
+const materializeIfNeededPublic = (state, privateHoleCards) => {
+  const stripped = stripPrivate(state);
+  const publicState = stripped.publicState;
+  const seatUserIdsInOrder = normalizeSeatOrderFromState(publicState.seats);
+  const handId = typeof publicState.handId === "string" ? publicState.handId.trim() : "";
+  const showdownHandId =
+    typeof publicState.showdown?.handId === "string" && publicState.showdown.handId.trim()
+      ? publicState.showdown.handId.trim()
+      : "";
+  const showdownAlreadyMaterialized = !!handId && !!showdownHandId && showdownHandId === handId;
+  const eligibleUserIds = seatUserIdsInOrder.filter(
+    (userId) =>
+      typeof userId === "string" &&
+      !publicState.foldedByUserId?.[userId] &&
+      !publicState.leftTableByUserId?.[userId] &&
+      !publicState.sitOutByUserId?.[userId]
+  );
+  const shouldMaterializeShowdown =
+    seatUserIdsInOrder.length > 0 &&
+    !showdownAlreadyMaterialized &&
+    (eligibleUserIds.length <= 1 || publicState.phase === "SHOWDOWN" || publicState.phase === "HAND_DONE");
+
+  if (publicState.phase === "SHOWDOWN" && seatUserIdsInOrder.length === 0) {
+    throw new Error("showdown_no_players");
+  }
+
+  let next = publicState;
+  if (shouldMaterializeShowdown) {
+    const materialized = materializeShowdownAndPayout({
+      state: publicState,
+      seatUserIdsInOrder,
+      holeCardsByUserId: privateHoleCards,
+      computeShowdown,
+      awardPotsAtShowdown,
+    });
+    next = materialized.nextState;
+  }
+
+  assertShowdownConsistency(next);
+  return next;
+};
+
 const maybeApplyTurnTimeout = ({ tableId, state, privateState, nowMs }) => {
   if (!state || typeof state !== "object" || Array.isArray(state)) return { applied: false, state };
   if (!isActionPhase(state.phase) || !state.turnUserId) return { applied: false, state };
@@ -65,97 +134,59 @@ const maybeApplyTurnTimeout = ({ tableId, state, privateState, nowMs }) => {
 
   const actionWithRequestId = { ...action, requestId };
   const applied = applyAction(privateState, actionWithRequestId);
-  const { holeCardsByUserId, deck, ...appliedPublic } = applied.state;
-  const policyResult = applyInactivityPolicy(appliedPublic, applied.events);
-  let nextState = { ...policyResult.state, holeCardsByUserId, deck };
-  let events = Array.isArray(policyResult.events) ? policyResult.events.slice() : [];
-  const materializeIfNeeded = (stateToCheck, holeCardsByUserId) => {
-    const seatUserIdsInOrder = normalizeSeatOrderFromState(stateToCheck.seats);
-    const currentHandId = typeof stateToCheck.handId === "string" ? stateToCheck.handId.trim() : "";
-    const showdownHandId =
-      typeof stateToCheck.showdown?.handId === "string" && stateToCheck.showdown.handId.trim()
-        ? stateToCheck.showdown.handId.trim()
-        : "";
-    const showdownAlreadyMaterialized = !!currentHandId && !!showdownHandId && showdownHandId === currentHandId;
-    const eligibleUserIds = seatUserIdsInOrder.filter(
-      (userId) =>
-        typeof userId === "string" &&
-        !stateToCheck.foldedByUserId?.[userId] &&
-        !stateToCheck.leftTableByUserId?.[userId] &&
-        !stateToCheck.sitOutByUserId?.[userId]
-    );
-    const shouldMaterializeShowdown =
-      seatUserIdsInOrder.length > 0 &&
-      !showdownAlreadyMaterialized &&
-      (eligibleUserIds.length <= 1 || stateToCheck.phase === "SHOWDOWN");
+  const stripped = stripPrivate(applied.state);
+  let nextPublic = stripped.publicState;
+  const privateHoleCards = stripped.privateHoleCards;
+  const missedTurnsSnapshot =
+    nextPublic && typeof nextPublic === "object" && !Array.isArray(nextPublic)
+      ? nextPublic.missedTurnsByUserId
+      : null;
+  let events = Array.isArray(applied.events) ? applied.events.slice() : [];
 
-    if (stateToCheck.phase === "SHOWDOWN" && seatUserIdsInOrder.length === 0) {
-      throw new Error("showdown_no_players");
-    }
-
-    let next = stateToCheck;
-    if (shouldMaterializeShowdown) {
-      const materialized = materializeShowdownAndPayout({
-        state: stateToCheck,
-        seatUserIdsInOrder,
-        holeCardsByUserId,
-        computeShowdown,
-        awardPotsAtShowdown,
-      });
-      next = materialized.nextState;
-    }
-
-    if (showdownAlreadyMaterialized) {
-      const potValue = Number(next.pot ?? 0);
-      if (!Number.isFinite(potValue) || potValue < 0 || Math.floor(potValue) !== potValue) {
-        throw new Error("showdown_invalid_pot");
-      }
-      if (potValue > 0) {
-        throw new Error("showdown_pot_not_zero");
-      }
-    }
-    if ((next.phase === "SHOWDOWN" || next.phase === "SETTLED") && Number(next.pot ?? 0) > 0) {
-      throw new Error("showdown_pot_not_zero");
-    }
-    return next;
-  };
-
-  const privateHoleCards = nextState?.holeCardsByUserId;
-  nextState = materializeIfNeeded(nextState, privateHoleCards);
+  nextPublic = materializeIfNeededPublic(nextPublic, privateHoleCards);
 
   let loops = 0;
   while (loops < ADVANCE_LIMIT) {
-    const prevPhase = nextState.phase;
-    const advanced = advanceIfNeeded(nextState);
-    nextState = advanced.state;
+    const prevPhase = nextPublic.phase;
+    const advanced = advanceIfNeeded(nextPublic);
+    nextPublic = advanced.state;
     if (Array.isArray(advanced.events) && advanced.events.length > 0) {
       events.push(...advanced.events);
     }
     if (!Array.isArray(advanced.events) || advanced.events.length === 0) break;
-    if (nextState.phase === prevPhase) break;
+    if (nextPublic.phase === prevPhase) break;
     loops += 1;
   }
 
-  nextState = materializeIfNeeded(nextState, privateHoleCards);
+  nextPublic = materializeIfNeededPublic(nextPublic, privateHoleCards);
 
-  const handEnded = nextState.phase === "SETTLED" || nextState.phase === "SHOWDOWN";
+  const handEnded = nextPublic.phase === "SETTLED" || nextPublic.phase === "SHOWDOWN";
   if (handEnded && !events.some((event) => event?.type === "HAND_RESET")) {
     events.push({ type: "HAND_RESET", reason: "timeout", handId, tableId });
   }
 
-  const { holeCardsByUserId: _ignoredHoleCards, deck: _ignoredDeck, ...stateBase } = nextState;
+  const finalStripped = stripPrivate(nextPublic);
   const updatedState = {
-    ...stateBase,
-    communityDealt: Array.isArray(nextState.community) ? nextState.community.length : 0,
+    ...finalStripped.publicState,
+    communityDealt: Array.isArray(nextPublic.community) ? nextPublic.community.length : 0,
     lastActionRequestIdByUserId: {
       ...lastByUserId,
       [action.userId]: requestId,
     },
   };
+  const policyInput = {
+    ...updatedState,
+    missedTurnsByUserId: missedTurnsSnapshot || updatedState.missedTurnsByUserId,
+  };
+  const policyResult = applyInactivityPolicy(policyInput, events);
+  const finalState = {
+    ...policyResult.state,
+    missedTurnsByUserId: updatedState.missedTurnsByUserId,
+  };
   return {
     applied: true,
-    state: updatedState,
-    events,
+    state: finalState,
+    events: policyResult.events,
     action,
     requestId,
   };
