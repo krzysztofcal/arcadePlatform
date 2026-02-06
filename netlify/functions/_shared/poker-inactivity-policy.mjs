@@ -1,5 +1,3 @@
-import { setAutoSitOut } from "./poker-sitout-flag.mjs";
-
 const AUTO_SITOUT_MISSED_TURNS = 2;
 const MISSED_TURN_THRESHOLD = AUTO_SITOUT_MISSED_TURNS;
 
@@ -23,13 +21,22 @@ const collectSeatUserIds = (seats) => {
   return ids;
 };
 
+const ensurePendingAutoSitOut = (state, userId) => {
+  if (!state || typeof state !== "object" || Array.isArray(state)) return { nextState: state, changed: false };
+  if (typeof userId !== "string" || !userId.trim()) return { nextState: state, changed: false };
+  const pending = isPlainObject(state.pendingAutoSitOutByUserId) ? state.pendingAutoSitOutByUserId : {};
+  if (pending[userId]) return { nextState: state, changed: false };
+  const nextPending = { ...pending, [userId]: true };
+  return { nextState: { ...state, pendingAutoSitOutByUserId: nextPending }, changed: true };
+};
+
 const applyInactivityPolicy = (state, events = []) => {
   if (!state || typeof state !== "object" || Array.isArray(state)) return { state, events };
   const missedTurnsByUserId = isPlainObject(state.missedTurnsByUserId) ? state.missedTurnsByUserId : {};
-  const sitOutByUserId = isPlainObject(state.sitOutByUserId) ? state.sitOutByUserId : {};
   const leftTableByUserId = isPlainObject(state.leftTableByUserId) ? state.leftTableByUserId : {};
+  const sitOutByUserId = isPlainObject(state.sitOutByUserId) ? state.sitOutByUserId : {};
   const seatUserIds = collectSeatUserIds(state.seats);
-  let nextSitOut = sitOutByUserId;
+  let nextState = state;
   let changed = false;
   const nextEvents = Array.isArray(events) ? events.slice() : [];
 
@@ -38,18 +45,16 @@ const applyInactivityPolicy = (state, events = []) => {
     if (!userId || missedCount < AUTO_SITOUT_MISSED_TURNS) continue;
     if (!seatUserIds.has(userId)) continue;
     if (leftTableByUserId[userId]) continue;
-    if (nextSitOut[userId]) continue;
-    const baseState = { ...state, sitOutByUserId: nextSitOut };
-    const autoResult = setAutoSitOut(baseState, userId, missedCount);
-    if (autoResult.changed) {
-      nextSitOut = autoResult.nextState.sitOutByUserId || nextSitOut;
-      changed = true;
-      if (autoResult.event) nextEvents.push(autoResult.event);
-    }
+    if (sitOutByUserId[userId]) continue;
+    const pendingResult = ensurePendingAutoSitOut(nextState, userId);
+    if (!pendingResult.changed) continue;
+    nextState = pendingResult.nextState;
+    changed = true;
+    nextEvents.push({ type: "PLAYER_AUTO_SITOUT_PENDING", userId, missedTurns: missedCount });
   }
 
   if (!changed) return { state, events };
-  return { state: { ...state, sitOutByUserId: nextSitOut }, events: nextEvents };
+  return { state: nextState, events: nextEvents };
 };
 
 export { AUTO_SITOUT_MISSED_TURNS, MISSED_TURN_THRESHOLD, applyInactivityPolicy };

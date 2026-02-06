@@ -1326,7 +1326,7 @@ const run = async () => {
     }
     assert.equal(timeoutCase.response.statusCode, 200);
     const timeoutBody = JSON.parse(timeoutCase.response.body);
-    assert.ok(timeoutBody.events.some((event) => event.type === "PLAYER_AUTO_SITOUT"));
+    assert.ok(timeoutBody.events.some((event) => event.type === "PLAYER_AUTO_SITOUT_PENDING"));
     const timeoutUpdate = timeoutCase.queries.find(
       (entry) =>
         entry.query.toLowerCase().includes("update public.poker_state") &&
@@ -1334,7 +1334,8 @@ const run = async () => {
     );
     assert.ok(timeoutUpdate, "timeout should persist poker_state");
     const persistedState = JSON.parse(timeoutUpdate.params?.[2]);
-    assert.equal(persistedState.sitOutByUserId?.["user-1"], true);
+    assert.equal(persistedState.sitOutByUserId?.["user-1"], undefined);
+    assert.equal(persistedState.pendingAutoSitOutByUserId?.["user-1"], true);
   }
 };
 

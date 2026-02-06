@@ -103,6 +103,7 @@ const sanitizeBoolMapBySeats = (value, seats) => {
 
 const sanitizeSitOutByUserId = (value, seats) => sanitizeBoolMapBySeats(value, seats);
 const sanitizeLeftTableByUserId = (value, seats) => sanitizeBoolMapBySeats(value, seats);
+const sanitizePendingAutoSitOutByUserId = (value, seats) => sanitizeBoolMapBySeats(value, seats);
 
 const computeEligibleUserIds = ({ orderedSeats, stacks, sitOutByUserId, leftTableByUserId }) =>
   orderedSeats
@@ -345,6 +346,7 @@ const initHandState = ({ tableId, seats, stacks, rng }) => {
     lastRaiseSize: null,
     missedTurnsByUserId: {},
     sitOutByUserId,
+    pendingAutoSitOutByUserId: {},
     leftTableByUserId,
   };
   const now = Date.now();
@@ -357,23 +359,32 @@ const resetToNextHand = (state, options = {}) => {
   const seats = Array.isArray(state.seats) ? state.seats.slice() : [];
   const stacks = copyMap(state.stacks);
   const sitOutByUserId = sanitizeSitOutByUserId(state.sitOutByUserId, seats);
+  const pendingAutoSitOutByUserId = sanitizePendingAutoSitOutByUserId(state.pendingAutoSitOutByUserId, seats);
+  const nextSitOutByUserId = { ...sitOutByUserId };
+  let hasPending = false;
+  for (const [userId, pending] of Object.entries(pendingAutoSitOutByUserId)) {
+    if (!pending) continue;
+    nextSitOutByUserId[userId] = true;
+    hasPending = true;
+  }
+  const nextPendingAutoSitOutByUserId = hasPending ? {} : pendingAutoSitOutByUserId;
   const leftTableByUserId = sanitizeLeftTableByUserId(state.leftTableByUserId, seats);
   const seatedUserIds = orderedSeats.map((seat) => seat.userId).filter(Boolean);
   if (seatedUserIds.length === 0) {
     return {
-      state: stampTurnTimer(state, Date.now()),
+      state: stampTurnTimer({ ...state, sitOutByUserId: nextSitOutByUserId, pendingAutoSitOutByUserId: nextPendingAutoSitOutByUserId }, Date.now()),
       events: [{ type: "HAND_RESET_SKIPPED", reason: "not_enough_players" }],
     };
   }
   const eligibleUserIds = computeEligibleUserIds({
     orderedSeats: orderSeats(seats),
     stacks,
-    sitOutByUserId,
+    sitOutByUserId: nextSitOutByUserId,
     leftTableByUserId,
   });
   if (eligibleUserIds.length < 2) {
     return {
-      state: stampTurnTimer(state, Date.now()),
+      state: stampTurnTimer({ ...state, sitOutByUserId: nextSitOutByUserId, pendingAutoSitOutByUserId: nextPendingAutoSitOutByUserId }, Date.now()),
       events: [{ type: "HAND_RESET_SKIPPED", reason: "not_enough_players" }],
     };
   }
@@ -381,7 +392,7 @@ const resetToNextHand = (state, options = {}) => {
     orderedSeats,
     currentDealerSeatNo: state.dealerSeatNo,
     stacks,
-    sitOutByUserId,
+    sitOutByUserId: nextSitOutByUserId,
     leftTableByUserId,
   });
   const foldedByUserId = buildDefaultMap(seats, false);
@@ -389,7 +400,7 @@ const resetToNextHand = (state, options = {}) => {
     orderedSeats,
     dealerSeatNo,
     stacks,
-    sitOutByUserId,
+    sitOutByUserId: nextSitOutByUserId,
     leftTableByUserId,
   });
   if (!turnUserId) {
@@ -431,7 +442,8 @@ const resetToNextHand = (state, options = {}) => {
     currentBet: 0,
     lastRaiseSize: null,
     missedTurnsByUserId: {},
-    sitOutByUserId,
+    sitOutByUserId: nextSitOutByUserId,
+    pendingAutoSitOutByUserId: nextPendingAutoSitOutByUserId,
     leftTableByUserId,
   };
   const nextWithAllIn = { ...nextState, allInByUserId: deriveAllInByUserId(nextState) };
@@ -508,6 +520,7 @@ const applyAction = (state, action) => {
     deck: Array.isArray(state.deck) ? state.deck.slice() : [],
     missedTurnsByUserId,
     sitOutByUserId,
+    pendingAutoSitOutByUserId: copyMap(state.pendingAutoSitOutByUserId),
     leftTableByUserId,
   };
   const userId = action.userId;
@@ -641,6 +654,7 @@ const applyLeaveTable = (state, { userId, requestId } = {}) => {
     deck: Array.isArray(state.deck) ? state.deck.slice() : [],
     missedTurnsByUserId,
     sitOutByUserId,
+    pendingAutoSitOutByUserId: copyMap(state.pendingAutoSitOutByUserId),
     leftTableByUserId,
   };
   next.leftTableByUserId[userId] = true;

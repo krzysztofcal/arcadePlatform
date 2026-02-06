@@ -1007,6 +1007,9 @@ export async function handler(event) {
       if (shouldMaterializeShowdown) {
         nextState = materializeShowdownState(nextState, seatUserIdsInOrder, holeCardsByUserId);
       }
+      if ((nextState.phase === "SHOWDOWN" || nextState.phase === "SETTLED") && Number(nextState.pot ?? 0) > 0) {
+        rejectStateInvalid("showdown_pot_not_zero", { pot: nextState.pot ?? null });
+      }
 
       const { holeCardsByUserId: _ignoredHoleCards, deck: _ignoredDeck, ...stateBase } = nextState;
       const updatedState = {

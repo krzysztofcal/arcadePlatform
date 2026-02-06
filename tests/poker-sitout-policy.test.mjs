@@ -60,11 +60,12 @@ const run = async () => {
     const second = runTimeout(withMissed, 4000);
 
     assert.equal(second.result.state.missedTurnsByUserId[timeoutUserId], MISSED_TURN_THRESHOLD);
-    assert.equal(second.result.state.sitOutByUserId?.[timeoutUserId], true);
+    assert.equal(second.result.state.sitOutByUserId?.[timeoutUserId], undefined);
+    assert.equal(second.result.state.pendingAutoSitOutByUserId?.[timeoutUserId], true);
     assert.ok(
       second.result.events.some(
         (event) =>
-          event.type === "PLAYER_AUTO_SITOUT" &&
+          event.type === "PLAYER_AUTO_SITOUT_PENDING" &&
           event.userId === timeoutUserId &&
           event.missedTurns === MISSED_TURN_THRESHOLD
       )
