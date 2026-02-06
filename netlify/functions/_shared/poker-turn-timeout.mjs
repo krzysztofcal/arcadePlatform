@@ -30,7 +30,12 @@ const getTimeoutDefaultAction = (state) => {
   const turnUserId = typeof state.turnUserId === "string" && state.turnUserId.trim() ? state.turnUserId : null;
   if (!turnUserId) return null;
   const publicState = withoutPrivateState(state);
-  const legal = computeLegalActions({ statePublic: publicState, userId: turnUserId });
+  let legal;
+  try {
+    legal = computeLegalActions({ statePublic: publicState, userId: turnUserId });
+  } catch (error) {
+    return null;
+  }
   const actions = Array.isArray(legal?.actions) ? legal.actions : [];
   if (actions.includes("CHECK")) return { type: "CHECK", userId: turnUserId };
   if (actions.includes("FOLD")) return { type: "FOLD", userId: turnUserId };

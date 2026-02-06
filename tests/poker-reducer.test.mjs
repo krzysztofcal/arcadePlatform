@@ -295,15 +295,20 @@ const run = async () => {
   }
 
   {
-    const { seats, stacks } = makeBase();
+    const seats = [
+      { userId: "user-1", seatNo: 1 },
+      { userId: "user-2", seatNo: 2 },
+    ];
+    const stacks = { "user-1": 100, "user-2": 100 };
     const { state } = initHandState({ tableId: "t-timeout-2", seats, stacks, rng: makeRng(22) });
-    const expired = {
-      ...state,
-      turnDeadlineAt: Date.now() - 1000,
-      toCallByUserId: { ...state.toCallByUserId, [state.turnUserId]: 5 },
-    };
+    const bettorId = state.turnUserId;
+    const defenderId = seats.map((seat) => seat.userId).find((userId) => userId !== bettorId);
+    const betResult = applyAction(state, { type: "BET", userId: bettorId, amount: 10 });
+    const bettingState = betResult.state;
+    assert.equal(bettingState.turnUserId, defenderId);
+    const expired = { ...bettingState, turnDeadlineAt: Date.now() - 1000 };
     const action = getTimeoutDefaultAction(expired);
-    assert.deepEqual(action, { type: "FOLD", userId: expired.turnUserId });
+    assert.deepEqual(action, { type: "FOLD", userId: defenderId });
   }
 
   {

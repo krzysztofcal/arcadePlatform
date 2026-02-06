@@ -43,6 +43,7 @@ const run = async () => {
     const { state } = initHandState({ tableId: "t-timeout-fold", seats, stacks, rng: makeRng(32) });
     const betResult = applyAction(state, { type: "BET", userId: state.turnUserId, amount: 10 });
     const bettingState = betResult.state;
+    assert.notEqual(bettingState.turnUserId, state.turnUserId);
     const nowMs = 5000;
     const timeoutState = { ...bettingState, turnStartedAt: 4000, turnDeadlineAt: 4500 };
     const timeoutResult = maybeApplyTurnTimeout({
