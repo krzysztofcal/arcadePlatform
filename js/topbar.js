@@ -3,6 +3,8 @@
   const doc = document;
   const chipNodes = { badge: null, amount: null, ready: false };
   let chipInFlight = null;
+  let chipsClientPromise = null;
+  const CHIP_BADGE_HREF = '/account.html#chipPanel';
 
   function pickPreferredTopbar(list){
     if (!list || !list.length) return null;
@@ -56,6 +58,99 @@
     prune();
   }
 
+  function ensureTopbarRight(){
+    const topbar = doc.querySelector('.topbar');
+    if (!topbar) return null;
+    let right = topbar.querySelector('.topbar-right');
+    if (!right){
+      right = doc.createElement('div');
+      right.className = 'topbar-right';
+      topbar.appendChild(right);
+    }
+    return right;
+  }
+
+  function moveNode(node, container, before){
+    if (!node || !container) return;
+    if (node.parentNode !== container){
+      try {
+        if (node.parentNode){ node.parentNode.removeChild(node); }
+      } catch (_err){}
+    }
+    if (before && before.parentNode === container && before !== node){
+      container.insertBefore(node, before);
+    } else if (node.parentNode !== container || node !== container.lastChild){
+      container.appendChild(node);
+    }
+  }
+
+  function ensureChipBadge(topbarRight){
+    let badge = doc.getElementById('chipBadge');
+    if (!badge){
+      badge = doc.createElement('a');
+      badge.id = 'chipBadge';
+      badge.className = 'chip-badge chip-pill chip-pill--loading';
+      badge.setAttribute('aria-live', 'polite');
+      badge.setAttribute('aria-busy', 'true');
+      badge.setAttribute('href', CHIP_BADGE_HREF);
+      badge.hidden = true;
+      const label = doc.createElement('span');
+      label.className = 'chip-badge__label';
+      label.appendChild(doc.createTextNode('Chips: '));
+      const amount = doc.createElement('span');
+      amount.id = 'chipBadgeAmount';
+      amount.textContent = '…';
+      label.appendChild(amount);
+      badge.appendChild(label);
+    } else if (badge.getAttribute('href') !== CHIP_BADGE_HREF){
+      badge.setAttribute('href', CHIP_BADGE_HREF);
+    }
+    let amount = doc.getElementById('chipBadgeAmount');
+    if (!amount){
+      const label = badge.querySelector('.chip-badge__label');
+      amount = doc.createElement('span');
+      amount.id = 'chipBadgeAmount';
+      amount.textContent = '…';
+      if (label){
+        if (label.textContent.indexOf('Chips:') === -1){
+          label.insertBefore(doc.createTextNode('Chips: '), label.firstChild || null);
+        }
+        label.appendChild(amount);
+      } else {
+        const wrap = doc.createElement('span');
+        wrap.className = 'chip-badge__label';
+        wrap.appendChild(doc.createTextNode('Chips: '));
+        wrap.appendChild(amount);
+        badge.textContent = '';
+        badge.appendChild(wrap);
+      }
+    }
+    if (topbarRight && badge.parentNode !== topbarRight){
+      topbarRight.appendChild(badge);
+    }
+    return badge;
+  }
+
+  function normalizeTopbarBadges(){
+    const topbarRight = ensureTopbarRight();
+    if (!topbarRight) return;
+    const avatarShell = doc.getElementById('avatarShell');
+    const xpBadge = doc.getElementById('xpBadge');
+    if (xpBadge){
+      moveNode(xpBadge, topbarRight, avatarShell || topbarRight.firstChild);
+    }
+    const chipBadge = ensureChipBadge(topbarRight);
+    if (chipBadge){
+      if (xpBadge && xpBadge.parentNode === topbarRight){
+        moveNode(chipBadge, topbarRight, xpBadge.nextSibling || avatarShell);
+      } else if (avatarShell){
+        moveNode(chipBadge, topbarRight, avatarShell);
+      } else {
+        moveNode(chipBadge, topbarRight);
+      }
+    }
+  }
+
   function refreshXpBadge(){
     if (!window || !window.XPClient || typeof window.XPClient.refreshBadgeFromServer !== 'function') return;
     try {
@@ -65,6 +160,7 @@
 
   function ensureChipNodes(){
     if (chipNodes.ready) return;
+    normalizeTopbarBadges();
     chipNodes.badge = doc.getElementById('chipBadge');
     chipNodes.amount = doc.getElementById('chipBadgeAmount');
     chipNodes.ready = true;
@@ -98,12 +194,45 @@
   }
 
   function renderChipBadgeSignedOut(){
-    setChipBadge('Sign in for chips', { loading: false });
+    hideChipBadge();
+  }
+
+  function ensureChipsClientLoaded(){
+    if (window && window.ChipsClient && typeof window.ChipsClient.fetchBalance === 'function'){
+      return Promise.resolve(true);
+    }
+    if (chipsClientPromise) return chipsClientPromise;
+    chipsClientPromise = new Promise(resolve => {
+      if (!doc || typeof doc.createElement !== 'function'){ resolve(false); return; }
+      let script = doc.getElementById('chipsClientScript');
+      if (!script){
+        script = doc.createElement('script');
+        script.id = 'chipsClientScript';
+        script.src = '/js/chips/client.js';
+        script.defer = true;
+        script.addEventListener('load', () => resolve(true));
+        script.addEventListener('error', () => resolve(false));
+        const target = doc.head || doc.body || doc.documentElement;
+        if (target && target.appendChild){ target.appendChild(script); }
+        else { resolve(false); }
+      } else {
+        script.addEventListener('load', () => resolve(true));
+        script.addEventListener('error', () => resolve(false));
+      }
+    });
+    return chipsClientPromise;
   }
 
   async function refreshChipBadge(){
     ensureChipNodes();
-    if (!chipNodes.badge || !window || !window.ChipsClient || typeof window.ChipsClient.fetchBalance !== 'function') return;
+    if (!chipNodes.badge) return;
+    if (!window || !window.ChipsClient || typeof window.ChipsClient.fetchBalance !== 'function'){
+      const loaded = await ensureChipsClientLoaded();
+      if (!loaded || !window.ChipsClient || typeof window.ChipsClient.fetchBalance !== 'function'){
+        hideChipBadge();
+        return;
+      }
+    }
     if (chipInFlight){ return chipInFlight; }
     setChipBadge('Syncing chips…', { loading: true });
     chipInFlight = (async function(){
@@ -159,10 +288,12 @@
 
   if (doc.readyState === 'loading'){
     doc.addEventListener('DOMContentLoaded', function(){
+      normalizeTopbarBadges();
       refreshChipBadge();
       wireChipEvents();
     }, { once: true });
   } else {
+    normalizeTopbarBadges();
     refreshChipBadge();
     wireChipEvents();
   }

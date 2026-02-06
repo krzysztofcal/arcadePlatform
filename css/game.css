@@ -116,6 +116,15 @@ canvas#game{ width:100%; height:auto; aspect-ratio:460/320; background:#0b1220; 
 .xp-badge--loading{ color:rgba(182,200,242,.96); background:rgba(148,163,184,.18); border-color:rgba(148,163,184,.35); }
 .xp-badge--loading::after{ content:""; width:12px; height:12px; border-radius:50%; border:2px solid currentColor; border-top-color:transparent; margin-left:4px; animation:xp-badge-spin .75s linear infinite; }
 .xp-badge--bump{ animation:xp-badge-bump .58s cubic-bezier(.25,1.5,.5,1); }
+.chip-pill{ font:600 13px/1 Poppins, sans-serif; color:#c7d2fe; background:rgba(99,102,241,.12); border:1px solid rgba(129,140,248,.5); border-radius:999px; padding:8px 14px; display:inline-flex; align-items:center; gap:6px; transition:transform .2s ease, background .2s ease; position:relative; overflow:visible; text-decoration:none; cursor:pointer; }
+
+.chip-pill--loading{ color:rgba(182,200,242,.96); background:rgba(148,163,184,.18); border-color:rgba(148,163,184,.35); }
+
+.chip-pill--loading::after{ content:""; width:12px; height:12px; border-radius:50%; border:2px solid currentColor; border-top-color:transparent; margin-left:4px; animation:xp-badge-spin .75s linear infinite; }
+
+.chip-badge{ color:#c7d2fe; }
+
+.chip-badge__label{ display:inline-flex; align-items:center; gap:6px; }
 @keyframes xp-badge-bump{
   0%{ transform:scale(1); }
   28%{ transform:scale(1.08); }
