@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { MISSED_TURN_THRESHOLD } from "../netlify/functions/_shared/poker-inactivity-policy.mjs";
 import { advanceIfNeeded, applyAction, initHandState } from "../netlify/functions/_shared/poker-reducer.mjs";
 import { maybeApplyTurnTimeout } from "../netlify/functions/_shared/poker-turn-timeout.mjs";
 
@@ -58,11 +59,14 @@ const run = async () => {
     };
     const second = runTimeout(withMissed, 4000);
 
-    assert.equal(second.result.state.missedTurnsByUserId[timeoutUserId], 2);
+    assert.equal(second.result.state.missedTurnsByUserId[timeoutUserId], MISSED_TURN_THRESHOLD);
     assert.equal(second.result.state.sitOutByUserId?.[timeoutUserId], true);
     assert.ok(
       second.result.events.some(
-        (event) => event.type === "PLAYER_AUTO_SITOUT" && event.userId === timeoutUserId && event.missedTurns === 2
+        (event) =>
+          event.type === "PLAYER_AUTO_SITOUT" &&
+          event.userId === timeoutUserId &&
+          event.missedTurns === MISSED_TURN_THRESHOLD
       )
     );
   }

@@ -3,6 +3,9 @@ import { HEARTBEAT_INTERVAL_SEC, isValidUuid } from "./_shared/poker-utils.mjs";
 import { postTransaction } from "./_shared/chips-ledger.mjs";
 import { normalizeRequestId } from "./_shared/poker-request-id.mjs";
 import { deletePokerRequest, ensurePokerRequest, storePokerRequestResult } from "./_shared/poker-idempotency.mjs";
+import { isStateStorageValid } from "./_shared/poker-state-utils.mjs";
+import { patchLeftTableByUserId } from "./_shared/poker-left-flag.mjs";
+import { loadPokerStateForUpdate, updatePokerStateLocked } from "./_shared/poker-state-write-locked.mjs";
 import { updatePokerStateOptimistic } from "./_shared/poker-state-write.mjs";
 
 const REQUEST_PENDING_STALE_SEC = 30;
@@ -58,39 +61,22 @@ const parseSeats = (value) => (Array.isArray(value) ? value : []);
 
 const parseStacks = (value) => (value && typeof value === "object" && !Array.isArray(value) ? value : {});
 
-const parseUserMap = (value) => (value && typeof value === "object" && !Array.isArray(value) ? value : {});
-
 const clearLeftFlag = async (tx, { tableId, userId }) => {
-  const stateRows = await tx.unsafe("select version, state from public.poker_state where table_id = $1 for update;", [tableId]);
-  const stateRow = stateRows?.[0] || null;
-  if (!stateRow) {
-    throw new Error("poker_state_missing");
-  }
-  const expectedVersion = Number(stateRow.version);
-  if (!Number.isInteger(expectedVersion) || expectedVersion < 0) {
+  const loadResult = await loadPokerStateForUpdate(tx, tableId);
+  if (!loadResult.ok) {
+    if (loadResult.reason === "not_found") throw makeError(404, "state_missing");
     throw makeError(409, "state_invalid");
   }
-  const currentState = normalizeState(stateRow.state);
-  const leftTableByUserId = parseUserMap(currentState.leftTableByUserId);
-  if (!leftTableByUserId[userId]) {
-    return { updated: false };
+  const currentState = loadResult.state;
+  const patched = patchLeftTableByUserId(currentState, userId, false);
+  if (!patched.changed) return { updated: false };
+  if (!isStateStorageValid(patched.nextState, { requireNoDeck: true, requireHandSeed: false, requireCommunityDealt: false })) {
+    klog("poker_join_state_invalid", { tableId, userId, reason: "state_invalid" });
+    throw makeError(409, "state_invalid");
   }
-  const updatedState = {
-    ...currentState,
-    leftTableByUserId: { ...leftTableByUserId, [userId]: false },
-  };
-  const updateResult = await updatePokerStateOptimistic(tx, {
-    tableId,
-    expectedVersion,
-    nextState: updatedState,
-  });
+  const updateResult = await updatePokerStateLocked(tx, { tableId, nextState: patched.nextState });
   if (!updateResult.ok) {
-    if (updateResult.reason === "not_found") {
-      throw makeError(404, "state_missing");
-    }
-    if (updateResult.reason === "conflict") {
-      throw makeError(409, "state_conflict");
-    }
+    if (updateResult.reason === "not_found") throw makeError(404, "state_missing");
     throw makeError(409, "state_invalid");
   }
   return { updated: true };
@@ -335,17 +321,20 @@ values ($1, $2, $3, 'ACTIVE', now(), now(), $4);
         const seats = parseSeats(currentState.seats).filter((seat) => seat?.userId !== auth.userId);
         seats.push({ userId: auth.userId, seatNo });
         const stacks = { ...parseStacks(currentState.stacks), [auth.userId]: buyIn };
-        const leftTableByUserId = { ...parseUserMap(currentState.leftTableByUserId), [auth.userId]: false };
+        const patched = patchLeftTableByUserId(currentState, auth.userId, false);
 
         const updatedState = {
-          ...currentState,
+          ...patched.nextState,
           tableId: currentState.tableId || tableId,
           seats,
           stacks,
           pot: Number.isFinite(currentState.pot) ? currentState.pot : 0,
           phase: currentState.phase || "INIT",
-          leftTableByUserId,
         };
+        if (!isStateStorageValid(updatedState, { requireNoDeck: true, requireHandSeed: false, requireCommunityDealt: false })) {
+          klog("poker_join_state_invalid", { tableId, userId: auth.userId, reason: "state_invalid" });
+          throw makeError(409, "state_invalid");
+        }
 
         const updateResult = await updatePokerStateOptimistic(tx, {
           tableId,

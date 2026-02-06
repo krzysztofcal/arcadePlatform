@@ -19,3 +19,15 @@ assert.ok(
   joinSrc.includes("poker_join_stack_persisted"),
   "join should log poker_join_stack_persisted after seat upsert"
 );
+assert.ok(
+  joinSrc.includes("isStateStorageValid"),
+  "join should validate poker_state before persisting updates"
+);
+assert.ok(
+  joinSrc.includes("updatePokerStateLocked"),
+  "join should use locked state updates for left-flag clearing"
+);
+assert.ok(
+  joinSrc.includes("patchLeftTableByUserId"),
+  "join should patch leftTableByUserId using shared helper"
+);
