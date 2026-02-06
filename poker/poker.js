@@ -366,7 +366,10 @@
 
   function formatRank(r){
     if (r == null) return '?';
-    if (r === 'A' || r === 'K' || r === 'Q' || r === 'J') return r;
+    if (typeof r === 'string'){
+      var upper = r.toUpperCase();
+      if (upper === 'A' || upper === 'K' || upper === 'Q' || upper === 'J') return upper;
+    }
     var n = Number(r);
     if (!Number.isFinite(n)) return String(r) || '?';
     n = Math.trunc(n);
