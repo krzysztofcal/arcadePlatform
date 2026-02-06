@@ -33,6 +33,7 @@ const deriveLastRaiseSize = (state, currentBet) => {
 
 const isActivePlayer = (state, userId) => {
   if (!state || !userId) return false;
+  if (state.leftTableByUserId && state.leftTableByUserId[userId]) return false;
   const folded = !!(state.foldedByUserId && state.foldedByUserId[userId]);
   const allIn = !!(state.allInByUserId && state.allInByUserId[userId]);
   return !folded && !allIn;
