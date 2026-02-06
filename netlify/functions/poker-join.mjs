@@ -6,6 +6,7 @@ import { deletePokerRequest, ensurePokerRequest, storePokerRequestResult } from 
 import { isStateStorageValid } from "./_shared/poker-state-utils.mjs";
 import { patchLeftTableByUserId } from "./_shared/poker-left-flag.mjs";
 import { clearMissedTurns } from "./_shared/poker-missed-turns.mjs";
+import { patchSitOutByUserId } from "./_shared/poker-sitout-flag.mjs";
 import { loadPokerStateForUpdate, updatePokerStateLocked } from "./_shared/poker-state-write-locked.mjs";
 
 const REQUEST_PENDING_STALE_SEC = 30;
@@ -48,7 +49,17 @@ const parseSeats = (value) => (Array.isArray(value) ? value : []);
 
 const parseStacks = (value) => (value && typeof value === "object" && !Array.isArray(value) ? value : {});
 
-const clearLeftFlag = async (tx, { tableId, userId }) => {
+const buildMeStatus = (state, userId, { forceSeated = false } = {}) => {
+  const seat = Array.isArray(state?.seats) ? state.seats.find((entry) => entry?.userId === userId) : null;
+  return {
+    userId,
+    isSeated: forceSeated ? true : !!seat,
+    isLeft: !!state?.leftTableByUserId?.[userId],
+    isSitOut: !!state?.sitOutByUserId?.[userId],
+  };
+};
+
+const clearRejoinFlags = async (tx, { tableId, userId }) => {
   const loadResult = await loadPokerStateForUpdate(tx, tableId);
   if (!loadResult.ok) {
     if (loadResult.reason === "not_found") throw makeError(404, "state_missing");
@@ -57,17 +68,20 @@ const clearLeftFlag = async (tx, { tableId, userId }) => {
   const currentState = loadResult.state;
   const patched = patchLeftTableByUserId(currentState, userId, false);
   const clearedMissed = clearMissedTurns(patched.nextState, userId);
-  if (!patched.changed && !clearedMissed.changed) return { updated: false };
-  if (!isStateStorageValid(clearedMissed.nextState, { requireNoDeck: true, requireHandSeed: false, requireCommunityDealt: false })) {
+  const clearedSitOut = patchSitOutByUserId(clearedMissed.nextState, userId, false);
+  if (!patched.changed && !clearedMissed.changed && !clearedSitOut.changed) {
+    return { updated: false, nextState: clearedSitOut.nextState };
+  }
+  if (!isStateStorageValid(clearedSitOut.nextState, { requireNoDeck: true, requireHandSeed: false, requireCommunityDealt: false })) {
     klog("poker_join_state_invalid", { tableId, userId, reason: "state_invalid" });
     throw makeError(409, "state_invalid");
   }
-  const updateResult = await updatePokerStateLocked(tx, { tableId, nextState: clearedMissed.nextState });
+  const updateResult = await updatePokerStateLocked(tx, { tableId, nextState: clearedSitOut.nextState });
   if (!updateResult.ok) {
     if (updateResult.reason === "not_found") throw makeError(404, "state_missing");
     throw makeError(409, "state_invalid");
   }
-  return { updated: true };
+  return { updated: true, nextState: clearedSitOut.nextState };
 };
 
 export async function handler(event) {
@@ -181,9 +195,15 @@ export async function handler(event) {
             "update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1;",
             [tableId]
           );
-          await clearLeftFlag(tx, { tableId, userId: auth.userId });
+          const flagResult = await clearRejoinFlags(tx, { tableId, userId: auth.userId });
 
-          const resultPayload = { ok: true, tableId, seatNo: existingSeatNo, userId: auth.userId };
+          const resultPayload = {
+            ok: true,
+            tableId,
+            seatNo: existingSeatNo,
+            userId: auth.userId,
+            me: buildMeStatus(flagResult.nextState, auth.userId, { forceSeated: true }),
+          };
           await storePokerRequestResult(tx, {
             tableId,
             userId: auth.userId,
@@ -241,8 +261,14 @@ values ($1, $2, $3, 'ACTIVE', now(), now(), $4);
                 [tableId, auth.userId, buyIn]
               );
               mutated = true;
-              await clearLeftFlag(tx, { tableId, userId: auth.userId });
-              const resultPayload = { ok: true, tableId, seatNo: fallbackSeatNo, userId: auth.userId };
+              const flagResult = await clearRejoinFlags(tx, { tableId, userId: auth.userId });
+              const resultPayload = {
+                ok: true,
+                tableId,
+                seatNo: fallbackSeatNo,
+                userId: auth.userId,
+                me: buildMeStatus(flagResult.nextState, auth.userId, { forceSeated: true }),
+              };
               await storePokerRequestResult(tx, {
                 tableId,
                 userId: auth.userId,
@@ -306,9 +332,10 @@ values ($1, $2, $3, 'ACTIVE', now(), now(), $4);
         const stacks = { ...parseStacks(currentState.stacks), [auth.userId]: buyIn };
         const patched = patchLeftTableByUserId(currentState, auth.userId, false);
         const clearedMissed = clearMissedTurns(patched.nextState, auth.userId);
+        const clearedSitOut = patchSitOutByUserId(clearedMissed.nextState, auth.userId, false);
 
         const updatedState = {
-          ...clearedMissed.nextState,
+          ...clearedSitOut.nextState,
           tableId: currentState.tableId || tableId,
           seats,
           stacks,
@@ -333,7 +360,14 @@ values ($1, $2, $3, 'ACTIVE', now(), now(), $4);
           [tableId]
         );
 
-        const resultPayload = { ok: true, tableId, seatNo, userId: auth.userId, heartbeatEverySec: HEARTBEAT_INTERVAL_SEC };
+        const resultPayload = {
+          ok: true,
+          tableId,
+          seatNo,
+          userId: auth.userId,
+          heartbeatEverySec: HEARTBEAT_INTERVAL_SEC,
+          me: buildMeStatus(updatedState, auth.userId, { forceSeated: true }),
+        };
         await storePokerRequestResult(tx, {
           tableId,
           userId: auth.userId,

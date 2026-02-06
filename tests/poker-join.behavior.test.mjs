@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { loadPokerHandler } from "./helpers/poker-test-helpers.mjs";
 import { patchLeftTableByUserId } from "../netlify/functions/_shared/poker-left-flag.mjs";
+import { patchSitOutByUserId } from "../netlify/functions/_shared/poker-sitout-flag.mjs";
 import { loadPokerStateForUpdate, updatePokerStateLocked } from "../netlify/functions/_shared/poker-state-write-locked.mjs";
 import { isStateStorageValid } from "../netlify/functions/_shared/poker-state-utils.mjs";
 
@@ -18,6 +19,7 @@ const makeJoinHandler = ({ requestStore, queries, sideEffects, failStoreResult =
     loadPokerStateForUpdate,
     updatePokerStateLocked,
     patchLeftTableByUserId,
+    patchSitOutByUserId,
     isStateStorageValid,
     beginSql: async (fn) =>
       fn({
@@ -75,6 +77,7 @@ const makeJoinHandler = ({ requestStore, queries, sideEffects, failStoreResult =
                   phase: "INIT",
                   leftTableByUserId: { [userId]: true },
                   missedTurnsByUserId: { [userId]: 1 },
+                  sitOutByUserId: { [userId]: true },
                 }),
               },
             ];
@@ -121,6 +124,11 @@ const run = async () => {
   const parsedState = JSON.parse(statePayload);
   assert.equal(parsedState.leftTableByUserId[userId], false);
   assert.equal(parsedState.missedTurnsByUserId?.[userId], undefined);
+  assert.equal(parsedState.sitOutByUserId?.[userId], false);
+  assert.equal(firstBody.me.userId, userId);
+  assert.equal(firstBody.me.isSeated, true);
+  assert.equal(firstBody.me.isLeft, false);
+  assert.equal(firstBody.me.isSitOut, false);
 
   const second = await callJoin(handler, "join-1");
   assert.equal(second.statusCode, 200);
@@ -174,6 +182,12 @@ const run = async () => {
   const rejoinState = JSON.parse(rejoinStatePayload);
   assert.equal(rejoinState.leftTableByUserId[userId], false);
   assert.equal(rejoinState.missedTurnsByUserId?.[userId], undefined);
+  assert.equal(rejoinState.sitOutByUserId?.[userId], false);
+  const rejoinBody = JSON.parse(rejoin.body);
+  assert.equal(rejoinBody.me.userId, userId);
+  assert.equal(rejoinBody.me.isSeated, true);
+  assert.equal(rejoinBody.me.isLeft, false);
+  assert.equal(rejoinBody.me.isSitOut, false);
 };
 
 run().catch((error) => {

@@ -4,6 +4,7 @@ import { isValidTwoCards } from "../../netlify/functions/_shared/poker-cards-uti
 import { deletePokerRequest, ensurePokerRequest, storePokerRequestResult } from "../../netlify/functions/_shared/poker-idempotency.mjs";
 import { formatStakes, parseStakes } from "../../netlify/functions/_shared/poker-stakes.mjs";
 import { clearMissedTurns } from "../../netlify/functions/_shared/poker-missed-turns.mjs";
+import { patchSitOutByUserId } from "../../netlify/functions/_shared/poker-sitout-flag.mjs";
 
 const root = process.cwd();
 
@@ -81,6 +82,7 @@ export const loadPokerHandler = (filePath, mocks) => {
     "loadPokerStateForUpdate",
     "parseStakes",
     "patchLeftTableByUserId",
+    "patchSitOutByUserId",
     "clearMissedTurns",
     "formatStakes",
     "upgradeLegacyInitState",
@@ -114,6 +116,7 @@ return handler;`
       storePokerRequestResult,
       deletePokerRequest,
       clearMissedTurns,
+      patchSitOutByUserId,
       ...mocks,
     };
     return factory(resolvedMocks, isValidTwoCards);
