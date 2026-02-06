@@ -320,7 +320,7 @@ const resetToNextHand = (state, options = {}) => {
   const orderedSeats = orderSeats(state.seats);
   const seats = Array.isArray(state.seats) ? state.seats.slice() : [];
   const stacks = copyMap(state.stacks);
-  const sitOutByUserId = sanitizeSitOutByUserId(state.sitOutByUserId, orderedSeats);
+  const sitOutByUserId = sanitizeSitOutByUserId(state.sitOutByUserId, seats);
   const seatedUserIds = orderedSeats.map((seat) => seat.userId).filter(Boolean);
   if (seatedUserIds.length === 0) {
     return {
@@ -328,7 +328,7 @@ const resetToNextHand = (state, options = {}) => {
       events: [{ type: "HAND_RESET_SKIPPED", reason: "not_enough_players" }],
     };
   }
-  const eligibleUserIds = computeEligibleUserIds({ orderedSeats, stacks, sitOutByUserId });
+  const eligibleUserIds = computeEligibleUserIds({ orderedSeats: orderSeats(seats), stacks, sitOutByUserId });
   if (eligibleUserIds.length < 2) {
     return {
       state: stampTurnTimer(state, Date.now()),

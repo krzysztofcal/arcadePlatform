@@ -128,7 +128,11 @@ const run = async () => {
     };
     const advanced = advanceIfNeeded(settled);
 
-    assert.ok(advanced.events.some((event) => event.type === "HAND_RESET_SKIPPED"));
+    assert.ok(
+      advanced.events.some((event) => event.type === "HAND_RESET_SKIPPED" && event.reason === "not_enough_players")
+    );
+    assert.ok(!advanced.events.some((event) => event.type === "HAND_RESET"));
+    assert.equal(advanced.state.handId, settled.handId);
   }
 };
 
