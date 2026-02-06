@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { loadPokerHandler } from "./helpers/poker-test-helpers.mjs";
-import { updatePokerStateOptimistic } from "../netlify/functions/_shared/poker-state-write.mjs";
+import { patchLeftTableByUserId } from "../netlify/functions/_shared/poker-left-flag.mjs";
+import { loadPokerStateForUpdate, updatePokerStateLocked } from "../netlify/functions/_shared/poker-state-write-locked.mjs";
+import { isStateStorageValid } from "../netlify/functions/_shared/poker-state-utils.mjs";
 
 const tableId = "11111111-1111-4111-8111-111111111111";
 const userId = "user-join";
@@ -13,7 +15,10 @@ const makeJoinHandler = ({ requestStore, queries, sideEffects, failStoreResult =
     verifySupabaseJwt: async () => ({ valid: true, userId }),
     isValidUuid: () => true,
     normalizeRequestId: (value) => ({ ok: true, value: value ?? null }),
-    updatePokerStateOptimistic,
+    loadPokerStateForUpdate,
+    updatePokerStateLocked,
+    patchLeftTableByUserId,
+    isStateStorageValid,
     beginSql: async (fn) =>
       fn({
         unsafe: async (query, params) => {
@@ -58,7 +63,19 @@ const makeJoinHandler = ({ requestStore, queries, sideEffects, failStoreResult =
             return [{ id: "escrow-1" }];
           }
           if (text.includes("from public.poker_state") && text.includes("for update")) {
-            return [{ version: 1, state: JSON.stringify({ tableId, seats: [], stacks: {}, pot: 0, phase: "INIT" }) }];
+            return [
+              {
+                version: 1,
+                state: JSON.stringify({
+                  tableId,
+                  seats: [],
+                  stacks: {},
+                  pot: 0,
+                  phase: "INIT",
+                  leftTableByUserId: { [userId]: true },
+                }),
+              },
+            ];
           }
           if (text.includes("update public.poker_state") && text.includes("version = version + 1")) {
             return [{ version: 2 }];
@@ -96,6 +113,11 @@ const run = async () => {
   assert.equal(firstBody.ok, true);
   assert.equal(sideEffects.seatInsert, 1);
   assert.equal(sideEffects.ledger, 1);
+  const stateWrite = queries.find((entry) => entry.query.toLowerCase().includes("update public.poker_state"));
+  assert.ok(stateWrite, "join should write poker_state under lock");
+  const statePayload = stateWrite?.params?.[1];
+  const parsedState = JSON.parse(statePayload);
+  assert.equal(parsedState.leftTableByUserId[userId], false);
 
   const second = await callJoin(handler, "join-1");
   assert.equal(second.statusCode, 200);

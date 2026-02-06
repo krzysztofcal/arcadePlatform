@@ -43,19 +43,6 @@ const parseBuyIn = (value) => {
   return num;
 };
 
-const normalizeState = (value) => {
-  if (!value) return {};
-  if (typeof value === "string") {
-    try {
-      return JSON.parse(value);
-    } catch {
-      return {};
-    }
-  }
-  if (typeof value === "object") return value;
-  return {};
-};
-
 const parseSeats = (value) => (Array.isArray(value) ? value : []);
 
 const parseStacks = (value) => (value && typeof value === "object" && !Array.isArray(value) ? value : {});
@@ -311,7 +298,7 @@ values ($1, $2, $3, 'ACTIVE', now(), now(), $4);
           throw makeError(409, "state_invalid");
         }
 
-        const currentState = normalizeState(loadResult.state);
+        const currentState = loadResult.state;
         const seats = parseSeats(currentState.seats).filter((seat) => seat?.userId !== auth.userId);
         seats.push({ userId: auth.userId, seatNo });
         const stacks = { ...parseStacks(currentState.stacks), [auth.userId]: buyIn };
