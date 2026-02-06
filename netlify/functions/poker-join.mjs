@@ -58,6 +58,44 @@ const parseSeats = (value) => (Array.isArray(value) ? value : []);
 
 const parseStacks = (value) => (value && typeof value === "object" && !Array.isArray(value) ? value : {});
 
+const parseUserMap = (value) => (value && typeof value === "object" && !Array.isArray(value) ? value : {});
+
+const clearLeftFlag = async (tx, { tableId, userId }) => {
+  const stateRows = await tx.unsafe("select version, state from public.poker_state where table_id = $1 for update;", [tableId]);
+  const stateRow = stateRows?.[0] || null;
+  if (!stateRow) {
+    throw new Error("poker_state_missing");
+  }
+  const expectedVersion = Number(stateRow.version);
+  if (!Number.isInteger(expectedVersion) || expectedVersion < 0) {
+    throw makeError(409, "state_invalid");
+  }
+  const currentState = normalizeState(stateRow.state);
+  const leftTableByUserId = parseUserMap(currentState.leftTableByUserId);
+  if (!leftTableByUserId[userId]) {
+    return { updated: false };
+  }
+  const updatedState = {
+    ...currentState,
+    leftTableByUserId: { ...leftTableByUserId, [userId]: false },
+  };
+  const updateResult = await updatePokerStateOptimistic(tx, {
+    tableId,
+    expectedVersion,
+    nextState: updatedState,
+  });
+  if (!updateResult.ok) {
+    if (updateResult.reason === "not_found") {
+      throw makeError(404, "state_missing");
+    }
+    if (updateResult.reason === "conflict") {
+      throw makeError(409, "state_conflict");
+    }
+    throw makeError(409, "state_invalid");
+  }
+  return { updated: true };
+};
+
 export async function handler(event) {
   const origin = event.headers?.origin || event.headers?.Origin;
   const cors = corsHeaders(origin);
@@ -169,6 +207,7 @@ export async function handler(event) {
             "update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1;",
             [tableId]
           );
+          await clearLeftFlag(tx, { tableId, userId: auth.userId });
 
           const resultPayload = { ok: true, tableId, seatNo: existingSeatNo, userId: auth.userId };
           await storePokerRequestResult(tx, {
@@ -228,6 +267,7 @@ values ($1, $2, $3, 'ACTIVE', now(), now(), $4);
                 [tableId, auth.userId, buyIn]
               );
               mutated = true;
+              await clearLeftFlag(tx, { tableId, userId: auth.userId });
               const resultPayload = { ok: true, tableId, seatNo: fallbackSeatNo, userId: auth.userId };
               await storePokerRequestResult(tx, {
                 tableId,
@@ -295,6 +335,7 @@ values ($1, $2, $3, 'ACTIVE', now(), now(), $4);
         const seats = parseSeats(currentState.seats).filter((seat) => seat?.userId !== auth.userId);
         seats.push({ userId: auth.userId, seatNo });
         const stacks = { ...parseStacks(currentState.stacks), [auth.userId]: buyIn };
+        const leftTableByUserId = { ...parseUserMap(currentState.leftTableByUserId), [auth.userId]: false };
 
         const updatedState = {
           ...currentState,
@@ -303,6 +344,7 @@ values ($1, $2, $3, 'ACTIVE', now(), now(), $4);
           stacks,
           pot: Number.isFinite(currentState.pot) ? currentState.pot : 0,
           phase: currentState.phase || "INIT",
+          leftTableByUserId,
         };
 
         const updateResult = await updatePokerStateOptimistic(tx, {

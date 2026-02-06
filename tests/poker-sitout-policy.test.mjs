@@ -59,7 +59,12 @@ const run = async () => {
     const second = runTimeout(withMissed, 4000);
 
     assert.equal(second.result.state.missedTurnsByUserId[timeoutUserId], 2);
-    assert.notEqual(second.result.state.sitOutByUserId?.[timeoutUserId], true);
+    assert.equal(second.result.state.sitOutByUserId?.[timeoutUserId], true);
+    assert.ok(
+      second.result.events.some(
+        (event) => event.type === "PLAYER_AUTO_SITOUT" && event.userId === timeoutUserId && event.missedTurns === 2
+      )
+    );
   }
 
   {
