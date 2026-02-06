@@ -182,4 +182,4 @@ const maybeApplyTurnTimeout = ({ tableId, state, privateState, nowMs }) => {
   };
 };
 
-export { getTimeoutAction, getTimeoutDefaultAction, materializeIfNeededPublic, maybeApplyTurnTimeout, normalizeSeatOrderFromState };
+export { getTimeoutAction, getTimeoutDefaultAction, maybeApplyTurnTimeout, normalizeSeatOrderFromState };
