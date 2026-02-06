@@ -55,6 +55,22 @@ const run = async () => {
 
   {
     const { seats, stacks } = makeBase();
+    const { state } = initHandState({ tableId: "t-missed-fold", seats, stacks, rng: makeRng(404) });
+    const withMissed = {
+      ...state,
+      missedTurnsByUserId: { [state.turnUserId]: 3 },
+    };
+    const applied = applyAction(withMissed, {
+      type: "FOLD",
+      userId: state.turnUserId,
+      requestId: "req:manual-fold",
+    });
+
+    assert.equal(applied.state.missedTurnsByUserId[state.turnUserId], 3);
+  }
+
+  {
+    const { seats, stacks } = makeBase();
     const { state } = initHandState({ tableId: "t-missed-reset-hand", seats, stacks, rng: makeRng(303) });
     const doneState = {
       ...state,

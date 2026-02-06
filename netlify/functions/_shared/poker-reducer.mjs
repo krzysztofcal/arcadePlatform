@@ -405,7 +405,7 @@ const applyAction = (state, action) => {
     missedTurnsByUserId,
   };
   const userId = action.userId;
-  if (!isAutoAction && ["CALL", "BET", "CHECK", "FOLD", "RAISE"].includes(action.type)) {
+  if (!isAutoAction && ["CALL", "BET", "CHECK", "RAISE"].includes(action.type)) {
     next.missedTurnsByUserId[userId] = 0;
   }
   const roundCurrentBet = deriveCurrentBet(next);
