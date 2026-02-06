@@ -59,7 +59,7 @@ const run = async () => {
     const second = runTimeout(withMissed, 4000);
 
     assert.equal(second.result.state.missedTurnsByUserId[timeoutUserId], 2);
-    assert.equal(second.result.state.sitOutByUserId[timeoutUserId], true);
+    assert.notEqual(second.result.state.sitOutByUserId?.[timeoutUserId], true);
   }
 
   {
