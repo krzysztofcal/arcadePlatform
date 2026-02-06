@@ -361,11 +361,9 @@ const resetToNextHand = (state, options = {}) => {
   const sitOutByUserId = sanitizeSitOutByUserId(state.sitOutByUserId, seats);
   const pendingAutoSitOutByUserId = sanitizePendingAutoSitOutByUserId(state.pendingAutoSitOutByUserId, seats);
   const nextSitOutByUserId = { ...sitOutByUserId };
-  let hasPending = false;
   for (const [userId, pending] of Object.entries(pendingAutoSitOutByUserId)) {
     if (!pending) continue;
     nextSitOutByUserId[userId] = true;
-    hasPending = true;
   }
   const nextPendingAutoSitOutByUserId = {};
   const leftTableByUserId = sanitizeLeftTableByUserId(state.leftTableByUserId, seats);

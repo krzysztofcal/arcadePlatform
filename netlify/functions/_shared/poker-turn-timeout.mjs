@@ -73,6 +73,7 @@ const assertShowdownConsistency = (state) => {
 };
 
 const materializeIfNeededPublic = (state, privateHoleCards) => {
+  if (!isPlainObject(state)) return state;
   const stripped = stripPrivate(state);
   const publicState = stripped.publicState;
   const seatUserIdsInOrder = normalizeSeatOrderFromState(publicState.seats);
@@ -137,10 +138,6 @@ const maybeApplyTurnTimeout = ({ tableId, state, privateState, nowMs }) => {
   const stripped = stripPrivate(applied.state);
   let nextPublic = stripped.publicState;
   const privateHoleCards = stripped.privateHoleCards;
-  const missedTurnsSnapshot =
-    nextPublic && typeof nextPublic === "object" && !Array.isArray(nextPublic)
-      ? nextPublic.missedTurnsByUserId
-      : null;
   let events = Array.isArray(applied.events) ? applied.events.slice() : [];
 
   nextPublic = materializeIfNeededPublic(nextPublic, privateHoleCards);
@@ -174,15 +171,8 @@ const maybeApplyTurnTimeout = ({ tableId, state, privateState, nowMs }) => {
       [action.userId]: requestId,
     },
   };
-  const policyInput = {
-    ...updatedState,
-    missedTurnsByUserId: missedTurnsSnapshot || updatedState.missedTurnsByUserId,
-  };
-  const policyResult = applyInactivityPolicy(policyInput, events);
-  const finalState = {
-    ...policyResult.state,
-    missedTurnsByUserId: updatedState.missedTurnsByUserId,
-  };
+  const policyResult = applyInactivityPolicy(updatedState, events);
+  const finalState = policyResult.state;
   return {
     applied: true,
     state: finalState,
@@ -192,4 +182,4 @@ const maybeApplyTurnTimeout = ({ tableId, state, privateState, nowMs }) => {
   };
 };
 
-export { getTimeoutAction, getTimeoutDefaultAction, maybeApplyTurnTimeout, normalizeSeatOrderFromState };
+export { getTimeoutAction, getTimeoutDefaultAction, materializeIfNeededPublic, maybeApplyTurnTimeout, normalizeSeatOrderFromState };
