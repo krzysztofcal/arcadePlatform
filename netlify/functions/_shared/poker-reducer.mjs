@@ -507,6 +507,7 @@ const applyAction = (state, action) => {
   const isAutoAction = requestId.startsWith("auto:");
   const sitOutByUserId = sanitizeSitOutByUserId(state.sitOutByUserId, safeSeats);
   const leftTableByUserId = sanitizeLeftTableByUserId(state.leftTableByUserId, safeSeats);
+  const pendingAutoSitOutByUserId = sanitizePendingAutoSitOutByUserId(state.pendingAutoSitOutByUserId, safeSeats);
   const next = {
     ...state,
     stacks: copyMap(state.stacks),
@@ -520,7 +521,7 @@ const applyAction = (state, action) => {
     deck: Array.isArray(state.deck) ? state.deck.slice() : [],
     missedTurnsByUserId,
     sitOutByUserId,
-    pendingAutoSitOutByUserId: copyMap(state.pendingAutoSitOutByUserId),
+    pendingAutoSitOutByUserId,
     leftTableByUserId,
   };
   const userId = action.userId;
@@ -637,6 +638,7 @@ const applyLeaveTable = (state, { userId, requestId } = {}) => {
   const safeSeats = Array.isArray(state.seats) ? state.seats : [];
   const sitOutByUserId = sanitizeSitOutByUserId(state.sitOutByUserId, safeSeats);
   const leftTableByUserId = sanitizeLeftTableByUserId(state.leftTableByUserId, safeSeats);
+  const pendingAutoSitOutByUserId = sanitizePendingAutoSitOutByUserId(state.pendingAutoSitOutByUserId, safeSeats);
   const missedTurnsByUserId =
     state.missedTurnsByUserId && typeof state.missedTurnsByUserId === "object" && !Array.isArray(state.missedTurnsByUserId)
       ? { ...state.missedTurnsByUserId }
@@ -654,7 +656,7 @@ const applyLeaveTable = (state, { userId, requestId } = {}) => {
     deck: Array.isArray(state.deck) ? state.deck.slice() : [],
     missedTurnsByUserId,
     sitOutByUserId,
-    pendingAutoSitOutByUserId: copyMap(state.pendingAutoSitOutByUserId),
+    pendingAutoSitOutByUserId,
     leftTableByUserId,
   };
   next.leftTableByUserId[userId] = true;

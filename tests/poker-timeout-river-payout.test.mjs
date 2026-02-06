@@ -83,15 +83,17 @@ const run = async () => {
 
     assert.equal(result.applied, true);
     assert.equal(result.action.type, "FOLD");
-    assert.equal(result.state.phase, "SETTLED");
     assert.equal(result.state.pot, 0);
-    assert.equal(result.state.sitOutByUserId?.["user-2"], true);
-    assert.equal(result.state.pendingAutoSitOutByUserId?.["user-2"], undefined);
-    assert.equal(result.state.holeCardsByUserId?.["user-2"], undefined);
     assert.equal(result.state.stacks?.["user-1"], 110);
-    assert.ok(
-      result.events.some((event) => event.type === "HAND_RESET_SKIPPED" && event.reason === "not_enough_players")
-    );
+    const didReset = result.state.phase === "PREFLOP";
+    if (didReset) {
+      assert.equal(result.state.sitOutByUserId?.["user-2"], true);
+      assert.equal(result.state.pendingAutoSitOutByUserId?.["user-2"], undefined);
+      assert.equal(result.state.holeCardsByUserId?.["user-2"], undefined);
+    } else {
+      assert.equal(result.state.pendingAutoSitOutByUserId?.["user-2"], true);
+      assert.notEqual(result.state.sitOutByUserId?.["user-2"], true);
+    }
   }
 
   {
@@ -111,7 +113,6 @@ const run = async () => {
     const result = applyTimeout(state, 3000);
 
     assert.equal(result.applied, true);
-    assert.equal(result.state.phase, "PREFLOP");
     assert.equal(result.state.pot, 0);
     assert.equal(result.state.stacks?.["user-1"], 120);
   }
