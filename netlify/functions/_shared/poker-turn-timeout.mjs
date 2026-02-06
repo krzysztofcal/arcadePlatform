@@ -68,8 +68,11 @@ const maybeApplyTurnTimeout = ({ tableId, state, privateState, nowMs }) => {
   let nextState = applied.state;
   let events = Array.isArray(applied.events) ? applied.events.slice() : [];
   let loops = 0;
+  let handDoneState = null;
   while (loops < ADVANCE_LIMIT) {
-    if (nextState.phase === "HAND_DONE") break;
+    if (nextState.phase === "HAND_DONE" && !handDoneState) {
+      handDoneState = nextState;
+    }
     const prevPhase = nextState.phase;
     const advanced = advanceIfNeeded(nextState);
     nextState = advanced.state;
@@ -81,32 +84,35 @@ const maybeApplyTurnTimeout = ({ tableId, state, privateState, nowMs }) => {
     loops += 1;
   }
 
-  const seatUserIdsInOrder = normalizeSeatOrderFromState(nextState.seats);
-  const currentHandId = typeof nextState.handId === "string" ? nextState.handId.trim() : "";
+  const showdownState = handDoneState || nextState;
+  const seatUserIdsInOrder = normalizeSeatOrderFromState(showdownState.seats);
+  const currentHandId = typeof showdownState.handId === "string" ? showdownState.handId.trim() : "";
   const showdownHandId =
-    typeof nextState.showdown?.handId === "string" && nextState.showdown.handId.trim() ? nextState.showdown.handId.trim() : "";
+    typeof showdownState.showdown?.handId === "string" && showdownState.showdown.handId.trim()
+      ? showdownState.showdown.handId.trim()
+      : "";
   const showdownAlreadyMaterialized = !!currentHandId && !!showdownHandId && showdownHandId === currentHandId;
   const eligibleUserIds = seatUserIdsInOrder.filter(
     (userId) =>
       typeof userId === "string" &&
-      !nextState.foldedByUserId?.[userId] &&
-      !nextState.leftTableByUserId?.[userId] &&
-      !nextState.sitOutByUserId?.[userId]
+      !showdownState.foldedByUserId?.[userId] &&
+      !showdownState.leftTableByUserId?.[userId] &&
+      !showdownState.sitOutByUserId?.[userId]
   );
   const shouldMaterializeShowdown =
     seatUserIdsInOrder.length > 0 &&
     !showdownAlreadyMaterialized &&
-    (eligibleUserIds.length <= 1 || nextState.phase === "SHOWDOWN");
+    (eligibleUserIds.length <= 1 || showdownState.phase === "SHOWDOWN");
 
-  if (nextState.phase === "SHOWDOWN" && seatUserIdsInOrder.length === 0) {
+  if (showdownState.phase === "SHOWDOWN" && seatUserIdsInOrder.length === 0) {
     throw new Error("showdown_no_players");
   }
 
   if (shouldMaterializeShowdown) {
     const materialized = materializeShowdownAndPayout({
-      state: nextState,
+      state: showdownState,
       seatUserIdsInOrder,
-      holeCardsByUserId: nextState.holeCardsByUserId,
+      holeCardsByUserId: showdownState.holeCardsByUserId,
       computeShowdown,
       awardPotsAtShowdown,
     });
