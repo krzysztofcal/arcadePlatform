@@ -788,7 +788,7 @@ export async function handler(event) {
 
       let applied;
       try {
-        applied = applyAction(privateState, { ...actionParsed.value, userId: auth.userId });
+        applied = applyAction(privateState, { ...actionParsed.value, userId: auth.userId, requestId });
       } catch (error) {
         const reason = error?.message || "invalid_action";
         if (reason === "not_your_turn") {

@@ -62,7 +62,8 @@ const maybeApplyTurnTimeout = ({ tableId, state, privateState, nowMs }) => {
     return { applied: false, state, requestId, replayed: true };
   }
 
-  const applied = applyAction(privateState, action);
+  const actionWithRequestId = { ...action, requestId };
+  const applied = applyAction(privateState, actionWithRequestId);
   let nextState = applied.state;
   const events = Array.isArray(applied.events) ? applied.events.slice() : [];
   let loops = 0;
@@ -112,12 +113,19 @@ const maybeApplyTurnTimeout = ({ tableId, state, privateState, nowMs }) => {
   }
 
   const { holeCardsByUserId: _ignoredHoleCards, deck: _ignoredDeck, ...stateBase } = nextState;
+  const missedTurnsByUserId = isPlainObject(state.missedTurnsByUserId) ? state.missedTurnsByUserId : {};
+  const previousMissed = Number(missedTurnsByUserId[action.userId]);
+  const safeMissed = Number.isFinite(previousMissed) && previousMissed >= 0 ? Math.trunc(previousMissed) : 0;
   const updatedState = {
     ...stateBase,
     communityDealt: Array.isArray(nextState.community) ? nextState.community.length : 0,
     lastActionRequestIdByUserId: {
       ...lastByUserId,
       [action.userId]: requestId,
+    },
+    missedTurnsByUserId: {
+      ...missedTurnsByUserId,
+      [action.userId]: safeMissed + 1,
     },
   };
   return { applied: true, state: updatedState, events, action, requestId };

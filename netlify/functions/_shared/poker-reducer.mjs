@@ -259,6 +259,7 @@ const initHandState = ({ tableId, seats, stacks, rng }) => {
     lastAggressorUserId: null,
     currentBet: 0,
     lastRaiseSize: null,
+    missedTurnsByUserId: {},
   };
   const now = Date.now();
   const nextState = stampTurnTimer({ ...state, allInByUserId: deriveAllInByUserId(state), turnNo: 1 }, now);
@@ -329,6 +330,7 @@ const resetToNextHand = (state, options = {}) => {
     sidePots: null,
     currentBet: 0,
     lastRaiseSize: null,
+    missedTurnsByUserId: {},
   };
   const nextWithAllIn = { ...nextState, allInByUserId: deriveAllInByUserId(nextState) };
   const stamped = stampTurnTimer(nextWithAllIn, Date.now());
@@ -383,6 +385,12 @@ const applyAction = (state, action) => {
   assertPlayer(state, action.userId);
   const events = [{ type: "ACTION_APPLIED", action }];
   const safeSeats = Array.isArray(state.seats) ? state.seats : [];
+  const missedTurnsByUserId =
+    state.missedTurnsByUserId && typeof state.missedTurnsByUserId === "object" && !Array.isArray(state.missedTurnsByUserId)
+      ? { ...state.missedTurnsByUserId }
+      : {};
+  const requestId = typeof action?.requestId === "string" ? action.requestId : "";
+  const isAutoAction = requestId.startsWith("auto:");
   const next = {
     ...state,
     stacks: copyMap(state.stacks),
@@ -394,8 +402,12 @@ const applyAction = (state, action) => {
     contributionsByUserId: copyMap(state.contributionsByUserId || buildDefaultMap(safeSeats, 0)),
     community: Array.isArray(state.community) ? state.community.slice() : [],
     deck: Array.isArray(state.deck) ? state.deck.slice() : [],
+    missedTurnsByUserId,
   };
   const userId = action.userId;
+  if (!isAutoAction && ["CALL", "BET", "CHECK", "FOLD", "RAISE"].includes(action.type)) {
+    next.missedTurnsByUserId[userId] = 0;
+  }
   const roundCurrentBet = deriveCurrentBet(next);
   const roundLastRaiseSize = deriveLastRaiseSize(next, roundCurrentBet);
   const currentBet = next.betThisRoundByUserId[userId] || 0;
