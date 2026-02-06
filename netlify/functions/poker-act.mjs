@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import { baseHeaders, beginSql, corsHeaders, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
 import { isHoleCardsTableMissing, loadHoleCardsByUserId } from "./_shared/poker-hole-cards-store.mjs";
 import { deriveCommunityCards, deriveRemainingDeck } from "./_shared/poker-deal-deterministic.mjs";
-import { TURN_MS, advanceIfNeeded, applyAction } from "./_shared/poker-reducer.mjs";
+import { TURN_MS, advanceIfNeeded, applyAction, applyLeaveTable } from "./_shared/poker-reducer.mjs";
 import { normalizeRequestId } from "./_shared/poker-request-id.mjs";
 import { awardPotsAtShowdown } from "./_shared/poker-payout.mjs";
 import { materializeShowdownAndPayout } from "./_shared/poker-materialize-showdown.mjs";
@@ -16,7 +16,7 @@ import { resetTurnTimer } from "./_shared/poker-turn-timer.mjs";
 import { maybeApplyTurnTimeout } from "./_shared/poker-turn-timeout.mjs";
 import { isValidUuid } from "./_shared/poker-utils.mjs";
 
-const ACTION_TYPES = new Set(["CHECK", "BET", "CALL", "RAISE", "FOLD"]);
+const ACTION_TYPES = new Set(["CHECK", "BET", "CALL", "RAISE", "FOLD", "LEAVE_TABLE"]);
 const ADVANCE_LIMIT = 4;
 const REQUEST_PENDING_STALE_SEC = 30;
 const isPlainObjectValue = (value) => value && typeof value === "object" && !Array.isArray(value);
@@ -78,6 +78,7 @@ const normalizeAction = (action) => {
     if (!Number.isFinite(amount) || !Number.isInteger(amount) || amount <= 0) return { ok: false, value: null };
     return { ok: true, value: { type, amount } };
   }
+  if (type === "LEAVE_TABLE") return { ok: true, value: { type } };
   return { ok: true, value: { type } };
 };
 
@@ -336,7 +337,7 @@ export async function handler(event) {
         if (currentState?.phase === "INIT") {
           throw makeError(409, "hand_not_started");
         }
-        if (!isActionPhase(currentState.phase) || !currentState.turnUserId) {
+        if (actionParsed.value.type !== "LEAVE_TABLE" && (!isActionPhase(currentState.phase) || !currentState.turnUserId)) {
           throw makeError(409, "state_invalid");
         }
         return { pending: true, requestId };
@@ -752,6 +753,125 @@ export async function handler(event) {
         return resultPayload;
       }
 
+      if (actionParsed.value.type === "LEAVE_TABLE") {
+        let applied;
+        try {
+          applied = applyLeaveTable(privateState, { userId: auth.userId, requestId });
+        } catch (error) {
+          const reason = error?.message || "invalid_action";
+          if (reason === "invalid_player") {
+            klog("poker_act_rejected", {
+              tableId,
+              userId: auth.userId,
+              reason: "invalid_player",
+              phase: currentState.phase,
+              actionType: actionParsed.value.type,
+            });
+            throw makeError(403, "not_allowed");
+          }
+          if (reason === "invalid_action") {
+            klog("poker_act_rejected", {
+              tableId,
+              userId: auth.userId,
+              reason: "invalid_action",
+              phase: currentState.phase,
+              actionType: actionParsed.value.type,
+            });
+            throw makeError(400, "invalid_action");
+          }
+          throw error;
+        }
+
+        const nextState = applied.state;
+        const events = Array.isArray(applied.events) ? applied.events.slice() : [];
+        const { holeCardsByUserId: _ignoredHoleCards, deck: _ignoredDeck, ...stateBase } = nextState;
+        const updatedState = {
+          ...stateBase,
+          communityDealt: Array.isArray(nextState.community) ? nextState.community.length : 0,
+          lastActionRequestIdByUserId: {
+            ...lastByUserId,
+            [auth.userId]: requestId,
+          },
+        };
+        const nowMs = Date.now();
+        const hasTurnUserId = typeof updatedState.turnUserId === "string" && updatedState.turnUserId.trim();
+        const shouldResetTimer = isActionPhase(updatedState.phase) && hasTurnUserId;
+        const timerResetState = shouldResetTimer
+          ? resetTurnTimer(updatedState, nowMs, TURN_MS)
+          : { ...updatedState, turnStartedAt: null, turnDeadlineAt: null };
+
+        if (!isStateStorageValid(timerResetState, { requireHandSeed: true, requireCommunityDealt: true, requireNoDeck: true })) {
+          klog("poker_state_corrupt", { tableId, phase: timerResetState.phase });
+          throw makeError(409, "state_invalid");
+        }
+
+        const updateResult = await updatePokerStateOptimistic(tx, {
+          tableId,
+          expectedVersion,
+          nextState: timerResetState,
+        });
+        if (!updateResult.ok) {
+          if (updateResult.reason === "not_found") {
+            throw makeError(404, "state_missing");
+          }
+          if (updateResult.reason === "conflict") {
+            klog("poker_act_conflict", { tableId, userId: auth.userId, expectedVersion, requestId });
+            throw makeError(409, "state_conflict");
+          }
+          klog("poker_act_rejected", {
+            tableId,
+            userId: auth.userId,
+            reason: "state_invalid",
+            phase: timerResetState.phase,
+          });
+          throw makeError(409, "state_invalid");
+        }
+        const newVersion = updateResult.newVersion;
+        mutated = true;
+
+        const actionHandId =
+          typeof timerResetState.handId === "string" && timerResetState.handId.trim() ? timerResetState.handId.trim() : null;
+        await tx.unsafe(
+          "insert into public.poker_actions (table_id, version, user_id, action_type, amount, hand_id, request_id, phase_from, phase_to, meta) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb);",
+          [
+            tableId,
+            newVersion,
+            auth.userId,
+            actionParsed.value.type,
+            null,
+            actionHandId,
+            requestId,
+            currentState.phase || null,
+            timerResetState.phase || null,
+            null,
+          ]
+        );
+
+        const publicState = withoutPrivateState(timerResetState);
+        const legalInfo = computeLegalActions({ statePublic: publicState, userId: auth.userId });
+        const resultPayload = {
+          ok: true,
+          tableId,
+          state: {
+            version: newVersion,
+            state: publicState,
+          },
+          myHoleCards: holeCardsByUserId[auth.userId] || [],
+          events,
+          replayed: false,
+          legalActions: legalInfo.actions,
+          actionConstraints: buildActionConstraints(legalInfo),
+        };
+        await storePokerRequestResult(tx, {
+          tableId,
+          userId: auth.userId,
+          requestId,
+          kind: "ACT",
+          result: resultPayload,
+        });
+        return resultPayload;
+      }
+
       if (currentState.turnUserId !== auth.userId) {
         klog("poker_act_rejected", {
           tableId,
@@ -849,7 +969,11 @@ export async function handler(event) {
         }
       }
       const eligibleUserIds = seatUserIdsInOrder.filter(
-        (userId) => typeof userId === "string" && !nextState.foldedByUserId?.[userId]
+        (userId) =>
+          typeof userId === "string" &&
+          !nextState.foldedByUserId?.[userId] &&
+          !nextState.leftTableByUserId?.[userId] &&
+          !nextState.sitOutByUserId?.[userId]
       );
       const shouldMaterializeShowdown =
         !showdownAlreadyMaterialized && (eligibleUserIds.length <= 1 || nextState.phase === "SHOWDOWN");

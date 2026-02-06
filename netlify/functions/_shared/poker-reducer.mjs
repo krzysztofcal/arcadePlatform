@@ -35,7 +35,13 @@ const orderSeats = (seats) =>
   (Array.isArray(seats) ? seats.slice() : []).sort((a, b) => (a?.seatNo ?? 0) - (b?.seatNo ?? 0));
 
 const getActiveSeats = (state) =>
-  orderSeats(state.seats).filter((seat) => seat?.userId && !state.foldedByUserId?.[seat.userId]);
+  orderSeats(state.seats).filter(
+    (seat) =>
+      seat?.userId &&
+      !state.foldedByUserId?.[seat.userId] &&
+      !state.leftTableByUserId?.[seat.userId] &&
+      !state.sitOutByUserId?.[seat.userId]
+  );
 
 const getBettingSeats = (state) =>
   getActiveSeats(state).filter((seat) => (state.stacks?.[seat.userId] || 0) > 0);
@@ -48,6 +54,16 @@ const getNextBettingUserId = (state, fromUserId) => {
   return betting[(idx + 1) % betting.length].userId;
 };
 
+const isEligibleTurnUser = (state, userId) => {
+  if (!userId) return false;
+  if (state.leftTableByUserId?.[userId]) return false;
+  if (state.sitOutByUserId?.[userId]) return false;
+  if (state.foldedByUserId?.[userId]) return false;
+  if (state.allInByUserId?.[userId]) return false;
+  if ((state.stacks?.[userId] ?? 0) <= 0) return false;
+  return true;
+};
+
 const getFirstBettingAfterDealer = (state) => {
   const ordered = orderSeats(state.seats);
   if (ordered.length === 0) return null;
@@ -55,7 +71,12 @@ const getFirstBettingAfterDealer = (state) => {
   const start = startIndex >= 0 ? startIndex : 0;
   for (let offset = 1; offset <= ordered.length; offset += 1) {
     const seat = ordered[(start + offset) % ordered.length];
-    if (seat?.userId && !state.foldedByUserId?.[seat.userId] && (state.stacks?.[seat.userId] || 0) > 0) {
+    if (
+      seat?.userId &&
+      !state.foldedByUserId?.[seat.userId] &&
+      !state.leftTableByUserId?.[seat.userId] &&
+      (state.stacks?.[seat.userId] || 0) > 0
+    ) {
       return seat.userId;
     }
   }
@@ -81,14 +102,18 @@ const sanitizeBoolMapBySeats = (value, seats) => {
 };
 
 const sanitizeSitOutByUserId = (value, seats) => sanitizeBoolMapBySeats(value, seats);
+const sanitizeLeftTableByUserId = (value, seats) => sanitizeBoolMapBySeats(value, seats);
 
-const computeEligibleUserIds = ({ orderedSeats, stacks, sitOutByUserId }) =>
+const computeEligibleUserIds = ({ orderedSeats, stacks, sitOutByUserId, leftTableByUserId }) =>
   orderedSeats
     .filter((seat) => seat?.userId)
     .map((seat) => seat.userId)
-    .filter((userId) => (stacks?.[userId] ?? 0) > 0 && !sitOutByUserId?.[userId]);
+    .filter(
+      (userId) =>
+        (stacks?.[userId] ?? 0) > 0 && !sitOutByUserId?.[userId] && !leftTableByUserId?.[userId]
+    );
 
-const rotateDealerSeatNoEligible = ({ orderedSeats, currentDealerSeatNo, stacks, sitOutByUserId }) => {
+const rotateDealerSeatNoEligible = ({ orderedSeats, currentDealerSeatNo, stacks, sitOutByUserId, leftTableByUserId }) => {
   if (orderedSeats.length === 0) return Number.isInteger(currentDealerSeatNo) ? currentDealerSeatNo : 0;
   const startIndex = orderedSeats.findIndex((seat) => seat.seatNo === currentDealerSeatNo);
   const start = startIndex >= 0 ? startIndex : 0;
@@ -97,12 +122,13 @@ const rotateDealerSeatNoEligible = ({ orderedSeats, currentDealerSeatNo, stacks,
     if (!seat?.userId) continue;
     if ((stacks?.[seat.userId] ?? 0) <= 0) continue;
     if (sitOutByUserId?.[seat.userId]) continue;
+    if (leftTableByUserId?.[seat.userId]) continue;
     return seat.seatNo;
   }
   return orderedSeats[0]?.seatNo ?? currentDealerSeatNo ?? 0;
 };
 
-const getFirstBettingAfterDealerEligible = ({ orderedSeats, dealerSeatNo, stacks, sitOutByUserId }) => {
+const getFirstBettingAfterDealerEligible = ({ orderedSeats, dealerSeatNo, stacks, sitOutByUserId, leftTableByUserId }) => {
   if (orderedSeats.length === 0) return null;
   const startIndex = orderedSeats.findIndex((seat) => seat.seatNo === dealerSeatNo);
   const start = startIndex >= 0 ? startIndex : 0;
@@ -111,6 +137,7 @@ const getFirstBettingAfterDealerEligible = ({ orderedSeats, dealerSeatNo, stacks
     if (!seat?.userId) continue;
     if ((stacks?.[seat.userId] ?? 0) <= 0) continue;
     if (sitOutByUserId?.[seat.userId]) continue;
+    if (leftTableByUserId?.[seat.userId]) continue;
     return seat.userId;
   }
   return null;
@@ -275,17 +302,25 @@ const checkHandDone = (state, events) => {
 const initHandState = ({ tableId, seats, stacks, rng }) => {
   const orderedSeats = orderSeats(seats);
   const deck = shuffle(createDeck(), rng || Math.random);
-  const playerIds = orderedSeats.map((seat) => seat.userId).filter(Boolean);
-  const dealt = dealHoleCards(deck, playerIds);
+  const sitOutByUserId = {};
+  const leftTableByUserId = {};
+  const eligibleUserIds = computeEligibleUserIds({
+    orderedSeats,
+    stacks: copyMap(stacks),
+    sitOutByUserId,
+    leftTableByUserId,
+  });
+  const dealt = dealHoleCards(deck, eligibleUserIds);
   const dealerSeatNo = orderedSeats[0]?.seatNo ?? 0;
   const foldedByUserId = buildDefaultMap(orderedSeats, false);
   const allInByUserId = buildDefaultMap(orderedSeats, false);
   const contributionsByUserId = buildDefaultMap(orderedSeats, 0);
-  const turnUserId = getFirstBettingAfterDealer({
-    seats: orderedSeats,
+  const turnUserId = getFirstBettingAfterDealerEligible({
+    orderedSeats,
     dealerSeatNo,
     stacks: copyMap(stacks),
-    foldedByUserId,
+    sitOutByUserId,
+    leftTableByUserId,
   });
   const state = {
     tableId,
@@ -309,7 +344,8 @@ const initHandState = ({ tableId, seats, stacks, rng }) => {
     currentBet: 0,
     lastRaiseSize: null,
     missedTurnsByUserId: {},
-    sitOutByUserId: {},
+    sitOutByUserId,
+    leftTableByUserId,
   };
   const now = Date.now();
   const nextState = stampTurnTimer({ ...state, allInByUserId: deriveAllInByUserId(state), turnNo: 1 }, now);
@@ -321,6 +357,7 @@ const resetToNextHand = (state, options = {}) => {
   const seats = Array.isArray(state.seats) ? state.seats.slice() : [];
   const stacks = copyMap(state.stacks);
   const sitOutByUserId = sanitizeSitOutByUserId(state.sitOutByUserId, seats);
+  const leftTableByUserId = sanitizeLeftTableByUserId(state.leftTableByUserId, seats);
   const seatedUserIds = orderedSeats.map((seat) => seat.userId).filter(Boolean);
   if (seatedUserIds.length === 0) {
     return {
@@ -328,7 +365,12 @@ const resetToNextHand = (state, options = {}) => {
       events: [{ type: "HAND_RESET_SKIPPED", reason: "not_enough_players" }],
     };
   }
-  const eligibleUserIds = computeEligibleUserIds({ orderedSeats: orderSeats(seats), stacks, sitOutByUserId });
+  const eligibleUserIds = computeEligibleUserIds({
+    orderedSeats: orderSeats(seats),
+    stacks,
+    sitOutByUserId,
+    leftTableByUserId,
+  });
   if (eligibleUserIds.length < 2) {
     return {
       state: stampTurnTimer(state, Date.now()),
@@ -340,6 +382,7 @@ const resetToNextHand = (state, options = {}) => {
     currentDealerSeatNo: state.dealerSeatNo,
     stacks,
     sitOutByUserId,
+    leftTableByUserId,
   });
   const foldedByUserId = buildDefaultMap(seats, false);
   const turnUserId = getFirstBettingAfterDealerEligible({
@@ -347,6 +390,7 @@ const resetToNextHand = (state, options = {}) => {
     dealerSeatNo,
     stacks,
     sitOutByUserId,
+    leftTableByUserId,
   });
   if (!turnUserId) {
     return {
@@ -388,6 +432,7 @@ const resetToNextHand = (state, options = {}) => {
     lastRaiseSize: null,
     missedTurnsByUserId: {},
     sitOutByUserId,
+    leftTableByUserId,
   };
   const nextWithAllIn = { ...nextState, allInByUserId: deriveAllInByUserId(nextState) };
   const stamped = stampTurnTimer(nextWithAllIn, Date.now());
@@ -449,6 +494,7 @@ const applyAction = (state, action) => {
   const requestId = typeof action?.requestId === "string" ? action.requestId : "";
   const isAutoAction = requestId.startsWith("auto:");
   const sitOutByUserId = sanitizeSitOutByUserId(state.sitOutByUserId, safeSeats);
+  const leftTableByUserId = sanitizeLeftTableByUserId(state.leftTableByUserId, safeSeats);
   const next = {
     ...state,
     stacks: copyMap(state.stacks),
@@ -462,6 +508,7 @@ const applyAction = (state, action) => {
     deck: Array.isArray(state.deck) ? state.deck.slice() : [],
     missedTurnsByUserId,
     sitOutByUserId,
+    leftTableByUserId,
   };
   const userId = action.userId;
   if (!isAutoAction && ["CALL", "BET", "CHECK", "RAISE"].includes(action.type)) {
@@ -566,6 +613,85 @@ const applyAction = (state, action) => {
   return { state: updated, events: done.events };
 };
 
+const applyLeaveTable = (state, { userId, requestId } = {}) => {
+  if (typeof userId !== "string" || !userId.trim()) {
+    throw new Error("invalid_player");
+  }
+  assertPlayer(state, userId);
+  const safeSeats = Array.isArray(state.seats) ? state.seats : [];
+  const sitOutByUserId = sanitizeSitOutByUserId(state.sitOutByUserId, safeSeats);
+  const leftTableByUserId = sanitizeLeftTableByUserId(state.leftTableByUserId, safeSeats);
+  const missedTurnsByUserId =
+    state.missedTurnsByUserId && typeof state.missedTurnsByUserId === "object" && !Array.isArray(state.missedTurnsByUserId)
+      ? { ...state.missedTurnsByUserId }
+      : {};
+  const next = {
+    ...state,
+    stacks: copyMap(state.stacks),
+    toCallByUserId: copyMap(state.toCallByUserId),
+    betThisRoundByUserId: copyMap(state.betThisRoundByUserId),
+    actedThisRoundByUserId: copyMap(state.actedThisRoundByUserId),
+    foldedByUserId: copyMap(state.foldedByUserId),
+    allInByUserId: copyMap(state.allInByUserId || buildDefaultMap(safeSeats, false)),
+    contributionsByUserId: copyMap(state.contributionsByUserId || buildDefaultMap(safeSeats, 0)),
+    community: Array.isArray(state.community) ? state.community.slice() : [],
+    deck: Array.isArray(state.deck) ? state.deck.slice() : [],
+    missedTurnsByUserId,
+    sitOutByUserId,
+    leftTableByUserId,
+  };
+  next.leftTableByUserId[userId] = true;
+  next.sitOutByUserId[userId] = false;
+  next.missedTurnsByUserId[userId] = 0;
+
+  const events = [
+    {
+      type: "PLAYER_LEFT_TABLE",
+      userId,
+      reason: "manual",
+      requestId: typeof requestId === "string" ? requestId : undefined,
+    },
+  ];
+
+  const baseTurnNo = Number.isInteger(state.turnNo) ? state.turnNo : 0;
+  const now = Date.now();
+  let updated = next;
+  if (state.turnUserId === userId) {
+    const nextUserId = getNextBettingUserId(next, userId);
+    if (nextUserId) {
+      updated = stampTurnTimer({ ...next, turnUserId: nextUserId, turnNo: baseTurnNo + 1 }, now);
+      events.push({ type: "TURN_SKIPPED_BY_LEAVE", fromUserId: userId, toUserId: nextUserId });
+    } else {
+      updated = stampTurnTimer({ ...next, turnUserId: null, turnNo: baseTurnNo }, now);
+    }
+  } else if (next.turnUserId && !isEligibleTurnUser(next, next.turnUserId)) {
+    const fromUserId = next.turnUserId;
+    const nextUserId = getNextBettingUserId(next, fromUserId);
+    if (nextUserId) {
+      updated = stampTurnTimer({ ...next, turnUserId: nextUserId, turnNo: baseTurnNo + 1 }, now);
+    } else {
+      updated = stampTurnTimer({ ...next, turnUserId: null, turnNo: baseTurnNo }, now);
+    }
+    events.push({ type: "TURN_FIXED_AFTER_LEAVE", fromUserId, toUserId: nextUserId });
+  }
+
+  const done = checkHandDone(updated, events);
+  updated = done.state;
+  if (updated.phase === "HAND_DONE") {
+    return { state: stampTurnTimer(updated, now), events: done.events };
+  }
+
+  if (!updated.turnUserId || getBettingSeats(updated).length === 0 || isBettingRoundComplete(updated)) {
+    const advanced = advanceIfNeeded(updated);
+    return {
+      state: advanced.state,
+      events: done.events.concat(advanced.events || []),
+    };
+  }
+
+  return { state: updated, events: done.events };
+};
+
 function advanceIfNeeded(state) {
   const events = [];
 // Hand reset is automatic and immediate.
@@ -622,7 +748,17 @@ function advanceIfNeeded(state) {
   const to = nextStreet(from);
   const baseTurnNo = Number.isInteger(state.turnNo) ? state.turnNo : 0;
   let next = resetRoundState({ ...validatedState, phase: to, turnUserId: null });
-  next = { ...next, turnUserId: getFirstBettingAfterDealer(next), turnNo: baseTurnNo + 1 };
+  const orderedSeats = orderSeats(next.seats);
+  const sitOutByUserId = sanitizeSitOutByUserId(next.sitOutByUserId, orderedSeats);
+  const leftTableByUserId = sanitizeLeftTableByUserId(next.leftTableByUserId, orderedSeats);
+  const turnUserId = getFirstBettingAfterDealerEligible({
+    orderedSeats,
+    dealerSeatNo: next.dealerSeatNo,
+    stacks: next.stacks,
+    sitOutByUserId,
+    leftTableByUserId,
+  });
+  next = { ...next, sitOutByUserId, leftTableByUserId, turnUserId, turnNo: baseTurnNo + 1 };
 
   const n = cardsToDeal(from);
   if (n > 0) {
@@ -635,4 +771,13 @@ function advanceIfNeeded(state) {
   return { state: stampTurnTimer(next, Date.now()), events };
 }
 
-export { TURN_MS, computeNextDealerSeatNo, initHandState, getLegalActions, applyAction, advanceIfNeeded, isBettingRoundComplete };
+export {
+  TURN_MS,
+  computeNextDealerSeatNo,
+  initHandState,
+  getLegalActions,
+  applyAction,
+  applyLeaveTable,
+  advanceIfNeeded,
+  isBettingRoundComplete,
+};
