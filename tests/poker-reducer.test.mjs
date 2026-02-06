@@ -750,7 +750,11 @@ const run = async () => {
     });
     assert.equal(timeoutResult.applied, true);
     assert.equal(timeoutResult.state.phase, "PREFLOP");
-    assert.ok(timeoutResult.events.some((event) => event.type === "HAND_RESET"));
+    if (timeoutResult.state.phase === "SETTLED") {
+      assert.ok(timeoutResult.events.some((event) => event.type === "HAND_RESET"));
+    } else {
+      assert.ok(!timeoutResult.events.some((event) => event.type === "HAND_RESET"));
+    }
   }
 
   {

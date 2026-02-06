@@ -106,6 +106,11 @@ const maybeApplyTurnTimeout = ({ tableId, state, privateState, nowMs }) => {
     nextState = materialized.nextState;
   }
 
+  const handEnded = nextState.phase === "SETTLED" || nextState.phase === "SHOWDOWN";
+  if (handEnded && !events.some((event) => event?.type === "HAND_RESET")) {
+    events.push({ type: "HAND_RESET", reason: "timeout", handId, tableId });
+  }
+
   const { holeCardsByUserId: _ignoredHoleCards, deck: _ignoredDeck, ...stateBase } = nextState;
   const updatedState = {
     ...stateBase,
