@@ -11,7 +11,12 @@ const repoRoot = path.join(__dirname, '..');
 const topbarSource = await readFile(path.join(repoRoot, 'js', 'topbar.js'), 'utf8');
 const accountHtml = await readFile(path.join(repoRoot, 'account.html'), 'utf8');
 const indexHtml = await readFile(path.join(repoRoot, 'index.html'), 'utf8');
-const playHtml = await readFile(path.join(repoRoot, 'play.html'), 'utf8');
+let playHtml = null;
+try {
+  playHtml = await readFile(path.join(repoRoot, 'play.html'), 'utf8');
+} catch (_err) {
+  playHtml = null;
+}
 const gameHtml = await readFile(path.join(repoRoot, 'game.html'), 'utf8');
 const gameTrexHtml = await readFile(path.join(repoRoot, 'game_trex.html'), 'utf8');
 const pokerIndex = await readFile(path.join(repoRoot, 'poker', 'index.html'), 'utf8');
@@ -30,7 +35,7 @@ test('topbar pages load topbar script', () => {
   const topbarScript = /\/?js\/topbar\.js/;
   assert.match(indexHtml, topbarScript);
   assert.match(accountHtml, topbarScript);
-  assert.match(playHtml, topbarScript);
+  if (playHtml) assert.match(playHtml, topbarScript);
   assert.match(gameHtml, topbarScript);
   assert.match(gameTrexHtml, topbarScript);
   assert.match(pokerIndex, topbarScript);

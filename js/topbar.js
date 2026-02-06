@@ -223,6 +223,7 @@
   }
 
   async function refreshChipBadge(){
+    normalizeTopbarBadges();
     ensureChipNodes();
     if (!chipNodes.badge) return;
     if (!window || !window.ChipsClient || typeof window.ChipsClient.fetchBalance !== 'function'){
