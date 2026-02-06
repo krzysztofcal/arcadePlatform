@@ -13,4 +13,14 @@ const patchSitOutByUserId = (state, userId, value = false) => {
   return { nextState: { ...state, sitOutByUserId: nextMap }, changed: true };
 };
 
-export { patchSitOutByUserId };
+const setAutoSitOut = (state, userId, missedTurns) => {
+  const patched = patchSitOutByUserId(state, userId, true);
+  if (!patched.changed) return { ...patched, event: null };
+  const count = Number.isFinite(Number(missedTurns)) ? Number(missedTurns) : 0;
+  return {
+    ...patched,
+    event: { type: "PLAYER_AUTO_SITOUT", userId, missedTurns: count },
+  };
+};
+
+export { patchSitOutByUserId, setAutoSitOut };

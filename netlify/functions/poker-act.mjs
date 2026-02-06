@@ -767,6 +767,17 @@ export async function handler(event) {
         return resultPayload;
       }
 
+      if (currentState?.sitOutByUserId?.[auth.userId] && actionParsed.value.type !== "LEAVE_TABLE") {
+        klog("poker_act_rejected", {
+          tableId,
+          userId: auth.userId,
+          reason: "player_sitout",
+          phase: currentState.phase,
+          actionType: actionParsed.value.type,
+        });
+        throw makeError(409, "player_sitout");
+      }
+
       if (actionParsed.value.type === "LEAVE_TABLE") {
         let applied;
         try {

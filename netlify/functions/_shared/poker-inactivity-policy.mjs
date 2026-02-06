@@ -1,4 +1,7 @@
-const MISSED_TURN_THRESHOLD = 2;
+import { setAutoSitOut } from "./poker-sitout-flag.mjs";
+
+const AUTO_SITOUT_MISSED_TURNS = 2;
+const MISSED_TURN_THRESHOLD = AUTO_SITOUT_MISSED_TURNS;
 
 const isPlainObject = (value) =>
   value !== null && typeof value === "object" && !Array.isArray(value) && Object.getPrototypeOf(value) === Object.prototype;
@@ -32,20 +35,21 @@ const applyInactivityPolicy = (state, events = []) => {
 
   for (const [userId, missed] of Object.entries(missedTurnsByUserId)) {
     const missedCount = toSafeInt(missed, 0);
-    if (!userId || missedCount < MISSED_TURN_THRESHOLD) continue;
+    if (!userId || missedCount < AUTO_SITOUT_MISSED_TURNS) continue;
     if (!seatUserIds.has(userId)) continue;
     if (leftTableByUserId[userId]) continue;
     if (nextSitOut[userId]) continue;
-    if (!changed) {
-      nextSitOut = { ...sitOutByUserId };
+    const baseState = { ...state, sitOutByUserId: nextSitOut };
+    const autoResult = setAutoSitOut(baseState, userId, missedCount);
+    if (autoResult.changed) {
+      nextSitOut = autoResult.nextState.sitOutByUserId || nextSitOut;
       changed = true;
+      if (autoResult.event) nextEvents.push(autoResult.event);
     }
-    nextSitOut[userId] = true;
-    nextEvents.push({ type: "PLAYER_AUTO_SITOUT", userId, missedTurns: missedCount });
   }
 
   if (!changed) return { state, events };
   return { state: { ...state, sitOutByUserId: nextSitOut }, events: nextEvents };
 };
 
-export { MISSED_TURN_THRESHOLD, applyInactivityPolicy };
+export { AUTO_SITOUT_MISSED_TURNS, MISSED_TURN_THRESHOLD, applyInactivityPolicy };

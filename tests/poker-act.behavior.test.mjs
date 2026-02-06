@@ -422,6 +422,19 @@ const run = async () => {
   assert.equal(JSON.parse(invalidAmount.body).error, "invalid_action");
 
   {
+    const sitoutResponse = await runCase({
+      state: { ...baseState, sitOutByUserId: { "user-1": true } },
+      action: { type: "CHECK" },
+      requestId: "req-sitout",
+      userId: "user-1",
+    });
+    assert.equal(sitoutResponse.response.statusCode, 409);
+    assert.equal(JSON.parse(sitoutResponse.response.body).error, "player_sitout");
+    assert.ok(!sitoutResponse.queries.some((entry) => entry.query.toLowerCase().includes("update public.poker_state")));
+    assert.ok(!sitoutResponse.queries.some((entry) => entry.query.toLowerCase().includes("insert into public.poker_actions")));
+  }
+
+  {
     const clearedResponse = await runCase({
       state: { ...baseState, missedTurnsByUserId: { "user-1": 1 } },
       action: { type: "CHECK" },
