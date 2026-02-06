@@ -34,12 +34,18 @@ const run = async () => {
     const first = applyTimeout(state, 2000);
 
     assert.equal(first.applied, true);
-    const timeoutUserId = first.action.userId;
+    const firstUserId = first.action.userId;
+    assert.equal(first.state.missedTurnsByUserId[firstUserId], 1);
 
-    const second = applyTimeout({ ...first.state, turnUserId: timeoutUserId }, 4000);
+    const second = applyTimeout(first.state, 4000);
 
     assert.equal(second.applied, true);
-    assert.equal(second.state.missedTurnsByUserId[timeoutUserId], 2);
+    const secondUserId = second.action.userId;
+    const missed = second.state.missedTurnsByUserId;
+    assert.equal(missed[firstUserId], firstUserId === secondUserId ? 2 : 1);
+    if (firstUserId !== secondUserId) {
+      assert.equal(missed[secondUserId], 1);
+    }
   }
 
   {

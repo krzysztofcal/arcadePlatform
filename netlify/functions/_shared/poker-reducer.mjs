@@ -511,7 +511,7 @@ const applyAction = (state, action) => {
     leftTableByUserId,
   };
   const userId = action.userId;
-  if (isAutoAction) {
+  if (isAutoAction && ["CHECK", "FOLD"].includes(action.type)) {
     const previousMissed = toSafeInt(next.missedTurnsByUserId[userId], 0);
     next.missedTurnsByUserId[userId] = Math.max(0, previousMissed) + 1;
   } else if (["CALL", "BET", "CHECK", "RAISE"].includes(action.type)) {
