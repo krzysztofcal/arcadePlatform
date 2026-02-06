@@ -1,4 +1,5 @@
 import { createDeck, dealCommunity, dealHoleCards, shuffle } from "./poker-engine.mjs";
+import { isPlainObject } from "./poker-state-utils.mjs";
 
 // =============================================================================
 // HAND LIFECYCLE CONTRACT (ENGINE ↔ UI)
@@ -67,11 +68,8 @@ const buildDefaultMap = (seats, value) =>
     return acc;
   }, {});
 
-const sanitizeSitOutByUserId = (value, seats) => {
-  const source =
-    value && typeof value === "object" && !Array.isArray(value) && Object.getPrototypeOf(value) === Object.prototype
-      ? value
-      : {};
+const sanitizeBoolMapBySeats = (value, seats) => {
+  const source = isPlainObject(value) ? value : {};
   const out = {};
   for (const seat of orderSeats(seats)) {
     if (!seat?.userId) continue;
@@ -80,6 +78,42 @@ const sanitizeSitOutByUserId = (value, seats) => {
     }
   }
   return out;
+};
+
+const sanitizeSitOutByUserId = (value, seats) => sanitizeBoolMapBySeats(value, seats);
+
+const computeEligibleUserIds = ({ orderedSeats, stacks, sitOutByUserId }) =>
+  orderedSeats
+    .filter((seat) => seat?.userId)
+    .map((seat) => seat.userId)
+    .filter((userId) => (stacks?.[userId] ?? 0) > 0 && !sitOutByUserId?.[userId]);
+
+const rotateDealerSeatNoEligible = ({ orderedSeats, currentDealerSeatNo, stacks, sitOutByUserId }) => {
+  if (orderedSeats.length === 0) return Number.isInteger(currentDealerSeatNo) ? currentDealerSeatNo : 0;
+  const startIndex = orderedSeats.findIndex((seat) => seat.seatNo === currentDealerSeatNo);
+  const start = startIndex >= 0 ? startIndex : 0;
+  for (let offset = 1; offset <= orderedSeats.length; offset += 1) {
+    const seat = orderedSeats[(start + offset) % orderedSeats.length];
+    if (!seat?.userId) continue;
+    if ((stacks?.[seat.userId] ?? 0) <= 0) continue;
+    if (sitOutByUserId?.[seat.userId]) continue;
+    return seat.seatNo;
+  }
+  return orderedSeats[0]?.seatNo ?? currentDealerSeatNo ?? 0;
+};
+
+const getFirstBettingAfterDealerEligible = ({ orderedSeats, dealerSeatNo, stacks, sitOutByUserId }) => {
+  if (orderedSeats.length === 0) return null;
+  const startIndex = orderedSeats.findIndex((seat) => seat.seatNo === dealerSeatNo);
+  const start = startIndex >= 0 ? startIndex : 0;
+  for (let offset = 1; offset <= orderedSeats.length; offset += 1) {
+    const seat = orderedSeats[(start + offset) % orderedSeats.length];
+    if (!seat?.userId) continue;
+    if ((stacks?.[seat.userId] ?? 0) <= 0) continue;
+    if (sitOutByUserId?.[seat.userId]) continue;
+    return seat.userId;
+  }
+  return null;
 };
 
 const maxFromMap = (value) => {
@@ -294,42 +328,25 @@ const resetToNextHand = (state, options = {}) => {
       events: [{ type: "HAND_RESET_SKIPPED", reason: "not_enough_players" }],
     };
   }
-  const eligibleUserIds = seatedUserIds.filter(
-    (userId) => (stacks?.[userId] ?? 0) > 0 && !sitOutByUserId?.[userId]
-  );
+  const eligibleUserIds = computeEligibleUserIds({ orderedSeats, stacks, sitOutByUserId });
   if (eligibleUserIds.length < 2) {
     return {
       state: stampTurnTimer(state, Date.now()),
       events: [{ type: "HAND_RESET_SKIPPED", reason: "not_enough_players" }],
     };
   }
-  const dealerSeatNo = (() => {
-    if (orderedSeats.length === 0) return Number.isInteger(state.dealerSeatNo) ? state.dealerSeatNo : 0;
-    const startIndex = orderedSeats.findIndex((seat) => seat.seatNo === state.dealerSeatNo);
-    const start = startIndex >= 0 ? startIndex : 0;
-    for (let offset = 1; offset <= orderedSeats.length; offset += 1) {
-      const seat = orderedSeats[(start + offset) % orderedSeats.length];
-      if (!seat?.userId) continue;
-      if ((stacks?.[seat.userId] ?? 0) <= 0) continue;
-      if (sitOutByUserId?.[seat.userId]) continue;
-      return seat.seatNo;
-    }
-    return orderedSeats[0]?.seatNo ?? state.dealerSeatNo ?? 0;
-  })();
+  const dealerSeatNo = rotateDealerSeatNoEligible({
+    orderedSeats,
+    currentDealerSeatNo: state.dealerSeatNo,
+    stacks,
+    sitOutByUserId,
+  });
   const foldedByUserId = buildDefaultMap(seats, false);
-  for (const userId of eligibleUserIds) {
-    foldedByUserId[userId] = false;
-  }
-  for (const userId of seatedUserIds) {
-    if (!eligibleUserIds.includes(userId)) {
-      foldedByUserId[userId] = true;
-    }
-  }
-  const turnUserId = getFirstBettingAfterDealer({
-    seats: orderedSeats,
+  const turnUserId = getFirstBettingAfterDealerEligible({
+    orderedSeats,
     dealerSeatNo,
     stacks,
-    foldedByUserId,
+    sitOutByUserId,
   });
   if (!turnUserId) {
     return {

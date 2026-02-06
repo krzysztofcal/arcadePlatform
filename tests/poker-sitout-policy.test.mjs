@@ -78,9 +78,11 @@ const run = async () => {
     };
     const advanced = advanceIfNeeded(settled);
 
+    assert.ok(advanced.events.some((event) => event.type === "HAND_RESET"));
     assert.notEqual(advanced.state.turnUserId, "user-1");
     assert.notEqual(advanced.state.dealerSeatNo, 1);
     assert.equal(advanced.state.holeCardsByUserId["user-1"], undefined);
+    assert.equal(advanced.state.foldedByUserId["user-1"], false);
   }
 
   {
@@ -113,6 +115,20 @@ const run = async () => {
     });
 
     assert.equal(applied.state.sitOutByUserId[withSitOut.turnUserId], true);
+  }
+
+  {
+    const { seats, stacks } = makeBase();
+    const { state } = initHandState({ tableId: "t-sitout-skip-two", seats, stacks, rng: makeRng(55) });
+    const settled = {
+      ...state,
+      phase: "SETTLED",
+      turnUserId: null,
+      sitOutByUserId: { "user-1": true },
+    };
+    const advanced = advanceIfNeeded(settled);
+
+    assert.ok(advanced.events.some((event) => event.type === "HAND_RESET_SKIPPED"));
   }
 };
 
