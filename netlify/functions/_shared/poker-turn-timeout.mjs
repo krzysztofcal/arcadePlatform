@@ -45,6 +45,76 @@ const getTimeoutDefaultAction = (state) => {
 
 const getTimeoutAction = (state) => getTimeoutDefaultAction(state);
 
+const stripPrivate = (state) => {
+  if (!state || typeof state !== "object" || Array.isArray(state)) {
+    return { publicState: state, privateHoleCards: null };
+  }
+  const { holeCardsByUserId, deck, ...publicState } = state;
+  return { publicState, privateHoleCards: holeCardsByUserId || null };
+};
+
+const assertShowdownConsistency = (state) => {
+  const handId = typeof state?.handId === "string" ? state.handId.trim() : "";
+  const showdownHandId =
+    typeof state?.showdown?.handId === "string" && state.showdown.handId.trim() ? state.showdown.handId.trim() : "";
+  const showdownAlreadyMaterialized = !!handId && !!showdownHandId && showdownHandId === handId;
+  if (showdownAlreadyMaterialized) {
+    const potValue = Number(state.pot ?? 0);
+    if (!Number.isFinite(potValue) || potValue < 0 || Math.floor(potValue) !== potValue) {
+      throw new Error("showdown_invalid_pot");
+    }
+    if (potValue > 0) {
+      throw new Error("showdown_pot_not_zero");
+    }
+  }
+  if ((state.phase === "SHOWDOWN" || state.phase === "SETTLED") && Number(state.pot ?? 0) > 0) {
+    throw new Error("showdown_pot_not_zero");
+  }
+};
+
+const materializeIfNeededPublic = (state, privateHoleCards) => {
+  if (!isPlainObject(state)) return state;
+  const stripped = stripPrivate(state);
+  const publicState = stripped.publicState;
+  const seatUserIdsInOrder = normalizeSeatOrderFromState(publicState.seats);
+  const handId = typeof publicState.handId === "string" ? publicState.handId.trim() : "";
+  const showdownHandId =
+    typeof publicState.showdown?.handId === "string" && publicState.showdown.handId.trim()
+      ? publicState.showdown.handId.trim()
+      : "";
+  const showdownAlreadyMaterialized = !!handId && !!showdownHandId && showdownHandId === handId;
+  const eligibleUserIds = seatUserIdsInOrder.filter(
+    (userId) =>
+      typeof userId === "string" &&
+      !publicState.foldedByUserId?.[userId] &&
+      !publicState.leftTableByUserId?.[userId] &&
+      !publicState.sitOutByUserId?.[userId]
+  );
+  const shouldMaterializeShowdown =
+    seatUserIdsInOrder.length > 0 &&
+    !showdownAlreadyMaterialized &&
+    (eligibleUserIds.length <= 1 || publicState.phase === "SHOWDOWN" || publicState.phase === "HAND_DONE");
+
+  if (publicState.phase === "SHOWDOWN" && seatUserIdsInOrder.length === 0) {
+    throw new Error("showdown_no_players");
+  }
+
+  let next = publicState;
+  if (shouldMaterializeShowdown) {
+    const materialized = materializeShowdownAndPayout({
+      state: publicState,
+      seatUserIdsInOrder,
+      holeCardsByUserId: privateHoleCards,
+      computeShowdown,
+      awardPotsAtShowdown,
+    });
+    next = materialized.nextState;
+  }
+
+  assertShowdownConsistency(next);
+  return next;
+};
+
 const maybeApplyTurnTimeout = ({ tableId, state, privateState, nowMs }) => {
   if (!state || typeof state !== "object" || Array.isArray(state)) return { applied: false, state };
   if (!isActionPhase(state.phase) || !state.turnUserId) return { applied: false, state };
@@ -65,67 +135,45 @@ const maybeApplyTurnTimeout = ({ tableId, state, privateState, nowMs }) => {
 
   const actionWithRequestId = { ...action, requestId };
   const applied = applyAction(privateState, actionWithRequestId);
-  let nextState = applied.state;
-  const events = Array.isArray(applied.events) ? applied.events.slice() : [];
+  const stripped = stripPrivate(applied.state);
+  let nextPublic = stripped.publicState;
+  const privateHoleCards = stripped.privateHoleCards;
+  let events = Array.isArray(applied.events) ? applied.events.slice() : [];
+
   let loops = 0;
   while (loops < ADVANCE_LIMIT) {
-    const prevPhase = nextState.phase;
-    const advanced = advanceIfNeeded(nextState);
-    nextState = advanced.state;
+    const prevPhase = nextPublic.phase;
+    const advanced = advanceIfNeeded(nextPublic);
+    nextPublic = advanced.state;
     if (Array.isArray(advanced.events) && advanced.events.length > 0) {
       events.push(...advanced.events);
     }
     if (!Array.isArray(advanced.events) || advanced.events.length === 0) break;
-    if (nextState.phase === prevPhase) break;
+    if (nextPublic.phase === prevPhase) break;
     loops += 1;
   }
 
-  const seatUserIdsInOrder = normalizeSeatOrderFromState(nextState.seats);
-  const currentHandId = typeof nextState.handId === "string" ? nextState.handId.trim() : "";
-  const showdownHandId =
-    typeof nextState.showdown?.handId === "string" && nextState.showdown.handId.trim() ? nextState.showdown.handId.trim() : "";
-  const showdownAlreadyMaterialized = !!currentHandId && !!showdownHandId && showdownHandId === currentHandId;
-  const eligibleUserIds = seatUserIdsInOrder.filter(
-    (userId) => typeof userId === "string" && !nextState.foldedByUserId?.[userId]
-  );
-  const shouldMaterializeShowdown =
-    seatUserIdsInOrder.length > 0 &&
-    !showdownAlreadyMaterialized &&
-    (eligibleUserIds.length <= 1 || nextState.phase === "SHOWDOWN");
+  nextPublic = materializeIfNeededPublic(nextPublic, privateHoleCards);
 
-  if (nextState.phase === "SHOWDOWN" && seatUserIdsInOrder.length === 0) {
-    throw new Error("showdown_no_players");
-  }
-
-  if (shouldMaterializeShowdown) {
-    const materialized = materializeShowdownAndPayout({
-      state: nextState,
-      seatUserIdsInOrder,
-      holeCardsByUserId: nextState.holeCardsByUserId,
-      computeShowdown,
-      awardPotsAtShowdown,
-    });
-    nextState = materialized.nextState;
-  }
-
-  const handEnded = nextState.phase === "SETTLED" || nextState.phase === "SHOWDOWN";
+  const handEnded = nextPublic.phase === "SETTLED" || nextPublic.phase === "SHOWDOWN";
   if (handEnded && !events.some((event) => event?.type === "HAND_RESET")) {
     events.push({ type: "HAND_RESET", reason: "timeout", handId, tableId });
   }
 
-  const { holeCardsByUserId: _ignoredHoleCards, deck: _ignoredDeck, ...stateBase } = nextState;
+  const finalStripped = stripPrivate(nextPublic);
   const updatedState = {
-    ...stateBase,
-    communityDealt: Array.isArray(nextState.community) ? nextState.community.length : 0,
+    ...finalStripped.publicState,
+    communityDealt: Array.isArray(nextPublic.community) ? nextPublic.community.length : 0,
     lastActionRequestIdByUserId: {
       ...lastByUserId,
       [action.userId]: requestId,
     },
   };
   const policyResult = applyInactivityPolicy(updatedState, events);
+  const finalState = policyResult.state;
   return {
     applied: true,
-    state: policyResult.state,
+    state: finalState,
     events: policyResult.events,
     action,
     requestId,

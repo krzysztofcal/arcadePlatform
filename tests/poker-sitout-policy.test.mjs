@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { MISSED_TURN_THRESHOLD } from "../netlify/functions/_shared/poker-inactivity-policy.mjs";
+import { MISSED_TURN_THRESHOLD, applyInactivityPolicy } from "../netlify/functions/_shared/poker-inactivity-policy.mjs";
 import { advanceIfNeeded, applyAction, initHandState } from "../netlify/functions/_shared/poker-reducer.mjs";
 import { maybeApplyTurnTimeout } from "../netlify/functions/_shared/poker-turn-timeout.mjs";
 
@@ -60,15 +60,37 @@ const run = async () => {
     const second = runTimeout(withMissed, 4000);
 
     assert.equal(second.result.state.missedTurnsByUserId[timeoutUserId], MISSED_TURN_THRESHOLD);
-    assert.equal(second.result.state.sitOutByUserId?.[timeoutUserId], true);
+    assert.equal(second.result.state.sitOutByUserId?.[timeoutUserId], undefined);
+    assert.equal(second.result.state.pendingAutoSitOutByUserId?.[timeoutUserId], true);
     assert.ok(
       second.result.events.some(
         (event) =>
-          event.type === "PLAYER_AUTO_SITOUT" &&
+          event.type === "PLAYER_AUTO_SITOUT_PENDING" &&
           event.userId === timeoutUserId &&
           event.missedTurns === MISSED_TURN_THRESHOLD
       )
     );
+  }
+
+  {
+    const { seats, stacks } = makeBase();
+    const { state } = initHandState({ tableId: "t-sitout-pending-idempotent", seats, stacks, rng: makeRng(18) });
+    const timeoutUserId = state.turnUserId;
+    const withMissed = {
+      ...state,
+      missedTurnsByUserId: { [timeoutUserId]: MISSED_TURN_THRESHOLD },
+    };
+    const first = applyInactivityPolicy(withMissed, []);
+    const second = applyInactivityPolicy(first.state, first.events);
+
+    const pendingEvents = second.events.filter(
+      (event) =>
+        event.type === "PLAYER_AUTO_SITOUT_PENDING" &&
+        event.userId === timeoutUserId &&
+        event.missedTurns === MISSED_TURN_THRESHOLD
+    );
+    assert.equal(pendingEvents.length, 1);
+    assert.equal(second.state.pendingAutoSitOutByUserId?.[timeoutUserId], true);
   }
 
   {
@@ -100,6 +122,7 @@ const run = async () => {
     const withSitOut = {
       ...state,
       sitOutByUserId: { [state.turnUserId]: true },
+      pendingAutoSitOutByUserId: { [state.turnUserId]: true },
     };
     const applied = applyAction(withSitOut, {
       type: "CHECK",
@@ -108,6 +131,7 @@ const run = async () => {
     });
 
     assert.equal(applied.state.sitOutByUserId[withSitOut.turnUserId], false);
+    assert.equal(applied.state.pendingAutoSitOutByUserId?.[withSitOut.turnUserId], undefined);
   }
 
   {
@@ -116,6 +140,7 @@ const run = async () => {
     const withSitOut = {
       ...state,
       sitOutByUserId: { [state.turnUserId]: true },
+      pendingAutoSitOutByUserId: { [state.turnUserId]: true },
     };
     const applied = applyAction(withSitOut, {
       type: "FOLD",
@@ -124,6 +149,7 @@ const run = async () => {
     });
 
     assert.equal(applied.state.sitOutByUserId[withSitOut.turnUserId], true);
+    assert.equal(applied.state.pendingAutoSitOutByUserId?.[withSitOut.turnUserId], true);
   }
 
   {
@@ -134,6 +160,8 @@ const run = async () => {
       phase: "SETTLED",
       turnUserId: null,
       sitOutByUserId: { "user-1": true },
+      pendingAutoSitOutByUserId: { "user-2": true },
+      missedTurnsByUserId: { "user-2": 2 },
     };
     const advanced = advanceIfNeeded(settled);
 
@@ -142,6 +170,9 @@ const run = async () => {
     );
     assert.ok(!advanced.events.some((event) => event.type === "HAND_RESET"));
     assert.equal(advanced.state.handId, settled.handId);
+    assert.equal(advanced.state.pendingAutoSitOutByUserId?.["user-2"], undefined);
+    assert.equal(Object.keys(advanced.state.missedTurnsByUserId || {}).length, 0);
+    assert.equal(advanced.state.sitOutByUserId?.["user-2"], true);
   }
 };
 

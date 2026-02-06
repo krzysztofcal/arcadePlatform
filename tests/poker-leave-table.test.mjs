@@ -76,13 +76,19 @@ const run = async () => {
 
   {
     const { state } = initHandState({ tableId: "t4", seats: makeSeats(), stacks: makeStacks(), rng: makeRng(44) });
-    const turnState = { ...state, turnUserId: "user-1", turnNo: 1 };
+    const turnState = {
+      ...state,
+      turnUserId: "user-1",
+      turnNo: 1,
+      pendingAutoSitOutByUserId: { "user-1": true },
+    };
     const first = applyLeaveTable(turnState, { userId: "user-1", requestId: "req-2" });
     const second = applyLeaveTable(first.state, { userId: "user-1", requestId: "req-3" });
 
     assert.equal(second.state.leftTableByUserId["user-1"], true);
     assert.equal(second.state.sitOutByUserId["user-1"], false);
     assert.equal(second.state.missedTurnsByUserId["user-1"], 0);
+    assert.equal(second.state.pendingAutoSitOutByUserId?.["user-1"], undefined);
   }
 
   {
