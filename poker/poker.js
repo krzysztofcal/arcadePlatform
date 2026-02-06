@@ -364,13 +364,30 @@
     return '?';
   }
 
+  function formatRank(r){
+    if (r == null) return '?';
+    if (typeof r === 'string'){
+      var upper = r.toUpperCase();
+      if (upper === 'A' || upper === 'K' || upper === 'Q' || upper === 'J') return upper;
+    }
+    var n = Number(r);
+    if (!Number.isFinite(n)) return String(r) || '?';
+    n = Math.trunc(n);
+    if (n === 14) return 'A';
+    if (n === 13) return 'K';
+    if (n === 12) return 'Q';
+    if (n === 11) return 'J';
+    if (n >= 2 && n <= 10) return String(n);
+    return '?';
+  }
+
   function isRedSuit(suit){
     var key = typeof suit === 'string' ? suit.toUpperCase() : '';
     return key === 'H' || key === 'D';
   }
 
   function buildCardElement(card){
-    var rank = card && card.r != null ? String(card.r) : '?';
+    var rank = formatRank(card && card.r != null ? card.r : null);
     var suitKey = card && card.s != null ? String(card.s).toUpperCase() : '';
     var suit = getSuitSymbol(suitKey);
     var cardEl = document.createElement('div');

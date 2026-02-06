@@ -68,6 +68,17 @@ assert.ok(startHandSrc.includes("derivedSeats"), "start-hand should re-derive se
 assert.ok(pokerUiSrc.includes("pendingJoinRequestId"), "poker UI should store pending join requestId");
 assert.ok(pokerUiSrc.includes("pendingLeaveRequestId"), "poker UI should store pending leave requestId");
 assert.ok(/function\s+resolveRequestId\s*\(/.test(pokerUiSrc), "poker UI should define resolveRequestId helper");
+const formatRankIndex = pokerUiSrc.indexOf("function formatRank");
+assert.ok(formatRankIndex !== -1, "poker UI should define formatRank helper");
+const formatRankSlice = formatRankIndex === -1 ? "" : pokerUiSrc.slice(formatRankIndex, formatRankIndex + 600);
+assert.ok(
+  /14[\s\S]{0,200}['"]A['"]/.test(formatRankSlice),
+  "poker UI formatRank should map 14 to A"
+);
+assert.ok(
+  /11[\s\S]{0,200}['"]J['"]/.test(formatRankSlice),
+  "poker UI formatRank should map 11 to J"
+);
 assert.ok(
   /if\s*\(\s*pending\s*\)\s*return\s*\{[\s\S]*?requestId\s*:\s*pending[\s\S]*?nextPending\s*:\s*pending[\s\S]*?\}/.test(pokerUiSrc),
   "poker UI should keep pending requestId during retries"
