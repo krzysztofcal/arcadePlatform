@@ -1288,6 +1288,41 @@ const run = async () => {
     assert.equal(timeoutBody.state.state.turnUserId, "user-1");
     assert.equal(timeoutBody.state.version, 1);
   }
+
+  {
+    const timeoutState = {
+      ...baseState,
+      turnNo: 2,
+      turnUserId: "user-1",
+      turnStartedAt: 0,
+      turnDeadlineAt: 1,
+      missedTurnsByUserId: { "user-1": 1 },
+    };
+    const realNow = Date.now;
+    Date.now = () => 999999;
+    let timeoutCase;
+    try {
+      timeoutCase = await runCase({
+        state: timeoutState,
+        action: { type: "CHECK" },
+        requestId: "req-timeout-sitout",
+        userId: "user-1",
+      });
+    } finally {
+      Date.now = realNow;
+    }
+    assert.equal(timeoutCase.response.statusCode, 200);
+    const timeoutBody = JSON.parse(timeoutCase.response.body);
+    assert.ok(timeoutBody.events.some((event) => event.type === "PLAYER_AUTO_SITOUT"));
+    const timeoutUpdate = timeoutCase.queries.find(
+      (entry) =>
+        entry.query.toLowerCase().includes("update public.poker_state") &&
+        entry.query.toLowerCase().includes("version = version + 1")
+    );
+    assert.ok(timeoutUpdate, "timeout should persist poker_state");
+    const persistedState = JSON.parse(timeoutUpdate.params?.[2]);
+    assert.equal(persistedState.sitOutByUserId?.["user-1"], true);
+  }
 };
 
 await run();
