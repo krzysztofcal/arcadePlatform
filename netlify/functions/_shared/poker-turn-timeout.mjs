@@ -140,8 +140,6 @@ const maybeApplyTurnTimeout = ({ tableId, state, privateState, nowMs }) => {
   const privateHoleCards = stripped.privateHoleCards;
   let events = Array.isArray(applied.events) ? applied.events.slice() : [];
 
-  nextPublic = materializeIfNeededPublic(nextPublic, privateHoleCards);
-
   let loops = 0;
   while (loops < ADVANCE_LIMIT) {
     const prevPhase = nextPublic.phase;

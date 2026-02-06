@@ -370,7 +370,15 @@ const resetToNextHand = (state, options = {}) => {
   const seatedUserIds = orderedSeats.map((seat) => seat.userId).filter(Boolean);
   if (seatedUserIds.length === 0) {
     return {
-      state: stampTurnTimer({ ...state, sitOutByUserId: nextSitOutByUserId, pendingAutoSitOutByUserId: nextPendingAutoSitOutByUserId }, Date.now()),
+      state: stampTurnTimer(
+        {
+          ...state,
+          sitOutByUserId: nextSitOutByUserId,
+          pendingAutoSitOutByUserId: nextPendingAutoSitOutByUserId,
+          missedTurnsByUserId: {},
+        },
+        Date.now()
+      ),
       events: [{ type: "HAND_RESET_SKIPPED", reason: "not_enough_players" }],
     };
   }
@@ -382,7 +390,15 @@ const resetToNextHand = (state, options = {}) => {
   });
   if (eligibleUserIds.length < 2) {
     return {
-      state: stampTurnTimer({ ...state, sitOutByUserId: nextSitOutByUserId, pendingAutoSitOutByUserId: nextPendingAutoSitOutByUserId }, Date.now()),
+      state: stampTurnTimer(
+        {
+          ...state,
+          sitOutByUserId: nextSitOutByUserId,
+          pendingAutoSitOutByUserId: nextPendingAutoSitOutByUserId,
+          missedTurnsByUserId: {},
+        },
+        Date.now()
+      ),
       events: [{ type: "HAND_RESET_SKIPPED", reason: "not_enough_players" }],
     };
   }
@@ -403,7 +419,15 @@ const resetToNextHand = (state, options = {}) => {
   });
   if (!turnUserId) {
     return {
-      state: stampTurnTimer(state, Date.now()),
+      state: stampTurnTimer(
+        {
+          ...state,
+          sitOutByUserId: nextSitOutByUserId,
+          pendingAutoSitOutByUserId: nextPendingAutoSitOutByUserId,
+          missedTurnsByUserId: {},
+        },
+        Date.now()
+      ),
       events: [{ type: "HAND_RESET_SKIPPED", reason: "not_enough_players" }],
     };
   }

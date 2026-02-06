@@ -35,6 +35,9 @@ const applyInactivityPolicy = (state, events = []) => {
   const missedTurnsByUserId = isPlainObject(state.missedTurnsByUserId) ? state.missedTurnsByUserId : {};
   const leftTableByUserId = isPlainObject(state.leftTableByUserId) ? state.leftTableByUserId : {};
   const sitOutByUserId = isPlainObject(state.sitOutByUserId) ? state.sitOutByUserId : {};
+  const pendingAutoSitOutByUserId = isPlainObject(state.pendingAutoSitOutByUserId)
+    ? state.pendingAutoSitOutByUserId
+    : {};
   const seatUserIds = collectSeatUserIds(state.seats);
   let nextState = state;
   let changed = false;
@@ -46,6 +49,7 @@ const applyInactivityPolicy = (state, events = []) => {
     if (!seatUserIds.has(userId)) continue;
     if (leftTableByUserId[userId]) continue;
     if (sitOutByUserId[userId]) continue;
+    if (pendingAutoSitOutByUserId[userId]) continue;
     const pendingResult = ensurePendingAutoSitOut(nextState, userId);
     if (!pendingResult.changed) continue;
     nextState = pendingResult.nextState;
