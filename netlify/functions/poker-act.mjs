@@ -15,6 +15,7 @@ import { parseStakes } from "./_shared/poker-stakes.mjs";
 import { resetTurnTimer } from "./_shared/poker-turn-timer.mjs";
 import { maybeApplyTurnTimeout } from "./_shared/poker-turn-timeout.mjs";
 import { isValidUuid } from "./_shared/poker-utils.mjs";
+import { clearMissedTurns } from "./_shared/poker-missed-turns.mjs";
 
 const ACTION_TYPES = new Set(["CHECK", "BET", "CALL", "RAISE", "FOLD", "LEAVE_TABLE"]);
 const ADVANCE_LIMIT = 4;
@@ -1011,6 +1012,8 @@ export async function handler(event) {
       const timerResetState = shouldResetTimer
         ? resetTurnTimer(updatedState, nowMs, TURN_MS)
         : { ...updatedState, turnStartedAt: null, turnDeadlineAt: null };
+      const clearedMissedTurns = clearMissedTurns(timerResetState, auth.userId);
+      const finalState = clearedMissedTurns.changed ? clearedMissedTurns.nextState : timerResetState;
 
       if (shouldResetTimer) {
         klog("poker_turn_timer_reset", {
@@ -1029,15 +1032,15 @@ export async function handler(event) {
         });
       }
 
-      if (!isStateStorageValid(timerResetState, { requireHandSeed: true, requireCommunityDealt: true, requireNoDeck: true })) {
-        klog("poker_state_corrupt", { tableId, phase: timerResetState.phase });
+      if (!isStateStorageValid(finalState, { requireHandSeed: true, requireCommunityDealt: true, requireNoDeck: true })) {
+        klog("poker_state_corrupt", { tableId, phase: finalState.phase });
         throw makeError(409, "state_invalid");
       }
 
       const updateResult = await updatePokerStateOptimistic(tx, {
         tableId,
         expectedVersion,
-        nextState: timerResetState,
+        nextState: finalState,
       });
       if (!updateResult.ok) {
         if (updateResult.reason === "not_found") {
@@ -1051,7 +1054,7 @@ export async function handler(event) {
           tableId,
           userId: auth.userId,
           reason: "state_invalid",
-          phase: timerResetState.phase,
+          phase: finalState.phase,
         });
         throw makeError(409, "state_invalid");
       }
@@ -1059,7 +1062,7 @@ export async function handler(event) {
         mutated = true;
 
       const actionHandId =
-        typeof timerResetState.handId === "string" && timerResetState.handId.trim() ? timerResetState.handId.trim() : null;
+        typeof finalState.handId === "string" && finalState.handId.trim() ? finalState.handId.trim() : null;
       await tx.unsafe(
         "insert into public.poker_actions (table_id, version, user_id, action_type, amount, hand_id, request_id, phase_from, phase_to, meta) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb);",
         [
@@ -1071,7 +1074,7 @@ export async function handler(event) {
           actionHandId,
           requestId,
           currentState.phase || null,
-          timerResetState.phase || null,
+          finalState.phase || null,
           null,
         ]
       );
@@ -1080,7 +1083,7 @@ export async function handler(event) {
         klog("poker_act_advanced", {
           tableId,
           fromPhase: currentState.phase,
-          toPhase: timerResetState.phase,
+          toPhase: finalState.phase,
           loops,
           eventTypes: Array.from(new Set(advanceEvents.map((event) => event?.type).filter(Boolean))),
         });
@@ -1092,11 +1095,11 @@ export async function handler(event) {
         actionType: actionParsed.value.type,
         amount: actionParsed.value.amount ?? null,
         fromPhase: currentState.phase,
-        toPhase: timerResetState.phase,
+        toPhase: finalState.phase,
         newVersion,
       });
 
-      const responseState = withoutPrivateState(timerResetState);
+      const responseState = withoutPrivateState(finalState);
       const nextLegalInfo = computeLegalActions({ statePublic: responseState, userId: auth.userId });
       const resultPayload = {
         ok: true,

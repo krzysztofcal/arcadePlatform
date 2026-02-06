@@ -5,6 +5,7 @@ import { normalizeRequestId } from "./_shared/poker-request-id.mjs";
 import { deletePokerRequest, ensurePokerRequest, storePokerRequestResult } from "./_shared/poker-idempotency.mjs";
 import { isStateStorageValid } from "./_shared/poker-state-utils.mjs";
 import { patchLeftTableByUserId } from "./_shared/poker-left-flag.mjs";
+import { clearMissedTurns } from "./_shared/poker-missed-turns.mjs";
 import { loadPokerStateForUpdate, updatePokerStateLocked } from "./_shared/poker-state-write-locked.mjs";
 
 const REQUEST_PENDING_STALE_SEC = 30;
@@ -55,12 +56,13 @@ const clearLeftFlag = async (tx, { tableId, userId }) => {
   }
   const currentState = loadResult.state;
   const patched = patchLeftTableByUserId(currentState, userId, false);
-  if (!patched.changed) return { updated: false };
-  if (!isStateStorageValid(patched.nextState, { requireNoDeck: true, requireHandSeed: false, requireCommunityDealt: false })) {
+  const clearedMissed = clearMissedTurns(patched.nextState, userId);
+  if (!patched.changed && !clearedMissed.changed) return { updated: false };
+  if (!isStateStorageValid(clearedMissed.nextState, { requireNoDeck: true, requireHandSeed: false, requireCommunityDealt: false })) {
     klog("poker_join_state_invalid", { tableId, userId, reason: "state_invalid" });
     throw makeError(409, "state_invalid");
   }
-  const updateResult = await updatePokerStateLocked(tx, { tableId, nextState: patched.nextState });
+  const updateResult = await updatePokerStateLocked(tx, { tableId, nextState: clearedMissed.nextState });
   if (!updateResult.ok) {
     if (updateResult.reason === "not_found") throw makeError(404, "state_missing");
     throw makeError(409, "state_invalid");
@@ -303,9 +305,10 @@ values ($1, $2, $3, 'ACTIVE', now(), now(), $4);
         seats.push({ userId: auth.userId, seatNo });
         const stacks = { ...parseStacks(currentState.stacks), [auth.userId]: buyIn };
         const patched = patchLeftTableByUserId(currentState, auth.userId, false);
+        const clearedMissed = clearMissedTurns(patched.nextState, auth.userId);
 
         const updatedState = {
-          ...patched.nextState,
+          ...clearedMissed.nextState,
           tableId: currentState.tableId || tableId,
           seats,
           stacks,

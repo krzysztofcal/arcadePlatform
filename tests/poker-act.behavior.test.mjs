@@ -422,6 +422,20 @@ const run = async () => {
   assert.equal(JSON.parse(invalidAmount.body).error, "invalid_action");
 
   {
+    const clearedResponse = await runCase({
+      state: { ...baseState, missedTurnsByUserId: { "user-1": 1 } },
+      action: { type: "CHECK" },
+      requestId: "req-clear-missed",
+      userId: "user-1",
+    });
+    assert.equal(clearedResponse.response.statusCode, 200);
+    const updateCall = clearedResponse.queries.find((entry) => entry.query.toLowerCase().includes("update public.poker_state"));
+    assert.ok(updateCall, "expected poker_state update for missed-turns clear");
+    const updatedState = JSON.parse(updateCall.params?.[2] || "{}");
+    assert.equal(updatedState.missedTurnsByUserId?.["user-1"], undefined);
+  }
+
+  {
     const conflictResponse = await runCase({
       state: baseState,
       action: { type: "CHECK" },
