@@ -59,6 +59,15 @@ const buildMeStatus = (state, userId, { forceSeated = false } = {}) => {
   };
 };
 
+const resolveMeStateAfterRejoin = async (tx, tableId, flagResult) => {
+  if (flagResult?.nextState && typeof flagResult.nextState === "object" && !Array.isArray(flagResult.nextState)) {
+    return flagResult.nextState;
+  }
+  const reload = await loadPokerStateForUpdate(tx, tableId);
+  if (reload.ok) return reload.state;
+  return {};
+};
+
 const clearRejoinFlags = async (tx, { tableId, userId }) => {
   const loadResult = await loadPokerStateForUpdate(tx, tableId);
   if (!loadResult.ok) {
@@ -196,7 +205,7 @@ export async function handler(event) {
             [tableId]
           );
           const flagResult = await clearRejoinFlags(tx, { tableId, userId: auth.userId });
-          const meState = flagResult?.nextState || {};
+          const meState = await resolveMeStateAfterRejoin(tx, tableId, flagResult);
 
           const resultPayload = {
             ok: true,
@@ -263,7 +272,7 @@ values ($1, $2, $3, 'ACTIVE', now(), now(), $4);
               );
               mutated = true;
               const flagResult = await clearRejoinFlags(tx, { tableId, userId: auth.userId });
-              const meState = flagResult?.nextState || {};
+              const meState = await resolveMeStateAfterRejoin(tx, tableId, flagResult);
               const resultPayload = {
                 ok: true,
                 tableId,
