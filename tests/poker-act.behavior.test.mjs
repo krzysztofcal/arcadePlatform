@@ -1294,16 +1294,23 @@ const run = async () => {
       ...baseState,
       turnNo: 2,
       turnUserId: "user-1",
-      turnStartedAt: Date.now() - 30000,
-      turnDeadlineAt: Date.now() - 1000,
+      turnStartedAt: 0,
+      turnDeadlineAt: 1,
       missedTurnsByUserId: { "user-1": 1 },
     };
-    const timeoutCase = await runCase({
-      state: timeoutState,
-      action: { type: "CHECK" },
-      requestId: "req-timeout-sitout",
-      userId: "user-1",
-    });
+    const realNow = Date.now;
+    Date.now = () => 999999;
+    let timeoutCase;
+    try {
+      timeoutCase = await runCase({
+        state: timeoutState,
+        action: { type: "CHECK" },
+        requestId: "req-timeout-sitout",
+        userId: "user-1",
+      });
+    } finally {
+      Date.now = realNow;
+    }
     assert.equal(timeoutCase.response.statusCode, 200);
     const timeoutBody = JSON.parse(timeoutCase.response.body);
     assert.ok(timeoutBody.events.some((event) => event.type === "PLAYER_AUTO_SITOUT"));

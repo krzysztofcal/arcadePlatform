@@ -196,13 +196,14 @@ export async function handler(event) {
             [tableId]
           );
           const flagResult = await clearRejoinFlags(tx, { tableId, userId: auth.userId });
+          const meState = flagResult?.nextState || {};
 
           const resultPayload = {
             ok: true,
             tableId,
             seatNo: existingSeatNo,
             userId: auth.userId,
-            me: buildMeStatus(flagResult.nextState, auth.userId, { forceSeated: true }),
+            me: buildMeStatus(meState, auth.userId, { forceSeated: true }),
           };
           await storePokerRequestResult(tx, {
             tableId,
@@ -262,12 +263,13 @@ values ($1, $2, $3, 'ACTIVE', now(), now(), $4);
               );
               mutated = true;
               const flagResult = await clearRejoinFlags(tx, { tableId, userId: auth.userId });
+              const meState = flagResult?.nextState || {};
               const resultPayload = {
                 ok: true,
                 tableId,
                 seatNo: fallbackSeatNo,
                 userId: auth.userId,
-                me: buildMeStatus(flagResult.nextState, auth.userId, { forceSeated: true }),
+                me: buildMeStatus(meState, auth.userId, { forceSeated: true }),
               };
               await storePokerRequestResult(tx, {
                 tableId,
