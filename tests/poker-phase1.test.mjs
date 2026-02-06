@@ -69,6 +69,10 @@ assert.ok(pokerUiSrc.includes("pendingJoinRequestId"), "poker UI should store pe
 assert.ok(pokerUiSrc.includes("pendingLeaveRequestId"), "poker UI should store pending leave requestId");
 assert.ok(/function\s+resolveRequestId\s*\(/.test(pokerUiSrc), "poker UI should define resolveRequestId helper");
 assert.ok(
+  /formatRank[\s\S]*?n\s*===\s*14[\s\S]*?return\s*['"]A['"][\s\S]*?n\s*===\s*11[\s\S]*?return\s*['"]J['"]/.test(pokerUiSrc),
+  "poker UI should map 14->A and 11->J in formatRank"
+);
+assert.ok(
   /if\s*\(\s*pending\s*\)\s*return\s*\{[\s\S]*?requestId\s*:\s*pending[\s\S]*?nextPending\s*:\s*pending[\s\S]*?\}/.test(pokerUiSrc),
   "poker UI should keep pending requestId during retries"
 );
