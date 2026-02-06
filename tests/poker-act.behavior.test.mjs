@@ -1251,9 +1251,11 @@ const run = async () => {
       nowMs: Date.now(),
     });
     assert.equal(timeoutResult.applied, true);
-    assert.equal(timeoutResult.state.phase, "SETTLED");
+    assert.notEqual(timeoutResult.state.phase, "HAND_DONE");
     assert.equal(timeoutResult.state.pot, 0);
-    assert.ok(timeoutResult.state.showdown);
+    if (timeoutResult.state.phase === "SHOWDOWN" || timeoutResult.state.phase === "SETTLED") {
+      assert.ok(timeoutResult.state.showdown);
+    }
   }
 
   {

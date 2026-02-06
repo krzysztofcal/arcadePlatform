@@ -531,6 +531,9 @@ const applyAction = (state, action) => {
   } else if (["CALL", "BET", "CHECK", "RAISE"].includes(action.type)) {
     next.missedTurnsByUserId[userId] = 0;
     next.sitOutByUserId[userId] = false;
+    if (next.pendingAutoSitOutByUserId) {
+      delete next.pendingAutoSitOutByUserId[userId];
+    }
   }
   const roundCurrentBet = deriveCurrentBet(next);
   const roundLastRaiseSize = deriveLastRaiseSize(next, roundCurrentBet);
@@ -662,6 +665,9 @@ const applyLeaveTable = (state, { userId, requestId } = {}) => {
   next.leftTableByUserId[userId] = true;
   next.sitOutByUserId[userId] = false;
   next.missedTurnsByUserId[userId] = 0;
+  if (next.pendingAutoSitOutByUserId) {
+    delete next.pendingAutoSitOutByUserId[userId];
+  }
 
   const events = [
     {

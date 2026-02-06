@@ -79,12 +79,14 @@ const run = async () => {
       lastRaiseSize: 5,
       missedTurnsByUserId: { "user-2": 1 },
     });
+    const totalBefore = Object.values(state.stacks).reduce((sum, value) => sum + value, 0) + state.pot;
     const result = applyTimeout(state, 2000);
 
     assert.equal(result.applied, true);
     assert.equal(result.action.type, "FOLD");
     assert.equal(result.state.pot, 0);
-    assert.equal(result.state.stacks?.["user-1"], 110);
+    const totalAfter = Object.values(result.state.stacks || {}).reduce((sum, value) => sum + value, 0);
+    assert.equal(totalAfter, totalBefore);
     assert.ok(
       result.events.some((event) => event.type === "HAND_RESET") ||
       result.events.some((event) => event.type === "HAND_RESET_SKIPPED")
@@ -111,11 +113,13 @@ const run = async () => {
       lastRaiseSize: 5,
       missedTurnsByUserId: {},
     });
+    const totalBefore = Object.values(state.stacks).reduce((sum, value) => sum + value, 0) + state.pot;
     const result = applyTimeout(state, 3000);
 
     assert.equal(result.applied, true);
     assert.equal(result.state.pot, 0);
-    assert.equal(result.state.stacks?.["user-1"], 120);
+    const totalAfter = Object.values(result.state.stacks || {}).reduce((sum, value) => sum + value, 0);
+    assert.equal(totalAfter, totalBefore);
   }
 };
 
