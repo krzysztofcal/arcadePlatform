@@ -65,12 +65,11 @@ const maybeApplyTurnTimeout = ({ tableId, state, privateState, nowMs }) => {
 
   const actionWithRequestId = { ...action, requestId };
   const applied = applyAction(privateState, actionWithRequestId);
-  let nextState = applied.state;
-  let events = Array.isArray(applied.events) ? applied.events.slice() : [];
-  const prePolicy = applyInactivityPolicy(nextState, events);
-  nextState = prePolicy.state;
-  events = prePolicy.events;
-  const materializeIfNeeded = (stateToCheck) => {
+  const { holeCardsByUserId, deck, ...appliedPublic } = applied.state;
+  const policyResult = applyInactivityPolicy(appliedPublic, applied.events);
+  let nextState = { ...policyResult.state, holeCardsByUserId, deck };
+  let events = Array.isArray(policyResult.events) ? policyResult.events.slice() : [];
+  const materializeIfNeeded = (stateToCheck, holeCardsByUserId) => {
     const seatUserIdsInOrder = normalizeSeatOrderFromState(stateToCheck.seats);
     const currentHandId = typeof stateToCheck.handId === "string" ? stateToCheck.handId.trim() : "";
     const showdownHandId =
@@ -88,7 +87,7 @@ const maybeApplyTurnTimeout = ({ tableId, state, privateState, nowMs }) => {
     const shouldMaterializeShowdown =
       seatUserIdsInOrder.length > 0 &&
       !showdownAlreadyMaterialized &&
-      (eligibleUserIds.length <= 1 || stateToCheck.phase === "SHOWDOWN" || stateToCheck.phase === "HAND_DONE");
+      (eligibleUserIds.length <= 1 || stateToCheck.phase === "SHOWDOWN");
 
     if (stateToCheck.phase === "SHOWDOWN" && seatUserIdsInOrder.length === 0) {
       throw new Error("showdown_no_players");
@@ -99,7 +98,7 @@ const maybeApplyTurnTimeout = ({ tableId, state, privateState, nowMs }) => {
       const materialized = materializeShowdownAndPayout({
         state: stateToCheck,
         seatUserIdsInOrder,
-        holeCardsByUserId: stateToCheck.holeCardsByUserId,
+        holeCardsByUserId,
         computeShowdown,
         awardPotsAtShowdown,
       });
@@ -121,7 +120,8 @@ const maybeApplyTurnTimeout = ({ tableId, state, privateState, nowMs }) => {
     return next;
   };
 
-  nextState = materializeIfNeeded(nextState);
+  const privateHoleCards = nextState?.holeCardsByUserId;
+  nextState = materializeIfNeeded(nextState, privateHoleCards);
 
   let loops = 0;
   while (loops < ADVANCE_LIMIT) {
@@ -136,7 +136,7 @@ const maybeApplyTurnTimeout = ({ tableId, state, privateState, nowMs }) => {
     loops += 1;
   }
 
-  nextState = materializeIfNeeded(nextState);
+  nextState = materializeIfNeeded(nextState, privateHoleCards);
 
   const handEnded = nextState.phase === "SETTLED" || nextState.phase === "SHOWDOWN";
   if (handEnded && !events.some((event) => event?.type === "HAND_RESET")) {
@@ -152,11 +152,10 @@ const maybeApplyTurnTimeout = ({ tableId, state, privateState, nowMs }) => {
       [action.userId]: requestId,
     },
   };
-  const policyResult = applyInactivityPolicy(updatedState, events);
   return {
     applied: true,
-    state: policyResult.state,
-    events: policyResult.events,
+    state: updatedState,
+    events,
     action,
     requestId,
   };

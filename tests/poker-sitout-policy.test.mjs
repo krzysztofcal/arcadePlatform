@@ -119,6 +119,7 @@ const run = async () => {
     const withSitOut = {
       ...state,
       sitOutByUserId: { [state.turnUserId]: true },
+      pendingAutoSitOutByUserId: { [state.turnUserId]: true },
     };
     const applied = applyAction(withSitOut, {
       type: "FOLD",
@@ -127,6 +128,7 @@ const run = async () => {
     });
 
     assert.equal(applied.state.sitOutByUserId[withSitOut.turnUserId], true);
+    assert.equal(applied.state.pendingAutoSitOutByUserId?.[withSitOut.turnUserId], true);
   }
 
   {
