@@ -19,46 +19,47 @@ const makeBase = () => {
   return { seats, stacks };
 };
 
-const forceTimeout = (state, nowMs) => {
-  const timeoutState = {
-    ...state,
-    turnStartedAt: nowMs - 1000,
-    turnDeadlineAt: nowMs - 500,
-  };
-  const timeoutResult = maybeApplyTurnTimeout({
+const makeTimedOutState = (state, nowMs) => ({
+  ...state,
+  turnStartedAt: nowMs - 1000,
+  turnDeadlineAt: nowMs - 500,
+});
+
+const runTimeout = (state, nowMs) => {
+  const timeoutState = makeTimedOutState(state, nowMs);
+  const result = maybeApplyTurnTimeout({
     tableId: timeoutState.tableId,
     state: timeoutState,
     privateState: timeoutState,
     nowMs,
   });
-  assert.equal(timeoutResult.applied, true);
-  const appliedPrivate = applyAction(timeoutState, { ...timeoutResult.action, requestId: timeoutResult.requestId });
-  const nextState = {
-    ...appliedPrivate.state,
-    missedTurnsByUserId: timeoutResult.state.missedTurnsByUserId,
-    sitOutByUserId: timeoutResult.state.sitOutByUserId,
-    lastActionRequestIdByUserId: timeoutResult.state.lastActionRequestIdByUserId,
-  };
-  return { timeoutResult, state: nextState };
+  assert.equal(result.applied, true);
+  return { timeoutState, result };
 };
 
 const run = async () => {
   {
     const { seats, stacks } = makeBase();
     const { state } = initHandState({ tableId: "t-sitout-timeouts", seats, stacks, rng: makeRng(11) });
-    const first = forceTimeout(state, 2000);
-    const timeoutUserId = first.timeoutResult.action.userId;
-    assert.equal(first.timeoutResult.state.missedTurnsByUserId[timeoutUserId], 1);
+    const first = runTimeout(state, 2000);
+    const timeoutUserId = first.result.action.userId;
 
-    const manual = applyAction(first.state, {
-      type: "CHECK",
-      userId: first.state.turnUserId,
-      requestId: "req:manual-check",
-    });
-    assert.equal(manual.state.turnUserId, timeoutUserId);
-    const second = forceTimeout(manual.state, 4000);
+    assert.equal(first.result.state.missedTurnsByUserId[timeoutUserId], 1);
+    assert.notEqual(first.result.state.sitOutByUserId?.[timeoutUserId], true);
+  }
 
-    assert.equal(second.timeoutResult.state.sitOutByUserId[timeoutUserId], true);
+  {
+    const { seats, stacks } = makeBase();
+    const { state } = initHandState({ tableId: "t-sitout-timeouts-2", seats, stacks, rng: makeRng(12) });
+    const timeoutUserId = state.turnUserId;
+    const withMissed = {
+      ...state,
+      missedTurnsByUserId: { [timeoutUserId]: 1 },
+    };
+    const second = runTimeout(withMissed, 4000);
+
+    assert.equal(second.result.state.missedTurnsByUserId[timeoutUserId], 2);
+    assert.equal(second.result.state.sitOutByUserId[timeoutUserId], true);
   }
 
   {

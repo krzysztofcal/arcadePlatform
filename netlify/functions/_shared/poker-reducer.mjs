@@ -431,10 +431,7 @@ const applyAction = (state, action) => {
       : {};
   const requestId = typeof action?.requestId === "string" ? action.requestId : "";
   const isAutoAction = requestId.startsWith("auto:");
-  const sitOutByUserId =
-    state.sitOutByUserId && typeof state.sitOutByUserId === "object" && !Array.isArray(state.sitOutByUserId)
-      ? { ...state.sitOutByUserId }
-      : {};
+  const sitOutByUserId = sanitizeSitOutByUserId(state.sitOutByUserId, safeSeats);
   const next = {
     ...state,
     stacks: copyMap(state.stacks),
