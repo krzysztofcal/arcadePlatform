@@ -338,7 +338,7 @@ const runInvalidSettlementFallsBackLegacyCashout = async () => {
   assert.equal(postCalls[0].metadata?.stackSource, "state");
 };
 
-const runSettlementPostFailureDoesNotWedge = async () => {
+const runSettlementPostFailureKeepsSeatActiveForRetry = async () => {
   process.env.POKER_SWEEP_SECRET = "secret";
   const postCalls = [];
   const queries = [];
@@ -386,8 +386,8 @@ const runSettlementPostFailureDoesNotWedge = async () => {
   const response = await handler({ httpMethod: "POST", headers: { "x-sweep-secret": "secret" } });
   assert.equal(response.statusCode, 200);
   assert.ok(
-    queries.some((q) => q.query.toLowerCase().includes("update public.poker_seats set status = 'inactive', stack = 0")),
-    "sweep should still inactivate seat when settlement post fails"
+    !queries.some((q) => q.query.toLowerCase().includes("update public.poker_seats set status = 'inactive', stack = 0")),
+    "sweep should keep seat active when settlement post fails so retry can happen"
   );
   assert.equal(
     postCalls.filter((c) => c.txType === "TABLE_CASH_OUT").length,
@@ -395,8 +395,8 @@ const runSettlementPostFailureDoesNotWedge = async () => {
     "sweep should still skip legacy cashout when usable settlement exists"
   );
   assert.ok(
-    klogEvents.some((entry) => entry.event === "poker_settlement_ledger_post_failed" && entry.payload?.handId === "h-boom"),
-    "sweep should log settlement posting failure"
+    klogEvents.some((entry) => entry.event === "poker_settlement_ledger_post_failed" && entry.payload?.handId === "h-boom" && entry.payload?.source === "timeout_cashout"),
+    "sweep should log settlement posting failure with timeout source"
   );
 };
 
@@ -409,7 +409,7 @@ Promise.resolve()
   .then(runCloseCashoutUsesSeatNo)
   .then(runSettlementSkipsLegacyCashout)
   .then(runInvalidSettlementFallsBackLegacyCashout)
-  .then(runSettlementPostFailureDoesNotWedge)
+  .then(runSettlementPostFailureKeepsSeatActiveForRetry)
   .catch((error) => {
     console.error(error);
     process.exit(1);

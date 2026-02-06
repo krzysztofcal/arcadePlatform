@@ -165,6 +165,7 @@ export async function handler(event) {
                 error: error?.message || "unknown_error",
                 source: "timeout_cashout",
               });
+              return { skipped: true, seatNo: locked.seat_no, reason: "settlement_post_failed" };
             }
           } else if (amount > 0) {
             await postTransaction({
