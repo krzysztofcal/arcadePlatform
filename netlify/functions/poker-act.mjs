@@ -972,7 +972,8 @@ export async function handler(event) {
         (userId) =>
           typeof userId === "string" &&
           !nextState.foldedByUserId?.[userId] &&
-          !nextState.leftTableByUserId?.[userId]
+          !nextState.leftTableByUserId?.[userId] &&
+          !nextState.sitOutByUserId?.[userId]
       );
       const shouldMaterializeShowdown =
         !showdownAlreadyMaterialized && (eligibleUserIds.length <= 1 || nextState.phase === "SHOWDOWN");

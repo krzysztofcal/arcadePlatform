@@ -36,7 +36,11 @@ const orderSeats = (seats) =>
 
 const getActiveSeats = (state) =>
   orderSeats(state.seats).filter(
-    (seat) => seat?.userId && !state.foldedByUserId?.[seat.userId] && !state.leftTableByUserId?.[seat.userId]
+    (seat) =>
+      seat?.userId &&
+      !state.foldedByUserId?.[seat.userId] &&
+      !state.leftTableByUserId?.[seat.userId] &&
+      !state.sitOutByUserId?.[seat.userId]
   );
 
 const getBettingSeats = (state) =>
@@ -48,6 +52,16 @@ const getNextBettingUserId = (state, fromUserId) => {
   const idx = betting.findIndex((seat) => seat.userId === fromUserId);
   if (idx === -1) return betting[0].userId;
   return betting[(idx + 1) % betting.length].userId;
+};
+
+const isEligibleTurnUser = (state, userId) => {
+  if (!userId) return false;
+  if (state.leftTableByUserId?.[userId]) return false;
+  if (state.sitOutByUserId?.[userId]) return false;
+  if (state.foldedByUserId?.[userId]) return false;
+  if (state.allInByUserId?.[userId]) return false;
+  if ((state.stacks?.[userId] ?? 0) <= 0) return false;
+  return true;
 };
 
 const getFirstBettingAfterDealer = (state) => {
@@ -639,21 +653,43 @@ const applyLeaveTable = (state, { userId, requestId } = {}) => {
     },
   ];
 
-  if (state.turnUserId !== userId) {
-    return { state: next, events };
-  }
-
-  const nextUserId = getNextBettingUserId(next, userId);
   const baseTurnNo = Number.isInteger(state.turnNo) ? state.turnNo : 0;
   const now = Date.now();
-  if (nextUserId) {
-    next.turnUserId = nextUserId;
-    events.push({ type: "TURN_SKIPPED_BY_LEAVE", fromUserId: userId, toUserId: nextUserId });
-    return { state: stampTurnTimer({ ...next, turnNo: baseTurnNo + 1 }, now), events };
+  let updated = next;
+  if (state.turnUserId === userId) {
+    const nextUserId = getNextBettingUserId(next, userId);
+    if (nextUserId) {
+      updated = stampTurnTimer({ ...next, turnUserId: nextUserId, turnNo: baseTurnNo + 1 }, now);
+      events.push({ type: "TURN_SKIPPED_BY_LEAVE", fromUserId: userId, toUserId: nextUserId });
+    } else {
+      updated = stampTurnTimer({ ...next, turnUserId: null, turnNo: baseTurnNo }, now);
+    }
+  } else if (next.turnUserId && !isEligibleTurnUser(next, next.turnUserId)) {
+    const fromUserId = next.turnUserId;
+    const nextUserId = getNextBettingUserId(next, fromUserId);
+    if (nextUserId) {
+      updated = stampTurnTimer({ ...next, turnUserId: nextUserId, turnNo: baseTurnNo + 1 }, now);
+    } else {
+      updated = stampTurnTimer({ ...next, turnUserId: null, turnNo: baseTurnNo }, now);
+    }
+    events.push({ type: "TURN_FIXED_AFTER_LEAVE", fromUserId, toUserId: nextUserId });
   }
 
-  next.turnUserId = null;
-  return { state: stampTurnTimer({ ...next, turnNo: baseTurnNo }, now), events };
+  const done = checkHandDone(updated, events);
+  updated = done.state;
+  if (updated.phase === "HAND_DONE") {
+    return { state: stampTurnTimer(updated, now), events: done.events };
+  }
+
+  if (!updated.turnUserId || getBettingSeats(updated).length === 0 || isBettingRoundComplete(updated)) {
+    const advanced = advanceIfNeeded(updated);
+    return {
+      state: advanced.state,
+      events: done.events.concat(advanced.events || []),
+    };
+  }
+
+  return { state: updated, events: done.events };
 };
 
 function advanceIfNeeded(state) {

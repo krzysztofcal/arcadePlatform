@@ -84,6 +84,19 @@ const run = async () => {
     assert.equal(second.state.sitOutByUserId["user-1"], false);
     assert.equal(second.state.missedTurnsByUserId["user-1"], 0);
   }
+
+  {
+    const { state } = initHandState({ tableId: "t5", seats: makeSeats(), stacks: makeStacks(), rng: makeRng(55) });
+    const staleTurn = {
+      ...state,
+      turnUserId: "user-2",
+      foldedByUserId: { ...state.foldedByUserId, "user-2": true },
+    };
+    const result = applyLeaveTable(staleTurn, { userId: "user-3", requestId: "req-4" });
+
+    assert.equal(result.state.phase, "HAND_DONE");
+    assert.ok(result.events.some((event) => event.type === "HAND_DONE" && event.winnerUserId === "user-1"));
+  }
 };
 
 await run();
