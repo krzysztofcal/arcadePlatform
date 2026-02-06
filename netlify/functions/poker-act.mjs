@@ -103,6 +103,18 @@ const isActionPhase = (phase) => phase === "PREFLOP" || phase === "FLOP" || phas
 
 const getSeatForUser = (state, userId) => (Array.isArray(state.seats) ? state.seats.find((seat) => seat?.userId === userId) : null);
 
+const buildMeStatus = (state, userId) => {
+  const seat = getSeatForUser(state, userId);
+  const isLeft = !!state?.leftTableByUserId?.[userId];
+  const isSitOut = !!state?.sitOutByUserId?.[userId];
+  return {
+    userId,
+    isSeated: !!seat,
+    isLeft,
+    isSitOut,
+  };
+};
+
 const normalizeRank = (value) => {
   if (typeof value === "number") return value;
   if (typeof value !== "string") return null;
@@ -737,6 +749,7 @@ export async function handler(event) {
             version: newVersion,
             state: timeoutPublicState,
           },
+          me: buildMeStatus(timeoutPublicState, auth.userId),
           myHoleCards: holeCardsByUserId[auth.userId] || [],
           events: timeoutResult.events || [],
           replayed: false,
@@ -856,6 +869,7 @@ export async function handler(event) {
             version: newVersion,
             state: publicState,
           },
+          me: buildMeStatus(publicState, auth.userId),
           myHoleCards: holeCardsByUserId[auth.userId] || [],
           events,
           replayed: false,
@@ -1091,6 +1105,7 @@ export async function handler(event) {
           version: newVersion,
           state: responseState,
         },
+        me: buildMeStatus(responseState, auth.userId),
         myHoleCards: holeCardsByUserId[auth.userId] || [],
         events,
         replayed: false,

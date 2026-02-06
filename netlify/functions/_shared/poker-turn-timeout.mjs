@@ -3,6 +3,7 @@ import { computeLegalActions } from "./poker-legal-actions.mjs";
 import { awardPotsAtShowdown } from "./poker-payout.mjs";
 import { materializeShowdownAndPayout } from "./poker-materialize-showdown.mjs";
 import { computeShowdown } from "./poker-showdown.mjs";
+import { applyInactivityPolicy } from "./poker-inactivity-policy.mjs";
 import { isPlainObject, withoutPrivateState } from "./poker-state-utils.mjs";
 
 const ADVANCE_LIMIT = 4;
@@ -121,7 +122,14 @@ const maybeApplyTurnTimeout = ({ tableId, state, privateState, nowMs }) => {
       [action.userId]: requestId,
     },
   };
-  return { applied: true, state: updatedState, events, action, requestId };
+  const policyResult = applyInactivityPolicy(updatedState, events);
+  return {
+    applied: true,
+    state: policyResult.state,
+    events: policyResult.events,
+    action,
+    requestId,
+  };
 };
 
 export { getTimeoutAction, getTimeoutDefaultAction, maybeApplyTurnTimeout, normalizeSeatOrderFromState };

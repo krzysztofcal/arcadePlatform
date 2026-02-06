@@ -77,7 +77,9 @@ export const loadPokerHandler = (filePath, mocks) => {
     "isValidUuid",
     "isHoleCardsTableMissing",
     "loadHoleCardsByUserId",
+    "loadPokerStateForUpdate",
     "parseStakes",
+    "patchLeftTableByUserId",
     "formatStakes",
     "upgradeLegacyInitState",
     "upgradeLegacyInitStateWithSeats",
@@ -86,6 +88,7 @@ export const loadPokerHandler = (filePath, mocks) => {
     "storePokerRequestResult",
     "TABLE_EMPTY_CLOSE_SEC",
     "TURN_MS",
+    "updatePokerStateLocked",
   ];
   const injectedNames = injectable.filter((name) => !declared.has(name));
   const destructureLine = injectedNames.length ? `const { ${injectedNames.join(", ")} } = mocks;` : "";
