@@ -58,7 +58,15 @@ const run = async () => {
     const { state } = initHandState({ tableId: "t-missed-reset-hand", seats, stacks, rng: makeRng(303) });
     const doneState = {
       ...state,
-      phase: "HAND_DONE",
+      phase: "SETTLED",
+      handId: "hand-settled",
+      handSeed: "seed-settled",
+      turnUserId: null,
+      handSettlement: {
+        handId: "hand-settled",
+        settledAt: "2026-01-01T00:00:00.000Z",
+        payouts: { "user-1": 10 },
+      },
       missedTurnsByUserId: { "user-1": 2, "user-2": 1 },
     };
     const advanced = advanceIfNeeded(doneState);

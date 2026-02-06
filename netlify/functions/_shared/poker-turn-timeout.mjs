@@ -113,7 +113,7 @@ const maybeApplyTurnTimeout = ({ tableId, state, privateState, nowMs }) => {
   }
 
   const { holeCardsByUserId: _ignoredHoleCards, deck: _ignoredDeck, ...stateBase } = nextState;
-  const missedTurnsByUserId = isPlainObject(state.missedTurnsByUserId) ? state.missedTurnsByUserId : {};
+  const missedTurnsByUserId = isPlainObject(nextState.missedTurnsByUserId) ? nextState.missedTurnsByUserId : {};
   const previousMissed = Number(missedTurnsByUserId[action.userId]);
   const safeMissed = Number.isFinite(previousMissed) && previousMissed >= 0 ? Math.trunc(previousMissed) : 0;
   const updatedState = {
