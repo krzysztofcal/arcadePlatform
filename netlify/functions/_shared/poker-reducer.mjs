@@ -67,6 +67,21 @@ const buildDefaultMap = (seats, value) =>
     return acc;
   }, {});
 
+const sanitizeSitOutByUserId = (value, seats) => {
+  const source =
+    value && typeof value === "object" && !Array.isArray(value) && Object.getPrototypeOf(value) === Object.prototype
+      ? value
+      : {};
+  const out = {};
+  for (const seat of orderSeats(seats)) {
+    if (!seat?.userId) continue;
+    if (Object.prototype.hasOwnProperty.call(source, seat.userId)) {
+      out[seat.userId] = Boolean(source[seat.userId]);
+    }
+  }
+  return out;
+};
+
 const maxFromMap = (value) => {
   if (!value || typeof value !== "object") return 0;
   const nums = Object.values(value)
@@ -260,6 +275,7 @@ const initHandState = ({ tableId, seats, stacks, rng }) => {
     currentBet: 0,
     lastRaiseSize: null,
     missedTurnsByUserId: {},
+    sitOutByUserId: {},
   };
   const now = Date.now();
   const nextState = stampTurnTimer({ ...state, allInByUserId: deriveAllInByUserId(state), turnNo: 1 }, now);
@@ -270,6 +286,7 @@ const resetToNextHand = (state, options = {}) => {
   const orderedSeats = orderSeats(state.seats);
   const seats = Array.isArray(state.seats) ? state.seats.slice() : [];
   const stacks = copyMap(state.stacks);
+  const sitOutByUserId = sanitizeSitOutByUserId(state.sitOutByUserId, orderedSeats);
   const seatedUserIds = orderedSeats.map((seat) => seat.userId).filter(Boolean);
   if (seatedUserIds.length === 0) {
     return {
@@ -277,15 +294,37 @@ const resetToNextHand = (state, options = {}) => {
       events: [{ type: "HAND_RESET_SKIPPED", reason: "not_enough_players" }],
     };
   }
-  const fundedUserIds = seatedUserIds.filter((userId) => (stacks?.[userId] ?? 0) > 0);
-  if (fundedUserIds.length < 2) {
+  const eligibleUserIds = seatedUserIds.filter(
+    (userId) => (stacks?.[userId] ?? 0) > 0 && !sitOutByUserId?.[userId]
+  );
+  if (eligibleUserIds.length < 2) {
     return {
       state: stampTurnTimer(state, Date.now()),
       events: [{ type: "HAND_RESET_SKIPPED", reason: "not_enough_players" }],
     };
   }
-  const dealerSeatNo = rotateDealerSeatNo(state);
+  const dealerSeatNo = (() => {
+    if (orderedSeats.length === 0) return Number.isInteger(state.dealerSeatNo) ? state.dealerSeatNo : 0;
+    const startIndex = orderedSeats.findIndex((seat) => seat.seatNo === state.dealerSeatNo);
+    const start = startIndex >= 0 ? startIndex : 0;
+    for (let offset = 1; offset <= orderedSeats.length; offset += 1) {
+      const seat = orderedSeats[(start + offset) % orderedSeats.length];
+      if (!seat?.userId) continue;
+      if ((stacks?.[seat.userId] ?? 0) <= 0) continue;
+      if (sitOutByUserId?.[seat.userId]) continue;
+      return seat.seatNo;
+    }
+    return orderedSeats[0]?.seatNo ?? state.dealerSeatNo ?? 0;
+  })();
   const foldedByUserId = buildDefaultMap(seats, false);
+  for (const userId of eligibleUserIds) {
+    foldedByUserId[userId] = false;
+  }
+  for (const userId of seatedUserIds) {
+    if (!eligibleUserIds.includes(userId)) {
+      foldedByUserId[userId] = true;
+    }
+  }
   const turnUserId = getFirstBettingAfterDealer({
     seats: orderedSeats,
     dealerSeatNo,
@@ -302,7 +341,7 @@ const resetToNextHand = (state, options = {}) => {
   const handSeed = makeHandId();
   const rng = typeof options.rng === "function" ? options.rng : Math.random;
   const deck = shuffle(createDeck(), rng);
-  const dealt = dealHoleCards(deck, seatedUserIds);
+  const dealt = dealHoleCards(deck, eligibleUserIds);
   const baseTurnNo = Number.isInteger(state.turnNo) ? state.turnNo : 0;
   const nextState = {
     tableId: state.tableId,
@@ -331,6 +370,7 @@ const resetToNextHand = (state, options = {}) => {
     currentBet: 0,
     lastRaiseSize: null,
     missedTurnsByUserId: {},
+    sitOutByUserId,
   };
   const nextWithAllIn = { ...nextState, allInByUserId: deriveAllInByUserId(nextState) };
   const stamped = stampTurnTimer(nextWithAllIn, Date.now());
@@ -391,6 +431,10 @@ const applyAction = (state, action) => {
       : {};
   const requestId = typeof action?.requestId === "string" ? action.requestId : "";
   const isAutoAction = requestId.startsWith("auto:");
+  const sitOutByUserId =
+    state.sitOutByUserId && typeof state.sitOutByUserId === "object" && !Array.isArray(state.sitOutByUserId)
+      ? { ...state.sitOutByUserId }
+      : {};
   const next = {
     ...state,
     stacks: copyMap(state.stacks),
@@ -403,10 +447,12 @@ const applyAction = (state, action) => {
     community: Array.isArray(state.community) ? state.community.slice() : [],
     deck: Array.isArray(state.deck) ? state.deck.slice() : [],
     missedTurnsByUserId,
+    sitOutByUserId,
   };
   const userId = action.userId;
   if (!isAutoAction && ["CALL", "BET", "CHECK", "RAISE"].includes(action.type)) {
     next.missedTurnsByUserId[userId] = 0;
+    next.sitOutByUserId[userId] = false;
   }
   const roundCurrentBet = deriveCurrentBet(next);
   const roundLastRaiseSize = deriveLastRaiseSize(next, roundCurrentBet);
