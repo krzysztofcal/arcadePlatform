@@ -7,7 +7,7 @@ import { isStateStorageValid } from "../netlify/functions/_shared/poker-state-ut
 const tableId = "11111111-1111-4111-8111-111111111111";
 const userId = "user-join";
 
-const makeJoinHandler = ({ requestStore, queries, sideEffects, failStoreResult = false }) =>
+const makeJoinHandler = ({ requestStore, queries, sideEffects, failStoreResult = false, existingSeatNo = null }) =>
   loadPokerHandler("netlify/functions/poker-join.mjs", {
     baseHeaders: () => ({}),
     corsHeaders: () => ({ "access-control-allow-origin": "https://example.test" }),
@@ -53,6 +53,7 @@ const makeJoinHandler = ({ requestStore, queries, sideEffects, failStoreResult =
             return [{ id: tableId, status: "OPEN", max_players: 6 }];
           }
           if (text.includes("from public.poker_seats") && text.includes("user_id = $2") && text.includes("limit 1")) {
+            if (Number.isInteger(existingSeatNo)) return [{ seat_no: existingSeatNo }];
             return [];
           }
           if (text.includes("insert into public.poker_seats")) {
@@ -73,6 +74,7 @@ const makeJoinHandler = ({ requestStore, queries, sideEffects, failStoreResult =
                   pot: 0,
                   phase: "INIT",
                   leftTableByUserId: { [userId]: true },
+                  missedTurnsByUserId: { [userId]: 1 },
                 }),
               },
             ];
@@ -118,6 +120,7 @@ const run = async () => {
   const statePayload = stateWrite?.params?.[1];
   const parsedState = JSON.parse(statePayload);
   assert.equal(parsedState.leftTableByUserId[userId], false);
+  assert.equal(parsedState.missedTurnsByUserId?.[userId], undefined);
 
   const second = await callJoin(handler, "join-1");
   assert.equal(second.statusCode, 200);
@@ -151,6 +154,26 @@ const run = async () => {
   assert.deepEqual(JSON.parse(retry.body), { error: "request_pending", requestId: "join-pending" });
   assert.equal(pendingSideEffects.seatInsert, 1, "pending join should not re-run seat insert");
   assert.equal(pendingSideEffects.ledger, 1, "pending join should not re-run ledger tx");
+
+  const rejoinQueries = [];
+  const rejoinSideEffects = { seatInsert: 0, ledger: 0 };
+  const rejoinHandler = makeJoinHandler({
+    requestStore: new Map(),
+    queries: rejoinQueries,
+    sideEffects: rejoinSideEffects,
+    existingSeatNo: 4,
+  });
+  const rejoin = await callJoin(rejoinHandler, "join-rejoin");
+  assert.equal(rejoin.statusCode, 200);
+  assert.equal(JSON.parse(rejoin.body).seatNo, 4);
+  assert.equal(rejoinSideEffects.seatInsert, 0);
+  assert.equal(rejoinSideEffects.ledger, 0);
+  const rejoinStateWrite = rejoinQueries.find((entry) => entry.query.toLowerCase().includes("update public.poker_state"));
+  assert.ok(rejoinStateWrite, "rejoin should update poker_state to clear flags");
+  const rejoinStatePayload = rejoinStateWrite?.params?.[1];
+  const rejoinState = JSON.parse(rejoinStatePayload);
+  assert.equal(rejoinState.leftTableByUserId[userId], false);
+  assert.equal(rejoinState.missedTurnsByUserId?.[userId], undefined);
 };
 
 run().catch((error) => {
