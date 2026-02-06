@@ -160,7 +160,6 @@
 
   function ensureChipNodes(){
     if (chipNodes.ready) return;
-    normalizeTopbarBadges();
     chipNodes.badge = doc.getElementById('chipBadge');
     chipNodes.amount = doc.getElementById('chipBadgeAmount');
     chipNodes.ready = true;
