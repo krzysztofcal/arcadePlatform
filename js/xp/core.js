@@ -1053,8 +1053,8 @@ function bootXpCore(window, document) {
       ? Math.max(0, candidate)
       : Math.max(Number(state.totalLifetime) || 0, candidate);
     state.snapshot = computeLevel(state.totalLifetime);
-    const totalText = state.snapshot.totalXp.toLocaleString();
-    state.labelEl.textContent = `Lvl ${state.snapshot.level}, ${totalText} XP`;
+    const totalText = formatCompactNumber(state.snapshot.totalXp);
+    state.labelEl.textContent = `XP: ${totalText}`;
     if (window.console && console.debug) {
       console.debug("[XP] ui_display_total_xp", {
         authenticated,
@@ -1066,6 +1066,27 @@ function bootXpCore(window, document) {
       });
     }
     setBadgeLoading(false);
+  }
+
+  function formatCompactNumber(value) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return "0";
+    const abs = Math.abs(numeric);
+    const sign = numeric < 0 ? "-" : "";
+    if (abs < 1000) return `${sign}${Math.round(abs)}`;
+    let divisor = 1000;
+    let suffix = "k";
+    if (abs >= 1e9) {
+      divisor = 1e9;
+      suffix = "b";
+    } else if (abs >= 1e6) {
+      divisor = 1e6;
+      suffix = "m";
+    }
+    const scaled = abs / divisor;
+    const rounded = scaled >= 10 ? Math.round(scaled) : Math.round(scaled * 10) / 10;
+    const text = Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
+    return `${sign}${text}${suffix}`;
   }
 
   function refreshBadgeFromStorage() {
