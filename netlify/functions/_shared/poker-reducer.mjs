@@ -711,7 +711,17 @@ function advanceIfNeeded(state) {
   const to = nextStreet(from);
   const baseTurnNo = Number.isInteger(state.turnNo) ? state.turnNo : 0;
   let next = resetRoundState({ ...validatedState, phase: to, turnUserId: null });
-  next = { ...next, turnUserId: getFirstBettingAfterDealer(next), turnNo: baseTurnNo + 1 };
+  const orderedSeats = orderSeats(next.seats);
+  const sitOutByUserId = sanitizeSitOutByUserId(next.sitOutByUserId, orderedSeats);
+  const leftTableByUserId = sanitizeLeftTableByUserId(next.leftTableByUserId, orderedSeats);
+  const turnUserId = getFirstBettingAfterDealerEligible({
+    orderedSeats,
+    dealerSeatNo: next.dealerSeatNo,
+    stacks: next.stacks,
+    sitOutByUserId,
+    leftTableByUserId,
+  });
+  next = { ...next, sitOutByUserId, leftTableByUserId, turnUserId, turnNo: baseTurnNo + 1 };
 
   const n = cardsToDeal(from);
   if (n > 0) {
