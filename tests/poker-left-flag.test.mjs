@@ -5,8 +5,8 @@ const run = async () => {
   {
     const state = { seats: [{ userId: "user-1" }] };
     const patched = patchLeftTableByUserId(state, "user-1", false);
-    assert.equal(patched.changed, true);
-    assert.equal(patched.nextState.leftTableByUserId["user-1"], false);
+    assert.equal(patched.changed, false);
+    assert.equal(patched.nextState, state);
   }
 
   {

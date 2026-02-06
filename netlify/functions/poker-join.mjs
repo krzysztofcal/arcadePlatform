@@ -6,7 +6,6 @@ import { deletePokerRequest, ensurePokerRequest, storePokerRequestResult } from 
 import { isStateStorageValid } from "./_shared/poker-state-utils.mjs";
 import { patchLeftTableByUserId } from "./_shared/poker-left-flag.mjs";
 import { loadPokerStateForUpdate, updatePokerStateLocked } from "./_shared/poker-state-write-locked.mjs";
-import { updatePokerStateOptimistic } from "./_shared/poker-state-write.mjs";
 
 const REQUEST_PENDING_STALE_SEC = 30;
 
@@ -304,20 +303,15 @@ values ($1, $2, $3, 'ACTIVE', now(), now(), $4);
         });
         mutated = true;
 
-        const stateRows = await tx.unsafe(
-          "select version, state from public.poker_state where table_id = $1 for update;",
-          [tableId]
-        );
-        const stateRow = stateRows?.[0] || null;
-        if (!stateRow) {
-          throw new Error("poker_state_missing");
-        }
-        const expectedVersion = Number(stateRow.version);
-        if (!Number.isInteger(expectedVersion) || expectedVersion < 0) {
+        const loadResult = await loadPokerStateForUpdate(tx, tableId);
+        if (!loadResult.ok) {
+          if (loadResult.reason === "not_found") {
+            throw makeError(404, "state_missing");
+          }
           throw makeError(409, "state_invalid");
         }
 
-        const currentState = normalizeState(stateRow.state);
+        const currentState = normalizeState(loadResult.state);
         const seats = parseSeats(currentState.seats).filter((seat) => seat?.userId !== auth.userId);
         seats.push({ userId: auth.userId, seatNo });
         const stacks = { ...parseStacks(currentState.stacks), [auth.userId]: buyIn };
@@ -336,18 +330,10 @@ values ($1, $2, $3, 'ACTIVE', now(), now(), $4);
           throw makeError(409, "state_invalid");
         }
 
-        const updateResult = await updatePokerStateOptimistic(tx, {
-          tableId,
-          expectedVersion,
-          nextState: updatedState,
-        });
+        const updateResult = await updatePokerStateLocked(tx, { tableId, nextState: updatedState });
         if (!updateResult.ok) {
           if (updateResult.reason === "not_found") {
             throw makeError(404, "state_missing");
-          }
-          if (updateResult.reason === "conflict") {
-            klog("poker_join_conflict", { tableId, userId: auth.userId, expectedVersion });
-            throw makeError(409, "state_conflict");
           }
           throw makeError(409, "state_invalid");
         }
