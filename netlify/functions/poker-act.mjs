@@ -99,16 +99,6 @@ const hasRequiredState = (state) =>
   isPlainObjectValue(state.actedThisRoundByUserId) &&
   isPlainObjectValue(state.foldedByUserId);
 
-const hasRequiredStateForLeave = (state) =>
-  isPlainObjectValue(state) &&
-  typeof state.phase === "string" &&
-  Array.isArray(state.seats) &&
-  isPlainObjectValue(state.stacks) &&
-  isPlainObjectValue(state.toCallByUserId) &&
-  isPlainObjectValue(state.betThisRoundByUserId) &&
-  isPlainObjectValue(state.actedThisRoundByUserId) &&
-  isPlainObjectValue(state.foldedByUserId);
-
 const isActionPhase = (phase) => phase === "PREFLOP" || phase === "FLOP" || phase === "TURN" || phase === "RIVER";
 
 const getSeatForUser = (state, userId) => (Array.isArray(state.seats) ? state.seats.find((seat) => seat?.userId === userId) : null);
@@ -341,7 +331,7 @@ export async function handler(event) {
           throw makeError(409, "state_invalid");
         }
         const currentState = normalizeJsonState(stateRow.state);
-        if (actionParsed.value.type === "LEAVE_TABLE" ? !hasRequiredStateForLeave(currentState) : !hasRequiredState(currentState)) {
+        if (!hasRequiredState(currentState)) {
           throw makeError(409, "state_invalid");
         }
         if (currentState?.phase === "INIT") {
@@ -391,7 +381,7 @@ export async function handler(event) {
         }
 
         let currentState = normalizeJsonState(stateRow.state);
-        if (actionParsed.value.type === "LEAVE_TABLE" ? !hasRequiredStateForLeave(currentState) : !hasRequiredState(currentState)) {
+        if (!hasRequiredState(currentState)) {
           klog("poker_act_rejected", {
             tableId,
             userId: auth.userId,

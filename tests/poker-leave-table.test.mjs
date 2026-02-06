@@ -28,6 +28,9 @@ const run = async () => {
     assert.equal(nextState.sitOutByUserId["user-1"], false);
     assert.equal(nextState.missedTurnsByUserId["user-1"], 0);
     assert.equal(nextState.turnUserId, "user-2");
+    assert.ok(Number.isFinite(nextState.turnStartedAt));
+    assert.ok(Number.isFinite(nextState.turnDeadlineAt));
+    assert.ok(nextState.turnDeadlineAt > nextState.turnStartedAt);
     assert.ok(result.events.some((event) => event.type === "PLAYER_LEFT_TABLE"));
     assert.ok(
       result.events.some(

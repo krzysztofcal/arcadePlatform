@@ -645,14 +645,15 @@ const applyLeaveTable = (state, { userId, requestId } = {}) => {
 
   const nextUserId = getNextBettingUserId(next, userId);
   const baseTurnNo = Number.isInteger(state.turnNo) ? state.turnNo : 0;
+  const now = Date.now();
   if (nextUserId) {
     next.turnUserId = nextUserId;
     events.push({ type: "TURN_SKIPPED_BY_LEAVE", fromUserId: userId, toUserId: nextUserId });
-    return { state: { ...next, turnNo: baseTurnNo + 1 }, events };
+    return { state: stampTurnTimer({ ...next, turnNo: baseTurnNo + 1 }, now), events };
   }
 
   next.turnUserId = null;
-  return { state: { ...next, turnNo: baseTurnNo }, events };
+  return { state: stampTurnTimer({ ...next, turnNo: baseTurnNo }, now), events };
 };
 
 function advanceIfNeeded(state) {
