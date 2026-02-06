@@ -3,6 +3,7 @@ import { computeLegalActions } from "./poker-legal-actions.mjs";
 import { awardPotsAtShowdown } from "./poker-payout.mjs";
 import { materializeShowdownAndPayout } from "./poker-materialize-showdown.mjs";
 import { computeShowdown } from "./poker-showdown.mjs";
+import { MISSED_TURNS_SITOUT_THRESHOLD } from "./poker-inactivity.mjs";
 import { isPlainObject, withoutPrivateState } from "./poker-state-utils.mjs";
 
 const ADVANCE_LIMIT = 4;
@@ -114,8 +115,10 @@ const maybeApplyTurnTimeout = ({ tableId, state, privateState, nowMs }) => {
 
   const { holeCardsByUserId: _ignoredHoleCards, deck: _ignoredDeck, ...stateBase } = nextState;
   const missedTurnsByUserId = isPlainObject(nextState.missedTurnsByUserId) ? nextState.missedTurnsByUserId : {};
+  const sitOutByUserId = isPlainObject(nextState.sitOutByUserId) ? nextState.sitOutByUserId : {};
   const previousMissed = Number(missedTurnsByUserId[action.userId]);
   const safeMissed = Number.isFinite(previousMissed) && previousMissed >= 0 ? Math.trunc(previousMissed) : 0;
+  const updatedMissed = safeMissed + 1;
   const updatedState = {
     ...stateBase,
     communityDealt: Array.isArray(nextState.community) ? nextState.community.length : 0,
@@ -125,7 +128,11 @@ const maybeApplyTurnTimeout = ({ tableId, state, privateState, nowMs }) => {
     },
     missedTurnsByUserId: {
       ...missedTurnsByUserId,
-      [action.userId]: safeMissed + 1,
+      [action.userId]: updatedMissed,
+    },
+    sitOutByUserId: {
+      ...sitOutByUserId,
+      ...(updatedMissed >= MISSED_TURNS_SITOUT_THRESHOLD ? { [action.userId]: true } : {}),
     },
   };
   return { applied: true, state: updatedState, events, action, requestId };

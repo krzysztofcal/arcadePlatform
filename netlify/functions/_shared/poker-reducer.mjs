@@ -1,4 +1,5 @@
 import { createDeck, dealCommunity, dealHoleCards, shuffle } from "./poker-engine.mjs";
+import { isPlainObject } from "./poker-state-utils.mjs";
 
 // =============================================================================
 // HAND LIFECYCLE CONTRACT (ENGINE ↔ UI)
@@ -66,6 +67,54 @@ const buildDefaultMap = (seats, value) =>
     if (seat?.userId) acc[seat.userId] = value;
     return acc;
   }, {});
+
+const sanitizeBoolMapBySeats = (value, seats) => {
+  const source = isPlainObject(value) ? value : {};
+  const out = {};
+  for (const seat of orderSeats(seats)) {
+    if (!seat?.userId) continue;
+    if (Object.prototype.hasOwnProperty.call(source, seat.userId)) {
+      out[seat.userId] = Boolean(source[seat.userId]);
+    }
+  }
+  return out;
+};
+
+const sanitizeSitOutByUserId = (value, seats) => sanitizeBoolMapBySeats(value, seats);
+
+const computeEligibleUserIds = ({ orderedSeats, stacks, sitOutByUserId }) =>
+  orderedSeats
+    .filter((seat) => seat?.userId)
+    .map((seat) => seat.userId)
+    .filter((userId) => (stacks?.[userId] ?? 0) > 0 && !sitOutByUserId?.[userId]);
+
+const rotateDealerSeatNoEligible = ({ orderedSeats, currentDealerSeatNo, stacks, sitOutByUserId }) => {
+  if (orderedSeats.length === 0) return Number.isInteger(currentDealerSeatNo) ? currentDealerSeatNo : 0;
+  const startIndex = orderedSeats.findIndex((seat) => seat.seatNo === currentDealerSeatNo);
+  const start = startIndex >= 0 ? startIndex : 0;
+  for (let offset = 1; offset <= orderedSeats.length; offset += 1) {
+    const seat = orderedSeats[(start + offset) % orderedSeats.length];
+    if (!seat?.userId) continue;
+    if ((stacks?.[seat.userId] ?? 0) <= 0) continue;
+    if (sitOutByUserId?.[seat.userId]) continue;
+    return seat.seatNo;
+  }
+  return orderedSeats[0]?.seatNo ?? currentDealerSeatNo ?? 0;
+};
+
+const getFirstBettingAfterDealerEligible = ({ orderedSeats, dealerSeatNo, stacks, sitOutByUserId }) => {
+  if (orderedSeats.length === 0) return null;
+  const startIndex = orderedSeats.findIndex((seat) => seat.seatNo === dealerSeatNo);
+  const start = startIndex >= 0 ? startIndex : 0;
+  for (let offset = 1; offset <= orderedSeats.length; offset += 1) {
+    const seat = orderedSeats[(start + offset) % orderedSeats.length];
+    if (!seat?.userId) continue;
+    if ((stacks?.[seat.userId] ?? 0) <= 0) continue;
+    if (sitOutByUserId?.[seat.userId]) continue;
+    return seat.userId;
+  }
+  return null;
+};
 
 const maxFromMap = (value) => {
   if (!value || typeof value !== "object") return 0;
@@ -260,6 +309,7 @@ const initHandState = ({ tableId, seats, stacks, rng }) => {
     currentBet: 0,
     lastRaiseSize: null,
     missedTurnsByUserId: {},
+    sitOutByUserId: {},
   };
   const now = Date.now();
   const nextState = stampTurnTimer({ ...state, allInByUserId: deriveAllInByUserId(state), turnNo: 1 }, now);
@@ -270,6 +320,7 @@ const resetToNextHand = (state, options = {}) => {
   const orderedSeats = orderSeats(state.seats);
   const seats = Array.isArray(state.seats) ? state.seats.slice() : [];
   const stacks = copyMap(state.stacks);
+  const sitOutByUserId = sanitizeSitOutByUserId(state.sitOutByUserId, seats);
   const seatedUserIds = orderedSeats.map((seat) => seat.userId).filter(Boolean);
   if (seatedUserIds.length === 0) {
     return {
@@ -277,20 +328,25 @@ const resetToNextHand = (state, options = {}) => {
       events: [{ type: "HAND_RESET_SKIPPED", reason: "not_enough_players" }],
     };
   }
-  const fundedUserIds = seatedUserIds.filter((userId) => (stacks?.[userId] ?? 0) > 0);
-  if (fundedUserIds.length < 2) {
+  const eligibleUserIds = computeEligibleUserIds({ orderedSeats: orderSeats(seats), stacks, sitOutByUserId });
+  if (eligibleUserIds.length < 2) {
     return {
       state: stampTurnTimer(state, Date.now()),
       events: [{ type: "HAND_RESET_SKIPPED", reason: "not_enough_players" }],
     };
   }
-  const dealerSeatNo = rotateDealerSeatNo(state);
+  const dealerSeatNo = rotateDealerSeatNoEligible({
+    orderedSeats,
+    currentDealerSeatNo: state.dealerSeatNo,
+    stacks,
+    sitOutByUserId,
+  });
   const foldedByUserId = buildDefaultMap(seats, false);
-  const turnUserId = getFirstBettingAfterDealer({
-    seats: orderedSeats,
+  const turnUserId = getFirstBettingAfterDealerEligible({
+    orderedSeats,
     dealerSeatNo,
     stacks,
-    foldedByUserId,
+    sitOutByUserId,
   });
   if (!turnUserId) {
     return {
@@ -302,7 +358,7 @@ const resetToNextHand = (state, options = {}) => {
   const handSeed = makeHandId();
   const rng = typeof options.rng === "function" ? options.rng : Math.random;
   const deck = shuffle(createDeck(), rng);
-  const dealt = dealHoleCards(deck, seatedUserIds);
+  const dealt = dealHoleCards(deck, eligibleUserIds);
   const baseTurnNo = Number.isInteger(state.turnNo) ? state.turnNo : 0;
   const nextState = {
     tableId: state.tableId,
@@ -331,6 +387,7 @@ const resetToNextHand = (state, options = {}) => {
     currentBet: 0,
     lastRaiseSize: null,
     missedTurnsByUserId: {},
+    sitOutByUserId,
   };
   const nextWithAllIn = { ...nextState, allInByUserId: deriveAllInByUserId(nextState) };
   const stamped = stampTurnTimer(nextWithAllIn, Date.now());
@@ -391,6 +448,7 @@ const applyAction = (state, action) => {
       : {};
   const requestId = typeof action?.requestId === "string" ? action.requestId : "";
   const isAutoAction = requestId.startsWith("auto:");
+  const sitOutByUserId = sanitizeSitOutByUserId(state.sitOutByUserId, safeSeats);
   const next = {
     ...state,
     stacks: copyMap(state.stacks),
@@ -403,10 +461,12 @@ const applyAction = (state, action) => {
     community: Array.isArray(state.community) ? state.community.slice() : [],
     deck: Array.isArray(state.deck) ? state.deck.slice() : [],
     missedTurnsByUserId,
+    sitOutByUserId,
   };
   const userId = action.userId;
   if (!isAutoAction && ["CALL", "BET", "CHECK", "RAISE"].includes(action.type)) {
     next.missedTurnsByUserId[userId] = 0;
+    next.sitOutByUserId[userId] = false;
   }
   const roundCurrentBet = deriveCurrentBet(next);
   const roundLastRaiseSize = deriveLastRaiseSize(next, roundCurrentBet);
