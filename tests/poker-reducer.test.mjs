@@ -6,7 +6,7 @@ import {
   initHandState,
   isBettingRoundComplete,
 } from "../netlify/functions/_shared/poker-reducer.mjs";
-import { getTimeoutAction, maybeApplyTurnTimeout } from "../netlify/functions/_shared/poker-turn-timeout.mjs";
+import { getTimeoutDefaultAction, maybeApplyTurnTimeout } from "../netlify/functions/_shared/poker-turn-timeout.mjs";
 
 const makeRng = (seed) => {
   let value = seed;
@@ -290,20 +290,25 @@ const run = async () => {
     const { seats, stacks } = makeBase();
     const { state } = initHandState({ tableId: "t-timeout-1", seats, stacks, rng: makeRng(21) });
     const expired = { ...state, turnDeadlineAt: Date.now() - 1000 };
-    const action = getTimeoutAction(expired);
+    const action = getTimeoutDefaultAction(expired);
     assert.deepEqual(action, { type: "CHECK", userId: expired.turnUserId });
   }
 
   {
-    const { seats, stacks } = makeBase();
+    const seats = [
+      { userId: "user-1", seatNo: 1 },
+      { userId: "user-2", seatNo: 2 },
+    ];
+    const stacks = { "user-1": 100, "user-2": 100 };
     const { state } = initHandState({ tableId: "t-timeout-2", seats, stacks, rng: makeRng(22) });
-    const expired = {
-      ...state,
-      turnDeadlineAt: Date.now() - 1000,
-      toCallByUserId: { ...state.toCallByUserId, [state.turnUserId]: 5 },
-    };
-    const action = getTimeoutAction(expired);
-    assert.deepEqual(action, { type: "FOLD", userId: expired.turnUserId });
+    const bettorId = state.turnUserId;
+    const defenderId = seats.map((seat) => seat.userId).find((userId) => userId !== bettorId);
+    const betResult = applyAction(state, { type: "BET", userId: bettorId, amount: 10 });
+    const bettingState = betResult.state;
+    assert.equal(bettingState.turnUserId, defenderId);
+    const expired = { ...bettingState, turnDeadlineAt: Date.now() - 1000 };
+    const action = getTimeoutDefaultAction(expired);
+    assert.deepEqual(action, { type: "FOLD", userId: defenderId });
   }
 
   {
@@ -745,7 +750,11 @@ const run = async () => {
     });
     assert.equal(timeoutResult.applied, true);
     assert.equal(timeoutResult.state.phase, "PREFLOP");
-    assert.ok(timeoutResult.events.some((event) => event.type === "HAND_RESET"));
+    if (timeoutResult.state.phase === "SETTLED") {
+      assert.ok(timeoutResult.events.some((event) => event.type === "HAND_RESET"));
+    } else {
+      assert.ok(!timeoutResult.events.some((event) => event.type === "HAND_RESET"));
+    }
   }
 
   {

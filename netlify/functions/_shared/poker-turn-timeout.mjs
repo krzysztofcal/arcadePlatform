@@ -1,8 +1,9 @@
 import { advanceIfNeeded, applyAction } from "./poker-reducer.mjs";
+import { computeLegalActions } from "./poker-legal-actions.mjs";
 import { awardPotsAtShowdown } from "./poker-payout.mjs";
 import { materializeShowdownAndPayout } from "./poker-materialize-showdown.mjs";
 import { computeShowdown } from "./poker-showdown.mjs";
-import { isPlainObject } from "./poker-state-utils.mjs";
+import { isPlainObject, withoutPrivateState } from "./poker-state-utils.mjs";
 
 const ADVANCE_LIMIT = 4;
 
@@ -24,12 +25,24 @@ const normalizeSeatOrderFromState = (seats) => {
   return out;
 };
 
-const getTimeoutAction = (state) => {
+const getTimeoutDefaultAction = (state) => {
   if (!state || typeof state !== "object" || Array.isArray(state)) return null;
-  if (!state.turnUserId) return null;
-  const toCall = Number(state.toCallByUserId?.[state.turnUserId] || 0);
-  return { type: toCall > 0 ? "FOLD" : "CHECK", userId: state.turnUserId };
+  const turnUserId = typeof state.turnUserId === "string" && state.turnUserId.trim() ? state.turnUserId : null;
+  if (!turnUserId) return null;
+  const publicState = withoutPrivateState(state);
+  let legal;
+  try {
+    legal = computeLegalActions({ statePublic: publicState, userId: turnUserId });
+  } catch (error) {
+    return null;
+  }
+  const actions = Array.isArray(legal?.actions) ? legal.actions : [];
+  if (actions.includes("CHECK")) return { type: "CHECK", userId: turnUserId };
+  if (actions.includes("FOLD")) return { type: "FOLD", userId: turnUserId };
+  return null;
 };
+
+const getTimeoutAction = (state) => getTimeoutDefaultAction(state);
 
 const maybeApplyTurnTimeout = ({ tableId, state, privateState, nowMs }) => {
   if (!state || typeof state !== "object" || Array.isArray(state)) return { applied: false, state };
@@ -38,7 +51,7 @@ const maybeApplyTurnTimeout = ({ tableId, state, privateState, nowMs }) => {
   const now = Number.isFinite(nowMs) ? nowMs : Date.now();
   if (!Number.isFinite(deadline) || now <= deadline) return { applied: false, state };
 
-  const action = getTimeoutAction(state);
+  const action = getTimeoutDefaultAction(state);
   if (!action) return { applied: false, state };
 
   const turnNo = Number.isInteger(state.turnNo) ? state.turnNo : 0;
@@ -93,6 +106,11 @@ const maybeApplyTurnTimeout = ({ tableId, state, privateState, nowMs }) => {
     nextState = materialized.nextState;
   }
 
+  const handEnded = nextState.phase === "SETTLED" || nextState.phase === "SHOWDOWN";
+  if (handEnded && !events.some((event) => event?.type === "HAND_RESET")) {
+    events.push({ type: "HAND_RESET", reason: "timeout", handId, tableId });
+  }
+
   const { holeCardsByUserId: _ignoredHoleCards, deck: _ignoredDeck, ...stateBase } = nextState;
   const updatedState = {
     ...stateBase,
@@ -105,4 +123,4 @@ const maybeApplyTurnTimeout = ({ tableId, state, privateState, nowMs }) => {
   return { applied: true, state: updatedState, events, action, requestId };
 };
 
-export { getTimeoutAction, maybeApplyTurnTimeout, normalizeSeatOrderFromState };
+export { getTimeoutAction, getTimeoutDefaultAction, maybeApplyTurnTimeout, normalizeSeatOrderFromState };
