@@ -201,7 +201,9 @@ with entries as (
 select * from entries;
 `;
   const rows = await executeSql(query, [account.id, cursorCreatedAt, cursorEntrySeq, cappedLimit]);
-  const normalizedEntries = (rows || []).map(row => {
+  const rowList = Array.isArray(rows) ? rows : [];
+  const hasFullPage = rowList.length === cappedLimit;
+  const normalizedEntries = rowList.map(row => {
     const parsedEntrySeq = parsePositiveInt(row?.entry_seq);
     const entrySeq = parsedEntrySeq;
     if (parsedEntrySeq === null) {
@@ -237,8 +239,8 @@ select * from entries;
       tx_created_at: txCreatedAt,
     };
   });
-  const cursorCandidate = normalizedEntries.length === cappedLimit ? findLastCursorCandidate(normalizedEntries) : null;
-  if (!cursorCandidate && normalizedEntries.length === cappedLimit) {
+  const cursorCandidate = hasFullPage ? findLastCursorCandidate(normalizedEntries) : null;
+  if (!cursorCandidate && hasFullPage) {
     klog("chips:ledger_cursor_missing", { count: normalizedEntries.length });
   }
   const nextCursor = cursorCandidate

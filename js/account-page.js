@@ -11,6 +11,7 @@
     nextCursor: null,
     hasMore: true,
     loading: false,
+    error: null,
     rowHeight: 72,
     overscan: 4,
     renderQueued: false,
@@ -181,6 +182,7 @@
 
   function getLedgerTailState(){
     if (ledgerState.loading){ return 'loading'; }
+    if (ledgerState.error){ return 'error'; }
     if (!ledgerState.hasMore && ledgerState.entries.length){ return 'end'; }
     return null;
   }
@@ -209,6 +211,9 @@
         row = buildLedgerRow(entries[i]);
       } else if (tailState === 'loading'){
         row = buildLedgerStatusRow('Loading more activity…');
+      } else if (tailState === 'error'){
+        row = buildLedgerStatusRow('Could not load more activity. Scroll to retry.');
+        row.addEventListener('click', loadLedgerPage);
       } else if (tailState === 'end'){
         row = buildLedgerStatusRow('End of history');
       }
@@ -226,6 +231,7 @@
     ledgerState.nextCursor = null;
     ledgerState.hasMore = true;
     ledgerState.loading = false;
+    ledgerState.error = null;
     ledgerState.renderQueued = false;
     if (nodes.chipLedgerScroll){ nodes.chipLedgerScroll.scrollTop = 0; }
   }
@@ -250,6 +256,7 @@
     if (!window || !window.ChipsClient || typeof window.ChipsClient.fetchLedger !== 'function') return;
     if (!ledgerState.hasMore || ledgerState.loading) return;
     ledgerState.loading = true;
+    ledgerState.error = null;
     queueLedgerRender();
     try {
       var payload = await window.ChipsClient.fetchLedger({
@@ -261,7 +268,7 @@
       setChipStatus('', '');
     } catch (err){
       setChipStatus('Could not load chip history right now.', 'error');
-      ledgerState.hasMore = false;
+      ledgerState.error = 'load_failed';
     } finally {
       ledgerState.loading = false;
       queueLedgerRender();

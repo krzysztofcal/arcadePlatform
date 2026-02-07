@@ -760,18 +760,31 @@ describe("chips ledger paging", () => {
       ],
     });
 
-    const admin = await import("../netlify/functions/_shared/supabase-admin.mjs");
-    const userAccount = [...admin.__mockDb.accounts.values()].find(acc => acc.user_id === "user-7");
-    const userEntries = admin.__mockDb.entries.filter(entry => entry.account_id === userAccount.id);
-    userEntries[userEntries.length - 1].entry_seq = null;
-
     const first = await listUserLedger("user-7", { limit: 2 });
     expect(first.items).toHaveLength(2);
     expect(first.nextCursor).toBeTruthy();
 
+    const admin = await import("../netlify/functions/_shared/supabase-admin.mjs");
+    const userAccount = [...admin.__mockDb.accounts.values()].find(acc => acc.user_id === "user-7");
+    const userEntries = admin.__mockDb.entries.filter(entry => entry.account_id === userAccount.id);
+    const lastPageItem = first.items[first.items.length - 1];
+    const target = userEntries.find(entry =>
+      entry.account_id === userAccount.id &&
+      entry.created_at === lastPageItem.created_at &&
+      entry.entry_seq === lastPageItem.entry_seq
+    );
+    if (target) {
+      target.entry_seq = null;
+    }
+
     const second = await listUserLedger("user-7", { limit: 2, cursor: first.nextCursor });
     expect(second.items.length).toBeGreaterThanOrEqual(1);
-    expect(second.items[0].entry_seq).not.toBe(first.items[0].entry_seq);
+    expect(second.items[0].created_at <= lastPageItem.created_at).toBe(true);
+    const pageOneKeys = new Set(first.items.map(item => `${item.created_at}:${item.entry_seq}`));
+    const overlap = second.items.some(item =>
+      item.entry_seq != null && pageOneKeys.has(`${item.created_at}:${item.entry_seq}`)
+    );
+    expect(overlap).toBe(false);
   });
 });
 

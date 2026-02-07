@@ -140,6 +140,18 @@ function findByClass(node, className) {
   return null;
 }
 
+function findByClassToken(node, className) {
+  if (!node) return null;
+  if (typeof node.className === "string" && node.className.split(" ").includes(className)) {
+    return node;
+  }
+  for (const child of node.children || []) {
+    const found = findByClassToken(child, className);
+    if (found) return found;
+  }
+  return null;
+}
+
 test("renders formatted chip ledger dates", async () => {
   const chipsClient = {
     fetchBalance() {
@@ -235,4 +247,76 @@ test("loads more ledger entries on scroll", async () => {
   assert.equal(calls[1].cursor, "cursor-1", "second page should include cursor");
   const spacer = document.getElementById("chipLedgerSpacer");
   assert.ok(Number.parseInt(spacer.style.height, 10) > firstPage.length * 72, "spacer height should grow");
+});
+
+test("shows error tail row and retries on scroll", async () => {
+  const calls = [];
+  const firstPage = Array.from({ length: 3 }, (_value, index) => ({
+    id: index + 1,
+    tx_type: "BUY_IN",
+    amount: 1,
+    created_at: "2026-02-06T19:00:00.000Z",
+  }));
+  const chipsClient = {
+    fetchBalance() {
+      return Promise.resolve({ balance: 1200 });
+    },
+    fetchLedger(options) {
+      calls.push(options);
+      if (calls.length === 1) {
+        return Promise.resolve({ items: firstPage, nextCursor: "cursor-1" });
+      }
+      if (calls.length === 2) {
+        return Promise.reject(new Error("network_error"));
+      }
+      return Promise.resolve({
+        items: [
+          {
+            id: 99,
+            tx_type: "CASH_OUT",
+            amount: -5,
+            created_at: "2026-02-05T18:40:00.000Z",
+          },
+        ],
+        nextCursor: null,
+      });
+    },
+  };
+  const { windowObj, document } = buildContext(chipsClient);
+  const context = vm.createContext({
+    window: windowObj,
+    document,
+    requestAnimationFrame: windowObj.requestAnimationFrame,
+    CustomEvent: function() {},
+  });
+  vm.runInContext(source, context);
+
+  await flush();
+  await flush();
+  await flush();
+
+  const scroll = document.getElementById("chipLedgerScroll");
+  scroll.clientHeight = 200;
+  scroll.scrollTop = 400;
+  scroll.dispatchEvent({ type: "scroll" });
+
+  await flush();
+  await flush();
+  await flush();
+
+  const list = document.getElementById("chipLedgerList");
+  const errorRow = findByClassToken(list, "chip-ledger__item--status");
+  assert.ok(errorRow, "error status row should render");
+  assert.match(errorRow.textContent, /Could not load more activity/i);
+
+  scroll.scrollTop = 400;
+  scroll.dispatchEvent({ type: "scroll" });
+
+  await flush();
+  await flush();
+  await flush();
+
+  const newErrorRow = findByClassToken(list, "chip-ledger__item--status");
+  assert.ok(!newErrorRow || !/Could not load more activity/i.test(newErrorRow.textContent), "error row should clear");
+  assert.ok(calls.length >= 3, "fetchLedger should retry after error");
 });
