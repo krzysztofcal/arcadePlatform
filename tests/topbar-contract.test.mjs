@@ -20,6 +20,7 @@ try {
   playHtml = null;
 }
 const gameHtml = await readFile(path.join(repoRoot, 'game.html'), 'utf8');
+const gameCatsHtml = await readFile(path.join(repoRoot, 'game_cats.html'), 'utf8');
 const gameTrexHtml = await readFile(path.join(repoRoot, 'game_trex.html'), 'utf8');
 const pokerIndex = await readFile(path.join(repoRoot, 'poker', 'index.html'), 'utf8');
 const pokerTable = await readFile(path.join(repoRoot, 'poker', 'table.html'), 'utf8');
@@ -69,6 +70,7 @@ test('chip badge styles only live in portal css', () => {
 
 test('game pages load portal css for topbar styles', () => {
   assert.match(gameHtml, /css\/portal\.css/);
+  assert.match(gameCatsHtml, /css\/portal\.css/);
   assert.match(gameTrexHtml, /css\/portal\.css/);
 });
 

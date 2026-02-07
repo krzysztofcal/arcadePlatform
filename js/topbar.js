@@ -4,6 +4,7 @@
   const chipNodes = { badge: null, amount: null, ready: false };
   let chipInFlight = null;
   let chipsClientPromise = null;
+  let chipLoadRetryUsed = false;
   let isSignedIn = false;
   let authWired = false;
   let authWireAttempts = 0;
@@ -213,6 +214,7 @@
     isSignedIn = value;
     if (!isSignedIn){
       hideChipBadge();
+      chipLoadRetryUsed = false;
       return;
     }
     refreshChipBadge();
@@ -289,7 +291,7 @@
         }
       }, 50);
 
-      timeoutTimer = setTimeout(() => finish(false), 1500);
+      timeoutTimer = setTimeout(() => finish(false), 3000);
     });
     return chipsClientPromise;
   }
@@ -306,6 +308,13 @@
       const loaded = await ensureChipsClientLoaded();
       if (!loaded || !window.ChipsClient || typeof window.ChipsClient.fetchBalance !== 'function'){
         hideChipBadge();
+        if (!chipLoadRetryUsed){
+          chipLoadRetryUsed = true;
+          setTimeout(() => {
+            if (!isSignedIn) return;
+            refreshChipBadge();
+          }, 2000);
+        }
         return;
       }
     }
@@ -317,6 +326,7 @@
         const raw = balance && balance.balance != null ? Number(balance.balance) : null;
         const value = Number.isFinite(raw) ? raw : null;
         renderChipBadgeBalance(value);
+        chipLoadRetryUsed = false;
       } catch (err){
         if (err && (err.status === 404 || err.code === 'not_found')){
           hideChipBadge();

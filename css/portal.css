@@ -20,9 +20,9 @@ body{margin:0; background:linear-gradient(180deg, #0b1020 0%, #0a0d1a 100%); col
 /* Hamburger */
 .hamburger{ width:40px; height:40px; display:grid; place-items:center; background:transparent; border:1px solid var(--border); border-radius:10px; margin-right:8px; cursor:pointer; }
 .hamburger span{ display:block; width:18px; height:2px; background:#cdd6ff; margin:3px 0; }
-.topbar{ position:fixed; left:0; right:0; top:0; height:var(--topbar-offset); display:flex; align-items:center; gap:12px; padding:calc(12px + var(--topbar-safe, 0px)) 18px 12px; background:var(--card); border-bottom:1px solid var(--border); z-index:100; overflow:visible; }
-.topbar-left{ display:flex; align-items:center; gap:12px; flex:1; min-width:0; overflow:visible; }
-.topbar-right{ margin-left:auto; display:flex; align-items:center; gap:12px; white-space:nowrap; flex:0 0 auto; }
+.topbar{ position:fixed; left:0; right:0; top:0; height:var(--topbar-offset); padding-top:var(--topbar-safe, 0px); padding-left:18px; padding-right:18px; background:var(--card); border-bottom:1px solid var(--border); z-index:100; overflow:visible; display:flex; align-items:center; gap:12px; }
+.topbar-left{ display:flex; align-items:center; gap:12px; flex:1; min-width:0; overflow:visible; height:var(--topbar-h); }
+.topbar-right{ margin-left:auto; display:flex; align-items:center; gap:12px; white-space:nowrap; flex:0 0 auto; height:var(--topbar-h); }
 .brand{ display:flex; align-items:center; gap:10px; text-decoration:none; cursor:pointer; transition:opacity .2s ease; }
 .brand:hover{ opacity:.88; }
 .brand:active{ opacity:.75; }
@@ -117,7 +117,7 @@ body{margin:0; background:linear-gradient(180deg, #0b1020 0%, #0a0d1a 100%); col
   .sidebar.collapsed:hover .sb-label{ max-width:0; opacity:1; } /* no hover expansion on mobile */
 }
 @media (max-width: 720px){
-  .topbar{ gap:10px; padding:calc(10px + var(--topbar-safe, 0px)) 12px 10px; }
+  .topbar{ gap:10px; padding-top:var(--topbar-safe, 0px); padding-left:12px; padding-right:12px; }
   .topbar-left{ gap:10px; }
   .xp-badge{ padding:6px 12px; font-size:12px; }
   .brand h1{ display:none; }
