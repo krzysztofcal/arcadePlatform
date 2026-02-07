@@ -327,7 +327,7 @@ test("loads more ledger entries on scroll", async () => {
   assert.equal(calls.length, 2, "fetchLedger should be called twice");
   assert.equal(calls[1].cursor, "cursor-1", "second page should include cursor");
   const spacer = document.getElementById("chipLedgerSpacer");
-  assert.ok(Number.parseInt(spacer.style.height, 10) > firstPage.length * 72, "spacer height should grow");
+  assert.ok(Number.parseInt(spacer.style.height, 10) > firstPage.length * 80, "spacer height should grow");
 });
 
 test("shows error tail row and retries on scroll", async () => {
@@ -455,7 +455,7 @@ test("dedupes overlapping items by created_at and entry_seq", async () => {
   await flush();
 
   const spacer = document.getElementById("chipLedgerSpacer");
-  assert.equal(Number.parseInt(spacer.style.height, 10), 4 * 72, "spacer height should match unique items");
+  assert.equal(Number.parseInt(spacer.style.height, 10), 4 * 80, "spacer height should match unique items");
   assert.equal(calls.length, 2, "should fetch two pages");
 });
 
@@ -506,7 +506,7 @@ test("dedupes items with null entry_seq using idempotency_key", async () => {
   await flush();
 
   const spacer = document.getElementById("chipLedgerSpacer");
-  assert.equal(Number.parseInt(spacer.style.height, 10), 4 * 72, "spacer height should match unique items");
+  assert.equal(Number.parseInt(spacer.style.height, 10), 4 * 80, "spacer height should match unique items");
   assert.equal(calls.length, 2, "should fetch two pages");
 });
 

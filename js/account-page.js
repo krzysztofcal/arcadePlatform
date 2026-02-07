@@ -12,7 +12,7 @@
     hasMore: true,
     loading: false,
     error: null,
-    rowHeight: 72,
+    rowHeight: 80,
     overscan: 4,
     lastLoadAttemptAtMs: 0,
     lastScrollTop: 0,
