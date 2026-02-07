@@ -59,6 +59,10 @@ body{margin:0; background:linear-gradient(180deg, #0b1020 0%, #0a0d1a 100%); col
 .chip-badge{ color:#c7d2fe; }
 
 .chip-badge__label{ display:inline-flex; align-items:center; gap:6px; }
+
+#chipBadge{ display:none; }
+
+html[data-auth="in"] #chipBadge{ display:inline-flex; }
 @keyframes xp-badge-bump{
   0%{ transform:scale(1); }
   28%{ transform:scale(1.08); }

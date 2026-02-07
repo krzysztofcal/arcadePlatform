@@ -5,10 +5,20 @@
   let chipInFlight = null;
   let chipsClientPromise = null;
   let chipLoadRetryUsed = false;
-  let isSignedIn = false;
+  const AuthState = { UNKNOWN: 0, SIGNED_OUT: 1, SIGNED_IN: 2 };
+  let authState = AuthState.UNKNOWN;
   let authWired = false;
   let authWireAttempts = 0;
   const CHIP_BADGE_HREF = '/account.html#chipPanel';
+
+  function setAuthDataset(state){
+    if (!doc || !doc.documentElement) return;
+    doc.documentElement.dataset.auth = state;
+  }
+
+  function isAuthed(){
+    return authState === AuthState.SIGNED_IN;
+  }
 
   function pickPreferredTopbar(list){
     if (!list || !list.length) return null;
@@ -163,9 +173,10 @@
     const badge = chipNodes.badge;
     const amount = chipNodes.amount;
     if (!badge || !amount) return;
-    badge.hidden = false;
-    amount.textContent = text;
-    const loading = options && options.loading;
+    const show = !!(options && options.show);
+    const loading = !!(options && options.loading);
+    if (show){ badge.hidden = false; }
+    amount.textContent = text || '';
     if (loading){
       badge.classList.add('chip-pill--loading');
       badge.setAttribute('aria-busy', 'true');
@@ -182,7 +193,7 @@
 
   function renderChipBadgeBalance(amount){
     const text = amount == null ? '—' : formatCompactNumber(amount);
-    setChipBadge(text, { loading: false });
+    setChipBadge(text, { loading: false, show: true });
   }
 
   function renderChipBadgeSignedOut(){
@@ -208,11 +219,11 @@
     return `${sign}${text}${suffix}`;
   }
 
-  function setSignedIn(next){
-    const value = !!next;
-    if (isSignedIn === value) return;
-    isSignedIn = value;
-    if (!isSignedIn){
+  function setAuthState(next){
+    if (authState === next) return;
+    authState = next;
+    setAuthDataset(next === AuthState.SIGNED_IN ? 'in' : next === AuthState.SIGNED_OUT ? 'out' : 'unknown');
+    if (!isAuthed()){
       hideChipBadge();
       chipLoadRetryUsed = false;
       return;
@@ -223,10 +234,16 @@
   function resolveInitialAuth(){
     if (!window || !window.SupabaseAuth || typeof window.SupabaseAuth.getCurrentUser !== 'function') return;
     window.SupabaseAuth.getCurrentUser().then(function(user){
-      setSignedIn(!!user);
-      if (user){ refreshXpBadge(); }
+      setAuthState(user ? AuthState.SIGNED_IN : AuthState.SIGNED_OUT);
+      if (!isAuthed()){
+        hideChipBadge();
+        return;
+      }
+      refreshXpBadge();
+      refreshChipBadge();
     }).catch(function(){
-      setSignedIn(false);
+      setAuthState(AuthState.SIGNED_OUT);
+      hideChipBadge();
     });
   }
 
@@ -299,7 +316,7 @@
   async function refreshChipBadge(){
     normalizeTopbarBadges();
     ensureChipNodes();
-    if (!isSignedIn){
+    if (!isAuthed()){
       hideChipBadge();
       return;
     }
@@ -308,10 +325,10 @@
       const loaded = await ensureChipsClientLoaded();
       if (!loaded || !window.ChipsClient || typeof window.ChipsClient.fetchBalance !== 'function'){
         hideChipBadge();
-        if (!chipLoadRetryUsed){
+        if (isAuthed() && !chipLoadRetryUsed){
           chipLoadRetryUsed = true;
           setTimeout(() => {
-            if (!isSignedIn) return;
+            if (!isAuthed()) return;
             refreshChipBadge();
           }, 2000);
         }
@@ -319,7 +336,7 @@
       }
     }
     if (chipInFlight){ return chipInFlight; }
-    setChipBadge('', { loading: true });
+    setChipBadge('', { loading: true, show: false });
     chipInFlight = (async function(){
       try {
         const balance = await window.ChipsClient.fetchBalance();
@@ -333,11 +350,11 @@
           return;
         }
         if (err && err.code === 'not_authenticated'){
-          setSignedIn(false);
-          renderChipBadgeSignedOut();
+          setAuthState(AuthState.SIGNED_OUT);
+          hideChipBadge();
           return;
         }
-        setChipBadge('—', { loading: false });
+        hideChipBadge();
       } finally {
         chipInFlight = null;
       }
@@ -346,20 +363,22 @@
     return chipInFlight;
   }
 
-  function handleAuthChange(event, _user, _session){
+  function handleAuthChange(event, user, session){
+    const hasUser = !!(user || (session && session.user));
     if (event === 'SIGNED_OUT'){
-      setSignedIn(false);
-      renderChipBadgeSignedOut();
+      setAuthState(AuthState.SIGNED_OUT);
+      hideChipBadge();
       return;
     }
-    if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED'){
-      setSignedIn(true);
+    if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION'){
+      setAuthState(hasUser ? AuthState.SIGNED_IN : AuthState.SIGNED_OUT);
+      if (!isAuthed()){
+        hideChipBadge();
+        return;
+      }
       refreshXpBadge();
+      refreshChipBadge();
       return;
-    }
-    if (_user || _session){
-      setSignedIn(true);
-      refreshXpBadge();
     }
   }
 
@@ -386,6 +405,8 @@
   }
 
   tryWireAuthBridge();
+
+  setAuthDataset('unknown');
 
   if (doc.readyState === 'loading'){
     doc.addEventListener('DOMContentLoaded', function(){
