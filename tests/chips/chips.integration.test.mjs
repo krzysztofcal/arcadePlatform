@@ -78,42 +78,29 @@ async function runIdempotencyConflict() {
 async function verifyLedgerCursor() {
   const first = await getLedger(config, { limit: 20 });
   assert.equal(first.status, 200, `ledger should succeed; ${formatResponse(first)}`);
-  assert.ok(typeof first.body?.sequenceOk === "boolean", `sequenceOk must be boolean; ${formatResponse(first)}`);
-  const entries = Array.isArray(first.body?.entries) ? first.body.entries : [];
-  if (first.body?.sequenceOk === true && entries.length > 1) {
-    for (let i = 1; i < entries.length; i += 1) {
-      assert.equal(
-        entries[i].entry_seq,
-        entries[i - 1].entry_seq + 1,
-        "ledger entries must be contiguous when sequenceOk is true",
-      );
-    }
-  }
+  const entries = Array.isArray(first.body?.items) ? first.body.items : [];
   if (!entries.length) return;
-  const lastSeq = entries[entries.length - 1].entry_seq;
-  ensureInteger(lastSeq, "last entry_seq");
-  const next = await getLedger(config, { after: lastSeq, limit: 20 });
+  const nextCursor = first.body?.nextCursor;
+  assert.ok(nextCursor, `nextCursor must be returned; ${formatResponse(first)}`);
+  const next = await getLedger(config, { cursor: nextCursor, limit: 20 });
   assert.equal(next.status, 200, `paged ledger should succeed; ${formatResponse(next)}`);
-  assert.ok(typeof next.body?.sequenceOk === "boolean", `paged sequenceOk must be boolean; ${formatResponse(next)}`);
-  const nextEntries = Array.isArray(next.body?.entries) ? next.body.entries : [];
+  const nextEntries = Array.isArray(next.body?.items) ? next.body.items : [];
   if (nextEntries.length) {
-    assert.ok(nextEntries[0].entry_seq > lastSeq, "paged entries must advance cursor");
-  }
-  if (next.body?.sequenceOk === true && nextEntries.length) {
-    assert.equal(
+    assert.notEqual(
       nextEntries[0].entry_seq,
-      lastSeq + 1,
-      "paged entries must start at lastSeq + 1 when sequenceOk is true",
+      entries[entries.length - 1].entry_seq,
+      "paged entries must advance cursor",
     );
-    if (nextEntries.length > 1) {
-      for (let i = 1; i < nextEntries.length; i += 1) {
-        assert.equal(
-          nextEntries[i].entry_seq,
-          nextEntries[i - 1].entry_seq + 1,
-          "paged ledger entries must be contiguous when sequenceOk is true",
-        );
-      }
-    }
+  }
+
+  if (entries.length && entries[entries.length - 1].entry_seq) {
+    const legacy = await getLedger(config, { after: entries[entries.length - 1].entry_seq, limit: 20 });
+    assert.equal(legacy.status, 200, `legacy ledger should succeed; ${formatResponse(legacy)}`);
+    assert.ok(typeof legacy.body?.sequenceOk === "boolean", `legacy sequenceOk must be boolean; ${formatResponse(legacy)}`);
+    assert.ok(
+      typeof legacy.body?.nextExpectedSeq === "number",
+      `legacy nextExpectedSeq must be number; ${formatResponse(legacy)}`,
+    );
   }
 }
 

@@ -177,8 +177,12 @@
 
   async function fetchLedger(options){
     var params = [];
-    if (options && Number.isInteger(options.after)){
+    if (options && typeof options.cursor === 'string' && options.cursor){
+      params.push('cursor=' + encodeURIComponent(options.cursor));
+    } else if (options && Number.isInteger(options.after)){
       params.push('after=' + encodeURIComponent(options.after));
+    } else if (options && Number.isInteger(options.afterSeq)){
+      params.push('after=' + encodeURIComponent(options.afterSeq));
     }
     if (options && Number.isInteger(options.limit)){
       params.push('limit=' + encodeURIComponent(options.limit));
@@ -186,11 +190,16 @@
     var url = params.length ? (LEDGER_URL + '?' + params.join('&')) : LEDGER_URL;
     try {
       var payload = await authedFetchWithRetry(url, { method: 'GET' });
-      if (payload && payload.data && payload.data.entries){
+      var items = payload && payload.data
+        ? (Array.isArray(payload.data.items)
+          ? payload.data.items
+          : (Array.isArray(payload.data.entries) ? payload.data.entries : null))
+        : null;
+      if (payload && payload.data && items){
         var loggedInvalidAmount = false;
         var loggedInvalidSeq = false;
-        for (var i = 0; i < payload.data.entries.length; i++){
-          var entry = payload.data.entries[i];
+        for (var i = 0; i < items.length; i++){
+          var entry = items[i];
           if (entry){
             var rawAmount = entry && Object.prototype.hasOwnProperty.call(entry, 'amount') ? entry.amount : null;
             var parsedAmount = parseLedgerAmount(rawAmount);
@@ -223,11 +232,15 @@
           }
         }
       }
+      if (payload && payload.data && items){
+        payload.data.items = items;
+        payload.data.entries = items;
+      }
       emit('chips:ledger', payload.data);
       return payload.data;
     } catch (err){
       if (err && err.status === 404){
-        var empty = { entries: [] };
+        var empty = { items: [], entries: [], nextCursor: null };
         emit('chips:ledger', empty);
         return empty;
       }

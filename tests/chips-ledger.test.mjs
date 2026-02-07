@@ -8,6 +8,8 @@ const mockDb = {
   entries: [],
   nextAccountId: 1,
   nextTransactionId: 1,
+  nextEntryId: 1,
+  clockMs: Date.parse("2026-02-06T19:00:00.000Z"),
 };
 
 const createId = (prefix, counter) => `${prefix}-${counter}`;
@@ -18,6 +20,8 @@ function resetMockDb() {
   mockDb.entries.length = 0;
   mockDb.nextAccountId = 1;
   mockDb.nextTransactionId = 1;
+  mockDb.nextEntryId = 1;
+  mockDb.clockMs = Date.parse("2026-02-06T19:00:00.000Z");
   // bootstrap a treasury system account to satisfy ledger posts
   const treasury = {
     id: createId("acct", mockDb.nextAccountId++),
@@ -82,26 +86,64 @@ function handleLedgerQuery(query, params = []) {
   }
 
   if (text.includes("from public.chips_entries") && text.includes("join public.chips_transactions")) {
-    const [accountId, afterSeq, limit] = params;
-    const entries = mockDb.entries
-      .filter(entry => entry.account_id === accountId && (afterSeq == null || entry.entry_seq > afterSeq))
-      .sort((a, b) => a.entry_seq - b.entry_seq)
-      .slice(0, limit ?? 50)
-      .map(entry => {
-        const tx = mockDb.transactions.get(entry.transaction_id);
-        return {
-          entry_seq: entry.entry_seq,
-          amount: entry.amount,
-          metadata: entry.metadata,
-          created_at: entry.created_at,
-          tx_type: tx?.tx_type ?? null,
-          reference: tx?.reference ?? null,
-          description: tx?.description ?? null,
-          idempotency_key: tx?.idempotency_key ?? null,
-          tx_created_at: tx?.created_at ?? null,
-        };
-      });
-    return entries;
+    if (text.includes("order by e.created_at desc")) {
+      const [accountId, cursorCreatedAt, cursorEntrySeq, limit] = params;
+      const entries = mockDb.entries
+        .filter(entry => {
+          if (entry.account_id !== accountId) return false;
+          if (!cursorCreatedAt) return true;
+          const createdAt = new Date(entry.created_at);
+          const cursorTime = new Date(cursorCreatedAt);
+          if (createdAt.getTime() === cursorTime.getTime()) {
+            return entry.entry_seq < cursorEntrySeq;
+          }
+          return createdAt.getTime() < cursorTime.getTime();
+        })
+        .sort((a, b) => {
+          const timeA = new Date(a.created_at).getTime();
+          const timeB = new Date(b.created_at).getTime();
+          if (timeA === timeB) return b.entry_seq - a.entry_seq;
+          return timeB - timeA;
+        })
+        .slice(0, limit ?? 50)
+        .map(entry => {
+          const tx = mockDb.transactions.get(entry.transaction_id);
+          return {
+            entry_seq: entry.entry_seq,
+            amount: entry.amount,
+            metadata: entry.metadata,
+            created_at: entry.created_at,
+            tx_type: tx?.tx_type ?? null,
+            reference: tx?.reference ?? null,
+            description: tx?.description ?? null,
+            idempotency_key: tx?.idempotency_key ?? null,
+            tx_created_at: tx?.created_at ?? null,
+          };
+        });
+      return entries;
+    }
+    if (text.includes("order by e.entry_seq asc")) {
+      const [accountId, afterSeq, limit] = params;
+      const entries = mockDb.entries
+        .filter(entry => entry.account_id === accountId && (afterSeq == null || entry.entry_seq > afterSeq))
+        .sort((a, b) => a.entry_seq - b.entry_seq)
+        .slice(0, limit ?? 50)
+        .map(entry => {
+          const tx = mockDb.transactions.get(entry.transaction_id);
+          return {
+            entry_seq: entry.entry_seq,
+            amount: entry.amount,
+            metadata: entry.metadata,
+            created_at: entry.created_at,
+            tx_type: tx?.tx_type ?? null,
+            reference: tx?.reference ?? null,
+            description: tx?.description ?? null,
+            idempotency_key: tx?.idempotency_key ?? null,
+            tx_created_at: tx?.created_at ?? null,
+          };
+        });
+      return entries;
+    }
   }
 
   if (text.includes("with txn as") && text.includes("chips_entries")) {
@@ -192,15 +234,17 @@ function insertEntries(transactionId, entriesPayload) {
     const account = mockDb.accounts.get(record.account_id);
     const entrySeq = account.next_entry_seq || 1;
     const entry = {
+      id: mockDb.nextEntryId++,
       transaction_id: transactionId,
       account_id: record.account_id,
       amount: Number(record.amount),
       metadata: record.metadata ?? {},
       system_key: record.system_key ?? null,
       entry_seq: entrySeq,
-      created_at: new Date().toISOString(),
+      created_at: new Date(mockDb.clockMs).toISOString(),
     };
     account.next_entry_seq = entrySeq + 1;
+    mockDb.clockMs += 1000;
     mockDb.entries.push(entry);
     inserted.push(entry);
   }
@@ -289,7 +333,11 @@ vi.mock("../netlify/functions/_shared/supabase-admin.mjs", () => {
 
 async function loadLedger() {
   const mod = await import("../netlify/functions/_shared/chips-ledger.mjs");
-  return { postTransaction: mod.postTransaction, listUserLedger: mod.listUserLedger };
+  return {
+    postTransaction: mod.postTransaction,
+    listUserLedger: mod.listUserLedger,
+    listUserLedgerAfterSeq: mod.listUserLedgerAfterSeq,
+  };
 }
 
 async function loadTxHandler() {
@@ -557,7 +605,7 @@ describe("chips auth isolation and idempotency per identity", () => {
   });
 });
 
-describe("chips ledger sequencing", () => {
+describe("chips ledger paging", () => {
   beforeEach(() => {
     vi.resetModules();
     mockLog.mockClear();
@@ -565,7 +613,7 @@ describe("chips ledger sequencing", () => {
     process.env.CHIPS_ENABLED = "1";
   });
 
-  it("reports contiguous sequences and highlights gaps", async () => {
+  it("returns newest entries first with a stable cursor tie-breaker", async () => {
     const { postTransaction, listUserLedger } = await loadLedger();
     await postTransaction({
       userId: "user-4",
@@ -595,49 +643,11 @@ describe("chips ledger sequencing", () => {
       ],
     });
 
-    const { entries, sequenceOk, nextExpectedSeq } = await listUserLedger("user-4");
-    expect(sequenceOk).toBe(true);
-    expect(entries[0].entry_seq).toBe(1);
-    expect(entries[1].entry_seq).toBe(2);
-    expect(nextExpectedSeq).toBe(3);
-
-    const admin = await import("../netlify/functions/_shared/supabase-admin.mjs");
-    const userAccount = [...admin.__mockDb.accounts.values()].find(acc => acc.user_id === "user-4");
-    const userEntries = admin.__mockDb.entries.filter(entry => entry.account_id === userAccount.id);
-    userEntries[1].entry_seq = 3;
-
-    const withGap = await listUserLedger("user-4");
-    expect(withGap.sequenceOk).toBe(false);
-    expect(Number.isInteger(withGap.nextExpectedSeq)).toBe(true);
-    expect(withGap.nextExpectedSeq).toBeGreaterThanOrEqual(1);
-    expect(withGap.nextExpectedSeq).toBeLessThanOrEqual(3);
-  });
-
-  it("advances the expected sequence when starting after a cursor", async () => {
-    const { postTransaction, listUserLedger } = await loadLedger();
-    await postTransaction({
-      userId: "user-5",
-      txType: "MINT",
-      idempotencyKey: "seed-user-5",
-      entries: [
-        { accountType: "SYSTEM", systemKey: "TREASURY", amount: -10 },
-        { accountType: "USER", amount: 10 },
-      ],
-    });
-    await postTransaction({
-      userId: "user-5",
-      txType: "BUY_IN",
-      idempotencyKey: "after-1",
-      entries: [
-        { accountType: "USER", amount: -3 },
-        { accountType: "SYSTEM", systemKey: "TREASURY", amount: 3 },
-      ],
-    });
-
-    const page = await listUserLedger("user-5", { afterSeq: 5, limit: 10 });
-    expect(page.sequenceOk).toBe(true);
-    expect(page.entries).toHaveLength(0);
-    expect(page.nextExpectedSeq).toBe(6);
+    const { items } = await listUserLedger("user-4");
+    expect(items).toHaveLength(3);
+    expect(items[0].created_at >= items[1].created_at).toBe(true);
+    expect(items[1].created_at >= items[2].created_at).toBe(true);
+    expect(items[0].entry_seq >= items[1].entry_seq).toBe(true);
   });
 
   it("rejects invalid cursor values and clamps limits", async () => {
@@ -675,16 +685,173 @@ describe("chips ledger sequencing", () => {
       });
     }
 
-    await expect(listUserLedger("user-6", { afterSeq: "abc" })).rejects.toMatchObject({
-      code: "invalid_after_seq",
+    await expect(listUserLedger("user-6", { cursor: "abc" })).rejects.toMatchObject({
+      code: "invalid_cursor",
+      status: 400,
+    });
+    await expect(listUserLedger("user-6", { cursor: "%%" })).rejects.toMatchObject({
+      code: "invalid_cursor",
+      status: 400,
+    });
+    await expect(
+      listUserLedger("user-6", { cursor: Buffer.from("{not_json").toString("base64") }),
+    ).rejects.toMatchObject({
+      code: "invalid_cursor",
+      status: 400,
+    });
+    await expect(
+      listUserLedger("user-6", { cursor: Buffer.from(JSON.stringify({ createdAt: "2026-02-06T19:00:00Z" })).toString("base64") }),
+    ).rejects.toMatchObject({
+      code: "invalid_cursor",
       status: 400,
     });
 
-    const limited = await listUserLedger("user-6", { afterSeq: null, limit: 0 });
-    expect(limited.entries).toHaveLength(1);
+    const limited = await listUserLedger("user-6", { cursor: null, limit: 0 });
+    expect(limited.items).toHaveLength(1);
 
-    const many = await listUserLedger("user-6", { afterSeq: null, limit: 9999 });
-    expect(many.entries.length).toBeLessThanOrEqual(200);
+    const many = await listUserLedger("user-6", { cursor: null, limit: 9999 });
+    expect(many.items.length).toBeLessThanOrEqual(200);
+  });
+
+  it("pages by cursor without overlap", async () => {
+    const { postTransaction, listUserLedger } = await loadLedger();
+    await postTransaction({
+      userId: "user-5",
+      txType: "MINT",
+      idempotencyKey: "seed-user-5",
+      entries: [
+        { accountType: "SYSTEM", systemKey: "TREASURY", amount: -10 },
+        { accountType: "USER", amount: 10 },
+      ],
+    });
+    await postTransaction({
+      userId: "user-5",
+      txType: "BUY_IN",
+      idempotencyKey: "after-1",
+      entries: [
+        { accountType: "USER", amount: -3 },
+        { accountType: "SYSTEM", systemKey: "TREASURY", amount: 3 },
+      ],
+    });
+    await postTransaction({
+      userId: "user-5",
+      txType: "BUY_IN",
+      idempotencyKey: "after-2",
+      entries: [
+        { accountType: "USER", amount: -4 },
+        { accountType: "SYSTEM", systemKey: "TREASURY", amount: 4 },
+      ],
+    });
+
+    const first = await listUserLedger("user-5", { limit: 1 });
+    expect(first.items).toHaveLength(1);
+    expect(first.nextCursor).toBeTruthy();
+
+    const second = await listUserLedger("user-5", { limit: 2, cursor: first.nextCursor });
+    expect(second.items.length).toBeGreaterThanOrEqual(1);
+    expect(second.items[0].entry_seq).not.toBe(first.items[0].entry_seq);
+    if (second.items.length > 1) {
+      expect(second.items[0].created_at >= second.items[1].created_at).toBe(true);
+    }
+    if (first.items.length === 1) {
+      expect(first.nextCursor).toBeTruthy();
+    }
+  });
+
+  it("continues paging when last entry has an invalid entry_seq", async () => {
+    const { postTransaction, listUserLedger } = await loadLedger();
+    await postTransaction({
+      userId: "user-7",
+      txType: "MINT",
+      idempotencyKey: "seed-user-7",
+      entries: [
+        { accountType: "SYSTEM", systemKey: "TREASURY", amount: -15 },
+        { accountType: "USER", amount: 15 },
+      ],
+    });
+    await postTransaction({
+      userId: "user-7",
+      txType: "BUY_IN",
+      idempotencyKey: "cursor-7-1",
+      entries: [
+        { accountType: "USER", amount: -3 },
+        { accountType: "SYSTEM", systemKey: "TREASURY", amount: 3 },
+      ],
+    });
+    await postTransaction({
+      userId: "user-7",
+      txType: "BUY_IN",
+      idempotencyKey: "cursor-7-2",
+      entries: [
+        { accountType: "USER", amount: -4 },
+        { accountType: "SYSTEM", systemKey: "TREASURY", amount: 4 },
+      ],
+    });
+
+    const first = await listUserLedger("user-7", { limit: 2 });
+    expect(first.items).toHaveLength(2);
+    expect(first.nextCursor).toBeTruthy();
+
+    const admin = await import("../netlify/functions/_shared/supabase-admin.mjs");
+    const userAccount = [...admin.__mockDb.accounts.values()].find(acc => acc.user_id === "user-7");
+    const userEntries = admin.__mockDb.entries.filter(entry => entry.account_id === userAccount.id);
+    const lastPageItem = first.items[first.items.length - 1];
+    const target = userEntries.find(entry =>
+      entry.account_id === userAccount.id &&
+      entry.created_at === lastPageItem.created_at &&
+      entry.entry_seq === lastPageItem.entry_seq
+    );
+    if (target) {
+      target.entry_seq = null;
+    }
+
+    const second = await listUserLedger("user-7", { limit: 2, cursor: first.nextCursor });
+    expect(second.items.length).toBeGreaterThanOrEqual(1);
+    expect(second.items[0].created_at <= lastPageItem.created_at).toBe(true);
+    const pageOneKeys = new Set(first.items.map(item => `${item.created_at}:${item.entry_seq}`));
+    const overlap = second.items.some(item =>
+      item.entry_seq != null && pageOneKeys.has(`${item.created_at}:${item.entry_seq}`)
+    );
+    expect(overlap).toBe(false);
+  });
+});
+
+describe("chips ledger legacy paging", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    mockLog.mockClear();
+    resetMockDb();
+    process.env.CHIPS_ENABLED = "1";
+  });
+
+  it("returns ascending entry_seq and sequence stats", async () => {
+    const { postTransaction, listUserLedgerAfterSeq } = await loadLedger();
+    await postTransaction({
+      userId: "user-8",
+      txType: "MINT",
+      idempotencyKey: "seed-user-8",
+      entries: [
+        { accountType: "SYSTEM", systemKey: "TREASURY", amount: -12 },
+        { accountType: "USER", amount: 12 },
+      ],
+    });
+    await postTransaction({
+      userId: "user-8",
+      txType: "BUY_IN",
+      idempotencyKey: "seq-8-1",
+      entries: [
+        { accountType: "USER", amount: -2 },
+        { accountType: "SYSTEM", systemKey: "TREASURY", amount: 2 },
+      ],
+    });
+
+    const page = await listUserLedgerAfterSeq("user-8", { afterSeq: 0, limit: 5 });
+    expect(page.entries.length).toBeGreaterThan(0);
+    for (let i = 1; i < page.entries.length; i += 1) {
+      expect(page.entries[i].entry_seq).toBeGreaterThan(page.entries[i - 1].entry_seq);
+    }
+    expect(typeof page.sequenceOk).toBe("boolean");
+    expect(typeof page.nextExpectedSeq).toBe("number");
   });
 });
 

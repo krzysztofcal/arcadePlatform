@@ -1,5 +1,5 @@
 import { baseHeaders, corsHeaders, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
-import { listUserLedger } from "./_shared/chips-ledger.mjs";
+import { listUserLedger, listUserLedgerAfterSeq } from "./_shared/chips-ledger.mjs";
 
 const CHIPS_ENABLED = process.env.CHIPS_ENABLED === "1";
 
@@ -31,7 +31,10 @@ export async function handler(event) {
     return { statusCode: 401, headers: cors, body: JSON.stringify({ error: "unauthorized", reason: auth.reason }) };
   }
 
-  const afterSeq = Object.prototype.hasOwnProperty.call(event.queryStringParameters || {}, "after")
+  const cursor = Object.prototype.hasOwnProperty.call(event.queryStringParameters || {}, "cursor")
+    ? event.queryStringParameters.cursor
+    : null;
+  const after = Object.prototype.hasOwnProperty.call(event.queryStringParameters || {}, "after")
     ? event.queryStringParameters.after
     : null;
   const limitRaw = event.queryStringParameters?.limit;
@@ -39,16 +42,32 @@ export async function handler(event) {
   const limit = Number.isInteger(parsedLimit) ? parsedLimit : 50;
 
   try {
-    const ledger = await listUserLedger(auth.userId, { afterSeq, limit });
-    klog("chips_ledger_ok", { userId: auth.userId, count: ledger.entries.length });
+    if (cursor) {
+      const ledger = await listUserLedger(auth.userId, { cursor, limit });
+      const items = Array.isArray(ledger.items) ? ledger.items : ledger.entries || [];
+      klog("chips_ledger_ok", { userId: auth.userId, count: items.length });
+      return {
+        statusCode: 200,
+        headers: cors,
+        body: JSON.stringify({
+          userId: auth.userId,
+          items: items,
+          entries: items,
+          nextCursor: ledger.nextCursor || null,
+        }),
+      };
+    }
+
+    const legacy = await listUserLedgerAfterSeq(auth.userId, { afterSeq: after, limit });
+    klog("chips_ledger_ok", { userId: auth.userId, count: legacy.entries.length });
     return {
       statusCode: 200,
       headers: cors,
       body: JSON.stringify({
         userId: auth.userId,
-        entries: ledger.entries,
-        sequenceOk: ledger.sequenceOk,
-        nextExpectedSeq: ledger.nextExpectedSeq,
+        entries: legacy.entries,
+        sequenceOk: legacy.sequenceOk,
+        nextExpectedSeq: legacy.nextExpectedSeq,
       }),
     };
   } catch (error) {
