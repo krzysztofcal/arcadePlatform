@@ -1,5 +1,5 @@
 import { baseHeaders, corsHeaders, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
-import { listUserLedger } from "./_shared/chips-ledger.mjs";
+import { listUserLedger, listUserLedgerAfterSeq } from "./_shared/chips-ledger.mjs";
 
 const CHIPS_ENABLED = process.env.CHIPS_ENABLED === "1";
 
@@ -34,22 +34,40 @@ export async function handler(event) {
   const cursor = Object.prototype.hasOwnProperty.call(event.queryStringParameters || {}, "cursor")
     ? event.queryStringParameters.cursor
     : null;
+  const after = Object.prototype.hasOwnProperty.call(event.queryStringParameters || {}, "after")
+    ? event.queryStringParameters.after
+    : null;
   const limitRaw = event.queryStringParameters?.limit;
   const parsedLimit = Number(limitRaw);
   const limit = Number.isInteger(parsedLimit) ? parsedLimit : 50;
 
   try {
-    const ledger = await listUserLedger(auth.userId, { cursor, limit });
-    const items = Array.isArray(ledger.items) ? ledger.items : ledger.entries || [];
-    klog("chips_ledger_ok", { userId: auth.userId, count: items.length });
+    if (cursor) {
+      const ledger = await listUserLedger(auth.userId, { cursor, limit });
+      const items = Array.isArray(ledger.items) ? ledger.items : ledger.entries || [];
+      klog("chips_ledger_ok", { userId: auth.userId, count: items.length });
+      return {
+        statusCode: 200,
+        headers: cors,
+        body: JSON.stringify({
+          userId: auth.userId,
+          items: items,
+          entries: items,
+          nextCursor: ledger.nextCursor || null,
+        }),
+      };
+    }
+
+    const legacy = await listUserLedgerAfterSeq(auth.userId, { afterSeq: after, limit });
+    klog("chips_ledger_ok", { userId: auth.userId, count: legacy.entries.length });
     return {
       statusCode: 200,
       headers: cors,
       body: JSON.stringify({
         userId: auth.userId,
-        items: items,
-        entries: items,
-        nextCursor: ledger.nextCursor || null,
+        entries: legacy.entries,
+        sequenceOk: legacy.sequenceOk,
+        nextExpectedSeq: legacy.nextExpectedSeq,
       }),
     };
   } catch (error) {

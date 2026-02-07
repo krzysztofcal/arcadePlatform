@@ -14,6 +14,8 @@
     error: null,
     rowHeight: 72,
     overscan: 4,
+    lastLoadAttemptAtMs: 0,
+    lastScrollTop: 0,
     renderQueued: false,
   };
 
@@ -174,7 +176,10 @@
   function queueLedgerRender(){
     if (ledgerState.renderQueued) return;
     ledgerState.renderQueued = true;
-    requestAnimationFrame(function(){
+    var raf = (window && window.requestAnimationFrame)
+      ? window.requestAnimationFrame
+      : function(cb){ return setTimeout(cb, 0); };
+    raf(function(){
       ledgerState.renderQueued = false;
       renderLedger();
     });
@@ -213,7 +218,9 @@
         row = buildLedgerStatusRow('Loading more activity…');
       } else if (tailState === 'error'){
         row = buildLedgerStatusRow('Could not load more activity. Scroll to retry.');
-        row.addEventListener('click', loadLedgerPage);
+        row.addEventListener('click', function(){
+          loadLedgerPage(true);
+        });
       } else if (tailState === 'end'){
         row = buildLedgerStatusRow('End of history');
       }
@@ -232,12 +239,51 @@
     ledgerState.hasMore = true;
     ledgerState.loading = false;
     ledgerState.error = null;
+    ledgerState.lastLoadAttemptAtMs = 0;
+    ledgerState.lastScrollTop = 0;
     ledgerState.renderQueued = false;
     if (nodes.chipLedgerScroll){ nodes.chipLedgerScroll.scrollTop = 0; }
   }
 
   function appendLedgerItems(items, nextCursor){
-    ledgerState.entries = ledgerState.entries.concat(items || []);
+    if (!items || !items.length){
+      ledgerState.nextCursor = nextCursor || null;
+      ledgerState.hasMore = !!nextCursor;
+      queueLedgerRender();
+      return;
+    }
+    var existing = ledgerState.entries || [];
+    var merged = [];
+    var seen = new Set();
+    function addEntry(entry){
+      if (!entry) return;
+      var key = (entry.created_at && Number.isInteger(entry.entry_seq))
+        ? (entry.created_at + ':' + entry.entry_seq)
+        : null;
+      if (key){
+        if (seen.has(key)) return;
+        seen.add(key);
+      }
+      merged.push(entry);
+    }
+    for (var i = 0; i < existing.length; i++){
+      addEntry(existing[i]);
+    }
+    for (var j = 0; j < items.length; j++){
+      addEntry(items[j]);
+    }
+    merged.sort(function(a, b){
+      var aCreated = a && a.created_at ? String(a.created_at) : '';
+      var bCreated = b && b.created_at ? String(b.created_at) : '';
+      if (aCreated !== bCreated){
+        return aCreated < bCreated ? 1 : -1;
+      }
+      var aSeq = Number.isInteger(a && a.entry_seq) ? a.entry_seq : -Infinity;
+      var bSeq = Number.isInteger(b && b.entry_seq) ? b.entry_seq : -Infinity;
+      if (aSeq === bSeq) return 0;
+      return aSeq < bSeq ? 1 : -1;
+    });
+    ledgerState.entries = merged;
     ledgerState.nextCursor = nextCursor || null;
     ledgerState.hasMore = !!nextCursor;
     queueLedgerRender();
@@ -246,17 +292,25 @@
   function shouldLoadMore(){
     if (!nodes.chipLedgerScroll) return false;
     if (!ledgerState.hasMore || ledgerState.loading) return false;
+    if (ledgerState.error){
+      var now = Date.now();
+      var scrolledEnough = nodes.chipLedgerScroll.scrollTop >= ledgerState.lastScrollTop + ledgerState.rowHeight;
+      var waitedEnough = now - ledgerState.lastLoadAttemptAtMs >= 800;
+      if (!scrolledEnough || !waitedEnough) return false;
+    }
     var tailState = getLedgerTailState();
     var totalCount = ledgerState.entries.length + (tailState ? 1 : 0);
     var totalHeight = totalCount * ledgerState.rowHeight;
     return nodes.chipLedgerScroll.scrollTop + nodes.chipLedgerScroll.clientHeight >= totalHeight - (ledgerState.rowHeight * 3);
   }
 
-  async function loadLedgerPage(){
+  async function loadLedgerPage(force){
     if (!window || !window.ChipsClient || typeof window.ChipsClient.fetchLedger !== 'function') return;
     if (!ledgerState.hasMore || ledgerState.loading) return;
     ledgerState.loading = true;
     ledgerState.error = null;
+    ledgerState.lastLoadAttemptAtMs = Date.now();
+    ledgerState.lastScrollTop = nodes.chipLedgerScroll ? nodes.chipLedgerScroll.scrollTop : 0;
     queueLedgerRender();
     try {
       var payload = await window.ChipsClient.fetchLedger({
@@ -278,7 +332,7 @@
   function handleLedgerScroll(){
     queueLedgerRender();
     if (shouldLoadMore()){
-      loadLedgerPage();
+      loadLedgerPage(false);
     }
   }
 

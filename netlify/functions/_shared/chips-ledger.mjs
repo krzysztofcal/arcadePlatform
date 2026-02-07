@@ -170,6 +170,100 @@ function findLastCursorCandidate(entries) {
   return null;
 }
 
+async function listUserLedgerAfterSeq(userId, { afterSeq = null, limit = 50 } = {}) {
+  const cappedLimit = Math.min(Math.max(1, Number.isInteger(limit) ? limit : 50), 200);
+  const account = await getOrCreateUserAccount(userId);
+  const hasAfter = afterSeq !== null && afterSeq !== undefined && !(typeof afterSeq === "string" && afterSeq.trim() === "");
+  const parsedAfterSeq = parsePositiveInt(afterSeq);
+  if (hasAfter && parsedAfterSeq === null) {
+    throw badRequest("invalid_after_seq", "Invalid after sequence");
+  }
+  const query = `
+with entries as (
+  select
+    e.entry_seq,
+    e.amount,
+    e.metadata,
+    e.created_at,
+    t.tx_type,
+    t.reference,
+    t.description,
+    t.idempotency_key,
+    t.created_at as tx_created_at
+  from public.chips_entries e
+  join public.chips_transactions t on t.id = e.transaction_id
+  where e.account_id = $1
+    and ($2::bigint is null or e.entry_seq > $2)
+  order by e.entry_seq asc
+  limit $3
+)
+select * from entries;
+`;
+  const rows = await executeSql(query, [account.id, parsedAfterSeq, cappedLimit]);
+  const expectedStart = parsedAfterSeq ? parsedAfterSeq + 1 : 1;
+  let sequenceOk = true;
+  let cursor = expectedStart;
+  let mismatchLogged = false;
+  for (const row of rows || []) {
+    const parsedSeq = parsePositiveInt(row?.entry_seq);
+    if (parsedSeq !== cursor) {
+      sequenceOk = false;
+      if (!mismatchLogged) {
+        klog("chips:ledger_sequence_mismatch", {
+          after_seq: parsedAfterSeq || 0,
+          expected_seq: cursor,
+          actual_seq: parsedSeq,
+          raw_entry_seq: row?.entry_seq,
+          tx_type: row?.tx_type ?? null,
+          idempotency_key: row?.idempotency_key ?? null,
+          reason: parsedSeq === null ? "invalid_entry_seq" : "non_contiguous_seq",
+        });
+        mismatchLogged = true;
+      }
+      break;
+    }
+    cursor += 1;
+  }
+  const normalizedEntries = (rows || []).map(row => {
+    const parsedEntrySeq = parsePositiveInt(row?.entry_seq);
+    const entrySeq = parsedEntrySeq;
+    if (parsedEntrySeq === null) {
+      klog("chips:ledger_invalid_entry_seq", {
+        raw_entry_seq: row?.entry_seq,
+        tx_type: row?.tx_type,
+        idempotency_key: row?.idempotency_key,
+      });
+    }
+
+    const parsedAmount = parseWholeInt(row?.amount);
+    const createdAt = asIso(row?.created_at);
+    const txCreatedAt = asIso(row?.tx_created_at);
+
+    if (parsedAmount === null && row?.amount != null) {
+      klog("chips:ledger_invalid_amount", {
+        entry_seq: entrySeq,
+        raw_amount: row?.amount == null ? null : String(row.amount),
+        tx_type: row?.tx_type,
+      });
+    }
+
+    return {
+      entry_seq: entrySeq,
+      amount: parsedAmount,
+      raw_amount: row?.amount == null ? null : String(row.amount),
+      metadata: row?.metadata ?? null,
+      created_at: createdAt,
+      tx_type: row?.tx_type ?? null,
+      reference: row?.reference ?? null,
+      description: row?.description ?? null,
+      idempotency_key: row?.idempotency_key ?? null,
+      tx_created_at: txCreatedAt,
+    };
+  });
+
+  return { entries: normalizedEntries, sequenceOk, nextExpectedSeq: cursor };
+}
+
 async function listUserLedger(userId, { cursor = null, limit = 50 } = {}) {
   const cappedLimit = Math.min(Math.max(1, Number.isInteger(limit) ? limit : 50), 200);
   const account = await getOrCreateUserAccount(userId);
@@ -615,6 +709,7 @@ from inserted i;
 export {
   VALID_TX_TYPES,
   getUserBalance,
+  listUserLedgerAfterSeq,
   listUserLedger,
   postTransaction,
 };

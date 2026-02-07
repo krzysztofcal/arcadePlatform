@@ -92,6 +92,16 @@ async function verifyLedgerCursor() {
       "paged entries must advance cursor",
     );
   }
+
+  if (entries.length && entries[entries.length - 1].entry_seq) {
+    const legacy = await getLedger(config, { after: entries[entries.length - 1].entry_seq, limit: 20 });
+    assert.equal(legacy.status, 200, `legacy ledger should succeed; ${formatResponse(legacy)}`);
+    assert.ok(typeof legacy.body?.sequenceOk === "boolean", `legacy sequenceOk must be boolean; ${formatResponse(legacy)}`);
+    assert.ok(
+      typeof legacy.body?.nextExpectedSeq === "number",
+      `legacy nextExpectedSeq must be number; ${formatResponse(legacy)}`,
+    );
+  }
 }
 
 async function ensureFunds(minBalance) {

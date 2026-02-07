@@ -179,6 +179,10 @@
     var params = [];
     if (options && typeof options.cursor === 'string' && options.cursor){
       params.push('cursor=' + encodeURIComponent(options.cursor));
+    } else if (options && Number.isInteger(options.after)){
+      params.push('after=' + encodeURIComponent(options.after));
+    } else if (options && Number.isInteger(options.afterSeq)){
+      params.push('after=' + encodeURIComponent(options.afterSeq));
     }
     if (options && Number.isInteger(options.limit)){
       params.push('limit=' + encodeURIComponent(options.limit));

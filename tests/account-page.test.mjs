@@ -195,6 +195,7 @@ test("loads more ledger entries on scroll", async () => {
   const calls = [];
   const firstPage = Array.from({ length: 10 }, (_value, index) => ({
     id: index + 1,
+    entry_seq: index + 1,
     tx_type: "BUY_IN",
     amount: 1,
     created_at: "2026-02-06T19:00:00.000Z",
@@ -212,6 +213,7 @@ test("loads more ledger entries on scroll", async () => {
         items: [
           {
             id: 99,
+            entry_seq: 99,
             tx_type: "CASH_OUT",
             amount: -5,
             created_at: "2026-02-05T18:40:00.000Z",
@@ -250,9 +252,13 @@ test("loads more ledger entries on scroll", async () => {
 });
 
 test("shows error tail row and retries on scroll", async () => {
+  const realNow = Date.now;
+  let now = 0;
+  Date.now = () => now;
   const calls = [];
   const firstPage = Array.from({ length: 3 }, (_value, index) => ({
     id: index + 1,
+    entry_seq: index + 1,
     tx_type: "BUY_IN",
     amount: 1,
     created_at: "2026-02-06T19:00:00.000Z",
@@ -273,6 +279,7 @@ test("shows error tail row and retries on scroll", async () => {
         items: [
           {
             id: 99,
+            entry_seq: 99,
             tx_type: "CASH_OUT",
             amount: -5,
             created_at: "2026-02-05T18:40:00.000Z",
@@ -309,8 +316,8 @@ test("shows error tail row and retries on scroll", async () => {
   assert.ok(errorRow, "error status row should render");
   assert.match(errorRow.textContent, /Could not load more activity/i);
 
-  scroll.scrollTop = 400;
-  scroll.dispatchEvent({ type: "scroll" });
+  now = 1000;
+  errorRow.dispatchEvent({ type: "click" });
 
   await flush();
   await flush();
@@ -319,4 +326,56 @@ test("shows error tail row and retries on scroll", async () => {
   const newErrorRow = findByClassToken(list, "chip-ledger__item--status");
   assert.ok(!newErrorRow || !/Could not load more activity/i.test(newErrorRow.textContent), "error row should clear");
   assert.ok(calls.length >= 3, "fetchLedger should retry after error");
+  Date.now = realNow;
+});
+
+test("dedupes overlapping items by created_at and entry_seq", async () => {
+  const calls = [];
+  const firstPage = [
+    { id: 1, entry_seq: 10, tx_type: "BUY_IN", amount: 1, created_at: "2026-02-06T19:00:00.000Z" },
+    { id: 2, entry_seq: 9, tx_type: "BUY_IN", amount: 1, created_at: "2026-02-06T18:59:00.000Z" },
+  ];
+  const chipsClient = {
+    fetchBalance() {
+      return Promise.resolve({ balance: 1200 });
+    },
+    fetchLedger(options) {
+      calls.push(options);
+      if (!options || !options.cursor) {
+        return Promise.resolve({ items: firstPage, nextCursor: "cursor-1" });
+      }
+      return Promise.resolve({
+        items: [
+          { id: 2, entry_seq: 9, tx_type: "BUY_IN", amount: 1, created_at: "2026-02-06T18:59:00.000Z" },
+          { id: 3, entry_seq: 8, tx_type: "BUY_IN", amount: 1, created_at: "2026-02-06T18:58:00.000Z" },
+        ],
+        nextCursor: null,
+      });
+    },
+  };
+  const { windowObj, document } = buildContext(chipsClient);
+  const context = vm.createContext({
+    window: windowObj,
+    document,
+    requestAnimationFrame: windowObj.requestAnimationFrame,
+    CustomEvent: function() {},
+  });
+  vm.runInContext(source, context);
+
+  await flush();
+  await flush();
+  await flush();
+
+  const scroll = document.getElementById("chipLedgerScroll");
+  scroll.clientHeight = 200;
+  scroll.scrollTop = 400;
+  scroll.dispatchEvent({ type: "scroll" });
+
+  await flush();
+  await flush();
+  await flush();
+
+  const spacer = document.getElementById("chipLedgerSpacer");
+  assert.equal(Number.parseInt(spacer.style.height, 10), 4 * 72, "spacer height should match unique items");
+  assert.equal(calls.length, 2, "should fetch two pages");
 });

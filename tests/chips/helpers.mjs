@@ -75,9 +75,10 @@ async function postTx(config, payload) {
   return { status: response.status, body };
 }
 
-async function getLedger(config, { cursor, limit } = {}) {
+async function getLedger(config, { cursor, after, limit } = {}) {
   const params = new URLSearchParams();
   if (cursor !== undefined && cursor !== null) params.set("cursor", String(cursor));
+  if (after !== undefined && after !== null) params.set("after", String(after));
   if (limit !== undefined && limit !== null) params.set("limit", String(limit));
   const path = params.toString()
     ? `/.netlify/functions/chips-ledger?${params.toString()}`

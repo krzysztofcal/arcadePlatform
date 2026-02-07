@@ -309,7 +309,11 @@ vi.mock("../netlify/functions/_shared/supabase-admin.mjs", () => {
 
 async function loadLedger() {
   const mod = await import("../netlify/functions/_shared/chips-ledger.mjs");
-  return { postTransaction: mod.postTransaction, listUserLedger: mod.listUserLedger };
+  return {
+    postTransaction: mod.postTransaction,
+    listUserLedger: mod.listUserLedger,
+    listUserLedgerAfterSeq: mod.listUserLedgerAfterSeq,
+  };
 }
 
 async function loadTxHandler() {
@@ -785,6 +789,45 @@ describe("chips ledger paging", () => {
       item.entry_seq != null && pageOneKeys.has(`${item.created_at}:${item.entry_seq}`)
     );
     expect(overlap).toBe(false);
+  });
+});
+
+describe("chips ledger legacy paging", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    mockLog.mockClear();
+    resetMockDb();
+    process.env.CHIPS_ENABLED = "1";
+  });
+
+  it("returns ascending entry_seq and sequence stats", async () => {
+    const { postTransaction, listUserLedgerAfterSeq } = await loadLedger();
+    await postTransaction({
+      userId: "user-8",
+      txType: "MINT",
+      idempotencyKey: "seed-user-8",
+      entries: [
+        { accountType: "SYSTEM", systemKey: "TREASURY", amount: -12 },
+        { accountType: "USER", amount: 12 },
+      ],
+    });
+    await postTransaction({
+      userId: "user-8",
+      txType: "BUY_IN",
+      idempotencyKey: "seq-8-1",
+      entries: [
+        { accountType: "USER", amount: -2 },
+        { accountType: "SYSTEM", systemKey: "TREASURY", amount: 2 },
+      ],
+    });
+
+    const page = await listUserLedgerAfterSeq("user-8", { afterSeq: 0, limit: 5 });
+    expect(page.entries.length).toBeGreaterThan(0);
+    for (let i = 1; i < page.entries.length; i += 1) {
+      expect(page.entries[i].entry_seq).toBeGreaterThan(page.entries[i - 1].entry_seq);
+    }
+    expect(typeof page.sequenceOk).toBe("boolean");
+    expect(typeof page.nextExpectedSeq).toBe("number");
   });
 });
 
