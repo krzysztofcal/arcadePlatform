@@ -164,7 +164,7 @@ test('nested legal pages use absolute chips/topbar dependencies', () => {
   const absoluteFormat = /src="\/js\/core\/number-format\.js"/g;
   const absoluteTopbar = /src="\/js\/topbar\.js"/g;
   const absoluteSupabaseClient = /src="\/js\/auth\/supabaseClient\.js"/g;
-  const nestedRelativeDependency = /src="(?:..\/)?js\/(chips\/client|core\/number-format|topbar|auth\/supabaseClient)\.js"/;
+  const nestedRelativeDependency = /src="(?:\.\.\/)?js\/(chips\/client|core\/number-format|topbar|auth\/supabaseClient)\.js"/;
   nestedPages.forEach((content) => {
     assert.equal((content.match(absoluteChips) || []).length, 1);
     assert.equal((content.match(absoluteFormat) || []).length, 1);
