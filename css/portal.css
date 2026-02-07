@@ -128,10 +128,11 @@ body{margin:0; background:linear-gradient(180deg, #0b1020 0%, #0a0d1a 100%); col
 }
 
 @media (max-width: 600px){
-  .search-box{ padding:8px 10px; }
+  .search-box{ padding:8px 10px; flex:0 1 180px; }
   .topbar-right{ gap:10px; }
   .xp-badge{ padding:6px 10px; }
 }
+@media (max-width: 420px){ .search-box{ flex:0 1 140px; } }
 @media (max-width: 520px){ .grid{ grid-template-columns: 1fr; } }
 .card{ position:relative; overflow:hidden; border-radius:18px; background:linear-gradient(160deg, var(--card) 0%, #0f1430 100%); border:1px solid var(--border); min-height:160px; cursor:pointer; display:flex; flex-direction:column; justify-content:flex-end; text-decoration:none; color:inherit;}
 .card:hover{ outline:2px solid rgba(110,231,231,.2);} 

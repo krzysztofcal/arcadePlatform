@@ -72,6 +72,7 @@ test('game pages load portal css for topbar styles', () => {
   assert.match(gameHtml, /css\/portal\.css/);
   assert.match(gameCatsHtml, /css\/portal\.css/);
   assert.match(gameTrexHtml, /css\/portal\.css/);
+  if (playHtml) assert.match(playHtml, /css\/portal\.css/);
 });
 
 test('compact number formatting helpers exist', () => {
