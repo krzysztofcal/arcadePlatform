@@ -44,7 +44,8 @@
   <script src="../js/core/search-utils.js" defer></script>
   <script src="../js/search-popup.js" defer></script>
   <script src="../js/search-popup-bootstrap.js" defer></script>
-  <script src="../js/sidebar.js" defer></script>
+  <script src="/js/core/sidebar-model.js" defer></script>
+  <script src="/js/sidebar.js" defer></script>
   <style>
     .page { max-width: 960px; margin: 0 auto; padding: 24px 16px 80px; display: flex; flex-direction: column; gap: 1rem; }
     .page h1 { font-size: clamp(2rem, 4vw, 2.75rem); margin-bottom: 0.25rem; }
@@ -100,28 +101,7 @@
   <div class="shell">
     <aside class="sidebar collapsed" id="sidebar" aria-label="Main navigation">
       <nav class="sb-nav">
-        <ul class="sb-list">
-          <li class="sb-item">
-            <a href="../index.html" class="sb-link sb-home" aria-label="Home" tabindex="0">
-              <span class="sb-ico" aria-hidden="true">
-                <svg class="sb-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 10.5 12 4l9 6.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1v-9.5Z"/></svg>
-              </span>
-              <span class="sb-label">Home</span>
-            </a>
-          </li>
-          <li class="sb-item">
-            <a href="../recently-played.html" class="sb-link" aria-label="Recently played" tabindex="0">
-              <span class="sb-ico" aria-hidden="true"></span>
-              <span class="sb-label" data-i18n="recentlyPlayed">Recently played</span>
-            </a>
-          </li>
-          <li class="sb-item">
-            <a href="../about.en.html" class="sb-link" tabindex="0" data-href-en="../about.en.html" data-href-pl="../about.pl.html">
-              <span class="sb-ico" aria-hidden="true"></span>
-              <span class="sb-label" data-i18n="about">About</span>
-            </a>
-          </li>
-        </ul>
+        <ul class="sb-list"></ul>
       </nav>
     </aside>
 
