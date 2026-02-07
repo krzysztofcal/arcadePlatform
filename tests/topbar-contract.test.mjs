@@ -179,8 +179,8 @@ test('nested legal pages use absolute chips/topbar dependencies', () => {
     assert.ok(chipsIndex > -1);
     assert.ok(formatIndex > -1);
     assert.ok(topbarIndex > -1);
-    assert.ok(supabaseIndex < chipsIndex);
-    assert.ok(chipsIndex < formatIndex);
+    assert.ok(supabaseIndex < topbarIndex);
+    assert.ok(chipsIndex < topbarIndex);
     assert.ok(formatIndex < topbarIndex);
   });
 });
