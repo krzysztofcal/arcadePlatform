@@ -86,7 +86,7 @@ function handleLedgerQuery(query, params = []) {
   }
 
   if (text.includes("from public.chips_entries") && text.includes("join public.chips_transactions")) {
-    const [accountId, cursorCreatedAt, cursorId, limit] = params;
+    const [accountId, cursorCreatedAt, cursorEntrySeq, limit] = params;
     const entries = mockDb.entries
       .filter(entry => {
         if (entry.account_id !== accountId) return false;
@@ -94,21 +94,20 @@ function handleLedgerQuery(query, params = []) {
         const createdAt = new Date(entry.created_at);
         const cursorTime = new Date(cursorCreatedAt);
         if (createdAt.getTime() === cursorTime.getTime()) {
-          return entry.id < cursorId;
+          return entry.entry_seq < cursorEntrySeq;
         }
         return createdAt.getTime() < cursorTime.getTime();
       })
       .sort((a, b) => {
         const timeA = new Date(a.created_at).getTime();
         const timeB = new Date(b.created_at).getTime();
-        if (timeA === timeB) return b.id - a.id;
+        if (timeA === timeB) return b.entry_seq - a.entry_seq;
         return timeB - timeA;
       })
       .slice(0, limit ?? 50)
       .map(entry => {
         const tx = mockDb.transactions.get(entry.transaction_id);
         return {
-          id: entry.id,
           entry_seq: entry.entry_seq,
           amount: entry.amount,
           metadata: entry.metadata,
@@ -620,6 +619,7 @@ describe("chips ledger paging", () => {
     expect(items).toHaveLength(3);
     expect(items[0].created_at >= items[1].created_at).toBe(true);
     expect(items[1].created_at >= items[2].created_at).toBe(true);
+    expect(items[0].entry_seq >= items[1].entry_seq).toBe(true);
   });
 
   it("rejects invalid cursor values and clamps limits", async () => {
@@ -658,6 +658,22 @@ describe("chips ledger paging", () => {
     }
 
     await expect(listUserLedger("user-6", { cursor: "abc" })).rejects.toMatchObject({
+      code: "invalid_cursor",
+      status: 400,
+    });
+    await expect(listUserLedger("user-6", { cursor: "%%" })).rejects.toMatchObject({
+      code: "invalid_cursor",
+      status: 400,
+    });
+    await expect(
+      listUserLedger("user-6", { cursor: Buffer.from("{not_json").toString("base64") }),
+    ).rejects.toMatchObject({
+      code: "invalid_cursor",
+      status: 400,
+    });
+    await expect(
+      listUserLedger("user-6", { cursor: Buffer.from(JSON.stringify({ createdAt: "2026-02-06T19:00:00Z" })).toString("base64") }),
+    ).rejects.toMatchObject({
       code: "invalid_cursor",
       status: 400,
     });
@@ -705,9 +721,12 @@ describe("chips ledger paging", () => {
 
     const second = await listUserLedger("user-5", { limit: 2, cursor: first.nextCursor });
     expect(second.items.length).toBeGreaterThanOrEqual(1);
-    expect(second.items[0].id).not.toBe(first.items[0].id);
+    expect(second.items[0].entry_seq).not.toBe(first.items[0].entry_seq);
     if (second.items.length > 1) {
       expect(second.items[0].created_at >= second.items[1].created_at).toBe(true);
+    }
+    if (first.items.length === 1) {
+      expect(first.nextCursor).toBeTruthy();
     }
   });
 });

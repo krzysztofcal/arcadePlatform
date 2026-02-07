@@ -86,7 +86,11 @@ async function verifyLedgerCursor() {
   assert.equal(next.status, 200, `paged ledger should succeed; ${formatResponse(next)}`);
   const nextEntries = Array.isArray(next.body?.items) ? next.body.items : [];
   if (nextEntries.length) {
-    assert.notEqual(nextEntries[0].id, entries[entries.length - 1].id, "paged entries must advance cursor");
+    assert.notEqual(
+      nextEntries[0].entry_seq,
+      entries[entries.length - 1].entry_seq,
+      "paged entries must advance cursor",
+    );
   }
 }
 

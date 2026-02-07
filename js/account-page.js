@@ -179,13 +179,19 @@
     });
   }
 
+  function getLedgerTailState(){
+    if (ledgerState.loading){ return 'loading'; }
+    if (!ledgerState.hasMore && ledgerState.entries.length){ return 'end'; }
+    return null;
+  }
+
   function renderLedger(){
     if (!nodes.chipLedgerList || !nodes.chipLedgerScroll || !nodes.chipLedgerSpacer) return;
     var entries = ledgerState.entries || [];
     var isEmpty = entries.length === 0 && !ledgerState.loading;
     if (nodes.chipLedgerEmpty){ nodes.chipLedgerEmpty.hidden = !isEmpty; }
 
-    var tailState = ledgerState.loading ? 'loading' : (!ledgerState.hasMore && entries.length ? 'end' : null);
+    var tailState = getLedgerTailState();
     var totalCount = entries.length + (tailState ? 1 : 0);
     var totalHeight = totalCount * ledgerState.rowHeight;
     nodes.chipLedgerSpacer.style.height = totalHeight + 'px';
@@ -234,7 +240,9 @@
   function shouldLoadMore(){
     if (!nodes.chipLedgerScroll) return false;
     if (!ledgerState.hasMore || ledgerState.loading) return false;
-    var totalHeight = (ledgerState.entries.length + 1) * ledgerState.rowHeight;
+    var tailState = getLedgerTailState();
+    var totalCount = ledgerState.entries.length + (tailState ? 1 : 0);
+    var totalHeight = totalCount * ledgerState.rowHeight;
     return nodes.chipLedgerScroll.scrollTop + nodes.chipLedgerScroll.clientHeight >= totalHeight - (ledgerState.rowHeight * 3);
   }
 

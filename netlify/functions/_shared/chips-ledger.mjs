@@ -139,18 +139,18 @@ function decodeLedgerCursor(cursor) {
     throw badRequest("invalid_cursor", "Invalid cursor");
   }
   const createdAt = payload?.createdAt || payload?.created_at;
-  const id = parsePositiveInt(payload?.id);
+  const entrySeq = parsePositiveInt(payload?.entrySeq ?? payload?.entry_seq);
   const parsedCreated = createdAt ? new Date(createdAt) : null;
-  if (!parsedCreated || Number.isNaN(parsedCreated.getTime()) || id === null) {
+  if (!parsedCreated || Number.isNaN(parsedCreated.getTime()) || entrySeq === null) {
     throw badRequest("invalid_cursor", "Invalid cursor");
   }
-  return { createdAt: parsedCreated.toISOString(), id };
+  return { createdAt: parsedCreated.toISOString(), entrySeq };
 }
 
-function encodeLedgerCursor(createdAt, id) {
-  if (!createdAt || !id) return null;
+function encodeLedgerCursor(createdAt, entrySeq) {
+  if (!createdAt || !entrySeq) return null;
   try {
-    const payload = JSON.stringify({ createdAt, id });
+    const payload = JSON.stringify({ createdAt, entrySeq });
     return Buffer.from(payload, "utf8").toString("base64");
   } catch (_err) {
     return null;
@@ -162,11 +162,10 @@ async function listUserLedger(userId, { cursor = null, limit = 50 } = {}) {
   const account = await getOrCreateUserAccount(userId);
   const parsedCursor = decodeLedgerCursor(cursor);
   const cursorCreatedAt = parsedCursor ? parsedCursor.createdAt : null;
-  const cursorId = parsedCursor ? parsedCursor.id : null;
+  const cursorEntrySeq = parsedCursor ? parsedCursor.entrySeq : null;
   const query = `
 with entries as (
   select
-    e.id,
     e.entry_seq,
     e.amount,
     e.metadata,
@@ -181,14 +180,14 @@ with entries as (
   where e.account_id = $1
     and (
       $2::timestamptz is null
-      or (e.created_at, e.id) < ($2::timestamptz, $3::bigint)
+      or (e.created_at, e.entry_seq) < ($2::timestamptz, $3::bigint)
     )
-  order by e.created_at desc, e.id desc
+  order by e.created_at desc, e.entry_seq desc
   limit $4
 )
 select * from entries;
 `;
-  const rows = await executeSql(query, [account.id, cursorCreatedAt, cursorId, cappedLimit]);
+  const rows = await executeSql(query, [account.id, cursorCreatedAt, cursorEntrySeq, cappedLimit]);
   const normalizedEntries = (rows || []).map(row => {
     const parsedEntrySeq = parsePositiveInt(row?.entry_seq);
     const entrySeq = parsedEntrySeq;
@@ -213,7 +212,6 @@ select * from entries;
     }
 
     return {
-      id: row?.id ?? null,
       entry_seq: entrySeq,
       amount: parsedAmount,
       raw_amount: row?.amount == null ? null : String(row.amount),
@@ -227,8 +225,8 @@ select * from entries;
     };
   });
   const last = normalizedEntries.length ? normalizedEntries[normalizedEntries.length - 1] : null;
-  const nextCursor = normalizedEntries.length === cappedLimit && last?.created_at && last?.id
-    ? encodeLedgerCursor(last.created_at, last.id)
+  const nextCursor = normalizedEntries.length === cappedLimit && last?.created_at && last?.entry_seq
+    ? encodeLedgerCursor(last.created_at, last.entry_seq)
     : null;
 
   return { entries: normalizedEntries, items: normalizedEntries, nextCursor };
