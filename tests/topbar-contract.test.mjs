@@ -56,6 +56,8 @@ test('topbar ensures chip badge creation when missing', () => {
   assert.ok(!topbarSource.includes('chipsClientScript'));
   assert.match(topbarSource, /setAuthDataset\(['"]out['"]\)/);
   assert.match(topbarSource, /badge\.hidden\s*=\s*!isAuthed\(\)/);
+  assert.match(topbarSource, /__topbarBooted/);
+  assert.ok(!topbarSource.includes('suffix'));
 });
 
 test('topbar pages load topbar script', () => {
@@ -107,6 +109,45 @@ test('root pages use relative topbar and format scripts', () => {
   assert.match(pokerTable, absoluteChips);
 });
 
+test('topbar scripts load once per page', () => {
+  const scripts = [
+    /src="js\/topbar\.js"/g,
+    /src="js\/core\/number-format\.js"/g,
+    /src="js\/chips\/client\.js"/g,
+  ];
+  const rootPages = [
+    accountHtml,
+    indexHtml,
+    gameHtml,
+    gameCatsHtml,
+    gameTrexHtml,
+    favoritesHtml,
+    recentlyPlayedHtml,
+    aboutEnHtml,
+    aboutPlHtml,
+    xpHtml,
+    playHtml || '',
+  ];
+  rootPages.forEach((content) => {
+    if (!content) return;
+    scripts.forEach((pattern) => {
+      const matches = content.match(pattern) || [];
+      assert.equal(matches.length, 1);
+    });
+  });
+  const pokerScripts = [
+    /src="\/js\/topbar\.js"/g,
+    /src="\/js\/core\/number-format\.js"/g,
+    /src="\/js\/chips\/client\.js"/g,
+  ];
+  [pokerIndex, pokerTable].forEach((content) => {
+    pokerScripts.forEach((pattern) => {
+      const matches = content.match(pattern) || [];
+      assert.equal(matches.length, 1);
+    });
+  });
+});
+
 test('chip badge is only provided by topbar', () => {
   assert.ok(!accountHtml.includes('id="chipBadge"'));
 });
@@ -130,6 +171,7 @@ test('game pages load portal css for topbar styles', () => {
 test('compact number formatting helpers exist', () => {
   assert.match(topbarSource, /ArcadeFormat/);
   assert.match(formatSource, /formatCompactNumber/);
+  assert.ok(!topbarSource.includes('formatCompactNumber'));
   assert.ok(!xpCoreSource.includes('formatCompactNumber'));
 });
 

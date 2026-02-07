@@ -1,6 +1,9 @@
 (function(){
   if (typeof document === 'undefined') return;
   const doc = document;
+  const win = window;
+  if (win.__topbarBooted) return;
+  win.__topbarBooted = true;
   const chipNodes = { badge: null, amount: null, ready: false };
   let chipInFlight = null;
   let chipsClientWaitTries = 0;
@@ -192,27 +195,11 @@
   }
 
   function renderChipBadgeBalance(amount){
-    const text = amount == null ? '—' : formatCompactNumber(amount);
+    const formatter = window && window.ArcadeFormat && typeof window.ArcadeFormat.formatCompactNumber === 'function'
+      ? window.ArcadeFormat.formatCompactNumber
+      : null;
+    const text = amount == null ? '—' : formatter ? formatter(amount) : String(Math.round(amount));
     setChipBadge(text, { loading: false });
-  }
-
-  function formatCompactNumber(value){
-    if (window && window.ArcadeFormat && typeof window.ArcadeFormat.formatCompactNumber === 'function'){
-      return window.ArcadeFormat.formatCompactNumber(value);
-    }
-    const numeric = Number(value);
-    if (!Number.isFinite(numeric)) return '0';
-    const abs = Math.abs(numeric);
-    const sign = numeric < 0 ? '-' : '';
-    if (abs < 1000) return `${sign}${Math.round(abs)}`;
-    let divisor = 1000;
-    let suffix = 'k';
-    if (abs >= 1e9){ divisor = 1e9; suffix = 'b'; }
-    else if (abs >= 1e6){ divisor = 1e6; suffix = 'm'; }
-    const scaled = abs / divisor;
-    const rounded = scaled >= 10 ? Math.round(scaled) : Math.round(scaled * 10) / 10;
-    const text = Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
-    return `${sign}${text}${suffix}`;
   }
 
   function setAuthState(next){
@@ -220,11 +207,19 @@
     authState = next;
     setAuthDataset(next === AuthState.SIGNED_IN ? 'in' : 'out');
     const badge = doc.getElementById('chipBadge');
-    if (badge){ badge.hidden = !isAuthed(); }
+    const amount = doc.getElementById('chipBadgeAmount');
+    if (badge){
+      badge.hidden = !isAuthed();
+      badge.classList.remove('chip-pill--loading');
+      badge.setAttribute('aria-busy', 'false');
+    }
+    if (amount){ amount.textContent = ''; }
     if (!isAuthed()){
       hideChipBadge();
       return;
     }
+    if (badge){ badge.hidden = false; }
+    setChipBadge('', { loading: true });
     refreshChipBadge();
   }
 
