@@ -86,40 +86,64 @@ function handleLedgerQuery(query, params = []) {
   }
 
   if (text.includes("from public.chips_entries") && text.includes("join public.chips_transactions")) {
-    const [accountId, cursorCreatedAt, cursorEntrySeq, limit] = params;
-    const entries = mockDb.entries
-      .filter(entry => {
-        if (entry.account_id !== accountId) return false;
-        if (!cursorCreatedAt) return true;
-        const createdAt = new Date(entry.created_at);
-        const cursorTime = new Date(cursorCreatedAt);
-        if (createdAt.getTime() === cursorTime.getTime()) {
-          return entry.entry_seq < cursorEntrySeq;
-        }
-        return createdAt.getTime() < cursorTime.getTime();
-      })
-      .sort((a, b) => {
-        const timeA = new Date(a.created_at).getTime();
-        const timeB = new Date(b.created_at).getTime();
-        if (timeA === timeB) return b.entry_seq - a.entry_seq;
-        return timeB - timeA;
-      })
-      .slice(0, limit ?? 50)
-      .map(entry => {
-        const tx = mockDb.transactions.get(entry.transaction_id);
-        return {
-          entry_seq: entry.entry_seq,
-          amount: entry.amount,
-          metadata: entry.metadata,
-          created_at: entry.created_at,
-          tx_type: tx?.tx_type ?? null,
-          reference: tx?.reference ?? null,
-          description: tx?.description ?? null,
-          idempotency_key: tx?.idempotency_key ?? null,
-          tx_created_at: tx?.created_at ?? null,
-        };
-      });
-    return entries;
+    if (text.includes("order by e.created_at desc")) {
+      const [accountId, cursorCreatedAt, cursorEntrySeq, limit] = params;
+      const entries = mockDb.entries
+        .filter(entry => {
+          if (entry.account_id !== accountId) return false;
+          if (!cursorCreatedAt) return true;
+          const createdAt = new Date(entry.created_at);
+          const cursorTime = new Date(cursorCreatedAt);
+          if (createdAt.getTime() === cursorTime.getTime()) {
+            return entry.entry_seq < cursorEntrySeq;
+          }
+          return createdAt.getTime() < cursorTime.getTime();
+        })
+        .sort((a, b) => {
+          const timeA = new Date(a.created_at).getTime();
+          const timeB = new Date(b.created_at).getTime();
+          if (timeA === timeB) return b.entry_seq - a.entry_seq;
+          return timeB - timeA;
+        })
+        .slice(0, limit ?? 50)
+        .map(entry => {
+          const tx = mockDb.transactions.get(entry.transaction_id);
+          return {
+            entry_seq: entry.entry_seq,
+            amount: entry.amount,
+            metadata: entry.metadata,
+            created_at: entry.created_at,
+            tx_type: tx?.tx_type ?? null,
+            reference: tx?.reference ?? null,
+            description: tx?.description ?? null,
+            idempotency_key: tx?.idempotency_key ?? null,
+            tx_created_at: tx?.created_at ?? null,
+          };
+        });
+      return entries;
+    }
+    if (text.includes("order by e.entry_seq asc")) {
+      const [accountId, afterSeq, limit] = params;
+      const entries = mockDb.entries
+        .filter(entry => entry.account_id === accountId && (afterSeq == null || entry.entry_seq > afterSeq))
+        .sort((a, b) => a.entry_seq - b.entry_seq)
+        .slice(0, limit ?? 50)
+        .map(entry => {
+          const tx = mockDb.transactions.get(entry.transaction_id);
+          return {
+            entry_seq: entry.entry_seq,
+            amount: entry.amount,
+            metadata: entry.metadata,
+            created_at: entry.created_at,
+            tx_type: tx?.tx_type ?? null,
+            reference: tx?.reference ?? null,
+            description: tx?.description ?? null,
+            idempotency_key: tx?.idempotency_key ?? null,
+            tx_created_at: tx?.created_at ?? null,
+          };
+        });
+      return entries;
+    }
   }
 
   if (text.includes("with txn as") && text.includes("chips_entries")) {
