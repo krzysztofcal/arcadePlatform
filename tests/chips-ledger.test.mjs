@@ -729,6 +729,50 @@ describe("chips ledger paging", () => {
       expect(first.nextCursor).toBeTruthy();
     }
   });
+
+  it("continues paging when last entry has an invalid entry_seq", async () => {
+    const { postTransaction, listUserLedger } = await loadLedger();
+    await postTransaction({
+      userId: "user-7",
+      txType: "MINT",
+      idempotencyKey: "seed-user-7",
+      entries: [
+        { accountType: "SYSTEM", systemKey: "TREASURY", amount: -15 },
+        { accountType: "USER", amount: 15 },
+      ],
+    });
+    await postTransaction({
+      userId: "user-7",
+      txType: "BUY_IN",
+      idempotencyKey: "cursor-7-1",
+      entries: [
+        { accountType: "USER", amount: -3 },
+        { accountType: "SYSTEM", systemKey: "TREASURY", amount: 3 },
+      ],
+    });
+    await postTransaction({
+      userId: "user-7",
+      txType: "BUY_IN",
+      idempotencyKey: "cursor-7-2",
+      entries: [
+        { accountType: "USER", amount: -4 },
+        { accountType: "SYSTEM", systemKey: "TREASURY", amount: 4 },
+      ],
+    });
+
+    const admin = await import("../netlify/functions/_shared/supabase-admin.mjs");
+    const userAccount = [...admin.__mockDb.accounts.values()].find(acc => acc.user_id === "user-7");
+    const userEntries = admin.__mockDb.entries.filter(entry => entry.account_id === userAccount.id);
+    userEntries[userEntries.length - 1].entry_seq = null;
+
+    const first = await listUserLedger("user-7", { limit: 2 });
+    expect(first.items).toHaveLength(2);
+    expect(first.nextCursor).toBeTruthy();
+
+    const second = await listUserLedger("user-7", { limit: 2, cursor: first.nextCursor });
+    expect(second.items.length).toBeGreaterThanOrEqual(1);
+    expect(second.items[0].entry_seq).not.toBe(first.items[0].entry_seq);
+  });
 });
 
 describe("chips handlers security and gating", () => {

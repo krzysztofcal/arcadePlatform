@@ -157,6 +157,19 @@ function encodeLedgerCursor(createdAt, entrySeq) {
   }
 }
 
+function findLastCursorCandidate(entries) {
+  if (!Array.isArray(entries)) return null;
+  for (let i = entries.length - 1; i >= 0; i -= 1) {
+    const entry = entries[i];
+    const parsedCreated = entry?.created_at ? new Date(entry.created_at) : null;
+    const entrySeq = parsePositiveInt(entry?.entry_seq);
+    if (parsedCreated && !Number.isNaN(parsedCreated.getTime()) && entrySeq !== null) {
+      return { createdAt: parsedCreated.toISOString(), entrySeq };
+    }
+  }
+  return null;
+}
+
 async function listUserLedger(userId, { cursor = null, limit = 50 } = {}) {
   const cappedLimit = Math.min(Math.max(1, Number.isInteger(limit) ? limit : 50), 200);
   const account = await getOrCreateUserAccount(userId);
@@ -224,9 +237,12 @@ select * from entries;
       tx_created_at: txCreatedAt,
     };
   });
-  const last = normalizedEntries.length ? normalizedEntries[normalizedEntries.length - 1] : null;
-  const nextCursor = normalizedEntries.length === cappedLimit && last?.created_at && last?.entry_seq
-    ? encodeLedgerCursor(last.created_at, last.entry_seq)
+  const cursorCandidate = normalizedEntries.length === cappedLimit ? findLastCursorCandidate(normalizedEntries) : null;
+  if (!cursorCandidate && normalizedEntries.length === cappedLimit) {
+    klog("chips:ledger_cursor_missing", { count: normalizedEntries.length });
+  }
+  const nextCursor = cursorCandidate
+    ? encodeLedgerCursor(cursorCandidate.createdAt, cursorCandidate.entrySeq)
     : null;
 
   return { entries: normalizedEntries, items: normalizedEntries, nextCursor };
