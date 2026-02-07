@@ -4,41 +4,78 @@
   const btn = doc.getElementById('sbToggle');
   if (!sidebar || !btn) return;
 
-  function insertPokerLink(){
-    const list = sidebar.querySelector('.sb-list');
-    if (!list) return;
-    if (list.querySelector('a[data-i18n="navPoker"], a[data-i18n="poker"], a[href="/poker/"], a[href="/poker"]')) return;
-    const favoritesLink = list.querySelector('a[data-i18n="favorites"]') || list.querySelector('a[aria-label="Favorites"]') || list.querySelector('a[href*="favorites"]');
-    if (!favoritesLink) return;
-    const favoritesItem = favoritesLink.closest('li') || favoritesLink.parentNode;
-    if (!favoritesItem || !favoritesItem.parentNode) return;
+  const model = window.SidebarModel;
+  const items = model && typeof model.getItems === 'function' ? model.getItems() : [];
 
-    const item = doc.createElement('li');
-    item.className = 'sb-item';
-
-    const link = doc.createElement('a');
-    link.className = 'sb-link';
-    if (window.location && typeof window.location.pathname === 'string' && window.location.pathname.indexOf('/poker') === 0){
-      link.classList.add('is-active');
+  function ensureList(){
+    let nav = sidebar.querySelector('.sb-nav');
+    if (!nav){
+      nav = doc.createElement('nav');
+      nav.className = 'sb-nav';
+      sidebar.appendChild(nav);
     }
-    link.setAttribute('href', '/poker/');
-    link.setAttribute('aria-label', 'Poker');
-    link.setAttribute('tabindex', '0');
+    let list = nav.querySelector('.sb-list');
+    if (!list){
+      list = doc.createElement('ul');
+      list.className = 'sb-list';
+      nav.appendChild(list);
+    }
+    return list;
+  }
 
-    const icon = doc.createElement('span');
-    icon.className = 'sb-ico';
-    icon.setAttribute('aria-hidden', 'true');
-    icon.innerHTML = '<svg class="sb-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-1-13h2v6h-2zm0 8h2v2h-2z"/></svg>';
+  function resolveLabel(item){
+    const key = item.labelKey;
+    if (key && window.ArcadeI18n && typeof window.ArcadeI18n.t === 'function'){
+      const translated = window.ArcadeI18n.t(key);
+      if (translated) return translated;
+    }
+    if (key && window.I18N && typeof window.I18N.t === 'function'){
+      const translated = window.I18N.t(key);
+      if (translated) return translated;
+    }
+    return item.fallbackLabel || '';
+  }
 
-    const label = doc.createElement('span');
-    label.className = 'sb-label';
-    label.setAttribute('data-i18n', 'navPoker');
-    label.textContent = 'Poker';
+  function isActive(href){
+    if (!href || !window.location || typeof window.location.pathname !== 'string') return false;
+    const path = window.location.pathname;
+    if (href === '/index.html' && (path === '/' || path === '/index.html')) return true;
+    if (href === '/poker/' && (path === '/poker' || path === '/poker/' || path.indexOf('/poker/') === 0)) return true;
+    if (href === '/about.en.html' && path.indexOf('/about.') === 0) return true;
+    return path === href;
+  }
 
-    link.appendChild(icon);
-    link.appendChild(label);
-    item.appendChild(link);
-    favoritesItem.parentNode.insertBefore(item, favoritesItem.nextSibling);
+  function render(){
+    const list = ensureList();
+    list.innerHTML = '';
+    items.forEach((item)=>{
+      const li = doc.createElement('li');
+      li.className = 'sb-item';
+
+      const link = doc.createElement('a');
+      link.className = 'sb-link';
+      if (item.className) link.classList.add(item.className);
+      link.setAttribute('href', item.href || '#');
+      link.setAttribute('tabindex', '0');
+      if (item.hrefEn) link.setAttribute('data-href-en', item.hrefEn);
+      if (item.hrefPl) link.setAttribute('data-href-pl', item.hrefPl);
+      if (isActive(item.href)) link.classList.add('is-active');
+
+      const icon = doc.createElement('span');
+      icon.className = 'sb-ico';
+      icon.setAttribute('aria-hidden', 'true');
+      if (item.iconSvg) icon.innerHTML = item.iconSvg;
+
+      const label = doc.createElement('span');
+      label.className = 'sb-label';
+      if (item.labelKey) label.setAttribute('data-i18n', item.labelKey);
+      label.textContent = resolveLabel(item);
+
+      link.appendChild(icon);
+      link.appendChild(label);
+      li.appendChild(link);
+      list.appendChild(li);
+    });
 
     if (window.I18N && typeof window.I18N.apply === 'function'){
       const lang = typeof window.I18N.getLang === 'function' ? window.I18N.getLang() : 'en';
@@ -81,7 +118,7 @@
     }
   }
 
-  insertPokerLink();
+  render();
   btn.addEventListener('click', toggle);
   window.addEventListener('resize', applyInitial);
   applyInitial();
