@@ -135,15 +135,12 @@
     const avatarShell = doc.getElementById('avatarShell');
     const xpBadge = doc.getElementById('xpBadge');
     const chipBadge = ensureChipBadge(topbarRight);
-    if (xpBadge){
-      moveNode(xpBadge, topbarRight, chipBadge || avatarShell);
-    }
-    if (chipBadge){
-      moveNode(chipBadge, topbarRight, avatarShell);
-    }
-    if (avatarShell){
-      moveNode(avatarShell, topbarRight);
-    }
+    if (xpBadge && xpBadge.parentNode !== topbarRight){ topbarRight.appendChild(xpBadge); }
+    if (chipBadge && chipBadge.parentNode !== topbarRight){ topbarRight.appendChild(chipBadge); }
+    if (avatarShell && avatarShell.parentNode !== topbarRight){ topbarRight.appendChild(avatarShell); }
+    if (xpBadge && chipBadge){ moveNode(xpBadge, topbarRight, chipBadge); }
+    if (chipBadge && avatarShell){ moveNode(chipBadge, topbarRight, avatarShell); }
+    if (xpBadge && avatarShell && !chipBadge){ moveNode(xpBadge, topbarRight, avatarShell); }
   }
 
   function refreshXpBadge(){
@@ -250,6 +247,7 @@
         resolved = true;
         if (pollTimer) clearInterval(pollTimer);
         if (timeoutTimer) clearTimeout(timeoutTimer);
+        if (!value){ chipsClientPromise = null; }
         resolve(value);
       };
 
