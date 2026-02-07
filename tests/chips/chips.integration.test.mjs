@@ -24,6 +24,12 @@ function ensureInteger(value, label) {
   assert.ok(Number.isInteger(value), `${label} must be integer`);
 }
 
+function isValidDateString(value) {
+  if (!value) return false;
+  const parsed = new Date(value);
+  return !Number.isNaN(parsed.getTime());
+}
+
 async function verifyBalanceStructure() {
   const { status, body } = await getBalance(config);
   assert.equal(status, 200, `balance endpoint should succeed; ${formatResponse({ status, body })}`);
@@ -80,6 +86,8 @@ async function verifyLedgerCursor() {
   assert.equal(first.status, 200, `ledger should succeed; ${formatResponse(first)}`);
   const entries = Array.isArray(first.body?.items) ? first.body.items : [];
   if (!entries.length) return;
+  assert.ok(entries.some(entry => isValidDateString(entry.created_at)), "ledger created_at should be parseable");
+  assert.ok(entries.some(entry => isValidDateString(entry.tx_created_at)), "ledger tx_created_at should be parseable");
   const nextCursor = first.body?.nextCursor;
   assert.ok(nextCursor, `nextCursor must be returned; ${formatResponse(first)}`);
   const next = await getLedger(config, { cursor: nextCursor, limit: 20 });
@@ -101,6 +109,11 @@ async function verifyLedgerCursor() {
       typeof legacy.body?.nextExpectedSeq === "number",
       `legacy nextExpectedSeq must be number; ${formatResponse(legacy)}`,
     );
+    const legacyEntries = Array.isArray(legacy.body?.entries) ? legacy.body.entries : [];
+    if (legacyEntries.length) {
+      assert.ok(legacyEntries.some(entry => isValidDateString(entry.created_at)), "legacy created_at should be parseable");
+      assert.ok(legacyEntries.some(entry => isValidDateString(entry.tx_created_at)), "legacy tx_created_at should be parseable");
+    }
   }
 }
 

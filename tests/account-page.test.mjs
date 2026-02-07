@@ -9,6 +9,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const repoRoot = path.join(__dirname, "..");
 const source = await readFile(path.join(repoRoot, "js", "account-page.js"), "utf8");
+const portalCss = await readFile(path.join(repoRoot, "css", "portal.css"), "utf8");
 
 const flush = () => new Promise(resolve => setImmediate(resolve));
 
@@ -189,6 +190,84 @@ test("renders formatted chip ledger dates", async () => {
   const timeNode = findByClass(list.children[0], "chip-ledger__time");
   assert.ok(timeNode, "time element should be present");
   assert.match(timeNode.textContent, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
+});
+
+test("renders tx_created_at when created_at is missing", async () => {
+  const chipsClient = {
+    fetchBalance() {
+      return Promise.resolve({ balance: 1200 });
+    },
+    fetchLedger() {
+      return Promise.resolve({
+        items: [
+          {
+            id: 10,
+            tx_type: "BUY_IN",
+            amount: 50,
+            created_at: null,
+            tx_created_at: "2026-02-06T20:45:11.000Z",
+          },
+        ],
+        nextCursor: null,
+      });
+    },
+  };
+  const { windowObj, document } = buildContext(chipsClient);
+  const context = vm.createContext({
+    window: windowObj,
+    document,
+    requestAnimationFrame: windowObj.requestAnimationFrame,
+    CustomEvent: function() {},
+  });
+  vm.runInContext(source, context);
+
+  await flush();
+  await flush();
+  await flush();
+
+  const list = document.getElementById("chipLedgerList");
+  const timeNode = findByClass(list.children[0], "chip-ledger__time");
+  assert.ok(timeNode, "time element should be present");
+  assert.match(timeNode.textContent, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
+});
+
+test("renders Unknown time when no valid timestamp exists", async () => {
+  const chipsClient = {
+    fetchBalance() {
+      return Promise.resolve({ balance: 1200 });
+    },
+    fetchLedger() {
+      return Promise.resolve({
+        items: [
+          {
+            id: 11,
+            tx_type: "CASH_OUT",
+            amount: -20,
+            created_at: "not-a-date",
+            tx_created_at: null,
+          },
+        ],
+        nextCursor: null,
+      });
+    },
+  };
+  const { windowObj, document } = buildContext(chipsClient);
+  const context = vm.createContext({
+    window: windowObj,
+    document,
+    requestAnimationFrame: windowObj.requestAnimationFrame,
+    CustomEvent: function() {},
+  });
+  vm.runInContext(source, context);
+
+  await flush();
+  await flush();
+  await flush();
+
+  const list = document.getElementById("chipLedgerList");
+  const timeNode = findByClass(list.children[0], "chip-ledger__time");
+  assert.ok(timeNode, "time element should be present");
+  assert.equal(timeNode.textContent, "Unknown time");
 });
 
 test("loads more ledger entries on scroll", async () => {
@@ -429,4 +508,9 @@ test("dedupes items with null entry_seq using idempotency_key", async () => {
   const spacer = document.getElementById("chipLedgerSpacer");
   assert.equal(Number.parseInt(spacer.style.height, 10), 4 * 72, "spacer height should match unique items");
   assert.equal(calls.length, 2, "should fetch two pages");
+});
+
+test("ledger scroll does not enforce a fixed max-height", () => {
+  const normalized = portalCss.replace(/\s+/g, " ");
+  assert.ok(!/chip-ledger__scroll\{[^}]*max-height/.test(normalized), "ledger scroll should not cap max-height");
 });

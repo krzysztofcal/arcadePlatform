@@ -139,6 +139,16 @@
     return year + '-' + month + '-' + day + ' ' + hour + ':' + minute;
   }
 
+  function resolveLedgerTimestamp(entry){
+    var primary = entry && entry.created_at ? entry.created_at : null;
+    var secondary = entry && entry.tx_created_at ? entry.tx_created_at : null;
+    var formatted = formatDateTime(primary);
+    if (!formatted && secondary){
+      formatted = formatDateTime(secondary);
+    }
+    return formatted || 'Unknown time';
+  }
+
   function buildLedgerRow(entry){
     var item = doc.createElement('li');
     item.className = 'chip-ledger__item';
@@ -156,12 +166,11 @@
 
     var time = doc.createElement('div');
     time.className = 'chip-ledger__time';
-    var displayTime = formatDateTime(entry && entry.created_at ? entry.created_at : (entry ? entry.tx_created_at : null));
-    time.textContent = displayTime;
+    time.textContent = resolveLedgerTimestamp(entry);
 
     meta.appendChild(type);
     if (desc.textContent){ meta.appendChild(desc); }
-    if (time.textContent){ meta.appendChild(time); }
+    meta.appendChild(time);
 
     var amount = doc.createElement('div');
     amount.className = 'chip-ledger__amount';

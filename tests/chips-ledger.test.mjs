@@ -13,6 +13,11 @@ const mockDb = {
 };
 
 const createId = (prefix, counter) => `${prefix}-${counter}`;
+const isValidDateString = (value) => {
+  if (!value) return false;
+  const parsed = new Date(value);
+  return !Number.isNaN(parsed.getTime());
+};
 
 function resetMockDb() {
   mockDb.accounts.clear();
@@ -648,6 +653,8 @@ describe("chips ledger paging", () => {
     expect(items[0].created_at >= items[1].created_at).toBe(true);
     expect(items[1].created_at >= items[2].created_at).toBe(true);
     expect(items[0].entry_seq >= items[1].entry_seq).toBe(true);
+    expect(items.some(item => isValidDateString(item.created_at))).toBe(true);
+    expect(items.some(item => isValidDateString(item.tx_created_at))).toBe(true);
   });
 
   it("rejects invalid cursor values and clamps limits", async () => {
@@ -850,6 +857,8 @@ describe("chips ledger legacy paging", () => {
     for (let i = 1; i < page.entries.length; i += 1) {
       expect(page.entries[i].entry_seq).toBeGreaterThan(page.entries[i - 1].entry_seq);
     }
+    expect(page.entries.some(entry => isValidDateString(entry.created_at))).toBe(true);
+    expect(page.entries.some(entry => isValidDateString(entry.tx_created_at))).toBe(true);
     expect(typeof page.sequenceOk).toBe("boolean");
     expect(typeof page.nextExpectedSeq).toBe("number");
   });
