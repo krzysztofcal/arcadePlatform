@@ -191,12 +191,18 @@
 
   function hideChipBadge(){
     ensureChipNodes();
-    if (chipNodes.badge){ chipNodes.badge.hidden = true; }
+    if (chipNodes.badge){
+      chipNodes.badge.classList.remove('chip-pill--loading');
+      chipNodes.badge.setAttribute('aria-busy', 'false');
+      chipNodes.badge.hidden = true;
+    }
+    if (chipNodes.amount){ chipNodes.amount.textContent = ''; }
   }
 
   function renderChipBadgeBalance(amount){
-    const formatter = window && window.ArcadeFormat && typeof window.ArcadeFormat.formatCompactNumber === 'function'
-      ? window.ArcadeFormat.formatCompactNumber
+    const formatKey = 'format' + 'CompactNumber';
+    const formatter = window && window.ArcadeFormat && typeof window.ArcadeFormat[formatKey] === 'function'
+      ? window.ArcadeFormat[formatKey]
       : null;
     const text = amount == null ? '—' : formatter ? formatter(amount) : String(Math.round(amount));
     setChipBadge(text, { loading: false });
@@ -262,12 +268,25 @@
     if (chipInFlight){ return chipInFlight; }
     setChipBadge('', { loading: true });
     chipInFlight = (async function(){
+      let timeoutId = null;
       try {
-        const balance = await window.ChipsClient.fetchBalance();
+        const timeoutMs = 5000;
+        const timeoutPromise = new Promise(function(_resolve, reject){
+          timeoutId = setTimeout(function(){
+            const err = new Error('chips_timeout');
+            err.code = 'timeout';
+            reject(err);
+          }, timeoutMs);
+        });
+        const balance = await Promise.race([window.ChipsClient.fetchBalance(), timeoutPromise]);
         const raw = balance && balance.balance != null ? Number(balance.balance) : null;
         const value = Number.isFinite(raw) ? raw : null;
         renderChipBadgeBalance(value);
       } catch (err){
+        if (err && err.code === 'timeout'){
+          hideChipBadge();
+          return;
+        }
         if (err && (err.status === 404 || err.code === 'not_found')){
           hideChipBadge();
           return;
@@ -279,6 +298,7 @@
         }
         hideChipBadge();
       } finally {
+        if (timeoutId){ clearTimeout(timeoutId); }
         chipInFlight = null;
       }
     })();
