@@ -121,17 +121,52 @@ async function getUserBalance(userId) {
   };
 }
 
-async function listUserLedger(userId, { afterSeq = null, limit = 50 } = {}) {
+function decodeLedgerCursor(cursor) {
+  if (cursor === null || cursor === undefined) return null;
+  if (typeof cursor !== "string" || cursor.trim() === "") {
+    throw badRequest("invalid_cursor", "Invalid cursor");
+  }
+  let decoded = null;
+  try {
+    decoded = Buffer.from(cursor, "base64").toString("utf8");
+  } catch (_err) {
+    throw badRequest("invalid_cursor", "Invalid cursor");
+  }
+  let payload = null;
+  try {
+    payload = JSON.parse(decoded);
+  } catch (_err) {
+    throw badRequest("invalid_cursor", "Invalid cursor");
+  }
+  const createdAt = payload?.createdAt || payload?.created_at;
+  const id = parsePositiveInt(payload?.id);
+  const parsedCreated = createdAt ? new Date(createdAt) : null;
+  if (!parsedCreated || Number.isNaN(parsedCreated.getTime()) || id === null) {
+    throw badRequest("invalid_cursor", "Invalid cursor");
+  }
+  return { createdAt: parsedCreated.toISOString(), id };
+}
+
+function encodeLedgerCursor(createdAt, id) {
+  if (!createdAt || !id) return null;
+  try {
+    const payload = JSON.stringify({ createdAt, id });
+    return Buffer.from(payload, "utf8").toString("base64");
+  } catch (_err) {
+    return null;
+  }
+}
+
+async function listUserLedger(userId, { cursor = null, limit = 50 } = {}) {
   const cappedLimit = Math.min(Math.max(1, Number.isInteger(limit) ? limit : 50), 200);
   const account = await getOrCreateUserAccount(userId);
-  const hasAfter = afterSeq !== null && afterSeq !== undefined && !(typeof afterSeq === "string" && afterSeq.trim() === "");
-  const parsedAfterSeq = parsePositiveInt(afterSeq);
-  if (hasAfter && parsedAfterSeq === null) {
-    throw badRequest("invalid_after_seq", "Invalid after sequence");
-  }
+  const parsedCursor = decodeLedgerCursor(cursor);
+  const cursorCreatedAt = parsedCursor ? parsedCursor.createdAt : null;
+  const cursorId = parsedCursor ? parsedCursor.id : null;
   const query = `
 with entries as (
   select
+    e.id,
     e.entry_seq,
     e.amount,
     e.metadata,
@@ -144,37 +179,16 @@ with entries as (
   from public.chips_entries e
   join public.chips_transactions t on t.id = e.transaction_id
   where e.account_id = $1
-    and ($2::bigint is null or e.entry_seq > $2)
-  order by e.entry_seq asc
-  limit $3
+    and (
+      $2::timestamptz is null
+      or (e.created_at, e.id) < ($2::timestamptz, $3::bigint)
+    )
+  order by e.created_at desc, e.id desc
+  limit $4
 )
 select * from entries;
 `;
-  const rows = await executeSql(query, [account.id, parsedAfterSeq, cappedLimit]);
-  const expectedStart = parsedAfterSeq ? parsedAfterSeq + 1 : 1;
-  let sequenceOk = true;
-  let cursor = expectedStart;
-  let mismatchLogged = false;
-  for (const row of rows || []) {
-    const parsedSeq = parsePositiveInt(row?.entry_seq);
-    if (parsedSeq !== cursor) {
-      sequenceOk = false;
-      if (!mismatchLogged) {
-        klog("chips:ledger_sequence_mismatch", {
-          after_seq: parsedAfterSeq || 0,
-          expected_seq: cursor,
-          actual_seq: parsedSeq,
-          raw_entry_seq: row?.entry_seq,
-          tx_type: row?.tx_type ?? null,
-          idempotency_key: row?.idempotency_key ?? null,
-          reason: parsedSeq === null ? "invalid_entry_seq" : "non_contiguous_seq",
-        });
-        mismatchLogged = true;
-      }
-      break;
-    }
-    cursor += 1;
-  }
+  const rows = await executeSql(query, [account.id, cursorCreatedAt, cursorId, cappedLimit]);
   const normalizedEntries = (rows || []).map(row => {
     const parsedEntrySeq = parsePositiveInt(row?.entry_seq);
     const entrySeq = parsedEntrySeq;
@@ -199,6 +213,7 @@ select * from entries;
     }
 
     return {
+      id: row?.id ?? null,
       entry_seq: entrySeq,
       amount: parsedAmount,
       raw_amount: row?.amount == null ? null : String(row.amount),
@@ -211,8 +226,12 @@ select * from entries;
       tx_created_at: txCreatedAt,
     };
   });
+  const last = normalizedEntries.length ? normalizedEntries[normalizedEntries.length - 1] : null;
+  const nextCursor = normalizedEntries.length === cappedLimit && last?.created_at && last?.id
+    ? encodeLedgerCursor(last.created_at, last.id)
+    : null;
 
-  return { entries: normalizedEntries, sequenceOk, nextExpectedSeq: cursor };
+  return { entries: normalizedEntries, items: normalizedEntries, nextCursor };
 }
 
 async function findTransactionByKey(idempotencyKey, tx = null) {

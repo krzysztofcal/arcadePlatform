@@ -6,6 +6,15 @@
   var nodes = {};
   var currentUser = null;
   var chipsInFlight = null;
+  var ledgerState = {
+    entries: [],
+    nextCursor: null,
+    hasMore: true,
+    loading: false,
+    rowHeight: 72,
+    overscan: 4,
+    renderQueued: false,
+  };
 
   function selectNodes(){
     nodes.status = doc.getElementById('accountStatus');
@@ -25,6 +34,8 @@
     nodes.chipPanel = doc.getElementById('chipPanel');
     nodes.chipStatus = doc.getElementById('chipStatus');
     nodes.chipBalanceValue = doc.getElementById('chipBalanceValue');
+    nodes.chipLedgerScroll = doc.getElementById('chipLedgerScroll');
+    nodes.chipLedgerSpacer = doc.getElementById('chipLedgerSpacer');
     nodes.chipLedgerList = doc.getElementById('chipLedgerList');
     nodes.chipLedgerEmpty = doc.getElementById('chipLedgerEmpty');
   }
@@ -65,8 +76,11 @@
   function clearChips(){
     if (nodes.chipBalanceValue){ nodes.chipBalanceValue.textContent = '—'; }
     if (nodes.chipLedgerList){ nodes.chipLedgerList.innerHTML = ''; }
+    if (nodes.chipLedgerSpacer){ nodes.chipLedgerSpacer.style.height = '0px'; }
+    if (nodes.chipLedgerScroll){ nodes.chipLedgerScroll.scrollTop = 0; }
     if (nodes.chipLedgerEmpty){ nodes.chipLedgerEmpty.hidden = false; }
     setChipStatus('', '');
+    resetLedgerState();
   }
 
   function setChipStatus(message, tone){
@@ -81,6 +95,18 @@
     var raw = balance && balance.balance != null ? Number(balance.balance) : null;
     var amount = Number.isFinite(raw) ? raw : null;
     nodes.chipBalanceValue.textContent = amount == null ? '—' : amount.toLocaleString();
+  }
+
+  function formatDateTime(value){
+    if (!value) return '';
+    var parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return '';
+    var year = String(parsed.getFullYear());
+    var month = String(parsed.getMonth() + 1).padStart(2, '0');
+    var day = String(parsed.getDate()).padStart(2, '0');
+    var hour = String(parsed.getHours()).padStart(2, '0');
+    var minute = String(parsed.getMinutes()).padStart(2, '0');
+    return year + '-' + month + '-' + day + ' ' + hour + ':' + minute;
   }
 
   function buildLedgerRow(entry){
@@ -100,12 +126,8 @@
 
     var time = doc.createElement('div');
     time.className = 'chip-ledger__time';
-    var parsedCreated = entry && entry.created_at ? new Date(entry.created_at) : null;
-    var parsedTxCreated = entry && entry.tx_created_at ? new Date(entry.tx_created_at) : null;
-    var useCreated = parsedCreated && !Number.isNaN(parsedCreated.getTime()) ? parsedCreated : null;
-    var useTxCreated = parsedTxCreated && !Number.isNaN(parsedTxCreated.getTime()) ? parsedTxCreated : null;
-    var displayTime = useCreated || useTxCreated;
-    time.textContent = displayTime ? displayTime.toLocaleString() : '';
+    var displayTime = formatDateTime(entry && entry.created_at ? entry.created_at : (entry ? entry.tx_created_at : null));
+    time.textContent = displayTime;
 
     meta.appendChild(type);
     if (desc.textContent){ meta.appendChild(desc); }
@@ -141,44 +163,118 @@
     return item;
   }
 
-  function renderLedger(entries){
-    if (!nodes.chipLedgerList) return;
+  function buildLedgerStatusRow(message){
+    var item = doc.createElement('li');
+    item.className = 'chip-ledger__item chip-ledger__item--status';
+    item.textContent = message;
+    return item;
+  }
+
+  function queueLedgerRender(){
+    if (ledgerState.renderQueued) return;
+    ledgerState.renderQueued = true;
+    requestAnimationFrame(function(){
+      ledgerState.renderQueued = false;
+      renderLedger();
+    });
+  }
+
+  function renderLedger(){
+    if (!nodes.chipLedgerList || !nodes.chipLedgerScroll || !nodes.chipLedgerSpacer) return;
+    var entries = ledgerState.entries || [];
+    var isEmpty = entries.length === 0 && !ledgerState.loading;
+    if (nodes.chipLedgerEmpty){ nodes.chipLedgerEmpty.hidden = !isEmpty; }
+
+    var tailState = ledgerState.loading ? 'loading' : (!ledgerState.hasMore && entries.length ? 'end' : null);
+    var totalCount = entries.length + (tailState ? 1 : 0);
+    var totalHeight = totalCount * ledgerState.rowHeight;
+    nodes.chipLedgerSpacer.style.height = totalHeight + 'px';
     nodes.chipLedgerList.innerHTML = '';
-    if (nodes.chipLedgerEmpty){ nodes.chipLedgerEmpty.hidden = true; }
-    if (!entries || !entries.length){
-      if (nodes.chipLedgerEmpty){ nodes.chipLedgerEmpty.hidden = false; }
-      return;
-    }
+    if (!totalCount) return;
 
-    var invalidSeqCount = 0;
-    var rendered = 0;
-    for (var i = 0; i < entries.length; i++){
-      var entry = entries[i];
-      var hasValidSeq = entry && Number.isInteger(entry.entry_seq) && entry.entry_seq > 0;
-      if (!hasValidSeq){
-        invalidSeqCount += 1;
-        continue;
+    var scrollTop = nodes.chipLedgerScroll.scrollTop;
+    var viewportHeight = nodes.chipLedgerScroll.clientHeight || 0;
+    var startIndex = Math.max(0, Math.floor(scrollTop / ledgerState.rowHeight) - ledgerState.overscan);
+    var endIndex = Math.min(totalCount, Math.ceil((scrollTop + viewportHeight) / ledgerState.rowHeight) + ledgerState.overscan);
+    var fragment = doc.createDocumentFragment();
+    for (var i = startIndex; i < endIndex; i++){
+      var row = null;
+      if (i < entries.length){
+        row = buildLedgerRow(entries[i]);
+      } else if (tailState === 'loading'){
+        row = buildLedgerStatusRow('Loading more activity…');
+      } else if (tailState === 'end'){
+        row = buildLedgerStatusRow('End of history');
       }
-      var row = buildLedgerRow(entry);
       if (row){
-        nodes.chipLedgerList.appendChild(row);
-        rendered += 1;
+        row.style.top = (i * ledgerState.rowHeight) + 'px';
+        row.style.height = ledgerState.rowHeight + 'px';
+        fragment.appendChild(row);
       }
     }
+    nodes.chipLedgerList.appendChild(fragment);
+  }
 
-    if (rendered === 0 && nodes.chipLedgerEmpty){
-      nodes.chipLedgerEmpty.hidden = false;
+  function resetLedgerState(){
+    ledgerState.entries = [];
+    ledgerState.nextCursor = null;
+    ledgerState.hasMore = true;
+    ledgerState.loading = false;
+    ledgerState.renderQueued = false;
+    if (nodes.chipLedgerScroll){ nodes.chipLedgerScroll.scrollTop = 0; }
+  }
+
+  function appendLedgerItems(items, nextCursor){
+    ledgerState.entries = ledgerState.entries.concat(items || []);
+    ledgerState.nextCursor = nextCursor || null;
+    ledgerState.hasMore = !!nextCursor;
+    queueLedgerRender();
+  }
+
+  function shouldLoadMore(){
+    if (!nodes.chipLedgerScroll) return false;
+    if (!ledgerState.hasMore || ledgerState.loading) return false;
+    var totalHeight = (ledgerState.entries.length + 1) * ledgerState.rowHeight;
+    return nodes.chipLedgerScroll.scrollTop + nodes.chipLedgerScroll.clientHeight >= totalHeight - (ledgerState.rowHeight * 3);
+  }
+
+  async function loadLedgerPage(){
+    if (!window || !window.ChipsClient || typeof window.ChipsClient.fetchLedger !== 'function') return;
+    if (!ledgerState.hasMore || ledgerState.loading) return;
+    ledgerState.loading = true;
+    queueLedgerRender();
+    try {
+      var payload = await window.ChipsClient.fetchLedger({
+        limit: 50,
+        cursor: ledgerState.nextCursor,
+      });
+      var items = payload && Array.isArray(payload.items) ? payload.items : (payload && Array.isArray(payload.entries) ? payload.entries : []);
+      appendLedgerItems(items, payload ? payload.nextCursor : null);
+      setChipStatus('', '');
+    } catch (err){
+      setChipStatus('Could not load chip history right now.', 'error');
+      ledgerState.hasMore = false;
+    } finally {
+      ledgerState.loading = false;
+      queueLedgerRender();
     }
+  }
 
-    if (invalidSeqCount > 0 && window && window.XP_DIAG && typeof console !== 'undefined' && console && typeof console.debug === 'function'){
-      try {
-        console.debug('[chips] invalid entry_seq in ledger', { count: invalidSeqCount });
-      } catch (_err){}
+  function handleLedgerScroll(){
+    queueLedgerRender();
+    if (shouldLoadMore()){
+      loadLedgerPage();
     }
   }
 
   async function loadChips(){
-    if (!currentUser || !window || !window.ChipsClient || typeof window.ChipsClient.fetchState !== 'function'){
+    if (
+      !currentUser ||
+      !window ||
+      !window.ChipsClient ||
+      typeof window.ChipsClient.fetchBalance !== 'function' ||
+      typeof window.ChipsClient.fetchLedger !== 'function'
+    ){
       clearChips();
       setBlockVisibility(nodes.chipPanel, false);
       return;
@@ -190,13 +286,15 @@
     setChipStatus('Syncing chips…', 'info');
     if (nodes.chipBalanceValue){ nodes.chipBalanceValue.textContent = '—'; }
     if (nodes.chipLedgerList){ nodes.chipLedgerList.innerHTML = ''; }
+    if (nodes.chipLedgerSpacer){ nodes.chipLedgerSpacer.style.height = '0px'; }
     if (nodes.chipLedgerEmpty){ nodes.chipLedgerEmpty.hidden = true; }
+    resetLedgerState();
 
     chipsInFlight = (async function(){
       try {
-        var state = await window.ChipsClient.fetchState({ limit: 10 });
-        renderChipBalance(state && state.balance ? state.balance : null);
-        renderLedger(state && state.ledger && state.ledger.entries ? state.ledger.entries : []);
+        var balance = await window.ChipsClient.fetchBalance();
+        renderChipBalance(balance);
+        await loadLedgerPage();
         setChipStatus('', '');
       } catch (err){
         if (err && (err.status === 404 || err.code === 'not_found')){
@@ -311,6 +409,11 @@
       setBlockVisibility(nodes.account, false);
       if (nodes.signInEmail){ nodes.signInEmail.focus(); }
     });
+
+    if (nodes.chipLedgerScroll){
+      nodes.chipLedgerScroll.addEventListener('scroll', handleLedgerScroll);
+    }
+    window.addEventListener('resize', queueLedgerRender);
   }
 
   function hydrateUser(){

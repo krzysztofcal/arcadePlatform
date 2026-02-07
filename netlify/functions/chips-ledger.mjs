@@ -31,24 +31,25 @@ export async function handler(event) {
     return { statusCode: 401, headers: cors, body: JSON.stringify({ error: "unauthorized", reason: auth.reason }) };
   }
 
-  const afterSeq = Object.prototype.hasOwnProperty.call(event.queryStringParameters || {}, "after")
-    ? event.queryStringParameters.after
+  const cursor = Object.prototype.hasOwnProperty.call(event.queryStringParameters || {}, "cursor")
+    ? event.queryStringParameters.cursor
     : null;
   const limitRaw = event.queryStringParameters?.limit;
   const parsedLimit = Number(limitRaw);
   const limit = Number.isInteger(parsedLimit) ? parsedLimit : 50;
 
   try {
-    const ledger = await listUserLedger(auth.userId, { afterSeq, limit });
-    klog("chips_ledger_ok", { userId: auth.userId, count: ledger.entries.length });
+    const ledger = await listUserLedger(auth.userId, { cursor, limit });
+    const items = Array.isArray(ledger.items) ? ledger.items : ledger.entries || [];
+    klog("chips_ledger_ok", { userId: auth.userId, count: items.length });
     return {
       statusCode: 200,
       headers: cors,
       body: JSON.stringify({
         userId: auth.userId,
-        entries: ledger.entries,
-        sequenceOk: ledger.sequenceOk,
-        nextExpectedSeq: ledger.nextExpectedSeq,
+        items: items,
+        entries: items,
+        nextCursor: ledger.nextCursor || null,
       }),
     };
   } catch (error) {
