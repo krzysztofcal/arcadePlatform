@@ -12,7 +12,12 @@ const topbarSource = await readFile(path.join(repoRoot, 'js', 'topbar.js'), 'utf
 const xpCoreSource = await readFile(path.join(repoRoot, 'js', 'xp', 'core.js'), 'utf8');
 const formatSource = await readFile(path.join(repoRoot, 'js', 'core', 'number-format.js'), 'utf8');
 const accountHtml = await readFile(path.join(repoRoot, 'account.html'), 'utf8');
+const favoritesHtml = await readFile(path.join(repoRoot, 'favorites.html'), 'utf8');
 const indexHtml = await readFile(path.join(repoRoot, 'index.html'), 'utf8');
+const recentlyPlayedHtml = await readFile(path.join(repoRoot, 'recently-played.html'), 'utf8');
+const aboutEnHtml = await readFile(path.join(repoRoot, 'about.en.html'), 'utf8');
+const aboutPlHtml = await readFile(path.join(repoRoot, 'about.pl.html'), 'utf8');
+const xpHtml = await readFile(path.join(repoRoot, 'xp.html'), 'utf8');
 let playHtml = null;
 try {
   playHtml = await readFile(path.join(repoRoot, 'play.html'), 'utf8');
@@ -34,6 +39,7 @@ const xpHtmlFiles = [
   pokerIndex,
   pokerTable,
   playHtml || '',
+  xpHtml,
 ];
 
 test('topbar ensures chip badge creation when missing', () => {
@@ -46,6 +52,10 @@ test('topbar ensures chip badge creation when missing', () => {
   assert.match(topbarSource, /CH:\s/);
   assert.match(topbarSource, /options\s*&&\s*options\.show/);
   assert.ok(!topbarSource.includes('_user || _session'));
+  assert.ok(!topbarSource.includes('ensureChipsClientLoaded'));
+  assert.ok(!topbarSource.includes('chipsClientScript'));
+  assert.ok(!topbarSource.includes('/js/chips/client.js'));
+  assert.match(topbarSource, /setAuthDataset\(['"]out['"]\)/);
 });
 
 test('topbar pages load topbar script', () => {
@@ -57,6 +67,37 @@ test('topbar pages load topbar script', () => {
   assert.match(gameTrexHtml, topbarScript);
   assert.match(pokerIndex, topbarScript);
   assert.match(pokerTable, topbarScript);
+});
+
+test('root pages use relative topbar and format scripts', () => {
+  const relativeTopbar = /src="js\/topbar\.js"/;
+  const relativeFormat = /src="js\/core\/number-format\.js"/;
+  const absoluteTopbar = /src="\/js\/topbar\.js"/;
+  const absoluteFormat = /src="\/js\/core\/number-format\.js"/;
+  const rootPages = [
+    accountHtml,
+    indexHtml,
+    gameHtml,
+    gameCatsHtml,
+    gameTrexHtml,
+    favoritesHtml,
+    recentlyPlayedHtml,
+    aboutEnHtml,
+    aboutPlHtml,
+    xpHtml,
+    playHtml || '',
+  ];
+  rootPages.forEach((content) => {
+    if (!content) return;
+    assert.match(content, relativeTopbar);
+    assert.match(content, relativeFormat);
+    assert.ok(!absoluteTopbar.test(content));
+    assert.ok(!absoluteFormat.test(content));
+  });
+  assert.match(pokerIndex, absoluteTopbar);
+  assert.match(pokerTable, absoluteTopbar);
+  assert.match(pokerIndex, absoluteFormat);
+  assert.match(pokerTable, absoluteFormat);
 });
 
 test('chip badge is only provided by topbar', () => {
