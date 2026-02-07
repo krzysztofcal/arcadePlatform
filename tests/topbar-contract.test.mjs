@@ -50,12 +50,13 @@ test('topbar ensures chip badge creation when missing', () => {
   assert.match(topbarSource, /badge\.hidden\s*=\s*true/);
   assert.match(topbarSource, /if\s*\(!isAuthed\(\)\)/);
   assert.match(topbarSource, /CH:\s/);
-  assert.match(topbarSource, /options\s*&&\s*options\.show/);
+  assert.ok(!topbarSource.includes('options.show'));
   assert.ok(!topbarSource.includes('_user || _session'));
   assert.ok(!topbarSource.includes('ensureChipsClientLoaded'));
   assert.ok(!topbarSource.includes('chipsClientScript'));
   assert.ok(!topbarSource.includes('/js/chips/client.js'));
   assert.match(topbarSource, /setAuthDataset\(['"]out['"]\)/);
+  assert.match(topbarSource, /badge\.hidden\s*=\s*!isAuthed\(\)/);
 });
 
 test('topbar pages load topbar script', () => {
@@ -112,6 +113,7 @@ test('chip badge styles only live in portal css', () => {
   assert.match(portalCss, /--topbar-offset/);
   assert.match(portalCss, /safe-area-inset-top/);
   assert.match(portalCss, /html\[data-auth="in"\]\s*#chipBadge/);
+  assert.match(portalCss, /html\[data-auth="out"\]\s*#chipBadge/);
   assert.ok(!gameCss.includes('.chip-pill'));
 });
 

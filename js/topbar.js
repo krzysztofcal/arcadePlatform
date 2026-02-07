@@ -173,9 +173,8 @@
     const badge = chipNodes.badge;
     const amount = chipNodes.amount;
     if (!badge || !amount) return;
-    const show = !!(options && options.show);
+    if (!isAuthed()) return;
     const loading = !!(options && options.loading);
-    if (show && isAuthed()){ badge.hidden = false; }
     amount.textContent = text || '';
     if (loading){
       badge.classList.add('chip-pill--loading');
@@ -193,7 +192,7 @@
 
   function renderChipBadgeBalance(amount){
     const text = amount == null ? '—' : formatCompactNumber(amount);
-    setChipBadge(text, { loading: false, show: true });
+    setChipBadge(text, { loading: false });
   }
 
   function formatCompactNumber(value){
@@ -219,6 +218,8 @@
     if (authState === next) return;
     authState = next;
     setAuthDataset(next === AuthState.SIGNED_IN ? 'in' : 'out');
+    const badge = doc.getElementById('chipBadge');
+    if (badge){ badge.hidden = !isAuthed(); }
     if (!isAuthed()){
       hideChipBadge();
       return;
@@ -255,7 +256,7 @@
       return;
     }
     if (chipInFlight){ return chipInFlight; }
-    setChipBadge('', { loading: true, show: false });
+    setChipBadge('', { loading: true });
     chipInFlight = (async function(){
       try {
         const balance = await window.ChipsClient.fetchBalance();
@@ -327,12 +328,10 @@
   if (doc.readyState === 'loading'){
     doc.addEventListener('DOMContentLoaded', function(){
       normalizeTopbarBadges();
-      refreshChipBadge();
       wireChipEvents();
     }, { once: true });
   } else {
     normalizeTopbarBadges();
-    refreshChipBadge();
     wireChipEvents();
   }
 })();
