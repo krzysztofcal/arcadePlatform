@@ -17,6 +17,11 @@ const indexHtml = await readFile(path.join(repoRoot, 'index.html'), 'utf8');
 const recentlyPlayedHtml = await readFile(path.join(repoRoot, 'recently-played.html'), 'utf8');
 const aboutEnHtml = await readFile(path.join(repoRoot, 'about.en.html'), 'utf8');
 const aboutPlHtml = await readFile(path.join(repoRoot, 'about.pl.html'), 'utf8');
+const licensesHtml = await readFile(path.join(repoRoot, 'about', 'licenses.html'), 'utf8');
+const termsEnHtml = await readFile(path.join(repoRoot, 'legal', 'terms.en.html'), 'utf8');
+const termsPlHtml = await readFile(path.join(repoRoot, 'legal', 'terms.pl.html'), 'utf8');
+const privacyEnHtml = await readFile(path.join(repoRoot, 'legal', 'privacy.en.html'), 'utf8');
+const privacyPlHtml = await readFile(path.join(repoRoot, 'legal', 'privacy.pl.html'), 'utf8');
 const xpHtml = await readFile(path.join(repoRoot, 'xp.html'), 'utf8');
 let playHtml = null;
 try {
@@ -144,6 +149,39 @@ test('topbar scripts load once per page', () => {
       const matches = content.match(pattern) || [];
       assert.equal(matches.length, 1);
     });
+  });
+});
+
+test('nested legal pages use absolute chips/topbar dependencies', () => {
+  const nestedPages = [
+    licensesHtml,
+    termsEnHtml,
+    termsPlHtml,
+    privacyEnHtml,
+    privacyPlHtml,
+  ];
+  const absoluteChips = /src="\/js\/chips\/client\.js"/g;
+  const absoluteFormat = /src="\/js\/core\/number-format\.js"/g;
+  const absoluteTopbar = /src="\/js\/topbar\.js"/g;
+  const absoluteSupabaseClient = /src="\/js\/auth\/supabaseClient\.js"/g;
+  const nestedRelativeDependency = /src="(?:\.\.\/)?js\/(chips\/client|core\/number-format|topbar|auth\/supabaseClient)\.js"/;
+  nestedPages.forEach((content) => {
+    assert.equal((content.match(absoluteChips) || []).length, 1);
+    assert.equal((content.match(absoluteFormat) || []).length, 1);
+    assert.equal((content.match(absoluteTopbar) || []).length, 1);
+    assert.equal((content.match(absoluteSupabaseClient) || []).length, 1);
+    assert.ok(!nestedRelativeDependency.test(content));
+    const supabaseIndex = content.indexOf('/js/auth/supabaseClient.js');
+    const chipsIndex = content.indexOf('/js/chips/client.js');
+    const formatIndex = content.indexOf('/js/core/number-format.js');
+    const topbarIndex = content.indexOf('/js/topbar.js');
+    assert.ok(supabaseIndex > -1);
+    assert.ok(chipsIndex > -1);
+    assert.ok(formatIndex > -1);
+    assert.ok(topbarIndex > -1);
+    assert.ok(supabaseIndex < topbarIndex);
+    assert.ok(chipsIndex < topbarIndex);
+    assert.ok(formatIndex < topbarIndex);
   });
 });
 
