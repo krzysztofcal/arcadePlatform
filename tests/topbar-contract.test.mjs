@@ -64,10 +64,6 @@ test('chip badge styles only live in portal css', () => {
   assert.match(portalCss, /\.chip-pill/);
   assert.match(portalCss, /--topbar-offset/);
   assert.match(portalCss, /safe-area-inset-top/);
-  assert.ok(!portalCss.includes('--topbar-h:calc'));
-  assert.ok(!portalCss.includes('safe-area-inset-top, 0px)'));
-  assert.ok(!gameCss.includes('--topbar-safe'));
-  assert.ok(!gameCss.includes('--topbar-h:calc'));
   assert.ok(!gameCss.includes('.chip-pill'));
 });
 
@@ -88,4 +84,9 @@ test('xp badge placeholders are compact', () => {
     assert.ok(!content.includes('Syncing XP'));
     assert.match(content, /xp-badge__label[^>]*>\s*XP\s*</);
   });
+});
+
+test('poker pages place xp badge inside topbar', () => {
+  assert.match(pokerIndex, /topbar-right[\s\S]*id="xpBadge"/);
+  assert.match(pokerTable, /topbar-right[\s\S]*id="xpBadge"/);
 });

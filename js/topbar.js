@@ -75,16 +75,11 @@
 
   function moveNode(node, container, before){
     if (!node || !container) return;
-    if (node.parentNode !== container){
-      try {
-        if (node.parentNode){ node.parentNode.removeChild(node); }
-      } catch (_err){}
-    }
-    if (before && before.parentNode === container && before !== node){
+    if (before && before.parentNode === container){
       container.insertBefore(node, before);
-    } else if (node.parentNode !== container || node !== container.lastChild){
-      container.appendChild(node);
+      return;
     }
+    container.appendChild(node);
   }
 
   function ensureChipBadge(topbarRight){
@@ -140,12 +135,14 @@
     const avatarShell = doc.getElementById('avatarShell');
     const xpBadge = doc.getElementById('xpBadge');
     const chipBadge = ensureChipBadge(topbarRight);
+    if (xpBadge){
+      moveNode(xpBadge, topbarRight, chipBadge || avatarShell);
+    }
+    if (chipBadge){
+      moveNode(chipBadge, topbarRight, avatarShell);
+    }
     if (avatarShell){
-      if (xpBadge) moveNode(xpBadge, topbarRight, avatarShell);
-      if (chipBadge) moveNode(chipBadge, topbarRight, avatarShell);
-    } else {
-      if (xpBadge) moveNode(xpBadge, topbarRight);
-      if (chipBadge) moveNode(chipBadge, topbarRight);
+      moveNode(avatarShell, topbarRight);
     }
   }
 
@@ -234,34 +231,67 @@
     });
   }
 
+  function isChipsClientReady(){
+    return !!(window && window.ChipsClient && typeof window.ChipsClient.fetchBalance === 'function');
+  }
+
   function ensureChipsClientLoaded(){
-    if (window && window.ChipsClient && typeof window.ChipsClient.fetchBalance === 'function'){
+    if (isChipsClientReady()){
       return Promise.resolve(true);
     }
     if (chipsClientPromise) return chipsClientPromise;
     chipsClientPromise = new Promise(resolve => {
       if (!doc || typeof doc.createElement !== 'function'){ resolve(false); return; }
+      let resolved = false;
+      let pollTimer = null;
+      let timeoutTimer = null;
+      const finish = (value) => {
+        if (resolved) return;
+        resolved = true;
+        if (pollTimer) clearInterval(pollTimer);
+        if (timeoutTimer) clearTimeout(timeoutTimer);
+        resolve(value);
+      };
+
+      if (isChipsClientReady()){
+        finish(true);
+        return;
+      }
+
       let script = doc.getElementById('chipsClientScript');
+      if (!script && doc.querySelectorAll){
+        const scripts = doc.querySelectorAll('script[src]');
+        for (let i = 0; i < scripts.length; i++){
+          const item = scripts[i];
+          const src = item && item.getAttribute ? item.getAttribute('src') : null;
+          if (src && src.indexOf('/js/chips/client.js') !== -1){
+            script = item;
+            break;
+          }
+        }
+      }
+
       if (!script){
         script = doc.createElement('script');
         script.id = 'chipsClientScript';
         script.src = '/js/chips/client.js';
         script.async = true;
-        script.addEventListener('load', () => {
-          const ready = !!(window && window.ChipsClient && typeof window.ChipsClient.fetchBalance === 'function');
-          resolve(ready);
-        });
-        script.addEventListener('error', () => resolve(false));
         const target = doc.head || doc.body || doc.documentElement;
         if (target && target.appendChild){ target.appendChild(script); }
-        else { resolve(false); }
-      } else {
-        script.addEventListener('load', () => {
-          const ready = !!(window && window.ChipsClient && typeof window.ChipsClient.fetchBalance === 'function');
-          resolve(ready);
-        });
-        script.addEventListener('error', () => resolve(false));
       }
+
+      if (script && script.addEventListener){
+        script.addEventListener('load', () => finish(isChipsClientReady()));
+        script.addEventListener('error', () => finish(false));
+      }
+
+      pollTimer = setInterval(() => {
+        if (isChipsClientReady()){
+          finish(true);
+        }
+      }, 50);
+
+      timeoutTimer = setTimeout(() => finish(false), 1500);
     });
     return chipsClientPromise;
   }
