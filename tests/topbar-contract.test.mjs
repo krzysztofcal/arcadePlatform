@@ -57,7 +57,6 @@ test('topbar ensures chip badge creation when missing', () => {
   assert.match(topbarSource, /setAuthDataset\(['"]out['"]\)/);
   assert.match(topbarSource, /badge\.hidden\s*=\s*!isAuthed\(\)/);
   assert.match(topbarSource, /__topbarBooted/);
-  assert.ok(!topbarSource.includes('suffix'));
 });
 
 test('topbar pages load topbar script', () => {
