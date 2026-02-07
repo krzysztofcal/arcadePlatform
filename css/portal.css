@@ -108,7 +108,6 @@ html[data-auth="out"] #chipBadge{ display:none !important; }
 
 .account-page .xp-page > article{ flex:1 1 auto; min-height:0; display:flex; flex-direction:column; }
 
-.account-page main > article{ flex:1 1 auto; min-height:0; display:flex; flex-direction:column; }
 
 .account-page .chip-panel{ flex:1 1 auto; min-height:0; }
 
