@@ -54,7 +54,6 @@ test('topbar ensures chip badge creation when missing', () => {
   assert.ok(!topbarSource.includes('_user || _session'));
   assert.ok(!topbarSource.includes('ensureChipsClientLoaded'));
   assert.ok(!topbarSource.includes('chipsClientScript'));
-  assert.ok(!topbarSource.includes('/js/chips/client.js'));
   assert.match(topbarSource, /setAuthDataset\(['"]out['"]\)/);
   assert.match(topbarSource, /badge\.hidden\s*=\s*!isAuthed\(\)/);
 });
@@ -73,6 +72,7 @@ test('topbar pages load topbar script', () => {
 test('root pages use relative topbar and format scripts', () => {
   const relativeTopbar = /src="js\/topbar\.js"/;
   const relativeFormat = /src="js\/core\/number-format\.js"/;
+  const relativeChips = /src="js\/chips\/client\.js"/;
   const absoluteTopbar = /src="\/js\/topbar\.js"/;
   const absoluteFormat = /src="\/js\/core\/number-format\.js"/;
   const absoluteChips = /src="\/js\/chips\/client\.js"/;
@@ -93,6 +93,7 @@ test('root pages use relative topbar and format scripts', () => {
     if (!content) return;
     assert.match(content, relativeTopbar);
     assert.match(content, relativeFormat);
+    assert.match(content, relativeChips);
     assert.ok(!absoluteTopbar.test(content));
     assert.ok(!absoluteFormat.test(content));
     assert.ok(!absoluteChips.test(content));
@@ -102,6 +103,8 @@ test('root pages use relative topbar and format scripts', () => {
   assert.match(pokerTable, absoluteTopbar);
   assert.match(pokerIndex, absoluteFormat);
   assert.match(pokerTable, absoluteFormat);
+  assert.match(pokerIndex, absoluteChips);
+  assert.match(pokerTable, absoluteChips);
 });
 
 test('chip badge is only provided by topbar', () => {

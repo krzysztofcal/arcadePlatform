@@ -3,6 +3,7 @@
   const doc = document;
   const chipNodes = { badge: null, amount: null, ready: false };
   let chipInFlight = null;
+  let chipsClientWaitTries = 0;
   const AuthState = { UNKNOWN: 0, SIGNED_OUT: 1, SIGNED_IN: 2 };
   let authState = AuthState.SIGNED_OUT;
   let authWired = false;
@@ -252,9 +253,17 @@
     }
     if (!chipNodes.badge) return;
     if (!window || !window.ChipsClient || typeof window.ChipsClient.fetchBalance !== 'function'){
+      if (chipsClientWaitTries < 6){
+        chipsClientWaitTries += 1;
+        setChipBadge('', { loading: true });
+        setTimeout(refreshChipBadge, 150);
+        return;
+      }
+      chipsClientWaitTries = 0;
       hideChipBadge();
       return;
     }
+    chipsClientWaitTries = 0;
     if (chipInFlight){ return chipInFlight; }
     setChipBadge('', { loading: true });
     chipInFlight = (async function(){
