@@ -10,6 +10,7 @@ const repoRoot = path.join(__dirname, '..');
 
 const topbarSource = await readFile(path.join(repoRoot, 'js', 'topbar.js'), 'utf8');
 const xpCoreSource = await readFile(path.join(repoRoot, 'js', 'xp', 'core.js'), 'utf8');
+const formatSource = await readFile(path.join(repoRoot, 'js', 'core', 'number-format.js'), 'utf8');
 const accountHtml = await readFile(path.join(repoRoot, 'account.html'), 'utf8');
 const indexHtml = await readFile(path.join(repoRoot, 'index.html'), 'utf8');
 let playHtml = null;
@@ -76,8 +77,9 @@ test('game pages load portal css for topbar styles', () => {
 });
 
 test('compact number formatting helpers exist', () => {
-  assert.match(topbarSource, /formatCompactNumber/);
-  assert.match(xpCoreSource, /formatCompactNumber/);
+  assert.match(topbarSource, /ArcadeFormat/);
+  assert.match(formatSource, /formatCompactNumber/);
+  assert.ok(!xpCoreSource.includes('formatCompactNumber'));
 });
 
 test('xp badge placeholders are compact', () => {

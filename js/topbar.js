@@ -6,6 +6,7 @@
   let chipsClientPromise = null;
   let isSignedIn = false;
   let authWired = false;
+  let authWireAttempts = 0;
   const CHIP_BADGE_HREF = '/account.html#chipPanel';
 
   function pickPreferredTopbar(list){
@@ -138,18 +139,13 @@
     if (!topbarRight) return;
     const avatarShell = doc.getElementById('avatarShell');
     const xpBadge = doc.getElementById('xpBadge');
-    if (xpBadge){
-      moveNode(xpBadge, topbarRight, avatarShell || topbarRight.firstChild);
-    }
     const chipBadge = ensureChipBadge(topbarRight);
-    if (chipBadge){
-      if (xpBadge && xpBadge.parentNode === topbarRight){
-        moveNode(chipBadge, topbarRight, xpBadge.nextSibling || avatarShell);
-      } else if (avatarShell){
-        moveNode(chipBadge, topbarRight, avatarShell);
-      } else {
-        moveNode(chipBadge, topbarRight);
-      }
+    if (avatarShell){
+      if (xpBadge) moveNode(xpBadge, topbarRight, avatarShell);
+      if (chipBadge) moveNode(chipBadge, topbarRight, avatarShell);
+    } else {
+      if (xpBadge) moveNode(xpBadge, topbarRight);
+      if (chipBadge) moveNode(chipBadge, topbarRight);
     }
   }
 
@@ -199,6 +195,9 @@
   }
 
   function formatCompactNumber(value){
+    if (window && window.ArcadeFormat && typeof window.ArcadeFormat.formatCompactNumber === 'function'){
+      return window.ArcadeFormat.formatCompactNumber(value);
+    }
     const numeric = Number(value);
     if (!Number.isFinite(numeric)) return '0';
     const abs = Math.abs(numeric);
@@ -247,14 +246,20 @@
         script = doc.createElement('script');
         script.id = 'chipsClientScript';
         script.src = '/js/chips/client.js';
-        script.defer = true;
-        script.addEventListener('load', () => resolve(true));
+        script.async = true;
+        script.addEventListener('load', () => {
+          const ready = !!(window && window.ChipsClient && typeof window.ChipsClient.fetchBalance === 'function');
+          resolve(ready);
+        });
         script.addEventListener('error', () => resolve(false));
         const target = doc.head || doc.body || doc.documentElement;
         if (target && target.appendChild){ target.appendChild(script); }
         else { resolve(false); }
       } else {
-        script.addEventListener('load', () => resolve(true));
+        script.addEventListener('load', () => {
+          const ready = !!(window && window.ChipsClient && typeof window.ChipsClient.fetchBalance === 'function');
+          resolve(ready);
+        });
         script.addEventListener('error', () => resolve(false));
       }
     });
@@ -333,7 +338,16 @@
     doc.addEventListener('chips:tx-complete', refreshChipBadge);
   }
 
-  wireAuthBridge();
+  function tryWireAuthBridge(){
+    if (authWired) return;
+    wireAuthBridge();
+    if (authWired) return;
+    authWireAttempts += 1;
+    if (authWireAttempts >= 8) return;
+    setTimeout(tryWireAuthBridge, 250);
+  }
+
+  tryWireAuthBridge();
 
   if (doc.readyState === 'loading'){
     doc.addEventListener('DOMContentLoaded', function(){
