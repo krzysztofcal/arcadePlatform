@@ -64,6 +64,7 @@ test('chip badge styles only live in portal css', () => {
   assert.match(portalCss, /--topbar-offset/);
   assert.match(portalCss, /safe-area-inset-top/);
   assert.ok(!portalCss.includes('--topbar-h:calc'));
+  assert.ok(!portalCss.includes('safe-area-inset-top, 0px)'));
   assert.ok(!gameCss.includes('--topbar-safe'));
   assert.ok(!gameCss.includes('--topbar-h:calc'));
   assert.ok(!gameCss.includes('.chip-pill'));
