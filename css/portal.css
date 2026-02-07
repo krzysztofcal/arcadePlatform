@@ -1,7 +1,7 @@
-:root{ --bg:#0b1020; --card:#111735; --card-2:#0e1530; --muted:#9fb0d0; --accent:#6ee7e7; --accent-2:#a78bfa; --border:#202a55; --chip:#0f2440; --brand:#e2e9ff; --topbar-safe:env(safe-area-inset-top, 0px); --topbar-h:calc(64px + var(--topbar-safe)); --footer-h:72px; }
+:root{ --bg:#0b1020; --card:#111735; --card-2:#0e1530; --muted:#9fb0d0; --accent:#6ee7e7; --accent-2:#a78bfa; --border:#202a55; --chip:#0f2440; --brand:#e2e9ff; --topbar-h:64px; --topbar-safe:env(safe-area-inset-top, 0px); --topbar-offset:calc(var(--topbar-h) + var(--topbar-safe)); --footer-h:72px; }
 
 *{box-sizing:border-box} html,body{height:100%}
-body{margin:0; background:linear-gradient(180deg, #0b1020 0%, #0a0d1a 100%); color:#e8eeff; font-family:Poppins, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; padding-bottom:calc(var(--footer-h) + 32px + env(safe-area-inset-bottom, 0px)); padding-top:calc(var(--topbar-h) + 16px);}
+body{margin:0; background:linear-gradient(180deg, #0b1020 0%, #0a0d1a 100%); color:#e8eeff; font-family:Poppins, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; padding-bottom:calc(var(--footer-h) + 32px + env(safe-area-inset-bottom, 0px)); padding-top:calc(var(--topbar-offset) + 16px);}
 .shell{display:grid; grid-template-columns: 64px 1fr; gap:16px; min-height:100vh; padding:16px;}
 .sidebar{ background:var(--card); border:1px solid var(--border); border-radius:20px; padding:8px; display:flex; flex-direction:column; gap:8px; align-self:start; max-height:320px; overflow:auto; width:64px; transition:width .18s ease; position:sticky; top:calc(var(--topbar-h) + 16px); z-index:20; }
 .sidebar.hidden{ width:0; padding:0; border-width:0; overflow:hidden; }
@@ -20,7 +20,7 @@ body{margin:0; background:linear-gradient(180deg, #0b1020 0%, #0a0d1a 100%); col
 /* Hamburger */
 .hamburger{ width:40px; height:40px; display:grid; place-items:center; background:transparent; border:1px solid var(--border); border-radius:10px; margin-right:8px; cursor:pointer; }
 .hamburger span{ display:block; width:18px; height:2px; background:#cdd6ff; margin:3px 0; }
-.topbar{ position:fixed; left:0; right:0; top:0; min-height:var(--topbar-h); display:flex; align-items:center; gap:12px; padding:12px 18px; padding-top:calc(12px + var(--topbar-safe)); background:var(--card); border-bottom:1px solid var(--border); z-index:100; overflow:visible; }
+.topbar{ position:fixed; left:0; right:0; top:0; height:var(--topbar-offset); display:flex; align-items:center; gap:12px; padding:12px 18px; padding-top:calc(12px + var(--topbar-safe)); background:var(--card); border-bottom:1px solid var(--border); z-index:100; overflow:visible; }
 .topbar-left{ display:flex; align-items:center; gap:12px; flex:1; min-width:0; overflow:visible; }
 .topbar-right{ margin-left:auto; display:flex; align-items:center; gap:12px; white-space:nowrap; flex:0 0 auto; }
 .brand{ display:flex; align-items:center; gap:10px; text-decoration:none; cursor:pointer; transition:opacity .2s ease; }
@@ -28,7 +28,7 @@ body{margin:0; background:linear-gradient(180deg, #0b1020 0%, #0a0d1a 100%); col
 .brand:active{ opacity:.75; }
 .logo{ width:36px; height:36px; border-radius:12px; background: radial-gradient(120% 140% at 10% 10%, var(--accent) 0%, var(--accent-2) 60%, #1b1f45 100%); border:1px solid var(--border); box-shadow:0 0 24px rgba(167,139,250,.25) inset; }
 .brand h1{margin:0; font-size:18px; letter-spacing:.3px; color:var(--brand); font-weight:800;}
-.search-box{ display:flex; align-items:center; gap:8px; background:var(--card-2); border:1px solid var(--border); padding:10px 12px; border-radius:14px; flex:1 1 360px; min-width:160px; transition:border-color .18s ease, box-shadow .18s ease; position:relative; }
+.search-box{ display:flex; align-items:center; gap:8px; background:var(--card-2); border:1px solid var(--border); padding:10px 12px; border-radius:14px; flex:1 1 auto; min-width:140px; transition:border-color .18s ease, box-shadow .18s ease; position:relative; }
 .search-box:focus-within{ border-color:rgba(110,231,231,.45); box-shadow:0 0 0 2px rgba(110,231,231,.18); }
 .search-box input{ width:100%; min-width:0; background:transparent; border:0; color:#dfe7ff; outline:none; font:600 14px Poppins, sans-serif; }
 

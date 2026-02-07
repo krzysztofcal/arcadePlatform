@@ -98,10 +98,10 @@
       badge.hidden = true;
       const label = doc.createElement('span');
       label.className = 'chip-badge__label';
-      label.appendChild(doc.createTextNode('Chips: '));
+      label.appendChild(doc.createTextNode('CH: '));
       const amount = doc.createElement('span');
       amount.id = 'chipBadgeAmount';
-      amount.textContent = '…';
+      amount.textContent = '';
       label.appendChild(amount);
       badge.appendChild(label);
     } else if (badge.getAttribute('href') !== CHIP_BADGE_HREF){
@@ -112,16 +112,16 @@
       const label = badge.querySelector('.chip-badge__label');
       amount = doc.createElement('span');
       amount.id = 'chipBadgeAmount';
-      amount.textContent = '…';
+      amount.textContent = '';
       if (label){
-        if (label.textContent.indexOf('Chips:') === -1){
-          label.insertBefore(doc.createTextNode('Chips: '), label.firstChild || null);
+        if (label.textContent.indexOf('CH:') === -1){
+          label.insertBefore(doc.createTextNode('CH: '), label.firstChild || null);
         }
         label.appendChild(amount);
       } else {
         const wrap = doc.createElement('span');
         wrap.className = 'chip-badge__label';
-        wrap.appendChild(doc.createTextNode('Chips: '));
+        wrap.appendChild(doc.createTextNode('CH: '));
         wrap.appendChild(amount);
         badge.textContent = '';
         badge.appendChild(wrap);
@@ -277,7 +277,7 @@
       }
     }
     if (chipInFlight){ return chipInFlight; }
-    setChipBadge('…', { loading: true });
+    setChipBadge('', { loading: true });
     chipInFlight = (async function(){
       try {
         const balance = await window.ChipsClient.fetchBalance();
@@ -290,6 +290,7 @@
           return;
         }
         if (err && err.code === 'not_authenticated'){
+          setSignedIn(false);
           renderChipBadgeSignedOut();
           return;
         }
@@ -333,9 +334,6 @@
   }
 
   wireAuthBridge();
-  if (doc.readyState === 'loading'){
-    doc.addEventListener('DOMContentLoaded', wireAuthBridge, { once: true });
-  }
 
   if (doc.readyState === 'loading'){
     doc.addEventListener('DOMContentLoaded', function(){
