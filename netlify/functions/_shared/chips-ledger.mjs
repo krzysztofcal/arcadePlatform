@@ -148,7 +148,8 @@ function decodeLedgerCursor(cursor) {
 }
 
 function encodeLedgerCursor(createdAt, entrySeq) {
-  if (!createdAt || !entrySeq) return null;
+  if (!createdAt || typeof createdAt !== "string" || !createdAt.trim()) return null;
+  if (!Number.isInteger(entrySeq) || entrySeq <= 0) return null;
   try {
     const payload = JSON.stringify({ createdAt, entrySeq });
     return Buffer.from(payload, "utf8").toString("base64");

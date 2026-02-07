@@ -100,6 +100,33 @@
     nodes.chipBalanceValue.textContent = amount == null ? '—' : amount.toLocaleString();
   }
 
+  function ledgerEntryKey(entry){
+    if (!entry) return null;
+    if (entry.created_at && Number.isInteger(entry.entry_seq)){
+      return 'seq:' + entry.created_at + ':' + entry.entry_seq;
+    }
+    if (entry.idempotency_key){ return 'idem:' + entry.idempotency_key; }
+    if (entry.tx_created_at && entry.tx_type && entry.amount != null){
+      return 'tx:' + entry.tx_created_at + ':' + entry.tx_type + ':' + entry.amount + ':' + (entry.reference || '') + ':' + (entry.description || '');
+    }
+    if (entry.created_at && entry.tx_type && entry.amount != null){
+      return 'entry:' + entry.created_at + ':' + entry.tx_type + ':' + entry.amount + ':' + (entry.reference || '');
+    }
+    if (entry.created_at || entry.tx_type || entry.amount != null || entry.reference || entry.description){
+      try {
+        return 'fallback:' + JSON.stringify({
+          created_at: entry.created_at || null,
+          tx_created_at: entry.tx_created_at || null,
+          tx_type: entry.tx_type || null,
+          amount: entry.amount,
+          reference: entry.reference || null,
+          description: entry.description || null,
+        });
+      } catch (_err){}
+    }
+    return null;
+  }
+
   function formatDateTime(value){
     if (!value) return '';
     var parsed = new Date(value);
@@ -257,9 +284,7 @@
     var seen = new Set();
     function addEntry(entry){
       if (!entry) return;
-      var key = (entry.created_at && Number.isInteger(entry.entry_seq))
-        ? (entry.created_at + ':' + entry.entry_seq)
-        : null;
+      var key = ledgerEntryKey(entry);
       if (key){
         if (seen.has(key)) return;
         seen.add(key);

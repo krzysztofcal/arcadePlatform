@@ -379,3 +379,54 @@ test("dedupes overlapping items by created_at and entry_seq", async () => {
   assert.equal(Number.parseInt(spacer.style.height, 10), 4 * 72, "spacer height should match unique items");
   assert.equal(calls.length, 2, "should fetch two pages");
 });
+
+test("dedupes items with null entry_seq using idempotency_key", async () => {
+  const calls = [];
+  const firstPage = [
+    { id: 1, entry_seq: null, idempotency_key: "idem-1", tx_type: "BUY_IN", amount: 1, created_at: "2026-02-06T19:00:00.000Z" },
+    { id: 2, entry_seq: null, idempotency_key: "idem-2", tx_type: "BUY_IN", amount: 1, created_at: "2026-02-06T18:59:00.000Z" },
+  ];
+  const chipsClient = {
+    fetchBalance() {
+      return Promise.resolve({ balance: 1200 });
+    },
+    fetchLedger(options) {
+      calls.push(options);
+      if (!options || !options.cursor) {
+        return Promise.resolve({ items: firstPage, nextCursor: "cursor-1" });
+      }
+      return Promise.resolve({
+        items: [
+          { id: 3, entry_seq: null, idempotency_key: "idem-2", tx_type: "BUY_IN", amount: 1, created_at: "2026-02-06T18:59:00.000Z" },
+          { id: 4, entry_seq: null, idempotency_key: "idem-3", tx_type: "BUY_IN", amount: 1, created_at: "2026-02-06T18:58:00.000Z" },
+        ],
+        nextCursor: null,
+      });
+    },
+  };
+  const { windowObj, document } = buildContext(chipsClient);
+  const context = vm.createContext({
+    window: windowObj,
+    document,
+    requestAnimationFrame: windowObj.requestAnimationFrame,
+    CustomEvent: function() {},
+  });
+  vm.runInContext(source, context);
+
+  await flush();
+  await flush();
+  await flush();
+
+  const scroll = document.getElementById("chipLedgerScroll");
+  scroll.clientHeight = 200;
+  scroll.scrollTop = 400;
+  scroll.dispatchEvent({ type: "scroll" });
+
+  await flush();
+  await flush();
+  await flush();
+
+  const spacer = document.getElementById("chipLedgerSpacer");
+  assert.equal(Number.parseInt(spacer.style.height, 10), 4 * 72, "spacer height should match unique items");
+  assert.equal(calls.length, 2, "should fetch two pages");
+});
