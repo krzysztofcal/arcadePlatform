@@ -84,6 +84,6 @@ test('xp badge placeholders are compact', () => {
   xpHtmlFiles.forEach((content) => {
     if (!content) return;
     assert.ok(!content.includes('Syncing XP'));
-    assert.ok(content.includes('>XP<'));
+    assert.match(content, /xp-badge__label[^>]*>\s*XP\s*</);
   });
 });
