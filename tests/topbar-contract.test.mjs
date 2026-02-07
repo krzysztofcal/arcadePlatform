@@ -74,6 +74,7 @@ test('root pages use relative topbar and format scripts', () => {
   const relativeFormat = /src="js\/core\/number-format\.js"/;
   const absoluteTopbar = /src="\/js\/topbar\.js"/;
   const absoluteFormat = /src="\/js\/core\/number-format\.js"/;
+  const absoluteChips = /src="\/js\/chips\/client\.js"/;
   const rootPages = [
     accountHtml,
     indexHtml,
@@ -93,7 +94,9 @@ test('root pages use relative topbar and format scripts', () => {
     assert.match(content, relativeFormat);
     assert.ok(!absoluteTopbar.test(content));
     assert.ok(!absoluteFormat.test(content));
+    assert.ok(!absoluteChips.test(content));
   });
+  assert.match(accountHtml, /src="js\/chips\/client\.js"/);
   assert.match(pokerIndex, absoluteTopbar);
   assert.match(pokerTable, absoluteTopbar);
   assert.match(pokerIndex, absoluteFormat);

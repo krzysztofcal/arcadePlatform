@@ -14,6 +14,8 @@
     doc.documentElement.dataset.auth = state;
   }
 
+  setAuthDataset('out');
+
   function isAuthed(){
     return authState === AuthState.SIGNED_IN;
   }
@@ -321,8 +323,6 @@
   }
 
   tryWireAuthBridge();
-
-  setAuthDataset('out');
 
   if (doc.readyState === 'loading'){
     doc.addEventListener('DOMContentLoaded', function(){
