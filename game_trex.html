@@ -8,6 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/portal.css">
   <link rel="stylesheet" href="css/game.css">
   <link rel="stylesheet" href="/css/xp-overlay.css">
   <link rel="stylesheet" href="/css/search-popup.css">
@@ -29,6 +30,8 @@
   <script src="/js/auth/supabase-config.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js" defer></script>
   <script src="/js/auth/supabaseClient.js" defer></script>
+  <script src="js/chips/client.js" defer></script>
+  <script src="js/core/number-format.js" defer></script>
   <script src="js/topbar.js" defer></script>
   <script src="js/xpClient.js" defer></script>
   <style>
@@ -59,7 +62,7 @@
     </div>
     <div class="topbar-right">
       <a id="xpBadge" class="xp-badge xp-badge--loading" aria-live="polite" aria-busy="true" href="xp.html">
-        <span class="xp-badge__label">Syncing XP…</span>
+        <span class="xp-badge__label">XP</span>
       </a>
       <div class="avatar-shell" id="avatarShell">
         <button type="button" class="avatar-btn" id="avatarButton" aria-haspopup="true" aria-expanded="false">
@@ -245,4 +248,3 @@
   </script>
 </body>
 </html>
-

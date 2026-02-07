@@ -1,8 +1,28 @@
 (function(){
   if (typeof document === 'undefined') return;
   const doc = document;
+  const win = window;
+  if (win.__topbarBooted) return;
+  win.__topbarBooted = true;
   const chipNodes = { badge: null, amount: null, ready: false };
   let chipInFlight = null;
+  let chipsClientWaitTries = 0;
+  const AuthState = { UNKNOWN: 0, SIGNED_OUT: 1, SIGNED_IN: 2 };
+  let authState = AuthState.SIGNED_OUT;
+  let authWired = false;
+  let authWireAttempts = 0;
+  const CHIP_BADGE_HREF = '/account.html#chipPanel';
+
+  function setAuthDataset(state){
+    if (!doc || !doc.documentElement) return;
+    doc.documentElement.dataset.auth = state;
+  }
+
+  setAuthDataset('out');
+
+  function isAuthed(){
+    return authState === AuthState.SIGNED_IN;
+  }
 
   function pickPreferredTopbar(list){
     if (!list || !list.length) return null;
@@ -56,6 +76,88 @@
     prune();
   }
 
+  function ensureTopbarRight(){
+    const topbar = doc.querySelector('.topbar');
+    if (!topbar) return null;
+    let right = topbar.querySelector('.topbar-right');
+    if (!right){
+      right = doc.createElement('div');
+      right.className = 'topbar-right';
+      topbar.appendChild(right);
+    }
+    return right;
+  }
+
+  function moveNode(node, container, before){
+    if (!node || !container) return;
+    if (before && before.parentNode === container){
+      container.insertBefore(node, before);
+      return;
+    }
+    container.appendChild(node);
+  }
+
+  function ensureChipBadge(topbarRight){
+    let badge = doc.getElementById('chipBadge');
+    if (!badge){
+      badge = doc.createElement('a');
+      badge.id = 'chipBadge';
+      badge.className = 'chip-badge chip-pill chip-pill--loading';
+      badge.setAttribute('aria-live', 'polite');
+      badge.setAttribute('aria-busy', 'true');
+      badge.setAttribute('href', CHIP_BADGE_HREF);
+      badge.hidden = true;
+      const label = doc.createElement('span');
+      label.className = 'chip-badge__label';
+      label.appendChild(doc.createTextNode('CH: '));
+      const amount = doc.createElement('span');
+      amount.id = 'chipBadgeAmount';
+      amount.textContent = '';
+      label.appendChild(amount);
+      badge.appendChild(label);
+    } else if (badge.getAttribute('href') !== CHIP_BADGE_HREF){
+      badge.setAttribute('href', CHIP_BADGE_HREF);
+    }
+    let amount = doc.getElementById('chipBadgeAmount');
+    if (!amount){
+      const label = badge.querySelector('.chip-badge__label');
+      amount = doc.createElement('span');
+      amount.id = 'chipBadgeAmount';
+      amount.textContent = '';
+      if (label){
+        if (label.textContent.indexOf('CH:') === -1){
+          label.insertBefore(doc.createTextNode('CH: '), label.firstChild || null);
+        }
+        label.appendChild(amount);
+      } else {
+        const wrap = doc.createElement('span');
+        wrap.className = 'chip-badge__label';
+        wrap.appendChild(doc.createTextNode('CH: '));
+        wrap.appendChild(amount);
+        badge.textContent = '';
+        badge.appendChild(wrap);
+      }
+    }
+    if (topbarRight && badge.parentNode !== topbarRight){
+      topbarRight.appendChild(badge);
+    }
+    return badge;
+  }
+
+  function normalizeTopbarBadges(){
+    const topbarRight = ensureTopbarRight();
+    if (!topbarRight) return;
+    const avatarShell = doc.getElementById('avatarShell');
+    const xpBadge = doc.getElementById('xpBadge');
+    const chipBadge = ensureChipBadge(topbarRight);
+    if (xpBadge && xpBadge.parentNode !== topbarRight){ topbarRight.appendChild(xpBadge); }
+    if (chipBadge && chipBadge.parentNode !== topbarRight){ topbarRight.appendChild(chipBadge); }
+    if (avatarShell && avatarShell.parentNode !== topbarRight){ topbarRight.appendChild(avatarShell); }
+    if (xpBadge && chipBadge){ moveNode(xpBadge, topbarRight, chipBadge); }
+    if (chipBadge && avatarShell){ moveNode(chipBadge, topbarRight, avatarShell); }
+    if (xpBadge && avatarShell && !chipBadge){ moveNode(xpBadge, topbarRight, avatarShell); }
+  }
+
   function refreshXpBadge(){
     if (!window || !window.XPClient || typeof window.XPClient.refreshBadgeFromServer !== 'function') return;
     try {
@@ -75,9 +177,9 @@
     const badge = chipNodes.badge;
     const amount = chipNodes.amount;
     if (!badge || !amount) return;
-    badge.hidden = false;
-    amount.textContent = text;
-    const loading = options && options.loading;
+    if (!isAuthed()) return;
+    const loading = !!(options && options.loading);
+    amount.textContent = text || '';
     if (loading){
       badge.classList.add('chip-pill--loading');
       badge.setAttribute('aria-busy', 'true');
@@ -93,19 +195,72 @@
   }
 
   function renderChipBadgeBalance(amount){
-    const text = amount == null ? 'Chips unavailable' : `${amount.toLocaleString()} chips`;
+    const formatter = window && window.ArcadeFormat && typeof window.ArcadeFormat.formatCompactNumber === 'function'
+      ? window.ArcadeFormat.formatCompactNumber
+      : null;
+    const text = amount == null ? '—' : formatter ? formatter(amount) : String(Math.round(amount));
     setChipBadge(text, { loading: false });
   }
 
-  function renderChipBadgeSignedOut(){
-    setChipBadge('Sign in for chips', { loading: false });
+  function setAuthState(next){
+    if (authState === next) return;
+    authState = next;
+    setAuthDataset(next === AuthState.SIGNED_IN ? 'in' : 'out');
+    const badge = doc.getElementById('chipBadge');
+    const amount = doc.getElementById('chipBadgeAmount');
+    if (badge){
+      badge.hidden = !isAuthed();
+      badge.classList.remove('chip-pill--loading');
+      badge.setAttribute('aria-busy', 'false');
+    }
+    if (amount){ amount.textContent = ''; }
+    if (!isAuthed()){
+      hideChipBadge();
+      return;
+    }
+    if (badge){ badge.hidden = false; }
+    setChipBadge('', { loading: true });
+    refreshChipBadge();
+  }
+
+  function resolveInitialAuth(){
+    if (!window || !window.SupabaseAuth || typeof window.SupabaseAuth.getCurrentUser !== 'function') return;
+    window.SupabaseAuth.getCurrentUser().then(function(user){
+      setAuthState(user ? AuthState.SIGNED_IN : AuthState.SIGNED_OUT);
+      if (!isAuthed()){
+        hideChipBadge();
+        return;
+      }
+      refreshXpBadge();
+      refreshChipBadge();
+    }).catch(function(){
+      setAuthState(AuthState.SIGNED_OUT);
+      hideChipBadge();
+    });
   }
 
   async function refreshChipBadge(){
+    normalizeTopbarBadges();
     ensureChipNodes();
-    if (!chipNodes.badge || !window || !window.ChipsClient || typeof window.ChipsClient.fetchBalance !== 'function') return;
+    if (!isAuthed()){
+      hideChipBadge();
+      return;
+    }
+    if (!chipNodes.badge) return;
+    if (!window || !window.ChipsClient || typeof window.ChipsClient.fetchBalance !== 'function'){
+      if (chipsClientWaitTries < 6){
+        chipsClientWaitTries += 1;
+        setChipBadge('', { loading: true });
+        setTimeout(refreshChipBadge, 150);
+        return;
+      }
+      chipsClientWaitTries = 0;
+      hideChipBadge();
+      return;
+    }
+    chipsClientWaitTries = 0;
     if (chipInFlight){ return chipInFlight; }
-    setChipBadge('Syncing chips…', { loading: true });
+    setChipBadge('', { loading: true });
     chipInFlight = (async function(){
       try {
         const balance = await window.ChipsClient.fetchBalance();
@@ -118,10 +273,11 @@
           return;
         }
         if (err && err.code === 'not_authenticated'){
-          renderChipBadgeSignedOut();
+          setAuthState(AuthState.SIGNED_OUT);
+          hideChipBadge();
           return;
         }
-        setChipBadge('Chip sync failed', { loading: false });
+        hideChipBadge();
       } finally {
         chipInFlight = null;
       }
@@ -130,20 +286,31 @@
     return chipInFlight;
   }
 
-  function handleAuthChange(event, _user, _session){
-    if (event === 'SIGNED_IN'){
+  function handleAuthChange(event, user, session){
+    const hasUser = !!(user || (session && session.user));
+    if (event === 'SIGNED_OUT'){
+      setAuthState(AuthState.SIGNED_OUT);
+      hideChipBadge();
+      return;
+    }
+    if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION'){
+      setAuthState(hasUser ? AuthState.SIGNED_IN : AuthState.SIGNED_OUT);
+      if (!isAuthed()){
+        hideChipBadge();
+        return;
+      }
       refreshXpBadge();
       refreshChipBadge();
       return;
     }
-    if (event === 'SIGNED_OUT'){
-      renderChipBadgeSignedOut();
-    }
   }
 
   function wireAuthBridge(){
+    if (authWired) return;
     if (!window || !window.SupabaseAuth || typeof window.SupabaseAuth.onAuthChange !== 'function') return;
+    authWired = true;
     window.SupabaseAuth.onAuthChange(handleAuthChange);
+    resolveInitialAuth();
   }
 
   function wireChipEvents(){
@@ -151,19 +318,24 @@
     doc.addEventListener('chips:tx-complete', refreshChipBadge);
   }
 
-  if (doc.readyState === 'loading'){
-    doc.addEventListener('DOMContentLoaded', wireAuthBridge, { once: true });
-  } else {
+  function tryWireAuthBridge(){
+    if (authWired) return;
     wireAuthBridge();
+    if (authWired) return;
+    authWireAttempts += 1;
+    if (authWireAttempts >= 8) return;
+    setTimeout(tryWireAuthBridge, 250);
   }
+
+  tryWireAuthBridge();
 
   if (doc.readyState === 'loading'){
     doc.addEventListener('DOMContentLoaded', function(){
-      refreshChipBadge();
+      normalizeTopbarBadges();
       wireChipEvents();
     }, { once: true });
   } else {
-    refreshChipBadge();
+    normalizeTopbarBadges();
     wireChipEvents();
   }
 })();
