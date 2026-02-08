@@ -44,11 +44,38 @@ const parseWholeInt = (value) => {
   return parsed;
 };
 
+const parsePositiveIntString = (value) => {
+  if (value === null || value === undefined) return null;
+  const normalized = typeof value === "string" ? value.trim() : String(value);
+  if (!normalized || !/^\d+$/.test(normalized)) return null;
+  if (normalized === "0") return null;
+  return normalized;
+};
+
 const asIso = (value) => {
   if (!value) return null;
   const dt = new Date(value);
   if (Number.isNaN(dt.getTime())) return null;
   return dt.toISOString();
+};
+
+const resolveDisplayCreatedAt = (row, context) => {
+  const fromDisplay = asIso(row?.display_created_at);
+  if (fromDisplay) return fromDisplay;
+  const fromEntry = asIso(row?.created_at);
+  if (fromEntry) return fromEntry;
+  const fromTx = asIso(row?.tx_created_at);
+  if (fromTx) return fromTx;
+  klog("chips:ledger_missing_display_created_at", {
+    entry_seq: context?.entry_seq ?? null,
+    sort_id: context?.sort_id ?? null,
+    tx_type: context?.tx_type ?? null,
+    idempotency_key: context?.idempotency_key ?? null,
+    created_at: row?.created_at ?? null,
+    tx_created_at: row?.tx_created_at ?? null,
+    display_created_at: row?.display_created_at ?? null,
+  });
+  return null;
 };
 
 function badRequest(code, message) {
@@ -138,20 +165,35 @@ function decodeLedgerCursor(cursor) {
   } catch (_err) {
     throw badRequest("invalid_cursor", "Invalid cursor");
   }
-  const createdAt = payload?.createdAt || payload?.created_at;
-  const entrySeq = parsePositiveInt(payload?.entrySeq ?? payload?.entry_seq);
+  const createdAt = payload?.displayCreatedAt || payload?.display_created_at || payload?.createdAt || payload?.created_at;
+  const hasSortKey = payload?.sortId != null || payload?.sort_id != null;
+  const hasSeqKey = payload?.entrySeq != null || payload?.entry_seq != null;
   const parsedCreated = createdAt ? new Date(createdAt) : null;
-  if (!parsedCreated || Number.isNaN(parsedCreated.getTime()) || entrySeq === null) {
+  if (!parsedCreated || Number.isNaN(parsedCreated.getTime())) {
     throw badRequest("invalid_cursor", "Invalid cursor");
   }
-  return { createdAt: parsedCreated.toISOString(), entrySeq };
+  if (hasSortKey) {
+    const sortId = parsePositiveIntString(payload?.sortId ?? payload?.sort_id);
+    if (!sortId) {
+      throw badRequest("invalid_cursor", "Invalid cursor");
+    }
+    return { createdAt: parsedCreated.toISOString(), sortId, mode: "sort_id" };
+  }
+  if (hasSeqKey) {
+    const entrySeq = parsePositiveInt(payload?.entrySeq ?? payload?.entry_seq);
+    if (entrySeq === null) {
+      throw badRequest("invalid_cursor", "Invalid cursor");
+    }
+    return { createdAt: parsedCreated.toISOString(), entrySeq, mode: "entry_seq" };
+  }
+  throw badRequest("invalid_cursor", "Invalid cursor");
 }
 
-function encodeLedgerCursor(createdAt, entrySeq) {
+function encodeLedgerCursor(createdAt, sortId) {
   if (!createdAt || typeof createdAt !== "string" || !createdAt.trim()) return null;
-  if (!Number.isInteger(entrySeq) || entrySeq <= 0) return null;
+  if (typeof sortId !== "string" || !/^\d+$/.test(sortId) || sortId === "0") return null;
   try {
-    const payload = JSON.stringify({ createdAt, entrySeq });
+    const payload = JSON.stringify({ displayCreatedAt: createdAt, sortId });
     return Buffer.from(payload, "utf8").toString("base64");
   } catch (_err) {
     return null;
@@ -162,10 +204,10 @@ function findLastCursorCandidate(entries) {
   if (!Array.isArray(entries)) return null;
   for (let i = entries.length - 1; i >= 0; i -= 1) {
     const entry = entries[i];
-    const parsedCreated = entry?.created_at ? new Date(entry.created_at) : null;
-    const entrySeq = parsePositiveInt(entry?.entry_seq);
-    if (parsedCreated && !Number.isNaN(parsedCreated.getTime()) && entrySeq !== null) {
-      return { createdAt: parsedCreated.toISOString(), entrySeq };
+    const parsedCreated = entry?.display_created_at ? new Date(entry.display_created_at) : null;
+    const sortId = parsePositiveIntString(entry?.sort_id);
+    if (parsedCreated && !Number.isNaN(parsedCreated.getTime()) && sortId !== null) {
+      return { createdAt: parsedCreated.toISOString(), sortId };
     }
   }
   return null;
@@ -183,6 +225,7 @@ async function listUserLedgerAfterSeq(userId, { afterSeq = null, limit = 50 } = 
 with entries as (
   select
     e.entry_seq,
+    e.id as sort_id,
     e.amount,
     e.metadata,
     e.created_at,
@@ -190,7 +233,8 @@ with entries as (
     t.reference,
     t.description,
     t.idempotency_key,
-    t.created_at as tx_created_at
+    t.created_at as tx_created_at,
+    coalesce(e.created_at, t.created_at) as display_created_at
   from public.chips_entries e
   join public.chips_transactions t on t.id = e.transaction_id
   where e.account_id = $1
@@ -239,6 +283,13 @@ select * from entries;
     const parsedAmount = parseWholeInt(row?.amount);
     const createdAt = asIso(row?.created_at);
     const txCreatedAt = asIso(row?.tx_created_at);
+    const displayCreatedAt = resolveDisplayCreatedAt(row, {
+      entry_seq: entrySeq,
+      sort_id: row?.sort_id ?? null,
+      tx_type: row?.tx_type ?? null,
+      idempotency_key: row?.idempotency_key ?? null,
+    });
+    const sortId = parsePositiveIntString(row?.sort_id);
 
     if (parsedAmount === null && row?.amount != null) {
       klog("chips:ledger_invalid_amount", {
@@ -254,6 +305,8 @@ select * from entries;
       raw_amount: row?.amount == null ? null : String(row.amount),
       metadata: row?.metadata ?? null,
       created_at: createdAt,
+      display_created_at: displayCreatedAt,
+      sort_id: sortId,
       tx_type: row?.tx_type ?? null,
       reference: row?.reference ?? null,
       description: row?.description ?? null,
@@ -270,11 +323,13 @@ async function listUserLedger(userId, { cursor = null, limit = 50 } = {}) {
   const account = await getOrCreateUserAccount(userId);
   const parsedCursor = decodeLedgerCursor(cursor);
   const cursorCreatedAt = parsedCursor ? parsedCursor.createdAt : null;
-  const cursorEntrySeq = parsedCursor ? parsedCursor.entrySeq : null;
-  const query = `
+  const cursorSortId = parsedCursor?.mode === "sort_id" ? parsedCursor.sortId : null;
+  const cursorEntrySeq = parsedCursor?.mode === "entry_seq" ? parsedCursor.entrySeq : null;
+  const sortQuery = `
 with entries as (
   select
     e.entry_seq,
+    e.id as sort_id,
     e.amount,
     e.metadata,
     e.created_at,
@@ -282,20 +337,51 @@ with entries as (
     t.reference,
     t.description,
     t.idempotency_key,
-    t.created_at as tx_created_at
+    t.created_at as tx_created_at,
+    coalesce(e.created_at, t.created_at) as display_created_at
   from public.chips_entries e
   join public.chips_transactions t on t.id = e.transaction_id
   where e.account_id = $1
     and (
       $2::timestamptz is null
-      or (e.created_at, e.entry_seq) < ($2::timestamptz, $3::bigint)
+      or (coalesce(e.created_at, t.created_at), e.id) < ($2::timestamptz, $3::bigint)
     )
-  order by e.created_at desc, e.entry_seq desc
+  order by display_created_at desc nulls last, e.id desc
   limit $4
 )
 select * from entries;
 `;
-  const rows = await executeSql(query, [account.id, cursorCreatedAt, cursorEntrySeq, cappedLimit]);
+  const legacyQuery = `
+with entries as (
+  select
+    e.entry_seq,
+    e.id as sort_id,
+    e.amount,
+    e.metadata,
+    e.created_at,
+    t.tx_type,
+    t.reference,
+    t.description,
+    t.idempotency_key,
+    t.created_at as tx_created_at,
+    coalesce(e.created_at, t.created_at) as display_created_at
+  from public.chips_entries e
+  join public.chips_transactions t on t.id = e.transaction_id
+  where e.account_id = $1
+    and (
+      $2::timestamptz is null
+      or (coalesce(e.created_at, t.created_at), e.entry_seq) < ($2::timestamptz, $3::bigint)
+    )
+  order by display_created_at desc nulls last, e.entry_seq desc
+  limit $4
+)
+select * from entries;
+`;
+  const useLegacy = parsedCursor?.mode === "entry_seq";
+  const rows = await executeSql(
+    useLegacy ? legacyQuery : sortQuery,
+    [account.id, cursorCreatedAt, useLegacy ? cursorEntrySeq : cursorSortId, cappedLimit],
+  );
   const rowList = Array.isArray(rows) ? rows : [];
   const hasFullPage = rowList.length === cappedLimit;
   const normalizedEntries = rowList.map(row => {
@@ -312,6 +398,13 @@ select * from entries;
     const parsedAmount = parseWholeInt(row?.amount);
     const createdAt = asIso(row?.created_at);
     const txCreatedAt = asIso(row?.tx_created_at);
+    const displayCreatedAt = resolveDisplayCreatedAt(row, {
+      entry_seq: entrySeq,
+      sort_id: row?.sort_id ?? null,
+      tx_type: row?.tx_type ?? null,
+      idempotency_key: row?.idempotency_key ?? null,
+    });
+    const sortId = parsePositiveIntString(row?.sort_id);
 
     if (parsedAmount === null && row?.amount != null) {
       klog("chips:ledger_invalid_amount", {
@@ -327,6 +420,8 @@ select * from entries;
       raw_amount: row?.amount == null ? null : String(row.amount),
       metadata: row?.metadata ?? null,
       created_at: createdAt,
+      display_created_at: displayCreatedAt,
+      sort_id: sortId,
       tx_type: row?.tx_type ?? null,
       reference: row?.reference ?? null,
       description: row?.description ?? null,
@@ -339,7 +434,7 @@ select * from entries;
     klog("chips:ledger_cursor_missing", { count: normalizedEntries.length });
   }
   const nextCursor = cursorCandidate
-    ? encodeLedgerCursor(cursorCandidate.createdAt, cursorCandidate.entrySeq)
+    ? encodeLedgerCursor(cursorCandidate.createdAt, cursorCandidate.sortId)
     : null;
 
   return { entries: normalizedEntries, items: normalizedEntries, nextCursor };

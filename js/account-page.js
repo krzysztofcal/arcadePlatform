@@ -12,7 +12,7 @@
     hasMore: true,
     loading: false,
     error: null,
-    rowHeight: 72,
+    rowHeight: 80,
     overscan: 4,
     lastLoadAttemptAtMs: 0,
     lastScrollTop: 0,
@@ -54,6 +54,25 @@
     nodes.status.textContent = message || '';
     nodes.status.dataset.tone = tone || '';
     nodes.status.hidden = !message;
+  }
+
+  function klog(kind, data){
+    try {
+      if (window && window.KLog && typeof window.KLog.log === 'function'){
+        window.KLog.log(kind, data || {});
+      }
+    } catch (_err){}
+  }
+
+  function parseSortId(value){
+    if (value === null || value === undefined) return null;
+    var text = String(value);
+    if (!/^\d+$/.test(text)) return null;
+    try {
+      return BigInt(text);
+    } catch (_err){
+      return null;
+    }
   }
 
   function renderUser(user){
@@ -102,21 +121,18 @@
 
   function ledgerEntryKey(entry){
     if (!entry) return null;
-    if (entry.created_at && Number.isInteger(entry.entry_seq)){
-      return 'seq:' + entry.created_at + ':' + entry.entry_seq;
+    var sortIdText = entry && entry.sort_id != null ? String(entry.sort_id) : '';
+    if (sortIdText && /^\d+$/.test(sortIdText)){
+      return 'sid:' + sortIdText;
     }
     if (entry.idempotency_key){ return 'idem:' + entry.idempotency_key; }
-    if (entry.tx_created_at && entry.tx_type && entry.amount != null){
-      return 'tx:' + entry.tx_created_at + ':' + entry.tx_type + ':' + entry.amount + ':' + (entry.reference || '') + ':' + (entry.description || '');
+    if (entry.display_created_at && entry.tx_type && entry.amount != null){
+      return 'entry:' + entry.display_created_at + ':' + entry.tx_type + ':' + entry.amount + ':' + (entry.reference || '');
     }
-    if (entry.created_at && entry.tx_type && entry.amount != null){
-      return 'entry:' + entry.created_at + ':' + entry.tx_type + ':' + entry.amount + ':' + (entry.reference || '');
-    }
-    if (entry.created_at || entry.tx_type || entry.amount != null || entry.reference || entry.description){
+    if (entry.display_created_at || entry.tx_type || entry.amount != null || entry.reference || entry.description){
       try {
         return 'fallback:' + JSON.stringify({
-          created_at: entry.created_at || null,
-          tx_created_at: entry.tx_created_at || null,
+          display_created_at: entry.display_created_at || null,
           tx_type: entry.tx_type || null,
           amount: entry.amount,
           reference: entry.reference || null,
@@ -139,6 +155,27 @@
     return year + '-' + month + '-' + day + ' ' + hour + ':' + minute;
   }
 
+  function resolveLedgerTimestamp(entry){
+    var candidates = [
+      { name: 'display_created_at', value: entry && entry.display_created_at },
+      { name: 'created_at', value: entry && entry.created_at },
+      { name: 'tx_created_at', value: entry && entry.tx_created_at },
+    ];
+    for (var i = 0; i < candidates.length; i++){
+      var candidate = candidates[i];
+      var formatted = formatDateTime(candidate.value);
+      if (formatted){ return formatted; }
+    }
+    klog('chips:ledger_invalid_display_timestamp', {
+      display_created_at: entry && entry.display_created_at,
+      created_at: entry && entry.created_at,
+      tx_created_at: entry && entry.tx_created_at,
+      entry_seq: entry && entry.entry_seq,
+      sort_id: entry && entry.sort_id,
+    });
+    return '—';
+  }
+
   function buildLedgerRow(entry){
     var item = doc.createElement('li');
     item.className = 'chip-ledger__item';
@@ -156,12 +193,11 @@
 
     var time = doc.createElement('div');
     time.className = 'chip-ledger__time';
-    var displayTime = formatDateTime(entry && entry.created_at ? entry.created_at : (entry ? entry.tx_created_at : null));
-    time.textContent = displayTime;
+    time.textContent = resolveLedgerTimestamp(entry);
 
     meta.appendChild(type);
     if (desc.textContent){ meta.appendChild(desc); }
-    if (time.textContent){ meta.appendChild(time); }
+    meta.appendChild(time);
 
     var amount = doc.createElement('div');
     amount.className = 'chip-ledger__amount';
@@ -177,15 +213,11 @@
     } else {
       amount.textContent = '—';
       item.dataset.invalid = 'amount';
-      if (window && window.XP_DIAG && typeof console !== 'undefined' && console && typeof console.debug === 'function'){
-        try {
-          console.debug('[chips] invalid ledger amount', {
-            entry_seq: entry && entry.entry_seq,
-            raw_amount: entry && entry.raw_amount != null ? entry.raw_amount : null,
-            entry: entry,
-          });
-        } catch (_err){}
-      }
+      klog('chips:ledger_invalid_amount', {
+        entry_seq: entry && entry.entry_seq,
+        raw_amount: entry && entry.raw_amount != null ? entry.raw_amount : null,
+        entry: entry,
+      });
     }
 
     item.appendChild(meta);
@@ -298,15 +330,18 @@
       addEntry(items[j]);
     }
     merged.sort(function(a, b){
-      var aCreated = a && a.created_at ? String(a.created_at) : '';
-      var bCreated = b && b.created_at ? String(b.created_at) : '';
+      var aCreated = a && a.display_created_at ? String(a.display_created_at) : '';
+      var bCreated = b && b.display_created_at ? String(b.display_created_at) : '';
       if (aCreated !== bCreated){
         return aCreated < bCreated ? 1 : -1;
       }
-      var aSeq = Number.isInteger(a && a.entry_seq) ? a.entry_seq : -Infinity;
-      var bSeq = Number.isInteger(b && b.entry_seq) ? b.entry_seq : -Infinity;
-      if (aSeq === bSeq) return 0;
-      return aSeq < bSeq ? 1 : -1;
+      var aSort = parseSortId(a && a.sort_id != null ? a.sort_id : null);
+      var bSort = parseSortId(b && b.sort_id != null ? b.sort_id : null);
+      if (aSort === null && bSort === null) return 0;
+      if (aSort === null) return 1;
+      if (bSort === null) return -1;
+      if (aSort === bSort) return 0;
+      return aSort < bSort ? 1 : -1;
     });
     ledgerState.entries = merged;
     ledgerState.nextCursor = nextCursor || null;
