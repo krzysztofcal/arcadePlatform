@@ -59,6 +59,25 @@ const asIso = (value) => {
   return dt.toISOString();
 };
 
+const resolveDisplayCreatedAt = (row, context) => {
+  const fromDisplay = asIso(row?.display_created_at);
+  if (fromDisplay) return fromDisplay;
+  const fromEntry = asIso(row?.created_at);
+  if (fromEntry) return fromEntry;
+  const fromTx = asIso(row?.tx_created_at);
+  if (fromTx) return fromTx;
+  klog("chips:ledger_missing_display_created_at", {
+    entry_seq: context?.entry_seq ?? null,
+    sort_id: context?.sort_id ?? null,
+    tx_type: context?.tx_type ?? null,
+    idempotency_key: context?.idempotency_key ?? null,
+    created_at: row?.created_at ?? null,
+    tx_created_at: row?.tx_created_at ?? null,
+    display_created_at: row?.display_created_at ?? null,
+  });
+  return null;
+};
+
 function badRequest(code, message) {
   const err = new Error(message || code);
   err.status = 400;
@@ -264,7 +283,12 @@ select * from entries;
     const parsedAmount = parseWholeInt(row?.amount);
     const createdAt = asIso(row?.created_at);
     const txCreatedAt = asIso(row?.tx_created_at);
-    const displayCreatedAt = asIso(row?.display_created_at);
+    const displayCreatedAt = resolveDisplayCreatedAt(row, {
+      entry_seq: entrySeq,
+      sort_id: row?.sort_id ?? null,
+      tx_type: row?.tx_type ?? null,
+      idempotency_key: row?.idempotency_key ?? null,
+    });
     const sortId = parsePositiveIntString(row?.sort_id);
 
     if (parsedAmount === null && row?.amount != null) {
@@ -374,7 +398,12 @@ select * from entries;
     const parsedAmount = parseWholeInt(row?.amount);
     const createdAt = asIso(row?.created_at);
     const txCreatedAt = asIso(row?.tx_created_at);
-    const displayCreatedAt = asIso(row?.display_created_at);
+    const displayCreatedAt = resolveDisplayCreatedAt(row, {
+      entry_seq: entrySeq,
+      sort_id: row?.sort_id ?? null,
+      tx_type: row?.tx_type ?? null,
+      idempotency_key: row?.idempotency_key ?? null,
+    });
     const sortId = parsePositiveIntString(row?.sort_id);
 
     if (parsedAmount === null && row?.amount != null) {

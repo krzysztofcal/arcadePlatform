@@ -156,17 +156,24 @@
   }
 
   function resolveLedgerTimestamp(entry){
-    var source = entry && entry.display_created_at ? entry.display_created_at : null;
-    var formatted = formatDateTime(source);
-    if (!formatted){
-      klog('chips:ledger_invalid_display_timestamp', {
-        display_created_at: source,
-        entry_seq: entry && entry.entry_seq,
-        sort_id: entry && entry.sort_id,
-      });
-      return '—';
+    var candidates = [
+      { name: 'display_created_at', value: entry && entry.display_created_at },
+      { name: 'created_at', value: entry && entry.created_at },
+      { name: 'tx_created_at', value: entry && entry.tx_created_at },
+    ];
+    for (var i = 0; i < candidates.length; i++){
+      var candidate = candidates[i];
+      var formatted = formatDateTime(candidate.value);
+      if (formatted){ return formatted; }
     }
-    return formatted;
+    klog('chips:ledger_invalid_display_timestamp', {
+      display_created_at: entry && entry.display_created_at,
+      created_at: entry && entry.created_at,
+      tx_created_at: entry && entry.tx_created_at,
+      entry_seq: entry && entry.entry_seq,
+      sort_id: entry && entry.sort_id,
+    });
+    return '—';
   }
 
   function buildLedgerRow(entry){

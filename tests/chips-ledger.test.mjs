@@ -128,6 +128,9 @@ function handleLedgerQuery(query, params = []) {
         .slice(0, limit ?? 50)
         .map(entry => {
           const tx = mockDb.transactions.get(entry.transaction_id);
+          const displayCreatedAt = entry.metadata?.force_display_created_at_null
+            ? null
+            : (entry.created_at ?? tx?.created_at ?? null);
           return {
             entry_seq: entry.entry_seq,
             sort_id: String(entry.id),
@@ -139,7 +142,7 @@ function handleLedgerQuery(query, params = []) {
             description: tx?.description ?? null,
             idempotency_key: tx?.idempotency_key ?? null,
             tx_created_at: tx?.created_at ?? null,
-            display_created_at: entry.created_at ?? tx?.created_at ?? null,
+            display_created_at: displayCreatedAt,
           };
         });
       return entries;
@@ -152,6 +155,9 @@ function handleLedgerQuery(query, params = []) {
         .slice(0, limit ?? 50)
         .map(entry => {
           const tx = mockDb.transactions.get(entry.transaction_id);
+          const displayCreatedAt = entry.metadata?.force_display_created_at_null
+            ? null
+            : (entry.created_at ?? tx?.created_at ?? null);
           return {
             entry_seq: entry.entry_seq,
             sort_id: String(entry.id),
@@ -163,7 +169,7 @@ function handleLedgerQuery(query, params = []) {
             description: tx?.description ?? null,
             idempotency_key: tx?.idempotency_key ?? null,
             tx_created_at: tx?.created_at ?? null,
-            display_created_at: entry.created_at ?? tx?.created_at ?? null,
+            display_created_at: displayCreatedAt,
           };
         });
       return entries;
@@ -715,6 +721,45 @@ describe("chips ledger paging", () => {
     const paged = await listUserLedger("user-4b", { limit: 1, cursor });
     expect(paged.items).toHaveLength(1);
     expect(paged.items[0].sort_id).toBe(items[1].sort_id);
+  });
+
+  it("falls back to created_at when display_created_at is missing", async () => {
+    const { postTransaction, listUserLedger } = await loadLedger();
+    await postTransaction({
+      userId: "user-4c",
+      txType: "BUY_IN",
+      idempotencyKey: "seq-1c",
+      entries: [
+        { accountType: "USER", amount: -5, metadata: { force_display_created_at_null: true } },
+        { accountType: "SYSTEM", systemKey: "TREASURY", amount: 5 },
+      ],
+    });
+
+    const { items } = await listUserLedger("user-4c", { limit: 1 });
+    expect(items).toHaveLength(1);
+    expect(items[0].display_created_at).toBe(items[0].created_at);
+  });
+
+  it("falls back to tx_created_at when entry created_at is missing", async () => {
+    const { postTransaction, listUserLedger } = await loadLedger();
+    await postTransaction({
+      userId: "user-4d",
+      txType: "BUY_IN",
+      idempotencyKey: "seq-1d",
+      entries: [
+        { accountType: "USER", amount: -5, metadata: { force_display_created_at_null: true } },
+        { accountType: "SYSTEM", systemKey: "TREASURY", amount: 5 },
+      ],
+    });
+
+    const admin = await import("../netlify/functions/_shared/supabase-admin.mjs");
+    const userAccount = [...admin.__mockDb.accounts.values()].find(acc => acc.user_id === "user-4d");
+    const userEntry = admin.__mockDb.entries.find(entry => entry.account_id === userAccount.id);
+    userEntry.created_at = null;
+
+    const { items } = await listUserLedger("user-4d", { limit: 1 });
+    expect(items).toHaveLength(1);
+    expect(items[0].display_created_at).toBe(items[0].tx_created_at);
   });
 
   it("rejects invalid cursor values and clamps limits", async () => {

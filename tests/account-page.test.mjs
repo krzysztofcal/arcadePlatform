@@ -114,11 +114,17 @@ function seedNodes(document) {
 function buildContext(chipsClient) {
   const document = createDocument();
   seedNodes(document);
+  const logs = [];
   const windowObj = {
     document,
     addEventListener() {},
     requestAnimationFrame(cb) {
       cb();
+    },
+    KLog: {
+      log(kind, data) {
+        logs.push({ kind, data });
+      },
     },
     SupabaseAuth: {
       getCurrentUser() {
@@ -128,7 +134,7 @@ function buildContext(chipsClient) {
     },
     ChipsClient: chipsClient,
   };
-  return { windowObj, document };
+  return { windowObj, document, logs };
 }
 
 function findByClass(node, className) {
@@ -232,7 +238,7 @@ test("renders display_created_at when present", async () => {
   assert.match(timeNode.textContent, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
 });
 
-test("renders placeholder when no valid timestamp exists", async () => {
+test("falls back to created_at when display_created_at is missing", async () => {
   const chipsClient = {
     fetchBalance() {
       return Promise.resolve({ balance: 1200 });
@@ -241,11 +247,11 @@ test("renders placeholder when no valid timestamp exists", async () => {
       return Promise.resolve({
         items: [
           {
-            id: 11,
-            tx_type: "CASH_OUT",
-            amount: -20,
-            display_created_at: null,
-            sort_id: "11",
+            id: 12,
+            tx_type: "BUY_IN",
+            amount: 50,
+            created_at: "2026-02-06T20:45:11.000Z",
+            sort_id: "12",
           },
         ],
         nextCursor: null,
@@ -268,7 +274,86 @@ test("renders placeholder when no valid timestamp exists", async () => {
   const list = document.getElementById("chipLedgerList");
   const timeNode = findByClass(list.children[0], "chip-ledger__time");
   assert.ok(timeNode, "time element should be present");
+  assert.match(timeNode.textContent, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
+});
+
+test("falls back to tx_created_at when display_created_at is missing", async () => {
+  const chipsClient = {
+    fetchBalance() {
+      return Promise.resolve({ balance: 1200 });
+    },
+    fetchLedger() {
+      return Promise.resolve({
+        items: [
+          {
+            id: 13,
+            tx_type: "BUY_IN",
+            amount: 50,
+            tx_created_at: "2026-02-06T20:45:11.000Z",
+            sort_id: "13",
+          },
+        ],
+        nextCursor: null,
+      });
+    },
+  };
+  const { windowObj, document } = buildContext(chipsClient);
+  const context = vm.createContext({
+    window: windowObj,
+    document,
+    requestAnimationFrame: windowObj.requestAnimationFrame,
+    CustomEvent: function() {},
+  });
+  vm.runInContext(source, context);
+
+  await flush();
+  await flush();
+  await flush();
+
+  const list = document.getElementById("chipLedgerList");
+  const timeNode = findByClass(list.children[0], "chip-ledger__time");
+  assert.ok(timeNode, "time element should be present");
+  assert.match(timeNode.textContent, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
+});
+
+test("renders placeholder when no valid timestamp exists", async () => {
+  const chipsClient = {
+    fetchBalance() {
+      return Promise.resolve({ balance: 1200 });
+    },
+    fetchLedger() {
+      return Promise.resolve({
+        items: [
+          {
+            id: 11,
+            tx_type: "CASH_OUT",
+            amount: -20,
+            display_created_at: null,
+            sort_id: "11",
+          },
+        ],
+        nextCursor: null,
+      });
+    },
+  };
+  const { windowObj, document, logs } = buildContext(chipsClient);
+  const context = vm.createContext({
+    window: windowObj,
+    document,
+    requestAnimationFrame: windowObj.requestAnimationFrame,
+    CustomEvent: function() {},
+  });
+  vm.runInContext(source, context);
+
+  await flush();
+  await flush();
+  await flush();
+
+  const list = document.getElementById("chipLedgerList");
+  const timeNode = findByClass(list.children[0], "chip-ledger__time");
+  assert.ok(timeNode, "time element should be present");
   assert.equal(timeNode.textContent, "—");
+  assert.ok(logs.some(entry => entry.kind === "chips:ledger_invalid_display_timestamp"));
 });
 
 test("loads more ledger entries on scroll", async () => {
