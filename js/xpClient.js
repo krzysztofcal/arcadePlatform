@@ -278,7 +278,7 @@
       if (!state.fallbackIds) {
         state.fallbackIds = {
           userId: `anon-${randomId()}`,
-          sessionId: `sess-${randomId()}`,
+          sessionId: `sess-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`,
         };
       }
       return state.fallbackIds;

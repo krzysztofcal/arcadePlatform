@@ -767,7 +767,7 @@ describe("chips ledger paging", () => {
       status: 400,
     });
     await expect(
-      listUserLedger("user-6", { cursor: Buffer.from(JSON.stringify({ createdAt: "2026-02-06T19:00:00Z" })).toString("base64") }),
+      listUserLedger("user-6", { cursor: Buffer.from(JSON.stringify({ createdAt: "nope" })).toString("base64") }),
     ).rejects.toMatchObject({
       code: "invalid_cursor",
       status: 400,
@@ -824,6 +824,40 @@ describe("chips ledger paging", () => {
       JSON.stringify({ createdAt: first.items[0].display_created_at, entrySeq: first.items[0].entry_seq }),
     ).toString("base64");
     const second = await listUserLedger("user-6b", { limit: 2, cursor: legacyCursor });
+    expect(second.items.length).toBeGreaterThan(0);
+    const snakeCursor = Buffer.from(
+      JSON.stringify({ created_at: first.items[0].display_created_at, entry_seq: first.items[0].entry_seq }),
+    ).toString("base64");
+    const third = await listUserLedger("user-6b", { limit: 2, cursor: snakeCursor });
+    expect(third.items.length).toBeGreaterThan(0);
+  });
+
+  it("handles timestamp-only cursor payloads", async () => {
+    const { postTransaction, listUserLedger } = await loadLedger();
+    await postTransaction({
+      userId: "user-6d",
+      txType: "MINT",
+      idempotencyKey: "seed-user-6d",
+      entries: [
+        { accountType: "SYSTEM", systemKey: "TREASURY", amount: -20 },
+        { accountType: "USER", amount: 20 },
+      ],
+    });
+    await postTransaction({
+      userId: "user-6d",
+      txType: "BUY_IN",
+      idempotencyKey: "cursor-6d-1",
+      entries: [
+        { accountType: "USER", amount: -2 },
+        { accountType: "SYSTEM", systemKey: "TREASURY", amount: 2 },
+      ],
+    });
+
+    const first = await listUserLedger("user-6d", { limit: 1 });
+    const timestampOnlyCursor = Buffer.from(
+      JSON.stringify({ createdAt: first.items[0].display_created_at }),
+    ).toString("base64");
+    const second = await listUserLedger("user-6d", { limit: 2, cursor: timestampOnlyCursor });
     expect(second.items.length).toBeGreaterThan(0);
   });
 

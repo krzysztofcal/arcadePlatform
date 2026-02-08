@@ -167,7 +167,7 @@ function decodeLedgerCursor(cursor) {
     }
     return { createdAt: parsedCreated.toISOString(), entrySeq, mode: "entry_seq" };
   }
-  throw badRequest("invalid_cursor", "Invalid cursor");
+  return { createdAt: parsedCreated.toISOString(), entrySeq: Number.MAX_SAFE_INTEGER, mode: "entry_seq" };
 }
 
 function encodeLedgerCursor(createdAt, sortId) {
