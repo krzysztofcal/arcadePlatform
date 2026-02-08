@@ -99,31 +99,21 @@ function handleLedgerQuery(query, params = []) {
   }
 
   if (text.includes("from public.chips_entries") && text.includes("join public.chips_transactions")) {
-    if (text.includes("order by display_created_at desc")) {
-      const [accountId, cursorCreatedAt, cursorSortId, limit] = params;
+    if (text.includes("order by e.id desc")) {
+      const [accountId, cursorSortId, limit] = params;
       const cursorSortIdBig = cursorSortId != null ? BigInt(String(cursorSortId)) : null;
       const entries = mockDb.entries
         .filter(entry => {
           if (entry.account_id !== accountId) return false;
-          if (!cursorCreatedAt) return true;
-          const displayCreatedAt = new Date(entry.created_at ?? mockDb.transactions.get(entry.transaction_id)?.created_at ?? null);
-          const cursorTime = new Date(cursorCreatedAt);
           const entryIdBig = BigInt(String(entry.id));
-          if (displayCreatedAt.getTime() === cursorTime.getTime()) {
-            return cursorSortIdBig === null ? false : entryIdBig < cursorSortIdBig;
-          }
-          return displayCreatedAt.getTime() < cursorTime.getTime();
+          if (cursorSortIdBig === null) return true;
+          return entryIdBig < cursorSortIdBig;
         })
         .sort((a, b) => {
-          const timeA = new Date(a.created_at ?? mockDb.transactions.get(a.transaction_id)?.created_at ?? null).getTime();
-          const timeB = new Date(b.created_at ?? mockDb.transactions.get(b.transaction_id)?.created_at ?? null).getTime();
-          if (timeA === timeB) {
-            const idA = BigInt(String(a.id));
-            const idB = BigInt(String(b.id));
-            if (idB === idA) return 0;
-            return idB > idA ? 1 : -1;
-          }
-          return timeB - timeA;
+          const idA = BigInt(String(a.id));
+          const idB = BigInt(String(b.id));
+          if (idB === idA) return 0;
+          return idB > idA ? 1 : -1;
         })
         .slice(0, limit ?? 50)
         .map(entry => {
@@ -716,11 +706,57 @@ describe("chips ledger paging", () => {
     expect(items[0].display_created_at).toBe(items[1].display_created_at);
     expect(BigInt(items[0].sort_id) > BigInt(items[1].sort_id)).toBe(true);
     const cursor = Buffer.from(
-      JSON.stringify({ displayCreatedAt: items[0].display_created_at, sortId: String(items[0].sort_id) }),
+      JSON.stringify({ sortId: String(items[0].sort_id) }),
     ).toString("base64");
     const paged = await listUserLedger("user-4b", { limit: 1, cursor });
     expect(paged.items).toHaveLength(1);
     expect(paged.items[0].sort_id).toBe(items[1].sort_id);
+  });
+
+  it("pages by sort_id even when timestamps match", async () => {
+    const { postTransaction, listUserLedger } = await loadLedger();
+    await postTransaction({
+      userId: "user-4e",
+      txType: "MINT",
+      idempotencyKey: "seed-user-4e",
+      entries: [
+        { accountType: "SYSTEM", systemKey: "TREASURY", amount: -20 },
+        { accountType: "USER", amount: 20 },
+      ],
+    });
+    await postTransaction({
+      userId: "user-4e",
+      txType: "BUY_IN",
+      idempotencyKey: "seq-1e",
+      entries: [
+        { accountType: "USER", amount: -5 },
+        { accountType: "SYSTEM", systemKey: "TREASURY", amount: 5 },
+      ],
+    });
+    await postTransaction({
+      userId: "user-4e",
+      txType: "BUY_IN",
+      idempotencyKey: "seq-2e",
+      entries: [
+        { accountType: "USER", amount: -7 },
+        { accountType: "SYSTEM", systemKey: "TREASURY", amount: 7 },
+      ],
+    });
+
+    const admin = await import("../netlify/functions/_shared/supabase-admin.mjs");
+    const userAccount = [...admin.__mockDb.accounts.values()].find(acc => acc.user_id === "user-4e");
+    const userEntries = admin.__mockDb.entries.filter(entry => entry.account_id === userAccount.id);
+    const sameTime = new Date("2026-02-06T19:00:00.000Z").toISOString();
+    userEntries.forEach(entry => {
+      entry.created_at = sameTime;
+    });
+
+    const first = await listUserLedger("user-4e", { limit: 1 });
+    expect(first.items).toHaveLength(1);
+    const cursor = first.nextCursor;
+    const second = await listUserLedger("user-4e", { limit: 2, cursor });
+    expect(second.items.length).toBeGreaterThan(0);
+    expect(second.items[0].sort_id).not.toBe(first.items[0].sort_id);
   });
 
   it("falls back to created_at when display_created_at is missing", async () => {
@@ -823,7 +859,6 @@ describe("chips ledger paging", () => {
         {
           cursor: Buffer.from(
             JSON.stringify({
-              displayCreatedAt: "2026-02-06T19:00:00Z",
               sortId: "nope",
               entrySeq: 4,
             }),
@@ -934,7 +969,6 @@ describe("chips ledger paging", () => {
     const first = await listUserLedger("user-6c", { limit: 1 });
     const mixedCursor = Buffer.from(
       JSON.stringify({
-        displayCreatedAt: first.items[0].display_created_at,
         sortId: first.items[0].sort_id,
         entrySeq: "not-a-number",
       }),

@@ -126,6 +126,9 @@
       return 'sid:' + sortIdText;
     }
     if (entry.idempotency_key){ return 'idem:' + entry.idempotency_key; }
+    if (entry.created_at && entry.entry_seq != null){
+      return 'legacy:' + entry.created_at + ':' + entry.entry_seq;
+    }
     if (entry.display_created_at && entry.tx_type && entry.amount != null){
       return 'entry:' + entry.display_created_at + ':' + entry.tx_type + ':' + entry.amount + ':' + (entry.reference || '');
     }

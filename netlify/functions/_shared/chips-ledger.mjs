@@ -165,21 +165,21 @@ function decodeLedgerCursor(cursor) {
   } catch (_err) {
     throw badRequest("invalid_cursor", "Invalid cursor");
   }
-  const createdAt = payload?.displayCreatedAt || payload?.display_created_at || payload?.createdAt || payload?.created_at;
   const hasSortKey = payload?.sortId != null || payload?.sort_id != null;
   const hasSeqKey = payload?.entrySeq != null || payload?.entry_seq != null;
-  const parsedCreated = createdAt ? new Date(createdAt) : null;
-  if (!parsedCreated || Number.isNaN(parsedCreated.getTime())) {
-    throw badRequest("invalid_cursor", "Invalid cursor");
-  }
   if (hasSortKey) {
     const sortId = parsePositiveIntString(payload?.sortId ?? payload?.sort_id);
     if (!sortId) {
       throw badRequest("invalid_cursor", "Invalid cursor");
     }
-    return { createdAt: parsedCreated.toISOString(), sortId, mode: "sort_id" };
+    return { sortId, mode: "sort_id" };
   }
   if (hasSeqKey) {
+    const createdAt = payload?.displayCreatedAt || payload?.display_created_at || payload?.createdAt || payload?.created_at;
+    const parsedCreated = createdAt ? new Date(createdAt) : null;
+    if (!parsedCreated || Number.isNaN(parsedCreated.getTime())) {
+      throw badRequest("invalid_cursor", "Invalid cursor");
+    }
     const entrySeq = parsePositiveInt(payload?.entrySeq ?? payload?.entry_seq);
     if (entrySeq === null) {
       throw badRequest("invalid_cursor", "Invalid cursor");
@@ -189,11 +189,10 @@ function decodeLedgerCursor(cursor) {
   throw badRequest("invalid_cursor", "Invalid cursor");
 }
 
-function encodeLedgerCursor(createdAt, sortId) {
-  if (!createdAt || typeof createdAt !== "string" || !createdAt.trim()) return null;
+function encodeLedgerCursor(sortId) {
   if (typeof sortId !== "string" || !/^\d+$/.test(sortId) || sortId === "0") return null;
   try {
-    const payload = JSON.stringify({ displayCreatedAt: createdAt, sortId });
+    const payload = JSON.stringify({ sortId });
     return Buffer.from(payload, "utf8").toString("base64");
   } catch (_err) {
     return null;
@@ -204,10 +203,9 @@ function findLastCursorCandidate(entries) {
   if (!Array.isArray(entries)) return null;
   for (let i = entries.length - 1; i >= 0; i -= 1) {
     const entry = entries[i];
-    const parsedCreated = entry?.display_created_at ? new Date(entry.display_created_at) : null;
     const sortId = parsePositiveIntString(entry?.sort_id);
-    if (parsedCreated && !Number.isNaN(parsedCreated.getTime()) && sortId !== null) {
-      return { createdAt: parsedCreated.toISOString(), sortId };
+    if (sortId !== null) {
+      return { sortId };
     }
   }
   return null;
@@ -322,7 +320,6 @@ async function listUserLedger(userId, { cursor = null, limit = 50 } = {}) {
   const cappedLimit = Math.min(Math.max(1, Number.isInteger(limit) ? limit : 50), 200);
   const account = await getOrCreateUserAccount(userId);
   const parsedCursor = decodeLedgerCursor(cursor);
-  const cursorCreatedAt = parsedCursor ? parsedCursor.createdAt : null;
   const cursorSortId = parsedCursor?.mode === "sort_id" ? parsedCursor.sortId : null;
   const cursorEntrySeq = parsedCursor?.mode === "entry_seq" ? parsedCursor.entrySeq : null;
   const sortQuery = `
@@ -343,11 +340,11 @@ with entries as (
   join public.chips_transactions t on t.id = e.transaction_id
   where e.account_id = $1
     and (
-      $2::timestamptz is null
-      or (coalesce(e.created_at, t.created_at), e.id) < ($2::timestamptz, $3::bigint)
+      $2::bigint is null
+      or e.id < $2::bigint
     )
-  order by display_created_at desc nulls last, e.id desc
-  limit $4
+  order by e.id desc
+  limit $3
 )
 select * from entries;
 `;
@@ -380,7 +377,9 @@ select * from entries;
   const useLegacy = parsedCursor?.mode === "entry_seq";
   const rows = await executeSql(
     useLegacy ? legacyQuery : sortQuery,
-    [account.id, cursorCreatedAt, useLegacy ? cursorEntrySeq : cursorSortId, cappedLimit],
+    useLegacy
+      ? [account.id, parsedCursor?.createdAt || null, cursorEntrySeq, cappedLimit]
+      : [account.id, cursorSortId, cappedLimit],
   );
   const rowList = Array.isArray(rows) ? rows : [];
   const hasFullPage = rowList.length === cappedLimit;
@@ -434,7 +433,7 @@ select * from entries;
     klog("chips:ledger_cursor_missing", { count: normalizedEntries.length });
   }
   const nextCursor = cursorCandidate
-    ? encodeLedgerCursor(cursorCandidate.createdAt, cursorCandidate.sortId)
+    ? encodeLedgerCursor(cursorCandidate.sortId)
     : null;
 
   return { entries: normalizedEntries, items: normalizedEntries, nextCursor };
