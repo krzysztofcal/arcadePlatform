@@ -126,9 +126,6 @@
       return 'sid:' + sortIdText;
     }
     if (entry.idempotency_key){ return 'idem:' + entry.idempotency_key; }
-    if (entry.tx_created_at && entry.tx_type && entry.amount != null){
-      return 'tx:' + entry.tx_created_at + ':' + entry.tx_type + ':' + entry.amount + ':' + (entry.reference || '') + ':' + (entry.description || '');
-    }
     if (entry.display_created_at && entry.tx_type && entry.amount != null){
       return 'entry:' + entry.display_created_at + ':' + entry.tx_type + ':' + entry.amount + ':' + (entry.reference || '');
     }
@@ -136,7 +133,6 @@
       try {
         return 'fallback:' + JSON.stringify({
           display_created_at: entry.display_created_at || null,
-          tx_created_at: entry.tx_created_at || null,
           tx_type: entry.tx_type || null,
           amount: entry.amount,
           reference: entry.reference || null,
@@ -210,15 +206,11 @@
     } else {
       amount.textContent = '—';
       item.dataset.invalid = 'amount';
-      if (window && window.XP_DIAG && typeof console !== 'undefined' && console && typeof console.debug === 'function'){
-        try {
-          console.debug('[chips] invalid ledger amount', {
-            entry_seq: entry && entry.entry_seq,
-            raw_amount: entry && entry.raw_amount != null ? entry.raw_amount : null,
-            entry: entry,
-          });
-        } catch (_err){}
-      }
+      klog('chips:ledger_invalid_amount', {
+        entry_seq: entry && entry.entry_seq,
+        raw_amount: entry && entry.raw_amount != null ? entry.raw_amount : null,
+        entry: entry,
+      });
     }
 
     item.appendChild(meta);
