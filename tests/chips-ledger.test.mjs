@@ -105,11 +105,12 @@ function handleLedgerQuery(query, params = []) {
 
   if (text.includes("from public.chips_entries") && text.includes("join public.chips_transactions")) {
     if (text.includes("order by e.id desc")) {
-      const [accountId, cursorSortId, limit] = params;
+      const [userId, cursorSortId, limit] = params;
       const cursorSortIdBig = cursorSortId != null ? BigInt(String(cursorSortId)) : null;
+      const account = ensureUserAccount(userId);
       const entries = mockDb.entries
         .filter(entry => {
-          if (entry.account_id !== accountId) return false;
+          if (entry.account_id !== account.id) return false;
           const entryIdBig = BigInt(String(entry.id));
           if (cursorSortIdBig === null) return true;
           return entryIdBig < cursorSortIdBig;
@@ -144,9 +145,10 @@ function handleLedgerQuery(query, params = []) {
       return entries;
     }
     if (text.includes("order by e.entry_seq asc")) {
-      const [accountId, afterSeq, limit] = params;
+      const [userId, afterSeq, limit] = params;
+      const account = ensureUserAccount(userId);
       const entries = mockDb.entries
-        .filter(entry => entry.account_id === accountId && (afterSeq == null || entry.entry_seq > afterSeq))
+        .filter(entry => entry.account_id === account.id && (afterSeq == null || entry.entry_seq > afterSeq))
         .sort((a, b) => a.entry_seq - b.entry_seq)
         .slice(0, limit ?? 50)
         .map(entry => {

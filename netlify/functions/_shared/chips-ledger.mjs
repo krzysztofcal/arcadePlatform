@@ -361,93 +361,13 @@ select * from entries;
   return { entries: normalizedEntries, sequenceOk, nextExpectedSeq: cursor };
 }
 
-async function listUserLedger(userId, tokenOrOptions, maybeOptions) {
-  const token = typeof tokenOrOptions === "string" ? tokenOrOptions : null;
-  const options = token ? (maybeOptions || {}) : (tokenOrOptions || {});
+async function listUserLedger(userId, options = {}) {
   const { cursor = null, limit = 50 } = options;
   const cappedLimit = Math.min(Math.max(1, Number.isInteger(limit) ? limit : 50), 200);
-  const account = await getOrCreateUserAccount(userId);
+  await getOrCreateUserAccount(userId);
   const parsedCursor = decodeLedgerCursor(cursor);
   const cursorSortId = parsedCursor?.mode === "sort_id" ? parsedCursor.sortId : null;
   const cursorEntrySeq = parsedCursor?.mode === "entry_seq" ? parsedCursor.entrySeq : null;
-  const supabaseUrl = process.env.SUPABASE_URL;
-  const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
-  if (token && supabaseUrl && supabaseAnonKey && parsedCursor?.mode !== "entry_seq") {
-    const baseUrl = supabaseUrl.replace(/\/+$/, "");
-    const params = new URLSearchParams();
-    params.set("select", "id,entry_seq,amount,metadata,created_at,tx_type,reference,description,idempotency_key");
-    params.set("order", "id.desc");
-    params.set("limit", String(cappedLimit));
-    if (cursorSortId) {
-      params.set("id", `lt.${cursorSortId}`);
-    }
-    const url = `${baseUrl}/rest/v1/v_user_chips_entries?${params.toString()}`;
-    const res = await fetch(url, {
-      headers: {
-        apikey: supabaseAnonKey,
-        Authorization: `Bearer ${token}`,
-      },
-    });
-    if (!res.ok) {
-      const err = new Error("Failed to load ledger");
-      err.status = res.status;
-      err.code = "ledger_fetch_failed";
-      throw err;
-    }
-    const rows = await res.json();
-    const rowList = Array.isArray(rows) ? rows : [];
-    const hasFullPage = rowList.length === cappedLimit;
-    const normalizedEntries = rowList.map(row => {
-      const parsedEntrySeq = parsePositiveInt(row?.entry_seq);
-      const entrySeq = parsedEntrySeq;
-      if (parsedEntrySeq === null) {
-        klog("chips:ledger_invalid_entry_seq", {
-          raw_entry_seq: row?.entry_seq,
-          tx_type: row?.tx_type,
-          idempotency_key: row?.idempotency_key,
-        });
-      }
-      const parsedAmount = parseWholeInt(row?.amount);
-      const createdAt = asIso(row?.created_at);
-      const txCreatedAt = null;
-      const displayCreatedAt = asIso(row?.created_at) || resolveDisplayCreatedAt(row, {
-        entry_seq: entrySeq,
-        sort_id: row?.id ?? null,
-        tx_type: row?.tx_type ?? null,
-        idempotency_key: row?.idempotency_key ?? null,
-      });
-      const sortId = parsePositiveIntString(row?.id);
-      if (parsedAmount === null && row?.amount != null) {
-        klog("chips:ledger_invalid_amount", {
-          entry_seq: entrySeq,
-          raw_amount: row?.amount == null ? null : String(row.amount),
-          tx_type: row?.tx_type,
-        });
-      }
-      return {
-        entry_seq: entrySeq,
-        amount: parsedAmount,
-        raw_amount: row?.amount == null ? null : String(row.amount),
-        metadata: row?.metadata ?? null,
-        created_at: createdAt,
-        display_created_at: displayCreatedAt,
-        sort_id: sortId,
-        tx_type: row?.tx_type ?? null,
-        reference: row?.reference ?? null,
-        description: row?.description ?? null,
-        idempotency_key: row?.idempotency_key ?? null,
-        tx_created_at: txCreatedAt,
-      };
-    });
-    const cursorCandidate = hasFullPage ? findLastCursorCandidate(normalizedEntries) : null;
-    if (!cursorCandidate && hasFullPage) {
-      klog("chips:ledger_cursor_missing", { count: normalizedEntries.length });
-    }
-    const nextCursor = cursorCandidate
-      ? encodeLedgerCursor(cursorCandidate)
-      : null;
-    return { entries: normalizedEntries, items: normalizedEntries, nextCursor };
-  }
   const sortQuery = `
 with entries as (
   select
@@ -464,7 +384,9 @@ with entries as (
     coalesce(e.created_at, t.created_at) as display_created_at
   from public.chips_entries e
   join public.chips_transactions t on t.id = e.transaction_id
-  where e.account_id = $1
+  join public.chips_accounts a on a.id = e.account_id
+  where a.account_type = 'USER'
+    and a.user_id = $1
     and (
       $2::bigint is null
       or e.id < $2::bigint
@@ -490,7 +412,9 @@ with entries as (
     coalesce(e.created_at, t.created_at) as display_created_at
   from public.chips_entries e
   join public.chips_transactions t on t.id = e.transaction_id
-  where e.account_id = $1
+  join public.chips_accounts a on a.id = e.account_id
+  where a.account_type = 'USER'
+    and a.user_id = $1
     and (
       $2::timestamptz is null
       or (coalesce(e.created_at, t.created_at), e.entry_seq) < ($2::timestamptz, $3::bigint)
@@ -504,8 +428,8 @@ select * from entries;
   const rows = await executeSql(
     useLegacy ? legacyQuery : sortQuery,
     useLegacy
-      ? [account.id, parsedCursor?.createdAt || null, cursorEntrySeq, cappedLimit]
-      : [account.id, cursorSortId, cappedLimit],
+      ? [userId, parsedCursor?.createdAt || null, cursorEntrySeq, cappedLimit]
+      : [userId, cursorSortId, cappedLimit],
   );
   const rowList = Array.isArray(rows) ? rows : [];
   const hasFullPage = rowList.length === cappedLimit;
