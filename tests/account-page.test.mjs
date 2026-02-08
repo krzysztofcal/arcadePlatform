@@ -166,6 +166,7 @@ test("renders formatted chip ledger dates", async () => {
             tx_type: "BUY_IN",
             amount: 25,
             display_created_at: "2026-02-06T19:15:23.123Z",
+            sort_id: 9,
           },
         ],
         nextCursor: null,
@@ -205,6 +206,7 @@ test("renders display_created_at when present", async () => {
             tx_type: "BUY_IN",
             amount: 50,
             display_created_at: "2026-02-06T20:45:11.000Z",
+            sort_id: 10,
           },
         ],
         nextCursor: null,
@@ -230,7 +232,7 @@ test("renders display_created_at when present", async () => {
   assert.match(timeNode.textContent, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
 });
 
-test("renders Unknown time when no valid timestamp exists", async () => {
+test("renders placeholder when no valid timestamp exists", async () => {
   const chipsClient = {
     fetchBalance() {
       return Promise.resolve({ balance: 1200 });
@@ -243,6 +245,7 @@ test("renders Unknown time when no valid timestamp exists", async () => {
             tx_type: "CASH_OUT",
             amount: -20,
             display_created_at: null,
+            sort_id: 11,
           },
         ],
         nextCursor: null,
@@ -265,7 +268,7 @@ test("renders Unknown time when no valid timestamp exists", async () => {
   const list = document.getElementById("chipLedgerList");
   const timeNode = findByClass(list.children[0], "chip-ledger__time");
   assert.ok(timeNode, "time element should be present");
-  assert.equal(timeNode.textContent, "Unknown time");
+  assert.equal(timeNode.textContent, "—");
 });
 
 test("loads more ledger entries on scroll", async () => {
@@ -276,6 +279,7 @@ test("loads more ledger entries on scroll", async () => {
     tx_type: "BUY_IN",
     amount: 1,
     display_created_at: "2026-02-06T19:00:00.000Z",
+    sort_id: 100 + index,
   }));
   const chipsClient = {
     fetchBalance() {
@@ -294,6 +298,7 @@ test("loads more ledger entries on scroll", async () => {
             tx_type: "CASH_OUT",
             amount: -5,
             display_created_at: "2026-02-05T18:40:00.000Z",
+            sort_id: 200,
           },
         ],
         nextCursor: null,
@@ -339,6 +344,7 @@ test("shows error tail row and retries on scroll", async () => {
     tx_type: "BUY_IN",
     amount: 1,
     display_created_at: "2026-02-06T19:00:00.000Z",
+    sort_id: 300 + index,
   }));
   const chipsClient = {
     fetchBalance() {
@@ -360,6 +366,7 @@ test("shows error tail row and retries on scroll", async () => {
             tx_type: "CASH_OUT",
             amount: -5,
             display_created_at: "2026-02-05T18:40:00.000Z",
+            sort_id: 400,
           },
         ],
         nextCursor: null,
@@ -409,8 +416,8 @@ test("shows error tail row and retries on scroll", async () => {
 test("dedupes overlapping items by created_at and entry_seq", async () => {
   const calls = [];
   const firstPage = [
-    { id: 1, entry_seq: 10, tx_type: "BUY_IN", amount: 1, display_created_at: "2026-02-06T19:00:00.000Z" },
-    { id: 2, entry_seq: 9, tx_type: "BUY_IN", amount: 1, display_created_at: "2026-02-06T18:59:00.000Z" },
+    { id: 1, entry_seq: 10, tx_type: "BUY_IN", amount: 1, display_created_at: "2026-02-06T19:00:00.000Z", sort_id: 500 },
+    { id: 2, entry_seq: 9, tx_type: "BUY_IN", amount: 1, display_created_at: "2026-02-06T18:59:00.000Z", sort_id: 499 },
   ];
   const chipsClient = {
     fetchBalance() {
@@ -423,8 +430,8 @@ test("dedupes overlapping items by created_at and entry_seq", async () => {
       }
       return Promise.resolve({
         items: [
-          { id: 2, entry_seq: 9, tx_type: "BUY_IN", amount: 1, display_created_at: "2026-02-06T18:59:00.000Z" },
-          { id: 3, entry_seq: 8, tx_type: "BUY_IN", amount: 1, display_created_at: "2026-02-06T18:58:00.000Z" },
+          { id: 2, entry_seq: 9, tx_type: "BUY_IN", amount: 1, display_created_at: "2026-02-06T18:59:00.000Z", sort_id: 499 },
+          { id: 3, entry_seq: 8, tx_type: "BUY_IN", amount: 1, display_created_at: "2026-02-06T18:58:00.000Z", sort_id: 498 },
         ],
         nextCursor: null,
       });
@@ -457,11 +464,57 @@ test("dedupes overlapping items by created_at and entry_seq", async () => {
   assert.equal(calls.length, 2, "should fetch two pages");
 });
 
+test("sorts by display_created_at then sort_id", async () => {
+  const chipsClient = {
+    fetchBalance() {
+      return Promise.resolve({ balance: 1200 });
+    },
+    fetchLedger() {
+      return Promise.resolve({
+        items: [
+          { id: 1, entry_seq: 1, tx_type: "BUY_IN", amount: 1, description: "Row 10", display_created_at: "2026-02-06T19:00:00.000Z", sort_id: 10 },
+          { id: 2, entry_seq: 2, tx_type: "BUY_IN", amount: 1, description: "Row 12", display_created_at: "2026-02-06T19:00:00.000Z", sort_id: 12 },
+        ],
+        nextCursor: null,
+      });
+    },
+  };
+  const { windowObj, document } = buildContext(chipsClient);
+  const context = vm.createContext({
+    window: windowObj,
+    document,
+    requestAnimationFrame: windowObj.requestAnimationFrame,
+    CustomEvent: function() {},
+  });
+  vm.runInContext(source, context);
+
+  await flush();
+  await flush();
+  await flush();
+
+  const spacer = document.getElementById("chipLedgerSpacer");
+  assert.equal(Number.parseInt(spacer.style.height, 10), 3 * 80, "spacer height should include tail row");
+  const list = document.getElementById("chipLedgerList");
+  assert.ok(list.children.length > 0, "ledger should render rows");
+  var rowHigh = null;
+  var rowLow = null;
+  for (var i = 0; i < list.children.length; i += 1) {
+    var descNode = findByClass(list.children[i], "chip-ledger__desc");
+    var text = descNode && descNode.textContent ? descNode.textContent : "";
+    if (text.indexOf("Row 12") >= 0) { rowHigh = list.children[i]; }
+    if (text.indexOf("Row 10") >= 0) { rowLow = list.children[i]; }
+  }
+  assert.ok(rowHigh && rowLow, "rows should render");
+  var highTop = Number.parseInt(rowHigh.style.top, 10);
+  var lowTop = Number.parseInt(rowLow.style.top, 10);
+  assert.ok(highTop < lowTop, "higher sort_id should render first");
+});
+
 test("dedupes items with null entry_seq using idempotency_key", async () => {
   const calls = [];
   const firstPage = [
-    { id: 1, entry_seq: null, idempotency_key: "idem-1", tx_type: "BUY_IN", amount: 1, display_created_at: "2026-02-06T19:00:00.000Z" },
-    { id: 2, entry_seq: null, idempotency_key: "idem-2", tx_type: "BUY_IN", amount: 1, display_created_at: "2026-02-06T18:59:00.000Z" },
+    { id: 1, entry_seq: null, idempotency_key: "idem-1", tx_type: "BUY_IN", amount: 1, display_created_at: "2026-02-06T19:00:00.000Z", sort_id: 700 },
+    { id: 2, entry_seq: null, idempotency_key: "idem-2", tx_type: "BUY_IN", amount: 1, display_created_at: "2026-02-06T18:59:00.000Z", sort_id: 699 },
   ];
   const chipsClient = {
     fetchBalance() {
@@ -474,8 +527,8 @@ test("dedupes items with null entry_seq using idempotency_key", async () => {
       }
       return Promise.resolve({
         items: [
-          { id: 3, entry_seq: null, idempotency_key: "idem-2", tx_type: "BUY_IN", amount: 1, display_created_at: "2026-02-06T18:59:00.000Z" },
-          { id: 4, entry_seq: null, idempotency_key: "idem-3", tx_type: "BUY_IN", amount: 1, display_created_at: "2026-02-06T18:58:00.000Z" },
+          { id: 3, entry_seq: null, idempotency_key: "idem-2", tx_type: "BUY_IN", amount: 1, display_created_at: "2026-02-06T18:59:00.000Z", sort_id: 699 },
+          { id: 4, entry_seq: null, idempotency_key: "idem-3", tx_type: "BUY_IN", amount: 1, display_created_at: "2026-02-06T18:58:00.000Z", sort_id: 698 },
         ],
         nextCursor: null,
       });

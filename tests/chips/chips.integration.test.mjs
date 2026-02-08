@@ -86,12 +86,20 @@ async function verifyLedgerCursor() {
   assert.equal(first.status, 200, `ledger should succeed; ${formatResponse(first)}`);
   const entries = Array.isArray(first.body?.items) ? first.body.items : [];
   if (!entries.length) return;
-  const entriesWithDisplay = entries.filter(entry => entry.display_created_at != null);
-  assert.ok(entriesWithDisplay.length > 0, "ledger entries should include display_created_at");
-  assert.ok(
-    entriesWithDisplay.some(entry => isValidDateString(entry.display_created_at)),
-    "ledger display_created_at should be parseable",
-  );
+  entries.forEach(entry => {
+    assert.ok(entry.display_created_at, "ledger entries should include display_created_at");
+    assert.ok(isValidDateString(entry.display_created_at), "ledger display_created_at should be parseable");
+    assert.ok(Number.isInteger(entry.sort_id), "ledger sort_id should be integer");
+  });
+  for (let i = 1; i < entries.length; i += 1) {
+    const prev = entries[i - 1];
+    const current = entries[i];
+    if (prev.display_created_at === current.display_created_at) {
+      assert.ok(prev.sort_id >= current.sort_id, "ledger sort_id should descend on tie");
+    } else {
+      assert.ok(prev.display_created_at >= current.display_created_at, "ledger display_created_at should descend");
+    }
+  }
   const nextCursor = first.body?.nextCursor;
   assert.ok(nextCursor, `nextCursor must be returned; ${formatResponse(first)}`);
   const next = await getLedger(config, { cursor: nextCursor, limit: 20 });
@@ -115,12 +123,10 @@ async function verifyLedgerCursor() {
     );
     const legacyEntries = Array.isArray(legacy.body?.entries) ? legacy.body.entries : [];
     if (legacyEntries.length) {
-      const legacyWithDisplay = legacyEntries.filter(entry => entry.display_created_at != null);
-      assert.ok(legacyWithDisplay.length > 0, "legacy ledger entries should include display_created_at");
-      assert.ok(
-        legacyWithDisplay.some(entry => isValidDateString(entry.display_created_at)),
-        "legacy display_created_at should be parseable",
-      );
+      legacyEntries.forEach(entry => {
+        assert.ok(entry.display_created_at, "legacy ledger entries should include display_created_at");
+        assert.ok(isValidDateString(entry.display_created_at), "legacy display_created_at should be parseable");
+      });
     }
   }
 }

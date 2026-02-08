@@ -56,6 +56,14 @@
     nodes.status.hidden = !message;
   }
 
+  function klog(kind, data){
+    try {
+      if (window && window.KLog && typeof window.KLog.log === 'function'){
+        window.KLog.log(kind, data || {});
+      }
+    } catch (_err){}
+  }
+
   function renderUser(user){
     var hasUser = !!user;
     currentUser = user || null;
@@ -102,8 +110,9 @@
 
   function ledgerEntryKey(entry){
     if (!entry) return null;
-    if (entry.display_created_at && Number.isInteger(entry.entry_seq)){
-      return 'seq:' + entry.display_created_at + ':' + entry.entry_seq;
+    var sortId = entry && entry.sort_id != null ? Number(entry.sort_id) : null;
+    if (Number.isFinite(sortId)){
+      return 'sid:' + sortId;
     }
     if (entry.idempotency_key){ return 'idem:' + entry.idempotency_key; }
     if (entry.tx_created_at && entry.tx_type && entry.amount != null){
@@ -142,7 +151,15 @@
   function resolveLedgerTimestamp(entry){
     var source = entry && entry.display_created_at ? entry.display_created_at : null;
     var formatted = formatDateTime(source);
-    return formatted || 'Unknown time';
+    if (!formatted){
+      klog('chips:ledger_invalid_display_timestamp', {
+        display_created_at: source,
+        entry_seq: entry && entry.entry_seq,
+        sort_id: entry && entry.sort_id,
+      });
+      return '—';
+    }
+    return formatted;
   }
 
   function buildLedgerRow(entry){
@@ -308,10 +325,10 @@
       if (aCreated !== bCreated){
         return aCreated < bCreated ? 1 : -1;
       }
-      var aSeq = Number.isInteger(a && a.entry_seq) ? a.entry_seq : -Infinity;
-      var bSeq = Number.isInteger(b && b.entry_seq) ? b.entry_seq : -Infinity;
-      if (aSeq === bSeq) return 0;
-      return aSeq < bSeq ? 1 : -1;
+      var aSort = a && a.sort_id != null ? Number(a.sort_id) : -Infinity;
+      var bSort = b && b.sort_id != null ? Number(b.sort_id) : -Infinity;
+      if (aSort === bSort) return 0;
+      return aSort < bSort ? 1 : -1;
     });
     ledgerState.entries = merged;
     ledgerState.nextCursor = nextCursor || null;

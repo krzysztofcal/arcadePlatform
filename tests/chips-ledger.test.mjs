@@ -19,11 +19,12 @@ const isValidDateString = (value) => {
   return !Number.isNaN(parsed.getTime());
 };
 
-const expectDisplayCreatedAtValidWhenPresent = (items) => {
-  const withDisplay = items.filter(item => item?.display_created_at != null);
-  if (withDisplay.length) {
-    expect(withDisplay.some(item => isValidDateString(item.display_created_at))).toBe(true);
-  }
+const expectDisplayCreatedAtValidForAll = (items) => {
+  expect(items.every(item => isValidDateString(item?.display_created_at))).toBe(true);
+};
+
+const expectSortIdForAll = (items) => {
+  expect(items.every(item => Number.isInteger(item?.sort_id))).toBe(true);
 };
 
 function resetMockDb() {
@@ -99,7 +100,7 @@ function handleLedgerQuery(query, params = []) {
 
   if (text.includes("from public.chips_entries") && text.includes("join public.chips_transactions")) {
     if (text.includes("order by display_created_at desc")) {
-      const [accountId, cursorCreatedAt, cursorEntrySeq, limit] = params;
+      const [accountId, cursorCreatedAt, cursorSortId, limit] = params;
       const entries = mockDb.entries
         .filter(entry => {
           if (entry.account_id !== accountId) return false;
@@ -107,14 +108,14 @@ function handleLedgerQuery(query, params = []) {
           const displayCreatedAt = new Date(entry.created_at ?? mockDb.transactions.get(entry.transaction_id)?.created_at ?? null);
           const cursorTime = new Date(cursorCreatedAt);
           if (displayCreatedAt.getTime() === cursorTime.getTime()) {
-            return entry.entry_seq < cursorEntrySeq;
+            return entry.id < cursorSortId;
           }
           return displayCreatedAt.getTime() < cursorTime.getTime();
         })
         .sort((a, b) => {
           const timeA = new Date(a.created_at ?? mockDb.transactions.get(a.transaction_id)?.created_at ?? null).getTime();
           const timeB = new Date(b.created_at ?? mockDb.transactions.get(b.transaction_id)?.created_at ?? null).getTime();
-          if (timeA === timeB) return b.entry_seq - a.entry_seq;
+          if (timeA === timeB) return b.id - a.id;
           return timeB - timeA;
         })
         .slice(0, limit ?? 50)
@@ -122,6 +123,7 @@ function handleLedgerQuery(query, params = []) {
           const tx = mockDb.transactions.get(entry.transaction_id);
           return {
             entry_seq: entry.entry_seq,
+            sort_id: entry.id,
             amount: entry.amount,
             metadata: entry.metadata,
             created_at: entry.created_at,
@@ -145,6 +147,7 @@ function handleLedgerQuery(query, params = []) {
           const tx = mockDb.transactions.get(entry.transaction_id);
           return {
             entry_seq: entry.entry_seq,
+            sort_id: entry.id,
             amount: entry.amount,
             metadata: entry.metadata,
             created_at: entry.created_at,
@@ -661,8 +664,44 @@ describe("chips ledger paging", () => {
     expect(items).toHaveLength(3);
     expect(items[0].display_created_at >= items[1].display_created_at).toBe(true);
     expect(items[1].display_created_at >= items[2].display_created_at).toBe(true);
-    expect(items[0].entry_seq >= items[1].entry_seq).toBe(true);
-    expectDisplayCreatedAtValidWhenPresent(items);
+    expect(items[0].sort_id >= items[1].sort_id).toBe(true);
+    expectDisplayCreatedAtValidForAll(items);
+    expectSortIdForAll(items);
+  });
+
+  it("orders by sort_id when timestamps match", async () => {
+    const { postTransaction, listUserLedger } = await loadLedger();
+    await postTransaction({
+      userId: "user-4b",
+      txType: "MINT",
+      idempotencyKey: "seed-user-4b",
+      entries: [
+        { accountType: "SYSTEM", systemKey: "TREASURY", amount: -20 },
+        { accountType: "USER", amount: 20 },
+      ],
+    });
+    await postTransaction({
+      userId: "user-4b",
+      txType: "BUY_IN",
+      idempotencyKey: "seq-1b",
+      entries: [
+        { accountType: "USER", amount: -5 },
+        { accountType: "SYSTEM", systemKey: "TREASURY", amount: 5 },
+      ],
+    });
+
+    const admin = await import("../netlify/functions/_shared/supabase-admin.mjs");
+    const userAccount = [...admin.__mockDb.accounts.values()].find(acc => acc.user_id === "user-4b");
+    const userEntries = admin.__mockDb.entries.filter(entry => entry.account_id === userAccount.id);
+    const sameTime = new Date("2026-02-06T19:00:00.000Z").toISOString();
+    userEntries.forEach(entry => {
+      entry.created_at = sameTime;
+    });
+
+    const { items } = await listUserLedger("user-4b", { limit: 2 });
+    expect(items).toHaveLength(2);
+    expect(items[0].display_created_at).toBe(items[1].display_created_at);
+    expect(items[0].sort_id).toBeGreaterThan(items[1].sort_id);
   });
 
   it("rejects invalid cursor values and clamps limits", async () => {
@@ -764,7 +803,7 @@ describe("chips ledger paging", () => {
 
     const second = await listUserLedger("user-5", { limit: 2, cursor: first.nextCursor });
     expect(second.items.length).toBeGreaterThanOrEqual(1);
-    expect(second.items[0].entry_seq).not.toBe(first.items[0].entry_seq);
+    expect(second.items[0].sort_id).not.toBe(first.items[0].sort_id);
     if (second.items.length > 1) {
       expect(second.items[0].display_created_at >= second.items[1].display_created_at).toBe(true);
     }
@@ -813,8 +852,7 @@ describe("chips ledger paging", () => {
     const lastPageItem = first.items[first.items.length - 1];
     const target = userEntries.find(entry =>
       entry.account_id === userAccount.id &&
-      entry.created_at === lastPageItem.created_at &&
-      entry.entry_seq === lastPageItem.entry_seq
+      entry.id === lastPageItem.sort_id
     );
     if (target) {
       target.entry_seq = null;
@@ -823,9 +861,9 @@ describe("chips ledger paging", () => {
     const second = await listUserLedger("user-7", { limit: 2, cursor: first.nextCursor });
     expect(second.items.length).toBeGreaterThanOrEqual(1);
     expect(second.items[0].display_created_at <= lastPageItem.display_created_at).toBe(true);
-    const pageOneKeys = new Set(first.items.map(item => `${item.display_created_at}:${item.entry_seq}`));
+    const pageOneKeys = new Set(first.items.map(item => `${item.display_created_at}:${item.sort_id}`));
     const overlap = second.items.some(item =>
-      item.entry_seq != null && pageOneKeys.has(`${item.display_created_at}:${item.entry_seq}`)
+      item.sort_id != null && pageOneKeys.has(`${item.display_created_at}:${item.sort_id}`)
     );
     expect(overlap).toBe(false);
   });
@@ -865,7 +903,8 @@ describe("chips ledger legacy paging", () => {
     for (let i = 1; i < page.entries.length; i += 1) {
       expect(page.entries[i].entry_seq).toBeGreaterThan(page.entries[i - 1].entry_seq);
     }
-    expectDisplayCreatedAtValidWhenPresent(page.entries);
+    expectDisplayCreatedAtValidForAll(page.entries);
+    expectSortIdForAll(page.entries);
     expect(typeof page.sequenceOk).toBe("boolean");
     expect(typeof page.nextExpectedSeq).toBe("number");
   });
