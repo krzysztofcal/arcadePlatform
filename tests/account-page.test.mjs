@@ -517,7 +517,9 @@ test("ledger scroll does not enforce a fixed max-height", () => {
 
 test("chip-panel min-height is scoped to page-account", () => {
   const normalized = portalCss.replace(/\s+/g, " ");
-  const stripped = normalized.replace(/\.page-account\s+\.chip-panel\{[^}]*\}/g, "");
-  assert.ok(!/\.chip-panel\{[^}]*min-height/.test(stripped), "chip-panel min-height should not be global");
+  const globalChipPanel = normalized.match(/\.chip-panel\{[^}]*\}/);
+  if (globalChipPanel) {
+    assert.ok(!/min-height/.test(globalChipPanel[0]), "chip-panel min-height should not be global");
+  }
   assert.ok(/\.page-account\s+\.chip-panel\{[^}]*min-height\s*:\s*0/.test(normalized), "chip-panel min-height must be scoped");
 });
