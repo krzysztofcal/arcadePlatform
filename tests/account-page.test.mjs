@@ -239,6 +239,45 @@ test("renders display_created_at when present", async () => {
   assert.match(timeNode.textContent, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
 });
 
+test("parses postgres timestamp formats for ledger dates", async () => {
+  const chipsClient = {
+    fetchBalance() {
+      return Promise.resolve({ balance: 1200 });
+    },
+    fetchLedger() {
+      return Promise.resolve({
+        items: [
+          {
+            id: 14,
+            tx_type: "BUY_IN",
+            amount: 50,
+            display_created_at: "2026-02-06 19:00:00+0000",
+            sort_id: "14",
+          },
+        ],
+        nextCursor: null,
+      });
+    },
+  };
+  const { windowObj, document } = buildContext(chipsClient);
+  const context = vm.createContext({
+    window: windowObj,
+    document,
+    requestAnimationFrame: windowObj.requestAnimationFrame,
+    CustomEvent: function() {},
+  });
+  vm.runInContext(source, context);
+
+  await flush();
+  await flush();
+  await flush();
+
+  const list = document.getElementById("chipLedgerList");
+  const timeNode = findByClass(list.children[0], "chip-ledger__time");
+  assert.ok(timeNode, "time element should be present");
+  assert.match(timeNode.textContent, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
+});
+
 test("renders ledger when API returns entries instead of items", async () => {
   const chipsClient = {
     fetchBalance() {
@@ -369,7 +408,9 @@ test("renders placeholder when no valid timestamp exists", async () => {
             id: 11,
             tx_type: "CASH_OUT",
             amount: -20,
-            display_created_at: null,
+            display_created_at: "not-a-date",
+            created_at: "still-not-a-date",
+            tx_created_at: "",
             sort_id: "11",
           },
         ],

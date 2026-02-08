@@ -75,9 +75,33 @@
     }
   }
 
+  function normalizeTimestampToIso(value){
+    if (!value) return null;
+    if (value instanceof Date){
+      if (Number.isNaN(value.getTime())) return null;
+      return value.toISOString();
+    }
+    if (typeof value !== 'string') return null;
+    var normalized = value.trim();
+    if (!normalized) return null;
+    var spaceIndex = normalized.indexOf(' ');
+    if (spaceIndex !== -1){
+      normalized = normalized.slice(0, spaceIndex) + 'T' + normalized.slice(spaceIndex + 1);
+    }
+    normalized = normalized.replace(/([+-]\d{2})(\d{2})$/, '$1:$2');
+    normalized = normalized.replace(/\+00$/, 'Z');
+    if (!/[Zz]|[+-]\d{2}:?\d{2}$/.test(normalized)){
+      normalized += 'Z';
+    }
+    var parsed = new Date(normalized);
+    if (Number.isNaN(parsed.getTime())) return null;
+    return parsed.toISOString();
+  }
+
   function resolveSortTimestamp(entry){
     if (!entry) return '';
-    return String(entry.display_created_at || entry.created_at || entry.tx_created_at || '');
+    var normalized = normalizeTimestampToIso(entry.display_created_at || entry.created_at || entry.tx_created_at || '');
+    return normalized ? normalized : '';
   }
 
   function renderUser(user){
@@ -153,8 +177,9 @@
   }
 
   function formatDateTime(value){
-    if (!value) return '';
-    var parsed = new Date(value);
+    var normalized = normalizeTimestampToIso(value);
+    if (!normalized) return '';
+    var parsed = new Date(normalized);
     if (Number.isNaN(parsed.getTime())) return '';
     var year = String(parsed.getFullYear());
     var month = String(parsed.getMonth() + 1).padStart(2, '0');
@@ -175,10 +200,6 @@
       var formatted = formatDateTime(candidate.value);
       if (formatted){ return formatted; }
     }
-    var rawFallback = '';
-    if (entry && entry.created_at){ rawFallback = String(entry.created_at); }
-    else if (entry && entry.tx_created_at){ rawFallback = String(entry.tx_created_at); }
-    else if (entry && entry.display_created_at){ rawFallback = String(entry.display_created_at); }
     klog('chips:ledger_invalid_display_timestamp', {
       display_created_at: entry && entry.display_created_at,
       created_at: entry && entry.created_at,
@@ -186,7 +207,7 @@
       entry_seq: entry && entry.entry_seq,
       sort_id: entry && entry.sort_id,
     });
-    return rawFallback ? rawFallback : '—';
+    return '—';
   }
 
   function buildLedgerRow(entry){
