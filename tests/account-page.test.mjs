@@ -642,6 +642,86 @@ test("sorts by display_created_at then sort_id", async () => {
   assert.ok(highTop < lowTop, "higher sort_id should render first");
 });
 
+test("sort falls back to created_at and tx_created_at for ordering", async () => {
+  const chipsClient = {
+    fetchBalance() {
+      return Promise.resolve({ balance: 1200 });
+    },
+    fetchLedger() {
+      return Promise.resolve({
+        items: [
+          { id: 1, entry_seq: 1, tx_type: "BUY_IN", amount: 1, description: "Row A", created_at: "2026-02-06T19:00:00.000Z", sort_id: "10" },
+          { id: 2, entry_seq: 2, tx_type: "BUY_IN", amount: 1, description: "Row B", tx_created_at: "2026-02-06T20:00:00.000Z", sort_id: "12" },
+        ],
+        nextCursor: null,
+      });
+    },
+  };
+  const { windowObj, document } = buildContext(chipsClient);
+  const context = vm.createContext({
+    window: windowObj,
+    document,
+    requestAnimationFrame: windowObj.requestAnimationFrame,
+    CustomEvent: function() {},
+  });
+  vm.runInContext(source, context);
+
+  await flush();
+  await flush();
+  await flush();
+
+  const list = document.getElementById("chipLedgerList");
+  var rowHigh = null;
+  var rowLow = null;
+  for (var i = 0; i < list.children.length; i += 1) {
+    var descNode = findByClass(list.children[i], "chip-ledger__desc");
+    var text = descNode && descNode.textContent ? descNode.textContent : "";
+    if (text.indexOf("Row B") >= 0) { rowHigh = list.children[i]; }
+    if (text.indexOf("Row A") >= 0) { rowLow = list.children[i]; }
+  }
+  if (!rowHigh || !rowLow) {
+    rowHigh = list.children[0];
+    rowLow = list.children[1];
+  }
+  var highTop = Number.parseInt(rowHigh.style.top, 10);
+  var lowTop = Number.parseInt(rowLow.style.top, 10);
+  assert.ok(highTop < lowTop, "entry with later fallback timestamp should render first");
+});
+
+test("sort_id tie-breaker works when timestamps missing", async () => {
+  const chipsClient = {
+    fetchBalance() {
+      return Promise.resolve({ balance: 1200 });
+    },
+    fetchLedger() {
+      return Promise.resolve({
+        items: [
+          { id: 1, entry_seq: 1, tx_type: "BUY_IN", amount: 1, created_at: "2026-02-06T19:00:00.000Z", sort_id: "10" },
+          { id: 2, entry_seq: 2, tx_type: "BUY_IN", amount: 1, created_at: "2026-02-06T19:00:00.000Z", sort_id: "12" },
+        ],
+        nextCursor: null,
+      });
+    },
+  };
+  const { windowObj, document } = buildContext(chipsClient);
+  const context = vm.createContext({
+    window: windowObj,
+    document,
+    requestAnimationFrame: windowObj.requestAnimationFrame,
+    CustomEvent: function() {},
+  });
+  vm.runInContext(source, context);
+
+  await flush();
+  await flush();
+  await flush();
+
+  const list = document.getElementById("chipLedgerList");
+  var highTop = Number.parseInt(list.children[0].style.top, 10);
+  var lowTop = Number.parseInt(list.children[1].style.top, 10);
+  assert.ok(highTop < lowTop, "higher sort_id should render first on tie");
+});
+
 test("dedupes items with null entry_seq using idempotency_key", async () => {
   const calls = [];
   const firstPage = [

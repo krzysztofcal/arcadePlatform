@@ -75,6 +75,11 @@
     }
   }
 
+  function resolveSortTimestamp(entry){
+    if (!entry) return '';
+    return String(entry.display_created_at || entry.created_at || entry.tx_created_at || '');
+  }
+
   function renderUser(user){
     var hasUser = !!user;
     currentUser = user || null;
@@ -129,13 +134,14 @@
     if (entry.created_at && entry.entry_seq != null){
       return 'legacy:' + entry.created_at + ':' + entry.entry_seq;
     }
-    if (entry.display_created_at && entry.tx_type && entry.amount != null){
-      return 'entry:' + entry.display_created_at + ':' + entry.tx_type + ':' + entry.amount + ':' + (entry.reference || '');
+    var resolvedTimestamp = resolveSortTimestamp(entry);
+    if (resolvedTimestamp && entry.tx_type && entry.amount != null){
+      return 'entry:' + resolvedTimestamp + ':' + entry.tx_type + ':' + entry.amount + ':' + (entry.reference || '');
     }
     if (entry.display_created_at || entry.tx_type || entry.amount != null || entry.reference || entry.description){
       try {
         return 'fallback:' + JSON.stringify({
-          display_created_at: entry.display_created_at || null,
+          display_created_at: entry.display_created_at || entry.created_at || entry.tx_created_at || null,
           tx_type: entry.tx_type || null,
           amount: entry.amount,
           reference: entry.reference || null,
@@ -337,8 +343,8 @@
       addEntry(items[j]);
     }
     merged.sort(function(a, b){
-      var aCreated = a && a.display_created_at ? String(a.display_created_at) : '';
-      var bCreated = b && b.display_created_at ? String(b.display_created_at) : '';
+      var aCreated = resolveSortTimestamp(a);
+      var bCreated = resolveSortTimestamp(b);
       if (aCreated !== bCreated){
         return aCreated < bCreated ? 1 : -1;
       }

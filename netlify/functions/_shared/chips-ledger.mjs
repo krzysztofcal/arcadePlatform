@@ -190,15 +190,15 @@ function decodeLedgerCursor(cursor) {
   }
   if (hasSeqKey) {
     const createdAt = payload?.displayCreatedAt || payload?.display_created_at || payload?.createdAt || payload?.created_at;
-    const parsedCreated = createdAt ? new Date(createdAt) : null;
-    if (!parsedCreated || Number.isNaN(parsedCreated.getTime())) {
+    const createdIso = asIso(createdAt);
+    if (!createdIso) {
       throw badRequest("invalid_cursor", "Invalid cursor");
     }
     const entrySeq = parsePositiveInt(payload?.entrySeq ?? payload?.entry_seq);
     if (entrySeq === null) {
       throw badRequest("invalid_cursor", "Invalid cursor");
     }
-    return { createdAt: parsedCreated.toISOString(), entrySeq, mode: "entry_seq" };
+    return { createdAt: createdIso, entrySeq, mode: "entry_seq" };
   }
   const timestampOnly = payload?.displayCreatedAt || payload?.display_created_at || payload?.createdAt || payload?.created_at;
   if (timestampOnly) {
@@ -236,12 +236,7 @@ function encodeLedgerCursor(cursor) {
       return null;
     }
   }
-  try {
-    const payload = JSON.stringify(cursor);
-    return Buffer.from(payload, "utf8").toString("base64");
-  } catch (_err) {
-    return null;
-  }
+  return null;
 }
 
 function findLastCursorCandidate(entries) {

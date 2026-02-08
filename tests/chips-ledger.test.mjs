@@ -1027,6 +1027,35 @@ describe("chips ledger paging", () => {
     });
   });
 
+  it("accepts legacy cursor timestamps with postgres formats", async () => {
+    const { postTransaction, listUserLedger } = await loadLedger();
+    await postTransaction({
+      userId: "user-6e",
+      txType: "MINT",
+      idempotencyKey: "seed-user-6e",
+      entries: [
+        { accountType: "SYSTEM", systemKey: "TREASURY", amount: -20 },
+        { accountType: "USER", amount: 20 },
+      ],
+    });
+    await postTransaction({
+      userId: "user-6e",
+      txType: "BUY_IN",
+      idempotencyKey: "cursor-6e-1",
+      entries: [
+        { accountType: "USER", amount: -2 },
+        { accountType: "SYSTEM", systemKey: "TREASURY", amount: 2 },
+      ],
+    });
+
+    const first = await listUserLedger("user-6e", { limit: 1 });
+    const legacyCursor = Buffer.from(
+      JSON.stringify({ createdAt: "2026-02-06 19:00:00+0000", entrySeq: first.items[0].entry_seq }),
+    ).toString("base64");
+    const second = await listUserLedger("user-6e", { limit: 2, cursor: legacyCursor });
+    expect(second.items.length).toBeGreaterThan(0);
+  });
+
   it("prefers sort_id mode when sortId is present", async () => {
     const { postTransaction, listUserLedger } = await loadLedger();
     await postTransaction({
