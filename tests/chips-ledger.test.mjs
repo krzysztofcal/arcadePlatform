@@ -832,7 +832,7 @@ describe("chips ledger paging", () => {
     expect(third.items.length).toBeGreaterThan(0);
   });
 
-  it("handles timestamp-only cursor payloads", async () => {
+  it("rejects timestamp-only cursor payloads", async () => {
     const { postTransaction, listUserLedger } = await loadLedger();
     await postTransaction({
       userId: "user-6d",
@@ -857,8 +857,12 @@ describe("chips ledger paging", () => {
     const timestampOnlyCursor = Buffer.from(
       JSON.stringify({ createdAt: first.items[0].display_created_at }),
     ).toString("base64");
-    const second = await listUserLedger("user-6d", { limit: 2, cursor: timestampOnlyCursor });
-    expect(second.items.length).toBeGreaterThan(0);
+    await expect(
+      listUserLedger("user-6d", { limit: 2, cursor: timestampOnlyCursor }),
+    ).rejects.toMatchObject({
+      code: "invalid_cursor",
+      status: 400,
+    });
   });
 
   it("prefers sort_id mode when sortId is present", async () => {
