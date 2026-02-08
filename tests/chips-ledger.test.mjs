@@ -1276,6 +1276,37 @@ describe("chips handlers security and gating", () => {
     const body = JSON.parse(ledgerResult.body);
     expect(ledgerResult.statusCode).toBe(200);
     expect(Array.isArray(body.items)).toBe(true);
+    expect(body.nextCursor).toBeDefined();
+    expect(body.sequenceOk).toBeUndefined();
+  });
+
+  it("uses legacy paging when after is provided without cursor", async () => {
+    process.env.CHIPS_ENABLED = "1";
+    const { handler: ledgerHandler } = await import("../netlify/functions/chips-ledger.mjs");
+    const { postTransaction } = await loadLedger();
+    await postTransaction({
+      userId: "user-legacy",
+      txType: "MINT",
+      idempotencyKey: "seed-user-legacy",
+      entries: [
+        { accountType: "SYSTEM", systemKey: "TREASURY", amount: -20 },
+        { accountType: "USER", amount: 20 },
+      ],
+    });
+
+    const ledgerResult = await ledgerHandler({
+      httpMethod: "GET",
+      headers: { authorization: "Bearer user-legacy", origin: "https://arcade.test" },
+      queryStringParameters: { after: "0" },
+    });
+    const body = JSON.parse(ledgerResult.body);
+    expect(ledgerResult.statusCode).toBe(200);
+    expect(Array.isArray(body.entries)).toBe(true);
+    expect(body.entries.length).toBeGreaterThan(0);
+    expectDisplayCreatedAtValidForAll(body.entries);
+    expectSortIdForAll(body.entries);
+    expect(typeof body.sequenceOk).toBe("boolean");
+    expect(typeof body.nextExpectedSeq).toBe("number");
   });
 
   it("returns 404 when chips are disabled", async () => {

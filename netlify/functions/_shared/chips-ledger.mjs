@@ -258,7 +258,6 @@ function findLastCursorCandidate(entries) {
 
 async function listUserLedgerAfterSeq(userId, { afterSeq = null, limit = 50 } = {}) {
   const cappedLimit = Math.min(Math.max(1, Number.isInteger(limit) ? limit : 50), 200);
-  const account = await getOrCreateUserAccount(userId);
   const hasAfter = afterSeq !== null && afterSeq !== undefined && !(typeof afterSeq === "string" && afterSeq.trim() === "");
   const parsedAfterSeq = parsePositiveInt(afterSeq);
   if (hasAfter && parsedAfterSeq === null) {
@@ -280,14 +279,17 @@ with entries as (
     coalesce(e.created_at, t.created_at) as display_created_at
   from public.chips_entries e
   join public.chips_transactions t on t.id = e.transaction_id
-  where e.account_id = $1
+  join public.chips_accounts a on a.id = e.account_id
+  where a.account_type = 'USER'
+    and a.user_id = $1
     and ($2::bigint is null or e.entry_seq > $2)
   order by e.entry_seq asc
   limit $3
 )
 select * from entries;
 `;
-  const rows = await executeSql(query, [account.id, parsedAfterSeq, cappedLimit]);
+  await getOrCreateUserAccount(userId);
+  const rows = await executeSql(query, [userId, parsedAfterSeq, cappedLimit]);
   const expectedStart = parsedAfterSeq ? parsedAfterSeq + 1 : 1;
   let sequenceOk = true;
   let cursor = expectedStart;

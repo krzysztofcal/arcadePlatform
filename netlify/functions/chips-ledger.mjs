@@ -50,13 +50,16 @@ export async function handler(event) {
   const afterRaw = hasAfter ? qs.after : null;
   const after = typeof afterRaw === "string" ? afterRaw.trim() : afterRaw;
   const cursor = hasCursor ? qs.cursor : null;
+  const trimmedCursor = typeof cursor === "string" ? cursor.trim() : cursor;
+  const hasCursorValue = typeof trimmedCursor === "string" ? trimmedCursor !== "" : !!trimmedCursor;
+  const hasAfterValue = typeof after === "string" ? after !== "" : after != null;
   const limitRaw = qs.limit;
   const parsedLimit = Number(limitRaw);
   const limit = Number.isInteger(parsedLimit) ? parsedLimit : 50;
 
   try {
-    if (!after) {
-      const ledger = await listUserLedger(auth.userId, { cursor, limit });
+    if (hasCursorValue || !hasAfterValue) {
+      const ledger = await listUserLedger(auth.userId, { cursor: hasCursorValue ? trimmedCursor : null, limit });
       const items = Array.isArray(ledger.items) ? ledger.items : ledger.entries || [];
       klog("chips_ledger_ok", { userId: auth.userId, count: items.length });
       return {
