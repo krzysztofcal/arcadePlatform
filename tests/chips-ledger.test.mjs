@@ -101,21 +101,28 @@ function handleLedgerQuery(query, params = []) {
   if (text.includes("from public.chips_entries") && text.includes("join public.chips_transactions")) {
     if (text.includes("order by display_created_at desc")) {
       const [accountId, cursorCreatedAt, cursorSortId, limit] = params;
+      const cursorSortIdBig = cursorSortId != null ? BigInt(String(cursorSortId)) : null;
       const entries = mockDb.entries
         .filter(entry => {
           if (entry.account_id !== accountId) return false;
           if (!cursorCreatedAt) return true;
           const displayCreatedAt = new Date(entry.created_at ?? mockDb.transactions.get(entry.transaction_id)?.created_at ?? null);
           const cursorTime = new Date(cursorCreatedAt);
+          const entryIdBig = BigInt(String(entry.id));
           if (displayCreatedAt.getTime() === cursorTime.getTime()) {
-            return entry.id < cursorSortId;
+            return cursorSortIdBig === null ? false : entryIdBig < cursorSortIdBig;
           }
           return displayCreatedAt.getTime() < cursorTime.getTime();
         })
         .sort((a, b) => {
           const timeA = new Date(a.created_at ?? mockDb.transactions.get(a.transaction_id)?.created_at ?? null).getTime();
           const timeB = new Date(b.created_at ?? mockDb.transactions.get(b.transaction_id)?.created_at ?? null).getTime();
-          if (timeA === timeB) return b.id - a.id;
+          if (timeA === timeB) {
+            const idA = BigInt(String(a.id));
+            const idB = BigInt(String(b.id));
+            if (idB === idA) return 0;
+            return idB > idA ? 1 : -1;
+          }
           return timeB - timeA;
         })
         .slice(0, limit ?? 50)
@@ -702,6 +709,12 @@ describe("chips ledger paging", () => {
     expect(items).toHaveLength(2);
     expect(items[0].display_created_at).toBe(items[1].display_created_at);
     expect(BigInt(items[0].sort_id) > BigInt(items[1].sort_id)).toBe(true);
+    const cursor = Buffer.from(
+      JSON.stringify({ displayCreatedAt: items[0].display_created_at, sortId: String(items[0].sort_id) }),
+    ).toString("base64");
+    const paged = await listUserLedger("user-4b", { limit: 1, cursor });
+    expect(paged.items).toHaveLength(1);
+    expect(paged.items[0].sort_id).toBe(items[1].sort_id);
   });
 
   it("rejects invalid cursor values and clamps limits", async () => {
