@@ -774,6 +774,7 @@ describe("chips ledger paging", () => {
     const { items } = await listUserLedger("user-4c", { limit: 1 });
     expect(items).toHaveLength(1);
     expect(items[0].display_created_at).toBe(items[0].created_at);
+    expect(items[0].created_at).toBeTruthy();
   });
 
   it("falls back to tx_created_at when entry created_at is missing", async () => {
@@ -796,6 +797,26 @@ describe("chips ledger paging", () => {
     const { items } = await listUserLedger("user-4d", { limit: 1 });
     expect(items).toHaveLength(1);
     expect(items[0].display_created_at).toBe(items[0].tx_created_at);
+    expect(items[0].tx_created_at).toBeTruthy();
+  });
+
+  it("prefers created_at over tx_created_at when both exist", async () => {
+    const { postTransaction, listUserLedger } = await loadLedger();
+    await postTransaction({
+      userId: "user-4f",
+      txType: "BUY_IN",
+      idempotencyKey: "seq-1f",
+      entries: [
+        { accountType: "USER", amount: -5 },
+        { accountType: "SYSTEM", systemKey: "TREASURY", amount: 5 },
+      ],
+    });
+
+    const { items } = await listUserLedger("user-4f", { limit: 1 });
+    expect(items).toHaveLength(1);
+    expect(items[0].created_at).toBeTruthy();
+    expect(items[0].tx_created_at).toBeTruthy();
+    expect(items[0].display_created_at).toBe(items[0].created_at);
   });
 
   it("rejects invalid cursor values and clamps limits", async () => {

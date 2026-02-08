@@ -60,8 +60,6 @@ const asIso = (value) => {
 };
 
 const resolveDisplayCreatedAt = (row, context) => {
-  const fromDisplay = asIso(row?.display_created_at);
-  if (fromDisplay) return fromDisplay;
   const fromEntry = asIso(row?.created_at);
   if (fromEntry) return fromEntry;
   const fromTx = asIso(row?.tx_created_at);

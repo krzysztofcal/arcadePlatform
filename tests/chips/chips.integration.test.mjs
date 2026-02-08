@@ -91,6 +91,8 @@ async function verifyLedgerCursor() {
   entries.forEach(entry => {
     assert.ok(entry.display_created_at, "ledger entries should include display_created_at");
     assert.ok(isValidDateString(entry.display_created_at), "ledger display_created_at should be parseable");
+    assert.ok(entry.created_at, "ledger entries should include created_at");
+    assert.ok(isValidDateString(entry.created_at), "ledger created_at should be parseable");
     assert.ok(/^\d+$/.test(String(entry.sort_id || "")), "ledger sort_id should be numeric");
   });
   for (let i = 1; i < entries.length; i += 1) {
