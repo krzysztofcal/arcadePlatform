@@ -24,7 +24,7 @@ const expectDisplayCreatedAtValidForAll = (items) => {
 };
 
 const expectSortIdForAll = (items) => {
-  expect(items.every(item => Number.isInteger(item?.sort_id))).toBe(true);
+  expect(items.every(item => typeof item?.sort_id === "string" && /^\d+$/.test(item.sort_id))).toBe(true);
 };
 
 function resetMockDb() {
@@ -123,7 +123,7 @@ function handleLedgerQuery(query, params = []) {
           const tx = mockDb.transactions.get(entry.transaction_id);
           return {
             entry_seq: entry.entry_seq,
-            sort_id: entry.id,
+            sort_id: String(entry.id),
             amount: entry.amount,
             metadata: entry.metadata,
             created_at: entry.created_at,
@@ -147,7 +147,7 @@ function handleLedgerQuery(query, params = []) {
           const tx = mockDb.transactions.get(entry.transaction_id);
           return {
             entry_seq: entry.entry_seq,
-            sort_id: entry.id,
+            sort_id: String(entry.id),
             amount: entry.amount,
             metadata: entry.metadata,
             created_at: entry.created_at,
@@ -664,7 +664,7 @@ describe("chips ledger paging", () => {
     expect(items).toHaveLength(3);
     expect(items[0].display_created_at >= items[1].display_created_at).toBe(true);
     expect(items[1].display_created_at >= items[2].display_created_at).toBe(true);
-    expect(items[0].sort_id >= items[1].sort_id).toBe(true);
+    expect(BigInt(items[0].sort_id) >= BigInt(items[1].sort_id)).toBe(true);
     expectDisplayCreatedAtValidForAll(items);
     expectSortIdForAll(items);
   });
@@ -701,7 +701,7 @@ describe("chips ledger paging", () => {
     const { items } = await listUserLedger("user-4b", { limit: 2 });
     expect(items).toHaveLength(2);
     expect(items[0].display_created_at).toBe(items[1].display_created_at);
-    expect(items[0].sort_id).toBeGreaterThan(items[1].sort_id);
+    expect(BigInt(items[0].sort_id) > BigInt(items[1].sort_id)).toBe(true);
   });
 
   it("rejects invalid cursor values and clamps limits", async () => {
@@ -765,6 +765,36 @@ describe("chips ledger paging", () => {
 
     const many = await listUserLedger("user-6", { cursor: null, limit: 9999 });
     expect(many.items.length).toBeLessThanOrEqual(200);
+  });
+
+  it("accepts legacy cursor payloads", async () => {
+    const { postTransaction, listUserLedger } = await loadLedger();
+    await postTransaction({
+      userId: "user-6b",
+      txType: "MINT",
+      idempotencyKey: "seed-user-6b",
+      entries: [
+        { accountType: "SYSTEM", systemKey: "TREASURY", amount: -20 },
+        { accountType: "USER", amount: 20 },
+      ],
+    });
+    await postTransaction({
+      userId: "user-6b",
+      txType: "BUY_IN",
+      idempotencyKey: "cursor-6b-1",
+      entries: [
+        { accountType: "USER", amount: -2 },
+        { accountType: "SYSTEM", systemKey: "TREASURY", amount: 2 },
+      ],
+    });
+
+    const first = await listUserLedger("user-6b", { limit: 1 });
+    expect(first.items).toHaveLength(1);
+    const legacyCursor = Buffer.from(
+      JSON.stringify({ createdAt: first.items[0].display_created_at, entrySeq: first.items[0].entry_seq }),
+    ).toString("base64");
+    const second = await listUserLedger("user-6b", { limit: 2, cursor: legacyCursor });
+    expect(second.items.length).toBeGreaterThan(0);
   });
 
   it("pages by cursor without overlap", async () => {
@@ -852,7 +882,7 @@ describe("chips ledger paging", () => {
     const lastPageItem = first.items[first.items.length - 1];
     const target = userEntries.find(entry =>
       entry.account_id === userAccount.id &&
-      entry.id === lastPageItem.sort_id
+      String(entry.id) === lastPageItem.sort_id
     );
     if (target) {
       target.entry_seq = null;

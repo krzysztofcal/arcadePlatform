@@ -64,6 +64,17 @@
     } catch (_err){}
   }
 
+  function parseSortId(value){
+    if (value === null || value === undefined) return null;
+    var text = String(value);
+    if (!/^\d+$/.test(text)) return null;
+    try {
+      return BigInt(text);
+    } catch (_err){
+      return null;
+    }
+  }
+
   function renderUser(user){
     var hasUser = !!user;
     currentUser = user || null;
@@ -110,9 +121,9 @@
 
   function ledgerEntryKey(entry){
     if (!entry) return null;
-    var sortId = entry && entry.sort_id != null ? Number(entry.sort_id) : null;
-    if (Number.isFinite(sortId)){
-      return 'sid:' + sortId;
+    var sortIdText = entry && entry.sort_id != null ? String(entry.sort_id) : '';
+    if (sortIdText && /^\d+$/.test(sortIdText)){
+      return 'sid:' + sortIdText;
     }
     if (entry.idempotency_key){ return 'idem:' + entry.idempotency_key; }
     if (entry.tx_created_at && entry.tx_type && entry.amount != null){
@@ -325,8 +336,11 @@
       if (aCreated !== bCreated){
         return aCreated < bCreated ? 1 : -1;
       }
-      var aSort = a && a.sort_id != null ? Number(a.sort_id) : -Infinity;
-      var bSort = b && b.sort_id != null ? Number(b.sort_id) : -Infinity;
+      var aSort = parseSortId(a && a.sort_id != null ? a.sort_id : null);
+      var bSort = parseSortId(b && b.sort_id != null ? b.sort_id : null);
+      if (aSort === null && bSort === null) return 0;
+      if (aSort === null) return 1;
+      if (bSort === null) return -1;
       if (aSort === bSort) return 0;
       return aSort < bSort ? 1 : -1;
     });

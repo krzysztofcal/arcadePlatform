@@ -166,7 +166,7 @@ test("renders formatted chip ledger dates", async () => {
             tx_type: "BUY_IN",
             amount: 25,
             display_created_at: "2026-02-06T19:15:23.123Z",
-            sort_id: 9,
+            sort_id: "9",
           },
         ],
         nextCursor: null,
@@ -206,7 +206,7 @@ test("renders display_created_at when present", async () => {
             tx_type: "BUY_IN",
             amount: 50,
             display_created_at: "2026-02-06T20:45:11.000Z",
-            sort_id: 10,
+            sort_id: "10",
           },
         ],
         nextCursor: null,
@@ -245,7 +245,7 @@ test("renders placeholder when no valid timestamp exists", async () => {
             tx_type: "CASH_OUT",
             amount: -20,
             display_created_at: null,
-            sort_id: 11,
+            sort_id: "11",
           },
         ],
         nextCursor: null,
@@ -279,7 +279,7 @@ test("loads more ledger entries on scroll", async () => {
     tx_type: "BUY_IN",
     amount: 1,
     display_created_at: "2026-02-06T19:00:00.000Z",
-    sort_id: 100 + index,
+    sort_id: String(100 + index),
   }));
   const chipsClient = {
     fetchBalance() {
@@ -298,7 +298,7 @@ test("loads more ledger entries on scroll", async () => {
             tx_type: "CASH_OUT",
             amount: -5,
             display_created_at: "2026-02-05T18:40:00.000Z",
-            sort_id: 200,
+            sort_id: "200",
           },
         ],
         nextCursor: null,
@@ -344,7 +344,7 @@ test("shows error tail row and retries on scroll", async () => {
     tx_type: "BUY_IN",
     amount: 1,
     display_created_at: "2026-02-06T19:00:00.000Z",
-    sort_id: 300 + index,
+    sort_id: String(300 + index),
   }));
   const chipsClient = {
     fetchBalance() {
@@ -366,7 +366,7 @@ test("shows error tail row and retries on scroll", async () => {
             tx_type: "CASH_OUT",
             amount: -5,
             display_created_at: "2026-02-05T18:40:00.000Z",
-            sort_id: 400,
+            sort_id: "400",
           },
         ],
         nextCursor: null,
@@ -416,8 +416,8 @@ test("shows error tail row and retries on scroll", async () => {
 test("dedupes overlapping items by created_at and entry_seq", async () => {
   const calls = [];
   const firstPage = [
-    { id: 1, entry_seq: 10, tx_type: "BUY_IN", amount: 1, display_created_at: "2026-02-06T19:00:00.000Z", sort_id: 500 },
-    { id: 2, entry_seq: 9, tx_type: "BUY_IN", amount: 1, display_created_at: "2026-02-06T18:59:00.000Z", sort_id: 499 },
+    { id: 1, entry_seq: 10, tx_type: "BUY_IN", amount: 1, display_created_at: "2026-02-06T19:00:00.000Z", sort_id: "500" },
+    { id: 2, entry_seq: 9, tx_type: "BUY_IN", amount: 1, display_created_at: "2026-02-06T18:59:00.000Z", sort_id: "499" },
   ];
   const chipsClient = {
     fetchBalance() {
@@ -430,8 +430,8 @@ test("dedupes overlapping items by created_at and entry_seq", async () => {
       }
       return Promise.resolve({
         items: [
-          { id: 2, entry_seq: 9, tx_type: "BUY_IN", amount: 1, display_created_at: "2026-02-06T18:59:00.000Z", sort_id: 499 },
-          { id: 3, entry_seq: 8, tx_type: "BUY_IN", amount: 1, display_created_at: "2026-02-06T18:58:00.000Z", sort_id: 498 },
+          { id: 2, entry_seq: 9, tx_type: "BUY_IN", amount: 1, display_created_at: "2026-02-06T18:59:00.000Z", sort_id: "499" },
+          { id: 3, entry_seq: 8, tx_type: "BUY_IN", amount: 1, display_created_at: "2026-02-06T18:58:00.000Z", sort_id: "498" },
         ],
         nextCursor: null,
       });
@@ -472,8 +472,8 @@ test("sorts by display_created_at then sort_id", async () => {
     fetchLedger() {
       return Promise.resolve({
         items: [
-          { id: 1, entry_seq: 1, tx_type: "BUY_IN", amount: 1, description: "Row 10", display_created_at: "2026-02-06T19:00:00.000Z", sort_id: 10 },
-          { id: 2, entry_seq: 2, tx_type: "BUY_IN", amount: 1, description: "Row 12", display_created_at: "2026-02-06T19:00:00.000Z", sort_id: 12 },
+          { id: 1, entry_seq: 1, tx_type: "BUY_IN", amount: 1, description: "Row 10", display_created_at: "2026-02-06T19:00:00.000Z", sort_id: "10" },
+          { id: 2, entry_seq: 2, tx_type: "BUY_IN", amount: 1, description: "Row 12", display_created_at: "2026-02-06T19:00:00.000Z", sort_id: "12" },
         ],
         nextCursor: null,
       });
@@ -513,8 +513,8 @@ test("sorts by display_created_at then sort_id", async () => {
 test("dedupes items with null entry_seq using idempotency_key", async () => {
   const calls = [];
   const firstPage = [
-    { id: 1, entry_seq: null, idempotency_key: "idem-1", tx_type: "BUY_IN", amount: 1, display_created_at: "2026-02-06T19:00:00.000Z", sort_id: 700 },
-    { id: 2, entry_seq: null, idempotency_key: "idem-2", tx_type: "BUY_IN", amount: 1, display_created_at: "2026-02-06T18:59:00.000Z", sort_id: 699 },
+    { id: 1, entry_seq: null, idempotency_key: "idem-1", tx_type: "BUY_IN", amount: 1, display_created_at: "2026-02-06T19:00:00.000Z", sort_id: "700" },
+    { id: 2, entry_seq: null, idempotency_key: "idem-2", tx_type: "BUY_IN", amount: 1, display_created_at: "2026-02-06T18:59:00.000Z", sort_id: "699" },
   ];
   const chipsClient = {
     fetchBalance() {
@@ -527,8 +527,8 @@ test("dedupes items with null entry_seq using idempotency_key", async () => {
       }
       return Promise.resolve({
         items: [
-          { id: 3, entry_seq: null, idempotency_key: "idem-2", tx_type: "BUY_IN", amount: 1, display_created_at: "2026-02-06T18:59:00.000Z", sort_id: 699 },
-          { id: 4, entry_seq: null, idempotency_key: "idem-3", tx_type: "BUY_IN", amount: 1, display_created_at: "2026-02-06T18:58:00.000Z", sort_id: 698 },
+          { id: 3, entry_seq: null, idempotency_key: "idem-2", tx_type: "BUY_IN", amount: 1, display_created_at: "2026-02-06T18:59:00.000Z", sort_id: "699" },
+          { id: 4, entry_seq: null, idempotency_key: "idem-3", tx_type: "BUY_IN", amount: 1, display_created_at: "2026-02-06T18:58:00.000Z", sort_id: "698" },
         ],
         nextCursor: null,
       });
