@@ -138,7 +138,7 @@ function decodeLedgerCursor(cursor) {
   } catch (_err) {
     throw badRequest("invalid_cursor", "Invalid cursor");
   }
-  const createdAt = payload?.createdAt || payload?.created_at;
+  const createdAt = payload?.displayCreatedAt || payload?.display_created_at || payload?.createdAt || payload?.created_at;
   const entrySeq = parsePositiveInt(payload?.entrySeq ?? payload?.entry_seq);
   const parsedCreated = createdAt ? new Date(createdAt) : null;
   if (!parsedCreated || Number.isNaN(parsedCreated.getTime()) || entrySeq === null) {
@@ -151,7 +151,7 @@ function encodeLedgerCursor(createdAt, entrySeq) {
   if (!createdAt || typeof createdAt !== "string" || !createdAt.trim()) return null;
   if (!Number.isInteger(entrySeq) || entrySeq <= 0) return null;
   try {
-    const payload = JSON.stringify({ createdAt, entrySeq });
+    const payload = JSON.stringify({ displayCreatedAt: createdAt, entrySeq });
     return Buffer.from(payload, "utf8").toString("base64");
   } catch (_err) {
     return null;
@@ -162,7 +162,7 @@ function findLastCursorCandidate(entries) {
   if (!Array.isArray(entries)) return null;
   for (let i = entries.length - 1; i >= 0; i -= 1) {
     const entry = entries[i];
-    const parsedCreated = entry?.created_at ? new Date(entry.created_at) : null;
+    const parsedCreated = entry?.display_created_at ? new Date(entry.display_created_at) : null;
     const entrySeq = parsePositiveInt(entry?.entry_seq);
     if (parsedCreated && !Number.isNaN(parsedCreated.getTime()) && entrySeq !== null) {
       return { createdAt: parsedCreated.toISOString(), entrySeq };
@@ -190,7 +190,8 @@ with entries as (
     t.reference,
     t.description,
     t.idempotency_key,
-    t.created_at as tx_created_at
+    t.created_at as tx_created_at,
+    coalesce(e.created_at, t.created_at) as display_created_at
   from public.chips_entries e
   join public.chips_transactions t on t.id = e.transaction_id
   where e.account_id = $1
@@ -239,6 +240,7 @@ select * from entries;
     const parsedAmount = parseWholeInt(row?.amount);
     const createdAt = asIso(row?.created_at);
     const txCreatedAt = asIso(row?.tx_created_at);
+    const displayCreatedAt = asIso(row?.display_created_at);
 
     if (parsedAmount === null && row?.amount != null) {
       klog("chips:ledger_invalid_amount", {
@@ -254,6 +256,7 @@ select * from entries;
       raw_amount: row?.amount == null ? null : String(row.amount),
       metadata: row?.metadata ?? null,
       created_at: createdAt,
+      display_created_at: displayCreatedAt,
       tx_type: row?.tx_type ?? null,
       reference: row?.reference ?? null,
       description: row?.description ?? null,
@@ -282,15 +285,16 @@ with entries as (
     t.reference,
     t.description,
     t.idempotency_key,
-    t.created_at as tx_created_at
+    t.created_at as tx_created_at,
+    coalesce(e.created_at, t.created_at) as display_created_at
   from public.chips_entries e
   join public.chips_transactions t on t.id = e.transaction_id
   where e.account_id = $1
     and (
       $2::timestamptz is null
-      or (e.created_at, e.entry_seq) < ($2::timestamptz, $3::bigint)
+      or (coalesce(e.created_at, t.created_at), e.entry_seq) < ($2::timestamptz, $3::bigint)
     )
-  order by e.created_at desc, e.entry_seq desc
+  order by display_created_at desc nulls last, e.entry_seq desc
   limit $4
 )
 select * from entries;
@@ -312,6 +316,7 @@ select * from entries;
     const parsedAmount = parseWholeInt(row?.amount);
     const createdAt = asIso(row?.created_at);
     const txCreatedAt = asIso(row?.tx_created_at);
+    const displayCreatedAt = asIso(row?.display_created_at);
 
     if (parsedAmount === null && row?.amount != null) {
       klog("chips:ledger_invalid_amount", {
@@ -327,6 +332,7 @@ select * from entries;
       raw_amount: row?.amount == null ? null : String(row.amount),
       metadata: row?.metadata ?? null,
       created_at: createdAt,
+      display_created_at: displayCreatedAt,
       tx_type: row?.tx_type ?? null,
       reference: row?.reference ?? null,
       description: row?.description ?? null,

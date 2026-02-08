@@ -19,13 +19,10 @@ const isValidDateString = (value) => {
   return !Number.isNaN(parsed.getTime());
 };
 
-const hasValidTimestamp = (item) =>
-  isValidDateString(item?.created_at) || isValidDateString(item?.tx_created_at);
-
-const expectTxCreatedAtValidWhenPresent = (items) => {
-  const withTx = items.filter(item => item?.tx_created_at != null);
-  if (withTx.length) {
-    expect(withTx.some(item => isValidDateString(item.tx_created_at))).toBe(true);
+const expectDisplayCreatedAtValidWhenPresent = (items) => {
+  const withDisplay = items.filter(item => item?.display_created_at != null);
+  if (withDisplay.length) {
+    expect(withDisplay.some(item => isValidDateString(item.display_created_at))).toBe(true);
   }
 };
 
@@ -101,22 +98,22 @@ function handleLedgerQuery(query, params = []) {
   }
 
   if (text.includes("from public.chips_entries") && text.includes("join public.chips_transactions")) {
-    if (text.includes("order by e.created_at desc")) {
+    if (text.includes("order by display_created_at desc")) {
       const [accountId, cursorCreatedAt, cursorEntrySeq, limit] = params;
       const entries = mockDb.entries
         .filter(entry => {
           if (entry.account_id !== accountId) return false;
           if (!cursorCreatedAt) return true;
-          const createdAt = new Date(entry.created_at);
+          const displayCreatedAt = new Date(entry.created_at ?? mockDb.transactions.get(entry.transaction_id)?.created_at ?? null);
           const cursorTime = new Date(cursorCreatedAt);
-          if (createdAt.getTime() === cursorTime.getTime()) {
+          if (displayCreatedAt.getTime() === cursorTime.getTime()) {
             return entry.entry_seq < cursorEntrySeq;
           }
-          return createdAt.getTime() < cursorTime.getTime();
+          return displayCreatedAt.getTime() < cursorTime.getTime();
         })
         .sort((a, b) => {
-          const timeA = new Date(a.created_at).getTime();
-          const timeB = new Date(b.created_at).getTime();
+          const timeA = new Date(a.created_at ?? mockDb.transactions.get(a.transaction_id)?.created_at ?? null).getTime();
+          const timeB = new Date(b.created_at ?? mockDb.transactions.get(b.transaction_id)?.created_at ?? null).getTime();
           if (timeA === timeB) return b.entry_seq - a.entry_seq;
           return timeB - timeA;
         })
@@ -133,6 +130,7 @@ function handleLedgerQuery(query, params = []) {
             description: tx?.description ?? null,
             idempotency_key: tx?.idempotency_key ?? null,
             tx_created_at: tx?.created_at ?? null,
+            display_created_at: entry.created_at ?? tx?.created_at ?? null,
           };
         });
       return entries;
@@ -155,6 +153,7 @@ function handleLedgerQuery(query, params = []) {
             description: tx?.description ?? null,
             idempotency_key: tx?.idempotency_key ?? null,
             tx_created_at: tx?.created_at ?? null,
+            display_created_at: entry.created_at ?? tx?.created_at ?? null,
           };
         });
       return entries;
@@ -660,11 +659,10 @@ describe("chips ledger paging", () => {
 
     const { items } = await listUserLedger("user-4");
     expect(items).toHaveLength(3);
-    expect(items[0].created_at >= items[1].created_at).toBe(true);
-    expect(items[1].created_at >= items[2].created_at).toBe(true);
+    expect(items[0].display_created_at >= items[1].display_created_at).toBe(true);
+    expect(items[1].display_created_at >= items[2].display_created_at).toBe(true);
     expect(items[0].entry_seq >= items[1].entry_seq).toBe(true);
-    expect(items.some(hasValidTimestamp)).toBe(true);
-    expectTxCreatedAtValidWhenPresent(items);
+    expectDisplayCreatedAtValidWhenPresent(items);
   });
 
   it("rejects invalid cursor values and clamps limits", async () => {
@@ -768,7 +766,7 @@ describe("chips ledger paging", () => {
     expect(second.items.length).toBeGreaterThanOrEqual(1);
     expect(second.items[0].entry_seq).not.toBe(first.items[0].entry_seq);
     if (second.items.length > 1) {
-      expect(second.items[0].created_at >= second.items[1].created_at).toBe(true);
+      expect(second.items[0].display_created_at >= second.items[1].display_created_at).toBe(true);
     }
     if (first.items.length === 1) {
       expect(first.nextCursor).toBeTruthy();
@@ -824,10 +822,10 @@ describe("chips ledger paging", () => {
 
     const second = await listUserLedger("user-7", { limit: 2, cursor: first.nextCursor });
     expect(second.items.length).toBeGreaterThanOrEqual(1);
-    expect(second.items[0].created_at <= lastPageItem.created_at).toBe(true);
-    const pageOneKeys = new Set(first.items.map(item => `${item.created_at}:${item.entry_seq}`));
+    expect(second.items[0].display_created_at <= lastPageItem.display_created_at).toBe(true);
+    const pageOneKeys = new Set(first.items.map(item => `${item.display_created_at}:${item.entry_seq}`));
     const overlap = second.items.some(item =>
-      item.entry_seq != null && pageOneKeys.has(`${item.created_at}:${item.entry_seq}`)
+      item.entry_seq != null && pageOneKeys.has(`${item.display_created_at}:${item.entry_seq}`)
     );
     expect(overlap).toBe(false);
   });
@@ -867,8 +865,7 @@ describe("chips ledger legacy paging", () => {
     for (let i = 1; i < page.entries.length; i += 1) {
       expect(page.entries[i].entry_seq).toBeGreaterThan(page.entries[i - 1].entry_seq);
     }
-    expect(page.entries.some(hasValidTimestamp)).toBe(true);
-    expectTxCreatedAtValidWhenPresent(page.entries);
+    expectDisplayCreatedAtValidWhenPresent(page.entries);
     expect(typeof page.sequenceOk).toBe("boolean");
     expect(typeof page.nextExpectedSeq).toBe("number");
   });

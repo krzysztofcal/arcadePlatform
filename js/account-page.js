@@ -102,20 +102,20 @@
 
   function ledgerEntryKey(entry){
     if (!entry) return null;
-    if (entry.created_at && Number.isInteger(entry.entry_seq)){
-      return 'seq:' + entry.created_at + ':' + entry.entry_seq;
+    if (entry.display_created_at && Number.isInteger(entry.entry_seq)){
+      return 'seq:' + entry.display_created_at + ':' + entry.entry_seq;
     }
     if (entry.idempotency_key){ return 'idem:' + entry.idempotency_key; }
     if (entry.tx_created_at && entry.tx_type && entry.amount != null){
       return 'tx:' + entry.tx_created_at + ':' + entry.tx_type + ':' + entry.amount + ':' + (entry.reference || '') + ':' + (entry.description || '');
     }
-    if (entry.created_at && entry.tx_type && entry.amount != null){
-      return 'entry:' + entry.created_at + ':' + entry.tx_type + ':' + entry.amount + ':' + (entry.reference || '');
+    if (entry.display_created_at && entry.tx_type && entry.amount != null){
+      return 'entry:' + entry.display_created_at + ':' + entry.tx_type + ':' + entry.amount + ':' + (entry.reference || '');
     }
-    if (entry.created_at || entry.tx_type || entry.amount != null || entry.reference || entry.description){
+    if (entry.display_created_at || entry.tx_type || entry.amount != null || entry.reference || entry.description){
       try {
         return 'fallback:' + JSON.stringify({
-          created_at: entry.created_at || null,
+          display_created_at: entry.display_created_at || null,
           tx_created_at: entry.tx_created_at || null,
           tx_type: entry.tx_type || null,
           amount: entry.amount,
@@ -140,12 +140,8 @@
   }
 
   function resolveLedgerTimestamp(entry){
-    var primary = entry && entry.created_at ? entry.created_at : null;
-    var secondary = entry && entry.tx_created_at ? entry.tx_created_at : null;
-    var formatted = formatDateTime(primary);
-    if (!formatted && secondary){
-      formatted = formatDateTime(secondary);
-    }
+    var source = entry && entry.display_created_at ? entry.display_created_at : null;
+    var formatted = formatDateTime(source);
     return formatted || 'Unknown time';
   }
 
@@ -307,8 +303,8 @@
       addEntry(items[j]);
     }
     merged.sort(function(a, b){
-      var aCreated = a && a.created_at ? String(a.created_at) : '';
-      var bCreated = b && b.created_at ? String(b.created_at) : '';
+      var aCreated = a && a.display_created_at ? String(a.display_created_at) : '';
+      var bCreated = b && b.display_created_at ? String(b.display_created_at) : '';
       if (aCreated !== bCreated){
         return aCreated < bCreated ? 1 : -1;
       }
