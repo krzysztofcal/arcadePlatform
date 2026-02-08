@@ -56,7 +56,7 @@ export async function handler(event) {
 
   try {
     if (!after) {
-      const ledger = await listUserLedger(auth.userId, { cursor, limit });
+      const ledger = await listUserLedger(auth.userId, token, { cursor, limit });
       const items = Array.isArray(ledger.items) ? ledger.items : ledger.entries || [];
       klog("chips_ledger_ok", { userId: auth.userId, count: items.length });
       return {
