@@ -47,14 +47,15 @@ export async function handler(event) {
   const qs = event.queryStringParameters || {};
   const hasAfter = Object.prototype.hasOwnProperty.call(qs, "after");
   const hasCursor = Object.prototype.hasOwnProperty.call(qs, "cursor");
-  const after = hasAfter ? qs.after : null;
+  const afterRaw = hasAfter ? qs.after : null;
+  const after = typeof afterRaw === "string" ? afterRaw.trim() : afterRaw;
   const cursor = hasCursor ? qs.cursor : null;
   const limitRaw = qs.limit;
   const parsedLimit = Number(limitRaw);
   const limit = Number.isInteger(parsedLimit) ? parsedLimit : 50;
 
   try {
-    if (!hasAfter) {
+    if (!after) {
       const ledger = await listUserLedger(auth.userId, { cursor, limit });
       const items = Array.isArray(ledger.items) ? ledger.items : ledger.entries || [];
       klog("chips_ledger_ok", { userId: auth.userId, count: items.length });

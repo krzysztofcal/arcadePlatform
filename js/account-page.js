@@ -350,10 +350,26 @@
       }
       var aSort = parseSortId(a && a.sort_id != null ? a.sort_id : null);
       var bSort = parseSortId(b && b.sort_id != null ? b.sort_id : null);
-      if (aSort === null && bSort === null) return 0;
+      if (aSort === null && bSort === null) {
+        var aSeq = a && Number.isInteger(a.entry_seq) ? a.entry_seq : null;
+        var bSeq = b && Number.isInteger(b.entry_seq) ? b.entry_seq : null;
+        if (aSeq !== null && bSeq !== null) {
+          if (aSeq === bSeq) return 0;
+          return aSeq < bSeq ? 1 : -1;
+        }
+        return 0;
+      }
       if (aSort === null) return 1;
       if (bSort === null) return -1;
-      if (aSort === bSort) return 0;
+      if (aSort === bSort) {
+        var aSeqFallback = a && Number.isInteger(a.entry_seq) ? a.entry_seq : null;
+        var bSeqFallback = b && Number.isInteger(b.entry_seq) ? b.entry_seq : null;
+        if (aSeqFallback !== null && bSeqFallback !== null) {
+          if (aSeqFallback === bSeqFallback) return 0;
+          return aSeqFallback < bSeqFallback ? 1 : -1;
+        }
+        return 0;
+      }
       return aSort < bSort ? 1 : -1;
     });
     ledgerState.entries = merged;

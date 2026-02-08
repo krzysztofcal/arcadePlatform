@@ -1238,6 +1238,44 @@ describe("chips handlers security and gating", () => {
     resetMockDb();
   });
 
+  it("treats blank after as cursor-mode", async () => {
+    process.env.CHIPS_ENABLED = "1";
+    const { handler: ledgerHandler } = await import("../netlify/functions/chips-ledger.mjs");
+    const ledgerResult = await ledgerHandler({
+      httpMethod: "GET",
+      headers: { authorization: "Bearer user-blank", origin: "https://arcade.test" },
+      queryStringParameters: { after: "" },
+    });
+    expect(ledgerResult.statusCode).toBe(200);
+    const body = JSON.parse(ledgerResult.body);
+    expect(Array.isArray(body.items)).toBe(true);
+    expect(body.nextCursor).toBeDefined();
+  });
+
+  it("prefers cursor mode when cursor and after are provided", async () => {
+    process.env.CHIPS_ENABLED = "1";
+    const { handler: ledgerHandler } = await import("../netlify/functions/chips-ledger.mjs");
+    const { postTransaction, listUserLedger } = await loadLedger();
+    await postTransaction({
+      userId: "user-pref",
+      txType: "MINT",
+      idempotencyKey: "seed-user-pref",
+      entries: [
+        { accountType: "SYSTEM", systemKey: "TREASURY", amount: -20 },
+        { accountType: "USER", amount: 20 },
+      ],
+    });
+    const first = await listUserLedger("user-pref", { limit: 1 });
+    const ledgerResult = await ledgerHandler({
+      httpMethod: "GET",
+      headers: { authorization: "Bearer user-pref", origin: "https://arcade.test" },
+      queryStringParameters: { after: "1", cursor: first.nextCursor },
+    });
+    const body = JSON.parse(ledgerResult.body);
+    expect(ledgerResult.statusCode).toBe(200);
+    expect(Array.isArray(body.items)).toBe(true);
+  });
+
   it("returns 404 when chips are disabled", async () => {
     process.env.CHIPS_ENABLED = "0";
     const { handler: txHandler } = await loadTxHandler();
