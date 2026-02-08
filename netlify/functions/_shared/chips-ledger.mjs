@@ -208,15 +208,36 @@ function decodeLedgerCursor(cursor) {
       has_createdAt: payload?.createdAt != null,
       has_created_at: payload?.created_at != null,
     });
-    return null;
   }
   throw badRequest("invalid_cursor", "Invalid cursor");
 }
 
-function encodeLedgerCursor(sortId) {
-  if (typeof sortId !== "string" || !/^\d+$/.test(sortId) || sortId === "0") return null;
+function encodeLedgerCursor(cursor) {
+  if (!cursor || typeof cursor !== "object") return null;
+  const sortId = cursor.sortId;
+  const createdAt = cursor.createdAt;
+  const entrySeq = cursor.entrySeq;
+  if (sortId) {
+    if (typeof sortId !== "string" || !/^\d+$/.test(sortId) || sortId === "0") return null;
+    try {
+      const payload = JSON.stringify({ sortId });
+      return Buffer.from(payload, "utf8").toString("base64");
+    } catch (_err) {
+      return null;
+    }
+  }
+  if (createdAt && entrySeq != null) {
+    if (typeof createdAt !== "string" || !createdAt.trim()) return null;
+    if (!Number.isInteger(entrySeq) || entrySeq <= 0) return null;
+    try {
+      const payload = JSON.stringify({ createdAt, entrySeq });
+      return Buffer.from(payload, "utf8").toString("base64");
+    } catch (_err) {
+      return null;
+    }
+  }
   try {
-    const payload = JSON.stringify({ sortId });
+    const payload = JSON.stringify(cursor);
     return Buffer.from(payload, "utf8").toString("base64");
   } catch (_err) {
     return null;
@@ -230,6 +251,11 @@ function findLastCursorCandidate(entries) {
     const sortId = parsePositiveIntString(entry?.sort_id);
     if (sortId !== null) {
       return { sortId };
+    }
+    const createdAt = entry?.display_created_at || entry?.created_at || entry?.tx_created_at || null;
+    const parsedEntrySeq = parsePositiveInt(entry?.entry_seq);
+    if (createdAt && parsedEntrySeq !== null) {
+      return { createdAt, entrySeq: parsedEntrySeq };
     }
   }
   return null;
@@ -305,7 +331,7 @@ select * from entries;
     const parsedAmount = parseWholeInt(row?.amount);
     const createdAt = asIso(row?.created_at);
     const txCreatedAt = asIso(row?.tx_created_at);
-    const displayCreatedAt = resolveDisplayCreatedAt(row, {
+    const displayCreatedAt = asIso(row?.display_created_at) || resolveDisplayCreatedAt(row, {
       entry_seq: entrySeq,
       sort_id: row?.sort_id ?? null,
       tx_type: row?.tx_type ?? null,
@@ -393,7 +419,7 @@ with entries as (
       $2::timestamptz is null
       or (coalesce(e.created_at, t.created_at), e.entry_seq) < ($2::timestamptz, $3::bigint)
     )
-  order by display_created_at desc nulls last, e.entry_seq desc
+  order by coalesce(e.created_at, t.created_at) desc nulls last, e.entry_seq desc
   limit $4
 )
 select * from entries;
@@ -421,7 +447,7 @@ select * from entries;
     const parsedAmount = parseWholeInt(row?.amount);
     const createdAt = asIso(row?.created_at);
     const txCreatedAt = asIso(row?.tx_created_at);
-    const displayCreatedAt = resolveDisplayCreatedAt(row, {
+    const displayCreatedAt = asIso(row?.display_created_at) || resolveDisplayCreatedAt(row, {
       entry_seq: entrySeq,
       sort_id: row?.sort_id ?? null,
       tx_type: row?.tx_type ?? null,
@@ -457,7 +483,7 @@ select * from entries;
     klog("chips:ledger_cursor_missing", { count: normalizedEntries.length });
   }
   const nextCursor = cursorCandidate
-    ? encodeLedgerCursor(cursorCandidate.sortId)
+    ? encodeLedgerCursor(cursorCandidate)
     : null;
 
   return { entries: normalizedEntries, items: normalizedEntries, nextCursor };

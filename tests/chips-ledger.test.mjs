@@ -122,16 +122,17 @@ function handleLedgerQuery(query, params = []) {
         })
         .slice(0, limit ?? 50)
         .map(entry => {
-          const tx = mockDb.transactions.get(entry.transaction_id);
-          const displayCreatedAt = entry.metadata?.force_display_created_at_null
-            ? null
-            : (entry.created_at ?? tx?.created_at ?? null);
-          return {
-            entry_seq: entry.entry_seq,
-            sort_id: String(entry.id),
-            amount: entry.amount,
-            metadata: entry.metadata,
-            created_at: entry.created_at,
+      const tx = mockDb.transactions.get(entry.transaction_id);
+      const displayCreatedAt = entry.metadata?.force_display_created_at_null
+        ? null
+        : (entry.created_at ?? tx?.created_at ?? null);
+      const sortId = entry.metadata?.force_sort_id_null ? null : String(entry.id);
+      return {
+        entry_seq: entry.entry_seq,
+        sort_id: sortId,
+        amount: entry.amount,
+        metadata: entry.metadata,
+        created_at: entry.created_at,
             tx_type: tx?.tx_type ?? null,
             reference: tx?.reference ?? null,
             description: tx?.description ?? null,
@@ -149,16 +150,17 @@ function handleLedgerQuery(query, params = []) {
         .sort((a, b) => a.entry_seq - b.entry_seq)
         .slice(0, limit ?? 50)
         .map(entry => {
-          const tx = mockDb.transactions.get(entry.transaction_id);
-          const displayCreatedAt = entry.metadata?.force_display_created_at_null
-            ? null
-            : (entry.created_at ?? tx?.created_at ?? null);
-          return {
-            entry_seq: entry.entry_seq,
-            sort_id: String(entry.id),
-            amount: entry.amount,
-            metadata: entry.metadata,
-            created_at: entry.created_at,
+      const tx = mockDb.transactions.get(entry.transaction_id);
+      const displayCreatedAt = entry.metadata?.force_display_created_at_null
+        ? null
+        : (entry.created_at ?? tx?.created_at ?? null);
+      const sortId = entry.metadata?.force_sort_id_null ? null : String(entry.id);
+      return {
+        entry_seq: entry.entry_seq,
+        sort_id: sortId,
+        amount: entry.amount,
+        metadata: entry.metadata,
+        created_at: entry.created_at,
             tx_type: tx?.tx_type ?? null,
             reference: tx?.reference ?? null,
             description: tx?.description ?? null,
@@ -764,6 +766,34 @@ describe("chips ledger paging", () => {
     expect(second.items[0].sort_id).not.toBe(first.items[0].sort_id);
   });
 
+  it("falls back to legacy cursor when sort_id is missing", async () => {
+    const { postTransaction, listUserLedger } = await loadLedger();
+    await postTransaction({
+      userId: "user-4h",
+      txType: "BUY_IN",
+      idempotencyKey: "seq-1h",
+      entries: [
+        { accountType: "USER", amount: -5, metadata: { force_sort_id_null: true } },
+        { accountType: "SYSTEM", systemKey: "TREASURY", amount: 5 },
+      ],
+    });
+    await postTransaction({
+      userId: "user-4h",
+      txType: "BUY_IN",
+      idempotencyKey: "seq-2h",
+      entries: [
+        { accountType: "USER", amount: -7 },
+        { accountType: "SYSTEM", systemKey: "TREASURY", amount: 7 },
+      ],
+    });
+
+    const first = await listUserLedger("user-4h", { limit: 1 });
+    expect(first.items).toHaveLength(1);
+    expect(first.nextCursor).toBeTruthy();
+    const second = await listUserLedger("user-4h", { limit: 2, cursor: first.nextCursor });
+    expect(second.items.length).toBeGreaterThan(0);
+  });
+
   it("falls back to created_at when display_created_at is missing", async () => {
     const { postTransaction, listUserLedger } = await loadLedger();
     await postTransaction({
@@ -964,7 +994,7 @@ describe("chips ledger paging", () => {
     expect(third.items.length).toBeGreaterThan(0);
   });
 
-  it("accepts timestamp-only cursor payloads", async () => {
+  it("rejects timestamp-only cursor payloads", async () => {
     const { postTransaction, listUserLedger } = await loadLedger();
     await postTransaction({
       userId: "user-6d",
@@ -989,8 +1019,12 @@ describe("chips ledger paging", () => {
     const timestampOnlyCursor = Buffer.from(
       JSON.stringify({ createdAt: first.items[0].display_created_at }),
     ).toString("base64");
-    const second = await listUserLedger("user-6d", { limit: 2, cursor: timestampOnlyCursor });
-    expect(second.items.length).toBeGreaterThan(0);
+    await expect(
+      listUserLedger("user-6d", { limit: 2, cursor: timestampOnlyCursor }),
+    ).rejects.toMatchObject({
+      code: "invalid_cursor",
+      status: 400,
+    });
   });
 
   it("prefers sort_id mode when sortId is present", async () => {
