@@ -759,6 +759,23 @@ describe("chips ledger paging", () => {
       code: "invalid_cursor",
       status: 400,
     });
+    await expect(
+      listUserLedger(
+        "user-6",
+        {
+          cursor: Buffer.from(
+            JSON.stringify({
+              displayCreatedAt: "2026-02-06T19:00:00Z",
+              sortId: "nope",
+              entrySeq: 4,
+            }),
+          ).toString("base64"),
+        },
+      ),
+    ).rejects.toMatchObject({
+      code: "invalid_cursor",
+      status: 400,
+    });
 
     const limited = await listUserLedger("user-6", { cursor: null, limit: 0 });
     expect(limited.items).toHaveLength(1);
@@ -794,6 +811,39 @@ describe("chips ledger paging", () => {
       JSON.stringify({ createdAt: first.items[0].display_created_at, entrySeq: first.items[0].entry_seq }),
     ).toString("base64");
     const second = await listUserLedger("user-6b", { limit: 2, cursor: legacyCursor });
+    expect(second.items.length).toBeGreaterThan(0);
+  });
+
+  it("prefers sort_id mode when sortId is present", async () => {
+    const { postTransaction, listUserLedger } = await loadLedger();
+    await postTransaction({
+      userId: "user-6c",
+      txType: "MINT",
+      idempotencyKey: "seed-user-6c",
+      entries: [
+        { accountType: "SYSTEM", systemKey: "TREASURY", amount: -20 },
+        { accountType: "USER", amount: 20 },
+      ],
+    });
+    await postTransaction({
+      userId: "user-6c",
+      txType: "BUY_IN",
+      idempotencyKey: "cursor-6c-1",
+      entries: [
+        { accountType: "USER", amount: -2 },
+        { accountType: "SYSTEM", systemKey: "TREASURY", amount: 2 },
+      ],
+    });
+
+    const first = await listUserLedger("user-6c", { limit: 1 });
+    const mixedCursor = Buffer.from(
+      JSON.stringify({
+        displayCreatedAt: first.items[0].display_created_at,
+        sortId: first.items[0].sort_id,
+        entrySeq: "not-a-number",
+      }),
+    ).toString("base64");
+    const second = await listUserLedger("user-6c", { limit: 2, cursor: mixedCursor });
     expect(second.items.length).toBeGreaterThan(0);
   });
 

@@ -147,16 +147,24 @@ function decodeLedgerCursor(cursor) {
     throw badRequest("invalid_cursor", "Invalid cursor");
   }
   const createdAt = payload?.displayCreatedAt || payload?.display_created_at || payload?.createdAt || payload?.created_at;
-  const sortId = parsePositiveIntString(payload?.sortId ?? payload?.sort_id);
-  const entrySeq = parsePositiveInt(payload?.entrySeq ?? payload?.entry_seq);
+  const hasSortKey = payload?.sortId != null || payload?.sort_id != null;
+  const hasSeqKey = payload?.entrySeq != null || payload?.entry_seq != null;
   const parsedCreated = createdAt ? new Date(createdAt) : null;
   if (!parsedCreated || Number.isNaN(parsedCreated.getTime())) {
     throw badRequest("invalid_cursor", "Invalid cursor");
   }
-  if (sortId !== null) {
+  if (hasSortKey) {
+    const sortId = parsePositiveIntString(payload?.sortId ?? payload?.sort_id);
+    if (!sortId) {
+      throw badRequest("invalid_cursor", "Invalid cursor");
+    }
     return { createdAt: parsedCreated.toISOString(), sortId, mode: "sort_id" };
   }
-  if (entrySeq !== null) {
+  if (hasSeqKey) {
+    const entrySeq = parsePositiveInt(payload?.entrySeq ?? payload?.entry_seq);
+    if (entrySeq === null) {
+      throw badRequest("invalid_cursor", "Invalid cursor");
+    }
     return { createdAt: parsedCreated.toISOString(), entrySeq, mode: "entry_seq" };
   }
   throw badRequest("invalid_cursor", "Invalid cursor");
