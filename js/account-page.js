@@ -169,6 +169,10 @@
       var formatted = formatDateTime(candidate.value);
       if (formatted){ return formatted; }
     }
+    var rawFallback = '';
+    if (entry && entry.created_at){ rawFallback = String(entry.created_at); }
+    else if (entry && entry.tx_created_at){ rawFallback = String(entry.tx_created_at); }
+    else if (entry && entry.display_created_at){ rawFallback = String(entry.display_created_at); }
     klog('chips:ledger_invalid_display_timestamp', {
       display_created_at: entry && entry.display_created_at,
       created_at: entry && entry.created_at,
@@ -176,7 +180,7 @@
       entry_seq: entry && entry.entry_seq,
       sort_id: entry && entry.sort_id,
     });
-    return '—';
+    return rawFallback ? rawFallback : '—';
   }
 
   function buildLedgerRow(entry){

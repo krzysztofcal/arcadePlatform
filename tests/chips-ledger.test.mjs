@@ -78,6 +78,11 @@ function normalizeSql(text) {
   return text.toLowerCase().replace(/\s+/g, " ").trim();
 }
 
+function normalizeTimestampLabel(label) {
+  const date = new Date(label);
+  return date.toISOString();
+}
+
 function handleLedgerQuery(query, params = []) {
   const text = normalizeSql(normalizeQueryText(query));
 
@@ -816,6 +821,32 @@ describe("chips ledger paging", () => {
     expect(items).toHaveLength(1);
     expect(items[0].created_at).toBeTruthy();
     expect(items[0].tx_created_at).toBeTruthy();
+    expect(items[0].display_created_at).toBe(items[0].created_at);
+  });
+
+  it("normalizes postgres timestamp strings to ISO", async () => {
+    const { postTransaction, listUserLedger } = await loadLedger();
+    await postTransaction({
+      userId: "user-4g",
+      txType: "BUY_IN",
+      idempotencyKey: "seq-1g",
+      entries: [
+        { accountType: "USER", amount: -5 },
+        { accountType: "SYSTEM", systemKey: "TREASURY", amount: 5 },
+      ],
+    });
+
+    const admin = await import("../netlify/functions/_shared/supabase-admin.mjs");
+    const userAccount = [...admin.__mockDb.accounts.values()].find(acc => acc.user_id === "user-4g");
+    const userEntry = admin.__mockDb.entries.find(entry => entry.account_id === userAccount.id);
+    const tx = admin.__mockDb.transactions.get(userEntry.transaction_id);
+    userEntry.created_at = "2026-02-06 18:59:00+00";
+    tx.created_at = "2026-02-06 19:00:00+0000";
+
+    const { items } = await listUserLedger("user-4g", { limit: 1 });
+    expect(items).toHaveLength(1);
+    expect(items[0].created_at).toBe(normalizeTimestampLabel("2026-02-06T18:59:00.000Z"));
+    expect(items[0].tx_created_at).toBe(normalizeTimestampLabel("2026-02-06T19:00:00.000Z"));
     expect(items[0].display_created_at).toBe(items[0].created_at);
   });
 

@@ -54,7 +54,23 @@ const parsePositiveIntString = (value) => {
 
 const asIso = (value) => {
   if (!value) return null;
-  const dt = new Date(value);
+  if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) return null;
+    return value.toISOString();
+  }
+  if (typeof value !== "string") return null;
+  let normalized = value.trim();
+  if (!normalized) return null;
+  const spaceIndex = normalized.indexOf(" ");
+  if (spaceIndex !== -1) {
+    normalized = normalized.slice(0, spaceIndex) + "T" + normalized.slice(spaceIndex + 1);
+  }
+  normalized = normalized.replace(/([+-]\\d{2})(\\d{2})$/, "$1:$2");
+  normalized = normalized.replace(/\\+00$/, "Z");
+  if (!/[Zz]|[+-]\\d{2}:?\\d{2}$/.test(normalized)) {
+    normalized += "Z";
+  }
+  const dt = new Date(normalized);
   if (Number.isNaN(dt.getTime())) return null;
   return dt.toISOString();
 };

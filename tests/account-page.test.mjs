@@ -197,6 +197,7 @@ test("renders formatted chip ledger dates", async () => {
   const timeNode = findByClass(list.children[0], "chip-ledger__time");
   assert.ok(timeNode, "time element should be present");
   assert.match(timeNode.textContent, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
+  assert.notEqual(timeNode.textContent, "", "time element should not be empty");
 });
 
 test("renders display_created_at when present", async () => {
