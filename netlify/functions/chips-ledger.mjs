@@ -2,10 +2,19 @@ import { baseHeaders, corsHeaders, extractBearerToken, klog, verifySupabaseJwt }
 import { listUserLedger, listUserLedgerAfterSeq } from "./_shared/chips-ledger.mjs";
 
 const CHIPS_ENABLED = process.env.CHIPS_ENABLED === "1";
+const LEDGER_VERSION = process.env.COMMIT_REF || process.env.BUILD_ID || process.env.DEPLOY_ID || new Date().toISOString();
+
+function withLedgerVersion(headers) {
+  return { ...headers, "x-chips-ledger-version": LEDGER_VERSION };
+}
 
 export async function handler(event) {
   if (!CHIPS_ENABLED) {
-    return { statusCode: 404, headers: baseHeaders(), body: JSON.stringify({ error: "not_found" }) };
+    return {
+      statusCode: 404,
+      headers: withLedgerVersion(baseHeaders()),
+      body: JSON.stringify({ error: "not_found" }),
+    };
   }
 
   const origin = event.headers?.origin || event.headers?.Origin;
@@ -13,42 +22,49 @@ export async function handler(event) {
   if (!cors) {
     return {
       statusCode: 403,
-      headers: baseHeaders(),
+      headers: withLedgerVersion(baseHeaders()),
       body: JSON.stringify({ error: "forbidden_origin" }),
     };
   }
   if (event.httpMethod === "OPTIONS") {
-    return { statusCode: 204, headers: cors, body: "" };
+    return { statusCode: 204, headers: withLedgerVersion(cors), body: "" };
   }
   if (event.httpMethod !== "GET") {
-    return { statusCode: 405, headers: cors, body: JSON.stringify({ error: "method_not_allowed" }) };
+    return { statusCode: 405, headers: withLedgerVersion(cors), body: JSON.stringify({ error: "method_not_allowed" }) };
   }
 
   const token = extractBearerToken(event.headers);
   const auth = await verifySupabaseJwt(token);
   if (!auth.valid || !auth.userId) {
     klog("chips_ledger_auth_failed", { reason: auth.reason });
-    return { statusCode: 401, headers: cors, body: JSON.stringify({ error: "unauthorized", reason: auth.reason }) };
+    return {
+      statusCode: 401,
+      headers: withLedgerVersion(cors),
+      body: JSON.stringify({ error: "unauthorized", reason: auth.reason }),
+    };
   }
 
-  const cursor = Object.prototype.hasOwnProperty.call(event.queryStringParameters || {}, "cursor")
-    ? event.queryStringParameters.cursor
-    : null;
-  const after = Object.prototype.hasOwnProperty.call(event.queryStringParameters || {}, "after")
-    ? event.queryStringParameters.after
-    : null;
-  const limitRaw = event.queryStringParameters?.limit;
+  const qs = event.queryStringParameters || {};
+  const hasAfter = Object.prototype.hasOwnProperty.call(qs, "after");
+  const hasCursor = Object.prototype.hasOwnProperty.call(qs, "cursor");
+  const afterRaw = hasAfter ? qs.after : null;
+  const after = typeof afterRaw === "string" ? afterRaw.trim() : afterRaw;
+  const cursor = hasCursor ? qs.cursor : null;
+  const trimmedCursor = typeof cursor === "string" ? cursor.trim() : cursor;
+  const hasCursorValue = typeof trimmedCursor === "string" ? trimmedCursor !== "" : !!trimmedCursor;
+  const hasAfterValue = typeof after === "string" ? after !== "" : after != null;
+  const limitRaw = qs.limit;
   const parsedLimit = Number(limitRaw);
   const limit = Number.isInteger(parsedLimit) ? parsedLimit : 50;
 
   try {
-    if (cursor) {
-      const ledger = await listUserLedger(auth.userId, { cursor, limit });
+    if (hasCursorValue || !hasAfterValue) {
+      const ledger = await listUserLedger(auth.userId, { cursor: hasCursorValue ? trimmedCursor : null, limit });
       const items = Array.isArray(ledger.items) ? ledger.items : ledger.entries || [];
       klog("chips_ledger_ok", { userId: auth.userId, count: items.length });
       return {
         statusCode: 200,
-        headers: cors,
+        headers: withLedgerVersion(cors),
         body: JSON.stringify({
           userId: auth.userId,
           items: items,
@@ -62,7 +78,7 @@ export async function handler(event) {
     klog("chips_ledger_ok", { userId: auth.userId, count: legacy.entries.length });
     return {
       statusCode: 200,
-      headers: cors,
+      headers: withLedgerVersion(cors),
       body: JSON.stringify({
         userId: auth.userId,
         entries: legacy.entries,
@@ -74,6 +90,6 @@ export async function handler(event) {
     const status = error && error.status ? error.status : 500;
     const code = error && error.code ? error.code : "server_error";
     klog("chips_ledger_error", { error: error.message, code });
-    return { statusCode: status, headers: cors, body: JSON.stringify({ error: code }) };
+    return { statusCode: status, headers: withLedgerVersion(cors), body: JSON.stringify({ error: code }) };
   }
 }

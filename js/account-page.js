@@ -12,7 +12,7 @@
     hasMore: true,
     loading: false,
     error: null,
-    rowHeight: 72,
+    rowHeight: 80,
     overscan: 4,
     lastLoadAttemptAtMs: 0,
     lastScrollTop: 0,
@@ -54,6 +54,54 @@
     nodes.status.textContent = message || '';
     nodes.status.dataset.tone = tone || '';
     nodes.status.hidden = !message;
+  }
+
+  function klog(kind, data){
+    try {
+      if (window && window.KLog && typeof window.KLog.log === 'function'){
+        window.KLog.log(kind, data || {});
+      }
+    } catch (_err){}
+  }
+
+  function parseSortId(value){
+    if (value === null || value === undefined) return null;
+    var text = String(value);
+    if (!/^\d+$/.test(text)) return null;
+    try {
+      return BigInt(text);
+    } catch (_err){
+      return null;
+    }
+  }
+
+  function normalizeTimestampToIso(value){
+    if (!value) return null;
+    if (value instanceof Date){
+      if (Number.isNaN(value.getTime())) return null;
+      return value.toISOString();
+    }
+    if (typeof value !== 'string') return null;
+    var normalized = value.trim();
+    if (!normalized) return null;
+    var spaceIndex = normalized.indexOf(' ');
+    if (spaceIndex !== -1){
+      normalized = normalized.slice(0, spaceIndex) + 'T' + normalized.slice(spaceIndex + 1);
+    }
+    normalized = normalized.replace(/([+-]\d{2})(\d{2})$/, '$1:$2');
+    normalized = normalized.replace(/\+00$/, 'Z');
+    if (!/[Zz]|[+-]\d{2}:?\d{2}$/.test(normalized)){
+      normalized += 'Z';
+    }
+    var parsed = new Date(normalized);
+    if (Number.isNaN(parsed.getTime())) return null;
+    return parsed.toISOString();
+  }
+
+  function resolveSortTimestamp(entry){
+    if (!entry) return '';
+    var normalized = normalizeTimestampToIso(entry.display_created_at || entry.created_at || entry.tx_created_at || '');
+    return normalized ? normalized : '';
   }
 
   function renderUser(user){
@@ -102,21 +150,22 @@
 
   function ledgerEntryKey(entry){
     if (!entry) return null;
-    if (entry.created_at && Number.isInteger(entry.entry_seq)){
-      return 'seq:' + entry.created_at + ':' + entry.entry_seq;
+    var sortIdText = entry && entry.sort_id != null ? String(entry.sort_id) : '';
+    if (sortIdText && /^\d+$/.test(sortIdText)){
+      return 'sid:' + sortIdText;
     }
     if (entry.idempotency_key){ return 'idem:' + entry.idempotency_key; }
-    if (entry.tx_created_at && entry.tx_type && entry.amount != null){
-      return 'tx:' + entry.tx_created_at + ':' + entry.tx_type + ':' + entry.amount + ':' + (entry.reference || '') + ':' + (entry.description || '');
+    if (entry.created_at && entry.entry_seq != null){
+      return 'legacy:' + entry.created_at + ':' + entry.entry_seq;
     }
-    if (entry.created_at && entry.tx_type && entry.amount != null){
-      return 'entry:' + entry.created_at + ':' + entry.tx_type + ':' + entry.amount + ':' + (entry.reference || '');
+    var resolvedTimestamp = resolveSortTimestamp(entry);
+    if (resolvedTimestamp && entry.tx_type && entry.amount != null){
+      return 'entry:' + resolvedTimestamp + ':' + entry.tx_type + ':' + entry.amount + ':' + (entry.reference || '');
     }
-    if (entry.created_at || entry.tx_type || entry.amount != null || entry.reference || entry.description){
+    if (entry.display_created_at || entry.tx_type || entry.amount != null || entry.reference || entry.description){
       try {
         return 'fallback:' + JSON.stringify({
-          created_at: entry.created_at || null,
-          tx_created_at: entry.tx_created_at || null,
+          display_created_at: entry.display_created_at || entry.created_at || entry.tx_created_at || null,
           tx_type: entry.tx_type || null,
           amount: entry.amount,
           reference: entry.reference || null,
@@ -128,8 +177,9 @@
   }
 
   function formatDateTime(value){
-    if (!value) return '';
-    var parsed = new Date(value);
+    var normalized = normalizeTimestampToIso(value);
+    if (!normalized) return '';
+    var parsed = new Date(normalized);
     if (Number.isNaN(parsed.getTime())) return '';
     var year = String(parsed.getFullYear());
     var month = String(parsed.getMonth() + 1).padStart(2, '0');
@@ -137,6 +187,27 @@
     var hour = String(parsed.getHours()).padStart(2, '0');
     var minute = String(parsed.getMinutes()).padStart(2, '0');
     return year + '-' + month + '-' + day + ' ' + hour + ':' + minute;
+  }
+
+  function resolveLedgerTimestamp(entry){
+    var candidates = [
+      { name: 'display_created_at', value: entry && entry.display_created_at },
+      { name: 'created_at', value: entry && entry.created_at },
+      { name: 'tx_created_at', value: entry && entry.tx_created_at },
+    ];
+    for (var i = 0; i < candidates.length; i++){
+      var candidate = candidates[i];
+      var formatted = formatDateTime(candidate.value);
+      if (formatted){ return formatted; }
+    }
+    klog('chips:ledger_invalid_display_timestamp', {
+      display_created_at: entry && entry.display_created_at,
+      created_at: entry && entry.created_at,
+      tx_created_at: entry && entry.tx_created_at,
+      entry_seq: entry && entry.entry_seq,
+      sort_id: entry && entry.sort_id,
+    });
+    return '—';
   }
 
   function buildLedgerRow(entry){
@@ -156,12 +227,11 @@
 
     var time = doc.createElement('div');
     time.className = 'chip-ledger__time';
-    var displayTime = formatDateTime(entry && entry.created_at ? entry.created_at : (entry ? entry.tx_created_at : null));
-    time.textContent = displayTime;
+    time.textContent = resolveLedgerTimestamp(entry);
 
     meta.appendChild(type);
     if (desc.textContent){ meta.appendChild(desc); }
-    if (time.textContent){ meta.appendChild(time); }
+    meta.appendChild(time);
 
     var amount = doc.createElement('div');
     amount.className = 'chip-ledger__amount';
@@ -177,15 +247,11 @@
     } else {
       amount.textContent = '—';
       item.dataset.invalid = 'amount';
-      if (window && window.XP_DIAG && typeof console !== 'undefined' && console && typeof console.debug === 'function'){
-        try {
-          console.debug('[chips] invalid ledger amount', {
-            entry_seq: entry && entry.entry_seq,
-            raw_amount: entry && entry.raw_amount != null ? entry.raw_amount : null,
-            entry: entry,
-          });
-        } catch (_err){}
-      }
+      klog('chips:ledger_invalid_amount', {
+        entry_seq: entry && entry.entry_seq,
+        raw_amount: entry && entry.raw_amount != null ? entry.raw_amount : null,
+        entry: entry,
+      });
     }
 
     item.appendChild(meta);
@@ -298,15 +364,34 @@
       addEntry(items[j]);
     }
     merged.sort(function(a, b){
-      var aCreated = a && a.created_at ? String(a.created_at) : '';
-      var bCreated = b && b.created_at ? String(b.created_at) : '';
+      var aCreated = resolveSortTimestamp(a);
+      var bCreated = resolveSortTimestamp(b);
       if (aCreated !== bCreated){
         return aCreated < bCreated ? 1 : -1;
       }
-      var aSeq = Number.isInteger(a && a.entry_seq) ? a.entry_seq : -Infinity;
-      var bSeq = Number.isInteger(b && b.entry_seq) ? b.entry_seq : -Infinity;
-      if (aSeq === bSeq) return 0;
-      return aSeq < bSeq ? 1 : -1;
+      var aSort = parseSortId(a && a.sort_id != null ? a.sort_id : null);
+      var bSort = parseSortId(b && b.sort_id != null ? b.sort_id : null);
+      if (aSort === null && bSort === null) {
+        var aSeq = a && Number.isInteger(a.entry_seq) ? a.entry_seq : null;
+        var bSeq = b && Number.isInteger(b.entry_seq) ? b.entry_seq : null;
+        if (aSeq !== null && bSeq !== null) {
+          if (aSeq === bSeq) return 0;
+          return aSeq < bSeq ? 1 : -1;
+        }
+        return 0;
+      }
+      if (aSort === null) return 1;
+      if (bSort === null) return -1;
+      if (aSort === bSort) {
+        var aSeqFallback = a && Number.isInteger(a.entry_seq) ? a.entry_seq : null;
+        var bSeqFallback = b && Number.isInteger(b.entry_seq) ? b.entry_seq : null;
+        if (aSeqFallback !== null && bSeqFallback !== null) {
+          if (aSeqFallback === bSeqFallback) return 0;
+          return aSeqFallback < bSeqFallback ? 1 : -1;
+        }
+        return 0;
+      }
+      return aSort < bSort ? 1 : -1;
     });
     ledgerState.entries = merged;
     ledgerState.nextCursor = nextCursor || null;

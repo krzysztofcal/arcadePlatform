@@ -27,6 +27,12 @@ function looksLikeJsonString(value) {
 function normalizeJsonDeep(value) {
   if (value == null) return value;
 
+  // ✅ Preserve timestamps coming back from postgres as Date objects
+  if (value instanceof Date) {
+    const t = value.getTime();
+    return Number.isNaN(t) ? null : value.toISOString();
+  }
+
   if (typeof value === "string" && looksLikeJsonString(value)) {
     try {
       const parsed = JSON.parse(value.trim());
