@@ -84,6 +84,7 @@ async function runIdempotencyConflict() {
 async function verifyLedgerCursor() {
   const first = await getLedger(config, { limit: 20 });
   assert.equal(first.status, 200, `ledger should succeed; ${formatResponse(first)}`);
+  assert.ok(first.body?.nextCursor, "ledger response should include nextCursor");
   const entries = Array.isArray(first.body?.items) ? first.body.items : [];
   if (!entries.length) return;
   entries.forEach(entry => {

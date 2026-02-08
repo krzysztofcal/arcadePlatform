@@ -179,10 +179,6 @@
     var params = [];
     if (options && typeof options.cursor === 'string' && options.cursor){
       params.push('cursor=' + encodeURIComponent(options.cursor));
-    } else if (options && Number.isInteger(options.after)){
-      params.push('after=' + encodeURIComponent(options.after));
-    } else if (options && Number.isInteger(options.afterSeq)){
-      params.push('after=' + encodeURIComponent(options.afterSeq));
     }
     if (options && Number.isInteger(options.limit)){
       params.push('limit=' + encodeURIComponent(options.limit));
@@ -190,10 +186,8 @@
     var url = params.length ? (LEDGER_URL + '?' + params.join('&')) : LEDGER_URL;
     try {
       var payload = await authedFetchWithRetry(url, { method: 'GET' });
-      var items = payload && payload.data
-        ? (Array.isArray(payload.data.items)
-          ? payload.data.items
-          : (Array.isArray(payload.data.entries) ? payload.data.entries : null))
+      var items = payload && payload.data && Array.isArray(payload.data.items)
+        ? payload.data.items
         : null;
       if (payload && payload.data && items){
         var loggedInvalidAmount = false;
