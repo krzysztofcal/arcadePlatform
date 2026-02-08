@@ -238,6 +238,46 @@ test("renders display_created_at when present", async () => {
   assert.match(timeNode.textContent, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
 });
 
+test("renders ledger when API returns entries instead of items", async () => {
+  const chipsClient = {
+    fetchBalance() {
+      return Promise.resolve({ balance: 1200 });
+    },
+    fetchLedger() {
+      return Promise.resolve({
+        entries: [
+          {
+            id: 9,
+            tx_type: "BUY_IN",
+            amount: 25,
+            display_created_at: "2026-02-06T19:15:23.123Z",
+            sort_id: "9",
+          },
+        ],
+        nextCursor: null,
+      });
+    },
+  };
+  const { windowObj, document } = buildContext(chipsClient);
+  const context = vm.createContext({
+    window: windowObj,
+    document,
+    requestAnimationFrame: windowObj.requestAnimationFrame,
+    CustomEvent: function() {},
+  });
+  vm.runInContext(source, context);
+
+  await flush();
+  await flush();
+  await flush();
+
+  const list = document.getElementById("chipLedgerList");
+  assert.ok(list.children.length > 0, "ledger should render at least one row");
+  const timeNode = findByClass(list.children[0], "chip-ledger__time");
+  assert.ok(timeNode, "time element should be present");
+  assert.match(timeNode.textContent, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
+});
+
 test("falls back to created_at when display_created_at is missing", async () => {
   const chipsClient = {
     fetchBalance() {

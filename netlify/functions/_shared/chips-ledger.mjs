@@ -184,6 +184,16 @@ function decodeLedgerCursor(cursor) {
     }
     return { createdAt: parsedCreated.toISOString(), entrySeq, mode: "entry_seq" };
   }
+  const timestampOnly = payload?.displayCreatedAt || payload?.display_created_at || payload?.createdAt || payload?.created_at;
+  if (timestampOnly) {
+    klog("chips:ledger_timestamp_only_cursor", {
+      has_displayCreatedAt: payload?.displayCreatedAt != null,
+      has_display_created_at: payload?.display_created_at != null,
+      has_createdAt: payload?.createdAt != null,
+      has_created_at: payload?.created_at != null,
+    });
+    return null;
+  }
   throw badRequest("invalid_cursor", "Invalid cursor");
 }
 

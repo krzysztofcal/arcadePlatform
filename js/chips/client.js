@@ -186,8 +186,10 @@
     var url = params.length ? (LEDGER_URL + '?' + params.join('&')) : LEDGER_URL;
     try {
       var payload = await authedFetchWithRetry(url, { method: 'GET' });
-      var items = payload && payload.data && Array.isArray(payload.data.items)
-        ? payload.data.items
+      var items = payload && payload.data
+        ? (Array.isArray(payload.data.items)
+          ? payload.data.items
+          : (Array.isArray(payload.data.entries) ? payload.data.entries : null))
         : null;
       if (payload && payload.data && items){
         var loggedInvalidAmount = false;
