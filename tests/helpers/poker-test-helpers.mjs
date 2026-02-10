@@ -91,6 +91,7 @@ export const loadPokerHandler = (filePath, mocks) => {
     "HEARTBEAT_INTERVAL_SEC",
     "storePokerRequestResult",
     "TABLE_EMPTY_CLOSE_SEC",
+    "TABLE_SINGLETON_CLOSE_SEC",
     "TURN_MS",
     "updatePokerStateLocked",
   ];

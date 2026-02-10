@@ -15,6 +15,7 @@ const makeHandler = (postCalls, queries, klogEvents, options = {}) => {
     expiredSeats = [{ table_id: tableId, user_id: userId, seat_no: seatNo, stack: 100, last_seen_at: new Date(0) }],
     closeCashoutTables = [],
     closeCashoutSeats = [],
+    singletonClosedTables = [],
     closedTables = [tableId],
     postSettlementCalls = [],
   } = options;
@@ -49,6 +50,9 @@ const makeHandler = (postCalls, queries, klogEvents, options = {}) => {
           }
           if (text.includes("update public.poker_seats set status = 'inactive', stack = 0")) {
             updIdx = queries.length - 1;
+          }
+          if (text.includes("with singleton_tables as")) {
+            return singletonClosedTables.map((id) => ({ id }));
           }
           if (text.includes("update public.poker_tables t")) {
             return closedTables.map((id) => ({ id }));
@@ -87,6 +91,7 @@ const makeHandler = (postCalls, queries, klogEvents, options = {}) => {
     },
     PRESENCE_TTL_SEC: 10,
     TABLE_EMPTY_CLOSE_SEC: 10,
+    TABLE_SINGLETON_CLOSE_SEC: 21600,
     isHoleCardsTableMissing,
   });
   return handler;
@@ -221,6 +226,44 @@ const runCloseCashoutUsesSeatNo = async () => {
 };
 
 
+const runSingletonCloseFeedsSameRunCloseCashout = async () => {
+  process.env.POKER_SWEEP_SECRET = "secret";
+  const postCalls = [];
+  const queries = [];
+  const klogEvents = [];
+  const handler = makeHandler(postCalls, queries, klogEvents, {
+    expiredSeats: [],
+    singletonClosedTables: [tableId],
+    closeCashoutTables: [tableId],
+    closeCashoutSeats: [{ seat_no: seatNo, status: "INACTIVE", stack: 55, user_id: userId }],
+    closedTables: [],
+  });
+
+  const response = await handler({ httpMethod: "POST", headers: { "x-sweep-secret": "secret" } });
+  assert.equal(response.statusCode, 200);
+  const singletonUpdate = queries.find(
+    (q) => q.query.toLowerCase().includes("with singleton_tables as") && q.query.toLowerCase().includes("having count(*) = 1")
+  );
+  assert.ok(singletonUpdate, "sweep should run singleton-close update");
+  assert.deepEqual(singletonUpdate.params, [21600, 25], "singleton-close should use TABLE_SINGLETON_CLOSE_SEC and batch limit");
+  const closeCashoutSelect = queries.find(
+    (q) =>
+      q.query.toLowerCase().includes("select t.id") &&
+      q.query.toLowerCase().includes("where t.status = 'closed'") &&
+      q.query.toLowerCase().includes("stack > 0")
+  );
+  assert.ok(closeCashoutSelect, "sweep should select closed tables for close-cashout after singleton close");
+  assert.equal(postCalls.length, 1, "singleton-closed table should be cashout-processed in same sweep run");
+  assert.equal(postCalls[0].idempotencyKey, `poker:close_cashout:${tableId}:${userId}:${seatNo}:v1`);
+  assert.ok(
+    queries.some(
+      (q) => q.query.toLowerCase().includes("delete from public.poker_hole_cards") && q.params?.[0]?.includes?.(tableId)
+    ),
+    "sweep should delete hole cards for singleton-closed tables"
+  );
+};
+
+
 const runSettlementSkipsLegacyCashout = async () => {
   process.env.POKER_SWEEP_SECRET = "secret";
   const postCalls = [];
@@ -274,6 +317,7 @@ const runSettlementSkipsLegacyCashout = async () => {
     },
     PRESENCE_TTL_SEC: 10,
     TABLE_EMPTY_CLOSE_SEC: 10,
+    TABLE_SINGLETON_CLOSE_SEC: 21600,
     isHoleCardsTableMissing,
   });
 
@@ -328,6 +372,7 @@ const runInvalidSettlementFallsBackLegacyCashout = async () => {
     klog: () => {},
     PRESENCE_TTL_SEC: 10,
     TABLE_EMPTY_CLOSE_SEC: 10,
+    TABLE_SINGLETON_CLOSE_SEC: 21600,
     isHoleCardsTableMissing,
   });
 
@@ -380,6 +425,7 @@ const runSettlementPostFailureKeepsSeatActiveForRetry = async () => {
     },
     PRESENCE_TTL_SEC: 10,
     TABLE_EMPTY_CLOSE_SEC: 10,
+    TABLE_SINGLETON_CLOSE_SEC: 21600,
     isHoleCardsTableMissing,
   });
 
@@ -407,6 +453,7 @@ Promise.resolve()
   .then(runCloseCashoutInvalidStack)
   .then(runCloseCashoutSkipsActiveSeat)
   .then(runCloseCashoutUsesSeatNo)
+  .then(runSingletonCloseFeedsSameRunCloseCashout)
   .then(runSettlementSkipsLegacyCashout)
   .then(runInvalidSettlementFallsBackLegacyCashout)
   .then(runSettlementPostFailureKeepsSeatActiveForRetry)
