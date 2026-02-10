@@ -122,10 +122,6 @@ export async function handler(event) {
             "update public.poker_seats set status = 'ACTIVE', last_seen_at = now() where table_id = $1 and user_id = $2;",
             [tableId, auth.userId]
           );
-          await tx.unsafe(
-            "update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1;",
-            [tableId]
-          );
           mutated = true;
         }
 
