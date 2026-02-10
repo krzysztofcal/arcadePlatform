@@ -2065,6 +2065,8 @@
         clearLeavePending();
         setError(errorEl, null);
         if (!isPageActive()) return;
+        isSeated = false;
+        stopHeartbeat();
         stopRealtime();
         loadTable(false);
       } catch (err){
