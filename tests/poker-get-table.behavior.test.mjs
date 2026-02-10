@@ -70,9 +70,9 @@ const makeHandler = (queries, storedState, userId, options = {}) => {
           }
           if (text.includes("from public.poker_seats")) {
             return [
-              { user_id: "user-1", seat_no: 1, status: "ACTIVE" },
-              { user_id: "user-2", seat_no: 2, status: "ACTIVE" },
-              { user_id: "user-3", seat_no: 3, status: "ACTIVE" },
+              { user_id: "user-1", seat_no: 1, status: "ACTIVE", is_bot: true },
+              { user_id: "user-2", seat_no: 2, status: "ACTIVE", is_bot: false },
+              { user_id: "user-3", seat_no: 3, status: "ACTIVE", is_bot: false },
             ];
           }
           if (text.includes("from public.poker_state")) {
@@ -127,6 +127,9 @@ const run = async () => {
   assert.equal(happyResponse.statusCode, 200);
   const happyPayload = JSON.parse(happyResponse.body);
   assert.equal(happyPayload.ok, true);
+  assert.ok(Array.isArray(happyPayload.seats));
+  assert.equal(happyPayload.seats[0].isBot, true);
+  assert.equal(happyPayload.seats[1].isBot, false);
   assert.ok(Array.isArray(happyPayload.myHoleCards));
   assert.equal(happyPayload.myHoleCards.length, 2);
   assert.equal(happyPayload.state.state.deck, undefined);

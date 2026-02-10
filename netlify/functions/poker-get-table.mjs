@@ -192,7 +192,7 @@ export async function handler(event) {
       }
 
       const seatRows = await tx.unsafe(
-        "select user_id, seat_no, status, last_seen_at, joined_at from public.poker_seats where table_id = $1 order by seat_no asc;",
+        "select user_id, seat_no, status, last_seen_at, joined_at, is_bot from public.poker_seats where table_id = $1 order by seat_no asc;",
         [tableId]
       );
       const activeSeatRows = await tx.unsafe(
@@ -221,6 +221,7 @@ export async function handler(event) {
             status: seat.status,
             lastSeenAt: seat.last_seen_at,
             joinedAt: seat.joined_at,
+            isBot: !!seat.is_bot,
           }))
         : [];
 
