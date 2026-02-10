@@ -817,6 +817,7 @@
     var pendingHiddenAt = null;
     var heartbeatPendingRetries = 0;
     var heartbeatInFlight = false;
+    var isSeated = false;
     var turnTimerInterval = null;
     var HEARTBEAT_PENDING_MAX_RETRIES = 8;
     var realtimeSub = null;
@@ -850,7 +851,6 @@
             stopAuthWatch();
             loadTable(false);
             startPolling();
-            startHeartbeat();
             startRealtime();
           }
         });
@@ -861,6 +861,8 @@
       var token = await getAccessToken();
       if (!token){
         currentUserId = null;
+        isSeated = false;
+        stopHeartbeat();
         stopRealtime();
         if (authMsg) authMsg.hidden = false;
         if (tableContent) tableContent.hidden = true;
@@ -882,6 +884,8 @@
 
     function handleTableAuthExpired(opts){
       currentUserId = null;
+      isSeated = false;
+      stopHeartbeat();
       setDevActionsEnabled(false);
       setDevActionsAuthStatus(false);
       renderHoleCards(null);
@@ -1387,7 +1391,13 @@
         var data = await apiGet(GET_URL + '?tableId=' + encodeURIComponent(tableId));
         tableData = data || {};
         tableData._actionConstraints = getSafeConstraints(tableData);
+        isSeated = isCurrentUserSeated(tableData);
         renderTable(tableData);
+        if (isSeated){
+          startHeartbeat();
+        } else {
+          stopHeartbeat();
+        }
         if (isPolling){ resetPollBackoff(); }
       } catch (err){
         if (isAuthError(err)){
@@ -1462,6 +1472,16 @@
       }
     }
 
+    function isCurrentUserSeated(data){
+      if (!currentUserId || !data || !Array.isArray(data.seats)) return false;
+      for (var i = 0; i < data.seats.length; i++){
+        var seat = data.seats[i];
+        if (!seat || typeof seat.userId !== 'string') continue;
+        if (seat.userId.trim() === currentUserId) return true;
+      }
+      return false;
+    }
+
     function handleRealtimeEvent(_payload){
       if (!isPageActive()) return;
       if (!tableId) return;
@@ -1481,6 +1501,7 @@
     }
 
     function stopRealtime(){
+      stopHeartbeat();
       if (realtimeSub && typeof realtimeSub.stop === 'function'){
         realtimeSub.stop();
       }
@@ -1489,6 +1510,9 @@
 
     function startHeartbeat(){
       if (heartbeatTimer) return;
+      if (!isSeated) return;
+      if (!isPageActive()) return;
+      if (document.visibilityState === 'hidden') return;
       if (!heartbeatRequestId){
         heartbeatRequestId = normalizeRequestId(generateRequestId());
       }
@@ -1502,6 +1526,7 @@
     }
 
     async function sendHeartbeat(){
+      if (!isSeated) return;
       if (document.visibilityState === 'hidden') return;
       if (heartbeatInFlight) return;
       heartbeatInFlight = true;
@@ -2040,6 +2065,7 @@
         clearLeavePending();
         setError(errorEl, null);
         if (!isPageActive()) return;
+        stopRealtime();
         loadTable(false);
       } catch (err){
         if (isAbortError(err)){
@@ -2067,7 +2093,6 @@
     function handleVisibility(){
       if (document.visibilityState === 'hidden'){
         stopPolling();
-        stopHeartbeat();
         stopRealtime();
         stopPendingRetries();
         if (!pendingHiddenAt) pendingHiddenAt = Date.now();
@@ -2083,7 +2108,7 @@
         state.pollInterval = POLL_INTERVAL_BASE;
         state.pollErrors = 0;
         startPolling();
-        startHeartbeat();
+        if (isSeated) startHeartbeat();
         if (currentUserId) startRealtime();
         if (pendingJoinRequestId) schedulePendingRetry('join', retryJoin);
         if (pendingLeaveRequestId) schedulePendingRetry('leave', retryLeave);
@@ -2233,6 +2258,7 @@
     }
 
     document.addEventListener('visibilitychange', handleVisibility); // xp-lifecycle-allow:poker-table(2026-01-01)
+    window.addEventListener('pagehide', stopRealtime); // xp-lifecycle-allow:poker-table-pagehide(2026-01-01)
     window.addEventListener('beforeunload', stopPolling); // xp-lifecycle-allow:poker-table(2026-01-01)
     window.addEventListener('beforeunload', stopHeartbeat); // xp-lifecycle-allow:poker-table-heartbeat(2026-01-01)
     window.addEventListener('beforeunload', stopRealtime); // xp-lifecycle-allow:poker-table-realtime(2026-01-01)
@@ -2246,7 +2272,6 @@
       if (authed){
         loadTable(false);
         startPolling();
-        startHeartbeat();
         startRealtime();
       }
     });
