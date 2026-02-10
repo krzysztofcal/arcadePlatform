@@ -263,6 +263,10 @@ returning t.id;`,
         ? singletonClosedRows.map((row) => row?.id).filter(Boolean)
         : [];
       if (singletonClosedTableIds.length) {
+        await tx.unsafe(
+          "update public.poker_seats set status = 'INACTIVE' where table_id = any($1::uuid[]) and status = 'ACTIVE';",
+          [singletonClosedTableIds]
+        );
         try {
           await tx.unsafe("delete from public.poker_hole_cards where table_id = any($1::uuid[]);", [singletonClosedTableIds]);
         } catch (error) {
@@ -284,8 +288,7 @@ returning t.id;`,
         `
 select t.id
 from public.poker_tables t
-where t.status = 'CLOSED'
-  and not exists (
+where not exists (
     select 1 from public.poker_seats s
     where s.table_id = t.id and s.status = 'ACTIVE'
   )

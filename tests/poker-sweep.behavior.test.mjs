@@ -54,6 +54,9 @@ const makeHandler = (postCalls, queries, klogEvents, options = {}) => {
           if (text.includes("with singleton_tables as")) {
             return singletonClosedTables.map((id) => ({ id }));
           }
+          if (text.includes("update public.poker_seats set status = 'inactive' where table_id = any")) {
+            return [];
+          }
           if (text.includes("update public.poker_tables t")) {
             return closedTables.map((id) => ({ id }));
           }
@@ -246,13 +249,18 @@ const runSingletonCloseFeedsSameRunCloseCashout = async () => {
   );
   assert.ok(singletonUpdate, "sweep should run singleton-close update");
   assert.deepEqual(singletonUpdate.params, [21600, 25], "singleton-close should use TABLE_SINGLETON_CLOSE_SEC and batch limit");
+  const singletonSeatInactivation = queries.find(
+    (q) => q.query.toLowerCase().includes("update public.poker_seats set status = 'inactive' where table_id = any")
+  );
+  assert.ok(singletonSeatInactivation, "sweep should inactivate ACTIVE seats for singleton-closed tables");
+  assert.deepEqual(singletonSeatInactivation.params, [[tableId]], "singleton seat inactivation should target singleton-closed table ids");
   const closeCashoutSelect = queries.find(
     (q) =>
       q.query.toLowerCase().includes("select t.id") &&
-      q.query.toLowerCase().includes("where t.status = 'closed'") &&
+      q.query.toLowerCase().includes("not exists") &&
       q.query.toLowerCase().includes("stack > 0")
   );
-  assert.ok(closeCashoutSelect, "sweep should select closed tables for close-cashout after singleton close");
+  assert.ok(closeCashoutSelect, "sweep should select no-active-seat tables for close-cashout after singleton close");
   assert.equal(postCalls.length, 1, "singleton-closed table should be cashout-processed in same sweep run");
   assert.equal(postCalls[0].idempotencyKey, `poker:close_cashout:${tableId}:${userId}:${seatNo}:v1`);
   assert.ok(
