@@ -118,6 +118,10 @@ const run = async () => {
   assert.equal(firstBody.ok, true);
   assert.equal(sideEffects.seatInsert, 1);
   assert.equal(sideEffects.ledger, 1);
+  const tableTouchCountAfterFirst = queries.filter((entry) =>
+    entry.query.toLowerCase().includes("update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1")
+  ).length;
+  assert.equal(tableTouchCountAfterFirst, 1, "join should bump table activity once when mutation is first applied");
   const stateWrite = queries.find((entry) => entry.query.toLowerCase().includes("update public.poker_state"));
   assert.ok(stateWrite, "join should write poker_state under lock");
   const statePayload = stateWrite?.params?.[1];
@@ -135,6 +139,10 @@ const run = async () => {
   assert.deepEqual(JSON.parse(second.body), firstBody);
   assert.equal(sideEffects.seatInsert, 1, "replayed join should not re-run seat insert");
   assert.equal(sideEffects.ledger, 1, "replayed join should not re-run ledger tx");
+  const tableTouchCountAfterReplay = queries.filter((entry) =>
+    entry.query.toLowerCase().includes("update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1")
+  ).length;
+  assert.equal(tableTouchCountAfterReplay, tableTouchCountAfterFirst, "replayed join should not bump table activity");
   assert.ok(
     queries.some((q) =>
       q.query.toLowerCase().includes("from public.poker_requests where table_id = $1 and user_id = $2 and request_id = $3 and kind = $4")
