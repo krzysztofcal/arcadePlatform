@@ -247,7 +247,7 @@ export async function handler(event) {
 
         const seatRowsActiveUserIds = Array.isArray(seatRows)
           ? seatRows
-              .filter((row) => row?.status === "ACTIVE")
+              .filter((row) => row?.status === "ACTIVE" && !row?.is_bot)
               .map((row) => row?.user_id)
               .filter(Boolean)
           : [];

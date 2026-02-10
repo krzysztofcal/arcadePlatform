@@ -65,7 +65,7 @@ const makeHandler = (queries, storedState, userId, options = {}) => {
             return [{ id: tableId, stakes: "1/2", max_players: 6, status: "OPEN" }];
           }
           if (text.includes("from public.poker_seats") && text.includes("status = 'active'")) {
-            const activeUserIds = options.activeUserIds || ["user-1", "user-2", "user-3"];
+            const activeUserIds = options.activeUserIds ?? ["user-1", "user-2", "user-3"];
             return activeUserIds.map((id, index) => ({ user_id: id, seat_no: index + 1 }));
           }
           if (text.includes("from public.poker_seats")) {
@@ -130,6 +130,10 @@ const run = async () => {
   assert.ok(Array.isArray(happyPayload.seats));
   assert.equal(happyPayload.seats[0].isBot, true);
   assert.equal(happyPayload.seats[1].isBot, false);
+  assert.equal(happyPayload.seats[2].isBot, false);
+  for (const seat of happyPayload.seats) {
+    assert.equal(typeof seat.isBot, "boolean");
+  }
   assert.ok(Array.isArray(happyPayload.myHoleCards));
   assert.equal(happyPayload.myHoleCards.length, 2);
   assert.equal(happyPayload.state.state.deck, undefined);
@@ -349,6 +353,20 @@ const run = async () => {
   const missingOtherPayload = JSON.parse(missingOtherResponse.body);
   assert.ok(Array.isArray(missingOtherPayload.myHoleCards));
   assert.equal(missingOtherPayload.myHoleCards.length, 2);
+
+  const botOnlyActiveFallbackLogs = [];
+  const botOnlyActiveFallbackResponse = await makeHandler([], storedState, "user-1", {
+    activeUserIds: [],
+    klog: (event, payload) => botOnlyActiveFallbackLogs.push({ event, payload }),
+  })({
+    httpMethod: "GET",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    queryStringParameters: { tableId },
+  });
+  assert.equal(botOnlyActiveFallbackResponse.statusCode, 200);
+  const botMismatchLog = botOnlyActiveFallbackLogs.find((entry) => entry.event === "poker_get_table_active_mismatch");
+  assert.ok(botMismatchLog);
+  assert.equal(botMismatchLog.payload.seatRowsActiveCount, 2);
 
   const notSeatedState = {
     ...baseState,
