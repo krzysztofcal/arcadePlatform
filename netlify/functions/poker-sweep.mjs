@@ -1,5 +1,5 @@
 import { baseHeaders, beginSql, klog } from "./_shared/supabase-admin.mjs";
-import { PRESENCE_TTL_SEC, TABLE_EMPTY_CLOSE_SEC } from "./_shared/poker-utils.mjs";
+import { PRESENCE_TTL_SEC, TABLE_EMPTY_CLOSE_SEC, TABLE_SINGLETON_CLOSE_SEC } from "./_shared/poker-utils.mjs";
 import { postTransaction } from "./_shared/chips-ledger.mjs";
 import { isHoleCardsTableMissing } from "./_shared/poker-hole-cards-store.mjs";
 import { postHandSettlementToLedger } from "./_shared/poker-ledger-settlement.mjs";
@@ -236,6 +236,53 @@ export async function handler(event) {
       limit: EXPIRED_SEATS_LIMIT,
     });
 
+    const singletonClosedResult = await beginSql(async (tx) => {
+      const singletonClosedRows = await tx.unsafe(
+        `
+with singleton_tables as (
+  select t.id
+  from public.poker_tables t
+  join public.poker_seats s
+    on s.table_id = t.id
+   and s.status = 'ACTIVE'
+  where t.status != 'CLOSED'
+    and t.last_activity_at < now() - ($1::int * interval '1 second')
+  group by t.id
+  having count(*) = 1
+  order by min(s.last_seen_at) asc nulls last
+  limit $2
+)
+update public.poker_tables t
+set status = 'CLOSED', updated_at = now()
+from singleton_tables st
+where t.id = st.id
+returning t.id;`,
+        [TABLE_SINGLETON_CLOSE_SEC, CLOSE_CASHOUT_TABLES_LIMIT]
+      );
+      const singletonClosedTableIds = Array.isArray(singletonClosedRows)
+        ? singletonClosedRows.map((row) => row?.id).filter(Boolean)
+        : [];
+      if (singletonClosedTableIds.length) {
+        await tx.unsafe(
+          "update public.poker_seats set status = 'INACTIVE' where table_id = any($1::uuid[]) and status = 'ACTIVE';",
+          [singletonClosedTableIds]
+        );
+        try {
+          await tx.unsafe("delete from public.poker_hole_cards where table_id = any($1::uuid[]);", [singletonClosedTableIds]);
+        } catch (error) {
+          if (isHoleCardsTableMissing(error)) {
+            klog("poker_hole_cards_missing", {
+              tableIds: singletonClosedTableIds,
+              error: error?.message || "unknown_error",
+            });
+          } else {
+            throw error;
+          }
+        }
+      }
+      return { closedCount: singletonClosedTableIds.length };
+    });
+
     const closeCashoutTables = await beginSql(async (tx) =>
       tx.unsafe(
         `
@@ -426,6 +473,8 @@ returning t.id;
       return { closedCount: closedTableIds.length };
     });
 
+    const totalClosedCount = singletonClosedResult.closedCount + closedResult.closedCount;
+
     const orphanRows = await beginSql(async (tx) =>
       tx.unsafe(
         `
@@ -453,7 +502,7 @@ where a.account_type = 'ESCROW'
     return {
       statusCode: 200,
       headers: baseHeaders(),
-      body: JSON.stringify({ ok: true, expiredCount, closedCount: closedResult.closedCount }),
+      body: JSON.stringify({ ok: true, expiredCount, closedCount: totalClosedCount }),
     };
   } catch (error) {
     klog("poker_sweep_error", { message: error?.message || "unknown_error" });
