@@ -4,7 +4,7 @@ import { loadPokerHandler } from "./helpers/poker-test-helpers.mjs";
 const tableId = "11111111-1111-4111-8111-111111111111";
 const userId = "user-heartbeat";
 
-const makeHeartbeatHandler = ({ requestStore, queries, sideEffects, failStoreResult = false }) =>
+const makeHeartbeatHandler = ({ requestStore, queries, sideEffects, failStoreResult = false, forbidTableTouch = false }) =>
   loadPokerHandler("netlify/functions/poker-heartbeat.mjs", {
     baseHeaders: () => ({}),
     corsHeaders: () => ({ "access-control-allow-origin": "https://example.test" }),
@@ -53,6 +53,7 @@ const makeHeartbeatHandler = ({ requestStore, queries, sideEffects, failStoreRes
             return [];
           }
           if (text.includes("update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1")) {
+            if (forbidTableTouch) throw new Error("unexpected_table_activity_touch");
             sideEffects.tableTouch += 1;
             return [];
           }
@@ -73,25 +74,31 @@ const run = async () => {
   const requestStore = new Map();
   const queries = [];
   const sideEffects = { seatTouch: 0, tableTouch: 0 };
-  const handler = makeHeartbeatHandler({ requestStore, queries, sideEffects });
+  const handler = makeHeartbeatHandler({ requestStore, queries, sideEffects, forbidTableTouch: true });
 
   const first = await callHeartbeat(handler, "hb-1");
   assert.equal(first.statusCode, 200);
   const firstBody = JSON.parse(first.body);
   assert.equal(firstBody.ok, true);
   assert.equal(sideEffects.seatTouch, 1);
-  assert.equal(sideEffects.tableTouch, 1);
+  assert.equal(sideEffects.tableTouch, 0);
 
   const second = await callHeartbeat(handler, "hb-1");
   assert.equal(second.statusCode, 200);
   assert.deepEqual(JSON.parse(second.body), firstBody);
   assert.equal(sideEffects.seatTouch, 1, "replayed heartbeat should not rerun seat touch");
-  assert.equal(sideEffects.tableTouch, 1, "replayed heartbeat should not rerun table touch");
+  assert.equal(sideEffects.tableTouch, 0, "heartbeat should never touch table activity");
   assert.ok(
     queries.some((q) =>
       q.query.toLowerCase().includes("from public.poker_requests where table_id = $1 and user_id = $2 and request_id = $3 and kind = $4")
     ),
     "heartbeat should scope poker_requests reads by table/user/request/kind"
+  );
+  assert.ok(
+    queries.every((q) =>
+      !q.query.toLowerCase().includes("update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1")
+    ),
+    "heartbeat must not update table activity timestamps"
   );
 
   const pendingStore = new Map();
@@ -101,20 +108,21 @@ const run = async () => {
     queries: [],
     sideEffects: pendingEffects,
     failStoreResult: true,
+    forbidTableTouch: true,
   });
   const failed = await callHeartbeat(failingStoreHandler, "hb-pending");
   assert.equal(failed.statusCode, 500);
   assert.equal(pendingEffects.seatTouch, 1);
-  assert.equal(pendingEffects.tableTouch, 1);
+  assert.equal(pendingEffects.tableTouch, 0);
 
   const retry = await callHeartbeat(
-    makeHeartbeatHandler({ requestStore: pendingStore, queries: [], sideEffects: pendingEffects }),
+    makeHeartbeatHandler({ requestStore: pendingStore, queries: [], sideEffects: pendingEffects, forbidTableTouch: true }),
     "hb-pending"
   );
   assert.equal(retry.statusCode, 202);
   assert.deepEqual(JSON.parse(retry.body), { error: "request_pending", requestId: "hb-pending" });
   assert.equal(pendingEffects.seatTouch, 1, "pending heartbeat should not rerun seat touch");
-  assert.equal(pendingEffects.tableTouch, 1, "pending heartbeat should not rerun table touch");
+  assert.equal(pendingEffects.tableTouch, 0, "pending heartbeat should never touch table activity");
 };
 
 run().catch((error) => {
