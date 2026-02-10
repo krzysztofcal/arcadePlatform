@@ -733,6 +733,10 @@ export async function handler(event) {
           ]
         );
         mutated = true;
+        await tx.unsafe(
+          "update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1;",
+          [tableId]
+        );
 
         klog("poker_turn_timeout", {
           tableId,
@@ -870,6 +874,10 @@ export async function handler(event) {
             timerResetState.phase || null,
             null,
           ]
+        );
+        await tx.unsafe(
+          "update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1;",
+          [tableId]
         );
 
         const publicState = withoutPrivateState(timerResetState);
@@ -1091,6 +1099,10 @@ export async function handler(event) {
           finalState.phase || null,
           null,
         ]
+      );
+      await tx.unsafe(
+        "update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1;",
+        [tableId]
       );
 
       if (advanceEvents.length > 0) {

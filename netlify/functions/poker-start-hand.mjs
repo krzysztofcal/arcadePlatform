@@ -528,6 +528,10 @@ export async function handler(event) {
           ]
         );
       }
+      await tx.unsafe(
+        "update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1;",
+        [tableId]
+      );
 
       const responseState = withoutPrivateState(updatedState);
       const legalInfo = computeLegalActions({ statePublic: responseState, userId: auth.userId });

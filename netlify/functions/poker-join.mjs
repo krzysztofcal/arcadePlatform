@@ -271,6 +271,10 @@ values ($1, $2, $3, 'ACTIVE', now(), now(), $4);
                 [tableId, auth.userId, buyIn]
               );
               mutated = true;
+              await tx.unsafe(
+                "update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1;",
+                [tableId]
+              );
               const flagResult = await clearRejoinFlags(tx, { tableId, userId: auth.userId });
               const meState = await resolveMeStateAfterRejoin(tx, tableId, flagResult);
               const resultPayload = {

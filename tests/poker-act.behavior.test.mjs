@@ -775,6 +775,10 @@ const run = async () => {
     assert.equal(firstResponse.statusCode, 200);
     const firstPayload = JSON.parse(firstResponse.body);
     assert.equal(firstPayload.replayed, false);
+    const tableTouchCountAfterFirst = idemQueries.filter((entry) =>
+      entry.query.toLowerCase().includes("update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1")
+    ).length;
+    assert.equal(tableTouchCountAfterFirst, 1, "act should bump table activity once when mutation is first applied");
     const updateCountBefore = idemQueries.filter((entry) => entry.query.toLowerCase().includes("update public.poker_state")).length;
     idemStored.value = JSON.stringify(baseState);
     idemStored.version = 4;
@@ -786,6 +790,10 @@ const run = async () => {
     assert.equal(secondResponse.statusCode, 200);
     const secondPayload = JSON.parse(secondResponse.body);
     assert.equal(secondPayload.replayed, true);
+    const tableTouchCountAfterReplay = idemQueries.filter((entry) =>
+      entry.query.toLowerCase().includes("update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1")
+    ).length;
+    assert.equal(tableTouchCountAfterReplay, tableTouchCountAfterFirst, "replayed act should not bump table activity");
     const updateCountAfter = idemQueries.filter((entry) => entry.query.toLowerCase().includes("update public.poker_state")).length;
     assert.equal(updateCountAfter, updateCountBefore);
   }
