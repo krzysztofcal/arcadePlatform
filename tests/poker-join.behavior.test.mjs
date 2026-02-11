@@ -114,7 +114,7 @@ const callJoin = (handler, requestId) =>
   handler({
     httpMethod: "POST",
     headers: { origin: "https://example.test", authorization: "Bearer token" },
-    body: JSON.stringify({ tableId, seatNo: 2, buyIn: 100, requestId }),
+    body: JSON.stringify({ tableId, seatNo: 1, buyIn: 100, requestId }),
   });
 
 const run = async () => {
@@ -192,7 +192,7 @@ const run = async () => {
   });
   const rejoin = await callJoin(rejoinHandler, "join-rejoin");
   assert.equal(rejoin.statusCode, 200);
-  assert.equal(JSON.parse(rejoin.body).seatNo, 4);
+  assert.equal(JSON.parse(rejoin.body).seatNo, 3);
   assert.equal(rejoinSideEffects.seatInsert, 0);
   assert.equal(rejoinSideEffects.ledger, 0);
   const rejoinStateWrite = rejoinQueries.find((entry) => entry.query.toLowerCase().includes("update public.poker_state"));
@@ -220,7 +220,7 @@ const run = async () => {
   assert.equal(conflictJoin.statusCode, 200);
   const conflictBody = JSON.parse(conflictJoin.body);
   assert.equal(conflictBody.ok, true);
-  assert.equal(conflictBody.seatNo, 3, "join should retry with next free seat when suggested seat is taken");
+  assert.equal(conflictBody.seatNo, 2, "join should retry with next free seat when suggested seat is taken");
   assert.equal(conflictSideEffects.seatInsert, 2, "join should retry insert after seat conflict");
   assert.equal(conflictSideEffects.ledger, 1, "join retry should still post a single ledger transaction");
   assert.ok(

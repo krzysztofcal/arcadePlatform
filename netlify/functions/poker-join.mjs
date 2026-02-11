@@ -49,17 +49,38 @@ const parseSeats = (value) => (Array.isArray(value) ? value : []);
 
 const parseStacks = (value) => (value && typeof value === "object" && !Array.isArray(value) ? value : {});
 
-const pickNextSeatNo = (rows, maxPlayers, preferredSeatNo) => {
+const toDbSeatNo = (seatNoUi, maxPlayers) => {
+  if (!Number.isInteger(maxPlayers) || maxPlayers < 2) return null;
+  if (!Number.isInteger(seatNoUi)) return null;
+  let clampedUi = seatNoUi;
+  if (clampedUi < 0) clampedUi = 0;
+  if (clampedUi > maxPlayers - 1) clampedUi = maxPlayers - 1;
+  const seatNoDb = clampedUi + 1;
+  if (seatNoDb < 1) return 1;
+  if (seatNoDb > maxPlayers) return maxPlayers;
+  return seatNoDb;
+};
+
+const toUiSeatNo = (seatNoDb, maxPlayers) => {
+  const maxUi = Number.isInteger(maxPlayers) && maxPlayers >= 2 ? maxPlayers - 1 : 0;
+  if (!Number.isInteger(seatNoDb)) return 0;
+  const seatNoUi = seatNoDb - 1;
+  if (seatNoUi < 0) return 0;
+  if (seatNoUi > maxUi) return maxUi;
+  return seatNoUi;
+};
+
+const pickNextSeatNo = (rows, maxPlayers, preferredSeatNoDb) => {
   const occupied = new Set();
   for (const row of rows || []) {
     if (Number.isInteger(row?.seat_no)) occupied.add(row.seat_no);
   }
-  const maxSeat = Number.isInteger(maxPlayers) && maxPlayers > 0 ? maxPlayers - 1 : -1;
-  if (maxSeat < 0) return null;
-  const preferred = Number.isInteger(preferredSeatNo) ? preferredSeatNo : 0;
-  const start = preferred < 0 ? 0 : preferred > maxSeat ? maxSeat : preferred;
-  for (let offset = 0; offset <= maxSeat; offset += 1) {
-    const candidate = (start + offset) % (maxSeat + 1);
+  const maxSeatDb = Number.isInteger(maxPlayers) && maxPlayers >= 2 ? maxPlayers : null;
+  if (!maxSeatDb) return null;
+  const preferred = Number.isInteger(preferredSeatNoDb) ? preferredSeatNoDb : 1;
+  const start = preferred < 1 ? 1 : preferred > maxSeatDb ? maxSeatDb : preferred;
+  for (let offset = 0; offset < maxSeatDb; offset += 1) {
+    const candidate = ((start - 1 + offset) % maxSeatDb) + 1;
     if (!occupied.has(candidate)) return candidate;
   }
   return null;
@@ -226,7 +247,7 @@ export async function handler(event) {
           const resultPayload = {
             ok: true,
             tableId,
-            seatNo: existingSeatNo,
+            seatNo: toUiSeatNo(existingSeatNo, Number(table.max_players)),
             userId: auth.userId,
             me: buildMeStatus(meState, auth.userId, { forceSeated: true }),
           };
@@ -240,11 +261,11 @@ export async function handler(event) {
           klog("poker_join_stack_persisted", {
             tableId,
             userId: auth.userId,
-            seatNo: existingSeatNo,
+            seatNo: toUiSeatNo(existingSeatNo, Number(table.max_players)),
             attemptedStackFill: buyIn,
             mode: "rejoin",
           });
-          klog("poker_join_ok", { tableId, userId: auth.userId, seatNo: existingSeatNo, rejoin: true });
+          klog("poker_join_ok", { tableId, userId: auth.userId, seatNo: toUiSeatNo(existingSeatNo, Number(table.max_players)), rejoin: true });
           return resultPayload;
         }
 
@@ -256,11 +277,12 @@ export async function handler(event) {
           throw makeError(409, "table_not_open");
         }
 
-        if (seatNo >= Number(table.max_players)) {
+        const seatNoDbInitial = toDbSeatNo(seatNo, Number(table.max_players));
+        if (!Number.isInteger(seatNoDbInitial)) {
           throw makeError(400, "invalid_seat_no");
         }
 
-        let seatNoToUse = seatNo;
+        let seatNoDbToUse = seatNoDbInitial;
         const maxSeatInsertAttempts = 3;
         for (let attempt = 0; attempt < maxSeatInsertAttempts; attempt += 1) {
           try {
@@ -269,7 +291,7 @@ export async function handler(event) {
 insert into public.poker_seats (table_id, user_id, seat_no, status, last_seen_at, joined_at, stack)
 values ($1, $2, $3, 'ACTIVE', now(), now(), $4);
               `,
-              [tableId, auth.userId, seatNoToUse, buyIn]
+              [tableId, auth.userId, seatNoDbToUse, buyIn]
             );
             mutated = true;
             break;
@@ -281,11 +303,11 @@ values ($1, $2, $3, 'ACTIVE', now(), now(), $4);
                 "select seat_no from public.poker_seats where table_id = $1 and status = 'ACTIVE' order by seat_no asc;",
                 [tableId]
               );
-              const nextSeatNo = pickNextSeatNo(activeSeatRows, Number(table.max_players), seatNoToUse + 1);
+              const nextSeatNo = pickNextSeatNo(activeSeatRows, Number(table.max_players), seatNoDbToUse + 1);
               if (!Number.isInteger(nextSeatNo)) {
                 throw makeError(409, "table_full");
               }
-              seatNoToUse = nextSeatNo;
+              seatNoDbToUse = nextSeatNo;
               if (attempt >= maxSeatInsertAttempts - 1) {
                 throw makeError(409, "seat_taken");
               }
@@ -312,7 +334,7 @@ values ($1, $2, $3, 'ACTIVE', now(), now(), $4);
                 const resultPayload = {
                   ok: true,
                   tableId,
-                  seatNo: fallbackSeatNo,
+                  seatNo: toUiSeatNo(fallbackSeatNo, Number(table.max_players)),
                   userId: auth.userId,
                   me: buildMeStatus(meState, auth.userId, { forceSeated: true }),
                 };
@@ -326,11 +348,11 @@ values ($1, $2, $3, 'ACTIVE', now(), now(), $4);
                 klog("poker_join_stack_persisted", {
                   tableId,
                   userId: auth.userId,
-                  seatNo: fallbackSeatNo,
+                  seatNo: toUiSeatNo(fallbackSeatNo, Number(table.max_players)),
                   attemptedStackFill: buyIn,
                   mode: "rejoin",
                 });
-                klog("poker_join_ok", { tableId, userId: auth.userId, seatNo: fallbackSeatNo, rejoin: true });
+                klog("poker_join_ok", { tableId, userId: auth.userId, seatNo: toUiSeatNo(fallbackSeatNo, Number(table.max_players)), rejoin: true });
                 return resultPayload;
               }
               throw makeError(409, "already_seated");
@@ -351,7 +373,7 @@ values ($1, $2, $3, 'ACTIVE', now(), now(), $4);
 
         const idempotencyKey = requestId
           ? `poker:join:${tableId}:${auth.userId}:${requestId}`
-          : `poker:join:${tableId}:${auth.userId}:${seatNoToUse}:${buyIn}`;
+          : `poker:join:${tableId}:${auth.userId}:${seatNoDbToUse}:${buyIn}`;
 
         await postTransaction({
           userId: auth.userId,
@@ -376,7 +398,7 @@ values ($1, $2, $3, 'ACTIVE', now(), now(), $4);
 
         const currentState = loadResult.state;
         const seats = parseSeats(currentState.seats).filter((seat) => seat?.userId !== auth.userId);
-        seats.push({ userId: auth.userId, seatNo: seatNoToUse });
+        seats.push({ userId: auth.userId, seatNo: seatNoDbToUse });
         const stacks = { ...parseStacks(currentState.stacks), [auth.userId]: buyIn };
         const patched = patchLeftTableByUserId(currentState, auth.userId, false);
         const clearedMissed = clearMissedTurns(patched.nextState, auth.userId);
@@ -411,7 +433,7 @@ values ($1, $2, $3, 'ACTIVE', now(), now(), $4);
         const resultPayload = {
           ok: true,
           tableId,
-          seatNo: seatNoToUse,
+          seatNo: toUiSeatNo(seatNoDbToUse, Number(table.max_players)),
           userId: auth.userId,
           heartbeatEverySec: HEARTBEAT_INTERVAL_SEC,
           me: buildMeStatus(updatedState, auth.userId, { forceSeated: true }),
@@ -426,11 +448,11 @@ values ($1, $2, $3, 'ACTIVE', now(), now(), $4);
         klog("poker_join_stack_persisted", {
           tableId,
           userId: auth.userId,
-          seatNo: seatNoToUse,
+          seatNoDb: seatNoDbToUse,
           persistedStack: buyIn,
           mode: "insert",
         });
-        klog("poker_join_ok", { tableId, userId: auth.userId, seatNo: seatNoToUse, rejoin: false });
+        klog("poker_join_ok", { tableId, userId: auth.userId, seatNoDb: seatNoDbToUse, rejoin: false });
         return resultPayload;
       } catch (error) {
         if (requestId && !mutated) {

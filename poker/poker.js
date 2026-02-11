@@ -1448,7 +1448,7 @@
         if (candidateSeat > maxUi) candidateSeat = candidateSeat - (maxUi + 1);
         seatNoInput.value = candidateSeat;
         try {
-          await joinTable();
+          await joinTable(null, { propagateError: true });
           return;
         } catch (err){
           if (isAbortError(err)){
@@ -1825,7 +1825,7 @@
       await sendAct(pendingActType, pendingActRequestId);
     }
 
-    async function joinTable(requestIdOverride){
+    async function joinTable(requestIdOverride, options){
       var seatNo = parseInt(seatNoInput ? seatNoInput.value : 0, 10);
       var buyIn = parseInt(buyInInput ? buyInInput.value : 100, 10) || 100;
       if (isNaN(seatNo)) seatNo = 0;
@@ -1834,6 +1834,7 @@
       if (seatNo > maxSeat) seatNo = maxSeat;
       if (seatNoInput) seatNoInput.value = seatNo;
       setPendingState('join', true);
+      var propagateError = !!(options && options.propagateError);
       try {
         var resolved = resolveRequestId(pendingJoinRequestId, requestIdOverride);
         if (resolved.nextPending){
@@ -1856,7 +1857,10 @@
         }
         if (joinResult && joinResult.ok === false){
           clearJoinPending();
-          setActionError('join', JOIN_URL, joinResult.error || 'request_failed', t('pokerErrJoin', 'Failed to join'));
+          var joinErr = new Error(joinResult.error || 'request_failed');
+          joinErr.code = joinResult.error || 'request_failed';
+          setActionError('join', JOIN_URL, joinErr.code, t('pokerErrJoin', 'Failed to join'));
+          if (propagateError) throw joinErr;
           return;
         }
         clearJoinPending();
@@ -1883,6 +1887,7 @@
         clearJoinPending();
         klog('poker_join_error', { tableId: tableId, error: err.message || err.code });
         setActionError('join', JOIN_URL, err.code || 'request_failed', err.message || t('pokerErrJoin', 'Failed to join'));
+        if (propagateError) throw err;
       }
     }
 
