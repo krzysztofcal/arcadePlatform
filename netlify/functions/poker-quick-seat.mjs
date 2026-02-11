@@ -50,6 +50,7 @@ const toUiSeatNo = (seatNoDb, maxPlayers) => {
 const createAndRecommend = async (tx, { userId, maxPlayers, stakesJson }) => {
   const created = await createPokerTableWithState(tx, { userId, maxPlayers, stakesJson });
   const tableId = created.tableId;
+  await tx.unsafe("update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1;", [tableId]);
   const seatNoUi = 0;
   return { tableId, seatNo: seatNoUi, strategy: "create" };
 };
@@ -71,8 +72,7 @@ where t.status = 'OPEN'
       and coalesce(hs.is_bot, false) = false
   ))
 order by t.last_activity_at desc nulls last, t.created_at asc nulls last
-limit 1
-for update of t skip locked;
+limit 1;
     `,
     [maxPlayers, stakesJson, requireHuman]
   );

@@ -144,6 +144,10 @@ const run = async () => {
       queries.some((entry) => entry.query.toLowerCase().includes("insert into public.poker_state")),
       "quick seat should initialize canonical poker_state when creating table"
     );
+    assert.ok(
+      queries.some((entry) => entry.query.toLowerCase().includes("update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1")),
+      "quick seat should bump table activity when creating"
+    );
     const stateInsertCall = queries.find((entry) => entry.query.toLowerCase().includes("insert into public.poker_state"));
     assert.ok(stateInsertCall, "quick seat create path should insert poker_state");
     const storedState = normalizeJsonState(stateInsertCall?.params?.[1]);
