@@ -1437,6 +1437,19 @@
       return code === 'seat_taken' || code === 'duplicate_seat' || code === 'conflict' || code === '23505';
     }
 
+    function applySeatInputBounds(){
+      if (!seatNoInput) return;
+      var maxUi = Number.isInteger(tableMaxPlayers) && tableMaxPlayers >= 2 ? tableMaxPlayers - 1 : 0;
+      seatNoInput.min = '0';
+      seatNoInput.max = String(maxUi);
+      seatNoInput.step = '1';
+      var seatNo = parseInt(seatNoInput.value, 10);
+      if (isNaN(seatNo)) seatNo = 0;
+      if (seatNo < 0) seatNo = 0;
+      if (seatNo > maxUi) seatNo = maxUi;
+      seatNoInput.value = String(seatNo);
+    }
+
     async function autoJoinWithRetries(){
       var maxUi = Math.max(0, tableMaxPlayers - 1);
       var startSeat = Number.isInteger(suggestedSeatNoParam) ? suggestedSeatNoParam : 0;
@@ -1489,6 +1502,7 @@
         tableData._actionConstraints = getSafeConstraints(tableData);
         isSeated = isCurrentUserSeated(tableData);
         renderTable(tableData);
+        applySeatInputBounds();
         if (isSeated){
           startHeartbeat();
         } else {
@@ -1696,10 +1710,6 @@
 
       var maxPlayers = table.maxPlayers != null ? table.maxPlayers : 6;
       tableMaxPlayers = maxPlayers;
-      if (seatNoInput){
-        seatNoInput.min = 0;
-        seatNoInput.max = Math.max(0, maxPlayers - 1);
-      }
       if (seatsGrid){
         seatsGrid.innerHTML = '';
         for (var i = 0; i < maxPlayers; i++){
