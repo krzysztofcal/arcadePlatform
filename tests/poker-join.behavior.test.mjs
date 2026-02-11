@@ -69,7 +69,7 @@ const makeJoinHandler = ({
             if (Number.isInteger(existingSeatNo)) return [{ seat_no: existingSeatNo }];
             return [];
           }
-          if (text.includes("where table_id = $1 order by seat_no asc")) {
+          if (text.includes("where table_id = $1 and status = 'active' order by seat_no asc")) {
             return occupiedSeatRows;
           }
           if (text.includes("insert into public.poker_seats")) {
