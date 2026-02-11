@@ -38,6 +38,15 @@ const pickSeatNo = (rows, maxPlayers) => {
   return null;
 };
 
+const toUiSeatNo = (seatNoDb, maxPlayers) => {
+  const maxSeat = Number.isInteger(maxPlayers) && maxPlayers >= 2 ? maxPlayers - 1 : 0;
+  if (!Number.isInteger(seatNoDb)) return 0;
+  const seatNoUi = seatNoDb - 1;
+  if (seatNoUi < 0) return 0;
+  if (seatNoUi > maxSeat) return maxSeat;
+  return seatNoUi;
+};
+
 const createAndRecommend = async (tx, { userId, maxPlayers, stakesJson }) => {
   const created = await createPokerTableWithState(tx, { userId, maxPlayers, stakesJson });
   const tableId = created.tableId;
@@ -77,7 +86,7 @@ const recommendSeatAtTable = async (tx, { tableId, userId, maxPlayers, allowCrea
   const existingSeatNoDb = existingSeatRows?.[0]?.seat_no;
   if (Number.isInteger(existingSeatNoDb)) {
     await tx.unsafe("update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1;", [tableId]);
-    return { tableId, seatNo: existingSeatNoDb - 1 };
+    return { tableId, seatNo: toUiSeatNo(existingSeatNoDb, maxPlayers) };
   }
 
   const activeSeatRows = await tx.unsafe(
@@ -90,7 +99,7 @@ const recommendSeatAtTable = async (tx, { tableId, userId, maxPlayers, allowCrea
     return null;
   }
   await tx.unsafe("update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1;", [tableId]);
-  return { tableId, seatNo: seatNoDb - 1 };
+  return { tableId, seatNo: toUiSeatNo(seatNoDb, maxPlayers) };
 };
 
 export async function handler(event) {

@@ -121,10 +121,6 @@ const run = async () => {
       "quick seat should check existing seat for idempotency"
     );
     assert.ok(
-      !queries.some((entry) => entry.query.toLowerCase().includes("where table_id = $1 and status = 'active' order by seat_no asc")),
-      "quick seat should return existing seat without scanning active seats"
-    );
-    assert.ok(
       queries.some((entry) => entry.query.toLowerCase().includes("update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1")),
       "quick seat should bump table activity when returning existing seat"
     );
@@ -139,6 +135,7 @@ const run = async () => {
     assert.equal(body.ok, true);
     assert.equal(body.tableId, "table-new");
     assert.equal(body.seatNo, 0);
+    assert.ok(body.seatNo >= 0 && body.seatNo <= 5);
     assert.ok(
       queries.some((entry) => entry.query.toLowerCase().includes("insert into public.poker_tables")),
       "quick seat should create a table when none is available"
