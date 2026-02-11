@@ -151,12 +151,12 @@ export async function handler(event) {
       const createPayload = { userId: auth.userId, maxPlayers, stakesJson };
       const matchKey = `quickseat:${maxPlayers}:${stakesParsed.value.sb}:${stakesParsed.value.bb}`;
 
-      klog("poker_quick_seat_lock", { matchKey, maxPlayers, stakesJson });
+      klog("poker_quick_seat_lock", { matchKey, maxPlayers, sb: stakesParsed.value.sb, bb: stakesParsed.value.bb, stakesJson });
       await tx.unsafe("select pg_advisory_xact_lock(hashtext($1));", [matchKey]);
 
       const preferredRows = await selectCandidate(tx, { stakesJson, maxPlayers, requireHuman: true });
       if (preferredRows?.[0]?.id) {
-        klog("poker_quick_seat_selected", { tableId: preferredRows[0].id, strategy: "prefer_humans" });
+        klog("poker_quick_seat_selected", { tableId: preferredRows[0].id, strategy: "prefer_humans", maxPlayers, sb: stakesParsed.value.sb, bb: stakesParsed.value.bb });
         const recommendation = await recommendSeatAtTable(tx, {
           tableId: preferredRows[0].id,
           userId: auth.userId,
@@ -169,7 +169,7 @@ export async function handler(event) {
 
       const anyRows = await selectCandidate(tx, { stakesJson, maxPlayers, requireHuman: false });
       if (anyRows?.[0]?.id) {
-        klog("poker_quick_seat_selected", { tableId: anyRows[0].id, strategy: "any_open" });
+        klog("poker_quick_seat_selected", { tableId: anyRows[0].id, strategy: "any_open", maxPlayers, sb: stakesParsed.value.sb, bb: stakesParsed.value.bb });
         const recommendation = await recommendSeatAtTable(tx, {
           tableId: anyRows[0].id,
           userId: auth.userId,
@@ -180,7 +180,9 @@ export async function handler(event) {
         if (recommendation) return { ...recommendation, strategy: "any_open" };
       }
 
-      return createAndRecommend(tx, createPayload);
+      const createdRecommendation = await createAndRecommend(tx, createPayload);
+      klog("poker_quick_seat_selected", { tableId: createdRecommendation.tableId, strategy: "create", maxPlayers, sb: stakesParsed.value.sb, bb: stakesParsed.value.bb });
+      return createdRecommendation;
     });
 
     klog("poker_quick_seat_ok", { tableId: result.tableId, seatNo: result.seatNo, userId: auth.userId, strategy: result.strategy });
