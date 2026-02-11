@@ -8,7 +8,18 @@ import { isStateStorageValid } from "../netlify/functions/_shared/poker-state-ut
 const tableId = "11111111-1111-4111-8111-111111111111";
 const userId = "user-join";
 
-const makeJoinHandler = ({ requestStore, queries, sideEffects, failStoreResult = false, existingSeatNo = null, conflictSeatInsertOnce = false, conflictUnknownUniqueOnce = false }) =>
+const makeJoinHandler = ({
+  requestStore,
+  queries,
+  sideEffects,
+  failStoreResult = false,
+  existingSeatNo = null,
+  conflictSeatInsertOnce = false,
+  conflictUnknownUniqueOnce = false,
+  tableMaxPlayers = 6,
+  occupiedSeatRows = [{ seat_no: 2 }],
+  alwaysSeatConflict = false,
+}) =>
   loadPokerHandler("netlify/functions/poker-join.mjs", {
     baseHeaders: () => ({}),
     corsHeaders: () => ({ "access-control-allow-origin": "https://example.test" }),
@@ -52,17 +63,24 @@ const makeJoinHandler = ({ requestStore, queries, sideEffects, failStoreResult =
             return [];
           }
           if (text.includes("from public.poker_tables")) {
-            return [{ id: tableId, status: "OPEN", max_players: 6 }];
+            return [{ id: tableId, status: "OPEN", max_players: tableMaxPlayers }];
           }
           if (text.includes("from public.poker_seats") && text.includes("user_id = $2") && text.includes("limit 1")) {
             if (Number.isInteger(existingSeatNo)) return [{ seat_no: existingSeatNo }];
             return [];
           }
-          if (text.includes("where table_id = $1 and status = 'active' order by seat_no asc")) {
-            return [{ seat_no: 2 }];
+          if (text.includes("where table_id = $1 order by seat_no asc")) {
+            return occupiedSeatRows;
           }
           if (text.includes("insert into public.poker_seats")) {
             sideEffects.seatInsert += 1;
+            if (alwaysSeatConflict) {
+              const err = new Error("seat_taken");
+              err.code = "23505";
+              err.constraint = "poker_seats_table_id_seat_no_key";
+              err.detail = "";
+              throw err;
+            }
             if (conflictSeatInsertOnce && !sideEffects.conflictSeatInsertUsed) {
               sideEffects.conflictSeatInsertUsed = true;
               const err = new Error("seat_taken");
@@ -118,11 +136,11 @@ const makeJoinHandler = ({ requestStore, queries, sideEffects, failStoreResult =
     HEARTBEAT_INTERVAL_SEC: 15,
   });
 
-const callJoin = (handler, requestId) =>
+const callJoin = (handler, requestId, overrides) =>
   handler({
     httpMethod: "POST",
     headers: { origin: "https://example.test", authorization: "Bearer token" },
-    body: JSON.stringify({ tableId, seatNo: 1, buyIn: 100, requestId }),
+    body: JSON.stringify({ tableId, seatNo: 1, buyIn: 100, requestId, ...(overrides || {}) }),
   });
 
 const run = async () => {
@@ -232,16 +250,40 @@ const run = async () => {
     conflictSeatInsertOnce: true,
   });
   const conflictJoin = await callJoin(conflictHandler, "join-conflict");
-  assert.equal(conflictJoin.statusCode, 200);
-  const conflictBody = JSON.parse(conflictJoin.body);
-  assert.equal(conflictBody.ok, true);
-  assert.equal(conflictBody.seatNo, 2, "join should retry with next free seat when suggested seat is taken");
-  assert.equal(conflictSideEffects.seatInsert, 2, "join should retry insert after seat conflict");
-  assert.equal(conflictSideEffects.ledger, 1, "join retry should still post a single ledger transaction");
-  assert.ok(
-    conflictQueries.some((entry) => entry.query.toLowerCase().includes("where table_id = $1 and status = 'active' order by seat_no asc")),
-    "join should scan active seats after seat conflict"
-  );
+  assert.equal(conflictJoin.statusCode, 409);
+  assert.deepEqual(JSON.parse(conflictJoin.body), { error: "seat_taken" });
+  assert.equal(conflictSideEffects.seatInsert, 1, "non-autoSeat join should fail immediately on seat conflict");
+  assert.equal(conflictSideEffects.ledger, 0, "failed seat insert should not post ledger transaction");
+
+  const autoSeatQueries = [];
+  const autoSeatSideEffects = { seatInsert: 0, ledger: 0, conflictSeatInsertUsed: false };
+  const autoSeatHandler = makeJoinHandler({
+    requestStore: new Map(),
+    queries: autoSeatQueries,
+    sideEffects: autoSeatSideEffects,
+    conflictSeatInsertOnce: true,
+  });
+  const autoSeatJoin = await callJoin(autoSeatHandler, "join-auto-seat", {
+    seatNo: undefined,
+    autoSeat: true,
+    preferredSeatNo: 1,
+  });
+  assert.equal(autoSeatJoin.statusCode, 200);
+  const autoSeatBody = JSON.parse(autoSeatJoin.body);
+  assert.equal(autoSeatBody.ok, true);
+  assert.equal(autoSeatBody.seatNo, 2, "autoSeat join should wrap to next free seat when preferred seat is taken");
+
+  const fullHandler = makeJoinHandler({
+    requestStore: new Map(),
+    queries: [],
+    sideEffects: { seatInsert: 0, ledger: 0 },
+    tableMaxPlayers: 2,
+    occupiedSeatRows: [{ seat_no: 1 }, { seat_no: 2 }],
+    alwaysSeatConflict: true,
+  });
+  const fullJoin = await callJoin(fullHandler, "join-table-full", { autoSeat: true, preferredSeatNo: 0 });
+  assert.equal(fullJoin.statusCode, 409);
+  assert.deepEqual(JSON.parse(fullJoin.body), { error: "table_full" });
 
   const unknownConflictSideEffects = { seatInsert: 0, ledger: 0, conflictUnknownUniqueUsed: false };
   const unknownConflictHandler = makeJoinHandler({

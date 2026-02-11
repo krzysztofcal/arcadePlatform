@@ -478,7 +478,11 @@ export async function handler(event) {
         }
         if (updateResult.reason === "conflict") {
           klog("poker_start_hand_conflict", { tableId, userId: auth.userId, expectedVersion });
-          throw makeError(409, "state_conflict");
+          const freshStateRows = await tx.unsafe("select state from public.poker_state where table_id = $1 limit 1;", [tableId]);
+          const freshState = normalizeJsonState(freshStateRows?.[0]?.state);
+          const freshPhase = freshState?.phase;
+          if (freshPhase && freshPhase !== "INIT" && freshPhase !== "HAND_DONE") throw makeError(409, "already_in_hand");
+          throw makeError(409, "already_in_hand");
         }
         throw makeError(409, "state_invalid");
       }

@@ -51,6 +51,11 @@ const parseSeatNo = (value) => {
   return num;
 };
 
+const parseAutoSeat = (value) => {
+  if (value == null) return false;
+  return value === true;
+};
+
 const parseBuyIn = (value) => {
   if (value == null) return null;
   const num = Number(value);
@@ -186,8 +191,10 @@ export async function handler(event) {
     return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "invalid_table_id" }) };
   }
 
+  const autoSeat = parseAutoSeat(payload?.autoSeat);
+  const preferredSeatNo = parseSeatNo(payload?.preferredSeatNo);
   const seatNo = parseSeatNo(payload?.seatNo);
-  if (seatNo == null) {
+  if (!autoSeat && seatNo == null) {
     return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "invalid_seat_no" }) };
   }
 
@@ -221,7 +228,14 @@ export async function handler(event) {
     return { statusCode: 401, headers: cors, body: JSON.stringify({ error: "unauthorized", reason: auth.reason }) };
   }
 
-  klog("poker_join_begin", { tableId, userId: auth.userId, seatNo, hasRequestId: !!requestId });
+  klog("poker_join_begin", {
+    tableId,
+    userId: auth.userId,
+    seatNo,
+    preferredSeatNo,
+    autoSeat,
+    hasRequestId: !!requestId,
+  });
 
   try {
     const result = await beginSql(async (tx) => {
@@ -310,13 +324,14 @@ export async function handler(event) {
           throw makeError(409, "table_not_open");
         }
 
-        const seatNoDbInitial = toDbSeatNo(seatNo, Number(table.max_players));
+        const preferredSeatNoUi = preferredSeatNo == null ? 0 : preferredSeatNo;
+        const seatNoDbInitial = toDbSeatNo(autoSeat ? preferredSeatNoUi : seatNo, Number(table.max_players));
         if (!Number.isInteger(seatNoDbInitial)) {
           throw makeError(400, "invalid_seat_no");
         }
 
         let seatNoDbToUse = seatNoDbInitial;
-        const maxSeatInsertAttempts = 3;
+        const maxSeatInsertAttempts = autoSeat ? Math.max(1, Number(table.max_players) || 1) : 3;
         for (let attempt = 0; attempt < maxSeatInsertAttempts; attempt += 1) {
           try {
             await tx.unsafe(
@@ -331,8 +346,11 @@ values ($1, $2, $3, 'ACTIVE', now(), now(), $4);
           } catch (error) {
             const conflictKind = classifySeatInsertConflict(error);
             if (conflictKind === "seat_taken") {
+              if (!autoSeat) {
+                throw makeError(409, "seat_taken");
+              }
               const activeSeatRows = await tx.unsafe(
-                "select seat_no from public.poker_seats where table_id = $1 and status = 'ACTIVE' order by seat_no asc;",
+                "select seat_no from public.poker_seats where table_id = $1 order by seat_no asc;",
                 [tableId]
               );
               const nextSeatNo = pickNextSeatNo(activeSeatRows, Number(table.max_players), seatNoDbToUse + 1);
@@ -341,7 +359,7 @@ values ($1, $2, $3, 'ACTIVE', now(), now(), $4);
               }
               seatNoDbToUse = nextSeatNo;
               if (attempt >= maxSeatInsertAttempts - 1) {
-                throw makeError(409, "seat_taken");
+                throw makeError(409, "duplicate_seat");
               }
               continue;
             }
