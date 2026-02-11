@@ -869,6 +869,8 @@
     var HEARTBEAT_PENDING_MAX_RETRIES = 8;
     var realtimeSub = null;
 
+    applySeatInputBounds();
+
     if (joinBtn){
       klog('poker_join_bind', { found: true, selector: joinSelector, page: 'table' });
     } else {
@@ -1455,7 +1457,7 @@
       var startSeat = Number.isInteger(suggestedSeatNoParam) ? suggestedSeatNoParam : 0;
       if (startSeat < 0) startSeat = 0;
       if (startSeat > maxUi) startSeat = maxUi;
-      var attempts = Number.isInteger(tableMaxPlayers) && tableMaxPlayers > 0 ? Math.min(3, tableMaxPlayers) : 1;
+      var attempts = Math.min(3, tableMaxPlayers);
       for (var i = 0; i < attempts; i++){
         var candidateSeat = startSeat + i;
         if (candidateSeat > maxUi) candidateSeat = candidateSeat - (maxUi + 1);
