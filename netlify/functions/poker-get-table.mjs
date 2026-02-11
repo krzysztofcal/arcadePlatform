@@ -196,7 +196,7 @@ export async function handler(event) {
         [tableId]
       );
       const activeSeatRows = await tx.unsafe(
-        "select user_id, seat_no from public.poker_seats where table_id = $1 and status = 'ACTIVE' order by seat_no asc;",
+        "select user_id, seat_no from public.poker_seats where table_id = $1 and status = 'ACTIVE' and is_bot = false order by seat_no asc;",
         [tableId]
       );
 
