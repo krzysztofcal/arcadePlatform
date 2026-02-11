@@ -79,6 +79,7 @@ const recommendSeatAtTable = async (tx, { tableId, maxPlayers, allowCreateFallba
     if (allowCreateFallback) return createAndRecommend(tx, createPayload);
     return null;
   }
+  await tx.unsafe("update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1;", [tableId]);
   return { tableId, seatNo: seatNoDb - 1 };
 };
 

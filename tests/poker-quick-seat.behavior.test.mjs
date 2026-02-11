@@ -76,6 +76,10 @@ const run = async () => {
       queries.some((entry) => entry.query.toLowerCase().includes("where table_id = $1 and status = 'active' order by seat_no asc")),
       "quick seat should read active seats to suggest a seat"
     );
+    assert.ok(
+      queries.some((entry) => entry.query.toLowerCase().includes("update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1")),
+      "quick seat should bump table activity when recommending"
+    );
   }
 
   {
@@ -91,6 +95,10 @@ const run = async () => {
     assert.ok(
       queries.some((entry) => entry.query.toLowerCase().includes("where table_id = $1 and status = 'active' order by seat_no asc")),
       "quick seat should read active seats before returning a recommendation"
+    );
+    assert.ok(
+      queries.some((entry) => entry.query.toLowerCase().includes("update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1")),
+      "quick seat should bump table activity when recommending"
     );
   }
 
