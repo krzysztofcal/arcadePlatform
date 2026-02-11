@@ -53,7 +53,15 @@ const parseSeatNo = (value) => {
 
 const parseAutoSeat = (value) => {
   if (value == null) return false;
-  return value === true;
+  if (value === true) return true;
+  if (value === false) return false;
+  if (typeof value === "string") {
+    const v = value.trim().toLowerCase();
+    if (v === "true" || v === "1" || v === "yes" || v === "y") return true;
+    if (v === "false" || v === "0" || v === "no" || v === "n") return false;
+  }
+  if (typeof value === "number") return value === 1;
+  return false;
 };
 
 const parseBuyIn = (value) => {
@@ -193,6 +201,7 @@ export async function handler(event) {
 
   const autoSeat = parseAutoSeat(payload?.autoSeat);
   const preferredSeatNo = parseSeatNo(payload?.preferredSeatNo);
+  const preferredSeatNoMissing = autoSeat && preferredSeatNo == null;
   const seatNo = parseSeatNo(payload?.seatNo);
   if (!autoSeat && seatNo == null) {
     return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "invalid_seat_no" }) };
@@ -226,6 +235,14 @@ export async function handler(event) {
   const auth = await verifySupabaseJwt(token);
   if (!auth.valid || !auth.userId) {
     return { statusCode: 401, headers: cors, body: JSON.stringify({ error: "unauthorized", reason: auth.reason }) };
+  }
+
+  if (preferredSeatNoMissing) {
+    klog("poker_join_autoseat_missing_preferred", {
+      tableId,
+      userId: auth.userId,
+      hasRequestId: !!requestId,
+    });
   }
 
   klog("poker_join_begin", {
@@ -359,7 +376,13 @@ values ($1, $2, $3, 'ACTIVE', now(), now(), $4);
               }
               seatNoDbToUse = nextSeatNo;
               if (attempt >= maxSeatInsertAttempts - 1) {
-                throw makeError(409, "duplicate_seat");
+                klog("poker_join_autoseat_retry_exhausted", {
+                  tableId,
+                  userId: auth.userId,
+                  seatNoDbInitial,
+                  lastSeatNoDb: seatNoDbToUse,
+                });
+                throw makeError(409, "seat_taken");
               }
               continue;
             }

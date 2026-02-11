@@ -273,6 +273,13 @@ const run = async () => {
   assert.equal(autoSeatBody.ok, true);
   assert.equal(autoSeatBody.seatNo, 2, "autoSeat join should wrap to next free seat when preferred seat is taken");
 
+  const autoSeatJoinStr = await callJoin(autoSeatHandler, "join-auto-seat-str", {
+    seatNo: undefined,
+    autoSeat: "true",
+    preferredSeatNo: 1,
+  });
+  assert.equal(autoSeatJoinStr.statusCode, 200);
+
   const fullHandler = makeJoinHandler({
     requestStore: new Map(),
     queries: [],

@@ -2093,9 +2093,12 @@
         if (joinResult && joinResult.ok){
           klog('poker_auto_join_success', { tableId: tableId, seatNo: joinResult.seatNo });
         }
-        isSeated = true;
         if (!isPageActive()) return;
-        await loadTable(false);
+        try {
+          await loadTable(false);
+        } catch (_err){
+          return;
+        }
         maybeAutoStartHand();
       } catch (err){
         if (isAbortError(err)){

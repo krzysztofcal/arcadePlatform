@@ -70,7 +70,13 @@ const normalizeVersion = (value) => {
 
 const normalizeStateRow = (raw) => {
   if (raw == null) return null;
-  if (typeof raw === "string") return normalizeJsonState(raw);
+  if (typeof raw === "string") {
+    try {
+      return normalizeJsonState(raw);
+    } catch {
+      return null;
+    }
+  }
   if (typeof raw === "object" && !Array.isArray(raw)) return raw;
   return null;
 };
