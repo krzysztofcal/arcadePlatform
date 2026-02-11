@@ -790,6 +790,7 @@
     var joinStatusEl = document.getElementById('pokerJoinStatus');
     var leaveStatusEl = document.getElementById('pokerLeaveStatus');
     var seatNoInput = document.getElementById('pokerSeatNo');
+    applySeatInputBounds();
     var buyInInput = document.getElementById('pokerBuyIn');
     var yourStackEl = document.getElementById('pokerYourStack');
     var potEl = document.getElementById('pokerPot');
@@ -1437,8 +1438,21 @@
       return code === 'seat_taken' || code === 'duplicate_seat' || code === 'conflict' || code === '23505';
     }
 
+    function applySeatInputBounds(){
+      if (!seatNoInput) return;
+      var maxUi = Number.isInteger(tableMaxPlayers) && tableMaxPlayers >= 2 ? tableMaxPlayers - 1 : 0;
+      seatNoInput.min = '0';
+      seatNoInput.max = String(maxUi);
+      seatNoInput.step = '1';
+      var seatNo = parseInt(seatNoInput.value, 10);
+      if (isNaN(seatNo)) seatNo = 0;
+      if (seatNo < 0) seatNo = 0;
+      if (seatNo > maxUi) seatNo = maxUi;
+      seatNoInput.value = String(seatNo);
+    }
+
     async function autoJoinWithRetries(){
-      var maxUi = Math.max(0, tableMaxPlayers - 1);
+      var maxUi = Number.isInteger(tableMaxPlayers) && tableMaxPlayers >= 2 ? tableMaxPlayers - 1 : 0;
       var startSeat = Number.isInteger(suggestedSeatNoParam) ? suggestedSeatNoParam : 0;
       if (startSeat < 0) startSeat = 0;
       if (startSeat > maxUi) startSeat = maxUi;
@@ -1696,10 +1710,7 @@
 
       var maxPlayers = table.maxPlayers != null ? table.maxPlayers : 6;
       tableMaxPlayers = maxPlayers;
-      if (seatNoInput){
-        seatNoInput.min = 0;
-        seatNoInput.max = Math.max(0, maxPlayers - 1);
-      }
+      applySeatInputBounds();
       if (seatsGrid){
         seatsGrid.innerHTML = '';
         for (var i = 0; i < maxPlayers; i++){
