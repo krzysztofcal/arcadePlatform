@@ -24,7 +24,12 @@ const makeHandler = ({ mode, queries }) =>
           queries.push({ query: String(query), params });
           const text = String(query).toLowerCase();
 
-          if (text.includes("from public.poker_tables t") && text.includes("$3::boolean = false")) {
+          if (
+            text.includes("from public.poker_tables t") &&
+            text.includes("where t.status = 'open'") &&
+            text.includes("t.max_players = $1") &&
+            text.includes("t.stakes = $2::jsonb")
+          ) {
             const requireHuman = params?.[2] === true;
             if (mode === "prefer_humans" || mode === "already_seated") {
               if (requireHuman) return [{ id: "table-human", max_players: 6 }];
