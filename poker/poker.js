@@ -890,6 +890,7 @@
     var heartbeatTimer = null;
     var heartbeatRequestId = null;
     var pendingJoinRequestId = null;
+    var pendingJoinAutoSeat = false;
     var pendingLeaveRequestId = null;
     var pendingStartHandRequestId = null;
     var pendingActRequestId = null;
@@ -2007,7 +2008,7 @@
     async function retryJoin(){
       if (!isPageActive()) return;
       if (!pendingJoinRequestId) return;
-      await joinTable(pendingJoinRequestId, { autoSeat: shouldAutoJoin });
+      await joinTable(pendingJoinRequestId);
     }
 
     async function retryLeave(){
@@ -2037,7 +2038,8 @@
       if (seatNo > maxSeatNo) seatNo = maxSeatNo;
       if (seatNoInput) seatNoInput.value = seatNo;
       var preferredSeatNo = getPreferredSeatNo(options && options.preferredSeatNoOverride);
-      var wantAutoSeat = !!(options && options.autoSeat);
+      var hasAutoSeatOption = !!(options && Object.prototype.hasOwnProperty.call(options, 'autoSeat'));
+      var wantAutoSeat = hasAutoSeatOption ? !!options.autoSeat : false;
       setPendingState('join', true);
       var propagateError = !!(options && options.propagateError);
       try {
@@ -2049,6 +2051,10 @@
         } else if (!pendingJoinRequestId) {
           pendingJoinRequestId = normalizeRequestId(resolved.requestId);
         }
+        if (!hasAutoSeatOption && requestIdOverride && pendingJoinRequestId && requestIdOverride === pendingJoinRequestId){
+          wantAutoSeat = !!pendingJoinAutoSeat;
+        }
+        pendingJoinAutoSeat = !!wantAutoSeat;
         var joinRequestId = normalizeRequestId(resolved.requestId);
         var joinPayload = {
           tableId: tableId,

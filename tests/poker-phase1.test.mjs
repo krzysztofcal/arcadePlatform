@@ -146,7 +146,9 @@ assert.ok(
   "poker UI leaveTable should resolve requestId using pendingLeaveRequestId"
 );
 assert.ok(
-  /apiPost\(\s*JOIN_URL[\s\S]*?requestId\s*:\s*joinRequestId/.test(pokerUiSrc),
+  /apiPost\(\s*JOIN_URL[\s\S]*?requestId\s*:\s*joinRequestId/.test(pokerUiSrc) ||
+    (/joinPayload\s*=\s*\{[\s\S]*?requestId\s*:\s*joinRequestId[\s\S]*?\}/.test(pokerUiSrc) &&
+      /apiPost\(\s*JOIN_URL\s*,\s*joinPayload\s*\)/.test(pokerUiSrc)),
   "poker UI join should send joinRequestId as requestId"
 );
 assert.ok(!/String\(\s*joinRequestId\s*\)/.test(pokerUiSrc), "poker UI join should not stringify joinRequestId");
