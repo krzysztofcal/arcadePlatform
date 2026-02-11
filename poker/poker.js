@@ -272,13 +272,15 @@
     return Array.isArray(params.legalActions) && params.legalActions.length > 0;
   }
 
-  window.__POKER_UI_TEST_HOOKS__ = {
-    normalizeDeadlineMs: normalizeDeadlineMs,
-    computeRemainingTurnSeconds: computeRemainingTurnSeconds,
-    shouldShowTurnActions: shouldShowTurnActions,
-    getConstraintsFromResponse: getConstraintsFromResponse,
-    getLegalActionsFromResponse: getLegalActionsFromResponse
-  };
+  if (window.__RUNNING_POKER_UI_TESTS__ === true){
+    window.__POKER_UI_TEST_HOOKS__ = {
+      normalizeDeadlineMs: normalizeDeadlineMs,
+      computeRemainingTurnSeconds: computeRemainingTurnSeconds,
+      shouldShowTurnActions: shouldShowTurnActions,
+      getConstraintsFromResponse: getConstraintsFromResponse,
+      getLegalActionsFromResponse: getLegalActionsFromResponse
+    };
+  }
 
   function resolveUserLabel(entry, playersById){
     var userId = null;
