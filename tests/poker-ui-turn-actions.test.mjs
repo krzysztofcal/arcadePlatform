@@ -13,6 +13,7 @@ const localStorageStub = {
 };
 
 const sandbox = {
+  Buffer,
   window: {
     location: { pathname: '/poker/table.html', search: '' },
     addEventListener: () => {},
