@@ -1432,21 +1432,45 @@
       });
     }
 
+    function isSeatTakenError(err){
+      var code = err && (err.code || err.error || err.message);
+      return code === 'seat_taken' || code === 'duplicate_seat' || code === 'conflict' || code === '23505';
+    }
+
+    async function autoJoinWithRetries(){
+      var maxUi = Math.max(0, tableMaxPlayers - 1);
+      var startSeat = Number.isInteger(suggestedSeatNoParam) ? suggestedSeatNoParam : 0;
+      if (startSeat < 0) startSeat = 0;
+      if (startSeat > maxUi) startSeat = maxUi;
+      var attempts = Math.min(3, tableMaxPlayers);
+      for (var i = 0; i < attempts; i++){
+        var candidateSeat = startSeat + i;
+        if (candidateSeat > maxUi) candidateSeat = candidateSeat - (maxUi + 1);
+        seatNoInput.value = candidateSeat;
+        try {
+          await joinTable();
+          return;
+        } catch (err){
+          if (isAbortError(err)){
+            pauseJoinPending();
+            return;
+          }
+          if (!isSeatTakenError(err)) throw err;
+        }
+      }
+      var seatErr = new Error(t('pokerErrSeatTaken', 'Seat was taken. Please try again.'));
+      seatErr.code = 'seat_taken';
+      throw seatErr;
+    }
+
     function maybeAutoJoin(){
       if (!shouldAutoJoin || autoJoinAttempted) return;
       if (joinPending || leavePending || startHandPending || actPending) return;
       if (!seatNoInput) return;
       if (!Number.isInteger(tableMaxPlayers) || tableMaxPlayers < 2) return;
       if (isSeated) return;
-      if (Number.isInteger(suggestedSeatNoParam)){
-        var maxSeat = Math.max(0, tableMaxPlayers - 1);
-        var candidateSeat = suggestedSeatNoParam;
-        if (candidateSeat < 0) candidateSeat = 0;
-        if (candidateSeat > maxSeat) candidateSeat = maxSeat;
-        seatNoInput.value = candidateSeat;
-      }
       autoJoinAttempted = true;
-      joinTable().catch(function(err){
+      autoJoinWithRetries().catch(function(err){
         if (isAbortError(err)){
           pauseJoinPending();
           return;

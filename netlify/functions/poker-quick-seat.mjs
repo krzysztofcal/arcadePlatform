@@ -39,11 +39,11 @@ const pickSeatNo = (rows, maxPlayers) => {
 };
 
 const toUiSeatNo = (seatNoDb, maxPlayers) => {
-  const maxSeat = Number.isInteger(maxPlayers) && maxPlayers >= 2 ? maxPlayers - 1 : 0;
+  const maxUi = Number.isInteger(maxPlayers) && maxPlayers >= 2 ? maxPlayers - 1 : 0;
   if (!Number.isInteger(seatNoDb)) return 0;
   const seatNoUi = seatNoDb - 1;
   if (seatNoUi < 0) return 0;
-  if (seatNoUi > maxSeat) return maxSeat;
+  if (seatNoUi > maxUi) return maxUi;
   return seatNoUi;
 };
 
@@ -72,7 +72,8 @@ where t.status = 'OPEN'
       and coalesce(hs.is_bot, false) = false
   ))
 order by t.last_activity_at desc nulls last, t.created_at asc nulls last
-limit 1;
+limit 1
+for update of t skip locked;
     `,
     [maxPlayers, stakesJson, requireHuman]
   );

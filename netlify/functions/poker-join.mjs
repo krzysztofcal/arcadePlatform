@@ -49,6 +49,22 @@ const parseSeats = (value) => (Array.isArray(value) ? value : []);
 
 const parseStacks = (value) => (value && typeof value === "object" && !Array.isArray(value) ? value : {});
 
+const pickNextSeatNo = (rows, maxPlayers, preferredSeatNo) => {
+  const occupied = new Set();
+  for (const row of rows || []) {
+    if (Number.isInteger(row?.seat_no)) occupied.add(row.seat_no);
+  }
+  const maxSeat = Number.isInteger(maxPlayers) && maxPlayers > 0 ? maxPlayers - 1 : -1;
+  if (maxSeat < 0) return null;
+  const preferred = Number.isInteger(preferredSeatNo) ? preferredSeatNo : 0;
+  const start = preferred < 0 ? 0 : preferred > maxSeat ? maxSeat : preferred;
+  for (let offset = 0; offset <= maxSeat; offset += 1) {
+    const candidate = (start + offset) % (maxSeat + 1);
+    if (!occupied.has(candidate)) return candidate;
+  }
+  return null;
+};
+
 const buildMeStatus = (state, userId, { forceSeated = false } = {}) => {
   const seat = Array.isArray(state?.seats) ? state.seats.find((entry) => entry?.userId === userId) : null;
   return {
@@ -244,66 +260,83 @@ export async function handler(event) {
           throw makeError(400, "invalid_seat_no");
         }
 
-        try {
-          await tx.unsafe(
-            `
+        let seatNoToUse = seatNo;
+        const maxSeatInsertAttempts = 3;
+        for (let attempt = 0; attempt < maxSeatInsertAttempts; attempt += 1) {
+          try {
+            await tx.unsafe(
+              `
 insert into public.poker_seats (table_id, user_id, seat_no, status, last_seen_at, joined_at, stack)
 values ($1, $2, $3, 'ACTIVE', now(), now(), $4);
-            `,
-            [tableId, auth.userId, seatNo, buyIn]
-          );
-          mutated = true;
-        } catch (error) {
-          const isUnique = error?.code === "23505";
-          const details = `${error?.constraint || ""} ${error?.detail || ""}`.toLowerCase();
-          if (isUnique && details.includes("seat_no")) {
-            throw makeError(409, "seat_taken");
-          }
-          if (isUnique && details.includes("user_id")) {
-            const seatRow = await tx.unsafe(
-              "select seat_no from public.poker_seats where table_id = $1 and user_id = $2 limit 1;",
-              [tableId, auth.userId]
+              `,
+              [tableId, auth.userId, seatNoToUse, buyIn]
             );
-            const fallbackSeatNo = seatRow?.[0]?.seat_no;
-            if (Number.isInteger(fallbackSeatNo)) {
-              await tx.unsafe(
-                "update public.poker_seats set status = 'ACTIVE', last_seen_at = now(), stack = coalesce(stack, $3) where table_id = $1 and user_id = $2;",
-                [tableId, auth.userId, buyIn]
-              );
-              mutated = true;
-              await tx.unsafe(
-                "update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1;",
+            mutated = true;
+            break;
+          } catch (error) {
+            const isUnique = error?.code === "23505";
+            const details = `${error?.constraint || ""} ${error?.detail || ""}`.toLowerCase();
+            if (isUnique && details.includes("seat_no")) {
+              const activeSeatRows = await tx.unsafe(
+                "select seat_no from public.poker_seats where table_id = $1 and status = 'ACTIVE' order by seat_no asc;",
                 [tableId]
               );
-              const flagResult = await clearRejoinFlags(tx, { tableId, userId: auth.userId });
-              const meState = await resolveMeStateAfterRejoin(tx, tableId, flagResult);
-              const resultPayload = {
-                ok: true,
-                tableId,
-                seatNo: fallbackSeatNo,
-                userId: auth.userId,
-                me: buildMeStatus(meState, auth.userId, { forceSeated: true }),
-              };
-              await storePokerRequestResult(tx, {
-                tableId,
-                userId: auth.userId,
-                requestId,
-                kind: "JOIN",
-                result: resultPayload,
-              });
-              klog("poker_join_stack_persisted", {
-                tableId,
-                userId: auth.userId,
-                seatNo: fallbackSeatNo,
-                attemptedStackFill: buyIn,
-                mode: "rejoin",
-              });
-              klog("poker_join_ok", { tableId, userId: auth.userId, seatNo: fallbackSeatNo, rejoin: true });
-              return resultPayload;
+              const nextSeatNo = pickNextSeatNo(activeSeatRows, Number(table.max_players), seatNoToUse + 1);
+              if (!Number.isInteger(nextSeatNo)) {
+                throw makeError(409, "table_full");
+              }
+              seatNoToUse = nextSeatNo;
+              if (attempt >= maxSeatInsertAttempts - 1) {
+                throw makeError(409, "seat_taken");
+              }
+              continue;
             }
-            throw makeError(409, "already_seated");
+            if (isUnique && details.includes("user_id")) {
+              const seatRow = await tx.unsafe(
+                "select seat_no from public.poker_seats where table_id = $1 and user_id = $2 limit 1;",
+                [tableId, auth.userId]
+              );
+              const fallbackSeatNo = seatRow?.[0]?.seat_no;
+              if (Number.isInteger(fallbackSeatNo)) {
+                await tx.unsafe(
+                  "update public.poker_seats set status = 'ACTIVE', last_seen_at = now(), stack = coalesce(stack, $3) where table_id = $1 and user_id = $2;",
+                  [tableId, auth.userId, buyIn]
+                );
+                mutated = true;
+                await tx.unsafe(
+                  "update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1;",
+                  [tableId]
+                );
+                const flagResult = await clearRejoinFlags(tx, { tableId, userId: auth.userId });
+                const meState = await resolveMeStateAfterRejoin(tx, tableId, flagResult);
+                const resultPayload = {
+                  ok: true,
+                  tableId,
+                  seatNo: fallbackSeatNo,
+                  userId: auth.userId,
+                  me: buildMeStatus(meState, auth.userId, { forceSeated: true }),
+                };
+                await storePokerRequestResult(tx, {
+                  tableId,
+                  userId: auth.userId,
+                  requestId,
+                  kind: "JOIN",
+                  result: resultPayload,
+                });
+                klog("poker_join_stack_persisted", {
+                  tableId,
+                  userId: auth.userId,
+                  seatNo: fallbackSeatNo,
+                  attemptedStackFill: buyIn,
+                  mode: "rejoin",
+                });
+                klog("poker_join_ok", { tableId, userId: auth.userId, seatNo: fallbackSeatNo, rejoin: true });
+                return resultPayload;
+              }
+              throw makeError(409, "already_seated");
+            }
+            throw error;
           }
-          throw error;
         }
 
         const escrowSystemKey = `POKER_TABLE:${tableId}`;
@@ -318,7 +351,7 @@ values ($1, $2, $3, 'ACTIVE', now(), now(), $4);
 
         const idempotencyKey = requestId
           ? `poker:join:${tableId}:${auth.userId}:${requestId}`
-          : `poker:join:${tableId}:${auth.userId}:${seatNo}:${buyIn}`;
+          : `poker:join:${tableId}:${auth.userId}:${seatNoToUse}:${buyIn}`;
 
         await postTransaction({
           userId: auth.userId,
@@ -343,7 +376,7 @@ values ($1, $2, $3, 'ACTIVE', now(), now(), $4);
 
         const currentState = loadResult.state;
         const seats = parseSeats(currentState.seats).filter((seat) => seat?.userId !== auth.userId);
-        seats.push({ userId: auth.userId, seatNo });
+        seats.push({ userId: auth.userId, seatNo: seatNoToUse });
         const stacks = { ...parseStacks(currentState.stacks), [auth.userId]: buyIn };
         const patched = patchLeftTableByUserId(currentState, auth.userId, false);
         const clearedMissed = clearMissedTurns(patched.nextState, auth.userId);
@@ -378,7 +411,7 @@ values ($1, $2, $3, 'ACTIVE', now(), now(), $4);
         const resultPayload = {
           ok: true,
           tableId,
-          seatNo,
+          seatNo: seatNoToUse,
           userId: auth.userId,
           heartbeatEverySec: HEARTBEAT_INTERVAL_SEC,
           me: buildMeStatus(updatedState, auth.userId, { forceSeated: true }),
@@ -393,11 +426,11 @@ values ($1, $2, $3, 'ACTIVE', now(), now(), $4);
         klog("poker_join_stack_persisted", {
           tableId,
           userId: auth.userId,
-          seatNo,
+          seatNo: seatNoToUse,
           persistedStack: buyIn,
           mode: "insert",
         });
-        klog("poker_join_ok", { tableId, userId: auth.userId, seatNo, rejoin: false });
+        klog("poker_join_ok", { tableId, userId: auth.userId, seatNo: seatNoToUse, rejoin: false });
         return resultPayload;
       } catch (error) {
         if (requestId && !mutated) {
