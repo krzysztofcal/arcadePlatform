@@ -671,7 +671,12 @@
       try {
         var data = await apiPost(QUICK_SEAT_URL, payload);
         if (data && data.ok === true && data.tableId){
-          window.location.href = '/poker/table.html?tableId=' + encodeURIComponent(data.tableId);
+          var nextUrl = '/poker/table.html?tableId=' + encodeURIComponent(data.tableId);
+          if (data.seatNo != null){
+            nextUrl += '&seatNo=' + encodeURIComponent(data.seatNo);
+          }
+          nextUrl += '&autoJoin=1';
+          window.location.href = nextUrl;
           return;
         }
         setError(errorEl, t('pokerErrNoTableId', 'Table created but no ID returned'));
@@ -857,6 +862,9 @@
     var heartbeatPendingRetries = 0;
     var heartbeatInFlight = false;
     var isSeated = false;
+    var suggestedSeatNoParam = parseInt(params.get('seatNo'), 10);
+    var shouldAutoJoin = params.get('autoJoin') === '1';
+    var autoJoinAttempted = false;
     var turnTimerInterval = null;
     var HEARTBEAT_PENDING_MAX_RETRIES = 8;
     var realtimeSub = null;
@@ -1424,6 +1432,30 @@
       });
     }
 
+    function maybeAutoJoin(){
+      if (!shouldAutoJoin || autoJoinAttempted) return;
+      if (joinPending || leavePending || startHandPending || actPending) return;
+      if (!seatNoInput) return;
+      if (isSeated) return;
+      if (Number.isInteger(suggestedSeatNoParam)){
+        var maxSeat = Math.max(0, tableMaxPlayers - 1);
+        var candidateSeat = suggestedSeatNoParam;
+        if (candidateSeat < 0) candidateSeat = 0;
+        if (candidateSeat > maxSeat) candidateSeat = maxSeat;
+        seatNoInput.value = candidateSeat;
+      }
+      autoJoinAttempted = true;
+      joinTable().catch(function(err){
+        if (isAbortError(err)){
+          pauseJoinPending();
+          return;
+        }
+        clearJoinPending();
+        klog('poker_auto_join_error', { tableId: tableId, error: err && (err.message || err.code) ? err.message || err.code : 'unknown_error' });
+        setActionError('join', JOIN_URL, err && err.code ? err.code : 'request_failed', err && (err.message || err.code) ? err.message || err.code : t('pokerErrJoin', 'Failed to join'));
+      });
+    }
+
     async function loadTable(isPolling){
       setError(errorEl, null);
       try {
@@ -1436,6 +1468,9 @@
           startHeartbeat();
         } else {
           stopHeartbeat();
+        }
+        if (!isPolling){
+          maybeAutoJoin();
         }
         if (isPolling){ resetPollBackoff(); }
       } catch (err){

@@ -19,7 +19,6 @@ const makeHandler = ({ mode, queries }) =>
     extractBearerToken: () => "token",
     verifySupabaseJwt: async () => ({ valid: true, userId }),
     beginSql: async (fn) => {
-      const tracker = { selectedAny: false, insertedSeat: false };
       return fn({
         unsafe: async (query, params) => {
           queries.push({ query: String(query), params });
@@ -33,24 +32,14 @@ const makeHandler = ({ mode, queries }) =>
             }
             if (mode === "any_open") {
               if (requireHuman) return [];
-              tracker.selectedAny = true;
               return [{ id: "table-any", max_players: 6 }];
             }
             return [];
           }
 
-          if (text.includes("where table_id = $1 and user_id = $2 limit 1")) {
-            return [];
-          }
-
-          if (text.includes("where table_id = $1 and status = 'active' order by seat_no asc for update")) {
+          if (text.includes("where table_id = $1 and status = 'active' order by seat_no asc")) {
             if (mode === "prefer_humans") return [{ seat_no: 1 }, { seat_no: 2 }];
             if (mode === "any_open") return [{ seat_no: 1 }];
-            return [];
-          }
-
-          if (text.includes("insert into public.poker_seats")) {
-            tracker.insertedSeat = true;
             return [];
           }
 
@@ -77,11 +66,15 @@ const run = async () => {
     const body = JSON.parse(res.body);
     assert.equal(body.ok, true);
     assert.equal(body.tableId, "table-human");
-    assert.equal(body.seatNo, 3);
-    assert.ok(body.seatNo >= 1 && body.seatNo <= 6);
+    assert.equal(body.seatNo, 2);
+    assert.ok(body.seatNo >= 0 && body.seatNo <= 5);
     assert.ok(
       queries.some((entry) => entry.query.toLowerCase().includes("coalesce(hs.is_bot, false) = false")),
       "quick seat should prefer tables with at least one human"
+    );
+    assert.ok(
+      queries.some((entry) => entry.query.toLowerCase().includes("where table_id = $1 and status = 'active' order by seat_no asc")),
+      "quick seat should read active seats to suggest a seat"
     );
   }
 
@@ -93,8 +86,12 @@ const run = async () => {
     const body = JSON.parse(res.body);
     assert.equal(body.ok, true);
     assert.equal(body.tableId, "table-any");
-    assert.equal(body.seatNo, 2);
-    assert.ok(body.seatNo >= 1 && body.seatNo <= 6);
+    assert.equal(body.seatNo, 1);
+    assert.ok(body.seatNo >= 0 && body.seatNo <= 5);
+    assert.ok(
+      queries.some((entry) => entry.query.toLowerCase().includes("where table_id = $1 and status = 'active' order by seat_no asc")),
+      "quick seat should read active seats before returning a recommendation"
+    );
   }
 
   {
@@ -105,7 +102,7 @@ const run = async () => {
     const body = JSON.parse(res.body);
     assert.equal(body.ok, true);
     assert.equal(body.tableId, "table-new");
-    assert.equal(body.seatNo, 1);
+    assert.equal(body.seatNo, 0);
     assert.ok(
       queries.some((entry) => entry.query.toLowerCase().includes("insert into public.poker_tables")),
       "quick seat should create a table when none is available"
@@ -119,8 +116,8 @@ const run = async () => {
     const storedState = normalizeJsonState(stateInsertCall?.params?.[1]);
     assert.equal(isStateStorageValid(storedState), true, "quick seat create path should persist a storage-valid init state");
     assert.ok(
-      queries.some((entry) => entry.query.toLowerCase().includes("insert into public.poker_seats")),
-      "quick seat should seat the user after creating table"
+      !queries.some((entry) => entry.query.toLowerCase().includes("insert into public.poker_seats")),
+      "quick seat should not seat the user directly"
     );
   }
 };

@@ -38,20 +38,11 @@ const pickSeatNo = (rows, maxPlayers) => {
   return null;
 };
 
-const createAndSeat = async (tx, { userId, maxPlayers, stakesJson }) => {
+const createAndRecommend = async (tx, { userId, maxPlayers, stakesJson }) => {
   const created = await createPokerTableWithState(tx, { userId, maxPlayers, stakesJson });
   const tableId = created.tableId;
-  const seatNo = 1;
-  await tx.unsafe(
-    `
-insert into public.poker_seats (table_id, user_id, seat_no, status, joined_at, last_seen_at)
-values ($1, $2, $3, 'ACTIVE', now(), now());
-    `,
-    [tableId, userId, seatNo]
-  );
-  await tx.unsafe("update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1;", [tableId]);
-
-  return { tableId, seatNo, strategy: "create" };
+  const seatNoUi = 0;
+  return { tableId, seatNo: seatNoUi, strategy: "create" };
 };
 
 const selectCandidate = async (tx, { stakesJson, maxPlayers, requireHuman }) => {
@@ -78,59 +69,17 @@ for update of t skip locked;
   );
 };
 
-const seatUserAtTable = async (tx, { tableId, userId, maxPlayers, allowCreateFallback, createPayload }) => {
-  const existingRows = await tx.unsafe(
-    "select seat_no from public.poker_seats where table_id = $1 and user_id = $2 limit 1;",
-    [tableId, userId]
-  );
-  const existingSeatNo = existingRows?.[0]?.seat_no;
-  if (Number.isInteger(existingSeatNo)) {
-    await tx.unsafe(
-      "update public.poker_seats set status = 'ACTIVE', last_seen_at = now() where table_id = $1 and user_id = $2;",
-      [tableId, userId]
-    );
-    await tx.unsafe("update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1;", [tableId]);
-    return { tableId, seatNo: existingSeatNo };
-  }
-
+const recommendSeatAtTable = async (tx, { tableId, maxPlayers, allowCreateFallback, createPayload }) => {
   const activeSeatRows = await tx.unsafe(
-    "select seat_no from public.poker_seats where table_id = $1 and status = 'ACTIVE' order by seat_no asc for update;",
+    "select seat_no from public.poker_seats where table_id = $1 and status = 'ACTIVE' order by seat_no asc;",
     [tableId]
   );
-  let seatNo = pickSeatNo(activeSeatRows, maxPlayers);
-  if (seatNo == null) {
-    if (allowCreateFallback) return createAndSeat(tx, createPayload);
+  const seatNoDb = pickSeatNo(activeSeatRows, maxPlayers);
+  if (seatNoDb == null) {
+    if (allowCreateFallback) return createAndRecommend(tx, createPayload);
     return null;
   }
-
-  const tryInsertSeat = async (candidateSeatNo) => {
-    await tx.unsafe(
-      `
-insert into public.poker_seats (table_id, user_id, seat_no, status, joined_at, last_seen_at)
-values ($1, $2, $3, 'ACTIVE', now(), now());
-      `,
-      [tableId, userId, candidateSeatNo]
-    );
-    await tx.unsafe("update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1;", [tableId]);
-    return { tableId, seatNo: candidateSeatNo };
-  };
-
-  try {
-    return await tryInsertSeat(seatNo);
-  } catch (error) {
-    const isUnique = error?.code === "23505";
-    if (!isUnique) throw error;
-    const retryRows = await tx.unsafe(
-      "select seat_no from public.poker_seats where table_id = $1 and status = 'ACTIVE' order by seat_no asc for update;",
-      [tableId]
-    );
-    seatNo = pickSeatNo(retryRows, maxPlayers);
-    if (seatNo == null) {
-      if (allowCreateFallback) return createAndSeat(tx, createPayload);
-      return null;
-    }
-    return tryInsertSeat(seatNo);
-  }
+  return { tableId, seatNo: seatNoDb - 1 };
 };
 
 export async function handler(event) {
@@ -183,29 +132,27 @@ export async function handler(event) {
 
       const preferredRows = await selectCandidate(tx, { stakesJson, maxPlayers, requireHuman: true });
       if (preferredRows?.[0]?.id) {
-        const seated = await seatUserAtTable(tx, {
+        const recommendation = await recommendSeatAtTable(tx, {
           tableId: preferredRows[0].id,
-          userId: auth.userId,
           maxPlayers,
           allowCreateFallback: true,
           createPayload,
         });
-        if (seated) return { ...seated, strategy: "prefer_humans" };
+        if (recommendation) return { ...recommendation, strategy: "prefer_humans" };
       }
 
       const anyRows = await selectCandidate(tx, { stakesJson, maxPlayers, requireHuman: false });
       if (anyRows?.[0]?.id) {
-        const seated = await seatUserAtTable(tx, {
+        const recommendation = await recommendSeatAtTable(tx, {
           tableId: anyRows[0].id,
-          userId: auth.userId,
           maxPlayers,
           allowCreateFallback: true,
           createPayload,
         });
-        if (seated) return { ...seated, strategy: "any_open" };
+        if (recommendation) return { ...recommendation, strategy: "any_open" };
       }
 
-      return createAndSeat(tx, createPayload);
+      return createAndRecommend(tx, createPayload);
     });
 
     klog("poker_quick_seat_ok", { tableId: result.tableId, seatNo: result.seatNo, userId: auth.userId, strategy: result.strategy });
