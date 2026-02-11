@@ -110,6 +110,10 @@ const run = async () => {
       "quick seat should create a table when none is available"
     );
     assert.ok(
+      queries.some((entry) => entry.query.toLowerCase().includes("insert into public.poker_state")),
+      "quick seat should initialize canonical poker_state when creating table"
+    );
+    assert.ok(
       queries.some((entry) => entry.query.toLowerCase().includes("insert into public.poker_seats")),
       "quick seat should seat the user after creating table"
     );

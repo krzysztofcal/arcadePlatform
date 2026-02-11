@@ -1,5 +1,6 @@
 import { baseHeaders, beginSql, corsHeaders, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
 import { formatStakes, parseStakes } from "./_shared/poker-stakes.mjs";
+import { createPokerTableWithState } from "./_shared/poker-table-init.mjs";
 
 const parseBody = (body) => {
   if (!body) return { ok: true, value: {} };
@@ -69,45 +70,8 @@ export async function handler(event) {
   let tableId = null;
   try {
     await beginSql(async (tx) => {
-      const tableRows = await tx.unsafe(
-        `
-insert into public.poker_tables (stakes, max_players, status, created_by, updated_at, last_activity_at)
-values ($1::jsonb, $2, 'OPEN', $3, now(), now())
-returning id;
-        `,
-        [stakesJson, maxPlayers, auth.userId]
-      );
-      tableId = tableRows?.[0]?.id || null;
-      if (!tableId) {
-        throw new Error("poker_table_insert_failed");
-      }
-
-      const state = { tableId, seats: [], stacks: {}, pot: 0, phase: "INIT" };
-      await tx.unsafe(
-        "insert into public.poker_state (table_id, version, state) values ($1, 0, $2::jsonb);",
-        [tableId, JSON.stringify(state)]
-      );
-
-      const escrowSystemKey = `POKER_TABLE:${tableId}`;
-      const escrowRows = await tx.unsafe(
-        `
-with inserted as (
-  insert into public.chips_accounts (account_type, system_key, status)
-  values ('ESCROW', $1, 'active')
-  on conflict (system_key) do nothing
-  returning id
-)
-select id from inserted
-union all
-select id from public.chips_accounts where system_key = $1
-limit 1;
-        `,
-        [escrowSystemKey]
-      );
-      const escrowId = escrowRows?.[0]?.id || null;
-      if (!escrowId) {
-        throw new Error("poker_escrow_missing");
-      }
+      const created = await createPokerTableWithState(tx, { userId: auth.userId, maxPlayers, stakesJson });
+      tableId = created.tableId;
     });
   } catch (error) {
     klog("poker_create_table_error", { message: error?.message || "unknown_error" });
