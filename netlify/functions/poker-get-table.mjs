@@ -192,11 +192,11 @@ export async function handler(event) {
       }
 
       const seatRows = await tx.unsafe(
-        "select user_id, seat_no, status, last_seen_at, joined_at from public.poker_seats where table_id = $1 order by seat_no asc;",
+        "select user_id, seat_no, status, last_seen_at, joined_at, is_bot from public.poker_seats where table_id = $1 order by seat_no asc;",
         [tableId]
       );
       const activeSeatRows = await tx.unsafe(
-        "select user_id, seat_no from public.poker_seats where table_id = $1 and status = 'ACTIVE' order by seat_no asc;",
+        "select user_id, seat_no from public.poker_seats where table_id = $1 and status = 'ACTIVE' and is_bot = false order by seat_no asc;",
         [tableId]
       );
 
@@ -221,6 +221,7 @@ export async function handler(event) {
             status: seat.status,
             lastSeenAt: seat.last_seen_at,
             joinedAt: seat.joined_at,
+            isBot: !!seat.is_bot,
           }))
         : [];
 
@@ -246,7 +247,7 @@ export async function handler(event) {
 
         const seatRowsActiveUserIds = Array.isArray(seatRows)
           ? seatRows
-              .filter((row) => row?.status === "ACTIVE")
+              .filter((row) => row?.status === "ACTIVE" && !row?.is_bot)
               .map((row) => row?.user_id)
               .filter(Boolean)
           : [];
