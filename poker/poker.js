@@ -2044,17 +2044,22 @@
       var propagateError = !!(options && options.propagateError);
       try {
         var resolved = resolveRequestId(pendingJoinRequestId, requestIdOverride);
+        var didSetPending = false;
         if (resolved.nextPending){
           pendingJoinRequestId = normalizeRequestId(resolved.nextPending);
           pendingJoinRetries = 0;
           pendingJoinStartedAt = null;
+          didSetPending = true;
         } else if (!pendingJoinRequestId) {
           pendingJoinRequestId = normalizeRequestId(resolved.requestId);
+          didSetPending = true;
         }
         if (!hasAutoSeatOption && requestIdOverride && pendingJoinRequestId && requestIdOverride === pendingJoinRequestId){
           wantAutoSeat = !!pendingJoinAutoSeat;
         }
-        pendingJoinAutoSeat = !!wantAutoSeat;
+        if (didSetPending){
+          pendingJoinAutoSeat = !!wantAutoSeat;
+        }
         var joinRequestId = normalizeRequestId(resolved.requestId);
         var joinPayload = {
           tableId: tableId,
