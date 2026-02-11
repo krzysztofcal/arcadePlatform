@@ -1446,7 +1446,7 @@
       for (var i = 0; i < attempts; i++){
         var candidateSeat = startSeat + i;
         if (candidateSeat > maxUi) candidateSeat = candidateSeat - (maxUi + 1);
-        seatNoInput.value = candidateSeat + 1;
+        seatNoInput.value = candidateSeat;
         try {
           await joinTable(null, { propagateError: true });
           return;
@@ -1826,14 +1826,13 @@
     }
 
     async function joinTable(requestIdOverride, options){
-      var seatDisplay = parseInt(seatNoInput ? seatNoInput.value : 1, 10);
+      var seatNo = parseInt(seatNoInput ? seatNoInput.value : 0, 10);
       var buyIn = parseInt(buyInInput ? buyInInput.value : 100, 10) || 100;
-      if (isNaN(seatDisplay)) seatDisplay = 1;
-      var maxDisplay = Math.max(1, tableMaxPlayers);
-      if (seatDisplay < 1) seatDisplay = 1;
-      if (seatDisplay > maxDisplay) seatDisplay = maxDisplay;
-      if (seatNoInput) seatNoInput.value = seatDisplay;
-      var seatNoUi = seatDisplay - 1;
+      if (isNaN(seatNo)) seatNo = 0;
+      var maxSeatNo = Math.max(0, tableMaxPlayers - 1);
+      if (seatNo < 0) seatNo = 0;
+      if (seatNo > maxSeatNo) seatNo = maxSeatNo;
+      if (seatNoInput) seatNoInput.value = seatNo;
       setPendingState('join', true);
       var propagateError = !!(options && options.propagateError);
       try {
@@ -1848,7 +1847,7 @@
         var joinRequestId = normalizeRequestId(resolved.requestId);
         var joinResult = await apiPost(JOIN_URL, {
           tableId: tableId,
-          seatNo: seatNoUi,
+          seatNo: seatNo,
           buyIn: buyIn,
           requestId: joinRequestId
         });
