@@ -2,6 +2,8 @@ import { baseHeaders, beginSql, corsHeaders, extractBearerToken, klog, verifySup
 import { formatStakes, parseStakes } from "./_shared/poker-stakes.mjs";
 import { createPokerTableWithState } from "./_shared/poker-table-init.mjs";
 
+const mergeHeaders = (next) => ({ ...baseHeaders(), ...(next || {}) });
+
 const parseBody = (body) => {
   if (!body) return { ok: true, value: {} };
   try {
@@ -33,37 +35,37 @@ export async function handler(event) {
     };
   }
   if (event.httpMethod === "OPTIONS") {
-    return { statusCode: 204, headers: cors, body: "" };
+    return { statusCode: 204, headers: mergeHeaders(cors), body: "" };
   }
   if (event.httpMethod !== "POST") {
-    return { statusCode: 405, headers: cors, body: JSON.stringify({ error: "method_not_allowed" }) };
+    return { statusCode: 405, headers: mergeHeaders(cors), body: JSON.stringify({ error: "method_not_allowed" }) };
   }
 
   const parsed = parseBody(event.body);
   if (!parsed.ok) {
-    return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "invalid_json" }) };
+    return { statusCode: 400, headers: mergeHeaders(cors), body: JSON.stringify({ error: "invalid_json" }) };
   }
 
   const payload = parsed.value ?? {};
   if (payload && !isPlainObject(payload)) {
-    return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "invalid_payload" }) };
+    return { statusCode: 400, headers: mergeHeaders(cors), body: JSON.stringify({ error: "invalid_payload" }) };
   }
 
   const maxPlayers = parseMaxPlayers(payload?.maxPlayers);
   if (maxPlayers == null) {
-    return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "invalid_max_players" }) };
+    return { statusCode: 400, headers: mergeHeaders(cors), body: JSON.stringify({ error: "invalid_max_players" }) };
   }
 
   const token = extractBearerToken(event.headers);
   const auth = await verifySupabaseJwt(token);
   if (!auth.valid || !auth.userId) {
-    return { statusCode: 401, headers: cors, body: JSON.stringify({ error: "unauthorized", reason: auth.reason }) };
+    return { statusCode: 401, headers: mergeHeaders(cors), body: JSON.stringify({ error: "unauthorized", reason: auth.reason }) };
   }
 
   const stakesParsed = parseStakes(payload?.stakes);
   if (!stakesParsed.ok) {
     klog("poker_create_table_invalid_stakes", { reason: stakesParsed.details?.reason || "stakes_invalid" });
-    return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "invalid_stakes" }) };
+    return { statusCode: 400, headers: mergeHeaders(cors), body: JSON.stringify({ error: "invalid_stakes" }) };
   }
   const stakesJson = formatStakes(stakesParsed.value);
 
@@ -75,13 +77,13 @@ export async function handler(event) {
     });
   } catch (error) {
     klog("poker_create_table_error", { message: error?.message || "unknown_error" });
-    return { statusCode: 500, headers: cors, body: JSON.stringify({ error: "server_error" }) };
+    return { statusCode: 500, headers: mergeHeaders(cors), body: JSON.stringify({ error: "server_error" }) };
   }
 
   const escrowSystemKey = `POKER_TABLE:${tableId}`;
   return {
     statusCode: 200,
-    headers: cors,
+    headers: mergeHeaders(cors),
     body: JSON.stringify({ tableId, escrowSystemKey }),
   };
 }

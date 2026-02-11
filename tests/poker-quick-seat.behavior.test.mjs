@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { loadPokerHandler } from "./helpers/poker-test-helpers.mjs";
+import { isStateStorageValid, normalizeJsonState } from "../netlify/functions/_shared/poker-state-utils.mjs";
 
 const userId = "user-quick";
 
@@ -113,6 +114,10 @@ const run = async () => {
       queries.some((entry) => entry.query.toLowerCase().includes("insert into public.poker_state")),
       "quick seat should initialize canonical poker_state when creating table"
     );
+    const stateInsertCall = queries.find((entry) => entry.query.toLowerCase().includes("insert into public.poker_state"));
+    assert.ok(stateInsertCall, "quick seat create path should insert poker_state");
+    const storedState = normalizeJsonState(stateInsertCall?.params?.[1]);
+    assert.equal(isStateStorageValid(storedState), true, "quick seat create path should persist a storage-valid init state");
     assert.ok(
       queries.some((entry) => entry.query.toLowerCase().includes("insert into public.poker_seats")),
       "quick seat should seat the user after creating table"

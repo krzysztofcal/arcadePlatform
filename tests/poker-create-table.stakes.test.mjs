@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { loadPokerHandler } from "./helpers/poker-test-helpers.mjs";
+import { isStateStorageValid, normalizeJsonState } from "../netlify/functions/_shared/poker-state-utils.mjs";
 
 const makeHandler = (queries, options = {}) =>
   loadPokerHandler("netlify/functions/poker-create-table.mjs", {
@@ -70,6 +71,10 @@ const runSlashStakes = async () => {
   const insertCall = queries.find((entry) => entry.query.toLowerCase().includes("insert into public.poker_tables"));
   assert.ok(insertCall, "expected insert into poker_tables");
   assert.deepEqual(JSON.parse(insertCall.params?.[0]), { sb: 1, bb: 2 });
+  const stateInsertCall = queries.find((entry) => entry.query.toLowerCase().includes("insert into public.poker_state"));
+  assert.ok(stateInsertCall, "expected insert into poker_state");
+  const storedState = normalizeJsonState(stateInsertCall?.params?.[1]);
+  assert.equal(isStateStorageValid(storedState), true, "create-table should persist a storage-valid init state");
 };
 
 await runMissingStakes();
