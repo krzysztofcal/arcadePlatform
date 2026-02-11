@@ -790,6 +790,7 @@
     var joinStatusEl = document.getElementById('pokerJoinStatus');
     var leaveStatusEl = document.getElementById('pokerLeaveStatus');
     var seatNoInput = document.getElementById('pokerSeatNo');
+    applySeatInputBounds();
     var buyInInput = document.getElementById('pokerBuyIn');
     var yourStackEl = document.getElementById('pokerYourStack');
     var potEl = document.getElementById('pokerPot');
@@ -868,8 +869,6 @@
     var turnTimerInterval = null;
     var HEARTBEAT_PENDING_MAX_RETRIES = 8;
     var realtimeSub = null;
-
-    applySeatInputBounds();
 
     if (joinBtn){
       klog('poker_join_bind', { found: true, selector: joinSelector, page: 'table' });
