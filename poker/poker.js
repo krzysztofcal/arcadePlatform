@@ -671,7 +671,12 @@
       try {
         var data = await apiPost(QUICK_SEAT_URL, payload);
         if (data && data.ok === true && data.tableId){
-          window.location.href = '/poker/table.html?tableId=' + encodeURIComponent(data.tableId);
+          var nextUrl = '/poker/table.html?tableId=' + encodeURIComponent(data.tableId);
+          if (data.seatNo != null){
+            nextUrl += '&seatNo=' + encodeURIComponent(data.seatNo);
+          }
+          nextUrl += '&autoJoin=1';
+          window.location.href = nextUrl;
           return;
         }
         setError(errorEl, t('pokerErrNoTableId', 'Table created but no ID returned'));
@@ -857,6 +862,9 @@
     var heartbeatPendingRetries = 0;
     var heartbeatInFlight = false;
     var isSeated = false;
+    var suggestedSeatNoParam = parseInt(params.get('seatNo'), 10);
+    var shouldAutoJoin = params.get('autoJoin') === '1';
+    var autoJoinAttempted = false;
     var turnTimerInterval = null;
     var HEARTBEAT_PENDING_MAX_RETRIES = 8;
     var realtimeSub = null;
@@ -1424,6 +1432,55 @@
       });
     }
 
+    function isSeatTakenError(err){
+      var code = err && (err.code || err.error || err.message);
+      return code === 'seat_taken' || code === 'duplicate_seat' || code === 'conflict' || code === '23505';
+    }
+
+    async function autoJoinWithRetries(){
+      var maxUi = Math.max(0, tableMaxPlayers - 1);
+      var startSeat = Number.isInteger(suggestedSeatNoParam) ? suggestedSeatNoParam : 0;
+      if (startSeat < 0) startSeat = 0;
+      if (startSeat > maxUi) startSeat = maxUi;
+      var attempts = Math.min(3, tableMaxPlayers);
+      for (var i = 0; i < attempts; i++){
+        var candidateSeat = startSeat + i;
+        if (candidateSeat > maxUi) candidateSeat = candidateSeat - (maxUi + 1);
+        seatNoInput.value = candidateSeat + 1;
+        try {
+          await joinTable(null, { propagateError: true });
+          return;
+        } catch (err){
+          if (isAbortError(err)){
+            pauseJoinPending();
+            return;
+          }
+          if (!isSeatTakenError(err)) throw err;
+        }
+      }
+      var seatErr = new Error(t('pokerErrSeatTaken', 'Seat was taken. Please try again.'));
+      seatErr.code = 'seat_taken';
+      throw seatErr;
+    }
+
+    function maybeAutoJoin(){
+      if (!shouldAutoJoin || autoJoinAttempted) return;
+      if (joinPending || leavePending || startHandPending || actPending) return;
+      if (!seatNoInput) return;
+      if (!Number.isInteger(tableMaxPlayers) || tableMaxPlayers < 2) return;
+      if (isSeated) return;
+      autoJoinAttempted = true;
+      autoJoinWithRetries().catch(function(err){
+        if (isAbortError(err)){
+          pauseJoinPending();
+          return;
+        }
+        clearJoinPending();
+        klog('poker_auto_join_error', { tableId: tableId, error: err && (err.message || err.code) ? err.message || err.code : 'unknown_error' });
+        setActionError('join', JOIN_URL, err && err.code ? err.code : 'request_failed', err && (err.message || err.code) ? err.message || err.code : t('pokerErrJoin', 'Failed to join'));
+      });
+    }
+
     async function loadTable(isPolling){
       setError(errorEl, null);
       try {
@@ -1437,6 +1494,7 @@
         } else {
           stopHeartbeat();
         }
+        maybeAutoJoin();
         if (isPolling){ resetPollBackoff(); }
       } catch (err){
         if (isAuthError(err)){
@@ -1767,15 +1825,17 @@
       await sendAct(pendingActType, pendingActRequestId);
     }
 
-    async function joinTable(requestIdOverride){
-      var seatNo = parseInt(seatNoInput ? seatNoInput.value : 0, 10);
+    async function joinTable(requestIdOverride, options){
+      var seatDisplay = parseInt(seatNoInput ? seatNoInput.value : 1, 10);
       var buyIn = parseInt(buyInInput ? buyInInput.value : 100, 10) || 100;
-      if (isNaN(seatNo)) seatNo = 0;
-      var maxSeat = Math.max(0, tableMaxPlayers - 1);
-      if (seatNo < 0) seatNo = 0;
-      if (seatNo > maxSeat) seatNo = maxSeat;
-      if (seatNoInput) seatNoInput.value = seatNo;
+      if (isNaN(seatDisplay)) seatDisplay = 1;
+      var maxDisplay = Math.max(1, tableMaxPlayers);
+      if (seatDisplay < 1) seatDisplay = 1;
+      if (seatDisplay > maxDisplay) seatDisplay = maxDisplay;
+      if (seatNoInput) seatNoInput.value = seatDisplay;
+      var seatNoUi = seatDisplay - 1;
       setPendingState('join', true);
+      var propagateError = !!(options && options.propagateError);
       try {
         var resolved = resolveRequestId(pendingJoinRequestId, requestIdOverride);
         if (resolved.nextPending){
@@ -1788,7 +1848,7 @@
         var joinRequestId = normalizeRequestId(resolved.requestId);
         var joinResult = await apiPost(JOIN_URL, {
           tableId: tableId,
-          seatNo: seatNo,
+          seatNo: seatNoUi,
           buyIn: buyIn,
           requestId: joinRequestId
         });
@@ -1798,7 +1858,10 @@
         }
         if (joinResult && joinResult.ok === false){
           clearJoinPending();
-          setActionError('join', JOIN_URL, joinResult.error || 'request_failed', t('pokerErrJoin', 'Failed to join'));
+          var joinErr = new Error(joinResult.error || 'request_failed');
+          joinErr.code = joinResult.error || 'request_failed';
+          setActionError('join', JOIN_URL, joinErr.code, t('pokerErrJoin', 'Failed to join'));
+          if (propagateError) throw joinErr;
           return;
         }
         clearJoinPending();
@@ -1825,6 +1888,7 @@
         clearJoinPending();
         klog('poker_join_error', { tableId: tableId, error: err.message || err.code });
         setActionError('join', JOIN_URL, err.code || 'request_failed', err.message || t('pokerErrJoin', 'Failed to join'));
+        if (propagateError) throw err;
       }
     }
 
