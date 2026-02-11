@@ -72,8 +72,7 @@ where t.status = 'OPEN'
       and coalesce(hs.is_bot, false) = false
   ))
 order by t.last_activity_at desc nulls last, t.created_at asc nulls last
-limit 1
-for update of t;
+limit 1;
     `,
     [maxPlayers, stakesJson, requireHuman]
   );

@@ -24,6 +24,8 @@ const makeHandler = ({ mode, queries }) =>
           queries.push({ query: String(query), params });
           const text = String(query).toLowerCase();
 
+          if (text.includes("pg_advisory_xact_lock")) return [];
+
           if (
             text.includes("from public.poker_tables t") &&
             text.includes("where t.status = 'open'") &&
