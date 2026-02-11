@@ -482,7 +482,7 @@ export async function handler(event) {
           const freshState = normalizeJsonState(freshStateRows?.[0]?.state);
           const freshPhase = freshState?.phase;
           if (freshPhase && freshPhase !== "INIT" && freshPhase !== "HAND_DONE") throw makeError(409, "already_in_hand");
-          throw makeError(409, "already_in_hand");
+          throw makeError(409, "state_conflict");
         }
         throw makeError(409, "state_invalid");
       }
