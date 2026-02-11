@@ -1,0 +1,131 @@
+import assert from "node:assert/strict";
+import { loadPokerHandler } from "./helpers/poker-test-helpers.mjs";
+import { isStateStorageValid, normalizeJsonState } from "../netlify/functions/_shared/poker-state-utils.mjs";
+
+const userId = "user-quick";
+
+const callQuickSeat = async (handler, body = {}) => {
+  return handler({
+    httpMethod: "POST",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    body: JSON.stringify(body),
+  });
+};
+
+const makeHandler = ({ mode, queries }) =>
+  loadPokerHandler("netlify/functions/poker-quick-seat.mjs", {
+    baseHeaders: () => ({}),
+    corsHeaders: () => ({ "access-control-allow-origin": "https://example.test" }),
+    extractBearerToken: () => "token",
+    verifySupabaseJwt: async () => ({ valid: true, userId }),
+    beginSql: async (fn) => {
+      const tracker = { selectedAny: false, insertedSeat: false };
+      return fn({
+        unsafe: async (query, params) => {
+          queries.push({ query: String(query), params });
+          const text = String(query).toLowerCase();
+
+          if (text.includes("from public.poker_tables t") && text.includes("$3::boolean = false")) {
+            const requireHuman = params?.[2] === true;
+            if (mode === "prefer_humans") {
+              if (requireHuman) return [{ id: "table-human", max_players: 6 }];
+              return [];
+            }
+            if (mode === "any_open") {
+              if (requireHuman) return [];
+              tracker.selectedAny = true;
+              return [{ id: "table-any", max_players: 6 }];
+            }
+            return [];
+          }
+
+          if (text.includes("where table_id = $1 and user_id = $2 limit 1")) {
+            return [];
+          }
+
+          if (text.includes("where table_id = $1 and status = 'active' order by seat_no asc for update")) {
+            if (mode === "prefer_humans") return [{ seat_no: 1 }, { seat_no: 2 }];
+            if (mode === "any_open") return [{ seat_no: 1 }];
+            return [];
+          }
+
+          if (text.includes("insert into public.poker_seats")) {
+            tracker.insertedSeat = true;
+            return [];
+          }
+
+          if (text.includes("insert into public.poker_tables")) {
+            return [{ id: "table-new" }];
+          }
+
+          if (text.includes("insert into public.poker_state")) return [];
+          if (text.includes("from public.chips_accounts")) return [{ id: "escrow-1" }];
+          if (text.includes("update public.poker_tables")) return [];
+          return [];
+        },
+      });
+    },
+    klog: () => {},
+  });
+
+const run = async () => {
+  {
+    const queries = [];
+    const handler = makeHandler({ mode: "prefer_humans", queries });
+    const res = await callQuickSeat(handler, { stakes: "1/2", maxPlayers: 6 });
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    assert.equal(body.ok, true);
+    assert.equal(body.tableId, "table-human");
+    assert.equal(body.seatNo, 3);
+    assert.ok(body.seatNo >= 1 && body.seatNo <= 6);
+    assert.ok(
+      queries.some((entry) => entry.query.toLowerCase().includes("coalesce(hs.is_bot, false) = false")),
+      "quick seat should prefer tables with at least one human"
+    );
+  }
+
+  {
+    const queries = [];
+    const handler = makeHandler({ mode: "any_open", queries });
+    const res = await callQuickSeat(handler, { stakes: "1/2", maxPlayers: 6 });
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    assert.equal(body.ok, true);
+    assert.equal(body.tableId, "table-any");
+    assert.equal(body.seatNo, 2);
+    assert.ok(body.seatNo >= 1 && body.seatNo <= 6);
+  }
+
+  {
+    const queries = [];
+    const handler = makeHandler({ mode: "create", queries });
+    const res = await callQuickSeat(handler, { stakes: "1/2", maxPlayers: 6 });
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    assert.equal(body.ok, true);
+    assert.equal(body.tableId, "table-new");
+    assert.equal(body.seatNo, 1);
+    assert.ok(
+      queries.some((entry) => entry.query.toLowerCase().includes("insert into public.poker_tables")),
+      "quick seat should create a table when none is available"
+    );
+    assert.ok(
+      queries.some((entry) => entry.query.toLowerCase().includes("insert into public.poker_state")),
+      "quick seat should initialize canonical poker_state when creating table"
+    );
+    const stateInsertCall = queries.find((entry) => entry.query.toLowerCase().includes("insert into public.poker_state"));
+    assert.ok(stateInsertCall, "quick seat create path should insert poker_state");
+    const storedState = normalizeJsonState(stateInsertCall?.params?.[1]);
+    assert.equal(isStateStorageValid(storedState), true, "quick seat create path should persist a storage-valid init state");
+    assert.ok(
+      queries.some((entry) => entry.query.toLowerCase().includes("insert into public.poker_seats")),
+      "quick seat should seat the user after creating table"
+    );
+  }
+};
+
+run().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});

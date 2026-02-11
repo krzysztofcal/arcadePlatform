@@ -1,5 +1,8 @@
 import { baseHeaders, beginSql, corsHeaders, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
 import { formatStakes, parseStakes } from "./_shared/poker-stakes.mjs";
+import { createPokerTableWithState } from "./_shared/poker-table-init.mjs";
+
+const mergeHeaders = (next) => ({ ...baseHeaders(), ...(next || {}) });
 
 const parseBody = (body) => {
   if (!body) return { ok: true, value: {} };
@@ -32,92 +35,55 @@ export async function handler(event) {
     };
   }
   if (event.httpMethod === "OPTIONS") {
-    return { statusCode: 204, headers: cors, body: "" };
+    return { statusCode: 204, headers: mergeHeaders(cors), body: "" };
   }
   if (event.httpMethod !== "POST") {
-    return { statusCode: 405, headers: cors, body: JSON.stringify({ error: "method_not_allowed" }) };
+    return { statusCode: 405, headers: mergeHeaders(cors), body: JSON.stringify({ error: "method_not_allowed" }) };
   }
 
   const parsed = parseBody(event.body);
   if (!parsed.ok) {
-    return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "invalid_json" }) };
+    return { statusCode: 400, headers: mergeHeaders(cors), body: JSON.stringify({ error: "invalid_json" }) };
   }
 
   const payload = parsed.value ?? {};
   if (payload && !isPlainObject(payload)) {
-    return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "invalid_payload" }) };
+    return { statusCode: 400, headers: mergeHeaders(cors), body: JSON.stringify({ error: "invalid_payload" }) };
   }
 
   const maxPlayers = parseMaxPlayers(payload?.maxPlayers);
   if (maxPlayers == null) {
-    return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "invalid_max_players" }) };
+    return { statusCode: 400, headers: mergeHeaders(cors), body: JSON.stringify({ error: "invalid_max_players" }) };
   }
 
   const token = extractBearerToken(event.headers);
   const auth = await verifySupabaseJwt(token);
   if (!auth.valid || !auth.userId) {
-    return { statusCode: 401, headers: cors, body: JSON.stringify({ error: "unauthorized", reason: auth.reason }) };
+    return { statusCode: 401, headers: mergeHeaders(cors), body: JSON.stringify({ error: "unauthorized", reason: auth.reason }) };
   }
 
   const stakesParsed = parseStakes(payload?.stakes);
   if (!stakesParsed.ok) {
     klog("poker_create_table_invalid_stakes", { reason: stakesParsed.details?.reason || "stakes_invalid" });
-    return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "invalid_stakes" }) };
+    return { statusCode: 400, headers: mergeHeaders(cors), body: JSON.stringify({ error: "invalid_stakes" }) };
   }
   const stakesJson = formatStakes(stakesParsed.value);
 
   let tableId = null;
   try {
     await beginSql(async (tx) => {
-      const tableRows = await tx.unsafe(
-        `
-insert into public.poker_tables (stakes, max_players, status, created_by, updated_at, last_activity_at)
-values ($1::jsonb, $2, 'OPEN', $3, now(), now())
-returning id;
-        `,
-        [stakesJson, maxPlayers, auth.userId]
-      );
-      tableId = tableRows?.[0]?.id || null;
-      if (!tableId) {
-        throw new Error("poker_table_insert_failed");
-      }
-
-      const state = { tableId, seats: [], stacks: {}, pot: 0, phase: "INIT" };
-      await tx.unsafe(
-        "insert into public.poker_state (table_id, version, state) values ($1, 0, $2::jsonb);",
-        [tableId, JSON.stringify(state)]
-      );
-
-      const escrowSystemKey = `POKER_TABLE:${tableId}`;
-      const escrowRows = await tx.unsafe(
-        `
-with inserted as (
-  insert into public.chips_accounts (account_type, system_key, status)
-  values ('ESCROW', $1, 'active')
-  on conflict (system_key) do nothing
-  returning id
-)
-select id from inserted
-union all
-select id from public.chips_accounts where system_key = $1
-limit 1;
-        `,
-        [escrowSystemKey]
-      );
-      const escrowId = escrowRows?.[0]?.id || null;
-      if (!escrowId) {
-        throw new Error("poker_escrow_missing");
-      }
+      const created = await createPokerTableWithState(tx, { userId: auth.userId, maxPlayers, stakesJson });
+      tableId = created.tableId;
     });
   } catch (error) {
     klog("poker_create_table_error", { message: error?.message || "unknown_error" });
-    return { statusCode: 500, headers: cors, body: JSON.stringify({ error: "server_error" }) };
+    return { statusCode: 500, headers: mergeHeaders(cors), body: JSON.stringify({ error: "server_error" }) };
   }
 
   const escrowSystemKey = `POKER_TABLE:${tableId}`;
   return {
     statusCode: 200,
-    headers: cors,
+    headers: mergeHeaders(cors),
     body: JSON.stringify({ tableId, escrowSystemKey }),
   };
 }

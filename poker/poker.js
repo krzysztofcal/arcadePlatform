@@ -3,6 +3,7 @@
 
   var LIST_URL = '/.netlify/functions/poker-list-tables';
   var CREATE_URL = '/.netlify/functions/poker-create-table';
+  var QUICK_SEAT_URL = '/.netlify/functions/poker-quick-seat';
   var GET_URL = '/.netlify/functions/poker-get-table';
   var JOIN_URL = '/.netlify/functions/poker-join';
   var LEAVE_URL = '/.netlify/functions/poker-leave';
@@ -553,6 +554,7 @@
     var lobbyContent = document.getElementById('pokerLobbyContent');
     var tableList = document.getElementById('pokerTableList');
     var refreshBtn = document.getElementById('pokerRefresh');
+    var quickSeatBtn = document.getElementById('pokerQuickSeat');
     var createBtn = document.getElementById('pokerCreate');
     var sbInput = document.getElementById('pokerSb');
     var bbInput = document.getElementById('pokerBb');
@@ -655,6 +657,40 @@
       });
     }
 
+
+    async function quickSeat(){
+      setError(errorEl, null);
+      var sb = parseInt(sbInput ? sbInput.value : 1, 10);
+      var bb = parseInt(bbInput ? bbInput.value : 2, 10);
+      var maxPlayers = parseInt(maxPlayersInput ? maxPlayersInput.value : 6, 10) || 6;
+      var payload = { maxPlayers: maxPlayers };
+      if (isFinite(sb) && isFinite(bb) && Math.floor(sb) === sb && Math.floor(bb) === bb && sb >= 0 && bb > 0 && sb < bb){
+        payload.stakes = { sb: sb, bb: bb };
+      }
+      setLoading(quickSeatBtn, true);
+      try {
+        var data = await apiPost(QUICK_SEAT_URL, payload);
+        if (data && data.ok === true && data.tableId){
+          window.location.href = '/poker/table.html?tableId=' + encodeURIComponent(data.tableId);
+          return;
+        }
+        setError(errorEl, t('pokerErrNoTableId', 'Table created but no ID returned'));
+      } catch (err){
+        if (isAuthError(err)){
+          handleAuthExpired({
+            authMsg: authMsg,
+            content: lobbyContent,
+            errorEl: errorEl,
+            onAuthExpired: startAuthWatch
+          });
+          return;
+        }
+        klog('poker_quick_seat_error', { error: err.message || err.code });
+        setError(errorEl, err.message || t('pokerErrJoin', 'Failed to join table'));
+      } finally {
+        setLoading(quickSeatBtn, false);
+      }
+    }
     async function createTable(){
       setError(errorEl, null);
       var sbRaw = sbInput ? sbInput.value : 1;
@@ -706,6 +742,9 @@
           }
         });
       });
+    }
+    if (quickSeatBtn){
+      quickSeatBtn.addEventListener('click', quickSeat);
     }
     if (createBtn){
       createBtn.addEventListener('click', createTable);

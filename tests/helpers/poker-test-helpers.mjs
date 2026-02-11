@@ -5,6 +5,7 @@ import { deletePokerRequest, ensurePokerRequest, storePokerRequestResult } from 
 import { formatStakes, parseStakes } from "../../netlify/functions/_shared/poker-stakes.mjs";
 import { clearMissedTurns } from "../../netlify/functions/_shared/poker-missed-turns.mjs";
 import { patchSitOutByUserId } from "../../netlify/functions/_shared/poker-sitout-flag.mjs";
+import { createPokerTableWithState } from "../../netlify/functions/_shared/poker-table-init.mjs";
 
 const root = process.cwd();
 
@@ -87,6 +88,7 @@ export const loadPokerHandler = (filePath, mocks) => {
     "formatStakes",
     "upgradeLegacyInitState",
     "upgradeLegacyInitStateWithSeats",
+    "createPokerTableWithState",
     "PRESENCE_TTL_SEC",
     "HEARTBEAT_INTERVAL_SEC",
     "storePokerRequestResult",
@@ -118,6 +120,7 @@ return handler;`
       deletePokerRequest,
       clearMissedTurns,
       patchSitOutByUserId,
+      createPokerTableWithState,
       ...mocks,
     };
     return factory(resolvedMocks, isValidTwoCards);
