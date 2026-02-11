@@ -68,6 +68,13 @@ const normalizeVersion = (value) => {
   return Number.isFinite(num) ? num : null;
 };
 
+const normalizeStateRow = (raw) => {
+  if (raw == null) return null;
+  if (typeof raw === "string") return normalizeJsonState(raw);
+  if (typeof raw === "object" && !Array.isArray(raw)) return raw;
+  return null;
+};
+
 const isHoleCardsTableMissing = (error) => {
   if (!error) return false;
   if (error.code === "42P01") return true;
@@ -479,8 +486,9 @@ export async function handler(event) {
         if (updateResult.reason === "conflict") {
           klog("poker_start_hand_conflict", { tableId, userId: auth.userId, expectedVersion });
           const freshStateRows = await tx.unsafe("select state from public.poker_state where table_id = $1 limit 1;", [tableId]);
-          const freshState = normalizeJsonState(freshStateRows?.[0]?.state);
-          const freshPhase = freshState?.phase;
+          const rawFreshState = freshStateRows?.[0]?.state ?? null;
+          const freshState = normalizeStateRow(rawFreshState);
+          const freshPhase = typeof freshState?.phase === "string" ? freshState.phase : null;
           if (freshPhase && freshPhase !== "INIT" && freshPhase !== "HAND_DONE") throw makeError(409, "already_in_hand");
           throw makeError(409, "state_conflict");
         }
