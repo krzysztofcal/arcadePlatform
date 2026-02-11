@@ -80,6 +80,12 @@
         logEvent('poker_rt_subscribe_error', { tableId: tableId, message: 'missing_table_id' });
         return;
       }
+      var hasWs = typeof window !== 'undefined' && typeof window.WebSocket === 'function';
+      if (!hasWs){
+        var wsErr = new Error('WebSocket not available');
+        wsErr.code = 'realtime_ws_missing';
+        throw wsErr;
+      }
       if (!window.supabaseClient){
         logOnceMissing();
         return;

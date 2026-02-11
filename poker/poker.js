@@ -921,6 +921,8 @@
     var turnTimerInterval = null;
     var HEARTBEAT_PENDING_MAX_RETRIES = 8;
     var realtimeSub = null;
+    var realtimeDisabled = false;
+    var realtimeUnavailableLogged = false;
 
     if (joinBtn){
       klog('poker_join_bind', { found: true, selector: joinSelector, page: 'table' });
@@ -951,7 +953,12 @@
             stopAuthWatch();
             loadTable(false);
             startPolling();
-            startRealtime();
+            try {
+              startRealtime();
+            } catch (_err){
+              startPolling();
+              loadTable(false);
+            }
           }
         });
       }, 3000);
@@ -1676,14 +1683,33 @@
     }
 
     function startRealtime(){
-      if (realtimeSub) return;
+      if (realtimeSub || realtimeDisabled) return;
       if (!tableId) return;
       if (!window.PokerRealtime || typeof window.PokerRealtime.subscribeToTableActions !== 'function') return;
-      realtimeSub = window.PokerRealtime.subscribeToTableActions({
-        tableId: tableId,
-        onEvent: handleRealtimeEvent,
-        klog: klog
-      });
+      try {
+        realtimeSub = window.PokerRealtime.subscribeToTableActions({
+          tableId: tableId,
+          onEvent: handleRealtimeEvent,
+          klog: klog
+        });
+      } catch (err){
+        realtimeSub = null;
+        realtimeDisabled = true;
+        if (!realtimeUnavailableLogged){
+          realtimeUnavailableLogged = true;
+          var errMessage = err && (err.message || err.code) ? err.message || err.code : 'unknown_error';
+          klog('poker_realtime_unavailable', {
+            message: errMessage,
+            code: err && err.code ? err.code : null,
+            userAgent: window.navigator && window.navigator.userAgent ? window.navigator.userAgent : null,
+            hasWebSocket: typeof window.WebSocket === 'function',
+            visibility: document.visibilityState,
+            tableId: tableId
+          });
+        }
+        startPolling();
+        loadTable(false);
+      }
     }
 
     function stopRealtime(){
@@ -2315,7 +2341,14 @@
         state.pollErrors = 0;
         startPolling();
         if (isSeated) startHeartbeat();
-        if (currentUserId) startRealtime();
+        if (currentUserId){
+          try {
+            startRealtime();
+          } catch (_err){
+            startPolling();
+            loadTable(false);
+          }
+        }
         if (pendingJoinRequestId) schedulePendingRetry('join', retryJoin);
         if (pendingLeaveRequestId) schedulePendingRetry('leave', retryLeave);
         if (pendingStartHandRequestId) scheduleDevPendingRetry('startHand', retryStartHand);
@@ -2478,7 +2511,12 @@
       if (authed){
         loadTable(false);
         startPolling();
-        startRealtime();
+        try {
+          startRealtime();
+        } catch (_err){
+          startPolling();
+          loadTable(false);
+        }
       }
     });
   }
