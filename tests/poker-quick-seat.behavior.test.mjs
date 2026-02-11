@@ -26,7 +26,7 @@ const makeHandler = ({ mode, queries }) =>
 
           if (text.includes("from public.poker_tables t") && text.includes("$3::boolean = false")) {
             const requireHuman = params?.[2] === true;
-            if (mode === "prefer_humans") {
+            if (mode === "prefer_humans" || mode === "already_seated") {
               if (requireHuman) return [{ id: "table-human", max_players: 6 }];
               return [];
             }
@@ -34,6 +34,11 @@ const makeHandler = ({ mode, queries }) =>
               if (requireHuman) return [];
               return [{ id: "table-any", max_players: 6 }];
             }
+            return [];
+          }
+
+          if (text.includes("where table_id = $1 and user_id = $2 limit 1")) {
+            if (mode === "already_seated") return [{ seat_no: 2 }];
             return [];
           }
 
@@ -99,6 +104,29 @@ const run = async () => {
     assert.ok(
       queries.some((entry) => entry.query.toLowerCase().includes("update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1")),
       "quick seat should bump table activity when recommending"
+    );
+  }
+
+  {
+    const queries = [];
+    const handler = makeHandler({ mode: "already_seated", queries });
+    const res = await callQuickSeat(handler, { stakes: "1/2", maxPlayers: 6 });
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    assert.equal(body.ok, true);
+    assert.equal(body.tableId, "table-human");
+    assert.equal(body.seatNo, 1);
+    assert.ok(
+      queries.some((entry) => entry.query.toLowerCase().includes("where table_id = $1 and user_id = $2 limit 1")),
+      "quick seat should check existing seat for idempotency"
+    );
+    assert.ok(
+      !queries.some((entry) => entry.query.toLowerCase().includes("where table_id = $1 and status = 'active' order by seat_no asc")),
+      "quick seat should return existing seat without scanning active seats"
+    );
+    assert.ok(
+      queries.some((entry) => entry.query.toLowerCase().includes("update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1")),
+      "quick seat should bump table activity when returning existing seat"
     );
   }
 

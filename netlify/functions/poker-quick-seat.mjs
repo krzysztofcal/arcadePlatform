@@ -69,7 +69,17 @@ for update of t skip locked;
   );
 };
 
-const recommendSeatAtTable = async (tx, { tableId, maxPlayers, allowCreateFallback, createPayload }) => {
+const recommendSeatAtTable = async (tx, { tableId, userId, maxPlayers, allowCreateFallback, createPayload }) => {
+  const existingSeatRows = await tx.unsafe(
+    "select seat_no from public.poker_seats where table_id = $1 and user_id = $2 limit 1;",
+    [tableId, userId]
+  );
+  const existingSeatNoDb = existingSeatRows?.[0]?.seat_no;
+  if (Number.isInteger(existingSeatNoDb)) {
+    await tx.unsafe("update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1;", [tableId]);
+    return { tableId, seatNo: existingSeatNoDb - 1 };
+  }
+
   const activeSeatRows = await tx.unsafe(
     "select seat_no from public.poker_seats where table_id = $1 and status = 'ACTIVE' order by seat_no asc;",
     [tableId]
@@ -135,6 +145,7 @@ export async function handler(event) {
       if (preferredRows?.[0]?.id) {
         const recommendation = await recommendSeatAtTable(tx, {
           tableId: preferredRows[0].id,
+          userId: auth.userId,
           maxPlayers,
           allowCreateFallback: true,
           createPayload,
@@ -146,6 +157,7 @@ export async function handler(event) {
       if (anyRows?.[0]?.id) {
         const recommendation = await recommendSeatAtTable(tx, {
           tableId: anyRows[0].id,
+          userId: auth.userId,
           maxPlayers,
           allowCreateFallback: true,
           createPayload,
