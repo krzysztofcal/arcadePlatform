@@ -149,7 +149,7 @@ export async function handler(event) {
   try {
     const result = await beginSql(async (tx) => {
       const createPayload = { userId: auth.userId, maxPlayers, stakesJson };
-      const matchKey = `quickseat:${maxPlayers}:${stakesJson}`;
+      const matchKey = `quickseat:${maxPlayers}:${stakesParsed.value.sb}:${stakesParsed.value.bb}`;
 
       klog("poker_quick_seat_lock", { matchKey, maxPlayers, stakesJson });
       await tx.unsafe("select pg_advisory_xact_lock(hashtext($1));", [matchKey]);
