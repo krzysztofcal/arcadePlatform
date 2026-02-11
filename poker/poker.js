@@ -201,8 +201,40 @@
     return n;
   }
 
+  function normalizeDeadlineMs(deadline){
+    if (deadline == null) return null;
+    var num = Number(deadline);
+    if (!isFinite(num) || num <= 0) return null;
+    if (num < 5e10){
+      return num * 1000;
+    }
+    return num;
+  }
+
+  function computeRemainingTurnSeconds(deadline, nowMs){
+    var deadlineMs = normalizeDeadlineMs(deadline);
+    if (!deadlineMs) return 0;
+    var now = Number(nowMs);
+    if (!isFinite(now)) now = Date.now();
+    return Math.max(0, Math.ceil((deadlineMs - now) / 1000));
+  }
+
+  function getConstraintsFromResponse(data){
+    if (data && isPlainObject(data.actionConstraints)) return data.actionConstraints;
+    var gameState = data && data.state && data.state.state;
+    if (gameState && isPlainObject(gameState.actionConstraints)) return gameState.actionConstraints;
+    return null;
+  }
+
+  function getLegalActionsFromResponse(data){
+    if (data && Array.isArray(data.legalActions)) return data.legalActions;
+    var gameState = data && data.state && data.state.state;
+    if (gameState && Array.isArray(gameState.legalActions)) return gameState.legalActions;
+    return [];
+  }
+
   function getSafeConstraints(data){
-    var constraints = data && isPlainObject(data.actionConstraints) ? data.actionConstraints : null;
+    var constraints = getConstraintsFromResponse(data);
     return {
       toCall: toFiniteOrNull(constraints ? constraints.toCall : null),
       minRaiseTo: toFiniteOrNull(constraints ? constraints.minRaiseTo : null),
@@ -227,6 +259,27 @@
       if (name) map[uid] = name;
     });
     return map;
+  }
+
+  function shouldShowTurnActions(params){
+    var phaseValue = params && params.phase;
+    var phase = typeof phaseValue === 'string' ? phaseValue.trim().toUpperCase() : '';
+    var isActionPhase = phase === 'PREFLOP' || phase === 'FLOP' || phase === 'TURN' || phase === 'RIVER';
+    if (!isActionPhase) return false;
+    var turnUserId = params && typeof params.turnUserId === 'string' ? params.turnUserId.trim() : '';
+    var currentUserId = params && typeof params.currentUserId === 'string' ? params.currentUserId.trim() : '';
+    if (!turnUserId || !currentUserId || turnUserId !== currentUserId) return false;
+    return Array.isArray(params.legalActions) && params.legalActions.length > 0;
+  }
+
+  if (window.__RUNNING_POKER_UI_TESTS__ === true){
+    window.__POKER_UI_TEST_HOOKS__ = {
+      normalizeDeadlineMs: normalizeDeadlineMs,
+      computeRemainingTurnSeconds: computeRemainingTurnSeconds,
+      shouldShowTurnActions: shouldShowTurnActions,
+      getConstraintsFromResponse: getConstraintsFromResponse,
+      getLegalActionsFromResponse: getLegalActionsFromResponse
+    };
   }
 
   function resolveUserLabel(entry, playersById){
@@ -790,7 +843,6 @@
     var joinStatusEl = document.getElementById('pokerJoinStatus');
     var leaveStatusEl = document.getElementById('pokerLeaveStatus');
     var seatNoInput = document.getElementById('pokerSeatNo');
-    applySeatInputBounds();
     var buyInInput = document.getElementById('pokerBuyIn');
     var yourStackEl = document.getElementById('pokerYourStack');
     var potEl = document.getElementById('pokerPot');
@@ -1051,10 +1103,16 @@
     }
 
     function getAllowedActionsForUser(data, userId){
-      var info = { allowed: new Set(), needsAmount: false };
+      var info = { allowed: new Set(), needsAmount: false, phase: null, turnUserId: null, isUsersTurn: false, legalActions: [] };
       if (!data || !userId) return info;
+      var stateObj = data && data.state ? data.state : null;
+      var gameState = stateObj && stateObj.state ? stateObj.state : {};
+      info.phase = resolvePhase(data, stateObj, gameState);
+      info.turnUserId = resolveTurnUserId(data, gameState);
+      info.isUsersTurn = !!(info.turnUserId && info.turnUserId === userId && isActionablePhase(info.phase));
       var allowed = info.allowed;
-      var list = Array.isArray(data.legalActions) ? data.legalActions : [];
+      var list = getLegalActionsFromResponse(data);
+      info.legalActions = list;
       for (var i = 0; i < list.length; i++){
         var type = normalizeActionType(list[i]);
         if (type) allowed.add(type);
@@ -1067,7 +1125,12 @@
       var allowedInfo = getAllowedActionsForUser(tableData, currentUserId);
       var allowed = allowedInfo.allowed;
       var enabled = shouldEnableDevActions();
-      var hasActions = !!currentUserId && allowed.size > 0;
+      var hasActions = shouldShowTurnActions({
+        phase: allowedInfo.phase,
+        turnUserId: allowedInfo.turnUserId,
+        currentUserId: currentUserId,
+        legalActions: allowedInfo.legalActions
+      });
       toggleHidden(actRow, !hasActions);
       toggleHidden(actAmountWrap, !hasActions || !allowedInfo.needsAmount);
       var actions = [
@@ -1103,6 +1166,15 @@
         updateActAmountConstraints(allowedInfo, pendingActType);
       }
       updateActAmountHint(allowedInfo, pendingActType);
+      if (actStatusEl){
+        if (allowedInfo.isUsersTurn && allowed.size === 0){
+          setInlineStatus(actStatusEl, t('pokerContractMismatch', 'No legal actions computed. Client/server contract mismatch.'), 'error');
+        } else if (!allowedInfo.isUsersTurn && isActionablePhase(allowedInfo.phase) && !!allowedInfo.turnUserId){
+          setInlineStatus(actStatusEl, t('pokerWaitingForOpponent', 'Waiting for opponent'), null);
+        } else if (actStatusEl.dataset.authRequired !== '1') {
+          setInlineStatus(actStatusEl, null, null);
+        }
+      }
     }
 
     function updateActAmountConstraints(allowedInfo, selectedType){
@@ -1203,6 +1275,9 @@
 
     function setDevActionsAuthStatus(authed){
       var message = authed ? null : t('pokerDevActionsSignIn', 'Sign in to use Dev Actions');
+      if (actStatusEl){
+        actStatusEl.dataset.authRequired = authed ? '' : '1';
+      }
       setInlineStatus(startHandStatusEl, message, null);
       setInlineStatus(actStatusEl, message, null);
       setInlineStatus(copyLogStatusEl, message, null);
@@ -1711,6 +1786,7 @@
       var maxPlayers = table.maxPlayers != null ? table.maxPlayers : 6;
       tableMaxPlayers = maxPlayers;
       applySeatInputBounds();
+      var stacks = gameState.stacks || {};
       if (seatsGrid){
         seatsGrid.innerHTML = '';
         for (var i = 0; i < maxPlayers; i++){
@@ -1731,25 +1807,41 @@
           seatUserEl.textContent = seat ? shortId(seat.userId) : t('pokerSeatEmpty', 'Empty');
           var seatStatusEl = document.createElement('div');
           seatStatusEl.className = 'poker-seat-status';
+          var seatStackEl = document.createElement('div');
+          seatStackEl.className = 'poker-seat-stack';
           if (!seat){
             seatStatusEl.className += ' poker-seat-status--empty';
             seatStatusEl.textContent = t('pokerSeatOpen', 'Open');
+            seatStackEl.textContent = t('pokerSeatStack', 'Stack') + ': -';
           } else if (seat.status && seat.status.toUpperCase() === 'INACTIVE'){
             seatStatusEl.className += ' poker-seat-status--inactive';
             seatStatusEl.textContent = t('pokerSeatInactive', 'Inactive');
+            var inactiveStack = seat.userId && stacks[seat.userId] != null ? formatChips(stacks[seat.userId]) : '-';
+            seatStackEl.textContent = t('pokerSeatStack', 'Stack') + ': ' + inactiveStack;
           } else {
             seatStatusEl.className += ' poker-seat-status--active';
             seatStatusEl.textContent = t('pokerSeatActive', 'Active');
+            var activeStack = seat.userId && stacks[seat.userId] != null ? formatChips(stacks[seat.userId]) : '0';
+            seatStackEl.textContent = t('pokerSeatStack', 'Stack') + ': ' + activeStack;
           }
           div.appendChild(seatNoEl);
           div.appendChild(seatUserEl);
           div.appendChild(seatStatusEl);
+          div.appendChild(seatStackEl);
           seatsGrid.appendChild(div);
         }
       }
 
-      var stacks = gameState.stacks || {};
-      var yourStack = currentUserId && stacks[currentUserId] != null ? stacks[currentUserId] : '-';
+      var hasCurrentUserStack = !!(currentUserId && stacks[currentUserId] != null);
+      var yourStack = hasCurrentUserStack ? formatChips(stacks[currentUserId]) : '-';
+      if (isSeated && currentUserId && !hasCurrentUserStack){
+        yourStack = '0';
+        klog('poker_stack_missing_for_seated_user', {
+          tableId: tableId,
+          userId: currentUserId,
+          stacksKeys: Object.keys(stacks || {})
+        });
+      }
       if (yourStackEl) yourStackEl.textContent = yourStack;
       if (potEl) potEl.textContent = gameState.pot != null ? gameState.pot : 0;
       if (phaseEl) phaseEl.textContent = gameState.phase || '-';
@@ -1789,8 +1881,8 @@
         }
         return;
       }
-      var deadline = Number(gameState.turnDeadlineAt);
-      if (!deadline || !isFinite(deadline)){
+      var deadlineMs = normalizeDeadlineMs(gameState.turnDeadlineAt);
+      if (!deadlineMs){
         turnTimerEl.hidden = true;
         turnTimerEl.textContent = '';
         if (turnTimerInterval){
@@ -1800,8 +1892,7 @@
         return;
       }
       function update(){
-        var remainingMs = Math.max(0, deadline - Date.now());
-        var seconds = Math.ceil(remainingMs / 1000);
+        var seconds = computeRemainingTurnSeconds(deadlineMs, Date.now());
         turnTimerEl.textContent = t('pokerTurnTimer', 'Time left') + ': ' + seconds + 's';
         turnTimerEl.hidden = false;
       }
