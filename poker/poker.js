@@ -1611,7 +1611,7 @@
         if (candidateSeat > maxUi) candidateSeat = candidateSeat - (maxUi + 1);
         seatNoInput.value = candidateSeat;
         try {
-          await joinTable(null, { propagateError: true, preferredSeatNoOverride: candidateSeat });
+          await joinTable(null, { propagateError: true, autoSeat: true, preferredSeatNoOverride: candidateSeat });
           return;
         } catch (err){
           if (isAbortError(err)){
@@ -2007,7 +2007,7 @@
     async function retryJoin(){
       if (!isPageActive()) return;
       if (!pendingJoinRequestId) return;
-      await joinTable(pendingJoinRequestId);
+      await joinTable(pendingJoinRequestId, { autoSeat: shouldAutoJoin });
     }
 
     async function retryLeave(){
@@ -2037,6 +2037,7 @@
       if (seatNo > maxSeatNo) seatNo = maxSeatNo;
       if (seatNoInput) seatNoInput.value = seatNo;
       var preferredSeatNo = getPreferredSeatNo(options && options.preferredSeatNoOverride);
+      var wantAutoSeat = !!(options && options.autoSeat);
       setPendingState('join', true);
       var propagateError = !!(options && options.propagateError);
       try {
@@ -2049,14 +2050,18 @@
           pendingJoinRequestId = normalizeRequestId(resolved.requestId);
         }
         var joinRequestId = normalizeRequestId(resolved.requestId);
-        var joinResult = await apiPost(JOIN_URL, {
+        var joinPayload = {
           tableId: tableId,
-          seatNo: seatNo,
-          preferredSeatNo: preferredSeatNo,
-          autoSeat: true,
           buyIn: buyIn,
           requestId: joinRequestId
-        });
+        };
+        if (wantAutoSeat){
+          joinPayload.autoSeat = true;
+          joinPayload.preferredSeatNo = preferredSeatNo;
+        } else {
+          joinPayload.seatNo = seatNo;
+        }
+        var joinResult = await apiPost(JOIN_URL, joinPayload);
         if (isPendingResponse(joinResult)){
           schedulePendingRetry('join', retryJoin);
           return;
