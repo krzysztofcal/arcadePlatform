@@ -1436,6 +1436,7 @@
       if (!shouldAutoJoin || autoJoinAttempted) return;
       if (joinPending || leavePending || startHandPending || actPending) return;
       if (!seatNoInput) return;
+      if (!Number.isInteger(tableMaxPlayers) || tableMaxPlayers < 2) return;
       if (isSeated) return;
       if (Number.isInteger(suggestedSeatNoParam)){
         var maxSeat = Math.max(0, tableMaxPlayers - 1);
@@ -1469,9 +1470,7 @@
         } else {
           stopHeartbeat();
         }
-        if (!isPolling){
-          maybeAutoJoin();
-        }
+        maybeAutoJoin();
         if (isPolling){ resetPollBackoff(); }
       } catch (err){
         if (isAuthError(err)){
