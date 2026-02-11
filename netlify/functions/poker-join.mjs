@@ -10,6 +10,20 @@ import { patchSitOutByUserId } from "./_shared/poker-sitout-flag.mjs";
 import { loadPokerStateForUpdate, updatePokerStateLocked } from "./_shared/poker-state-write-locked.mjs";
 
 const REQUEST_PENDING_STALE_SEC = 30;
+const UNIQUE_VIOLATION = "23505";
+
+const isUniqueViolation = (err) => err?.code === UNIQUE_VIOLATION;
+
+const classifySeatInsertConflict = (err) => {
+  if (!isUniqueViolation(err)) return null;
+  const constraint = String(err?.constraint || "").toLowerCase();
+  const detail = String(err?.detail || "").toLowerCase();
+  if (constraint.includes("seat_no")) return "seat_taken";
+  if (constraint.includes("user_id")) return "already_seated";
+  if (detail.includes("seat_no")) return "seat_taken";
+  if (detail.includes("user_id")) return "already_seated";
+  return "unique_unknown";
+};
 
 const parseBody = (body) => {
   if (!body) return { ok: true, value: {} };
@@ -84,6 +98,15 @@ const pickNextSeatNo = (rows, maxPlayers, preferredSeatNoDb) => {
     if (!occupied.has(candidate)) return candidate;
   }
   return null;
+};
+
+const ensureStateSeatEntry = (state, userId, seatNoDb) => {
+  const seats = parseSeats(state?.seats);
+  if (seats.some((seat) => seat?.userId === userId)) return state;
+  return {
+    ...(state && typeof state === "object" && !Array.isArray(state) ? state : {}),
+    seats: [...seats, { userId, seatNo: seatNoDb }],
+  };
 };
 
 const buildMeStatus = (state, userId, { forceSeated = false } = {}) => {
@@ -243,13 +266,22 @@ export async function handler(event) {
           );
           const flagResult = await clearRejoinFlags(tx, { tableId, userId: auth.userId });
           const meState = await resolveMeStateAfterRejoin(tx, tableId, flagResult);
+          const meStateWithSeat = ensureStateSeatEntry(meState, auth.userId, existingSeatNo);
+          if (meStateWithSeat !== meState) {
+            const statePatchResult = await updatePokerStateLocked(tx, { tableId, nextState: meStateWithSeat });
+            if (!statePatchResult.ok) {
+              if (statePatchResult.reason === "not_found") throw makeError(404, "state_missing");
+              throw makeError(409, "state_invalid");
+            }
+          }
+          const seatNoUi = toUiSeatNo(existingSeatNo, Number(table.max_players));
 
           const resultPayload = {
             ok: true,
             tableId,
-            seatNo: toUiSeatNo(existingSeatNo, Number(table.max_players)),
+            seatNo: seatNoUi,
             userId: auth.userId,
-            me: buildMeStatus(meState, auth.userId, { forceSeated: true }),
+            me: buildMeStatus(meStateWithSeat, auth.userId, { forceSeated: true }),
           };
           await storePokerRequestResult(tx, {
             tableId,
@@ -261,11 +293,12 @@ export async function handler(event) {
           klog("poker_join_stack_persisted", {
             tableId,
             userId: auth.userId,
-            seatNo: toUiSeatNo(existingSeatNo, Number(table.max_players)),
+            seatNoUi,
+            seatNoDb: existingSeatNo,
             attemptedStackFill: buyIn,
             mode: "rejoin",
           });
-          klog("poker_join_ok", { tableId, userId: auth.userId, seatNo: toUiSeatNo(existingSeatNo, Number(table.max_players)), rejoin: true });
+          klog("poker_join_ok", { tableId, userId: auth.userId, seatNoUi, seatNoDb: existingSeatNo, rejoin: true });
           return resultPayload;
         }
 
@@ -296,9 +329,8 @@ values ($1, $2, $3, 'ACTIVE', now(), now(), $4);
             mutated = true;
             break;
           } catch (error) {
-            const isUnique = error?.code === "23505";
-            const details = `${error?.constraint || ""} ${error?.detail || ""}`.toLowerCase();
-            if (isUnique && details.includes("seat_no")) {
+            const conflictKind = classifySeatInsertConflict(error);
+            if (conflictKind === "seat_taken") {
               const activeSeatRows = await tx.unsafe(
                 "select seat_no from public.poker_seats where table_id = $1 and status = 'ACTIVE' order by seat_no asc;",
                 [tableId]
@@ -313,7 +345,7 @@ values ($1, $2, $3, 'ACTIVE', now(), now(), $4);
               }
               continue;
             }
-            if (isUnique && details.includes("user_id")) {
+            if (conflictKind === "already_seated") {
               const seatRow = await tx.unsafe(
                 "select seat_no from public.poker_seats where table_id = $1 and user_id = $2 limit 1;",
                 [tableId, auth.userId]
@@ -331,12 +363,21 @@ values ($1, $2, $3, 'ACTIVE', now(), now(), $4);
                 );
                 const flagResult = await clearRejoinFlags(tx, { tableId, userId: auth.userId });
                 const meState = await resolveMeStateAfterRejoin(tx, tableId, flagResult);
+                const meStateWithSeat = ensureStateSeatEntry(meState, auth.userId, fallbackSeatNo);
+                if (meStateWithSeat !== meState) {
+                  const statePatchResult = await updatePokerStateLocked(tx, { tableId, nextState: meStateWithSeat });
+                  if (!statePatchResult.ok) {
+                    if (statePatchResult.reason === "not_found") throw makeError(404, "state_missing");
+                    throw makeError(409, "state_invalid");
+                  }
+                }
+                const seatNoUi = toUiSeatNo(fallbackSeatNo, Number(table.max_players));
                 const resultPayload = {
                   ok: true,
                   tableId,
-                  seatNo: toUiSeatNo(fallbackSeatNo, Number(table.max_players)),
+                  seatNo: seatNoUi,
                   userId: auth.userId,
-                  me: buildMeStatus(meState, auth.userId, { forceSeated: true }),
+                  me: buildMeStatus(meStateWithSeat, auth.userId, { forceSeated: true }),
                 };
                 await storePokerRequestResult(tx, {
                   tableId,
@@ -348,14 +389,18 @@ values ($1, $2, $3, 'ACTIVE', now(), now(), $4);
                 klog("poker_join_stack_persisted", {
                   tableId,
                   userId: auth.userId,
-                  seatNo: toUiSeatNo(fallbackSeatNo, Number(table.max_players)),
+                  seatNoUi,
+                  seatNoDb: fallbackSeatNo,
                   attemptedStackFill: buyIn,
                   mode: "rejoin",
                 });
-                klog("poker_join_ok", { tableId, userId: auth.userId, seatNo: toUiSeatNo(fallbackSeatNo, Number(table.max_players)), rejoin: true });
+                klog("poker_join_ok", { tableId, userId: auth.userId, seatNoUi, seatNoDb: fallbackSeatNo, rejoin: true });
                 return resultPayload;
               }
               throw makeError(409, "already_seated");
+            }
+            if (conflictKind === "unique_unknown") {
+              throw makeError(409, "seat_taken");
             }
             throw error;
           }
@@ -445,14 +490,16 @@ values ($1, $2, $3, 'ACTIVE', now(), now(), $4);
           kind: "JOIN",
           result: resultPayload,
         });
+        const seatNoUi = toUiSeatNo(seatNoDbToUse, Number(table.max_players));
         klog("poker_join_stack_persisted", {
           tableId,
           userId: auth.userId,
+          seatNoUi,
           seatNoDb: seatNoDbToUse,
           persistedStack: buyIn,
           mode: "insert",
         });
-        klog("poker_join_ok", { tableId, userId: auth.userId, seatNoDb: seatNoDbToUse, rejoin: false });
+        klog("poker_join_ok", { tableId, userId: auth.userId, seatNoUi, seatNoDb: seatNoDbToUse, rejoin: false });
         return resultPayload;
       } catch (error) {
         if (requestId && !mutated) {

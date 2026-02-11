@@ -8,7 +8,7 @@ import { isStateStorageValid } from "../netlify/functions/_shared/poker-state-ut
 const tableId = "11111111-1111-4111-8111-111111111111";
 const userId = "user-join";
 
-const makeJoinHandler = ({ requestStore, queries, sideEffects, failStoreResult = false, existingSeatNo = null, conflictSeatInsertOnce = false }) =>
+const makeJoinHandler = ({ requestStore, queries, sideEffects, failStoreResult = false, existingSeatNo = null, conflictSeatInsertOnce = false, conflictUnknownUniqueOnce = false }) =>
   loadPokerHandler("netlify/functions/poker-join.mjs", {
     baseHeaders: () => ({}),
     corsHeaders: () => ({ "access-control-allow-origin": "https://example.test" }),
@@ -68,7 +68,15 @@ const makeJoinHandler = ({ requestStore, queries, sideEffects, failStoreResult =
               const err = new Error("seat_taken");
               err.code = "23505";
               err.constraint = "poker_seats_table_id_seat_no_key";
-              err.detail = "seat_no";
+              err.detail = "";
+              throw err;
+            }
+            if (conflictUnknownUniqueOnce && !sideEffects.conflictUnknownUniqueUsed) {
+              sideEffects.conflictUnknownUniqueUsed = true;
+              const err = new Error("unique_unknown");
+              err.code = "23505";
+              err.constraint = "";
+              err.detail = "";
               throw err;
             }
             return [];
@@ -195,13 +203,20 @@ const run = async () => {
   assert.equal(JSON.parse(rejoin.body).seatNo, 3);
   assert.equal(rejoinSideEffects.seatInsert, 0);
   assert.equal(rejoinSideEffects.ledger, 0);
-  const rejoinStateWrite = rejoinQueries.find((entry) => entry.query.toLowerCase().includes("update public.poker_state"));
-  assert.ok(rejoinStateWrite, "rejoin should update poker_state to clear flags");
-  const rejoinStatePayload = rejoinStateWrite?.params?.[1];
+  const rejoinStateWrites = rejoinQueries.filter((entry) => entry.query.toLowerCase().includes("update public.poker_state"));
+  assert.ok(rejoinStateWrites.length > 0, "rejoin should update poker_state");
+  const rejoinStatePayload = rejoinStateWrites[0]?.params?.[1];
   const rejoinState = JSON.parse(rejoinStatePayload);
   assert.equal(rejoinState.leftTableByUserId[userId], false);
   assert.equal(rejoinState.missedTurnsByUserId?.[userId], undefined);
   assert.equal(rejoinState.sitOutByUserId?.[userId], false);
+  const rejoinSeatPatched = rejoinStateWrites.some((entry) => {
+    var payload = entry?.params?.[1];
+    if (typeof payload !== 'string') return false;
+    var parsed = JSON.parse(payload);
+    return Array.isArray(parsed?.seats) && parsed.seats.some((seat) => seat?.userId === userId && seat?.seatNo === 4);
+  });
+  assert.equal(rejoinSeatPatched, true, "rejoin should patch poker_state seats with DB seat when missing");
   const rejoinBody = JSON.parse(rejoin.body);
   assert.equal(rejoinBody.me.userId, userId);
   assert.equal(rejoinBody.me.isSeated, true);
@@ -227,6 +242,17 @@ const run = async () => {
     conflictQueries.some((entry) => entry.query.toLowerCase().includes("where table_id = $1 and status = 'active' order by seat_no asc")),
     "join should scan active seats after seat conflict"
   );
+
+  const unknownConflictSideEffects = { seatInsert: 0, ledger: 0, conflictUnknownUniqueUsed: false };
+  const unknownConflictHandler = makeJoinHandler({
+    requestStore: new Map(),
+    queries: [],
+    sideEffects: unknownConflictSideEffects,
+    conflictUnknownUniqueOnce: true,
+  });
+  const unknownConflict = await callJoin(unknownConflictHandler, "join-unknown-unique");
+  assert.equal(unknownConflict.statusCode, 409);
+  assert.deepEqual(JSON.parse(unknownConflict.body), { error: "seat_taken" });
 };
 
 run().catch((error) => {
