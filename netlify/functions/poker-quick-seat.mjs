@@ -73,7 +73,7 @@ where t.status = 'OPEN'
   ))
 order by t.last_activity_at desc nulls last, t.created_at asc nulls last
 limit 1
-for update of t skip locked;
+for update of t;
     `,
     [maxPlayers, stakesJson, requireHuman]
   );
@@ -150,9 +150,14 @@ export async function handler(event) {
   try {
     const result = await beginSql(async (tx) => {
       const createPayload = { userId: auth.userId, maxPlayers, stakesJson };
+      const matchKey = `quickseat:${maxPlayers}:${stakesJson}`;
+
+      klog("poker_quick_seat_lock", { matchKey, maxPlayers, stakesJson });
+      await tx.unsafe("select pg_advisory_xact_lock(hashtext($1));", [matchKey]);
 
       const preferredRows = await selectCandidate(tx, { stakesJson, maxPlayers, requireHuman: true });
       if (preferredRows?.[0]?.id) {
+        klog("poker_quick_seat_selected", { tableId: preferredRows[0].id, strategy: "prefer_humans" });
         const recommendation = await recommendSeatAtTable(tx, {
           tableId: preferredRows[0].id,
           userId: auth.userId,
@@ -165,6 +170,7 @@ export async function handler(event) {
 
       const anyRows = await selectCandidate(tx, { stakesJson, maxPlayers, requireHuman: false });
       if (anyRows?.[0]?.id) {
+        klog("poker_quick_seat_selected", { tableId: anyRows[0].id, strategy: "any_open" });
         const recommendation = await recommendSeatAtTable(tx, {
           tableId: anyRows[0].id,
           userId: auth.userId,

@@ -83,6 +83,10 @@ const run = async () => {
       "quick seat should prefer tables with at least one human"
     );
     assert.ok(
+      queries.some((entry) => entry.query.toLowerCase().includes("pg_advisory_xact_lock(hashtext($1))")),
+      "quick seat should serialize matchmaking per stakes and maxPlayers"
+    );
+    assert.ok(
       queries.some((entry) => entry.query.toLowerCase().includes("where table_id = $1 and status = 'active' order by seat_no asc")),
       "quick seat should read active seats to suggest a seat"
     );
