@@ -382,7 +382,7 @@ values ($1, $2, $3, 'ACTIVE', now(), now(), $4);
                   seatNoDbInitial,
                   lastSeatNoDb: seatNoDbToUse,
                 });
-                throw makeError(409, "seat_taken");
+                throw makeError(409, "duplicate_seat");
               }
               continue;
             }
