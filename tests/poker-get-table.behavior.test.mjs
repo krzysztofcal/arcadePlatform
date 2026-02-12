@@ -53,8 +53,8 @@ const makeHandler = (queries, storedState, userId, options = {}) => {
     loadHoleCardsByUserId,
     maybeApplyTurnTimeout: options.maybeApplyTurnTimeout || maybeApplyTurnTimeout,
     deriveDeck,
-    deriveCommunityCards,
-    deriveRemainingDeck,
+    deriveCommunityCards: options.deriveCommunityCards || deriveCommunityCards,
+    deriveRemainingDeck: options.deriveRemainingDeck || deriveRemainingDeck,
     beginSql: async (fn) =>
       fn({
         unsafe: async (query, params) => {
@@ -473,6 +473,7 @@ const run = async () => {
   assert.equal(timeoutInvalidUpdates.length, 0);
 
   let timeoutStaleSeatCalled = false;
+  let timeoutDerivedSeatOrder = null;
   const timeoutStaleSeatQueries = [];
   const timeoutStaleSeatResponse = await makeHandler(
     timeoutStaleSeatQueries,
@@ -500,6 +501,10 @@ const run = async () => {
         timeoutStaleSeatCalled = true;
         return { applied: false };
       },
+      deriveCommunityCards: (args) => {
+        timeoutDerivedSeatOrder = Array.isArray(args?.seatUserIdsInOrder) ? args.seatUserIdsInOrder.slice() : null;
+        return deriveCommunityCards(args);
+      },
     }
   )({
     httpMethod: "GET",
@@ -508,6 +513,8 @@ const run = async () => {
   });
   assert.equal(timeoutStaleSeatResponse.statusCode, 200);
   assert.equal(timeoutStaleSeatCalled, true);
+  assert.ok(Array.isArray(timeoutDerivedSeatOrder));
+  assert.equal(timeoutDerivedSeatOrder.includes("user-x"), false);
   const timeoutStaleSeatArrayParams = timeoutStaleSeatQueries.flatMap((entry) =>
     Array.isArray(entry.params) ? entry.params.filter((param) => Array.isArray(param)) : []
   );

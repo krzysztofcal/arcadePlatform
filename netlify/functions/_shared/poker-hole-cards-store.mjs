@@ -45,7 +45,6 @@ const loadHoleCardsByUserId = async (
   const activeSet = new Set(activeUserIds);
   const map = {};
   const statusByUserId = {};
-  const isSoft = mode === "soft";
 
   for (const row of list) {
     const userId = row?.user_id;
@@ -70,11 +69,9 @@ const loadHoleCardsByUserId = async (
     }
   }
 
-  if (isSoft) {
-    for (const userId of requiredIds) {
-      if (statusByUserId[userId] === "INVALID") {
-        delete map[userId];
-      }
+  for (const userId of Object.keys(statusByUserId)) {
+    if (statusByUserId[userId] === "INVALID") {
+      delete map[userId];
     }
   }
 

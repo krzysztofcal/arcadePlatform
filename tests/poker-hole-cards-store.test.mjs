@@ -113,7 +113,7 @@ test("strict mode only validates required users", async () => {
 
   assert.equal(out.holeCardsStatusByUserId["user-1"], undefined);
   assert.equal(out.holeCardsStatusByUserId["user-2"], "INVALID");
-  assert.equal(Object.prototype.hasOwnProperty.call(out.holeCardsByUserId, "user-2"), true);
+  assert.equal(Object.prototype.hasOwnProperty.call(out.holeCardsByUserId, "user-2"), false);
 });
 
 test("strict mode throws when required set includes invalid user", async () => {

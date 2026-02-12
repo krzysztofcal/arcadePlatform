@@ -335,14 +335,38 @@ export async function handler(event) {
             }
 
             if (shouldApplyTimeout) {
-              const seatUserIdsInOrder = normalizeSeatOrderFromState(currentState.seats);
-              if (seatUserIdsInOrder.length <= 0) {
-                throw new Error("state_invalid");
+              const stateSeatUserIdsInOrder = normalizeSeatOrderFromState(currentState.seats);
+              const timeoutRequiredUserIds = seatRowsActiveUserIds.length
+                ? seatRowsActiveUserIds
+                : dbActiveUserIds.length
+                  ? dbActiveUserIds
+                  : stateSeatUserIds;
+              const requiredSet = new Set(timeoutRequiredUserIds);
+              const timeoutSeatUserIdsInOrder = stateSeatUserIdsInOrder.filter((id) => requiredSet.has(id));
+              if (timeoutSeatUserIdsInOrder.length < 2) {
+                klog("poker_get_table_timeout_apply_skipped", {
+                  tableId,
+                  handId: currentState.handId,
+                  reason: "insufficient_effective_players",
+                  effectiveCount: timeoutSeatUserIdsInOrder.length,
+                });
+                shouldApplyTimeout = false;
               }
+            }
+
+            if (shouldApplyTimeout) {
+              const stateSeatUserIdsInOrder = normalizeSeatOrderFromState(currentState.seats);
+              const timeoutRequiredUserIds = seatRowsActiveUserIds.length
+                ? seatRowsActiveUserIds
+                : dbActiveUserIds.length
+                  ? dbActiveUserIds
+                  : stateSeatUserIds;
+              const requiredSet = new Set(timeoutRequiredUserIds);
+              const timeoutSeatUserIdsInOrder = stateSeatUserIdsInOrder.filter((id) => requiredSet.has(id));
 
               const derivedCommunity = deriveCommunityCards({
                 handSeed: currentState.handSeed,
-                seatUserIdsInOrder,
+                seatUserIdsInOrder: timeoutSeatUserIdsInOrder,
                 communityDealt: currentState.communityDealt,
               });
 
@@ -352,7 +376,7 @@ export async function handler(event) {
 
               const derivedDeck = deriveRemainingDeck({
                 handSeed: currentState.handSeed,
-                seatUserIdsInOrder,
+                seatUserIdsInOrder: timeoutSeatUserIdsInOrder,
                 communityDealt: currentState.communityDealt,
               });
 
