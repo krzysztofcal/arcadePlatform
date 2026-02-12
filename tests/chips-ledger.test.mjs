@@ -623,12 +623,12 @@ describe("chips auth isolation and idempotency per identity", () => {
 
     const first = await handler({
       httpMethod: "POST",
-      headers: { authorization: "Bearer user-a", origin: "https://arcade.test" },
+      headers: { authorization: "Bearer 00000000-0000-4000-8000-000000000008", origin: "https://arcade.test" },
       body: JSON.stringify(body),
     });
     const replay = await handler({
       httpMethod: "POST",
-      headers: { authorization: "Bearer user-a", origin: "https://arcade.test" },
+      headers: { authorization: "Bearer 00000000-0000-4000-8000-000000000008", origin: "https://arcade.test" },
       body: JSON.stringify(body),
     });
 
@@ -640,7 +640,7 @@ describe("chips auth isolation and idempotency per identity", () => {
 
     const conflict = await handler({
       httpMethod: "POST",
-      headers: { authorization: "Bearer user-b", origin: "https://arcade.test" },
+      headers: { authorization: "Bearer 00000000-0000-4000-8000-000000000009", origin: "https://arcade.test" },
       body: JSON.stringify(body),
     });
     expect(conflict.statusCode).toBe(409);
@@ -673,14 +673,14 @@ describe("chips auth isolation and idempotency per identity", () => {
 
     const first = await handler({
       httpMethod: "POST",
-      headers: { authorization: "Bearer user-c", origin: "https://arcade.test" },
+      headers: { authorization: "Bearer 00000000-0000-4000-8000-00000000000a", origin: "https://arcade.test" },
       body: JSON.stringify(baseBody),
     });
     expect(first.statusCode).toBe(200);
 
     const conflict = await handler({
       httpMethod: "POST",
-      headers: { authorization: "Bearer user-c", origin: "https://arcade.test" },
+      headers: { authorization: "Bearer 00000000-0000-4000-8000-00000000000a", origin: "https://arcade.test" },
       body: JSON.stringify({
         ...baseBody,
         amount: 11,
@@ -1308,7 +1308,7 @@ describe("chips handlers security and gating", () => {
     const { handler: ledgerHandler } = await import("../netlify/functions/chips-ledger.mjs");
     const ledgerResult = await ledgerHandler({
       httpMethod: "GET",
-      headers: { authorization: "Bearer user-blank", origin: "https://arcade.test" },
+      headers: { authorization: "Bearer 00000000-0000-4000-8000-00000000001d", origin: "https://arcade.test" },
       queryStringParameters: { after: "" },
     });
     expect(ledgerResult.statusCode).toBe(200);
@@ -1333,7 +1333,7 @@ describe("chips handlers security and gating", () => {
     const first = await listUserLedger("00000000-0000-4000-8000-00000000001b", { limit: 1 });
     const ledgerResult = await ledgerHandler({
       httpMethod: "GET",
-      headers: { authorization: "Bearer user-pref", origin: "https://arcade.test" },
+      headers: { authorization: "Bearer 00000000-0000-4000-8000-00000000001b", origin: "https://arcade.test" },
       queryStringParameters: { after: "1", cursor: first.nextCursor },
     });
     const body = JSON.parse(ledgerResult.body);
@@ -1359,7 +1359,7 @@ describe("chips handlers security and gating", () => {
 
     const ledgerResult = await ledgerHandler({
       httpMethod: "GET",
-      headers: { authorization: "Bearer user-legacy", origin: "https://arcade.test" },
+      headers: { authorization: "Bearer 00000000-0000-4000-8000-00000000001c", origin: "https://arcade.test" },
       queryStringParameters: { after: "0" },
     });
     const body = JSON.parse(ledgerResult.body);
