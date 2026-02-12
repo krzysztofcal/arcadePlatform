@@ -65,3 +65,30 @@ test("selfHealInvalid deletes only required invalid users and scrubs map", async
   assert.equal(Object.prototype.hasOwnProperty.call(out.holeCardsByUserId, "user-1"), false);
   assert.equal(Object.prototype.hasOwnProperty.call(out.holeCardsByUserId, "user-2"), true);
 });
+
+
+test("strict mode throws when required set includes invalid user", async () => {
+  const tx = {
+    unsafe: async (query) => {
+      const text = String(query).toLowerCase();
+      if (text.includes("select user_id, cards")) {
+        return [
+          { user_id: "user-1", cards: [{ r: "A", s: "S" }, { r: "K", s: "S" }] },
+          { user_id: "user-2", cards: [] },
+        ];
+      }
+      throw new Error("unexpected_query");
+    },
+  };
+
+  await assert.rejects(
+    loadHoleCardsByUserId(tx, {
+      tableId,
+      handId,
+      activeUserIds: ["user-1", "user-2"],
+      requiredUserIds: ["user-1", "user-2"],
+      mode: "strict",
+    }),
+    /state_invalid/
+  );
+});

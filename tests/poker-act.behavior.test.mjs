@@ -1210,7 +1210,8 @@ const run = async () => {
       "user-2": [],
     },
   });
-  assert.equal(invalidCardsResponse.response.statusCode, 200);
+  assert.equal(invalidCardsResponse.response.statusCode, 409);
+  assert.equal(JSON.parse(invalidCardsResponse.response.body).error, "state_invalid");
 
   const missingRowResponse = await runCase({
     state: baseState,
@@ -1222,7 +1223,8 @@ const run = async () => {
       "user-2": defaultHoleCards["user-2"],
     },
   });
-  assert.equal(missingRowResponse.response.statusCode, 200);
+  assert.equal(missingRowResponse.response.statusCode, 409);
+  assert.equal(JSON.parse(missingRowResponse.response.body).error, "state_invalid");
 
   const actorInvalidCardsResponse = await runCase({
     state: baseState,
