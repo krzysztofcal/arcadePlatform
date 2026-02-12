@@ -1603,7 +1603,7 @@
 
     async function autoJoinWithRetries(){
       var maxUi = Number.isInteger(tableMaxPlayers) && tableMaxPlayers >= 2 ? tableMaxPlayers - 1 : 0;
-      var startSeat = Number.isInteger(suggestedSeatNoParam) ? suggestedSeatNoParam : 0;
+      var startSeat = getPreferredSeatNo();
       if (startSeat < 0) startSeat = 0;
       if (startSeat > maxUi) startSeat = maxUi;
       var attempts = Math.min(3, tableMaxPlayers);
@@ -1668,6 +1668,7 @@
         }
         maybeAutoJoin();
         if (isPolling){ resetPollBackoff(); }
+        return true;
       } catch (err){
         if (isAuthError(err)){
           stopPendingAll();
@@ -1679,16 +1680,17 @@
             stopHeartbeat: stopHeartbeat,
             onAuthExpired: startAuthWatch
           });
-          return;
+          return false;
         }
         if (err && err.code === 'state_invalid'){
           setError(errorEl, t('pokerErrStateChanged', 'State changed. Refreshing...'));
           scheduleRetry(function(){ loadTable(false); }, 300);
-          return;
+          return false;
         }
         klog('poker_table_load_error', { tableId: tableId, error: err.message || err.code });
         setError(errorEl, err.message || t('pokerErrLoadTable', 'Failed to load table'));
         if (isPolling){ increasePollBackoff(); }
+        return false;
       }
     }
 
@@ -2094,11 +2096,8 @@
           klog('poker_auto_join_success', { tableId: tableId, seatNo: joinResult.seatNo });
         }
         if (!isPageActive()) return;
-        try {
-          await loadTable(false);
-        } catch (_err){
-          return;
-        }
+        var loaded = await loadTable(false);
+        if (!loaded) return;
         maybeAutoStartHand();
       } catch (err){
         if (isAbortError(err)){
