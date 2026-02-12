@@ -110,9 +110,13 @@ const makeJoinHandler = ({
             seats.push({ table_id: tableId, user_id: userId, seat_no: params?.[2], status: "ACTIVE", is_bot: false, stack: params?.[3] });
             return [];
           }
-          if (sqlNormalized.includes("select count(*)::int as count from public.poker_seats")) {
+          if (sqlNormalized.includes("select count(*)::int as count from public.poker_seats") && sqlNormalized.includes("coalesce(is_bot, false) = false")) {
             const humans = seats.filter((seat) => seat.status === "ACTIVE" && !seat.is_bot).length;
             return [{ count: humans }];
+          }
+          if (sqlNormalized.includes("select count(*)::int as count from public.poker_seats") && sqlNormalized.includes("coalesce(is_bot, false) = true")) {
+            const bots = seats.filter((seat) => seat.status === "ACTIVE" && !!seat.is_bot).length;
+            return [{ count: bots }];
           }
           if (sqlNormalized.includes("select seat_no from public.poker_seats where table_id = $1 order by seat_no asc")) {
             return seats.map((seat) => ({ seat_no: seat.seat_no })).sort((a, b) => a.seat_no - b.seat_no);
@@ -176,8 +180,10 @@ const run = async () => {
     assert.equal(botSeedLedger.length, 2);
     for (const ledgerCall of botSeedLedger) {
       assert.equal(Array.isArray(ledgerCall.entries), true);
-      assert.equal(ledgerCall.entries.length, 2);
-      assert.equal(ledgerCall.entries.some((entry) => entry.accountType === "USER"), false);
+      assert.equal(ledgerCall.entries.length, 4);
+      assert.equal(ledgerCall.entries.filter((entry) => entry.accountType === "USER").length, 2);
+      assert.equal(ledgerCall.entries.some((entry) => entry.accountType === "USER" && entry.amount === 200), true);
+      assert.equal(ledgerCall.entries.some((entry) => entry.accountType === "USER" && entry.amount === -200), true);
       assert.equal(
         ledgerCall.entries.some((entry) => entry.accountType === "SYSTEM" && String(entry.systemKey || "").startsWith("POKER_BOT:")),
         false

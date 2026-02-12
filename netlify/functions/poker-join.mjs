@@ -127,6 +127,14 @@ const seedBotsAfterHumanJoin = async (tx, { tableId, maxPlayers, bb, cfg, humanU
   const targetBots = computeTargetBotCount({ maxPlayers, humanCount, maxBots: cfg.maxPerTable });
   if (!Number.isInteger(targetBots) || targetBots <= 0) return [];
 
+  const existingBotRows = await tx.unsafe(
+    "select count(*)::int as count from public.poker_seats where table_id = $1 and status = 'ACTIVE' and coalesce(is_bot, false) = true;",
+    [tableId]
+  );
+  const existingBotCount = Number(existingBotRows?.[0]?.count || 0);
+  const toSeed = Math.max(0, targetBots - existingBotCount);
+  if (toSeed <= 0) return [];
+
   const existingRows = await tx.unsafe(
     "select seat_no from public.poker_seats where table_id = $1 order by seat_no asc;",
     [tableId]
@@ -137,7 +145,7 @@ const seedBotsAfterHumanJoin = async (tx, { tableId, maxPlayers, bb, cfg, humanU
   }
 
   const selectedSeats = [];
-  for (let seatNo = 1; seatNo <= maxPlayers && selectedSeats.length < targetBots; seatNo += 1) {
+  for (let seatNo = 1; seatNo <= maxPlayers && selectedSeats.length < toSeed; seatNo += 1) {
     if (!occupied.has(seatNo)) selectedSeats.push(seatNo);
   }
   if (!selectedSeats.length) return [];
@@ -176,6 +184,8 @@ returning seat_no;
         },
         entries: [
           { accountType: "SYSTEM", systemKey: cfg.bankrollSystemKey, amount: -buyInChips },
+          { accountType: "USER", amount: buyInChips },
+          { accountType: "USER", amount: -buyInChips },
           { accountType: "ESCROW", systemKey: escrowSystemKey, amount: buyInChips },
         ],
         createdBy: humanUserId,
