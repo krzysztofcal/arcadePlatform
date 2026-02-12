@@ -71,14 +71,19 @@ assert.ok(
   pokerUiSrc.includes("not_enough_players") && pokerUiSrc.includes("already_in_hand") && pokerUiSrc.includes("state_conflict"),
   "poker UI auto-start should treat already_in_hand/not_enough_players/state_conflict as neutral"
 );
+const maybeAutoStartStart = pokerUiSrc.indexOf("async function maybeAutoStartHand(");
+const maybeAutoStartEnd = maybeAutoStartStart === -1 ? -1 : pokerUiSrc.indexOf("function applySeatInputBounds", maybeAutoStartStart);
+const maybeAutoStartSrc = maybeAutoStartStart === -1 || maybeAutoStartEnd === -1 ? "" : pokerUiSrc.slice(maybeAutoStartStart, maybeAutoStartEnd);
+assert.ok(maybeAutoStartSrc.includes("if (pendingStartHandRequestId) return;"), "poker UI auto-start should guard duplicate start-hand requests");
+assert.ok(!maybeAutoStartSrc.includes("scheduleDevPendingRetry('startHand'"), "poker UI auto-start should not call dev-only pending scheduler");
+assert.ok(/maybeAutoStartHand[\s\S]*?startHand\(/.test(maybeAutoStartSrc), "poker UI auto-start should delegate to startHand flow");
 assert.ok(
-  /async function maybeAutoStartHand\([\s\S]*?if \(!pendingStartHandRequestId\) return;[\s\S]*?retryStartHand\(\)/.test(pokerUiSrc) ||
-    /async function maybeAutoStartHand\([\s\S]*?if \(pendingStartHandRequestId\) return;/.test(pokerUiSrc),
-  "poker UI auto-start should guard duplicate start-hand requests"
+  maybeAutoStartSrc.includes("if (code === 'already_in_hand') autoStartStopForHand = true;"),
+  "poker UI auto-start should stop retrying after already_in_hand"
 );
 assert.ok(
-  pokerUiSrc.includes("if (errCode === 'already_in_hand') autoStartStopForHand = true;"),
-  "poker UI auto-start should stop retrying after already_in_hand"
+  pokerUiSrc.includes("scheduleDevPendingRetry('startHand', retryStartHand);"),
+  "poker UI start-hand flow should keep pending retry scheduler"
 );
 assert.ok(/function\s+resolveRequestId\s*\(/.test(pokerUiSrc), "poker UI should define resolveRequestId helper");
 const formatRankIndex = pokerUiSrc.indexOf("function formatRank");

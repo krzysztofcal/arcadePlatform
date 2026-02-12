@@ -1582,30 +1582,11 @@
       klog('poker_auto_start_attempt', { tableId: tableId, seatedCount: seatedCount, phase: phase, status: status });
       var requestId = normalizeRequestId(generateRequestId());
       pendingStartHandRequestId = requestId;
-      try {
-        var res = await authedFetch(START_HAND_URL, { method: 'POST', body: JSON.stringify({ tableId: tableId, requestId: requestId }) });
-        var result = {};
-        try { result = await res.json(); } catch (_err) {}
-        if (res.status === 202 && result && result.error === 'request_pending'){
-          scheduleDevPendingRetry('startHand', retryStartHand);
-          klog('poker_auto_start_result', { tableId: tableId, code: 'request_pending' });
-          return;
-        }
-        if (!res.ok){
-          throw { code: (result && result.error) || 'request_failed' };
-        }
-        clearStartHandPending();
-        autoStartStopForHand = false;
-        klog('poker_auto_start_result', { tableId: tableId, code: 'ok' });
-        if (!isPageActive()) return;
-        loadTable(false);
-      } catch (err){
-        var errCode = err && (err.code || err.error || err.message) ? err.code || err.error || err.message : 'unknown_error';
-        klog('poker_auto_start_result', { tableId: tableId, code: errCode });
-        if (errCode === 'already_in_hand') autoStartStopForHand = true;
-        clearStartHandPending();
-        if (isNeutralAutoStartCode(errCode)) return;
-      }
+      var startResult = await startHand(requestId, { suppressNeutralErrors: true });
+      var code = startResult && startResult.code ? startResult.code : (startResult && startResult.ok ? 'ok' : 'unknown_error');
+      klog('poker_auto_start_result', { tableId: tableId, code: code });
+      if (code === 'already_in_hand') autoStartStopForHand = true;
+      if (isNeutralAutoStartCode(code)) return;
     }
 
     function applySeatInputBounds(){
@@ -2143,12 +2124,14 @@
       }
     }
 
-    async function startHand(requestIdOverride){
-      if (!shouldEnableDevActions()) return;
+    async function startHand(requestIdOverride, options){
+      if (!shouldEnableDevActions()) return { ok: false, code: 'dev_actions_disabled' };
       if (!stakesValid){
         setInlineStatus(startHandStatusEl, t('pokerErrInvalidStakes', 'Invalid stakes'), 'error');
-        return;
+        return { ok: false, code: 'invalid_stakes' };
       }
+      var opts = options || {};
+      var suppressNeutralErrors = !!opts.suppressNeutralErrors;
       setInlineStatus(startHandStatusEl, null, null);
       setDevPendingState('startHand', true);
       try {
@@ -2164,26 +2147,31 @@
         var result = await apiPost(START_HAND_URL, { tableId: tableId, requestId: startRequestId });
         if (isPendingResponse(result)){
           scheduleDevPendingRetry('startHand', retryStartHand);
-          return;
+          return { ok: false, code: 'request_pending', pending: true };
         }
         if (result && result.ok === false){
+          var resultCode = result.error || 'request_failed';
           clearStartHandPending();
-          if (result.error === 'state_invalid'){
+          if (resultCode === 'state_invalid') {
             setInlineStatus(startHandStatusEl, t('pokerErrStateChanged', 'State changed. Refreshing...'), 'error');
             if (isPageActive()) loadTable(false);
-            return;
+            return { ok: false, code: resultCode };
+          }
+          if (suppressNeutralErrors && isNeutralAutoStartCode(resultCode)) {
+            return { ok: false, code: resultCode };
           }
           setInlineStatus(startHandStatusEl, t('pokerErrStartHand', 'Failed to start hand'), 'error');
-          return;
+          return { ok: false, code: resultCode };
         }
         clearStartHandPending();
         setInlineStatus(startHandStatusEl, t('pokerStartHandOk', 'Hand started'), 'success');
-        if (!isPageActive()) return;
+        if (!isPageActive()) return { ok: true, code: 'ok' };
         loadTable(false);
+        return { ok: true, code: 'ok' };
       } catch (err){
         if (isAbortError(err)){
           pauseStartHandPending();
-          return;
+          return { ok: false, code: 'aborted' };
         }
         if (isAuthError(err)){
           stopPendingAll();
@@ -2195,11 +2183,15 @@
             stopHeartbeat: stopHeartbeat,
             onAuthExpired: startAuthWatch
           });
-          return;
+          return { ok: false, code: 'unauthorized' };
         }
+        var errCode = err && (err.code || err.error || err.message) ? err.code || err.error || err.message : 'request_failed';
         clearStartHandPending();
         klog('poker_start_hand_error', { tableId: tableId, error: err.message || err.code });
-        setInlineStatus(startHandStatusEl, err.message || t('pokerErrStartHand', 'Failed to start hand'), 'error');
+        if (!(suppressNeutralErrors && isNeutralAutoStartCode(errCode))){
+          setInlineStatus(startHandStatusEl, err.message || t('pokerErrStartHand', 'Failed to start hand'), 'error');
+        }
+        return { ok: false, code: errCode };
       }
     }
 
