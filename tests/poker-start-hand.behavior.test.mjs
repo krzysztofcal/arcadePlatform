@@ -945,6 +945,32 @@ const runConflictSemantics = async () => {
   assert.equal(JSON.parse(inHandConflict.body).error, "already_in_hand");
 };
 
+
+const runHoleCardsAtomicWriteFailure = async () => {
+  const queries = [];
+  const storedState = {
+    value: null,
+    holeCardsStore: new Map(),
+    holeCardsInsertError: { code: "XX000", message: "simulated_partial_failure" },
+  };
+  const handler = makeHandler(queries, storedState);
+
+  const response = await handler({
+    httpMethod: "POST",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    body: JSON.stringify({ tableId, requestId: "req-atomic-fail" }),
+  });
+
+  assert.equal(response.statusCode, 500);
+  assert.equal(JSON.parse(response.body).error, "XX000");
+  const holeCardInserts = queries.filter((q) => q.query.toLowerCase().includes("insert into public.poker_hole_cards"));
+  assert.equal(holeCardInserts.length, 1);
+  const actionInserts = queries.filter((q) => q.query.toLowerCase().includes("insert into public.poker_actions"));
+  assert.equal(actionInserts.length, 0);
+  assert.equal(storedState.holeCardsStore.size, 0);
+};
+
+
 await runHappyPath();
 await runReplayPath();
 await runHeadsUpBlinds();
@@ -952,6 +978,7 @@ await runDealerRotation();
 await runDealerBasedBlinds();
 await runInvalidDeal();
 await runMissingHoleCardsTable();
+await runHoleCardsAtomicWriteFailure();
 await runMissingDealSecret();
 await runRequestPending();
 await runInvalidStakes();

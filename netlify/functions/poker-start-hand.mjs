@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import { baseHeaders, beginSql, corsHeaders, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
-import { isValidTwoCards } from "./_shared/poker-cards-utils.mjs";
+import { areCardsUnique, isValidTwoCards } from "./_shared/poker-cards-utils.mjs";
 import { dealHoleCards } from "./_shared/poker-engine.mjs";
 import { deriveDeck } from "./_shared/poker-deal-deterministic.mjs";
 import { TURN_MS, computeNextDealerSeatNo } from "./_shared/poker-reducer.mjs";
@@ -392,6 +392,11 @@ export async function handler(event) {
 
       if (!activeUserIdList.every((userId) => isValidTwoCards(dealtHoleCards[userId]))) {
         klog("poker_state_corrupt", { tableId, phase: "PREFLOP" });
+        throw makeError(409, "state_invalid");
+      }
+      const flatHoleCards = activeUserIdList.flatMap((seatUserId) => dealtHoleCards[seatUserId] || []);
+      if (!areCardsUnique(flatHoleCards)) {
+        klog("poker_state_corrupt", { tableId, phase: "PREFLOP", reason: "hole_cards_not_unique" });
         throw makeError(409, "state_invalid");
       }
 

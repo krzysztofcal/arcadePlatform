@@ -205,12 +205,23 @@ const run = async () => {
     headers: { origin: "https://example.test", authorization: "Bearer token" },
     queryStringParameters: { tableId },
   });
-  assert.equal(missingTableResponse.statusCode, 409);
-  assert.equal(JSON.parse(missingTableResponse.body).error, "state_invalid");
+  assert.equal(missingTableResponse.statusCode, 200);
+  const missingTablePayload = JSON.parse(missingTableResponse.body);
+  assert.equal(missingTablePayload.ok, true);
+  assert.equal(missingTablePayload.myHoleCards, null);
+  assert.equal(missingTablePayload.holeCardsStatus, "MISSING");
   const missingTableInserts = missingTableQueries.filter((entry) =>
     entry.query.toLowerCase().includes("insert into public.poker_hole_cards")
   );
   assert.equal(missingTableInserts.length, 0);
+  const missingTableResponsePoll2 = await makeHandler([], storedState, "user-1", {
+    holeCardsSelectError: missingTableError,
+  })({
+    httpMethod: "GET",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    queryStringParameters: { tableId },
+  });
+  assert.equal(missingTableResponsePoll2.statusCode, 200);
 
   const missingRowResponse = await makeHandler([], storedState, "user-1", {
     holeCardsByUserId: {
@@ -227,6 +238,7 @@ const run = async () => {
   assert.equal(missingRowPayload.ok, true);
   assert.ok(Array.isArray(missingRowPayload.myHoleCards));
   assert.equal(missingRowPayload.myHoleCards.length, 2);
+  assert.equal(missingRowPayload.holeCardsStatus, undefined);
 
   const invalidCardsResponse = await makeHandler([], storedState, "user-1", {
     holeCardsByUserId: {
@@ -243,6 +255,22 @@ const run = async () => {
   assert.equal(invalidCardsPayload.ok, true);
   assert.ok(Array.isArray(invalidCardsPayload.myHoleCards));
   assert.equal(invalidCardsPayload.myHoleCards.length, 2);
+
+  const myInvalidCardsResponse = await makeHandler([], storedState, "user-1", {
+    holeCardsByUserId: {
+      ...defaultHoleCards,
+      "user-1": [{ r: "A", s: "S" }],
+    },
+  })({
+    httpMethod: "GET",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    queryStringParameters: { tableId },
+  });
+  assert.equal(myInvalidCardsResponse.statusCode, 200);
+  const myInvalidCardsPayload = JSON.parse(myInvalidCardsResponse.body);
+  assert.equal(myInvalidCardsPayload.ok, true);
+  assert.equal(myInvalidCardsPayload.myHoleCards, null);
+  assert.equal(myInvalidCardsPayload.holeCardsStatus, "INVALID");
 
   const repairQueries = [];
   const repairState = {
@@ -268,16 +296,16 @@ const run = async () => {
   assert.equal(repairResponse.statusCode, 200);
   const repairPayload = JSON.parse(repairResponse.body);
   assert.equal(repairPayload.ok, true);
-  assert.ok(Array.isArray(repairPayload.myHoleCards));
-  assert.equal(repairPayload.myHoleCards.length, 2);
+  assert.equal(repairPayload.myHoleCards, null);
+  assert.equal(repairPayload.holeCardsStatus, "MISSING");
   assert.equal(JSON.stringify(repairPayload).includes("holeCardsByUserId"), false);
   assert.equal(JSON.stringify(repairPayload).includes('"deck"'), false);
   assert.equal(JSON.stringify(repairPayload).includes('"handSeed"'), false);
   const repairInserts = repairQueries.filter((entry) =>
     entry.query.toLowerCase().includes("insert into public.poker_hole_cards")
   );
-  assert.equal(repairInserts.length, 1);
-  assert.ok(repairLogs.some((entry) => entry.event === "poker_get_table_hole_cards_repaired"));
+  assert.equal(repairInserts.length, 0);
+  assert.ok(repairLogs.some((entry) => entry.event === "poker_get_table_hole_cards_soft_fail"));
 
   const missingSeedState = { ...baseState, handSeed: "" };
   const missingSeedQueries = [];
@@ -421,7 +449,7 @@ const run = async () => {
     queryStringParameters: { tableId },
   });
   assert.equal(timeoutResponse.statusCode, 200);
-  assert.equal(timeoutCalled, false);
+  assert.equal(timeoutCalled, true);
   const timeoutUpdates = timeoutQueries.filter((entry) =>
     entry.query.toLowerCase().includes("update public.poker_state")
   );

@@ -9,10 +9,28 @@ import { maybeApplyTurnTimeout, normalizeSeatOrderFromState } from "./_shared/po
 import { isValidUuid } from "./_shared/poker-utils.mjs";
 
 const isActionPhase = (phase) => phase === "PREFLOP" || phase === "FLOP" || phase === "TURN" || phase === "RIVER";
-const isRepairableHoleCardsError = (error) => {
-  if (!error || isHoleCardsTableMissing(error)) return false;
-  const message = String(error?.message || "");
-  return message === "state_invalid";
+const HOLE_CARDS_STATUS_MISSING = "MISSING";
+const HOLE_CARDS_STATUS_INVALID = "INVALID";
+
+const holeCardLogLimiter = new Map();
+
+const logHoleCardsIssueOnce = ({ tableId, handId, userId, reason }) => {
+  const key = `${tableId}:${handId || "unknown"}:${userId}:${reason}`;
+  const now = Date.now();
+  const prev = holeCardLogLimiter.get(key) || 0;
+  if (now - prev < 30_000) return;
+  holeCardLogLimiter.set(key, now);
+  if (holeCardLogLimiter.size > 2000) {
+    for (const [entryKey, ts] of holeCardLogLimiter.entries()) {
+      if (now - ts > 120_000) holeCardLogLimiter.delete(entryKey);
+    }
+  }
+  klog("poker_get_table_hole_cards_soft_fail", {
+    tableId,
+    handId: handId || null,
+    userId,
+    reason,
+  });
 };
 
 const normalizeSeatUserIds = (seats) => {
@@ -30,13 +48,6 @@ const hasSameUserIds = (left, right) => {
   return true;
 };
 
-const canRepairHoleCards = (state) => {
-  if (!state || !isActionPhase(state.phase)) return false;
-  if (typeof state.handId !== "string" || !state.handId.trim()) return false;
-  if (typeof state.handSeed !== "string" || !state.handSeed.trim()) return false;
-  const seatUserIdsInOrder = normalizeSeatOrderFromState(state.seats);
-  return seatUserIdsInOrder.length > 0;
-};
 
 const parseTableId = (event) => {
   const queryValue = event.queryStringParameters?.tableId;
@@ -227,6 +238,7 @@ export async function handler(event) {
 
       const currentState = normalizeJsonState(stateRow.state);
       let myHoleCards = [];
+      let holeCardsStatus = null;
       let updatedState = currentState;
 
       if (isActionPhase(currentState.phase)) {
@@ -302,46 +314,38 @@ export async function handler(event) {
                 handId: currentState.handId,
                 activeUserIds: effectiveUserIdsForHoleCards,
                 requiredUserIds: [auth.userId],
+                selfHealInvalid: true,
               });
             } catch (error) {
               if (isHoleCardsTableMissing(error)) {
-                throw new Error("state_invalid");
+                throw error;
               }
-              if (!isRepairableHoleCardsError(error)) throw error;
-
-              // IMPORTANT: never attempt DB repair unless explicitly enabled.
-              // Default OFF in prod to avoid lock waits/timeouts in get-table.
-              if (process.env.POKER_GET_TABLE_REPAIR !== "1") {
-                throw new Error("state_invalid");
-              }
-
-              if (!canRepairHoleCards(currentState)) {
-                throw new Error("state_invalid");
-              }
-
-              const repairResult = await repairHoleCards({
-                tx,
-                tableId,
-                handId: currentState.handId,
-                handSeed: currentState.handSeed,
-                seats: currentState.seats,
-              });
-
-              klog("poker_get_table_hole_cards_repaired", {
-                tableId,
-                handId: currentState.handId,
-                seatCount: repairResult.seatCount,
-              });
-
-              holeCards = await loadHoleCardsByUserId(tx, {
-                tableId,
-                handId: currentState.handId,
-                activeUserIds: effectiveUserIdsForHoleCards,
-                requiredUserIds: [auth.userId],
-              });
+              throw error;
             }
 
-            myHoleCards = holeCards.holeCardsByUserId[auth.userId] || [];
+            const statusByUserId = holeCards.holeCardsStatusByUserId || {};
+            const userHoleCardsStatus = statusByUserId[auth.userId] || null;
+            if (userHoleCardsStatus === HOLE_CARDS_STATUS_INVALID) {
+              myHoleCards = null;
+              holeCardsStatus = HOLE_CARDS_STATUS_INVALID;
+              logHoleCardsIssueOnce({
+                tableId,
+                handId: currentState.handId,
+                userId: auth.userId,
+                reason: HOLE_CARDS_STATUS_INVALID,
+              });
+            } else if (userHoleCardsStatus === HOLE_CARDS_STATUS_MISSING) {
+              myHoleCards = null;
+              holeCardsStatus = HOLE_CARDS_STATUS_MISSING;
+              logHoleCardsIssueOnce({
+                tableId,
+                handId: currentState.handId,
+                userId: auth.userId,
+                reason: HOLE_CARDS_STATUS_MISSING,
+              });
+            } else {
+              myHoleCards = holeCards.holeCardsByUserId[auth.userId] || [];
+            }
 
             if (shouldApplyTimeout) {
               let allHoleCards;
@@ -351,6 +355,7 @@ export async function handler(event) {
                   handId: currentState.handId,
                   activeUserIds: stateSeatUserIds,
                   requiredUserIds: stateSeatUserIds,
+                  selfHealInvalid: true,
                 });
               } catch (error) {
                 klog("poker_get_table_timeout_missing_hole_cards", {
@@ -465,30 +470,23 @@ export async function handler(event) {
               }
             }
           } catch (error) {
-            if (error?.message === "state_invalid") {
-              klog("poker_get_table_hole_cards_invalid", {
-                tableId,
-                handId: currentState.handId,
-                userId: auth.userId,
-                effectiveCount: effectiveUserIdsForHoleCards.length,
-              });
-              throw new Error("state_invalid");
-            }
             if (isHoleCardsTableMissing(error)) {
-              klog("poker_get_table_hole_cards_invalid", {
+              myHoleCards = null;
+              holeCardsStatus = HOLE_CARDS_STATUS_MISSING;
+              logHoleCardsIssueOnce({
                 tableId,
                 handId: currentState.handId,
                 userId: auth.userId,
-                effectiveCount: effectiveUserIdsForHoleCards.length,
+                reason: "TABLE_MISSING",
               });
-              throw new Error("state_invalid");
+            } else {
+              throw error;
             }
-            throw error;
           }
         }
       }
 
-      return { table, seats, stateVersion, currentState: updatedState, myHoleCards };
+      return { table, seats, stateVersion, currentState: updatedState, myHoleCards, holeCardsStatus };
     });
 
     if (result?.error === "table_not_found") {
@@ -524,13 +522,14 @@ export async function handler(event) {
           version: stateVersion,
           state: publicState,
         },
-        myHoleCards: result.myHoleCards || [],
+        myHoleCards: typeof result.myHoleCards === "undefined" ? [] : result.myHoleCards,
+        holeCardsStatus: result.holeCardsStatus || undefined,
         legalActions: legalInfo.actions,
         actionConstraints: buildActionConstraints(legalInfo),
       }),
     };
   } catch (error) {
-    if (error?.message === "state_invalid" || isHoleCardsTableMissing(error)) {
+    if (error?.message === "state_invalid") {
       return { statusCode: 409, headers: mergeHeaders(cors), body: JSON.stringify({ error: "state_invalid" }) };
     }
     klog("poker_get_table_error", { message: error?.message || "unknown_error" });
