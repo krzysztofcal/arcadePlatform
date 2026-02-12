@@ -86,6 +86,13 @@ const makeHandler = (queries, storedState, userId, options = {}) => {
             }
             return rows;
           }
+          if (text.includes("delete from public.poker_hole_cards")) {
+            const userIds = Array.isArray(params?.[2]) ? params[2] : [];
+            for (const userIdValue of userIds) {
+              delete holeCardsMap[userIdValue];
+            }
+            return [];
+          }
           if (text.includes("insert into public.poker_hole_cards")) {
             if (options.holeCardsInsertError) throw options.holeCardsInsertError;
 
@@ -271,6 +278,41 @@ const run = async () => {
   assert.equal(myInvalidCardsPayload.ok, true);
   assert.equal(myInvalidCardsPayload.myHoleCards, null);
   assert.equal(myInvalidCardsPayload.holeCardsStatus, "INVALID");
+
+  delete process.env.POKER_GET_TABLE_SELF_HEAL;
+  const noSelfHealQueries = [];
+  await makeHandler(noSelfHealQueries, storedState, "user-1", {
+    holeCardsByUserId: {
+      ...defaultHoleCards,
+      "user-1": [{ r: "A", s: "S" }],
+    },
+  })({
+    httpMethod: "GET",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    queryStringParameters: { tableId },
+  });
+  const noSelfHealDeletes = noSelfHealQueries.filter((entry) =>
+    entry.query.toLowerCase().includes("delete from public.poker_hole_cards")
+  );
+  assert.equal(noSelfHealDeletes.length, 0);
+
+  process.env.POKER_GET_TABLE_SELF_HEAL = "1";
+  const yesSelfHealQueries = [];
+  await makeHandler(yesSelfHealQueries, storedState, "user-1", {
+    holeCardsByUserId: {
+      ...defaultHoleCards,
+      "user-1": [{ r: "A", s: "S" }],
+    },
+  })({
+    httpMethod: "GET",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    queryStringParameters: { tableId },
+  });
+  const yesSelfHealDeletes = yesSelfHealQueries.filter((entry) =>
+    entry.query.toLowerCase().includes("delete from public.poker_hole_cards")
+  );
+  assert.equal(yesSelfHealDeletes.length, 1);
+  delete process.env.POKER_GET_TABLE_SELF_HEAL;
 
   const repairQueries = [];
   const repairState = {

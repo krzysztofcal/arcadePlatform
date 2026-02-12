@@ -340,6 +340,15 @@ export async function handler(event) {
       const derivedSeats = orderedSeatList.slice();
       const activeUserIds = new Set(orderedSeats.map((seat) => seat.user_id));
       const activeUserIdList = orderedSeats.map((seat) => seat.user_id);
+      if (activeUserIds.size < 2 || activeUserIdList.length < 2) {
+        klog("poker_start_hand_invalid_active_players", {
+          tableId,
+          reason: "insufficient_active_players",
+          activeUserCount: activeUserIds.size,
+          activeSeatCount: activeUserIdList.length,
+        });
+        throw makeError(409, "state_invalid");
+      }
       const currentStacks = parseStacks(currentState.stacks);
       const nextStacks = activeUserIdList.reduce((acc, userId) => {
         if (!Object.prototype.hasOwnProperty.call(currentStacks, userId)) return acc;

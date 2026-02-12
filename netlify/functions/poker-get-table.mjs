@@ -12,6 +12,7 @@ import { isValidUuid } from "./_shared/poker-utils.mjs";
 const isActionPhase = (phase) => phase === "PREFLOP" || phase === "FLOP" || phase === "TURN" || phase === "RIVER";
 const HOLE_CARDS_STATUS_MISSING = "MISSING";
 const HOLE_CARDS_STATUS_INVALID = "INVALID";
+const shouldSelfHealHoleCards = () => process.env.POKER_GET_TABLE_SELF_HEAL === "1";
 
 const holeCardLogLimiter = new Map();
 
@@ -316,7 +317,7 @@ export async function handler(event) {
                 activeUserIds: effectiveUserIdsForHoleCards,
                 requiredUserIds: [auth.userId],
                 mode: "soft",
-                selfHealInvalid: true,
+                selfHealInvalid: shouldSelfHealHoleCards(),
               });
             } catch (error) {
               if (isHoleCardsTableMissing(error)) {
@@ -358,7 +359,7 @@ export async function handler(event) {
                   activeUserIds: stateSeatUserIds,
                   requiredUserIds: stateSeatUserIds,
                   mode: "soft",
-                  selfHealInvalid: true,
+                  selfHealInvalid: shouldSelfHealHoleCards(),
                 });
               } catch (error) {
                 klog("poker_get_table_timeout_missing_hole_cards", {
