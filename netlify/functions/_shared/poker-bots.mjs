@@ -81,13 +81,15 @@ function computeTargetBotCount({ maxPlayers, humanCount, maxBots } = {}) {
   const totalSeats = Number.isFinite(Number(maxPlayers)) ? Math.trunc(Number(maxPlayers)) : 0;
   const humans = Number.isFinite(Number(humanCount)) ? Math.trunc(Number(humanCount)) : 0;
   const limit = Number.isFinite(Number(maxBots)) ? Math.trunc(Number(maxBots)) : 0;
+  const totalSeatsSafe = Math.max(0, totalSeats);
+  const humansSafe = Math.max(0, humans);
+  const limitSafe = Math.max(0, limit);
 
-  if (humans <= 0) return 0;
-  if (humans >= totalSeats) return 0;
+  if (humansSafe <= 0) return 0;
+  if (humansSafe >= totalSeatsSafe) return 0;
 
-  const freeSeats = totalSeats - humans;
-  const maxBotsAllowedByCapacity = Math.max(0, freeSeats - 1);
-  return Math.max(0, Math.min(limit, maxBotsAllowedByCapacity));
+  const maxBotsAllowedByCapacity = Math.max(0, (totalSeatsSafe - humansSafe) - 1);
+  return Math.max(0, Math.min(limitSafe, maxBotsAllowedByCapacity));
 }
 
 function chooseBotActionTrivial(legalActions) {
