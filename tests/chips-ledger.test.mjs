@@ -460,6 +460,53 @@ describe("chips ledger idempotency and validation", () => {
     ).rejects.toMatchObject({ code: "missing_user_entry", status: 400 });
   });
 
+  it("uses explicit USER entry userId when provided", async () => {
+    const { postTransaction } = await loadLedger();
+    await postTransaction({
+      userId: "human-user",
+      txType: "MINT",
+      idempotencyKey: "entry-userid-explicit",
+      entries: [
+        { accountType: "SYSTEM", systemKey: "TREASURY", amount: -10 },
+        { accountType: "USER", userId: "bot-user", amount: 10 },
+      ],
+    });
+    const botAccount = [...mockDb.accounts.values()].find((acc) => acc.account_type === "USER" && acc.user_id === "bot-user");
+    const humanAccount = [...mockDb.accounts.values()].find((acc) => acc.account_type === "USER" && acc.user_id === "human-user");
+    expect(botAccount?.balance).toBe(10);
+    expect(humanAccount?.balance ?? 0).toBe(0);
+  });
+
+  it("falls back USER entry userId to payload userId", async () => {
+    const { postTransaction } = await loadLedger();
+    await postTransaction({
+      userId: "human-fallback",
+      txType: "MINT",
+      idempotencyKey: "entry-userid-fallback",
+      entries: [
+        { accountType: "SYSTEM", systemKey: "TREASURY", amount: -11 },
+        { accountType: "USER", amount: 11 },
+      ],
+    });
+    const humanAccount = [...mockDb.accounts.values()].find((acc) => acc.account_type === "USER" && acc.user_id === "human-fallback");
+    expect(humanAccount?.balance).toBe(11);
+  });
+
+  it("rejects USER entry when both entry.userId and payload userId are missing", async () => {
+    const { postTransaction } = await loadLedger();
+    await expect(
+      postTransaction({
+        userId: null,
+        txType: "MINT",
+        idempotencyKey: "entry-userid-missing",
+        entries: [
+          { accountType: "SYSTEM", systemKey: "TREASURY", amount: -12 },
+          { accountType: "USER", amount: 12 },
+        ],
+      }),
+    ).rejects.toMatchObject({ code: "invalid_entry_user", status: 400 });
+  });
+
   it("requires balanced double-entry amounts", async () => {
     const { postTransaction } = await loadLedger();
     await expect(

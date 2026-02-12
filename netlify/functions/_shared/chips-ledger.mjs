@@ -531,7 +531,7 @@ select
   return rows?.[0] || null;
 }
 
-function validateEntries(entries) {
+function validateEntries(entries, payloadUserId) {
   if (!Array.isArray(entries) || entries.length === 0) {
     throw badRequest("missing_entries", "At least one entry is required");
   }
@@ -541,6 +541,9 @@ function validateEntries(entries) {
     const amount = Number(entry?.amount);
     const kind = entry?.accountType || entry?.kind;
     const systemKey = entry?.systemKey;
+    const rawEntryUserId = entry?.userId;
+    const hasEntryUserId = rawEntryUserId !== undefined && rawEntryUserId !== null;
+    const entryUserId = hasEntryUserId ? String(rawEntryUserId).trim() : "";
     if (!Number.isInteger(amount) || amount === 0) {
       throw badRequest("invalid_entry_amount", "Entry amount must be a non-zero integer");
     }
@@ -550,8 +553,21 @@ function validateEntries(entries) {
     if (kind !== "USER" && !systemKey) {
       throw badRequest("missing_system_key", "System entries must provide systemKey");
     }
+    let effectiveUserId = null;
     if (kind === "USER") {
       hasUserEntry = true;
+      if (hasEntryUserId) {
+        if (!entryUserId) {
+          throw badRequest("invalid_entry_user", "USER entries require userId when provided");
+        }
+        effectiveUserId = entryUserId;
+      } else {
+        const fallbackUserId = String(payloadUserId == null ? "" : payloadUserId).trim();
+        if (!fallbackUserId) {
+          throw badRequest("invalid_entry_user", "USER entries require a user id");
+        }
+        effectiveUserId = fallbackUserId;
+      }
     }
     if (
       Object.prototype.hasOwnProperty.call(entry, "metadata") &&
@@ -561,7 +577,7 @@ function validateEntries(entries) {
       throw badRequest("invalid_entry_metadata", "Entry metadata must be a plain JSON object");
     }
     const metadata = entry?.metadata ?? {};
-    sanitized.push({ kind, systemKey, amount, metadata });
+    sanitized.push({ kind, systemKey, amount, metadata, userId: effectiveUserId });
   }
   if (!hasUserEntry) {
     throw badRequest("missing_user_entry", "Transactions must include the user account");
@@ -587,7 +603,7 @@ async function postTransaction({
     throw badRequest("missing_idempotency_key", "Idempotency key is required");
   }
 
-  const normalizedEntries = validateEntries(entries);
+  const normalizedEntries = validateEntries(entries, userId);
   assertPlainObjectOrNull(metadata, "invalid_metadata");
   const safeMetadata = metadata ?? {};
   let safeMetadataJson = "{}";
@@ -618,6 +634,7 @@ async function postTransaction({
 
   const hashableEntries = normalizedEntries.map((entry) => ({
     kind: entry.kind,
+    userId: entry.userId ?? null,
     systemKey: entry.systemKey ?? null,
     amount: entry.amount,
     metadata: entry.metadata ?? {},
@@ -643,11 +660,16 @@ async function postTransaction({
   const runInTx = async (sqlTx) => {
     // IMPORTANT: inside this block use ONLY `sqlTx` for all SQL to keep it atomic.
     userAccount = await getOrCreateUserAccount(userId, sqlTx);
+    const userEntryIds = [...new Set(normalizedEntries.filter((entry) => entry.kind === "USER").map((entry) => entry.userId).filter(Boolean))];
+    const userAccountById = new Map();
+    for (const userEntryId of userEntryIds) {
+      userAccountById.set(userEntryId, await getOrCreateUserAccount(userEntryId, sqlTx));
+    }
 
     const entryRecords = normalizedEntries.map(entry => {
       if (entry.kind === "USER") {
         const safeEntryMetadata = entry?.metadata ?? {};
-        return { account_id: userAccount.id, amount: entry.amount, metadata: safeEntryMetadata };
+        return { account_id: userAccountById.get(entry.userId)?.id, amount: entry.amount, metadata: safeEntryMetadata };
       }
       const account = systemMap.get(entry.systemKey);
       const safeEntryMetadata = entry?.metadata ?? {};
