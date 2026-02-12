@@ -285,18 +285,18 @@ const run = async () => {
     queries: [],
     sideEffects: { seatInsert: 0, ledger: 0, conflictSeatInsertUsed: false },
     conflictSeatInsertOnce: true,
-    occupiedSeatRows: [{ seat_no: 1, status: "ACTIVE" }],
+    occupiedSeatRows: [{ seat_no: 2, status: "ACTIVE" }],
   });
   const activeSeatIsOccupiedJoin = await callJoin(activeSeatIsOccupiedHandler, "join-auto-seat-active-occupied", {
     seatNo: undefined,
     autoSeat: true,
-    preferredSeatNo: 0,
+    preferredSeatNo: 1,
   });
   assert.equal(activeSeatIsOccupiedJoin.statusCode, 200);
   assert.equal(
     JSON.parse(activeSeatIsOccupiedJoin.body).seatNo,
-    1,
-    "autoSeat should skip ACTIVE seats during retries (next free seat, UI index)"
+    2,
+    "autoSeat should skip ACTIVE seats during retries (next free seat)"
   );
 
 
