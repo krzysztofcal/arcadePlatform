@@ -6,6 +6,7 @@ import { isStateStorageValid, normalizeJsonState, withoutPrivateState } from "./
 import { updatePokerStateOptimistic } from "./_shared/poker-state-write.mjs";
 import { parseStakes } from "./_shared/poker-stakes.mjs";
 import { maybeApplyTurnTimeout, normalizeSeatOrderFromState } from "./_shared/poker-turn-timeout.mjs";
+import { isValidTwoCards } from "./_shared/poker-cards-utils.mjs";
 import { isValidUuid } from "./_shared/poker-utils.mjs";
 
 const isActionPhase = (phase) => phase === "PREFLOP" || phase === "FLOP" || phase === "TURN" || phase === "RIVER";
@@ -314,6 +315,7 @@ export async function handler(event) {
                 handId: currentState.handId,
                 activeUserIds: effectiveUserIdsForHoleCards,
                 requiredUserIds: [auth.userId],
+                mode: "soft",
                 selfHealInvalid: true,
               });
             } catch (error) {
@@ -355,6 +357,7 @@ export async function handler(event) {
                   handId: currentState.handId,
                   activeUserIds: stateSeatUserIds,
                   requiredUserIds: stateSeatUserIds,
+                  mode: "soft",
                   selfHealInvalid: true,
                 });
               } catch (error) {
@@ -369,7 +372,24 @@ export async function handler(event) {
               }
 
               if (shouldApplyTimeout) {
-                holeCards = allHoleCards;
+                const allStatuses = allHoleCards.holeCardsStatusByUserId || {};
+                const hasRequiredStatus = stateSeatUserIds.some((userId) => allStatuses[userId]);
+                const hasRequiredCards = stateSeatUserIds.every((userId) =>
+                  isValidTwoCards(allHoleCards.holeCardsByUserId?.[userId])
+                );
+                if (hasRequiredStatus || !hasRequiredCards) {
+                  klog("poker_get_table_timeout_missing_hole_cards", {
+                    tableId,
+                    handId: currentState.handId,
+                    expectedCount: stateSeatUserIds.length,
+                    attemptedUserIds: stateSeatUserIds,
+                    statusCount: Object.keys(allStatuses).length,
+                    validCount: Object.values(allHoleCards.holeCardsByUserId || {}).filter((cards) => isValidTwoCards(cards)).length,
+                  });
+                  shouldApplyTimeout = false;
+                } else {
+                  holeCards = allHoleCards;
+                }
               }
             }
 

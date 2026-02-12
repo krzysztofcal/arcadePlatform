@@ -20,7 +20,10 @@ const normalizeCards = (value) => {
   return null;
 };
 
-const loadHoleCardsByUserId = async (tx, { tableId, handId, activeUserIds, requiredUserIds, selfHealInvalid = false }) => {
+const loadHoleCardsByUserId = async (
+  tx,
+  { tableId, handId, activeUserIds, requiredUserIds, mode = "strict", selfHealInvalid = false }
+) => {
   if (!Array.isArray(activeUserIds) || activeUserIds.length === 0) {
     throw new Error("state_invalid");
   }
@@ -29,42 +32,49 @@ const loadHoleCardsByUserId = async (tx, { tableId, handId, activeUserIds, requi
   if (!Array.isArray(requiredIds) || requiredIds.length === 0) {
     throw new Error("state_invalid");
   }
+
   const rows = await tx.unsafe(
     "select user_id, cards from public.poker_hole_cards where table_id = $1 and hand_id = $2;",
     [tableId, handId]
   );
   const list = Array.isArray(rows) ? rows : [];
   const activeSet = new Set(activeUserIds);
+  const requiredSet = new Set(requiredIds);
   const map = {};
   const statusByUserId = {};
-  const invalidUsersToDelete = [];
+
   for (const row of list) {
     const userId = row?.user_id;
     if (!activeSet.has(userId)) continue;
     const cards = normalizeCards(row.cards);
     map[userId] = cards;
-    if (cards == null) {
+    if (requiredSet.has(userId) && !isValidTwoCards(cards)) {
       statusByUserId[userId] = "INVALID";
-      invalidUsersToDelete.push(userId);
     }
   }
+
   for (const userId of requiredIds) {
     if (!Object.prototype.hasOwnProperty.call(map, userId)) {
       statusByUserId[userId] = "MISSING";
       continue;
     }
-    const cards = map[userId];
-    if (!isValidTwoCards(cards)) {
+    if (!isValidTwoCards(map[userId])) {
       statusByUserId[userId] = "INVALID";
     }
   }
 
-  if (selfHealInvalid && invalidUsersToDelete.length > 0) {
-    await tx.unsafe("delete from public.poker_hole_cards where table_id = $1 and hand_id = $2 and user_id = any($3::text[]);", [
-      tableId,
-      handId,
-      invalidUsersToDelete,
-    ]);
+  if (selfHealInvalid) {
+    const invalidUsersToDelete = Object.keys(statusByUserId).filter((userId) => statusByUserId[userId] === "INVALID");
+    if (invalidUsersToDelete.length > 0) {
+      await tx.unsafe(
+        "delete from public.poker_hole_cards where table_id = $1 and hand_id = $2 and user_id = any($3::text[]);",
+        [tableId, handId, invalidUsersToDelete]
+      );
+    }
+  }
+
+  if (mode !== "soft" && requiredIds.some((userId) => statusByUserId[userId])) {
+    throw new Error("state_invalid");
   }
 
   return { holeCardsByUserId: map, holeCardsStatusByUserId: statusByUserId };

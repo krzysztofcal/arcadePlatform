@@ -546,6 +546,8 @@ export async function handler(event) {
           tableId,
           handId: currentState.handId,
           activeUserIds: activeUserIdsForHoleCards,
+          requiredUserIds: activeUserIdsForHoleCards,
+          mode: "strict",
         });
         holeCardsByUserId = holeCards.holeCardsByUserId;
       } catch (error) {

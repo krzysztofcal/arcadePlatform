@@ -449,12 +449,44 @@ const run = async () => {
     queryStringParameters: { tableId },
   });
   assert.equal(timeoutResponse.statusCode, 200);
-  assert.equal(timeoutCalled, true);
+  assert.equal(timeoutCalled, false);
   const timeoutUpdates = timeoutQueries.filter((entry) =>
     entry.query.toLowerCase().includes("update public.poker_state")
   );
   assert.equal(timeoutUpdates.length, 0);
 
+
+  let timeoutInvalidCalled = false;
+  const timeoutInvalidQueries = [];
+  const timeoutInvalidResponse = await makeHandler(
+    timeoutInvalidQueries,
+    { value: JSON.stringify(timeoutState), version: 6 },
+    "user-1",
+    {
+      holeCardsByUserId: {
+        "user-1": defaultHoleCards["user-1"],
+        "user-2": [{ r: "A", s: "S" }],
+        "user-3": defaultHoleCards["user-3"],
+      },
+      maybeApplyTurnTimeout: () => {
+        timeoutInvalidCalled = true;
+        return { applied: false };
+      },
+    }
+  )({
+    httpMethod: "GET",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    queryStringParameters: { tableId },
+  });
+  assert.equal(timeoutInvalidResponse.statusCode, 200);
+  assert.equal(timeoutInvalidCalled, false);
+  const timeoutInvalidPayload = JSON.parse(timeoutInvalidResponse.body);
+  assert.ok(Array.isArray(timeoutInvalidPayload.myHoleCards));
+  assert.equal(timeoutInvalidPayload.myHoleCards.length, 2);
+  const timeoutInvalidUpdates = timeoutInvalidQueries.filter((entry) =>
+    entry.query.toLowerCase().includes("update public.poker_state")
+  );
+  assert.equal(timeoutInvalidUpdates.length, 0);
   let timeoutAppliedCalled = false;
   const timeoutAppliedQueries = [];
   const timeoutAppliedResponse = await makeHandler(
