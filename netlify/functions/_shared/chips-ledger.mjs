@@ -558,7 +558,7 @@ function validateEntries(entries, payloadUserId) {
       hasUserEntry = true;
       if (hasEntryUserId) {
         if (!entryUserId) {
-          throw badRequest("invalid_entry_user", "USER entries require userId when provided");
+          throw badRequest("invalid_entry_user", "USER entry userId must be non-empty string");
         }
         effectiveUserId = entryUserId;
       } else {
@@ -577,7 +577,7 @@ function validateEntries(entries, payloadUserId) {
       throw badRequest("invalid_entry_metadata", "Entry metadata must be a plain JSON object");
     }
     const metadata = entry?.metadata ?? {};
-    sanitized.push({ kind, systemKey, amount, metadata, userId: effectiveUserId });
+    sanitized.push({ kind, systemKey, amount, metadata, ...(kind === "USER" ? { userId: effectiveUserId } : {}) });
   }
   if (!hasUserEntry) {
     throw badRequest("missing_user_entry", "Transactions must include the user account");
@@ -634,7 +634,7 @@ async function postTransaction({
 
   const hashableEntries = normalizedEntries.map((entry) => ({
     kind: entry.kind,
-    userId: entry.userId ?? null,
+    userId: entry.kind === "USER" ? (entry.userId ?? null) : null,
     systemKey: entry.systemKey ?? null,
     amount: entry.amount,
     metadata: entry.metadata ?? {},
@@ -659,12 +659,13 @@ async function postTransaction({
   let userAccount = null;
   const runInTx = async (sqlTx) => {
     // IMPORTANT: inside this block use ONLY `sqlTx` for all SQL to keep it atomic.
-    userAccount = await getOrCreateUserAccount(userId, sqlTx);
     const userEntryIds = [...new Set(normalizedEntries.filter((entry) => entry.kind === "USER").map((entry) => entry.userId).filter(Boolean))];
     const userAccountById = new Map();
     for (const userEntryId of userEntryIds) {
       userAccountById.set(userEntryId, await getOrCreateUserAccount(userEntryId, sqlTx));
     }
+    const payloadUserId = String(userId == null ? "" : userId).trim();
+    userAccount = payloadUserId ? (userAccountById.get(payloadUserId) || null) : null;
 
     const entryRecords = normalizedEntries.map(entry => {
       if (entry.kind === "USER") {
