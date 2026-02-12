@@ -212,24 +212,13 @@ const run = async () => {
     headers: { origin: "https://example.test", authorization: "Bearer token" },
     queryStringParameters: { tableId },
   });
-  assert.equal(missingTableResponse.statusCode, 200);
+  assert.equal(missingTableResponse.statusCode, 409);
   const missingTablePayload = JSON.parse(missingTableResponse.body);
-  assert.equal(missingTablePayload.ok, true);
-  assert.equal(missingTablePayload.myHoleCards, null);
-  assert.equal(missingTablePayload.holeCardsStatus, "MISSING");
+  assert.equal(missingTablePayload.error, "state_invalid");
   const missingTableInserts = missingTableQueries.filter((entry) =>
     entry.query.toLowerCase().includes("insert into public.poker_hole_cards")
   );
   assert.equal(missingTableInserts.length, 0);
-  const missingTableResponsePoll2 = await makeHandler([], storedState, "user-1", {
-    holeCardsSelectError: missingTableError,
-  })({
-    httpMethod: "GET",
-    headers: { origin: "https://example.test", authorization: "Bearer token" },
-    queryStringParameters: { tableId },
-  });
-  assert.equal(missingTableResponsePoll2.statusCode, 200);
-
   const missingRowResponse = await makeHandler([], storedState, "user-1", {
     holeCardsByUserId: {
       "user-1": defaultHoleCards["user-1"],

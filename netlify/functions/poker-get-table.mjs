@@ -301,7 +301,7 @@ export async function handler(event) {
               });
             } catch (error) {
               if (isHoleCardsTableMissing(error)) {
-                throw error;
+                throw new Error("state_invalid");
               }
               throw error;
             }
@@ -475,18 +475,7 @@ export async function handler(event) {
               }
             }
           } catch (error) {
-            if (isHoleCardsTableMissing(error)) {
-              myHoleCards = null;
-              holeCardsStatus = HOLE_CARDS_STATUS_MISSING;
-              logHoleCardsIssueOnce({
-                tableId,
-                handId: currentState.handId,
-                userId: auth.userId,
-                reason: "TABLE_MISSING",
-              });
-            } else {
-              throw error;
-            }
+            throw error;
           }
         }
       }
