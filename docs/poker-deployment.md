@@ -6,10 +6,16 @@ Poker funds must always have a deterministic path back to the user. Each buy-in
 moves chips from USER → ESCROW using `TABLE_BUY_IN`, and each leave/timeout must
 cash those chips back from ESCROW → USER using `TABLE_CASH_OUT`. The sweep
 timeout path is required to cash out inactive seats so escrow balances cannot
-remain stranded. The authoritative stack source is `public.poker_seats.stack`,
-which must never be NULL after a successful join. JSON table state stacks are
-treated as derived/cache only and must be kept in sync when gameplay updates a
-player’s stack.
+remain stranded. The authoritative stack source during active gameplay is `poker_state.state.stacks`.
+`public.poker_seats.stack` is a persisted snapshot used for join preconditions,
+lobby display, and safety checks. It must never be NULL after a successful join.
+Seat stacks must be kept in sync at key transitions:
+- successful join
+- hand end / settlement
+- leave / cash-out
+- sweep cleanup
+This prevents stranded escrow balances and avoids gameplay issues such as
+"stack = 0" with no legal actions.
 
 ## Poker sweep endpoint
 

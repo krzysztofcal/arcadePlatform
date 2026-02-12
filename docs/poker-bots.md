@@ -27,18 +27,24 @@ To keep human seating priority, two protections apply.
    - In practice, do not seat bots into the last available slot when that slot should remain open for a human join path.
 
 2. Intervention rule
-   - If a human attempts to join a full table and at least one seat is bot-occupied, mark one bot as `leave_after_hand`.
-   - That bot remains for hand integrity, then leaves when the current hand ends.
+   - If a human attempts to join a full table and at least one seat is bot-occupied, mark one bot seat with a `leave_after_hand` flag (stored on the seat record).
+   - This flag is evaluated after the current hand settles. The bot is then cash-outed and the seat becomes available.
    - After hand end, free the seat for the waiting human path.
 
 ## 4. Economy & Chips Ledger
 
 Bots use house bankroll funds, but all chip movement still goes through the same ledger model used by poker seats.
 
+Each bot may have a deterministic system ledger account key
+(for example derived from `{tableId, seatNo}`).
+
+Bots are not Supabase-auth users. They operate through system ledger accounts
+so all chip movement remains auditable.
+
 - Bot buy-in is a real ledger transfer:
-  - `TABLE_BUY_IN`: bot account -> table escrow
+  - `TABLE_BUY_IN`: bot system account -> table escrow
 - Bot cash-out is a real ledger transfer:
-  - `TABLE_CASH_OUT`: table escrow -> bot account
+  - `TABLE_CASH_OUT`: table escrow -> bot system account
 
 Escrow concept (high level):
 - Table escrow is the temporary ledger location that holds active table chips during play.
