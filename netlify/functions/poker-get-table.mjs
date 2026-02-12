@@ -10,35 +10,6 @@ import { cardIdentity, isValidTwoCards } from "./_shared/poker-cards-utils.mjs";
 import { isValidUuid } from "./_shared/poker-utils.mjs";
 
 const isActionPhase = (phase) => phase === "PREFLOP" || phase === "FLOP" || phase === "TURN" || phase === "RIVER";
-const HOLE_CARDS_STATUS_MISSING = "MISSING";
-const HOLE_CARDS_STATUS_INVALID = "INVALID";
-const shouldSelfHealHoleCards = () => process.env.POKER_GET_TABLE_SELF_HEAL === "1";
-
-const shouldLogHoleCardsIssue = ({ tableId, handId, userId, reason }) => {
-  const rawPct = Number.parseInt(process.env.POKER_GET_TABLE_HOLE_CARDS_LOG_SAMPLE_PCT || "1", 10);
-  const samplePct = Number.isFinite(rawPct) ? Math.max(0, Math.min(100, rawPct)) : 1;
-  if (samplePct <= 0) return false;
-  if (samplePct >= 100) return true;
-  const key = `${tableId}|${handId || ""}|${userId}|${reason}`;
-  let hash = 2166136261;
-  for (let i = 0; i < key.length; i += 1) {
-    hash ^= key.charCodeAt(i);
-    hash = Math.imul(hash, 16777619);
-  }
-  const bucket = (hash >>> 0) % 100;
-  return bucket < samplePct;
-};
-
-const logHoleCardsIssue = ({ tableId, handId, userId, reason }) => {
-  if (!shouldLogHoleCardsIssue({ tableId, handId, userId, reason })) return;
-  klog("poker_get_table_hole_cards_soft_fail", {
-    tableId,
-    handId: handId || null,
-    userId,
-    reason,
-  });
-};
-
 const normalizeSeatUserIds = (seats) => {
   if (!Array.isArray(seats)) return [];
   return seats.map((seat) => seat?.userId).filter((userId) => typeof userId === "string" && userId.trim());
@@ -224,7 +195,6 @@ export async function handler(event) {
 
       const currentState = normalizeJsonState(stateRow.state);
       let myHoleCards = [];
-      let holeCardsStatus;
       let updatedState = currentState;
 
       if (isActionPhase(currentState.phase)) {
@@ -301,7 +271,6 @@ export async function handler(event) {
                 activeUserIds: effectiveUserIdsForHoleCards,
                 requiredUserIds: [auth.userId],
                 mode: "soft",
-                selfHealInvalid: shouldSelfHealHoleCards(),
               });
             } catch (error) {
               if (isHoleCardsTableMissing(error)) {
@@ -312,24 +281,8 @@ export async function handler(event) {
 
             const statusByUserId = holeCards.holeCardsStatusByUserId || {};
             const userHoleCardsStatus = statusByUserId[auth.userId] || null;
-            if (userHoleCardsStatus === HOLE_CARDS_STATUS_INVALID) {
-              myHoleCards = null;
-              holeCardsStatus = HOLE_CARDS_STATUS_INVALID;
-              logHoleCardsIssue({
-                tableId,
-                handId: currentState.handId,
-                userId: auth.userId,
-                reason: HOLE_CARDS_STATUS_INVALID,
-              });
-            } else if (userHoleCardsStatus === HOLE_CARDS_STATUS_MISSING) {
-              myHoleCards = null;
-              holeCardsStatus = HOLE_CARDS_STATUS_MISSING;
-              logHoleCardsIssue({
-                tableId,
-                handId: currentState.handId,
-                userId: auth.userId,
-                reason: HOLE_CARDS_STATUS_MISSING,
-              });
+            if (userHoleCardsStatus) {
+              myHoleCards = [];
             } else {
               myHoleCards = holeCards.holeCardsByUserId[auth.userId] || [];
             }
@@ -348,7 +301,6 @@ export async function handler(event) {
                   activeUserIds: timeoutRequiredUserIds,
                   requiredUserIds: timeoutRequiredUserIds,
                   mode: "soft",
-                  selfHealInvalid: shouldSelfHealHoleCards(),
                 });
               } catch (error) {
                 klog("poker_get_table_timeout_missing_hole_cards", {
@@ -484,7 +436,7 @@ export async function handler(event) {
         }
       }
 
-      return { table, seats, stateVersion, currentState: updatedState, myHoleCards, holeCardsStatus };
+      return { table, seats, stateVersion, currentState: updatedState, myHoleCards };
     });
 
     if (result?.error === "table_not_found") {
@@ -520,8 +472,7 @@ export async function handler(event) {
           version: stateVersion,
           state: publicState,
         },
-        myHoleCards: typeof result.myHoleCards === "undefined" ? [] : result.myHoleCards,
-        holeCardsStatus: result.holeCardsStatus || undefined,
+        myHoleCards: Array.isArray(result.myHoleCards) ? result.myHoleCards : [],
         legalActions: legalInfo.actions,
         actionConstraints: buildActionConstraints(legalInfo),
       }),

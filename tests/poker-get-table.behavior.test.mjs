@@ -234,7 +234,6 @@ const run = async () => {
   assert.equal(missingRowPayload.ok, true);
   assert.ok(Array.isArray(missingRowPayload.myHoleCards));
   assert.equal(missingRowPayload.myHoleCards.length, 2);
-  assert.equal(missingRowPayload.holeCardsStatus, undefined);
 
   const invalidCardsResponse = await makeHandler([], storedState, "user-1", {
     holeCardsByUserId: {
@@ -265,76 +264,8 @@ const run = async () => {
   assert.equal(myInvalidCardsResponse.statusCode, 200);
   const myInvalidCardsPayload = JSON.parse(myInvalidCardsResponse.body);
   assert.equal(myInvalidCardsPayload.ok, true);
-  assert.equal(myInvalidCardsPayload.myHoleCards, null);
-  assert.equal(myInvalidCardsPayload.holeCardsStatus, "INVALID");
-  process.env.POKER_GET_TABLE_HOLE_CARDS_LOG_SAMPLE_PCT = "0";
-  const sampledLogsNone = [];
-  await makeHandler([], storedState, "user-1", {
-    holeCardsByUserId: {
-      ...defaultHoleCards,
-      "user-1": [{ r: "A", s: "S" }],
-    },
-    klog: (event, payload) => sampledLogsNone.push({ event, payload }),
-  })({
-    httpMethod: "GET",
-    headers: { origin: "https://example.test", authorization: "Bearer token" },
-    queryStringParameters: { tableId },
-  });
-  assert.equal(sampledLogsNone.some((entry) => entry.event === "poker_get_table_hole_cards_soft_fail"), false);
-
-  process.env.POKER_GET_TABLE_HOLE_CARDS_LOG_SAMPLE_PCT = "100";
-  const sampledLogsAll = [];
-  await makeHandler([], storedState, "user-1", {
-    holeCardsByUserId: {
-      ...defaultHoleCards,
-      "user-1": [{ r: "A", s: "S" }],
-    },
-    klog: (event, payload) => sampledLogsAll.push({ event, payload }),
-  })({
-    httpMethod: "GET",
-    headers: { origin: "https://example.test", authorization: "Bearer token" },
-    queryStringParameters: { tableId },
-  });
-  assert.equal(sampledLogsAll.some((entry) => entry.event === "poker_get_table_hole_cards_soft_fail"), true);
-  delete process.env.POKER_GET_TABLE_HOLE_CARDS_LOG_SAMPLE_PCT;
-
-
-  delete process.env.POKER_GET_TABLE_SELF_HEAL;
-  const noSelfHealQueries = [];
-  await makeHandler(noSelfHealQueries, storedState, "user-1", {
-    holeCardsByUserId: {
-      ...defaultHoleCards,
-      "user-1": [{ r: "A", s: "S" }],
-    },
-  })({
-    httpMethod: "GET",
-    headers: { origin: "https://example.test", authorization: "Bearer token" },
-    queryStringParameters: { tableId },
-  });
-  const noSelfHealDeletes = noSelfHealQueries.filter((entry) =>
-    entry.query.toLowerCase().includes("delete from public.poker_hole_cards")
-  );
-  assert.equal(noSelfHealDeletes.length, 0);
-
-  process.env.POKER_GET_TABLE_SELF_HEAL = "1";
-  const yesSelfHealQueries = [];
-  await makeHandler(yesSelfHealQueries, storedState, "user-1", {
-    holeCardsByUserId: {
-      ...defaultHoleCards,
-      "user-1": [{ r: "A", s: "S" }],
-    },
-  })({
-    httpMethod: "GET",
-    headers: { origin: "https://example.test", authorization: "Bearer token" },
-    queryStringParameters: { tableId },
-  });
-  const yesSelfHealDeletes = yesSelfHealQueries.filter((entry) =>
-    entry.query.toLowerCase().includes("delete from public.poker_hole_cards")
-  );
-  assert.equal(yesSelfHealDeletes.length, 1);
-  delete process.env.POKER_GET_TABLE_SELF_HEAL;
-
-  process.env.POKER_GET_TABLE_HOLE_CARDS_LOG_SAMPLE_PCT = "100";
+  assert.ok(Array.isArray(myInvalidCardsPayload.myHoleCards));
+  assert.equal(myInvalidCardsPayload.myHoleCards.length, 0);
   const repairQueries = [];
   const repairState = {
     ...baseState,
@@ -342,14 +273,12 @@ const run = async () => {
     community: [{ r: "2", s: "S" }, { r: "3", s: "H" }, { r: "4", s: "D" }],
     communityDealt: 3,
   };
-  const repairLogs = [];
   const repairResponse = await makeHandler(
     repairQueries,
     { value: JSON.stringify(repairState), version: 7 },
     "user-1",
     {
       holeCardsByUserId: {},
-      klog: (event, payload) => repairLogs.push({ event, payload }),
     }
   )({
     httpMethod: "GET",
@@ -359,8 +288,8 @@ const run = async () => {
   assert.equal(repairResponse.statusCode, 200);
   const repairPayload = JSON.parse(repairResponse.body);
   assert.equal(repairPayload.ok, true);
-  assert.equal(repairPayload.myHoleCards, null);
-  assert.equal(repairPayload.holeCardsStatus, "MISSING");
+  assert.ok(Array.isArray(repairPayload.myHoleCards));
+  assert.equal(repairPayload.myHoleCards.length, 0);
   assert.equal(JSON.stringify(repairPayload).includes("holeCardsByUserId"), false);
   assert.equal(JSON.stringify(repairPayload).includes('"deck"'), false);
   assert.equal(JSON.stringify(repairPayload).includes('"handSeed"'), false);
@@ -368,8 +297,6 @@ const run = async () => {
     entry.query.toLowerCase().includes("insert into public.poker_hole_cards")
   );
   assert.equal(repairInserts.length, 0);
-  assert.ok(repairLogs.some((entry) => entry.event === "poker_get_table_hole_cards_soft_fail"));
-  delete process.env.POKER_GET_TABLE_HOLE_CARDS_LOG_SAMPLE_PCT;
 
   const missingSeedState = { ...baseState, handSeed: "" };
   const missingSeedQueries = [];
