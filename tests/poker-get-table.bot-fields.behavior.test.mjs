@@ -10,7 +10,7 @@ const makeHandler = () =>
     extractBearerToken: () => "token",
     verifySupabaseJwt: async () => ({ valid: true, userId: "user-1" }),
     isValidUuid: () => true,
-    parseStakes: () => ({ ok: true, value: { sb: 1, bb: 2 } }),
+    parseStakes: () => ({ sb: 1, bb: 2 }),
     normalizeJsonState: (value) => value,
     withoutPrivateState: (state) => state,
     computeLegalActions: () => ({ actions: [] }),
@@ -58,6 +58,7 @@ const run = async () => {
     queryStringParameters: { tableId },
   });
 
+  assert.equal(response.statusCode, 200);
   const payload = JSON.parse(response.body);
   assert.equal(payload.ok, true);
   assert.equal(payload.seats[0].isBot, true);
