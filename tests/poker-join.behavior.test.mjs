@@ -294,7 +294,8 @@ const run = async () => {
     queries: activeSeatQueries,
     sideEffects: { seatInsert: 0, ledger: 0, conflictSeatInsertUsed: false },
     conflictSeatInsertOnce: true,
-    occupiedSeatRows: [{ seat_no: 2, status: "ACTIVE" }, { seat_no: 3, status: "ACTIVE" }],
+    tableMaxPlayers: 6,
+    occupiedSeatRows: [{ seat_no: 2, status: "ACTIVE" }],
   });
   const activeSeatIsOccupiedJoin = await callJoin(activeSeatIsOccupiedHandler, "join-auto-seat-active-occupied", {
     seatNo: undefined,
@@ -302,14 +303,20 @@ const run = async () => {
     preferredSeatNo: 1,
   });
   assert.equal(activeSeatIsOccupiedJoin.statusCode, 200);
-  const activeSeatQueryCount = activeSeatQueries.filter((entry) =>
-    entry.query.toLowerCase().includes("from public.poker_seats where table_id = $1 and status = 'active' order by seat_no asc")
-  ).length;
+  const activeSeatQueryCount = activeSeatQueries.filter((entry) => {
+    const sqlNormalized = String(entry.query).replace(/\s+/g, " ").trim().toLowerCase();
+    return (
+      sqlNormalized.includes("select seat_no") &&
+      sqlNormalized.includes("from public.poker_seats") &&
+      sqlNormalized.includes("status = 'active'") &&
+      sqlNormalized.includes("order by seat_no asc")
+    );
+  }).length;
   assert.ok(activeSeatQueryCount >= 1, "autoSeat retry should query ACTIVE seats");
   assert.equal(
     JSON.parse(activeSeatIsOccupiedJoin.body).seatNo,
-    3,
-    "autoSeat should skip ACTIVE seats during retries and choose the next free seat"
+    2,
+    "autoSeat should skip ACTIVE seats during retries and choose DB seat 3 (UI seat 2)"
   );
 
 
