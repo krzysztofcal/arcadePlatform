@@ -46,7 +46,7 @@ const makeJoinHandler = ({
     patchSitOutByUserId,
     isStateStorageValid,
     parseStakes: () => ({ ok: true, value: { sb: 1, bb: 2 } }),
-    getBotConfig: () => ({ enabled: botEnabled, maxPerTable: botMaxPerTable, defaultProfile: "TRIVIAL", buyInBB: 100 }),
+    getBotConfig: () => ({ enabled: botEnabled, maxPerTable: botMaxPerTable, defaultProfile: "TRIVIAL", buyInBB: 100, bankrollSystemKey: "TREASURY" }),
     makeBotUserId: (_tableId, seatNo) => `bot-${seatNo}`,
     makeBotSystemKey: (_tableId, seatNo) => `POKER_BOT:${tableId}:${seatNo}`,
     computeTargetBotCount: ({ maxPlayers, humanCount, maxBots }) => {
@@ -172,7 +172,25 @@ const run = async () => {
     assert.equal(stackMap[botSeats[0].user_id], botSeats[0].stack);
     assert.equal(stackMap[botSeats[1].user_id], botSeats[1].stack);
     assert.equal(ctx.ledgerCalls.filter((entry) => entry.txType === "TABLE_BUY_IN").length, 3);
-    assert.equal(ctx.ledgerCalls.filter((entry) => entry.metadata?.reason === "BOT_SEED_BUY_IN").length, 2);
+    const botSeedLedger = ctx.ledgerCalls.filter((entry) => entry.metadata?.reason === "BOT_SEED_BUY_IN");
+    assert.equal(botSeedLedger.length, 2);
+    for (const ledgerCall of botSeedLedger) {
+      assert.equal(Array.isArray(ledgerCall.entries), true);
+      assert.equal(ledgerCall.entries.length, 2);
+      assert.equal(ledgerCall.entries.some((entry) => entry.accountType === "USER"), false);
+      assert.equal(
+        ledgerCall.entries.some((entry) => entry.accountType === "SYSTEM" && String(entry.systemKey || "").startsWith("POKER_BOT:")),
+        false
+      );
+      assert.equal(
+        ledgerCall.entries.some((entry) => entry.accountType === "SYSTEM" && entry.systemKey === "TREASURY" && entry.amount === -200),
+        true
+      );
+      assert.equal(
+        ledgerCall.entries.some((entry) => entry.accountType === "ESCROW" && entry.systemKey === `POKER_TABLE:${tableId}` && entry.amount === 200),
+        true
+      );
+    }
   }
 
   {

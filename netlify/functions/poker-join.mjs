@@ -175,9 +175,7 @@ returning seat_no;
           reason: "BOT_SEED_BUY_IN",
         },
         entries: [
-          { accountType: "USER", amount: buyInChips, metadata: { reason: "BOT_SEED_BRIDGE_IN" } },
-          { accountType: "USER", amount: -buyInChips, metadata: { reason: "BOT_SEED_BRIDGE_OUT" } },
-          { accountType: "SYSTEM", systemKey: botSystemKey, amount: -buyInChips },
+          { accountType: "SYSTEM", systemKey: cfg.bankrollSystemKey, amount: -buyInChips },
           { accountType: "ESCROW", systemKey: escrowSystemKey, amount: buyInChips },
         ],
         createdBy: humanUserId,
