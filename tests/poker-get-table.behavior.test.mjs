@@ -529,6 +529,42 @@ const run = async () => {
     entry.query.toLowerCase().includes("update public.poker_state")
   );
   assert.equal(timeoutInvalidUpdates.length, 0);
+
+  let timeoutStaleSeatCalled = false;
+  const timeoutStaleSeatResponse = await makeHandler(
+    [],
+    {
+      value: JSON.stringify({
+        ...timeoutState,
+        seats: [
+          { userId: "user-1", seatNo: 1 },
+          { userId: "user-2", seatNo: 2 },
+          { userId: "user-3", seatNo: 3 },
+          { userId: "user-x", seatNo: 4 },
+        ],
+      }),
+      version: 6,
+    },
+    "user-1",
+    {
+      activeUserIds: ["user-1", "user-2", "user-3"],
+      holeCardsByUserId: {
+        "user-1": defaultHoleCards["user-1"],
+        "user-2": defaultHoleCards["user-2"],
+        "user-3": defaultHoleCards["user-3"],
+      },
+      maybeApplyTurnTimeout: () => {
+        timeoutStaleSeatCalled = true;
+        return { applied: false };
+      },
+    }
+  )({
+    httpMethod: "GET",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    queryStringParameters: { tableId },
+  });
+  assert.equal(timeoutStaleSeatResponse.statusCode, 200);
+  assert.equal(timeoutStaleSeatCalled, true);
   let timeoutAppliedCalled = false;
   const timeoutAppliedQueries = [];
   const timeoutAppliedResponse = await makeHandler(

@@ -72,8 +72,8 @@ test("isValidTwoCards validates length/uniqueness/encoding", () => {
 });
 
 
-test("areCardsUnique rejects empty arrays", () => {
-  assert.equal(areCardsUnique([]), false);
+test("areCardsUnique accepts empty arrays", () => {
+  assert.equal(areCardsUnique([]), true);
 });
 
 test("card identity canonicalizes rank aliases", () => {

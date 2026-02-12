@@ -45,7 +45,7 @@ export const cardIdentity = (card) => {
 };
 
 export const areCardsUnique = (cards) => {
-  if (!Array.isArray(cards) || cards.length === 0) return false;
+  if (!Array.isArray(cards)) return false;
   const ids = cards.map(cardIdentity);
   if (ids.some((id) => !id)) return false;
   return new Set(ids).size === ids.length;
