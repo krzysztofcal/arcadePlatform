@@ -542,6 +542,11 @@ function validateEntries(entries, payloadUserId, { txType = null, createdBy = nu
   const sanitized = [];
   let hasUserEntry = false;
   let hasEscrowEntry = false;
+  let hasSystemEntry = false;
+  let escrowEntryCount = 0;
+  let systemEntryCount = 0;
+  let escrowAmount = 0;
+  let systemAmount = 0;
   for (const entry of entries) {
     const amount = Number(entry?.amount);
     const kind = entry?.accountType || entry?.kind;
@@ -555,7 +560,16 @@ function validateEntries(entries, payloadUserId, { txType = null, createdBy = nu
     if (kind !== "USER" && kind !== "SYSTEM" && kind !== "ESCROW") {
       throw badRequest("unsupported_account_type", "Unsupported accountType in entry");
     }
-    if (kind === "ESCROW") hasEscrowEntry = true;
+    if (kind === "ESCROW") {
+      hasEscrowEntry = true;
+      escrowEntryCount += 1;
+      escrowAmount = amount;
+    }
+    if (kind === "SYSTEM") {
+      hasSystemEntry = true;
+      systemEntryCount += 1;
+      systemAmount = amount;
+    }
     if (kind !== "USER" && !systemKey) {
       throw badRequest("missing_system_key", "System entries must provide systemKey");
     }
@@ -588,12 +602,24 @@ function validateEntries(entries, payloadUserId, { txType = null, createdBy = nu
     const metadata = entry?.metadata ?? {};
     sanitized.push({ kind, systemKey, amount, metadata, ...(kind === "USER" ? { userId: effectiveUserId } : {}) });
   }
+  const payloadUserIdNormalized = String(payloadUserId == null ? "" : payloadUserId).trim();
+  const createdByNormalized = String(createdBy == null ? "" : createdBy).trim();
   const allowEscrowOnlyTableBuyIn =
     !hasUserEntry &&
     txType === "TABLE_BUY_IN" &&
+    payloadUserIdNormalized === "" &&
+    isUuidLike(createdByNormalized) &&
+    entries.length === 2 &&
     hasEscrowEntry &&
-    String(createdBy == null ? "" : createdBy).trim() !== "";
-  if (!hasUserEntry && !allowEscrowOnlyTableBuyIn) {
+    hasSystemEntry &&
+    escrowEntryCount === 1 &&
+    systemEntryCount === 1 &&
+    systemAmount < 0 &&
+    escrowAmount > 0;
+  if (!hasUserEntry && txType === "TABLE_BUY_IN" && !allowEscrowOnlyTableBuyIn) {
+    throw badRequest("invalid_escrow_only_entries", "Escrow-only TABLE_BUY_IN requires SYSTEM(-) and ESCROW(+) strict shape");
+  }
+  if (!hasUserEntry && txType !== "TABLE_BUY_IN") {
     throw badRequest("missing_user_entry", "Transactions must include the user account");
   }
   return sanitized;

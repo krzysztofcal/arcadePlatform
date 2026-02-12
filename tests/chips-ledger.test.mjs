@@ -500,6 +500,143 @@ describe("chips ledger idempotency and validation", () => {
     expect(result.transaction.id).toBeDefined();
   });
 
+  it("rejects escrow-only TABLE_BUY_IN when createdBy is not UUID", async () => {
+    const { postTransaction } = await loadLedger();
+    const escrow = {
+      id: createId("acct", mockDb.nextAccountId++), account_type: "ESCROW", system_key: "POKER_TABLE:table-2", status: "active", balance: 0, next_entry_seq: 1,
+    };
+    mockDb.accounts.set(escrow.id, escrow);
+    await expect(postTransaction({
+      userId: null,
+      txType: "TABLE_BUY_IN",
+      idempotencyKey: "table-buyin-bad-createdby",
+      createdBy: "not-a-uuid",
+      entries: [
+        { accountType: "SYSTEM", systemKey: "TREASURY", amount: -10 },
+        { accountType: "ESCROW", systemKey: "POKER_TABLE:table-2", amount: 10 },
+      ],
+    })).rejects.toMatchObject({ code: "invalid_escrow_only_entries", status: 400 });
+  });
+
+  it("rejects escrow-only TABLE_BUY_IN with extra entries", async () => {
+    const { postTransaction } = await loadLedger();
+    const escrow = {
+      id: createId("acct", mockDb.nextAccountId++), account_type: "ESCROW", system_key: "POKER_TABLE:table-3", status: "active", balance: 0, next_entry_seq: 1,
+    };
+    mockDb.accounts.set(escrow.id, escrow);
+    await expect(postTransaction({
+      userId: null,
+      txType: "TABLE_BUY_IN",
+      idempotencyKey: "table-buyin-extra-entry",
+      createdBy: "00000000-0000-4000-8000-000000000001",
+      entries: [
+        { accountType: "SYSTEM", systemKey: "TREASURY", amount: -10 },
+        { accountType: "ESCROW", systemKey: "POKER_TABLE:table-3", amount: 10 },
+        { accountType: "SYSTEM", systemKey: "TREASURY", amount: 1 },
+      ],
+    })).rejects.toMatchObject({ code: "invalid_escrow_only_entries", status: 400 });
+  });
+
+  it("rejects escrow-only TABLE_BUY_IN with wrong sign", async () => {
+    const { postTransaction } = await loadLedger();
+    const escrow = {
+      id: createId("acct", mockDb.nextAccountId++), account_type: "ESCROW", system_key: "POKER_TABLE:table-4", status: "active", balance: 0, next_entry_seq: 1,
+    };
+    mockDb.accounts.set(escrow.id, escrow);
+    await expect(postTransaction({
+      userId: null,
+      txType: "TABLE_BUY_IN",
+      idempotencyKey: "table-buyin-wrong-sign",
+      createdBy: "00000000-0000-4000-8000-000000000001",
+      entries: [
+        { accountType: "SYSTEM", systemKey: "TREASURY", amount: 10 },
+        { accountType: "ESCROW", systemKey: "POKER_TABLE:table-4", amount: -10 },
+      ],
+    })).rejects.toMatchObject({ code: "invalid_escrow_only_entries", status: 400 });
+  });
+
+  it("rejects escrow-only TABLE_BUY_IN missing escrow or system leg", async () => {
+    const { postTransaction } = await loadLedger();
+    await expect(postTransaction({
+      userId: null,
+      txType: "TABLE_BUY_IN",
+      idempotencyKey: "table-buyin-system-only",
+      createdBy: "00000000-0000-4000-8000-000000000001",
+      entries: [{ accountType: "SYSTEM", systemKey: "TREASURY", amount: -10 }],
+    })).rejects.toMatchObject({ code: "invalid_escrow_only_entries", status: 400 });
+  });
+
+  it("replays escrow-only TABLE_BUY_IN when payload hash matches", async () => {
+    const { postTransaction } = await loadLedger();
+    const escrow = {
+      id: createId("acct", mockDb.nextAccountId++), account_type: "ESCROW", system_key: "POKER_TABLE:table-5", status: "active", balance: 0, next_entry_seq: 1,
+    };
+    mockDb.accounts.set(escrow.id, escrow);
+    const payload = {
+      userId: null,
+      txType: "TABLE_BUY_IN",
+      idempotencyKey: "table-buyin-replay",
+      createdBy: "00000000-0000-4000-8000-000000000001",
+      entries: [
+        { accountType: "SYSTEM", systemKey: "TREASURY", amount: -10 },
+        { accountType: "ESCROW", systemKey: "POKER_TABLE:table-5", amount: 10 },
+      ],
+    };
+    const first = await postTransaction(payload);
+    const replay = await postTransaction(payload);
+    expect(replay.transaction.id).toBe(first.transaction.id);
+  });
+
+  it("conflicts escrow-only TABLE_BUY_IN when payload hash differs", async () => {
+    const { postTransaction } = await loadLedger();
+    const escrow = {
+      id: createId("acct", mockDb.nextAccountId++), account_type: "ESCROW", system_key: "POKER_TABLE:table-6", status: "active", balance: 0, next_entry_seq: 1,
+    };
+    mockDb.accounts.set(escrow.id, escrow);
+    await postTransaction({
+      userId: null,
+      txType: "TABLE_BUY_IN",
+      idempotencyKey: "table-buyin-conflict",
+      createdBy: "00000000-0000-4000-8000-000000000001",
+      entries: [
+        { accountType: "SYSTEM", systemKey: "TREASURY", amount: -10 },
+        { accountType: "ESCROW", systemKey: "POKER_TABLE:table-6", amount: 10 },
+      ],
+    });
+    await expect(postTransaction({
+      userId: null,
+      txType: "TABLE_BUY_IN",
+      idempotencyKey: "table-buyin-conflict",
+      createdBy: "00000000-0000-4000-8000-000000000001",
+      entries: [
+        { accountType: "SYSTEM", systemKey: "TREASURY", amount: -11 },
+        { accountType: "ESCROW", systemKey: "POKER_TABLE:table-6", amount: 11 },
+      ],
+    })).rejects.toMatchObject({ status: 409 });
+  });
+
+  it("conflicts idempotency when explicit USER entry userId changes", async () => {
+    const { postTransaction } = await loadLedger();
+    await postTransaction({
+      userId: "00000000-0000-4000-8000-000000000003",
+      txType: "MINT",
+      idempotencyKey: "multi-user-entry-conflict",
+      entries: [
+        { accountType: "SYSTEM", systemKey: "TREASURY", amount: -10 },
+        { accountType: "USER", userId: "00000000-0000-4000-8000-000000000004", amount: 10 },
+      ],
+    });
+    await expect(postTransaction({
+      userId: "00000000-0000-4000-8000-000000000003",
+      txType: "MINT",
+      idempotencyKey: "multi-user-entry-conflict",
+      entries: [
+        { accountType: "SYSTEM", systemKey: "TREASURY", amount: -10 },
+        { accountType: "USER", userId: "00000000-0000-4000-8000-000000000005", amount: 10 },
+      ],
+    })).rejects.toMatchObject({ status: 409 });
+  });
+
   it("still rejects non-TABLE_BUY_IN postings without USER entries", async () => {
     const { postTransaction } = await loadLedger();
     await expect(
