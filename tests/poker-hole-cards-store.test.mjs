@@ -150,7 +150,7 @@ test("selfHealInvalid deletes only required invalid users and scrubs map", async
   assert.equal(Object.prototype.hasOwnProperty.call(out.holeCardsByUserId, "user-1"), false);
   assert.equal(Object.prototype.hasOwnProperty.call(out.holeCardsByUserId, "user-2"), true);
   assert.equal(out.holeCardsStatusByUserId["user-3"], "INVALID");
-  assert.equal(Object.prototype.hasOwnProperty.call(out.holeCardsByUserId, "user-3"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(out.holeCardsByUserId, "user-3"), true);
 });
 
 

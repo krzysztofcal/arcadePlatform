@@ -70,7 +70,7 @@ const loadHoleCardsByUserId = async (
   }
 
   if (isSoft) {
-    for (const userId of Object.keys(statusByUserId)) {
+    for (const userId of requiredIds) {
       if (statusByUserId[userId] === "INVALID") {
         delete map[userId];
       }
