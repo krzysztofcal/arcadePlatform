@@ -22,13 +22,14 @@ const normalizeCards = (value) => {
 
 const loadHoleCardsByUserId = async (
   tx,
-  { tableId, handId, activeUserIds, requiredUserIds, mode = "legacy", selfHealInvalid = false }
+  { tableId, handId, activeUserIds, requiredUserIds, mode = "legacy" }
 ) => {
   if (!Array.isArray(activeUserIds) || activeUserIds.length === 0) {
     throw new Error("state_invalid");
   }
+  const isLegacy = mode === "legacy";
   const hasRequiredIds = Array.isArray(requiredUserIds) && requiredUserIds.length > 0;
-  const requiredIds = hasRequiredIds ? requiredUserIds : activeUserIds;
+  const requiredIds = isLegacy ? activeUserIds : (hasRequiredIds ? requiredUserIds : activeUserIds);
   if (!Array.isArray(requiredIds) || requiredIds.length === 0) {
     throw new Error("state_invalid");
   }
@@ -72,19 +73,6 @@ const loadHoleCardsByUserId = async (
   if (isSoft) {
     for (const userId of requiredIds) {
       if (statusByUserId[userId] === "INVALID") {
-        delete map[userId];
-      }
-    }
-  }
-
-  if (selfHealInvalid) {
-    const invalidUsersToDelete = requiredIds.filter((userId) => statusByUserId[userId] === "INVALID");
-    if (invalidUsersToDelete.length > 0) {
-      await tx.unsafe(
-        "delete from public.poker_hole_cards where table_id = $1 and hand_id = $2 and user_id = any($3::text[]);",
-        [tableId, handId, invalidUsersToDelete]
-      );
-      for (const userId of invalidUsersToDelete) {
         delete map[userId];
       }
     }

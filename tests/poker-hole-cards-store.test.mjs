@@ -116,44 +116,6 @@ test("strict mode only validates required users", async () => {
   assert.equal(Object.prototype.hasOwnProperty.call(out.holeCardsByUserId, "user-2"), true);
 });
 
-test("selfHealInvalid deletes only required invalid users and scrubs map", async () => {
-  const deletes = [];
-  const tx = {
-    unsafe: async (query, params) => {
-      const text = String(query).toLowerCase();
-      if (text.includes("select user_id, cards")) {
-        return [
-          { user_id: "user-1", cards: [{ r: "A", s: "S" }] },
-          { user_id: "user-2", cards: [{ r: "Q", s: "H" }, { r: "J", s: "H" }] },
-          { user_id: "user-3", cards: [{ r: "9", s: "D" }] },
-        ];
-      }
-      if (text.includes("delete from public.poker_hole_cards")) {
-        deletes.push(params?.[2] || []);
-        return [];
-      }
-      throw new Error("unexpected_query");
-    },
-  };
-
-  const out = await loadHoleCardsByUserId(tx, {
-    tableId,
-    handId,
-    activeUserIds: ["user-1", "user-2", "user-3"],
-    requiredUserIds: ["user-1"],
-    mode: "soft",
-    selfHealInvalid: true,
-  });
-
-  assert.deepEqual(deletes, [["user-1"]]);
-  assert.equal(out.holeCardsStatusByUserId["user-1"], "INVALID");
-  assert.equal(Object.prototype.hasOwnProperty.call(out.holeCardsByUserId, "user-1"), false);
-  assert.equal(Object.prototype.hasOwnProperty.call(out.holeCardsByUserId, "user-2"), true);
-  assert.equal(out.holeCardsStatusByUserId["user-3"], "INVALID");
-  assert.equal(Object.prototype.hasOwnProperty.call(out.holeCardsByUserId, "user-3"), true);
-});
-
-
 test("strict mode throws when required set includes invalid user", async () => {
   const tx = {
     unsafe: async (query) => {

@@ -86,13 +86,6 @@ const makeHandler = (queries, storedState, userId, options = {}) => {
             }
             return rows;
           }
-          if (text.includes("delete from public.poker_hole_cards")) {
-            const userIds = Array.isArray(params?.[2]) ? params[2] : [];
-            for (const userIdValue of userIds) {
-              delete holeCardsMap[userIdValue];
-            }
-            return [];
-          }
           if (text.includes("insert into public.poker_hole_cards")) {
             if (options.holeCardsInsertError) throw options.holeCardsInsertError;
 
