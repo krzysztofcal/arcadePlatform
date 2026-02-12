@@ -102,6 +102,10 @@ function badRequest(code, message) {
 const hashPayload = (input) =>
   crypto.createHash("sha256").update(JSON.stringify(input)).digest("hex");
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+const isUuidLike = (value) => UUID_RE.test(String(value || "").trim());
+
 const isPlainObject = (value) =>
   value !== null && typeof value === "object" && Object.getPrototypeOf(value) === Object.prototype;
 
@@ -567,6 +571,9 @@ function validateEntries(entries, payloadUserId) {
           throw badRequest("invalid_entry_user", "USER entries require a user id");
         }
         effectiveUserId = fallbackUserId;
+      }
+      if (!isUuidLike(effectiveUserId)) {
+        throw badRequest("invalid_entry_user", "USER entry userId must be a UUID");
       }
     }
     if (

@@ -385,7 +385,7 @@ describe("chips ledger idempotency and validation", () => {
   it("reuses the same transaction on idempotent replay", async () => {
     const { postTransaction } = await loadLedger();
     await postTransaction({
-      userId: "user-1",
+      userId: "00000000-0000-4000-8000-000000000001",
       txType: "MINT",
       idempotencyKey: "seed-user-1",
       entries: [
@@ -394,7 +394,7 @@ describe("chips ledger idempotency and validation", () => {
       ],
     });
     const payload = {
-      userId: "user-1",
+      userId: "00000000-0000-4000-8000-000000000001",
       txType: "BUY_IN",
       idempotencyKey: "idem-1",
       entries: [
@@ -411,14 +411,14 @@ describe("chips ledger idempotency and validation", () => {
     expect(second.entries).toHaveLength(first.entries.length);
 
     const admin = await import("../netlify/functions/_shared/supabase-admin.mjs");
-    const userAccount = [...admin.__mockDb.accounts.values()].find(acc => acc.user_id === "user-1");
+    const userAccount = [...admin.__mockDb.accounts.values()].find(acc => acc.user_id === "00000000-0000-4000-8000-000000000001");
     expect(userAccount.balance).toBe(50);
   });
 
   it("rejects conflicting payloads for the same idempotency key", async () => {
     const { postTransaction } = await loadLedger();
     await postTransaction({
-      userId: "user-1",
+      userId: "00000000-0000-4000-8000-000000000001",
       txType: "MINT",
       idempotencyKey: "seed-user-1-b",
       entries: [
@@ -427,7 +427,7 @@ describe("chips ledger idempotency and validation", () => {
       ],
     });
     const base = {
-      userId: "user-1",
+      userId: "00000000-0000-4000-8000-000000000001",
       txType: "BUY_IN",
       idempotencyKey: "idem-conflict",
       entries: [
@@ -452,7 +452,7 @@ describe("chips ledger idempotency and validation", () => {
     const { postTransaction } = await loadLedger();
     await expect(
       postTransaction({
-        userId: "user-2",
+        userId: "00000000-0000-4000-8000-000000000002",
         txType: "MINT",
         idempotencyKey: "missing-user-entry",
         entries: [{ accountType: "SYSTEM", systemKey: "TREASURY", amount: 10 }],
@@ -463,16 +463,16 @@ describe("chips ledger idempotency and validation", () => {
   it("uses explicit USER entry userId when provided", async () => {
     const { postTransaction } = await loadLedger();
     await postTransaction({
-      userId: "human-user",
+      userId: "00000000-0000-4000-8000-000000000003",
       txType: "MINT",
       idempotencyKey: "entry-userid-explicit",
       entries: [
         { accountType: "SYSTEM", systemKey: "TREASURY", amount: -10 },
-        { accountType: "USER", userId: "bot-user", amount: 10 },
+        { accountType: "USER", userId: "00000000-0000-4000-8000-000000000004", amount: 10 },
       ],
     });
-    const botAccount = [...mockDb.accounts.values()].find((acc) => acc.account_type === "USER" && acc.user_id === "bot-user");
-    const humanAccount = [...mockDb.accounts.values()].find((acc) => acc.account_type === "USER" && acc.user_id === "human-user");
+    const botAccount = [...mockDb.accounts.values()].find((acc) => acc.account_type === "USER" && acc.user_id === "00000000-0000-4000-8000-000000000004");
+    const humanAccount = [...mockDb.accounts.values()].find((acc) => acc.account_type === "USER" && acc.user_id === "00000000-0000-4000-8000-000000000003");
     expect(botAccount?.balance).toBe(10);
     expect(humanAccount?.balance ?? 0).toBe(0);
   });
@@ -480,7 +480,7 @@ describe("chips ledger idempotency and validation", () => {
   it("falls back USER entry userId to payload userId", async () => {
     const { postTransaction } = await loadLedger();
     await postTransaction({
-      userId: "human-fallback",
+      userId: "00000000-0000-4000-8000-000000000005",
       txType: "MINT",
       idempotencyKey: "entry-userid-fallback",
       entries: [
@@ -488,8 +488,24 @@ describe("chips ledger idempotency and validation", () => {
         { accountType: "USER", amount: 11 },
       ],
     });
-    const humanAccount = [...mockDb.accounts.values()].find((acc) => acc.account_type === "USER" && acc.user_id === "human-fallback");
+    const humanAccount = [...mockDb.accounts.values()].find((acc) => acc.account_type === "USER" && acc.user_id === "00000000-0000-4000-8000-000000000005");
     expect(humanAccount?.balance).toBe(11);
+  });
+
+
+  it("rejects explicit USER entry userId that is not a UUID", async () => {
+    const { postTransaction } = await loadLedger();
+    await expect(
+      postTransaction({
+        userId: "00000000-0000-4000-8000-00000000001d",
+        txType: "MINT",
+        idempotencyKey: "invalid_entry_userid_format",
+        entries: [
+          { accountType: "SYSTEM", systemKey: "TREASURY", amount: -9 },
+          { accountType: "USER", userId: "not-a-uuid", amount: 9 },
+        ],
+      }),
+    ).rejects.toMatchObject({ code: "invalid_entry_user", status: 400 });
   });
 
   it("rejects USER entry when both entry.userId and payload userId are missing", async () => {
@@ -511,7 +527,7 @@ describe("chips ledger idempotency and validation", () => {
     const { postTransaction } = await loadLedger();
     await expect(
       postTransaction({
-        userId: "user-2",
+        userId: "00000000-0000-4000-8000-000000000002",
         txType: "MINT",
         idempotencyKey: "unbalanced",
         entries: [
@@ -525,7 +541,7 @@ describe("chips ledger idempotency and validation", () => {
   it("accepts string amounts while applying balance guards", async () => {
     const { postTransaction } = await loadLedger();
     await postTransaction({
-      userId: "user-strings",
+      userId: "00000000-0000-4000-8000-000000000006",
       txType: "MINT",
       idempotencyKey: "seed-user-strings",
       entries: [
@@ -535,7 +551,7 @@ describe("chips ledger idempotency and validation", () => {
     });
 
     const result = await postTransaction({
-      userId: "user-strings",
+      userId: "00000000-0000-4000-8000-000000000006",
       txType: "BUY_IN",
       idempotencyKey: "strings-buy",
       entries: [
@@ -546,7 +562,7 @@ describe("chips ledger idempotency and validation", () => {
 
     expect(result.transaction.id).toBeDefined();
     const admin = await import("../netlify/functions/_shared/supabase-admin.mjs");
-    const userAccount = [...admin.__mockDb.accounts.values()].find(acc => acc.user_id === "user-strings");
+    const userAccount = [...admin.__mockDb.accounts.values()].find(acc => acc.user_id === "00000000-0000-4000-8000-000000000006");
     expect(userAccount.balance).toBe(10);
   });
 
@@ -554,7 +570,7 @@ describe("chips ledger idempotency and validation", () => {
     const { postTransaction } = await loadLedger();
     await expect(
       postTransaction({
-        userId: "user-3",
+        userId: "00000000-0000-4000-8000-000000000007",
         txType: "CASH_OUT",
         idempotencyKey: "guard-negative",
         entries: [
@@ -577,7 +593,7 @@ describe("chips auth isolation and idempotency per identity", () => {
   it("replays idempotent calls for the same user but blocks cross-user reuse", async () => {
     const { postTransaction } = await loadLedger();
     await postTransaction({
-      userId: "user-a",
+      userId: "00000000-0000-4000-8000-000000000008",
       txType: "MINT",
       idempotencyKey: "seed-auth-a",
       entries: [
@@ -586,7 +602,7 @@ describe("chips auth isolation and idempotency per identity", () => {
       ],
     });
     await postTransaction({
-      userId: "user-b",
+      userId: "00000000-0000-4000-8000-000000000009",
       txType: "MINT",
       idempotencyKey: "seed-auth-b",
       entries: [
@@ -637,7 +653,7 @@ describe("chips auth isolation and idempotency per identity", () => {
     const { handler } = await loadTxHandler();
     const { postTransaction } = await loadLedger();
     await postTransaction({
-      userId: "user-c",
+      userId: "00000000-0000-4000-8000-00000000000a",
       txType: "MINT",
       idempotencyKey: "seed-auth-c",
       entries: [
@@ -692,7 +708,7 @@ describe("chips ledger paging", () => {
   it("returns newest entries first with a stable cursor tie-breaker", async () => {
     const { postTransaction, listUserLedger } = await loadLedger();
     await postTransaction({
-      userId: "user-4",
+      userId: "00000000-0000-4000-8000-00000000000b",
       txType: "MINT",
       idempotencyKey: "seed-user-4",
       entries: [
@@ -701,7 +717,7 @@ describe("chips ledger paging", () => {
       ],
     });
     await postTransaction({
-      userId: "user-4",
+      userId: "00000000-0000-4000-8000-00000000000b",
       txType: "BUY_IN",
       idempotencyKey: "seq-1",
       entries: [
@@ -710,7 +726,7 @@ describe("chips ledger paging", () => {
       ],
     });
     await postTransaction({
-      userId: "user-4",
+      userId: "00000000-0000-4000-8000-00000000000b",
       txType: "BUY_IN",
       idempotencyKey: "seq-2",
       entries: [
@@ -719,7 +735,7 @@ describe("chips ledger paging", () => {
       ],
     });
 
-    const { items } = await listUserLedger("user-4");
+    const { items } = await listUserLedger("00000000-0000-4000-8000-00000000000b");
     expect(items).toHaveLength(3);
     expect(items[0].display_created_at >= items[1].display_created_at).toBe(true);
     expect(items[1].display_created_at >= items[2].display_created_at).toBe(true);
@@ -731,7 +747,7 @@ describe("chips ledger paging", () => {
   it("orders by sort_id when timestamps match", async () => {
     const { postTransaction, listUserLedger } = await loadLedger();
     await postTransaction({
-      userId: "user-4b",
+      userId: "00000000-0000-4000-8000-00000000000c",
       txType: "MINT",
       idempotencyKey: "seed-user-4b",
       entries: [
@@ -740,7 +756,7 @@ describe("chips ledger paging", () => {
       ],
     });
     await postTransaction({
-      userId: "user-4b",
+      userId: "00000000-0000-4000-8000-00000000000c",
       txType: "BUY_IN",
       idempotencyKey: "seq-1b",
       entries: [
@@ -750,21 +766,21 @@ describe("chips ledger paging", () => {
     });
 
     const admin = await import("../netlify/functions/_shared/supabase-admin.mjs");
-    const userAccount = [...admin.__mockDb.accounts.values()].find(acc => acc.user_id === "user-4b");
+    const userAccount = [...admin.__mockDb.accounts.values()].find(acc => acc.user_id === "00000000-0000-4000-8000-00000000000c");
     const userEntries = admin.__mockDb.entries.filter(entry => entry.account_id === userAccount.id);
     const sameTime = new Date("2026-02-06T19:00:00.000Z").toISOString();
     userEntries.forEach(entry => {
       entry.created_at = sameTime;
     });
 
-    const { items } = await listUserLedger("user-4b", { limit: 2 });
+    const { items } = await listUserLedger("00000000-0000-4000-8000-00000000000c", { limit: 2 });
     expect(items).toHaveLength(2);
     expect(items[0].display_created_at).toBe(items[1].display_created_at);
     expect(BigInt(items[0].sort_id) > BigInt(items[1].sort_id)).toBe(true);
     const cursor = Buffer.from(
       JSON.stringify({ sortId: String(items[0].sort_id) }),
     ).toString("base64");
-    const paged = await listUserLedger("user-4b", { limit: 1, cursor });
+    const paged = await listUserLedger("00000000-0000-4000-8000-00000000000c", { limit: 1, cursor });
     expect(paged.items).toHaveLength(1);
     expect(paged.items[0].sort_id).toBe(items[1].sort_id);
   });
@@ -772,7 +788,7 @@ describe("chips ledger paging", () => {
   it("pages by sort_id even when timestamps match", async () => {
     const { postTransaction, listUserLedger } = await loadLedger();
     await postTransaction({
-      userId: "user-4e",
+      userId: "00000000-0000-4000-8000-00000000000d",
       txType: "MINT",
       idempotencyKey: "seed-user-4e",
       entries: [
@@ -781,7 +797,7 @@ describe("chips ledger paging", () => {
       ],
     });
     await postTransaction({
-      userId: "user-4e",
+      userId: "00000000-0000-4000-8000-00000000000d",
       txType: "BUY_IN",
       idempotencyKey: "seq-1e",
       entries: [
@@ -790,7 +806,7 @@ describe("chips ledger paging", () => {
       ],
     });
     await postTransaction({
-      userId: "user-4e",
+      userId: "00000000-0000-4000-8000-00000000000d",
       txType: "BUY_IN",
       idempotencyKey: "seq-2e",
       entries: [
@@ -800,17 +816,17 @@ describe("chips ledger paging", () => {
     });
 
     const admin = await import("../netlify/functions/_shared/supabase-admin.mjs");
-    const userAccount = [...admin.__mockDb.accounts.values()].find(acc => acc.user_id === "user-4e");
+    const userAccount = [...admin.__mockDb.accounts.values()].find(acc => acc.user_id === "00000000-0000-4000-8000-00000000000d");
     const userEntries = admin.__mockDb.entries.filter(entry => entry.account_id === userAccount.id);
     const sameTime = new Date("2026-02-06T19:00:00.000Z").toISOString();
     userEntries.forEach(entry => {
       entry.created_at = sameTime;
     });
 
-    const first = await listUserLedger("user-4e", { limit: 1 });
+    const first = await listUserLedger("00000000-0000-4000-8000-00000000000d", { limit: 1 });
     expect(first.items).toHaveLength(1);
     const cursor = first.nextCursor;
-    const second = await listUserLedger("user-4e", { limit: 2, cursor });
+    const second = await listUserLedger("00000000-0000-4000-8000-00000000000d", { limit: 2, cursor });
     expect(second.items.length).toBeGreaterThan(0);
     expect(second.items[0].sort_id).not.toBe(first.items[0].sort_id);
   });
@@ -818,7 +834,7 @@ describe("chips ledger paging", () => {
   it("falls back to legacy cursor when sort_id is missing", async () => {
     const { postTransaction, listUserLedger } = await loadLedger();
     await postTransaction({
-      userId: "user-4h",
+      userId: "00000000-0000-4000-8000-00000000000e",
       txType: "BUY_IN",
       idempotencyKey: "seq-1h",
       entries: [
@@ -827,7 +843,7 @@ describe("chips ledger paging", () => {
       ],
     });
     await postTransaction({
-      userId: "user-4h",
+      userId: "00000000-0000-4000-8000-00000000000e",
       txType: "BUY_IN",
       idempotencyKey: "seq-2h",
       entries: [
@@ -836,17 +852,17 @@ describe("chips ledger paging", () => {
       ],
     });
 
-    const first = await listUserLedger("user-4h", { limit: 1 });
+    const first = await listUserLedger("00000000-0000-4000-8000-00000000000e", { limit: 1 });
     expect(first.items).toHaveLength(1);
     expect(first.nextCursor).toBeTruthy();
-    const second = await listUserLedger("user-4h", { limit: 2, cursor: first.nextCursor });
+    const second = await listUserLedger("00000000-0000-4000-8000-00000000000e", { limit: 2, cursor: first.nextCursor });
     expect(second.items.length).toBeGreaterThan(0);
   });
 
   it("falls back to created_at when display_created_at is missing", async () => {
     const { postTransaction, listUserLedger } = await loadLedger();
     await postTransaction({
-      userId: "user-4c",
+      userId: "00000000-0000-4000-8000-00000000000f",
       txType: "BUY_IN",
       idempotencyKey: "seq-1c",
       entries: [
@@ -855,7 +871,7 @@ describe("chips ledger paging", () => {
       ],
     });
 
-    const { items } = await listUserLedger("user-4c", { limit: 1 });
+    const { items } = await listUserLedger("00000000-0000-4000-8000-00000000000f", { limit: 1 });
     expect(items).toHaveLength(1);
     expect(items[0].display_created_at).toBe(items[0].created_at);
     expect(items[0].created_at).toBeTruthy();
@@ -864,7 +880,7 @@ describe("chips ledger paging", () => {
   it("falls back to tx_created_at when entry created_at is missing", async () => {
     const { postTransaction, listUserLedger } = await loadLedger();
     await postTransaction({
-      userId: "user-4d",
+      userId: "00000000-0000-4000-8000-000000000010",
       txType: "BUY_IN",
       idempotencyKey: "seq-1d",
       entries: [
@@ -874,11 +890,11 @@ describe("chips ledger paging", () => {
     });
 
     const admin = await import("../netlify/functions/_shared/supabase-admin.mjs");
-    const userAccount = [...admin.__mockDb.accounts.values()].find(acc => acc.user_id === "user-4d");
+    const userAccount = [...admin.__mockDb.accounts.values()].find(acc => acc.user_id === "00000000-0000-4000-8000-000000000010");
     const userEntry = admin.__mockDb.entries.find(entry => entry.account_id === userAccount.id);
     userEntry.created_at = null;
 
-    const { items } = await listUserLedger("user-4d", { limit: 1 });
+    const { items } = await listUserLedger("00000000-0000-4000-8000-000000000010", { limit: 1 });
     expect(items).toHaveLength(1);
     expect(items[0].display_created_at).toBe(items[0].tx_created_at);
     expect(items[0].tx_created_at).toBeTruthy();
@@ -887,7 +903,7 @@ describe("chips ledger paging", () => {
   it("prefers created_at over tx_created_at when both exist", async () => {
     const { postTransaction, listUserLedger } = await loadLedger();
     await postTransaction({
-      userId: "user-4f",
+      userId: "00000000-0000-4000-8000-000000000011",
       txType: "BUY_IN",
       idempotencyKey: "seq-1f",
       entries: [
@@ -896,7 +912,7 @@ describe("chips ledger paging", () => {
       ],
     });
 
-    const { items } = await listUserLedger("user-4f", { limit: 1 });
+    const { items } = await listUserLedger("00000000-0000-4000-8000-000000000011", { limit: 1 });
     expect(items).toHaveLength(1);
     expect(items[0].created_at).toBeTruthy();
     expect(items[0].tx_created_at).toBeTruthy();
@@ -906,7 +922,7 @@ describe("chips ledger paging", () => {
   it("normalizes postgres timestamp strings to ISO", async () => {
     const { postTransaction, listUserLedger } = await loadLedger();
     await postTransaction({
-      userId: "user-4g",
+      userId: "00000000-0000-4000-8000-000000000012",
       txType: "BUY_IN",
       idempotencyKey: "seq-1g",
       entries: [
@@ -916,13 +932,13 @@ describe("chips ledger paging", () => {
     });
 
     const admin = await import("../netlify/functions/_shared/supabase-admin.mjs");
-    const userAccount = [...admin.__mockDb.accounts.values()].find(acc => acc.user_id === "user-4g");
+    const userAccount = [...admin.__mockDb.accounts.values()].find(acc => acc.user_id === "00000000-0000-4000-8000-000000000012");
     const userEntry = admin.__mockDb.entries.find(entry => entry.account_id === userAccount.id);
     const tx = admin.__mockDb.transactions.get(userEntry.transaction_id);
     userEntry.created_at = "2026-02-06 18:59:00+00";
     tx.created_at = "2026-02-06 19:00:00+0000";
 
-    const { items } = await listUserLedger("user-4g", { limit: 1 });
+    const { items } = await listUserLedger("00000000-0000-4000-8000-000000000012", { limit: 1 });
     expect(items).toHaveLength(1);
     expect(items[0].created_at).toBe(normalizeTimestampLabel("2026-02-06T18:59:00.000Z"));
     expect(items[0].tx_created_at).toBe(normalizeTimestampLabel("2026-02-06T19:00:00.000Z"));
@@ -932,7 +948,7 @@ describe("chips ledger paging", () => {
   it("rejects invalid cursor values and clamps limits", async () => {
     const { postTransaction, listUserLedger } = await loadLedger();
     await postTransaction({
-      userId: "user-6",
+      userId: "00000000-0000-4000-8000-000000000013",
       txType: "MINT",
       idempotencyKey: "seed-user-6",
       entries: [
@@ -941,7 +957,7 @@ describe("chips ledger paging", () => {
       ],
     });
     await postTransaction({
-      userId: "user-6",
+      userId: "00000000-0000-4000-8000-000000000013",
       txType: "BUY_IN",
       idempotencyKey: "cursor-1",
       entries: [
@@ -954,7 +970,7 @@ describe("chips ledger paging", () => {
       // create enough entries to exercise the limit cap
       // eslint-disable-next-line no-await-in-loop
       await postTransaction({
-        userId: "user-6",
+        userId: "00000000-0000-4000-8000-000000000013",
         txType: "BUY_IN",
         idempotencyKey: `cursor-${i + 2}`,
         entries: [
@@ -964,29 +980,29 @@ describe("chips ledger paging", () => {
       });
     }
 
-    await expect(listUserLedger("user-6", { cursor: "abc" })).rejects.toMatchObject({
+    await expect(listUserLedger("00000000-0000-4000-8000-000000000013", { cursor: "abc" })).rejects.toMatchObject({
       code: "invalid_cursor",
       status: 400,
     });
-    await expect(listUserLedger("user-6", { cursor: "%%" })).rejects.toMatchObject({
+    await expect(listUserLedger("00000000-0000-4000-8000-000000000013", { cursor: "%%" })).rejects.toMatchObject({
       code: "invalid_cursor",
       status: 400,
     });
     await expect(
-      listUserLedger("user-6", { cursor: Buffer.from("{not_json").toString("base64") }),
+      listUserLedger("00000000-0000-4000-8000-000000000013", { cursor: Buffer.from("{not_json").toString("base64") }),
     ).rejects.toMatchObject({
       code: "invalid_cursor",
       status: 400,
     });
     await expect(
-      listUserLedger("user-6", { cursor: Buffer.from(JSON.stringify({ createdAt: "nope" })).toString("base64") }),
+      listUserLedger("00000000-0000-4000-8000-000000000013", { cursor: Buffer.from(JSON.stringify({ createdAt: "nope" })).toString("base64") }),
     ).rejects.toMatchObject({
       code: "invalid_cursor",
       status: 400,
     });
     await expect(
       listUserLedger(
-        "user-6",
+        "00000000-0000-4000-8000-000000000013",
         {
           cursor: Buffer.from(
             JSON.stringify({
@@ -1001,17 +1017,17 @@ describe("chips ledger paging", () => {
       status: 400,
     });
 
-    const limited = await listUserLedger("user-6", { cursor: null, limit: 0 });
+    const limited = await listUserLedger("00000000-0000-4000-8000-000000000013", { cursor: null, limit: 0 });
     expect(limited.items).toHaveLength(1);
 
-    const many = await listUserLedger("user-6", { cursor: null, limit: 9999 });
+    const many = await listUserLedger("00000000-0000-4000-8000-000000000013", { cursor: null, limit: 9999 });
     expect(many.items.length).toBeLessThanOrEqual(200);
   });
 
   it("accepts legacy cursor payloads", async () => {
     const { postTransaction, listUserLedger } = await loadLedger();
     await postTransaction({
-      userId: "user-6b",
+      userId: "00000000-0000-4000-8000-000000000014",
       txType: "MINT",
       idempotencyKey: "seed-user-6b",
       entries: [
@@ -1020,7 +1036,7 @@ describe("chips ledger paging", () => {
       ],
     });
     await postTransaction({
-      userId: "user-6b",
+      userId: "00000000-0000-4000-8000-000000000014",
       txType: "BUY_IN",
       idempotencyKey: "cursor-6b-1",
       entries: [
@@ -1029,24 +1045,24 @@ describe("chips ledger paging", () => {
       ],
     });
 
-    const first = await listUserLedger("user-6b", { limit: 1 });
+    const first = await listUserLedger("00000000-0000-4000-8000-000000000014", { limit: 1 });
     expect(first.items).toHaveLength(1);
     const legacyCursor = Buffer.from(
       JSON.stringify({ createdAt: first.items[0].display_created_at, entrySeq: first.items[0].entry_seq }),
     ).toString("base64");
-    const second = await listUserLedger("user-6b", { limit: 2, cursor: legacyCursor });
+    const second = await listUserLedger("00000000-0000-4000-8000-000000000014", { limit: 2, cursor: legacyCursor });
     expect(second.items.length).toBeGreaterThan(0);
     const snakeCursor = Buffer.from(
       JSON.stringify({ created_at: first.items[0].display_created_at, entry_seq: first.items[0].entry_seq }),
     ).toString("base64");
-    const third = await listUserLedger("user-6b", { limit: 2, cursor: snakeCursor });
+    const third = await listUserLedger("00000000-0000-4000-8000-000000000014", { limit: 2, cursor: snakeCursor });
     expect(third.items.length).toBeGreaterThan(0);
   });
 
   it("rejects timestamp-only cursor payloads", async () => {
     const { postTransaction, listUserLedger } = await loadLedger();
     await postTransaction({
-      userId: "user-6d",
+      userId: "00000000-0000-4000-8000-000000000015",
       txType: "MINT",
       idempotencyKey: "seed-user-6d",
       entries: [
@@ -1055,7 +1071,7 @@ describe("chips ledger paging", () => {
       ],
     });
     await postTransaction({
-      userId: "user-6d",
+      userId: "00000000-0000-4000-8000-000000000015",
       txType: "BUY_IN",
       idempotencyKey: "cursor-6d-1",
       entries: [
@@ -1064,12 +1080,12 @@ describe("chips ledger paging", () => {
       ],
     });
 
-    const first = await listUserLedger("user-6d", { limit: 1 });
+    const first = await listUserLedger("00000000-0000-4000-8000-000000000015", { limit: 1 });
     const timestampOnlyCursor = Buffer.from(
       JSON.stringify({ createdAt: first.items[0].display_created_at }),
     ).toString("base64");
     await expect(
-      listUserLedger("user-6d", { limit: 2, cursor: timestampOnlyCursor }),
+      listUserLedger("00000000-0000-4000-8000-000000000015", { limit: 2, cursor: timestampOnlyCursor }),
     ).rejects.toMatchObject({
       code: "invalid_cursor",
       status: 400,
@@ -1079,7 +1095,7 @@ describe("chips ledger paging", () => {
   it("accepts legacy cursor timestamps with postgres formats", async () => {
     const { postTransaction, listUserLedger } = await loadLedger();
     await postTransaction({
-      userId: "user-6e",
+      userId: "00000000-0000-4000-8000-000000000016",
       txType: "MINT",
       idempotencyKey: "seed-user-6e",
       entries: [
@@ -1088,7 +1104,7 @@ describe("chips ledger paging", () => {
       ],
     });
     await postTransaction({
-      userId: "user-6e",
+      userId: "00000000-0000-4000-8000-000000000016",
       txType: "BUY_IN",
       idempotencyKey: "cursor-6e-1",
       entries: [
@@ -1097,18 +1113,18 @@ describe("chips ledger paging", () => {
       ],
     });
 
-    const first = await listUserLedger("user-6e", { limit: 1 });
+    const first = await listUserLedger("00000000-0000-4000-8000-000000000016", { limit: 1 });
     const legacyCursor = Buffer.from(
       JSON.stringify({ createdAt: "2026-02-06 19:00:00+0000", entrySeq: first.items[0].entry_seq }),
     ).toString("base64");
-    const second = await listUserLedger("user-6e", { limit: 2, cursor: legacyCursor });
+    const second = await listUserLedger("00000000-0000-4000-8000-000000000016", { limit: 2, cursor: legacyCursor });
     expect(second.items.length).toBeGreaterThan(0);
   });
 
   it("prefers sort_id mode when sortId is present", async () => {
     const { postTransaction, listUserLedger } = await loadLedger();
     await postTransaction({
-      userId: "user-6c",
+      userId: "00000000-0000-4000-8000-000000000017",
       txType: "MINT",
       idempotencyKey: "seed-user-6c",
       entries: [
@@ -1117,7 +1133,7 @@ describe("chips ledger paging", () => {
       ],
     });
     await postTransaction({
-      userId: "user-6c",
+      userId: "00000000-0000-4000-8000-000000000017",
       txType: "BUY_IN",
       idempotencyKey: "cursor-6c-1",
       entries: [
@@ -1126,21 +1142,21 @@ describe("chips ledger paging", () => {
       ],
     });
 
-    const first = await listUserLedger("user-6c", { limit: 1 });
+    const first = await listUserLedger("00000000-0000-4000-8000-000000000017", { limit: 1 });
     const mixedCursor = Buffer.from(
       JSON.stringify({
         sortId: first.items[0].sort_id,
         entrySeq: "not-a-number",
       }),
     ).toString("base64");
-    const second = await listUserLedger("user-6c", { limit: 2, cursor: mixedCursor });
+    const second = await listUserLedger("00000000-0000-4000-8000-000000000017", { limit: 2, cursor: mixedCursor });
     expect(second.items.length).toBeGreaterThan(0);
   });
 
   it("pages by cursor without overlap", async () => {
     const { postTransaction, listUserLedger } = await loadLedger();
     await postTransaction({
-      userId: "user-5",
+      userId: "00000000-0000-4000-8000-000000000018",
       txType: "MINT",
       idempotencyKey: "seed-user-5",
       entries: [
@@ -1149,7 +1165,7 @@ describe("chips ledger paging", () => {
       ],
     });
     await postTransaction({
-      userId: "user-5",
+      userId: "00000000-0000-4000-8000-000000000018",
       txType: "BUY_IN",
       idempotencyKey: "after-1",
       entries: [
@@ -1158,7 +1174,7 @@ describe("chips ledger paging", () => {
       ],
     });
     await postTransaction({
-      userId: "user-5",
+      userId: "00000000-0000-4000-8000-000000000018",
       txType: "BUY_IN",
       idempotencyKey: "after-2",
       entries: [
@@ -1167,11 +1183,11 @@ describe("chips ledger paging", () => {
       ],
     });
 
-    const first = await listUserLedger("user-5", { limit: 1 });
+    const first = await listUserLedger("00000000-0000-4000-8000-000000000018", { limit: 1 });
     expect(first.items).toHaveLength(1);
     expect(first.nextCursor).toBeTruthy();
 
-    const second = await listUserLedger("user-5", { limit: 2, cursor: first.nextCursor });
+    const second = await listUserLedger("00000000-0000-4000-8000-000000000018", { limit: 2, cursor: first.nextCursor });
     expect(second.items.length).toBeGreaterThanOrEqual(1);
     expect(second.items[0].sort_id).not.toBe(first.items[0].sort_id);
     if (second.items.length > 1) {
@@ -1185,7 +1201,7 @@ describe("chips ledger paging", () => {
   it("continues paging when last entry has an invalid entry_seq", async () => {
     const { postTransaction, listUserLedger } = await loadLedger();
     await postTransaction({
-      userId: "user-7",
+      userId: "00000000-0000-4000-8000-000000000019",
       txType: "MINT",
       idempotencyKey: "seed-user-7",
       entries: [
@@ -1194,7 +1210,7 @@ describe("chips ledger paging", () => {
       ],
     });
     await postTransaction({
-      userId: "user-7",
+      userId: "00000000-0000-4000-8000-000000000019",
       txType: "BUY_IN",
       idempotencyKey: "cursor-7-1",
       entries: [
@@ -1203,7 +1219,7 @@ describe("chips ledger paging", () => {
       ],
     });
     await postTransaction({
-      userId: "user-7",
+      userId: "00000000-0000-4000-8000-000000000019",
       txType: "BUY_IN",
       idempotencyKey: "cursor-7-2",
       entries: [
@@ -1212,12 +1228,12 @@ describe("chips ledger paging", () => {
       ],
     });
 
-    const first = await listUserLedger("user-7", { limit: 2 });
+    const first = await listUserLedger("00000000-0000-4000-8000-000000000019", { limit: 2 });
     expect(first.items).toHaveLength(2);
     expect(first.nextCursor).toBeTruthy();
 
     const admin = await import("../netlify/functions/_shared/supabase-admin.mjs");
-    const userAccount = [...admin.__mockDb.accounts.values()].find(acc => acc.user_id === "user-7");
+    const userAccount = [...admin.__mockDb.accounts.values()].find(acc => acc.user_id === "00000000-0000-4000-8000-000000000019");
     const userEntries = admin.__mockDb.entries.filter(entry => entry.account_id === userAccount.id);
     const lastPageItem = first.items[first.items.length - 1];
     const target = userEntries.find(entry =>
@@ -1228,7 +1244,7 @@ describe("chips ledger paging", () => {
       target.entry_seq = null;
     }
 
-    const second = await listUserLedger("user-7", { limit: 2, cursor: first.nextCursor });
+    const second = await listUserLedger("00000000-0000-4000-8000-000000000019", { limit: 2, cursor: first.nextCursor });
     expect(second.items.length).toBeGreaterThanOrEqual(1);
     expect(second.items[0].display_created_at <= lastPageItem.display_created_at).toBe(true);
     const pageOneKeys = new Set(first.items.map(item => `${item.display_created_at}:${item.sort_id}`));
@@ -1250,7 +1266,7 @@ describe("chips ledger legacy paging", () => {
   it("returns ascending entry_seq and sequence stats", async () => {
     const { postTransaction, listUserLedgerAfterSeq } = await loadLedger();
     await postTransaction({
-      userId: "user-8",
+      userId: "00000000-0000-4000-8000-00000000001a",
       txType: "MINT",
       idempotencyKey: "seed-user-8",
       entries: [
@@ -1259,7 +1275,7 @@ describe("chips ledger legacy paging", () => {
       ],
     });
     await postTransaction({
-      userId: "user-8",
+      userId: "00000000-0000-4000-8000-00000000001a",
       txType: "BUY_IN",
       idempotencyKey: "seq-8-1",
       entries: [
@@ -1268,7 +1284,7 @@ describe("chips ledger legacy paging", () => {
       ],
     });
 
-    const page = await listUserLedgerAfterSeq("user-8", { afterSeq: 0, limit: 5 });
+    const page = await listUserLedgerAfterSeq("00000000-0000-4000-8000-00000000001a", { afterSeq: 0, limit: 5 });
     expect(page.entries.length).toBeGreaterThan(0);
     for (let i = 1; i < page.entries.length; i += 1) {
       expect(page.entries[i].entry_seq).toBeGreaterThan(page.entries[i - 1].entry_seq);
@@ -1306,7 +1322,7 @@ describe("chips handlers security and gating", () => {
     const { handler: ledgerHandler } = await import("../netlify/functions/chips-ledger.mjs");
     const { postTransaction, listUserLedger } = await loadLedger();
     await postTransaction({
-      userId: "user-pref",
+      userId: "00000000-0000-4000-8000-00000000001b",
       txType: "MINT",
       idempotencyKey: "seed-user-pref",
       entries: [
@@ -1314,7 +1330,7 @@ describe("chips handlers security and gating", () => {
         { accountType: "USER", amount: 20 },
       ],
     });
-    const first = await listUserLedger("user-pref", { limit: 1 });
+    const first = await listUserLedger("00000000-0000-4000-8000-00000000001b", { limit: 1 });
     const ledgerResult = await ledgerHandler({
       httpMethod: "GET",
       headers: { authorization: "Bearer user-pref", origin: "https://arcade.test" },
@@ -1332,7 +1348,7 @@ describe("chips handlers security and gating", () => {
     const { handler: ledgerHandler } = await import("../netlify/functions/chips-ledger.mjs");
     const { postTransaction } = await loadLedger();
     await postTransaction({
-      userId: "user-legacy",
+      userId: "00000000-0000-4000-8000-00000000001c",
       txType: "MINT",
       idempotencyKey: "seed-user-legacy",
       entries: [

@@ -6,7 +6,7 @@ import { loadPokerStateForUpdate, updatePokerStateLocked } from "../netlify/func
 import { isStateStorageValid } from "../netlify/functions/_shared/poker-state-utils.mjs";
 
 const tableId = "11111111-1111-4111-8111-111111111111";
-const userId = "user-join";
+const userId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 
 const makeJoinHandler = ({
   tableMaxPlayers = 6,
@@ -47,7 +47,7 @@ const makeJoinHandler = ({
     isStateStorageValid,
     parseStakes: () => ({ ok: true, value: { sb: 1, bb: 2 } }),
     getBotConfig: () => ({ enabled: botEnabled, maxPerTable: botMaxPerTable, defaultProfile: "TRIVIAL", buyInBB: 100, bankrollSystemKey: "TREASURY" }),
-    makeBotUserId: (_tableId, seatNo) => `bot-${seatNo}`,
+    makeBotUserId: (_tableId, seatNo) => (seatNo === 2 ? "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" : seatNo === 3 ? "cccccccc-cccc-4ccc-8ccc-cccccccccccc" : "dddddddd-dddd-4ddd-8ddd-dddddddddddd"),
     makeBotSystemKey: (_tableId, seatNo) => `POKER_BOT:${tableId}:${seatNo}`,
     computeTargetBotCount: ({ maxPlayers, humanCount, maxBots }) => {
       if (humanCount <= 0) return 0;
@@ -222,7 +222,7 @@ const run = async () => {
     const ctx = makeJoinHandler({ botEnabled: true, botMaxPerTable: 2, tableMaxPlayers: 6 });
     ctx.seats.push({
       table_id: tableId,
-      user_id: "bot-2",
+      user_id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
       seat_no: 2,
       status: "ACTIVE",
       is_bot: true,
