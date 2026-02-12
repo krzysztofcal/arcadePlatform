@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { areCardsUnique, isValidCard, isValidTwoCards } from "../netlify/functions/_shared/poker-cards-utils.mjs";
+import { areCardsUnique, cardIdentity, isValidCard, isValidTwoCards } from "../netlify/functions/_shared/poker-cards-utils.mjs";
 
 test("isValidCard accepts supported ranks/suits", () => {
   assert.equal(isValidCard({ r: "A", s: "S" }), true);
@@ -69,4 +69,31 @@ test("isValidTwoCards validates length/uniqueness/encoding", () => {
   );
   assert.equal(isValidTwoCards([{ r: "A", s: "S" }]), false);
   assert.equal(isValidTwoCards([]), false);
+});
+
+
+test("areCardsUnique rejects empty arrays", () => {
+  assert.equal(areCardsUnique([]), false);
+});
+
+test("card identity canonicalizes rank aliases", () => {
+  assert.equal(cardIdentity({ r: "11", s: "S" }), cardIdentity({ r: "J", s: "S" }));
+  assert.equal(cardIdentity({ r: "10", s: "H" }), cardIdentity({ r: "T", s: "H" }));
+});
+
+test("areCardsUnique rejects canonical duplicate aliases", () => {
+  assert.equal(
+    areCardsUnique([
+      { r: "11", s: "S" },
+      { r: "J", s: "S" },
+    ]),
+    false
+  );
+  assert.equal(
+    areCardsUnique([
+      { r: "10", s: "H" },
+      { r: "T", s: "H" },
+    ]),
+    false
+  );
 });

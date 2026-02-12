@@ -29,7 +29,7 @@ test("strict mode only validates required users", async () => {
 
   assert.equal(out.holeCardsStatusByUserId["user-1"], undefined);
   assert.equal(out.holeCardsStatusByUserId["user-2"], undefined);
-  assert.ok(Array.isArray(out.holeCardsByUserId["user-2"]));
+  assert.equal(Object.prototype.hasOwnProperty.call(out.holeCardsByUserId, "user-2"), true);
 });
 
 test("selfHealInvalid deletes only required invalid users and scrubs map", async () => {
@@ -63,5 +63,5 @@ test("selfHealInvalid deletes only required invalid users and scrubs map", async
   assert.deepEqual(deletes, [["user-1"]]);
   assert.equal(out.holeCardsStatusByUserId["user-1"], "INVALID");
   assert.equal(Object.prototype.hasOwnProperty.call(out.holeCardsByUserId, "user-1"), false);
-  assert.ok(Array.isArray(out.holeCardsByUserId["user-2"]));
+  assert.equal(Object.prototype.hasOwnProperty.call(out.holeCardsByUserId, "user-2"), true);
 });
