@@ -539,7 +539,7 @@ export async function handler(event) {
         ? activeSeatRows.map((row) => row?.user_id).filter(Boolean)
         : [];
       const activeUserIdsForHoleCards = seatUserIdsInOrder.slice();
-      const requiredHoleCardUserIds = dbActiveUserIds.length ? dbActiveUserIds.slice() : activeUserIdsForHoleCards;
+      const requiredHoleCardUserIds = dbActiveUserIds.length ? dbActiveUserIds.slice() : [auth.userId];
 
       let holeCardsByUserId;
       try {

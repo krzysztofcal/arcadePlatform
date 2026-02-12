@@ -531,8 +531,9 @@ const run = async () => {
   assert.equal(timeoutInvalidUpdates.length, 0);
 
   let timeoutStaleSeatCalled = false;
+  const timeoutStaleSeatQueries = [];
   const timeoutStaleSeatResponse = await makeHandler(
-    [],
+    timeoutStaleSeatQueries,
     {
       value: JSON.stringify({
         ...timeoutState,
@@ -565,6 +566,11 @@ const run = async () => {
   });
   assert.equal(timeoutStaleSeatResponse.statusCode, 200);
   assert.equal(timeoutStaleSeatCalled, true);
+  const timeoutStaleSeatArrayParams = timeoutStaleSeatQueries.flatMap((entry) =>
+    Array.isArray(entry.params) ? entry.params.filter((param) => Array.isArray(param)) : []
+  );
+  assert.equal(timeoutStaleSeatArrayParams.some((param) => param.includes("user-x")), false);
+
   let timeoutAppliedCalled = false;
   const timeoutAppliedQueries = [];
   const timeoutAppliedResponse = await makeHandler(

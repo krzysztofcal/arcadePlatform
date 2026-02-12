@@ -1212,6 +1212,20 @@ const run = async () => {
     },
   });
   assert.equal(staleSeatResponse.response.statusCode, 200);
+
+  const staleSeatNoDbActiveResponse = await runCase({
+    state: staleSeatState,
+    action: { type: "CHECK" },
+    requestId: "req-stale-seat-no-db-active",
+    userId: "user-1",
+    activeSeatUserIds: [],
+    holeCardsByUserId: {
+      "user-1": defaultHoleCards["user-1"],
+      "user-2": defaultHoleCards["user-2"],
+      "user-3": defaultHoleCards["user-3"],
+    },
+  });
+  assert.equal(staleSeatNoDbActiveResponse.response.statusCode, 200);
   const missingTableError = new Error("missing table");
   missingTableError.code = "42P01";
   const missingTableResponse = await runCase({

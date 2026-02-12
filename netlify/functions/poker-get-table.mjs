@@ -351,17 +351,17 @@ export async function handler(event) {
             }
 
             if (shouldApplyTimeout) {
+              const timeoutRequiredUserIds = seatRowsActiveUserIds.length
+                ? seatRowsActiveUserIds
+                : dbActiveUserIds.length
+                  ? dbActiveUserIds
+                  : stateSeatUserIds;
               let allHoleCards;
               try {
-                const timeoutRequiredUserIds = seatRowsActiveUserIds.length
-                  ? seatRowsActiveUserIds
-                  : dbActiveUserIds.length
-                    ? dbActiveUserIds
-                    : stateSeatUserIds;
                 allHoleCards = await loadHoleCardsByUserId(tx, {
                   tableId,
                   handId: currentState.handId,
-                  activeUserIds: stateSeatUserIds,
+                  activeUserIds: timeoutRequiredUserIds,
                   requiredUserIds: timeoutRequiredUserIds,
                   mode: "soft",
                   selfHealInvalid: shouldSelfHealHoleCards(),
@@ -370,8 +370,8 @@ export async function handler(event) {
                 klog("poker_get_table_timeout_missing_hole_cards", {
                   tableId,
                   handId: currentState.handId,
-                  expectedCount: stateSeatUserIds.length,
-                  attemptedUserIds: stateSeatUserIds,
+                  expectedCount: timeoutRequiredUserIds.length,
+                  attemptedUserIds: timeoutRequiredUserIds,
                   minimalAvailableCount: Object.keys(holeCards.holeCardsByUserId || {}).length,
                 });
                 shouldApplyTimeout = false;
@@ -379,7 +379,6 @@ export async function handler(event) {
 
               if (shouldApplyTimeout) {
                 const allStatuses = allHoleCards.holeCardsStatusByUserId || {};
-                const timeoutRequiredUserIds = seatRowsActiveUserIds.length ? seatRowsActiveUserIds : dbActiveUserIds.length ? dbActiveUserIds : stateSeatUserIds;
                 const hasRequiredStatus = timeoutRequiredUserIds.some((userId) => allStatuses[userId]);
                 const hasRequiredCards = timeoutRequiredUserIds.every((userId) =>
                   isValidTwoCards(allHoleCards.holeCardsByUserId?.[userId])
