@@ -849,6 +849,94 @@ const runInvalidStakes = async () => {
   assert.equal(updateCalls.length, 1);
 };
 
+const runConflictSemantics = async () => {
+  const makeConflictHandler = ({ freshPhase }) => {
+    const requestStore = new Map();
+    return loadPokerHandler("netlify/functions/poker-start-hand.mjs", {
+      baseHeaders: () => ({}),
+      corsHeaders: () => ({ "access-control-allow-origin": "https://example.test" }),
+      createDeck,
+      dealHoleCards,
+      deriveDeck,
+      extractBearerToken: () => "token",
+      getRng,
+      isPlainObject,
+      isStateStorageValid,
+      shuffle,
+      verifySupabaseJwt: async () => ({ valid: true, userId }),
+      isValidUuid: () => true,
+      normalizeJsonState,
+      normalizeRequestId,
+      upgradeLegacyInitStateWithSeats,
+      withoutPrivateState,
+      computeLegalActions,
+      computeNextDealerSeatNo,
+      buildActionConstraints,
+      TURN_MS,
+      updatePokerStateOptimistic: async () => ({ ok: false, reason: "conflict" }),
+      beginSql: async (fn) =>
+        fn({
+          unsafe: async (query, params) => {
+            const text = String(query).toLowerCase();
+            if (text.includes("from public.poker_requests")) {
+              const requestKey = `${params?.[0]}|${params?.[1]}|${params?.[2]}|${params?.[3]}`;
+              const entry = requestStore.get(requestKey);
+              if (!entry) return [];
+              return [{ result_json: entry.resultJson, created_at: entry.createdAt }];
+            }
+            if (text.includes("insert into public.poker_requests")) {
+              const requestKey = `${params?.[0]}|${params?.[1]}|${params?.[2]}|${params?.[3]}`;
+              if (requestStore.has(requestKey)) return [];
+              requestStore.set(requestKey, { resultJson: null, createdAt: new Date().toISOString() });
+              return [{ request_id: params?.[2] }];
+            }
+            if (text.includes("delete from public.poker_requests")) {
+              const requestKey = `${params?.[0]}|${params?.[1]}|${params?.[2]}|${params?.[3]}`;
+              requestStore.delete(requestKey);
+              return [];
+            }
+            if (text.includes("from public.poker_tables")) {
+              return [{ id: tableId, status: "OPEN", max_players: 6, stakes: "1/2" }];
+            }
+            if (text.includes("select version, state from public.poker_state")) {
+              return [{ version: 1, state: { phase: "HAND_DONE", stacks: initialStacks } }];
+            }
+            if (text.includes("select state from public.poker_state where table_id = $1")) {
+              return [{ state: { phase: freshPhase } }];
+            }
+            if (text.includes("from public.poker_seats")) {
+              return [
+                { user_id: "user-1", seat_no: 1, status: "ACTIVE" },
+                { user_id: "user-2", seat_no: 3, status: "ACTIVE" },
+              ];
+            }
+            if (text.includes("insert into public.poker_hole_cards")) {
+              return [{ user_id: "user-1" }, { user_id: "user-2" }];
+            }
+            return [];
+          },
+        }),
+      klog: () => {},
+    });
+  };
+
+  const initConflict = await makeConflictHandler({ freshPhase: "INIT" })({
+    httpMethod: "POST",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    body: JSON.stringify({ tableId, requestId: "req-conflict-init" }),
+  });
+  assert.equal(initConflict.statusCode, 409);
+  assert.equal(JSON.parse(initConflict.body).error, "state_conflict");
+
+  const inHandConflict = await makeConflictHandler({ freshPhase: "PREFLOP" })({
+    httpMethod: "POST",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    body: JSON.stringify({ tableId, requestId: "req-conflict-pref" }),
+  });
+  assert.equal(inHandConflict.statusCode, 409);
+  assert.equal(JSON.parse(inHandConflict.body).error, "already_in_hand");
+};
+
 await runHappyPath();
 await runReplayPath();
 await runHeadsUpBlinds();
@@ -860,3 +948,4 @@ await runMissingDealSecret();
 await runRequestPending();
 await runInvalidStakes();
 await runMissingStateRow();
+await runConflictSemantics();

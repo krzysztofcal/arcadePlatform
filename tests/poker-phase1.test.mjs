@@ -146,8 +146,15 @@ assert.ok(
   "poker UI leaveTable should resolve requestId using pendingLeaveRequestId"
 );
 assert.ok(
-  /apiPost\(\s*JOIN_URL[\s\S]*?requestId\s*:\s*joinRequestId/.test(pokerUiSrc),
+  /apiPost\(\s*JOIN_URL[\s\S]*?requestId\s*:\s*joinRequestId/.test(pokerUiSrc) ||
+    (/var\s+joinPayload\s*=\s*\{[\s\S]*?requestId\s*:\s*joinRequestId[\s\S]*?\}\s*;/.test(pokerUiSrc) &&
+      /apiPost\(\s*JOIN_URL\s*,\s*joinPayload\s*\)/.test(pokerUiSrc)),
   "poker UI join should send joinRequestId as requestId"
+);
+assert.ok(/var\s+pendingJoinAutoSeat\s*=\s*false;/.test(pokerUiSrc), "poker UI should track pendingJoinAutoSeat mode");
+assert.ok(
+  /requestIdOverride\s*===\s*pendingJoinRequestId[\s\S]*?wantAutoSeat\s*=\s*!!pendingJoinAutoSeat/.test(pokerUiSrc),
+  "poker UI join retry should infer autoSeat mode from pendingJoinAutoSeat"
 );
 assert.ok(!/String\(\s*joinRequestId\s*\)/.test(pokerUiSrc), "poker UI join should not stringify joinRequestId");
 assert.ok(
