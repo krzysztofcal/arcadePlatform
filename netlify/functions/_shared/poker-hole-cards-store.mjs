@@ -69,6 +69,9 @@ const loadHoleCardsByUserId = async (
         "delete from public.poker_hole_cards where table_id = $1 and hand_id = $2 and user_id = any($3::text[]);",
         [tableId, handId, invalidUsersToDelete]
       );
+      for (const userId of invalidUsersToDelete) {
+        delete map[userId];
+      }
     }
   }
 
