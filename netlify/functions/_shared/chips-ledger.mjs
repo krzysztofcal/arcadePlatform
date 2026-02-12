@@ -535,12 +535,13 @@ select
   return rows?.[0] || null;
 }
 
-function validateEntries(entries, payloadUserId) {
+function validateEntries(entries, payloadUserId, { txType = null, createdBy = null } = {}) {
   if (!Array.isArray(entries) || entries.length === 0) {
     throw badRequest("missing_entries", "At least one entry is required");
   }
   const sanitized = [];
   let hasUserEntry = false;
+  let hasEscrowEntry = false;
   for (const entry of entries) {
     const amount = Number(entry?.amount);
     const kind = entry?.accountType || entry?.kind;
@@ -554,6 +555,7 @@ function validateEntries(entries, payloadUserId) {
     if (kind !== "USER" && kind !== "SYSTEM" && kind !== "ESCROW") {
       throw badRequest("unsupported_account_type", "Unsupported accountType in entry");
     }
+    if (kind === "ESCROW") hasEscrowEntry = true;
     if (kind !== "USER" && !systemKey) {
       throw badRequest("missing_system_key", "System entries must provide systemKey");
     }
@@ -586,7 +588,12 @@ function validateEntries(entries, payloadUserId) {
     const metadata = entry?.metadata ?? {};
     sanitized.push({ kind, systemKey, amount, metadata, ...(kind === "USER" ? { userId: effectiveUserId } : {}) });
   }
-  if (!hasUserEntry) {
+  const allowEscrowOnlyTableBuyIn =
+    !hasUserEntry &&
+    txType === "TABLE_BUY_IN" &&
+    hasEscrowEntry &&
+    String(createdBy == null ? "" : createdBy).trim() !== "";
+  if (!hasUserEntry && !allowEscrowOnlyTableBuyIn) {
     throw badRequest("missing_user_entry", "Transactions must include the user account");
   }
   return sanitized;
@@ -610,7 +617,12 @@ async function postTransaction({
     throw badRequest("missing_idempotency_key", "Idempotency key is required");
   }
 
-  const normalizedEntries = validateEntries(entries, userId);
+  const payloadUserId = String(userId == null ? "" : userId).trim();
+  if (payloadUserId && !isUuidLike(payloadUserId)) {
+    throw badRequest("invalid_user_id", "userId must be a UUID");
+  }
+
+  const normalizedEntries = validateEntries(entries, payloadUserId, { txType, createdBy });
   assertPlainObjectOrNull(metadata, "invalid_metadata");
   const safeMetadata = metadata ?? {};
   let safeMetadataJson = "{}";
@@ -650,7 +662,7 @@ async function postTransaction({
   let payloadHash;
   try {
     payloadHash = hashPayload({
-      userId,
+      userId: payloadUserId || null,
       txType,
       idempotencyKey,
       reference,
@@ -671,7 +683,7 @@ async function postTransaction({
     for (const userEntryId of userEntryIds) {
       userAccountById.set(userEntryId, await getOrCreateUserAccount(userEntryId, sqlTx));
     }
-    const payloadUserId = String(userId == null ? "" : userId).trim();
+
     userAccount = payloadUserId ? (userAccountById.get(payloadUserId) || null) : null;
 
     const entryRecords = normalizedEntries.map(entry => {
@@ -699,7 +711,7 @@ async function postTransaction({
 
     const txRows = await sqlTx`
       insert into public.chips_transactions (reference, description, metadata, idempotency_key, payload_hash, tx_type, user_id, created_by)
-      values (${reference}, ${description}, ${safeMetadataJson}::jsonb, ${idempotencyKey}, ${payloadHash}, ${txType}, ${userId}, ${createdBy})
+      values (${reference}, ${description}, ${safeMetadataJson}::jsonb, ${idempotencyKey}, ${payloadHash}, ${txType}, ${payloadUserId || null}, ${createdBy})
       returning *;
     `;
 

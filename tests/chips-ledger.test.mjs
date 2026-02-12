@@ -460,6 +460,59 @@ describe("chips ledger idempotency and validation", () => {
     ).rejects.toMatchObject({ code: "missing_user_entry", status: 400 });
   });
 
+  it("rejects non-UUID payload userId even with valid USER entry userId", async () => {
+    const { postTransaction } = await loadLedger();
+    await expect(
+      postTransaction({
+        userId: "not-a-uuid",
+        txType: "MINT",
+        idempotencyKey: "invalid-payload-userid",
+        entries: [
+          { accountType: "SYSTEM", systemKey: "TREASURY", amount: -10 },
+          { accountType: "USER", userId: "00000000-0000-4000-8000-000000000004", amount: 10 },
+        ],
+      }),
+    ).rejects.toMatchObject({ code: "invalid_user_id", status: 400 });
+  });
+
+  it("allows TABLE_BUY_IN escrow-only postings without USER entries", async () => {
+    const { postTransaction } = await loadLedger();
+    const escrow = {
+      id: createId("acct", mockDb.nextAccountId++),
+      account_type: "ESCROW",
+      system_key: "POKER_TABLE:table-1",
+      status: "active",
+      balance: 0,
+      next_entry_seq: 1,
+    };
+    mockDb.accounts.set(escrow.id, escrow);
+
+    const result = await postTransaction({
+      userId: null,
+      txType: "TABLE_BUY_IN",
+      idempotencyKey: "table-buyin-escrow-only",
+      createdBy: "00000000-0000-4000-8000-000000000001",
+      entries: [
+        { accountType: "SYSTEM", systemKey: "TREASURY", amount: -10 },
+        { accountType: "ESCROW", systemKey: "POKER_TABLE:table-1", amount: 10 },
+      ],
+    });
+    expect(result.transaction.id).toBeDefined();
+  });
+
+  it("still rejects non-TABLE_BUY_IN postings without USER entries", async () => {
+    const { postTransaction } = await loadLedger();
+    await expect(
+      postTransaction({
+        userId: null,
+        txType: "MINT",
+        idempotencyKey: "mint-no-user",
+        createdBy: "00000000-0000-4000-8000-000000000001",
+        entries: [{ accountType: "SYSTEM", systemKey: "TREASURY", amount: 10 }],
+      }),
+    ).rejects.toMatchObject({ code: "missing_user_entry", status: 400 });
+  });
+
   it("uses explicit USER entry userId when provided", async () => {
     const { postTransaction } = await loadLedger();
     await postTransaction({

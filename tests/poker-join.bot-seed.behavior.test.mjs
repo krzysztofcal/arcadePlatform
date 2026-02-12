@@ -180,14 +180,8 @@ const run = async () => {
     assert.equal(botSeedLedger.length, 2);
     for (const ledgerCall of botSeedLedger) {
       assert.equal(Array.isArray(ledgerCall.entries), true);
-      assert.equal(ledgerCall.entries.length, 4);
-      assert.equal(ledgerCall.entries.filter((entry) => entry.accountType === "USER").length, 2);
-      assert.equal(ledgerCall.entries.some((entry) => entry.accountType === "USER" && entry.amount === 200), true);
-      assert.equal(ledgerCall.entries.some((entry) => entry.accountType === "USER" && entry.amount === -200), true);
-      for (const entry of ledgerCall.entries.filter((item) => item.accountType === "USER")) {
-        assert.equal(typeof entry.userId, "string");
-        assert.equal(entry.userId, ledgerCall.userId);
-      }
+      assert.equal(ledgerCall.entries.length, 2);
+      assert.equal(ledgerCall.entries.filter((entry) => entry.accountType === "USER").length, 0);
       assert.equal(
         ledgerCall.entries.some((entry) => entry.accountType === "SYSTEM" && String(entry.systemKey || "").startsWith("POKER_BOT:")),
         false
