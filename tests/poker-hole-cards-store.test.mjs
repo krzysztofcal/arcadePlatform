@@ -5,6 +5,67 @@ import { loadHoleCardsByUserId } from "../netlify/functions/_shared/poker-hole-c
 const tableId = "11111111-1111-4111-8111-111111111111";
 const handId = "hand-1";
 
+test("default legacy mode uses active users as required and throws on invalid/missing", async () => {
+  const txInvalid = {
+    unsafe: async (query) => {
+      const text = String(query).toLowerCase();
+      if (text.includes("select user_id, cards")) {
+        return [{ user_id: "user-1", cards: [{ r: "A", s: "S" }] }];
+      }
+      throw new Error("unexpected_query");
+    },
+  };
+
+  await assert.rejects(
+    loadHoleCardsByUserId(txInvalid, {
+      tableId,
+      handId,
+      activeUserIds: ["user-1"],
+    }),
+    /state_invalid/
+  );
+
+  const txValid = {
+    unsafe: async (query) => {
+      const text = String(query).toLowerCase();
+      if (text.includes("select user_id, cards")) {
+        return [{ user_id: "user-1", cards: [{ r: "A", s: "S" }, { r: "K", s: "S" }] }];
+      }
+      throw new Error("unexpected_query");
+    },
+  };
+
+  const out = await loadHoleCardsByUserId(txValid, {
+    tableId,
+    handId,
+    activeUserIds: ["user-1"],
+  });
+  assert.deepEqual(out.holeCardsByUserId["user-1"], [{ r: "A", s: "S" }, { r: "K", s: "S" }]);
+});
+
+test("soft mode never throws and returns statuses", async () => {
+  const tx = {
+    unsafe: async (query) => {
+      const text = String(query).toLowerCase();
+      if (text.includes("select user_id, cards")) {
+        return [{ user_id: "user-1", cards: [{ r: "A", s: "S" }] }];
+      }
+      throw new Error("unexpected_query");
+    },
+  };
+
+  const out = await loadHoleCardsByUserId(tx, {
+    tableId,
+    handId,
+    activeUserIds: ["user-1"],
+    requiredUserIds: ["user-1"],
+    mode: "soft",
+  });
+  assert.equal(out.holeCardsStatusByUserId["user-1"], "INVALID");
+  assert.equal(Object.prototype.hasOwnProperty.call(out.holeCardsByUserId, "user-1"), false);
+});
+
+
 test("strict mode requires explicit required users", async () => {
   const tx = {
     unsafe: async (query) => {

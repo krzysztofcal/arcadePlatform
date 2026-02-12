@@ -22,7 +22,7 @@ const normalizeCards = (value) => {
 
 const loadHoleCardsByUserId = async (
   tx,
-  { tableId, handId, activeUserIds, requiredUserIds, mode = "strict", selfHealInvalid = false }
+  { tableId, handId, activeUserIds, requiredUserIds, mode = "legacy", selfHealInvalid = false }
 ) => {
   if (!Array.isArray(activeUserIds) || activeUserIds.length === 0) {
     throw new Error("state_invalid");
@@ -90,7 +90,7 @@ const loadHoleCardsByUserId = async (
     }
   }
 
-  if (mode !== "soft" && requiredIds.some((userId) => statusByUserId[userId])) {
+  if ((mode === "strict" || mode === "legacy") && requiredIds.some((userId) => statusByUserId[userId])) {
     throw new Error("state_invalid");
   }
 

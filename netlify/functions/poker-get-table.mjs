@@ -14,7 +14,23 @@ const HOLE_CARDS_STATUS_MISSING = "MISSING";
 const HOLE_CARDS_STATUS_INVALID = "INVALID";
 const shouldSelfHealHoleCards = () => process.env.POKER_GET_TABLE_SELF_HEAL === "1";
 
+const shouldLogHoleCardsIssue = ({ tableId, handId, userId, reason }) => {
+  const rawPct = Number.parseInt(process.env.POKER_GET_TABLE_HOLE_CARDS_LOG_SAMPLE_PCT || "1", 10);
+  const samplePct = Number.isFinite(rawPct) ? Math.max(0, Math.min(100, rawPct)) : 1;
+  if (samplePct <= 0) return false;
+  if (samplePct >= 100) return true;
+  const key = `${tableId}|${handId || ""}|${userId}|${reason}`;
+  let hash = 2166136261;
+  for (let i = 0; i < key.length; i += 1) {
+    hash ^= key.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  const bucket = (hash >>> 0) % 100;
+  return bucket < samplePct;
+};
+
 const logHoleCardsIssue = ({ tableId, handId, userId, reason }) => {
+  if (!shouldLogHoleCardsIssue({ tableId, handId, userId, reason })) return;
   klog("poker_get_table_hole_cards_soft_fail", {
     tableId,
     handId: handId || null,

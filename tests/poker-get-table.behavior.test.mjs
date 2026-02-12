@@ -267,6 +267,37 @@ const run = async () => {
   assert.equal(myInvalidCardsPayload.ok, true);
   assert.equal(myInvalidCardsPayload.myHoleCards, null);
   assert.equal(myInvalidCardsPayload.holeCardsStatus, "INVALID");
+  process.env.POKER_GET_TABLE_HOLE_CARDS_LOG_SAMPLE_PCT = "0";
+  const sampledLogsNone = [];
+  await makeHandler([], storedState, "user-1", {
+    holeCardsByUserId: {
+      ...defaultHoleCards,
+      "user-1": [{ r: "A", s: "S" }],
+    },
+    klog: (event, payload) => sampledLogsNone.push({ event, payload }),
+  })({
+    httpMethod: "GET",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    queryStringParameters: { tableId },
+  });
+  assert.equal(sampledLogsNone.some((entry) => entry.event === "poker_get_table_hole_cards_soft_fail"), false);
+
+  process.env.POKER_GET_TABLE_HOLE_CARDS_LOG_SAMPLE_PCT = "100";
+  const sampledLogsAll = [];
+  await makeHandler([], storedState, "user-1", {
+    holeCardsByUserId: {
+      ...defaultHoleCards,
+      "user-1": [{ r: "A", s: "S" }],
+    },
+    klog: (event, payload) => sampledLogsAll.push({ event, payload }),
+  })({
+    httpMethod: "GET",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    queryStringParameters: { tableId },
+  });
+  assert.equal(sampledLogsAll.some((entry) => entry.event === "poker_get_table_hole_cards_soft_fail"), true);
+  delete process.env.POKER_GET_TABLE_HOLE_CARDS_LOG_SAMPLE_PCT;
+
 
   delete process.env.POKER_GET_TABLE_SELF_HEAL;
   const noSelfHealQueries = [];
@@ -303,6 +334,7 @@ const run = async () => {
   assert.equal(yesSelfHealDeletes.length, 1);
   delete process.env.POKER_GET_TABLE_SELF_HEAL;
 
+  process.env.POKER_GET_TABLE_HOLE_CARDS_LOG_SAMPLE_PCT = "100";
   const repairQueries = [];
   const repairState = {
     ...baseState,
@@ -337,6 +369,7 @@ const run = async () => {
   );
   assert.equal(repairInserts.length, 0);
   assert.ok(repairLogs.some((entry) => entry.event === "poker_get_table_hole_cards_soft_fail"));
+  delete process.env.POKER_GET_TABLE_HOLE_CARDS_LOG_SAMPLE_PCT;
 
   const missingSeedState = { ...baseState, handSeed: "" };
   const missingSeedQueries = [];
