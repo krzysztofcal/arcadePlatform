@@ -39,7 +39,6 @@ const loadHoleCardsByUserId = async (
   );
   const list = Array.isArray(rows) ? rows : [];
   const activeSet = new Set(activeUserIds);
-  const requiredSet = new Set(requiredIds);
   const map = {};
   const statusByUserId = {};
 
@@ -48,7 +47,7 @@ const loadHoleCardsByUserId = async (
     if (!activeSet.has(userId)) continue;
     const cards = normalizeCards(row.cards);
     map[userId] = cards;
-    if (requiredSet.has(userId) && !isValidTwoCards(cards)) {
+    if (!isValidTwoCards(cards)) {
       statusByUserId[userId] = "INVALID";
     }
   }

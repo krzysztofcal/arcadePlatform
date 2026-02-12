@@ -1210,8 +1210,7 @@ const run = async () => {
       "user-2": [],
     },
   });
-  assert.equal(invalidCardsResponse.response.statusCode, 409);
-  assert.equal(JSON.parse(invalidCardsResponse.response.body).error, "state_invalid");
+  assert.equal(invalidCardsResponse.response.statusCode, 200);
 
   const missingRowResponse = await runCase({
     state: baseState,
@@ -1223,8 +1222,20 @@ const run = async () => {
       "user-2": defaultHoleCards["user-2"],
     },
   });
-  assert.equal(missingRowResponse.response.statusCode, 409);
-  assert.equal(JSON.parse(missingRowResponse.response.body).error, "state_invalid");
+  assert.equal(missingRowResponse.response.statusCode, 200);
+
+  const actorInvalidCardsResponse = await runCase({
+    state: baseState,
+    action: { type: "CHECK" },
+    requestId: "req-actor-invalid-cards",
+    userId: "user-1",
+    holeCardsByUserId: {
+      ...defaultHoleCards,
+      "user-1": [{ r: "A", s: "S" }],
+    },
+  });
+  assert.equal(actorInvalidCardsResponse.response.statusCode, 409);
+  assert.equal(JSON.parse(actorInvalidCardsResponse.response.body).error, "state_invalid");
 
   {
     const seatUserIdsInOrder = seatOrder.slice();

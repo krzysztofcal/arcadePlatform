@@ -384,7 +384,7 @@ export async function handler(event) {
                     expectedCount: stateSeatUserIds.length,
                     attemptedUserIds: stateSeatUserIds,
                     statusCount: Object.keys(allStatuses).length,
-                    validCount: Object.values(allHoleCards.holeCardsByUserId || {}).filter((cards) => isValidTwoCards(cards)).length,
+                    validCount: stateSeatUserIds.filter((userId) => isValidTwoCards(allHoleCards.holeCardsByUserId?.[userId])).length,
                   });
                   shouldApplyTimeout = false;
                 } else {
