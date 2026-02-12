@@ -262,6 +262,10 @@ const runReplayPath = async () => {
   const updateCount = queries.filter((q) => q.query.toLowerCase().includes("update public.poker_state")).length;
   const actionCount = queries.filter((q) => q.query.toLowerCase().includes("insert into public.poker_actions")).length;
   const holeCardQueryCount = queries.filter((q) => q.query.toLowerCase().includes("from public.poker_hole_cards")).length;
+  const tableTouchCount = queries.filter((q) =>
+    q.query.toLowerCase().includes("update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1")
+  ).length;
+  assert.equal(tableTouchCount, 1, "start-hand happy path should bump table activity once");
   const replayResponse = await handler({
     httpMethod: "POST",
     headers: { origin: "https://example.test", authorization: "Bearer token" },
@@ -286,9 +290,13 @@ const runReplayPath = async () => {
   const updateCalls = queries.filter((q) => q.query.toLowerCase().includes("update public.poker_state"));
   const actionCalls = queries.filter((q) => q.query.toLowerCase().includes("insert into public.poker_actions"));
   const holeCardQueries = queries.filter((q) => q.query.toLowerCase().includes("from public.poker_hole_cards"));
+  const replayTableTouchCount = queries.filter((q) =>
+    q.query.toLowerCase().includes("update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1")
+  ).length;
   assert.equal(updateCalls.length, updateCount);
   assert.equal(actionCalls.length, actionCount);
   assert.equal(holeCardQueries.length, holeCardQueryCount);
+  assert.equal(replayTableTouchCount, tableTouchCount, "replayed start-hand should not bump table activity");
 
   const differentResponse = await handler({
     httpMethod: "POST",

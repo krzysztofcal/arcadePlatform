@@ -53,6 +53,11 @@ const toErrorPayload = (err) => {
   return { code: "server_error" };
 };
 
+const makeAlreadyInHandError = (tableId, userId, context) => {
+  klog("poker_start_hand_already_in_hand", { tableId, userId, context: context || "unknown" });
+  return makeError(409, "already_in_hand");
+};
+
 const REQUEST_PENDING_STALE_SEC = 30;
 
 const parseRequestId = (value) => {
@@ -300,7 +305,7 @@ export async function handler(event) {
         }
 
       if (currentState.phase && currentState.phase !== "INIT" && currentState.phase !== "HAND_DONE") {
-        throw makeError(409, "already_in_hand");
+        throw makeAlreadyInHandError(tableId, auth.userId, "phase_gate");
       }
 
       const orderedSeats = validSeats.slice().sort((a, b) => Number(a.seat_no) - Number(b.seat_no));
@@ -495,7 +500,9 @@ export async function handler(event) {
           const rawFreshState = freshStateRows?.[0]?.state ?? null;
           const freshState = normalizeStateRow(rawFreshState);
           const freshPhase = typeof freshState?.phase === "string" ? freshState.phase : null;
-          if (freshPhase && freshPhase !== "INIT" && freshPhase !== "HAND_DONE") throw makeError(409, "already_in_hand");
+          if (freshPhase && freshPhase !== "INIT" && freshPhase !== "HAND_DONE") {
+            throw makeAlreadyInHandError(tableId, auth.userId, "optimistic_conflict");
+          }
           throw makeError(409, "state_conflict");
         }
         throw makeError(409, "state_invalid");

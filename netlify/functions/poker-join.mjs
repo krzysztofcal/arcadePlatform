@@ -367,7 +367,7 @@ values ($1, $2, $3, 'ACTIVE', now(), now(), $4);
                 throw makeError(409, "seat_taken");
               }
               const activeSeatRows = await tx.unsafe(
-                "select seat_no from public.poker_seats where table_id = $1 and status = 'ACTIVE' order by seat_no asc;",
+                "select seat_no from public.poker_seats where table_id = $1 order by seat_no asc;",
                 [tableId]
               );
               const nextSeatNo = pickNextSeatNo(activeSeatRows, Number(table.max_players), seatNoDbToUse + 1);
@@ -375,6 +375,13 @@ values ($1, $2, $3, 'ACTIVE', now(), now(), $4);
                 throw makeError(409, "table_full");
               }
               seatNoDbToUse = nextSeatNo;
+              klog("poker_join_autoseat_selected", {
+                tableId,
+                userId: auth.userId,
+                seatNoDbInitial,
+                chosenSeatNoDb: seatNoDbToUse,
+                attempt: attempt + 1,
+              });
               if (attempt >= maxSeatInsertAttempts - 1) {
                 klog("poker_join_autoseat_retry_exhausted", {
                   tableId,

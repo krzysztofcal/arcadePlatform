@@ -69,7 +69,7 @@ const makeJoinHandler = ({
             if (Number.isInteger(existingSeatNo)) return [{ seat_no: existingSeatNo }];
             return [];
           }
-          if (text.includes("where table_id = $1 and status = 'active' order by seat_no asc")) {
+          if (text.includes("where table_id = $1 order by seat_no asc")) {
             return occupiedSeatRows;
           }
           if (text.includes("insert into public.poker_seats")) {
@@ -279,6 +279,27 @@ const run = async () => {
     preferredSeatNo: 1,
   });
   assert.equal(autoSeatJoinStr.statusCode, 200);
+
+  const inactiveOccupiedQueries = [];
+  const inactiveOccupiedSideEffects = { seatInsert: 0, ledger: 0, conflictSeatInsertUsed: false };
+  const inactiveOccupiedHandler = makeJoinHandler({
+    requestStore: new Map(),
+    queries: inactiveOccupiedQueries,
+    sideEffects: inactiveOccupiedSideEffects,
+    conflictSeatInsertOnce: true,
+    occupiedSeatRows: [{ seat_no: 2, status: "INACTIVE" }],
+  });
+  const inactiveOccupiedJoin = await callJoin(inactiveOccupiedHandler, "join-auto-seat-inactive-occupied", {
+    seatNo: undefined,
+    autoSeat: true,
+    preferredSeatNo: 1,
+  });
+  assert.equal(inactiveOccupiedJoin.statusCode, 200);
+  assert.equal(
+    JSON.parse(inactiveOccupiedJoin.body).seatNo,
+    2,
+    "autoSeat should treat non-ACTIVE seat rows as occupied during retries"
+  );
 
   const fullHandler = makeJoinHandler({
     requestStore: new Map(),

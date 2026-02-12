@@ -922,6 +922,7 @@
     var autoJoinAttempted = false;
     var autoStartLastAttemptAt = 0;
     var autoStartCooldownMs = 4000;
+    var autoStartStopForHand = false;
     var lastAutoStartSeatCount = null;
     var turnTimerInterval = null;
     var HEARTBEAT_PENDING_MAX_RETRIES = 8;
@@ -1526,7 +1527,7 @@
     }
 
     function isNeutralAutoStartCode(code){
-      return code === 'not_enough_players' || code === 'already_in_hand';
+      return code === 'not_enough_players' || code === 'already_in_hand' || code === 'state_conflict';
     }
 
     function getPreferredSeatNo(preferredSeatNoOverride){
@@ -1561,6 +1562,7 @@
       if (!shouldAutoStart) return;
       if (!currentUserId || !isSeated || !tableData) return;
       if (startHandPending || joinPending || leavePending || actPending) return;
+      if (pendingStartHandRequestId) return;
       var table = tableData.table || {};
       var stateObj = tableData.state || {};
       var gameState = stateObj.state || {};
@@ -1568,22 +1570,40 @@
       var phase = typeof gameState.phase === 'string' ? gameState.phase : '';
       var seatedCount = getSeatedCount(tableData);
       var minPlayers = Number.isInteger(table.minPlayers) && table.minPlayers >= 2 ? table.minPlayers : 2;
-      if (status !== 'OPEN' || phase !== 'INIT') return;
+      if (status !== 'OPEN' || phase !== 'INIT') {
+        autoStartStopForHand = false;
+        return;
+      }
       if (seatedCount < minPlayers) return;
+      if (autoStartStopForHand) return;
       var now = Date.now();
       if (now - autoStartLastAttemptAt < autoStartCooldownMs) return;
       autoStartLastAttemptAt = now;
       klog('poker_auto_start_attempt', { tableId: tableId, seatedCount: seatedCount, phase: phase, status: status });
+      var requestId = normalizeRequestId(generateRequestId());
+      pendingStartHandRequestId = requestId;
       try {
-        var requestId = normalizeRequestId(generateRequestId());
-        var result = await apiPost(START_HAND_URL, { tableId: tableId, requestId: requestId });
-        var code = result && result.code ? result.code : 'ok';
-        klog('poker_auto_start_result', { tableId: tableId, code: code });
+        var res = await authedFetch(START_HAND_URL, { method: 'POST', body: JSON.stringify({ tableId: tableId, requestId: requestId }) });
+        var result = {};
+        try { result = await res.json(); } catch (_err) {}
+        if (res.status === 202 && result && result.error === 'request_pending'){
+          scheduleDevPendingRetry('startHand', retryStartHand);
+          klog('poker_auto_start_result', { tableId: tableId, code: 'request_pending' });
+          return;
+        }
+        if (!res.ok){
+          throw { code: (result && result.error) || 'request_failed' };
+        }
+        clearStartHandPending();
+        autoStartStopForHand = false;
+        klog('poker_auto_start_result', { tableId: tableId, code: 'ok' });
         if (!isPageActive()) return;
         loadTable(false);
       } catch (err){
         var errCode = err && (err.code || err.error || err.message) ? err.code || err.error || err.message : 'unknown_error';
         klog('poker_auto_start_result', { tableId: tableId, code: errCode });
+        if (errCode === 'already_in_hand') autoStartStopForHand = true;
+        clearStartHandPending();
         if (isNeutralAutoStartCode(errCode)) return;
       }
     }
