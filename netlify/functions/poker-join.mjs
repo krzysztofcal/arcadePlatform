@@ -184,8 +184,8 @@ returning seat_no;
         },
         entries: [
           { accountType: "SYSTEM", systemKey: cfg.bankrollSystemKey, amount: -buyInChips },
-          { accountType: "USER", amount: buyInChips },
-          { accountType: "USER", amount: -buyInChips },
+          { accountType: "USER", userId: botUserId, amount: buyInChips },
+          { accountType: "USER", userId: botUserId, amount: -buyInChips },
           { accountType: "ESCROW", systemKey: escrowSystemKey, amount: buyInChips },
         ],
         createdBy: humanUserId,

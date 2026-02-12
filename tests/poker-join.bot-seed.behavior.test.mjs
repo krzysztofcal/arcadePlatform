@@ -184,6 +184,10 @@ const run = async () => {
       assert.equal(ledgerCall.entries.filter((entry) => entry.accountType === "USER").length, 2);
       assert.equal(ledgerCall.entries.some((entry) => entry.accountType === "USER" && entry.amount === 200), true);
       assert.equal(ledgerCall.entries.some((entry) => entry.accountType === "USER" && entry.amount === -200), true);
+      for (const entry of ledgerCall.entries.filter((item) => item.accountType === "USER")) {
+        assert.equal(typeof entry.userId, "string");
+        assert.equal(entry.userId, ledgerCall.userId);
+      }
       assert.equal(
         ledgerCall.entries.some((entry) => entry.accountType === "SYSTEM" && String(entry.systemKey || "").startsWith("POKER_BOT:")),
         false
@@ -212,6 +216,28 @@ const run = async () => {
     const res = await callJoin(ctx.handler, "reserve-seat");
     assert.equal(res.statusCode, 200);
     assert.equal(ctx.seats.filter((seat) => seat.is_bot).length, 0);
+  }
+
+  {
+    const ctx = makeJoinHandler({ botEnabled: true, botMaxPerTable: 2, tableMaxPlayers: 6 });
+    ctx.seats.push({
+      table_id: tableId,
+      user_id: "bot-2",
+      seat_no: 2,
+      status: "ACTIVE",
+      is_bot: true,
+      bot_profile: "TRIVIAL",
+      leave_after_hand: false,
+      stack: 200,
+    });
+
+    const res = await callJoin(ctx.handler, "seed-delta");
+    assert.equal(res.statusCode, 200);
+    assert.equal(ctx.seats.filter((seat) => seat.is_bot).length, 2);
+
+    const botSeedLedger = ctx.ledgerCalls.filter((entry) => entry.metadata?.reason === "BOT_SEED_BUY_IN");
+    assert.equal(botSeedLedger.length, 1);
+    assert.equal(botSeedLedger[0].idempotencyKey, `bot-seed-buyin:${tableId}:3`);
   }
 
   {
