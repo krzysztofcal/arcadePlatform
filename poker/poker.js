@@ -1430,39 +1430,28 @@
     }
 
     function handleDevPendingTimeout(action){
-      var message = action === 'startHand' ? t('pokerErrStartHandPending', 'Start hand still pending. Please try again.') : t('pokerErrActPending', 'Action still pending. Please try again.');
-      var statusEl = action === 'startHand' ? startHandStatusEl : actStatusEl;
-      if (action === 'startHand'){
-        clearStartHandPending();
-      } else {
-        clearActPending();
-      }
-      setInlineStatus(statusEl, message, 'error');
+      if (action !== 'act') return;
+      clearActPending();
+      setInlineStatus(actStatusEl, t('pokerErrActPending', 'Action still pending. Please try again.'), 'error');
     }
 
     function scheduleDevPendingRetry(action, retryFn){
+      if (action !== 'act') return;
       if (!isPageActive()) return;
-      setDevPendingState(action, true);
-      var startedAt = action === 'startHand' ? pendingStartHandStartedAt : pendingActStartedAt;
-      var retries = action === 'startHand' ? pendingStartHandRetries : pendingActRetries;
+      setDevPendingState('act', true);
+      var startedAt = pendingActStartedAt;
+      var retries = pendingActRetries;
       if (!startedAt) startedAt = Date.now();
       retries += 1;
       var delay = getPendingDelay(retries);
       if (!shouldRetryPending(startedAt, delay)){
-        handleDevPendingTimeout(action);
+        handleDevPendingTimeout('act');
         return;
       }
-      if (action === 'startHand'){
-        pendingStartHandStartedAt = startedAt;
-        pendingStartHandRetries = retries;
-        if (pendingStartHandTimer) clearTimeout(pendingStartHandTimer);
-        pendingStartHandTimer = scheduleRetry(retryFn, delay);
-      } else {
-        pendingActStartedAt = startedAt;
-        pendingActRetries = retries;
-        if (pendingActTimer) clearTimeout(pendingActTimer);
-        pendingActTimer = scheduleRetry(retryFn, delay);
-      }
+      pendingActStartedAt = startedAt;
+      pendingActRetries = retries;
+      if (pendingActTimer) clearTimeout(pendingActTimer);
+      pendingActTimer = scheduleRetry(retryFn, delay);
     }
 
     function stopPendingRetries(){

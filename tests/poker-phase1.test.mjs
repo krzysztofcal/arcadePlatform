@@ -85,6 +85,7 @@ assert.ok(
   pokerUiSrc.includes("schedulePendingRetry('startHand', retryStartHand);"),
   "poker UI start-hand flow should schedule pending retry via prod-safe scheduler"
 );
+assert.ok(!pokerUiSrc.includes("scheduleDevPendingRetry('startHand'"), "poker UI should not schedule start-hand via dev-only scheduler anywhere");
 assert.ok(/function\s+resolveRequestId\s*\(/.test(pokerUiSrc), "poker UI should define resolveRequestId helper");
 const formatRankIndex = pokerUiSrc.indexOf("function formatRank");
 assert.ok(formatRankIndex !== -1, "poker UI should define formatRank helper");
