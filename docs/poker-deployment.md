@@ -6,10 +6,16 @@ Poker funds must always have a deterministic path back to the user. Each buy-in
 moves chips from USER → ESCROW using `TABLE_BUY_IN`, and each leave/timeout must
 cash those chips back from ESCROW → USER using `TABLE_CASH_OUT`. The sweep
 timeout path is required to cash out inactive seats so escrow balances cannot
-remain stranded. The authoritative stack source is `public.poker_seats.stack`,
-which must never be NULL after a successful join. JSON table state stacks are
-treated as derived/cache only and must be kept in sync when gameplay updates a
-player’s stack.
+remain stranded. The authoritative stack source during active gameplay is `poker_state.state.stacks`.
+`public.poker_seats.stack` is a persisted snapshot used for join preconditions,
+lobby display, and safety checks. It must never be NULL after a successful join.
+Seat stacks must be kept in sync at key transitions:
+- successful join
+- hand end / settlement
+- leave / cash-out
+- sweep cleanup
+This prevents stranded escrow balances and avoids gameplay issues such as
+"stack = 0" with no legal actions.
 
 ## Poker sweep endpoint
 
@@ -21,6 +27,30 @@ The poker sweep function requires a shared secret to run cleanup safely.
    - `x-sweep-secret: <POKER_SWEEP_SECRET>`
 
 Requests without the header (or with a mismatched value) are rejected with `401 unauthorized`.
+
+
+## Poker Bots (Phase 1)
+
+Runtime config should be read in code via `process.env.*` (Netlify Functions runtime style).
+
+Set these as Netlify environment variables (Site settings -> Environment variables):
+
+- `POKER_BOTS_ENABLED` (`0`/`1`)
+- `POKER_BOTS_MAX_PER_TABLE` (default: `2`)
+- `POKER_BOT_PROFILE_DEFAULT` (default: `TRIVIAL`)
+- `POKER_BOT_BUYIN_BB` (example: `100`)
+- `POKER_BOT_BANKROLL_SYSTEM_KEY` (default now: `TREASURY`; optional later: `POKER_BOT_BANKROLL`)
+- Optional later: `POKER_BOTS_MAX_ACTIONS_PER_POLL`
+
+Notes:
+- Most values above are runtime config, not secrets.
+- If any value is sensitive (for example an internal key/token), mark it as Sensitive/Secret in Netlify.
+
+### Local development
+
+- Local `.env` is supported for development only (gitignored, never committed).
+- Deployed environments should use Netlify environment variables.
+- Keep naming consistent between docs and code: Netlify environment variables read through `process.env`.
 
 ## Acceptance
 
