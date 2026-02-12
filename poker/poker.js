@@ -1376,6 +1376,13 @@
     }
 
     function handlePendingTimeout(action){
+      if (action === 'startHand'){
+        var startHandRetries = pendingStartHandRetries;
+        klog('poker_pending_timeout', { action: action, tableId: tableId, retries: startHandRetries, budgetMs: PENDING_RETRY_BUDGET_MS });
+        clearStartHandPending();
+        setInlineStatus(startHandStatusEl, t('pokerErrStartHandPending', 'Start hand still pending. Please try again.'), 'error');
+        return;
+      }
       var message = action === 'join' ? t('pokerErrJoinPending', 'Join still pending. Please try again.') : t('pokerErrLeavePending', 'Leave still pending. Please try again.');
       var endpoint = action === 'join' ? JOIN_URL : LEAVE_URL;
       var retries = action === 'join' ? pendingJoinRetries : pendingLeaveRetries;
@@ -1390,9 +1397,13 @@
 
     function schedulePendingRetry(action, retryFn){
       if (!isPageActive()) return;
-      setPendingState(action, true);
-      var startedAt = action === 'join' ? pendingJoinStartedAt : pendingLeaveStartedAt;
-      var retries = action === 'join' ? pendingJoinRetries : pendingLeaveRetries;
+      if (action === 'startHand'){
+        setDevPendingState('startHand', true);
+      } else {
+        setPendingState(action, true);
+      }
+      var startedAt = action === 'join' ? pendingJoinStartedAt : action === 'leave' ? pendingLeaveStartedAt : pendingStartHandStartedAt;
+      var retries = action === 'join' ? pendingJoinRetries : action === 'leave' ? pendingLeaveRetries : pendingStartHandRetries;
       if (!startedAt) startedAt = Date.now();
       retries += 1;
       var delay = getPendingDelay(retries);
@@ -1405,11 +1416,16 @@
         pendingJoinRetries = retries;
         if (pendingJoinTimer) clearTimeout(pendingJoinTimer);
         pendingJoinTimer = scheduleRetry(retryFn, delay);
-      } else {
+      } else if (action === 'leave'){
         pendingLeaveStartedAt = startedAt;
         pendingLeaveRetries = retries;
         if (pendingLeaveTimer) clearTimeout(pendingLeaveTimer);
         pendingLeaveTimer = scheduleRetry(retryFn, delay);
+      } else if (action === 'startHand'){
+        pendingStartHandStartedAt = startedAt;
+        pendingStartHandRetries = retries;
+        if (pendingStartHandTimer) clearTimeout(pendingStartHandTimer);
+        pendingStartHandTimer = scheduleRetry(retryFn, delay);
       }
     }
 
@@ -2146,7 +2162,7 @@
         var startRequestId = normalizeRequestId(resolved.requestId);
         var result = await apiPost(START_HAND_URL, { tableId: tableId, requestId: startRequestId });
         if (isPendingResponse(result)){
-          scheduleDevPendingRetry('startHand', retryStartHand);
+          schedulePendingRetry('startHand', retryStartHand);
           return { ok: false, code: 'request_pending', pending: true };
         }
         if (result && result.ok === false){
@@ -2467,7 +2483,7 @@
         }
         if (pendingJoinRequestId) schedulePendingRetry('join', retryJoin);
         if (pendingLeaveRequestId) schedulePendingRetry('leave', retryLeave);
-        if (pendingStartHandRequestId) scheduleDevPendingRetry('startHand', retryStartHand);
+        if (pendingStartHandRequestId) schedulePendingRetry('startHand', retryStartHand);
         if (pendingActRequestId) scheduleDevPendingRetry('act', retryAct);
         if (!pendingJoinRequestId && !pendingLeaveRequestId) loadTable(false);
       }

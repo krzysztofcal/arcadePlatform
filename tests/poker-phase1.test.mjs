@@ -82,8 +82,8 @@ assert.ok(
   "poker UI auto-start should stop retrying after already_in_hand"
 );
 assert.ok(
-  pokerUiSrc.includes("scheduleDevPendingRetry('startHand', retryStartHand);"),
-  "poker UI start-hand flow should keep pending retry scheduler"
+  pokerUiSrc.includes("schedulePendingRetry('startHand', retryStartHand);"),
+  "poker UI start-hand flow should schedule pending retry via prod-safe scheduler"
 );
 assert.ok(/function\s+resolveRequestId\s*\(/.test(pokerUiSrc), "poker UI should define resolveRequestId helper");
 const formatRankIndex = pokerUiSrc.indexOf("function formatRank");
