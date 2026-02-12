@@ -98,7 +98,12 @@ const makeHandler = (queries, storedState, userId, options = {}) =>
             if (hasActive && hasUserFilter && okParams) return [{ user_id: userId }];
             if (hasActive) {
               const activeSeatUserIds = options.activeSeatUserIds || ["user-1", "user-2", "user-3"];
-              return activeSeatUserIds.map((id, index) => ({ user_id: id, seat_no: index + 1 }));
+              const botSeatUserIds = new Set(options.botSeatUserIds || []);
+              const rows = activeSeatUserIds.map((id, index) => ({ user_id: id, seat_no: index + 1, is_bot: botSeatUserIds.has(id) }));
+              if (text.includes("coalesce(is_bot,false) = false")) {
+                return rows.filter((row) => !row.is_bot).map(({ user_id, seat_no }) => ({ user_id, seat_no }));
+              }
+              return rows.map(({ user_id, seat_no }) => ({ user_id, seat_no }));
             }
             return [];
           }
@@ -361,6 +366,7 @@ const runCase = async ({
   holeCardsError,
   applyAction: applyActionOverride,
   activeSeatUserIds,
+  botSeatUserIds,
   loadHoleCardsByUserId: loadHoleCardsByUserIdOverride,
   updatePokerStateConflict,
 }) => {
@@ -372,6 +378,7 @@ const runCase = async ({
     holeCardsError,
     applyAction: applyActionOverride,
     activeSeatUserIds,
+    botSeatUserIds,
     loadHoleCardsByUserId: loadHoleCardsByUserIdOverride,
     updatePokerStateConflict,
   });
@@ -1226,6 +1233,28 @@ const run = async () => {
     },
   });
   assert.equal(staleSeatNoDbActiveResponse.response.statusCode, 200);
+
+  const botSeatState = {
+    ...baseState,
+    seats: [
+      { userId: "user-1", seatNo: 1 },
+      { userId: "bot-1", seatNo: 2 },
+      { userId: "user-2", seatNo: 3 },
+    ],
+  };
+  const botSeatResponse = await runCase({
+    state: botSeatState,
+    action: { type: "CHECK" },
+    requestId: "req-bot-seat",
+    userId: "user-1",
+    activeSeatUserIds: ["user-1", "bot-1", "user-2"],
+    botSeatUserIds: ["bot-1"],
+    holeCardsByUserId: {
+      "user-1": defaultHoleCards["user-1"],
+      "user-2": defaultHoleCards["user-2"],
+    },
+  });
+  assert.equal(botSeatResponse.response.statusCode, 200);
   const missingTableError = new Error("missing table");
   missingTableError.code = "42P01";
   const missingTableResponse = await runCase({

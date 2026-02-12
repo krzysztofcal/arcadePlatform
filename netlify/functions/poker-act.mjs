@@ -531,7 +531,7 @@ export async function handler(event) {
         throw makeError(409, "state_invalid");
       }
       const activeSeatRows = await tx.unsafe(
-        "select user_id from public.poker_seats where table_id = $1 and status = 'ACTIVE' order by seat_no asc;",
+        "select user_id from public.poker_seats where table_id = $1 and status = 'ACTIVE' and coalesce(is_bot,false) = false order by seat_no asc;",
         [tableId]
       );
       const seatUserIdsInOrder = normalizeSeatOrderFromState(currentState.seats);
