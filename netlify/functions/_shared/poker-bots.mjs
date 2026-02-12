@@ -50,11 +50,13 @@ const findAction = (legalActions, actionType) => {
   return null;
 };
 
+const toHex = (bytes) => Buffer.from(bytes).toString("hex");
+
 const toUuidLike = (input) => {
-  const digest = createHash("sha256").update(input).digest();
-  const bytes = digest.subarray(0, 16);
-  const hex = bytes.toString("hex");
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
+  const bytes = Buffer.from(createHash("sha256").update(input).digest().subarray(0, 16));
+  bytes[6] = (bytes[6] & 0x0f) | 0x50;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  return `${toHex(bytes.subarray(0, 4))}-${toHex(bytes.subarray(4, 6))}-${toHex(bytes.subarray(6, 8))}-${toHex(bytes.subarray(8, 10))}-${toHex(bytes.subarray(10, 16))}`;
 };
 
 function getBotConfig(env = process.env) {

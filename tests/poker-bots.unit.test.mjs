@@ -33,7 +33,10 @@ import {
   const c = makeBotUserId("table-1", 3);
   assert.equal(a, b);
   assert.notEqual(a, c);
-  assert.match(a, /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
+  assert.match(a, /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+  const parts = a.split("-");
+  assert.equal(parts[2][0], "5");
+  assert.match(parts[3][0], /^[89ab]$/i);
 }
 
 {

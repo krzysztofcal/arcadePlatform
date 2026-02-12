@@ -102,6 +102,10 @@ function badRequest(code, message) {
 const hashPayload = (input) =>
   crypto.createHash("sha256").update(JSON.stringify(input)).digest("hex");
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+const isUuidLike = (value) => UUID_RE.test(String(value || "").trim());
+
 const isPlainObject = (value) =>
   value !== null && typeof value === "object" && Object.getPrototypeOf(value) === Object.prototype;
 
@@ -531,27 +535,62 @@ select
   return rows?.[0] || null;
 }
 
-function validateEntries(entries) {
+function validateEntries(entries, payloadUserId, { txType = null, createdBy = null } = {}) {
   if (!Array.isArray(entries) || entries.length === 0) {
     throw badRequest("missing_entries", "At least one entry is required");
   }
   const sanitized = [];
   let hasUserEntry = false;
+  let hasEscrowEntry = false;
+  let hasSystemEntry = false;
+  let escrowEntryCount = 0;
+  let systemEntryCount = 0;
+  let escrowAmount = 0;
+  let systemAmount = 0;
   for (const entry of entries) {
     const amount = Number(entry?.amount);
     const kind = entry?.accountType || entry?.kind;
     const systemKey = entry?.systemKey;
+    const rawEntryUserId = entry?.userId;
+    const hasEntryUserId = rawEntryUserId !== undefined && rawEntryUserId !== null;
+    const entryUserId = hasEntryUserId ? String(rawEntryUserId).trim() : "";
     if (!Number.isInteger(amount) || amount === 0) {
       throw badRequest("invalid_entry_amount", "Entry amount must be a non-zero integer");
     }
     if (kind !== "USER" && kind !== "SYSTEM" && kind !== "ESCROW") {
       throw badRequest("unsupported_account_type", "Unsupported accountType in entry");
     }
+    if (kind === "ESCROW") {
+      hasEscrowEntry = true;
+      escrowEntryCount += 1;
+      escrowAmount += amount;
+    }
+    if (kind === "SYSTEM") {
+      hasSystemEntry = true;
+      systemEntryCount += 1;
+      systemAmount += amount;
+    }
     if (kind !== "USER" && !systemKey) {
       throw badRequest("missing_system_key", "System entries must provide systemKey");
     }
+    let effectiveUserId = null;
     if (kind === "USER") {
       hasUserEntry = true;
+      if (hasEntryUserId) {
+        if (!entryUserId) {
+          throw badRequest("invalid_entry_user", "USER entry userId must be non-empty string");
+        }
+        effectiveUserId = entryUserId;
+      } else {
+        const fallbackUserId = String(payloadUserId == null ? "" : payloadUserId).trim();
+        if (!fallbackUserId) {
+          throw badRequest("invalid_entry_user", "USER entries require a user id");
+        }
+        effectiveUserId = fallbackUserId;
+      }
+      if (!isUuidLike(effectiveUserId)) {
+        throw badRequest("invalid_entry_user", "USER entry userId must be a UUID");
+      }
     }
     if (
       Object.prototype.hasOwnProperty.call(entry, "metadata") &&
@@ -561,9 +600,27 @@ function validateEntries(entries) {
       throw badRequest("invalid_entry_metadata", "Entry metadata must be a plain JSON object");
     }
     const metadata = entry?.metadata ?? {};
-    sanitized.push({ kind, systemKey, amount, metadata });
+    sanitized.push({ kind, systemKey, amount, metadata, ...(kind === "USER" ? { userId: effectiveUserId } : {}) });
   }
-  if (!hasUserEntry) {
+  const payloadUserIdNormalized = String(payloadUserId == null ? "" : payloadUserId).trim();
+  const createdByNormalized = String(createdBy == null ? "" : createdBy).trim();
+  const allowEscrowOnlyTableBuyIn =
+    !hasUserEntry &&
+    txType === "TABLE_BUY_IN" &&
+    payloadUserIdNormalized === "" &&
+    isUuidLike(createdByNormalized) &&
+    entries.length === 2 &&
+    hasEscrowEntry &&
+    hasSystemEntry &&
+    escrowEntryCount === 1 &&
+    systemEntryCount === 1 &&
+    systemAmount < 0 &&
+    escrowAmount > 0 &&
+    (systemAmount + escrowAmount) === 0;
+  if (!hasUserEntry && txType === "TABLE_BUY_IN" && !allowEscrowOnlyTableBuyIn) {
+    throw badRequest("invalid_escrow_only_entries", "Escrow-only TABLE_BUY_IN requires SYSTEM(-) and ESCROW(+) strict shape");
+  }
+  if (!hasUserEntry && txType !== "TABLE_BUY_IN") {
     throw badRequest("missing_user_entry", "Transactions must include the user account");
   }
   return sanitized;
@@ -587,7 +644,19 @@ async function postTransaction({
     throw badRequest("missing_idempotency_key", "Idempotency key is required");
   }
 
-  const normalizedEntries = validateEntries(entries);
+  const payloadUserIdRaw = String(userId == null ? "" : userId).trim();
+  const userEntryFallbackNeeded = Array.isArray(entries)
+    ? entries.some((entry) => {
+      const kind = entry?.accountType || entry?.kind;
+      return kind === "USER" && (entry?.userId === undefined || entry?.userId === null || String(entry.userId).trim() === "");
+    })
+    : false;
+  if (payloadUserIdRaw && !isUuidLike(payloadUserIdRaw) && userEntryFallbackNeeded) {
+    throw badRequest("invalid_user_id", "userId must be a UUID");
+  }
+  const payloadUserId = isUuidLike(payloadUserIdRaw) ? payloadUserIdRaw : "";
+
+  const normalizedEntries = validateEntries(entries, payloadUserId, { txType, createdBy });
   assertPlainObjectOrNull(metadata, "invalid_metadata");
   const safeMetadata = metadata ?? {};
   let safeMetadataJson = "{}";
@@ -618,6 +687,7 @@ async function postTransaction({
 
   const hashableEntries = normalizedEntries.map((entry) => ({
     kind: entry.kind,
+    userId: entry.kind === "USER" ? (entry.userId ?? null) : null,
     systemKey: entry.systemKey ?? null,
     amount: entry.amount,
     metadata: entry.metadata ?? {},
@@ -626,7 +696,7 @@ async function postTransaction({
   let payloadHash;
   try {
     payloadHash = hashPayload({
-      userId,
+      userId: payloadUserId || null,
       txType,
       idempotencyKey,
       reference,
@@ -642,12 +712,24 @@ async function postTransaction({
   let userAccount = null;
   const runInTx = async (sqlTx) => {
     // IMPORTANT: inside this block use ONLY `sqlTx` for all SQL to keep it atomic.
-    userAccount = await getOrCreateUserAccount(userId, sqlTx);
+    const userEntryIds = [...new Set(normalizedEntries.filter((entry) => entry.kind === "USER").map((entry) => entry.userId).filter(Boolean))];
+    const userAccountById = new Map();
+    for (const userEntryId of userEntryIds) {
+      userAccountById.set(userEntryId, await getOrCreateUserAccount(userEntryId, sqlTx));
+    }
+
+    userAccount = payloadUserId ? (userAccountById.get(payloadUserId) || null) : null;
+
+    for (const entry of normalizedEntries) {
+      if (entry.kind === "USER" && !userAccountById.has(entry.userId)) {
+        throw badRequest("invalid_entry_user", "USER entry userId must resolve to a user account");
+      }
+    }
 
     const entryRecords = normalizedEntries.map(entry => {
       if (entry.kind === "USER") {
         const safeEntryMetadata = entry?.metadata ?? {};
-        return { account_id: userAccount.id, amount: entry.amount, metadata: safeEntryMetadata };
+        return { account_id: userAccountById.get(entry.userId)?.id, amount: entry.amount, metadata: safeEntryMetadata };
       }
       const account = systemMap.get(entry.systemKey);
       const safeEntryMetadata = entry?.metadata ?? {};
@@ -669,7 +751,7 @@ async function postTransaction({
 
     const txRows = await sqlTx`
       insert into public.chips_transactions (reference, description, metadata, idempotency_key, payload_hash, tx_type, user_id, created_by)
-      values (${reference}, ${description}, ${safeMetadataJson}::jsonb, ${idempotencyKey}, ${payloadHash}, ${txType}, ${userId}, ${createdBy})
+      values (${reference}, ${description}, ${safeMetadataJson}::jsonb, ${idempotencyKey}, ${payloadHash}, ${txType}, ${payloadUserId || null}, ${createdBy})
       returning *;
     `;
 
