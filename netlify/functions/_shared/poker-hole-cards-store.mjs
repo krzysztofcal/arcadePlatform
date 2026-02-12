@@ -45,11 +45,7 @@ const loadHoleCardsByUserId = async (
   for (const row of list) {
     const userId = row?.user_id;
     if (!activeSet.has(userId)) continue;
-    const cards = normalizeCards(row.cards);
-    map[userId] = cards;
-    if (!isValidTwoCards(cards)) {
-      statusByUserId[userId] = "INVALID";
-    }
+    map[userId] = normalizeCards(row.cards);
   }
 
   for (const userId of requiredIds) {
@@ -63,7 +59,7 @@ const loadHoleCardsByUserId = async (
   }
 
   if (selfHealInvalid) {
-    const invalidUsersToDelete = Object.keys(statusByUserId).filter((userId) => statusByUserId[userId] === "INVALID");
+    const invalidUsersToDelete = requiredIds.filter((userId) => statusByUserId[userId] === "INVALID");
     if (invalidUsersToDelete.length > 0) {
       await tx.unsafe(
         "delete from public.poker_hole_cards where table_id = $1 and hand_id = $2 and user_id = any($3::text[]);",

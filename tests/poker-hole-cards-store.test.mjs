@@ -1,0 +1,67 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { loadHoleCardsByUserId } from "../netlify/functions/_shared/poker-hole-cards-store.mjs";
+
+const tableId = "11111111-1111-4111-8111-111111111111";
+const handId = "hand-1";
+
+test("strict mode only validates required users", async () => {
+  const tx = {
+    unsafe: async (query) => {
+      const text = String(query).toLowerCase();
+      if (text.includes("select user_id, cards")) {
+        return [
+          { user_id: "user-1", cards: [{ r: "A", s: "S" }, { r: "K", s: "S" }] },
+          { user_id: "user-2", cards: [] },
+        ];
+      }
+      throw new Error("unexpected_query");
+    },
+  };
+
+  const out = await loadHoleCardsByUserId(tx, {
+    tableId,
+    handId,
+    activeUserIds: ["user-1", "user-2"],
+    requiredUserIds: ["user-1"],
+    mode: "strict",
+  });
+
+  assert.equal(out.holeCardsStatusByUserId["user-1"], undefined);
+  assert.equal(out.holeCardsStatusByUserId["user-2"], undefined);
+  assert.ok(Array.isArray(out.holeCardsByUserId["user-2"]));
+});
+
+test("selfHealInvalid deletes only required invalid users and scrubs map", async () => {
+  const deletes = [];
+  const tx = {
+    unsafe: async (query, params) => {
+      const text = String(query).toLowerCase();
+      if (text.includes("select user_id, cards")) {
+        return [
+          { user_id: "user-1", cards: [{ r: "A", s: "S" }] },
+          { user_id: "user-2", cards: [{ r: "Q", s: "H" }, { r: "J", s: "H" }] },
+        ];
+      }
+      if (text.includes("delete from public.poker_hole_cards")) {
+        deletes.push(params?.[2] || []);
+        return [];
+      }
+      throw new Error("unexpected_query");
+    },
+  };
+
+  const out = await loadHoleCardsByUserId(tx, {
+    tableId,
+    handId,
+    activeUserIds: ["user-1", "user-2"],
+    requiredUserIds: ["user-1"],
+    mode: "soft",
+    selfHealInvalid: true,
+  });
+
+  assert.deepEqual(deletes, [["user-1"]]);
+  assert.equal(out.holeCardsStatusByUserId["user-1"], "INVALID");
+  assert.equal(Object.prototype.hasOwnProperty.call(out.holeCardsByUserId, "user-1"), false);
+  assert.ok(Array.isArray(out.holeCardsByUserId["user-2"]));
+});

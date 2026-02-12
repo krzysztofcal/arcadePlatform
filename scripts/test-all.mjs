@@ -36,6 +36,7 @@ run("node", ["tests/poker-phase1.test.mjs"], "poker-phase1");
 run("node", ["tests/poker-engine.test.mjs"], "poker-engine");
 run("node", ["tests/poker-eval.test.mjs"], "poker-eval");
 run("node", ["tests/poker-cards-utils.test.mjs"], "poker-cards-utils");
+run("node", ["tests/poker-hole-cards-store.test.mjs"], "poker-hole-cards-store");
 run("node", ["tests/poker-contract.phase1.test.mjs"], "poker-contract-phase1");
 run("node", ["tests/poker-db-lockdown.contract.test.mjs"], "poker-db-lockdown");
 run("node", ["tests/poker-hole-cards.rls.test.mjs"], "poker-hole-cards-rls");
