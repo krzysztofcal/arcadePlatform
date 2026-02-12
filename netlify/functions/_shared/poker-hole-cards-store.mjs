@@ -48,6 +48,13 @@ const loadHoleCardsByUserId = async (
     map[userId] = normalizeCards(row.cards);
   }
 
+  for (const userId of activeUserIds) {
+    if (!Object.prototype.hasOwnProperty.call(map, userId)) continue;
+    if (!isValidTwoCards(map[userId])) {
+      statusByUserId[userId] = "INVALID";
+    }
+  }
+
   for (const userId of requiredIds) {
     if (!Object.prototype.hasOwnProperty.call(map, userId)) {
       statusByUserId[userId] = "MISSING";

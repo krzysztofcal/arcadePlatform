@@ -37,11 +37,18 @@ export const isValidCard = (card) => {
   return true;
 };
 
-export const cardIdentity = (card) => {
+
+export const normalizeCardForCompare = (card) => {
   const rank = normalizeRank(card?.r);
   const suit = normalizeSuit(card?.s);
-  if (!rank || !SUIT_SET.has(suit)) return "";
-  return `${rank}-${suit}`;
+  if (!rank || !SUIT_SET.has(suit)) return null;
+  return { r: rank, s: suit };
+};
+
+export const cardIdentity = (card) => {
+  const normalized = normalizeCardForCompare(card);
+  if (!normalized) return "";
+  return `${normalized.r}-${normalized.s}`;
 };
 
 export const areCardsUnique = (cards) => {

@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { areCardsUnique, isValidTwoCards } from "../../netlify/functions/_shared/poker-cards-utils.mjs";
+import { areCardsUnique, cardIdentity, isValidTwoCards } from "../../netlify/functions/_shared/poker-cards-utils.mjs";
 import { deletePokerRequest, ensurePokerRequest, storePokerRequestResult } from "../../netlify/functions/_shared/poker-idempotency.mjs";
 import { formatStakes, parseStakes } from "../../netlify/functions/_shared/poker-stakes.mjs";
 import { clearMissedTurns } from "../../netlify/functions/_shared/poker-missed-turns.mjs";
@@ -60,6 +60,7 @@ export const loadPokerHandler = (filePath, mocks) => {
     "advanceIfNeeded",
     "applyAction",
     "areCardsUnique",
+    "cardIdentity",
     "materializeShowdownAndPayout",
     "executeSql",
     "extractBearerToken",
@@ -123,6 +124,7 @@ return handler;`
       patchSitOutByUserId,
       createPokerTableWithState,
       areCardsUnique,
+      cardIdentity,
       ...mocks,
     };
     return factory(resolvedMocks, isValidTwoCards);

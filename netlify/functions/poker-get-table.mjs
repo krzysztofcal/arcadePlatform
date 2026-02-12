@@ -6,7 +6,7 @@ import { isStateStorageValid, normalizeJsonState, withoutPrivateState } from "./
 import { updatePokerStateOptimistic } from "./_shared/poker-state-write.mjs";
 import { parseStakes } from "./_shared/poker-stakes.mjs";
 import { maybeApplyTurnTimeout, normalizeSeatOrderFromState } from "./_shared/poker-turn-timeout.mjs";
-import { isValidTwoCards } from "./_shared/poker-cards-utils.mjs";
+import { cardIdentity, isValidTwoCards } from "./_shared/poker-cards-utils.mjs";
 import { isValidUuid } from "./_shared/poker-utils.mjs";
 
 const isActionPhase = (phase) => phase === "PREFLOP" || phase === "FLOP" || phase === "TURN" || phase === "RIVER";
@@ -67,33 +67,13 @@ const parseTableId = (event) => {
   return last;
 };
 
-const normalizeRank = (value) => {
-  if (typeof value === "number") return value;
-  if (typeof value !== "string") return null;
-  const upper = value.toUpperCase();
-  if (upper === "T") return 10;
-  if (upper === "J") return 11;
-  if (upper === "Q") return 12;
-  if (upper === "K") return 13;
-  if (upper === "A") return 14;
-  const num = Number(upper);
-  return Number.isInteger(num) ? num : null;
-};
-
-const cardKey = (card) => {
-  const rank = normalizeRank(card?.r);
-  const suit = typeof card?.s === "string" ? card.s.toUpperCase() : "";
-  if (!rank || !suit) return "";
-  return `${rank}-${suit}`;
-};
-
 const cardsSameSet = (left, right) => {
   if (!Array.isArray(left) || !Array.isArray(right)) return false;
   if (left.length !== right.length) return false;
-  const leftKeys = left.map(cardKey);
+  const leftKeys = left.map(cardIdentity);
   if (leftKeys.some((key) => !key)) return false;
   leftKeys.sort();
-  const rightKeys = right.map(cardKey);
+  const rightKeys = right.map(cardIdentity);
   if (rightKeys.some((key) => !key)) return false;
   rightKeys.sort();
   if (leftKeys.length !== rightKeys.length) return false;
@@ -372,7 +352,6 @@ export async function handler(event) {
                   handId: currentState.handId,
                   expectedCount: timeoutRequiredUserIds.length,
                   attemptedUserIds: timeoutRequiredUserIds,
-                  minimalAvailableCount: Object.keys(holeCards.holeCardsByUserId || {}).length,
                 });
                 shouldApplyTimeout = false;
               }
