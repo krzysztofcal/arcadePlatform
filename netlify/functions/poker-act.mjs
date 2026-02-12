@@ -531,7 +531,7 @@ export async function handler(event) {
         throw makeError(409, "state_invalid");
       }
       const activeSeatRows = await tx.unsafe(
-        "select user_id from public.poker_seats where table_id = $1 and status = 'ACTIVE' order by seat_no asc;",
+        "select user_id from public.poker_seats where table_id = $1 and status = 'ACTIVE' and coalesce(is_bot,false) = false order by seat_no asc;",
         [tableId]
       );
       const seatUserIdsInOrder = normalizeSeatOrderFromState(currentState.seats);
@@ -539,6 +539,7 @@ export async function handler(event) {
         ? activeSeatRows.map((row) => row?.user_id).filter(Boolean)
         : [];
       const activeUserIdsForHoleCards = seatUserIdsInOrder.slice();
+      const requiredHoleCardUserIds = dbActiveUserIds.length ? dbActiveUserIds.slice() : [auth.userId];
 
       let holeCardsByUserId;
       try {
@@ -546,6 +547,8 @@ export async function handler(event) {
           tableId,
           handId: currentState.handId,
           activeUserIds: activeUserIdsForHoleCards,
+          requiredUserIds: requiredHoleCardUserIds,
+          mode: "strict",
         });
         holeCardsByUserId = holeCards.holeCardsByUserId;
       } catch (error) {

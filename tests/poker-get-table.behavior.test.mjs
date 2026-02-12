@@ -53,8 +53,8 @@ const makeHandler = (queries, storedState, userId, options = {}) => {
     loadHoleCardsByUserId,
     maybeApplyTurnTimeout: options.maybeApplyTurnTimeout || maybeApplyTurnTimeout,
     deriveDeck,
-    deriveCommunityCards,
-    deriveRemainingDeck,
+    deriveCommunityCards: options.deriveCommunityCards || deriveCommunityCards,
+    deriveRemainingDeck: options.deriveRemainingDeck || deriveRemainingDeck,
     beginSql: async (fn) =>
       fn({
         unsafe: async (query, params) => {
@@ -206,12 +206,12 @@ const run = async () => {
     queryStringParameters: { tableId },
   });
   assert.equal(missingTableResponse.statusCode, 409);
-  assert.equal(JSON.parse(missingTableResponse.body).error, "state_invalid");
+  const missingTablePayload = JSON.parse(missingTableResponse.body);
+  assert.equal(missingTablePayload.error, "state_invalid");
   const missingTableInserts = missingTableQueries.filter((entry) =>
     entry.query.toLowerCase().includes("insert into public.poker_hole_cards")
   );
   assert.equal(missingTableInserts.length, 0);
-
   const missingRowResponse = await makeHandler([], storedState, "user-1", {
     holeCardsByUserId: {
       "user-1": defaultHoleCards["user-1"],
@@ -244,6 +244,21 @@ const run = async () => {
   assert.ok(Array.isArray(invalidCardsPayload.myHoleCards));
   assert.equal(invalidCardsPayload.myHoleCards.length, 2);
 
+  const myInvalidCardsResponse = await makeHandler([], storedState, "user-1", {
+    holeCardsByUserId: {
+      ...defaultHoleCards,
+      "user-1": [{ r: "A", s: "S" }],
+    },
+  })({
+    httpMethod: "GET",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    queryStringParameters: { tableId },
+  });
+  assert.equal(myInvalidCardsResponse.statusCode, 200);
+  const myInvalidCardsPayload = JSON.parse(myInvalidCardsResponse.body);
+  assert.equal(myInvalidCardsPayload.ok, true);
+  assert.ok(Array.isArray(myInvalidCardsPayload.myHoleCards));
+  assert.equal(myInvalidCardsPayload.myHoleCards.length, 0);
   const repairQueries = [];
   const repairState = {
     ...baseState,
@@ -251,14 +266,12 @@ const run = async () => {
     community: [{ r: "2", s: "S" }, { r: "3", s: "H" }, { r: "4", s: "D" }],
     communityDealt: 3,
   };
-  const repairLogs = [];
   const repairResponse = await makeHandler(
     repairQueries,
     { value: JSON.stringify(repairState), version: 7 },
     "user-1",
     {
       holeCardsByUserId: {},
-      klog: (event, payload) => repairLogs.push({ event, payload }),
     }
   )({
     httpMethod: "GET",
@@ -269,15 +282,14 @@ const run = async () => {
   const repairPayload = JSON.parse(repairResponse.body);
   assert.equal(repairPayload.ok, true);
   assert.ok(Array.isArray(repairPayload.myHoleCards));
-  assert.equal(repairPayload.myHoleCards.length, 2);
+  assert.equal(repairPayload.myHoleCards.length, 0);
   assert.equal(JSON.stringify(repairPayload).includes("holeCardsByUserId"), false);
   assert.equal(JSON.stringify(repairPayload).includes('"deck"'), false);
   assert.equal(JSON.stringify(repairPayload).includes('"handSeed"'), false);
   const repairInserts = repairQueries.filter((entry) =>
     entry.query.toLowerCase().includes("insert into public.poker_hole_cards")
   );
-  assert.equal(repairInserts.length, 1);
-  assert.ok(repairLogs.some((entry) => entry.event === "poker_get_table_hole_cards_repaired"));
+  assert.equal(repairInserts.length, 0);
 
   const missingSeedState = { ...baseState, handSeed: "" };
   const missingSeedQueries = [];
@@ -426,6 +438,87 @@ const run = async () => {
     entry.query.toLowerCase().includes("update public.poker_state")
   );
   assert.equal(timeoutUpdates.length, 0);
+
+
+  let timeoutInvalidCalled = false;
+  const timeoutInvalidQueries = [];
+  const timeoutInvalidResponse = await makeHandler(
+    timeoutInvalidQueries,
+    { value: JSON.stringify(timeoutState), version: 6 },
+    "user-1",
+    {
+      holeCardsByUserId: {
+        "user-1": defaultHoleCards["user-1"],
+        "user-2": [{ r: "A", s: "S" }],
+        "user-3": defaultHoleCards["user-3"],
+      },
+      maybeApplyTurnTimeout: () => {
+        timeoutInvalidCalled = true;
+        return { applied: false };
+      },
+    }
+  )({
+    httpMethod: "GET",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    queryStringParameters: { tableId },
+  });
+  assert.equal(timeoutInvalidResponse.statusCode, 200);
+  assert.equal(timeoutInvalidCalled, false);
+  const timeoutInvalidPayload = JSON.parse(timeoutInvalidResponse.body);
+  assert.ok(Array.isArray(timeoutInvalidPayload.myHoleCards));
+  assert.equal(timeoutInvalidPayload.myHoleCards.length, 2);
+  const timeoutInvalidUpdates = timeoutInvalidQueries.filter((entry) =>
+    entry.query.toLowerCase().includes("update public.poker_state")
+  );
+  assert.equal(timeoutInvalidUpdates.length, 0);
+
+  let timeoutStaleSeatCalled = false;
+  let timeoutDerivedSeatOrder = null;
+  const timeoutStaleSeatQueries = [];
+  const timeoutStaleSeatResponse = await makeHandler(
+    timeoutStaleSeatQueries,
+    {
+      value: JSON.stringify({
+        ...timeoutState,
+        seats: [
+          { userId: "user-1", seatNo: 1 },
+          { userId: "user-2", seatNo: 2 },
+          { userId: "user-3", seatNo: 3 },
+          { userId: "user-x", seatNo: 4 },
+        ],
+      }),
+      version: 6,
+    },
+    "user-1",
+    {
+      activeUserIds: ["user-1", "user-2", "user-3"],
+      holeCardsByUserId: {
+        "user-1": defaultHoleCards["user-1"],
+        "user-2": defaultHoleCards["user-2"],
+        "user-3": defaultHoleCards["user-3"],
+      },
+      maybeApplyTurnTimeout: () => {
+        timeoutStaleSeatCalled = true;
+        return { applied: false };
+      },
+      deriveCommunityCards: (args) => {
+        timeoutDerivedSeatOrder = Array.isArray(args?.seatUserIdsInOrder) ? args.seatUserIdsInOrder.slice() : null;
+        return deriveCommunityCards(args);
+      },
+    }
+  )({
+    httpMethod: "GET",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    queryStringParameters: { tableId },
+  });
+  assert.equal(timeoutStaleSeatResponse.statusCode, 200);
+  assert.equal(timeoutStaleSeatCalled, true);
+  assert.ok(Array.isArray(timeoutDerivedSeatOrder));
+  assert.equal(timeoutDerivedSeatOrder.includes("user-x"), false);
+  const timeoutStaleSeatArrayParams = timeoutStaleSeatQueries.flatMap((entry) =>
+    Array.isArray(entry.params) ? entry.params.filter((param) => Array.isArray(param)) : []
+  );
+  assert.equal(timeoutStaleSeatArrayParams.some((param) => param.includes("user-x")), false);
 
   let timeoutAppliedCalled = false;
   const timeoutAppliedQueries = [];

@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import { baseHeaders, beginSql, corsHeaders, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
-import { isValidTwoCards } from "./_shared/poker-cards-utils.mjs";
+import { areCardsUnique, isValidTwoCards } from "./_shared/poker-cards-utils.mjs";
 import { dealHoleCards } from "./_shared/poker-engine.mjs";
 import { deriveDeck } from "./_shared/poker-deal-deterministic.mjs";
 import { TURN_MS, computeNextDealerSeatNo } from "./_shared/poker-reducer.mjs";
@@ -340,6 +340,15 @@ export async function handler(event) {
       const derivedSeats = orderedSeatList.slice();
       const activeUserIds = new Set(orderedSeats.map((seat) => seat.user_id));
       const activeUserIdList = orderedSeats.map((seat) => seat.user_id);
+      if (activeUserIds.size < 2 || activeUserIdList.length < 2) {
+        klog("poker_start_hand_invalid_active_players", {
+          tableId,
+          reason: "insufficient_active_players",
+          activeUserCount: activeUserIds.size,
+          activeSeatCount: activeUserIdList.length,
+        });
+        throw makeError(409, "state_invalid");
+      }
       const currentStacks = parseStacks(currentState.stacks);
       const nextStacks = activeUserIdList.reduce((acc, userId) => {
         if (!Object.prototype.hasOwnProperty.call(currentStacks, userId)) return acc;
@@ -392,6 +401,22 @@ export async function handler(event) {
 
       if (!activeUserIdList.every((userId) => isValidTwoCards(dealtHoleCards[userId]))) {
         klog("poker_state_corrupt", { tableId, phase: "PREFLOP" });
+        throw makeError(409, "state_invalid");
+      }
+      const flatHoleCards = activeUserIdList.flatMap((seatUserId) => dealtHoleCards[seatUserId] || []);
+      const expectedHoleCardCount = activeUserIdList.length * 2;
+      if (flatHoleCards.length !== expectedHoleCardCount) {
+        klog("poker_state_corrupt", {
+          tableId,
+          phase: "PREFLOP",
+          reason: "hole_cards_wrong_count",
+          expectedHoleCardCount,
+          actual: flatHoleCards.length,
+        });
+        throw makeError(409, "state_invalid");
+      }
+      if (!areCardsUnique(flatHoleCards)) {
+        klog("poker_state_corrupt", { tableId, phase: "PREFLOP", reason: "hole_cards_not_unique" });
         throw makeError(409, "state_invalid");
       }
 
