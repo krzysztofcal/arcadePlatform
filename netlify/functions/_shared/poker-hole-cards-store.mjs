@@ -27,9 +27,12 @@ const loadHoleCardsByUserId = async (
   if (!Array.isArray(activeUserIds) || activeUserIds.length === 0) {
     throw new Error("state_invalid");
   }
-  const requiredIds =
-    Array.isArray(requiredUserIds) && requiredUserIds.length > 0 ? requiredUserIds : activeUserIds;
+  const hasRequiredIds = Array.isArray(requiredUserIds) && requiredUserIds.length > 0;
+  const requiredIds = hasRequiredIds ? requiredUserIds : activeUserIds;
   if (!Array.isArray(requiredIds) || requiredIds.length === 0) {
+    throw new Error("state_invalid");
+  }
+  if (mode === "strict" && !hasRequiredIds) {
     throw new Error("state_invalid");
   }
 

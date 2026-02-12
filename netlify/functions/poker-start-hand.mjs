@@ -404,6 +404,17 @@ export async function handler(event) {
         throw makeError(409, "state_invalid");
       }
       const flatHoleCards = activeUserIdList.flatMap((seatUserId) => dealtHoleCards[seatUserId] || []);
+      const expectedHoleCardCount = activeUserIdList.length * 2;
+      if (flatHoleCards.length !== expectedHoleCardCount) {
+        klog("poker_state_corrupt", {
+          tableId,
+          phase: "PREFLOP",
+          reason: "hole_cards_wrong_count",
+          expectedHoleCardCount,
+          actual: flatHoleCards.length,
+        });
+        throw makeError(409, "state_invalid");
+      }
       if (!areCardsUnique(flatHoleCards)) {
         klog("poker_state_corrupt", { tableId, phase: "PREFLOP", reason: "hole_cards_not_unique" });
         throw makeError(409, "state_invalid");

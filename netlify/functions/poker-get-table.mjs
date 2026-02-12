@@ -14,19 +14,7 @@ const HOLE_CARDS_STATUS_MISSING = "MISSING";
 const HOLE_CARDS_STATUS_INVALID = "INVALID";
 const shouldSelfHealHoleCards = () => process.env.POKER_GET_TABLE_SELF_HEAL === "1";
 
-const holeCardLogLimiter = new Map();
-
-const logHoleCardsIssueOnce = ({ tableId, handId, userId, reason }) => {
-  const key = `${tableId}:${handId || "unknown"}:${userId}:${reason}`;
-  const now = Date.now();
-  const prev = holeCardLogLimiter.get(key) || 0;
-  if (now - prev < 30_000) return;
-  holeCardLogLimiter.set(key, now);
-  if (holeCardLogLimiter.size > 2000) {
-    for (const [entryKey, ts] of holeCardLogLimiter.entries()) {
-      if (now - ts > 120_000) holeCardLogLimiter.delete(entryKey);
-    }
-  }
+const logHoleCardsIssue = ({ tableId, handId, userId, reason }) => {
   klog("poker_get_table_hole_cards_soft_fail", {
     tableId,
     handId: handId || null,
@@ -311,7 +299,7 @@ export async function handler(event) {
             if (userHoleCardsStatus === HOLE_CARDS_STATUS_INVALID) {
               myHoleCards = null;
               holeCardsStatus = HOLE_CARDS_STATUS_INVALID;
-              logHoleCardsIssueOnce({
+              logHoleCardsIssue({
                 tableId,
                 handId: currentState.handId,
                 userId: auth.userId,
@@ -320,7 +308,7 @@ export async function handler(event) {
             } else if (userHoleCardsStatus === HOLE_CARDS_STATUS_MISSING) {
               myHoleCards = null;
               holeCardsStatus = HOLE_CARDS_STATUS_MISSING;
-              logHoleCardsIssueOnce({
+              logHoleCardsIssue({
                 tableId,
                 handId: currentState.handId,
                 userId: auth.userId,

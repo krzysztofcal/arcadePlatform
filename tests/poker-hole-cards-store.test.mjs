@@ -5,6 +5,29 @@ import { loadHoleCardsByUserId } from "../netlify/functions/_shared/poker-hole-c
 const tableId = "11111111-1111-4111-8111-111111111111";
 const handId = "hand-1";
 
+test("strict mode requires explicit required users", async () => {
+  const tx = {
+    unsafe: async (query) => {
+      const text = String(query).toLowerCase();
+      if (text.includes("select user_id, cards")) {
+        return [{ user_id: "user-1", cards: [{ r: "A", s: "S" }, { r: "K", s: "S" }] }];
+      }
+      throw new Error("unexpected_query");
+    },
+  };
+
+  await assert.rejects(
+    loadHoleCardsByUserId(tx, {
+      tableId,
+      handId,
+      activeUserIds: ["user-1"],
+      mode: "strict",
+    }),
+    /state_invalid/
+  );
+});
+
+
 test("strict mode only validates required users", async () => {
   const tx = {
     unsafe: async (query) => {
