@@ -922,6 +922,7 @@
     var autoJoinAttempted = false;
     var autoStartLastAttemptAt = 0;
     var autoStartCooldownMs = 4000;
+    var autoStartStopForHand = false;
     var lastAutoStartSeatCount = null;
     var turnTimerInterval = null;
     var HEARTBEAT_PENDING_MAX_RETRIES = 8;
@@ -1375,6 +1376,13 @@
     }
 
     function handlePendingTimeout(action){
+      if (action === 'startHand'){
+        var startHandRetries = pendingStartHandRetries;
+        klog('poker_pending_timeout', { action: action, tableId: tableId, retries: startHandRetries, budgetMs: PENDING_RETRY_BUDGET_MS });
+        clearStartHandPending();
+        setInlineStatus(startHandStatusEl, t('pokerErrStartHandPending', 'Start hand still pending. Please try again.'), 'error');
+        return;
+      }
       var message = action === 'join' ? t('pokerErrJoinPending', 'Join still pending. Please try again.') : t('pokerErrLeavePending', 'Leave still pending. Please try again.');
       var endpoint = action === 'join' ? JOIN_URL : LEAVE_URL;
       var retries = action === 'join' ? pendingJoinRetries : pendingLeaveRetries;
@@ -1389,9 +1397,13 @@
 
     function schedulePendingRetry(action, retryFn){
       if (!isPageActive()) return;
-      setPendingState(action, true);
-      var startedAt = action === 'join' ? pendingJoinStartedAt : pendingLeaveStartedAt;
-      var retries = action === 'join' ? pendingJoinRetries : pendingLeaveRetries;
+      if (action === 'startHand'){
+        setDevPendingState('startHand', true);
+      } else {
+        setPendingState(action, true);
+      }
+      var startedAt = action === 'join' ? pendingJoinStartedAt : action === 'leave' ? pendingLeaveStartedAt : pendingStartHandStartedAt;
+      var retries = action === 'join' ? pendingJoinRetries : action === 'leave' ? pendingLeaveRetries : pendingStartHandRetries;
       if (!startedAt) startedAt = Date.now();
       retries += 1;
       var delay = getPendingDelay(retries);
@@ -1404,48 +1416,42 @@
         pendingJoinRetries = retries;
         if (pendingJoinTimer) clearTimeout(pendingJoinTimer);
         pendingJoinTimer = scheduleRetry(retryFn, delay);
-      } else {
+      } else if (action === 'leave'){
         pendingLeaveStartedAt = startedAt;
         pendingLeaveRetries = retries;
         if (pendingLeaveTimer) clearTimeout(pendingLeaveTimer);
         pendingLeaveTimer = scheduleRetry(retryFn, delay);
-      }
-    }
-
-    function handleDevPendingTimeout(action){
-      var message = action === 'startHand' ? t('pokerErrStartHandPending', 'Start hand still pending. Please try again.') : t('pokerErrActPending', 'Action still pending. Please try again.');
-      var statusEl = action === 'startHand' ? startHandStatusEl : actStatusEl;
-      if (action === 'startHand'){
-        clearStartHandPending();
-      } else {
-        clearActPending();
-      }
-      setInlineStatus(statusEl, message, 'error');
-    }
-
-    function scheduleDevPendingRetry(action, retryFn){
-      if (!isPageActive()) return;
-      setDevPendingState(action, true);
-      var startedAt = action === 'startHand' ? pendingStartHandStartedAt : pendingActStartedAt;
-      var retries = action === 'startHand' ? pendingStartHandRetries : pendingActRetries;
-      if (!startedAt) startedAt = Date.now();
-      retries += 1;
-      var delay = getPendingDelay(retries);
-      if (!shouldRetryPending(startedAt, delay)){
-        handleDevPendingTimeout(action);
-        return;
-      }
-      if (action === 'startHand'){
+      } else if (action === 'startHand'){
         pendingStartHandStartedAt = startedAt;
         pendingStartHandRetries = retries;
         if (pendingStartHandTimer) clearTimeout(pendingStartHandTimer);
         pendingStartHandTimer = scheduleRetry(retryFn, delay);
-      } else {
-        pendingActStartedAt = startedAt;
-        pendingActRetries = retries;
-        if (pendingActTimer) clearTimeout(pendingActTimer);
-        pendingActTimer = scheduleRetry(retryFn, delay);
       }
+    }
+
+    function handleDevPendingTimeout(action){
+      if (action !== 'act') return;
+      clearActPending();
+      setInlineStatus(actStatusEl, t('pokerErrActPending', 'Action still pending. Please try again.'), 'error');
+    }
+
+    function scheduleDevPendingRetry(action, retryFn){
+      if (action !== 'act') return;
+      if (!isPageActive()) return;
+      setDevPendingState('act', true);
+      var startedAt = pendingActStartedAt;
+      var retries = pendingActRetries;
+      if (!startedAt) startedAt = Date.now();
+      retries += 1;
+      var delay = getPendingDelay(retries);
+      if (!shouldRetryPending(startedAt, delay)){
+        handleDevPendingTimeout('act');
+        return;
+      }
+      pendingActStartedAt = startedAt;
+      pendingActRetries = retries;
+      if (pendingActTimer) clearTimeout(pendingActTimer);
+      pendingActTimer = scheduleRetry(retryFn, delay);
     }
 
     function stopPendingRetries(){
@@ -1526,7 +1532,7 @@
     }
 
     function isNeutralAutoStartCode(code){
-      return code === 'not_enough_players' || code === 'already_in_hand';
+      return code === 'not_enough_players' || code === 'already_in_hand' || code === 'state_conflict';
     }
 
     function getPreferredSeatNo(preferredSeatNoOverride){
@@ -1561,6 +1567,7 @@
       if (!shouldAutoStart) return;
       if (!currentUserId || !isSeated || !tableData) return;
       if (startHandPending || joinPending || leavePending || actPending) return;
+      if (pendingStartHandRequestId) return;
       var table = tableData.table || {};
       var stateObj = tableData.state || {};
       var gameState = stateObj.state || {};
@@ -1568,24 +1575,23 @@
       var phase = typeof gameState.phase === 'string' ? gameState.phase : '';
       var seatedCount = getSeatedCount(tableData);
       var minPlayers = Number.isInteger(table.minPlayers) && table.minPlayers >= 2 ? table.minPlayers : 2;
-      if (status !== 'OPEN' || phase !== 'INIT') return;
+      if (status !== 'OPEN' || phase !== 'INIT') {
+        autoStartStopForHand = false;
+        return;
+      }
       if (seatedCount < minPlayers) return;
+      if (autoStartStopForHand) return;
       var now = Date.now();
       if (now - autoStartLastAttemptAt < autoStartCooldownMs) return;
       autoStartLastAttemptAt = now;
       klog('poker_auto_start_attempt', { tableId: tableId, seatedCount: seatedCount, phase: phase, status: status });
-      try {
-        var requestId = normalizeRequestId(generateRequestId());
-        var result = await apiPost(START_HAND_URL, { tableId: tableId, requestId: requestId });
-        var code = result && result.code ? result.code : 'ok';
-        klog('poker_auto_start_result', { tableId: tableId, code: code });
-        if (!isPageActive()) return;
-        loadTable(false);
-      } catch (err){
-        var errCode = err && (err.code || err.error || err.message) ? err.code || err.error || err.message : 'unknown_error';
-        klog('poker_auto_start_result', { tableId: tableId, code: errCode });
-        if (isNeutralAutoStartCode(errCode)) return;
-      }
+      var requestId = normalizeRequestId(generateRequestId());
+      pendingStartHandRequestId = requestId;
+      var startResult = await startHand(requestId, { suppressNeutralErrors: true });
+      var code = startResult && startResult.code ? startResult.code : (startResult && startResult.ok ? 'ok' : 'unknown_error');
+      klog('poker_auto_start_result', { tableId: tableId, code: code });
+      if (code === 'already_in_hand') autoStartStopForHand = true;
+      if (isNeutralAutoStartCode(code)) return;
     }
 
     function applySeatInputBounds(){
@@ -2123,12 +2129,14 @@
       }
     }
 
-    async function startHand(requestIdOverride){
-      if (!shouldEnableDevActions()) return;
+    async function startHand(requestIdOverride, options){
+      if (!shouldEnableDevActions()) return { ok: false, code: 'dev_actions_disabled' };
       if (!stakesValid){
         setInlineStatus(startHandStatusEl, t('pokerErrInvalidStakes', 'Invalid stakes'), 'error');
-        return;
+        return { ok: false, code: 'invalid_stakes' };
       }
+      var opts = options || {};
+      var suppressNeutralErrors = !!opts.suppressNeutralErrors;
       setInlineStatus(startHandStatusEl, null, null);
       setDevPendingState('startHand', true);
       try {
@@ -2143,27 +2151,32 @@
         var startRequestId = normalizeRequestId(resolved.requestId);
         var result = await apiPost(START_HAND_URL, { tableId: tableId, requestId: startRequestId });
         if (isPendingResponse(result)){
-          scheduleDevPendingRetry('startHand', retryStartHand);
-          return;
+          schedulePendingRetry('startHand', retryStartHand);
+          return { ok: false, code: 'request_pending', pending: true };
         }
         if (result && result.ok === false){
+          var resultCode = result.error || 'request_failed';
           clearStartHandPending();
-          if (result.error === 'state_invalid'){
+          if (resultCode === 'state_invalid') {
             setInlineStatus(startHandStatusEl, t('pokerErrStateChanged', 'State changed. Refreshing...'), 'error');
             if (isPageActive()) loadTable(false);
-            return;
+            return { ok: false, code: resultCode };
+          }
+          if (suppressNeutralErrors && isNeutralAutoStartCode(resultCode)) {
+            return { ok: false, code: resultCode };
           }
           setInlineStatus(startHandStatusEl, t('pokerErrStartHand', 'Failed to start hand'), 'error');
-          return;
+          return { ok: false, code: resultCode };
         }
         clearStartHandPending();
         setInlineStatus(startHandStatusEl, t('pokerStartHandOk', 'Hand started'), 'success');
-        if (!isPageActive()) return;
+        if (!isPageActive()) return { ok: true, code: 'ok' };
         loadTable(false);
+        return { ok: true, code: 'ok' };
       } catch (err){
         if (isAbortError(err)){
           pauseStartHandPending();
-          return;
+          return { ok: false, code: 'aborted' };
         }
         if (isAuthError(err)){
           stopPendingAll();
@@ -2175,11 +2188,15 @@
             stopHeartbeat: stopHeartbeat,
             onAuthExpired: startAuthWatch
           });
-          return;
+          return { ok: false, code: 'unauthorized' };
         }
+        var errCode = err && (err.code || err.error || err.message) ? err.code || err.error || err.message : 'request_failed';
         clearStartHandPending();
         klog('poker_start_hand_error', { tableId: tableId, error: err.message || err.code });
-        setInlineStatus(startHandStatusEl, err.message || t('pokerErrStartHand', 'Failed to start hand'), 'error');
+        if (!(suppressNeutralErrors && isNeutralAutoStartCode(errCode))){
+          setInlineStatus(startHandStatusEl, err.message || t('pokerErrStartHand', 'Failed to start hand'), 'error');
+        }
+        return { ok: false, code: errCode };
       }
     }
 
@@ -2455,7 +2472,7 @@
         }
         if (pendingJoinRequestId) schedulePendingRetry('join', retryJoin);
         if (pendingLeaveRequestId) schedulePendingRetry('leave', retryLeave);
-        if (pendingStartHandRequestId) scheduleDevPendingRetry('startHand', retryStartHand);
+        if (pendingStartHandRequestId) schedulePendingRetry('startHand', retryStartHand);
         if (pendingActRequestId) scheduleDevPendingRetry('act', retryAct);
         if (!pendingJoinRequestId && !pendingLeaveRequestId) loadTable(false);
       }

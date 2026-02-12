@@ -67,6 +67,25 @@ assert.ok(startHandSrc.includes("nextStacks"), "start-hand should filter stacks 
 assert.ok(startHandSrc.includes("derivedSeats"), "start-hand should re-derive seats from ACTIVE rows");
 assert.ok(pokerUiSrc.includes("pendingJoinRequestId"), "poker UI should store pending join requestId");
 assert.ok(pokerUiSrc.includes("pendingLeaveRequestId"), "poker UI should store pending leave requestId");
+assert.ok(
+  pokerUiSrc.includes("not_enough_players") && pokerUiSrc.includes("already_in_hand") && pokerUiSrc.includes("state_conflict"),
+  "poker UI auto-start should treat already_in_hand/not_enough_players/state_conflict as neutral"
+);
+const maybeAutoStartStart = pokerUiSrc.indexOf("async function maybeAutoStartHand(");
+const maybeAutoStartEnd = maybeAutoStartStart === -1 ? -1 : pokerUiSrc.indexOf("function applySeatInputBounds", maybeAutoStartStart);
+const maybeAutoStartSrc = maybeAutoStartStart === -1 || maybeAutoStartEnd === -1 ? "" : pokerUiSrc.slice(maybeAutoStartStart, maybeAutoStartEnd);
+assert.ok(maybeAutoStartSrc.includes("if (pendingStartHandRequestId) return;"), "poker UI auto-start should guard duplicate start-hand requests");
+assert.ok(!maybeAutoStartSrc.includes("scheduleDevPendingRetry('startHand'"), "poker UI auto-start should not call dev-only pending scheduler");
+assert.ok(/maybeAutoStartHand[\s\S]*?startHand\(/.test(maybeAutoStartSrc), "poker UI auto-start should delegate to startHand flow");
+assert.ok(
+  maybeAutoStartSrc.includes("if (code === 'already_in_hand') autoStartStopForHand = true;"),
+  "poker UI auto-start should stop retrying after already_in_hand"
+);
+assert.ok(
+  pokerUiSrc.includes("schedulePendingRetry('startHand', retryStartHand);"),
+  "poker UI start-hand flow should schedule pending retry via prod-safe scheduler"
+);
+assert.ok(!pokerUiSrc.includes("scheduleDevPendingRetry('startHand'"), "poker UI should not schedule start-hand via dev-only scheduler anywhere");
 assert.ok(/function\s+resolveRequestId\s*\(/.test(pokerUiSrc), "poker UI should define resolveRequestId helper");
 const formatRankIndex = pokerUiSrc.indexOf("function formatRank");
 assert.ok(formatRankIndex !== -1, "poker UI should define formatRank helper");

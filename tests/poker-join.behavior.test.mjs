@@ -280,6 +280,26 @@ const run = async () => {
   });
   assert.equal(autoSeatJoinStr.statusCode, 200);
 
+  const activeSeatIsOccupiedHandler = makeJoinHandler({
+    requestStore: new Map(),
+    queries: [],
+    sideEffects: { seatInsert: 0, ledger: 0, conflictSeatInsertUsed: false },
+    conflictSeatInsertOnce: true,
+    occupiedSeatRows: [{ seat_no: 2, status: "ACTIVE" }],
+  });
+  const activeSeatIsOccupiedJoin = await callJoin(activeSeatIsOccupiedHandler, "join-auto-seat-active-occupied", {
+    seatNo: undefined,
+    autoSeat: true,
+    preferredSeatNo: 1,
+  });
+  assert.equal(activeSeatIsOccupiedJoin.statusCode, 200);
+  assert.equal(
+    JSON.parse(activeSeatIsOccupiedJoin.body).seatNo,
+    2,
+    "autoSeat should skip ACTIVE seats during retries (next free seat)"
+  );
+
+
   const fullHandler = makeJoinHandler({
     requestStore: new Map(),
     queries: [],
