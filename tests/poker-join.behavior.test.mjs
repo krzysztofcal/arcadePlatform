@@ -280,23 +280,23 @@ const run = async () => {
   });
   assert.equal(autoSeatJoinStr.statusCode, 200);
 
-  const inactiveIsFreeHandler = makeJoinHandler({
+  const activeSeatIsOccupiedHandler = makeJoinHandler({
     requestStore: new Map(),
     queries: [],
     sideEffects: { seatInsert: 0, ledger: 0, conflictSeatInsertUsed: false },
     conflictSeatInsertOnce: true,
     occupiedSeatRows: [{ seat_no: 1, status: "ACTIVE" }],
   });
-  const inactiveIsFreeJoin = await callJoin(inactiveIsFreeHandler, "join-auto-seat-inactive-free", {
+  const activeSeatIsOccupiedJoin = await callJoin(activeSeatIsOccupiedHandler, "join-auto-seat-active-occupied", {
     seatNo: undefined,
     autoSeat: true,
     preferredSeatNo: 0,
   });
-  assert.equal(inactiveIsFreeJoin.statusCode, 200);
+  assert.equal(activeSeatIsOccupiedJoin.statusCode, 200);
   assert.equal(
-    JSON.parse(inactiveIsFreeJoin.body).seatNo,
+    JSON.parse(activeSeatIsOccupiedJoin.body).seatNo,
     1,
-    "autoSeat should treat non-ACTIVE seat rows as free during retries"
+    "autoSeat should skip ACTIVE seats during retries (next free seat, UI index)"
   );
 
 
