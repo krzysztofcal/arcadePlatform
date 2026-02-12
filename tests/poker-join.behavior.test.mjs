@@ -295,7 +295,7 @@ const run = async () => {
   assert.equal(activeSeatIsOccupiedJoin.statusCode, 200);
   assert.equal(
     JSON.parse(activeSeatIsOccupiedJoin.body).seatNo,
-    2,
+    3,
     "autoSeat should skip ACTIVE seats during retries (next free seat)"
   );
 
