@@ -460,16 +460,30 @@ describe("chips ledger idempotency and validation", () => {
     ).rejects.toMatchObject({ code: "missing_user_entry", status: 400 });
   });
 
-  it("rejects non-UUID payload userId even with valid USER entry userId", async () => {
+  it("allows non-UUID payload userId when USER entries provide explicit UUID userId", async () => {
+    const { postTransaction } = await loadLedger();
+    const result = await postTransaction({
+      userId: "not-a-uuid",
+      txType: "MINT",
+      idempotencyKey: "invalid-payload-userid",
+      entries: [
+        { accountType: "SYSTEM", systemKey: "TREASURY", amount: -10 },
+        { accountType: "USER", userId: "00000000-0000-4000-8000-000000000004", amount: 10 },
+      ],
+    });
+    expect(result.transaction.id).toBeDefined();
+  });
+
+  it("rejects non-UUID payload userId when USER entries rely on payload fallback", async () => {
     const { postTransaction } = await loadLedger();
     await expect(
       postTransaction({
         userId: "not-a-uuid",
         txType: "MINT",
-        idempotencyKey: "invalid-payload-userid",
+        idempotencyKey: "invalid-payload-userid-fallback",
         entries: [
           { accountType: "SYSTEM", systemKey: "TREASURY", amount: -10 },
-          { accountType: "USER", userId: "00000000-0000-4000-8000-000000000004", amount: 10 },
+          { accountType: "USER", amount: 10 },
         ],
       }),
     ).rejects.toMatchObject({ code: "invalid_user_id", status: 400 });

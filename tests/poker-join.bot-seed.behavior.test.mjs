@@ -14,6 +14,7 @@ const makeJoinHandler = ({
   botMaxPerTable = 2,
   existingRequestStore = new Map(),
   existingSeatNo = null,
+  stakesOk = true,
 }) => {
   const queries = [];
   const ledgerCalls = [];
@@ -45,7 +46,7 @@ const makeJoinHandler = ({
     patchLeftTableByUserId,
     patchSitOutByUserId,
     isStateStorageValid,
-    parseStakes: () => ({ ok: true, value: { sb: 1, bb: 2 } }),
+    parseStakes: () => (stakesOk ? { ok: true, value: { sb: 1, bb: 2 } } : { ok: false, error: "invalid_stakes" }),
     getBotConfig: () => ({ enabled: botEnabled, maxPerTable: botMaxPerTable, defaultProfile: "TRIVIAL", buyInBB: 100, bankrollSystemKey: "TREASURY" }),
     makeBotUserId: (_tableId, seatNo) => (seatNo === 2 ? "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" : seatNo === 3 ? "cccccccc-cccc-4ccc-8ccc-cccccccccccc" : "dddddddd-dddd-4ddd-8ddd-dddddddddddd"),
     makeBotSystemKey: (_tableId, seatNo) => `POKER_BOT:${tableId}:${seatNo}`,
@@ -210,6 +211,16 @@ const run = async () => {
     const res = await callJoin(ctx.handler, "reserve-seat");
     assert.equal(res.statusCode, 200);
     assert.equal(ctx.seats.filter((seat) => seat.is_bot).length, 0);
+  }
+
+  {
+    const ctx = makeJoinHandler({ botEnabled: true, botMaxPerTable: 2, tableMaxPlayers: 6, stakesOk: false });
+    const res = await callJoin(ctx.handler, "invalid-stakes");
+    assert.equal(res.statusCode, 200);
+    assert.equal(ctx.seats.filter((seat) => seat.is_bot).length, 0);
+    assert.equal(ctx.seats.filter((seat) => !seat.is_bot).length, 1);
+    assert.equal(ctx.ledgerCalls.filter((entry) => entry.metadata?.reason === "BOT_SEED_BUY_IN").length, 0);
+    assert.equal(ctx.ledgerCalls.filter((entry) => entry.txType === "TABLE_BUY_IN").length, 1);
   }
 
   {

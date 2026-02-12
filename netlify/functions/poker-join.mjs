@@ -574,16 +574,17 @@ values ($1, $2, $3, 'ACTIVE', now(), now(), $4);
         let seededBots = [];
         if (botCfg.enabled) {
           const stakesParsed = parseStakes(table?.stakes);
-          if (!stakesParsed?.ok) {
-            throw makeError(409, "invalid_stakes");
+          if (stakesParsed?.ok) {
+            seededBots = await seedBotsAfterHumanJoin(tx, {
+              tableId,
+              maxPlayers: Number(table.max_players),
+              bb: stakesParsed.value.bb,
+              cfg: botCfg,
+              humanUserId: auth.userId,
+            });
+          } else {
+            klog("poker_join_bot_seed_skip_invalid_stakes", { tableId, stakes: table?.stakes ?? null });
           }
-          seededBots = await seedBotsAfterHumanJoin(tx, {
-            tableId,
-            maxPlayers: Number(table.max_players),
-            bb: stakesParsed.value.bb,
-            cfg: botCfg,
-            humanUserId: auth.userId,
-          });
         }
         if (seededBots.length > 0) mutated = true;
 

@@ -563,12 +563,12 @@ function validateEntries(entries, payloadUserId, { txType = null, createdBy = nu
     if (kind === "ESCROW") {
       hasEscrowEntry = true;
       escrowEntryCount += 1;
-      escrowAmount = amount;
+      escrowAmount += amount;
     }
     if (kind === "SYSTEM") {
       hasSystemEntry = true;
       systemEntryCount += 1;
-      systemAmount = amount;
+      systemAmount += amount;
     }
     if (kind !== "USER" && !systemKey) {
       throw badRequest("missing_system_key", "System entries must provide systemKey");
@@ -615,7 +615,8 @@ function validateEntries(entries, payloadUserId, { txType = null, createdBy = nu
     escrowEntryCount === 1 &&
     systemEntryCount === 1 &&
     systemAmount < 0 &&
-    escrowAmount > 0;
+    escrowAmount > 0 &&
+    (systemAmount + escrowAmount) === 0;
   if (!hasUserEntry && txType === "TABLE_BUY_IN" && !allowEscrowOnlyTableBuyIn) {
     throw badRequest("invalid_escrow_only_entries", "Escrow-only TABLE_BUY_IN requires SYSTEM(-) and ESCROW(+) strict shape");
   }
@@ -643,10 +644,17 @@ async function postTransaction({
     throw badRequest("missing_idempotency_key", "Idempotency key is required");
   }
 
-  const payloadUserId = String(userId == null ? "" : userId).trim();
-  if (payloadUserId && !isUuidLike(payloadUserId)) {
+  const payloadUserIdRaw = String(userId == null ? "" : userId).trim();
+  const userEntryFallbackNeeded = Array.isArray(entries)
+    ? entries.some((entry) => {
+      const kind = entry?.accountType || entry?.kind;
+      return kind === "USER" && (entry?.userId === undefined || entry?.userId === null || String(entry.userId).trim() === "");
+    })
+    : false;
+  if (payloadUserIdRaw && !isUuidLike(payloadUserIdRaw) && userEntryFallbackNeeded) {
     throw badRequest("invalid_user_id", "userId must be a UUID");
   }
+  const payloadUserId = isUuidLike(payloadUserIdRaw) ? payloadUserIdRaw : "";
 
   const normalizedEntries = validateEntries(entries, payloadUserId, { txType, createdBy });
   assertPlainObjectOrNull(metadata, "invalid_metadata");
@@ -711,6 +719,12 @@ async function postTransaction({
     }
 
     userAccount = payloadUserId ? (userAccountById.get(payloadUserId) || null) : null;
+
+    for (const entry of normalizedEntries) {
+      if (entry.kind === "USER" && !userAccountById.has(entry.userId)) {
+        throw badRequest("invalid_entry_user", "USER entry userId must resolve to a user account");
+      }
+    }
 
     const entryRecords = normalizedEntries.map(entry => {
       if (entry.kind === "USER") {
