@@ -37,6 +37,7 @@ const makeJoinHandler = ({
         unsafe: async (query, params) => {
           queries.push({ query: String(query), params });
           const text = String(query).toLowerCase();
+          const sqlNormalized = String(query).replace(/\s+/g, " ").trim().toLowerCase();
           if (text.includes("from public.poker_requests")) {
             const key = `${params?.[0]}|${params?.[1]}|${params?.[2]}|${params?.[3]}`;
             const entry = requestStore.get(key);
@@ -69,8 +70,15 @@ const makeJoinHandler = ({
             if (Number.isInteger(existingSeatNo)) return [{ seat_no: existingSeatNo }];
             return [];
           }
-          if (text.includes("where table_id = $1 and status = 'active' order by seat_no asc")) {
-            return occupiedSeatRows;
+          if (
+            sqlNormalized.includes("select seat_no") &&
+            sqlNormalized.includes("from public.poker_seats") &&
+            sqlNormalized.includes("status = 'active'") &&
+            sqlNormalized.includes("order by seat_no asc")
+          ) {
+            return (occupiedSeatRows || [])
+              .filter((row) => String(row?.status || "ACTIVE").toUpperCase() === "ACTIVE")
+              .map((row) => ({ seat_no: row?.seat_no }));
           }
           if (text.includes("insert into public.poker_seats")) {
             sideEffects.seatInsert += 1;
@@ -280,11 +288,13 @@ const run = async () => {
   });
   assert.equal(autoSeatJoinStr.statusCode, 200);
 
+  const activeSeatQueries = [];
   const activeSeatIsOccupiedHandler = makeJoinHandler({
     requestStore: new Map(),
-    queries: [],
+    queries: activeSeatQueries,
     sideEffects: { seatInsert: 0, ledger: 0, conflictSeatInsertUsed: false },
     conflictSeatInsertOnce: true,
+    tableMaxPlayers: 6,
     occupiedSeatRows: [{ seat_no: 2, status: "ACTIVE" }],
   });
   const activeSeatIsOccupiedJoin = await callJoin(activeSeatIsOccupiedHandler, "join-auto-seat-active-occupied", {
@@ -293,11 +303,22 @@ const run = async () => {
     preferredSeatNo: 1,
   });
   assert.equal(activeSeatIsOccupiedJoin.statusCode, 200);
+  const activeSeatQueryCount = activeSeatQueries.filter((entry) => {
+    const sqlNormalized = String(entry.query).replace(/\s+/g, " ").trim().toLowerCase();
+    return (
+      sqlNormalized.includes("select seat_no") &&
+      sqlNormalized.includes("from public.poker_seats") &&
+      sqlNormalized.includes("status = 'active'") &&
+      sqlNormalized.includes("order by seat_no asc")
+    );
+  }).length;
+  assert.ok(activeSeatQueryCount >= 1, "autoSeat retry should query ACTIVE seats");
   assert.equal(
     JSON.parse(activeSeatIsOccupiedJoin.body).seatNo,
     2,
-    "autoSeat should skip ACTIVE seats during retries (next free seat)"
+    "autoSeat should skip ACTIVE seats during retries and choose DB seat 3 (UI seat 2)"
   );
+
 
 
   const fullHandler = makeJoinHandler({
