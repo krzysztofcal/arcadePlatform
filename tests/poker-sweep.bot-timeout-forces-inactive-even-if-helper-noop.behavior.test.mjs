@@ -44,7 +44,7 @@ const run = async () => {
             return [{ seat_no: seatNo, status: seatStatus, stack, last_seen_at: new Date(0), is_bot: true }];
           }
           if (text.includes("from public.poker_state") && text.includes("for update")) return [{ state: JSON.stringify({ stacks: { [botUserId]: 0 } }) }];
-          if (text.includes("update public.poker_seats set status = 'inactive' where table_id = $1 and user_id = $2 and is_bot = true")) {
+          if (text.includes("update public.poker_seats set status = 'inactive' where table_id = $1 and user_id = $2 and is_bot = true and status = 'active'")) {
             seatStatus = "INACTIVE";
             return [];
           }
@@ -66,9 +66,9 @@ const run = async () => {
 
   const res = await handler({ httpMethod: "POST", headers: { "x-sweep-secret": "secret" } });
   assert.equal(res.statusCode, 200);
-  assert.equal(cashoutCalls, 0, "cashout should be skipped when helper noop leaves bot seat ACTIVE");
-  const forceInactiveIdx = queries.findIndex((q) => q.text.includes("update public.poker_seats set status = 'inactive' where table_id = $1 and user_id = $2 and is_bot = true"));
-  assert.equal(forceInactiveIdx, -1);
+  assert.equal(cashoutCalls, 1, "cashout should run after forced inactivation when helper is noop");
+  const forceInactiveIdx = queries.findIndex((q) => q.text.includes("update public.poker_seats set status = 'inactive' where table_id = $1 and user_id = $2 and is_bot = true and status = 'active'"));
+  assert.ok(forceInactiveIdx >= 0);
 };
 
 run().catch((error) => {

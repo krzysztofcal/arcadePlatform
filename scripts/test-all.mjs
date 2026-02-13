@@ -69,6 +69,7 @@ run("node", ["tests/poker-sweep.bot-cashout-on-timeout.behavior.test.mjs"], "pok
 run("node", ["tests/poker-sweep.bot-timeout-forces-inactive-even-if-helper-noop.behavior.test.mjs"], "poker-sweep-bot-timeout-force-inactive-helper-noop");
 run("node", ["tests/poker-sweep.bot-timeout-skips-when-actor-missing.behavior.test.mjs"], "poker-sweep-bot-timeout-skips-when-actor-missing");
 run("node", ["tests/poker-sweep.bot-cashout-on-close.behavior.test.mjs"], "poker-sweep-bot-cashout-on-close-behavior");
+run("node", ["tests/poker-sweep.bot-close-cashes-out-using-state-when-seat-zero.behavior.test.mjs"], "poker-sweep-bot-close-cashout-state-when-seat-zero");
 run("node", ["tests/poker-sweep.bot-close-rechecks-status-after-inactivate.behavior.test.mjs"], "poker-sweep-bot-close-recheck-status-after-inactivate");
 run("node", ["tests/poker-sweep.bot-close-skips-when-actor-missing.behavior.test.mjs"], "poker-sweep-bot-close-skips-when-actor-missing");
 run("node", ["tests/poker-sweep.bot-close-does-not-clear-state-when-not-safe.behavior.test.mjs"], "poker-sweep-bot-close-no-clear-when-not-safe");

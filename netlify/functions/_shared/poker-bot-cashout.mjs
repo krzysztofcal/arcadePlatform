@@ -28,7 +28,7 @@ export async function ensureBotSeatInactiveForCashout(tx, { tableId, botUserId }
 
 export async function cashoutBotSeatIfNeeded(
   tx,
-  { tableId, botUserId, seatNo, reason, actorUserId, idempotencyKeySuffix }
+  { tableId, botUserId, seatNo, reason, actorUserId, idempotencyKeySuffix, expectedAmount }
 ) {
   const lockedRows = await tx.unsafe(
     "select user_id, seat_no, status, is_bot, stack from public.poker_seats where table_id = $1 and user_id = $2 and is_bot = true limit 1 for update;",
@@ -58,7 +58,8 @@ export async function cashoutBotSeatIfNeeded(
     return { ok: true, skipped: true, reason: "active_seat", amount: 0, seatNo: effectiveSeatNo };
   }
 
-  const amount = normalizeStack(seat.stack);
+  const providedExpectedAmount = normalizeStack(expectedAmount);
+  const amount = providedExpectedAmount > 0 ? providedExpectedAmount : normalizeStack(seat.stack);
   if (amount <= 0) {
     klog("poker_bot_cashout_skip", {
       tableId,

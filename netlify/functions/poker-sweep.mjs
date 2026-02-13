@@ -201,13 +201,24 @@ export async function handler(event) {
             );
             const botStatus = botStatusRows?.[0] || null;
             if (botStatus?.status === "ACTIVE") {
-              klog("poker_timeout_cashout_bot_skip", {
-                tableId,
-                userId,
-                seatNo: locked.seat_no ?? null,
-                reason: "failed_to_inactivate",
-              });
-              return { skipped: true, seatNo: locked.seat_no ?? null, reason: "failed_to_inactivate", isBot: true, amount: 0, stackSource };
+              await tx.unsafe(
+                "update public.poker_seats set status = 'INACTIVE' where table_id = $1 and user_id = $2 and is_bot = true and status = 'ACTIVE';",
+                [tableId, userId]
+              );
+              const botStatusAfterRows = await tx.unsafe(
+                "select status, seat_no from public.poker_seats where table_id = $1 and user_id = $2 and is_bot = true limit 1 for update;",
+                [tableId, userId]
+              );
+              const botStatusAfter = botStatusAfterRows?.[0] || null;
+              if (botStatusAfter?.status === "ACTIVE") {
+                klog("poker_timeout_cashout_bot_skip", {
+                  tableId,
+                  userId,
+                  seatNo: locked.seat_no ?? null,
+                  reason: "failed_to_inactivate",
+                });
+                return { skipped: true, seatNo: locked.seat_no ?? null, reason: "failed_to_inactivate", isBot: true, amount: 0, stackSource };
+              }
             }
             if (!sweepActorUserId) {
               klog("poker_timeout_cashout_bot_skip", {
@@ -226,6 +237,7 @@ export async function handler(event) {
                 reason: "SWEEP_TIMEOUT",
                 actorUserId: sweepActorUserId,
                 idempotencyKeySuffix: "timeout_cashout:v1",
+                expectedAmount: amount,
               });
               effectiveAmount = botResult?.amount > 0 ? botResult.amount : 0;
               safeToClearStateStack = botResult?.cashedOut === true;
@@ -511,9 +523,10 @@ limit $1;`,
                   tableId,
                   botUserId: userId,
                   seatNo,
-                    reason: "SWEEP_CLOSE",
+                  reason: "SWEEP_CLOSE",
                   actorUserId: sweepActorUserId,
                   idempotencyKeySuffix: "close_cashout:v1",
+                  expectedAmount: normalizedStack,
                 });
               } catch (error) {
                 klog("poker_close_cashout_fail", {
