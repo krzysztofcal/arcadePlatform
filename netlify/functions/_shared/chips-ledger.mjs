@@ -871,12 +871,14 @@ from inserted i;
       throw mismatch;
     }
 
-    const accountRows = await sqlTx`
+    const accountRows = userAccount?.id
+      ? await sqlTx`
       select id, balance, next_entry_seq
       from public.chips_accounts
       where id = ${userAccount.id}
       limit 1;
-    `;
+    `
+      : [];
 
     return {
       transaction: transactionRow,

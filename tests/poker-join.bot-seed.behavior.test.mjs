@@ -18,6 +18,7 @@ const makeJoinHandler = ({
 }) => {
   const queries = [];
   const ledgerCalls = [];
+  const logs = [];
   const seats = [];
   const requestStore = existingRequestStore;
   const stateHolder = {
@@ -141,11 +142,11 @@ const makeJoinHandler = ({
       ledgerCalls.push(payload);
       return { transaction: { id: `tx-${ledgerCalls.length}` } };
     },
-    klog: () => {},
+    klog: (event, payload) => { logs.push({ event, payload }); },
     HEARTBEAT_INTERVAL_SEC: 15,
   });
 
-  return { handler, seats, ledgerCalls, stateHolder, queries };
+  return { handler, seats, ledgerCalls, logs, stateHolder, queries };
 };
 
 const callJoin = (handler, requestId = "join-1") =>
@@ -197,6 +198,7 @@ const run = async () => {
         true
       );
     }
+    assert.equal(ctx.logs.some((entry) => entry.event === "poker_join_bot_seed_failed"), false);
   }
 
   {
