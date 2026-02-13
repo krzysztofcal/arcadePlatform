@@ -3,7 +3,6 @@ import { PRESENCE_TTL_SEC, TABLE_EMPTY_CLOSE_SEC, TABLE_SINGLETON_CLOSE_SEC, isV
 import { postTransaction } from "./_shared/chips-ledger.mjs";
 import { isHoleCardsTableMissing } from "./_shared/poker-hole-cards-store.mjs";
 import { postHandSettlementToLedger } from "./_shared/poker-ledger-settlement.mjs";
-import { getBotConfig } from "./_shared/poker-bots.mjs";
 import { cashoutBotSeatIfNeeded, ensureBotSeatInactiveForCashout } from "./_shared/poker-bot-cashout.mjs";
 
 const STALE_PENDING_CUTOFF_MINUTES = 10;
@@ -223,13 +222,11 @@ export async function handler(event) {
               });
               return { skipped: true, seatNo: locked.seat_no ?? null, reason: "missing_actor", isBot: true, amount: 0, stackSource };
             }
-            const botConfig = getBotConfig();
             try {
               botResult = await cashoutBotSeatIfNeeded(tx, {
                 tableId,
                 botUserId: userId,
                 seatNo: locked.seat_no,
-                bankrollSystemKey: botConfig.bankrollSystemKey,
                 reason: "SWEEP_TIMEOUT",
                 actorUserId: sweepActorUserId,
                 idempotencyKeySuffix: "timeout_cashout:v1",
@@ -450,7 +447,6 @@ limit $1;`,
           }
           let stateChanged = false;
           const nextStacks = { ...currentStacks };
-          const botConfig = getBotConfig();
           let tableProcessed = 0;
           let tableSkipped = 0;
           for (const locked of lockedRows || []) {
@@ -523,8 +519,7 @@ limit $1;`,
                   tableId,
                   botUserId: userId,
                   seatNo,
-                  bankrollSystemKey: botConfig.bankrollSystemKey,
-                  reason: "SWEEP_CLOSE",
+                    reason: "SWEEP_CLOSE",
                   actorUserId: sweepActorUserId,
                   idempotencyKeySuffix: "close_cashout:v1",
                 });

@@ -41,8 +41,7 @@ const run = async () => {
       tableId,
       botUserId,
       seatNo: 7,
-      bankrollSystemKey: "TREASURY",
-      reason: "SWEEP_CLOSE",
+        reason: "SWEEP_CLOSE",
       actorUserId,
       idempotencyKeySuffix: "close_cashout:v1",
     }

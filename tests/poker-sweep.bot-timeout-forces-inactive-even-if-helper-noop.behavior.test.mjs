@@ -22,7 +22,6 @@ const run = async () => {
     TABLE_SINGLETON_CLOSE_SEC: 21600,
     isHoleCardsTableMissing,
     isValidUuid: () => true,
-    getBotConfig: () => ({ bankrollSystemKey: "TREASURY" }),
     ensureBotSeatInactiveForCashout: async () => ({ ok: true, changed: false, seatNo }),
     cashoutBotSeatIfNeeded: async () => {
       cashoutCalls += 1;

@@ -19,7 +19,6 @@ const run = async () => {
     TABLE_SINGLETON_CLOSE_SEC: 21600,
     isHoleCardsTableMissing,
     isValidUuid: () => true,
-    getBotConfig: () => ({ bankrollSystemKey: "TREASURY" }),
     cashoutBotSeatIfNeeded: async () => ({
       ok: true,
       skipped: true,

@@ -31,7 +31,7 @@ export async function ensureBotSeatInactiveForCashout(tx, { tableId, botUserId }
 
 export async function cashoutBotSeatIfNeeded(
   tx,
-  { tableId, botUserId, seatNo, bankrollSystemKey, reason, actorUserId, idempotencyKeySuffix }
+  { tableId, botUserId, seatNo, reason, actorUserId, idempotencyKeySuffix }
 ) {
   const lockedRows = await tx.unsafe(
     "select user_id, seat_no, status, is_bot, stack from public.poker_seats where table_id = $1 and user_id = $2 limit 1 for update;",

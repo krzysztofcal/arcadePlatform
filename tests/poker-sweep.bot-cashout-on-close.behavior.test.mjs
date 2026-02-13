@@ -24,7 +24,6 @@ const run = async () => {
     TABLE_SINGLETON_CLOSE_SEC: 21600,
     isHoleCardsTableMissing,
     isValidUuid: () => true,
-    getBotConfig: () => ({ bankrollSystemKey: "TREASURY" }),
     ensureBotSeatInactiveForCashout: async (tx, { tableId: tid, botUserId }) => {
       const row = botSeats.get(botUserId);
       if (!row) return { ok: false, skipped: true, reason: "seat_missing" };

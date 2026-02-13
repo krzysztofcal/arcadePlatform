@@ -20,7 +20,6 @@ const run = async () => {
     TABLE_SINGLETON_CLOSE_SEC: 21600,
     isHoleCardsTableMissing,
     isValidUuid: () => true,
-    getBotConfig: () => ({ bankrollSystemKey: "TREASURY" }),
     ensureBotSeatInactiveForCashout: async () => {
       seatStatus = "INACTIVE";
       return { ok: true, changed: true, seatNo: 6 };
@@ -44,6 +43,7 @@ const run = async () => {
             return [{ seat_no: 6, status: "ACTIVE", stack: 40, user_id: botUserId, is_bot: true }];
           }
           if (text.includes("from public.poker_state") && text.includes("for update")) return [{ state: JSON.stringify({ stacks: { [botUserId]: 40 } }) }];
+          if (text.includes("update public.poker_seats set status = 'inactive' where table_id = $1 and user_id = $2 and is_bot = true")) return [];
           if (text.includes("select status, stack, seat_no from public.poker_seats where table_id = $1 and user_id = $2 limit 1 for update")) {
             return [{ status: seatStatus, stack: 40, seat_no: 6 }];
           }
@@ -62,6 +62,7 @@ const run = async () => {
   const res = await handler({ httpMethod: "POST", headers: { "x-sweep-secret": "secret" } });
   assert.equal(res.statusCode, 200);
   assert.equal(cashoutCalls, 1, "cashout should proceed after status re-check shows inactive");
+  assert.ok(queries.some((q) => q.includes("update public.poker_seats set status = 'inactive' where table_id = $1 and user_id = $2 and is_bot = true")));
   assert.ok(queries.some((q) => q.includes("select status, stack, seat_no from public.poker_seats where table_id = $1 and user_id = $2 limit 1 for update")));
 };
 

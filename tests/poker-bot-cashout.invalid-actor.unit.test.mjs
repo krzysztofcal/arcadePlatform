@@ -37,8 +37,7 @@ const run = async () => {
           tableId: "99999999-9999-4999-8999-999999999999",
           botUserId: "11111111-1111-4111-8111-111111111111",
           seatNo: 7,
-          bankrollSystemKey: "TREASURY",
-          reason: "SWEEP_CLOSE",
+            reason: "SWEEP_CLOSE",
           actorUserId: "bad-actor",
           idempotencyKeySuffix: "close_cashout:v1",
         }

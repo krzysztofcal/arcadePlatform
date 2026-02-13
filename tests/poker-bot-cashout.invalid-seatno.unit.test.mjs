@@ -17,7 +17,6 @@ const run = async () => {
       cashoutBotSeatIfNeeded(tx, {
         tableId: "99999999-9999-4999-8999-999999999999",
         botUserId: "11111111-1111-4111-8111-111111111111",
-        bankrollSystemKey: "TREASURY",
         reason: "SWEEP_CLOSE",
         actorUserId: "00000000-0000-4000-8000-000000000001",
         idempotencyKeySuffix: "close_cashout:v1:7",
