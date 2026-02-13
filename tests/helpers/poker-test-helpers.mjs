@@ -8,6 +8,7 @@ import { patchSitOutByUserId } from "../../netlify/functions/_shared/poker-sitou
 import { createPokerTableWithState } from "../../netlify/functions/_shared/poker-table-init.mjs";
 import { computeTargetBotCount, getBotConfig, makeBotSystemKey, makeBotUserId } from "../../netlify/functions/_shared/poker-bots.mjs";
 import { cashoutBotSeatIfNeeded, ensureBotSeatInactiveForCashout } from "../../netlify/functions/_shared/poker-bot-cashout.mjs";
+import { isValidUuid } from "../../netlify/functions/_shared/poker-utils.mjs";
 
 const root = process.cwd();
 
@@ -137,6 +138,7 @@ return handler;`
       makeBotUserId,
       cashoutBotSeatIfNeeded,
       ensureBotSeatInactiveForCashout,
+      isValidUuid,
       areCardsUnique,
       cardIdentity,
       ...mocks,

@@ -43,7 +43,7 @@ const run = async () => {
             if (db.seatStatus !== "ACTIVE") return [];
             return [{ seat_no: seatNo, status: db.seatStatus, stack: db.seatStack, last_seen_at: new Date(0), is_bot: true }];
           }
-          if (text.includes("select version, state from public.poker_state where table_id") && text.includes("for update")) {
+          if (text.includes("select state from public.poker_state where table_id") && text.includes("for update")) {
             return [{ version: db.stateVersion, state: JSON.stringify({ stacks: { ...db.stacks } }) }];
           }
           if (text.includes("update public.poker_seats set status = 'inactive' where table_id = $1 and user_id = $2")) {
@@ -101,7 +101,7 @@ const run = async () => {
   const stackUpdateIdx = queries.findIndex((q) => q.includes("update public.poker_seats set stack = 0 where table_id = $1 and user_id = $2"));
   assert.ok(statusUpdateIdx >= 0, "should set bot seat INACTIVE before bot timeout cashout");
   assert.ok(stackUpdateIdx > statusUpdateIdx, "stack zeroing must occur after status INACTIVE transition");
-  assert.equal(postCalls[0].idempotencyKey, `bot-cashout:${tableId}:${seatNo}:SWEEP_TIMEOUT:timeout_cashout:v1:7`);
+  assert.equal(postCalls[0].idempotencyKey, `bot-cashout:${tableId}:${seatNo}:SWEEP_TIMEOUT:timeout_cashout:v1`);
   assert.deepEqual(postCalls[0].entries, [
     { accountType: "ESCROW", systemKey: `POKER_TABLE:${tableId}`, amount: -150 },
     { accountType: "SYSTEM", systemKey: "TREASURY", amount: 150 },

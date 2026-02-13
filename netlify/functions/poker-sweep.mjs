@@ -29,14 +29,9 @@ const normalizeState = (value) => {
 };
 
 
-const getSweepActorUserId = () => {
+const getSweepActorUserIdOrNull = () => {
   const actorUserId = String(process.env.POKER_SYSTEM_ACTOR_USER_ID || "").trim();
-  if (!isValidUuid(actorUserId)) {
-    const error = new Error("invalid_system_actor_user_id");
-    error.code = "invalid_system_actor_user_id";
-    throw error;
-  }
-  return actorUserId;
+  return isValidUuid(actorUserId) ? actorUserId : null;
 };
 
 const isExpiredSeat = (value) => {
@@ -62,6 +57,13 @@ export async function handler(event) {
   const headerSecret = event.headers?.["x-sweep-secret"] || event.headers?.["X-Sweep-Secret"];
   if (!headerSecret || headerSecret !== sweepSecret) {
     return { statusCode: 401, headers: baseHeaders(), body: JSON.stringify({ error: "unauthorized" }) };
+  }
+
+  const sweepActorUserId = getSweepActorUserIdOrNull();
+  if (!sweepActorUserId) {
+    klog("poker_sweep_bot_cashout_disabled_missing_actor", {
+      hasActorEnv: Boolean(process.env.POKER_SYSTEM_ACTOR_USER_ID),
+    });
   }
 
   try {
@@ -137,10 +139,8 @@ export async function handler(event) {
             return { skipped: true, seatNo: locked.seat_no };
           }
 
-          const stateRows = await tx.unsafe("select version, state from public.poker_state where table_id = $1 for update;", [tableId]);
+          const stateRows = await tx.unsafe("select state from public.poker_state where table_id = $1 for update;", [tableId]);
           const stateRow = stateRows?.[0] || null;
-          const stateVersion = Number(stateRow?.version);
-          const stateVersionSuffix = Number.isInteger(stateVersion) && stateVersion >= 0 ? String(stateVersion) : "unknown_version";
           const currentState = normalizeState(stateRow?.state);
           const handSettlement =
             currentState?.handSettlement && typeof currentState.handSettlement === "object"
@@ -180,7 +180,15 @@ export async function handler(event) {
             }
           } else if (locked?.is_bot === true) {
             const botConfig = getBotConfig();
-            const sweepActorUserId = getSweepActorUserId();
+            if (!sweepActorUserId) {
+              klog("poker_timeout_cashout_bot_skip", {
+                tableId,
+                userId,
+                seatNo: locked.seat_no ?? null,
+                reason: "missing_actor",
+              });
+              return { skipped: true, seatNo: locked.seat_no ?? null, reason: "missing_actor" };
+            }
             try {
               const inactiveResult = await ensureBotSeatInactiveForCashout(tx, { tableId, botUserId: userId });
               if (!inactiveResult?.ok) {
@@ -193,7 +201,7 @@ export async function handler(event) {
                 bankrollSystemKey: botConfig.bankrollSystemKey,
                 reason: "SWEEP_TIMEOUT",
                 actorUserId: sweepActorUserId,
-                idempotencyKeySuffix: `timeout_cashout:v1:${stateVersionSuffix}`,
+                idempotencyKeySuffix: "timeout_cashout:v1",
               });
               effectiveAmount = botResult?.amount > 0 ? botResult.amount : 0;
               safeToClearStateStack =
@@ -386,10 +394,8 @@ limit $1;`,
             "select seat_no, status, stack, user_id, is_bot from public.poker_seats where table_id = $1 for update;",
             [tableId]
           );
-          const stateRows = await tx.unsafe("select version, state from public.poker_state where table_id = $1 for update;", [tableId]);
+          const stateRows = await tx.unsafe("select state from public.poker_state where table_id = $1 for update;", [tableId]);
           const stateRow = stateRows?.[0] || null;
-          const stateVersion = Number(stateRow?.version);
-          const stateVersionSuffix = Number.isInteger(stateVersion) && stateVersion >= 0 ? String(stateVersion) : "unknown_version";
           const currentState = normalizeState(stateRow?.state);
           const currentStacks =
             currentState?.stacks && typeof currentState.stacks === "object" && !Array.isArray(currentState.stacks)
@@ -419,7 +425,6 @@ limit $1;`,
           let stateChanged = false;
           const nextStacks = { ...currentStacks };
           const botConfig = getBotConfig();
-          const sweepActorUserId = getSweepActorUserId();
           let tableProcessed = 0;
           let tableSkipped = 0;
           for (const locked of lockedRows || []) {
@@ -449,6 +454,11 @@ limit $1;`,
                   : "none";
             if (locked?.is_bot === true) {
               let botResult = null;
+              if (!sweepActorUserId) {
+                klog("poker_close_cashout_skip", { tableId, userId, seatNo, amount: normalizedStack, stackSource, reason: "missing_actor" });
+                tableSkipped += 1;
+                continue;
+              }
               try {
                 const inactiveResult = await ensureBotSeatInactiveForCashout(tx, { tableId, botUserId: userId });
                 if (!inactiveResult?.ok) {
@@ -468,7 +478,7 @@ limit $1;`,
                   bankrollSystemKey: botConfig.bankrollSystemKey,
                   reason: "SWEEP_CLOSE",
                   actorUserId: sweepActorUserId,
-                  idempotencyKeySuffix: `close_cashout:v1:${stateVersionSuffix}`,
+                  idempotencyKeySuffix: "close_cashout:v1",
                 });
               } catch (error) {
                 klog("poker_close_cashout_fail", {

@@ -21,8 +21,8 @@ assert.ok(
   "sweep should define non-negative integer normalization helper"
 );
 assert.ok(
-  /select version, state from public\.poker_state where table_id = \$1 for update;/.test(sweepSrc),
-  "sweep should lock poker_state and read version during auto-cashout"
+  /select state from public\.poker_state where table_id = \$1 for update;/.test(sweepSrc),
+  "sweep should lock poker_state during auto-cashout"
 );
 assert.ok(
   /const currentState = normalizeState\(stateRow\?\.state\);/.test(sweepSrc),
@@ -103,11 +103,11 @@ assert.ok(
 assert.ok(sweepSrc.includes("poker_sweep_close_cashout_summary"), "sweep should log close cash-out summary");
 
 assert.ok(
-  sweepSrc.includes("close_cashout:v1:${stateVersionSuffix}"),
-  "sweep bot close cashout idempotency should include state-version suffix"
+  sweepSrc.includes(`idempotencyKeySuffix: "close_cashout:v1"`),
+  "sweep bot close cashout idempotency should use stable suffix without schema version dependency"
 );
 
 assert.ok(
-  sweepSrc.includes("timeout_cashout:v1:${stateVersionSuffix}"),
-  "sweep bot timeout cashout idempotency should include state-version suffix"
+  sweepSrc.includes(`idempotencyKeySuffix: "timeout_cashout:v1"`),
+  "sweep bot timeout cashout idempotency should use stable suffix without schema version dependency"
 );

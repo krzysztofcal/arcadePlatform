@@ -2,15 +2,16 @@ import assert from "node:assert/strict";
 import { loadPokerHandler } from "./helpers/poker-test-helpers.mjs";
 import { isHoleCardsTableMissing } from "../netlify/functions/_shared/poker-hole-cards-store.mjs";
 
-const tableId = "33333333-3333-4333-8333-333333333333";
-const botId = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
-const seatNo = 2;
+const tableId = "55555555-5555-4555-8555-555555555555";
+const botId = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+const seatNo = 4;
 
 const run = async () => {
   process.env.POKER_SWEEP_SECRET = "secret";
-  process.env.POKER_SYSTEM_ACTOR_USER_ID = "00000000-0000-4000-8000-000000000001";
+  process.env.POKER_SYSTEM_ACTOR_USER_ID = "not-a-uuid";
 
-  const stateUpdateCalls = [];
+  const queries = [];
+  let botCashoutCalls = 0;
 
   const handler = loadPokerHandler("netlify/functions/poker-sweep.mjs", {
     baseHeaders: () => ({}),
@@ -18,19 +19,16 @@ const run = async () => {
     TABLE_EMPTY_CLOSE_SEC: 10,
     TABLE_SINGLETON_CLOSE_SEC: 21600,
     isHoleCardsTableMissing,
-    isValidUuid: () => true,
-    getBotConfig: () => ({ bankrollSystemKey: "TREASURY" }),
-    cashoutBotSeatIfNeeded: async () => ({
-      ok: true,
-      skipped: true,
-      reason: "active_seat",
-      amount: 0,
-      seatNo,
-    }),
+    isValidUuid: () => false,
+    cashoutBotSeatIfNeeded: async () => {
+      botCashoutCalls += 1;
+      return { ok: true, amount: 20 };
+    },
     beginSql: async (fn) =>
       fn({
         unsafe: async (query, params) => {
           const text = String(query).toLowerCase();
+          queries.push({ text, params });
           if (text.includes("from public.poker_requests") && text.includes("result_json is null")) return [];
           if (text.includes("from public.poker_seats") && text.includes("last_seen_at < now()")) return [];
           if (text.includes("delete from public.poker_requests")) return [];
@@ -43,28 +41,26 @@ const run = async () => {
           if (text.includes("select state from public.poker_state")) {
             return [{ state: JSON.stringify({ tableId, stacks: { [botId]: 0 } }) }];
           }
-          if (text.includes("update public.poker_state set state = $2 where table_id = $1")) {
-            stateUpdateCalls.push(params?.[1]);
-            return [];
-          }
-          if (text.includes("update public.poker_seats set status = 'inactive' where table_id = $1 and seat_no = $2")) return [];
-          if (text.includes("update public.poker_seats set status = 'inactive', stack = 0 where table_id = $1 and seat_no = $2")) return [];
+          if (text.includes("update public.poker_state set state = $2 where table_id = $1")) return [];
           if (text.includes("update public.poker_tables t")) return [{ id: tableId }];
           if (text.includes("delete from public.poker_hole_cards")) return [];
           if (text.includes("from public.chips_accounts a")) return [];
           return [];
         },
       }),
-    postTransaction: async () => {
-      throw new Error("should_not_post_human_cashout");
-    },
+    postTransaction: async () => ({ transaction: { id: "tx" } }),
     postHandSettlementToLedger: async () => ({ count: 0, total: 0 }),
     klog: () => {},
   });
 
   const response = await handler({ httpMethod: "POST", headers: { "x-sweep-secret": "secret" } });
   assert.equal(response.statusCode, 200);
-  assert.equal(stateUpdateCalls.length, 0, "bot unsafe close-cashout must not clear poker_state stack via normalizedStack===0 path");
+  assert.equal(botCashoutCalls, 0);
+  assert.equal(queries.some((q) => q.text.includes("update public.poker_state set state = $2 where table_id = $1")), false);
+  assert.equal(
+    queries.some((q) => q.text.includes("update public.poker_seats set stack = 0 where table_id = $1 and user_id = $2")),
+    false
+  );
 };
 
 run().catch((error) => {
