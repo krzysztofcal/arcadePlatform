@@ -35,6 +35,8 @@ run("node", ["tests/poker-bots.unit.test.mjs"], "poker-bots-unit");
 run("node", ["tests/poker-bot-cashout.active-seat.unit.test.mjs"], "poker-bot-cashout-active-seat-unit");
 run("node", ["tests/poker-bot-cashout.invalid-seatno.unit.test.mjs"], "poker-bot-cashout-invalid-seatno-unit");
 run("node", ["tests/poker-bot-cashout.userId-is-bot.unit.test.mjs"], "poker-bot-cashout-userid-is-bot-unit");
+run("node", ["tests/poker-bot-cashout.invalid-actor.unit.test.mjs"], "poker-bot-cashout-invalid-actor-unit");
+run("node", ["tests/poker-bot-cashout.invalid-idempotency-suffix.unit.test.mjs"], "poker-bot-cashout-invalid-idempotency-suffix-unit");
 run("node", ["tests/poker-stakes-ui.test.mjs"], "poker-stakes-ui");
 run("node", ["tests/poker-create-table.stakes.test.mjs"], "poker-create-table-stakes");
 run("node", ["tests/poker-phase1.test.mjs"], "poker-phase1");
@@ -66,6 +68,7 @@ run("node", ["tests/poker-sweep.bot-timeout-skips-when-actor-missing.behavior.te
 run("node", ["tests/poker-sweep.bot-cashout-on-close.behavior.test.mjs"], "poker-sweep-bot-cashout-on-close-behavior");
 run("node", ["tests/poker-sweep.bot-close-skips-when-actor-missing.behavior.test.mjs"], "poker-sweep-bot-close-skips-when-actor-missing");
 run("node", ["tests/poker-sweep.bot-close-does-not-clear-state-when-not-safe.behavior.test.mjs"], "poker-sweep-bot-close-no-clear-when-not-safe");
+run("node", ["tests/poker-sweep.close-empty-table-counts-skipped.behavior.test.mjs"], "poker-sweep-close-empty-table-counts-skipped");
 run("node", ["tests/poker-sweep.cashout-authoritative.behavior.test.mjs"], "poker-sweep-cashout-authoritative");
 run("node", ["tests/poker-get-table.behavior.test.mjs"], "poker-get-table-behavior");
 run("node", ["tests/poker-get-table.bot-fields.behavior.test.mjs"], "poker-get-table-bot-fields-behavior");

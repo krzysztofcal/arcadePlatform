@@ -179,9 +179,24 @@ export async function handler(event) {
               return { skipped: true, seatNo: locked.seat_no, reason: "settlement_post_failed" };
             }
           } else if (locked?.is_bot === true) {
-            const botConfig = getBotConfig();
+            const inactiveResult = await ensureBotSeatInactiveForCashout(tx, { tableId, botUserId: userId });
+            if (!inactiveResult?.ok) {
+              klog("poker_timeout_cashout_bot_skip", {
+                tableId,
+                userId,
+                seatNo: locked.seat_no ?? null,
+                reason: inactiveResult?.reason || "bot_inactive_failed",
+              });
+              return {
+                skipped: true,
+                seatNo: locked.seat_no ?? null,
+                reason: inactiveResult?.reason || "bot_inactive_failed",
+                isBot: true,
+                amount: 0,
+                stackSource,
+              };
+            }
             if (!sweepActorUserId) {
-              await ensureBotSeatInactiveForCashout(tx, { tableId, botUserId: userId });
               klog("poker_timeout_cashout_bot_skip", {
                 tableId,
                 userId,
@@ -190,11 +205,8 @@ export async function handler(event) {
               });
               return { skipped: true, seatNo: locked.seat_no ?? null, reason: "missing_actor", isBot: true, amount: 0, stackSource };
             }
+            const botConfig = getBotConfig();
             try {
-              const inactiveResult = await ensureBotSeatInactiveForCashout(tx, { tableId, botUserId: userId });
-              if (!inactiveResult?.ok) {
-                throw new Error("bot_seat_invalid");
-              }
               botResult = await cashoutBotSeatIfNeeded(tx, {
                 tableId,
                 botUserId: userId,
@@ -470,6 +482,18 @@ limit $1;`,
                     userId,
                     seatNo,
                     reason: inactiveResult?.reason || "unknown",
+                  });
+                  tableSkipped += 1;
+                  continue;
+                }
+                if (locked?.status === "ACTIVE" && inactiveResult?.changed !== true) {
+                  klog("poker_close_cashout_skip", {
+                    tableId,
+                    userId,
+                    seatNo,
+                    amount: normalizedStack,
+                    stackSource,
+                    reason: "bot_still_active",
                   });
                   tableSkipped += 1;
                   continue;

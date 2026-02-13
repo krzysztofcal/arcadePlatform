@@ -43,7 +43,7 @@ const run = async () => {
           if (text.includes("from public.poker_seats") && text.includes("for update") && text.includes("last_seen_at")) {
             return [{ seat_no: seatNo, status: "ACTIVE", stack: 50, last_seen_at: new Date(0), is_bot: true }];
           }
-          if (text.includes("select state from public.poker_state where table_id") && text.includes("for update")) {
+          if (text.includes("from public.poker_state") && text.includes("for update")) {
             return [{ state: JSON.stringify({ tableId, stacks: { [botId]: 50 } }) }];
           }
           if (text.includes("select t.id") && text.includes("stack > 0")) return [];
