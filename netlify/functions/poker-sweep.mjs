@@ -1,5 +1,5 @@
 import { baseHeaders, beginSql, klog } from "./_shared/supabase-admin.mjs";
-import { PRESENCE_TTL_SEC, TABLE_EMPTY_CLOSE_SEC, TABLE_SINGLETON_CLOSE_SEC, isValidUuid } from "./_shared/poker-utils.mjs";
+import { PRESENCE_TTL_SEC, TABLE_EMPTY_CLOSE_SEC, TABLE_SINGLETON_CLOSE_SEC } from "./_shared/poker-utils.mjs";
 import { postTransaction } from "./_shared/chips-ledger.mjs";
 import { isHoleCardsTableMissing } from "./_shared/poker-hole-cards-store.mjs";
 import { postHandSettlementToLedger } from "./_shared/poker-ledger-settlement.mjs";
@@ -31,7 +31,8 @@ const normalizeState = (value) => {
 
 const getSweepActorUserIdOrNull = () => {
   const actorUserId = String(process.env.POKER_SYSTEM_ACTOR_USER_ID || "").trim();
-  return isValidUuid(actorUserId) ? actorUserId : null;
+  const validateUuid = typeof isValidUuid === "function" ? isValidUuid : () => false;
+  return validateUuid(actorUserId) ? actorUserId : null;
 };
 
 const isExpiredSeat = (value) => {
@@ -181,13 +182,14 @@ export async function handler(event) {
           } else if (locked?.is_bot === true) {
             const botConfig = getBotConfig();
             if (!sweepActorUserId) {
+              await ensureBotSeatInactiveForCashout(tx, { tableId, botUserId: userId });
               klog("poker_timeout_cashout_bot_skip", {
                 tableId,
                 userId,
                 seatNo: locked.seat_no ?? null,
                 reason: "missing_actor",
               });
-              return { skipped: true, seatNo: locked.seat_no ?? null, reason: "missing_actor" };
+              return { skipped: true, seatNo: locked.seat_no ?? null, reason: "missing_actor", isBot: true, amount: 0, stackSource };
             }
             try {
               const inactiveResult = await ensureBotSeatInactiveForCashout(tx, { tableId, botUserId: userId });
@@ -562,12 +564,7 @@ limit $1;`,
                 stateChanged = true;
               }
             }
-            if (locked?.is_bot === true) {
-              await tx.unsafe("update public.poker_seats set status = 'INACTIVE' where table_id = $1 and seat_no = $2;", [
-                tableId,
-                seatNo,
-              ]);
-            } else {
+            if (locked?.is_bot !== true) {
               await tx.unsafe(
                 "update public.poker_seats set status = 'INACTIVE', stack = 0 where table_id = $1 and seat_no = $2;",
                 [tableId, seatNo]

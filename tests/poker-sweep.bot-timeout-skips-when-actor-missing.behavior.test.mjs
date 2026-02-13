@@ -22,6 +22,10 @@ const run = async () => {
     TABLE_SINGLETON_CLOSE_SEC: 21600,
     isHoleCardsTableMissing,
     isValidUuid: () => false,
+    ensureBotSeatInactiveForCashout: async (tx, args) => {
+      await tx.unsafe("update public.poker_seats set status = 'INACTIVE' where table_id = $1 and user_id = $2;", [args.tableId, args.botUserId]);
+      return { ok: true, changed: true, seatNo };
+    },
     cashoutBotSeatIfNeeded: async () => {
       botCashoutCalls += 1;
       return { ok: true, amount: 10 };
@@ -62,7 +66,7 @@ const run = async () => {
   assert.equal(postCalls, 0);
   assert.equal(
     queries.some((q) => q.text.includes("update public.poker_seats set status = 'inactive' where table_id = $1 and user_id = $2")),
-    false
+    true
   );
   assert.equal(queries.some((q) => q.text.includes("update public.poker_state set state = $2 where table_id = $1")), false);
   assert.ok(logs.some((entry) => entry.name === "poker_timeout_cashout_bot_skip" && entry.payload?.reason === "missing_actor"));

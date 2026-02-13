@@ -32,7 +32,7 @@ assert.ok(
   "leave should normalize seat stack as fallback"
 );
 assert.ok(
-  /let cashOutAmount = stateStack \?\? seatStack \?\? 0;/.test(leaveSrc),
+  /const cashOutAmount = stateStack \?\? seatStack \?\? 0;/.test(leaveSrc),
   "leave should initialize cashOutAmount from authoritative state/seat stack"
 );
 assert.ok(

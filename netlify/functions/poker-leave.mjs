@@ -198,7 +198,7 @@ export async function handler(event) {
         const stateStackRaw = currentState?.stacks?.[auth.userId];
         const stateStack = normalizeNonNegativeInt(Number(stateStackRaw));
         const seatStack = normalizeNonNegativeInt(Number(rawSeatStack));
-        let cashOutAmount = stateStack ?? seatStack ?? 0;
+        const cashOutAmount = stateStack ?? seatStack ?? 0;
         const isStackMissing = rawSeatStack == null;
         if (isStackMissing) {
           klog("poker_leave_stack_missing", { tableId, userId: auth.userId, seatNo });

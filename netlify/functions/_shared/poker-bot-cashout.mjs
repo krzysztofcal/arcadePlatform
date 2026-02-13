@@ -112,7 +112,7 @@ export async function cashoutBotSeatIfNeeded(
   const safeReason = String(reason || "UNKNOWN").toUpperCase();
 
   await postTransaction({
-    userId: createdBy,
+    userId: botUserId,
     txType: "TABLE_CASH_OUT",
     idempotencyKey: `bot-cashout:${tableId}:${effectiveSeatNo}:${safeReason}:${keySuffix}`,
     metadata: {
