@@ -33,7 +33,7 @@ assert.ok(
 );
 assert.ok(
   /const cashOutAmount = stateStack \?\? seatStack \?\? 0;/.test(leaveSrc),
-  "leave should prefer state stack over seat stack and default to 0"
+  "leave should initialize cashOutAmount from authoritative state/seat stack"
 );
 assert.ok(
   /const isStackMissing = rawSeatStack == null;/.test(leaveSrc),
@@ -44,10 +44,16 @@ assert.ok(
   "leave should only log missing stack when raw stack is null"
 );
 assert.ok(
-  /if \(cashOutAmount > 0\)[\s\S]*?TABLE_CASH_OUT/.test(leaveSrc),
-  "leave should cash out only when cashOutAmount > 0"
+  /if \(cashOutAmount > 0\) \{[\s\S]*?TABLE_CASH_OUT/.test(leaveSrc),
+  "leave should cash out only when positive amount exists"
 );
 assert.ok(
   /poker:leave:\$\{tableId\}:\$\{auth\.userId\}:\$\{requestId\}/.test(leaveSrc),
   "leave should scope requestId idempotency by tableId and userId"
 );
+
+assert.ok(!/POKER_SYSTEM_ACTOR_USER_ID/.test(leaveSrc), "leave should not depend on system actor env var");
+assert.ok(!/cashoutBotSeatIfNeeded/.test(leaveSrc), "leave should not use bot cashout helper");
+assert.ok(!/ensureBotSeatInactiveForCashout/.test(leaveSrc), "leave should not use bot inactive helper");
+assert.ok(!/getBotConfig/.test(leaveSrc), "leave should not read bot config");
+assert.ok(!/is_bot/.test(leaveSrc), "leave should not branch on is_bot");

@@ -1,22 +1,15 @@
 import { baseHeaders, beginSql, klog } from "./_shared/supabase-admin.mjs";
-import { PRESENCE_TTL_SEC, TABLE_EMPTY_CLOSE_SEC, TABLE_SINGLETON_CLOSE_SEC } from "./_shared/poker-utils.mjs";
+import { PRESENCE_TTL_SEC, TABLE_EMPTY_CLOSE_SEC, TABLE_SINGLETON_CLOSE_SEC, isValidUuid } from "./_shared/poker-utils.mjs";
 import { postTransaction } from "./_shared/chips-ledger.mjs";
 import { isHoleCardsTableMissing } from "./_shared/poker-hole-cards-store.mjs";
 import { postHandSettlementToLedger } from "./_shared/poker-ledger-settlement.mjs";
+import { cashoutBotSeatIfNeeded, ensureBotSeatInactiveForCashout } from "./_shared/poker-bot-cashout.mjs";
 
 const STALE_PENDING_CUTOFF_MINUTES = 10;
 const STALE_PENDING_LIMIT = 500;
 const OLD_REQUESTS_LIMIT = 1000;
 const EXPIRED_SEATS_LIMIT = 200;
 const CLOSE_CASHOUT_TABLES_LIMIT = 25;
-
-const normalizeSeatStack = (value) => {
-  if (value == null) return null;
-  const num = Number(value);
-  if (!Number.isFinite(num) || !Number.isInteger(num)) return null;
-  if (Math.abs(num) > Number.MAX_SAFE_INTEGER) return null;
-  return num;
-};
 
 const normalizeNonNegativeInt = (n) =>
   Number.isInteger(n) && n >= 0 && Math.abs(n) <= Number.MAX_SAFE_INTEGER ? n : null;
@@ -32,6 +25,12 @@ const normalizeState = (value) => {
   }
   if (typeof value === "object") return value;
   return {};
+};
+
+
+const getSweepActorUserIdOrNull = () => {
+  const actorUserId = String(process.env.POKER_SYSTEM_ACTOR_USER_ID || "").trim();
+  return isValidUuid(actorUserId) ? actorUserId : null;
 };
 
 const isExpiredSeat = (value) => {
@@ -57,6 +56,13 @@ export async function handler(event) {
   const headerSecret = event.headers?.["x-sweep-secret"] || event.headers?.["X-Sweep-Secret"];
   if (!headerSecret || headerSecret !== sweepSecret) {
     return { statusCode: 401, headers: baseHeaders(), body: JSON.stringify({ error: "unauthorized" }) };
+  }
+
+  const sweepActorUserId = getSweepActorUserIdOrNull();
+  if (!sweepActorUserId) {
+    klog("poker_sweep_bot_cashout_disabled_missing_actor", {
+      hasActorEnv: Boolean(process.env.POKER_SYSTEM_ACTOR_USER_ID),
+    });
   }
 
   try {
@@ -121,7 +127,7 @@ export async function handler(event) {
       try {
         const processed = await beginSql(async (tx) => {
           const lockedRows = await tx.unsafe(
-            "select seat_no, status, stack, last_seen_at from public.poker_seats where table_id = $1 and user_id = $2 for update;",
+            "select seat_no, status, stack, last_seen_at, is_bot from public.poker_seats where table_id = $1 and user_id = $2 for update;",
             [tableId, userId]
           );
           const locked = lockedRows?.[0] || null;
@@ -155,9 +161,13 @@ export async function handler(event) {
                 ? "seat"
                 : "none";
 
+          let effectiveAmount = amount;
+          let safeToClearStateStack = false;
+          let botResult = null;
           if (usableSettlement) {
             try {
               await postHandSettlementToLedger({ tableId, handSettlement, postTransaction, klog, tx });
+              safeToClearStateStack = true;
             } catch (error) {
               klog("poker_settlement_ledger_post_failed", {
                 tableId,
@@ -166,6 +176,85 @@ export async function handler(event) {
                 source: "timeout_cashout",
               });
               return { skipped: true, seatNo: locked.seat_no, reason: "settlement_post_failed" };
+            }
+          } else if (locked?.is_bot === true) {
+            const inactiveResult = await ensureBotSeatInactiveForCashout(tx, { tableId, botUserId: userId });
+            if (!inactiveResult?.ok) {
+              klog("poker_timeout_cashout_bot_skip", {
+                tableId,
+                userId,
+                seatNo: locked.seat_no ?? null,
+                reason: inactiveResult?.reason || "bot_inactive_failed",
+              });
+              return {
+                skipped: true,
+                seatNo: locked.seat_no ?? null,
+                reason: inactiveResult?.reason || "bot_inactive_failed",
+                isBot: true,
+                amount: 0,
+                stackSource,
+              };
+            }
+            const botStatusRows = await tx.unsafe(
+              "select status, seat_no from public.poker_seats where table_id = $1 and user_id = $2 and is_bot = true limit 1 for update;",
+              [tableId, userId]
+            );
+            const botStatus = botStatusRows?.[0] || null;
+            if (botStatus?.status === "ACTIVE") {
+              await tx.unsafe(
+                "update public.poker_seats set status = 'INACTIVE' where table_id = $1 and user_id = $2 and is_bot = true and status = 'ACTIVE';",
+                [tableId, userId]
+              );
+              const botStatusAfterRows = await tx.unsafe(
+                "select status, seat_no from public.poker_seats where table_id = $1 and user_id = $2 and is_bot = true limit 1 for update;",
+                [tableId, userId]
+              );
+              const botStatusAfter = botStatusAfterRows?.[0] || null;
+              if (botStatusAfter?.status === "ACTIVE") {
+                klog("poker_timeout_cashout_bot_skip", {
+                  tableId,
+                  userId,
+                  seatNo: locked.seat_no ?? null,
+                  reason: "failed_to_inactivate",
+                });
+                return { skipped: true, seatNo: locked.seat_no ?? null, reason: "failed_to_inactivate", isBot: true, amount: 0, stackSource };
+              }
+            }
+            if (!sweepActorUserId) {
+              klog("poker_timeout_cashout_bot_skip", {
+                tableId,
+                userId,
+                seatNo: locked.seat_no ?? null,
+                reason: "missing_actor",
+              });
+              return { skipped: true, seatNo: locked.seat_no ?? null, reason: "missing_actor", isBot: true, amount: 0, stackSource };
+            }
+            try {
+              botResult = await cashoutBotSeatIfNeeded(tx, {
+                tableId,
+                botUserId: userId,
+                seatNo: locked.seat_no,
+                reason: "SWEEP_TIMEOUT",
+                actorUserId: sweepActorUserId,
+                idempotencyKeySuffix: "timeout_cashout:v1",
+                expectedAmount: amount,
+              });
+              effectiveAmount = botResult?.amount > 0 ? botResult.amount : 0;
+              safeToClearStateStack = botResult?.cashedOut === true;
+              if (!safeToClearStateStack && botResult?.reason === "non_positive_stack") {
+                safeToClearStateStack = (stateStack ?? 0) === 0;
+              }
+            } catch (error) {
+              klog("poker_timeout_cashout_bot_fail", {
+                tableId,
+                userId,
+                seatNo: locked.seat_no ?? null,
+                error: error?.message || "unknown_error",
+              });
+              if (error && typeof error === "object") {
+                error.botTimeoutCashoutLogged = true;
+              }
+              throw error;
             }
           } else if (amount > 0) {
             await postTransaction({
@@ -181,14 +270,17 @@ export async function handler(event) {
               createdBy: userId,
               tx,
             });
+            safeToClearStateStack = true;
           }
 
-          await tx.unsafe(
-            "update public.poker_seats set status = 'INACTIVE', stack = 0 where table_id = $1 and user_id = $2;",
-            [tableId, userId]
-          );
+          if (locked?.is_bot !== true) {
+            await tx.unsafe(
+              "update public.poker_seats set status = 'INACTIVE', stack = 0 where table_id = $1 and user_id = $2;",
+              [tableId, userId]
+            );
+          }
 
-          if (amount > 0 && stateRow && currentState?.stacks && typeof currentState.stacks === "object") {
+          if (safeToClearStateStack && stateRow && currentState?.stacks && typeof currentState.stacks === "object") {
             const nextStacks = { ...currentState.stacks };
             if (Object.prototype.hasOwnProperty.call(nextStacks, userId)) {
               delete nextStacks[userId];
@@ -197,14 +289,32 @@ export async function handler(event) {
             }
           }
 
-          return { seatNo: locked.seat_no, amount, stackSource };
+          return { seatNo: locked.seat_no, amount: effectiveAmount, stackSource, isBot: locked?.is_bot === true, botCashedOut: botResult?.cashedOut === true };
         });
 
         if (processed?.skipped) {
           continue;
         }
         expiredCount += 1;
-        if (processed?.amount > 0) {
+        if (processed?.isBot === true) {
+          if (processed?.botCashedOut === true) {
+            klog("poker_timeout_cashout_bot_ok", {
+              tableId,
+              userId,
+              seatNo: processed.seatNo ?? null,
+              amount: processed.amount,
+              stackSource: processed.stackSource ?? "none",
+            });
+          } else {
+            klog("poker_timeout_cashout_bot_skip", {
+              tableId,
+              userId,
+              seatNo: processed?.seatNo ?? null,
+              amount: processed?.amount ?? 0,
+              stackSource: processed?.stackSource ?? "none",
+            });
+          }
+        } else if (processed?.amount > 0) {
           klog("poker_timeout_cashout_ok", {
             tableId,
             userId,
@@ -222,12 +332,14 @@ export async function handler(event) {
           });
         }
       } catch (error) {
-        klog("poker_timeout_cashout_fail", {
-          tableId,
-          userId,
-          seatNo: seat?.seat_no ?? null,
-          error: error?.message || "unknown_error",
-        });
+        if (!error?.botTimeoutCashoutLogged) {
+          klog("poker_timeout_cashout_fail", {
+            tableId,
+            userId,
+            seatNo: seat?.seat_no ?? null,
+            error: error?.message || "unknown_error",
+          });
+        }
       }
     }
     klog("poker_sweep_timeout_summary", {
@@ -310,7 +422,7 @@ limit $1;`,
       try {
         const result = await beginSql(async (tx) => {
           const lockedRows = await tx.unsafe(
-            "select seat_no, status, stack, user_id from public.poker_seats where table_id = $1 for update;",
+            "select seat_no, status, stack, user_id, is_bot from public.poker_seats where table_id = $1 for update;",
             [tableId]
           );
           const stateRows = await tx.unsafe("select state from public.poker_state where table_id = $1 for update;", [tableId]);
@@ -343,6 +455,8 @@ limit $1;`,
           }
           let stateChanged = false;
           const nextStacks = { ...currentStacks };
+          let tableProcessed = 0;
+          let tableSkipped = 0;
           for (const locked of lockedRows || []) {
             const userId = locked?.user_id;
             const seatNo = locked?.seat_no ?? null;
@@ -354,7 +468,7 @@ limit $1;`,
               });
               continue;
             }
-            if (locked?.status === "ACTIVE") {
+            if (locked?.status === "ACTIVE" && locked?.is_bot !== true) {
               klog("poker_close_cashout_skip_active_seat", { tableId, userId, seatNo });
               continue;
             }
@@ -368,7 +482,91 @@ limit $1;`,
                 : seatStack != null
                   ? "seat"
                   : "none";
-            if (normalizedStack > 0) {
+            if (locked?.is_bot === true) {
+              let botResult = null;
+              if (!sweepActorUserId) {
+                await ensureBotSeatInactiveForCashout(tx, { tableId, botUserId: userId });
+                klog("poker_close_cashout_skip", { tableId, userId, seatNo, amount: normalizedStack, stackSource, reason: "missing_actor" });
+                tableSkipped += 1;
+                continue;
+              }
+              try {
+                const inactiveResult = await ensureBotSeatInactiveForCashout(tx, { tableId, botUserId: userId });
+                if (!inactiveResult?.ok) {
+                  klog("poker_close_cashout_bot_invalid", {
+                    tableId,
+                    userId,
+                    seatNo,
+                    reason: inactiveResult?.reason || "unknown",
+                  });
+                  tableSkipped += 1;
+                  continue;
+                }
+                const botSeatRows = await tx.unsafe(
+                  "select status, stack, seat_no from public.poker_seats where table_id = $1 and user_id = $2 and is_bot = true limit 1 for update;",
+                  [tableId, userId]
+                );
+                const botSeat = botSeatRows?.[0] || null;
+                if (botSeat?.status === "ACTIVE") {
+                  klog("poker_close_cashout_skip", {
+                    tableId,
+                    userId,
+                    seatNo,
+                    amount: normalizedStack,
+                    stackSource,
+                    reason: "failed_to_inactivate",
+                  });
+                  tableSkipped += 1;
+                  continue;
+                }
+                botResult = await cashoutBotSeatIfNeeded(tx, {
+                  tableId,
+                  botUserId: userId,
+                  seatNo,
+                  reason: "SWEEP_CLOSE",
+                  actorUserId: sweepActorUserId,
+                  idempotencyKeySuffix: "close_cashout:v1",
+                  expectedAmount: normalizedStack,
+                });
+              } catch (error) {
+                klog("poker_close_cashout_fail", {
+                  tableId,
+                  userId,
+                  seatNo,
+                  error: error?.message || "unknown_error",
+                });
+                if (error && typeof error === "object") {
+                  error.closeCashoutLogged = true;
+                }
+                throw error;
+              }
+              let botSafeToClearState = botResult?.cashedOut === true;
+              if (!botSafeToClearState && botResult?.reason === "non_positive_stack") {
+                botSafeToClearState = (stateStack ?? 0) === 0;
+              }
+              if (botSafeToClearState) {
+                if (Object.prototype.hasOwnProperty.call(nextStacks, userId)) {
+                  delete nextStacks[userId];
+                  stateChanged = true;
+                }
+                if (botResult?.amount > 0 || botResult?.cashedOut === true) {
+                  tableProcessed += 1;
+                } else {
+                  tableSkipped += 1;
+                }
+              } else {
+                klog("poker_close_cashout_skip", {
+                  tableId,
+                  userId,
+                  seatNo,
+                  amount: botResult?.amount ?? normalizedStack,
+                  stackSource,
+                  reason: botResult?.reason || "bot_not_safe_to_clear",
+                });
+                tableSkipped += 1;
+                continue;
+              }
+            } else if (normalizedStack > 0) {
               try {
                 await postTransaction({
                   userId,
@@ -400,29 +598,36 @@ limit $1;`,
                 stateChanged = true;
               }
               klog("poker_close_cashout_ok", { tableId, userId, seatNo, amount: normalizedStack, stackSource });
-              closeCashoutProcessed += 1;
+              tableProcessed += 1;
             } else {
               klog("poker_close_cashout_skip", { tableId, userId, seatNo, amount: normalizedStack, stackSource });
-              closeCashoutSkipped += 1;
+              tableSkipped += 1;
             }
-            if (normalizedStack === 0 && Object.prototype.hasOwnProperty.call(nextStacks, userId)) {
-              delete nextStacks[userId];
-              stateChanged = true;
+            if (locked?.is_bot !== true) {
+              if (normalizedStack === 0 && Object.prototype.hasOwnProperty.call(nextStacks, userId)) {
+                delete nextStacks[userId];
+                stateChanged = true;
+              }
             }
-            await tx.unsafe(
-              "update public.poker_seats set status = 'INACTIVE', stack = 0 where table_id = $1 and seat_no = $2;",
-              [tableId, seatNo]
-            );
+            if (locked?.is_bot !== true) {
+              await tx.unsafe(
+                "update public.poker_seats set status = 'INACTIVE', stack = 0 where table_id = $1 and seat_no = $2;",
+                [tableId, seatNo]
+              );
+            }
           }
           if (stateRow && stateChanged) {
             const nextState = { ...currentState, stacks: nextStacks };
             await tx.unsafe("update public.poker_state set state = $2 where table_id = $1;", [tableId, JSON.stringify(nextState)]);
           }
-          return { seatCount: lockedRows?.length ?? 0 };
+          const seatCount = lockedRows?.length ?? 0;
+          if (seatCount === 0) {
+            tableSkipped += 1;
+          }
+          return { seatCount, tableProcessed, tableSkipped };
         });
-        if (result?.seatCount === 0) {
-          closeCashoutSkipped += 1;
-        }
+        closeCashoutProcessed += Number(result?.tableProcessed || 0);
+        closeCashoutSkipped += Number(result?.tableSkipped || 0);
       } catch (error) {
         if (!error?.closeCashoutLogged) {
           klog("poker_close_cashout_fail", {
