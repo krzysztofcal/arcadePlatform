@@ -220,7 +220,7 @@ export async function handler(event) {
               safeToClearStateStack = botResult?.cashedOut === true;
               if (!safeToClearStateStack && botResult?.reason === "non_positive_stack") {
                 const seatAfterRows = await tx.unsafe(
-                  "select stack from public.poker_seats where table_id = $1 and user_id = $2 for update limit 1;",
+                  "select stack from public.poker_seats where table_id = $1 and user_id = $2 limit 1 for update;",
                   [tableId, userId]
                 );
                 const seatAfter = seatAfterRows?.[0] || null;
@@ -272,7 +272,7 @@ export async function handler(event) {
             }
           }
 
-          return { seatNo: locked.seat_no, amount: effectiveAmount, stackSource, isBot: locked?.is_bot === true };
+          return { seatNo: locked.seat_no, amount: effectiveAmount, stackSource, isBot: locked?.is_bot === true, botCashedOut: botResult?.cashedOut === true };
         });
 
         if (processed?.skipped) {
@@ -280,7 +280,7 @@ export async function handler(event) {
         }
         expiredCount += 1;
         if (processed?.isBot === true) {
-          if (processed?.amount > 0) {
+          if (processed?.botCashedOut === true) {
             klog("poker_timeout_cashout_bot_ok", {
               tableId,
               userId,
@@ -522,7 +522,7 @@ limit $1;`,
               let botSafeToClearState = botResult?.cashedOut === true;
               if (!botSafeToClearState && botResult?.reason === "non_positive_stack") {
                 const seatAfterRows = await tx.unsafe(
-                  "select stack from public.poker_seats where table_id = $1 and user_id = $2 for update limit 1;",
+                  "select stack from public.poker_seats where table_id = $1 and user_id = $2 limit 1 for update;",
                   [tableId, userId]
                 );
                 const seatAfter = seatAfterRows?.[0] || null;

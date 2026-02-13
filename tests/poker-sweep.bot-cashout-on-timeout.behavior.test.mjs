@@ -85,7 +85,7 @@ const run = async () => {
         });
       }
       await tx.unsafe("update public.poker_seats set stack = 0 where table_id = $1 and user_id = $2;", [args.tableId, args.botUserId]);
-      return { ok: true, amount };
+      return { ok: true, cashedOut: amount > 0, amount, seatNo: args.seatNo };
     },
     postTransaction: async () => ({ transaction: { id: "tx-timeout" } }),
     postHandSettlementToLedger: async () => ({ count: 0, total: 0 }),
