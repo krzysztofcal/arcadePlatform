@@ -1,5 +1,5 @@
 import { baseHeaders, beginSql, klog } from "./_shared/supabase-admin.mjs";
-import { PRESENCE_TTL_SEC, TABLE_EMPTY_CLOSE_SEC, TABLE_SINGLETON_CLOSE_SEC } from "./_shared/poker-utils.mjs";
+import { PRESENCE_TTL_SEC, TABLE_EMPTY_CLOSE_SEC, TABLE_SINGLETON_CLOSE_SEC, isValidUuid } from "./_shared/poker-utils.mjs";
 import { postTransaction } from "./_shared/chips-ledger.mjs";
 import { isHoleCardsTableMissing } from "./_shared/poker-hole-cards-store.mjs";
 import { postHandSettlementToLedger } from "./_shared/poker-ledger-settlement.mjs";
@@ -31,8 +31,7 @@ const normalizeState = (value) => {
 
 const getSweepActorUserIdOrNull = () => {
   const actorUserId = String(process.env.POKER_SYSTEM_ACTOR_USER_ID || "").trim();
-  const validateUuid = typeof isValidUuid === "function" ? isValidUuid : () => false;
-  return validateUuid(actorUserId) ? actorUserId : null;
+  return isValidUuid(actorUserId) ? actorUserId : null;
 };
 
 const isExpiredSeat = (value) => {
@@ -206,11 +205,16 @@ export async function handler(event) {
                 idempotencyKeySuffix: "timeout_cashout:v1",
               });
               effectiveAmount = botResult?.amount > 0 ? botResult.amount : 0;
-              safeToClearStateStack =
-                botResult?.cashedOut === true ||
-                botResult?.amount > 0 ||
-                botResult?.reason === "non_positive_stack" ||
-                (botResult?.amount === 0 && botResult?.reason !== "active_seat");
+              safeToClearStateStack = botResult?.cashedOut === true;
+              if (!safeToClearStateStack && botResult?.reason === "non_positive_stack") {
+                const seatAfterRows = await tx.unsafe(
+                  "select stack from public.poker_seats where table_id = $1 and user_id = $2 for update limit 1;",
+                  [tableId, userId]
+                );
+                const seatAfter = seatAfterRows?.[0] || null;
+                const seatAfterStack = normalizeNonNegativeInt(Number(seatAfter?.stack));
+                safeToClearStateStack = seatAfterStack === 0;
+              }
             } catch (error) {
               klog("poker_timeout_cashout_bot_fail", {
                 tableId,
@@ -457,6 +461,7 @@ limit $1;`,
             if (locked?.is_bot === true) {
               let botResult = null;
               if (!sweepActorUserId) {
+                await ensureBotSeatInactiveForCashout(tx, { tableId, botUserId: userId });
                 klog("poker_close_cashout_skip", { tableId, userId, seatNo, amount: normalizedStack, stackSource, reason: "missing_actor" });
                 tableSkipped += 1;
                 continue;
@@ -494,11 +499,16 @@ limit $1;`,
                 }
                 throw error;
               }
-              const botSafeToClearState =
-                botResult?.cashedOut === true ||
-                botResult?.amount > 0 ||
-                botResult?.reason === "non_positive_stack" ||
-                (botResult?.amount === 0 && botResult?.reason !== "active_seat");
+              let botSafeToClearState = botResult?.cashedOut === true;
+              if (!botSafeToClearState && botResult?.reason === "non_positive_stack") {
+                const seatAfterRows = await tx.unsafe(
+                  "select stack from public.poker_seats where table_id = $1 and user_id = $2 for update limit 1;",
+                  [tableId, userId]
+                );
+                const seatAfter = seatAfterRows?.[0] || null;
+                const seatAfterStack = normalizeNonNegativeInt(Number(seatAfter?.stack));
+                botSafeToClearState = seatAfterStack === 0;
+              }
               if (botSafeToClearState) {
                 if (Object.prototype.hasOwnProperty.call(nextStacks, userId)) {
                   delete nextStacks[userId];

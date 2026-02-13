@@ -77,7 +77,7 @@ const run = async () => {
       if (amount > 0) {
         postCalls.push({
           txType: "TABLE_CASH_OUT",
-          idempotencyKey: `bot-cashout:${args.tableId}:${args.seatNo}:SWEEP_TIMEOUT:${args.idempotencyKeySuffix}`,
+          idempotencyKey: `bot-cashout:${args.tableId}:${args.botUserId}:${args.seatNo}:SWEEP_TIMEOUT:${args.idempotencyKeySuffix}`,
           entries: [
             { accountType: "ESCROW", systemKey: `POKER_TABLE:${args.tableId}`, amount: -amount },
             { accountType: "SYSTEM", systemKey: args.bankrollSystemKey, amount },
@@ -101,7 +101,7 @@ const run = async () => {
   const stackUpdateIdx = queries.findIndex((q) => q.includes("update public.poker_seats set stack = 0 where table_id = $1 and user_id = $2"));
   assert.ok(statusUpdateIdx >= 0, "should set bot seat INACTIVE before bot timeout cashout");
   assert.ok(stackUpdateIdx > statusUpdateIdx, "stack zeroing must occur after status INACTIVE transition");
-  assert.equal(postCalls[0].idempotencyKey, `bot-cashout:${tableId}:${seatNo}:SWEEP_TIMEOUT:timeout_cashout:v1`);
+  assert.equal(postCalls[0].idempotencyKey, `bot-cashout:${tableId}:${botUserId}:${seatNo}:SWEEP_TIMEOUT:timeout_cashout:v1`);
   assert.deepEqual(postCalls[0].entries, [
     { accountType: "ESCROW", systemKey: `POKER_TABLE:${tableId}`, amount: -150 },
     { accountType: "SYSTEM", systemKey: "TREASURY", amount: 150 },

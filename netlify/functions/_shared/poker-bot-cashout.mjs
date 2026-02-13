@@ -114,7 +114,7 @@ export async function cashoutBotSeatIfNeeded(
   await postTransaction({
     userId: botUserId,
     txType: "TABLE_CASH_OUT",
-    idempotencyKey: `bot-cashout:${tableId}:${effectiveSeatNo}:${safeReason}:${keySuffix}`,
+    idempotencyKey: `bot-cashout:${tableId}:${botUserId}:${effectiveSeatNo}:${safeReason}:${keySuffix}`,
     metadata: {
       actor: "BOT",
       reason: "BOT_CASH_OUT",
