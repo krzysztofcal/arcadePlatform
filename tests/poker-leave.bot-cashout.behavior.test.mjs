@@ -132,6 +132,39 @@ const run = async () => {
   assert.equal(replay.statusCode, 200);
   assert.equal(postCalls.length, 1, "replay should not perform extra bot cashout");
 
+
+  process.env.POKER_SYSTEM_ACTOR_USER_ID = "00000000-0000-4000-8000-000000000001";
+  const missingRequestStateRef = {
+    version: 1,
+    seatStack: 120,
+    deleted: false,
+    state: {
+      tableId,
+      seats: [{ userId: botUserId, seatNo: 2 }],
+      stacks: { [botUserId]: 120 },
+      pot: 0,
+      phase: "INIT",
+    },
+  };
+  const missingRequestStore = new Map();
+  const missingRequestPostCalls = [];
+  const missingRequestHelperCalls = [];
+  const missingRequestHandler = makeHandler({
+    requestStore: missingRequestStore,
+    postCalls: missingRequestPostCalls,
+    stateRef: missingRequestStateRef,
+    helperCalls: missingRequestHelperCalls,
+  });
+  const missingRequestResponse = await missingRequestHandler({
+    httpMethod: "POST",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    body: JSON.stringify({ tableId }),
+  });
+  assert.equal(missingRequestResponse.statusCode, 400);
+  assert.equal(JSON.parse(missingRequestResponse.body).error, "request_id_required");
+  assert.equal(missingRequestPostCalls.length, 0);
+  assert.equal(missingRequestHelperCalls.length, 0);
+
   process.env.POKER_SYSTEM_ACTOR_USER_ID = "";
   const missingActorStateRef = {
     version: 1,

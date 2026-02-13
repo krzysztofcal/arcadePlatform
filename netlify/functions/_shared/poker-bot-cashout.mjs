@@ -29,6 +29,18 @@ export async function cashoutBotSeatIfNeeded(
   }
 
   const effectiveSeatNo = Number.isInteger(seat.seat_no) ? seat.seat_no : seatNo;
+  if (seat.status === "ACTIVE") {
+    klog("poker_bot_cashout_skip", {
+      tableId,
+      botUserId,
+      seatNo: effectiveSeatNo ?? null,
+      reason: "active_seat",
+      amount: 0,
+      cause: reason,
+    });
+    return { ok: true, skipped: true, reason: "active_seat", amount: 0, seatNo: effectiveSeatNo ?? null };
+  }
+
   const amount = normalizeStack(seat.stack);
   if (amount <= 0) {
     klog("poker_bot_cashout_skip", {

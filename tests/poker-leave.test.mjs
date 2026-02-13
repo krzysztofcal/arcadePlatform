@@ -57,6 +57,11 @@ assert.ok(
   "leave bot path should validate POKER_SYSTEM_ACTOR_USER_ID"
 );
 assert.ok(
-  /actorUserId: systemActorUserId,[\s\S]*?idempotencyKeySuffix: requestId \|\| "no_request"/.test(leaveSrc),
+  /actorUserId: systemActorUserId,[\s\S]*?idempotencyKeySuffix: requestId/.test(leaveSrc),
   "leave bot path should use system actor and request-based idempotency suffix"
+);
+
+assert.ok(
+  /if \(!requestId\) \{\s*throw makeError\(400, "request_id_required"\);/.test(leaveSrc),
+  "leave bot path should require requestId"
 );
