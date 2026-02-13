@@ -499,7 +499,7 @@ limit $1;`,
                   userId,
                 ]);
                 const botSeatRows = await tx.unsafe(
-                  "select status, stack, seat_no from public.poker_seats where table_id = $1 and user_id = $2 limit 1 for update;",
+                  "select status, stack, seat_no from public.poker_seats where table_id = $1 and user_id = $2 and is_bot = true limit 1 for update;",
                   [tableId, userId]
                 );
                 const botSeat = botSeatRows?.[0] || null;

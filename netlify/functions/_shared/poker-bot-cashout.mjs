@@ -25,7 +25,7 @@ export async function ensureBotSeatInactiveForCashout(tx, { tableId, botUserId }
   if (seat.status !== "ACTIVE") {
     return { ok: true, changed: false, seatNo: Number.isInteger(seat.seat_no) ? seat.seat_no : null };
   }
-  await tx.unsafe("update public.poker_seats set status = 'INACTIVE' where table_id = $1 and user_id = $2;", [tableId, botUserId]);
+  await tx.unsafe("update public.poker_seats set status = 'INACTIVE' where table_id = $1 and user_id = $2 and is_bot = true;", [tableId, botUserId]);
   return { ok: true, changed: true, seatNo: Number.isInteger(seat.seat_no) ? seat.seat_no : null };
 }
 

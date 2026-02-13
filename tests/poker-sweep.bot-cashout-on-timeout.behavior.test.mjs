@@ -45,7 +45,7 @@ const run = async () => {
           if (text.includes("from public.poker_state") && text.includes("for update")) {
             return [{ version: db.stateVersion, state: JSON.stringify({ stacks: { ...db.stacks } }) }];
           }
-          if (text.includes("update public.poker_seats set status = 'inactive' where table_id = $1 and user_id = $2")) {
+          if (text.includes("update public.poker_seats set status = 'inactive' where table_id = $1 and user_id = $2 and is_bot = true")) {
             db.seatStatus = "INACTIVE";
             return [];
           }
@@ -67,7 +67,7 @@ const run = async () => {
       }),
     ensureBotSeatInactiveForCashout: async (tx, args) => {
       helperCalls.push({ phase: "ensure_inactive", ...args });
-      await tx.unsafe("update public.poker_seats set status = 'INACTIVE' where table_id = $1 and user_id = $2;", [args.tableId, args.botUserId]);
+      await tx.unsafe("update public.poker_seats set status = 'INACTIVE' where table_id = $1 and user_id = $2 and is_bot = true;", [args.tableId, args.botUserId]);
       return { ok: true, changed: true, seatNo };
     },
     cashoutBotSeatIfNeeded: async (tx, args) => {
@@ -96,7 +96,7 @@ const run = async () => {
   assert.equal(postCalls.length, 1);
   assert.equal(helperCalls.filter((c) => c.phase === "cashout").length, 1);
   assert.equal(helperCalls.filter((c) => c.phase === "ensure_inactive").length, 1);
-  const statusUpdateIdx = queries.findIndex((q) => q.includes("update public.poker_seats set status = 'inactive' where table_id = $1 and user_id = $2"));
+  const statusUpdateIdx = queries.findIndex((q) => q.includes("update public.poker_seats set status = 'inactive' where table_id = $1 and user_id = $2 and is_bot = true"));
   const stackUpdateIdx = queries.findIndex((q) => q.includes("update public.poker_seats set stack = 0 where table_id = $1 and user_id = $2"));
   assert.ok(statusUpdateIdx >= 0, "should set bot seat INACTIVE before bot timeout cashout");
   assert.ok(stackUpdateIdx > statusUpdateIdx, "stack zeroing must occur after status INACTIVE transition");

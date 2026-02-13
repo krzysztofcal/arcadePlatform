@@ -44,7 +44,7 @@ const run = async () => {
           }
           if (text.includes("from public.poker_state") && text.includes("for update")) return [{ state: JSON.stringify({ stacks: { [botUserId]: 40 } }) }];
           if (text.includes("update public.poker_seats set status = 'inactive' where table_id = $1 and user_id = $2 and is_bot = true")) return [];
-          if (text.includes("select status, stack, seat_no from public.poker_seats where table_id = $1 and user_id = $2 limit 1 for update")) {
+          if (text.includes("select status, stack, seat_no from public.poker_seats where table_id = $1 and user_id = $2 and is_bot = true limit 1 for update")) {
             return [{ status: seatStatus, stack: 40, seat_no: 6 }];
           }
           if (text.includes("update public.poker_state set state = $2 where table_id = $1")) return [];
@@ -63,7 +63,7 @@ const run = async () => {
   assert.equal(res.statusCode, 200);
   assert.equal(cashoutCalls, 1, "cashout should proceed after status re-check shows inactive");
   assert.ok(queries.some((q) => q.includes("update public.poker_seats set status = 'inactive' where table_id = $1 and user_id = $2 and is_bot = true")));
-  assert.ok(queries.some((q) => q.includes("select status, stack, seat_no from public.poker_seats where table_id = $1 and user_id = $2 limit 1 for update")));
+  assert.ok(queries.some((q) => q.includes("select status, stack, seat_no from public.poker_seats where table_id = $1 and user_id = $2 and is_bot = true limit 1 for update")));
 };
 
 run().catch((error) => {

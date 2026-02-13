@@ -28,7 +28,7 @@ const run = async () => {
       const row = botSeats.get(botUserId);
       if (!row) return { ok: false, skipped: true, reason: "seat_missing" };
       if (row.status === "INACTIVE") return { ok: true, changed: false, seatNo: row.seat_no };
-      await tx.unsafe("update public.poker_seats set status = 'INACTIVE' where table_id = $1 and user_id = $2;", [tid, botUserId]);
+      await tx.unsafe("update public.poker_seats set status = 'INACTIVE' where table_id = $1 and user_id = $2 and is_bot = true;", [tid, botUserId]);
       row.status = "INACTIVE";
       return { ok: true, changed: true, seatNo: row.seat_no };
     },
@@ -70,7 +70,7 @@ const run = async () => {
             if (row) row.stack = 0;
             return [];
           }
-          if (text.includes("update public.poker_seats set status = 'inactive' where table_id = $1 and user_id = $2")) {
+          if (text.includes("update public.poker_seats set status = 'inactive' where table_id = $1 and user_id = $2 and is_bot = true")) {
             const userId = params?.[1];
             const row = botSeats.get(userId);
             if (row) row.status = "INACTIVE";
@@ -115,7 +115,7 @@ const run = async () => {
   for (const botUserId of [botA, botB]) {
     const statusUpdateIdx = queries.findIndex(
       (entry) =>
-        entry.text.includes("update public.poker_seats set status = 'inactive' where table_id = $1 and user_id = $2") &&
+        entry.text.includes("update public.poker_seats set status = 'inactive' where table_id = $1 and user_id = $2 and is_bot = true") &&
         entry.params?.[1] === botUserId
     );
     const stackUpdateIdx = queries.findIndex(

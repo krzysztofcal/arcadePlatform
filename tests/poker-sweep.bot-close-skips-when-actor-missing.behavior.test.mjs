@@ -21,7 +21,7 @@ const run = async () => {
     isHoleCardsTableMissing,
     isValidUuid: () => false,
     ensureBotSeatInactiveForCashout: async (tx, args) => {
-      await tx.unsafe("update public.poker_seats set status = 'INACTIVE' where table_id = $1 and user_id = $2;", [args.tableId, args.botUserId]);
+      await tx.unsafe("update public.poker_seats set status = 'INACTIVE' where table_id = $1 and user_id = $2 and is_bot = true;", [args.tableId, args.botUserId]);
       return { ok: true, changed: true, seatNo };
     },
     cashoutBotSeatIfNeeded: async () => {
@@ -61,7 +61,7 @@ const run = async () => {
   assert.equal(response.statusCode, 200);
   assert.equal(botCashoutCalls, 0);
   assert.equal(
-    queries.some((q) => q.text.includes("update public.poker_seats set status = 'inactive' where table_id = $1 and user_id = $2")),
+    queries.some((q) => q.text.includes("update public.poker_seats set status = 'inactive' where table_id = $1 and user_id = $2 and is_bot = true")),
     true
   );
   assert.equal(queries.some((q) => q.text.includes("update public.poker_state set state = $2 where table_id = $1")), false);
