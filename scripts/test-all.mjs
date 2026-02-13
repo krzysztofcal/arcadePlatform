@@ -51,6 +51,7 @@ run("node", ["tests/poker-hole-cards-store.test.mjs"], "poker-hole-cards-store")
 run("node", ["tests/poker-contract.phase1.test.mjs"], "poker-contract-phase1");
 run("node", ["tests/poker-db-lockdown.contract.test.mjs"], "poker-db-lockdown");
 run("node", ["tests/poker-hole-cards.rls.test.mjs"], "poker-hole-cards-rls");
+run("node", ["tests/poker-hole-cards.allow-bots.contract.test.mjs"], "poker-hole-cards-allow-bots-contract");
 run("node", ["tests/poker-rls.read.test.mjs"], "poker-rls-read");
 run("node", ["tests/poker-reducer.test.mjs"], "poker-reducer");
 run("node", ["tests/poker-leave.test.mjs"], "poker-leave");
@@ -62,6 +63,7 @@ run("node", ["tests/poker-join.behavior.test.mjs"], "poker-join-behavior");
 run("node", ["tests/poker-join.bot-seed.behavior.test.mjs"], "poker-join-bot-seed");
 run("node", ["tests/poker-heartbeat.behavior.test.mjs"], "poker-heartbeat-behavior");
 run("node", ["tests/poker-start-hand.behavior.test.mjs"], "poker-start-hand-behavior");
+run("node", ["tests/poker-start-hand.bots.behavior.test.mjs"], "poker-start-hand-bots-behavior");
 run("node", ["tests/poker-start-hand.legacy-init-upgrade.test.mjs"], "poker-start-hand-legacy-init-upgrade");
 run("node", ["tests/poker-act.behavior.test.mjs"], "poker-act-behavior");
 run("node", ["tests/poker-act.init-phase.test.mjs"], "poker-act-init-phase");
