@@ -80,7 +80,7 @@ const run = async () => {
           idempotencyKey: `bot-cashout:${args.tableId}:${args.botUserId}:${args.seatNo}:SWEEP_TIMEOUT:${args.idempotencyKeySuffix}`,
           entries: [
             { accountType: "ESCROW", systemKey: `POKER_TABLE:${args.tableId}`, amount: -amount },
-            { accountType: "SYSTEM", systemKey: args.bankrollSystemKey, amount },
+            { accountType: "USER", amount },
           ],
         });
       }
@@ -104,7 +104,7 @@ const run = async () => {
   assert.equal(postCalls[0].idempotencyKey, `bot-cashout:${tableId}:${botUserId}:${seatNo}:SWEEP_TIMEOUT:timeout_cashout:v1`);
   assert.deepEqual(postCalls[0].entries, [
     { accountType: "ESCROW", systemKey: `POKER_TABLE:${tableId}`, amount: -150 },
-    { accountType: "SYSTEM", systemKey: "TREASURY", amount: 150 },
+    { accountType: "USER", amount: 150 },
   ]);
 
   const second = await handler({ httpMethod: "POST", headers: { "x-sweep-secret": "secret" } });

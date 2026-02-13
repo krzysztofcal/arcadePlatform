@@ -42,7 +42,7 @@ const run = async () => {
           idempotencyKey: `bot-cashout:${args.tableId}:${args.botUserId}:${args.seatNo}:SWEEP_CLOSE:${args.idempotencyKeySuffix}`,
           entries: [
             { accountType: "ESCROW", systemKey: `POKER_TABLE:${args.tableId}`, amount: -amount },
-            { accountType: "SYSTEM", systemKey: args.bankrollSystemKey, amount },
+            { accountType: "USER", amount },
           ],
         });
       }
@@ -104,8 +104,14 @@ const run = async () => {
   assert.equal(postCalls.length, 2);
   assert.equal(postCalls[0].idempotencyKey, `bot-cashout:${tableId}:${botA}:1:SWEEP_CLOSE:close_cashout:v1`);
   assert.equal(postCalls[1].idempotencyKey, `bot-cashout:${tableId}:${botB}:4:SWEEP_CLOSE:close_cashout:v1`);
-  assert.equal(postCalls[0].entries[0].amount, -120);
-  assert.equal(postCalls[1].entries[0].amount, -80);
+  assert.deepEqual(postCalls[0].entries, [
+    { accountType: "ESCROW", systemKey: `POKER_TABLE:${tableId}`, amount: -120 },
+    { accountType: "USER", amount: 120 },
+  ]);
+  assert.deepEqual(postCalls[1].entries, [
+    { accountType: "ESCROW", systemKey: `POKER_TABLE:${tableId}`, amount: -80 },
+    { accountType: "USER", amount: 80 },
+  ]);
 
   for (const botUserId of [botA, botB]) {
     const statusUpdateIdx = queries.findIndex(

@@ -24,6 +24,7 @@ const run = async () => {
     () => {}
   );
 
+  const tableId = "99999999-9999-4999-8999-999999999999";
   const botUserId = "11111111-1111-4111-8111-111111111111";
   const actorUserId = "00000000-0000-4000-8000-000000000001";
   await cashoutBotSeatIfNeeded(
@@ -37,7 +38,7 @@ const run = async () => {
       },
     },
     {
-      tableId: "99999999-9999-4999-8999-999999999999",
+      tableId,
       botUserId,
       seatNo: 7,
       bankrollSystemKey: "TREASURY",
@@ -50,6 +51,11 @@ const run = async () => {
   assert.equal(postCalls.length, 1);
   assert.equal(postCalls[0].userId, botUserId);
   assert.equal(postCalls[0].createdBy, actorUserId);
+  assert.equal(postCalls[0].txType, "TABLE_CASH_OUT");
+  assert.deepEqual(postCalls[0].entries, [
+    { accountType: "ESCROW", systemKey: `POKER_TABLE:${tableId}`, amount: -33 },
+    { accountType: "USER", amount: 33 },
+  ]);
 };
 
 run().catch((error) => {

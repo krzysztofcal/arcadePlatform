@@ -498,6 +498,10 @@ limit $1;`,
                   tableSkipped += 1;
                   continue;
                 }
+                await tx.unsafe("update public.poker_seats set status = 'INACTIVE' where table_id = $1 and user_id = $2 and is_bot = true;", [
+                  tableId,
+                  userId,
+                ]);
                 const botSeatRows = await tx.unsafe(
                   "select status, stack, seat_no from public.poker_seats where table_id = $1 and user_id = $2 limit 1 for update;",
                   [tableId, userId]
