@@ -59,6 +59,7 @@ run("node", ["tests/poker-start-hand.legacy-init-upgrade.test.mjs"], "poker-star
 run("node", ["tests/poker-act.behavior.test.mjs"], "poker-act-behavior");
 run("node", ["tests/poker-act.init-phase.test.mjs"], "poker-act-init-phase");
 run("node", ["tests/poker-sweep.behavior.test.mjs"], "poker-sweep-behavior");
+run("node", ["tests/poker-sweep.timeout-zero-amount-inactivates-seat.behavior.test.mjs"], "poker-sweep-timeout-zero-inactivate");
 run("node", ["tests/poker-sweep.bot-cashout-on-timeout.behavior.test.mjs"], "poker-sweep-bot-cashout-on-timeout-behavior");
 run("node", ["tests/poker-sweep.bot-timeout-skips-when-actor-missing.behavior.test.mjs"], "poker-sweep-bot-timeout-skips-when-actor-missing");
 run("node", ["tests/poker-sweep.bot-cashout-on-close.behavior.test.mjs"], "poker-sweep-bot-cashout-on-close-behavior");

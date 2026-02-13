@@ -238,15 +238,15 @@ export async function handler(event) {
             safeToClearStateStack = true;
           }
 
-          if (safeToClearStateStack) {
-            if (locked?.is_bot === true) {
+          if (locked?.is_bot === true) {
+            if (safeToClearStateStack) {
               await tx.unsafe("update public.poker_seats set status = 'INACTIVE' where table_id = $1 and user_id = $2;", [tableId, userId]);
-            } else {
-              await tx.unsafe(
-                "update public.poker_seats set status = 'INACTIVE', stack = 0 where table_id = $1 and user_id = $2;",
-                [tableId, userId]
-              );
             }
+          } else {
+            await tx.unsafe(
+              "update public.poker_seats set status = 'INACTIVE', stack = 0 where table_id = $1 and user_id = $2;",
+              [tableId, userId]
+            );
           }
 
           if (safeToClearStateStack && stateRow && currentState?.stacks && typeof currentState.stacks === "object") {
