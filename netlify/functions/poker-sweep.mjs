@@ -1,8 +1,10 @@
 import { baseHeaders, beginSql, klog } from "./_shared/supabase-admin.mjs";
-import { PRESENCE_TTL_SEC, TABLE_EMPTY_CLOSE_SEC, TABLE_SINGLETON_CLOSE_SEC } from "./_shared/poker-utils.mjs";
+import { PRESENCE_TTL_SEC, TABLE_EMPTY_CLOSE_SEC, TABLE_SINGLETON_CLOSE_SEC, isValidUuid } from "./_shared/poker-utils.mjs";
 import { postTransaction } from "./_shared/chips-ledger.mjs";
 import { isHoleCardsTableMissing } from "./_shared/poker-hole-cards-store.mjs";
 import { postHandSettlementToLedger } from "./_shared/poker-ledger-settlement.mjs";
+import { getBotConfig } from "./_shared/poker-bots.mjs";
+import { cashoutBotSeatIfNeeded } from "./_shared/poker-bot-cashout.mjs";
 
 const STALE_PENDING_CUTOFF_MINUTES = 10;
 const STALE_PENDING_LIMIT = 500;
@@ -32,6 +34,17 @@ const normalizeState = (value) => {
   }
   if (typeof value === "object") return value;
   return {};
+};
+
+
+const getSweepActorUserId = () => {
+  const actorUserId = String(process.env.POKER_SYSTEM_ACTOR_USER_ID || "").trim();
+  if (!isValidUuid(actorUserId)) {
+    const error = new Error("invalid_system_actor_user_id");
+    error.code = "invalid_system_actor_user_id";
+    throw error;
+  }
+  return actorUserId;
 };
 
 const isExpiredSeat = (value) => {
@@ -310,7 +323,7 @@ limit $1;`,
       try {
         const result = await beginSql(async (tx) => {
           const lockedRows = await tx.unsafe(
-            "select seat_no, status, stack, user_id from public.poker_seats where table_id = $1 for update;",
+            "select seat_no, status, stack, user_id, is_bot from public.poker_seats where table_id = $1 for update;",
             [tableId]
           );
           const stateRows = await tx.unsafe("select state from public.poker_state where table_id = $1 for update;", [tableId]);
@@ -343,6 +356,8 @@ limit $1;`,
           }
           let stateChanged = false;
           const nextStacks = { ...currentStacks };
+          const botConfig = getBotConfig();
+          const sweepActorUserId = getSweepActorUserId();
           for (const locked of lockedRows || []) {
             const userId = locked?.user_id;
             const seatNo = locked?.seat_no ?? null;
@@ -368,7 +383,38 @@ limit $1;`,
                 : seatStack != null
                   ? "seat"
                   : "none";
-            if (normalizedStack > 0) {
+            if (locked?.is_bot === true) {
+              try {
+                const botResult = await cashoutBotSeatIfNeeded(tx, {
+                  tableId,
+                  botUserId: userId,
+                  seatNo,
+                  bankrollSystemKey: botConfig.bankrollSystemKey,
+                  reason: "SWEEP_CLOSE",
+                  actorUserId: sweepActorUserId,
+                });
+                if (botResult?.amount > 0) {
+                  closeCashoutProcessed += 1;
+                } else {
+                  closeCashoutSkipped += 1;
+                }
+              } catch (error) {
+                klog("poker_close_cashout_fail", {
+                  tableId,
+                  userId,
+                  seatNo,
+                  error: error?.message || "unknown_error",
+                });
+                if (error && typeof error === "object") {
+                  error.closeCashoutLogged = true;
+                }
+                throw error;
+              }
+              if (Object.prototype.hasOwnProperty.call(nextStacks, userId)) {
+                delete nextStacks[userId];
+                stateChanged = true;
+              }
+            } else if (normalizedStack > 0) {
               try {
                 await postTransaction({
                   userId,
@@ -405,7 +451,7 @@ limit $1;`,
               klog("poker_close_cashout_skip", { tableId, userId, seatNo, amount: normalizedStack, stackSource });
               closeCashoutSkipped += 1;
             }
-            if (normalizedStack === 0 && Object.prototype.hasOwnProperty.call(nextStacks, userId)) {
+            if ((normalizedStack === 0 || locked?.is_bot === true) && Object.prototype.hasOwnProperty.call(nextStacks, userId)) {
               delete nextStacks[userId];
               stateChanged = true;
             }

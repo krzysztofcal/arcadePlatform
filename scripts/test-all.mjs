@@ -49,6 +49,7 @@ run("node", ["tests/poker-join.test.mjs"], "poker-join");
 run("node", ["tests/poker-sweep.test.mjs"], "poker-sweep");
 run("node", ["tests/poker-invariants.test.mjs"], "poker-invariants");
 run("node", ["tests/poker-leave.behavior.test.mjs"], "poker-leave-behavior");
+run("node", ["tests/poker-leave.bot-cashout.behavior.test.mjs"], "poker-leave-bot-cashout-behavior");
 run("node", ["tests/poker-join.behavior.test.mjs"], "poker-join-behavior");
 run("node", ["tests/poker-join.bot-seed.behavior.test.mjs"], "poker-join-bot-seed");
 run("node", ["tests/poker-heartbeat.behavior.test.mjs"], "poker-heartbeat-behavior");
@@ -57,6 +58,7 @@ run("node", ["tests/poker-start-hand.legacy-init-upgrade.test.mjs"], "poker-star
 run("node", ["tests/poker-act.behavior.test.mjs"], "poker-act-behavior");
 run("node", ["tests/poker-act.init-phase.test.mjs"], "poker-act-init-phase");
 run("node", ["tests/poker-sweep.behavior.test.mjs"], "poker-sweep-behavior");
+run("node", ["tests/poker-sweep.bot-cashout-on-close.behavior.test.mjs"], "poker-sweep-bot-cashout-on-close-behavior");
 run("node", ["tests/poker-sweep.cashout-authoritative.behavior.test.mjs"], "poker-sweep-cashout-authoritative");
 run("node", ["tests/poker-get-table.behavior.test.mjs"], "poker-get-table-behavior");
 run("node", ["tests/poker-get-table.bot-fields.behavior.test.mjs"], "poker-get-table-bot-fields-behavior");

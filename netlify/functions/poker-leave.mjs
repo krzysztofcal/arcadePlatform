@@ -4,6 +4,8 @@ import { postTransaction } from "./_shared/chips-ledger.mjs";
 import { normalizeRequestId } from "./_shared/poker-request-id.mjs";
 import { deletePokerRequest, ensurePokerRequest, storePokerRequestResult } from "./_shared/poker-idempotency.mjs";
 import { updatePokerStateOptimistic } from "./_shared/poker-state-write.mjs";
+import { getBotConfig } from "./_shared/poker-bots.mjs";
+import { cashoutBotSeatIfNeeded } from "./_shared/poker-bot-cashout.mjs";
 
 const REQUEST_PENDING_STALE_SEC = 30;
 
@@ -165,11 +167,12 @@ export async function handler(event) {
           !Object.prototype.hasOwnProperty.call(stacks, auth.userId);
 
         const seatRows = await tx.unsafe(
-          "select seat_no, status, stack from public.poker_seats where table_id = $1 and user_id = $2 for update;",
+          "select seat_no, status, stack, is_bot from public.poker_seats where table_id = $1 and user_id = $2 for update;",
           [tableId, auth.userId]
         );
         const seatRow = seatRows?.[0] || null;
         const seatNo = seatRow?.seat_no;
+        const isBotSeat = seatRow?.is_bot === true;
         if (alreadyLeft || !Number.isInteger(seatNo)) {
           if (seatRow) {
             await tx.unsafe("delete from public.poker_seats where table_id = $1 and user_id = $2;", [
@@ -198,7 +201,7 @@ export async function handler(event) {
         const stateStackRaw = currentState?.stacks?.[auth.userId];
         const stateStack = normalizeNonNegativeInt(Number(stateStackRaw));
         const seatStack = normalizeNonNegativeInt(Number(rawSeatStack));
-        const cashOutAmount = stateStack ?? seatStack ?? 0;
+        let cashOutAmount = stateStack ?? seatStack ?? 0;
         const isStackMissing = rawSeatStack == null;
         if (isStackMissing) {
           klog("poker_leave_stack_missing", { tableId, userId: auth.userId, seatNo });
@@ -207,7 +210,18 @@ export async function handler(event) {
           klog("poker_leave_stack_negative", { tableId, userId: auth.userId, seatNo, stack: stackValue });
         }
 
-        if (cashOutAmount > 0) {
+        if (isBotSeat) {
+          const botConfig = getBotConfig();
+          const botCashout = await cashoutBotSeatIfNeeded(tx, {
+            tableId,
+            botUserId: auth.userId,
+            seatNo,
+            bankrollSystemKey: botConfig.bankrollSystemKey,
+            reason: "LEAVE",
+            actorUserId: auth.userId,
+          });
+          cashOutAmount = botCashout?.amount > 0 ? botCashout.amount : 0;
+        } else if (cashOutAmount > 0) {
           const escrowSystemKey = `POKER_TABLE:${tableId}`;
           const idempotencyKey = requestId
             ? `poker:leave:${tableId}:${auth.userId}:${requestId}`

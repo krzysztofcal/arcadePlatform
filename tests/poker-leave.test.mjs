@@ -8,7 +8,7 @@ const read = (filePath) => fs.readFileSync(path.join(root, filePath), "utf8");
 const leaveSrc = read("netlify/functions/poker-leave.mjs");
 
 assert.ok(
-  /select seat_no, status, stack from public\.poker_seats[\s\S]*?for update;/.test(leaveSrc),
+  /select seat_no, status, stack, is_bot from public\.poker_seats[\s\S]*?for update;/.test(leaveSrc),
   "leave should lock seat row FOR UPDATE and load stack"
 );
 assert.ok(
@@ -32,8 +32,8 @@ assert.ok(
   "leave should normalize seat stack as fallback"
 );
 assert.ok(
-  /const cashOutAmount = stateStack \?\? seatStack \?\? 0;/.test(leaveSrc),
-  "leave should prefer state stack over seat stack and default to 0"
+  /let cashOutAmount = stateStack \?\? seatStack \?\? 0;/.test(leaveSrc),
+  "leave should initialize cashOutAmount from authoritative state/seat stack"
 );
 assert.ok(
   /const isStackMissing = rawSeatStack == null;/.test(leaveSrc),
@@ -44,8 +44,8 @@ assert.ok(
   "leave should only log missing stack when raw stack is null"
 );
 assert.ok(
-  /if \(cashOutAmount > 0\)[\s\S]*?TABLE_CASH_OUT/.test(leaveSrc),
-  "leave should cash out only when cashOutAmount > 0"
+  /if \(isBotSeat\)[\s\S]*?cashoutBotSeatIfNeeded[\s\S]*?else if \(cashOutAmount > 0\)[\s\S]*?TABLE_CASH_OUT/.test(leaveSrc),
+  "leave should use bot cashout helper first, then human cashout for positive stacks"
 );
 assert.ok(
   /poker:leave:\$\{tableId\}:\$\{auth\.userId\}:\$\{requestId\}/.test(leaveSrc),

@@ -96,6 +96,7 @@ const makeHandler = (postCalls, queries, klogEvents, options = {}) => {
     TABLE_EMPTY_CLOSE_SEC: 10,
     TABLE_SINGLETON_CLOSE_SEC: 21600,
     isHoleCardsTableMissing,
+    isValidUuid: () => true,
   });
   return handler;
 };
@@ -327,6 +328,7 @@ const runSettlementSkipsLegacyCashout = async () => {
     TABLE_EMPTY_CLOSE_SEC: 10,
     TABLE_SINGLETON_CLOSE_SEC: 21600,
     isHoleCardsTableMissing,
+    isValidUuid: () => true,
   });
 
   const first = await handler({ httpMethod: "POST", headers: { "x-sweep-secret": "secret" } });
@@ -382,6 +384,7 @@ const runInvalidSettlementFallsBackLegacyCashout = async () => {
     TABLE_EMPTY_CLOSE_SEC: 10,
     TABLE_SINGLETON_CLOSE_SEC: 21600,
     isHoleCardsTableMissing,
+    isValidUuid: () => true,
   });
 
   const response = await handler({ httpMethod: "POST", headers: { "x-sweep-secret": "secret" } });
@@ -435,6 +438,7 @@ const runSettlementPostFailureKeepsSeatActiveForRetry = async () => {
     TABLE_EMPTY_CLOSE_SEC: 10,
     TABLE_SINGLETON_CLOSE_SEC: 21600,
     isHoleCardsTableMissing,
+    isValidUuid: () => true,
   });
 
   const response = await handler({ httpMethod: "POST", headers: { "x-sweep-secret": "secret" } });
