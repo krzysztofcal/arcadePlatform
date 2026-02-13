@@ -19,6 +19,7 @@ const makeJoinHandler = ({
   tableMaxPlayers = 6,
   occupiedSeatRows = [{ seat_no: 2 }],
   alwaysSeatConflict = false,
+  buyInDuplicateOnce = false,
 }) =>
   loadPokerHandler("netlify/functions/poker-join.mjs", {
     baseHeaders: () => ({}),
@@ -68,6 +69,7 @@ const makeJoinHandler = ({
           }
           if (text.includes("from public.poker_seats") && text.includes("user_id = $2") && text.includes("limit 1")) {
             if (Number.isInteger(existingSeatNo)) return [{ seat_no: existingSeatNo }];
+            if (Number.isInteger(sideEffects.seatedUserSeatNo)) return [{ seat_no: sideEffects.seatedUserSeatNo }];
             return [];
           }
           if (
@@ -82,6 +84,7 @@ const makeJoinHandler = ({
           }
           if (text.includes("insert into public.poker_seats")) {
             sideEffects.seatInsert += 1;
+            if (Number.isInteger(params?.[2])) sideEffects.seatedUserSeatNo = params[2];
             if (alwaysSeatConflict) {
               const err = new Error("seat_taken");
               err.code = "23505";
@@ -137,7 +140,15 @@ const makeJoinHandler = ({
         },
       }),
     postTransaction: async () => {
-      sideEffects.ledger += 1;
+      sideEffects.ledgerAttempted = Number(sideEffects.ledgerAttempted || 0) + 1;
+      if (buyInDuplicateOnce && !sideEffects.buyInDuplicateRaised) {
+        sideEffects.buyInDuplicateRaised = true;
+        const err = new Error('duplicate key value violates unique constraint "chips_transactions_idempotency_key_unique"');
+        err.code = "23505";
+        err.constraint = "chips_transactions_idempotency_key_unique";
+        throw err;
+      }
+      sideEffects.ledgerSucceeded = Number(sideEffects.ledgerSucceeded || 0) + 1;
       return { transaction: { id: "tx-join" } };
     },
     klog: () => {},
@@ -154,7 +165,7 @@ const callJoin = (handler, requestId, overrides) =>
 const run = async () => {
   const requestStore = new Map();
   const queries = [];
-  const sideEffects = { seatInsert: 0, ledger: 0 };
+  const sideEffects = { seatInsert: 0, ledgerAttempted: 0, ledgerSucceeded: 0 };
   const handler = makeJoinHandler({ requestStore, queries, sideEffects });
 
   const first = await callJoin(handler, "join-1");
@@ -162,7 +173,7 @@ const run = async () => {
   const firstBody = JSON.parse(first.body);
   assert.equal(firstBody.ok, true);
   assert.equal(sideEffects.seatInsert, 1);
-  assert.equal(sideEffects.ledger, 1);
+  assert.equal(sideEffects.ledgerSucceeded, 1);
   const tableTouchCountAfterFirst = queries.filter((entry) =>
     entry.query.toLowerCase().includes("update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1")
   ).length;
@@ -183,7 +194,7 @@ const run = async () => {
   assert.equal(second.statusCode, 200);
   assert.deepEqual(JSON.parse(second.body), firstBody);
   assert.equal(sideEffects.seatInsert, 1, "replayed join should not re-run seat insert");
-  assert.equal(sideEffects.ledger, 1, "replayed join should not re-run ledger tx");
+  assert.equal(sideEffects.ledgerSucceeded, 1, "replayed join should not re-run ledger tx");
   const tableTouchCountAfterReplay = queries.filter((entry) =>
     entry.query.toLowerCase().includes("update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1")
   ).length;
@@ -197,7 +208,7 @@ const run = async () => {
 
   const pendingStore = new Map();
   const pendingQueries = [];
-  const pendingSideEffects = { seatInsert: 0, ledger: 0 };
+  const pendingSideEffects = { seatInsert: 0, ledgerAttempted: 0, ledgerSucceeded: 0 };
   const failingStoreHandler = makeJoinHandler({
     requestStore: pendingStore,
     queries: pendingQueries,
@@ -208,16 +219,16 @@ const run = async () => {
   const failed = await callJoin(failingStoreHandler, "join-pending");
   assert.equal(failed.statusCode, 500);
   assert.equal(pendingSideEffects.seatInsert, 1);
-  assert.equal(pendingSideEffects.ledger, 1);
+  assert.equal(pendingSideEffects.ledgerSucceeded, 1);
 
   const retry = await callJoin(makeJoinHandler({ requestStore: pendingStore, queries: [], sideEffects: pendingSideEffects }), "join-pending");
   assert.equal(retry.statusCode, 202);
   assert.deepEqual(JSON.parse(retry.body), { error: "request_pending", requestId: "join-pending" });
   assert.equal(pendingSideEffects.seatInsert, 1, "pending join should not re-run seat insert");
-  assert.equal(pendingSideEffects.ledger, 1, "pending join should not re-run ledger tx");
+  assert.equal(pendingSideEffects.ledgerSucceeded, 1, "pending join should not re-run ledger tx");
 
   const rejoinQueries = [];
-  const rejoinSideEffects = { seatInsert: 0, ledger: 0 };
+  const rejoinSideEffects = { seatInsert: 0, ledgerAttempted: 0, ledgerSucceeded: 0 };
   const rejoinHandler = makeJoinHandler({
     requestStore: new Map(),
     queries: rejoinQueries,
@@ -228,7 +239,7 @@ const run = async () => {
   assert.equal(rejoin.statusCode, 200);
   assert.equal(JSON.parse(rejoin.body).seatNo, 3);
   assert.equal(rejoinSideEffects.seatInsert, 0);
-  assert.equal(rejoinSideEffects.ledger, 0);
+  assert.equal(rejoinSideEffects.ledgerSucceeded, 0);
   const rejoinStateWrites = rejoinQueries.filter((entry) => entry.query.toLowerCase().includes("update public.poker_state"));
   assert.ok(rejoinStateWrites.length > 0, "rejoin should update poker_state");
   const rejoinStatePayload = rejoinStateWrites[0]?.params?.[1];
@@ -250,7 +261,7 @@ const run = async () => {
   assert.equal(rejoinBody.me.isSitOut, false);
 
   const conflictQueries = [];
-  const conflictSideEffects = { seatInsert: 0, ledger: 0, conflictSeatInsertUsed: false };
+  const conflictSideEffects = { seatInsert: 0, ledgerAttempted: 0, ledgerSucceeded: 0, conflictSeatInsertUsed: false };
   const conflictHandler = makeJoinHandler({
     requestStore: new Map(),
     queries: conflictQueries,
@@ -261,10 +272,10 @@ const run = async () => {
   assert.equal(conflictJoin.statusCode, 409);
   assert.deepEqual(JSON.parse(conflictJoin.body), { error: "seat_taken" });
   assert.equal(conflictSideEffects.seatInsert, 1, "non-autoSeat join should fail immediately on seat conflict");
-  assert.equal(conflictSideEffects.ledger, 0, "failed seat insert should not post ledger transaction");
+  assert.equal(conflictSideEffects.ledgerSucceeded, 0, "failed seat insert should not post ledger transaction");
 
   const autoSeatQueries = [];
-  const autoSeatSideEffects = { seatInsert: 0, ledger: 0, conflictSeatInsertUsed: false };
+  const autoSeatSideEffects = { seatInsert: 0, ledgerAttempted: 0, ledgerSucceeded: 0, conflictSeatInsertUsed: false };
   const autoSeatHandler = makeJoinHandler({
     requestStore: new Map(),
     queries: autoSeatQueries,
@@ -292,7 +303,7 @@ const run = async () => {
   const activeSeatIsOccupiedHandler = makeJoinHandler({
     requestStore: new Map(),
     queries: activeSeatQueries,
-    sideEffects: { seatInsert: 0, ledger: 0, conflictSeatInsertUsed: false },
+    sideEffects: { seatInsert: 0, ledgerAttempted: 0, ledgerSucceeded: 0, conflictSeatInsertUsed: false },
     conflictSeatInsertOnce: true,
     tableMaxPlayers: 6,
     occupiedSeatRows: [{ seat_no: 2, status: "ACTIVE" }],
@@ -320,11 +331,36 @@ const run = async () => {
   );
 
 
+  const duplicateSideEffects = { seatInsert: 0, ledgerAttempted: 0, ledgerSucceeded: 0, buyInDuplicateRaised: false };
+  const duplicateHandler = makeJoinHandler({
+    requestStore: new Map(),
+    queries: [],
+    sideEffects: duplicateSideEffects,
+    buyInDuplicateOnce: true,
+  });
+  const duplicateJoin = await callJoin(duplicateHandler, "join-dup-idempotency");
+  assert.equal(duplicateJoin.statusCode, 200);
+  assert.equal(JSON.parse(duplicateJoin.body).ok, true);
+  assert.equal(duplicateSideEffects.seatInsert, 1);
+  assert.equal(duplicateSideEffects.ledgerAttempted, 1);
+  assert.equal(duplicateSideEffects.ledgerSucceeded, 0);
+
+  const seatedSideEffects = { seatInsert: 0, ledgerAttempted: 0, ledgerSucceeded: 0 };
+  const seatedHandler = makeJoinHandler({ requestStore: new Map(), queries: [], sideEffects: seatedSideEffects });
+  const firstJoin = await callJoin(seatedHandler, "join-already-seated-1");
+  assert.equal(firstJoin.statusCode, 200);
+  assert.equal(seatedSideEffects.ledgerSucceeded, 1);
+  const secondJoin = await callJoin(seatedHandler, "join-already-seated-2");
+  assert.equal(secondJoin.statusCode, 200);
+  assert.equal(seatedSideEffects.ledgerSucceeded, 1, "already-seated join should not call buy-in transaction again");
+  assert.equal(JSON.parse(secondJoin.body).seatNo, JSON.parse(firstJoin.body).seatNo);
+
+
 
   const fullHandler = makeJoinHandler({
     requestStore: new Map(),
     queries: [],
-    sideEffects: { seatInsert: 0, ledger: 0 },
+    sideEffects: { seatInsert: 0, ledgerAttempted: 0, ledgerSucceeded: 0 },
     tableMaxPlayers: 2,
     occupiedSeatRows: [{ seat_no: 1 }, { seat_no: 2 }],
     alwaysSeatConflict: true,
@@ -333,7 +369,7 @@ const run = async () => {
   assert.equal(fullJoin.statusCode, 409);
   assert.deepEqual(JSON.parse(fullJoin.body), { error: "table_full" });
 
-  const unknownConflictSideEffects = { seatInsert: 0, ledger: 0, conflictUnknownUniqueUsed: false };
+  const unknownConflictSideEffects = { seatInsert: 0, ledgerAttempted: 0, ledgerSucceeded: 0, conflictUnknownUniqueUsed: false };
   const unknownConflictHandler = makeJoinHandler({
     requestStore: new Map(),
     queries: [],
