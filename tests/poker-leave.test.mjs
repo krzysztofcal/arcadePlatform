@@ -8,7 +8,7 @@ const read = (filePath) => fs.readFileSync(path.join(root, filePath), "utf8");
 const leaveSrc = read("netlify/functions/poker-leave.mjs");
 
 assert.ok(
-  /select seat_no, status, stack, is_bot from public\.poker_seats[\s\S]*?for update;/.test(leaveSrc),
+  /select seat_no, status, stack from public\.poker_seats[\s\S]*?for update;/.test(leaveSrc),
   "leave should lock seat row FOR UPDATE and load stack"
 );
 assert.ok(
@@ -44,24 +44,16 @@ assert.ok(
   "leave should only log missing stack when raw stack is null"
 );
 assert.ok(
-  /if \(isBotSeat\)[\s\S]*?cashoutBotSeatIfNeeded[\s\S]*?else if \(cashOutAmount > 0\)[\s\S]*?TABLE_CASH_OUT/.test(leaveSrc),
-  "leave should use bot cashout helper first, then human cashout for positive stacks"
+  /if \(cashOutAmount > 0\) \{[\s\S]*?TABLE_CASH_OUT/.test(leaveSrc),
+  "leave should cash out only when positive amount exists"
 );
 assert.ok(
   /poker:leave:\$\{tableId\}:\$\{auth\.userId\}:\$\{requestId\}/.test(leaveSrc),
   "leave should scope requestId idempotency by tableId and userId"
 );
 
-assert.ok(
-  /const systemActorUserId = String\(process\.env\.POKER_SYSTEM_ACTOR_USER_ID \|\| ""\)\.trim\(\);[\s\S]*?if \(!isValidUuid\(systemActorUserId\)\)/.test(leaveSrc),
-  "leave bot path should validate POKER_SYSTEM_ACTOR_USER_ID"
-);
-assert.ok(
-  /actorUserId: systemActorUserId,[\s\S]*?idempotencyKeySuffix: requestId/.test(leaveSrc),
-  "leave bot path should use system actor and request-based idempotency suffix"
-);
-
-assert.ok(
-  /if \(!requestId\) \{\s*throw makeError\(400, "request_id_required"\);/.test(leaveSrc),
-  "leave bot path should require requestId"
-);
+assert.ok(!/POKER_SYSTEM_ACTOR_USER_ID/.test(leaveSrc), "leave should not depend on system actor env var");
+assert.ok(!/cashoutBotSeatIfNeeded/.test(leaveSrc), "leave should not use bot cashout helper");
+assert.ok(!/ensureBotSeatInactiveForCashout/.test(leaveSrc), "leave should not use bot inactive helper");
+assert.ok(!/getBotConfig/.test(leaveSrc), "leave should not read bot config");
+assert.ok(!/is_bot/.test(leaveSrc), "leave should not branch on is_bot");

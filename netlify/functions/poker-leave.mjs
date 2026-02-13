@@ -4,8 +4,6 @@ import { postTransaction } from "./_shared/chips-ledger.mjs";
 import { normalizeRequestId } from "./_shared/poker-request-id.mjs";
 import { deletePokerRequest, ensurePokerRequest, storePokerRequestResult } from "./_shared/poker-idempotency.mjs";
 import { updatePokerStateOptimistic } from "./_shared/poker-state-write.mjs";
-import { getBotConfig } from "./_shared/poker-bots.mjs";
-import { cashoutBotSeatIfNeeded, ensureBotSeatInactiveForCashout } from "./_shared/poker-bot-cashout.mjs";
 
 const REQUEST_PENDING_STALE_SEC = 30;
 
@@ -167,12 +165,11 @@ export async function handler(event) {
           !Object.prototype.hasOwnProperty.call(stacks, auth.userId);
 
         const seatRows = await tx.unsafe(
-          "select seat_no, status, stack, is_bot from public.poker_seats where table_id = $1 and user_id = $2 for update;",
+          "select seat_no, status, stack from public.poker_seats where table_id = $1 and user_id = $2 for update;",
           [tableId, auth.userId]
         );
         const seatRow = seatRows?.[0] || null;
         const seatNo = seatRow?.seat_no;
-        const isBotSeat = seatRow?.is_bot === true;
         if (alreadyLeft || !Number.isInteger(seatNo)) {
           if (seatRow) {
             await tx.unsafe("delete from public.poker_seats where table_id = $1 and user_id = $2;", [
@@ -210,47 +207,7 @@ export async function handler(event) {
           klog("poker_leave_stack_negative", { tableId, userId: auth.userId, seatNo, stack: stackValue });
         }
 
-        if (isBotSeat) {
-          if (!requestId) {
-            throw makeError(400, "request_id_required");
-          }
-          const systemActorUserId = String(process.env.POKER_SYSTEM_ACTOR_USER_ID || "").trim();
-          if (!isValidUuid(systemActorUserId)) {
-            throw makeError(500, "invalid_system_actor_user_id");
-          }
-          const botInactive = await ensureBotSeatInactiveForCashout(tx, { tableId, botUserId: auth.userId });
-          if (!botInactive?.ok) {
-            if (botInactive?.skipped && botInactive?.reason === "seat_missing") {
-              const resultPayload = {
-                ok: true,
-                tableId,
-                cashedOut: 0,
-                seatNo: Number.isInteger(seatNo) ? seatNo : null,
-                status: "already_left",
-              };
-              await storePokerRequestResult(tx, {
-                tableId,
-                userId: auth.userId,
-                requestId,
-                kind: "LEAVE",
-                result: resultPayload,
-              });
-              return resultPayload;
-            }
-            throw makeError(409, "bot_seat_invalid");
-          }
-          const botConfig = getBotConfig();
-          const botCashout = await cashoutBotSeatIfNeeded(tx, {
-            tableId,
-            botUserId: auth.userId,
-            seatNo,
-            bankrollSystemKey: botConfig.bankrollSystemKey,
-            reason: "LEAVE",
-            actorUserId: systemActorUserId,
-            idempotencyKeySuffix: requestId,
-          });
-          cashOutAmount = botCashout?.amount > 0 ? botCashout.amount : 0;
-        } else if (cashOutAmount > 0) {
+        if (cashOutAmount > 0) {
           const escrowSystemKey = `POKER_TABLE:${tableId}`;
           const idempotencyKey = requestId
             ? `poker:leave:${tableId}:${auth.userId}:${requestId}`
