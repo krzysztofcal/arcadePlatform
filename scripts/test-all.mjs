@@ -62,6 +62,7 @@ run("node", ["tests/poker-act.init-phase.test.mjs"], "poker-act-init-phase");
 run("node", ["tests/poker-sweep.behavior.test.mjs"], "poker-sweep-behavior");
 run("node", ["tests/poker-sweep.bot-cashout-on-timeout.behavior.test.mjs"], "poker-sweep-bot-cashout-on-timeout-behavior");
 run("node", ["tests/poker-sweep.bot-cashout-on-close.behavior.test.mjs"], "poker-sweep-bot-cashout-on-close-behavior");
+run("node", ["tests/poker-sweep.bot-close-does-not-clear-state-when-not-safe.behavior.test.mjs"], "poker-sweep-bot-close-no-clear-when-not-safe");
 run("node", ["tests/poker-sweep.cashout-authoritative.behavior.test.mjs"], "poker-sweep-cashout-authoritative");
 run("node", ["tests/poker-get-table.behavior.test.mjs"], "poker-get-table-behavior");
 run("node", ["tests/poker-get-table.bot-fields.behavior.test.mjs"], "poker-get-table-bot-fields-behavior");

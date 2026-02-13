@@ -535,9 +535,11 @@ limit $1;`,
               klog("poker_close_cashout_skip", { tableId, userId, seatNo, amount: normalizedStack, stackSource });
               tableSkipped += 1;
             }
-            if (normalizedStack === 0 && Object.prototype.hasOwnProperty.call(nextStacks, userId)) {
-              delete nextStacks[userId];
-              stateChanged = true;
+            if (locked?.is_bot !== true) {
+              if (normalizedStack === 0 && Object.prototype.hasOwnProperty.call(nextStacks, userId)) {
+                delete nextStacks[userId];
+                stateChanged = true;
+              }
             }
             if (locked?.is_bot === true) {
               await tx.unsafe("update public.poker_seats set status = 'INACTIVE' where table_id = $1 and seat_no = $2;", [
