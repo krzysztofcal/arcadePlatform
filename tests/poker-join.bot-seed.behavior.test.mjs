@@ -180,6 +180,7 @@ const run = async () => {
     const botSeedLedger = ctx.ledgerCalls.filter((entry) => entry.metadata?.reason === "BOT_SEED_BUY_IN");
     assert.equal(botSeedLedger.length, 2);
     for (const ledgerCall of botSeedLedger) {
+      assert.equal(ledgerCall.userId, null);
       assert.equal(Array.isArray(ledgerCall.entries), true);
       assert.equal(ledgerCall.entries.length, 2);
       assert.equal(ledgerCall.entries.filter((entry) => entry.accountType === "USER").length, 0);

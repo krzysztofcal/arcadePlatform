@@ -170,7 +170,7 @@ returning seat_no;
 
     try {
       await postTransaction({
-        userId: botUserId,
+        userId: null,
         txType: "TABLE_BUY_IN",
         idempotencyKey: `bot-seed-buyin:${tableId}:${seatNo}`,
         metadata: {
