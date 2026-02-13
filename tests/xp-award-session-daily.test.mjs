@@ -168,7 +168,7 @@ async function testZeroDeltaAdvancesLastSync() {
 }
 
 async function testMidnightRollover() {
-  const beforeReset = Date.UTC(2024, 0, 2, 23, 50, 0); // 10 min before UTC midnight
+  const beforeReset = Date.UTC(2024, 0, 3, 1, 50, 0); // 02:50 local (UTC+1), before Warsaw reset
   const handler = await createHandler('midnight', { dailyCap: 400, sessionCap: 250 });
   const base = { userId: 'midnight-user', sessionId: 'midnight-session', ts: beforeReset };
 
@@ -181,7 +181,7 @@ async function testMidnightRollover() {
     assert.equal(dayOne.payload.remaining, 250);
     expectCookieTotal(dayOne.cookie, 150);
 
-    const afterReset = Date.UTC(2024, 0, 3, 0, 10, 0); // 10 min after UTC midnight
+    const afterReset = Date.UTC(2024, 0, 3, 2, 10, 0); // 03:10 local, after Warsaw reset
     Date.now = () => afterReset;
     const dayTwo = await invoke(handler, { ...base, ts: afterReset, delta: 200 });
     assert.equal(dayTwo.payload.totalToday, 100);

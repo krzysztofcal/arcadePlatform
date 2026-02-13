@@ -17,7 +17,7 @@ import crypto from "node:crypto";
 import { store, atomicRateLimitIncr } from "./_shared/store-upstash.mjs";
 import { klog } from "./_shared/supabase-admin.mjs";
 import { verifySessionToken, validateServerSession, touchSession } from "./start-session.mjs";
-import { nextUtcMidnightMs, utcDayKey } from "./_shared/time-utils.mjs";
+import { nextWarsawResetMs, warsawDayKey } from "./_shared/time-utils.mjs";
 
 // ============================================================================
 // Configuration Constants
@@ -250,9 +250,9 @@ function generateFingerprint(headers) {
   return hash(`${ua}|${lang}|${enc}`).slice(0, 16);
 }
 
-const getDailyKey = (ms = Date.now()) => utcDayKey(ms);
+const getDailyKey = (ms = Date.now()) => warsawDayKey(ms);
 
-const getNextResetEpoch = (ms = Date.now()) => nextUtcMidnightMs(ms);
+const getNextResetEpoch = (ms = Date.now()) => nextWarsawResetMs(ms);
 
 // Redis Keys
 const keyDaily = (u, day = getDailyKey()) => `${KEY_NS}:daily:${u}:${day}`;

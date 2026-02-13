@@ -2,13 +2,13 @@ import crypto from "node:crypto";
 import { store, saveUserProfile, atomicRateLimitIncr } from "./_shared/store-upstash.mjs";
 import { klog } from "./_shared/supabase-admin.mjs";
 import { verifySessionToken, validateServerSession, touchSession } from "./start-session.mjs";
-import { nextUtcMidnightMs, utcDayKey } from "./_shared/time-utils.mjs";
+import { nextWarsawResetMs, warsawDayKey } from "./_shared/time-utils.mjs";
 
 const XP_DAY_COOKIE = "xp_day";
 
-const getDailyKey = (ms = Date.now()) => utcDayKey(ms);
+const getDailyKey = (ms = Date.now()) => warsawDayKey(ms);
 
-const getNextResetEpoch = (ms = Date.now()) => nextUtcMidnightMs(ms);
+const getNextResetEpoch = (ms = Date.now()) => nextWarsawResetMs(ms);
 
 const asNumber = (raw, fallback) => {
   if (raw == null) return fallback;

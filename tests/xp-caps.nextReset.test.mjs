@@ -1,19 +1,26 @@
 import assert from 'node:assert/strict';
-import { nextUtcMidnightMs, utcDayKey } from '../netlify/functions/_shared/time-utils.mjs';
+import { nextWarsawResetMs, warsawDayKey } from '../netlify/functions/_shared/time-utils.mjs';
 
 const HOUR_MS = 60 * 60 * 1000;
 
 function runCase(nowIso, expectedDayKey) {
   const nowMs = Date.parse(nowIso);
-  const nextResetMs = nextUtcMidnightMs(nowMs);
+  const nextResetMs = nextWarsawResetMs(nowMs);
 
   assert(nextResetMs > nowMs, 'nextReset must be in the future');
   assert(nextResetMs - nowMs <= 24 * HOUR_MS, 'nextReset must be <= 24h from now');
-  assert.equal(utcDayKey(nowMs), expectedDayKey, 'dayKey must use UTC date');
+  assert.equal(warsawDayKey(nowMs), expectedDayKey, 'dayKey must follow Warsaw 03:00 reset semantics');
 }
 
-runCase('2026-02-12T10:15:00.000Z', '2026-02-12');
-runCase('2026-03-29T23:59:59.000Z', '2026-03-29');
-runCase('2026-10-25T00:30:00.000Z', '2026-10-25');
+// Winter: before 03:00 Warsaw belongs to previous day key
+runCase('2026-02-12T01:15:00.000Z', '2026-02-11');
 
-console.log('xp-caps nextReset UTC invariant tests passed');
+// DST start (last Sunday in March): around jump
+runCase('2026-03-29T00:30:00.000Z', '2026-03-28');
+runCase('2026-03-29T02:30:00.000Z', '2026-03-29');
+
+// DST end (last Sunday in October): around overlap
+runCase('2026-10-25T00:30:00.000Z', '2026-10-24');
+runCase('2026-10-25T02:30:00.000Z', '2026-10-25');
+
+console.log('xp-caps nextReset Warsaw invariant tests passed');
