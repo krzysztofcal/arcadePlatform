@@ -163,9 +163,12 @@ export async function handler(event) {
                 : "none";
 
           let effectiveAmount = amount;
+          let safeToClearStateStack = false;
+          let botResult = null;
           if (usableSettlement) {
             try {
               await postHandSettlementToLedger({ tableId, handSettlement, postTransaction, klog, tx });
+              safeToClearStateStack = true;
             } catch (error) {
               klog("poker_settlement_ledger_post_failed", {
                 tableId,
@@ -183,7 +186,7 @@ export async function handler(event) {
               if (!inactiveResult?.ok) {
                 throw new Error("bot_seat_invalid");
               }
-              const botResult = await cashoutBotSeatIfNeeded(tx, {
+              botResult = await cashoutBotSeatIfNeeded(tx, {
                 tableId,
                 botUserId: userId,
                 seatNo: locked.seat_no,
@@ -193,6 +196,11 @@ export async function handler(event) {
                 idempotencyKeySuffix: `timeout_cashout:v1:${stateVersionSuffix}`,
               });
               effectiveAmount = botResult?.amount > 0 ? botResult.amount : 0;
+              safeToClearStateStack =
+                botResult?.cashedOut === true ||
+                botResult?.amount > 0 ||
+                botResult?.reason === "non_positive_stack" ||
+                (botResult?.amount === 0 && botResult?.reason !== "active_seat");
             } catch (error) {
               klog("poker_timeout_cashout_bot_fail", {
                 tableId,
@@ -219,18 +227,21 @@ export async function handler(event) {
               createdBy: userId,
               tx,
             });
+            safeToClearStateStack = true;
           }
 
-          if (locked?.is_bot === true) {
-            await tx.unsafe("update public.poker_seats set status = 'INACTIVE' where table_id = $1 and user_id = $2;", [tableId, userId]);
-          } else {
-            await tx.unsafe(
-              "update public.poker_seats set status = 'INACTIVE', stack = 0 where table_id = $1 and user_id = $2;",
-              [tableId, userId]
-            );
+          if (safeToClearStateStack) {
+            if (locked?.is_bot === true) {
+              await tx.unsafe("update public.poker_seats set status = 'INACTIVE' where table_id = $1 and user_id = $2;", [tableId, userId]);
+            } else {
+              await tx.unsafe(
+                "update public.poker_seats set status = 'INACTIVE', stack = 0 where table_id = $1 and user_id = $2;",
+                [tableId, userId]
+              );
+            }
           }
 
-          if (stateRow && currentState?.stacks && typeof currentState.stacks === "object") {
+          if (safeToClearStateStack && stateRow && currentState?.stacks && typeof currentState.stacks === "object") {
             const nextStacks = { ...currentState.stacks };
             if (Object.prototype.hasOwnProperty.call(nextStacks, userId)) {
               delete nextStacks[userId];
@@ -464,7 +475,7 @@ limit $1;`,
                 botResult?.cashedOut === true ||
                 botResult?.amount > 0 ||
                 botResult?.reason === "non_positive_stack" ||
-                botResult?.amount === 0;
+                (botResult?.amount === 0 && botResult?.reason !== "active_seat");
               if (botSafeToClearState) {
                 if (Object.prototype.hasOwnProperty.call(nextStacks, userId)) {
                   delete nextStacks[userId];

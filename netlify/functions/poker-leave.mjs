@@ -220,6 +220,23 @@ export async function handler(event) {
           }
           const botInactive = await ensureBotSeatInactiveForCashout(tx, { tableId, botUserId: auth.userId });
           if (!botInactive?.ok) {
+            if (botInactive?.skipped && botInactive?.reason === "seat_missing") {
+              const resultPayload = {
+                ok: true,
+                tableId,
+                cashedOut: 0,
+                seatNo: Number.isInteger(seatNo) ? seatNo : null,
+                status: "already_left",
+              };
+              await storePokerRequestResult(tx, {
+                tableId,
+                userId: auth.userId,
+                requestId,
+                kind: "LEAVE",
+                result: resultPayload,
+              });
+              return resultPayload;
+            }
             throw makeError(409, "bot_seat_invalid");
           }
           const botConfig = getBotConfig();

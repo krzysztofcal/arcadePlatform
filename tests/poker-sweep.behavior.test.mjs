@@ -303,7 +303,7 @@ const runSettlementSkipsLegacyCashout = async () => {
             return [{ seat_no: seatNo, status: "ACTIVE", stack: 123, last_seen_at: new Date(0) }];
           }
           if (text.includes("from public.poker_state where table_id") && text.includes("for update")) {
-            return [{ state: JSON.stringify(settledState) }];
+            return [{ version: 7, state: JSON.stringify(settledState) }];
           }
           if (text.includes("delete from public.poker_requests")) return [];
           if (text.includes("update public.poker_seats set status = 'inactive', stack = 0")) return [];
