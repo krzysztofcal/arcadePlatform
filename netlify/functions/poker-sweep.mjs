@@ -196,6 +196,24 @@ export async function handler(event) {
                 stackSource,
               };
             }
+            await tx.unsafe("update public.poker_seats set status = 'INACTIVE' where table_id = $1 and user_id = $2 and is_bot = true;", [
+              tableId,
+              userId,
+            ]);
+            const botStatusRows = await tx.unsafe(
+              "select status, seat_no from public.poker_seats where table_id = $1 and user_id = $2 and is_bot = true limit 1 for update;",
+              [tableId, userId]
+            );
+            const botStatus = botStatusRows?.[0] || null;
+            if (botStatus?.status === "ACTIVE") {
+              klog("poker_timeout_cashout_bot_skip", {
+                tableId,
+                userId,
+                seatNo: locked.seat_no ?? null,
+                reason: "failed_to_inactivate",
+              });
+              return { skipped: true, seatNo: locked.seat_no ?? null, reason: "failed_to_inactivate", isBot: true, amount: 0, stackSource };
+            }
             if (!sweepActorUserId) {
               klog("poker_timeout_cashout_bot_skip", {
                 tableId,
@@ -486,14 +504,19 @@ limit $1;`,
                   tableSkipped += 1;
                   continue;
                 }
-                if (locked?.status === "ACTIVE" && inactiveResult?.changed !== true) {
+                const botSeatRows = await tx.unsafe(
+                  "select status, stack, seat_no from public.poker_seats where table_id = $1 and user_id = $2 limit 1 for update;",
+                  [tableId, userId]
+                );
+                const botSeat = botSeatRows?.[0] || null;
+                if (botSeat?.status === "ACTIVE") {
                   klog("poker_close_cashout_skip", {
                     tableId,
                     userId,
                     seatNo,
                     amount: normalizedStack,
                     stackSource,
-                    reason: "bot_still_active",
+                    reason: "failed_to_inactivate",
                   });
                   tableSkipped += 1;
                   continue;
