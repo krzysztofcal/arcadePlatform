@@ -362,7 +362,7 @@ const runInvalidSettlementFallsBackLegacyCashout = async () => {
             return [{ seat_no: seatNo, status: "ACTIVE", stack: 99, last_seen_at: new Date(0) }];
           }
           if (text.includes("from public.poker_state where table_id") && text.includes("for update")) {
-            return [{ state: JSON.stringify({ handSettlement: { handId: "bad-no-payouts" }, stacks: { [userId]: 88 } }) }];
+            return [{ version: 7, state: JSON.stringify({ handSettlement: { handId: "bad-no-payouts" }, stacks: { [userId]: 88 } }) }];
           }
           if (text.includes("update public.poker_seats set status = 'inactive', stack = 0")) return [];
           if (text.includes("update public.poker_state set state")) return [];
@@ -415,7 +415,7 @@ const runSettlementPostFailureKeepsSeatActiveForRetry = async () => {
             return [{ seat_no: seatNo, status: "ACTIVE", stack: 100, last_seen_at: new Date(0) }];
           }
           if (text.includes("from public.poker_state where table_id") && text.includes("for update")) {
-            return [{ state: JSON.stringify({ handSettlement: { handId: "h-boom", payouts: { [userId]: 50 } }, stacks: { [userId]: 100 } }) }];
+            return [{ version: 7, state: JSON.stringify({ handSettlement: { handId: "h-boom", payouts: { [userId]: 50 } }, stacks: { [userId]: 100 } }) }];
           }
           if (text.includes("update public.poker_seats set status = 'inactive', stack = 0")) return [];
           if (text.includes("select t.id") && text.includes("stack > 0")) return [];

@@ -437,8 +437,9 @@ limit $1;`,
                   ? "seat"
                   : "none";
             if (locked?.is_bot === true) {
+              let botResult = null;
               try {
-                const botResult = await cashoutBotSeatIfNeeded(tx, {
+                botResult = await cashoutBotSeatIfNeeded(tx, {
                   tableId,
                   botUserId: userId,
                   seatNo,
@@ -447,11 +448,6 @@ limit $1;`,
                   actorUserId: sweepActorUserId,
                   idempotencyKeySuffix: `close_cashout:v1:${stateVersionSuffix}`,
                 });
-                if (botResult?.amount > 0) {
-                  tableProcessed += 1;
-                } else {
-                  tableSkipped += 1;
-                }
               } catch (error) {
                 klog("poker_close_cashout_fail", {
                   tableId,
@@ -464,9 +460,32 @@ limit $1;`,
                 }
                 throw error;
               }
-              if (Object.prototype.hasOwnProperty.call(nextStacks, userId)) {
-                delete nextStacks[userId];
-                stateChanged = true;
+              const botSafeToClearState =
+                botResult?.cashedOut === true ||
+                botResult?.amount > 0 ||
+                botResult?.reason === "non_positive_stack" ||
+                botResult?.amount === 0;
+              if (botSafeToClearState) {
+                if (Object.prototype.hasOwnProperty.call(nextStacks, userId)) {
+                  delete nextStacks[userId];
+                  stateChanged = true;
+                }
+                if (botResult?.amount > 0 || botResult?.cashedOut === true) {
+                  tableProcessed += 1;
+                } else {
+                  tableSkipped += 1;
+                }
+              } else {
+                klog("poker_close_cashout_skip", {
+                  tableId,
+                  userId,
+                  seatNo,
+                  amount: botResult?.amount ?? normalizedStack,
+                  stackSource,
+                  reason: botResult?.reason || "bot_not_safe_to_clear",
+                });
+                tableSkipped += 1;
+                continue;
               }
             } else if (normalizedStack > 0) {
               try {
@@ -505,7 +524,7 @@ limit $1;`,
               klog("poker_close_cashout_skip", { tableId, userId, seatNo, amount: normalizedStack, stackSource });
               tableSkipped += 1;
             }
-            if ((normalizedStack === 0 || locked?.is_bot === true) && Object.prototype.hasOwnProperty.call(nextStacks, userId)) {
+            if (normalizedStack === 0 && Object.prototype.hasOwnProperty.call(nextStacks, userId)) {
               delete nextStacks[userId];
               stateChanged = true;
             }

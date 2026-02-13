@@ -33,6 +33,7 @@ run("node", ["tests/favorites-service.test.mjs"], "favorites-service");
 run("node", ["tests/poker-stakes.test.mjs"], "poker-stakes");
 run("node", ["tests/poker-bots.unit.test.mjs"], "poker-bots-unit");
 run("node", ["tests/poker-bot-cashout.active-seat.unit.test.mjs"], "poker-bot-cashout-active-seat-unit");
+run("node", ["tests/poker-bot-cashout.invalid-seatno.unit.test.mjs"], "poker-bot-cashout-invalid-seatno-unit");
 run("node", ["tests/poker-stakes-ui.test.mjs"], "poker-stakes-ui");
 run("node", ["tests/poker-create-table.stakes.test.mjs"], "poker-create-table-stakes");
 run("node", ["tests/poker-phase1.test.mjs"], "poker-phase1");

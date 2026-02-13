@@ -49,16 +49,21 @@ export async function cashoutBotSeatIfNeeded(
   }
 
   const effectiveSeatNo = Number.isInteger(seat.seat_no) ? seat.seat_no : seatNo;
+  if (!Number.isInteger(effectiveSeatNo)) {
+    const error = new Error("invalid_seat_no");
+    error.code = "invalid_seat_no";
+    throw error;
+  }
   if (seat.status === "ACTIVE") {
     klog("poker_bot_cashout_skip", {
       tableId,
       botUserId,
-      seatNo: effectiveSeatNo ?? null,
+      seatNo: effectiveSeatNo,
       reason: "active_seat",
       amount: 0,
       cause: reason,
     });
-    return { ok: true, skipped: true, reason: "active_seat", amount: 0, seatNo: effectiveSeatNo ?? null };
+    return { ok: true, skipped: true, reason: "active_seat", amount: 0, seatNo: effectiveSeatNo };
   }
 
   const amount = normalizeStack(seat.stack);
@@ -66,7 +71,7 @@ export async function cashoutBotSeatIfNeeded(
     klog("poker_bot_cashout_skip", {
       tableId,
       botUserId,
-      seatNo: effectiveSeatNo ?? null,
+      seatNo: effectiveSeatNo,
       reason: "non_positive_stack",
       amount,
       cause: reason,
@@ -79,7 +84,7 @@ export async function cashoutBotSeatIfNeeded(
     klog("poker_bot_cashout_failed", {
       tableId,
       botUserId,
-      seatNo: effectiveSeatNo ?? null,
+      seatNo: effectiveSeatNo,
       amount,
       cause: reason,
       code: "invalid_actor_user_id",
@@ -94,7 +99,7 @@ export async function cashoutBotSeatIfNeeded(
     klog("poker_bot_cashout_failed", {
       tableId,
       botUserId,
-      seatNo: effectiveSeatNo ?? null,
+      seatNo: effectiveSeatNo,
       amount,
       cause: reason,
       code: "invalid_idempotency_suffix",
@@ -131,10 +136,10 @@ export async function cashoutBotSeatIfNeeded(
   klog("poker_bot_cashout_ok", {
     tableId,
     botUserId,
-    seatNo: effectiveSeatNo ?? null,
+    seatNo: effectiveSeatNo,
     amount,
     cause: safeReason,
   });
 
-  return { ok: true, cashedOut: true, amount, seatNo: effectiveSeatNo ?? null };
+  return { ok: true, cashedOut: true, amount, seatNo: effectiveSeatNo };
 }
