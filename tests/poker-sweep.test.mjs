@@ -8,7 +8,7 @@ const read = (filePath) => fs.readFileSync(path.join(root, filePath), "utf8");
 const sweepSrc = read("netlify/functions/poker-sweep.mjs");
 
 assert.ok(
-  /select seat_no, status, stack, last_seen_at from public\.poker_seats[\s\S]*?for update;/.test(sweepSrc),
+  /select seat_no, status, stack, last_seen_at, is_bot from public\.poker_seats[\s\S]*?for update;/.test(sweepSrc),
   "sweep should lock seat rows before timeout cash-out"
 );
 assert.ok(sweepSrc.includes("EXPIRED_SEATS_LIMIT"), "sweep should define EXPIRED_SEATS_LIMIT");
@@ -75,8 +75,11 @@ assert.ok(
 assert.ok(
   sweepSrc.includes("poker_timeout_cashout_ok") &&
     sweepSrc.includes("poker_timeout_cashout_skip") &&
-    sweepSrc.includes("poker_timeout_cashout_fail"),
-  "sweep should log timeout cash-out outcomes"
+    sweepSrc.includes("poker_timeout_cashout_fail") &&
+    sweepSrc.includes("poker_timeout_cashout_bot_ok") &&
+    sweepSrc.includes("poker_timeout_cashout_bot_skip") &&
+    sweepSrc.includes("poker_timeout_cashout_bot_fail"),
+  "sweep should log timeout cash-out outcomes for human and bot paths"
 );
 assert.ok(sweepSrc.includes("poker_sweep_timeout_summary"), "sweep should log timeout summary");
 assert.ok(
@@ -102,4 +105,9 @@ assert.ok(sweepSrc.includes("poker_sweep_close_cashout_summary"), "sweep should 
 assert.ok(
   sweepSrc.includes("close_cashout:v1:${stateVersionSuffix}"),
   "sweep bot close cashout idempotency should include state-version suffix"
+);
+
+assert.ok(
+  sweepSrc.includes("timeout_cashout:v1:${stateVersionSuffix}"),
+  "sweep bot timeout cashout idempotency should include state-version suffix"
 );

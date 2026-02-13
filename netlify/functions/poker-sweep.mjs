@@ -126,7 +126,7 @@ export async function handler(event) {
       try {
         const processed = await beginSql(async (tx) => {
           const lockedRows = await tx.unsafe(
-            "select seat_no, status, stack, last_seen_at from public.poker_seats where table_id = $1 and user_id = $2 for update;",
+            "select seat_no, status, stack, last_seen_at, is_bot from public.poker_seats where table_id = $1 and user_id = $2 for update;",
             [tableId, userId]
           );
           const locked = lockedRows?.[0] || null;
@@ -162,6 +162,7 @@ export async function handler(event) {
                 ? "seat"
                 : "none";
 
+          let effectiveAmount = amount;
           if (usableSettlement) {
             try {
               await postHandSettlementToLedger({ tableId, handSettlement, postTransaction, klog, tx });
@@ -173,6 +174,32 @@ export async function handler(event) {
                 source: "timeout_cashout",
               });
               return { skipped: true, seatNo: locked.seat_no, reason: "settlement_post_failed" };
+            }
+          } else if (locked?.is_bot === true) {
+            const botConfig = getBotConfig();
+            const sweepActorUserId = getSweepActorUserId();
+            try {
+              const botResult = await cashoutBotSeatIfNeeded(tx, {
+                tableId,
+                botUserId: userId,
+                seatNo: locked.seat_no,
+                bankrollSystemKey: botConfig.bankrollSystemKey,
+                reason: "SWEEP_TIMEOUT",
+                actorUserId: sweepActorUserId,
+                idempotencyKeySuffix: `timeout_cashout:v1:${stateVersionSuffix}`,
+              });
+              effectiveAmount = botResult?.amount > 0 ? botResult.amount : 0;
+            } catch (error) {
+              klog("poker_timeout_cashout_bot_fail", {
+                tableId,
+                userId,
+                seatNo: locked.seat_no ?? null,
+                error: error?.message || "unknown_error",
+              });
+              if (error && typeof error === "object") {
+                error.botTimeoutCashoutLogged = true;
+              }
+              throw error;
             }
           } else if (amount > 0) {
             await postTransaction({
@@ -195,7 +222,7 @@ export async function handler(event) {
             [tableId, userId]
           );
 
-          if (amount > 0 && stateRow && currentState?.stacks && typeof currentState.stacks === "object") {
+          if (stateRow && currentState?.stacks && typeof currentState.stacks === "object") {
             const nextStacks = { ...currentState.stacks };
             if (Object.prototype.hasOwnProperty.call(nextStacks, userId)) {
               delete nextStacks[userId];
@@ -204,14 +231,32 @@ export async function handler(event) {
             }
           }
 
-          return { seatNo: locked.seat_no, amount, stackSource };
+          return { seatNo: locked.seat_no, amount: effectiveAmount, stackSource, isBot: locked?.is_bot === true };
         });
 
         if (processed?.skipped) {
           continue;
         }
         expiredCount += 1;
-        if (processed?.amount > 0) {
+        if (processed?.isBot === true) {
+          if (processed?.amount > 0) {
+            klog("poker_timeout_cashout_bot_ok", {
+              tableId,
+              userId,
+              seatNo: processed.seatNo ?? null,
+              amount: processed.amount,
+              stackSource: processed.stackSource ?? "none",
+            });
+          } else {
+            klog("poker_timeout_cashout_bot_skip", {
+              tableId,
+              userId,
+              seatNo: processed?.seatNo ?? null,
+              amount: processed?.amount ?? 0,
+              stackSource: processed?.stackSource ?? "none",
+            });
+          }
+        } else if (processed?.amount > 0) {
           klog("poker_timeout_cashout_ok", {
             tableId,
             userId,
@@ -229,12 +274,14 @@ export async function handler(event) {
           });
         }
       } catch (error) {
-        klog("poker_timeout_cashout_fail", {
-          tableId,
-          userId,
-          seatNo: seat?.seat_no ?? null,
-          error: error?.message || "unknown_error",
-        });
+        if (!error?.botTimeoutCashoutLogged) {
+          klog("poker_timeout_cashout_fail", {
+            tableId,
+            userId,
+            seatNo: seat?.seat_no ?? null,
+            error: error?.message || "unknown_error",
+          });
+        }
       }
     }
     klog("poker_sweep_timeout_summary", {
