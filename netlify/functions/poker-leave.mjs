@@ -211,6 +211,10 @@ export async function handler(event) {
         }
 
         if (isBotSeat) {
+          const systemActorUserId = String(process.env.POKER_SYSTEM_ACTOR_USER_ID || "").trim();
+          if (!isValidUuid(systemActorUserId)) {
+            throw makeError(500, "invalid_system_actor_user_id");
+          }
           const botConfig = getBotConfig();
           const botCashout = await cashoutBotSeatIfNeeded(tx, {
             tableId,
@@ -218,7 +222,8 @@ export async function handler(event) {
             seatNo,
             bankrollSystemKey: botConfig.bankrollSystemKey,
             reason: "LEAVE",
-            actorUserId: auth.userId,
+            actorUserId: systemActorUserId,
+            idempotencyKeySuffix: requestId || "no_request",
           });
           cashOutAmount = botCashout?.amount > 0 ? botCashout.amount : 0;
         } else if (cashOutAmount > 0) {

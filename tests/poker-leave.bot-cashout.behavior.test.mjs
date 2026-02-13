@@ -5,13 +5,13 @@ import { updatePokerStateOptimistic } from "../netlify/functions/_shared/poker-s
 const tableId = "11111111-1111-4111-8111-111111111111";
 const botUserId = "33333333-3333-4333-8333-333333333333";
 
-const makeHandler = ({ requestStore, postCalls, stateRef }) =>
+const makeHandler = ({ requestStore, postCalls, stateRef, helperCalls }) =>
   loadPokerHandler("netlify/functions/poker-leave.mjs", {
     baseHeaders: () => ({}),
     corsHeaders: () => ({ "access-control-allow-origin": "https://example.test" }),
     extractBearerToken: () => "token",
     verifySupabaseJwt: async () => ({ valid: true, userId: botUserId }),
-    isValidUuid: () => true,
+    isValidUuid: (value) => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || "")),
     normalizeRequestId: (value) => ({ ok: true, value: value ?? null }),
     updatePokerStateOptimistic,
     getBotConfig: () => ({ bankrollSystemKey: "TREASURY" }),
@@ -20,13 +20,16 @@ const makeHandler = ({ requestStore, postCalls, stateRef }) =>
       if (amount > 0) {
         postCalls.push({
           txType: "TABLE_CASH_OUT",
-          idempotencyKey: `bot-cashout:${args.tableId}:${args.seatNo}:LEAVE`,
+          idempotencyKey: `bot-cashout:${args.tableId}:${args.seatNo}:LEAVE:${args.idempotencyKeySuffix}`,
+          createdBy: args.actorUserId,
+          userId: args.actorUserId,
           entries: [
             { accountType: "ESCROW", systemKey: `POKER_TABLE:${args.tableId}`, amount: -amount },
             { accountType: "SYSTEM", systemKey: args.bankrollSystemKey, amount },
           ],
         });
       }
+      helperCalls.push(args);
       await tx.unsafe("update public.poker_seats set stack = 0 where table_id = $1 and user_id = $2;", [args.tableId, args.botUserId]);
       return { ok: true, amount };
     },
@@ -82,6 +85,8 @@ const makeHandler = ({ requestStore, postCalls, stateRef }) =>
 const run = async () => {
   const requestStore = new Map();
   const postCalls = [];
+  process.env.POKER_SYSTEM_ACTOR_USER_ID = "00000000-0000-4000-8000-000000000001";
+
   const stateRef = {
     version: 1,
     seatStack: 200,
@@ -95,7 +100,8 @@ const run = async () => {
     },
   };
 
-  const handler = makeHandler({ requestStore, postCalls, stateRef });
+  const helperCalls = [];
+  const handler = makeHandler({ requestStore, postCalls, stateRef, helperCalls });
   const requestId = "leave-bot-1";
   const first = await handler({
     httpMethod: "POST",
@@ -105,7 +111,9 @@ const run = async () => {
   assert.equal(first.statusCode, 200);
   assert.equal(postCalls.length, 1);
   assert.equal(postCalls[0].txType, "TABLE_CASH_OUT");
-  assert.equal(postCalls[0].idempotencyKey, `bot-cashout:${tableId}:2:LEAVE`);
+  assert.equal(postCalls[0].idempotencyKey, `bot-cashout:${tableId}:2:LEAVE:${requestId}`);
+  assert.equal(postCalls[0].createdBy, process.env.POKER_SYSTEM_ACTOR_USER_ID);
+  assert.equal(postCalls[0].userId, process.env.POKER_SYSTEM_ACTOR_USER_ID);
   assert.deepEqual(postCalls[0].entries, [
     { accountType: "ESCROW", systemKey: `POKER_TABLE:${tableId}`, amount: -200 },
     { accountType: "SYSTEM", systemKey: "TREASURY", amount: 200 },
@@ -123,6 +131,37 @@ const run = async () => {
   });
   assert.equal(replay.statusCode, 200);
   assert.equal(postCalls.length, 1, "replay should not perform extra bot cashout");
+
+  process.env.POKER_SYSTEM_ACTOR_USER_ID = "";
+  const missingActorStateRef = {
+    version: 1,
+    seatStack: 150,
+    deleted: false,
+    state: {
+      tableId,
+      seats: [{ userId: botUserId, seatNo: 2 }],
+      stacks: { [botUserId]: 150 },
+      pot: 0,
+      phase: "INIT",
+    },
+  };
+  const missingActorRequestStore = new Map();
+  const missingActorPostCalls = [];
+  const missingActorHelperCalls = [];
+  const missingActorHandler = makeHandler({
+    requestStore: missingActorRequestStore,
+    postCalls: missingActorPostCalls,
+    stateRef: missingActorStateRef,
+    helperCalls: missingActorHelperCalls,
+  });
+  const missingActor = await missingActorHandler({
+    httpMethod: "POST",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    body: JSON.stringify({ tableId, requestId: "leave-bot-2" }),
+  });
+  assert.equal(missingActor.statusCode, 500);
+  assert.equal(JSON.parse(missingActor.body).error, "invalid_system_actor_user_id");
+  assert.equal(missingActorPostCalls.length, 0);
 };
 
 run().catch((error) => {

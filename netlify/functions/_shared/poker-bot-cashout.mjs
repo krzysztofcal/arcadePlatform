@@ -11,7 +11,7 @@ const normalizeStack = (value) => {
 
 export async function cashoutBotSeatIfNeeded(
   tx,
-  { tableId, botUserId, seatNo, bankrollSystemKey, reason, actorUserId }
+  { tableId, botUserId, seatNo, bankrollSystemKey, reason, actorUserId, idempotencyKeySuffix }
 ) {
   const lockedRows = await tx.unsafe(
     "select user_id, seat_no, status, is_bot, stack from public.poker_seats where table_id = $1 and user_id = $2 limit 1 for update;",
@@ -57,12 +57,27 @@ export async function cashoutBotSeatIfNeeded(
     throw error;
   }
 
+  const keySuffix = String(idempotencyKeySuffix || "").trim();
+  if (!keySuffix) {
+    klog("poker_bot_cashout_failed", {
+      tableId,
+      botUserId,
+      seatNo: effectiveSeatNo ?? null,
+      amount,
+      cause: reason,
+      code: "invalid_idempotency_suffix",
+    });
+    const error = new Error("invalid_idempotency_suffix");
+    error.code = "invalid_idempotency_suffix";
+    throw error;
+  }
+
   const safeReason = String(reason || "UNKNOWN").toUpperCase();
 
   await postTransaction({
     userId: createdBy,
     txType: "TABLE_CASH_OUT",
-    idempotencyKey: `bot-cashout:${tableId}:${effectiveSeatNo}:${safeReason}`,
+    idempotencyKey: `bot-cashout:${tableId}:${effectiveSeatNo}:${safeReason}:${keySuffix}`,
     metadata: {
       actor: "BOT",
       reason: "BOT_CASH_OUT",

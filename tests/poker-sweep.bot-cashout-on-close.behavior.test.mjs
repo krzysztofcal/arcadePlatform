@@ -30,7 +30,7 @@ const run = async () => {
       if (amount > 0) {
         postCalls.push({
           txType: "TABLE_CASH_OUT",
-          idempotencyKey: `bot-cashout:${args.tableId}:${args.seatNo}:SWEEP_CLOSE`,
+          idempotencyKey: `bot-cashout:${args.tableId}:${args.seatNo}:SWEEP_CLOSE:${args.idempotencyKeySuffix}`,
           entries: [
             { accountType: "ESCROW", systemKey: `POKER_TABLE:${args.tableId}`, amount: -amount },
             { accountType: "SYSTEM", systemKey: args.bankrollSystemKey, amount },
@@ -52,8 +52,8 @@ const run = async () => {
           if (text.includes("update public.poker_seats set status = 'inactive' where table_id = any")) return [];
           if (text.includes("select t.id") && text.includes("stack > 0")) return [{ id: tableId }];
           if (text.includes("select seat_no, status, stack, user_id, is_bot")) return Array.from(botSeats.values());
-          if (text.includes("select state from public.poker_state")) {
-            return [{ state: JSON.stringify({ tableId, stacks: { [botA]: 120, [botB]: 80 } }) }];
+          if (text.includes("select version, state from public.poker_state")) {
+            return [{ version: 7, state: JSON.stringify({ tableId, stacks: { [botA]: 120, [botB]: 80 } }) }];
           }
           if (text.includes("select user_id, seat_no, status, is_bot, stack from public.poker_seats") && text.includes("for update")) {
             const userId = params?.[1];
@@ -91,8 +91,8 @@ const run = async () => {
   const first = await handler({ httpMethod: "POST", headers: { "x-sweep-secret": "secret" } });
   assert.equal(first.statusCode, 200);
   assert.equal(postCalls.length, 2);
-  assert.equal(postCalls[0].idempotencyKey, `bot-cashout:${tableId}:1:SWEEP_CLOSE`);
-  assert.equal(postCalls[1].idempotencyKey, `bot-cashout:${tableId}:4:SWEEP_CLOSE`);
+  assert.equal(postCalls[0].idempotencyKey, `bot-cashout:${tableId}:1:SWEEP_CLOSE:close_cashout:v1:7`);
+  assert.equal(postCalls[1].idempotencyKey, `bot-cashout:${tableId}:4:SWEEP_CLOSE:close_cashout:v1:7`);
   assert.equal(postCalls[0].entries[0].amount, -120);
   assert.equal(postCalls[1].entries[0].amount, -80);
 

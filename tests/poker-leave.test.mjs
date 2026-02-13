@@ -51,3 +51,12 @@ assert.ok(
   /poker:leave:\$\{tableId\}:\$\{auth\.userId\}:\$\{requestId\}/.test(leaveSrc),
   "leave should scope requestId idempotency by tableId and userId"
 );
+
+assert.ok(
+  /const systemActorUserId = String\(process\.env\.POKER_SYSTEM_ACTOR_USER_ID \|\| ""\)\.trim\(\);[\s\S]*?if \(!isValidUuid\(systemActorUserId\)\)/.test(leaveSrc),
+  "leave bot path should validate POKER_SYSTEM_ACTOR_USER_ID"
+);
+assert.ok(
+  /actorUserId: systemActorUserId,[\s\S]*?idempotencyKeySuffix: requestId \|\| "no_request"/.test(leaveSrc),
+  "leave bot path should use system actor and request-based idempotency suffix"
+);
