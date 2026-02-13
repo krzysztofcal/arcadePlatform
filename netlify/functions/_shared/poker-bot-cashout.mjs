@@ -12,15 +12,12 @@ const normalizeStack = (value) => {
 
 export async function ensureBotSeatInactiveForCashout(tx, { tableId, botUserId }) {
   const lockedRows = await tx.unsafe(
-    "select user_id, seat_no, status, is_bot from public.poker_seats where table_id = $1 and user_id = $2 limit 1 for update;",
+    "select user_id, seat_no, status, is_bot from public.poker_seats where table_id = $1 and user_id = $2 and is_bot = true limit 1 for update;",
     [tableId, botUserId]
   );
   const seat = lockedRows?.[0] || null;
   if (!seat) {
     return { ok: false, skipped: true, reason: "seat_missing" };
-  }
-  if (!seat.is_bot) {
-    return { ok: false, skipped: true, reason: "not_bot" };
   }
   if (seat.status !== "ACTIVE") {
     return { ok: true, changed: false, seatNo: Number.isInteger(seat.seat_no) ? seat.seat_no : null };
@@ -34,18 +31,13 @@ export async function cashoutBotSeatIfNeeded(
   { tableId, botUserId, seatNo, reason, actorUserId, idempotencyKeySuffix }
 ) {
   const lockedRows = await tx.unsafe(
-    "select user_id, seat_no, status, is_bot, stack from public.poker_seats where table_id = $1 and user_id = $2 limit 1 for update;",
+    "select user_id, seat_no, status, is_bot, stack from public.poker_seats where table_id = $1 and user_id = $2 and is_bot = true limit 1 for update;",
     [tableId, botUserId]
   );
   const seat = lockedRows?.[0] || null;
   if (!seat) {
     klog("poker_bot_cashout_skip", { tableId, botUserId, seatNo: seatNo ?? null, reason: "seat_missing", cause: reason });
     return { ok: false, skipped: true, reason: "seat_missing" };
-  }
-
-  if (!seat.is_bot) {
-    klog("poker_bot_cashout_skip", { tableId, botUserId, seatNo: seat.seat_no ?? seatNo ?? null, reason: "not_bot", cause: reason });
-    return { ok: false, skipped: true, reason: "not_bot" };
   }
 
   const effectiveSeatNo = Number.isInteger(seat.seat_no) ? seat.seat_no : seatNo;

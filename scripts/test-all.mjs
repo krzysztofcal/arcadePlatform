@@ -37,6 +37,8 @@ run("node", ["tests/poker-bot-cashout.invalid-seatno.unit.test.mjs"], "poker-bot
 run("node", ["tests/poker-bot-cashout.userId-is-bot.unit.test.mjs"], "poker-bot-cashout-userid-is-bot-unit");
 run("node", ["tests/poker-bot-cashout.invalid-actor.unit.test.mjs"], "poker-bot-cashout-invalid-actor-unit");
 run("node", ["tests/poker-bot-cashout.invalid-idempotency-suffix.unit.test.mjs"], "poker-bot-cashout-invalid-idempotency-suffix-unit");
+run("node", ["tests/poker-bot-cashout.seat-missing.unit.test.mjs"], "poker-bot-cashout-seat-missing-unit");
+run("node", ["tests/poker-bot-cashout.not-bot.unit.test.mjs"], "poker-bot-cashout-not-bot-unit");
 run("node", ["tests/poker-stakes-ui.test.mjs"], "poker-stakes-ui");
 run("node", ["tests/poker-create-table.stakes.test.mjs"], "poker-create-table-stakes");
 run("node", ["tests/poker-phase1.test.mjs"], "poker-phase1");

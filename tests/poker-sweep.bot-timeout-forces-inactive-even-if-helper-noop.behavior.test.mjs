@@ -66,9 +66,9 @@ const run = async () => {
 
   const res = await handler({ httpMethod: "POST", headers: { "x-sweep-secret": "secret" } });
   assert.equal(res.statusCode, 200);
-  assert.equal(cashoutCalls, 1, "cashout should run only after forced inactive update");
+  assert.equal(cashoutCalls, 0, "cashout should be skipped when helper noop leaves bot seat ACTIVE");
   const forceInactiveIdx = queries.findIndex((q) => q.text.includes("update public.poker_seats set status = 'inactive' where table_id = $1 and user_id = $2 and is_bot = true"));
-  assert.ok(forceInactiveIdx >= 0);
+  assert.equal(forceInactiveIdx, -1);
 };
 
 run().catch((error) => {

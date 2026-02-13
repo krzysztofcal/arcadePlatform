@@ -20,7 +20,8 @@ const run = async () => {
     TABLE_SINGLETON_CLOSE_SEC: 21600,
     isHoleCardsTableMissing,
     isValidUuid: () => true,
-    ensureBotSeatInactiveForCashout: async () => {
+    ensureBotSeatInactiveForCashout: async (tx, args) => {
+      await tx.unsafe("update public.poker_seats set status = 'INACTIVE' where table_id = $1 and user_id = $2 and is_bot = true;", [args.tableId, args.botUserId]);
       seatStatus = "INACTIVE";
       return { ok: true, changed: true, seatNo: 6 };
     },
