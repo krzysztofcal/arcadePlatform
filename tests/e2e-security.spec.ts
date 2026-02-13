@@ -41,6 +41,15 @@ async function wait(ms: number): Promise<void> {
 
 test.describe('E2E Security Tests', () => {
 
+  test.beforeAll(async ({ request }) => {
+    const bootstrap = await request.post('/api/xp/start-session', {
+      data: { userId: `health-${Date.now()}`, sessionId: `health-${Date.now()}` },
+    });
+    if (bootstrap.status() === 404) {
+      throw new Error('Netlify redirects/functions not configured in CI baseURL');
+    }
+  });
+
   // ============================================================================
   // A. CORS & Origin Validation Tests
   // ============================================================================
@@ -360,9 +369,9 @@ test.describe('E2E Security Tests', () => {
       expect(data).toHaveProperty('nextReset');
       expect(data.nextReset).toBeGreaterThan(Date.now());
 
-      // Next reset should be within 24 hours
+      // Next reset should be within 25 hours (DST fall-back can be a 25h day)
       const hoursUntilReset = (data.nextReset - Date.now()) / (1000 * 60 * 60);
-      expect(hoursUntilReset).toBeLessThanOrEqual(24);
+      expect(hoursUntilReset).toBeLessThanOrEqual(25);
     });
 
     test('should include dayKey in response', async ({ request }) => {
