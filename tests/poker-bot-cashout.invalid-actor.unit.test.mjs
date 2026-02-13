@@ -16,7 +16,7 @@ const run = async () => {
       postCalls.push(payload);
       return { transaction: { id: "tx" } };
     },
-    () => false,
+    (value) => value !== "bad-actor",
     () => {}
   );
 

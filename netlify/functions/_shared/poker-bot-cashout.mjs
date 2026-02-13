@@ -30,6 +30,31 @@ export async function cashoutBotSeatIfNeeded(
   tx,
   { tableId, botUserId, seatNo, reason, actorUserId, idempotencyKeySuffix, expectedAmount }
 ) {
+  if (!isValidUuid(String(tableId || "").trim())) {
+    klog("poker_bot_cashout_failed", {
+      tableId: tableId ?? null,
+      botUserId,
+      seatNo: seatNo ?? null,
+      cause: reason,
+      code: "invalid_table_id",
+    });
+    const error = new Error("invalid_table_id");
+    error.code = "invalid_table_id";
+    throw error;
+  }
+
+  if (!isValidUuid(String(botUserId || "").trim())) {
+    klog("poker_bot_cashout_failed", {
+      tableId,
+      botUserId: botUserId ?? null,
+      seatNo: seatNo ?? null,
+      cause: reason,
+      code: "invalid_bot_user_id",
+    });
+    const error = new Error("invalid_bot_user_id");
+    error.code = "invalid_bot_user_id";
+    throw error;
+  }
   const lockedRows = await tx.unsafe(
     "select user_id, seat_no, status, is_bot, stack from public.poker_seats where table_id = $1 and user_id = $2 and is_bot = true limit 1 for update;",
     [tableId, botUserId]

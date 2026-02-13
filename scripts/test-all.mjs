@@ -37,6 +37,8 @@ run("node", ["tests/poker-bot-cashout.invalid-seatno.unit.test.mjs"], "poker-bot
 run("node", ["tests/poker-bot-cashout.userId-is-bot.unit.test.mjs"], "poker-bot-cashout-userid-is-bot-unit");
 run("node", ["tests/poker-bot-cashout.invalid-actor.unit.test.mjs"], "poker-bot-cashout-invalid-actor-unit");
 run("node", ["tests/poker-bot-cashout.invalid-idempotency-suffix.unit.test.mjs"], "poker-bot-cashout-invalid-idempotency-suffix-unit");
+run("node", ["tests/poker-bot-cashout.invalid-table-id.unit.test.mjs"], "poker-bot-cashout-invalid-table-id-unit");
+run("node", ["tests/poker-bot-cashout.invalid-bot-user-id.unit.test.mjs"], "poker-bot-cashout-invalid-bot-user-id-unit");
 run("node", ["tests/poker-bot-cashout.seat-missing.unit.test.mjs"], "poker-bot-cashout-seat-missing-unit");
 run("node", ["tests/poker-bot-cashout.not-bot.unit.test.mjs"], "poker-bot-cashout-not-bot-unit");
 run("node", ["tests/poker-stakes-ui.test.mjs"], "poker-stakes-ui");
@@ -68,10 +70,12 @@ run("node", ["tests/poker-sweep.timeout-zero-amount-inactivates-seat.behavior.te
 run("node", ["tests/poker-sweep.bot-cashout-on-timeout.behavior.test.mjs"], "poker-sweep-bot-cashout-on-timeout-behavior");
 run("node", ["tests/poker-sweep.bot-timeout-forces-inactive-even-if-helper-noop.behavior.test.mjs"], "poker-sweep-bot-timeout-force-inactive-helper-noop");
 run("node", ["tests/poker-sweep.bot-timeout-skips-when-actor-missing.behavior.test.mjs"], "poker-sweep-bot-timeout-skips-when-actor-missing");
+run("node", ["tests/poker-sweep.bot-timeout-invalid-botUserId-does-not-crash.behavior.test.mjs"], "poker-sweep-bot-timeout-invalid-botuserid-no-crash");
 run("node", ["tests/poker-sweep.bot-cashout-on-close.behavior.test.mjs"], "poker-sweep-bot-cashout-on-close-behavior");
 run("node", ["tests/poker-sweep.bot-close-cashes-out-using-state-when-seat-zero.behavior.test.mjs"], "poker-sweep-bot-close-cashout-state-when-seat-zero");
 run("node", ["tests/poker-sweep.bot-close-rechecks-status-after-inactivate.behavior.test.mjs"], "poker-sweep-bot-close-recheck-status-after-inactivate");
 run("node", ["tests/poker-sweep.bot-close-skips-when-actor-missing.behavior.test.mjs"], "poker-sweep-bot-close-skips-when-actor-missing");
+run("node", ["tests/poker-sweep.bot-close-invalid-tableId-skips.behavior.test.mjs"], "poker-sweep-bot-close-invalid-tableid-skips");
 run("node", ["tests/poker-sweep.bot-close-does-not-clear-state-when-not-safe.behavior.test.mjs"], "poker-sweep-bot-close-no-clear-when-not-safe");
 run("node", ["tests/poker-sweep.close-empty-table-counts-skipped.behavior.test.mjs"], "poker-sweep-close-empty-table-counts-skipped");
 run("node", ["tests/poker-sweep.cashout-authoritative.behavior.test.mjs"], "poker-sweep-cashout-authoritative");

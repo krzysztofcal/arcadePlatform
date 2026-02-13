@@ -16,35 +16,33 @@ const run = async () => {
       postCalls.push(payload);
       return { transaction: { id: "tx" } };
     },
-    () => true,
+    (value) => value !== "bad-table-id",
     () => {}
   );
 
-  const tx = {
-    unsafe: async (query) => {
-      const text = String(query).toLowerCase();
-      txCalls.push(text);
-      if (text.includes("select user_id, seat_no, status, is_bot, stack") && text.includes("for update")) {
-        return [{ user_id: "11111111-1111-4111-8111-111111111111", seat_no: null, status: "INACTIVE", is_bot: true, stack: 100 }];
-      }
-      return [];
-    },
-  };
-
   await assert.rejects(
     () =>
-      cashoutBotSeatIfNeeded(tx, {
-        tableId: "99999999-9999-4999-8999-999999999999",
-        botUserId: "11111111-1111-4111-8111-111111111111",
-        reason: "SWEEP_CLOSE",
-        actorUserId: "00000000-0000-4000-8000-000000000001",
-        idempotencyKeySuffix: "close_cashout:v1:7",
-      }),
-    (error) => error?.code === "invalid_seat_no"
+      cashoutBotSeatIfNeeded(
+        {
+          unsafe: async (query) => {
+            txCalls.push(String(query).toLowerCase());
+            return [];
+          },
+        },
+        {
+          tableId: "bad-table-id",
+          botUserId: "11111111-1111-4111-8111-111111111111",
+          seatNo: 7,
+          reason: "SWEEP_CLOSE",
+          actorUserId: "00000000-0000-4000-8000-000000000001",
+          idempotencyKeySuffix: "close_cashout:v1",
+        }
+      ),
+    (error) => error?.code === "invalid_table_id"
   );
 
   assert.equal(postCalls.length, 0);
-  assert.equal(txCalls.some((text) => text.includes("update public.poker_seats set stack = 0")), false);
+  assert.equal(txCalls.length, 0);
 };
 
 run().catch((error) => {
