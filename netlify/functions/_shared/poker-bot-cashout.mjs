@@ -125,7 +125,7 @@ export async function cashoutBotSeatIfNeeded(
     },
     entries: [
       { accountType: "ESCROW", systemKey: `POKER_TABLE:${tableId}`, amount: -amount },
-      { accountType: "SYSTEM", systemKey: bankrollSystemKey, amount },
+      { accountType: "USER", amount },
     ],
     createdBy,
     tx,

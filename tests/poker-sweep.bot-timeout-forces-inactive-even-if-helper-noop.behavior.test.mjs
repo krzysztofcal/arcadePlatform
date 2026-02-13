@@ -26,6 +26,7 @@ const run = async () => {
     ensureBotSeatInactiveForCashout: async () => ({ ok: true, changed: false, seatNo }),
     cashoutBotSeatIfNeeded: async () => {
       cashoutCalls += 1;
+      assert.equal(seatStatus, "INACTIVE", "seat should be forced inactive before bot cashout");
       return { ok: true, skipped: true, reason: "non_positive_stack", amount: 0, seatNo };
     },
     beginSql: async (fn) =>
@@ -51,9 +52,6 @@ const run = async () => {
           if (text.includes("select status, seat_no from public.poker_seats where table_id = $1 and user_id = $2 and is_bot = true limit 1 for update")) {
             return [{ status: seatStatus, seat_no: seatNo }];
           }
-          if (text.includes("select stack from public.poker_seats where table_id = $1 and user_id = $2 limit 1 for update")) {
-            return [{ stack }];
-          }
           if (text.includes("update public.poker_state set state = $2 where table_id = $1")) return [];
           if (text.includes("select t.id") && text.includes("stack > 0")) return [];
           if (text.includes("update public.poker_tables t")) return [];
@@ -71,9 +69,7 @@ const run = async () => {
   assert.equal(res.statusCode, 200);
   assert.equal(cashoutCalls, 1, "cashout should run only after forced inactive update");
   const forceInactiveIdx = queries.findIndex((q) => q.text.includes("update public.poker_seats set status = 'inactive' where table_id = $1 and user_id = $2 and is_bot = true"));
-  const cashoutIdx = queries.findIndex((q) => q.text.includes("select stack from public.poker_seats where table_id = $1 and user_id = $2 limit 1 for update"));
   assert.ok(forceInactiveIdx >= 0);
-  assert.ok(cashoutIdx > forceInactiveIdx, "stack safety check should happen after forced inactive update");
 };
 
 run().catch((error) => {

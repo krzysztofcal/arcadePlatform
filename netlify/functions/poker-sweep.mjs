@@ -237,13 +237,7 @@ export async function handler(event) {
               effectiveAmount = botResult?.amount > 0 ? botResult.amount : 0;
               safeToClearStateStack = botResult?.cashedOut === true;
               if (!safeToClearStateStack && botResult?.reason === "non_positive_stack") {
-                const seatAfterRows = await tx.unsafe(
-                  "select stack from public.poker_seats where table_id = $1 and user_id = $2 limit 1 for update;",
-                  [tableId, userId]
-                );
-                const seatAfter = seatAfterRows?.[0] || null;
-                const seatAfterStack = normalizeNonNegativeInt(Number(seatAfter?.stack));
-                safeToClearStateStack = seatAfterStack === 0;
+                safeToClearStateStack = (stateStack ?? 0) === 0;
               }
             } catch (error) {
               klog("poker_timeout_cashout_bot_fail", {
@@ -544,13 +538,7 @@ limit $1;`,
               }
               let botSafeToClearState = botResult?.cashedOut === true;
               if (!botSafeToClearState && botResult?.reason === "non_positive_stack") {
-                const seatAfterRows = await tx.unsafe(
-                  "select stack from public.poker_seats where table_id = $1 and user_id = $2 limit 1 for update;",
-                  [tableId, userId]
-                );
-                const seatAfter = seatAfterRows?.[0] || null;
-                const seatAfterStack = normalizeNonNegativeInt(Number(seatAfter?.stack));
-                botSafeToClearState = seatAfterStack === 0;
+                botSafeToClearState = (stateStack ?? 0) === 0;
               }
               if (botSafeToClearState) {
                 if (Object.prototype.hasOwnProperty.call(nextStacks, userId)) {
