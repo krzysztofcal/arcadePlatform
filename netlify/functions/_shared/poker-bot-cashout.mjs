@@ -9,6 +9,26 @@ const normalizeStack = (value) => {
   return num;
 };
 
+
+export async function ensureBotSeatInactiveForCashout(tx, { tableId, botUserId }) {
+  const lockedRows = await tx.unsafe(
+    "select user_id, seat_no, status, is_bot from public.poker_seats where table_id = $1 and user_id = $2 limit 1 for update;",
+    [tableId, botUserId]
+  );
+  const seat = lockedRows?.[0] || null;
+  if (!seat) {
+    return { ok: false, skipped: true, reason: "seat_missing" };
+  }
+  if (!seat.is_bot) {
+    return { ok: false, skipped: true, reason: "not_bot" };
+  }
+  if (seat.status !== "ACTIVE") {
+    return { ok: true, changed: false, seatNo: Number.isInteger(seat.seat_no) ? seat.seat_no : null };
+  }
+  await tx.unsafe("update public.poker_seats set status = 'INACTIVE' where table_id = $1 and user_id = $2;", [tableId, botUserId]);
+  return { ok: true, changed: true, seatNo: Number.isInteger(seat.seat_no) ? seat.seat_no : null };
+}
+
 export async function cashoutBotSeatIfNeeded(
   tx,
   { tableId, botUserId, seatNo, bankrollSystemKey, reason, actorUserId, idempotencyKeySuffix }

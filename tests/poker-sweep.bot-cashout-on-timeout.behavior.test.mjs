@@ -12,6 +12,7 @@ const run = async () => {
 
   const postCalls = [];
   const helperCalls = [];
+  const queries = [];
   const db = {
     seatStatus: "ACTIVE",
     seatStack: 150,
@@ -31,6 +32,7 @@ const run = async () => {
       fn({
         unsafe: async (query, params) => {
           const text = String(query).toLowerCase();
+          queries.push(text);
           if (text.includes("from public.poker_requests") && text.includes("result_json is null")) return [];
           if (text.includes("delete from public.poker_requests")) return [];
           if (text.includes("from public.poker_seats") && text.includes("last_seen_at < now()") && !text.includes("for update")) {
@@ -44,8 +46,11 @@ const run = async () => {
           if (text.includes("select version, state from public.poker_state where table_id") && text.includes("for update")) {
             return [{ version: db.stateVersion, state: JSON.stringify({ stacks: { ...db.stacks } }) }];
           }
-          if (text.includes("update public.poker_seats set status = 'inactive', stack = 0") && text.includes("user_id = $2")) {
+          if (text.includes("update public.poker_seats set status = 'inactive' where table_id = $1 and user_id = $2")) {
             db.seatStatus = "INACTIVE";
+            return [];
+          }
+          if (text.includes("update public.poker_seats set stack = 0 where table_id = $1 and user_id = $2")) {
             db.seatStack = 0;
             return [];
           }
@@ -61,8 +66,13 @@ const run = async () => {
           return [];
         },
       }),
+    ensureBotSeatInactiveForCashout: async (tx, args) => {
+      helperCalls.push({ phase: "ensure_inactive", ...args });
+      await tx.unsafe("update public.poker_seats set status = 'INACTIVE' where table_id = $1 and user_id = $2;", [args.tableId, args.botUserId]);
+      return { ok: true, changed: true, seatNo };
+    },
     cashoutBotSeatIfNeeded: async (tx, args) => {
-      helperCalls.push(args);
+      helperCalls.push({ phase: "cashout", ...args });
       const amount = db.seatStack;
       if (amount > 0) {
         postCalls.push({
@@ -85,7 +95,12 @@ const run = async () => {
   const first = await handler({ httpMethod: "POST", headers: { "x-sweep-secret": "secret" } });
   assert.equal(first.statusCode, 200);
   assert.equal(postCalls.length, 1);
-  assert.equal(helperCalls.length, 1);
+  assert.equal(helperCalls.filter((c) => c.phase === "cashout").length, 1);
+  assert.equal(helperCalls.filter((c) => c.phase === "ensure_inactive").length, 1);
+  const statusUpdateIdx = queries.findIndex((q) => q.includes("update public.poker_seats set status = 'inactive' where table_id = $1 and user_id = $2"));
+  const stackUpdateIdx = queries.findIndex((q) => q.includes("update public.poker_seats set stack = 0 where table_id = $1 and user_id = $2"));
+  assert.ok(statusUpdateIdx >= 0, "should set bot seat INACTIVE before bot timeout cashout");
+  assert.ok(stackUpdateIdx > statusUpdateIdx, "stack zeroing must occur after status INACTIVE transition");
   assert.equal(postCalls[0].idempotencyKey, `bot-cashout:${tableId}:${seatNo}:SWEEP_TIMEOUT:timeout_cashout:v1:7`);
   assert.deepEqual(postCalls[0].entries, [
     { accountType: "ESCROW", systemKey: `POKER_TABLE:${tableId}`, amount: -150 },

@@ -5,7 +5,7 @@ import { normalizeRequestId } from "./_shared/poker-request-id.mjs";
 import { deletePokerRequest, ensurePokerRequest, storePokerRequestResult } from "./_shared/poker-idempotency.mjs";
 import { updatePokerStateOptimistic } from "./_shared/poker-state-write.mjs";
 import { getBotConfig } from "./_shared/poker-bots.mjs";
-import { cashoutBotSeatIfNeeded } from "./_shared/poker-bot-cashout.mjs";
+import { cashoutBotSeatIfNeeded, ensureBotSeatInactiveForCashout } from "./_shared/poker-bot-cashout.mjs";
 
 const REQUEST_PENDING_STALE_SEC = 30;
 
@@ -217,6 +217,10 @@ export async function handler(event) {
           const systemActorUserId = String(process.env.POKER_SYSTEM_ACTOR_USER_ID || "").trim();
           if (!isValidUuid(systemActorUserId)) {
             throw makeError(500, "invalid_system_actor_user_id");
+          }
+          const botInactive = await ensureBotSeatInactiveForCashout(tx, { tableId, botUserId: auth.userId });
+          if (!botInactive?.ok) {
+            throw makeError(409, "bot_seat_invalid");
           }
           const botConfig = getBotConfig();
           const botCashout = await cashoutBotSeatIfNeeded(tx, {

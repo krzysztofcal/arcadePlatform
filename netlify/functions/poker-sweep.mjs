@@ -4,7 +4,7 @@ import { postTransaction } from "./_shared/chips-ledger.mjs";
 import { isHoleCardsTableMissing } from "./_shared/poker-hole-cards-store.mjs";
 import { postHandSettlementToLedger } from "./_shared/poker-ledger-settlement.mjs";
 import { getBotConfig } from "./_shared/poker-bots.mjs";
-import { cashoutBotSeatIfNeeded } from "./_shared/poker-bot-cashout.mjs";
+import { cashoutBotSeatIfNeeded, ensureBotSeatInactiveForCashout } from "./_shared/poker-bot-cashout.mjs";
 
 const STALE_PENDING_CUTOFF_MINUTES = 10;
 const STALE_PENDING_LIMIT = 500;
@@ -179,6 +179,10 @@ export async function handler(event) {
             const botConfig = getBotConfig();
             const sweepActorUserId = getSweepActorUserId();
             try {
+              const inactiveResult = await ensureBotSeatInactiveForCashout(tx, { tableId, botUserId: userId });
+              if (!inactiveResult?.ok) {
+                throw new Error("bot_seat_invalid");
+              }
               const botResult = await cashoutBotSeatIfNeeded(tx, {
                 tableId,
                 botUserId: userId,
@@ -217,10 +221,14 @@ export async function handler(event) {
             });
           }
 
-          await tx.unsafe(
-            "update public.poker_seats set status = 'INACTIVE', stack = 0 where table_id = $1 and user_id = $2;",
-            [tableId, userId]
-          );
+          if (locked?.is_bot === true) {
+            await tx.unsafe("update public.poker_seats set status = 'INACTIVE' where table_id = $1 and user_id = $2;", [tableId, userId]);
+          } else {
+            await tx.unsafe(
+              "update public.poker_seats set status = 'INACTIVE', stack = 0 where table_id = $1 and user_id = $2;",
+              [tableId, userId]
+            );
+          }
 
           if (stateRow && currentState?.stacks && typeof currentState.stacks === "object") {
             const nextStacks = { ...currentState.stacks };

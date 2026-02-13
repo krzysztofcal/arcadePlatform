@@ -7,7 +7,7 @@ import { clearMissedTurns } from "../../netlify/functions/_shared/poker-missed-t
 import { patchSitOutByUserId } from "../../netlify/functions/_shared/poker-sitout-flag.mjs";
 import { createPokerTableWithState } from "../../netlify/functions/_shared/poker-table-init.mjs";
 import { computeTargetBotCount, getBotConfig, makeBotSystemKey, makeBotUserId } from "../../netlify/functions/_shared/poker-bots.mjs";
-import { cashoutBotSeatIfNeeded } from "../../netlify/functions/_shared/poker-bot-cashout.mjs";
+import { cashoutBotSeatIfNeeded, ensureBotSeatInactiveForCashout } from "../../netlify/functions/_shared/poker-bot-cashout.mjs";
 
 const root = process.cwd();
 
@@ -105,6 +105,7 @@ export const loadPokerHandler = (filePath, mocks) => {
     "makeBotSystemKey",
     "makeBotUserId",
     "cashoutBotSeatIfNeeded",
+    "ensureBotSeatInactiveForCashout",
   ];
   const injectedNames = injectable.filter((name) => !declared.has(name));
   const destructureLine = injectedNames.length ? `const { ${injectedNames.join(", ")} } = mocks;` : "";
@@ -135,6 +136,7 @@ return handler;`
       makeBotSystemKey,
       makeBotUserId,
       cashoutBotSeatIfNeeded,
+      ensureBotSeatInactiveForCashout,
       areCardsUnique,
       cardIdentity,
       ...mocks,
