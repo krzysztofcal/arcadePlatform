@@ -16,6 +16,15 @@ const UNIQUE_VIOLATION = "23505";
 
 const isUniqueViolation = (err) => err?.code === UNIQUE_VIOLATION;
 
+const BUY_IN_IDEMPOTENCY_CONSTRAINT = "chips_transactions_idempotency_key_unique";
+
+const isBuyInIdempotencyDuplicate = (err) => {
+  if (!isUniqueViolation(err)) return false;
+  const constraint = String(err?.constraint || "");
+  const message = String(err?.message || "");
+  return constraint === BUY_IN_IDEMPOTENCY_CONSTRAINT || message.includes(BUY_IN_IDEMPOTENCY_CONSTRAINT);
+};
+
 const classifySeatInsertConflict = (err) => {
   if (!isUniqueViolation(err)) return null;
   const constraint = String(err?.constraint || "").toLowerCase();
@@ -554,20 +563,26 @@ values ($1, $2, $3, 'ACTIVE', now(), now(), $4);
         }
 
         const idempotencyKey = requestId
-          ? `poker:join:${tableId}:${auth.userId}:${requestId}`
-          : `poker:join:${tableId}:${auth.userId}:${seatNoDbToUse}:${buyIn}`;
+          ? `join-buyin:${tableId}:${auth.userId}:${requestId}`
+          : `join-buyin:${tableId}:${auth.userId}:${seatNoDbToUse}:${buyIn}`;
+        klog("poker_join_buyin_attempt", { tableId, userId: auth.userId, idempotencyKey });
 
-        await postTransaction({
-          userId: auth.userId,
-          txType: "TABLE_BUY_IN",
-          idempotencyKey,
-          entries: [
-            { accountType: "USER", amount: -buyIn },
-            { accountType: "ESCROW", systemKey: escrowSystemKey, amount: buyIn },
-          ],
-          createdBy: auth.userId,
-          tx,
-        });
+        try {
+          await postTransaction({
+            userId: auth.userId,
+            txType: "TABLE_BUY_IN",
+            idempotencyKey,
+            entries: [
+              { accountType: "USER", amount: -buyIn },
+              { accountType: "ESCROW", systemKey: escrowSystemKey, amount: buyIn },
+            ],
+            createdBy: auth.userId,
+            tx,
+          });
+        } catch (error) {
+          if (!isBuyInIdempotencyDuplicate(error)) throw error;
+          klog("poker_join_buyin_duplicate_idempotency", { tableId, userId: auth.userId, idempotencyKey });
+        }
         mutated = true;
 
         const botCfg = getBotConfig(process.env);

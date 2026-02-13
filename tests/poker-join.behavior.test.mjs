@@ -19,6 +19,7 @@ const makeJoinHandler = ({
   tableMaxPlayers = 6,
   occupiedSeatRows = [{ seat_no: 2 }],
   alwaysSeatConflict = false,
+  buyInDuplicateOnce = false,
 }) =>
   loadPokerHandler("netlify/functions/poker-join.mjs", {
     baseHeaders: () => ({}),
@@ -138,6 +139,13 @@ const makeJoinHandler = ({
       }),
     postTransaction: async () => {
       sideEffects.ledger += 1;
+      if (buyInDuplicateOnce && !sideEffects.buyInDuplicateRaised) {
+        sideEffects.buyInDuplicateRaised = true;
+        const err = new Error('duplicate key value violates unique constraint "chips_transactions_idempotency_key_unique"');
+        err.code = "23505";
+        err.constraint = "chips_transactions_idempotency_key_unique";
+        throw err;
+      }
       return { transaction: { id: "tx-join" } };
     },
     klog: () => {},
@@ -318,6 +326,35 @@ const run = async () => {
     2,
     "autoSeat should skip ACTIVE seats during retries and choose DB seat 3 (UI seat 2)"
   );
+
+
+  const duplicateSideEffects = { seatInsert: 0, ledger: 0, buyInDuplicateRaised: false };
+  const duplicateHandler = makeJoinHandler({
+    requestStore: new Map(),
+    queries: [],
+    sideEffects: duplicateSideEffects,
+    buyInDuplicateOnce: true,
+  });
+  const duplicateJoin = await callJoin(duplicateHandler, "join-dup-idempotency");
+  assert.equal(duplicateJoin.statusCode, 200);
+  assert.equal(JSON.parse(duplicateJoin.body).ok, true);
+  assert.equal(duplicateSideEffects.seatInsert, 1);
+  assert.equal(duplicateSideEffects.ledger, 1);
+
+  const seatedSideEffects = { seatInsert: 0, ledger: 0 };
+  const firstJoin = await callJoin(
+    makeJoinHandler({ requestStore: new Map(), queries: [], sideEffects: seatedSideEffects }),
+    "join-already-seated-1"
+  );
+  assert.equal(firstJoin.statusCode, 200);
+  assert.equal(seatedSideEffects.ledger, 1);
+  const secondJoin = await callJoin(
+    makeJoinHandler({ requestStore: new Map(), queries: [], sideEffects: seatedSideEffects, existingSeatNo: 2 }),
+    "join-already-seated-2"
+  );
+  assert.equal(secondJoin.statusCode, 200);
+  assert.equal(seatedSideEffects.ledger, 1, "already-seated join should not call buy-in transaction again");
+  assert.equal(JSON.parse(secondJoin.body).seatNo, 1);
 
 
 
