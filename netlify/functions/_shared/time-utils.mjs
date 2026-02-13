@@ -39,12 +39,13 @@ function parseWarsawOffsetMinutes(ms) {
 }
 
 function toWarsawEpoch(year, month, day, hour) {
-  let guessUtc = Date.UTC(year, month - 1, day, hour, 0, 0, 0);
-  let offset = parseWarsawOffsetMinutes(guessUtc);
-  let adjusted = guessUtc - offset * 60_000;
+  const baseUtc = Date.UTC(year, month - 1, day, hour, 0, 0, 0);
+  let offset = parseWarsawOffsetMinutes(baseUtc);
+  let adjusted = baseUtc - offset * 60_000;
   const adjustedOffset = parseWarsawOffsetMinutes(adjusted);
   if (adjustedOffset !== offset) {
-    adjusted = Date.UTC(year, month - 1, day, hour, 0, 0, 0) - adjustedOffset * 60_000;
+    offset = adjustedOffset;
+    adjusted = Date.UTC(year, month - 1, day, hour, 0, 0, 0) - offset * 60_000;
   }
   return adjusted;
 }
@@ -76,12 +77,6 @@ export function nextWarsawResetMs(nowMs = Date.now()) {
     nextReset = nextCandidateReset(nowMs + DAY_MS);
   }
 
-  if (nextReset - nowMs > DAY_MS) {
-    const stabilized = nextCandidateReset(nowMs + 12 * 60 * 60 * 1000);
-    if (stabilized > nowMs && stabilized - nowMs <= DAY_MS) {
-      nextReset = stabilized;
-    }
-  }
 
   return nextReset;
 }

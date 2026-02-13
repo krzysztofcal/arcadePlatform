@@ -8,7 +8,7 @@ function runCase(nowIso, expectedDayKey) {
   const nextResetMs = nextWarsawResetMs(nowMs);
 
   assert(nextResetMs > nowMs, 'nextReset must be in the future');
-  assert(nextResetMs - nowMs <= 24 * HOUR_MS, 'nextReset must be <= 24h from now');
+  assert(nextResetMs - nowMs <= 25 * HOUR_MS, 'nextReset must be <= 25h from now (Warsaw DST-safe)');
   assert.equal(warsawDayKey(nowMs), expectedDayKey, 'dayKey must follow Warsaw 03:00 reset semantics');
 }
 
