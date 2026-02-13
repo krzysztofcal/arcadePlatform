@@ -76,7 +76,7 @@ export async function cashoutBotSeatIfNeeded(
       amount,
       cause: reason,
     });
-    return { ok: true, skipped: true, reason: "non_positive_stack", amount };
+    return { ok: true, skipped: true, reason: "non_positive_stack", amount, seatNo: effectiveSeatNo };
   }
 
   const createdBy = String(actorUserId || "").trim();

@@ -244,11 +244,7 @@ export async function handler(event) {
             safeToClearStateStack = true;
           }
 
-          if (locked?.is_bot === true) {
-            if (safeToClearStateStack) {
-              await tx.unsafe("update public.poker_seats set status = 'INACTIVE' where table_id = $1 and user_id = $2;", [tableId, userId]);
-            }
-          } else {
+          if (locked?.is_bot !== true) {
             await tx.unsafe(
               "update public.poker_seats set status = 'INACTIVE', stack = 0 where table_id = $1 and user_id = $2;",
               [tableId, userId]
@@ -585,7 +581,11 @@ limit $1;`,
             const nextState = { ...currentState, stacks: nextStacks };
             await tx.unsafe("update public.poker_state set state = $2 where table_id = $1;", [tableId, JSON.stringify(nextState)]);
           }
-          return { seatCount: lockedRows?.length ?? 0, tableProcessed, tableSkipped };
+          const seatCount = lockedRows?.length ?? 0;
+          if (seatCount === 0) {
+            tableSkipped += 1;
+          }
+          return { seatCount, tableProcessed, tableSkipped };
         });
         closeCashoutProcessed += Number(result?.tableProcessed || 0);
         closeCashoutSkipped += Number(result?.tableSkipped || 0);

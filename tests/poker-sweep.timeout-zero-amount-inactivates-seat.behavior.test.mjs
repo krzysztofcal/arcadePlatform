@@ -33,7 +33,7 @@ const run = async () => {
           if (text.includes("from public.poker_seats") && text.includes("for update") && text.includes("last_seen_at")) {
             return [{ seat_no: seatNo, status: "ACTIVE", stack: 0, last_seen_at: new Date(0), is_bot: false }];
           }
-          if (text.includes("select state from public.poker_state where table_id") && text.includes("for update")) {
+          if (text.includes("from public.poker_state") && text.includes("for update")) {
             return [{ state: JSON.stringify({ stacks: { [userId]: 0 } }) }];
           }
           if (text.includes("update public.poker_seats set status = 'inactive', stack = 0 where table_id = $1 and user_id = $2")) {

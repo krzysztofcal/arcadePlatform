@@ -300,9 +300,9 @@ const runSettlementSkipsLegacyCashout = async () => {
             return [{ table_id: tableId, user_id: userId, seat_no: seatNo, stack: 123, last_seen_at: new Date(0) }];
           }
           if (text.includes("from public.poker_seats") && text.includes("for update") && text.includes("last_seen_at")) {
-            return [{ seat_no: seatNo, status: "ACTIVE", stack: 123, last_seen_at: new Date(0) }];
+            return [{ seat_no: seatNo, status: "ACTIVE", stack: 123, last_seen_at: new Date(0), is_bot: false }];
           }
-          if (text.includes("from public.poker_state where table_id") && text.includes("for update")) {
+          if (text.includes("from public.poker_state") && text.includes("for update")) {
             return [{ state: JSON.stringify(settledState) }];
           }
           if (text.includes("delete from public.poker_requests")) return [];
@@ -361,7 +361,7 @@ const runInvalidSettlementFallsBackLegacyCashout = async () => {
           if (text.includes("from public.poker_seats") && text.includes("for update") && text.includes("last_seen_at")) {
             return [{ seat_no: seatNo, status: "ACTIVE", stack: 99, last_seen_at: new Date(0) }];
           }
-          if (text.includes("from public.poker_state where table_id") && text.includes("for update")) {
+          if (text.includes("from public.poker_state") && text.includes("for update")) {
             return [{ state: JSON.stringify({ handSettlement: { handId: "bad-no-payouts" }, stacks: { [userId]: 88 } }) }];
           }
           if (text.includes("update public.poker_seats set status = 'inactive', stack = 0")) return [];
@@ -412,9 +412,9 @@ const runSettlementPostFailureKeepsSeatActiveForRetry = async () => {
             return [{ table_id: tableId, user_id: userId, seat_no: seatNo, stack: 100, last_seen_at: new Date(0) }];
           }
           if (text.includes("from public.poker_seats") && text.includes("for update") && text.includes("last_seen_at")) {
-            return [{ seat_no: seatNo, status: "ACTIVE", stack: 100, last_seen_at: new Date(0) }];
+            return [{ seat_no: seatNo, status: "ACTIVE", stack: 100, last_seen_at: new Date(0), is_bot: false }];
           }
-          if (text.includes("from public.poker_state where table_id") && text.includes("for update")) {
+          if (text.includes("from public.poker_state") && text.includes("for update")) {
             return [{ state: JSON.stringify({ handSettlement: { handId: "h-boom", payouts: { [userId]: 50 } }, stacks: { [userId]: 100 } }) }];
           }
           if (text.includes("update public.poker_seats set status = 'inactive', stack = 0")) return [];

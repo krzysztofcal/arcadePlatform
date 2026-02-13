@@ -43,7 +43,7 @@ const run = async () => {
             if (db.seatStatus !== "ACTIVE") return [];
             return [{ seat_no: seatNo, status: db.seatStatus, stack: db.seatStack, last_seen_at: new Date(0), is_bot: true }];
           }
-          if (text.includes("select state from public.poker_state where table_id") && text.includes("for update")) {
+          if (text.includes("from public.poker_state") && text.includes("for update")) {
             return [{ version: db.stateVersion, state: JSON.stringify({ stacks: { ...db.stacks } }) }];
           }
           if (text.includes("update public.poker_seats set status = 'inactive' where table_id = $1 and user_id = $2")) {
