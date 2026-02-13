@@ -11,9 +11,10 @@ const run = async () => {
   process.env.POKER_SYSTEM_ACTOR_USER_ID = "00000000-0000-4000-8000-000000000001";
 
   const postCalls = [];
+  const queries = [];
   const botSeats = new Map([
-    [botA, { seat_no: 1, status: "INACTIVE", stack: 120, is_bot: true, user_id: botA }],
-    [botB, { seat_no: 4, status: "INACTIVE", stack: 80, is_bot: true, user_id: botB }],
+    [botA, { seat_no: 1, status: "ACTIVE", stack: 120, is_bot: true, user_id: botA }],
+    [botB, { seat_no: 4, status: "ACTIVE", stack: 80, is_bot: true, user_id: botB }],
   ]);
 
   const handler = loadPokerHandler("netlify/functions/poker-sweep.mjs", {
@@ -24,6 +25,14 @@ const run = async () => {
     isHoleCardsTableMissing,
     isValidUuid: () => true,
     getBotConfig: () => ({ bankrollSystemKey: "TREASURY" }),
+    ensureBotSeatInactiveForCashout: async (tx, { tableId: tid, botUserId }) => {
+      const row = botSeats.get(botUserId);
+      if (!row) return { ok: false, skipped: true, reason: "seat_missing" };
+      if (row.status === "INACTIVE") return { ok: true, changed: false, seatNo: row.seat_no };
+      await tx.unsafe("update public.poker_seats set status = 'INACTIVE' where table_id = $1 and user_id = $2;", [tid, botUserId]);
+      row.status = "INACTIVE";
+      return { ok: true, changed: true, seatNo: row.seat_no };
+    },
     cashoutBotSeatIfNeeded: async (tx, args) => {
       const seat = botSeats.get(args.botUserId);
       const amount = Number(seat?.stack || 0);
@@ -45,6 +54,7 @@ const run = async () => {
       fn({
         unsafe: async (query, params) => {
           const text = String(query).toLowerCase();
+          queries.push({ text, params });
           if (text.includes("from public.poker_requests") && text.includes("result_json is null")) return [];
           if (text.includes("from public.poker_seats") && text.includes("last_seen_at < now()")) return [];
           if (text.includes("delete from public.poker_requests")) return [];
@@ -55,15 +65,16 @@ const run = async () => {
           if (text.includes("select version, state from public.poker_state")) {
             return [{ version: 7, state: JSON.stringify({ tableId, stacks: { [botA]: 120, [botB]: 80 } }) }];
           }
-          if (text.includes("select user_id, seat_no, status, is_bot, stack from public.poker_seats") && text.includes("for update")) {
-            const userId = params?.[1];
-            const row = botSeats.get(userId);
-            return row ? [row] : [];
-          }
           if (text.includes("update public.poker_seats set stack = 0 where table_id = $1 and user_id = $2")) {
             const userId = params?.[1];
             const row = botSeats.get(userId);
             if (row) row.stack = 0;
+            return [];
+          }
+          if (text.includes("update public.poker_seats set status = 'inactive' where table_id = $1 and user_id = $2")) {
+            const userId = params?.[1];
+            const row = botSeats.get(userId);
+            if (row) row.status = "INACTIVE";
             return [];
           }
           if (text.includes("update public.poker_seats set status = 'inactive', stack = 0")) {
@@ -95,6 +106,21 @@ const run = async () => {
   assert.equal(postCalls[1].idempotencyKey, `bot-cashout:${tableId}:4:SWEEP_CLOSE:close_cashout:v1:7`);
   assert.equal(postCalls[0].entries[0].amount, -120);
   assert.equal(postCalls[1].entries[0].amount, -80);
+
+  for (const botUserId of [botA, botB]) {
+    const statusUpdateIdx = queries.findIndex(
+      (entry) =>
+        entry.text.includes("update public.poker_seats set status = 'inactive' where table_id = $1 and user_id = $2") &&
+        entry.params?.[1] === botUserId
+    );
+    const stackUpdateIdx = queries.findIndex(
+      (entry) =>
+        entry.text.includes("update public.poker_seats set stack = 0 where table_id = $1 and user_id = $2") &&
+        entry.params?.[1] === botUserId
+    );
+    assert.ok(statusUpdateIdx >= 0, `expected status inactivation query for ${botUserId}`);
+    assert.ok(stackUpdateIdx > statusUpdateIdx, `expected stack cashout update after status inactivation for ${botUserId}`);
+  }
 
   const second = await handler({ httpMethod: "POST", headers: { "x-sweep-secret": "secret" } });
   assert.equal(second.statusCode, 200);

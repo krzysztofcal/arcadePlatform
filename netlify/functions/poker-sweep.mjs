@@ -433,7 +433,7 @@ limit $1;`,
               });
               continue;
             }
-            if (locked?.status === "ACTIVE") {
+            if (locked?.status === "ACTIVE" && locked?.is_bot !== true) {
               klog("poker_close_cashout_skip_active_seat", { tableId, userId, seatNo });
               continue;
             }
@@ -450,6 +450,17 @@ limit $1;`,
             if (locked?.is_bot === true) {
               let botResult = null;
               try {
+                const inactiveResult = await ensureBotSeatInactiveForCashout(tx, { tableId, botUserId: userId });
+                if (!inactiveResult?.ok) {
+                  klog("poker_close_cashout_bot_invalid", {
+                    tableId,
+                    userId,
+                    seatNo,
+                    reason: inactiveResult?.reason || "unknown",
+                  });
+                  tableSkipped += 1;
+                  continue;
+                }
                 botResult = await cashoutBotSeatIfNeeded(tx, {
                   tableId,
                   botUserId: userId,
