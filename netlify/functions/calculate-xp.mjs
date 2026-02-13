@@ -17,6 +17,7 @@ import crypto from "node:crypto";
 import { store, atomicRateLimitIncr } from "./_shared/store-upstash.mjs";
 import { klog } from "./_shared/supabase-admin.mjs";
 import { verifySessionToken, validateServerSession, touchSession } from "./start-session.mjs";
+import { nextUtcMidnightMs, utcDayKey } from "./_shared/time-utils.mjs";
 
 // ============================================================================
 // Configuration Constants
@@ -249,84 +250,9 @@ function generateFingerprint(headers) {
   return hash(`${ua}|${lang}|${enc}`).slice(0, 16);
 }
 
-const warsawDateFormatter = new Intl.DateTimeFormat("en-CA", {
-  timeZone: "Europe/Warsaw",
-  hour12: false,
-  year: "numeric",
-  month: "2-digit",
-  day: "2-digit",
-  hour: "2-digit",
-});
+const getDailyKey = (ms = Date.now()) => utcDayKey(ms);
 
-const warsawParts = (ms) => {
-  const parts = warsawDateFormatter.formatToParts(new Date(ms));
-  const result = {};
-  for (const part of parts) {
-    if (part.type === "year" || part.type === "month" || part.type === "day" || part.type === "hour") {
-      result[part.type] = Number(part.value);
-    }
-  }
-  return result;
-};
-
-const getDailyKey = (ms = Date.now()) => {
-  let effectiveMs = ms;
-  let { year, month, day, hour } = warsawParts(effectiveMs);
-  if (hour < 3) {
-    effectiveMs -= 3 * 60 * 60 * 1000;
-    ({ year, month, day } = warsawParts(effectiveMs));
-  }
-  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-};
-
-const warsawOffsetFormatter = new Intl.DateTimeFormat("en-US", {
-  timeZone: "Europe/Warsaw",
-  hour12: false,
-  timeZoneName: "longOffset",
-});
-
-const parseWarsawOffsetMinutes = (ms) => {
-  const parts = warsawOffsetFormatter.formatToParts(new Date(ms));
-  const offsetPart = parts.find((part) => part.type === "timeZoneName");
-  if (!offsetPart) return 0;
-  const match = /GMT([+-])(\d{2}):(\d{2})/.exec(offsetPart.value);
-  if (!match) return 0;
-  const sign = match[1] === "-" ? -1 : 1;
-  const hours = Number(match[2]);
-  const minutes = Number(match[3]);
-  return sign * (hours * 60 + minutes);
-};
-
-const toWarsawEpoch = (year, month, day, hour) => {
-  let guessUtc = Date.UTC(year, month - 1, day, hour, 0, 0, 0);
-  let offset = parseWarsawOffsetMinutes(guessUtc);
-  let adjusted = guessUtc - offset * 60_000;
-  const adjustedOffset = parseWarsawOffsetMinutes(adjusted);
-  if (adjustedOffset !== offset) {
-    offset = adjustedOffset;
-    adjusted = Date.UTC(year, month - 1, day, hour, 0, 0, 0) - offset * 60_000;
-  }
-  return adjusted;
-};
-
-const warsawNow = (ms = Date.now()) => ({
-  ...warsawParts(ms),
-  ms,
-});
-
-const getNextResetEpoch = (ms = Date.now()) => {
-  const current = warsawNow(ms);
-  let targetYear = current.year;
-  let targetMonth = current.month;
-  let targetDay = current.day;
-  if (current.hour >= 3) {
-    const tomorrow = warsawParts(ms + 24 * 60 * 60 * 1000);
-    targetYear = tomorrow.year;
-    targetMonth = tomorrow.month;
-    targetDay = tomorrow.day;
-  }
-  return toWarsawEpoch(targetYear, targetMonth, targetDay, 3);
-};
+const getNextResetEpoch = (ms = Date.now()) => nextUtcMidnightMs(ms);
 
 // Redis Keys
 const keyDaily = (u, day = getDailyKey()) => `${KEY_NS}:daily:${u}:${day}`;

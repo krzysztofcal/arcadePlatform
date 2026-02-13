@@ -119,22 +119,30 @@ function send(res, status, body, headers = {}) {
   }
 }
 
-// Import and handle Netlify function (ESM)
-let awardXpHandler = null;
+// Import and handle Netlify functions (ESM)
+const functionHandlers = {
+  'award-xp': null,
+  'start-session': null,
+  'calculate-xp': null,
+};
+
 const handlerPromise = (async () => {
-  try {
-    const module = await import('../netlify/functions/award-xp.mjs');
-    awardXpHandler = module.handler || module.default?.handler;
-  } catch (e) {
-    console.warn('Warning: Could not load award-xp function:', e.message);
+  for (const fnName of Object.keys(functionHandlers)) {
+    try {
+      const module = await import(`../netlify/functions/${fnName}.mjs`);
+      functionHandlers[fnName] = module.handler || module.default?.handler;
+    } catch (e) {
+      console.warn(`Warning: Could not load ${fnName} function:`, e.message);
+    }
   }
 })();
 
-async function handleFunction(req, res) {
-  // Wait for handler to be loaded if still loading
+async function handleFunction(req, res, fnName) {
+  // Wait for handlers to be loaded if still loading
   await handlerPromise;
 
-  if (!awardXpHandler) {
+  const handler = functionHandlers[fnName];
+  if (!handler) {
     send(res, 501, 'Function not implemented', { 'Content-Type': 'text/plain' });
     return;
   }
@@ -147,7 +155,7 @@ async function handleFunction(req, res) {
   // Handle OPTIONS (CORS preflight)
   if (req.method === 'OPTIONS') {
     try {
-      const result = await awardXpHandler({ httpMethod: 'OPTIONS', headers, body: '' });
+      const result = await handler({ httpMethod: 'OPTIONS', headers, body: '' });
       send(res, result.statusCode || 204, result.body || '', result.headers || {});
     } catch (e) {
       console.error('Function error (OPTIONS):', e);
@@ -166,7 +174,7 @@ async function handleFunction(req, res) {
   req.on('data', (chunk) => (body += chunk));
   req.on('end', async () => {
     try {
-      const result = await awardXpHandler({ httpMethod: 'POST', headers, body });
+      const result = await handler({ httpMethod: 'POST', headers, body });
       const responseHeaders = result.headers || {};
 
       // Ensure CORS headers are present
@@ -190,9 +198,20 @@ const server = http.createServer(async (req, res) => {
     const parsedUrl = new url.URL(req.url || '/', `http://${req.headers.host || host}`);
     let pathname = decodeURIComponent(parsedUrl.pathname);
 
-    // Handle Netlify function endpoint
-    if (pathname === '/.netlify/functions/award-xp') {
-      await handleFunction(req, res);
+    // Handle Netlify function endpoints + API redirects used in Netlify
+    const functionRouteMap = {
+      '/.netlify/functions/award-xp': 'award-xp',
+      '/.netlify/functions/start-session': 'start-session',
+      '/.netlify/functions/calculate-xp': 'calculate-xp',
+      '/api/xp/award': 'award-xp',
+      '/api/xp/start-session': 'start-session',
+      '/api/xp/calculate': 'calculate-xp',
+      '/api/start-session': 'start-session',
+      '/api/award-xp': 'award-xp',
+    };
+    const fnName = functionRouteMap[pathname];
+    if (fnName) {
+      await handleFunction(req, res, fnName);
       return;
     }
 
@@ -243,5 +262,6 @@ server.listen(port, host, async () => {
   console.log(`Test server running at http://${host}:${port}`);
   console.log('  - Static files from:', root);
   console.log('  - Security headers:', Object.keys(securityHeaders).length > 0 ? 'enabled' : 'disabled');
-  console.log('  - Netlify functions:', awardXpHandler ? 'enabled' : 'disabled');
+  const enabled = Object.values(functionHandlers).filter(Boolean).length;
+  console.log('  - Netlify functions:', `${enabled}/${Object.keys(functionHandlers).length} loaded`);
 });

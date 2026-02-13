@@ -41,6 +41,15 @@ async function wait(ms: number): Promise<void> {
 
 test.describe('E2E Security Tests', () => {
 
+  test.beforeAll(async ({ request }) => {
+    const bootstrap = await request.post('/api/xp/start-session', {
+      data: { userId: `health-${Date.now()}`, sessionId: `health-${Date.now()}` },
+    });
+    if (bootstrap.status() === 404) {
+      throw new Error('Netlify redirects/functions not configured in CI baseURL');
+    }
+  });
+
   // ============================================================================
   // A. CORS & Origin Validation Tests
   // ============================================================================
