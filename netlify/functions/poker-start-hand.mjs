@@ -68,6 +68,17 @@ const parseRequestId = (value) => {
 
 const parseStacks = (value) => (value && typeof value === "object" && !Array.isArray(value) ? value : {});
 
+const buildStacksFromSeats = (seats) => {
+  const rows = Array.isArray(seats) ? seats : [];
+  return rows.reduce((acc, seat) => {
+    const userId = typeof seat?.user_id === "string" ? seat.user_id : "";
+    if (!userId) return acc;
+    const parsed = Number(seat?.stack);
+    acc[userId] = Math.max(0, Number.isFinite(parsed) ? parsed : 0);
+    return acc;
+  }, {});
+};
+
 const normalizeVersion = (value) => {
   const num = Number(value);
   return Number.isFinite(num) ? num : null;
@@ -207,7 +218,7 @@ export async function handler(event) {
         const previousDealerSeatNo = Number.isInteger(currentState?.dealerSeatNo) ? currentState.dealerSeatNo : null;
 
         const seatRows = await tx.unsafe(
-          "select user_id, seat_no from public.poker_seats where table_id = $1 and status = 'ACTIVE' order by seat_no asc;",
+          "select user_id, seat_no, stack from public.poker_seats where table_id = $1 and status = 'ACTIVE' order by seat_no asc;",
           [tableId]
         );
         const seats = Array.isArray(seatRows) ? seatRows : [];
@@ -350,12 +361,32 @@ export async function handler(event) {
         throw makeError(409, "state_invalid");
       }
       const currentStacks = parseStacks(currentState.stacks);
+      const stacksFromSeats = buildStacksFromSeats(orderedSeats);
+      const hasStoredStacks = Object.keys(currentStacks).length > 0;
+      const missingActiveStackUserId = activeUserIdList.find((userId) => !Object.prototype.hasOwnProperty.call(currentStacks, userId));
       const nextStacks = activeUserIdList.reduce((acc, userId) => {
-        if (!Object.prototype.hasOwnProperty.call(currentStacks, userId)) return acc;
-        const n = Number(currentStacks[userId]);
+        const rawStack =
+          hasStoredStacks && !missingActiveStackUserId
+            ? currentStacks[userId]
+            : Object.prototype.hasOwnProperty.call(currentStacks, userId)
+              ? currentStacks[userId]
+              : stacksFromSeats[userId];
+        const n = Number(rawStack);
         if (Number.isFinite(n) && Number.isInteger(n) && n >= 0) acc[userId] = n;
         return acc;
       }, {});
+      const invalidActiveStackUserIds = activeUserIdList.filter((userId) => (nextStacks[userId] ?? 0) <= 0);
+      if (invalidActiveStackUserIds.length > 0) {
+        klog("poker_start_hand_invalid_active_stacks", {
+          tableId,
+          userId: auth.userId,
+          invalidActiveStackUserIds,
+          activeUserIdList,
+          currentStacks,
+          stacksFromSeats,
+        });
+        throw makeError(409, "state_invalid");
+      }
       const toCallByUserId = Object.fromEntries(activeUserIdList.map((userId) => [userId, 0]));
       const betThisRoundByUserId = Object.fromEntries(activeUserIdList.map((userId) => [userId, 0]));
       const actedThisRoundByUserId = Object.fromEntries(activeUserIdList.map((userId) => [userId, false]));
@@ -372,7 +403,7 @@ export async function handler(event) {
         if (!userId) return 0;
         const stack = nextStacks[userId] ?? 0;
         const posted = Math.min(stack, blindAmount);
-        nextStacks[userId] = stack - posted;
+        nextStacks[userId] = Math.max(0, stack - posted);
         betThisRoundByUserId[userId] = posted;
         contributionsByUserId[userId] = posted;
         return posted;
