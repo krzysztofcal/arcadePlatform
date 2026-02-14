@@ -4,14 +4,7 @@ import { createDeck, dealHoleCards, shuffle } from "../netlify/functions/_shared
 import { deriveDeck } from "../netlify/functions/_shared/poker-deal-deterministic.mjs";
 import { TURN_MS, advanceIfNeeded, applyAction } from "../netlify/functions/_shared/poker-reducer.mjs";
 import { buildActionConstraints, computeLegalActions } from "../netlify/functions/_shared/poker-legal-actions.mjs";
-import {
-  getRng,
-  isPlainObject,
-  isStateStorageValid,
-  normalizeJsonState,
-  upgradeLegacyInitStateWithSeats,
-  withoutPrivateState,
-} from "../netlify/functions/_shared/poker-state-utils.mjs";
+import { getRng, isPlainObject, isStateStorageValid, normalizeJsonState, upgradeLegacyInitStateWithSeats, withoutPrivateState } from "../netlify/functions/_shared/poker-state-utils.mjs";
 import { normalizeRequestId } from "../netlify/functions/_shared/poker-request-id.mjs";
 import { resetTurnTimer } from "../netlify/functions/_shared/poker-turn-timer.mjs";
 import { clearMissedTurns } from "../netlify/functions/_shared/poker-missed-turns.mjs";
@@ -19,23 +12,21 @@ import { updatePokerStateOptimistic } from "../netlify/functions/_shared/poker-s
 
 const tableId = "11111111-1111-4111-8111-111111111111";
 const humanUserId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
-const botUserId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+const botA = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+const botB = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 
 process.env.POKER_DEAL_SECRET = process.env.POKER_DEAL_SECRET || "test-deal-secret";
-process.env.POKER_BOTS_MAX_ACTIONS_PER_REQUEST = "1";
+process.env.POKER_BOTS_MAX_ACTIONS_PER_REQUEST = "3";
 
 const run = async () => {
   const actionRows = [];
   const logs = [];
   const stateHolder = {
-    version: 7,
+    version: 10,
     state: {
       tableId,
       phase: "INIT",
-      stacks: {
-        [humanUserId]: 200,
-        [botUserId]: 200,
-      },
+      stacks: { [humanUserId]: 200, [botA]: 200, [botB]: 200 },
     },
   };
 
@@ -57,11 +48,14 @@ const run = async () => {
     upgradeLegacyInitStateWithSeats,
     withoutPrivateState,
     computeLegalActions,
-    computeNextDealerSeatNo: () => 2,
+    computeNextDealerSeatNo: () => 3,
     buildActionConstraints,
     updatePokerStateOptimistic,
     TURN_MS,
     applyAction,
+    advanceIfNeeded,
+    resetTurnTimer,
+    clearMissedTurns,
     advanceIfNeeded,
     resetTurnTimer,
     clearMissedTurns,
@@ -70,16 +64,13 @@ const run = async () => {
       fn({
         unsafe: async (query, params) => {
           const text = String(query).toLowerCase();
-          if (text.includes("from public.poker_tables")) {
-            return [{ id: tableId, status: "OPEN", stakes: '{"sb":1,"bb":2}' }];
-          }
-          if (text.includes("from public.poker_state") && text.includes("version, state")) {
-            return [{ version: stateHolder.version, state: stateHolder.state }];
-          }
+          if (text.includes("from public.poker_tables")) return [{ id: tableId, status: "OPEN", stakes: '{"sb":1,"bb":2}' }];
+          if (text.includes("from public.poker_state") && text.includes("version, state")) return [{ version: stateHolder.version, state: stateHolder.state }];
           if (text.includes("from public.poker_seats")) {
             return [
               { user_id: humanUserId, seat_no: 1, status: "ACTIVE", is_bot: false, stack: 200 },
-              { user_id: botUserId, seat_no: 2, status: "ACTIVE", is_bot: true, stack: 200 },
+              { user_id: botA, seat_no: 2, status: "ACTIVE", is_bot: true, stack: 200 },
+              { user_id: botB, seat_no: 3, status: "ACTIVE", is_bot: true, stack: 200 },
             ];
           }
           if (text.includes("from public.poker_requests")) return [];
@@ -109,30 +100,29 @@ const run = async () => {
   const response = await handler({
     httpMethod: "POST",
     headers: { origin: "https://example.test", authorization: "Bearer token" },
-    body: JSON.stringify({ tableId, requestId: "bot-start-1" }),
+    body: JSON.stringify({ tableId, requestId: "bot-advance-1" }),
   });
 
   assert.equal(response.statusCode, 200);
   const payload = JSON.parse(response.body || "{}");
   assert.equal(payload.ok, true);
-  assert.equal(payload.state?.state?.phase, "PREFLOP");
-  assert.ok(payload.state?.version >= 9, "expected at least one bot mutation beyond initial start-hand write");
-  assert.ok(actionRows.length >= 4, "expected START_HAND + blinds + bot action");
-  const botMeta = actionRows.map((row) => JSON.parse(row?.[9] || "null")).find((meta) => meta?.actor === "BOT");
-  assert.equal(botMeta?.botUserId, botUserId);
-  assert.equal(stateHolder.state.communityDealt, (stateHolder.state.community || []).length);
-  const phase = stateHolder.state.phase;
-  const isActionPhase = phase === "PREFLOP" || phase === "FLOP" || phase === "TURN" || phase === "RIVER";
-  if (isActionPhase) {
-    assert.equal(typeof stateHolder.state.turnUserId, "string");
-    assert.ok(stateHolder.state.turnUserId.length > 0, "expected non-empty turnUserId");
-    assert.notEqual(stateHolder.state.turnDeadlineAt, null, "expected non-null turn deadline in action phase");
-  }
-  const stopLog = logs.find((entry) => entry.event === "poker_start_hand_bot_autoplay_stop");
-  assert.equal(typeof stopLog?.payload?.reason, "string");
+
+  const botActions = actionRows.filter((row) => {
+    const meta = JSON.parse(row?.[9] || "null");
+    return meta?.actor === "BOT";
+  });
+  assert.ok(botActions.length >= 1, "expected at least one bot action");
+
+  const finalTurn = stateHolder.state.turnUserId || null;
+  const advancedPhase = stateHolder.state.phase !== "PREFLOP";
+  const progressedTurn = finalTurn !== botA;
+  assert.ok(advancedPhase || progressedTurn, "expected phase or turn progression after bot autoplay");
+
+  const errorLog = logs.find((entry) => entry.event === "poker_start_hand_error");
+  assert.equal(errorLog, undefined, "did not expect state_invalid/server error");
 };
 
-run().then(() => console.log("poker-start-hand bot autoplay behavior test passed")).catch((error) => {
+run().then(() => console.log("poker-start-hand bot autoplay advance behavior test passed")).catch((error) => {
   console.error(error);
   process.exit(1);
 });

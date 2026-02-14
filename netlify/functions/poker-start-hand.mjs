@@ -3,7 +3,7 @@ import { baseHeaders, beginSql, corsHeaders, extractBearerToken, klog, verifySup
 import { areCardsUnique, isValidTwoCards } from "./_shared/poker-cards-utils.mjs";
 import { dealHoleCards } from "./_shared/poker-engine.mjs";
 import { deriveDeck } from "./_shared/poker-deal-deterministic.mjs";
-import { TURN_MS, applyAction, computeNextDealerSeatNo } from "./_shared/poker-reducer.mjs";
+import { TURN_MS, advanceIfNeeded, applyAction, computeNextDealerSeatNo } from "./_shared/poker-reducer.mjs";
 import { buildActionConstraints, computeLegalActions } from "./_shared/poker-legal-actions.mjs";
 import {
   getRng,
@@ -18,6 +18,8 @@ import { updatePokerStateOptimistic } from "./_shared/poker-state-write.mjs";
 import { parseStakes } from "./_shared/poker-stakes.mjs";
 import { isValidUuid } from "./_shared/poker-utils.mjs";
 import { normalizeRequestId } from "./_shared/poker-request-id.mjs";
+import { resetTurnTimer } from "./_shared/poker-turn-timer.mjs";
+import { clearMissedTurns } from "./_shared/poker-missed-turns.mjs";
 import { buildSeatBotMap, chooseBotActionTrivial, getBotAutoplayConfig, isBotTurn } from "./_shared/poker-bots.mjs";
 
 const parseBody = (body) => {
@@ -60,6 +62,7 @@ const makeAlreadyInHandError = (tableId, userId, context) => {
 };
 
 const REQUEST_PENDING_STALE_SEC = 30;
+const ADVANCE_LIMIT = 4;
 
 const parseRequestId = (value) => {
   const parsed = normalizeRequestId(value, { maxLen: 200 });
@@ -616,25 +619,97 @@ export async function handler(event) {
       let finalState = updatedState;
       let loopPrivateState = { ...updatedState, deck: Array.isArray(dealResult?.deck) ? dealResult.deck.slice() : [] };
       let botActionIndex = 0;
-      while (botActionIndex < botAutoplayConfig.maxActionsPerRequest) {
-        if (!isBotTurn(finalState.turnUserId, seatBotMap)) break;
-        const legalInfoBot = computeLegalActions({ statePublic: withoutPrivateState(finalState), userId: finalState.turnUserId });
-        const selected = chooseBotActionTrivial(legalInfoBot.actions);
-        if (!selected || !selected.type) break;
-        const botRequestId = `bot:${handId}:${botActionIndex + 1}`;
-        const botAction = { ...selected, userId: finalState.turnUserId, requestId: botRequestId };
-        const appliedBot = applyAction(loopPrivateState, botAction);
-        const { holeCardsByUserId: _ignoredHoleCards, deck: _ignoredDeck, ...botStateBase } = appliedBot.state || {};
-        const persistedBotState = {
-          ...botStateBase,
-          communityDealt: Array.isArray(appliedBot.state?.community) ? appliedBot.state.community.length : 0,
+      let stopReason = "not_attempted";
+      let lastBotActionSummary = null;
+      const handIdForLog = typeof handId === "string" && handId.trim() ? handId.trim() : null;
+      const runAdvanceLoop = (stateToAdvance, eventsList) => {
+        let next = stateToAdvance;
+        let loopCount = 0;
+        while (loopCount < ADVANCE_LIMIT) {
+          if (next.phase === "HAND_DONE") break;
+          const prevPhase = next.phase;
+          const advanced = advanceIfNeeded(next);
+          next = advanced.state;
+          if (Array.isArray(advanced.events) && advanced.events.length > 0) {
+            eventsList.push(...advanced.events);
+          }
+          if (!Array.isArray(advanced.events) || advanced.events.length === 0) break;
+          if (next.phase === prevPhase) break;
+          loopCount += 1;
+        }
+        return next;
+      };
+      const toPersistedState = (privateStateInput, actorUserId, actorRequestId) => {
+        const { holeCardsByUserId: _ignoredHoleCards, deck: _ignoredDeck, ...stateBase } = privateStateInput || {};
+        const withCommunity = {
+          ...stateBase,
+          communityDealt: Array.isArray(privateStateInput?.community) ? privateStateInput.community.length : 0,
           lastActionRequestIdByUserId: {
             ...(finalState.lastActionRequestIdByUserId || {}),
-            [botAction.userId]: botRequestId,
+            [actorUserId]: actorRequestId,
           },
         };
+        const nowMs = Date.now();
+        const hasTurnUserId = typeof withCommunity.turnUserId === "string" && withCommunity.turnUserId.trim();
+        const withTimer =
+          (withCommunity.phase === "PREFLOP" || withCommunity.phase === "FLOP" || withCommunity.phase === "TURN" || withCommunity.phase === "RIVER") && hasTurnUserId
+            ? resetTurnTimer(withCommunity, nowMs, TURN_MS)
+            : { ...withCommunity, turnStartedAt: null, turnDeadlineAt: null };
+        const cleared = clearMissedTurns(withTimer, actorUserId);
+        return cleared.changed ? cleared.nextState : withTimer;
+      };
+
+      klog("poker_start_hand_bot_autoplay_attempt", {
+        tableId,
+        handId: handIdForLog,
+        turnUserId: finalState.turnUserId || null,
+        policyVersion: botAutoplayConfig.policyVersion,
+        maxActionsPerRequest: botAutoplayConfig.maxActionsPerRequest,
+      });
+
+      while (botActionIndex < botAutoplayConfig.maxActionsPerRequest) {
+        const turnUserId = finalState.turnUserId;
+        if (!(finalState.phase === "PREFLOP" || finalState.phase === "FLOP" || finalState.phase === "TURN" || finalState.phase === "RIVER")) {
+          stopReason = "non_action_phase";
+          break;
+        }
+        if (!isBotTurn(turnUserId, seatBotMap)) {
+          stopReason = "turn_not_bot";
+          break;
+        }
+        const legalInfoBot = computeLegalActions({ statePublic: withoutPrivateState(finalState), userId: turnUserId });
+        const selected = chooseBotActionTrivial(legalInfoBot.actions);
+        if (!selected || !selected.type) {
+          stopReason = "no_legal_action";
+          break;
+        }
+
+        const botRequestId = `bot:${handId}:${botActionIndex + 1}`;
+        const botAction = { ...selected, userId: turnUserId, requestId: botRequestId };
+        let appliedBot;
+        try {
+          appliedBot = applyAction(loopPrivateState, botAction);
+        } catch (error) {
+          stopReason = "apply_action_failed";
+          klog("poker_start_hand_bot_autoplay_stop", {
+            tableId,
+            handId: handIdForLog,
+            turnUserId: turnUserId || null,
+            policyVersion: botAutoplayConfig.policyVersion,
+            botActionCount: botActionIndex,
+            reason: stopReason,
+            actionType: botAction.type || null,
+            actionAmount: botAction.amount ?? null,
+            error: error?.message || "apply_action_failed",
+          });
+          break;
+        }
+        const botEvents = Array.isArray(appliedBot.events) ? appliedBot.events.slice() : [];
+        const botAdvancedState = runAdvanceLoop(appliedBot.state, botEvents);
+        const persistedBotState = toPersistedState(botAdvancedState, botAction.userId, botRequestId);
         if (!isStateStorageValid(persistedBotState, { requireHandSeed: true, requireCommunityDealt: true, requireNoDeck: true })) {
-          throw makeError(409, "state_invalid");
+          stopReason = "invalid_persist_state";
+          break;
         }
         const botUpdate = await updatePokerStateOptimistic(tx, {
           tableId,
@@ -642,8 +717,15 @@ export async function handler(event) {
           nextState: persistedBotState,
         });
         if (!botUpdate.ok) {
-          if (botUpdate.reason === "not_found") throw makeError(404, "state_missing");
-          if (botUpdate.reason === "conflict") throw makeError(409, "state_conflict");
+          if (botUpdate.reason === "conflict") {
+            stopReason = "optimistic_conflict";
+            break;
+          }
+          if (botUpdate.reason === "not_found") {
+            stopReason = "state_missing";
+            throw makeError(404, "state_missing");
+          }
+          stopReason = "update_failed";
           throw makeError(409, "state_invalid");
         }
         newVersion = botUpdate.newVersion;
@@ -663,10 +745,27 @@ export async function handler(event) {
             JSON.stringify({ actor: "BOT", botUserId: botAction.userId, policyVersion: botAutoplayConfig.policyVersion, reason: "AUTO_TURN" }),
           ]
         );
+        lastBotActionSummary = { type: botAction.type, amount: botAction.amount ?? null, userId: botAction.userId };
         finalState = persistedBotState;
-        loopPrivateState = { ...appliedBot.state, lastActionRequestIdByUserId: persistedBotState.lastActionRequestIdByUserId };
+        loopPrivateState = botAdvancedState;
         botActionIndex += 1;
       }
+      if (stopReason === "not_attempted") {
+        stopReason = botActionIndex >= botAutoplayConfig.maxActionsPerRequest ? "action_cap_reached" : "completed";
+      } else if (botActionIndex >= botAutoplayConfig.maxActionsPerRequest) {
+        stopReason = "action_cap_reached";
+      }
+      klog("poker_start_hand_bot_autoplay_stop", {
+        tableId,
+        handId: handIdForLog,
+        turnUserId: finalState.turnUserId || null,
+        policyVersion: botAutoplayConfig.policyVersion,
+        botActionCount: botActionIndex,
+        reason: stopReason,
+        lastActionType: lastBotActionSummary?.type || null,
+        lastActionAmount: lastBotActionSummary?.amount ?? null,
+        optimisticConflict: stopReason === "optimistic_conflict",
+      });
 
       await tx.unsafe(
         "update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1;",
