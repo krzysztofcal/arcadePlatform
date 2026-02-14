@@ -3,7 +3,7 @@ import { baseHeaders, beginSql, corsHeaders, extractBearerToken, klog, verifySup
 import { areCardsUnique, isValidTwoCards } from "./_shared/poker-cards-utils.mjs";
 import { dealHoleCards } from "./_shared/poker-engine.mjs";
 import { deriveDeck } from "./_shared/poker-deal-deterministic.mjs";
-import { TURN_MS, computeNextDealerSeatNo } from "./_shared/poker-reducer.mjs";
+import { TURN_MS, applyAction, computeNextDealerSeatNo } from "./_shared/poker-reducer.mjs";
 import { buildActionConstraints, computeLegalActions } from "./_shared/poker-legal-actions.mjs";
 import {
   getRng,
@@ -18,6 +18,7 @@ import { updatePokerStateOptimistic } from "./_shared/poker-state-write.mjs";
 import { parseStakes } from "./_shared/poker-stakes.mjs";
 import { isValidUuid } from "./_shared/poker-utils.mjs";
 import { normalizeRequestId } from "./_shared/poker-request-id.mjs";
+import { buildSeatBotMap, chooseBotActionTrivial, getBotAutoplayConfig, isBotTurn } from "./_shared/poker-bots.mjs";
 
 const parseBody = (body) => {
   if (!body) return { ok: true, value: {} };
@@ -218,10 +219,11 @@ export async function handler(event) {
         const previousDealerSeatNo = Number.isInteger(currentState?.dealerSeatNo) ? currentState.dealerSeatNo : null;
 
         const seatRows = await tx.unsafe(
-          "select user_id, seat_no, stack from public.poker_seats where table_id = $1 and status = 'ACTIVE' order by seat_no asc;",
+          "select user_id, seat_no, stack, is_bot from public.poker_seats where table_id = $1 and status = 'ACTIVE' order by seat_no asc;",
           [tableId]
         );
         const seats = Array.isArray(seatRows) ? seatRows : [];
+        const seatBotMap = buildSeatBotMap(seats);
         const validSeats = seats.filter((seat) => Number.isInteger(seat?.seat_no) && seat?.user_id);
         if (validSeats.length < 2) {
           throw makeError(400, "not_enough_players");
@@ -563,7 +565,7 @@ export async function handler(event) {
         }
         throw makeError(409, "state_invalid");
       }
-      const newVersion = updateResult.newVersion;
+      let newVersion = updateResult.newVersion;
       mutated = true;
 
       const actionMeta = {
@@ -609,12 +611,69 @@ export async function handler(event) {
           ]
         );
       }
+
+      const botAutoplayConfig = getBotAutoplayConfig(process.env);
+      let finalState = updatedState;
+      let loopPrivateState = { ...updatedState, deck: Array.isArray(dealResult?.deck) ? dealResult.deck.slice() : [] };
+      let botActionIndex = 0;
+      while (botActionIndex < botAutoplayConfig.maxActionsPerRequest) {
+        if (!isBotTurn(finalState.turnUserId, seatBotMap)) break;
+        const legalInfoBot = computeLegalActions({ statePublic: withoutPrivateState(finalState), userId: finalState.turnUserId });
+        const selected = chooseBotActionTrivial(legalInfoBot.actions);
+        if (!selected || !selected.type) break;
+        const botRequestId = `bot:${handId}:${botActionIndex + 1}`;
+        const botAction = { ...selected, userId: finalState.turnUserId, requestId: botRequestId };
+        const appliedBot = applyAction(loopPrivateState, botAction);
+        const { holeCardsByUserId: _ignoredHoleCards, deck: _ignoredDeck, ...botStateBase } = appliedBot.state || {};
+        const persistedBotState = {
+          ...botStateBase,
+          communityDealt: Array.isArray(appliedBot.state?.community) ? appliedBot.state.community.length : 0,
+          lastActionRequestIdByUserId: {
+            ...(finalState.lastActionRequestIdByUserId || {}),
+            [botAction.userId]: botRequestId,
+          },
+        };
+        if (!isStateStorageValid(persistedBotState, { requireHandSeed: true, requireCommunityDealt: true, requireNoDeck: true })) {
+          throw makeError(409, "state_invalid");
+        }
+        const botUpdate = await updatePokerStateOptimistic(tx, {
+          tableId,
+          expectedVersion: newVersion,
+          nextState: persistedBotState,
+        });
+        if (!botUpdate.ok) {
+          if (botUpdate.reason === "not_found") throw makeError(404, "state_missing");
+          if (botUpdate.reason === "conflict") throw makeError(409, "state_conflict");
+          throw makeError(409, "state_invalid");
+        }
+        newVersion = botUpdate.newVersion;
+        mutated = true;
+        await tx.unsafe(
+          "insert into public.poker_actions (table_id, version, user_id, action_type, amount, hand_id, request_id, phase_from, phase_to, meta) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb);",
+          [
+            tableId,
+            newVersion,
+            botAction.userId,
+            botAction.type,
+            botAction.amount ?? null,
+            handId,
+            botRequestId,
+            finalState.phase || null,
+            persistedBotState.phase || null,
+            JSON.stringify({ actor: "BOT", botUserId: botAction.userId, policyVersion: botAutoplayConfig.policyVersion, reason: "AUTO_TURN" }),
+          ]
+        );
+        finalState = persistedBotState;
+        loopPrivateState = { ...appliedBot.state, lastActionRequestIdByUserId: persistedBotState.lastActionRequestIdByUserId };
+        botActionIndex += 1;
+      }
+
       await tx.unsafe(
         "update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1;",
         [tableId]
       );
 
-      const responseState = withoutPrivateState(updatedState);
+      const responseState = withoutPrivateState(finalState);
       const legalInfo = computeLegalActions({ statePublic: responseState, userId: auth.userId });
       const resultPayload = {
         ok: true,

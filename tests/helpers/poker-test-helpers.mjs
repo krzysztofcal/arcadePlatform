@@ -6,7 +6,16 @@ import { formatStakes, parseStakes } from "../../netlify/functions/_shared/poker
 import { clearMissedTurns } from "../../netlify/functions/_shared/poker-missed-turns.mjs";
 import { patchSitOutByUserId } from "../../netlify/functions/_shared/poker-sitout-flag.mjs";
 import { createPokerTableWithState } from "../../netlify/functions/_shared/poker-table-init.mjs";
-import { computeTargetBotCount, getBotConfig, makeBotSystemKey, makeBotUserId } from "../../netlify/functions/_shared/poker-bots.mjs";
+import {
+  buildSeatBotMap,
+  chooseBotActionTrivial,
+  computeTargetBotCount,
+  getBotAutoplayConfig,
+  getBotConfig,
+  isBotTurn,
+  makeBotSystemKey,
+  makeBotUserId,
+} from "../../netlify/functions/_shared/poker-bots.mjs";
 import { cashoutBotSeatIfNeeded, ensureBotSeatInactiveForCashout } from "../../netlify/functions/_shared/poker-bot-cashout.mjs";
 import { isValidUuid } from "../../netlify/functions/_shared/poker-utils.mjs";
 
@@ -102,6 +111,10 @@ export const loadPokerHandler = (filePath, mocks) => {
     "TURN_MS",
     "updatePokerStateLocked",
     "computeTargetBotCount",
+    "getBotAutoplayConfig",
+    "chooseBotActionTrivial",
+    "buildSeatBotMap",
+    "isBotTurn",
     "getBotConfig",
     "makeBotSystemKey",
     "makeBotUserId",
@@ -133,6 +146,10 @@ return handler;`
       patchSitOutByUserId,
       createPokerTableWithState,
       computeTargetBotCount,
+      getBotAutoplayConfig,
+      chooseBotActionTrivial,
+      buildSeatBotMap,
+      isBotTurn,
       getBotConfig,
       makeBotSystemKey,
       makeBotUserId,

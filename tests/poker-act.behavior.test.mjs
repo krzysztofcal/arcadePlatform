@@ -103,7 +103,7 @@ const makeHandler = (queries, storedState, userId, options = {}) =>
               if (text.includes("coalesce(is_bot,false) = false")) {
                 return rows.filter((row) => !row.is_bot).map(({ user_id, seat_no }) => ({ user_id, seat_no }));
               }
-              return rows.map(({ user_id, seat_no }) => ({ user_id, seat_no }));
+              return rows.map(({ user_id, seat_no, is_bot }) => ({ user_id, seat_no, is_bot }));
             }
             return [];
           }
