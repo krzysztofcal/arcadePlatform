@@ -871,7 +871,8 @@ from inserted i;
       throw mismatch;
     }
 
-    const accountRows = userAccount?.id
+    const shouldLoadUserAccountSnapshot = Boolean(payloadUserId && userAccount?.id);
+    const accountRows = shouldLoadUserAccountSnapshot
       ? await sqlTx`
       select id, balance, next_entry_seq
       from public.chips_accounts

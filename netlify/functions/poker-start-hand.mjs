@@ -446,6 +446,9 @@ export async function handler(event) {
         if (isHoleCardsTableMissing(error)) {
           throw makeError(409, "state_invalid");
         }
+        if (error?.code === "23503") {
+          throw makeError(500, "hole_cards_write_failed");
+        }
         throw error;
       }
       const insertedUserIds = Array.isArray(holeCardInsertRows)
@@ -627,7 +630,15 @@ export async function handler(event) {
     const isAppError = Number.isInteger(error?.status) && typeof error?.code === "string";
     const status = isAppError ? error.status : 500;
     const code = isAppError ? error.code : toErrorPayload(error).code;
-    klog("poker_start_hand_error", { tableId, userId: auth?.userId ?? null, status, code });
+    klog("poker_start_hand_error", {
+      tableId,
+      userId: auth?.userId ?? null,
+      status,
+      code,
+      constraint: typeof error?.constraint === "string" ? error.constraint : null,
+      message: typeof error?.message === "string" ? error.message : null,
+      dbCode: typeof error?.code === "string" ? error.code : null,
+    });
     return respondError(status, code);
   }
 }
