@@ -10,7 +10,7 @@ import { computeShowdown } from "../netlify/functions/_shared/poker-showdown.mjs
 import { maybeApplyTurnTimeout } from "../netlify/functions/_shared/poker-turn-timeout.mjs";
 import { isPlainObject, isStateStorageValid, normalizeJsonState, withoutPrivateState } from "../netlify/functions/_shared/poker-state-utils.mjs";
 import { deriveCommunityCards, deriveRemainingDeck } from "../netlify/functions/_shared/poker-deal-deterministic.mjs";
-import { buildActionConstraints } from "../netlify/functions/_shared/poker-legal-actions.mjs";
+import { buildActionConstraints, computeLegalActions } from "../netlify/functions/_shared/poker-legal-actions.mjs";
 import { resetTurnTimer } from "../netlify/functions/_shared/poker-turn-timer.mjs";
 import { updatePokerStateOptimistic } from "../netlify/functions/_shared/poker-state-write.mjs";
 import { loadPokerHandler } from "./helpers/poker-test-helpers.mjs";
@@ -50,7 +50,6 @@ const holeCardsByUserId = dealHoleCards(deriveDeck(baseState.handSeed), [humanUs
 
 const run = async () => {
   const logs = [];
-  const actionInserts = [];
   const storedState = { version: 4, value: JSON.stringify(baseState) };
 
   const handler = loadPokerHandler("netlify/functions/poker-act.mjs", {
@@ -73,10 +72,7 @@ const run = async () => {
     applyAction,
     deriveCommunityCards,
     deriveRemainingDeck,
-    computeLegalActions: ({ userId }) => {
-      if (userId === botUserId) return { actions: ["CHECK"], minRaiseTo: null, maxRaiseTo: null };
-      return { actions: ["CHECK"], minRaiseTo: null, maxRaiseTo: null };
-    },
+    computeLegalActions,
     buildActionConstraints,
     isHoleCardsTableMissing,
     resetTurnTimer,
@@ -101,10 +97,7 @@ const run = async () => {
             storedState.version += 1;
             return [{ version: storedState.version }];
           }
-          if (text.includes("insert into public.poker_actions")) {
-            actionInserts.push(params);
-            return [{ ok: true }];
-          }
+          if (text.includes("insert into public.poker_actions")) return [{ ok: true }];
           if (text.includes("update public.poker_tables set last_activity_at = now(), updated_at = now()")) return [];
           return [];
         },
@@ -115,36 +108,17 @@ const run = async () => {
   const response = await handler({
     httpMethod: "POST",
     headers: { origin: "https://example.test", authorization: "Bearer token" },
-    body: JSON.stringify({ tableId, requestId: "human-check-stop-reason", action: { type: "CHECK" } }),
+    body: JSON.stringify({ tableId, requestId: "compile-path-1", action: { type: "CHECK" } }),
   });
 
   assert.equal(response.statusCode, 200);
   const payload = JSON.parse(response.body || "{}");
   assert.equal(payload.ok, true);
-
-  const stopLog = logs.find((entry) => entry.event === "poker_act_bot_autoplay_stop");
-  assert.equal(typeof stopLog?.payload?.reason, "string");
-  assert.equal(stopLog?.payload?.tableId, tableId);
-  assert.equal(stopLog?.payload?.handId, "hand-1");
-  assert.equal(typeof stopLog?.payload?.policyVersion, "string");
-
-  const botWrites = actionInserts.filter((params) => {
-    const meta = (() => {
-      try {
-        return JSON.parse(params?.[9] || "null");
-      } catch {
-        return null;
-      }
-    })();
-    return params?.[2] === botUserId || meta?.actor === "BOT";
-  });
-  assert.ok(botWrites.length >= 1, "expected bot action write for bot legal action path");
-  const botMeta = JSON.parse(botWrites[0]?.[9] || "null");
-  assert.equal(botMeta?.actor, "BOT");
-  assert.equal(botMeta?.reason, "AUTO_TURN");
+  assert.ok(logs.some((entry) => entry.event === "poker_act_bot_autoplay_attempt"));
+  assert.ok(logs.some((entry) => entry.event === "poker_act_bot_autoplay_stop"));
 };
 
-run().then(() => console.log("poker-act bot autoplay stop-reason behavior test passed")).catch((error) => {
+run().then(() => console.log("poker-act bot autoplay compile behavior test passed")).catch((error) => {
   console.error(error);
   process.exit(1);
 });

@@ -74,6 +74,7 @@ run("node", ["tests/poker-start-hand.short-stack-blind.behavior.test.mjs"], "pok
 run("node", ["tests/poker-start-hand.legacy-init-upgrade.test.mjs"], "poker-start-hand-legacy-init-upgrade");
 run("node", ["tests/poker-act.behavior.test.mjs"], "poker-act-behavior");
 run("node", ["tests/poker-act.bot-autoplay.behavior.test.mjs"], "poker-act-bot-autoplay-behavior");
+run("node", ["tests/poker-act.bot-autoplay.compile.behavior.test.mjs"], "poker-act-bot-autoplay-compile-behavior");
 run("node", ["tests/poker-act.bot-autoplay-stop-reason.behavior.test.mjs"], "poker-act-bot-autoplay-stop-reason-behavior");
 run("node", ["tests/poker-act.init-phase.test.mjs"], "poker-act-init-phase");
 run("node", ["tests/poker-sweep.behavior.test.mjs"], "poker-sweep-behavior");

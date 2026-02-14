@@ -21,6 +21,27 @@ import { buildSeatBotMap, chooseBotActionTrivial, getBotAutoplayConfig, isBotTur
 const ACTION_TYPES = new Set(["CHECK", "BET", "CALL", "RAISE", "FOLD", "LEAVE_TABLE"]);
 const ADVANCE_LIMIT = 4;
 const REQUEST_PENDING_STALE_SEC = 30;
+
+const runAdvanceLoop = (stateToAdvance, eventsList, advanceEventsList, advanceLimit = ADVANCE_LIMIT) => {
+  let next = stateToAdvance;
+  let loopCount = 0;
+  while (loopCount < advanceLimit) {
+    if (next.phase === "HAND_DONE") break;
+    const prevPhase = next.phase;
+    const advanced = advanceIfNeeded(next);
+    next = advanced.state;
+
+    if (Array.isArray(advanced.events) && advanced.events.length > 0) {
+      if (Array.isArray(eventsList)) eventsList.push(...advanced.events);
+      if (Array.isArray(advanceEventsList)) advanceEventsList.push(...advanced.events);
+    }
+
+    if (!Array.isArray(advanced.events) || advanced.events.length === 0) break;
+    if (next.phase === prevPhase) break;
+    loopCount += 1;
+  }
+  return { nextState: next, loops: loopCount };
+};
 const isPlainObjectValue = (value) => value && typeof value === "object" && !Array.isArray(value);
 const isPlainObject = isPlainObjectValue;
 
@@ -474,26 +495,6 @@ export async function handler(event) {
           rejectStateInvalid("showdown_failed", { reason });
         }
         return materialized.nextState;
-      };
-      const runAdvanceLoop = (stateToAdvance, eventsList, advanceEventsList) => {
-        let next = stateToAdvance;
-        let loopCount = 0;
-        while (loopCount < ADVANCE_LIMIT) {
-          if (next.phase === "HAND_DONE") break;
-          const prevPhase = next.phase;
-          const advanced = advanceIfNeeded(next);
-          next = advanced.state;
-
-          if (Array.isArray(advanced.events) && advanced.events.length > 0) {
-            eventsList.push(...advanced.events);
-            advanceEventsList.push(...advanced.events);
-          }
-
-          if (!Array.isArray(advanced.events) || advanced.events.length === 0) break;
-          if (next.phase === prevPhase) break;
-          loopCount += 1;
-        }
-        return { nextState: next, loops: loopCount };
       };
       if (typeof currentState.handId !== "string" || !currentState.handId.trim()) {
         klog("poker_act_rejected", {
