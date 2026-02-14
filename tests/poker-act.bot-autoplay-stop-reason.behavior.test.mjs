@@ -50,6 +50,7 @@ const holeCardsByUserId = dealHoleCards(deriveDeck(baseState.handSeed), [humanUs
 
 const run = async () => {
   const logs = [];
+  const actionInserts = [];
   const storedState = { version: 4, value: JSON.stringify(baseState) };
 
   const handler = loadPokerHandler("netlify/functions/poker-act.mjs", {
@@ -100,7 +101,10 @@ const run = async () => {
             storedState.version += 1;
             return [{ version: storedState.version }];
           }
-          if (text.includes("insert into public.poker_actions")) return [{ ok: true }];
+          if (text.includes("insert into public.poker_actions")) {
+            actionInserts.push(params);
+            return [{ ok: true }];
+          }
           if (text.includes("update public.poker_tables set last_activity_at = now(), updated_at = now()")) return [];
           return [];
         },
@@ -123,6 +127,18 @@ const run = async () => {
   assert.equal(stopLog?.payload?.handId, "hand-1");
   assert.equal(stopLog?.payload?.turnUserId, botUserId);
   assert.equal(typeof stopLog?.payload?.policyVersion, "string");
+
+  const botWrites = actionInserts.filter((params) => {
+    const meta = (() => {
+      try {
+        return JSON.parse(params?.[9] || "null");
+      } catch {
+        return null;
+      }
+    })();
+    return params?.[2] === botUserId || meta?.actor === "BOT";
+  });
+  assert.equal(botWrites.length, 0, "expected no bot action writes when stop reason is no_legal_action");
 };
 
 run().then(() => console.log("poker-act bot autoplay stop-reason behavior test passed")).catch((error) => {

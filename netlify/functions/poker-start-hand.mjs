@@ -634,7 +634,6 @@ export async function handler(event) {
             eventsList.push(...advanced.events);
           }
           if (!Array.isArray(advanced.events) || advanced.events.length === 0) break;
-          if (next.phase === prevPhase) break;
           loopCount += 1;
         }
         return next;

@@ -56,9 +56,6 @@ const run = async () => {
     advanceIfNeeded,
     resetTurnTimer,
     clearMissedTurns,
-    advanceIfNeeded,
-    resetTurnTimer,
-    clearMissedTurns,
     klog: (event, payload) => logs.push({ event, payload }),
     beginSql: async (fn) =>
       fn({
@@ -113,8 +110,17 @@ const run = async () => {
   });
   assert.ok(botActions.length >= 1, "expected at least one bot action");
 
+  assert.equal(stateHolder.state.communityDealt, (stateHolder.state.community || []).length);
+  const finalPhase = stateHolder.state.phase;
+  const isActionPhase = finalPhase === "PREFLOP" || finalPhase === "FLOP" || finalPhase === "TURN" || finalPhase === "RIVER";
+  if (isActionPhase) {
+    assert.equal(typeof stateHolder.state.turnUserId, "string");
+    assert.ok(stateHolder.state.turnUserId.length > 0, "expected non-empty turnUserId in action phase");
+    assert.notEqual(stateHolder.state.turnDeadlineAt, null, "expected non-null turnDeadlineAt in action phase");
+  }
+
   const finalTurn = stateHolder.state.turnUserId || null;
-  const advancedPhase = stateHolder.state.phase !== "PREFLOP";
+  const advancedPhase = finalPhase !== "PREFLOP";
   const progressedTurn = finalTurn !== botA;
   assert.ok(advancedPhase || progressedTurn, "expected phase or turn progression after bot autoplay");
 
