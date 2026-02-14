@@ -89,6 +89,7 @@ const run = async () => {
   });
 
   assert.equal(result.transaction.user_id, userId);
+  assert.equal(result.account?.id, `acct-user-${userId}`);
   assert.equal(state.userAccountsCreated, 1);
   assert.equal(result.entries.length, 2);
   assert.equal(result.entries.some((entry) => entry.account_id === `acct-user-${userId}` && entry.amount === -100), true);

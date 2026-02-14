@@ -88,6 +88,7 @@ const run = async () => {
 
   assert.equal(result.transaction.tx_type, "TABLE_BUY_IN");
   assert.equal(result.transaction.user_id, null);
+  assert.equal(result.account, null);
   assert.equal(state.userLookups, 0);
   assert.equal(result.entries.length, 2);
   assert.deepEqual(result.entries.map((entry) => entry.account_id).sort(), ["acct-escrow", "acct-system"]);
