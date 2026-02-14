@@ -363,19 +363,15 @@ export async function handler(event) {
       const currentStacks = parseStacks(currentState.stacks);
       const stacksFromSeats = buildStacksFromSeats(orderedSeats);
       const hasStoredStacks = Object.keys(currentStacks).length > 0;
-      const missingActiveStackUserId = activeUserIdList.find((userId) => !Object.prototype.hasOwnProperty.call(currentStacks, userId));
+      const missingStoredStackUserId = activeUserIdList.find((userId) => !Object.prototype.hasOwnProperty.call(currentStacks, userId));
+      const useStoredStacks = hasStoredStacks && !missingStoredStackUserId;
       const nextStacks = activeUserIdList.reduce((acc, userId) => {
-        const rawStack =
-          hasStoredStacks && !missingActiveStackUserId
-            ? currentStacks[userId]
-            : Object.prototype.hasOwnProperty.call(currentStacks, userId)
-              ? currentStacks[userId]
-              : stacksFromSeats[userId];
+        const rawStack = useStoredStacks ? currentStacks[userId] : stacksFromSeats[userId];
         const n = Number(rawStack);
         if (Number.isFinite(n) && Number.isInteger(n) && n >= 0) acc[userId] = n;
         return acc;
       }, {});
-      const invalidActiveStackUserIds = activeUserIdList.filter((userId) => (nextStacks[userId] ?? 0) <= 0);
+      const invalidActiveStackUserIds = activeUserIdList.filter((userId) => !Object.prototype.hasOwnProperty.call(nextStacks, userId));
       if (invalidActiveStackUserIds.length > 0) {
         klog("poker_start_hand_invalid_active_stacks", {
           tableId,
@@ -384,6 +380,7 @@ export async function handler(event) {
           activeUserIdList,
           currentStacks,
           stacksFromSeats,
+          useStoredStacks,
         });
         throw makeError(409, "state_invalid");
       }

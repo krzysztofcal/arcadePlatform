@@ -23,24 +23,10 @@ const bot2UserId = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 process.env.POKER_DEAL_SECRET = process.env.POKER_DEAL_SECRET || "test-deal-secret";
 
 const run = async () => {
-  const logs = [];
-  const stateWrites = [];
   const requestStore = new Map();
-  const seatStacks = {
-    [humanUserId]: 100,
-    [bot1UserId]: 200,
-    [bot2UserId]: 200,
-  };
   const stateHolder = {
-    version: 7,
-    state: {
-      tableId,
-      phase: "INIT",
-      dealerSeatNo: 1,
-      stacks: {
-        [bot1UserId]: 200,
-      },
-    },
+    version: 1,
+    state: { tableId, phase: "INIT", dealerSeatNo: 3, stacks: {} },
   };
 
   const handler = loadPokerHandler("netlify/functions/poker-start-hand.mjs", {
@@ -65,22 +51,20 @@ const run = async () => {
     buildActionConstraints,
     updatePokerStateOptimistic,
     TURN_MS,
-    klog: (event, payload) => logs.push({ event, payload }),
+    klog: () => {},
     beginSql: async (fn) =>
       fn({
         unsafe: async (query, params) => {
           const text = String(query).toLowerCase();
-          if (text.includes("from public.poker_tables")) {
-            return [{ id: tableId, status: "OPEN", stakes: '{"sb":1,"bb":2}' }];
-          }
+          if (text.includes("from public.poker_tables")) return [{ id: tableId, status: "OPEN", stakes: '{"sb":1,"bb":2}' }];
           if (text.includes("from public.poker_state") && text.includes("version, state")) {
             return [{ version: stateHolder.version, state: stateHolder.state }];
           }
           if (text.includes("from public.poker_seats")) {
             return [
-              { user_id: humanUserId, seat_no: 1, status: "ACTIVE", stack: seatStacks[humanUserId] },
-              { user_id: bot1UserId, seat_no: 2, status: "ACTIVE", stack: seatStacks[bot1UserId] },
-              { user_id: bot2UserId, seat_no: 3, status: "ACTIVE", stack: seatStacks[bot2UserId] },
+              { user_id: humanUserId, seat_no: 1, status: "ACTIVE", stack: 2 },
+              { user_id: bot1UserId, seat_no: 2, status: "ACTIVE", stack: 10 },
+              { user_id: bot2UserId, seat_no: 3, status: "ACTIVE", stack: 1 },
             ];
           }
           if (text.includes("from public.poker_requests")) {
@@ -108,9 +92,7 @@ const run = async () => {
             return insertedRows;
           }
           if (text.includes("update public.poker_state") && text.includes("version = version + 1")) {
-            const statePayload = JSON.parse(params?.[2] || "{}");
-            stateWrites.push(statePayload);
-            stateHolder.state = statePayload;
+            stateHolder.state = JSON.parse(params?.[2] || "{}");
             stateHolder.version += 1;
             return [{ version: stateHolder.version }];
           }
@@ -124,33 +106,21 @@ const run = async () => {
   const response = await handler({
     httpMethod: "POST",
     headers: { origin: "https://example.test", authorization: "Bearer token" },
-    body: JSON.stringify({ tableId, requestId: "seat-stack-req-1" }),
+    body: JSON.stringify({ tableId, requestId: "short-stack-req-1" }),
   });
 
   assert.equal(response.statusCode, 200);
   const payload = JSON.parse(response.body || "{}");
   assert.equal(payload.ok, true);
   assert.equal(payload.state?.state?.phase, "PREFLOP");
-
-  const stateWrite = stateWrites[stateWrites.length - 1];
-  assert.ok(stateWrite, "expected preflop state write");
-  const sbUserId = stateWrite.seats?.find((seat) => seat?.seatNo === 3)?.userId;
-  const bbUserId = stateWrite.seats?.find((seat) => seat?.seatNo === 1)?.userId;
-  const nonBlindUserId = stateWrite.seats?.find((seat) => seat?.seatNo === 2)?.userId;
-  assert.equal(sbUserId, bot2UserId, "expected deterministic SB user from arranged dealer");
-  assert.equal(bbUserId, humanUserId, "expected deterministic BB user from arranged dealer");
-  assert.equal(nonBlindUserId, bot1UserId, "expected deterministic non-blind user from arranged dealer");
-  assert.equal(stateWrite.stacks[sbUserId], seatStacks[sbUserId] - 1, "SB should be deducted by sb amount");
-  assert.equal(stateWrite.stacks[bbUserId], seatStacks[bbUserId] - 2, "BB should be deducted by bb amount");
-  assert.equal(stateWrite.stacks[nonBlindUserId], seatStacks[nonBlindUserId], "non-blind stack should remain unchanged");
-
-  const errorLog = logs.find((entry) => entry.event === "poker_start_hand_error");
-  assert.equal(errorLog, undefined, "did not expect poker_start_hand_error in seat stack happy path");
+  assert.equal(payload.state?.state?.stacks?.[bot2UserId], 0, "short-stack SB should be able to post to zero");
+  assert.ok(Array.isArray(payload.legalActions), "response should include legalActions");
+  assert.equal(typeof payload.actionConstraints, "object", "response should include actionConstraints");
 };
 
 run()
   .then(() => {
-    console.log("poker-start-hand seat stack behavior test passed");
+    console.log("poker-start-hand short-stack blind behavior test passed");
   })
   .catch((error) => {
     console.error(error);

@@ -26,7 +26,7 @@ const run = async () => {
   const requestStore = new Map();
   const stateHolder = {
     version: 2,
-    state: { tableId, phase: "INIT", stacks: {} },
+    state: { tableId, phase: "INIT", dealerSeatNo: 3, stacks: {} },
   };
 
   const handler = loadPokerHandler("netlify/functions/poker-start-hand.mjs", {

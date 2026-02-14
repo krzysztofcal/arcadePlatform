@@ -68,6 +68,7 @@ run("node", ["tests/poker-start-hand.behavior.test.mjs"], "poker-start-hand-beha
 run("node", ["tests/poker-start-hand.bots.behavior.test.mjs"], "poker-start-hand-bots-behavior");
 run("node", ["tests/poker-start-hand.seat-stacks.behavior.test.mjs"], "poker-start-hand-seat-stacks-behavior");
 run("node", ["tests/poker-start-hand.legal-actions.behavior.test.mjs"], "poker-start-hand-legal-actions-behavior");
+run("node", ["tests/poker-start-hand.short-stack-blind.behavior.test.mjs"], "poker-start-hand-short-stack-blind-behavior");
 run("node", ["tests/poker-start-hand.legacy-init-upgrade.test.mjs"], "poker-start-hand-legacy-init-upgrade");
 run("node", ["tests/poker-act.behavior.test.mjs"], "poker-act-behavior");
 run("node", ["tests/poker-act.init-phase.test.mjs"], "poker-act-init-phase");
