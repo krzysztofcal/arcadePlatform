@@ -300,8 +300,8 @@ export async function handler(event) {
   const autoSeat = parseAutoSeat(payload?.autoSeat);
   const preferredSeatNo = parseSeatNo(payload?.preferredSeatNo);
   const preferredSeatNoMissing = autoSeat && preferredSeatNo == null;
-  const seatNo = parseSeatNo(payload?.seatNo);
-  if (!autoSeat && seatNo == null) {
+  const seatNoUi = parseSeatNo(payload?.seatNo);
+  if (!autoSeat && seatNoUi == null) {
     return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "invalid_seat_no" }) };
   }
 
@@ -346,7 +346,7 @@ export async function handler(event) {
   klog("poker_join_begin", {
     tableId,
     userId: auth.userId,
-    seatNo,
+    seatNoUi,
     preferredSeatNo,
     autoSeat,
     hasRequestId: !!requestId,
@@ -440,7 +440,7 @@ export async function handler(event) {
         }
 
         const preferredSeatNoUi = preferredSeatNo == null ? 0 : preferredSeatNo;
-        const seatNoDbInitial = toDbSeatNo(autoSeat ? preferredSeatNoUi : seatNo, Number(table.max_players));
+        const seatNoDbInitial = toDbSeatNo(autoSeat ? preferredSeatNoUi : seatNoUi, Number(table.max_players));
         if (!Number.isInteger(seatNoDbInitial)) {
           throw makeError(400, "invalid_seat_no");
         }
@@ -668,16 +668,16 @@ values ($1, $2, $3, 'ACTIVE', now(), now(), $4);
           kind: "JOIN",
           result: resultPayload,
         });
-        const seatNoUi = toUiSeatNo(seatNoDbToUse, Number(table.max_players));
+        const resolvedSeatNoUi = toUiSeatNo(seatNoDbToUse, Number(table.max_players));
         klog("poker_join_stack_persisted", {
           tableId,
           userId: auth.userId,
-          seatNoUi,
+          seatNoUi: resolvedSeatNoUi,
           seatNoDb: seatNoDbToUse,
           persistedStack: buyIn,
           mode: "insert",
         });
-        klog("poker_join_ok", { tableId, userId: auth.userId, seatNoUi, seatNoDb: seatNoDbToUse, rejoin: false });
+        klog("poker_join_ok", { tableId, userId: auth.userId, seatNoUi: resolvedSeatNoUi, seatNoDb: seatNoDbToUse, rejoin: false });
         return resultPayload;
       } catch (error) {
         if (requestId && !mutated) {
@@ -704,7 +704,11 @@ values ($1, $2, $3, 'ACTIVE', now(), now(), $4);
     };
   } catch (error) {
     if (error?.status && error?.code) {
-      klog("poker_join_fail", { tableId, userId: auth.userId, reason: error.code });
+      if (error.code === "seat_taken") {
+        klog("poker_join_rejected", { tableId, userId: auth.userId, reason: error.code });
+      } else {
+        klog("poker_join_fail", { tableId, userId: auth.userId, reason: error.code });
+      }
       return { statusCode: error.status, headers: cors, body: JSON.stringify({ error: error.code }) };
     }
     klog("poker_join_error", { message: error?.message || "unknown_error" });
