@@ -77,6 +77,7 @@ run("node", ["tests/poker-start-hand.short-stack-blind.behavior.test.mjs"], "pok
 run("node", ["tests/poker-start-hand.legacy-init-upgrade.test.mjs"], "poker-start-hand-legacy-init-upgrade");
 run("node", ["tests/poker-act.behavior.test.mjs"], "poker-act-behavior");
 run("node", ["tests/poker-act.bot-autoplay.behavior.test.mjs"], "poker-act-bot-autoplay-behavior");
+run("node", ["tests/poker-act.bot-autoplay.timeout-applied.behavior.test.mjs"], "poker-act-bot-autoplay-timeout-applied-behavior");
 run("node", ["tests/poker-act.bot-autoplay.multi-human-requests.behavior.test.mjs"], "poker-act-bot-autoplay-multi-human-requests-behavior");
 run("node", ["tests/poker-act.bot-autoplay.last-action-requestid.behavior.test.mjs"], "poker-act-bot-autoplay-last-action-requestid-behavior");
 run("node", ["tests/poker-act.bot-autoplay.compile.behavior.test.mjs"], "poker-act-bot-autoplay-compile-behavior");

@@ -754,7 +754,179 @@ export async function handler(event) {
           newVersion,
         });
 
-        const timeoutPublicState = withoutPrivateState(updatedState);
+        const botAutoplayConfig = getBotAutoplayConfig(process.env);
+        let timeoutFinalState = updatedState;
+        let timeoutEvents = Array.isArray(timeoutResult.events) ? timeoutResult.events.slice() : [];
+        let timeoutLoopPrivateState = {
+          ...updatedState,
+          community: Array.isArray(updatedState.community) ? updatedState.community.slice() : [],
+          deck: deriveRemainingDeck({
+            handSeed: updatedState.handSeed,
+            seatUserIdsInOrder,
+            communityDealt: updatedState.communityDealt,
+          }),
+          holeCardsByUserId,
+        };
+        let timeoutLoopVersion = newVersion;
+        let timeoutBotActionCount = 0;
+        let timeoutBotStopReason = "not_attempted";
+        let timeoutLastBotActionSummary = null;
+        const timeoutHandIdForLog =
+          typeof timeoutFinalState.handId === "string" && timeoutFinalState.handId.trim() ? timeoutFinalState.handId.trim() : null;
+        klog("poker_act_bot_autoplay_attempt", {
+          tableId,
+          handId: timeoutHandIdForLog,
+          turnUserId: timeoutFinalState.turnUserId || null,
+          policyVersion: botAutoplayConfig.policyVersion,
+          maxActionsPerRequest: botAutoplayConfig.maxActionsPerRequest,
+        });
+
+        while (timeoutBotActionCount < botAutoplayConfig.maxActionsPerRequest) {
+          if (!isActionPhase(timeoutFinalState.phase)) {
+            timeoutBotStopReason = "non_action_phase";
+            break;
+          }
+          const botTurnUserId = timeoutFinalState.turnUserId;
+          if (!isBotTurn(botTurnUserId, seatBotMap)) {
+            timeoutBotStopReason = "turn_not_bot";
+            break;
+          }
+
+          const botLegalInfo = computeLegalActions({ statePublic: withoutPrivateState(timeoutFinalState), userId: botTurnUserId });
+          const botChoice = chooseBotActionTrivial(botLegalInfo.actions);
+          if (!botChoice) {
+            timeoutBotStopReason = "no_legal_action";
+            break;
+          }
+          const botAction = botChoice.amount != null ? { type: botChoice.type, amount: botChoice.amount } : { type: botChoice.type };
+          const botRequestId = `bot:${requestId}:${timeoutBotActionCount + 1}`;
+
+          let botApplied;
+          try {
+            botApplied = applyAction(timeoutLoopPrivateState, { ...botAction, userId: botTurnUserId, requestId: botRequestId });
+          } catch (error) {
+            timeoutBotStopReason = "apply_action_failed";
+            klog("poker_act_bot_autoplay_step_error", {
+              tableId,
+              handId: timeoutHandIdForLog,
+              turnUserId: botTurnUserId || null,
+              policyVersion: botAutoplayConfig.policyVersion,
+              botActionCount: timeoutBotActionCount,
+              reason: timeoutBotStopReason,
+              actionType: botAction.type || null,
+              actionAmount: botAction.amount ?? null,
+              error: error?.message || "apply_action_failed",
+            });
+            break;
+          }
+
+          let botNextState = botApplied.state;
+          const botAdvanceEvents = [];
+          const botEvents = Array.isArray(botApplied.events) ? botApplied.events.slice() : [];
+          const botAdvanced = runAdvanceLoop(botNextState, botEvents, botAdvanceEvents);
+          botNextState = botAdvanced.nextState;
+          const botEligibleUserIds = seatUserIdsInOrder.filter(
+            (userId) =>
+              typeof userId === "string" &&
+              !botNextState.foldedByUserId?.[userId] &&
+              !botNextState.leftTableByUserId?.[userId] &&
+              !botNextState.sitOutByUserId?.[userId]
+          );
+          const botHandId = typeof botNextState.handId === "string" ? botNextState.handId.trim() : "";
+          const botShowdownHandId =
+            typeof botNextState.showdown?.handId === "string" && botNextState.showdown.handId.trim()
+              ? botNextState.showdown.handId.trim()
+              : "";
+          const botShowdownMaterialized = !!botHandId && !!botShowdownHandId && botShowdownHandId === botHandId;
+          const botNeedsShowdown = !botShowdownMaterialized && (botEligibleUserIds.length <= 1 || botNextState.phase === "SHOWDOWN");
+          if (botNeedsShowdown) {
+            botNextState = materializeShowdownState(botNextState, seatUserIdsInOrder, holeCardsByUserId);
+          }
+
+          const { holeCardsByUserId: _ignoredHoleCards, deck: _ignoredDeck, ...timeoutBotStateBase } = botNextState;
+          const timeoutBotUpdatedState = {
+            ...timeoutBotStateBase,
+            communityDealt: Array.isArray(botNextState.community) ? botNextState.community.length : 0,
+            lastActionRequestIdByUserId: {
+              ...(isPlainObjectValue(timeoutBotStateBase.lastActionRequestIdByUserId)
+                ? timeoutBotStateBase.lastActionRequestIdByUserId
+                : {}),
+              [botTurnUserId]: botRequestId,
+            },
+          };
+          const timeoutBotNowMs = Date.now();
+          const timeoutBotHasTurn = typeof timeoutBotUpdatedState.turnUserId === "string" && timeoutBotUpdatedState.turnUserId.trim();
+          const timeoutBotWithTimer = isActionPhase(timeoutBotUpdatedState.phase) && timeoutBotHasTurn
+            ? resetTurnTimer(timeoutBotUpdatedState, timeoutBotNowMs, TURN_MS)
+            : { ...timeoutBotUpdatedState, turnStartedAt: null, turnDeadlineAt: null };
+          const timeoutBotClearedMissedTurns = clearMissedTurns(timeoutBotWithTimer, botTurnUserId);
+          const timeoutBotPersistedState = timeoutBotClearedMissedTurns.changed
+            ? timeoutBotClearedMissedTurns.nextState
+            : timeoutBotWithTimer;
+
+          if (!isStateStorageValid(timeoutBotPersistedState, { requireHandSeed: true, requireCommunityDealt: true, requireNoDeck: true })) {
+            timeoutBotStopReason = "invalid_persist_state";
+            break;
+          }
+
+          const botUpdateResult = await updatePokerStateOptimistic(tx, {
+            tableId,
+            expectedVersion: timeoutLoopVersion,
+            nextState: timeoutBotPersistedState,
+          });
+          if (!botUpdateResult.ok) {
+            timeoutBotStopReason = botUpdateResult.reason === "conflict" ? "optimistic_conflict" : "update_failed";
+            break;
+          }
+
+          timeoutLoopVersion = botUpdateResult.newVersion;
+          mutated = true;
+          const botActionHandId =
+            typeof timeoutBotPersistedState.handId === "string" && timeoutBotPersistedState.handId.trim()
+              ? timeoutBotPersistedState.handId.trim()
+              : null;
+          await tx.unsafe(
+            "insert into public.poker_actions (table_id, version, user_id, action_type, amount, hand_id, request_id, phase_from, phase_to, meta) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb);",
+            [
+              tableId,
+              timeoutLoopVersion,
+              botTurnUserId,
+              botAction.type,
+              botAction.amount ?? null,
+              botActionHandId,
+              botRequestId,
+              timeoutFinalState.phase || null,
+              timeoutBotPersistedState.phase || null,
+              JSON.stringify({ actor: "BOT", botUserId: botTurnUserId, policyVersion: botAutoplayConfig.policyVersion, reason: "AUTO_TURN" }),
+            ]
+          );
+
+          timeoutFinalState = timeoutBotPersistedState;
+          timeoutEvents = timeoutEvents.concat(botEvents);
+          timeoutLoopPrivateState = botNextState;
+          newVersion = timeoutLoopVersion;
+          timeoutLastBotActionSummary = { type: botAction.type, amount: botAction.amount ?? null, userId: botTurnUserId };
+          timeoutBotActionCount += 1;
+        }
+
+        if (timeoutBotStopReason === "not_attempted") {
+          timeoutBotStopReason = timeoutBotActionCount >= botAutoplayConfig.maxActionsPerRequest ? "action_cap_reached" : "completed";
+        } else if (timeoutBotActionCount >= botAutoplayConfig.maxActionsPerRequest) {
+          timeoutBotStopReason = "action_cap_reached";
+        }
+        klog("poker_act_bot_autoplay_stop", {
+          tableId,
+          handId: timeoutHandIdForLog,
+          turnUserId: timeoutFinalState.turnUserId || null,
+          policyVersion: botAutoplayConfig.policyVersion,
+          botActionCount: timeoutBotActionCount,
+          reason: timeoutBotStopReason,
+          lastActionType: timeoutLastBotActionSummary?.type || null,
+          lastActionAmount: timeoutLastBotActionSummary?.amount ?? null,
+          optimisticConflict: timeoutBotStopReason === "optimistic_conflict",
+        });
+
+        const timeoutPublicState = withoutPrivateState(timeoutFinalState);
         const timeoutLegalInfo = computeLegalActions({ statePublic: timeoutPublicState, userId: auth.userId });
         const resultPayload = {
           ok: true,
@@ -765,7 +937,7 @@ export async function handler(event) {
           },
           me: buildMeStatus(timeoutPublicState, auth.userId),
           myHoleCards: holeCardsByUserId[auth.userId] || [],
-          events: timeoutResult.events || [],
+          events: timeoutEvents,
           replayed: false,
           legalActions: timeoutLegalInfo.actions,
           actionConstraints: buildActionConstraints(timeoutLegalInfo),
