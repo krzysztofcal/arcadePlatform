@@ -683,7 +683,7 @@ export async function handler(event) {
           break;
         }
 
-        const botRequestId = `bot:${handId}:${botActionIndex + 1}`;
+        const botRequestId = `bot:${requestIdParsed.value}:${botActionIndex + 1}`;
         const botAction = { ...selected, userId: turnUserId, requestId: botRequestId };
         let appliedBot;
         try {

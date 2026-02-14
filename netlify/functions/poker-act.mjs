@@ -1154,7 +1154,7 @@ export async function handler(event) {
         const botChoice = chooseBotActionTrivial(botLegalInfo.actions);
         if (!botChoice || !botChoice.type) { botStopReason = "no_legal_action"; break; }
 
-        const botRequestId = `bot:${responseFinalState.handId || "hand"}:${botActionCount + 1}`;
+        const botRequestId = `bot:${requestId}:${botActionCount + 1}`;
         const botAction = { ...botChoice, userId: botTurnUserId, requestId: botRequestId };
         let botApplied;
         try {

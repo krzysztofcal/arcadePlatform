@@ -131,6 +131,9 @@ const run = async () => {
   assert.equal(botMeta?.actor, "BOT");
   assert.equal(botMeta?.reason, "AUTO_TURN");
   assert.equal(typeof botMeta?.policyVersion, "string");
+  const botRequestIds = botRows.map((row) => String(row?.[6] || ""));
+  assert.ok(botRequestIds.every((id) => id.startsWith("bot:")), "expected bot request ids to use bot: prefix");
+  assert.ok(botRequestIds.some((id) => id.includes("human-call-1")), "expected bot request id to include human requestId namespace");
   assert.ok(Array.isArray(payload.events), "expected events array");
   assert.ok(payload.events.length >= 1, "expected events to include bot progression");
   const stopLog = logs.find((entry) => entry.event === "poker_act_bot_autoplay_stop");

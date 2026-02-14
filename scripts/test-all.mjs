@@ -67,6 +67,7 @@ run("node", ["tests/poker-heartbeat.behavior.test.mjs"], "poker-heartbeat-behavi
 run("node", ["tests/poker-start-hand.behavior.test.mjs"], "poker-start-hand-behavior");
 run("node", ["tests/poker-start-hand.bots.behavior.test.mjs"], "poker-start-hand-bots-behavior");
 run("node", ["tests/poker-start-hand.bot-autoplay.behavior.test.mjs"], "poker-start-hand-bot-autoplay-behavior");
+run("node", ["tests/poker-start-hand.bot-autoplay.requestid.behavior.test.mjs"], "poker-start-hand-bot-autoplay-requestid-behavior");
 run("node", ["tests/poker-start-hand.bot-autoplay-advance.behavior.test.mjs"], "poker-start-hand-bot-autoplay-advance-behavior");
 run("node", ["tests/poker-start-hand.seat-stacks.behavior.test.mjs"], "poker-start-hand-seat-stacks-behavior");
 run("node", ["tests/poker-start-hand.legal-actions.behavior.test.mjs"], "poker-start-hand-legal-actions-behavior");
@@ -74,6 +75,7 @@ run("node", ["tests/poker-start-hand.short-stack-blind.behavior.test.mjs"], "pok
 run("node", ["tests/poker-start-hand.legacy-init-upgrade.test.mjs"], "poker-start-hand-legacy-init-upgrade");
 run("node", ["tests/poker-act.behavior.test.mjs"], "poker-act-behavior");
 run("node", ["tests/poker-act.bot-autoplay.behavior.test.mjs"], "poker-act-bot-autoplay-behavior");
+run("node", ["tests/poker-act.bot-autoplay.multi-human-requests.behavior.test.mjs"], "poker-act-bot-autoplay-multi-human-requests-behavior");
 run("node", ["tests/poker-act.bot-autoplay.compile.behavior.test.mjs"], "poker-act-bot-autoplay-compile-behavior");
 run("node", ["tests/poker-act.bot-autoplay-stop-reason.behavior.test.mjs"], "poker-act-bot-autoplay-stop-reason-behavior");
 run("node", ["tests/poker-act.init-phase.test.mjs"], "poker-act-init-phase");
