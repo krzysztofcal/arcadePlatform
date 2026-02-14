@@ -119,10 +119,38 @@ function chooseBotActionTrivial(legalActions) {
   return null;
 }
 
+function getBotAutoplayConfig(env = process.env) {
+  const source = env || {};
+  return {
+    maxActionsPerRequest: parseIntClamped(source.POKER_BOTS_MAX_ACTIONS_PER_REQUEST, 5, 1, 20),
+    policyVersion: normalizeString(source.POKER_BOT_POLICY_VERSION) || "TRIVIAL_V1",
+  };
+}
+
+function buildSeatBotMap(seatRows) {
+  const rows = Array.isArray(seatRows) ? seatRows : [];
+  const map = new Map();
+  for (const row of rows) {
+    const userId = typeof row?.user_id === "string" ? row.user_id.trim() : "";
+    if (!userId) continue;
+    map.set(userId, !!row?.is_bot);
+  }
+  return map;
+}
+
+function isBotTurn(turnUserId, seatBotMap) {
+  if (typeof turnUserId !== "string" || !turnUserId.trim()) return false;
+  if (!(seatBotMap instanceof Map)) return false;
+  return seatBotMap.get(turnUserId) === true;
+}
+
 export {
+  buildSeatBotMap,
   chooseBotActionTrivial,
   computeTargetBotCount,
+  getBotAutoplayConfig,
   getBotConfig,
+  isBotTurn,
   makeBotSystemKey,
   makeBotUserId,
 };
