@@ -640,11 +640,15 @@ export async function handler(event) {
       };
       const toPersistedState = (privateStateInput, actorUserId, actorRequestId) => {
         const { holeCardsByUserId: _ignoredHoleCards, deck: _ignoredDeck, ...stateBase } = privateStateInput || {};
+        const baseLastActionRequestIdByUserId =
+          stateBase?.lastActionRequestIdByUserId && typeof stateBase.lastActionRequestIdByUserId === "object" && !Array.isArray(stateBase.lastActionRequestIdByUserId)
+            ? stateBase.lastActionRequestIdByUserId
+            : {};
         const withCommunity = {
           ...stateBase,
           communityDealt: Array.isArray(privateStateInput?.community) ? privateStateInput.community.length : 0,
           lastActionRequestIdByUserId: {
-            ...(finalState.lastActionRequestIdByUserId || {}),
+            ...baseLastActionRequestIdByUserId,
             [actorUserId]: actorRequestId,
           },
         };

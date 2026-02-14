@@ -1112,7 +1112,12 @@ export async function handler(event) {
       const botAutoplayConfig = getBotAutoplayConfig(process.env);
       let responseFinalState = finalState;
       let responseEvents = Array.isArray(events) ? events.slice() : [];
-      let loopPrivateState = nextState;
+      let loopPrivateState = {
+        ...nextState,
+        lastActionRequestIdByUserId: isPlainObjectValue(finalState?.lastActionRequestIdByUserId)
+          ? { ...finalState.lastActionRequestIdByUserId }
+          : {},
+      };
       let loopVersion = newVersion;
       let botActionCount = 0;
       let botStopReason = "not_attempted";
@@ -1128,11 +1133,14 @@ export async function handler(event) {
 
       const buildPersistedFromPrivateState = (privateStateInput, actorUserId, actionRequestId) => {
         const { holeCardsByUserId: _ignoredHoleCards, deck: _ignoredDeck, ...stateBase } = privateStateInput;
+        const baseLastActionRequestIdByUserId = isPlainObjectValue(stateBase?.lastActionRequestIdByUserId)
+          ? stateBase.lastActionRequestIdByUserId
+          : {};
         const updated = {
           ...stateBase,
           communityDealt: Array.isArray(privateStateInput.community) ? privateStateInput.community.length : 0,
           lastActionRequestIdByUserId: {
-            ...(responseFinalState.lastActionRequestIdByUserId || {}),
+            ...baseLastActionRequestIdByUserId,
             [actorUserId]: actionRequestId,
           },
         };

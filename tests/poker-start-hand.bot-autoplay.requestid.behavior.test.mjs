@@ -117,6 +117,8 @@ const run = async () => {
     body: JSON.stringify({ tableId, requestId: "start-req-1" }),
   });
   assert.equal(first.statusCode, 200);
+  const firstBody = first.body;
+  const versionAfterFirst = stateHolder.version;
 
   const botRowsAfterFirst = actionRows.filter((row) => {
     const meta = JSON.parse(row?.[9] || "null");
@@ -133,6 +135,10 @@ const run = async () => {
     body: JSON.stringify({ tableId, requestId: "start-req-1" }),
   });
   assert.equal(second.statusCode, 200);
+  const firstPayload = JSON.parse(firstBody || "{}");
+  const secondPayload = JSON.parse(second.body || "{}");
+  assert.deepEqual(secondPayload, { ...firstPayload, replayed: true }, "expected replay response to match stored payload semantics");
+  assert.equal(stateHolder.version, versionAfterFirst, "expected no state version bump on replay");
 
   const botRowsAfterReplay = actionRows.filter((row) => {
     const meta = JSON.parse(row?.[9] || "null");

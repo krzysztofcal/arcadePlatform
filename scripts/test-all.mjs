@@ -68,7 +68,9 @@ run("node", ["tests/poker-start-hand.behavior.test.mjs"], "poker-start-hand-beha
 run("node", ["tests/poker-start-hand.bots.behavior.test.mjs"], "poker-start-hand-bots-behavior");
 run("node", ["tests/poker-start-hand.bot-autoplay.behavior.test.mjs"], "poker-start-hand-bot-autoplay-behavior");
 run("node", ["tests/poker-start-hand.bot-autoplay.requestid.behavior.test.mjs"], "poker-start-hand-bot-autoplay-requestid-behavior");
+run("node", ["tests/poker-start-hand.idempotency.replay.returns-stored.behavior.test.mjs"], "poker-start-hand-idempotency-replay-returns-stored-behavior");
 run("node", ["tests/poker-start-hand.bot-autoplay-advance.behavior.test.mjs"], "poker-start-hand-bot-autoplay-advance-behavior");
+run("node", ["tests/poker-start-hand.bot-autoplay.last-action-requestid.behavior.test.mjs"], "poker-start-hand-bot-autoplay-last-action-requestid-behavior");
 run("node", ["tests/poker-start-hand.seat-stacks.behavior.test.mjs"], "poker-start-hand-seat-stacks-behavior");
 run("node", ["tests/poker-start-hand.legal-actions.behavior.test.mjs"], "poker-start-hand-legal-actions-behavior");
 run("node", ["tests/poker-start-hand.short-stack-blind.behavior.test.mjs"], "poker-start-hand-short-stack-blind-behavior");
@@ -76,6 +78,7 @@ run("node", ["tests/poker-start-hand.legacy-init-upgrade.test.mjs"], "poker-star
 run("node", ["tests/poker-act.behavior.test.mjs"], "poker-act-behavior");
 run("node", ["tests/poker-act.bot-autoplay.behavior.test.mjs"], "poker-act-bot-autoplay-behavior");
 run("node", ["tests/poker-act.bot-autoplay.multi-human-requests.behavior.test.mjs"], "poker-act-bot-autoplay-multi-human-requests-behavior");
+run("node", ["tests/poker-act.bot-autoplay.last-action-requestid.behavior.test.mjs"], "poker-act-bot-autoplay-last-action-requestid-behavior");
 run("node", ["tests/poker-act.bot-autoplay.compile.behavior.test.mjs"], "poker-act-bot-autoplay-compile-behavior");
 run("node", ["tests/poker-act.bot-autoplay-stop-reason.behavior.test.mjs"], "poker-act-bot-autoplay-stop-reason-behavior");
 run("node", ["tests/poker-act.init-phase.test.mjs"], "poker-act-init-phase");

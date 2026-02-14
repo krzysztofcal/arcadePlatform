@@ -117,9 +117,17 @@ const run = async () => {
   assert.equal(payload.ok, true);
   assert.equal(payload.state?.state?.phase, "PREFLOP");
   assert.ok(payload.state?.version >= 9, "expected at least one bot mutation beyond initial start-hand write");
+  assert.equal(payload.state?.version, stateHolder.version, "expected payload version to match latest stored state version");
   assert.ok(actionRows.length >= 4, "expected START_HAND + blinds + bot action");
-  const botMeta = actionRows.map((row) => JSON.parse(row?.[9] || "null")).find((meta) => meta?.actor === "BOT");
+  const botRows = actionRows.filter((row) => {
+    const meta = JSON.parse(row?.[9] || "null");
+    return meta?.actor === "BOT";
+  });
+  const botMeta = botRows.map((row) => JSON.parse(row?.[9] || "null")).find((meta) => meta?.actor === "BOT");
   assert.equal(botMeta?.botUserId, botUserId);
+  const botVersions = botRows.map((row) => Number(row?.[1])).filter(Number.isFinite);
+  assert.ok(botVersions.length >= 1, "expected bot action version rows");
+  assert.equal(Math.max(...botVersions), payload.state?.version, "expected latest bot action version to match payload version");
   assert.equal(stateHolder.state.communityDealt, (stateHolder.state.community || []).length);
   const phase = stateHolder.state.phase;
   const isActionPhase = phase === "PREFLOP" || phase === "FLOP" || phase === "TURN" || phase === "RIVER";

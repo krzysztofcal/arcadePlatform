@@ -127,6 +127,10 @@ const run = async () => {
   assert.ok(payload.state?.version >= 10, "expected version to include at least one bot mutation");
   const botRows = actionInserts.filter((row) => row?.[2] === botA || row?.[2] === botB);
   assert.ok(botRows.length >= 1, "expected at least one bot action row");
+  assert.equal(payload.state?.version, storedState.version, "expected payload version to match latest stored version");
+  const botVersions = botRows.map((row) => Number(row?.[1])).filter(Number.isFinite);
+  assert.ok(botVersions.length >= 1, "expected bot action versions");
+  assert.equal(Math.max(...botVersions), payload.state?.version, "expected latest bot action version to match payload version");
   const botMeta = botRows.map((row) => JSON.parse(row?.[9] || "null")).find((m) => m?.actor === "BOT");
   assert.equal(botMeta?.actor, "BOT");
   assert.equal(botMeta?.reason, "AUTO_TURN");
