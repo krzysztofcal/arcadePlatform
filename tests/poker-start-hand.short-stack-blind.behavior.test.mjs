@@ -17,24 +17,16 @@ import { updatePokerStateOptimistic } from "../netlify/functions/_shared/poker-s
 
 const tableId = "11111111-1111-4111-8111-111111111111";
 const humanUserId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
-const botUserId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+const bot1UserId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+const bot2UserId = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 
 process.env.POKER_DEAL_SECRET = process.env.POKER_DEAL_SECRET || "test-deal-secret";
 
 const run = async () => {
-  const queries = [];
-  const logs = [];
   const requestStore = new Map();
   const stateHolder = {
-    version: 7,
-    state: {
-      tableId,
-      phase: "INIT",
-      stacks: {
-        [humanUserId]: 200,
-        [botUserId]: 200,
-      },
-    },
+    version: 1,
+    state: { tableId, phase: "INIT", dealerSeatNo: 3, stacks: {} },
   };
 
   const handler = loadPokerHandler("netlify/functions/poker-start-hand.mjs", {
@@ -59,22 +51,20 @@ const run = async () => {
     buildActionConstraints,
     updatePokerStateOptimistic,
     TURN_MS,
-    klog: (event, payload) => logs.push({ event, payload }),
+    klog: () => {},
     beginSql: async (fn) =>
       fn({
         unsafe: async (query, params) => {
           const text = String(query).toLowerCase();
-          queries.push({ query: String(query), params });
-          if (text.includes("from public.poker_tables")) {
-            return [{ id: tableId, status: "OPEN", stakes: '{"sb":1,"bb":2}' }];
-          }
+          if (text.includes("from public.poker_tables")) return [{ id: tableId, status: "OPEN", stakes: '{"sb":1,"bb":2}' }];
           if (text.includes("from public.poker_state") && text.includes("version, state")) {
             return [{ version: stateHolder.version, state: stateHolder.state }];
           }
           if (text.includes("from public.poker_seats")) {
             return [
-              { user_id: humanUserId, seat_no: 1, status: "ACTIVE", is_bot: false, stack: 200 },
-              { user_id: botUserId, seat_no: 2, status: "ACTIVE", is_bot: true, stack: 200 },
+              { user_id: humanUserId, seat_no: 1, status: "ACTIVE", stack: 2 },
+              { user_id: bot1UserId, seat_no: 2, status: "ACTIVE", stack: 10 },
+              { user_id: bot2UserId, seat_no: 3, status: "ACTIVE", stack: 1 },
             ];
           }
           if (text.includes("from public.poker_requests")) {
@@ -96,16 +86,9 @@ const run = async () => {
             requestStore.set(key, entry);
             return [{ request_id: params?.[2] }];
           }
-          if (text.includes("delete from public.poker_requests")) {
-            const key = `${params?.[0]}|${params?.[1]}|${params?.[2]}|${params?.[3]}`;
-            requestStore.delete(key);
-            return [];
-          }
           if (text.includes("insert into public.poker_hole_cards")) {
             const insertedRows = [];
-            for (let i = 0; i < params.length; i += 4) {
-              insertedRows.push({ user_id: params[i + 2] });
-            }
+            for (let i = 0; i < params.length; i += 4) insertedRows.push({ user_id: params[i + 2] });
             return insertedRows;
           }
           if (text.includes("update public.poker_state") && text.includes("version = version + 1")) {
@@ -123,31 +106,21 @@ const run = async () => {
   const response = await handler({
     httpMethod: "POST",
     headers: { origin: "https://example.test", authorization: "Bearer token" },
-    body: JSON.stringify({ tableId, requestId: "bot-start-1" }),
+    body: JSON.stringify({ tableId, requestId: "short-stack-req-1" }),
   });
 
   assert.equal(response.statusCode, 200);
   const payload = JSON.parse(response.body || "{}");
   assert.equal(payload.ok, true);
   assert.equal(payload.state?.state?.phase, "PREFLOP");
-  assert.ok(payload.state?.state?.stacks?.[humanUserId] > 0, "expected non-zero human stack after PREFLOP start");
-  assert.ok(Array.isArray(payload.legalActions), "expected legalActions array in response");
-  assert.equal(typeof payload.actionConstraints, "object", "expected actionConstraints in response");
-
-  const holeCardInsert = queries.find((entry) => entry.query.toLowerCase().includes("insert into public.poker_hole_cards"));
-  assert.ok(holeCardInsert, "expected hole-cards insert query");
-  const insertedUserIds = [];
-  for (let i = 0; i < (holeCardInsert.params || []).length; i += 4) insertedUserIds.push(holeCardInsert.params[i + 2]);
-  assert.deepEqual(insertedUserIds, [humanUserId, botUserId]);
-
-  const errorLog = logs.find((entry) => entry.event === "poker_start_hand_error");
-  assert.equal(errorLog, undefined, "did not expect poker_start_hand_error log in bot-seated happy path");
-  assert.notEqual(payload.error, "23503");
+  assert.equal(payload.state?.state?.stacks?.[bot2UserId], 0, "short-stack SB should be able to post to zero");
+  assert.ok(Array.isArray(payload.legalActions), "response should include legalActions");
+  assert.equal(typeof payload.actionConstraints, "object", "response should include actionConstraints");
 };
 
 run()
   .then(() => {
-    console.log("poker-start-hand bot-seated behavior test passed");
+    console.log("poker-start-hand short-stack blind behavior test passed");
   })
   .catch((error) => {
     console.error(error);
