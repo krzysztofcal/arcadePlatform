@@ -22,11 +22,13 @@ const handler = loadPokerHandler("netlify/functions/poker-join.mjs", {
   patchLeftTableByUserId,
   patchSitOutByUserId,
   isStateStorageValid,
+  getBotConfig: () => ({ enabled: false }),
   beginSql: async (fn) =>
     fn({
       unsafe: async (query, params) => {
         queries.push({ query: String(query), params });
         const text = String(query).toLowerCase();
+        const sqlNormalized = String(query).replace(/\s+/g, " ").trim().toLowerCase();
         if (text.includes("from public.poker_requests")) return [];
         if (text.includes("insert into public.poker_requests")) return [{ request_id: params?.[2] }];
         if (text.includes("update public.poker_requests")) return [{ request_id: params?.[2] }];
@@ -36,7 +38,7 @@ const handler = loadPokerHandler("netlify/functions/poker-join.mjs", {
         if (text.includes("from public.poker_state") && text.includes("for update")) {
           return [{ version: 1, state: JSON.stringify({ tableId, seats: [], stacks: {}, pot: 0, phase: "INIT", leftTableByUserId: {}, sitOutByUserId: {} }) }];
         }
-        if (text.includes("update public.poker_state") && text.includes("version = version + 1")) return [{ version: 2 }];
+        if (sqlNormalized.includes("update public.poker_state") && sqlNormalized.includes("version = version + 1")) return [{ version: 2 }];
         if (text.includes("update public.poker_tables")) return [];
         return [];
       },
