@@ -24,6 +24,30 @@ const botB = "b2222222-2222-4222-8222-222222222222";
 process.env.POKER_DEAL_SECRET = process.env.POKER_DEAL_SECRET || "test-deal-secret";
 process.env.POKER_BOTS_MAX_ACTIONS_PER_REQUEST = "2";
 
+const extractActorFromInsertParams = (params) => {
+  if (!Array.isArray(params)) return null;
+  for (let idx = params.length - 1; idx >= 0; idx -= 1) {
+    const candidate = params[idx];
+    if (candidate == null) continue;
+    if (typeof candidate === "object" && !Array.isArray(candidate)) {
+      if (typeof candidate.actor === "string") return candidate.actor;
+      continue;
+    }
+    if (typeof candidate !== "string") continue;
+    const trimmed = candidate.trim();
+    if (!(trimmed.startsWith("{") && trimmed.endsWith("}"))) continue;
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed) && typeof parsed.actor === "string") {
+        return parsed.actor;
+      }
+    } catch {
+      // ignore non-json params
+    }
+  }
+  return null;
+};
+
 const run = async () => {
   const actionRows = [];
   const stateHolder = {
@@ -121,7 +145,7 @@ const run = async () => {
   assert.equal(payload.ok, true);
   assert.equal(payload.state?.state?.phase, "PREFLOP");
   assert.ok(payload.state?.version >= 6, "expected start-hand mutation to persist");
-  const botActorRows = actionRows.filter((row) => JSON.parse(row?.[9] || "null")?.actor === "BOT");
+  const botActorRows = actionRows.filter((row) => extractActorFromInsertParams(row) === "BOT");
   assert.equal(botActorRows.length, 0, "expected no bot autoplay action rows when no active humans");
 
   const replay = await handler({
@@ -130,7 +154,7 @@ const run = async () => {
     body: JSON.stringify({ tableId, requestId: "bot-start-gated-1" }),
   });
   assert.equal(replay.statusCode, 200);
-  assert.equal(actionRows.filter((row) => JSON.parse(row?.[9] || "null")?.actor === "BOT").length, 0);
+  assert.equal(actionRows.filter((row) => extractActorFromInsertParams(row) === "BOT").length, 0);
 };
 
 run().then(() => console.log("poker-start-hand bot autoplay human-gate behavior test passed")).catch((error) => {
