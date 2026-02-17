@@ -1,5 +1,11 @@
 import { baseHeaders, beginSql, klog } from "./_shared/supabase-admin.mjs";
-import { PRESENCE_TTL_SEC, TABLE_EMPTY_CLOSE_SEC, TABLE_SINGLETON_CLOSE_SEC, isValidUuid } from "./_shared/poker-utils.mjs";
+import {
+  PRESENCE_TTL_SEC,
+  TABLE_EMPTY_CLOSE_SEC,
+  TABLE_SINGLETON_CLOSE_SEC,
+  TABLE_BOT_ONLY_CLOSE_SEC,
+  isValidUuid,
+} from "./_shared/poker-utils.mjs";
 import { postTransaction } from "./_shared/chips-ledger.mjs";
 import { isHoleCardsTableMissing } from "./_shared/poker-hole-cards-store.mjs";
 import { postHandSettlementToLedger } from "./_shared/poker-ledger-settlement.mjs";
@@ -371,20 +377,55 @@ where t.id = st.id
 returning t.id;`,
         [TABLE_SINGLETON_CLOSE_SEC, CLOSE_CASHOUT_TABLES_LIMIT]
       );
+      const botOnlyClosedRows = await tx.unsafe(
+        `
+with bot_only_tables as (
+  select t.id
+  from public.poker_tables t
+  where t.status = 'OPEN'
+    and t.last_activity_at < now() - ($1::int * interval '1 second')
+    and not exists (
+      select 1
+      from public.poker_seats hs
+      where hs.table_id = t.id
+        and hs.status = 'ACTIVE'
+        and coalesce(hs.is_bot, false) = false
+    )
+    and exists (
+      select 1
+      from public.poker_seats bs
+      where bs.table_id = t.id
+        and bs.status = 'ACTIVE'
+        and bs.is_bot = true
+    )
+  order by t.last_activity_at asc nulls first
+  limit $2
+)
+update public.poker_tables t
+set status = 'CLOSED', updated_at = now()
+from bot_only_tables bt
+where t.id = bt.id
+returning t.id;`,
+        [TABLE_BOT_ONLY_CLOSE_SEC, CLOSE_CASHOUT_TABLES_LIMIT]
+      );
       const singletonClosedTableIds = Array.isArray(singletonClosedRows)
         ? singletonClosedRows.map((row) => row?.id).filter(Boolean)
         : [];
-      if (singletonClosedTableIds.length) {
+      const botOnlyClosedTableIds = Array.isArray(botOnlyClosedRows)
+        ? botOnlyClosedRows.map((row) => row?.id).filter(Boolean)
+        : [];
+      const closedTableIds = [...new Set([...singletonClosedTableIds, ...botOnlyClosedTableIds])];
+      if (closedTableIds.length) {
         await tx.unsafe(
           "update public.poker_seats set status = 'INACTIVE' where table_id = any($1::uuid[]) and status = 'ACTIVE';",
-          [singletonClosedTableIds]
+          [closedTableIds]
         );
         try {
-          await tx.unsafe("delete from public.poker_hole_cards where table_id = any($1::uuid[]);", [singletonClosedTableIds]);
+          await tx.unsafe("delete from public.poker_hole_cards where table_id = any($1::uuid[]);", [closedTableIds]);
         } catch (error) {
           if (isHoleCardsTableMissing(error)) {
             klog("poker_hole_cards_missing", {
-              tableIds: singletonClosedTableIds,
+              tableIds: closedTableIds,
               error: error?.message || "unknown_error",
             });
           } else {
@@ -392,7 +433,7 @@ returning t.id;`,
           }
         }
       }
-      return { closedCount: singletonClosedTableIds.length };
+      return { closedCount: closedTableIds.length };
     });
 
     const closeCashoutTables = await beginSql(async (tx) =>
