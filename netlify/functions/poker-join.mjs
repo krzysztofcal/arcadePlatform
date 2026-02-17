@@ -125,6 +125,45 @@ const pickNextSeatNo = (rows, maxPlayers, preferredSeatNoDb) => {
   return null;
 };
 
+const markBotLeaveAfterHandIfNeeded = async (tx, { tableId }) => {
+  await tx.unsafe("select id from public.poker_tables where id = $1 limit 1 for update;", [tableId]);
+  const markRows = await tx.unsafe(
+    `
+with candidate as (
+  select user_id, seat_no
+  from public.poker_seats
+  where table_id = $1
+    and status = 'ACTIVE'
+    and coalesce(is_bot, false) = true
+    and coalesce(leave_after_hand, false) = false
+  order by seat_no asc
+  limit 1
+  for update skip locked
+)
+update public.poker_seats s
+set leave_after_hand = true
+from candidate
+where s.table_id = $1
+  and s.user_id = candidate.user_id
+  and s.seat_no = candidate.seat_no
+returning s.user_id, s.seat_no;
+    `,
+    [tableId]
+  );
+  if (markRows?.length) {
+    return { status: "marked", botUserId: markRows[0].user_id, seatNo: markRows[0].seat_no };
+  }
+
+  const existingRows = await tx.unsafe(
+    "select user_id, seat_no from public.poker_seats where table_id = $1 and status = 'ACTIVE' and coalesce(is_bot, false) = true and coalesce(leave_after_hand, false) = true order by seat_no asc limit 1;",
+    [tableId]
+  );
+  if (existingRows?.length) {
+    return { status: "already_marked", botUserId: existingRows[0].user_id, seatNo: existingRows[0].seat_no };
+  }
+  return { status: "no_bot" };
+};
+
 
 
 const seedBotsAfterHumanJoin = async (tx, { tableId, maxPlayers, bb, cfg, humanUserId }) => {
@@ -472,6 +511,25 @@ values ($1, $2, $3, 'ACTIVE', now(), now(), $4);
               );
               const nextSeatNo = pickNextSeatNo(activeSeatRows, Number(table.max_players), seatNoDbToUse + 1);
               if (!Number.isInteger(nextSeatNo)) {
+                const botLeaveMark = await markBotLeaveAfterHandIfNeeded(tx, { tableId });
+                if (botLeaveMark.status === "marked") {
+                  klog("poker_join_bot_leave_after_hand_marked", {
+                    tableId,
+                    userId: auth.userId,
+                    botUserId: botLeaveMark.botUserId,
+                    seatNo: botLeaveMark.seatNo,
+                  });
+                  throw makeError(409, "table_full_bot_leaving");
+                }
+                if (botLeaveMark.status === "already_marked") {
+                  klog("poker_join_bot_leave_after_hand_already_marked", {
+                    tableId,
+                    userId: auth.userId,
+                    botUserId: botLeaveMark.botUserId,
+                    seatNo: botLeaveMark.seatNo,
+                  });
+                  throw makeError(409, "table_full_bot_leaving");
+                }
                 throw makeError(409, "table_full");
               }
               seatNoDbToUse = nextSeatNo;
