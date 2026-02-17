@@ -383,7 +383,17 @@ with bot_only_tables as (
   select t.id
   from public.poker_tables t
   where t.status = 'OPEN'
-    and t.last_activity_at < now() - ($1::int * interval '1 second')
+    and coalesce(
+      (
+        select max(coalesce(hs.last_seen_at, hs.updated_at))
+        from public.poker_seats hs
+        where hs.table_id = t.id
+          and hs.status = 'ACTIVE'
+          and coalesce(hs.is_bot, false) = false
+      ),
+      t.created_at,
+      t.updated_at
+    ) < now() - ($1::int * interval '1 second')
     and not exists (
       select 1
       from public.poker_seats hs
@@ -398,7 +408,7 @@ with bot_only_tables as (
         and bs.status = 'ACTIVE'
         and bs.is_bot = true
     )
-  order by t.last_activity_at asc nulls first
+  order by coalesce(t.created_at, t.updated_at) asc nulls first
   limit $2
 )
 update public.poker_tables t

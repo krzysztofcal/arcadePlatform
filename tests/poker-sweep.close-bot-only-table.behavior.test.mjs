@@ -107,6 +107,13 @@ const run = async () => {
     { accountType: "USER", amount: 80 },
   ]);
 
+
+  const botOnlyCloseQuery = queries.find((entry) => entry.text.includes("with bot_only_tables as"));
+  assert.ok(botOnlyCloseQuery, "expected bot-only close candidate query");
+  assert.ok(botOnlyCloseQuery.text.includes("max(coalesce(hs.last_seen_at, hs.updated_at))"));
+  assert.ok(botOnlyCloseQuery.text.includes("coalesce(") && botOnlyCloseQuery.text.includes("t.created_at") && botOnlyCloseQuery.text.includes("t.updated_at"));
+  assert.equal(botOnlyCloseQuery.text.includes("t.last_activity_at < now()"), false);
+
   for (const botUserId of [botA, botB]) {
     const statusUpdateIdx = queries.findIndex(
       (entry) =>
