@@ -33,14 +33,15 @@ const handler = loadPokerHandler("netlify/functions/poker-join.mjs", {
         if (text.includes("insert into public.poker_requests")) return [{ request_id: params?.[2] }];
         if (text.includes("update public.poker_requests")) return [{ request_id: params?.[2] }];
         if (text.includes("delete from public.poker_requests")) return [];
-        if (text.includes("from public.poker_tables")) return [{ id: tableId, status: "OPEN", max_players: 6 }];
+        if (text.includes("from public.poker_tables")) return [{ id: tableId, status: "OPEN", max_players: 6, stakes: null }];
         if (text.includes("from public.poker_seats") && text.includes("user_id = $2") && text.includes("limit 1")) return [{ seat_no: 3 }];
+        if (sqlNormalized.includes("update public.poker_seats set status = 'active'")) return [];
         if (text.includes("from public.poker_state") && text.includes("for update")) {
           return [{ version: 1, state: JSON.stringify({ tableId, seats: [], stacks: {}, pot: 0, phase: "INIT", leftTableByUserId: {}, sitOutByUserId: {} }) }];
         }
         if (sqlNormalized.includes("update public.poker_state") && sqlNormalized.includes("version = version + 1")) return [{ version: 2 }];
         if (text.includes("update public.poker_tables")) return [];
-        return [];
+        throw new Error(`unhandled_sql: ${sqlNormalized}`);
       },
     }),
   postTransaction: async () => ({ transaction: { id: "tx-rejoin" } }),
