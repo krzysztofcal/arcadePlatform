@@ -133,6 +133,7 @@ const seedBotsAfterHumanJoin = async (tx, { tableId, maxPlayers, bb, cfg, humanU
     [tableId]
   );
   const humanCount = Number(countRows?.[0]?.count || 0);
+  if (humanCount !== 1) return [];
   const targetBots = computeTargetBotCount({ maxPlayers, humanCount, maxBots: cfg.maxPerTable });
   if (!Number.isInteger(targetBots) || targetBots <= 0) return [];
 
