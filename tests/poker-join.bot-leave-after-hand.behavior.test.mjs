@@ -61,11 +61,11 @@ const makeHandler = ({ mode }) => {
   return { handler, marks };
 };
 
-const callJoin = (handler, requestId) =>
+const callJoin = (handler, requestId, overrides) =>
   handler({
     httpMethod: "POST",
     headers: { origin: "https://example.test", authorization: "Bearer token" },
-    body: JSON.stringify({ tableId, seatNo: 0, autoSeat: true, preferredSeatNo: 0, buyIn: 100, requestId }),
+    body: JSON.stringify({ tableId, seatNo: 0, autoSeat: true, preferredSeatNo: 0, buyIn: 100, requestId, ...(overrides || {}) }),
   });
 
 const run = async () => {
@@ -74,6 +74,13 @@ const run = async () => {
   assert.equal(resEligible.statusCode, 409);
   assert.equal(JSON.parse(resEligible.body || "{}").error, "table_full_bot_leaving");
   assert.equal(eligible.marks.length, 1);
+
+
+  const nonAutoEligible = makeHandler({ mode: "eligible" });
+  const resNonAuto = await callJoin(nonAutoEligible.handler, "join-non-auto-eligible", { autoSeat: false, seatNo: 1 });
+  assert.equal(resNonAuto.statusCode, 409);
+  assert.equal(JSON.parse(resNonAuto.body || "{}").error, "table_full_bot_leaving");
+  assert.equal(nonAutoEligible.marks.length, 1);
 
   const noBots = makeHandler({ mode: "none" });
   const resNoBots = await callJoin(noBots.handler, "join-no-bot");

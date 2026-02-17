@@ -6,7 +6,7 @@ const humanUserId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const botUserId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 
 const run = async () => {
-  process.env.POKER_SYSTEM_ACTOR_USER_ID = "00000000-0000-4000-8000-000000000001";
+  delete process.env.POKER_SYSTEM_ACTOR_USER_ID;
   const queries = [];
   const helperCalls = [];
   const db = {
@@ -114,6 +114,7 @@ const run = async () => {
   assert.equal(helperCalls.filter((x) => x.phase === "cashout").length, 1);
   const cashout = helperCalls.find((x) => x.phase === "cashout");
   assert.equal(cashout?.idempotencyKeySuffix, "leave_after_hand:v1");
+  assert.equal(cashout?.actorUserId, humanUserId);
   assert.ok(queries.some((q) => q.includes("update public.poker_seats set status = 'inactive' where table_id = $1 and user_id = $2 and is_bot = true")));
   assert.ok(queries.some((q) => q.includes("update public.poker_seats set stack = 0, leave_after_hand = false where table_id = $1 and user_id = $2")));
   assert.equal(Object.prototype.hasOwnProperty.call(db.state.stacks, botUserId), false, "bot stack should be removed from authoritative state");

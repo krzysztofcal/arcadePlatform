@@ -1276,7 +1276,7 @@ export async function handler(event) {
       const leaveAfterHand = await maybeEvictMarkedBotAfterSettlement(tx, {
         tableId,
         state: finalState,
-        actorUserId: process.env.POKER_SYSTEM_ACTOR_USER_ID,
+        actorUserId: process.env.POKER_SYSTEM_ACTOR_USER_ID || auth.userId,
       });
       finalState = leaveAfterHand.state;
 

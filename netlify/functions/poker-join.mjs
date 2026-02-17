@@ -166,6 +166,29 @@ returning s.user_id, s.seat_no;
 
 
 
+const resolveFullTableJoinError = async (tx, { tableId, userId }) => {
+  const botLeaveMark = await markBotLeaveAfterHandIfNeeded(tx, { tableId });
+  if (botLeaveMark.status === "marked") {
+    klog("poker_join_bot_leave_after_hand_marked", {
+      tableId,
+      userId,
+      botUserId: botLeaveMark.botUserId,
+      seatNo: botLeaveMark.seatNo,
+    });
+    return "table_full_bot_leaving";
+  }
+  if (botLeaveMark.status === "already_marked") {
+    klog("poker_join_bot_leave_after_hand_already_marked", {
+      tableId,
+      userId,
+      botUserId: botLeaveMark.botUserId,
+      seatNo: botLeaveMark.seatNo,
+    });
+    return "table_full_bot_leaving";
+  }
+  return "table_full";
+};
+
 const seedBotsAfterHumanJoin = async (tx, { tableId, maxPlayers, bb, cfg, humanUserId }) => {
   if (!cfg?.enabled) return [];
   const countRows = await tx.unsafe(
@@ -502,35 +525,17 @@ values ($1, $2, $3, 'ACTIVE', now(), now(), $4);
           } catch (error) {
             const conflictKind = classifySeatInsertConflict(error);
             if (conflictKind === "seat_taken") {
-              if (!autoSeat) {
-                throw makeError(409, "seat_taken");
-              }
               const activeSeatRows = await tx.unsafe(
                 "select seat_no from public.poker_seats where table_id = $1 and status = 'ACTIVE' order by seat_no asc;",
                 [tableId]
               );
               const nextSeatNo = pickNextSeatNo(activeSeatRows, Number(table.max_players), seatNoDbToUse + 1);
               if (!Number.isInteger(nextSeatNo)) {
-                const botLeaveMark = await markBotLeaveAfterHandIfNeeded(tx, { tableId });
-                if (botLeaveMark.status === "marked") {
-                  klog("poker_join_bot_leave_after_hand_marked", {
-                    tableId,
-                    userId: auth.userId,
-                    botUserId: botLeaveMark.botUserId,
-                    seatNo: botLeaveMark.seatNo,
-                  });
-                  throw makeError(409, "table_full_bot_leaving");
-                }
-                if (botLeaveMark.status === "already_marked") {
-                  klog("poker_join_bot_leave_after_hand_already_marked", {
-                    tableId,
-                    userId: auth.userId,
-                    botUserId: botLeaveMark.botUserId,
-                    seatNo: botLeaveMark.seatNo,
-                  });
-                  throw makeError(409, "table_full_bot_leaving");
-                }
-                throw makeError(409, "table_full");
+                const fullTableError = await resolveFullTableJoinError(tx, { tableId, userId: auth.userId });
+                throw makeError(409, fullTableError);
+              }
+              if (!autoSeat) {
+                throw makeError(409, "seat_taken");
               }
               seatNoDbToUse = nextSeatNo;
               klog("poker_join_autoseat_selected", {
