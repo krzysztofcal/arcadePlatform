@@ -20,6 +20,7 @@ const makeJoinHandler = ({
   occupiedSeatRows = [{ seat_no: 2 }],
   alwaysSeatConflict = false,
   buyInDuplicateOnce = false,
+  logs = [],
 }) =>
   loadPokerHandler("netlify/functions/poker-join.mjs", {
     baseHeaders: () => ({}),
@@ -151,7 +152,7 @@ const makeJoinHandler = ({
       sideEffects.ledgerSucceeded = Number(sideEffects.ledgerSucceeded || 0) + 1;
       return { transaction: { id: "tx-join" } };
     },
-    klog: () => {},
+    klog: (event, payload) => { logs.push({ event, payload }); },
     HEARTBEAT_INTERVAL_SEC: 15,
   });
 
@@ -229,13 +230,16 @@ const run = async () => {
 
   const rejoinQueries = [];
   const rejoinSideEffects = { seatInsert: 0, ledgerAttempted: 0, ledgerSucceeded: 0 };
+  const rejoinLogs = [];
   const rejoinHandler = makeJoinHandler({
     requestStore: new Map(),
     queries: rejoinQueries,
     sideEffects: rejoinSideEffects,
     existingSeatNo: 4,
+    logs: rejoinLogs,
   });
-  const rejoin = await callJoin(rejoinHandler, "join-rejoin");
+  const requestedSeatNo = 0;
+  const rejoin = await callJoin(rejoinHandler, "join-rejoin", { seatNo: requestedSeatNo });
   assert.equal(rejoin.statusCode, 200);
   assert.equal(JSON.parse(rejoin.body).seatNo, 3);
   assert.equal(rejoinSideEffects.seatInsert, 0);
@@ -260,19 +264,27 @@ const run = async () => {
   assert.equal(rejoinBody.me.isLeft, false);
   assert.equal(rejoinBody.me.isSitOut, false);
 
+  const rejoinOkLog = rejoinLogs.find((entry) => entry?.event === "poker_join_ok");
+  assert.ok(rejoinOkLog, "rejoin should emit poker_join_ok log");
+  assert.equal(rejoinOkLog.payload?.seatNoUi, 3);
+  assert.notEqual(rejoinOkLog.payload?.seatNoUi, requestedSeatNo);
+
   const conflictQueries = [];
   const conflictSideEffects = { seatInsert: 0, ledgerAttempted: 0, ledgerSucceeded: 0, conflictSeatInsertUsed: false };
+  const conflictLogs = [];
   const conflictHandler = makeJoinHandler({
     requestStore: new Map(),
     queries: conflictQueries,
     sideEffects: conflictSideEffects,
     conflictSeatInsertOnce: true,
+    logs: conflictLogs,
   });
   const conflictJoin = await callJoin(conflictHandler, "join-conflict");
   assert.equal(conflictJoin.statusCode, 409);
   assert.deepEqual(JSON.parse(conflictJoin.body), { error: "seat_taken" });
   assert.equal(conflictSideEffects.seatInsert, 1, "non-autoSeat join should fail immediately on seat conflict");
   assert.equal(conflictSideEffects.ledgerSucceeded, 0, "failed seat insert should not post ledger transaction");
+  assert.equal(conflictLogs.some((entry) => entry?.event === "poker_join_rejected" && entry?.payload?.reason === "seat_taken"), true);
 
   const autoSeatQueries = [];
   const autoSeatSideEffects = { seatInsert: 0, ledgerAttempted: 0, ledgerSucceeded: 0, conflictSeatInsertUsed: false };
