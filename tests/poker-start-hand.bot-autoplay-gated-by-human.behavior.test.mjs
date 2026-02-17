@@ -143,10 +143,13 @@ const run = async () => {
   assert.equal(response.statusCode, 200);
   const payload = JSON.parse(response.body || "{}");
   assert.equal(payload.ok, true);
-  assert.equal(payload.state?.state?.phase, "PREFLOP");
-  assert.ok(payload.state?.version >= 6, "expected start-hand mutation to persist");
+  const initialVersion = 5;
+  assert.equal(stateHolder.state?.phase, "PREFLOP");
+  assert.ok(stateHolder.version > initialVersion, "expected persisted state/version mutation");
   const botActorRows = actionRows.filter((row) => extractActorFromInsertParams(row) === "BOT");
   assert.equal(botActorRows.length, 0, "expected no bot autoplay action rows when no active humans");
+  assert.equal(actionRows.length, 3, "expected START_HAND + blinds baseline only");
+  const actionRowCountAfterFirst = actionRows.length;
 
   const replay = await handler({
     httpMethod: "POST",
@@ -154,6 +157,7 @@ const run = async () => {
     body: JSON.stringify({ tableId, requestId: "bot-start-gated-1" }),
   });
   assert.equal(replay.statusCode, 200);
+  assert.equal(actionRows.length, actionRowCountAfterFirst, "replay must not append action rows");
   assert.equal(actionRows.filter((row) => extractActorFromInsertParams(row) === "BOT").length, 0);
 };
 
