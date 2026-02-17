@@ -8,6 +8,9 @@ import { isStateStorageValid } from "../netlify/functions/_shared/poker-state-ut
 const tableId = "11111111-1111-4111-8111-111111111111";
 const userId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const maxPlayers = 6;
+const botBuyInBb = 100;
+const bigBlind = 2;
+const minBotStack = botBuyInBb * bigBlind;
 
 const findBotInsertPayload = (params, seats) => {
   const list = Array.isArray(params) ? params : [];
@@ -19,8 +22,8 @@ const findBotInsertPayload = (params, seats) => {
       value <= maxPlayers &&
       !seats.some((seat) => seat.seat_no === value || seat.user_id === botUserId)
   );
-  const stack = list.find((value) => Number.isInteger(value) && value > 0);
-  if (!botUserId || !Number.isInteger(seatNo) || !Number.isInteger(stack) || stack <= 0) return null;
+  const stack = list.find((value) => Number.isInteger(value) && value >= minBotStack && value !== seatNo);
+  if (!botUserId || !Number.isInteger(seatNo) || !Number.isInteger(stack) || stack < minBotStack) return null;
   return { botUserId, seatNo, stack };
 };
 
@@ -41,7 +44,7 @@ const makeCtx = () => {
     patchLeftTableByUserId,
     patchSitOutByUserId,
     isStateStorageValid,
-    parseStakes: () => ({ ok: true, value: { sb: 1, bb: 2 } }),
+    parseStakes: () => ({ ok: true, value: { sb: 1, bb: bigBlind } }),
     getBotConfig: () => ({ enabled: true, maxPerTable: 2, defaultProfile: "TRIVIAL", buyInBB: 100, bankrollSystemKey: "TREASURY" }),
     makeBotUserId: (_tableId, seatNo) => `bot-${seatNo}`,
     makeBotSystemKey: (_tableId, seatNo) => `POKER_BOT:${_tableId}:${seatNo}`,
@@ -127,6 +130,12 @@ const run = async () => {
   assert.equal(ctx.seats.filter((seat) => !seat.is_bot && seat.status === "ACTIVE").length, 1);
   assert.equal(ctx.seats.filter((seat) => seat.is_bot && seat.status === "ACTIVE").length, 2);
   assert.equal(ctx.botInsertCalls.length, 2);
+
+  for (const call of ctx.botInsertCalls) {
+    assert.equal(call.seatNo >= 1 && call.seatNo <= maxPlayers, true);
+    assert.equal(call.stack >= minBotStack, true);
+    assert.equal(call.stack === call.seatNo, false);
+  }
 
   const second = await ctx.handler({
     httpMethod: "POST",
