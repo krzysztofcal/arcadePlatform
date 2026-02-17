@@ -118,6 +118,8 @@ export async function handler(event) {
         }
 
         if (isSeated) {
+          // Heartbeat intentionally updates seat presence only; sweep lifecycle uses poker_tables.last_activity_at
+          // from real state/action mutations, not passive keep-alive traffic.
           await tx.unsafe(
             "update public.poker_seats set status = 'ACTIVE', last_seen_at = now() where table_id = $1 and user_id = $2;",
             [tableId, auth.userId]
