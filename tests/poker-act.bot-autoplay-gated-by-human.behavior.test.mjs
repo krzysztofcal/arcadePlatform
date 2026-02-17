@@ -145,6 +145,8 @@ const runScenario = async ({ authUserId, activeSeats, includeHumanSeat }) => {
     klog: () => {},
   });
 
+  const versionBefore = storedState.version;
+  const actionCountBefore = actionInserts.length;
   const requestId = `req-${authUserId}`;
   const response = await handler({
     httpMethod: "POST",
@@ -152,11 +154,10 @@ const runScenario = async ({ authUserId, activeSeats, includeHumanSeat }) => {
     body: JSON.stringify({ tableId, requestId, action: { type: "CALL" } }),
   });
 
-  return { response, actionInserts, storedState, handler, requestId };
+  return { response, actionInserts, storedState, handler, requestId, versionBefore, actionCountBefore };
 };
 
 const run = async () => {
-  const noHumansInitialVersion = 8;
   const noHumans = await runScenario({
     authUserId: botA,
     includeHumanSeat: false,
@@ -170,8 +171,8 @@ const run = async () => {
   assert.equal(noHumansPayload.ok, true);
   const noHumansBotRows = noHumans.actionInserts.filter((row) => extractActorFromInsertParams(row) === "BOT");
   assert.equal(noHumansBotRows.length, 0, "bot autoplay should not run when active human count is zero");
-  assert.ok(noHumans.actionInserts.length >= 1, "expected at least one persisted action row when no humans are active");
-  assert.ok(noHumans.storedState.version > noHumansInitialVersion, "expected persisted version to advance in no-human path");
+  assert.ok(noHumans.actionInserts.length >= noHumans.actionCountBefore + 1, "expected at least one persisted action row when no humans are active");
+  assert.ok(noHumans.storedState.version > noHumans.versionBefore, "expected persisted version to advance in no-human path");
   const noHumansActionCountAfterFirst = noHumans.actionInserts.length;
   const noHumansVersionAfterFirst = noHumans.storedState.version;
 
@@ -184,7 +185,6 @@ const run = async () => {
   assert.equal(noHumans.actionInserts.length, noHumansActionCountAfterFirst, "replay should not append action rows");
   assert.equal(noHumans.storedState.version, noHumansVersionAfterFirst, "replay should not mutate version");
 
-  const withHumanInitialVersion = 8;
   const withHuman = await runScenario({
     authUserId: humanUserId,
     includeHumanSeat: true,
@@ -198,7 +198,7 @@ const run = async () => {
   const withHumanPayload = JSON.parse(withHuman.response.body || "{}");
   assert.equal(withHumanPayload.ok, true);
   assert.ok(withHuman.actionInserts.length >= 1, "expected at least one action row from user action path");
-  assert.ok(withHuman.storedState.version > withHumanInitialVersion, "expected state version to advance for with-human scenario");
+  assert.ok(withHuman.storedState.version > withHuman.versionBefore, "expected state version to advance for with-human scenario");
 };
 
 run().then(() => console.log("poker-act bot autoplay human-gate behavior test passed")).catch((error) => {
