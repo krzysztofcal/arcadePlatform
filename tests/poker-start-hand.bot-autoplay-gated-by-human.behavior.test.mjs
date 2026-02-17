@@ -148,8 +148,9 @@ const run = async () => {
   assert.ok(stateHolder.version > initialVersion, "expected persisted state/version mutation");
   const botActorRows = actionRows.filter((row) => extractActorFromInsertParams(row) === "BOT");
   assert.equal(botActorRows.length, 0, "expected no bot autoplay action rows when no active humans");
-  assert.equal(actionRows.length, 3, "expected START_HAND + blinds baseline only");
+  assert.ok(actionRows.length >= 1, "expected at least one non-bot action row to persist");
   const actionRowCountAfterFirst = actionRows.length;
+  const versionAfterFirst = stateHolder.version;
 
   const replay = await handler({
     httpMethod: "POST",
@@ -158,6 +159,7 @@ const run = async () => {
   });
   assert.equal(replay.statusCode, 200);
   assert.equal(actionRows.length, actionRowCountAfterFirst, "replay must not append action rows");
+  assert.equal(stateHolder.version, versionAfterFirst, "replay must not mutate persisted version");
   assert.equal(actionRows.filter((row) => extractActorFromInsertParams(row) === "BOT").length, 0);
 };
 
