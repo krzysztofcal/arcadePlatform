@@ -390,8 +390,7 @@ with bot_only_tables as (
         where hs.table_id = t.id
           and coalesce(hs.is_bot, false) = false
       ),
-      t.created_at,
-      t.updated_at
+      t.created_at
     ) < now() - ($1::int * interval '1 second')
     and not exists (
       select 1
