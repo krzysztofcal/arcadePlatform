@@ -33,6 +33,8 @@ Requests without the header (or with a mismatched value) are rejected with `401 
 
 Runtime config should be read in code via `process.env.*` (Netlify Functions runtime style).
 
+Authoritative behavior reference: `docs/poker-bots.md`.
+
 Set these as Netlify environment variables (Site settings -> Environment variables):
 
 - `POKER_BOTS_ENABLED` (`0`/`1`)
@@ -42,9 +44,10 @@ Set these as Netlify environment variables (Site settings -> Environment variabl
 - `POKER_BOT_BANKROLL_SYSTEM_KEY` (default now: `TREASURY`; optional later: `POKER_BOT_BANKROLL`)
 - Optional later: `POKER_BOTS_MAX_ACTIONS_PER_POLL`
 
-Notes:
-- Most values above are runtime config, not secrets.
-- If any value is sensitive (for example an internal key/token), mark it as Sensitive/Secret in Netlify.
+Operational notes:
+- Bot runtime is guarded by `POKER_BOTS_ENABLED`.
+- Values above are Netlify runtime config env vars (not secrets unless explicitly sensitive).
+- Bot logic runs server-side in Netlify Functions runtime (no client-side bot scripts).
 
 ### Local development
 
