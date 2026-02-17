@@ -227,6 +227,10 @@ export async function handler(event) {
         );
         const seats = Array.isArray(seatRows) ? seatRows : [];
         const seatBotMap = buildSeatBotMap(seats);
+        const activeHumanCount = seats.reduce(
+          (count, seat) => (seat?.is_bot ? count : count + 1),
+          0
+        );
         const validSeats = seats.filter((seat) => Number.isInteger(seat?.seat_no) && seat?.user_id);
         if (validSeats.length < 2) {
           throw makeError(400, "not_enough_players");
@@ -671,6 +675,10 @@ export async function handler(event) {
       });
 
       while (botActionIndex < botAutoplayConfig.maxActionsPerRequest) {
+        if (activeHumanCount === 0) {
+          stopReason = "no_active_humans";
+          break;
+        }
         const turnUserId = finalState.turnUserId;
         if (!(finalState.phase === "PREFLOP" || finalState.phase === "FLOP" || finalState.phase === "TURN" || finalState.phase === "RIVER")) {
           stopReason = "non_action_phase";

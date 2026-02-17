@@ -7,15 +7,17 @@ const botA = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const botB = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 const human = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 
-const buildScenario = ({ humanLastActivityAgeSec, humanSeatStatus = "INACTIVE" }) => {
+const buildScenario = ({ humanLastActivityAgeSec, humanSeatStatus = "INACTIVE", includeHumanSeat = true }) => {
   const postCalls = [];
   const queries = [];
   const TABLE_BOT_ONLY_CLOSE_SEC = 10;
   const seats = new Map([
     [botA, { seat_no: 2, status: "ACTIVE", stack: 120, is_bot: true, user_id: botA }],
     [botB, { seat_no: 6, status: "ACTIVE", stack: 80, is_bot: true, user_id: botB }],
-    [human, { seat_no: 1, status: humanSeatStatus, stack: 0, is_bot: false, user_id: human }],
   ]);
+  if (includeHumanSeat) {
+    seats.set(human, { seat_no: 1, status: humanSeatStatus, stack: 0, is_bot: false, user_id: human });
+  }
 
   const botRows = () => Array.from(seats.values()).filter((row) => row.is_bot === true);
 
@@ -163,6 +165,11 @@ const run = async () => {
   assert.equal(botOnlyCloseQuery.text.includes("t.last_activity_at < now()"), false);
   assert.equal(botOnlyCloseQuery.text.includes("hs.updated_at"), false, "bot-only close query must not reference missing poker_seats.updated_at");
   assert.equal(
+    botOnlyCloseQuery.text.includes("t.created_at,\n      t.updated_at\n    ) < now()"),
+    false,
+    "bot-only close timer must not include poker_tables.updated_at fallback"
+  );
+  assert.equal(
     botOnlyCloseQuery.text.includes("hs.joined_at") || botOnlyCloseQuery.text.includes("hs.created_at"),
     true,
     "bot-only close query should use existing poker_seats timestamps as fallback"
@@ -173,6 +180,15 @@ const run = async () => {
   const second = await old.handler({ httpMethod: "POST", headers: { "x-sweep-secret": "secret" } });
   assert.equal(second.statusCode, 200);
   assert.equal(old.postCalls.length, 2, "replay should not issue extra cashouts once stacks are zero");
+
+
+  const noHumanHistory = buildScenario({ humanLastActivityAgeSec: 999, includeHumanSeat: false });
+  const noHumanHistoryRun = await noHumanHistory.handler({ httpMethod: "POST", headers: { "x-sweep-secret": "secret" } });
+  assert.equal(noHumanHistoryRun.statusCode, 200);
+  assert.equal(noHumanHistory.postCalls.length, 2, "no human-history tables should close and cash out bots");
+  const noHumanReplay = await noHumanHistory.handler({ httpMethod: "POST", headers: { "x-sweep-secret": "secret" } });
+  assert.equal(noHumanReplay.statusCode, 200);
+  assert.equal(noHumanHistory.postCalls.length, 2, "replay should remain idempotent for no-human-history scenario");
 
   const activeHuman = buildScenario({ humanLastActivityAgeSec: 999, humanSeatStatus: "ACTIVE" });
   const activeHumanRun = await activeHuman.handler({ httpMethod: "POST", headers: { "x-sweep-secret": "secret" } });

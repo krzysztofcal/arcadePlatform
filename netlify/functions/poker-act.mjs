@@ -544,6 +544,7 @@ export async function handler(event) {
       const dbActiveHumanUserIds = Array.isArray(activeSeatRows)
         ? activeSeatRows.filter((row) => !row?.is_bot).map((row) => row?.user_id).filter(Boolean)
         : [];
+      const activeHumanCount = dbActiveHumanUserIds.length;
       const activeUserIdsForHoleCards = seatUserIdsInOrder.slice();
       const requiredHoleCardUserIds = dbActiveHumanUserIds.length ? dbActiveHumanUserIds.slice() : [auth.userId];
 
@@ -782,6 +783,10 @@ export async function handler(event) {
         });
 
         while (timeoutBotActionCount < botAutoplayConfig.maxActionsPerRequest) {
+          if (activeHumanCount === 0) {
+            timeoutBotStopReason = "no_active_humans";
+            break;
+          }
           if (!isActionPhase(timeoutFinalState.phase)) {
             timeoutBotStopReason = "non_action_phase";
             break;
@@ -1326,6 +1331,7 @@ export async function handler(event) {
       };
 
       while (botActionCount < botAutoplayConfig.maxActionsPerRequest) {
+        if (activeHumanCount === 0) { botStopReason = "no_active_humans"; break; }
         if (!isActionPhase(responseFinalState.phase)) { botStopReason = "non_action_phase"; break; }
         const botTurnUserId = responseFinalState.turnUserId;
         if (!isBotTurn(botTurnUserId, seatBotMap)) { botStopReason = "turn_not_bot"; break; }
