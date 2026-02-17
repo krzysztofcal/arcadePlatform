@@ -18,6 +18,7 @@ import {
 } from "../../netlify/functions/_shared/poker-bots.mjs";
 import { cashoutBotSeatIfNeeded, ensureBotSeatInactiveForCashout } from "../../netlify/functions/_shared/poker-bot-cashout.mjs";
 import { isValidUuid } from "../../netlify/functions/_shared/poker-utils.mjs";
+import { hasActiveHumanGuardSql, shouldSeedBotsOnJoin, tableIdleCutoffExprSql } from "../../netlify/functions/_shared/poker-table-lifecycle.mjs";
 
 const root = process.cwd();
 
@@ -121,6 +122,9 @@ export const loadPokerHandler = (filePath, mocks) => {
     "makeBotUserId",
     "cashoutBotSeatIfNeeded",
     "ensureBotSeatInactiveForCashout",
+    "tableIdleCutoffExprSql",
+    "hasActiveHumanGuardSql",
+    "shouldSeedBotsOnJoin",
   ];
   const injectedNames = injectable.filter((name) => !declared.has(name));
   const destructureLine = injectedNames.length ? `const { ${injectedNames.join(", ")} } = mocks;` : "";
@@ -156,6 +160,9 @@ return handler;`
       makeBotUserId,
       cashoutBotSeatIfNeeded,
       ensureBotSeatInactiveForCashout,
+      tableIdleCutoffExprSql,
+      hasActiveHumanGuardSql,
+      shouldSeedBotsOnJoin,
       isValidUuid,
       areCardsUnique,
       cardIdentity,

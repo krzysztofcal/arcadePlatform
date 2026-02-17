@@ -10,6 +10,7 @@ import { postTransaction } from "./_shared/chips-ledger.mjs";
 import { isHoleCardsTableMissing } from "./_shared/poker-hole-cards-store.mjs";
 import { postHandSettlementToLedger } from "./_shared/poker-ledger-settlement.mjs";
 import { cashoutBotSeatIfNeeded, ensureBotSeatInactiveForCashout } from "./_shared/poker-bot-cashout.mjs";
+import { hasActiveHumanGuardSql, tableIdleCutoffExprSql } from "./_shared/poker-table-lifecycle.mjs";
 
 const STALE_PENDING_CUTOFF_MINUTES = 10;
 const STALE_PENDING_LIMIT = 500;
@@ -45,6 +46,9 @@ const isExpiredSeat = (value) => {
   if (!Number.isFinite(lastSeenMs)) return false;
   return Date.now() - lastSeenMs > PRESENCE_TTL_SEC * 1000;
 };
+
+const TABLE_IDLE_EXPR_SQL = tableIdleCutoffExprSql({ tableAlias: "t" });
+const ACTIVE_HUMAN_GUARD_SQL = hasActiveHumanGuardSql({ tableAlias: "t" });
 
 export async function handler(event) {
   if (event.httpMethod === "OPTIONS") {
@@ -364,14 +368,8 @@ with singleton_tables as (
     on s.table_id = t.id
    and s.status = 'ACTIVE'
   where t.status != 'CLOSED'
-    and coalesce(t.last_activity_at, t.created_at) < now() - ($1::int * interval '1 second')
-    and not exists (
-      select 1
-      from public.poker_seats hs
-      where hs.table_id = t.id
-        and hs.status = 'ACTIVE'
-        and coalesce(hs.is_bot, false) = false
-    )
+    and ${TABLE_IDLE_EXPR_SQL} < now() - ($1::int * interval '1 second')
+    and ${ACTIVE_HUMAN_GUARD_SQL}
   group by t.id
   having count(*) = 1
   order by min(s.last_seen_at) asc nulls last
@@ -390,14 +388,8 @@ with bot_only_tables as (
   select t.id
   from public.poker_tables t
   where t.status = 'OPEN'
-    and coalesce(t.last_activity_at, t.created_at) < now() - ($1::int * interval '1 second')
-    and not exists (
-      select 1
-      from public.poker_seats hs
-      where hs.table_id = t.id
-        and hs.status = 'ACTIVE'
-        and coalesce(hs.is_bot, false) = false
-    )
+    and ${TABLE_IDLE_EXPR_SQL} < now() - ($1::int * interval '1 second')
+    and ${ACTIVE_HUMAN_GUARD_SQL}
     and exists (
       select 1
       from public.poker_seats bs
@@ -405,7 +397,7 @@ with bot_only_tables as (
         and bs.status = 'ACTIVE'
         and bs.is_bot = true
     )
-  order by coalesce(t.last_activity_at, t.created_at) asc nulls first
+  order by ${TABLE_IDLE_EXPR_SQL} asc nulls first
   limit $2
 )
 update public.poker_tables t
@@ -697,18 +689,12 @@ limit $1;`,
 update public.poker_tables t
 set status = 'CLOSED', updated_at = now()
 where t.status != 'CLOSED'
-  and coalesce(t.last_activity_at, t.created_at) < now() - ($1::int * interval '1 second')
+  and ${TABLE_IDLE_EXPR_SQL} < now() - ($1::int * interval '1 second')
   and not exists (
     select 1 from public.poker_seats s
     where s.table_id = t.id and s.status = 'ACTIVE'
   )
-  and not exists (
-    select 1
-    from public.poker_seats hs
-    where hs.table_id = t.id
-      and hs.status = 'ACTIVE'
-      and coalesce(hs.is_bot, false) = false
-  )
+  and ${ACTIVE_HUMAN_GUARD_SQL}
 returning t.id;
         `,
         [TABLE_EMPTY_CLOSE_SEC]
