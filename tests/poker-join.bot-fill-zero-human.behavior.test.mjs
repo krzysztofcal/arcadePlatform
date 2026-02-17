@@ -4,7 +4,7 @@ import { loadPokerHandler } from "./helpers/poker-test-helpers.mjs";
 const tableId = "11111111-1111-4111-8111-111111111111";
 const userId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 
-const run = async () => {
+const makeHandler = ({ tableStatus = "CLOSED", maxPlayers = 6 }) => {
   const botInsertCalls = [];
   const handler = loadPokerHandler("netlify/functions/poker-join.mjs", {
     baseHeaders: () => ({}),
@@ -17,10 +17,10 @@ const run = async () => {
       fn({
         unsafe: async (query) => {
           const text = String(query).toLowerCase();
-          if (text.includes("insert into public.poker_requests")) return [{ request_id: "join-closed" }];
+          if (text.includes("insert into public.poker_requests")) return [{ request_id: "join-id" }];
           if (text.includes("from public.poker_requests")) return [];
           if (text.includes("delete from public.poker_requests")) return [];
-          if (text.includes("from public.poker_tables")) return [{ id: tableId, status: "CLOSED", max_players: 6, stakes: "1/2" }];
+          if (text.includes("from public.poker_tables")) return [{ id: tableId, status: tableStatus, max_players: maxPlayers, stakes: "1/2" }];
           if (text.includes("insert into public.poker_seats") && text.includes("is_bot")) {
             botInsertCalls.push(1);
             return [];
@@ -32,15 +32,33 @@ const run = async () => {
     klog: () => {},
   });
 
-  const res = await handler({
-    httpMethod: "POST",
-    headers: { origin: "https://example.test", authorization: "Bearer token" },
-    body: JSON.stringify({ tableId, seatNo: 0, buyIn: 100, requestId: "join-closed" }),
-  });
+  return { handler, botInsertCalls };
+};
 
-  assert.equal(res.statusCode, 409);
-  assert.equal(JSON.parse(res.body).error, "table_closed");
-  assert.equal(botInsertCalls.length, 0);
+const run = async () => {
+  {
+    const ctx = makeHandler({ tableStatus: "CLOSED", maxPlayers: 6 });
+    const res = await ctx.handler({
+      httpMethod: "POST",
+      headers: { origin: "https://example.test", authorization: "Bearer token" },
+      body: JSON.stringify({ tableId, seatNo: 0, buyIn: 100, requestId: "join-closed" }),
+    });
+    assert.equal(res.statusCode, 409);
+    assert.equal(JSON.parse(res.body).error, "table_closed");
+    assert.equal(ctx.botInsertCalls.length, 0);
+  }
+
+  {
+    const ctx = makeHandler({ tableStatus: "OPEN", maxPlayers: 1 });
+    const res = await ctx.handler({
+      httpMethod: "POST",
+      headers: { origin: "https://example.test", authorization: "Bearer token" },
+      body: JSON.stringify({ tableId, seatNo: 0, buyIn: 100, requestId: "join-open-invalid" }),
+    });
+    assert.equal(res.statusCode, 400);
+    assert.equal(JSON.parse(res.body).error, "invalid_seat_no");
+    assert.equal(ctx.botInsertCalls.length, 0);
+  }
 };
 
 run().catch((error) => {

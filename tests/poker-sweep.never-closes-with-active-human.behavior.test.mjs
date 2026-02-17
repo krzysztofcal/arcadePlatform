@@ -3,6 +3,12 @@ import { loadPokerHandler } from "./helpers/poker-test-helpers.mjs";
 
 const tableId = "99999999-9999-4999-8999-999999999999";
 
+const hasActiveHumanGuard = (text) =>
+  text.includes("not exists") &&
+  text.includes("from public.poker_seats hs") &&
+  text.includes("hs.status = 'active'") &&
+  text.includes("coalesce(hs.is_bot, false) = false");
+
 const run = async () => {
   process.env.POKER_SWEEP_SECRET = "secret";
   process.env.POKER_SYSTEM_ACTOR_USER_ID = "00000000-0000-4000-8000-000000000001";
@@ -11,6 +17,11 @@ const run = async () => {
     closeTable: 0,
     inactivateSeats: 0,
     closeCashout: 0,
+  };
+  const queryChecks = {
+    singletonGuard: false,
+    botOnlyGuard: false,
+    emptyGuard: false,
   };
 
   const handler = loadPokerHandler("netlify/functions/poker-sweep.mjs", {
@@ -28,17 +39,31 @@ const run = async () => {
           if (text.includes("from public.poker_requests") && text.includes("result_json is null")) return [];
           if (text.includes("from public.poker_seats") && text.includes("last_seen_at < now()")) return [];
           if (text.includes("delete from public.poker_requests")) return [];
-          if (text.includes("with singleton_tables as")) return [];
-          if (text.includes("with bot_only_tables as")) return [];
+
+          if (text.includes("with singleton_tables as")) {
+            const guarded = hasActiveHumanGuard(text);
+            queryChecks.singletonGuard = guarded;
+            return guarded ? [] : [{ id: tableId }];
+          }
+          if (text.includes("with bot_only_tables as")) {
+            const guarded = hasActiveHumanGuard(text);
+            queryChecks.botOnlyGuard = guarded;
+            return guarded ? [] : [{ id: tableId }];
+          }
+
           if (text.includes("update public.poker_seats set status = 'inactive' where table_id = any")) {
             calls.inactivateSeats += 1;
             return [];
           }
           if (text.includes("select t.id") && text.includes("stack > 0")) return [];
+
           if (text.includes("update public.poker_tables t") && text.includes("set status = 'closed'")) {
-            calls.closeTable += 1;
-            return [];
+            const guarded = hasActiveHumanGuard(text);
+            queryChecks.emptyGuard = guarded;
+            calls.closeTable += guarded ? 0 : 1;
+            return guarded ? [] : [{ id: tableId }];
           }
+
           if (text.includes("select seat_no, status, stack, user_id, is_bot")) {
             calls.closeCashout += 1;
             return [{ seat_no: 1, status: "ACTIVE", stack: 100, user_id: "human", is_bot: false }];
@@ -61,6 +86,10 @@ const run = async () => {
 
   const res = await handler({ httpMethod: "POST", headers: { "x-sweep-secret": "secret" } });
   assert.equal(res.statusCode, 200);
+  assert.equal(queryChecks.singletonGuard, true);
+  assert.equal(queryChecks.botOnlyGuard, true);
+  assert.equal(queryChecks.emptyGuard, true);
+  assert.equal(calls.closeTable, 0);
   assert.equal(calls.inactivateSeats, 0);
   assert.equal(calls.closeCashout, 0);
 };
