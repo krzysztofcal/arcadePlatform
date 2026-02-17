@@ -168,6 +168,11 @@ const run = async () => {
   assert.equal(botOnlyCloseQuery.text.includes("t.last_activity_at < now()"), false);
   assert.equal(botOnlyCloseQuery.text.includes("hs.updated_at"), false, "bot-only close query must not reference missing poker_seats.updated_at");
   assert.equal(
+    botOnlyCloseQuery.text.includes("t.created_at,\n      t.updated_at\n    ) < now()"),
+    false,
+    "bot-only close timer must not include poker_tables.updated_at fallback"
+  );
+  assert.equal(
     botOnlyCloseQuery.text.includes("hs.joined_at") || botOnlyCloseQuery.text.includes("hs.created_at"),
     true,
     "bot-only close query should use existing poker_seats timestamps as fallback"
@@ -186,6 +191,15 @@ const run = async () => {
   const second = await old.handler({ httpMethod: "POST", headers: { "x-sweep-secret": "secret" } });
   assert.equal(second.statusCode, 200);
   assert.equal(old.postCalls.length, 2, "replay should not issue extra cashouts once stacks are zero");
+
+
+  const noHumanHistory = buildScenario({ humanLastActivityAgeSec: 999, includeHumanSeat: false });
+  const noHumanHistoryRun = await noHumanHistory.handler({ httpMethod: "POST", headers: { "x-sweep-secret": "secret" } });
+  assert.equal(noHumanHistoryRun.statusCode, 200);
+  assert.equal(noHumanHistory.postCalls.length, 2, "no human-history tables should close and cash out bots");
+  const noHumanReplay = await noHumanHistory.handler({ httpMethod: "POST", headers: { "x-sweep-secret": "secret" } });
+  assert.equal(noHumanReplay.statusCode, 200);
+  assert.equal(noHumanHistory.postCalls.length, 2, "replay should remain idempotent for no-human-history scenario");
 
   const activeHuman = buildScenario({ humanLastActivityAgeSec: 999, humanSeatStatus: "ACTIVE" });
   const activeHumanRun = await activeHuman.handler({ httpMethod: "POST", headers: { "x-sweep-secret": "secret" } });
