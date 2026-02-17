@@ -364,7 +364,14 @@ with singleton_tables as (
     on s.table_id = t.id
    and s.status = 'ACTIVE'
   where t.status != 'CLOSED'
-    and t.last_activity_at < now() - ($1::int * interval '1 second')
+    and coalesce(t.last_activity_at, t.created_at) < now() - ($1::int * interval '1 second')
+    and not exists (
+      select 1
+      from public.poker_seats hs
+      where hs.table_id = t.id
+        and hs.status = 'ACTIVE'
+        and coalesce(hs.is_bot, false) = false
+    )
   group by t.id
   having count(*) = 1
   order by min(s.last_seen_at) asc nulls last
@@ -383,15 +390,7 @@ with bot_only_tables as (
   select t.id
   from public.poker_tables t
   where t.status = 'OPEN'
-    and coalesce(
-      (
-        select max(coalesce(hs.last_seen_at, hs.joined_at, hs.created_at))
-        from public.poker_seats hs
-        where hs.table_id = t.id
-          and coalesce(hs.is_bot, false) = false
-      ),
-      t.created_at
-    ) < now() - ($1::int * interval '1 second')
+    and coalesce(t.last_activity_at, t.created_at) < now() - ($1::int * interval '1 second')
     and not exists (
       select 1
       from public.poker_seats hs
@@ -406,7 +405,7 @@ with bot_only_tables as (
         and bs.status = 'ACTIVE'
         and bs.is_bot = true
     )
-  order by coalesce(t.created_at, t.updated_at) asc nulls first
+  order by coalesce(t.last_activity_at, t.created_at) asc nulls first
   limit $2
 )
 update public.poker_tables t
@@ -698,10 +697,17 @@ limit $1;`,
 update public.poker_tables t
 set status = 'CLOSED', updated_at = now()
 where t.status != 'CLOSED'
-  and t.last_activity_at < now() - ($1::int * interval '1 second')
+  and coalesce(t.last_activity_at, t.created_at) < now() - ($1::int * interval '1 second')
   and not exists (
     select 1 from public.poker_seats s
     where s.table_id = t.id and s.status = 'ACTIVE'
+  )
+  and not exists (
+    select 1
+    from public.poker_seats hs
+    where hs.table_id = t.id
+      and hs.status = 'ACTIVE'
+      and coalesce(hs.is_bot, false) = false
   )
 returning t.id;
         `,
