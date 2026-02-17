@@ -10,6 +10,7 @@ import { patchSitOutByUserId } from "./_shared/poker-sitout-flag.mjs";
 import { loadPokerStateForUpdate, updatePokerStateLocked } from "./_shared/poker-state-write-locked.mjs";
 import { computeTargetBotCount, getBotConfig, makeBotSystemKey, makeBotUserId } from "./_shared/poker-bots.mjs";
 import { parseStakes } from "./_shared/poker-stakes.mjs";
+import { shouldSeedBotsOnJoin } from "./_shared/poker-table-lifecycle.mjs";
 
 const REQUEST_PENDING_STALE_SEC = 30;
 const UNIQUE_VIOLATION = "23505";
@@ -133,7 +134,7 @@ const seedBotsAfterHumanJoin = async (tx, { tableId, maxPlayers, bb, cfg, humanU
     [tableId]
   );
   const humanCount = Number(countRows?.[0]?.count || 0);
-  if (humanCount !== 1) return [];
+  if (!shouldSeedBotsOnJoin({ humanCount })) return [];
   const targetBots = computeTargetBotCount({ maxPlayers, humanCount, maxBots: cfg.maxPerTable });
   if (!Number.isInteger(targetBots) || targetBots <= 0) return [];
 
