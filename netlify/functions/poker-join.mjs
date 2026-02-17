@@ -403,12 +403,12 @@ export async function handler(event) {
               throw makeError(409, "state_invalid");
             }
           }
-          const seatNoUi = toUiSeatNo(existingSeatNo, Number(table.max_players));
+          const resolvedSeatNoUi = toUiSeatNo(existingSeatNo, Number(table.max_players));
 
           const resultPayload = {
             ok: true,
             tableId,
-            seatNo: seatNoUi,
+            seatNo: resolvedSeatNoUi,
             userId: auth.userId,
             me: buildMeStatus(meStateWithSeat, auth.userId, { forceSeated: true }),
           };
@@ -422,12 +422,12 @@ export async function handler(event) {
           klog("poker_join_stack_persisted", {
             tableId,
             userId: auth.userId,
-            seatNoUi,
+            seatNoUi: resolvedSeatNoUi,
             seatNoDb: existingSeatNo,
             attemptedStackFill: buyIn,
             mode: "rejoin",
           });
-          klog("poker_join_ok", { tableId, userId: auth.userId, seatNoUi, seatNoDb: existingSeatNo, rejoin: true });
+          klog("poker_join_ok", { tableId, userId: auth.userId, seatNoUi: resolvedSeatNoUi, seatNoDb: existingSeatNo, rejoin: true });
           return resultPayload;
         }
 

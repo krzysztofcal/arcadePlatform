@@ -230,13 +230,16 @@ const run = async () => {
 
   const rejoinQueries = [];
   const rejoinSideEffects = { seatInsert: 0, ledgerAttempted: 0, ledgerSucceeded: 0 };
+  const rejoinLogs = [];
   const rejoinHandler = makeJoinHandler({
     requestStore: new Map(),
     queries: rejoinQueries,
     sideEffects: rejoinSideEffects,
     existingSeatNo: 4,
+    logs: rejoinLogs,
   });
-  const rejoin = await callJoin(rejoinHandler, "join-rejoin");
+  const requestedSeatNo = 0;
+  const rejoin = await callJoin(rejoinHandler, "join-rejoin", { seatNo: requestedSeatNo });
   assert.equal(rejoin.statusCode, 200);
   assert.equal(JSON.parse(rejoin.body).seatNo, 3);
   assert.equal(rejoinSideEffects.seatInsert, 0);
@@ -260,6 +263,11 @@ const run = async () => {
   assert.equal(rejoinBody.me.isSeated, true);
   assert.equal(rejoinBody.me.isLeft, false);
   assert.equal(rejoinBody.me.isSitOut, false);
+
+  const rejoinOkLog = rejoinLogs.find((entry) => entry?.event === "poker_join_ok");
+  assert.ok(rejoinOkLog, "rejoin should emit poker_join_ok log");
+  assert.equal(rejoinOkLog.payload?.seatNoUi, 3);
+  assert.notEqual(rejoinOkLog.payload?.seatNoUi, requestedSeatNo);
 
   const conflictQueries = [];
   const conflictSideEffects = { seatInsert: 0, ledgerAttempted: 0, ledgerSucceeded: 0, conflictSeatInsertUsed: false };
