@@ -1,6 +1,9 @@
+const SAFE_ALIAS_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
 const normalizeAlias = (tableAlias) => {
   const alias = typeof tableAlias === "string" ? tableAlias.trim() : "";
-  return alias || "t";
+  if (!alias) return "t";
+  return SAFE_ALIAS_RE.test(alias) ? alias : "t";
 };
 
 export const tableIdleCutoffExprSql = ({ tableAlias } = {}) => {
