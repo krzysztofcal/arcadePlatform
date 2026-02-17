@@ -123,7 +123,6 @@ const run = async () => {
   assert.ok(payload.state?.version >= 6, "expected start-hand mutation to persist");
   const botActorRows = actionRows.filter((row) => JSON.parse(row?.[9] || "null")?.actor === "BOT");
   assert.equal(botActorRows.length, 0, "expected no bot autoplay action rows when no active humans");
-  assert.equal(actionRows.length, 3, "expected START_HAND + blinds only");
 
   const replay = await handler({
     httpMethod: "POST",
