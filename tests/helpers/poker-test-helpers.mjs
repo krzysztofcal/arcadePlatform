@@ -108,6 +108,7 @@ export const loadPokerHandler = (filePath, mocks) => {
     "storePokerRequestResult",
     "TABLE_EMPTY_CLOSE_SEC",
     "TABLE_SINGLETON_CLOSE_SEC",
+    "TABLE_BOT_ONLY_CLOSE_SEC",
     "TURN_MS",
     "updatePokerStateLocked",
     "computeTargetBotCount",
