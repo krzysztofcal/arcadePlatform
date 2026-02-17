@@ -83,10 +83,10 @@ const run = async () => {
               : [];
           }
           if (text.includes("select state from public.poker_state")) {
-            const tableId = params?.[0];
-            const row = scenario.get(tableId);
-            const botUserId = botByTable[tableId];
-            return [{ state: JSON.stringify({ tableId, stacks: { [botUserId]: row?.stack || 0 } }) }];
+            const id = params?.[0];
+            const row = scenario.get(id);
+            const botUserId = botByTable[id];
+            return [{ state: JSON.stringify({ tableId: id, stacks: { [botUserId]: row?.stack || 0 } }) }];
           }
           if (text.includes("update public.poker_seats set stack = 0 where table_id = $1 and user_id = $2")) {
             const row = scenario.get(params?.[0]);
@@ -109,10 +109,17 @@ const run = async () => {
 
   const first = await handler({ httpMethod: "POST", headers: { "x-sweep-secret": "secret" } });
   assert.equal(first.statusCode, 200);
+
+  const botOnlyCloseQuery = queries.find((entry) => entry.text.includes("with bot_only_tables as"));
+  assert.ok(botOnlyCloseQuery, "expected bot-only close candidate query");
+  assert.equal(botOnlyCloseQuery.text.includes("coalesce(t.last_activity_at, t.created_at)"), true);
+  assert.equal(botOnlyCloseQuery.text.includes("t.updated_at"), false);
+  assert.equal(botOnlyCloseQuery.text.includes("order by coalesce(t.last_activity_at, t.created_at)"), true);
+
   assert.deepEqual(
     postCalls.map((c) => c.tableId).sort(),
     [nullActivityTable, staleTable].sort(),
-    "stale last_activity_at and null-last_activity-old-created tables should close; recent should not"
+    "only stale last_activity table and null-last-activity-old-created table should close"
   );
 
   const second = await handler({ httpMethod: "POST", headers: { "x-sweep-secret": "secret" } });
