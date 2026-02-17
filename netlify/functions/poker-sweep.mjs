@@ -385,7 +385,7 @@ with bot_only_tables as (
   where t.status = 'OPEN'
     and coalesce(
       (
-        select max(coalesce(hs.last_seen_at, hs.updated_at))
+        select max(coalesce(hs.last_seen_at, hs.joined_at, hs.created_at))
         from public.poker_seats hs
         where hs.table_id = t.id
           and coalesce(hs.is_bot, false) = false

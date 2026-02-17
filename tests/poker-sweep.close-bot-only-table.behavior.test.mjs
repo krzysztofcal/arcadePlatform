@@ -161,7 +161,12 @@ const run = async () => {
   const botOnlyCloseQuery = old.queries.find((entry) => entry.text.includes("with bot_only_tables as"));
   assert.ok(botOnlyCloseQuery, "expected bot-only close candidate query");
   assert.equal(botOnlyCloseQuery.text.includes("t.last_activity_at < now()"), false);
-  assert.equal(botOnlyCloseQuery.text.includes("select max(coalesce(hs.last_seen_at, hs.updated_at))\n        from public.poker_seats hs\n        where hs.table_id = t.id\n          and hs.status = 'active'\n          and coalesce(hs.is_bot, false) = false"), false);
+  assert.equal(botOnlyCloseQuery.text.includes("hs.updated_at"), false, "bot-only close query must not reference missing poker_seats.updated_at");
+  assert.equal(
+    botOnlyCloseQuery.text.includes("hs.joined_at") || botOnlyCloseQuery.text.includes("hs.created_at"),
+    true,
+    "bot-only close query should use existing poker_seats timestamps as fallback"
+  );
 
   assertBotCashoutOrdering(old.queries);
 
