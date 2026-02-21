@@ -1,6 +1,9 @@
 import { spawnSync } from "node:child_process";
 import "../tests/_setup/poker-deal-secret.mjs";
 
+process.env.NODE_ENV = process.env.NODE_ENV || "test";
+process.env.XP_TEST_MODE = "1";
+
 function run(cmd, args, name){
   const r = spawnSync(cmd, args, { stdio: "inherit", env: process.env });
   if (r.status !== 0) {
@@ -18,6 +21,7 @@ run("node", ["tests/xp-client-contract.test.mjs"], "xp-client-contract");
 run("node", ["tests/xp-game-hook.test.mjs"], "xp-game-hook");
 run("node", ["tests/xp-badge.test.mjs"], "xp-badge");
 run("node", ["tests/xp-multigame.test.mjs"], "xp-multigame");
+run("node", ["tests/store-upstash.force-memory-test-mode.behavior.test.mjs"], "store-upstash-force-memory-test-mode");
 run("node", ["tests/xp-award-delta.test.mjs"], "xp-award-delta");
 run("node", ["tests/xp-award-session-daily.test.mjs"], "xp-award-session-daily");
 run("node", ["tests/xp-award-legacy-fallback.test.mjs"], "xp-award-legacy-fallback");
