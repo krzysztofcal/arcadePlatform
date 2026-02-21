@@ -4,7 +4,7 @@ import { klog } from "./supabase-admin.mjs";
 const BASE = process.env.UPSTASH_REDIS_REST_URL;
 const TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN;
 const USER_PROFILE_PREFIX = "kcswh:xp:user:";
-const FORCE_MEMORY_STORE = process.env.NODE_ENV === "test" || process.env.XP_TEST_MODE === "1";
+const FORCE_MEMORY_STORE = process.env.XP_TEST_MODE === "1";
 
 // Track whether we're using memory store (for fallback logic)
 export const isMemoryStore = FORCE_MEMORY_STORE || !BASE || !TOKEN;
