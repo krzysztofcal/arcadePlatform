@@ -1,6 +1,4 @@
-import crypto from "node:crypto";
 import { baseHeaders, beginSql, corsHeaders, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
-import { areCardsUnique, isValidTwoCards } from "./_shared/poker-cards-utils.mjs";
 import { dealHoleCards } from "./_shared/poker-engine.mjs";
 import { deriveDeck } from "./_shared/poker-deal-deterministic.mjs";
 import { TURN_MS, advanceIfNeeded, applyAction, computeNextDealerSeatNo } from "./_shared/poker-reducer.mjs";
@@ -21,6 +19,7 @@ import { normalizeRequestId } from "./_shared/poker-request-id.mjs";
 import { resetTurnTimer } from "./_shared/poker-turn-timer.mjs";
 import { clearMissedTurns } from "./_shared/poker-missed-turns.mjs";
 import { buildSeatBotMap, chooseBotActionTrivial, getBotAutoplayConfig, isBotTurn } from "./_shared/poker-bots.mjs";
+import { startHandCore } from "./_shared/poker-start-hand-core.mjs";
 
 const parseBody = (body) => {
   if (!body) return { ok: true, value: {} };
@@ -68,19 +67,6 @@ const parseRequestId = (value) => {
   const parsed = normalizeRequestId(value, { maxLen: 200 });
   if (!parsed.ok || !parsed.value) return { ok: false, value: null };
   return { ok: true, value: parsed.value };
-};
-
-const parseStacks = (value) => (value && typeof value === "object" && !Array.isArray(value) ? value : {});
-
-const buildStacksFromSeats = (seats) => {
-  const rows = Array.isArray(seats) ? seats : [];
-  return rows.reduce((acc, seat) => {
-    const userId = typeof seat?.user_id === "string" ? seat.user_id : "";
-    if (!userId) return acc;
-    const parsed = Number(seat?.stack);
-    acc[userId] = Math.max(0, Number.isFinite(parsed) ? parsed : 0);
-    return acc;
-  }, {});
 };
 
 const normalizeVersion = (value) => {
@@ -328,238 +314,18 @@ export async function handler(event) {
         throw makeAlreadyInHandError(tableId, auth.userId, "phase_gate");
       }
 
-      const orderedSeats = validSeats.slice().sort((a, b) => Number(a.seat_no) - Number(b.seat_no));
-      const orderedSeatList = orderedSeats.map((seat) => ({ userId: seat.user_id, seatNo: seat.seat_no }));
-      let dealerSeatNo = computeNextDealerSeatNo(orderedSeatList, previousDealerSeatNo);
-      if (!orderedSeats.some((seat) => seat.seat_no === dealerSeatNo)) {
-        dealerSeatNo = orderedSeats[0].seat_no;
-      }
-      const dealerIndex = Math.max(
-        orderedSeats.findIndex((seat) => seat.seat_no === dealerSeatNo),
-        0
-      );
-      const seatCount = orderedSeats.length;
-      const isHeadsUp = seatCount === 2;
-      const sbIndex = isHeadsUp ? dealerIndex : (dealerIndex + 1) % seatCount;
-      const bbIndex = (sbIndex + 1) % seatCount;
-      const utgIndex = isHeadsUp ? dealerIndex : (bbIndex + 1) % seatCount;
-      const sbUserId = orderedSeats[sbIndex]?.user_id || null;
-      const bbUserId = orderedSeats[bbIndex]?.user_id || null;
-      const turnUserId =
-        orderedSeats[utgIndex]?.user_id || orderedSeats[dealerIndex]?.user_id || orderedSeats[0].user_id;
-
-      const rng = getRng();
-      const handId =
-        typeof crypto.randomUUID === "function"
-          ? crypto.randomUUID()
-          : `hand_${Date.now()}_${Math.floor(rng() * 1e6)}`;
-      const handSeed =
-        typeof crypto.randomUUID === "function"
-          ? crypto.randomUUID()
-          : `seed_${Date.now()}_${Math.floor(rng() * 1e6)}`;
-      const derivedSeats = orderedSeatList.slice();
-      const activeUserIds = new Set(orderedSeats.map((seat) => seat.user_id));
-      const activeUserIdList = orderedSeats.map((seat) => seat.user_id);
-      if (activeUserIds.size < 2 || activeUserIdList.length < 2) {
-        klog("poker_start_hand_invalid_active_players", {
-          tableId,
-          reason: "insufficient_active_players",
-          activeUserCount: activeUserIds.size,
-          activeSeatCount: activeUserIdList.length,
-        });
-        throw makeError(409, "state_invalid");
-      }
-      const currentStacks = parseStacks(currentState.stacks);
-      const stacksFromSeats = buildStacksFromSeats(orderedSeats);
-      const hasStoredStacks = Object.keys(currentStacks).length > 0;
-      const missingStoredStackUserId = activeUserIdList.find((userId) => !Object.prototype.hasOwnProperty.call(currentStacks, userId));
-      const useStoredStacks = hasStoredStacks && !missingStoredStackUserId;
-      const nextStacks = activeUserIdList.reduce((acc, userId) => {
-        const rawStack = useStoredStacks ? currentStacks[userId] : stacksFromSeats[userId];
-        const n = Number(rawStack);
-        if (Number.isFinite(n) && Number.isInteger(n) && n >= 0) acc[userId] = n;
-        return acc;
-      }, {});
-      const invalidActiveStackUserIds = activeUserIdList.filter((userId) => !Object.prototype.hasOwnProperty.call(nextStacks, userId));
-      if (invalidActiveStackUserIds.length > 0) {
-        klog("poker_start_hand_invalid_active_stacks", {
-          tableId,
-          userId: auth.userId,
-          invalidActiveStackUserIds,
-          activeUserIdList,
-          currentStacks,
-          stacksFromSeats,
-          useStoredStacks,
-        });
-        throw makeError(409, "state_invalid");
-      }
-      const toCallByUserId = Object.fromEntries(activeUserIdList.map((userId) => [userId, 0]));
-      const betThisRoundByUserId = Object.fromEntries(activeUserIdList.map((userId) => [userId, 0]));
-      const actedThisRoundByUserId = Object.fromEntries(activeUserIdList.map((userId) => [userId, false]));
-      const foldedByUserId = Object.fromEntries(activeUserIdList.map((userId) => [userId, false]));
-      const contributionsByUserId = Object.fromEntries(activeUserIdList.map((userId) => [userId, 0]));
-      const stakesParsed = parseStakes(table?.stakes);
-      if (!stakesParsed.ok) {
-        klog("poker_start_hand_invalid_stakes", { tableId, reason: stakesParsed.details?.reason || "stakes_invalid" });
-        throw makeError(409, "invalid_stakes");
-      }
-      const sbAmount = stakesParsed.value.sb;
-      const bbAmount = stakesParsed.value.bb;
-      const postBlind = (userId, blindAmount) => {
-        if (!userId) return 0;
-        const stack = nextStacks[userId] ?? 0;
-        const posted = Math.min(stack, blindAmount);
-        nextStacks[userId] = Math.max(0, stack - posted);
-        betThisRoundByUserId[userId] = posted;
-        contributionsByUserId[userId] = posted;
-        return posted;
-      };
-      const sbPosted = postBlind(sbUserId, sbAmount);
-      const bbPosted = postBlind(bbUserId, bbAmount);
-      const currentBet = bbPosted;
-      const blindRaiseSize = bbPosted - sbPosted;
-      const lastRaiseSize = bbPosted > 0 ? (blindRaiseSize > 0 ? blindRaiseSize : bbPosted) : 0;
-      activeUserIdList.forEach((userId) => {
-        const bet = betThisRoundByUserId[userId] || 0;
-        toCallByUserId[userId] = Math.max(0, currentBet - bet);
-      });
-
-      let deck;
-      try {
-        deck = deriveDeck(handSeed);
-      } catch (error) {
-        if (error?.message === "deal_secret_missing") {
-          throw makeError(409, "state_invalid");
-        }
-        throw error;
-      }
-      const dealResult = dealHoleCards(deck, activeUserIdList);
-      const dealtHoleCards = isPlainObject(dealResult?.holeCardsByUserId) ? dealResult.holeCardsByUserId : {};
-
-      if (!activeUserIdList.every((userId) => isValidTwoCards(dealtHoleCards[userId]))) {
-        klog("poker_state_corrupt", { tableId, phase: "PREFLOP" });
-        throw makeError(409, "state_invalid");
-      }
-      const flatHoleCards = activeUserIdList.flatMap((seatUserId) => dealtHoleCards[seatUserId] || []);
-      const expectedHoleCardCount = activeUserIdList.length * 2;
-      if (flatHoleCards.length !== expectedHoleCardCount) {
-        klog("poker_state_corrupt", {
-          tableId,
-          phase: "PREFLOP",
-          reason: "hole_cards_wrong_count",
-          expectedHoleCardCount,
-          actual: flatHoleCards.length,
-        });
-        throw makeError(409, "state_invalid");
-      }
-      if (!areCardsUnique(flatHoleCards)) {
-        klog("poker_state_corrupt", { tableId, phase: "PREFLOP", reason: "hole_cards_not_unique" });
-        throw makeError(409, "state_invalid");
-      }
-
-      if (!isStateStorageValid({ seats: derivedSeats, holeCardsByUserId: dealtHoleCards }, { requireHoleCards: true })) {
-        klog("poker_state_corrupt", { tableId, phase: "PREFLOP" });
-        throw makeError(409, "state_invalid");
-      }
-
-      const holeCardValues = activeUserIdList.map((userId) => ({ userId, cards: dealtHoleCards[userId] }));
-      const holeCardPlaceholders = holeCardValues
-        .map((_, index) => `($${index * 4 + 1}, $${index * 4 + 2}, $${index * 4 + 3}, $${index * 4 + 4}::jsonb)`)
-        .join(", ");
-      const holeCardParams = holeCardValues.flatMap((entry) => [
+      const startResult = await startHandCore({
+        tx,
         tableId,
-        handId,
-        entry.userId,
-        JSON.stringify(entry.cards),
-      ]);
-
-      let holeCardInsertRows;
-      try {
-        holeCardInsertRows = await tx.unsafe(
-          `insert into public.poker_hole_cards (table_id, hand_id, user_id, cards) values ${holeCardPlaceholders} on conflict (table_id, hand_id, user_id) do update set cards = excluded.cards returning user_id;`,
-          holeCardParams
-        );
-      } catch (error) {
-        if (isHoleCardsTableMissing(error)) {
-          throw makeError(409, "state_invalid");
-        }
-        if (error?.code === "23503") {
-          throw makeError(500, "hole_cards_write_failed");
-        }
-        throw error;
-      }
-      const insertedUserIds = Array.isArray(holeCardInsertRows)
-        ? holeCardInsertRows.map((row) => row?.user_id).filter(Boolean)
-        : [];
-      const expectedSeatCount = activeUserIdList.length;
-      const insertedCount = insertedUserIds.length;
-      const insertedSet = new Set(insertedUserIds);
-      const missingUserIds = activeUserIdList.filter((userId) => !insertedSet.has(userId));
-      if (insertedCount !== expectedSeatCount || missingUserIds.length > 0) {
-        klog("poker_start_hand_hole_cards_write_failed", {
-          tableId,
-          handId,
-          expectedSeatCount,
-          insertedCount,
-          missingUserIds,
-          userIds: activeUserIdList,
-        });
-        throw makeError(500, "hole_cards_write_failed");
-      }
-      klog("poker_start_hand_hole_cards_written", {
-        tableId,
-        handId,
-        expectedSeatCount,
-        insertedCount,
-        userIds: activeUserIdList,
-      });
-
-      const { holeCardsByUserId: _ignoredHoleCards, ...stateBase } = currentState;
-      const updatedState = {
-        ...stateBase,
-        tableId: currentState.tableId || tableId,
-        handId,
-        handSeed,
-        phase: "PREFLOP",
-        pot: sbPosted + bbPosted,
-        community: [],
-        communityDealt: 0,
-        seats: derivedSeats,
-        stacks: nextStacks,
-        dealerSeatNo,
-        turnUserId,
-        toCallByUserId,
-        betThisRoundByUserId,
-        actedThisRoundByUserId,
-        foldedByUserId,
-        contributionsByUserId,
-        currentBet,
-        lastRaiseSize,
-        lastActionRequestIdByUserId: {},
-        lastStartHandRequestId: requestIdParsed.value || null,
-        lastStartHandUserId: auth.userId,
-        startedAt: new Date().toISOString(),
-      };
-      const nowMs = Date.now();
-      updatedState.turnNo = 1;
-      updatedState.turnStartedAt = nowMs;
-      updatedState.turnDeadlineAt = nowMs + TURN_MS;
-
-      if (!isStateStorageValid(updatedState, { requireHandSeed: true, requireCommunityDealt: true, requireNoDeck: true })) {
-        klog("poker_state_corrupt", { tableId, phase: updatedState.phase });
-        throw makeError(409, "state_invalid");
-      }
-
-      const updateResult = await updatePokerStateOptimistic(tx, {
-        tableId,
+        table,
+        currentState,
         expectedVersion,
-        nextState: updatedState,
-      });
-      if (!updateResult.ok) {
-        if (updateResult.reason === "not_found") {
-          throw makeError(404, "state_missing");
-        }
-        if (updateResult.reason === "conflict") {
+        validSeats,
+        userId: auth.userId,
+        requestId: requestIdParsed.value,
+        previousDealerSeatNo,
+        makeError,
+        onAlreadyInHandConflict: async () => {
           klog("poker_start_hand_conflict", { tableId, userId: auth.userId, expectedVersion });
           const freshStateRows = await tx.unsafe("select state from public.poker_state where table_id = $1 limit 1;", [tableId]);
           const rawFreshState = freshStateRows?.[0]?.state ?? null;
@@ -568,60 +334,25 @@ export async function handler(event) {
           if (freshPhase && freshPhase !== "INIT" && freshPhase !== "HAND_DONE") {
             throw makeAlreadyInHandError(tableId, auth.userId, "optimistic_conflict");
           }
-          throw makeError(409, "state_conflict");
-        }
-        throw makeError(409, "state_invalid");
-      }
-      let newVersion = updateResult.newVersion;
-      mutated = true;
-
-      const actionMeta = {
-        determinism: {
-          handSeed,
-          dealContext: "poker-deal:v1",
         },
-      };
-      await tx.unsafe(
-        "insert into public.poker_actions (table_id, version, user_id, action_type, amount, hand_id, request_id, phase_from, phase_to, meta) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb);",
-        [
-          tableId,
-          newVersion,
-          auth.userId,
-          "START_HAND",
-          null,
-          handId,
-          requestIdParsed.value,
-          currentState.phase || null,
-          updatedState.phase || null,
-          JSON.stringify(actionMeta),
-        ]
-      );
-      const blindActions = [
-        { type: "POST_SB", userId: sbUserId, amount: sbPosted },
-        { type: "POST_BB", userId: bbUserId, amount: bbPosted },
-      ];
-      for (const blindAction of blindActions) {
-        if (!blindAction.userId) continue;
-        await tx.unsafe(
-          "insert into public.poker_actions (table_id, version, user_id, action_type, amount, hand_id, request_id, phase_from, phase_to, meta) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb);",
-          [
-            tableId,
-            newVersion,
-            blindAction.userId,
-            blindAction.type,
-            blindAction.amount,
-            handId,
-            requestIdParsed.value,
-            currentState.phase || null,
-            updatedState.phase || null,
-            JSON.stringify({}),
-          ]
-        );
-      }
-
+        deps: {
+          dealHoleCards,
+          deriveDeck,
+          getRng,
+          computeNextDealerSeatNo,
+          parseStakes,
+          updatePokerStateOptimistic,
+          klog,
+        },
+      });
+      let newVersion = startResult.newVersion;
+      mutated = true;
+      const updatedState = startResult.updatedState;
+      const dealtHoleCards = startResult.dealtHoleCards;
+      const handId = updatedState.handId;
       const botAutoplayConfig = getBotAutoplayConfig(process.env);
       let finalState = updatedState;
-      let loopPrivateState = { ...updatedState, deck: Array.isArray(dealResult?.deck) ? dealResult.deck.slice() : [] };
+      let loopPrivateState = startResult.privateState;
       let botActionIndex = 0;
       let stopReason = "not_attempted";
       let lastBotActionSummary = null;

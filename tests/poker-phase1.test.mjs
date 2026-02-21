@@ -13,6 +13,7 @@ const heartbeatSrc = read("netlify/functions/poker-heartbeat.mjs");
 const requestIdHelperSrc = read("netlify/functions/_shared/poker-request-id.mjs");
 const idempotencyHelperSrc = read("netlify/functions/_shared/poker-idempotency.mjs");
 const startHandSrc = read("netlify/functions/poker-start-hand.mjs");
+const startHandCoreSrc = read("netlify/functions/_shared/poker-start-hand-core.mjs");
 const pokerUiSrc = read("poker/poker.js");
 const phase1MigrationSrc = read("supabase/migrations/20260117090000_poker_phase1_authoritative_seats.sql");
 const idempotencyMigrationSrc = read("supabase/migrations/20260118000000_poker_requests_idempotency_scope.sql");
@@ -63,8 +64,8 @@ assert.ok(!/update public\\.poker_seats set status = 'INACTIVE'/.test(getTableSr
 assert.ok(!/max_players\s*:/.test(getTableSrc), "get-table should not return max_players duplicate");
 assert.ok(!/last_activity_at\s*:/.test(getTableSrc), "get-table should not return last_activity_at duplicate");
 assert.ok(/status = 'ACTIVE'/.test(startHandSrc), "start-hand should select ACTIVE seats");
-assert.ok(startHandSrc.includes("nextStacks"), "start-hand should filter stacks to ACTIVE seats");
-assert.ok(startHandSrc.includes("derivedSeats"), "start-hand should re-derive seats from ACTIVE rows");
+assert.ok(startHandCoreSrc.includes("nextStacks"), "start-hand should filter stacks to ACTIVE seats");
+assert.ok(startHandCoreSrc.includes("derivedSeats"), "start-hand should re-derive seats from ACTIVE rows");
 assert.ok(pokerUiSrc.includes("pendingJoinRequestId"), "poker UI should store pending join requestId");
 assert.ok(pokerUiSrc.includes("pendingLeaveRequestId"), "poker UI should store pending leave requestId");
 assert.ok(

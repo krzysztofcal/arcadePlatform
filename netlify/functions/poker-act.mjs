@@ -18,6 +18,7 @@ import { isValidUuid } from "./_shared/poker-utils.mjs";
 import { clearMissedTurns } from "./_shared/poker-missed-turns.mjs";
 import { buildSeatBotMap, chooseBotActionTrivial, getBotAutoplayConfig, isBotTurn } from "./_shared/poker-bots.mjs";
 import { cashoutBotSeatIfNeeded, ensureBotSeatInactiveForCashout } from "./_shared/poker-bot-cashout.mjs";
+import { startHandCore } from "./_shared/poker-start-hand-core.mjs";
 
 const ACTION_TYPES = new Set(["CHECK", "BET", "CALL", "RAISE", "FOLD", "LEAVE_TABLE"]);
 const ADVANCE_LIMIT = 4;
@@ -613,7 +614,7 @@ export async function handler(event) {
         throw makeError(409, "state_invalid");
       }
       const activeSeatRows = await tx.unsafe(
-        "select user_id, is_bot from public.poker_seats where table_id = $1 and status = 'ACTIVE' order by seat_no asc;",
+        "select user_id, seat_no, is_bot from public.poker_seats where table_id = $1 and status = 'ACTIVE' order by seat_no asc;",
         [tableId]
       );
       const seatBotMap = buildSeatBotMap(activeSeatRows);
@@ -1528,6 +1529,69 @@ export async function handler(event) {
         lastActionAmount: lastBotActionSummary?.amount ?? null,
         optimisticConflict: botStopReason === "optimistic_conflict",
       });
+
+      if (responseFinalState.phase === "HAND_DONE" || responseFinalState.phase === "SETTLED") {
+        const settledHandId = typeof responseFinalState?.handId === "string" ? responseFinalState.handId.trim() : "";
+        if (!settledHandId) {
+          klog("poker_act_auto_start_skipped", { tableId, reason: "missing_hand_id", phase: responseFinalState.phase || null });
+        } else {
+          const stackMap = isPlainObjectValue(responseFinalState?.stacks) ? responseFinalState.stacks : {};
+          const eligibleSeats = (Array.isArray(responseFinalState?.seats) ? responseFinalState.seats : [])
+            .filter((seat) => {
+              const userId = typeof seat?.userId === "string" ? seat.userId : "";
+              if (!userId) return false;
+              return Number.isInteger(Number(stackMap[userId])) && Number(stackMap[userId]) > 0;
+            })
+            .map((seat) => ({ user_id: seat.userId, seat_no: Number(seat.seatNo), stack: Number(stackMap[seat.userId] ?? 0) }))
+            .filter((seat) => Number.isInteger(seat.seat_no));
+          if (eligibleSeats.length >= 2) {
+            const autoStartRequestId = `auto-start:${tableId}:${settledHandId}:v${loopVersion}`;
+            const autoStartRequest = await ensurePokerRequest(tx, {
+              tableId,
+              userId: auth.userId,
+              requestId: autoStartRequestId,
+              kind: "ACT_AUTO_START",
+              pendingStaleSec: REQUEST_PENDING_STALE_SEC,
+            });
+            if (autoStartRequest.status === "created") {
+              try {
+                const autoStart = await startHandCore({
+                  tx,
+                  tableId,
+                  table,
+                  currentState: responseFinalState,
+                  expectedVersion: loopVersion,
+                  validSeats: eligibleSeats,
+                  userId: auth.userId,
+                  requestId: autoStartRequestId,
+                  previousDealerSeatNo: Number.isInteger(responseFinalState?.dealerSeatNo) ? responseFinalState.dealerSeatNo : null,
+                  makeError,
+                });
+                responseFinalState = autoStart.updatedState;
+                loopVersion = autoStart.newVersion;
+                newVersion = autoStart.newVersion;
+                holeCardsByUserId = autoStart.dealtHoleCards;
+                mutated = true;
+                await storePokerRequestResult(tx, {
+                  tableId,
+                  userId: auth.userId,
+                  requestId: autoStartRequestId,
+                  kind: "ACT_AUTO_START",
+                  result: { ok: true, handId: responseFinalState.handId, version: newVersion },
+                });
+              } catch (error) {
+                await deletePokerRequest(tx, {
+                  tableId,
+                  userId: auth.userId,
+                  requestId: autoStartRequestId,
+                  kind: "ACT_AUTO_START",
+                });
+                throw error;
+              }
+            }
+          }
+        }
+      }
 
       await tx.unsafe(
         "update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1;",
