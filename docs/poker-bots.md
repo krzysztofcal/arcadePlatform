@@ -28,6 +28,7 @@ Poker bots are implemented in the current runtime.
 - Cash-out / sweep:
   - Bot chip movements use the same ledger primitives as seat flows: `TABLE_BUY_IN` into table escrow and `TABLE_CASH_OUT` from escrow.
   - Sweep/timeout and close flows may force bot seat inactive and cash out via bot cash-out helper logic.
+- Bot cash-out/eviction actions require `POKER_SYSTEM_ACTOR_USER_ID` to be configured as a valid UUID; if missing/invalid, leave-after-hand and other bot cash-out paths fail closed (skip) for actor safety.
 
 ## Persisted seat fields used by bot flows
 

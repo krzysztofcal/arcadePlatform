@@ -25,6 +25,32 @@ const REQUEST_PENDING_STALE_SEC = 30;
 
 const LEAVE_AFTER_HAND_SUFFIX = "leave_after_hand:v1";
 
+const isPlainObjectValue = (value) => value && typeof value === "object" && !Array.isArray(value);
+const isPlainObject = isPlainObjectValue;
+
+const BOT_EVICT_PERSISTED_USER_MAP_KEYS = [
+  "toCallByUserId",
+  "betThisRoundByUserId",
+  "actedThisRoundByUserId",
+  "foldedByUserId",
+  "leftTableByUserId",
+  "sitOutByUserId",
+  "lastActionRequestIdByUserId",
+  "missedTurnsByUserId",
+];
+
+const removeUserIdFromStateMaps = (state, userId) => {
+  if (!isPlainObjectValue(state) || typeof userId !== "string" || !userId) return state;
+  const nextState = { ...state };
+  for (const key of BOT_EVICT_PERSISTED_USER_MAP_KEYS) {
+    if (!isPlainObjectValue(nextState[key]) || !Object.prototype.hasOwnProperty.call(nextState[key], userId)) continue;
+    const nextMap = { ...nextState[key] };
+    delete nextMap[userId];
+    nextState[key] = nextMap;
+  }
+  return nextState;
+};
+
 const maybeEvictMarkedBotAfterSettlement = async (tx, { tableId, state, actorUserId }) => {
   if (state?.phase !== "SETTLED") return { state, evicted: false };
   try {
@@ -64,7 +90,13 @@ const maybeEvictMarkedBotAfterSettlement = async (tx, { tableId, state, actorUse
 
     const nextStacks = isPlainObjectValue(state?.stacks) ? { ...state.stacks } : {};
     delete nextStacks[botUserId];
-    const nextState = { ...state, stacks: nextStacks };
+    const nextSeats = Array.isArray(state?.seats) ? state.seats.filter((seat) => seat?.userId !== botUserId) : [];
+    const cleanedState = removeUserIdFromStateMaps(state, botUserId);
+    const nextState = {
+      ...cleanedState,
+      seats: nextSeats,
+      stacks: nextStacks,
+    };
     klog("poker_bot_leave_after_hand_evicted", { tableId, botUserId, seatNo: marked.seat_no ?? null });
     return { state: nextState, evicted: true, botUserId };
   } catch (error) {
@@ -93,9 +125,6 @@ const runAdvanceLoop = (stateToAdvance, eventsList, advanceEventsList, advanceLi
   }
   return { nextState: next, loops: loopCount };
 };
-const isPlainObjectValue = (value) => value && typeof value === "object" && !Array.isArray(value);
-const isPlainObject = isPlainObjectValue;
-
 const toSafeInt = (value, fallback = 0) => {
   const num = Number(value);
   if (!Number.isFinite(num)) return fallback;

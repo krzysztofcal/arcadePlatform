@@ -43,7 +43,10 @@ const makeHandler = ({ mode }) => {
             if (mode === "already_marked") return [{ user_id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", seat_no: 2 }];
             return [];
           }
-          if (text.includes("status = 'active'") && text.includes("order by seat_no asc")) return [{ seat_no: 1 }, { seat_no: 2 }];
+          if (text.includes("status = 'active'") && text.includes("order by seat_no asc")) {
+            if (mode === "seat_taken_not_full") return [{ seat_no: 1 }];
+            return [{ seat_no: 1 }, { seat_no: 2 }];
+          }
           return [];
         },
       }),
@@ -76,11 +79,11 @@ const run = async () => {
   assert.equal(eligible.marks.length, 1);
 
 
-  const nonAutoEligible = makeHandler({ mode: "eligible" });
-  const resNonAuto = await callJoin(nonAutoEligible.handler, "join-non-auto-eligible", { autoSeat: false, seatNo: 1 });
+  const nonAutoSeatTakenNotFull = makeHandler({ mode: "seat_taken_not_full" });
+  const resNonAuto = await callJoin(nonAutoSeatTakenNotFull.handler, "join-non-auto-seat-taken-not-full", { autoSeat: false, seatNo: 1 });
   assert.equal(resNonAuto.statusCode, 409);
-  assert.equal(JSON.parse(resNonAuto.body || "{}").error, "table_full_bot_leaving");
-  assert.equal(nonAutoEligible.marks.length, 1);
+  assert.equal(JSON.parse(resNonAuto.body || "{}").error, "seat_taken");
+  assert.equal(nonAutoSeatTakenNotFull.marks.length, 0);
 
   const noBots = makeHandler({ mode: "none" });
   const resNoBots = await callJoin(noBots.handler, "join-no-bot");
