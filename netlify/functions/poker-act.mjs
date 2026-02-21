@@ -17,10 +17,61 @@ import { maybeApplyTurnTimeout } from "./_shared/poker-turn-timeout.mjs";
 import { isValidUuid } from "./_shared/poker-utils.mjs";
 import { clearMissedTurns } from "./_shared/poker-missed-turns.mjs";
 import { buildSeatBotMap, chooseBotActionTrivial, getBotAutoplayConfig, isBotTurn } from "./_shared/poker-bots.mjs";
+import { cashoutBotSeatIfNeeded, ensureBotSeatInactiveForCashout } from "./_shared/poker-bot-cashout.mjs";
 
 const ACTION_TYPES = new Set(["CHECK", "BET", "CALL", "RAISE", "FOLD", "LEAVE_TABLE"]);
 const ADVANCE_LIMIT = 4;
 const REQUEST_PENDING_STALE_SEC = 30;
+
+const LEAVE_AFTER_HAND_SUFFIX = "leave_after_hand:v1";
+
+const maybeEvictMarkedBotAfterSettlement = async (tx, { tableId, state, actorUserId }) => {
+  if (state?.phase !== "SETTLED") return { state, evicted: false };
+  try {
+    const actor = String(actorUserId || "").trim();
+    if (!isValidUuid(actor)) {
+      klog("poker_bot_leave_after_hand_skip", { tableId, reason: "missing_actor" });
+      return { state, evicted: false };
+    }
+    const markedRows = await tx.unsafe(
+      "select user_id, seat_no from public.poker_seats where table_id = $1 and status = 'ACTIVE' and coalesce(is_bot, false) = true and coalesce(leave_after_hand, false) = true order by seat_no asc limit 1 for update;",
+      [tableId]
+    );
+    const marked = markedRows?.[0] || null;
+    if (!marked?.user_id) return { state, evicted: false };
+
+    const botUserId = marked.user_id;
+    const inactiveResult = await ensureBotSeatInactiveForCashout(tx, { tableId, botUserId });
+    if (!inactiveResult?.ok) {
+      klog("poker_bot_leave_after_hand_skip", { tableId, botUserId, seatNo: marked.seat_no ?? null, reason: inactiveResult?.reason || "inactivate_failed" });
+      return { state, evicted: false };
+    }
+
+    await cashoutBotSeatIfNeeded(tx, {
+      tableId,
+      botUserId,
+      seatNo: marked.seat_no,
+      reason: "LEAVE_AFTER_HAND",
+      actorUserId: actor,
+      idempotencyKeySuffix: LEAVE_AFTER_HAND_SUFFIX,
+      expectedAmount: Number(state?.stacks?.[botUserId] ?? 0),
+    });
+
+    await tx.unsafe(
+      "update public.poker_seats set stack = 0, leave_after_hand = false where table_id = $1 and user_id = $2 and coalesce(is_bot, false) = true;",
+      [tableId, botUserId]
+    );
+
+    const nextStacks = isPlainObjectValue(state?.stacks) ? { ...state.stacks } : {};
+    delete nextStacks[botUserId];
+    const nextState = { ...state, stacks: nextStacks };
+    klog("poker_bot_leave_after_hand_evicted", { tableId, botUserId, seatNo: marked.seat_no ?? null });
+    return { state: nextState, evicted: true, botUserId };
+  } catch (error) {
+    klog("poker_bot_leave_after_hand_error", { tableId, reason: error?.code || error?.message || "unknown_error" });
+    return { state, evicted: false };
+  }
+};
 
 const runAdvanceLoop = (stateToAdvance, eventsList, advanceEventsList, advanceLimit = ADVANCE_LIMIT) => {
   let next = stateToAdvance;
@@ -1221,7 +1272,13 @@ export async function handler(event) {
         ? resetTurnTimer(updatedState, nowMs, TURN_MS)
         : { ...updatedState, turnStartedAt: null, turnDeadlineAt: null };
       const clearedMissedTurns = clearMissedTurns(timerResetState, auth.userId);
-      const finalState = clearedMissedTurns.changed ? clearedMissedTurns.nextState : timerResetState;
+      let finalState = clearedMissedTurns.changed ? clearedMissedTurns.nextState : timerResetState;
+      const leaveAfterHand = await maybeEvictMarkedBotAfterSettlement(tx, {
+        tableId,
+        state: finalState,
+        actorUserId: process.env.POKER_SYSTEM_ACTOR_USER_ID || auth.userId,
+      });
+      finalState = leaveAfterHand.state;
 
       if (shouldResetTimer) {
         klog("poker_turn_timer_reset", {

@@ -66,6 +66,7 @@ run("node", ["tests/poker-join.behavior.test.mjs"], "poker-join-behavior");
 run("node", ["tests/poker-join.seat-domain.behavior.test.mjs"], "poker-join-seat-domain-behavior");
 run("node", ["tests/poker-join.rejoin-seat-logging.behavior.test.mjs"], "poker-join-rejoin-seat-logging-behavior");
 run("node", ["tests/poker-join.bot-seed.behavior.test.mjs"], "poker-join-bot-seed");
+run("node", ["tests/poker-join.bot-leave-after-hand.behavior.test.mjs"], "poker-join-bot-leave-after-hand");
 run("node", ["tests/poker-heartbeat.behavior.test.mjs"], "poker-heartbeat-behavior");
 run("node", ["tests/poker-start-hand.behavior.test.mjs"], "poker-start-hand-behavior");
 run("node", ["tests/poker-start-hand.bots.behavior.test.mjs"], "poker-start-hand-bots-behavior");
@@ -85,6 +86,7 @@ run("node", ["tests/poker-act.bot-autoplay.multi-human-requests.behavior.test.mj
 run("node", ["tests/poker-act.bot-autoplay.last-action-requestid.behavior.test.mjs"], "poker-act-bot-autoplay-last-action-requestid-behavior");
 run("node", ["tests/poker-act.bot-autoplay.compile.behavior.test.mjs"], "poker-act-bot-autoplay-compile-behavior");
 run("node", ["tests/poker-act.bot-autoplay-stop-reason.behavior.test.mjs"], "poker-act-bot-autoplay-stop-reason-behavior");
+run("node", ["tests/poker-bots.leave-after-hand-evicted-on-settle.behavior.test.mjs"], "poker-bots-leave-after-hand-evicted-on-settle");
 run("node", ["tests/poker-act.init-phase.test.mjs"], "poker-act-init-phase");
 run("node", ["tests/poker-sweep.behavior.test.mjs"], "poker-sweep-behavior");
 run("node", ["tests/poker-sweep.timeout-zero-amount-inactivates-seat.behavior.test.mjs"], "poker-sweep-timeout-zero-inactivate");
