@@ -12,6 +12,7 @@ const bot1UserId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 const bot2UserId = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 
 process.env.POKER_DEAL_SECRET = process.env.POKER_DEAL_SECRET || "test-deal-secret";
+process.env.POKER_BOT_MAX_ACTIONS_PER_REQUEST = "1";
 
 const run = async () => {
   const stored = {
@@ -66,7 +67,54 @@ const run = async () => {
     deriveCommunityCards: () => [],
     deriveRemainingDeck: () => [],
     maybeApplyTurnTimeout: async (state) => ({ state, timedOut: false }),
-    applyAction: (state) => ({ state: { ...state, phase: "HAND_DONE", turnUserId: null, pot: 0 }, events: [] }),
+    chooseBotActionTrivial: () => ({ type: "CHECK" }),
+    applyAction: (state, action) => {
+      if (action?.userId === humanUserId) {
+        return { state: { ...state, phase: "HAND_DONE", turnUserId: null, pot: 0 }, events: [] };
+      }
+      return {
+        state: { ...state, phase: "PREFLOP", turnUserId: humanUserId, actedThisRoundByUserId: { ...(state.actedThisRoundByUserId || {}), [action.userId]: true } },
+        events: [{ type: "BOT_ACTED" }],
+      };
+    },
+    startHandCore: async ({ tx, tableId: startTableId, expectedVersion, currentState }) => {
+      await tx.unsafe("insert into public.poker_hole_cards (table_id, hand_id, user_id, cards) values ($1, $2, $3, $4::jsonb);", [startTableId, "ffffffff-ffff-4fff-8fff-ffffffffffff", "seed-user", "[]"]);
+      await tx.unsafe("insert into public.poker_actions (table_id, version, user_id, action_type, amount, hand_id, request_id, phase_from, phase_to, meta) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb);", [startTableId, expectedVersion + 1, null, "START_HAND", null, "ffffffff-ffff-4fff-8fff-ffffffffffff", "auto", "SETTLED", "PREFLOP", null]);
+      return {
+      updatedState: {
+        ...currentState,
+        phase: "PREFLOP",
+        handId: "ffffffff-ffff-4fff-8fff-ffffffffffff",
+        handSeed: "99999999-9999-4999-8999-999999999999",
+        turnUserId: bot1UserId,
+        community: [],
+        communityDealt: 0,
+        toCallByUserId: { [humanUserId]: 0, [bot1UserId]: 0, [bot2UserId]: 0 },
+        betThisRoundByUserId: { [humanUserId]: 0, [bot1UserId]: 0, [bot2UserId]: 0 },
+        actedThisRoundByUserId: { [humanUserId]: false, [bot1UserId]: false, [bot2UserId]: false },
+        foldedByUserId: { [humanUserId]: false, [bot1UserId]: false, [bot2UserId]: false },
+      },
+      privateState: {
+        ...currentState,
+        phase: "PREFLOP",
+        handId: "ffffffff-ffff-4fff-8fff-ffffffffffff",
+        handSeed: "99999999-9999-4999-8999-999999999999",
+        turnUserId: bot1UserId,
+        community: [],
+        communityDealt: 0,
+        toCallByUserId: { [humanUserId]: 0, [bot1UserId]: 0, [bot2UserId]: 0 },
+        betThisRoundByUserId: { [humanUserId]: 0, [bot1UserId]: 0, [bot2UserId]: 0 },
+        actedThisRoundByUserId: { [humanUserId]: false, [bot1UserId]: false, [bot2UserId]: false },
+        foldedByUserId: { [humanUserId]: false, [bot1UserId]: false, [bot2UserId]: false },
+      },
+      dealtHoleCards: {
+        [humanUserId]: [{ r: "2", s: "S" }, { r: "3", s: "S" }],
+        [bot1UserId]: [{ r: "4", s: "S" }, { r: "5", s: "S" }],
+        [bot2UserId]: [{ r: "6", s: "S" }, { r: "7", s: "S" }],
+      },
+      newVersion: expectedVersion + 1,
+    };
+    },
     loadHoleCardsByUserId: async () => ({
       holeCardsByUserId: {
         [humanUserId]: [{ r: "A", s: "S" }, { r: "K", s: "S" }],
@@ -135,6 +183,11 @@ const run = async () => {
   const first = await handler(event);
   const firstPayload = JSON.parse(first.body || "{}");
   assert.equal(first.statusCode, 200);
+  assert.equal(firstPayload.ok, true);
+  assert.equal(stateWriteCount >= 2, true, "first run should settle and advance via bot autoplay");
+  assert.equal(holeInsertCount, 1, "first run should deal hole cards once");
+  assert.equal(actionInsertCount >= 3, true, "first run should insert player + start hand + bot action rows");
+
   const writeCountAfterFirst = stateWriteCount;
   const holeCountAfterFirst = holeInsertCount;
   const actionCountAfterFirst = actionInsertCount;

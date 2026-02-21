@@ -12,41 +12,39 @@ const bot1UserId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 const bot2UserId = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 
 process.env.POKER_DEAL_SECRET = process.env.POKER_DEAL_SECRET || "test-deal-secret";
-
-const makeStoredState = () => ({
-  version: 3,
-  state: {
-    tableId,
-    phase: "RIVER",
-    handId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
-    handSeed: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
-    seats: [
-      { userId: humanUserId, seatNo: 1 },
-      { userId: bot1UserId, seatNo: 2 },
-      { userId: bot2UserId, seatNo: 3 },
-    ],
-    stacks: { [humanUserId]: 100, [bot1UserId]: 100, [bot2UserId]: 100 },
-    pot: 30,
-    community: [],
-    communityDealt: 0,
-    dealerSeatNo: 1,
-    turnUserId: humanUserId,
-    toCallByUserId: { [humanUserId]: 0, [bot1UserId]: 0, [bot2UserId]: 0 },
-    betThisRoundByUserId: { [humanUserId]: 0, [bot1UserId]: 0, [bot2UserId]: 0 },
-    actedThisRoundByUserId: { [humanUserId]: false, [bot1UserId]: false, [bot2UserId]: false },
-    foldedByUserId: { [humanUserId]: false, [bot1UserId]: false, [bot2UserId]: false },
-    lastActionRequestIdByUserId: {},
-    currentBet: 0,
-    lastRaiseSize: 0,
-  },
-  requests: new Map(),
-});
+process.env.POKER_BOT_MAX_ACTIONS_PER_REQUEST = "1";
 
 const run = async () => {
-  const writes = [];
-  const holeCardInserts = [];
-  const actionInserts = [];
-  const stored = makeStoredState();
+  const stored = {
+    version: 9,
+    state: {
+      tableId,
+      phase: "RIVER",
+      handId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+      handSeed: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+      seats: [
+        { userId: humanUserId, seatNo: 1 },
+        { userId: bot1UserId, seatNo: 2 },
+        { userId: bot2UserId, seatNo: 3 },
+      ],
+      stacks: { [humanUserId]: 100, [bot1UserId]: 100, [bot2UserId]: 100 },
+      pot: 30,
+      community: [],
+      communityDealt: 0,
+      dealerSeatNo: 1,
+      turnUserId: humanUserId,
+      toCallByUserId: { [humanUserId]: 0, [bot1UserId]: 0, [bot2UserId]: 0 },
+      betThisRoundByUserId: { [humanUserId]: 0, [bot1UserId]: 0, [bot2UserId]: 0 },
+      actedThisRoundByUserId: { [humanUserId]: false, [bot1UserId]: false, [bot2UserId]: false },
+      foldedByUserId: { [humanUserId]: false, [bot1UserId]: false, [bot2UserId]: false },
+      lastActionRequestIdByUserId: {},
+      currentBet: 0,
+      lastRaiseSize: 0,
+    },
+    requests: new Map(),
+  };
+
+  const stopLogs = [];
 
   const handler = loadPokerHandler("netlify/functions/poker-act.mjs", {
     baseHeaders: () => ({}),
@@ -67,25 +65,21 @@ const run = async () => {
     deriveCommunityCards: () => [],
     deriveRemainingDeck: () => [],
     maybeApplyTurnTimeout: async (state) => ({ state, timedOut: false }),
-    applyAction: (state) => ({
-      state: {
-        ...state,
-        phase: "HAND_DONE",
-        turnUserId: null,
-        pot: 0,
-      },
-      events: [{ type: "HAND_SETTLED" }],
-    }),
-
+    chooseBotActionTrivial: () => ({ type: "CHECK" }),
+    applyAction: (state, action) => {
+      if (action?.userId === humanUserId) return { state: { ...state, phase: "HAND_DONE", turnUserId: null, pot: 0 }, events: [] };
+      return {
+        state: { ...state, phase: "PREFLOP", turnUserId: humanUserId, actedThisRoundByUserId: { ...(state.actedThisRoundByUserId || {}), [action.userId]: true } },
+        events: [{ type: "BOT_ACTED" }],
+      };
+    },
     startHandCore: async ({ tx, tableId: startTableId, expectedVersion, currentState }) => {
-      await tx.unsafe("insert into public.poker_hole_cards (table_id, hand_id, user_id, cards) values ($1, $2, $3, $4::jsonb);", [startTableId, "ffffffff-ffff-4fff-8fff-ffffffffffff", "seed-user", "[]"]);
-      await tx.unsafe("insert into public.poker_actions (table_id, version, user_id, action_type, amount, hand_id, request_id, phase_from, phase_to, meta) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb);", [startTableId, expectedVersion + 1, null, "START_HAND", null, "ffffffff-ffff-4fff-8fff-ffffffffffff", "auto", "SETTLED", "PREFLOP", null]);
-      const nextAutoState = {
+      const autoState = {
         ...currentState,
         phase: "PREFLOP",
         handId: "ffffffff-ffff-4fff-8fff-ffffffffffff",
         handSeed: "99999999-9999-4999-8999-999999999999",
-        turnUserId: humanUserId,
+        turnUserId: bot1UserId,
         community: [],
         communityDealt: 0,
         toCallByUserId: { [humanUserId]: 0, [bot1UserId]: 0, [bot2UserId]: 0 },
@@ -93,30 +87,12 @@ const run = async () => {
         actedThisRoundByUserId: { [humanUserId]: false, [bot1UserId]: false, [bot2UserId]: false },
         foldedByUserId: { [humanUserId]: false, [bot1UserId]: false, [bot2UserId]: false },
       };
-      const autoWrite = await updatePokerStateOptimistic(tx, {
-        tableId: startTableId,
-        expectedVersion,
-        nextState: nextAutoState,
-      });
-      assert.equal(autoWrite.ok, true);
-      return {
-      updatedState: nextAutoState,
-      privateState: nextAutoState,
-      dealtHoleCards: {
-        [humanUserId]: [{ r: "2", s: "S" }, { r: "3", s: "S" }],
-        [bot1UserId]: [{ r: "4", s: "S" }, { r: "5", s: "S" }],
-        [bot2UserId]: [{ r: "6", s: "S" }, { r: "7", s: "S" }],
-      },
-      newVersion: expectedVersion + 1,
-    };
+      await tx.unsafe("update public.poker_state set state = $3::jsonb, version = version + 1, updated_at = now() where table_id = $1 and version = $2 returning version;", [startTableId, expectedVersion, JSON.stringify(autoState)]);
+      await tx.unsafe("insert into public.poker_hole_cards (table_id, hand_id, user_id, cards) values ($1, $2, $3, $4::jsonb);", [startTableId, autoState.handId, "seed-user", "[]"]);
+      await tx.unsafe("insert into public.poker_actions (table_id, version, user_id, action_type, amount, hand_id, request_id, phase_from, phase_to, meta) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb);", [startTableId, expectedVersion + 1, null, "START_HAND", null, autoState.handId, "auto", "SETTLED", "PREFLOP", null]);
+      return { updatedState: autoState, privateState: autoState, dealtHoleCards: {}, newVersion: expectedVersion + 1 };
     },
-    loadHoleCardsByUserId: async () => ({
-      holeCardsByUserId: {
-        [humanUserId]: [{ r: "A", s: "S" }, { r: "K", s: "S" }],
-        [bot1UserId]: [{ r: "Q", s: "S" }, { r: "J", s: "S" }],
-        [bot2UserId]: [{ r: "T", s: "S" }, { r: "9", s: "S" }],
-      },
-    }),
+    loadHoleCardsByUserId: async () => ({ holeCardsByUserId: {} }),
     beginSql: async (fn) =>
       fn({
         unsafe: async (query, params) => {
@@ -150,44 +126,33 @@ const run = async () => {
             return [{ request_id: params?.[2] }];
           }
           if (text.includes("update public.poker_state") && text.includes("version = version + 1")) {
-            const nextState = JSON.parse(params?.[2] || "{}");
-            writes.push(nextState);
-            stored.state = nextState;
+            stored.state = JSON.parse(params?.[2] || "{}");
             stored.version += 1;
             return [{ version: stored.version }];
           }
-          if (text.includes("insert into public.poker_hole_cards")) {
-            holeCardInserts.push(params);
-            return [{ user_id: humanUserId }, { user_id: bot1UserId }, { user_id: bot2UserId }];
-          }
-          if (text.includes("insert into public.poker_actions")) {
-            actionInserts.push(params);
-            return [{ ok: true }];
-          }
-          return [];
+          return [{ ok: true }];
         },
       }),
-    klog: () => {},
+    klog: (eventName, payload) => {
+      if (eventName === "poker_act_bot_autoplay_stop") stopLogs.push(payload);
+    },
   });
 
   const response = await handler({
     httpMethod: "POST",
     headers: { origin: "https://example.test", authorization: "Bearer token" },
-    body: JSON.stringify({ tableId, requestId: "act-auto-start-1", action: { type: "CHECK" } }),
+    body: JSON.stringify({ tableId, requestId: "act-stop-log-handid", action: { type: "CHECK" } }),
   });
 
   assert.equal(response.statusCode, 200);
   const payload = JSON.parse(response.body || "{}");
   assert.equal(payload.ok, true);
-  assert.equal(payload.state?.state?.phase, "PREFLOP");
-  assert.ok(typeof payload.state?.state?.handId === "string");
-  assert.ok(holeCardInserts.length >= 1);
-  assert.equal(writes.length >= 2, true, "should write settled state then auto-start state");
-  assert.equal(writes.at(-1)?.handId, payload.state?.state?.handId);
-  assert.equal(actionInserts.some((row) => row?.[3] === "START_HAND"), true);
+  assert.equal(stopLogs.length >= 1, true);
+  assert.equal(stopLogs[0]?.handId, payload.state?.state?.handId);
+  assert.equal(stopLogs[0]?.handId, "ffffffff-ffff-4fff-8fff-ffffffffffff");
 };
 
-run().then(() => console.log("poker-act auto-next-hand behavior test passed")).catch((error) => {
+run().then(() => console.log("poker-act bot autoplay stop log handId behavior test passed")).catch((error) => {
   console.error(error);
   process.exit(1);
 });
