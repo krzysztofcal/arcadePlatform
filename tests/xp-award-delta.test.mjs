@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 
 const BASE_TS = 1_700_000_000_000;
+const RUN_NS = `run-${process.pid}-${Date.now()}`;
 
 const cookieJar = new WeakMap();
 const XP_DAY_COOKIE = 'xp_day';
@@ -55,8 +56,12 @@ function buildSignedCookie({ key, total, secret = DEFAULT_SECRET }) {
 }
 
 async function createHandler(label, overrides = {}) {
+  process.env.NODE_ENV = 'test';
+  process.env.XP_TEST_MODE = '1';
+  process.env.UPSTASH_REDIS_REST_URL = process.env.UPSTASH_REDIS_REST_URL || 'https://example-upstash.invalid';
+  process.env.UPSTASH_REDIS_REST_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN || 'dummy-token';
   process.env.XP_DEBUG = '1';
-  process.env.XP_KEY_NS = `test:delta:${label}`;
+  process.env.XP_KEY_NS = `test:delta:${RUN_NS}:${label}`;
   process.env.XP_DAILY_CAP = String(overrides.dailyCap ?? 400);
   process.env.XP_SESSION_CAP = String(overrides.sessionCap ?? 200);
   process.env.XP_DELTA_CAP = String(overrides.deltaCap ?? 300);

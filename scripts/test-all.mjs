@@ -1,6 +1,9 @@
 import { spawnSync } from "node:child_process";
 import "../tests/_setup/poker-deal-secret.mjs";
 
+process.env.NODE_ENV = process.env.NODE_ENV || "test";
+process.env.XP_TEST_MODE = "1";
+
 function run(cmd, args, name){
   const r = spawnSync(cmd, args, { stdio: "inherit", env: process.env });
   if (r.status !== 0) {
