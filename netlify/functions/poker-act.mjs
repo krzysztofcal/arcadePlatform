@@ -1436,9 +1436,11 @@ export async function handler(event) {
             botApplied = applyAction(loopPrivateState, botAction);
           } catch (error) {
             botStopReason = "apply_action_failed";
+            const currentHandIdForLog =
+              typeof responseFinalState?.handId === "string" && responseFinalState.handId.trim() ? responseFinalState.handId.trim() : null;
             klog("poker_act_bot_autoplay_step_error", {
               tableId,
-              handId: handIdForLog,
+              handId: currentHandIdForLog,
               turnUserId: botTurnUserId || null,
               policyVersion: botAutoplayConfig.policyVersion,
               botActionCount,
