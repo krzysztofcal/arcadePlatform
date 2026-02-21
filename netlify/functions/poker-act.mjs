@@ -25,6 +25,9 @@ const REQUEST_PENDING_STALE_SEC = 30;
 
 const LEAVE_AFTER_HAND_SUFFIX = "leave_after_hand:v1";
 
+const isPlainObjectValue = (value) => value && typeof value === "object" && !Array.isArray(value);
+const isPlainObject = isPlainObjectValue;
+
 const BOT_EVICT_PERSISTED_USER_MAP_KEYS = [
   "toCallByUserId",
   "betThisRoundByUserId",
@@ -122,9 +125,6 @@ const runAdvanceLoop = (stateToAdvance, eventsList, advanceEventsList, advanceLi
   }
   return { nextState: next, loops: loopCount };
 };
-const isPlainObjectValue = (value) => value && typeof value === "object" && !Array.isArray(value);
-const isPlainObject = isPlainObjectValue;
-
 const toSafeInt = (value, fallback = 0) => {
   const num = Number(value);
   if (!Number.isFinite(num)) return fallback;
