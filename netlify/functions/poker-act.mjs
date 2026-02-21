@@ -1592,9 +1592,11 @@ export async function handler(event) {
         await runBotAutoplayLoop();
       }
 
+      const currentHandIdForLog =
+        typeof responseFinalState?.handId === "string" && responseFinalState.handId.trim() ? responseFinalState.handId.trim() : null;
       klog("poker_act_bot_autoplay_stop", {
         tableId,
-        handId: handIdForLog,
+        handId: currentHandIdForLog,
         turnUserId: responseFinalState.turnUserId || null,
         policyVersion: botAutoplayConfig.policyVersion,
         botActionCount,
