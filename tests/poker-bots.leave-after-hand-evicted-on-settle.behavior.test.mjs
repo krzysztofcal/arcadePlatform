@@ -121,6 +121,11 @@ const run = async () => {
   assert.equal(missingActor.helperCalls.filter((x) => x.phase === "ensure").length, 0);
   assert.equal(missingActor.helperCalls.filter((x) => x.phase === "cashout").length, 0);
   assert.equal(Object.prototype.hasOwnProperty.call(missingActor.db.state.stacks, botUserId), true);
+  assert.equal(missingActor.db.state.seats.some((seat) => seat?.userId === botUserId), true);
+  assert.equal(Object.prototype.hasOwnProperty.call(missingActor.db.state.toCallByUserId, botUserId), true);
+  assert.equal(Object.prototype.hasOwnProperty.call(missingActor.db.state.betThisRoundByUserId, botUserId), true);
+  assert.equal(Object.prototype.hasOwnProperty.call(missingActor.db.state.actedThisRoundByUserId, botUserId), true);
+  assert.equal(Object.prototype.hasOwnProperty.call(missingActor.db.state.foldedByUserId, botUserId), true);
   assert.equal(
     missingActor.queries.some((q) => q.includes("update public.poker_seats set stack = 0, leave_after_hand = false where table_id = $1 and user_id = $2")),
     false
@@ -134,6 +139,11 @@ const run = async () => {
   assert.equal(cashout?.idempotencyKeySuffix, "leave_after_hand:v1");
   assert.equal(cashout?.actorUserId, systemActorUserId);
   assert.equal(Object.prototype.hasOwnProperty.call(validActor.db.state.stacks, botUserId), false);
+  assert.equal(validActor.db.state.seats.some((seat) => seat?.userId === botUserId), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(validActor.db.state.toCallByUserId, botUserId), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(validActor.db.state.betThisRoundByUserId, botUserId), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(validActor.db.state.actedThisRoundByUserId, botUserId), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(validActor.db.state.foldedByUserId, botUserId), false);
 };
 
 run().catch((error) => {
