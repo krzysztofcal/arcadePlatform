@@ -55,6 +55,7 @@ const runCase = async ({ actorEnv }) => {
       state: {
         ...db.state,
         phase: "SETTLED",
+        stacks: { ...db.state.stacks, [botUserId]: 0 },
         turnUserId: humanUserId,
       },
       events: [{ type: "SETTLED" }],
@@ -77,7 +78,7 @@ const runCase = async ({ actorEnv }) => {
         unsafe: async (query) => {
           const text = String(query).toLowerCase().replace(/\s+/g, " ").trim();
           queries.push(text);
-          if (text.includes("from public.poker_tables")) return [{ id: tableId, status: "OPEN", stakes: "1/2" }];
+          if (text.includes("from public.poker_tables")) return [{ id: tableId, status: "OPEN", stakes: "{\"sb\":1,\"bb\":2}" }];
           if (text.includes("from public.poker_seats") && text.includes("status = 'active'") && text.includes("user_id = $2")) {
             return [{ user_id: humanUserId }];
           }
@@ -86,9 +87,13 @@ const runCase = async ({ actorEnv }) => {
             return [{ user_id: botUserId, seat_no: 2 }];
           }
           if (text.includes("from public.poker_seats") && text.includes("status = 'active'") && !text.includes("user_id = $2")) {
-            return [{ user_id: humanUserId, is_bot: false }, { user_id: botUserId, is_bot: true }];
+            return [
+              { user_id: humanUserId, seat_no: 1, stack: 120, is_bot: false },
+              { user_id: botUserId, seat_no: 2, stack: 80, is_bot: true },
+            ];
           }
           if (text.includes("from public.poker_state")) return [{ version: db.version, state: JSON.stringify(db.state) }];
+          if (text.includes("insert into public.poker_hole_cards")) return [{ user_id: humanUserId }, { user_id: botUserId }];
           if (text.includes("insert into public.poker_actions")) return [{ ok: true }];
           if (text.includes("update public.poker_seats set stack = 0, leave_after_hand = false")) return [];
           return [];
