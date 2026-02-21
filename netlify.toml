@@ -132,10 +132,12 @@
 # =============================================================================
 
 # Headers for security
+# Note: Additional security headers (CSP, X-Frame-Options) are defined in _headers file
 [[headers]]
   for = "/*"
   [headers.values]
-    X-Frame-Options = "SAMEORIGIN"
+    # SECURITY: Use DENY to prevent all framing (consistent with _headers and CSP frame-ancestors: 'none')
+    X-Frame-Options = "DENY"
     X-Content-Type-Options = "nosniff"
     Referrer-Policy = "strict-origin-when-cross-origin"
 

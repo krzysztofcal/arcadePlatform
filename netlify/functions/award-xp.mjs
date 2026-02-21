@@ -57,6 +57,11 @@ const RATE_LIMIT_PER_USER_PER_MIN = Math.max(0, asNumber(process.env.XP_RATE_LIM
 const RATE_LIMIT_PER_IP_PER_MIN = Math.max(0, asNumber(process.env.XP_RATE_LIMIT_IP_PER_MIN, 60));
 const RATE_LIMIT_ENABLED = process.env.XP_RATE_LIMIT_ENABLED !== "0"; // Default enabled
 
+// SECURITY: Input validation limits
+// Max length for user-provided IDs (anonId, sessionId) to prevent abuse
+// UUIDs are 36 chars, so 128 provides ample room while preventing excessively long values
+const MAX_ID_LENGTH = 128;
+
 // SECURITY: Server-side session token configuration
 // These are read at runtime to support dynamic configuration changes
 // When enabled, XP awards require a valid server-signed session token
@@ -459,6 +464,11 @@ export async function handler(event) {
 
   let anonIdRaw = queryAnonIdRaw;
   let anonId = typeof anonIdRaw === "string" ? anonIdRaw.trim() : null;
+  // SECURITY: Validate anonId length to prevent Redis key abuse
+  if (anonId && anonId.length > MAX_ID_LENGTH) {
+    anonId = null; // Reject overly long IDs
+    klog("xp_anonId_too_long", { length: anonIdRaw?.length });
+  }
 
   const jwtToken = extractBearerToken(event.headers);
   const authContext = verifySupabaseJwt(jwtToken);
@@ -540,6 +550,11 @@ export async function handler(event) {
   if (bodyAnonIdRaw) {
     anonIdRaw = bodyAnonIdRaw;
     anonId = typeof anonIdRaw === "string" ? anonIdRaw.trim() : null;
+    // SECURITY: Validate anonId length to prevent Redis key abuse
+    if (anonId && anonId.length > MAX_ID_LENGTH) {
+      anonId = null;
+      klog("xp_body_anonId_too_long", { length: bodyAnonIdRaw?.length });
+    }
   }
 
   xpIdentity = supabaseUserId || anonId || null;
@@ -586,6 +601,11 @@ export async function handler(event) {
 
   const sessionIdRaw = body.sessionId ?? querySessionId;
   let sessionId = typeof sessionIdRaw === "string" ? sessionIdRaw.trim() : null;
+  // SECURITY: Validate sessionId length to prevent Redis key abuse
+  if (sessionId && sessionId.length > MAX_ID_LENGTH) {
+    sessionId = null;
+    klog("xp_sessionId_too_long", { length: sessionIdRaw?.length });
+  }
 
   // SECURITY: Rate limiting check
   const clientIp = event.headers?.["x-forwarded-for"]?.split(",")[0]?.trim()

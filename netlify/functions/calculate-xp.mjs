@@ -863,7 +863,9 @@ export async function handler(event) {
   const visibilitySeconds = Math.max(0, Number(body.visibilitySeconds) || 0);
   const scoreDelta = Math.max(0, Math.floor(Number(body.scoreDelta) || 0));
   const gameEvents = Array.isArray(body.gameEvents) ? body.gameEvents.slice(0, 50) : []; // Limit events
-  const clientBoost = Math.max(1, Math.min(5, Number(body.boostMultiplier) || 1)); // Client-reported boost
+  // SECURITY: Client-reported boost is parsed but NOT trusted for XP calculation
+  // This is kept for logging/debugging purposes only
+  const clientBoost = Math.max(1, Math.min(5, Number(body.boostMultiplier) || 1));
 
   // Timestamp validation
   if (windowEnd > now + DRIFT_MS) {
@@ -930,9 +932,10 @@ export async function handler(event) {
     ? sessionState.boostMultiplier
     : 1;
 
-  // Use the higher of server-tracked boost or client-reported boost
-  // (client might have received a boost we haven't tracked yet)
-  const effectiveBoost = Math.max(activeBoost, clientBoost);
+  // SECURITY: Only use server-tracked boost, do NOT trust client-reported boost
+  // Previously this used Math.max(activeBoost, clientBoost) which let clients
+  // claim any boost multiplier up to 5x even without server-side validation
+  const effectiveBoost = activeBoost;
 
   // Calculate XP server-side
   const calculation = calculateXP({
