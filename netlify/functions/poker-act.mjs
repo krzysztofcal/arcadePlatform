@@ -1587,10 +1587,17 @@ export async function handler(event) {
           klog("poker_act_auto_start_skipped", { tableId, reason: "missing_hand_id", phase: responseFinalState.phase || null });
         } else {
           const stackMap = isPlainObjectValue(responseFinalState?.stacks) ? responseFinalState.stacks : {};
+          const leftTableByUserId = isPlainObjectValue(responseFinalState?.leftTableByUserId) ? responseFinalState.leftTableByUserId : {};
+          const sitOutByUserId = isPlainObjectValue(responseFinalState?.sitOutByUserId) ? responseFinalState.sitOutByUserId : {};
+          const pendingAutoSitOutByUserId = isPlainObjectValue(responseFinalState?.pendingAutoSitOutByUserId)
+            ? responseFinalState.pendingAutoSitOutByUserId
+            : {};
+          const isParticipatingUser = (userId) =>
+            !!userId && !leftTableByUserId?.[userId] && !sitOutByUserId?.[userId] && !pendingAutoSitOutByUserId?.[userId];
           const eligibleSeatsAll = (Array.isArray(responseFinalState?.seats) ? responseFinalState.seats : [])
             .filter((seat) => {
               const userId = typeof seat?.userId === "string" ? seat.userId : "";
-              if (!userId) return false;
+              if (!isParticipatingUser(userId)) return false;
               const seatNo = Number(seat?.seatNo);
               const stack = Number(stackMap[userId]);
               return Number.isInteger(seatNo) && Number.isInteger(stack) && stack > 0;

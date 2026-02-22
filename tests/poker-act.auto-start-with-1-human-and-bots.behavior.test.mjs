@@ -35,6 +35,8 @@ const makeStoredState = () => ({
     betThisRoundByUserId: { [humanUserId]: 0, [bot1UserId]: 0, [bot2UserId]: 0 },
     actedThisRoundByUserId: { [humanUserId]: false, [bot1UserId]: false, [bot2UserId]: false },
     foldedByUserId: { [humanUserId]: false, [bot1UserId]: false, [bot2UserId]: false },
+    leftTableByUserId: {},
+    sitOutByUserId: {},
     lastActionRequestIdByUserId: {},
     currentBet: 0,
     lastRaiseSize: 0,
