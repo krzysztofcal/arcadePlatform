@@ -123,6 +123,7 @@ function getBotAutoplayConfig(env = process.env) {
   const source = env || {};
   return {
     maxActionsPerRequest: parseIntClamped(source.POKER_BOTS_MAX_ACTIONS_PER_REQUEST, 5, 1, 20),
+    botsOnlyHandCompletionHardCap: parseIntClamped(source.POKER_BOTS_BOTS_ONLY_HAND_HARD_CAP, 80, 10, 250),
     policyVersion: normalizeString(source.POKER_BOT_POLICY_VERSION) || "TRIVIAL_V1",
   };
 }
