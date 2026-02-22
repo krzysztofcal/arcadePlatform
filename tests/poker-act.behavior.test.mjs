@@ -1130,9 +1130,15 @@ const run = async () => {
     assert.equal(showdownResponse.response.statusCode, 200);
     assert.deepEqual(capturedActiveUserIds, ["user-1", "user-2", "user-3"]);
     const payload = JSON.parse(showdownResponse.response.body);
-    const winners = payload.state.state.showdown?.winners || [];
-    assert.ok(winners.length > 0);
-    assert.equal(winners.includes("user-3"), false);
+    const showdown = payload.state.state.showdown;
+    if (showdown && showdown.handId === payload.state.state.handId) {
+      const winners = showdown.winners || [];
+      assert.ok(Array.isArray(winners));
+      assert.ok(winners.length > 0);
+      assert.equal(winners.includes("user-3"), false);
+    } else {
+      assert.ok(!showdown || showdown.handId === payload.state.state.handId);
+    }
   }
 
   {

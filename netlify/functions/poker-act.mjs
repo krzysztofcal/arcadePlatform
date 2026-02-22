@@ -458,7 +458,8 @@ export async function handler(event) {
         if (!Number.isInteger(expectedVersion) || expectedVersion < 0) {
           throw makeError(409, "state_invalid");
         }
-        const currentState = normalizeJsonState(stateRow.state);
+        let currentState = normalizeJsonState(stateRow.state);
+        currentState = clearMismatchedShowdown(currentState);
         if (!hasRequiredState(currentState)) {
           throw makeError(409, "state_invalid");
         }
@@ -522,6 +523,7 @@ export async function handler(event) {
       if (repairedDealerSeatNo != null && repairedDealerSeatNo !== currentState.dealerSeatNo) {
         currentState = { ...currentState, dealerSeatNo: repairedDealerSeatNo };
       }
+      currentState = clearMismatchedShowdown(currentState);
 
       if (currentState?.phase === "INIT") {
         klog("poker_act_rejected", {
