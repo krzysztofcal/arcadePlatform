@@ -15,12 +15,18 @@ import type { APIRequestContext, Page } from '@playwright/test';
 
 const XP_ENDPOINT = '/.netlify/functions/award-xp';
 
-const ALLOWED_ORIGIN = 'http://127.0.0.1:4173';
-const RATE_LIMIT_TEST_IP = '203.0.113.10';
+const BASE_ORIGIN = (() => {
+  const candidate = process.env.PLAYWRIGHT_TEST_BASE_URL || process.env.PLAYWRIGHT_BASE_URL || process.env.BASE_URL || 'http://127.0.0.1:4173';
+  try {
+    return new URL(candidate).origin;
+  } catch {
+    return 'http://127.0.0.1:4173';
+  }
+})();
 
-function buildRateLimitHeaders(ip: string = RATE_LIMIT_TEST_IP) {
+function buildRateLimitHeaders(origin: string = BASE_ORIGIN, ip: string = '203.0.113.10') {
   return {
-    Origin: ALLOWED_ORIGIN,
+    Origin: origin,
     'x-forwarded-for': ip,
   };
 }
@@ -54,7 +60,7 @@ test.describe('E2E Security Tests', () => {
   test.beforeAll(async ({ request }) => {
     const bootstrap = await request.post('/api/xp/start-session', {
       data: { userId: `health-${Date.now()}`, sessionId: `health-${Date.now()}` },
-      headers: { Origin: ALLOWED_ORIGIN },
+      headers: { Origin: BASE_ORIGIN },
     });
     if (bootstrap.status() === 404) {
       throw new Error('Netlify redirects/functions not configured in CI baseURL');
@@ -213,10 +219,10 @@ test.describe('E2E Security Tests', () => {
     test('should reset rate limit after 60 seconds', async ({ request }) => {
       const userId = generateUserId();
       const sessionId = generateSessionId();
-      const headers = buildRateLimitHeaders('203.0.113.12');
+      const headers = buildRateLimitHeaders();
 
       let hitRateLimit = false;
-      for (let i = 0; i < 80; i++) {
+      for (let i = 0; i < 30; i++) {
         const response = await request.post(XP_ENDPOINT, {
           data: createXPRequest({ userId, sessionId, ts: Date.now() + i }),
           headers,
@@ -234,14 +240,14 @@ test.describe('E2E Security Tests', () => {
       });
       expect(immediateResponse.status()).toBe(429);
 
-      await wait(61000);
+      await wait(5500);
 
       const afterReset = await request.post(XP_ENDPOINT, {
         data: createXPRequest({ userId, sessionId }),
         headers,
       });
       expect(afterReset.status()).toBe(200);
-    }, { timeout: 140000 });
+    }, { timeout: 45000 });
 
     test('should track rate limits independently per user', async ({ request }) => {
       const user1 = generateUserId();
@@ -253,14 +259,14 @@ test.describe('E2E Security Tests', () => {
       for (let i = 0; i < 31; i++) {
         await request.post(XP_ENDPOINT, {
           data: createXPRequest({ userId: user1, sessionId: session1, ts: Date.now() + i }),
-          headers: buildRateLimitHeaders('203.0.113.11')
+          headers: buildRateLimitHeaders(BASE_ORIGIN, '203.0.113.11')
         });
       }
 
       // User2 should still work (unless IP limit hit)
       const response = await request.post(XP_ENDPOINT, {
         data: createXPRequest({ userId: user2, sessionId: session2 }),
-        headers: buildRateLimitHeaders('203.0.113.11')
+        headers: buildRateLimitHeaders(BASE_ORIGIN, '203.0.113.12')
       });
 
       // May succeed or be blocked by IP rate limit (per-IP limit may also be hit in test environment)

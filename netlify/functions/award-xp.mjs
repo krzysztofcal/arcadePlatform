@@ -3,6 +3,7 @@ import { store, saveUserProfile, atomicRateLimitIncr } from "./_shared/store-ups
 import { klog } from "./_shared/supabase-admin.mjs";
 import { verifySessionToken, validateServerSession, touchSession } from "./start-session.mjs";
 import { nextWarsawResetMs, warsawDayKey } from "./_shared/time-utils.mjs";
+import { buildCorsAllowlist, buildCorsHeaders } from "./_shared/xp-cors.mjs";
 
 const XP_DAY_COOKIE = "xp_day";
 
@@ -31,18 +32,7 @@ const KEY_NS = process.env.XP_KEY_NS ?? "kcswh:xp:v2";
 const LOCK_KEY_PREFIX = `${KEY_NS}:lock:`;
 const DRIFT_MS = Math.max(0, asNumber(process.env.XP_DRIFT_MS, 30_000));
 // Build CORS allowlist from env var + auto-include Netlify site URL
-const CORS_ALLOW = (() => {
-  const fromEnv = (process.env.XP_CORS_ALLOW ?? "")
-    .split(",")
-    .map(s => s.trim())
-    .filter(Boolean);
-  // Auto-include the Netlify site URL (handles custom domains)
-  const siteUrl = process.env.URL;
-  if (siteUrl && !fromEnv.includes(siteUrl)) {
-    fromEnv.push(siteUrl);
-  }
-  return fromEnv;
-})();
+const CORS_ALLOW = buildCorsAllowlist({ xpCorsAllow: process.env.XP_CORS_ALLOW, siteUrl: process.env.URL });
 
 const RAW_LOCK_TTL = Number(process.env.XP_LOCK_TTL_MS ?? 3_000);
 const LOCK_TTL_MS = Number.isFinite(RAW_LOCK_TTL) && RAW_LOCK_TTL >= 0 ? RAW_LOCK_TTL : 3_000;
@@ -56,6 +46,7 @@ klog("xp_lock_config", {
 const RATE_LIMIT_PER_USER_PER_MIN = Math.max(0, asNumber(process.env.XP_RATE_LIMIT_USER_PER_MIN, 30));
 const RATE_LIMIT_PER_IP_PER_MIN = Math.max(0, asNumber(process.env.XP_RATE_LIMIT_IP_PER_MIN, 60));
 const RATE_LIMIT_ENABLED = process.env.XP_RATE_LIMIT_ENABLED !== "0"; // Default enabled
+const RATE_LIMIT_WINDOW_SEC = Math.max(1, asNumber(process.env.XP_RATE_LIMIT_WINDOW_SEC, 60));
 
 // SECURITY: Server-side session token configuration
 // These are read at runtime to support dynamic configuration changes
@@ -223,36 +214,7 @@ const json = (statusCode, obj, origin, extraHeaders) => {
 };
 
 function corsHeaders(origin) {
-  // SECURITY: CORS validation for cross-origin requests
-  // Note: Origin header is only present for cross-origin requests
-  // Same-origin and local requests don't have Origin header - allow those
-
-  const headers = {
-    "content-type": "application/json; charset=utf-8",
-    "cache-control": "no-store",
-  };
-
-  // If there's no Origin header, it's same-origin/local - allow it
-  if (!origin) {
-    return headers;
-  }
-
-  // Automatically allow Netlify deploy preview and production domains
-  // Pattern: https://*.netlify.app (including deploy-preview-*, branch-*, etc.)
-  const isNetlifyDomain = /^https:\/\/[a-z0-9-]+\.netlify\.app$/i.test(origin);
-
-  // If there IS an Origin header, enforce whitelist (unless it's a Netlify domain)
-  if (!isNetlifyDomain && CORS_ALLOW.length > 0 && !CORS_ALLOW.includes(origin)) {
-    return null; // Signal rejection for non-whitelisted origins
-  }
-
-  // Origin is whitelisted (or no whitelist configured) - add CORS headers
-  headers["access-control-allow-origin"] = origin;
-  headers["access-control-allow-headers"] = "content-type,authorization,x-api-key";
-  headers["access-control-allow-methods"] = "POST,OPTIONS";
-  headers["Vary"] = "Origin";
-
-  return headers;
+  return buildCorsHeaders({ origin, allowlist: CORS_ALLOW, methods: "POST,OPTIONS", headers: "content-type,authorization,x-api-key" });
 }
 
 const hash = (s) => crypto.createHash("sha256").update(s).digest("hex");
@@ -273,8 +235,8 @@ const keyTotal = (u) => `${KEY_NS}:total:${u}`;
 const keySession = (u, s) => `${KEY_NS}:session:${hash(`${u}|${s}`)}`;
 const keySessionSync = (u, s) => `${KEY_NS}:session:last:${hash(`${u}|${s}`)}`;
 const keyLock = (u, s) => `${LOCK_KEY_PREFIX}${hash(`${u}|${s}`)}`;
-const keyRateLimitUser = (userId) => `${KEY_NS}:ratelimit:user:${userId}:${Math.floor(Date.now() / 60000)}`;
-const keyRateLimitIp = (ip) => `${KEY_NS}:ratelimit:ip:${hash(ip)}:${Math.floor(Date.now() / 60000)}`;
+const keyRateLimitUser = (userId) => `${KEY_NS}:ratelimit:user:${userId}:${Math.floor(Date.now() / (RATE_LIMIT_WINDOW_SEC * 1000))}`;
+const keyRateLimitIp = (ip) => `${KEY_NS}:ratelimit:ip:${hash(ip)}:${Math.floor(Date.now() / (RATE_LIMIT_WINDOW_SEC * 1000))}`;
 const keySessionRegistry = (userId, sessionId) => `${KEY_NS}:registry:${hash(`${userId}|${sessionId}`)}`;
 const keyMigration = (anonId, userId) => `${KEY_NS}:migration:${hash(`${anonId}|${userId}`)}`;
 
@@ -315,7 +277,7 @@ async function checkRateLimit({ userId, ip }) {
   if (userId && RATE_LIMIT_PER_USER_PER_MIN > 0) {
     const userKey = keyRateLimitUser(userId);
     checks.push(
-      atomicRateLimitIncr(userKey, 60)
+      atomicRateLimitIncr(userKey, RATE_LIMIT_WINDOW_SEC)
         .then(({ count }) => ({
           type: 'user',
           count,
@@ -333,7 +295,7 @@ async function checkRateLimit({ userId, ip }) {
   if (ip && RATE_LIMIT_PER_IP_PER_MIN > 0) {
     const ipKey = keyRateLimitIp(ip);
     checks.push(
-      atomicRateLimitIncr(ipKey, 60)
+      atomicRateLimitIncr(ipKey, RATE_LIMIT_WINDOW_SEC)
         .then(({ count }) => ({
           type: 'ip',
           count,
@@ -595,7 +557,7 @@ export async function handler(event) {
   const isStatusOnly = body.statusOnly === true;
   const rateLimitResult = isStatusOnly ? { allowed: true } : await checkRateLimit({ userId: xpIdentity, ip: clientIp });
   if (!rateLimitResult.allowed) {
-    const retryAfter = rateLimitResult.retryAfter ?? 60;
+    const retryAfter = rateLimitResult.retryAfter ?? RATE_LIMIT_WINDOW_SEC;
     const payload = {
       error: "rate_limit_exceeded",
       message: `Too many requests from ${rateLimitResult.type}`,

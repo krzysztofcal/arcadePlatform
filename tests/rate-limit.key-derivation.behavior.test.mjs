@@ -5,9 +5,11 @@ process.env.XP_TEST_MODE = '1';
 process.env.XP_RATE_LIMIT_ENABLED = '1';
 process.env.XP_RATE_LIMIT_USER_PER_MIN = '100';
 process.env.XP_RATE_LIMIT_IP_PER_MIN = '2';
+process.env.XP_RATE_LIMIT_WINDOW_SEC = '2';
+process.env.XP_KEY_NS = `test:rate-key:${Date.now()}`;
+process.env.XP_CORS_ALLOW = 'http://127.0.0.1:4173';
 
-const moduleKey = `rate-key-${Date.now()}`;
-const { handler } = await import(`../netlify/functions/award-xp.mjs?${moduleKey}`);
+const { handler } = await import('../netlify/functions/award-xp.mjs');
 
 const post = (ip, userId = `user-${Date.now()}`) =>
   handler({
