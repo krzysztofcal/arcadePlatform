@@ -231,6 +231,23 @@ const hasRequiredState = (state) =>
 
 const isActionPhase = (phase) => phase === "PREFLOP" || phase === "FLOP" || phase === "TURN" || phase === "RIVER";
 
+const isUserParticipatingInHand = (state, userId) =>
+  !!userId &&
+  !state?.foldedByUserId?.[userId] &&
+  !state?.leftTableByUserId?.[userId] &&
+  !state?.sitOutByUserId?.[userId] &&
+  !state?.pendingAutoSitOutByUserId?.[userId];
+
+const hasParticipatingHumanInHand = (state, seatBotMap) => {
+  const seats = Array.isArray(state?.seats) ? state.seats : [];
+  for (const seat of seats) {
+    const userId = typeof seat?.userId === "string" ? seat.userId : "";
+    if (!isUserParticipatingInHand(state, userId)) continue;
+    const isBot = seatBotMap instanceof Map ? seatBotMap.get(userId) === true : !!seatBotMap?.[userId];
+    if (!isBot) return true;
+  }
+  return false;
+};
 
 
 const computeLegalActionsWithGuard = ({ statePublic, userId, tableId, source }) => {
@@ -905,6 +922,10 @@ export async function handler(event) {
         let timeoutBotActionCount = 0;
         let timeoutBotStopReason = "not_attempted";
         let timeoutLastBotActionSummary = null;
+        const timeoutBotsOnlyAtStart = !hasParticipatingHumanInHand(timeoutFinalState, seatBotMap);
+        const timeoutEffectiveMaxBotActions = timeoutBotsOnlyAtStart
+          ? Math.max(botAutoplayConfig.maxActionsPerRequest, botAutoplayConfig.botsOnlyHandCompletionHardCap)
+          : botAutoplayConfig.maxActionsPerRequest;
         const timeoutHandIdForLog =
           typeof timeoutFinalState.handId === "string" && timeoutFinalState.handId.trim() ? timeoutFinalState.handId.trim() : null;
         klog("poker_act_bot_autoplay_attempt", {
@@ -913,9 +934,11 @@ export async function handler(event) {
           turnUserId: timeoutFinalState.turnUserId || null,
           policyVersion: botAutoplayConfig.policyVersion,
           maxActionsPerRequest: botAutoplayConfig.maxActionsPerRequest,
+          effectiveMaxActionsPerRequest: timeoutEffectiveMaxBotActions,
+          botsOnlyInHand: timeoutBotsOnlyAtStart,
         });
 
-        while (timeoutBotActionCount < botAutoplayConfig.maxActionsPerRequest) {
+        while (timeoutBotActionCount < timeoutEffectiveMaxBotActions) {
           if (!isActionPhase(timeoutFinalState.phase)) {
             timeoutBotStopReason = "non_action_phase";
             break;
@@ -1047,9 +1070,13 @@ export async function handler(event) {
         }
 
         if (timeoutBotStopReason === "not_attempted") {
-          timeoutBotStopReason = timeoutBotActionCount >= botAutoplayConfig.maxActionsPerRequest ? "action_cap_reached" : "completed";
-        } else if (timeoutBotActionCount >= botAutoplayConfig.maxActionsPerRequest) {
-          timeoutBotStopReason = "action_cap_reached";
+          if (timeoutBotActionCount >= timeoutEffectiveMaxBotActions) {
+            timeoutBotStopReason = timeoutBotsOnlyAtStart ? "hard_cap_reached" : "action_cap_reached";
+          } else {
+            timeoutBotStopReason = "completed";
+          }
+        } else if (timeoutBotActionCount >= timeoutEffectiveMaxBotActions) {
+          timeoutBotStopReason = timeoutBotsOnlyAtStart ? "hard_cap_reached" : "action_cap_reached";
         }
         const timeoutCurrentHandIdForLog =
           typeof timeoutFinalState?.handId === "string" && timeoutFinalState.handId.trim() ? timeoutFinalState.handId.trim() : null;
@@ -1060,6 +1087,8 @@ export async function handler(event) {
           policyVersion: botAutoplayConfig.policyVersion,
           botActionCount: timeoutBotActionCount,
           reason: timeoutBotStopReason,
+          botsOnlyInHand: timeoutBotsOnlyAtStart,
+          effectiveMaxActionsPerRequest: timeoutEffectiveMaxBotActions,
           lastActionType: timeoutLastBotActionSummary?.type || null,
           lastActionAmount: timeoutLastBotActionSummary?.amount ?? null,
           optimisticConflict: timeoutBotStopReason === "optimistic_conflict",
@@ -1441,6 +1470,10 @@ export async function handler(event) {
       let botActionCount = 0;
       let botStopReason = "not_attempted";
       let lastBotActionSummary = null;
+      const botsOnlyAtStart = !hasParticipatingHumanInHand(responseFinalState, seatBotMap);
+      const effectiveMaxBotActions = botsOnlyAtStart
+        ? Math.max(botAutoplayConfig.maxActionsPerRequest, botAutoplayConfig.botsOnlyHandCompletionHardCap)
+        : botAutoplayConfig.maxActionsPerRequest;
       const handIdForLog = typeof responseFinalState.handId === "string" && responseFinalState.handId.trim() ? responseFinalState.handId.trim() : null;
       klog("poker_act_bot_autoplay_attempt", {
         tableId,
@@ -1448,6 +1481,8 @@ export async function handler(event) {
         turnUserId: responseFinalState.turnUserId || null,
         policyVersion: botAutoplayConfig.policyVersion,
         maxActionsPerRequest: botAutoplayConfig.maxActionsPerRequest,
+        effectiveMaxActionsPerRequest: effectiveMaxBotActions,
+        botsOnlyInHand: botsOnlyAtStart,
       });
 
       const buildPersistedFromPrivateState = (privateStateInput, actorUserId, actionRequestId) => {
@@ -1475,7 +1510,7 @@ export async function handler(event) {
 
       const runBotAutoplayLoop = async () => {
         botStopReason = "not_attempted";
-        while (botActionCount < botAutoplayConfig.maxActionsPerRequest) {
+        while (botActionCount < effectiveMaxBotActions) {
           if (!isActionPhase(responseFinalState.phase)) { botStopReason = "non_action_phase"; break; }
           const botTurnUserId = responseFinalState.turnUserId;
           if (!isBotTurn(botTurnUserId, seatBotMap)) { botStopReason = "turn_not_bot"; break; }
@@ -1500,6 +1535,8 @@ export async function handler(event) {
               policyVersion: botAutoplayConfig.policyVersion,
               botActionCount,
               reason: botStopReason,
+        botsOnlyInHand: botsOnlyAtStart,
+        effectiveMaxActionsPerRequest: effectiveMaxBotActions,
               actionType: botAction.type || null,
               actionAmount: botAction.amount ?? null,
               error: error?.message || "apply_action_failed",
@@ -1573,9 +1610,13 @@ export async function handler(event) {
         }
 
         if (botStopReason === "not_attempted") {
-          botStopReason = botActionCount >= botAutoplayConfig.maxActionsPerRequest ? "action_cap_reached" : "completed";
-        } else if (botActionCount >= botAutoplayConfig.maxActionsPerRequest) {
-          botStopReason = "action_cap_reached";
+          if (botActionCount >= effectiveMaxBotActions) {
+            botStopReason = botsOnlyAtStart ? "hard_cap_reached" : "action_cap_reached";
+          } else {
+            botStopReason = "completed";
+          }
+        } else if (botActionCount >= effectiveMaxBotActions) {
+          botStopReason = botsOnlyAtStart ? "hard_cap_reached" : "action_cap_reached";
         }
       };
 
@@ -1660,7 +1701,7 @@ export async function handler(event) {
         }
       }
 
-      if (isActionPhase(responseFinalState.phase) && isBotTurn(responseFinalState.turnUserId, seatBotMap) && botActionCount < botAutoplayConfig.maxActionsPerRequest) {
+      if (isActionPhase(responseFinalState.phase) && isBotTurn(responseFinalState.turnUserId, seatBotMap) && botActionCount < effectiveMaxBotActions) {
         await runBotAutoplayLoop();
       }
 
@@ -1673,6 +1714,8 @@ export async function handler(event) {
         policyVersion: botAutoplayConfig.policyVersion,
         botActionCount,
         reason: botStopReason,
+        botsOnlyInHand: botsOnlyAtStart,
+        effectiveMaxActionsPerRequest: effectiveMaxBotActions,
         lastActionType: lastBotActionSummary?.type || null,
         lastActionAmount: lastBotActionSummary?.amount ?? null,
         optimisticConflict: botStopReason === "optimistic_conflict",
