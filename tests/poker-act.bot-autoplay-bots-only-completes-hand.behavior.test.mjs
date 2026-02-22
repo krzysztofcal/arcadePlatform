@@ -81,11 +81,11 @@ const run = async () => {
     normalizeRequestId: (value) => ({ ok: true, value: String(value || "") }),
     advanceIfNeeded: (state) => ({ state, events: [] }),
     applyAction: applyActionStub,
-    computeLegalActions: ({ userId }) => {
-      const actions = userId === humanUserId ? [{ type: "FOLD" }] : [{ type: "CHECK" }];
-      actions.includes = (target) => actions.some((entry) => entry?.type === target);
-      return { actions };
-    },
+    computeLegalActions: ({ userId }) => ({
+      actions: userId === humanUserId ? [{ type: "FOLD" }] : [{ type: "CHECK" }],
+      minRaiseTo: null,
+      maxRaiseTo: null,
+    }),
     buildActionConstraints: () => ({}),
     isStateStorageValid: () => true,
     normalizeJsonState: (state) => state,

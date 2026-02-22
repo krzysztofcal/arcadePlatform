@@ -212,6 +212,18 @@ const normalizeAction = (action) => {
   return { ok: true, value: { type } };
 };
 
+const actionListHasType = (actions, type) => {
+  if (!Array.isArray(actions)) return false;
+  const target = typeof type === "string" ? type.trim().toUpperCase() : "";
+  if (!target) return false;
+  return actions.some((entry) => {
+    if (typeof entry === "string") return entry.trim().toUpperCase() === target;
+    if (!entry || typeof entry !== "object") return false;
+    const entryType = typeof entry.type === "string" ? entry.type : entry.action;
+    return typeof entryType === "string" && entryType.trim().toUpperCase() === target;
+  });
+};
+
 const normalizeRequest = (value) => {
   const parsed = normalizeRequestId(value, { maxLen: 200 });
   if (!parsed.ok || !parsed.value) return { ok: false, value: null };
@@ -1269,7 +1281,7 @@ export async function handler(event) {
       }
 
       const legalInfo = computeLegalActions({ statePublic: withoutPrivateState(currentState), userId: auth.userId });
-      if (!legalInfo.actions.includes(actionParsed.value.type)) {
+      if (!actionListHasType(legalInfo.actions, actionParsed.value.type)) {
         klog("poker_act_rejected", {
           tableId,
           userId: auth.userId,
