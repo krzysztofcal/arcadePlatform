@@ -17,6 +17,24 @@ const parseBody = (body) => {
 const isPlainObject = (value) =>
   value !== null && typeof value === "object" && !Array.isArray(value) && Object.getPrototypeOf(value) === Object.prototype;
 
+const touchSeatPresence = async (tx, tableId, userId) => {
+  const seatRows = await tx.unsafe(
+    "select seat_no from public.poker_seats where table_id = $1 and user_id = $2 limit 1;",
+    [tableId, userId]
+  );
+  const seatNo = seatRows?.[0]?.seat_no;
+  const isSeated = Number.isInteger(seatNo);
+  if (isSeated) {
+    // Heartbeat intentionally updates seat presence only; sweep lifecycle uses poker_tables.last_activity_at
+    // from real state/action mutations, not passive keep-alive traffic.
+    await tx.unsafe(
+      "update public.poker_seats set status = 'ACTIVE', last_seen_at = now() where table_id = $1 and user_id = $2;",
+      [tableId, userId]
+    );
+  }
+  return { isSeated, seatNo: isSeated ? seatNo : null };
+};
+
 export async function handler(event) {
   const origin = event.headers?.origin || event.headers?.Origin;
   const cors = corsHeaders(origin);
@@ -85,8 +103,17 @@ export async function handler(event) {
         kind: "HEARTBEAT",
         pendingStaleSec: REQUEST_PENDING_STALE_SEC,
       });
-      if (requestInfo.status === "stored") return requestInfo.result;
       if (requestInfo.status === "pending") return { ok: false, pending: true, requestId };
+      if (requestInfo.status === "stored") {
+        const replayResult = requestInfo.result;
+        if (!replayResult?.closed) {
+          const replayPresence = await touchSeatPresence(tx, tableId, auth.userId);
+          if (replayPresence.isSeated) {
+            mutated = true;
+          }
+        }
+        return replayResult;
+      }
 
       try {
         const tableRows = await tx.unsafe("select status from public.poker_tables where id = $1 limit 1;", [tableId]);
@@ -95,15 +122,15 @@ export async function handler(event) {
           return { error: "table_not_found", statusCode: 404 };
         }
 
-        const seatRows = await tx.unsafe(
-          "select seat_no from public.poker_seats where table_id = $1 and user_id = $2 limit 1;",
-          [tableId, auth.userId]
-        );
-        const seatNo = seatRows?.[0]?.seat_no;
-        const isSeated = Number.isInteger(seatNo);
+        const presence = await touchSeatPresence(tx, tableId, auth.userId);
+        const isSeated = presence.isSeated;
+        const seatNo = presence.seatNo;
+        if (isSeated) {
+          mutated = true;
+        }
 
         if (tableStatus === "CLOSED") {
-          const resultPayload = { ok: true, seated: isSeated, seatNo: isSeated ? seatNo : null };
+          const resultPayload = { ok: true, seated: isSeated, seatNo: seatNo };
           if (isSeated) {
             resultPayload.closed = true;
           }
@@ -117,17 +144,7 @@ export async function handler(event) {
           return resultPayload;
         }
 
-        if (isSeated) {
-          // Heartbeat intentionally updates seat presence only; sweep lifecycle uses poker_tables.last_activity_at
-          // from real state/action mutations, not passive keep-alive traffic.
-          await tx.unsafe(
-            "update public.poker_seats set status = 'ACTIVE', last_seen_at = now() where table_id = $1 and user_id = $2;",
-            [tableId, auth.userId]
-          );
-          mutated = true;
-        }
-
-        const resultPayload = { ok: true, seated: isSeated, seatNo: isSeated ? seatNo : null };
+        const resultPayload = { ok: true, seated: isSeated, seatNo: seatNo };
         await storePokerRequestResult(tx, {
           tableId,
           userId: auth.userId,

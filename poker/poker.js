@@ -888,7 +888,7 @@
     var devActionsEnabled = false;
     var authTimer = null;
     var heartbeatTimer = null;
-    var heartbeatRequestId = null;
+    var pendingHeartbeatRequestId = null;
     var pendingJoinRequestId = null;
     var pendingJoinAutoSeat = false;
     var pendingLeaveRequestId = null;
@@ -1809,9 +1809,6 @@
       if (!isSeated) return;
       if (!isPageActive()) return;
       if (document.visibilityState === 'hidden') return;
-      if (!heartbeatRequestId){
-        heartbeatRequestId = normalizeRequestId(generateRequestId());
-      }
       heartbeatTimer = setInterval(sendHeartbeat, HEARTBEAT_INTERVAL_MS);
       sendHeartbeat();
     }
@@ -1828,10 +1825,10 @@
       heartbeatInFlight = true;
       var shouldReturn = false;
       try {
-        if (!getValidRequestId(heartbeatRequestId)){
-          heartbeatRequestId = normalizeRequestId(generateRequestId());
+        if (!getValidRequestId(pendingHeartbeatRequestId)){
+          pendingHeartbeatRequestId = normalizeRequestId(generateRequestId());
         }
-        var requestId = heartbeatRequestId;
+        var requestId = pendingHeartbeatRequestId;
         var data = await apiPost(HEARTBEAT_URL, { tableId: tableId, requestId: requestId });
         if (isPendingResponse(data)){
           heartbeatPendingRetries++;
@@ -1842,6 +1839,7 @@
         }
         if (!shouldReturn){
           heartbeatPendingRetries = 0;
+          pendingHeartbeatRequestId = null;
           if (data && data.closed){
             stopPolling();
             stopHeartbeat();

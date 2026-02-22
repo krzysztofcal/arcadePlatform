@@ -108,7 +108,7 @@ assert.ok(pokerUiSrc.includes("apiPost(LEAVE_URL"), "poker UI should retry leave
 assert.ok(pokerUiSrc.includes("poker_leave_bind"), "poker UI should log leave bind state");
 assert.ok(pokerUiSrc.includes("poker_leave_click"), "poker UI should log leave click");
 const heartbeatCallRegex =
-  /apiPost\(\s*HEARTBEAT_URL[\s\S]*?\{[\s\S]*?tableId\s*:\s*tableId[\s\S]*?requestId\s*:\s*(?:requestId|heartbeatRequestId)[\s\S]*?\}[\s\S]*?\)/;
+  /apiPost\(\s*HEARTBEAT_URL[\s\S]*?\{[\s\S]*?tableId\s*:\s*tableId[\s\S]*?requestId\s*:\s*requestId[\s\S]*?\}[\s\S]*?\)/;
 assert.ok(heartbeatCallRegex.test(pokerUiSrc), "poker UI heartbeat should send requestId and tableId");
 assert.ok(!/tbl\.max_players/.test(pokerUiSrc), "poker UI should not read tbl.max_players");
 assert.ok(!/table\.max_players/.test(pokerUiSrc), "poker UI should not read table.max_players");
@@ -183,8 +183,12 @@ assert.ok(
 );
 assert.ok(!/String\(\s*leaveRequestId\s*\)/.test(pokerUiSrc), "poker UI leave should not stringify leaveRequestId");
 assert.ok(
-  /async function sendHeartbeat\([\s\S]*?getValidRequestId\(heartbeatRequestId\)/.test(pokerUiSrc),
-  "poker UI heartbeat should validate requestId before sending"
+  /async function sendHeartbeat\([\s\S]*?if \(!getValidRequestId\(pendingHeartbeatRequestId\)\)[\s\S]*?pendingHeartbeatRequestId\s*=\s*normalizeRequestId\(generateRequestId\(\)\)/.test(pokerUiSrc),
+  "poker UI heartbeat should create per-tick pendingHeartbeatRequestId"
+);
+assert.ok(
+  /if \(isPendingResponse\(data\)\)[\s\S]*?shouldReturn\s*=\s*true[\s\S]*?if \(!shouldReturn\)[\s\S]*?pendingHeartbeatRequestId\s*=\s*null;/.test(pokerUiSrc),
+  "poker UI heartbeat should clear pendingHeartbeatRequestId after non-pending responses"
 );
 assert.ok(
   ciWorkflowSrc.includes("playwright install --with-deps"),

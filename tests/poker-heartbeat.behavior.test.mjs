@@ -86,7 +86,7 @@ const run = async () => {
   const second = await callHeartbeat(handler, "hb-1");
   assert.equal(second.statusCode, 200);
   assert.deepEqual(JSON.parse(second.body), firstBody);
-  assert.equal(sideEffects.seatTouch, 1, "replayed heartbeat should not rerun seat touch");
+  assert.equal(sideEffects.seatTouch, 2, "replayed heartbeat should refresh seat touch");
   assert.equal(sideEffects.tableTouch, 0, "heartbeat should never touch table activity");
   assert.ok(
     queries.some((q) =>
