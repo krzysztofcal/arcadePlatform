@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { deriveCommunityCards, deriveDeck, deriveRemainingDeck } from "../netlify/functions/_shared/poker-deal-deterministic.mjs";
 import { isHoleCardsTableMissing, loadHoleCardsByUserId } from "../netlify/functions/_shared/poker-hole-cards-store.mjs";
 import { buildActionConstraints, computeLegalActions } from "../netlify/functions/_shared/poker-legal-actions.mjs";
-import { normalizeJsonState, withoutPrivateState } from "../netlify/functions/_shared/poker-state-utils.mjs";
+import { advanceIfNeeded } from "../netlify/functions/_shared/poker-reducer.mjs";
+import { isStateStorageValid, normalizeJsonState, withoutPrivateState } from "../netlify/functions/_shared/poker-state-utils.mjs";
 import { maybeApplyTurnTimeout, normalizeSeatOrderFromState } from "../netlify/functions/_shared/poker-turn-timeout.mjs";
 import { loadPokerHandler } from "./helpers/poker-test-helpers.mjs";
 
@@ -37,6 +38,15 @@ const defaultHoleCards = {
 const makeHandler = (queries, storedState, userId, options = {}) => {
   const holeCardsMap =
     options.holeCardsByUserId !== undefined ? { ...options.holeCardsByUserId } : { ...defaultHoleCards };
+  const optimisticWrites = options.optimisticWrites || [];
+
+  const optimisticWriter =
+    options.updatePokerStateOptimistic ||
+    (async (_tx, args) => {
+      optimisticWrites.push(args);
+      if (options.forceOptimisticConflict) return { ok: false, reason: "conflict" };
+      return { ok: true, newVersion: Number(args.expectedVersion) + 1 };
+    });
 
   return loadPokerHandler("netlify/functions/poker-get-table.mjs", {
     baseHeaders: () => ({}),
@@ -44,6 +54,7 @@ const makeHandler = (queries, storedState, userId, options = {}) => {
     extractBearerToken: () => "token",
     verifySupabaseJwt: async () => ({ valid: true, userId }),
     isValidUuid: () => true,
+    isStateStorageValid,
     normalizeJsonState,
     withoutPrivateState,
     computeLegalActions,
@@ -52,6 +63,8 @@ const makeHandler = (queries, storedState, userId, options = {}) => {
     isHoleCardsTableMissing,
     loadHoleCardsByUserId,
     maybeApplyTurnTimeout: options.maybeApplyTurnTimeout || maybeApplyTurnTimeout,
+    advanceIfNeeded,
+    updatePokerStateOptimistic: optimisticWriter,
     deriveDeck,
     deriveCommunityCards: options.deriveCommunityCards || deriveCommunityCards,
     deriveRemainingDeck: options.deriveRemainingDeck || deriveRemainingDeck,
@@ -69,7 +82,7 @@ const makeHandler = (queries, storedState, userId, options = {}) => {
             return activeUserIds.map((id, index) => ({ user_id: id, seat_no: index + 1 }));
           }
           if (text.includes("from public.poker_seats")) {
-            return [
+            return options.seatRows || [
               { user_id: "user-1", seat_no: 1, status: "ACTIVE", is_bot: true },
               { user_id: "user-2", seat_no: 2, status: "ACTIVE", is_bot: false },
               { user_id: "user-3", seat_no: 3, status: "ACTIVE", is_bot: false },
@@ -562,6 +575,171 @@ const run = async () => {
     entry.query.toLowerCase().includes("from public.poker_hole_cards")
   );
   assert.equal(holeCardQueries.length, 0);
+
+  const settledAdvanceWrites = [];
+  const settledAdvanceResponse = await makeHandler(
+    [],
+    {
+      value: JSON.stringify({
+        ...baseState,
+        phase: "SETTLED",
+        turnUserId: null,
+        turnDeadlineAt: null,
+      }),
+      version: 9,
+    },
+    "user-2",
+    {
+      optimisticWrites: settledAdvanceWrites,
+    }
+  )({
+    httpMethod: "GET",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    queryStringParameters: { tableId },
+  });
+  assert.equal(settledAdvanceResponse.statusCode, 200);
+  const settledAdvancePayload = JSON.parse(settledAdvanceResponse.body);
+  assert.notEqual(settledAdvancePayload.state.state.phase, "SETTLED");
+  assert.notEqual(settledAdvancePayload.state.state.phase, "SHOWDOWN");
+  assert.equal(settledAdvanceWrites.length, 1);
+  assert.equal(settledAdvancePayload.state.version, 10);
+
+  const settledBotsOnlyWrites = [];
+  const settledBotsOnlyResponse = await makeHandler(
+    [],
+    {
+      value: JSON.stringify({
+        ...baseState,
+        phase: "SETTLED",
+        turnUserId: null,
+        turnDeadlineAt: null,
+      }),
+      version: 11,
+    },
+    "user-1",
+    {
+      optimisticWrites: settledBotsOnlyWrites,
+      activeUserIds: [],
+      seatRows: [
+        { user_id: "user-1", seat_no: 1, status: "ACTIVE", is_bot: true },
+        { user_id: "user-2", seat_no: 2, status: "ACTIVE", is_bot: true },
+      ],
+    }
+  )({
+    httpMethod: "GET",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    queryStringParameters: { tableId },
+  });
+  assert.equal(settledBotsOnlyResponse.statusCode, 200);
+  const settledBotsOnlyPayload = JSON.parse(settledBotsOnlyResponse.body);
+  assert.equal(settledBotsOnlyPayload.state.state.phase, "SETTLED");
+  assert.equal(settledBotsOnlyWrites.length, 0);
+
+  const originalNow = Date.now;
+  const versionPropagationWrites = [];
+  const versionPropagationResponse = await (async () => {
+    let nowCallCount = 0;
+    Date.now = () => {
+      nowCallCount += 1;
+      return nowCallCount === 1 ? 1000 : 1000000;
+    };
+    try {
+      return await makeHandler(
+    [],
+    {
+      value: JSON.stringify({
+        ...baseState,
+        phase: "SETTLED",
+        turnUserId: null,
+        turnDeadlineAt: 0,
+      }),
+      version: 20,
+    },
+    "user-2",
+    {
+      optimisticWrites: versionPropagationWrites,
+      maybeApplyTurnTimeout: ({ state }) => {
+        const nextState = { ...state, turnNo: Number(state.turnNo || 0) + 1 };
+        delete nextState.deck;
+        delete nextState.holeCardsByUserId;
+        return {
+          applied: true,
+          state: nextState,
+          action: { userId: "user-2", type: "CHECK", amount: null },
+        };
+      },
+    }
+  )({
+    httpMethod: "GET",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    queryStringParameters: { tableId },
+  });
+    } finally {
+      Date.now = originalNow;
+    }
+  })();
+  assert.equal(versionPropagationResponse.statusCode, 200);
+  assert.equal(versionPropagationWrites.length, 2);
+  assert.equal(versionPropagationWrites[0].expectedVersion, 20);
+  assert.equal(versionPropagationWrites[1].expectedVersion, 21);
+
+  const handDoneAdvanceWrites = [];
+  const handDoneAdvanceResponse = await makeHandler(
+    [],
+    {
+      value: JSON.stringify({
+        ...baseState,
+        phase: "HAND_DONE",
+        turnUserId: null,
+        turnDeadlineAt: null,
+      }),
+      version: 30,
+    },
+    "user-2",
+    {
+      optimisticWrites: handDoneAdvanceWrites,
+    }
+  )({
+    httpMethod: "GET",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    queryStringParameters: { tableId },
+  });
+  assert.equal(handDoneAdvanceResponse.statusCode, 200);
+  const handDoneAdvancePayload = JSON.parse(handDoneAdvanceResponse.body);
+  assert.notEqual(handDoneAdvancePayload.state.state.phase, "HAND_DONE");
+  assert.equal(handDoneAdvanceWrites.length, 1);
+  assert.notEqual(handDoneAdvanceWrites[0].nextState.phase, "HAND_DONE");
+
+  const handDoneBotsOnlyWrites = [];
+  const handDoneBotsOnlyResponse = await makeHandler(
+    [],
+    {
+      value: JSON.stringify({
+        ...baseState,
+        phase: "HAND_DONE",
+        turnUserId: null,
+        turnDeadlineAt: null,
+      }),
+      version: 31,
+    },
+    "user-1",
+    {
+      optimisticWrites: handDoneBotsOnlyWrites,
+      activeUserIds: [],
+      seatRows: [
+        { user_id: "user-1", seat_no: 1, status: "ACTIVE", is_bot: true },
+        { user_id: "user-2", seat_no: 2, status: "ACTIVE", is_bot: true },
+      ],
+    }
+  )({
+    httpMethod: "GET",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    queryStringParameters: { tableId },
+  });
+  assert.equal(handDoneBotsOnlyResponse.statusCode, 200);
+  const handDoneBotsOnlyPayload = JSON.parse(handDoneBotsOnlyResponse.body);
+  assert.equal(handDoneBotsOnlyPayload.state.state.phase, "HAND_DONE");
+  assert.equal(handDoneBotsOnlyWrites.length, 0);
 };
 
 await run();
