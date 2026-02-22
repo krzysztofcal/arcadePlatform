@@ -35,7 +35,7 @@ const stored = {
       { userId: "user-2", seatNo: 2 },
       { userId: "user-3", seatNo: 3 },
     ],
-    stacks: { "user-1": 100, "user-2": 0, "user-3": 0 },
+    stacks: { "user-1": 100, "user-2": 100, "user-3": 100 },
     pot: 10,
     community: deriveCommunityCards({ handSeed, seatUserIdsInOrder: seatUserIds, communityDealt: 5 }),
     communityDealt: 5,
@@ -44,7 +44,7 @@ const stored = {
     toCallByUserId: { "user-1": 0, "user-2": 0, "user-3": 0 },
     betThisRoundByUserId: { "user-1": 0, "user-2": 0, "user-3": 0 },
     actedThisRoundByUserId: { "user-1": false, "user-2": true, "user-3": true },
-    foldedByUserId: { "user-1": false, "user-2": true, "user-3": true },
+    foldedByUserId: { "user-1": false, "user-2": false, "user-3": true },
     lastActionRequestIdByUserId: {},
     currentBet: 0,
     lastRaiseSize: 0,
@@ -118,6 +118,7 @@ const run = async () => {
         },
       }),
     klog: () => {},
+    ensurePokerRequest: async (_tx, { kind }) => (kind === "ACT_AUTO_START" ? { status: "stored", result: null } : { status: "created" }),
   });
 
   const response = await handler({

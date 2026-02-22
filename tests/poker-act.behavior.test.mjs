@@ -172,6 +172,7 @@ const makeHandler = (queries, storedState, userId, options = {}) =>
         },
       }),
     klog: options.klog || (() => {}),
+    ...(options.ensurePokerRequest ? { ensurePokerRequest: options.ensurePokerRequest } : {}),
   });
 
 const makeStartHandHandler = (queries, storedState, userId, seatUserIds) => {
@@ -376,6 +377,7 @@ const runCase = async ({
   botSeatUserIds,
   loadHoleCardsByUserId: loadHoleCardsByUserIdOverride,
   updatePokerStateConflict,
+  ensurePokerRequest,
 }) => {
   const queries = [];
   const storedState = { value: JSON.stringify(state), version: 3 };
@@ -388,6 +390,7 @@ const runCase = async ({
     botSeatUserIds,
     loadHoleCardsByUserId: loadHoleCardsByUserIdOverride,
     updatePokerStateConflict,
+    ensurePokerRequest,
   });
   const response = await handler({
     httpMethod: "POST",
@@ -1107,7 +1110,6 @@ const run = async () => {
       ...baseState,
       phase: "RIVER",
       pot: 10,
-      stacks: { "user-1": 100, "user-2": 0, "user-3": 0 },
       community: deriveCommunityCards({ handSeed: baseState.handSeed, seatUserIdsInOrder: seatOrder, communityDealt: 5 }),
       communityDealt: 5,
       turnUserId: "user-1",
@@ -1127,6 +1129,7 @@ const run = async () => {
       requestId: "req-showdown-hole-cards",
       userId: "user-1",
       loadHoleCardsByUserId: holeCardsLoader,
+      ensurePokerRequest: async (_tx, { kind }) => (kind === "ACT_AUTO_START" ? { status: "stored", result: null } : { status: "created" }),
     });
     assert.equal(showdownResponse.response.statusCode, 200);
     assert.deepEqual(capturedActiveUserIds, ["user-1", "user-2", "user-3"]);
