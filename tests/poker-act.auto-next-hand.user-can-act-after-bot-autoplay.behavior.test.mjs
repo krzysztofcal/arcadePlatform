@@ -171,10 +171,7 @@ const run = async () => {
   assert.equal(String(second.body || "").includes("showdown_hand_mismatch"), false);
   assert.equal(String(second.body || "").includes("showdown_settlement_hand_mismatch"), false);
   const returnedState = secondPayload.state?.state || {};
-  assert.equal(
-    !Object.prototype.hasOwnProperty.call(returnedState, "handSettlement") || returnedState.handSettlement?.handId === returnedState.handId,
-    true
-  );
+  assert.equal(Object.prototype.hasOwnProperty.call(returnedState, "handSettlement"), false);
   assert.equal(stateWriteCount > writesAfterFirst, true);
 };
 
