@@ -132,6 +132,7 @@ const run = async () => {
   const happyQueries = [];
   const storedState = { value: JSON.stringify(baseState), version: 4 };
   const happyHandler = makeHandler(happyQueries, storedState, "user-1");
+  assert.equal(typeof happyHandler, "function");
   const happyResponse = await happyHandler({
     httpMethod: "GET",
     headers: { origin: "https://example.test", authorization: "Bearer token" },
