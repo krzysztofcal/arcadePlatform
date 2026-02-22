@@ -28,7 +28,7 @@ const hasSameUserIds = (left, right) => {
 
 const MIN_PLAYERS = 2;
 const END_PHASE_ADVANCE_LIMIT = 3;
-const isSettledPhase = (phase) => phase === "SETTLED" || phase === "SHOWDOWN";
+const isSettledPhase = (phase) => phase === "HAND_DONE" || phase === "SETTLED" || phase === "SHOWDOWN";
 
 
 const parseTableId = (event) => {
@@ -182,7 +182,7 @@ export async function handler(event) {
         throw new Error("poker_state_missing");
       }
       let stateVersion = stateRow.version;
-      const expectedVersion = Number(stateVersion);
+      let expectedVersion = Number(stateVersion);
       if (!Number.isInteger(expectedVersion) || expectedVersion < 0) {
         throw new Error("state_invalid");
       }
@@ -227,6 +227,7 @@ export async function handler(event) {
             if (updateResult.ok) {
               updatedState = advancedState;
               stateVersion = updateResult.newVersion;
+              expectedVersion = updateResult.newVersion;
             } else if (updateResult.reason !== "conflict") {
               throw new Error("state_invalid");
             }
@@ -462,6 +463,7 @@ export async function handler(event) {
                   } else {
                     const newVersion = updateResult.newVersion;
                     stateVersion = newVersion;
+                    expectedVersion = newVersion;
 
                     await tx.unsafe(
                       "insert into public.poker_actions (table_id, version, user_id, action_type, amount) values ($1, $2, $3, $4, $5);",
