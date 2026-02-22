@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { test, expect } from '@playwright/test';
 import type { APIRequestContext, Page } from '@playwright/test';
 
@@ -33,11 +34,11 @@ function buildRateLimitHeaders(origin: string = BASE_ORIGIN, ip: string = '203.0
 
 // Test utilities
 function generateUserId(): string {
-  return `test-user-${Date.now()}-${Math.random().toString(36).substring(7)}`;
+  return `test-user-${Date.now()}-${randomUUID()}`;
 }
 
 function generateSessionId(): string {
-  return `test-session-${Date.now()}-${Math.random().toString(36).substring(7)}`;
+  return `test-session-${Date.now()}-${randomUUID()}`;
 }
 
 function createXPRequest(overrides: any = {}) {
