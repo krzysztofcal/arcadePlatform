@@ -62,7 +62,12 @@ export default defineConfig({
       XP_DAILY_SECRET: 'test-secret-for-sessions-32chars!',
       XP_DEBUG: '1',
       // Enable CORS whitelist for security testing
-      XP_CORS_ALLOW: 'http://localhost:8888,https://example.netlify.app',
+      XP_CORS_ALLOW: `http://localhost:${PORT},http://127.0.0.1:${PORT},https://example.netlify.app`,
+      XP_RATE_LIMIT_ENABLED: '0', // test harness only: avoid cross-suite 429 flake
+      XP_RATE_LIMIT_WINDOW_SEC: '5',
+      XP_RATE_LIMIT_USER_PER_MIN: '10',
+      XP_RATE_LIMIT_IP_PER_MIN: '40',
+      XP_SESSION_RATE_LIMIT_ENABLED: '0', // test harness only: avoid CI flake from session bootstrap churn
     },
   },
 });

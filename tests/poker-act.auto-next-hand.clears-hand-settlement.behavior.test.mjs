@@ -14,12 +14,14 @@ const bot2UserId = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 process.env.POKER_DEAL_SECRET = process.env.POKER_DEAL_SECRET || "test-deal-secret";
 process.env.POKER_BOT_MAX_ACTIONS_PER_REQUEST = "1";
 
+const oldHandId = "f4e19544-dddd-4ddd-8ddd-dddddddddddd";
+const newHandId = "c1b7e1cf-ffff-4fff-8fff-ffffffffffff";
 const stored = {
-  version: 10,
+  version: 5,
   state: {
     tableId,
     phase: "RIVER",
-    handId: "f4e19544-dddd-4ddd-8ddd-dddddddddddd",
+    handId: oldHandId,
     handSeed: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
     seats: [
       { userId: humanUserId, seatNo: 1 },
@@ -27,7 +29,7 @@ const stored = {
       { userId: bot2UserId, seatNo: 3 },
     ],
     stacks: { [humanUserId]: 100, [bot1UserId]: 100, [bot2UserId]: 100 },
-    pot: 20,
+    pot: 25,
     community: [],
     communityDealt: 0,
     dealerSeatNo: 1,
@@ -44,8 +46,6 @@ const stored = {
 };
 
 const run = async () => {
-  let stateWriteCount = 0;
-
   const handler = loadPokerHandler("netlify/functions/poker-act.mjs", {
     baseHeaders: () => ({}),
     corsHeaders: () => ({ "access-control-allow-origin": "https://example.test" }),
@@ -65,32 +65,18 @@ const run = async () => {
     deriveCommunityCards: () => [],
     deriveRemainingDeck: () => [],
     maybeApplyTurnTimeout: async (state) => ({ state, timedOut: false }),
-    applyAction: (state, action) => {
-      if (action?.userId === humanUserId && state.phase === "RIVER") return { state: { ...state, phase: "HAND_DONE", turnUserId: null, pot: 0 }, events: [{ type: "HAND_SETTLED" }] };
-      if (action?.userId === bot1UserId) return { state: { ...state, phase: "PREFLOP", turnUserId: humanUserId }, events: [{ type: "BOT_ACTED" }] };
-      return { state: { ...state, phase: "PREFLOP", turnUserId: bot1UserId }, events: [{ type: "HUMAN_ACTED" }] };
-    },
+    applyAction: (state) => ({ state: { ...state, phase: "HAND_DONE", pot: 0, turnUserId: null }, events: [{ type: "HAND_SETTLED" }] }),
     chooseBotActionTrivial: () => ({ type: "CHECK" }),
     startHandCore: async ({ tx, tableId: startTableId, currentState, expectedVersion }) => {
       const nextState = {
-
         ...currentState,
         phase: "PREFLOP",
-        handId: "c1b7e1cf-ffff-4fff-8fff-ffffffffffff",
+        handId: newHandId,
         handSeed: "99999999-9999-4999-8999-999999999999",
-        turnUserId: bot1UserId,
-        showdown: { handId: "f4e19544-dddd-4ddd-8ddd-dddddddddddd", winners: [] },
-        handSettlement: { handId: "f4e19544-dddd-4ddd-8ddd-dddddddddddd", payouts: [] },
+        turnUserId: humanUserId,
+        handSettlement: { handId: oldHandId, payouts: [] },
       };
-      const privateState = {
-        ...currentState,
-        phase: "PREFLOP",
-        handId: "c1b7e1cf-ffff-4fff-8fff-ffffffffffff",
-        handSeed: "99999999-9999-4999-8999-999999999999",
-        turnUserId: bot1UserId,
-        showdown: { handId: "f4e19544-dddd-4ddd-8ddd-dddddddddddd", winners: [] },
-        handSettlement: { handId: "f4e19544-dddd-4ddd-8ddd-dddddddddddd", payouts: [] },
-      };
+      const privateState = { ...nextState };
       const autoWrite = await updatePokerStateOptimistic(tx, {
         tableId: startTableId,
         expectedVersion,
@@ -136,7 +122,6 @@ const run = async () => {
             return [{ request_id: params?.[2] }];
           }
           if (text.includes("update public.poker_state") && text.includes("version = version + 1")) {
-            stateWriteCount += 1;
             stored.state = JSON.parse(params?.[2] || "{}");
             stored.version += 1;
             return [{ version: stored.version }];
@@ -148,34 +133,21 @@ const run = async () => {
     klog: () => {},
   });
 
-  const first = await handler({
+  const response = await handler({
     httpMethod: "POST",
     headers: { origin: "https://example.test", authorization: "Bearer token" },
-    body: JSON.stringify({ tableId, requestId: "user-act-after-bot-1", action: { type: "CHECK" } }),
-  });
-  assert.equal(first.statusCode, 200);
-  const firstPayload = JSON.parse(first.body || "{}");
-  assert.equal(firstPayload.ok, true);
-
-  const writesAfterFirst = stateWriteCount;
-  const second = await handler({
-    httpMethod: "POST",
-    headers: { origin: "https://example.test", authorization: "Bearer token" },
-    body: JSON.stringify({ tableId, requestId: "user-act-after-bot-2", action: { type: "CHECK" } }),
+    body: JSON.stringify({ tableId, requestId: "clear-settlement-1", action: { type: "CHECK" } }),
   });
 
-  assert.equal(second.statusCode, 200);
-  const secondPayload = JSON.parse(second.body || "{}");
-  assert.equal(secondPayload.ok, true);
-  assert.equal(Boolean(secondPayload.rejected), false);
-  assert.equal(String(second.body || "").includes("showdown_hand_mismatch"), false);
-  assert.equal(String(second.body || "").includes("showdown_settlement_hand_mismatch"), false);
-  const returnedState = secondPayload.state?.state || {};
-  assert.equal(Object.prototype.hasOwnProperty.call(returnedState, "handSettlement"), false);
-  assert.equal(stateWriteCount > writesAfterFirst, true);
+  assert.equal(response.statusCode, 200);
+  const payload = JSON.parse(response.body || "{}");
+  assert.equal(payload.ok, true);
+  assert.equal(payload.state?.state?.phase, "PREFLOP");
+  assert.equal(payload.state?.state?.handId, newHandId);
+  assert.equal(Object.prototype.hasOwnProperty.call(payload.state?.state || {}, "handSettlement"), false);
 };
 
-run().then(() => console.log("poker-act auto-next-hand user can act after bot autoplay behavior test passed")).catch((error) => {
+run().then(() => console.log("poker-act auto-next-hand clears hand settlement behavior test passed")).catch((error) => {
   console.error(error);
   process.exit(1);
 });

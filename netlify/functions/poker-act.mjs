@@ -64,6 +64,20 @@ const clearMismatchedShowdown = (stateInput) => {
   return sanitizedState;
 };
 
+const clearMismatchedHandSettlement = (stateInput) => {
+  if (!isPlainObjectValue(stateInput) || !stateInput.handSettlement) return stateInput;
+  const handId = typeof stateInput.handId === "string" ? stateInput.handId.trim() : "";
+  const handSettlementHandId =
+    typeof stateInput.handSettlement?.handId === "string" && stateInput.handSettlement.handId.trim()
+      ? stateInput.handSettlement.handId.trim()
+      : "";
+  if (!handId || !handSettlementHandId || handSettlementHandId === handId) return stateInput;
+  const { handSettlement: _ignoredHandSettlement, ...sanitizedState } = stateInput;
+  return sanitizedState;
+};
+
+const sanitizePerHandArtifacts = (stateInput) => clearMismatchedHandSettlement(clearMismatchedShowdown(stateInput));
+
 const maybeEvictMarkedBotAfterSettlement = async (tx, { tableId, state, actorUserId }) => {
   if (state?.phase !== "SETTLED") return { state, evicted: false };
   try {
@@ -459,7 +473,7 @@ export async function handler(event) {
           throw makeError(409, "state_invalid");
         }
         let currentState = normalizeJsonState(stateRow.state);
-        currentState = clearMismatchedShowdown(currentState);
+        currentState = sanitizePerHandArtifacts(currentState);
         if (!hasRequiredState(currentState)) {
           throw makeError(409, "state_invalid");
         }
@@ -523,7 +537,7 @@ export async function handler(event) {
       if (repairedDealerSeatNo != null && repairedDealerSeatNo !== currentState.dealerSeatNo) {
         currentState = { ...currentState, dealerSeatNo: repairedDealerSeatNo };
       }
-      currentState = clearMismatchedShowdown(currentState);
+      currentState = sanitizePerHandArtifacts(currentState);
 
       if (currentState?.phase === "INIT") {
         klog("poker_act_rejected", {
@@ -965,7 +979,7 @@ export async function handler(event) {
           const timeoutBotPersistedStateRaw = timeoutBotClearedMissedTurns.changed
             ? timeoutBotClearedMissedTurns.nextState
             : timeoutBotWithTimer;
-          const timeoutBotPersistedState = clearMismatchedShowdown(timeoutBotPersistedStateRaw);
+          const timeoutBotPersistedState = sanitizePerHandArtifacts(timeoutBotPersistedStateRaw);
 
           if (!isStateStorageValid(timeoutBotPersistedState, { requireHandSeed: true, requireCommunityDealt: true, requireNoDeck: true })) {
             timeoutBotStopReason = "invalid_persist_state";
@@ -1434,7 +1448,7 @@ export async function handler(event) {
           : { ...updated, turnStartedAt: null, turnDeadlineAt: null };
         const cleared = clearMissedTurns(withTimer, actorUserId);
         const persistedState = cleared.changed ? cleared.nextState : withTimer;
-        return clearMismatchedShowdown(persistedState);
+        return sanitizePerHandArtifacts(persistedState);
       };
 
       const runBotAutoplayLoop = async () => {
@@ -1583,8 +1597,8 @@ export async function handler(event) {
                   previousDealerSeatNo: Number.isInteger(responseFinalState?.dealerSeatNo) ? responseFinalState.dealerSeatNo : null,
                   makeError,
                 });
-                responseFinalState = clearMismatchedShowdown(autoStart.updatedState);
-                loopPrivateState = clearMismatchedShowdown(autoStart.privateState || autoStart.updatedState);
+                responseFinalState = sanitizePerHandArtifacts(autoStart.updatedState);
+                loopPrivateState = sanitizePerHandArtifacts(autoStart.privateState || autoStart.updatedState);
                 loopVersion = autoStart.newVersion;
                 newVersion = autoStart.newVersion;
                 holeCardsByUserId = autoStart.dealtHoleCards;

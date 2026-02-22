@@ -161,7 +161,7 @@ export const startHandCore = async ({
   const insertedUserIds = Array.isArray(holeCardInsertRows) ? holeCardInsertRows.map((row) => row?.user_id).filter(Boolean) : [];
   if (insertedUserIds.length !== activeUserIdList.length) throw makeError(500, "hole_cards_write_failed");
 
-  const { holeCardsByUserId: _ignoredHoleCards, ...stateBase } = currentState;
+  const { holeCardsByUserId: _ignoredHoleCards, handSettlement: _ignoredHandSettlement, ...stateBase } = currentState;
   const updatedState = {
     ...stateBase,
     tableId: currentState.tableId || tableId,
