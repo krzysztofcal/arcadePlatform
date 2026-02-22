@@ -35,11 +35,18 @@ const run = async () => {
   };
 
   let version = 10;
-  let capturedNextState = null;
+  let updateStateHits = 0;
   const tx = {
-    unsafe: async (query) => {
+    unsafe: async (query, params) => {
       const text = String(query).toLowerCase();
       if (text.includes("insert into public.poker_hole_cards")) return [{ user_id: userId }, { user_id: otherUserId }];
+      if (text.includes("update public.poker_state") && text.includes("version = version + 1")) {
+        updateStateHits += 1;
+        version += 1;
+        const parsedState = JSON.parse(String(params?.[2] || "{}"));
+        assert.equal(Object.prototype.hasOwnProperty.call(parsedState, "handSettlement"), false);
+        return [{ version }];
+      }
       if (text.includes("insert into public.poker_actions")) return [{ ok: true }];
       return [];
     },
@@ -66,17 +73,12 @@ const run = async () => {
     },
     deps: {
       getRng: () => () => 0.123456,
-      updatePokerStateOptimistic: async (_tx, { nextState }) => {
-        capturedNextState = nextState;
-        version += 1;
-        return { ok: true, newVersion: version };
-      },
     },
   });
 
+  assert.equal(updateStateHits, 1);
   assert.equal(Object.prototype.hasOwnProperty.call(result.updatedState, "handSettlement"), false);
   assert.equal(Object.prototype.hasOwnProperty.call(result.privateState, "handSettlement"), false);
-  assert.equal(Object.prototype.hasOwnProperty.call(capturedNextState || {}, "handSettlement"), false);
 };
 
 run().then(() => console.log("poker-start-hand-core does not carry hand-settlement behavior test passed")).catch((error) => {
