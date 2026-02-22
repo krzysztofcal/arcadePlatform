@@ -17,14 +17,19 @@ const parseBody = (body) => {
 const isPlainObject = (value) =>
   value !== null && typeof value === "object" && !Array.isArray(value) && Object.getPrototypeOf(value) === Object.prototype;
 
-const touchSeatPresence = async (tx, tableId, userId) => {
+const getSeatPresence = async (tx, tableId, userId) => {
   const seatRows = await tx.unsafe(
     "select seat_no from public.poker_seats where table_id = $1 and user_id = $2 limit 1;",
     [tableId, userId]
   );
   const seatNo = seatRows?.[0]?.seat_no;
   const isSeated = Number.isInteger(seatNo);
-  if (isSeated) {
+  return { isSeated, seatNo: isSeated ? seatNo : null };
+};
+
+const touchSeatPresence = async (tx, tableId, userId) => {
+  const presence = await getSeatPresence(tx, tableId, userId);
+  if (presence.isSeated) {
     // Heartbeat intentionally updates seat presence only; sweep lifecycle uses poker_tables.last_activity_at
     // from real state/action mutations, not passive keep-alive traffic.
     await tx.unsafe(
@@ -32,7 +37,7 @@ const touchSeatPresence = async (tx, tableId, userId) => {
       [tableId, userId]
     );
   }
-  return { isSeated, seatNo: isSeated ? seatNo : null };
+  return presence;
 };
 
 export async function handler(event) {
@@ -106,11 +111,11 @@ export async function handler(event) {
       if (requestInfo.status === "pending") return { ok: false, pending: true, requestId };
       if (requestInfo.status === "stored") {
         const replayResult = requestInfo.result;
-        if (!replayResult?.closed) {
+        const tableRows = await tx.unsafe("select status from public.poker_tables where id = $1 limit 1;", [tableId]);
+        const tableStatus = tableRows?.[0]?.status;
+        if (tableStatus && tableStatus !== "CLOSED") {
           const replayPresence = await touchSeatPresence(tx, tableId, auth.userId);
-          if (replayPresence.isSeated) {
-            mutated = true;
-          }
+          if (replayPresence.isSeated) mutated = true;
         }
         return replayResult;
       }
@@ -122,16 +127,10 @@ export async function handler(event) {
           return { error: "table_not_found", statusCode: 404 };
         }
 
-        const presence = await touchSeatPresence(tx, tableId, auth.userId);
-        const isSeated = presence.isSeated;
-        const seatNo = presence.seatNo;
-        if (isSeated) {
-          mutated = true;
-        }
-
         if (tableStatus === "CLOSED") {
-          const resultPayload = { ok: true, seated: isSeated, seatNo: seatNo };
-          if (isSeated) {
+          const presence = await getSeatPresence(tx, tableId, auth.userId);
+          const resultPayload = { ok: true, seated: presence.isSeated, seatNo: presence.seatNo };
+          if (presence.isSeated) {
             resultPayload.closed = true;
           }
           await storePokerRequestResult(tx, {
@@ -144,7 +143,12 @@ export async function handler(event) {
           return resultPayload;
         }
 
-        const resultPayload = { ok: true, seated: isSeated, seatNo: seatNo };
+        const presence = await touchSeatPresence(tx, tableId, auth.userId);
+        if (presence.isSeated) {
+          mutated = true;
+        }
+
+        const resultPayload = { ok: true, seated: presence.isSeated, seatNo: presence.seatNo };
         await storePokerRequestResult(tx, {
           tableId,
           userId: auth.userId,
