@@ -17,15 +17,25 @@ async function readStableTimeLeft(
   page: import('@playwright/test').Page,
   timeout = 1000
 ) {
-  let previous = await readTimeLeft(page);
-  let stableValue = previous;
+  let previous: number | null = null;
+  let stableCount = 0;
+  let stableValue = NaN;
   await expect
     .poll(async () => {
       const current = await readTimeLeft(page);
-      const isStable = Math.abs(current - previous) < 0.000001;
+      if (!Number.isFinite(current)) {
+        previous = null;
+        stableCount = 0;
+        return false;
+      }
+      if (previous !== null && Math.abs(current - previous) < 0.000001) {
+        stableCount += 1;
+      } else {
+        stableCount = 0;
+      }
       previous = current;
-      if (isStable) stableValue = current;
-      return isStable;
+      stableValue = current;
+      return stableCount >= 2;
     }, {
       timeout,
       intervals: [100, 150, 200],
@@ -81,6 +91,7 @@ test('game starts, pauses, and resumes', async ({ page }) => {
   await page.locator('#btnPause').click();
   await expect(page.locator('#btnPause')).toHaveAttribute('aria-pressed', 'true');
   const pausedBaseline = await readStableTimeLeft(page);
+  expect(Number.isFinite(pausedBaseline)).toBe(true);
   await expect
     .poll(async () => readTimeLeft(page), {
       timeout: 600,
