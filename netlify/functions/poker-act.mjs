@@ -231,6 +231,50 @@ const hasRequiredState = (state) =>
 
 const isActionPhase = (phase) => phase === "PREFLOP" || phase === "FLOP" || phase === "TURN" || phase === "RIVER";
 
+const isTurnUserEligible = (state, userId) => {
+  if (!isActionPhase(state?.phase)) return false;
+  if (typeof userId !== "string" || !userId.trim()) return false;
+  if (state?.foldedByUserId?.[userId]) return false;
+  if (state?.leftTableByUserId?.[userId]) return false;
+  if (state?.sitOutByUserId?.[userId]) return false;
+  if ((state?.stacks?.[userId] ?? 0) <= 0) return false;
+  return true;
+};
+
+const coerceActionPhaseTurn = (state) => {
+  if (!isActionPhase(state?.phase)) return state;
+  if (isTurnUserEligible(state, state?.turnUserId)) return state;
+  const advanced = advanceIfNeeded(state);
+  return advanced?.state || state;
+};
+
+const computeLegalActionsWithGuard = ({ statePublic, userId, tableId, source }) => {
+  const legalInfo = computeLegalActions({ statePublic, userId });
+  const actionCount = Array.isArray(legalInfo?.actions) ? legalInfo.actions.length : 0;
+  if (!isActionPhase(statePublic?.phase)) return { legalInfo, statePublic, healed: false };
+  const shouldCheck = userId && statePublic?.turnUserId === userId;
+  if (!shouldCheck || actionCount > 0) return { legalInfo, statePublic, healed: false };
+
+  klog("poker_contract_empty_legal_actions", {
+    tableId,
+    source,
+    phase: statePublic?.phase || null,
+    turnUserId: statePublic?.turnUserId || null,
+    folded: !!statePublic?.foldedByUserId?.[statePublic?.turnUserId],
+    leftTable: !!statePublic?.leftTableByUserId?.[statePublic?.turnUserId],
+    sitOut: !!statePublic?.sitOutByUserId?.[statePublic?.turnUserId],
+    stack: statePublic?.turnUserId ? Number(statePublic?.stacks?.[statePublic.turnUserId] ?? 0) : null,
+  });
+
+  const healedState = withoutPrivateState(coerceActionPhaseTurn(statePublic));
+  const healedInfo = computeLegalActions({ statePublic: healedState, userId });
+  const healedCount = Array.isArray(healedInfo?.actions) ? healedInfo.actions.length : 0;
+  if (isActionPhase(healedState?.phase) && healedState?.turnUserId === userId && healedCount === 0) {
+    throw makeError(409, "contract_mismatch_empty_legal_actions");
+  }
+  return { legalInfo: healedInfo, statePublic: healedState, healed: true };
+};
+
 const getSeatForUser = (state, userId) => (Array.isArray(state.seats) ? state.seats.find((seat) => seat?.userId === userId) : null);
 
 const buildMeStatus = (state, userId) => {
@@ -653,7 +697,6 @@ export async function handler(event) {
       const dbActiveHumanUserIds = Array.isArray(activeSeatRows)
         ? activeSeatRows.filter((row) => !row?.is_bot).map((row) => row?.user_id).filter(Boolean)
         : [];
-      const activeHumanCount = dbActiveHumanUserIds.length;
       const activeUserIdsForHoleCards = seatUserIdsInOrder.slice();
       const requiredHoleCardUserIds = dbActiveHumanUserIds.length ? dbActiveHumanUserIds.slice() : [auth.userId];
 
@@ -709,8 +752,10 @@ export async function handler(event) {
           });
           throw makeError(409, "state_invalid");
         }
-        const replayPublicState = withoutPrivateState(currentState);
-        const replayLegalInfo = computeLegalActions({ statePublic: replayPublicState, userId: auth.userId });
+        let replayPublicState = withoutPrivateState(currentState);
+        const replayGuard = computeLegalActionsWithGuard({ statePublic: replayPublicState, userId: auth.userId, tableId, source: "poker_act_replay" });
+        replayPublicState = replayGuard.statePublic;
+        const replayLegalInfo = replayGuard.legalInfo;
         const resultPayload = {
           ok: true,
           tableId,
@@ -892,10 +937,6 @@ export async function handler(event) {
         });
 
         while (timeoutBotActionCount < botAutoplayConfig.maxActionsPerRequest) {
-          if (activeHumanCount === 0) {
-            timeoutBotStopReason = "no_active_humans";
-            break;
-          }
           if (!isActionPhase(timeoutFinalState.phase)) {
             timeoutBotStopReason = "non_action_phase";
             break;
@@ -1045,8 +1086,10 @@ export async function handler(event) {
           optimisticConflict: timeoutBotStopReason === "optimistic_conflict",
         });
 
-        const timeoutPublicState = withoutPrivateState(timeoutFinalState);
-        const timeoutLegalInfo = computeLegalActions({ statePublic: timeoutPublicState, userId: auth.userId });
+        let timeoutPublicState = withoutPrivateState(timeoutFinalState);
+        const timeoutGuard = computeLegalActionsWithGuard({ statePublic: timeoutPublicState, userId: auth.userId, tableId, source: "poker_act_timeout" });
+        timeoutPublicState = timeoutGuard.statePublic;
+        const timeoutLegalInfo = timeoutGuard.legalInfo;
         const resultPayload = {
           ok: true,
           tableId,
@@ -1454,7 +1497,6 @@ export async function handler(event) {
       const runBotAutoplayLoop = async () => {
         botStopReason = "not_attempted";
         while (botActionCount < botAutoplayConfig.maxActionsPerRequest) {
-          if (activeHumanCount === 0) { botStopReason = "no_active_humans"; break; }
           if (!isActionPhase(responseFinalState.phase)) { botStopReason = "non_action_phase"; break; }
           const botTurnUserId = responseFinalState.turnUserId;
           if (!isBotTurn(botTurnUserId, seatBotMap)) { botStopReason = "turn_not_bot"; break; }
@@ -1570,6 +1612,7 @@ export async function handler(event) {
             .filter((seat) => {
               const userId = typeof seat?.userId === "string" ? seat.userId : "";
               if (!userId) return false;
+              if (seatBotMap?.[userId]) return false;
               return Number.isInteger(Number(stackMap[userId])) && Number(stackMap[userId]) > 0;
             })
             .map((seat) => ({ user_id: seat.userId, seat_no: Number(seat.seatNo), stack: Number(stackMap[seat.userId] ?? 0) }))
@@ -1667,8 +1710,10 @@ export async function handler(event) {
         newVersion,
       });
 
-      const responseState = withoutPrivateState(responseFinalState);
-      const nextLegalInfo = computeLegalActions({ statePublic: responseState, userId: auth.userId });
+      let responseState = withoutPrivateState(responseFinalState);
+      const responseGuard = computeLegalActionsWithGuard({ statePublic: responseState, userId: auth.userId, tableId, source: "poker_act" });
+      responseState = responseGuard.statePublic;
+      const nextLegalInfo = responseGuard.legalInfo;
       const resultPayload = {
         ok: true,
         tableId,
