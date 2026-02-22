@@ -8,6 +8,7 @@ import { parseStakes } from "./_shared/poker-stakes.mjs";
 import { maybeApplyTurnTimeout, normalizeSeatOrderFromState } from "./_shared/poker-turn-timeout.mjs";
 import { cardIdentity, isValidTwoCards } from "./_shared/poker-cards-utils.mjs";
 import { isValidUuid } from "./_shared/poker-utils.mjs";
+import { advanceIfNeeded } from "./_shared/poker-reducer.mjs";
 
 const isActionPhase = (phase) => phase === "PREFLOP" || phase === "FLOP" || phase === "TURN" || phase === "RIVER";
 const normalizeSeatUserIds = (seats) => {
@@ -24,6 +25,10 @@ const hasSameUserIds = (left, right) => {
   }
   return true;
 };
+
+const MIN_PLAYERS = 2;
+const END_PHASE_ADVANCE_LIMIT = 3;
+const isSettledPhase = (phase) => phase === "SETTLED" || phase === "SHOWDOWN";
 
 
 const parseTableId = (event) => {
@@ -199,17 +204,47 @@ export async function handler(event) {
       let myHoleCards = [];
       let updatedState = currentState;
 
-      if (isActionPhase(currentState.phase)) {
-        if (typeof currentState.handId !== "string" || !currentState.handId.trim()) {
+      if (isSettledPhase(currentState.phase)) {
+        const activeSeats = seats.filter((seat) => seat?.status === "ACTIVE");
+        const activeCount = activeSeats.length;
+        const humanActiveCount = activeSeats.filter((seat) => !seat?.isBot).length;
+        if (humanActiveCount >= 1 && activeCount >= MIN_PLAYERS) {
+          let advancedState = currentState;
+          let loops = 0;
+          while (isSettledPhase(advancedState.phase) && loops < END_PHASE_ADVANCE_LIMIT) {
+            const next = advanceIfNeeded(advancedState);
+            if (!next?.state || next.state === advancedState) break;
+            advancedState = next.state;
+            loops += 1;
+          }
+
+          if (advancedState !== currentState) {
+            const updateResult = await updatePokerStateOptimistic(tx, {
+              tableId,
+              expectedVersion,
+              nextState: advancedState,
+            });
+            if (updateResult.ok) {
+              updatedState = advancedState;
+              stateVersion = updateResult.newVersion;
+            } else if (updateResult.reason !== "conflict") {
+              throw new Error("state_invalid");
+            }
+          }
+        }
+      }
+
+      if (isActionPhase(updatedState.phase)) {
+        if (typeof updatedState.handId !== "string" || !updatedState.handId.trim()) {
           throw new Error("state_invalid");
         }
-        if (typeof currentState.handSeed !== "string" || !currentState.handSeed.trim()) {
+        if (typeof updatedState.handSeed !== "string" || !updatedState.handSeed.trim()) {
           throw new Error("state_invalid");
         }
 
         const nowMs = Date.now();
         let shouldApplyTimeout =
-          Number.isFinite(Number(currentState.turnDeadlineAt)) && nowMs > currentState.turnDeadlineAt;
+          Number.isFinite(Number(updatedState.turnDeadlineAt)) && nowMs > updatedState.turnDeadlineAt;
 
         const dbActiveUserIds = Array.isArray(activeSeatRows)
           ? activeSeatRows.map((row) => row?.user_id).filter(Boolean)
@@ -222,7 +257,7 @@ export async function handler(event) {
               .filter(Boolean)
           : [];
 
-        const stateSeatUserIds = normalizeSeatUserIds(currentState.seats);
+        const stateSeatUserIds = normalizeSeatUserIds(updatedState.seats);
         if (stateSeatUserIds.length <= 0) {
           throw new Error("state_invalid");
         }
@@ -246,7 +281,7 @@ export async function handler(event) {
         if (!amSeated) {
           klog("poker_get_table_user_not_seated", {
             tableId,
-            handId: currentState.handId,
+            handId: updatedState.handId,
             userId: auth.userId,
             stateSeatCount: stateSeatUserIds.length,
             dbActiveCount: dbActiveUserIds.length,
@@ -269,7 +304,7 @@ export async function handler(event) {
             try {
               holeCards = await loadHoleCardsByUserId(tx, {
                 tableId,
-                handId: currentState.handId,
+                handId: updatedState.handId,
                 activeUserIds: effectiveUserIdsForHoleCards,
                 requiredUserIds: [auth.userId],
                 mode: "soft",
@@ -299,7 +334,7 @@ export async function handler(event) {
               try {
                 allHoleCards = await loadHoleCardsByUserId(tx, {
                   tableId,
-                  handId: currentState.handId,
+                  handId: updatedState.handId,
                   activeUserIds: timeoutRequiredUserIds,
                   requiredUserIds: timeoutRequiredUserIds,
                   mode: "soft",
@@ -307,7 +342,7 @@ export async function handler(event) {
               } catch (error) {
                 klog("poker_get_table_timeout_missing_hole_cards", {
                   tableId,
-                  handId: currentState.handId,
+                  handId: updatedState.handId,
                   expectedCount: timeoutRequiredUserIds.length,
                   attemptedUserIds: timeoutRequiredUserIds,
                 });
@@ -323,7 +358,7 @@ export async function handler(event) {
                 if (hasRequiredStatus || !hasRequiredCards) {
                   klog("poker_get_table_timeout_missing_hole_cards", {
                     tableId,
-                    handId: currentState.handId,
+                    handId: updatedState.handId,
                     expectedCount: timeoutRequiredUserIds.length,
                     attemptedUserIds: timeoutRequiredUserIds,
                     statusCount: Object.keys(allStatuses).length,
@@ -337,7 +372,7 @@ export async function handler(event) {
             }
 
             if (shouldApplyTimeout) {
-              const stateSeatUserIdsInOrder = normalizeSeatOrderFromState(currentState.seats);
+              const stateSeatUserIdsInOrder = normalizeSeatOrderFromState(updatedState.seats);
               const timeoutRequiredUserIds = seatRowsActiveUserIds.length
                 ? seatRowsActiveUserIds
                 : dbActiveUserIds.length
@@ -348,7 +383,7 @@ export async function handler(event) {
               if (timeoutSeatUserIdsInOrder.length < 2) {
                 klog("poker_get_table_timeout_apply_skipped", {
                   tableId,
-                  handId: currentState.handId,
+                  handId: updatedState.handId,
                   reason: "insufficient_effective_players",
                   effectiveCount: timeoutSeatUserIdsInOrder.length,
                 });
@@ -357,7 +392,7 @@ export async function handler(event) {
             }
 
             if (shouldApplyTimeout) {
-              const stateSeatUserIdsInOrder = normalizeSeatOrderFromState(currentState.seats);
+              const stateSeatUserIdsInOrder = normalizeSeatOrderFromState(updatedState.seats);
               const timeoutRequiredUserIds = seatRowsActiveUserIds.length
                 ? seatRowsActiveUserIds
                 : dbActiveUserIds.length
@@ -367,23 +402,23 @@ export async function handler(event) {
               const timeoutSeatUserIdsInOrder = stateSeatUserIdsInOrder.filter((id) => requiredSet.has(id));
 
               const derivedCommunity = deriveCommunityCards({
-                handSeed: currentState.handSeed,
+                handSeed: updatedState.handSeed,
                 seatUserIdsInOrder: timeoutSeatUserIdsInOrder,
-                communityDealt: currentState.communityDealt,
+                communityDealt: updatedState.communityDealt,
               });
 
-              if (!cardsSameSet(currentState.community, derivedCommunity)) {
+              if (!cardsSameSet(updatedState.community, derivedCommunity)) {
                 throw new Error("state_invalid");
               }
 
               const derivedDeck = deriveRemainingDeck({
-                handSeed: currentState.handSeed,
+                handSeed: updatedState.handSeed,
                 seatUserIdsInOrder: timeoutSeatUserIdsInOrder,
-                communityDealt: currentState.communityDealt,
+                communityDealt: updatedState.communityDealt,
               });
 
               const privateState = {
-                ...currentState,
+                ...updatedState,
                 community: derivedCommunity,
                 deck: derivedDeck,
                 holeCardsByUserId: holeCards.holeCardsByUserId,
@@ -391,7 +426,7 @@ export async function handler(event) {
 
               const timeoutResult = maybeApplyTurnTimeout({
                 tableId,
-                state: currentState,
+                state: updatedState,
                 privateState,
                 nowMs,
               });

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { deriveCommunityCards, deriveDeck, deriveRemainingDeck } from "../netlify/functions/_shared/poker-deal-deterministic.mjs";
 import { isHoleCardsTableMissing, loadHoleCardsByUserId } from "../netlify/functions/_shared/poker-hole-cards-store.mjs";
 import { buildActionConstraints, computeLegalActions } from "../netlify/functions/_shared/poker-legal-actions.mjs";
+import { advanceIfNeeded } from "../netlify/functions/_shared/poker-reducer.mjs";
 import { normalizeJsonState, withoutPrivateState } from "../netlify/functions/_shared/poker-state-utils.mjs";
 import { maybeApplyTurnTimeout, normalizeSeatOrderFromState } from "../netlify/functions/_shared/poker-turn-timeout.mjs";
 import { loadPokerHandler } from "./helpers/poker-test-helpers.mjs";
@@ -37,6 +38,15 @@ const defaultHoleCards = {
 const makeHandler = (queries, storedState, userId, options = {}) => {
   const holeCardsMap =
     options.holeCardsByUserId !== undefined ? { ...options.holeCardsByUserId } : { ...defaultHoleCards };
+  const optimisticWrites = options.optimisticWrites || [];
+
+  const optimisticWriter =
+    options.updatePokerStateOptimistic ||
+    (async (_tx, args) => {
+      optimisticWrites.push(args);
+      if (options.forceOptimisticConflict) return { ok: false, reason: "conflict" };
+      return { ok: true, newVersion: Number(args.expectedVersion) + 1 };
+    });
 
   return loadPokerHandler("netlify/functions/poker-get-table.mjs", {
     baseHeaders: () => ({}),
@@ -52,6 +62,8 @@ const makeHandler = (queries, storedState, userId, options = {}) => {
     isHoleCardsTableMissing,
     loadHoleCardsByUserId,
     maybeApplyTurnTimeout: options.maybeApplyTurnTimeout || maybeApplyTurnTimeout,
+    advanceIfNeeded,
+    updatePokerStateOptimistic: optimisticWriter,
     deriveDeck,
     deriveCommunityCards: options.deriveCommunityCards || deriveCommunityCards,
     deriveRemainingDeck: options.deriveRemainingDeck || deriveRemainingDeck,
@@ -69,7 +81,7 @@ const makeHandler = (queries, storedState, userId, options = {}) => {
             return activeUserIds.map((id, index) => ({ user_id: id, seat_no: index + 1 }));
           }
           if (text.includes("from public.poker_seats")) {
-            return [
+            return options.seatRows || [
               { user_id: "user-1", seat_no: 1, status: "ACTIVE", is_bot: true },
               { user_id: "user-2", seat_no: 2, status: "ACTIVE", is_bot: false },
               { user_id: "user-3", seat_no: 3, status: "ACTIVE", is_bot: false },
@@ -562,6 +574,65 @@ const run = async () => {
     entry.query.toLowerCase().includes("from public.poker_hole_cards")
   );
   assert.equal(holeCardQueries.length, 0);
+
+  const settledAdvanceWrites = [];
+  const settledAdvanceResponse = await makeHandler(
+    [],
+    {
+      value: JSON.stringify({
+        ...baseState,
+        phase: "SETTLED",
+        turnUserId: null,
+        turnDeadlineAt: null,
+      }),
+      version: 9,
+    },
+    "user-2",
+    {
+      optimisticWrites: settledAdvanceWrites,
+    }
+  )({
+    httpMethod: "GET",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    queryStringParameters: { tableId },
+  });
+  assert.equal(settledAdvanceResponse.statusCode, 200);
+  const settledAdvancePayload = JSON.parse(settledAdvanceResponse.body);
+  assert.notEqual(settledAdvancePayload.state.state.phase, "SETTLED");
+  assert.notEqual(settledAdvancePayload.state.state.phase, "SHOWDOWN");
+  assert.equal(settledAdvanceWrites.length, 1);
+  assert.equal(settledAdvancePayload.state.version, 10);
+
+  const settledBotsOnlyWrites = [];
+  const settledBotsOnlyResponse = await makeHandler(
+    [],
+    {
+      value: JSON.stringify({
+        ...baseState,
+        phase: "SETTLED",
+        turnUserId: null,
+        turnDeadlineAt: null,
+      }),
+      version: 11,
+    },
+    "user-1",
+    {
+      optimisticWrites: settledBotsOnlyWrites,
+      activeUserIds: [],
+      seatRows: [
+        { user_id: "user-1", seat_no: 1, status: "ACTIVE", is_bot: true },
+        { user_id: "user-2", seat_no: 2, status: "ACTIVE", is_bot: true },
+      ],
+    }
+  )({
+    httpMethod: "GET",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    queryStringParameters: { tableId },
+  });
+  assert.equal(settledBotsOnlyResponse.statusCode, 200);
+  const settledBotsOnlyPayload = JSON.parse(settledBotsOnlyResponse.body);
+  assert.equal(settledBotsOnlyPayload.state.state.phase, "SETTLED");
+  assert.equal(settledBotsOnlyWrites.length, 0);
 };
 
 await run();
