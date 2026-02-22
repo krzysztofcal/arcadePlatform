@@ -231,15 +231,6 @@ const hasRequiredState = (state) =>
 
 const isActionPhase = (phase) => phase === "PREFLOP" || phase === "FLOP" || phase === "TURN" || phase === "RIVER";
 
-const isTurnUserEligible = (state, userId) => {
-  if (!isActionPhase(state?.phase)) return false;
-  if (typeof userId !== "string" || !userId.trim()) return false;
-  if (state?.foldedByUserId?.[userId]) return false;
-  if (state?.leftTableByUserId?.[userId]) return false;
-  if (state?.sitOutByUserId?.[userId]) return false;
-  if ((state?.stacks?.[userId] ?? 0) <= 0) return false;
-  return true;
-};
 
 
 const computeLegalActionsWithGuard = ({ statePublic, userId, tableId, source }) => {
