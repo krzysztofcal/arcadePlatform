@@ -57,7 +57,7 @@ const makeHandler = (queries, storedState, userId, options = {}) => {
     isStateStorageValid,
     normalizeJsonState,
     withoutPrivateState,
-    computeLegalActions,
+    computeLegalActions: options.computeLegalActions || computeLegalActions,
     buildActionConstraints,
     normalizeSeatOrderFromState,
     isHoleCardsTableMissing,
@@ -194,6 +194,36 @@ const run = async () => {
   assert.deepEqual(contractMismatchPayload, { error: "contract_mismatch_empty_legal_actions" });
   assert.equal(contractMismatchPayload.state, undefined);
   assert.equal(contractMismatchLogs.some((entry) => entry.event === "poker_contract_empty_legal_actions"), true);
+
+
+  const eligibleEmptyLogs = [];
+  const eligibleEmptyState = {
+    value: JSON.stringify({
+      ...baseState,
+      phase: "FLOP",
+      turnUserId: "user-1",
+      foldedByUserId: { "user-1": false, "user-2": false, "user-3": false },
+      leftTableByUserId: { "user-1": false, "user-2": false, "user-3": false },
+      sitOutByUserId: { "user-1": false, "user-2": false, "user-3": false },
+      stacks: { "user-1": 100, "user-2": 100, "user-3": 100 },
+      toCallByUserId: { "user-1": 0, "user-2": 0, "user-3": 0 },
+      betThisRoundByUserId: { "user-1": 0, "user-2": 0, "user-3": 0 },
+      actedThisRoundByUserId: { "user-1": false, "user-2": false, "user-3": false },
+    }),
+    version: 12,
+  };
+  const eligibleEmptyResponse = await makeHandler([], eligibleEmptyState, "user-1", {
+    computeLegalActions: ({ userId }) => ({ actions: userId === "user-1" ? [] : [{ type: "CHECK" }], minRaiseTo: null, maxRaiseTo: null }),
+    klog: (event, payload) => eligibleEmptyLogs.push({ event, payload }),
+  })({
+    httpMethod: "GET",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    queryStringParameters: { tableId },
+  });
+  assert.equal(eligibleEmptyResponse.statusCode, 409);
+  const eligibleEmptyPayload = JSON.parse(eligibleEmptyResponse.body || "{}");
+  assert.deepEqual(eligibleEmptyPayload, { error: "state_invalid" });
+  assert.equal(eligibleEmptyLogs.some((entry) => entry.event === "poker_contract_empty_legal_actions"), true);
   const stringCardResponse = await makeHandler([], storedState, "user-1", {
     holeCardsByUserId: {
       "user-1": JSON.stringify(defaultHoleCards["user-1"]),

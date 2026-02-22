@@ -11,6 +11,15 @@ import { isValidUuid } from "./_shared/poker-utils.mjs";
 
 const isActionPhase = (phase) => phase === "PREFLOP" || phase === "FLOP" || phase === "TURN" || phase === "RIVER";
 
+const isTurnUserIneligible = (statePublic, userId) => {
+  if (!statePublic || typeof userId !== "string" || !userId.trim()) return true;
+  if (statePublic?.foldedByUserId?.[userId]) return true;
+  if (statePublic?.leftTableByUserId?.[userId]) return true;
+  if (statePublic?.sitOutByUserId?.[userId]) return true;
+  if ((statePublic?.stacks?.[userId] ?? 0) <= 0) return true;
+  return false;
+};
+
 const computeLegalActionsWithGuard = ({ statePublic, userId, tableId }) => {
   const legalInfo = computeLegalActions({ statePublic, userId });
   const actionCount = Array.isArray(legalInfo?.actions) ? legalInfo.actions.length : 0;
@@ -28,7 +37,10 @@ const computeLegalActionsWithGuard = ({ statePublic, userId, tableId }) => {
     stack: statePublic?.turnUserId ? Number(statePublic?.stacks?.[statePublic.turnUserId] ?? 0) : null,
   });
 
-  throw new Error("contract_mismatch_empty_legal_actions");
+  if (isTurnUserIneligible(statePublic, userId)) {
+    throw new Error("contract_mismatch_empty_legal_actions");
+  }
+  throw new Error("state_invalid");
 };
 
 const normalizeSeatUserIds = (seats) => {

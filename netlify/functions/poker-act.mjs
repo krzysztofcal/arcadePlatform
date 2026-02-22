@@ -241,23 +241,6 @@ const isTurnUserEligible = (state, userId) => {
   return true;
 };
 
-const coerceActionPhaseTurn = (state) => {
-  if (!isActionPhase(state?.phase)) return state;
-  if (isTurnUserEligible(state, state?.turnUserId)) return state;
-  const seats = Array.isArray(state?.seats) ? state.seats.slice().sort((a, b) => (a?.seatNo ?? 0) - (b?.seatNo ?? 0)) : [];
-  if (!seats.length) return state;
-  const fromUserId = typeof state?.turnUserId === "string" ? state.turnUserId : "";
-  const fromIndex = seats.findIndex((seat) => seat?.userId === fromUserId);
-  const start = fromIndex >= 0 ? fromIndex : -1;
-  for (let offset = 1; offset <= seats.length; offset += 1) {
-    const seat = seats[(start + offset + seats.length) % seats.length];
-    const nextUserId = typeof seat?.userId === "string" ? seat.userId : "";
-    if (!nextUserId) continue;
-    if (!isTurnUserEligible(state, nextUserId)) continue;
-    return { ...state, turnUserId: nextUserId };
-  }
-  return state;
-};
 
 const computeLegalActionsWithGuard = ({ statePublic, userId, tableId, source }) => {
   const legalInfo = computeLegalActions({ statePublic, userId });
@@ -277,13 +260,7 @@ const computeLegalActionsWithGuard = ({ statePublic, userId, tableId, source }) 
     stack: statePublic?.turnUserId ? Number(statePublic?.stacks?.[statePublic.turnUserId] ?? 0) : null,
   });
 
-  const healedState = withoutPrivateState(coerceActionPhaseTurn(statePublic));
-  const healedInfo = computeLegalActions({ statePublic: healedState, userId });
-  const healedCount = Array.isArray(healedInfo?.actions) ? healedInfo.actions.length : 0;
-  if (isActionPhase(healedState?.phase) && healedState?.turnUserId === userId && healedCount === 0) {
-    throw makeError(409, "contract_mismatch_empty_legal_actions");
-  }
-  return { legalInfo: healedInfo, statePublic: healedState, healed: true };
+  throw makeError(409, "contract_mismatch_empty_legal_actions");
 };
 
 const getSeatForUser = (state, userId) => (Array.isArray(state.seats) ? state.seats.find((seat) => seat?.userId === userId) : null);
