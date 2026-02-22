@@ -162,8 +162,10 @@ const run = async () => {
     if (folded.phase === "FLOP") {
       assert.notEqual(folded.turnUserId, "human-1");
       assert.ok(["bot-1", "bot-2"].includes(folded.turnUserId));
+      assert.equal(folded.foldedByUserId[folded.turnUserId], false);
     } else {
       assert.ok(["SHOWDOWN", "SETTLED", "HAND_DONE"].includes(folded.phase));
+      assert.equal(folded.turnUserId, null);
     }
   }
   {

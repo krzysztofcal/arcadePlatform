@@ -167,6 +167,33 @@ const run = async () => {
   );
   assert.equal(happyInserts.length, 0);
 
+
+  const contractMismatchLogs = [];
+  const contractMismatchState = {
+    value: JSON.stringify({
+      ...baseState,
+      turnUserId: "user-1",
+      foldedByUserId: { "user-1": true, "user-2": false, "user-3": false },
+      toCallByUserId: { "user-1": 0, "user-2": 0, "user-3": 0 },
+      betThisRoundByUserId: { "user-1": 0, "user-2": 0, "user-3": 0 },
+      actedThisRoundByUserId: { "user-1": false, "user-2": false, "user-3": false },
+      leftTableByUserId: {},
+      sitOutByUserId: {},
+    }),
+    version: 11,
+  };
+  const contractMismatchResponse = await makeHandler([], contractMismatchState, "user-1", {
+    klog: (event, payload) => contractMismatchLogs.push({ event, payload }),
+  })({
+    httpMethod: "GET",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    queryStringParameters: { tableId },
+  });
+  assert.equal(contractMismatchResponse.statusCode, 409);
+  const contractMismatchPayload = JSON.parse(contractMismatchResponse.body || "{}");
+  assert.deepEqual(contractMismatchPayload, { error: "contract_mismatch_empty_legal_actions" });
+  assert.equal(contractMismatchPayload.state, undefined);
+  assert.equal(contractMismatchLogs.some((entry) => entry.event === "poker_contract_empty_legal_actions"), true);
   const stringCardResponse = await makeHandler([], storedState, "user-1", {
     holeCardsByUserId: {
       "user-1": JSON.stringify(defaultHoleCards["user-1"]),

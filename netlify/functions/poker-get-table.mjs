@@ -8,7 +8,6 @@ import { parseStakes } from "./_shared/poker-stakes.mjs";
 import { maybeApplyTurnTimeout, normalizeSeatOrderFromState } from "./_shared/poker-turn-timeout.mjs";
 import { cardIdentity, isValidTwoCards } from "./_shared/poker-cards-utils.mjs";
 import { isValidUuid } from "./_shared/poker-utils.mjs";
-import { advanceIfNeeded } from "./_shared/poker-reducer.mjs";
 
 const isActionPhase = (phase) => phase === "PREFLOP" || phase === "FLOP" || phase === "TURN" || phase === "RIVER";
 
@@ -29,13 +28,7 @@ const computeLegalActionsWithGuard = ({ statePublic, userId, tableId }) => {
     stack: statePublic?.turnUserId ? Number(statePublic?.stacks?.[statePublic.turnUserId] ?? 0) : null,
   });
 
-  const healedState = withoutPrivateState(advanceIfNeeded(statePublic).state || statePublic);
-  const healedInfo = computeLegalActions({ statePublic: healedState, userId });
-  const healedCount = Array.isArray(healedInfo?.actions) ? healedInfo.actions.length : 0;
-  if (isActionPhase(healedState?.phase) && healedState?.turnUserId === userId && healedCount === 0) {
-    throw new Error("contract_mismatch_empty_legal_actions");
-  }
-  return { statePublic: healedState, legalInfo: healedInfo };
+  throw new Error("contract_mismatch_empty_legal_actions");
 };
 
 const normalizeSeatUserIds = (seats) => {

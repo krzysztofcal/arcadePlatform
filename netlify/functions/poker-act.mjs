@@ -244,8 +244,19 @@ const isTurnUserEligible = (state, userId) => {
 const coerceActionPhaseTurn = (state) => {
   if (!isActionPhase(state?.phase)) return state;
   if (isTurnUserEligible(state, state?.turnUserId)) return state;
-  const advanced = advanceIfNeeded(state);
-  return advanced?.state || state;
+  const seats = Array.isArray(state?.seats) ? state.seats.slice().sort((a, b) => (a?.seatNo ?? 0) - (b?.seatNo ?? 0)) : [];
+  if (!seats.length) return state;
+  const fromUserId = typeof state?.turnUserId === "string" ? state.turnUserId : "";
+  const fromIndex = seats.findIndex((seat) => seat?.userId === fromUserId);
+  const start = fromIndex >= 0 ? fromIndex : -1;
+  for (let offset = 1; offset <= seats.length; offset += 1) {
+    const seat = seats[(start + offset + seats.length) % seats.length];
+    const nextUserId = typeof seat?.userId === "string" ? seat.userId : "";
+    if (!nextUserId) continue;
+    if (!isTurnUserEligible(state, nextUserId)) continue;
+    return { ...state, turnUserId: nextUserId };
+  }
+  return state;
 };
 
 const computeLegalActionsWithGuard = ({ statePublic, userId, tableId, source }) => {
