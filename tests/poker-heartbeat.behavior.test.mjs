@@ -4,7 +4,14 @@ import { loadPokerHandler } from "./helpers/poker-test-helpers.mjs";
 const tableId = "11111111-1111-4111-8111-111111111111";
 const userId = "user-heartbeat";
 
-const makeHeartbeatHandler = ({ requestStore, queries, sideEffects, failStoreResult = false, forbidTableTouch = false }) =>
+const makeHeartbeatHandler = ({
+  requestStore,
+  queries,
+  sideEffects,
+  failStoreResult = false,
+  forbidTableTouch = false,
+  tableStatus = "OPEN",
+}) =>
   loadPokerHandler("netlify/functions/poker-heartbeat.mjs", {
     baseHeaders: () => ({}),
     corsHeaders: () => ({ "access-control-allow-origin": "https://example.test" }),
@@ -43,7 +50,7 @@ const makeHeartbeatHandler = ({ requestStore, queries, sideEffects, failStoreRes
             return [];
           }
           if (text.includes("from public.poker_tables where id = $1")) {
-            return [{ status: "OPEN" }];
+            return tableStatus ? [{ status: tableStatus }] : [];
           }
           if (text.includes("from public.poker_seats where table_id = $1 and user_id = $2")) {
             return [{ seat_no: 3 }];
@@ -74,7 +81,7 @@ const run = async () => {
   const requestStore = new Map();
   const queries = [];
   const sideEffects = { seatTouch: 0, tableTouch: 0 };
-  const handler = makeHeartbeatHandler({ requestStore, queries, sideEffects, forbidTableTouch: true });
+  const handler = makeHeartbeatHandler({ requestStore, queries, sideEffects, forbidTableTouch: true, tableStatus: "OPEN" });
 
   const first = await callHeartbeat(handler, "hb-1");
   assert.equal(first.statusCode, 200);
@@ -86,8 +93,76 @@ const run = async () => {
   const second = await callHeartbeat(handler, "hb-1");
   assert.equal(second.statusCode, 200);
   assert.deepEqual(JSON.parse(second.body), firstBody);
-  assert.equal(sideEffects.seatTouch, 1, "replayed heartbeat should not rerun seat touch");
+  assert.equal(sideEffects.seatTouch, 2, "replayed heartbeat should refresh seat touch");
   assert.equal(sideEffects.tableTouch, 0, "heartbeat should never touch table activity");
+
+  const closedNonReplayStore = new Map();
+  const closedNonReplayQueries = [];
+  const closedNonReplayEffects = { seatTouch: 0, tableTouch: 0 };
+  const closedNonReplayHandler = makeHeartbeatHandler({
+    requestStore: closedNonReplayStore,
+    queries: closedNonReplayQueries,
+    sideEffects: closedNonReplayEffects,
+    forbidTableTouch: true,
+    tableStatus: "CLOSED",
+  });
+  const closedNonReplay = await callHeartbeat(closedNonReplayHandler, "hb-closed");
+  assert.equal(closedNonReplay.statusCode, 200);
+  assert.deepEqual(JSON.parse(closedNonReplay.body), { ok: true, seated: true, seatNo: 3, closed: true });
+  assert.equal(closedNonReplayEffects.seatTouch, 0, "closed-table heartbeat should not touch seat presence");
+  assert.equal(closedNonReplayEffects.tableTouch, 0);
+  assert.ok(
+    closedNonReplayQueries.some((q) => q.query.toLowerCase().includes("from public.poker_tables where id = $1")),
+    "closed-table heartbeat should query current table status"
+  );
+  assert.ok(
+    closedNonReplayQueries.some((q) => q.query.toLowerCase().includes("from public.poker_seats where table_id = $1 and user_id = $2")),
+    "closed-table heartbeat should still read seat state"
+  );
+  assert.ok(
+    closedNonReplayQueries.every(
+      (q) => !q.query.toLowerCase().includes("update public.poker_seats set status = 'active', last_seen_at = now()")
+    ),
+    "closed-table heartbeat should not update seat presence"
+  );
+
+  const replayStore = new Map();
+  const replayEffects = { seatTouch: 0, tableTouch: 0 };
+  const replayOpenFirst = await callHeartbeat(
+    makeHeartbeatHandler({
+      requestStore: replayStore,
+      queries: [],
+      sideEffects: replayEffects,
+      forbidTableTouch: true,
+      tableStatus: "OPEN",
+    }),
+    "hb-replay-closed"
+  );
+  assert.equal(replayOpenFirst.statusCode, 200);
+  const replayOpenBody = JSON.parse(replayOpenFirst.body);
+  assert.deepEqual(replayOpenBody, { ok: true, seated: true, seatNo: 3 });
+  assert.equal(replayEffects.seatTouch, 1);
+
+  const replayClosedQueries = [];
+  const replayClosed = await callHeartbeat(
+    makeHeartbeatHandler({
+      requestStore: replayStore,
+      queries: replayClosedQueries,
+      sideEffects: replayEffects,
+      forbidTableTouch: true,
+      tableStatus: "CLOSED",
+    }),
+    "hb-replay-closed"
+  );
+  assert.equal(replayClosed.statusCode, 200);
+  assert.deepEqual(JSON.parse(replayClosed.body), replayOpenBody);
+  assert.equal(replayEffects.seatTouch, 1, "replay heartbeat should not touch seat presence when table is now CLOSED");
+  assert.equal(replayEffects.tableTouch, 0);
+  assert.ok(
+    replayClosedQueries.some((q) => q.query.toLowerCase().includes("from public.poker_tables where id = $1")),
+    "replay heartbeat should check current table status before seat touch"
+  );
+
   assert.ok(
     queries.some((q) =>
       q.query.toLowerCase().includes("from public.poker_requests where table_id = $1 and user_id = $2 and request_id = $3 and kind = $4")
