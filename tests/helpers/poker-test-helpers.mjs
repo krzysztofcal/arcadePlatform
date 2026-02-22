@@ -20,6 +20,7 @@ import { cashoutBotSeatIfNeeded, ensureBotSeatInactiveForCashout } from "../../n
 import { startHandCore } from "../../netlify/functions/_shared/poker-start-hand-core.mjs";
 import { isValidUuid } from "../../netlify/functions/_shared/poker-utils.mjs";
 import { hasActiveHumanGuardSql, shouldSeedBotsOnJoin, tableIdleCutoffExprSql } from "../../netlify/functions/_shared/poker-table-lifecycle.mjs";
+import { applyLeaveTable } from "../../netlify/functions/_shared/poker-reducer.mjs";
 
 const root = process.cwd();
 
@@ -158,6 +159,7 @@ return handler;`
       chooseBotActionTrivial,
       buildSeatBotMap,
       isBotTurn,
+      applyLeaveTable,
       getBotConfig,
       makeBotSystemKey,
       makeBotUserId,
