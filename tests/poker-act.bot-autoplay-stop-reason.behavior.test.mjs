@@ -124,6 +124,7 @@ const run = async () => {
 
   const stopLog = logs.find((entry) => entry.event === "poker_act_bot_autoplay_stop");
   assert.equal(typeof stopLog?.payload?.reason, "string");
+  assert.notEqual(stopLog?.payload?.reason, "no_active_humans");
   assert.equal(stopLog?.payload?.tableId, tableId);
   assert.equal(stopLog?.payload?.handId, "hand-1");
   assert.equal(typeof stopLog?.payload?.policyVersion, "string");

@@ -127,6 +127,47 @@ const run = async () => {
     assert.equal(state.actedThisRoundByUserId["user-1"], false);
   }
 
+
+  {
+    const seats = [
+      { userId: "human-1", seatNo: 1 },
+      { userId: "bot-1", seatNo: 2 },
+      { userId: "bot-2", seatNo: 3 },
+    ];
+    const stacks = { "human-1": 100, "bot-1": 100, "bot-2": 100 };
+    const state = {
+      tableId: "t-fold-skip",
+      phase: "FLOP",
+      seats,
+      stacks,
+      pot: 10,
+      community: [{ r: "2", s: "C" }, { r: "3", s: "D" }, { r: "4", s: "H" }],
+      dealerSeatNo: 1,
+      turnUserId: "human-1",
+      handId: "hand-fold-skip",
+      handSeed: "seed-fold-skip",
+      communityDealt: 3,
+      toCallByUserId: { "human-1": 0, "bot-1": 0, "bot-2": 0 },
+      betThisRoundByUserId: { "human-1": 0, "bot-1": 0, "bot-2": 0 },
+      actedThisRoundByUserId: { "human-1": false, "bot-1": false, "bot-2": false },
+      foldedByUserId: { "human-1": false, "bot-1": false, "bot-2": false },
+      leftTableByUserId: { "human-1": false, "bot-1": false, "bot-2": false },
+      sitOutByUserId: { "human-1": false, "bot-1": false, "bot-2": false },
+      currentBet: 0,
+      lastRaiseSize: 0,
+    };
+
+    const folded = applyAction(state, { type: "FOLD", userId: "human-1" }).state;
+    assert.equal(folded.foldedByUserId["human-1"], true);
+    if (folded.phase === "FLOP") {
+      assert.notEqual(folded.turnUserId, "human-1");
+      assert.ok(["bot-1", "bot-2"].includes(folded.turnUserId));
+      assert.equal(folded.foldedByUserId[folded.turnUserId], false);
+    } else {
+      assert.ok(["SHOWDOWN", "SETTLED", "HAND_DONE"].includes(folded.phase));
+      assert.equal(folded.turnUserId, null);
+    }
+  }
   {
     const seats = [
       { userId: "user-1", seatNo: 1 },

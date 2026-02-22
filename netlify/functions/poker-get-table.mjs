@@ -11,6 +11,39 @@ import { isValidUuid } from "./_shared/poker-utils.mjs";
 import { advanceIfNeeded } from "./_shared/poker-reducer.mjs";
 
 const isActionPhase = (phase) => phase === "PREFLOP" || phase === "FLOP" || phase === "TURN" || phase === "RIVER";
+
+const isTurnUserIneligible = (statePublic, userId) => {
+  if (!statePublic || typeof userId !== "string" || !userId.trim()) return true;
+  if (statePublic?.foldedByUserId?.[userId]) return true;
+  if (statePublic?.leftTableByUserId?.[userId]) return true;
+  if (statePublic?.sitOutByUserId?.[userId]) return true;
+  if ((statePublic?.stacks?.[userId] ?? 0) <= 0) return true;
+  return false;
+};
+
+const computeLegalActionsWithGuard = ({ statePublic, userId, tableId }) => {
+  const legalInfo = computeLegalActions({ statePublic, userId });
+  const actionCount = Array.isArray(legalInfo?.actions) ? legalInfo.actions.length : 0;
+  if (!isActionPhase(statePublic?.phase)) return { statePublic, legalInfo };
+  if (statePublic?.turnUserId !== userId || actionCount > 0) return { statePublic, legalInfo };
+
+  klog("poker_contract_empty_legal_actions", {
+    tableId,
+    source: "poker_get_table",
+    phase: statePublic?.phase || null,
+    turnUserId: statePublic?.turnUserId || null,
+    folded: !!statePublic?.foldedByUserId?.[statePublic?.turnUserId],
+    leftTable: !!statePublic?.leftTableByUserId?.[statePublic?.turnUserId],
+    sitOut: !!statePublic?.sitOutByUserId?.[statePublic?.turnUserId],
+    stack: statePublic?.turnUserId ? Number(statePublic?.stacks?.[statePublic.turnUserId] ?? 0) : null,
+  });
+
+  if (isTurnUserIneligible(statePublic, userId)) {
+    throw new Error("contract_mismatch_empty_legal_actions");
+  }
+  throw new Error("state_invalid");
+};
+
 const normalizeSeatUserIds = (seats) => {
   if (!Array.isArray(seats)) return [];
   return seats.map((seat) => seat?.userId).filter((userId) => typeof userId === "string" && userId.trim());
@@ -509,8 +542,10 @@ export async function handler(event) {
     const table = result.table;
     const seats = result.seats;
     const stateVersion = result.stateVersion;
-    const publicState = withoutPrivateState(result.currentState);
-    const legalInfo = computeLegalActions({ statePublic: publicState, userId: auth.userId });
+    let publicState = withoutPrivateState(result.currentState);
+    const guarded = computeLegalActionsWithGuard({ statePublic: publicState, userId: auth.userId, tableId });
+    publicState = guarded.statePublic;
+    const legalInfo = guarded.legalInfo;
 
     const stakesParsed = parseStakes(table.stakes);
     const tablePayload = {
@@ -541,8 +576,9 @@ export async function handler(event) {
       }),
     };
   } catch (error) {
-    if (error?.message === "state_invalid" || isHoleCardsTableMissing(error)) {
-      return { statusCode: 409, headers: mergeHeaders(cors), body: JSON.stringify({ error: "state_invalid" }) };
+    if (error?.message === "state_invalid" || error?.message === "contract_mismatch_empty_legal_actions" || isHoleCardsTableMissing(error)) {
+      const code = error?.message === "contract_mismatch_empty_legal_actions" ? "contract_mismatch_empty_legal_actions" : "state_invalid";
+      return { statusCode: 409, headers: mergeHeaders(cors), body: JSON.stringify({ error: code }) };
     }
     klog("poker_get_table_error", { message: error?.message || "unknown_error" });
     return { statusCode: 500, headers: mergeHeaders(cors), body: JSON.stringify({ error: "server_error" }) };

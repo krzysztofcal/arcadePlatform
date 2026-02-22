@@ -129,7 +129,14 @@ const rotateDealerSeatNoEligible = ({ orderedSeats, currentDealerSeatNo, stacks,
   return orderedSeats[0]?.seatNo ?? currentDealerSeatNo ?? 0;
 };
 
-const getFirstBettingAfterDealerEligible = ({ orderedSeats, dealerSeatNo, stacks, sitOutByUserId, leftTableByUserId }) => {
+const getFirstBettingAfterDealerEligible = ({
+  orderedSeats,
+  dealerSeatNo,
+  stacks,
+  sitOutByUserId,
+  leftTableByUserId,
+  foldedByUserId,
+}) => {
   if (orderedSeats.length === 0) return null;
   const startIndex = orderedSeats.findIndex((seat) => seat.seatNo === dealerSeatNo);
   const start = startIndex >= 0 ? startIndex : 0;
@@ -139,6 +146,7 @@ const getFirstBettingAfterDealerEligible = ({ orderedSeats, dealerSeatNo, stacks
     if ((stacks?.[seat.userId] ?? 0) <= 0) continue;
     if (sitOutByUserId?.[seat.userId]) continue;
     if (leftTableByUserId?.[seat.userId]) continue;
+    if (foldedByUserId?.[seat.userId]) continue;
     return seat.userId;
   }
   return null;
@@ -322,6 +330,7 @@ const initHandState = ({ tableId, seats, stacks, rng }) => {
     stacks: copyMap(stacks),
     sitOutByUserId,
     leftTableByUserId,
+    foldedByUserId,
   });
   const state = {
     tableId,
@@ -416,6 +425,7 @@ const resetToNextHand = (state, options = {}) => {
     stacks,
     sitOutByUserId: nextSitOutByUserId,
     leftTableByUserId,
+    foldedByUserId,
   });
   if (!turnUserId) {
     return {
@@ -804,6 +814,7 @@ function advanceIfNeeded(state) {
     stacks: next.stacks,
     sitOutByUserId,
     leftTableByUserId,
+    foldedByUserId: next.foldedByUserId,
   });
   next = { ...next, sitOutByUserId, leftTableByUserId, turnUserId, turnNo: baseTurnNo + 1 };
 
