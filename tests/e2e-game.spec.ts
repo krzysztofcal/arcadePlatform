@@ -50,15 +50,31 @@ test('game starts, pauses, and resumes', async ({ page }) => {
   await expect(page.locator('#status')).toHaveText(/Punkty: 0/);
 
   const timeAfterStart = await readTimeLeft(page);
-  await page.waitForTimeout(200);
-  const timeAfterWait = await readTimeLeft(page);
-  expect(timeAfterWait).toBeLessThan(timeAfterStart);
+  await expect
+    .poll(async () => readTimeLeft(page), {
+      timeout: 2500,
+      intervals: [100, 200, 300],
+    })
+    .toBeLessThan(timeAfterStart);
 
   await page.locator('#btnPause').click();
   await expect(page.locator('#btnPause')).toHaveAttribute('aria-pressed', 'true');
+  const pausedT1 = await readTimeLeft(page);
+  await expect
+    .poll(async () => readTimeLeft(page), {
+      timeout: 600,
+      intervals: [150, 150, 150],
+    })
+    .toBeGreaterThanOrEqual(pausedT1);
 
   await page.locator('#btnPause').click();
   await expect(page.locator('#btnPause')).toHaveAttribute('aria-pressed', 'false');
+  await expect
+    .poll(async () => readTimeLeft(page), {
+      timeout: 2500,
+      intervals: [100, 200, 300],
+    })
+    .toBeLessThan(pausedT1);
 });
 
 test('replay button restarts the round', async ({ page }) => {
