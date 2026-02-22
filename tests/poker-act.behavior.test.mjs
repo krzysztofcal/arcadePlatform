@@ -1107,6 +1107,7 @@ const run = async () => {
       ...baseState,
       phase: "RIVER",
       pot: 10,
+      stacks: { "user-1": 100, "user-2": 0, "user-3": 0 },
       community: deriveCommunityCards({ handSeed: baseState.handSeed, seatUserIdsInOrder: seatOrder, communityDealt: 5 }),
       communityDealt: 5,
       turnUserId: "user-1",
@@ -1130,15 +1131,11 @@ const run = async () => {
     assert.equal(showdownResponse.response.statusCode, 200);
     assert.deepEqual(capturedActiveUserIds, ["user-1", "user-2", "user-3"]);
     const payload = JSON.parse(showdownResponse.response.body);
-    const showdown = payload.state.state.showdown;
-    if (showdown && showdown.handId === payload.state.state.handId) {
-      const winners = showdown.winners || [];
-      assert.ok(Array.isArray(winners));
-      assert.ok(winners.length > 0);
-      assert.equal(winners.includes("user-3"), false);
-    } else {
-      assert.ok(!showdown || showdown.handId === payload.state.state.handId);
-    }
+    assert.ok(payload.state.state.showdown);
+    assert.equal(payload.state.state.showdown.handId, payload.state.state.handId);
+    assert.ok(Array.isArray(payload.state.state.showdown.winners));
+    assert.ok(payload.state.state.showdown.winners.length > 0);
+    assert.equal(payload.state.state.showdown.winners.includes("user-3"), false);
   }
 
   {
