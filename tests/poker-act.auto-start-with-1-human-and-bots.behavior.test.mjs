@@ -66,7 +66,7 @@ const run = async () => {
     updatePokerStateOptimistic,
     deriveCommunityCards: () => [],
     deriveRemainingDeck: () => [],
-    maybeApplyTurnTimeout: async (state) => ({ state, timedOut: false }),
+    maybeApplyTurnTimeout: async ({ state }) => ({ applied: false, state, action: null, events: [] }),
     applyAction: (state) => ({
       state: {
         ...state,
