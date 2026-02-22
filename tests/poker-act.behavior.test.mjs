@@ -172,6 +172,7 @@ const makeHandler = (queries, storedState, userId, options = {}) =>
         },
       }),
     klog: options.klog || (() => {}),
+    ...(options.ensurePokerRequest ? { ensurePokerRequest: options.ensurePokerRequest } : {}),
   });
 
 const makeStartHandHandler = (queries, storedState, userId, seatUserIds) => {
@@ -376,6 +377,7 @@ const runCase = async ({
   botSeatUserIds,
   loadHoleCardsByUserId: loadHoleCardsByUserIdOverride,
   updatePokerStateConflict,
+  ensurePokerRequest,
 }) => {
   const queries = [];
   const storedState = { value: JSON.stringify(state), version: 3 };
@@ -388,6 +390,7 @@ const runCase = async ({
     botSeatUserIds,
     loadHoleCardsByUserId: loadHoleCardsByUserIdOverride,
     updatePokerStateConflict,
+    ensurePokerRequest,
   });
   const response = await handler({
     httpMethod: "POST",
@@ -1126,13 +1129,16 @@ const run = async () => {
       requestId: "req-showdown-hole-cards",
       userId: "user-1",
       loadHoleCardsByUserId: holeCardsLoader,
+      ensurePokerRequest: async (_tx, { kind }) => (kind === "ACT_AUTO_START" ? { status: "stored", result: null } : { status: "created" }),
     });
     assert.equal(showdownResponse.response.statusCode, 200);
     assert.deepEqual(capturedActiveUserIds, ["user-1", "user-2", "user-3"]);
     const payload = JSON.parse(showdownResponse.response.body);
-    const winners = payload.state.state.showdown?.winners || [];
-    assert.ok(winners.length > 0);
-    assert.equal(winners.includes("user-3"), false);
+    assert.ok(payload.state.state.showdown);
+    assert.equal(payload.state.state.showdown.handId, payload.state.state.handId);
+    assert.ok(Array.isArray(payload.state.state.showdown.winners));
+    assert.ok(payload.state.state.showdown.winners.length > 0);
+    assert.equal(payload.state.state.showdown.winners.includes("user-3"), false);
   }
 
   {

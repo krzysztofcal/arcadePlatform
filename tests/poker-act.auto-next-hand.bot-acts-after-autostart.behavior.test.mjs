@@ -96,6 +96,7 @@ const run = async () => {
         turnUserId: bot1UserId,
         community: [],
         communityDealt: 0,
+        showdown: { handId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd", winners: [] },
         toCallByUserId: { [humanUserId]: 0, [bot1UserId]: 0, [bot2UserId]: 0 },
         betThisRoundByUserId: { [humanUserId]: 0, [bot1UserId]: 0, [bot2UserId]: 0 },
         actedThisRoundByUserId: { [humanUserId]: false, [bot1UserId]: false, [bot2UserId]: false },
@@ -115,6 +116,7 @@ const run = async () => {
         turnUserId: bot1UserId,
         community: [],
         communityDealt: 0,
+        showdown: { handId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd", winners: [] },
         toCallByUserId: { [humanUserId]: 0, [bot1UserId]: 0, [bot2UserId]: 0 },
         betThisRoundByUserId: { [humanUserId]: 0, [bot1UserId]: 0, [bot2UserId]: 0 },
         actedThisRoundByUserId: { [humanUserId]: false, [bot1UserId]: false, [bot2UserId]: false },
@@ -205,6 +207,11 @@ const run = async () => {
   assert.equal(payload.ok, true);
   assert.equal(payload.state?.state?.phase, "PREFLOP");
   assert.equal(payload.state?.state?.actedThisRoundByUserId?.[bot1UserId], true);
+  assert.equal(
+    !payload.state?.state?.showdown || payload.state?.state?.showdown?.handId === payload.state?.state?.handId,
+    true,
+    "showdown should be cleared or match current hand"
+  );
   assert.equal(actionInsertCount >= 3, true, "expect user action + auto-start start hand + bot action");
   assert.equal(actionTypes.includes("START_HAND"), true);
   assert.equal(actionTypes.includes("CHECK"), true);

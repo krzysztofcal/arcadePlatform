@@ -52,6 +52,18 @@ const removeUserIdFromStateMaps = (state, userId) => {
   return nextState;
 };
 
+const clearMismatchedShowdown = (stateInput) => {
+  if (!isPlainObjectValue(stateInput) || !stateInput.showdown) return stateInput;
+  const handId = typeof stateInput.handId === "string" ? stateInput.handId.trim() : "";
+  const showdownHandId =
+    typeof stateInput.showdown?.handId === "string" && stateInput.showdown.handId.trim()
+      ? stateInput.showdown.handId.trim()
+      : "";
+  if (!handId || !showdownHandId || showdownHandId === handId) return stateInput;
+  const { showdown: _ignoredShowdown, ...sanitizedState } = stateInput;
+  return sanitizedState;
+};
+
 const maybeEvictMarkedBotAfterSettlement = async (tx, { tableId, state, actorUserId }) => {
   if (state?.phase !== "SETTLED") return { state, evicted: false };
   try {
@@ -446,7 +458,8 @@ export async function handler(event) {
         if (!Number.isInteger(expectedVersion) || expectedVersion < 0) {
           throw makeError(409, "state_invalid");
         }
-        const currentState = normalizeJsonState(stateRow.state);
+        let currentState = normalizeJsonState(stateRow.state);
+        currentState = clearMismatchedShowdown(currentState);
         if (!hasRequiredState(currentState)) {
           throw makeError(409, "state_invalid");
         }
@@ -510,6 +523,7 @@ export async function handler(event) {
       if (repairedDealerSeatNo != null && repairedDealerSeatNo !== currentState.dealerSeatNo) {
         currentState = { ...currentState, dealerSeatNo: repairedDealerSeatNo };
       }
+      currentState = clearMismatchedShowdown(currentState);
 
       if (currentState?.phase === "INIT") {
         klog("poker_act_rejected", {
@@ -892,9 +906,11 @@ export async function handler(event) {
             botApplied = applyAction(timeoutLoopPrivateState, { ...botAction, userId: botTurnUserId, requestId: botRequestId });
           } catch (error) {
             timeoutBotStopReason = "apply_action_failed";
+            const timeoutCurrentHandIdForLog =
+              typeof timeoutFinalState?.handId === "string" && timeoutFinalState.handId.trim() ? timeoutFinalState.handId.trim() : null;
             klog("poker_act_bot_autoplay_step_error", {
               tableId,
-              handId: timeoutHandIdForLog,
+              handId: timeoutCurrentHandIdForLog,
               turnUserId: botTurnUserId || null,
               policyVersion: botAutoplayConfig.policyVersion,
               botActionCount: timeoutBotActionCount,
@@ -946,9 +962,10 @@ export async function handler(event) {
             ? resetTurnTimer(timeoutBotUpdatedState, timeoutBotNowMs, TURN_MS)
             : { ...timeoutBotUpdatedState, turnStartedAt: null, turnDeadlineAt: null };
           const timeoutBotClearedMissedTurns = clearMissedTurns(timeoutBotWithTimer, botTurnUserId);
-          const timeoutBotPersistedState = timeoutBotClearedMissedTurns.changed
+          const timeoutBotPersistedStateRaw = timeoutBotClearedMissedTurns.changed
             ? timeoutBotClearedMissedTurns.nextState
             : timeoutBotWithTimer;
+          const timeoutBotPersistedState = clearMismatchedShowdown(timeoutBotPersistedStateRaw);
 
           if (!isStateStorageValid(timeoutBotPersistedState, { requireHandSeed: true, requireCommunityDealt: true, requireNoDeck: true })) {
             timeoutBotStopReason = "invalid_persist_state";
@@ -1000,9 +1017,11 @@ export async function handler(event) {
         } else if (timeoutBotActionCount >= botAutoplayConfig.maxActionsPerRequest) {
           timeoutBotStopReason = "action_cap_reached";
         }
+        const timeoutCurrentHandIdForLog =
+          typeof timeoutFinalState?.handId === "string" && timeoutFinalState.handId.trim() ? timeoutFinalState.handId.trim() : null;
         klog("poker_act_bot_autoplay_stop", {
           tableId,
-          handId: timeoutHandIdForLog,
+          handId: timeoutCurrentHandIdForLog,
           turnUserId: timeoutFinalState.turnUserId || null,
           policyVersion: botAutoplayConfig.policyVersion,
           botActionCount: timeoutBotActionCount,
@@ -1414,7 +1433,8 @@ export async function handler(event) {
           ? resetTurnTimer(updated, nowMsValue, TURN_MS)
           : { ...updated, turnStartedAt: null, turnDeadlineAt: null };
         const cleared = clearMissedTurns(withTimer, actorUserId);
-        return cleared.changed ? cleared.nextState : withTimer;
+        const persistedState = cleared.changed ? cleared.nextState : withTimer;
+        return clearMismatchedShowdown(persistedState);
       };
 
       const runBotAutoplayLoop = async () => {
@@ -1563,8 +1583,8 @@ export async function handler(event) {
                   previousDealerSeatNo: Number.isInteger(responseFinalState?.dealerSeatNo) ? responseFinalState.dealerSeatNo : null,
                   makeError,
                 });
-                responseFinalState = autoStart.updatedState;
-                loopPrivateState = autoStart.privateState || autoStart.updatedState;
+                responseFinalState = clearMismatchedShowdown(autoStart.updatedState);
+                loopPrivateState = clearMismatchedShowdown(autoStart.privateState || autoStart.updatedState);
                 loopVersion = autoStart.newVersion;
                 newVersion = autoStart.newVersion;
                 holeCardsByUserId = autoStart.dealtHoleCards;
