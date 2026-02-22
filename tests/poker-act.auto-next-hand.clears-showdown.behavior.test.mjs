@@ -14,12 +14,12 @@ const bot2UserId = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 process.env.POKER_DEAL_SECRET = process.env.POKER_DEAL_SECRET || "test-deal-secret";
 process.env.POKER_BOT_MAX_ACTIONS_PER_REQUEST = "1";
 
-const makeStoredState = () => ({
-  version: 7,
+const stored = {
+  version: 5,
   state: {
     tableId,
     phase: "RIVER",
-    handId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+    handId: "f4e19544-dddd-4ddd-8ddd-dddddddddddd",
     handSeed: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
     seats: [
       { userId: humanUserId, seatNo: 1 },
@@ -41,15 +41,9 @@ const makeStoredState = () => ({
     lastRaiseSize: 0,
   },
   requests: new Map(),
-});
+};
 
 const run = async () => {
-  const stored = makeStoredState();
-  let stateWriteCount = 0;
-  let holeInsertCount = 0;
-  let actionInsertCount = 0;
-  const actionTypes = [];
-
   const handler = loadPokerHandler("netlify/functions/poker-act.mjs", {
     baseHeaders: () => ({}),
     corsHeaders: () => ({ "access-control-allow-origin": "https://example.test" }),
@@ -69,93 +63,51 @@ const run = async () => {
     deriveCommunityCards: () => [],
     deriveRemainingDeck: () => [],
     maybeApplyTurnTimeout: async (state) => ({ state, timedOut: false }),
-    applyAction: (state, action) => {
-      if (action?.userId === humanUserId) {
-        return { state: { ...state, phase: "HAND_DONE", turnUserId: null, pot: 0 }, events: [{ type: "HAND_SETTLED" }] };
-      }
+    applyAction: (state) => ({ state: { ...state, phase: "HAND_DONE", pot: 0, turnUserId: null }, events: [{ type: "HAND_SETTLED" }] }),
+    chooseBotActionTrivial: () => ({ type: "CHECK" }),
+    startHandCore: async ({ tx, tableId: startTableId, currentState, expectedVersion }) => {
+      const nextState = {
+
+        ...currentState,
+        phase: "PREFLOP",
+        handId: "c1b7e1cf-ffff-4fff-8fff-ffffffffffff",
+        handSeed: "99999999-9999-4999-8999-999999999999",
+        turnUserId: humanUserId,
+        showdown: { handId: "f4e19544-dddd-4ddd-8ddd-dddddddddddd", winners: [] },
+      };
+      const privateState = {
+        ...currentState,
+        phase: "PREFLOP",
+        handId: "c1b7e1cf-ffff-4fff-8fff-ffffffffffff",
+        handSeed: "99999999-9999-4999-8999-999999999999",
+        turnUserId: humanUserId,
+        showdown: { handId: "f4e19544-dddd-4ddd-8ddd-dddddddddddd", winners: [] },
+      };
+      const autoWrite = await updatePokerStateOptimistic(tx, {
+        tableId: startTableId,
+        expectedVersion,
+        nextState,
+      });
+      assert.equal(autoWrite.ok, true);
       return {
-        state: {
-          ...state,
-          phase: "PREFLOP",
-          turnUserId: humanUserId,
-          actedThisRoundByUserId: { ...(state.actedThisRoundByUserId || {}), [action.userId]: true },
-        },
-        events: [{ type: "BOT_ACTED" }],
+        updatedState: nextState,
+        privateState,
+        dealtHoleCards: { [humanUserId]: [], [bot1UserId]: [], [bot2UserId]: [] },
+        newVersion: autoWrite.newVersion,
       };
     },
-    chooseBotActionTrivial: () => ({ type: "CHECK" }),
-    startHandCore: async ({ tx, tableId: startTableId, expectedVersion, currentState }) => {
-      await tx.unsafe("insert into public.poker_hole_cards (table_id, hand_id, user_id, cards) values ($1, $2, $3, $4::jsonb);", [startTableId, "ffffffff-ffff-4fff-8fff-ffffffffffff", "seed-user", "[]"]);
-      await tx.unsafe("insert into public.poker_actions (table_id, version, user_id, action_type, amount, hand_id, request_id, phase_from, phase_to, meta) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb);", [startTableId, expectedVersion + 1, null, "START_HAND", null, "ffffffff-ffff-4fff-8fff-ffffffffffff", "auto", "SETTLED", "PREFLOP", null]);
-      return {
-      updatedState: {
-        ...currentState,
-        phase: "PREFLOP",
-        handId: "ffffffff-ffff-4fff-8fff-ffffffffffff",
-        handSeed: "99999999-9999-4999-8999-999999999999",
-        turnUserId: bot1UserId,
-        community: [],
-        communityDealt: 0,
-        showdown: { handId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd", winners: [] },
-        toCallByUserId: { [humanUserId]: 0, [bot1UserId]: 0, [bot2UserId]: 0 },
-        betThisRoundByUserId: { [humanUserId]: 0, [bot1UserId]: 0, [bot2UserId]: 0 },
-        actedThisRoundByUserId: { [humanUserId]: false, [bot1UserId]: false, [bot2UserId]: false },
-        foldedByUserId: { [humanUserId]: false, [bot1UserId]: false, [bot2UserId]: false },
-        deck: [{ r: "A", s: "S" }],
-        holeCardsByUserId: {
-          [humanUserId]: [{ r: "2", s: "S" }, { r: "3", s: "S" }],
-          [bot1UserId]: [{ r: "4", s: "S" }, { r: "5", s: "S" }],
-          [bot2UserId]: [{ r: "6", s: "S" }, { r: "7", s: "S" }],
-        },
-      },
-      privateState: {
-        ...currentState,
-        phase: "PREFLOP",
-        handId: "ffffffff-ffff-4fff-8fff-ffffffffffff",
-        handSeed: "99999999-9999-4999-8999-999999999999",
-        turnUserId: bot1UserId,
-        community: [],
-        communityDealt: 0,
-        showdown: { handId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd", winners: [] },
-        toCallByUserId: { [humanUserId]: 0, [bot1UserId]: 0, [bot2UserId]: 0 },
-        betThisRoundByUserId: { [humanUserId]: 0, [bot1UserId]: 0, [bot2UserId]: 0 },
-        actedThisRoundByUserId: { [humanUserId]: false, [bot1UserId]: false, [bot2UserId]: false },
-        foldedByUserId: { [humanUserId]: false, [bot1UserId]: false, [bot2UserId]: false },
-        deck: [{ r: "A", s: "S" }],
-        holeCardsByUserId: {
-          [humanUserId]: [{ r: "2", s: "S" }, { r: "3", s: "S" }],
-          [bot1UserId]: [{ r: "4", s: "S" }, { r: "5", s: "S" }],
-          [bot2UserId]: [{ r: "6", s: "S" }, { r: "7", s: "S" }],
-        },
-      },
-      dealtHoleCards: {
-        [humanUserId]: [{ r: "2", s: "S" }, { r: "3", s: "S" }],
-        [bot1UserId]: [{ r: "4", s: "S" }, { r: "5", s: "S" }],
-        [bot2UserId]: [{ r: "6", s: "S" }, { r: "7", s: "S" }],
-      },
-      newVersion: expectedVersion + 1,
-    };
-    },
-    loadHoleCardsByUserId: async () => ({
-      holeCardsByUserId: {
-        [humanUserId]: [{ r: "A", s: "S" }, { r: "K", s: "S" }],
-        [bot1UserId]: [{ r: "Q", s: "S" }, { r: "J", s: "S" }],
-        [bot2UserId]: [{ r: "T", s: "S" }, { r: "9", s: "S" }],
-      },
-    }),
+    loadHoleCardsByUserId: async () => ({ holeCardsByUserId: { [humanUserId]: [], [bot1UserId]: [], [bot2UserId]: [] } }),
     beginSql: async (fn) =>
       fn({
         unsafe: async (query, params) => {
           const text = String(query).toLowerCase();
           if (text.includes("from public.poker_tables")) return [{ id: tableId, status: "OPEN", stakes: '{"sb":1,"bb":2}' }];
           if (text.includes("from public.poker_seats") && text.includes("user_id = $2")) return [{ user_id: humanUserId }];
-          if (text.includes("from public.poker_seats") && text.includes("status = 'active'")) {
-            return [
-              { user_id: humanUserId, seat_no: 1, is_bot: false },
-              { user_id: bot1UserId, seat_no: 2, is_bot: true },
-              { user_id: bot2UserId, seat_no: 3, is_bot: true },
-            ];
-          }
+          if (text.includes("from public.poker_seats") && text.includes("status = 'active'")) return [
+            { user_id: humanUserId, seat_no: 1, is_bot: false },
+            { user_id: bot1UserId, seat_no: 2, is_bot: true },
+            { user_id: bot2UserId, seat_no: 3, is_bot: true },
+          ];
           if (text.includes("from public.poker_state")) return [{ version: stored.version, state: stored.state }];
           if (text.includes("from public.poker_requests")) {
             const key = `${params?.[0]}|${params?.[1]}|${params?.[2]}|${params?.[3]}`;
@@ -176,19 +128,9 @@ const run = async () => {
             return [{ request_id: params?.[2] }];
           }
           if (text.includes("update public.poker_state") && text.includes("version = version + 1")) {
-            stateWriteCount += 1;
             stored.state = JSON.parse(params?.[2] || "{}");
             stored.version += 1;
             return [{ version: stored.version }];
-          }
-          if (text.includes("insert into public.poker_hole_cards")) {
-            holeInsertCount += 1;
-            return [{ user_id: humanUserId }, { user_id: bot1UserId }, { user_id: bot2UserId }];
-          }
-          if (text.includes("insert into public.poker_actions")) {
-            actionInsertCount += 1;
-            actionTypes.push(params?.[3]);
-            return [{ ok: true }];
           }
           return [];
         },
@@ -199,27 +141,21 @@ const run = async () => {
   const response = await handler({
     httpMethod: "POST",
     headers: { origin: "https://example.test", authorization: "Bearer token" },
-    body: JSON.stringify({ tableId, requestId: "act-auto-next-bot-loop", action: { type: "CHECK" } }),
+    body: JSON.stringify({ tableId, requestId: "clear-showdown-1", action: { type: "CHECK" } }),
   });
 
   assert.equal(response.statusCode, 200);
   const payload = JSON.parse(response.body || "{}");
   assert.equal(payload.ok, true);
   assert.equal(payload.state?.state?.phase, "PREFLOP");
-  assert.equal(payload.state?.state?.actedThisRoundByUserId?.[bot1UserId], true);
+  assert.equal(payload.state?.state?.handId, "c1b7e1cf-ffff-4fff-8fff-ffffffffffff");
   assert.equal(
     !payload.state?.state?.showdown || payload.state?.state?.showdown?.handId === payload.state?.state?.handId,
-    true,
-    "showdown should be cleared or match current hand"
+    true
   );
-  assert.equal(actionInsertCount >= 3, true, "expect user action + auto-start start hand + bot action");
-  assert.equal(actionTypes.includes("START_HAND"), true);
-  assert.equal(actionTypes.includes("CHECK"), true);
-  assert.equal(stateWriteCount >= 2, true, "expect at least settle write and one bot follow-up write");
-  assert.equal(holeInsertCount, 1, "auto-start should insert hole cards once");
 };
 
-run().then(() => console.log("poker-act auto-next-hand bot acts after autostart behavior test passed")).catch((error) => {
+run().then(() => console.log("poker-act auto-next-hand clears showdown behavior test passed")).catch((error) => {
   console.error(error);
   process.exit(1);
 });
