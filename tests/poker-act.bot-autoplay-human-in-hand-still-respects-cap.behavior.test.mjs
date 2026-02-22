@@ -72,11 +72,11 @@ const run = async () => {
     applyAction,
     deriveCommunityCards,
     deriveRemainingDeck,
-    computeLegalActions: ({ userId }) => ({
-      actions: userId === botUserId ? [{ type: "CHECK" }] : ["CHECK"],
-      minRaiseTo: null,
-      maxRaiseTo: null,
-    }),
+    computeLegalActions: () => {
+      const actions = [{ type: "CHECK" }];
+      actions.includes = (target) => actions.some((entry) => entry?.type === target);
+      return { actions, minRaiseTo: null, maxRaiseTo: null };
+    },
     buildActionConstraints,
     isHoleCardsTableMissing,
     resetTurnTimer,

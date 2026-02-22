@@ -82,8 +82,9 @@ const run = async () => {
     advanceIfNeeded: (state) => ({ state, events: [] }),
     applyAction: applyActionStub,
     computeLegalActions: ({ userId }) => {
-      if (userId === humanUserId) return { actions: ["FOLD"] };
-      return { actions: [{ type: "CHECK" }] };
+      const actions = userId === humanUserId ? [{ type: "FOLD" }] : [{ type: "CHECK" }];
+      actions.includes = (target) => actions.some((entry) => entry?.type === target);
+      return { actions };
     },
     buildActionConstraints: () => ({}),
     isStateStorageValid: () => true,
@@ -91,7 +92,11 @@ const run = async () => {
     withoutPrivateState: (state) => state,
     resetTurnTimer: (state) => state,
     clearMissedTurns: (state) => ({ changed: false, nextState: state }),
-    updatePokerStateOptimistic: async (_tx, _args) => ({ ok: true, newVersion: ++stored.version }),
+    updatePokerStateOptimistic: async (_tx, args) => {
+      stored.state = args.nextState;
+      stored.version = Number(args.expectedVersion) + 1;
+      return { ok: true, newVersion: stored.version };
+    },
     deriveCommunityCards: ({ communityDealt }) => [
       { r: "A", s: "S" },
       { r: "K", s: "S" },
@@ -134,7 +139,6 @@ const run = async () => {
           }
           if (text.includes("update public.poker_state") && text.includes("version = version + 1")) {
             stored.state = JSON.parse(params?.[2] || "{}");
-            stored.version += 1;
             return [{ version: stored.version }];
           }
           if (text.includes("update public.poker_tables set last_activity_at = now(), updated_at = now()")) return [];
