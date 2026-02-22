@@ -72,7 +72,11 @@ const run = async () => {
     applyAction,
     deriveCommunityCards,
     deriveRemainingDeck,
-    computeLegalActions: ({ userId }) => ({ actions: userId === botUserId ? ["CHECK"] : ["CHECK"], minRaiseTo: null, maxRaiseTo: null }),
+    computeLegalActions: ({ userId }) => ({
+      actions: userId === botUserId ? [{ type: "CHECK" }] : ["CHECK"],
+      minRaiseTo: null,
+      maxRaiseTo: null,
+    }),
     buildActionConstraints,
     isHoleCardsTableMissing,
     resetTurnTimer,
@@ -104,6 +108,8 @@ const run = async () => {
   const stopLog = logs.find((entry) => entry.event === "poker_act_bot_autoplay_stop");
   assert.equal(stopLog?.payload?.reason, "action_cap_reached");
   assert.equal(stopLog?.payload?.botsOnlyInHand, false);
+  assert.equal(Number(stopLog?.payload?.effectiveMaxActionsPerRequest), 1);
+  assert.equal(Number(stopLog?.payload?.botActionCount), 1);
 };
 
 run().then(() => console.log("poker-act human-in-hand autoplay cap behavior test passed")).catch((error) => {
