@@ -44,6 +44,7 @@ const stored = {
 };
 
 const run = async () => {
+  let lastWrittenStateJson = "";
   const handler = loadPokerHandler("netlify/functions/poker-act.mjs", {
     baseHeaders: () => ({}),
     corsHeaders: () => ({ "access-control-allow-origin": "https://example.test" }),
@@ -128,6 +129,7 @@ const run = async () => {
             return [{ request_id: params?.[2] }];
           }
           if (text.includes("update public.poker_state") && text.includes("version = version + 1")) {
+            lastWrittenStateJson = String(params?.[2] || "");
             stored.state = JSON.parse(params?.[2] || "{}");
             stored.version += 1;
             return [{ version: stored.version }];
@@ -149,10 +151,8 @@ const run = async () => {
   assert.equal(payload.ok, true);
   assert.equal(payload.state?.state?.phase, "PREFLOP");
   assert.equal(payload.state?.state?.handId, "c1b7e1cf-ffff-4fff-8fff-ffffffffffff");
-  assert.equal(
-    !payload.state?.state?.showdown || payload.state?.state?.showdown?.handId === payload.state?.state?.handId,
-    true
-  );
+  assert.equal("showdown" in (payload.state?.state || {}), false);
+  assert.equal(lastWrittenStateJson.includes("\"showdown\":null"), false);
 };
 
 run().then(() => console.log("poker-act auto-next-hand clears showdown behavior test passed")).catch((error) => {

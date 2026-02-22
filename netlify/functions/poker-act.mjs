@@ -60,7 +60,8 @@ const clearMismatchedShowdown = (stateInput) => {
       ? stateInput.showdown.handId.trim()
       : "";
   if (!handId || !showdownHandId || showdownHandId === handId) return stateInput;
-  return { ...stateInput, showdown: null };
+  const { showdown: _ignoredShowdown, ...sanitizedState } = stateInput;
+  return sanitizedState;
 };
 
 const maybeEvictMarkedBotAfterSettlement = async (tx, { tableId, state, actorUserId }) => {
