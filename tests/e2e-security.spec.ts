@@ -106,7 +106,7 @@ test.describe('E2E Security Tests', () => {
       const response = await request.post(XP_ENDPOINT, {
         data: payload,
         headers: {
-          'Origin': 'http://localhost:8888'
+          'Origin': BASE_ORIGIN
         }
       });
 
@@ -857,7 +857,7 @@ test.describe('E2E Security Tests', () => {
           }
         },
         headers: {
-          'Origin': 'http://localhost:8888' // Simulate same-origin request
+          'Origin': BASE_ORIGIN // Simulate real app origin
         }
       });
 

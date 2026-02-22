@@ -66,6 +66,7 @@ export default defineConfig({
       XP_RATE_LIMIT_WINDOW_SEC: '5',
       XP_RATE_LIMIT_USER_PER_MIN: '10',
       XP_RATE_LIMIT_IP_PER_MIN: '40',
+      XP_SESSION_RATE_LIMIT_ENABLED: '0', // test harness only: avoid CI flake from session bootstrap churn
     },
   },
 });
