@@ -1146,6 +1146,7 @@ export async function handler(event) {
       }
 
       if (actionParsed.value.type === "LEAVE_TABLE") {
+        const wasParticipatingInHand = isUserParticipatingInHand(currentState, auth.userId);
         let applied;
         try {
           applied = applyLeaveTable(privateState, { userId: auth.userId, requestId });
@@ -1176,9 +1177,14 @@ export async function handler(event) {
 
         const nextState = applied.state;
         const events = Array.isArray(applied.events) ? applied.events.slice() : [];
+        const nextFoldedByUserId = isPlainObjectValue(nextState?.foldedByUserId) ? { ...nextState.foldedByUserId } : {};
+        if (wasParticipatingInHand) {
+          nextFoldedByUserId[auth.userId] = true;
+        }
         const { holeCardsByUserId: _ignoredHoleCards, deck: _ignoredDeck, ...stateBase } = nextState;
         const updatedState = {
           ...stateBase,
+          foldedByUserId: nextFoldedByUserId,
           communityDealt: Array.isArray(nextState.community) ? nextState.community.length : 0,
           lastActionRequestIdByUserId: {
             ...lastByUserId,

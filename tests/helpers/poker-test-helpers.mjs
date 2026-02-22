@@ -73,6 +73,7 @@ export const loadPokerHandler = (filePath, mocks) => {
     "ensurePokerRequest",
     "advanceIfNeeded",
     "applyAction",
+    "applyLeaveTable",
     "areCardsUnique",
     "cardIdentity",
     "materializeShowdownAndPayout",
