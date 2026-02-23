@@ -240,17 +240,23 @@ export async function handler(event) {
         });
 
         const leaveApplied = applyLeaveTable(currentState, { userId: auth.userId, requestId });
-        const leaveState = normalizeState(leaveApplied?.state);
+        if (!isPlainObject(leaveApplied?.state)) {
+          klog("poker_leave_invalid_reducer_state", { tableId, userId: auth.userId, hasState: leaveApplied?.state != null });
+          throw makeError(409, "state_invalid");
+        }
+        const leaveState = normalizeState(leaveApplied.state);
         const leavePhase = typeof leaveState.phase === "string" ? leaveState.phase : "";
         const hasActiveHandId = typeof leaveState.handId === "string" && leaveState.handId.trim() !== "";
         const isActiveHandPhase = ["PREFLOP", "FLOP", "TURN", "RIVER", "SHOWDOWN"].includes(leavePhase);
         const hasAnyActiveHandSignal = hasActiveHandId || isActiveHandPhase;
         const shouldDetachSeatAndStack = !hasAnyActiveHandSignal;
 
+        const baseSeats = Array.isArray(leaveState.seats) ? leaveState.seats : parseSeats(currentState.seats);
+        const baseStacks = isPlainObject(leaveState.stacks) ? leaveState.stacks : parseStacks(currentState.stacks);
         const seats = shouldDetachSeatAndStack
-          ? parseSeats(leaveState.seats).filter((seatItem) => seatItem?.userId !== auth.userId)
-          : parseSeats(leaveState.seats);
-        const updatedStacks = parseStacks(leaveState.stacks);
+          ? parseSeats(baseSeats).filter((seatItem) => seatItem?.userId !== auth.userId)
+          : parseSeats(baseSeats);
+        const updatedStacks = parseStacks(baseStacks);
         const seatRetained = seats.some((seatItem) => seatItem?.userId === auth.userId);
         if (shouldDetachSeatAndStack) {
           delete updatedStacks[auth.userId];
