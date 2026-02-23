@@ -7,11 +7,14 @@ const humanUserId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const botUserId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 const thirdUserId = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 
+let seatDeleteCount = 0;
+
 const stored = {
   version: 4,
   state: {
     tableId,
     phase: "PREFLOP",
+    handId: "hand-mid",
     seats: [
       { userId: humanUserId, seatNo: 1 },
       { userId: botUserId, seatNo: 2 },
@@ -62,6 +65,10 @@ const handler = loadPokerHandler("netlify/functions/poker-leave.mjs", {
           stored.version += 1;
           return [{ version: stored.version }];
         }
+        if (text.includes("delete from public.poker_seats")) {
+          seatDeleteCount += 1;
+          return [];
+        }
         return [];
       },
     }),
@@ -78,6 +85,7 @@ const response = await handler({
 assert.equal(response.statusCode, 200);
 const payload = JSON.parse(response.body || "{}");
 assert.equal(payload.ok, true);
+assert.equal(seatDeleteCount, 0);
 assert.equal(payload.state.state.leftTableByUserId[humanUserId], true);
 assert.equal(payload.state.state.foldedByUserId[humanUserId], true);
 assert.equal(payload.state.state.actedThisRoundByUserId[humanUserId], true);

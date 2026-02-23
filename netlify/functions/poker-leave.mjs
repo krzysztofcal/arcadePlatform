@@ -282,11 +282,13 @@ export async function handler(event) {
           }
           throw makeError(409, "state_invalid");
         }
-        await tx.unsafe("delete from public.poker_seats where table_id = $1 and user_id = $2;", [
-          tableId,
-          auth.userId,
-        ]);
         mutated = true;
+        if (shouldDetachSeatAndStack) {
+          await tx.unsafe("delete from public.poker_seats where table_id = $1 and user_id = $2;", [
+            tableId,
+            auth.userId,
+          ]);
+        }
 
         await tx.unsafe(
           "update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1;",

@@ -9,16 +9,15 @@ const botUserId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 let seatDeleteCount = 0;
 
 const stored = {
-  version: 3,
+  version: 2,
   state: {
     tableId,
-    phase: "PREFLOP",
-    handId: "hand-mid",
+    phase: "INIT",
     seats: [
       { userId: humanUserId, seatNo: 1 },
       { userId: botUserId, seatNo: 2 },
     ],
-    stacks: { [humanUserId]: 100, [botUserId]: 100 },
+    stacks: { [humanUserId]: 100, [botUserId]: 120 },
     pot: 0,
     turnUserId: humanUserId,
     toCallByUserId: { [humanUserId]: 0, [botUserId]: 0 },
@@ -31,9 +30,7 @@ const stored = {
     allInByUserId: { [humanUserId]: false, [botUserId]: false },
     contributionsByUserId: { [humanUserId]: 0, [botUserId]: 0 },
     community: [],
-    deck: [{ r: "A", s: "S" }, { r: "K", s: "H" }],
-    currentBet: 0,
-    lastRaiseSize: 0,
+    deck: [{ r: "A", s: "S" }],
     dealerSeatNo: 1,
   },
 };
@@ -44,7 +41,7 @@ const handler = loadPokerHandler("netlify/functions/poker-leave.mjs", {
   extractBearerToken: () => "token",
   verifySupabaseJwt: async () => ({ valid: true, userId: humanUserId }),
   isValidUuid: () => true,
-  normalizeRequestId: () => ({ ok: true, value: "leave-1" }),
+  normalizeRequestId: () => ({ ok: true, value: "leave-init" }),
   updatePokerStateOptimistic,
   ensurePokerRequest: async () => ({ status: "proceed" }),
   storePokerRequestResult: async () => {},
@@ -55,9 +52,7 @@ const handler = loadPokerHandler("netlify/functions/poker-leave.mjs", {
         const text = String(query).toLowerCase();
         if (text.includes("from public.poker_tables")) return [{ id: tableId, status: "OPEN" }];
         if (text.includes("from public.poker_state")) return [{ version: stored.version, state: stored.state }];
-        if (text.includes("from public.poker_seats") && text.includes("for update")) {
-          return [{ seat_no: 1, status: "ACTIVE", stack: 100 }];
-        }
+        if (text.includes("from public.poker_seats") && text.includes("for update")) return [{ seat_no: 1, status: "ACTIVE", stack: 100 }];
         if (text.includes("update public.poker_state") && text.includes("version = version + 1")) {
           stored.state = JSON.parse(params?.[2] || "{}");
           stored.version += 1;
@@ -77,18 +72,15 @@ const handler = loadPokerHandler("netlify/functions/poker-leave.mjs", {
 const response = await handler({
   httpMethod: "POST",
   headers: { origin: "https://example.test", authorization: "Bearer token" },
-  body: JSON.stringify({ tableId, requestId: "leave-1" }),
+  body: JSON.stringify({ tableId, requestId: "leave-init" }),
 });
 
 assert.equal(response.statusCode, 200);
 const payload = JSON.parse(response.body || "{}");
 assert.equal(payload.ok, true);
-assert.equal(seatDeleteCount, 0);
-assert.equal(payload.state.state.leftTableByUserId[humanUserId], true);
-assert.equal(payload.state.state.foldedByUserId[humanUserId], true);
-assert.equal(payload.state.state.actedThisRoundByUserId[humanUserId], true);
-assert.equal(payload.state.state.seats.some((seat) => seat?.userId === humanUserId), true);
-assert.ok(payload.state.state.turnUserId === null || payload.state.state.turnUserId !== humanUserId);
+assert.equal(seatDeleteCount, 1);
+assert.equal(payload.state.state.seats.some((seat) => seat?.userId === humanUserId), false);
+assert.equal(payload.state.state.stacks?.[humanUserId], undefined);
 assert.equal(payload.state.state.deck, undefined);
 
-console.log("poker-leave in-hand turn leaver behavior test passed");
+console.log("poker-leave non-hand detaches and deletes seat behavior test passed");
