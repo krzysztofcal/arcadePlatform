@@ -119,7 +119,7 @@
     talisman: { en: 'Talisman', pl: 'Talizman' },
     talismanKicker: { en: 'Astro energy configurator', pl: 'Astro konfigurator energii' },
     talismanTitle: { en: 'Your personal talisman', pl: 'Twój osobisty talizman' },
-    talismanLead: { en: 'Choose your profile and the skills you want to boost to get your power and protective stone.', pl: 'Wybierz swoje dane i skille, a dobierzemy kamień mocy oraz kamień ochronny.' },
+    talismanLead: { en: 'Choose your profile and Feng Shui life areas to get your power and protective stone.', pl: 'Wybierz swoje dane i obszary Feng Shui, a dobierzemy kamień mocy oraz kamień ochronny.' },
     talismanBirthDate: { en: 'Birth date', pl: 'Data urodzenia' },
     talismanBirthYear: { en: 'Birth year', pl: 'Rok urodzenia' },
     talismanZodiac: { en: 'Zodiac sign', pl: 'Znak zodiaku' },
@@ -128,12 +128,13 @@
     talismanGenderF: { en: 'Woman', pl: 'Kobieta' },
     talismanGenderM: { en: 'Man', pl: 'Mężczyzna' },
     talismanGenderBoth: { en: 'Both', pl: 'Obie' },
-    talismanSkills: { en: 'What skills do you want to boost?', pl: 'Jakie skille chcesz podkręcić?' },
-    skillFocus: { en: 'Focus', pl: 'Skupienie' },
-    skillConfidence: { en: 'Confidence', pl: 'Pewność siebie' },
-    skillMoney: { en: 'Money', pl: 'Finanse' },
-    skillLove: { en: 'Relationships', pl: 'Relacje' },
-    skillCreativity: { en: 'Creativity', pl: 'Kreatywność' },
+    talismanAreas: { en: 'Choose Feng Shui areas', pl: 'Wybierz obszary Feng Shui' },
+    areaWealth: { en: 'Wealth', pl: 'Bogactwo' },
+    areaCareer: { en: 'Career', pl: 'Kariera' },
+    areaHealth: { en: 'Health', pl: 'Zdrowie' },
+    areaFamily: { en: 'Family', pl: 'Rodzina' },
+    areaWoman: { en: 'Woman', pl: 'Kobieta' },
+    areaMan: { en: 'Man', pl: 'Mężczyzna' },
     talismanButton: { en: 'Find my talisman', pl: 'Dobierz talizman' }
   };
 

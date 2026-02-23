@@ -32,39 +32,34 @@
     wodnik: { power: 'Akwamaryn', protective: 'Howlit' },
     ryby: { power: 'Ametryn', protective: 'Labradoryt' }
   };
-  var skillCandidates = {
-    focus: [{ stone: 'Fluoryt', base: 10 }, { stone: 'Sodalit', base: 9 }, { stone: 'Ametyst', base: 8 }],
-    confidence: [{ stone: 'Kamień słoneczny', base: 10 }, { stone: 'Tygrysie oko', base: 9 }, { stone: 'Karneol', base: 8 }],
-    money: [{ stone: 'Piryt', base: 10 }, { stone: 'Cytryn', base: 9 }, { stone: 'Awenturyn', base: 8 }, { stone: 'Jadeit', base: 7 }],
-    love: [{ stone: 'Różowy kwarc', base: 10 }, { stone: 'Rodonit', base: 9 }, { stone: 'Kamień księżycowy', base: 8 }],
-    creativity: [{ stone: 'Karneol', base: 10 }, { stone: 'Cytryn', base: 9 }, { stone: 'Lapis lazuli', base: 8 }]
-  };
-  var signSkillBonuses = {
-    byk: { money: { Piryt: 3, Cytryn: 2, Awenturyn: 2 } },
-    bliznieta: { money: { Cytryn: 8, Awenturyn: 6, Piryt: 0 } },
-    lew: { confidence: { 'Kamień słoneczny': 3, 'Tygrysie oko': 2 } },
-    rak: { love: { 'Kamień księżycowy': 3, 'Różowy kwarc': 2 } },
-    wodnik: { creativity: { 'Lapis lazuli': 3, Cytryn: 2 } }
-  };
-  var moonSkillStoneBonuses = {
-    Full: { love: { 'Różowy kwarc': 2, 'Kamień księżycowy': 2 }, focus: { Ametyst: 1 } },
-    New: { money: { Cytryn: 1, Awenturyn: 1 }, confidence: { Karneol: 1 } },
-    FirstQuarter: { confidence: { 'Tygrysie oko': 1 }, money: { Piryt: 1 } },
-    LastQuarter: { focus: { Fluoryt: 1 }, love: { Rodonit: 1 } },
-    WaxingCrescent: { creativity: { Karneol: 1 } },
-    WaxingGibbous: { money: { Cytryn: 1 } },
-    WaningGibbous: { focus: { Sodalit: 1 } },
-    WaningCrescent: { love: { 'Kamień księżycowy': 1 } }
+  var baguaAreas = {
+    wealth: { label: 'Bogactwo', direction: 'SE', element: 'Wood', stones: ['Cytryn','Awenturyn','Jadeit'] },
+    career: { label: 'Kariera', direction: 'N', element: 'Water', stones: ['Akwamaryn','Sodalit','Labradoryt'] },
+    health: { label: 'Zdrowie', direction: 'C', element: 'Earth', stones: ['Ametyst','Fluoryt','Howlit'] },
+    family: { label: 'Rodzina', direction: 'E', element: 'Wood', stones: ['Różowy kwarc','Malachit','Jadeit'] },
+    woman: { label: 'Kobieta', direction: 'SW', element: 'Earth', stones: ['Kamień księżycowy','Rodonit','Kwarc dymny'] },
+    man: { label: 'Mężczyzna', direction: 'NW', element: 'Metal', stones: ['Hematyt','Onyks','Tygrysie oko'] }
   };
   var moonPhaseLabels = {
-    New: 'Nów',
-    WaxingCrescent: 'Przybywający sierp',
-    FirstQuarter: 'Pierwsza kwadra',
-    WaxingGibbous: 'Przybywający garb',
-    Full: 'Pełnia',
-    WaningGibbous: 'Ubywający garb',
-    LastQuarter: 'Ostatnia kwadra',
-    WaningCrescent: 'Ubywający sierp'
+    New: 'Nów', WaxingCrescent: 'Przybywający sierp', FirstQuarter: 'Pierwsza kwadra', WaxingGibbous: 'Przybywający garb',
+    Full: 'Pełnia', WaningGibbous: 'Ubywający garb', LastQuarter: 'Ostatnia kwadra', WaningCrescent: 'Ubywający sierp'
+  };
+  var moonAreaBonuses = {
+    Full: { family: { 'Różowy kwarc': 2 }, woman: { 'Kamień księżycowy': 2 } },
+    New: { wealth: { 'Cytryn': 1 }, career: { 'Akwamaryn': 1 } },
+    FirstQuarter: { man: { 'Tygrysie oko': 1 }, wealth: { 'Awenturyn': 1 } },
+    LastQuarter: { health: { 'Fluoryt': 1 }, woman: { Rodonit: 1 } },
+    WaxingCrescent: { wealth: { Jadeit: 1 } },
+    WaxingGibbous: { career: { Sodalit: 1 } },
+    WaningGibbous: { health: { Howlit: 1 } },
+    WaningCrescent: { family: { Malachit: 1 } }
+  };
+  var zodiacAreaStoneBonuses = {
+    byk: { wealth: { Cytryn: 2, Awenturyn: 2 }, family: { Jadeit: 1 } },
+    bliznieta: { wealth: { Cytryn: 3, Awenturyn: 2 }, career: { Sodalit: 1 } },
+    rak: { woman: { 'Kamień księżycowy': 2 }, family: { 'Różowy kwarc': 1 } },
+    lew: { man: { 'Tygrysie oko': 2 }, wealth: { Cytryn: 1 } },
+    wodnik: { career: { Akwamaryn: 2, Labradoryt: 1 } }
   };
 
   function parseDate(dateValue){
@@ -75,17 +70,9 @@
   }
 
   function getSignBoundsForYear(sign, year){
-    var startYear = year;
-    var endYear = year;
-    if (sign.start[0] > sign.end[0]) {
-      if (sign.start[0] === 12) {
-        if (sign.start[0] <= 3) startYear = year - 1;
-        if (sign.end[0] <= 3) endYear = year;
-      }
-    }
-    var startDate = new Date(Date.UTC(startYear, sign.start[0] - 1, sign.start[1]));
-    var endDate = new Date(Date.UTC(endYear, sign.end[0] - 1, sign.end[1]));
-    if (endDate.getTime() < startDate.getTime()) endDate = new Date(Date.UTC(startYear + 1, sign.end[0] - 1, sign.end[1]));
+    var startDate = new Date(Date.UTC(year, sign.start[0] - 1, sign.start[1]));
+    var endDate = new Date(Date.UTC(year, sign.end[0] - 1, sign.end[1]));
+    if (sign.start[0] > sign.end[0]) endDate = new Date(Date.UTC(year + 1, sign.end[0] - 1, sign.end[1]));
     return { startDate: startDate, endDate: endDate };
   }
 
@@ -94,8 +81,8 @@
     for (var i = 0; i < zodiacSigns.length; i++) {
       var sign = zodiacSigns[i];
       var bounds = getSignBoundsForYear(sign, year);
-      if (date.getTime() >= bounds.startDate.getTime() && date.getTime() <= bounds.endDate.getTime()) return i;
       var prevBounds = getSignBoundsForYear(sign, year - 1);
+      if (date.getTime() >= bounds.startDate.getTime() && date.getTime() <= bounds.endDate.getTime()) return i;
       if (date.getTime() >= prevBounds.startDate.getTime() && date.getTime() <= prevBounds.endDate.getTime()) return i;
     }
     return 0;
@@ -115,31 +102,14 @@
     var distanceToEnd = Math.floor((bounds.endDate.getTime() - date.getTime()) / dayMs);
     var blend = 0;
     var adjacent = null;
-    if (distanceToStart >= 0 && distanceToStart <= CUSP_DAYS) {
-      adjacent = prev;
-      blend = MAX_CUSP_BLEND * ((CUSP_DAYS + 1 - distanceToStart) / (CUSP_DAYS + 1));
-    }
+    if (distanceToStart >= 0 && distanceToStart <= CUSP_DAYS) { adjacent = prev; blend = MAX_CUSP_BLEND * ((CUSP_DAYS + 1 - distanceToStart) / (CUSP_DAYS + 1)); }
     if (distanceToEnd >= 0 && distanceToEnd <= CUSP_DAYS) {
       var endBlend = MAX_CUSP_BLEND * ((CUSP_DAYS + 1 - distanceToEnd) / (CUSP_DAYS + 1));
-      if (endBlend > blend) {
-        adjacent = next;
-        blend = endBlend;
-      }
+      if (endBlend > blend) { adjacent = next; blend = endBlend; }
     }
     var primaryWeight = Number((1 - blend).toFixed(2));
     var adjacentWeight = Number(blend.toFixed(2));
-    var weights = {};
-    weights[sign.id] = primaryWeight;
-    if (adjacent) weights[adjacent.id] = adjacentWeight;
-    return {
-      primarySign: sign.id,
-      adjacentSign: adjacent ? adjacent.id : null,
-      weights: weights,
-      primaryWeight: primaryWeight,
-      adjacentWeight: adjacentWeight,
-      primaryLabel: sign.label,
-      adjacentLabel: adjacent ? adjacent.label : null
-    };
+    return { primarySign: sign.id, adjacentSign: adjacent ? adjacent.id : null, primaryWeight: primaryWeight, adjacentWeight: adjacentWeight, primaryLabel: sign.label, adjacentLabel: adjacent ? adjacent.label : null };
   }
 
   function detectMoonPhase(dateValue){
@@ -155,43 +125,64 @@
   function detectChineseFromYear(year){
     var y = Number(year);
     if (!y || y < 1900) return null;
-    var idx = ((y - 4) % 12 + 12) % 12;
-    return chineseSigns[idx];
+    return chineseSigns[((y - 4) % 12 + 12) % 12];
   }
 
-  function getSelectedSkills(form){
-    return Array.prototype.slice.call(form.querySelectorAll('input[name="skill"]:checked')).map(function(el){ return el.value; });
+  function getChineseElement(year){
+    var y = Number(year);
+    if (!y || y < 1900) return null;
+    var mod10 = ((y - 4) % 10 + 10) % 10;
+    var idx = Math.floor(mod10 / 2);
+    return ['Wood', 'Fire', 'Earth', 'Metal', 'Water'][idx];
   }
 
-  function getSignBonus(signId, skill, stone){
-    var bySign = signSkillBonuses[signId] || {};
-    var bySkill = bySign[skill] || {};
-    return Number(bySkill[stone] || 0);
+  function getElementCompatibilityScore(userElement, areaElement){
+    if (!userElement || !areaElement) return 0;
+    if (userElement === areaElement) return 2;
+    var generates = { Wood: 'Fire', Fire: 'Earth', Earth: 'Metal', Metal: 'Water', Water: 'Wood' };
+    var controls = { Wood: 'Earth', Earth: 'Water', Water: 'Fire', Fire: 'Metal', Metal: 'Wood' };
+    if (generates[userElement] === areaElement) return 3;
+    if (controls[userElement] === areaElement) return -2;
+    if (generates[areaElement] === userElement) return 1;
+    if (controls[areaElement] === userElement) return -1;
+    return 0;
   }
 
-  function getMoonBonus(moonPhase, skill, stone){
-    var byMoon = moonSkillStoneBonuses[moonPhase] || {};
-    var bySkill = byMoon[skill] || {};
-    return Number(bySkill[stone] || 0);
+  function getSelectedAreas(form){
+    return Array.prototype.slice.call(form.querySelectorAll('input[name="area"]:checked')).map(function(el){ return el.value; });
   }
 
-  function scoreSkillStones(skills, influence, moonPhase){
+  function getAreaBonusBySign(signId, areaKey, stone){
+    var bySign = zodiacAreaStoneBonuses[signId] || {};
+    var byArea = bySign[areaKey] || {};
+    return Number(byArea[stone] || 0);
+  }
+
+  function getMoonBonus(phase, areaKey, stone){
+    var byPhase = moonAreaBonuses[phase] || {};
+    var byArea = byPhase[areaKey] || {};
+    return Number(byArea[stone] || 0);
+  }
+
+  function scoreAreaStones(areas, influence, moonPhase, userElement){
     var map = {};
-    for (var i = 0; i < skills.length; i++) {
-      var skill = skills[i];
-      var candidates = skillCandidates[skill] || [];
-      for (var j = 0; j < candidates.length; j++) {
-        var candidate = candidates[j];
-        var score = candidate.base;
-        score += influence.primaryWeight * getSignBonus(influence.primarySign, skill, candidate.stone);
-        score += influence.adjacentWeight * getSignBonus(influence.adjacentSign, skill, candidate.stone);
-        score += getMoonBonus(moonPhase, skill, candidate.stone);
-        if (!map[candidate.stone] || map[candidate.stone].score < score) {
-          map[candidate.stone] = { stone: candidate.stone, score: Number(score.toFixed(2)), skill: skill };
-        }
+    var firstArea = null;
+    for (var i = 0; i < areas.length; i++) {
+      var areaKey = areas[i];
+      var area = baguaAreas[areaKey];
+      if (!area) continue;
+      if (!firstArea) firstArea = area;
+      var compatibility = getElementCompatibilityScore(userElement, area.element);
+      for (var j = 0; j < area.stones.length; j++) {
+        var stone = area.stones[j];
+        var base = 10 - j;
+        var score = base + compatibility + getMoonBonus(moonPhase, areaKey, stone);
+        score += influence.primaryWeight * getAreaBonusBySign(influence.primarySign, areaKey, stone);
+        score += influence.adjacentWeight * getAreaBonusBySign(influence.adjacentSign, areaKey, stone);
+        if (!map[stone] || map[stone].score < score) map[stone] = { stone: stone, score: Number(score.toFixed(2)), area: areaKey, direction: area.direction, element: area.element, areaLabel: area.label, compatibility: compatibility };
       }
     }
-    return Object.keys(map).map(function(key){ return map[key]; }).sort(function(a, b){ return b.score - a.score; });
+    return { ranked: Object.keys(map).map(function(k){ return map[k]; }).sort(function(a, b){ return b.score - a.score; }), firstArea: firstArea };
   }
 
   function createNode(tag, text){
@@ -200,9 +191,7 @@
     return node;
   }
 
-  function clearNode(node){
-    while (node.firstChild) node.removeChild(node.firstChild);
-  }
+  function clearNode(node){ while (node.firstChild) node.removeChild(node.firstChild); }
 
   function buildLabelRow(label, value){
     var p = createNode('p');
@@ -213,40 +202,40 @@
   }
 
   function calculateRecommendation(formValues){
-    var influence = computeZodiacInfluence(formValues.birthDate) || {
-      primarySign: formValues.zodiacSign,
-      adjacentSign: null,
-      primaryWeight: 1,
-      adjacentWeight: 0,
-      primaryLabel: (zodiacSigns.find(function(s){ return s.id === formValues.zodiacSign; }) || {}).label || formValues.zodiacSign,
-      adjacentLabel: null
-    };
+    var influence = computeZodiacInfluence(formValues.birthDate) || { primarySign: formValues.zodiacSign, adjacentSign: null, primaryWeight: 1, adjacentWeight: 0, primaryLabel: formValues.zodiacSign, adjacentLabel: null };
     var zodiacId = influence.primarySign || formValues.zodiacSign;
     var zodiacData = zodiacStones[zodiacId] || { power: 'Ametyst', protective: 'Czarny turmalin' };
     var moonPhase = detectMoonPhase(formValues.birthDate) || 'New';
-    var ranked = formValues.skills.length ? scoreSkillStones(formValues.skills, influence, moonPhase) : [];
+    var userElement = getChineseElement(formValues.birthYear);
+    var score = formValues.areas.length ? scoreAreaStones(formValues.areas, influence, moonPhase, userElement) : { ranked: [], firstArea: null };
+    var ranked = score.ranked;
     var topStone = ranked.length ? ranked[0].stone : 'Kryształ górski';
-    var tags = ranked.slice(0, 3).map(function(item){ return item.stone; });
-    if (!tags.length) tags.push('Kryształ górski');
+    var area = score.firstArea || { label: 'Brak', direction: '-', element: '-' };
+    var topArea = ranked.length ? ranked[0] : { compatibility: 0 };
     return {
       influence: influence,
       moonPhase: moonPhase,
       moonLabel: moonPhaseLabels[moonPhase] || moonPhase,
+      chineseElement: userElement || '-',
+      area: { label: area.label, direction: area.direction, element: area.element },
+      compatibility: Number(topArea.compatibility || 0),
       powerStone: zodiacData.power + ' + ' + topStone,
       protectiveStone: zodiacData.protective,
-      tags: tags,
-      why: influence.adjacentWeight > 0 ? ('Cusp zwiększa wpływ ' + influence.adjacentLabel + ', więc kamienie tego znaku dostały premię.') : 'Dominujący znak prowadzi dobór kamieni bez domieszki cusp.'
+      tags: ranked.slice(0, 3).map(function(item){ return item.stone; }),
+      why: 'Dobór łączy kierunek ' + area.direction + ', żywioł ' + area.element + ' i fazę Księżyca ' + (moonPhaseLabels[moonPhase] || moonPhase) + '.'
     };
   }
 
   function renderResult(form, resultNode){
-    var zodiacLabel = (zodiacSigns.find(function(item){ return item.id === form.zodiacSign.value; }) || {}).label || form.zodiacSign.value;
+    var zodiac = form.zodiacSign.value;
+    var zodiacLabel = (zodiacSigns.filter(function(item){ return item.id === zodiac; })[0] || {}).label || zodiac;
     var values = {
       birthDate: form.birthDate.value,
-      zodiacSign: form.zodiacSign.value,
+      birthYear: form.birthYear.value,
+      zodiacSign: zodiac,
       chineseSign: form.chineseSign.value,
       gender: (form.querySelector('input[name="gender"]:checked') || {}).value || '',
-      skills: getSelectedSkills(form)
+      areas: getSelectedAreas(form)
     };
     var rec = calculateRecommendation(values);
     var primaryPct = Math.round(rec.influence.primaryWeight * 100);
@@ -258,21 +247,20 @@
     resultNode.appendChild(buildLabelRow('Moc główna', rec.powerStone));
     resultNode.appendChild(buildLabelRow('Kamień ochronny', rec.protectiveStone));
     resultNode.appendChild(buildLabelRow('Profil', zodiacLabel + ', ' + values.chineseSign + ', ' + values.gender));
-    if (adjPct > 0 && rec.influence.adjacentLabel) {
-      resultNode.appendChild(buildLabelRow('Wpływy znaków', rec.influence.primaryLabel + ' ' + primaryPct + '% + ' + rec.influence.adjacentLabel + ' ' + adjPct + '%'));
-    } else {
-      resultNode.appendChild(buildLabelRow('Wpływy znaków', rec.influence.primaryLabel + ' 100%'));
-    }
+    resultNode.appendChild(buildLabelRow('Obszar Feng Shui', rec.area.label));
+    resultNode.appendChild(buildLabelRow('Kierunek', rec.area.direction));
+    resultNode.appendChild(buildLabelRow('Żywioł', rec.area.element));
+    resultNode.appendChild(buildLabelRow('Twój żywioł chiński', rec.chineseElement));
+    resultNode.appendChild(buildLabelRow('Kompatybilność żywiołów', String(rec.compatibility)));
+    if (adjPct > 0 && rec.influence.adjacentLabel) resultNode.appendChild(buildLabelRow('Wpływy znaków', rec.influence.primaryLabel + ' ' + primaryPct + '% + ' + rec.influence.adjacentLabel + ' ' + adjPct + '%'));
+    else resultNode.appendChild(buildLabelRow('Wpływy znaków', rec.influence.primaryLabel + ' 100%'));
     resultNode.appendChild(buildLabelRow('Faza Księżyca', rec.moonLabel));
     resultNode.appendChild(buildLabelRow('Dlaczego', rec.why));
 
     var tags = createNode('div');
     tags.className = 'talisman-tags';
-    for (var i = 0; i < rec.tags.length; i++) {
-      var chip = createNode('span', rec.tags[i]);
-      chip.className = 'talisman-tag';
-      tags.appendChild(chip);
-    }
+    var tagList = rec.tags.length ? rec.tags : ['Kryształ górski'];
+    for (var i = 0; i < tagList.length; i++) { var chip = createNode('span', tagList[i]); chip.className = 'talisman-tag'; tags.appendChild(chip); }
     resultNode.appendChild(tags);
   }
 
@@ -282,13 +270,8 @@
     for (var i = 0; i < values.length; i++) {
       var item = values[i];
       var option = document.createElement('option');
-      if (typeof item === 'string') {
-        option.value = item;
-        option.textContent = item;
-      } else {
-        option.value = item[keyName];
-        option.textContent = item.label;
-      }
+      if (typeof item === 'string') { option.value = item; option.textContent = item; }
+      else { option.value = item[keyName]; option.textContent = item.label; }
       select.appendChild(option);
     }
   }
@@ -299,31 +282,14 @@
     if (!form || !resultNode) return;
     populateSelect(form.zodiacSign, zodiacSigns, 'id');
     populateSelect(form.chineseSign, chineseSigns);
-
-    form.birthDate.addEventListener('change', function(){
-      var influence = computeZodiacInfluence(form.birthDate.value);
-      if (influence && influence.primarySign) form.zodiacSign.value = influence.primarySign;
-    });
-    form.birthYear.addEventListener('change', function(){
-      var chinese = detectChineseFromYear(form.birthYear.value);
-      if (chinese) form.chineseSign.value = chinese;
-    });
-    form.addEventListener('submit', function(event){
-      event.preventDefault();
-      if (!form.checkValidity()) return;
-      renderResult(form, resultNode);
-    });
+    form.birthDate.addEventListener('change', function(){ var influence = computeZodiacInfluence(form.birthDate.value); if (influence && influence.primarySign) form.zodiacSign.value = influence.primarySign; });
+    form.birthYear.addEventListener('change', function(){ var chinese = detectChineseFromYear(form.birthYear.value); if (chinese) form.chineseSign.value = chinese; });
+    form.addEventListener('submit', function(event){ event.preventDefault(); if (!form.checkValidity()) return; renderResult(form, resultNode); });
   }
 
   if (typeof window !== 'undefined') {
-    window.__TalizmanEngine = {
-      computeZodiacInfluence: computeZodiacInfluence,
-      detectMoonPhase: detectMoonPhase,
-      calculateRecommendation: calculateRecommendation,
-      detectChineseFromYear: detectChineseFromYear
-    };
+    window.__TalizmanEngine = { computeZodiacInfluence: computeZodiacInfluence, detectMoonPhase: detectMoonPhase, calculateRecommendation: calculateRecommendation, detectChineseFromYear: detectChineseFromYear, getChineseElement: getChineseElement, getElementCompatibilityScore: getElementCompatibilityScore, baguaAreas: baguaAreas };
   }
-
   if (typeof document !== 'undefined') {
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
   }
