@@ -46,7 +46,7 @@ const run = async () => {
       return { transaction: { id: "unexpected" } };
     },
     applyLeaveTable: () => {
-      throw new Error("boom");
+      throw new Error("invalid_player");
     },
     klog: () => {},
   });
@@ -57,16 +57,19 @@ const run = async () => {
     body: JSON.stringify({ tableId }),
   });
 
-  assert.equal(response.statusCode, 409);
+  assert.equal(response.statusCode, 200);
   const payload = JSON.parse(response.body || "{}");
-  assert.equal(payload.error, "state_invalid");
+  assert.equal(payload.ok, true);
+  assert.equal(payload.status, "already_left");
+  assert.equal(payload.cashedOut, 0);
+  assert.equal(payload.seatNo, 1);
   assert.equal(stateUpdateCount, 0);
-  assert.equal(seatDeleteCount, 0);
   assert.equal(postTransactionCalls, 0);
+  assert.equal(seatDeleteCount, 1);
 };
 
 run()
-  .then(() => console.log("poker-leave reducer throw does-not-mutate behavior test passed"))
+  .then(() => console.log("poker-leave invalid_player reducer throw treated as noop test passed"))
   .catch((error) => {
     console.error(error);
     process.exit(1);

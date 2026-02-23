@@ -56,6 +56,12 @@ const normalizeSeatStack = (value) => {
 const normalizeNonNegativeInt = (n) =>
   Number.isInteger(n) && n >= 0 && Math.abs(n) <= Number.MAX_SAFE_INTEGER ? n : null;
 
+const isInvalidPlayerLeaveNoop = (error) => {
+  const code = typeof error?.code === "string" ? error.code.trim().toLowerCase() : "";
+  const message = typeof error?.message === "string" ? error.message.trim().toLowerCase() : "";
+  return code === "invalid_player" || message === "invalid_player";
+};
+
 export async function handler(event) {
   const origin = event.headers?.origin || event.headers?.Origin;
   const cors = corsHeaders(origin);
@@ -222,12 +228,54 @@ export async function handler(event) {
         try {
           leaveApplied = applyLeaveTable(currentState, { userId: auth.userId, requestId: reducerRequestId });
         } catch (error) {
+          const isInvalidPlayer = isInvalidPlayerLeaveNoop(error);
           klog("poker_leave_reducer_throw", {
             tableId,
             userId: auth.userId,
             requestId: reducerRequestId || null,
             message: error?.message || "unknown_error",
+            code: error?.code || null,
+            noop: isInvalidPlayer,
           });
+          if (isInvalidPlayer) {
+            if (seatRow) {
+              await tx.unsafe("delete from public.poker_seats where table_id = $1 and user_id = $2;", [
+                tableId,
+                auth.userId,
+              ]);
+            }
+            const resultPayload = {
+              ok: true,
+              tableId,
+              cashedOut: 0,
+              seatNo: Number.isInteger(seatNo) ? seatNo : null,
+              status: "already_left",
+              ...(includeState
+                ? {
+                    state: {
+                      version: expectedVersion,
+                      state: withoutPrivateState(currentState),
+                    },
+                  }
+                : {}),
+            };
+            if (normalizedRequestId) {
+              await storePokerRequestResult(tx, {
+                tableId,
+                userId: auth.userId,
+                requestId: normalizedRequestId,
+                kind: "LEAVE",
+                result: resultPayload,
+              });
+            }
+            klog("poker_leave_already_left_noop", {
+              tableId,
+              userId: auth.userId,
+              requestId: normalizedRequestId || null,
+              reason: "invalid_player",
+            });
+            return resultPayload;
+          }
           throw makeError(409, "state_invalid");
         }
 
