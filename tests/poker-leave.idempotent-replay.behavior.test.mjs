@@ -89,7 +89,7 @@ const handler = loadPokerHandler("netlify/functions/poker-leave.mjs", {
 const event = {
   httpMethod: "POST",
   headers: { origin: "https://example.test", authorization: "Bearer token" },
-  body: JSON.stringify({ tableId, requestId }),
+  body: JSON.stringify({ tableId, requestId, includeState: true }),
 };
 
 const first = await handler(event);

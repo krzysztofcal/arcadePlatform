@@ -83,6 +83,7 @@ export async function handler(event) {
   if (payload && !isPlainObject(payload)) {
     return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "invalid_payload" }) };
   }
+  const includeState = payload?.includeState === true;
 
   const tableIdValue = payload?.tableId;
   const tableIdRaw = typeof tableIdValue === "string" ? tableIdValue : "";
@@ -303,10 +304,14 @@ export async function handler(event) {
           tableId,
           cashedOut: cashOutAmount,
           seatNo: seatNo ?? null,
-          state: {
-            version: updateResult.newVersion,
-            state: publicState,
-          },
+          ...(includeState
+            ? {
+                state: {
+                  version: updateResult.newVersion,
+                  state: publicState,
+                },
+              }
+            : {}),
         };
         await storePokerRequestResult(tx, {
           tableId,

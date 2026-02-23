@@ -77,7 +77,7 @@ const handler = loadPokerHandler("netlify/functions/poker-leave.mjs", {
 const response = await handler({
   httpMethod: "POST",
   headers: { origin: "https://example.test", authorization: "Bearer token" },
-  body: JSON.stringify({ tableId, requestId: "leave-1" }),
+  body: JSON.stringify({ tableId, requestId: "leave-1", includeState: true }),
 });
 
 assert.equal(response.statusCode, 200);
