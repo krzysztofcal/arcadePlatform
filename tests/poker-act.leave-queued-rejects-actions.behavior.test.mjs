@@ -18,9 +18,15 @@ const run = async () => {
     normalizeJsonState: (value) => value,
     isStateStorageValid: () => true,
     withoutPrivateState: (state) => state,
-    computeLegalActions: () => ({ actions: ["CHECK"] }),
-    buildActionConstraints: () => ({}),
-    resetTurnTimer: (state) => state,
+    computeLegalActions: () => {
+      throw new Error("should_not_reach_legal_actions");
+    },
+    buildActionConstraints: () => {
+      throw new Error("should_not_reach_action_constraints");
+    },
+    resetTurnTimer: () => {
+      throw new Error("should_not_reach_reset_turn_timer");
+    },
     beginSql: async (fn) =>
       fn({
         unsafe: async (query, params) => {
