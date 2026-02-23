@@ -5,6 +5,7 @@ import { normalizeRequestId } from "./_shared/poker-request-id.mjs";
 import { deletePokerRequest, ensurePokerRequest, storePokerRequestResult } from "./_shared/poker-idempotency.mjs";
 import { updatePokerStateOptimistic } from "./_shared/poker-state-write.mjs";
 import { applyLeaveTable } from "./_shared/poker-reducer.mjs";
+import { withoutPrivateState } from "./_shared/poker-state-utils.mjs";
 
 const REQUEST_PENDING_STALE_SEC = 30;
 
@@ -278,6 +279,7 @@ export async function handler(event) {
           [tableId]
         );
 
+        const publicState = withoutPrivateState(updatedState);
         const resultPayload = {
           ok: true,
           tableId,
@@ -285,7 +287,7 @@ export async function handler(event) {
           seatNo: seatNo ?? null,
           state: {
             version: updateResult.newVersion,
-            state: updatedState,
+            state: publicState,
           },
         };
         await storePokerRequestResult(tx, {

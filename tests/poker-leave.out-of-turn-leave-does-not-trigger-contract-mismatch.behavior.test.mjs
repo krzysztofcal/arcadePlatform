@@ -30,7 +30,7 @@ const stored = {
     allInByUserId: { [humanUserId]: false, [botUserId]: false, [thirdUserId]: false },
     contributionsByUserId: { [humanUserId]: 0, [botUserId]: 0, [thirdUserId]: 0 },
     community: [],
-    deck: [],
+    deck: [{ r: "A", s: "S" }, { r: "K", s: "H" }],
     currentBet: 0,
     lastRaiseSize: 0,
     dealerSeatNo: 1,
@@ -82,5 +82,6 @@ assert.equal(payload.state.state.leftTableByUserId[humanUserId], true);
 assert.equal(payload.state.state.foldedByUserId[humanUserId], true);
 assert.equal(payload.state.state.actedThisRoundByUserId[humanUserId], true);
 assert.equal(payload.state.state.turnUserId, botUserId);
+assert.equal(payload.state.state.deck, undefined);
 
 console.log("poker-leave out-of-turn behavior test passed");

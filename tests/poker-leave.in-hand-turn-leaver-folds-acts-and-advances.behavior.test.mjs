@@ -28,7 +28,7 @@ const stored = {
     allInByUserId: { [humanUserId]: false, [botUserId]: false },
     contributionsByUserId: { [humanUserId]: 0, [botUserId]: 0 },
     community: [],
-    deck: [],
+    deck: [{ r: "A", s: "S" }, { r: "K", s: "H" }],
     currentBet: 0,
     lastRaiseSize: 0,
     dealerSeatNo: 1,
@@ -80,5 +80,6 @@ assert.equal(payload.state.state.leftTableByUserId[humanUserId], true);
 assert.equal(payload.state.state.foldedByUserId[humanUserId], true);
 assert.equal(payload.state.state.actedThisRoundByUserId[humanUserId], true);
 assert.ok(payload.state.state.turnUserId === null || payload.state.state.turnUserId !== humanUserId);
+assert.equal(payload.state.state.deck, undefined);
 
 console.log("poker-leave in-hand turn leaver behavior test passed");

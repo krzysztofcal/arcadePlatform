@@ -31,7 +31,7 @@ const stored = {
     allInByUserId: { [humanUserId]: false, [botUserId]: false },
     contributionsByUserId: { [humanUserId]: 0, [botUserId]: 0 },
     community: [],
-    deck: [],
+    deck: [{ r: "A", s: "S" }, { r: "K", s: "H" }],
     currentBet: 0,
     lastRaiseSize: 0,
     dealerSeatNo: 1,
@@ -102,5 +102,7 @@ const secondBody = JSON.parse(second.body || "{}");
 assert.equal(firstBody.ok, true);
 assert.deepEqual(secondBody, firstBody);
 assert.equal(stored.stateUpdates, 1);
+assert.equal(firstBody.state?.state?.deck, undefined);
+assert.equal(secondBody.state?.state?.deck, undefined);
 
 console.log("poker-leave idempotent replay behavior test passed");
