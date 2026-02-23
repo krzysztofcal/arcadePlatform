@@ -4,10 +4,17 @@ import { postTransaction } from "./_shared/chips-ledger.mjs";
 import { normalizeRequestId } from "./_shared/poker-request-id.mjs";
 import { deletePokerRequest, ensurePokerRequest, storePokerRequestResult } from "./_shared/poker-idempotency.mjs";
 import { updatePokerStateOptimistic } from "./_shared/poker-state-write.mjs";
-import { applyLeaveTable } from "./_shared/poker-reducer.mjs";
-import { withoutPrivateState } from "./_shared/poker-state-utils.mjs";
+import { TURN_MS, advanceIfNeeded, applyLeaveTable } from "./_shared/poker-reducer.mjs";
+import { isStateStorageValid, withoutPrivateState } from "./_shared/poker-state-utils.mjs";
+import { buildSeatBotMap, getBotAutoplayConfig } from "./_shared/poker-bots.mjs";
+import { resetTurnTimer } from "./_shared/poker-turn-timer.mjs";
+import { clearMissedTurns } from "./_shared/poker-missed-turns.mjs";
+import { runAdvanceLoop, runBotAutoplayLoop } from "./_shared/poker-autoplay.mjs";
 
 const REQUEST_PENDING_STALE_SEC = 30;
+
+
+const isActionPhase = (phase) => phase === "PREFLOP" || phase === "FLOP" || phase === "TURN" || phase === "RIVER";
 
 const parseBody = (body) => {
   if (!body) return { ok: true, value: {} };
@@ -389,6 +396,116 @@ export async function handler(event) {
           throw makeError(409, "state_invalid");
         }
         mutated = true;
+
+        let latestState = updatedState;
+        let latestVersion = updateResult.newVersion;
+        if (!shouldDetachSeatAndStack) {
+          const seatRowsAll = await tx.unsafe(
+            "select user_id, seat_no, coalesce(is_bot, false) as is_bot from public.poker_seats where table_id = $1 and status = 'ACTIVE' order by seat_no asc;",
+            [tableId]
+          );
+          const seatBotMap = buildSeatBotMap(seatRowsAll);
+          const seatUserIdsInOrder = seatRowsAll
+            .map((row) => (typeof row?.user_id === "string" ? row.user_id : ""))
+            .filter(Boolean);
+
+          const leaveAdvanceEvents = [];
+          const leaveAdvanced = runAdvanceLoop(latestState, null, leaveAdvanceEvents, advanceIfNeeded);
+          latestState = leaveAdvanced.nextState;
+          if (leaveAdvanceEvents.length > 0) {
+            const advanceUpdateResult = await updatePokerStateOptimistic(tx, {
+              tableId,
+              expectedVersion: latestVersion,
+              nextState: latestState,
+            });
+            if (!advanceUpdateResult.ok) {
+              throw makeError(409, advanceUpdateResult.reason === "conflict" ? "state_conflict" : "state_invalid");
+            }
+            latestVersion = advanceUpdateResult.newVersion;
+          }
+
+          const botAutoplayConfig = getBotAutoplayConfig(process.env);
+          const buildPersistedFromPrivateState = (privateStateInput, actorUserId, actionRequestId) => {
+            const { holeCardsByUserId: _ignoredHoleCards, deck: _ignoredDeck, ...stateBase } = privateStateInput;
+            const updatedPrivate = {
+              ...stateBase,
+              communityDealt: Array.isArray(privateStateInput.community) ? privateStateInput.community.length : 0,
+              lastActionRequestIdByUserId: {
+                ...(stateBase?.lastActionRequestIdByUserId && typeof stateBase.lastActionRequestIdByUserId === "object"
+                  ? stateBase.lastActionRequestIdByUserId
+                  : {}),
+                [actorUserId]: actionRequestId,
+              },
+            };
+            const nowMsValue = Date.now();
+            const hasTurn = typeof updatedPrivate.turnUserId === "string" && updatedPrivate.turnUserId.trim();
+            const withTimer = isActionPhase(updatedPrivate.phase) && hasTurn
+              ? resetTurnTimer(updatedPrivate, nowMsValue, TURN_MS)
+              : { ...updatedPrivate, turnStartedAt: null, turnDeadlineAt: null };
+            const cleared = clearMissedTurns(withTimer, actorUserId);
+            return cleared.changed ? cleared.nextState : withTimer;
+          };
+
+          const autoplay = await runBotAutoplayLoop({
+            tableId,
+            requestId: normalizedRequestId || `leave:${Date.now()}`,
+            initialState: latestState,
+            initialPrivateState: latestState,
+            initialVersion: latestVersion,
+            seatBotMap,
+            seatUserIdsInOrder,
+            maxActions: botAutoplayConfig.maxActionsPerRequest,
+            botsOnlyHandCompletionHardCap: botAutoplayConfig.botsOnlyHandCompletionHardCap,
+            policyVersion: botAutoplayConfig.policyVersion,
+            klog,
+            isActionPhase,
+            advanceIfNeeded,
+            buildPersistedFromPrivateState,
+            persistStep: async ({ botTurnUserId, botAction, botRequestId, fromState, persistedState, privateState, loopVersion }) => {
+              if (!isStateStorageValid(persistedState, { requireHandSeed: true, requireCommunityDealt: true, requireNoDeck: true })) {
+                return { ok: false, reason: "invalid_persist_state" };
+              }
+              const botUpdateResult = await updatePokerStateOptimistic(tx, {
+                tableId,
+                expectedVersion: loopVersion,
+                nextState: persistedState,
+              });
+              if (!botUpdateResult.ok) {
+                return { ok: false, reason: botUpdateResult.reason === "conflict" ? "optimistic_conflict" : "update_failed" };
+              }
+              await tx.unsafe(
+                "insert into public.poker_actions (table_id, version, user_id, action_type, amount, hand_id, request_id, phase_from, phase_to, meta) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb);",
+                [
+                  tableId,
+                  botUpdateResult.newVersion,
+                  botTurnUserId,
+                  botAction.type,
+                  botAction.amount ?? null,
+                  typeof persistedState.handId === "string" && persistedState.handId.trim() ? persistedState.handId.trim() : null,
+                  botRequestId,
+                  fromState.phase || null,
+                  persistedState.phase || null,
+                  JSON.stringify({ actor: "BOT", botUserId: botTurnUserId, policyVersion: botAutoplayConfig.policyVersion, reason: "AUTO_TURN_LEAVE" }),
+                ]
+              );
+              return { ok: true, loopVersion: botUpdateResult.newVersion, responseFinalState: persistedState, loopPrivateState: privateState };
+            },
+          });
+
+          latestState = autoplay.responseFinalState;
+          latestVersion = autoplay.loopVersion;
+          if (autoplay.botActionCount > 0 || leaveAdvanceEvents.length > 0) {
+            mutated = true;
+            klog("poker_leave_autoplay_advanced", {
+              tableId,
+              userId: auth.userId,
+              advanceEvents: leaveAdvanceEvents.length,
+              botActionCount: autoplay.botActionCount,
+              stopReason: autoplay.botStopReason,
+            });
+          }
+        }
+
         if (shouldDetachSeatAndStack) {
           await tx.unsafe("delete from public.poker_seats where table_id = $1 and user_id = $2;", [
             tableId,
@@ -401,7 +518,7 @@ export async function handler(event) {
           [tableId]
         );
 
-        const publicState = withoutPrivateState(updatedState);
+        const publicState = withoutPrivateState(latestState);
         const resultPayload = {
           ok: true,
           tableId,
@@ -411,7 +528,7 @@ export async function handler(event) {
           ...(includeState
             ? {
                 state: {
-                  version: updateResult.newVersion,
+                  version: latestVersion,
                   state: publicState,
                 },
               }
