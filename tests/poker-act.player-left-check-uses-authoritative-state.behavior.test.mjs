@@ -20,8 +20,12 @@ const run = async () => {
     computeLegalActions: () => {
       throw new Error("should_not_reach_legal_actions");
     },
-    buildActionConstraints: () => ({}),
-    resetTurnTimer: (state) => state,
+    buildActionConstraints: () => {
+      throw new Error("should_not_reach_action_constraints");
+    },
+    resetTurnTimer: () => {
+      throw new Error("should_not_reach_reset_turn_timer");
+    },
     beginSql: async (fn) =>
       fn({
         unsafe: async (query) => {
