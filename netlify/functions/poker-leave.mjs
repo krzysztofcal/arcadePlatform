@@ -51,8 +51,21 @@ const sanitizePersistedState = (stateInput) => {
   return sanitizePerHandArtifacts(rest);
 };
 
+const isHandScopedForStorageValidation = (state) => {
+  const handId = typeof state?.handId === "string" ? state.handId.trim() : "";
+  const phase = typeof state?.phase === "string" ? state.phase : "";
+  if (handId) return true;
+  if (isActionPhase(phase)) return true;
+  return phase === "SHOWDOWN" || phase === "SETTLED";
+};
+
 const validatePersistedStateOrThrow = (state, makeErrorFn) => {
-  if (!isStateStorageValid(state, { requireHandSeed: true, requireCommunityDealt: true, requireNoDeck: true })) {
+  const requireHandScopedData = isHandScopedForStorageValidation(state);
+  if (!isStateStorageValid(state, {
+    requireNoDeck: true,
+    requireHandSeed: requireHandScopedData,
+    requireCommunityDealt: requireHandScopedData,
+  })) {
     throw makeErrorFn(409, "state_invalid");
   }
 };
