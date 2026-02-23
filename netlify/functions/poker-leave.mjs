@@ -4,6 +4,8 @@ import { postTransaction } from "./_shared/chips-ledger.mjs";
 import { normalizeRequestId } from "./_shared/poker-request-id.mjs";
 import { deletePokerRequest, ensurePokerRequest, storePokerRequestResult } from "./_shared/poker-idempotency.mjs";
 import { updatePokerStateOptimistic } from "./_shared/poker-state-write.mjs";
+import { applyLeaveTable } from "./_shared/poker-reducer.mjs";
+import { withoutPrivateState } from "./_shared/poker-state-utils.mjs";
 
 const REQUEST_PENDING_STALE_SEC = 30;
 
@@ -81,6 +83,7 @@ export async function handler(event) {
   if (payload && !isPlainObject(payload)) {
     return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "invalid_payload" }) };
   }
+  const includeState = payload?.includeState === true;
 
   const tableIdValue = payload?.tableId;
   const tableIdRaw = typeof tableIdValue === "string" ? tableIdValue : "";
@@ -236,17 +239,41 @@ export async function handler(event) {
           hadStack: stackValue != null,
         });
 
-        const seats = seatsBefore.filter((seatItem) => seatItem?.userId !== auth.userId);
-        const updatedStacks = { ...stacks };
-        delete updatedStacks[auth.userId];
+        const leaveApplied = applyLeaveTable(currentState, { userId: auth.userId, requestId });
+        if (!isPlainObject(leaveApplied?.state)) {
+          klog("poker_leave_invalid_reducer_state", { tableId, userId: auth.userId, hasState: leaveApplied?.state != null });
+          throw makeError(409, "state_invalid");
+        }
+        const leaveState = normalizeState(leaveApplied.state);
+        const leavePhase = typeof leaveState.phase === "string" ? leaveState.phase : "";
+        const hasActiveHandId = typeof leaveState.handId === "string" && leaveState.handId.trim() !== "";
+        const isActiveHandPhase = ["PREFLOP", "FLOP", "TURN", "RIVER", "SHOWDOWN"].includes(leavePhase);
+        const hasAnyActiveHandSignal = hasActiveHandId || isActiveHandPhase;
+        const shouldDetachSeatAndStack = !hasAnyActiveHandSignal;
+
+        const baseSeats = Array.isArray(leaveState.seats) ? leaveState.seats : parseSeats(currentState.seats);
+        const baseStacks = isPlainObject(leaveState.stacks) ? leaveState.stacks : parseStacks(currentState.stacks);
+        const seats = shouldDetachSeatAndStack
+          ? parseSeats(baseSeats).filter((seatItem) => seatItem?.userId !== auth.userId)
+          : parseSeats(baseSeats);
+        const updatedStacks = parseStacks(baseStacks);
+        const seatRetained = seats.some((seatItem) => seatItem?.userId === auth.userId);
+        if (shouldDetachSeatAndStack) {
+          delete updatedStacks[auth.userId];
+        } else if (seatRetained) {
+          const restoredStack = stateStack ?? seatStack;
+          if (normalizeNonNegativeInt(restoredStack) != null && normalizeNonNegativeInt(updatedStacks[auth.userId]) == null) {
+            updatedStacks[auth.userId] = restoredStack;
+          }
+        }
 
         const updatedState = {
-          ...currentState,
-          tableId: currentState.tableId || tableId,
+          ...leaveState,
+          tableId: leaveState.tableId || tableId,
           seats,
           stacks: updatedStacks,
-          pot: Number.isFinite(currentState.pot) ? currentState.pot : 0,
-          phase: currentState.phase || "INIT",
+          pot: Number.isFinite(leaveState.pot) ? leaveState.pot : 0,
+          phase: leaveState.phase || "INIT",
         };
 
         const updateResult = await updatePokerStateOptimistic(tx, {
@@ -264,18 +291,34 @@ export async function handler(event) {
           }
           throw makeError(409, "state_invalid");
         }
-        await tx.unsafe("delete from public.poker_seats where table_id = $1 and user_id = $2;", [
-          tableId,
-          auth.userId,
-        ]);
         mutated = true;
+        if (shouldDetachSeatAndStack) {
+          await tx.unsafe("delete from public.poker_seats where table_id = $1 and user_id = $2;", [
+            tableId,
+            auth.userId,
+          ]);
+        }
 
         await tx.unsafe(
           "update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1;",
           [tableId]
         );
 
-        const resultPayload = { ok: true, tableId, cashedOut: cashOutAmount, seatNo: seatNo ?? null };
+        const publicState = withoutPrivateState(updatedState);
+        const resultPayload = {
+          ok: true,
+          tableId,
+          cashedOut: cashOutAmount,
+          seatNo: seatNo ?? null,
+          ...(includeState
+            ? {
+                state: {
+                  version: updateResult.newVersion,
+                  state: publicState,
+                },
+              }
+            : {}),
+        };
         await storePokerRequestResult(tx, {
           tableId,
           userId: auth.userId,
