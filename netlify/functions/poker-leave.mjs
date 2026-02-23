@@ -243,7 +243,9 @@ export async function handler(event) {
         const leavePhase = typeof leaveState.phase === "string" ? leaveState.phase : "";
         const hasActiveHandId = typeof leaveState.handId === "string" && leaveState.handId.trim() !== "";
         const isActiveHandPhase = ["PREFLOP", "FLOP", "TURN", "RIVER", "SHOWDOWN"].includes(leavePhase);
-        const shouldDetachSeatAndStack = !isActiveHandPhase && !hasActiveHandId;
+        const isExplicitNoHandPhase = ["INIT", "HAND_DONE"].includes(leavePhase);
+        const hasAnyActiveHandSignal = hasActiveHandId || isActiveHandPhase;
+        const shouldDetachSeatAndStack = !hasAnyActiveHandSignal && isExplicitNoHandPhase;
 
         const seats = shouldDetachSeatAndStack
           ? parseSeats(leaveState.seats).filter((seatItem) => seatItem?.userId !== auth.userId)
