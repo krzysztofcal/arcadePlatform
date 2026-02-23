@@ -210,6 +210,20 @@ export async function handler(event) {
           klog("poker_leave_stack_negative", { tableId, userId: auth.userId, seatNo, stack: stackValue });
         }
 
+        const reducerRequestId = typeof requestId === "string" && requestId.trim() ? requestId.trim() : undefined;
+        let leaveApplied = null;
+        try {
+          leaveApplied = applyLeaveTable(currentState, { userId: auth.userId, requestId: reducerRequestId });
+        } catch (error) {
+          klog("poker_leave_reducer_throw", {
+            tableId,
+            userId: auth.userId,
+            requestId: reducerRequestId || null,
+            message: error?.message || "unknown_error",
+          });
+          throw makeError(409, "state_invalid");
+        }
+
         if (cashOutAmount > 0) {
           const escrowSystemKey = `POKER_TABLE:${tableId}`;
           const idempotencyKey = requestId
@@ -239,19 +253,6 @@ export async function handler(event) {
           hadStack: stackValue != null,
         });
 
-        const reducerRequestId = typeof requestId === "string" && requestId.trim() ? requestId.trim() : undefined;
-        let leaveApplied = null;
-        try {
-          leaveApplied = applyLeaveTable(currentState, { userId: auth.userId, requestId: reducerRequestId });
-        } catch (error) {
-          klog("poker_leave_reducer_throw", {
-            tableId,
-            userId: auth.userId,
-            requestId: reducerRequestId || null,
-            message: error?.message || "unknown_error",
-          });
-          throw makeError(409, "state_invalid");
-        }
         if (!isPlainObject(leaveApplied?.state)) {
           klog("poker_leave_invalid_reducer_state", { tableId, userId: auth.userId, hasState: leaveApplied?.state != null });
           throw makeError(409, "state_invalid");

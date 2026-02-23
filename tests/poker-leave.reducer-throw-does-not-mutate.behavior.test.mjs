@@ -7,6 +7,7 @@ const userId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const run = async () => {
   let stateUpdateCount = 0;
   let seatDeleteCount = 0;
+  let postTransactionCalls = 0;
 
   const handler = loadPokerHandler("netlify/functions/poker-leave.mjs", {
     baseHeaders: () => ({}),
@@ -40,6 +41,10 @@ const run = async () => {
           return [];
         },
       }),
+    postTransaction: async () => {
+      postTransactionCalls += 1;
+      return { transaction: { id: "unexpected" } };
+    },
     applyLeaveTable: () => {
       throw new Error("boom");
     },
@@ -57,6 +62,7 @@ const run = async () => {
   assert.equal(payload.error, "state_invalid");
   assert.equal(stateUpdateCount, 0);
   assert.equal(seatDeleteCount, 0);
+  assert.equal(postTransactionCalls, 0);
 };
 
 run()
