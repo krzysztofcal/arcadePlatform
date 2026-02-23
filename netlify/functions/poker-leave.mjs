@@ -239,7 +239,19 @@ export async function handler(event) {
           hadStack: stackValue != null,
         });
 
-        const leaveApplied = applyLeaveTable(currentState, { userId: auth.userId, requestId });
+        const reducerRequestId = typeof requestId === "string" && requestId.trim() ? requestId.trim() : undefined;
+        let leaveApplied = null;
+        try {
+          leaveApplied = applyLeaveTable(currentState, { userId: auth.userId, requestId: reducerRequestId });
+        } catch (error) {
+          klog("poker_leave_reducer_throw", {
+            tableId,
+            userId: auth.userId,
+            requestId: reducerRequestId || null,
+            message: error?.message || "unknown_error",
+          });
+          throw makeError(409, "state_invalid");
+        }
         if (!isPlainObject(leaveApplied?.state)) {
           klog("poker_leave_invalid_reducer_state", { tableId, userId: auth.userId, hasState: leaveApplied?.state != null });
           throw makeError(409, "state_invalid");
