@@ -1,9 +1,8 @@
 import assert from "node:assert/strict";
 import { loadPokerHandler } from "./helpers/poker-test-helpers.mjs";
 
-const tableId = "77777777-7777-4777-8777-777777777777";
-const userId = "abababab-abab-4bab-8bab-abababababab";
-const otherUserId = "cdcdcdcd-cdcd-4dcd-8dcd-cdcdcdcdcdcd";
+const tableId = "88888888-8888-4888-8888-888888888888";
+const userId = "12121212-1212-4121-8121-121212121212";
 
 const run = async () => {
   let stateUpdateCount = 0;
@@ -14,7 +13,7 @@ const run = async () => {
     extractBearerToken: () => "token",
     verifySupabaseJwt: async () => ({ valid: true, userId }),
     isValidUuid: () => true,
-    normalizeRequestId: () => ({ ok: true, value: "rid-queued-reject" }),
+    normalizeRequestId: () => ({ ok: true, value: "rid-authoritative" }),
     normalizeJsonState: (value) => value,
     isStateStorageValid: () => true,
     withoutPrivateState: (state) => state,
@@ -23,36 +22,31 @@ const run = async () => {
     resetTurnTimer: (state) => state,
     beginSql: async (fn) =>
       fn({
-        unsafe: async (query, params) => {
+        unsafe: async (query) => {
           const text = String(query).toLowerCase();
           if (text.includes("from public.poker_tables")) return [{ id: tableId, status: "OPEN", stakes: '{"sb":1,"bb":2}' }];
           if (text.includes("from public.poker_seats") && text.includes("user_id = $2")) return [{ user_id: userId }];
-          if (text.includes("from public.poker_seats") && text.includes("status = 'active'")) {
-            return [
-              { user_id: userId, seat_no: 1, is_bot: false },
-              { user_id: otherUserId, seat_no: 2, is_bot: false },
-            ];
-          }
+          if (text.includes("from public.poker_seats") && text.includes("status = 'active'")) return [{ user_id: userId, seat_no: 1, is_bot: false }];
           if (text.includes("from public.poker_state")) {
             return [{
-              version: 4,
+              version: 9,
               state: {
                 phase: "PREFLOP",
-                seats: [{ userId, seatNo: 1 }, { userId: otherUserId, seatNo: 2 }],
-                stacks: { [userId]: 80, [otherUserId]: 120 },
-                pot: 20,
+                seats: [{ userId, seatNo: 1 }],
+                stacks: { [userId]: 100 },
+                pot: 0,
                 community: [],
                 dealerSeatNo: 1,
                 turnUserId: userId,
-                handId: "hand-queued-leave",
-                handSeed: "seed-queued-leave",
+                handId: "hand-authoritative",
+                handSeed: "seed-authoritative",
                 communityDealt: 0,
-                toCallByUserId: { [userId]: 0, [otherUserId]: 0 },
-                betThisRoundByUserId: { [userId]: 0, [otherUserId]: 0 },
-                actedThisRoundByUserId: { [userId]: false, [otherUserId]: false },
-                foldedByUserId: { [userId]: false, [otherUserId]: false },
-                leftTableByUserId: { [userId]: true, [otherUserId]: false },
-                sitOutByUserId: { [userId]: false, [otherUserId]: false },
+                toCallByUserId: { [userId]: 0 },
+                betThisRoundByUserId: { [userId]: 0 },
+                actedThisRoundByUserId: { [userId]: false },
+                foldedByUserId: { [userId]: false },
+                leftTableByUserId: { [userId]: true },
+                sitOutByUserId: { [userId]: false },
                 pendingAutoSitOutByUserId: {},
                 currentBet: 0,
                 lastRaiseSize: 0,
@@ -62,12 +56,16 @@ const run = async () => {
           }
           if (text.includes("update public.poker_state") && text.includes("version = version + 1")) {
             stateUpdateCount += 1;
-            return [{ version: 5 }];
+            return [{ version: 10 }];
           }
           return [];
         },
       }),
     maybeApplyTurnTimeout: ({ state }) => ({ applied: false, state, action: null, events: [] }),
+    withoutPrivateState: () => ({ phase: "PREFLOP", seats: [], leftTableByUserId: {} }),
+    computeLegalActions: () => {
+      throw new Error("should_not_reach_legal_actions");
+    },
     loadHoleCardsByUserId: async () => ({ holeCardsByUserId: {}, holeCardsStatusByUserId: {} }),
     isHoleCardsTableMissing: async () => false,
     deriveCommunityCards: () => [],
@@ -78,7 +76,7 @@ const run = async () => {
   const response = await handler({
     httpMethod: "POST",
     headers: { origin: "https://example.test", authorization: "Bearer token" },
-    body: JSON.stringify({ tableId, requestId: "rid-queued-reject", action: { type: "CHECK" } }),
+    body: JSON.stringify({ tableId, requestId: "rid-authoritative", action: { type: "CHECK" } }),
   });
 
   assert.equal(response.statusCode, 409);
@@ -87,7 +85,7 @@ const run = async () => {
   assert.equal(stateUpdateCount, 0);
 };
 
-run().then(() => console.log("poker-act leave queued rejects actions behavior test passed")).catch((error) => {
+run().then(() => console.log("poker-act player_left uses authoritative state behavior test passed")).catch((error) => {
   console.error(error);
   process.exit(1);
 });

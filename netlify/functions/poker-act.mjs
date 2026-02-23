@@ -1134,7 +1134,7 @@ export async function handler(event) {
         return resultPayload;
       }
 
-      if (currentState?.leftTableByUserId?.[auth.userId] && actionParsed.value.type !== "LEAVE_TABLE") {
+      if (privateState?.leftTableByUserId?.[auth.userId] && actionParsed.value.type !== "LEAVE_TABLE") {
         klog("poker_act_rejected", {
           tableId,
           userId: auth.userId,
