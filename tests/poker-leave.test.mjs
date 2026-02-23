@@ -44,8 +44,8 @@ assert.ok(
   "leave should only log missing stack when raw stack is null"
 );
 assert.ok(
-  /if \(cashOutAmount > 0\) \{[\s\S]*?TABLE_CASH_OUT/.test(leaveSrc),
-  "leave should cash out only when positive amount exists"
+  /if \(shouldDetachSeatAndStack && cashOutAmount > 0\) \{[\s\S]*?TABLE_CASH_OUT/.test(leaveSrc),
+  "leave should cash out only when positive amount exists and detach is safe"
 );
 assert.ok(
   /poker:leave:\$\{tableId\}:\$\{auth\.userId\}:\$\{normalizedRequestId\}/.test(leaveSrc),
