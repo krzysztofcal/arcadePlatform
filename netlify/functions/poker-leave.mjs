@@ -6,7 +6,6 @@ import { deletePokerRequest, ensurePokerRequest, storePokerRequestResult } from 
 import { updatePokerStateOptimistic } from "./_shared/poker-state-write.mjs";
 import { advanceIfNeeded, applyLeaveTable } from "./_shared/poker-reducer.mjs";
 import { isStateStorageValid, withoutPrivateState } from "./_shared/poker-state-utils.mjs";
-import { buildSeatBotMap } from "./_shared/poker-bots.mjs";
 import { runAdvanceLoop } from "./_shared/poker-autoplay.mjs";
 
 const REQUEST_PENDING_STALE_SEC = 30;
@@ -48,10 +47,8 @@ const sanitizePersistedState = (stateInput) => {
 
 const isHandScopedForStorageValidation = (state) => {
   const handId = typeof state?.handId === "string" ? state.handId.trim() : "";
-  const phase = typeof state?.phase === "string" ? state.phase : "";
   if (handId) return true;
-  if (isActionPhase(phase)) return true;
-  return phase === "SHOWDOWN" || phase === "SETTLED";
+  return false;
 };
 
 const validatePersistedStateOrThrow = (state, makeErrorFn) => {
@@ -64,10 +61,6 @@ const validatePersistedStateOrThrow = (state, makeErrorFn) => {
     throw makeErrorFn(409, "state_invalid");
   }
 };
-
-function isActionPhase(phase) {
-  return phase === "PREFLOP" || phase === "FLOP" || phase === "TURN" || phase === "RIVER";
-}
 
 const parseBody = (body) => {
   if (!body) return { ok: true, value: {} };
@@ -455,15 +448,6 @@ export async function handler(event) {
         let latestState = updatedState;
         let latestVersion = updateResult.newVersion;
         if (!shouldDetachSeatAndStack) {
-          const seatRowsAll = await tx.unsafe(
-            "select user_id, seat_no, coalesce(is_bot, false) as is_bot from public.poker_seats where table_id = $1 and status = 'ACTIVE' order by seat_no asc;",
-            [tableId]
-          );
-          const seatBotMap = buildSeatBotMap(seatRowsAll);
-          const seatUserIdsInOrder = seatRowsAll
-            .map((row) => (typeof row?.user_id === "string" ? row.user_id : ""))
-            .filter(Boolean);
-
           const leaveAdvanceEvents = [];
           const leaveAdvanced = runAdvanceLoop(latestState, null, leaveAdvanceEvents, advanceIfNeeded);
           latestState = sanitizePersistedState(leaveAdvanced.nextState);
@@ -495,7 +479,7 @@ export async function handler(event) {
             reason: "missing_private_state",
             hasDeck: false,
             hasHoleCards: false,
-            seats: seatUserIdsInOrder.length,
+            seats: Array.isArray(latestState?.seats) ? latestState.seats.length : null,
           });
         }
 
