@@ -243,11 +243,7 @@ export async function handler(event) {
         const leavePhase = typeof leaveState.phase === "string" ? leaveState.phase : "";
         const hasActiveHandId = typeof leaveState.handId === "string" && leaveState.handId.trim() !== "";
         const isActiveHandPhase = ["PREFLOP", "FLOP", "TURN", "RIVER", "SHOWDOWN"].includes(leavePhase);
-        const wasParticipatingInHand =
-          !!leaveState?.leftTableByUserId?.[auth.userId] &&
-          !!leaveState?.foldedByUserId?.[auth.userId] &&
-          !!leaveState?.actedThisRoundByUserId?.[auth.userId];
-        const shouldDetachSeatAndStack = (!isActiveHandPhase && !hasActiveHandId) || !wasParticipatingInHand;
+        const shouldDetachSeatAndStack = !isActiveHandPhase && !hasActiveHandId;
 
         const seats = shouldDetachSeatAndStack
           ? parseSeats(leaveState.seats).filter((seatItem) => seatItem?.userId !== auth.userId)
