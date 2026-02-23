@@ -240,22 +240,27 @@ export async function handler(event) {
 
         const leaveApplied = applyLeaveTable(currentState, { userId: auth.userId, requestId });
         const leaveState = normalizeState(leaveApplied?.state);
-        const currentPhase = typeof currentState.phase === "string" ? currentState.phase : "";
-        const hasActiveHandId = typeof currentState.handId === "string" && currentState.handId.trim() !== "";
-        const isActiveHandPhase = ["PREFLOP", "FLOP", "TURN", "RIVER", "SHOWDOWN"].includes(currentPhase);
+        const leavePhase = typeof leaveState.phase === "string" ? leaveState.phase : "";
+        const hasActiveHandId = typeof leaveState.handId === "string" && leaveState.handId.trim() !== "";
+        const isActiveHandPhase = ["PREFLOP", "FLOP", "TURN", "RIVER", "SHOWDOWN"].includes(leavePhase);
         const wasParticipatingInHand =
-          !currentState?.foldedByUserId?.[auth.userId] &&
-          !currentState?.leftTableByUserId?.[auth.userId] &&
-          !currentState?.sitOutByUserId?.[auth.userId] &&
-          !currentState?.pendingAutoSitOutByUserId?.[auth.userId];
+          !!leaveState?.leftTableByUserId?.[auth.userId] &&
+          !!leaveState?.foldedByUserId?.[auth.userId] &&
+          !!leaveState?.actedThisRoundByUserId?.[auth.userId];
         const shouldDetachSeatAndStack = (!isActiveHandPhase && !hasActiveHandId) || !wasParticipatingInHand;
 
         const seats = shouldDetachSeatAndStack
           ? parseSeats(leaveState.seats).filter((seatItem) => seatItem?.userId !== auth.userId)
           : parseSeats(leaveState.seats);
         const updatedStacks = parseStacks(leaveState.stacks);
+        const seatRetained = seats.some((seatItem) => seatItem?.userId === auth.userId);
         if (shouldDetachSeatAndStack) {
           delete updatedStacks[auth.userId];
+        } else if (seatRetained) {
+          const restoredStack = stateStack ?? seatStack;
+          if (normalizeNonNegativeInt(restoredStack) != null && normalizeNonNegativeInt(updatedStacks[auth.userId]) == null) {
+            updatedStacks[auth.userId] = restoredStack;
+          }
         }
 
         const updatedState = {
