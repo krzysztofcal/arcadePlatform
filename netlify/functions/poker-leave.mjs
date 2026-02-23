@@ -4,6 +4,7 @@ import { postTransaction } from "./_shared/chips-ledger.mjs";
 import { normalizeRequestId } from "./_shared/poker-request-id.mjs";
 import { deletePokerRequest, ensurePokerRequest, storePokerRequestResult } from "./_shared/poker-idempotency.mjs";
 import { updatePokerStateOptimistic } from "./_shared/poker-state-write.mjs";
+import { applyLeaveTable } from "./_shared/poker-reducer.mjs";
 
 const REQUEST_PENDING_STALE_SEC = 30;
 
@@ -236,17 +237,19 @@ export async function handler(event) {
           hadStack: stackValue != null,
         });
 
-        const seats = seatsBefore.filter((seatItem) => seatItem?.userId !== auth.userId);
-        const updatedStacks = { ...stacks };
+        const leaveApplied = applyLeaveTable(currentState, { userId: auth.userId, requestId });
+        const leaveState = normalizeState(leaveApplied?.state);
+        const seats = parseSeats(leaveState.seats).filter((seatItem) => seatItem?.userId !== auth.userId);
+        const updatedStacks = parseStacks(leaveState.stacks);
         delete updatedStacks[auth.userId];
 
         const updatedState = {
-          ...currentState,
-          tableId: currentState.tableId || tableId,
+          ...leaveState,
+          tableId: leaveState.tableId || tableId,
           seats,
           stacks: updatedStacks,
-          pot: Number.isFinite(currentState.pot) ? currentState.pot : 0,
-          phase: currentState.phase || "INIT",
+          pot: Number.isFinite(leaveState.pot) ? leaveState.pot : 0,
+          phase: leaveState.phase || "INIT",
         };
 
         const updateResult = await updatePokerStateOptimistic(tx, {
@@ -275,7 +278,16 @@ export async function handler(event) {
           [tableId]
         );
 
-        const resultPayload = { ok: true, tableId, cashedOut: cashOutAmount, seatNo: seatNo ?? null };
+        const resultPayload = {
+          ok: true,
+          tableId,
+          cashedOut: cashOutAmount,
+          seatNo: seatNo ?? null,
+          state: {
+            version: updateResult.newVersion,
+            state: updatedState,
+          },
+        };
         await storePokerRequestResult(tx, {
           tableId,
           userId: auth.userId,
