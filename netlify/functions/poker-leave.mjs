@@ -4,10 +4,63 @@ import { postTransaction } from "./_shared/chips-ledger.mjs";
 import { normalizeRequestId } from "./_shared/poker-request-id.mjs";
 import { deletePokerRequest, ensurePokerRequest, storePokerRequestResult } from "./_shared/poker-idempotency.mjs";
 import { updatePokerStateOptimistic } from "./_shared/poker-state-write.mjs";
-import { applyLeaveTable } from "./_shared/poker-reducer.mjs";
-import { withoutPrivateState } from "./_shared/poker-state-utils.mjs";
+import { advanceIfNeeded, applyLeaveTable } from "./_shared/poker-reducer.mjs";
+import { isStateStorageValid, withoutPrivateState } from "./_shared/poker-state-utils.mjs";
+import { runAdvanceLoop } from "./_shared/poker-autoplay.mjs";
 
 const REQUEST_PENDING_STALE_SEC = 30;
+
+
+const isPlainObjectValue = (value) => value && typeof value === "object" && !Array.isArray(value);
+
+const clearMismatchedShowdown = (stateInput) => {
+  if (!isPlainObjectValue(stateInput) || !stateInput.showdown) return stateInput;
+  const handId = typeof stateInput.handId === "string" ? stateInput.handId.trim() : "";
+  const showdownHandId =
+    typeof stateInput.showdown?.handId === "string" && stateInput.showdown.handId.trim()
+      ? stateInput.showdown.handId.trim()
+      : "";
+  if (!handId || !showdownHandId || showdownHandId === handId) return stateInput;
+  const { showdown: _ignoredShowdown, ...sanitizedState } = stateInput;
+  return sanitizedState;
+};
+
+const clearMismatchedHandSettlement = (stateInput) => {
+  if (!isPlainObjectValue(stateInput) || !stateInput.handSettlement) return stateInput;
+  const handId = typeof stateInput.handId === "string" ? stateInput.handId.trim() : "";
+  const handSettlementHandId =
+    typeof stateInput.handSettlement?.handId === "string" && stateInput.handSettlement.handId.trim()
+      ? stateInput.handSettlement.handId.trim()
+      : "";
+  if (!handId || !handSettlementHandId || handSettlementHandId === handId) return stateInput;
+  const { handSettlement: _ignoredHandSettlement, ...sanitizedState } = stateInput;
+  return sanitizedState;
+};
+
+const sanitizePerHandArtifacts = (stateInput) => clearMismatchedHandSettlement(clearMismatchedShowdown(stateInput));
+
+const sanitizePersistedState = (stateInput) => {
+  if (!isPlainObjectValue(stateInput)) return stateInput;
+  const { deck: _ignoredDeck, holeCardsByUserId: _ignoredHoleCards, ...rest } = stateInput;
+  return sanitizePerHandArtifacts(rest);
+};
+
+const isHandScopedForStorageValidation = (state) => {
+  const handId = typeof state?.handId === "string" ? state.handId.trim() : "";
+  if (handId) return true;
+  return false;
+};
+
+const validatePersistedStateOrThrow = (state, makeErrorFn) => {
+  const requireHandScopedData = isHandScopedForStorageValidation(state);
+  if (!isStateStorageValid(state, {
+    requireNoDeck: true,
+    requireHandSeed: requireHandScopedData,
+    requireCommunityDealt: requireHandScopedData,
+  })) {
+    throw makeErrorFn(409, "state_invalid");
+  }
+};
 
 const parseBody = (body) => {
   if (!body) return { ok: true, value: {} };
@@ -363,7 +416,7 @@ export async function handler(event) {
           nextLeftTableByUserId[auth.userId] = true;
         }
 
-        const updatedState = {
+        const updatedStateRaw = {
           ...leaveState,
           tableId: leaveState.tableId || tableId,
           seats,
@@ -372,6 +425,8 @@ export async function handler(event) {
           pot: Number.isFinite(leaveState.pot) ? leaveState.pot : 0,
           phase: leaveState.phase || "INIT",
         };
+        const updatedState = sanitizePersistedState(updatedStateRaw);
+        validatePersistedStateOrThrow(updatedState, makeError);
 
         const updateResult = await updatePokerStateOptimistic(tx, {
           tableId,
@@ -389,6 +444,45 @@ export async function handler(event) {
           throw makeError(409, "state_invalid");
         }
         mutated = true;
+
+        let latestState = updatedState;
+        let latestVersion = updateResult.newVersion;
+        if (!shouldDetachSeatAndStack) {
+          const leaveAdvanceEvents = [];
+          const leaveAdvanced = runAdvanceLoop(latestState, null, leaveAdvanceEvents, advanceIfNeeded);
+          latestState = sanitizePersistedState(leaveAdvanced.nextState);
+          if (leaveAdvanceEvents.length > 0) {
+            validatePersistedStateOrThrow(latestState, makeError);
+            const advanceUpdateResult = await updatePokerStateOptimistic(tx, {
+              tableId,
+              expectedVersion: latestVersion,
+              nextState: latestState,
+            });
+            if (!advanceUpdateResult.ok) {
+              throw makeError(409, advanceUpdateResult.reason === "conflict" ? "state_conflict" : "state_invalid");
+            }
+            latestVersion = advanceUpdateResult.newVersion;
+          }
+
+          if (leaveAdvanceEvents.length > 0) {
+            mutated = true;
+            klog("poker_leave_advanced", {
+              tableId,
+              userId: auth.userId,
+              advanceEvents: leaveAdvanceEvents.length,
+            });
+          }
+
+          klog("poker_leave_autoplay_skipped", {
+            tableId,
+            userId: auth.userId,
+            reason: "missing_private_state",
+            hasDeck: false,
+            hasHoleCards: false,
+            seats: Array.isArray(latestState?.seats) ? latestState.seats.length : null,
+          });
+        }
+
         if (shouldDetachSeatAndStack) {
           await tx.unsafe("delete from public.poker_seats where table_id = $1 and user_id = $2;", [
             tableId,
@@ -401,7 +495,7 @@ export async function handler(event) {
           [tableId]
         );
 
-        const publicState = withoutPrivateState(updatedState);
+        const publicState = withoutPrivateState(latestState);
         const resultPayload = {
           ok: true,
           tableId,
@@ -411,7 +505,7 @@ export async function handler(event) {
           ...(includeState
             ? {
                 state: {
-                  version: updateResult.newVersion,
+                  version: latestVersion,
                   state: publicState,
                 },
               }

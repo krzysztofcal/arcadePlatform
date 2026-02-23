@@ -46,6 +46,7 @@ const handler = loadPokerHandler("netlify/functions/poker-leave.mjs", {
   isValidUuid: () => true,
   normalizeRequestId: () => ({ ok: true, value: "leave-waiting" }),
   updatePokerStateOptimistic,
+  isStateStorageValid: (state) => !state?.deck && !state?.holeCardsByUserId,
   ensurePokerRequest: async () => ({ status: "proceed" }),
   storePokerRequestResult: async () => {},
   deletePokerRequest: async () => {},

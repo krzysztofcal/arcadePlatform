@@ -19,9 +19,10 @@ import {
 import { cashoutBotSeatIfNeeded, ensureBotSeatInactiveForCashout } from "../../netlify/functions/_shared/poker-bot-cashout.mjs";
 import { startHandCore } from "../../netlify/functions/_shared/poker-start-hand-core.mjs";
 import { isValidUuid } from "../../netlify/functions/_shared/poker-utils.mjs";
-import { withoutPrivateState } from "../../netlify/functions/_shared/poker-state-utils.mjs";
+import { isStateStorageValid, withoutPrivateState } from "../../netlify/functions/_shared/poker-state-utils.mjs";
 import { hasActiveHumanGuardSql, shouldSeedBotsOnJoin, tableIdleCutoffExprSql } from "../../netlify/functions/_shared/poker-table-lifecycle.mjs";
-import { applyLeaveTable } from "../../netlify/functions/_shared/poker-reducer.mjs";
+import { advanceIfNeeded, applyLeaveTable } from "../../netlify/functions/_shared/poker-reducer.mjs";
+import { hasParticipatingHumanInHand, runAdvanceLoop, runBotAutoplayLoop } from "../../netlify/functions/_shared/poker-autoplay.mjs";
 
 const root = process.cwd();
 
@@ -130,6 +131,9 @@ export const loadPokerHandler = (filePath, mocks) => {
     "tableIdleCutoffExprSql",
     "hasActiveHumanGuardSql",
     "shouldSeedBotsOnJoin",
+    "hasParticipatingHumanInHand",
+    "runAdvanceLoop",
+    "runBotAutoplayLoop",
   ];
   const injectedNames = injectable.filter((name) => !declared.has(name));
   const destructureLine = injectedNames.length ? `const { ${injectedNames.join(", ")} } = mocks;` : "";
@@ -161,7 +165,9 @@ return handler;`
       buildSeatBotMap,
       isBotTurn,
       applyLeaveTable,
+      advanceIfNeeded,
       withoutPrivateState,
+      isStateStorageValid,
       getBotConfig,
       makeBotSystemKey,
       makeBotUserId,
@@ -171,6 +177,9 @@ return handler;`
       tableIdleCutoffExprSql,
       hasActiveHumanGuardSql,
       shouldSeedBotsOnJoin,
+      hasParticipatingHumanInHand,
+      runAdvanceLoop,
+      runBotAutoplayLoop,
       isValidUuid,
       areCardsUnique,
       cardIdentity,

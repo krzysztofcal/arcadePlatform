@@ -56,4 +56,13 @@ assert.ok(!/POKER_SYSTEM_ACTOR_USER_ID/.test(leaveSrc), "leave should not depend
 assert.ok(!/cashoutBotSeatIfNeeded/.test(leaveSrc), "leave should not use bot cashout helper");
 assert.ok(!/ensureBotSeatInactiveForCashout/.test(leaveSrc), "leave should not use bot inactive helper");
 assert.ok(!/getBotConfig/.test(leaveSrc), "leave should not read bot config");
-assert.ok(!/is_bot/.test(leaveSrc), "leave should not branch on is_bot");
+assert.ok(!/\bcoalesce\(is_bot\b/i.test(leaveSrc), "leave should not query is_bot");
+assert.ok(!/\bbuildSeatBotMap\s*\(/.test(leaveSrc), "leave should not build bot map");
+assert.ok(
+  /const shouldDetachSeatAndStack = !hasAnyActiveHandSignal;/.test(leaveSrc),
+  "leave detach-vs-queued actor semantics should be based on active-hand safety signals"
+);
+assert.ok(
+  /if \(!shouldDetachSeatAndStack\) \{\s*nextLeftTableByUserId\[auth\.userId\] = true;\s*\}/.test(leaveSrc),
+  "leave_queued actor left-flag semantics should not depend on bot classification"
+);

@@ -1,0 +1,107 @@
+import assert from "node:assert/strict";
+import { loadPokerHandler } from "./helpers/poker-test-helpers.mjs";
+
+const tableId = "33333333-3333-4333-8333-333333333333";
+const humanUserId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+const bot1 = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+const bot2 = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+
+const stored = {
+  version: 5,
+  state: {
+    tableId,
+    phase: "RIVER",
+    handId: "hand-no-autostart",
+    handSeed: "seed-3",
+    communityDealt: 0,
+    seats: [{ userId: humanUserId, seatNo: 1 }, { userId: bot1, seatNo: 2 }, { userId: bot2, seatNo: 3 }],
+    stacks: { [humanUserId]: 100, [bot1]: 100, [bot2]: 100 },
+    turnUserId: humanUserId,
+    toCallByUserId: { [humanUserId]: 0, [bot1]: 0, [bot2]: 0 },
+    betThisRoundByUserId: { [humanUserId]: 0, [bot1]: 0, [bot2]: 0 },
+    actedThisRoundByUserId: { [humanUserId]: false, [bot1]: false, [bot2]: false },
+    foldedByUserId: { [humanUserId]: false, [bot1]: false, [bot2]: false },
+    leftTableByUserId: { [humanUserId]: false, [bot1]: false, [bot2]: false },
+    sitOutByUserId: { [humanUserId]: false, [bot1]: false, [bot2]: false },
+    pendingAutoSitOutByUserId: {},
+    allInByUserId: { [humanUserId]: false, [bot1]: false, [bot2]: false },
+    contributionsByUserId: { [humanUserId]: 0, [bot1]: 0, [bot2]: 0 },
+    currentBet: 0,
+    lastRaiseSize: 0,
+    community: [],
+    pot: 0,
+  },
+};
+
+let startHandCalls = 0;
+const persistedStates = [];
+const updatePokerStateOptimistic = async (_tx, { expectedVersion, nextState }) => {
+  assert.equal(typeof nextState.deck, "undefined");
+  persistedStates.push(JSON.parse(JSON.stringify(nextState)));
+  if (expectedVersion !== stored.version) return { ok: false, reason: "conflict" };
+  stored.version += 1;
+  stored.state = JSON.parse(JSON.stringify(nextState));
+  return { ok: true, newVersion: stored.version };
+};
+
+const handler = loadPokerHandler("netlify/functions/poker-leave.mjs", {
+  baseHeaders: () => ({}),
+  corsHeaders: () => ({ "access-control-allow-origin": "https://example.test" }),
+  extractBearerToken: () => "token",
+  verifySupabaseJwt: async () => ({ valid: true, userId: humanUserId }),
+  isValidUuid: () => true,
+  normalizeRequestId: () => ({ ok: true, value: "leave-no-autostart" }),
+  ensurePokerRequest: async () => ({ status: "proceed" }),
+  updatePokerStateOptimistic,
+  isStateStorageValid: (state) => !state?.deck,
+  advanceIfNeeded: (state) => ({ state, events: [] }),
+  TURN_MS: 15000,
+  resetTurnTimer: (state) => state,
+  startHandCore: async () => {
+    startHandCalls += 1;
+    return {};
+  },
+  storePokerRequestResult: async () => {},
+  deletePokerRequest: async () => {},
+  runBotAutoplayLoop: async ({ initialState, initialVersion, persistStep }) => {
+    const done = { ...initialState, phase: "HAND_DONE", handId: "hand-no-autostart", turnUserId: null };
+    const persisted = await persistStep({
+      botTurnUserId: bot1,
+      botAction: { type: "CHECK" },
+      botRequestId: "bot:leave-no-autostart:1",
+      fromState: initialState,
+      persistedState: done,
+      privateState: done,
+      loopVersion: initialVersion,
+    });
+    return { responseFinalState: done, loopPrivateState: done, loopVersion: persisted.loopVersion, botActionCount: 1, botStopReason: "completed", responseEvents: [] };
+  },
+  beginSql: async (fn) =>
+    fn({
+      unsafe: async (query) => {
+        const text = String(query).toLowerCase();
+        if (text.includes("from public.poker_tables")) return [{ id: tableId, status: "OPEN" }];
+        if (text.includes("from public.poker_state")) return [{ version: stored.version, state: stored.state }];
+        if (text.includes("from public.poker_seats") && text.includes("for update")) return [{ seat_no: 1, status: "ACTIVE", stack: 100 }];
+        if (text.includes("from public.poker_seats") && text.includes("is_bot")) {
+          return [
+            { user_id: humanUserId, seat_no: 1, is_bot: false },
+            { user_id: bot1, seat_no: 2, is_bot: true },
+            { user_id: bot2, seat_no: 3, is_bot: true },
+          ];
+        }
+        return [];
+      },
+    }),
+  postTransaction: async () => ({ transaction: { id: "tx-1" } }),
+  klog: () => {},
+});
+
+const res = await handler({ httpMethod: "POST", headers: { origin: "https://example.test" }, body: JSON.stringify({ tableId, requestId: "leave-no-autostart", includeState: true }) });
+assert.equal(res.statusCode, 200);
+const payload = JSON.parse(res.body || "{}");
+assert.equal(payload.status, "leave_queued");
+assert.equal(payload.state.state.handId, "hand-no-autostart");
+assert.equal(startHandCalls, 0);
+assert.ok(persistedStates.every((state) => state.deck === undefined));
+console.log("poker-leave bots-only next hand not autostarted behavior test passed");
