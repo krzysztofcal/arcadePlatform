@@ -1,32 +1,36 @@
 import assert from "node:assert/strict";
 import { loadPokerHandler } from "./helpers/poker-test-helpers.mjs";
 import { updatePokerStateOptimistic } from "../netlify/functions/_shared/poker-state-write.mjs";
+import { buildActionConstraints, computeLegalActions } from "../netlify/functions/_shared/poker-legal-actions.mjs";
 
 const tableId = "11111111-1111-4111-8111-111111111111";
 const humanUserId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const botUserId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+const thirdUserId = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 
 const stored = {
-  version: 3,
+  version: 5,
   state: {
     tableId,
     phase: "PREFLOP",
+    handId: "hand-1",
     seats: [
       { userId: humanUserId, seatNo: 1 },
       { userId: botUserId, seatNo: 2 },
+      { userId: thirdUserId, seatNo: 3 },
     ],
-    stacks: { [humanUserId]: 100, [botUserId]: 100 },
+    stacks: { [humanUserId]: 100, [botUserId]: 100, [thirdUserId]: 100 },
     pot: 0,
     turnUserId: humanUserId,
-    toCallByUserId: { [humanUserId]: 0, [botUserId]: 0 },
-    betThisRoundByUserId: { [humanUserId]: 0, [botUserId]: 0 },
-    actedThisRoundByUserId: { [humanUserId]: false, [botUserId]: false },
-    foldedByUserId: { [humanUserId]: false, [botUserId]: false },
-    leftTableByUserId: { [humanUserId]: false, [botUserId]: false },
-    sitOutByUserId: { [humanUserId]: false, [botUserId]: false },
+    toCallByUserId: { [humanUserId]: 0, [botUserId]: 0, [thirdUserId]: 0 },
+    betThisRoundByUserId: { [humanUserId]: 0, [botUserId]: 0, [thirdUserId]: 0 },
+    actedThisRoundByUserId: { [humanUserId]: false, [botUserId]: false, [thirdUserId]: false },
+    foldedByUserId: { [humanUserId]: false, [botUserId]: false, [thirdUserId]: false },
+    leftTableByUserId: { [humanUserId]: false, [botUserId]: false, [thirdUserId]: false },
+    sitOutByUserId: { [humanUserId]: false, [botUserId]: false, [thirdUserId]: false },
     pendingAutoSitOutByUserId: {},
-    allInByUserId: { [humanUserId]: false, [botUserId]: false },
-    contributionsByUserId: { [humanUserId]: 0, [botUserId]: 0 },
+    allInByUserId: { [humanUserId]: false, [botUserId]: false, [thirdUserId]: false },
+    contributionsByUserId: { [humanUserId]: 0, [botUserId]: 0, [thirdUserId]: 0 },
     community: [],
     deck: [{ r: "A", s: "S" }, { r: "K", s: "H" }],
     currentBet: 0,
@@ -41,11 +45,8 @@ const handler = loadPokerHandler("netlify/functions/poker-leave.mjs", {
   extractBearerToken: () => "token",
   verifySupabaseJwt: async () => ({ valid: true, userId: humanUserId }),
   isValidUuid: () => true,
-  normalizeRequestId: () => ({ ok: true, value: "leave-1" }),
+  normalizeRequestId: () => ({ ok: true, value: "leave-legal" }),
   updatePokerStateOptimistic,
-  ensurePokerRequest: async () => ({ status: "proceed" }),
-  storePokerRequestResult: async () => {},
-  deletePokerRequest: async () => {},
   beginSql: async (fn) =>
     fn({
       unsafe: async (query, params) => {
@@ -70,17 +71,18 @@ const handler = loadPokerHandler("netlify/functions/poker-leave.mjs", {
 const response = await handler({
   httpMethod: "POST",
   headers: { origin: "https://example.test", authorization: "Bearer token" },
-  body: JSON.stringify({ tableId, requestId: "leave-1" }),
+  body: JSON.stringify({ tableId, requestId: "leave-legal" }),
 });
 
 assert.equal(response.statusCode, 200);
 const payload = JSON.parse(response.body || "{}");
 assert.equal(payload.ok, true);
-assert.equal(payload.state.state.leftTableByUserId[humanUserId], true);
-assert.equal(payload.state.state.foldedByUserId[humanUserId], true);
-assert.equal(payload.state.state.actedThisRoundByUserId[humanUserId], true);
-assert.equal(payload.state.state.seats.some((seat) => seat?.userId === humanUserId), true);
-assert.ok(payload.state.state.turnUserId === null || payload.state.state.turnUserId !== humanUserId);
+assert.ok(payload.state?.state?.turnUserId);
+const legal = computeLegalActions({ statePublic: payload.state.state, userId: payload.state.state.turnUserId });
+const constraints = buildActionConstraints(legal);
+assert.ok(Array.isArray(legal.actions));
+assert.ok(legal.actions.length > 0);
+assert.ok(constraints && typeof constraints === "object");
 assert.equal(payload.state.state.deck, undefined);
 
-console.log("poker-leave in-hand turn leaver behavior test passed");
+console.log("poker-leave mid-hand legal actions behavior test passed");

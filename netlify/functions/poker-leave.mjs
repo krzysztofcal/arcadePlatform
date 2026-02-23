@@ -240,9 +240,23 @@ export async function handler(event) {
 
         const leaveApplied = applyLeaveTable(currentState, { userId: auth.userId, requestId });
         const leaveState = normalizeState(leaveApplied?.state);
-        const seats = parseSeats(leaveState.seats).filter((seatItem) => seatItem?.userId !== auth.userId);
+        const currentPhase = typeof currentState.phase === "string" ? currentState.phase : "";
+        const hasActiveHandId = typeof currentState.handId === "string" && currentState.handId.trim() !== "";
+        const isActiveHandPhase = ["PREFLOP", "FLOP", "TURN", "RIVER", "SHOWDOWN"].includes(currentPhase);
+        const wasParticipatingInHand =
+          !currentState?.foldedByUserId?.[auth.userId] &&
+          !currentState?.leftTableByUserId?.[auth.userId] &&
+          !currentState?.sitOutByUserId?.[auth.userId] &&
+          !currentState?.pendingAutoSitOutByUserId?.[auth.userId];
+        const shouldDetachSeatAndStack = (!isActiveHandPhase && !hasActiveHandId) || !wasParticipatingInHand;
+
+        const seats = shouldDetachSeatAndStack
+          ? parseSeats(leaveState.seats).filter((seatItem) => seatItem?.userId !== auth.userId)
+          : parseSeats(leaveState.seats);
         const updatedStacks = parseStacks(leaveState.stacks);
-        delete updatedStacks[auth.userId];
+        if (shouldDetachSeatAndStack) {
+          delete updatedStacks[auth.userId];
+        }
 
         const updatedState = {
           ...leaveState,

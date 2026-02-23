@@ -81,6 +81,7 @@ assert.equal(payload.ok, true);
 assert.equal(payload.state.state.leftTableByUserId[humanUserId], true);
 assert.equal(payload.state.state.foldedByUserId[humanUserId], true);
 assert.equal(payload.state.state.actedThisRoundByUserId[humanUserId], true);
+assert.equal(payload.state.state.seats.some((seat) => seat?.userId === humanUserId), true);
 assert.equal(payload.state.state.turnUserId, botUserId);
 assert.equal(payload.state.state.deck, undefined);
 
