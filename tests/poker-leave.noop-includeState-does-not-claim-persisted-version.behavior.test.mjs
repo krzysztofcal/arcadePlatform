@@ -43,7 +43,9 @@ const run = async () => {
   assert.equal(response.statusCode, 200);
   const body = JSON.parse(response.body || "{}");
   assert.equal(body.status, "already_left");
-  assert.equal(body.state, undefined);
+  assert.ok(body.state && body.state.state);
+  assert.equal(body.state.version, null);
+  assert.equal(body.state.viewOnly, true);
   assert.ok(body.viewState);
 };
 

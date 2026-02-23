@@ -1134,6 +1134,17 @@ export async function handler(event) {
         return resultPayload;
       }
 
+      if (currentState?.leftTableByUserId?.[auth.userId] && actionParsed.value.type !== "LEAVE_TABLE") {
+        klog("poker_act_rejected", {
+          tableId,
+          userId: auth.userId,
+          reason: "player_left",
+          phase: currentState.phase,
+          actionType: actionParsed.value.type,
+        });
+        throw makeError(409, "player_left");
+      }
+
       if (currentState?.sitOutByUserId?.[auth.userId] && actionParsed.value.type !== "LEAVE_TABLE") {
         klog("poker_act_rejected", {
           tableId,

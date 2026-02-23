@@ -208,6 +208,11 @@ export async function handler(event) {
             status: "already_left",
             ...(includeState
               ? {
+                  state: {
+                    version: null,
+                    viewOnly: true,
+                    state: withoutPrivateState(sanitizeNoopResponseState(currentState, auth.userId)),
+                  },
                   viewState: withoutPrivateState(sanitizeNoopResponseState(currentState, auth.userId)),
                 }
               : {}),
@@ -266,6 +271,11 @@ export async function handler(event) {
               status: "already_left",
               ...(includeState
                 ? {
+                    state: {
+                      version: null,
+                      viewOnly: true,
+                      state: withoutPrivateState(sanitizeNoopResponseState(currentState, auth.userId)),
+                    },
                     viewState: withoutPrivateState(sanitizeNoopResponseState(currentState, auth.userId)),
                   }
                 : {}),
