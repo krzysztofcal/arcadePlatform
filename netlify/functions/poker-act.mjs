@@ -1639,10 +1639,6 @@ export async function handler(event) {
         }
       }
 
-      if (isActionPhase(responseFinalState.phase) && isBotTurn(responseFinalState.turnUserId, seatBotMap) && botActionCount < effectiveMaxBotActions) {
-        await runBotAutoplayLoop();
-      }
-
       const currentHandIdForLog =
         typeof responseFinalState?.handId === "string" && responseFinalState.handId.trim() ? responseFinalState.handId.trim() : null;
       klog("poker_act_bot_autoplay_stop", {
