@@ -208,10 +208,7 @@ export async function handler(event) {
             status: "already_left",
             ...(includeState
               ? {
-                  state: {
-                    version: expectedVersion,
-                    state: withoutPrivateState(sanitizeNoopResponseState(currentState, auth.userId)),
-                  },
+                  viewState: withoutPrivateState(sanitizeNoopResponseState(currentState, auth.userId)),
                 }
               : {}),
           };
@@ -269,10 +266,7 @@ export async function handler(event) {
               status: "already_left",
               ...(includeState
                 ? {
-                    state: {
-                      version: expectedVersion,
-                      state: withoutPrivateState(sanitizeNoopResponseState(currentState, auth.userId)),
-                    },
+                    viewState: withoutPrivateState(sanitizeNoopResponseState(currentState, auth.userId)),
                   }
                 : {}),
             };
@@ -342,14 +336,7 @@ export async function handler(event) {
         const baseStacks = isPlainObject(leaveState.stacks) ? leaveState.stacks : parseStacks(currentState.stacks);
         const seats = shouldDetachSeatAndStack
           ? parseSeats(baseSeats).filter((seatItem) => seatItem?.userId !== auth.userId)
-          : parseSeats(baseSeats).map((seatItem) =>
-              seatItem?.userId === auth.userId
-                ? {
-                    ...seatItem,
-                    status: "LEAVING",
-                  }
-                : seatItem
-            );
+          : parseSeats(baseSeats);
         const updatedStacks = parseStacks(baseStacks);
         const seatRetained = seats.some((seatItem) => seatItem?.userId === auth.userId);
         if (shouldDetachSeatAndStack) {
@@ -361,11 +348,17 @@ export async function handler(event) {
           }
         }
 
+        const nextLeftTableByUserId = isPlainObject(leaveState.leftTableByUserId) ? { ...leaveState.leftTableByUserId } : {};
+        if (!shouldDetachSeatAndStack) {
+          nextLeftTableByUserId[auth.userId] = true;
+        }
+
         const updatedState = {
           ...leaveState,
           tableId: leaveState.tableId || tableId,
           seats,
           stacks: updatedStacks,
+          leftTableByUserId: nextLeftTableByUserId,
           pot: Number.isFinite(leaveState.pot) ? leaveState.pot : 0,
           phase: leaveState.phase || "INIT",
         };

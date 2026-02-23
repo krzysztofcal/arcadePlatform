@@ -65,9 +65,10 @@ const run = async () => {
   assert.equal(absentBody.ok, true);
   assert.equal(absentBody.status, "already_left");
   assert.equal(absentBody.cashedOut, 0);
-  if (absentBody.state && absentBody.state.state) {
-    const absentSeats = Array.isArray(absentBody.state.state.seats) ? absentBody.state.state.seats : [];
-    const absentStacks = absentBody.state.state.stacks && typeof absentBody.state.state.stacks === "object" ? absentBody.state.state.stacks : {};
+  const absentViewState = absentBody.viewState || absentBody.state?.state || null;
+  if (absentViewState) {
+    const absentSeats = Array.isArray(absentViewState.seats) ? absentViewState.seats : [];
+    const absentStacks = absentViewState.stacks && typeof absentViewState.stacks === "object" ? absentViewState.stacks : {};
     assert.equal(absentSeats.some((seat) => seat?.userId === userId), false);
     assert.equal(Object.prototype.hasOwnProperty.call(absentStacks, userId), false);
   }

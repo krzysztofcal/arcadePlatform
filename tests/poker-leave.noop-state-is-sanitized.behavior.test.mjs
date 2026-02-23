@@ -58,9 +58,10 @@ const run = async () => {
   const body = JSON.parse(response.body || "{}");
   assert.equal(body.status, "already_left");
   assert.equal(body.cashedOut, 0);
-  assert.ok(body.state && body.state.state);
-  const seats = Array.isArray(body.state.state.seats) ? body.state.state.seats : [];
-  const stacks = body.state.state.stacks && typeof body.state.state.stacks === "object" ? body.state.state.stacks : {};
+  assert.ok(body.viewState);
+  assert.equal(body.state, undefined);
+  const seats = Array.isArray(body.viewState.seats) ? body.viewState.seats : [];
+  const stacks = body.viewState.stacks && typeof body.viewState.stacks === "object" ? body.viewState.stacks : {};
   assert.equal(seats.some((seat) => seat?.userId === userId), false);
   assert.equal(Object.prototype.hasOwnProperty.call(stacks, userId), false);
   assert.equal(postTransactionCalls, 0);

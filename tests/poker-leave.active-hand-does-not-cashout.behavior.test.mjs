@@ -80,7 +80,7 @@ const run = async () => {
   assert.ok(capturedNextState && capturedNextState.leftTableByUserId && capturedNextState.leftTableByUserId[userId] === true);
   const queuedSeat = Array.isArray(capturedNextState?.seats) ? capturedNextState.seats.find((seat) => seat?.userId === userId) : null;
   assert.ok(queuedSeat);
-  assert.equal(queuedSeat.status, "LEAVING");
+  assert.notEqual(queuedSeat.status, "LEAVING");
   assert.equal(capturedNextState?.stacks?.[userId], 125);
 };
 
