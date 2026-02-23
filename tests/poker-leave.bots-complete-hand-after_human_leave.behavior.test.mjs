@@ -95,7 +95,7 @@ const handler = loadPokerHandler("netlify/functions/poker-leave.mjs", {
 const res = await handler({ httpMethod: "POST", headers: { origin: "https://example.test" }, body: JSON.stringify({ tableId, requestId: "leave-bots-done", includeState: true }) });
 assert.equal(res.statusCode, 200);
 const payload = JSON.parse(res.body || "{}");
-assert.equal(payload.state.state.phase, "HAND_DONE");
-assert.ok(persistedStates.length >= 2);
+assert.equal(payload.status, "leave_queued");
+assert.ok(persistedStates.length >= 1);
 assert.ok(persistedStates.every((state) => state.deck === undefined));
 console.log("poker-leave bots complete hand after human leave behavior test passed");

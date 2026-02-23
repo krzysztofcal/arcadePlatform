@@ -100,7 +100,7 @@ const handler = loadPokerHandler("netlify/functions/poker-leave.mjs", {
 const res = await handler({ httpMethod: "POST", headers: { origin: "https://example.test" }, body: JSON.stringify({ tableId, requestId: "leave-no-autostart", includeState: true }) });
 assert.equal(res.statusCode, 200);
 const payload = JSON.parse(res.body || "{}");
-assert.equal(payload.state.state.phase, "HAND_DONE");
+assert.equal(payload.status, "leave_queued");
 assert.equal(payload.state.state.handId, "hand-no-autostart");
 assert.equal(startHandCalls, 0);
 assert.ok(persistedStates.every((state) => state.deck === undefined));

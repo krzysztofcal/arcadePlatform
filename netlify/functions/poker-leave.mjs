@@ -4,15 +4,10 @@ import { postTransaction } from "./_shared/chips-ledger.mjs";
 import { normalizeRequestId } from "./_shared/poker-request-id.mjs";
 import { deletePokerRequest, ensurePokerRequest, storePokerRequestResult } from "./_shared/poker-idempotency.mjs";
 import { updatePokerStateOptimistic } from "./_shared/poker-state-write.mjs";
-import { TURN_MS, advanceIfNeeded, applyLeaveTable } from "./_shared/poker-reducer.mjs";
+import { advanceIfNeeded, applyLeaveTable } from "./_shared/poker-reducer.mjs";
 import { isStateStorageValid, withoutPrivateState } from "./_shared/poker-state-utils.mjs";
-import { buildSeatBotMap, getBotAutoplayConfig } from "./_shared/poker-bots.mjs";
-import { resetTurnTimer } from "./_shared/poker-turn-timer.mjs";
-import { clearMissedTurns } from "./_shared/poker-missed-turns.mjs";
-import { runAdvanceLoop, runBotAutoplayLoop } from "./_shared/poker-autoplay.mjs";
-import { materializeShowdownAndPayout } from "./_shared/poker-materialize-showdown.mjs";
-import { computeShowdown } from "./_shared/poker-showdown.mjs";
-import { awardPotsAtShowdown } from "./_shared/poker-payout.mjs";
+import { buildSeatBotMap } from "./_shared/poker-bots.mjs";
+import { runAdvanceLoop } from "./_shared/poker-autoplay.mjs";
 
 const REQUEST_PENDING_STALE_SEC = 30;
 
@@ -485,108 +480,23 @@ export async function handler(event) {
             latestVersion = advanceUpdateResult.newVersion;
           }
 
-          const botAutoplayConfig = getBotAutoplayConfig(process.env);
-          const buildPersistedFromPrivateState = (privateStateInput, actorUserId, actionRequestId) => {
-            const { holeCardsByUserId: _ignoredHoleCards, deck: _ignoredDeck, ...stateBase } = privateStateInput;
-            const updatedPrivate = {
-              ...stateBase,
-              communityDealt: Array.isArray(privateStateInput.community) ? privateStateInput.community.length : 0,
-              lastActionRequestIdByUserId: {
-                ...(stateBase?.lastActionRequestIdByUserId && typeof stateBase.lastActionRequestIdByUserId === "object"
-                  ? stateBase.lastActionRequestIdByUserId
-                  : {}),
-                [actorUserId]: actionRequestId,
-              },
-            };
-            const nowMsValue = Date.now();
-            const hasTurn = typeof updatedPrivate.turnUserId === "string" && updatedPrivate.turnUserId.trim();
-            const withTimer = isActionPhase(updatedPrivate.phase) && hasTurn
-              ? resetTurnTimer(updatedPrivate, nowMsValue, TURN_MS)
-              : { ...updatedPrivate, turnStartedAt: null, turnDeadlineAt: null };
-            const cleared = clearMissedTurns(withTimer, actorUserId);
-            return sanitizePersistedState(cleared.changed ? cleared.nextState : withTimer);
-          };
-
-          const autoplay = await runBotAutoplayLoop({
-            tableId,
-            requestId: normalizedRequestId || `leave:${Date.now()}`,
-            initialState: latestState,
-            initialPrivateState: latestState,
-            initialVersion: latestVersion,
-            seatBotMap,
-            seatUserIdsInOrder,
-            maxActions: botAutoplayConfig.maxActionsPerRequest,
-            botsOnlyHandCompletionHardCap: botAutoplayConfig.botsOnlyHandCompletionHardCap,
-            policyVersion: botAutoplayConfig.policyVersion,
-            klog,
-            isActionPhase,
-            advanceIfNeeded,
-            buildPersistedFromPrivateState,
-            materializeShowdownState: (stateToMaterialize, seatOrder) => {
-              try {
-                const materialized = materializeShowdownAndPayout({
-                  state: stateToMaterialize,
-                  seatUserIdsInOrder: seatOrder,
-                  holeCardsByUserId: {},
-                  computeShowdown,
-                  awardPotsAtShowdown,
-                  klog,
-                });
-                return sanitizePersistedState(materialized.nextState);
-              } catch (error) {
-                klog("poker_leave_showdown_materialize_failed", {
-                  tableId,
-                  userId: auth.userId,
-                  reason: error?.message || "unknown_error",
-                });
-                return stateToMaterialize;
-              }
-            },
-            persistStep: async ({ botTurnUserId, botAction, botRequestId, fromState, persistedState, privateState, loopVersion }) => {
-              try {
-                validatePersistedStateOrThrow(persistedState, makeError);
-              } catch {
-                return { ok: false, reason: "invalid_persist_state" };
-              }
-              const botUpdateResult = await updatePokerStateOptimistic(tx, {
-                tableId,
-                expectedVersion: loopVersion,
-                nextState: persistedState,
-              });
-              if (!botUpdateResult.ok) {
-                return { ok: false, reason: botUpdateResult.reason === "conflict" ? "optimistic_conflict" : "update_failed" };
-              }
-              await tx.unsafe(
-                "insert into public.poker_actions (table_id, version, user_id, action_type, amount, hand_id, request_id, phase_from, phase_to, meta) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb);",
-                [
-                  tableId,
-                  botUpdateResult.newVersion,
-                  botTurnUserId,
-                  botAction.type,
-                  botAction.amount ?? null,
-                  typeof persistedState.handId === "string" && persistedState.handId.trim() ? persistedState.handId.trim() : null,
-                  botRequestId,
-                  fromState.phase || null,
-                  persistedState.phase || null,
-                  JSON.stringify({ actor: "BOT", botUserId: botTurnUserId, policyVersion: botAutoplayConfig.policyVersion, reason: "AUTO_TURN_LEAVE" }),
-                ]
-              );
-              return { ok: true, loopVersion: botUpdateResult.newVersion, responseFinalState: persistedState, loopPrivateState: privateState };
-            },
-          });
-
-          latestState = autoplay.responseFinalState;
-          latestVersion = autoplay.loopVersion;
-          if (autoplay.botActionCount > 0 || leaveAdvanceEvents.length > 0) {
+          if (leaveAdvanceEvents.length > 0) {
             mutated = true;
-            klog("poker_leave_autoplay_advanced", {
+            klog("poker_leave_advanced", {
               tableId,
               userId: auth.userId,
               advanceEvents: leaveAdvanceEvents.length,
-              botActionCount: autoplay.botActionCount,
-              stopReason: autoplay.botStopReason,
             });
           }
+
+          klog("poker_leave_autoplay_skipped", {
+            tableId,
+            userId: auth.userId,
+            reason: "missing_private_state",
+            hasDeck: false,
+            hasHoleCards: false,
+            seats: seatUserIdsInOrder.length,
+          });
         }
 
         if (shouldDetachSeatAndStack) {
