@@ -109,7 +109,9 @@ export async function handler(event) {
     });
     return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "invalid_request_id" }) };
   }
-  const requestId = requestIdParsed.value;
+  const parsedRequestId = requestIdParsed.value;
+  const normalizedRequestId =
+    typeof parsedRequestId === "string" && parsedRequestId.trim() ? parsedRequestId.trim() : null;
 
   const token = extractBearerToken(event.headers);
   const auth = await verifySupabaseJwt(token);
@@ -130,15 +132,18 @@ export async function handler(event) {
     let txId = null;
     const result = await beginSql(async (tx) => {
       let mutated = false;
-      const requestInfo = await ensurePokerRequest(tx, {
-        tableId,
-        userId: auth.userId,
-        requestId,
-        kind: "LEAVE",
-        pendingStaleSec: REQUEST_PENDING_STALE_SEC,
-      });
-      if (requestInfo.status === "stored") return requestInfo.result;
-      if (requestInfo.status === "pending") return { ok: false, pending: true, requestId };
+      let requestInfo = { status: "none" };
+      if (normalizedRequestId) {
+        requestInfo = await ensurePokerRequest(tx, {
+          tableId,
+          userId: auth.userId,
+          requestId: normalizedRequestId,
+          kind: "LEAVE",
+          pendingStaleSec: REQUEST_PENDING_STALE_SEC,
+        });
+        if (requestInfo.status === "stored") return requestInfo.result;
+        if (requestInfo.status === "pending") return { ok: false, pending: true, requestId: normalizedRequestId };
+      }
 
       try {
         const tableRows = await tx.unsafe("select id, status from public.poker_tables where id = $1 limit 1;", [tableId]);
@@ -187,13 +192,15 @@ export async function handler(event) {
             seatNo: Number.isInteger(seatNo) ? seatNo : null,
             status: "already_left",
           };
-          await storePokerRequestResult(tx, {
-            tableId,
-            userId: auth.userId,
-            requestId,
-            kind: "LEAVE",
-            result: resultPayload,
-          });
+          if (normalizedRequestId) {
+            await storePokerRequestResult(tx, {
+              tableId,
+              userId: auth.userId,
+              requestId: normalizedRequestId,
+              kind: "LEAVE",
+              result: resultPayload,
+            });
+          }
           return resultPayload;
         }
         const rawSeatStack = seatRow ? seatRow.stack : null;
@@ -210,10 +217,29 @@ export async function handler(event) {
           klog("poker_leave_stack_negative", { tableId, userId: auth.userId, seatNo, stack: stackValue });
         }
 
+        const reducerRequestId = normalizedRequestId || undefined;
+        let leaveApplied = null;
+        try {
+          leaveApplied = applyLeaveTable(currentState, { userId: auth.userId, requestId: reducerRequestId });
+        } catch (error) {
+          klog("poker_leave_reducer_throw", {
+            tableId,
+            userId: auth.userId,
+            requestId: reducerRequestId || null,
+            message: error?.message || "unknown_error",
+          });
+          throw makeError(409, "state_invalid");
+        }
+
+        if (!isPlainObject(leaveApplied?.state)) {
+          klog("poker_leave_invalid_reducer_state", { tableId, userId: auth.userId, hasState: leaveApplied?.state != null });
+          throw makeError(409, "state_invalid");
+        }
+
         if (cashOutAmount > 0) {
           const escrowSystemKey = `POKER_TABLE:${tableId}`;
-          const idempotencyKey = requestId
-            ? `poker:leave:${tableId}:${auth.userId}:${requestId}`
+          const idempotencyKey = normalizedRequestId
+            ? `poker:leave:${tableId}:${auth.userId}:${normalizedRequestId}`
             : `poker:leave:${tableId}:${auth.userId}:${cashOutAmount}`;
 
           const txResult = await postTransaction({
@@ -238,12 +264,6 @@ export async function handler(event) {
           stackSource: stateStack != null ? "state" : seatStack != null ? "seat" : "none",
           hadStack: stackValue != null,
         });
-
-        const leaveApplied = applyLeaveTable(currentState, { userId: auth.userId, requestId });
-        if (!isPlainObject(leaveApplied?.state)) {
-          klog("poker_leave_invalid_reducer_state", { tableId, userId: auth.userId, hasState: leaveApplied?.state != null });
-          throw makeError(409, "state_invalid");
-        }
         const leaveState = normalizeState(leaveApplied.state);
         const leavePhase = typeof leaveState.phase === "string" ? leaveState.phase : "";
         const hasActiveHandId = typeof leaveState.handId === "string" && leaveState.handId.trim() !== "";
@@ -319,26 +339,28 @@ export async function handler(event) {
               }
             : {}),
         };
-        await storePokerRequestResult(tx, {
-          tableId,
-          userId: auth.userId,
-          requestId,
-          kind: "LEAVE",
-          result: resultPayload,
-        });
+        if (normalizedRequestId) {
+          await storePokerRequestResult(tx, {
+            tableId,
+            userId: auth.userId,
+            requestId: normalizedRequestId,
+            kind: "LEAVE",
+            result: resultPayload,
+          });
+        }
         klog("poker_leave_ok", {
           tableId,
           userId: auth.userId,
-          requestId: requestId || null,
+          requestId: normalizedRequestId || null,
           cashedOut: cashOutAmount > 0,
           txId,
         });
         return resultPayload;
       } catch (error) {
-        if (requestId && !mutated) {
-          await deletePokerRequest(tx, { tableId, userId: auth.userId, requestId, kind: "LEAVE" });
-        } else if (requestId && mutated) {
-          klog("poker_leave_request_retained", { tableId, userId: auth.userId, requestId });
+        if (normalizedRequestId && !mutated) {
+          await deletePokerRequest(tx, { tableId, userId: auth.userId, requestId: normalizedRequestId, kind: "LEAVE" });
+        } else if (normalizedRequestId && mutated) {
+          klog("poker_leave_request_retained", { tableId, userId: auth.userId, requestId: normalizedRequestId });
         }
         throw error;
       }
@@ -348,7 +370,7 @@ export async function handler(event) {
       return {
         statusCode: 202,
         headers: cors,
-        body: JSON.stringify({ error: "request_pending", requestId: result.requestId || requestId }),
+        body: JSON.stringify({ error: "request_pending", requestId: result.requestId || normalizedRequestId }),
       };
     }
 

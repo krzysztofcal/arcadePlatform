@@ -7,6 +7,7 @@ const userId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 
 let stateUpdateCount = 0;
 let seatDeleteCount = 0;
+let postTransactionCalls = 0;
 
 const handler = loadPokerHandler("netlify/functions/poker-leave.mjs", {
   baseHeaders: () => ({}),
@@ -49,7 +50,10 @@ const handler = loadPokerHandler("netlify/functions/poker-leave.mjs", {
         return [];
       },
     }),
-  postTransaction: async () => ({ transaction: { id: "tx-1" } }),
+  postTransaction: async () => {
+    postTransactionCalls += 1;
+    return { transaction: { id: "tx-1" } };
+  },
   klog: () => {},
 });
 
@@ -64,5 +68,6 @@ const body = JSON.parse(response.body || "{}");
 assert.equal(body.error, "state_invalid");
 assert.equal(stateUpdateCount, 0);
 assert.equal(seatDeleteCount, 0);
+assert.equal(postTransactionCalls, 0);
 
 console.log("poker-leave reducer missing state does not wipe behavior test passed");
