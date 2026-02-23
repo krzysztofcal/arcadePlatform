@@ -224,6 +224,11 @@ export async function handler(event) {
           throw makeError(409, "state_invalid");
         }
 
+        if (!isPlainObject(leaveApplied?.state)) {
+          klog("poker_leave_invalid_reducer_state", { tableId, userId: auth.userId, hasState: leaveApplied?.state != null });
+          throw makeError(409, "state_invalid");
+        }
+
         if (cashOutAmount > 0) {
           const escrowSystemKey = `POKER_TABLE:${tableId}`;
           const idempotencyKey = requestId
@@ -252,11 +257,6 @@ export async function handler(event) {
           stackSource: stateStack != null ? "state" : seatStack != null ? "seat" : "none",
           hadStack: stackValue != null,
         });
-
-        if (!isPlainObject(leaveApplied?.state)) {
-          klog("poker_leave_invalid_reducer_state", { tableId, userId: auth.userId, hasState: leaveApplied?.state != null });
-          throw makeError(409, "state_invalid");
-        }
         const leaveState = normalizeState(leaveApplied.state);
         const leavePhase = typeof leaveState.phase === "string" ? leaveState.phase : "";
         const hasActiveHandId = typeof leaveState.handId === "string" && leaveState.handId.trim() !== "";
