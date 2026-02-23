@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { loadPokerHandler } from "./helpers/poker-test-helpers.mjs";
-import { updatePokerStateOptimistic } from "../netlify/functions/_shared/poker-state-write.mjs";
 
 const tableId = "11111111-1111-4111-8111-111111111111";
 const leavingUserId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
@@ -13,6 +12,8 @@ const stored = {
     tableId,
     phase: "PREFLOP",
     handId: "hand-1",
+    handSeed: "seed-1",
+    communityDealt: 0,
     seats: [
       { userId: leavingUserId, seatNo: 1 },
       { userId: botUserId, seatNo: 2 },
@@ -32,12 +33,20 @@ const stored = {
     currentBet: 0,
     lastRaiseSize: 0,
     community: [],
-    deck: [{ r: "A", s: "S" }],
     pot: 0,
   },
 };
 
-let updateCount = 0;
+const persistedStates = [];
+const updatePokerStateOptimistic = async (_tx, { expectedVersion, nextState }) => {
+  assert.equal(typeof nextState.deck, "undefined");
+  persistedStates.push(JSON.parse(JSON.stringify(nextState)));
+  if (expectedVersion !== stored.version) return { ok: false, reason: "conflict" };
+  stored.version += 1;
+  stored.state = JSON.parse(JSON.stringify(nextState));
+  return { ok: true, newVersion: stored.version };
+};
+
 const handler = loadPokerHandler("netlify/functions/poker-leave.mjs", {
   baseHeaders: () => ({}),
   corsHeaders: () => ({ "access-control-allow-origin": "https://example.test" }),
@@ -47,7 +56,7 @@ const handler = loadPokerHandler("netlify/functions/poker-leave.mjs", {
   normalizeRequestId: () => ({ ok: true, value: "leave-adv-1" }),
   ensurePokerRequest: async () => ({ status: "proceed" }),
   updatePokerStateOptimistic,
-  isStateStorageValid: () => true,
+  isStateStorageValid: (state) => !state?.deck,
   advanceIfNeeded: (state) => ({ state, events: [] }),
   TURN_MS: 15000,
   resetTurnTimer: (state) => state,
@@ -79,7 +88,7 @@ const handler = loadPokerHandler("netlify/functions/poker-leave.mjs", {
   },
   beginSql: async (fn) =>
     fn({
-      unsafe: async (query, params) => {
+      unsafe: async (query) => {
         const text = String(query).toLowerCase();
         if (text.includes("from public.poker_tables")) return [{ id: tableId, status: "OPEN" }];
         if (text.includes("from public.poker_state")) return [{ version: stored.version, state: stored.state }];
@@ -90,12 +99,6 @@ const handler = loadPokerHandler("netlify/functions/poker-leave.mjs", {
             { user_id: botUserId, seat_no: 2, is_bot: true },
             { user_id: human2UserId, seat_no: 3, is_bot: false },
           ];
-        }
-        if (text.includes("update public.poker_state") && text.includes("version = version + 1")) {
-          stored.state = JSON.parse(params?.[2] || "{}");
-          stored.version += 1;
-          updateCount += 1;
-          return [{ version: stored.version }];
         }
         return [];
       },
@@ -110,5 +113,6 @@ const payload = JSON.parse(res.body || "{}");
 assert.equal(payload.ok, true);
 assert.notEqual(payload.state.state.turnUserId, leavingUserId);
 assert.equal(payload.state.state.actedThisRoundByUserId[botUserId], true);
-assert.ok(updateCount > 1);
+assert.ok(persistedStates.length >= 2);
+assert.ok(persistedStates.every((state) => state.deck === undefined));
 console.log("poker-leave advances turn when leaver was turn behavior test passed");

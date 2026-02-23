@@ -4,6 +4,9 @@ import { chooseBotActionTrivial, isBotTurn } from "./poker-bots.mjs";
 import { applyAction } from "./poker-reducer.mjs";
 
 export const runAdvanceLoop = (stateToAdvance, eventsList, advanceEventsList, advanceIfNeeded, advanceLimit = 4) => {
+  if (typeof advanceIfNeeded !== "function") {
+    throw new Error("runAdvanceLoop requires advanceIfNeeded function");
+  }
   let next = stateToAdvance;
   let loopCount = 0;
   while (loopCount < advanceLimit) {

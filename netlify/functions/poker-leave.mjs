@@ -10,9 +10,52 @@ import { buildSeatBotMap, getBotAutoplayConfig } from "./_shared/poker-bots.mjs"
 import { resetTurnTimer } from "./_shared/poker-turn-timer.mjs";
 import { clearMissedTurns } from "./_shared/poker-missed-turns.mjs";
 import { runAdvanceLoop, runBotAutoplayLoop } from "./_shared/poker-autoplay.mjs";
+import { materializeShowdownAndPayout } from "./_shared/poker-materialize-showdown.mjs";
+import { computeShowdown } from "./_shared/poker-showdown.mjs";
+import { awardPotsAtShowdown } from "./_shared/poker-payout.mjs";
 
 const REQUEST_PENDING_STALE_SEC = 30;
 
+
+const isPlainObjectValue = (value) => value && typeof value === "object" && !Array.isArray(value);
+
+const clearMismatchedShowdown = (stateInput) => {
+  if (!isPlainObjectValue(stateInput) || !stateInput.showdown) return stateInput;
+  const handId = typeof stateInput.handId === "string" ? stateInput.handId.trim() : "";
+  const showdownHandId =
+    typeof stateInput.showdown?.handId === "string" && stateInput.showdown.handId.trim()
+      ? stateInput.showdown.handId.trim()
+      : "";
+  if (!handId || !showdownHandId || showdownHandId === handId) return stateInput;
+  const { showdown: _ignoredShowdown, ...sanitizedState } = stateInput;
+  return sanitizedState;
+};
+
+const clearMismatchedHandSettlement = (stateInput) => {
+  if (!isPlainObjectValue(stateInput) || !stateInput.handSettlement) return stateInput;
+  const handId = typeof stateInput.handId === "string" ? stateInput.handId.trim() : "";
+  const handSettlementHandId =
+    typeof stateInput.handSettlement?.handId === "string" && stateInput.handSettlement.handId.trim()
+      ? stateInput.handSettlement.handId.trim()
+      : "";
+  if (!handId || !handSettlementHandId || handSettlementHandId === handId) return stateInput;
+  const { handSettlement: _ignoredHandSettlement, ...sanitizedState } = stateInput;
+  return sanitizedState;
+};
+
+const sanitizePerHandArtifacts = (stateInput) => clearMismatchedHandSettlement(clearMismatchedShowdown(stateInput));
+
+const sanitizePersistedState = (stateInput) => {
+  if (!isPlainObjectValue(stateInput)) return stateInput;
+  const { deck: _ignoredDeck, holeCardsByUserId: _ignoredHoleCards, ...rest } = stateInput;
+  return sanitizePerHandArtifacts(rest);
+};
+
+const validatePersistedStateOrThrow = (state, makeErrorFn) => {
+  if (!isStateStorageValid(state, { requireHandSeed: true, requireCommunityDealt: true, requireNoDeck: true })) {
+    throw makeErrorFn(409, "state_invalid");
+  }
+};
 
 const isActionPhase = (phase) => phase === "PREFLOP" || phase === "FLOP" || phase === "TURN" || phase === "RIVER";
 
@@ -370,7 +413,7 @@ export async function handler(event) {
           nextLeftTableByUserId[auth.userId] = true;
         }
 
-        const updatedState = {
+        const updatedStateRaw = {
           ...leaveState,
           tableId: leaveState.tableId || tableId,
           seats,
@@ -379,6 +422,8 @@ export async function handler(event) {
           pot: Number.isFinite(leaveState.pot) ? leaveState.pot : 0,
           phase: leaveState.phase || "INIT",
         };
+        const updatedState = sanitizePersistedState(updatedStateRaw);
+        validatePersistedStateOrThrow(updatedState, makeError);
 
         const updateResult = await updatePokerStateOptimistic(tx, {
           tableId,
@@ -411,8 +456,9 @@ export async function handler(event) {
 
           const leaveAdvanceEvents = [];
           const leaveAdvanced = runAdvanceLoop(latestState, null, leaveAdvanceEvents, advanceIfNeeded);
-          latestState = leaveAdvanced.nextState;
+          latestState = sanitizePersistedState(leaveAdvanced.nextState);
           if (leaveAdvanceEvents.length > 0) {
+            validatePersistedStateOrThrow(latestState, makeError);
             const advanceUpdateResult = await updatePokerStateOptimistic(tx, {
               tableId,
               expectedVersion: latestVersion,
@@ -443,7 +489,7 @@ export async function handler(event) {
               ? resetTurnTimer(updatedPrivate, nowMsValue, TURN_MS)
               : { ...updatedPrivate, turnStartedAt: null, turnDeadlineAt: null };
             const cleared = clearMissedTurns(withTimer, actorUserId);
-            return cleared.changed ? cleared.nextState : withTimer;
+            return sanitizePersistedState(cleared.changed ? cleared.nextState : withTimer);
           };
 
           const autoplay = await runBotAutoplayLoop({
@@ -461,8 +507,30 @@ export async function handler(event) {
             isActionPhase,
             advanceIfNeeded,
             buildPersistedFromPrivateState,
+            materializeShowdownState: (stateToMaterialize, seatOrder) => {
+              try {
+                const materialized = materializeShowdownAndPayout({
+                  state: stateToMaterialize,
+                  seatUserIdsInOrder: seatOrder,
+                  holeCardsByUserId: {},
+                  computeShowdown,
+                  awardPotsAtShowdown,
+                  klog,
+                });
+                return sanitizePersistedState(materialized.nextState);
+              } catch (error) {
+                klog("poker_leave_showdown_materialize_failed", {
+                  tableId,
+                  userId: auth.userId,
+                  reason: error?.message || "unknown_error",
+                });
+                return stateToMaterialize;
+              }
+            },
             persistStep: async ({ botTurnUserId, botAction, botRequestId, fromState, persistedState, privateState, loopVersion }) => {
-              if (!isStateStorageValid(persistedState, { requireHandSeed: true, requireCommunityDealt: true, requireNoDeck: true })) {
+              try {
+                validatePersistedStateOrThrow(persistedState, makeError);
+              } catch {
                 return { ok: false, reason: "invalid_persist_state" };
               }
               const botUpdateResult = await updatePokerStateOptimistic(tx, {
