@@ -704,6 +704,7 @@ const applyLeaveTable = (state, { userId, requestId } = {}) => {
   next.sitOutByUserId[userId] = false;
   if (wasParticipatingInHand) {
     next.foldedByUserId[userId] = true;
+    next.actedThisRoundByUserId[userId] = true;
   }
   next.missedTurnsByUserId[userId] = 0;
   if (next.pendingAutoSitOutByUserId) {

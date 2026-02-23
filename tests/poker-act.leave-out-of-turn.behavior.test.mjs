@@ -117,6 +117,8 @@ const run = async () => {
   const payload = JSON.parse(response.body || "{}");
   assert.equal(payload.ok, true);
   assert.equal(payload.state?.state?.leftTableByUserId?.[humanUserId], true);
+  assert.equal(payload.state?.state?.foldedByUserId?.[humanUserId], true);
+  assert.equal(payload.state?.state?.actedThisRoundByUserId?.[humanUserId], true);
   const rejected = logs.filter((entry) => entry.event === "poker_act_rejected").map((entry) => entry.payload?.reason);
   assert.ok(!rejected.includes("not_your_turn"));
   assert.ok(!rejected.includes("action_not_allowed"));
