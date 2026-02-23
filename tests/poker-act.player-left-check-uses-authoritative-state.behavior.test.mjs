@@ -17,7 +17,9 @@ const run = async () => {
     normalizeJsonState: (value) => value,
     isStateStorageValid: () => true,
     withoutPrivateState: (state) => state,
-    computeLegalActions: () => ({ actions: ["CHECK"] }),
+    computeLegalActions: () => {
+      throw new Error("should_not_reach_legal_actions");
+    },
     buildActionConstraints: () => ({}),
     resetTurnTimer: (state) => state,
     beginSql: async (fn) =>
@@ -62,10 +64,6 @@ const run = async () => {
         },
       }),
     maybeApplyTurnTimeout: ({ state }) => ({ applied: false, state, action: null, events: [] }),
-    withoutPrivateState: () => ({ phase: "PREFLOP", seats: [], leftTableByUserId: {} }),
-    computeLegalActions: () => {
-      throw new Error("should_not_reach_legal_actions");
-    },
     loadHoleCardsByUserId: async () => ({ holeCardsByUserId: {}, holeCardsStatusByUserId: {} }),
     isHoleCardsTableMissing: async () => false,
     deriveCommunityCards: () => [],

@@ -1139,7 +1139,8 @@ export async function handler(event) {
           tableId,
           userId: auth.userId,
           reason: "player_left",
-          phase: currentState.phase,
+          phase: privateState?.phase || currentState?.phase || null,
+          publicPhase: currentState?.phase || null,
           actionType: actionParsed.value.type,
         });
         throw makeError(409, "player_left");
