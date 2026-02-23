@@ -115,7 +115,26 @@
     pokerCopyLog: { en: 'Copy hand log', pl: 'Kopiuj log rozdania' },
     pokerCopyLogPending: { en: 'Copying...', pl: 'Kopiowanie...' },
     pokerCopyLogOk: { en: 'Log copied', pl: 'Log skopiowany' },
-    pokerCopyLogFail: { en: 'Failed to export log', pl: 'Nie udało się wyeksportować logu' }
+    pokerCopyLogFail: { en: 'Failed to export log', pl: 'Nie udało się wyeksportować logu' },
+    talisman: { en: 'Talisman', pl: 'Talizman' },
+    talismanKicker: { en: 'Astro energy configurator', pl: 'Astro konfigurator energii' },
+    talismanTitle: { en: 'Your personal talisman', pl: 'Twój osobisty talizman' },
+    talismanLead: { en: 'Choose your profile and the skills you want to boost to get your power and protective stone.', pl: 'Wybierz swoje dane i skille, a dobierzemy kamień mocy oraz kamień ochronny.' },
+    talismanBirthDate: { en: 'Birth date', pl: 'Data urodzenia' },
+    talismanBirthYear: { en: 'Birth year', pl: 'Rok urodzenia' },
+    talismanZodiac: { en: 'Zodiac sign', pl: 'Znak zodiaku' },
+    talismanChinese: { en: 'Chinese sign', pl: 'Chiński znak' },
+    talismanGender: { en: 'Gender', pl: 'Płeć' },
+    talismanGenderF: { en: 'Woman', pl: 'Kobieta' },
+    talismanGenderM: { en: 'Man', pl: 'Mężczyzna' },
+    talismanGenderBoth: { en: 'Both', pl: 'Obie' },
+    talismanSkills: { en: 'What skills do you want to boost?', pl: 'Jakie skille chcesz podkręcić?' },
+    skillFocus: { en: 'Focus', pl: 'Skupienie' },
+    skillConfidence: { en: 'Confidence', pl: 'Pewność siebie' },
+    skillMoney: { en: 'Money', pl: 'Finanse' },
+    skillLove: { en: 'Relationships', pl: 'Relacje' },
+    skillCreativity: { en: 'Creativity', pl: 'Kreatywność' },
+    talismanButton: { en: 'Find my talisman', pl: 'Dobierz talizman' }
   };
 
   let currentLang = 'en';

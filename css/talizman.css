@@ -1,0 +1,43 @@
+.talisman-page{ display:grid; gap:18px; padding:18px; }
+
+.talisman-hero{ border:1px solid rgba(187,196,255,.2); border-radius:20px; background:radial-gradient(circle at top right, rgba(163,111,255,.35), rgba(20,25,45,.95)); padding:24px; box-shadow:0 16px 32px rgba(0,0,0,.28); }
+
+.talisman-kicker{ margin:0 0 8px; font:700 12px/1.2 Poppins, sans-serif; letter-spacing:.12em; text-transform:uppercase; color:#aab9ff; }
+
+.talisman-hero h1{ margin:0 0 10px; color:#f2e9ff; font:800 30px/1.15 Poppins, sans-serif; }
+
+.talisman-hero p{ margin:0; color:#d4dcff; max-width:680px; }
+
+.talisman-card{ border:1px solid rgba(187,196,255,.2); border-radius:20px; background:linear-gradient(180deg, rgba(17,22,42,.95), rgba(12,16,33,.95)); padding:18px; }
+
+.talisman-form{ display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:14px; }
+
+.talisman-form label,.talisman-form fieldset{ border:1px solid rgba(179,193,255,.2); border-radius:14px; background:rgba(10,15,34,.65); padding:12px; display:grid; gap:8px; color:#d7dfff; }
+
+.talisman-form span,.talisman-form legend{ font:700 12px/1.2 Poppins, sans-serif; letter-spacing:.03em; }
+
+.talisman-form input,.talisman-form select{ width:100%; min-height:40px; border-radius:10px; border:1px solid rgba(190,200,255,.22); background:#10172e; color:#eff3ff; padding:0 10px; }
+
+.inline{ display:flex; align-items:center; gap:8px; font:600 13px/1.2 Poppins, sans-serif; }
+
+.inline input{ width:auto; min-height:auto; }
+
+.gender-box,.skills-box{ grid-column:1/-1; }
+
+.skills-box{ display:flex; gap:10px; flex-wrap:wrap; }
+
+.talisman-btn{ grid-column:1/-1; min-height:44px; border:1px solid rgba(189,161,255,.45); border-radius:12px; background:linear-gradient(135deg, #8b5cf6, #5b7cfa); color:#fff; font:700 14px/1 Poppins, sans-serif; cursor:pointer; }
+
+.talisman-btn:hover{ filter:brightness(1.08); }
+
+.talisman-result{ border:1px solid rgba(173,255,227,.35); border-radius:18px; padding:18px; background:radial-gradient(circle at top, rgba(72,121,255,.25), rgba(9,19,36,.95)); color:#e7f3ff; }
+
+.talisman-result h2{ margin:0 0 10px; font:800 24px/1.2 Poppins, sans-serif; }
+
+.talisman-result p{ margin:0 0 8px; }
+
+.talisman-tags{ display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
+
+.talisman-tag{ padding:6px 10px; border-radius:999px; border:1px solid rgba(164,197,255,.38); background:rgba(8,19,42,.65); font:700 12px/1 Poppins, sans-serif; }
+
+@media (max-width:720px){ .talisman-page{ padding:12px; } }
