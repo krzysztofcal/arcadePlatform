@@ -132,15 +132,18 @@ export async function handler(event) {
     let txId = null;
     const result = await beginSql(async (tx) => {
       let mutated = false;
-      const requestInfo = await ensurePokerRequest(tx, {
-        tableId,
-        userId: auth.userId,
-        requestId: normalizedRequestId,
-        kind: "LEAVE",
-        pendingStaleSec: REQUEST_PENDING_STALE_SEC,
-      });
-      if (requestInfo.status === "stored") return requestInfo.result;
-      if (requestInfo.status === "pending") return { ok: false, pending: true, requestId: normalizedRequestId };
+      let requestInfo = { status: "none" };
+      if (normalizedRequestId) {
+        requestInfo = await ensurePokerRequest(tx, {
+          tableId,
+          userId: auth.userId,
+          requestId: normalizedRequestId,
+          kind: "LEAVE",
+          pendingStaleSec: REQUEST_PENDING_STALE_SEC,
+        });
+        if (requestInfo.status === "stored") return requestInfo.result;
+        if (requestInfo.status === "pending") return { ok: false, pending: true, requestId: normalizedRequestId };
+      }
 
       try {
         const tableRows = await tx.unsafe("select id, status from public.poker_tables where id = $1 limit 1;", [tableId]);
@@ -189,13 +192,15 @@ export async function handler(event) {
             seatNo: Number.isInteger(seatNo) ? seatNo : null,
             status: "already_left",
           };
-          await storePokerRequestResult(tx, {
-            tableId,
-            userId: auth.userId,
-            requestId: normalizedRequestId,
-            kind: "LEAVE",
-            result: resultPayload,
-          });
+          if (normalizedRequestId) {
+            await storePokerRequestResult(tx, {
+              tableId,
+              userId: auth.userId,
+              requestId: normalizedRequestId,
+              kind: "LEAVE",
+              result: resultPayload,
+            });
+          }
           return resultPayload;
         }
         const rawSeatStack = seatRow ? seatRow.stack : null;
@@ -334,13 +339,15 @@ export async function handler(event) {
               }
             : {}),
         };
-        await storePokerRequestResult(tx, {
-          tableId,
-          userId: auth.userId,
-          requestId: normalizedRequestId,
-          kind: "LEAVE",
-          result: resultPayload,
-        });
+        if (normalizedRequestId) {
+          await storePokerRequestResult(tx, {
+            tableId,
+            userId: auth.userId,
+            requestId: normalizedRequestId,
+            kind: "LEAVE",
+            result: resultPayload,
+          });
+        }
         klog("poker_leave_ok", {
           tableId,
           userId: auth.userId,

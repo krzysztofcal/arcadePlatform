@@ -48,7 +48,7 @@ assert.ok(
   "leave should cash out only when positive amount exists"
 );
 assert.ok(
-  /poker:leave:\$\{tableId\}:\$\{auth\.userId\}:\$\{requestId\}/.test(leaveSrc),
+  /poker:leave:\$\{tableId\}:\$\{auth\.userId\}:\$\{normalizedRequestId\}/.test(leaveSrc),
   "leave should scope requestId idempotency by tableId and userId"
 );
 
