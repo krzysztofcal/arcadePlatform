@@ -63,6 +63,14 @@ const isInvalidPlayerLeaveNoop = (error) => {
   return message === "invalid_player";
 };
 
+const sanitizeNoopResponseState = (state, userId) => {
+  const base = normalizeState(state);
+  const seats = parseSeats(base.seats).filter((seat) => seat?.userId !== userId);
+  const stacks = { ...parseStacks(base.stacks) };
+  delete stacks[userId];
+  return { ...base, seats, stacks };
+};
+
 export async function handler(event) {
   const origin = event.headers?.origin || event.headers?.Origin;
   const cors = corsHeaders(origin);
@@ -255,7 +263,7 @@ export async function handler(event) {
                 ? {
                     state: {
                       version: expectedVersion,
-                      state: withoutPrivateState(currentState),
+                      state: withoutPrivateState(sanitizeNoopResponseState(currentState, auth.userId)),
                     },
                   }
                 : {}),

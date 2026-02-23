@@ -57,7 +57,7 @@ const run = async () => {
   const absentResponse = await absent.handler({
     httpMethod: "POST",
     headers: { origin: "https://example.test", authorization: "Bearer token" },
-    body: JSON.stringify({ tableId }),
+    body: JSON.stringify({ tableId, includeState: true }),
   });
 
   assert.equal(absentResponse.statusCode, 200);
@@ -65,6 +65,12 @@ const run = async () => {
   assert.equal(absentBody.ok, true);
   assert.equal(absentBody.status, "already_left");
   assert.equal(absentBody.cashedOut, 0);
+  if (absentBody.state && absentBody.state.state) {
+    const absentSeats = Array.isArray(absentBody.state.state.seats) ? absentBody.state.state.seats : [];
+    const absentStacks = absentBody.state.state.stacks && typeof absentBody.state.state.stacks === "object" ? absentBody.state.state.stacks : {};
+    assert.equal(absentSeats.some((seat) => seat?.userId === userId), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(absentStacks, userId), false);
+  }
   assert.equal(absent.counters().postTransactionCalls, 0);
   assert.equal(absent.counters().stateUpdateCount, 0);
   assert.equal(absent.counters().seatDeleteCount, 1);

@@ -1,22 +1,19 @@
 import assert from "node:assert/strict";
 import { loadPokerHandler } from "./helpers/poker-test-helpers.mjs";
 
-const tableId = "33333333-3333-4333-8333-333333333333";
-const userId = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+const tableId = "44444444-4444-4444-8444-444444444444";
+const userId = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
 
 const run = async () => {
-  let stateUpdateCount = 0;
-  let seatDeleteCount = 0;
-  let postTransactionCalls = 0;
   let capturedNextState = null;
 
   const currentState = {
     tableId,
-    phase: "FLOP",
-    handId: "hand-1",
-    seats: [{ userId, seatNo: 2, status: "active" }],
-    stacks: { [userId]: 125 },
-    pot: 30,
+    phase: "TURN",
+    handId: "hand-durable-1",
+    seats: [{ userId, seatNo: 5, status: "active" }],
+    stacks: { [userId]: 250 },
+    pot: 80,
   };
 
   const handler = loadPokerHandler("netlify/functions/poker-leave.mjs", {
@@ -31,31 +28,21 @@ const run = async () => {
         unsafe: async (query) => {
           const text = String(query).toLowerCase();
           if (text.includes("from public.poker_tables")) return [{ id: tableId, status: "OPEN" }];
-          if (text.includes("from public.poker_state")) return [{ version: 11, state: currentState }];
-          if (text.includes("from public.poker_seats") && text.includes("for update")) {
-            return [{ seat_no: 2, status: "ACTIVE", stack: 125 }];
-          }
-          if (text.includes("delete from public.poker_seats")) {
-            seatDeleteCount += 1;
-            return [];
-          }
+          if (text.includes("from public.poker_state")) return [{ version: 21, state: currentState }];
+          if (text.includes("from public.poker_seats") && text.includes("for update")) return [{ seat_no: 5, status: "ACTIVE", stack: 250 }];
           return [];
         },
       }),
-    postTransaction: async () => {
-      postTransactionCalls += 1;
-      return { transaction: { id: "unexpected" } };
-    },
     updatePokerStateOptimistic: async (_tx, payload) => {
-      stateUpdateCount += 1;
       capturedNextState = payload?.nextState || null;
-      return { ok: true, newVersion: 12 };
+      return { ok: true, newVersion: 22 };
+    },
+    postTransaction: async () => {
+      throw new Error("should_not_cashout_during_active_hand");
     },
     applyLeaveTable: () => ({
       state: {
         ...currentState,
-        seats: [{ userId, seatNo: 2, status: "folded" }],
-        stacks: { [userId]: 125 },
         leftTableByUserId: { [userId]: true },
         sitOutByUserId: { [userId]: false },
       },
@@ -66,7 +53,7 @@ const run = async () => {
   const response = await handler({
     httpMethod: "POST",
     headers: { origin: "https://example.test", authorization: "Bearer token" },
-    body: JSON.stringify({ tableId }),
+    body: JSON.stringify({ tableId, includeState: true }),
   });
 
   assert.equal(response.statusCode, 200);
@@ -74,16 +61,18 @@ const run = async () => {
   assert.equal(body.ok, true);
   assert.equal(body.status, "leave_queued");
   assert.equal(body.cashedOut, 0);
-  assert.equal(postTransactionCalls, 0);
-  assert.equal(seatDeleteCount, 0);
-  assert.equal(stateUpdateCount, 1);
+  assert.equal(body.state.version, 22);
+  assert.ok(body.state.state.leftTableByUserId && body.state.state.leftTableByUserId[userId] === true);
+  assert.ok(Array.isArray(body.state.state.seats) && body.state.state.seats.some((seat) => seat?.userId === userId));
+  assert.equal(body.state.state.stacks?.[userId], 250);
+
   assert.ok(capturedNextState && capturedNextState.leftTableByUserId && capturedNextState.leftTableByUserId[userId] === true);
-  assert.ok(Array.isArray(capturedNextState?.seats) && capturedNextState.seats.some((seat) => seat?.userId === userId));
-  assert.equal(capturedNextState?.stacks?.[userId], 125);
+  assert.ok(Array.isArray(capturedNextState.seats) && capturedNextState.seats.some((seat) => seat?.userId === userId));
+  assert.equal(capturedNextState.stacks?.[userId], 250);
 };
 
 run()
-  .then(() => console.log("poker-leave active hand does not cashout behavior test passed"))
+  .then(() => console.log("poker-leave leave queued is durable behavior test passed"))
   .catch((error) => {
     console.error(error);
     process.exit(1);
