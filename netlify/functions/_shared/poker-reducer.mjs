@@ -694,8 +694,18 @@ const applyLeaveTable = (state, { userId, requestId } = {}) => {
     pendingAutoSitOutByUserId,
     leftTableByUserId,
   };
+  const wasParticipatingInHand =
+    !next.foldedByUserId[userId] &&
+    !next.leftTableByUserId[userId] &&
+    !next.sitOutByUserId[userId] &&
+    !next.pendingAutoSitOutByUserId?.[userId];
+
   next.leftTableByUserId[userId] = true;
   next.sitOutByUserId[userId] = false;
+  if (wasParticipatingInHand) {
+    next.foldedByUserId[userId] = true;
+    next.actedThisRoundByUserId[userId] = true;
+  }
   next.missedTurnsByUserId[userId] = 0;
   if (next.pendingAutoSitOutByUserId) {
     delete next.pendingAutoSitOutByUserId[userId];
