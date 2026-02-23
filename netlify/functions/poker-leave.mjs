@@ -58,8 +58,9 @@ const normalizeNonNegativeInt = (n) =>
 
 const isInvalidPlayerLeaveNoop = (error) => {
   const code = typeof error?.code === "string" ? error.code.trim().toLowerCase() : "";
+  if (code === "invalid_player") return true;
   const message = typeof error?.message === "string" ? error.message.trim().toLowerCase() : "";
-  return code === "invalid_player" || message === "invalid_player";
+  return message === "invalid_player";
 };
 
 export async function handler(event) {
@@ -237,7 +238,7 @@ export async function handler(event) {
             code: error?.code || null,
             noop: isInvalidPlayer,
           });
-          if (isInvalidPlayer) {
+          if (isInvalidPlayer && alreadyLeft) {
             if (seatRow) {
               await tx.unsafe("delete from public.poker_seats where table_id = $1 and user_id = $2;", [
                 tableId,
@@ -284,7 +285,14 @@ export async function handler(event) {
           throw makeError(409, "state_invalid");
         }
 
-        if (cashOutAmount > 0) {
+        const leaveState = normalizeState(leaveApplied.state);
+        const leavePhase = typeof leaveState.phase === "string" ? leaveState.phase : "";
+        const hasActiveHandId = typeof leaveState.handId === "string" && leaveState.handId.trim() !== "";
+        const isActiveHandPhase = ["PREFLOP", "FLOP", "TURN", "RIVER", "SHOWDOWN"].includes(leavePhase);
+        const hasAnyActiveHandSignal = hasActiveHandId || isActiveHandPhase;
+        const shouldDetachSeatAndStack = !hasAnyActiveHandSignal;
+
+        if (shouldDetachSeatAndStack && cashOutAmount > 0) {
           const escrowSystemKey = `POKER_TABLE:${tableId}`;
           const idempotencyKey = normalizedRequestId
             ? `poker:leave:${tableId}:${auth.userId}:${normalizedRequestId}`
@@ -307,17 +315,12 @@ export async function handler(event) {
         klog("poker_leave_cashout", {
           tableId,
           userId: auth.userId,
-          amount: cashOutAmount,
+          amount: shouldDetachSeatAndStack ? cashOutAmount : 0,
           seatNo,
           stackSource: stateStack != null ? "state" : seatStack != null ? "seat" : "none",
           hadStack: stackValue != null,
+          deferred: !shouldDetachSeatAndStack,
         });
-        const leaveState = normalizeState(leaveApplied.state);
-        const leavePhase = typeof leaveState.phase === "string" ? leaveState.phase : "";
-        const hasActiveHandId = typeof leaveState.handId === "string" && leaveState.handId.trim() !== "";
-        const isActiveHandPhase = ["PREFLOP", "FLOP", "TURN", "RIVER", "SHOWDOWN"].includes(leavePhase);
-        const hasAnyActiveHandSignal = hasActiveHandId || isActiveHandPhase;
-        const shouldDetachSeatAndStack = !hasAnyActiveHandSignal;
 
         const baseSeats = Array.isArray(leaveState.seats) ? leaveState.seats : parseSeats(currentState.seats);
         const baseStacks = isPlainObject(leaveState.stacks) ? leaveState.stacks : parseStacks(currentState.stacks);
@@ -376,8 +379,9 @@ export async function handler(event) {
         const resultPayload = {
           ok: true,
           tableId,
-          cashedOut: cashOutAmount,
+          cashedOut: shouldDetachSeatAndStack ? cashOutAmount : 0,
           seatNo: seatNo ?? null,
+          ...(shouldDetachSeatAndStack ? {} : { status: "leave_queued" }),
           ...(includeState
             ? {
                 state: {
@@ -400,7 +404,7 @@ export async function handler(event) {
           tableId,
           userId: auth.userId,
           requestId: normalizedRequestId || null,
-          cashedOut: cashOutAmount > 0,
+          cashedOut: shouldDetachSeatAndStack && cashOutAmount > 0,
           txId,
         });
         return resultPayload;
