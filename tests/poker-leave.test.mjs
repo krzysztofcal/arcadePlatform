@@ -56,11 +56,8 @@ assert.ok(!/POKER_SYSTEM_ACTOR_USER_ID/.test(leaveSrc), "leave should not depend
 assert.ok(!/cashoutBotSeatIfNeeded/.test(leaveSrc), "leave should not use bot cashout helper");
 assert.ok(!/ensureBotSeatInactiveForCashout/.test(leaveSrc), "leave should not use bot inactive helper");
 assert.ok(!/getBotConfig/.test(leaveSrc), "leave should not read bot config");
-assert.ok(
-  /select user_id, seat_no, coalesce\(is_bot, false\) as is_bot from public\.poker_seats/.test(leaveSrc),
-  "leave may read is_bot for autoplay progression"
-);
-assert.ok(/buildSeatBotMap\(seatRowsAll\)/.test(leaveSrc), "leave should build bot map for autoplay progression");
+assert.ok(!/\bcoalesce\(is_bot\b/i.test(leaveSrc), "leave should not query is_bot");
+assert.ok(!/\bbuildSeatBotMap\s*\(/.test(leaveSrc), "leave should not build bot map");
 assert.ok(
   /const shouldDetachSeatAndStack = !hasAnyActiveHandSignal;/.test(leaveSrc),
   "leave detach-vs-queued actor semantics should be based on active-hand safety signals"
