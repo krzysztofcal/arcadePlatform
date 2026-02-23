@@ -78,7 +78,9 @@ const run = async () => {
   assert.equal(seatDeleteCount, 0);
   assert.equal(stateUpdateCount, 1);
   assert.ok(capturedNextState && capturedNextState.leftTableByUserId && capturedNextState.leftTableByUserId[userId] === true);
-  assert.ok(Array.isArray(capturedNextState?.seats) && capturedNextState.seats.some((seat) => seat?.userId === userId));
+  const queuedSeat = Array.isArray(capturedNextState?.seats) ? capturedNextState.seats.find((seat) => seat?.userId === userId) : null;
+  assert.ok(queuedSeat);
+  assert.equal(queuedSeat.status, "LEAVING");
   assert.equal(capturedNextState?.stacks?.[userId], 125);
 };
 

@@ -206,6 +206,14 @@ export async function handler(event) {
             cashedOut: 0,
             seatNo: Number.isInteger(seatNo) ? seatNo : null,
             status: "already_left",
+            ...(includeState
+              ? {
+                  state: {
+                    version: expectedVersion,
+                    state: withoutPrivateState(sanitizeNoopResponseState(currentState, auth.userId)),
+                  },
+                }
+              : {}),
           };
           if (normalizedRequestId) {
             await storePokerRequestResult(tx, {
@@ -334,7 +342,14 @@ export async function handler(event) {
         const baseStacks = isPlainObject(leaveState.stacks) ? leaveState.stacks : parseStacks(currentState.stacks);
         const seats = shouldDetachSeatAndStack
           ? parseSeats(baseSeats).filter((seatItem) => seatItem?.userId !== auth.userId)
-          : parseSeats(baseSeats);
+          : parseSeats(baseSeats).map((seatItem) =>
+              seatItem?.userId === auth.userId
+                ? {
+                    ...seatItem,
+                    status: "LEAVING",
+                  }
+                : seatItem
+            );
         const updatedStacks = parseStacks(baseStacks);
         const seatRetained = seats.some((seatItem) => seatItem?.userId === auth.userId);
         if (shouldDetachSeatAndStack) {

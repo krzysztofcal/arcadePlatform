@@ -63,11 +63,15 @@ const run = async () => {
   assert.equal(body.cashedOut, 0);
   assert.equal(body.state.version, 22);
   assert.ok(body.state.state.leftTableByUserId && body.state.state.leftTableByUserId[userId] === true);
-  assert.ok(Array.isArray(body.state.state.seats) && body.state.state.seats.some((seat) => seat?.userId === userId));
+  const returnedSeat = Array.isArray(body.state.state.seats) ? body.state.state.seats.find((seat) => seat?.userId === userId) : null;
+  assert.ok(returnedSeat);
+  assert.equal(returnedSeat.status, "LEAVING");
   assert.equal(body.state.state.stacks?.[userId], 250);
 
   assert.ok(capturedNextState && capturedNextState.leftTableByUserId && capturedNextState.leftTableByUserId[userId] === true);
-  assert.ok(Array.isArray(capturedNextState.seats) && capturedNextState.seats.some((seat) => seat?.userId === userId));
+  const persistedSeat = Array.isArray(capturedNextState.seats) ? capturedNextState.seats.find((seat) => seat?.userId === userId) : null;
+  assert.ok(persistedSeat);
+  assert.equal(persistedSeat.status, "LEAVING");
   assert.equal(capturedNextState.stacks?.[userId], 250);
 };
 
