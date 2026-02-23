@@ -70,7 +70,9 @@ const validatePersistedStateOrThrow = (state, makeErrorFn) => {
   }
 };
 
-const isActionPhase = (phase) => phase === "PREFLOP" || phase === "FLOP" || phase === "TURN" || phase === "RIVER";
+function isActionPhase(phase) {
+  return phase === "PREFLOP" || phase === "FLOP" || phase === "TURN" || phase === "RIVER";
+}
 
 const parseBody = (body) => {
   if (!body) return { ok: true, value: {} };
