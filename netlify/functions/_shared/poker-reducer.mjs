@@ -451,6 +451,7 @@ const resetToNextHand = (state, options = {}) => {
     tableId: state.tableId,
     phase: "PREFLOP",
     seats,
+    handSeats: null,
     stacks,
     pot: 0,
     community: [],

@@ -172,6 +172,7 @@ export const startHandCore = async ({
     community: [],
     communityDealt: 0,
     seats: derivedSeats,
+    handSeats: derivedSeats.slice(),
     stacks: nextStacks,
     dealerSeatNo,
     turnUserId,
