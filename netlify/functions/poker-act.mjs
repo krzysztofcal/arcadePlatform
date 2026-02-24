@@ -1494,68 +1494,85 @@ export async function handler(event) {
         return sanitizePerHandArtifacts(persistedState);
       };
 
-      const botLoop = await runBotAutoplayLoop({
-        tableId,
-        requestId,
+      const executeBotAutoplayLoop = async ({
+        loopRequestId,
+        maxActions,
+        initialState,
+        initialPrivateState,
+        initialVersion,
+      }) => {
+        const botLoop = await runBotAutoplayLoop({
+          tableId,
+          requestId: loopRequestId,
+          initialState,
+          initialPrivateState,
+          initialVersion,
+          seatBotMap,
+          seatUserIdsInOrder,
+          maxActions,
+          botsOnlyHandCompletionHardCap: botAutoplayConfig.botsOnlyHandCompletionHardCap,
+          policyVersion: botAutoplayConfig.policyVersion,
+          klog,
+          isActionPhase,
+          advanceIfNeeded,
+          buildPersistedFromPrivateState,
+          materializeShowdownState: (stateToMaterialize, seatOrder) => materializeShowdownState(stateToMaterialize, seatOrder, holeCardsByUserId),
+          persistStep: async ({ botTurnUserId, botAction, botRequestId, fromState, persistedState, privateState, loopVersion: currentLoopVersion }) => {
+            if (!isStateStorageValid(persistedState, { requireHandSeed: true, requireCommunityDealt: true, requireNoDeck: true })) {
+              return { ok: false, reason: "invalid_persist_state" };
+            }
+
+            const botUpdateResult = await updatePokerStateOptimistic(tx, {
+              tableId,
+              expectedVersion: currentLoopVersion,
+              nextState: persistedState,
+            });
+            if (!botUpdateResult.ok) {
+              return { ok: false, reason: botUpdateResult.reason === "conflict" ? "optimistic_conflict" : "update_failed" };
+            }
+
+            mutated = true;
+            const botActionHandId =
+              typeof persistedState.handId === "string" && persistedState.handId.trim() ? persistedState.handId.trim() : null;
+            await tx.unsafe(
+              "insert into public.poker_actions (table_id, version, user_id, action_type, amount, hand_id, request_id, phase_from, phase_to, meta) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb);",
+              [
+                tableId,
+                botUpdateResult.newVersion,
+                botTurnUserId,
+                botAction.type,
+                botAction.amount ?? null,
+                botActionHandId,
+                botRequestId,
+                fromState.phase || null,
+                persistedState.phase || null,
+                JSON.stringify({ actor: "BOT", botUserId: botTurnUserId, policyVersion: botAutoplayConfig.policyVersion, reason: "AUTO_TURN" }),
+              ]
+            );
+
+            return {
+              ok: true,
+              loopVersion: botUpdateResult.newVersion,
+              responseFinalState: persistedState,
+              loopPrivateState: privateState,
+            };
+          },
+        });
+        responseFinalState = botLoop.responseFinalState;
+        responseEvents = responseEvents.concat(botLoop.responseEvents);
+        loopPrivateState = botLoop.loopPrivateState;
+        loopVersion = botLoop.loopVersion;
+        newVersion = loopVersion;
+        return botLoop;
+      };
+
+      const botLoop = await executeBotAutoplayLoop({
+        loopRequestId: requestId,
+        maxActions: botAutoplayConfig.maxActionsPerRequest,
         initialState: responseFinalState,
         initialPrivateState: loopPrivateState,
         initialVersion: loopVersion,
-        seatBotMap,
-        seatUserIdsInOrder,
-        maxActions: botAutoplayConfig.maxActionsPerRequest,
-        botsOnlyHandCompletionHardCap: botAutoplayConfig.botsOnlyHandCompletionHardCap,
-        policyVersion: botAutoplayConfig.policyVersion,
-        klog,
-        isActionPhase,
-        advanceIfNeeded,
-        buildPersistedFromPrivateState,
-        materializeShowdownState: (stateToMaterialize, seatOrder) => materializeShowdownState(stateToMaterialize, seatOrder, holeCardsByUserId),
-        persistStep: async ({ botTurnUserId, botAction, botRequestId, fromState, persistedState, privateState, loopVersion: currentLoopVersion }) => {
-          if (!isStateStorageValid(persistedState, { requireHandSeed: true, requireCommunityDealt: true, requireNoDeck: true })) {
-            return { ok: false, reason: "invalid_persist_state" };
-          }
-
-          const botUpdateResult = await updatePokerStateOptimistic(tx, {
-            tableId,
-            expectedVersion: currentLoopVersion,
-            nextState: persistedState,
-          });
-          if (!botUpdateResult.ok) {
-            return { ok: false, reason: botUpdateResult.reason === "conflict" ? "optimistic_conflict" : "update_failed" };
-          }
-
-          mutated = true;
-          const botActionHandId =
-            typeof persistedState.handId === "string" && persistedState.handId.trim() ? persistedState.handId.trim() : null;
-          await tx.unsafe(
-            "insert into public.poker_actions (table_id, version, user_id, action_type, amount, hand_id, request_id, phase_from, phase_to, meta) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb);",
-            [
-              tableId,
-              botUpdateResult.newVersion,
-              botTurnUserId,
-              botAction.type,
-              botAction.amount ?? null,
-              botActionHandId,
-              botRequestId,
-              fromState.phase || null,
-              persistedState.phase || null,
-              JSON.stringify({ actor: "BOT", botUserId: botTurnUserId, policyVersion: botAutoplayConfig.policyVersion, reason: "AUTO_TURN" }),
-            ]
-          );
-
-          return {
-            ok: true,
-            loopVersion: botUpdateResult.newVersion,
-            responseFinalState: persistedState,
-            loopPrivateState: privateState,
-          };
-        },
       });
-      responseFinalState = botLoop.responseFinalState;
-      responseEvents = responseEvents.concat(botLoop.responseEvents);
-      loopPrivateState = botLoop.loopPrivateState;
-      loopVersion = botLoop.loopVersion;
-      newVersion = loopVersion;
       botActionCount = botLoop.botActionCount;
       botStopReason = botLoop.botStopReason;
       lastBotActionSummary = botLoop.lastBotActionSummary;
@@ -1618,6 +1635,19 @@ export async function handler(event) {
                 newVersion = autoStart.newVersion;
                 holeCardsByUserId = autoStart.dealtHoleCards;
                 mutated = true;
+                if (isActionPhase(responseFinalState.phase) && isBotTurn(responseFinalState.turnUserId, seatBotMap)) {
+                  const postAutoStartRequestId = `bot-auto:post-autostart:${requestId}`;
+                  const postAutoStartLoop = await executeBotAutoplayLoop({
+                    loopRequestId: postAutoStartRequestId,
+                    maxActions: botAutoplayConfig.maxActionsPerRequest,
+                    initialState: responseFinalState,
+                    initialPrivateState: loopPrivateState,
+                    initialVersion: loopVersion,
+                  });
+                  botActionCount = postAutoStartLoop.botActionCount;
+                  botStopReason = postAutoStartLoop.botStopReason;
+                  lastBotActionSummary = postAutoStartLoop.lastBotActionSummary;
+                }
                 await storePokerRequestResult(tx, {
                   tableId,
                   userId: auth.userId,

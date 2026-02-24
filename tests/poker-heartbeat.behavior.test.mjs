@@ -11,6 +11,7 @@ const makeHeartbeatHandler = ({
   failStoreResult = false,
   forbidTableTouch = false,
   tableStatus = "OPEN",
+  timeoutApplied = false,
 }) =>
   loadPokerHandler("netlify/functions/poker-heartbeat.mjs", {
     baseHeaders: () => ({}),
@@ -19,6 +20,14 @@ const makeHeartbeatHandler = ({
     verifySupabaseJwt: async () => ({ valid: true, userId }),
     isValidUuid: () => true,
     normalizeRequestId: (value) => ({ ok: true, value: value ?? null }),
+    normalizeJsonState: (value) => value,
+    withoutPrivateState: (value) => value,
+    isStateStorageValid: () => true,
+    updatePokerStateOptimistic: async () => ({ ok: true, newVersion: 2 }),
+    maybeApplyTurnTimeout: () =>
+      timeoutApplied
+        ? { applied: true, state: { phase: "PREFLOP", handSeed: "seed", communityDealt: 0 }, action: { userId, type: "CHECK" }, requestId: "timeout-1" }
+        : { applied: false },
     beginSql: async (fn) =>
       fn({
         unsafe: async (query, params) => {
@@ -52,12 +61,19 @@ const makeHeartbeatHandler = ({
           if (text.includes("from public.poker_tables where id = $1")) {
             return tableStatus ? [{ status: tableStatus }] : [];
           }
+          if (text.includes("from public.poker_state where table_id = $1")) {
+            return [{ version: 1, state: { phase: "PREFLOP", handSeed: "seed", communityDealt: 0 } }];
+          }
           if (text.includes("from public.poker_seats where table_id = $1 and user_id = $2")) {
             return [{ seat_no: 3 }];
           }
           if (text.includes("update public.poker_seats set status = 'active'")) {
             sideEffects.seatTouch += 1;
             return [];
+          }
+          if (text.includes("insert into public.poker_actions") && text.includes("where not exists")) {
+            sideEffects.actionInsert += 1;
+            return [{ ok: true }];
           }
           if (text.includes("update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1")) {
             if (forbidTableTouch) throw new Error("unexpected_table_activity_touch");
@@ -80,7 +96,7 @@ const callHeartbeat = (handler, requestId) =>
 const run = async () => {
   const requestStore = new Map();
   const queries = [];
-  const sideEffects = { seatTouch: 0, tableTouch: 0 };
+  const sideEffects = { seatTouch: 0, tableTouch: 0, actionInsert: 0 };
   const handler = makeHeartbeatHandler({ requestStore, queries, sideEffects, forbidTableTouch: true, tableStatus: "OPEN" });
 
   const first = await callHeartbeat(handler, "hb-1");
@@ -89,16 +105,33 @@ const run = async () => {
   assert.equal(firstBody.ok, true);
   assert.equal(sideEffects.seatTouch, 1);
   assert.equal(sideEffects.tableTouch, 0);
+  assert.equal(sideEffects.actionInsert, 0);
 
   const second = await callHeartbeat(handler, "hb-1");
   assert.equal(second.statusCode, 200);
   assert.deepEqual(JSON.parse(second.body), firstBody);
   assert.equal(sideEffects.seatTouch, 2, "replayed heartbeat should refresh seat touch");
   assert.equal(sideEffects.tableTouch, 0, "heartbeat should never touch table activity");
+  assert.equal(sideEffects.actionInsert, 0, "non-timeout heartbeat should not log timeout actions");
+
+  const timeoutStore = new Map();
+  const timeoutQueries = [];
+  const timeoutEffects = { seatTouch: 0, tableTouch: 0, actionInsert: 0 };
+  const timeoutHandler = makeHeartbeatHandler({
+    requestStore: timeoutStore,
+    queries: timeoutQueries,
+    sideEffects: timeoutEffects,
+    tableStatus: "OPEN",
+    timeoutApplied: true,
+  });
+  const timeoutResponse = await callHeartbeat(timeoutHandler, "hb-timeout-basic-1");
+  assert.equal(timeoutResponse.statusCode, 200);
+  assert.equal(timeoutEffects.tableTouch, 1, "timeout heartbeat should touch table activity");
+  assert.equal(timeoutEffects.actionInsert, 1, "timeout heartbeat should log one timeout action");
 
   const closedNonReplayStore = new Map();
   const closedNonReplayQueries = [];
-  const closedNonReplayEffects = { seatTouch: 0, tableTouch: 0 };
+  const closedNonReplayEffects = { seatTouch: 0, tableTouch: 0, actionInsert: 0 };
   const closedNonReplayHandler = makeHeartbeatHandler({
     requestStore: closedNonReplayStore,
     queries: closedNonReplayQueries,
@@ -127,7 +160,7 @@ const run = async () => {
   );
 
   const replayStore = new Map();
-  const replayEffects = { seatTouch: 0, tableTouch: 0 };
+  const replayEffects = { seatTouch: 0, tableTouch: 0, actionInsert: 0 };
   const replayOpenFirst = await callHeartbeat(
     makeHeartbeatHandler({
       requestStore: replayStore,
@@ -177,7 +210,7 @@ const run = async () => {
   );
 
   const pendingStore = new Map();
-  const pendingEffects = { seatTouch: 0, tableTouch: 0 };
+  const pendingEffects = { seatTouch: 0, tableTouch: 0, actionInsert: 0 };
   const failingStoreHandler = makeHeartbeatHandler({
     requestStore: pendingStore,
     queries: [],
