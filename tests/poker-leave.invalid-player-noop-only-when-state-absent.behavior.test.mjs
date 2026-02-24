@@ -84,12 +84,13 @@ const run = async () => {
     body: JSON.stringify({ tableId }),
   });
 
-  assert.equal(presentResponse.statusCode, 409);
+  assert.equal(presentResponse.statusCode, 200);
   const presentBody = JSON.parse(presentResponse.body || "{}");
-  assert.equal(presentBody.error, "state_invalid");
+  assert.equal(presentBody.ok, true);
+  assert.equal(presentBody.status, "already_left");
   assert.equal(present.counters().postTransactionCalls, 0);
   assert.equal(present.counters().stateUpdateCount, 0);
-  assert.equal(present.counters().seatDeleteCount, 0);
+  assert.equal(present.counters().seatDeleteCount, 1);
 };
 
 run()
