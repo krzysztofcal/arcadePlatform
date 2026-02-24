@@ -133,6 +133,39 @@ const remediateOrphanEscrow = async ({ tableId, escrowBalance, sweepActorUserId 
     }
 
     if (owedByUser.size > 0) {
+      let owedTotal = 0;
+      for (const owed of owedByUser.values()) owedTotal += owed;
+      if (owedTotal > lockedEscrowBalance) {
+        if (!sweepActorUserId) {
+          return {
+            action: "skip",
+            reason: "owed_exceeds_escrow_missing_actor",
+            escrowBalance: lockedEscrowBalance,
+            owedTotal,
+          };
+        }
+        await postTransaction({
+          userId: sweepActorUserId,
+          txType: "TABLE_CASH_OUT",
+          idempotencyKey: `poker:orphan_quarantine:${tableId}:v1`,
+          reference: `table:${tableId}`,
+          metadata: { tableId, reason: "orphan_escrow_quarantine" },
+          entries: [
+            { accountType: "ESCROW", systemKey: escrowSystemKey, amount: -lockedEscrowBalance },
+            { accountType: "USER", amount: lockedEscrowBalance },
+          ],
+          createdBy: sweepActorUserId,
+          tx,
+        });
+        return {
+          action: "quarantined",
+          reason: "owed_exceeds_escrow",
+          escrowBalance: lockedEscrowBalance,
+          userId: sweepActorUserId,
+          owedTotal,
+        };
+      }
+
       let cashedOutTotal = 0;
       for (const [userId, owed] of owedByUser.entries()) {
         await postTransaction({
@@ -920,6 +953,7 @@ where a.account_type = 'ESCROW'
             tableId,
             escrowBalance: remediation.escrowBalance,
             userId: remediation.userId || null,
+            reason: remediation.reason || null,
           });
         } else {
           if (remediation?.reason === "quarantine_missing_actor") {
