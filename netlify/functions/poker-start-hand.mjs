@@ -217,7 +217,21 @@ export async function handler(event) {
           (count, seat) => (seat?.is_bot ? count : count + 1),
           0
         );
-        const validSeats = seats.filter((seat) => Number.isInteger(seat?.seat_no) && seat?.user_id);
+        const leftTableByUserId =
+          currentState?.leftTableByUserId && typeof currentState.leftTableByUserId === "object"
+            ? currentState.leftTableByUserId
+            : {};
+        const sitOutByUserId =
+          currentState?.sitOutByUserId && typeof currentState.sitOutByUserId === "object"
+            ? currentState.sitOutByUserId
+            : {};
+        const validSeats = seats.filter(
+          (seat) =>
+            Number.isInteger(seat?.seat_no) &&
+            seat?.user_id &&
+            !leftTableByUserId[seat.user_id] &&
+            !sitOutByUserId[seat.user_id]
+        );
         if (validSeats.length < 2) {
           throw makeError(400, "not_enough_players");
         }

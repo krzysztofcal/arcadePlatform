@@ -1031,6 +1031,73 @@ const runInsufficientUniqueActivePlayers = async () => {
   assert.ok(!queries.some((q) => q.query.toLowerCase().includes("insert into public.poker_hole_cards")));
 };
 
+const runExcludesLeavingAndSitOutSeats = async () => {
+  const queries = [];
+  const handler = loadPokerHandler("netlify/functions/poker-start-hand.mjs", {
+    baseHeaders: () => ({}),
+    corsHeaders: () => ({ "access-control-allow-origin": "https://example.test" }),
+    createDeck,
+    dealHoleCards,
+    deriveDeck,
+    extractBearerToken: () => "token",
+    getRng,
+    isPlainObject,
+    isStateStorageValid,
+    shuffle,
+    verifySupabaseJwt: async () => ({ valid: true, userId }),
+    isValidUuid: () => true,
+    normalizeJsonState,
+    normalizeRequestId,
+    upgradeLegacyInitStateWithSeats,
+    withoutPrivateState,
+    computeLegalActions,
+    computeNextDealerSeatNo,
+    buildActionConstraints,
+    updatePokerStateOptimistic,
+    TURN_MS,
+    beginSql: async (fn) =>
+      fn({
+        unsafe: async (query, params) => {
+          const text = String(query).toLowerCase();
+          queries.push({ query: String(query), params });
+          if (text.includes("from public.poker_requests")) return [];
+          if (text.includes("insert into public.poker_requests")) return [{ request_id: params?.[2] }];
+          if (text.includes("delete from public.poker_requests")) return [];
+          if (text.includes("from public.poker_tables")) return [{ id: tableId, status: "OPEN", max_players: 6, stakes: "1/2" }];
+          if (text.includes("from public.poker_state")) {
+            return [{
+              version: 1,
+              state: {
+                phase: "INIT",
+                stacks: initialStacks,
+                leftTableByUserId: { "user-2": true },
+                sitOutByUserId: { "user-3": true },
+              },
+            }];
+          }
+          if (text.includes("from public.poker_seats")) {
+            return [
+              { user_id: "user-1", seat_no: 1, status: "ACTIVE" },
+              { user_id: "user-2", seat_no: 2, status: "ACTIVE" },
+              { user_id: "user-3", seat_no: 3, status: "ACTIVE" },
+            ];
+          }
+          return [];
+        },
+      }),
+    klog: () => {},
+  });
+  const response = await handler({
+    httpMethod: "POST",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    body: JSON.stringify({ tableId, requestId: "req-exclude-left" }),
+  });
+
+  assert.equal(response.statusCode, 400);
+  assert.equal(JSON.parse(response.body).error, "not_enough_players");
+  assert.ok(!queries.some((q) => q.query.toLowerCase().includes("insert into public.poker_hole_cards")));
+};
+
 await runHappyPath();
 await runReplayPath();
 await runHeadsUpBlinds();
@@ -1045,3 +1112,4 @@ await runInvalidStakes();
 await runMissingStateRow();
 await runConflictSemantics();
 await runInsufficientUniqueActivePlayers();
+await runExcludesLeavingAndSitOutSeats();

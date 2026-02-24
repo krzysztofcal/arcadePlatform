@@ -210,6 +210,16 @@ const run = async () => {
   assert.equal(body.ok, true);
   assert.equal(body.cashedOut, 0);
   assert.equal(postCalls.length, 0);
+  assert.equal(
+    queries.filter((q) => q.query.toLowerCase().includes("update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1")).length,
+    1,
+    "leave should bump table activity once when state mutates"
+  );
+  assert.equal(
+    queries.filter((q) => q.query.toLowerCase().includes("insert into public.poker_actions") && q.params?.[3] === "LEAVE_TABLE").length,
+    0,
+    "non-hand leave should not insert LEAVE_TABLE action"
+  );
   assert.ok(
     queries.some((q) => q.query.toLowerCase().includes("delete from public.poker_seats")),
     "leave should delete poker_seats row"
@@ -325,6 +335,10 @@ const run = async () => {
   assert.equal(nonIdempotentCalls.length, 1, "second non-idempotent leave should not double-credit after state cleanup");
   const nonIdempotentSecondBody = JSON.parse(nonIdempotentSecond.body);
   assert.equal(nonIdempotentSecondBody.cashedOut, 0, "second non-idempotent leave should cash out zero when already left");
+  const secondActivityBumps = nonIdempotentQueries.filter((q) =>
+    q.query.toLowerCase().includes("update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1")
+  ).length;
+  assert.equal(secondActivityBumps, 1, "already-left replay should not bump table activity without mutation");
 
   const requestScopedRead = idempotentQueries.find((q) =>
     q.query.toLowerCase().includes("from public.poker_requests where table_id = $1 and user_id = $2 and request_id = $3 and kind = $4")
