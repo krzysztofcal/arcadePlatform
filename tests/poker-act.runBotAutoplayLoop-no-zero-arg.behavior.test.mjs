@@ -19,8 +19,8 @@ assert.doesNotMatch(
 
 assert.match(
   src,
-  /postAutoStartRequestId\s*=\s*`bot-auto:post-autostart:\$\{requestId\}`[\s\S]*?executeBotAutoplayLoop\s*\(\s*postAutoStartRequestId\s*,/,
-  "poker-act should trigger post-autostart bot autoplay loop with scoped request id"
+  /postAutoStartRequestId\s*=\s*`bot-auto:post-autostart:\$\{requestId\}`[\s\S]*?executeBotAutoplayLoop\s*\(\s*\{[\s\S]*?initialVersion:\s*loopVersion[\s\S]*?\}\s*\)/,
+  "poker-act should trigger post-autostart bot autoplay with explicit initialVersion seed"
 );
 
 console.log("poker-act runBotAutoplayLoop no-zero-arg behavior test passed");

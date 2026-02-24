@@ -57,7 +57,7 @@ const run = async () => {
           if (text.includes("from public.poker_seats where table_id = $1 and user_id = $2")) return [{ seat_no: 2 }];
           if (text.includes("update public.poker_seats set status = 'active'")) return [];
           if (text.includes("insert into public.poker_actions")) {
-            actionInsert = { version: params?.[1], userId: params?.[2], actionType: params?.[3] };
+            actionInsert = { version: params?.[1], userId: params?.[2], actionType: params?.[3], requestId: params?.[6] };
             return [{ ok: true }];
           }
           if (text.includes("update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1")) {
@@ -83,10 +83,21 @@ const run = async () => {
   assert.equal(payload.state?.state?.actedThisRoundByUserId?.["cccccccc-cccc-4ccc-8ccc-cccccccccccc"], true);
   assert.equal(actionInsert?.actionType, "CHECK");
   assert.equal(
+    queries.some((q) => q.includes("for update")),
+    false,
+    "heartbeat should avoid for update lock on state read"
+  );
+  assert.equal(
+    queries.some((q) => q.includes("where not exists (select 1 from public.poker_actions where table_id = $1 and request_id = $7)")),
+    true,
+    "heartbeat timeout action insert should be guarded for idempotency"
+  );
+  assert.equal(
     queries.some((q) => q.includes("insert into public.poker_actions")),
     true,
     "heartbeat timeout should record a poker_actions row"
   );
+  assert.equal(actionInsert?.requestId, `heartbeat-timeout:${tableId}:v${stored.version}`);
   assert.equal(tableTouchCount, 1);
 };
 

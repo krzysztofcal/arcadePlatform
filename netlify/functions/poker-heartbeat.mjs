@@ -7,6 +7,7 @@ import { isStateStorageValid, normalizeJsonState, withoutPrivateState } from "./
 import { updatePokerStateOptimistic } from "./_shared/poker-state-write.mjs";
 
 const REQUEST_PENDING_STALE_SEC = 30;
+const TIMEOUT_ACTION_TYPES = new Set(["CHECK", "FOLD"]);
 
 const parseBody = (body) => {
   if (!body) return { ok: true, value: {} };
@@ -151,10 +152,7 @@ export async function handler(event) {
           mutated = true;
         }
 
-        const stateRows = await tx.unsafe(
-          "select version, state from public.poker_state where table_id = $1 order by version desc limit 1 for update;",
-          [tableId]
-        );
+        const stateRows = await tx.unsafe("select version, state from public.poker_state where table_id = $1 order by version desc limit 1;", [tableId]);
         const latest = stateRows?.[0] || null;
         if (!latest?.state || !Number.isInteger(latest?.version)) {
           return { error: "state_missing", statusCode: 404 };
@@ -164,6 +162,24 @@ export async function handler(event) {
         const currentState = normalizeJsonState(latest.state);
         const timeoutResult = maybeApplyTurnTimeout({ tableId, state: currentState, privateState: currentState, nowMs: Date.now() });
         if (timeoutResult.applied) {
+          const timeoutActionType = typeof timeoutResult.action?.type === "string" ? timeoutResult.action.type.trim().toUpperCase() : "";
+          if (!TIMEOUT_ACTION_TYPES.has(timeoutActionType)) {
+            klog("poker_heartbeat_timeout_skip", {
+              tableId,
+              reason: "unsafe_timeout_action",
+              actionType: timeoutActionType || null,
+            });
+            const resultPayload = { ok: true, seated: presence.isSeated, seatNo: presence.seatNo };
+            await storePokerRequestResult(tx, {
+              tableId,
+              userId: auth.userId,
+              requestId,
+              kind: "HEARTBEAT",
+              result: resultPayload,
+            });
+            return resultPayload;
+          }
+
           const updatedState = timeoutResult.state;
           if (!isStateStorageValid(updatedState, { requireHandSeed: true, requireCommunityDealt: true, requireNoDeck: true })) {
             return { error: "state_invalid", statusCode: 409 };
@@ -180,17 +196,18 @@ export async function handler(event) {
           }
           mutated = true;
 
+          const timeoutRequestId = `heartbeat-timeout:${tableId}:v${expectedVersion}`;
           const timeoutHandId = typeof updatedState.handId === "string" && updatedState.handId.trim() ? updatedState.handId.trim() : null;
           await tx.unsafe(
-            "insert into public.poker_actions (table_id, version, user_id, action_type, amount, hand_id, request_id, phase_from, phase_to, meta) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb);",
+            "insert into public.poker_actions (table_id, version, user_id, action_type, amount, hand_id, request_id, phase_from, phase_to, meta) select $1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb where not exists (select 1 from public.poker_actions where table_id = $1 and request_id = $7);",
             [
               tableId,
               updateResult.newVersion,
               timeoutResult.action.userId,
-              timeoutResult.action.type,
+              timeoutActionType,
               timeoutResult.action.amount ?? null,
               timeoutHandId,
-              timeoutResult.requestId || `heartbeat-timeout-${updateResult.newVersion}`,
+              timeoutRequestId,
               currentState.phase || null,
               updatedState.phase || null,
               JSON.stringify({ actor: "SYSTEM", reason: "HEARTBEAT_TIMEOUT" }),

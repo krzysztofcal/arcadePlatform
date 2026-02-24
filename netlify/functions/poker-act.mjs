@@ -1494,13 +1494,19 @@ export async function handler(event) {
         return sanitizePerHandArtifacts(persistedState);
       };
 
-      const executeBotAutoplayLoop = async (loopRequestId, maxActions) => {
+      const executeBotAutoplayLoop = async ({
+        loopRequestId,
+        maxActions,
+        initialState,
+        initialPrivateState,
+        initialVersion,
+      }) => {
         const botLoop = await runBotAutoplayLoop({
           tableId,
           requestId: loopRequestId,
-          initialState: responseFinalState,
-          initialPrivateState: loopPrivateState,
-          initialVersion: loopVersion,
+          initialState,
+          initialPrivateState,
+          initialVersion,
           seatBotMap,
           seatUserIdsInOrder,
           maxActions,
@@ -1560,7 +1566,13 @@ export async function handler(event) {
         return botLoop;
       };
 
-      const botLoop = await executeBotAutoplayLoop(requestId, botAutoplayConfig.maxActionsPerRequest);
+      const botLoop = await executeBotAutoplayLoop({
+        loopRequestId: requestId,
+        maxActions: botAutoplayConfig.maxActionsPerRequest,
+        initialState: responseFinalState,
+        initialPrivateState: loopPrivateState,
+        initialVersion: loopVersion,
+      });
       botActionCount = botLoop.botActionCount;
       botStopReason = botLoop.botStopReason;
       lastBotActionSummary = botLoop.lastBotActionSummary;
@@ -1625,7 +1637,13 @@ export async function handler(event) {
                 mutated = true;
                 if (isActionPhase(responseFinalState.phase) && isBotTurn(responseFinalState.turnUserId, seatBotMap)) {
                   const postAutoStartRequestId = `bot-auto:post-autostart:${requestId}`;
-                  const postAutoStartLoop = await executeBotAutoplayLoop(postAutoStartRequestId, botAutoplayConfig.maxActionsPerRequest);
+                  const postAutoStartLoop = await executeBotAutoplayLoop({
+                    loopRequestId: postAutoStartRequestId,
+                    maxActions: botAutoplayConfig.maxActionsPerRequest,
+                    initialState: responseFinalState,
+                    initialPrivateState: loopPrivateState,
+                    initialVersion: loopVersion,
+                  });
                   botActionCount = postAutoStartLoop.botActionCount;
                   botStopReason = postAutoStartLoop.botStopReason;
                   lastBotActionSummary = postAutoStartLoop.lastBotActionSummary;
