@@ -14,6 +14,8 @@ const callHeartbeat = (handler, requestId) =>
 const run = async () => {
   const requests = new Map();
   const actionKeys = new Set();
+  let actionInsertCalls = 0;
+  let lastTimeoutRequestId = null;
   let updateCalls = 0;
   const stored = {
     version: 5,
@@ -81,7 +83,9 @@ const run = async () => {
           if (text.includes("from public.poker_seats where table_id = $1 and user_id = $2")) return [{ seat_no: 2 }];
           if (text.includes("update public.poker_seats set status = 'active'")) return [];
           if (text.includes("insert into public.poker_actions") && text.includes("where not exists")) {
+            actionInsertCalls += 1;
             const key = `${params?.[0]}|${params?.[6]}`;
+            lastTimeoutRequestId = params?.[6] ?? null;
             if (!actionKeys.has(key)) actionKeys.add(key);
             return [{ ok: true }];
           }
@@ -102,8 +106,14 @@ const run = async () => {
   assert.deepEqual(JSON.parse(second.body || "{}"), firstBody);
 
   assert.equal(actionKeys.size, 1, "timeout action insert should be idempotent");
+  assert.equal(actionInsertCalls, 1, "timeout action insert should only be attempted once across idempotent replay");
   assert.equal(
-    actionKeys.has(`${tableId}|heartbeat-timeout:${tableId}:v5`),
+    lastTimeoutRequestId,
+    `heartbeat-timeout:${tableId}:v5`,
+    "deterministic timeout request id should use table + expectedVersion"
+  );
+  assert.equal(
+    actionKeys.has(`${tableId}|${lastTimeoutRequestId}`),
     true,
     "deterministic timeout request id should use table + expectedVersion"
   );

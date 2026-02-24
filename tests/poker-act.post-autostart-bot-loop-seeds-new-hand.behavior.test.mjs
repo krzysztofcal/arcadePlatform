@@ -4,7 +4,6 @@ import { TURN_MS, advanceIfNeeded } from "../netlify/functions/_shared/poker-red
 import { buildActionConstraints, computeLegalActions } from "../netlify/functions/_shared/poker-legal-actions.mjs";
 import { isStateStorageValid, normalizeJsonState, withoutPrivateState } from "../netlify/functions/_shared/poker-state-utils.mjs";
 import { resetTurnTimer } from "../netlify/functions/_shared/poker-turn-timer.mjs";
-import { updatePokerStateOptimistic } from "../netlify/functions/_shared/poker-state-write.mjs";
 
 const tableId = "11111111-1111-4111-8111-111111111111";
 const humanUserId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
@@ -43,6 +42,7 @@ const run = async () => {
   };
 
   const botLoopCalls = [];
+  const unknownQueries = [];
 
   const handler = loadPokerHandler("netlify/functions/poker-act.mjs", {
     baseHeaders: () => ({}),
@@ -59,7 +59,7 @@ const run = async () => {
     normalizeJsonState,
     withoutPrivateState,
     resetTurnTimer,
-    updatePokerStateOptimistic,
+    updatePokerStateOptimistic: async (_tx, { expectedVersion }) => ({ ok: true, newVersion: expectedVersion + 1 }),
     deriveCommunityCards: () => [],
     deriveRemainingDeck: () => [],
     maybeApplyTurnTimeout: () => ({ applied: false }),
@@ -160,6 +160,7 @@ const run = async () => {
           }
           if (text.includes("insert into public.poker_actions")) return [{ ok: true }];
           if (text.includes("update public.poker_tables set last_activity_at")) return [];
+          unknownQueries.push(text);
           return [];
         },
       }),
@@ -174,6 +175,11 @@ const run = async () => {
 
   assert.equal(response.statusCode, 200);
   assert.equal(botLoopCalls.length >= 2, true);
+  const postAutoStartCall = botLoopCalls.find((call) => call.requestId === "bot-auto:post-autostart:act-post-seed");
+  assert.equal(!!postAutoStartCall, true);
+  assert.equal(postAutoStartCall?.initialState?.handId, "new-hand-0000-4000-8000-000000000001");
+  assert.equal(postAutoStartCall?.initialVersion, 100);
+  assert.equal(unknownQueries.length, 0, `unexpected SQL queries hit: ${unknownQueries.join(" | ")}`);
 };
 
 run().then(() => console.log("poker-act post-autostart bot loop seeds new hand behavior test passed")).catch((error) => {
