@@ -97,7 +97,10 @@ const run = async () => {
     true,
     "heartbeat timeout should record a poker_actions row"
   );
-  assert.equal(actionInsert?.requestId, `heartbeat-timeout:${tableId}:v${stored.version}`);
+  assert.equal(
+    actionInsert?.requestId,
+    `heartbeat-timeout:${tableId}:${stored.state.handId}:${stored.state.turnDeadlineAt}`
+  );
   assert.equal(tableTouchCount, 1);
 };
 

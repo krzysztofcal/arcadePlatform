@@ -9,6 +9,13 @@ import { updatePokerStateOptimistic } from "./_shared/poker-state-write.mjs";
 const REQUEST_PENDING_STALE_SEC = 30;
 const TIMEOUT_ACTION_TYPES = new Set(["CHECK", "FOLD"]);
 
+const deriveTimeoutRequestId = ({ tableId, state }) => {
+  const handId = typeof state?.handId === "string" && state.handId.trim() ? state.handId.trim() : "unknown-hand";
+  const deadlineRaw = Number(state?.turnDeadlineAt);
+  const deadline = Number.isFinite(deadlineRaw) ? Math.trunc(deadlineRaw) : 0;
+  return `heartbeat-timeout:${tableId}:${handId}:${deadline}`;
+};
+
 const parseBody = (body) => {
   if (!body) return { ok: true, value: {} };
   try {
@@ -184,6 +191,7 @@ export async function handler(event) {
           if (!isStateStorageValid(updatedState, { requireHandSeed: true, requireCommunityDealt: true, requireNoDeck: true })) {
             return { error: "state_invalid", statusCode: 409 };
           }
+          const timeoutRequestId = deriveTimeoutRequestId({ tableId, state: currentState });
           const updateResult = await updatePokerStateOptimistic(tx, {
             tableId,
             expectedVersion,
@@ -191,12 +199,21 @@ export async function handler(event) {
           });
           if (!updateResult.ok) {
             if (updateResult.reason === "not_found") return { error: "state_missing", statusCode: 404 };
-            if (updateResult.reason === "conflict") return { error: "state_conflict", statusCode: 409 };
+            if (updateResult.reason === "conflict") {
+              const resultPayload = { ok: true, seated: presence.isSeated, seatNo: presence.seatNo };
+              await storePokerRequestResult(tx, {
+                tableId,
+                userId: auth.userId,
+                requestId,
+                kind: "HEARTBEAT",
+                result: resultPayload,
+              });
+              return resultPayload;
+            }
             return { error: "state_invalid", statusCode: 409 };
           }
           mutated = true;
 
-          const timeoutRequestId = `heartbeat-timeout:${tableId}:v${expectedVersion}`;
           const timeoutHandId = typeof updatedState.handId === "string" && updatedState.handId.trim() ? updatedState.handId.trim() : null;
           await tx.unsafe(
             "insert into public.poker_actions (table_id, version, user_id, action_type, amount, hand_id, request_id, phase_from, phase_to, meta) select $1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb where not exists (select 1 from public.poker_actions where table_id = $1 and request_id = $7);",
