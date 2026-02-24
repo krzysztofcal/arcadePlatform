@@ -3,7 +3,7 @@ import { loadPokerHandler } from "./helpers/poker-test-helpers.mjs";
 
 const tableId = "44444444-4444-4444-8444-444444444444";
 const userId = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
-const otherUserId = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+const botUserId = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
 
 let nextStatePersisted = null;
 
@@ -21,6 +21,24 @@ const handler = loadPokerHandler("netlify/functions/poker-leave.mjs", {
     );
     return { ok: true, newVersion: expectedVersion + 1 };
   },
+  runBotAutoplayLoop: async ({ requestId, initialState, initialVersion, persistStep }) => {
+    const postBotState = {
+      ...initialState,
+      turnUserId: null,
+      phase: "HAND_DONE",
+      actedThisRoundByUserId: { ...(initialState.actedThisRoundByUserId || {}), [botUserId]: true },
+    };
+    const persisted = await persistStep({
+      botTurnUserId: botUserId,
+      botAction: { type: "CHECK" },
+      botRequestId: `bot:${requestId}:1`,
+      fromState: initialState,
+      persistedState: postBotState,
+      privateState: postBotState,
+      loopVersion: initialVersion,
+    });
+    return { responseFinalState: postBotState, loopPrivateState: postBotState, loopVersion: persisted.loopVersion, botActionCount: 1, botStopReason: "non_action_phase", responseEvents: [] };
+  },
   beginSql: async (fn) =>
     fn({
       unsafe: async (query, params) => {
@@ -31,19 +49,41 @@ const handler = loadPokerHandler("netlify/functions/poker-leave.mjs", {
             version: 10,
             state: {
               tableId,
-              phase: "INIT",
-              seats: [{ userId, seatNo: 2 }, { userId: otherUserId, seatNo: 4 }],
-              stacks: { [userId]: 125, [otherUserId]: 140 },
+              phase: "TURN",
+              handId: "hand-clear-seat",
+              handSeed: "seed-clear-seat",
+              communityDealt: 3,
+              community: [{ r: "2", s: "H" }, { r: "3", s: "D" }, { r: "4", s: "C" }],
+              turnUserId: userId,
+              seats: [{ userId, seatNo: 2 }, { userId: botUserId, seatNo: 4 }],
+              stacks: { [userId]: 125, [botUserId]: 140 },
+              actedThisRoundByUserId: { [userId]: false, [botUserId]: false },
+              foldedByUserId: { [userId]: false, [botUserId]: false },
+              leftTableByUserId: { [userId]: false, [botUserId]: false },
+              sitOutByUserId: { [userId]: false, [botUserId]: false },
+              pendingAutoSitOutByUserId: {},
               holeCardsByUserId: { [userId]: [{ r: "A", s: "S" }, { r: "A", s: "H" }] },
               deck: [{ r: "K", s: "S" }],
               pot: 0,
             },
           }];
         }
-        if (text.includes("from public.poker_seats") && text.includes("for update")) return [{ seat_no: 2, status: "ACTIVE", stack: 125 }];
+        if (text.includes("from public.poker_seats") && text.includes("and user_id") && text.includes("for update")) return [{ seat_no: 2, status: "ACTIVE", stack: 125 }];
+        if (text.includes("from public.poker_seats") && text.includes("status = 'active'")) {
+          return [
+            { user_id: userId, seat_no: 2, is_bot: false },
+            { user_id: botUserId, seat_no: 4, is_bot: true },
+          ];
+        }
+        if (text.includes("from public.poker_hole_cards")) {
+          return [
+            { user_id: userId, cards: [{ r: "A", s: "S" }, { r: "A", s: "H" }] },
+            { user_id: botUserId, cards: [{ r: "K", s: "C" }, { r: "Q", s: "C" }] },
+          ];
+        }
         if (text.includes("update public.poker_state") && text.includes("version = version + 1")) {
           nextStatePersisted = JSON.parse(params?.[2] || "{}");
-          return [{ version: 11 }];
+          return [{ version: Number(params?.[1]) + 1 }];
         }
         return [];
       },
@@ -67,6 +107,8 @@ const returnedStacks = returnedState.stacks && typeof returnedState.stacks === "
 
 assert.equal(returnedSeats.some((seat) => seat?.userId === userId), false);
 assert.equal(Object.prototype.hasOwnProperty.call(returnedStacks, userId), false);
+assert.ok(returnedState.actedThisRoundByUserId?.[botUserId] === true || returnedState.turnUserId !== userId);
+assert.ok(["TURN", "HAND_DONE"].includes(returnedState.phase));
 assert.equal(returnedState.deck, undefined);
 assert.equal(returnedState.holeCardsByUserId, undefined);
 assert.ok(nextStatePersisted);
