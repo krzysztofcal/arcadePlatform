@@ -23,6 +23,10 @@ const buildHandler = ({ postCalls, logs }) => {
         return "OK";
       },
       async eval() { return 1; },
+      async del(key) {
+        if (key === "poker:sweep:lock:v1") state.lockHeld = false;
+        return 1;
+      },
       async expire(key) {
         if (key === "poker:sweep:lock:v1") state.lockHeld = false;
         return 1;

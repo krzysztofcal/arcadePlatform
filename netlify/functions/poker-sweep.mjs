@@ -86,7 +86,11 @@ const releaseSweepLock = async (token) => {
   if (isMemoryStore) {
     const current = await store.get(SWEEP_LOCK_KEY);
     if (current && current === token) {
-      await store.setex(SWEEP_LOCK_KEY, 0, "released");
+      if (typeof store.del === "function") {
+        await store.del(SWEEP_LOCK_KEY);
+      } else {
+        await store.expire(SWEEP_LOCK_KEY, 1);
+      }
     }
     return;
   }
@@ -220,7 +224,7 @@ export async function handler(event) {
     });
   }
 
-  const lockToken = `sweep-${Date.now()}-${process.pid || 0}`;
+  const lockToken = `sweep-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   let lockAcquired = false;
   try {
     lockAcquired = await acquireSweepLock(lockToken);

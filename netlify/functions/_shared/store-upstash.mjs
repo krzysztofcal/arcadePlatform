@@ -88,6 +88,9 @@ function createMemoryStore() {
       const ttl = entry.expiry - Date.now();
       return ttl > 0 ? Math.ceil(ttl / 1000) : -2;
     },
+    async del(key) {
+      return memory.delete(key) ? 1 : 0;
+    },
     async eval(_script, keys = [], argv = []) {
       // Memory impl supports only v2 delta script signature [sessionKey, sessionSyncKey, dailyKey, totalKey, lockKey] x [now, delta, dailyCap, sessionCap, ts, lockTtl, sessionTtl].
       if (keys.length === 5 && argv.length === 7) {
@@ -193,6 +196,7 @@ const remoteStore = {
   async decrBy(key, delta) { return call("DECRBY", key, String(delta)); },
   async expire(key, seconds) { return call("EXPIRE", key, String(seconds)); },
   async ttl(key) { return call("TTL", key); },
+  async del(key) { return call("DEL", key); },
   async eval(script, keys = [], argv = []) {
     // Upstash REST API expects array format: ["eval", script, numkeys, key1, key2, ..., arg1, arg2, ...]
     // The command name must be included as the first element when POSTing to the root endpoint
