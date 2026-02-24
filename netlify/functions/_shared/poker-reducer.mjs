@@ -382,6 +382,7 @@ const resetToNextHand = (state, options = {}) => {
       state: stampTurnTimer(
         {
           ...state,
+          handSeats: null,
           sitOutByUserId: nextSitOutByUserId,
           pendingAutoSitOutByUserId: nextPendingAutoSitOutByUserId,
           missedTurnsByUserId: {},
@@ -402,6 +403,7 @@ const resetToNextHand = (state, options = {}) => {
       state: stampTurnTimer(
         {
           ...state,
+          handSeats: null,
           sitOutByUserId: nextSitOutByUserId,
           pendingAutoSitOutByUserId: nextPendingAutoSitOutByUserId,
           missedTurnsByUserId: {},
@@ -432,6 +434,7 @@ const resetToNextHand = (state, options = {}) => {
       state: stampTurnTimer(
         {
           ...state,
+          handSeats: null,
           sitOutByUserId: nextSitOutByUserId,
           pendingAutoSitOutByUserId: nextPendingAutoSitOutByUserId,
           missedTurnsByUserId: {},
@@ -451,6 +454,7 @@ const resetToNextHand = (state, options = {}) => {
     tableId: state.tableId,
     phase: "PREFLOP",
     seats,
+    handSeats: null,
     stacks,
     pot: 0,
     community: [],
@@ -847,5 +851,6 @@ export {
   applyAction,
   applyLeaveTable,
   advanceIfNeeded,
+  resetToNextHand as __testOnly_resetToNextHand,
   isBettingRoundComplete,
 };
