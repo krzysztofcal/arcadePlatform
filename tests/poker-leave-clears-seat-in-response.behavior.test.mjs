@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { loadPokerHandler } from "./helpers/poker-test-helpers.mjs";
-import { updatePokerStateOptimistic } from "../netlify/functions/_shared/poker-state-write.mjs";
 
 const tableId = "44444444-4444-4444-8444-444444444444";
 const userId = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
@@ -15,7 +14,13 @@ const handler = loadPokerHandler("netlify/functions/poker-leave.mjs", {
   verifySupabaseJwt: async () => ({ valid: true, userId }),
   isValidUuid: () => true,
   normalizeRequestId: (value) => ({ ok: true, value }),
-  updatePokerStateOptimistic,
+  updatePokerStateOptimistic: async (tx, { tableId: updateTableId, expectedVersion, nextState }) => {
+    await tx.unsafe(
+      "update public.poker_state set state = $3::jsonb, version = version + 1 where table_id = $1 and version = $2 returning version;",
+      [updateTableId, expectedVersion, JSON.stringify(nextState || {})]
+    );
+    return { ok: true, newVersion: expectedVersion + 1 };
+  },
   beginSql: async (fn) =>
     fn({
       unsafe: async (query, params) => {

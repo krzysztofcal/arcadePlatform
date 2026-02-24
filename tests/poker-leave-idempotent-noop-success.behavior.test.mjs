@@ -38,7 +38,7 @@ const handler = loadPokerHandler("netlify/functions/poker-leave.mjs", {
         }
         if (text.includes("from public.poker_tables")) return [{ id: tableId, status: "OPEN" }];
         if (text.includes("from public.poker_state")) {
-          return [{ version: 5, state: { tableId, phase: "INIT", seats: [], stacks: {}, pot: 0, deck: [{ r: "A", s: "S" }] } }];
+          return [{ version: 5, state: { tableId, phase: "INIT", seats: [], stacks: {}, pot: 0, deck: [{ r: "A", s: "S" }], holeCardsByUserId: { [userId]: [{ r: "K", s: "H" }, { r: "Q", s: "D" }] } } }];
         }
         if (text.includes("from public.poker_seats") && text.includes("for update")) return [];
         if (text.includes("update public.poker_state") && text.includes("version = version + 1")) {
@@ -82,5 +82,6 @@ const actionMutations = queryLog.filter((q) => q.includes("insert into public.po
 assert.equal(stateMutations.length, 0);
 assert.equal(actionMutations.length, 0);
 assert.equal(firstBody.state?.state?.deck, undefined);
+assert.equal(firstBody.state?.state?.holeCardsByUserId, undefined);
 
 console.log("poker-leave idempotent noop success behavior test passed");

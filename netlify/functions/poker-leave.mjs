@@ -267,7 +267,7 @@ export async function handler(event) {
         );
         const seatRow = seatRows?.[0] || null;
         const seatNo = seatRow?.seat_no;
-        if (alreadyLeft || !Number.isInteger(seatNo)) {
+        if (alreadyLeft) {
           if (seatRow) {
             await tx.unsafe("delete from public.poker_seats where table_id = $1 and user_id = $2;", [
               tableId,
@@ -320,7 +320,7 @@ export async function handler(event) {
             code: error?.code || null,
             noop: isInvalidPlayer,
           });
-          if (isInvalidPlayer) {
+          if (isInvalidPlayer && alreadyLeft) {
             if (seatRow) {
               await tx.unsafe("delete from public.poker_seats where table_id = $1 and user_id = $2;", [
                 tableId,

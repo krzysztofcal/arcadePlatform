@@ -8,6 +8,7 @@ const buildHandler = ({ state, seatNo = 4, seatStack = 0, withSeatRow = true }) 
   let stateUpdateCount = 0;
   let seatDeleteCount = 0;
   let postTransactionCalls = 0;
+  let actionInsertCount = 0;
 
   const handler = loadPokerHandler("netlify/functions/poker-leave.mjs", {
     baseHeaders: () => ({}),
@@ -29,6 +30,10 @@ const buildHandler = ({ state, seatNo = 4, seatStack = 0, withSeatRow = true }) 
             stateUpdateCount += 1;
             return [{ version: 8 }];
           }
+          if (text.includes("insert into public.poker_actions")) {
+            actionInsertCount += 1;
+            return [];
+          }
           if (text.includes("delete from public.poker_seats")) {
             seatDeleteCount += 1;
             return [];
@@ -48,7 +53,7 @@ const buildHandler = ({ state, seatNo = 4, seatStack = 0, withSeatRow = true }) 
     klog: () => {},
   });
 
-  return { handler, counters: () => ({ stateUpdateCount, seatDeleteCount, postTransactionCalls }) };
+  return { handler, counters: () => ({ stateUpdateCount, seatDeleteCount, postTransactionCalls, actionInsertCount }) };
 };
 
 const run = async () => {
@@ -75,6 +80,7 @@ const run = async () => {
   assert.equal(absent.counters().postTransactionCalls, 0);
   assert.equal(absent.counters().stateUpdateCount, 0);
   assert.equal(absent.counters().seatDeleteCount, 1);
+  assert.equal(absent.counters().actionInsertCount, 0);
 
   const presentState = { tableId, phase: "INIT", seats: [{ userId, seatNo: 4 }], stacks: { [userId]: 50 }, pot: 0 };
   const present = buildHandler({ state: presentState, withSeatRow: true, seatStack: 50 });
@@ -84,13 +90,13 @@ const run = async () => {
     body: JSON.stringify({ tableId }),
   });
 
-  assert.equal(presentResponse.statusCode, 200);
+  assert.equal(presentResponse.statusCode, 409);
   const presentBody = JSON.parse(presentResponse.body || "{}");
-  assert.equal(presentBody.ok, true);
-  assert.equal(presentBody.status, "already_left");
+  assert.equal(presentBody.error, "state_invalid");
   assert.equal(present.counters().postTransactionCalls, 0);
   assert.equal(present.counters().stateUpdateCount, 0);
-  assert.equal(present.counters().seatDeleteCount, 1);
+  assert.equal(present.counters().seatDeleteCount, 0);
+  assert.equal(present.counters().actionInsertCount, 0);
 };
 
 run()
