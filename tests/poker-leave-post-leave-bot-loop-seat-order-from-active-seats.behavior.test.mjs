@@ -34,6 +34,7 @@ const stored = {
 };
 
 let botLoopRuns = 0;
+let seatLockQueryValidated = false;
 const actionRequestIds = [];
 
 const handler = loadPokerHandler("netlify/functions/poker-leave.mjs", {
@@ -84,7 +85,13 @@ const handler = loadPokerHandler("netlify/functions/poker-leave.mjs", {
         const text = String(query).toLowerCase();
         if (text.includes("from public.poker_tables")) return [{ id: tableId, status: "OPEN" }];
         if (text.includes("from public.poker_state")) return [{ version: stored.version, state: stored.state }];
-        if (text.includes("from public.poker_seats") && text.includes("and user_id") && text.includes("for update")) return [{ seat_no: 1, status: "ACTIVE", stack: 100 }];
+        if (text.includes("from public.poker_seats") && text.includes("and user_id") && text.includes("for update")) {
+          assert.ok(Array.isArray(params), "seat-lock query params must be passed");
+          assert.equal(params[0], tableId, "seat-lock tableId param mismatch");
+          assert.equal(params[1], humanUserId, "seat-lock userId param mismatch");
+          seatLockQueryValidated = true;
+          return [{ seat_no: 1, status: "ACTIVE", stack: 100 }];
+        }
         if (text.includes("from public.poker_seats") && text.includes("status = 'active'")) {
           return [
             { user_id: bot1, seat_no: 2, is_bot: true },
@@ -123,5 +130,6 @@ assert.ok(payload.state?.version > 3);
 assert.equal(payload.state?.state?.deck, undefined);
 assert.equal(payload.state?.state?.holeCardsByUserId, undefined);
 assert.equal(actionRequestIds.length, 1);
+assert.equal(seatLockQueryValidated, true);
 
 console.log("poker-leave post-leave bot loop seat order from active seats behavior test passed");

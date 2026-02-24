@@ -35,6 +35,7 @@ const stored = {
 
 let botLoopRuns = 0;
 let actionInsertCount = 0;
+let seatLockQueryValidated = false;
 
 const handler = loadPokerHandler("netlify/functions/poker-leave.mjs", {
   baseHeaders: () => ({}),
@@ -59,9 +60,8 @@ const handler = loadPokerHandler("netlify/functions/poker-leave.mjs", {
     },
   }),
   loadHoleCardsByUserId: async (_tx, { requiredUserIds }) => {
-    if (new Set(requiredUserIds).size !== requiredUserIds.length) {
-      throw new Error("requiredUserIds_has_duplicates");
-    }
+    assert.equal(new Set(requiredUserIds).size, requiredUserIds.length, "requiredUserIds must be deduped");
+    assert.deepEqual(requiredUserIds, [bot1, bot2], "requiredUserIds should match deduped ACTIVE seat order");
     return {
       holeCardsByUserId: {
         [bot1]: [{ r: "A", s: "S" }, { r: "A", s: "H" }],
@@ -91,11 +91,17 @@ const handler = loadPokerHandler("netlify/functions/poker-leave.mjs", {
   },
   beginSql: async (fn) =>
     fn({
-      unsafe: async (query) => {
+      unsafe: async (query, params) => {
         const text = String(query).toLowerCase();
         if (text.includes("from public.poker_tables")) return [{ id: tableId, status: "OPEN" }];
         if (text.includes("from public.poker_state")) return [{ version: stored.version, state: stored.state }];
-        if (text.includes("from public.poker_seats") && text.includes("and user_id") && text.includes("for update")) return [{ seat_no: 1, status: "ACTIVE", stack: 100 }];
+        if (text.includes("from public.poker_seats") && text.includes("and user_id") && text.includes("for update")) {
+          assert.ok(Array.isArray(params), "seat-lock query params must be passed");
+          assert.equal(params[0], tableId, "seat-lock tableId param mismatch");
+          assert.equal(params[1], humanUserId, "seat-lock userId param mismatch");
+          seatLockQueryValidated = true;
+          return [{ seat_no: 1, status: "ACTIVE", stack: 100 }];
+        }
         if (text.includes("from public.poker_seats") && text.includes("status = 'active'")) {
           return [
             { user_id: bot1, seat_no: 2, is_bot: true },
@@ -127,5 +133,6 @@ assert.equal(botLoopRuns, 1);
 assert.equal(payload.state?.state?.deck, undefined);
 assert.equal(payload.state?.state?.holeCardsByUserId, undefined);
 assert.equal(actionInsertCount, 1);
+assert.equal(seatLockQueryValidated, true);
 
 console.log("poker-leave post-leave bot loop seat order dedupes behavior test passed");
