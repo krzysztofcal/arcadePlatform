@@ -133,10 +133,11 @@ const isActionPhase = (phase) => ["PREFLOP", "FLOP", "TURN", "RIVER"].includes(p
 
 const normalizeSeatOrderFromActiveSeatRows = (activeSeatRows) => {
   if (!Array.isArray(activeSeatRows)) return [];
-  return activeSeatRows
+  const orderedUserIds = activeSeatRows
     .filter((row) => Number.isInteger(Number(row?.seat_no)) && typeof row?.user_id === "string" && row.user_id.trim())
     .sort((a, b) => Number(a.seat_no) - Number(b.seat_no))
     .map((row) => row.user_id);
+  return [...new Set(orderedUserIds)];
 };
 
 const selectFallbackBotTurnUserId = (state, seatUserIdsInOrder, seatBotMap) => {
