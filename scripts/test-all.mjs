@@ -61,6 +61,8 @@ run("node", ["tests/poker-hole-cards.rls.test.mjs"], "poker-hole-cards-rls");
 run("node", ["tests/poker-hole-cards.allow-bots.contract.test.mjs"], "poker-hole-cards-allow-bots-contract");
 run("node", ["tests/poker-rls.read.test.mjs"], "poker-rls-read");
 run("node", ["tests/poker-reducer.test.mjs"], "poker-reducer");
+run("node", ["tests/poker-handSeats-routing.behavior.test.mjs"], "poker-handseats-routing-behavior");
+run("node", ["tests/poker-handSeats-seats-undefined.behavior.test.mjs"], "poker-handseats-seats-undefined-behavior");
 run("node", ["tests/poker-handSeats-reset.behavior.test.mjs"], "poker-handseats-reset-behavior");
 run("node", ["tests/poker-leave.test.mjs"], "poker-leave");
 run("node", ["tests/poker-join.test.mjs"], "poker-join");
