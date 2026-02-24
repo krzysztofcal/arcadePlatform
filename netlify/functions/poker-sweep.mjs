@@ -20,7 +20,6 @@ const EXPIRED_SEATS_LIMIT = 200;
 const CLOSE_CASHOUT_TABLES_LIMIT = 25;
 const SWEEP_LOCK_KEY = "poker:sweep:lock:v1";
 const SWEEP_LOCK_TTL_SEC = 90;
-const ORPHAN_QUARANTINE_SYSTEM_KEY = "POKER_ORPHAN_QUARANTINE";
 
 const SWEEP_LOCK_SCRIPT = `
 local key = KEYS[1]
@@ -29,6 +28,15 @@ local ttlSec = tonumber(ARGV[2])
 local locked = redis.call('SET', key, token, 'EX', ttlSec, 'NX')
 if locked then
   return 1
+end
+return 0
+`;
+
+const SWEEP_UNLOCK_SCRIPT = `
+local key = KEYS[1]
+local token = ARGV[1]
+if redis.call('GET', key) == token then
+  return redis.call('DEL', key)
 end
 return 0
 `;
@@ -75,13 +83,17 @@ const acquireSweepLock = async (token) => {
 };
 
 const releaseSweepLock = async (token) => {
-  const current = await store.get(SWEEP_LOCK_KEY);
-  if (current && current === token) {
-    await store.expire(SWEEP_LOCK_KEY, 1);
+  if (isMemoryStore) {
+    const current = await store.get(SWEEP_LOCK_KEY);
+    if (current && current === token) {
+      await store.setex(SWEEP_LOCK_KEY, 0, "released");
+    }
+    return;
   }
+  await store.eval(SWEEP_UNLOCK_SCRIPT, [SWEEP_LOCK_KEY], [token]);
 };
 
-const remediateOrphanEscrow = async ({ tableId, escrowBalance }) => {
+const remediateOrphanEscrow = async ({ tableId, escrowBalance, sweepActorUserId }) => {
   const escrowSystemKey = `POKER_TABLE:${tableId}`;
   return beginSql(async (tx) => {
     const accountRows = await tx.unsafe(
@@ -145,21 +157,25 @@ const remediateOrphanEscrow = async ({ tableId, escrowBalance }) => {
       };
     }
 
+    if (!sweepActorUserId) {
+      return { action: "skip", reason: "quarantine_missing_actor", escrowBalance: lockedEscrowBalance };
+    }
+
     await postTransaction({
-      userId: null,
+      userId: sweepActorUserId,
       txType: "TABLE_CASH_OUT",
       idempotencyKey: `poker:orphan_quarantine:${tableId}:v1`,
       reference: `table:${tableId}`,
       metadata: { tableId, reason: "orphan_escrow_quarantine" },
       entries: [
         { accountType: "ESCROW", systemKey: escrowSystemKey, amount: -lockedEscrowBalance },
-        { accountType: "SYSTEM", systemKey: ORPHAN_QUARANTINE_SYSTEM_KEY, amount: lockedEscrowBalance },
+        { accountType: "USER", amount: lockedEscrowBalance },
       ],
-      createdBy: null,
+      createdBy: sweepActorUserId,
       tx,
     });
 
-    return { action: "quarantined", escrowBalance: lockedEscrowBalance };
+    return { action: "quarantined", escrowBalance: lockedEscrowBalance, userId: sweepActorUserId };
   });
 };
 
@@ -887,7 +903,7 @@ where a.account_type = 'ESCROW'
           klog("poker_escrow_orphan_skip", { tableId, escrowBalance, reason: "invalid_or_zero_balance" });
           continue;
         }
-        const remediation = await remediateOrphanEscrow({ tableId, escrowBalance });
+        const remediation = await remediateOrphanEscrow({ tableId, escrowBalance, sweepActorUserId });
         if (remediation?.action === "remediated") {
           klog("poker_escrow_orphan_remediated", {
             tableId,
@@ -899,9 +915,15 @@ where a.account_type = 'ESCROW'
           klog("poker_escrow_orphan_quarantined", {
             tableId,
             escrowBalance: remediation.escrowBalance,
-            systemKey: ORPHAN_QUARANTINE_SYSTEM_KEY,
+            userId: remediation.userId || null,
           });
         } else {
+          if (remediation?.reason === "quarantine_missing_actor") {
+            klog("poker_escrow_orphan_quarantine_disabled_missing_actor", {
+              tableId,
+              escrowBalance: remediation?.escrowBalance ?? escrowBalance,
+            });
+          }
           klog("poker_escrow_orphan_skip", {
             tableId,
             escrowBalance: remediation?.escrowBalance ?? escrowBalance,

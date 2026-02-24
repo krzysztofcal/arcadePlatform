@@ -2,17 +2,18 @@ import assert from "node:assert/strict";
 import { loadPokerHandler } from "./helpers/poker-test-helpers.mjs";
 import { isHoleCardsTableMissing } from "../netlify/functions/_shared/poker-hole-cards-store.mjs";
 
-const tableId = "55555555-5555-4555-8555-555555555555";
+const tableId = "56565656-5656-4565-8565-565656565656";
 
 const buildHandler = ({ postCalls, logs }) => {
   const state = {
     lockHeld: false,
-    escrowBalance: 90,
+    escrowBalance: 75,
   };
 
   const handler = loadPokerHandler("netlify/functions/poker-sweep.mjs", {
     baseHeaders: () => ({}),
     isMemoryStore: true,
+    isValidUuid: () => false,
     store: {
       async get(key) {
         if (key === "poker:sweep:lock:v1") return state.lockHeld ? "token" : null;
@@ -53,7 +54,6 @@ const buildHandler = ({ postCalls, logs }) => {
       }),
     postTransaction: async (payload) => {
       postCalls.push(payload);
-      if (payload.idempotencyKey === `poker:orphan_quarantine:${tableId}:v1`) state.escrowBalance = 0;
       return { transaction: { id: payload.idempotencyKey } };
     },
     postHandSettlementToLedger: async () => {},
@@ -70,23 +70,15 @@ const buildHandler = ({ postCalls, logs }) => {
 
 const run = async () => {
   process.env.POKER_SWEEP_SECRET = "secret";
-  process.env.POKER_SYSTEM_ACTOR_USER_ID = "00000000-0000-4000-8000-000000000099";
+  delete process.env.POKER_SYSTEM_ACTOR_USER_ID;
   const postCalls = [];
   const logs = [];
   const { handler } = buildHandler({ postCalls, logs });
 
-  const first = await handler({ httpMethod: "POST", headers: { "x-sweep-secret": "secret" } });
-  assert.equal(first.statusCode, 200);
-  assert.equal(postCalls.length, 1);
-  assert.equal(postCalls[0].idempotencyKey, `poker:orphan_quarantine:${tableId}:v1`);
-  assert.equal(postCalls[0].userId, "00000000-0000-4000-8000-000000000099");
-  assert.ok(postCalls[0].entries.some((entry) => entry.accountType === "USER" && entry.amount === 90));
-  assert.ok(!postCalls[0].entries.some((entry) => entry.accountType === "SYSTEM"));
-  assert.ok(logs.some((entry) => entry.event === "poker_escrow_orphan_quarantined"));
-
-  const second = await handler({ httpMethod: "POST", headers: { "x-sweep-secret": "secret" } });
-  assert.equal(second.statusCode, 200);
-  assert.equal(postCalls.length, 1);
+  const response = await handler({ httpMethod: "POST", headers: { "x-sweep-secret": "secret" } });
+  assert.equal(response.statusCode, 200);
+  assert.equal(postCalls.length, 0);
+  assert.ok(logs.some((entry) => entry.event === "poker_escrow_orphan_quarantine_disabled_missing_actor"));
 };
 
 run().catch((error) => {

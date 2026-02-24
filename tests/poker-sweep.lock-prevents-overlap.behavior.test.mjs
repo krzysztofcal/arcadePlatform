@@ -8,14 +8,23 @@ const run = async () => {
   let lockAttempt = 0;
   let workQueryCount = 0;
   const logs = [];
+  const evalCalls = [];
 
   const handler = loadPokerHandler("netlify/functions/poker-sweep.mjs", {
     baseHeaders: () => ({}),
     isMemoryStore: false,
     store: {
-      async eval() {
-        lockAttempt += 1;
-        return lockAttempt === 1 ? 1 : 0;
+      async eval(script, keys, argv) {
+        evalCalls.push({ script: String(script || ""), keys, argv });
+        const src = String(script || "").toLowerCase();
+        if (src.includes("set") && src.includes("nx")) {
+          lockAttempt += 1;
+          return lockAttempt === 1 ? 1 : 0;
+        }
+        if (src.includes("del") && src.includes("get")) {
+          return 1;
+        }
+        return 0;
       },
       async get() { return null; },
       async setex() { return "OK"; },
@@ -59,6 +68,10 @@ const run = async () => {
   assert.deepEqual(JSON.parse(second.body), { ok: true, skipped: "locked" });
   assert.equal(workQueryCount, 1, "second locked run should not execute sweep queries");
   assert.ok(logs.some((entry) => entry.event === "poker_sweep_skip_locked"));
+  const unlockCall = evalCalls.find((entry) => entry.script.toLowerCase().includes("redis.call('del', key)"));
+  assert.ok(unlockCall, "expected atomic unlock eval to be invoked");
+  assert.equal(unlockCall.keys?.[0], "poker:sweep:lock:v1");
+  assert.equal(typeof unlockCall.argv?.[0], "string");
 };
 
 run().catch((error) => {
