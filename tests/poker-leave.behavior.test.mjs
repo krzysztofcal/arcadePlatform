@@ -198,6 +198,7 @@ const makeStatefulHandler = (seatStack, stateStack, postCalls, queries) => {
 };
 
 const makeActiveHandHandler = ({ queries, requestStore = null, forceAdvanceWrite = false }) => {
+  const stateWriteVersions = [];
   const db = {
     version: 5,
     state: {
@@ -268,6 +269,7 @@ const makeActiveHandHandler = ({ queries, requestStore = null, forceAdvanceWrite
           if (text.includes("update public.poker_state") && text.includes("version = version + 1")) {
             db.version += 1;
             db.state = JSON.parse(params?.[2] || "{}");
+            stateWriteVersions.push(db.version);
             return [{ version: db.version }];
           }
           if (text.includes("insert into public.poker_actions") && text.includes("leave_table")) {
@@ -302,7 +304,7 @@ const makeActiveHandHandler = ({ queries, requestStore = null, forceAdvanceWrite
       return { nextState: { ...state, phase: "TURN" } };
     };
   }
-  return loadPokerHandler("netlify/functions/poker-leave.mjs", deps);
+  return { handler: loadPokerHandler("netlify/functions/poker-leave.mjs", deps), stateWriteVersions };
 };
 
 const run = async () => {
@@ -450,8 +452,8 @@ const run = async () => {
   assert.equal(secondActivityBumps, 1, "already-left replay should not bump table activity without mutation");
 
   const activeQueries = [];
-  const activeHandler = makeActiveHandHandler({ queries: activeQueries });
-  const activeResponse = await activeHandler({
+  const activeHarness = makeActiveHandHandler({ queries: activeQueries });
+  const activeResponse = await activeHarness.handler({
     httpMethod: "POST",
     headers: { origin: "https://example.test", authorization: "Bearer token" },
     body: JSON.stringify({ tableId, includeState: true }),
@@ -470,8 +472,8 @@ const run = async () => {
   assert.ok(activeStateUpdateIndex >= 0);
   assert.ok(activeActionInsertIndex > activeStateUpdateIndex, "LEAVE_TABLE action should be inserted after state write");
   const activeActionInsert = activeQueries[activeActionInsertIndex];
-  const firstStateUpdate = activeQueries[activeStateUpdateIndex];
-  const leaveWriteVersion = Number(firstStateUpdate?.params?.[1]) + 1;
+  const leaveWriteVersion = activeHarness.stateWriteVersions[0];
+  assert.equal(typeof leaveWriteVersion, "number", "active-hand leave should capture first state write version");
   assert.equal(activeActionInsert.params?.[1], leaveWriteVersion, "LEAVE_TABLE version should match leave-write post version");
   const activeBumps = activeQueries.filter((q) =>
     q.query.toLowerCase().includes("update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1")
@@ -480,15 +482,15 @@ const run = async () => {
 
   const activeReqQueries = [];
   const activeReqStore = new Map();
-  const activeReqHandler = makeActiveHandHandler({ queries: activeReqQueries, requestStore: activeReqStore });
+  const activeReqHarness = makeActiveHandHandler({ queries: activeReqQueries, requestStore: activeReqStore });
   const reqId = "req-active-1";
-  const reqFirst = await activeReqHandler({
+  const reqFirst = await activeReqHarness.handler({
     httpMethod: "POST",
     headers: { origin: "https://example.test", authorization: "Bearer token" },
     body: JSON.stringify({ tableId, includeState: true, requestId: reqId }),
   });
   assert.equal(reqFirst.statusCode, 200);
-  const reqSecond = await activeReqHandler({
+  const reqSecond = await activeReqHarness.handler({
     httpMethod: "POST",
     headers: { origin: "https://example.test", authorization: "Bearer token" },
     body: JSON.stringify({ tableId, includeState: true, requestId: reqId }),
@@ -505,14 +507,14 @@ const run = async () => {
   assert.equal(reqActivityBumps, 1, "replay with same requestId should not bump activity again");
 
   const activeNoReqQueries = [];
-  const activeNoReqHandler = makeActiveHandHandler({ queries: activeNoReqQueries });
-  const noReqFirst = await activeNoReqHandler({
+  const activeNoReqHarness = makeActiveHandHandler({ queries: activeNoReqQueries });
+  const noReqFirst = await activeNoReqHarness.handler({
     httpMethod: "POST",
     headers: { origin: "https://example.test", authorization: "Bearer token" },
     body: JSON.stringify({ tableId }),
   });
   assert.equal(noReqFirst.statusCode, 200);
-  const noReqSecond = await activeNoReqHandler({
+  const noReqSecond = await activeNoReqHarness.handler({
     httpMethod: "POST",
     headers: { origin: "https://example.test", authorization: "Bearer token" },
     body: JSON.stringify({ tableId }),
@@ -524,8 +526,8 @@ const run = async () => {
   assert.equal(noReqActionInserts, 1, "no requestId same-hand leave should dedupe LEAVE_TABLE insertion");
 
   const divergentQueries = [];
-  const divergentHandler = makeActiveHandHandler({ queries: divergentQueries, forceAdvanceWrite: true });
-  const divergentResponse = await divergentHandler({
+  const divergentHarness = makeActiveHandHandler({ queries: divergentQueries, forceAdvanceWrite: true });
+  const divergentResponse = await divergentHarness.handler({
     httpMethod: "POST",
     headers: { origin: "https://example.test", authorization: "Bearer token" },
     body: JSON.stringify({ tableId, includeState: true }),
@@ -536,8 +538,8 @@ const run = async () => {
     q.query.toLowerCase().includes("update public.poker_state set version = version + 1")
   );
   assert.ok(divergentStateUpdates.length >= 2, "forced advance should persist a second state write");
-  const divergentLeaveWriteVersion = Number(divergentStateUpdates[0]?.params?.[1]) + 1;
-  const divergentFinalVersion = Number(divergentStateUpdates[1]?.params?.[1]) + 1;
+  const divergentLeaveWriteVersion = divergentHarness.stateWriteVersions[0];
+  const divergentFinalVersion = divergentHarness.stateWriteVersions[divergentHarness.stateWriteVersions.length - 1];
   const divergentActionInsert = divergentQueries.find(
     (q) => q.query.toLowerCase().includes("insert into public.poker_actions") && q.params?.[3] === "LEAVE_TABLE"
   );
