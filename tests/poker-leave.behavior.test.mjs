@@ -197,7 +197,7 @@ const makeStatefulHandler = (seatStack, stateStack, postCalls, queries) => {
   });
 };
 
-const makeActiveHandHandler = ({ queries, requestStore = null }) => {
+const makeActiveHandHandler = ({ queries, requestStore = null, forceAdvanceWrite = false }) => {
   const db = {
     version: 5,
     state: {
@@ -223,7 +223,7 @@ const makeActiveHandHandler = ({ queries, requestStore = null }) => {
     leaveActions: [],
   };
 
-  return loadPokerHandler("netlify/functions/poker-leave.mjs", {
+  const deps = {
     baseHeaders: () => ({}),
     corsHeaders: () => ({ "access-control-allow-origin": "https://example.test" }),
     extractBearerToken: () => "token",
@@ -295,7 +295,14 @@ const makeActiveHandHandler = ({ queries, requestStore = null }) => {
       }),
     postTransaction: async () => ({ transaction: { id: "tx-1" } }),
     klog: () => {},
-  });
+  };
+  if (forceAdvanceWrite) {
+    deps.runAdvanceLoop = (state, _privateState, events) => {
+      events.push({ type: "FORCED_ADVANCE" });
+      return { nextState: { ...state, phase: "TURN" } };
+    };
+  }
+  return loadPokerHandler("netlify/functions/poker-leave.mjs", deps);
 };
 
 const run = async () => {
@@ -463,7 +470,9 @@ const run = async () => {
   assert.ok(activeStateUpdateIndex >= 0);
   assert.ok(activeActionInsertIndex > activeStateUpdateIndex, "LEAVE_TABLE action should be inserted after state write");
   const activeActionInsert = activeQueries[activeActionInsertIndex];
-  assert.equal(activeActionInsert.params?.[1], activeBody?.state?.version, "LEAVE_TABLE version should match post-write version");
+  const firstStateUpdate = activeQueries[activeStateUpdateIndex];
+  const leaveWriteVersion = Number(firstStateUpdate?.params?.[1]) + 1;
+  assert.equal(activeActionInsert.params?.[1], leaveWriteVersion, "LEAVE_TABLE version should match leave-write post version");
   const activeBumps = activeQueries.filter((q) =>
     q.query.toLowerCase().includes("update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1")
   ).length;
@@ -513,6 +522,32 @@ const run = async () => {
     (q) => q.query.toLowerCase().includes("insert into public.poker_actions") && q.params?.[3] === "LEAVE_TABLE"
   ).length;
   assert.equal(noReqActionInserts, 1, "no requestId same-hand leave should dedupe LEAVE_TABLE insertion");
+
+  const divergentQueries = [];
+  const divergentHandler = makeActiveHandHandler({ queries: divergentQueries, forceAdvanceWrite: true });
+  const divergentResponse = await divergentHandler({
+    httpMethod: "POST",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    body: JSON.stringify({ tableId, includeState: true }),
+  });
+  assert.equal(divergentResponse.statusCode, 200);
+  const divergentBody = JSON.parse(divergentResponse.body);
+  const divergentStateUpdates = divergentQueries.filter((q) =>
+    q.query.toLowerCase().includes("update public.poker_state set version = version + 1")
+  );
+  assert.ok(divergentStateUpdates.length >= 2, "forced advance should persist a second state write");
+  const divergentLeaveWriteVersion = Number(divergentStateUpdates[0]?.params?.[1]) + 1;
+  const divergentFinalVersion = Number(divergentStateUpdates[1]?.params?.[1]) + 1;
+  const divergentActionInsert = divergentQueries.find(
+    (q) => q.query.toLowerCase().includes("insert into public.poker_actions") && q.params?.[3] === "LEAVE_TABLE"
+  );
+  assert.ok(divergentActionInsert, "should insert LEAVE_TABLE action in divergent active-hand flow");
+  assert.equal(divergentActionInsert.params?.[1], divergentLeaveWriteVersion, "LEAVE_TABLE should use first post-leave write version");
+  assert.equal(divergentBody?.state?.version, divergentFinalVersion, "response should expose final version after subsequent writes");
+  const divergentBumps = divergentQueries.filter((q) =>
+    q.query.toLowerCase().includes("update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1")
+  ).length;
+  assert.equal(divergentBumps, 1, "multi-step active-hand leave should bump activity once");
 
   const requestScopedRead = idempotentQueries.find((q) =>
     q.query.toLowerCase().includes("from public.poker_requests where table_id = $1 and user_id = $2 and request_id = $3 and kind = $4")
