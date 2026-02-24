@@ -51,12 +51,15 @@ const run = async () => {
 
   const first = await handler({ httpMethod: "POST", headers: { "x-sweep-secret": "secret" } });
   assert.equal(first.statusCode, 200);
+  assert.equal(workRuns, 1);
+  assert.equal(mem.has("poker:sweep:lock:v1"), false);
+
   const second = await handler({ httpMethod: "POST", headers: { "x-sweep-secret": "secret" } });
   assert.equal(second.statusCode, 200);
   assert.equal(JSON.parse(second.body).skipped, undefined);
   assert.equal(workRuns, 2);
-  assert.ok(delCalls >= 2);
   assert.equal(mem.has("poker:sweep:lock:v1"), false);
+  assert.ok(delCalls >= 1);
 };
 
 run().catch((error) => {
