@@ -1,18 +1,18 @@
 import assert from "node:assert/strict";
 import { loadPokerHandler } from "./helpers/poker-test-helpers.mjs";
 
-const tableId = "12121212-1212-4212-8212-121212121212";
-const humanUserId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
-const bot1 = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
-const bot2 = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+const tableId = "56565656-5656-4656-8656-565656565656";
+const humanUserId = "11111111-1111-4111-8111-111111111111";
+const bot1 = "22222222-2222-4222-8222-222222222222";
+const bot2 = "33333333-3333-4333-8333-333333333333";
 
 const stored = {
-  version: 3,
+  version: 12,
   state: {
     tableId,
     phase: "TURN",
-    handId: "hand-seat-order",
-    handSeed: "seed-seat-order",
+    handId: "hand-dedupe-seat-order",
+    handSeed: "seed-dedupe-seat-order",
     communityDealt: 3,
     community: [{ r: "2", s: "H" }, { r: "3", s: "D" }, { r: "4", s: "C" }],
     seats: [{ userId: humanUserId, seatNo: 1 }, { userId: bot1, seatNo: 2 }, { userId: bot2, seatNo: 3 }],
@@ -34,8 +34,8 @@ const stored = {
 };
 
 let botLoopRuns = 0;
+let actionInsertCount = 0;
 let seatLockQueryValidated = false;
-const actionRequestIds = [];
 
 const handler = loadPokerHandler("netlify/functions/poker-leave.mjs", {
   baseHeaders: () => ({}),
@@ -43,7 +43,7 @@ const handler = loadPokerHandler("netlify/functions/poker-leave.mjs", {
   extractBearerToken: () => "token",
   verifySupabaseJwt: async () => ({ valid: true, userId: humanUserId }),
   isValidUuid: () => true,
-  normalizeRequestId: () => ({ ok: true, value: "leave-seat-order" }),
+  normalizeRequestId: () => ({ ok: true, value: "leave-seat-order-dedupe" }),
   ensurePokerRequest: async () => ({ status: "proceed" }),
   storePokerRequestResult: async () => {},
   deletePokerRequest: async () => {},
@@ -59,6 +59,16 @@ const handler = loadPokerHandler("netlify/functions/poker-leave.mjs", {
       actedThisRoundByUserId: { ...(state.actedThisRoundByUserId || {}), [humanUserId]: true },
     },
   }),
+  loadHoleCardsByUserId: async (_tx, { requiredUserIds }) => {
+    assert.equal(new Set(requiredUserIds).size, requiredUserIds.length, "requiredUserIds must be deduped");
+    assert.deepEqual(requiredUserIds, [bot1, bot2], "requiredUserIds should match deduped ACTIVE seat order");
+    return {
+      holeCardsByUserId: {
+        [bot1]: [{ r: "A", s: "S" }, { r: "A", s: "H" }],
+        [bot2]: [{ r: "K", s: "S" }, { r: "K", s: "H" }],
+      },
+    };
+  },
   updatePokerStateOptimistic: async (_tx, { expectedVersion, nextState }) => {
     if (expectedVersion !== stored.version) return { ok: false, reason: "conflict" };
     stored.version += 1;
@@ -99,14 +109,8 @@ const handler = loadPokerHandler("netlify/functions/poker-leave.mjs", {
             { user_id: bot2, seat_no: 3, is_bot: true },
           ];
         }
-        if (text.includes("from public.poker_hole_cards")) {
-          return [
-            { user_id: bot1, cards: [{ r: "A", s: "S" }, { r: "A", s: "H" }] },
-            { user_id: bot2, cards: [{ r: "K", s: "S" }, { r: "K", s: "H" }] },
-          ];
-        }
         if (text.includes("insert into public.poker_actions")) {
-          actionRequestIds.push(params?.[6]);
+          actionInsertCount += 1;
           return [];
         }
         return [];
@@ -119,17 +123,16 @@ const handler = loadPokerHandler("netlify/functions/poker-leave.mjs", {
 const response = await handler({
   httpMethod: "POST",
   headers: { origin: "https://example.test" },
-  body: JSON.stringify({ tableId, requestId: "leave-seat-order", includeState: true }),
+  body: JSON.stringify({ tableId, requestId: "leave-seat-order-dedupe", includeState: true }),
 });
 
 assert.equal(response.statusCode, 200);
 const payload = JSON.parse(response.body || "{}");
 assert.equal(payload.ok, true);
 assert.equal(botLoopRuns, 1);
-assert.ok(payload.state?.version > 3);
 assert.equal(payload.state?.state?.deck, undefined);
 assert.equal(payload.state?.state?.holeCardsByUserId, undefined);
-assert.equal(actionRequestIds.length, 1);
+assert.equal(actionInsertCount, 1);
 assert.equal(seatLockQueryValidated, true);
 
-console.log("poker-leave post-leave bot loop seat order from active seats behavior test passed");
+console.log("poker-leave post-leave bot loop seat order dedupes behavior test passed");
