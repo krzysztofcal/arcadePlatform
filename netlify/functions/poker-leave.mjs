@@ -242,6 +242,17 @@ const executePostLeaveBotAutoplayLoop = async ({
   const fallbackBotTurnUserId = !hasBotTurn && botsOnlyInHand
     ? selectFallbackBotTurnUserId(state, seatUserIdsInOrder, seatBotMap)
     : null;
+  if (!hasBotTurn && botsOnlyInHand && !fallbackBotTurnUserId) {
+    klog("poker_leave_autoplay_skipped", {
+      tableId,
+      userId,
+      reason: "no_eligible_bot_turn",
+      hasDeck: false,
+      hasHoleCards: false,
+      seats: Array.isArray(state?.seats) ? state.seats.length : null,
+    });
+    return { state, version, attempted: true, reason: "no_eligible_bot_turn" };
+  }
   const autoplayStartState = fallbackBotTurnUserId ? { ...state, turnUserId: fallbackBotTurnUserId } : state;
 
   const privateStateResult = await maybeBuildPrivateStateForBotAutoplay({ tx, tableId, state: autoplayStartState, seatUserIdsInOrder });
