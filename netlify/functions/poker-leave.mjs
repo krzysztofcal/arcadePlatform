@@ -448,7 +448,7 @@ export async function handler(event) {
       }
 
       try {
-        const tableRows = await tx.unsafe("select id, status from public.poker_tables where id = $1 limit 1;", [tableId]);
+        const tableRows = await tx.unsafe("select id, status from public.poker_tables where id = $1 for update;", [tableId]);
         const table = tableRows?.[0] || null;
         if (!table) {
           throw makeError(404, "table_not_found");
@@ -486,6 +486,11 @@ export async function handler(event) {
               tableId,
               auth.userId,
             ]);
+            mutated = true;
+            await tx.unsafe(
+              "update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1;",
+              [tableId]
+            );
           }
           const resultPayload = buildAlreadyLeftResultPayload({
             tableId,
@@ -662,6 +667,55 @@ export async function handler(event) {
         let latestState = updatedState;
         let latestVersion = updateResult.newVersion;
         if (!shouldDetachSeatAndStack) {
+          const actionHandId = typeof leaveState.handId === "string" && leaveState.handId.trim() ? leaveState.handId.trim() : null;
+          let leaveActionRows = [];
+          if (normalizedRequestId) {
+            leaveActionRows = await tx.unsafe(
+              `insert into public.poker_actions (table_id, version, user_id, action_type, amount, hand_id, request_id, phase_from, phase_to, meta)
+               select $1, $2, $3, $4, null, $5, $6, $7, $8, $9::jsonb
+               where not exists (
+                 select 1 from public.poker_actions
+                 where table_id = $1 and user_id = $3 and action_type = $4 and request_id is not distinct from $6
+               )
+               returning id;`,
+              [
+                tableId,
+                latestVersion,
+                auth.userId,
+                "LEAVE_TABLE",
+                actionHandId,
+                normalizedRequestId,
+                currentState.phase || null,
+                leaveState.phase || null,
+                JSON.stringify({ source: "poker-leave" }),
+              ]
+            );
+          } else {
+            leaveActionRows = await tx.unsafe(
+              `insert into public.poker_actions (table_id, version, user_id, action_type, amount, hand_id, request_id, phase_from, phase_to, meta)
+               select $1, $2, $3, $4, null, $5, $6, $7, $8, $9::jsonb
+               where not exists (
+                 select 1 from public.poker_actions
+                 where table_id = $1 and user_id = $3 and action_type = $4 and hand_id is not distinct from $5
+               )
+               returning id;`,
+              [
+                tableId,
+                latestVersion,
+                auth.userId,
+                "LEAVE_TABLE",
+                actionHandId,
+                null,
+                currentState.phase || null,
+                leaveState.phase || null,
+                JSON.stringify({ source: "poker-leave" }),
+              ]
+            );
+          }
+          if (Array.isArray(leaveActionRows) && leaveActionRows.length > 0) {
+            mutated = true;
+          }
+
           const leaveAdvanceEvents = [];
           const leaveAdvanced = runAdvanceLoop(latestState, null, leaveAdvanceEvents, advanceIfNeeded);
           latestState = sanitizePersistedState(leaveAdvanced.nextState);
@@ -722,10 +776,12 @@ export async function handler(event) {
           ]);
         }
 
-        await tx.unsafe(
-          "update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1;",
-          [tableId]
-        );
+        if (mutated) {
+          await tx.unsafe(
+            "update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1;",
+            [tableId]
+          );
+        }
 
         const publicState = withoutPrivateState(latestState);
         const responseState = sanitizeNoopResponseState(publicState, auth.userId);
