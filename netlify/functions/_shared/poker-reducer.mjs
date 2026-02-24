@@ -851,5 +851,6 @@ export {
   applyAction,
   applyLeaveTable,
   advanceIfNeeded,
+  resetToNextHand,
   isBettingRoundComplete,
 };
