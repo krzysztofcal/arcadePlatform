@@ -382,6 +382,7 @@ const resetToNextHand = (state, options = {}) => {
       state: stampTurnTimer(
         {
           ...state,
+          handSeats: null,
           sitOutByUserId: nextSitOutByUserId,
           pendingAutoSitOutByUserId: nextPendingAutoSitOutByUserId,
           missedTurnsByUserId: {},
@@ -402,6 +403,7 @@ const resetToNextHand = (state, options = {}) => {
       state: stampTurnTimer(
         {
           ...state,
+          handSeats: null,
           sitOutByUserId: nextSitOutByUserId,
           pendingAutoSitOutByUserId: nextPendingAutoSitOutByUserId,
           missedTurnsByUserId: {},
@@ -432,6 +434,7 @@ const resetToNextHand = (state, options = {}) => {
       state: stampTurnTimer(
         {
           ...state,
+          handSeats: null,
           sitOutByUserId: nextSitOutByUserId,
           pendingAutoSitOutByUserId: nextPendingAutoSitOutByUserId,
           missedTurnsByUserId: {},
