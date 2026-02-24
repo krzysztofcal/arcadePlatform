@@ -23,6 +23,8 @@ import { isStateStorageValid, withoutPrivateState } from "../../netlify/function
 import { hasActiveHumanGuardSql, shouldSeedBotsOnJoin, tableIdleCutoffExprSql } from "../../netlify/functions/_shared/poker-table-lifecycle.mjs";
 import { advanceIfNeeded, applyLeaveTable } from "../../netlify/functions/_shared/poker-reducer.mjs";
 import { hasParticipatingHumanInHand, runAdvanceLoop, runBotAutoplayLoop } from "../../netlify/functions/_shared/poker-autoplay.mjs";
+import { isHoleCardsTableMissing, loadHoleCardsByUserId } from "../../netlify/functions/_shared/poker-hole-cards-store.mjs";
+import { deriveCommunityCards, deriveRemainingDeck } from "../../netlify/functions/_shared/poker-deal-deterministic.mjs";
 
 const root = process.cwd();
 
@@ -180,6 +182,10 @@ return handler;`
       hasParticipatingHumanInHand,
       runAdvanceLoop,
       runBotAutoplayLoop,
+      deriveRemainingDeck,
+      deriveCommunityCards,
+      loadHoleCardsByUserId,
+      isHoleCardsTableMissing,
       isValidUuid,
       areCardsUnique,
       cardIdentity,

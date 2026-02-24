@@ -6,9 +6,14 @@ import { deletePokerRequest, ensurePokerRequest, storePokerRequestResult } from 
 import { updatePokerStateOptimistic } from "./_shared/poker-state-write.mjs";
 import { advanceIfNeeded, applyLeaveTable } from "./_shared/poker-reducer.mjs";
 import { isStateStorageValid, withoutPrivateState } from "./_shared/poker-state-utils.mjs";
-import { runAdvanceLoop } from "./_shared/poker-autoplay.mjs";
+import { buildSeatBotMap, isBotTurn } from "./_shared/poker-bots.mjs";
+import { deriveCommunityCards, deriveRemainingDeck } from "./_shared/poker-deal-deterministic.mjs";
+import { isHoleCardsTableMissing, loadHoleCardsByUserId } from "./_shared/poker-hole-cards-store.mjs";
+import { hasParticipatingHumanInHand, runAdvanceLoop, runBotAutoplayLoop } from "./_shared/poker-autoplay.mjs";
 
 const REQUEST_PENDING_STALE_SEC = 30;
+const BOT_AUTOPLAY_MAX_ACTIONS = 8;
+const BOT_AUTOPLAY_BOTS_ONLY_HARD_CAP = 30;
 
 
 const isPlainObjectValue = (value) => value && typeof value === "object" && !Array.isArray(value);
@@ -122,6 +127,179 @@ const sanitizeNoopResponseState = (state, userId) => {
   const stacks = { ...parseStacks(base.stacks) };
   delete stacks[userId];
   return { ...base, seats, stacks };
+};
+
+const isActionPhase = (phase) => ["PREFLOP", "FLOP", "TURN", "RIVER"].includes(phase);
+
+const normalizeSeatOrderFromState = (seatsInput) => {
+  if (!Array.isArray(seatsInput)) return [];
+  return seatsInput
+    .filter((seat) => Number.isInteger(Number(seat?.seatNo)) && typeof seat?.userId === "string" && seat.userId.trim())
+    .sort((a, b) => Number(a.seatNo) - Number(b.seatNo))
+    .map((seat) => seat.userId);
+};
+
+const buildPersistedFromPrivateState = (privateStateInput, actorUserId, actionRequestId) => {
+  const { holeCardsByUserId: _ignoredHoleCards, deck: _ignoredDeck, ...stateBase } = privateStateInput;
+  const baseLastActionRequestIdByUserId = isPlainObjectValue(stateBase?.lastActionRequestIdByUserId)
+    ? stateBase.lastActionRequestIdByUserId
+    : {};
+  return sanitizePersistedState({
+    ...stateBase,
+    communityDealt: Array.isArray(privateStateInput.community) ? privateStateInput.community.length : 0,
+    lastActionRequestIdByUserId: {
+      ...baseLastActionRequestIdByUserId,
+      [actorUserId]: actionRequestId,
+    },
+  });
+};
+
+const maybeBuildPrivateStateForBotAutoplay = async ({ tx, tableId, state, seatUserIdsInOrder }) => {
+  const handId = typeof state?.handId === "string" ? state.handId.trim() : "";
+  const handSeed = typeof state?.handSeed === "string" ? state.handSeed.trim() : "";
+  if (!handId || !handSeed) return { ok: false, reason: "missing_hand_context" };
+  if (!Number.isInteger(state?.communityDealt) || state.communityDealt < 0 || state.communityDealt > 5) {
+    return { ok: false, reason: "invalid_community_dealt" };
+  }
+
+  let holeCardsByUserId;
+  try {
+    const holeCards = await loadHoleCardsByUserId(tx, {
+      tableId,
+      handId,
+      activeUserIds: seatUserIdsInOrder,
+      requiredUserIds: seatUserIdsInOrder,
+      mode: "strict",
+    });
+    holeCardsByUserId = holeCards.holeCardsByUserId;
+  } catch (error) {
+    if (error?.message === "state_invalid") return { ok: false, reason: "hole_cards_state_invalid" };
+    if (isHoleCardsTableMissing(error)) return { ok: false, reason: "hole_cards_table_missing" };
+    throw error;
+  }
+
+  let derivedCommunity;
+  let derivedDeck;
+  try {
+    derivedCommunity = deriveCommunityCards({
+      handSeed,
+      seatUserIdsInOrder,
+      communityDealt: state.communityDealt,
+    });
+    derivedDeck = deriveRemainingDeck({
+      handSeed,
+      seatUserIdsInOrder,
+      communityDealt: state.communityDealt,
+    });
+  } catch {
+    return { ok: false, reason: "derive_failed" };
+  }
+
+  return {
+    ok: true,
+    privateState: {
+      ...state,
+      community: derivedCommunity,
+      deck: derivedDeck,
+      holeCardsByUserId,
+    },
+  };
+};
+
+const executePostLeaveBotAutoplayLoop = async ({
+  tx,
+  tableId,
+  userId,
+  requestId,
+  state,
+  version,
+  seatBotMap,
+  seatUserIdsInOrder,
+  mutate,
+  validatePersistedState,
+}) => {
+  if (!isActionPhase(state?.phase) || !isBotTurn(state?.turnUserId, seatBotMap)) {
+    return { state, version, attempted: false, reason: "not_applicable" };
+  }
+  const privateStateResult = await maybeBuildPrivateStateForBotAutoplay({ tx, tableId, state, seatUserIdsInOrder });
+  if (!privateStateResult.ok) {
+    klog("poker_leave_autoplay_skipped", {
+      tableId,
+      userId,
+      reason: privateStateResult.reason,
+      hasDeck: false,
+      hasHoleCards: false,
+      seats: Array.isArray(state?.seats) ? state.seats.length : null,
+    });
+    return { state, version, attempted: true, reason: privateStateResult.reason };
+  }
+
+  const botLoop = await runBotAutoplayLoop({
+    tableId,
+    requestId: `bot-auto:post-leave:${requestId || "no-request-id"}`,
+    initialState: state,
+    initialPrivateState: privateStateResult.privateState,
+    initialVersion: version,
+    seatBotMap,
+    seatUserIdsInOrder,
+    maxActions: BOT_AUTOPLAY_MAX_ACTIONS,
+    botsOnlyHandCompletionHardCap: BOT_AUTOPLAY_BOTS_ONLY_HARD_CAP,
+    policyVersion: "leave-v1",
+    klog,
+    isActionPhase,
+    advanceIfNeeded,
+    buildPersistedFromPrivateState,
+    persistStep: async ({ botTurnUserId, botAction, botRequestId, fromState, persistedState, privateState, loopVersion }) => {
+      validatePersistedState(persistedState);
+      const updateResult = await updatePokerStateOptimistic(tx, {
+        tableId,
+        expectedVersion: loopVersion,
+        nextState: persistedState,
+      });
+      if (!updateResult.ok) {
+        return { ok: false, reason: updateResult.reason === "conflict" ? "optimistic_conflict" : "update_failed" };
+      }
+
+      mutate();
+      const botActionHandId = typeof persistedState.handId === "string" && persistedState.handId.trim() ? persistedState.handId.trim() : null;
+      await tx.unsafe(
+        "insert into public.poker_actions (table_id, version, user_id, action_type, amount, hand_id, request_id, phase_from, phase_to, meta) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb);",
+        [
+          tableId,
+          updateResult.newVersion,
+          botTurnUserId,
+          botAction.type,
+          botAction.amount ?? null,
+          botActionHandId,
+          botRequestId,
+          fromState.phase || null,
+          persistedState.phase || null,
+          JSON.stringify({ actor: "BOT", botUserId: botTurnUserId, policyVersion: "leave-v1", reason: "AUTO_TURN" }),
+        ]
+      );
+      return {
+        ok: true,
+        loopVersion: updateResult.newVersion,
+        responseFinalState: persistedState,
+        loopPrivateState: privateState,
+      };
+    },
+  });
+
+  klog("poker_leave_bot_autoplay_stop", {
+    tableId,
+    userId,
+    requestId: requestId || null,
+    botActionCount: botLoop.botActionCount,
+    botStopReason: botLoop.botStopReason,
+  });
+
+  return {
+    state: sanitizePersistedState(botLoop.responseFinalState),
+    version: botLoop.loopVersion,
+    attempted: true,
+    reason: botLoop.botStopReason,
+  };
 };
 
 const buildAlreadyLeftResultPayload = ({ tableId, seatNo, includeState, state, userId }) => {
@@ -474,14 +652,31 @@ export async function handler(event) {
             });
           }
 
-          klog("poker_leave_autoplay_skipped", {
-            tableId,
-            userId: auth.userId,
-            reason: "missing_private_state",
-            hasDeck: false,
-            hasHoleCards: false,
-            seats: Array.isArray(latestState?.seats) ? latestState.seats.length : null,
-          });
+          const activeSeatRows = await tx.unsafe(
+            "select user_id, seat_no, is_bot from public.poker_seats where table_id = $1 and status = 'ACTIVE' order by seat_no asc;",
+            [tableId]
+          );
+          const seatBotMap = buildSeatBotMap(activeSeatRows);
+          const seatUserIdsInOrder = normalizeSeatOrderFromState(latestState.seats);
+          const botsOnlyInHand = !hasParticipatingHumanInHand(latestState, seatBotMap);
+          if (isBotTurn(latestState.turnUserId, seatBotMap) || botsOnlyInHand) {
+            const autoplayResult = await executePostLeaveBotAutoplayLoop({
+              tx,
+              tableId,
+              userId: auth.userId,
+              requestId: normalizedRequestId,
+              state: latestState,
+              version: latestVersion,
+              seatBotMap,
+              seatUserIdsInOrder,
+              mutate: () => {
+                mutated = true;
+              },
+              validatePersistedState: (stateToValidate) => validatePersistedStateOrThrow(stateToValidate, makeError),
+            });
+            latestState = autoplayResult.state;
+            latestVersion = autoplayResult.version;
+          }
         }
 
         if (shouldDetachSeatAndStack) {
