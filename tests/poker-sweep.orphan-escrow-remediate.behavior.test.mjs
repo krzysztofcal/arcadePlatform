@@ -8,6 +8,7 @@ const userB = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb2";
 
 const buildHandler = ({ postCalls, logs }) => {
   const state = {
+    lockAcquireCalls: 0,
     lockHeld: false,
     escrowBalance: 200,
     seats: [
@@ -22,11 +23,18 @@ const buildHandler = ({ postCalls, logs }) => {
     isMemoryStore: true,
     store: {
       async get(key) {
-        if (key === "poker:sweep:lock:v1") return state.lockHeld ? "token" : null;
+        if (key === "poker:sweep:lock:v1") return state.lockHeld ? String(state.lockHeld) : null;
         return null;
       },
       async setex(key) {
         if (key === "poker:sweep:lock:v1") state.lockHeld = true;
+        return "OK";
+      },
+      async setNxEx(key, _seconds, value) {
+        if (key !== "poker:sweep:lock:v1") return "OK";
+        state.lockAcquireCalls += 1;
+        if (state.lockHeld) return null;
+        state.lockHeld = String(value || "token");
         return "OK";
       },
       async eval() { return 1; },
@@ -114,6 +122,8 @@ const run = async () => {
   const second = await handler({ httpMethod: "POST", headers: { "x-sweep-secret": "secret" } });
   assert.equal(second.statusCode, 200);
   assert.equal(postCalls.length, 2);
+  assert.ok(state.lockAcquireCalls > 0, "expected setNxEx lock acquisition path");
+  assert.equal(state.lockHeld, false, "lock should be released after handler run");
 };
 
 run().catch((error) => {

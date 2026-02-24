@@ -205,7 +205,7 @@ const remoteStore = {
   async get(key) { return call("GET", key); },
   async set(key, value) { return call("SET", key, String(value)); },
   async setex(key, seconds, value) { return call("SETEX", key, String(seconds), String(value)); },
-  async setNxEx(key, seconds, value) { return this.eval(SET_NX_EX_SCRIPT, [key], [String(value), String(seconds)]); },
+  async setNxEx(key, seconds, value) { return remoteStore.eval(SET_NX_EX_SCRIPT, [key], [String(value), String(seconds)]); },
   async incrBy(key, delta) { return call("INCRBY", key, String(delta)); },
   async decrBy(key, delta) { return call("DECRBY", key, String(delta)); },
   async expire(key, seconds) { return call("EXPIRE", key, String(seconds)); },
@@ -250,6 +250,8 @@ const remoteStore = {
 };
 
 export const store = isMemoryStore ? createMemoryStore() : remoteStore;
+export const __remoteStoreForTests = remoteStore;
+export const __setNxExScriptForTests = SET_NX_EX_SCRIPT;
 
 /**
  * Rate limit increment with TTL.

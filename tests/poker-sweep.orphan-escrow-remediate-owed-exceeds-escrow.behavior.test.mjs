@@ -13,14 +13,21 @@ const run = async () => {
 
   const postCalls = [];
   const logs = [];
-  const state = { lockHeld: false, escrowBalance: 100 };
+  const state = { lockAcquireCalls: 0, lockHeld: false, escrowBalance: 100 };
 
   const handler = loadPokerHandler("netlify/functions/poker-sweep.mjs", {
     baseHeaders: () => ({}),
     isMemoryStore: true,
     store: {
-      async get(key) { return key === "poker:sweep:lock:v1" && state.lockHeld ? "token" : null; },
+      async get(key) { return key === "poker:sweep:lock:v1" && state.lockHeld ? String(state.lockHeld) : null; },
       async setex(key) { if (key === "poker:sweep:lock:v1") state.lockHeld = true; return "OK"; },
+      async setNxEx(key, _seconds, value) {
+        if (key !== "poker:sweep:lock:v1") return "OK";
+        state.lockAcquireCalls += 1;
+        if (state.lockHeld) return null;
+        state.lockHeld = String(value || "token");
+        return "OK";
+      },
       async del(key) { if (key === "poker:sweep:lock:v1") state.lockHeld = false; return 1; },
       async eval() { return 1; },
       async expire() { return 1; },
@@ -39,9 +46,7 @@ const run = async () => {
         if (text.includes("from public.chips_accounts a") && text.includes("a.balance <> 0")) return [{ system_key: `POKER_TABLE:${tableId}`, balance: 100 }];
         if (text.includes("from public.chips_accounts where account_type = 'escrow'")) return [{ balance: 100 }];
         if (text.includes("from public.poker_seats where table_id = $1 and status = 'active'")) return [];
-        if (text.includes("select user_id, stack from public.poker_seats where table_id = $1 for update")) {
-          return [{ user_id: userA, stack: 80 }, { user_id: userB, stack: 70 }];
-        }
+        if (text.includes("select user_id, stack from public.poker_seats where table_id = $1 for update")) return [{ user_id: userA, stack: 80 }, { user_id: userB, stack: 70 }];
         return [];
       },
     }),
@@ -67,6 +72,8 @@ const run = async () => {
   assert.ok(postCalls[0].entries.some((entry) => entry.accountType === "USER" && entry.amount === 100));
   assert.ok(!postCalls.some((call) => String(call.idempotencyKey || "").includes("orphan_cashout")));
   assert.ok(logs.some((entry) => entry.event === "poker_escrow_orphan_quarantined" && entry.payload?.tableId === tableId));
+  assert.ok(state.lockAcquireCalls > 0, "expected setNxEx lock acquisition path");
+  assert.equal(state.lockHeld, false, "lock should be released after handler run");
 };
 
 run().catch((error) => {

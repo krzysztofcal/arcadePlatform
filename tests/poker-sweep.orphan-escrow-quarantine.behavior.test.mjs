@@ -6,6 +6,7 @@ const tableId = "55555555-5555-4555-8555-555555555555";
 
 const buildHandler = ({ postCalls, logs }) => {
   const state = {
+    lockAcquireCalls: 0,
     lockHeld: false,
     escrowBalance: 90,
   };
@@ -14,23 +15,18 @@ const buildHandler = ({ postCalls, logs }) => {
     baseHeaders: () => ({}),
     isMemoryStore: true,
     store: {
-      async get(key) {
-        if (key === "poker:sweep:lock:v1") return state.lockHeld ? "token" : null;
-        return null;
-      },
-      async setex(key) {
-        if (key === "poker:sweep:lock:v1") state.lockHeld = true;
+      async get(key) { return key === "poker:sweep:lock:v1" && state.lockHeld ? String(state.lockHeld) : null; },
+      async setex(key) { if (key === "poker:sweep:lock:v1") state.lockHeld = true; return "OK"; },
+      async setNxEx(key, _seconds, value) {
+        if (key !== "poker:sweep:lock:v1") return "OK";
+        state.lockAcquireCalls += 1;
+        if (state.lockHeld) return null;
+        state.lockHeld = String(value || "token");
         return "OK";
       },
       async eval() { return 1; },
-      async del(key) {
-        if (key === "poker:sweep:lock:v1") state.lockHeld = false;
-        return 1;
-      },
-      async expire(key) {
-        if (key === "poker:sweep:lock:v1") state.lockHeld = false;
-        return 1;
-      },
+      async del(key) { if (key === "poker:sweep:lock:v1") state.lockHeld = false; return 1; },
+      async expire(key) { if (key === "poker:sweep:lock:v1") state.lockHeld = false; return 1; },
     },
     beginSql: async (fn) =>
       fn({
@@ -44,12 +40,8 @@ const buildHandler = ({ postCalls, logs }) => {
           if (text.includes("update public.poker_tables t\nset status = 'closed', updated_at = now()")) return [];
           if (text.includes("delete from public.poker_hole_cards")) return [];
           if (text.includes("select t.id") && text.includes("stack > 0")) return [];
-          if (text.includes("from public.chips_accounts a") && text.includes("a.balance <> 0")) {
-            return [{ system_key: `POKER_TABLE:${tableId}`, balance: state.escrowBalance }];
-          }
-          if (text.includes("from public.chips_accounts where account_type = 'escrow'")) {
-            return [{ balance: state.escrowBalance }];
-          }
+          if (text.includes("from public.chips_accounts a") && text.includes("a.balance <> 0")) return [{ system_key: `POKER_TABLE:${tableId}`, balance: state.escrowBalance }];
+          if (text.includes("from public.chips_accounts where account_type = 'escrow'")) return [{ balance: state.escrowBalance }];
           if (text.includes("from public.poker_seats where table_id = $1 and status = 'active'")) return [];
           if (text.includes("select user_id, stack from public.poker_seats where table_id = $1 for update")) return [];
           return [];
@@ -69,7 +61,7 @@ const buildHandler = ({ postCalls, logs }) => {
     isHoleCardsTableMissing,
   });
 
-  return { handler };
+  return { handler, state };
 };
 
 const run = async () => {
@@ -77,7 +69,7 @@ const run = async () => {
   process.env.POKER_SYSTEM_ACTOR_USER_ID = "00000000-0000-4000-8000-000000000099";
   const postCalls = [];
   const logs = [];
-  const { handler } = buildHandler({ postCalls, logs });
+  const { handler, state } = buildHandler({ postCalls, logs });
 
   const first = await handler({ httpMethod: "POST", headers: { "x-sweep-secret": "secret" } });
   assert.equal(first.statusCode, 200);
@@ -91,6 +83,8 @@ const run = async () => {
   const second = await handler({ httpMethod: "POST", headers: { "x-sweep-secret": "secret" } });
   assert.equal(second.statusCode, 200);
   assert.equal(postCalls.length, 1);
+  assert.ok(state.lockAcquireCalls > 0, "expected setNxEx lock acquisition path");
+  assert.equal(state.lockHeld, false, "lock should be released after handler run");
 };
 
 run().catch((error) => {
