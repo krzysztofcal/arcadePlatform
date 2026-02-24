@@ -72,11 +72,9 @@ const parseTableIdFromSystemKey = (systemKey) => {
 };
 
 const acquireSweepLock = async (token) => {
-  if (isMemoryStore) {
-    const existing = await store.get(SWEEP_LOCK_KEY);
-    if (existing) return false;
-    await store.setex(SWEEP_LOCK_KEY, SWEEP_LOCK_TTL_SEC, token);
-    return true;
+  if (typeof store.setNxEx === "function") {
+    const result = await store.setNxEx(SWEEP_LOCK_KEY, SWEEP_LOCK_TTL_SEC, token);
+    return result === "OK";
   }
   const result = await store.eval(SWEEP_LOCK_SCRIPT, [SWEEP_LOCK_KEY], [token, String(SWEEP_LOCK_TTL_SEC)]);
   return Number(result) === 1;

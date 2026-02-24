@@ -11,6 +11,11 @@ const run = async () => {
   const store = {
     async get(key) { return mem.get(key) ?? null; },
     async setex(key, _seconds, value) { mem.set(key, String(value)); return "OK"; },
+    async setNxEx(key, _seconds, value) {
+      if (mem.has(key)) return null;
+      mem.set(key, String(value));
+      return "OK";
+    },
     async del(key) { delCalls += 1; return mem.delete(key) ? 1 : 0; },
     async eval() { return 1; },
     async expire(key) { return mem.delete(key) ? 1 : 0; },

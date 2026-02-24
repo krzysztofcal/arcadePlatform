@@ -61,6 +61,12 @@ function createMemoryStore() {
     async get(key) { return getValue(key); },
     async set(key, value) { setValue(key, value, null); return "OK"; },
     async setex(key, seconds, value) { setValue(key, value, seconds * 1000); return "OK"; },
+    async setNxEx(key, seconds, value) {
+      const existing = sweep(key);
+      if (existing) return null;
+      setValue(key, value, seconds * 1000);
+      return "OK";
+    },
     async incrBy(key, delta) {
       const entry = sweep(key);
       const prev = Number(entry?.value ?? "0");
@@ -188,10 +194,18 @@ async function call(cmd, ...args) {
   return data.result;
 }
 
+const SET_NX_EX_SCRIPT = `
+local key = KEYS[1]
+local value = ARGV[1]
+local ttlSec = tonumber(ARGV[2])
+return redis.call('SET', key, value, 'EX', ttlSec, 'NX')
+`;
+
 const remoteStore = {
   async get(key) { return call("GET", key); },
   async set(key, value) { return call("SET", key, String(value)); },
   async setex(key, seconds, value) { return call("SETEX", key, String(seconds), String(value)); },
+  async setNxEx(key, seconds, value) { return this.eval(SET_NX_EX_SCRIPT, [key], [String(value), String(seconds)]); },
   async incrBy(key, delta) { return call("INCRBY", key, String(delta)); },
   async decrBy(key, delta) { return call("DECRBY", key, String(delta)); },
   async expire(key, seconds) { return call("EXPIRE", key, String(seconds)); },
