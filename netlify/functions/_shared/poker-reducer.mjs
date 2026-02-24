@@ -42,8 +42,10 @@ const isActiveHandPhase = (phase) =>
   phase === "SHOWDOWN" ||
   phase === "HAND_DONE";
 
-const getSeatsForHand = (state) =>
-  isActiveHandPhase(state?.phase) && Array.isArray(state?.handSeats) ? state.handSeats : state?.seats;
+const getSeatsForHand = (state) => {
+  const seats = isActiveHandPhase(state?.phase) && Array.isArray(state?.handSeats) ? state.handSeats : state?.seats;
+  return Array.isArray(seats) ? seats : [];
+};
 
 const getActiveSeats = (state) =>
   orderSeats(getSeatsForHand(state)).filter(
@@ -217,7 +219,7 @@ const computeNextDealerSeatNo = (seats, prevDealerSeatNo) => {
 const rotateDealerSeatNo = (state) => computeNextDealerSeatNo(state.seats, state.dealerSeatNo);
 
 const deriveAllInByUserId = (state) => {
-  const seats = Array.isArray(getSeatsForHand(state)) ? getSeatsForHand(state) : [];
+  const seats = getSeatsForHand(state);
   return orderSeats(seats).reduce((acc, seat) => {
     if (!seat?.userId) return acc;
     const userId = seat.userId;
@@ -228,7 +230,7 @@ const deriveAllInByUserId = (state) => {
 };
 
 const assertPlayer = (state, userId) => {
-  const seats = Array.isArray(getSeatsForHand(state)) ? getSeatsForHand(state) : [];
+  const seats = getSeatsForHand(state);
   if (!seats.some((seat) => seat.userId === userId)) {
     throw new Error("invalid_player");
   }
