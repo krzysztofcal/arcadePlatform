@@ -176,6 +176,10 @@ const runCloseCashoutInvalidStack = async () => {
     klogEvents.some((entry) => entry.event === "poker_close_cashout_skip" && entry.payload?.stackSource === "none"),
     "sweep should log skipped close cashout with stack source"
   );
+
+  const second = await handler({ httpMethod: "POST", headers: { "x-sweep-secret": "secret" } });
+  assert.equal(second.statusCode, 200);
+  assert.equal(postCalls.length, 0, "invalid/missing stack close-cashout should remain idempotent with no cashout tx");
 };
 
 const runCloseCashoutSkipsActiveSeat = async () => {

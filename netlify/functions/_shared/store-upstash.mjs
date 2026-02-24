@@ -61,6 +61,12 @@ function createMemoryStore() {
     async get(key) { return getValue(key); },
     async set(key, value) { setValue(key, value, null); return "OK"; },
     async setex(key, seconds, value) { setValue(key, value, seconds * 1000); return "OK"; },
+    async setNxEx(key, seconds, value) {
+      const existing = sweep(key);
+      if (existing) return null;
+      setValue(key, value, seconds * 1000);
+      return "OK";
+    },
     async incrBy(key, delta) {
       const entry = sweep(key);
       const prev = Number(entry?.value ?? "0");
@@ -87,6 +93,9 @@ function createMemoryStore() {
       if (entry.expiry == null) return -1;
       const ttl = entry.expiry - Date.now();
       return ttl > 0 ? Math.ceil(ttl / 1000) : -2;
+    },
+    async del(key) {
+      return memory.delete(key) ? 1 : 0;
     },
     async eval(_script, keys = [], argv = []) {
       // Memory impl supports only v2 delta script signature [sessionKey, sessionSyncKey, dailyKey, totalKey, lockKey] x [now, delta, dailyCap, sessionCap, ts, lockTtl, sessionTtl].
@@ -185,14 +194,23 @@ async function call(cmd, ...args) {
   return data.result;
 }
 
+const SET_NX_EX_SCRIPT = `
+local key = KEYS[1]
+local value = ARGV[1]
+local ttlSec = tonumber(ARGV[2])
+return redis.call('SET', key, value, 'EX', ttlSec, 'NX')
+`;
+
 const remoteStore = {
   async get(key) { return call("GET", key); },
   async set(key, value) { return call("SET", key, String(value)); },
   async setex(key, seconds, value) { return call("SETEX", key, String(seconds), String(value)); },
+  async setNxEx(key, seconds, value) { return remoteStore.eval(SET_NX_EX_SCRIPT, [key], [String(value), String(seconds)]); },
   async incrBy(key, delta) { return call("INCRBY", key, String(delta)); },
   async decrBy(key, delta) { return call("DECRBY", key, String(delta)); },
   async expire(key, seconds) { return call("EXPIRE", key, String(seconds)); },
   async ttl(key) { return call("TTL", key); },
+  async del(key) { return call("DEL", key); },
   async eval(script, keys = [], argv = []) {
     // Upstash REST API expects array format: ["eval", script, numkeys, key1, key2, ..., arg1, arg2, ...]
     // The command name must be included as the first element when POSTing to the root endpoint
@@ -232,6 +250,8 @@ const remoteStore = {
 };
 
 export const store = isMemoryStore ? createMemoryStore() : remoteStore;
+export const __remoteStoreForTests = remoteStore;
+export const __setNxExScriptForTests = SET_NX_EX_SCRIPT;
 
 /**
  * Rate limit increment with TTL.
