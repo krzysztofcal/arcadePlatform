@@ -9,22 +9,20 @@ const run = async () => {
   let workQueryCount = 0;
   const logs = [];
   const evalCalls = [];
+  const setNxExCalls = [];
 
   const handler = loadPokerHandler("netlify/functions/poker-sweep.mjs", {
     baseHeaders: () => ({}),
     isMemoryStore: false,
     store: {
+      async setNxEx(key, seconds, token) {
+        setNxExCalls.push({ key, seconds, token });
+        lockAttempt += 1;
+        return lockAttempt === 1 ? "OK" : null;
+      },
       async eval(script, keys, argv) {
         evalCalls.push({ script: String(script || ""), keys, argv });
-        const src = String(script || "").toLowerCase();
-        if (src.includes("set") && src.includes("nx")) {
-          lockAttempt += 1;
-          return lockAttempt === 1 ? 1 : 0;
-        }
-        if (src.includes("del") && src.includes("get")) {
-          return 1;
-        }
-        return 0;
+        return 1;
       },
       async get() { return null; },
       async setex() { return "OK"; },
@@ -61,13 +59,19 @@ const run = async () => {
 
   const first = await handler({ httpMethod: "POST", headers: { "x-sweep-secret": "secret" } });
   assert.equal(first.statusCode, 200);
+  assert.equal(setNxExCalls.length, 1);
+  assert.equal(setNxExCalls[0].key, "poker:sweep:lock:v1");
+  assert.equal(setNxExCalls[0].seconds, 90);
+  assert.equal(typeof setNxExCalls[0].token, "string");
   assert.ok(workQueryCount > 0);
 
   const second = await handler({ httpMethod: "POST", headers: { "x-sweep-secret": "secret" } });
   assert.equal(second.statusCode, 200);
   assert.deepEqual(JSON.parse(second.body), { ok: true, skipped: "locked" });
+  assert.equal(setNxExCalls.length, 2);
   assert.equal(workQueryCount, 1, "second locked run should not execute sweep queries");
   assert.ok(logs.some((entry) => entry.event === "poker_sweep_skip_locked"));
+
   const unlockCall = evalCalls.find((entry) => entry.script.toLowerCase().includes("redis.call('del', key)"));
   assert.ok(unlockCall, "expected atomic unlock eval to be invoked");
   assert.equal(unlockCall.keys?.[0], "poker:sweep:lock:v1");
