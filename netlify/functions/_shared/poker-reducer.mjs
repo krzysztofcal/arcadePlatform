@@ -34,8 +34,19 @@ const toSafeInt = (value, fallback = 0) => {
 const orderSeats = (seats) =>
   (Array.isArray(seats) ? seats.slice() : []).sort((a, b) => (a?.seatNo ?? 0) - (b?.seatNo ?? 0));
 
+const isActiveHandPhase = (phase) =>
+  phase === "PREFLOP" ||
+  phase === "FLOP" ||
+  phase === "TURN" ||
+  phase === "RIVER" ||
+  phase === "SHOWDOWN" ||
+  phase === "HAND_DONE";
+
+const getSeatsForHand = (state) =>
+  isActiveHandPhase(state?.phase) && Array.isArray(state?.handSeats) ? state.handSeats : state?.seats;
+
 const getActiveSeats = (state) =>
-  orderSeats(state.seats).filter(
+  orderSeats(getSeatsForHand(state)).filter(
     (seat) =>
       seat?.userId &&
       !state.foldedByUserId?.[seat.userId] &&
@@ -65,7 +76,7 @@ const isEligibleTurnUser = (state, userId) => {
 };
 
 const getFirstBettingAfterDealer = (state) => {
-  const ordered = orderSeats(state.seats);
+  const ordered = orderSeats(getSeatsForHand(state));
   if (ordered.length === 0) return null;
   const startIndex = ordered.findIndex((seat) => seat.seatNo === state.dealerSeatNo);
   const start = startIndex >= 0 ? startIndex : 0;
@@ -206,7 +217,7 @@ const computeNextDealerSeatNo = (seats, prevDealerSeatNo) => {
 const rotateDealerSeatNo = (state) => computeNextDealerSeatNo(state.seats, state.dealerSeatNo);
 
 const deriveAllInByUserId = (state) => {
-  const seats = Array.isArray(state.seats) ? state.seats : [];
+  const seats = Array.isArray(getSeatsForHand(state)) ? getSeatsForHand(state) : [];
   return orderSeats(seats).reduce((acc, seat) => {
     if (!seat?.userId) return acc;
     const userId = seat.userId;
@@ -217,7 +228,8 @@ const deriveAllInByUserId = (state) => {
 };
 
 const assertPlayer = (state, userId) => {
-  if (!state.seats.some((seat) => seat.userId === userId)) {
+  const seats = Array.isArray(getSeatsForHand(state)) ? getSeatsForHand(state) : [];
+  if (!seats.some((seat) => seat.userId === userId)) {
     throw new Error("invalid_player");
   }
   if (state.foldedByUserId?.[userId]) {
@@ -264,9 +276,9 @@ const assertCommunityCountForPhase = (state) => {
 
 const resetRoundState = (state) => ({
   ...state,
-  toCallByUserId: buildDefaultMap(state.seats, 0),
-  betThisRoundByUserId: buildDefaultMap(state.seats, 0),
-  actedThisRoundByUserId: buildDefaultMap(state.seats, false),
+  toCallByUserId: buildDefaultMap(getSeatsForHand(state), 0),
+  betThisRoundByUserId: buildDefaultMap(getSeatsForHand(state), 0),
+  actedThisRoundByUserId: buildDefaultMap(getSeatsForHand(state), false),
   currentBet: 0,
   lastRaiseSize: null,
 });
@@ -819,7 +831,7 @@ function advanceIfNeeded(state) {
   const to = nextStreet(from);
   const baseTurnNo = Number.isInteger(state.turnNo) ? state.turnNo : 0;
   let next = resetRoundState({ ...validatedState, phase: to, turnUserId: null });
-  const orderedSeats = orderSeats(next.seats);
+  const orderedSeats = orderSeats(getSeatsForHand(next));
   const sitOutByUserId = sanitizeSitOutByUserId(next.sitOutByUserId, orderedSeats);
   const leftTableByUserId = sanitizeLeftTableByUserId(next.leftTableByUserId, orderedSeats);
   const turnUserId = getFirstBettingAfterDealerEligible({
