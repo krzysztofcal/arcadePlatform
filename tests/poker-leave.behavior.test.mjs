@@ -196,6 +196,108 @@ const makeStatefulHandler = (seatStack, stateStack, postCalls, queries) => {
     klog: () => {},
   });
 };
+
+const makeActiveHandHandler = ({ queries, requestStore = null }) => {
+  const db = {
+    version: 5,
+    state: {
+      tableId,
+      phase: "FLOP",
+      handId: "hand-1",
+      handSeed: "seed-1",
+      seats: [{ userId, seatNo: 1 }, { userId: "user-2", seatNo: 2 }],
+      stacks: { [userId]: 120, "user-2": 120 },
+      leftTableByUserId: {},
+      foldedByUserId: { [userId]: false, "user-2": false },
+      actedThisRoundByUserId: { [userId]: false, "user-2": false },
+      toCallByUserId: { [userId]: 0, "user-2": 0 },
+      betThisRoundByUserId: { [userId]: 0, "user-2": 0 },
+      pendingAutoSitOutByUserId: {},
+      sitOutByUserId: {},
+      community: [{ r: "A", s: "S" }, { r: "K", s: "D" }, { r: "Q", s: "H" }],
+      communityDealt: 3,
+      pot: 10,
+      turnUserId: "user-2",
+      turnNo: 2,
+    },
+    leaveActions: [],
+  };
+
+  return loadPokerHandler("netlify/functions/poker-leave.mjs", {
+    baseHeaders: () => ({}),
+    corsHeaders: () => ({ "access-control-allow-origin": "https://example.test" }),
+    extractBearerToken: () => "token",
+    verifySupabaseJwt: async () => ({ valid: true, userId }),
+    isValidUuid: () => true,
+    normalizeRequestId: (value) => ({ ok: true, value: value ?? null }),
+    updatePokerStateOptimistic,
+    beginSql: async (fn) =>
+      fn({
+        unsafe: async (query, params) => {
+          queries.push({ query: String(query), params });
+          const text = String(query).toLowerCase();
+          if (text.includes("from public.poker_requests") && requestStore) {
+            const key = `${params?.[0]}|${params?.[1]}|${params?.[2]}|${params?.[3]}`;
+            const entry = requestStore.get(key);
+            if (!entry) return [];
+            return [{ result_json: entry.resultJson, created_at: entry.createdAt }];
+          }
+          if (text.includes("insert into public.poker_requests") && requestStore) {
+            const key = `${params?.[0]}|${params?.[1]}|${params?.[2]}|${params?.[3]}`;
+            if (requestStore.has(key)) return [];
+            requestStore.set(key, { resultJson: null, createdAt: new Date().toISOString() });
+            return [{ request_id: params?.[2] }];
+          }
+          if (text.includes("update public.poker_requests") && requestStore) {
+            const key = `${params?.[0]}|${params?.[1]}|${params?.[2]}|${params?.[3]}`;
+            const entry = requestStore.get(key) || { createdAt: new Date().toISOString() };
+            entry.resultJson = params?.[4] ?? null;
+            requestStore.set(key, entry);
+            return [{ request_id: params?.[2] }];
+          }
+          if (text.includes("delete from public.poker_requests") && requestStore) {
+            const key = `${params?.[0]}|${params?.[1]}|${params?.[2]}|${params?.[3]}`;
+            requestStore.delete(key);
+            return [];
+          }
+          if (text.includes("from public.poker_tables")) return [{ id: tableId, status: "OPEN" }];
+          if (text.includes("from public.poker_state")) return [{ version: db.version, state: JSON.stringify(db.state) }];
+          if (text.includes("from public.poker_seats") && text.includes("for update")) {
+            return [{ seat_no: 1, status: "ACTIVE", stack: 120 }];
+          }
+          if (text.includes("update public.poker_state") && text.includes("version = version + 1")) {
+            db.version += 1;
+            db.state = JSON.parse(params?.[2] || "{}");
+            return [{ version: db.version }];
+          }
+          if (text.includes("insert into public.poker_actions") && text.includes("leave_table")) {
+            const version = params?.[1];
+            const handId = params?.[4] ?? null;
+            const requestId = params?.[5] ?? null;
+            const dedupeExists = requestId != null
+              ? db.leaveActions.some((row) => row.requestId === requestId)
+              : db.leaveActions.some((row) => row.handId === handId);
+            if (dedupeExists) return [];
+            db.leaveActions.push({ version, handId, requestId });
+            return [{ id: `action-${db.leaveActions.length}` }];
+          }
+          if (text.includes("select user_id, seat_no, is_bot from public.poker_seats")) {
+            return [
+              { user_id: userId, seat_no: 1, is_bot: false },
+              { user_id: "user-2", seat_no: 2, is_bot: false },
+            ];
+          }
+          if (text.includes("update public.poker_tables set last_activity_at = now()")) {
+            return [{ ok: true }];
+          }
+          return [];
+        },
+      }),
+    postTransaction: async () => ({ transaction: { id: "tx-1" } }),
+    klog: () => {},
+  });
+};
+
 const run = async () => {
   const postCalls = [];
   const queries = [];
@@ -339,6 +441,78 @@ const run = async () => {
     q.query.toLowerCase().includes("update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1")
   ).length;
   assert.equal(secondActivityBumps, 1, "already-left replay should not bump table activity without mutation");
+
+  const activeQueries = [];
+  const activeHandler = makeActiveHandHandler({ queries: activeQueries });
+  const activeResponse = await activeHandler({
+    httpMethod: "POST",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    body: JSON.stringify({ tableId, includeState: true }),
+  });
+  assert.equal(activeResponse.statusCode, 200);
+  const activeBody = JSON.parse(activeResponse.body);
+  assert.equal(activeBody.ok, true);
+  assert.equal(activeBody.status, "leave_queued");
+  assert.equal(activeBody.cashedOut, 0);
+  const activeStateUpdateIndex = activeQueries.findIndex((q) =>
+    q.query.toLowerCase().includes("update public.poker_state set version = version + 1")
+  );
+  const activeActionInsertIndex = activeQueries.findIndex(
+    (q) => q.query.toLowerCase().includes("insert into public.poker_actions") && q.params?.[3] === "LEAVE_TABLE"
+  );
+  assert.ok(activeStateUpdateIndex >= 0);
+  assert.ok(activeActionInsertIndex > activeStateUpdateIndex, "LEAVE_TABLE action should be inserted after state write");
+  const activeActionInsert = activeQueries[activeActionInsertIndex];
+  assert.equal(activeActionInsert.params?.[1], activeBody?.state?.version, "LEAVE_TABLE version should match post-write version");
+  const activeBumps = activeQueries.filter((q) =>
+    q.query.toLowerCase().includes("update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1")
+  ).length;
+  assert.equal(activeBumps, 1, "active-hand queued leave should bump table activity once");
+
+  const activeReqQueries = [];
+  const activeReqStore = new Map();
+  const activeReqHandler = makeActiveHandHandler({ queries: activeReqQueries, requestStore: activeReqStore });
+  const reqId = "req-active-1";
+  const reqFirst = await activeReqHandler({
+    httpMethod: "POST",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    body: JSON.stringify({ tableId, includeState: true, requestId: reqId }),
+  });
+  assert.equal(reqFirst.statusCode, 200);
+  const reqSecond = await activeReqHandler({
+    httpMethod: "POST",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    body: JSON.stringify({ tableId, includeState: true, requestId: reqId }),
+  });
+  assert.equal(reqSecond.statusCode, 200);
+  assert.deepEqual(JSON.parse(reqSecond.body), JSON.parse(reqFirst.body));
+  const reqActionInserts = activeReqQueries.filter(
+    (q) => q.query.toLowerCase().includes("insert into public.poker_actions") && q.params?.[3] === "LEAVE_TABLE"
+  ).length;
+  assert.equal(reqActionInserts, 1, "same requestId should not insert duplicate LEAVE_TABLE action");
+  const reqActivityBumps = activeReqQueries.filter((q) =>
+    q.query.toLowerCase().includes("update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1")
+  ).length;
+  assert.equal(reqActivityBumps, 1, "replay with same requestId should not bump activity again");
+
+  const activeNoReqQueries = [];
+  const activeNoReqHandler = makeActiveHandHandler({ queries: activeNoReqQueries });
+  const noReqFirst = await activeNoReqHandler({
+    httpMethod: "POST",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    body: JSON.stringify({ tableId }),
+  });
+  assert.equal(noReqFirst.statusCode, 200);
+  const noReqSecond = await activeNoReqHandler({
+    httpMethod: "POST",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    body: JSON.stringify({ tableId }),
+  });
+  assert.ok(noReqSecond.statusCode === 200 || noReqSecond.statusCode === 409);
+  const noReqActionInserts = activeNoReqQueries.filter(
+    (q) => q.query.toLowerCase().includes("insert into public.poker_actions") && q.params?.[3] === "LEAVE_TABLE"
+  ).length;
+  assert.equal(noReqActionInserts, 1, "no requestId same-hand leave should dedupe LEAVE_TABLE insertion");
 
   const requestScopedRead = idempotentQueries.find((q) =>
     q.query.toLowerCase().includes("from public.poker_requests where table_id = $1 and user_id = $2 and request_id = $3 and kind = $4")

@@ -584,29 +584,6 @@ export async function handler(event) {
         const hasAnyActiveHandSignal = hasActiveHandId || isActiveHandPhase;
         const shouldDetachSeatAndStack = !hasAnyActiveHandSignal;
 
-        if (!shouldDetachSeatAndStack) {
-          const actionHandId = typeof leaveState.handId === "string" && leaveState.handId.trim() ? leaveState.handId.trim() : null;
-          await tx.unsafe(
-            `insert into public.poker_actions (table_id, version, user_id, action_type, amount, hand_id, request_id, phase_from, phase_to, meta)
-             select $1, $2, $3, $4, null, $5, $6, $7, $8, $9::jsonb
-             where not exists (
-               select 1 from public.poker_actions
-               where table_id = $1 and user_id = $3 and action_type = $4 and hand_id is not distinct from $5
-             );`,
-            [
-              tableId,
-              expectedVersion,
-              auth.userId,
-              "LEAVE_TABLE",
-              actionHandId,
-              normalizedRequestId,
-              currentState.phase || null,
-              leaveState.phase || null,
-              JSON.stringify({ source: "poker-leave" }),
-            ]
-          );
-        }
-
         if (shouldDetachSeatAndStack && cashOutAmount > 0) {
           const escrowSystemKey = `POKER_TABLE:${tableId}`;
           const idempotencyKey = normalizedRequestId
@@ -690,6 +667,55 @@ export async function handler(event) {
         let latestState = updatedState;
         let latestVersion = updateResult.newVersion;
         if (!shouldDetachSeatAndStack) {
+          const actionHandId = typeof leaveState.handId === "string" && leaveState.handId.trim() ? leaveState.handId.trim() : null;
+          let leaveActionRows = [];
+          if (normalizedRequestId) {
+            leaveActionRows = await tx.unsafe(
+              `insert into public.poker_actions (table_id, version, user_id, action_type, amount, hand_id, request_id, phase_from, phase_to, meta)
+               select $1, $2, $3, $4, null, $5, $6, $7, $8, $9::jsonb
+               where not exists (
+                 select 1 from public.poker_actions
+                 where table_id = $1 and user_id = $3 and action_type = $4 and request_id is not distinct from $6
+               )
+               returning id;`,
+              [
+                tableId,
+                latestVersion,
+                auth.userId,
+                "LEAVE_TABLE",
+                actionHandId,
+                normalizedRequestId,
+                currentState.phase || null,
+                leaveState.phase || null,
+                JSON.stringify({ source: "poker-leave" }),
+              ]
+            );
+          } else {
+            leaveActionRows = await tx.unsafe(
+              `insert into public.poker_actions (table_id, version, user_id, action_type, amount, hand_id, request_id, phase_from, phase_to, meta)
+               select $1, $2, $3, $4, null, $5, $6, $7, $8, $9::jsonb
+               where not exists (
+                 select 1 from public.poker_actions
+                 where table_id = $1 and user_id = $3 and action_type = $4 and hand_id is not distinct from $5
+               )
+               returning id;`,
+              [
+                tableId,
+                latestVersion,
+                auth.userId,
+                "LEAVE_TABLE",
+                actionHandId,
+                null,
+                currentState.phase || null,
+                leaveState.phase || null,
+                JSON.stringify({ source: "poker-leave" }),
+              ]
+            );
+          }
+          if (Array.isArray(leaveActionRows) && leaveActionRows.length > 0) {
+            mutated = true;
+          }
+
           const leaveAdvanceEvents = [];
           const leaveAdvanced = runAdvanceLoop(latestState, null, leaveAdvanceEvents, advanceIfNeeded);
           latestState = sanitizePersistedState(leaveAdvanced.nextState);
