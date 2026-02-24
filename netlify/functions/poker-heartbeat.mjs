@@ -2,6 +2,9 @@ import { baseHeaders, beginSql, corsHeaders, extractBearerToken, klog, verifySup
 import { isValidUuid } from "./_shared/poker-utils.mjs";
 import { normalizeRequestId } from "./_shared/poker-request-id.mjs";
 import { deletePokerRequest, ensurePokerRequest, storePokerRequestResult } from "./_shared/poker-idempotency.mjs";
+import { maybeApplyTurnTimeout } from "./_shared/poker-turn-timeout.mjs";
+import { isStateStorageValid, normalizeJsonState, withoutPrivateState } from "./_shared/poker-state-utils.mjs";
+import { updatePokerStateOptimistic } from "./_shared/poker-state-write.mjs";
 
 const REQUEST_PENDING_STALE_SEC = 30;
 
@@ -146,6 +149,74 @@ export async function handler(event) {
         const presence = await touchSeatPresence(tx, tableId, auth.userId);
         if (presence.isSeated) {
           mutated = true;
+        }
+
+        const stateRows = await tx.unsafe(
+          "select version, state from public.poker_state where table_id = $1 order by version desc limit 1 for update;",
+          [tableId]
+        );
+        const latest = stateRows?.[0] || null;
+        if (!latest?.state || !Number.isInteger(latest?.version)) {
+          return { error: "state_missing", statusCode: 404 };
+        }
+
+        const expectedVersion = latest.version;
+        const currentState = normalizeJsonState(latest.state);
+        const timeoutResult = maybeApplyTurnTimeout({ tableId, state: currentState, privateState: currentState, nowMs: Date.now() });
+        if (timeoutResult.applied) {
+          const updatedState = timeoutResult.state;
+          if (!isStateStorageValid(updatedState, { requireHandSeed: true, requireCommunityDealt: true, requireNoDeck: true })) {
+            return { error: "state_invalid", statusCode: 409 };
+          }
+          const updateResult = await updatePokerStateOptimistic(tx, {
+            tableId,
+            expectedVersion,
+            nextState: updatedState,
+          });
+          if (!updateResult.ok) {
+            if (updateResult.reason === "not_found") return { error: "state_missing", statusCode: 404 };
+            if (updateResult.reason === "conflict") return { error: "state_conflict", statusCode: 409 };
+            return { error: "state_invalid", statusCode: 409 };
+          }
+          mutated = true;
+
+          const timeoutHandId = typeof updatedState.handId === "string" && updatedState.handId.trim() ? updatedState.handId.trim() : null;
+          await tx.unsafe(
+            "insert into public.poker_actions (table_id, version, user_id, action_type, amount, hand_id, request_id, phase_from, phase_to, meta) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb);",
+            [
+              tableId,
+              updateResult.newVersion,
+              timeoutResult.action.userId,
+              timeoutResult.action.type,
+              timeoutResult.action.amount ?? null,
+              timeoutHandId,
+              timeoutResult.requestId || `heartbeat-timeout-${updateResult.newVersion}`,
+              currentState.phase || null,
+              updatedState.phase || null,
+              JSON.stringify({ actor: "SYSTEM", reason: "HEARTBEAT_TIMEOUT" }),
+            ]
+          );
+
+          await tx.unsafe(
+            "update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1;",
+            [tableId]
+          );
+          klog("poker_heartbeat_timeout_applied", {
+            tableId,
+            actionType: timeoutResult.action?.type || null,
+            turnUserId: timeoutResult.action?.userId || null,
+            newVersion: updateResult.newVersion,
+          });
+          const publicState = withoutPrivateState(updatedState);
+          const resultPayload = { ok: true, seated: presence.isSeated, seatNo: presence.seatNo, state: { version: updateResult.newVersion, state: publicState } };
+          await storePokerRequestResult(tx, {
+            tableId,
+            userId: auth.userId,
+            requestId,
+            kind: "HEARTBEAT",
+            result: resultPayload,
+          });
+          return resultPayload;
         }
 
         const resultPayload = { ok: true, seated: presence.isSeated, seatNo: presence.seatNo };

@@ -17,4 +17,10 @@ assert.doesNotMatch(
   "poker-act must not call runBotAutoplayLoop() with empty args"
 );
 
+assert.match(
+  src,
+  /postAutoStartRequestId\s*=\s*`bot-auto:post-autostart:\$\{requestId\}`[\s\S]*?executeBotAutoplayLoop\s*\(\s*postAutoStartRequestId\s*,/,
+  "poker-act should trigger post-autostart bot autoplay loop with scoped request id"
+);
+
 console.log("poker-act runBotAutoplayLoop no-zero-arg behavior test passed");

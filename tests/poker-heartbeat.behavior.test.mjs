@@ -11,6 +11,7 @@ const makeHeartbeatHandler = ({
   failStoreResult = false,
   forbidTableTouch = false,
   tableStatus = "OPEN",
+  timeoutApplied = false,
 }) =>
   loadPokerHandler("netlify/functions/poker-heartbeat.mjs", {
     baseHeaders: () => ({}),
@@ -19,6 +20,14 @@ const makeHeartbeatHandler = ({
     verifySupabaseJwt: async () => ({ valid: true, userId }),
     isValidUuid: () => true,
     normalizeRequestId: (value) => ({ ok: true, value: value ?? null }),
+    normalizeJsonState: (value) => value,
+    withoutPrivateState: (value) => value,
+    isStateStorageValid: () => true,
+    updatePokerStateOptimistic: async () => ({ ok: true, newVersion: 2 }),
+    maybeApplyTurnTimeout: () =>
+      timeoutApplied
+        ? { applied: true, state: { phase: "PREFLOP", handSeed: "seed", communityDealt: 0 }, action: { userId, type: "CHECK" }, requestId: "timeout-1" }
+        : { applied: false },
     beginSql: async (fn) =>
       fn({
         unsafe: async (query, params) => {
@@ -51,6 +60,9 @@ const makeHeartbeatHandler = ({
           }
           if (text.includes("from public.poker_tables where id = $1")) {
             return tableStatus ? [{ status: tableStatus }] : [];
+          }
+          if (text.includes("from public.poker_state where table_id = $1")) {
+            return [{ version: 1, state: { phase: "PREFLOP", handSeed: "seed", communityDealt: 0 } }];
           }
           if (text.includes("from public.poker_seats where table_id = $1 and user_id = $2")) {
             return [{ seat_no: 3 }];
