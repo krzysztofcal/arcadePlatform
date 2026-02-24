@@ -25,6 +25,7 @@ import { advanceIfNeeded, applyLeaveTable } from "../../netlify/functions/_share
 import { hasParticipatingHumanInHand, runAdvanceLoop, runBotAutoplayLoop } from "../../netlify/functions/_shared/poker-autoplay.mjs";
 import { isHoleCardsTableMissing, loadHoleCardsByUserId } from "../../netlify/functions/_shared/poker-hole-cards-store.mjs";
 import { deriveCommunityCards, deriveRemainingDeck } from "../../netlify/functions/_shared/poker-deal-deterministic.mjs";
+import { store as upstashStore, isMemoryStore as upstashIsMemoryStore } from "../../netlify/functions/_shared/store-upstash.mjs";
 
 const root = process.cwd();
 
@@ -133,6 +134,8 @@ export const loadPokerHandler = (filePath, mocks) => {
     "tableIdleCutoffExprSql",
     "hasActiveHumanGuardSql",
     "shouldSeedBotsOnJoin",
+    "store",
+    "isMemoryStore",
     "hasParticipatingHumanInHand",
     "runAdvanceLoop",
     "runBotAutoplayLoop",
@@ -179,6 +182,8 @@ return handler;`
       tableIdleCutoffExprSql,
       hasActiveHumanGuardSql,
       shouldSeedBotsOnJoin,
+      store: upstashStore,
+      isMemoryStore: upstashIsMemoryStore,
       hasParticipatingHumanInHand,
       runAdvanceLoop,
       runBotAutoplayLoop,

@@ -11,12 +11,27 @@ import { isHoleCardsTableMissing } from "./_shared/poker-hole-cards-store.mjs";
 import { postHandSettlementToLedger } from "./_shared/poker-ledger-settlement.mjs";
 import { cashoutBotSeatIfNeeded, ensureBotSeatInactiveForCashout } from "./_shared/poker-bot-cashout.mjs";
 import { hasActiveHumanGuardSql, tableIdleCutoffExprSql } from "./_shared/poker-table-lifecycle.mjs";
+import { isMemoryStore, store } from "./_shared/store-upstash.mjs";
 
 const STALE_PENDING_CUTOFF_MINUTES = 10;
 const STALE_PENDING_LIMIT = 500;
 const OLD_REQUESTS_LIMIT = 1000;
 const EXPIRED_SEATS_LIMIT = 200;
 const CLOSE_CASHOUT_TABLES_LIMIT = 25;
+const SWEEP_LOCK_KEY = "poker:sweep:lock:v1";
+const SWEEP_LOCK_TTL_SEC = 90;
+const ORPHAN_QUARANTINE_SYSTEM_KEY = "POKER_ORPHAN_QUARANTINE";
+
+const SWEEP_LOCK_SCRIPT = `
+local key = KEYS[1]
+local token = ARGV[1]
+local ttlSec = tonumber(ARGV[2])
+local locked = redis.call('SET', key, token, 'EX', ttlSec, 'NX')
+if locked then
+  return 1
+end
+return 0
+`;
 
 const normalizeNonNegativeInt = (n) =>
   Number.isInteger(n) && n >= 0 && Math.abs(n) <= Number.MAX_SAFE_INTEGER ? n : null;
@@ -32,6 +47,120 @@ const normalizeState = (value) => {
   }
   if (typeof value === "object") return value;
   return {};
+};
+
+const asPositiveWhole = (value) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return 0;
+  if (Math.trunc(parsed) !== parsed) return 0;
+  if (parsed <= 0) return 0;
+  if (Math.abs(parsed) > Number.MAX_SAFE_INTEGER) return 0;
+  return parsed;
+};
+
+const parseTableIdFromSystemKey = (systemKey) => {
+  const value = String(systemKey || "");
+  return value.startsWith("POKER_TABLE:") ? value.slice("POKER_TABLE:".length) : null;
+};
+
+const acquireSweepLock = async (token) => {
+  if (isMemoryStore) {
+    const existing = await store.get(SWEEP_LOCK_KEY);
+    if (existing) return false;
+    await store.setex(SWEEP_LOCK_KEY, SWEEP_LOCK_TTL_SEC, token);
+    return true;
+  }
+  const result = await store.eval(SWEEP_LOCK_SCRIPT, [SWEEP_LOCK_KEY], [token, String(SWEEP_LOCK_TTL_SEC)]);
+  return Number(result) === 1;
+};
+
+const releaseSweepLock = async (token) => {
+  const current = await store.get(SWEEP_LOCK_KEY);
+  if (current && current === token) {
+    await store.expire(SWEEP_LOCK_KEY, 1);
+  }
+};
+
+const remediateOrphanEscrow = async ({ tableId, escrowBalance }) => {
+  const escrowSystemKey = `POKER_TABLE:${tableId}`;
+  return beginSql(async (tx) => {
+    const accountRows = await tx.unsafe(
+      "select balance from public.chips_accounts where account_type = 'ESCROW' and system_key = $1 limit 1 for update;",
+      [escrowSystemKey]
+    );
+    const account = accountRows?.[0] || null;
+    const lockedEscrowBalance = asPositiveWhole(account?.balance);
+    if (lockedEscrowBalance <= 0) {
+      return { action: "skip", reason: "already_zero", escrowBalance: 0 };
+    }
+
+    const activeSeatRows = await tx.unsafe(
+      "select 1 from public.poker_seats where table_id = $1 and status = 'ACTIVE' limit 1;",
+      [tableId]
+    );
+    if (Array.isArray(activeSeatRows) && activeSeatRows.length > 0) {
+      return { action: "skip", reason: "active_seats_present", escrowBalance: lockedEscrowBalance };
+    }
+
+    const seatRows = await tx.unsafe(
+      "select user_id, stack from public.poker_seats where table_id = $1 for update;",
+      [tableId]
+    );
+
+    const owedByUser = new Map();
+    for (const row of seatRows || []) {
+      const userId = row?.user_id;
+      if (!userId) continue;
+      const stack = asPositiveWhole(row?.stack);
+      if (stack <= 0) continue;
+      owedByUser.set(userId, (owedByUser.get(userId) || 0) + stack);
+    }
+
+    if (owedByUser.size > 0) {
+      let cashedOutTotal = 0;
+      for (const [userId, owed] of owedByUser.entries()) {
+        await postTransaction({
+          userId,
+          txType: "TABLE_CASH_OUT",
+          idempotencyKey: `poker:orphan_cashout:${tableId}:${userId}:v1`,
+          reference: `table:${tableId}`,
+          metadata: { tableId, reason: "orphan_escrow_remediation" },
+          entries: [
+            { accountType: "ESCROW", systemKey: escrowSystemKey, amount: -owed },
+            { accountType: "USER", amount: owed },
+          ],
+          createdBy: userId,
+          tx,
+        });
+        cashedOutTotal += owed;
+      }
+
+      await tx.unsafe("update public.poker_seats set stack = 0, status = 'INACTIVE' where table_id = $1 and stack > 0;", [tableId]);
+
+      return {
+        action: "remediated",
+        usersCashedOut: owedByUser.size,
+        cashoutTotal: cashedOutTotal,
+        escrowBalance: lockedEscrowBalance,
+      };
+    }
+
+    await postTransaction({
+      userId: null,
+      txType: "TABLE_CASH_OUT",
+      idempotencyKey: `poker:orphan_quarantine:${tableId}:v1`,
+      reference: `table:${tableId}`,
+      metadata: { tableId, reason: "orphan_escrow_quarantine" },
+      entries: [
+        { accountType: "ESCROW", systemKey: escrowSystemKey, amount: -lockedEscrowBalance },
+        { accountType: "SYSTEM", systemKey: ORPHAN_QUARANTINE_SYSTEM_KEY, amount: lockedEscrowBalance },
+      ],
+      createdBy: null,
+      tx,
+    });
+
+    return { action: "quarantined", escrowBalance: lockedEscrowBalance };
+  });
 };
 
 
@@ -75,7 +204,19 @@ export async function handler(event) {
     });
   }
 
+  const lockToken = `sweep-${Date.now()}-${process.pid || 0}`;
+  let lockAcquired = false;
   try {
+    lockAcquired = await acquireSweepLock(lockToken);
+    if (!lockAcquired) {
+      klog("poker_sweep_skip_locked", { lockKey: SWEEP_LOCK_KEY, lockTtlSec: SWEEP_LOCK_TTL_SEC });
+      return {
+        statusCode: 200,
+        headers: baseHeaders(),
+        body: JSON.stringify({ ok: true, skipped: "locked" }),
+      };
+    }
+
     const result = await beginSql(async (tx) => {
       const cleanupRows = await tx.unsafe(
         `with candidates as (
@@ -738,11 +879,36 @@ where a.account_type = 'ESCROW'
       )
     );
     if (Array.isArray(orphanRows)) {
-      orphanRows.forEach((row) => {
-        const systemKey = row?.system_key || "";
-        const tableId = systemKey.startsWith("POKER_TABLE:") ? systemKey.slice("POKER_TABLE:".length) : null;
-        klog("poker_escrow_orphan_detected", { tableId, escrowBalance: row?.balance ?? null });
-      });
+      for (const row of orphanRows) {
+        const tableId = parseTableIdFromSystemKey(row?.system_key);
+        const escrowBalance = asPositiveWhole(row?.balance);
+        klog("poker_escrow_orphan_detected", { tableId, escrowBalance });
+        if (!tableId || escrowBalance <= 0) {
+          klog("poker_escrow_orphan_skip", { tableId, escrowBalance, reason: "invalid_or_zero_balance" });
+          continue;
+        }
+        const remediation = await remediateOrphanEscrow({ tableId, escrowBalance });
+        if (remediation?.action === "remediated") {
+          klog("poker_escrow_orphan_remediated", {
+            tableId,
+            usersCashedOut: remediation.usersCashedOut,
+            total: remediation.cashoutTotal,
+            escrowBalance: remediation.escrowBalance,
+          });
+        } else if (remediation?.action === "quarantined") {
+          klog("poker_escrow_orphan_quarantined", {
+            tableId,
+            escrowBalance: remediation.escrowBalance,
+            systemKey: ORPHAN_QUARANTINE_SYSTEM_KEY,
+          });
+        } else {
+          klog("poker_escrow_orphan_skip", {
+            tableId,
+            escrowBalance: remediation?.escrowBalance ?? escrowBalance,
+            reason: remediation?.reason || "noop",
+          });
+        }
+      }
     }
 
     return {
@@ -753,5 +919,16 @@ where a.account_type = 'ESCROW'
   } catch (error) {
     klog("poker_sweep_error", { message: error?.message || "unknown_error" });
     return { statusCode: 500, headers: baseHeaders(), body: JSON.stringify({ error: "server_error" }) };
+  } finally {
+    if (lockAcquired) {
+      try {
+        await releaseSweepLock(lockToken);
+      } catch (error) {
+        klog("poker_sweep_lock_release_failed", {
+          lockKey: SWEEP_LOCK_KEY,
+          message: error?.message || "unknown_error",
+        });
+      }
+    }
   }
 }
