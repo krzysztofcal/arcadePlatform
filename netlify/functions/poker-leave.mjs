@@ -124,6 +124,27 @@ const sanitizeNoopResponseState = (state, userId) => {
   return { ...base, seats, stacks };
 };
 
+const buildAlreadyLeftResultPayload = ({ tableId, seatNo, includeState, state, userId }) => {
+  const viewState = withoutPrivateState(sanitizeNoopResponseState(state, userId));
+  return {
+    ok: true,
+    tableId,
+    cashedOut: 0,
+    seatNo: Number.isInteger(seatNo) ? seatNo : null,
+    status: "already_left",
+    ...(includeState
+      ? {
+          state: {
+            version: null,
+            viewOnly: true,
+            state: viewState,
+          },
+          viewState,
+        }
+      : {}),
+  };
+};
+
 export async function handler(event) {
   const origin = event.headers?.origin || event.headers?.Origin;
   const cors = corsHeaders(origin);
@@ -246,30 +267,20 @@ export async function handler(event) {
         );
         const seatRow = seatRows?.[0] || null;
         const seatNo = seatRow?.seat_no;
-        if (alreadyLeft || !Number.isInteger(seatNo)) {
+        if (alreadyLeft) {
           if (seatRow) {
             await tx.unsafe("delete from public.poker_seats where table_id = $1 and user_id = $2;", [
               tableId,
               auth.userId,
             ]);
           }
-          const resultPayload = {
-            ok: true,
+          const resultPayload = buildAlreadyLeftResultPayload({
             tableId,
-            cashedOut: 0,
-            seatNo: Number.isInteger(seatNo) ? seatNo : null,
-            status: "already_left",
-            ...(includeState
-              ? {
-                  state: {
-                    version: null,
-                    viewOnly: true,
-                    state: withoutPrivateState(sanitizeNoopResponseState(currentState, auth.userId)),
-                  },
-                  viewState: withoutPrivateState(sanitizeNoopResponseState(currentState, auth.userId)),
-                }
-              : {}),
-          };
+            seatNo,
+            includeState,
+            state: currentState,
+            userId: auth.userId,
+          });
           if (normalizedRequestId) {
             await storePokerRequestResult(tx, {
               tableId,
@@ -316,23 +327,13 @@ export async function handler(event) {
                 auth.userId,
               ]);
             }
-            const resultPayload = {
-              ok: true,
+            const resultPayload = buildAlreadyLeftResultPayload({
               tableId,
-              cashedOut: 0,
-              seatNo: Number.isInteger(seatNo) ? seatNo : null,
-              status: "already_left",
-              ...(includeState
-                ? {
-                    state: {
-                      version: null,
-                      viewOnly: true,
-                      state: withoutPrivateState(sanitizeNoopResponseState(currentState, auth.userId)),
-                    },
-                    viewState: withoutPrivateState(sanitizeNoopResponseState(currentState, auth.userId)),
-                  }
-                : {}),
-            };
+              seatNo,
+              includeState,
+              state: currentState,
+              userId: auth.userId,
+            });
             if (normalizedRequestId) {
               await storePokerRequestResult(tx, {
                 tableId,
@@ -496,6 +497,7 @@ export async function handler(event) {
         );
 
         const publicState = withoutPrivateState(latestState);
+        const responseState = sanitizeNoopResponseState(publicState, auth.userId);
         const resultPayload = {
           ok: true,
           tableId,
@@ -506,7 +508,7 @@ export async function handler(event) {
             ? {
                 state: {
                   version: latestVersion,
-                  state: publicState,
+                  state: responseState,
                 },
               }
             : {}),
