@@ -131,12 +131,24 @@ const sanitizeNoopResponseState = (state, userId) => {
 
 const isActionPhase = (phase) => ["PREFLOP", "FLOP", "TURN", "RIVER"].includes(phase);
 
-const normalizeSeatOrderFromState = (seatsInput) => {
-  if (!Array.isArray(seatsInput)) return [];
-  return seatsInput
-    .filter((seat) => Number.isInteger(Number(seat?.seatNo)) && typeof seat?.userId === "string" && seat.userId.trim())
-    .sort((a, b) => Number(a.seatNo) - Number(b.seatNo))
-    .map((seat) => seat.userId);
+const normalizeSeatOrderFromActiveSeatRows = (activeSeatRows) => {
+  if (!Array.isArray(activeSeatRows)) return [];
+  return activeSeatRows
+    .filter((row) => Number.isInteger(Number(row?.seat_no)) && typeof row?.user_id === "string" && row.user_id.trim())
+    .sort((a, b) => Number(a.seat_no) - Number(b.seat_no))
+    .map((row) => row.user_id);
+};
+
+const selectFallbackBotTurnUserId = (state, seatUserIdsInOrder, seatBotMap) => {
+  for (const userId of seatUserIdsInOrder) {
+    if (!isBotTurn(userId, seatBotMap)) continue;
+    if (state?.foldedByUserId?.[userId]) continue;
+    if (state?.leftTableByUserId?.[userId]) continue;
+    if (state?.sitOutByUserId?.[userId]) continue;
+    if (state?.pendingAutoSitOutByUserId?.[userId]) continue;
+    return userId;
+  }
+  return null;
 };
 
 const buildPersistedFromPrivateState = (privateStateInput, actorUserId, actionRequestId) => {
@@ -217,11 +229,22 @@ const executePostLeaveBotAutoplayLoop = async ({
   seatUserIdsInOrder,
   mutate,
   validatePersistedState,
+  botsOnlyInHand,
 }) => {
-  if (!isActionPhase(state?.phase) || !isBotTurn(state?.turnUserId, seatBotMap)) {
+  if (!isActionPhase(state?.phase)) {
     return { state, version, attempted: false, reason: "not_applicable" };
   }
-  const privateStateResult = await maybeBuildPrivateStateForBotAutoplay({ tx, tableId, state, seatUserIdsInOrder });
+  const hasBotTurn = isBotTurn(state?.turnUserId, seatBotMap);
+  if (!hasBotTurn && !botsOnlyInHand) {
+    return { state, version, attempted: false, reason: "not_applicable" };
+  }
+
+  const fallbackBotTurnUserId = !hasBotTurn && botsOnlyInHand
+    ? selectFallbackBotTurnUserId(state, seatUserIdsInOrder, seatBotMap)
+    : null;
+  const autoplayStartState = fallbackBotTurnUserId ? { ...state, turnUserId: fallbackBotTurnUserId } : state;
+
+  const privateStateResult = await maybeBuildPrivateStateForBotAutoplay({ tx, tableId, state: autoplayStartState, seatUserIdsInOrder });
   if (!privateStateResult.ok) {
     klog("poker_leave_autoplay_skipped", {
       tableId,
@@ -237,7 +260,7 @@ const executePostLeaveBotAutoplayLoop = async ({
   const botLoop = await runBotAutoplayLoop({
     tableId,
     requestId: `bot-auto:post-leave:${requestId || "no-request-id"}`,
-    initialState: state,
+    initialState: autoplayStartState,
     initialPrivateState: privateStateResult.privateState,
     initialVersion: version,
     seatBotMap,
@@ -657,7 +680,7 @@ export async function handler(event) {
             [tableId]
           );
           const seatBotMap = buildSeatBotMap(activeSeatRows);
-          const seatUserIdsInOrder = normalizeSeatOrderFromState(latestState.seats);
+          const seatUserIdsInOrder = normalizeSeatOrderFromActiveSeatRows(activeSeatRows);
           const botsOnlyInHand = !hasParticipatingHumanInHand(latestState, seatBotMap);
           if (isBotTurn(latestState.turnUserId, seatBotMap) || botsOnlyInHand) {
             const autoplayResult = await executePostLeaveBotAutoplayLoop({
@@ -673,6 +696,7 @@ export async function handler(event) {
                 mutated = true;
               },
               validatePersistedState: (stateToValidate) => validatePersistedStateOrThrow(stateToValidate, makeError),
+              botsOnlyInHand,
             });
             latestState = autoplayResult.state;
             latestVersion = autoplayResult.version;

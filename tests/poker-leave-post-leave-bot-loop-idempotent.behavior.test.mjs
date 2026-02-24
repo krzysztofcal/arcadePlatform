@@ -59,7 +59,7 @@ const handler = loadPokerHandler("netlify/functions/poker-leave.mjs", {
   applyLeaveTable: (state) => ({
     state: {
       ...state,
-      turnUserId: bot1,
+      turnUserId: humanUserId,
       foldedByUserId: { ...(state.foldedByUserId || {}), [humanUserId]: true },
       leftTableByUserId: { ...(state.leftTableByUserId || {}), [humanUserId]: true },
       actedThisRoundByUserId: { ...(state.actedThisRoundByUserId || {}), [humanUserId]: true },
