@@ -547,6 +547,13 @@ export async function handler(event) {
     publicState = guarded.statePublic;
     const legalInfo = guarded.legalInfo;
 
+    const me = {
+      userId: auth.userId,
+      isSeated: seats.some((seat) => seat?.userId === auth.userId && seat?.status === "ACTIVE"),
+      isLeft: !!publicState?.leftTableByUserId?.[auth.userId],
+      isSitOut: !!publicState?.sitOutByUserId?.[auth.userId],
+    };
+
     const stakesParsed = parseStakes(table.stakes);
     const tablePayload = {
       id: table.id,
@@ -571,6 +578,7 @@ export async function handler(event) {
           state: publicState,
         },
         myHoleCards: Array.isArray(result.myHoleCards) ? result.myHoleCards : [],
+        me,
         legalActions: legalInfo.actions,
         actionConstraints: buildActionConstraints(legalInfo),
       }),

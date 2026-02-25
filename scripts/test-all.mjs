@@ -63,6 +63,7 @@ run("node", ["tests/poker-rls.read.test.mjs"], "poker-rls-read");
 run("node", ["tests/poker-reducer.test.mjs"], "poker-reducer");
 run("node", ["tests/poker-reducer.left-player.applyAction.invalid-player.unit.test.mjs"], "poker-reducer-left-player-invalid-player-unit");
 run("node", ["tests/poker-handSeats-routing.behavior.test.mjs"], "poker-handseats-routing-behavior");
+run("node", ["tests/poker-handSeats.left-player.excluded.behavior.test.mjs"], "poker-handseats-left-player-excluded-behavior");
 run("node", ["tests/poker-handSeats-seats-undefined.behavior.test.mjs"], "poker-handseats-seats-undefined-behavior");
 run("node", ["tests/poker-handSeats-reset.behavior.test.mjs"], "poker-handseats-reset-behavior");
 run("node", ["tests/poker-legal-actions.left-player.invalid-player.behavior.test.mjs"], "poker-legal-actions-left-player-invalid-player-behavior");
@@ -71,6 +72,7 @@ run("node", ["tests/poker-leave.instant-detach.midhand.behavior.test.mjs"], "pok
 run("node", ["tests/poker-leave.instant-detach.replay-preserves-left-flag.behavior.test.mjs"], "poker-leave-instant-detach-replay-preserves-left-flag-behavior");
 run("node", ["tests/poker-leave.instant-detach.no-resurrection.behavior.test.mjs"], "poker-leave-instant-detach-no-resurrection-behavior");
 run("node", ["tests/poker-join.after-midhand-leave.seat-available.behavior.test.mjs"], "poker-join-after-midhand-leave-seat-available-behavior");
+run("node", ["tests/poker-join.left-player.no-resurrection.behavior.test.mjs"], "poker-join-left-player-no-resurrection-behavior");
 run("node", ["tests/poker-leave.cashout-only-uncommitted.behavior.test.mjs"], "poker-leave-cashout-only-uncommitted-behavior");
 run("node", ["tests/poker-leave.active-hand.instant-detach.idempotent-replay.behavior.test.mjs"], "poker-leave-active-hand-instant-detach-idempotent-replay-behavior");
 run("node", ["tests/poker-join.test.mjs"], "poker-join");
@@ -130,6 +132,7 @@ run("node", ["tests/poker-sweep.close-empty-table-counts-skipped.behavior.test.m
 run("node", ["tests/poker-sweep.cashout-authoritative.behavior.test.mjs"], "poker-sweep-cashout-authoritative");
 run("node", ["tests/poker-get-table.behavior.test.mjs"], "poker-get-table-behavior");
 run("node", ["tests/poker-get-table.bot-fields.behavior.test.mjs"], "poker-get-table-bot-fields-behavior");
+run("node", ["tests/poker-get-table.me-left-consistent.behavior.test.mjs"], "poker-get-table-me-left-consistent-behavior");
 run("node", ["tests/poker-materialize-settlement.payouts.test.mjs"], "poker-materialize-settlement-payouts");
 
 try { run("npm", ["run", "-s", "lint:games"], "unit"); } catch { /* optional */ }
