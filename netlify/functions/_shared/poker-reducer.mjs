@@ -520,6 +520,9 @@ const resetToNextHand = (state, options = {}) => {
 
 const getLegalActions = (state, userId) => {
   assertPlayer(state, userId);
+  if (state?.leftTableByUserId?.[userId]) {
+    throw new Error("invalid_player");
+  }
   if (!state.turnUserId) return [];
   if (userId !== state.turnUserId) return [];
   const stack = state.stacks?.[userId] ?? 0;
