@@ -1742,6 +1742,7 @@
         clearInterval(turnTimerInterval);
         turnTimerInterval = null;
       }
+      clearDeadlineNudge();
     }
 
     function stopHeartbeat(){
@@ -1773,6 +1774,9 @@
       deadlineNudgeTimer = setTimeout(function(){
         deadlineNudgeTimer = null;
         deadlineNudgeTargetMs = null;
+        if (!isPageActive()) return;
+        if (joinPending || leavePending || startHandPending || actPending) return;
+        if (heartbeatInFlight) return;
         sendHeartbeat();
       }, delayMs);
     }
