@@ -70,6 +70,7 @@ run("node", ["tests/poker-leave.instant-detach.replay-preserves-left-flag.behavi
 run("node", ["tests/poker-leave.instant-detach.no-resurrection.behavior.test.mjs"], "poker-leave-instant-detach-no-resurrection-behavior");
 run("node", ["tests/poker-join.after-midhand-leave.seat-available.behavior.test.mjs"], "poker-join-after-midhand-leave-seat-available-behavior");
 run("node", ["tests/poker-leave.cashout-only-uncommitted.behavior.test.mjs"], "poker-leave-cashout-only-uncommitted-behavior");
+run("node", ["tests/poker-leave.active-hand.instant-detach.idempotent-replay.behavior.test.mjs"], "poker-leave-active-hand-instant-detach-idempotent-replay-behavior");
 run("node", ["tests/poker-join.test.mjs"], "poker-join");
 run("node", ["tests/poker-sweep.test.mjs"], "poker-sweep");
 run("node", ["tests/poker-invariants.test.mjs"], "poker-invariants");

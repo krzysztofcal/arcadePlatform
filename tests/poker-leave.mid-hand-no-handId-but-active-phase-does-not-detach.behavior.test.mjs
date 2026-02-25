@@ -7,6 +7,10 @@ const humanUserId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const botUserId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 
 let seatDeleteCount = 0;
+let postTransactionCalls = 0;
+let normalizeRequestIdCalls = 0;
+let ensureRequestIdSeen = null;
+let storedRequestIdSeen = null;
 
 const stored = {
   version: 10,
@@ -15,6 +19,10 @@ const stored = {
     phase: "PREFLOP",
     handId: "",
     seats: [
+      { userId: humanUserId, seatNo: 1 },
+      { userId: botUserId, seatNo: 2 },
+    ],
+    handSeats: [
       { userId: humanUserId, seatNo: 1 },
       { userId: botUserId, seatNo: 2 },
     ],
@@ -44,23 +52,20 @@ const handler = loadPokerHandler("netlify/functions/poker-leave.mjs", {
   extractBearerToken: () => "token",
   verifySupabaseJwt: async () => ({ valid: true, userId: humanUserId }),
   isValidUuid: () => true,
-  normalizeRequestId: () => ({ ok: true, value: "leave-no-handid" }),
+  normalizeRequestId: (raw) => {
+    normalizeRequestIdCalls += 1;
+    assert.equal(raw, "leave-no-handid");
+    return { ok: true, value: raw };
+  },
   updatePokerStateOptimistic,
-  ensurePokerRequest: async () => ({ status: "proceed" }),
-  storePokerRequestResult: async () => {},
+  ensurePokerRequest: async (_tx, payload) => {
+    ensureRequestIdSeen = payload?.requestId ?? null;
+    return { status: "proceed" };
+  },
+  storePokerRequestResult: async (_tx, payload) => {
+    storedRequestIdSeen = payload?.requestId ?? null;
+  },
   deletePokerRequest: async () => {},
-  applyLeaveTable: (state) => ({
-    state: {
-      ...state,
-      phase: "PREFLOP",
-      handId: "",
-      leftTableByUserId: { ...(state.leftTableByUserId || {}), [humanUserId]: true },
-      seats: state.seats,
-      stacks: state.stacks,
-      deck: state.deck,
-    },
-    events: [],
-  }),
   beginSql: async (fn) =>
     fn({
       unsafe: async (query, params) => {
@@ -77,10 +82,23 @@ const handler = loadPokerHandler("netlify/functions/poker-leave.mjs", {
           seatDeleteCount += 1;
           return [];
         }
+        if (text.includes("select user_id, seat_no, is_bot from public.poker_seats") && text.includes("status = 'active'")) {
+          return [{ user_id: botUserId, seat_no: 2, is_bot: true }];
+        }
         return [];
       },
     }),
-  postTransaction: async () => ({ transaction: { id: "tx-1" } }),
+  postTransaction: async ({ entries }) => {
+    postTransactionCalls += 1;
+    const list = Array.isArray(entries) ? entries : [];
+    const userEntry = list.find((entry) => entry?.accountType === "USER");
+    const escrowEntry = list.find((entry) => entry?.accountType === "ESCROW");
+    assert.equal(userEntry?.amount, 100);
+    assert.equal(escrowEntry?.amount, -100);
+    assert.equal(typeof escrowEntry?.systemKey, "string");
+    assert.equal(escrowEntry?.systemKey, `POKER_TABLE:${tableId}`);
+    return { transaction: { id: "tx-1" } };
+  },
   klog: () => {},
 });
 
@@ -93,9 +111,16 @@ const response = await handler({
 assert.equal(response.statusCode, 200);
 const payload = JSON.parse(response.body || "{}");
 assert.equal(payload.ok, true);
-assert.equal(seatDeleteCount, 0);
-assert.equal(payload.state.state.seats.some((seat) => seat?.userId === humanUserId), true);
-assert.equal(payload.state.state.stacks?.[humanUserId], 100);
+assert.equal(payload.cashedOut, 100);
+assert.equal(normalizeRequestIdCalls, 1);
+assert.equal(ensureRequestIdSeen, "leave-no-handid");
+assert.equal(storedRequestIdSeen, "leave-no-handid");
+assert.equal(postTransactionCalls, 1);
+assert.equal(seatDeleteCount, 1);
+assert.equal(payload.state.state.seats.some((seat) => seat?.userId === humanUserId), false);
+assert.equal(payload.state.state.handSeats.some((seat) => seat?.userId === humanUserId), true);
+assert.equal(payload.state.state.leftTableByUserId?.[humanUserId], true);
+assert.equal(payload.state.state.stacks?.[humanUserId], undefined);
 assert.equal(payload.state.state.deck, undefined);
 
-console.log("poker-leave mid-hand active phase without handId does not detach behavior test passed");
+console.log("poker-leave mid-hand active phase without handId instant-detach behavior test passed");
