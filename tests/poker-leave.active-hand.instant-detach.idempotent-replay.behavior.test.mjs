@@ -121,7 +121,7 @@ const second = await handler({
 
 assert.equal(first.statusCode, 200);
 assert.equal(second.statusCode, 200);
-assert.equal(first.body, second.body);
+assert.deepEqual(JSON.parse(second.body || "{}"), JSON.parse(first.body || "{}"));
 assert.equal(normalizeRequestIdCalls, 2);
 assert.deepEqual(ensureRequestIds, ["active-detach-1", "active-detach-1"]);
 assert.deepEqual(storedRequestIds, ["active-detach-1"]);
