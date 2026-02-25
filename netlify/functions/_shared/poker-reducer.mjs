@@ -118,6 +118,20 @@ const sanitizeSitOutByUserId = (value, seats) => sanitizeBoolMapBySeats(value, s
 const sanitizeLeftTableByUserId = (value, seats) => sanitizeBoolMapBySeats(value, seats);
 const sanitizePendingAutoSitOutByUserId = (value, seats) => sanitizeBoolMapBySeats(value, seats);
 
+
+const mergeSeatUniverse = (...seatLists) => {
+  const byUserId = new Map();
+  for (const list of seatLists) {
+    for (const seat of orderSeats(list)) {
+      if (!seat?.userId) continue;
+      if (!byUserId.has(seat.userId)) {
+        byUserId.set(seat.userId, seat);
+      }
+    }
+  }
+  return orderSeats([...byUserId.values()]);
+};
+
 const computeEligibleUserIds = ({ orderedSeats, stacks, sitOutByUserId, leftTableByUserId }) =>
   orderedSeats
     .filter((seat) => seat?.userId)
@@ -687,24 +701,37 @@ const applyLeaveTable = (state, { userId, requestId } = {}) => {
   if (typeof userId !== "string" || !userId.trim()) {
     throw new Error("invalid_player");
   }
-  assertPlayer(state, userId);
   const safeSeats = Array.isArray(state.seats) ? state.seats : [];
-  const sitOutByUserId = sanitizeSitOutByUserId(state.sitOutByUserId, safeSeats);
-  const leftTableByUserId = sanitizeLeftTableByUserId(state.leftTableByUserId, safeSeats);
-  const pendingAutoSitOutByUserId = sanitizePendingAutoSitOutByUserId(state.pendingAutoSitOutByUserId, safeSeats);
+  const seatsForHand = getSeatsForHand(state);
+  const sanitizeSeats = mergeSeatUniverse(seatsForHand, safeSeats);
+  const userInHandSeats = seatsForHand.some((seat) => seat?.userId === userId);
+  const userInTableSeats = safeSeats.some((seat) => seat?.userId === userId);
+  const stackMap = copyMap(state.stacks);
+  const hasStackEntry = Object.prototype.hasOwnProperty.call(stackMap, userId);
+  const alreadyLeft = !!state.leftTableByUserId?.[userId];
+  if (!userInHandSeats && !userInTableSeats && !alreadyLeft) {
+    throw new Error("invalid_player");
+  }
+  if (alreadyLeft && !userInHandSeats && !userInTableSeats && !hasStackEntry) {
+    return { state, events: [] };
+  }
+  const sitOutByUserId = sanitizeSitOutByUserId(state.sitOutByUserId, sanitizeSeats);
+  const leftTableByUserId = sanitizeLeftTableByUserId(state.leftTableByUserId, sanitizeSeats);
+  const pendingAutoSitOutByUserId = sanitizePendingAutoSitOutByUserId(state.pendingAutoSitOutByUserId, sanitizeSeats);
   const missedTurnsByUserId =
     state.missedTurnsByUserId && typeof state.missedTurnsByUserId === "object" && !Array.isArray(state.missedTurnsByUserId)
       ? { ...state.missedTurnsByUserId }
       : {};
   const next = {
     ...state,
-    stacks: copyMap(state.stacks),
+    seats: safeSeats.filter((seat) => seat?.userId !== userId),
+    stacks: stackMap,
     toCallByUserId: copyMap(state.toCallByUserId),
     betThisRoundByUserId: copyMap(state.betThisRoundByUserId),
     actedThisRoundByUserId: copyMap(state.actedThisRoundByUserId),
     foldedByUserId: copyMap(state.foldedByUserId),
-    allInByUserId: copyMap(state.allInByUserId || buildDefaultMap(safeSeats, false)),
-    contributionsByUserId: copyMap(state.contributionsByUserId || buildDefaultMap(safeSeats, 0)),
+    allInByUserId: copyMap(state.allInByUserId || buildDefaultMap(sanitizeSeats, false)),
+    contributionsByUserId: copyMap(state.contributionsByUserId || buildDefaultMap(sanitizeSeats, 0)),
     community: Array.isArray(state.community) ? state.community.slice() : [],
     deck: Array.isArray(state.deck) ? state.deck.slice() : [],
     missedTurnsByUserId,
@@ -719,6 +746,7 @@ const applyLeaveTable = (state, { userId, requestId } = {}) => {
     !next.pendingAutoSitOutByUserId?.[userId];
 
   next.leftTableByUserId[userId] = true;
+  delete next.stacks[userId];
   next.sitOutByUserId[userId] = false;
   if (wasParticipatingInHand) {
     next.foldedByUserId[userId] = true;

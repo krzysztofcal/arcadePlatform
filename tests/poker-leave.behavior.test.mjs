@@ -461,8 +461,8 @@ const run = async () => {
   assert.equal(activeResponse.statusCode, 200);
   const activeBody = JSON.parse(activeResponse.body);
   assert.equal(activeBody.ok, true);
-  assert.equal(activeBody.status, "leave_queued");
-  assert.equal(activeBody.cashedOut, 0);
+  assert.equal(activeBody.status, undefined);
+  assert.equal(activeBody.cashedOut, 120);
   const activeStateUpdateIndex = activeQueries.findIndex((q) =>
     q.query.toLowerCase().includes("update public.poker_state set version = version + 1")
   );
@@ -478,7 +478,7 @@ const run = async () => {
   const activeBumps = activeQueries.filter((q) =>
     q.query.toLowerCase().includes("update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1")
   ).length;
-  assert.equal(activeBumps, 1, "active-hand queued leave should bump table activity once");
+  assert.equal(activeBumps, 1, "active-hand instant leave should bump table activity once");
 
   const activeReqQueries = [];
   const activeReqStore = new Map();
