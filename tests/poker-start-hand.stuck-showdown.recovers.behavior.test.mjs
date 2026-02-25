@@ -149,7 +149,7 @@ const run = async () => {
 
   const payload = JSON.parse(response.body || "{}");
   if (response.statusCode === 409) {
-    assert.notEqual(payload.error, "already_in_hand", "recovery conflict must not surface as already_in_hand");
+    assert.equal(payload.error, "state_conflict", "recovery conflict must be retryable state_conflict");
     return;
   }
 
@@ -164,6 +164,15 @@ const run = async () => {
     writtenStates.every((state) => !(state?.phase === "SHOWDOWN" && state?.showdown == null)),
     "recovery writes must not persist stuck showdown state"
   );
+  const initWrite = writtenStates.find((state) => state?.phase === "INIT");
+  if (initWrite) {
+    for (const userId of [userA, userB]) {
+      assert.ok(Object.prototype.hasOwnProperty.call(initWrite.toCallByUserId || {}, userId));
+      assert.ok(Object.prototype.hasOwnProperty.call(initWrite.betThisRoundByUserId || {}, userId));
+      assert.ok(Object.prototype.hasOwnProperty.call(initWrite.actedThisRoundByUserId || {}, userId));
+      assert.ok(Object.prototype.hasOwnProperty.call(initWrite.foldedByUserId || {}, userId));
+    }
+  }
 };
 
 run().then(() => console.log("poker-start-hand stuck-showdown recovery behavior test passed")).catch((error) => {

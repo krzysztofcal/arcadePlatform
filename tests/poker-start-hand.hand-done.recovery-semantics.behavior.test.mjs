@@ -142,7 +142,7 @@ const run = async () => {
 
   const payload = JSON.parse(response.body || "{}");
   if (response.statusCode === 409) {
-    assert.notEqual(payload.error, "already_in_hand", "HAND_DONE recovery conflict must not surface as already_in_hand");
+    assert.equal(payload.error, "state_conflict", "HAND_DONE retries should surface retryable state_conflict");
     return;
   }
 

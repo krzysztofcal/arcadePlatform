@@ -94,6 +94,100 @@ const normalizeStateRow = (raw) => {
 
 const TERMINAL_OR_RECOVERABLE_PHASES = new Set(["SHOWDOWN", "SETTLED"]);
 
+const toInt = (value, fallback = 0) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  const rounded = Math.trunc(parsed);
+  return rounded >= 0 ? rounded : fallback;
+};
+
+const normalizeBooleanUserMap = (value, userIds, fallback = false) => {
+  const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  return userIds.reduce((acc, userId) => {
+    acc[userId] = source[userId] === true ? true : fallback;
+    return acc;
+  }, {});
+};
+
+const normalizeNumberUserMap = (value, userIds, fallback = 0) => {
+  const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  return userIds.reduce((acc, userId) => {
+    acc[userId] = toInt(source[userId], fallback);
+    return acc;
+  }, {});
+};
+
+const normalizeInitStateForRecovery = (state, activeSeatRows) => {
+  const {
+    deck: _ignoredDeck,
+    holeCardsByUserId: _ignoredHoleCards,
+    handSettlement: _ignoredHandSettlement,
+    ...stateBase
+  } = state && typeof state === "object" && !Array.isArray(state) ? state : {};
+  const seats = (Array.isArray(activeSeatRows) ? activeSeatRows : [])
+    .filter(
+      (seat) =>
+        Number.isInteger(seat?.seat_no) &&
+        typeof seat?.user_id === "string" &&
+        seat.user_id.trim()
+    )
+    .slice()
+    .sort((a, b) => Number(a.seat_no) - Number(b.seat_no))
+    .map((seat) => ({ userId: seat.user_id, seatNo: seat.seat_no, stack: toInt(seat?.stack, 0) }));
+  const userIds = seats.map((seat) => seat.userId);
+  if (userIds.length < 2) return null;
+
+  const stateStacks = state?.stacks && typeof state.stacks === "object" && !Array.isArray(state.stacks) ? state.stacks : {};
+  const stacks = userIds.reduce((acc, userId, idx) => {
+    const fromState = stateStacks[userId];
+    if (Number.isInteger(fromState) && fromState >= 0) {
+      acc[userId] = fromState;
+      return acc;
+    }
+    const fallbackSeat = seats[idx];
+    acc[userId] = toInt(fallbackSeat?.stack, 0);
+    return acc;
+  }, {});
+  const firstSeatNo = Number.isInteger(seats[0]?.seatNo) ? seats[0].seatNo : 0;
+  const dealerSeatNo = Number.isInteger(state?.dealerSeatNo) && seats.some((seat) => seat.seatNo === state.dealerSeatNo)
+    ? state.dealerSeatNo
+    : firstSeatNo;
+  const turnUserId = typeof state?.turnUserId === "string" && userIds.includes(state.turnUserId) ? state.turnUserId : seats[0]?.userId || null;
+
+  return {
+    ...stateBase,
+    phase: "INIT",
+    seats: seats.map((seat) => ({ userId: seat.userId, seatNo: seat.seatNo })),
+    handSeats: null,
+    handId: "",
+    handSeed: "",
+    community: [],
+    communityDealt: 0,
+    pot: 0,
+    dealerSeatNo,
+    turnUserId,
+    stacks,
+    toCallByUserId: normalizeNumberUserMap(state?.toCallByUserId, userIds, 0),
+    betThisRoundByUserId: normalizeNumberUserMap(state?.betThisRoundByUserId, userIds, 0),
+    actedThisRoundByUserId: normalizeBooleanUserMap(state?.actedThisRoundByUserId, userIds, false),
+    foldedByUserId: normalizeBooleanUserMap(state?.foldedByUserId, userIds, false),
+    allInByUserId: normalizeBooleanUserMap(state?.allInByUserId, userIds, false),
+    contributionsByUserId: normalizeNumberUserMap(state?.contributionsByUserId, userIds, 0),
+    lastActionRequestIdByUserId: {},
+    currentBet: 0,
+    lastRaiseSize: null,
+    lastAggressorUserId: null,
+    sidePots: null,
+    showdown: null,
+    missedTurnsByUserId: normalizeNumberUserMap(state?.missedTurnsByUserId, userIds, 0),
+    leftTableByUserId: normalizeBooleanUserMap(state?.leftTableByUserId, userIds, false),
+    sitOutByUserId: normalizeBooleanUserMap(state?.sitOutByUserId, userIds, false),
+    pendingAutoSitOutByUserId: normalizeBooleanUserMap(state?.pendingAutoSitOutByUserId, userIds, false),
+    turnStartedAt: null,
+    turnDeadlineAt: null,
+  };
+};
+
 const recoverTerminalStateIfNeeded = async ({ tx, tableId, state, expectedVersion, activeSeatRows }) => {
   const phase = typeof state?.phase === "string" ? state.phase : "";
   const stuckShowdown = phase === "SHOWDOWN" && !state?.showdown;
@@ -178,9 +272,18 @@ const recoverTerminalStateIfNeeded = async ({ tx, tableId, state, expectedVersio
     loopCount += 1;
   }
 
+  if (nextState?.phase !== "INIT") {
+    const normalizedInit = normalizeInitStateForRecovery(nextState, activeSeatRows);
+    if (!normalizedInit) {
+      throw makeError(409, "state_conflict");
+    }
+    nextState = normalizedInit;
+    didMutate = true;
+  }
+
   if (!didMutate) return { state, expectedVersion, recovered: false };
   if (!isStateStorageValid(nextState, { requireNoDeck: true, requireHandSeed: false, requireCommunityDealt: false })) {
-    throw makeError(409, "state_invalid");
+    throw makeError(409, "state_conflict");
   }
 
   const recovered = await updatePokerStateOptimistic(tx, {
@@ -190,7 +293,7 @@ const recoverTerminalStateIfNeeded = async ({ tx, tableId, state, expectedVersio
   });
   if (!recovered.ok) {
     if (recovered.reason === "conflict") throw makeError(409, "state_conflict");
-    throw makeError(409, "state_invalid");
+    throw makeError(409, "state_conflict");
   }
   nextVersion = recovered.newVersion;
   return { state: nextState, expectedVersion: nextVersion, recovered: true };
