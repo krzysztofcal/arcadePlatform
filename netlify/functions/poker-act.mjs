@@ -460,17 +460,8 @@ export async function handler(event) {
       });
       if (requestInfo.status === "stored") {
         const stored = requestInfo.result;
-        if (stored?.replayed) return stored;
-        if (stored?.ok) {
-          const replayed = { ...stored, replayed: true };
-          await storePokerRequestResult(tx, {
-            tableId,
-            userId: auth.userId,
-            requestId,
-            kind: "ACT",
-            result: replayed,
-          });
-          return replayed;
+        if (stored && typeof stored === "object" && !Array.isArray(stored)) {
+          return { ...stored, replayed: true };
         }
         return stored;
       }
