@@ -582,9 +582,9 @@ export async function handler(event) {
         const hasActiveHandId = typeof leaveState.handId === "string" && leaveState.handId.trim() !== "";
         const isActiveHandPhase = ["PREFLOP", "FLOP", "TURN", "RIVER", "SHOWDOWN"].includes(leavePhase);
         const hasAnyActiveHandSignal = hasActiveHandId || isActiveHandPhase;
-        const shouldDetachSeatAndStack = !hasAnyActiveHandSignal;
+        const shouldDetachSeatAndStack = true;
 
-        if (shouldDetachSeatAndStack && cashOutAmount > 0) {
+        if (cashOutAmount > 0) {
           const escrowSystemKey = `POKER_TABLE:${tableId}`;
           const idempotencyKey = normalizedRequestId
             ? `poker:leave:${tableId}:${auth.userId}:${normalizedRequestId}`
@@ -631,9 +631,7 @@ export async function handler(event) {
         }
 
         const nextLeftTableByUserId = isPlainObject(leaveState.leftTableByUserId) ? { ...leaveState.leftTableByUserId } : {};
-        if (!shouldDetachSeatAndStack) {
-          nextLeftTableByUserId[auth.userId] = true;
-        }
+        nextLeftTableByUserId[auth.userId] = true;
 
         const updatedStateRaw = {
           ...leaveState,
@@ -666,7 +664,7 @@ export async function handler(event) {
 
         let latestState = updatedState;
         let latestVersion = updateResult.newVersion;
-        if (!shouldDetachSeatAndStack) {
+        if (hasAnyActiveHandSignal) {
           const actionHandId = typeof leaveState.handId === "string" && leaveState.handId.trim() ? leaveState.handId.trim() : null;
           let leaveActionRows = [];
           if (normalizedRequestId) {
@@ -790,7 +788,6 @@ export async function handler(event) {
           tableId,
           cashedOut: shouldDetachSeatAndStack ? cashOutAmount : 0,
           seatNo: seatNo ?? null,
-          ...(shouldDetachSeatAndStack ? {} : { status: "leave_queued" }),
           ...(includeState
             ? {
                 state: {

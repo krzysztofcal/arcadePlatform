@@ -65,6 +65,9 @@ run("node", ["tests/poker-handSeats-routing.behavior.test.mjs"], "poker-handseat
 run("node", ["tests/poker-handSeats-seats-undefined.behavior.test.mjs"], "poker-handseats-seats-undefined-behavior");
 run("node", ["tests/poker-handSeats-reset.behavior.test.mjs"], "poker-handseats-reset-behavior");
 run("node", ["tests/poker-leave.test.mjs"], "poker-leave");
+run("node", ["tests/poker-leave.instant-detach.midhand.behavior.test.mjs"], "poker-leave-instant-detach-midhand-behavior");
+run("node", ["tests/poker-join.after-midhand-leave.seat-available.behavior.test.mjs"], "poker-join-after-midhand-leave-seat-available-behavior");
+run("node", ["tests/poker-leave.cashout-only-uncommitted.behavior.test.mjs"], "poker-leave-cashout-only-uncommitted-behavior");
 run("node", ["tests/poker-join.test.mjs"], "poker-join");
 run("node", ["tests/poker-sweep.test.mjs"], "poker-sweep");
 run("node", ["tests/poker-invariants.test.mjs"], "poker-invariants");

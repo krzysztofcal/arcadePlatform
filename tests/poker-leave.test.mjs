@@ -44,8 +44,8 @@ assert.ok(
   "leave should only log missing stack when raw stack is null"
 );
 assert.ok(
-  /if \(shouldDetachSeatAndStack && cashOutAmount > 0\) \{[\s\S]*?TABLE_CASH_OUT/.test(leaveSrc),
-  "leave should cash out only when positive amount exists and detach is safe"
+  /if \(cashOutAmount > 0\) \{[\s\S]*?TABLE_CASH_OUT/.test(leaveSrc),
+  "leave should cash out positive uncommitted amount immediately"
 );
 assert.ok(
   /poker:leave:\$\{tableId\}:\$\{auth\.userId\}:\$\{normalizedRequestId\}/.test(leaveSrc),
@@ -57,10 +57,10 @@ assert.ok(!/cashoutBotSeatIfNeeded/.test(leaveSrc), "leave should not use bot ca
 assert.ok(!/ensureBotSeatInactiveForCashout/.test(leaveSrc), "leave should not use bot inactive helper");
 assert.ok(!/getBotConfig/.test(leaveSrc), "leave should not read bot config");
 assert.ok(
-  /const shouldDetachSeatAndStack = !hasAnyActiveHandSignal;/.test(leaveSrc),
-  "leave detach-vs-queued actor semantics should be based on active-hand safety signals"
+  /const shouldDetachSeatAndStack = true;/.test(leaveSrc),
+  "leave should always detach seat/stack immediately"
 );
 assert.ok(
-  /if \(!shouldDetachSeatAndStack\) \{\s*nextLeftTableByUserId\[auth\.userId\] = true;\s*\}/.test(leaveSrc),
-  "leave_queued actor left-flag semantics should not depend on bot classification"
+  /nextLeftTableByUserId\[auth\.userId\] = true;/.test(leaveSrc),
+  "leave should always preserve left-table signal for in-hand safety"
 );

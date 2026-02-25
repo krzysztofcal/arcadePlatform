@@ -687,8 +687,19 @@ const applyLeaveTable = (state, { userId, requestId } = {}) => {
   if (typeof userId !== "string" || !userId.trim()) {
     throw new Error("invalid_player");
   }
-  assertPlayer(state, userId);
   const safeSeats = Array.isArray(state.seats) ? state.seats : [];
+  const seatsForHand = getSeatsForHand(state);
+  const userInHandSeats = seatsForHand.some((seat) => seat?.userId === userId);
+  const userInTableSeats = safeSeats.some((seat) => seat?.userId === userId);
+  const stackMap = copyMap(state.stacks);
+  const hasStackEntry = Object.prototype.hasOwnProperty.call(stackMap, userId);
+  const alreadyLeft = !!state.leftTableByUserId?.[userId];
+  if (!userInHandSeats && !userInTableSeats && !alreadyLeft) {
+    throw new Error("invalid_player");
+  }
+  if (alreadyLeft && !userInTableSeats && !hasStackEntry) {
+    return { state, events: [] };
+  }
   const sitOutByUserId = sanitizeSitOutByUserId(state.sitOutByUserId, safeSeats);
   const leftTableByUserId = sanitizeLeftTableByUserId(state.leftTableByUserId, safeSeats);
   const pendingAutoSitOutByUserId = sanitizePendingAutoSitOutByUserId(state.pendingAutoSitOutByUserId, safeSeats);
@@ -698,7 +709,8 @@ const applyLeaveTable = (state, { userId, requestId } = {}) => {
       : {};
   const next = {
     ...state,
-    stacks: copyMap(state.stacks),
+    seats: safeSeats.filter((seat) => seat?.userId !== userId),
+    stacks: stackMap,
     toCallByUserId: copyMap(state.toCallByUserId),
     betThisRoundByUserId: copyMap(state.betThisRoundByUserId),
     actedThisRoundByUserId: copyMap(state.actedThisRoundByUserId),
@@ -719,6 +731,7 @@ const applyLeaveTable = (state, { userId, requestId } = {}) => {
     !next.pendingAutoSitOutByUserId?.[userId];
 
   next.leftTableByUserId[userId] = true;
+  delete next.stacks[userId];
   next.sitOutByUserId[userId] = false;
   if (wasParticipatingInHand) {
     next.foldedByUserId[userId] = true;
