@@ -92,16 +92,13 @@ const normalizeStateRow = (raw) => {
   return null;
 };
 
-const TERMINAL_OR_RECOVERABLE_PHASES = new Set(["SHOWDOWN", "HAND_DONE", "SETTLED"]);
+const TERMINAL_OR_RECOVERABLE_PHASES = new Set(["SHOWDOWN", "SETTLED"]);
 
 const recoverTerminalStateIfNeeded = async ({ tx, tableId, state, expectedVersion, activeSeatRows }) => {
   const phase = typeof state?.phase === "string" ? state.phase : "";
   const stuckShowdown = phase === "SHOWDOWN" && !state?.showdown;
   const terminalPhase = TERMINAL_OR_RECOVERABLE_PHASES.has(phase);
   if (!stuckShowdown && !terminalPhase) {
-    return { state, expectedVersion, recovered: false };
-  }
-  if (phase === "HAND_DONE") {
     return { state, expectedVersion, recovered: false };
   }
 

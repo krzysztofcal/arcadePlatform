@@ -147,11 +147,12 @@ const run = async () => {
   }
 
   assert.equal(response.statusCode, 200);
+  assert.equal(writtenStates.length, 0, "HAND_DONE should not trigger recovery write before start-hand");
   assert.equal(payload.state?.state?.phase, "PREFLOP");
   assert.equal(payload.state?.state?.handId, "hand-new-2");
 };
 
-run().then(() => console.log("poker-start-hand HAND_DONE recovery behavior test passed")).catch((error) => {
+run().then(() => console.log("poker-start-hand HAND_DONE recovery semantics behavior test passed")).catch((error) => {
   console.error(error);
   process.exit(1);
 });
