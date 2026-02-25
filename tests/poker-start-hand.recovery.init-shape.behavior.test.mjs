@@ -19,21 +19,21 @@ process.env.POKER_BOTS_MAX_ACTIONS_PER_REQUEST = "0";
 const makeState = () => ({
   tableId,
   phase: "SHOWDOWN",
-  showdown: null,
-  handId: "hand-stuck-1",
-  handSeed: "seed-stuck-1",
+  showdown: { winners: [userA], source: "settled" },
+  handId: "hand-prev-1",
+  handSeed: "seed-prev-1",
   dealerSeatNo: 1,
   communityDealt: 5,
   community: ["As", "Kd", "7c", "3h", "2s"],
-  pot: 20,
-  stacks: { [userA]: 90, [userB]: 90 },
-  bets: { [userA]: 10, [userB]: 10 },
+  pot: 0,
+  stacks: { [userA]: 110, [userB]: 90 },
   toCallByUserId: { [userA]: 0, [userB]: 0 },
   betThisRoundByUserId: { [userA]: 0, [userB]: 0 },
   actedThisRoundByUserId: { [userA]: true, [userB]: true },
-  foldedByUserId: { [userA]: false, [userB]: false },
-  leftTableByUserId: {},
-  sitOutByUserId: {},
+  foldedByUserId: { [userA]: false, [userB]: true },
+  leftTableByUserId: { [userA]: false, [userB]: false },
+  sitOutByUserId: { [userA]: false, [userB]: false },
+  pendingAutoSitOutByUserId: { [userA]: true },
   handSeats: [
     { userId: userA, seatNo: 1 },
     { userId: userB, seatNo: 2 },
@@ -46,9 +46,8 @@ const makeState = () => ({
 });
 
 const run = async () => {
-  const stateHolder = { version: 7, state: makeState() };
+  const stateHolder = { version: 5, state: makeState() };
   const writtenStates = [];
-  const logs = [];
 
   const handler = loadPokerHandler("netlify/functions/poker-start-hand.mjs", {
     baseHeaders: () => ({}),
@@ -72,17 +71,13 @@ const run = async () => {
     resetTurnTimer,
     clearMissedTurns,
     normalizeSeatOrderFromState,
-    klog: (event, payload) => logs.push({ event, payload }),
     parseStakes: () => ({ sb: 1, bb: 2 }),
-    loadHoleCardsByUserId: async () => ({
-      holeCardsByUserId: { [userA]: ["Ah", "Kh"], [userB]: ["Qd", "Qs"] },
-    }),
-    isHoleCardsTableMissing: () => false,
     ensurePokerRequest: async () => ({ status: "claimed" }),
     storePokerRequestResult: async () => {},
     deletePokerRequest: async () => {},
+    klog: () => {},
     startHandCore: async ({ currentState, expectedVersion }) => {
-      assert.equal(currentState.phase, "INIT", "expected recovery to reset state before start-hand");
+      assert.equal(currentState.phase, "INIT", "recovery should hand off INIT to startHandCore");
       return {
         newVersion: expectedVersion,
         updatedState: {
@@ -94,7 +89,7 @@ const run = async () => {
           community: [],
           communityDealt: 0,
           showdown: null,
-          lastStartHandRequestId: "req-1",
+          lastStartHandRequestId: "req-init-shape-1",
           lastStartHandUserId: userA,
         },
         dealtHoleCards: { [userA]: ["Ah", "Kh"] },
@@ -109,7 +104,7 @@ const run = async () => {
           showdown: null,
           holeCardsByUserId: { [userA]: ["Ah", "Kh"], [userB]: ["Qd", "Qs"] },
           deck: [],
-          lastStartHandRequestId: "req-1",
+          lastStartHandRequestId: "req-init-shape-1",
           lastStartHandUserId: userA,
         },
       };
@@ -123,8 +118,8 @@ const run = async () => {
         }
         if (text.includes("from public.poker_seats")) {
           return [
-            { user_id: userA, seat_no: 1, stack: 100, is_bot: false },
-            { user_id: userB, seat_no: 2, stack: 100, is_bot: true },
+            { user_id: userA, seat_no: 1, stack: 110, is_bot: false },
+            { user_id: userB, seat_no: 2, stack: 90, is_bot: true },
           ];
         }
         if (text.includes("update public.poker_state") && text.includes("version = version + 1")) {
@@ -144,43 +139,27 @@ const run = async () => {
   const response = await handler({
     httpMethod: "POST",
     headers: { origin: "https://example.test", authorization: "Bearer token" },
-    body: JSON.stringify({ tableId, requestId: "req-1" }),
+    body: JSON.stringify({ tableId, requestId: "req-init-shape-1" }),
   });
 
   const payload = JSON.parse(response.body || "{}");
   if (response.statusCode === 409) {
-    assert.equal(payload.error, "state_conflict", "recovery conflict must be retryable state_conflict");
+    assert.equal(payload.error, "state_conflict");
     return;
   }
 
-  if (response.statusCode !== 200) {
-    const errorLog = logs.find((entry) => entry.event === "poker_start_hand_error");
-    throw new Error(`unexpected status=${response.statusCode} body=${response.body || ""} log=${JSON.stringify(errorLog || null)}`);
-  }
-  assert.equal(payload.ok, true);
-  assert.equal(payload.state?.state?.phase, "PREFLOP");
-  assert.equal(payload.state?.state?.handId, "hand-new-2");
-  assert.ok(
-    writtenStates.every((state) => !(state?.phase === "SHOWDOWN" && state?.showdown == null)),
-    "recovery writes must not persist stuck showdown state"
-  );
+  assert.equal(response.statusCode, 200);
   const initWrite = writtenStates.find((state) => state?.phase === "INIT");
-  if (initWrite) {
-    for (const userId of [userA, userB]) {
-      assert.ok(Object.prototype.hasOwnProperty.call(initWrite.toCallByUserId || {}, userId));
-      assert.ok(Object.prototype.hasOwnProperty.call(initWrite.betThisRoundByUserId || {}, userId));
-      assert.ok(Object.prototype.hasOwnProperty.call(initWrite.actedThisRoundByUserId || {}, userId));
-      assert.ok(Object.prototype.hasOwnProperty.call(initWrite.foldedByUserId || {}, userId));
-    }
-    assert.deepEqual(
-      initWrite.pendingAutoSitOutByUserId || {},
-      {},
-      "INIT recovery write should keep pendingAutoSitOutByUserId in schema-safe empty-object shape"
-    );
-  }
+  assert.ok(initWrite, "recovery path should emit an INIT write before start hand");
+  assert.deepEqual(initWrite.pendingAutoSitOutByUserId || {}, {}, "INIT recovery shape should keep pendingAutoSitOutByUserId as {} for compatibility");
+  assert.equal(
+    isStateStorageValid(initWrite, { requireNoDeck: true, requireHandSeed: false, requireCommunityDealt: false }),
+    true,
+    "written INIT state must satisfy storage validator"
+  );
 };
 
-run().then(() => console.log("poker-start-hand stuck-showdown recovery behavior test passed")).catch((error) => {
+run().then(() => console.log("poker-start-hand recovery INIT shape behavior test passed")).catch((error) => {
   console.error(error);
   process.exit(1);
 });

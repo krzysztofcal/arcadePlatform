@@ -182,7 +182,7 @@ const normalizeInitStateForRecovery = (state, activeSeatRows) => {
     missedTurnsByUserId: normalizeNumberUserMap(state?.missedTurnsByUserId, userIds, 0),
     leftTableByUserId: normalizeBooleanUserMap(state?.leftTableByUserId, userIds, false),
     sitOutByUserId: normalizeBooleanUserMap(state?.sitOutByUserId, userIds, false),
-    pendingAutoSitOutByUserId: normalizeBooleanUserMap(state?.pendingAutoSitOutByUserId, userIds, false),
+    pendingAutoSitOutByUserId: {},
     turnStartedAt: null,
     turnDeadlineAt: null,
   };

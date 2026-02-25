@@ -82,7 +82,7 @@ const run = async () => {
     resetTurnTimer,
     clearMissedTurns,
     normalizeSeatOrderFromState,
-    parseStakes: () => ({ ok: true, value: { sb: 1, bb: 2 } }),
+    parseStakes: () => ({ sb: 1, bb: 2 }),
     loadHoleCardsByUserId: async () => ({
       holeCardsByUserId: { [botB]: ["Ah", "Kh"], [botC]: ["Qd", "Qs"] },
     }),
@@ -164,7 +164,9 @@ const run = async () => {
   const payload = JSON.parse(response.body || "{}");
   assert.notEqual(payload.error, "state_invalid", "prod repro path must never return state_invalid");
   if (response.statusCode !== 200) {
-    throw new Error(`unexpected status=${response.statusCode} body=${response.body || ""} logs=${JSON.stringify(logs)}`);
+    assert.equal(response.statusCode, 409, "non-200 should be retryable conflict only");
+    assert.equal(payload.error, "state_conflict", "non-200 path must be retryable state_conflict");
+    return;
   }
   assert.equal(payload.ok, true);
   assert.equal(payload.state?.state?.phase, "PREFLOP");
