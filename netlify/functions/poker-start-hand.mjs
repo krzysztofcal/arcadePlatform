@@ -92,13 +92,16 @@ const normalizeStateRow = (raw) => {
   return null;
 };
 
-const TERMINAL_OR_RECOVERABLE_PHASES = new Set(["SHOWDOWN", "SETTLED"]);
+const TERMINAL_OR_RECOVERABLE_PHASES = new Set(["SHOWDOWN", "HAND_DONE", "SETTLED"]);
 
 const recoverTerminalStateIfNeeded = async ({ tx, tableId, state, expectedVersion, activeSeatRows }) => {
   const phase = typeof state?.phase === "string" ? state.phase : "";
   const stuckShowdown = phase === "SHOWDOWN" && !state?.showdown;
   const terminalPhase = TERMINAL_OR_RECOVERABLE_PHASES.has(phase);
   if (!stuckShowdown && !terminalPhase) {
+    return { state, expectedVersion, recovered: false };
+  }
+  if (phase === "HAND_DONE") {
     return { state, expectedVersion, recovered: false };
   }
 
@@ -108,56 +111,55 @@ const recoverTerminalStateIfNeeded = async ({ tx, tableId, state, expectedVersio
 
   if (stuckShowdown) {
     try {
-      const normalizedHandSeats = Array.isArray(nextState?.handSeats)
-      ? nextState.handSeats
-      : [];
+      const normalizedHandSeats = Array.isArray(nextState?.handSeats) ? nextState.handSeats : [];
       let seatUserIdsInOrder = normalizeSeatOrderFromState(normalizedHandSeats);
       if (seatUserIdsInOrder.length === 0) {
-      const fallbackSeats = Array.isArray(activeSeatRows) ? activeSeatRows : [];
-      const sorted = fallbackSeats.slice().sort((a, b) => Number(a?.seat_no ?? 0) - Number(b?.seat_no ?? 0));
-      seatUserIdsInOrder = sorted
-        .map((seat) => (typeof seat?.user_id === "string" ? seat.user_id.trim() : ""))
-        .filter((userId) => !!userId);
-    }
-        if (seatUserIdsInOrder.length === 0) {
+        const fallbackSeats = Array.isArray(activeSeatRows) ? activeSeatRows : [];
+        const sorted = fallbackSeats.slice().sort((a, b) => Number(a?.seat_no ?? 0) - Number(b?.seat_no ?? 0));
+        seatUserIdsInOrder = sorted
+          .map((seat) => (typeof seat?.user_id === "string" ? seat.user_id.trim() : ""))
+          .filter((userId) => !!userId);
+      }
+      if (seatUserIdsInOrder.length === 0) {
         throw makeError(409, "state_conflict");
       }
 
       const eligibleUserIds = seatUserIdsInOrder.filter(
-      (userId) =>
-        typeof userId === "string" &&
-        !nextState?.foldedByUserId?.[userId] &&
-        !nextState?.leftTableByUserId?.[userId] &&
-        !nextState?.sitOutByUserId?.[userId]
-    );
+        (userId) =>
+          typeof userId === "string" &&
+          !nextState?.foldedByUserId?.[userId] &&
+          !nextState?.leftTableByUserId?.[userId] &&
+          !nextState?.sitOutByUserId?.[userId]
+      );
+
       let holeCardsByUserId = null;
       if (eligibleUserIds.length > 1) {
-      let loaded;
-      try {
-        loaded = await loadHoleCardsByUserId(tx, {
-          tableId,
-          handId: nextState.handId,
-          activeUserIds: seatUserIdsInOrder,
-          requiredUserIds: eligibleUserIds,
-          mode: "strict",
-        });
-      } catch (error) {
-        if (isHoleCardsTableMissing(error)) {
-          throw makeError(409, "state_conflict");
+        let loaded;
+        try {
+          loaded = await loadHoleCardsByUserId(tx, {
+            tableId,
+            handId: nextState.handId,
+            activeUserIds: seatUserIdsInOrder,
+            requiredUserIds: eligibleUserIds,
+            mode: "strict",
+          });
+        } catch (error) {
+          if (isHoleCardsTableMissing(error)) {
+            throw makeError(409, "state_conflict");
+          }
+          throw error;
         }
-        throw error;
+        holeCardsByUserId = loaded?.holeCardsByUserId || null;
       }
-      holeCardsByUserId = loaded?.holeCardsByUserId || null;
-    }
 
       const materialized = materializeShowdownAndPayout({
-      state: nextState,
-      seatUserIdsInOrder,
-      holeCardsByUserId,
-      computeShowdown,
-      awardPotsAtShowdown,
-      klog,
-    });
+        state: nextState,
+        seatUserIdsInOrder,
+        holeCardsByUserId,
+        computeShowdown,
+        awardPotsAtShowdown,
+        klog,
+      });
       nextState = materialized.nextState;
       didMutate = true;
     } catch (error) {
