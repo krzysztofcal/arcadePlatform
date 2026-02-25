@@ -466,29 +466,16 @@ export async function handler(event) {
         return stored;
       }
       if (requestInfo.status === "pending") {
-        const stateRows = await tx.unsafe("select version, state from public.poker_state where table_id = $1 limit 1;", [
-          tableId,
-        ]);
-        const stateRow = stateRows?.[0] || null;
-        if (!stateRow) {
-          throw makeError(409, "state_invalid");
-        }
-        const expectedVersion = Number(stateRow.version);
-        if (!Number.isInteger(expectedVersion) || expectedVersion < 0) {
-          throw makeError(409, "state_invalid");
-        }
-        let currentState = normalizeJsonState(stateRow.state);
-        currentState = sanitizePerHandArtifacts(currentState);
-        if (!hasRequiredState(currentState)) {
-          throw makeError(409, "state_invalid");
-        }
-        if (currentState?.phase === "INIT") {
-          throw makeError(409, "hand_not_started");
-        }
-        if (actionParsed.value.type !== "LEAVE_TABLE" && (!isActionPhase(currentState.phase) || !currentState.turnUserId)) {
-          throw makeError(409, "state_invalid");
-        }
         return { pending: true, requestId };
+      }
+      if (requestInfo.status !== "created" && requestInfo.status !== "claimed" && requestInfo.status !== "none") {
+        klog("poker_act_rejected", {
+          tableId,
+          userId: auth.userId,
+          reason: "invalid_request_status",
+          requestStatus: requestInfo.status || null,
+        });
+        throw makeError(409, "state_invalid");
       }
 
       try {
