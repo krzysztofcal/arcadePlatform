@@ -99,6 +99,7 @@ run("node", ["tests/poker-act.left-player.invalid-player.behavior.test.mjs"], "p
 run("node", ["tests/poker-act.left-player.leave-table.idempotent-noop.behavior.test.mjs"], "poker-act-left-player-leave-table-idempotent-noop-behavior");
 run("node", ["tests/poker-act.left-player.leave-table.noop-stores-once.behavior.test.mjs"], "poker-act-left-player-leave-table-noop-stores-once-behavior");
 run("node", ["tests/poker-act.idempotency.stored-replay-sets-replayed-true.behavior.test.mjs"], "poker-act-idempotency-stored-replay-sets-replayed-true-behavior");
+run("node", ["tests/poker-act.idempotency.stored-nonok-object.not-mutated.behavior.test.mjs"], "poker-act-idempotency-stored-nonok-object-not-mutated-behavior");
 run("node", ["tests/poker-act.idempotency.claimed-status.proceeds.behavior.test.mjs"], "poker-act-idempotency-claimed-status-proceeds-behavior");
 run("node", ["tests/poker-act.idempotency.pending-status.does-not-proceed.behavior.test.mjs"], "poker-act-idempotency-pending-status-does-not-proceed-behavior");
 run("node", ["tests/poker-act.idempotency.pending-status.no-state-read.behavior.test.mjs"], "poker-act-idempotency-pending-status-no-state-read-behavior");

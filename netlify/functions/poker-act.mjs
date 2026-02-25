@@ -460,7 +460,7 @@ export async function handler(event) {
       });
       if (requestInfo.status === "stored") {
         const stored = requestInfo.result;
-        if (stored && typeof stored === "object" && !Array.isArray(stored)) {
+        if (stored && typeof stored === "object" && !Array.isArray(stored) && stored.ok === true) {
           return { ...stored, replayed: true };
         }
         return stored;
