@@ -18,6 +18,10 @@ const stored = {
       { userId: humanUserId, seatNo: 1 },
       { userId: botUserId, seatNo: 2 },
     ],
+    handSeats: [
+      { userId: humanUserId, seatNo: 1 },
+      { userId: botUserId, seatNo: 2 },
+    ],
     stacks: { [humanUserId]: 100, [botUserId]: 100 },
     pot: 0,
     turnUserId: humanUserId,
@@ -49,18 +53,6 @@ const handler = loadPokerHandler("netlify/functions/poker-leave.mjs", {
   ensurePokerRequest: async () => ({ status: "proceed" }),
   storePokerRequestResult: async () => {},
   deletePokerRequest: async () => {},
-  applyLeaveTable: (state) => ({
-    state: {
-      ...state,
-      phase: "PREFLOP",
-      handId: "",
-      leftTableByUserId: { ...(state.leftTableByUserId || {}), [humanUserId]: true },
-      seats: state.seats,
-      stacks: state.stacks,
-      deck: state.deck,
-    },
-    events: [],
-  }),
   beginSql: async (fn) =>
     fn({
       unsafe: async (query, params) => {
@@ -76,6 +68,9 @@ const handler = loadPokerHandler("netlify/functions/poker-leave.mjs", {
         if (text.includes("delete from public.poker_seats")) {
           seatDeleteCount += 1;
           return [];
+        }
+        if (text.includes("select user_id, seat_no, is_bot from public.poker_seats") && text.includes("status = 'active'")) {
+          return [{ user_id: botUserId, seat_no: 2, is_bot: true }];
         }
         return [];
       },
@@ -93,9 +88,12 @@ const response = await handler({
 assert.equal(response.statusCode, 200);
 const payload = JSON.parse(response.body || "{}");
 assert.equal(payload.ok, true);
-assert.equal(seatDeleteCount, 0);
-assert.equal(payload.state.state.seats.some((seat) => seat?.userId === humanUserId), true);
-assert.equal(payload.state.state.stacks?.[humanUserId], 100);
+assert.equal(payload.cashedOut, 100);
+assert.equal(seatDeleteCount, 1);
+assert.equal(payload.state.state.seats.some((seat) => seat?.userId === humanUserId), false);
+assert.equal(payload.state.state.handSeats.some((seat) => seat?.userId === humanUserId), true);
+assert.equal(payload.state.state.leftTableByUserId?.[humanUserId], true);
+assert.equal(payload.state.state.stacks?.[humanUserId], undefined);
 assert.equal(payload.state.state.deck, undefined);
 
-console.log("poker-leave mid-hand active phase without handId does not detach behavior test passed");
+console.log("poker-leave mid-hand active phase without handId instant-detach behavior test passed");
