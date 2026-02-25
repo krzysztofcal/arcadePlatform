@@ -816,6 +816,18 @@ export async function handler(event) {
         holeCardsByUserId,
       };
 
+      if (privateState?.leftTableByUserId?.[auth.userId]) {
+        klog("poker_act_rejected", {
+          tableId,
+          userId: auth.userId,
+          reason: "player_left",
+          phase: privateState?.phase || currentState?.phase || null,
+          publicPhase: currentState?.phase || null,
+          actionType: actionParsed.value.type,
+        });
+        throw makeError(409, "player_left");
+      }
+
       const timeoutResult = maybeApplyTurnTimeout({ tableId, state: currentState, privateState, nowMs: Date.now() });
       if (timeoutResult.applied) {
         const updatedState = timeoutResult.state;
@@ -1094,18 +1106,6 @@ export async function handler(event) {
           result: resultPayload,
         });
         return resultPayload;
-      }
-
-      if (privateState?.leftTableByUserId?.[auth.userId] && actionParsed.value.type !== "LEAVE_TABLE") {
-        klog("poker_act_rejected", {
-          tableId,
-          userId: auth.userId,
-          reason: "player_left",
-          phase: privateState?.phase || currentState?.phase || null,
-          publicPhase: currentState?.phase || null,
-          actionType: actionParsed.value.type,
-        });
-        throw makeError(409, "player_left");
       }
 
       if (currentState?.sitOutByUserId?.[auth.userId] && actionParsed.value.type !== "LEAVE_TABLE") {

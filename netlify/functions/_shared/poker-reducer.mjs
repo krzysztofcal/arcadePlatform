@@ -248,6 +248,9 @@ const assertPlayer = (state, userId) => {
   if (!seats.some((seat) => seat.userId === userId)) {
     throw new Error("invalid_player");
   }
+  if (state.leftTableByUserId?.[userId]) {
+    throw new Error("invalid_player");
+  }
   if (state.foldedByUserId?.[userId]) {
     throw new Error("invalid_player");
   }
