@@ -73,6 +73,18 @@ const run = async () => {
   }
 
   {
+    const { seats, stacks } = makeBase();
+    const { state } = initHandState({ tableId: "t-left", seats, stacks, rng: makeRng(11) });
+    const frozen = { ...state, turnUserId: "user-1", leftTableByUserId: { ...state.leftTableByUserId, "user-1": true } };
+    assert.throws(
+      () => applyAction(frozen, { type: "CHECK", userId: "user-1" }),
+      (error) => error?.message === "invalid_player"
+    );
+    assert.equal(frozen.leftTableByUserId["user-1"], true);
+    assert.equal(frozen.turnUserId, "user-1");
+  }
+
+  {
     const seats = [
       { userId: "user-1", seatNo: 1 },
       { userId: "user-2", seatNo: 3 },

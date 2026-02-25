@@ -460,44 +460,22 @@ export async function handler(event) {
       });
       if (requestInfo.status === "stored") {
         const stored = requestInfo.result;
-        if (stored?.replayed) return stored;
-        if (stored?.ok) {
-          const replayed = { ...stored, replayed: true };
-          await storePokerRequestResult(tx, {
-            tableId,
-            userId: auth.userId,
-            requestId,
-            kind: "ACT",
-            result: replayed,
-          });
-          return replayed;
+        if (stored && typeof stored === "object" && !Array.isArray(stored) && stored.ok === true) {
+          return { ...stored, replayed: true };
         }
         return stored;
       }
       if (requestInfo.status === "pending") {
-        const stateRows = await tx.unsafe("select version, state from public.poker_state where table_id = $1 limit 1;", [
-          tableId,
-        ]);
-        const stateRow = stateRows?.[0] || null;
-        if (!stateRow) {
-          throw makeError(409, "state_invalid");
-        }
-        const expectedVersion = Number(stateRow.version);
-        if (!Number.isInteger(expectedVersion) || expectedVersion < 0) {
-          throw makeError(409, "state_invalid");
-        }
-        let currentState = normalizeJsonState(stateRow.state);
-        currentState = sanitizePerHandArtifacts(currentState);
-        if (!hasRequiredState(currentState)) {
-          throw makeError(409, "state_invalid");
-        }
-        if (currentState?.phase === "INIT") {
-          throw makeError(409, "hand_not_started");
-        }
-        if (actionParsed.value.type !== "LEAVE_TABLE" && (!isActionPhase(currentState.phase) || !currentState.turnUserId)) {
-          throw makeError(409, "state_invalid");
-        }
         return { pending: true, requestId };
+      }
+      if (requestInfo.status !== "created" && requestInfo.status !== "claimed" && requestInfo.status !== "none") {
+        klog("poker_act_rejected", {
+          tableId,
+          userId: auth.userId,
+          reason: "invalid_request_status",
+          requestStatus: requestInfo.status || null,
+        });
+        throw makeError(409, "state_invalid");
       }
 
       try {
@@ -816,6 +794,45 @@ export async function handler(event) {
         holeCardsByUserId,
       };
 
+      if (privateState?.leftTableByUserId?.[auth.userId] && actionParsed.value.type !== "LEAVE_TABLE") {
+        klog("poker_act_rejected", {
+          tableId,
+          userId: auth.userId,
+          reason: "player_left",
+          phase: privateState?.phase || currentState?.phase || null,
+          publicPhase: currentState?.phase || null,
+          actionType: actionParsed.value.type,
+        });
+        throw makeError(409, "player_left");
+      }
+
+      if (privateState?.leftTableByUserId?.[auth.userId] && actionParsed.value.type === "LEAVE_TABLE") {
+        const publicState = withoutPrivateState(currentState);
+        const legalInfo = { actions: [] };
+        const resultPayload = {
+          ok: true,
+          tableId,
+          state: {
+            version: expectedVersion,
+            state: publicState,
+          },
+          me: buildMeStatus(publicState, auth.userId),
+          myHoleCards: holeCardsByUserId[auth.userId] || [],
+          events: [],
+          replayed: false,
+          legalActions: legalInfo.actions,
+          actionConstraints: {},
+        };
+        await storePokerRequestResult(tx, {
+          tableId,
+          userId: auth.userId,
+          requestId,
+          kind: "ACT",
+          result: resultPayload,
+        });
+        return resultPayload;
+      }
+
       const timeoutResult = maybeApplyTurnTimeout({ tableId, state: currentState, privateState, nowMs: Date.now() });
       if (timeoutResult.applied) {
         const updatedState = timeoutResult.state;
@@ -1094,18 +1111,6 @@ export async function handler(event) {
           result: resultPayload,
         });
         return resultPayload;
-      }
-
-      if (privateState?.leftTableByUserId?.[auth.userId] && actionParsed.value.type !== "LEAVE_TABLE") {
-        klog("poker_act_rejected", {
-          tableId,
-          userId: auth.userId,
-          reason: "player_left",
-          phase: privateState?.phase || currentState?.phase || null,
-          publicPhase: currentState?.phase || null,
-          actionType: actionParsed.value.type,
-        });
-        throw makeError(409, "player_left");
       }
 
       if (currentState?.sitOutByUserId?.[auth.userId] && actionParsed.value.type !== "LEAVE_TABLE") {
