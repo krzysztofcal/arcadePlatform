@@ -18,7 +18,8 @@ process.env.POKER_BOTS_MAX_ACTIONS_PER_REQUEST = "0";
 
 const makeState = () => ({
   tableId,
-  phase: "HAND_DONE",
+  phase: "SHOWDOWN",
+  showdown: { winners: [userA], source: "settled" },
   handId: "hand-prev-1",
   handSeed: "seed-prev-1",
   dealerSeatNo: 1,
@@ -30,8 +31,9 @@ const makeState = () => ({
   betThisRoundByUserId: { [userA]: 0, [userB]: 0 },
   actedThisRoundByUserId: { [userA]: true, [userB]: true },
   foldedByUserId: { [userA]: false, [userB]: true },
-  leftTableByUserId: {},
-  sitOutByUserId: {},
+  leftTableByUserId: { [userA]: false, [userB]: false },
+  sitOutByUserId: { [userA]: false, [userB]: false },
+  pendingAutoSitOutByUserId: { [userA]: true },
   handSeats: [
     { userId: userA, seatNo: 1 },
     { userId: userB, seatNo: 2 },
@@ -44,7 +46,7 @@ const makeState = () => ({
 });
 
 const run = async () => {
-  const stateHolder = { version: 9, state: makeState() };
+  const stateHolder = { version: 5, state: makeState() };
   const writtenStates = [];
 
   const handler = loadPokerHandler("netlify/functions/poker-start-hand.mjs", {
@@ -75,7 +77,7 @@ const run = async () => {
     deletePokerRequest: async () => {},
     klog: () => {},
     startHandCore: async ({ currentState, expectedVersion }) => {
-      assert.equal(currentState.phase, "HAND_DONE", "HAND_DONE should remain startable and avoid already_in_hand");
+      assert.equal(currentState.phase, "INIT", "recovery should hand off INIT to startHandCore");
       return {
         newVersion: expectedVersion,
         updatedState: {
@@ -87,7 +89,7 @@ const run = async () => {
           community: [],
           communityDealt: 0,
           showdown: null,
-          lastStartHandRequestId: "req-hand-done-1",
+          lastStartHandRequestId: "req-init-shape-1",
           lastStartHandUserId: userA,
         },
         dealtHoleCards: { [userA]: ["Ah", "Kh"] },
@@ -102,7 +104,7 @@ const run = async () => {
           showdown: null,
           holeCardsByUserId: { [userA]: ["Ah", "Kh"], [userB]: ["Qd", "Qs"] },
           deck: [],
-          lastStartHandRequestId: "req-hand-done-1",
+          lastStartHandRequestId: "req-init-shape-1",
           lastStartHandUserId: userA,
         },
       };
@@ -137,22 +139,27 @@ const run = async () => {
   const response = await handler({
     httpMethod: "POST",
     headers: { origin: "https://example.test", authorization: "Bearer token" },
-    body: JSON.stringify({ tableId, requestId: "req-hand-done-1" }),
+    body: JSON.stringify({ tableId, requestId: "req-init-shape-1" }),
   });
 
   const payload = JSON.parse(response.body || "{}");
   if (response.statusCode === 409) {
-    assert.equal(payload.error, "state_conflict", "HAND_DONE retries should surface retryable state_conflict");
+    assert.equal(payload.error, "state_conflict");
     return;
   }
 
   assert.equal(response.statusCode, 200);
-  assert.equal(writtenStates.length, 0, "HAND_DONE should not trigger recovery write before start-hand");
-  assert.equal(payload.state?.state?.phase, "PREFLOP");
-  assert.equal(payload.state?.state?.handId, "hand-new-2");
+  const initWrite = writtenStates.find((state) => state?.phase === "INIT");
+  assert.ok(initWrite, "recovery path should emit an INIT write before start hand");
+  assert.deepEqual(initWrite.pendingAutoSitOutByUserId || {}, {}, "INIT recovery shape should keep pendingAutoSitOutByUserId as {} for compatibility");
+  assert.equal(
+    isStateStorageValid(initWrite, { requireNoDeck: true, requireHandSeed: false, requireCommunityDealt: false }),
+    true,
+    "written INIT state must satisfy storage validator"
+  );
 };
 
-run().then(() => console.log("poker-start-hand HAND_DONE recovery semantics behavior test passed")).catch((error) => {
+run().then(() => console.log("poker-start-hand recovery INIT shape behavior test passed")).catch((error) => {
   console.error(error);
   process.exit(1);
 });
