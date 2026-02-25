@@ -41,4 +41,9 @@ assert.equal(Object.prototype.hasOwnProperty.call(next.stacks || {}, u1), false)
 assert.equal(next.pot, 60);
 assert.equal(next.contributionsByUserId?.[u1], 30);
 
+const replay = applyLeaveTable(next, { userId: u1, requestId: "req-mid-detach-2" });
+assert.equal(replay.state.leftTableByUserId?.[u1], true);
+assert.equal(replay.state.handSeats.some((seat) => seat?.userId === u1), true);
+assert.equal(replay.state.seats.some((seat) => seat?.userId === u1), false);
+
 console.log("poker-leave instant detach midhand behavior test passed");

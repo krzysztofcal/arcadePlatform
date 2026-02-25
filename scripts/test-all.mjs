@@ -66,6 +66,8 @@ run("node", ["tests/poker-handSeats-seats-undefined.behavior.test.mjs"], "poker-
 run("node", ["tests/poker-handSeats-reset.behavior.test.mjs"], "poker-handseats-reset-behavior");
 run("node", ["tests/poker-leave.test.mjs"], "poker-leave");
 run("node", ["tests/poker-leave.instant-detach.midhand.behavior.test.mjs"], "poker-leave-instant-detach-midhand-behavior");
+run("node", ["tests/poker-leave.instant-detach.replay-preserves-left-flag.behavior.test.mjs"], "poker-leave-instant-detach-replay-preserves-left-flag-behavior");
+run("node", ["tests/poker-leave.instant-detach.no-resurrection.behavior.test.mjs"], "poker-leave-instant-detach-no-resurrection-behavior");
 run("node", ["tests/poker-join.after-midhand-leave.seat-available.behavior.test.mjs"], "poker-join-after-midhand-leave-seat-available-behavior");
 run("node", ["tests/poker-leave.cashout-only-uncommitted.behavior.test.mjs"], "poker-leave-cashout-only-uncommitted-behavior");
 run("node", ["tests/poker-join.test.mjs"], "poker-join");
