@@ -78,7 +78,13 @@ const run = async () => {
       }),
     postTransaction: async ({ entries }) => {
       postTransactionCalls += 1;
-      assert.equal(entries?.[1]?.amount, 125);
+      const list = Array.isArray(entries) ? entries : [];
+      const userEntry = list.find((entry) => entry?.accountType === "USER");
+      const escrowEntry = list.find((entry) => entry?.accountType === "ESCROW");
+      assert.equal(userEntry?.amount, 125);
+      assert.equal(escrowEntry?.amount, -125);
+      assert.equal(typeof escrowEntry?.systemKey, "string");
+      assert.equal(escrowEntry?.systemKey, `POKER_TABLE:${tableId}`);
       return { transaction: { id: "tx-1" } };
     },
     klog: () => {},

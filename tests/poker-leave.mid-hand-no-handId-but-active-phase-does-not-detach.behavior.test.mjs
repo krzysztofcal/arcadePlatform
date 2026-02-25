@@ -7,6 +7,7 @@ const humanUserId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const botUserId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 
 let seatDeleteCount = 0;
+let postTransactionCalls = 0;
 
 const stored = {
   version: 10,
@@ -75,7 +76,17 @@ const handler = loadPokerHandler("netlify/functions/poker-leave.mjs", {
         return [];
       },
     }),
-  postTransaction: async () => ({ transaction: { id: "tx-1" } }),
+  postTransaction: async ({ entries }) => {
+    postTransactionCalls += 1;
+    const list = Array.isArray(entries) ? entries : [];
+    const userEntry = list.find((entry) => entry?.accountType === "USER");
+    const escrowEntry = list.find((entry) => entry?.accountType === "ESCROW");
+    assert.equal(userEntry?.amount, 100);
+    assert.equal(escrowEntry?.amount, -100);
+    assert.equal(typeof escrowEntry?.systemKey, "string");
+    assert.equal(escrowEntry?.systemKey, `POKER_TABLE:${tableId}`);
+    return { transaction: { id: "tx-1" } };
+  },
   klog: () => {},
 });
 
@@ -89,6 +100,7 @@ assert.equal(response.statusCode, 200);
 const payload = JSON.parse(response.body || "{}");
 assert.equal(payload.ok, true);
 assert.equal(payload.cashedOut, 100);
+assert.equal(postTransactionCalls, 1);
 assert.equal(seatDeleteCount, 1);
 assert.equal(payload.state.state.seats.some((seat) => seat?.userId === humanUserId), false);
 assert.equal(payload.state.state.handSeats.some((seat) => seat?.userId === humanUserId), true);
