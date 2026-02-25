@@ -101,6 +101,7 @@ run("node", ["tests/poker-act.idempotency.stored-replay-sets-replayed-true.behav
 run("node", ["tests/poker-act.idempotency.claimed-status.proceeds.behavior.test.mjs"], "poker-act-idempotency-claimed-status-proceeds-behavior");
 run("node", ["tests/poker-act.idempotency.pending-status.does-not-proceed.behavior.test.mjs"], "poker-act-idempotency-pending-status-does-not-proceed-behavior");
 run("node", ["tests/poker-act.idempotency.pending-status.no-state-read.behavior.test.mjs"], "poker-act-idempotency-pending-status-no-state-read-behavior");
+run("node", ["tests/poker-act.idempotency.unknown-status.rejected.behavior.test.mjs"], "poker-act-idempotency-unknown-status-rejected-behavior");
 run("node", ["tests/poker-act.load.no-duplicate-helpers.behavior.test.mjs"], "poker-act-load-no-duplicate-helpers-behavior");
 run("node", ["tests/poker-act.bot-autoplay.behavior.test.mjs"], "poker-act-bot-autoplay-behavior");
 run("node", ["tests/poker-act.bot-autoplay.timeout-applied.behavior.test.mjs"], "poker-act-bot-autoplay-timeout-applied-behavior");
