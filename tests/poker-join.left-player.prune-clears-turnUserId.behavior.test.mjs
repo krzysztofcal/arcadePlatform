@@ -10,7 +10,6 @@ const tableId = "11111111-1111-4111-8111-111111111111";
 const userId = "user-left";
 
 const writes = [];
-let seatStatusUpdates = 0;
 
 const initialState = {
   tableId,
@@ -23,10 +22,12 @@ const initialState = {
     { userId: "other-1", seatNo: 1 },
     { userId, seatNo: 3 },
   ],
-  leftTableByUserId: { [userId]: true },
-  sitOutByUserId: { [userId]: false },
-  missedTurnsByUserId: { [userId]: 2 },
-  stacks: { [userId]: 200, "other-1": 200 },
+  leftTableByUserId: { [userId]: true, "other-1": false },
+  sitOutByUserId: { [userId]: false, "other-1": false },
+  foldedByUserId: { [userId]: false, "other-1": false },
+  allInByUserId: { [userId]: false, "other-1": false },
+  stacks: { [userId]: 200, "other-1": 250 },
+  missedTurnsByUserId: { [userId]: 1 },
   pot: 10,
   turnUserId: userId,
 };
@@ -57,10 +58,7 @@ const handler = loadPokerHandler("netlify/functions/poker-join.mjs", {
         if (text.includes("from public.poker_seats") && text.includes("user_id = $2") && text.includes("limit 1")) {
           return [{ seat_no: 3 }];
         }
-        if (text.includes("update public.poker_seats set status = 'active'")) {
-          seatStatusUpdates += 1;
-          return [];
-        }
+        if (text.includes("update public.poker_seats set status = 'active'")) return [];
         if (text.includes("from public.poker_state") && text.includes("for update")) {
           return [{ version: 7, state: JSON.stringify(initialState) }];
         }
@@ -79,20 +77,18 @@ const handler = loadPokerHandler("netlify/functions/poker-join.mjs", {
 const response = await handler({
   httpMethod: "POST",
   headers: { origin: "https://example.test", authorization: "Bearer token" },
-  body: JSON.stringify({ tableId, seatNo: 2, buyIn: 100, requestId: "join-left-1" }),
+  body: JSON.stringify({ tableId, seatNo: 2, buyIn: 100, requestId: "join-left-turn-1" }),
 });
 
 assert.equal(response.statusCode, 200);
-assert.equal(seatStatusUpdates, 1, "join should still reactivate seat row");
 const payload = JSON.parse(response.body || "{}");
 assert.equal(payload.ok, true);
-assert.equal(payload.me?.isLeft, true);
 
 assert.ok(writes.length >= 1, "join should persist guarded state");
 const latest = writes[writes.length - 1];
-assert.equal(latest.leftTableByUserId?.[userId], true, "left flag should remain true mid-hand");
-assert.equal((latest.handSeats || []).some((seat) => seat?.userId === userId), false, "left player must stay out of handSeats");
-assert.notEqual(latest.turnUserId, userId, "turn should not remain on pruned left player");
-assert.equal(latest.missedTurnsByUserId?.[userId], 2, "join should not clear missed turns mid-hand when left is preserved");
+assert.equal(latest.leftTableByUserId?.[userId], true);
+assert.equal((latest.handSeats || []).some((seat) => seat?.userId === userId), false);
+assert.notEqual(latest.turnUserId, userId, "turnUserId must move off the pruned player");
+assert.equal(latest.turnUserId, "other-1", "turn should move to next eligible hand participant");
 
-console.log("poker-join left player no-resurrection behavior test passed");
+console.log("poker-join left-player prune clears turnUserId behavior test passed");

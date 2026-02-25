@@ -49,6 +49,13 @@ const normalizeSeatUserIds = (seats) => {
   return seats.map((seat) => seat?.userId).filter((userId) => typeof userId === "string" && userId.trim());
 };
 
+const isSeatActiveForUser = (seat, userId) => {
+  const seatUserId = typeof seat?.userId === "string" ? seat.userId : typeof seat?.user_id === "string" ? seat.user_id : null;
+  if (seatUserId !== userId) return false;
+  const status = typeof seat?.status === "string" ? seat.status.toUpperCase() : "ACTIVE";
+  return status === "ACTIVE";
+};
+
 const hasSameUserIds = (left, right) => {
   if (left.length !== right.length) return false;
   const leftSet = new Set(left);
@@ -549,7 +556,7 @@ export async function handler(event) {
 
     const me = {
       userId: auth.userId,
-      isSeated: seats.some((seat) => seat?.userId === auth.userId && seat?.status === "ACTIVE"),
+      isSeated: seats.some((seat) => isSeatActiveForUser(seat, auth.userId)),
       isLeft: !!publicState?.leftTableByUserId?.[auth.userId],
       isSitOut: !!publicState?.sitOutByUserId?.[auth.userId],
     };

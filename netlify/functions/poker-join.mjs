@@ -91,12 +91,40 @@ const parseStacks = (value) => (value && typeof value === "object" && !Array.isA
 const SETTLED_PHASES = new Set(["HAND_DONE", "SETTLED"]);
 const isHandInProgress = (phase) => typeof phase === "string" && phase !== "INIT" && !SETTLED_PHASES.has(phase);
 
+const isEligibleTurnUser = (state, userId) => {
+  if (!userId) return false;
+  if (state?.leftTableByUserId?.[userId]) return false;
+  if (state?.sitOutByUserId?.[userId]) return false;
+  if (state?.foldedByUserId?.[userId]) return false;
+  if (state?.allInByUserId?.[userId]) return false;
+  return Number(state?.stacks?.[userId] ?? 0) > 0;
+};
+
+const resolveTurnUserAfterPrune = ({ state, previousHandSeats, nextHandSeats, removedUserId }) => {
+  if (state?.turnUserId !== removedUserId) return state?.turnUserId ?? null;
+  if (!Array.isArray(nextHandSeats) || nextHandSeats.length === 0) return null;
+
+  const orderedPrev = Array.isArray(previousHandSeats) ? previousHandSeats : [];
+  const removedIndex = orderedPrev.findIndex((seat) => seat?.userId === removedUserId);
+  const orderedNext = nextHandSeats.slice();
+  const startIndex = removedIndex >= 0 ? removedIndex % orderedNext.length : 0;
+
+  for (let offset = 0; offset < orderedNext.length; offset += 1) {
+    const candidate = orderedNext[(startIndex + offset) % orderedNext.length]?.userId;
+    if (isEligibleTurnUser(state, candidate)) return candidate;
+  }
+
+  const fallback = orderedNext.find((seat) => seat?.userId)?.userId;
+  return fallback || null;
+};
+
 const pruneUserFromHandSeats = (state, userId) => {
   const handSeats = Array.isArray(state?.handSeats) ? state.handSeats : null;
   if (!handSeats) return { changed: false, nextState: state };
   const nextHandSeats = handSeats.filter((seat) => seat?.userId !== userId);
   if (nextHandSeats.length === handSeats.length) return { changed: false, nextState: state };
-  return { changed: true, nextState: { ...state, handSeats: nextHandSeats } };
+  const nextTurnUserId = resolveTurnUserAfterPrune({ state, previousHandSeats: handSeats, nextHandSeats, removedUserId: userId });
+  return { changed: true, nextState: { ...state, handSeats: nextHandSeats, turnUserId: nextTurnUserId } };
 };
 
 const toDbSeatNo = (seatNoUi, maxPlayers) => {
