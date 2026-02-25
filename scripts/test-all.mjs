@@ -97,6 +97,7 @@ run("node", ["tests/poker-start-hand.legacy-init-upgrade.test.mjs"], "poker-star
 run("node", ["tests/poker-act.behavior.test.mjs"], "poker-act-behavior");
 run("node", ["tests/poker-act.left-player.invalid-player.behavior.test.mjs"], "poker-act-left-player-invalid-player-behavior");
 run("node", ["tests/poker-act.left-player.leave-table.idempotent-noop.behavior.test.mjs"], "poker-act-left-player-leave-table-idempotent-noop-behavior");
+run("node", ["tests/poker-act.left-player.leave-table.noop-stores-once.behavior.test.mjs"], "poker-act-left-player-leave-table-noop-stores-once-behavior");
 run("node", ["tests/poker-act.idempotency.stored-replay-sets-replayed-true.behavior.test.mjs"], "poker-act-idempotency-stored-replay-sets-replayed-true-behavior");
 run("node", ["tests/poker-act.idempotency.claimed-status.proceeds.behavior.test.mjs"], "poker-act-idempotency-claimed-status-proceeds-behavior");
 run("node", ["tests/poker-act.idempotency.pending-status.does-not-proceed.behavior.test.mjs"], "poker-act-idempotency-pending-status-does-not-proceed-behavior");

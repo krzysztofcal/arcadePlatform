@@ -14,6 +14,7 @@ const writeSignatures = [
 const run = async () => {
   const queries = [];
   const storedByRequestId = new Map();
+  let storePokerRequestResultCount = 0;
 
   const handler = loadPokerHandler("netlify/functions/poker-act.mjs", {
     baseHeaders: () => ({}),
@@ -36,6 +37,7 @@ const run = async () => {
       return { status: "claimed" };
     },
     storePokerRequestResult: async (_tx, { requestId, result }) => {
+      storePokerRequestResultCount += 1;
       storedByRequestId.set(requestId, result);
     },
     loadHoleCardsByUserId: async () => ({ holeCardsByUserId: {}, holeCardsStatusByUserId: {} }),
@@ -102,26 +104,41 @@ const run = async () => {
   const requestId = "rid-left-leave-idempotent";
   const payload = { tableId, requestId, action: { type: "LEAVE_TABLE" } };
 
+  const firstQueryCount = queries.length;
   const first = await handler({
     httpMethod: "POST",
     headers: { origin: "https://example.test", authorization: "Bearer token" },
     body: JSON.stringify(payload),
   });
+  const firstQueries = queries.slice(firstQueryCount);
+
+  const secondQueryCount = queries.length;
   const second = await handler({
     httpMethod: "POST",
     headers: { origin: "https://example.test", authorization: "Bearer token" },
     body: JSON.stringify(payload),
   });
 
+  const secondQueries = queries.slice(secondQueryCount);
+
   const firstBody = JSON.parse(first.body || "{}");
   const secondBody = JSON.parse(second.body || "{}");
 
   assert.equal(first.statusCode, 200);
-  assert.equal(second.statusCode, 200);
-  assert.deepEqual(secondBody, { ...firstBody, replayed: true });
+  assert.equal(firstBody.ok, true);
+  assert.equal(firstBody.replayed, false);
+  assert.equal(storePokerRequestResultCount, 1);
 
   for (const signature of writeSignatures) {
-    assert.equal(queries.some((query) => query.includes(signature)), false, `unexpected write query: ${signature}`);
+    assert.equal(firstQueries.some((query) => query.includes(signature)), false, `unexpected write query on first call: ${signature}`);
+  }
+
+  assert.equal(second.statusCode, 200);
+  assert.deepEqual(secondBody, { ...firstBody, replayed: true });
+  assert.equal(storePokerRequestResultCount, 1);
+
+  for (const signature of writeSignatures) {
+    assert.equal(secondQueries.some((query) => query.includes(signature)), false, `unexpected write query on second call: ${signature}`);
   }
 };
 
