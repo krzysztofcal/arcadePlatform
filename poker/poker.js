@@ -13,7 +13,7 @@
   var EXPORT_LOG_URL = '/.netlify/functions/poker-export-log';
   var POLL_INTERVAL_BASE = 2000;
   var POLL_INTERVAL_MAX = 10000;
-  var HEARTBEAT_INTERVAL_MS = 20000;
+  var HEARTBEAT_INTERVAL_MS = 5000;
   var PENDING_RETRY_DELAYS = [150, 300, 600, 900];
   var PENDING_RETRY_BUDGET_MS = 2000;
   var UI_VERSION = '2025-02-19';
@@ -925,6 +925,8 @@
     var autoStartStopForHand = false;
     var lastAutoStartSeatCount = null;
     var turnTimerInterval = null;
+    var deadlineNudgeTimer = null;
+    var deadlineNudgeTargetMs = null;
     var HEARTBEAT_PENDING_MAX_RETRIES = 8;
     var realtimeSub = null;
     var realtimeDisabled = false;
@@ -1740,6 +1742,7 @@
         clearInterval(turnTimerInterval);
         turnTimerInterval = null;
       }
+      clearDeadlineNudge();
     }
 
     function stopHeartbeat(){
@@ -1747,7 +1750,37 @@
         clearInterval(heartbeatTimer);
         heartbeatTimer = null;
       }
+      clearDeadlineNudge();
     }
+
+    function clearDeadlineNudge(){
+      if (deadlineNudgeTimer){
+        clearTimeout(deadlineNudgeTimer);
+        deadlineNudgeTimer = null;
+      }
+      deadlineNudgeTargetMs = null;
+    }
+
+    function scheduleDeadlineNudge(turnDeadlineAt){
+      var deadlineMs = normalizeDeadlineMs(turnDeadlineAt);
+      if (!deadlineMs){
+        clearDeadlineNudge();
+        return;
+      }
+      if (deadlineNudgeTimer && deadlineNudgeTargetMs === deadlineMs) return;
+      clearDeadlineNudge();
+      deadlineNudgeTargetMs = deadlineMs;
+      var delayMs = Math.max(0, deadlineMs - Date.now() + 250);
+      deadlineNudgeTimer = setTimeout(function(){
+        deadlineNudgeTimer = null;
+        deadlineNudgeTargetMs = null;
+        if (!isPageActive()) return;
+        if (joinPending || leavePending || startHandPending || actPending) return;
+        if (heartbeatInFlight) return;
+        sendHeartbeat();
+      }, delayMs);
+    }
+
 
     function isCurrentUserSeated(data){
       if (!currentUserId || !data || !Array.isArray(data.seats)) return false;
@@ -1987,6 +2020,7 @@
           clearInterval(turnTimerInterval);
           turnTimerInterval = null;
         }
+        clearDeadlineNudge();
         return;
       }
       var deadlineMs = normalizeDeadlineMs(gameState.turnDeadlineAt);
@@ -1997,8 +2031,10 @@
           clearInterval(turnTimerInterval);
           turnTimerInterval = null;
         }
+        clearDeadlineNudge();
         return;
       }
+      scheduleDeadlineNudge(gameState.turnDeadlineAt);
       function update(){
         var seconds = computeRemainingTurnSeconds(deadlineMs, Date.now());
         turnTimerEl.textContent = t('pokerTurnTimer', 'Time left') + ': ' + seconds + 's';
@@ -2619,6 +2655,7 @@
     window.addEventListener('pagehide', stopRealtime); // xp-lifecycle-allow:poker-table-pagehide(2026-01-01)
     window.addEventListener('beforeunload', stopPolling); // xp-lifecycle-allow:poker-table(2026-01-01)
     window.addEventListener('beforeunload', stopHeartbeat); // xp-lifecycle-allow:poker-table-heartbeat(2026-01-01)
+    window.addEventListener('beforeunload', clearDeadlineNudge); // xp-lifecycle-allow:poker-table-deadline-nudge(2026-01-01)
     window.addEventListener('beforeunload', stopRealtime); // xp-lifecycle-allow:poker-table-realtime(2026-01-01)
     window.addEventListener('beforeunload', stopPendingAll); // xp-lifecycle-allow:poker-table-pending(2026-01-01)
     window.addEventListener('beforeunload', stopAuthWatch); // xp-lifecycle-allow:poker-table-auth(2026-01-01)
