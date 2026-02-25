@@ -49,6 +49,13 @@ const normalizeSeatUserIds = (seats) => {
   return seats.map((seat) => seat?.userId).filter((userId) => typeof userId === "string" && userId.trim());
 };
 
+const isSeatActiveForUser = (seat, userId) => {
+  const seatUserId = typeof seat?.userId === "string" ? seat.userId : typeof seat?.user_id === "string" ? seat.user_id : null;
+  if (seatUserId !== userId) return false;
+  const status = typeof seat?.status === "string" ? seat.status.toUpperCase() : "ACTIVE";
+  return status === "ACTIVE";
+};
+
 const hasSameUserIds = (left, right) => {
   if (left.length !== right.length) return false;
   const leftSet = new Set(left);
@@ -547,6 +554,13 @@ export async function handler(event) {
     publicState = guarded.statePublic;
     const legalInfo = guarded.legalInfo;
 
+    const me = {
+      userId: auth.userId,
+      isSeated: seats.some((seat) => isSeatActiveForUser(seat, auth.userId)),
+      isLeft: !!publicState?.leftTableByUserId?.[auth.userId],
+      isSitOut: !!publicState?.sitOutByUserId?.[auth.userId],
+    };
+
     const stakesParsed = parseStakes(table.stakes);
     const tablePayload = {
       id: table.id,
@@ -571,6 +585,7 @@ export async function handler(event) {
           state: publicState,
         },
         myHoleCards: Array.isArray(result.myHoleCards) ? result.myHoleCards : [],
+        me,
         legalActions: legalInfo.actions,
         actionConstraints: buildActionConstraints(legalInfo),
       }),

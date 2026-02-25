@@ -88,6 +88,45 @@ const parseSeats = (value) => (Array.isArray(value) ? value : []);
 
 const parseStacks = (value) => (value && typeof value === "object" && !Array.isArray(value) ? value : {});
 
+const SETTLED_PHASES = new Set(["HAND_DONE", "SETTLED"]);
+const isHandInProgress = (phase) => typeof phase === "string" && phase !== "INIT" && !SETTLED_PHASES.has(phase);
+
+const isEligibleTurnUser = (state, userId) => {
+  if (!userId) return false;
+  if (state?.leftTableByUserId?.[userId]) return false;
+  if (state?.sitOutByUserId?.[userId]) return false;
+  if (state?.foldedByUserId?.[userId]) return false;
+  if (state?.allInByUserId?.[userId]) return false;
+  return Number(state?.stacks?.[userId] ?? 0) > 0;
+};
+
+const resolveTurnUserAfterPrune = ({ state, previousHandSeats, nextHandSeats, removedUserId }) => {
+  if (state?.turnUserId !== removedUserId) return state?.turnUserId ?? null;
+  if (!Array.isArray(nextHandSeats) || nextHandSeats.length === 0) return null;
+
+  const orderedPrev = Array.isArray(previousHandSeats) ? previousHandSeats : [];
+  const removedIndex = orderedPrev.findIndex((seat) => seat?.userId === removedUserId);
+  const orderedNext = nextHandSeats.slice();
+  const startIndex = removedIndex >= 0 ? removedIndex % orderedNext.length : 0;
+
+  for (let offset = 0; offset < orderedNext.length; offset += 1) {
+    const candidate = orderedNext[(startIndex + offset) % orderedNext.length]?.userId;
+    if (isEligibleTurnUser(state, candidate)) return candidate;
+  }
+
+  const fallback = orderedNext.find((seat) => seat?.userId)?.userId;
+  return fallback || null;
+};
+
+const pruneUserFromHandSeats = (state, userId) => {
+  const handSeats = Array.isArray(state?.handSeats) ? state.handSeats : null;
+  if (!handSeats) return { changed: false, nextState: state };
+  const nextHandSeats = handSeats.filter((seat) => seat?.userId !== userId);
+  if (nextHandSeats.length === handSeats.length) return { changed: false, nextState: state };
+  const nextTurnUserId = resolveTurnUserAfterPrune({ state, previousHandSeats: handSeats, nextHandSeats, removedUserId: userId });
+  return { changed: true, nextState: { ...state, handSeats: nextHandSeats, turnUserId: nextTurnUserId } };
+};
+
 const toDbSeatNo = (seatNoUi, maxPlayers) => {
   if (!Number.isInteger(maxPlayers) || maxPlayers < 2) return null;
   if (!Number.isInteger(seatNoUi)) return null;
@@ -310,6 +349,22 @@ const clearRejoinFlags = async (tx, { tableId, userId }) => {
     throw makeError(409, "state_invalid");
   }
   const currentState = loadResult.state;
+  if (currentState?.leftTableByUserId?.[userId] && isHandInProgress(currentState?.phase)) {
+    const pruned = pruneUserFromHandSeats(currentState, userId);
+    if (!pruned.changed) {
+      return { updated: false, nextState: currentState };
+    }
+    if (!isStateStorageValid(pruned.nextState, { requireNoDeck: true, requireHandSeed: false, requireCommunityDealt: false })) {
+      klog("poker_join_state_invalid", { tableId, userId, reason: "state_invalid" });
+      throw makeError(409, "state_invalid");
+    }
+    const prunedUpdate = await updatePokerStateLocked(tx, { tableId, nextState: pruned.nextState });
+    if (!prunedUpdate.ok) {
+      if (prunedUpdate.reason === "not_found") throw makeError(404, "state_missing");
+      throw makeError(409, "state_invalid");
+    }
+    return { updated: true, nextState: pruned.nextState };
+  }
   const patched = patchLeftTableByUserId(currentState, userId, false);
   const clearedMissed = clearMissedTurns(patched.nextState, userId);
   const clearedSitOut = patchSitOutByUserId(clearedMissed.nextState, userId, false);
@@ -688,12 +743,20 @@ values ($1, $2, $3, 'ACTIVE', now(), now(), $4);
         for (const bot of seededBots) {
           stacks[bot.userId] = bot.stack;
         }
-        const patched = patchLeftTableByUserId(currentState, auth.userId, false);
-        const clearedMissed = clearMissedTurns(patched.nextState, auth.userId);
-        const clearedSitOut = patchSitOutByUserId(clearedMissed.nextState, auth.userId, false);
+        const preserveLeftDuringActiveHand = !!currentState?.leftTableByUserId?.[auth.userId] && isHandInProgress(currentState?.phase);
+        let nextBaseState = currentState;
+        if (preserveLeftDuringActiveHand) {
+          const pruned = pruneUserFromHandSeats(currentState, auth.userId);
+          nextBaseState = pruned.nextState;
+        } else {
+          const patched = patchLeftTableByUserId(currentState, auth.userId, false);
+          const clearedMissed = clearMissedTurns(patched.nextState, auth.userId);
+          const clearedSitOut = patchSitOutByUserId(clearedMissed.nextState, auth.userId, false);
+          nextBaseState = clearedSitOut.nextState;
+        }
 
         const updatedState = {
-          ...clearedSitOut.nextState,
+          ...nextBaseState,
           tableId: currentState.tableId || tableId,
           seats,
           stacks,
