@@ -46,8 +46,12 @@ const state = makeState();
 const afterU1 = applyAction(state, { type: "CHECK", userId: "u1" }).state;
 assert.equal(afterU1.turnUserId, "u2");
 
+assert.ok(!afterU1.seats.some((seat) => seat.userId === "u2"));
+
 const u2Actions = getLegalActions(afterU1, "u2").map((action) => action.type);
+assert.ok(u2Actions.length > 0);
 assert.ok(u2Actions.includes("CHECK"));
 
+assert.doesNotThrow(() => applyAction(afterU1, { type: "CHECK", userId: "u2" }));
 const afterU2 = applyAction(afterU1, { type: "CHECK", userId: "u2" }).state;
 assert.equal(afterU2.phase, "FLOP");
