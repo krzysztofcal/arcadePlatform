@@ -38,6 +38,25 @@ const run = async () => {
     assert.equal(timeoutResult.state.lastActionRequestIdByUserId[timeoutState.turnUserId], timeoutResult.requestId);
   }
 
+
+  {
+    const { seats, stacks } = makeBase();
+    const { state } = initHandState({ tableId: "t-timeout-check-equality", seats, stacks, rng: makeRng(33) });
+    const nowMs = 1500;
+    const timeoutState = { ...state, turnStartedAt: 1000, turnDeadlineAt: 1500 };
+    const timeoutResult = maybeApplyTurnTimeout({
+      tableId: timeoutState.tableId,
+      state: timeoutState,
+      privateState: timeoutState,
+      nowMs,
+    });
+
+    assert.equal(timeoutResult.applied, true);
+    assert.equal(timeoutResult.action.type, "CHECK");
+    assert.equal(timeoutResult.action.userId, timeoutState.turnUserId);
+    assert.equal(timeoutResult.state.lastActionRequestIdByUserId[timeoutState.turnUserId], timeoutResult.requestId);
+  }
+
   {
     const { seats, stacks } = makeBase();
     const { state } = initHandState({ tableId: "t-timeout-fold", seats, stacks, rng: makeRng(32) });

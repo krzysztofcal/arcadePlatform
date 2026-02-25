@@ -120,7 +120,7 @@ const maybeApplyTurnTimeout = ({ tableId, state, privateState, nowMs }) => {
   if (!isActionPhase(state.phase) || !state.turnUserId) return { applied: false, state };
   const deadline = Number(state.turnDeadlineAt);
   const now = Number.isFinite(nowMs) ? nowMs : Date.now();
-  if (!Number.isFinite(deadline) || now <= deadline) return { applied: false, state };
+  if (!Number.isFinite(deadline) || now < deadline) return { applied: false, state };
 
   const action = getTimeoutAction(state);
   if (!action) return { applied: false, state };
