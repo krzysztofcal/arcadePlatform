@@ -3,6 +3,9 @@ import { dealHoleCards } from "./_shared/poker-engine.mjs";
 import { deriveDeck } from "./_shared/poker-deal-deterministic.mjs";
 import { TURN_MS, advanceIfNeeded, applyAction, computeNextDealerSeatNo } from "./_shared/poker-reducer.mjs";
 import { buildActionConstraints, computeLegalActions } from "./_shared/poker-legal-actions.mjs";
+import { materializeShowdownAndPayout } from "./_shared/poker-materialize-showdown.mjs";
+import { computeShowdown } from "./_shared/poker-showdown.mjs";
+import { awardPotsAtShowdown } from "./_shared/poker-payout.mjs";
 import {
   getRng,
   isPlainObject,
@@ -18,8 +21,10 @@ import { isValidUuid } from "./_shared/poker-utils.mjs";
 import { normalizeRequestId } from "./_shared/poker-request-id.mjs";
 import { resetTurnTimer } from "./_shared/poker-turn-timer.mjs";
 import { clearMissedTurns } from "./_shared/poker-missed-turns.mjs";
+import { isHoleCardsTableMissing, loadHoleCardsByUserId } from "./_shared/poker-hole-cards-store.mjs";
 import { buildSeatBotMap, chooseBotActionTrivial, getBotAutoplayConfig, isBotTurn } from "./_shared/poker-bots.mjs";
 import { startHandCore } from "./_shared/poker-start-hand-core.mjs";
+import { normalizeSeatOrderFromState } from "./_shared/poker-turn-timeout.mjs";
 
 const parseBody = (body) => {
   if (!body) return { ok: true, value: {} };
@@ -87,11 +92,108 @@ const normalizeStateRow = (raw) => {
   return null;
 };
 
-const isHoleCardsTableMissing = (error) => {
-  if (!error) return false;
-  if (error.code === "42P01") return true;
-  const message = String(error.message || "").toLowerCase();
-  return message.includes("poker_hole_cards") && message.includes("does not exist");
+const TERMINAL_OR_RECOVERABLE_PHASES = new Set(["SHOWDOWN", "SETTLED"]);
+
+const recoverTerminalStateIfNeeded = async ({ tx, tableId, state, expectedVersion, activeSeatRows }) => {
+  const phase = typeof state?.phase === "string" ? state.phase : "";
+  const stuckShowdown = phase === "SHOWDOWN" && !state?.showdown;
+  const terminalPhase = TERMINAL_OR_RECOVERABLE_PHASES.has(phase);
+  if (!stuckShowdown && !terminalPhase) {
+    return { state, expectedVersion, recovered: false };
+  }
+
+  let nextState = state;
+  let nextVersion = expectedVersion;
+  let didMutate = false;
+
+  if (stuckShowdown) {
+    try {
+      const normalizedHandSeats = Array.isArray(nextState?.handSeats) ? nextState.handSeats : [];
+      let seatUserIdsInOrder = normalizeSeatOrderFromState(normalizedHandSeats);
+      if (seatUserIdsInOrder.length === 0) {
+        const fallbackSeats = Array.isArray(activeSeatRows) ? activeSeatRows : [];
+        const sorted = fallbackSeats.slice().sort((a, b) => Number(a?.seat_no ?? 0) - Number(b?.seat_no ?? 0));
+        seatUserIdsInOrder = sorted
+          .map((seat) => (typeof seat?.user_id === "string" ? seat.user_id.trim() : ""))
+          .filter((userId) => !!userId);
+      }
+      if (seatUserIdsInOrder.length === 0) {
+        throw makeError(409, "state_conflict");
+      }
+
+      const eligibleUserIds = seatUserIdsInOrder.filter(
+        (userId) =>
+          typeof userId === "string" &&
+          !nextState?.foldedByUserId?.[userId] &&
+          !nextState?.leftTableByUserId?.[userId] &&
+          !nextState?.sitOutByUserId?.[userId]
+      );
+
+      let holeCardsByUserId = null;
+      if (eligibleUserIds.length > 1) {
+        let loaded;
+        try {
+          loaded = await loadHoleCardsByUserId(tx, {
+            tableId,
+            handId: nextState.handId,
+            activeUserIds: seatUserIdsInOrder,
+            requiredUserIds: eligibleUserIds,
+            mode: "strict",
+          });
+        } catch (error) {
+          if (isHoleCardsTableMissing(error)) {
+            throw makeError(409, "state_conflict");
+          }
+          throw error;
+        }
+        holeCardsByUserId = loaded?.holeCardsByUserId || null;
+      }
+
+      const materialized = materializeShowdownAndPayout({
+        state: nextState,
+        seatUserIdsInOrder,
+        holeCardsByUserId,
+        computeShowdown,
+        awardPotsAtShowdown,
+        klog,
+      });
+      nextState = materialized.nextState;
+      didMutate = true;
+    } catch (error) {
+      if (Number.isInteger(error?.status) && typeof error?.code === "string") throw error;
+      throw makeError(409, "state_conflict");
+    }
+  }
+
+  let loopCount = 0;
+  while (loopCount < ADVANCE_LIMIT) {
+    const before = nextState;
+    const advanced = advanceIfNeeded(nextState);
+    nextState = advanced.state;
+    const hasEvents = Array.isArray(advanced.events) && advanced.events.length > 0;
+    const phaseChanged = before?.phase !== nextState?.phase;
+    if (!hasEvents && !phaseChanged) break;
+    didMutate = true;
+    if (nextState?.phase === "INIT") break;
+    loopCount += 1;
+  }
+
+  if (!didMutate) return { state, expectedVersion, recovered: false };
+  if (!isStateStorageValid(nextState, { requireNoDeck: true, requireHandSeed: false, requireCommunityDealt: false })) {
+    throw makeError(409, "state_invalid");
+  }
+
+  const recovered = await updatePokerStateOptimistic(tx, {
+    tableId,
+    expectedVersion: nextVersion,
+    nextState,
+  });
+  if (!recovered.ok) {
+    if (recovered.reason === "conflict") throw makeError(409, "state_conflict");
+    throw makeError(409, "state_invalid");
+  }
+  nextVersion = recovered.newVersion;
+  return { state: nextState, expectedVersion: nextVersion, recovered: true };
 };
 
 export async function handler(event) {
@@ -271,6 +373,24 @@ export async function handler(event) {
             mutated = true;
           }
           currentState = upgradedState;
+        }
+
+        const recovered = await recoverTerminalStateIfNeeded({
+          tx,
+          tableId,
+          state: currentState,
+          expectedVersion,
+          activeSeatRows: validSeats,
+        });
+        if (recovered.recovered) {
+          currentState = recovered.state;
+          expectedVersion = recovered.expectedVersion;
+          mutated = true;
+          klog("poker_start_hand_recovered_terminal_state", {
+            tableId,
+            userId: auth.userId,
+            phase: currentState?.phase || null,
+          });
         }
 
         const sameRequest =

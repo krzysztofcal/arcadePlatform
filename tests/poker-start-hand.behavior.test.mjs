@@ -62,7 +62,7 @@ const makeHandler = (queries, storedState) =>
           }
           if (text.includes("from public.poker_state")) {
             if (storedState.value) {
-              return [{ version: 2, state: JSON.parse(storedState.value) }];
+              return [{ version: storedState.version || 2, state: JSON.parse(storedState.value) }];
             }
             return [{ version: 1, state: { phase: "INIT", stacks: initialStacks } }];
           }
@@ -344,7 +344,7 @@ const runHeadsUpBlinds = async () => {
           }
           if (text.includes("from public.poker_state")) {
             if (storedState.value) {
-              return [{ version: 2, state: JSON.parse(storedState.value) }];
+              return [{ version: storedState.version || 2, state: JSON.parse(storedState.value) }];
             }
             return [{ version: 1, state: { phase: "INIT", stacks: { "user-1": 100, "user-2": 100 } } }];
           }

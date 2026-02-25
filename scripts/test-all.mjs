@@ -97,6 +97,8 @@ run("node", ["tests/poker-start-hand.seat-stacks.behavior.test.mjs"], "poker-sta
 run("node", ["tests/poker-start-hand.legal-actions.behavior.test.mjs"], "poker-start-hand-legal-actions-behavior");
 run("node", ["tests/poker-start-hand.short-stack-blind.behavior.test.mjs"], "poker-start-hand-short-stack-blind-behavior");
 run("node", ["tests/poker-start-hand.legacy-init-upgrade.test.mjs"], "poker-start-hand-legacy-init-upgrade");
+run("node", ["tests/poker-start-hand.stuck-showdown.recovers.behavior.test.mjs"], "poker-start-hand-stuck-showdown-recovers-behavior");
+run("node", ["tests/poker-start-hand.hand-done.recovery-semantics.behavior.test.mjs"], "poker-start-hand-hand-done-recovery-semantics-behavior");
 run("node", ["tests/poker-act.behavior.test.mjs"], "poker-act-behavior");
 run("node", ["tests/poker-act.left-player.invalid-player.behavior.test.mjs"], "poker-act-left-player-invalid-player-behavior");
 run("node", ["tests/poker-act.left-player.leave-table.idempotent-noop.behavior.test.mjs"], "poker-act-left-player-leave-table-idempotent-noop-behavior");
