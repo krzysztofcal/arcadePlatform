@@ -96,6 +96,7 @@ run("node", ["tests/poker-start-hand.short-stack-blind.behavior.test.mjs"], "pok
 run("node", ["tests/poker-start-hand.legacy-init-upgrade.test.mjs"], "poker-start-hand-legacy-init-upgrade");
 run("node", ["tests/poker-act.behavior.test.mjs"], "poker-act-behavior");
 run("node", ["tests/poker-act.left-player.invalid-player.behavior.test.mjs"], "poker-act-left-player-invalid-player-behavior");
+run("node", ["tests/poker-act.left-player.leave-table.idempotent-noop.behavior.test.mjs"], "poker-act-left-player-leave-table-idempotent-noop-behavior");
 run("node", ["tests/poker-act.load.no-duplicate-helpers.behavior.test.mjs"], "poker-act-load-no-duplicate-helpers-behavior");
 run("node", ["tests/poker-act.bot-autoplay.behavior.test.mjs"], "poker-act-bot-autoplay-behavior");
 run("node", ["tests/poker-act.bot-autoplay.timeout-applied.behavior.test.mjs"], "poker-act-bot-autoplay-timeout-applied-behavior");

@@ -816,7 +816,7 @@ export async function handler(event) {
         holeCardsByUserId,
       };
 
-      if (privateState?.leftTableByUserId?.[auth.userId]) {
+      if (privateState?.leftTableByUserId?.[auth.userId] && actionParsed.value.type !== "LEAVE_TABLE") {
         klog("poker_act_rejected", {
           tableId,
           userId: auth.userId,
@@ -826,6 +826,33 @@ export async function handler(event) {
           actionType: actionParsed.value.type,
         });
         throw makeError(409, "player_left");
+      }
+
+      if (privateState?.leftTableByUserId?.[auth.userId] && actionParsed.value.type === "LEAVE_TABLE") {
+        const publicState = withoutPrivateState(currentState);
+        const legalInfo = { actions: [] };
+        const resultPayload = {
+          ok: true,
+          tableId,
+          state: {
+            version: expectedVersion,
+            state: publicState,
+          },
+          me: buildMeStatus(publicState, auth.userId),
+          myHoleCards: holeCardsByUserId[auth.userId] || [],
+          events: [],
+          replayed: false,
+          legalActions: legalInfo.actions,
+          actionConstraints: {},
+        };
+        await storePokerRequestResult(tx, {
+          tableId,
+          userId: auth.userId,
+          requestId,
+          kind: "ACT",
+          result: resultPayload,
+        });
+        return resultPayload;
       }
 
       const timeoutResult = maybeApplyTurnTimeout({ tableId, state: currentState, privateState, nowMs: Date.now() });

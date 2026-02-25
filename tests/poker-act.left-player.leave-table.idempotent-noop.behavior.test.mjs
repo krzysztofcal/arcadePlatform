@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { loadPokerHandler } from "./helpers/poker-test-helpers.mjs";
 
-const tableId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
-const userId = "11111111-1111-4111-8111-111111111111";
-const otherUserId = "22222222-2222-4222-8222-222222222222";
+const tableId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+const userId = "33333333-3333-4333-8333-333333333333";
+const otherUserId = "44444444-4444-4444-8444-444444444444";
 
 const writeSignatures = [
   "update public.poker_state set version = version + 1",
@@ -11,11 +11,9 @@ const writeSignatures = [
   "update public.poker_tables set last_activity_at = now()",
 ];
 
-const hasWriteQueries = (queries) =>
-  writeSignatures.some((signature) => queries.some((query) => query.includes(signature)));
-
 const run = async () => {
   const queries = [];
+  const storedByRequestId = new Map();
 
   const handler = loadPokerHandler("netlify/functions/poker-act.mjs", {
     baseHeaders: () => ({}),
@@ -29,10 +27,17 @@ const run = async () => {
     deriveCommunityCards: () => [],
     deriveRemainingDeck: () => [],
     maybeApplyTurnTimeout: () => {
-      throw new Error("should_not_apply_timeout_for_left_player");
+      throw new Error("should_not_apply_timeout_for_left_leave_noop");
     },
-    ensurePokerRequest: async () => ({ status: "claimed" }),
-    storePokerRequestResult: async () => {},
+    ensurePokerRequest: async (_tx, { requestId }) => {
+      if (storedByRequestId.has(requestId)) {
+        return { status: "stored", result: storedByRequestId.get(requestId) };
+      }
+      return { status: "claimed" };
+    },
+    storePokerRequestResult: async (_tx, { requestId, result }) => {
+      storedByRequestId.set(requestId, result);
+    },
     loadHoleCardsByUserId: async () => ({ holeCardsByUserId: {}, holeCardsStatusByUserId: {} }),
     isHoleCardsTableMissing: async () => false,
     klog: () => {},
@@ -56,7 +61,7 @@ const run = async () => {
           if (text.includes("from public.poker_state")) {
             return [
               {
-                version: 7,
+                version: 12,
                 state: {
                   phase: "PREFLOP",
                   seats: [
@@ -67,17 +72,17 @@ const run = async () => {
                     { userId, seatNo: 1 },
                     { userId: otherUserId, seatNo: 2 },
                   ],
-                  stacks: { [userId]: 100, [otherUserId]: 100 },
-                  pot: 4,
+                  stacks: { [userId]: 125, [otherUserId]: 88 },
+                  pot: 6,
                   community: [],
                   dealerSeatNo: 1,
                   turnUserId: userId,
-                  handId: "hand-left-guard",
-                  handSeed: "seed-left-guard",
+                  handId: "hand-left-idempotent",
+                  handSeed: "seed-left-idempotent",
                   communityDealt: 0,
                   toCallByUserId: { [userId]: 0, [otherUserId]: 0 },
                   betThisRoundByUserId: { [userId]: 0, [otherUserId]: 0 },
-                  actedThisRoundByUserId: { [userId]: false, [otherUserId]: true },
+                  actedThisRoundByUserId: { [userId]: false, [otherUserId]: false },
                   foldedByUserId: { [userId]: false, [otherUserId]: false },
                   leftTableByUserId: { [userId]: true },
                   sitOutByUserId: { [userId]: false, [otherUserId]: false },
@@ -94,35 +99,35 @@ const run = async () => {
       }),
   });
 
-  const invoke = async (requestId, action) =>
-    handler({
-      httpMethod: "POST",
-      headers: { origin: "https://example.test", authorization: "Bearer token" },
-      body: JSON.stringify({ tableId, requestId, action }),
-    });
+  const requestId = "rid-left-leave-idempotent";
+  const payload = { tableId, requestId, action: { type: "LEAVE_TABLE" } };
 
-  const beforeCheckCount = queries.length;
-  const checkResponse = await invoke("rid-left-check", { type: "CHECK" });
-  const checkQueries = queries.slice(beforeCheckCount);
+  const first = await handler({
+    httpMethod: "POST",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    body: JSON.stringify(payload),
+  });
+  const second = await handler({
+    httpMethod: "POST",
+    headers: { origin: "https://example.test", authorization: "Bearer token" },
+    body: JSON.stringify(payload),
+  });
 
-  assert.equal(checkResponse.statusCode, 409);
-  assert.equal(JSON.parse(checkResponse.body || "{}").error, "player_left");
-  assert.equal(hasWriteQueries(checkQueries), false);
+  const firstBody = JSON.parse(first.body || "{}");
+  const secondBody = JSON.parse(second.body || "{}");
 
-  const beforeLeaveCount = queries.length;
-  const leaveResponse = await invoke("rid-left-leave", { type: "LEAVE_TABLE" });
-  const leaveQueries = queries.slice(beforeLeaveCount);
+  assert.equal(first.statusCode, 200);
+  assert.equal(second.statusCode, 200);
+  assert.deepEqual(secondBody, { ...firstBody, replayed: true });
 
-  const leaveBody = JSON.parse(leaveResponse.body || "{}");
-  assert.notEqual(leaveResponse.statusCode, 409);
-  assert.notEqual(leaveBody.error, "player_left");
-  assert.equal(leaveBody.ok, true);
-  assert.equal(hasWriteQueries(leaveQueries), false);
+  for (const signature of writeSignatures) {
+    assert.equal(queries.some((query) => query.includes(signature)), false, `unexpected write query: ${signature}`);
+  }
 };
 
 run()
   .then(() => {
-    process.stdout.write("poker-act left-player invalid-player behavior test passed\n");
+    process.stdout.write("poker-act left-player leave-table idempotent noop behavior test passed\n");
   })
   .catch((error) => {
     process.stderr.write(`${error?.stack || error}\n`);
