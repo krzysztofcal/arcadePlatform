@@ -9,6 +9,9 @@ const otherUserId = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
 const run = async () => {
   let seatDeleteCount = 0;
   let postTransactionCalls = 0;
+  let normalizeRequestIdCalls = 0;
+  let ensureRequestIdSeen = null;
+  let storedRequestIdSeen = null;
 
   const stored = {
     version: 11,
@@ -50,10 +53,19 @@ const run = async () => {
     extractBearerToken: () => "token",
     verifySupabaseJwt: async () => ({ valid: true, userId }),
     isValidUuid: () => true,
-    normalizeRequestId: () => ({ ok: true, value: "active-detach-1" }),
+    normalizeRequestId: (raw) => {
+      normalizeRequestIdCalls += 1;
+      assert.equal(raw, "active-detach-1");
+      return { ok: true, value: raw };
+    },
     updatePokerStateOptimistic,
-    ensurePokerRequest: async () => ({ status: "proceed" }),
-    storePokerRequestResult: async () => {},
+    ensurePokerRequest: async (_tx, payload) => {
+      ensureRequestIdSeen = payload?.requestId ?? null;
+      return { status: "proceed" };
+    },
+    storePokerRequestResult: async (_tx, payload) => {
+      storedRequestIdSeen = payload?.requestId ?? null;
+    },
     deletePokerRequest: async () => {},
     beginSql: async (fn) =>
       fn({
@@ -101,6 +113,9 @@ const run = async () => {
   assert.equal(body.ok, true);
   assert.equal(body.status, undefined);
   assert.equal(body.cashedOut, 125);
+  assert.equal(normalizeRequestIdCalls, 1);
+  assert.equal(ensureRequestIdSeen, "active-detach-1");
+  assert.equal(storedRequestIdSeen, "active-detach-1");
   assert.equal(postTransactionCalls, 1);
   assert.equal(seatDeleteCount, 1);
   assert.equal(body.state.state.seats.some((seat) => seat?.userId === userId), false);

@@ -8,6 +8,9 @@ const botUserId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 
 let seatDeleteCount = 0;
 let postTransactionCalls = 0;
+let normalizeRequestIdCalls = 0;
+let ensureRequestIdSeen = null;
+let storedRequestIdSeen = null;
 
 const stored = {
   version: 10,
@@ -49,10 +52,19 @@ const handler = loadPokerHandler("netlify/functions/poker-leave.mjs", {
   extractBearerToken: () => "token",
   verifySupabaseJwt: async () => ({ valid: true, userId: humanUserId }),
   isValidUuid: () => true,
-  normalizeRequestId: () => ({ ok: true, value: "leave-no-handid" }),
+  normalizeRequestId: (raw) => {
+    normalizeRequestIdCalls += 1;
+    assert.equal(raw, "leave-no-handid");
+    return { ok: true, value: raw };
+  },
   updatePokerStateOptimistic,
-  ensurePokerRequest: async () => ({ status: "proceed" }),
-  storePokerRequestResult: async () => {},
+  ensurePokerRequest: async (_tx, payload) => {
+    ensureRequestIdSeen = payload?.requestId ?? null;
+    return { status: "proceed" };
+  },
+  storePokerRequestResult: async (_tx, payload) => {
+    storedRequestIdSeen = payload?.requestId ?? null;
+  },
   deletePokerRequest: async () => {},
   beginSql: async (fn) =>
     fn({
@@ -100,6 +112,9 @@ assert.equal(response.statusCode, 200);
 const payload = JSON.parse(response.body || "{}");
 assert.equal(payload.ok, true);
 assert.equal(payload.cashedOut, 100);
+assert.equal(normalizeRequestIdCalls, 1);
+assert.equal(ensureRequestIdSeen, "leave-no-handid");
+assert.equal(storedRequestIdSeen, "leave-no-handid");
 assert.equal(postTransactionCalls, 1);
 assert.equal(seatDeleteCount, 1);
 assert.equal(payload.state.state.seats.some((seat) => seat?.userId === humanUserId), false);
