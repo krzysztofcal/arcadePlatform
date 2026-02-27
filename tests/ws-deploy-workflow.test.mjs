@@ -16,6 +16,7 @@ test("workflow runs deterministic install and ws behavior test before deploy", (
   assert.match(text, /node --test ws-server\/server\.behavior\.test\.mjs/);
   assert.match(text, /node --test tests\/ws-deploy-workflow\.test\.mjs/);
   assert.match(text, /node --test tests\/ws-lockfile-integrity\.test\.mjs/);
+  assert.match(text, /node --test tests\/ws-smoke-check-script\.behavior\.test\.mjs/);
   assert.doesNotMatch(text, /node --test tests\/ws-npm-ci-smoke\.test\.mjs/);
 });
 
@@ -38,6 +39,28 @@ test("verify step remains bounded and deploy includes compose preflight", () => 
   assert.match(text, /test "\$WSCAT_OK" = "1"/);
 });
 
+test("ws smoke check validates connected marker inside loop script", () => {
+  const text = workflowText();
+  const start = text.indexOf("WSCAT_OK=0");
+  assert.notEqual(start, -1);
+
+  const guard = 'test "$WSCAT_OK" = "1"';
+  const guardStart = text.indexOf(guard, start);
+  assert.notEqual(guardStart, -1);
+
+  const loopText = text.slice(start, guardStart + guard.length);
+
+  assert.doesNotMatch(text, /sh -lc "[^"]*"\s*\|\s*grep\s+['"`]?connected['"`]?/);
+  assert.match(loopText, /wscat -c wss:\/\/ws\.kcswh\.pl\/ws/);
+  assert.match(loopText, /\bwscat\b[^\n]*\s-w\s+2/);
+  assert.match(loopText, /OUT=\$\(wscat -c wss:\/\/ws\.kcswh\.pl\/ws[^\n]*\|\s*head\s+-n\s+1[^\n]*\|\|\s*true\)/);
+  assert.match(loopText, /printf\s+['"]?%s\\n['"]?\s+['"]?\$OUT['"]?\s*\|\s*grep\s+-q\s+['"]?\^connected['"]?/);
+  assert.match(loopText, /\$OUT[^\n]*grep\s+-q[^\n]*connected/);
+  assert.doesNotMatch(loopText, /\|\s*grep\s+-qx\s+'connected'/);
+  assert.doesNotMatch(loopText, /head\s+-n\s+5/);
+  assert.match(loopText, /for i in 1 2 3 4 5; do/);
+  assert.match(loopText, /timeout 12s/);
+});
 
 test("dockerfile enforces lockfile-based deterministic install", () => {
   const text = dockerfileText();
