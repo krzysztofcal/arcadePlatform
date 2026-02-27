@@ -6,6 +6,7 @@ on:
     paths:
       - "ws-server/**"
       - ".github/workflows/ws-deploy.yml"
+      - "tests/ws-deploy-workflow.test.mjs"
 
 jobs:
   build-push-deploy:
@@ -24,10 +25,13 @@ jobs:
           node-version: 20
 
       - name: Install WS server dependencies
-        run: npm install --prefix ws-server
+        run: npm ci --prefix ws-server
 
       - name: Run WS behavior test
         run: node --test ws-server/server.behavior.test.mjs
+
+      - name: Run workflow-content test
+        run: node --test tests/ws-deploy-workflow.test.mjs
 
       - name: Login to GHCR
         uses: docker/login-action@v3
@@ -51,6 +55,7 @@ jobs:
           key: ${{ secrets.WS_SSH_KEY }}
           script: |
             set -euo pipefail
+            docker compose version >/dev/null 2>&1 || { echo "docker compose is required on VPS"; exit 1; }
             echo "${{ secrets.GHCR_PAT }}" | docker login ghcr.io -u krzysztofcal --password-stdin
             cd /opt/arcade-ws
             docker compose pull
