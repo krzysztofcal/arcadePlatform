@@ -16,6 +16,7 @@ test("workflow runs deterministic install and ws behavior test before deploy", (
   assert.match(text, /node --test ws-server\/server\.behavior\.test\.mjs/);
   assert.match(text, /node --test tests\/ws-deploy-workflow\.test\.mjs/);
   assert.match(text, /node --test tests\/ws-lockfile-integrity\.test\.mjs/);
+  assert.match(text, /node --test tests\/ws-npm-ci-smoke\.test\.mjs/);
 });
 
 test("verify step discovers ws container by compose label and avoids hardcoded name", () => {

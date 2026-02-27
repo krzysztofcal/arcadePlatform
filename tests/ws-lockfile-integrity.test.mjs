@@ -11,6 +11,7 @@ test("ws lockfile stays canonical for npm ci", () => {
   const lock = readJson("ws-server/package-lock.json");
 
   assert.equal(lock.lockfileVersion, 3);
+  assert.equal(lock.name, pkg.name);
   assert.ok(lock.packages && typeof lock.packages === "object");
   assert.ok(lock.packages[""] && typeof lock.packages[""] === "object");
   assert.equal(lock.packages[""].name, pkg.name);

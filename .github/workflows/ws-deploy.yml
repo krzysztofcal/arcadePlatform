@@ -8,6 +8,7 @@ on:
       - ".github/workflows/ws-deploy.yml"
       - "tests/ws-deploy-workflow.test.mjs"
       - "tests/ws-lockfile-integrity.test.mjs"
+      - "tests/ws-npm-ci-smoke.test.mjs"
 
 jobs:
   build-push-deploy:
@@ -36,6 +37,9 @@ jobs:
 
       - name: Run lockfile integrity test
         run: node --test tests/ws-lockfile-integrity.test.mjs
+
+      - name: Run npm ci smoke test
+        run: node --test tests/ws-npm-ci-smoke.test.mjs
 
       - name: Login to GHCR
         uses: docker/login-action@v3
