@@ -86,7 +86,7 @@ jobs:
             curl -fsS http://127.0.0.1:3000/healthz | grep '^ok$'
             WSCAT_OK=0
             for i in 1 2 3 4 5; do
-              if timeout 12s docker run --rm --network host node:20-alpine sh -lc 'npm i -g wscat >/dev/null 2>&1 && OUT="$(wscat -c wss://ws.kcswh.pl/ws -w 2 2>/dev/null | head -n 1 || true)" && printf "%s\n" "$OUT" | grep -q "^connected"'; then
+              if timeout 12s docker run --rm --network host node:20-alpine sh -lc 'npm i -g wscat >/dev/null 2>&1 && wscat -c wss://ws.kcswh.pl/ws -x ping -w 2 >/dev/null 2>&1'; then
                 WSCAT_OK=1
                 break
               fi
