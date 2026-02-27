@@ -39,7 +39,7 @@ jobs:
           username: ${{ secrets.WS_USER }}
           key: ${{ secrets.WS_SSH_KEY }}
           script: |
-            set -eu
+            set -euo pipefail
             echo "${{ secrets.GHCR_PAT }}" | docker login ghcr.io -u krzysztofcal --password-stdin
             cd /opt/arcade-ws
             docker compose pull
@@ -52,9 +52,11 @@ jobs:
           username: ${{ secrets.WS_USER }}
           key: ${{ secrets.WS_SSH_KEY }}
           script: |
-            set -eu
-            docker ps --filter name=ws --format '{{.Names}}' | grep '^ws$'
-            docker inspect ws --format='{{.Config.Image}}' | grep 'ghcr.io/krzysztofcal/arcadeplatform-ws:main'
-            docker logs ws --tail 20 | grep 'WS listening on'
+            set -euo pipefail
+            WS_CID="$(docker ps --filter "label=com.docker.compose.service=ws" --format '{{.ID}}' | head -n 1)"
+            test -n "$WS_CID"
+            test "$(docker ps --filter "label=com.docker.compose.service=ws" --format '{{.ID}}' | wc -l | tr -d ' ')" = "1"
+            docker inspect "$WS_CID" --format='{{.Config.Image}}' | grep 'ghcr.io/krzysztofcal/arcadeplatform-ws:main'
+            docker logs "$WS_CID" --tail 20 | grep 'WS listening on'
             curl -fsS http://127.0.0.1:3000/healthz | grep '^ok$'
-            docker run --rm --network host node:20-alpine sh -lc "npm i -g wscat >/dev/null 2>&1 && wscat -c wss://ws.kcswh.pl/ws -x 'ping' -w 3" | grep 'connected'
+            timeout 12s docker run --rm --network host node:20-alpine sh -lc "npm i -g wscat >/dev/null 2>&1 && wscat -c wss://ws.kcswh.pl/ws -x 'ping' -w 2" | grep 'connected'
