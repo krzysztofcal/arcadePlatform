@@ -1,0 +1,91 @@
+name: WS Deploy
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - "ws-server/**"
+      - ".github/workflows/ws-deploy.yml"
+      - "tests/ws-deploy-workflow.test.mjs"
+      - "tests/ws-lockfile-integrity.test.mjs"
+
+jobs:
+  build-push-deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install WS server dependencies
+        run: npm ci --prefix ws-server
+
+      - name: Run WS behavior test
+        run: node --test ws-server/server.behavior.test.mjs
+
+      - name: Run workflow-content test
+        run: node --test tests/ws-deploy-workflow.test.mjs
+
+      - name: Run lockfile integrity test
+        run: node --test tests/ws-lockfile-integrity.test.mjs
+
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build & Push Docker Image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./ws-server
+          push: true
+          tags: ghcr.io/krzysztofcal/arcadeplatform-ws:main
+
+      - name: Deploy to VPS via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.WS_HOST }}
+          username: ${{ secrets.WS_USER }}
+          key: ${{ secrets.WS_SSH_KEY }}
+          script: |
+            set -euo pipefail
+            docker compose version >/dev/null 2>&1 || { echo "docker compose is required on VPS"; exit 1; }
+            echo "${{ secrets.GHCR_PAT }}" | docker login ghcr.io -u krzysztofcal --password-stdin
+            cd /opt/arcade-ws
+            docker compose pull
+            docker compose up -d
+
+      - name: Verify deploy health and runtime on VPS
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.WS_HOST }}
+          username: ${{ secrets.WS_USER }}
+          key: ${{ secrets.WS_SSH_KEY }}
+          script: |
+            set -euo pipefail
+            WS_CID="$(docker ps --filter "label=com.docker.compose.service=ws" --format '{{.ID}}' | head -n 1)"
+            test -n "$WS_CID"
+            test "$(docker ps --filter "label=com.docker.compose.service=ws" --format '{{.ID}}' | wc -l | tr -d ' ')" = "1"
+            docker inspect "$WS_CID" --format='{{.Config.Image}}' | grep 'ghcr.io/krzysztofcal/arcadeplatform-ws:main'
+            docker logs "$WS_CID" --tail 20 | grep 'WS listening on'
+            curl -fsS http://127.0.0.1:3000/healthz | grep '^ok$'
+            WSCAT_OK=0
+            for i in 1 2 3 4 5; do
+              if timeout 12s docker run --rm --network host node:20-alpine sh -lc "npm i -g wscat >/dev/null 2>&1 && wscat -c wss://ws.kcswh.pl/ws -x 'ping' -w 2" | grep 'connected'; then
+                WSCAT_OK=1
+                break
+              fi
+              sleep 2
+            done
+            test "$WSCAT_OK" = "1"
