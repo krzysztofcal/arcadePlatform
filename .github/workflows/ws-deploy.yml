@@ -39,7 +39,22 @@ jobs:
           username: ${{ secrets.WS_USER }}
           key: ${{ secrets.WS_SSH_KEY }}
           script: |
+            set -eu
+            echo "${{ secrets.GHCR_PAT }}" | docker login ghcr.io -u krzysztofcal --password-stdin
             cd /opt/arcade-ws
             docker compose pull
             docker compose up -d
-            docker ps --filter name=ws
+
+      - name: Verify deploy health and runtime on VPS
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.WS_HOST }}
+          username: ${{ secrets.WS_USER }}
+          key: ${{ secrets.WS_SSH_KEY }}
+          script: |
+            set -eu
+            docker ps --filter name=ws --format '{{.Names}}' | grep '^ws$'
+            docker inspect ws --format='{{.Config.Image}}' | grep 'ghcr.io/krzysztofcal/arcadeplatform-ws:main'
+            docker logs ws --tail 20 | grep 'WS listening on'
+            curl -fsS http://127.0.0.1:3000/healthz | grep '^ok$'
+            docker run --rm --network host node:20-alpine sh -lc "npm i -g wscat >/dev/null 2>&1 && wscat -c wss://ws.kcswh.pl/ws -x 'ping' -w 3" | grep 'connected'

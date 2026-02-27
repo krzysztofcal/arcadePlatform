@@ -3,6 +3,11 @@ import { WebSocketServer } from "ws";
 
 const PORT = Number(process.env.PORT || 3000);
 
+function klog(kind, data) {
+  const payload = data && typeof data === "object" ? ` ${JSON.stringify(data)}` : "";
+  process.stdout.write(`[klog] ${kind}${payload}\n`);
+}
+
 const server = http.createServer((req, res) => {
   if (req.url === "/healthz") {
     res.writeHead(200, { "content-type": "text/plain" });
@@ -24,4 +29,6 @@ wss.on("connection", (ws) => {
   });
 });
 
-server.listen(PORT, "0.0.0.0");
+server.listen(PORT, "0.0.0.0", () => {
+  klog("ws_listening", { message: `WS listening on ${PORT}`, port: PORT });
+});
