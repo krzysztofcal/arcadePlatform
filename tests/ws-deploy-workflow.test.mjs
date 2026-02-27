@@ -39,7 +39,7 @@ test("verify step remains bounded and deploy includes compose preflight", () => 
   assert.match(text, /test "\$WSCAT_OK" = "1"/);
 });
 
-test("ws smoke check validates connected marker inside loop script", () => {
+test("ws smoke check relies on wscat exit code (no stdout parsing)", () => {
   const text = workflowText();
   const start = text.indexOf("WSCAT_OK=0");
   assert.notEqual(start, -1);
@@ -51,19 +51,16 @@ test("ws smoke check validates connected marker inside loop script", () => {
   const loopText = text.slice(start, guardStart + guard.length);
 
   assert.match(loopText, /wscat -c wss:\/\/ws\.kcswh\.pl\/ws/);
-  assert.match(loopText, /\bwscat\b[^\n]*\s-w\s+2/);
-  assert.match(loopText, /sh -lc '\s*[^\n]*/);
-  assert.doesNotMatch(loopText, /sh -lc "[^"]*\$OUT[^"]*"/);
-  assert.doesNotMatch(loopText, /\bsh -lc "/);
-  assert.match(loopText, /OUT="\$\(\s*wscat -c wss:\/\/ws\.kcswh\.pl\/ws[^\n]*\|\s*head\s+-n\s+1[^\n]*\|\|\s*true\s*\)"/);
-  assert.match(loopText, /printf\s+"%s\\n"\s+"\$OUT"\s*\|\s*grep\s+-q\s+"\^connected"/);
-  assert.doesNotMatch(loopText, /grep\s+-qx\s+"\^connected\$"/);
-  assert.doesNotMatch(loopText, /sh -lc "[^"]*"\s*\|\s*grep\s+[^\n]*connected/);
-  assert.doesNotMatch(loopText, /head\s+-n\s+5/);
+  assert.match(loopText, /\bwscat\b[^\n]*\s-x\s+ping\b/);
+  assert.match(loopText, /\bwscat\b[^\n]*\s-w\s+2\b/);
+  assert.match(loopText, /\bwscat\b[^\n]*>\s*\/dev\/null\s+2>&1/);
+  assert.doesNotMatch(loopText, /\|\s*grep\s+.*connected/);
+  assert.doesNotMatch(loopText, /\bOUT=\$?\(/);
   assert.match(loopText, /for i in 1 2 3 4 5; do/);
   assert.match(loopText, /timeout 12s/);
   assert.match(loopText, /test "\$WSCAT_OK" = "1"/);
 });
+
 
 test("dockerfile enforces lockfile-based deterministic install", () => {
   const text = dockerfileText();
