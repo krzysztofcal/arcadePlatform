@@ -6,6 +6,10 @@ function workflowText() {
   return fs.readFileSync(".github/workflows/ws-deploy.yml", "utf8");
 }
 
+function dockerfileText() {
+  return fs.readFileSync("ws-server/Dockerfile", "utf8");
+}
+
 test("workflow runs deterministic install and ws behavior test before deploy", () => {
   const text = workflowText();
   assert.match(text, /npm ci --prefix ws-server/);
@@ -30,4 +34,12 @@ test("verify step remains bounded and deploy includes compose preflight", () => 
   assert.match(text, /for i in 1 2 3 4 5; do/);
   assert.match(text, /timeout 12s docker run --rm --network host node:20-alpine/);
   assert.match(text, /test "\$WSCAT_OK" = "1"/);
+});
+
+
+test("dockerfile enforces lockfile-based deterministic install", () => {
+  const text = dockerfileText();
+  assert.match(text, /COPY\s+package\.json\s+package-lock\.json/);
+  assert.match(text, /npm\s+ci/);
+  assert.doesNotMatch(text, /npm\s+install/);
 });
