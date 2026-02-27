@@ -20,4 +20,10 @@ test("ws lockfile stays canonical for npm ci", () => {
   assert.equal(lockWs, pkgWs);
 
   assert.ok(lock.packages["node_modules/ws"] && lock.packages["node_modules/ws"].version);
+  assert.ok(lock.packages["node_modules/ws"] && typeof lock.packages["node_modules/ws"].resolved === "string" && lock.packages["node_modules/ws"].resolved.length > 0, "lockfile must include node_modules/ws.resolved (regenerate via npm install in ws-server)");
+  assert.ok(lock.packages["node_modules/ws"] && typeof lock.packages["node_modules/ws"].integrity === "string" && lock.packages["node_modules/ws"].integrity.length > 0, "lockfile must include node_modules/ws.integrity (regenerate via npm install in ws-server)");
+
+  if (lock.dependencies && lock.dependencies.ws) {
+    assert.ok(typeof lock.dependencies.ws === "object");
+  }
 });
