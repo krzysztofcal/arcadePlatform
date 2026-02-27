@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import net from "node:net";
-import fs from "node:fs";
+import WebSocket from "ws";
 
 function getFreePort() {
   return new Promise((resolve, reject) => {
@@ -46,12 +46,7 @@ function waitForExit(proc) {
   return new Promise((resolve) => proc.once("exit", resolve));
 }
 
-test("server sends connected marker and serves healthz", async (t) => {
-  if (!fs.existsSync("ws-server/node_modules/ws")) {
-    t.skip("ws-server/node_modules/ws is unavailable in this environment");
-    return;
-  }
-  assert.ok(typeof WebSocket === "function", "Node WebSocket client is unavailable in this runtime");
+test("server sends connected marker and serves healthz", async () => {
   const port = await getFreePort();
   const child = spawn(process.execPath, ["ws-server/server.mjs"], {
     env: { ...process.env, PORT: String(port) },
@@ -68,16 +63,17 @@ test("server sends connected marker and serves healthz", async (t) => {
         reject(new Error("Timed out waiting for first websocket message"));
       }, 5000);
 
-      ws.onmessage = (event) => {
+      ws.once("message", (data) => {
         clearTimeout(timer);
         ws.close();
-        resolve(String(event.data));
-      };
-      ws.onerror = () => {
+        resolve(String(data));
+      });
+
+      ws.once("error", () => {
         clearTimeout(timer);
         ws.close();
         reject(new Error("WebSocket connection failed"));
-      };
+      });
     });
 
     assert.equal(firstMessage, "connected");

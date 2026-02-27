@@ -16,9 +16,17 @@ test("verify step discovers WS container instead of hardcoded name", async () =>
   expect(text).toContain('docker logs "$WS_CID"');
 });
 
-test("verify step enforces bounded smoke check and strict shell", async () => {
+test("workflow runs ws behavior test before build", async () => {
+  const text = workflowText();
+  expect(text).toContain("npm install --prefix ws-server");
+  expect(text).toContain("node --test ws-server/server.behavior.test.mjs");
+});
+
+test("verify step enforces bounded smoke check, retries and strict shell", async () => {
   const text = workflowText();
   expect(text).toContain("set -euo pipefail");
+  expect(text).toContain("for i in 1 2 3 4 5; do");
+  expect(text).toContain("sleep 2");
   expect(text).toContain("timeout 12s docker run --rm --network host node:20-alpine");
-  expect(text).toContain("wscat -c wss://ws.kcswh.pl/ws -x 'ping' -w 2");
+  expect(text).toContain('test "$WSCAT_OK" = "1"');
 });

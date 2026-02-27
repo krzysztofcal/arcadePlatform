@@ -18,6 +18,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install WS server dependencies
+        run: npm install --prefix ws-server
+
+      - name: Run WS behavior test
+        run: node --test ws-server/server.behavior.test.mjs
+
       - name: Login to GHCR
         uses: docker/login-action@v3
         with:
@@ -59,4 +70,12 @@ jobs:
             docker inspect "$WS_CID" --format='{{.Config.Image}}' | grep 'ghcr.io/krzysztofcal/arcadeplatform-ws:main'
             docker logs "$WS_CID" --tail 20 | grep 'WS listening on'
             curl -fsS http://127.0.0.1:3000/healthz | grep '^ok$'
-            timeout 12s docker run --rm --network host node:20-alpine sh -lc "npm i -g wscat >/dev/null 2>&1 && wscat -c wss://ws.kcswh.pl/ws -x 'ping' -w 2" | grep 'connected'
+            WSCAT_OK=0
+            for i in 1 2 3 4 5; do
+              if timeout 12s docker run --rm --network host node:20-alpine sh -lc "npm i -g wscat >/dev/null 2>&1 && wscat -c wss://ws.kcswh.pl/ws -x 'ping' -w 2" | grep 'connected'; then
+                WSCAT_OK=1
+                break
+              fi
+              sleep 2
+            done
+            test "$WSCAT_OK" = "1"
