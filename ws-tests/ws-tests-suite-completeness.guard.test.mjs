@@ -52,14 +52,23 @@ test("required ws tests are wired into PR and deploy workflows", () => {
   const deployWorkflow = workflowText(".github/workflows/ws-deploy.yml");
 
   for (const file of wsTestFiles()) {
+    const command = `node --test ${file}`;
+
     if (mustRunInPr(file)) {
-      assert.match(prWorkflow, new RegExp(`node --test ${file.replace(/\./g, "\\.")}`), `Missing in PR workflow: ${file}`);
+      assert.ok(prWorkflow.includes(command), `Missing in PR workflow: ${file}`);
     }
 
     if (mustRunInDeploy(file)) {
-      assert.match(deployWorkflow, new RegExp(`node --test ${file.replace(/\./g, "\\.")}`), `Missing in deploy workflow: ${file}`);
+      assert.ok(deployWorkflow.includes(command), `Missing in deploy workflow: ${file}`);
     }
   }
+});
+
+test("workflow wiring check uses literal matching (no dynamic RegExp)", () => {
+  const text = workflowText("ws-tests/ws-tests-suite-completeness.guard.test.mjs");
+  assert.doesNotMatch(text, /\bnew RegExp\b/);
+  assert.doesNotMatch(text, /\bRegExp\s*\(/);
+  assert.match(text, /\.includes\(/);
 });
 
 test("protocol doc gate is present in both workflows", () => {
