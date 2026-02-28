@@ -34,11 +34,17 @@ jobs:
       - name: Run ws conn-state behavior test
         run: node --test ws-server/poker/runtime/conn-state.behavior.test.mjs
 
+      - name: Run ws table behavior test
+        run: node --test ws-server/poker/table/table.behavior.test.mjs
+
       - name: Run WS PR workflow guard test
         run: node --test ws-tests/ws-pr-workflow.test.mjs
 
       - name: Run ws auth workflow guard behavior test
         run: node --test ws-tests/ws-ws-auth-workflow.guard.behavior.test.mjs
+
+      - name: Run ws table workflow guard behavior test
+        run: node --test ws-tests/ws-table-workflow.guard.behavior.test.mjs
 
       - name: Run ws tests location guard
         run: node --test ws-tests/ws-tests-location.guard.test.mjs
