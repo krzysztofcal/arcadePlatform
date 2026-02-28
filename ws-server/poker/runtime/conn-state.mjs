@@ -1,12 +1,16 @@
 import { randomUUID } from "node:crypto";
 import { PROTOCOL_VERSION } from "../protocol/constants.mjs";
+import { createSession } from "./session.mjs";
 
 export const HEARTBEAT_MS = 15000;
 
-export function createConnState() {
+export function createConnState(nowTs = () => new Date().toISOString()) {
+  const sessionId = `sess_${randomUUID()}`;
   return {
-    sessionId: `sess_${randomUUID()}`,
+    sessionId,
     negotiatedVersion: PROTOCOL_VERSION,
-    protocolViolations: []
+    protocolViolations: [],
+    userId: null,
+    session: createSession({ sessionId, nowTs })
   };
 }
