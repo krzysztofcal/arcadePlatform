@@ -54,15 +54,24 @@ function assertRequiredOrder(text) {
 
   const install = block.indexOf("npm ci --prefix ws-server");
   const behavior = block.indexOf("node --test ws-server/server.behavior.test.mjs");
-  const imageCheck = block.indexOf("node --test tests/ws-image-contains-protocol.behavior.test.mjs");
-  const containerCheck = block.indexOf("node --test tests/ws-container-starts.behavior.test.mjs");
+  const locationGuard = block.indexOf("node --test ws-tests/ws-tests-location.guard.test.mjs");
+  const suiteGuard = block.indexOf("node --test ws-tests/ws-tests-suite-completeness.guard.test.mjs");
+  const protocolDoc = block.indexOf("node --test ws-tests/ws-poker-protocol-doc.test.mjs");
+  const imageCheck = block.indexOf("node --test ws-tests/ws-image-contains-protocol.behavior.test.mjs");
+  const containerCheck = block.indexOf("node --test ws-tests/ws-container-starts.behavior.test.mjs");
 
   assert.notEqual(install, -1);
   assert.notEqual(behavior, -1);
+  assert.notEqual(locationGuard, -1);
+  assert.notEqual(suiteGuard, -1);
+  assert.notEqual(protocolDoc, -1);
   assert.notEqual(imageCheck, -1);
   assert.notEqual(containerCheck, -1);
   assert.equal(install < behavior, true);
-  assert.equal(behavior < imageCheck, true);
+  assert.equal(behavior < locationGuard, true);
+  assert.equal(locationGuard < suiteGuard, true);
+  assert.equal(suiteGuard < protocolDoc, true);
+  assert.equal(protocolDoc < imageCheck, true);
   assert.equal(imageCheck < containerCheck, true);
 }
 
@@ -70,9 +79,7 @@ test("ws pr workflow is pull_request-only with ws-related path filters", () => {
   const text = workflowText();
   assert.match(text, /on:\s*\n\s*pull_request:/);
   assert.match(text, /paths:\s*\n\s*-\s*"ws-server\/\*\*"/);
-  assert.match(text, /"tests\/ws-pr-workflow\.test\.mjs"/);
-  assert.match(text, /"tests\/ws-image-contains-protocol\.behavior\.test\.mjs"/);
-  assert.match(text, /"tests\/ws-container-starts\.behavior\.test\.mjs"/);
+  assert.match(text, /"ws-tests\/\*\*"/);
   assert.doesNotMatch(text, /push:/);
 });
 
@@ -94,7 +101,7 @@ test("ws pr workflow order check tolerates CRLF", () => {
 
 test("ws pr workflow order check is resilient to non-step occurrences", () => {
   const text = workflowText();
-  const textWithNoise = `${text}\n# harmless note: node --test tests/ws-container-starts.behavior.test.mjs`;
+  const textWithNoise = `${text}\n# harmless note: node --test ws-tests/ws-container-starts.behavior.test.mjs`;
   assertRequiredOrder(textWithNoise);
 });
 

@@ -4,10 +4,8 @@ on:
   pull_request:
     paths:
       - "ws-server/**"
+      - "ws-tests/**"
       - ".github/workflows/ws-pr-checks.yml"
-      - "tests/ws-pr-workflow.test.mjs"
-      - "tests/ws-image-contains-protocol.behavior.test.mjs"
-      - "tests/ws-container-starts.behavior.test.mjs"
 
 jobs:
   ws-harness:
@@ -31,10 +29,19 @@ jobs:
         run: node --test ws-server/server.behavior.test.mjs
 
       - name: Run WS PR workflow guard test
-        run: node --test tests/ws-pr-workflow.test.mjs
+        run: node --test ws-tests/ws-pr-workflow.test.mjs
+
+      - name: Run ws tests location guard
+        run: node --test ws-tests/ws-tests-location.guard.test.mjs
+
+      - name: Run ws tests suite completeness guard
+        run: node --test ws-tests/ws-tests-suite-completeness.guard.test.mjs
+
+      - name: Run ws poker protocol doc test
+        run: node --test ws-tests/ws-poker-protocol-doc.test.mjs
 
       - name: Run ws image protocol content behavior test
-        run: node --test tests/ws-image-contains-protocol.behavior.test.mjs
+        run: node --test ws-tests/ws-image-contains-protocol.behavior.test.mjs
 
       - name: Run ws container startup behavior test
-        run: node --test tests/ws-container-starts.behavior.test.mjs
+        run: node --test ws-tests/ws-container-starts.behavior.test.mjs
