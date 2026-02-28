@@ -17,6 +17,8 @@ test("workflow runs deterministic install and ws behavior test before deploy", (
   assert.match(text, /node --test tests\/ws-deploy-workflow\.test\.mjs/);
   assert.match(text, /node --test tests\/ws-lockfile-integrity\.test\.mjs/);
   assert.match(text, /node --test tests\/ws-smoke-check-script\.behavior\.test\.mjs/);
+  assert.match(text, /node --test tests\/ws-image-contains-protocol\.behavior\.test\.mjs/);
+  assert.match(text, /node --test tests\/ws-container-starts\.behavior\.test\.mjs/);
   assert.doesNotMatch(text, /node --test tests\/ws-npm-ci-smoke\.test\.mjs/);
 });
 
@@ -27,6 +29,7 @@ test("verify step discovers ws container by compose label and avoids hardcoded n
   assert.match(text, /label=com\.docker\.compose\.service=ws/);
   assert.match(text, /WS_CID="\$\(docker ps --filter "label=com\.docker\.compose\.service=ws" --format/);
   assert.match(text, /docker inspect "\$WS_CID"/);
+  assert.match(text, /docker exec "\$WS_CID" test -f \/app\/poker\/protocol\/constants\.mjs/);
   assert.match(text, /docker logs "\$WS_CID"/);
 });
 
@@ -65,6 +68,7 @@ test("ws smoke check relies on wscat exit code (no stdout parsing)", () => {
 test("dockerfile enforces lockfile-based deterministic install", () => {
   const text = dockerfileText();
   assert.match(text, /COPY\s+package\.json\s+package-lock\.json/);
+  assert.match(text, /COPY\s+poker\s+\.\/poker/);
   assert.match(text, /npm\s+ci/);
   assert.doesNotMatch(text, /npm\s+install/);
 });
