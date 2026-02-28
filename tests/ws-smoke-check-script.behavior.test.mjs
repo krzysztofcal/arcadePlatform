@@ -49,39 +49,86 @@ function runSmokeScript(url, timeoutMs) {
   const script = `
 const WebSocket = require('ws');
 const url = process.argv[1];
-const timer = setTimeout(() => process.exit(2), 2500);
+const timer = setTimeout(() => finish(2), 2500);
 const ws = new WebSocket(url);
+let done = false;
+
+function finish(code, message) {
+  if (done) return;
+  done = true;
+  clearTimeout(timer);
+  if (message) {
+    process.stdout.write(message + '\\n');
+  }
+  if (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN) {
+    ws.close();
+  }
+  process.exit(code);
+}
+
 ws.once('message', (data) => {
   const msg = String(data);
-  clearTimeout(timer);
-  ws.close();
-  process.exit(msg === 'connected' ? 0 : 3);
+  let parsed;
+
+  try {
+    parsed = JSON.parse(msg);
+  } catch {
+    finish(3, msg);
+    return;
+  }
+
+  if (parsed && parsed.type === 'helloAck' && parsed.payload && parsed.payload.version === '1.0') {
+    finish(0, JSON.stringify(parsed));
+    return;
+  }
+
+  finish(3, JSON.stringify(parsed));
 });
-ws.once('error', () => {
-  clearTimeout(timer);
-  process.exit(4);
+
+ws.once('error', () => finish(4));
+ws.once('close', () => finish(5));
+ws.once('open', () => {
+  ws.send(
+    JSON.stringify({
+      version: '1.0',
+      type: 'hello',
+      ts: new Date().toISOString(),
+      payload: { supportedVersions: ['1.0'] }
+    })
+  );
 });
 `;
 
   const child = spawn(process.execPath, ["-e", script, url], {
     cwd: "ws-server",
-    stdio: ["ignore", "ignore", "ignore"]
+    stdio: ["ignore", "pipe", "pipe"]
   });
 
   return new Promise((resolve) => {
+    let stdout = "";
+    let stderr = "";
+
+    child.stdout.on("data", (buf) => {
+      stdout += String(buf);
+    });
+
+    child.stderr.on("data", (buf) => {
+      stderr += String(buf);
+    });
+
     const timer = setTimeout(() => {
       child.kill("SIGKILL");
-      resolve(124);
+      resolve({ code: 124, stdout, stderr });
     }, timeoutMs);
 
     child.once("exit", (code) => {
       clearTimeout(timer);
-      resolve(code ?? 1);
+      resolve({ code: code ?? 1, stdout, stderr });
     });
   });
 }
 
-test("smoke script succeeds when websocket returns connected marker", async () => {
+test("smoke script succeeds when websocket returns helloAck", async () => {
   const port = await getFreePort();
   const server = spawn(process.execPath, ["ws-server/server.mjs"], {
     env: { ...process.env, PORT: String(port) },
@@ -91,8 +138,10 @@ test("smoke script succeeds when websocket returns connected marker", async () =
   try {
     await waitForListening(server, 5000);
     const started = Date.now();
-    const code = await runSmokeScript(`ws://127.0.0.1:${port}`, 5000);
-    assert.equal(code, 0);
+    const result = await runSmokeScript(`ws://127.0.0.1:${port}`, 5000);
+    assert.equal(result.code, 0);
+    assert.match(result.stdout, /"type":"helloAck"/);
+    assert.match(result.stdout, /"version":"1\.0"/);
     assert.ok(Date.now() - started < 5000, "smoke script should finish within timeout");
   } finally {
     server.kill("SIGTERM");
@@ -103,7 +152,25 @@ test("smoke script succeeds when websocket returns connected marker", async () =
 test("smoke script fails when websocket endpoint is unreachable", async () => {
   const port = await getFreePort();
   const started = Date.now();
-  const code = await runSmokeScript(`ws://127.0.0.1:${port}`, 5000);
-  assert.notEqual(code, 0);
+  const result = await runSmokeScript(`ws://127.0.0.1:${port}`, 5000);
+  assert.notEqual(result.code, 0);
   assert.ok(Date.now() - started < 5000, "smoke script should fail within timeout");
+});
+
+test("smoke script resolves deterministically when server closes quickly", async () => {
+  const port = await getFreePort();
+  const fastCloseServer = net.createServer((socket) => {
+    socket.destroy();
+  });
+
+  await new Promise((resolve) => fastCloseServer.listen(port, "127.0.0.1", resolve));
+
+  try {
+    const started = Date.now();
+    const result = await runSmokeScript(`ws://127.0.0.1:${port}`, 5000);
+    assert.notEqual(result.code, 0);
+    assert.ok(Date.now() - started < 5000, "smoke script should resolve quickly on fast close");
+  } finally {
+    await new Promise((resolve) => fastCloseServer.close(resolve));
+  }
 });
