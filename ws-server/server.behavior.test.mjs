@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { createHmac } from "node:crypto";
 import net from "node:net";
 import WebSocket from "ws";
 
@@ -46,48 +47,103 @@ function waitForExit(proc) {
   return new Promise((resolve) => proc.once("exit", resolve));
 }
 
-test("server supports healthz and hello/helloAck smoke flow", async () => {
-  const port = await getFreePort();
-  const child = spawn(process.execPath, ["ws-server/server.mjs"], {
-    env: { ...process.env, PORT: String(port) },
-    stdio: ["ignore", "pipe", "pipe"]
+function createServer({ env = {} } = {}) {
+  return getFreePort().then((port) => {
+    const child = spawn(process.execPath, ["ws-server/server.mjs"], {
+      env: { ...process.env, PORT: String(port), ...env },
+      stdio: ["ignore", "pipe", "pipe"]
+    });
+    return { port, child };
   });
+}
+
+function connectClient(port) {
+  return new Promise((resolve, reject) => {
+    const ws = new WebSocket(`ws://127.0.0.1:${port}`);
+    ws.once("open", () => resolve(ws));
+    ws.once("error", reject);
+  });
+}
+
+function nextMessage(ws, timeoutMs = 5000) {
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      clearTimeout(timer);
+      ws.off("message", onMessage);
+      ws.off("error", onError);
+      ws.off("close", onClose);
+    };
+
+    const onMessage = (data) => {
+      cleanup();
+      resolve(JSON.parse(String(data)));
+    };
+
+    const onError = (error) => {
+      cleanup();
+      reject(error);
+    };
+
+    const onClose = (code) => {
+      cleanup();
+      reject(new Error(`Socket closed before message: ${code}`));
+    };
+
+    const timer = setTimeout(() => {
+      cleanup();
+      reject(new Error("Timed out waiting for websocket message"));
+    }, timeoutMs);
+
+    ws.on("message", onMessage);
+    ws.on("error", onError);
+    ws.on("close", onClose);
+  });
+}
+
+function sendFrame(ws, frame) {
+  ws.send(JSON.stringify(frame));
+}
+
+function base64urlJson(value) {
+  return Buffer.from(JSON.stringify(value)).toString("base64url");
+}
+
+function makeHs256Jwt({ secret, sub }) {
+  const encodedHeader = base64urlJson({ alg: "HS256", typ: "JWT" });
+  const encodedPayload = base64urlJson({ sub });
+  const signature = createHmac("sha256", secret).update(`${encodedHeader}.${encodedPayload}`).digest("base64url");
+  return `${encodedHeader}.${encodedPayload}.${signature}`;
+}
+
+async function hello(ws) {
+  sendFrame(ws, {
+    version: "1.0",
+    type: "hello",
+    requestId: "req-hello",
+    ts: "2026-02-28T00:00:00Z",
+    payload: { supportedVersions: ["1.0"] }
+  });
+  return nextMessage(ws);
+}
+
+function protectedEchoFrame(requestId = "req-protected") {
+  return {
+    version: "1.0",
+    type: "protected_echo",
+    requestId,
+    ts: "2026-02-28T00:00:01Z",
+    payload: { echo: "hi" }
+  };
+}
+
+test("server supports healthz and hello/helloAck smoke flow", async () => {
+  const { port, child } = await createServer();
 
   try {
     await waitForListening(child, 5000);
+    const ws = await connectClient(port);
 
-    const helloAck = await new Promise((resolve, reject) => {
-      const ws = new WebSocket(`ws://127.0.0.1:${port}`);
-      const timer = setTimeout(() => {
-        ws.close();
-        reject(new Error("Timed out waiting for helloAck"));
-      }, 5000);
-
-      ws.once("open", () => {
-        ws.send(
-          JSON.stringify({
-            version: "1.0",
-            type: "hello",
-            requestId: "req-smoke",
-            ts: "2026-02-28T00:00:00Z",
-            payload: { supportedVersions: ["1.0"] }
-          })
-        );
-      });
-
-      ws.once("message", (data) => {
-        clearTimeout(timer);
-        ws.close();
-        resolve(JSON.parse(String(data)));
-      });
-
-      ws.once("error", () => {
-        clearTimeout(timer);
-        ws.close();
-        reject(new Error("WebSocket connection failed"));
-      });
-    });
-
+    const helloAck = await hello(ws);
     assert.equal(helloAck.type, "helloAck");
     assert.equal(helloAck.payload.version, "1.0");
     assert.equal(typeof helloAck.payload.sessionId, "string");
@@ -96,9 +152,119 @@ test("server supports healthz and hello/helloAck smoke flow", async () => {
     assert.equal(typeof helloAck.payload.heartbeatMs, "number");
     assert.ok(helloAck.payload.heartbeatMs > 0);
 
+    ws.close();
+
     const response = await fetch(`http://127.0.0.1:${port}/healthz`);
     assert.equal(response.status, 200);
     assert.equal(await response.text(), "ok");
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
+test("protected message requires auth", async () => {
+  const { port, child } = await createServer();
+
+  try {
+    await waitForListening(child, 5000);
+    const ws = await connectClient(port);
+
+    const helloAck = await hello(ws);
+    assert.equal(helloAck.type, "helloAck");
+
+    sendFrame(ws, protectedEchoFrame());
+    const authRequired = await nextMessage(ws);
+    assert.equal(authRequired.type, "error");
+    assert.equal(authRequired.payload.code, "auth_required");
+    assert.equal(ws.readyState, WebSocket.OPEN);
+
+    ws.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
+test("invalid token returns authError and does not authenticate", async () => {
+  const { port, child } = await createServer({ env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: "test-secret" } });
+
+  try {
+    await waitForListening(child, 5000);
+    const ws = await connectClient(port);
+    await hello(ws);
+
+    sendFrame(ws, {
+      version: "1.0",
+      type: "auth",
+      requestId: "req-auth-invalid",
+      ts: "2026-02-28T00:00:02Z",
+      payload: { token: "invalid.token.value" }
+    });
+
+    const authError = await nextMessage(ws);
+    assert.equal(authError.type, "error");
+    assert.equal(authError.payload.code, "auth_invalid");
+
+    sendFrame(ws, protectedEchoFrame("req-protected-after-invalid"));
+    const authRequired = await nextMessage(ws);
+    assert.equal(authRequired.type, "error");
+    assert.equal(authRequired.payload.code, "auth_required");
+
+    ws.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
+test("valid token returns authOk and unlocks protected messages", async () => {
+  const secret = "test-secret";
+  const token = makeHs256Jwt({ secret, sub: "user_123" });
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret
+    }
+  });
+
+  try {
+    await waitForListening(child, 5000);
+    const ws = await connectClient(port);
+    await hello(ws);
+
+    sendFrame(ws, {
+      version: "1.0",
+      type: "auth",
+      requestId: "req-auth-valid-1",
+      ts: "2026-02-28T00:00:03Z",
+      payload: { token }
+    });
+
+    const authOk = await nextMessage(ws);
+    assert.equal(authOk.type, "authOk");
+    assert.equal(authOk.payload.userId, "user_123");
+    assert.equal(typeof authOk.payload.sessionId, "string");
+
+    sendFrame(ws, protectedEchoFrame("req-protected-after-auth"));
+    const protectedOk = await nextMessage(ws);
+    assert.equal(protectedOk.type, "protectedEchoOk");
+    assert.equal(protectedOk.payload.userId, "user_123");
+    assert.equal(protectedOk.payload.echo, "hi");
+
+    sendFrame(ws, {
+      version: "1.0",
+      type: "auth",
+      requestId: "req-auth-valid-2",
+      ts: "2026-02-28T00:00:04Z",
+      payload: { token }
+    });
+
+    const authOkRepeat = await nextMessage(ws);
+    assert.equal(authOkRepeat.type, "authOk");
+    assert.equal(authOkRepeat.payload.userId, "user_123");
+
+    ws.close();
   } finally {
     child.kill("SIGTERM");
     await waitForExit(child);

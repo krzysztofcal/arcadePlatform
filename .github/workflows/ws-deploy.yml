@@ -30,8 +30,17 @@ jobs:
       - name: Run WS behavior test
         run: node --test ws-server/server.behavior.test.mjs
 
+      - name: Run ws auth verifier behavior test
+        run: node --test ws-server/poker/auth/verify-token.behavior.test.mjs
+
+      - name: Run ws conn-state behavior test
+        run: node --test ws-server/poker/runtime/conn-state.behavior.test.mjs
+
       - name: Run workflow-content test
         run: node --test ws-tests/ws-deploy-workflow.test.mjs
+
+      - name: Run ws auth workflow guard behavior test
+        run: node --test ws-tests/ws-ws-auth-workflow.guard.behavior.test.mjs
 
       - name: Run ws tests location guard
         run: node --test ws-tests/ws-tests-location.guard.test.mjs

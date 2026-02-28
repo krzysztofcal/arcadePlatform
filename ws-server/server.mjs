@@ -4,10 +4,15 @@ import { MAX_FRAME_BYTES } from "./poker/protocol/constants.mjs";
 import { makeErrorFrame, parseFrame, validateEnvelope } from "./poker/protocol/envelope.mjs";
 import { handleHello } from "./poker/handlers/hello.mjs";
 import { handlePing } from "./poker/handlers/ping.mjs";
+import { handleAuth } from "./poker/handlers/auth.mjs";
+import { handleProtectedEcho } from "./poker/handlers/protected-echo.mjs";
+import { verifyToken } from "./poker/auth/verify-token.mjs";
 import { createConnState } from "./poker/runtime/conn-state.mjs";
+import { touchSession } from "./poker/runtime/session.mjs";
 import { recordProtocolViolation, shouldClose } from "./poker/runtime/conn-guards.mjs";
 
 const PORT = Number(process.env.PORT || 3000);
+const PROTECTED_MESSAGE_TYPES = new Set(["protected_echo"]);
 
 function klog(kind, data) {
   const payload = data && typeof data === "object" ? ` ${JSON.stringify(data)}` : "";
@@ -61,7 +66,7 @@ const server = http.createServer((req, res) => {
 const wss = new WebSocketServer({ server });
 
 wss.on("connection", (ws) => {
-  const connState = createConnState();
+  const connState = createConnState(nowTs);
 
   ws.on("message", (msg, isBinary) => {
     if (isBinary) {
@@ -105,6 +110,8 @@ wss.on("connection", (ws) => {
     }
 
     const frame = validation.value;
+    touchSession(connState.session, nowTs);
+
     if (frame.type === "hello") {
       const response = handleHello({ frame, connState, nowTs });
       if (!response.ok) {
@@ -132,6 +139,36 @@ wss.on("connection", (ws) => {
         return;
       }
 
+      sendFrame(ws, response.frame);
+      return;
+    }
+
+    if (frame.type === "auth") {
+      const response = handleAuth({ frame, connState, nowTs, verifyToken });
+      if (!response.ok) {
+        sendError(ws, connState, {
+          code: response.code,
+          message: response.message,
+          requestId: frame.requestId ?? null
+        });
+        return;
+      }
+
+      sendFrame(ws, response.frame);
+      return;
+    }
+
+    if (PROTECTED_MESSAGE_TYPES.has(frame.type) && !connState.session.userId) {
+      sendError(ws, connState, {
+        code: "auth_required",
+        message: "Authentication is required for this message type",
+        requestId: frame.requestId ?? null
+      });
+      return;
+    }
+
+    if (frame.type === "protected_echo") {
+      const response = handleProtectedEcho({ frame, connState, nowTs });
       sendFrame(ws, response.frame);
       return;
     }
