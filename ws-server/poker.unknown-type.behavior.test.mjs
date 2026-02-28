@@ -46,7 +46,42 @@ function waitForExit(proc) {
   return new Promise((resolve) => proc.once("exit", resolve));
 }
 
-test("server supports healthz and hello/helloAck smoke flow", async () => {
+function nextMessage(ws) {
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      clearTimeout(timer);
+      ws.off("message", onMessage);
+      ws.off("error", onError);
+      ws.off("close", onClose);
+    };
+
+    const onMessage = (data) => {
+      cleanup();
+      resolve(JSON.parse(String(data)));
+    };
+
+    const onError = (error) => {
+      cleanup();
+      reject(error);
+    };
+
+    const onClose = (code) => {
+      cleanup();
+      reject(new Error(`Socket closed before message: ${code}`));
+    };
+
+    const timer = setTimeout(() => {
+      cleanup();
+      reject(new Error("Timed out waiting for websocket message"));
+    }, 5000);
+
+    ws.on("message", onMessage);
+    ws.on("error", onError);
+    ws.on("close", onClose);
+  });
+}
+
+test("unknown command type returns INVALID_COMMAND and keeps socket open", async () => {
   const port = await getFreePort();
   const child = spawn(process.execPath, ["ws-server/server.mjs"], {
     env: { ...process.env, PORT: String(port) },
@@ -55,45 +90,24 @@ test("server supports healthz and hello/helloAck smoke flow", async () => {
 
   try {
     await waitForListening(child, 5000);
+    const ws = new WebSocket(`ws://127.0.0.1:${port}`);
+    await new Promise((resolve) => ws.once("open", resolve));
 
-    const helloAck = await new Promise((resolve, reject) => {
-      const ws = new WebSocket(`ws://127.0.0.1:${port}`);
-      const timer = setTimeout(() => {
-        ws.close();
-        reject(new Error("Timed out waiting for helloAck"));
-      }, 5000);
+    ws.send(
+      JSON.stringify({
+        version: "1.0",
+        type: "wat",
+        requestId: "req-wat",
+        ts: "2026-02-28T00:00:00Z",
+        payload: {}
+      })
+    );
 
-      ws.once("open", () => {
-        ws.send(
-          JSON.stringify({
-            version: "1.0",
-            type: "hello",
-            requestId: "req-smoke",
-            ts: "2026-02-28T00:00:00Z",
-            payload: { supportedVersions: ["1.0"] }
-          })
-        );
-      });
-
-      ws.once("message", (data) => {
-        clearTimeout(timer);
-        ws.close();
-        resolve(JSON.parse(String(data)));
-      });
-
-      ws.once("error", () => {
-        clearTimeout(timer);
-        ws.close();
-        reject(new Error("WebSocket connection failed"));
-      });
-    });
-
-    assert.equal(helloAck.type, "helloAck");
-    assert.equal(helloAck.payload.version, "1.0");
-
-    const response = await fetch(`http://127.0.0.1:${port}/healthz`);
-    assert.equal(response.status, 200);
-    assert.equal(await response.text(), "ok");
+    const error = await nextMessage(ws);
+    assert.equal(error.type, "error");
+    assert.equal(error.payload.code, "INVALID_COMMAND");
+    assert.equal(ws.readyState, WebSocket.OPEN);
+    ws.close();
   } finally {
     child.kill("SIGTERM");
     await waitForExit(child);
