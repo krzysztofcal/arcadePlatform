@@ -14,18 +14,20 @@ test("ws image contains required poker protocol/runtime modules", { timeout: 180
   }
 
   const imageTag = `arcadeplatform-ws-test:${Date.now()}-protocol`;
-  const build = run("docker", ["build", "-t", imageTag, "-f", "ws-server/Dockerfile", "ws-server"]);
-  assert.equal(build.status, 0, `docker build failed:\n${build.stderr || build.stdout}`);
+  try {
+    const build = run("docker", ["build", "-t", imageTag, "-f", "ws-server/Dockerfile", "ws-server"]);
+    assert.equal(build.status, 0, `docker build failed:\n${build.stderr || build.stdout}`);
 
-  const check = run("docker", [
-    "run",
-    "--rm",
-    imageTag,
-    "sh",
-    "-lc",
-    "test -f /app/poker/protocol/constants.mjs && test -f /app/poker/protocol/envelope.mjs && test -f /app/poker/handlers/hello.mjs && test -f /app/poker/runtime/conn-state.mjs"
-  ]);
-  assert.equal(check.status, 0, `required ws modules are missing in image:\n${check.stderr || check.stdout}`);
-
-  run("docker", ["rmi", "-f", imageTag]);
+    const check = run("docker", [
+      "run",
+      "--rm",
+      imageTag,
+      "sh",
+      "-lc",
+      "test -f /app/poker/protocol/constants.mjs && test -f /app/poker/protocol/envelope.mjs && test -f /app/poker/handlers/hello.mjs && test -f /app/poker/runtime/conn-state.mjs"
+    ]);
+    assert.equal(check.status, 0, `required ws modules are missing in image:\n${check.stderr || check.stdout}`);
+  } finally {
+    run("docker", ["rmi", "-f", imageTag]);
+  }
 });

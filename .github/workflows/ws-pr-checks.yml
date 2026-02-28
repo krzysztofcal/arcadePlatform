@@ -1,0 +1,40 @@
+name: WS PR Checks
+
+on:
+  pull_request:
+    paths:
+      - "ws-server/**"
+      - ".github/workflows/ws-pr-checks.yml"
+      - "tests/ws-pr-workflow.test.mjs"
+      - "tests/ws-image-contains-protocol.behavior.test.mjs"
+      - "tests/ws-container-starts.behavior.test.mjs"
+
+jobs:
+  ws-harness:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install WS server dependencies
+        run: npm ci --prefix ws-server
+
+      - name: Run WS behavior test
+        run: node --test ws-server/server.behavior.test.mjs
+
+      - name: Run WS PR workflow guard test
+        run: node --test tests/ws-pr-workflow.test.mjs
+
+      - name: Run ws image protocol content behavior test
+        run: node --test tests/ws-image-contains-protocol.behavior.test.mjs
+
+      - name: Run ws container startup behavior test
+        run: node --test tests/ws-container-starts.behavior.test.mjs
