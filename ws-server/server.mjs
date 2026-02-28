@@ -10,9 +10,11 @@ import { verifyToken } from "./poker/auth/verify-token.mjs";
 import { createConnState } from "./poker/runtime/conn-state.mjs";
 import { touchSession } from "./poker/runtime/session.mjs";
 import { recordProtocolViolation, shouldClose } from "./poker/runtime/conn-guards.mjs";
+import { createTableManager } from "./poker/table/table-manager.mjs";
 
 const PORT = Number(process.env.PORT || 3000);
-const PROTECTED_MESSAGE_TYPES = new Set(["protected_echo"]);
+const PROTECTED_MESSAGE_TYPES = new Set(["protected_echo", "table_join", "table_leave", "table_state_sub"]);
+const tableManager = createTableManager();
 
 function klog(kind, data) {
   const payload = data && typeof data === "object" ? ` ${JSON.stringify(data)}` : "";
@@ -52,6 +54,54 @@ function sendError(ws, connState, { code, message, requestId = null, closeCode =
   }
 }
 
+function normalizeTableId(value) {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const tableId = value.trim();
+  if (tableId.length === 0 || tableId.length > 64) {
+    return null;
+  }
+
+  return tableId;
+}
+
+function sendTableState(ws, connState, { requestId = null, tableState }) {
+  const frame = {
+    version: "1.0",
+    type: "table_state",
+    ts: nowTs(),
+    sessionId: connState.sessionId,
+    payload: {
+      tableId: tableState.tableId,
+      members: tableState.members
+    }
+  };
+
+  if (requestId) {
+    frame.requestId = requestId;
+  }
+
+  sendFrame(ws, frame);
+}
+
+function broadcastTableState(tableId, { excludeWs = null } = {}) {
+  const tableState = tableManager.tableState(tableId);
+  const subscribers = tableManager.orderedSubscribers(tableId, (socket) => socket.__connState?.sessionId ?? "");
+
+  for (const subscriber of subscribers) {
+    if (excludeWs && subscriber === excludeWs) {
+      continue;
+    }
+
+    const subscriberConnState = subscriber.__connState;
+    if (subscriberConnState) {
+      sendTableState(subscriber, subscriberConnState, { tableState });
+    }
+  }
+}
+
 const server = http.createServer((req, res) => {
   if (req.url === "/healthz") {
     res.writeHead(200, { "content-type": "text/plain" });
@@ -67,6 +117,7 @@ const wss = new WebSocketServer({ server });
 
 wss.on("connection", (ws) => {
   const connState = createConnState(nowTs);
+  ws.__connState = connState;
 
   ws.on("message", (msg, isBinary) => {
     if (isBinary) {
@@ -173,6 +224,87 @@ wss.on("connection", (ws) => {
       return;
     }
 
+    if (frame.type === "table_join") {
+      const tableId = normalizeTableId(frame.payload.tableId);
+      if (!tableId) {
+        sendError(ws, connState, {
+          code: "INVALID_COMMAND",
+          message: "table_join requires payload.tableId as a non-empty string",
+          requestId: frame.requestId ?? null
+        });
+        return;
+      }
+
+      const joined = tableManager.join({ ws, userId: connState.session.userId, tableId });
+      if (!joined.ok) {
+        sendError(ws, connState, {
+          code: "INVALID_COMMAND",
+          message: joined.message,
+          requestId: frame.requestId ?? null
+        });
+        return;
+      }
+
+      sendTableState(ws, connState, { requestId: frame.requestId ?? null, tableState: joined.tableState });
+      if (joined.changed) {
+        broadcastTableState(tableId, { excludeWs: ws });
+      }
+      return;
+    }
+
+    if (frame.type === "table_leave") {
+      const tableId = frame.payload.tableId === undefined ? null : normalizeTableId(frame.payload.tableId);
+      if (frame.payload.tableId !== undefined && !tableId) {
+        sendError(ws, connState, {
+          code: "INVALID_COMMAND",
+          message: "table_leave payload.tableId must be a non-empty string when provided",
+          requestId: frame.requestId ?? null
+        });
+        return;
+      }
+
+      const left = tableManager.leave({ ws, userId: connState.session.userId, tableId });
+      if (!left.tableState) {
+        sendError(ws, connState, {
+          code: "INVALID_COMMAND",
+          message: "table_leave requires payload.tableId when connection is not joined",
+          requestId: frame.requestId ?? null
+        });
+        return;
+      }
+
+      sendTableState(ws, connState, { requestId: frame.requestId ?? null, tableState: left.tableState });
+      if (left.changed) {
+        broadcastTableState(left.tableState.tableId, { excludeWs: ws });
+      }
+      return;
+    }
+
+    if (frame.type === "table_state_sub") {
+      const tableId = normalizeTableId(frame.payload.tableId);
+      if (!tableId) {
+        sendError(ws, connState, {
+          code: "INVALID_COMMAND",
+          message: "table_state_sub requires payload.tableId as a non-empty string",
+          requestId: frame.requestId ?? null
+        });
+        return;
+      }
+
+      const subscribed = tableManager.subscribe({ ws, tableId });
+      if (!subscribed.ok) {
+        sendError(ws, connState, {
+          code: "INVALID_COMMAND",
+          message: subscribed.message,
+          requestId: frame.requestId ?? null
+        });
+        return;
+      }
+
+      sendTableState(ws, connState, { requestId: frame.requestId ?? null, tableState: subscribed.tableState });
+      return;
+    }
+
     sendFrame(
       ws,
       makeErrorFrame({
@@ -186,7 +318,18 @@ wss.on("connection", (ws) => {
   });
 
   ws.on("error", (err) => {
+    const cleanupUpdates = tableManager.cleanupConnection({ ws, userId: connState.session.userId });
+    for (const update of cleanupUpdates) {
+      broadcastTableState(update.tableId);
+    }
     klog("ws_error", { message: err.message });
+  });
+
+  ws.on("close", () => {
+    const cleanupUpdates = tableManager.cleanupConnection({ ws, userId: connState.session.userId });
+    for (const update of cleanupUpdates) {
+      broadcastTableState(update.tableId);
+    }
   });
 });
 
