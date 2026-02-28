@@ -1,4 +1,6 @@
-export function createTableManager() {
+const DEFAULT_PRESENCE_TTL_MS = 10_000;
+
+export function createTableManager({ presenceTtlMs = DEFAULT_PRESENCE_TTL_MS } = {}) {
   const tables = new Map();
   const connStateBySocket = new Map();
 
@@ -25,6 +27,7 @@ export function createTableManager() {
 
   function getOrderedMembers(table) {
     return [...table.presenceByUserId.values()]
+      .filter((member) => member.connected !== false)
       .sort((a, b) => {
         if (a.seat !== b.seat) {
           return a.seat - b.seat;
@@ -55,7 +58,19 @@ export function createTableManager() {
     return candidate;
   }
 
-  function join({ ws, userId, tableId }) {
+  function markConnected(member, nowMs) {
+    member.connected = true;
+    member.lastSeenAt = nowMs;
+    member.expiresAt = null;
+  }
+
+  function markDisconnected(member, nowMs) {
+    member.connected = false;
+    member.lastSeenAt = nowMs;
+    member.expiresAt = nowMs + presenceTtlMs;
+  }
+
+  function join({ ws, userId, tableId, nowTs = Date.now() }) {
     const conn = ensureConn(ws);
     if (conn.joinedTableId && conn.joinedTableId !== tableId) {
       return { ok: false, code: "one_table_per_connection", message: "Connection is already joined to a different table" };
@@ -66,8 +81,13 @@ export function createTableManager() {
     if (!alreadyJoined) {
       table.presenceByUserId.set(userId, {
         userId,
-        seat: nextSeat(table)
+        seat: nextSeat(table),
+        connected: true,
+        lastSeenAt: nowTs,
+        expiresAt: null
       });
+    } else {
+      markConnected(table.presenceByUserId.get(userId), nowTs);
     }
 
     table.subscribers.add(ws);
@@ -77,6 +97,42 @@ export function createTableManager() {
     return {
       ok: true,
       changed: !alreadyJoined,
+      tableState: tableState(tableId)
+    };
+  }
+
+  function touchPresence({ tableId, userId, nowTs = Date.now() }) {
+    const table = tables.get(tableId);
+    if (!table) {
+      return { ok: false, changed: false, tableState: tableState(tableId) };
+    }
+
+    const member = table.presenceByUserId.get(userId);
+    if (!member) {
+      return { ok: false, changed: false, tableState: tableState(tableId) };
+    }
+
+    const changed = !member.connected;
+    markConnected(member, nowTs);
+    return { ok: true, changed, tableState: tableState(tableId) };
+  }
+
+  function resync({ ws, userId, tableId, nowTs = Date.now() }) {
+    const conn = ensureConn(ws);
+    if (conn.subscribedTableId && conn.subscribedTableId !== tableId) {
+      return { ok: false, code: "one_table_per_connection", message: "Connection is already subscribed to a different table" };
+    }
+
+    const table = ensureTable(tableId);
+    table.subscribers.add(ws);
+    conn.subscribedTableId = tableId;
+
+    const touched = touchPresence({ tableId, userId, nowTs });
+    conn.joinedTableId = touched.ok ? tableId : null;
+
+    return {
+      ok: true,
+      changed: false,
       tableState: tableState(tableId)
     };
   }
@@ -136,7 +192,7 @@ export function createTableManager() {
     };
   }
 
-  function cleanupConnection({ ws, userId }) {
+  function cleanupConnection({ ws, userId, nowTs = Date.now(), activeSockets = [] }) {
     const conn = connStateBySocket.get(ws);
     if (!conn) {
       return [];
@@ -145,21 +201,85 @@ export function createTableManager() {
     const updates = [];
 
     if (conn.joinedTableId) {
-      const leaveResult = leave({ ws, userId, tableId: conn.joinedTableId });
-      if (leaveResult.tableState) {
-        updates.push({ tableId: leaveResult.tableState.tableId, tableState: leaveResult.tableState });
+      const joinedTableId = conn.joinedTableId;
+      const table = tables.get(joinedTableId);
+      if (table) {
+        const member = table.presenceByUserId.get(userId);
+        const hasTableAssociatedConnection = activeSockets.some((socket) => {
+          const activeConn = connStateBySocket.get(socket);
+          return activeConn && (activeConn.joinedTableId === joinedTableId || activeConn.subscribedTableId === joinedTableId);
+        });
+
+        let membershipChanged = false;
+        if (member && !hasTableAssociatedConnection) {
+          if (presenceTtlMs === 0) {
+            membershipChanged = table.presenceByUserId.delete(userId);
+          } else if (member.connected) {
+            markDisconnected(member, nowTs);
+            membershipChanged = true;
+          }
+        }
+
+        table.subscribers.delete(ws);
+
+        if (membershipChanged) {
+          updates.push({ tableId: joinedTableId, tableState: tableState(joinedTableId) });
+        }
+
+        if (table.presenceByUserId.size === 0 && table.subscribers.size === 0) {
+          tables.delete(joinedTableId);
+        }
       }
+
+      if (conn.subscribedTableId === joinedTableId) {
+        conn.subscribedTableId = null;
+      }
+      conn.joinedTableId = null;
     }
 
-    if (conn.subscribedTableId && conn.subscribedTableId !== conn.joinedTableId) {
-      const table = tables.get(conn.subscribedTableId);
+    if (conn.subscribedTableId) {
+      const subscribedTableId = conn.subscribedTableId;
+      const table = tables.get(subscribedTableId);
       if (table) {
         table.subscribers.delete(ws);
-        updates.push({ tableId: conn.subscribedTableId, tableState: tableState(conn.subscribedTableId) });
+        if (table.presenceByUserId.size === 0 && table.subscribers.size === 0) {
+          tables.delete(subscribedTableId);
+        }
       }
+      conn.subscribedTableId = null;
     }
 
     connStateBySocket.delete(ws);
+    return updates;
+  }
+
+  function sweepExpiredPresence({ nowTs = Date.now() } = {}) {
+    const updates = [];
+
+    for (const [tableId, table] of tables.entries()) {
+      let changed = false;
+      const expiredUserIds = [];
+
+      for (const [userId, member] of table.presenceByUserId.entries()) {
+        if (!member.connected && typeof member.expiresAt === "number" && member.expiresAt <= nowTs) {
+          expiredUserIds.push(userId);
+        }
+      }
+
+      for (const userId of expiredUserIds) {
+        table.presenceByUserId.delete(userId);
+        changed = true;
+      }
+
+      if (changed) {
+        updates.push({ tableId, tableState: tableState(tableId) });
+      }
+
+      if (table.presenceByUserId.size === 0 && table.subscribers.size === 0) {
+        tables.delete(tableId);
+      }
+    }
+
     return updates;
   }
 
@@ -176,8 +296,11 @@ export function createTableManager() {
     join,
     leave,
     subscribe,
+    resync,
+    touchPresence,
     tableState,
     cleanupConnection,
-    orderedSubscribers
+    orderedSubscribers,
+    sweepExpiredPresence
   };
 }
