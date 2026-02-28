@@ -39,6 +39,9 @@ jobs:
       - name: Run ws table behavior test
         run: node --test ws-server/poker/table/table.behavior.test.mjs
 
+      - name: Run ws resync behavior test
+        run: node --test ws-server/poker/reconnect/resync.behavior.test.mjs
+
       - name: Run workflow-content test
         run: node --test ws-tests/ws-deploy-workflow.test.mjs
 
@@ -47,6 +50,9 @@ jobs:
 
       - name: Run ws table workflow guard behavior test
         run: node --test ws-tests/ws-table-workflow.guard.behavior.test.mjs
+
+      - name: Run ws resync workflow guard behavior test
+        run: node --test ws-tests/ws-resync-workflow.guard.behavior.test.mjs
 
       - name: Run ws tests location guard
         run: node --test ws-tests/ws-tests-location.guard.test.mjs

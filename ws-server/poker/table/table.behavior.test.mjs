@@ -172,12 +172,13 @@ async function auth(ws, token, requestId) {
   return nextMessage(ws);
 }
 
-test("table join/leave/sub flow is auth-gated, idempotent, and cleaned on disconnect", async () => {
+test("table join/leave/sub flow is auth-gated, idempotent, and cleaned on disconnect (ttl=0 immediate removal)", async () => {
   const secret = "test-secret";
   const { port, child } = await createServer({
     env: {
       WS_AUTH_REQUIRED: "1",
-      WS_AUTH_TEST_SECRET: secret
+      WS_AUTH_TEST_SECRET: secret,
+      WS_PRESENCE_TTL_MS: "0"
     }
   });
 

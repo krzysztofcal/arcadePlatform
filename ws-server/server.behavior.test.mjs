@@ -186,6 +186,94 @@ test("protected message requires auth", async () => {
   }
 });
 
+
+test("resync message requires auth", async () => {
+  const { port, child } = await createServer({ env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: "test-secret" } });
+
+  try {
+    await waitForListening(child, 5000);
+    const ws = await connectClient(port);
+    await hello(ws);
+
+    sendFrame(ws, {
+      version: "1.0",
+      type: "resync",
+      requestId: "req-resync-unauth",
+      ts: "2026-02-28T00:00:01Z",
+      payload: { tableId: "table_A" }
+    });
+
+    const authRequired = await nextMessage(ws);
+    assert.equal(authRequired.type, "error");
+    assert.equal(authRequired.payload.code, "auth_required");
+    assert.equal(ws.readyState, WebSocket.OPEN);
+
+    ws.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
+
+test("table_leave message requires auth", async () => {
+  const { port, child } = await createServer({ env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: "test-secret" } });
+
+  try {
+    await waitForListening(child, 5000);
+    const ws = await connectClient(port);
+    await hello(ws);
+
+    sendFrame(ws, {
+      version: "1.0",
+      type: "table_leave",
+      requestId: "req-table-leave-unauth",
+      ts: "2026-02-28T00:00:01Z",
+      payload: { tableId: "table_A" }
+    });
+
+    const authRequired = await nextMessage(ws);
+    assert.equal(authRequired.type, "error");
+    assert.equal(authRequired.payload.code, "auth_required");
+    assert.equal(ws.readyState, WebSocket.OPEN);
+
+    ws.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
+
+test("unauth table_leave is blocked by auth guard, not handler validation", async () => {
+  const { port, child } = await createServer({ env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: "test-secret" } });
+
+  try {
+    await waitForListening(child, 5000);
+    const ws = await connectClient(port);
+    await hello(ws);
+
+    sendFrame(ws, {
+      version: "1.0",
+      type: "table_leave",
+      requestId: "req-table-leave-guard-check",
+      ts: "2026-02-28T00:00:01Z",
+      payload: { tableId: "table_A" }
+    });
+
+    const authRequired = await nextMessage(ws);
+    assert.equal(authRequired.type, "error");
+    assert.equal(authRequired.payload.code, "auth_required");
+    assert.notEqual(authRequired.payload.code, "INVALID_COMMAND");
+    assert.equal(ws.readyState, WebSocket.OPEN);
+
+    ws.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
 test("invalid token returns authError and does not authenticate", async () => {
   const { port, child } = await createServer({ env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: "test-secret" } });
 
@@ -212,6 +300,81 @@ test("invalid token returns authError and does not authenticate", async () => {
     assert.equal(authRequired.payload.code, "auth_required");
 
     ws.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
+
+test("invalid WS_PRESENCE_TTL_MS falls back safely and keeps resync idempotent", async () => {
+  const secret = "test-secret";
+  const token = makeHs256Jwt({ secret, sub: "user_123" });
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      WS_PRESENCE_TTL_MS: "abc"
+    }
+  });
+
+  try {
+    await waitForListening(child, 5000);
+
+    const ws1 = await connectClient(port);
+    await hello(ws1);
+    const authOk = await (async () => {
+      sendFrame(ws1, {
+        version: "1.0",
+        type: "auth",
+        requestId: "req-auth-badttl-1",
+        ts: "2026-02-28T00:00:05Z",
+        payload: { token }
+      });
+      return nextMessage(ws1);
+    })();
+    assert.equal(authOk.type, "authOk");
+
+    sendFrame(ws1, {
+      version: "1.0",
+      type: "table_join",
+      requestId: "req-join-badttl-1",
+      ts: "2026-02-28T00:00:06Z",
+      payload: { tableId: "table_badttl" }
+    });
+    const join1 = await nextMessage(ws1);
+    assert.equal(join1.type, "table_state");
+    assert.equal(join1.payload.members.length, 1);
+    const seatBefore = join1.payload.members[0].seat;
+    ws1.close();
+
+    const ws2 = await connectClient(port);
+    await hello(ws2);
+    sendFrame(ws2, {
+      version: "1.0",
+      type: "auth",
+      requestId: "req-auth-badttl-2",
+      ts: "2026-02-28T00:00:07Z",
+      payload: { token }
+    });
+    const authOk2 = await nextMessage(ws2);
+    assert.equal(authOk2.type, "authOk");
+
+    sendFrame(ws2, {
+      version: "1.0",
+      type: "resync",
+      requestId: "req-resync-badttl",
+      ts: "2026-02-28T00:00:08Z",
+      payload: { tableId: "table_badttl" }
+    });
+
+    const resync = await nextMessage(ws2);
+    assert.equal(resync.type, "table_state");
+    assert.equal(resync.payload.members.length, 1);
+    assert.equal(resync.payload.members[0].userId, "user_123");
+    assert.equal(resync.payload.members[0].seat, seatBefore);
+
+    ws2.close();
   } finally {
     child.kill("SIGTERM");
     await waitForExit(child);

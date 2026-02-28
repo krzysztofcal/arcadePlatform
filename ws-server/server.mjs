@@ -11,10 +11,21 @@ import { createConnState } from "./poker/runtime/conn-state.mjs";
 import { touchSession } from "./poker/runtime/session.mjs";
 import { recordProtocolViolation, shouldClose } from "./poker/runtime/conn-guards.mjs";
 import { createTableManager } from "./poker/table/table-manager.mjs";
+import { createSessionStore } from "./poker/runtime/session-store.mjs";
 
 const PORT = Number(process.env.PORT || 3000);
-const PROTECTED_MESSAGE_TYPES = new Set(["protected_echo", "table_join", "table_leave", "table_state_sub"]);
-const tableManager = createTableManager();
+const PROTECTED_MESSAGE_TYPES = new Set(["protected_echo", "table_join", "table_leave", "table_state_sub", "resync", "resume"]);
+
+function resolvePresenceTtlMs(rawValue) {
+  const parsed = Number(rawValue);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return 10_000;
+  }
+  return parsed;
+}
+
+const tableManager = createTableManager({ presenceTtlMs: resolvePresenceTtlMs(process.env.WS_PRESENCE_TTL_MS) });
+const sessionStore = createSessionStore();
 
 function klog(kind, data) {
   const payload = data && typeof data === "object" ? ` ${JSON.stringify(data)}` : "";
@@ -102,6 +113,13 @@ function broadcastTableState(tableId, { excludeWs = null } = {}) {
   }
 }
 
+
+function sweepAndBroadcastExpiredPresence() {
+  const sweepUpdates = tableManager.sweepExpiredPresence({ nowTs: Date.now() });
+  for (const update of sweepUpdates) {
+    broadcastTableState(update.tableId);
+  }
+}
 const server = http.createServer((req, res) => {
   if (req.url === "/healthz") {
     res.writeHead(200, { "content-type": "text/plain" });
@@ -120,6 +138,7 @@ wss.on("connection", (ws) => {
   ws.__connState = connState;
 
   ws.on("message", (msg, isBinary) => {
+    sweepAndBroadcastExpiredPresence();
     if (isBinary) {
       sendError(ws, connState, {
         code: "INVALID_ENVELOPE",
@@ -206,6 +225,9 @@ wss.on("connection", (ws) => {
       }
 
       sendFrame(ws, response.frame);
+      if (response.frame.type === "authOk" && connState.session.userId) {
+        sessionStore.trackConnection({ ws, userId: connState.session.userId });
+      }
       return;
     }
 
@@ -235,7 +257,8 @@ wss.on("connection", (ws) => {
         return;
       }
 
-      const joined = tableManager.join({ ws, userId: connState.session.userId, tableId });
+      sessionStore.trackConnection({ ws, userId: connState.session.userId });
+      const joined = tableManager.join({ ws, userId: connState.session.userId, tableId, nowTs: Date.now() });
       if (!joined.ok) {
         sendError(ws, connState, {
           code: "INVALID_COMMAND",
@@ -249,6 +272,32 @@ wss.on("connection", (ws) => {
       if (joined.changed) {
         broadcastTableState(tableId, { excludeWs: ws });
       }
+      return;
+    }
+
+    if (frame.type === "resync" || frame.type === "resume") {
+      const tableId = normalizeTableId(frame.payload.tableId);
+      if (!tableId) {
+        sendError(ws, connState, {
+          code: "INVALID_COMMAND",
+          message: "resync requires payload.tableId as a non-empty string",
+          requestId: frame.requestId ?? null
+        });
+        return;
+      }
+
+      sessionStore.trackConnection({ ws, userId: connState.session.userId });
+      const resynced = tableManager.resync({ ws, userId: connState.session.userId, tableId, nowTs: Date.now() });
+      if (!resynced.ok) {
+        sendError(ws, connState, {
+          code: "INVALID_COMMAND",
+          message: resynced.message,
+          requestId: frame.requestId ?? null
+        });
+        return;
+      }
+
+      sendTableState(ws, connState, { requestId: frame.requestId ?? null, tableState: resynced.tableState });
       return;
     }
 
@@ -318,18 +367,32 @@ wss.on("connection", (ws) => {
   });
 
   ws.on("error", (err) => {
-    const cleanupUpdates = tableManager.cleanupConnection({ ws, userId: connState.session.userId });
+    sessionStore.untrackConnection({ ws, userId: connState.session.userId });
+    const cleanupUpdates = tableManager.cleanupConnection({
+      ws,
+      userId: connState.session.userId,
+      nowTs: Date.now(),
+      activeSockets: sessionStore.connectionsForUser(connState.session.userId)
+    });
     for (const update of cleanupUpdates) {
       broadcastTableState(update.tableId);
     }
+    sweepAndBroadcastExpiredPresence();
     klog("ws_error", { message: err.message });
   });
 
   ws.on("close", () => {
-    const cleanupUpdates = tableManager.cleanupConnection({ ws, userId: connState.session.userId });
+    sessionStore.untrackConnection({ ws, userId: connState.session.userId });
+    const cleanupUpdates = tableManager.cleanupConnection({
+      ws,
+      userId: connState.session.userId,
+      nowTs: Date.now(),
+      activeSockets: sessionStore.connectionsForUser(connState.session.userId)
+    });
     for (const update of cleanupUpdates) {
       broadcastTableState(update.tableId);
     }
+    sweepAndBroadcastExpiredPresence();
   });
 });
 
