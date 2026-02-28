@@ -90,6 +90,11 @@ test("server supports healthz and hello/helloAck smoke flow", async () => {
 
     assert.equal(helloAck.type, "helloAck");
     assert.equal(helloAck.payload.version, "1.0");
+    assert.equal(typeof helloAck.payload.sessionId, "string");
+    assert.ok(helloAck.payload.sessionId.length > 0);
+    assert.equal(helloAck.sessionId, helloAck.payload.sessionId);
+    assert.equal(typeof helloAck.payload.heartbeatMs, "number");
+    assert.ok(helloAck.payload.heartbeatMs > 0);
 
     const response = await fetch(`http://127.0.0.1:${port}/healthz`);
     assert.equal(response.status, 200);
