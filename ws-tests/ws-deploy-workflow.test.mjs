@@ -14,12 +14,16 @@ test("workflow runs deterministic install and ws behavior test before deploy", (
   const text = workflowText();
   assert.match(text, /npm ci --prefix ws-server/);
   assert.match(text, /node --test ws-server\/server\.behavior\.test\.mjs/);
-  assert.match(text, /node --test tests\/ws-deploy-workflow\.test\.mjs/);
-  assert.match(text, /node --test tests\/ws-lockfile-integrity\.test\.mjs/);
-  assert.match(text, /node --test tests\/ws-smoke-check-script\.behavior\.test\.mjs/);
-  assert.match(text, /node --test tests\/ws-image-contains-protocol\.behavior\.test\.mjs/);
-  assert.match(text, /node --test tests\/ws-container-starts\.behavior\.test\.mjs/);
-  assert.doesNotMatch(text, /node --test tests\/ws-npm-ci-smoke\.test\.mjs/);
+  assert.match(text, /node --test ws-tests\/ws-deploy-workflow\.test\.mjs/);
+  assert.match(text, /node --test ws-tests\/ws-tests-location.guard\.test\.mjs/);
+  assert.match(text, /node --test ws-tests\/ws-tests-suite-completeness\.guard\.test\.mjs/);
+  assert.match(text, /node --test ws-tests\/ws-lockfile-integrity\.test\.mjs/);
+  assert.match(text, /node --test ws-tests\/ws-smoke-check-script\.behavior\.test\.mjs/);
+  assert.match(text, /node --test ws-tests\/ws-poker-protocol-doc\.test\.mjs/);
+  assert.match(text, /node --test ws-tests\/ws-image-contains-protocol\.behavior\.test\.mjs/);
+  assert.match(text, /node --test ws-tests\/ws-container-starts\.behavior\.test\.mjs/);
+  assert.match(text, /"ws-tests\/\*\*"/);
+  assert.doesNotMatch(text, /node --test ws-tests\/ws-npm-ci-smoke\.test\.mjs/);
 });
 
 test("verify step discovers ws container by compose label and avoids hardcoded name", () => {
@@ -71,4 +75,18 @@ test("dockerfile enforces lockfile-based deterministic install", () => {
   assert.match(text, /COPY\s+poker\s+\.\/poker/);
   assert.match(text, /npm\s+ci/);
   assert.doesNotMatch(text, /npm\s+install/);
+});
+
+
+test("workflow keeps ws gates before docker push/deploy steps", () => {
+  const text = workflowText();
+  const suiteGuard = text.indexOf("node --test ws-tests/ws-tests-suite-completeness.guard.test.mjs");
+  const protocolDoc = text.indexOf("node --test ws-tests/ws-poker-protocol-doc.test.mjs");
+  const push = text.indexOf("docker/build-push-action@v6");
+
+  assert.notEqual(suiteGuard, -1);
+  assert.notEqual(protocolDoc, -1);
+  assert.notEqual(push, -1);
+  assert.equal(suiteGuard < protocolDoc, true);
+  assert.equal(protocolDoc < push, true);
 });
