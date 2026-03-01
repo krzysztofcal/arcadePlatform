@@ -58,6 +58,21 @@ jobs:
       - name: Run ws tests suite completeness guard
         run: node --test ws-tests/ws-tests-suite-completeness.guard.test.mjs
 
+      - name: Run infra VPS workflow guard test
+        run: node --test ws-tests/infra-vps-workflow.guard.test.mjs
+
+      - name: Run infra VPS smoke-check structure behavior test
+        run: node --test ws-tests/infra-vps-workflow.smokecheck-structure.behavior.test.mjs
+
+      - name: Run infra VPS WS smoke-check deps guard test
+        run: node --test ws-tests/infra-vps-workflow.ws-smokecheck-deps.guard.test.mjs
+
+      - name: Run infra VPS concurrency guard test
+        run: node --test ws-tests/infra-vps-workflow.concurrency.guard.test.mjs
+
+      - name: Run infra VPS bash exit propagation guard test
+        run: node --test ws-tests/infra-vps-workflow.bash-exit-propagation.guard.test.mjs
+
       - name: Run ws poker protocol doc test
         run: node --test ws-tests/ws-poker-protocol-doc.test.mjs
 
