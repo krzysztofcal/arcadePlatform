@@ -1,0 +1,250 @@
+name: Infra VPS
+
+on:
+  pull_request:
+    paths:
+      - "infra/vps/**"
+  push:
+    branches:
+      - "main"
+    paths:
+      - "infra/vps/**"
+  workflow_dispatch:
+
+concurrency:
+  group: infra-vps-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate infra VPS structure
+        run: |
+          set -euo pipefail
+          test -f infra/vps/Caddyfile
+
+  apply:
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Ensure Caddyfile exists
+        run: |
+          set -euo pipefail
+          test -f infra/vps/Caddyfile
+
+      - name: Upload Caddyfile to VPS temp path
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          source: infra/vps/Caddyfile
+          target: /tmp/arcadeplatform-infra
+          strip_components: 2
+
+      - name: Backup, validate, reload and smoke-check Caddy config
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            set -eu
+            if ! command -v bash >/dev/null 2>&1; then
+              echo "bash is required on VPS"
+              exit 1
+            fi
+
+            bash <<'BASH'
+            set -Eeuo pipefail
+            CADDY_PATH="/etc/caddy/Caddyfile"
+            BACKUP_PATH="${CADDY_PATH}.bak.$(date +%Y%m%d%H%M%S)"
+            TMP_PATH="/tmp/arcadeplatform-infra/Caddyfile"
+            HAVE_BACKUP=0
+            APPLIED=0
+            ROLLED_BACK=0
+
+            rollback() {
+              if [ "$HAVE_BACKUP" != "1" ] || [ "$ROLLED_BACK" = "1" ]; then
+                return 0
+              fi
+              ROLLED_BACK=1
+              sudo -n cp "$BACKUP_PATH" "$CADDY_PATH" || true
+              sudo -n systemctl reload caddy || true
+            }
+
+            on_error() {
+              rc=$?
+              if [ "$APPLIED" = "1" ]; then
+                rollback
+              fi
+              exit "$rc"
+            }
+
+            trap 'on_error' ERR
+
+            test -f "$TMP_PATH"
+            sudo -n cp "$CADDY_PATH" "$BACKUP_PATH"
+            sudo -n test -f "$BACKUP_PATH"
+            HAVE_BACKUP=1
+
+            sudo -n cp "$TMP_PATH" "$CADDY_PATH"
+            APPLIED=1
+
+            sudo -n caddy validate --config /etc/caddy/Caddyfile
+            sudo -n systemctl reload caddy
+
+            HEALTHZ_BODY="$(curl -fsS https://ws.kcswh.pl/healthz | tr -d '\r\n')"
+            test "$HEALTHZ_BODY" = "ok"
+
+            if command -v node >/dev/null 2>&1; then
+              timeout 12s node <<'NODE'
+const tls = require('tls');
+const crypto = require('crypto');
+
+const host = 'ws.kcswh.pl';
+const path = '/ws';
+const wsKey = crypto.randomBytes(16).toString('base64');
+const expectedAccept = crypto.createHash('sha1').update(`${wsKey}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`).digest('base64');
+const helloPayload = JSON.stringify({ version: '1.0', type: 'hello', ts: new Date().toISOString(), payload: { supportedVersions: ['1.0'] } });
+
+function maskedTextFrame(payload) {
+  const data = Buffer.from(payload, 'utf8');
+  const mask = crypto.randomBytes(4);
+  let header;
+  if (data.length < 126) {
+    header = Buffer.from([0x81, 0x80 | data.length]);
+  } else if (data.length < 65536) {
+    header = Buffer.alloc(4);
+    header[0] = 0x81;
+    header[1] = 0x80 | 126;
+    header.writeUInt16BE(data.length, 2);
+  } else {
+    process.exit(1);
+  }
+  const masked = Buffer.alloc(data.length);
+  for (let i = 0; i < data.length; i += 1) masked[i] = data[i] ^ mask[i % 4];
+  return Buffer.concat([header, mask, masked]);
+}
+
+function unmask(payload, mask) {
+  const out = Buffer.alloc(payload.length);
+  for (let i = 0; i < payload.length; i += 1) out[i] = payload[i] ^ mask[i % 4];
+  return out;
+}
+
+const socket = tls.connect({ host, port: 443, servername: host }, () => {
+  const req = [
+    `GET ${path} HTTP/1.1`,
+    `Host: ${host}`,
+    'Upgrade: websocket',
+    'Connection: Upgrade',
+    `Sec-WebSocket-Key: ${wsKey}`,
+    'Sec-WebSocket-Version: 13',
+    '',
+    ''
+  ].join('\r\n');
+  socket.write(req);
+});
+
+let done = false;
+let stage = 'handshake';
+let buffer = Buffer.alloc(0);
+const timer = setTimeout(() => finish(1), 5000);
+
+function finish(code) {
+  if (done) return;
+  done = true;
+  clearTimeout(timer);
+  socket.destroy();
+  process.exit(code);
+}
+
+function parseFrames() {
+  while (buffer.length >= 2) {
+    const b1 = buffer[0];
+    const b2 = buffer[1];
+    const opcode = b1 & 0x0f;
+    const masked = (b2 & 0x80) !== 0;
+    let offset = 2;
+    let length = b2 & 0x7f;
+
+    if (length === 126) {
+      if (buffer.length < offset + 2) return;
+      length = buffer.readUInt16BE(offset);
+      offset += 2;
+    } else if (length === 127) {
+      return finish(1);
+    }
+
+    const maskBytes = masked ? 4 : 0;
+    if (buffer.length < offset + maskBytes + length) return;
+    const mask = masked ? buffer.subarray(offset, offset + 4) : null;
+    offset += maskBytes;
+    let payload = buffer.subarray(offset, offset + length);
+    buffer = buffer.subarray(offset + length);
+
+    if (masked && mask) payload = unmask(payload, mask);
+    if (opcode === 0x1) {
+      const msg = payload.toString('utf8');
+      if (msg.includes('"type":"helloAck"')) return finish(0);
+    }
+  }
+}
+
+socket.on('data', (chunk) => {
+  buffer = Buffer.concat([buffer, chunk]);
+
+  if (stage === 'handshake') {
+    const idx = buffer.indexOf('\r\n\r\n');
+    if (idx === -1) return;
+
+    const head = buffer.subarray(0, idx).toString('utf8');
+    const lines = head.split('\r\n');
+    const status = lines[0] || '';
+    const headers = new Map();
+    for (let i = 1; i < lines.length; i += 1) {
+      const pos = lines[i].indexOf(':');
+      if (pos > 0) headers.set(lines[i].slice(0, pos).trim().toLowerCase(), lines[i].slice(pos + 1).trim());
+    }
+
+    if (!status.includes('101')) return finish(1);
+    if ((headers.get('sec-websocket-accept') || '') !== expectedAccept) return finish(1);
+
+    buffer = buffer.subarray(idx + 4);
+    stage = 'frames';
+    socket.write(maskedTextFrame(helloPayload));
+  }
+
+  if (stage === 'frames') parseFrames();
+});
+
+socket.on('error', () => finish(1));
+socket.on('end', () => finish(1));
+NODE
+            else
+              curl -sS -o /dev/null -D - --http1.1 https://ws.kcswh.pl/ws \
+                -H 'Connection: Upgrade' \
+                -H 'Upgrade: websocket' \
+                -H 'Sec-WebSocket-Version: 13' \
+                -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' | grep -q ' 101 '
+            fi
+
+            trap - ERR
+            BASH
+            rc=$?
+            if [ "$rc" != "0" ]; then
+              exit "$rc"
+            fi
