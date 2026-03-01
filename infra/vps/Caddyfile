@@ -1,0 +1,15 @@
+ws.kcswh.pl {
+  @healthz path /healthz
+  handle @healthz {
+    reverse_proxy 127.0.0.1:3000
+  }
+
+  @ws path /ws*
+  handle @ws {
+    reverse_proxy 127.0.0.1:3000
+  }
+
+  handle {
+    respond "OK" 200
+  }
+}
