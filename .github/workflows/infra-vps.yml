@@ -44,21 +44,12 @@ jobs:
           set -euo pipefail
           test -f infra/vps/Caddyfile
 
-      - name: Write SSH key to file
-        run: |
-          set -euo pipefail
-          key_path="$RUNNER_TEMP/ws_deploy_key"
-          umask 177
-          printf '%s\n' '${{ secrets.WS_SSH_KEY }}' > "$key_path"
-          test -s "$key_path"
-          echo "WS_DEPLOY_KEY_PATH=$key_path" >> "$GITHUB_ENV"
-
       - name: Upload Caddyfile to VPS temp path
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.WS_HOST }}
           username: ${{ secrets.WS_USER }}
-          key_path: ${{ env.WS_DEPLOY_KEY_PATH }}
+          key: ${{ secrets.WS_SSH_KEY }}
           source: infra/vps/Caddyfile
           target: /tmp/arcadeplatform-infra
           strip_components: 2
@@ -68,7 +59,7 @@ jobs:
         with:
           host: ${{ secrets.WS_HOST }}
           username: ${{ secrets.WS_USER }}
-          key_path: ${{ env.WS_DEPLOY_KEY_PATH }}
+          key: ${{ secrets.WS_SSH_KEY }}
           script: |
             set -eu
             if ! command -v bash >/dev/null 2>&1; then
