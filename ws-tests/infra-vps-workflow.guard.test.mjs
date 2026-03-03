@@ -253,7 +253,7 @@ test("infra VPS workflow WS smoke-check uses node built-ins and curl fallback", 
   assert.ok(text.includes("Sec-WebSocket-Key"));
   assert.ok(text.includes("sec-websocket-accept"));
   assert.ok(text.includes("helloAck"));
-  assert.ok(text.includes("--http1.1 --connect-timeout 2 --max-time 3 https://ws.kcswh.pl/ws"));
+  assert.ok(text.includes("--http1.1 --connect-timeout 5 --max-time 10 https://ws.kcswh.pl/ws"));
   assert.ok(text.includes("Connection: Upgrade"));
   assert.ok(text.includes("Upgrade: websocket"));
   assert.ok(text.includes("grep -q '^HTTP/1\\.1 101 '"));
@@ -287,4 +287,13 @@ test("heredocEndOffset advances offsets and finds terminator after start", () =>
 
   assert.notEqual(offset2, -1);
   assert.equal(offset2 > offset1, true);
+});
+
+
+test("infra VPS workflow curl fallback for /ws uses increased timeout budget and still checks 101", () => {
+  const text = read(WORKFLOW_PATH);
+
+  assert.ok(text.includes("--connect-timeout 5"));
+  assert.ok(text.includes("--max-time 10"));
+  assert.ok(text.includes("| head -n 1 | grep -q '^HTTP/1\\.1 101 '"));
 });

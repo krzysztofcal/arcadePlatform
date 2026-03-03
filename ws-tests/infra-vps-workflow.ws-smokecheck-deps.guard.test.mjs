@@ -17,7 +17,7 @@ test("infra VPS WS smoke-check does not depend on globally installed ws tooling"
   assert.ok(text.includes("require('tls')"));
   assert.ok(text.includes("require('crypto')"));
   assert.ok(text.includes("if command -v node >/dev/null 2>&1; then"));
-  assert.ok(text.includes("--connect-timeout 2"));
-  assert.ok(text.includes("--max-time 3"));
+  assert.ok(text.includes("--connect-timeout 5"));
+  assert.ok(text.includes("--max-time 10"));
   assert.ok(text.includes("| head -n 1 | grep -q '^HTTP/1\\.1 101 '"));
 });
