@@ -64,6 +64,41 @@ test("infra VPS workflow validate job declares least-privilege contents read per
   assert.notEqual(contentsReadIndex, -1);
   assert.equal(permissionsIndex < contentsReadIndex, true);
 });
+
+test("infra VPS workflow uses WS_* secrets and does not reference VPS_* secrets", () => {
+  const text = read(WORKFLOW_PATH);
+
+  assert.equal(text.includes("secrets.WS_HOST"), true);
+  assert.equal(text.includes("secrets.WS_USER"), true);
+  assert.equal(text.includes("secrets.WS_SSH_KEY"), true);
+
+  assert.equal(text.includes("secrets.VPS_HOST"), false);
+  assert.equal(text.includes("secrets.VPS_USER"), false);
+  assert.equal(text.includes("secrets.VPS_SSH_KEY"), false);
+});
+
+
+test("infra VPS workflow writes WS key to file and uses key_path for appleboy actions", () => {
+  const text = read(WORKFLOW_PATH);
+
+  const keyWriteIndex = text.indexOf("ws_deploy_key");
+  const scpIndex = text.indexOf("uses: appleboy/scp-action");
+  const sshIndex = text.indexOf("uses: appleboy/ssh-action");
+  const scpKeyPathIndex = text.indexOf("key_path:", scpIndex);
+  const sshKeyPathIndex = text.indexOf("key_path:", sshIndex);
+
+  assert.notEqual(keyWriteIndex, -1);
+  assert.notEqual(scpIndex, -1);
+  assert.notEqual(sshIndex, -1);
+  assert.notEqual(scpKeyPathIndex, -1);
+  assert.notEqual(sshKeyPathIndex, -1);
+
+  assert.equal(keyWriteIndex < scpIndex, true);
+  assert.equal(scpIndex < scpKeyPathIndex, true);
+  assert.equal(sshIndex < sshKeyPathIndex, true);
+  assert.equal(text.includes("key: ${{ secrets.WS_SSH_KEY }}"), false);
+});
+
 test("infra VPS Caddyfile preserves explicit /healthz, /ws*, and root OK routing", () => {
   const text = read(CADDYFILE_PATH);
   assert.match(text, /path\s+\/healthz/);
