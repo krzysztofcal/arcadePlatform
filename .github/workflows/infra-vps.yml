@@ -60,6 +60,8 @@ jobs:
           host: ${{ secrets.WS_HOST }}
           username: ${{ secrets.WS_USER }}
           key: ${{ secrets.WS_SSH_KEY }}
+          timeout: 2m
+          command_timeout: 20m
           script: |
             set -eu
             if ! command -v bash >/dev/null 2>&1; then
@@ -235,11 +237,11 @@ jobs:
             socket.on('end', () => finish(1));
             NODE
             else
-              curl -sS -o /dev/null -D - --http1.1 https://ws.kcswh.pl/ws \
+              { curl -sS -o /dev/null -D - --http1.1 --connect-timeout 2 --max-time 3 https://ws.kcswh.pl/ws \
                 -H 'Connection: Upgrade' \
                 -H 'Upgrade: websocket' \
                 -H 'Sec-WebSocket-Version: 13' \
-                -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' | grep -q ' 101 '
+                -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' || [ "$?" -eq 23 ]; } | head -n 1 | grep -q '^HTTP/1\.1 101 '
             fi
 
             trap - ERR
