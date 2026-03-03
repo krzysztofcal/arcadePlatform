@@ -237,11 +237,22 @@ jobs:
             socket.on('end', () => finish(1));
             NODE
             else
-              { curl -sS -o /dev/null -D - --http1.1 --connect-timeout 5 --max-time 10 https://ws.kcswh.pl/ws \
+              set +e
+              WS_LINE="$(curl -sS -o /dev/null -D - --http1.1 --connect-timeout 5 --max-time 10 https://ws.kcswh.pl/ws \
                 -H 'Connection: Upgrade' \
                 -H 'Upgrade: websocket' \
                 -H 'Sec-WebSocket-Version: 13' \
-                -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' || [ "$?" -eq 23 ]; } | head -n 1 | grep -q '^HTTP/1\.1 101 '
+                -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' \
+                | head -n 1)"
+              CURL_RC=${PIPESTATUS[0]}
+              set -e
+
+              if [ "$CURL_RC" -ne 0 ] && [ "$CURL_RC" -ne 23 ] && [ "$CURL_RC" -ne 28 ]; then
+                echo "curl failed rc=$CURL_RC line=${WS_LINE:-<empty>}"
+                exit 1
+              fi
+
+              echo "$WS_LINE" | grep -q '^HTTP/1\.1 101 '
             fi
 
             trap - ERR

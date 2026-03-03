@@ -290,10 +290,13 @@ test("heredocEndOffset advances offsets and finds terminator after start", () =>
 });
 
 
-test("infra VPS workflow curl fallback for /ws uses increased timeout budget and still checks 101", () => {
+test("infra VPS workflow curl fallback for /ws captures curl rc via PIPESTATUS and accepts timeout outcomes", () => {
   const text = read(WORKFLOW_PATH);
 
   assert.ok(text.includes("--connect-timeout 5"));
   assert.ok(text.includes("--max-time 10"));
-  assert.ok(text.includes("| head -n 1 | grep -q '^HTTP/1\\.1 101 '"));
+  assert.ok(text.includes("CURL_RC=${PIPESTATUS[0]}"));
+  assert.ok(text.includes('[ "$CURL_RC" -ne 23 ]'));
+  assert.ok(text.includes('[ "$CURL_RC" -ne 28 ]'));
+  assert.ok(text.includes("grep -q '^HTTP/1\\.1 101 '"));
 });

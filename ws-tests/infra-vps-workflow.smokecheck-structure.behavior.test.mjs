@@ -37,8 +37,13 @@ test("infra VPS smoke checks are standalone commands and trap remains active", (
   assert.ok(text.includes("HEALTHZ_BODY=\"$(curl -fsS https://ws.kcswh.pl/healthz"));
   assert.ok(text.includes("timeout 12s node <<'NODE'"));
   assert.ok(text.includes("curl -sS -o /dev/null -D - --http1.1 --connect-timeout 5 --max-time 10 https://ws.kcswh.pl/ws"));
-  assert.ok(text.includes("| head -n 1 | grep -q '^HTTP/1\\.1 101 '"));
-  assert.equal(text.includes("WS_RESPONSE=\"$("), false);
+  assert.ok(text.includes("set +e"));
+  assert.ok(text.includes("WS_LINE=\"$(curl -sS -o /dev/null -D - --http1.1"));
+  assert.ok(text.includes("CURL_RC=${PIPESTATUS[0]}"));
+  assert.ok(text.includes("set -e"));
+  assert.ok(text.includes("grep -q '^HTTP/1\\.1 101 '"));
+  assert.equal(text.includes("{ curl -sS"), false);
+  assert.equal(text.includes("|| [ \"$?\" -eq 23 ]"), false);
 });
 
 
