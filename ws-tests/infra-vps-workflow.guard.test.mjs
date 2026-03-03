@@ -78,6 +78,23 @@ test("infra VPS workflow uses WS_* secrets and does not reference VPS_* secrets"
 });
 
 
+
+
+test("infra VPS workflow sets ssh action transport and command timeouts", () => {
+  const text = read(WORKFLOW_PATH);
+  const sshStepIndex = text.indexOf("uses: appleboy/ssh-action@v1.0.3");
+  const timeoutIndex = text.indexOf("timeout: 2m", sshStepIndex);
+  const commandTimeoutIndex = text.indexOf("command_timeout: 20m", sshStepIndex);
+  const scriptIndex = text.indexOf("script: |", sshStepIndex);
+
+  assert.notEqual(sshStepIndex, -1);
+  assert.notEqual(timeoutIndex, -1);
+  assert.notEqual(commandTimeoutIndex, -1);
+  assert.notEqual(scriptIndex, -1);
+  assert.equal(sshStepIndex < timeoutIndex, true);
+  assert.equal(timeoutIndex < commandTimeoutIndex, true);
+  assert.equal(commandTimeoutIndex < scriptIndex, true);
+});
 test("infra VPS workflow uses WS key secret directly with appleboy actions", () => {
   const text = read(WORKFLOW_PATH);
 
@@ -236,10 +253,10 @@ test("infra VPS workflow WS smoke-check uses node built-ins and curl fallback", 
   assert.ok(text.includes("Sec-WebSocket-Key"));
   assert.ok(text.includes("sec-websocket-accept"));
   assert.ok(text.includes("helloAck"));
-  assert.ok(text.includes("--http1.1 https://ws.kcswh.pl/ws"));
+  assert.ok(text.includes("--http1.1 --connect-timeout 2 --max-time 3 https://ws.kcswh.pl/ws"));
   assert.ok(text.includes("Connection: Upgrade"));
   assert.ok(text.includes("Upgrade: websocket"));
-  assert.ok(text.includes("grep -q ' 101 '"));
+  assert.ok(text.includes("grep -q '^HTTP/1\\.1 101 '"));
   assert.equal(text.includes("require('ws')"), false);
 });
 
