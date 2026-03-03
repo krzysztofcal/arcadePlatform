@@ -237,15 +237,23 @@ jobs:
             socket.on('end', () => finish(1));
             NODE
             else
+              HDRS="$(mktemp)"
               set +e
-              WS_LINE="$(curl -sS -o /dev/null -D - --http1.1 --connect-timeout 5 --max-time 10 https://ws.kcswh.pl/ws \
+              curl -sS -o /dev/null -D "$HDRS" --http1.1 --connect-timeout 5 --max-time 10 https://ws.kcswh.pl/ws \
                 -H 'Connection: Upgrade' \
                 -H 'Upgrade: websocket' \
                 -H 'Sec-WebSocket-Version: 13' \
-                -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' \
-                | head -n 1)"
-              CURL_RC=${PIPESTATUS[0]}
+                -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ=='
+              CURL_RC=$?
               set -e
+
+              WS_LINE="$(head -n 1 "$HDRS" | tr -d '\r')"
+              rm -f "$HDRS"
+
+              if [ -z "$WS_LINE" ]; then
+                echo "curl produced no headers rc=$CURL_RC"
+                exit 1
+              fi
 
               if [ "$CURL_RC" -ne 0 ] && [ "$CURL_RC" -ne 23 ] && [ "$CURL_RC" -ne 28 ]; then
                 echo "curl failed rc=$CURL_RC line=${WS_LINE:-<empty>}"

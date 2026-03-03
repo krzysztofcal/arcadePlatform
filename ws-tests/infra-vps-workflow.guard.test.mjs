@@ -290,13 +290,16 @@ test("heredocEndOffset advances offsets and finds terminator after start", () =>
 });
 
 
-test("infra VPS workflow curl fallback for /ws captures curl rc via PIPESTATUS and accepts timeout outcomes", () => {
+test("infra VPS workflow curl fallback for /ws captures headers and curl rc from direct command", () => {
   const text = read(WORKFLOW_PATH);
 
   assert.ok(text.includes("--connect-timeout 5"));
   assert.ok(text.includes("--max-time 10"));
-  assert.ok(text.includes("CURL_RC=${PIPESTATUS[0]}"));
-  assert.ok(text.includes('[ "$CURL_RC" -ne 23 ]'));
-  assert.ok(text.includes('[ "$CURL_RC" -ne 28 ]'));
+  assert.ok(text.includes('HDRS="$(mktemp)"'));
+  assert.ok(text.includes('-D "$HDRS"'));
+  assert.ok(text.includes("CURL_RC=$?"));
+  assert.ok(text.includes('if [ "$CURL_RC" -ne 0 ] && [ "$CURL_RC" -ne 23 ] && [ "$CURL_RC" -ne 28 ]; then'));
+  assert.ok(text.includes('if [ -z "$WS_LINE" ]; then'));
   assert.ok(text.includes("grep -q '^HTTP/1\\.1 101 '"));
+  assert.equal(text.includes("PIPESTATUS"), false);
 });
