@@ -15,6 +15,6 @@ test("ws-server deploy artifact is produced in workspace and uploaded from works
   assert.match(text, /-czf "\$ARTIFACT_FILE"/);
   assert.match(text, /source: \.artifacts\/ws-server\/ws-server-dist\.tgz/);
   assert.doesNotMatch(text, /strip_components:\s*3/);
-  assert.match(text, /TMP_ARCHIVE="\/tmp\/arcadeplatform-ws\/ws-server-dist\.tgz"/);
+  assert.match(text, /TMP_ARCHIVE="\/tmp\/arcadeplatform-ws\/\.artifacts\/ws-server\/ws-server-dist\.tgz"/);
   assert.match(text, /test -f "\$TMP_ARCHIVE"/);
 });
