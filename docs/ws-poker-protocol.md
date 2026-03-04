@@ -3,6 +3,10 @@
 Status: Draft (PR0 contract).  
 Scope: Persistent WebSocket poker room protocol only. No runtime behavior is implemented by this document.
 
+## System context
+
+For WS engine responsibilities, data ownership, and cross-cutting invariants (funds safety, bots, sweep, hole-cards normalization), see [docs/poker-system-spec.md](./poker-system-spec.md). This protocol document remains the wire-contract source for envelopes, message types, idempotency, reconnect/resync, and versioning.
+
 ## Envelope
 
 All frames MUST be UTF-8 JSON objects with the envelope below.
