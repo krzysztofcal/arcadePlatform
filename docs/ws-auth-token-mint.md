@@ -11,11 +11,12 @@ Set these in Netlify (function runtime) and keep WS verifier settings aligned wi
 - `WS_AUTH_HS256_SECRET=<shared-hs256-secret>` — signing key used by mint endpoint; must match WS server verify secret.
 - Optional: `WS_MINT_TTL_SEC=300` — minted token expiry in seconds.
 
-User-mode CORS allowlist (`corsHeaders(origin)` from `netlify/functions/_shared/supabase-admin.mjs`):
+User-mode CORS allowlist (`corsHeaders(origin)` in `netlify/functions/ws-mint-token.mjs`, aligned with project CORS rules):
 
 - `XP_CORS_ALLOW` — comma-separated explicit origin allowlist used by user mint.
 - `URL` — automatically added to the same allowlist when present.
 - `https://*.netlify.app` origins are accepted by built-in Netlify domain rule.
+- Non-Netlify origins are denied when neither `XP_CORS_ALLOW` nor `URL` allow them (fail-closed behavior).
 
 WS server verification env alignment:
 

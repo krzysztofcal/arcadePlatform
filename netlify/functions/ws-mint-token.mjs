@@ -32,7 +32,7 @@ function corsHeaders(origin, env = process.env) {
 
   const allow = corsAllowList(env);
   const isNetlifyDomain = /^https:\/\/[a-z0-9-]+\.netlify\.app$/i.test(origin);
-  if (!isNetlifyDomain && allow.length > 0 && !allow.includes(origin)) {
+  if (!isNetlifyDomain && !allow.includes(origin)) {
     return null;
   }
 
