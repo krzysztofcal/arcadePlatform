@@ -1,0 +1,327 @@
+name: WS Server Deploy
+
+on:
+  pull_request:
+    paths:
+      - "ws-server/**"
+      - "ws-tests/**"
+      - ".github/workflows/ws-server-deploy.yml"
+  push:
+    branches:
+      - "main"
+    paths:
+      - "ws-server/**"
+      - ".github/workflows/ws-server-deploy.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ws-server-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Run WS server deploy workflow guards
+        run: |
+          set -euo pipefail
+          node --test ws-tests/ws-server-deploy.workflow.guard.test.mjs
+          node --test ws-tests/ws-server-deploy.remote-script.behavior.test.mjs
+          node --test ws-tests/ws-server-deploy.runner-smoke.behavior.test.mjs
+          node --test ws-tests/ws-server-deploy.codeql-url-substring.guard.test.mjs
+          node --test ws-tests/ws-server-deploy.artifact-path.guard.test.mjs
+          node --test ws-tests/ws-production-deploy-collision.guard.test.mjs
+          node --test ws-tests/ws-deploy.no-prod-mutation-on-ws-tests.guard.test.mjs
+          node --test ws-tests/ws-deploy.trigger-surface.guard.test.mjs
+          node --test ws-tests/ws-server-deploy.scp-contract.behavior.test.mjs
+          node --test ws-tests/ws-server-deploy.deploy-gated-by-validate.guard.test.mjs
+
+  deploy:
+    needs: validate
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Build and package ws-server deploy artifact
+        run: |
+          set -euo pipefail
+          ARTIFACT_DIR="$GITHUB_WORKSPACE/.artifacts/ws-server"
+          STAGE_DIR="$ARTIFACT_DIR/stage"
+          ARTIFACT_FILE="$ARTIFACT_DIR/ws-server-dist.tgz"
+
+          rm -rf "$ARTIFACT_DIR"
+          mkdir -p "$STAGE_DIR"
+
+          npm ci --prefix ws-server
+          npm run --prefix ws-server build --if-present
+
+          rm -rf ws-server/node_modules
+          npm ci --prefix ws-server --omit=dev
+
+          cp ws-server/package.json "$STAGE_DIR"/
+          cp ws-server/package-lock.json "$STAGE_DIR"/
+          cp -R ws-server/node_modules "$STAGE_DIR"/node_modules
+
+          if [ -d ws-server/dist ]; then
+            cp -R ws-server/dist "$STAGE_DIR"/dist
+          fi
+
+          if [ -f ws-server/server.mjs ]; then
+            cp ws-server/server.mjs "$STAGE_DIR"/
+          fi
+
+          if [ -d ws-server/poker ]; then
+            cp -R ws-server/poker "$STAGE_DIR"/poker
+          fi
+
+          tar \
+            --sort=name \
+            --mtime='UTC 1970-01-01' \
+            --owner=0 \
+            --group=0 \
+            --numeric-owner \
+            -czf "$ARTIFACT_FILE" \
+            -C "$STAGE_DIR" \
+            .
+
+      - name: Upload ws-server artifact to VPS
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.WS_HOST }}
+          username: ${{ secrets.WS_USER }}
+          key: ${{ secrets.WS_SSH_KEY }}
+          source: .artifacts/ws-server/ws-server-dist.tgz
+          target: /tmp/arcadeplatform-ws
+
+      - name: Atomic release switch + restart + health gate on VPS
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          RELEASE_SHA: ${{ github.sha }}
+        with:
+          host: ${{ secrets.WS_HOST }}
+          username: ${{ secrets.WS_USER }}
+          key: ${{ secrets.WS_SSH_KEY }}
+          timeout: 2m
+          command_timeout: 20m
+          envs: RELEASE_SHA
+          script: |
+            set -eu
+            if ! command -v bash >/dev/null 2>&1; then
+              echo "bash is required on VPS"
+              exit 1
+            fi
+
+            bash <<'BASH'
+            set -Eeuo pipefail
+
+            BASE_DIR="/opt/ws-server"
+            RELEASES_DIR="$BASE_DIR/releases"
+            CURRENT_LINK="$BASE_DIR/current"
+            TMP_ARCHIVE="/tmp/arcadeplatform-ws/ws-server-dist.tgz"
+            RELEASE_ID="$RELEASE_SHA"
+            NEW_RELEASE_DIR="$RELEASES_DIR/$RELEASE_ID"
+            PREVIOUS_TARGET=""
+            HAVE_SWITCHED=0
+
+            rollback() {
+              if [ "$HAVE_SWITCHED" != "1" ] || [ -z "$PREVIOUS_TARGET" ]; then
+                return 0
+              fi
+              sudo -n ln -sfn "$PREVIOUS_TARGET" "$CURRENT_LINK.tmp"
+              sudo -n mv -Tf "$CURRENT_LINK.tmp" "$CURRENT_LINK"
+              sudo -n systemctl restart ws-server.service || true
+            }
+
+            on_error() {
+              rc=$?
+              rollback
+              exit "$rc"
+            }
+
+            trap 'on_error' ERR
+
+            test -f "$TMP_ARCHIVE"
+            sudo -n mkdir -p "$RELEASES_DIR"
+
+            if [ -L "$CURRENT_LINK" ] || [ -e "$CURRENT_LINK" ]; then
+              PREVIOUS_TARGET="$(readlink -f "$CURRENT_LINK" || true)"
+            fi
+
+            sudo -n rm -rf "$NEW_RELEASE_DIR"
+            sudo -n mkdir -p "$NEW_RELEASE_DIR"
+            sudo -n tar -xzf "$TMP_ARCHIVE" -C "$NEW_RELEASE_DIR"
+
+            sudo -n ln -sfn "$NEW_RELEASE_DIR" "$CURRENT_LINK.tmp"
+            sudo -n mv -Tf "$CURRENT_LINK.tmp" "$CURRENT_LINK"
+            HAVE_SWITCHED=1
+
+            sudo -n systemctl restart ws-server.service
+
+            HEALTHZ_BODY="$(curl -fsS https://ws.kcswh.pl/healthz | tr -d '\r\n')"
+            test "$HEALTHZ_BODY" = "ok"
+
+            trap - ERR
+            BASH
+            rc=$?
+            if [ "$rc" != "0" ]; then
+              exit "$rc"
+            fi
+
+      - name: Smoke-check ws.kcswh.pl WebSocket handshake from runner
+        run: |
+          set -euo pipefail
+          timeout 15s node <<'NODE'
+          const tls = require('tls');
+          const crypto = require('crypto');
+
+          const host = 'ws.kcswh.pl';
+          const path = '/ws';
+          const wsKey = crypto.randomBytes(16).toString('base64');
+          const expectedAccept = crypto.createHash('sha1').update(`${wsKey}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`).digest('base64');
+          const helloPayload = JSON.stringify({ version: '1.0', type: 'hello', ts: new Date().toISOString(), payload: { supportedVersions: ['1.0'] } });
+
+          let stage = 'connect';
+          let statusLine = '';
+          let wsAccept = '';
+
+          function fail(reason) {
+            console.error(`ws-smoke fail stage=${stage} reason=${reason} status=${statusLine || 'n/a'} accept=${wsAccept || 'n/a'}`);
+            finish(1);
+          }
+
+          function maskedTextFrame(payload) {
+            const data = Buffer.from(payload, 'utf8');
+            const mask = crypto.randomBytes(4);
+            let header;
+            if (data.length < 126) {
+              header = Buffer.from([0x81, 0x80 | data.length]);
+            } else if (data.length < 65536) {
+              header = Buffer.alloc(4);
+              header[0] = 0x81;
+              header[1] = 0x80 | 126;
+              header.writeUInt16BE(data.length, 2);
+            } else {
+              fail('payload-too-large');
+              return Buffer.alloc(0);
+            }
+            const masked = Buffer.alloc(data.length);
+            for (let i = 0; i < data.length; i += 1) masked[i] = data[i] ^ mask[i % 4];
+            return Buffer.concat([header, mask, masked]);
+          }
+
+          function unmask(payload, mask) {
+            const out = Buffer.alloc(payload.length);
+            for (let i = 0; i < payload.length; i += 1) out[i] = payload[i] ^ mask[i % 4];
+            return out;
+          }
+
+          const socket = tls.connect({ host, port: 443, servername: host }, () => {
+            stage = 'handshake';
+            const req = [
+              `GET ${path} HTTP/1.1`,
+              `Host: ${host}`,
+              'Upgrade: websocket',
+              'Connection: Upgrade',
+              `Sec-WebSocket-Key: ${wsKey}`,
+              'Sec-WebSocket-Version: 13',
+              '',
+              ''
+            ].join('\r\n');
+            socket.write(req);
+          });
+
+          let done = false;
+          let buffer = Buffer.alloc(0);
+          const timer = setTimeout(() => fail('timeout'), 5000);
+
+          function finish(code) {
+            if (done) return;
+            done = true;
+            clearTimeout(timer);
+            socket.destroy();
+            process.exit(code);
+          }
+
+          function parseFrames() {
+            while (buffer.length >= 2) {
+              const b1 = buffer[0];
+              const b2 = buffer[1];
+              const opcode = b1 & 0x0f;
+              const masked = (b2 & 0x80) !== 0;
+              let offset = 2;
+              let length = b2 & 0x7f;
+
+              if (length === 126) {
+                if (buffer.length < offset + 2) return;
+                length = buffer.readUInt16BE(offset);
+                offset += 2;
+              } else if (length === 127) {
+                fail('unsupported-frame-length');
+                return;
+              }
+
+              const maskBytes = masked ? 4 : 0;
+              if (buffer.length < offset + maskBytes + length) return;
+              const mask = masked ? buffer.subarray(offset, offset + 4) : null;
+              offset += maskBytes;
+              let payload = buffer.subarray(offset, offset + length);
+              buffer = buffer.subarray(offset + length);
+
+              if (masked && mask) payload = unmask(payload, mask);
+              if (opcode === 0x1) {
+                const msg = payload.toString('utf8');
+                if (msg.includes('"type":"helloAck"')) return finish(0);
+              }
+            }
+          }
+
+          socket.on('data', (chunk) => {
+            buffer = Buffer.concat([buffer, chunk]);
+
+            if (stage === 'handshake') {
+              const idx = buffer.indexOf('\r\n\r\n');
+              if (idx === -1) return;
+
+              const head = buffer.subarray(0, idx).toString('utf8');
+              const lines = head.split('\r\n');
+              statusLine = lines[0] || '';
+              const headers = new Map();
+              for (let i = 1; i < lines.length; i += 1) {
+                const pos = lines[i].indexOf(':');
+                if (pos > 0) headers.set(lines[i].slice(0, pos).trim().toLowerCase(), lines[i].slice(pos + 1).trim());
+              }
+
+              wsAccept = headers.get('sec-websocket-accept') || '';
+              if (!statusLine.includes('101')) return fail('unexpected-status');
+              if (wsAccept !== expectedAccept) return fail('invalid-accept-header');
+
+              buffer = buffer.subarray(idx + 4);
+              stage = 'frames';
+              socket.write(maskedTextFrame(helloPayload));
+            }
+
+            if (stage === 'frames') parseFrames();
+          });
+
+          socket.on('error', (err) => fail(`socket-error:${err && err.code ? err.code : 'unknown'}`));
+          socket.on('end', () => fail('socket-end-before-helloAck'));
+          NODE
