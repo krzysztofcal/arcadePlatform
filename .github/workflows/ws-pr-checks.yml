@@ -52,6 +52,34 @@ jobs:
       - name: Run ws resync workflow guard behavior test
         run: node --test ws-tests/ws-resync-workflow.guard.behavior.test.mjs
 
+
+      - name: Run ws-server deploy workflow guard test
+        run: node --test ws-tests/ws-server-deploy.workflow.guard.test.mjs
+
+      - name: Run ws-server deploy remote-script behavior test
+        run: node --test ws-tests/ws-server-deploy.remote-script.behavior.test.mjs
+
+      - name: Run ws-server deploy runner-smoke behavior test
+        run: node --test ws-tests/ws-server-deploy.runner-smoke.behavior.test.mjs
+
+      - name: Run ws-server deploy artifact path guard test
+        run: node --test ws-tests/ws-server-deploy.artifact-path.guard.test.mjs
+
+      - name: Run ws production deploy collision guard test
+        run: node --test ws-tests/ws-production-deploy-collision.guard.test.mjs
+
+      - name: Run ws-deploy no-prod-mutation-on-ws-tests guard test
+        run: node --test ws-tests/ws-deploy.no-prod-mutation-on-ws-tests.guard.test.mjs
+
+      - name: Run ws-deploy trigger-surface guard test
+        run: node --test ws-tests/ws-deploy.trigger-surface.guard.test.mjs
+
+      - name: Run ws-server deploy scp-contract behavior test
+        run: node --test ws-tests/ws-server-deploy.scp-contract.behavior.test.mjs
+
+      - name: Run ws-server deploy gated-by-validate guard test
+        run: node --test ws-tests/ws-server-deploy.deploy-gated-by-validate.guard.test.mjs
+
       - name: Run ws tests location guard
         run: node --test ws-tests/ws-tests-location.guard.test.mjs
 
@@ -81,3 +109,6 @@ jobs:
 
       - name: Run ws container startup behavior test
         run: node --test ws-tests/ws-container-starts.behavior.test.mjs
+
+      - name: Run ws-server deploy CodeQL URL substring guard test
+        run: node --test ws-tests/ws-server-deploy.codeql-url-substring.guard.test.mjs
