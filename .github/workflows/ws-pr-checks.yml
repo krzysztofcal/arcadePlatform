@@ -92,8 +92,14 @@ jobs:
       - name: Run ws-server deploy rollout harness test
         run: node --test ws-tests/ws-server-deploy-rollout.test.mjs
 
+      - name: Run ws mint-token behavior test
+        run: node --test ws-tests/ws-mint-token.behavior.test.mjs
+
       - name: Run ws tests location guard
         run: node --test ws-tests/ws-tests-location.guard.test.mjs
+
+      - name: Run ws auth token mint doc test
+        run: node --test ws-tests/ws-auth-token-mint-doc.test.mjs
 
       - name: Run ws tests suite completeness guard
         run: node --test ws-tests/ws-tests-suite-completeness.guard.test.mjs
