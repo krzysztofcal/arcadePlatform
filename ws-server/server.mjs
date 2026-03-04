@@ -14,7 +14,17 @@ import { createTableManager } from "./poker/table/table-manager.mjs";
 import { createSessionStore } from "./poker/runtime/session-store.mjs";
 
 const PORT = Number(process.env.PORT || 3000);
-const PROTECTED_MESSAGE_TYPES = new Set(["protected_echo", "table_join", "table_leave", "table_state_sub", "resync", "resume"]);
+const PROTECTED_MESSAGE_TYPES = new Set([
+  "protected_echo",
+  "join",
+  "leave",
+  "table_join",
+  "table_leave",
+  "table_state_sub",
+  "resync",
+  "resume"
+]);
+const REQUEST_ID_REQUIRED_TYPES = new Set(["join", "leave", "table_join", "table_leave", "table_state_sub", "resync", "resume"]);
 
 function resolvePresenceTtlMs(rawValue) {
   const parsed = Number(rawValue);
@@ -76,6 +86,52 @@ function normalizeTableId(value) {
   }
 
   return tableId;
+}
+
+function resolveRoomId(frame, { allowMissing = false } = {}) {
+  const envelopeRoomIdProvided = frame.roomId !== undefined;
+  const payloadTableIdProvided = frame.payload.tableId !== undefined;
+
+  const envelopeRoomId = envelopeRoomIdProvided ? normalizeTableId(frame.roomId) : null;
+  if (envelopeRoomIdProvided && !envelopeRoomId) {
+    return {
+      ok: false,
+      code: "INVALID_ROOM_ID",
+      message: "roomId must be a non-empty string"
+    };
+  }
+
+  const payloadTableId = payloadTableIdProvided ? normalizeTableId(frame.payload.tableId) : null;
+  if (payloadTableIdProvided && !payloadTableId) {
+    return {
+      ok: false,
+      code: "INVALID_ROOM_ID",
+      message: "payload.tableId must be a non-empty string"
+    };
+  }
+
+  if (envelopeRoomId && payloadTableId && envelopeRoomId !== payloadTableId) {
+    return {
+      ok: false,
+      code: "INVALID_ROOM_ID",
+      message: "roomId and payload.tableId must match when both are provided"
+    };
+  }
+
+  const resolvedRoomId = envelopeRoomId || payloadTableId;
+  if (!allowMissing && !resolvedRoomId) {
+    return {
+      ok: false,
+      code: "INVALID_ROOM_ID",
+      message: "roomId is required"
+    };
+  }
+
+  return { ok: true, roomId: resolvedRoomId ?? null };
+}
+
+function requiresRequestId(frameType) {
+  return REQUEST_ID_REQUIRED_TYPES.has(frameType);
 }
 
 function sendTableState(ws, connState, { requestId = null, tableState }) {
@@ -240,22 +296,32 @@ wss.on("connection", (ws) => {
       return;
     }
 
+    if (requiresRequestId(frame.type) && typeof frame.requestId !== "string") {
+      sendError(ws, connState, {
+        code: "INVALID_COMMAND",
+        message: `${frame.type} requires requestId`,
+        requestId: null
+      });
+      return;
+    }
+
     if (frame.type === "protected_echo") {
       const response = handleProtectedEcho({ frame, connState, nowTs });
       sendFrame(ws, response.frame);
       return;
     }
 
-    if (frame.type === "table_join") {
-      const tableId = normalizeTableId(frame.payload.tableId);
-      if (!tableId) {
+    if (frame.type === "table_join" || frame.type === "join") {
+      const resolvedRoomId = resolveRoomId(frame);
+      if (!resolvedRoomId.ok) {
         sendError(ws, connState, {
-          code: "INVALID_COMMAND",
-          message: "table_join requires payload.tableId as a non-empty string",
+          code: resolvedRoomId.code,
+          message: resolvedRoomId.message,
           requestId: frame.requestId ?? null
         });
         return;
       }
+      const tableId = resolvedRoomId.roomId;
 
       sessionStore.trackConnection({ ws, userId: connState.session.userId });
       const joined = tableManager.join({ ws, userId: connState.session.userId, tableId, nowTs: Date.now() });
@@ -276,15 +342,16 @@ wss.on("connection", (ws) => {
     }
 
     if (frame.type === "resync" || frame.type === "resume") {
-      const tableId = normalizeTableId(frame.payload.tableId);
-      if (!tableId) {
+      const resolvedRoomId = resolveRoomId(frame);
+      if (!resolvedRoomId.ok) {
         sendError(ws, connState, {
-          code: "INVALID_COMMAND",
-          message: "resync requires payload.tableId as a non-empty string",
+          code: resolvedRoomId.code,
+          message: resolvedRoomId.message,
           requestId: frame.requestId ?? null
         });
         return;
       }
+      const tableId = resolvedRoomId.roomId;
 
       sessionStore.trackConnection({ ws, userId: connState.session.userId });
       const resynced = tableManager.resync({ ws, userId: connState.session.userId, tableId, nowTs: Date.now() });
@@ -301,16 +368,17 @@ wss.on("connection", (ws) => {
       return;
     }
 
-    if (frame.type === "table_leave") {
-      const tableId = frame.payload.tableId === undefined ? null : normalizeTableId(frame.payload.tableId);
-      if (frame.payload.tableId !== undefined && !tableId) {
+    if (frame.type === "table_leave" || frame.type === "leave") {
+      const resolvedRoomId = resolveRoomId(frame, { allowMissing: true });
+      if (!resolvedRoomId.ok) {
         sendError(ws, connState, {
-          code: "INVALID_COMMAND",
-          message: "table_leave payload.tableId must be a non-empty string when provided",
+          code: resolvedRoomId.code,
+          message: resolvedRoomId.message,
           requestId: frame.requestId ?? null
         });
         return;
       }
+      const tableId = resolvedRoomId.roomId;
 
       const left = tableManager.leave({ ws, userId: connState.session.userId, tableId });
       if (!left.tableState) {
@@ -330,15 +398,16 @@ wss.on("connection", (ws) => {
     }
 
     if (frame.type === "table_state_sub") {
-      const tableId = normalizeTableId(frame.payload.tableId);
-      if (!tableId) {
+      const resolvedRoomId = resolveRoomId(frame);
+      if (!resolvedRoomId.ok) {
         sendError(ws, connState, {
-          code: "INVALID_COMMAND",
-          message: "table_state_sub requires payload.tableId as a non-empty string",
+          code: resolvedRoomId.code,
+          message: resolvedRoomId.message,
           requestId: frame.requestId ?? null
         });
         return;
       }
+      const tableId = resolvedRoomId.roomId;
 
       const subscribed = tableManager.subscribe({ ws, tableId });
       if (!subscribed.ok) {
