@@ -92,6 +92,9 @@ jobs:
       - name: Run ws-server deploy rollout harness test
         run: node --test ws-tests/ws-server-deploy-rollout.test.mjs
 
+      - name: Run ws mint-token no-postgres dependency guard test
+        run: node --test ws-tests/ws-mint-token.no-postgres-dep.guard.test.mjs
+
       - name: Run ws mint-token behavior test
         run: node --test ws-tests/ws-mint-token.behavior.test.mjs
 

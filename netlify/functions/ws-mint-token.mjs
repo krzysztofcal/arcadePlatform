@@ -1,5 +1,123 @@
-import { createHmac } from "node:crypto";
-import { baseHeaders, corsHeaders, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
+import { createHmac, timingSafeEqual } from "node:crypto";
+
+function klog(kind, data) {
+  const payload = data && typeof data === "object" ? ` ${JSON.stringify(data)}` : "";
+  process.stdout.write(`[klog] ${kind}${payload}\n`);
+}
+
+function baseHeaders() {
+  return {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+  };
+}
+
+function corsAllowList(env = process.env) {
+  const fromEnv = (env.XP_CORS_ALLOW ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const siteUrl = env.URL;
+  if (siteUrl && !fromEnv.includes(siteUrl)) {
+    fromEnv.push(siteUrl);
+  }
+  return fromEnv;
+}
+
+function corsHeaders(origin, env = process.env) {
+  const headers = baseHeaders();
+  if (!origin) {
+    return headers;
+  }
+
+  const allow = corsAllowList(env);
+  const isNetlifyDomain = /^https:\/\/[a-z0-9-]+\.netlify\.app$/i.test(origin);
+  if (!isNetlifyDomain && allow.length > 0 && !allow.includes(origin)) {
+    return null;
+  }
+
+  return {
+    ...headers,
+    "access-control-allow-origin": origin,
+    "access-control-allow-credentials": "true",
+    "access-control-allow-headers": "authorization, content-type",
+    "access-control-allow-methods": "GET, POST, DELETE, OPTIONS",
+  };
+}
+
+function extractBearerToken(headers) {
+  const headerValue = headers?.authorization || headers?.Authorization || headers?.AUTHORIZATION;
+  if (!headerValue || typeof headerValue !== "string") return null;
+  const match = /^Bearer\s+(.+)$/i.exec(headerValue.trim());
+  return match ? match[1].trim() : null;
+}
+
+function decodeBase64UrlJson(segment) {
+  if (!segment) return null;
+  try {
+    return JSON.parse(Buffer.from(segment, "base64url").toString("utf8"));
+  } catch {
+    return null;
+  }
+}
+
+function safeCompareBase64Url(a, b) {
+  if (!a || !b) return false;
+  let left;
+  let right;
+  try {
+    left = Buffer.from(a, "base64url");
+    right = Buffer.from(b, "base64url");
+  } catch {
+    return false;
+  }
+  if (left.length !== right.length) return false;
+  return timingSafeEqual(left, right);
+}
+
+async function verifySupabaseJwt(token, env = process.env) {
+  if (!token) {
+    return { valid: false, userId: null, reason: "missing_token" };
+  }
+  const secret = env.SUPABASE_JWT_SECRET || env.SUPABASE_JWT_SECRET_V2 || "";
+  if (!secret) {
+    return { valid: false, userId: null, reason: "missing_jwt_secret" };
+  }
+
+  const [headerSegment, payloadSegment, signatureSegment] = token.split(".");
+  if (!headerSegment || !payloadSegment || !signatureSegment) {
+    return { valid: false, userId: null, reason: "malformed_token" };
+  }
+
+  const header = decodeBase64UrlJson(headerSegment);
+  const payload = decodeBase64UrlJson(payloadSegment);
+  if (!header || !payload) {
+    return { valid: false, userId: null, reason: "invalid_encoding" };
+  }
+
+  if (header.alg !== "HS256") {
+    return { valid: false, userId: null, reason: "unsupported_alg" };
+  }
+
+  const expectedSig = createHmac("sha256", secret)
+    .update(`${headerSegment}.${payloadSegment}`)
+    .digest("base64url");
+  if (!safeCompareBase64Url(signatureSegment, expectedSig)) {
+    return { valid: false, userId: null, reason: "invalid_signature" };
+  }
+
+  const nowSec = Math.floor(Date.now() / 1000);
+  if (!Number.isFinite(payload.exp) || Number(payload.exp) <= nowSec) {
+    return { valid: false, userId: null, reason: "expired" };
+  }
+
+  const userId = typeof payload.sub === "string" ? payload.sub.trim() : "";
+  if (!userId) {
+    return { valid: false, userId: null, reason: "missing_sub" };
+  }
+
+  return { valid: true, userId, reason: "ok" };
+}
 
 function getHeader(headers, key) {
   if (!headers || typeof headers !== "object") return undefined;
