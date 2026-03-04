@@ -25,11 +25,24 @@ test("remote deploy script is strict, rollback-capable and health-gated", () => 
   assert.match(text, /mv -Tf "\$CURRENT_LINK\.tmp" "\$CURRENT_LINK"/);
 
   assert.match(text, /systemctl restart ws-server\.service/);
-  assert.match(text, /curl -fsS/);
-  assert.match(text, /https:\/\//);
-  assert.match(text, /ws\.kcswh\.pl/);
-  assert.match(text, /\/healthz/);
-  assert.match(text, /test "\$HEALTHZ_BODY" = "ok"/);
+  assert.match(text, /curl -fsS http:\/\/127\.0\.0\.1:3000\/healthz/);
+  assert.match(text, /curl -fsS https:\/\/ws\.kcswh\.pl\/healthz/);
+  assert.match(text, /for i in \$\(seq 1 "\$HEALTH_RETRIES"\); do/);
+  assert.doesNotMatch(
+    text,
+    /HEALTHZ_BODY="\$\(curl -fsS https:\/\/ws\.kcswh\.pl\/healthz \| tr -d '\\r\\n'\)"\s*test "\$HEALTHZ_BODY" = "ok"/
+  );
+
+  const localHealthIdx = text.indexOf("curl -fsS http://127.0.0.1:3000/healthz");
+  const publicHealthIdx = text.indexOf("curl -fsS https://ws.kcswh.pl/healthz");
+  assert.notEqual(localHealthIdx, -1);
+  assert.notEqual(publicHealthIdx, -1);
+  assert.ok(localHealthIdx < publicHealthIdx, "local health check should run before public health check");
+
+  assert.doesNotMatch(text, /local healthz failed after retries[\s\S]*exit 1/);
+  assert.doesNotMatch(text, /public healthz failed after retries[\s\S]*exit 1/);
+  assert.match(text, /local healthz failed after retries[\s\S]*false/);
+  assert.match(text, /public healthz failed after retries[\s\S]*false/);
 
   assert.match(text, /rollback\(\)/);
   assert.match(text, /on_error\(\)/);
