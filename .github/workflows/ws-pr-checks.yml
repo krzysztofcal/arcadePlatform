@@ -59,6 +59,9 @@ jobs:
       - name: Run ws-server deploy remote-script behavior test
         run: node --test ws-tests/ws-server-deploy.remote-script.behavior.test.mjs
 
+      - name: Run ws-server deploy sudo-preflight guard test
+        run: node --test ws-tests/ws-server-deploy.sudo-preflight.guard.test.mjs
+
       - name: Run ws-server deploy runner-smoke behavior test
         run: node --test ws-tests/ws-server-deploy.runner-smoke.behavior.test.mjs
 

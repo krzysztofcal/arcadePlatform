@@ -37,6 +37,7 @@ jobs:
           set -euo pipefail
           node --test ws-tests/ws-server-deploy.workflow.guard.test.mjs
           node --test ws-tests/ws-server-deploy.remote-script.behavior.test.mjs
+          node --test ws-tests/ws-server-deploy.sudo-preflight.guard.test.mjs
           node --test ws-tests/ws-server-deploy.runner-smoke.behavior.test.mjs
           node --test ws-tests/ws-server-deploy.codeql-url-substring.guard.test.mjs
           node --test ws-tests/ws-server-deploy.artifact-path.guard.test.mjs
@@ -144,11 +145,6 @@ jobs:
             PREVIOUS_TARGET=""
             HAVE_SWITCHED=0
 
-            if ! sudo -n true >/dev/null 2>&1; then
-              echo "configure /etc/sudoers.d/ws-server-deploy"
-              exit 1
-            fi
-
             if ! command -v node >/dev/null 2>&1; then
               echo "install nodejs"
               exit 1
@@ -160,7 +156,7 @@ jobs:
             fi
 
             if ! sudo -n systemctl cat ws-server.service >/dev/null 2>&1; then
-              echo "provision unit first"
+              echo "configure /etc/sudoers.d/ws-server-deploy"
               exit 1
             fi
 
