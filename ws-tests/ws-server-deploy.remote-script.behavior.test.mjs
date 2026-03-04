@@ -13,7 +13,9 @@ test("remote deploy script is strict, rollback-capable and health-gated", () => 
   assert.match(text, /trap 'on_error' ERR/);
   assert.match(text, /RELEASES_DIR="\$BASE_DIR\/releases"/);
   assert.match(text, /NEW_RELEASE_DIR="\$RELEASES_DIR\/\$RELEASE_ID"/);
+  assert.doesNotMatch(text, /sudo -n true/);
   assert.match(text, /configure \/etc\/sudoers\.d\/ws-server-deploy/);
+  assert.match(text, /sudo -n systemctl cat ws-server\.service/);
   assert.match(text, /install nodejs/);
   assert.match(text, /provision unit first/);
   assert.match(text, /provision \/opt\/ws-server\/releases first/);
