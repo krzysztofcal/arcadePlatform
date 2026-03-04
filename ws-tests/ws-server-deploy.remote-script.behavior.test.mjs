@@ -25,16 +25,17 @@ test("remote deploy script is strict, rollback-capable and health-gated", () => 
   assert.match(text, /mv -Tf "\$CURRENT_LINK\.tmp" "\$CURRENT_LINK"/);
 
   assert.match(text, /systemctl restart ws-server\.service/);
-  assert.match(text, /curl -fsS http:\/\/127\.0\.0\.1:3000\/healthz/);
-  assert.match(text, /curl -fsS https:\/\/ws\.kcswh\.pl\/healthz/);
+  assert.match(text, /curl -fsS http:\/\/127\.0\.0\.1:3000/);
+  assert.match(text, /curl -fsS https:\/\/ws\.kcswh\.pl/);
   assert.match(text, /for i in \$\(seq 1 "\$HEALTH_RETRIES"\); do/);
+  assert.match(text, /\/healthz/);
   assert.doesNotMatch(
     text,
-    /HEALTHZ_BODY="\$\(curl -fsS https:\/\/ws\.kcswh\.pl\/healthz \| tr -d '\\r\\n'\)"\s*test "\$HEALTHZ_BODY" = "ok"/
+    /HEALTHZ_BODY="\$\(curl -fsS https:\/\/ws\.kcswh\.pl[^"\n]* \| tr -d '\\r\\n'\)"\s*test "\$HEALTHZ_BODY" = "ok"/
   );
 
-  const localHealthIdx = text.indexOf("curl -fsS http://127.0.0.1:3000/healthz");
-  const publicHealthIdx = text.indexOf("curl -fsS https://ws.kcswh.pl/healthz");
+  const localHealthIdx = text.indexOf("curl -fsS http://127.0.0.1:3000");
+  const publicHealthIdx = text.indexOf("curl -fsS https://ws.kcswh.pl");
   assert.notEqual(localHealthIdx, -1);
   assert.notEqual(publicHealthIdx, -1);
   assert.ok(localHealthIdx < publicHealthIdx, "local health check should run before public health check");

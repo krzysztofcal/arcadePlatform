@@ -15,6 +15,7 @@ test("ws-server deploy health gate uses retry constants and accepts normalized o
   assert.match(text, /\[ "\$LOCAL_HEALTHZ_BODY" = "ok" \]/);
   assert.match(text, /\[ "\$HEALTHZ_BODY" = "ok" \]/);
   assert.match(text, /for i in \$\(seq 1 "\$HEALTH_RETRIES"\); do/);
+  assert.match(text, /\/healthz/);
   assert.doesNotMatch(text, /healthz failed after retries"\s*\n\s*exit 1/);
   assert.match(text, /local healthz failed after retries[\s\S]*false/);
   assert.match(text, /public healthz failed after retries[\s\S]*false/);
@@ -24,6 +25,6 @@ test("ws-server deploy health gate uses retry constants and accepts normalized o
 
   assert.doesNotMatch(
     text,
-    /HEALTHZ_BODY="\$\(curl -fsS https:\/\/ws\.kcswh\.pl\/healthz \| tr -d '\\r\\n'\)"\s*test "\$HEALTHZ_BODY" = "ok"/
+    /HEALTHZ_BODY="\$\(curl -fsS https:\/\/ws\.kcswh\.pl[^"\n]* \| tr -d '\\r\\n'\)"\s*test "\$HEALTHZ_BODY" = "ok"/
   );
 });
