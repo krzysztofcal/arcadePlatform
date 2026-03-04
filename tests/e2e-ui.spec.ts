@@ -23,20 +23,19 @@ test('Mute button toggles aria-pressed and title', async ({ page }) => {
   const mute = page.locator('#btnMute');
   await expect(mute).toBeVisible();
 
-  const beforePressed = await mute.getAttribute('aria-pressed');
-  const beforeTitle = (await mute.getAttribute('title')) || '';
-
   // Initial state should be unmuted
-  expect(beforePressed).toBe('false');
-  expect(beforeTitle).toBe('Mute');
+  await expect(mute).toHaveAttribute('aria-pressed', 'false');
+  await expect(mute).toHaveAttribute('title', 'Mute');
 
   await mute.click();
-  const afterPressed = await mute.getAttribute('aria-pressed');
-  const afterTitle = (await mute.getAttribute('title')) || '';
 
   // aria-pressed should toggle, and title should swap Mute/Unmute
-  expect(afterPressed).toBe('true');
-  expect(afterTitle).toBe('Unmute');
+  await expect(mute).toHaveAttribute('aria-pressed', 'true');
+  await expect(mute).toHaveAttribute('title', 'Unmute');
+
+  await mute.click();
+  await expect(mute).toHaveAttribute('aria-pressed', 'false');
+  await expect(mute).toHaveAttribute('title', 'Mute');
 });
 
 test('Fullscreen buttons sanity (enter/exit visibility)', async ({ page }) => {
@@ -71,4 +70,3 @@ test('Fullscreen buttons sanity (enter/exit visibility)', async ({ page }) => {
     expect(enterVisible).toBeTruthy();
   }
 });
-
