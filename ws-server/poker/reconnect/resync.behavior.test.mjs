@@ -284,6 +284,65 @@ test("resync restores presence and seat without duplicates", async () => {
   }
 });
 
+test("resync accepts roomId without payload.tableId", async () => {
+  const secret = "test-secret";
+  const token = makeHs256Jwt({ secret, sub: "user_roomid" });
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      WS_PRESENCE_TTL_MS: "10000"
+    }
+  });
+
+  try {
+    await waitForListening(child, 5000);
+
+    const client1 = await connectClient(port);
+    await hello(client1, "req-hello-roomid-c1");
+    const auth1 = await auth(client1, token, "req-auth-roomid-c1");
+    assert.equal(auth1.type, "authOk");
+
+    sendFrame(client1, {
+      version: "1.0",
+      type: "table_join",
+      roomId: "table_roomid_resync",
+      requestId: "req-join-roomid-c1",
+      ts: "2026-02-28T00:00:20Z",
+      payload: {}
+    });
+    const joined = await nextMessage(client1, 5000, "join-roomid-c1");
+    assert.equal(joined.type, "table_state");
+    assert.equal(joined.payload.tableId, "table_roomid_resync");
+
+    client1.close();
+
+    const client2 = await connectClient(port);
+    await hello(client2, "req-hello-roomid-c2");
+    const auth2 = await auth(client2, token, "req-auth-roomid-c2");
+    assert.equal(auth2.type, "authOk");
+
+    sendFrame(client2, {
+      version: "1.0",
+      type: "resync",
+      roomId: "table_roomid_resync",
+      requestId: "req-resync-roomid-c2",
+      ts: "2026-02-28T00:00:21Z",
+      payload: {}
+    });
+    const resynced = await nextMessage(client2, 5000, "resync-roomid-c2");
+    assert.equal(resynced.type, "table_state");
+    assert.equal(resynced.payload.tableId, "table_roomid_resync");
+    assert.equal(resynced.payload.members.length, 1);
+    assert.equal(resynced.payload.members[0].userId, "user_roomid");
+
+    client2.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
 test("expired disconnected presence is removed after TTL", async () => {
   const secret = "test-secret";
   const token1 = makeHs256Jwt({ secret, sub: "user_1" });

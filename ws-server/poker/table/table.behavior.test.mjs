@@ -366,3 +366,341 @@ test("table join/leave/sub flow is auth-gated, idempotent, and cleaned on discon
     await waitForExit(child);
   }
 });
+
+test("roomId-only join alias works and legacy table_join remains compatible", async () => {
+  const secret = "test-secret";
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      WS_PRESENCE_TTL_MS: "0"
+    }
+  });
+
+  try {
+    await waitForListening(child, 5000);
+
+    const aliasClient = await connectClient(port);
+    await hello(aliasClient, "req-hello-alias");
+    const aliasToken = makeHs256Jwt({ secret, sub: "user_alias" });
+    const aliasAuth = await auth(aliasClient, aliasToken, "req-auth-alias");
+    assert.equal(aliasAuth.type, "authOk");
+
+    sendFrame(aliasClient, {
+      version: "1.0",
+      type: "join",
+      roomId: "table_room_id_only",
+      requestId: "req-join-alias-roomid-only",
+      ts: "2026-02-28T00:10:00Z",
+      payload: {}
+    });
+
+    const aliasJoin = await nextMessage(aliasClient, 5000, "aliasJoin");
+    assert.equal(aliasJoin.type, "table_state");
+    assert.equal(aliasJoin.payload.tableId, "table_room_id_only");
+    assert.deepEqual(aliasJoin.payload.members.map((entry) => entry.userId), ["user_alias"]);
+
+    sendFrame(aliasClient, {
+      version: "1.0",
+      type: "table_state_sub",
+      roomId: "table_room_id_only",
+      requestId: "req-sub-alias-roomid-only",
+      ts: "2026-02-28T00:10:01Z",
+      payload: {}
+    });
+
+    const aliasSub = await nextMessage(aliasClient, 5000, "aliasSub");
+    assert.equal(aliasSub.type, "table_state");
+    assert.equal(aliasSub.payload.tableId, "table_room_id_only");
+    assert.deepEqual(aliasSub.payload.members.map((entry) => entry.userId), ["user_alias"]);
+
+    const legacyClient = await connectClient(port);
+    await hello(legacyClient, "req-hello-legacy");
+    const legacyToken = makeHs256Jwt({ secret, sub: "user_legacy" });
+    const legacyAuth = await auth(legacyClient, legacyToken, "req-auth-legacy");
+    assert.equal(legacyAuth.type, "authOk");
+
+    sendFrame(legacyClient, {
+      version: "1.0",
+      type: "table_join",
+      requestId: "req-join-legacy-payload-tableid",
+      ts: "2026-02-28T00:10:02Z",
+      payload: { tableId: "table_legacy" }
+    });
+
+    const legacyJoin = await nextMessage(legacyClient, 5000, "legacyJoin");
+    assert.equal(legacyJoin.type, "table_state");
+    assert.equal(legacyJoin.payload.tableId, "table_legacy");
+    assert.deepEqual(legacyJoin.payload.members.map((entry) => entry.userId), ["user_legacy"]);
+
+    aliasClient.close();
+    legacyClient.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
+test("conflicting roomId and payload.tableId is rejected deterministically without state mutation", async () => {
+  const secret = "test-secret";
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      WS_PRESENCE_TTL_MS: "0"
+    }
+  });
+
+  try {
+    await waitForListening(child, 5000);
+
+    const observer = await connectClient(port);
+    const actor = await connectClient(port);
+    await hello(observer, "req-hello-observer-conflict");
+    await hello(actor, "req-hello-actor-conflict");
+
+    const observerToken = makeHs256Jwt({ secret, sub: "user_observer" });
+    const actorToken = makeHs256Jwt({ secret, sub: "user_actor" });
+    const observerAuth = await auth(observer, observerToken, "req-auth-observer-conflict");
+    const actorAuth = await auth(actor, actorToken, "req-auth-actor-conflict");
+    assert.equal(observerAuth.type, "authOk");
+    assert.equal(actorAuth.type, "authOk");
+
+    sendFrame(observer, {
+      version: "1.0",
+      type: "table_state_sub",
+      roomId: "table_A",
+      requestId: "req-sub-observer-conflict",
+      ts: "2026-02-28T00:11:00Z",
+      payload: {}
+    });
+    const initialObserverState = await nextMessage(observer, 5000, "initialObserverState");
+    assert.equal(initialObserverState.type, "table_state");
+    assert.equal(initialObserverState.payload.tableId, "table_A");
+    assert.deepEqual(initialObserverState.payload.members, []);
+
+    sendFrame(actor, {
+      version: "1.0",
+      type: "join",
+      roomId: "table_A",
+      requestId: "req-join-conflict",
+      ts: "2026-02-28T00:11:01Z",
+      payload: { tableId: "table_B" }
+    });
+
+    const conflictError = await nextMessage(actor, 5000, "conflictError");
+    assert.equal(conflictError.type, "error");
+    assert.equal(conflictError.payload.code, "INVALID_ROOM_ID");
+
+    const observerNoBroadcast = await attemptMessage(observer);
+    assert.equal(observerNoBroadcast, null);
+
+    sendFrame(observer, {
+      version: "1.0",
+      type: "table_state_sub",
+      roomId: "table_A",
+      requestId: "req-sub-observer-conflict-again",
+      ts: "2026-02-28T00:11:02Z",
+      payload: {}
+    });
+    const afterConflictObserverState = await nextMessage(observer, 5000, "afterConflictObserverState");
+    assert.equal(afterConflictObserverState.type, "table_state");
+    assert.deepEqual(afterConflictObserverState.payload.members, []);
+
+    observer.close();
+    actor.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
+
+test("table_leave without room/table id succeeds when currently joined", async () => {
+  const secret = "test-secret";
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      WS_PRESENCE_TTL_MS: "0"
+    }
+  });
+
+  try {
+    await waitForListening(child, 5000);
+
+    const leaver = await connectClient(port);
+    const observer = await connectClient(port);
+
+    await hello(leaver, "req-hello-leaver");
+    await hello(observer, "req-hello-observer-leave");
+
+    const leaverAuth = await auth(leaver, makeHs256Jwt({ secret, sub: "user_leaver" }), "req-auth-leaver");
+    const observerAuth = await auth(observer, makeHs256Jwt({ secret, sub: "user_observer_leave" }), "req-auth-observer-leave");
+    assert.equal(leaverAuth.type, "authOk");
+    assert.equal(observerAuth.type, "authOk");
+
+    sendFrame(observer, {
+      version: "1.0",
+      type: "table_state_sub",
+      roomId: "table_leave_implicit",
+      requestId: "req-sub-observer-leave",
+      ts: "2026-02-28T00:12:00Z",
+      payload: {}
+    });
+    const observerInitial = await nextMessage(observer, 5000, "observerInitial");
+    assert.equal(observerInitial.type, "table_state");
+    assert.deepEqual(observerInitial.payload.members, []);
+
+    sendFrame(leaver, {
+      version: "1.0",
+      type: "table_join",
+      roomId: "table_leave_implicit",
+      requestId: "req-join-leaver",
+      ts: "2026-02-28T00:12:01Z",
+      payload: {}
+    });
+
+    const leaverJoinAck = await nextMessage(leaver, 5000, "leaverJoinAck");
+    const observerAfterJoin = await nextMessage(observer, 5000, "observerAfterJoin");
+    assert.equal(leaverJoinAck.type, "table_state");
+    assert.equal(observerAfterJoin.type, "table_state");
+    assert.deepEqual(leaverJoinAck.payload.members.map((entry) => entry.userId), ["user_leaver"]);
+    assert.deepEqual(observerAfterJoin.payload.members.map((entry) => entry.userId), ["user_leaver"]);
+
+    sendFrame(leaver, {
+      version: "1.0",
+      type: "table_leave",
+      requestId: "req-leave-implicit",
+      ts: "2026-02-28T00:12:02Z",
+      payload: {}
+    });
+
+    const leaverLeaveAck = await nextMessage(leaver, 5000, "leaverLeaveAck");
+    const observerAfterLeave = await nextMessage(observer, 5000, "observerAfterLeave");
+    assert.equal(leaverLeaveAck.type, "table_state");
+    assert.equal(observerAfterLeave.type, "table_state");
+    assert.equal(leaverLeaveAck.payload.tableId, "table_leave_implicit");
+    assert.deepEqual(leaverLeaveAck.payload.members, []);
+    assert.deepEqual(observerAfterLeave.payload.members, []);
+
+    const observerNoExtra = await attemptMessage(observer);
+    assert.equal(observerNoExtra, null);
+
+    leaver.close();
+    observer.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
+
+test("table_leave without room/table id fails deterministically when not joined and does not broadcast", async () => {
+  const secret = "test-secret";
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      WS_PRESENCE_TTL_MS: "0"
+    }
+  });
+
+  try {
+    await waitForListening(child, 5000);
+
+    const actor = await connectClient(port);
+    const observer = await connectClient(port);
+    await hello(actor, "req-hello-actor-leave-not-joined");
+    await hello(observer, "req-hello-observer-leave-not-joined");
+
+    const actorAuth = await auth(actor, makeHs256Jwt({ secret, sub: "user_actor_leave_not_joined" }), "req-auth-actor-leave-not-joined");
+    const observerAuth = await auth(observer, makeHs256Jwt({ secret, sub: "user_observer_leave_not_joined" }), "req-auth-observer-leave-not-joined");
+    assert.equal(actorAuth.type, "authOk");
+    assert.equal(observerAuth.type, "authOk");
+
+    sendFrame(observer, {
+      version: "1.0",
+      type: "table_state_sub",
+      roomId: "table_leave_not_joined",
+      requestId: "req-sub-observer-leave-not-joined",
+      ts: "2026-02-28T00:13:00Z",
+      payload: {}
+    });
+    await nextMessage(observer, 5000, "observerInitLeaveNotJoined");
+
+    sendFrame(actor, {
+      version: "1.0",
+      type: "table_leave",
+      requestId: "req-leave-not-joined",
+      ts: "2026-02-28T00:13:01Z",
+      payload: {}
+    });
+
+    const leaveError = await nextMessage(actor, 5000, "leaveErrorNotJoined");
+    assert.equal(leaveError.type, "error");
+    assert.equal(leaveError.payload.code, "INVALID_COMMAND");
+
+    const actorNoExtra = await attemptMessage(actor);
+    const observerNoBroadcast = await attemptMessage(observer);
+    assert.equal(actorNoExtra, null);
+    assert.equal(observerNoBroadcast, null);
+
+    actor.close();
+    observer.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
+
+test("missing requestId on join is rejected with INVALID_COMMAND and does not mutate membership", async () => {
+  const secret = "test-secret";
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      WS_PRESENCE_TTL_MS: "0"
+    }
+  });
+
+  try {
+    await waitForListening(child, 5000);
+
+    const client = await connectClient(port);
+    await hello(client, "req-hello-missing-requestid");
+    const authResp = await auth(client, makeHs256Jwt({ secret, sub: "user_missing_requestid" }), "req-auth-missing-requestid");
+    assert.equal(authResp.type, "authOk");
+
+    sendFrame(client, {
+      version: "1.0",
+      type: "join",
+      roomId: "table_reqid",
+      ts: "2026-02-28T00:14:00Z",
+      payload: {}
+    });
+
+    const missingRequestIdError = await nextMessage(client, 5000, "missingRequestIdError");
+    assert.equal(missingRequestIdError.type, "error");
+    assert.equal(missingRequestIdError.payload.code, "INVALID_COMMAND");
+
+    sendFrame(client, {
+      version: "1.0",
+      type: "table_state_sub",
+      roomId: "table_reqid",
+      requestId: "req-sub-after-missing-requestid",
+      ts: "2026-02-28T00:14:01Z",
+      payload: {}
+    });
+
+    const stateAfterRejectedJoin = await nextMessage(client, 5000, "stateAfterRejectedJoin");
+    assert.equal(stateAfterRejectedJoin.type, "table_state");
+    assert.deepEqual(stateAfterRejectedJoin.payload.members, []);
+
+    client.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
