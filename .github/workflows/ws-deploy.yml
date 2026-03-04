@@ -79,6 +79,12 @@ jobs:
       - name: Run ws-server deploy gated-by-validate guard test
         run: node --test ws-tests/ws-server-deploy.deploy-gated-by-validate.guard.test.mjs
 
+      - name: Run ws-server deploy artifact-path harness test
+        run: node --test ws-tests/ws-server-deploy-artifact-path.test.mjs
+
+      - name: Run ws-server deploy rollout harness test
+        run: node --test ws-tests/ws-server-deploy-rollout.test.mjs
+
       - name: Run ws tests location guard
         run: node --test ws-tests/ws-tests-location.guard.test.mjs
 

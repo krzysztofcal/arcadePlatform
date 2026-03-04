@@ -11,6 +11,6 @@ test("ws-server deploy scp contract maps workspace artifact to expected remote a
 
   assert.match(text, /source: \.artifacts\/ws-server\/ws-server-dist\.tgz/);
   assert.match(text, /target: \/tmp\/arcadeplatform-ws/);
-  assert.match(text, /TMP_ARCHIVE="\/tmp\/arcadeplatform-ws\/ws-server-dist\.tgz"/);
+  assert.match(text, /TMP_ARCHIVE="\/tmp\/arcadeplatform-ws\/\.artifacts\/ws-server\/ws-server-dist\.tgz"/);
   assert.doesNotMatch(text, /strip_components:\s*3/);
 });

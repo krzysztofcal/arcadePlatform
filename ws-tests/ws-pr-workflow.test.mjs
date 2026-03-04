@@ -119,3 +119,9 @@ test("ws pr workflow uses read-only token permissions", () => {
   const text = workflowText();
   assert.match(text, /permissions:\s*\n\s*contents:\s*read/);
 });
+
+test("ws pr workflow runs ws-server deploy harness tests", () => {
+  const text = workflowText();
+  assert.match(text, /node --test ws-tests\/ws-server-deploy-artifact-path\.test\.mjs/);
+  assert.match(text, /node --test ws-tests\/ws-server-deploy-rollout\.test\.mjs/);
+});

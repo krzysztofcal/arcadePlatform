@@ -45,6 +45,8 @@ jobs:
           node --test ws-tests/ws-deploy.trigger-surface.guard.test.mjs
           node --test ws-tests/ws-server-deploy.scp-contract.behavior.test.mjs
           node --test ws-tests/ws-server-deploy.deploy-gated-by-validate.guard.test.mjs
+          node --test ws-tests/ws-server-deploy-artifact-path.test.mjs
+          node --test ws-tests/ws-server-deploy-rollout.test.mjs
 
   deploy:
     needs: validate
@@ -136,11 +138,36 @@ jobs:
             BASE_DIR="/opt/ws-server"
             RELEASES_DIR="$BASE_DIR/releases"
             CURRENT_LINK="$BASE_DIR/current"
-            TMP_ARCHIVE="/tmp/arcadeplatform-ws/ws-server-dist.tgz"
+            TMP_ARCHIVE="/tmp/arcadeplatform-ws/.artifacts/ws-server/ws-server-dist.tgz"
             RELEASE_ID="$RELEASE_SHA"
             NEW_RELEASE_DIR="$RELEASES_DIR/$RELEASE_ID"
             PREVIOUS_TARGET=""
             HAVE_SWITCHED=0
+
+            if ! sudo -n true >/dev/null 2>&1; then
+              echo "configure /etc/sudoers.d/ws-server-deploy"
+              exit 1
+            fi
+
+            if ! command -v node >/dev/null 2>&1; then
+              echo "install nodejs"
+              exit 1
+            fi
+
+            if ! command -v systemctl >/dev/null 2>&1; then
+              echo "provision unit first"
+              exit 1
+            fi
+
+            if ! sudo -n systemctl cat ws-server.service >/dev/null 2>&1; then
+              echo "provision unit first"
+              exit 1
+            fi
+
+            if ! sudo -n test -d "$RELEASES_DIR"; then
+              echo "provision /opt/ws-server/releases first"
+              exit 1
+            fi
 
             rollback() {
               if [ "$HAVE_SWITCHED" != "1" ] || [ -z "$PREVIOUS_TARGET" ]; then
@@ -160,7 +187,6 @@ jobs:
             trap 'on_error' ERR
 
             test -f "$TMP_ARCHIVE"
-            sudo -n mkdir -p "$RELEASES_DIR"
 
             if [ -L "$CURRENT_LINK" ] || [ -e "$CURRENT_LINK" ]; then
               PREVIOUS_TARGET="$(readlink -f "$CURRENT_LINK" || true)"
