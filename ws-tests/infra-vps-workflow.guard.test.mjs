@@ -89,8 +89,8 @@ test("infra VPS workflow removes remote websocket curl upgrade and adds runner n
 
   assert.equal(remote.includes("Upgrade: websocket"), false);
   assert.equal(remote.includes("Sec-WebSocket-Key"), false);
-  assert.equal(remote.includes("https://ws.kcswh.pl/ws"), false);
   assert.equal(remote.includes("--http1.1"), false);
+  assert.doesNotMatch(remote, /\/ws(?:[/?\\s'\"]|$)/);
 
   assert.ok(text.includes("- name: Smoke-check ws.kcswh.pl from runner"));
   assert.ok(text.includes("timeout 15s node <<'NODE'"));

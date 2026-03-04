@@ -31,5 +31,5 @@ test("infra VPS ws smoke-check uses built-in node modules only on runner", () =>
 
   assert.equal(remote.includes("command -v node"), false);
   assert.equal(remote.includes("timeout 12s node"), false);
-  assert.equal(remote.includes("https://ws.kcswh.pl/ws"), false);
+  assert.doesNotMatch(remote, /\/ws(?:[/?\\s'\"]|$)/);
 });

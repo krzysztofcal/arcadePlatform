@@ -31,7 +31,7 @@ test("infra VPS remote bash keeps backup -> apply -> validate -> reload ordering
   assert.equal(applyIndex < validateIndex, true);
   assert.equal(validateIndex < reloadIndex, true);
   assert.equal(remote.includes("curl -sS -o /dev/null -D"), false);
-  assert.equal(remote.includes("https://ws.kcswh.pl/ws"), false);
+  assert.doesNotMatch(remote, /\/ws(?:[/?\\s'\"]|$)/);
 });
 
 test("infra VPS runner smoke-check runs after ssh-action step", () => {
