@@ -6,6 +6,16 @@ function withAppliedRequestId(state, requestId) {
   state.version += 1;
 }
 
+function findLowestAvailableSeat(state) {
+  const usedSeats = new Set(state.members.map((member) => member.seat));
+  for (let seat = 1; seat <= state.maxSeats; seat += 1) {
+    if (!usedSeats.has(seat)) {
+      return seat;
+    }
+  }
+  return null;
+}
+
 export function applyCoreEvent(previousState, rawEvent) {
   const stateValidation = validateCoreState(previousState);
   if (!stateValidation.ok) {
@@ -41,12 +51,13 @@ export function applyCoreEvent(previousState, rawEvent) {
 
   switch (event.type) {
     case CORE_EVENT_TYPES.JOIN: {
-      if (nextState.members.includes(event.userId)) {
+      const existingMember = nextState.members.find((member) => member.userId === event.userId);
+      if (existingMember) {
         withAppliedRequestId(nextState, event.requestId);
         return {
           ok: true,
           state: nextState,
-          effects: [{ type: "noop", reason: "already_member" }]
+          effects: [{ type: "noop", reason: "already_member", userId: existingMember.userId, seat: existingMember.seat }]
         };
       }
 
@@ -59,18 +70,29 @@ export function applyCoreEvent(previousState, rawEvent) {
         };
       }
 
-      nextState.members = [...nextState.members, event.userId];
+      const seat = findLowestAvailableSeat(nextState);
+      if (!seat) {
+        return {
+          ok: false,
+          state: previousState,
+          effects: [],
+          error: { code: "bounds_exceeded" }
+        };
+      }
+
+      nextState.members = [...nextState.members, { userId: event.userId, seat }];
+      nextState.seats = { ...nextState.seats, [event.userId]: seat };
       withAppliedRequestId(nextState, event.requestId);
       return {
         ok: true,
         state: nextState,
-        effects: [{ type: "member_joined", userId: event.userId }]
+        effects: [{ type: "member_joined", userId: event.userId, seat }]
       };
     }
 
     case CORE_EVENT_TYPES.LEAVE: {
-      const memberIndex = nextState.members.indexOf(event.userId);
-      if (memberIndex === -1) {
+      const existingMember = nextState.members.find((member) => member.userId === event.userId);
+      if (!existingMember) {
         withAppliedRequestId(nextState, event.requestId);
         return {
           ok: true,
@@ -79,12 +101,15 @@ export function applyCoreEvent(previousState, rawEvent) {
         };
       }
 
-      nextState.members = nextState.members.filter((memberId) => memberId !== event.userId);
+      nextState.members = nextState.members.filter((member) => member.userId !== event.userId);
+      const nextSeats = { ...nextState.seats };
+      delete nextSeats[event.userId];
+      nextState.seats = nextSeats;
       withAppliedRequestId(nextState, event.requestId);
       return {
         ok: true,
         state: nextState,
-        effects: [{ type: "member_left", userId: event.userId }]
+        effects: [{ type: "member_left", userId: event.userId, seat: existingMember.seat }]
       };
     }
 

@@ -34,7 +34,21 @@ function resolvePresenceTtlMs(rawValue) {
   return parsed;
 }
 
-const tableManager = createTableManager({ presenceTtlMs: resolvePresenceTtlMs(process.env.WS_PRESENCE_TTL_MS) });
+function resolveMaxSeats(rawValue) {
+  const parsed = Number(rawValue);
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    return 10;
+  }
+  if (parsed > 10) {
+    return 10;
+  }
+  return parsed;
+}
+
+const tableManager = createTableManager({
+  presenceTtlMs: resolvePresenceTtlMs(process.env.WS_PRESENCE_TTL_MS),
+  maxSeats: resolveMaxSeats(process.env.WS_MAX_SEATS)
+});
 const sessionStore = createSessionStore();
 
 function klog(kind, data) {
@@ -324,10 +338,16 @@ wss.on("connection", (ws) => {
       const tableId = resolvedRoomId.roomId;
 
       sessionStore.trackConnection({ ws, userId: connState.session.userId });
-      const joined = tableManager.join({ ws, userId: connState.session.userId, tableId, nowTs: Date.now() });
+      const joined = tableManager.join({
+        ws,
+        userId: connState.session.userId,
+        tableId,
+        requestId: frame.requestId,
+        nowTs: Date.now()
+      });
       if (!joined.ok) {
         sendError(ws, connState, {
-          code: "INVALID_COMMAND",
+          code: joined.code === "bounds_exceeded" ? "bounds_exceeded" : "INVALID_COMMAND",
           message: joined.message,
           requestId: frame.requestId ?? null
         });
@@ -380,7 +400,7 @@ wss.on("connection", (ws) => {
       }
       const tableId = resolvedRoomId.roomId;
 
-      const left = tableManager.leave({ ws, userId: connState.session.userId, tableId });
+      const left = tableManager.leave({ ws, userId: connState.session.userId, tableId, requestId: frame.requestId });
       if (!left.tableState) {
         sendError(ws, connState, {
           code: "INVALID_COMMAND",

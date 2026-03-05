@@ -704,3 +704,279 @@ test("missing requestId on join is rejected with INVALID_COMMAND and does not mu
     await waitForExit(child);
   }
 });
+
+test("table_join is idempotent by requestId and preserves a single seat-bearing member", async () => {
+  const secret = "test-secret";
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      WS_PRESENCE_TTL_MS: "0"
+    }
+  });
+
+  try {
+    await waitForListening(child, 5000);
+
+    const client = await connectClient(port);
+    await hello(client, "req-hello-idempotent");
+    const authResp = await auth(client, makeHs256Jwt({ secret, sub: "user_idempotent" }), "req-auth-idempotent");
+    assert.equal(authResp.type, "authOk");
+
+    const joinFrame = {
+      version: "1.0",
+      type: "table_join",
+      requestId: "req-join-same-id",
+      ts: "2026-02-28T00:15:00Z",
+      payload: { tableId: "table_idempotent" }
+    };
+
+    sendFrame(client, joinFrame);
+    const firstJoin = await nextMessage(client, 5000, "firstJoinSameRequestId");
+    assert.equal(firstJoin.type, "table_state");
+    assert.deepEqual(firstJoin.payload.members, [{ userId: "user_idempotent", seat: 1 }]);
+
+    sendFrame(client, joinFrame);
+    const secondJoin = await nextMessage(client, 5000, "secondJoinSameRequestId");
+    assert.equal(secondJoin.type, "table_state");
+    assert.deepEqual(secondJoin.payload.members, [{ userId: "user_idempotent", seat: 1 }]);
+
+    const noExtra = await attemptMessage(client);
+    assert.equal(noExtra, null);
+
+    client.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
+test("join rejects with bounds_exceeded when table is full and does not mutate membership", async () => {
+  const secret = "test-secret";
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      WS_PRESENCE_TTL_MS: "0",
+      WS_MAX_SEATS: "1"
+    }
+  });
+
+  try {
+    await waitForListening(child, 5000);
+
+    const userA = await connectClient(port);
+    const userB = await connectClient(port);
+
+    await hello(userA, "req-hello-userA-bounds");
+    await hello(userB, "req-hello-userB-bounds");
+
+    const userAAuth = await auth(userA, makeHs256Jwt({ secret, sub: "user_A" }), "req-auth-userA-bounds");
+    const userBAuth = await auth(userB, makeHs256Jwt({ secret, sub: "user_B" }), "req-auth-userB-bounds");
+    assert.equal(userAAuth.type, "authOk");
+    assert.equal(userBAuth.type, "authOk");
+
+    sendFrame(userA, {
+      version: "1.0",
+      type: "table_join",
+      requestId: "req-join-userA-bounds",
+      ts: "2026-02-28T00:16:00Z",
+      payload: { tableId: "table_bounds" }
+    });
+
+    const userAJoin = await nextMessage(userA, 5000, "userAJoinBounds");
+    assert.equal(userAJoin.type, "table_state");
+    assert.deepEqual(userAJoin.payload.members, [{ userId: "user_A", seat: 1 }]);
+
+    sendFrame(userB, {
+      version: "1.0",
+      type: "table_join",
+      requestId: "req-join-userB-bounds",
+      ts: "2026-02-28T00:16:01Z",
+      payload: { tableId: "table_bounds" }
+    });
+
+    const userBError = await nextMessage(userB, 5000, "userBJoinBoundsError");
+    assert.equal(userBError.type, "error");
+    assert.equal(userBError.payload.code, "bounds_exceeded");
+
+    sendFrame(userB, {
+      version: "1.0",
+      type: "table_state_sub",
+      requestId: "req-sub-userB-bounds",
+      ts: "2026-02-28T00:16:02Z",
+      payload: { tableId: "table_bounds" }
+    });
+
+    const stableState = await nextMessage(userB, 5000, "stableStateAfterBoundsError");
+    assert.equal(stableState.type, "table_state");
+    assert.deepEqual(stableState.payload.members, [{ userId: "user_A", seat: 1 }]);
+
+    userA.close();
+    userB.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
+test("WS_MAX_SEATS above core limit is clamped and does not brick table_join", async () => {
+  const secret = "test-secret";
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      WS_PRESENCE_TTL_MS: "0",
+      WS_MAX_SEATS: "11"
+    }
+  });
+
+  try {
+    await waitForListening(child, 5000);
+
+    const client = await connectClient(port);
+    await hello(client, "req-hello-max-seats-clamp");
+    const authResp = await auth(client, makeHs256Jwt({ secret, sub: "user_clamp" }), "req-auth-max-seats-clamp");
+    assert.equal(authResp.type, "authOk");
+
+    sendFrame(client, {
+      version: "1.0",
+      type: "table_join",
+      requestId: "req-join-max-seats-clamp",
+      ts: "2026-02-28T00:17:00Z",
+      payload: { tableId: "table_clamp" }
+    });
+
+    const joinAck = await nextMessage(client, 5000, "joinAckMaxSeatsClamp");
+    assert.equal(joinAck.type, "table_state");
+    assert.deepEqual(joinAck.payload.members, [{ userId: "user_clamp", seat: 1 }]);
+
+    client.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
+test("clamped max seats enforces bounds at 10 when WS_MAX_SEATS is 999", async () => {
+  const secret = "test-secret";
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      WS_PRESENCE_TTL_MS: "0",
+      WS_MAX_SEATS: "999"
+    }
+  });
+
+  try {
+    await waitForListening(child, 5000);
+
+    const tableId = "table_clamp_999";
+    const clients = [];
+
+    for (let index = 1; index <= 11; index += 1) {
+      const client = await connectClient(port);
+      clients.push(client);
+      await hello(client, `req-hello-clamp-999-${index}`);
+      const authResp = await auth(client, makeHs256Jwt({ secret, sub: `user_clamp_999_${index}` }), `req-auth-clamp-999-${index}`);
+      assert.equal(authResp.type, "authOk");
+
+      sendFrame(client, {
+        version: "1.0",
+        type: "table_join",
+        requestId: `req-join-clamp-999-${index}`,
+        ts: "2026-02-28T00:18:00Z",
+        payload: { tableId }
+      });
+
+      const joinResponse = await nextMessage(client, 5000, `joinResponseClamp999-${index}`);
+      if (index <= 10) {
+        assert.equal(joinResponse.type, "table_state");
+        assert.equal(joinResponse.payload.members.length, index);
+      } else {
+        assert.equal(joinResponse.type, "error");
+        assert.equal(joinResponse.payload.code, "bounds_exceeded");
+      }
+    }
+
+    const observer = clients[10];
+    sendFrame(observer, {
+      version: "1.0",
+      type: "table_state_sub",
+      requestId: "req-sub-clamp-999-after-failed-join",
+      ts: "2026-02-28T00:18:01Z",
+      payload: { tableId }
+    });
+
+    const stableState = await nextMessage(observer, 5000, "stableStateClamp999");
+    assert.equal(stableState.type, "table_state");
+    assert.equal(stableState.payload.members.length, 10);
+
+    for (const client of clients) {
+      client.close();
+    }
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
+
+test("table_leave is idempotent by requestId and does not mutate state on replay", async () => {
+  const secret = "test-secret";
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      WS_PRESENCE_TTL_MS: "0"
+    }
+  });
+
+  try {
+    await waitForListening(child, 5000);
+
+    const client = await connectClient(port);
+    await hello(client, "req-hello-leave-idempotent");
+    const authResp = await auth(client, makeHs256Jwt({ secret, sub: "user_leave_idempotent" }), "req-auth-leave-idempotent");
+    assert.equal(authResp.type, "authOk");
+
+    sendFrame(client, {
+      version: "1.0",
+      type: "table_join",
+      requestId: "req-join-leave-idempotent",
+      ts: "2026-02-28T00:19:00Z",
+      payload: { tableId: "table_leave_idempotent" }
+    });
+
+    const joinAck = await nextMessage(client, 5000, "joinAckLeaveIdempotent");
+    assert.equal(joinAck.type, "table_state");
+    assert.deepEqual(joinAck.payload.members, [{ userId: "user_leave_idempotent", seat: 1 }]);
+
+    const leaveFrame = {
+      version: "1.0",
+      type: "table_leave",
+      requestId: "req-leave-same-id",
+      ts: "2026-02-28T00:19:01Z",
+      payload: { tableId: "table_leave_idempotent" }
+    };
+
+    sendFrame(client, leaveFrame);
+    const firstLeave = await nextMessage(client, 5000, "firstLeaveSameRequestId");
+    assert.equal(firstLeave.type, "table_state");
+    assert.deepEqual(firstLeave.payload.members, []);
+
+    sendFrame(client, leaveFrame);
+    const secondLeave = await nextMessage(client, 5000, "secondLeaveSameRequestId");
+    assert.equal(secondLeave.type, "table_state");
+    assert.deepEqual(secondLeave.payload.members, []);
+
+    const noExtra = await attemptMessage(client);
+    assert.equal(noExtra, null);
+
+    client.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});

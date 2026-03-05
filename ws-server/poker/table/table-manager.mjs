@@ -1,6 +1,26 @@
-const DEFAULT_PRESENCE_TTL_MS = 10_000;
+import { applyCoreEvent, CORE_EVENT_TYPES, createInitialCoreState } from "../core/index.mjs";
 
-export function createTableManager({ presenceTtlMs = DEFAULT_PRESENCE_TTL_MS } = {}) {
+const DEFAULT_PRESENCE_TTL_MS = 10_000;
+const DEFAULT_MAX_SEATS = 10;
+
+function normalizeMembers(table) {
+  const members = [];
+  for (const coreMember of table.coreState.members) {
+    const presence = table.presenceByUserId.get(coreMember.userId);
+    if (presence && presence.connected !== false) {
+      members.push({ userId: coreMember.userId, seat: coreMember.seat });
+    }
+  }
+
+  return members.sort((a, b) => {
+    if (a.seat !== b.seat) {
+      return a.seat - b.seat;
+    }
+    return a.userId.localeCompare(b.userId);
+  });
+}
+
+export function createTableManager({ presenceTtlMs = DEFAULT_PRESENCE_TTL_MS, maxSeats = DEFAULT_MAX_SEATS } = {}) {
   const tables = new Map();
   const connStateBySocket = new Map();
 
@@ -18,23 +38,12 @@ export function createTableManager({ presenceTtlMs = DEFAULT_PRESENCE_TTL_MS } =
     if (!tables.has(tableId)) {
       tables.set(tableId, {
         tableId,
+        coreState: createInitialCoreState({ roomId: tableId, maxSeats }),
         presenceByUserId: new Map(),
         subscribers: new Set()
       });
     }
     return tables.get(tableId);
-  }
-
-  function getOrderedMembers(table) {
-    return [...table.presenceByUserId.values()]
-      .filter((member) => member.connected !== false)
-      .sort((a, b) => {
-        if (a.seat !== b.seat) {
-          return a.seat - b.seat;
-        }
-        return a.userId.localeCompare(b.userId);
-      })
-      .map((member) => ({ userId: member.userId, seat: member.seat }));
   }
 
   function tableState(tableId) {
@@ -45,17 +54,8 @@ export function createTableManager({ presenceTtlMs = DEFAULT_PRESENCE_TTL_MS } =
 
     return {
       tableId,
-      members: getOrderedMembers(table)
+      members: normalizeMembers(table)
     };
-  }
-
-  function nextSeat(table) {
-    const used = new Set([...table.presenceByUserId.values()].map((member) => member.seat));
-    let candidate = 1;
-    while (used.has(candidate)) {
-      candidate += 1;
-    }
-    return candidate;
   }
 
   function markConnected(member, nowMs) {
@@ -70,33 +70,49 @@ export function createTableManager({ presenceTtlMs = DEFAULT_PRESENCE_TTL_MS } =
     member.expiresAt = nowMs + presenceTtlMs;
   }
 
-  function join({ ws, userId, tableId, nowTs = Date.now() }) {
+  function join({ ws, userId, tableId, requestId, nowTs = Date.now() }) {
     const conn = ensureConn(ws);
     if (conn.joinedTableId && conn.joinedTableId !== tableId) {
       return { ok: false, code: "one_table_per_connection", message: "Connection is already joined to a different table" };
     }
 
     const table = ensureTable(tableId);
-    const alreadyJoined = table.presenceByUserId.has(userId);
-    if (!alreadyJoined) {
+    const joinResult = applyCoreEvent(table.coreState, {
+      type: CORE_EVENT_TYPES.JOIN,
+      requestId,
+      userId
+    });
+
+    if (!joinResult.ok) {
+      return { ok: false, code: joinResult.error.code, message: joinResult.error.code, tableState: tableState(tableId) };
+    }
+
+    table.coreState = joinResult.state;
+
+    const seat = table.coreState.seats[userId];
+    if (!table.presenceByUserId.has(userId)) {
       table.presenceByUserId.set(userId, {
         userId,
-        seat: nextSeat(table),
+        seat,
         connected: true,
         lastSeenAt: nowTs,
         expiresAt: null
       });
     } else {
-      markConnected(table.presenceByUserId.get(userId), nowTs);
+      const existingPresence = table.presenceByUserId.get(userId);
+      existingPresence.seat = seat;
+      markConnected(existingPresence, nowTs);
     }
 
     table.subscribers.add(ws);
     conn.joinedTableId = tableId;
     conn.subscribedTableId = tableId;
 
+    const changed = joinResult.effects.some((effect) => effect.type === "member_joined");
     return {
       ok: true,
-      changed: !alreadyJoined,
+      changed,
+      effects: joinResult.effects,
       tableState: tableState(tableId)
     };
   }
@@ -137,12 +153,12 @@ export function createTableManager({ presenceTtlMs = DEFAULT_PRESENCE_TTL_MS } =
     };
   }
 
-  function leave({ ws, userId, tableId }) {
+  function leave({ ws, userId, tableId, requestId }) {
     const conn = ensureConn(ws);
     const resolvedTableId = tableId || conn.joinedTableId;
 
     if (!resolvedTableId) {
-      return { ok: true, changed: false, tableState: null };
+      return { ok: true, changed: false, effects: [{ type: "noop", reason: "not_joined" }], tableState: null };
     }
 
     const table = tables.get(resolvedTableId);
@@ -151,10 +167,25 @@ export function createTableManager({ presenceTtlMs = DEFAULT_PRESENCE_TTL_MS } =
       if (conn.subscribedTableId === resolvedTableId) {
         conn.subscribedTableId = null;
       }
-      return { ok: true, changed: false, tableState: tableState(resolvedTableId) };
+      return { ok: true, changed: false, effects: [{ type: "noop", reason: "table_missing" }], tableState: tableState(resolvedTableId) };
     }
 
-    const hadMember = table.presenceByUserId.delete(userId);
+    const leaveResult = applyCoreEvent(table.coreState, {
+      type: CORE_EVENT_TYPES.LEAVE,
+      requestId,
+      userId
+    });
+
+    if (!leaveResult.ok) {
+      return { ok: false, code: leaveResult.error.code, message: leaveResult.error.code, tableState: tableState(resolvedTableId) };
+    }
+
+    table.coreState = leaveResult.state;
+
+    const hasMember = table.coreState.members.some((member) => member.userId === userId);
+    if (!hasMember) {
+      table.presenceByUserId.delete(userId);
+    }
     table.subscribers.delete(ws);
 
     if (conn.joinedTableId === resolvedTableId) {
@@ -165,13 +196,15 @@ export function createTableManager({ presenceTtlMs = DEFAULT_PRESENCE_TTL_MS } =
       conn.subscribedTableId = null;
     }
 
-    if (table.presenceByUserId.size === 0 && table.subscribers.size === 0) {
+    if (table.coreState.members.length === 0 && table.subscribers.size === 0) {
       tables.delete(resolvedTableId);
     }
 
+    const changed = leaveResult.effects.some((effect) => effect.type === "member_left");
     return {
       ok: true,
-      changed: hadMember,
+      changed,
+      effects: leaveResult.effects,
       tableState: tableState(resolvedTableId)
     };
   }
@@ -213,7 +246,16 @@ export function createTableManager({ presenceTtlMs = DEFAULT_PRESENCE_TTL_MS } =
         let membershipChanged = false;
         if (member && !hasTableAssociatedConnection) {
           if (presenceTtlMs === 0) {
-            membershipChanged = table.presenceByUserId.delete(userId);
+            const leaveResult = applyCoreEvent(table.coreState, {
+              type: CORE_EVENT_TYPES.LEAVE,
+              requestId: `disconnect:${joinedTableId}:${userId}:${nowTs}`,
+              userId
+            });
+            if (leaveResult.ok) {
+              table.coreState = leaveResult.state;
+              table.presenceByUserId.delete(userId);
+              membershipChanged = leaveResult.effects.some((effect) => effect.type === "member_left");
+            }
           } else if (member.connected) {
             markDisconnected(member, nowTs);
             membershipChanged = true;
@@ -226,7 +268,7 @@ export function createTableManager({ presenceTtlMs = DEFAULT_PRESENCE_TTL_MS } =
           updates.push({ tableId: joinedTableId, tableState: tableState(joinedTableId) });
         }
 
-        if (table.presenceByUserId.size === 0 && table.subscribers.size === 0) {
+        if (table.coreState.members.length === 0 && table.subscribers.size === 0) {
           tables.delete(joinedTableId);
         }
       }
@@ -242,7 +284,7 @@ export function createTableManager({ presenceTtlMs = DEFAULT_PRESENCE_TTL_MS } =
       const table = tables.get(subscribedTableId);
       if (table) {
         table.subscribers.delete(ws);
-        if (table.presenceByUserId.size === 0 && table.subscribers.size === 0) {
+        if (table.coreState.members.length === 0 && table.subscribers.size === 0) {
           tables.delete(subscribedTableId);
         }
       }
@@ -267,15 +309,23 @@ export function createTableManager({ presenceTtlMs = DEFAULT_PRESENCE_TTL_MS } =
       }
 
       for (const userId of expiredUserIds) {
-        table.presenceByUserId.delete(userId);
-        changed = true;
+        const leaveResult = applyCoreEvent(table.coreState, {
+          type: CORE_EVENT_TYPES.LEAVE,
+          requestId: `sweep:${tableId}:${userId}:${nowTs}`,
+          userId
+        });
+        if (leaveResult.ok) {
+          table.coreState = leaveResult.state;
+          table.presenceByUserId.delete(userId);
+          changed = changed || leaveResult.effects.some((effect) => effect.type === "member_left");
+        }
       }
 
       if (changed) {
         updates.push({ tableId, tableState: tableState(tableId) });
       }
 
-      if (table.presenceByUserId.size === 0 && table.subscribers.size === 0) {
+      if (table.coreState.members.length === 0 && table.subscribers.size === 0) {
         tables.delete(tableId);
       }
     }

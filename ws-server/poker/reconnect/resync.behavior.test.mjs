@@ -273,6 +273,7 @@ test("resync restores presence and seat without duplicates", async () => {
     assert.equal(resynced.payload.members.length, 1);
     assert.equal(resynced.payload.members[0].userId, "user_1");
     assert.equal(resynced.payload.members[0].seat, beforeSeat);
+    assert.deepEqual(resynced.payload.members, [{ userId: "user_1", seat: beforeSeat }]);
 
     const noExtraFrames = await attemptMessage(client2);
     assert.equal(noExtraFrames, null);
