@@ -20,9 +20,17 @@ function normalizeMembers(table) {
   });
 }
 
-export function createTableManager({ presenceTtlMs = DEFAULT_PRESENCE_TTL_MS, maxSeats = DEFAULT_MAX_SEATS } = {}) {
+export function createTableManager({
+  presenceTtlMs = DEFAULT_PRESENCE_TTL_MS,
+  maxSeats = DEFAULT_MAX_SEATS,
+  enableDebugCore = false,
+  nodeEnv = process.env.NODE_ENV
+} = {}) {
   const tables = new Map();
   const connStateBySocket = new Map();
+  function nextSyntheticRequestId(kind, tableId, userId, nowTs, discriminator) {
+    return `${kind}:${tableId}:${userId}:${nowTs}:${discriminator}`;
+  }
 
   function ensureConn(ws) {
     if (!connStateBySocket.has(ws)) {
@@ -248,7 +256,7 @@ export function createTableManager({ presenceTtlMs = DEFAULT_PRESENCE_TTL_MS, ma
           if (presenceTtlMs === 0) {
             const leaveResult = applyCoreEvent(table.coreState, {
               type: CORE_EVENT_TYPES.LEAVE,
-              requestId: `disconnect:${joinedTableId}:${userId}:${nowTs}`,
+              requestId: nextSyntheticRequestId("disconnect", joinedTableId, userId, nowTs, table.coreState.version),
               userId
             });
             if (leaveResult.ok) {
@@ -311,7 +319,7 @@ export function createTableManager({ presenceTtlMs = DEFAULT_PRESENCE_TTL_MS, ma
       for (const userId of expiredUserIds) {
         const leaveResult = applyCoreEvent(table.coreState, {
           type: CORE_EVENT_TYPES.LEAVE,
-          requestId: `sweep:${tableId}:${userId}:${nowTs}`,
+          requestId: nextSyntheticRequestId("sweep", tableId, userId, nowTs, table.coreState.version),
           userId
         });
         if (leaveResult.ok) {
@@ -333,6 +341,19 @@ export function createTableManager({ presenceTtlMs = DEFAULT_PRESENCE_TTL_MS, ma
     return updates;
   }
 
+
+  function __debugCore(tableId) {
+    const table = tables.get(tableId);
+    if (!table) {
+      return null;
+    }
+
+    return {
+      version: table.coreState.version,
+      appliedRequestIdsLength: table.coreState.appliedRequestIds.length
+    };
+  }
+
   function orderedSubscribers(tableId, getOrderKey) {
     const table = tables.get(tableId);
     if (!table) {
@@ -342,7 +363,7 @@ export function createTableManager({ presenceTtlMs = DEFAULT_PRESENCE_TTL_MS, ma
     return [...table.subscribers].sort((a, b) => getOrderKey(a).localeCompare(getOrderKey(b)));
   }
 
-  return {
+  const manager = {
     join,
     leave,
     subscribe,
@@ -353,4 +374,10 @@ export function createTableManager({ presenceTtlMs = DEFAULT_PRESENCE_TTL_MS, ma
     orderedSubscribers,
     sweepExpiredPresence
   };
+
+  if (enableDebugCore && nodeEnv !== "production") {
+    manager.__debugCore = __debugCore;
+  }
+
+  return manager;
 }
