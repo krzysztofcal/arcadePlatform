@@ -39,6 +39,24 @@ test("ws poker protocol document contains envelope JSON markers", () => {
   assert.match(text, /"requestId"\s*:\s*"[^"]+"/);
 });
 
+test("ws poker protocol document describes table_state members as { userId, seat }", () => {
+  const text = docText();
+  assert.match(text, /payload\.members:\s*Array<\{\s*userId:\s*string,\s*seat:\s*number\s*\}>/);
+  assert.match(text, /"type"\s*:\s*"table_state"/);
+  assert.match(text, /"members"\s*:\s*\[\s*\{\s*"userId"\s*:\s*"[^"]+"\s*,\s*"seat"\s*:\s*\d+/s);
+});
+
+
+test("ws poker protocol document describes stable members sorting semantics", () => {
+  const text = docText();
+  assert.match(text, /Sorted by `seat` ascending, then `userId` ascending/);
+});
+
+test("ws poker protocol document includes bounds_exceeded join error code", () => {
+  const text = docText();
+  assert.match(text, /`bounds_exceeded`\s*—\s*join rejected because the table is already at max seats\./);
+});
+
 test("first two JSON fenced blocks are parseable JSON", () => {
   const text = docText();
   const matches = [...text.matchAll(/```json\n([\s\S]*?)\n```/g)].map((m) => m[1]);

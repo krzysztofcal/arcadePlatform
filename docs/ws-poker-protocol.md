@@ -106,6 +106,41 @@ Examples:
 }
 ```
 
+
+### Table state membership snapshot (runtime compatibility)
+
+`table_state` frames emitted by the current runtime use:
+
+- `payload.tableId: string`
+- `payload.members: Array<{ userId: string, seat: number }>`
+
+Membership snapshot semantics:
+
+- Sorted by `seat` ascending, then `userId` ascending for stability.
+- Connected-only projection: members are derived from core membership intersected with active presence.
+- No duplicates.
+
+Example `table_state` frame:
+
+```json
+{
+  "version": "1.0",
+  "type": "table_state",
+  "requestId": "req-table-join-1",
+  "roomId": "table_100_200",
+  "sessionId": "sess_01JZ9VYQH8R9M8M5TQ2J4K8H3Z",
+  "seq": 42,
+  "ts": "2026-02-28T10:16:07Z",
+  "payload": {
+    "tableId": "table_100_200",
+    "members": [
+      { "userId": "user_1", "seat": 1 },
+      { "userId": "user_2", "seat": 2 }
+    ]
+  }
+}
+```
+
 ## Errors
 
 Canonical v1 `error.code` values:
@@ -116,6 +151,7 @@ Canonical v1 `error.code` values:
 - `UNAUTHENTICATED` — command requires auth, but auth is missing/expired.
 - `FORBIDDEN` — authenticated user lacks permission for room/command.
 - `INVALID_COMMAND` — command payload invalid (schema/domain rules).
+- `bounds_exceeded` — join rejected because the table is already at max seats.
 - `CONFLICT` — optimistic or state/version conflict.
 - `DUPLICATE_REQUEST` — duplicate `requestId` detected and safely ignored/replayed.
 - `RATE_LIMITED` — command frequency exceeded contract limits.
