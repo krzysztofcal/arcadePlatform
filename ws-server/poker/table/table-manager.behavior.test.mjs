@@ -216,10 +216,11 @@ test("tableSnapshot is read-only and deterministic", () => {
 
   assert.deepEqual(snapshot1, snapshot2);
   assert.deepEqual(before, after);
-  assert.deepEqual(snapshot1.hand, { handId: null, status: null, round: null });
+  assert.deepEqual(snapshot1.hand, { handId: null, status: "LOBBY", round: null });
   assert.deepEqual(snapshot1.board, { cards: [] });
-  assert.deepEqual(snapshot1.turn, { userId: null, seat: null });
+  assert.deepEqual(snapshot1.turn, { userId: "user_a", seat: 1 });
   assert.deepEqual(snapshot1.legalActions, { seat: null, actions: [] });
+  assert.deepEqual(snapshot1.private, { userId: "user_a", seat: 1, holeCards: [] });
 });
 
 test("tableSnapshot for missing table returns canonical placeholders", () => {
@@ -233,10 +234,11 @@ test("tableSnapshot for missing table returns canonical placeholders", () => {
   assert.equal(snapshot.memberCount, 0);
   assert.deepEqual(snapshot.members, []);
   assert.equal(snapshot.youSeat, null);
-  assert.deepEqual(snapshot.hand, { handId: null, status: null, round: null });
+  assert.deepEqual(snapshot.hand, { handId: null, status: "EMPTY", round: null });
   assert.deepEqual(snapshot.board, { cards: [] });
-  assert.deepEqual(snapshot.pot, { total: null, sidePots: [] });
+  assert.deepEqual(snapshot.pot, { total: 0, sidePots: [] });
   assert.deepEqual(snapshot.turn, { userId: null, seat: null });
+  assert.equal(snapshot.private, null);
   assert.deepEqual(snapshot.legalActions, { seat: null, actions: [] });
   assert.equal(tableManager.__debugCore("missing_table"), null);
 });

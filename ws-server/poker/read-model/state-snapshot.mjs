@@ -40,6 +40,19 @@ function normalizeActionList(actions) {
   return actions.filter((action) => typeof action === "string");
 }
 
+function normalizePrivateBranch(privateBranch, { userId, youSeat }) {
+  const base = { userId, seat: youSeat };
+  if (!privateBranch || typeof privateBranch !== "object" || Array.isArray(privateBranch)) {
+    return base;
+  }
+
+  const holeCards = normalizeCards(privateBranch.holeCards);
+  return {
+    ...base,
+    holeCards
+  };
+}
+
 export function buildStateSnapshotPayload({ tableSnapshot, userId }) {
   const tableId = normalizeString(tableSnapshot?.tableId);
   const stateVersion = Number.isInteger(tableSnapshot?.stateVersion) ? tableSnapshot.stateVersion : 0;
@@ -91,10 +104,7 @@ export function buildStateSnapshotPayload({ tableSnapshot, userId }) {
   };
 
   if (youSeat !== null) {
-    payload.private = {
-      userId,
-      seat: youSeat
-    };
+    payload.private = normalizePrivateBranch(tableSnapshot?.private, { userId, youSeat });
   }
 
   return payload;

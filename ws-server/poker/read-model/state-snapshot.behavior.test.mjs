@@ -26,12 +26,12 @@ test("buildStateSnapshotPayload returns canonical room-core payload for seated a
   ]);
   assert.equal(payload.you.userId, "user_a");
   assert.equal(payload.you.seat, 2);
-  assert.deepEqual(payload.private, { userId: "user_a", seat: 2 });
+  assert.deepEqual(payload.private, { userId: "user_a", seat: 2, holeCards: [] });
 
-  assert.deepEqual(payload.public.hand, { handId: null, status: null, round: null });
+  assert.deepEqual(payload.public.hand, { handId: null, status: "LOBBY", round: null });
   assert.deepEqual(payload.public.board, { cards: [] });
-  assert.deepEqual(payload.public.pot, { total: null, sidePots: [] });
-  assert.deepEqual(payload.public.turn, { userId: null, seat: null });
+  assert.deepEqual(payload.public.pot, { total: 0, sidePots: [] });
+  assert.deepEqual(payload.public.turn, { userId: "user_b", seat: 1 });
   assert.deepEqual(payload.public.legalActions, { seat: null, actions: [] });
 });
 
@@ -50,7 +50,7 @@ test("buildStateSnapshotPayload for observer never exposes private branch", () =
   assert.equal(payload.you.seat, null);
   assert.equal("private" in payload, false);
   assert.equal("players" in payload.you, false);
-  assert.equal(payload.public.turn.userId, null);
+  assert.equal(payload.public.turn.userId, "user_a");
 });
 
 test("buildStateSnapshotPayload missing table snapshot returns canonical empty room-core shape", () => {
@@ -65,7 +65,7 @@ test("buildStateSnapshotPayload missing table snapshot returns canonical empty r
   assert.equal(payload.you.seat, null);
   assert.equal(payload.public.roomId, "missing_table");
   assert.deepEqual(payload.public.board.cards, []);
-  assert.deepEqual(payload.public.pot, { total: null, sidePots: [] });
+  assert.deepEqual(payload.public.pot, { total: 0, sidePots: [] });
   assert.deepEqual(payload.public.legalActions, { seat: null, actions: [] });
   assert.equal("private" in payload, false);
 });

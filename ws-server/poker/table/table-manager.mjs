@@ -1,4 +1,5 @@
 import { applyCoreEvent, CORE_EVENT_TYPES, createInitialCoreState } from "../core/index.mjs";
+import { projectRoomCoreSnapshot } from "../read-model/room-core-snapshot.mjs";
 
 const DEFAULT_PRESENCE_TTL_MS = 10_000;
 const DEFAULT_MAX_SEATS = 10;
@@ -18,31 +19,6 @@ function normalizeMembers(table) {
     }
     return a.userId.localeCompare(b.userId);
   });
-}
-
-function defaultRoomCoreProjection() {
-  return {
-    hand: {
-      handId: null,
-      status: null,
-      round: null
-    },
-    board: {
-      cards: []
-    },
-    pot: {
-      total: null,
-      sidePots: []
-    },
-    turn: {
-      userId: null,
-      seat: null
-    },
-    legalActions: {
-      seat: null,
-      actions: []
-    }
-  };
 }
 
 export function createTableManager({
@@ -93,28 +69,35 @@ export function createTableManager({
 
   function tableSnapshot(tableId, userId) {
     const table = tables.get(tableId);
-    const roomCore = defaultRoomCoreProjection();
+    const members = table ? normalizeMembers(table) : [];
+    const roomId = table?.coreState?.roomId || tableId;
+    const youSeatValue = table?.coreState?.seats?.[userId];
+    const youSeat = Number.isInteger(youSeatValue) ? youSeatValue : null;
+    const roomCore = projectRoomCoreSnapshot({
+      tableId,
+      roomId,
+      coreState: table?.coreState ?? null,
+      members,
+      userId,
+      youSeat
+    });
+
     if (!table) {
       return {
         tableId,
-        roomId: tableId,
+        roomId,
         stateVersion: 0,
-        members: [],
+        members,
         memberCount: 0,
         maxSeats,
-        youSeat: null,
+        youSeat,
         ...roomCore
       };
     }
 
-    const seatedValue = table.coreState.seats[userId];
-    const youSeat = Number.isInteger(seatedValue) ? seatedValue : null;
-
-    const members = normalizeMembers(table);
-
     return {
       tableId,
-      roomId: table.coreState.roomId,
+      roomId,
       stateVersion: table.coreState.version,
       members,
       memberCount: members.length,
