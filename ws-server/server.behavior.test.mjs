@@ -47,6 +47,35 @@ function waitForExit(proc) {
   return new Promise((resolve) => proc.once("exit", resolve));
 }
 
+
+function waitForStdoutLine(proc, needle, timeoutMs = 5000) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      proc.stdout.off("data", onData);
+      proc.off("exit", onExit);
+      reject(new Error(`Timed out waiting for stdout line: ${needle}`));
+    }, timeoutMs);
+
+    const onData = (buf) => {
+      if (String(buf).includes(needle)) {
+        clearTimeout(timer);
+        proc.stdout.off("data", onData);
+        proc.off("exit", onExit);
+        resolve();
+      }
+    };
+
+    const onExit = (code) => {
+      clearTimeout(timer);
+      proc.stdout.off("data", onData);
+      reject(new Error(`Server exited before stdout match (${needle}): ${code}`));
+    };
+
+    proc.stdout.on("data", onData);
+    proc.once("exit", onExit);
+  });
+}
+
 function createServer({ env = {} } = {}) {
   return getFreePort().then((port) => {
     const child = spawn(process.execPath, ["ws-server/server.mjs"], {
@@ -667,6 +696,153 @@ test("legacy table_state_sub subscribes and receives follow-up table_state", asy
   }
 });
 
+
+
+
+
+test("table_join bootstrap logging path is runtime-safe and does not crash server", async () => {
+  const secret = "test-secret";
+  const userAToken = makeHs256Jwt({ secret, sub: "log_user_a" });
+  const userBToken = makeHs256Jwt({ secret, sub: "log_user_b" });
+  const { port, child } = await createServer({ env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret } });
+
+  try {
+    await waitForListening(child, 5000);
+    const a = await connectClient(port);
+    const b = await connectClient(port);
+
+    await hello(a);
+    await hello(b);
+    assert.equal((await auth(a, userAToken, "req-auth-log-a")).type, "authOk");
+    assert.equal((await auth(b, userBToken, "req-auth-log-b")).type, "authOk");
+
+    sendFrame(a, {
+      version: "1.0",
+      type: "table_join",
+      requestId: "req-join-log-a",
+      ts: "2026-02-28T00:01:00Z",
+      payload: { tableId: "table_log_bootstrap" }
+    });
+    assert.equal((await nextMessage(a)).type, "table_state");
+
+    sendFrame(b, {
+      version: "1.0",
+      type: "table_join",
+      requestId: "req-join-log-b",
+      ts: "2026-02-28T00:01:01Z",
+      payload: { tableId: "table_log_bootstrap" }
+    });
+    const bJoin = await nextMessage(b);
+    assert.equal(bJoin.type, "table_state");
+
+    const aFollowup = await nextMessage(a);
+    assert.equal(aFollowup.type, "table_state");
+
+    await waitForStdoutLine(child, "ws_hand_bootstrap_started", 5000);
+
+    assert.equal(a.readyState, WebSocket.OPEN);
+    assert.equal(b.readyState, WebSocket.OPEN);
+
+    sendFrame(a, {
+      version: "1.0",
+      type: "table_state_sub",
+      requestId: "req-sub-log-a",
+      ts: "2026-02-28T00:01:02Z",
+      payload: { tableId: "table_log_bootstrap", view: "snapshot" }
+    });
+    const snapshot = await nextMessage(a);
+    assert.equal(snapshot.type, "stateSnapshot");
+    assert.equal(snapshot.payload.public.hand.status, "PREFLOP");
+
+    a.close();
+    b.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+test("snapshot view projects live bootstrapped PREFLOP hand for seated user and observer", async () => {
+  const secret = "test-secret";
+  const seatedToken = makeHs256Jwt({ secret, sub: "live_seated_user" });
+  const otherToken = makeHs256Jwt({ secret, sub: "live_other_user" });
+  const observerToken = makeHs256Jwt({ secret, sub: "live_observer_user" });
+  const { port, child } = await createServer({ env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret } });
+
+  try {
+    await waitForListening(child, 5000);
+    const seated = await connectClient(port);
+    const other = await connectClient(port);
+    const observer = await connectClient(port);
+
+    await hello(seated);
+    await hello(other);
+    await hello(observer);
+    assert.equal((await auth(seated, seatedToken, "req-auth-live-seated")).type, "authOk");
+    assert.equal((await auth(other, otherToken, "req-auth-live-other")).type, "authOk");
+    assert.equal((await auth(observer, observerToken, "req-auth-live-observer")).type, "authOk");
+
+    sendFrame(seated, {
+      version: "1.0",
+      type: "table_join",
+      requestId: "req-join-live-seated",
+      ts: "2026-02-28T00:00:30Z",
+      payload: { tableId: "table_live_ws" }
+    });
+    assert.equal((await nextMessage(seated)).type, "table_state");
+
+    sendFrame(other, {
+      version: "1.0",
+      type: "table_join",
+      requestId: "req-join-live-other",
+      ts: "2026-02-28T00:00:31Z",
+      payload: { tableId: "table_live_ws" }
+    });
+    assert.equal((await nextMessage(other)).type, "table_state");
+    assert.equal((await nextMessage(seated)).type, "table_state");
+
+    sendFrame(seated, {
+      version: "1.0",
+      type: "table_state_sub",
+      requestId: "req-sub-live-seated",
+      ts: "2026-02-28T00:00:32Z",
+      payload: { tableId: "table_live_ws", view: "snapshot" }
+    });
+    const seatedSnapshot = await nextMessage(seated);
+    assert.equal(seatedSnapshot.type, "stateSnapshot");
+
+    sendFrame(observer, {
+      version: "1.0",
+      type: "table_state_sub",
+      requestId: "req-sub-live-observer",
+      ts: "2026-02-28T00:00:33Z",
+      payload: { tableId: "table_live_ws", view: "snapshot" }
+    });
+    const observerSnapshot = await nextMessage(observer);
+    assert.equal(observerSnapshot.type, "stateSnapshot");
+
+    assert.equal(seatedSnapshot.payload.public.hand.status, "PREFLOP");
+    assert.equal(typeof seatedSnapshot.payload.public.hand.handId, "string");
+    assert.deepEqual(seatedSnapshot.payload.public.pot, { total: 3, sidePots: [] });
+    assert.equal(seatedSnapshot.payload.public.turn.userId, "live_seated_user");
+    assert.deepEqual(seatedSnapshot.payload.public.legalActions, { seat: 1, actions: ["FOLD", "CALL", "RAISE"] });
+    assert.equal(Array.isArray(seatedSnapshot.payload.private?.holeCards), true);
+    assert.equal(seatedSnapshot.payload.private.holeCards.length, 2);
+
+    assert.equal(observerSnapshot.payload.you.seat, null);
+    assert.equal("private" in observerSnapshot.payload, false);
+    assert.deepEqual(observerSnapshot.payload.public, {
+      ...seatedSnapshot.payload.public,
+      legalActions: { seat: null, actions: [] }
+    });
+
+    seated.close();
+    other.close();
+    observer.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
 test("observer snapshot and seated snapshot keep shared public fields but scoped private differences", async () => {
   const secret = "test-secret";
   const seatedToken = makeHs256Jwt({ secret, sub: "seated_user" });

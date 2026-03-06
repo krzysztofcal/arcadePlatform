@@ -1,3 +1,5 @@
+import { computeSharedLegalActions } from "../shared/poker-primitives.mjs";
+
 function asObject(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : null;
 }
@@ -10,104 +12,6 @@ function withoutPrivateState(state) {
   return rest;
 }
 
-const ACTION_PHASES = new Set(["PREFLOP", "FLOP", "TURN", "RIVER"]);
-
-function toSafeInt(value, fallback = 0) {
-  const num = Number(value);
-  if (!Number.isFinite(num)) {
-    return fallback;
-  }
-  return Math.trunc(num);
-}
-
-function maxFromMap(value) {
-  if (!value || typeof value !== "object") {
-    return 0;
-  }
-  const nums = Object.values(value)
-    .map((entry) => toSafeInt(entry, 0))
-    .filter((entry) => entry > 0);
-  if (nums.length === 0) {
-    return 0;
-  }
-  return Math.max(...nums);
-}
-
-function deriveCurrentBet(state) {
-  const currentBet = toSafeInt(state.currentBet, null);
-  if (currentBet == null || currentBet < 0) {
-    return maxFromMap(state.betThisRoundByUserId);
-  }
-  return currentBet;
-}
-
-function deriveLastRaiseSize(state, currentBet) {
-  const lastRaiseSize = toSafeInt(state.lastRaiseSize, null);
-  if (lastRaiseSize == null || lastRaiseSize <= 0) {
-    return currentBet > 0 ? currentBet : 0;
-  }
-  return lastRaiseSize;
-}
-
-function isActivePlayer(state, userId) {
-  if (!state || !userId) {
-    return false;
-  }
-  if (state.leftTableByUserId && state.leftTableByUserId[userId]) {
-    return false;
-  }
-  if (state.sitOutByUserId && state.sitOutByUserId[userId]) {
-    return false;
-  }
-  const folded = !!(state.foldedByUserId && state.foldedByUserId[userId]);
-  const allIn = !!(state.allInByUserId && state.allInByUserId[userId]);
-  return !folded && !allIn;
-}
-
-function computeLegalActions({ statePublic, userId } = {}) {
-  const state = statePublic || {};
-  if (!state || typeof state !== "object" || Array.isArray(state)) {
-    return { actions: [] };
-  }
-  const phase = typeof state.phase === "string" ? state.phase : "";
-  if (!ACTION_PHASES.has(phase)) {
-    return { actions: [] };
-  }
-  if (!userId || typeof userId !== "string") {
-    return { actions: [] };
-  }
-  const turnUserId = typeof state.turnUserId === "string" ? state.turnUserId : "";
-  if (!turnUserId || turnUserId !== userId) {
-    return { actions: [] };
-  }
-  if (!isActivePlayer(state, userId)) {
-    return { actions: [] };
-  }
-
-  const stack = toSafeInt(state.stacks?.[userId], 0);
-  const currentUserBet = toSafeInt(state.betThisRoundByUserId?.[userId], 0);
-  const currentBet = deriveCurrentBet(state);
-  const lastRaiseSize = deriveLastRaiseSize(state, currentBet);
-  const toCall = Math.max(0, currentBet - currentUserBet);
-  if (stack <= 0) {
-    return { actions: [], toCall };
-  }
-
-  if (toCall > 0) {
-    const actions = ["FOLD", "CALL"];
-    const maxRaiseTo = stack + currentUserBet;
-    if (maxRaiseTo > currentBet && lastRaiseSize >= 0) {
-      actions.push("RAISE");
-    }
-    return { actions, toCall };
-  }
-
-  const actions = ["CHECK"];
-  if (stack > 0) {
-    actions.push("BET");
-  }
-  return { actions, toCall };
-}
 
 function normalizeCards(value) {
   if (!Array.isArray(value)) {
@@ -200,7 +104,7 @@ export function projectRoomCoreSnapshot({ tableId, roomId, coreState, members, u
   const turnUserId = typeof statePublic.turnUserId === "string" ? statePublic.turnUserId : null;
   const seatByUserId = asObject(coreState?.seats) || {};
   const turnSeat = Number.isInteger(seatByUserId[turnUserId]) ? seatByUserId[turnUserId] : null;
-  const legalInfo = computeLegalActions({ statePublic, userId });
+  const legalInfo = computeSharedLegalActions({ statePublic, userId });
 
   return {
     roomId: typeof statePublic.roomId === "string" ? statePublic.roomId : roomId || tableId,

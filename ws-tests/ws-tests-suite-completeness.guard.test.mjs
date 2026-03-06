@@ -5,6 +5,12 @@ import path from "node:path";
 
 const WS_TESTS_DIR = "ws-tests";
 
+const REQUIRED_PR8_WS_SERVER_BEHAVIOR_TESTS = [
+  "ws-server/poker/read-model/room-core-snapshot.behavior.test.mjs",
+  "ws-server/poker/read-model/state-snapshot.behavior.test.mjs",
+  "ws-server/poker/shared/poker-primitives.behavior.test.mjs"
+];
+
 const EXCLUDED_FROM_PR = new Set([
   "ws-tests/ws-deploy-workflow.test.mjs",
   "ws-tests/ws-lockfile-integrity.test.mjs",
@@ -85,4 +91,16 @@ test("no workflow references legacy tests/ws-* harness paths", () => {
 
   assert.doesNotMatch(prWorkflow, /node --test tests\/ws-/);
   assert.doesNotMatch(deployWorkflow, /node --test tests\/ws-/);
+});
+
+
+test("PR8 WS-server behavior tests are wired in both PR and deploy workflows", () => {
+  const prWorkflow = workflowText(".github/workflows/ws-pr-checks.yml");
+  const deployWorkflow = workflowText(".github/workflows/ws-deploy.yml");
+
+  for (const file of REQUIRED_PR8_WS_SERVER_BEHAVIOR_TESTS) {
+    const command = `node --test ${file}`;
+    assert.ok(prWorkflow.includes(command), `Missing PR8 WS-server test in PR workflow: ${file}`);
+    assert.ok(deployWorkflow.includes(command), `Missing PR8 WS-server test in deploy workflow: ${file}`);
+  }
 });

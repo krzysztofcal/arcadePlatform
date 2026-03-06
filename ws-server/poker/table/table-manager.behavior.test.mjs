@@ -263,3 +263,70 @@ test("tableSnapshot memberCount matches connected-only members after disconnect 
   assert.equal(snapshot.memberCount, snapshot.members.length);
   assert.deepEqual(after, before);
 });
+
+
+test("bootstrapHand starts PREFLOP once and remains idempotent for live hand", () => {
+  const tableManager = createTableManager({ maxSeats: 4, enableDebugCore: true, nodeEnv: "test" });
+  const wsA = fakeWs("boot-a");
+  const wsB = fakeWs("boot-b");
+
+  assert.equal(tableManager.join({ ws: wsA, userId: "user_a", tableId: "table_boot", requestId: "join-a", nowTs: 10 }).ok, true);
+  assert.equal(tableManager.join({ ws: wsB, userId: "user_b", tableId: "table_boot", requestId: "join-b", nowTs: 10 }).ok, true);
+
+  const first = tableManager.bootstrapHand("table_boot");
+  const firstSnapshot = tableManager.tableSnapshot("table_boot", "user_a");
+  const second = tableManager.bootstrapHand("table_boot");
+  const secondSnapshot = tableManager.tableSnapshot("table_boot", "user_a");
+
+  assert.equal(first.ok, true);
+  assert.equal(first.changed, true);
+  assert.equal(first.bootstrap, "started");
+  assert.equal(firstSnapshot.hand.status, "PREFLOP");
+  assert.equal(typeof firstSnapshot.hand.handId, "string");
+  assert.ok(firstSnapshot.hand.handId.length > 0);
+  assert.equal(firstSnapshot.turn.userId, "user_a");
+  assert.deepEqual(firstSnapshot.pot, { total: 3, sidePots: [] });
+  assert.deepEqual(firstSnapshot.legalActions, { seat: 1, actions: ["FOLD", "CALL", "RAISE"] });
+  assert.equal(Array.isArray(firstSnapshot.private?.holeCards), true);
+  assert.equal(firstSnapshot.private.holeCards.length, 2);
+
+  assert.equal(second.ok, true);
+  assert.equal(second.changed, false);
+  assert.equal(second.bootstrap, "already_live");
+  assert.equal(second.handId, first.handId);
+  assert.equal(second.stateVersion, first.stateVersion);
+  assert.deepEqual(secondSnapshot, firstSnapshot);
+});
+
+
+test("bootstrapHand uses seed-derived shuffled deck and can vary by effective seed", () => {
+  const managerA = createTableManager({ maxSeats: 4 });
+  const managerB = createTableManager({ maxSeats: 4 });
+  const wsA1 = fakeWs("seed-a1");
+  const wsA2 = fakeWs("seed-a2");
+  const wsB1 = fakeWs("seed-b1");
+  const wsB2 = fakeWs("seed-b2");
+
+  assert.equal(managerA.join({ ws: wsA1, userId: "user_a", tableId: "table_seed_a", requestId: "join-a1" }).ok, true);
+  assert.equal(managerA.join({ ws: wsA2, userId: "user_b", tableId: "table_seed_a", requestId: "join-a2" }).ok, true);
+  assert.equal(managerB.join({ ws: wsB1, userId: "user_a", tableId: "table_seed_b", requestId: "join-b1" }).ok, true);
+  assert.equal(managerB.join({ ws: wsB2, userId: "user_b", tableId: "table_seed_b", requestId: "join-b2" }).ok, true);
+
+  const bootA = managerA.bootstrapHand("table_seed_a");
+  const bootB = managerB.bootstrapHand("table_seed_b");
+  assert.equal(bootA.ok, true);
+  assert.equal(bootB.ok, true);
+
+  const snapA = managerA.tableSnapshot("table_seed_a", "user_a");
+  const snapB = managerB.tableSnapshot("table_seed_b", "user_a");
+
+  assert.equal(snapA.hand.status, "PREFLOP");
+  assert.equal(snapB.hand.status, "PREFLOP");
+  assert.equal(snapA.private.holeCards.length, 2);
+  assert.equal(snapB.private.holeCards.length, 2);
+  assert.deepEqual(snapA.pot, { total: 3, sidePots: [] });
+  assert.deepEqual(snapB.pot, { total: 3, sidePots: [] });
+  assert.equal(snapA.turn.userId, "user_a");
+  assert.equal(snapB.turn.userId, "user_a");
+  assert.notDeepEqual(snapA.private.holeCards, snapB.private.holeCards);
+});
