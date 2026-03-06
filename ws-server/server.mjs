@@ -8,7 +8,7 @@ import { handleAuth } from "./poker/handlers/auth.mjs";
 import { handleProtectedEcho } from "./poker/handlers/protected-echo.mjs";
 import { verifyToken } from "./poker/auth/verify-token.mjs";
 import { createConnState } from "./poker/runtime/conn-state.mjs";
-import { touchSession } from "./poker/runtime/session.mjs";
+import { recordReplayFrame, resolveReplay, touchSession } from "./poker/runtime/session.mjs";
 import { recordProtocolViolation, shouldClose } from "./poker/runtime/conn-guards.mjs";
 import { createTableManager } from "./poker/table/table-manager.mjs";
 import { createSessionStore } from "./poker/runtime/session-store.mjs";
@@ -34,6 +34,15 @@ function resolvePresenceTtlMs(rawValue) {
   return parsed;
 }
 
+
+function resolveSessionTtlMs(rawValue) {
+  const parsed = Number(rawValue);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return 60_000;
+  }
+  return parsed;
+}
+
 function resolveMaxSeats(rawValue) {
   const parsed = Number(rawValue);
   if (!Number.isInteger(parsed) || parsed < 1) {
@@ -49,7 +58,9 @@ const tableManager = createTableManager({
   presenceTtlMs: resolvePresenceTtlMs(process.env.WS_PRESENCE_TTL_MS),
   maxSeats: resolveMaxSeats(process.env.WS_MAX_SEATS)
 });
-const sessionStore = createSessionStore();
+const sessionStore = createSessionStore({
+  sessionTtlMs: resolveSessionTtlMs(process.env.WS_SESSION_TTL_MS)
+});
 
 function klog(kind, data) {
   const payload = data && typeof data === "object" ? ` ${JSON.stringify(data)}` : "";
@@ -149,7 +160,7 @@ function requiresRequestId(frameType) {
 }
 
 function sendTableState(ws, connState, { requestId = null, tableState }) {
-  const frame = {
+  const baseFrame = {
     version: "1.0",
     type: "table_state",
     ts: nowTs(),
@@ -157,6 +168,53 @@ function sendTableState(ws, connState, { requestId = null, tableState }) {
     payload: {
       tableId: tableState.tableId,
       members: tableState.members
+    }
+  };
+
+  if (requestId) {
+    baseFrame.requestId = requestId;
+  }
+
+  const frame = recordReplayFrame({
+    session: connState.session,
+    tableId: tableState.tableId,
+    frame: baseFrame
+  });
+  sendFrame(ws, frame);
+}
+
+function sendResumeRequired(ws, connState, { requestId = null, tableId, reason, expectedSeq = 0 }) {
+  const frame = {
+    version: "1.0",
+    type: "resync",
+    ts: nowTs(),
+    roomId: tableId,
+    sessionId: connState.sessionId,
+    payload: {
+      mode: "required",
+      reason,
+      expectedSeq
+    }
+  };
+
+  if (requestId) {
+    frame.requestId = requestId;
+  }
+
+  sendFrame(ws, frame);
+}
+
+function sendResumeAck(ws, connState, { requestId = null, tableId }) {
+  const frame = {
+    version: "1.0",
+    type: "commandResult",
+    ts: nowTs(),
+    roomId: tableId,
+    sessionId: connState.sessionId,
+    payload: {
+      requestId,
+      status: "accepted",
+      reason: null
     }
   };
 
@@ -185,7 +243,9 @@ function broadcastTableState(tableId, { excludeWs = null } = {}) {
 
 
 function sweepAndBroadcastExpiredPresence() {
-  const sweepUpdates = tableManager.sweepExpiredPresence({ nowTs: Date.now() });
+  const nowMs = Date.now();
+  sessionStore.sweepExpiredSessions({ nowMs });
+  const sweepUpdates = tableManager.sweepExpiredPresence({ nowTs: nowMs });
   for (const update of sweepUpdates) {
     broadcastTableState(update.tableId);
   }
@@ -205,6 +265,7 @@ const wss = new WebSocketServer({ server });
 
 wss.on("connection", (ws) => {
   const connState = createConnState(nowTs);
+  sessionStore.registerSession({ session: connState.session });
   ws.__connState = connState;
 
   ws.on("message", (msg, isBinary) => {
@@ -296,7 +357,7 @@ wss.on("connection", (ws) => {
 
       sendFrame(ws, response.frame);
       if (response.frame.type === "authOk" && connState.session.userId) {
-        sessionStore.trackConnection({ ws, userId: connState.session.userId });
+        sessionStore.trackConnection({ ws, userId: connState.session.userId, sessionId: connState.session.sessionId });
       }
       return;
     }
@@ -337,7 +398,7 @@ wss.on("connection", (ws) => {
       }
       const tableId = resolvedRoomId.roomId;
 
-      sessionStore.trackConnection({ ws, userId: connState.session.userId });
+      sessionStore.trackConnection({ ws, userId: connState.session.userId, sessionId: connState.session.sessionId });
       const joined = tableManager.join({
         ws,
         userId: connState.session.userId,
@@ -373,7 +434,63 @@ wss.on("connection", (ws) => {
       }
       const tableId = resolvedRoomId.roomId;
 
-      sessionStore.trackConnection({ ws, userId: connState.session.userId });
+      if (frame.type === "resync") {
+        sessionStore.trackConnection({ ws, userId: connState.session.userId, sessionId: connState.session.sessionId });
+        const resynced = tableManager.resync({ ws, userId: connState.session.userId, tableId, nowTs: Date.now() });
+        if (!resynced.ok) {
+          sendError(ws, connState, {
+            code: "INVALID_COMMAND",
+            message: resynced.message,
+            requestId: frame.requestId ?? null
+          });
+          return;
+        }
+
+        sendTableState(ws, connState, { requestId: frame.requestId ?? null, tableState: resynced.tableState });
+        return;
+      }
+
+      const resumeSessionId = frame.payload.sessionId;
+      const resumeLastSeq = frame.payload.lastSeq;
+      if (typeof resumeSessionId !== "string" || !Number.isInteger(resumeLastSeq) || resumeLastSeq < 0) {
+        sendError(ws, connState, {
+          code: "INVALID_COMMAND",
+          message: "resume requires payload.sessionId and integer payload.lastSeq",
+          requestId: frame.requestId ?? null
+        });
+        return;
+      }
+
+      const rebound = sessionStore.rebindSession({
+        sessionId: resumeSessionId,
+        userId: connState.session.userId,
+        ws
+      });
+      if (!rebound.ok) {
+        sendResumeRequired(ws, connState, {
+          requestId: frame.requestId ?? null,
+          tableId,
+          reason: rebound.reason,
+          expectedSeq: 0
+        });
+        return;
+      }
+
+      const replay = resolveReplay({ session: rebound.session, tableId, lastSeq: resumeLastSeq });
+      if (!replay.ok) {
+        sendResumeRequired(ws, connState, {
+          requestId: frame.requestId ?? null,
+          tableId,
+          reason: replay.reason,
+          expectedSeq: replay.latestSeq ?? 0
+        });
+        return;
+      }
+
+      connState.session = rebound.session;
+      connState.sessionId = rebound.session.sessionId;
+      ws.__connState = connState;
+
       const resynced = tableManager.resync({ ws, userId: connState.session.userId, tableId, nowTs: Date.now() });
       if (!resynced.ok) {
         sendError(ws, connState, {
@@ -384,7 +501,14 @@ wss.on("connection", (ws) => {
         return;
       }
 
-      sendTableState(ws, connState, { requestId: frame.requestId ?? null, tableState: resynced.tableState });
+      if (replay.frames.length === 0) {
+        sendResumeAck(ws, connState, { requestId: frame.requestId ?? null, tableId });
+        return;
+      }
+
+      for (const replayFrame of replay.frames) {
+        sendFrame(ws, replayFrame);
+      }
       return;
     }
 

@@ -719,3 +719,355 @@ test("ttl=0 removes presence immediately on disconnect", async () => {
     await waitForExit(child);
   }
 });
+
+test("resume replays only missing frames when lastSeq is in window", async () => {
+  const secret = "test-secret";
+  const token = makeHs256Jwt({ secret, sub: "user_resume_ok" });
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      WS_PRESENCE_TTL_MS: "10000"
+    }
+  });
+
+  try {
+    await waitForListening(child, 5000);
+
+    const client1 = await connectClient(port);
+    await hello(client1, "req-hello-resume-ok-c1");
+    const auth1 = await auth(client1, token, "req-auth-resume-ok-c1");
+    assert.equal(auth1.type, "authOk");
+    const sessionId = auth1.payload.sessionId;
+
+    sendFrame(client1, {
+      version: "1.0",
+      type: "table_join",
+      requestId: "req-join-resume-ok-c1",
+      ts: "2026-02-28T00:05:00Z",
+      payload: { tableId: "table_resume_ok" }
+    });
+    const seq1 = await nextMessage(client1, 5000, "resume-ok-seq1");
+    assert.equal(seq1.type, "table_state");
+    assert.equal(typeof seq1.seq, "number");
+
+    sendFrame(client1, {
+      version: "1.0",
+      type: "table_state_sub",
+      requestId: "req-sub-resume-ok-c1",
+      ts: "2026-02-28T00:05:01Z",
+      payload: { tableId: "table_resume_ok" }
+    });
+    const seq2 = await nextMessage(client1, 5000, "resume-ok-seq2");
+    assert.equal(seq2.type, "table_state");
+    assert.equal(seq2.seq, seq1.seq + 1);
+
+    client1.close();
+    await waitSocketClose(client1);
+
+    const client2 = await connectClient(port);
+    await hello(client2, "req-hello-resume-ok-c2");
+    const auth2 = await auth(client2, token, "req-auth-resume-ok-c2");
+    assert.equal(auth2.type, "authOk");
+
+    sendFrame(client2, {
+      version: "1.0",
+      type: "resume",
+      roomId: "table_resume_ok",
+      requestId: "req-resume-ok-c2",
+      ts: "2026-02-28T00:05:02Z",
+      payload: { tableId: "table_resume_ok", sessionId, lastSeq: seq1.seq }
+    });
+
+    const replayed = await nextMessage(client2, 5000, "resume-ok-replayed");
+    assert.equal(replayed.type, "table_state");
+    assert.equal(replayed.seq, seq2.seq);
+    assert.equal(replayed.payload.tableId, "table_resume_ok");
+
+    const noExtra = await attemptMessage(client2);
+    assert.equal(noExtra, null);
+
+    client2.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
+test("resume with lastSeq at head returns explicit deterministic success", async () => {
+  const secret = "test-secret";
+  const token = makeHs256Jwt({ secret, sub: "user_resume_head" });
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      WS_PRESENCE_TTL_MS: "10000"
+    }
+  });
+
+  try {
+    await waitForListening(child, 5000);
+
+    const client1 = await connectClient(port);
+    await hello(client1, "req-hello-resume-head-c1");
+    const auth1 = await auth(client1, token, "req-auth-resume-head-c1");
+    const sessionId = auth1.payload.sessionId;
+
+    sendFrame(client1, {
+      version: "1.0",
+      type: "table_join",
+      requestId: "req-join-resume-head-c1",
+      ts: "2026-02-28T00:05:30Z",
+      payload: { tableId: "table_resume_head" }
+    });
+    const seq1 = await nextMessage(client1, 5000, "resume-head-seq1");
+
+    sendFrame(client1, {
+      version: "1.0",
+      type: "table_state_sub",
+      requestId: "req-sub-resume-head-c1",
+      ts: "2026-02-28T00:05:31Z",
+      payload: { tableId: "table_resume_head" }
+    });
+    const seq2 = await nextMessage(client1, 5000, "resume-head-seq2");
+    assert.equal(seq2.seq, seq1.seq + 1);
+
+    client1.close();
+    await waitSocketClose(client1);
+
+    const client2 = await connectClient(port);
+    await hello(client2, "req-hello-resume-head-c2");
+    await auth(client2, token, "req-auth-resume-head-c2");
+
+    sendFrame(client2, {
+      version: "1.0",
+      type: "resume",
+      roomId: "table_resume_head",
+      requestId: "req-resume-head-c2",
+      ts: "2026-02-28T00:05:32Z",
+      payload: { tableId: "table_resume_head", sessionId, lastSeq: seq2.seq }
+    });
+
+    const ack = await nextMessage(client2, 5000, "resume-head-ack");
+    assert.equal(ack.type, "commandResult");
+    assert.equal(ack.payload.status, "accepted");
+    assert.equal(ack.payload.reason, null);
+    assert.equal(ack.requestId, "req-resume-head-c2");
+
+    const noExtra = await attemptMessage(client2);
+    assert.equal(noExtra, null);
+
+    client2.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
+test("resume with unknown sessionId returns explicit resync outcome", async () => {
+  const secret = "test-secret";
+  const token = makeHs256Jwt({ secret, sub: "user_resume_unknown" });
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret
+    }
+  });
+
+  try {
+    await waitForListening(child, 5000);
+
+    const ws = await connectClient(port);
+    await hello(ws, "req-hello-resume-unknown");
+    await auth(ws, token, "req-auth-resume-unknown");
+
+    sendFrame(ws, {
+      version: "1.0",
+      type: "resume",
+      roomId: "table_resume_unknown",
+      requestId: "req-resume-unknown",
+      ts: "2026-02-28T00:06:00Z",
+      payload: { tableId: "table_resume_unknown", sessionId: "sess_missing", lastSeq: 0 }
+    });
+
+    const outcome = await nextMessage(ws, 5000, "resume-unknown-outcome");
+    assert.equal(outcome.type, "resync");
+    assert.equal(outcome.roomId, "table_resume_unknown");
+    assert.equal(outcome.payload.mode, "required");
+    assert.equal(outcome.payload.reason, "unknown_session");
+    assert.equal(typeof outcome.payload.expectedSeq, "number");
+
+    ws.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
+test("resume rejects same sessionId for different authenticated user", async () => {
+  const secret = "test-secret";
+  const token1 = makeHs256Jwt({ secret, sub: "user_resume_owner" });
+  const token2 = makeHs256Jwt({ secret, sub: "user_resume_other" });
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret
+    }
+  });
+
+  try {
+    await waitForListening(child, 5000);
+
+    const owner = await connectClient(port);
+    await hello(owner, "req-hello-resume-owner");
+    const ownerAuth = await auth(owner, token1, "req-auth-resume-owner");
+    const ownerSessionId = ownerAuth.payload.sessionId;
+
+    owner.close();
+    await waitSocketClose(owner);
+
+    const other = await connectClient(port);
+    await hello(other, "req-hello-resume-other");
+    await auth(other, token2, "req-auth-resume-other");
+
+    sendFrame(other, {
+      version: "1.0",
+      type: "resume",
+      roomId: "table_resume_cross_user",
+      requestId: "req-resume-cross-user",
+      ts: "2026-02-28T00:07:00Z",
+      payload: { tableId: "table_resume_cross_user", sessionId: ownerSessionId, lastSeq: 0 }
+    });
+
+    const outcome = await nextMessage(other, 5000, "resume-cross-user-outcome");
+    assert.equal(outcome.type, "resync");
+    assert.equal(outcome.payload.mode, "required");
+    assert.equal(outcome.payload.reason, "session_user_mismatch");
+
+    other.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
+test("resume with stale lastSeq outside replay window returns deterministic resync", async () => {
+  const secret = "test-secret";
+  const token = makeHs256Jwt({ secret, sub: "user_resume_stale" });
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret
+    }
+  });
+
+  try {
+    await waitForListening(child, 5000);
+
+    const client1 = await connectClient(port);
+    await hello(client1, "req-hello-resume-stale-c1");
+    const auth1 = await auth(client1, token, "req-auth-resume-stale-c1");
+    const sessionId = auth1.payload.sessionId;
+
+    sendFrame(client1, {
+      version: "1.0",
+      type: "table_join",
+      requestId: "req-join-resume-stale-c1",
+      ts: "2026-02-28T00:08:00Z",
+      payload: { tableId: "table_resume_stale" }
+    });
+    await nextMessage(client1, 5000, "resume-stale-seed");
+
+    for (let idx = 0; idx < 24; idx += 1) {
+      sendFrame(client1, {
+        version: "1.0",
+        type: "table_state_sub",
+        requestId: `req-sub-resume-stale-${idx}`,
+        ts: "2026-02-28T00:08:01Z",
+        payload: { tableId: "table_resume_stale" }
+      });
+      await nextMessage(client1, 5000, `resume-stale-${idx}`);
+    }
+
+    client1.close();
+    await waitSocketClose(client1);
+
+    const client2 = await connectClient(port);
+    await hello(client2, "req-hello-resume-stale-c2");
+    await auth(client2, token, "req-auth-resume-stale-c2");
+
+    sendFrame(client2, {
+      version: "1.0",
+      type: "resume",
+      roomId: "table_resume_stale",
+      requestId: "req-resume-stale-c2",
+      ts: "2026-02-28T00:08:02Z",
+      payload: { tableId: "table_resume_stale", sessionId, lastSeq: 0 }
+    });
+
+    const outcome = await nextMessage(client2, 5000, "resume-stale-outcome");
+    assert.equal(outcome.type, "resync");
+    assert.equal(outcome.payload.mode, "required");
+    assert.equal(outcome.payload.reason, "last_seq_out_of_window");
+    assert.equal(typeof outcome.payload.expectedSeq, "number");
+
+    const noReplay = await attemptMessage(client2);
+    assert.equal(noReplay, null);
+
+    client2.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
+
+test("resume after session expiry returns explicit unknown_session resync", async () => {
+  const secret = "test-secret";
+  const token = makeHs256Jwt({ secret, sub: "user_resume_expired" });
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      WS_SESSION_TTL_MS: "50"
+    }
+  });
+
+  try {
+    await waitForListening(child, 5000);
+
+    const client1 = await connectClient(port);
+    await hello(client1, "req-hello-resume-expired-c1");
+    const auth1 = await auth(client1, token, "req-auth-resume-expired-c1");
+    const sessionId = auth1.payload.sessionId;
+    client1.close();
+    await waitSocketClose(client1);
+
+    await waitBeyondTtl(50);
+
+    const client2 = await connectClient(port);
+    await hello(client2, "req-hello-resume-expired-c2");
+    await auth(client2, token, "req-auth-resume-expired-c2");
+
+    sendFrame(client2, {
+      version: "1.0",
+      type: "resume",
+      roomId: "table_resume_expired",
+      requestId: "req-resume-expired-c2",
+      ts: "2026-02-28T00:09:00Z",
+      payload: { tableId: "table_resume_expired", sessionId, lastSeq: 0 }
+    });
+
+    const outcome = await nextMessage(client2, 5000, "resume-expired-outcome");
+    assert.equal(outcome.type, "resync");
+    assert.equal(outcome.payload.reason, "unknown_session");
+
+    const noReplay = await attemptMessage(client2);
+    assert.equal(noReplay, null);
+
+    client2.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});

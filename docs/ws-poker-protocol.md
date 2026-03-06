@@ -20,7 +20,7 @@ All frames MUST be UTF-8 JSON objects with the envelope below.
 | `requestId` | c→s, s→c | string | required for all client commands; optional for server events | UUID v4 string, max 64 chars | Idempotency key and correlation id. |
 | `roomId` | c→s, s→c | string | required after successful auth | 1..64 chars | Logical poker room/table id. |
 | `sessionId` | c→s, s→c | string | optional | 1..128 chars | Server-issued connection/session handle used for resume. |
-| `seq` | s→c | integer | required for stateful server events | `>= 1` monotonic per room | Stream sequence for resume/replay detection. |
+| `seq` | s→c | integer | required for stateful server events | `>= 1` monotonic per room | Stream sequence for replayable state events (`table_state`, `stateSnapshot`, `statePatch`) and resume gap detection. |
 | `ts` | c→s, s→c | string | yes | RFC 3339 UTC timestamp | Producer timestamp. |
 | `payload` | c→s, s→c | object | yes | max serialized frame 32 KB | Message-specific body. |
 
@@ -94,13 +94,13 @@ Examples:
 {
   "version": "1.0",
   "type": "resync",
+  "requestId": "resume-req-1",
   "roomId": "table_100_200",
   "sessionId": "sess_01JZ9VYQH8R9M8M5TQ2J4K8H3Z",
-  "seq": 188,
   "ts": "2026-02-28T10:16:05Z",
   "payload": {
     "mode": "required",
-    "reason": "SEQ_GAP",
+    "reason": "last_seq_out_of_window",
     "expectedSeq": 187
   }
 }
@@ -176,9 +176,10 @@ Close vs error event rules:
 
 1. Client reconnects and sends `hello`, then `auth`, then `resume` with `sessionId` and `lastSeq`.
 2. Server resume decision:
-   - If stream continuity is valid (`lastSeq` within replay window), server replays missing events (`seq > lastSeq`).
-   - If continuity cannot be guaranteed (sequence gap/window expired/session unknown), server sends `resync` followed by `stateSnapshot`.
-3. Client MUST discard local speculative state and adopt `stateSnapshot` on `resync`.
+   - If stream continuity is valid (`lastSeq` within replay window) and missing events exist, server replays only missing replayable events (`seq > lastSeq`) in original order.
+   - If stream continuity is valid and no events are missing (`lastSeq === latestSeq`), server returns `commandResult` with `{ "status": "accepted", "reason": null }` for that resume request.
+   - If continuity cannot be guaranteed (sequence gap/window expired/session unknown/session-user mismatch), server sends `resync` with payload `{ "mode": "required", "reason": string, "expectedSeq": integer }`.
+3. Client MUST discard local speculative state and request/accept full current snapshot after `resync`.
 4. Server MUST NOT apply hidden mutations on connect/reconnect; only explicit commands may mutate game state.
 
 Resync triggers (non-exhaustive): sequence gap, stale client state version, session expiration, schema/protocol mismatch requiring full snapshot.
