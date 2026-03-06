@@ -64,7 +64,7 @@ Example envelope:
 | `helloAck` | `{ "version": "1.0", "sessionId": string, "heartbeatMs": integer }` | Confirms negotiated version and returns initial session id. |
 | `authOk` | `{ "userId": string, "roomId": string, "permissions": string[] }` | Auth success event. |
 | `pong` | `{ "clientTime": string, "serverTime": string }` | Ping response. |
-| `stateSnapshot` | `{ "stateVersion": integer, "table": object, "you": object }` | Full room state snapshot (private data scoped to authenticated seat only). |
+| `stateSnapshot` | `{ "stateVersion": integer, "table": object, "you": object }` | Full room state snapshot (canonical PR5 read-model contract; private data scoped to authenticated seat only). |
 | `statePatch` | `{ "stateVersion": integer, "patch": object }` | Incremental room state update. |
 | `commandResult` | `{ "requestId": string, "status": "accepted"|"rejected", "reason": string|null }` | Deterministic outcome for a client command. |
 | `resync` | `{ "mode": "required", "reason": string, "expectedSeq": integer }` | Signals that client must request/accept full snapshot. |
@@ -137,6 +137,56 @@ Example `table_state` frame:
       { "userId": "user_1", "seat": 1 },
       { "userId": "user_2", "seat": 2 }
     ]
+  }
+}
+```
+
+### State snapshot read-model (PR5 runtime contract)
+
+For read-only room projection, runtime currently supports `table_state_sub` with `payload.view = "snapshot"`.
+When this view is requested after successful auth, server emits `stateSnapshot` with canonical payload branch:
+
+- Snapshot view is a one-shot response for that request; it does not implicitly subscribe the socket to legacy `table_state` broadcast updates.
+
+- `payload.stateVersion: integer`
+- `payload.table: object`
+- `payload.you: object`
+
+Initial PR5 snapshot projection fields:
+
+- `payload.table.tableId: string`
+- `payload.table.members: Array<{ userId: string, seat: number }>` (stable sorted as above)
+- `payload.table.memberCount: number`
+- `payload.table.maxSeats: number` (when configured/runtime-known)
+- `payload.you.userId: string` (authenticated user)
+- `payload.you.seat: number | null` (null when authenticated observer is not seated)
+
+Example `stateSnapshot` frame:
+
+```json
+{
+  "version": "1.0",
+  "type": "stateSnapshot",
+  "requestId": "req-sub-snapshot-1",
+  "roomId": "table_100_200",
+  "sessionId": "sess_01JZ9VYQH8R9M8M5TQ2J4K8H3Z",
+  "seq": 43,
+  "ts": "2026-02-28T10:16:08Z",
+  "payload": {
+    "stateVersion": 7,
+    "table": {
+      "tableId": "table_100_200",
+      "members": [
+        { "userId": "user_1", "seat": 1 },
+        { "userId": "user_2", "seat": 2 }
+      ],
+      "memberCount": 2,
+      "maxSeats": 10
+    },
+    "you": {
+      "userId": "user_1",
+      "seat": 1
+    }
   }
 }
 ```

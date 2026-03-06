@@ -12,6 +12,7 @@ import { recordReplayFrame, resolveReplay, touchSession } from "./poker/runtime/
 import { recordProtocolViolation, shouldClose } from "./poker/runtime/conn-guards.mjs";
 import { createTableManager } from "./poker/table/table-manager.mjs";
 import { createSessionStore } from "./poker/runtime/session-store.mjs";
+import { buildStateSnapshotPayload } from "./poker/read-model/state-snapshot.mjs";
 
 const PORT = Number(process.env.PORT || 3000);
 const PROTECTED_MESSAGE_TYPES = new Set([
@@ -178,6 +179,31 @@ function sendTableState(ws, connState, { requestId = null, tableState }) {
   const frame = recordReplayFrame({
     session: connState.session,
     tableId: tableState.tableId,
+    frame: baseFrame
+  });
+  sendFrame(ws, frame);
+}
+
+function sendStateSnapshot(ws, connState, { requestId = null, tableSnapshot }) {
+  const baseFrame = {
+    version: "1.0",
+    type: "stateSnapshot",
+    ts: nowTs(),
+    roomId: tableSnapshot.tableId,
+    sessionId: connState.sessionId,
+    payload: buildStateSnapshotPayload({
+      tableSnapshot,
+      userId: connState.session.userId
+    })
+  };
+
+  if (requestId) {
+    baseFrame.requestId = requestId;
+  }
+
+  const frame = recordReplayFrame({
+    session: connState.session,
+    tableId: tableSnapshot.tableId,
     frame: baseFrame
   });
   sendFrame(ws, frame);
@@ -552,6 +578,13 @@ wss.on("connection", (ws) => {
         return;
       }
       const tableId = resolvedRoomId.roomId;
+
+      const wantsSnapshot = frame.payload?.view === "snapshot" || frame.payload?.mode === "snapshot";
+      if (wantsSnapshot) {
+        const tableSnapshot = tableManager.tableSnapshot(tableId, connState.session.userId);
+        sendStateSnapshot(ws, connState, { requestId: frame.requestId ?? null, tableSnapshot });
+        return;
+      }
 
       const subscribed = tableManager.subscribe({ ws, tableId });
       if (!subscribed.ok) {
