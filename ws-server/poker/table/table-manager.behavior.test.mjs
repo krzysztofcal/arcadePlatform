@@ -123,3 +123,80 @@ test("maintenance requestIds are collision-safe under identical nowTs", () => {
   assert.deepEqual(thirdSweep, []);
   assert.deepEqual(tableManager.tableState("table_C").members, []);
 });
+
+test("join on full table is side-effect free and repeatable", () => {
+  const tableManager = createTableManager({ maxSeats: 2, presenceTtlMs: 5, enableDebugCore: true, nodeEnv: "test" });
+  const ws1 = fakeWs("ws-1");
+  const ws2 = fakeWs("ws-2");
+  const ws3 = fakeWs("ws-3");
+  const tableId = "table_full";
+
+  assert.equal(tableManager.join({ ws: ws1, userId: "user_1", tableId, requestId: "join-1", nowTs: 100 }).ok, true);
+  assert.equal(tableManager.join({ ws: ws2, userId: "user_2", tableId, requestId: "join-2", nowTs: 100 }).ok, true);
+
+  const beforeReject = tableManager.__debugCore(tableId);
+  assert.ok(beforeReject);
+
+  const join3 = tableManager.join({ ws: ws3, userId: "user_3", tableId, requestId: "join-3", nowTs: 100 });
+  assert.equal(join3.ok, false);
+  assert.equal(join3.code, "bounds_exceeded");
+
+  const afterReject = tableManager.__debugCore(tableId);
+  assert.equal(afterReject?.version, beforeReject?.version);
+  assert.equal(afterReject?.appliedRequestIdsLength, beforeReject?.appliedRequestIdsLength);
+  assert.deepEqual(memberPairs(tableManager.tableState(tableId).members), [
+    ["user_1", 1],
+    ["user_2", 2]
+  ]);
+
+  const join3Again = tableManager.join({ ws: ws3, userId: "user_3", tableId, requestId: "join-3", nowTs: 100 });
+  assert.equal(join3Again.ok, false);
+  assert.equal(join3Again.code, "bounds_exceeded");
+  const afterSameRequestReject = tableManager.__debugCore(tableId);
+  assert.equal(afterSameRequestReject?.version, beforeReject?.version);
+  assert.equal(afterSameRequestReject?.appliedRequestIdsLength, beforeReject?.appliedRequestIdsLength);
+  assert.deepEqual(memberPairs(tableManager.tableState(tableId).members), [
+    ["user_1", 1],
+    ["user_2", 2]
+  ]);
+
+  const join3DifferentRequestId = tableManager.join({ ws: ws3, userId: "user_3", tableId, requestId: "join-3b", nowTs: 100 });
+  assert.equal(join3DifferentRequestId.ok, false);
+  assert.equal(join3DifferentRequestId.code, "bounds_exceeded");
+  const afterDifferentRequestReject = tableManager.__debugCore(tableId);
+  assert.equal(afterDifferentRequestReject?.version, beforeReject?.version);
+  assert.equal(afterDifferentRequestReject?.appliedRequestIdsLength, beforeReject?.appliedRequestIdsLength);
+  assert.deepEqual(memberPairs(tableManager.tableState(tableId).members), [
+    ["user_1", 1],
+    ["user_2", 2]
+  ]);
+});
+
+test("join reject does not record requestId as applied and does not block future successful join", () => {
+  const tableManager = createTableManager({ maxSeats: 2, presenceTtlMs: 5, enableDebugCore: true, nodeEnv: "test" });
+  const ws1 = fakeWs("ws-a");
+  const ws2 = fakeWs("ws-b");
+  const ws3 = fakeWs("ws-c");
+  const tableId = "table_reject_recover";
+
+  assert.equal(tableManager.join({ ws: ws1, userId: "user_1", tableId, requestId: "join-a", nowTs: 100 }).ok, true);
+  assert.equal(tableManager.join({ ws: ws2, userId: "user_2", tableId, requestId: "join-b", nowTs: 100 }).ok, true);
+
+  const beforeReject = tableManager.__debugCore(tableId);
+  assert.ok(beforeReject);
+
+  const rejected = tableManager.join({ ws: ws3, userId: "user_3", tableId, requestId: "join-reject", nowTs: 100 });
+  assert.equal(rejected.ok, false);
+  assert.equal(rejected.code, "bounds_exceeded");
+  assert.deepEqual(tableManager.__debugCore(tableId), beforeReject);
+
+  const left = tableManager.leave({ ws: ws2, userId: "user_2", tableId, requestId: "leave-b" });
+  assert.equal(left.ok, true);
+
+  const accepted = tableManager.join({ ws: ws3, userId: "user_3", tableId, requestId: "join-reject", nowTs: 101 });
+  assert.equal(accepted.ok, true);
+  assert.deepEqual(memberPairs(tableManager.tableState(tableId).members), [
+    ["user_1", 1],
+    ["user_3", 2]
+  ]);
+});

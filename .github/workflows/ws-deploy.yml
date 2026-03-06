@@ -144,3 +144,9 @@ jobs:
 
       - name: Run ws-server deploy CodeQL URL substring guard test
         run: node --test ws-tests/ws-server-deploy.codeql-url-substring.guard.test.mjs
+
+      - name: WS dependency graph guard test
+        run: node --test ws-tests/ws-ws-dependency.guard.test.mjs
+
+      - name: WS poker protocol compliance test
+        run: node --test ws-tests/ws-poker-protocol-compliance.test.mjs
