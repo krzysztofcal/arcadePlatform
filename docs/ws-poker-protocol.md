@@ -141,7 +141,7 @@ Example `table_state` frame:
 }
 ```
 
-### State snapshot read-model (PR6 room-core contract)
+### State snapshot read-model (PR7 room-core contract)
 
 For read-only room projection, runtime supports `table_state_sub` with `payload.view = "snapshot"` or `payload.mode = "snapshot"`.
 When snapshot mode is requested after successful auth, server emits exactly one `stateSnapshot` frame and **does not** subscribe that socket to legacy `table_state` broadcasts.
@@ -152,14 +152,14 @@ Canonical payload branches:
 - `payload.table: object`
 - `payload.you: object`
 - `payload.public: object`
-- `payload.private?: object` (only for the authenticated seated user; omitted for observers)
+- `payload.private?: object` (only for the authenticated seated user; omitted for observers). Runtime includes `{ userId, seat, holeCards }` for seated users.
 
 Canonical room-core fields in `payload.public`:
 
 - `payload.public.roomId: string`
 - `payload.public.hand: { handId: string|null, status: string|null, round: string|null }`
 - `payload.public.board: { cards: string[] }`
-- `payload.public.pot: { total: number|null, sidePots: any[] }`
+- `payload.public.pot: { total: number, sidePots: any[] }`
 - `payload.public.turn: { userId: string|null, seat: number|null }`
 - `payload.public.legalActions: { seat: number|null, actions: string[] }`
 
@@ -172,7 +172,7 @@ Canonical compatibility fields:
 - `payload.you.userId: string` (authenticated user)
 - `payload.you.seat: number | null` (null for authenticated non-seated observer)
 
-Missing room-core data MUST fail safe to canonical null/empty values (`null`, `[]`) and never expose foreign private state.
+Missing room-core data MUST fail safe to canonical defaults and never expose foreign private state: `public.hand.status` resolves to `"LOBBY"` (members present) or `"EMPTY"` (no members), `public.pot.total` resolves to `0`, list fields resolve to `[]`, and optional scalars remain `null` when unavailable.
 
 Example `stateSnapshot` frame:
 
@@ -202,15 +202,16 @@ Example `stateSnapshot` frame:
     },
     "public": {
       "roomId": "table_100_200",
-      "hand": { "handId": null, "status": null, "round": null },
+      "hand": { "handId": null, "status": "LOBBY", "round": null },
       "board": { "cards": [] },
-      "pot": { "total": null, "sidePots": [] },
-      "turn": { "userId": null, "seat": null },
+      "pot": { "total": 0, "sidePots": [] },
+      "turn": { "userId": "user_1", "seat": 1 },
       "legalActions": { "seat": null, "actions": [] }
     },
     "private": {
       "userId": "user_1",
-      "seat": 1
+      "seat": 1,
+      "holeCards": []
     }
   }
 }

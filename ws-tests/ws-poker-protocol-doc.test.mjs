@@ -52,9 +52,10 @@ test("ws poker protocol document defines canonical stateSnapshot payload fields"
   assert.match(text, /"table"\s*:\s*\{/);
   assert.match(text, /"you"\s*:\s*\{/);
   assert.match(text, /"public"\s*:\s*\{/);
-  assert.match(text, /"hand"\s*:\s*\{\s*"handId"\s*:\s*null/);
+  assert.match(text, /"hand"\s*:\s*\{\s*"handId"\s*:\s*null\s*,\s*"status"\s*:\s*"LOBBY"/);
   assert.match(text, /"board"\s*:\s*\{\s*"cards"\s*:\s*\[\s*\]/);
-  assert.match(text, /"pot"\s*:\s*\{\s*"total"\s*:\s*null/);
+  assert.match(text, /"pot"\s*:\s*\{\s*"total"\s*:\s*0/);
+  assert.match(text, /"private"\s*:\s*\{[\s\S]*"holeCards"\s*:\s*\[/);
 });
 
 test("ws poker protocol document contains envelope JSON markers", () => {
@@ -109,4 +110,17 @@ test("ws poker protocol document states snapshot mode is one-shot and non-subscr
   const text = docText();
   assert.match(text, /emits exactly one `stateSnapshot` frame/);
   assert.match(text, /(\*\*does not\*\* subscribe|does not subscribe) that socket to legacy `table_state` broadcasts/);
+});
+
+test("ws poker protocol document fallback wording matches PR7 defaults", () => {
+  const text = docText();
+  assert.match(text, /`public\.hand\.status` resolves to `"LOBBY"` \(members present\) or `"EMPTY"` \(no members\)/);
+  assert.match(text, /`public\.pot\.total` resolves to `0`/);
+  assert.match(text, /list fields resolve to `\[\]`/);
+});
+
+test("ws poker protocol document states private holeCards are seated-user only", () => {
+  const text = docText();
+  assert.match(text, /only for the authenticated seated user; omitted for observers/);
+  assert.match(text, /Runtime includes `\{ userId, seat, holeCards \}` for seated users/);
 });

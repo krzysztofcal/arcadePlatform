@@ -328,10 +328,10 @@ test("authenticated snapshot view emits stateSnapshot with canonical payload sha
     assert.deepEqual(snapshot.payload.table.members, [{ userId: "user_123", seat: 1 }]);
     assert.equal(snapshot.payload.you.userId, "user_123");
     assert.equal(snapshot.payload.you.seat, 1);
-    assert.deepEqual(snapshot.payload.private, { userId: "user_123", seat: 1 });
-    assert.deepEqual(snapshot.payload.public.hand, { handId: null, status: null, round: null });
+    assert.deepEqual(snapshot.payload.private, { userId: "user_123", seat: 1, holeCards: [] });
+    assert.deepEqual(snapshot.payload.public.hand, { handId: null, status: "LOBBY", round: null });
     assert.deepEqual(snapshot.payload.public.board, { cards: [] });
-    assert.deepEqual(snapshot.payload.public.pot, { total: null, sidePots: [] });
+    assert.deepEqual(snapshot.payload.public.pot, { total: 0, sidePots: [] });
     assert.equal(typeof snapshot.sessionId, "string");
     assert.equal(typeof snapshot.ts, "string");
     assert.equal(snapshot.version, "1.0");
@@ -716,7 +716,7 @@ test("observer snapshot and seated snapshot keep shared public fields but scoped
     assert.deepEqual(seatedSnapshot.payload.table, observerSnapshot.payload.table);
     assert.equal(seatedSnapshot.payload.you.userId, "seated_user");
     assert.equal(seatedSnapshot.payload.you.seat, 1);
-    assert.deepEqual(seatedSnapshot.payload.private, { userId: "seated_user", seat: 1 });
+    assert.deepEqual(seatedSnapshot.payload.private, { userId: "seated_user", seat: 1, holeCards: [] });
     assert.equal(observerSnapshot.payload.you.userId, "observer_user");
     assert.equal(observerSnapshot.payload.you.seat, null);
     assert.equal("private" in observerSnapshot.payload, false);
