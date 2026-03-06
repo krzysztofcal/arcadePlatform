@@ -200,3 +200,64 @@ test("join reject does not record requestId as applied and does not block future
     ["user_3", 2]
   ]);
 });
+
+test("tableSnapshot is read-only and deterministic", () => {
+  const tableManager = createTableManager({ maxSeats: 4, enableDebugCore: true, nodeEnv: "test" });
+  const wsA = fakeWs("snap-a");
+  const wsB = fakeWs("snap-b");
+
+  assert.equal(tableManager.join({ ws: wsA, userId: "user_a", tableId: "table_snap", requestId: "join-a", nowTs: 10 }).ok, true);
+  assert.equal(tableManager.join({ ws: wsB, userId: "user_b", tableId: "table_snap", requestId: "join-b", nowTs: 11 }).ok, true);
+
+  const before = tableManager.__debugCore("table_snap");
+  const snapshot1 = tableManager.tableSnapshot("table_snap", "user_a");
+  const snapshot2 = tableManager.tableSnapshot("table_snap", "user_a");
+  const after = tableManager.__debugCore("table_snap");
+
+  assert.deepEqual(snapshot1, snapshot2);
+  assert.deepEqual(before, after);
+  assert.deepEqual(snapshot1.hand, { handId: null, status: null, round: null });
+  assert.deepEqual(snapshot1.board, { cards: [] });
+  assert.deepEqual(snapshot1.turn, { userId: null, seat: null });
+  assert.deepEqual(snapshot1.legalActions, { seat: null, actions: [] });
+});
+
+test("tableSnapshot for missing table returns canonical placeholders", () => {
+  const tableManager = createTableManager({ maxSeats: 4, enableDebugCore: true, nodeEnv: "test" });
+
+  const snapshot = tableManager.tableSnapshot("missing_table", "observer");
+
+  assert.equal(snapshot.tableId, "missing_table");
+  assert.equal(snapshot.roomId, "missing_table");
+  assert.equal(snapshot.stateVersion, 0);
+  assert.equal(snapshot.memberCount, 0);
+  assert.deepEqual(snapshot.members, []);
+  assert.equal(snapshot.youSeat, null);
+  assert.deepEqual(snapshot.hand, { handId: null, status: null, round: null });
+  assert.deepEqual(snapshot.board, { cards: [] });
+  assert.deepEqual(snapshot.pot, { total: null, sidePots: [] });
+  assert.deepEqual(snapshot.turn, { userId: null, seat: null });
+  assert.deepEqual(snapshot.legalActions, { seat: null, actions: [] });
+  assert.equal(tableManager.__debugCore("missing_table"), null);
+});
+
+test("tableSnapshot memberCount matches connected-only members after disconnect cleanup", () => {
+  const tableManager = createTableManager({ maxSeats: 4, presenceTtlMs: 10, enableDebugCore: true, nodeEnv: "test" });
+  const wsA = fakeWs("disc-a");
+  const wsB = fakeWs("disc-b");
+  const tableId = "table_disconnect_snapshot";
+
+  assert.equal(tableManager.join({ ws: wsA, userId: "user_a", tableId, requestId: "join-a", nowTs: 100 }).ok, true);
+  assert.equal(tableManager.join({ ws: wsB, userId: "user_b", tableId, requestId: "join-b", nowTs: 100 }).ok, true);
+
+  const before = tableManager.__debugCore(tableId);
+  const updates = tableManager.cleanupConnection({ ws: wsB, userId: "user_b", nowTs: 101, activeSockets: [] });
+  assert.equal(updates.length, 1);
+
+  const snapshot = tableManager.tableSnapshot(tableId, "observer_user");
+  const after = tableManager.__debugCore(tableId);
+
+  assert.deepEqual(snapshot.members, [{ userId: "user_a", seat: 1 }]);
+  assert.equal(snapshot.memberCount, snapshot.members.length);
+  assert.deepEqual(after, before);
+});

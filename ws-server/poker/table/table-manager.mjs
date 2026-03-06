@@ -20,6 +20,31 @@ function normalizeMembers(table) {
   });
 }
 
+function defaultRoomCoreProjection() {
+  return {
+    hand: {
+      handId: null,
+      status: null,
+      round: null
+    },
+    board: {
+      cards: []
+    },
+    pot: {
+      total: null,
+      sidePots: []
+    },
+    turn: {
+      userId: null,
+      seat: null
+    },
+    legalActions: {
+      seat: null,
+      actions: []
+    }
+  };
+}
+
 export function createTableManager({
   presenceTtlMs = DEFAULT_PRESENCE_TTL_MS,
   maxSeats = DEFAULT_MAX_SEATS,
@@ -68,25 +93,34 @@ export function createTableManager({
 
   function tableSnapshot(tableId, userId) {
     const table = tables.get(tableId);
+    const roomCore = defaultRoomCoreProjection();
     if (!table) {
       return {
         tableId,
+        roomId: tableId,
         stateVersion: 0,
         members: [],
+        memberCount: 0,
         maxSeats,
-        youSeat: null
+        youSeat: null,
+        ...roomCore
       };
     }
 
     const seatedValue = table.coreState.seats[userId];
     const youSeat = Number.isInteger(seatedValue) ? seatedValue : null;
 
+    const members = normalizeMembers(table);
+
     return {
       tableId,
+      roomId: table.coreState.roomId,
       stateVersion: table.coreState.version,
-      members: normalizeMembers(table),
+      members,
+      memberCount: members.length,
       maxSeats: table.coreState.maxSeats,
-      youSeat
+      youSeat,
+      ...roomCore
     };
   }
 

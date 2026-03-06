@@ -64,7 +64,7 @@ Example envelope:
 | `helloAck` | `{ "version": "1.0", "sessionId": string, "heartbeatMs": integer }` | Confirms negotiated version and returns initial session id. |
 | `authOk` | `{ "userId": string, "roomId": string, "permissions": string[] }` | Auth success event. |
 | `pong` | `{ "clientTime": string, "serverTime": string }` | Ping response. |
-| `stateSnapshot` | `{ "stateVersion": integer, "table": object, "you": object }` | Full room state snapshot (canonical PR5 read-model contract; private data scoped to authenticated seat only). |
+| `stateSnapshot` | `{ "stateVersion": integer, "table": object, "you": object, "public": object, "private"?: object }` | One-shot room-core snapshot for `table_state_sub` snapshot mode; does not subscribe socket to legacy `table_state` broadcasts. |
 | `statePatch` | `{ "stateVersion": integer, "patch": object }` | Incremental room state update. |
 | `commandResult` | `{ "requestId": string, "status": "accepted"|"rejected", "reason": string|null }` | Deterministic outcome for a client command. |
 | `resync` | `{ "mode": "required", "reason": string, "expectedSeq": integer }` | Signals that client must request/accept full snapshot. |
@@ -141,25 +141,38 @@ Example `table_state` frame:
 }
 ```
 
-### State snapshot read-model (PR5 runtime contract)
+### State snapshot read-model (PR6 room-core contract)
 
-For read-only room projection, runtime currently supports `table_state_sub` with `payload.view = "snapshot"`.
-When this view is requested after successful auth, server emits `stateSnapshot` with canonical payload branch:
+For read-only room projection, runtime supports `table_state_sub` with `payload.view = "snapshot"` or `payload.mode = "snapshot"`.
+When snapshot mode is requested after successful auth, server emits exactly one `stateSnapshot` frame and **does not** subscribe that socket to legacy `table_state` broadcasts.
 
-- Snapshot view is a one-shot response for that request; it does not implicitly subscribe the socket to legacy `table_state` broadcast updates.
+Canonical payload branches:
 
 - `payload.stateVersion: integer`
 - `payload.table: object`
 - `payload.you: object`
+- `payload.public: object`
+- `payload.private?: object` (only for the authenticated seated user; omitted for observers)
 
-Initial PR5 snapshot projection fields:
+Canonical room-core fields in `payload.public`:
+
+- `payload.public.roomId: string`
+- `payload.public.hand: { handId: string|null, status: string|null, round: string|null }`
+- `payload.public.board: { cards: string[] }`
+- `payload.public.pot: { total: number|null, sidePots: any[] }`
+- `payload.public.turn: { userId: string|null, seat: number|null }`
+- `payload.public.legalActions: { seat: number|null, actions: string[] }`
+
+Canonical compatibility fields:
 
 - `payload.table.tableId: string`
-- `payload.table.members: Array<{ userId: string, seat: number }>` (stable sorted as above)
+- `payload.table.members: Array<{ userId: string, seat: number }>` (stable sorted by `seat` asc then `userId` asc)
 - `payload.table.memberCount: number`
-- `payload.table.maxSeats: number` (when configured/runtime-known)
+- `payload.table.maxSeats: number` (when runtime-known)
 - `payload.you.userId: string` (authenticated user)
-- `payload.you.seat: number | null` (null when authenticated observer is not seated)
+- `payload.you.seat: number | null` (null for authenticated non-seated observer)
+
+Missing room-core data MUST fail safe to canonical null/empty values (`null`, `[]`) and never expose foreign private state.
 
 Example `stateSnapshot` frame:
 
@@ -184,6 +197,18 @@ Example `stateSnapshot` frame:
       "maxSeats": 10
     },
     "you": {
+      "userId": "user_1",
+      "seat": 1
+    },
+    "public": {
+      "roomId": "table_100_200",
+      "hand": { "handId": null, "status": null, "round": null },
+      "board": { "cards": [] },
+      "pot": { "total": null, "sidePots": [] },
+      "turn": { "userId": null, "seat": null },
+      "legalActions": { "seat": null, "actions": [] }
+    },
+    "private": {
       "userId": "user_1",
       "seat": 1
     }

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { createTableManager } from "../table/table-manager.mjs";
 import { buildStateSnapshotPayload } from "./state-snapshot.mjs";
 
-test("buildStateSnapshotPayload returns canonical payload for seated authenticated user", () => {
+test("buildStateSnapshotPayload returns canonical room-core payload for seated authenticated user", () => {
   const tableManager = createTableManager({ maxSeats: 6 });
   const wsA = {};
   const wsB = {};
@@ -19,15 +19,23 @@ test("buildStateSnapshotPayload returns canonical payload for seated authenticat
   assert.equal(Number.isInteger(payload.stateVersion), true);
   assert.equal(typeof payload.table, "object");
   assert.equal(typeof payload.you, "object");
+  assert.equal(typeof payload.public, "object");
   assert.deepEqual(payload.table.members, [
     { userId: "user_b", seat: 1 },
     { userId: "user_a", seat: 2 }
   ]);
   assert.equal(payload.you.userId, "user_a");
   assert.equal(payload.you.seat, 2);
+  assert.deepEqual(payload.private, { userId: "user_a", seat: 2 });
+
+  assert.deepEqual(payload.public.hand, { handId: null, status: null, round: null });
+  assert.deepEqual(payload.public.board, { cards: [] });
+  assert.deepEqual(payload.public.pot, { total: null, sidePots: [] });
+  assert.deepEqual(payload.public.turn, { userId: null, seat: null });
+  assert.deepEqual(payload.public.legalActions, { seat: null, actions: [] });
 });
 
-test("buildStateSnapshotPayload keeps user scope and null seat for non-seated authenticated user", () => {
+test("buildStateSnapshotPayload for observer never exposes private branch", () => {
   const tableManager = createTableManager({ maxSeats: 6 });
   const wsA = {};
   const wsB = {};
@@ -42,4 +50,41 @@ test("buildStateSnapshotPayload keeps user scope and null seat for non-seated au
   assert.equal(payload.you.seat, null);
   assert.equal("private" in payload, false);
   assert.equal("players" in payload.you, false);
+  assert.equal(payload.public.turn.userId, null);
+});
+
+test("buildStateSnapshotPayload missing table snapshot returns canonical empty room-core shape", () => {
+  const tableManager = createTableManager({ maxSeats: 6 });
+
+  const tableSnapshot = tableManager.tableSnapshot("missing_table", "user_x");
+  const payload = buildStateSnapshotPayload({ tableSnapshot, userId: "user_x" });
+
+  assert.equal(payload.stateVersion, 0);
+  assert.deepEqual(payload.table.members, []);
+  assert.equal(payload.table.memberCount, 0);
+  assert.equal(payload.you.seat, null);
+  assert.equal(payload.public.roomId, "missing_table");
+  assert.deepEqual(payload.public.board.cards, []);
+  assert.deepEqual(payload.public.pot, { total: null, sidePots: [] });
+  assert.deepEqual(payload.public.legalActions, { seat: null, actions: [] });
+  assert.equal("private" in payload, false);
+});
+
+test("buildStateSnapshotPayload keeps memberCount aligned with connected-only members after disconnect", () => {
+  const tableManager = createTableManager({ maxSeats: 6, presenceTtlMs: 10 });
+  const wsA = {};
+  const wsB = {};
+  const tableId = "table_disconnect_payload";
+
+  assert.equal(tableManager.join({ ws: wsA, userId: "user_a", tableId, requestId: "join-a", nowTs: 100 }).ok, true);
+  assert.equal(tableManager.join({ ws: wsB, userId: "user_b", tableId, requestId: "join-b", nowTs: 100 }).ok, true);
+
+  const updates = tableManager.cleanupConnection({ ws: wsB, userId: "user_b", nowTs: 101, activeSockets: [] });
+  assert.equal(updates.length, 1);
+
+  const tableSnapshot = tableManager.tableSnapshot(tableId, "observer_user");
+  const payload = buildStateSnapshotPayload({ tableSnapshot, userId: "observer_user" });
+
+  assert.deepEqual(payload.table.members, [{ userId: "user_a", seat: 1 }]);
+  assert.equal(payload.table.memberCount, payload.table.members.length);
 });
