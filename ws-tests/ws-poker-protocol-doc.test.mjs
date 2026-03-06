@@ -57,6 +57,21 @@ test("ws poker protocol document includes bounds_exceeded join error code", () =
   assert.match(text, /`bounds_exceeded`\s*—\s*join rejected because the table is already at max seats\./);
 });
 
+
+test("ws poker protocol document defines canonical reconnect resync payload shape", () => {
+  const text = docText();
+  assert.match(text, /"type"\s*:\s*"resync"/);
+  assert.match(text, /"mode"\s*:\s*"required"/);
+  assert.match(text, /"reason"\s*:\s*"[^"]+"/);
+  assert.match(text, /"expectedSeq"\s*:\s*\d+/);
+});
+
+test("ws poker protocol document describes explicit no-op resume success", () => {
+  const text = docText();
+  assert.match(text, /lastSeq === latestSeq/);
+  assert.match(text, /server returns `commandResult`/);
+  assert.match(text, /"status": "accepted", "reason": null/);
+});
 test("first two JSON fenced blocks are parseable JSON", () => {
   const text = docText();
   const matches = [...text.matchAll(/```json\n([\s\S]*?)\n```/g)].map((m) => m[1]);
