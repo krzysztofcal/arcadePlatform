@@ -174,6 +174,8 @@ Canonical compatibility fields:
 
 Missing room-core data MUST fail safe to canonical defaults and never expose foreign private state: `public.hand.status` resolves to `"LOBBY"` (members present) or `"EMPTY"` (no members), `public.pot.total` resolves to `0`, list fields resolve to `[]`, and optional scalars remain `null` when unavailable.
 
+PR8 contract delta: when WS room-core has bootstrapped a live initial hand, `stateSnapshot` may return `public.hand.status = "PREFLOP"` with live `public.turn`, `public.pot`, and per-user `public.legalActions`, while `payload.private.holeCards` is still emitted only for the authenticated seated user. This delta is limited to initial hand bootstrap/read-model projection and does **not** promise full WS `act` mutation support yet.
+
 Example `stateSnapshot` frame:
 
 ```json

@@ -124,3 +124,11 @@ test("ws poker protocol document states private holeCards are seated-user only",
   assert.match(text, /only for the authenticated seated user; omitted for observers/);
   assert.match(text, /Runtime includes `\{ userId, seat, holeCards \}` for seated users/);
 });
+
+
+test("ws poker protocol document describes PR8 live PREFLOP snapshot bootstrap contract delta", () => {
+  const text = docText();
+  assert.match(text, /PR8 contract delta/);
+  assert.match(text, /`public\.hand\.status = "PREFLOP"`/);
+  assert.match(text, /does \*\*not\*\* promise full WS `act` mutation support yet/);
+});

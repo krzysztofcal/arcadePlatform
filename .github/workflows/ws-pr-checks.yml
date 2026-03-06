@@ -40,6 +40,15 @@ jobs:
       - name: Run ws core behavior test
         run: node --test ws-server/poker/core/core.behavior.test.mjs
 
+      - name: Run room-core snapshot behavior test
+        run: node --test ws-server/poker/read-model/room-core-snapshot.behavior.test.mjs
+
+      - name: Run state-snapshot behavior test
+        run: node --test ws-server/poker/read-model/state-snapshot.behavior.test.mjs
+
+      - name: Run poker primitives behavior test
+        run: node --test ws-server/poker/shared/poker-primitives.behavior.test.mjs
+
       - name: Run ws resync behavior test
         run: node --test ws-server/poker/reconnect/resync.behavior.test.mjs
 

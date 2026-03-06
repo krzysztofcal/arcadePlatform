@@ -68,6 +68,15 @@ function klog(kind, data) {
   process.stdout.write(`[klog] ${kind}${payload}\n`);
 }
 
+
+function klogSafe(kind, data) {
+  try {
+    klog(kind, data);
+  } catch {
+    // Logging must never break request handling.
+  }
+}
+
 function nowTs() {
   return new Date().toISOString();
 }
@@ -442,8 +451,13 @@ wss.on("connection", (ws) => {
       }
 
       sendTableState(ws, connState, { requestId: frame.requestId ?? null, tableState: joined.tableState });
+
+      const bootstrapped = tableManager.bootstrapHand(tableId);
       if (joined.changed) {
         broadcastTableState(tableId, { excludeWs: ws });
+      }
+      if (bootstrapped?.changed) {
+        klogSafe("ws_hand_bootstrap_started", { tableId, handId: bootstrapped.handId, stateVersion: bootstrapped.stateVersion });
       }
       return;
     }
@@ -624,7 +638,7 @@ wss.on("connection", (ws) => {
       broadcastTableState(update.tableId);
     }
     sweepAndBroadcastExpiredPresence();
-    klog("ws_error", { message: err.message });
+    klogSafe("ws_error", { message: err.message });
   });
 
   ws.on("close", () => {
@@ -643,5 +657,5 @@ wss.on("connection", (ws) => {
 });
 
 server.listen(PORT, "0.0.0.0", () => {
-  klog("ws_listening", { message: `WS listening on ${PORT}`, port: PORT });
+  klogSafe("ws_listening", { message: `WS listening on ${PORT}`, port: PORT });
 });

@@ -88,3 +88,31 @@ test("buildStateSnapshotPayload keeps memberCount aligned with connected-only me
   assert.deepEqual(payload.table.members, [{ userId: "user_a", seat: 1 }]);
   assert.equal(payload.table.memberCount, payload.table.members.length);
 });
+
+
+test("buildStateSnapshotPayload projects bootstrapped PREFLOP state from table manager", () => {
+  const tableManager = createTableManager({ maxSeats: 6 });
+  const wsA = {};
+  const wsB = {};
+
+  assert.equal(tableManager.join({ ws: wsA, userId: "user_a", tableId: "table_live", requestId: "join-a" }).ok, true);
+  assert.equal(tableManager.join({ ws: wsB, userId: "user_b", tableId: "table_live", requestId: "join-b" }).ok, true);
+  const boot = tableManager.bootstrapHand("table_live");
+  assert.equal(boot.ok, true);
+
+  const seatedPayload = buildStateSnapshotPayload({ tableSnapshot: tableManager.tableSnapshot("table_live", "user_a"), userId: "user_a" });
+  const observerPayload = buildStateSnapshotPayload({ tableSnapshot: tableManager.tableSnapshot("table_live", "observer"), userId: "observer" });
+
+  assert.equal(seatedPayload.public.hand.status, "PREFLOP");
+  assert.equal(typeof seatedPayload.public.hand.handId, "string");
+  assert.deepEqual(seatedPayload.public.pot, { total: 3, sidePots: [] });
+  assert.deepEqual(seatedPayload.public.legalActions, { seat: 1, actions: ["FOLD", "CALL", "RAISE"] });
+  assert.equal(Array.isArray(seatedPayload.private.holeCards), true);
+  assert.equal(seatedPayload.private.holeCards.length, 2);
+  assert.equal("private" in observerPayload, false);
+  assert.deepEqual(observerPayload.public, {
+    ...seatedPayload.public,
+    legalActions: { seat: null, actions: [] }
+  });
+  assert.equal(seatedPayload.table.memberCount, seatedPayload.table.members.length);
+});
