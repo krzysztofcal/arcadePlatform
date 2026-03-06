@@ -66,6 +66,30 @@ export function createTableManager({
     };
   }
 
+  function tableSnapshot(tableId, userId) {
+    const table = tables.get(tableId);
+    if (!table) {
+      return {
+        tableId,
+        stateVersion: 0,
+        members: [],
+        maxSeats,
+        youSeat: null
+      };
+    }
+
+    const seatedValue = table.coreState.seats[userId];
+    const youSeat = Number.isInteger(seatedValue) ? seatedValue : null;
+
+    return {
+      tableId,
+      stateVersion: table.coreState.version,
+      members: normalizeMembers(table),
+      maxSeats: table.coreState.maxSeats,
+      youSeat
+    };
+  }
+
   function markConnected(member, nowMs) {
     member.connected = true;
     member.lastSeenAt = nowMs;
@@ -370,6 +394,7 @@ export function createTableManager({
     resync,
     touchPresence,
     tableState,
+    tableSnapshot,
     cleanupConnection,
     orderedSubscribers,
     sweepExpiredPresence

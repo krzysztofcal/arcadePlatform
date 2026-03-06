@@ -100,6 +100,41 @@ function nextMessage(ws, timeoutMs = 5000) {
   });
 }
 
+function attemptMessage(ws, timeoutMs = 300) {
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      clearTimeout(timer);
+      ws.off("message", onMessage);
+      ws.off("error", onError);
+      ws.off("close", onClose);
+    };
+
+    const onMessage = (data) => {
+      cleanup();
+      resolve(JSON.parse(String(data)));
+    };
+
+    const onError = (error) => {
+      cleanup();
+      reject(error);
+    };
+
+    const onClose = () => {
+      cleanup();
+      resolve(null);
+    };
+
+    const timer = setTimeout(() => {
+      cleanup();
+      resolve(null);
+    }, timeoutMs);
+
+    ws.on("message", onMessage);
+    ws.on("error", onError);
+    ws.on("close", onClose);
+  });
+}
+
 function sendFrame(ws, frame) {
   ws.send(JSON.stringify(frame));
 }
@@ -122,6 +157,17 @@ async function hello(ws) {
     requestId: "req-hello",
     ts: "2026-02-28T00:00:00Z",
     payload: { supportedVersions: ["1.0"] }
+  });
+  return nextMessage(ws);
+}
+
+async function auth(ws, token, requestId = "req-auth") {
+  sendFrame(ws, {
+    version: "1.0",
+    type: "auth",
+    requestId,
+    ts: "2026-02-28T00:00:01Z",
+    payload: { token }
   });
   return nextMessage(ws);
 }
@@ -209,6 +255,141 @@ test("resync message requires auth", async () => {
     assert.equal(ws.readyState, WebSocket.OPEN);
 
     ws.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
+test("table_state_sub snapshot view requires auth and does not leak stateSnapshot", async () => {
+  const { port, child } = await createServer({ env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: "test-secret" } });
+
+  try {
+    await waitForListening(child, 5000);
+    const ws = await connectClient(port);
+    await hello(ws);
+
+    sendFrame(ws, {
+      version: "1.0",
+      type: "table_state_sub",
+      requestId: "req-sub-unauth",
+      ts: "2026-02-28T00:00:01Z",
+      payload: { tableId: "table_A", view: "snapshot" }
+    });
+
+    const frame = await nextMessage(ws);
+    assert.equal(frame.type, "error");
+    assert.equal(frame.payload.code, "auth_required");
+    assert.notEqual(frame.type, "stateSnapshot");
+
+    ws.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
+test("authenticated snapshot view emits stateSnapshot with canonical payload shape", async () => {
+  const secret = "test-secret";
+  const token = makeHs256Jwt({ secret, sub: "user_123" });
+  const { port, child } = await createServer({ env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret } });
+
+  try {
+    await waitForListening(child, 5000);
+    const ws = await connectClient(port);
+    await hello(ws);
+    const authOk = await auth(ws, token, "req-auth-snapshot");
+    assert.equal(authOk.type, "authOk");
+
+    sendFrame(ws, {
+      version: "1.0",
+      type: "table_join",
+      requestId: "req-join-snapshot",
+      ts: "2026-02-28T00:00:02Z",
+      payload: { tableId: "table_A" }
+    });
+    const join = await nextMessage(ws);
+    assert.equal(join.type, "table_state");
+
+    sendFrame(ws, {
+      version: "1.0",
+      type: "table_state_sub",
+      requestId: "req-sub-snapshot",
+      ts: "2026-02-28T00:00:03Z",
+      payload: { tableId: "table_A", view: "snapshot" }
+    });
+    const snapshot = await nextMessage(ws);
+    assert.equal(snapshot.type, "stateSnapshot");
+    assert.equal(snapshot.payload.table.tableId, "table_A");
+    assert.equal(Number.isInteger(snapshot.payload.stateVersion), true);
+    assert.equal(typeof snapshot.payload.table, "object");
+    assert.equal(typeof snapshot.payload.you, "object");
+    assert.deepEqual(snapshot.payload.table.members, [{ userId: "user_123", seat: 1 }]);
+    assert.equal(snapshot.payload.you.userId, "user_123");
+    assert.equal(snapshot.payload.you.seat, 1);
+    assert.equal(typeof snapshot.sessionId, "string");
+    assert.equal(typeof snapshot.ts, "string");
+    assert.equal(snapshot.version, "1.0");
+
+    sendFrame(ws, {
+      version: "1.0",
+      type: "table_state_sub",
+      requestId: "req-sub-snapshot-2",
+      ts: "2026-02-28T00:00:04Z",
+      payload: { tableId: "table_A", view: "snapshot" }
+    });
+    const snapshot2 = await nextMessage(ws);
+    assert.equal(snapshot2.type, "stateSnapshot");
+    assert.deepEqual(snapshot2.payload, snapshot.payload);
+
+    ws.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
+test("snapshot-view subscription is one-shot and does not receive later legacy table_state broadcasts", async () => {
+  const secret = "test-secret";
+  const snapshotToken = makeHs256Jwt({ secret, sub: "snapshot_user" });
+  const actorToken = makeHs256Jwt({ secret, sub: "actor_user" });
+  const { port, child } = await createServer({ env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret } });
+
+  try {
+    await waitForListening(child, 5000);
+    const snapshotClient = await connectClient(port);
+    const actorClient = await connectClient(port);
+
+    await hello(snapshotClient);
+    await hello(actorClient);
+    assert.equal((await auth(snapshotClient, snapshotToken, "req-auth-snapshot-oneshot")).type, "authOk");
+    assert.equal((await auth(actorClient, actorToken, "req-auth-actor-oneshot")).type, "authOk");
+
+    sendFrame(snapshotClient, {
+      version: "1.0",
+      type: "table_state_sub",
+      requestId: "req-sub-snapshot-oneshot",
+      ts: "2026-02-28T00:00:05Z",
+      payload: { tableId: "table_oneshot", view: "snapshot" }
+    });
+    const snapshot = await nextMessage(snapshotClient);
+    assert.equal(snapshot.type, "stateSnapshot");
+
+    sendFrame(actorClient, {
+      version: "1.0",
+      type: "table_join",
+      requestId: "req-join-actor-oneshot",
+      ts: "2026-02-28T00:00:06Z",
+      payload: { tableId: "table_oneshot" }
+    });
+    const actorJoin = await nextMessage(actorClient);
+    assert.equal(actorJoin.type, "table_state");
+
+    const snapshotFollowup = await attemptMessage(snapshotClient, 350);
+    assert.equal(snapshotFollowup, null);
+
+    snapshotClient.close();
+    actorClient.close();
   } finally {
     child.kill("SIGTERM");
     await waitForExit(child);
