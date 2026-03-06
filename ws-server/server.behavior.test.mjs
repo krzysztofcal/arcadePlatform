@@ -324,9 +324,14 @@ test("authenticated snapshot view emits stateSnapshot with canonical payload sha
     assert.equal(Number.isInteger(snapshot.payload.stateVersion), true);
     assert.equal(typeof snapshot.payload.table, "object");
     assert.equal(typeof snapshot.payload.you, "object");
+    assert.equal(typeof snapshot.payload.public, "object");
     assert.deepEqual(snapshot.payload.table.members, [{ userId: "user_123", seat: 1 }]);
     assert.equal(snapshot.payload.you.userId, "user_123");
     assert.equal(snapshot.payload.you.seat, 1);
+    assert.deepEqual(snapshot.payload.private, { userId: "user_123", seat: 1 });
+    assert.deepEqual(snapshot.payload.public.hand, { handId: null, status: null, round: null });
+    assert.deepEqual(snapshot.payload.public.board, { cards: [] });
+    assert.deepEqual(snapshot.payload.public.pot, { total: null, sidePots: [] });
     assert.equal(typeof snapshot.sessionId, "string");
     assert.equal(typeof snapshot.ts, "string");
     assert.equal(snapshot.version, "1.0");
@@ -609,6 +614,161 @@ test("valid token returns authOk and unlocks protected messages", async () => {
     assert.equal(authOkRepeat.payload.userId, "user_123");
 
     ws.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
+test("legacy table_state_sub subscribes and receives follow-up table_state", async () => {
+  const secret = "test-secret";
+  const subscriberToken = makeHs256Jwt({ secret, sub: "legacy_sub_user" });
+  const actorToken = makeHs256Jwt({ secret, sub: "legacy_actor_user" });
+  const { port, child } = await createServer({ env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret } });
+
+  try {
+    await waitForListening(child, 5000);
+    const subscriber = await connectClient(port);
+    const actor = await connectClient(port);
+
+    await hello(subscriber);
+    await hello(actor);
+    assert.equal((await auth(subscriber, subscriberToken, "req-auth-legacy-sub")).type, "authOk");
+    assert.equal((await auth(actor, actorToken, "req-auth-legacy-actor")).type, "authOk");
+
+    sendFrame(subscriber, {
+      version: "1.0",
+      type: "table_state_sub",
+      requestId: "req-sub-legacy",
+      ts: "2026-02-28T00:00:09Z",
+      payload: { tableId: "table_legacy" }
+    });
+    const initial = await nextMessage(subscriber);
+    assert.equal(initial.type, "table_state");
+
+    sendFrame(actor, {
+      version: "1.0",
+      type: "table_join",
+      requestId: "req-join-legacy-actor",
+      ts: "2026-02-28T00:00:10Z",
+      payload: { tableId: "table_legacy" }
+    });
+    assert.equal((await nextMessage(actor)).type, "table_state");
+
+    const followup = await nextMessage(subscriber);
+    assert.equal(followup.type, "table_state");
+    assert.deepEqual(followup.payload.members, [{ userId: "legacy_actor_user", seat: 1 }]);
+
+    subscriber.close();
+    actor.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
+test("observer snapshot and seated snapshot keep shared public fields but scoped private differences", async () => {
+  const secret = "test-secret";
+  const seatedToken = makeHs256Jwt({ secret, sub: "seated_user" });
+  const observerToken = makeHs256Jwt({ secret, sub: "observer_user" });
+  const { port, child } = await createServer({ env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret } });
+
+  try {
+    await waitForListening(child, 5000);
+    const seatedClient = await connectClient(port);
+    const observerClient = await connectClient(port);
+
+    await hello(seatedClient);
+    await hello(observerClient);
+    assert.equal((await auth(seatedClient, seatedToken, "req-auth-seated-snap")).type, "authOk");
+    assert.equal((await auth(observerClient, observerToken, "req-auth-observer-snap")).type, "authOk");
+
+    sendFrame(seatedClient, {
+      version: "1.0",
+      type: "table_join",
+      requestId: "req-join-seated",
+      ts: "2026-02-28T00:00:11Z",
+      payload: { tableId: "table_scope" }
+    });
+    assert.equal((await nextMessage(seatedClient)).type, "table_state");
+
+    sendFrame(seatedClient, {
+      version: "1.0",
+      type: "table_state_sub",
+      requestId: "req-sub-seated-snap",
+      ts: "2026-02-28T00:00:12Z",
+      payload: { tableId: "table_scope", mode: "snapshot" }
+    });
+    const seatedSnapshot = await nextMessage(seatedClient);
+    assert.equal(seatedSnapshot.type, "stateSnapshot");
+
+    sendFrame(observerClient, {
+      version: "1.0",
+      type: "table_state_sub",
+      requestId: "req-sub-observer-snap",
+      ts: "2026-02-28T00:00:13Z",
+      payload: { tableId: "table_scope", view: "snapshot" }
+    });
+    const observerSnapshot = await nextMessage(observerClient);
+    assert.equal(observerSnapshot.type, "stateSnapshot");
+
+    assert.deepEqual(seatedSnapshot.payload.public, observerSnapshot.payload.public);
+    assert.deepEqual(seatedSnapshot.payload.table, observerSnapshot.payload.table);
+    assert.equal(seatedSnapshot.payload.you.userId, "seated_user");
+    assert.equal(seatedSnapshot.payload.you.seat, 1);
+    assert.deepEqual(seatedSnapshot.payload.private, { userId: "seated_user", seat: 1 });
+    assert.equal(observerSnapshot.payload.you.userId, "observer_user");
+    assert.equal(observerSnapshot.payload.you.seat, null);
+    assert.equal("private" in observerSnapshot.payload, false);
+
+    seatedClient.close();
+    observerClient.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
+test("snapshot view keeps table memberCount consistent with members after actor disconnect", async () => {
+  const secret = "test-secret";
+  const snapshotToken = makeHs256Jwt({ secret, sub: "snapshot_consistency_user" });
+  const actorToken = makeHs256Jwt({ secret, sub: "actor_consistency_user" });
+  const { port, child } = await createServer({ env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret } });
+
+  try {
+    await waitForListening(child, 5000);
+    const snapshotClient = await connectClient(port);
+    const actorClient = await connectClient(port);
+
+    await hello(snapshotClient);
+    await hello(actorClient);
+    assert.equal((await auth(snapshotClient, snapshotToken, "req-auth-snapshot-consistency")).type, "authOk");
+    assert.equal((await auth(actorClient, actorToken, "req-auth-actor-consistency")).type, "authOk");
+
+    sendFrame(actorClient, {
+      version: "1.0",
+      type: "table_join",
+      requestId: "req-join-actor-consistency",
+      ts: "2026-02-28T00:00:20Z",
+      payload: { tableId: "table_consistency" }
+    });
+    assert.equal((await nextMessage(actorClient)).type, "table_state");
+
+    actorClient.close();
+    await new Promise((resolve) => setTimeout(resolve, 75));
+
+    sendFrame(snapshotClient, {
+      version: "1.0",
+      type: "table_state_sub",
+      requestId: "req-sub-snapshot-consistency",
+      ts: "2026-02-28T00:00:21Z",
+      payload: { tableId: "table_consistency", view: "snapshot" }
+    });
+    const snapshot = await nextMessage(snapshotClient);
+    assert.equal(snapshot.type, "stateSnapshot");
+    assert.equal(snapshot.payload.table.memberCount, snapshot.payload.table.members.length);
+
+    snapshotClient.close();
   } finally {
     child.kill("SIGTERM");
     await waitForExit(child);

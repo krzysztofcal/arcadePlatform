@@ -46,10 +46,15 @@ test("ws poker protocol document defines canonical stateSnapshot payload fields"
   const text = docText();
   const serverTypes = serverMessageTypesSection(text);
 
-  assert.match(serverTypes, /^\|\s*`stateSnapshot`\s*\|[^\n]*"stateVersion"\s*:\s*integer[^\n]*"table"\s*:\s*object[^\n]*"you"\s*:\s*object/m);
+  assert.match(serverTypes, /^\|\s*`stateSnapshot`\s*\|[^\n]*"stateVersion"\s*:\s*integer[^\n]*"table"\s*:\s*object[^\n]*"you"\s*:\s*object[^\n]*"public"\s*:\s*object/m);
+  assert.match(serverTypes, /"private"\?:\s*object/);
   assert.match(text, /"stateVersion"\s*:\s*\d+/);
   assert.match(text, /"table"\s*:\s*\{/);
   assert.match(text, /"you"\s*:\s*\{/);
+  assert.match(text, /"public"\s*:\s*\{/);
+  assert.match(text, /"hand"\s*:\s*\{\s*"handId"\s*:\s*null/);
+  assert.match(text, /"board"\s*:\s*\{\s*"cards"\s*:\s*\[\s*\]/);
+  assert.match(text, /"pot"\s*:\s*\{\s*"total"\s*:\s*null/);
 });
 
 test("ws poker protocol document contains envelope JSON markers", () => {
@@ -97,4 +102,11 @@ test("first two JSON fenced blocks are parseable JSON", () => {
   assert.ok(matches.length >= 2);
   assert.equal(typeof JSON.parse(matches[0]), "object");
   assert.equal(typeof JSON.parse(matches[1]), "object");
+});
+
+
+test("ws poker protocol document states snapshot mode is one-shot and non-subscribing", () => {
+  const text = docText();
+  assert.match(text, /emits exactly one `stateSnapshot` frame/);
+  assert.match(text, /(\*\*does not\*\* subscribe|does not subscribe) that socket to legacy `table_state` broadcasts/);
 });
