@@ -8,6 +8,11 @@ function docText() {
   return fs.readFileSync(DOC_PATH, "utf8");
 }
 
+function serverMessageTypesSection(text) {
+  const match = text.match(/### Server → Client\n\n([\s\S]*?)(\n### |\n## |$)/);
+  return match ? match[1] : "";
+}
+
 test("ws poker protocol document exists and is non-empty", () => {
   assert.ok(fs.existsSync(DOC_PATH));
   const text = docText();
@@ -29,8 +34,22 @@ test("ws poker protocol document defines required message type names", () => {
   assert.match(text, /^\|\s*`hello`\s*\|/m);
   assert.match(text, /^\|\s*`auth`\s*\|/m);
   assert.match(text, /^\|\s*`ping`\s*\|/m);
-  assert.match(text, /^\|\s*`error`\s*\|/m);
-  assert.match(text, /^\|\s*`resync`\s*\|/m);
+
+  const serverTypes = serverMessageTypesSection(text);
+  assert.ok(serverTypes.length > 0);
+  assert.match(serverTypes, /^\|\s*`error`\s*\|/m);
+  assert.match(serverTypes, /^\|\s*`resync`\s*\|/m);
+  assert.match(serverTypes, /^\|\s*`stateSnapshot`\s*\|/m);
+});
+
+test("ws poker protocol document defines canonical stateSnapshot payload fields", () => {
+  const text = docText();
+  const serverTypes = serverMessageTypesSection(text);
+
+  assert.match(serverTypes, /^\|\s*`stateSnapshot`\s*\|[^\n]*"stateVersion"\s*:\s*integer[^\n]*"table"\s*:\s*object[^\n]*"you"\s*:\s*object/m);
+  assert.match(text, /"stateVersion"\s*:\s*\d+/);
+  assert.match(text, /"table"\s*:\s*\{/);
+  assert.match(text, /"you"\s*:\s*\{/);
 });
 
 test("ws poker protocol document contains envelope JSON markers", () => {
