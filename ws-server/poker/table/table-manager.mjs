@@ -42,14 +42,29 @@ function orderedSeatMembers(coreState) {
     .sort((a, b) => a.seat - b.seat || a.userId.localeCompare(b.userId));
 }
 
-function buildBootstrappedPokerState({ tableId, coreState }) {
+function isContinuationEligibleByStack(userId, stacksByUserId) {
+  const stack = Number(stacksByUserId?.[userId] ?? 0);
+  return Number.isFinite(stack) && stack > 0;
+}
+
+function orderedEligibleSeatMembers(coreState, stacksByUserId = null) {
   const members = orderedSeatMembers(coreState);
+  if (!stacksByUserId || typeof stacksByUserId !== "object" || Array.isArray(stacksByUserId)) {
+    return members;
+  }
+  return members.filter((member) => isContinuationEligibleByStack(member.userId, stacksByUserId));
+}
+
+function buildBootstrappedPokerState({ tableId, coreState, dealerSeatNo = null, startingStacks = null, handVersion = null }) {
+  const members = orderedEligibleSeatMembers(coreState, startingStacks);
   if (members.length < MIN_PLAYERS_TO_BOOTSTRAP) {
     return null;
   }
 
   const userIds = members.map((member) => member.userId);
-  const dealerIndex = 0;
+  const dealerIndex = Number.isInteger(dealerSeatNo)
+    ? Math.max(0, members.findIndex((member) => member.seat === dealerSeatNo))
+    : 0;
   const isHeadsUp = members.length === 2;
   const sbIndex = isHeadsUp ? dealerIndex : (dealerIndex + 1) % members.length;
   const bbIndex = (sbIndex + 1) % members.length;
@@ -57,10 +72,14 @@ function buildBootstrappedPokerState({ tableId, coreState }) {
   const sbUserId = members[sbIndex]?.userId ?? null;
   const bbUserId = members[bbIndex]?.userId ?? null;
   const turnUserId = members[utgIndex]?.userId ?? members[dealerIndex]?.userId ?? null;
-  const handSeed = nextHandSeed(tableId, coreState.version, members.length);
+  const versionForHand = Number.isInteger(handVersion) ? handVersion : coreState.version;
+  const handSeed = nextHandSeed(tableId, versionForHand, members.length);
   const initialDeck = deriveDeck(handSeed);
   const dealt = dealHoleCards(initialDeck, userIds);
-  const stacks = Object.fromEntries(userIds.map((userId) => [userId, 100]));
+  const stacks = Object.fromEntries(userIds.map((userId) => {
+    const stack = Number(startingStacks?.[userId]);
+    return [userId, Number.isFinite(stack) && stack >= 0 ? Math.trunc(stack) : 100];
+  }));
   const betThisRoundByUserId = Object.fromEntries(userIds.map((userId) => [userId, 0]));
   const toCallByUserId = Object.fromEntries(userIds.map((userId) => [userId, 0]));
   const actedThisRoundByUserId = Object.fromEntries(userIds.map((userId) => [userId, false]));
@@ -88,7 +107,7 @@ function buildBootstrappedPokerState({ tableId, coreState }) {
 
   return {
     roomId: coreState.roomId || tableId,
-    handId: nextHandId(tableId, coreState.version, members.length),
+    handId: nextHandId(tableId, versionForHand, members.length),
     handSeed,
     phase: "PREFLOP",
     dealerSeatNo: members[dealerIndex]?.seat ?? null,
@@ -110,6 +129,46 @@ function buildBootstrappedPokerState({ tableId, coreState }) {
     deck: toCardCodes(dealt.deck)
   };
 }
+
+function resolveNextDealerSeatNo({ members, settledState }) {
+  if (!Array.isArray(members) || members.length === 0) {
+    return null;
+  }
+
+  const eligibleMembers = members.filter((member) => isContinuationEligibleByStack(member.userId, settledState?.stacks));
+  if (eligibleMembers.length === 0) {
+    return null;
+  }
+
+  const currentDealerSeatNo = Number(settledState?.dealerSeatNo);
+  const currentDealerIndex = eligibleMembers.findIndex((member) => member.seat === currentDealerSeatNo);
+  if (currentDealerIndex === -1) {
+    return eligibleMembers[0].seat;
+  }
+
+  const nextIndex = (currentDealerIndex + 1) % eligibleMembers.length;
+  return eligibleMembers[nextIndex]?.seat ?? eligibleMembers[0].seat;
+}
+
+function buildNextHandStateFromSettled({ tableId, coreState, settledState, nextVersion }) {
+  const members = orderedEligibleSeatMembers(coreState, settledState?.stacks);
+  const nextDealerSeatNo = resolveNextDealerSeatNo({ members, settledState });
+  return buildBootstrappedPokerState({
+    tableId,
+    coreState,
+    dealerSeatNo: nextDealerSeatNo,
+    startingStacks: settledState?.stacks,
+    handVersion: nextVersion
+  });
+}
+
+export const __testOnly = {
+  isContinuationEligibleByStack,
+  orderedEligibleSeatMembers,
+  resolveNextDealerSeatNo,
+  buildNextHandStateFromSettled,
+  buildBootstrappedPokerState
+};
 
 function normalizeMembers(table) {
   const members = [];
@@ -348,10 +407,20 @@ export function createTableManager({
       return rejected;
     }
 
+    const nextVersion = table.coreState.version + 1;
+    const nextPokerState = applied.state?.phase === "SETTLED"
+      ? buildNextHandStateFromSettled({
+          tableId,
+          coreState: table.coreState,
+          settledState: applied.state,
+          nextVersion
+        }) || applied.state
+      : applied.state;
+
     table.coreState = {
       ...table.coreState,
-      version: table.coreState.version + 1,
-      pokerState: applied.state
+      version: nextVersion,
+      pokerState: nextPokerState
     };
 
     const accepted = {
@@ -362,7 +431,7 @@ export function createTableManager({
       reason: null,
       action: applied.action,
       stateVersion: table.coreState.version,
-      handId: applied.state.handId
+      handId: nextPokerState.handId
     };
 
     rememberActionResult(table, requestId, { ...accepted, userId });

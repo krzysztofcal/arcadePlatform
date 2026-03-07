@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createTableManager } from "./table-manager.mjs";
+import { __testOnly, createTableManager } from "./table-manager.mjs";
 
 function fakeWs(id) {
   return { id };
@@ -10,6 +10,51 @@ function memberPairs(members) {
   return members.map((member) => [member.userId, member.seat]);
 }
 
+
+
+test("buildNextHandStateFromSettled requires at least two continuation-eligible stacks", () => {
+  const settledState = {
+    dealerSeatNo: 1,
+    stacks: { user_a: 120, user_b: 0, user_c: 0 }
+  };
+  const coreState = {
+    version: 9,
+    roomId: "table_eligibility_gate",
+    members: [
+      { userId: "user_a", seat: 1 },
+      { userId: "user_b", seat: 2 },
+      { userId: "user_c", seat: 3 }
+    ]
+  };
+
+  const nextHand = __testOnly.buildNextHandStateFromSettled({
+    tableId: "table_eligibility_gate",
+    coreState,
+    settledState,
+    nextVersion: 10
+  });
+
+  assert.equal(nextHand, null);
+});
+
+test("resolveNextDealerSeatNo skips ineligible seats based on settled continuation stacks", () => {
+  const members = [
+    { userId: "user_a", seat: 1 },
+    { userId: "user_b", seat: 2 },
+    { userId: "user_c", seat: 3 },
+    { userId: "user_d", seat: 4 }
+  ];
+
+  const nextDealer = __testOnly.resolveNextDealerSeatNo({
+    members,
+    settledState: {
+      dealerSeatNo: 1,
+      stacks: { user_a: 50, user_b: 0, user_c: 80, user_d: 0 }
+    }
+  });
+
+  assert.equal(nextDealer, 3);
+});
 test("table manager exposes connected members as sorted {userId, seat} and reuses freed seats", () => {
   const tableManager = createTableManager({ maxSeats: 3, presenceTtlMs: 0 });
   const ws1 = fakeWs("ws-1");
@@ -633,7 +678,7 @@ test("first FLOP CHECK keeps FLOP and passes turn", () => {
   assert.equal(flopAfter.turn.userId, "user_a");
 });
 
-test("preflop fold-win settles snapshot and exposes zero-pot terminal hand", () => {
+test("preflop fold-win auto-bootstraps next PREFLOP hand with preserved stacks", () => {
   const tableManager = createTableManager({ maxSeats: 4 });
   const wsA = fakeWs("fold-a");
   const wsB = fakeWs("fold-b");
@@ -644,17 +689,22 @@ test("preflop fold-win settles snapshot and exposes zero-pot terminal hand", () 
   assert.equal(tableManager.bootstrapHand(tableId).ok, true);
 
   const pre = tableManager.tableSnapshot(tableId, "user_b");
+  const before = tableManager.tableSnapshot(tableId, "user_a");
   const close = tableManager.applyAction({ tableId, handId: pre.hand.handId, userId: pre.turn.userId, requestId: "req-fold-close", action: "FOLD", amount: 0 });
   const after = tableManager.tableSnapshot(tableId, "user_a");
 
   assert.equal(close.accepted, true);
-  assert.equal(after.hand.status, "SETTLED");
-  assert.equal(after.turn.userId, null);
-  assert.equal(after.pot.total, 0);
-  assert.deepEqual(after.showdown.winners.length, 1);
+  assert.equal(after.hand.status, "PREFLOP");
+  assert.notEqual(after.hand.handId, before.hand.handId);
+  assert.equal(after.board.cards.length, 0);
+  assert.equal(typeof after.turn.userId, "string");
+  assert.equal(after.pot.total, 3);
+  assert.equal("showdown" in after, false);
+  assert.equal("handSettlement" in after, false);
+  assert.equal(Array.isArray(after.legalActions.actions), true);
 });
 
-test("closing RIVER action settles hand and rejects fresh post-settlement action", () => {
+test("closing RIVER action auto-bootstraps next PREFLOP hand and replay is idempotent", () => {
   const tableManager = createTableManager({ maxSeats: 4 });
   const wsA = fakeWs("river-a");
   const wsB = fakeWs("river-b");
@@ -681,12 +731,16 @@ test("closing RIVER action settles hand and rejects fresh post-settlement action
   const after = tableManager.tableSnapshot(tableId, "user_a");
 
   assert.equal(close.accepted, true);
-  assert.equal(after.hand.status, "SETTLED");
-  assert.equal(after.turn.userId, null);
-  assert.equal(after.pot.total, 0);
-  assert.deepEqual(after.legalActions.actions, []);
-  const settledAt = after.handSettlement.settledAt;
-  assert.equal(typeof settledAt, "string");
+  assert.equal(after.hand.status, "PREFLOP");
+  assert.notEqual(after.hand.handId, river.hand.handId);
+  assert.equal(after.board.cards.length, 0);
+  assert.equal(typeof after.turn.userId, "string");
+  assert.equal(after.pot.total, 3);
+  assert.equal("showdown" in after, false);
+  assert.equal("handSettlement" in after, false);
+  const nextHandId = after.hand.handId;
+  const nextStateVersion = after.stateVersion;
+  const nextDealerSeat = after.turn.seat;
 
   const replayClose = tableManager.applyAction({ tableId, handId: river.hand.handId, userId: "user_a", requestId: "req-river-check-2", action: "CHECK", amount: 0 });
   assert.equal(replayClose.accepted, true);
@@ -695,10 +749,47 @@ test("closing RIVER action settles hand and rejects fresh post-settlement action
   assert.equal(replayClose.stateVersion, close.stateVersion);
 
   const afterReplay = tableManager.tableSnapshot(tableId, "user_a");
-  assert.equal(afterReplay.handSettlement.settledAt, settledAt);
+  assert.equal(afterReplay.hand.handId, nextHandId);
+  assert.equal(afterReplay.stateVersion, nextStateVersion);
+  assert.equal(afterReplay.turn.seat, nextDealerSeat);
 
   const rejected = tableManager.applyAction({ tableId, handId: river.hand.handId, userId: "user_b", requestId: "req-river-check-3", action: "CHECK", amount: 0 });
   assert.equal(rejected.accepted, false);
-  assert.equal(rejected.reason, "hand_not_live");
+  assert.equal(rejected.reason, "hand_mismatch");
   assert.equal(rejected.stateVersion, close.stateVersion);
+});
+
+test("next hand rotates dealer for heads-up and three-player tables", () => {
+  const headsUpManager = createTableManager({ maxSeats: 4 });
+  const wsHU1 = fakeWs("hu-a");
+  const wsHU2 = fakeWs("hu-b");
+  const headsUpTableId = "table_rotate_hu";
+  assert.equal(headsUpManager.join({ ws: wsHU1, userId: "user_a", tableId: headsUpTableId, requestId: "join-hu-a" }).ok, true);
+  assert.equal(headsUpManager.join({ ws: wsHU2, userId: "user_b", tableId: headsUpTableId, requestId: "join-hu-b" }).ok, true);
+  assert.equal(headsUpManager.bootstrapHand(headsUpTableId).ok, true);
+
+  const preHu = headsUpManager.tableSnapshot(headsUpTableId, "user_a");
+  const dealerBeforeHu = preHu.turn.userId;
+  assert.equal(headsUpManager.applyAction({ tableId: headsUpTableId, handId: preHu.hand.handId, userId: preHu.turn.userId, requestId: "hu-fold-close", action: "FOLD", amount: 0 }).accepted, true);
+  const nextHu = headsUpManager.tableSnapshot(headsUpTableId, "user_a");
+  assert.equal(nextHu.hand.status, "PREFLOP");
+  assert.notEqual(nextHu.turn.userId, dealerBeforeHu);
+
+  const ringManager = createTableManager({ maxSeats: 6 });
+  const wsR1 = fakeWs("r-a");
+  const wsR2 = fakeWs("r-b");
+  const wsR3 = fakeWs("r-c");
+  const ringTableId = "table_rotate_ring";
+  assert.equal(ringManager.join({ ws: wsR1, userId: "user_a", tableId: ringTableId, requestId: "join-r-a" }).ok, true);
+  assert.equal(ringManager.join({ ws: wsR2, userId: "user_b", tableId: ringTableId, requestId: "join-r-b" }).ok, true);
+  assert.equal(ringManager.join({ ws: wsR3, userId: "user_c", tableId: ringTableId, requestId: "join-r-c" }).ok, true);
+  assert.equal(ringManager.bootstrapHand(ringTableId).ok, true);
+
+  const preRing = ringManager.tableSnapshot(ringTableId, "user_a");
+  assert.equal(preRing.turn.userId, "user_a");
+  assert.equal(ringManager.applyAction({ tableId: ringTableId, handId: preRing.hand.handId, userId: preRing.turn.userId, requestId: "ring-fold-close", action: "FOLD", amount: 0 }).accepted, true);
+
+  const nextRing = ringManager.tableSnapshot(ringTableId, "user_a");
+  assert.equal(nextRing.hand.status, "PREFLOP");
+  assert.equal(nextRing.turn.userId, "user_b");
 });
