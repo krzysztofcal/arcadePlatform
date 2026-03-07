@@ -61,7 +61,8 @@ test("__debugCore is exposed only when enableDebugCore is true and nodeEnv is no
   assert.equal(joined.ok, true);
   assert.deepEqual(tableManager.__debugCore("table_debug"), {
     version: 1,
-    appliedRequestIdsLength: 1
+    appliedRequestIdsLength: 1,
+    actionResultsCacheSize: 0
   });
 });
 
@@ -329,4 +330,231 @@ test("bootstrapHand uses seed-derived shuffled deck and can vary by effective se
   assert.equal(snapA.turn.userId, "user_a");
   assert.equal(snapB.turn.userId, "user_a");
   assert.notDeepEqual(snapA.private.holeCards, snapB.private.holeCards);
+});
+
+test("applyAction accepts legal turn CALL and increments state version once", () => {
+  const tableManager = createTableManager({ maxSeats: 4, enableDebugCore: true, nodeEnv: "test" });
+  const wsA = fakeWs("apply-a");
+  const wsB = fakeWs("apply-b");
+  const tableId = "table_apply_action";
+
+  assert.equal(tableManager.join({ ws: wsA, userId: "user_a", tableId, requestId: "join-a", nowTs: 1 }).ok, true);
+  assert.equal(tableManager.join({ ws: wsB, userId: "user_b", tableId, requestId: "join-b", nowTs: 1 }).ok, true);
+  const boot = tableManager.bootstrapHand(tableId);
+  assert.equal(boot.ok, true);
+
+  const before = tableManager.tableSnapshot(tableId, "user_a");
+  const action = tableManager.applyAction({
+    tableId,
+    handId: before.hand.handId,
+    userId: "user_a",
+    requestId: "req-act-a",
+    action: "CALL",
+    amount: 0
+  });
+  const after = tableManager.tableSnapshot(tableId, "user_a");
+
+  assert.equal(action.accepted, true);
+  assert.equal(after.stateVersion, before.stateVersion + 1);
+  assert.deepEqual(after.pot, { total: 4, sidePots: [] });
+  assert.equal(after.turn.userId, null);
+  assert.deepEqual(after.legalActions, { seat: 1, actions: [] });
+  assert.equal(after.private.holeCards.length, 2);
+});
+
+test("applyAction CALL closes initial heads-up preflop loop coherently", () => {
+  const tableManager = createTableManager({ maxSeats: 4 });
+  const wsA = fakeWs("close-a");
+  const wsB = fakeWs("close-b");
+  const tableId = "table_apply_close";
+
+  assert.equal(tableManager.join({ ws: wsA, userId: "user_a", tableId, requestId: "join-a", nowTs: 1 }).ok, true);
+  assert.equal(tableManager.join({ ws: wsB, userId: "user_b", tableId, requestId: "join-b", nowTs: 1 }).ok, true);
+  assert.equal(tableManager.bootstrapHand(tableId).ok, true);
+
+  const before = tableManager.tableSnapshot(tableId, "user_a");
+  const action = tableManager.applyAction({
+    tableId,
+    handId: before.hand.handId,
+    userId: "user_a",
+    requestId: "req-close-call",
+    action: "CALL",
+    amount: 0
+  });
+  const actorAfter = tableManager.tableSnapshot(tableId, "user_a");
+  const otherAfter = tableManager.tableSnapshot(tableId, "user_b");
+
+  assert.equal(action.accepted, true);
+  assert.equal(actorAfter.turn.userId, null);
+  assert.deepEqual(actorAfter.legalActions, { seat: 1, actions: [] });
+  assert.deepEqual(otherAfter.legalActions, { seat: 2, actions: [] });
+});
+
+test("applyAction rejects mismatched hand and keeps snapshot unchanged", () => {
+  const tableManager = createTableManager({ maxSeats: 4 });
+  const wsA = fakeWs("reject-a");
+  const wsB = fakeWs("reject-b");
+  const tableId = "table_apply_reject";
+
+  assert.equal(tableManager.join({ ws: wsA, userId: "user_a", tableId, requestId: "join-a", nowTs: 1 }).ok, true);
+  assert.equal(tableManager.join({ ws: wsB, userId: "user_b", tableId, requestId: "join-b", nowTs: 1 }).ok, true);
+  assert.equal(tableManager.bootstrapHand(tableId).ok, true);
+
+  const before = tableManager.tableSnapshot(tableId, "user_a");
+  const rejected = tableManager.applyAction({
+    tableId,
+    handId: "bad_hand",
+    userId: "user_a",
+    requestId: "req-act-bad",
+    action: "CALL",
+    amount: 0
+  });
+  const after = tableManager.tableSnapshot(tableId, "user_a");
+
+  assert.equal(rejected.accepted, false);
+  assert.equal(rejected.reason, "hand_mismatch");
+  assert.deepEqual(after, before);
+});
+
+test("applyAction is idempotent for requestId and does not double-apply", () => {
+  const tableManager = createTableManager({ maxSeats: 4 });
+  const wsA = fakeWs("idem-a");
+  const wsB = fakeWs("idem-b");
+  const tableId = "table_apply_idem";
+
+  assert.equal(tableManager.join({ ws: wsA, userId: "user_a", tableId, requestId: "join-a", nowTs: 1 }).ok, true);
+  assert.equal(tableManager.join({ ws: wsB, userId: "user_b", tableId, requestId: "join-b", nowTs: 1 }).ok, true);
+  assert.equal(tableManager.bootstrapHand(tableId).ok, true);
+
+  const before = tableManager.tableSnapshot(tableId, "user_a");
+  const first = tableManager.applyAction({
+    tableId,
+    handId: before.hand.handId,
+    userId: "user_a",
+    requestId: "req-idem",
+    action: "CALL",
+    amount: 0
+  });
+  const mid = tableManager.tableSnapshot(tableId, "user_a");
+  const second = tableManager.applyAction({
+    tableId,
+    handId: before.hand.handId,
+    userId: "user_a",
+    requestId: "req-idem",
+    action: "CALL",
+    amount: 0
+  });
+  const after = tableManager.tableSnapshot(tableId, "user_a");
+
+  assert.equal(first.accepted, true);
+  assert.equal(first.changed, true);
+  assert.equal(first.replayed, false);
+  assert.equal(second.accepted, true);
+  assert.equal(second.changed, false);
+  assert.equal(second.replayed, true);
+  assert.equal(second.stateVersion, first.stateVersion);
+  assert.deepEqual(after, mid);
+});
+
+test("applyAction same requestId from different users does not collide", () => {
+  const tableManager = createTableManager({ maxSeats: 4, actionResultCacheMax: 8 });
+  const wsA = fakeWs("scope-a");
+  const wsB = fakeWs("scope-b");
+  const tableId = "table_apply_scope";
+
+  assert.equal(tableManager.join({ ws: wsA, userId: "user_a", tableId, requestId: "join-a", nowTs: 1 }).ok, true);
+  assert.equal(tableManager.join({ ws: wsB, userId: "user_b", tableId, requestId: "join-b", nowTs: 1 }).ok, true);
+  assert.equal(tableManager.bootstrapHand(tableId).ok, true);
+
+  const before = tableManager.tableSnapshot(tableId, "user_a");
+  const actorResult = tableManager.applyAction({
+    tableId,
+    handId: before.hand.handId,
+    userId: "user_a",
+    requestId: "req-shared",
+    action: "CALL",
+    amount: 0
+  });
+
+  const otherResult = tableManager.applyAction({
+    tableId,
+    handId: before.hand.handId,
+    userId: "user_b",
+    requestId: "req-shared",
+    action: "CALL",
+    amount: 0
+  });
+
+  assert.equal(actorResult.accepted, true);
+  assert.equal(actorResult.replayed, false);
+  assert.equal(otherResult.accepted, false);
+  assert.equal(otherResult.replayed, false);
+  assert.equal(otherResult.reason, "illegal_action");
+});
+
+test("applyAction cache is bounded and evicts oldest requestIds deterministically", () => {
+  const tableManager = createTableManager({ maxSeats: 4, actionResultCacheMax: 2, enableDebugCore: true, nodeEnv: "test" });
+  const wsA = fakeWs("bounded-a");
+  const wsB = fakeWs("bounded-b");
+  const tableId = "table_apply_bounded";
+
+  assert.equal(tableManager.join({ ws: wsA, userId: "user_a", tableId, requestId: "join-a", nowTs: 1 }).ok, true);
+  assert.equal(tableManager.join({ ws: wsB, userId: "user_b", tableId, requestId: "join-b", nowTs: 1 }).ok, true);
+  assert.equal(tableManager.bootstrapHand(tableId).ok, true);
+
+  const before = tableManager.tableSnapshot(tableId, "user_a");
+  const req1 = tableManager.applyAction({
+    tableId,
+    handId: before.hand.handId,
+    userId: "user_a",
+    requestId: "req-bounded-1",
+    action: "CALL",
+    amount: 0
+  });
+  assert.equal(req1.accepted, true);
+
+  const req2 = tableManager.applyAction({
+    tableId,
+    handId: before.hand.handId,
+    userId: "user_b",
+    requestId: "req-bounded-2",
+    action: "CALL",
+    amount: 0
+  });
+  const req3 = tableManager.applyAction({
+    tableId,
+    handId: before.hand.handId,
+    userId: "user_b",
+    requestId: "req-bounded-3",
+    action: "FOLD",
+    amount: 0
+  });
+
+  assert.equal(req2.accepted, false);
+  assert.equal(req3.accepted, false);
+  assert.equal(tableManager.__debugCore(tableId).actionResultsCacheSize, 2);
+
+  const replayEvicted = tableManager.applyAction({
+    tableId,
+    handId: before.hand.handId,
+    userId: "user_a",
+    requestId: "req-bounded-1",
+    action: "CALL",
+    amount: 0
+  });
+  assert.equal(replayEvicted.accepted, false);
+  assert.equal(replayEvicted.reason, "illegal_action");
+
+  const replayKept = tableManager.applyAction({
+    tableId,
+    handId: before.hand.handId,
+    userId: "user_b",
+    requestId: "req-bounded-3",
+    action: "FOLD",
+    amount: 0
+  });
+  assert.equal(replayKept.accepted, req3.accepted);
+  assert.equal(replayKept.reason, req3.reason);
+  assert.equal(replayKept.replayed, true);
+  assert.equal(tableManager.__debugCore(tableId).actionResultsCacheSize, 2);
 });

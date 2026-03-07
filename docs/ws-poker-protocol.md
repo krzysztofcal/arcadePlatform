@@ -176,6 +176,8 @@ Missing room-core data MUST fail safe to canonical defaults and never expose for
 
 PR8 contract delta: when WS room-core has bootstrapped a live initial hand, `stateSnapshot` may return `public.hand.status = "PREFLOP"` with live `public.turn`, `public.pot`, and per-user `public.legalActions`, while `payload.private.holeCards` is still emitted only for the authenticated seated user. This delta is limited to initial hand bootstrap/read-model projection and does **not** promise full WS `act` mutation support yet.
 
+PR9 contract delta: WS `act` is supported for initial PREFLOP scope (`fold`/`check`/`call`/`bet`/`raise`). Successful or rejected domain outcomes are emitted as `commandResult` (`status = "accepted"|"rejected"`) and malformed payloads still use `error.code = "INVALID_COMMAND"`. On accepted fresh `act`, server emits fresh post-action `stateSnapshot` to the acting connection and currently connected table-associated sockets (joined or subscribed for that table). Idempotent accepted replay returns accepted command semantics but does not trigger a new post-action snapshot fanout wave. Post-action `stateSnapshot` projection preserves existing private scoping guarantees.
+
 Example `stateSnapshot` frame:
 
 ```json
@@ -248,6 +250,8 @@ Close vs error event rules:
 - Duplicate request handling:
   - If original command already resolved, server MUST return same `commandResult` semantics (or `error.code = "DUPLICATE_REQUEST"` with prior outcome reference) and MUST NOT apply mutation twice.
   - If original command is still pending, server MAY return `commandResult.status = "accepted"` with no additional side effects.
+- Runtime note (PR9 WS server): in-memory idempotency replay for `act` is bounded by per-table cache size; oldest requestIds may be evicted, after which replay is no longer guaranteed.
+- Runtime note (PR9 WS server): `act` replay cache is keyed by user-scoped idempotency tuple within a room; reusing a requestId from a different user MUST NOT reuse another user's cached outcome.
 - Non-mutating commands (`hello`, `auth`, `resume`, `ping`, `ack`) SHOULD still include `requestId` for tracing/correlation.
 
 ## Reconnect/Resync

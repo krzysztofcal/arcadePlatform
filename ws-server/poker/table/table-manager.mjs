@@ -6,9 +6,11 @@ import {
   toHoleCardCodeMap,
   toCardCodes
 } from "../shared/poker-primitives.mjs";
+import { applyPreflopAction } from "../shared/poker-action-reducer.mjs";
 
 const DEFAULT_PRESENCE_TTL_MS = 10_000;
 const DEFAULT_MAX_SEATS = 10;
+const DEFAULT_ACTION_RESULT_CACHE_MAX = 256;
 const MIN_PLAYERS_TO_BOOTSTRAP = 2;
 
 function nextHandId(tableId, version, seatCount) {
@@ -129,13 +131,53 @@ function normalizeMembers(table) {
 export function createTableManager({
   presenceTtlMs = DEFAULT_PRESENCE_TTL_MS,
   maxSeats = DEFAULT_MAX_SEATS,
+  actionResultCacheMax = DEFAULT_ACTION_RESULT_CACHE_MAX,
   enableDebugCore = false,
   nodeEnv = process.env.NODE_ENV
 } = {}) {
+  const normalizedActionResultCacheMax = Number.isInteger(actionResultCacheMax) && actionResultCacheMax > 0
+    ? actionResultCacheMax
+    : DEFAULT_ACTION_RESULT_CACHE_MAX;
   const tables = new Map();
   const connStateBySocket = new Map();
   function nextSyntheticRequestId(kind, tableId, userId, nowTs, discriminator) {
     return `${kind}:${tableId}:${userId}:${nowTs}:${discriminator}`;
+  }
+
+  function rememberActionResult(table, requestId, result) {
+    const replayKey = makeActionReplayKey({ userId: result?.userId ?? null, requestId });
+    if (!replayKey) {
+      return;
+    }
+
+    while (table.actionResultsByRequestId.size >= normalizedActionResultCacheMax) {
+      const oldestKey = table.actionResultsByRequestId.keys().next().value;
+      if (typeof oldestKey !== "string") {
+        break;
+      }
+      table.actionResultsByRequestId.delete(oldestKey);
+    }
+
+    table.actionResultsByRequestId.set(replayKey, result);
+  }
+
+  function makeActionReplayKey({ userId, requestId }) {
+    if (typeof userId !== "string" || userId.trim() === "") {
+      return null;
+    }
+    if (typeof requestId !== "string" || requestId.trim() === "") {
+      return null;
+    }
+    return `${userId}:${requestId}`;
+  }
+
+  function asReplayedResult(result) {
+    const { userId: _ignoredUserId, ...rest } = result || {};
+    return {
+      ...rest,
+      changed: false,
+      replayed: true
+    };
   }
 
   function ensureConn(ws) {
@@ -154,10 +196,22 @@ export function createTableManager({
         tableId,
         coreState: createInitialCoreState({ roomId: tableId, maxSeats }),
         presenceByUserId: new Map(),
-        subscribers: new Set()
+        subscribers: new Set(),
+        actionResultsByRequestId: new Map()
       });
     }
     return tables.get(tableId);
+  }
+
+  function rejectAction({ reason, stateVersion }) {
+    return {
+      ok: true,
+      accepted: false,
+      changed: false,
+      replayed: false,
+      reason,
+      stateVersion
+    };
   }
 
   function tableState(tableId) {
@@ -247,6 +301,72 @@ export function createTableManager({
       handId: nextPokerState.handId,
       stateVersion: table.coreState.version
     };
+  }
+
+  function applyAction({ tableId, handId, userId, requestId, action, amount }) {
+    const table = tables.get(tableId);
+    if (!table) {
+      return rejectAction({ reason: "table_not_found", stateVersion: 0 });
+    }
+
+    const replayKey = makeActionReplayKey({ userId, requestId });
+    if (replayKey && table.actionResultsByRequestId.has(replayKey)) {
+      return asReplayedResult(table.actionResultsByRequestId.get(replayKey));
+    }
+
+    const liveState = asLiveHandState(table.coreState?.pokerState);
+    if (!liveState) {
+      const rejected = rejectAction({ reason: "hand_not_live", stateVersion: table.coreState.version });
+      rememberActionResult(table, requestId, { ...rejected, userId });
+      return rejected;
+    }
+
+    if (typeof handId !== "string" || handId !== liveState.handId) {
+      const rejected = rejectAction({ reason: "hand_mismatch", stateVersion: table.coreState.version });
+      rememberActionResult(table, requestId, { ...rejected, userId });
+      return rejected;
+    }
+
+    const seat = Number.isInteger(table.coreState.seats?.[userId]) ? table.coreState.seats[userId] : null;
+    if (!Number.isInteger(seat)) {
+      const rejected = rejectAction({ reason: "not_seated", stateVersion: table.coreState.version });
+      rememberActionResult(table, requestId, { ...rejected, userId });
+      return rejected;
+    }
+
+    const applied = applyPreflopAction({
+      pokerState: liveState,
+      userId,
+      action,
+      amount
+    });
+
+    if (!applied.ok) {
+      const rejected = rejectAction({ reason: applied.reason || "action_rejected", stateVersion: table.coreState.version });
+      rememberActionResult(table, requestId, { ...rejected, userId });
+      return rejected;
+    }
+
+    table.coreState = {
+      ...table.coreState,
+      version: table.coreState.version + 1,
+      pokerState: applied.state
+    };
+
+    const accepted = {
+      ok: true,
+      accepted: true,
+      changed: true,
+      replayed: false,
+      reason: null,
+      action: applied.action,
+      stateVersion: table.coreState.version,
+      handId: applied.state.handId
+    };
+
+    rememberActionResult(table, requestId, { ...accepted, userId });
+
+    return accepted;
   }
 
   function markConnected(member, nowMs) {
@@ -533,7 +653,8 @@ export function createTableManager({
 
     return {
       version: table.coreState.version,
-      appliedRequestIdsLength: table.coreState.appliedRequestIds.length
+      appliedRequestIdsLength: table.coreState.appliedRequestIds.length,
+      actionResultsCacheSize: table.actionResultsByRequestId.size
     };
   }
 
@@ -546,6 +667,16 @@ export function createTableManager({
     return [...table.subscribers].sort((a, b) => getOrderKey(a).localeCompare(getOrderKey(b)));
   }
 
+  function orderedConnectionsForTable(tableId, getOrderKey) {
+    const sockets = [];
+    for (const [socket, conn] of connStateBySocket.entries()) {
+      if (conn?.joinedTableId === tableId || conn?.subscribedTableId === tableId) {
+        sockets.push(socket);
+      }
+    }
+    return sockets.sort((a, b) => getOrderKey(a).localeCompare(getOrderKey(b)));
+  }
+
   const manager = {
     join,
     leave,
@@ -555,8 +686,10 @@ export function createTableManager({
     tableState,
     tableSnapshot,
     bootstrapHand,
+    applyAction,
     cleanupConnection,
     orderedSubscribers,
+    orderedConnectionsForTable,
     sweepExpiredPresence
   };
 

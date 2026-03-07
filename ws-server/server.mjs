@@ -22,10 +22,11 @@ const PROTECTED_MESSAGE_TYPES = new Set([
   "table_join",
   "table_leave",
   "table_state_sub",
+  "act",
   "resync",
   "resume"
 ]);
-const REQUEST_ID_REQUIRED_TYPES = new Set(["join", "leave", "table_join", "table_leave", "table_state_sub", "resync", "resume"]);
+const REQUEST_ID_REQUIRED_TYPES = new Set(["join", "leave", "table_join", "table_leave", "table_state_sub", "act", "resync", "resume"]);
 
 function resolvePresenceTtlMs(rawValue) {
   const parsed = Number(rawValue);
@@ -55,9 +56,18 @@ function resolveMaxSeats(rawValue) {
   return parsed;
 }
 
+function resolveActionResultCacheMax(rawValue) {
+  const parsed = Number(rawValue);
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    return 256;
+  }
+  return parsed;
+}
+
 const tableManager = createTableManager({
   presenceTtlMs: resolvePresenceTtlMs(process.env.WS_PRESENCE_TTL_MS),
-  maxSeats: resolveMaxSeats(process.env.WS_MAX_SEATS)
+  maxSeats: resolveMaxSeats(process.env.WS_MAX_SEATS),
+  actionResultCacheMax: resolveActionResultCacheMax(process.env.WS_ACTION_RESULT_CACHE_MAX)
 });
 const sessionStore = createSessionStore({
   sessionTtlMs: resolveSessionTtlMs(process.env.WS_SESSION_TTL_MS)
@@ -252,6 +262,30 @@ function sendResumeAck(ws, connState, { requestId = null, tableId }) {
       reason: null
     }
   };
+
+  if (requestId) {
+    frame.requestId = requestId;
+  }
+
+  sendFrame(ws, frame);
+}
+
+function sendCommandResult(ws, connState, { requestId = null, tableId = null, status, reason = null }) {
+  const frame = {
+    version: "1.0",
+    type: "commandResult",
+    ts: nowTs(),
+    sessionId: connState.sessionId,
+    payload: {
+      requestId,
+      status,
+      reason
+    }
+  };
+
+  if (tableId) {
+    frame.roomId = tableId;
+  }
 
   if (requestId) {
     frame.requestId = requestId;
@@ -611,6 +645,82 @@ wss.on("connection", (ws) => {
       }
 
       sendTableState(ws, connState, { requestId: frame.requestId ?? null, tableState: subscribed.tableState });
+      return;
+    }
+
+    if (frame.type === "act") {
+      const resolvedRoomId = resolveRoomId(frame);
+      if (!resolvedRoomId.ok) {
+        sendError(ws, connState, {
+          code: resolvedRoomId.code,
+          message: resolvedRoomId.message,
+          requestId: frame.requestId ?? null
+        });
+        return;
+      }
+
+      const tableId = resolvedRoomId.roomId;
+      const handId = typeof frame.payload?.handId === "string" ? frame.payload.handId.trim() : "";
+      const action = typeof frame.payload?.action === "string" ? frame.payload.action.trim().toUpperCase() : "";
+      const amount = frame.payload?.amount;
+
+      if (!handId) {
+        sendError(ws, connState, {
+          code: "INVALID_COMMAND",
+          message: "act requires payload.handId",
+          requestId: frame.requestId ?? null
+        });
+        return;
+      }
+
+      if (!["FOLD", "CHECK", "CALL", "BET", "RAISE"].includes(action)) {
+        sendError(ws, connState, {
+          code: "INVALID_COMMAND",
+          message: "act requires payload.action of fold/check/call/bet/raise",
+          requestId: frame.requestId ?? null
+        });
+        return;
+      }
+
+      if ((action === "BET" || action === "RAISE") && !Number.isFinite(amount)) {
+        sendError(ws, connState, {
+          code: "INVALID_COMMAND",
+          message: "act requires numeric payload.amount for bet/raise",
+          requestId: frame.requestId ?? null
+        });
+        return;
+      }
+
+      const result = tableManager.applyAction({
+        tableId,
+        handId,
+        userId: connState.session.userId,
+        requestId: frame.requestId,
+        action,
+        amount
+      });
+
+      sendCommandResult(ws, connState, {
+        requestId: frame.requestId ?? null,
+        tableId,
+        status: result.accepted ? "accepted" : "rejected",
+        reason: result.reason
+      });
+
+      if (result.accepted && !result.replayed) {
+        const recipients = tableManager.orderedConnectionsForTable(tableId, (socket) => socket.__connState?.sessionId ?? "");
+        if (!recipients.includes(ws)) {
+          recipients.push(ws);
+        }
+
+        for (const recipient of recipients) {
+          const recipientConnState = recipient.__connState;
+          if (recipientConnState) {
+            const tableSnapshot = tableManager.tableSnapshot(tableId, recipientConnState.session.userId);
+            sendStateSnapshot(recipient, recipientConnState, { tableSnapshot });
+          }
+        }
+      }
       return;
     }
 

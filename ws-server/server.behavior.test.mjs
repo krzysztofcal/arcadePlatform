@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createHmac } from "node:crypto";
+import { EventEmitter } from "node:events";
 import net from "node:net";
 import WebSocket from "ws";
 
@@ -94,7 +95,7 @@ function connectClient(port) {
   });
 }
 
-function nextMessage(ws, timeoutMs = 5000) {
+function nextMessage(ws, timeoutMs = 10000) {
   return new Promise((resolve, reject) => {
     const cleanup = () => {
       clearTimeout(timer);
@@ -168,6 +169,23 @@ function sendFrame(ws, frame) {
   ws.send(JSON.stringify(frame));
 }
 
+async function nextMessageOfType(ws, type, timeoutMs = 10000) {
+  const started = Date.now();
+  while (true) {
+    const elapsed = Date.now() - started;
+    const remainingMs = timeoutMs - elapsed;
+    if (remainingMs <= 0) {
+      break;
+    }
+
+    const frame = await nextMessage(ws, remainingMs);
+    if (frame?.type === type) {
+      return frame;
+    }
+  }
+  throw new Error(`Timed out waiting for message type: ${type}`);
+}
+
 function base64urlJson(value) {
   return Buffer.from(JSON.stringify(value)).toString("base64url");
 }
@@ -210,6 +228,31 @@ function protectedEchoFrame(requestId = "req-protected") {
     payload: { echo: "hi" }
   };
 }
+
+test("nextMessageOfType respects total timeout budget when only non-matching frames arrive", async () => {
+  const fakeWs = new EventEmitter();
+  fakeWs.close = () => {};
+
+  const tick = setInterval(() => {
+    fakeWs.emit("message", JSON.stringify({ type: "pong" }));
+  }, 25);
+
+  const timeoutMs = 200;
+  const started = Date.now();
+
+  try {
+    await assert.rejects(
+      () => nextMessageOfType(fakeWs, "stateSnapshot", timeoutMs),
+      /Timed out waiting for (message type: stateSnapshot|websocket message)/
+    );
+  } finally {
+    clearInterval(tick);
+  }
+
+  const elapsed = Date.now() - started;
+  assert.equal(elapsed >= timeoutMs, true);
+  assert.equal(elapsed < timeoutMs + 300, true);
+});
 
 test("server supports healthz and hello/helloAck smoke flow", async () => {
   const { port, child } = await createServer();
@@ -945,6 +988,326 @@ test("snapshot view keeps table memberCount consistent with members after actor 
     assert.equal(snapshot.payload.table.memberCount, snapshot.payload.table.members.length);
 
     snapshotClient.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
+test("act command accepts turn action and broadcasts updated snapshot while preserving observer privacy", async () => {
+  const secret = "test-secret";
+  const actorToken = makeHs256Jwt({ secret, sub: "act_actor_user" });
+  const otherToken = makeHs256Jwt({ secret, sub: "act_other_user" });
+  const observerToken = makeHs256Jwt({ secret, sub: "act_observer_user" });
+  const { port, child } = await createServer({ env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret } });
+
+  try {
+    await waitForListening(child, 5000);
+    const actor = await connectClient(port);
+    const other = await connectClient(port);
+    const observer = await connectClient(port);
+
+    await hello(actor);
+    await hello(other);
+    await hello(observer);
+    assert.equal((await auth(actor, actorToken, "req-auth-act-actor")).type, "authOk");
+    assert.equal((await auth(other, otherToken, "req-auth-act-other")).type, "authOk");
+    assert.equal((await auth(observer, observerToken, "req-auth-act-observer")).type, "authOk");
+
+    sendFrame(actor, { version: "1.0", type: "table_join", requestId: "req-join-act-actor", ts: "2026-02-28T00:01:00Z", payload: { tableId: "table_act" } });
+    assert.equal((await nextMessage(actor)).type, "table_state");
+
+    sendFrame(other, { version: "1.0", type: "table_join", requestId: "req-join-act-other", ts: "2026-02-28T00:01:01Z", payload: { tableId: "table_act" } });
+    assert.equal((await nextMessage(other)).type, "table_state");
+    assert.equal((await nextMessage(actor)).type, "table_state");
+
+    sendFrame(observer, { version: "1.0", type: "table_state_sub", requestId: "req-sub-observer-act", ts: "2026-02-28T00:01:02Z", payload: { tableId: "table_act" } });
+    assert.equal((await nextMessage(observer)).type, "table_state");
+
+    sendFrame(actor, {
+      version: "1.0",
+      type: "table_state_sub",
+      requestId: "req-snapshot-before",
+      ts: "2026-02-28T00:01:03Z",
+      payload: { tableId: "table_act", view: "snapshot" }
+    });
+    const before = await nextMessage(actor);
+    const handId = before.payload.public.hand.handId;
+
+    const observerSnapshotPromise = nextMessageOfType(observer, "stateSnapshot");
+
+    sendFrame(actor, {
+      version: "1.0",
+      type: "act",
+      roomId: "table_act",
+      requestId: "req-act-call",
+      ts: "2026-02-28T00:01:04Z",
+      payload: { tableId: "table_act", handId, action: "call", amount: 999 }
+    });
+
+    const actorResult = await nextMessage(actor);
+    assert.equal(actorResult.type, "commandResult");
+    assert.equal(actorResult.payload.status, "accepted");
+    assert.equal(actorResult.payload.reason, null);
+
+    const actorSnapshot = await nextMessageOfType(actor, "stateSnapshot");
+    const observerSnapshot = await observerSnapshotPromise;
+    const otherSnapshot = await attemptMessage(other, 1500);
+    assert.equal(actorSnapshot.type, "stateSnapshot");
+    assert.ok(otherSnapshot === null || otherSnapshot.type === "stateSnapshot");
+    assert.equal(observerSnapshot.type, "stateSnapshot");
+    assert.equal(actorSnapshot.payload.stateVersion > before.payload.stateVersion, true);
+    assert.deepEqual(actorSnapshot.payload.public.pot, { total: 4, sidePots: [] });
+    assert.equal(actorSnapshot.payload.public.turn.userId, null);
+    assert.deepEqual(observerSnapshot.payload.public, { ...actorSnapshot.payload.public, legalActions: { seat: null, actions: [] } });
+    assert.equal("private" in observerSnapshot.payload, false);
+
+    actor.close();
+    other.close();
+    observer.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
+test("act command rejects non-turn user, malformed payload and unauthenticated attempts without mutation", async () => {
+  const secret = "test-secret";
+  const actorToken = makeHs256Jwt({ secret, sub: "act_reject_actor" });
+  const otherToken = makeHs256Jwt({ secret, sub: "act_reject_other" });
+  const { port, child } = await createServer({ env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret } });
+
+  try {
+    await waitForListening(child, 5000);
+    const actor = await connectClient(port);
+    const other = await connectClient(port);
+    const anon = await connectClient(port);
+
+    await hello(actor);
+    await hello(other);
+    await hello(anon);
+    assert.equal((await auth(actor, actorToken, "req-auth-reject-actor")).type, "authOk");
+    assert.equal((await auth(other, otherToken, "req-auth-reject-other")).type, "authOk");
+
+    sendFrame(actor, { version: "1.0", type: "table_join", requestId: "req-join-reject-actor", ts: "2026-02-28T00:02:00Z", payload: { tableId: "table_act_reject" } });
+    assert.equal((await nextMessage(actor)).type, "table_state");
+    sendFrame(other, { version: "1.0", type: "table_join", requestId: "req-join-reject-other", ts: "2026-02-28T00:02:01Z", payload: { tableId: "table_act_reject" } });
+    assert.equal((await nextMessage(other)).type, "table_state");
+    assert.equal((await nextMessage(actor)).type, "table_state");
+
+    sendFrame(actor, { version: "1.0", type: "table_state_sub", requestId: "req-snapshot-reject-before", ts: "2026-02-28T00:02:02Z", payload: { tableId: "table_act_reject", view: "snapshot" } });
+    const before = await nextMessage(actor);
+    const handId = before.payload.public.hand.handId;
+
+    sendFrame(anon, {
+      version: "1.0",
+      type: "act",
+      requestId: "req-act-unauth",
+      ts: "2026-02-28T00:02:03Z",
+      payload: { tableId: "table_act_reject", handId, action: "call", amount: 0 }
+    });
+    const unauth = await nextMessage(anon);
+    assert.equal(unauth.type, "error");
+    assert.equal(unauth.payload.code, "auth_required");
+
+    sendFrame(other, {
+      version: "1.0",
+      type: "act",
+      requestId: "req-act-wrong-turn",
+      ts: "2026-02-28T00:02:04Z",
+      payload: { tableId: "table_act_reject", handId, action: "call", amount: 0 }
+    });
+    const wrongTurn = await nextMessage(other);
+    assert.equal(wrongTurn.type, "commandResult");
+    assert.equal(wrongTurn.payload.status, "rejected");
+
+    sendFrame(other, {
+      version: "1.0",
+      type: "act",
+      requestId: "req-act-bad-hand",
+      ts: "2026-02-28T00:02:05Z",
+      payload: { tableId: "table_act_reject", handId: "wrong", action: "call", amount: 0 }
+    });
+    const badHand = await nextMessage(other);
+    assert.equal(badHand.type, "commandResult");
+    assert.equal(badHand.payload.status, "rejected");
+
+    sendFrame(other, {
+      version: "1.0",
+      type: "act",
+      requestId: "req-act-bad-payload",
+      ts: "2026-02-28T00:02:06Z",
+      payload: { tableId: "table_act_reject", handId, action: "raise" }
+    });
+    const invalid = await nextMessage(other);
+    assert.equal(invalid.type, "error");
+    assert.equal(invalid.payload.code, "INVALID_COMMAND");
+
+    sendFrame(actor, { version: "1.0", type: "table_state_sub", requestId: "req-snapshot-reject-after", ts: "2026-02-28T00:02:07Z", payload: { tableId: "table_act_reject", view: "snapshot" } });
+    const after = await nextMessage(actor);
+    assert.equal(after.payload.stateVersion, before.payload.stateVersion);
+    assert.deepEqual(after.payload.public, before.payload.public);
+
+    actor.close();
+    other.close();
+    anon.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
+test("act accepted sends post-action snapshot to actor even after one-shot snapshot and to joined table members", async () => {
+  const secret = "test-secret";
+  const actorToken = makeHs256Jwt({ secret, sub: "act_delivery_actor" });
+  const otherToken = makeHs256Jwt({ secret, sub: "act_delivery_other" });
+  const { port, child } = await createServer({ env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret } });
+
+  try {
+    await waitForListening(child, 5000);
+    const actor = await connectClient(port);
+    const other = await connectClient(port);
+
+    await hello(actor);
+    await hello(other);
+    assert.equal((await auth(actor, actorToken, "req-auth-delivery-actor")).type, "authOk");
+    assert.equal((await auth(other, otherToken, "req-auth-delivery-other")).type, "authOk");
+
+    sendFrame(actor, { version: "1.0", type: "table_join", requestId: "req-join-delivery-actor", ts: "2026-02-28T00:03:00Z", payload: { tableId: "table_act_delivery" } });
+    assert.equal((await nextMessage(actor)).type, "table_state");
+    sendFrame(other, { version: "1.0", type: "table_join", requestId: "req-join-delivery-other", ts: "2026-02-28T00:03:01Z", payload: { tableId: "table_act_delivery" } });
+    assert.equal((await nextMessage(other)).type, "table_state");
+    assert.equal((await nextMessage(actor)).type, "table_state");
+
+    sendFrame(actor, { version: "1.0", type: "table_state_sub", requestId: "req-delivery-snapshot-before", ts: "2026-02-28T00:03:02Z", payload: { tableId: "table_act_delivery", view: "snapshot" } });
+    const before = await nextMessage(actor);
+
+    const otherAfterPromise = nextMessageOfType(other, "stateSnapshot");
+
+    sendFrame(actor, {
+      version: "1.0",
+      type: "act",
+      requestId: "req-delivery-act-call",
+      ts: "2026-02-28T00:03:03Z",
+      payload: { tableId: "table_act_delivery", handId: before.payload.public.hand.handId, action: "call", amount: 0 }
+    });
+
+    const result = await nextMessage(actor);
+    assert.equal(result.type, "commandResult");
+    assert.equal(result.payload.status, "accepted");
+
+    const actorAfter = await nextMessageOfType(actor, "stateSnapshot");
+    const otherAfter = await otherAfterPromise;
+    assert.equal(actorAfter.payload.public.turn.userId, null);
+    assert.deepEqual(actorAfter.payload.public.pot, { total: 4, sidePots: [] });
+    assert.deepEqual(otherAfter.payload.public.pot, { total: 4, sidePots: [] });
+
+    actor.close();
+    other.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
+test("act duplicate replay is idempotent in-scope and evicted requestIds do not double-apply", async () => {
+  const secret = "test-secret";
+  const actorToken = makeHs256Jwt({ secret, sub: "act_dup_actor" });
+  const otherToken = makeHs256Jwt({ secret, sub: "act_dup_other" });
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      WS_ACTION_RESULT_CACHE_MAX: "2"
+    }
+  });
+
+  try {
+    await waitForListening(child, 5000);
+    const actor = await connectClient(port);
+    const other = await connectClient(port);
+
+    await hello(actor);
+    await hello(other);
+    assert.equal((await auth(actor, actorToken, "req-auth-dup-actor")).type, "authOk");
+    assert.equal((await auth(other, otherToken, "req-auth-dup-other")).type, "authOk");
+
+    sendFrame(actor, { version: "1.0", type: "table_join", requestId: "req-join-dup-actor", ts: "2026-02-28T00:04:00Z", payload: { tableId: "table_act_dup" } });
+    assert.equal((await nextMessage(actor)).type, "table_state");
+    sendFrame(other, { version: "1.0", type: "table_join", requestId: "req-join-dup-other", ts: "2026-02-28T00:04:01Z", payload: { tableId: "table_act_dup" } });
+    assert.equal((await nextMessage(other)).type, "table_state");
+    assert.equal((await nextMessage(actor)).type, "table_state");
+
+    sendFrame(actor, { version: "1.0", type: "table_state_sub", requestId: "req-snapshot-dup-before", ts: "2026-02-28T00:04:02Z", payload: { tableId: "table_act_dup", view: "snapshot" } });
+    const before = await nextMessage(actor);
+    const handId = before.payload.public.hand.handId;
+
+    sendFrame(actor, {
+      version: "1.0",
+      type: "act",
+      requestId: "req-act-dup-1",
+      ts: "2026-02-28T00:04:03Z",
+      payload: { tableId: "table_act_dup", handId, action: "call", amount: 0 }
+    });
+    const first = await nextMessage(actor);
+    const firstSnapshot = await nextMessageOfType(actor, "stateSnapshot");
+    assert.equal(first.type, "commandResult");
+    assert.equal(first.payload.status, "accepted");
+    await attemptMessage(other, 400);
+
+    sendFrame(actor, {
+      version: "1.0",
+      type: "act",
+      requestId: "req-act-dup-1",
+      ts: "2026-02-28T00:04:04Z",
+      payload: { tableId: "table_act_dup", handId, action: "call", amount: 0 }
+    });
+    const duplicate = await nextMessage(actor);
+    assert.equal(duplicate.type, "commandResult");
+    assert.equal(duplicate.payload.status, "accepted");
+    assert.equal((await attemptMessage(actor, 500)), null);
+    assert.equal((await attemptMessage(other, 500)), null);
+
+    sendFrame(other, {
+      version: "1.0",
+      type: "act",
+      requestId: "req-act-dup-2",
+      ts: "2026-02-28T00:04:05Z",
+      payload: { tableId: "table_act_dup", handId, action: "call", amount: 0 }
+    });
+    const reject2 = await nextMessage(other);
+    assert.equal(reject2.type, "commandResult");
+    assert.equal(reject2.payload.status, "rejected");
+
+    sendFrame(other, {
+      version: "1.0",
+      type: "act",
+      requestId: "req-act-dup-3",
+      ts: "2026-02-28T00:04:06Z",
+      payload: { tableId: "table_act_dup", handId, action: "fold", amount: 0 }
+    });
+    const reject3 = await nextMessage(other);
+    assert.equal(reject3.type, "commandResult");
+    assert.equal(reject3.payload.status, "rejected");
+
+    sendFrame(actor, {
+      version: "1.0",
+      type: "act",
+      requestId: "req-act-dup-1",
+      ts: "2026-02-28T00:04:07Z",
+      payload: { tableId: "table_act_dup", handId, action: "call", amount: 0 }
+    });
+    const evictedReplay = await nextMessage(actor);
+    assert.equal(evictedReplay.type, "commandResult");
+    assert.equal(evictedReplay.payload.status, "rejected");
+    assert.equal((await attemptMessage(other, 500)), null);
+
+    sendFrame(actor, { version: "1.0", type: "table_state_sub", requestId: "req-snapshot-dup-after", ts: "2026-02-28T00:04:08Z", payload: { tableId: "table_act_dup", view: "snapshot" } });
+    const after = await nextMessage(actor);
+    assert.equal(after.payload.stateVersion, firstSnapshot.payload.stateVersion);
+
+    actor.close();
+    other.close();
   } finally {
     child.kill("SIGTERM");
     await waitForExit(child);

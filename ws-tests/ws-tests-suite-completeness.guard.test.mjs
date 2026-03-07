@@ -11,6 +11,13 @@ const REQUIRED_PR8_WS_SERVER_BEHAVIOR_TESTS = [
   "ws-server/poker/shared/poker-primitives.behavior.test.mjs"
 ];
 
+const REQUIRED_PR9_WS_SERVER_BEHAVIOR_TESTS = [
+  "ws-server/server.behavior.test.mjs",
+  "ws-server/poker/table/table-manager.behavior.test.mjs",
+  "ws-server/poker/shared/poker-action-reducer.behavior.test.mjs",
+  "ws-server/poker/read-model/state-snapshot.behavior.test.mjs"
+];
+
 const EXCLUDED_FROM_PR = new Set([
   "ws-tests/ws-deploy-workflow.test.mjs",
   "ws-tests/ws-lockfile-integrity.test.mjs",
@@ -102,5 +109,16 @@ test("PR8 WS-server behavior tests are wired in both PR and deploy workflows", (
     const command = `node --test ${file}`;
     assert.ok(prWorkflow.includes(command), `Missing PR8 WS-server test in PR workflow: ${file}`);
     assert.ok(deployWorkflow.includes(command), `Missing PR8 WS-server test in deploy workflow: ${file}`);
+  }
+});
+
+test("PR9 WS-server behavior tests are wired in both PR and deploy workflows", () => {
+  const prWorkflow = workflowText(".github/workflows/ws-pr-checks.yml");
+  const deployWorkflow = workflowText(".github/workflows/ws-deploy.yml");
+
+  for (const file of REQUIRED_PR9_WS_SERVER_BEHAVIOR_TESTS) {
+    const command = `node --test ${file}`;
+    assert.ok(prWorkflow.includes(command), `Missing PR9 WS-server test in PR workflow: ${file}`);
+    assert.ok(deployWorkflow.includes(command), `Missing PR9 WS-server test in deploy workflow: ${file}`);
   }
 });
