@@ -55,6 +55,7 @@ test("ws poker protocol document defines canonical stateSnapshot payload fields"
   assert.match(text, /"hand"\s*:\s*\{\s*"handId"\s*:\s*null\s*,\s*"status"\s*:\s*"LOBBY"/);
   assert.match(text, /"board"\s*:\s*\{\s*"cards"\s*:\s*\[\s*\]/);
   assert.match(text, /"pot"\s*:\s*\{\s*"total"\s*:\s*0/);
+  assert.match(text, /"turn"\s*:\s*\{\s*"userId"\s*:\s*"[^"]+"\s*,\s*"seat"\s*:\s*\d+\s*,\s*"startedAt"\s*:\s*null\s*,\s*"deadlineAt"\s*:\s*null\s*\}/s);
   assert.match(text, /"private"\s*:\s*\{[\s\S]*"holeCards"\s*:\s*\[/);
 });
 
@@ -156,4 +157,13 @@ test("ws poker protocol document describes PR11 terminal settled hand snapshot d
   assert.match(text, /`public\.showdown`/);
   assert.match(text, /`public\.handSettlement`/);
   assert.match(text, /Settled hands are no longer live\/actionable/);
+});
+
+
+test("ws poker protocol document describes PR14 turn timer snapshot delta", () => {
+  const text = docText();
+  assert.match(text, /PR14 contract delta/);
+  assert.match(text, /`stateSnapshot\.payload\.public\.turn` now includes additive authoritative timer metadata/);
+  assert.match(text, /`startedAt` and `deadlineAt`/);
+  assert.match(text, /For non-live\/no-turn\/terminal states, both fields resolve to `null`/);
 });

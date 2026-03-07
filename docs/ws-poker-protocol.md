@@ -160,7 +160,7 @@ Canonical room-core fields in `payload.public`:
 - `payload.public.hand: { handId: string|null, status: string|null, round: string|null }`
 - `payload.public.board: { cards: string[] }`
 - `payload.public.pot: { total: number, sidePots: any[] }`
-- `payload.public.turn: { userId: string|null, seat: number|null }`
+- `payload.public.turn: { userId: string|null, seat: number|null, startedAt: number|null, deadlineAt: number|null }`
 - `payload.public.legalActions: { seat: number|null, actions: string[] }`
 - `payload.public.showdown?: { winners: string[], potsAwarded: any[], potAwardedTotal: number, reason: string|null, handId: string|null }`
 - `payload.public.handSettlement?: { handId: string|null, settledAt: string|null, payouts: Record<string, number> }`
@@ -181,6 +181,8 @@ PR8 contract delta: when WS room-core has bootstrapped a live initial hand, `sta
 PR9 contract delta: WS `act` is supported for initial PREFLOP scope (`fold`/`check`/`call`/`bet`/`raise`). Successful or rejected domain outcomes are emitted as `commandResult` (`status = "accepted"|"rejected"`) and malformed payloads still use `error.code = "INVALID_COMMAND"`. On accepted fresh `act`, server emits fresh post-action `stateSnapshot` to the acting connection and currently connected table-associated sockets (joined or subscribed for that table). Idempotent accepted replay returns accepted command semantics but does not trigger a new post-action snapshot fanout wave. Post-action `stateSnapshot` projection preserves existing private scoping guarantees.
 
 PR11 contract delta: a WS-owned hand can settle terminally after fold-win or river-complete showdown. Terminal snapshots use `public.hand.status = "SETTLED"`, `public.turn.userId = null`, and `public.pot.total = 0`. Runtime may include additive `public.showdown` and `public.handSettlement` metadata. Settled hands are no longer live/actionable; fresh `act` requests for the settled hand are rejected while replayed identical accepted requests remain idempotent.
+
+PR14 contract delta: `stateSnapshot.payload.public.turn` now includes additive authoritative timer metadata: `startedAt` and `deadlineAt` (epoch milliseconds). These fields are server-projected from WS-owned hand state for live turns so clients can render countdowns without inferring timing from client clocks. For non-live/no-turn/terminal states, both fields resolve to `null`. Timer metadata is public and does not change timeout authority or private-state visibility.
 
 Example `stateSnapshot` frame:
 
@@ -213,7 +215,7 @@ Example `stateSnapshot` frame:
       "hand": { "handId": null, "status": "LOBBY", "round": null },
       "board": { "cards": [] },
       "pot": { "total": 0, "sidePots": [] },
-      "turn": { "userId": "user_1", "seat": 1 },
+      "turn": { "userId": "user_1", "seat": 1, "startedAt": null, "deadlineAt": null },
       "legalActions": { "seat": null, "actions": [] }
     },
     "private": {
