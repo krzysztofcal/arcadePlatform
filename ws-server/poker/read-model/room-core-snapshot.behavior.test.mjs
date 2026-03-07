@@ -137,3 +137,44 @@ test("projectRoomCoreSnapshot projects settled showdown fields without leaking p
   assert.equal(observer.showdown.potsAwarded[0].eligibleUserIds.includes("seated_user"), true);
   assert.deepEqual(seated.private, { userId: "seated_user", seat: 1, holeCards: ["AH", "AD"] });
 });
+
+test("projectRoomCoreSnapshot omits terminal fields for fresh next-hand PREFLOP state", () => {
+  const coreState = {
+    seats: { seated_user: 1, other_user: 2 },
+    pokerState: {
+      roomId: "table_next_hand",
+      handId: "hand_next_2",
+      phase: "PREFLOP",
+      turnUserId: "seated_user",
+      community: [],
+      potTotal: 3,
+      sidePots: [],
+      toCallByUserId: { seated_user: 1, other_user: 0 },
+      betThisRoundByUserId: { seated_user: 1, other_user: 2 },
+      currentBet: 2,
+      stacks: { seated_user: 99, other_user: 98 },
+      foldedByUserId: { seated_user: false, other_user: false },
+      holeCardsByUserId: { seated_user: ["AS", "KD"], other_user: ["2C", "2D"] },
+      handSeed: "sensitive_new_seed",
+      deck: ["3H"]
+    }
+  };
+
+  const snapshot = projectRoomCoreSnapshot({
+    tableId: "table_next_hand",
+    roomId: "table_next_hand",
+    coreState,
+    members: [
+      { userId: "seated_user", seat: 1 },
+      { userId: "other_user", seat: 2 }
+    ],
+    userId: "seated_user",
+    youSeat: 1
+  });
+
+  assert.equal(snapshot.hand.status, "PREFLOP");
+  assert.deepEqual(snapshot.board.cards, []);
+  assert.equal("showdown" in snapshot, false);
+  assert.equal("handSettlement" in snapshot, false);
+  assert.deepEqual(snapshot.private, { userId: "seated_user", seat: 1, holeCards: ["AS", "KD"] });
+});

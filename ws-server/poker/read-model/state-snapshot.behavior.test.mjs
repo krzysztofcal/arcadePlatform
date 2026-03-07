@@ -153,3 +153,32 @@ test("buildStateSnapshotPayload includes terminal showdown/settlement fields whe
   assert.deepEqual(payload.public.handSettlement.payouts, { user_a: 5 });
   assert.deepEqual(payload.private, { userId: "user_a", seat: 1, holeCards: ["AS", "AD"] });
 });
+
+test("buildStateSnapshotPayload serializes fresh next hand without stale terminal fields", () => {
+  const payload = buildStateSnapshotPayload({
+    userId: "user_a",
+    tableSnapshot: {
+      tableId: "table_next_hand",
+      roomId: "table_next_hand",
+      stateVersion: 11,
+      members: [
+        { userId: "user_a", seat: 1 },
+        { userId: "user_b", seat: 2 }
+      ],
+      memberCount: 2,
+      youSeat: 1,
+      hand: { handId: "h_next", status: "PREFLOP", round: "PREFLOP" },
+      board: { cards: [] },
+      pot: { total: 3, sidePots: [] },
+      turn: { userId: "user_a", seat: 1 },
+      legalActions: { seat: 1, actions: ["FOLD", "CALL", "RAISE"] },
+      private: { holeCards: ["AS", "AD"] }
+    }
+  });
+
+  assert.equal(payload.public.hand.status, "PREFLOP");
+  assert.deepEqual(payload.public.board.cards, []);
+  assert.equal("showdown" in payload.public, false);
+  assert.equal("handSettlement" in payload.public, false);
+  assert.deepEqual(payload.private.holeCards, ["AS", "AD"]);
+});

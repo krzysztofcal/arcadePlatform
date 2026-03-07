@@ -1366,7 +1366,7 @@ test("first postflop CHECK keeps same FLOP street and passes turn", async () => 
   }
 });
 
-test("river-closing WS action settles hand and rejects fresh post-settlement act", async () => {
+test("river-closing WS action auto-advances to next PREFLOP hand and replay is idempotent", async () => {
   const secret = "test-secret";
   const actorToken = makeHs256Jwt({ secret, sub: "river_close_actor" });
   const otherToken = makeHs256Jwt({ secret, sub: "river_close_other" });
@@ -1419,12 +1419,14 @@ test("river-closing WS action settles hand and rejects fresh post-settlement act
     assert.equal(snap.payload.public.turn.userId, "river_close_actor");
 
     const [finalSnap] = await act(actor, "req-river-river-2", "check");
-    assert.equal(finalSnap.payload.public.hand.status, "SETTLED");
-    assert.equal(finalSnap.payload.public.turn.userId, null);
-    assert.equal(finalSnap.payload.public.pot.total, 0);
-    assert.equal(Array.isArray(finalSnap.payload.public.showdown?.winners), true);
-    const settledAt = finalSnap.payload.public.handSettlement?.settledAt;
-    assert.equal(typeof settledAt, "string");
+    assert.equal(finalSnap.payload.public.hand.status, "PREFLOP");
+    assert.equal(finalSnap.payload.public.board.cards.length, 0);
+    assert.equal(finalSnap.payload.public.pot.total, 3);
+    assert.equal(typeof finalSnap.payload.public.turn.userId, "string");
+    assert.equal("showdown" in finalSnap.payload.public, false);
+    assert.equal("handSettlement" in finalSnap.payload.public, false);
+    const nextHandId = finalSnap.payload.public.hand.handId;
+    assert.equal(typeof nextHandId, "string");
 
     sendFrame(actor, {
       version: "1.0",
@@ -1439,7 +1441,8 @@ test("river-closing WS action settles hand and rejects fresh post-settlement act
 
     sendFrame(actor, { version: "1.0", type: "table_state_sub", requestId: "req-river-snapshot-after-replay", ts: "2026-02-28T00:06:05Z", payload: { tableId: "table_river_close", view: "snapshot" } });
     const afterReplaySnapshot = await nextMessageOfType(actor, "stateSnapshot");
-    assert.equal(afterReplaySnapshot.payload.public.handSettlement?.settledAt, settledAt);
+    assert.equal(afterReplaySnapshot.payload.public.hand.handId, nextHandId);
+    assert.equal(afterReplaySnapshot.payload.public.hand.status, "PREFLOP");
 
     sendFrame(other, {
       version: "1.0",
@@ -1450,6 +1453,7 @@ test("river-closing WS action settles hand and rejects fresh post-settlement act
     });
     const rejected = await nextMessageOfType(other, "commandResult");
     assert.equal(rejected.payload.status, "rejected");
+    assert.equal(rejected.payload.reason, "hand_mismatch");
 
     assert.equal((await attemptMessage(actor, 500)), null);
     assert.equal((await attemptMessage(other, 500)), null);
