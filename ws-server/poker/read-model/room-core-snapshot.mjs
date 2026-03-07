@@ -51,6 +51,36 @@ function resolveRoundFromPhase(phase) {
   return null;
 }
 
+function normalizeShowdown(showdown) {
+  if (!showdown || typeof showdown !== "object" || Array.isArray(showdown)) {
+    return null;
+  }
+  return {
+    winners: Array.isArray(showdown.winners) ? showdown.winners.filter((userId) => typeof userId === "string") : [],
+    potsAwarded: Array.isArray(showdown.potsAwarded) ? showdown.potsAwarded : [],
+    potAwardedTotal: Number.isFinite(showdown.potAwardedTotal)
+      ? showdown.potAwardedTotal
+      : Number.isFinite(showdown.potAwarded)
+        ? showdown.potAwarded
+        : 0,
+    reason: typeof showdown.reason === "string" ? showdown.reason : null,
+    handId: typeof showdown.handId === "string" ? showdown.handId : null
+  };
+}
+
+function normalizeHandSettlement(handSettlement) {
+  if (!handSettlement || typeof handSettlement !== "object" || Array.isArray(handSettlement)) {
+    return null;
+  }
+  return {
+    handId: typeof handSettlement.handId === "string" ? handSettlement.handId : null,
+    settledAt: typeof handSettlement.settledAt === "string" ? handSettlement.settledAt : null,
+    payouts: handSettlement.payouts && typeof handSettlement.payouts === "object" && !Array.isArray(handSettlement.payouts)
+      ? handSettlement.payouts
+      : {}
+  };
+}
+
 function resolvePrivateBranch({ state, userId, youSeat }) {
   if (!Number.isInteger(youSeat)) {
     return null;
@@ -106,7 +136,7 @@ export function projectRoomCoreSnapshot({ tableId, roomId, coreState, members, u
   const turnSeat = Number.isInteger(seatByUserId[turnUserId]) ? seatByUserId[turnUserId] : null;
   const legalInfo = computeSharedLegalActions({ statePublic, userId });
 
-  return {
+  const snapshot = {
     roomId: typeof statePublic.roomId === "string" ? statePublic.roomId : roomId || tableId,
     hand: {
       handId: typeof statePublic.handId === "string" && statePublic.handId.trim() ? statePublic.handId : null,
@@ -130,4 +160,16 @@ export function projectRoomCoreSnapshot({ tableId, roomId, coreState, members, u
     },
     private: resolvePrivateBranch({ state, userId, youSeat })
   };
+
+  const showdown = normalizeShowdown(statePublic.showdown);
+  if (showdown) {
+    snapshot.showdown = showdown;
+  }
+
+  const handSettlement = normalizeHandSettlement(statePublic.handSettlement);
+  if (handSettlement) {
+    snapshot.handSettlement = handSettlement;
+  }
+
+  return snapshot;
 }

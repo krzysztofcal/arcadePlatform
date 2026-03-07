@@ -147,3 +147,13 @@ test("ws poker protocol document describes PR9 act accepted snapshot delivery sc
   assert.match(text, /On accepted fresh `act`, server emits fresh post-action `stateSnapshot` to the acting connection and currently connected table-associated sockets/);
   assert.match(text, /Idempotent accepted replay returns accepted command semantics but does not trigger a new post-action snapshot fanout wave/);
 });
+
+test("ws poker protocol document describes PR11 terminal settled hand snapshot delta", () => {
+  const text = docText();
+  assert.match(text, /PR11 contract delta/);
+  assert.match(text, /`public\.hand\.status = "SETTLED"`/);
+  assert.match(text, /`public\.pot\.total = 0`/);
+  assert.match(text, /`public\.showdown`/);
+  assert.match(text, /`public\.handSettlement`/);
+  assert.match(text, /Settled hands are no longer live\/actionable/);
+});

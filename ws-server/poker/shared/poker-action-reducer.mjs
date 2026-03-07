@@ -1,4 +1,7 @@
 import { computeSharedLegalActions } from "./poker-primitives.mjs";
+import { materializeShowdownAndPayout } from "./settlement/poker-materialize-showdown.mjs";
+import { awardPotsAtShowdown } from "./settlement/poker-payout.mjs";
+import { computeShowdown } from "./settlement/poker-showdown.mjs";
 
 const SUPPORTED_ACTIONS = new Set(["FOLD", "CHECK", "CALL", "BET", "RAISE"]);
 const NEXT_PHASE = {
@@ -34,9 +37,109 @@ function asStateCopy(state) {
     actedThisRoundByUserId: { ...(state.actedThisRoundByUserId || {}) },
     foldedByUserId: { ...(state.foldedByUserId || {}) },
     contributionsByUserId: { ...(state.contributionsByUserId || {}) },
+    sidePots: Array.isArray(state.sidePots) ? state.sidePots.slice() : [],
     community: Array.isArray(state.community) ? state.community.slice() : [],
     deck: Array.isArray(state.deck) ? state.deck.slice() : []
   };
+}
+
+function cardCodeToCard(cardCode) {
+  if (typeof cardCode !== "string") {
+    return null;
+  }
+  const code = cardCode.trim().toUpperCase();
+  if (!/^(10|[2-9TJQKA])[CDHS]$/.test(code)) {
+    return null;
+  }
+  const suit = code.slice(-1);
+  const rankCode = code.slice(0, -1);
+  const rank = rankCode === "A"
+    ? 14
+    : rankCode === "K"
+      ? 13
+      : rankCode === "Q"
+        ? 12
+        : rankCode === "J"
+          ? 11
+          : rankCode === "T"
+            ? 10
+            : Number(rankCode);
+  if (!Number.isInteger(rank) || rank < 2 || rank > 14) {
+    return null;
+  }
+  return { r: rank, s: suit };
+}
+
+function toShowdownHoleCardsByUserId(holeCardsByUserId) {
+  const entries = Object.entries(holeCardsByUserId || {});
+  const normalized = {};
+  for (const [userId, cards] of entries) {
+    if (typeof userId !== "string") {
+      continue;
+    }
+    if (!Array.isArray(cards)) {
+      continue;
+    }
+    const parsed = cards.map(cardCodeToCard);
+    if (parsed.length === 2 && parsed.every(Boolean)) {
+      normalized[userId] = parsed;
+    }
+  }
+  return normalized;
+}
+
+function seatUserIdsInOrder(state) {
+  return orderedSeats(state).map((seat) => seat.userId);
+}
+
+function eligibleUserIdsForSettlement(state) {
+  return seatUserIdsInOrder(state).filter((userId) => !state.foldedByUserId?.[userId]);
+}
+
+function settleHandState(state, nowIso) {
+  const handId = typeof state.handId === "string" ? state.handId : "";
+  if (!handId) {
+    return state;
+  }
+
+  const materialized = materializeShowdownAndPayout({
+    state: {
+      ...state,
+      pot: Number(state.potTotal ?? state.pot ?? 0),
+      community: (state.community || []).map(cardCodeToCard).filter(Boolean)
+    },
+    seatUserIdsInOrder: seatUserIdsInOrder(state),
+    holeCardsByUserId: toShowdownHoleCardsByUserId(state.holeCardsByUserId),
+    computeShowdown,
+    awardPotsAtShowdown,
+    nowIso
+  });
+
+  if (!materialized?.nextState || materialized.nextState === state) {
+    return state;
+  }
+
+  return {
+    ...state,
+    ...materialized.nextState,
+    phase: "SETTLED",
+    turnUserId: null,
+    turnStartedAt: null,
+    turnDeadlineAt: null,
+    community: Array.isArray(state.community) ? state.community.slice() : [],
+    holeCardsByUserId: { ...(state.holeCardsByUserId || {}) },
+    deck: Array.isArray(state.deck) ? state.deck.slice() : [],
+    potTotal: Number(materialized.nextState.pot ?? state.potTotal ?? 0),
+    sidePots: []
+  };
+}
+
+function shouldSettleByFold(state) {
+  return eligibleUserIdsForSettlement(state).length <= 1;
+}
+
+function shouldSettleAtShowdown(state) {
+  return state.phase === "RIVER" && isBettingClosed(state);
 }
 
 function orderedSeats(state) {
@@ -171,7 +274,7 @@ function advanceStreetIfClosed(state) {
   return true;
 }
 
-export function applyAction({ pokerState, userId, action, amount }) {
+export function applyAction({ pokerState, userId, action, amount, nowIso = "1970-01-01T00:00:00.000Z" }) {
   if (!pokerState || typeof pokerState !== "object" || Array.isArray(pokerState)) {
     return { ok: false, reason: "invalid_state" };
   }
@@ -245,6 +348,23 @@ export function applyAction({ pokerState, userId, action, amount }) {
   }
 
   recomputeToCall(nextState);
+
+  if (shouldSettleByFold(nextState)) {
+    return {
+      ok: true,
+      action: normalizedAction,
+      state: settleHandState(nextState, nowIso)
+    };
+  }
+
+  if (shouldSettleAtShowdown(nextState)) {
+    return {
+      ok: true,
+      action: normalizedAction,
+      state: settleHandState(nextState, nowIso)
+    };
+  }
+
   const closedRound = advanceStreetIfClosed(nextState);
   if (!closedRound) {
     nextState.turnUserId = resolveNextTurnUserId(nextState, userId);

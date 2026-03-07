@@ -116,3 +116,40 @@ test("buildStateSnapshotPayload projects bootstrapped PREFLOP state from table m
   });
   assert.equal(seatedPayload.table.memberCount, seatedPayload.table.members.length);
 });
+
+test("buildStateSnapshotPayload includes terminal showdown/settlement fields when present", () => {
+  const payload = buildStateSnapshotPayload({
+    userId: "user_a",
+    tableSnapshot: {
+      tableId: "table_terminal",
+      roomId: "table_terminal",
+      stateVersion: 10,
+      members: [{ userId: "user_a", seat: 1 }],
+      memberCount: 1,
+      youSeat: 1,
+      hand: { handId: "h_terminal", status: "SETTLED", round: null },
+      board: { cards: ["2H", "3H", "4H", "9C", "KD"] },
+      pot: { total: 0, sidePots: [] },
+      turn: { userId: null, seat: null },
+      legalActions: { seat: 1, actions: [] },
+      private: { holeCards: ["AS", "AD"] },
+      showdown: {
+        handId: "h_terminal",
+        winners: ["user_a"],
+        potsAwarded: [{ amount: 5, winners: ["user_a"] }],
+        potAwardedTotal: 5,
+        reason: "computed"
+      },
+      handSettlement: {
+        handId: "h_terminal",
+        settledAt: "2026-03-01T00:00:00.000Z",
+        payouts: { user_a: 5 }
+      }
+    }
+  });
+
+  assert.deepEqual(payload.public.showdown.winners, ["user_a"]);
+  assert.equal(payload.public.showdown.potAwardedTotal, 5);
+  assert.deepEqual(payload.public.handSettlement.payouts, { user_a: 5 });
+  assert.deepEqual(payload.private, { userId: "user_a", seat: 1, holeCards: ["AS", "AD"] });
+});
