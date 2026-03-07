@@ -793,3 +793,110 @@ test("next hand rotates dealer for heads-up and three-player tables", () => {
   assert.equal(nextRing.hand.status, "PREFLOP");
   assert.equal(nextRing.turn.userId, "user_b");
 });
+
+
+test("maybeApplyTurnTimeout applies deterministic action once for expired turn", () => {
+  const tableManager = createTableManager({ maxSeats: 4, enableDebugCore: true, nodeEnv: "test" });
+  const wsA = fakeWs("timeout-a");
+  const wsB = fakeWs("timeout-b");
+  const tableId = "table_timeout_once";
+  const fixedFutureMs = 9_000_000;
+
+  assert.equal(tableManager.join({ ws: wsA, userId: "user_a", tableId, requestId: "join-a", nowTs: 1 }).ok, true);
+  assert.equal(tableManager.join({ ws: wsB, userId: "user_b", tableId, requestId: "join-b", nowTs: 1 }).ok, true);
+
+  const started = tableManager.bootstrapHand(tableId, { nowMs: fixedFutureMs - 100_000 });
+  assert.equal(started.changed, true);
+
+  const before = tableManager.tableSnapshot(tableId, "user_a");
+  const timeoutResult = tableManager.maybeApplyTurnTimeout({ tableId, nowMs: fixedFutureMs });
+  const after = tableManager.tableSnapshot(tableId, "user_a");
+
+  assert.equal(timeoutResult.ok, true);
+  assert.equal(timeoutResult.changed, true);
+  assert.equal(timeoutResult.action, "FOLD");
+  assert.equal(after.stateVersion, before.stateVersion + 1);
+
+  const replay = tableManager.maybeApplyTurnTimeout({ tableId, nowMs: fixedFutureMs });
+  const afterReplay = tableManager.tableSnapshot(tableId, "user_a");
+  assert.equal(replay.changed, false);
+  assert.equal(afterReplay.stateVersion, after.stateVersion);
+});
+
+test("maybeApplyTurnTimeout does nothing when deadline is unexpired", () => {
+  const tableManager = createTableManager({ maxSeats: 4 });
+  const wsA = fakeWs("timeout-noop-a");
+  const wsB = fakeWs("timeout-noop-b");
+  const tableId = "table_timeout_noop";
+
+  assert.equal(tableManager.join({ ws: wsA, userId: "user_a", tableId, requestId: "join-a", nowTs: 1 }).ok, true);
+  assert.equal(tableManager.join({ ws: wsB, userId: "user_b", tableId, requestId: "join-b", nowTs: 1 }).ok, true);
+  assert.equal(tableManager.bootstrapHand(tableId).changed, true);
+
+  const before = tableManager.tableSnapshot(tableId, "user_a");
+  const result = tableManager.maybeApplyTurnTimeout({ tableId, nowMs: 0 });
+  const after = tableManager.tableSnapshot(tableId, "user_a");
+
+  assert.equal(result.ok, true);
+  assert.equal(result.changed, false);
+  assert.equal(after.stateVersion, before.stateVersion);
+});
+
+test("timeout progression can settle hand and auto-start next hand using supplied logical clock", () => {
+  const tableManager = createTableManager({ maxSeats: 4, enableDebugCore: true, nodeEnv: "test" });
+  const wsA = fakeWs("timeout-cycle-a");
+  const wsB = fakeWs("timeout-cycle-b");
+  const tableId = "table_timeout_cycle";
+  const fixedFutureMs = 7_000_000;
+
+  assert.equal(tableManager.join({ ws: wsA, userId: "user_a", tableId, requestId: "join-a", nowTs: 1 }).ok, true);
+  assert.equal(tableManager.join({ ws: wsB, userId: "user_b", tableId, requestId: "join-b", nowTs: 1 }).ok, true);
+
+  assert.equal(tableManager.bootstrapHand(tableId, { nowMs: fixedFutureMs - 50_000 }).changed, true);
+  const before = tableManager.tableSnapshot(tableId, "user_a");
+  const previousHandId = before.hand.handId;
+
+  const timeoutResult = tableManager.maybeApplyTurnTimeout({ tableId, nowMs: fixedFutureMs });
+  const after = tableManager.tableSnapshot(tableId, "user_a");
+  const livePokerState = tableManager.__debugPokerState(tableId);
+
+  assert.equal(timeoutResult.ok, true);
+  assert.equal(timeoutResult.changed, true);
+  assert.notEqual(after.hand.handId, previousHandId);
+  assert.equal(after.hand.status, "PREFLOP");
+  assert.equal(typeof after.turn.userId, "string");
+  assert.equal(livePokerState.turnStartedAt, fixedFutureMs);
+  assert.equal(livePokerState.turnDeadlineAt > fixedFutureMs, true);
+
+  const secondSweep = tableManager.maybeApplyTurnTimeout({ tableId, nowMs: fixedFutureMs });
+  assert.equal(secondSweep.changed, false);
+});
+
+
+test("applyAction resets turn deadline using supplied action clock", () => {
+  const tableManager = createTableManager({ maxSeats: 4, enableDebugCore: true, nodeEnv: "test" });
+  const wsA = fakeWs("action-clock-a");
+  const wsB = fakeWs("action-clock-b");
+  const tableId = "table_action_clock";
+  const actionNowMs = 5_555_000;
+
+  assert.equal(tableManager.join({ ws: wsA, userId: "user_a", tableId, requestId: "join-a", nowTs: 1 }).ok, true);
+  assert.equal(tableManager.join({ ws: wsB, userId: "user_b", tableId, requestId: "join-b", nowTs: 1 }).ok, true);
+  assert.equal(tableManager.bootstrapHand(tableId, { nowMs: actionNowMs - 1_000 }).changed, true);
+
+  const before = tableManager.tableSnapshot(tableId, "user_a");
+  const acted = tableManager.applyAction({
+    tableId,
+    handId: before.hand.handId,
+    userId: before.turn.userId,
+    requestId: "act-clock",
+    action: "FOLD",
+    amount: 0,
+    nowMs: actionNowMs
+  });
+
+  assert.equal(acted.accepted, true);
+  const livePokerState = tableManager.__debugPokerState(tableId);
+  assert.equal(livePokerState.turnStartedAt, actionNowMs);
+  assert.equal(livePokerState.turnDeadlineAt > actionNowMs, true);
+});

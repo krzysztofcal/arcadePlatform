@@ -7,6 +7,7 @@ import {
   toCardCodes
 } from "../shared/poker-primitives.mjs";
 import { applyAction as applyPokerAction } from "../shared/poker-action-reducer.mjs";
+import { decideTurnTimeout, stampTurnDeadline } from "../shared/poker-turn-timeout.mjs";
 
 const DEFAULT_PRESENCE_TTL_MS = 10_000;
 const DEFAULT_MAX_SEATS = 10;
@@ -126,7 +127,9 @@ function buildBootstrappedPokerState({ tableId, coreState, dealerSeatNo = null, 
     foldedByUserId,
     contributionsByUserId,
     holeCardsByUserId: toHoleCardCodeMap(dealt.holeCardsByUserId),
-    deck: toCardCodes(dealt.deck)
+    deck: toCardCodes(dealt.deck),
+    turnStartedAt: null,
+    turnDeadlineAt: null
   };
 }
 
@@ -230,6 +233,13 @@ export function createTableManager({
     return `${userId}:${requestId}`;
   }
 
+  function resolveNowMs({ nowMs }) {
+    if (Number.isFinite(nowMs)) {
+      return Math.trunc(nowMs);
+    }
+    return Date.now();
+  }
+
   function asReplayedResult(result) {
     const { userId: _ignoredUserId, ...rest } = result || {};
     return {
@@ -325,7 +335,7 @@ export function createTableManager({
     };
   }
 
-  function bootstrapHand(tableId) {
+  function bootstrapHand(tableId, { nowMs } = {}) {
     const table = tables.get(tableId);
     if (!table) {
       return { ok: false, code: "table_missing", bootstrap: "table_missing" };
@@ -342,10 +352,12 @@ export function createTableManager({
       };
     }
 
-    const nextPokerState = buildBootstrappedPokerState({ tableId, coreState: table.coreState });
-    if (!nextPokerState) {
+    const bootstrappedState = buildBootstrappedPokerState({ tableId, coreState: table.coreState });
+    if (!bootstrappedState) {
       return { ok: true, changed: false, bootstrap: "not_eligible", stateVersion: table.coreState.version };
     }
+
+    const nextPokerState = stampTurnDeadline(bootstrappedState, resolveNowMs({ nowMs }));
 
     table.coreState = {
       ...table.coreState,
@@ -362,7 +374,7 @@ export function createTableManager({
     };
   }
 
-  function applyAction({ tableId, handId, userId, requestId, action, amount, nowIso }) {
+  function applyAction({ tableId, handId, userId, requestId, action, amount, nowIso, nowMs }) {
     const table = tables.get(tableId);
     if (!table) {
       return rejectAction({ reason: "table_not_found", stateVersion: 0 });
@@ -407,8 +419,9 @@ export function createTableManager({
       return rejected;
     }
 
+    const actionNowMs = resolveNowMs({ nowMs });
     const nextVersion = table.coreState.version + 1;
-    const nextPokerState = applied.state?.phase === "SETTLED"
+    const rawNextPokerState = applied.state?.phase === "SETTLED"
       ? buildNextHandStateFromSettled({
           tableId,
           coreState: table.coreState,
@@ -416,6 +429,7 @@ export function createTableManager({
           nextVersion
         }) || applied.state
       : applied.state;
+    const nextPokerState = stampTurnDeadline(rawNextPokerState, actionNowMs);
 
     table.coreState = {
       ...table.coreState,
@@ -437,6 +451,93 @@ export function createTableManager({
     rememberActionResult(table, requestId, { ...accepted, userId });
 
     return accepted;
+  }
+
+  function timeoutRequestId({ tableId, pokerState }) {
+    const handId = typeof pokerState?.handId === "string" && pokerState.handId.trim() ? pokerState.handId.trim() : "unknown";
+    const actor = typeof pokerState?.turnUserId === "string" && pokerState.turnUserId.trim() ? pokerState.turnUserId.trim() : "unknown";
+    const phase = typeof pokerState?.phase === "string" ? pokerState.phase : "unknown";
+    const deadline = Number.isFinite(Number(pokerState?.turnDeadlineAt)) ? Math.trunc(Number(pokerState.turnDeadlineAt)) : -1;
+    return `timeout:${tableId}:${handId}:${phase}:${actor}:${deadline}`;
+  }
+
+  function maybeApplyTurnTimeout({ tableId, nowMs = Date.now() } = {}) {
+    const table = tables.get(tableId);
+    if (!table) {
+      return { ok: false, changed: false, reason: "table_not_found", stateVersion: 0 };
+    }
+
+    const liveState = asLiveHandState(table.coreState?.pokerState);
+    if (!liveState) {
+      return { ok: true, changed: false, reason: "hand_not_live", stateVersion: table.coreState.version };
+    }
+
+    const decision = decideTurnTimeout({ pokerState: liveState, nowMs });
+    if (!decision.due) {
+      return { ok: true, changed: false, reason: decision.reason, stateVersion: table.coreState.version };
+    }
+
+    const requestId = timeoutRequestId({ tableId, pokerState: liveState });
+    const replayKey = makeActionReplayKey({ userId: decision.actorUserId, requestId });
+    if (replayKey && table.actionResultsByRequestId.has(replayKey)) {
+      return {
+        ok: true,
+        changed: false,
+        replayed: true,
+        reason: "already_applied",
+        stateVersion: table.coreState.version
+      };
+    }
+
+    const applied = applyAction({
+      tableId,
+      handId: liveState.handId,
+      userId: decision.actorUserId,
+      requestId,
+      action: decision.action.type,
+      amount: null,
+      nowIso: new Date(nowMs).toISOString(),
+      nowMs
+    });
+
+    if (!applied.accepted) {
+      rememberActionResult(table, requestId, {
+        ok: true,
+        accepted: false,
+        changed: false,
+        replayed: false,
+        reason: applied.reason || "timeout_rejected",
+        stateVersion: table.coreState.version,
+        userId: decision.actorUserId
+      });
+      return {
+        ok: true,
+        changed: false,
+        reason: applied.reason || "timeout_rejected",
+        stateVersion: table.coreState.version
+      };
+    }
+
+    return {
+      ok: true,
+      changed: true,
+      replayed: false,
+      requestId,
+      action: decision.action.type,
+      actorUserId: decision.actorUserId,
+      stateVersion: applied.stateVersion
+    };
+  }
+
+  function sweepTurnTimeouts({ nowMs = Date.now() } = {}) {
+    const updates = [];
+    for (const [tableId] of tables.entries()) {
+      const timeoutResult = maybeApplyTurnTimeout({ tableId, nowMs });
+      if (timeoutResult.ok && timeoutResult.changed) {
+        updates.push({ tableId, stateVersion: timeoutResult.stateVersion });
+      }
+    }
+    return updates;
   }
 
   function markConnected(member, nowMs) {
@@ -715,6 +816,19 @@ export function createTableManager({
   }
 
 
+  function __debugPokerState(tableId) {
+    const table = tables.get(tableId);
+    if (!table) {
+      return null;
+    }
+
+    if (!table.coreState?.pokerState || typeof table.coreState.pokerState !== "object") {
+      return null;
+    }
+
+    return { ...table.coreState.pokerState };
+  }
+
   function __debugCore(tableId) {
     const table = tables.get(tableId);
     if (!table) {
@@ -757,6 +871,8 @@ export function createTableManager({
     tableSnapshot,
     bootstrapHand,
     applyAction,
+    maybeApplyTurnTimeout,
+    sweepTurnTimeouts,
     cleanupConnection,
     orderedSubscribers,
     orderedConnectionsForTable,
@@ -765,6 +881,7 @@ export function createTableManager({
 
   if (enableDebugCore && nodeEnv !== "production") {
     manager.__debugCore = __debugCore;
+    manager.__debugPokerState = __debugPokerState;
   }
 
   return manager;

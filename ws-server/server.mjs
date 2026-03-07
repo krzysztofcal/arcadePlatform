@@ -311,12 +311,32 @@ function broadcastTableState(tableId, { excludeWs = null } = {}) {
 }
 
 
+function broadcastStateSnapshots(tableId) {
+  const recipients = tableManager.orderedConnectionsForTable(tableId, (socket) => socket.__connState?.sessionId ?? "");
+  for (const recipient of recipients) {
+    const recipientConnState = recipient.__connState;
+    if (!recipientConnState) {
+      continue;
+    }
+    const tableSnapshot = tableManager.tableSnapshot(tableId, recipientConnState.session.userId);
+    sendStateSnapshot(recipient, recipientConnState, { tableSnapshot });
+  }
+}
+
 function sweepAndBroadcastExpiredPresence() {
   const nowMs = Date.now();
   sessionStore.sweepExpiredSessions({ nowMs });
   const sweepUpdates = tableManager.sweepExpiredPresence({ nowTs: nowMs });
   for (const update of sweepUpdates) {
     broadcastTableState(update.tableId);
+  }
+}
+
+function sweepTurnTimeoutsAndBroadcast() {
+  const nowMs = Date.now();
+  const timeoutUpdates = tableManager.sweepTurnTimeouts({ nowMs });
+  for (const update of timeoutUpdates) {
+    broadcastStateSnapshots(update.tableId);
   }
 }
 const server = http.createServer((req, res) => {
@@ -339,6 +359,7 @@ wss.on("connection", (ws) => {
 
   ws.on("message", (msg, isBinary) => {
     sweepAndBroadcastExpiredPresence();
+    sweepTurnTimeoutsAndBroadcast();
     if (isBinary) {
       sendError(ws, connState, {
         code: "INVALID_ENVELOPE",
@@ -486,7 +507,7 @@ wss.on("connection", (ws) => {
 
       sendTableState(ws, connState, { requestId: frame.requestId ?? null, tableState: joined.tableState });
 
-      const bootstrapped = tableManager.bootstrapHand(tableId);
+      const bootstrapped = tableManager.bootstrapHand(tableId, { nowMs: Date.now() });
       if (joined.changed) {
         broadcastTableState(tableId, { excludeWs: ws });
       }
@@ -709,18 +730,7 @@ wss.on("connection", (ws) => {
       });
 
       if (result.accepted && !result.replayed) {
-        const recipients = tableManager.orderedConnectionsForTable(tableId, (socket) => socket.__connState?.sessionId ?? "");
-        if (!recipients.includes(ws)) {
-          recipients.push(ws);
-        }
-
-        for (const recipient of recipients) {
-          const recipientConnState = recipient.__connState;
-          if (recipientConnState) {
-            const tableSnapshot = tableManager.tableSnapshot(tableId, recipientConnState.session.userId);
-            sendStateSnapshot(recipient, recipientConnState, { tableSnapshot });
-          }
-        }
+        broadcastStateSnapshots(tableId);
       }
       return;
     }
@@ -766,6 +776,15 @@ wss.on("connection", (ws) => {
     sweepAndBroadcastExpiredPresence();
   });
 });
+
+
+const timeoutSweepIntervalMs = Number(process.env.WS_TIMEOUT_SWEEP_MS || 250);
+const timeoutSweepTimer = setInterval(() => {
+  sweepAndBroadcastExpiredPresence();
+  sweepTurnTimeoutsAndBroadcast();
+}, Number.isFinite(timeoutSweepIntervalMs) && timeoutSweepIntervalMs > 0 ? timeoutSweepIntervalMs : 250);
+
+timeoutSweepTimer.unref();
 
 server.listen(PORT, "0.0.0.0", () => {
   klogSafe("ws_listening", { message: `WS listening on ${PORT}`, port: PORT });

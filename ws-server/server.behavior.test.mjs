@@ -1465,3 +1465,103 @@ test("river-closing WS action auto-advances to next PREFLOP hand and replay is i
     await waitForExit(child);
   }
 });
+
+
+test("server applies due timeout and emits one updated stateSnapshot", async () => {
+  const secret = "timeout-secret";
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      WS_POKER_TURN_MS: "600",
+      WS_TIMEOUT_SWEEP_MS: "25"
+    }
+  });
+
+  try {
+    await waitForListening(child, 5000);
+
+    const wsA = await connectClient(port);
+    const wsB = await connectClient(port);
+    await hello(wsA);
+    await hello(wsB);
+
+    assert.equal((await auth(wsA, makeHs256Jwt({ secret, sub: "user_a" }), "auth-a")).type, "authOk");
+    assert.equal((await auth(wsB, makeHs256Jwt({ secret, sub: "user_b" }), "auth-b")).type, "authOk");
+
+    sendFrame(wsA, { version: "1.0", type: "table_join", requestId: "join-a", ts: "2026-02-28T00:00:02Z", payload: { tableId: "table_timeout_ws" } });
+    await nextMessageOfType(wsA, "table_state");
+
+    sendFrame(wsB, { version: "1.0", type: "table_join", requestId: "join-b", ts: "2026-02-28T00:00:03Z", payload: { tableId: "table_timeout_ws" } });
+    await nextMessageOfType(wsB, "table_state");
+    await nextMessageOfType(wsA, "table_state");
+
+    sendFrame(wsA, { version: "1.0", type: "table_state_sub", requestId: "snap-a", ts: "2026-02-28T00:00:04Z", payload: { tableId: "table_timeout_ws", view: "snapshot" } });
+    const baseA = await nextMessageOfType(wsA, "stateSnapshot");
+
+    sendFrame(wsB, { version: "1.0", type: "table_state_sub", requestId: "snap-b", ts: "2026-02-28T00:00:05Z", payload: { tableId: "table_timeout_ws", view: "snapshot" } });
+    const baseB = await nextMessageOfType(wsB, "stateSnapshot");
+
+    const timeoutA = await nextMessageOfType(wsA, "stateSnapshot", 4000);
+    const timeoutB = await nextMessageOfType(wsB, "stateSnapshot", 4000);
+
+    assert.equal(timeoutA.payload.stateVersion > baseA.payload.stateVersion, true);
+    assert.equal(timeoutB.payload.stateVersion > baseB.payload.stateVersion, true);
+    assert.equal(timeoutA.payload.private.userId, "user_a");
+    assert.equal(timeoutB.payload.private.userId, "user_b");
+    assert.equal(Array.isArray(timeoutA.payload.private.holeCards), true);
+    assert.equal(Array.isArray(timeoutB.payload.private.holeCards), true);
+    assert.equal(Object.prototype.hasOwnProperty.call(timeoutA.payload.public, "holeCardsByUserId"), false);
+
+
+    wsA.close();
+    wsB.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
+test("repeated timeout checks do not double-apply the same turn", async () => {
+  const secret = "timeout-secret";
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      WS_POKER_TURN_MS: "600",
+      WS_TIMEOUT_SWEEP_MS: "20"
+    }
+  });
+
+  try {
+    await waitForListening(child, 5000);
+
+    const wsA = await connectClient(port);
+    const wsB = await connectClient(port);
+    await hello(wsA);
+    await hello(wsB);
+    await auth(wsA, makeHs256Jwt({ secret, sub: "user_a" }), "auth-a");
+    await auth(wsB, makeHs256Jwt({ secret, sub: "user_b" }), "auth-b");
+
+    sendFrame(wsA, { version: "1.0", type: "table_join", requestId: "join-a", ts: "2026-02-28T00:00:02Z", payload: { tableId: "table_timeout_idempotent" } });
+    await nextMessageOfType(wsA, "table_state");
+    sendFrame(wsB, { version: "1.0", type: "table_join", requestId: "join-b", ts: "2026-02-28T00:00:03Z", payload: { tableId: "table_timeout_idempotent" } });
+    await nextMessageOfType(wsB, "table_state");
+    await nextMessageOfType(wsA, "table_state");
+
+    sendFrame(wsA, { version: "1.0", type: "table_state_sub", requestId: "snap-a", ts: "2026-02-28T00:00:04Z", payload: { tableId: "table_timeout_idempotent", view: "snapshot" } });
+    const base = await nextMessageOfType(wsA, "stateSnapshot");
+    const firstTimeout = await nextMessageOfType(wsA, "stateSnapshot", 4000);
+
+    assert.equal(firstTimeout.payload.stateVersion > base.payload.stateVersion, true);
+
+    const noDoubleApply = await attemptMessage(wsA, 200);
+    assert.equal(noDoubleApply, null);
+
+    wsA.close();
+    wsB.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
