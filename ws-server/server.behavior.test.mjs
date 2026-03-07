@@ -1366,7 +1366,7 @@ test("first postflop CHECK keeps same FLOP street and passes turn", async () => 
   }
 });
 
-test("river-closing WS action does not reopen a new turn", async () => {
+test("river-closing WS action settles hand and rejects fresh post-settlement act", async () => {
   const secret = "test-secret";
   const actorToken = makeHs256Jwt({ secret, sub: "river_close_actor" });
   const otherToken = makeHs256Jwt({ secret, sub: "river_close_other" });
@@ -1419,8 +1419,38 @@ test("river-closing WS action does not reopen a new turn", async () => {
     assert.equal(snap.payload.public.turn.userId, "river_close_actor");
 
     const [finalSnap] = await act(actor, "req-river-river-2", "check");
-    assert.equal(finalSnap.payload.public.hand.status, "RIVER");
+    assert.equal(finalSnap.payload.public.hand.status, "SETTLED");
     assert.equal(finalSnap.payload.public.turn.userId, null);
+    assert.equal(finalSnap.payload.public.pot.total, 0);
+    assert.equal(Array.isArray(finalSnap.payload.public.showdown?.winners), true);
+    const settledAt = finalSnap.payload.public.handSettlement?.settledAt;
+    assert.equal(typeof settledAt, "string");
+
+    sendFrame(actor, {
+      version: "1.0",
+      type: "act",
+      requestId: "req-river-river-2",
+      ts: "2026-02-28T00:06:04Z",
+      payload: { tableId: "table_river_close", handId, action: "check", amount: 0 }
+    });
+    const replay = await nextMessageOfType(actor, "commandResult");
+    assert.equal(replay.payload.status, "accepted");
+    assert.equal((await attemptMessage(actor, 500)), null);
+
+    sendFrame(actor, { version: "1.0", type: "table_state_sub", requestId: "req-river-snapshot-after-replay", ts: "2026-02-28T00:06:05Z", payload: { tableId: "table_river_close", view: "snapshot" } });
+    const afterReplaySnapshot = await nextMessageOfType(actor, "stateSnapshot");
+    assert.equal(afterReplaySnapshot.payload.public.handSettlement?.settledAt, settledAt);
+
+    sendFrame(other, {
+      version: "1.0",
+      type: "act",
+      requestId: "req-river-after-settled",
+      ts: "2026-02-28T00:06:06Z",
+      payload: { tableId: "table_river_close", handId, action: "check", amount: 0 }
+    });
+    const rejected = await nextMessageOfType(other, "commandResult");
+    assert.equal(rejected.payload.status, "rejected");
+
     assert.equal((await attemptMessage(actor, 500)), null);
     assert.equal((await attemptMessage(other, 500)), null);
 

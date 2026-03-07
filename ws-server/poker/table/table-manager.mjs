@@ -303,7 +303,7 @@ export function createTableManager({
     };
   }
 
-  function applyAction({ tableId, handId, userId, requestId, action, amount }) {
+  function applyAction({ tableId, handId, userId, requestId, action, amount, nowIso }) {
     const table = tables.get(tableId);
     if (!table) {
       return rejectAction({ reason: "table_not_found", stateVersion: 0 });
@@ -338,7 +338,8 @@ export function createTableManager({
       pokerState: liveState,
       userId,
       action,
-      amount
+      amount,
+      nowIso
     });
 
     if (!applied.ok) {

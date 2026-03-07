@@ -162,6 +162,8 @@ Canonical room-core fields in `payload.public`:
 - `payload.public.pot: { total: number, sidePots: any[] }`
 - `payload.public.turn: { userId: string|null, seat: number|null }`
 - `payload.public.legalActions: { seat: number|null, actions: string[] }`
+- `payload.public.showdown?: { winners: string[], potsAwarded: any[], potAwardedTotal: number, reason: string|null, handId: string|null }`
+- `payload.public.handSettlement?: { handId: string|null, settledAt: string|null, payouts: Record<string, number> }`
 
 Canonical compatibility fields:
 
@@ -177,6 +179,8 @@ Missing room-core data MUST fail safe to canonical defaults and never expose for
 PR8 contract delta: when WS room-core has bootstrapped a live initial hand, `stateSnapshot` may return `public.hand.status = "PREFLOP"` with live `public.turn`, `public.pot`, and per-user `public.legalActions`, while `payload.private.holeCards` is still emitted only for the authenticated seated user. This delta is limited to initial hand bootstrap/read-model projection and does **not** promise full WS `act` mutation support yet.
 
 PR9 contract delta: WS `act` is supported for initial PREFLOP scope (`fold`/`check`/`call`/`bet`/`raise`). Successful or rejected domain outcomes are emitted as `commandResult` (`status = "accepted"|"rejected"`) and malformed payloads still use `error.code = "INVALID_COMMAND"`. On accepted fresh `act`, server emits fresh post-action `stateSnapshot` to the acting connection and currently connected table-associated sockets (joined or subscribed for that table). Idempotent accepted replay returns accepted command semantics but does not trigger a new post-action snapshot fanout wave. Post-action `stateSnapshot` projection preserves existing private scoping guarantees.
+
+PR11 contract delta: a WS-owned hand can settle terminally after fold-win or river-complete showdown. Terminal snapshots use `public.hand.status = "SETTLED"`, `public.turn.userId = null`, and `public.pot.total = 0`. Runtime may include additive `public.showdown` and `public.handSettlement` metadata. Settled hands are no longer live/actionable; fresh `act` requests for the settled hand are rejected while replayed identical accepted requests remain idempotent.
 
 Example `stateSnapshot` frame:
 

@@ -77,3 +77,63 @@ test("projectRoomCoreSnapshot reuses poker legal-actions/public stripping semant
   assert.deepEqual(observer.legalActions, { seat: null, actions: [] });
   assert.equal(observer.private, null);
 });
+
+test("projectRoomCoreSnapshot projects settled showdown fields without leaking private cards", () => {
+  const coreState = {
+    seats: { seated_user: 1, other_user: 2 },
+    pokerState: {
+      roomId: "table_settled",
+      handId: "hand_settled_1",
+      phase: "SETTLED",
+      turnUserId: null,
+      community: ["2H", "3H", "4H", "9C", "KD"],
+      potTotal: 0,
+      sidePots: [],
+      showdown: {
+        handId: "hand_settled_1",
+        winners: ["other_user"],
+        potsAwarded: [{ amount: 6, winners: ["other_user"], eligibleUserIds: ["seated_user", "other_user"] }],
+        potAwardedTotal: 6,
+        reason: "computed"
+      },
+      handSettlement: {
+        handId: "hand_settled_1",
+        settledAt: "2026-03-01T00:00:00.000Z",
+        payouts: { other_user: 6 }
+      },
+      holeCardsByUserId: { seated_user: ["AH", "AD"], other_user: ["2C", "2D"] },
+      deck: []
+    }
+  };
+
+  const seated = projectRoomCoreSnapshot({
+    tableId: "table_settled",
+    roomId: "table_settled",
+    coreState,
+    members: [
+      { userId: "seated_user", seat: 1 },
+      { userId: "other_user", seat: 2 }
+    ],
+    userId: "seated_user",
+    youSeat: 1
+  });
+  const observer = projectRoomCoreSnapshot({
+    tableId: "table_settled",
+    roomId: "table_settled",
+    coreState,
+    members: [
+      { userId: "seated_user", seat: 1 },
+      { userId: "other_user", seat: 2 }
+    ],
+    userId: "observer",
+    youSeat: null
+  });
+
+  assert.equal(seated.hand.status, "SETTLED");
+  assert.equal(seated.pot.total, 0);
+  assert.deepEqual(seated.showdown.winners, ["other_user"]);
+  assert.deepEqual(seated.handSettlement.payouts, { other_user: 6 });
+  assert.equal(observer.private, null);
+  assert.equal(observer.showdown.potsAwarded[0].eligibleUserIds.includes("seated_user"), true);
+  assert.deepEqual(seated.private, { userId: "seated_user", seat: 1, holeCards: ["AH", "AD"] });
+});

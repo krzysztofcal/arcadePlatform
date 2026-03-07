@@ -633,7 +633,28 @@ test("first FLOP CHECK keeps FLOP and passes turn", () => {
   assert.equal(flopAfter.turn.userId, "user_a");
 });
 
-test("closing RIVER action keeps turn null and does not reopen action", () => {
+test("preflop fold-win settles snapshot and exposes zero-pot terminal hand", () => {
+  const tableManager = createTableManager({ maxSeats: 4 });
+  const wsA = fakeWs("fold-a");
+  const wsB = fakeWs("fold-b");
+  const tableId = "table_fold_settle";
+
+  assert.equal(tableManager.join({ ws: wsA, userId: "user_a", tableId, requestId: "join-a", nowTs: 1 }).ok, true);
+  assert.equal(tableManager.join({ ws: wsB, userId: "user_b", tableId, requestId: "join-b", nowTs: 1 }).ok, true);
+  assert.equal(tableManager.bootstrapHand(tableId).ok, true);
+
+  const pre = tableManager.tableSnapshot(tableId, "user_b");
+  const close = tableManager.applyAction({ tableId, handId: pre.hand.handId, userId: pre.turn.userId, requestId: "req-fold-close", action: "FOLD", amount: 0 });
+  const after = tableManager.tableSnapshot(tableId, "user_a");
+
+  assert.equal(close.accepted, true);
+  assert.equal(after.hand.status, "SETTLED");
+  assert.equal(after.turn.userId, null);
+  assert.equal(after.pot.total, 0);
+  assert.deepEqual(after.showdown.winners.length, 1);
+});
+
+test("closing RIVER action settles hand and rejects fresh post-settlement action", () => {
   const tableManager = createTableManager({ maxSeats: 4 });
   const wsA = fakeWs("river-a");
   const wsB = fakeWs("river-b");
@@ -660,7 +681,24 @@ test("closing RIVER action keeps turn null and does not reopen action", () => {
   const after = tableManager.tableSnapshot(tableId, "user_a");
 
   assert.equal(close.accepted, true);
-  assert.equal(after.hand.status, "RIVER");
+  assert.equal(after.hand.status, "SETTLED");
   assert.equal(after.turn.userId, null);
+  assert.equal(after.pot.total, 0);
   assert.deepEqual(after.legalActions.actions, []);
+  const settledAt = after.handSettlement.settledAt;
+  assert.equal(typeof settledAt, "string");
+
+  const replayClose = tableManager.applyAction({ tableId, handId: river.hand.handId, userId: "user_a", requestId: "req-river-check-2", action: "CHECK", amount: 0 });
+  assert.equal(replayClose.accepted, true);
+  assert.equal(replayClose.replayed, true);
+  assert.equal(replayClose.changed, false);
+  assert.equal(replayClose.stateVersion, close.stateVersion);
+
+  const afterReplay = tableManager.tableSnapshot(tableId, "user_a");
+  assert.equal(afterReplay.handSettlement.settledAt, settledAt);
+
+  const rejected = tableManager.applyAction({ tableId, handId: river.hand.handId, userId: "user_b", requestId: "req-river-check-3", action: "CHECK", amount: 0 });
+  assert.equal(rejected.accepted, false);
+  assert.equal(rejected.reason, "hand_not_live");
+  assert.equal(rejected.stateVersion, close.stateVersion);
 });

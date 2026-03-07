@@ -40,6 +40,36 @@ function normalizeActionList(actions) {
   return actions.filter((action) => typeof action === "string");
 }
 
+function normalizeShowdown(showdown) {
+  if (!showdown || typeof showdown !== "object" || Array.isArray(showdown)) {
+    return null;
+  }
+  return {
+    winners: Array.isArray(showdown.winners) ? showdown.winners.filter((userId) => typeof userId === "string") : [],
+    potsAwarded: Array.isArray(showdown.potsAwarded) ? showdown.potsAwarded : [],
+    potAwardedTotal: Number.isFinite(showdown.potAwardedTotal)
+      ? showdown.potAwardedTotal
+      : Number.isFinite(showdown.potAwarded)
+        ? showdown.potAwarded
+        : 0,
+    reason: typeof showdown.reason === "string" ? showdown.reason : null,
+    handId: typeof showdown.handId === "string" ? showdown.handId : null
+  };
+}
+
+function normalizeHandSettlement(handSettlement) {
+  if (!handSettlement || typeof handSettlement !== "object" || Array.isArray(handSettlement)) {
+    return null;
+  }
+  return {
+    handId: typeof handSettlement.handId === "string" ? handSettlement.handId : null,
+    settledAt: typeof handSettlement.settledAt === "string" ? handSettlement.settledAt : null,
+    payouts: handSettlement.payouts && typeof handSettlement.payouts === "object" && !Array.isArray(handSettlement.payouts)
+      ? handSettlement.payouts
+      : {}
+  };
+}
+
 function normalizePrivateBranch(privateBranch, { userId, youSeat }) {
   const base = { userId, seat: youSeat };
   if (!privateBranch || typeof privateBranch !== "object" || Array.isArray(privateBranch)) {
@@ -105,6 +135,16 @@ export function buildStateSnapshotPayload({ tableSnapshot, userId }) {
 
   if (youSeat !== null) {
     payload.private = normalizePrivateBranch(tableSnapshot?.private, { userId, youSeat });
+  }
+
+  const showdown = normalizeShowdown(tableSnapshot?.showdown);
+  if (showdown) {
+    payload.public.showdown = showdown;
+  }
+
+  const handSettlement = normalizeHandSettlement(tableSnapshot?.handSettlement);
+  if (handSettlement) {
+    payload.public.handSettlement = handSettlement;
   }
 
   return payload;

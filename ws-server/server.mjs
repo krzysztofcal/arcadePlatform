@@ -697,7 +697,8 @@ wss.on("connection", (ws) => {
         userId: connState.session.userId,
         requestId: frame.requestId,
         action,
-        amount
+        amount,
+        nowIso: frame.ts
       });
 
       sendCommandResult(ws, connState, {

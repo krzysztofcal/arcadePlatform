@@ -130,6 +130,9 @@ jobs:
       - name: Run ws room-core snapshot dependency guard test
         run: node --test ws-tests/ws-room-core-snapshot-dependency.guard.test.mjs
 
+      - name: Run ws terminal settlement runtime deps guard test
+        run: node --test ws-tests/ws-terminal-settlement-runtime-deps.guard.test.mjs
+
       - name: Run infra VPS workflow guard test
         run: node --test ws-tests/infra-vps-workflow.guard.test.mjs
 
