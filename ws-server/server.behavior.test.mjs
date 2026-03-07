@@ -867,6 +867,8 @@ test("snapshot view projects live bootstrapped PREFLOP hand for seated user and 
     assert.equal(typeof seatedSnapshot.payload.public.hand.handId, "string");
     assert.deepEqual(seatedSnapshot.payload.public.pot, { total: 3, sidePots: [] });
     assert.equal(seatedSnapshot.payload.public.turn.userId, "live_seated_user");
+    assert.equal(Number.isFinite(seatedSnapshot.payload.public.turn.startedAt), true);
+    assert.equal(Number.isFinite(seatedSnapshot.payload.public.turn.deadlineAt), true);
     assert.deepEqual(seatedSnapshot.payload.public.legalActions, { seat: 1, actions: ["FOLD", "CALL", "RAISE"] });
     assert.equal(Array.isArray(seatedSnapshot.payload.private?.holeCards), true);
     assert.equal(seatedSnapshot.payload.private.holeCards.length, 2);
@@ -1508,6 +1510,10 @@ test("server applies due timeout and emits one updated stateSnapshot", async () 
     assert.equal(timeoutA.payload.stateVersion > baseA.payload.stateVersion, true);
     assert.equal(timeoutB.payload.stateVersion > baseB.payload.stateVersion, true);
     assert.equal(timeoutA.payload.private.userId, "user_a");
+    assert.equal(Number.isFinite(timeoutA.payload.public.turn.startedAt), true);
+    assert.equal(Number.isFinite(timeoutA.payload.public.turn.deadlineAt), true);
+    assert.equal(timeoutA.payload.public.turn.startedAt, timeoutB.payload.public.turn.startedAt);
+    assert.equal(timeoutA.payload.public.turn.deadlineAt, timeoutB.payload.public.turn.deadlineAt);
     assert.equal(timeoutB.payload.private.userId, "user_b");
     assert.equal(Array.isArray(timeoutA.payload.private.holeCards), true);
     assert.equal(Array.isArray(timeoutB.payload.private.holeCards), true);

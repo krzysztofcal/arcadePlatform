@@ -40,6 +40,10 @@ function normalizeActionList(actions) {
   return actions.filter((action) => typeof action === "string");
 }
 
+function normalizeTurnTimerField(value) {
+  return Number.isFinite(value) ? value : null;
+}
+
 function normalizeShowdown(showdown) {
   if (!showdown || typeof showdown !== "object" || Array.isArray(showdown)) {
     return null;
@@ -124,7 +128,9 @@ export function buildStateSnapshotPayload({ tableSnapshot, userId }) {
       },
       turn: {
         userId: typeof tableSnapshot?.turn?.userId === "string" ? tableSnapshot.turn.userId : null,
-        seat: normalizeSeat(tableSnapshot?.turn?.seat)
+        seat: normalizeSeat(tableSnapshot?.turn?.seat),
+        startedAt: normalizeTurnTimerField(tableSnapshot?.turn?.startedAt),
+        deadlineAt: normalizeTurnTimerField(tableSnapshot?.turn?.deadlineAt)
       },
       legalActions: {
         seat: normalizeSeat(tableSnapshot?.legalActions?.seat),

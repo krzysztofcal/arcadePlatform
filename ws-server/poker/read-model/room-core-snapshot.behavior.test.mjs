@@ -14,7 +14,7 @@ test("projectRoomCoreSnapshot derives lobby snapshot when poker state is missing
 
   assert.equal(snapshot.roomId, "table_lobby");
   assert.deepEqual(snapshot.hand, { handId: null, status: "LOBBY", round: null });
-  assert.deepEqual(snapshot.turn, { userId: "user_a", seat: 1 });
+  assert.deepEqual(snapshot.turn, { userId: "user_a", seat: 1, startedAt: null, deadlineAt: null });
   assert.deepEqual(snapshot.pot, { total: 0, sidePots: [] });
   assert.deepEqual(snapshot.private, { userId: "user_a", seat: 1, holeCards: [] });
 });
@@ -75,6 +75,8 @@ test("projectRoomCoreSnapshot reuses poker legal-actions/public stripping semant
   assert.deepEqual(observer.turn, seated.turn);
   assert.deepEqual(observer.pot, seated.pot);
   assert.deepEqual(observer.legalActions, { seat: null, actions: [] });
+  assert.equal(seated.turn.startedAt, null);
+  assert.equal(seated.turn.deadlineAt, null);
   assert.equal(observer.private, null);
 });
 
@@ -177,4 +179,91 @@ test("projectRoomCoreSnapshot omits terminal fields for fresh next-hand PREFLOP 
   assert.equal("showdown" in snapshot, false);
   assert.equal("handSettlement" in snapshot, false);
   assert.deepEqual(snapshot.private, { userId: "seated_user", seat: 1, holeCards: ["AS", "KD"] });
+});
+
+
+test("projectRoomCoreSnapshot projects turn timer metadata for a live hand", () => {
+  const coreState = {
+    seats: { seated_user: 2, other_user: 1 },
+    pokerState: {
+      roomId: "table_live_timer",
+      handId: "hand_timer_1",
+      phase: "PREFLOP",
+      turnUserId: "seated_user",
+      turnStartedAt: 1710000000000,
+      turnDeadlineAt: 1710000015000,
+      community: [],
+      potTotal: 3,
+      sidePots: [],
+      stacks: { seated_user: 99, other_user: 98 },
+      betThisRoundByUserId: { seated_user: 1, other_user: 2 },
+      currentBet: 2,
+      foldedByUserId: { seated_user: false, other_user: false },
+      leftTableByUserId: { seated_user: false, other_user: false },
+      sitOutByUserId: { seated_user: false, other_user: false },
+      holeCardsByUserId: { seated_user: ["AH", "AD"], other_user: ["2C", "2D"] }
+    }
+  };
+
+  const seated = projectRoomCoreSnapshot({
+    tableId: "table_live_timer",
+    roomId: "table_live_timer",
+    coreState,
+    members: [
+      { userId: "other_user", seat: 1 },
+      { userId: "seated_user", seat: 2 }
+    ],
+    userId: "seated_user",
+    youSeat: 2
+  });
+  const observer = projectRoomCoreSnapshot({
+    tableId: "table_live_timer",
+    roomId: "table_live_timer",
+    coreState,
+    members: [
+      { userId: "other_user", seat: 1 },
+      { userId: "seated_user", seat: 2 }
+    ],
+    userId: "observer",
+    youSeat: null
+  });
+
+  assert.equal(seated.turn.startedAt, 1710000000000);
+  assert.equal(seated.turn.deadlineAt, 1710000015000);
+  assert.deepEqual(observer.turn, seated.turn);
+  assert.equal(observer.private, null);
+});
+
+test("projectRoomCoreSnapshot clears turn timer metadata when hand is settled or turn is unavailable", () => {
+  const coreState = {
+    seats: { seated_user: 1, other_user: 2 },
+    pokerState: {
+      roomId: "table_settled_timer",
+      handId: "hand_settled_timer",
+      phase: "SETTLED",
+      turnUserId: null,
+      turnStartedAt: 1710000000000,
+      turnDeadlineAt: 1710000015000,
+      community: ["2H", "3H", "4H", "9C", "KD"],
+      potTotal: 0,
+      sidePots: [],
+      holeCardsByUserId: { seated_user: ["AH", "AD"], other_user: ["2C", "2D"] }
+    }
+  };
+
+  const snapshot = projectRoomCoreSnapshot({
+    tableId: "table_settled_timer",
+    roomId: "table_settled_timer",
+    coreState,
+    members: [
+      { userId: "seated_user", seat: 1 },
+      { userId: "other_user", seat: 2 }
+    ],
+    userId: "seated_user",
+    youSeat: 1
+  });
+
+  assert.equal(snapshot.turn.userId, null);
+  assert.equal(snapshot.turn.startedAt, null);
+  assert.equal(snapshot.turn.deadlineAt, null);
 });

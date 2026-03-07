@@ -51,6 +51,20 @@ function resolveRoundFromPhase(phase) {
   return null;
 }
 
+function resolveTurnTimerField(value) {
+  return Number.isFinite(value) ? value : null;
+}
+
+function resolveTurnTimer({ statePublic, turnUserId }) {
+  if (typeof turnUserId !== "string") {
+    return { startedAt: null, deadlineAt: null };
+  }
+  return {
+    startedAt: resolveTurnTimerField(statePublic?.turnStartedAt),
+    deadlineAt: resolveTurnTimerField(statePublic?.turnDeadlineAt)
+  };
+}
+
 function normalizeShowdown(showdown) {
   if (!showdown || typeof showdown !== "object" || Array.isArray(showdown)) {
     return null;
@@ -115,7 +129,9 @@ export function projectRoomCoreSnapshot({ tableId, roomId, coreState, members, u
       },
       turn: {
         userId: members[0]?.userId ?? null,
-        seat: Number.isInteger(members[0]?.seat) ? members[0].seat : null
+        seat: Number.isInteger(members[0]?.seat) ? members[0].seat : null,
+        startedAt: null,
+        deadlineAt: null
       },
       legalActions: {
         seat: null,
@@ -134,6 +150,7 @@ export function projectRoomCoreSnapshot({ tableId, roomId, coreState, members, u
   const turnUserId = typeof statePublic.turnUserId === "string" ? statePublic.turnUserId : null;
   const seatByUserId = asObject(coreState?.seats) || {};
   const turnSeat = Number.isInteger(seatByUserId[turnUserId]) ? seatByUserId[turnUserId] : null;
+  const turnTimer = resolveTurnTimer({ statePublic, turnUserId });
   const legalInfo = computeSharedLegalActions({ statePublic, userId });
 
   const snapshot = {
@@ -152,7 +169,9 @@ export function projectRoomCoreSnapshot({ tableId, roomId, coreState, members, u
     },
     turn: {
       userId: turnUserId,
-      seat: turnSeat
+      seat: turnSeat,
+      startedAt: turnTimer.startedAt,
+      deadlineAt: turnTimer.deadlineAt
     },
     legalActions: {
       seat: Number.isInteger(youSeat) ? youSeat : null,
