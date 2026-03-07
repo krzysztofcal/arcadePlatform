@@ -780,7 +780,6 @@ wss.on("connection", (ws) => {
 
 const timeoutSweepIntervalMs = Number(process.env.WS_TIMEOUT_SWEEP_MS || 250);
 const timeoutSweepTimer = setInterval(() => {
-  sweepAndBroadcastExpiredPresence();
   sweepTurnTimeoutsAndBroadcast();
 }, Number.isFinite(timeoutSweepIntervalMs) && timeoutSweepIntervalMs > 0 ? timeoutSweepIntervalMs : 250);
 
