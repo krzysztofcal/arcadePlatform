@@ -97,6 +97,13 @@ test("ws poker protocol document describes explicit no-op resume success", () =>
   assert.match(text, /server returns `commandResult`/);
   assert.match(text, /"status": "accepted", "reason": null/);
 });
+
+test("ws poker protocol document states bounded WS act idempotency replay window", () => {
+  const text = docText();
+  assert.match(text, /in-memory idempotency replay for `act` is bounded by per-table cache size/);
+  assert.match(text, /oldest requestIds may be evicted/);
+  assert.match(text, /reusing a requestId from a different user MUST NOT reuse another user's cached outcome/);
+});
 test("first two JSON fenced blocks are parseable JSON", () => {
   const text = docText();
   const matches = [...text.matchAll(/```json\n([\s\S]*?)\n```/g)].map((m) => m[1]);
@@ -131,4 +138,12 @@ test("ws poker protocol document describes PR8 live PREFLOP snapshot bootstrap c
   assert.match(text, /PR8 contract delta/);
   assert.match(text, /`public\.hand\.status = "PREFLOP"`/);
   assert.match(text, /does \*\*not\*\* promise full WS `act` mutation support yet/);
+});
+
+test("ws poker protocol document describes PR9 act accepted snapshot delivery scope", () => {
+  const text = docText();
+  assert.match(text, /PR9 contract delta/);
+  assert.match(text, /Successful or rejected domain outcomes are emitted as `commandResult`/);
+  assert.match(text, /On accepted fresh `act`, server emits fresh post-action `stateSnapshot` to the acting connection and currently connected table-associated sockets/);
+  assert.match(text, /Idempotent accepted replay returns accepted command semantics but does not trigger a new post-action snapshot fanout wave/);
 });
