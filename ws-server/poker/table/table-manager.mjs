@@ -6,7 +6,7 @@ import {
   toHoleCardCodeMap,
   toCardCodes
 } from "../shared/poker-primitives.mjs";
-import { applyPreflopAction } from "../shared/poker-action-reducer.mjs";
+import { applyAction as applyPokerAction } from "../shared/poker-action-reducer.mjs";
 
 const DEFAULT_PRESENCE_TTL_MS = 10_000;
 const DEFAULT_MAX_SEATS = 10;
@@ -28,7 +28,7 @@ function asLiveHandState(value) {
   if (typeof value.handId !== "string" || value.handId.trim() === "") {
     return null;
   }
-  if (typeof value.phase !== "string" || value.phase !== "PREFLOP") {
+  if (typeof value.phase !== "string" || !["PREFLOP", "FLOP", "TURN", "RIVER"].includes(value.phase)) {
     return null;
   }
   return value;
@@ -334,7 +334,7 @@ export function createTableManager({
       return rejected;
     }
 
-    const applied = applyPreflopAction({
+    const applied = applyPokerAction({
       pokerState: liveState,
       userId,
       action,
