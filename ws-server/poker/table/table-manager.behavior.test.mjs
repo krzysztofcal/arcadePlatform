@@ -357,7 +357,9 @@ test("applyAction accepts legal turn CALL and increments state version once", ()
   assert.equal(action.accepted, true);
   assert.equal(after.stateVersion, before.stateVersion + 1);
   assert.deepEqual(after.pot, { total: 4, sidePots: [] });
-  assert.equal(after.turn.userId, null);
+  assert.equal(after.hand.status, "FLOP");
+  assert.equal(after.board.cards.length, 3);
+  assert.equal(after.turn.userId, "user_b");
   assert.deepEqual(after.legalActions, { seat: 1, actions: [] });
   assert.equal(after.private.holeCards.length, 2);
 });
@@ -385,9 +387,11 @@ test("applyAction CALL closes initial heads-up preflop loop coherently", () => {
   const otherAfter = tableManager.tableSnapshot(tableId, "user_b");
 
   assert.equal(action.accepted, true);
-  assert.equal(actorAfter.turn.userId, null);
+  assert.equal(actorAfter.hand.status, "FLOP");
+  assert.equal(actorAfter.board.cards.length, 3);
+  assert.equal(actorAfter.turn.userId, "user_b");
   assert.deepEqual(actorAfter.legalActions, { seat: 1, actions: [] });
-  assert.deepEqual(otherAfter.legalActions, { seat: 2, actions: [] });
+  assert.deepEqual(otherAfter.legalActions.actions.includes("CHECK"), true);
 });
 
 test("applyAction rejects mismatched hand and keeps snapshot unchanged", () => {
@@ -557,4 +561,106 @@ test("applyAction cache is bounded and evicts oldest requestIds deterministicall
   assert.equal(replayKept.reason, req3.reason);
   assert.equal(replayKept.replayed, true);
   assert.equal(tableManager.__debugCore(tableId).actionResultsCacheSize, 2);
+});
+
+test("applyAction remains actionable after preflop street progression", () => {
+  const tableManager = createTableManager({ maxSeats: 4 });
+  const wsA = fakeWs("street-a");
+  const wsB = fakeWs("street-b");
+  const tableId = "table_apply_street";
+
+  assert.equal(tableManager.join({ ws: wsA, userId: "user_a", tableId, requestId: "join-a", nowTs: 1 }).ok, true);
+  assert.equal(tableManager.join({ ws: wsB, userId: "user_b", tableId, requestId: "join-b", nowTs: 1 }).ok, true);
+  assert.equal(tableManager.bootstrapHand(tableId).ok, true);
+
+  const pre = tableManager.tableSnapshot(tableId, "user_a");
+  const closePreflop = tableManager.applyAction({ tableId, handId: pre.hand.handId, userId: "user_a", requestId: "req-pre-close", action: "CALL", amount: 0 });
+  assert.equal(closePreflop.accepted, true);
+
+  const flop = tableManager.tableSnapshot(tableId, "user_b");
+  assert.equal(flop.hand.status, "FLOP");
+  const flopAct = tableManager.applyAction({ tableId, handId: flop.hand.handId, userId: "user_b", requestId: "req-flop-check", action: "CHECK", amount: 0 });
+  assert.equal(flopAct.accepted, true);
+});
+
+test("applyAction replay does not advance street or board twice", () => {
+  const tableManager = createTableManager({ maxSeats: 4 });
+  const wsA = fakeWs("replay-a");
+  const wsB = fakeWs("replay-b");
+  const tableId = "table_apply_replay_street";
+
+  assert.equal(tableManager.join({ ws: wsA, userId: "user_a", tableId, requestId: "join-a", nowTs: 1 }).ok, true);
+  assert.equal(tableManager.join({ ws: wsB, userId: "user_b", tableId, requestId: "join-b", nowTs: 1 }).ok, true);
+  assert.equal(tableManager.bootstrapHand(tableId).ok, true);
+
+  const before = tableManager.tableSnapshot(tableId, "user_a");
+  const first = tableManager.applyAction({ tableId, handId: before.hand.handId, userId: "user_a", requestId: "req-close-replay", action: "CALL", amount: 0 });
+  const mid = tableManager.tableSnapshot(tableId, "user_a");
+  const second = tableManager.applyAction({ tableId, handId: before.hand.handId, userId: "user_a", requestId: "req-close-replay", action: "CALL", amount: 0 });
+  const after = tableManager.tableSnapshot(tableId, "user_a");
+
+  assert.equal(first.accepted, true);
+  assert.equal(mid.hand.status, "FLOP");
+  assert.equal(mid.board.cards.length, 3);
+  assert.equal(second.replayed, true);
+  assert.equal(second.changed, false);
+  assert.equal(second.stateVersion, first.stateVersion);
+  assert.deepEqual(after.board.cards, mid.board.cards);
+  assert.equal(after.stateVersion, mid.stateVersion);
+});
+
+test("first FLOP CHECK keeps FLOP and passes turn", () => {
+  const tableManager = createTableManager({ maxSeats: 4 });
+  const wsA = fakeWs("flop-a");
+  const wsB = fakeWs("flop-b");
+  const tableId = "table_apply_flop_first_check";
+
+  assert.equal(tableManager.join({ ws: wsA, userId: "user_a", tableId, requestId: "join-a", nowTs: 1 }).ok, true);
+  assert.equal(tableManager.join({ ws: wsB, userId: "user_b", tableId, requestId: "join-b", nowTs: 1 }).ok, true);
+  assert.equal(tableManager.bootstrapHand(tableId).ok, true);
+  const pre = tableManager.tableSnapshot(tableId, "user_a");
+  assert.equal(tableManager.applyAction({ tableId, handId: pre.hand.handId, userId: "user_a", requestId: "req-pre-call", action: "CALL", amount: 0 }).accepted, true);
+
+  const flopBefore = tableManager.tableSnapshot(tableId, "user_b");
+  assert.equal(flopBefore.hand.status, "FLOP");
+  assert.equal(flopBefore.turn.userId, "user_b");
+  const firstCheck = tableManager.applyAction({ tableId, handId: flopBefore.hand.handId, userId: "user_b", requestId: "req-flop-check-1", action: "CHECK", amount: 0 });
+  const flopAfter = tableManager.tableSnapshot(tableId, "user_a");
+
+  assert.equal(firstCheck.accepted, true);
+  assert.equal(flopAfter.hand.status, "FLOP");
+  assert.equal(flopAfter.board.cards.length, 3);
+  assert.equal(flopAfter.turn.userId, "user_a");
+});
+
+test("closing RIVER action keeps turn null and does not reopen action", () => {
+  const tableManager = createTableManager({ maxSeats: 4 });
+  const wsA = fakeWs("river-a");
+  const wsB = fakeWs("river-b");
+  const tableId = "table_apply_river_close";
+
+  assert.equal(tableManager.join({ ws: wsA, userId: "user_a", tableId, requestId: "join-a", nowTs: 1 }).ok, true);
+  assert.equal(tableManager.join({ ws: wsB, userId: "user_b", tableId, requestId: "join-b", nowTs: 1 }).ok, true);
+  assert.equal(tableManager.bootstrapHand(tableId).ok, true);
+
+  const pre = tableManager.tableSnapshot(tableId, "user_a");
+  assert.equal(tableManager.applyAction({ tableId, handId: pre.hand.handId, userId: "user_a", requestId: "req-pre-call", action: "CALL", amount: 0 }).accepted, true);
+  const flop = tableManager.tableSnapshot(tableId, "user_b");
+  assert.equal(tableManager.applyAction({ tableId, handId: flop.hand.handId, userId: "user_b", requestId: "req-flop-check-1", action: "CHECK", amount: 0 }).accepted, true);
+  assert.equal(tableManager.applyAction({ tableId, handId: flop.hand.handId, userId: "user_a", requestId: "req-flop-check-2", action: "CHECK", amount: 0 }).accepted, true);
+
+  const turn = tableManager.tableSnapshot(tableId, "user_b");
+  assert.equal(tableManager.applyAction({ tableId, handId: turn.hand.handId, userId: "user_b", requestId: "req-turn-check-1", action: "CHECK", amount: 0 }).accepted, true);
+  assert.equal(tableManager.applyAction({ tableId, handId: turn.hand.handId, userId: "user_a", requestId: "req-turn-check-2", action: "CHECK", amount: 0 }).accepted, true);
+
+  const river = tableManager.tableSnapshot(tableId, "user_b");
+  assert.equal(river.hand.status, "RIVER");
+  assert.equal(tableManager.applyAction({ tableId, handId: river.hand.handId, userId: "user_b", requestId: "req-river-check-1", action: "CHECK", amount: 0 }).accepted, true);
+  const close = tableManager.applyAction({ tableId, handId: river.hand.handId, userId: "user_a", requestId: "req-river-check-2", action: "CHECK", amount: 0 });
+  const after = tableManager.tableSnapshot(tableId, "user_a");
+
+  assert.equal(close.accepted, true);
+  assert.equal(after.hand.status, "RIVER");
+  assert.equal(after.turn.userId, null);
+  assert.deepEqual(after.legalActions.actions, []);
 });

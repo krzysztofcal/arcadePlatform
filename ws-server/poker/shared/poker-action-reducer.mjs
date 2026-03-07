@@ -1,6 +1,11 @@
 import { computeSharedLegalActions } from "./poker-primitives.mjs";
 
 const SUPPORTED_ACTIONS = new Set(["FOLD", "CHECK", "CALL", "BET", "RAISE"]);
+const NEXT_PHASE = {
+  PREFLOP: "FLOP",
+  FLOP: "TURN",
+  TURN: "RIVER"
+};
 
 function toInt(value) {
   if (!Number.isFinite(value)) {
@@ -28,7 +33,9 @@ function asStateCopy(state) {
     betThisRoundByUserId: { ...(state.betThisRoundByUserId || {}) },
     actedThisRoundByUserId: { ...(state.actedThisRoundByUserId || {}) },
     foldedByUserId: { ...(state.foldedByUserId || {}) },
-    contributionsByUserId: { ...(state.contributionsByUserId || {}) }
+    contributionsByUserId: { ...(state.contributionsByUserId || {}) },
+    community: Array.isArray(state.community) ? state.community.slice() : [],
+    deck: Array.isArray(state.deck) ? state.deck.slice() : []
   };
 }
 
@@ -89,14 +96,86 @@ function isBettingClosed(state) {
     return true;
   }
 
-  return active.every((seat) => Number(state.toCallByUserId?.[seat.userId] ?? 0) === 0);
+  const allMatched = active.every((seat) => Number(state.toCallByUserId?.[seat.userId] ?? 0) === 0);
+  if (!allMatched) {
+    return false;
+  }
+  if (Number(state.currentBet ?? 0) > 0) {
+    return true;
+  }
+  return active.every((seat) => state.actedThisRoundByUserId?.[seat.userId] === true);
 }
 
-export function applyPreflopAction({ pokerState, userId, action, amount }) {
+function nextPhase(phase) {
+  return typeof phase === "string" ? (NEXT_PHASE[phase] ?? null) : null;
+}
+
+function revealCommunityCards(state, count) {
+  const normalized = Number.isInteger(count) && count > 0 ? count : 0;
+  if (normalized === 0) {
+    return;
+  }
+  const deck = Array.isArray(state.deck) ? state.deck : [];
+  const community = Array.isArray(state.community) ? state.community : [];
+  const dealt = deck.slice(0, normalized);
+  state.community = community.concat(dealt);
+  state.deck = deck.slice(dealt.length);
+  state.communityDealt = Number(state.communityDealt ?? community.length) + dealt.length;
+}
+
+function resetRoundState(state) {
+  state.currentBet = 0;
+  for (const seat of orderedSeats(state)) {
+    const userId = seat.userId;
+    state.betThisRoundByUserId[userId] = 0;
+    state.toCallByUserId[userId] = 0;
+    state.actedThisRoundByUserId[userId] = false;
+  }
+}
+
+function resolveStreetTurnUserId(state) {
+  const seats = orderedSeats(state);
+  if (seats.length === 0) {
+    return null;
+  }
+  const dealerSeatNo = Number(state.dealerSeatNo ?? 0);
+  const dealerIndex = seats.findIndex((seat) => seat.seatNo === dealerSeatNo);
+  const startIndex = dealerIndex === -1 ? 0 : (dealerIndex + 1) % seats.length;
+  for (let offset = 0; offset < seats.length; offset += 1) {
+    const seat = seats[(startIndex + offset) % seats.length];
+    if (isSelectableActor(state, seat.userId)) {
+      return seat.userId;
+    }
+  }
+  return null;
+}
+
+function advanceStreetIfClosed(state) {
+  if (!isBettingClosed(state)) {
+    return false;
+  }
+  const phase = nextPhase(state.phase);
+  if (!phase) {
+    state.turnUserId = null;
+    return true;
+  }
+
+  state.phase = phase;
+  if (phase === "FLOP") {
+    revealCommunityCards(state, 3);
+  } else {
+    revealCommunityCards(state, 1);
+  }
+  resetRoundState(state);
+  state.turnUserId = resolveStreetTurnUserId(state);
+  return true;
+}
+
+export function applyAction({ pokerState, userId, action, amount }) {
   if (!pokerState || typeof pokerState !== "object" || Array.isArray(pokerState)) {
     return { ok: false, reason: "invalid_state" };
   }
-  if (pokerState.phase !== "PREFLOP") {
+  if (typeof pokerState.phase !== "string" || !["PREFLOP", "FLOP", "TURN", "RIVER"].includes(pokerState.phase)) {
     return { ok: false, reason: "unsupported_phase" };
   }
   if (typeof userId !== "string" || userId.trim() === "") {
@@ -166,9 +245,8 @@ export function applyPreflopAction({ pokerState, userId, action, amount }) {
   }
 
   recomputeToCall(nextState);
-  if (normalizedAction === "CALL" && toCall > 0 && isBettingClosed(nextState)) {
-    nextState.turnUserId = null;
-  } else {
+  const closedRound = advanceStreetIfClosed(nextState);
+  if (!closedRound) {
     nextState.turnUserId = resolveNextTurnUserId(nextState, userId);
   }
 
@@ -177,4 +255,8 @@ export function applyPreflopAction({ pokerState, userId, action, amount }) {
     action: normalizedAction,
     state: nextState
   };
+}
+
+export function applyPreflopAction(params) {
+  return applyAction(params);
 }
