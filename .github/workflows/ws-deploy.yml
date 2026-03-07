@@ -52,6 +52,9 @@ jobs:
       - name: Run poker primitives behavior test
         run: node --test ws-server/poker/shared/poker-primitives.behavior.test.mjs
 
+      - name: Run poker turn timeout behavior test
+        run: node --test ws-server/poker/shared/poker-turn-timeout.behavior.test.mjs
+
       - name: Run poker action reducer behavior test
         run: node --test ws-server/poker/shared/poker-action-reducer.behavior.test.mjs
 
