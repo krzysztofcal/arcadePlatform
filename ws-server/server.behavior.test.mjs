@@ -1074,9 +1074,9 @@ test("act command accepts turn action and broadcasts updated snapshot while pres
     const actorUpdate = await nextStateUpdate(actor, { baseline: before.payload });
     const observerUpdate = await observerUpdatePromise;
     const otherUpdate = await attemptMessage(other, 1500);
-    assert.ok(["stateSnapshot", "statePatch"].includes(actorUpdate.frame.type));
-    assert.ok(otherUpdate === null || ["stateSnapshot", "statePatch"].includes(otherUpdate.type));
-    assert.ok(["stateSnapshot", "statePatch"].includes(observerUpdate.frame.type));
+    assert.equal(actorUpdate.frame.type, "stateSnapshot");
+    assert.ok(otherUpdate === null || otherUpdate.type === "stateSnapshot");
+    assert.equal(observerUpdate.frame.type, "stateSnapshot");
     assert.equal(actorUpdate.payload.stateVersion > before.payload.stateVersion, true);
     assert.deepEqual(actorUpdate.payload.public.pot, { total: 4, sidePots: [] });
     assert.equal(actorUpdate.payload.public.hand.status, "FLOP");
@@ -1220,7 +1220,7 @@ test("act accepted sends post-action snapshot to actor even after one-shot snaps
 
     const actorAfter = await nextStateUpdate(actor, { baseline: before.payload });
     const otherAfter = await otherAfterPromise;
-    assert.ok(["stateSnapshot", "statePatch"].includes(actorAfter.frame.type));
+    assert.equal(actorAfter.frame.type, "stateSnapshot");
     assert.equal(actorAfter.payload.public.hand.status, "FLOP");
     assert.equal(actorAfter.payload.public.board.cards.length, 3);
     assert.deepEqual(actorAfter.payload.public.pot, { total: 4, sidePots: [] });
@@ -1782,51 +1782,6 @@ test("resume replay is isolated by session stream for same authenticated user", 
 
     wsB.close();
     wsAResume.close();
-  } finally {
-    child.kill("SIGTERM");
-    await waitForExit(child);
-  }
-});
-
-test("server emits statePatch after baseline snapshot when patch path is safe", async () => {
-  const secret = "patch-after-baseline";
-  const { port, child } = await createServer({ env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret } });
-  try {
-    await waitForListening(child, 5000);
-    const actor = await connectClient(port);
-    const other = await connectClient(port);
-    await hello(actor);
-    await hello(other);
-    await auth(actor, makeHs256Jwt({ secret, sub: "patch_actor" }), "auth-patch-actor");
-    await auth(other, makeHs256Jwt({ secret, sub: "patch_other" }), "auth-patch-other");
-
-    sendFrame(actor, { version: "1.0", type: "table_join", requestId: "join-pa", ts: "2026-02-28T00:12:00Z", payload: { tableId: "table_patch_after_baseline" } });
-    await nextMessageOfType(actor, "table_state");
-    sendFrame(other, { version: "1.0", type: "table_join", requestId: "join-po", ts: "2026-02-28T00:12:01Z", payload: { tableId: "table_patch_after_baseline" } });
-    await nextMessageOfType(other, "table_state");
-    await nextMessageOfType(actor, "table_state");
-
-    sendFrame(actor, { version: "1.0", type: "table_state_sub", requestId: "snap-pa", ts: "2026-02-28T00:12:02Z", payload: { tableId: "table_patch_after_baseline", view: "snapshot" } });
-    const baseline = await nextMessageOfType(actor, "stateSnapshot");
-
-    sendFrame(actor, {
-      version: "1.0",
-      type: "act",
-      requestId: "act-pa",
-      ts: "2026-02-28T00:12:03Z",
-      payload: { tableId: "table_patch_after_baseline", handId: baseline.payload.public.hand.handId, action: "call", amount: 0 }
-    });
-
-    const result = await nextMessageOfType(actor, "commandResult");
-    assert.equal(result.payload.status, "accepted");
-    const update = await nextStateUpdate(actor, { baseline: baseline.payload });
-    assert.equal(update.frame.type, "statePatch");
-    assert.equal(update.payload.stateVersion > baseline.payload.stateVersion, true);
-    assert.equal(update.payload.public.hand.status, "FLOP");
-    assert.equal(Array.isArray(update.payload.private.holeCards), true);
-
-    actor.close();
-    other.close();
   } finally {
     child.kill("SIGTERM");
     await waitForExit(child);

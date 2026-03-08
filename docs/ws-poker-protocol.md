@@ -296,7 +296,8 @@ PR15 resume/ack behavior (implemented):
 - `ack` advances receiver-local watermark only and never mutates poker table state.
 - `resume` replays only in-window events (`seq > lastSeq`) in order when continuity is provable for the same receiver/session stream.
 - On replay miss (`last_seq_out_of_window`, unknown session, or mismatch), server emits `resync` and then sends fresh `stateSnapshot` fallback.
-- `statePatch` is emitted only after the receiver stream already has a baseline snapshot and patch generation is safe/smaller; otherwise server emits full `stateSnapshot`.
-- `statePatch` is additive optimization and `stateSnapshot` remains canonical fallback/resync truth path.
+- Legacy PR9/PR11 live fanout paths remain `stateSnapshot`-based for v1.x compatibility.
+- `statePatch` is reserved for additive/opt-in transport optimization paths and does not redefine default legacy post-action or timeout delivery.
+- `stateSnapshot` remains canonical fallback/resync truth path.
 
 Durability note: replay buffer is process-local and bounded; server restarts or long gaps may require full snapshot recovery.

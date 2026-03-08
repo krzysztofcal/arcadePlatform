@@ -175,7 +175,8 @@ test("ws poker protocol document describes PR15 bounded replay + resume fallback
   assert.match(text, /bounded in-memory replay window/);
   assert.match(text, /best-effort only within the current process lifetime/);
   assert.match(text, /`ack` advances receiver-local watermark only/);
-  assert.match(text, /`statePatch` is emitted only after the receiver stream already has a baseline snapshot and patch generation is safe\/smaller/);
   assert.match(text, /same receiver\/session stream/);
-  assert.match(text, /`statePatch` is additive optimization and `stateSnapshot` remains canonical fallback/);
+  assert.match(text, /Legacy PR9\/PR11 live fanout paths remain `stateSnapshot`-based/);
+  assert.match(text, /`statePatch` is reserved for additive\/opt-in transport optimization paths/);
+  assert.match(text, /`stateSnapshot` remains canonical fallback\/resync truth path/);
 });

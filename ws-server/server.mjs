@@ -363,7 +363,7 @@ function broadcastStateSnapshots(tableId) {
       continue;
     }
     const tableSnapshot = tableManager.tableSnapshot(tableId, recipientConnState.session.userId);
-    sendStateDelta(recipient, recipientConnState, { tableSnapshot });
+    sendStateSnapshot(recipient, recipientConnState, { tableSnapshot });
   }
 }
 
