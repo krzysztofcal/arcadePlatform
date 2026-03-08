@@ -186,6 +186,25 @@ async function nextMessageOfType(ws, type, timeoutMs = 10000) {
   throw new Error(`Timed out waiting for message type: ${type}`);
 }
 
+
+
+async function nextStateUpdate(ws, { baseline = null, timeoutMs = 10000 } = {}) {
+  const started = Date.now();
+  while (true) {
+    const remainingMs = timeoutMs - (Date.now() - started);
+    if (remainingMs <= 0) {
+      throw new Error("Timed out waiting for state update frame");
+    }
+    const frame = await nextMessage(ws, remainingMs);
+    if (frame?.type === "stateSnapshot") {
+      return { frame, payload: frame.payload, baseline: frame.payload };
+    }
+    if (frame?.type === "statePatch") {
+      const merged = baseline ? { ...baseline, ...frame.payload } : { ...frame.payload };
+      return { frame, payload: merged, baseline: merged };
+    }
+  }
+}
 function base64urlJson(value) {
   return Buffer.from(JSON.stringify(value)).toString("base64url");
 }
@@ -1036,7 +1055,7 @@ test("act command accepts turn action and broadcasts updated snapshot while pres
     const before = await nextMessage(actor);
     const handId = before.payload.public.hand.handId;
 
-    const observerSnapshotPromise = nextMessageOfType(observer, "stateSnapshot");
+    const observerUpdatePromise = nextStateUpdate(observer, { baseline: null, timeoutMs: 1500 });
 
     sendFrame(actor, {
       version: "1.0",
@@ -1052,18 +1071,18 @@ test("act command accepts turn action and broadcasts updated snapshot while pres
     assert.equal(actorResult.payload.status, "accepted");
     assert.equal(actorResult.payload.reason, null);
 
-    const actorSnapshot = await nextMessageOfType(actor, "stateSnapshot");
-    const observerSnapshot = await observerSnapshotPromise;
-    const otherSnapshot = await attemptMessage(other, 1500);
-    assert.equal(actorSnapshot.type, "stateSnapshot");
-    assert.ok(otherSnapshot === null || otherSnapshot.type === "stateSnapshot");
-    assert.equal(observerSnapshot.type, "stateSnapshot");
-    assert.equal(actorSnapshot.payload.stateVersion > before.payload.stateVersion, true);
-    assert.deepEqual(actorSnapshot.payload.public.pot, { total: 4, sidePots: [] });
-    assert.equal(actorSnapshot.payload.public.hand.status, "FLOP");
-    assert.equal(actorSnapshot.payload.public.board.cards.length, 3);
-    assert.deepEqual(observerSnapshot.payload.public, { ...actorSnapshot.payload.public, legalActions: { seat: null, actions: [] } });
-    assert.equal("private" in observerSnapshot.payload, false);
+    const actorUpdate = await nextStateUpdate(actor, { baseline: before.payload });
+    const observerUpdate = await observerUpdatePromise;
+    const otherUpdate = await attemptMessage(other, 1500);
+    assert.ok(["stateSnapshot", "statePatch"].includes(actorUpdate.frame.type));
+    assert.ok(otherUpdate === null || ["stateSnapshot", "statePatch"].includes(otherUpdate.type));
+    assert.ok(["stateSnapshot", "statePatch"].includes(observerUpdate.frame.type));
+    assert.equal(actorUpdate.payload.stateVersion > before.payload.stateVersion, true);
+    assert.deepEqual(actorUpdate.payload.public.pot, { total: 4, sidePots: [] });
+    assert.equal(actorUpdate.payload.public.hand.status, "FLOP");
+    assert.equal(actorUpdate.payload.public.board.cards.length, 3);
+    assert.deepEqual(observerUpdate.payload.public, { ...actorUpdate.payload.public, legalActions: { seat: null, actions: [] } });
+    assert.equal("private" in observerUpdate.payload, false);
 
     actor.close();
     other.close();
@@ -1185,7 +1204,7 @@ test("act accepted sends post-action snapshot to actor even after one-shot snaps
     sendFrame(actor, { version: "1.0", type: "table_state_sub", requestId: "req-delivery-snapshot-before", ts: "2026-02-28T00:03:02Z", payload: { tableId: "table_act_delivery", view: "snapshot" } });
     const before = await nextMessage(actor);
 
-    const otherAfterPromise = nextMessageOfType(other, "stateSnapshot");
+    const otherAfterPromise = nextStateUpdate(other, { baseline: null, timeoutMs: 1500 });
 
     sendFrame(actor, {
       version: "1.0",
@@ -1199,8 +1218,9 @@ test("act accepted sends post-action snapshot to actor even after one-shot snaps
     assert.equal(result.type, "commandResult");
     assert.equal(result.payload.status, "accepted");
 
-    const actorAfter = await nextMessageOfType(actor, "stateSnapshot");
+    const actorAfter = await nextStateUpdate(actor, { baseline: before.payload });
     const otherAfter = await otherAfterPromise;
+    assert.ok(["stateSnapshot", "statePatch"].includes(actorAfter.frame.type));
     assert.equal(actorAfter.payload.public.hand.status, "FLOP");
     assert.equal(actorAfter.payload.public.board.cards.length, 3);
     assert.deepEqual(actorAfter.payload.public.pot, { total: 4, sidePots: [] });
@@ -1254,7 +1274,7 @@ test("act duplicate replay is idempotent in-scope and evicted requestIds do not 
       payload: { tableId: "table_act_dup", handId, action: "call", amount: 0 }
     });
     const first = await nextMessage(actor);
-    const firstSnapshot = await nextMessageOfType(actor, "stateSnapshot");
+    const firstSnapshot = await nextStateUpdate(actor, { baseline: before.payload });
     assert.equal(first.type, "commandResult");
     assert.equal(first.payload.status, "accepted");
     await attemptMessage(other, 400);
@@ -1346,13 +1366,18 @@ test("first postflop CHECK keeps same FLOP street and passes turn", async () => 
 
     sendFrame(actor, { version: "1.0", type: "act", requestId: "req-pre-close", ts: "2026-02-28T00:05:03Z", payload: { tableId: "table_flop_check", handId, action: "call", amount: 0 } });
     assert.equal((await nextMessage(actor)).type, "commandResult");
-    const preActor = await nextMessageOfType(actor, "stateSnapshot");
+    const preActor = await nextStateUpdate(actor, { baseline: before.payload });
+    let otherBaseline = null;
+    const preOther = await attemptMessage(other, 500);
+    if (preOther && (preOther.type === "stateSnapshot" || preOther.type === "statePatch")) {
+      otherBaseline = preOther.type === "stateSnapshot" ? preOther.payload : { ...preOther.payload };
+    }
     assert.equal(preActor.payload.public.hand.status, "FLOP");
     assert.equal(preActor.payload.public.turn.userId, "flop_check_other");
 
     sendFrame(other, { version: "1.0", type: "act", requestId: "req-flop-check-1", ts: "2026-02-28T00:05:04Z", payload: { tableId: "table_flop_check", handId, action: "check", amount: 0 } });
     const checkResult = await nextMessageOfType(other, "commandResult");
-    const checkOther = await nextMessageOfType(other, "stateSnapshot");
+    const checkOther = await nextStateUpdate(other, { baseline: otherBaseline });
 
     assert.equal(checkResult.type, "commandResult");
     assert.equal(checkResult.payload.status, "accepted");
@@ -1394,40 +1419,43 @@ test("river-closing WS action auto-advances to next PREFLOP hand and replay is i
     const before = await nextMessage(actor);
     const handId = before.payload.public.hand.handId;
 
+    const baselineByWs = new Map([[actor, before.payload], [other, null]]);
+
     const act = async (ws, requestId, action) => {
       sendFrame(ws, { version: "1.0", type: "act", requestId, ts: "2026-02-28T00:06:03Z", payload: { tableId: "table_river_close", handId, action, amount: 0 } });
       const result = await nextMessageOfType(ws, "commandResult");
       assert.equal(result.payload.status, "accepted");
-      const wsSnapshot = await nextMessageOfType(ws, "stateSnapshot");
-      return [wsSnapshot];
+      const wsUpdate = await nextStateUpdate(ws, { baseline: baselineByWs.get(ws) });
+      baselineByWs.set(ws, wsUpdate.baseline);
+      return wsUpdate.payload;
     };
 
     let snap;
-    [snap] = await act(actor, "req-river-pre-call", "call");
-    assert.equal(snap.payload.public.hand.status, "FLOP");
+    snap = await act(actor, "req-river-pre-call", "call");
+    assert.equal(snap.public.hand.status, "FLOP");
 
-    [snap] = await act(other, "req-river-flop-1", "check");
-    assert.equal(snap.payload.public.hand.status, "FLOP");
-    [snap] = await act(actor, "req-river-flop-2", "check");
-    assert.equal(snap.payload.public.hand.status, "TURN");
+    snap = await act(other, "req-river-flop-1", "check");
+    assert.equal(snap.public.hand.status, "FLOP");
+    snap = await act(actor, "req-river-flop-2", "check");
+    assert.equal(snap.public.hand.status, "TURN");
 
-    [snap] = await act(other, "req-river-turn-1", "check");
-    assert.equal(snap.payload.public.hand.status, "TURN");
-    [snap] = await act(actor, "req-river-turn-2", "check");
-    assert.equal(snap.payload.public.hand.status, "RIVER");
+    snap = await act(other, "req-river-turn-1", "check");
+    assert.equal(snap.public.hand.status, "TURN");
+    snap = await act(actor, "req-river-turn-2", "check");
+    assert.equal(snap.public.hand.status, "RIVER");
 
-    [snap] = await act(other, "req-river-river-1", "check");
-    assert.equal(snap.payload.public.hand.status, "RIVER");
-    assert.equal(snap.payload.public.turn.userId, "river_close_actor");
+    snap = await act(other, "req-river-river-1", "check");
+    assert.equal(snap.public.hand.status, "RIVER");
+    assert.equal(snap.public.turn.userId, "river_close_actor");
 
-    const [finalSnap] = await act(actor, "req-river-river-2", "check");
-    assert.equal(finalSnap.payload.public.hand.status, "PREFLOP");
-    assert.equal(finalSnap.payload.public.board.cards.length, 0);
-    assert.equal(finalSnap.payload.public.pot.total, 3);
-    assert.equal(typeof finalSnap.payload.public.turn.userId, "string");
-    assert.equal("showdown" in finalSnap.payload.public, false);
-    assert.equal("handSettlement" in finalSnap.payload.public, false);
-    const nextHandId = finalSnap.payload.public.hand.handId;
+    const finalSnap = await act(actor, "req-river-river-2", "check");
+    assert.equal(finalSnap.public.hand.status, "PREFLOP");
+    assert.equal(finalSnap.public.board.cards.length, 0);
+    assert.equal(finalSnap.public.pot.total, 3);
+    assert.equal(typeof finalSnap.public.turn.userId, "string");
+    assert.equal("showdown" in finalSnap.public, false);
+    assert.equal("handSettlement" in finalSnap.public, false);
+    const nextHandId = finalSnap.public.hand.handId;
     assert.equal(typeof nextHandId, "string");
 
     sendFrame(actor, {
@@ -1504,26 +1532,26 @@ test("server applies due timeout and emits one updated stateSnapshot", async () 
     sendFrame(wsB, { version: "1.0", type: "table_state_sub", requestId: "snap-b", ts: "2026-02-28T00:00:05Z", payload: { tableId: "table_timeout_ws", view: "snapshot" } });
     const baseB = await nextMessageOfType(wsB, "stateSnapshot");
 
-    const timeoutA = await nextMessageOfType(wsA, "stateSnapshot", 4000);
-    const timeoutB = await nextMessageOfType(wsB, "stateSnapshot", 4000);
+    const timeoutA = (await nextStateUpdate(wsA, { baseline: baseA.payload, timeoutMs: 4000 })).payload;
+    const timeoutB = (await nextStateUpdate(wsB, { baseline: baseB.payload, timeoutMs: 4000 })).payload;
 
     // Periodic timeout sweeps can emit adjacent valid timeout waves while each socket
     // awaits independently, so this test verifies receiver-local timer sanity and
     // progression invariants rather than exact cross-socket timer equality.
-    assert.equal(timeoutA.payload.stateVersion > baseA.payload.stateVersion, true);
-    assert.equal(timeoutB.payload.stateVersion > baseB.payload.stateVersion, true);
-    assert.equal(timeoutA.payload.private.userId, "user_a");
-    assert.equal(timeoutB.payload.private.userId, "user_b");
-    assert.equal(Number.isFinite(timeoutA.payload.public.turn.startedAt), true);
-    assert.equal(Number.isFinite(timeoutA.payload.public.turn.deadlineAt), true);
-    assert.equal(timeoutA.payload.public.turn.deadlineAt > timeoutA.payload.public.turn.startedAt, true);
-    assert.equal(Number.isFinite(timeoutB.payload.public.turn.startedAt), true);
-    assert.equal(Number.isFinite(timeoutB.payload.public.turn.deadlineAt), true);
-    assert.equal(timeoutB.payload.public.turn.deadlineAt > timeoutB.payload.public.turn.startedAt, true);
-    assert.equal(Array.isArray(timeoutA.payload.private.holeCards), true);
-    assert.equal(Array.isArray(timeoutB.payload.private.holeCards), true);
-    assert.equal(Object.prototype.hasOwnProperty.call(timeoutA.payload.public, "holeCardsByUserId"), false);
-    assert.equal(Object.prototype.hasOwnProperty.call(timeoutB.payload.public, "holeCardsByUserId"), false);
+    assert.equal(timeoutA.stateVersion > baseA.payload.stateVersion, true);
+    assert.equal(timeoutB.stateVersion > baseB.payload.stateVersion, true);
+    assert.equal(timeoutA.private.userId, "user_a");
+    assert.equal(timeoutB.private.userId, "user_b");
+    assert.equal(Number.isFinite(timeoutA.public.turn.startedAt), true);
+    assert.equal(Number.isFinite(timeoutA.public.turn.deadlineAt), true);
+    assert.equal(timeoutA.public.turn.deadlineAt > timeoutA.public.turn.startedAt, true);
+    assert.equal(Number.isFinite(timeoutB.public.turn.startedAt), true);
+    assert.equal(Number.isFinite(timeoutB.public.turn.deadlineAt), true);
+    assert.equal(timeoutB.public.turn.deadlineAt > timeoutB.public.turn.startedAt, true);
+    assert.equal(Array.isArray(timeoutA.private.holeCards), true);
+    assert.equal(Array.isArray(timeoutB.private.holeCards), true);
+    assert.equal(Object.prototype.hasOwnProperty.call(timeoutA.public, "holeCardsByUserId"), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(timeoutB.public, "holeCardsByUserId"), false);
 
 
     wsA.close();
@@ -1563,15 +1591,340 @@ test("repeated timeout checks do not double-apply the same turn", async () => {
 
     sendFrame(wsA, { version: "1.0", type: "table_state_sub", requestId: "snap-a", ts: "2026-02-28T00:00:04Z", payload: { tableId: "table_timeout_idempotent", view: "snapshot" } });
     const base = await nextMessageOfType(wsA, "stateSnapshot");
-    const firstTimeout = await nextMessageOfType(wsA, "stateSnapshot", 4000);
+    const firstTimeout = (await nextStateUpdate(wsA, { baseline: base.payload, timeoutMs: 4000 })).payload;
 
-    assert.equal(firstTimeout.payload.stateVersion > base.payload.stateVersion, true);
+    assert.equal(firstTimeout.stateVersion > base.payload.stateVersion, true);
 
     const noDoubleApply = await attemptMessage(wsA, 200);
     assert.equal(noDoubleApply, null);
 
     wsA.close();
     wsB.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
+test("stateful stream events include monotonic seq per receiver", async () => {
+  const secret = "seq-secret";
+  const { port, child } = await createServer({ env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret } });
+  try {
+    await waitForListening(child, 5000);
+    const ws = await connectClient(port);
+    await hello(ws);
+    await auth(ws, makeHs256Jwt({ secret, sub: "user_seq" }));
+
+    sendFrame(ws, { version: "1.0", type: "table_join", requestId: "join-seq", ts: "2026-02-28T00:00:01Z", payload: { tableId: "table_seq" } });
+    const tableState = await nextMessageOfType(ws, "table_state");
+    sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "snap-seq", ts: "2026-02-28T00:00:02Z", payload: { tableId: "table_seq", view: "snapshot" } });
+    const snapshot = await nextMessageOfType(ws, "stateSnapshot");
+
+    assert.equal(Number.isInteger(tableState.seq), true);
+    assert.equal(Number.isInteger(snapshot.seq), true);
+    assert.equal(snapshot.seq > tableState.seq, true);
+    ws.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
+test("ack is receiver-local no-op for poker state", async () => {
+  const secret = "ack-secret";
+  const { port, child } = await createServer({ env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret } });
+  try {
+    await waitForListening(child, 5000);
+    const ws = await connectClient(port);
+    await hello(ws);
+    await auth(ws, makeHs256Jwt({ secret, sub: "user_ack" }));
+
+    sendFrame(ws, { version: "1.0", type: "table_join", requestId: "join-ack", ts: "2026-02-28T00:00:01Z", payload: { tableId: "table_ack" } });
+    const joined = await nextMessageOfType(ws, "table_state");
+
+    sendFrame(ws, { version: "1.0", type: "ack", requestId: "ack-1", roomId: "table_ack", ts: "2026-02-28T00:00:02Z", payload: { tableId: "table_ack", seq: joined.seq } });
+    sendFrame(ws, { version: "1.0", type: "ack", requestId: "ack-2", roomId: "table_ack", ts: "2026-02-28T00:00:03Z", payload: { tableId: "table_ack", seq: joined.seq } });
+
+    const noMutation = await attemptMessage(ws, 250);
+    assert.equal(noMutation, null);
+    ws.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
+test("resume outside replay window triggers deterministic resync plus fresh snapshot", async () => {
+  const secret = "resume-secret";
+  const { port, child } = await createServer({ env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret, WS_STREAM_REPLAY_CAP: "2" } });
+  try {
+    await waitForListening(child, 5000);
+    const ws = await connectClient(port);
+    const helloAck = await hello(ws);
+    await auth(ws, makeHs256Jwt({ secret, sub: "user_resume" }));
+
+    sendFrame(ws, { version: "1.0", type: "table_join", requestId: "join-r1", ts: "2026-02-28T00:00:01Z", payload: { tableId: "table_resume" } });
+    const first = await nextMessageOfType(ws, "table_state");
+    sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "snap-r1", ts: "2026-02-28T00:00:02Z", payload: { tableId: "table_resume", view: "snapshot" } });
+    await nextMessageOfType(ws, "stateSnapshot");
+    sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "snap-r2", ts: "2026-02-28T00:00:03Z", payload: { tableId: "table_resume", view: "snapshot" } });
+    await nextMessageOfType(ws, "stateSnapshot");
+    ws.close();
+
+    const ws2 = await connectClient(port);
+    await hello(ws2);
+    await auth(ws2, makeHs256Jwt({ secret, sub: "user_resume" }), "auth-r2");
+    sendFrame(ws2, {
+      version: "1.0",
+      type: "resume",
+      requestId: "resume-r2",
+      roomId: "table_resume",
+      ts: "2026-02-28T00:00:04Z",
+      payload: { tableId: "table_resume", sessionId: helloAck.payload.sessionId, lastSeq: 0 }
+    });
+
+    const resync = await nextMessageOfType(ws2, "resync");
+    const snapshot = await nextMessageOfType(ws2, "stateSnapshot");
+    assert.equal(resync.payload.mode, "required");
+    assert.equal(snapshot.type, "stateSnapshot");
+    ws2.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
+test("resume replays in-window missing events in order", async () => {
+  const secret = "resume-in-window-secret";
+  const { port, child } = await createServer({ env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret, WS_STREAM_REPLAY_CAP: "8" } });
+  try {
+    await waitForListening(child, 5000);
+    const ws = await connectClient(port);
+    const helloAck = await hello(ws);
+    await auth(ws, makeHs256Jwt({ secret, sub: "user_resume_window" }));
+
+    sendFrame(ws, { version: "1.0", type: "table_join", requestId: "join-rw", ts: "2026-02-28T00:00:01Z", payload: { tableId: "table_resume_window" } });
+    const first = await nextMessageOfType(ws, "table_state");
+    sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "snap-rw-1", ts: "2026-02-28T00:00:02Z", payload: { tableId: "table_resume_window", view: "snapshot" } });
+    const second = await nextMessageOfType(ws, "stateSnapshot");
+    ws.close();
+
+    const ws2 = await connectClient(port);
+    await hello(ws2);
+    await auth(ws2, makeHs256Jwt({ secret, sub: "user_resume_window" }), "auth-rw-2");
+    sendFrame(ws2, {
+      version: "1.0",
+      type: "resume",
+      requestId: "resume-rw-2",
+      roomId: "table_resume_window",
+      ts: "2026-02-28T00:00:04Z",
+      payload: { tableId: "table_resume_window", sessionId: helloAck.payload.sessionId, lastSeq: first.seq }
+    });
+
+    const replayed = await nextMessage(ws2);
+    assert.equal(replayed.seq, second.seq);
+    assert.equal(replayed.type, "stateSnapshot");
+    ws2.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
+test("resume replay is isolated by session stream for same authenticated user", async () => {
+  const secret = "same-user-session-isolation";
+  const { port, child } = await createServer({ env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret, WS_STREAM_REPLAY_CAP: "16" } });
+  try {
+    await waitForListening(child, 5000);
+
+    const token = makeHs256Jwt({ secret, sub: "shared_user" });
+
+    const wsA = await connectClient(port);
+    const helloA = await hello(wsA);
+    await auth(wsA, token, "auth-a");
+    sendFrame(wsA, { version: "1.0", type: "table_join", requestId: "join-a", ts: "2026-02-28T00:11:01Z", payload: { tableId: "table_same_user" } });
+    await nextMessageOfType(wsA, "table_state");
+    sendFrame(wsA, { version: "1.0", type: "table_state_sub", requestId: "snap-a", ts: "2026-02-28T00:11:02Z", payload: { tableId: "table_same_user", view: "snapshot" } });
+    const aSnapshot = await nextMessageOfType(wsA, "stateSnapshot");
+
+    const wsB = await connectClient(port);
+    await hello(wsB);
+    await auth(wsB, token, "auth-b");
+    sendFrame(wsB, { version: "1.0", type: "table_join", requestId: "join-b", ts: "2026-02-28T00:11:03Z", payload: { tableId: "table_same_user" } });
+    await nextMessageOfType(wsB, "table_state");
+    sendFrame(wsB, { version: "1.0", type: "table_state_sub", requestId: "snap-b", ts: "2026-02-28T00:11:04Z", payload: { tableId: "table_same_user", view: "snapshot" } });
+    const bSnapshot = await nextMessageOfType(wsB, "stateSnapshot");
+
+    wsA.close();
+
+    sendFrame(wsB, { version: "1.0", type: "table_state_sub", requestId: "snap-b-2", ts: "2026-02-28T00:11:04Z", payload: { tableId: "table_same_user", view: "snapshot" } });
+    const bSnapshot2 = await nextMessageOfType(wsB, "stateSnapshot");
+
+    const wsAResume = await connectClient(port);
+    await hello(wsAResume);
+    await auth(wsAResume, token, "auth-a2");
+    sendFrame(wsAResume, {
+      version: "1.0",
+      type: "resume",
+      requestId: "resume-a",
+      roomId: "table_same_user",
+      ts: "2026-02-28T00:11:05Z",
+      payload: { tableId: "table_same_user", sessionId: helloA.payload.sessionId, lastSeq: aSnapshot.seq }
+    });
+
+    const resumed = await nextMessageOfType(wsAResume, "commandResult");
+    assert.equal(resumed.payload.status, "accepted");
+    const unexpected = await attemptMessage(wsAResume, 300);
+    assert.equal(unexpected, null);
+
+    assert.notEqual(aSnapshot.sessionId, bSnapshot.sessionId);
+    assert.equal(bSnapshot2.seq > bSnapshot.seq, true);
+
+    wsB.close();
+    wsAResume.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
+test("server emits statePatch after baseline snapshot when patch path is safe", async () => {
+  const secret = "patch-after-baseline";
+  const { port, child } = await createServer({ env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret } });
+  try {
+    await waitForListening(child, 5000);
+    const actor = await connectClient(port);
+    const other = await connectClient(port);
+    await hello(actor);
+    await hello(other);
+    await auth(actor, makeHs256Jwt({ secret, sub: "patch_actor" }), "auth-patch-actor");
+    await auth(other, makeHs256Jwt({ secret, sub: "patch_other" }), "auth-patch-other");
+
+    sendFrame(actor, { version: "1.0", type: "table_join", requestId: "join-pa", ts: "2026-02-28T00:12:00Z", payload: { tableId: "table_patch_after_baseline" } });
+    await nextMessageOfType(actor, "table_state");
+    sendFrame(other, { version: "1.0", type: "table_join", requestId: "join-po", ts: "2026-02-28T00:12:01Z", payload: { tableId: "table_patch_after_baseline" } });
+    await nextMessageOfType(other, "table_state");
+    await nextMessageOfType(actor, "table_state");
+
+    sendFrame(actor, { version: "1.0", type: "table_state_sub", requestId: "snap-pa", ts: "2026-02-28T00:12:02Z", payload: { tableId: "table_patch_after_baseline", view: "snapshot" } });
+    const baseline = await nextMessageOfType(actor, "stateSnapshot");
+
+    sendFrame(actor, {
+      version: "1.0",
+      type: "act",
+      requestId: "act-pa",
+      ts: "2026-02-28T00:12:03Z",
+      payload: { tableId: "table_patch_after_baseline", handId: baseline.payload.public.hand.handId, action: "call", amount: 0 }
+    });
+
+    const result = await nextMessageOfType(actor, "commandResult");
+    assert.equal(result.payload.status, "accepted");
+    const update = await nextStateUpdate(actor, { baseline: baseline.payload });
+    assert.equal(update.frame.type, "statePatch");
+    assert.equal(update.payload.stateVersion > baseline.payload.stateVersion, true);
+    assert.equal(update.payload.public.hand.status, "FLOP");
+    assert.equal(Array.isArray(update.payload.private.holeCards), true);
+
+    actor.close();
+    other.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
+test("server sends stateSnapshot fallback when receiver has no baseline cache", async () => {
+  const secret = "snapshot-no-baseline";
+  const { port, child } = await createServer({ env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret } });
+  try {
+    await waitForListening(child, 5000);
+    const actor = await connectClient(port);
+    const other = await connectClient(port);
+    await hello(actor);
+    await hello(other);
+    await auth(actor, makeHs256Jwt({ secret, sub: "nobase_actor" }), "auth-nobase-actor");
+    await auth(other, makeHs256Jwt({ secret, sub: "nobase_other" }), "auth-nobase-other");
+
+    sendFrame(actor, { version: "1.0", type: "table_join", requestId: "join-na", ts: "2026-02-28T00:13:00Z", payload: { tableId: "table_no_baseline" } });
+    await nextMessageOfType(actor, "table_state");
+    sendFrame(other, { version: "1.0", type: "table_join", requestId: "join-no", ts: "2026-02-28T00:13:01Z", payload: { tableId: "table_no_baseline" } });
+    await nextMessageOfType(other, "table_state");
+    await nextMessageOfType(actor, "table_state");
+
+    sendFrame(other, { version: "1.0", type: "table_state_sub", requestId: "snap-no", ts: "2026-02-28T00:13:02Z", payload: { tableId: "table_no_baseline", view: "snapshot" } });
+    const otherBaseline = await nextMessageOfType(other, "stateSnapshot");
+
+    const turnUserId = otherBaseline.payload.public.turn.userId;
+    const actingWs = turnUserId === "nobase_actor" ? actor : other;
+    sendFrame(actingWs, {
+      version: "1.0",
+      type: "act",
+      requestId: "act-no",
+      ts: "2026-02-28T00:13:03Z",
+      payload: { tableId: "table_no_baseline", handId: otherBaseline.payload.public.hand.handId, action: "call", amount: 0 }
+    });
+
+    const actingResult = await nextMessageOfType(actingWs, "commandResult");
+    assert.equal(actingResult.payload.status, "accepted");
+
+    const actorUpdate = await nextMessageOfType(actor, "stateSnapshot");
+    assert.equal(actorUpdate.type, "stateSnapshot");
+    assert.equal(actorUpdate.payload.public.hand.status, "FLOP");
+
+    actor.close();
+    other.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
+test("resume continuity for session A is not invalidated by high-traffic session B", async () => {
+  const secret = "resume-scoped-window";
+  const { port, child } = await createServer({ env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret, WS_STREAM_REPLAY_CAP: "2" } });
+  try {
+    await waitForListening(child, 5000);
+    const token = makeHs256Jwt({ secret, sub: "resume_shared_user" });
+
+    const wsA = await connectClient(port);
+    const helloA = await hello(wsA);
+    await auth(wsA, token, "auth-rsa");
+    sendFrame(wsA, { version: "1.0", type: "table_join", requestId: "join-rsa", ts: "2026-02-28T00:14:00Z", payload: { tableId: "table_resume_scoped" } });
+    await nextMessageOfType(wsA, "table_state");
+    sendFrame(wsA, { version: "1.0", type: "table_state_sub", requestId: "snap-rsa", ts: "2026-02-28T00:14:01Z", payload: { tableId: "table_resume_scoped", view: "snapshot" } });
+    const aBaseline = await nextMessageOfType(wsA, "stateSnapshot");
+
+    const wsB = await connectClient(port);
+    await hello(wsB);
+    await auth(wsB, token, "auth-rsb");
+    sendFrame(wsB, { version: "1.0", type: "table_join", requestId: "join-rsb", ts: "2026-02-28T00:14:02Z", payload: { tableId: "table_resume_scoped" } });
+    await nextMessageOfType(wsB, "table_state");
+
+    for (let i = 0; i < 5; i += 1) {
+      sendFrame(wsB, { version: "1.0", type: "table_state_sub", requestId: `snap-rsb-${i}`, ts: "2026-02-28T00:14:03Z", payload: { tableId: "table_resume_scoped", view: "snapshot" } });
+      await nextMessageOfType(wsB, "stateSnapshot");
+    }
+
+    wsA.close();
+
+    const wsAResume = await connectClient(port);
+    await hello(wsAResume);
+    await auth(wsAResume, token, "auth-rsa2");
+    sendFrame(wsAResume, {
+      version: "1.0",
+      type: "resume",
+      requestId: "resume-rsa",
+      roomId: "table_resume_scoped",
+      ts: "2026-02-28T00:14:04Z",
+      payload: { tableId: "table_resume_scoped", sessionId: helloA.payload.sessionId, lastSeq: aBaseline.seq }
+    });
+
+    const resumeResult = await nextMessageOfType(wsAResume, "commandResult");
+    assert.equal(resumeResult.payload.status, "accepted");
+    assert.equal(await attemptMessage(wsAResume, 300), null);
+
+    wsB.close();
+    wsAResume.close();
   } finally {
     child.kill("SIGTERM");
     await waitForExit(child);

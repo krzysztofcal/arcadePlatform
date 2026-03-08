@@ -22,6 +22,10 @@ test("ws-deploy keeps ws-tests trigger surface and runs harness checks", () => {
   assert.match(text, /node --test ws-tests\/ws-deploy\.no-prod-mutation-on-ws-tests\.guard\.test\.mjs/);
   assert.match(text, /node --test ws-tests\/ws-server-deploy-artifact-path\.test\.mjs/);
   assert.match(text, /node --test ws-tests\/ws-server-deploy-rollout\.test\.mjs/);
+  assert.match(text, /Run state-patch behavior test/);
+  assert.match(text, /node --test ws-server\/poker\/read-model\/state-patch\.behavior\.test\.mjs/);
+  assert.match(text, /Run stream-log behavior test/);
+  assert.match(text, /node --test ws-server\/poker\/runtime\/stream-log\.behavior\.test\.mjs/);
 });
 
 test("ws-deploy is non-mutating for production", () => {

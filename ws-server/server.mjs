@@ -8,11 +8,13 @@ import { handleAuth } from "./poker/handlers/auth.mjs";
 import { handleProtectedEcho } from "./poker/handlers/protected-echo.mjs";
 import { verifyToken } from "./poker/auth/verify-token.mjs";
 import { createConnState } from "./poker/runtime/conn-state.mjs";
-import { recordReplayFrame, resolveReplay, touchSession } from "./poker/runtime/session.mjs";
+import { ackSessionSeq, touchSession } from "./poker/runtime/session.mjs";
 import { recordProtocolViolation, shouldClose } from "./poker/runtime/conn-guards.mjs";
 import { createTableManager } from "./poker/table/table-manager.mjs";
 import { createSessionStore } from "./poker/runtime/session-store.mjs";
 import { buildStateSnapshotPayload } from "./poker/read-model/state-snapshot.mjs";
+import { buildStatePatch } from "./poker/read-model/state-patch.mjs";
+import { createStreamLog } from "./poker/runtime/stream-log.mjs";
 
 const PORT = Number(process.env.PORT || 3000);
 const PROTECTED_MESSAGE_TYPES = new Set([
@@ -24,7 +26,8 @@ const PROTECTED_MESSAGE_TYPES = new Set([
   "table_state_sub",
   "act",
   "resync",
-  "resume"
+  "resume",
+  "ack"
 ]);
 const REQUEST_ID_REQUIRED_TYPES = new Set(["join", "leave", "table_join", "table_leave", "table_state_sub", "act", "resync", "resume"]);
 
@@ -72,6 +75,12 @@ const tableManager = createTableManager({
 const sessionStore = createSessionStore({
   sessionTtlMs: resolveSessionTtlMs(process.env.WS_SESSION_TTL_MS)
 });
+const streamLog = createStreamLog({ cap: Number(process.env.WS_STREAM_REPLAY_CAP || 128) });
+const lastSnapshotBySessionAndTable = new Map();
+
+function snapshotCacheKey(sessionId, tableId) {
+  return `${sessionId}:${tableId}`;
+}
 
 function klog(kind, data) {
   const payload = data && typeof data === "object" ? ` ${JSON.stringify(data)}` : "";
@@ -179,11 +188,23 @@ function requiresRequestId(frameType) {
   return REQUEST_ID_REQUIRED_TYPES.has(frameType);
 }
 
+function recordStatefulFrame({ ws, connState, tableId, frame }) {
+  const replayFrame = streamLog.append({
+    tableId,
+    frame,
+    receiverKey: connState.sessionId
+  });
+  connState.session.latestDeliveredSeqByTableId.set(tableId, replayFrame.seq);
+  sendFrame(ws, replayFrame);
+  return replayFrame;
+}
+
 function sendTableState(ws, connState, { requestId = null, tableState }) {
-  const baseFrame = {
+  const frame = {
     version: "1.0",
     type: "table_state",
     ts: nowTs(),
+    roomId: tableState.tableId,
     sessionId: connState.sessionId,
     payload: {
       tableId: tableState.tableId,
@@ -192,40 +213,63 @@ function sendTableState(ws, connState, { requestId = null, tableState }) {
   };
 
   if (requestId) {
-    baseFrame.requestId = requestId;
+    frame.requestId = requestId;
   }
 
-  const frame = recordReplayFrame({
-    session: connState.session,
-    tableId: tableState.tableId,
-    frame: baseFrame
-  });
-  sendFrame(ws, frame);
+  return recordStatefulFrame({ ws, connState, tableId: tableState.tableId, frame });
 }
 
-function sendStateSnapshot(ws, connState, { requestId = null, tableSnapshot }) {
-  const baseFrame = {
+function sendStateSnapshot(ws, connState, { requestId = null, tableSnapshot, reason = null }) {
+  const payload = buildStateSnapshotPayload({
+    tableSnapshot,
+    userId: connState.session.userId
+  });
+
+  const frame = {
     version: "1.0",
     type: "stateSnapshot",
     ts: nowTs(),
     roomId: tableSnapshot.tableId,
     sessionId: connState.sessionId,
-    payload: buildStateSnapshotPayload({
-      tableSnapshot,
-      userId: connState.session.userId
-    })
+    payload
   };
 
   if (requestId) {
-    baseFrame.requestId = requestId;
+    frame.requestId = requestId;
   }
 
-  const frame = recordReplayFrame({
-    session: connState.session,
-    tableId: tableSnapshot.tableId,
-    frame: baseFrame
+  if (reason) {
+    frame.payload.resyncReason = reason;
+  }
+
+  lastSnapshotBySessionAndTable.set(snapshotCacheKey(connState.sessionId, tableSnapshot.tableId), payload);
+  return recordStatefulFrame({ ws, connState, tableId: tableSnapshot.tableId, frame });
+}
+
+function sendStateDelta(ws, connState, { tableSnapshot }) {
+  const payload = buildStateSnapshotPayload({
+    tableSnapshot,
+    userId: connState.session.userId
   });
-  sendFrame(ws, frame);
+  const cacheKey = snapshotCacheKey(connState.sessionId, tableSnapshot.tableId);
+  const previousPayload = lastSnapshotBySessionAndTable.get(cacheKey) ?? null;
+  const patch = buildStatePatch({ beforePayload: previousPayload, nextPayload: payload });
+
+  if (!patch.ok) {
+    return sendStateSnapshot(ws, connState, { tableSnapshot });
+  }
+
+  const frame = {
+    version: "1.0",
+    type: "statePatch",
+    ts: nowTs(),
+    roomId: tableSnapshot.tableId,
+    sessionId: connState.sessionId,
+    payload: patch.patch
+  };
+
+  lastSnapshotBySessionAndTable.set(cacheKey, payload);
+  return recordStatefulFrame({ ws, connState, tableId: tableSnapshot.tableId, frame });
 }
 
 function sendResumeRequired(ws, connState, { requestId = null, tableId, reason, expectedSeq = 0 }) {
@@ -246,7 +290,7 @@ function sendResumeRequired(ws, connState, { requestId = null, tableId, reason, 
     frame.requestId = requestId;
   }
 
-  sendFrame(ws, frame);
+  return recordStatefulFrame({ ws, connState, tableId, frame });
 }
 
 function sendResumeAck(ws, connState, { requestId = null, tableId }) {
@@ -319,13 +363,20 @@ function broadcastStateSnapshots(tableId) {
       continue;
     }
     const tableSnapshot = tableManager.tableSnapshot(tableId, recipientConnState.session.userId);
-    sendStateSnapshot(recipient, recipientConnState, { tableSnapshot });
+    sendStateDelta(recipient, recipientConnState, { tableSnapshot });
   }
 }
 
 function sweepAndBroadcastExpiredPresence() {
   const nowMs = Date.now();
-  sessionStore.sweepExpiredSessions({ nowMs });
+  const expiredSessionIds = sessionStore.sweepExpiredSessions({ nowMs });
+  for (const sessionId of expiredSessionIds) {
+    for (const key of [...lastSnapshotBySessionAndTable.keys()]) {
+      if (key.startsWith(`${sessionId}:`)) {
+        lastSnapshotBySessionAndTable.delete(key);
+      }
+    }
+  }
   const sweepUpdates = tableManager.sweepExpiredPresence({ nowTs: nowMs });
   for (const update of sweepUpdates) {
     broadcastTableState(update.tableId);
@@ -470,6 +521,29 @@ wss.on("connection", (ws) => {
       return;
     }
 
+
+    if (frame.type === "ack") {
+      const resolvedRoomId = resolveRoomId(frame);
+      if (!resolvedRoomId.ok) {
+        sendError(ws, connState, {
+          code: resolvedRoomId.code,
+          message: resolvedRoomId.message,
+          requestId: frame.requestId ?? null
+        });
+        return;
+      }
+      const ackSeq = frame.payload?.seq;
+      const ackResult = ackSessionSeq({ session: connState.session, tableId: resolvedRoomId.roomId, seq: ackSeq });
+      if (!ackResult.ok) {
+        sendError(ws, connState, {
+          code: "INVALID_COMMAND",
+          message: "ack payload.seq must be an integer within delivered range",
+          requestId: frame.requestId ?? null
+        });
+      }
+      return;
+    }
+
     if (frame.type === "protected_echo") {
       const response = handleProtectedEcho({ frame, connState, nowTs });
       sendFrame(ws, response.frame);
@@ -571,16 +645,7 @@ wss.on("connection", (ws) => {
         return;
       }
 
-      const replay = resolveReplay({ session: rebound.session, tableId, lastSeq: resumeLastSeq });
-      if (!replay.ok) {
-        sendResumeRequired(ws, connState, {
-          requestId: frame.requestId ?? null,
-          tableId,
-          reason: replay.reason,
-          expectedSeq: replay.latestSeq ?? 0
-        });
-        return;
-      }
+      const replay = streamLog.eventsAfter({ tableId, lastSeq: resumeLastSeq, receiverKey: resumeSessionId });
 
       connState.session = rebound.session;
       connState.sessionId = rebound.session.sessionId;
@@ -596,12 +661,25 @@ wss.on("connection", (ws) => {
         return;
       }
 
+      if (!replay.ok) {
+        sendResumeRequired(ws, connState, {
+          requestId: frame.requestId ?? null,
+          tableId,
+          reason: replay.reason,
+          expectedSeq: replay.latestSeq ?? 0
+        });
+        const tableSnapshot = tableManager.tableSnapshot(tableId, connState.session.userId);
+        sendStateSnapshot(ws, connState, { tableSnapshot, reason: replay.reason });
+        return;
+      }
+
       if (replay.frames.length === 0) {
         sendResumeAck(ws, connState, { requestId: frame.requestId ?? null, tableId });
         return;
       }
 
       for (const replayFrame of replay.frames) {
+        connState.session.latestDeliveredSeqByTableId.set(tableId, replayFrame.seq);
         sendFrame(ws, replayFrame);
       }
       return;

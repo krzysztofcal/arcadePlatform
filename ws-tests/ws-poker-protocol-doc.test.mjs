@@ -167,3 +167,15 @@ test("ws poker protocol document describes PR14 turn timer snapshot delta", () =
   assert.match(text, /`startedAt` and `deadlineAt`/);
   assert.match(text, /For non-live\/no-turn\/terminal states, both fields resolve to `null`/);
 });
+
+
+test("ws poker protocol document describes PR15 bounded replay + resume fallback semantics", () => {
+  const text = docText();
+  assert.match(text, /PR15 contract delta/);
+  assert.match(text, /bounded in-memory replay window/);
+  assert.match(text, /best-effort only within the current process lifetime/);
+  assert.match(text, /`ack` advances receiver-local watermark only/);
+  assert.match(text, /`statePatch` is emitted only after the receiver stream already has a baseline snapshot and patch generation is safe\/smaller/);
+  assert.match(text, /same receiver\/session stream/);
+  assert.match(text, /`statePatch` is additive optimization and `stateSnapshot` remains canonical fallback/);
+});

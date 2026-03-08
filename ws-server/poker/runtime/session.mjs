@@ -21,7 +21,8 @@ export function createSession({ sessionId, nowTs, replayWindowSize = DEFAULT_REP
     latestDeliveredSeq: 0,
     replayWindowSize,
     replayByTableId: new Map(),
-    latestDeliveredSeqByTableId: new Map()
+    latestDeliveredSeqByTableId: new Map(),
+    latestAckedSeqByTableId: new Map()
   };
 }
 
@@ -95,4 +96,20 @@ export function resolveReplay({ session, tableId, lastSeq }) {
     earliestSeq,
     frames
   };
+}
+
+
+export function ackSessionSeq({ session, tableId, seq }) {
+  const latestDelivered = session.latestDeliveredSeqByTableId.get(tableId) ?? 0;
+  if (!Number.isInteger(seq) || seq < 0 || seq > latestDelivered) {
+    return { ok: false, reason: "invalid_ack", latestDelivered };
+  }
+
+  const priorAck = session.latestAckedSeqByTableId.get(tableId) ?? 0;
+  if (seq <= priorAck) {
+    return { ok: true, changed: false, ackedSeq: priorAck, latestDelivered };
+  }
+
+  session.latestAckedSeqByTableId.set(tableId, seq);
+  return { ok: true, changed: true, ackedSeq: seq, latestDelivered };
 }
