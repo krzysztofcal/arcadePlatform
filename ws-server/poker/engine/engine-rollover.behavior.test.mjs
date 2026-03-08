@@ -1,6 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { applyCoreStateAction, bootstrapCoreStateHand } from "./poker-engine.mjs";
+import {
+  applyCoreStateAction,
+  bootstrapCoreStateHand,
+  buildBootstrappedPokerState,
+  buildNextHandStateFromSettled
+} from "./poker-engine.mjs";
 
 function initialCore() {
   return {
@@ -36,4 +41,82 @@ test("engine rollover starts next preflop hand after settled terminal action", (
   assert.deepEqual(coreState.pokerState.community, []);
   assert.equal(coreState.pokerState.communityDealt, 0);
   assert.equal(coreState.pokerState.turnUserId !== null, true);
+});
+
+test("fold settlement carryover preserves stack-eligible members and deterministic dealer rotation", () => {
+  const threePlayer = {
+    roomId: "table_engine_roll_3p",
+    version: 9,
+    seats: { user_a: 1, user_b: 2, user_c: 3 },
+    members: [
+      { userId: "user_a", seat: 1 },
+      { userId: "user_b", seat: 2 },
+      { userId: "user_c", seat: 3 }
+    ],
+    pokerState: null
+  };
+
+  const settledLikeState = {
+    handId: "settled_1",
+    phase: "SETTLED",
+    dealerSeatNo: 1,
+    stacks: { user_a: 0, user_b: 130, user_c: 70 }
+  };
+
+  const next = buildNextHandStateFromSettled({
+    tableId: "table_engine_roll_3p",
+    coreState: threePlayer,
+    settledState: settledLikeState,
+    nextVersion: 10
+  });
+
+  assert.equal(next.phase, "PREFLOP");
+  assert.equal(next.handId, "ws_hand_table_engine_roll_3p_10_2");
+  assert.deepEqual(next.community, []);
+  assert.equal(next.communityDealt, 0);
+  assert.equal(next.currentBet, 2);
+  assert.equal(next.dealerSeatNo, 2);
+  assert.deepEqual(next.seats, [
+    { userId: "user_b", seatNo: 2 },
+    { userId: "user_c", seatNo: 3 }
+  ]);
+  assert.equal(next.turnUserId, "user_b");
+});
+
+test("rollover does not bootstrap a live hand when fewer than two stack-eligible players remain", () => {
+  const baseCore = {
+    roomId: "table_engine_roll_no_start",
+    version: 20,
+    seats: { user_a: 1, user_b: 2, user_c: 3 },
+    members: [
+      { userId: "user_a", seat: 1 },
+      { userId: "user_b", seat: 2 },
+      { userId: "user_c", seat: 3 }
+    ],
+    pokerState: null
+  };
+
+  const notEnough = buildBootstrappedPokerState({
+    tableId: "table_engine_roll_no_start",
+    coreState: baseCore,
+    startingStacks: { user_a: 0, user_b: 25, user_c: 0 },
+    handVersion: 21,
+    dealerSeatNo: 2
+  });
+
+  assert.equal(notEnough, null);
+
+  const nextFromSettled = buildNextHandStateFromSettled({
+    tableId: "table_engine_roll_no_start",
+    coreState: baseCore,
+    settledState: {
+      handId: "settled_2",
+      phase: "SETTLED",
+      dealerSeatNo: 2,
+      stacks: { user_a: 0, user_b: 25, user_c: 0 }
+    },
+    nextVersion: 21
+  });
+
+  assert.equal(nextFromSettled, null);
 });
