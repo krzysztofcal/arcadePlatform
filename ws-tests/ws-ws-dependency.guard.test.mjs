@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
+import fs from "node:fs";
 
 const require = createRequire(import.meta.url);
 
@@ -68,4 +69,16 @@ test("guard reports explicit diagnostics when neither globalThis.WebSocket nor w
     () => assertWsAvailable(availability),
     /Unable to resolve a WebSocket implementation\. hasGlobalWebSocket=false;.*forced resolve failure/
   );
+});
+
+
+test("persisted bootstrap repository stays within ws-server runtime boundary", () => {
+  const repositoryText = fs.readFileSync("ws-server/poker/bootstrap/persisted-bootstrap-repository.mjs", "utf8");
+  assert.doesNotMatch(repositoryText, /netlify\/functions\/_shared\/supabase-admin\.mjs/);
+  assert.match(repositoryText, /import\("\.\/persisted-bootstrap-db\.mjs"\)/);
+});
+
+test("ws-server package declares postgres dependency for db-backed bootstrap runtime", () => {
+  const packageJson = JSON.parse(fs.readFileSync("ws-server/package.json", "utf8"));
+  assert.equal(packageJson.dependencies?.postgres, "^3.4.5");
 });

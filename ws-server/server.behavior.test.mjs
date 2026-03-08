@@ -1885,3 +1885,395 @@ test("resume continuity for session A is not invalidated by high-traffic session
     await waitForExit(child);
   }
 });
+
+function persistedBootstrapFixturesEnv(fixtures) {
+  return {
+    WS_PERSISTED_BOOTSTRAP_FIXTURES_JSON: JSON.stringify(fixtures)
+  };
+}
+
+test("WS table_join hydrates from persisted bootstrap fixture", async () => {
+  const secret = "test-secret";
+  const token = makeHs256Jwt({ secret, sub: "user_a" });
+  const tableId = "table_persisted_join";
+  const fixtures = {
+    [tableId]: {
+      tableRow: { id: tableId, max_players: 6, status: "active" },
+      seatRows: [{ user_id: "user_a", seat_no: 3, status: "ACTIVE", is_bot: false }],
+      stateRow: { version: 21, state: { handId: "h21", phase: "PREFLOP", turnUserId: "user_a", holeCardsByUserId: { user_a: ["As", "Kd"] } } }
+    }
+  };
+
+  const { port, child } = await createServer({ env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret, SUPABASE_DB_URL: "", ...persistedBootstrapFixturesEnv(fixtures) } });
+
+  try {
+    await waitForListening(child, 5000);
+    const ws = await connectClient(port);
+    await hello(ws);
+    const authOk = await auth(ws, token);
+    assert.equal(authOk.type, "authOk");
+
+    sendFrame(ws, { version: "1.0", type: "table_join", requestId: "req-join", ts: "2026-02-28T00:00:02Z", payload: { tableId } });
+    const tableState = await nextMessageOfType(ws, "table_state");
+    assert.deepEqual(tableState.payload.members, [{ userId: "user_a", seat: 3 }]);
+
+    sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "req-snap", ts: "2026-02-28T00:00:03Z", payload: { tableId, view: "snapshot" } });
+    const snapshot = await nextMessageOfType(ws, "stateSnapshot");
+    assert.equal(snapshot.payload.stateVersion, 22);
+
+    ws.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
+test("WS table_join missing persisted table returns protocol-safe error and later valid join works", async () => {
+  const secret = "test-secret";
+  const token = makeHs256Jwt({ secret, sub: "user_a" });
+  const validTableId = "table_present_later";
+  const fixtures = {
+    [validTableId]: {
+      tableRow: { id: validTableId, max_players: 6 },
+      seatRows: [{ user_id: "user_a", seat_no: 1, status: "ACTIVE" }],
+      stateRow: { version: 3, state: { handId: "h3", phase: "PREFLOP" } }
+    }
+  };
+
+  const { port, child } = await createServer({ env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret, SUPABASE_DB_URL: "", ...persistedBootstrapFixturesEnv(fixtures) } });
+
+  try {
+    await waitForListening(child, 5000);
+    const ws = await connectClient(port);
+    await hello(ws);
+    await auth(ws, token);
+
+    sendFrame(ws, { version: "1.0", type: "table_join", requestId: "req-missing", ts: "2026-02-28T00:00:02Z", payload: { tableId: "missing_table" } });
+    const missingErr = await nextMessageOfType(ws, "error");
+    assert.equal(missingErr.payload.code, "INVALID_COMMAND");
+
+    sendFrame(ws, { version: "1.0", type: "table_join", requestId: "req-valid", ts: "2026-02-28T00:00:03Z", payload: { tableId: validTableId } });
+    const tableState = await nextMessageOfType(ws, "table_state");
+    assert.deepEqual(tableState.payload.members, [{ userId: "user_a", seat: 1 }]);
+
+    ws.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
+test("act does not create synthetic table when bootstrap fails", async () => {
+  const secret = "test-secret";
+  const token = makeHs256Jwt({ secret, sub: "user_a" });
+  const { port, child } = await createServer({ env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret, ...persistedBootstrapFixturesEnv({}) } });
+
+  try {
+    await waitForListening(child, 5000);
+    const ws = await connectClient(port);
+    await hello(ws);
+    await auth(ws, token);
+
+    sendFrame(ws, {
+      version: "1.0",
+      type: "act",
+      requestId: "req-act-missing",
+      ts: "2026-02-28T00:00:05Z",
+      payload: { tableId: "missing_table", handId: "h1", action: "check" }
+    });
+
+    const commandResult = await nextMessageOfType(ws, "commandResult");
+    assert.equal(commandResult.payload.status, "rejected");
+    assert.equal(commandResult.payload.reason, "table_not_found");
+
+    const noSnapshot = await attemptMessage(ws, 300);
+    assert.equal(noSnapshot?.type === "stateSnapshot", false);
+    ws.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
+test("server startup/auth works with persisted bootstrap disabled", async () => {
+  const secret = "test-secret";
+  const token = makeHs256Jwt({ secret, sub: "user_disabled_bootstrap" });
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      SUPABASE_DB_URL: "",
+      WS_PERSISTED_BOOTSTRAP_FIXTURES_JSON: ""
+    }
+  });
+
+  try {
+    await waitForListening(child, 5000);
+    const ws = await connectClient(port);
+    const helloAck = await hello(ws);
+    assert.equal(helloAck.type, "helloAck");
+
+    const authOk = await auth(ws, token, "auth-disabled-bootstrap");
+    assert.equal(authOk.type, "authOk");
+
+    sendFrame(ws, {
+      version: "1.0",
+      type: "table_join",
+      requestId: "join-disabled-bootstrap",
+      ts: "2026-02-28T00:20:01Z",
+      payload: { tableId: "table_synthetic_ok" }
+    });
+    const tableState = await nextMessageOfType(ws, "table_state");
+    assert.equal(tableState.payload.tableId, "table_synthetic_ok");
+
+    ws.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
+test("same-socket frame ordering is preserved when bootstrap load is slow", async () => {
+  const secret = "test-secret";
+  const token = makeHs256Jwt({ secret, sub: "user_a" });
+  const tableId = "table_slow_ordering";
+  const fixtures = {
+    [tableId]: {
+      delayMs: 250,
+      tableRow: { id: tableId, max_players: 6 },
+      seatRows: [{ user_id: "user_a", seat_no: 1, status: "ACTIVE" }],
+      stateRow: { version: 8, state: { handId: "h8", phase: "PREFLOP" } }
+    }
+  };
+
+  const { port, child } = await createServer({ env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret, ...persistedBootstrapFixturesEnv(fixtures) } });
+
+  try {
+    await waitForListening(child, 5000);
+    const ws = await connectClient(port);
+    await hello(ws);
+    await auth(ws, token);
+
+    sendFrame(ws, { version: "1.0", type: "table_join", requestId: "join-slow", ts: "2026-02-28T00:21:00Z", payload: { tableId } });
+    sendFrame(ws, {
+      version: "1.0",
+      type: "act",
+      requestId: "act-after-join",
+      ts: "2026-02-28T00:21:01Z",
+      payload: { tableId, handId: "h8", action: "check" }
+    });
+
+    const first = await nextMessage(ws);
+    const second = await nextMessage(ws);
+
+    assert.equal(first.type, "table_state");
+    assert.equal(second.type, "commandResult");
+    ws.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
+test("slow bootstrap on one socket does not block another socket", async () => {
+  const secret = "test-secret";
+  const tokenA = makeHs256Jwt({ secret, sub: "user_a" });
+  const tokenB = makeHs256Jwt({ secret, sub: "user_b" });
+  const tableId = "table_socket_a_slow";
+  const fixtures = {
+    [tableId]: {
+      delayMs: 300,
+      tableRow: { id: tableId, max_players: 6 },
+      seatRows: [{ user_id: "user_a", seat_no: 1, status: "ACTIVE" }],
+      stateRow: { version: 5, state: { handId: "h5", phase: "PREFLOP" } }
+    }
+  };
+
+  const { port, child } = await createServer({ env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret, ...persistedBootstrapFixturesEnv(fixtures) } });
+
+  try {
+    await waitForListening(child, 5000);
+    const wsA = await connectClient(port);
+    const wsB = await connectClient(port);
+
+    await hello(wsA);
+    await auth(wsA, tokenA);
+    await hello(wsB);
+    await auth(wsB, tokenB);
+
+    sendFrame(wsA, { version: "1.0", type: "table_join", requestId: "join-a-slow", ts: "2026-02-28T00:22:00Z", payload: { tableId } });
+
+    sendFrame(wsB, {
+      version: "1.0",
+      type: "protected_echo",
+      requestId: "echo-b-fast",
+      ts: "2026-02-28T00:22:01Z",
+      payload: { echo: "B" }
+    });
+
+    const echoResponse = await nextMessageOfType(wsB, "protectedEchoOk", 2000);
+    assert.equal(echoResponse.payload.echo, "B");
+
+    const tableStateA = await nextMessageOfType(wsA, "table_state", 3000);
+    assert.equal(tableStateA.payload.tableId, tableId);
+
+    wsA.close();
+    wsB.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
+test("rapid same-socket join then snapshot remains ordered with slow bootstrap", async () => {
+  const secret = "test-secret";
+  const token = makeHs256Jwt({ secret, sub: "user_a" });
+  const tableId = "table_join_snapshot_ordered";
+  const fixtures = {
+    [tableId]: {
+      delayMs: 250,
+      tableRow: { id: tableId, max_players: 6 },
+      seatRows: [{ user_id: "user_a", seat_no: 2, status: "ACTIVE" }],
+      stateRow: { version: 17, state: { handId: "h17", phase: "PREFLOP", turnUserId: "user_a" } }
+    }
+  };
+
+  const { port, child } = await createServer({ env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret, ...persistedBootstrapFixturesEnv(fixtures) } });
+
+  try {
+    await waitForListening(child, 5000);
+    const ws = await connectClient(port);
+    await hello(ws);
+    await auth(ws, token);
+
+    sendFrame(ws, { version: "1.0", type: "table_join", requestId: "join-ordered", ts: "2026-02-28T00:23:00Z", payload: { tableId } });
+    sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "snap-ordered", ts: "2026-02-28T00:23:01Z", payload: { tableId, view: "snapshot" } });
+
+    const first = await nextMessage(ws, 4000);
+    const second = await nextMessage(ws, 4000);
+
+    assert.equal(first.type, "table_state");
+    assert.equal(second.type, "stateSnapshot");
+    assert.equal(second.roomId, tableId);
+    ws.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
+test("unexpected processMessage failure returns protocol-safe error frame", async () => {
+  const secret = "test-secret";
+  const token = makeHs256Jwt({ secret, sub: "user_throw_single" });
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      WS_TEST_THROW_ON_FRAME_TYPE: "protected_echo"
+    }
+  });
+
+  try {
+    await waitForListening(child, 5000);
+    const ws = await connectClient(port);
+    await hello(ws);
+    await auth(ws, token);
+
+    sendFrame(ws, protectedEchoFrame("throw-on-echo"));
+    const errorFrame = await nextMessage(ws, 3000);
+    assert.equal(errorFrame.payload.code, "INTERNAL_ERROR");
+    assert.equal(errorFrame.payload.message, "internal_server_error");
+    assert.equal(ws.readyState, WebSocket.OPEN);
+
+    ws.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
+test("one socket internal failure does not block another socket", async () => {
+  const secret = "test-secret";
+  const tokenA = makeHs256Jwt({ secret, sub: "user_throw_a" });
+  const tokenB = makeHs256Jwt({ secret, sub: "user_throw_b" });
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      WS_TEST_THROW_ON_FRAME_TYPE: "table_join"
+    }
+  });
+
+  try {
+    await waitForListening(child, 5000);
+    const wsA = await connectClient(port);
+    const wsB = await connectClient(port);
+    await hello(wsA);
+    await auth(wsA, tokenA);
+    await hello(wsB);
+    await auth(wsB, tokenB);
+
+    sendFrame(wsA, {
+      version: "1.0",
+      type: "table_join",
+      requestId: "throw-join-a",
+      ts: "2026-02-28T00:30:00Z",
+      payload: { tableId: "table_throw_a" }
+    });
+
+    sendFrame(wsB, protectedEchoFrame("echo-b-normal"));
+
+    const errA = await nextMessage(wsA, 3000);
+    assert.equal(errA.type, "error");
+    assert.equal(errA.payload.code, "INTERNAL_ERROR");
+
+    const okB = await nextMessage(wsB, 3000);
+    assert.equal(okB.type, "protectedEchoOk");
+    assert.equal(okB.payload.echo, "hi");
+
+    wsA.close();
+    wsB.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
+test("same-socket queue remains usable after internal failure", async () => {
+  const secret = "test-secret";
+  const token = makeHs256Jwt({ secret, sub: "user_throw_recover" });
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      WS_TEST_THROW_ON_FRAME_TYPE: "protected_echo"
+    }
+  });
+
+  try {
+    await waitForListening(child, 5000);
+    const ws = await connectClient(port);
+    await hello(ws);
+    await auth(ws, token);
+
+    sendFrame(ws, protectedEchoFrame("throw-first"));
+    const errorFrame = await nextMessage(ws, 3000);
+    assert.equal(errorFrame.payload.code, "INTERNAL_ERROR");
+
+    sendFrame(ws, {
+      version: "1.0",
+      type: "ping",
+      requestId: "ping-after-throw",
+      ts: "2026-02-28T00:30:10Z",
+      payload: {}
+    });
+
+    const followup = await nextMessage(ws, 3000);
+    assert.equal(["pong", "error"].includes(followup.type), true);
+    assert.equal(ws.readyState, WebSocket.OPEN);
+    ws.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});

@@ -45,6 +45,7 @@ export function createTableManager({
   presenceTtlMs = DEFAULT_PRESENCE_TTL_MS,
   maxSeats = DEFAULT_MAX_SEATS,
   actionResultCacheMax = DEFAULT_ACTION_RESULT_CACHE_MAX,
+  tableBootstrapLoader = null,
   enableDebugCore = false,
   nodeEnv = process.env.NODE_ENV
 } = {}) {
@@ -52,6 +53,7 @@ export function createTableManager({
     ? actionResultCacheMax
     : DEFAULT_ACTION_RESULT_CACHE_MAX;
   const tables = new Map();
+  const pendingBootstrapByTableId = new Map();
   const connStateBySocket = new Map();
   function nextSyntheticRequestId(kind, tableId, userId, nowTs, discriminator) {
     return `${kind}:${tableId}:${userId}:${nowTs}:${discriminator}`;
@@ -121,6 +123,43 @@ export function createTableManager({
       });
     }
     return tables.get(tableId);
+  }
+
+  async function ensureTableLoaded(tableId) {
+    if (tables.has(tableId)) {
+      return { ok: true, table: tables.get(tableId), cached: true };
+    }
+
+    if (pendingBootstrapByTableId.has(tableId)) {
+      return pendingBootstrapByTableId.get(tableId);
+    }
+
+    const bootstrapPromise = (async () => {
+      if (typeof tableBootstrapLoader !== "function") {
+        const table = ensureTable(tableId);
+        return { ok: true, table, cached: false };
+      }
+
+      const loaded = await tableBootstrapLoader({ tableId, maxSeats });
+      if (!loaded?.ok) {
+        return {
+          ok: false,
+          code: loaded?.code || "table_not_found",
+          message: loaded?.message || loaded?.code || "table_not_found"
+        };
+      }
+
+      tables.set(tableId, loaded.table);
+      return { ok: true, table: loaded.table, cached: false };
+    })();
+
+    pendingBootstrapByTableId.set(tableId, bootstrapPromise);
+
+    try {
+      return await bootstrapPromise;
+    } finally {
+      pendingBootstrapByTableId.delete(tableId);
+    }
   }
 
   function rejectAction({ reason, stateVersion }) {
@@ -657,6 +696,7 @@ export function createTableManager({
   }
 
   const manager = {
+    ensureTableLoaded,
     join,
     leave,
     subscribe,
