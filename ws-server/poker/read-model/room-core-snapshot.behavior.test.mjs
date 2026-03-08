@@ -133,6 +133,7 @@ test("projectRoomCoreSnapshot projects settled showdown fields without leaking p
 
   assert.equal(seated.hand.status, "SETTLED");
   assert.equal(seated.pot.total, 0);
+  assert.deepEqual(seated.turn, { userId: null, seat: null, startedAt: null, deadlineAt: null });
   assert.deepEqual(seated.showdown.winners, ["other_user"]);
   assert.deepEqual(seated.handSettlement.payouts, { other_user: 6 });
   assert.equal(observer.private, null);
@@ -265,7 +266,8 @@ test("projectRoomCoreSnapshot clears turn timer metadata for settled hands even 
 
   assert.equal(snapshot.hand.status, "SETTLED");
   assert.equal(snapshot.pot.total, 0);
-  assert.equal(snapshot.turn.userId, "seated_user");
+  assert.equal(snapshot.turn.userId, null);
+  assert.equal(snapshot.turn.seat, null);
   assert.equal(snapshot.turn.startedAt, null);
   assert.equal(snapshot.turn.deadlineAt, null);
   assert.deepEqual(snapshot.private, { userId: "seated_user", seat: 1, holeCards: ["AH", "AD"] });
