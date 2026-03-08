@@ -49,6 +49,12 @@ jobs:
       - name: Run state-snapshot behavior test
         run: node --test ws-server/poker/read-model/state-snapshot.behavior.test.mjs
 
+      - name: Run state-patch behavior test
+        run: node --test ws-server/poker/read-model/state-patch.behavior.test.mjs
+
+      - name: Run stream-log behavior test
+        run: node --test ws-server/poker/runtime/stream-log.behavior.test.mjs
+
       - name: Run poker primitives behavior test
         run: node --test ws-server/poker/shared/poker-primitives.behavior.test.mjs
 

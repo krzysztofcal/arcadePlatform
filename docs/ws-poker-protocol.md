@@ -289,3 +289,15 @@ Resync triggers (non-exhaustive): sequence gap, stale client state version, sess
 - Private state isolation: hole cards and equivalent sensitive fields MUST only be present in `stateSnapshot`/`statePatch` for the owning player.
 - Rate limits: server enforces per-connection and per-user command limits; excess uses `RATE_LIMITED`.
 - Server-authoritative poker transitions: client commands are requests only; legality and final state are determined server-side.
+
+PR15 contract delta: WS transport now assigns server-authoritative `seq` for stateful room-stream events (`table_state`, `stateSnapshot`, `statePatch`, `resync`) with deterministic per-table monotonic ordering. Runtime keeps a bounded in-memory replay window and resume is best-effort only within the current process lifetime.
+
+PR15 resume/ack behavior (implemented):
+- `ack` advances receiver-local watermark only and never mutates poker table state.
+- `resume` replays only in-window events (`seq > lastSeq`) in order when continuity is provable for the same receiver/session stream.
+- On replay miss (`last_seq_out_of_window`, unknown session, or mismatch), server emits `resync` and then sends fresh `stateSnapshot` fallback.
+- Legacy PR9/PR11 live fanout paths remain `stateSnapshot`-based for v1.x compatibility.
+- `statePatch` is reserved for additive/opt-in transport optimization paths and does not redefine default legacy post-action or timeout delivery.
+- `stateSnapshot` remains canonical fallback/resync truth path.
+
+Durability note: replay buffer is process-local and bounded; server restarts or long gaps may require full snapshot recovery.

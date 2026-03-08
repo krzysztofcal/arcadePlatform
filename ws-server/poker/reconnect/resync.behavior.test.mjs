@@ -170,6 +170,24 @@ function sendFrame(ws, frame) {
 }
 
 
+async function nextMessageOfType(ws, type, { timeoutMs = 5000, skipTypes = [] } = {}) {
+  const started = Date.now();
+  while (true) {
+    const remaining = timeoutMs - (Date.now() - started);
+    if (remaining <= 0) {
+      throw new Error(`Timed out waiting for message type: ${type}`);
+    }
+    const frame = await nextMessage(ws, remaining, `nextMessageOfType(${type})`);
+    if (frame?.type === type) {
+      return frame;
+    }
+    if (skipTypes.includes(frame?.type)) {
+      continue;
+    }
+    throw new Error(`Unexpected frame while waiting for ${type}: ${frame?.type || "unknown"}`);
+  }
+}
+
 function waitBeyondTtl(ttlMs, bufferMs = 250) {
   return new Promise((resolve) => setTimeout(resolve, ttlMs + bufferMs));
 }
@@ -957,7 +975,8 @@ test("resume with stale lastSeq outside replay window returns deterministic resy
   const { port, child } = await createServer({
     env: {
       WS_AUTH_REQUIRED: "1",
-      WS_AUTH_TEST_SECRET: secret
+      WS_AUTH_TEST_SECRET: secret,
+      WS_STREAM_REPLAY_CAP: "8"
     }
   });
 
@@ -1005,14 +1024,20 @@ test("resume with stale lastSeq outside replay window returns deterministic resy
       payload: { tableId: "table_resume_stale", sessionId, lastSeq: 0 }
     });
 
-    const outcome = await nextMessage(client2, 5000, "resume-stale-outcome");
+    const outcome = await nextMessageOfType(client2, "resync", { skipTypes: ["table_state"] });
     assert.equal(outcome.type, "resync");
     assert.equal(outcome.payload.mode, "required");
     assert.equal(outcome.payload.reason, "last_seq_out_of_window");
     assert.equal(typeof outcome.payload.expectedSeq, "number");
 
-    const noReplay = await attemptMessage(client2);
-    assert.equal(noReplay, null);
+    const recovery = await nextMessageOfType(client2, "stateSnapshot", { skipTypes: ["table_state"] });
+    assert.equal(recovery.type, "stateSnapshot");
+    assert.equal(typeof recovery.seq, "number");
+    assert.equal(recovery.payload.table.tableId, "table_resume_stale");
+    assert.equal(recovery.payload.you.userId, "user_resume_stale");
+
+    const noMutationFrames = await attemptMessage(client2, 300);
+    assert.equal(noMutationFrames === null || noMutationFrames.type !== "commandResult", true);
 
     client2.close();
   } finally {

@@ -60,6 +60,11 @@ function assertRequiredOrder(text) {
   const imageCheck = block.indexOf("node --test ws-tests/ws-image-contains-protocol.behavior.test.mjs");
   const containerCheck = block.indexOf("node --test ws-tests/ws-container-starts.behavior.test.mjs");
 
+  assert.match(block, /Run state-patch behavior test/);
+  assert.match(block, /node --test ws-server\/poker\/read-model\/state-patch\.behavior\.test\.mjs/);
+  assert.match(block, /Run stream-log behavior test/);
+  assert.match(block, /node --test ws-server\/poker\/runtime\/stream-log\.behavior\.test\.mjs/);
+
   assert.notEqual(install, -1);
   assert.notEqual(behavior, -1);
   assert.notEqual(locationGuard, -1);
