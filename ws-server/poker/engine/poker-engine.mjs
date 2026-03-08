@@ -1,6 +1,7 @@
 import {
   dealHoleCards,
   deriveDeck,
+  computeSharedLegalActions,
   toHoleCardCodeMap,
   toCardCodes
 } from "../shared/poker-primitives.mjs";
@@ -8,6 +9,22 @@ import { applyAction as applyPokerAction } from "../shared/poker-action-reducer.
 import { decideTurnTimeout, stampTurnDeadline } from "../shared/poker-turn-timeout.mjs";
 
 const MIN_PLAYERS_TO_BOOTSTRAP = 2;
+const ENGINE_ACTIONS = new Set(["FOLD", "CHECK", "CALL", "RAISE"]);
+
+function toInt(value) {
+  if (!Number.isFinite(value)) {
+    return null;
+  }
+  return Math.trunc(value);
+}
+
+function normalizeEngineAction(action) {
+  if (typeof action !== "string") {
+    return null;
+  }
+  const normalized = action.trim().toUpperCase();
+  return ENGINE_ACTIONS.has(normalized) ? normalized : null;
+}
 
 function nextHandId(tableId, version, seatCount) {
   return `ws_hand_${tableId}_${version}_${seatCount}`;
@@ -209,7 +226,44 @@ export function applyCoreStateAction({ tableId, coreState, handId, userId, actio
     return { ok: true, accepted: false, changed: false, reason: "not_seated", stateVersion: coreState.version, coreState };
   }
 
-  const applied = applyPokerAction({ pokerState: liveState, userId, action, amount, nowIso });
+  if (liveState.turnUserId !== userId) {
+    return { ok: true, accepted: false, changed: false, reason: "illegal_action", stateVersion: coreState.version, coreState };
+  }
+
+  const normalizedAction = normalizeEngineAction(action);
+  if (!normalizedAction) {
+    return { ok: true, accepted: false, changed: false, reason: "illegal_action", stateVersion: coreState.version, coreState };
+  }
+
+  const legalInfo = computeSharedLegalActions({ statePublic: liveState, userId });
+  if (!Array.isArray(legalInfo.actions) || !legalInfo.actions.includes(normalizedAction)) {
+    return { ok: true, accepted: false, changed: false, reason: "illegal_action", stateVersion: coreState.version, coreState };
+  }
+
+  const stack = Number(liveState.stacks?.[userId] ?? 0);
+  const toCall = Math.max(0, Number(legalInfo.toCall ?? 0));
+  if (normalizedAction === "CALL") {
+    if (toCall === 0) {
+      return { ok: true, accepted: false, changed: false, reason: "illegal_action", stateVersion: coreState.version, coreState };
+    }
+    if (!Number.isFinite(stack) || stack < toCall) {
+      return { ok: true, accepted: false, changed: false, reason: "unsupported_all_in", stateVersion: coreState.version, coreState };
+    }
+  }
+
+  if (normalizedAction === "RAISE") {
+    const raiseTo = toInt(amount);
+    const minRaiseTo = Number(legalInfo.minRaiseTo ?? 0);
+    const maxRaiseTo = Number(legalInfo.maxRaiseTo ?? 0);
+    if (!Number.isInteger(raiseTo) || raiseTo < minRaiseTo || raiseTo > maxRaiseTo) {
+      return { ok: true, accepted: false, changed: false, reason: "invalid_amount", stateVersion: coreState.version, coreState };
+    }
+    if (!Number.isFinite(stack) || raiseTo > stack + Number(liveState.betThisRoundByUserId?.[userId] ?? 0)) {
+      return { ok: true, accepted: false, changed: false, reason: "invalid_amount", stateVersion: coreState.version, coreState };
+    }
+  }
+
+  const applied = applyPokerAction({ pokerState: liveState, userId, action: normalizedAction, amount, nowIso });
   if (!applied.ok) {
     return {
       ok: true,

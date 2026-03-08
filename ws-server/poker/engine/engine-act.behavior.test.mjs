@@ -162,3 +162,101 @@ test("engine action application is deterministic for identical pre-state/action/
   assert.equal(second.stateVersion, preState.version + 1);
   assert.deepEqual(first.coreState.pokerState, second.coreState.pokerState);
 });
+
+
+test("engine legality gate rejects wrong-turn/non-seated/hand-mismatch actions without mutation", () => {
+  const boot = bootstrapCoreStateHand({ tableId: "table_engine_act", coreState: initialCore(), nowMs: 4_000 });
+  const coreState = boot.coreState;
+
+  const wrongTurn = applyCoreStateAction({
+    tableId: "table_engine_act",
+    coreState,
+    handId: coreState.pokerState.handId,
+    userId: "user_b",
+    action: "CALL",
+    nowIso: new Date(4_001).toISOString(),
+    nowMs: 4_001
+  });
+  assert.equal(wrongTurn.accepted, false);
+  assert.equal(wrongTurn.changed, false);
+  assert.equal(wrongTurn.reason, "illegal_action");
+  assert.equal(wrongTurn.stateVersion, coreState.version);
+  assert.equal(wrongTurn.coreState, coreState);
+
+  const nonSeatedCore = { ...coreState, seats: { user_a: 1 } };
+  const nonSeated = applyCoreStateAction({
+    tableId: "table_engine_act",
+    coreState: nonSeatedCore,
+    handId: coreState.pokerState.handId,
+    userId: "user_b",
+    action: "CALL",
+    nowIso: new Date(4_002).toISOString(),
+    nowMs: 4_002
+  });
+  assert.equal(nonSeated.accepted, false);
+  assert.equal(nonSeated.reason, "not_seated");
+  assert.equal(nonSeated.stateVersion, nonSeatedCore.version);
+  assert.equal(nonSeated.coreState, nonSeatedCore);
+
+  const badHand = applyCoreStateAction({
+    tableId: "table_engine_act",
+    coreState,
+    handId: "wrong_hand_id",
+    userId: "user_a",
+    action: "CALL",
+    nowIso: new Date(4_003).toISOString(),
+    nowMs: 4_003
+  });
+  assert.equal(badHand.accepted, false);
+  assert.equal(badHand.reason, "hand_mismatch");
+  assert.equal(badHand.stateVersion, coreState.version);
+  assert.equal(badHand.coreState, coreState);
+});
+
+test("engine legality gate rejects illegal check/missing raise/too-small raise with no mutation", () => {
+  const boot = bootstrapCoreStateHand({ tableId: "table_engine_act", coreState: initialCore(), nowMs: 5_000 });
+  const coreState = boot.coreState;
+
+  const illegalCheck = applyCoreStateAction({
+    tableId: "table_engine_act",
+    coreState,
+    handId: coreState.pokerState.handId,
+    userId: coreState.pokerState.turnUserId,
+    action: "CHECK",
+    nowIso: new Date(5_001).toISOString(),
+    nowMs: 5_001
+  });
+  assert.equal(illegalCheck.accepted, false);
+  assert.equal(illegalCheck.reason, "illegal_action");
+  assert.equal(illegalCheck.stateVersion, coreState.version);
+  assert.equal(illegalCheck.coreState, coreState);
+
+  const missingRaise = applyCoreStateAction({
+    tableId: "table_engine_act",
+    coreState,
+    handId: coreState.pokerState.handId,
+    userId: coreState.pokerState.turnUserId,
+    action: "RAISE",
+    nowIso: new Date(5_002).toISOString(),
+    nowMs: 5_002
+  });
+  assert.equal(missingRaise.accepted, false);
+  assert.equal(missingRaise.reason, "invalid_amount");
+  assert.equal(missingRaise.stateVersion, coreState.version);
+  assert.equal(missingRaise.coreState, coreState);
+
+  const tooSmallRaise = applyCoreStateAction({
+    tableId: "table_engine_act",
+    coreState,
+    handId: coreState.pokerState.handId,
+    userId: coreState.pokerState.turnUserId,
+    action: "RAISE",
+    amount: 3,
+    nowIso: new Date(5_003).toISOString(),
+    nowMs: 5_003
+  });
+  assert.equal(tooSmallRaise.accepted, false);
+  assert.equal(tooSmallRaise.reason, "invalid_amount");
+  assert.equal(tooSmallRaise.stateVersion, coreState.version);
+  assert.equal(tooSmallRaise.coreState, coreState);
+});
