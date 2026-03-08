@@ -40,3 +40,69 @@ test("engine bootstrap creates deterministic preflop hand with expected invarian
   assert.equal(Array.isArray(pokerState.seats), true);
   assert.equal(typeof pokerState.roomId, "string");
 });
+
+test("bootstrap maps dealer/SB/BB/UTG deterministically for 2-player and 3-player tables", () => {
+  const twoPlayerCore = {
+    roomId: "table_engine_2p",
+    version: 0,
+    seats: { user_a: 1, user_b: 2 },
+    members: [
+      { userId: "user_a", seat: 1 },
+      { userId: "user_b", seat: 2 }
+    ],
+    pokerState: null
+  };
+
+  const twoPlayer = bootstrapCoreStateHand({ tableId: "table_engine_2p", coreState: twoPlayerCore, nowMs: 1_000 });
+  assert.equal(twoPlayer.changed, true);
+  assert.equal(twoPlayer.coreState.pokerState.dealerSeatNo, 1);
+  assert.equal(twoPlayer.coreState.pokerState.turnUserId, "user_a");
+  assert.equal(twoPlayer.coreState.pokerState.betThisRoundByUserId.user_a, 1);
+  assert.equal(twoPlayer.coreState.pokerState.betThisRoundByUserId.user_b, 2);
+
+  const threePlayer = bootstrapCoreStateHand({ tableId: "table_engine", coreState: coreStateBase(), nowMs: 1_000 });
+  assert.equal(threePlayer.changed, true);
+  assert.equal(threePlayer.coreState.pokerState.dealerSeatNo, 1);
+  assert.equal(threePlayer.coreState.pokerState.turnUserId, "user_a");
+  assert.equal(threePlayer.coreState.pokerState.betThisRoundByUserId.user_b, 1);
+  assert.equal(threePlayer.coreState.pokerState.betThisRoundByUserId.user_c, 2);
+});
+
+test("bootstrap no-op paths preserve stable result shape", () => {
+  const insufficientPlayers = {
+    roomId: "table_engine_short",
+    version: 4,
+    seats: { user_a: 1 },
+    members: [{ userId: "user_a", seat: 1 }],
+    pokerState: null
+  };
+
+  const notEligible = bootstrapCoreStateHand({
+    tableId: "table_engine_short",
+    coreState: insufficientPlayers,
+    nowMs: 1_111
+  });
+  assert.equal(notEligible.ok, true);
+  assert.equal(notEligible.changed, false);
+  assert.equal(notEligible.bootstrap, "not_eligible");
+  assert.equal(notEligible.stateVersion, 4);
+  assert.equal(notEligible.coreState, insufficientPlayers);
+
+  const alreadyLiveCore = bootstrapCoreStateHand({
+    tableId: "table_engine",
+    coreState: coreStateBase(),
+    nowMs: 1_000
+  }).coreState;
+
+  const alreadyLive = bootstrapCoreStateHand({
+    tableId: "table_engine",
+    coreState: alreadyLiveCore,
+    nowMs: 1_001
+  });
+  assert.equal(alreadyLive.ok, true);
+  assert.equal(alreadyLive.changed, false);
+  assert.equal(alreadyLive.bootstrap, "already_live");
+  assert.equal(alreadyLive.handId, alreadyLiveCore.pokerState.handId);
+  assert.equal(alreadyLive.stateVersion, alreadyLiveCore.version);
+  assert.equal(alreadyLive.coreState, alreadyLiveCore);
+});

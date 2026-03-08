@@ -84,3 +84,81 @@ test("engine action progression advances PREFLOP->FLOP->TURN with monotonic vers
   });
   assert.deepEqual(deterministicReplay.coreState.pokerState, coreState.pokerState);
 });
+
+test("engine action accounting parity: PREFLOP raise/call updates fields exactly once", () => {
+  const boot = bootstrapCoreStateHand({ tableId: "table_engine_act", coreState: initialCore(), nowMs: 2_000 });
+  const initial = boot.coreState;
+
+  const raised = applyCoreStateAction({
+    tableId: "table_engine_act",
+    coreState: initial,
+    handId: initial.pokerState.handId,
+    userId: initial.pokerState.turnUserId,
+    action: "RAISE",
+    amount: 6,
+    nowIso: new Date(2_001).toISOString(),
+    nowMs: 2_001
+  });
+
+  assert.equal(raised.accepted, true);
+  assert.equal(raised.stateVersion, initial.version + 1);
+  assert.equal(raised.coreState.pokerState.potTotal, 8);
+  assert.equal(raised.coreState.pokerState.currentBet, 6);
+  assert.equal(raised.coreState.pokerState.toCallByUserId.user_a, 0);
+  assert.equal(raised.coreState.pokerState.toCallByUserId.user_b, 4);
+  assert.equal(raised.coreState.pokerState.betThisRoundByUserId.user_a, 6);
+  assert.equal(raised.coreState.pokerState.betThisRoundByUserId.user_b, 2);
+  assert.equal(raised.coreState.pokerState.actedThisRoundByUserId.user_a, true);
+  assert.equal(raised.coreState.pokerState.actedThisRoundByUserId.user_b, false);
+  assert.equal(raised.coreState.pokerState.contributionsByUserId.user_a, 6);
+  assert.equal(raised.coreState.pokerState.contributionsByUserId.user_b, 2);
+  assert.equal(raised.coreState.pokerState.turnUserId, "user_b");
+
+  const called = applyCoreStateAction({
+    tableId: "table_engine_act",
+    coreState: raised.coreState,
+    handId: raised.coreState.pokerState.handId,
+    userId: "user_b",
+    action: "CALL",
+    nowIso: new Date(2_002).toISOString(),
+    nowMs: 2_002
+  });
+
+  assert.equal(called.accepted, true);
+  assert.equal(called.stateVersion, raised.stateVersion + 1);
+  assert.equal(called.coreState.pokerState.phase, "FLOP");
+  assert.equal(called.coreState.pokerState.potTotal, 12);
+  assert.equal(called.coreState.pokerState.currentBet, 0);
+  assert.equal(called.coreState.pokerState.betThisRoundByUserId.user_a, 0);
+  assert.equal(called.coreState.pokerState.betThisRoundByUserId.user_b, 0);
+  assert.equal(called.coreState.pokerState.toCallByUserId.user_a, 0);
+  assert.equal(called.coreState.pokerState.toCallByUserId.user_b, 0);
+  assert.equal(called.coreState.pokerState.actedThisRoundByUserId.user_a, false);
+  assert.equal(called.coreState.pokerState.actedThisRoundByUserId.user_b, false);
+  assert.equal(called.coreState.pokerState.contributionsByUserId.user_a, 6);
+  assert.equal(called.coreState.pokerState.contributionsByUserId.user_b, 6);
+  assert.equal(called.coreState.pokerState.turnUserId, "user_b");
+});
+
+test("engine action application is deterministic for identical pre-state/action/timestamp", () => {
+  const boot = bootstrapCoreStateHand({ tableId: "table_engine_act", coreState: initialCore(), nowMs: 3_000 });
+  const preState = boot.coreState;
+  const actionArgs = {
+    tableId: "table_engine_act",
+    coreState: preState,
+    handId: preState.pokerState.handId,
+    userId: preState.pokerState.turnUserId,
+    action: "CALL",
+    nowIso: new Date(3_001).toISOString(),
+    nowMs: 3_001
+  };
+
+  const first = applyCoreStateAction(actionArgs);
+  const second = applyCoreStateAction(actionArgs);
+
+  assert.equal(first.accepted, true);
+  assert.equal(second.accepted, true);
+  assert.equal(first.stateVersion, preState.version + 1);
+  assert.equal(second.stateVersion, preState.version + 1);
+  assert.deepEqual(first.coreState.pokerState, second.coreState.pokerState);
+});
