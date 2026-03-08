@@ -87,7 +87,7 @@ test("projectRoomCoreSnapshot projects settled showdown fields without leaking p
       roomId: "table_settled",
       handId: "hand_settled_1",
       phase: "SETTLED",
-      turnUserId: null,
+      turnUserId: "seated_user",
       community: ["2H", "3H", "4H", "9C", "KD"],
       potTotal: 0,
       sidePots: [],
@@ -234,14 +234,14 @@ test("projectRoomCoreSnapshot projects turn timer metadata for a live hand", () 
   assert.equal(observer.private, null);
 });
 
-test("projectRoomCoreSnapshot clears turn timer metadata when hand is settled or turn is unavailable", () => {
+test("projectRoomCoreSnapshot clears turn timer metadata for settled hands even with stale turn metadata", () => {
   const coreState = {
     seats: { seated_user: 1, other_user: 2 },
     pokerState: {
       roomId: "table_settled_timer",
       handId: "hand_settled_timer",
       phase: "SETTLED",
-      turnUserId: null,
+      turnUserId: "seated_user",
       turnStartedAt: 1710000000000,
       turnDeadlineAt: 1710000015000,
       community: ["2H", "3H", "4H", "9C", "KD"],
@@ -263,7 +263,10 @@ test("projectRoomCoreSnapshot clears turn timer metadata when hand is settled or
     youSeat: 1
   });
 
-  assert.equal(snapshot.turn.userId, null);
+  assert.equal(snapshot.hand.status, "SETTLED");
+  assert.equal(snapshot.pot.total, 0);
+  assert.equal(snapshot.turn.userId, "seated_user");
   assert.equal(snapshot.turn.startedAt, null);
   assert.equal(snapshot.turn.deadlineAt, null);
+  assert.deepEqual(snapshot.private, { userId: "seated_user", seat: 1, holeCards: ["AH", "AD"] });
 });

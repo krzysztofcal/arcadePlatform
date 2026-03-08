@@ -56,7 +56,9 @@ function resolveTurnTimerField(value) {
 }
 
 function resolveTurnTimer({ statePublic, turnUserId }) {
-  if (typeof turnUserId !== "string") {
+  const liveRound = resolveRoundFromPhase(statePublic?.phase);
+  const hasTurnUser = typeof turnUserId === "string" && turnUserId.trim().length > 0;
+  if (!liveRound || !hasTurnUser) {
     return { startedAt: null, deadlineAt: null };
   }
   return {
