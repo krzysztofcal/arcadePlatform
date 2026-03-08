@@ -867,6 +867,8 @@ test("snapshot view projects live bootstrapped PREFLOP hand for seated user and 
     assert.equal(typeof seatedSnapshot.payload.public.hand.handId, "string");
     assert.deepEqual(seatedSnapshot.payload.public.pot, { total: 3, sidePots: [] });
     assert.equal(seatedSnapshot.payload.public.turn.userId, "live_seated_user");
+    assert.equal(Number.isFinite(seatedSnapshot.payload.public.turn.startedAt), true);
+    assert.equal(Number.isFinite(seatedSnapshot.payload.public.turn.deadlineAt), true);
     assert.deepEqual(seatedSnapshot.payload.public.legalActions, { seat: 1, actions: ["FOLD", "CALL", "RAISE"] });
     assert.equal(Array.isArray(seatedSnapshot.payload.private?.holeCards), true);
     assert.equal(seatedSnapshot.payload.private.holeCards.length, 2);
@@ -1505,13 +1507,23 @@ test("server applies due timeout and emits one updated stateSnapshot", async () 
     const timeoutA = await nextMessageOfType(wsA, "stateSnapshot", 4000);
     const timeoutB = await nextMessageOfType(wsB, "stateSnapshot", 4000);
 
+    // Periodic timeout sweeps can emit adjacent valid timeout waves while each socket
+    // awaits independently, so this test verifies receiver-local timer sanity and
+    // progression invariants rather than exact cross-socket timer equality.
     assert.equal(timeoutA.payload.stateVersion > baseA.payload.stateVersion, true);
     assert.equal(timeoutB.payload.stateVersion > baseB.payload.stateVersion, true);
     assert.equal(timeoutA.payload.private.userId, "user_a");
     assert.equal(timeoutB.payload.private.userId, "user_b");
+    assert.equal(Number.isFinite(timeoutA.payload.public.turn.startedAt), true);
+    assert.equal(Number.isFinite(timeoutA.payload.public.turn.deadlineAt), true);
+    assert.equal(timeoutA.payload.public.turn.deadlineAt > timeoutA.payload.public.turn.startedAt, true);
+    assert.equal(Number.isFinite(timeoutB.payload.public.turn.startedAt), true);
+    assert.equal(Number.isFinite(timeoutB.payload.public.turn.deadlineAt), true);
+    assert.equal(timeoutB.payload.public.turn.deadlineAt > timeoutB.payload.public.turn.startedAt, true);
     assert.equal(Array.isArray(timeoutA.payload.private.holeCards), true);
     assert.equal(Array.isArray(timeoutB.payload.private.holeCards), true);
     assert.equal(Object.prototype.hasOwnProperty.call(timeoutA.payload.public, "holeCardsByUserId"), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(timeoutB.payload.public, "holeCardsByUserId"), false);
 
 
     wsA.close();

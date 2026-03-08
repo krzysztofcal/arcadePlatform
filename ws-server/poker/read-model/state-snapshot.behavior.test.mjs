@@ -31,7 +31,7 @@ test("buildStateSnapshotPayload returns canonical room-core payload for seated a
   assert.deepEqual(payload.public.hand, { handId: null, status: "LOBBY", round: null });
   assert.deepEqual(payload.public.board, { cards: [] });
   assert.deepEqual(payload.public.pot, { total: 0, sidePots: [] });
-  assert.deepEqual(payload.public.turn, { userId: "user_b", seat: 1 });
+  assert.deepEqual(payload.public.turn, { userId: "user_b", seat: 1, startedAt: null, deadlineAt: null });
   assert.deepEqual(payload.public.legalActions, { seat: null, actions: [] });
 });
 
@@ -130,7 +130,7 @@ test("buildStateSnapshotPayload includes terminal showdown/settlement fields whe
       hand: { handId: "h_terminal", status: "SETTLED", round: null },
       board: { cards: ["2H", "3H", "4H", "9C", "KD"] },
       pot: { total: 0, sidePots: [] },
-      turn: { userId: null, seat: null },
+      turn: { userId: null, seat: null, startedAt: null, deadlineAt: null },
       legalActions: { seat: 1, actions: [] },
       private: { holeCards: ["AS", "AD"] },
       showdown: {
@@ -150,6 +150,7 @@ test("buildStateSnapshotPayload includes terminal showdown/settlement fields whe
 
   assert.deepEqual(payload.public.showdown.winners, ["user_a"]);
   assert.equal(payload.public.showdown.potAwardedTotal, 5);
+  assert.deepEqual(payload.public.turn, { userId: null, seat: null, startedAt: null, deadlineAt: null });
   assert.deepEqual(payload.public.handSettlement.payouts, { user_a: 5 });
   assert.deepEqual(payload.private, { userId: "user_a", seat: 1, holeCards: ["AS", "AD"] });
 });
@@ -181,4 +182,59 @@ test("buildStateSnapshotPayload serializes fresh next hand without stale termina
   assert.equal("showdown" in payload.public, false);
   assert.equal("handSettlement" in payload.public, false);
   assert.deepEqual(payload.private.holeCards, ["AS", "AD"]);
+});
+
+
+test("buildStateSnapshotPayload serializes turn timer metadata for live hand", () => {
+  const payload = buildStateSnapshotPayload({
+    userId: "user_a",
+    tableSnapshot: {
+      tableId: "table_timer",
+      roomId: "table_timer",
+      stateVersion: 12,
+      members: [
+        { userId: "user_a", seat: 1 },
+        { userId: "user_b", seat: 2 }
+      ],
+      memberCount: 2,
+      youSeat: 1,
+      hand: { handId: "h_timer", status: "PREFLOP", round: "PREFLOP" },
+      board: { cards: [] },
+      pot: { total: 3, sidePots: [] },
+      turn: { userId: "user_a", seat: 1, startedAt: 1710000000000, deadlineAt: 1710000015000 },
+      legalActions: { seat: 1, actions: ["FOLD", "CALL", "RAISE"] },
+      private: { holeCards: ["AS", "AD"] }
+    }
+  });
+
+  assert.deepEqual(payload.public.turn, { userId: "user_a", seat: 1, startedAt: 1710000000000, deadlineAt: 1710000015000 });
+  assert.deepEqual(payload.private, { userId: "user_a", seat: 1, holeCards: ["AS", "AD"] });
+});
+
+test("buildStateSnapshotPayload keeps next-hand timer metadata and omits stale terminal fields", () => {
+  const payload = buildStateSnapshotPayload({
+    userId: "user_a",
+    tableSnapshot: {
+      tableId: "table_next_hand_timer",
+      roomId: "table_next_hand_timer",
+      stateVersion: 13,
+      members: [
+        { userId: "user_a", seat: 1 },
+        { userId: "user_b", seat: 2 }
+      ],
+      memberCount: 2,
+      youSeat: 1,
+      hand: { handId: "h_next_timer", status: "PREFLOP", round: "PREFLOP" },
+      board: { cards: [] },
+      pot: { total: 3, sidePots: [] },
+      turn: { userId: "user_a", seat: 1, startedAt: 1710000020000, deadlineAt: 1710000035000 },
+      legalActions: { seat: 1, actions: ["FOLD", "CALL", "RAISE"] },
+      private: { holeCards: ["AS", "AD"] }
+    }
+  });
+
+  assert.equal(payload.public.turn.startedAt, 1710000020000);
+  assert.equal(payload.public.turn.deadlineAt, 1710000035000);
+  assert.equal("showdown" in payload.public, false);
+  assert.equal("handSettlement" in payload.public, false);
 });
