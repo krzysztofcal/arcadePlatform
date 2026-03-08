@@ -900,3 +900,111 @@ test("applyAction resets turn deadline using supplied action clock", () => {
   assert.equal(livePokerState.turnStartedAt, actionNowMs);
   assert.equal(livePokerState.turnDeadlineAt > actionNowMs, true);
 });
+
+test("boundary contract: bootstrapHand returns stable started/already_live outward semantics", () => {
+  const tableManager = createTableManager({ maxSeats: 4, enableDebugCore: true, nodeEnv: "test" });
+  const tableId = "table_boundary_bootstrap";
+  const wsA = fakeWs("boundary-boot-a");
+  const wsB = fakeWs("boundary-boot-b");
+
+  assert.equal(tableManager.join({ ws: wsA, userId: "user_a", tableId, requestId: "join-a", nowTs: 11 }).ok, true);
+  assert.equal(tableManager.join({ ws: wsB, userId: "user_b", tableId, requestId: "join-b", nowTs: 11 }).ok, true);
+
+  const before = tableManager.tableSnapshot(tableId, "user_a");
+  const first = tableManager.bootstrapHand(tableId, { nowMs: 1_000 });
+  const second = tableManager.bootstrapHand(tableId, { nowMs: 1_001 });
+  const after = tableManager.tableSnapshot(tableId, "user_a");
+
+  assert.equal(before.hand.status, "LOBBY");
+  assert.deepEqual(Object.keys(first).sort(), ["bootstrap", "changed", "handId", "ok", "stateVersion"]);
+  assert.equal(first.ok, true);
+  assert.equal(first.changed, true);
+  assert.equal(first.bootstrap, "started");
+  assert.equal(typeof first.handId, "string");
+  assert.ok(first.handId.length > 0);
+  assert.equal(first.stateVersion, before.stateVersion + 1);
+
+  assert.equal(second.ok, true);
+  assert.equal(second.changed, false);
+  assert.equal(second.bootstrap, "already_live");
+  assert.equal(second.handId, first.handId);
+  assert.equal(second.stateVersion, first.stateVersion);
+  assert.equal(after.stateVersion, first.stateVersion);
+  assert.equal(after.hand.handId, first.handId);
+});
+
+test("boundary contract: applyAction preserves accepted fields and requestId replay semantics", () => {
+  const tableManager = createTableManager({ maxSeats: 4, enableDebugCore: true, nodeEnv: "test" });
+  const tableId = "table_boundary_action";
+  const wsA = fakeWs("boundary-act-a");
+  const wsB = fakeWs("boundary-act-b");
+
+  assert.equal(tableManager.join({ ws: wsA, userId: "user_a", tableId, requestId: "join-a", nowTs: 12 }).ok, true);
+  assert.equal(tableManager.join({ ws: wsB, userId: "user_b", tableId, requestId: "join-b", nowTs: 12 }).ok, true);
+  assert.equal(tableManager.bootstrapHand(tableId, { nowMs: 2_000 }).changed, true);
+
+  const before = tableManager.tableSnapshot(tableId, "user_a");
+  const request = {
+    tableId,
+    handId: before.hand.handId,
+    userId: before.turn.userId,
+    requestId: "boundary-action-idempotent",
+    action: "CALL",
+    amount: 0,
+    nowIso: new Date(2_001).toISOString(),
+    nowMs: 2_001
+  };
+
+  const first = tableManager.applyAction(request);
+  const second = tableManager.applyAction(request);
+  const after = tableManager.tableSnapshot(tableId, "user_a");
+
+  assert.equal(first.ok, true);
+  assert.equal(first.accepted, true);
+  assert.equal(first.changed, true);
+  assert.equal(first.replayed, false);
+  assert.equal(first.reason, null);
+  assert.equal(typeof first.stateVersion, "number");
+  assert.equal(typeof first.handId, "string");
+
+  assert.equal(second.ok, true);
+  assert.equal(second.accepted, true);
+  assert.equal(second.changed, false);
+  assert.equal(second.replayed, true);
+  assert.equal(second.reason, null);
+  assert.equal(second.stateVersion, first.stateVersion);
+  assert.equal(second.handId, first.handId);
+
+  assert.equal(after.stateVersion, first.stateVersion);
+});
+
+test("boundary contract: maybeApplyTurnTimeout mutates once and replay-guards repeated sweep", () => {
+  const tableManager = createTableManager({ maxSeats: 4, enableDebugCore: true, nodeEnv: "test" });
+  const tableId = "table_boundary_timeout";
+  const wsA = fakeWs("boundary-timeout-a");
+  const wsB = fakeWs("boundary-timeout-b");
+  const nowMs = 9_999_000;
+
+  assert.equal(tableManager.join({ ws: wsA, userId: "user_a", tableId, requestId: "join-a", nowTs: 13 }).ok, true);
+  assert.equal(tableManager.join({ ws: wsB, userId: "user_b", tableId, requestId: "join-b", nowTs: 13 }).ok, true);
+  assert.equal(tableManager.bootstrapHand(tableId, { nowMs: nowMs - 40_000 }).changed, true);
+
+  const before = tableManager.tableSnapshot(tableId, "user_a");
+  const first = tableManager.maybeApplyTurnTimeout({ tableId, nowMs });
+  const second = tableManager.maybeApplyTurnTimeout({ tableId, nowMs });
+  const after = tableManager.tableSnapshot(tableId, "user_a");
+
+  assert.equal(first.ok, true);
+  assert.equal(first.changed, true);
+  assert.equal(first.replayed, false);
+  assert.equal(typeof first.requestId, "string");
+  assert.equal(typeof first.actorUserId, "string");
+  assert.equal(typeof first.stateVersion, "number");
+
+  assert.equal(second.ok, true);
+  assert.equal(second.changed, false);
+  assert.equal(second.stateVersion, first.stateVersion);
+  assert.ok(second.replayed === true || typeof second.reason === "string");
+
+  assert.equal(after.stateVersion, before.stateVersion + 1);
+});

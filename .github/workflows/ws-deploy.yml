@@ -40,6 +40,18 @@ jobs:
       - name: Run ws table manager behavior test
         run: node --test ws-server/poker/table/table-manager.behavior.test.mjs
 
+      - name: Run ws poker engine bootstrap behavior test
+        run: node --test ws-server/poker/engine/engine-bootstrap.behavior.test.mjs
+
+      - name: Run ws poker engine act behavior test
+        run: node --test ws-server/poker/engine/engine-act.behavior.test.mjs
+
+      - name: Run ws poker engine rollover behavior test
+        run: node --test ws-server/poker/engine/engine-rollover.behavior.test.mjs
+
+      - name: Run ws poker engine timeout behavior test
+        run: node --test ws-server/poker/engine/engine-timeout.behavior.test.mjs
+
       - name: Run ws core behavior test
         run: node --test ws-server/poker/core/core.behavior.test.mjs
 

@@ -1,170 +1,21 @@
 import { applyCoreEvent, CORE_EVENT_TYPES, createInitialCoreState } from "../core/index.mjs";
 import { projectRoomCoreSnapshot } from "../read-model/room-core-snapshot.mjs";
 import {
-  dealHoleCards,
-  deriveDeck,
-  toHoleCardCodeMap,
-  toCardCodes
-} from "../shared/poker-primitives.mjs";
-import { applyAction as applyPokerAction } from "../shared/poker-action-reducer.mjs";
-import { decideTurnTimeout, stampTurnDeadline } from "../shared/poker-turn-timeout.mjs";
+  applyCoreStateAction,
+  applyCoreStateTurnTimeout,
+  asLiveHandState,
+  decideCoreStateTurnTimeout,
+  bootstrapCoreStateHand,
+  buildBootstrappedPokerState,
+  buildNextHandStateFromSettled,
+  isContinuationEligibleByStack,
+  orderedEligibleSeatMembers,
+  resolveNextDealerSeatNo
+} from "../engine/poker-engine.mjs";
 
 const DEFAULT_PRESENCE_TTL_MS = 10_000;
 const DEFAULT_MAX_SEATS = 10;
 const DEFAULT_ACTION_RESULT_CACHE_MAX = 256;
-const MIN_PLAYERS_TO_BOOTSTRAP = 2;
-
-function nextHandId(tableId, version, seatCount) {
-  return `ws_hand_${tableId}_${version}_${seatCount}`;
-}
-
-function nextHandSeed(tableId, version, seatCount) {
-  return `ws_seed_${tableId}_${version}_${seatCount}`;
-}
-
-function asLiveHandState(value) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return null;
-  }
-  if (typeof value.handId !== "string" || value.handId.trim() === "") {
-    return null;
-  }
-  if (typeof value.phase !== "string" || !["PREFLOP", "FLOP", "TURN", "RIVER"].includes(value.phase)) {
-    return null;
-  }
-  return value;
-}
-
-function orderedSeatMembers(coreState) {
-  const members = Array.isArray(coreState?.members) ? coreState.members : [];
-  return members
-    .filter((member) => typeof member?.userId === "string" && Number.isInteger(member?.seat))
-    .slice()
-    .sort((a, b) => a.seat - b.seat || a.userId.localeCompare(b.userId));
-}
-
-function isContinuationEligibleByStack(userId, stacksByUserId) {
-  const stack = Number(stacksByUserId?.[userId] ?? 0);
-  return Number.isFinite(stack) && stack > 0;
-}
-
-function orderedEligibleSeatMembers(coreState, stacksByUserId = null) {
-  const members = orderedSeatMembers(coreState);
-  if (!stacksByUserId || typeof stacksByUserId !== "object" || Array.isArray(stacksByUserId)) {
-    return members;
-  }
-  return members.filter((member) => isContinuationEligibleByStack(member.userId, stacksByUserId));
-}
-
-function buildBootstrappedPokerState({ tableId, coreState, dealerSeatNo = null, startingStacks = null, handVersion = null }) {
-  const members = orderedEligibleSeatMembers(coreState, startingStacks);
-  if (members.length < MIN_PLAYERS_TO_BOOTSTRAP) {
-    return null;
-  }
-
-  const userIds = members.map((member) => member.userId);
-  const dealerIndex = Number.isInteger(dealerSeatNo)
-    ? Math.max(0, members.findIndex((member) => member.seat === dealerSeatNo))
-    : 0;
-  const isHeadsUp = members.length === 2;
-  const sbIndex = isHeadsUp ? dealerIndex : (dealerIndex + 1) % members.length;
-  const bbIndex = (sbIndex + 1) % members.length;
-  const utgIndex = isHeadsUp ? dealerIndex : (bbIndex + 1) % members.length;
-  const sbUserId = members[sbIndex]?.userId ?? null;
-  const bbUserId = members[bbIndex]?.userId ?? null;
-  const turnUserId = members[utgIndex]?.userId ?? members[dealerIndex]?.userId ?? null;
-  const versionForHand = Number.isInteger(handVersion) ? handVersion : coreState.version;
-  const handSeed = nextHandSeed(tableId, versionForHand, members.length);
-  const initialDeck = deriveDeck(handSeed);
-  const dealt = dealHoleCards(initialDeck, userIds);
-  const stacks = Object.fromEntries(userIds.map((userId) => {
-    const stack = Number(startingStacks?.[userId]);
-    return [userId, Number.isFinite(stack) && stack >= 0 ? Math.trunc(stack) : 100];
-  }));
-  const betThisRoundByUserId = Object.fromEntries(userIds.map((userId) => [userId, 0]));
-  const toCallByUserId = Object.fromEntries(userIds.map((userId) => [userId, 0]));
-  const actedThisRoundByUserId = Object.fromEntries(userIds.map((userId) => [userId, false]));
-  const foldedByUserId = Object.fromEntries(userIds.map((userId) => [userId, false]));
-  const contributionsByUserId = Object.fromEntries(userIds.map((userId) => [userId, 0]));
-
-  const postBlind = (userId, amount) => {
-    if (!userId || !Number.isFinite(amount) || amount <= 0) {
-      return 0;
-    }
-    const currentStack = Number(stacks[userId] ?? 0);
-    const posted = Math.max(0, Math.min(currentStack, Math.trunc(amount)));
-    stacks[userId] = currentStack - posted;
-    betThisRoundByUserId[userId] = posted;
-    contributionsByUserId[userId] = posted;
-    return posted;
-  };
-
-  const sbPosted = postBlind(sbUserId, 1);
-  const bbPosted = postBlind(bbUserId, 2);
-  const currentBet = Math.max(sbPosted, bbPosted);
-  for (const userId of userIds) {
-    toCallByUserId[userId] = Math.max(0, currentBet - Number(betThisRoundByUserId[userId] ?? 0));
-  }
-
-  return {
-    roomId: coreState.roomId || tableId,
-    handId: nextHandId(tableId, versionForHand, members.length),
-    handSeed,
-    phase: "PREFLOP",
-    dealerSeatNo: members[dealerIndex]?.seat ?? null,
-    turnUserId,
-    seats: members.map((member) => ({ userId: member.userId, seatNo: member.seat })),
-    community: [],
-    communityDealt: 0,
-    potTotal: sbPosted + bbPosted,
-    sidePots: [],
-    currentBet,
-    lastRaiseSize: bbPosted,
-    stacks,
-    toCallByUserId,
-    betThisRoundByUserId,
-    actedThisRoundByUserId,
-    foldedByUserId,
-    contributionsByUserId,
-    holeCardsByUserId: toHoleCardCodeMap(dealt.holeCardsByUserId),
-    deck: toCardCodes(dealt.deck),
-    turnStartedAt: null,
-    turnDeadlineAt: null
-  };
-}
-
-function resolveNextDealerSeatNo({ members, settledState }) {
-  if (!Array.isArray(members) || members.length === 0) {
-    return null;
-  }
-
-  const eligibleMembers = members.filter((member) => isContinuationEligibleByStack(member.userId, settledState?.stacks));
-  if (eligibleMembers.length === 0) {
-    return null;
-  }
-
-  const currentDealerSeatNo = Number(settledState?.dealerSeatNo);
-  const currentDealerIndex = eligibleMembers.findIndex((member) => member.seat === currentDealerSeatNo);
-  if (currentDealerIndex === -1) {
-    return eligibleMembers[0].seat;
-  }
-
-  const nextIndex = (currentDealerIndex + 1) % eligibleMembers.length;
-  return eligibleMembers[nextIndex]?.seat ?? eligibleMembers[0].seat;
-}
-
-function buildNextHandStateFromSettled({ tableId, coreState, settledState, nextVersion }) {
-  const members = orderedEligibleSeatMembers(coreState, settledState?.stacks);
-  const nextDealerSeatNo = resolveNextDealerSeatNo({ members, settledState });
-  return buildBootstrappedPokerState({
-    tableId,
-    coreState,
-    dealerSeatNo: nextDealerSeatNo,
-    startingStacks: settledState?.stacks,
-    handVersion: nextVersion
-  });
-}
-
 export const __testOnly = {
   isContinuationEligibleByStack,
   orderedEligibleSeatMembers,
@@ -341,36 +192,15 @@ export function createTableManager({
       return { ok: false, code: "table_missing", bootstrap: "table_missing" };
     }
 
-    const existingLiveState = asLiveHandState(table.coreState?.pokerState);
-    if (existingLiveState) {
-      return {
-        ok: true,
-        changed: false,
-        bootstrap: "already_live",
-        handId: existingLiveState.handId,
-        stateVersion: table.coreState.version
-      };
-    }
-
-    const bootstrappedState = buildBootstrappedPokerState({ tableId, coreState: table.coreState });
-    if (!bootstrappedState) {
-      return { ok: true, changed: false, bootstrap: "not_eligible", stateVersion: table.coreState.version };
-    }
-
-    const nextPokerState = stampTurnDeadline(bootstrappedState, resolveNowMs({ nowMs }));
-
-    table.coreState = {
-      ...table.coreState,
-      version: table.coreState.version + 1,
-      pokerState: nextPokerState
-    };
+    const result = bootstrapCoreStateHand({ tableId, coreState: table.coreState, nowMs: resolveNowMs({ nowMs }) });
+    table.coreState = result.coreState;
 
     return {
-      ok: true,
-      changed: true,
-      bootstrap: "started",
-      handId: nextPokerState.handId,
-      stateVersion: table.coreState.version
+      ok: result.ok,
+      changed: result.changed,
+      bootstrap: result.bootstrap,
+      handId: result.handId,
+      stateVersion: result.stateVersion
     };
   }
 
@@ -385,57 +215,24 @@ export function createTableManager({
       return asReplayedResult(table.actionResultsByRequestId.get(replayKey));
     }
 
-    const liveState = asLiveHandState(table.coreState?.pokerState);
-    if (!liveState) {
-      const rejected = rejectAction({ reason: "hand_not_live", stateVersion: table.coreState.version });
-      rememberActionResult(table, requestId, { ...rejected, userId });
-      return rejected;
-    }
-
-    if (typeof handId !== "string" || handId !== liveState.handId) {
-      const rejected = rejectAction({ reason: "hand_mismatch", stateVersion: table.coreState.version });
-      rememberActionResult(table, requestId, { ...rejected, userId });
-      return rejected;
-    }
-
-    const seat = Number.isInteger(table.coreState.seats?.[userId]) ? table.coreState.seats[userId] : null;
-    if (!Number.isInteger(seat)) {
-      const rejected = rejectAction({ reason: "not_seated", stateVersion: table.coreState.version });
-      rememberActionResult(table, requestId, { ...rejected, userId });
-      return rejected;
-    }
-
-    const applied = applyPokerAction({
-      pokerState: liveState,
+    const applied = applyCoreStateAction({
+      tableId,
+      coreState: table.coreState,
+      handId,
       userId,
       action,
       amount,
-      nowIso
+      nowIso,
+      nowMs: resolveNowMs({ nowMs })
     });
 
-    if (!applied.ok) {
-      const rejected = rejectAction({ reason: applied.reason || "action_rejected", stateVersion: table.coreState.version });
+    if (!applied.accepted) {
+      const rejected = rejectAction({ reason: applied.reason || "action_rejected", stateVersion: applied.stateVersion });
       rememberActionResult(table, requestId, { ...rejected, userId });
       return rejected;
     }
 
-    const actionNowMs = resolveNowMs({ nowMs });
-    const nextVersion = table.coreState.version + 1;
-    const rawNextPokerState = applied.state?.phase === "SETTLED"
-      ? buildNextHandStateFromSettled({
-          tableId,
-          coreState: table.coreState,
-          settledState: applied.state,
-          nextVersion
-        }) || applied.state
-      : applied.state;
-    const nextPokerState = stampTurnDeadline(rawNextPokerState, actionNowMs);
-
-    table.coreState = {
-      ...table.coreState,
-      version: nextVersion,
-      pokerState: nextPokerState
-    };
+    table.coreState = applied.coreState;
 
     const accepted = {
       ok: true,
@@ -444,8 +241,8 @@ export function createTableManager({
       replayed: false,
       reason: null,
       action: applied.action,
-      stateVersion: table.coreState.version,
-      handId: nextPokerState.handId
+      stateVersion: applied.stateVersion,
+      handId: applied.handId
     };
 
     rememberActionResult(table, requestId, { ...accepted, userId });
@@ -472,13 +269,13 @@ export function createTableManager({
       return { ok: true, changed: false, reason: "hand_not_live", stateVersion: table.coreState.version };
     }
 
-    const decision = decideTurnTimeout({ pokerState: liveState, nowMs });
-    if (!decision.due) {
-      return { ok: true, changed: false, reason: decision.reason, stateVersion: table.coreState.version };
+    const timeoutDecision = decideCoreStateTurnTimeout({ coreState: table.coreState, nowMs });
+    if (!timeoutDecision.due) {
+      return { ok: true, changed: false, reason: timeoutDecision.reason, stateVersion: timeoutDecision.stateVersion };
     }
 
-    const requestId = timeoutRequestId({ tableId, pokerState: liveState });
-    const replayKey = makeActionReplayKey({ userId: decision.actorUserId, requestId });
+    const requestId = timeoutRequestId({ tableId, pokerState: timeoutDecision.liveState });
+    const replayKey = makeActionReplayKey({ userId: timeoutDecision.decision.actorUserId, requestId });
     if (replayKey && table.actionResultsByRequestId.has(replayKey)) {
       return {
         ok: true,
@@ -489,43 +286,41 @@ export function createTableManager({
       };
     }
 
-    const applied = applyAction({
-      tableId,
-      handId: liveState.handId,
-      userId: decision.actorUserId,
-      requestId,
-      action: decision.action.type,
-      amount: null,
-      nowIso: new Date(nowMs).toISOString(),
-      nowMs
-    });
-
-    if (!applied.accepted) {
+    const timeoutApplied = applyCoreStateTurnTimeout({ tableId, coreState: table.coreState, nowMs });
+    if (!timeoutApplied.changed) {
       rememberActionResult(table, requestId, {
         ok: true,
         accepted: false,
         changed: false,
         replayed: false,
-        reason: applied.reason || "timeout_rejected",
+        reason: timeoutApplied.reason || "timeout_rejected",
         stateVersion: table.coreState.version,
-        userId: decision.actorUserId
+        userId: timeoutDecision.decision.actorUserId
       });
-      return {
-        ok: true,
-        changed: false,
-        reason: applied.reason || "timeout_rejected",
-        stateVersion: table.coreState.version
-      };
+      return { ok: true, changed: false, reason: timeoutApplied.reason, stateVersion: timeoutApplied.stateVersion };
     }
+
+    table.coreState = timeoutApplied.coreState;
+    rememberActionResult(table, requestId, {
+      ok: true,
+      accepted: true,
+      changed: true,
+      replayed: false,
+      reason: null,
+      action: timeoutApplied.action,
+      stateVersion: timeoutApplied.stateVersion,
+      handId: table.coreState?.pokerState?.handId ?? null,
+      userId: timeoutApplied.actorUserId
+    });
 
     return {
       ok: true,
       changed: true,
       replayed: false,
       requestId,
-      action: decision.action.type,
-      actorUserId: decision.actorUserId,
-      stateVersion: applied.stateVersion
+      action: timeoutApplied.action,
+      actorUserId: timeoutApplied.actorUserId,
+      stateVersion: timeoutApplied.stateVersion
     };
   }
 
