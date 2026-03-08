@@ -26,6 +26,14 @@ test("ws-deploy keeps ws-tests trigger surface and runs harness checks", () => {
   assert.match(text, /node --test ws-server\/poker\/read-model\/state-patch\.behavior\.test\.mjs/);
   assert.match(text, /Run stream-log behavior test/);
   assert.match(text, /node --test ws-server\/poker\/runtime\/stream-log\.behavior\.test\.mjs/);
+  assert.match(text, /Run ws poker engine bootstrap behavior test/);
+  assert.match(text, /node --test ws-server\/poker\/engine\/engine-bootstrap\.behavior\.test\.mjs/);
+  assert.match(text, /Run ws poker engine act behavior test/);
+  assert.match(text, /node --test ws-server\/poker\/engine\/engine-act\.behavior\.test\.mjs/);
+  assert.match(text, /Run ws poker engine rollover behavior test/);
+  assert.match(text, /node --test ws-server\/poker\/engine\/engine-rollover\.behavior\.test\.mjs/);
+  assert.match(text, /Run ws poker engine timeout behavior test/);
+  assert.match(text, /node --test ws-server\/poker\/engine\/engine-timeout\.behavior\.test\.mjs/);
 });
 
 test("ws-deploy is non-mutating for production", () => {
