@@ -1008,3 +1008,99 @@ test("boundary contract: maybeApplyTurnTimeout mutates once and replay-guards re
 
   assert.equal(after.stateVersion, before.stateVersion + 1);
 });
+
+
+test("applyAction rejection parity: invalid actor/hand/illegal action preserve snapshot and version", () => {
+  const tableManager = createTableManager({ maxSeats: 4 });
+  const wsA = fakeWs("rej-parity-a");
+  const wsB = fakeWs("rej-parity-b");
+  const tableId = "table_apply_rejection_parity";
+
+  assert.equal(tableManager.join({ ws: wsA, userId: "user_a", tableId, requestId: "join-a", nowTs: 1 }).ok, true);
+  assert.equal(tableManager.join({ ws: wsB, userId: "user_b", tableId, requestId: "join-b", nowTs: 1 }).ok, true);
+  assert.equal(tableManager.bootstrapHand(tableId).ok, true);
+
+  const before = tableManager.tableSnapshot(tableId, "user_a");
+
+  const wrongTurn = tableManager.applyAction({
+    tableId,
+    handId: before.hand.handId,
+    userId: "user_b",
+    requestId: "req-wrong-turn",
+    action: "CHECK",
+    amount: 0
+  });
+  const afterWrongTurn = tableManager.tableSnapshot(tableId, "user_a");
+  assert.equal(wrongTurn.accepted, false);
+  assert.equal(wrongTurn.changed, false);
+  assert.equal(wrongTurn.replayed, false);
+  assert.equal(wrongTurn.reason, "illegal_action");
+  assert.equal(wrongTurn.stateVersion, before.stateVersion);
+  assert.deepEqual(afterWrongTurn, before);
+
+  const nonSeated = tableManager.applyAction({
+    tableId,
+    handId: before.hand.handId,
+    userId: "user_c",
+    requestId: "req-not-seated",
+    action: "CALL",
+    amount: 0
+  });
+  const afterNonSeated = tableManager.tableSnapshot(tableId, "user_a");
+  assert.equal(nonSeated.accepted, false);
+  assert.equal(nonSeated.reason, "not_seated");
+  assert.equal(nonSeated.stateVersion, before.stateVersion);
+  assert.deepEqual(afterNonSeated, before);
+
+  const handMismatch = tableManager.applyAction({
+    tableId,
+    handId: "bad_hand",
+    userId: "user_a",
+    requestId: "req-bad-hand",
+    action: "CALL",
+    amount: 0
+  });
+  const afterHandMismatch = tableManager.tableSnapshot(tableId, "user_a");
+  assert.equal(handMismatch.accepted, false);
+  assert.equal(handMismatch.reason, "hand_mismatch");
+  assert.equal(handMismatch.stateVersion, before.stateVersion);
+  assert.deepEqual(afterHandMismatch, before);
+});
+
+test("applyAction replay for rejected requestId stays deterministic and non-mutating", () => {
+  const tableManager = createTableManager({ maxSeats: 4 });
+  const wsA = fakeWs("rej-replay-a");
+  const wsB = fakeWs("rej-replay-b");
+  const tableId = "table_apply_rejection_replay";
+
+  assert.equal(tableManager.join({ ws: wsA, userId: "user_a", tableId, requestId: "join-a", nowTs: 1 }).ok, true);
+  assert.equal(tableManager.join({ ws: wsB, userId: "user_b", tableId, requestId: "join-b", nowTs: 1 }).ok, true);
+  assert.equal(tableManager.bootstrapHand(tableId).ok, true);
+
+  const before = tableManager.tableSnapshot(tableId, "user_a");
+  const request = {
+    tableId,
+    handId: before.hand.handId,
+    userId: "user_b",
+    requestId: "req-reject-replay",
+    action: "CHECK",
+    amount: 0
+  };
+
+  const first = tableManager.applyAction(request);
+  const mid = tableManager.tableSnapshot(tableId, "user_a");
+  const second = tableManager.applyAction(request);
+  const after = tableManager.tableSnapshot(tableId, "user_a");
+
+  assert.equal(first.accepted, false);
+  assert.equal(first.replayed, false);
+  assert.equal(first.changed, false);
+  assert.equal(first.reason, "illegal_action");
+  assert.equal(second.accepted, false);
+  assert.equal(second.replayed, true);
+  assert.equal(second.changed, false);
+  assert.equal(second.reason, first.reason);
+  assert.equal(second.stateVersion, first.stateVersion);
+  assert.deepEqual(mid, before);
+  assert.deepEqual(after, before);
+});
