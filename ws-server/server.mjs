@@ -11,6 +11,7 @@ import { createConnState } from "./poker/runtime/conn-state.mjs";
 import { ackSessionSeq, touchSession } from "./poker/runtime/session.mjs";
 import { recordProtocolViolation, shouldClose } from "./poker/runtime/conn-guards.mjs";
 import { createTableManager } from "./poker/table/table-manager.mjs";
+import { adaptPersistedBootstrap } from "./poker/bootstrap/persisted-bootstrap-adapter.mjs";
 import { createSessionStore } from "./poker/runtime/session-store.mjs";
 import { buildStateSnapshotPayload } from "./poker/read-model/state-snapshot.mjs";
 import { buildStatePatch } from "./poker/read-model/state-patch.mjs";
@@ -67,10 +68,36 @@ function resolveActionResultCacheMax(rawValue) {
   return parsed;
 }
 
+const persistedBootstrapEnabled = Boolean(process.env.SUPABASE_DB_URL || process.env.WS_PERSISTED_BOOTSTRAP_FIXTURES_JSON);
+
+function createPersistedBootstrapLoader({ env = process.env } = {}) {
+  let repositoryPromise = null;
+
+  async function loadRepository() {
+    if (!repositoryPromise) {
+      repositoryPromise = import("./poker/bootstrap/persisted-bootstrap-repository.mjs")
+        .then((module) => module.createPersistedBootstrapRepository({ env }));
+    }
+    return repositoryPromise;
+  }
+
+  return async function loadPersistedTableBootstrap({ tableId }) {
+    const repository = await loadRepository();
+    const loaded = await repository.load(tableId);
+    return adaptPersistedBootstrap({
+      tableId,
+      tableRow: loaded?.tableRow,
+      seatRows: loaded?.seatRows,
+      stateRow: loaded?.stateRow
+    });
+  };
+}
+
 const tableManager = createTableManager({
   presenceTtlMs: resolvePresenceTtlMs(process.env.WS_PRESENCE_TTL_MS),
   maxSeats: resolveMaxSeats(process.env.WS_MAX_SEATS),
-  actionResultCacheMax: resolveActionResultCacheMax(process.env.WS_ACTION_RESULT_CACHE_MAX)
+  actionResultCacheMax: resolveActionResultCacheMax(process.env.WS_ACTION_RESULT_CACHE_MAX),
+  tableBootstrapLoader: persistedBootstrapEnabled ? createPersistedBootstrapLoader() : null
 });
 const sessionStore = createSessionStore({
   sessionTtlMs: resolveSessionTtlMs(process.env.WS_SESSION_TTL_MS)
@@ -408,7 +435,9 @@ wss.on("connection", (ws) => {
   sessionStore.registerSession({ session: connState.session });
   ws.__connState = connState;
 
-  ws.on("message", (msg, isBinary) => {
+  let messageQueue = Promise.resolve();
+
+  async function processMessage(msg, isBinary) {
     sweepAndBroadcastExpiredPresence();
     sweepTurnTimeoutsAndBroadcast();
     if (isBinary) {
@@ -453,6 +482,10 @@ wss.on("connection", (ws) => {
 
     const frame = validation.value;
     touchSession(connState.session, nowTs);
+
+    if (process.env.WS_TEST_THROW_ON_FRAME_TYPE && process.env.WS_TEST_THROW_ON_FRAME_TYPE === frame.type) {
+      throw new Error("forced_process_message_failure");
+    }
 
     if (frame.type === "hello") {
       const response = handleHello({ frame, connState, nowTs });
@@ -562,6 +595,16 @@ wss.on("connection", (ws) => {
       }
       const tableId = resolvedRoomId.roomId;
 
+      const ensured = await tableManager.ensureTableLoaded(tableId);
+      if (!ensured.ok) {
+        sendError(ws, connState, {
+          code: "INVALID_COMMAND",
+          message: ensured.message,
+          requestId: frame.requestId ?? null
+        });
+        return;
+      }
+
       sessionStore.trackConnection({ ws, userId: connState.session.userId, sessionId: connState.session.sessionId });
       const joined = tableManager.join({
         ws,
@@ -604,6 +647,16 @@ wss.on("connection", (ws) => {
       const tableId = resolvedRoomId.roomId;
 
       if (frame.type === "resync") {
+        const ensured = await tableManager.ensureTableLoaded(tableId);
+        if (!ensured.ok) {
+          sendError(ws, connState, {
+            code: "INVALID_COMMAND",
+            message: ensured.message,
+            requestId: frame.requestId ?? null
+          });
+          return;
+        }
+
         sessionStore.trackConnection({ ws, userId: connState.session.userId, sessionId: connState.session.sessionId });
         const resynced = tableManager.resync({ ws, userId: connState.session.userId, tableId, nowTs: Date.now() });
         if (!resynced.ok) {
@@ -728,8 +781,28 @@ wss.on("connection", (ws) => {
 
       const wantsSnapshot = frame.payload?.view === "snapshot" || frame.payload?.mode === "snapshot";
       if (wantsSnapshot) {
+        const ensured = await tableManager.ensureTableLoaded(tableId);
+        if (!ensured.ok) {
+          sendError(ws, connState, {
+            code: "INVALID_COMMAND",
+            message: ensured.message,
+            requestId: frame.requestId ?? null
+          });
+          return;
+        }
+
         const tableSnapshot = tableManager.tableSnapshot(tableId, connState.session.userId);
         sendStateSnapshot(ws, connState, { requestId: frame.requestId ?? null, tableSnapshot });
+        return;
+      }
+
+      const ensured = await tableManager.ensureTableLoaded(tableId);
+      if (!ensured.ok) {
+        sendError(ws, connState, {
+          code: "INVALID_COMMAND",
+          message: ensured.message,
+          requestId: frame.requestId ?? null
+        });
         return;
       }
 
@@ -790,6 +863,17 @@ wss.on("connection", (ws) => {
         return;
       }
 
+      const ensured = await tableManager.ensureTableLoaded(tableId);
+      if (!ensured.ok) {
+        sendCommandResult(ws, connState, {
+          requestId: frame.requestId ?? null,
+          tableId,
+          status: "rejected",
+          reason: ensured.code
+        });
+        return;
+      }
+
       const result = tableManager.applyAction({
         tableId,
         handId,
@@ -823,6 +907,28 @@ wss.on("connection", (ws) => {
         ts: nowTs()
       })
     );
+  }
+
+  ws.on("message", (msg, isBinary) => {
+    messageQueue = messageQueue
+      .then(() => processMessage(msg, isBinary))
+      .catch((error) => {
+        klogSafe("ws_message_processing_error", { message: error?.message || "unknown" });
+        try {
+          sendFrame(
+            ws,
+            makeErrorFrame({
+              code: "INTERNAL_ERROR",
+              message: "internal_server_error",
+              requestId: null,
+              sessionId: connState.sessionId,
+              ts: nowTs()
+            })
+          );
+        } catch {
+          ws.close(1011);
+        }
+      });
   });
 
   ws.on("error", (err) => {

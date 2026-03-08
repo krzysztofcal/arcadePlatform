@@ -40,6 +40,13 @@ jobs:
       - name: Run ws table manager behavior test
         run: node --test ws-server/poker/table/table-manager.behavior.test.mjs
 
+      - name: Run persisted bootstrap adapter behavior test
+        run: node --test ws-server/poker/bootstrap/persisted-bootstrap-adapter.behavior.test.mjs
+
+      - name: Run persisted bootstrap repository behavior test
+        run: node --test ws-server/poker/bootstrap/persisted-bootstrap-repository.behavior.test.mjs
+
+
       - name: Run ws poker engine bootstrap behavior test
         run: node --test ws-server/poker/engine/engine-bootstrap.behavior.test.mjs
 

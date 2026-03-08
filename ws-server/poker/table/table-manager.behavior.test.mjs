@@ -1104,3 +1104,76 @@ test("applyAction replay for rejected requestId stays deterministic and non-muta
   assert.deepEqual(mid, before);
   assert.deepEqual(after, before);
 });
+
+test("bootstraps table from persisted poker state and reuses cache without writes", async () => {
+  const calls = { reads: 0, writes: 0 };
+  const tableManager = createTableManager({
+    tableBootstrapLoader: async ({ tableId }) => {
+      calls.reads += 1;
+      assert.equal(tableId, "table_persisted");
+      return {
+        ok: true,
+        table: {
+          tableId,
+          coreState: {
+            roomId: tableId,
+            maxSeats: 6,
+            version: 44,
+            members: [{ userId: "user_a", seat: 2 }],
+            seats: { user_a: 2 },
+            appliedRequestIds: [],
+            pokerState: { handId: "h44", phase: "PREFLOP" }
+          },
+          presenceByUserId: new Map([["user_a", { userId: "user_a", seat: 2, connected: false, lastSeenAt: null, expiresAt: null }]]),
+          subscribers: new Set(),
+          actionResultsByRequestId: new Map()
+        }
+      };
+    }
+  });
+
+  const ensured = await tableManager.ensureTableLoaded("table_persisted");
+  assert.equal(ensured.ok, true);
+  assert.equal(tableManager.tableSnapshot("table_persisted", "user_a").stateVersion, 44);
+
+  const ws = fakeWs("persisted-ws");
+  const joined = tableManager.join({ ws, userId: "user_a", tableId: "table_persisted", requestId: "join-1", nowTs: 10 });
+  assert.equal(joined.ok, true);
+
+  const ensuredAgain = await tableManager.ensureTableLoaded("table_persisted");
+  assert.equal(ensuredAgain.ok, true);
+  assert.equal(calls.reads, 1);
+  assert.equal(calls.writes, 0);
+});
+
+test("bootstrap rejects missing table without creating synthetic room", async () => {
+  const tableManager = createTableManager({
+    tableBootstrapLoader: async () => ({ ok: false, code: "table_not_found", message: "table_not_found" })
+  });
+
+  const ensured = await tableManager.ensureTableLoaded("missing_table");
+  assert.equal(ensured.ok, false);
+  assert.equal(ensured.code, "table_not_found");
+  assert.deepEqual(tableManager.tableState("missing_table").members, []);
+  assert.equal(tableManager.tableSnapshot("missing_table", "user_m").stateVersion, 0);
+});
+
+test("bootstrap rejects invalid persisted state and blocks actions", async () => {
+  const tableManager = createTableManager({
+    tableBootstrapLoader: async () => ({ ok: false, code: "invalid_persisted_state", message: "invalid_persisted_state" })
+  });
+
+  const ensured = await tableManager.ensureTableLoaded("table_invalid");
+  assert.equal(ensured.ok, false);
+  assert.equal(ensured.code, "invalid_persisted_state");
+
+  const action = tableManager.applyAction({
+    tableId: "table_invalid",
+    handId: "h1",
+    userId: "user_x",
+    requestId: "act-1",
+    action: "CHECK"
+  });
+  assert.equal(action.accepted, false);
+  assert.equal(action.reason, "table_not_found");
+});
