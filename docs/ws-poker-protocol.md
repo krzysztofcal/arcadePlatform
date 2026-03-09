@@ -52,7 +52,7 @@ Example envelope:
 | `auth` | `{ "token": string }` | Authenticates identity and room access. No table mutation allowed. |
 | `resume` | `{ "sessionId": string, "lastSeq": integer }` | Requests stream resume from last acknowledged sequence. |
 | `ping` | `{ "clientTime": string }` | Keepalive/latency probe. No state mutation. |
-| `join` | `{ "tableId": string }` | Legacy alias of `table_join`; transport connect/observe/resync entrypoint only (no seat mutation). Requires auth. |
+| `join` | `{ "tableId": string }` | Legacy alias of `table_join`; default runtime behavior is authoritative seat/join mutation (idempotent). Optional observe-only runtime mode can make it transport-only. Requires auth. |
 | `act` | `{ "handId": string, "action": "fold"|"check"|"call"|"bet"|"raise", "amount": integer }` | Requests poker action mutation. Requires auth and turn validity. |
 | `leave` | `{ "reason": string }` | Requests leave/cashout workflow. |
 | `ack` | `{ "seq": integer }` | Acknowledges latest processed server sequence (flow-control aid). |
@@ -110,15 +110,17 @@ Examples:
 
 ### table_join / join contract (authoritative seat lifecycle boundary)
 
-`table_join` (and legacy alias `join`) is a **transport-level connect/observe/resync** command:
+`table_join` (and legacy alias `join`) is a seat/join command by default:
 
-- Loads/attaches the socket to an existing table stream and returns current `table_state`.
+- Loads/attaches the socket to the table stream and returns current `table_state`.
+- In default runtime mode, applies authoritative WS join semantics (seat-bearing membership mutation) when allowed by room constraints.
 - Is idempotent for repeated calls from the same authenticated socket/user/table.
-- Does **not** acquire a seat, create a seat row, perform buy-in, or mutate authoritative seat occupancy.
 
-Authoritative seat acquisition and buy-in remain outside this WS command path (HTTP authority, currently `netlify/functions/poker-join.mjs`, persisted in `public.poker_seats`). WS snapshots/read models reflect seated membership sourced from authoritative bootstrap state, while non-seated authenticated users may observe and resync with `you.seat = null`.
+Optional runtime mode: deployments may explicitly enable observe-only `table_join` via server config (`WS_OBSERVE_ONLY_JOIN=1`). In that mode, `table_join` is transport-level connect/observe/resync for non-seated users and does not allocate seats.
 
-`leave` remains authoritative for already-seated users: when the authenticated user is an authoritative table member, WS `leave` executes authoritative member removal/cashout semantics even though `table_join` itself is observe-only for non-seated users.
+Authoritative seat acquisition/buy-in remains server-authoritative. HTTP authority paths (currently `netlify/functions/poker-join.mjs`, persisted in `public.poker_seats`) are still valid for persistent seat lifecycle management.
+
+`leave` remains authoritative for already-seated users: when the authenticated user is an authoritative table member, WS `leave` executes authoritative member removal/cashout semantics in both default and observe-only runtime modes.
 
 ### Table state membership snapshot (runtime compatibility)
 

@@ -68,6 +68,14 @@ function resolveActionResultCacheMax(rawValue) {
   return parsed;
 }
 
+function resolveObserveOnlyJoin(rawValue) {
+  if (rawValue === undefined || rawValue === null) {
+    return false;
+  }
+  const normalized = String(rawValue).trim().toLowerCase();
+  return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on";
+}
+
 const persistedBootstrapEnabled = Boolean(process.env.SUPABASE_DB_URL || process.env.WS_PERSISTED_BOOTSTRAP_FIXTURES_JSON);
 
 function createPersistedBootstrapLoader({ env = process.env } = {}) {
@@ -98,7 +106,7 @@ const tableManager = createTableManager({
   maxSeats: resolveMaxSeats(process.env.WS_MAX_SEATS),
   actionResultCacheMax: resolveActionResultCacheMax(process.env.WS_ACTION_RESULT_CACHE_MAX),
   tableBootstrapLoader: persistedBootstrapEnabled ? createPersistedBootstrapLoader() : null,
-  observeOnlyJoin: true
+  observeOnlyJoin: resolveObserveOnlyJoin(process.env.WS_OBSERVE_ONLY_JOIN)
 });
 const sessionStore = createSessionStore({
   sessionTtlMs: resolveSessionTtlMs(process.env.WS_SESSION_TTL_MS)

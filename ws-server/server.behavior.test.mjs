@@ -929,6 +929,10 @@ function persistedBootstrapFixturesEnv(fixtures) {
   };
 }
 
+function observeOnlyJoinEnv() {
+  return { WS_OBSERVE_ONLY_JOIN: "1" };
+}
+
 test("WS table_join hydrates from persisted bootstrap fixture", async () => {
   const secret = "test-secret";
   const token = makeHs256Jwt({ secret, sub: "user_a" });
@@ -1230,7 +1234,7 @@ test("observer table_join returns table_state without creating seated membership
     }
   };
 
-  const { port, child } = await createServer({ env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret, SUPABASE_DB_URL: "", ...persistedBootstrapFixturesEnv(fixtures) } });
+  const { port, child } = await createServer({ env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret, SUPABASE_DB_URL: "", ...observeOnlyJoinEnv(), ...persistedBootstrapFixturesEnv(fixtures) } });
 
   try {
     await waitForListening(child, 5000);
@@ -1305,7 +1309,7 @@ test("observer join then resync keeps observer unseated", async () => {
     }
   };
 
-  const { port, child } = await createServer({ env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret, SUPABASE_DB_URL: "", ...persistedBootstrapFixturesEnv(fixtures) } });
+  const { port, child } = await createServer({ env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret, SUPABASE_DB_URL: "", ...observeOnlyJoinEnv(), ...persistedBootstrapFixturesEnv(fixtures) } });
 
   try {
     await waitForListening(child, 5000);
@@ -1460,7 +1464,7 @@ test("active replacement: observe-only snapshot privacy for seated and observer 
   };
   const seatedToken = makeHs256Jwt({ secret, sub: "seat_user" });
   const observerToken = makeHs256Jwt({ secret, sub: "observer_user" });
-  const { port, child } = await createServer({ env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret, SUPABASE_DB_URL: "", ...persistedBootstrapFixturesEnv(fixtures) } });
+  const { port, child } = await createServer({ env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret, SUPABASE_DB_URL: "", ...observeOnlyJoinEnv(), ...persistedBootstrapFixturesEnv(fixtures) } });
   try {
     await waitForListening(child, 5000);
     const seated = await connectClient(port);
@@ -1504,7 +1508,7 @@ test("active replacement: observe-only join does not broadcast table_state membe
   };
   const observerToken = makeHs256Jwt({ secret, sub: "observer_stream" });
   const actorToken = makeHs256Jwt({ secret, sub: "actor_stream" });
-  const { port, child } = await createServer({ env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret, SUPABASE_DB_URL: "", ...persistedBootstrapFixturesEnv(fixtures) } });
+  const { port, child } = await createServer({ env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret, SUPABASE_DB_URL: "", ...observeOnlyJoinEnv(), ...persistedBootstrapFixturesEnv(fixtures) } });
   try {
     await waitForListening(child, 5000);
     const observer = await connectClient(port);
@@ -1545,7 +1549,7 @@ test("active replacement: seated act accepted and observer act rejected under ob
   };
   const actorToken = makeHs256Jwt({ secret, sub: "seat_actor" });
   const observerToken = makeHs256Jwt({ secret, sub: "observer_actor" });
-  const { port, child } = await createServer({ env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret, SUPABASE_DB_URL: "", ...persistedBootstrapFixturesEnv(fixtures) } });
+  const { port, child } = await createServer({ env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret, SUPABASE_DB_URL: "", ...observeOnlyJoinEnv(), ...persistedBootstrapFixturesEnv(fixtures) } });
   try {
     await waitForListening(child, 5000);
     const seatA = await connectClient(port);
@@ -1670,6 +1674,7 @@ test("timeout sweep advances seated persisted table state under observe-only run
       WS_POKER_TURN_MS: "600",
       WS_TIMEOUT_SWEEP_MS: "20",
       SUPABASE_DB_URL: "",
+      ...observeOnlyJoinEnv(),
       ...persistedBootstrapFixturesEnv(fixtures)
     }
   });
@@ -1716,7 +1721,8 @@ test("active replacement: observe-only semantics in bootstrap-disabled mode keep
       WS_AUTH_REQUIRED: "1",
       WS_AUTH_TEST_SECRET: secret,
       SUPABASE_DB_URL: "",
-      WS_PERSISTED_BOOTSTRAP_FIXTURES_JSON: ""
+      WS_PERSISTED_BOOTSTRAP_FIXTURES_JSON: "",
+      ...observeOnlyJoinEnv()
     }
   });
 

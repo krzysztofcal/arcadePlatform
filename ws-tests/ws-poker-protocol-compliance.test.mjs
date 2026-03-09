@@ -50,6 +50,10 @@ function runSerial(step) {
   return run;
 }
 
+function observeOnlyJoinEnv() {
+  return { WS_OBSERVE_ONLY_JOIN: "1" };
+}
+
 function wsOn(ws, eventName, handler, { once = false } = {}) {
   if (typeof ws.addEventListener === "function") {
     ws.addEventListener(eventName, handler, once ? { once: true } : undefined);
@@ -244,6 +248,21 @@ function nextMessage(ws, timeoutMs = 5000, label = "") {
     wsOn(ws, "error", onError);
     wsOn(ws, "close", onClose);
   });
+}
+
+
+async function nextMessageOfType(ws, type, timeoutMs = 5000, label = "") {
+  const started = Date.now();
+  while (true) {
+    const remaining = timeoutMs - (Date.now() - started);
+    if (remaining <= 0) {
+      throw new Error(`Timed out waiting for websocket message type: ${type}${label ? ` (${label})` : ""}`);
+    }
+    const frame = await nextMessage(ws, remaining, label);
+    if (frame?.type === type) {
+      return frame;
+    }
+  }
 }
 
 function attemptMessage(ws, timeoutMs = 1000) {
@@ -456,10 +475,62 @@ test("server shutdown is bounded after SIGTERM", async () => runSerial(async () 
 
 
 
+
+
+test("default runtime keeps legacy table_join membership mutation semantics", async () => runSerial(async () => {
+  const secret = "test-secret";
+  const { port, child } = await createServer({
+    env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret, WS_PRESENCE_TTL_MS: "0", WS_MAX_SEATS: "3" }
+  });
+
+  try {
+    await waitForListening(child, 5000);
+    const subscriber = await connectClient(port);
+    const actor = await connectClient(port);
+
+    await hello(subscriber, "req-hello-default-sub");
+    await hello(actor, "req-hello-default-actor");
+    assert.equal((await auth(subscriber, secret, "default_sub", "req-auth-default-sub")).type, "authOk");
+    assert.equal((await auth(actor, secret, "default_actor", "req-auth-default-actor")).type, "authOk");
+
+    sendFrame(subscriber, {
+      version: "1.0",
+      type: "table_state_sub",
+      requestId: "req-sub-default",
+      ts: "2026-02-28T00:00:00Z",
+      payload: { tableId: "table_default_join" }
+    });
+    const initial = await nextMessage(subscriber, 5000, "defaultInitial");
+    assert.equal(initial.type, "table_state");
+    assert.deepEqual(initial.payload.members, []);
+
+    sendFrame(actor, {
+      version: "1.0",
+      type: "table_join",
+      requestId: "req-join-default",
+      ts: "2026-02-28T00:00:01Z",
+      payload: { tableId: "table_default_join" }
+    });
+    const joined = await nextMessage(actor, 5000, "defaultJoined");
+    assert.equal(joined.type, "table_state");
+    assert.deepEqual(joined.payload.members, [{ userId: "default_actor", seat: 1 }]);
+
+    const broadcast = await nextMessage(subscriber, 5000, "defaultBroadcast");
+    assert.equal(broadcast.type, "table_state");
+    assert.deepEqual(broadcast.payload.members, [{ userId: "default_actor", seat: 1 }]);
+
+    subscriber.close();
+    actor.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+}));
+
 test("table_join is observe-only and does not emit membership mutation broadcasts", async () => runSerial(async () => {
   const secret = "test-secret";
   const { port, child } = await createServer({
-    env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret, WS_PRESENCE_TTL_MS: "0", WS_MAX_SEATS: "2" }
+    env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret, ...observeOnlyJoinEnv(), WS_PRESENCE_TTL_MS: "0", WS_MAX_SEATS: "2" }
   });
 
   try {
@@ -553,7 +624,7 @@ test("table_join is observe-only and does not emit membership mutation broadcast
 test("observe-only table_join rejects second different table on same socket", async () => runSerial(async () => {
   const secret = "test-secret";
   const { port, child } = await createServer({
-    env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret, WS_PRESENCE_TTL_MS: "0", WS_MAX_SEATS: "3" }
+    env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret, ...observeOnlyJoinEnv(), WS_PRESENCE_TTL_MS: "0", WS_MAX_SEATS: "3" }
   });
 
   try {
@@ -611,6 +682,7 @@ test("observe-only mode keeps seated persisted user table_leave authoritative", 
     env: {
       WS_AUTH_REQUIRED: "1",
       WS_AUTH_TEST_SECRET: secret,
+      ...observeOnlyJoinEnv(),
       SUPABASE_DB_URL: "",
       WS_PERSISTED_BOOTSTRAP_FIXTURES_JSON: JSON.stringify(fixtures)
     }
@@ -710,6 +782,7 @@ test("observe-only runtime keeps seated act accepted and observer act rejected",
     env: {
       WS_AUTH_REQUIRED: "1",
       WS_AUTH_TEST_SECRET: secret,
+      ...observeOnlyJoinEnv(),
       SUPABASE_DB_URL: "",
       WS_PERSISTED_BOOTSTRAP_FIXTURES_JSON: JSON.stringify(fixtures)
     }
@@ -735,7 +808,7 @@ test("observe-only runtime keeps seated act accepted and observer act rejected",
     await nextMessage(observer, 5000, "joinActObserver");
 
     sendFrame(seat, { version: "1.0", type: "table_state_sub", requestId: "snap-act-seat", ts: "2026-02-28T00:05:03Z", payload: { tableId, view: "snapshot" } });
-    const base = await nextMessage(seat, 5000, "baseActSnapshot");
+    const base = await nextMessageOfType(seat, "stateSnapshot", 5000, "baseActSnapshot");
     const handId = base.payload.public.hand.handId;
 
     sendFrame(observer, { version: "1.0", type: "act", requestId: "act-observer-reject", ts: "2026-02-28T00:05:04Z", payload: { tableId, handId, action: "fold" } });
@@ -744,7 +817,7 @@ test("observe-only runtime keeps seated act accepted and observer act rejected",
     assert.equal(observerAct.payload.status, "rejected");
 
     sendFrame(observer, { version: "1.0", type: "table_state_sub", requestId: "snap-act-observer", ts: "2026-02-28T00:05:05Z", payload: { tableId, view: "snapshot" } });
-    const observerSnap = await nextMessage(observer, 5000, "observerActSnapshot");
+    const observerSnap = await nextMessageOfType(observer, "stateSnapshot", 5000, "observerActSnapshot");
     assert.equal(observerSnap.payload.you.seat, null);
     assert.equal("private" in observerSnap.payload, false);
 
@@ -777,7 +850,7 @@ test("duplicate act requestId does not emit additional advancing state frame", a
       stateRow: { version: 0, state: {} }
     }
   };
-  const { port, child } = await createServer({ env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret, SUPABASE_DB_URL: "", WS_PERSISTED_BOOTSTRAP_FIXTURES_JSON: JSON.stringify(fixtures) } });
+  const { port, child } = await createServer({ env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret, ...observeOnlyJoinEnv(), SUPABASE_DB_URL: "", WS_PERSISTED_BOOTSTRAP_FIXTURES_JSON: JSON.stringify(fixtures) } });
 
   try {
     await waitForListening(child, 5000);
@@ -879,7 +952,7 @@ test("timeout sweep emits at most one immediate transition for a single due turn
 test("table_state_sub observer stream stays stable across observe-only join/leave", async () => runSerial(async () => {
   const secret = "test-secret";
   const { port, child } = await createServer({
-    env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret, WS_PRESENCE_TTL_MS: "0", WS_MAX_SEATS: "3" }
+    env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret, ...observeOnlyJoinEnv(), WS_PRESENCE_TTL_MS: "0", WS_MAX_SEATS: "3" }
   });
 
   try {
@@ -943,7 +1016,7 @@ test("table_state_sub observer stream stays stable across observe-only join/leav
 test("table_state is emitted once per maintenance membership change and not emitted for no-op sweep", async () => runSerial(async () => {
   const secret = "test-secret";
   const { port, child } = await createServer({
-    env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret, WS_PRESENCE_TTL_MS: "25", WS_MAX_SEATS: "2" }
+    env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret, ...observeOnlyJoinEnv(), WS_PRESENCE_TTL_MS: "25", WS_MAX_SEATS: "2" }
   });
 
   try {
@@ -994,7 +1067,7 @@ test("table_state is emitted once per maintenance membership change and not emit
 test("table_state is emitted once when cleanupConnection triggers immediate leave at ttl=0", async () => runSerial(async () => {
   const secret = "test-secret";
   const { port, child } = await createServer({
-    env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret, WS_PRESENCE_TTL_MS: "0", WS_MAX_SEATS: "2" }
+    env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret, ...observeOnlyJoinEnv(), WS_PRESENCE_TTL_MS: "0", WS_MAX_SEATS: "2" }
   });
 
   try {
@@ -1045,7 +1118,7 @@ test("table_state is emitted once when cleanupConnection triggers immediate leav
 test("observe-only table_leave without tableId resolves subscribed context", async () => runSerial(async () => {
   const secret = "test-secret";
   const { port, child } = await createServer({
-    env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret, WS_PRESENCE_TTL_MS: "0", WS_MAX_SEATS: "2" }
+    env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret, ...observeOnlyJoinEnv(), WS_PRESENCE_TTL_MS: "0", WS_MAX_SEATS: "2" }
   });
 
   try {

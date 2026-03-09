@@ -117,12 +117,12 @@ test("ws poker protocol document states snapshot mode is one-shot and non-subscr
 
 
 
-test("ws poker protocol document keeps join observe-only while leave remains authoritative for seated users", () => {
+test("ws poker protocol document keeps legacy default join mutation and marks observe-only as opt-in", () => {
   const text = docText();
-  assert.match(text, /`table_join` \(and legacy alias `join`\) is a \*\*transport-level connect\/observe\/resync\*\* command/);
-  assert.match(text, /acquire a seat, create a seat row, perform buy-in, or mutate authoritative seat occupancy/);
+  assert.match(text, /`table_join` \(and legacy alias `join`\) is a seat\/join command by default/);
+  assert.match(text, /default runtime behavior is authoritative seat\/join mutation/);
+  assert.match(text, /Optional runtime mode: deployments may explicitly enable observe-only `table_join` via server config \(`WS_OBSERVE_ONLY_JOIN=1`\)/);
   assert.match(text, /`leave` remains authoritative for already-seated users/);
-  assert.match(text, /executes authoritative member removal\/cashout semantics/);
 });
 
 test("ws poker protocol document fallback wording matches PR7 defaults", () => {
