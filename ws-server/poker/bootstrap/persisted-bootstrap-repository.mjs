@@ -16,6 +16,7 @@ function delay(ms) {
 }
 
 export function createPersistedBootstrapRepository({ env = process.env } = {}) {
+  let fileStoreLoaderPromise = null;
   const fixtures = parseFixtureMap(env.WS_PERSISTED_BOOTSTRAP_FIXTURES_JSON);
   let beginSqlPromise = null;
 
@@ -57,6 +58,13 @@ export function createPersistedBootstrapRepository({ env = process.env } = {}) {
     }, { env });
   }
 
+  async function loadFileStore() {
+    if (!fileStoreLoaderPromise) {
+      fileStoreLoaderPromise = import("../persistence/persisted-state-file-store.mjs").then((module) => module.loadPersistedTableFromFile);
+    }
+    return fileStoreLoaderPromise;
+  }
+
   async function load(tableId) {
     if (fixtures && Object.prototype.hasOwnProperty.call(fixtures, tableId)) {
       const fixture = fixtures[tableId];
@@ -69,6 +77,11 @@ export function createPersistedBootstrapRepository({ env = process.env } = {}) {
         seatRows: Array.isArray(fixture?.seatRows) ? fixture.seatRows : [],
         stateRow: fixture?.stateRow ?? null
       };
+    }
+
+    if (env.WS_PERSISTED_STATE_FILE) {
+      const loadFromFile = await loadFileStore();
+      return loadFromFile({ filePath: env.WS_PERSISTED_STATE_FILE, tableId });
     }
 
     if (!env.SUPABASE_DB_URL) {

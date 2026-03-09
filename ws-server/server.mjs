@@ -16,6 +16,7 @@ import { createSessionStore } from "./poker/runtime/session-store.mjs";
 import { buildStateSnapshotPayload } from "./poker/read-model/state-snapshot.mjs";
 import { buildStatePatch } from "./poker/read-model/state-patch.mjs";
 import { createStreamLog } from "./poker/runtime/stream-log.mjs";
+import { createPersistedStateWriter } from "./poker/persistence/persisted-state-writer.mjs";
 
 const PORT = Number(process.env.PORT || 3000);
 const PROTECTED_MESSAGE_TYPES = new Set([
@@ -76,7 +77,8 @@ function resolveObserveOnlyJoin(rawValue) {
   return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on";
 }
 
-const persistedBootstrapEnabled = Boolean(process.env.SUPABASE_DB_URL || process.env.WS_PERSISTED_BOOTSTRAP_FIXTURES_JSON);
+const persistedBootstrapEnabled = Boolean(process.env.SUPABASE_DB_URL || process.env.WS_PERSISTED_BOOTSTRAP_FIXTURES_JSON || process.env.WS_PERSISTED_STATE_FILE);
+const persistedStateWriteEnabled = Boolean(process.env.SUPABASE_DB_URL || process.env.WS_PERSISTED_STATE_FILE);
 
 function createPersistedBootstrapLoader({ env = process.env } = {}) {
   let repositoryPromise = null;
@@ -101,17 +103,20 @@ function createPersistedBootstrapLoader({ env = process.env } = {}) {
   };
 }
 
+const loadPersistedTableBootstrap = persistedBootstrapEnabled ? createPersistedBootstrapLoader() : null;
+
 const tableManager = createTableManager({
   presenceTtlMs: resolvePresenceTtlMs(process.env.WS_PRESENCE_TTL_MS),
   maxSeats: resolveMaxSeats(process.env.WS_MAX_SEATS),
   actionResultCacheMax: resolveActionResultCacheMax(process.env.WS_ACTION_RESULT_CACHE_MAX),
-  tableBootstrapLoader: persistedBootstrapEnabled ? createPersistedBootstrapLoader() : null,
+  tableBootstrapLoader: loadPersistedTableBootstrap,
   observeOnlyJoin: resolveObserveOnlyJoin(process.env.WS_OBSERVE_ONLY_JOIN)
 });
 const sessionStore = createSessionStore({
   sessionTtlMs: resolveSessionTtlMs(process.env.WS_SESSION_TTL_MS)
 });
 const streamLog = createStreamLog({ cap: Number(process.env.WS_STREAM_REPLAY_CAP || 128) });
+const persistedStateWriter = persistedStateWriteEnabled ? createPersistedStateWriter({ env: process.env, klog: klogSafe }) : null;
 const lastSnapshotBySessionAndTable = new Map();
 
 function snapshotCacheKey(sessionId, tableId) {
@@ -391,6 +396,57 @@ function broadcastTableState(tableId, { excludeWs = null } = {}) {
 }
 
 
+
+
+async function persistMutatedState({ tableId, expectedVersion, mutationKind }) {
+  if (!persistedStateWriter) {
+    return { ok: true, skipped: true };
+  }
+  const nextState = tableManager.persistedPokerState(tableId);
+  if (!nextState) {
+    return { ok: false, reason: "invalid_state" };
+  }
+  const persisted = await persistedStateWriter.writeMutation({
+    tableId,
+    expectedVersion,
+    nextState,
+    supabaseUrl: process.env.SUPABASE_URL,
+    supabaseServiceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY,
+    meta: { mutationKind }
+  });
+  if (!persisted?.ok) {
+    klogSafe("ws_state_persist_failed", { tableId, expectedVersion, mutationKind, reason: persisted?.reason || "unknown" });
+    return persisted;
+  }
+  tableManager.setPersistedStateVersion(tableId, persisted.newVersion);
+  return persisted;
+}
+
+async function restoreTableFromPersisted(tableId) {
+  if (typeof loadPersistedTableBootstrap !== "function") {
+    return { ok: false, reason: "persisted_bootstrap_disabled" };
+  }
+  try {
+    const restored = await loadPersistedTableBootstrap({ tableId });
+    if (!restored?.ok || !restored?.table) {
+      return { ok: false, reason: restored?.code || "restore_failed" };
+    }
+    return tableManager.restoreTableFromPersisted(tableId, restored.table);
+  } catch (error) {
+    klogSafe("ws_state_restore_failed", { tableId, message: error?.message || "unknown" });
+    return { ok: false, reason: "restore_error" };
+  }
+}
+
+function broadcastResyncRequired(tableId, reason) {
+  const recipients = tableManager.orderedConnectionsForTable(tableId, (socket) => socket.__connState?.sessionId ?? "");
+  for (const recipient of recipients) {
+    const recipientConnState = recipient.__connState;
+    if (!recipientConnState) continue;
+    sendResumeRequired(recipient, recipientConnState, { tableId, reason, expectedSeq: 0 });
+  }
+}
+
 function broadcastStateSnapshots(tableId) {
   const recipients = tableManager.orderedConnectionsForTable(tableId, (socket) => socket.__connState?.sessionId ?? "");
   for (const recipient of recipients) {
@@ -419,13 +475,24 @@ function sweepAndBroadcastExpiredPresence() {
   }
 }
 
-function sweepTurnTimeoutsAndBroadcast() {
+async function sweepTurnTimeoutsAndBroadcast() {
   const nowMs = Date.now();
   const timeoutUpdates = tableManager.sweepTurnTimeouts({ nowMs });
   for (const update of timeoutUpdates) {
+    const persisted = await persistMutatedState({
+      tableId: update.tableId,
+      expectedVersion: Number(update.stateVersion) - 1,
+      mutationKind: "timeout"
+    });
+    if (!persisted?.ok) {
+      await restoreTableFromPersisted(update.tableId);
+      broadcastResyncRequired(update.tableId, "persistence_conflict");
+      continue;
+    }
     broadcastStateSnapshots(update.tableId);
   }
 }
+
 const server = http.createServer((req, res) => {
   if (req.url === "/healthz") {
     res.writeHead(200, { "content-type": "text/plain" });
@@ -448,7 +515,7 @@ wss.on("connection", (ws) => {
 
   async function processMessage(msg, isBinary) {
     sweepAndBroadcastExpiredPresence();
-    sweepTurnTimeoutsAndBroadcast();
+    await sweepTurnTimeoutsAndBroadcast();
     if (isBinary) {
       sendError(ws, connState, {
         code: "INVALID_ENVELOPE",
@@ -638,7 +705,22 @@ wss.on("connection", (ws) => {
         broadcastTableState(tableId, { excludeWs: ws });
       }
       if (bootstrapped?.changed) {
-        klogSafe("ws_hand_bootstrap_started", { tableId, handId: bootstrapped.handId, stateVersion: bootstrapped.stateVersion });
+        const persisted = await persistMutatedState({
+          tableId,
+          expectedVersion: Number(bootstrapped.stateVersion) - 1,
+          mutationKind: "bootstrap"
+        });
+        if (!persisted?.ok) {
+          await restoreTableFromPersisted(tableId);
+          broadcastResyncRequired(tableId, "persistence_conflict");
+          sendError(ws, connState, {
+            code: "INTERNAL_ERROR",
+            message: "state_persist_failed",
+            requestId: frame.requestId ?? null
+          });
+          return;
+        }
+        klogSafe("ws_hand_bootstrap_started", { tableId, handId: bootstrapped.handId, stateVersion: persisted.newVersion });
       }
       return;
     }
@@ -893,6 +975,25 @@ wss.on("connection", (ws) => {
         nowIso: frame.ts
       });
 
+      if (result.accepted && !result.replayed && result.changed) {
+        const persisted = await persistMutatedState({
+          tableId,
+          expectedVersion: Number(result.stateVersion) - 1,
+          mutationKind: "act"
+        });
+        if (!persisted?.ok) {
+          await restoreTableFromPersisted(tableId);
+          sendCommandResult(ws, connState, {
+            requestId: frame.requestId ?? null,
+            tableId,
+            status: "rejected",
+            reason: persisted?.reason || "persist_failed"
+          });
+          broadcastResyncRequired(tableId, "persistence_conflict");
+          return;
+        }
+      }
+
       sendCommandResult(ws, connState, {
         requestId: frame.requestId ?? null,
         tableId,
@@ -900,7 +1001,7 @@ wss.on("connection", (ws) => {
         reason: result.reason
       });
 
-      if (result.accepted && !result.replayed) {
+      if (result.accepted && !result.replayed && result.changed) {
         broadcastStateSnapshots(tableId);
       }
       return;
@@ -973,7 +1074,7 @@ wss.on("connection", (ws) => {
 
 const timeoutSweepIntervalMs = Number(process.env.WS_TIMEOUT_SWEEP_MS || 250);
 const timeoutSweepTimer = setInterval(() => {
-  sweepTurnTimeoutsAndBroadcast();
+  void sweepTurnTimeoutsAndBroadcast();
 }, Number.isFinite(timeoutSweepIntervalMs) && timeoutSweepIntervalMs > 0 ? timeoutSweepIntervalMs : 250);
 
 timeoutSweepTimer.unref();
