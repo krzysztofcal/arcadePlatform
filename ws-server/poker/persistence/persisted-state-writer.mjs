@@ -1,6 +1,22 @@
 import { beginSqlWs } from "../bootstrap/persisted-bootstrap-db.mjs";
-import { normalizeJsonState } from "../../../netlify/functions/_shared/poker-state-utils.mjs";
 import { writePersistedTableToFile } from "./persisted-state-file-store.mjs";
+
+
+function normalizeJsonState(value) {
+  if (!value) return {};
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return value;
+  }
+  return {};
+}
 
 const stableStringify = (value) =>
   JSON.stringify(value, (_key, val) => {
