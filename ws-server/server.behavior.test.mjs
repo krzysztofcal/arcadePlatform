@@ -3,6 +3,9 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createHmac } from "node:crypto";
 import { EventEmitter } from "node:events";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import net from "node:net";
 import WebSocket from "ws";
 
@@ -168,6 +171,19 @@ function attemptMessage(ws, timeoutMs = 300) {
 
 function sendFrame(ws, frame) {
   ws.send(JSON.stringify(frame));
+}
+
+async function writePersistedFile(fixture) {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "ws-persist-"));
+  const filePath = path.join(dir, "persisted-state.json");
+  await fs.writeFile(filePath, `${JSON.stringify(fixture)}
+`, "utf8");
+  return { dir, filePath };
+}
+
+async function readPersistedFile(filePath) {
+  const raw = await fs.readFile(filePath, "utf8");
+  return JSON.parse(raw);
 }
 
 async function nextMessageOfType(ws, type, timeoutMs = 10000) {
@@ -1757,3 +1773,212 @@ test("active replacement: observe-only semantics in bootstrap-disabled mode keep
 });
 
 
+
+
+test("WS act persists state to file-backed optimistic store", async () => {
+  const secret = "persist-secret";
+  const tableId = "table_ws_persist_act";
+  const store = {
+    tables: {
+      [tableId]: {
+        tableRow: { id: tableId, max_players: 6, status: "active" },
+        seatRows: [
+          { user_id: "seat_actor", seat_no: 1, status: "ACTIVE", is_bot: false },
+          { user_id: "seat_other", seat_no: 2, status: "ACTIVE", is_bot: false }
+        ],
+        stateRow: { version: 0, state: {} }
+      }
+    }
+  };
+  const { dir, filePath } = await writePersistedFile(store);
+  const { port, child } = await createServer({
+    env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret, WS_PERSISTED_STATE_FILE: filePath }
+  });
+
+  try {
+    await waitForListening(child, 5000);
+    const ws = await connectClient(port);
+    await hello(ws);
+    await auth(ws, makeHs256Jwt({ secret, sub: "seat_actor" }), "auth-persist");
+
+    sendFrame(ws, { version: "1.0", type: "table_join", requestId: "join-persist", ts: "2026-02-28T02:00:00Z", payload: { tableId } });
+    await nextMessageOfType(ws, "table_state");
+
+    sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "snap-persist", ts: "2026-02-28T02:00:01Z", payload: { tableId, view: "snapshot" } });
+    const baseline = await nextMessageOfType(ws, "stateSnapshot");
+    const handId = baseline.payload.public.hand.handId;
+
+    sendFrame(ws, { version: "1.0", type: "act", requestId: "act-persist", ts: "2026-02-28T02:00:02Z", payload: { tableId, handId, action: "fold" } });
+    const result = await nextMessageOfType(ws, "commandResult");
+    assert.equal(result.payload.status, "accepted");
+    const post = await nextStateUpdate(ws, { baseline: baseline.payload, timeoutMs: 4000 });
+    assert.equal(post.payload.stateVersion > baseline.payload.stateVersion, true);
+
+    const persisted = await readPersistedFile(filePath);
+    assert.equal(persisted.tables[tableId].stateRow.version, post.payload.stateVersion);
+    assert.equal(typeof persisted.tables[tableId].lastActivityAt, "string");
+
+    ws.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("WS act optimistic conflict returns deterministic rejection and resync", async () => {
+  const secret = "persist-conflict-secret";
+  const tableId = "table_ws_persist_conflict";
+  const store = {
+    tables: {
+      [tableId]: {
+        tableRow: { id: tableId, max_players: 6, status: "active" },
+        seatRows: [
+          { user_id: "seat_actor", seat_no: 1, status: "ACTIVE", is_bot: false },
+          { user_id: "seat_other", seat_no: 2, status: "ACTIVE", is_bot: false }
+        ],
+        stateRow: { version: 0, state: {} }
+      }
+    }
+  };
+  const { dir, filePath } = await writePersistedFile(store);
+  const { port, child } = await createServer({
+    env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret, WS_PERSISTED_STATE_FILE: filePath }
+  });
+
+  try {
+    await waitForListening(child, 5000);
+    const ws = await connectClient(port);
+    await hello(ws);
+    await auth(ws, makeHs256Jwt({ secret, sub: "seat_actor" }), "auth-conflict");
+    sendFrame(ws, { version: "1.0", type: "table_join", requestId: "join-conflict", ts: "2026-02-28T02:10:00Z", payload: { tableId } });
+    await nextMessageOfType(ws, "table_state");
+    sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "snap-conflict", ts: "2026-02-28T02:10:01Z", payload: { tableId, view: "snapshot" } });
+    const baseline = await nextMessageOfType(ws, "stateSnapshot");
+    const handId = baseline.payload.public.hand.handId;
+
+    const forced = await readPersistedFile(filePath);
+    forced.tables[tableId].stateRow.version = baseline.payload.stateVersion + 7;
+    await fs.writeFile(filePath, `${JSON.stringify(forced)}
+`, "utf8");
+
+    sendFrame(ws, { version: "1.0", type: "act", requestId: "act-conflict", ts: "2026-02-28T02:10:02Z", payload: { tableId, handId, action: "fold" } });
+    const rejected = await nextMessageOfType(ws, "commandResult");
+    assert.equal(rejected.payload.status, "rejected");
+    assert.equal(rejected.payload.reason, "conflict");
+    const resync = await nextMessageOfType(ws, "resync");
+    assert.equal(resync.payload.reason, "persistence_conflict");
+
+    sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "snap-conflict-after", ts: "2026-02-28T02:10:03Z", payload: { tableId, view: "snapshot" } });
+    const afterConflict = await nextMessageOfType(ws, "stateSnapshot");
+    assert.equal(afterConflict.payload.stateVersion, forced.tables[tableId].stateRow.version);
+
+    ws.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("failed bootstrap persistence reloads persisted state before further snapshots", async () => {
+  const secret = "bootstrap-fail-secret";
+  const tableId = "table_ws_bootstrap_fail";
+  const store = {
+    tables: {
+      [tableId]: {
+        tableRow: { id: tableId, max_players: 6, status: "active" },
+        seatRows: [
+          { user_id: "seat_bootstrap", seat_no: 1, status: "ACTIVE", is_bot: false },
+          { user_id: "seat_other", seat_no: 2, status: "ACTIVE", is_bot: false }
+        ],
+        stateRow: { version: 0, state: {} }
+      }
+    }
+  };
+  const { dir, filePath } = await writePersistedFile(store);
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      WS_PERSISTED_STATE_FILE: filePath,
+      WS_TEST_PERSIST_FAIL_KIND: "bootstrap"
+    }
+  });
+
+  try {
+    await waitForListening(child, 5000);
+    const ws = await connectClient(port);
+    await hello(ws);
+    await auth(ws, makeHs256Jwt({ secret, sub: "seat_bootstrap" }), "auth-bootstrap-fail");
+
+    sendFrame(ws, { version: "1.0", type: "table_join", requestId: "join-bootstrap-fail", ts: "2026-02-28T02:20:00Z", payload: { tableId } });
+    await nextMessageOfType(ws, "table_state");
+    const errorFrame = await nextMessageOfType(ws, "error");
+    assert.equal(errorFrame.payload.code, "INTERNAL_ERROR");
+
+    sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "snap-bootstrap-fail", ts: "2026-02-28T02:20:01Z", payload: { tableId, view: "snapshot" } });
+    const snapshot = await nextMessageOfType(ws, "stateSnapshot");
+    assert.equal(snapshot.payload.stateVersion, 0);
+    assert.equal(snapshot.payload.public.hand?.handId ?? null, null);
+
+    ws.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("failed timeout persistence does not publish unpersisted timeout mutation", async () => {
+  const secret = "timeout-fail-secret";
+  const tableId = "table_ws_timeout_fail";
+  const store = {
+    tables: {
+      [tableId]: {
+        tableRow: { id: tableId, max_players: 6, status: "active" },
+        seatRows: [
+          { user_id: "timeout_actor", seat_no: 1, status: "ACTIVE", is_bot: false },
+          { user_id: "timeout_other", seat_no: 2, status: "ACTIVE", is_bot: false }
+        ],
+        stateRow: { version: 0, state: {} }
+      }
+    }
+  };
+  const { dir, filePath } = await writePersistedFile(store);
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      WS_PERSISTED_STATE_FILE: filePath,
+      WS_TEST_PERSIST_FAIL_KIND: "timeout",
+      WS_TIMEOUT_SWEEP_MS: "50",
+      WS_POKER_TURN_MS: "100"
+    }
+  });
+
+  try {
+    await waitForListening(child, 5000);
+    const ws = await connectClient(port);
+    await hello(ws);
+    await auth(ws, makeHs256Jwt({ secret, sub: "timeout_actor" }), "auth-timeout-fail");
+
+    sendFrame(ws, { version: "1.0", type: "table_join", requestId: "join-timeout-fail", ts: "2026-02-28T02:30:00Z", payload: { tableId } });
+    await nextMessageOfType(ws, "table_state");
+    sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "snap-timeout-before", ts: "2026-02-28T02:30:01Z", payload: { tableId, view: "snapshot" } });
+    const baseline = await nextMessageOfType(ws, "stateSnapshot");
+
+    const resync = await nextMessageOfType(ws, "resync", 10000);
+    assert.equal(resync.payload.reason, "persistence_conflict");
+
+    sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "snap-timeout-after", ts: "2026-02-28T02:30:02Z", payload: { tableId, view: "snapshot" } });
+    const after = await nextMessageOfType(ws, "stateSnapshot");
+    assert.equal(after.payload.stateVersion, baseline.payload.stateVersion);
+
+    ws.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});

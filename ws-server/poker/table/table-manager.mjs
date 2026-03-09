@@ -672,6 +672,54 @@ export function createTableManager({
   }
 
 
+
+  function persistedPokerState(tableId) {
+    const table = tables.get(tableId);
+    const pokerState = table?.coreState?.pokerState;
+    if (!pokerState || typeof pokerState !== "object" || Array.isArray(pokerState)) {
+      return null;
+    }
+    return { ...pokerState };
+  }
+
+  function setPersistedStateVersion(tableId, stateVersion) {
+    const table = tables.get(tableId);
+    if (!table || !Number.isInteger(stateVersion) || stateVersion < 0) {
+      return { ok: false };
+    }
+    table.coreState.version = stateVersion;
+    return { ok: true };
+  }
+
+  function restoreTableFromPersisted(tableId, restoredTable) {
+    const restoredCoreState = restoredTable?.coreState;
+    if (!restoredCoreState || typeof restoredCoreState !== "object") {
+      return { ok: false, reason: "invalid_restored_table" };
+    }
+
+    const table = ensureTable(tableId);
+    const previousPresenceByUserId = table.presenceByUserId;
+    const restoredPresenceByUserId = restoredTable?.presenceByUserId instanceof Map
+      ? restoredTable.presenceByUserId
+      : new Map();
+    const nextPresenceByUserId = new Map();
+
+    for (const [userId, restoredPresence] of restoredPresenceByUserId.entries()) {
+      const previousPresence = previousPresenceByUserId.get(userId);
+      nextPresenceByUserId.set(userId, {
+        ...restoredPresence,
+        connected: Boolean(previousPresence?.connected),
+        lastSeenAt: previousPresence?.lastSeenAt ?? null,
+        expiresAt: previousPresence?.expiresAt ?? null
+      });
+    }
+
+    table.coreState = restoredCoreState;
+    table.presenceByUserId = nextPresenceByUserId;
+    table.actionResultsByRequestId.clear();
+    return { ok: true };
+  }
+
   function __debugPokerState(tableId) {
     const table = tables.get(tableId);
     if (!table) {
@@ -733,7 +781,10 @@ export function createTableManager({
     cleanupConnection,
     orderedSubscribers,
     orderedConnectionsForTable,
-    sweepExpiredPresence
+    sweepExpiredPresence,
+    persistedPokerState,
+    setPersistedStateVersion,
+    restoreTableFromPersisted
   };
 
   if (enableDebugCore && nodeEnv !== "production") {
