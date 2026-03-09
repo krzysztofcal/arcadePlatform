@@ -78,11 +78,6 @@ test("ws poker protocol document describes stable members sorting semantics", ()
   assert.match(text, /Sorted by `seat` ascending, then `userId` ascending/);
 });
 
-test("ws poker protocol document includes bounds_exceeded join error code", () => {
-  const text = docText();
-  assert.match(text, /`bounds_exceeded`\s*—\s*join rejected because the table is already at max seats\./);
-});
-
 
 test("ws poker protocol document defines canonical reconnect resync payload shape", () => {
   const text = docText();
@@ -118,6 +113,16 @@ test("ws poker protocol document states snapshot mode is one-shot and non-subscr
   const text = docText();
   assert.match(text, /emits exactly one `stateSnapshot` frame/);
   assert.match(text, /(\*\*does not\*\* subscribe|does not subscribe) that socket to legacy `table_state` broadcasts/);
+});
+
+
+
+test("ws poker protocol document keeps join observe-only while leave remains authoritative for seated users", () => {
+  const text = docText();
+  assert.match(text, /`table_join` \(and legacy alias `join`\) is a \*\*transport-level connect\/observe\/resync\*\* command/);
+  assert.match(text, /acquire a seat, create a seat row, perform buy-in, or mutate authoritative seat occupancy/);
+  assert.match(text, /`leave` remains authoritative for already-seated users/);
+  assert.match(text, /executes authoritative member removal\/cashout semantics/);
 });
 
 test("ws poker protocol document fallback wording matches PR7 defaults", () => {

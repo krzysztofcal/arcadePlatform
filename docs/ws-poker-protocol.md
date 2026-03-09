@@ -52,7 +52,7 @@ Example envelope:
 | `auth` | `{ "token": string }` | Authenticates identity and room access. No table mutation allowed. |
 | `resume` | `{ "sessionId": string, "lastSeq": integer }` | Requests stream resume from last acknowledged sequence. |
 | `ping` | `{ "clientTime": string }` | Keepalive/latency probe. No state mutation. |
-| `join` | `{ "seat": integer, "buyIn": integer }` | Requests seat/join mutation. Requires auth. |
+| `join` | `{ "tableId": string }` | Legacy alias of `table_join`; transport connect/observe/resync entrypoint only (no seat mutation). Requires auth. |
 | `act` | `{ "handId": string, "action": "fold"|"check"|"call"|"bet"|"raise", "amount": integer }` | Requests poker action mutation. Requires auth and turn validity. |
 | `leave` | `{ "reason": string }` | Requests leave/cashout workflow. |
 | `ack` | `{ "seq": integer }` | Acknowledges latest processed server sequence (flow-control aid). |
@@ -106,6 +106,19 @@ Examples:
 }
 ```
 
+
+
+### table_join / join contract (authoritative seat lifecycle boundary)
+
+`table_join` (and legacy alias `join`) is a **transport-level connect/observe/resync** command:
+
+- Loads/attaches the socket to an existing table stream and returns current `table_state`.
+- Is idempotent for repeated calls from the same authenticated socket/user/table.
+- Does **not** acquire a seat, create a seat row, perform buy-in, or mutate authoritative seat occupancy.
+
+Authoritative seat acquisition and buy-in remain outside this WS command path (HTTP authority, currently `netlify/functions/poker-join.mjs`, persisted in `public.poker_seats`). WS snapshots/read models reflect seated membership sourced from authoritative bootstrap state, while non-seated authenticated users may observe and resync with `you.seat = null`.
+
+`leave` remains authoritative for already-seated users: when the authenticated user is an authoritative table member, WS `leave` executes authoritative member removal/cashout semantics even though `table_join` itself is observe-only for non-seated users.
 
 ### Table state membership snapshot (runtime compatibility)
 
@@ -237,7 +250,6 @@ Canonical v1 `error.code` values:
 - `UNAUTHENTICATED` — command requires auth, but auth is missing/expired.
 - `FORBIDDEN` — authenticated user lacks permission for room/command.
 - `INVALID_COMMAND` — command payload invalid (schema/domain rules).
-- `bounds_exceeded` — join rejected because the table is already at max seats.
 - `CONFLICT` — optimistic or state/version conflict.
 - `DUPLICATE_REQUEST` — duplicate `requestId` detected and safely ignored/replayed.
 - `RATE_LIMITED` — command frequency exceeded contract limits.
@@ -251,7 +263,7 @@ Close vs error event rules:
 
 ## Idempotency
 
-- Every mutating client command (`join`, `act`, `leave`) MUST include `requestId` UUID.
+- Every stateful client command (`table_join`/`join`, `act`, `leave`, `resync`, `table_state_sub`) MUST include `requestId` UUID.
 - Server MUST treat `(userId, roomId, type, requestId)` as idempotency scope.
 - Duplicate request handling:
   - If original command already resolved, server MUST return same `commandResult` semantics (or `error.code = "DUPLICATE_REQUEST"` with prior outcome reference) and MUST NOT apply mutation twice.

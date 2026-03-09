@@ -97,7 +97,8 @@ const tableManager = createTableManager({
   presenceTtlMs: resolvePresenceTtlMs(process.env.WS_PRESENCE_TTL_MS),
   maxSeats: resolveMaxSeats(process.env.WS_MAX_SEATS),
   actionResultCacheMax: resolveActionResultCacheMax(process.env.WS_ACTION_RESULT_CACHE_MAX),
-  tableBootstrapLoader: persistedBootstrapEnabled ? createPersistedBootstrapLoader() : null
+  tableBootstrapLoader: persistedBootstrapEnabled ? createPersistedBootstrapLoader() : null,
+  observeOnlyJoin: true
 });
 const sessionStore = createSessionStore({
   sessionTtlMs: resolveSessionTtlMs(process.env.WS_SESSION_TTL_MS)

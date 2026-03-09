@@ -46,6 +46,7 @@ export function createTableManager({
   maxSeats = DEFAULT_MAX_SEATS,
   actionResultCacheMax = DEFAULT_ACTION_RESULT_CACHE_MAX,
   tableBootstrapLoader = null,
+  observeOnlyJoin = false,
   enableDebugCore = false,
   nodeEnv = process.env.NODE_ENV
 } = {}) {
@@ -388,47 +389,58 @@ export function createTableManager({
 
   function join({ ws, userId, tableId, requestId, nowTs = Date.now() }) {
     const conn = ensureConn(ws);
-    if (conn.joinedTableId && conn.joinedTableId !== tableId) {
+    const activeTableId = conn.joinedTableId || conn.subscribedTableId;
+    if (activeTableId && activeTableId !== tableId) {
       return { ok: false, code: "one_table_per_connection", message: "Connection is already joined to a different table" };
     }
 
     const table = ensureTable(tableId);
-    const joinResult = applyCoreEvent(table.coreState, {
-      type: CORE_EVENT_TYPES.JOIN,
-      requestId,
-      userId
-    });
+    const isAuthoritativeMember = table.coreState.members.some((member) => member.userId === userId);
+    const shouldMutateMembership = !observeOnlyJoin;
 
-    if (!joinResult.ok) {
-      return { ok: false, code: joinResult.error.code, message: joinResult.error.code, tableState: tableState(tableId) };
-    }
+    if (isAuthoritativeMember || shouldMutateMembership) {
+      if (shouldMutateMembership && !isAuthoritativeMember) {
+        const joinResult = applyCoreEvent(table.coreState, {
+          type: CORE_EVENT_TYPES.JOIN,
+          requestId,
+          userId
+        });
 
-    table.coreState = joinResult.state;
+        if (!joinResult.ok) {
+          return { ok: false, code: joinResult.error.code, message: joinResult.error.code, tableState: tableState(tableId) };
+        }
 
-    const seat = table.coreState.seats[userId];
-    if (!table.presenceByUserId.has(userId)) {
-      table.presenceByUserId.set(userId, {
-        userId,
-        seat,
-        connected: true,
-        lastSeenAt: nowTs,
-        expiresAt: null
-      });
-    } else {
-      const existingPresence = table.presenceByUserId.get(userId);
-      existingPresence.seat = seat;
-      markConnected(existingPresence, nowTs);
+        table.coreState = joinResult.state;
+      }
+
+      const seat = table.coreState.seats[userId];
+      if (!table.presenceByUserId.has(userId)) {
+        table.presenceByUserId.set(userId, {
+          userId,
+          seat,
+          connected: true,
+          lastSeenAt: nowTs,
+          expiresAt: null
+        });
+      } else {
+        const existingPresence = table.presenceByUserId.get(userId);
+        existingPresence.seat = seat;
+        markConnected(existingPresence, nowTs);
+      }
     }
 
     table.subscribers.add(ws);
-    conn.joinedTableId = tableId;
+    conn.joinedTableId = (isAuthoritativeMember || shouldMutateMembership) ? tableId : null;
     conn.subscribedTableId = tableId;
 
-    const changed = joinResult.effects.some((effect) => effect.type === "member_joined");
     return {
       ok: true,
-      changed,
-      effects: joinResult.effects,
+      changed: shouldMutateMembership && !isAuthoritativeMember,
+      effects: isAuthoritativeMember
+        ? [{ type: "presence_connected" }]
+        : shouldMutateMembership
+          ? [{ type: "member_joined" }]
+          : [{ type: "observer_connected" }],
       tableState: tableState(tableId)
     };
   }
@@ -471,7 +483,7 @@ export function createTableManager({
 
   function leave({ ws, userId, tableId, requestId }) {
     const conn = ensureConn(ws);
-    const resolvedTableId = tableId || conn.joinedTableId;
+    const resolvedTableId = tableId || conn.joinedTableId || conn.subscribedTableId;
 
     if (!resolvedTableId) {
       return { ok: true, changed: false, effects: [{ type: "noop", reason: "not_joined" }], tableState: null };
@@ -486,22 +498,33 @@ export function createTableManager({
       return { ok: true, changed: false, effects: [{ type: "noop", reason: "table_missing" }], tableState: tableState(resolvedTableId) };
     }
 
-    const leaveResult = applyCoreEvent(table.coreState, {
-      type: CORE_EVENT_TYPES.LEAVE,
-      requestId,
-      userId
-    });
-
-    if (!leaveResult.ok) {
-      return { ok: false, code: leaveResult.error.code, message: leaveResult.error.code, tableState: tableState(resolvedTableId) };
-    }
-
-    table.coreState = leaveResult.state;
-
     const hasMember = table.coreState.members.some((member) => member.userId === userId);
-    if (!hasMember) {
+    let effects = [{ type: "observer_left" }];
+    let changed = false;
+
+    if (hasMember) {
+      const leaveResult = applyCoreEvent(table.coreState, {
+        type: CORE_EVENT_TYPES.LEAVE,
+        requestId,
+        userId
+      });
+
+      if (!leaveResult.ok) {
+        return { ok: false, code: leaveResult.error.code, message: leaveResult.error.code, tableState: tableState(resolvedTableId) };
+      }
+
+      table.coreState = leaveResult.state;
+      effects = leaveResult.effects;
+      changed = leaveResult.effects.some((effect) => effect.type === "member_left");
+
+      const stillMember = table.coreState.members.some((member) => member.userId === userId);
+      if (!stillMember) {
+        table.presenceByUserId.delete(userId);
+      }
+    } else {
       table.presenceByUserId.delete(userId);
     }
+
     table.subscribers.delete(ws);
 
     if (conn.joinedTableId === resolvedTableId) {
@@ -516,11 +539,10 @@ export function createTableManager({
       tables.delete(resolvedTableId);
     }
 
-    const changed = leaveResult.effects.some((effect) => effect.type === "member_left");
     return {
       ok: true,
       changed,
-      effects: leaveResult.effects,
+      effects,
       tableState: tableState(resolvedTableId)
     };
   }

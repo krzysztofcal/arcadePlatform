@@ -87,6 +87,120 @@ test("table manager exposes connected members as sorted {userId, seat} and reuse
   ]);
 });
 
+
+
+
+
+test("observeOnlyJoin rejects second different table on same socket and keeps original subscription", async () => {
+  const tableManager = createTableManager({ maxSeats: 4, observeOnlyJoin: true });
+  const ws = fakeWs("ws-observer-one-table");
+
+  const joinA = tableManager.join({ ws, userId: "observer_user", tableId: "table_A", requestId: "join-a", nowTs: 10 });
+  assert.equal(joinA.ok, true);
+
+  const joinB = tableManager.join({ ws, userId: "observer_user", tableId: "table_B", requestId: "join-b", nowTs: 11 });
+  assert.equal(joinB.ok, false);
+  assert.equal(joinB.code, "one_table_per_connection");
+
+  const resyncB = tableManager.resync({ ws, userId: "observer_user", tableId: "table_B", nowTs: 12 });
+  assert.equal(resyncB.ok, false);
+  assert.equal(resyncB.code, "one_table_per_connection");
+
+  const rejoinA = tableManager.join({ ws, userId: "observer_user", tableId: "table_A", requestId: "join-a-2", nowTs: 13 });
+  assert.equal(rejoinA.ok, true);
+  assert.deepEqual(memberPairs(rejoinA.tableState.members), []);
+
+  const leaveA = tableManager.leave({ ws, userId: "observer_user", tableId: "table_A", requestId: "leave-a" });
+  assert.equal(leaveA.ok, true);
+  assert.deepEqual(memberPairs(tableManager.tableState("table_B").members), []);
+});
+
+
+test("observeOnlyJoin seated leave remains authoritative and idempotent", async () => {
+  const tableId = "table_seated_leave_authoritative";
+  const tableManager = createTableManager({
+    observeOnlyJoin: true,
+    tableBootstrapLoader: async ({ tableId: loadedTableId }) => ({
+      ok: true,
+      table: {
+        tableId: loadedTableId,
+        coreState: {
+          version: 3,
+          roomId: loadedTableId,
+          maxSeats: 4,
+          appliedRequestIds: [],
+          members: [{ userId: "seat_user", seat: 2 }],
+          seats: { seat_user: 2 },
+          pokerState: null
+        },
+        presenceByUserId: new Map([["seat_user", { userId: "seat_user", seat: 2, connected: true, lastSeenAt: 1, expiresAt: null }]]),
+        subscribers: new Set(),
+        actionResultsByRequestId: new Map()
+      }
+    })
+  });
+
+  const ws = fakeWs("ws-seat-authoritative-leave");
+  await tableManager.ensureTableLoaded(tableId);
+
+  const joined = tableManager.join({ ws, userId: "seat_user", tableId, requestId: "join-seat", nowTs: 10 });
+  assert.equal(joined.ok, true);
+  assert.deepEqual(memberPairs(joined.tableState.members), [["seat_user", 2]]);
+
+  const left = tableManager.leave({ ws, userId: "seat_user", tableId, requestId: "leave-seat" });
+  assert.equal(left.ok, true);
+  assert.equal(left.effects.some((effect) => effect.type === "member_left"), true);
+  assert.deepEqual(memberPairs(tableManager.tableState(tableId).members), []);
+
+  const resynced = tableManager.resync({ ws, userId: "seat_user", tableId, nowTs: 11 });
+  assert.equal(resynced.ok, true);
+  assert.deepEqual(memberPairs(resynced.tableState.members), []);
+
+  const leftAgain = tableManager.leave({ ws, userId: "seat_user", tableId, requestId: "leave-seat-again" });
+  assert.equal(leftAgain.ok, true);
+  assert.equal(leftAgain.changed, false);
+  assert.deepEqual(memberPairs(tableManager.tableState(tableId).members), []);
+});
+test("observeOnlyJoin keeps non-member join transport-only and idempotent", async () => {
+  const tableId = "table_observe_only";
+  const tableManager = createTableManager({
+    maxSeats: 4,
+    observeOnlyJoin: true,
+    tableBootstrapLoader: async ({ tableId: loadedTableId }) => ({
+      ok: true,
+      table: {
+        tableId: loadedTableId,
+        coreState: {
+          version: 1,
+          roomId: loadedTableId,
+          maxSeats: 4,
+          appliedRequestIds: [],
+          members: [{ userId: "seat_user", seat: 1 }],
+          seats: { seat_user: 1 },
+          pokerState: null
+        },
+        presenceByUserId: new Map([["seat_user", { userId: "seat_user", seat: 1, connected: true, lastSeenAt: 1, expiresAt: null }]]),
+        subscribers: new Set(),
+        actionResultsByRequestId: new Map()
+      }
+    })
+  });
+  const wsObserver = fakeWs("ws-observer");
+
+  const ensured = await tableManager.ensureTableLoaded(tableId);
+  assert.equal(ensured.ok, true);
+
+  const firstObserve = tableManager.join({ ws: wsObserver, userId: "observer_user", tableId, requestId: "observe-1", nowTs: 20 });
+  assert.equal(firstObserve.ok, true);
+  assert.equal(firstObserve.changed, false);
+  assert.deepEqual(memberPairs(firstObserve.tableState.members), [["seat_user", 1]]);
+
+  const secondObserve = tableManager.join({ ws: wsObserver, userId: "observer_user", tableId, requestId: "observe-2", nowTs: 21 });
+  assert.equal(secondObserve.ok, true);
+  assert.equal(secondObserve.changed, false);
+  assert.deepEqual(memberPairs(secondObserve.tableState.members), [["seat_user", 1]]);
+});
+
 test("table manager does not expose __debugCore by default even when nodeEnv is test", () => {
   const tableManager = createTableManager({ maxSeats: 3, presenceTtlMs: 5, nodeEnv: "test" });
   assert.equal(tableManager.__debugCore, undefined);
@@ -1176,4 +1290,123 @@ test("bootstrap rejects invalid persisted state and blocks actions", async () =>
   });
   assert.equal(action.accepted, false);
   assert.equal(action.reason, "table_not_found");
+});
+
+
+test("observer leave without tableId resolves subscribed table in observeOnlyJoin mode", async () => {
+  const tableId = "table_observer_leave";
+  const tableManager = createTableManager({
+    maxSeats: 4,
+    observeOnlyJoin: true,
+    tableBootstrapLoader: async ({ tableId: loadedTableId }) => ({
+      ok: true,
+      table: {
+        tableId: loadedTableId,
+        coreState: {
+          version: 1,
+          roomId: loadedTableId,
+          maxSeats: 4,
+          appliedRequestIds: [],
+          members: [{ userId: "seat_user", seat: 1 }],
+          seats: { seat_user: 1 },
+          pokerState: null
+        },
+        presenceByUserId: new Map([["seat_user", { userId: "seat_user", seat: 1, connected: true, lastSeenAt: 1, expiresAt: null }]]),
+        subscribers: new Set(),
+        actionResultsByRequestId: new Map()
+      }
+    })
+  });
+
+  const wsObserver = fakeWs("ws-observer-leave");
+  const ensured = await tableManager.ensureTableLoaded(tableId);
+  assert.equal(ensured.ok, true);
+
+  const joined = tableManager.join({ ws: wsObserver, userId: "observer_user", tableId, requestId: "join-observer", nowTs: 10 });
+  assert.equal(joined.ok, true);
+
+  const left = tableManager.leave({ ws: wsObserver, userId: "observer_user", requestId: "leave-observer" });
+  assert.equal(left.ok, true);
+  assert.notDeepEqual(left.effects, [{ type: "noop", reason: "not_joined" }]);
+  assert.deepEqual(memberPairs(left.tableState.members), [["seat_user", 1]]);
+});
+
+test("observeOnlyJoin observer lifecycle join->resync->leave stays non-mutating", async () => {
+  const tableId = "table_observer_lifecycle";
+  const tableManager = createTableManager({
+    maxSeats: 4,
+    observeOnlyJoin: true,
+    tableBootstrapLoader: async ({ tableId: loadedTableId }) => ({
+      ok: true,
+      table: {
+        tableId: loadedTableId,
+        coreState: {
+          version: 2,
+          roomId: loadedTableId,
+          maxSeats: 4,
+          appliedRequestIds: [],
+          members: [{ userId: "seat_user", seat: 1 }],
+          seats: { seat_user: 1 },
+          pokerState: null
+        },
+        presenceByUserId: new Map([["seat_user", { userId: "seat_user", seat: 1, connected: true, lastSeenAt: 1, expiresAt: null }]]),
+        subscribers: new Set(),
+        actionResultsByRequestId: new Map()
+      }
+    })
+  });
+
+  const ws = fakeWs("ws-observer-lifecycle");
+  await tableManager.ensureTableLoaded(tableId);
+
+  const joined = tableManager.join({ ws, userId: "obs_user", tableId, requestId: "join-obs", nowTs: 10 });
+  assert.equal(joined.ok, true);
+  assert.deepEqual(memberPairs(joined.tableState.members), [["seat_user", 1]]);
+
+  const resynced = tableManager.resync({ ws, userId: "obs_user", tableId, nowTs: 11 });
+  assert.equal(resynced.ok, true);
+  assert.deepEqual(memberPairs(resynced.tableState.members), [["seat_user", 1]]);
+
+  const left = tableManager.leave({ ws, userId: "obs_user", requestId: "leave-obs" });
+  assert.equal(left.ok, true);
+  assert.notDeepEqual(left.effects, [{ type: "noop", reason: "not_joined" }]);
+  assert.deepEqual(memberPairs(left.tableState.members), [["seat_user", 1]]);
+});
+
+test("observeOnlyJoin seated member reconnect remains non-mutating and connected", async () => {
+  const tableId = "table_seated_reconnect";
+  const tableManager = createTableManager({
+    maxSeats: 4,
+    observeOnlyJoin: true,
+    tableBootstrapLoader: async ({ tableId: loadedTableId }) => ({
+      ok: true,
+      table: {
+        tableId: loadedTableId,
+        coreState: {
+          version: 3,
+          roomId: loadedTableId,
+          maxSeats: 4,
+          appliedRequestIds: [],
+          members: [{ userId: "seat_user", seat: 2 }],
+          seats: { seat_user: 2 },
+          pokerState: null
+        },
+        presenceByUserId: new Map([["seat_user", { userId: "seat_user", seat: 2, connected: false, lastSeenAt: null, expiresAt: null }]]),
+        subscribers: new Set(),
+        actionResultsByRequestId: new Map()
+      }
+    })
+  });
+
+  const ws = fakeWs("ws-seat-reconnect");
+  await tableManager.ensureTableLoaded(tableId);
+
+  const firstJoin = tableManager.join({ ws, userId: "seat_user", tableId, requestId: "join-seat-1", nowTs: 10 });
+  assert.equal(firstJoin.ok, true);
+  assert.deepEqual(memberPairs(firstJoin.tableState.members), [["seat_user", 2]]);
+
+  const secondJoin = tableManager.join({ ws, userId: "seat_user", tableId, requestId: "join-seat-2", nowTs: 11 });
+  assert.equal(secondJoin.ok, true);
+  assert.equal(secondJoin.changed, false);
+  assert.deepEqual(memberPairs(secondJoin.tableState.members), [["seat_user", 2]]);
 });
