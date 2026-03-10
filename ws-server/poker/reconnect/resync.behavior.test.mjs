@@ -1225,3 +1225,48 @@ test("resync after persistence conflict rehydrates persisted source of truth", a
     await fs.rm(dir, { recursive: true, force: true });
   }
 });
+
+test("resync preserves presence contract and gameplay snapshot is explicit table_snapshot call", async () => {
+  const secret = "resync-snapshot-secret";
+  const token = makeHs256Jwt({ secret, sub: "resync_user" });
+  const tableId = "table_resync_snapshot";
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      WS_TABLE_SNAPSHOT_FIXTURES_JSON: JSON.stringify({
+        [tableId]: {
+          tableId,
+          state: { version: 4, state: { phase: "PREFLOP" } },
+          myHoleCards: [],
+          legalActions: [],
+          actionConstraints: { toCall: 0, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null },
+          viewer: { userId: "resync_user", seated: false }
+        }
+      })
+    }
+  });
+  await waitForListening(child, 5000);
+  const ws = await connectClient(port);
+  try {
+    await hello(ws, "hello-resync-snapshot");
+    await auth(ws, token, "auth-resync-snapshot");
+
+    sendFrame(ws, { version: "1.0", type: "table_join", requestId: "join-resync-snapshot", ts: "2026-02-28T04:00:00Z", payload: { tableId } });
+    await nextMessageOfType(ws, "table_state", { skipTypes: ["stateSnapshot", "statePatch"] });
+
+    sendFrame(ws, { version: "1.0", type: "resync", requestId: "resync-presence", ts: "2026-02-28T04:00:01Z", payload: { tableId } });
+    const resyncState = await nextMessageOfType(ws, "table_state");
+    assert.equal(resyncState.payload.tableId, tableId);
+    assert.ok(Array.isArray(resyncState.payload.members));
+
+    sendFrame(ws, { version: "1.0", type: "table_snapshot", requestId: "snapshot-after-resync", ts: "2026-02-28T04:00:02Z", payload: { tableId } });
+    const snapshot = await nextMessageOfType(ws, "table_snapshot");
+    assert.equal(snapshot.payload.tableId, tableId);
+    assert.equal(snapshot.payload.state.version, 4);
+  } finally {
+    ws.close();
+    child.kill();
+    await waitForExit(child);
+  }
+});

@@ -27,21 +27,53 @@ function getFreePort() {
 
 function waitForListening(proc, timeoutMs) {
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error("Server did not start in time")), timeoutMs);
-    const onData = (buf) => {
-      if (String(buf).includes("WS listening on")) {
-        clearTimeout(timer);
-        proc.stdout.off("data", onData);
-        proc.off("exit", onExit);
+    const stdoutChunks = [];
+    const stderrChunks = [];
+
+    const summarize = (chunks) => {
+      const joined = chunks.join("");
+      if (!joined) {
+        return "<empty>";
+      }
+      return joined.slice(-4000);
+    };
+
+    const cleanup = () => {
+      clearTimeout(timer);
+      proc.stdout.off("data", onStdout);
+      proc.stderr.off("data", onStderr);
+      proc.off("exit", onExit);
+    };
+
+    const onStdout = (buf) => {
+      const text = String(buf);
+      stdoutChunks.push(text);
+      if (text.includes("WS listening on")) {
+        cleanup();
         resolve();
       }
     };
-    const onExit = (code) => {
-      clearTimeout(timer);
-      proc.stdout.off("data", onData);
-      reject(new Error(`Server exited before ready: ${code}`));
+
+    const onStderr = (buf) => {
+      stderrChunks.push(String(buf));
     };
-    proc.stdout.on("data", onData);
+
+    const timer = setTimeout(() => {
+      cleanup();
+      reject(new Error(
+        `Server did not start in time. stdout: ${summarize(stdoutChunks)} stderr: ${summarize(stderrChunks)}`
+      ));
+    }, timeoutMs);
+
+    const onExit = (code, signal) => {
+      cleanup();
+      reject(new Error(
+        `Server exited before ready: code=${code} signal=${signal || "none"}. stdout: ${summarize(stdoutChunks)} stderr: ${summarize(stderrChunks)}`
+      ));
+    };
+
+    proc.stdout.on("data", onStdout);
+    proc.stderr.on("data", onStderr);
     proc.once("exit", onExit);
   });
 }
@@ -126,6 +158,46 @@ function nextMessage(ws, timeoutMs = 10000) {
     const timer = setTimeout(() => {
       cleanup();
       reject(new Error("Timed out waiting for websocket message"));
+    }, timeoutMs);
+
+    ws.on("message", onMessage);
+    ws.on("error", onError);
+    ws.on("close", onClose);
+  });
+}
+
+function nextNMessages(ws, count, timeoutMs = 10000) {
+  return new Promise((resolve, reject) => {
+    const messages = [];
+
+    const cleanup = () => {
+      clearTimeout(timer);
+      ws.off("message", onMessage);
+      ws.off("error", onError);
+      ws.off("close", onClose);
+    };
+
+    const onMessage = (data) => {
+      messages.push(JSON.parse(String(data)));
+      if (messages.length >= count) {
+        cleanup();
+        resolve(messages);
+      }
+    };
+
+    const onError = (error) => {
+      cleanup();
+      reject(error);
+    };
+
+    const onClose = (code) => {
+      cleanup();
+      reject(new Error(`Socket closed before receiving ${count} messages: ${code}`));
+    };
+
+    const timer = setTimeout(() => {
+      cleanup();
+      reject(new Error(`Timed out waiting for ${count} websocket messages`));
     }, timeoutMs);
 
     ws.on("message", onMessage);
@@ -1125,6 +1197,8 @@ test("same-socket frame ordering is preserved when bootstrap load is slow", asyn
     await hello(ws);
     await auth(ws, token);
 
+    const twoMessages = nextNMessages(ws, 2, 4000);
+
     sendFrame(ws, { version: "1.0", type: "table_join", requestId: "join-slow", ts: "2026-02-28T00:21:00Z", payload: { tableId } });
     sendFrame(ws, {
       version: "1.0",
@@ -1134,8 +1208,7 @@ test("same-socket frame ordering is preserved when bootstrap load is slow", asyn
       payload: { tableId, handId: "h8", action: "check" }
     });
 
-    const first = await nextMessage(ws);
-    const second = await nextMessage(ws);
+    const [first, second] = await twoMessages;
 
     assert.equal(first.type, "table_state");
     assert.equal(second.type, "commandResult");
@@ -1217,11 +1290,12 @@ test("rapid same-socket join then snapshot remains ordered with slow bootstrap",
     await hello(ws);
     await auth(ws, token);
 
+    const twoMessages = nextNMessages(ws, 2, 4000);
+
     sendFrame(ws, { version: "1.0", type: "table_join", requestId: "join-ordered", ts: "2026-02-28T00:23:00Z", payload: { tableId } });
     sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "snap-ordered", ts: "2026-02-28T00:23:01Z", payload: { tableId, view: "snapshot" } });
 
-    const first = await nextMessage(ws, 4000);
-    const second = await nextMessage(ws, 4000);
+    const [first, second] = await twoMessages;
 
     assert.equal(first.type, "table_state");
     assert.equal(second.type, "stateSnapshot");
@@ -1965,10 +2039,15 @@ test("failed timeout persistence does not publish unpersisted timeout mutation",
 
     sendFrame(ws, { version: "1.0", type: "table_join", requestId: "join-timeout-fail", ts: "2026-02-28T02:30:00Z", payload: { tableId } });
     await nextMessageOfType(ws, "table_state");
-    sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "snap-timeout-before", ts: "2026-02-28T02:30:01Z", payload: { tableId, view: "snapshot" } });
-    const baseline = await nextMessageOfType(ws, "stateSnapshot");
 
-    const resync = await nextMessageOfType(ws, "resync", 10000);
+    const snapshotAndResync = nextNMessages(ws, 2, 10000);
+    sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "snap-timeout-before", ts: "2026-02-28T02:30:01Z", payload: { tableId, view: "snapshot" } });
+    const [first, second] = await snapshotAndResync;
+    const baseline = first.type === "stateSnapshot" ? first : second;
+    const resync = first.type === "resync" ? first : second;
+
+    assert.equal(baseline.type, "stateSnapshot");
+    assert.equal(resync.type, "resync");
     assert.equal(resync.payload.reason, "persistence_conflict");
 
     sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "snap-timeout-after", ts: "2026-02-28T02:30:02Z", payload: { tableId, view: "snapshot" } });
@@ -1980,5 +2059,353 @@ test("failed timeout persistence does not publish unpersisted timeout mutation",
     child.kill("SIGTERM");
     await waitForExit(child);
     await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("table_snapshot rejects unauthenticated requests", async () => {
+  const { port, child } = await createServer();
+  await waitForListening(child, 5000);
+  const ws = await connectClient(port);
+  try {
+    await hello(ws);
+
+    sendFrame(ws, {
+      version: "1.0",
+      type: "table_snapshot",
+      requestId: "snapshot-unauth",
+      ts: "2026-02-28T03:00:00Z",
+      payload: { tableId: "table_snapshot_unauth" }
+    });
+
+    const frame = await nextMessage(ws);
+    assert.equal(frame.type, "error");
+    assert.equal(frame.payload.code, "auth_required");
+  } finally {
+    ws.close();
+    child.kill();
+    await waitForExit(child);
+  }
+});
+
+test("table_snapshot supports roomId alias and payload.tableId equivalently", async () => {
+  const secret = "snapshot-secret";
+  const token = makeHs256Jwt({ secret, sub: "snapshot_user" });
+  const tableId = "table_snapshot_alias";
+  const fixture = {
+    [tableId]: {
+      tableId,
+      state: { version: 12, state: { phase: "PREFLOP", seats: [] } },
+      myHoleCards: [],
+      legalActions: [],
+      actionConstraints: { toCall: 0, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null },
+      viewer: { userId: "snapshot_user", seated: false }
+    }
+  };
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      WS_TABLE_SNAPSHOT_FIXTURES_JSON: JSON.stringify(fixture)
+    }
+  });
+  await waitForListening(child, 5000);
+  const ws = await connectClient(port);
+  try {
+    await hello(ws);
+    const authOk = await auth(ws, token, "snapshot-auth");
+    assert.equal(authOk.type, "authOk");
+
+    sendFrame(ws, {
+      version: "1.0",
+      type: "table_snapshot",
+      requestId: "snapshot-room-id",
+      roomId: tableId,
+      ts: "2026-02-28T03:00:01Z",
+      payload: {}
+    });
+    const byRoomId = await nextMessageOfType(ws, "table_snapshot");
+
+    sendFrame(ws, {
+      version: "1.0",
+      type: "table_snapshot",
+      requestId: "snapshot-payload-id",
+      ts: "2026-02-28T03:00:02Z",
+      payload: { tableId }
+    });
+    const byPayload = await nextMessageOfType(ws, "table_snapshot");
+
+    assert.equal(byRoomId.payload.tableId, tableId);
+    assert.equal(byRoomId.payload.state.version, 12);
+    assert.deepEqual(byRoomId.payload, byPayload.payload);
+  } finally {
+    ws.close();
+    child.kill();
+    await waitForExit(child);
+  }
+});
+
+test("table_snapshot rejects mismatched roomId and payload.tableId deterministically", async () => {
+  const secret = "snapshot-mismatch-secret";
+  const token = makeHs256Jwt({ secret, sub: "snapshot_user" });
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      WS_TABLE_SNAPSHOT_FIXTURES_JSON: JSON.stringify({
+        table_a: {
+          tableId: "table_a",
+          state: { version: 1, state: {} },
+          myHoleCards: [],
+          legalActions: [],
+          actionConstraints: { toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null },
+          viewer: { userId: "snapshot_user", seated: false }
+        }
+      })
+    }
+  });
+  await waitForListening(child, 5000);
+  const ws = await connectClient(port);
+  try {
+    await hello(ws);
+    await auth(ws, token, "snapshot-auth-mismatch");
+
+    sendFrame(ws, {
+      version: "1.0",
+      type: "table_snapshot",
+      requestId: "snapshot-mismatch",
+      roomId: "table_a",
+      ts: "2026-02-28T03:00:03Z",
+      payload: { tableId: "table_b" }
+    });
+
+    const frame = await nextMessage(ws);
+    assert.equal(frame.type, "error");
+    assert.equal(frame.payload.code, "INVALID_ROOM_ID");
+    assert.equal(frame.payload.message, "roomId and payload.tableId must match when both are provided");
+  } finally {
+    ws.close();
+    child.kill();
+    await waitForExit(child);
+  }
+});
+
+test("table_snapshot returns gameplay snapshot without mutating presence table_state", async () => {
+  const secret = "snapshot-presence-secret";
+  const token = makeHs256Jwt({ secret, sub: "presence_user" });
+  const tableId = "table_snapshot_presence";
+  const fixture = {
+    [tableId]: {
+      tableId,
+      state: { version: 9, state: { phase: "PREFLOP", seats: [] } },
+      myHoleCards: [],
+      legalActions: ["CHECK"],
+      actionConstraints: { toCall: 0, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: 1000 },
+      viewer: { userId: "presence_user", seated: true }
+    }
+  };
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      WS_TABLE_SNAPSHOT_FIXTURES_JSON: JSON.stringify(fixture)
+    }
+  });
+  await waitForListening(child, 5000);
+  const ws = await connectClient(port);
+  try {
+    await hello(ws);
+    await auth(ws, token, "snapshot-auth-presence");
+
+    sendFrame(ws, { version: "1.0", type: "table_join", requestId: "join-presence", ts: "2026-02-28T03:00:04Z", payload: { tableId } });
+    const joined = await nextMessageOfType(ws, "table_state");
+
+    sendFrame(ws, { version: "1.0", type: "table_snapshot", requestId: "snapshot-presence", ts: "2026-02-28T03:00:05Z", payload: { tableId } });
+    const snapshot = await nextMessageOfType(ws, "table_snapshot");
+
+    sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "sub-presence", ts: "2026-02-28T03:00:06Z", payload: { tableId } });
+    const after = await nextMessageOfType(ws, "table_state");
+
+    assert.equal(snapshot.payload.tableId, tableId);
+    assert.equal(snapshot.payload.state.version, 9);
+    assert.deepEqual(after.payload.members, joined.payload.members);
+  } finally {
+    ws.close();
+    child.kill();
+    await waitForExit(child);
+  }
+});
+
+test("table_snapshot matches HTTP snapshot version semantics for repeated reads", async () => {
+  const secret = "snapshot-repeat-secret";
+  const token = makeHs256Jwt({ secret, sub: "repeat_user" });
+  const tableId = "table_snapshot_repeat";
+  const fixture = {
+    [tableId]: {
+      tableId,
+      state: { version: 33, state: { phase: "PREFLOP", seats: [] } },
+      myHoleCards: [],
+      legalActions: [],
+      actionConstraints: { toCall: 0, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null },
+      viewer: { userId: "repeat_user", seated: false }
+    }
+  };
+
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      WS_TABLE_SNAPSHOT_FIXTURES_JSON: JSON.stringify(fixture)
+    }
+  });
+  await waitForListening(child, 5000);
+  const ws = await connectClient(port);
+  try {
+    await hello(ws);
+    await auth(ws, token, "snapshot-auth-repeat");
+
+    sendFrame(ws, { version: "1.0", type: "table_join", requestId: "join-repeat", ts: "2026-02-28T03:10:00Z", payload: { tableId } });
+    const joined = await nextMessageOfType(ws, "table_state");
+
+    sendFrame(ws, { version: "1.0", type: "table_snapshot", requestId: "snapshot-repeat-1", ts: "2026-02-28T03:10:01Z", payload: { tableId } });
+    const first = await nextMessageOfType(ws, "table_snapshot");
+
+    sendFrame(ws, { version: "1.0", type: "table_snapshot", requestId: "snapshot-repeat-2", ts: "2026-02-28T03:10:02Z", payload: { tableId } });
+    const second = await nextMessageOfType(ws, "table_snapshot");
+
+    sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "sub-repeat", ts: "2026-02-28T03:10:03Z", payload: { tableId } });
+    const after = await nextMessageOfType(ws, "table_state");
+
+    assert.equal(first.payload.state.version, 33);
+    assert.equal(second.payload.state.version, 33);
+    assert.deepEqual(first.payload, second.payload);
+    assert.deepEqual(after.payload.members, joined.payload.members);
+  } finally {
+    ws.close();
+    child.kill();
+    await waitForExit(child);
+  }
+});
+
+
+test("table_snapshot rejects missing requestId deterministically and does not mutate presence", async () => {
+  const secret = "snapshot-no-reqid-secret";
+  const token = makeHs256Jwt({ secret, sub: "noreqid_user" });
+  const tableId = "table_snapshot_noreqid";
+  const fixture = {
+    [tableId]: {
+      tableId,
+      state: { version: 6, state: { phase: "PREFLOP", seats: [] } },
+      myHoleCards: [],
+      legalActions: [],
+      actionConstraints: { toCall: 0, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null },
+      viewer: { userId: "noreqid_user", seated: false }
+    }
+  };
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      WS_TABLE_SNAPSHOT_FIXTURES_JSON: JSON.stringify(fixture)
+    }
+  });
+  await waitForListening(child, 5000);
+  const ws = await connectClient(port);
+  try {
+    await hello(ws);
+    await auth(ws, token, "snapshot-auth-noreqid");
+
+    sendFrame(ws, { version: "1.0", type: "table_join", requestId: "join-noreqid", ts: "2026-02-28T03:11:00Z", payload: { tableId } });
+    const before = await nextMessageOfType(ws, "table_state");
+
+    sendFrame(ws, { version: "1.0", type: "table_snapshot", ts: "2026-02-28T03:11:01Z", payload: { tableId } });
+    const rejected = await nextMessage(ws);
+    assert.equal(rejected.type, "error");
+    assert.equal(rejected.payload.code, "INVALID_COMMAND");
+    assert.equal(rejected.payload.message, "table_snapshot requires requestId");
+
+    sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "sub-noreqid", ts: "2026-02-28T03:11:02Z", payload: { tableId } });
+    const after = await nextMessageOfType(ws, "table_state");
+    assert.deepEqual(after.payload.members, before.payload.members);
+  } finally {
+    ws.close();
+    child.kill();
+    await waitForExit(child);
+  }
+});
+
+
+test("table_snapshot rejects invalid gameplay snapshot state deterministically", async () => {
+  const secret = "snapshot-invalid-state-secret";
+  const token = makeHs256Jwt({ secret, sub: "invalid_snapshot_user" });
+  const tableId = "table_snapshot_invalid";
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      WS_TABLE_SNAPSHOT_FIXTURES_JSON: JSON.stringify({
+        [tableId]: { ok: false, code: "state_invalid" }
+      })
+    }
+  });
+  await waitForListening(child, 5000);
+  const ws = await connectClient(port);
+  try {
+    await hello(ws);
+    await auth(ws, token, "snapshot-auth-invalid-state");
+
+    sendFrame(ws, { version: "1.0", type: "table_join", requestId: "join-invalid-state", ts: "2026-02-28T03:12:00Z", payload: { tableId } });
+    const before = await nextMessageOfType(ws, "table_state");
+
+    sendFrame(ws, { version: "1.0", type: "table_snapshot", requestId: "snapshot-invalid-state", ts: "2026-02-28T03:12:01Z", payload: { tableId } });
+    const rejected = await nextMessage(ws);
+    assert.equal(rejected.type, "error");
+    assert.equal(rejected.payload.code, "INVALID_COMMAND");
+    assert.equal(rejected.payload.message, "state_invalid");
+
+    sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "sub-invalid-state", ts: "2026-02-28T03:12:02Z", payload: { tableId } });
+    const after = await nextMessageOfType(ws, "table_state");
+    assert.deepEqual(after.payload.members, before.payload.members);
+  } finally {
+    ws.close();
+    child.kill();
+    await waitForExit(child);
+  }
+});
+
+test("table_snapshot internal failures are non-leaking and do not mutate presence", async () => {
+  const secret = "snapshot-internal-failure-secret";
+  const token = makeHs256Jwt({ secret, sub: "internal_snapshot_user" });
+  const tableId = "table_snapshot_internal_failure";
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      WS_TABLE_SNAPSHOT_FIXTURES_JSON: JSON.stringify({
+        [tableId]: { ok: false, code: "db_internal: relation private.secret failed" }
+      })
+    }
+  });
+  await waitForListening(child, 5000);
+  const ws = await connectClient(port);
+  try {
+    await hello(ws);
+    await auth(ws, token, "snapshot-auth-internal-failure");
+
+    sendFrame(ws, { version: "1.0", type: "table_join", requestId: "join-internal-failure", ts: "2026-02-28T03:12:00Z", payload: { tableId } });
+    const before = await nextMessageOfType(ws, "table_state");
+
+    sendFrame(ws, { version: "1.0", type: "table_snapshot", requestId: "snapshot-internal-failure", ts: "2026-02-28T03:12:01Z", payload: { tableId } });
+    const rejected = await nextMessage(ws);
+    assert.equal(rejected.type, "error");
+    assert.equal(rejected.payload.code, "INVALID_COMMAND");
+    assert.equal(rejected.payload.message, "snapshot_failed");
+
+    sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "sub-internal-failure", ts: "2026-02-28T03:12:02Z", payload: { tableId } });
+    const after = await nextMessageOfType(ws, "table_state");
+    assert.deepEqual(after.payload.members, before.payload.members);
+  } finally {
+    ws.close();
+    child.kill();
+    await waitForExit(child);
   }
 });

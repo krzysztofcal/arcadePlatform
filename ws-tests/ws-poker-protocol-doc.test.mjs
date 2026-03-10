@@ -40,6 +40,8 @@ test("ws poker protocol document defines required message type names", () => {
   assert.match(serverTypes, /^\|\s*`error`\s*\|/m);
   assert.match(serverTypes, /^\|\s*`resync`\s*\|/m);
   assert.match(serverTypes, /^\|\s*`stateSnapshot`\s*\|/m);
+  assert.match(serverTypes, /^\|\s*`table_snapshot`\s*\|/m);
+  assert.match(text, /^\|\s*`table_snapshot`\s*\|/m);
 });
 
 test("ws poker protocol document defines canonical stateSnapshot payload fields", () => {
@@ -184,4 +186,24 @@ test("ws poker protocol document describes PR15 bounded replay + resume fallback
   assert.match(text, /Legacy PR9\/PR11 live fanout paths remain `stateSnapshot`-based/);
   assert.match(text, /`statePatch` is reserved for additive\/opt-in transport optimization paths/);
   assert.match(text, /`stateSnapshot` remains canonical fallback\/resync truth path/);
+});
+
+
+test("ws poker protocol document distinguishes presence table_state from gameplay table_snapshot", () => {
+  const text = docText();
+  assert.match(text, /`table_state` remains the \*\*presence-only\*\* WS membership frame/);
+  assert.match(text, /New `table_snapshot` is the gameplay snapshot command\/response path/);
+  assert.match(text, /viewer-scoped `myHoleCards`/);
+});
+
+
+
+test("ws poker protocol documents table_snapshot as requestId-required", () => {
+  const text = docText();
+  assert.match(text, /table_snapshot[\s\S]*Requires `requestId`/);
+});
+
+test("ws poker protocol documents table_snapshot unknown internal failures as snapshot_failed", () => {
+  const text = docText();
+  assert.match(text, /unknown backend\/storage failures collapse to `snapshot_failed`/);
 });

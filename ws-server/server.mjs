@@ -17,6 +17,7 @@ import { buildStateSnapshotPayload } from "./poker/read-model/state-snapshot.mjs
 import { buildStatePatch } from "./poker/read-model/state-patch.mjs";
 import { createStreamLog } from "./poker/runtime/stream-log.mjs";
 import { createPersistedStateWriter } from "./poker/persistence/persisted-state-writer.mjs";
+import { createTableSnapshotLoader } from "./poker/table/table-snapshot.mjs";
 
 const PORT = Number(process.env.PORT || 3000);
 const PROTECTED_MESSAGE_TYPES = new Set([
@@ -26,12 +27,20 @@ const PROTECTED_MESSAGE_TYPES = new Set([
   "table_join",
   "table_leave",
   "table_state_sub",
+  "table_snapshot",
   "act",
   "resync",
   "resume",
   "ack"
 ]);
-const REQUEST_ID_REQUIRED_TYPES = new Set(["join", "leave", "table_join", "table_leave", "table_state_sub", "act", "resync", "resume"]);
+const REQUEST_ID_REQUIRED_TYPES = new Set(["join", "leave", "table_join", "table_leave", "table_state_sub", "table_snapshot", "act", "resync", "resume"]);
+const TABLE_SNAPSHOT_KNOWN_FAILURE_CODES = new Set([
+  "invalid_table_id",
+  "table_not_found",
+  "state_missing",
+  "state_invalid",
+  "contract_mismatch_empty_legal_actions"
+]);
 
 function resolvePresenceTtlMs(rawValue) {
   const parsed = Number(rawValue);
@@ -116,6 +125,7 @@ const sessionStore = createSessionStore({
   sessionTtlMs: resolveSessionTtlMs(process.env.WS_SESSION_TTL_MS)
 });
 const streamLog = createStreamLog({ cap: Number(process.env.WS_STREAM_REPLAY_CAP || 128) });
+const tableSnapshotLoader = createTableSnapshotLoader({ env: process.env });
 const persistedStateWriter = persistedStateWriteEnabled ? createPersistedStateWriter({ env: process.env, klog: klogSafe }) : null;
 const lastSnapshotBySessionAndTable = new Map();
 
@@ -136,6 +146,23 @@ function klogSafe(kind, data) {
     // Logging must never break request handling.
   }
 }
+
+process.on("uncaughtException", (error) => {
+  klogSafe("ws_uncaught_exception", {
+    message: error?.message || "unknown",
+    stack: error?.stack || null
+  });
+  process.exit(1);
+});
+
+process.on("unhandledRejection", (reason) => {
+  const asError = reason instanceof Error ? reason : null;
+  klogSafe("ws_unhandled_rejection", {
+    message: asError?.message || String(reason),
+    stack: asError?.stack || null
+  });
+  process.exit(1);
+});
 
 function nowTs() {
   return new Date().toISOString();
@@ -371,6 +398,23 @@ function sendCommandResult(ws, connState, { requestId = null, tableId = null, st
   if (tableId) {
     frame.roomId = tableId;
   }
+
+  if (requestId) {
+    frame.requestId = requestId;
+  }
+
+  sendFrame(ws, frame);
+}
+
+function sendGameplaySnapshot(ws, connState, { requestId = null, tableId, snapshot }) {
+  const frame = {
+    version: "1.0",
+    type: "table_snapshot",
+    ts: nowTs(),
+    roomId: tableId,
+    sessionId: connState.sessionId,
+    payload: snapshot
+  };
 
   if (requestId) {
     frame.requestId = requestId;
@@ -908,6 +952,31 @@ wss.on("connection", (ws) => {
       }
 
       sendTableState(ws, connState, { requestId: frame.requestId ?? null, tableState: subscribed.tableState });
+      return;
+    }
+
+    if (frame.type === "table_snapshot") {
+      const resolvedRoomId = resolveRoomId(frame);
+      if (!resolvedRoomId.ok) {
+        sendError(ws, connState, {
+          code: resolvedRoomId.code,
+          message: resolvedRoomId.message,
+          requestId: frame.requestId ?? null
+        });
+        return;
+      }
+      const tableId = resolvedRoomId.roomId;
+      const loaded = await tableSnapshotLoader({ tableId, userId: connState.session.userId, nowMs: Date.now() });
+      if (!loaded?.ok || !loaded?.snapshot) {
+        const snapshotFailureCode = TABLE_SNAPSHOT_KNOWN_FAILURE_CODES.has(loaded?.code) ? loaded.code : "snapshot_failed";
+        sendError(ws, connState, {
+          code: "INVALID_COMMAND",
+          message: snapshotFailureCode,
+          requestId: frame.requestId ?? null
+        });
+        return;
+      }
+      sendGameplaySnapshot(ws, connState, { requestId: frame.requestId ?? null, tableId, snapshot: loaded.snapshot });
       return;
     }
 

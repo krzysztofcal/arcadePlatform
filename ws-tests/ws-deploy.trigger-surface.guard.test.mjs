@@ -11,11 +11,11 @@ function pushBlock(text) {
   return match ? match[1] : "";
 }
 
-test("ws-deploy push trigger surface keeps ws-tests coverage and avoids ws-server ownership", () => {
+test("ws-deploy push trigger surface includes ws-server and ws-tests coverage", () => {
   const text = workflowText();
   const push = pushBlock(text);
 
   assert.match(push, /paths:[\s\S]*-\s*"ws-tests\/\*\*"/);
   assert.match(push, /paths:[\s\S]*-\s*"\.github\/workflows\/ws-deploy\.yml"/);
-  assert.doesNotMatch(push, /"ws-server\/\*\*"/);
+  assert.match(push, /"ws-server\/\*\*"/);
 });

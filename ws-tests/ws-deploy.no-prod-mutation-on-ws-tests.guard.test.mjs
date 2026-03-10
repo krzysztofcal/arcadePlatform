@@ -16,7 +16,7 @@ test("ws-deploy never contains production mutation steps", () => {
   const push = pushBlock(text);
 
   assert.match(push, /"ws-tests\/\*\*"/);
-  assert.doesNotMatch(push, /"ws-server\/\*\*"/);
+  assert.match(push, /"ws-server\/\*\*"/);
 
   assert.doesNotMatch(text, /docker\/login-action@/);
   assert.doesNotMatch(text, /docker\/build-push-action@/);

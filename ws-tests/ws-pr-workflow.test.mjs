@@ -53,6 +53,8 @@ function assertRequiredOrder(text) {
   const block = stepsBlock(text);
 
   const install = block.indexOf("npm ci --prefix ws-server");
+  const rootInstall = block.indexOf("\n        run: npm ci\n");
+  const runtimeDepsGuard = block.indexOf("node --test ws-tests/ws-server-package-runtime-deps.guard.test.mjs");
   const behavior = block.indexOf("node --test ws-server/server.behavior.test.mjs");
   const locationGuard = block.indexOf("node --test ws-tests/ws-tests-location.guard.test.mjs");
   const suiteGuard = block.indexOf("node --test ws-tests/ws-tests-suite-completeness.guard.test.mjs");
@@ -74,14 +76,17 @@ function assertRequiredOrder(text) {
   assert.match(block, /Run ws poker engine timeout behavior test/);
   assert.match(block, /node --test ws-server\/poker\/engine\/engine-timeout\.behavior\.test\.mjs/);
 
+  assert.equal(rootInstall, -1);
   assert.notEqual(install, -1);
+  assert.notEqual(runtimeDepsGuard, -1);
   assert.notEqual(behavior, -1);
   assert.notEqual(locationGuard, -1);
   assert.notEqual(suiteGuard, -1);
   assert.notEqual(protocolDoc, -1);
   assert.notEqual(imageCheck, -1);
   assert.notEqual(containerCheck, -1);
-  assert.equal(install < behavior, true);
+  assert.equal(install < runtimeDepsGuard, true);
+  assert.equal(runtimeDepsGuard < behavior, true);
   assert.equal(behavior < locationGuard, true);
   assert.equal(locationGuard < suiteGuard, true);
   assert.equal(suiteGuard < protocolDoc, true);

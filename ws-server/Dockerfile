@@ -1,13 +1,15 @@
 FROM node:20-alpine
 
-WORKDIR /app
+WORKDIR /app/ws-server
 
-COPY package.json package-lock.json ./
+COPY ws-server/package.json ws-server/package-lock.json ./
 RUN npm ci --omit=dev
 
-COPY server.mjs ./
-COPY poker ./poker
+COPY ws-server ./
+
+WORKDIR /app
+COPY netlify/functions/_shared ./netlify/functions/_shared
 
 EXPOSE 3000
 
-CMD ["node", "server.mjs"]
+CMD ["node", "ws-server/server.mjs"]

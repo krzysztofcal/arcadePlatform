@@ -49,7 +49,7 @@ async function probeHealthz(hostPort, timeoutMs) {
 }
 
 function startWsContainer(imageTag, containerName) {
-  const build = run("docker", ["build", "-t", imageTag, "-f", "ws-server/Dockerfile", "ws-server"]);
+  const build = run("docker", ["build", "-t", imageTag, "-f", "ws-server/Dockerfile", "."]);
   assert.equal(build.status, 0, `docker build failed:\n${build.stderr || build.stdout}`);
 
   const runOut = run("docker", [
