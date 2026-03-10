@@ -4,6 +4,7 @@ on:
   push:
     branches: [ "main" ]
     paths:
+      - "ws-server/**"
       - "ws-tests/**"
       - ".github/workflows/ws-deploy.yml"
 
@@ -25,6 +26,13 @@ jobs:
       - name: Install WS server dependencies
         run: npm ci --prefix ws-server
 
+
+      - name: Validate ws Dockerfile build contract (repo-root context)
+        run: |
+          set -euo pipefail
+          docker build -t arcadeplatform-ws-contract:${{ github.sha }} -f ws-server/Dockerfile .
+          docker image rm -f arcadeplatform-ws-contract:${{ github.sha }}
+
       - name: Run WS behavior test
         run: node --test ws-server/server.behavior.test.mjs
 
@@ -36,6 +44,9 @@ jobs:
 
       - name: Run ws table behavior test
         run: node --test ws-server/poker/table/table.behavior.test.mjs
+
+      - name: Run ws table snapshot behavior test
+        run: node --test ws-server/poker/table/table-snapshot.behavior.test.mjs
 
       - name: Run ws table manager behavior test
         run: node --test ws-server/poker/table/table-manager.behavior.test.mjs
@@ -199,3 +210,4 @@ jobs:
 
       - name: WS poker protocol compliance test
         run: node --test ws-tests/ws-poker-protocol-compliance.test.mjs
+

@@ -37,6 +37,9 @@ jobs:
       - name: Run ws table behavior test
         run: node --test ws-server/poker/table/table.behavior.test.mjs
 
+      - name: Run ws table snapshot behavior test
+        run: node --test ws-server/poker/table/table-snapshot.behavior.test.mjs
+
       - name: Run ws table manager behavior test
         run: node --test ws-server/poker/table/table-manager.behavior.test.mjs
 

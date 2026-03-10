@@ -1982,3 +1982,351 @@ test("failed timeout persistence does not publish unpersisted timeout mutation",
     await fs.rm(dir, { recursive: true, force: true });
   }
 });
+
+test("table_snapshot rejects unauthenticated requests", async () => {
+  const { port, child } = await createServer();
+  await waitForListening(child, 5000);
+  const ws = await connectClient(port);
+  try {
+    await hello(ws);
+
+    sendFrame(ws, {
+      version: "1.0",
+      type: "table_snapshot",
+      requestId: "snapshot-unauth",
+      ts: "2026-02-28T03:00:00Z",
+      payload: { tableId: "table_snapshot_unauth" }
+    });
+
+    const frame = await nextMessage(ws);
+    assert.equal(frame.type, "error");
+    assert.equal(frame.payload.code, "auth_required");
+  } finally {
+    ws.close();
+    child.kill();
+    await waitForExit(child);
+  }
+});
+
+test("table_snapshot supports roomId alias and payload.tableId equivalently", async () => {
+  const secret = "snapshot-secret";
+  const token = makeHs256Jwt({ secret, sub: "snapshot_user" });
+  const tableId = "table_snapshot_alias";
+  const fixture = {
+    [tableId]: {
+      tableId,
+      state: { version: 12, state: { phase: "PREFLOP", seats: [] } },
+      myHoleCards: [],
+      legalActions: [],
+      actionConstraints: { toCall: 0, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null },
+      viewer: { userId: "snapshot_user", seated: false }
+    }
+  };
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      WS_TABLE_SNAPSHOT_FIXTURES_JSON: JSON.stringify(fixture)
+    }
+  });
+  await waitForListening(child, 5000);
+  const ws = await connectClient(port);
+  try {
+    await hello(ws);
+    const authOk = await auth(ws, token, "snapshot-auth");
+    assert.equal(authOk.type, "authOk");
+
+    sendFrame(ws, {
+      version: "1.0",
+      type: "table_snapshot",
+      requestId: "snapshot-room-id",
+      roomId: tableId,
+      ts: "2026-02-28T03:00:01Z",
+      payload: {}
+    });
+    const byRoomId = await nextMessageOfType(ws, "table_snapshot");
+
+    sendFrame(ws, {
+      version: "1.0",
+      type: "table_snapshot",
+      requestId: "snapshot-payload-id",
+      ts: "2026-02-28T03:00:02Z",
+      payload: { tableId }
+    });
+    const byPayload = await nextMessageOfType(ws, "table_snapshot");
+
+    assert.equal(byRoomId.payload.tableId, tableId);
+    assert.equal(byRoomId.payload.state.version, 12);
+    assert.deepEqual(byRoomId.payload, byPayload.payload);
+  } finally {
+    ws.close();
+    child.kill();
+    await waitForExit(child);
+  }
+});
+
+test("table_snapshot rejects mismatched roomId and payload.tableId deterministically", async () => {
+  const secret = "snapshot-mismatch-secret";
+  const token = makeHs256Jwt({ secret, sub: "snapshot_user" });
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      WS_TABLE_SNAPSHOT_FIXTURES_JSON: JSON.stringify({
+        table_a: {
+          tableId: "table_a",
+          state: { version: 1, state: {} },
+          myHoleCards: [],
+          legalActions: [],
+          actionConstraints: { toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null },
+          viewer: { userId: "snapshot_user", seated: false }
+        }
+      })
+    }
+  });
+  await waitForListening(child, 5000);
+  const ws = await connectClient(port);
+  try {
+    await hello(ws);
+    await auth(ws, token, "snapshot-auth-mismatch");
+
+    sendFrame(ws, {
+      version: "1.0",
+      type: "table_snapshot",
+      requestId: "snapshot-mismatch",
+      roomId: "table_a",
+      ts: "2026-02-28T03:00:03Z",
+      payload: { tableId: "table_b" }
+    });
+
+    const frame = await nextMessage(ws);
+    assert.equal(frame.type, "error");
+    assert.equal(frame.payload.code, "INVALID_ROOM_ID");
+    assert.equal(frame.payload.message, "roomId and payload.tableId must match when both are provided");
+  } finally {
+    ws.close();
+    child.kill();
+    await waitForExit(child);
+  }
+});
+
+test("table_snapshot returns gameplay snapshot without mutating presence table_state", async () => {
+  const secret = "snapshot-presence-secret";
+  const token = makeHs256Jwt({ secret, sub: "presence_user" });
+  const tableId = "table_snapshot_presence";
+  const fixture = {
+    [tableId]: {
+      tableId,
+      state: { version: 9, state: { phase: "PREFLOP", seats: [] } },
+      myHoleCards: [],
+      legalActions: ["CHECK"],
+      actionConstraints: { toCall: 0, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: 1000 },
+      viewer: { userId: "presence_user", seated: true }
+    }
+  };
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      WS_TABLE_SNAPSHOT_FIXTURES_JSON: JSON.stringify(fixture)
+    }
+  });
+  await waitForListening(child, 5000);
+  const ws = await connectClient(port);
+  try {
+    await hello(ws);
+    await auth(ws, token, "snapshot-auth-presence");
+
+    sendFrame(ws, { version: "1.0", type: "table_join", requestId: "join-presence", ts: "2026-02-28T03:00:04Z", payload: { tableId } });
+    const joined = await nextMessageOfType(ws, "table_state");
+
+    sendFrame(ws, { version: "1.0", type: "table_snapshot", requestId: "snapshot-presence", ts: "2026-02-28T03:00:05Z", payload: { tableId } });
+    const snapshot = await nextMessageOfType(ws, "table_snapshot");
+
+    sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "sub-presence", ts: "2026-02-28T03:00:06Z", payload: { tableId } });
+    const after = await nextMessageOfType(ws, "table_state");
+
+    assert.equal(snapshot.payload.tableId, tableId);
+    assert.equal(snapshot.payload.state.version, 9);
+    assert.deepEqual(after.payload.members, joined.payload.members);
+  } finally {
+    ws.close();
+    child.kill();
+    await waitForExit(child);
+  }
+});
+
+test("table_snapshot matches HTTP snapshot version semantics for repeated reads", async () => {
+  const secret = "snapshot-repeat-secret";
+  const token = makeHs256Jwt({ secret, sub: "repeat_user" });
+  const tableId = "table_snapshot_repeat";
+  const fixture = {
+    [tableId]: {
+      tableId,
+      state: { version: 33, state: { phase: "PREFLOP", seats: [] } },
+      myHoleCards: [],
+      legalActions: [],
+      actionConstraints: { toCall: 0, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null },
+      viewer: { userId: "repeat_user", seated: false }
+    }
+  };
+
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      WS_TABLE_SNAPSHOT_FIXTURES_JSON: JSON.stringify(fixture)
+    }
+  });
+  await waitForListening(child, 5000);
+  const ws = await connectClient(port);
+  try {
+    await hello(ws);
+    await auth(ws, token, "snapshot-auth-repeat");
+
+    sendFrame(ws, { version: "1.0", type: "table_join", requestId: "join-repeat", ts: "2026-02-28T03:10:00Z", payload: { tableId } });
+    const joined = await nextMessageOfType(ws, "table_state");
+
+    sendFrame(ws, { version: "1.0", type: "table_snapshot", requestId: "snapshot-repeat-1", ts: "2026-02-28T03:10:01Z", payload: { tableId } });
+    const first = await nextMessageOfType(ws, "table_snapshot");
+
+    sendFrame(ws, { version: "1.0", type: "table_snapshot", requestId: "snapshot-repeat-2", ts: "2026-02-28T03:10:02Z", payload: { tableId } });
+    const second = await nextMessageOfType(ws, "table_snapshot");
+
+    sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "sub-repeat", ts: "2026-02-28T03:10:03Z", payload: { tableId } });
+    const after = await nextMessageOfType(ws, "table_state");
+
+    assert.equal(first.payload.state.version, 33);
+    assert.equal(second.payload.state.version, 33);
+    assert.deepEqual(first.payload, second.payload);
+    assert.deepEqual(after.payload.members, joined.payload.members);
+  } finally {
+    ws.close();
+    child.kill();
+    await waitForExit(child);
+  }
+});
+
+
+test("table_snapshot rejects missing requestId deterministically and does not mutate presence", async () => {
+  const secret = "snapshot-no-reqid-secret";
+  const token = makeHs256Jwt({ secret, sub: "noreqid_user" });
+  const tableId = "table_snapshot_noreqid";
+  const fixture = {
+    [tableId]: {
+      tableId,
+      state: { version: 6, state: { phase: "PREFLOP", seats: [] } },
+      myHoleCards: [],
+      legalActions: [],
+      actionConstraints: { toCall: 0, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null },
+      viewer: { userId: "noreqid_user", seated: false }
+    }
+  };
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      WS_TABLE_SNAPSHOT_FIXTURES_JSON: JSON.stringify(fixture)
+    }
+  });
+  await waitForListening(child, 5000);
+  const ws = await connectClient(port);
+  try {
+    await hello(ws);
+    await auth(ws, token, "snapshot-auth-noreqid");
+
+    sendFrame(ws, { version: "1.0", type: "table_join", requestId: "join-noreqid", ts: "2026-02-28T03:11:00Z", payload: { tableId } });
+    const before = await nextMessageOfType(ws, "table_state");
+
+    sendFrame(ws, { version: "1.0", type: "table_snapshot", ts: "2026-02-28T03:11:01Z", payload: { tableId } });
+    const rejected = await nextMessage(ws);
+    assert.equal(rejected.type, "error");
+    assert.equal(rejected.payload.code, "INVALID_COMMAND");
+    assert.equal(rejected.payload.message, "table_snapshot requires requestId");
+
+    sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "sub-noreqid", ts: "2026-02-28T03:11:02Z", payload: { tableId } });
+    const after = await nextMessageOfType(ws, "table_state");
+    assert.deepEqual(after.payload.members, before.payload.members);
+  } finally {
+    ws.close();
+    child.kill();
+    await waitForExit(child);
+  }
+});
+
+
+test("table_snapshot rejects invalid gameplay snapshot state deterministically", async () => {
+  const secret = "snapshot-invalid-state-secret";
+  const token = makeHs256Jwt({ secret, sub: "invalid_snapshot_user" });
+  const tableId = "table_snapshot_invalid";
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      WS_TABLE_SNAPSHOT_FIXTURES_JSON: JSON.stringify({
+        [tableId]: { ok: false, code: "state_invalid" }
+      })
+    }
+  });
+  await waitForListening(child, 5000);
+  const ws = await connectClient(port);
+  try {
+    await hello(ws);
+    await auth(ws, token, "snapshot-auth-invalid-state");
+
+    sendFrame(ws, { version: "1.0", type: "table_join", requestId: "join-invalid-state", ts: "2026-02-28T03:12:00Z", payload: { tableId } });
+    const before = await nextMessageOfType(ws, "table_state");
+
+    sendFrame(ws, { version: "1.0", type: "table_snapshot", requestId: "snapshot-invalid-state", ts: "2026-02-28T03:12:01Z", payload: { tableId } });
+    const rejected = await nextMessage(ws);
+    assert.equal(rejected.type, "error");
+    assert.equal(rejected.payload.code, "INVALID_COMMAND");
+    assert.equal(rejected.payload.message, "state_invalid");
+
+    sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "sub-invalid-state", ts: "2026-02-28T03:12:02Z", payload: { tableId } });
+    const after = await nextMessageOfType(ws, "table_state");
+    assert.deepEqual(after.payload.members, before.payload.members);
+  } finally {
+    ws.close();
+    child.kill();
+    await waitForExit(child);
+  }
+});
+
+test("table_snapshot internal failures are non-leaking and do not mutate presence", async () => {
+  const secret = "snapshot-internal-failure-secret";
+  const token = makeHs256Jwt({ secret, sub: "internal_snapshot_user" });
+  const tableId = "table_snapshot_internal_failure";
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      WS_TABLE_SNAPSHOT_FIXTURES_JSON: JSON.stringify({
+        [tableId]: { ok: false, code: "db_internal: relation private.secret failed" }
+      })
+    }
+  });
+  await waitForListening(child, 5000);
+  const ws = await connectClient(port);
+  try {
+    await hello(ws);
+    await auth(ws, token, "snapshot-auth-internal-failure");
+
+    sendFrame(ws, { version: "1.0", type: "table_join", requestId: "join-internal-failure", ts: "2026-02-28T03:12:00Z", payload: { tableId } });
+    const before = await nextMessageOfType(ws, "table_state");
+
+    sendFrame(ws, { version: "1.0", type: "table_snapshot", requestId: "snapshot-internal-failure", ts: "2026-02-28T03:12:01Z", payload: { tableId } });
+    const rejected = await nextMessage(ws);
+    assert.equal(rejected.type, "error");
+    assert.equal(rejected.payload.code, "INVALID_COMMAND");
+    assert.equal(rejected.payload.message, "snapshot_failed");
+
+    sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "sub-internal-failure", ts: "2026-02-28T03:12:02Z", payload: { tableId } });
+    const after = await nextMessageOfType(ws, "table_state");
+    assert.deepEqual(after.payload.members, before.payload.members);
+  } finally {
+    ws.close();
+    child.kill();
+    await waitForExit(child);
+  }
+});

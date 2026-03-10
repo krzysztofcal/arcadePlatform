@@ -14,6 +14,7 @@ const REQUIRED_PR8_WS_SERVER_BEHAVIOR_TESTS = [
 const REQUIRED_PR9_WS_SERVER_BEHAVIOR_TESTS = [
   "ws-server/server.behavior.test.mjs",
   "ws-server/poker/table/table-manager.behavior.test.mjs",
+  "ws-server/poker/table/table-snapshot.behavior.test.mjs",
   "ws-server/poker/shared/poker-action-reducer.behavior.test.mjs",
   "ws-server/poker/read-model/state-snapshot.behavior.test.mjs"
 ];

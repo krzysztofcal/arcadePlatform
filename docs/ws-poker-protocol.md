@@ -56,6 +56,7 @@ Example envelope:
 | `act` | `{ "handId": string, "action": "fold"|"check"|"call"|"bet"|"raise", "amount": integer }` | Requests poker action mutation. Requires auth and turn validity. |
 | `leave` | `{ "reason": string }` | Requests leave/cashout workflow. |
 | `ack` | `{ "seq": integer }` | Acknowledges latest processed server sequence (flow-control aid). |
+| `table_snapshot` | `{ "tableId": string }` (or envelope `roomId`) | Protected read-only gameplay snapshot command. **Requires `requestId`** like other stateful protected commands. Returns viewer-scoped poker state and does not mutate presence membership. |
 
 ### Server → Client
 
@@ -66,6 +67,7 @@ Example envelope:
 | `pong` | `{ "clientTime": string, "serverTime": string }` | Ping response. |
 | `stateSnapshot` | `{ "stateVersion": integer, "table": object, "you": object, "public": object, "private"?: object }` | One-shot room-core snapshot for `table_state_sub` snapshot mode; does not subscribe socket to legacy `table_state` broadcasts. |
 | `statePatch` | `{ "stateVersion": integer, "patch": object }` | Incremental room state update. |
+| `table_snapshot` | `{ "tableId": string, "state": { "version": integer, "state": object }, "myHoleCards": array, "legalActions": string[], "actionConstraints": object, "viewer": object }` | Read-only gameplay snapshot response for `table_snapshot` command. Distinct from presence `table_state`. |
 | `commandResult` | `{ "requestId": string, "status": "accepted"|"rejected", "reason": string|null }` | Deterministic outcome for a client command. |
 | `resync` | `{ "mode": "required", "reason": string, "expectedSeq": integer }` | Signals that client must request/accept full snapshot. |
 | `error` | `{ "code": string, "message": string, "retryable": boolean, "requestId": string|null }` | Protocol or domain error (see Errors). |
@@ -107,6 +109,13 @@ Examples:
 ```
 
 
+
+### Presence vs gameplay snapshot contract
+
+- `table_state` remains the **presence-only** WS membership frame with payload `{ tableId, members }`.
+- New `table_snapshot` is the gameplay snapshot command/response path and MUST NOT overload `table_state`.
+- `table_snapshot` reuses HTTP `poker-get-table` read semantics: state normalization, timeout application path, private-state stripping, and viewer-scoped `myHoleCards`.
+- `table_snapshot` deterministic error messages are limited to known contract/state codes (`table_not_found`, `state_missing`, `state_invalid`, `contract_mismatch_empty_legal_actions`); unknown backend/storage failures collapse to `snapshot_failed`.
 
 ### table_join / join contract (authoritative seat lifecycle boundary)
 
