@@ -26,8 +26,10 @@ import { hasParticipatingHumanInHand, runAdvanceLoop, runBotAutoplayLoop } from 
 import { isHoleCardsTableMissing, loadHoleCardsByUserId } from "../../netlify/functions/_shared/poker-hole-cards-store.mjs";
 import { deriveCommunityCards, deriveRemainingDeck } from "../../netlify/functions/_shared/poker-deal-deterministic.mjs";
 import { store as upstashStore, isMemoryStore as upstashIsMemoryStore } from "../../netlify/functions/_shared/store-upstash.mjs";
+import { executePokerLeave } from "../../shared/poker-domain/leave.mjs";
 
 const root = process.cwd();
+const sharedLeavePath = path.join(root, "shared/poker-domain/leave.mjs");
 
 const stripImports = (source) => source.replace(/^\s*import[\s\S]*?;\s*$/gm, "");
 
@@ -48,6 +50,20 @@ const getDeclaredIdentifiers = (src) => {
     }
   }
   return declared;
+};
+
+const buildExecutePokerLeaveFromMocks = (mocks) => {
+  const source = fs.readFileSync(sharedLeavePath, "utf8");
+  const withoutImports = stripImports(source);
+  const rewritten = withoutImports.replace(/export\s+async\s+function\s+executePokerLeave\s*\(/, "async function executePokerLeave(");
+  const factory = new Function(
+    "mocks",
+    `"use strict";
+const { postTransaction, deletePokerRequest, ensurePokerRequest, storePokerRequestResult, updatePokerStateOptimistic, advanceIfNeeded, applyLeaveTable, isStateStorageValid, withoutPrivateState, buildSeatBotMap, isBotTurn, deriveCommunityCards, deriveRemainingDeck, isHoleCardsTableMissing, loadHoleCardsByUserId, hasParticipatingHumanInHand, runAdvanceLoop, runBotAutoplayLoop } = mocks;
+${rewritten}
+return executePokerLeave;`
+  );
+  return factory(mocks);
 };
 
 export const loadPokerHandler = (filePath, mocks) => {
@@ -139,6 +155,7 @@ export const loadPokerHandler = (filePath, mocks) => {
     "hasParticipatingHumanInHand",
     "runAdvanceLoop",
     "runBotAutoplayLoop",
+    "executePokerLeave",
   ];
   const injectedNames = injectable.filter((name) => !declared.has(name));
   const destructureLine = injectedNames.length ? `const { ${injectedNames.join(", ")} } = mocks;` : "";
@@ -196,6 +213,7 @@ return handler;`
       cardIdentity,
       ...mocks,
     };
+    resolvedMocks.executePokerLeave = resolvedMocks.executePokerLeave || buildExecutePokerLeaveFromMocks(resolvedMocks) || executePokerLeave;
     return factory(resolvedMocks, isValidTwoCards);
   } catch (error) {
     throw new Error(`[poker-test-helpers] Failed to compile ${filePath}: ${error?.message || error}`);
