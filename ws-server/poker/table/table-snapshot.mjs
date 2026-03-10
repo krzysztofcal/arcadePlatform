@@ -1,4 +1,4 @@
-import { beginSql, klog } from "../../../netlify/functions/_shared/supabase-admin.mjs";
+import { beginSql, klog } from "../persistence/sql-admin.mjs";
 import { deriveCommunityCards, deriveDeck, deriveRemainingDeck } from "../../../netlify/functions/_shared/poker-deal-deterministic.mjs";
 import { cardIdentity } from "../../../netlify/functions/_shared/poker-cards-utils.mjs";
 import { isHoleCardsTableMissing, loadHoleCardsByUserId } from "../../../netlify/functions/_shared/poker-hole-cards-store.mjs";
