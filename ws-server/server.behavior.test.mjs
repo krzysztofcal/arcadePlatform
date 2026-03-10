@@ -27,21 +27,53 @@ function getFreePort() {
 
 function waitForListening(proc, timeoutMs) {
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error("Server did not start in time")), timeoutMs);
-    const onData = (buf) => {
-      if (String(buf).includes("WS listening on")) {
-        clearTimeout(timer);
-        proc.stdout.off("data", onData);
-        proc.off("exit", onExit);
+    const stdoutChunks = [];
+    const stderrChunks = [];
+
+    const summarize = (chunks) => {
+      const joined = chunks.join("");
+      if (!joined) {
+        return "<empty>";
+      }
+      return joined.slice(-4000);
+    };
+
+    const cleanup = () => {
+      clearTimeout(timer);
+      proc.stdout.off("data", onStdout);
+      proc.stderr.off("data", onStderr);
+      proc.off("exit", onExit);
+    };
+
+    const onStdout = (buf) => {
+      const text = String(buf);
+      stdoutChunks.push(text);
+      if (text.includes("WS listening on")) {
+        cleanup();
         resolve();
       }
     };
-    const onExit = (code) => {
-      clearTimeout(timer);
-      proc.stdout.off("data", onData);
-      reject(new Error(`Server exited before ready: ${code}`));
+
+    const onStderr = (buf) => {
+      stderrChunks.push(String(buf));
     };
-    proc.stdout.on("data", onData);
+
+    const timer = setTimeout(() => {
+      cleanup();
+      reject(new Error(
+        `Server did not start in time. stdout: ${summarize(stdoutChunks)} stderr: ${summarize(stderrChunks)}`
+      ));
+    }, timeoutMs);
+
+    const onExit = (code, signal) => {
+      cleanup();
+      reject(new Error(
+        `Server exited before ready: code=${code} signal=${signal || "none"}. stdout: ${summarize(stdoutChunks)} stderr: ${summarize(stderrChunks)}`
+      ));
+    };
+
+    proc.stdout.on("data", onStdout);
+    proc.stderr.on("data", onStderr);
     proc.once("exit", onExit);
   });
 }

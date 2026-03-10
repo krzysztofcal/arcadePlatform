@@ -147,6 +147,23 @@ function klogSafe(kind, data) {
   }
 }
 
+process.on("uncaughtException", (error) => {
+  klogSafe("ws_uncaught_exception", {
+    message: error?.message || "unknown",
+    stack: error?.stack || null
+  });
+  process.exit(1);
+});
+
+process.on("unhandledRejection", (reason) => {
+  const asError = reason instanceof Error ? reason : null;
+  klogSafe("ws_unhandled_rejection", {
+    message: asError?.message || String(reason),
+    stack: asError?.stack || null
+  });
+  process.exit(1);
+});
+
 function nowTs() {
   return new Date().toISOString();
 }
