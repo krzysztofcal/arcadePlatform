@@ -23,9 +23,6 @@ jobs:
         with:
           node-version: 20
 
-      - name: Install repo dependencies
-        run: npm ci
-
       - name: Install WS server dependencies
         run: npm ci --prefix ws-server
 

@@ -41,6 +41,9 @@ test("ws-deploy keeps ws-tests trigger surface and runs harness checks", () => {
   assert.match(text, /node --test ws-server\/poker\/engine\/engine-rollover\.behavior\.test\.mjs/);
   assert.match(text, /Run ws poker engine timeout behavior test/);
   assert.match(text, /node --test ws-server\/poker\/engine\/engine-timeout\.behavior\.test\.mjs/);
+
+  assert.match(text, /npm ci --prefix ws-server/);
+  assert.doesNotMatch(text, /\n\s*run:\s*npm ci\n/);
 });
 
 test("ws-deploy is non-mutating for production", () => {
@@ -60,6 +63,8 @@ test("ws Dockerfile keeps ws-server deploy context-compatible copy contract", ()
   assert.match(dockerfile, /COPY ws-server \.\//);
   assert.match(dockerfile, /COPY netlify\/functions\/_shared \.\/netlify\/functions\/_shared/);
   assert.match(dockerfile, /CMD \["node", "ws-server\/server\.mjs"\]/);
+  assert.doesNotMatch(dockerfile, /COPY package\.json package-lock\.json \.\//);
+  assert.doesNotMatch(dockerfile, /npm ci --omit=dev --ignore-scripts/);
 });
 
 
