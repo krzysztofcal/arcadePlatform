@@ -91,3 +91,13 @@ test("ws-deploy keeps Docker artifact contract parity with repo-root context", (
     assert.match(text, /docker\/build-push-action@v6[\s\S]*file:\s*ws-server\/Dockerfile/);
   }
 });
+
+
+test("ws-deploy runs runtime deps guard test before ws behavior test", () => {
+  const text = workflowText();
+  const guardIndex = text.indexOf("node --test ws-tests/ws-server-package-runtime-deps.guard.test.mjs");
+  const behaviorIndex = text.indexOf("node --test ws-server/server.behavior.test.mjs");
+  assert.notEqual(guardIndex, -1);
+  assert.notEqual(behaviorIndex, -1);
+  assert.equal(guardIndex < behaviorIndex, true);
+});

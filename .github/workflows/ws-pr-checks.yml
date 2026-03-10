@@ -25,6 +25,9 @@ jobs:
       - name: Install WS server dependencies
         run: npm ci --prefix ws-server
 
+      - name: Run ws-server package runtime deps guard test
+        run: node --test ws-tests/ws-server-package-runtime-deps.guard.test.mjs
+
       - name: Run WS behavior test
         run: node --test ws-server/server.behavior.test.mjs
 
@@ -158,9 +161,6 @@ jobs:
 
       - name: Run ws tests suite completeness guard
         run: node --test ws-tests/ws-tests-suite-completeness.guard.test.mjs
-      - name: Run ws-server package runtime deps guard test
-        run: node --test ws-tests/ws-server-package-runtime-deps.guard.test.mjs
-
 
       - name: Run ws room-core snapshot dependency guard test
         run: node --test ws-tests/ws-room-core-snapshot-dependency.guard.test.mjs
