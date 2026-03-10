@@ -8,7 +8,6 @@ RUN npm ci --omit=dev
 COPY ws-server ./
 
 WORKDIR /app
-COPY netlify/functions/_shared ./netlify/functions/_shared
 
 EXPOSE 3000
 

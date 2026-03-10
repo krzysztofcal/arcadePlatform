@@ -1,11 +1,11 @@
 import { beginSql, klog } from "../persistence/sql-admin.mjs";
-import { deriveCommunityCards, deriveDeck, deriveRemainingDeck } from "../../../netlify/functions/_shared/poker-deal-deterministic.mjs";
-import { cardIdentity } from "../../../netlify/functions/_shared/poker-cards-utils.mjs";
-import { isHoleCardsTableMissing, loadHoleCardsByUserId } from "../../../netlify/functions/_shared/poker-hole-cards-store.mjs";
-import { buildActionConstraints, computeLegalActions } from "../../../netlify/functions/_shared/poker-legal-actions.mjs";
-import { isStateStorageValid, normalizeJsonState, withoutPrivateState } from "../../../netlify/functions/_shared/poker-state-utils.mjs";
-import { updatePokerStateOptimistic } from "../../../netlify/functions/_shared/poker-state-write.mjs";
-import { maybeApplyTurnTimeout, normalizeSeatOrderFromState } from "../../../netlify/functions/_shared/poker-turn-timeout.mjs";
+import { deriveCommunityCards, deriveDeck, deriveRemainingDeck } from "../snapshot-runtime/poker-deal-deterministic.mjs";
+import { cardIdentity } from "../snapshot-runtime/poker-cards-utils.mjs";
+import { isHoleCardsTableMissing, loadHoleCardsByUserId } from "../snapshot-runtime/poker-hole-cards-store.mjs";
+import { buildActionConstraints, computeLegalActions } from "../snapshot-runtime/poker-legal-actions.mjs";
+import { isStateStorageValid, normalizeJsonState, withoutPrivateState } from "../snapshot-runtime/poker-state-utils.mjs";
+import { updatePokerStateOptimistic } from "../snapshot-runtime/poker-state-write.mjs";
+import { maybeApplyTurnTimeout, normalizeSeatOrderFromState } from "../snapshot-runtime/poker-turn-timeout.mjs";
 
 const KNOWN_SNAPSHOT_FAILURE_CODES = new Set([
   "invalid_table_id",
