@@ -82,3 +82,34 @@ test("ws-server package declares postgres dependency for db-backed bootstrap run
   const packageJson = JSON.parse(fs.readFileSync("ws-server/package.json", "utf8"));
   assert.equal(packageJson.dependencies?.postgres, "^3.4.5");
 });
+
+
+test("ws snapshot runtime helper chain stays within ws-server boundary", () => {
+  const runtimeFiles = [
+    "ws-server/poker/table/table-snapshot.mjs",
+    "ws-server/poker/snapshot-runtime/poker-deal-deterministic.mjs",
+    "ws-server/poker/snapshot-runtime/poker-cards-utils.mjs",
+    "ws-server/poker/snapshot-runtime/poker-hole-cards-store.mjs",
+    "ws-server/poker/snapshot-runtime/poker-legal-actions.mjs",
+    "ws-server/poker/snapshot-runtime/poker-state-utils.mjs",
+    "ws-server/poker/snapshot-runtime/poker-state-write.mjs",
+    "ws-server/poker/snapshot-runtime/poker-turn-timeout.mjs",
+    "ws-server/poker/snapshot-runtime/poker-reducer.mjs",
+    "ws-server/poker/snapshot-runtime/poker-payout.mjs",
+    "ws-server/poker/snapshot-runtime/poker-materialize-showdown.mjs",
+    "ws-server/poker/snapshot-runtime/poker-showdown.mjs",
+    "ws-server/poker/snapshot-runtime/poker-inactivity-policy.mjs",
+    "ws-server/poker/snapshot-runtime/poker-engine.mjs",
+    "ws-server/poker/snapshot-runtime/poker-eval.mjs",
+    "ws-server/poker/snapshot-runtime/poker-side-pots.mjs"
+  ];
+
+  for (const runtimeFile of runtimeFiles) {
+    const text = fs.readFileSync(runtimeFile, "utf8");
+    assert.doesNotMatch(
+      text,
+      /netlify\/functions\/_shared\//,
+      `WS runtime boundary: ${runtimeFile} must not import repo-root netlify/functions/_shared modules`
+    );
+  }
+});
