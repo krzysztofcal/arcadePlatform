@@ -5,7 +5,7 @@ import path from "node:path";
 const root = process.cwd();
 const read = (filePath) => fs.readFileSync(path.join(root, filePath), "utf8");
 
-const leaveSrc = read("netlify/functions/poker-leave.mjs");
+const leaveSrc = read("shared/poker-domain/leave.mjs");
 
 assert.ok(
   /select seat_no, status, stack from public\.poker_seats[\s\S]*?for update;/.test(leaveSrc),
@@ -20,7 +20,7 @@ assert.ok(
   "leave should normalize stack from seat row"
 );
 assert.ok(
-  /const stateStackRaw = currentState\?\.stacks\?\.\[auth\.userId\];/.test(leaveSrc),
+  /const stateStackRaw = currentState\?\.stacks\?\.\[userId\];/.test(leaveSrc),
   "leave should read authoritative stack from poker_state"
 );
 assert.ok(
@@ -48,7 +48,7 @@ assert.ok(
   "leave should cash out positive uncommitted amount immediately"
 );
 assert.ok(
-  /poker:leave:\$\{tableId\}:\$\{auth\.userId\}:\$\{normalizedRequestId\}/.test(leaveSrc),
+  /poker:leave:\$\{tableId\}:\$\{userId\}:\$\{requestId\}/.test(leaveSrc),
   "leave should scope requestId idempotency by tableId and userId"
 );
 
@@ -61,6 +61,6 @@ assert.ok(
   "leave should always detach seat/stack immediately"
 );
 assert.ok(
-  /nextLeftTableByUserId\[auth\.userId\] = true;/.test(leaveSrc),
+  /nextLeftTableByUserId\[userId\] = true;/.test(leaveSrc),
   "leave should always preserve left-table signal for in-hand safety"
 );

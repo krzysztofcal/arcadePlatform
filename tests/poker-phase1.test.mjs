@@ -9,6 +9,7 @@ const getTableSrc = read("netlify/functions/poker-get-table.mjs");
 const sweepSrc = read("netlify/functions/poker-sweep.mjs");
 const joinSrc = read("netlify/functions/poker-join.mjs");
 const leaveSrc = read("netlify/functions/poker-leave.mjs");
+const leaveDomainSrc = read("shared/poker-domain/leave.mjs");
 const heartbeatSrc = read("netlify/functions/poker-heartbeat.mjs");
 const requestIdHelperSrc = read("netlify/functions/_shared/poker-request-id.mjs");
 const idempotencyHelperSrc = read("netlify/functions/_shared/poker-idempotency.mjs");
@@ -117,10 +118,10 @@ assert.ok(!/table\.seat_count/.test(pokerUiSrc), "poker UI should not read table
 assert.ok(!joinSrc.includes("RUNNING"), "join should not set status to RUNNING");
 assert.ok(!leaveSrc.includes("RUNNING"), "leave should not set status to RUNNING");
 assert.ok(joinSrc.includes("REQUEST_PENDING_STALE_SEC"), "join should guard stale pending requests");
-assert.ok(leaveSrc.includes("REQUEST_PENDING_STALE_SEC"), "leave should guard stale pending requests");
+assert.ok(leaveDomainSrc.includes("REQUEST_PENDING_STALE_SEC"), "leave should guard stale pending requests");
 assert.ok(heartbeatSrc.includes("REQUEST_PENDING_STALE_SEC"), "heartbeat should guard stale pending requests");
 assert.ok(leaveSrc.includes("poker_leave_start"), "leave should log poker_leave_start");
-assert.ok(leaveSrc.includes("poker_leave_ok"), "leave should log poker_leave_ok");
+assert.ok(leaveDomainSrc.includes("poker_leave_ok"), "leave should log poker_leave_ok");
 assert.ok(leaveSrc.includes("poker_leave_error"), "leave should log poker_leave_error");
 assert.ok(joinSrc.includes("poker_request_id_invalid"), "join should log invalid requestId inputs");
 assert.ok(leaveSrc.includes("poker_request_id_invalid"), "leave should log invalid requestId inputs");
@@ -142,7 +143,7 @@ assert.ok(
   "join should use shared poker idempotency helper"
 );
 assert.ok(
-  leaveSrc.includes("ensurePokerRequest") && leaveSrc.includes("storePokerRequestResult"),
+  leaveDomainSrc.includes("ensurePokerRequest") && leaveDomainSrc.includes("storePokerRequestResult"),
   "leave should use shared poker idempotency helper"
 );
 assert.ok(

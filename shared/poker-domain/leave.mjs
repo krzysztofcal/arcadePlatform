@@ -228,6 +228,7 @@ const executePostLeaveBotAutoplayLoop = async ({
   mutate,
   validatePersistedState,
   botsOnlyInHand,
+  klog,
 }) => {
   if (!isActionPhase(state?.phase)) {
     return { state, version, attempted: false, reason: "not_applicable" };
@@ -688,6 +689,7 @@ export async function executePokerLeave({ beginSql, tableId, userId, requestId =
               },
               validatePersistedState: (stateToValidate) => validatePersistedStateOrThrow(stateToValidate, makeError),
               botsOnlyInHand,
+              klog,
             });
             latestState = autoplayResult.state;
             latestVersion = autoplayResult.version;
