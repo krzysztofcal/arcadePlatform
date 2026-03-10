@@ -134,6 +134,46 @@ function nextMessage(ws, timeoutMs = 10000) {
   });
 }
 
+function nextNMessages(ws, count, timeoutMs = 10000) {
+  return new Promise((resolve, reject) => {
+    const messages = [];
+
+    const cleanup = () => {
+      clearTimeout(timer);
+      ws.off("message", onMessage);
+      ws.off("error", onError);
+      ws.off("close", onClose);
+    };
+
+    const onMessage = (data) => {
+      messages.push(JSON.parse(String(data)));
+      if (messages.length >= count) {
+        cleanup();
+        resolve(messages);
+      }
+    };
+
+    const onError = (error) => {
+      cleanup();
+      reject(error);
+    };
+
+    const onClose = (code) => {
+      cleanup();
+      reject(new Error(`Socket closed before receiving ${count} messages: ${code}`));
+    };
+
+    const timer = setTimeout(() => {
+      cleanup();
+      reject(new Error(`Timed out waiting for ${count} websocket messages`));
+    }, timeoutMs);
+
+    ws.on("message", onMessage);
+    ws.on("error", onError);
+    ws.on("close", onClose);
+  });
+}
+
 function attemptMessage(ws, timeoutMs = 300) {
   return new Promise((resolve, reject) => {
     const cleanup = () => {
@@ -1125,6 +1165,8 @@ test("same-socket frame ordering is preserved when bootstrap load is slow", asyn
     await hello(ws);
     await auth(ws, token);
 
+    const twoMessages = nextNMessages(ws, 2, 4000);
+
     sendFrame(ws, { version: "1.0", type: "table_join", requestId: "join-slow", ts: "2026-02-28T00:21:00Z", payload: { tableId } });
     sendFrame(ws, {
       version: "1.0",
@@ -1134,8 +1176,7 @@ test("same-socket frame ordering is preserved when bootstrap load is slow", asyn
       payload: { tableId, handId: "h8", action: "check" }
     });
 
-    const first = await nextMessage(ws);
-    const second = await nextMessage(ws);
+    const [first, second] = await twoMessages;
 
     assert.equal(first.type, "table_state");
     assert.equal(second.type, "commandResult");
@@ -1217,11 +1258,12 @@ test("rapid same-socket join then snapshot remains ordered with slow bootstrap",
     await hello(ws);
     await auth(ws, token);
 
+    const twoMessages = nextNMessages(ws, 2, 4000);
+
     sendFrame(ws, { version: "1.0", type: "table_join", requestId: "join-ordered", ts: "2026-02-28T00:23:00Z", payload: { tableId } });
     sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "snap-ordered", ts: "2026-02-28T00:23:01Z", payload: { tableId, view: "snapshot" } });
 
-    const first = await nextMessage(ws, 4000);
-    const second = await nextMessage(ws, 4000);
+    const [first, second] = await twoMessages;
 
     assert.equal(first.type, "table_state");
     assert.equal(second.type, "stateSnapshot");
@@ -1965,10 +2007,15 @@ test("failed timeout persistence does not publish unpersisted timeout mutation",
 
     sendFrame(ws, { version: "1.0", type: "table_join", requestId: "join-timeout-fail", ts: "2026-02-28T02:30:00Z", payload: { tableId } });
     await nextMessageOfType(ws, "table_state");
-    sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "snap-timeout-before", ts: "2026-02-28T02:30:01Z", payload: { tableId, view: "snapshot" } });
-    const baseline = await nextMessageOfType(ws, "stateSnapshot");
 
-    const resync = await nextMessageOfType(ws, "resync", 10000);
+    const snapshotAndResync = nextNMessages(ws, 2, 10000);
+    sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "snap-timeout-before", ts: "2026-02-28T02:30:01Z", payload: { tableId, view: "snapshot" } });
+    const [first, second] = await snapshotAndResync;
+    const baseline = first.type === "stateSnapshot" ? first : second;
+    const resync = first.type === "resync" ? first : second;
+
+    assert.equal(baseline.type, "stateSnapshot");
+    assert.equal(resync.type, "resync");
     assert.equal(resync.payload.reason, "persistence_conflict");
 
     sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "snap-timeout-after", ts: "2026-02-28T02:30:02Z", payload: { tableId, view: "snapshot" } });
