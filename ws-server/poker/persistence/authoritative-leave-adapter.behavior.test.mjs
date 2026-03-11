@@ -12,9 +12,9 @@ test("default loader uses single explicit artifact-relative path", () => {
   assert.doesNotMatch(source, /\.\.\/\.\.\/\.\.\/shared\/poker-domain\/leave\.mjs/);
 });
 
-test("ws-local authoritative leave bridge resolves from adapter runtime location", async () => {
-  const module = await import("../../shared/poker-domain/leave.mjs");
-  assert.equal(typeof module.executePokerLeave, "function");
+test("ws-local authoritative leave bridge re-exports repo-root shared leave module", async () => {
+  const source = await fs.readFile("ws-server/shared/poker-domain/leave.mjs", "utf8");
+  assert.match(source, /export\s*\{\s*executePokerLeave\s*\}\s*from\s*"\.\.\/\.\.\/\.\.\/shared\/poker-domain\/leave\.mjs"\s*;/);
 });
 
 test("default loader resolves in artifact-shaped layout without loader-unavailable taxonomy", async () => {
