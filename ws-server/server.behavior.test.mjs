@@ -889,7 +889,7 @@ test("leave routes to commandResult and does not fall through to table_state", a
   const secret = "test-secret";
   const actorToken = makeHs256Jwt({ secret, sub: "leave_route_actor" });
   const tableId = "table_leave_route";
-  const override = JSON.stringify({ ok: true, tableId, status: "already_left", state: { version: 3, state: { tableId, seats: [], stacks: {}, phase: "INIT" } } });
+  const override = JSON.stringify({ ok: true, tableId, state: { version: 3, state: { tableId, seats: null, phase: "INIT" } } });
   const { port, child } = await createServer({ env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret, WS_TEST_LEAVE_RESULT_JSON: override } });
 
   try {
@@ -903,7 +903,51 @@ test("leave routes to commandResult and does not fall through to table_state", a
     sendFrame(actor, { version: "1.0", type: "leave", requestId: "leave-route", ts: "2026-02-28T00:00:02Z", payload: { tableId } });
     const first = await nextMessage(actor);
     assert.equal(first.type, "commandResult");
+    assert.equal(first.payload.status, "rejected");
+    assert.equal(first.payload.reason, "authoritative_state_invalid");
     assert.notEqual(first.type, "table_state");
+    assert.equal(await attemptMessage(actor, 300), null);
+
+    actor.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
+test("leave rejects when in-memory sync fails after authoritative execution", async () => {
+  const secret = "test-secret";
+  const actorToken = makeHs256Jwt({ secret, sub: "leave_sync_fail_actor" });
+  const tableId = "table_leave_sync_fail";
+  const override = JSON.stringify({
+    ok: true,
+    tableId,
+    state: {
+      version: 3,
+      state: {
+        tableId,
+        seats: null,
+        phase: "INIT"
+      }
+    }
+  });
+  const { port, child } = await createServer({ env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret, WS_TEST_LEAVE_RESULT_JSON: override } });
+
+  try {
+    await waitForListening(child, 5000);
+    const actor = await connectClient(port);
+    await hello(actor);
+    await auth(actor, actorToken, "auth-leave-sync-fail");
+
+    sendFrame(actor, { version: "1.0", type: "table_join", requestId: "join-leave-sync-fail", ts: "2026-02-28T00:00:01Z", payload: { tableId } });
+    await nextMessage(actor);
+
+    sendFrame(actor, { version: "1.0", type: "table_leave", requestId: "leave-sync-fail", ts: "2026-02-28T00:00:02Z", payload: { tableId } });
+    const first = await nextMessage(actor);
+    assert.equal(first.type, "commandResult");
+    assert.equal(first.payload.status, "rejected");
+    assert.equal(first.payload.reason, "authoritative_state_invalid");
+    assert.equal(await attemptMessage(actor, 300), null);
 
     actor.close();
   } finally {
