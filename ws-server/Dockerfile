@@ -9,8 +9,10 @@ COPY ws-server ./
 
 WORKDIR /app
 
-COPY shared ./shared
-COPY netlify/functions/_shared ./netlify/functions/_shared
+COPY shared/poker-domain ./shared/poker-domain
+COPY netlify/functions/_shared/chips-ledger.mjs ./netlify/functions/_shared/
+COPY netlify/functions/_shared/poker-*.mjs ./netlify/functions/_shared/
+COPY netlify/functions/_shared/supabase-admin.mjs ./netlify/functions/_shared/
 
 
 EXPOSE 3000

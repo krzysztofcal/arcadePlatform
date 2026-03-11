@@ -147,7 +147,10 @@ test("ws authoritative leave adapter imports with ws-server dependency graph", (
 test("ws deploy artifact contract includes authoritative leave runtime files", () => {
   const deployWorkflow = fs.readFileSync(".github/workflows/ws-server-deploy.yml", "utf8");
   assert.match(deployWorkflow, /cp -R shared\/poker-domain "\$STAGE_DIR"\/shared\/poker-domain/);
-  assert.match(deployWorkflow, /cp -R netlify\/functions\/_shared "\$STAGE_DIR"\/netlify\/functions\/_shared/);
+  assert.match(deployWorkflow, /cp netlify\/functions\/_shared\/chips-ledger\.mjs "\$STAGE_DIR"\/netlify\/functions\/_shared\//);
+  assert.match(deployWorkflow, /cp netlify\/functions\/_shared\/poker-\*\.mjs "\$STAGE_DIR"\/netlify\/functions\/_shared\//);
+  assert.match(deployWorkflow, /cp netlify\/functions\/_shared\/supabase-admin\.mjs "\$STAGE_DIR"\/netlify\/functions\/_shared\//);
+  assert.doesNotMatch(deployWorkflow, /cp -R netlify\/functions\/_shared "\$STAGE_DIR"\/netlify\/functions\/_shared/);
 });
 
 test("ws authoritative leave executor non-override path resolves real module loader contract", async () => {

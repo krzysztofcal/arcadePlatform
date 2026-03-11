@@ -24,7 +24,7 @@ test("docker image contains authoritative leave runtime modules", { timeout: 180
       imageTag,
       "sh",
       "-lc",
-      "test -f /app/ws-server/shared/poker-domain/leave.mjs && test -f /app/shared/poker-domain/leave.mjs && test -f /app/netlify/functions/_shared/poker-reducer.mjs"
+      "test -f /app/ws-server/shared/poker-domain/leave.mjs && test -f /app/shared/poker-domain/leave.mjs && test -f /app/netlify/functions/_shared/poker-reducer.mjs && test -f /app/netlify/functions/_shared/supabase-admin.mjs && test ! -f /app/netlify/functions/_shared/xp-cors.mjs"
     ]);
     assert.equal(fileCheck.status, 0, `authoritative leave runtime files missing in image:\n${fileCheck.stderr || fileCheck.stdout}`);
   } finally {

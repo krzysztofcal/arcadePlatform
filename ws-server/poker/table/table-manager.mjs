@@ -547,6 +547,23 @@ export function createTableManager({
     };
   }
 
+
+
+  function hasValidAuthoritativeSeats(stateSeats) {
+    if (!Array.isArray(stateSeats)) return false;
+    return stateSeats.every((seatEntry) => {
+      const rawSeatNo = seatEntry?.seatNo;
+      const rawSeatAlias = seatEntry?.seat;
+      const normalizedSeat = Number.isInteger(Number(rawSeatNo))
+        ? Number(rawSeatNo)
+        : Number.isInteger(Number(rawSeatAlias))
+          ? Number(rawSeatAlias)
+          : null;
+      const seatUserId = typeof seatEntry?.userId === "string" ? seatEntry.userId.trim() : "";
+      return Number.isInteger(normalizedSeat) && seatUserId.length > 0;
+    });
+  }
+
   function syncAuthoritativeLeave({ ws, userId, tableId, stateVersion = null, pokerState = null }) {
     const conn = ensureConn(ws);
     const resolvedTableId = tableId || conn.joinedTableId || conn.subscribedTableId;
@@ -569,8 +586,22 @@ export function createTableManager({
     const previousSeats = JSON.stringify(table.coreState.seats || {});
     const previousVersion = Number(table.coreState.version);
     const previousPokerState = JSON.stringify(table.coreState.pokerState ?? null);
-    const normalizedState = pokerState && typeof pokerState === "object" && !Array.isArray(pokerState) ? pokerState : {};
-    const stateSeats = Array.isArray(normalizedState.seats) ? normalizedState.seats : [];
+
+    const normalizedState = pokerState && typeof pokerState === "object" && !Array.isArray(pokerState) ? pokerState : null;
+    const stateTableId = typeof normalizedState?.tableId === "string" ? normalizedState.tableId : "";
+    const stateSeats = normalizedState?.seats;
+    const authoritativeStateValid = normalizedState
+      && stateTableId === resolvedTableId
+      && hasValidAuthoritativeSeats(stateSeats);
+
+    if (!authoritativeStateValid) {
+      return {
+        ok: true,
+        changed: false,
+        tableState: tableState(resolvedTableId)
+      };
+    }
+
     const nextMembers = stateSeats
       .map((seatEntry) => {
         const rawSeatNo = seatEntry?.seatNo;
@@ -580,7 +611,7 @@ export function createTableManager({
           : Number.isInteger(Number(rawSeatAlias))
             ? Number(rawSeatAlias)
             : null;
-        const userId = typeof seatEntry?.userId === "string" ? seatEntry.userId : "";
+        const userId = typeof seatEntry?.userId === "string" ? seatEntry.userId.trim() : "";
         if (!Number.isInteger(normalizedSeat) || !userId) {
           return null;
         }

@@ -39,7 +39,7 @@ ${check.stderr || check.stdout}`);
       imageTag,
       "sh",
       "-lc",
-      "test -f /app/ws-server/poker/protocol/constants.mjs && test -f /app/ws-server/poker/protocol/envelope.mjs && test -f /app/ws-server/poker/handlers/hello.mjs && test -f /app/ws-server/poker/runtime/conn-state.mjs && test -f /app/ws-server/poker/table/table-snapshot.mjs && test -f /app/ws-server/poker/snapshot-runtime/poker-turn-timeout.mjs && test -f /app/ws-server/poker/snapshot-runtime/poker-state-utils.mjs && test -f /app/ws-server/poker/snapshot-runtime/poker-legal-actions.mjs && test -f /app/netlify/functions/_shared/poker-turn-timeout.mjs && test -f /app/shared/poker-domain/leave.mjs"
+      "test -f /app/ws-server/poker/protocol/constants.mjs && test -f /app/ws-server/poker/protocol/envelope.mjs && test -f /app/ws-server/poker/handlers/hello.mjs && test -f /app/ws-server/poker/runtime/conn-state.mjs && test -f /app/ws-server/poker/table/table-snapshot.mjs && test -f /app/ws-server/poker/snapshot-runtime/poker-turn-timeout.mjs && test -f /app/ws-server/poker/snapshot-runtime/poker-state-utils.mjs && test -f /app/ws-server/poker/snapshot-runtime/poker-legal-actions.mjs && test -f /app/netlify/functions/_shared/poker-turn-timeout.mjs && test -f /app/netlify/functions/_shared/supabase-admin.mjs && test -f /app/shared/poker-domain/leave.mjs && test ! -f /app/netlify/functions/_shared/xp-cors.mjs"
     ]);
     assert.equal(runtimeCheck.status, 0, `required ws modules are missing in image:
 ${runtimeCheck.stderr || runtimeCheck.stdout}`);
