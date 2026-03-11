@@ -16,7 +16,13 @@ function resolveLeaveTestOverride(env = process.env) {
 export function createAuthoritativeLeaveExecutor({
   env = process.env,
   klog = () => {},
-  loadAuthoritativeLeaveModule = () => import("../../../shared/poker-domain/leave.mjs"),
+  loadAuthoritativeLeaveModule = async () => {
+    try {
+      return await import("../../shared/poker-domain/leave.mjs");
+    } catch {
+      return import("../../../shared/poker-domain/leave.mjs");
+    }
+  },
   beginSql = beginSqlWs
 } = {}) {
   return async function executeAuthoritativeLeave({ tableId, userId, requestId }) {
