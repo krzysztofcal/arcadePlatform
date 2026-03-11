@@ -170,7 +170,14 @@ test("ws authoritative leave executor non-override path resolves real module loa
             userId,
             requestId,
             includeState,
-            txOk: txResult.ok
+            txOk: txResult.ok,
+            state: {
+              version: 1,
+              state: {
+                tableId,
+                seats: [{ seatNo: 1, userId }]
+              }
+            }
           };
         }
       };
@@ -207,7 +214,7 @@ test("ws authoritative leave adapter default loader resolves in artifact-shaped 
     await fsp.writeFile(stagedBootstrap, "export async function beginSqlWs(fn) { return fn({}); }\n", "utf8");
     await fsp.writeFile(
       stagedLeave,
-      "export async function executePokerLeave() { return { ok: true, tableId: 'artifact_table', state: { version: 1, state: { seats: [] } } }; }\n",
+      "export async function executePokerLeave() { return { ok: true, tableId: 'artifact_table', state: { version: 1, state: { tableId: 'artifact_table', seats: [{ seatNo: 1, userId: 'u1' }] } } }; }\n",
       "utf8"
     );
 
