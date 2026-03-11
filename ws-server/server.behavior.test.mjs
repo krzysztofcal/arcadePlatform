@@ -549,7 +549,7 @@ test("snapshot-view subscription is one-shot and does not receive later legacy t
 
 
 
-test("table_leave non-override path is wired and does not return temporarily_unavailable", async () => {
+test("table_leave non-override path is wired and returns authoritative execution failure (not unavailable)", async () => {
   const secret = "test-secret";
   const actorToken = makeHs256Jwt({ secret, sub: "leave_non_override" });
   const { port, child } = await createServer({ env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret } });
@@ -570,7 +570,46 @@ test("table_leave non-override path is wired and does not return temporarily_una
     const first = await nextMessage(actor);
     assert.equal(first.type, "commandResult");
     assert.equal(first.payload.status, "rejected");
-    assert.notEqual(first.payload.reason, "temporarily_unavailable");
+    assert.equal(first.payload.reason, "authoritative_leave_failed");
+
+    actor.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
+
+
+test("table_leave non-override path returns temporarily_unavailable when loader contract is broken", async () => {
+  const secret = "test-secret";
+  const actorToken = makeHs256Jwt({ secret, sub: "leave_non_override_broken_loader" });
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      WS_AUTHORITATIVE_LEAVE_MODULE_PATH: "./does-not-exist/leave.mjs"
+    }
+  });
+
+  try {
+    await waitForListening(child, 5000);
+    const actor = await connectClient(port);
+    await hello(actor);
+    await auth(actor, actorToken, "auth-leave-non-override-broken-loader");
+
+    sendFrame(actor, {
+      version: "1.0",
+      type: "table_leave",
+      requestId: "leave-non-override-broken-loader",
+      ts: "2026-02-28T00:00:03Z",
+      payload: { tableId: "table_leave_non_override_broken_loader" }
+    });
+    const first = await nextMessage(actor);
+    assert.equal(first.type, "commandResult");
+    assert.equal(first.payload.status, "rejected");
+    assert.equal(first.payload.reason, "temporarily_unavailable");
+    assert.equal(actor.readyState, WebSocket.OPEN);
 
     actor.close();
   } finally {

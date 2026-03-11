@@ -129,7 +129,9 @@ test("ws server leave path avoids static shared/netlify runtime imports", () => 
 
   assert.doesNotMatch(adapterText, /from\s+["']\.\.\.\/\.\.\.\/netlify\/functions\/_shared\//);
   assert.doesNotMatch(adapterText, /from\s+["']\.\.\.\/\.\.\.\/shared\/poker-domain\/leave\.mjs["']/);
-  assert.match(adapterText, /import\(["']\.\.\/\.\.\/shared\/poker-domain\/leave\.mjs["']\)/);
+  assert.match(adapterText, /modulePath\s*=\s*configuredPath\s*\|\|\s*["']\.\.\/\.\.\/shared\/poker-domain\/leave\.mjs["']/);
+  assert.doesNotMatch(adapterText, /import\(["']\.\.\/\.\.\/\.\.\/shared\/poker-domain\/leave\.mjs["']\)/);
+  assert.doesNotMatch(adapterText, /try\s*\{[\s\S]*import\(["']\.\.\/\.\.\/shared\/poker-domain\/leave\.mjs["']\)[\s\S]*\}\s*catch/);
 });
 
 test("ws authoritative leave adapter imports with ws-server dependency graph", () => {
@@ -189,30 +191,34 @@ test("ws authoritative leave adapter default loader resolves in artifact-shaped 
   const stageDir = await fsp.mkdtemp(path.join(os.tmpdir(), "ws-artifact-leave-"));
   const srcAdapter = "ws-server/poker/persistence/authoritative-leave-adapter.mjs";
 
-  const stagedAdapter = path.join(stageDir, "poker/persistence/authoritative-leave-adapter.mjs");
-  const stagedBootstrap = path.join(stageDir, "poker/bootstrap/persisted-bootstrap-db.mjs");
-  const stagedLeave = path.join(stageDir, "shared/poker-domain/leave.mjs");
+  try {
+    const stagedAdapter = path.join(stageDir, "poker/persistence/authoritative-leave-adapter.mjs");
+    const stagedBootstrap = path.join(stageDir, "poker/bootstrap/persisted-bootstrap-db.mjs");
+    const stagedLeave = path.join(stageDir, "shared/poker-domain/leave.mjs");
 
-  await fsp.mkdir(path.dirname(stagedAdapter), { recursive: true });
-  await fsp.mkdir(path.dirname(stagedBootstrap), { recursive: true });
-  await fsp.mkdir(path.dirname(stagedLeave), { recursive: true });
+    await fsp.mkdir(path.dirname(stagedAdapter), { recursive: true });
+    await fsp.mkdir(path.dirname(stagedBootstrap), { recursive: true });
+    await fsp.mkdir(path.dirname(stagedLeave), { recursive: true });
 
-  await fsp.copyFile(srcAdapter, stagedAdapter);
-  await fsp.writeFile(stagedBootstrap, "export async function beginSqlWs(fn) { return fn({}); }\n", "utf8");
-  await fsp.writeFile(
-    stagedLeave,
-    "export async function executePokerLeave() { return { ok: true, tableId: 'artifact_table', state: { version: 1, state: { seats: [] } } }; }\n",
-    "utf8"
-  );
+    await fsp.copyFile(srcAdapter, stagedAdapter);
+    await fsp.writeFile(stagedBootstrap, "export async function beginSqlWs(fn) { return fn({}); }\n", "utf8");
+    await fsp.writeFile(
+      stagedLeave,
+      "export async function executePokerLeave() { return { ok: true, tableId: 'artifact_table', state: { version: 1, state: { seats: [] } } }; }\n",
+      "utf8"
+    );
 
-  const adapterModule = await import(pathToFileURL(stagedAdapter).href);
-  const execute = adapterModule.createAuthoritativeLeaveExecutor({
-    env: {},
-    beginSql: async (fn) => fn({}),
-    klog: () => {}
-  });
+    const adapterModule = await import(pathToFileURL(stagedAdapter).href);
+    const execute = adapterModule.createAuthoritativeLeaveExecutor({
+      env: {},
+      beginSql: async (fn) => fn({}),
+      klog: () => {}
+    });
 
-  const result = await execute({ tableId: "artifact_table", userId: "u1", requestId: "r1" });
-  assert.equal(result.ok, true);
-  assert.notEqual(result.code, "temporarily_unavailable");
+    const result = await execute({ tableId: "artifact_table", userId: "u1", requestId: "r1" });
+    assert.equal(result.ok, true);
+    assert.notEqual(result.code, "temporarily_unavailable");
+  } finally {
+    await fsp.rm(stageDir, { recursive: true, force: true });
+  }
 });

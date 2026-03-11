@@ -566,6 +566,9 @@ export function createTableManager({
     }
 
     const previousMembers = JSON.stringify(table.coreState.members);
+    const previousSeats = JSON.stringify(table.coreState.seats || {});
+    const previousVersion = Number(table.coreState.version);
+    const previousPokerState = JSON.stringify(table.coreState.pokerState ?? null);
     const normalizedState = pokerState && typeof pokerState === "object" && !Array.isArray(pokerState) ? pokerState : {};
     const stateSeats = Array.isArray(normalizedState.seats) ? normalizedState.seats : [];
     const nextMembers = stateSeats
@@ -618,9 +621,18 @@ export function createTableManager({
       tables.delete(resolvedTableId);
     }
 
+    const nextMembersJson = JSON.stringify(nextMembers);
+    const nextSeatsJson = JSON.stringify(nextSeats);
+    const nextVersion = Number(table.coreState.version);
+    const nextPokerState = JSON.stringify(table.coreState.pokerState ?? null);
+    const changed = previousMembers !== nextMembersJson
+      || previousSeats !== nextSeatsJson
+      || previousVersion !== nextVersion
+      || previousPokerState !== nextPokerState;
+
     return {
       ok: true,
-      changed: previousMembers !== JSON.stringify(nextMembers),
+      changed,
       tableState: tableState(resolvedTableId)
     };
   }

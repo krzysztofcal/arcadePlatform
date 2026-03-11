@@ -16,12 +16,12 @@ function resolveLeaveTestOverride(env = process.env) {
 export function createAuthoritativeLeaveExecutor({
   env = process.env,
   klog = () => {},
-  loadAuthoritativeLeaveModule = async () => {
-    try {
-      return await import("../../shared/poker-domain/leave.mjs");
-    } catch {
-      return import("../../../shared/poker-domain/leave.mjs");
-    }
+  loadAuthoritativeLeaveModule = () => {
+    const configuredPath = typeof env?.WS_AUTHORITATIVE_LEAVE_MODULE_PATH === "string"
+      ? env.WS_AUTHORITATIVE_LEAVE_MODULE_PATH.trim()
+      : "";
+    const modulePath = configuredPath || "../../shared/poker-domain/leave.mjs";
+    return import(modulePath);
   },
   beginSql = beginSqlWs
 } = {}) {

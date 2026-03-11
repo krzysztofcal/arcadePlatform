@@ -166,6 +166,83 @@ test("syncAuthoritativeLeave tolerates seat compatibility alias", () => {
   assert.deepEqual(memberPairs(tableManager.tableState(tableId).members), [["user_stay", 2]]);
 });
 
+
+
+test("syncAuthoritativeLeave changed=true when authoritative version/state changes with stable members", () => {
+  const tableId = "table_sync_leave_version";
+  const tableManager = createTableManager({ maxSeats: 4, enableDebugCore: true, nodeEnv: "test" });
+  const wsA = fakeWs("ws-sync-version-a");
+  const wsB = fakeWs("ws-sync-version-b");
+
+  tableManager.join({ ws: wsA, userId: "user_a", tableId, requestId: "join-version-a", nowTs: 1 });
+  tableManager.join({ ws: wsB, userId: "user_b", tableId, requestId: "join-version-b", nowTs: 2 });
+
+  const synced = tableManager.syncAuthoritativeLeave({
+    ws: wsA,
+    userId: "user_a",
+    tableId,
+    stateVersion: 9,
+    pokerState: {
+      tableId,
+      seats: [{ seatNo: 1, userId: "user_a" }, { seatNo: 2, userId: "user_b" }],
+      phase: "PREFLOP",
+      handId: "h-9"
+    }
+  });
+
+  assert.equal(synced.ok, true);
+  assert.equal(synced.changed, true);
+  assert.equal(tableManager.__debugCore(tableId).version, 9);
+});
+
+test("syncAuthoritativeLeave replay remains changed=false for identical authoritative state", () => {
+  const tableId = "table_sync_leave_replay_identical";
+  const tableManager = createTableManager({ maxSeats: 4 });
+  const wsA = fakeWs("ws-sync-replay-a");
+  const wsB = fakeWs("ws-sync-replay-b");
+
+  tableManager.join({ ws: wsA, userId: "user_a", tableId, requestId: "join-replay-a", nowTs: 1 });
+  tableManager.join({ ws: wsB, userId: "user_b", tableId, requestId: "join-replay-b", nowTs: 2 });
+
+  const state = {
+    tableId,
+    seats: [{ seatNo: 2, userId: "user_b" }],
+    phase: "INIT"
+  };
+
+  const first = tableManager.syncAuthoritativeLeave({ ws: wsA, userId: "user_a", tableId, stateVersion: 4, pokerState: state });
+  const replay = tableManager.syncAuthoritativeLeave({ ws: wsA, userId: "user_a", tableId, stateVersion: 4, pokerState: state });
+
+  assert.equal(first.changed, true);
+  assert.equal(replay.changed, false);
+});
+
+test("syncAuthoritativeLeave intentionally drops caller subscription while preserving non-leaving observer", () => {
+  const tableId = "table_sync_leave_subscription_policy";
+  const tableManager = createTableManager({ maxSeats: 4 });
+  const wsLeave = fakeWs("ws-sync-leaver");
+  const wsObserver = fakeWs("ws-sync-observer");
+
+  tableManager.join({ ws: wsLeave, userId: "user_leave", tableId, requestId: "join-sub-leaver", nowTs: 1 });
+  tableManager.join({ ws: wsObserver, userId: "user_keep", tableId, requestId: "join-sub-observer", nowTs: 2 });
+
+  tableManager.syncAuthoritativeLeave({
+    ws: wsLeave,
+    userId: "user_leave",
+    tableId,
+    stateVersion: 5,
+    pokerState: {
+      tableId,
+      seats: [{ seatNo: 2, userId: "user_keep" }],
+      phase: "INIT"
+    }
+  });
+
+  const connections = tableManager.orderedConnectionsForTable(tableId, (socket) => socket.id || "");
+  assert.deepEqual(connections, [wsObserver]);
+  assert.deepEqual(memberPairs(tableManager.tableState(tableId).members), [["user_keep", 2]]);
+});
+
 test("observeOnlyJoin rejects second different table on same socket and keeps original subscription", async () => {
   const tableManager = createTableManager({ maxSeats: 4, observeOnlyJoin: true });
   const ws = fakeWs("ws-observer-one-table");
