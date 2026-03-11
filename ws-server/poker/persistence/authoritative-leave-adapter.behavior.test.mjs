@@ -1,5 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { createAuthoritativeLeaveExecutor } from "./authoritative-leave-adapter.mjs";
 
 test("default loader uses single explicit artifact-relative path", () => {
@@ -8,25 +12,34 @@ test("default loader uses single explicit artifact-relative path", () => {
   assert.doesNotMatch(source, /\.\.\/\.\.\/\.\.\/shared\/poker-domain\/leave\.mjs/);
 });
 
-
-
 test("ws-local authoritative leave bridge resolves from adapter runtime location", async () => {
   const module = await import("../../shared/poker-domain/leave.mjs");
   assert.equal(typeof module.executePokerLeave, "function");
 });
 
+test("default loader resolves in artifact-shaped layout without loader-unavailable taxonomy", async () => {
+  const stageDir = await fs.mkdtemp(path.join(os.tmpdir(), "ws-adapter-default-loader-"));
+  try {
+    const stagedAdapter = path.join(stageDir, "poker/persistence/authoritative-leave-adapter.mjs");
+    const stagedBootstrap = path.join(stageDir, "poker/bootstrap/persisted-bootstrap-db.mjs");
+    const stagedLeave = path.join(stageDir, "shared/poker-domain/leave.mjs");
 
-test("default loader execution path does not collapse to loader-unavailable taxonomy", async () => {
-  const execute = createAuthoritativeLeaveExecutor({
-    env: { WS_AUTHORITATIVE_LEAVE_MODULE_PATH: "" },
-    beginSql: async (fn) => fn({}),
-    klog: () => {}
-  });
+    await fs.mkdir(path.dirname(stagedAdapter), { recursive: true });
+    await fs.mkdir(path.dirname(stagedBootstrap), { recursive: true });
+    await fs.mkdir(path.dirname(stagedLeave), { recursive: true });
 
-  const result = await execute({ tableId: "table_default_loader", userId: "user_default_loader", requestId: "req_default_loader" });
-  assert.notEqual(result.code, "temporarily_unavailable");
+    await fs.copyFile("ws-server/poker/persistence/authoritative-leave-adapter.mjs", stagedAdapter);
+    await fs.writeFile(stagedBootstrap, "export async function beginSqlWs(fn) { return fn({}); }\n", "utf8");
+    await fs.writeFile(stagedLeave, "export async function executePokerLeave(){ throw Object.assign(new Error('state_invalid'), { code: 'state_invalid' }); }\n", "utf8");
+
+    const adapterModule = await import(pathToFileURL(stagedAdapter).href);
+    const execute = adapterModule.createAuthoritativeLeaveExecutor({ env: {}, klog: () => {} });
+    const result = await execute({ tableId: "t1", userId: "u1", requestId: "r1" });
+    assert.notEqual(result.code, "temporarily_unavailable");
+  } finally {
+    await fs.rm(stageDir, { recursive: true, force: true });
+  }
 });
-
 
 test("authoritative adapter taxonomy: loader failure returns temporarily_unavailable", async () => {
   const logs = [];

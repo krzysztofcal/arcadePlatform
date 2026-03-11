@@ -256,6 +256,37 @@ function resolveRoomId(frame, { allowMissing = false } = {}) {
   return { ok: true, roomId: resolvedRoomId ?? null };
 }
 
+
+function hasValidAuthoritativeLeaveSeats(stateSeats) {
+  if (!Array.isArray(stateSeats)) {
+    return false;
+  }
+
+  return stateSeats.every((seatEntry) => {
+    const rawSeatNo = seatEntry?.seatNo;
+    const rawSeatAlias = seatEntry?.seat;
+    const seatNo = Number.isInteger(Number(rawSeatNo))
+      ? Number(rawSeatNo)
+      : Number.isInteger(Number(rawSeatAlias))
+        ? Number(rawSeatAlias)
+        : null;
+    const seatUserId = typeof seatEntry?.userId === "string" ? seatEntry.userId.trim() : "";
+    return Number.isInteger(seatNo) && seatUserId.length > 0;
+  });
+}
+
+function isValidAuthoritativeLeaveState({ tableId, leaveState }) {
+  if (!leaveState || typeof leaveState !== "object" || Array.isArray(leaveState)) {
+    return false;
+  }
+
+  if (typeof leaveState.tableId !== "string" || leaveState.tableId !== tableId) {
+    return false;
+  }
+
+  return hasValidAuthoritativeLeaveSeats(leaveState.seats);
+}
+
 function requiresRequestId(frameType) {
   return REQUEST_ID_REQUIRED_TYPES.has(frameType);
 }
@@ -917,6 +948,16 @@ wss.on("connection", (ws) => {
         }
 
         const leaveState = left?.state?.state && typeof left.state.state === "object" ? left.state.state : null;
+        if (!isValidAuthoritativeLeaveState({ tableId, leaveState })) {
+          sendCommandResult(ws, connState, {
+            requestId: frame.requestId ?? null,
+            tableId,
+            status: "rejected",
+            reason: "authoritative_state_invalid"
+          });
+          return;
+        }
+
         const synced = tableManager.syncAuthoritativeLeave({
           ws,
           userId: connState.session.userId,
