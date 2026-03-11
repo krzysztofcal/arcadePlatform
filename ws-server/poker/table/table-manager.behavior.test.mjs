@@ -267,7 +267,8 @@ test("syncAuthoritativeLeave rejects mismatched authoritative tableId without mu
     }
   });
 
-  assert.equal(result.ok, true);
+  assert.equal(result.ok, false);
+  assert.equal(result.code, "authoritative_state_invalid");
   assert.equal(result.changed, false);
   assert.deepEqual(tableManager.__debugCore(tableId), before);
 });
@@ -296,7 +297,8 @@ test("syncAuthoritativeLeave rejects malformed seats payload without mutating st
     }
   });
 
-  assert.equal(result.ok, true);
+  assert.equal(result.ok, false);
+  assert.equal(result.code, "authoritative_state_invalid");
   assert.equal(result.changed, false);
   assert.deepEqual(tableManager.__debugCore(tableId), before);
   assert.deepEqual(tableManager.orderedConnectionsForTable(tableId, (socket) => socket.id || ""), beforeConnections);
@@ -325,7 +327,8 @@ test("syncAuthoritativeLeave rejects invalid seat entries without mutating state
     }
   });
 
-  assert.equal(result.ok, true);
+  assert.equal(result.ok, false);
+  assert.equal(result.code, "authoritative_state_invalid");
   assert.equal(result.changed, false);
   assert.deepEqual(tableManager.__debugCore(tableId), before);
 });

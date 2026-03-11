@@ -596,7 +596,8 @@ export function createTableManager({
 
     if (!authoritativeStateValid) {
       return {
-        ok: true,
+        ok: false,
+        code: "authoritative_state_invalid",
         changed: false,
         tableState: tableState(resolvedTableId)
       };

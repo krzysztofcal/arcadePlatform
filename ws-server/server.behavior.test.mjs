@@ -732,6 +732,107 @@ test("table_leave succeeds with commandResult accepted as first response", async
 
 
 
+
+
+test("table_leave rejects when authoritative executor returns invalid state contract", async () => {
+  const secret = "test-secret";
+  const actorToken = makeHs256Jwt({ secret, sub: "leave_invalid_state_actor" });
+  const tableId = "table_leave_invalid_state";
+  const override = JSON.stringify({
+    ok: true,
+    tableId,
+    state: {
+      version: 77,
+      state: {
+        tableId: "table_other_invalid",
+        seats: [{ seatNo: 1, userId: "leave_invalid_state_actor" }],
+        phase: "INIT"
+      }
+    }
+  });
+  const { port, child } = await createServer({ env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret, WS_TEST_LEAVE_RESULT_JSON: override } });
+
+  try {
+    await waitForListening(child, 5000);
+    const actor = await connectClient(port);
+    await hello(actor);
+    await auth(actor, actorToken, "auth-leave-invalid-state");
+
+    sendFrame(actor, { version: "1.0", type: "table_join", requestId: "join-leave-invalid-state", ts: "2026-02-28T00:00:01Z", payload: { tableId } });
+    await nextMessage(actor);
+
+    sendFrame(actor, { version: "1.0", type: "table_leave", requestId: "leave-invalid-state", ts: "2026-02-28T00:00:02Z", payload: { tableId } });
+    const first = await nextMessage(actor);
+    assert.equal(first.type, "commandResult");
+    assert.equal(first.payload.status, "rejected");
+    assert.equal(first.payload.reason, "authoritative_state_invalid");
+    assert.equal(actor.readyState, WebSocket.OPEN);
+    assert.equal(await attemptMessage(actor, 300), null);
+
+    actor.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
+
+test("table_leave invalid authoritative sync rejection does not broadcast or mutate observer view", async () => {
+  const secret = "test-secret";
+  const actorToken = makeHs256Jwt({ secret, sub: "leave_invalid_sync_actor" });
+  const keepToken = makeHs256Jwt({ secret, sub: "leave_invalid_sync_keep" });
+  const tableId = "table_leave_invalid_sync";
+  const override = JSON.stringify({
+    ok: true,
+    tableId,
+    state: {
+      version: 88,
+      state: {
+        tableId,
+        seats: null,
+        phase: "INIT"
+      }
+    }
+  });
+  const { port, child } = await createServer({ env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret, WS_TEST_LEAVE_RESULT_JSON: override } });
+
+  try {
+    await waitForListening(child, 5000);
+    const actor = await connectClient(port);
+    const other = await connectClient(port);
+    await hello(actor);
+    await hello(other);
+    await auth(actor, actorToken, "auth-leave-invalid-sync-actor");
+    await auth(other, keepToken, "auth-leave-invalid-sync-keep");
+
+    sendFrame(actor, { version: "1.0", type: "table_join", requestId: "join-leave-invalid-sync-actor", ts: "2026-02-28T00:00:01Z", payload: { tableId } });
+    await nextMessage(actor);
+    sendFrame(other, { version: "1.0", type: "table_join", requestId: "join-leave-invalid-sync-keep", ts: "2026-02-28T00:00:02Z", payload: { tableId } });
+    await nextMessage(other);
+    await nextMessage(actor);
+
+    sendFrame(actor, { version: "1.0", type: "table_leave", requestId: "leave-invalid-sync", ts: "2026-02-28T00:00:03Z", payload: { tableId } });
+    const result = await nextMessage(actor);
+    assert.equal(result.type, "commandResult");
+    assert.equal(result.payload.status, "rejected");
+    assert.equal(result.payload.reason, "authoritative_state_invalid");
+    assert.equal(await attemptMessage(other, 300), null);
+
+    sendFrame(other, { version: "1.0", type: "table_state_sub", requestId: "sub-after-invalid-sync", ts: "2026-02-28T00:00:04Z", payload: { tableId } });
+    const observerState = await nextMessageOfType(other, "table_state");
+    assert.deepEqual(observerState.payload.members, [
+      { userId: "leave_invalid_sync_actor", seat: 1 },
+      { userId: "leave_invalid_sync_keep", seat: 2 }
+    ]);
+
+    actor.close();
+    other.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
 test("table_leave preserves remaining subscriber when authoritative state uses seatNo", async () => {
   const secret = "test-secret";
   const actorToken = makeHs256Jwt({ secret, sub: "leave_actor_seatno" });

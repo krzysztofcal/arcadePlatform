@@ -925,6 +925,16 @@ wss.on("connection", (ws) => {
           pokerState: leaveState
         });
 
+        if (!synced?.ok) {
+          sendCommandResult(ws, connState, {
+            requestId: frame.requestId ?? null,
+            tableId,
+            status: "rejected",
+            reason: synced?.code || "authoritative_state_invalid"
+          });
+          return;
+        }
+
         sendCommandResult(ws, connState, {
           requestId: frame.requestId ?? null,
           tableId,
