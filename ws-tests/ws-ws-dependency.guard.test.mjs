@@ -234,19 +234,19 @@ test("ws authoritative leave adapter default loader resolves in artifact-shaped 
 });
 
 
-test("ws-local leave wrapper is the only allowed bridge to repo-root shared leave module", () => {
+test("ws-local leave module remains inside ws-server runtime boundary", () => {
   const wrapperFile = "ws-server/shared/poker-domain/leave.mjs";
   const wrapperText = fs.readFileSync(wrapperFile, "utf8");
-  assert.match(wrapperText, /export\s*\{\s*executePokerLeave\s*\}\s*from\s*["']\.\.\/\.\.\/\.\.\/shared\/poker-domain\/leave\.mjs["']/);
+  assert.match(wrapperText, /export\s+async\s+function\s+executePokerLeave\s*\(/);
+  assert.doesNotMatch(wrapperText, /\.\.\/\.\.\/\.\.\/shared\/poker-domain\/leave\.mjs/);
 
   const wsFiles = fs.readdirSync("ws-server", { recursive: true })
     .filter((entry) => typeof entry === "string" && entry.endsWith('.mjs'))
     .map((entry) => `ws-server/${entry.replaceAll('\\', '/')}`);
 
   for (const file of wsFiles) {
-    if (file === wrapperFile) continue;
     const text = fs.readFileSync(file, "utf8");
-    assert.doesNotMatch(text, /\.\.\/\.\.\/\.\.\/shared\/poker-domain\/leave\.mjs/, `Only ${wrapperFile} may bridge to repo-root shared leave module`);
+    assert.doesNotMatch(text, /\.\.\/\.\.\/\.\.\/shared\/poker-domain\/leave\.mjs/, `WS runtime must not bridge directly to repo-root shared leave module (${file})`);
   }
 });
 
