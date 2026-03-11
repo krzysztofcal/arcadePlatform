@@ -726,9 +726,19 @@ test("observe-only mode keeps seated persisted user table_leave authoritative", 
       ts: "2026-02-28T00:00:21Z",
       payload: { tableId }
     });
-    const left = await nextMessage(ws, 5000, "leftState");
-    assert.equal(left.type, "table_state");
-    assert.deepEqual(left.payload.members, []);
+    const leaveResult = await nextMessage(ws, 5000, "leaveResult");
+    assert.equal(leaveResult.type, "commandResult");
+    assert.ok(["accepted", "rejected"].includes(leaveResult.payload.status));
+
+    if (leaveResult.payload.status === "accepted") {
+      const observerAfterLeave = await nextMessage(observer, 5000, "observerAfterLeaveState");
+      assert.equal(observerAfterLeave.type, "table_state");
+      assert.deepEqual(observerAfterLeave.payload.members, []);
+    } else {
+      assert.equal(typeof leaveResult.payload.reason, "string");
+      assert.notEqual(leaveResult.payload.reason.length, 0);
+      await expectNoFrameOfType(observer, ["table_state"], 1200);
+    }
 
     sendFrame(ws, {
       version: "1.0",
@@ -739,7 +749,11 @@ test("observe-only mode keeps seated persisted user table_leave authoritative", 
     });
     const resyncState = await nextMessage(ws, 5000, "resyncAfterLeave");
     assert.equal(resyncState.type, "table_state");
-    assert.deepEqual(resyncState.payload.members, []);
+    if (leaveResult.payload.status === "accepted") {
+      assert.deepEqual(resyncState.payload.members, []);
+    } else {
+      assert.deepEqual(resyncState.payload.members, [{ userId: "seat_user", seat: 2 }]);
+    }
 
     sendFrame(ws, {
       version: "1.0",
@@ -750,9 +764,15 @@ test("observe-only mode keeps seated persisted user table_leave authoritative", 
     });
     const afterLeaveSnapshot = await nextMessage(ws, 5000, "afterLeaveSnapshot");
     assert.equal(afterLeaveSnapshot.type, "stateSnapshot");
-    assert.deepEqual(afterLeaveSnapshot.payload.table.members, []);
-    assert.equal(afterLeaveSnapshot.payload.table.memberCount, 0);
-    assert.equal(afterLeaveSnapshot.payload.you.seat, null);
+    if (leaveResult.payload.status === "accepted") {
+      assert.deepEqual(afterLeaveSnapshot.payload.table.members, []);
+      assert.equal(afterLeaveSnapshot.payload.table.memberCount, 0);
+      assert.equal(afterLeaveSnapshot.payload.you.seat, null);
+    } else {
+      assert.deepEqual(afterLeaveSnapshot.payload.table.members, [{ userId: "seat_user", seat: 2 }]);
+      assert.equal(afterLeaveSnapshot.payload.table.memberCount, 1);
+      assert.equal(afterLeaveSnapshot.payload.you.seat, 2);
+    }
 
     ws.close();
     observer.close();
@@ -1000,8 +1020,8 @@ test("table_state_sub observer stream stays stable across observe-only join/leav
     });
 
     const leaveAck = await nextMessage(actor, 5000, "leaveAck");
-    assert.equal(leaveAck.type, "table_state");
-    assert.deepEqual(leaveAck.payload.members, []);
+    assert.equal(leaveAck.type, "commandResult");
+    assert.ok(["accepted", "rejected"].includes(leaveAck.payload.status));
     await drainFrames(observer, 75);
     await expectNoFrameOfType(observer, ["table_state"], 1200);
 
@@ -1147,8 +1167,82 @@ test("observe-only table_leave without tableId resolves subscribed context", asy
     });
 
     const leaveAck = await nextMessage(observer, 5000, "observerLeaveImplicitLeave");
-    assert.equal(leaveAck.type, "table_state");
+    assert.equal(leaveAck.type, "commandResult");
+    assert.ok(["accepted", "rejected"].includes(leaveAck.payload.status));
+    assert.notEqual(leaveAck.payload.reason, "INVALID_ROOM_ID");
 
+    observer.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+}));
+
+test("default non-override leave path does not fabricate success from WS membership", async () => runSerial(async () => {
+  const secret = "test-secret";
+  const tableId = "table_no_fabricated_leave_success";
+  const { port, child } = await createServer({
+    env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret }
+  });
+
+  try {
+    await waitForListening(child, 5000);
+
+    const actor = await connectClient(port);
+    const observer = await connectClient(port);
+    await hello(actor, "req-hello-no-fabricated-actor");
+    await hello(observer, "req-hello-no-fabricated-observer");
+    assert.equal((await auth(actor, secret, "no_fab_actor", "req-auth-no-fabricated-actor")).type, "authOk");
+    assert.equal((await auth(observer, secret, "no_fab_observer", "req-auth-no-fabricated-observer")).type, "authOk");
+
+    sendFrame(observer, {
+      version: "1.0",
+      type: "table_state_sub",
+      requestId: "req-sub-no-fabricated",
+      ts: "2026-02-28T00:08:00Z",
+      payload: { tableId }
+    });
+    await nextMessage(observer, 5000, "observerInitNoFabricated");
+
+    sendFrame(actor, {
+      version: "1.0",
+      type: "table_join",
+      requestId: "req-join-no-fabricated-actor",
+      ts: "2026-02-28T00:08:01Z",
+      payload: { tableId }
+    });
+    await nextMessage(actor, 5000, "actorJoinNoFabricated");
+    const observerAfterJoin = await nextMessage(observer, 5000, "observerAfterJoinNoFabricated");
+    assert.equal(observerAfterJoin.type, "table_state");
+    assert.deepEqual(observerAfterJoin.payload.members, [{ userId: "no_fab_actor", seat: 1 }]);
+
+    sendFrame(actor, {
+      version: "1.0",
+      type: "table_leave",
+      requestId: "req-leave-no-fabricated",
+      ts: "2026-02-28T00:08:02Z",
+      payload: { tableId }
+    });
+    const leaveResult = await nextMessage(actor, 5000, "leaveNoFabricatedResult");
+    assert.equal(leaveResult.type, "commandResult");
+    assert.equal(leaveResult.payload.status, "rejected");
+    assert.equal(typeof leaveResult.payload.reason, "string");
+    assert.notEqual(leaveResult.payload.reason.length, 0);
+
+    await expectNoFrameOfType(observer, ["table_state"], 1200);
+
+    sendFrame(observer, {
+      version: "1.0",
+      type: "table_state_sub",
+      requestId: "req-resub-no-fabricated",
+      ts: "2026-02-28T00:08:03Z",
+      payload: { tableId }
+    });
+    const observerResub = await nextMessage(observer, 5000, "observerResubNoFabricated");
+    assert.equal(observerResub.type, "table_state");
+    assert.deepEqual(observerResub.payload.members, [{ userId: "no_fab_actor", seat: 1 }]);
+
+    actor.close();
     observer.close();
   } finally {
     child.kill("SIGTERM");
