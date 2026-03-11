@@ -8,7 +8,7 @@ test("default loader uses single explicit artifact-relative path", () => {
   assert.doesNotMatch(source, /\.\.\/\.\.\/\.\.\/shared\/poker-domain\/leave\.mjs/);
 });
 
-test("missing authoritative module returns temporarily_unavailable and logs unavailable event", async () => {
+test("authoritative adapter taxonomy: loader failure returns temporarily_unavailable", async () => {
   const logs = [];
   const execute = createAuthoritativeLeaveExecutor({
     env: {},
@@ -24,31 +24,36 @@ test("missing authoritative module returns temporarily_unavailable and logs unav
   assert.equal(logs[0].kind, "ws_leave_authoritative_unavailable");
 });
 
-test("authoritative execution failure returns explicit code or authoritative_leave_failed", async () => {
+test("authoritative adapter taxonomy: execute failure without code returns authoritative_leave_failed", async () => {
   const logs = [];
-  const makeExecute = (errorToThrow) => createAuthoritativeLeaveExecutor({
+  const execute = createAuthoritativeLeaveExecutor({
     env: {},
     klog: (kind, data) => logs.push({ kind, data }),
     beginSql: async (fn) => fn({}),
     loadAuthoritativeLeaveModule: async () => ({
       executePokerLeave: async () => {
-        throw errorToThrow;
+        throw new Error("unknown");
       }
     })
   });
 
-  const withCode = await makeExecute(Object.assign(new Error("conflict"), { code: "state_conflict" }))({
-    tableId: "table_code",
-    userId: "user_code",
-    requestId: "req_code"
-  });
-  assert.deepEqual(withCode, { ok: false, code: "state_conflict" });
-
-  const withoutCode = await makeExecute(new Error("unknown"))({
-    tableId: "table_no_code",
-    userId: "user_no_code",
-    requestId: "req_no_code"
-  });
-  assert.deepEqual(withoutCode, { ok: false, code: "authoritative_leave_failed" });
+  const result = await execute({ tableId: "table_no_code", userId: "user_no_code", requestId: "req_no_code" });
+  assert.deepEqual(result, { ok: false, code: "authoritative_leave_failed" });
   assert.equal(logs.some((entry) => entry.kind === "ws_leave_authoritative_failed"), true);
+});
+
+test("authoritative adapter taxonomy: execute failure with explicit code propagates that code", async () => {
+  const execute = createAuthoritativeLeaveExecutor({
+    env: {},
+    klog: () => {},
+    beginSql: async (fn) => fn({}),
+    loadAuthoritativeLeaveModule: async () => ({
+      executePokerLeave: async () => {
+        throw Object.assign(new Error("conflict"), { code: "state_conflict" });
+      }
+    })
+  });
+
+  const result = await execute({ tableId: "table_code", userId: "user_code", requestId: "req_code" });
+  assert.deepEqual(result, { ok: false, code: "state_conflict" });
 });

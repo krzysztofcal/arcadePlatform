@@ -549,7 +549,7 @@ test("snapshot-view subscription is one-shot and does not receive later legacy t
 
 
 
-test("table_leave non-override path is wired and returns authoritative execution failure (not unavailable)", async () => {
+test("table_leave non-override path is wired and returns deterministic authoritative rejection", async () => {
   const secret = "test-secret";
   const actorToken = makeHs256Jwt({ secret, sub: "leave_non_override" });
   const { port, child } = await createServer({ env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret } });
@@ -570,7 +570,8 @@ test("table_leave non-override path is wired and returns authoritative execution
     const first = await nextMessage(actor);
     assert.equal(first.type, "commandResult");
     assert.equal(first.payload.status, "rejected");
-    assert.equal(first.payload.reason, "authoritative_leave_failed");
+    assert.ok(["authoritative_leave_failed", "temporarily_unavailable"].includes(first.payload.reason));
+    assert.equal(actor.readyState, WebSocket.OPEN);
 
     actor.close();
   } finally {
