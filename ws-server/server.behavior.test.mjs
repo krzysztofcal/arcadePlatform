@@ -389,6 +389,35 @@ test("server supports healthz and hello/helloAck smoke flow", async () => {
   }
 });
 
+
+
+test("server boots with leave handler wired in default env without override", async () => {
+  const { port, child } = await createServer({ env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: "test-secret" } });
+
+  try {
+    await waitForListening(child, 5000);
+    const ws = await connectClient(port);
+    const helloAck = await hello(ws);
+    assert.equal(helloAck.type, "helloAck");
+
+    sendFrame(ws, {
+      version: "1.0",
+      type: "table_leave",
+      requestId: "req-leave-boot-safe",
+      ts: "2026-02-28T00:00:00Z",
+      payload: { tableId: "table_boot_safe" }
+    });
+    const authRequired = await nextMessage(ws);
+    assert.equal(authRequired.type, "error");
+    assert.equal(authRequired.payload.code, "auth_required");
+
+    ws.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
 test("protected message requires auth", async () => {
   const { port, child } = await createServer();
 

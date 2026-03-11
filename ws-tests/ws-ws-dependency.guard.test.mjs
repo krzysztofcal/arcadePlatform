@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import fs from "node:fs";
+import { execFileSync } from "node:child_process";
 
 const require = createRequire(import.meta.url);
 
@@ -112,4 +113,26 @@ test("ws snapshot runtime helper chain stays within ws-server boundary", () => {
       `WS runtime boundary: ${runtimeFile} must not import repo-root netlify/functions/_shared modules`
     );
   }
+});
+
+
+test("ws server leave path avoids static shared/netlify runtime imports", () => {
+  const serverText = fs.readFileSync("ws-server/server.mjs", "utf8");
+  const adapterText = fs.readFileSync("ws-server/poker/persistence/authoritative-leave-adapter.mjs", "utf8");
+
+  assert.doesNotMatch(serverText, /from\s+["']\.\.\/shared\/poker-domain\/leave\.mjs["']/);
+  assert.match(serverText, /from\s+["']\.\/poker\/persistence\/authoritative-leave-adapter\.mjs["']/);
+
+  assert.doesNotMatch(adapterText, /from\s+["']\.\.\.\/\.\.\.\/netlify\/functions\/_shared\//);
+  assert.doesNotMatch(adapterText, /from\s+["']\.\.\.\/\.\.\.\/shared\/poker-domain\/leave\.mjs["']/);
+  assert.match(adapterText, /await import\(["']\.\.\/\.\.\/\.\.\/shared\/poker-domain\/leave\.mjs["']\)/);
+});
+
+test("ws authoritative leave adapter imports with ws-server dependency graph", () => {
+  const output = execFileSync(
+    process.execPath,
+    ["-e", "import('./ws-server/poker/persistence/authoritative-leave-adapter.mjs').then(() => process.stdout.write('ok'))"],
+    { encoding: "utf8" }
+  );
+  assert.equal(output.trim(), "ok");
 });

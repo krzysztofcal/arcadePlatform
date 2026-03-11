@@ -18,8 +18,7 @@ import { buildStatePatch } from "./poker/read-model/state-patch.mjs";
 import { createStreamLog } from "./poker/runtime/stream-log.mjs";
 import { createPersistedStateWriter } from "./poker/persistence/persisted-state-writer.mjs";
 import { createTableSnapshotLoader } from "./poker/table/table-snapshot.mjs";
-import { beginSqlWs } from "./poker/bootstrap/persisted-bootstrap-db.mjs";
-import { executePokerLeave } from "../shared/poker-domain/leave.mjs";
+import { createAuthoritativeLeaveExecutor } from "./poker/persistence/authoritative-leave-adapter.mjs";
 
 const PORT = Number(process.env.PORT || 3000);
 const PROTECTED_MESSAGE_TYPES = new Set([
@@ -136,34 +135,7 @@ function snapshotCacheKey(sessionId, tableId) {
 }
 
 
-function resolveLeaveTestOverride() {
-  const raw = process.env.WS_TEST_LEAVE_RESULT_JSON;
-  if (!raw) {
-    return null;
-  }
-  try {
-    const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === "object" ? parsed : null;
-  } catch {
-    return null;
-  }
-}
-
-async function executeAuthoritativeLeave({ tableId, userId, requestId }) {
-  const override = resolveLeaveTestOverride();
-  if (override) {
-    return override;
-  }
-
-  return executePokerLeave({
-    beginSql: (fn) => beginSqlWs(fn, { env: process.env }),
-    tableId,
-    userId,
-    requestId,
-    includeState: true,
-    klog: klogSafe
-  });
-}
+const executeAuthoritativeLeave = createAuthoritativeLeaveExecutor({ env: process.env, klog: klogSafe });
 
 function klog(kind, data) {
   const payload = data && typeof data === "object" ? ` ${JSON.stringify(data)}` : "";
