@@ -9,6 +9,10 @@ COPY ws-server ./
 
 WORKDIR /app
 
+COPY shared ./shared
+COPY netlify/functions/_shared ./netlify/functions/_shared
+
+
 EXPOSE 3000
 
 CMD ["node", "ws-server/server.mjs"]

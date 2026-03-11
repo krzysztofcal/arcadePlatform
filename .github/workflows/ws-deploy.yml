@@ -205,6 +205,9 @@ jobs:
       - name: Run ws image protocol content behavior test
         run: node --test ws-tests/ws-image-contains-protocol.behavior.test.mjs
 
+      - name: Run ws docker leave runtime guard test
+        run: node --test ws-tests/ws-docker-leave-runtime.guard.test.mjs
+
       - name: Run ws container startup behavior test
         run: node --test ws-tests/ws-container-starts.behavior.test.mjs
 
