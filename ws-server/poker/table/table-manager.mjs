@@ -547,6 +547,84 @@ export function createTableManager({
     };
   }
 
+  function syncAuthoritativeLeave({ ws, userId, tableId, stateVersion = null, pokerState = null }) {
+    const conn = ensureConn(ws);
+    const resolvedTableId = tableId || conn.joinedTableId || conn.subscribedTableId;
+    if (!resolvedTableId) {
+      return { ok: true, changed: false, tableState: null };
+    }
+
+    const table = tables.get(resolvedTableId);
+    if (!table) {
+      if (conn.joinedTableId === resolvedTableId) {
+        conn.joinedTableId = null;
+      }
+      if (conn.subscribedTableId === resolvedTableId) {
+        conn.subscribedTableId = null;
+      }
+      return { ok: true, changed: false, tableState: tableState(resolvedTableId) };
+    }
+
+    const previousMembers = JSON.stringify(table.coreState.members);
+    const normalizedState = pokerState && typeof pokerState === "object" && !Array.isArray(pokerState) ? pokerState : {};
+    const stateSeats = Array.isArray(normalizedState.seats) ? normalizedState.seats : [];
+    const nextMembers = stateSeats
+      .map((seatEntry) => {
+        const rawSeatNo = seatEntry?.seatNo;
+        const rawSeatAlias = seatEntry?.seat;
+        const normalizedSeat = Number.isInteger(Number(rawSeatNo))
+          ? Number(rawSeatNo)
+          : Number.isInteger(Number(rawSeatAlias))
+            ? Number(rawSeatAlias)
+            : null;
+        const userId = typeof seatEntry?.userId === "string" ? seatEntry.userId : "";
+        if (!Number.isInteger(normalizedSeat) || !userId) {
+          return null;
+        }
+        return { userId, seat: normalizedSeat };
+      })
+      .filter(Boolean)
+      .sort((a, b) => a.seat - b.seat || a.userId.localeCompare(b.userId));
+    const nextSeats = {};
+    for (const member of nextMembers) {
+      nextSeats[member.userId] = member.seat;
+    }
+
+    table.coreState.members = nextMembers;
+    table.coreState.seats = nextSeats;
+    if (Number.isInteger(stateVersion) && stateVersion >= 0) {
+      table.coreState.version = stateVersion;
+    }
+    table.coreState.pokerState = { ...normalizedState };
+
+    for (const [presenceUserId, presence] of table.presenceByUserId.entries()) {
+      if (!Object.prototype.hasOwnProperty.call(nextSeats, presenceUserId)) {
+        table.presenceByUserId.delete(presenceUserId);
+        continue;
+      }
+      presence.seat = nextSeats[presenceUserId];
+    }
+    table.presenceByUserId.delete(userId);
+
+    table.subscribers.delete(ws);
+    if (conn.joinedTableId === resolvedTableId) {
+      conn.joinedTableId = null;
+    }
+    if (conn.subscribedTableId === resolvedTableId) {
+      conn.subscribedTableId = null;
+    }
+
+    if (table.coreState.members.length === 0 && table.subscribers.size === 0) {
+      tables.delete(resolvedTableId);
+    }
+
+    return {
+      ok: true,
+      changed: previousMembers !== JSON.stringify(nextMembers),
+      tableState: tableState(resolvedTableId)
+    };
+  }
+
   function subscribe({ ws, tableId }) {
     const conn = ensureConn(ws);
     if (conn.subscribedTableId && conn.subscribedTableId !== tableId) {
@@ -769,6 +847,7 @@ export function createTableManager({
     ensureTableLoaded,
     join,
     leave,
+    syncAuthoritativeLeave,
     subscribe,
     resync,
     touchPresence,

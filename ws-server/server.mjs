@@ -18,6 +18,8 @@ import { buildStatePatch } from "./poker/read-model/state-patch.mjs";
 import { createStreamLog } from "./poker/runtime/stream-log.mjs";
 import { createPersistedStateWriter } from "./poker/persistence/persisted-state-writer.mjs";
 import { createTableSnapshotLoader } from "./poker/table/table-snapshot.mjs";
+import { beginSqlWs } from "./poker/bootstrap/persisted-bootstrap-db.mjs";
+import { executePokerLeave } from "../shared/poker-domain/leave.mjs";
 
 const PORT = Number(process.env.PORT || 3000);
 const PROTECTED_MESSAGE_TYPES = new Set([
@@ -131,6 +133,36 @@ const lastSnapshotBySessionAndTable = new Map();
 
 function snapshotCacheKey(sessionId, tableId) {
   return `${sessionId}:${tableId}`;
+}
+
+
+function resolveLeaveTestOverride() {
+  const raw = process.env.WS_TEST_LEAVE_RESULT_JSON;
+  if (!raw) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+async function executeAuthoritativeLeave({ tableId, userId, requestId }) {
+  const override = resolveLeaveTestOverride();
+  if (override) {
+    return override;
+  }
+
+  return executePokerLeave({
+    beginSql: (fn) => beginSqlWs(fn, { env: process.env }),
+    tableId,
+    userId,
+    requestId,
+    includeState: true,
+    klog: klogSafe
+  });
 }
 
 function klog(kind, data) {
@@ -874,7 +906,7 @@ wss.on("connection", (ws) => {
     }
 
     if (frame.type === "table_leave" || frame.type === "leave") {
-      const resolvedRoomId = resolveRoomId(frame, { allowMissing: true });
+      const resolvedRoomId = resolveRoomId(frame);
       if (!resolvedRoomId.ok) {
         sendError(ws, connState, {
           code: resolvedRoomId.code,
@@ -885,21 +917,64 @@ wss.on("connection", (ws) => {
       }
       const tableId = resolvedRoomId.roomId;
 
-      const left = tableManager.leave({ ws, userId: connState.session.userId, tableId, requestId: frame.requestId });
-      if (!left.tableState) {
-        sendError(ws, connState, {
-          code: "INVALID_COMMAND",
-          message: "table_leave requires payload.tableId when connection is not joined",
-          requestId: frame.requestId ?? null
+      try {
+        const left = await executeAuthoritativeLeave({
+          tableId,
+          userId: connState.session.userId,
+          requestId: frame.requestId
+        });
+
+        if (!left?.ok) {
+          if (left?.pending) {
+            sendCommandResult(ws, connState, {
+              requestId: frame.requestId ?? null,
+              tableId,
+              status: "rejected",
+              reason: "request_pending"
+            });
+            return;
+          }
+
+          sendCommandResult(ws, connState, {
+            requestId: frame.requestId ?? null,
+            tableId,
+            status: "rejected",
+            reason: left?.code || left?.reason || "state_invalid"
+          });
+          return;
+        }
+
+        const leaveState = left?.state?.state && typeof left.state.state === "object" ? left.state.state : null;
+        const synced = tableManager.syncAuthoritativeLeave({
+          ws,
+          userId: connState.session.userId,
+          tableId,
+          stateVersion: left?.state?.version ?? null,
+          pokerState: leaveState
+        });
+
+        sendCommandResult(ws, connState, {
+          requestId: frame.requestId ?? null,
+          tableId,
+          status: "accepted",
+          reason: left?.status === "already_left" ? "already_left" : null
+        });
+
+        if (synced.changed) {
+          broadcastStateSnapshots(tableId);
+          broadcastTableState(tableId);
+        }
+        return;
+      } catch (error) {
+        const reason = typeof error?.code === "string" ? error.code : "state_invalid";
+        sendCommandResult(ws, connState, {
+          requestId: frame.requestId ?? null,
+          tableId,
+          status: "rejected",
+          reason
         });
         return;
       }
-
-      sendTableState(ws, connState, { requestId: frame.requestId ?? null, tableState: left.tableState });
-      if (left.changed) {
-        broadcastTableState(left.tableState.tableId, { excludeWs: ws });
-      }
-      return;
     }
 
     if (frame.type === "table_state_sub") {

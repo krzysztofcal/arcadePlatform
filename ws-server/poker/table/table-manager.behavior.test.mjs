@@ -91,6 +91,81 @@ test("table manager exposes connected members as sorted {userId, seat} and reuse
 
 
 
+
+
+test("syncAuthoritativeLeave removes member in-memory without persistence side-effects and is idempotent", () => {
+  const tableId = "table_sync_leave";
+  const tableManager = createTableManager({ maxSeats: 4 });
+  const wsMember = fakeWs("ws-sync-member");
+  const wsOther = fakeWs("ws-sync-other");
+
+  const joinMember = tableManager.join({ ws: wsMember, userId: "user_leave", tableId, requestId: "join-sync-1", nowTs: 1 });
+  const joinOther = tableManager.join({ ws: wsOther, userId: "user_stay", tableId, requestId: "join-sync-2", nowTs: 2 });
+  assert.equal(joinMember.ok, true);
+  assert.equal(joinOther.ok, true);
+
+  const synced = tableManager.syncAuthoritativeLeave({
+    ws: wsMember,
+    userId: "user_leave",
+    tableId,
+    stateVersion: 7,
+    pokerState: {
+      tableId,
+      seats: [{ seatNo: 2, userId: "user_stay" }],
+      stacks: { user_stay: 100 },
+      phase: "INIT"
+    }
+  });
+
+  assert.equal(synced.ok, true);
+  assert.equal(synced.changed, true);
+  assert.deepEqual(memberPairs(tableManager.tableState(tableId).members), [["user_stay", 2]]);
+
+  const replayed = tableManager.syncAuthoritativeLeave({
+    ws: wsMember,
+    userId: "user_leave",
+    tableId,
+    stateVersion: 7,
+    pokerState: {
+      tableId,
+      seats: [{ seatNo: 2, userId: "user_stay" }],
+      stacks: { user_stay: 100 },
+      phase: "INIT"
+    }
+  });
+  assert.equal(replayed.ok, true);
+  assert.equal(replayed.changed, false);
+  assert.deepEqual(memberPairs(tableManager.tableState(tableId).members), [["user_stay", 2]]);
+});
+
+
+
+test("syncAuthoritativeLeave tolerates seat compatibility alias", () => {
+  const tableId = "table_sync_leave_alias";
+  const tableManager = createTableManager({ maxSeats: 4 });
+  const wsMember = fakeWs("ws-sync-alias-member");
+  const wsOther = fakeWs("ws-sync-alias-other");
+
+  tableManager.join({ ws: wsMember, userId: "user_leave", tableId, requestId: "join-sync-alias-1", nowTs: 1 });
+  tableManager.join({ ws: wsOther, userId: "user_stay", tableId, requestId: "join-sync-alias-2", nowTs: 2 });
+
+  const synced = tableManager.syncAuthoritativeLeave({
+    ws: wsMember,
+    userId: "user_leave",
+    tableId,
+    stateVersion: 9,
+    pokerState: {
+      tableId,
+      seats: [{ seat: 2, userId: "user_stay" }],
+      stacks: { user_stay: 100 },
+      phase: "INIT"
+    }
+  });
+
+  assert.equal(synced.ok, true);
+  assert.deepEqual(memberPairs(tableManager.tableState(tableId).members), [["user_stay", 2]]);
+});
+
 test("observeOnlyJoin rejects second different table on same socket and keeps original subscription", async () => {
   const tableManager = createTableManager({ maxSeats: 4, observeOnlyJoin: true });
   const ws = fakeWs("ws-observer-one-table");
