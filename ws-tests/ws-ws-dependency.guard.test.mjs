@@ -236,6 +236,27 @@ test("ws-local leave wrapper is the only allowed bridge to repo-root shared leav
   for (const file of wsFiles) {
     if (file === wrapperFile) continue;
     const text = fs.readFileSync(file, "utf8");
-    assert.doesNotMatch(text, /\.\.\.\/\.\.\.\/shared\/poker-domain\/leave\.mjs/, `Only ${wrapperFile} may bridge to repo-root shared leave module`);
+    assert.doesNotMatch(text, /\.\.\/\.\.\/\.\.\/shared\/poker-domain\/leave\.mjs/, `Only ${wrapperFile} may bridge to repo-root shared leave module`);
+  }
+});
+
+
+test("ws dependency guard detects forbidden bridge import", async () => {
+  const forbiddenFile = "ws-server/tmp-forbidden-import.mjs";
+  await fsp.writeFile(forbiddenFile, 'import { executePokerLeave } from "../../../shared/poker-domain/leave.mjs";\n', "utf8");
+
+  try {
+    const wrapperFile = "ws-server/shared/poker-domain/leave.mjs";
+    const wsFiles = fs.readdirSync("ws-server", { recursive: true })
+      .filter((entry) => typeof entry === "string" && entry.endsWith('.mjs'))
+      .map((entry) => `ws-server/${entry.replaceAll('\\', '/')}`);
+
+    const violators = wsFiles
+      .filter((file) => file !== wrapperFile)
+      .filter((file) => /\.\.\/\.\.\/\.\.\/shared\/poker-domain\/leave\.mjs/.test(fs.readFileSync(file, "utf8")));
+
+    assert.ok(violators.includes(forbiddenFile));
+  } finally {
+    await fsp.rm(forbiddenFile, { force: true });
   }
 });
