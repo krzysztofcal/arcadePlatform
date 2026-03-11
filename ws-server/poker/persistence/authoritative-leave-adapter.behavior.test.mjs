@@ -8,6 +8,18 @@ test("default loader uses single explicit artifact-relative path", () => {
   assert.doesNotMatch(source, /\.\.\/\.\.\/\.\.\/shared\/poker-domain\/leave\.mjs/);
 });
 
+test("default loader resolves in repo-root ws runtime and does not return temporarily_unavailable", async () => {
+  const execute = createAuthoritativeLeaveExecutor({
+    env: { WS_AUTHORITATIVE_LEAVE_MODULE_PATH: "" },
+    beginSql: async (fn) => fn({}),
+    klog: () => {}
+  });
+
+  const result = await execute({ tableId: "table_default_loader", userId: "user_default_loader", requestId: "req_default_loader" });
+  assert.notEqual(result.code, "temporarily_unavailable");
+});
+
+
 test("authoritative adapter taxonomy: loader failure returns temporarily_unavailable", async () => {
   const logs = [];
   const execute = createAuthoritativeLeaveExecutor({

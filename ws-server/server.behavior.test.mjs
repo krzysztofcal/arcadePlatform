@@ -503,7 +503,7 @@ test("snapshot-view subscription is one-shot and does not receive later legacy t
   const secret = "test-secret";
   const snapshotToken = makeHs256Jwt({ secret, sub: "snapshot_user" });
   const actorToken = makeHs256Jwt({ secret, sub: "actor_user" });
-  const { port, child } = await createServer({ env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret } });
+  const { port, child } = await createServer({ env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret, WS_AUTHORITATIVE_LEAVE_MODULE_PATH: "" } });
 
   try {
     await waitForListening(child, 5000);
@@ -549,10 +549,10 @@ test("snapshot-view subscription is one-shot and does not receive later legacy t
 
 
 
-test("table_leave non-override path is wired and returns deterministic authoritative rejection", async () => {
+test("table_leave non-override path is wired and does not degrade to temporarily_unavailable", async () => {
   const secret = "test-secret";
   const actorToken = makeHs256Jwt({ secret, sub: "leave_non_override" });
-  const { port, child } = await createServer({ env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret } });
+  const { port, child } = await createServer({ env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret, WS_AUTHORITATIVE_LEAVE_MODULE_PATH: "" } });
 
   try {
     await waitForListening(child, 5000);
@@ -570,7 +570,7 @@ test("table_leave non-override path is wired and returns deterministic authorita
     const first = await nextMessage(actor);
     assert.equal(first.type, "commandResult");
     assert.equal(first.payload.status, "rejected");
-    assert.ok(["authoritative_leave_failed", "temporarily_unavailable"].includes(first.payload.reason));
+    assert.notEqual(first.payload.reason, "temporarily_unavailable");
     assert.equal(actor.readyState, WebSocket.OPEN);
 
     actor.close();
