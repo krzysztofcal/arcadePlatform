@@ -549,7 +549,7 @@ test("snapshot-view subscription is one-shot and does not receive later legacy t
 
 
 
-test("table_leave non-override path is wired and returns protocol-safe rejection", async () => {
+test("table_leave non-override path is wired and returns commandResult accepted", async () => {
   const secret = "test-secret";
   const actorToken = makeHs256Jwt({ secret, sub: "leave_non_override" });
   const { port, child } = await createServer({ env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret } });
@@ -569,7 +569,7 @@ test("table_leave non-override path is wired and returns protocol-safe rejection
     });
     const first = await nextMessage(actor);
     assert.equal(first.type, "commandResult");
-    assert.equal(first.payload.status, "rejected");
+    assert.equal(first.payload.status, "accepted");
     assert.equal(actor.readyState, WebSocket.OPEN);
 
     actor.close();

@@ -12,9 +12,20 @@ test("default loader uses single explicit artifact-relative path", () => {
   assert.doesNotMatch(source, /\.\.\/\.\.\/\.\.\/shared\/poker-domain\/leave\.mjs/);
 });
 
-test("ws-local authoritative leave module is runnable and exports callable executor", async () => {
+test("ws-local authoritative leave module is runnable and supports success execution", async () => {
   const module = await import("../../shared/poker-domain/leave.mjs");
   assert.equal(typeof module.executePokerLeave, "function");
+
+  const result = await module.executePokerLeave({
+    tableId: "table_local",
+    userId: "user_local",
+    requestId: "req_local",
+    includeState: true,
+    klog: () => {}
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.tableId, "table_local");
+  assert.equal(Array.isArray(result?.state?.state?.seats), true);
 });
 
 test("default loader resolves in artifact-shaped layout without loader-unavailable taxonomy", async () => {

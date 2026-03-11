@@ -238,6 +238,7 @@ test("ws-local leave module remains inside ws-server runtime boundary", () => {
   const wrapperFile = "ws-server/shared/poker-domain/leave.mjs";
   const wrapperText = fs.readFileSync(wrapperFile, "utf8");
   assert.match(wrapperText, /export\s+async\s+function\s+executePokerLeave\s*\(/);
+  assert.doesNotMatch(wrapperText, /throw\s+Object\.assign\(new Error\("state_invalid"\),\s*\{\s*code:\s*"state_invalid"\s*\}\)/);
   assert.doesNotMatch(wrapperText, /\.\.\/\.\.\/\.\.\/shared\/poker-domain\/leave\.mjs/);
 
   const wsFiles = fs.readdirSync("ws-server", { recursive: true })
