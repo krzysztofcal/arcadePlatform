@@ -18,7 +18,6 @@ import { buildStatePatch } from "./poker/read-model/state-patch.mjs";
 import { createStreamLog } from "./poker/runtime/stream-log.mjs";
 import { createPersistedStateWriter } from "./poker/persistence/persisted-state-writer.mjs";
 import { createTableSnapshotLoader } from "./poker/table/table-snapshot.mjs";
-import { createAuthoritativeLeaveExecutor } from "./poker/persistence/authoritative-leave-adapter.mjs";
 
 const PORT = Number(process.env.PORT || 3000);
 const PROTECTED_MESSAGE_TYPES = new Set([
@@ -135,7 +134,15 @@ function snapshotCacheKey(sessionId, tableId) {
 }
 
 
-const executeAuthoritativeLeave = createAuthoritativeLeaveExecutor({ env: process.env, klog: klogSafe });
+let authoritativeLeaveExecutorPromise = null;
+
+async function loadAuthoritativeLeaveExecutor() {
+  if (!authoritativeLeaveExecutorPromise) {
+    authoritativeLeaveExecutorPromise = import("./poker/persistence/authoritative-leave-adapter.mjs")
+      .then((module) => module.createAuthoritativeLeaveExecutor({ env: process.env, klog: klogSafe }));
+  }
+  return authoritativeLeaveExecutorPromise;
+}
 
 function klog(kind, data) {
   const payload = data && typeof data === "object" ? ` ${JSON.stringify(data)}` : "";
@@ -902,6 +909,7 @@ wss.on("connection", (ws) => {
       }
 
       try {
+        const executeAuthoritativeLeave = await loadAuthoritativeLeaveExecutor();
         const left = await executeAuthoritativeLeave({
           tableId,
           userId: connState.session.userId,

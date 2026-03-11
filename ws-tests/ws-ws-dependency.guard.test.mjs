@@ -125,7 +125,8 @@ test("ws server leave path avoids static shared/netlify runtime imports", () => 
   const adapterText = fs.readFileSync("ws-server/poker/persistence/authoritative-leave-adapter.mjs", "utf8");
 
   assert.doesNotMatch(serverText, /from\s+["']\.\.\/shared\/poker-domain\/leave\.mjs["']/);
-  assert.match(serverText, /from\s+["']\.\/poker\/persistence\/authoritative-leave-adapter\.mjs["']/);
+  assert.doesNotMatch(serverText, /from\s+["']\.\/poker\/persistence\/authoritative-leave-adapter\.mjs["']/);
+  assert.match(serverText, /import\(["']\.\/poker\/persistence\/authoritative-leave-adapter\.mjs["']\)/);
 
   assert.doesNotMatch(adapterText, /from\s+["']\.\.\.\/\.\.\.\/netlify\/functions\/_shared\//);
   assert.doesNotMatch(adapterText, /from\s+["']\.\.\.\/\.\.\.\/shared\/poker-domain\/leave\.mjs["']/);
