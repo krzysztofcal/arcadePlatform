@@ -564,6 +564,16 @@ export function createTableManager({
     });
   }
 
+  function authoritativeSeatsContainUser(stateSeats, userId) {
+    if (!Array.isArray(stateSeats)) return false;
+    const normalizedUserId = typeof userId === "string" ? userId.trim() : "";
+    if (!normalizedUserId) return false;
+    return stateSeats.some((seatEntry) => {
+      const seatUserId = typeof seatEntry?.userId === "string" ? seatEntry.userId.trim() : "";
+      return seatUserId === normalizedUserId;
+    });
+  }
+
   function syncAuthoritativeLeave({ ws, userId, tableId, stateVersion = null, pokerState = null }) {
     const conn = ensureConn(ws);
     const resolvedTableId = tableId || conn.joinedTableId || conn.subscribedTableId;
@@ -594,7 +604,7 @@ export function createTableManager({
       && stateTableId === resolvedTableId
       && hasValidAuthoritativeSeats(stateSeats);
 
-    if (!authoritativeStateValid) {
+    if (!authoritativeStateValid || authoritativeSeatsContainUser(stateSeats, userId)) {
       return {
         ok: false,
         code: "authoritative_state_invalid",

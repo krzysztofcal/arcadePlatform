@@ -1249,3 +1249,103 @@ test("default non-override leave path does not fabricate success from WS members
     await waitForExit(child);
   }
 }));
+
+test("authoritative invalid-success-shape leave (actor still in seats) is rejected without observer mutation", async () => runSerial(async () => {
+  const secret = "test-secret";
+  const tableId = "table_invalid_success_shape_leave";
+  const override = JSON.stringify({
+    ok: true,
+    tableId,
+    state: {
+      version: 41,
+      state: {
+        tableId,
+        seats: [
+          { seatNo: 1, userId: "invalid_shape_actor" },
+          { seatNo: 2, userId: "invalid_shape_observer" }
+        ],
+        phase: "INIT"
+      }
+    }
+  });
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      WS_TEST_LEAVE_RESULT_JSON: override
+    }
+  });
+
+  try {
+    await waitForListening(child, 5000);
+
+    const actor = await connectClient(port);
+    const observer = await connectClient(port);
+    await hello(actor, "req-hello-invalid-shape-actor");
+    await hello(observer, "req-hello-invalid-shape-observer");
+    assert.equal((await auth(actor, secret, "invalid_shape_actor", "req-auth-invalid-shape-actor")).type, "authOk");
+    assert.equal((await auth(observer, secret, "invalid_shape_observer", "req-auth-invalid-shape-observer")).type, "authOk");
+
+    sendFrame(observer, {
+      version: "1.0",
+      type: "table_state_sub",
+      requestId: "req-sub-invalid-shape",
+      ts: "2026-02-28T00:09:00Z",
+      payload: { tableId }
+    });
+    await nextMessage(observer, 5000, "observerInitInvalidShape");
+
+    sendFrame(actor, {
+      version: "1.0",
+      type: "table_join",
+      requestId: "req-join-invalid-shape-actor",
+      ts: "2026-02-28T00:09:01Z",
+      payload: { tableId }
+    });
+    await nextMessage(actor, 5000, "actorJoinInvalidShape");
+
+    sendFrame(observer, {
+      version: "1.0",
+      type: "table_join",
+      requestId: "req-join-invalid-shape-observer",
+      ts: "2026-02-28T00:09:02Z",
+      payload: { tableId }
+    });
+    await nextMessage(observer, 5000, "observerJoinInvalidShape");
+    await nextMessage(actor, 5000, "actorSawObserverInvalidShape");
+
+    sendFrame(actor, {
+      version: "1.0",
+      type: "table_leave",
+      requestId: "req-leave-invalid-shape",
+      ts: "2026-02-28T00:09:03Z",
+      payload: { tableId }
+    });
+    const leaveResult = await nextMessage(actor, 5000, "leaveInvalidShapeResult");
+    assert.equal(leaveResult.type, "commandResult");
+    assert.equal(leaveResult.payload.status, "rejected");
+    assert.equal(leaveResult.payload.reason, "authoritative_state_invalid");
+
+    await expectNoFrameOfType(observer, ["table_state"], 1200);
+
+    sendFrame(observer, {
+      version: "1.0",
+      type: "table_state_sub",
+      requestId: "req-resub-invalid-shape",
+      ts: "2026-02-28T00:09:04Z",
+      payload: { tableId }
+    });
+    const observerResub = await nextMessage(observer, 5000, "observerResubInvalidShape");
+    assert.equal(observerResub.type, "table_state");
+    assert.deepEqual(observerResub.payload.members, [
+      { userId: "invalid_shape_actor", seat: 1 },
+      { userId: "invalid_shape_observer", seat: 2 }
+    ]);
+
+    actor.close();
+    observer.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+}));

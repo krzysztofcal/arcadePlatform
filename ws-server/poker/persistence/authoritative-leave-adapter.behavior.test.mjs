@@ -132,3 +132,32 @@ test("authoritative success payload with malformed seats downgrades to authorita
   const result = await execute({ tableId: "t1", userId: "u1", requestId: "req-bad-seats" });
   assert.deepEqual(result, { ok: false, code: "authoritative_state_invalid" });
 });
+
+test("authoritative success payload that still contains leaving user downgrades to authoritative_state_invalid", async () => {
+  const logs = [];
+  const execute = createAuthoritativeLeaveExecutor({
+    env: {},
+    klog: (kind, data) => logs.push({ kind, data }),
+    beginSql: async (fn) => fn({}),
+    loadAuthoritativeLeaveModule: async () => ({
+      executePokerLeave: async () => ({
+        ok: true,
+        tableId: "t1",
+        state: {
+          version: 1,
+          state: {
+            tableId: "t1",
+            seats: [
+              { seatNo: 1, userId: "u1" },
+              { seatNo: 2, userId: "u2" }
+            ]
+          }
+        }
+      })
+    })
+  });
+
+  const result = await execute({ tableId: "t1", userId: "u1", requestId: "req-still-present" });
+  assert.deepEqual(result, { ok: false, code: "authoritative_state_invalid" });
+  assert.equal(logs.some((entry) => entry.kind === "ws_leave_authoritative_failed"), true);
+});

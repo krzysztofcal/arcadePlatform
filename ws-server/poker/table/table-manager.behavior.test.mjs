@@ -184,7 +184,7 @@ test("syncAuthoritativeLeave changed=true when authoritative version/state chang
     stateVersion: 9,
     pokerState: {
       tableId,
-      seats: [{ seatNo: 1, userId: "user_a" }, { seatNo: 2, userId: "user_b" }],
+      seats: [{ seatNo: 2, userId: "user_b" }],
       phase: "PREFLOP",
       handId: "h-9"
     }
@@ -331,6 +331,42 @@ test("syncAuthoritativeLeave rejects invalid seat entries without mutating state
   assert.equal(result.code, "authoritative_state_invalid");
   assert.equal(result.changed, false);
   assert.deepEqual(tableManager.__debugCore(tableId), before);
+});
+
+test("syncAuthoritativeLeave rejects seats that still contain leaving user without mutating state", () => {
+  const tableId = "table_sync_leave_still_present";
+  const tableManager = createTableManager({ maxSeats: 4, enableDebugCore: true, nodeEnv: "test" });
+  const wsLeave = fakeWs("ws-sync-still-present-leave");
+  const wsKeep = fakeWs("ws-sync-still-present-keep");
+
+  tableManager.join({ ws: wsLeave, userId: "user_leave", tableId, requestId: "join-still-present-leave", nowTs: 1 });
+  tableManager.join({ ws: wsKeep, userId: "user_keep", tableId, requestId: "join-still-present-keep", nowTs: 2 });
+
+  const beforeCore = tableManager.__debugCore(tableId);
+  const beforeConnections = tableManager.orderedConnectionsForTable(tableId, (socket) => socket.id || "");
+  const beforeMembers = tableManager.tableState(tableId).members;
+
+  const result = tableManager.syncAuthoritativeLeave({
+    ws: wsLeave,
+    userId: "user_leave",
+    tableId,
+    stateVersion: 9,
+    pokerState: {
+      tableId,
+      seats: [
+        { seatNo: 1, userId: "user_leave" },
+        { seatNo: 2, userId: "user_keep" }
+      ],
+      phase: "INIT"
+    }
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, "authoritative_state_invalid");
+  assert.equal(result.changed, false);
+  assert.deepEqual(tableManager.__debugCore(tableId), beforeCore);
+  assert.deepEqual(tableManager.orderedConnectionsForTable(tableId, (socket) => socket.id || ""), beforeConnections);
+  assert.deepEqual(tableManager.tableState(tableId).members, beforeMembers);
 });
 
 test("observeOnlyJoin rejects second different table on same socket and keeps original subscription", async () => {

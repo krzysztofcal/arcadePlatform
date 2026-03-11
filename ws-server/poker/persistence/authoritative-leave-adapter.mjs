@@ -33,7 +33,21 @@ function hasValidAuthoritativeSeats(seats) {
   });
 }
 
-function isValidAuthoritativeLeaveSuccessShape(result, expectedTableId) {
+function authoritativeSeatsContainUser(seats, userId) {
+  if (!Array.isArray(seats)) {
+    return false;
+  }
+  const normalizedUserId = typeof userId === "string" ? userId.trim() : "";
+  if (!normalizedUserId) {
+    return false;
+  }
+  return seats.some((seatEntry) => {
+    const seatUserId = typeof seatEntry?.userId === "string" ? seatEntry.userId.trim() : "";
+    return seatUserId === normalizedUserId;
+  });
+}
+
+function isValidAuthoritativeLeaveSuccessShape(result, expectedTableId, leavingUserId) {
   if (!result?.ok) {
     return true;
   }
@@ -48,11 +62,15 @@ function isValidAuthoritativeLeaveSuccessShape(result, expectedTableId) {
     return false;
   }
 
-  return hasValidAuthoritativeSeats(state.seats);
+  if (!hasValidAuthoritativeSeats(state.seats)) {
+    return false;
+  }
+
+  return !authoritativeSeatsContainUser(state.seats, leavingUserId);
 }
 
 function normalizeValidatedResult({ result, tableId, userId, requestId, klog }) {
-  if (isValidAuthoritativeLeaveSuccessShape(result, tableId)) {
+  if (isValidAuthoritativeLeaveSuccessShape(result, tableId, userId)) {
     return result;
   }
 
