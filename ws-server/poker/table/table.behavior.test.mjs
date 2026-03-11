@@ -515,13 +515,25 @@ test("conflicting roomId and payload.tableId is rejected deterministically witho
 });
 
 
-test("table_leave without room/table id rejects with INVALID_ROOM_ID when currently joined", async () => {
+test("table_leave without room/table id resolves to joined table", async () => {
   const secret = "test-secret";
+  const override = JSON.stringify({
+    ok: true,
+    tableId: "table_leave_implicit",
+    state: {
+      version: 5,
+      state: {
+        tableId: "table_leave_implicit",
+        seats: []
+      }
+    }
+  });
   const { port, child } = await createServer({
     env: {
       WS_AUTH_REQUIRED: "1",
       WS_AUTH_TEST_SECRET: secret,
-      WS_PRESENCE_TTL_MS: "0"
+      WS_PRESENCE_TTL_MS: "0",
+      WS_TEST_LEAVE_RESULT_JSON: override
     }
   });
 
@@ -576,11 +588,15 @@ test("table_leave without room/table id rejects with INVALID_ROOM_ID when curren
     });
 
     const leaverLeaveAck = await nextMessage(leaver, 5000, "leaverLeaveAck");
-    assert.equal(leaverLeaveAck.type, "error");
-    assert.equal(leaverLeaveAck.payload.code, "INVALID_ROOM_ID");
+    assert.equal(leaverLeaveAck.type, "commandResult");
+    assert.equal(leaverLeaveAck.payload.status, "accepted");
 
-    const observerNoBroadcast = await attemptMessage(observer);
-    assert.equal(observerNoBroadcast, null);
+    const observerAfterLeaveFirst = await nextMessage(observer, 5000, "observerAfterLeaveFirst");
+    const observerAfterLeave = observerAfterLeaveFirst.type === "table_state"
+      ? observerAfterLeaveFirst
+      : await nextMessage(observer, 5000, "observerAfterLeave");
+    assert.equal(observerAfterLeave.type, "table_state");
+    assert.deepEqual(observerAfterLeave.payload.members, []);
 
     leaver.close();
     observer.close();

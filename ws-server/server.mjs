@@ -879,7 +879,7 @@ wss.on("connection", (ws) => {
     }
 
     if (frame.type === "table_leave" || frame.type === "leave") {
-      const resolvedRoomId = resolveRoomId(frame);
+      const resolvedRoomId = resolveRoomId(frame, { allowMissing: true });
       if (!resolvedRoomId.ok) {
         sendError(ws, connState, {
           code: resolvedRoomId.code,
@@ -888,7 +888,18 @@ wss.on("connection", (ws) => {
         });
         return;
       }
-      const tableId = resolvedRoomId.roomId;
+      const tableId = resolvedRoomId.roomId || tableManager.resolveImplicitLeaveTableId({
+        ws,
+        userId: connState.session.userId
+      });
+      if (!tableId) {
+        sendError(ws, connState, {
+          code: "INVALID_ROOM_ID",
+          message: "roomId is required",
+          requestId: frame.requestId ?? null
+        });
+        return;
+      }
 
       try {
         const left = await executeAuthoritativeLeave({

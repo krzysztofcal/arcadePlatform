@@ -887,6 +887,26 @@ export function createTableManager({
     return sockets.sort((a, b) => getOrderKey(a).localeCompare(getOrderKey(b)));
   }
 
+  function resolveImplicitLeaveTableId({ ws, userId }) {
+    const conn = connStateBySocket.get(ws);
+    if (conn?.joinedTableId) {
+      return conn.joinedTableId;
+    }
+    if (conn?.subscribedTableId) {
+      return conn.subscribedTableId;
+    }
+
+    const matches = [];
+    for (const [tableId, table] of tables.entries()) {
+      const hasMember = table?.coreState?.members?.some((member) => member?.userId === userId);
+      if (hasMember) {
+        matches.push(tableId);
+      }
+    }
+
+    return matches.length === 1 ? matches[0] : null;
+  }
+
   const manager = {
     ensureTableLoaded,
     join,
@@ -904,6 +924,7 @@ export function createTableManager({
     cleanupConnection,
     orderedSubscribers,
     orderedConnectionsForTable,
+    resolveImplicitLeaveTableId,
     sweepExpiredPresence,
     persistedPokerState,
     setPersistedStateVersion,
