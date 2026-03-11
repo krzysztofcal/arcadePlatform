@@ -8,7 +8,15 @@ test("default loader uses single explicit artifact-relative path", () => {
   assert.doesNotMatch(source, /\.\.\/\.\.\/\.\.\/shared\/poker-domain\/leave\.mjs/);
 });
 
-test("default loader resolves in repo-root ws runtime and does not return temporarily_unavailable", async () => {
+
+
+test("ws-local authoritative leave bridge resolves from adapter runtime location", async () => {
+  const module = await import("../../shared/poker-domain/leave.mjs");
+  assert.equal(typeof module.executePokerLeave, "function");
+});
+
+
+test("default loader execution path does not collapse to loader-unavailable taxonomy", async () => {
   const execute = createAuthoritativeLeaveExecutor({
     env: { WS_AUTHORITATIVE_LEAVE_MODULE_PATH: "" },
     beginSql: async (fn) => fn({}),
