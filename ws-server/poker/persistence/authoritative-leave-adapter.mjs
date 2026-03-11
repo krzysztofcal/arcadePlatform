@@ -81,7 +81,7 @@ export function createAuthoritativeLeaveExecutor({
   },
   beginSql = beginSqlWs
 } = {}) {
-  return async function executeAuthoritativeLeave({ tableId, userId, requestId }) {
+  return async function executeAuthoritativeLeave({ tableId, userId, requestId, currentMembers = [] }) {
     const override = resolveLeaveTestOverride(env);
     if (override) {
       return normalizeValidatedResult({ result: override, tableId, userId, requestId, klog });
@@ -110,6 +110,7 @@ export function createAuthoritativeLeaveExecutor({
         userId,
         requestId,
         includeState: true,
+        currentMembers,
         klog
       });
       return normalizeValidatedResult({ result, tableId, userId, requestId, klog });

@@ -5,7 +5,24 @@ function normalizeNonEmptyString(value) {
   return value.trim();
 }
 
-export async function executePokerLeave({ tableId, userId, requestId, includeState, klog = () => {} } = {}) {
+function normalizeMembers(members) {
+  if (!Array.isArray(members)) {
+    return [];
+  }
+
+  const normalized = [];
+  for (const entry of members) {
+    const userId = normalizeNonEmptyString(entry?.userId);
+    const seat = Number(entry?.seat);
+    if (!userId || !Number.isInteger(seat)) {
+      continue;
+    }
+    normalized.push({ userId, seat });
+  }
+  return normalized;
+}
+
+export async function executePokerLeave({ tableId, userId, requestId, currentMembers, klog = () => {} } = {}) {
   const normalizedTableId = normalizeNonEmptyString(tableId);
   const normalizedUserId = normalizeNonEmptyString(userId);
   const normalizedRequestId = normalizeNonEmptyString(requestId);
@@ -17,28 +34,29 @@ export async function executePokerLeave({ tableId, userId, requestId, includeSta
     throw Object.assign(new Error("invalid_user_id"), { code: "invalid_user_id" });
   }
 
+  const members = normalizeMembers(currentMembers);
+  const seats = members
+    .filter((member) => member.userId !== normalizedUserId)
+    .map((member) => ({ seatNo: member.seat, userId: member.userId }));
+  const alreadyLeft = seats.length === members.length;
+
   klog("ws_leave_authoritative_local", {
     tableId: normalizedTableId,
     userId: normalizedUserId,
-    requestId: normalizedRequestId || null
+    requestId: normalizedRequestId || null,
+    alreadyLeft
   });
 
-  const result = {
+  return {
     ok: true,
     tableId: normalizedTableId,
-    status: "left",
+    status: alreadyLeft ? "already_left" : "left",
     state: {
       version: 1,
       state: {
         tableId: normalizedTableId,
-        seats: []
+        seats
       }
     }
   };
-
-  if (includeState === false) {
-    delete result.state;
-  }
-
-  return result;
 }
