@@ -891,12 +891,10 @@ wss.on("connection", (ws) => {
       const tableId = resolvedRoomId.roomId;
 
       try {
-        const currentSnapshot = tableManager.tableSnapshot(tableId, connState.session.userId);
         const left = await executeAuthoritativeLeave({
           tableId,
           userId: connState.session.userId,
-          requestId: frame.requestId,
-          currentMembers: currentSnapshot?.members || []
+          requestId: frame.requestId
         });
 
         if (!left?.ok) {

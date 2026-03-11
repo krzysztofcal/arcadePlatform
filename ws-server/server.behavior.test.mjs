@@ -549,7 +549,7 @@ test("snapshot-view subscription is one-shot and does not receive later legacy t
 
 
 
-test("table_leave non-override path is wired and returns commandResult accepted", async () => {
+test("table_leave non-override path does not fabricate accepted success from WS in-memory snapshot", async () => {
   const secret = "test-secret";
   const actorToken = makeHs256Jwt({ secret, sub: "leave_non_override_actor" });
   const otherToken = makeHs256Jwt({ secret, sub: "leave_non_override_other" });
@@ -580,11 +580,17 @@ test("table_leave non-override path is wired and returns commandResult accepted"
     });
     const first = await nextMessage(actor);
     assert.equal(first.type, "commandResult");
-    assert.equal(first.payload.status, "accepted");
+    assert.equal(first.payload.status, "rejected");
+    assert.notEqual(first.payload.reason, null);
+    assert.notEqual(first.payload.reason, "authoritative_state_invalid");
 
-    const otherState = await nextMessageOfType(other, "table_state");
-    assert.deepEqual(otherState.payload.members, [{ userId: "leave_non_override_other", seat: 2 }]);
-    assert.equal(actor.readyState, WebSocket.OPEN);
+    assert.equal(await attemptMessage(other, 300), null);
+    sendFrame(other, { version: "1.0", type: "table_state_sub", requestId: "sub-leave-non-override-other", ts: "2026-02-28T00:00:04Z", payload: { tableId } });
+    const observerState = await nextMessageOfType(other, "table_state");
+    assert.deepEqual(observerState.payload.members, [
+      { userId: "leave_non_override_actor", seat: 1 },
+      { userId: "leave_non_override_other", seat: 2 }
+    ]);
 
     actor.close();
     other.close();

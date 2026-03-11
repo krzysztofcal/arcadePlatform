@@ -50,7 +50,7 @@ test("docker runtime resolves authoritative leave adapter default loader", { tim
       imageTag,
       "sh",
       "-lc",
-      "cd /app/ws-server && node --input-type=module -e \"import { createAuthoritativeLeaveExecutor } from './poker/persistence/authoritative-leave-adapter.mjs'; const execute = createAuthoritativeLeaveExecutor({ env: { SUPABASE_DB_URL: '' }, beginSql: async (fn) => fn({}), klog: () => {} }); const result = await execute({ tableId: 't1', userId: 'u1', requestId: 'r1', currentMembers: [{ userId: 'u1', seat: 1 }, { userId: 'u2', seat: 2 }] }); if (result?.code === 'temporarily_unavailable') { throw new Error('temporarily_unavailable'); } if (result?.ok !== true) { throw new Error('unexpected_result'); } const seats = result?.state?.state?.seats; if (!Array.isArray(seats) || seats.length !== 1 || seats[0]?.userId !== 'u2' || seats[0]?.seatNo !== 2) { throw new Error('unexpected_seats'); }\""
+      "cd /app/ws-server && node --input-type=module -e \"import { createAuthoritativeLeaveExecutor } from './poker/persistence/authoritative-leave-adapter.mjs'; const execute = createAuthoritativeLeaveExecutor({ env: { SUPABASE_DB_URL: '' }, beginSql: async (fn) => fn({}), klog: () => {} }); const result = await execute({ tableId: 't1', userId: 'u1', requestId: 'r1' }); if (result?.code === 'temporarily_unavailable') { throw new Error('temporarily_unavailable'); } if (result?.ok === true) { throw new Error('unexpected_fabricated_success'); } if (typeof result?.code !== 'string' || result.code.length === 0) { throw new Error('unexpected_result_code'); }\""
     ]);
     assert.equal(runtime.status, 0, `authoritative leave loader failed in docker runtime:\n${runtime.stderr || runtime.stdout}`);
   } finally {
