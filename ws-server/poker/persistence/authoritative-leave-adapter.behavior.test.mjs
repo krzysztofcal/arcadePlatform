@@ -95,6 +95,33 @@ test("authoritative adapter taxonomy: execute failure with explicit code propaga
 });
 
 
+
+
+test("authoritative success payload with post-leave seats excluding leaver remains accepted", async () => {
+  const execute = createAuthoritativeLeaveExecutor({
+    env: {},
+    klog: () => {},
+    beginSql: async (fn) => fn({}),
+    loadAuthoritativeLeaveModule: async () => ({
+      executePokerLeave: async () => ({
+        ok: true,
+        tableId: "t1",
+        state: {
+          version: 2,
+          state: {
+            tableId: "t1",
+            seats: [{ seatNo: 2, userId: "u2" }]
+          }
+        }
+      })
+    })
+  });
+
+  const result = await execute({ tableId: "t1", userId: "u1", requestId: "req-valid-post-leave" });
+  assert.equal(result.ok, true);
+  assert.equal(result.code, undefined);
+  assert.equal(result.state.state.seats.some((seat) => seat.userId === "u1"), false);
+});
 test("authoritative success payload with mismatched tableId downgrades to authoritative_state_invalid", async () => {
   const logs = [];
   const execute = createAuthoritativeLeaveExecutor({

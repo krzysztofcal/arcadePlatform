@@ -175,7 +175,7 @@ test("ws authoritative leave executor non-override path resolves real module loa
               version: 1,
               state: {
                 tableId,
-                seats: [{ seatNo: 1, userId }]
+                seats: [{ seatNo: 2, userId: "u2" }]
               }
             }
           };
@@ -194,6 +194,7 @@ test("ws authoritative leave executor non-override path resolves real module loa
   assert.equal(result.ok, true);
   assert.equal(result.includeState, true);
   assert.notEqual(result.code, "temporarily_unavailable");
+  assert.equal(result.state.state.seats.some((seat) => seat.userId === "u1"), false);
 });
 
 
@@ -214,7 +215,7 @@ test("ws authoritative leave adapter default loader resolves in artifact-shaped 
     await fsp.writeFile(stagedBootstrap, "export async function beginSqlWs(fn) { return fn({}); }\n", "utf8");
     await fsp.writeFile(
       stagedLeave,
-      "export async function executePokerLeave() { return { ok: true, tableId: 'artifact_table', state: { version: 1, state: { tableId: 'artifact_table', seats: [{ seatNo: 1, userId: 'u1' }] } } }; }\n",
+      "export async function executePokerLeave() { return { ok: true, tableId: 'artifact_table', state: { version: 1, state: { tableId: 'artifact_table', seats: [{ seatNo: 2, userId: 'u2' }] } } }; }\n",
       "utf8"
     );
 
@@ -228,6 +229,7 @@ test("ws authoritative leave adapter default loader resolves in artifact-shaped 
     const result = await execute({ tableId: "artifact_table", userId: "u1", requestId: "r1" });
     assert.equal(result.ok, true);
     assert.notEqual(result.code, "temporarily_unavailable");
+    assert.equal(result.state.state.seats.some((seat) => seat.userId === "u1"), false);
   } finally {
     await fsp.rm(stageDir, { recursive: true, force: true });
   }
