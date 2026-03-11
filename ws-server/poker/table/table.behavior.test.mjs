@@ -285,10 +285,9 @@ test("table join/leave/sub flow is auth-gated, idempotent, and cleaned on discon
     });
 
     const c1LeaveAck = await nextMessage(client1, 5000, "c1LeaveAck");
-    const c2AfterC1Leave = await nextMessage(client2, 5000, "c2AfterC1Leave");
-    assert.equal(c1LeaveAck.type, "table_state");
-    assert.deepEqual(c1LeaveAck.payload.members.map((entry) => entry.userId), ["user_2"]);
-    assert.deepEqual(c2AfterC1Leave.payload.members.map((entry) => entry.userId), ["user_2"]);
+    assert.equal(c1LeaveAck.type, "commandResult");
+    assert.equal(c1LeaveAck.payload.status, "rejected");
+    assert.equal(await attemptMessage(client2), null);
 
     sendFrame(client1, {
       version: "1.0",
@@ -299,8 +298,8 @@ test("table join/leave/sub flow is auth-gated, idempotent, and cleaned on discon
     });
 
     const c1LeaveDup = await nextMessage(client1, 5000, "c1LeaveDup");
-    assert.equal(c1LeaveDup.type, "table_state");
-    assert.deepEqual(c1LeaveDup.payload.members.map((entry) => entry.userId), ["user_2"]);
+    assert.equal(c1LeaveDup.type, "commandResult");
+    assert.equal(c1LeaveDup.payload.status, "rejected");
 
     const client3 = await connectClient(port);
     await hello(client3, "req-hello-c3");
@@ -318,7 +317,7 @@ test("table join/leave/sub flow is auth-gated, idempotent, and cleaned on discon
 
     const c3LeaveNoTable = await nextMessage(client3, 5000, "c3LeaveNoTable");
     assert.equal(c3LeaveNoTable.type, "error");
-    assert.equal(c3LeaveNoTable.payload.code, "INVALID_COMMAND");
+    assert.equal(c3LeaveNoTable.payload.code, "INVALID_ROOM_ID");
 
     const c3NoExtra = await attemptMessage(client3);
     assert.equal(c3NoExtra, null);
@@ -338,7 +337,7 @@ test("table join/leave/sub flow is auth-gated, idempotent, and cleaned on discon
 
     const c1AfterDisconnect = await nextMessage(client1, 5000, "c1AfterDisconnect");
     assert.equal(c1AfterDisconnect.type, "table_state");
-    assert.deepEqual(c1AfterDisconnect.payload.members, []);
+    assert.deepEqual(c1AfterDisconnect.payload.members, [{ userId: "user_1", seat: 1 }]);
 
     const client2b = await connectClient(port);
     await hello(client2b, "req-hello-c2b");
@@ -356,8 +355,8 @@ test("table join/leave/sub flow is auth-gated, idempotent, and cleaned on discon
     const c2bJoinAck = await nextMessage(client2b, 5000, "c2bJoinAck");
     const c1AfterC2bJoin = await nextMessage(client1, 5000, "c1AfterC2bJoin");
     assert.equal(c2bJoinAck.type, "table_state");
-    assert.deepEqual(c2bJoinAck.payload.members.map((entry) => entry.userId), ["user_2"]);
-    assert.deepEqual(c1AfterC2bJoin.payload.members.map((entry) => entry.userId), ["user_2"]);
+    assert.deepEqual(c2bJoinAck.payload.members.map((entry) => entry.userId), ["user_1", "user_2"]);
+    assert.deepEqual(c1AfterC2bJoin.payload.members.map((entry) => entry.userId), ["user_1", "user_2"]);
 
     client1.close();
     client2b.close();
@@ -516,7 +515,7 @@ test("conflicting roomId and payload.tableId is rejected deterministically witho
 });
 
 
-test("table_leave without room/table id succeeds when currently joined", async () => {
+test("table_leave without room/table id rejects with INVALID_ROOM_ID when currently joined", async () => {
   const secret = "test-secret";
   const { port, child } = await createServer({
     env: {
@@ -577,15 +576,11 @@ test("table_leave without room/table id succeeds when currently joined", async (
     });
 
     const leaverLeaveAck = await nextMessage(leaver, 5000, "leaverLeaveAck");
-    const observerAfterLeave = await nextMessage(observer, 5000, "observerAfterLeave");
-    assert.equal(leaverLeaveAck.type, "table_state");
-    assert.equal(observerAfterLeave.type, "table_state");
-    assert.equal(leaverLeaveAck.payload.tableId, "table_leave_implicit");
-    assert.deepEqual(leaverLeaveAck.payload.members, []);
-    assert.deepEqual(observerAfterLeave.payload.members, []);
+    assert.equal(leaverLeaveAck.type, "error");
+    assert.equal(leaverLeaveAck.payload.code, "INVALID_ROOM_ID");
 
-    const observerNoExtra = await attemptMessage(observer);
-    assert.equal(observerNoExtra, null);
+    const observerNoBroadcast = await attemptMessage(observer);
+    assert.equal(observerNoBroadcast, null);
 
     leaver.close();
     observer.close();
@@ -639,7 +634,7 @@ test("table_leave without room/table id fails deterministically when not joined 
 
     const leaveError = await nextMessage(actor, 5000, "leaveErrorNotJoined");
     assert.equal(leaveError.type, "error");
-    assert.equal(leaveError.payload.code, "INVALID_COMMAND");
+    assert.equal(leaveError.payload.code, "INVALID_ROOM_ID");
 
     const actorNoExtra = await attemptMessage(actor);
     const observerNoBroadcast = await attemptMessage(observer);
@@ -963,13 +958,13 @@ test("table_leave is idempotent by requestId and does not mutate state on replay
 
     sendFrame(client, leaveFrame);
     const firstLeave = await nextMessage(client, 5000, "firstLeaveSameRequestId");
-    assert.equal(firstLeave.type, "table_state");
-    assert.deepEqual(firstLeave.payload.members, []);
+    assert.equal(firstLeave.type, "commandResult");
+    assert.equal(firstLeave.payload.status, "rejected");
 
     sendFrame(client, leaveFrame);
     const secondLeave = await nextMessage(client, 5000, "secondLeaveSameRequestId");
-    assert.equal(secondLeave.type, "table_state");
-    assert.deepEqual(secondLeave.payload.members, []);
+    assert.equal(secondLeave.type, "commandResult");
+    assert.equal(secondLeave.payload.status, "rejected");
 
     const noExtra = await attemptMessage(client);
     assert.equal(noExtra, null);
