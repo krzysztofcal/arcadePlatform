@@ -133,6 +133,17 @@ function snapshotCacheKey(sessionId, tableId) {
   return `${sessionId}:${tableId}`;
 }
 
+
+let authoritativeLeaveExecutorPromise = null;
+
+async function loadAuthoritativeLeaveExecutor() {
+  if (!authoritativeLeaveExecutorPromise) {
+    authoritativeLeaveExecutorPromise = import("./poker/persistence/authoritative-leave-adapter.mjs")
+      .then((module) => module.createAuthoritativeLeaveExecutor({ env: process.env, klog: klogSafe }));
+  }
+  return authoritativeLeaveExecutorPromise;
+}
+
 function klog(kind, data) {
   const payload = data && typeof data === "object" ? ` ${JSON.stringify(data)}` : "";
   process.stdout.write(`[klog] ${kind}${payload}\n`);
@@ -251,6 +262,7 @@ function resolveRoomId(frame, { allowMissing = false } = {}) {
 
   return { ok: true, roomId: resolvedRoomId ?? null };
 }
+
 
 function requiresRequestId(frameType) {
   return REQUEST_ID_REQUIRED_TYPES.has(frameType);
@@ -883,23 +895,88 @@ wss.on("connection", (ws) => {
         });
         return;
       }
-      const tableId = resolvedRoomId.roomId;
-
-      const left = tableManager.leave({ ws, userId: connState.session.userId, tableId, requestId: frame.requestId });
-      if (!left.tableState) {
+      const tableId = resolvedRoomId.roomId || tableManager.resolveImplicitLeaveTableId({
+        ws,
+        userId: connState.session.userId
+      });
+      if (!tableId) {
         sendError(ws, connState, {
-          code: "INVALID_COMMAND",
-          message: "table_leave requires payload.tableId when connection is not joined",
+          code: "INVALID_ROOM_ID",
+          message: "roomId is required",
           requestId: frame.requestId ?? null
         });
         return;
       }
 
-      sendTableState(ws, connState, { requestId: frame.requestId ?? null, tableState: left.tableState });
-      if (left.changed) {
-        broadcastTableState(left.tableState.tableId, { excludeWs: ws });
+      try {
+        const executeAuthoritativeLeave = await loadAuthoritativeLeaveExecutor();
+        const left = await executeAuthoritativeLeave({
+          tableId,
+          userId: connState.session.userId,
+          requestId: frame.requestId
+        });
+
+        if (!left?.ok) {
+          if (left?.pending) {
+            sendCommandResult(ws, connState, {
+              requestId: frame.requestId ?? null,
+              tableId,
+              status: "rejected",
+              reason: "request_pending"
+            });
+            return;
+          }
+
+          sendCommandResult(ws, connState, {
+            requestId: frame.requestId ?? null,
+            tableId,
+            status: "rejected",
+            reason: left?.code || left?.reason || "state_invalid"
+          });
+          return;
+        }
+
+        const leaveState = left?.state?.state && typeof left.state.state === "object" ? left.state.state : null;
+        const synced = tableManager.syncAuthoritativeLeave({
+          ws,
+          userId: connState.session.userId,
+          tableId,
+          stateVersion: left?.state?.version ?? null,
+          pokerState: leaveState
+        });
+
+        if (!synced || synced.ok !== true) {
+          sendCommandResult(ws, connState, {
+            requestId: frame.requestId ?? null,
+            tableId,
+            status: "rejected",
+            reason: synced?.code || "authoritative_state_invalid"
+          });
+          return;
+        }
+
+        sendCommandResult(ws, connState, {
+          requestId: frame.requestId ?? null,
+          tableId,
+          status: "accepted",
+          reason: left?.status === "already_left" ? "already_left" : null
+        });
+
+        if (synced.changed) {
+          broadcastStateSnapshots(tableId);
+          broadcastTableState(tableId);
+        }
+        return;
+      } catch (error) {
+        const reason = typeof error?.code === "string" ? error.code : "state_invalid";
+        sendCommandResult(ws, connState, {
+          requestId: frame.requestId ?? null,
+          tableId,
+          status: "rejected",
+          reason
+        });
+        return;
       }
-      return;
     }
 
     if (frame.type === "table_state_sub") {

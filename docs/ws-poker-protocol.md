@@ -131,6 +131,8 @@ Authoritative seat acquisition/buy-in remains server-authoritative. HTTP authori
 
 `leave` remains authoritative for already-seated users: when the authenticated user is an authoritative table member, WS `leave` executes authoritative member removal/cashout semantics in both default and observe-only runtime modes.
 
+Authoritative leave success-shape validation is strict: if backend authoritative state still contains the leaving user in `state.seats`, WS MUST reject the command as `commandResult.status = "rejected"` with `reason = "authoritative_state_invalid"`, and MUST NOT emit fabricated membership mutation broadcasts to observers.
+
 ### Table state membership snapshot (runtime compatibility)
 
 `table_state` frames emitted by the current runtime use:

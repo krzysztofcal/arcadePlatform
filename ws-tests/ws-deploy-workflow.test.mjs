@@ -22,6 +22,7 @@ test("ws-deploy keeps ws-tests trigger surface and runs harness checks", () => {
   assert.match(text, /node --test ws-tests\/ws-deploy\.no-prod-mutation-on-ws-tests\.guard\.test\.mjs/);
   assert.match(text, /node --test ws-tests\/ws-server-deploy-artifact-path\.test\.mjs/);
   assert.match(text, /node --test ws-tests\/ws-server-deploy-rollout\.test\.mjs/);
+  assert.match(text, /node --test ws-tests\/ws-docker-leave-runtime\.guard\.test\.mjs/);
   assert.match(text, /Validate ws Dockerfile build contract \(repo-root context\)/);
   assert.match(text, /docker build -t arcadeplatform-ws-contract:\$\{\{ github\.sha \}\} -f ws-server\/Dockerfile \./);
   assert.doesNotMatch(text, /docker build[^\n]*-f ws-server\/Dockerfile \.\/ws-server/);
@@ -61,7 +62,12 @@ test("ws Dockerfile keeps ws-server deploy context-compatible copy contract", ()
   const dockerfile = fs.readFileSync("ws-server/Dockerfile", "utf8");
   assert.match(dockerfile, /COPY ws-server\/package\.json ws-server\/package-lock\.json \.\//);
   assert.match(dockerfile, /COPY ws-server \.\//);
-  assert.doesNotMatch(dockerfile, /COPY netlify\/functions\/_shared/);
+  assert.match(dockerfile, /COPY shared\/poker-domain \.\/shared\/poker-domain/);
+  assert.match(dockerfile, /COPY netlify\/functions\/_shared\/chips-ledger\.mjs \.\/netlify\/functions\/_shared\//);
+  assert.match(dockerfile, /COPY netlify\/functions\/_shared\/poker-\*\.mjs \.\/netlify\/functions\/_shared\//);
+  assert.match(dockerfile, /COPY netlify\/functions\/_shared\/supabase-admin\.mjs \.\/netlify\/functions\/_shared\//);
+  assert.doesNotMatch(dockerfile, /COPY shared \.\/shared/);
+  assert.doesNotMatch(dockerfile, /COPY netlify\/functions\/_shared \.\/netlify\/functions\/_shared/);
   assert.match(dockerfile, /CMD \["node", "ws-server\/server\.mjs"\]/);
   assert.doesNotMatch(dockerfile, /COPY package\.json package-lock\.json \.\//);
   assert.doesNotMatch(dockerfile, /npm ci --omit=dev --ignore-scripts/);

@@ -547,6 +547,138 @@ export function createTableManager({
     };
   }
 
+
+
+  function hasValidAuthoritativeSeats(stateSeats) {
+    if (!Array.isArray(stateSeats)) return false;
+    return stateSeats.every((seatEntry) => {
+      const rawSeatNo = seatEntry?.seatNo;
+      const rawSeatAlias = seatEntry?.seat;
+      const normalizedSeat = Number.isInteger(Number(rawSeatNo))
+        ? Number(rawSeatNo)
+        : Number.isInteger(Number(rawSeatAlias))
+          ? Number(rawSeatAlias)
+          : null;
+      const seatUserId = typeof seatEntry?.userId === "string" ? seatEntry.userId.trim() : "";
+      return Number.isInteger(normalizedSeat) && seatUserId.length > 0;
+    });
+  }
+
+  function authoritativeSeatsContainUser(stateSeats, userId) {
+    if (!Array.isArray(stateSeats)) return false;
+    const normalizedUserId = typeof userId === "string" ? userId.trim() : "";
+    if (!normalizedUserId) return false;
+    return stateSeats.some((seatEntry) => {
+      const seatUserId = typeof seatEntry?.userId === "string" ? seatEntry.userId.trim() : "";
+      return seatUserId === normalizedUserId;
+    });
+  }
+
+  function syncAuthoritativeLeave({ ws, userId, tableId, stateVersion = null, pokerState = null }) {
+    const conn = ensureConn(ws);
+    const resolvedTableId = tableId || conn.joinedTableId || conn.subscribedTableId;
+    if (!resolvedTableId) {
+      return { ok: true, changed: false, tableState: null };
+    }
+
+    const table = tables.get(resolvedTableId);
+    if (!table) {
+      if (conn.joinedTableId === resolvedTableId) {
+        conn.joinedTableId = null;
+      }
+      if (conn.subscribedTableId === resolvedTableId) {
+        conn.subscribedTableId = null;
+      }
+      return { ok: true, changed: false, tableState: tableState(resolvedTableId) };
+    }
+
+    const previousMembers = JSON.stringify(table.coreState.members);
+    const previousSeats = JSON.stringify(table.coreState.seats || {});
+    const previousVersion = Number(table.coreState.version);
+    const previousPokerState = JSON.stringify(table.coreState.pokerState ?? null);
+
+    const normalizedState = pokerState && typeof pokerState === "object" && !Array.isArray(pokerState) ? pokerState : null;
+    const stateTableId = typeof normalizedState?.tableId === "string" ? normalizedState.tableId : "";
+    const stateSeats = normalizedState?.seats;
+    const authoritativeStateValid = normalizedState
+      && stateTableId === resolvedTableId
+      && hasValidAuthoritativeSeats(stateSeats);
+
+    if (!authoritativeStateValid || authoritativeSeatsContainUser(stateSeats, userId)) {
+      return {
+        ok: false,
+        code: "authoritative_state_invalid",
+        changed: false,
+        tableState: tableState(resolvedTableId)
+      };
+    }
+
+    const nextMembers = stateSeats
+      .map((seatEntry) => {
+        const rawSeatNo = seatEntry?.seatNo;
+        const rawSeatAlias = seatEntry?.seat;
+        const normalizedSeat = Number.isInteger(Number(rawSeatNo))
+          ? Number(rawSeatNo)
+          : Number.isInteger(Number(rawSeatAlias))
+            ? Number(rawSeatAlias)
+            : null;
+        const userId = typeof seatEntry?.userId === "string" ? seatEntry.userId.trim() : "";
+        if (!Number.isInteger(normalizedSeat) || !userId) {
+          return null;
+        }
+        return { userId, seat: normalizedSeat };
+      })
+      .filter(Boolean)
+      .sort((a, b) => a.seat - b.seat || a.userId.localeCompare(b.userId));
+    const nextSeats = {};
+    for (const member of nextMembers) {
+      nextSeats[member.userId] = member.seat;
+    }
+
+    table.coreState.members = nextMembers;
+    table.coreState.seats = nextSeats;
+    if (Number.isInteger(stateVersion) && stateVersion >= 0) {
+      table.coreState.version = stateVersion;
+    }
+    table.coreState.pokerState = { ...normalizedState };
+
+    for (const [presenceUserId, presence] of table.presenceByUserId.entries()) {
+      if (!Object.prototype.hasOwnProperty.call(nextSeats, presenceUserId)) {
+        table.presenceByUserId.delete(presenceUserId);
+        continue;
+      }
+      presence.seat = nextSeats[presenceUserId];
+    }
+    table.presenceByUserId.delete(userId);
+
+    table.subscribers.delete(ws);
+    if (conn.joinedTableId === resolvedTableId) {
+      conn.joinedTableId = null;
+    }
+    if (conn.subscribedTableId === resolvedTableId) {
+      conn.subscribedTableId = null;
+    }
+
+    if (table.coreState.members.length === 0 && table.subscribers.size === 0) {
+      tables.delete(resolvedTableId);
+    }
+
+    const nextMembersJson = JSON.stringify(nextMembers);
+    const nextSeatsJson = JSON.stringify(nextSeats);
+    const nextVersion = Number(table.coreState.version);
+    const nextPokerState = JSON.stringify(table.coreState.pokerState ?? null);
+    const changed = previousMembers !== nextMembersJson
+      || previousSeats !== nextSeatsJson
+      || previousVersion !== nextVersion
+      || previousPokerState !== nextPokerState;
+
+    return {
+      ok: true,
+      changed,
+      tableState: tableState(resolvedTableId)
+    };
+  }
+
   function subscribe({ ws, tableId }) {
     const conn = ensureConn(ws);
     if (conn.subscribedTableId && conn.subscribedTableId !== tableId) {
@@ -765,10 +897,31 @@ export function createTableManager({
     return sockets.sort((a, b) => getOrderKey(a).localeCompare(getOrderKey(b)));
   }
 
+  function resolveImplicitLeaveTableId({ ws, userId }) {
+    const conn = connStateBySocket.get(ws);
+    if (conn?.joinedTableId) {
+      return conn.joinedTableId;
+    }
+    if (conn?.subscribedTableId) {
+      return conn.subscribedTableId;
+    }
+
+    const matches = [];
+    for (const [tableId, table] of tables.entries()) {
+      const hasMember = table?.coreState?.members?.some((member) => member?.userId === userId);
+      if (hasMember) {
+        matches.push(tableId);
+      }
+    }
+
+    return matches.length === 1 ? matches[0] : null;
+  }
+
   const manager = {
     ensureTableLoaded,
     join,
     leave,
+    syncAuthoritativeLeave,
     subscribe,
     resync,
     touchPresence,
@@ -781,6 +934,7 @@ export function createTableManager({
     cleanupConnection,
     orderedSubscribers,
     orderedConnectionsForTable,
+    resolveImplicitLeaveTableId,
     sweepExpiredPresence,
     persistedPokerState,
     setPersistedStateVersion,
