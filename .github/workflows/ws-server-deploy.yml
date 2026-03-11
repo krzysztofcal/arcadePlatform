@@ -97,6 +97,16 @@ jobs:
             cp -R ws-server/poker "$STAGE_DIR"/poker
           fi
 
+          if [ -d shared/poker-domain ]; then
+            mkdir -p "$STAGE_DIR"/shared
+            cp -R shared/poker-domain "$STAGE_DIR"/shared/poker-domain
+          fi
+
+          if [ -d netlify/functions/_shared ]; then
+            mkdir -p "$STAGE_DIR"/netlify/functions
+            cp -R netlify/functions/_shared "$STAGE_DIR"/netlify/functions/_shared
+          fi
+
           tar \
             --sort=name \
             --mtime='UTC 1970-01-01' \

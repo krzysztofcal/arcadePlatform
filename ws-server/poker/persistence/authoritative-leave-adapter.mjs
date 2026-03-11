@@ -13,23 +13,21 @@ function resolveLeaveTestOverride(env = process.env) {
   }
 }
 
-export function createAuthoritativeLeaveExecutor({ env = process.env, klog = () => {} } = {}) {
+export function createAuthoritativeLeaveExecutor({
+  env = process.env,
+  klog = () => {},
+  loadAuthoritativeLeaveModule = () => import("../../../shared/poker-domain/leave.mjs"),
+  beginSql = beginSqlWs
+} = {}) {
   return async function executeAuthoritativeLeave({ tableId, userId, requestId }) {
     const override = resolveLeaveTestOverride(env);
     if (override) {
       return override;
     }
 
+    let module;
     try {
-      const module = await import("../../../shared/poker-domain/leave.mjs");
-      return module.executePokerLeave({
-        beginSql: (fn) => beginSqlWs(fn, { env }),
-        tableId,
-        userId,
-        requestId,
-        includeState: true,
-        klog
-      });
+      module = await loadAuthoritativeLeaveModule();
     } catch (error) {
       klog("ws_leave_authoritative_unavailable", {
         tableId,
@@ -40,6 +38,29 @@ export function createAuthoritativeLeaveExecutor({ env = process.env, klog = () 
       return {
         ok: false,
         code: "temporarily_unavailable"
+      };
+    }
+
+    try {
+      return await module.executePokerLeave({
+        beginSql: (fn) => beginSql(fn, { env }),
+        tableId,
+        userId,
+        requestId,
+        includeState: true,
+        klog
+      });
+    } catch (error) {
+      klog("ws_leave_authoritative_failed", {
+        tableId,
+        userId,
+        requestId: requestId || null,
+        message: error?.message || "unknown",
+        code: typeof error?.code === "string" ? error.code : null
+      });
+      return {
+        ok: false,
+        code: typeof error?.code === "string" ? error.code : "authoritative_leave_failed"
       };
     }
   };

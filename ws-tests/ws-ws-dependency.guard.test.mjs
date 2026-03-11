@@ -125,7 +125,7 @@ test("ws server leave path avoids static shared/netlify runtime imports", () => 
 
   assert.doesNotMatch(adapterText, /from\s+["']\.\.\.\/\.\.\.\/netlify\/functions\/_shared\//);
   assert.doesNotMatch(adapterText, /from\s+["']\.\.\.\/\.\.\.\/shared\/poker-domain\/leave\.mjs["']/);
-  assert.match(adapterText, /await import\(["']\.\.\/\.\.\/\.\.\/shared\/poker-domain\/leave\.mjs["']\)/);
+  assert.match(adapterText, /loadAuthoritativeLeaveModule\s*=\s*\(\)\s*=>\s*import\(["']\.\.\/\.\.\/\.\.\/shared\/poker-domain\/leave\.mjs["']\)/);
 });
 
 test("ws authoritative leave adapter imports with ws-server dependency graph", () => {
@@ -135,4 +135,47 @@ test("ws authoritative leave adapter imports with ws-server dependency graph", (
     { encoding: "utf8" }
   );
   assert.equal(output.trim(), "ok");
+});
+
+
+test("ws deploy artifact contract includes authoritative leave runtime files", () => {
+  const deployWorkflow = fs.readFileSync(".github/workflows/ws-server-deploy.yml", "utf8");
+  assert.match(deployWorkflow, /cp -R shared\/poker-domain "\$STAGE_DIR"\/shared\/poker-domain/);
+  assert.match(deployWorkflow, /cp -R netlify\/functions\/_shared "\$STAGE_DIR"\/netlify\/functions\/_shared/);
+});
+
+test("ws authoritative leave executor non-override path resolves real module loader contract", async () => {
+  const { createAuthoritativeLeaveExecutor } = await import("../ws-server/poker/persistence/authoritative-leave-adapter.mjs");
+  let loaderCalled = 0;
+  let beginCalled = 0;
+  const executor = createAuthoritativeLeaveExecutor({
+    env: {},
+    loadAuthoritativeLeaveModule: async () => {
+      loaderCalled += 1;
+      return {
+        executePokerLeave: async ({ beginSql, tableId, userId, requestId, includeState }) => {
+          const txResult = await beginSql(async () => ({ ok: true }));
+          return {
+            ok: true,
+            tableId,
+            userId,
+            requestId,
+            includeState,
+            txOk: txResult.ok
+          };
+        }
+      };
+    },
+    beginSql: async (fn) => {
+      beginCalled += 1;
+      return fn({});
+    }
+  });
+
+  const result = await executor({ tableId: "t1", userId: "u1", requestId: "r1" });
+  assert.equal(loaderCalled, 1);
+  assert.equal(beginCalled, 1);
+  assert.equal(result.ok, true);
+  assert.equal(result.includeState, true);
+  assert.notEqual(result.code, "temporarily_unavailable");
 });

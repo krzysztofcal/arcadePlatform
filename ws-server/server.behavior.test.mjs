@@ -547,6 +547,38 @@ test("snapshot-view subscription is one-shot and does not receive later legacy t
 });
 
 
+
+
+test("table_leave non-override path is wired and does not return temporarily_unavailable", async () => {
+  const secret = "test-secret";
+  const actorToken = makeHs256Jwt({ secret, sub: "leave_non_override" });
+  const { port, child } = await createServer({ env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret } });
+
+  try {
+    await waitForListening(child, 5000);
+    const actor = await connectClient(port);
+    await hello(actor);
+    await auth(actor, actorToken, "auth-leave-non-override");
+
+    sendFrame(actor, {
+      version: "1.0",
+      type: "table_leave",
+      requestId: "leave-non-override",
+      ts: "2026-02-28T00:00:03Z",
+      payload: { tableId: "table_leave_non_override" }
+    });
+    const first = await nextMessage(actor);
+    assert.equal(first.type, "commandResult");
+    assert.equal(first.payload.status, "rejected");
+    assert.notEqual(first.payload.reason, "temporarily_unavailable");
+
+    actor.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
 test("table_leave message requires auth", async () => {
   const { port, child } = await createServer({ env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: "test-secret" } });
 
