@@ -1,4 +1,7 @@
-import { beginSqlWs } from "../bootstrap/persisted-bootstrap-db.mjs";
+async function beginSqlDefault(fn, { env = process.env } = {}) {
+  const bootstrapDb = await import("../bootstrap/persisted-bootstrap-db.mjs");
+  return bootstrapDb.beginSqlWs(fn, { env });
+}
 
 function resolveLeaveTestOverride(env = process.env) {
   const raw = env.WS_TEST_LEAVE_RESULT_JSON;
@@ -97,7 +100,7 @@ export function createAuthoritativeLeaveExecutor({
     const modulePath = configuredPath || "../../shared/poker-domain/leave.mjs";
     return import(modulePath);
   },
-  beginSql = beginSqlWs
+  beginSql = beginSqlDefault
 } = {}) {
   return async function executeAuthoritativeLeave({ tableId, userId, requestId }) {
     const override = resolveLeaveTestOverride(env);
