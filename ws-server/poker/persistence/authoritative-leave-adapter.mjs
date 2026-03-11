@@ -13,6 +13,62 @@ function resolveLeaveTestOverride(env = process.env) {
   }
 }
 
+
+
+function hasValidAuthoritativeSeats(seats) {
+  if (!Array.isArray(seats)) {
+    return false;
+  }
+
+  return seats.every((seatEntry) => {
+    const rawSeatNo = seatEntry?.seatNo;
+    const rawSeatAlias = seatEntry?.seat;
+    const seatNo = Number.isInteger(Number(rawSeatNo))
+      ? Number(rawSeatNo)
+      : Number.isInteger(Number(rawSeatAlias))
+        ? Number(rawSeatAlias)
+        : null;
+    const seatUserId = typeof seatEntry?.userId === "string" ? seatEntry.userId.trim() : "";
+    return Number.isInteger(seatNo) && seatUserId.length > 0;
+  });
+}
+
+function isValidAuthoritativeLeaveSuccessShape(result, expectedTableId) {
+  if (!result?.ok) {
+    return true;
+  }
+
+  const version = result?.state?.version;
+  const state = result?.state?.state;
+  if (!Number.isInteger(Number(version)) || !state || typeof state !== "object" || Array.isArray(state)) {
+    return false;
+  }
+
+  if (typeof state.tableId !== "string" || state.tableId !== expectedTableId) {
+    return false;
+  }
+
+  return hasValidAuthoritativeSeats(state.seats);
+}
+
+function normalizeValidatedResult({ result, tableId, userId, requestId, klog }) {
+  if (isValidAuthoritativeLeaveSuccessShape(result, tableId)) {
+    return result;
+  }
+
+  klog("ws_leave_authoritative_failed", {
+    tableId,
+    userId,
+    requestId: requestId || null,
+    message: "invalid_authoritative_success_shape",
+    code: "authoritative_state_invalid"
+  });
+  return {
+    ok: false,
+    code: "authoritative_state_invalid"
+  };
+}
+
 export function createAuthoritativeLeaveExecutor({
   env = process.env,
   klog = () => {},
@@ -28,7 +84,7 @@ export function createAuthoritativeLeaveExecutor({
   return async function executeAuthoritativeLeave({ tableId, userId, requestId }) {
     const override = resolveLeaveTestOverride(env);
     if (override) {
-      return override;
+      return normalizeValidatedResult({ result: override, tableId, userId, requestId, klog });
     }
 
     let module;
@@ -48,7 +104,7 @@ export function createAuthoritativeLeaveExecutor({
     }
 
     try {
-      return await module.executePokerLeave({
+      const result = await module.executePokerLeave({
         beginSql: (fn) => beginSql(fn, { env }),
         tableId,
         userId,
@@ -56,6 +112,7 @@ export function createAuthoritativeLeaveExecutor({
         includeState: true,
         klog
       });
+      return normalizeValidatedResult({ result, tableId, userId, requestId, klog });
     } catch (error) {
       klog("ws_leave_authoritative_failed", {
         tableId,

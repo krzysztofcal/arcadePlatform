@@ -90,3 +90,42 @@ test("authoritative adapter taxonomy: execute failure with explicit code propaga
   const result = await execute({ tableId: "table_code", userId: "user_code", requestId: "req_code" });
   assert.deepEqual(result, { ok: false, code: "state_conflict" });
 });
+
+
+test("authoritative success payload with mismatched tableId downgrades to authoritative_state_invalid", async () => {
+  const logs = [];
+  const execute = createAuthoritativeLeaveExecutor({
+    env: {},
+    klog: (kind, data) => logs.push({ kind, data }),
+    beginSql: async (fn) => fn({}),
+    loadAuthoritativeLeaveModule: async () => ({
+      executePokerLeave: async () => ({
+        ok: true,
+        tableId: "t1",
+        state: { version: 1, state: { tableId: "other", seats: [{ seatNo: 1, userId: "u1" }] } }
+      })
+    })
+  });
+
+  const result = await execute({ tableId: "t1", userId: "u1", requestId: "req-mismatch" });
+  assert.deepEqual(result, { ok: false, code: "authoritative_state_invalid" });
+  assert.equal(logs.some((entry) => entry.kind === "ws_leave_authoritative_failed"), true);
+});
+
+test("authoritative success payload with malformed seats downgrades to authoritative_state_invalid", async () => {
+  const execute = createAuthoritativeLeaveExecutor({
+    env: {},
+    klog: () => {},
+    beginSql: async (fn) => fn({}),
+    loadAuthoritativeLeaveModule: async () => ({
+      executePokerLeave: async () => ({
+        ok: true,
+        tableId: "t1",
+        state: { version: 1, state: { tableId: "t1", seats: null } }
+      })
+    })
+  });
+
+  const result = await execute({ tableId: "t1", userId: "u1", requestId: "req-bad-seats" });
+  assert.deepEqual(result, { ok: false, code: "authoritative_state_invalid" });
+});
