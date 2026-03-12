@@ -931,6 +931,10 @@
     var realtimeSub = null;
     var realtimeDisabled = false;
     var realtimeUnavailableLogged = false;
+    var wsClient = null;
+    var wsStarted = false;
+    var wsSnapshotSeen = false;
+    var pendingWsSeatUpdate = null;
 
     if (joinBtn){
       klog('poker_join_bind', { found: true, selector: joinSelector, page: 'table' });
@@ -950,6 +954,124 @@
       if (authTimer){
         clearInterval(authTimer);
         authTimer = null;
+      }
+    }
+
+    function stopWsClient(){
+      wsStarted = false;
+      wsSnapshotSeen = false;
+      pendingWsSeatUpdate = null;
+      if (wsClient && typeof wsClient.destroy === 'function'){
+        wsClient.destroy();
+      }
+      wsClient = null;
+    }
+
+    function mapTableStateToSeatUpdates(snapshotPayload){
+      var payload = snapshotPayload && typeof snapshotPayload === 'object' ? snapshotPayload : {};
+      var members = Array.isArray(payload.members) ? payload.members : [];
+      var seats = members.map(function(member){
+        return {
+          userId: member && member.userId ? member.userId : null,
+          seatNo: member && member.seat != null ? member.seat : null,
+          status: 'ACTIVE'
+        };
+      }).filter(function(seat){
+        return typeof seat.userId === 'string' && seat.userId && Number.isInteger(seat.seatNo) && seat.seatNo >= 0;
+      });
+      return {
+        tableId: payload.tableId || null,
+        seats: seats
+      };
+    }
+
+    function mergePresenceIntoSeats(existingSeats, seatUpdates){
+      if (!Array.isArray(existingSeats) || existingSeats.length === 0) return null;
+      if (!Array.isArray(seatUpdates) || seatUpdates.length === 0) return existingSeats.slice();
+      var bySeatNo = {};
+      seatUpdates.forEach(function(updateSeat){
+        if (!updateSeat || !Number.isInteger(updateSeat.seatNo) || updateSeat.seatNo < 0) return;
+        if (typeof updateSeat.userId !== 'string' || !updateSeat.userId) return;
+        bySeatNo[updateSeat.seatNo] = updateSeat;
+      });
+      return existingSeats.map(function(existing){
+        if (!existing || !Number.isInteger(existing.seatNo)) return existing;
+        var nextSeat = bySeatNo[existing.seatNo];
+        if (!nextSeat) return existing;
+        return Object.assign({}, existing, {
+          userId: nextSeat.userId,
+          status: nextSeat.status || existing.status || 'ACTIVE'
+        });
+      });
+    }
+
+    function applyWsSeatUpdate(update){
+      if (!update || !Array.isArray(update.seats)) return false;
+      if (!tableData || typeof tableData !== 'object') return false;
+      var mergedSeats = mergePresenceIntoSeats(tableData.seats, update.seats);
+      if (!mergedSeats) return false;
+      tableData = Object.assign({}, tableData, { seats: mergedSeats });
+      isSeated = isCurrentUserSeated(tableData);
+      renderTable(tableData);
+      wsSnapshotSeen = true;
+      pendingWsSeatUpdate = null;
+      return true;
+    }
+
+    function applyWsSnapshot(snapshot){
+      if (!snapshot || !snapshot.payload) return;
+      if (wsSnapshotSeen) return;
+      var payload = snapshot.payload || {};
+      klog('poker_ws_snapshot_received', {
+        tableId: tableId,
+        kind: snapshot.kind || snapshot.rawType || null,
+        members: Array.isArray(payload.members) ? payload.members.length : 0
+      });
+      var update = mapTableStateToSeatUpdates(payload);
+      if (!applyWsSeatUpdate(update)){
+        pendingWsSeatUpdate = update;
+        klog('poker_ws_presence_deferred', {
+          tableId: tableId,
+          hasTableData: !!tableData,
+          hasBaselineSeats: !!(tableData && Array.isArray(tableData.seats) && tableData.seats.length > 0),
+          seatUpdates: Array.isArray(update.seats) ? update.seats.length : 0
+        });
+      }
+    }
+
+    function startWsBootstrap(){
+      if (wsStarted) return;
+      if (!tableId || !currentUserId) return;
+      if (!window.PokerWsClient || typeof window.PokerWsClient.create !== 'function') return;
+      wsStarted = true;
+      wsClient = window.PokerWsClient.create({
+        tableId: tableId,
+        getAccessToken: getAccessToken,
+        klog: klog,
+        onStatus: function(status, data){
+          klog('poker_ws_status', {
+            tableId: tableId,
+            status: status,
+            stage: data && data.stage ? data.stage : null,
+            code: data && data.code ? data.code : null,
+            reason: data && data.reason ? data.reason : null
+          });
+        },
+        onSnapshot: function(snapshot){
+          applyWsSnapshot(snapshot);
+        },
+        onProtocolError: function(info){
+          wsStarted = false;
+          klog('poker_ws_protocol_error', {
+            tableId: tableId,
+            code: info && info.code ? info.code : 'unknown_error',
+            detail: info && info.detail ? info.detail : null
+          });
+        }
+      });
+      if (wsClient && typeof wsClient.start === 'function'){
+        klog('poker_ws_bootstrap_start', { tableId: tableId });
+        wsClient.start();
       }
     }
 
@@ -979,6 +1101,7 @@
         isSeated = false;
         stopHeartbeat();
         stopRealtime();
+        stopWsClient();
         if (authMsg) authMsg.hidden = false;
         if (tableContent) tableContent.hidden = true;
         renderHoleCards(null);
@@ -994,6 +1117,7 @@
       setDevActionsAuthStatus(true);
       stopAuthWatch();
       startRealtime();
+      startWsBootstrap();
       return true;
     }
 
@@ -1004,6 +1128,7 @@
       setDevActionsEnabled(false);
       setDevActionsAuthStatus(false);
       renderHoleCards(null);
+      stopWsClient();
       stopRealtime();
       handleAuthExpired(opts);
     }
@@ -1663,7 +1788,13 @@
         tableData = data || {};
         tableData._actionConstraints = getSafeConstraints(tableData);
         isSeated = isCurrentUserSeated(tableData);
-        renderTable(tableData);
+        var wsApplied = false;
+        if (pendingWsSeatUpdate && !wsSnapshotSeen){
+          wsApplied = applyWsSeatUpdate(pendingWsSeatUpdate);
+        }
+        if (!wsApplied){
+          renderTable(tableData);
+        }
         if (isSeated){
           startHeartbeat();
         } else {
@@ -2481,6 +2612,7 @@
       if (document.visibilityState === 'hidden'){
         stopPolling();
         stopRealtime();
+        stopWsClient();
         stopPendingRetries();
         if (!pendingHiddenAt) pendingHiddenAt = Date.now();
       } else {
@@ -2499,6 +2631,7 @@
         if (currentUserId){
           try {
             startRealtime();
+            startWsBootstrap();
           } catch (_err){
             startPolling();
             loadTable(false);
@@ -2657,6 +2790,7 @@
     window.addEventListener('beforeunload', stopHeartbeat); // xp-lifecycle-allow:poker-table-heartbeat(2026-01-01)
     window.addEventListener('beforeunload', clearDeadlineNudge); // xp-lifecycle-allow:poker-table-deadline-nudge(2026-01-01)
     window.addEventListener('beforeunload', stopRealtime); // xp-lifecycle-allow:poker-table-realtime(2026-01-01)
+    window.addEventListener('beforeunload', stopWsClient); // xp-lifecycle-allow:poker-table-ws(2026-01-01)
     window.addEventListener('beforeunload', stopPendingAll); // xp-lifecycle-allow:poker-table-pending(2026-01-01)
     window.addEventListener('beforeunload', stopAuthWatch); // xp-lifecycle-allow:poker-table-auth(2026-01-01)
 
@@ -2669,6 +2803,7 @@
         startPolling();
         try {
           startRealtime();
+          startWsBootstrap();
         } catch (_err){
           startPolling();
           loadTable(false);
