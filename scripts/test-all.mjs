@@ -51,6 +51,7 @@ run("node", ["tests/chips-ledger.human.buyin.unit.test.mjs"], "chips-ledger-huma
 run("node", ["tests/poker-stakes-ui.test.mjs"], "poker-stakes-ui");
 run("node", ["tests/poker-ws-client.test.mjs"], "poker-ws-client");
 run("node", ["tests/poker-csp-ws-allowlist.test.mjs"], "poker-csp-ws-allowlist");
+run("node", ["tests/ws-mint-token.test.mjs"], "ws-mint-token");
 run("node", ["tests/poker-ws-presence-mapping.test.mjs"], "poker-ws-presence-mapping");
 run("node", ["tests/poker-ws-presence-race.behavior.test.mjs"], "poker-ws-presence-race-behavior");
 run("node", ["tests/poker-create-table.stakes.test.mjs"], "poker-create-table-stakes");

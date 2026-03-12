@@ -182,8 +182,8 @@ function invalidRequest(headers) {
 }
 
 export async function handler(event) {
-  if (process.env.WS_MINT_ENABLED !== "1") {
-    return { statusCode: 404, headers: baseHeaders(), body: JSON.stringify({ error: "not_found" }) };
+  if (process.env.WS_MINT_ENABLED === "0") {
+    return { statusCode: 503, headers: baseHeaders(), body: JSON.stringify({ error: "disabled" }) };
   }
 
   const origin = getHeader(event.headers, "origin");
