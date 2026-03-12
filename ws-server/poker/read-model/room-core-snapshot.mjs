@@ -190,6 +190,12 @@ export function projectRoomCoreSnapshot({ tableId, roomId, coreState, members, u
       seat: Number.isInteger(youSeat) ? youSeat : null,
       actions: Number.isInteger(youSeat) ? normalizeActions(legalInfo.actions) : []
     },
+    actionConstraints: {
+      toCall: Number.isFinite(legalInfo.toCall) ? legalInfo.toCall : null,
+      minRaiseTo: Number.isFinite(legalInfo.minRaiseTo) ? legalInfo.minRaiseTo : null,
+      maxRaiseTo: Number.isFinite(legalInfo.maxRaiseTo) ? legalInfo.maxRaiseTo : null,
+      maxBetAmount: Number.isFinite(legalInfo.maxBetAmount) ? legalInfo.maxBetAmount : null
+    },
     private: resolvePrivateBranch({ state, userId, youSeat })
   };
 

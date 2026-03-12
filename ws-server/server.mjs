@@ -279,17 +279,41 @@ function recordStatefulFrame({ ws, connState, tableId, frame }) {
   return replayFrame;
 }
 
-function sendTableState(ws, connState, { requestId = null, tableState }) {
+function buildTableStatePayload({ tableState, tableSnapshot }) {
+  const payload = {
+    tableId: tableState.tableId,
+    members: Array.isArray(tableState.members) ? tableState.members : []
+  };
+
+  if (!tableSnapshot || typeof tableSnapshot !== "object") {
+    return payload;
+  }
+
+  if (typeof tableSnapshot.roomId === "string" && tableSnapshot.roomId) payload.roomId = tableSnapshot.roomId;
+  if (Number.isInteger(tableSnapshot.stateVersion)) payload.stateVersion = tableSnapshot.stateVersion;
+  if (Number.isInteger(tableSnapshot.memberCount)) payload.memberCount = tableSnapshot.memberCount;
+  if (Number.isInteger(tableSnapshot.maxSeats)) payload.maxSeats = tableSnapshot.maxSeats;
+  if (Number.isInteger(tableSnapshot.youSeat)) payload.youSeat = tableSnapshot.youSeat;
+  if (tableSnapshot.hand && typeof tableSnapshot.hand === "object") payload.hand = tableSnapshot.hand;
+  if (tableSnapshot.board && typeof tableSnapshot.board === "object") payload.board = tableSnapshot.board;
+  if (tableSnapshot.pot && typeof tableSnapshot.pot === "object") payload.pot = tableSnapshot.pot;
+  if (tableSnapshot.turn && typeof tableSnapshot.turn === "object") payload.turn = tableSnapshot.turn;
+  if (tableSnapshot.legalActions && typeof tableSnapshot.legalActions === "object") payload.legalActions = tableSnapshot.legalActions;
+  if (tableSnapshot.actionConstraints && typeof tableSnapshot.actionConstraints === "object") payload.actionConstraints = tableSnapshot.actionConstraints;
+  if (tableSnapshot.showdown && typeof tableSnapshot.showdown === "object") payload.showdown = tableSnapshot.showdown;
+  if (tableSnapshot.handSettlement && typeof tableSnapshot.handSettlement === "object") payload.handSettlement = tableSnapshot.handSettlement;
+
+  return payload;
+}
+
+function sendTableState(ws, connState, { requestId = null, tableState, tableSnapshot = null }) {
   const frame = {
     version: "1.0",
     type: "table_state",
     ts: nowTs(),
     roomId: tableState.tableId,
     sessionId: connState.sessionId,
-    payload: {
-      tableId: tableState.tableId,
-      members: tableState.members
-    }
+    payload: buildTableStatePayload({ tableState, tableSnapshot })
   };
 
   if (requestId) {
@@ -446,7 +470,8 @@ function broadcastTableState(tableId, { excludeWs = null } = {}) {
 
     const subscriberConnState = subscriber.__connState;
     if (subscriberConnState) {
-      sendTableState(subscriber, subscriberConnState, { tableState });
+      const tableSnapshot = tableManager.tableSnapshot(tableId, subscriberConnState.session.userId);
+      sendTableState(subscriber, subscriberConnState, { tableState, tableSnapshot });
     }
   }
 }
@@ -1028,7 +1053,8 @@ wss.on("connection", (ws) => {
         return;
       }
 
-      sendTableState(ws, connState, { requestId: frame.requestId ?? null, tableState: subscribed.tableState });
+      const tableSnapshot = tableManager.tableSnapshot(tableId, connState.session.userId);
+      sendTableState(ws, connState, { requestId: frame.requestId ?? null, tableState: subscribed.tableState, tableSnapshot });
       return;
     }
 

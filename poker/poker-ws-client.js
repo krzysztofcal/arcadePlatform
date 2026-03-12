@@ -68,7 +68,7 @@
     function normalizeSnapshot(frame){
       if (!frame || typeof frame !== 'object') return null;
       if (frame.type === 'table_state'){
-        return { kind: 'table_state', payload: frame.payload || {}, rawType: frame.type };
+        return { kind: 'table_state', payload: frame.payload || {}, rawType: frame.type, initial: true };
       }
       return null;
     }

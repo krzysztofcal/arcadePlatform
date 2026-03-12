@@ -934,7 +934,7 @@
     var wsClient = null;
     var wsStarted = false;
     var wsSnapshotSeen = false;
-    var pendingWsSeatUpdate = null;
+    var pendingWsSnapshot = null;
 
     if (joinBtn){
       klog('poker_join_bind', { found: true, selector: joinSelector, page: 'table' });
@@ -960,7 +960,7 @@
     function stopWsClient(){
       wsStarted = false;
       wsSnapshotSeen = false;
-      pendingWsSeatUpdate = null;
+      pendingWsSnapshot = null;
       if (wsClient && typeof wsClient.destroy === 'function'){
         wsClient.destroy();
       }
@@ -1005,16 +1005,57 @@
       });
     }
 
-    function applyWsSeatUpdate(update){
-      if (!update || !Array.isArray(update.seats)) return false;
+    function mergeWsStateIntoTableData(existingData, snapshotPayload){
+      if (!existingData || typeof existingData !== 'object') return null;
+      var payload = snapshotPayload && typeof snapshotPayload === 'object' ? snapshotPayload : {};
+      var update = mapTableStateToSeatUpdates(payload);
+      var merged = Object.assign({}, existingData);
+      var baselineState = isPlainObject(merged.state) ? merged.state : {};
+      var baselineInner = isPlainObject(baselineState.state) ? baselineState.state : {};
+      if (Number.isInteger(payload.stateVersion)) baselineState.version = payload.stateVersion;
+      if (payload.hand && typeof payload.hand === 'object'){
+        baselineState.state = Object.assign({}, baselineInner, {
+          handId: payload.hand.handId || baselineInner.handId || null,
+          phase: payload.hand.status || baselineInner.phase || null,
+          turnUserId: payload.turn && payload.turn.userId ? payload.turn.userId : baselineInner.turnUserId,
+          turnDeadlineAt: payload.turn && payload.turn.deadlineAt != null ? payload.turn.deadlineAt : baselineInner.turnDeadlineAt,
+          community: payload.board && Array.isArray(payload.board.cards) ? payload.board.cards.slice() : baselineInner.community,
+          pot: payload.pot && Number.isFinite(Number(payload.pot.total)) ? Number(payload.pot.total) : baselineInner.pot,
+          potTotal: payload.pot && Number.isFinite(Number(payload.pot.total)) ? Number(payload.pot.total) : baselineInner.potTotal,
+          sidePots: payload.pot && Array.isArray(payload.pot.sidePots) ? payload.pot.sidePots.slice() : baselineInner.sidePots
+        });
+      }
+      merged.state = baselineState;
+      if (payload.legalActions && typeof payload.legalActions === 'object'){
+        var wsActions = Array.isArray(payload.legalActions.actions) ? payload.legalActions.actions.slice() : null;
+        if (wsActions){
+          merged.legalActions = wsActions;
+          var wsConstraints = null;
+          if (isPlainObject(payload.actionConstraints)) wsConstraints = payload.actionConstraints;
+          else if (isPlainObject(payload.legalActions.actionConstraints)) wsConstraints = payload.legalActions.actionConstraints;
+          if (wsConstraints){
+            var safeConstraints = getSafeConstraints({ actionConstraints: wsConstraints });
+            merged.actionConstraints = safeConstraints;
+            merged._actionConstraints = safeConstraints;
+          }
+        }
+      }
+      var mergedSeats = mergePresenceIntoSeats(merged.seats, update.seats);
+      if (mergedSeats) merged.seats = mergedSeats;
+      return merged;
+    }
+
+    function applyWsSnapshotNow(snapshotPayload){
+      if (!snapshotPayload || typeof snapshotPayload !== 'object') return false;
       if (!tableData || typeof tableData !== 'object') return false;
-      var mergedSeats = mergePresenceIntoSeats(tableData.seats, update.seats);
-      if (!mergedSeats) return false;
-      tableData = Object.assign({}, tableData, { seats: mergedSeats });
+      var mergedData = mergeWsStateIntoTableData(tableData, snapshotPayload);
+      if (!mergedData) return false;
+      mergedData._actionConstraints = getSafeConstraints(mergedData);
+      tableData = mergedData;
       isSeated = isCurrentUserSeated(tableData);
       renderTable(tableData);
       wsSnapshotSeen = true;
-      pendingWsSeatUpdate = null;
+      pendingWsSnapshot = null;
       return true;
     }
 
@@ -1025,19 +1066,19 @@
       klog('poker_ws_snapshot_received', {
         tableId: tableId,
         kind: snapshot.kind || snapshot.rawType || null,
-        members: Array.isArray(payload.members) ? payload.members.length : 0
+        members: Array.isArray(payload.members) ? payload.members.length : 0,
+        stateVersion: Number.isInteger(payload.stateVersion) ? payload.stateVersion : null
       });
-      var update = mapTableStateToSeatUpdates(payload);
-      if (!applyWsSeatUpdate(update)){
-        pendingWsSeatUpdate = update;
-        klog('poker_ws_presence_deferred', {
+      if (!applyWsSnapshotNow(payload)){
+        pendingWsSnapshot = payload;
+        klog('poker_ws_snapshot_deferred', {
           tableId: tableId,
           hasTableData: !!tableData,
-          hasBaselineSeats: !!(tableData && Array.isArray(tableData.seats) && tableData.seats.length > 0),
-          seatUpdates: Array.isArray(update.seats) ? update.seats.length : 0
+          members: Array.isArray(payload.members) ? payload.members.length : 0
         });
       }
     }
+
 
     function startWsBootstrap(){
       if (wsStarted) return;
@@ -1789,8 +1830,8 @@
         tableData._actionConstraints = getSafeConstraints(tableData);
         isSeated = isCurrentUserSeated(tableData);
         var wsApplied = false;
-        if (pendingWsSeatUpdate && !wsSnapshotSeen){
-          wsApplied = applyWsSeatUpdate(pendingWsSeatUpdate);
+        if (pendingWsSnapshot && !wsSnapshotSeen){
+          wsApplied = applyWsSnapshotNow(pendingWsSnapshot);
         }
         if (!wsApplied){
           renderTable(tableData);
