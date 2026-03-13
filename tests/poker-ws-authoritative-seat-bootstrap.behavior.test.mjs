@@ -43,6 +43,7 @@ test("ws bootstrap can hydrate occupied seats from authoritativeMembers when liv
       tableId: "table_boot",
       members: [],
       authoritativeMembers: [{ userId: "uA", seat: 0 }, { userId: "uB", seat: 1 }],
+      stateVersion: 2,
       hand: { status: "PREFLOP" }
     }
   });

@@ -98,11 +98,14 @@ test('poker ws client bootstraps hello -> auth -> snapshot once', async () => {
   ws.message({ type: 'table_state', payload: { tableId: 'table_test_1', members: [{ userId: 'u1', seat: 1 }], hand: { status: 'FLOP' }, pot: { total: 12 }, turn: { userId: 'u1' }, legalActions: { seat: 1, actions: ['CHECK'] }, actionConstraints: { toCall: 0, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: 500 } } });
   ws.message({ type: 'table_state', payload: { tableId: 'table_test_1', members: [{ userId: 'u2', seat: 2 }] } });
 
-  assert.equal(h.snapshots.length, 1);
+  assert.equal(h.snapshots.length, 2);
   assert.equal(h.snapshots[0].kind, 'table_state');
   assert.equal(h.snapshots[0].initial, true);
   assert.equal(h.snapshots[0].payload.hand.status, 'FLOP');
   assert.equal(h.snapshots[0].payload.actionConstraints.maxBetAmount, 500);
+  assert.equal(h.snapshots[1].kind, 'table_state');
+  assert.equal(h.snapshots[1].initial, false);
+  assert.equal(h.snapshots[1].payload.members[0].userId, 'u2');
   assert.equal(h.protocolErrors.length, 0);
 
   const logDump = JSON.stringify(h.logs);

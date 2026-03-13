@@ -18,6 +18,7 @@ test("buildTableStatePayload keeps live members and emits authoritativeMembers f
     tableSnapshot: {
       roomId: "table_1",
       stateVersion: 22,
+      memberCount: 1,
       hand: { status: "TURN" },
       board: { cards: ["Ah", "Kd", "Qs", "2c"] },
       pot: { total: 90, sidePots: [] },
@@ -32,6 +33,7 @@ test("buildTableStatePayload keeps live members and emits authoritativeMembers f
   assert.equal(withConstraints.tableId, "table_1");
   assert.deepEqual(withConstraints.members, [{ userId: "u1", seat: 0 }]);
   assert.equal(withConstraints.stateVersion, 22);
+  assert.equal(withConstraints.memberCount, 1);
   assert.deepEqual(withConstraints.legalActions, { seat: 0, actions: ["CHECK", "BET"] });
   assert.deepEqual(withConstraints.actionConstraints, { toCall: 0, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: 500 });
   assert.deepEqual(withConstraints.authoritativeMembers, [{ userId: "seed_user", seat: 2 }]);
