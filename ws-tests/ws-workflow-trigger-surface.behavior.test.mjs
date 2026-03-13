@@ -10,6 +10,11 @@ const REQUIRED_TRIGGER_PATHS = [
   "scripts/test-all.mjs"
 ];
 
+const REQUIRED_PR_WORKFLOW_FILE_TRIGGERS = [
+  ".github/workflows/ws-pr-checks.yml",
+  ".github/workflows/ws-deploy.yml"
+];
+
 function read(file) {
   return fs.readFileSync(file, "utf8");
 }
@@ -35,6 +40,13 @@ test("ws-pr-checks pull_request trigger paths include required literal coverage"
     assert.ok(
       block.includes(`- "${triggerPath}"`),
       `Missing trigger path in .github/workflows/ws-pr-checks.yml: ${triggerPath}`
+    );
+  }
+
+  for (const workflowPath of REQUIRED_PR_WORKFLOW_FILE_TRIGGERS) {
+    assert.ok(
+      block.includes(`- "${workflowPath}"`),
+      `Missing trigger path in .github/workflows/ws-pr-checks.yml: ${workflowPath}`
     );
   }
 });

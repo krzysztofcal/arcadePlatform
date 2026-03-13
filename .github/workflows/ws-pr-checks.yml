@@ -9,6 +9,7 @@ on:
       - "tests/**"
       - "scripts/test-all.mjs"
       - ".github/workflows/ws-pr-checks.yml"
+      - ".github/workflows/ws-deploy.yml"
 
 jobs:
   ws-harness:

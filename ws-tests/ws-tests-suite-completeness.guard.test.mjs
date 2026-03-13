@@ -116,6 +116,19 @@ test("WS PR/deploy workflows include required literal trigger paths", () => {
   }
 });
 
+
+test("PR workflow must self-trigger and trigger on deploy workflow changes", () => {
+  const prWorkflow = workflowText(".github/workflows/ws-pr-checks.yml");
+  assert.ok(
+    prWorkflow.includes('- ".github/workflows/ws-pr-checks.yml"'),
+    'Missing trigger path in .github/workflows/ws-pr-checks.yml: .github/workflows/ws-pr-checks.yml'
+  );
+  assert.ok(
+    prWorkflow.includes('- ".github/workflows/ws-deploy.yml"'),
+    'Missing trigger path in .github/workflows/ws-pr-checks.yml: .github/workflows/ws-deploy.yml'
+  );
+});
+
 test("workflow wiring check uses literal matching (no dynamic RegExp)", () => {
   const text = workflowText("ws-tests/ws-tests-suite-completeness.guard.test.mjs");
   assert.doesNotMatch(text, /\bnew RegExp\b/);
