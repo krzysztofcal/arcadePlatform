@@ -199,6 +199,14 @@ async function nextMessageOfType(ws, type, { timeoutMs = 5000, skipTypes = [] } 
   }
 }
 
+
+function persistedBootstrapFixturesEnv(fixtures) {
+  return {
+    SUPABASE_DB_URL: "",
+    WS_PERSISTED_BOOTSTRAP_FIXTURES_JSON: JSON.stringify(fixtures)
+  };
+}
+
 function waitBeyondTtl(ttlMs, bufferMs = 250) {
   return new Promise((resolve) => setTimeout(resolve, ttlMs + bufferMs));
 }
@@ -377,11 +385,19 @@ test("expired disconnected presence is removed after TTL", async () => {
   const secret = "test-secret";
   const token1 = makeHs256Jwt({ secret, sub: "user_1" });
   const token2 = makeHs256Jwt({ secret, sub: "user_2" });
+  const fixtures = {
+    table_ttl: {
+      tableRow: { id: "table_ttl", max_players: 6, status: "active" },
+      seatRows: [{ user_id: "user_1", seat_no: 1, status: "ACTIVE", is_bot: false }],
+      stateRow: { version: 1, state: { handId: "h1", phase: "PREFLOP" } }
+    }
+  };
   const { port, child } = await createServer({
     env: {
       WS_AUTH_REQUIRED: "1",
       WS_AUTH_TEST_SECRET: secret,
-      WS_PRESENCE_TTL_MS: "50"
+      WS_PRESENCE_TTL_MS: "50",
+      ...persistedBootstrapFixturesEnv(fixtures)
     }
   });
 
@@ -433,11 +449,19 @@ test("auth-only socket does not keep presence for the table", async () => {
   const secret = "test-secret";
   const token1 = makeHs256Jwt({ secret, sub: "user_1" });
   const token2 = makeHs256Jwt({ secret, sub: "user_2" });
+  const fixtures = {
+    table_multi: {
+      tableRow: { id: "table_multi", max_players: 6, status: "active" },
+      seatRows: [{ user_id: "user_1", seat_no: 1, status: "ACTIVE", is_bot: false }],
+      stateRow: { version: 1, state: { handId: "h1", phase: "PREFLOP" } }
+    }
+  };
   const { port, child } = await createServer({
     env: {
       WS_AUTH_REQUIRED: "1",
       WS_AUTH_TEST_SECRET: secret,
-      WS_PRESENCE_TTL_MS: "50"
+      WS_PRESENCE_TTL_MS: "50",
+      ...persistedBootstrapFixturesEnv(fixtures)
     }
   });
 
@@ -633,11 +657,23 @@ test("disconnect with ttl>0 keeps live members empty while authoritative members
 test("sweep removes multiple expired members in one pass", async () => {
   const secret = "test-secret";
   const users = ["user_1", "user_2", "user_3"];
+  const fixtures = {
+    table_sweep_multi: {
+      tableRow: { id: "table_sweep_multi", max_players: 6, status: "active" },
+      seatRows: [
+        { user_id: "user_1", seat_no: 1, status: "ACTIVE", is_bot: false },
+        { user_id: "user_2", seat_no: 2, status: "ACTIVE", is_bot: false },
+        { user_id: "user_3", seat_no: 3, status: "ACTIVE", is_bot: false }
+      ],
+      stateRow: { version: 1, state: { handId: "h1", phase: "PREFLOP" } }
+    }
+  };
   const { port, child } = await createServer({
     env: {
       WS_AUTH_REQUIRED: "1",
       WS_AUTH_TEST_SECRET: secret,
-      WS_PRESENCE_TTL_MS: "50"
+      WS_PRESENCE_TTL_MS: "50",
+      ...persistedBootstrapFixturesEnv(fixtures)
     }
   });
 
@@ -704,11 +740,19 @@ test("ttl=0 removes presence immediately on disconnect", async () => {
   const secret = "test-secret";
   const token1 = makeHs256Jwt({ secret, sub: "user_1" });
   const token2 = makeHs256Jwt({ secret, sub: "user_2" });
+  const fixtures = {
+    table_ttl_zero: {
+      tableRow: { id: "table_ttl_zero", max_players: 6, status: "active" },
+      seatRows: [{ user_id: "user_1", seat_no: 1, status: "ACTIVE", is_bot: false }],
+      stateRow: { version: 1, state: { handId: "h1", phase: "PREFLOP" } }
+    }
+  };
   const { port, child } = await createServer({
     env: {
       WS_AUTH_REQUIRED: "1",
       WS_AUTH_TEST_SECRET: secret,
-      WS_PRESENCE_TTL_MS: "0"
+      WS_PRESENCE_TTL_MS: "0",
+      ...persistedBootstrapFixturesEnv(fixtures)
     }
   });
 

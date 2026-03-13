@@ -223,9 +223,8 @@ test("table join/leave/sub flow is auth-gated, idempotent, and cleaned on discon
       payload: { tableId: "table_A" }
     });
     const subState = await nextMessage(client1, 5000, "subState");
-    assert.equal(subState.type, "table_state");
-    assert.equal(subState.payload.tableId, "table_A");
-    assert.deepEqual(subState.payload.members, []);
+    assert.equal(subState.type, "error");
+    assert.equal(subState.payload.code, "TABLE_BOOTSTRAP_UNAVAILABLE");
 
     sendFrame(client1, {
       version: "1.0",
@@ -474,9 +473,8 @@ test("conflicting roomId and payload.tableId is rejected deterministically witho
       payload: {}
     });
     const initialObserverState = await nextMessage(observer, 5000, "initialObserverState");
-    assert.equal(initialObserverState.type, "table_state");
-    assert.equal(initialObserverState.payload.tableId, "table_A");
-    assert.deepEqual(initialObserverState.payload.members, []);
+    assert.equal(initialObserverState.type, "error");
+    assert.equal(initialObserverState.payload.code, "TABLE_BOOTSTRAP_UNAVAILABLE");
 
     sendFrame(actor, {
       version: "1.0",
@@ -503,8 +501,8 @@ test("conflicting roomId and payload.tableId is rejected deterministically witho
       payload: {}
     });
     const afterConflictObserverState = await nextMessage(observer, 5000, "afterConflictObserverState");
-    assert.equal(afterConflictObserverState.type, "table_state");
-    assert.deepEqual(afterConflictObserverState.payload.members, []);
+    assert.equal(afterConflictObserverState.type, "error");
+    assert.equal(afterConflictObserverState.payload.code, "TABLE_BOOTSTRAP_UNAVAILABLE");
 
     observer.close();
     actor.close();
@@ -560,8 +558,8 @@ test("table_leave without room/table id resolves to joined table", async () => {
       payload: {}
     });
     const observerInitial = await nextMessage(observer, 5000, "observerInitial");
-    assert.equal(observerInitial.type, "table_state");
-    assert.deepEqual(observerInitial.payload.members, []);
+    assert.equal(observerInitial.type, "error");
+    assert.equal(observerInitial.payload.code, "TABLE_BOOTSTRAP_UNAVAILABLE");
 
     sendFrame(leaver, {
       version: "1.0",
@@ -573,10 +571,20 @@ test("table_leave without room/table id resolves to joined table", async () => {
     });
 
     const leaverJoinAck = await nextMessage(leaver, 5000, "leaverJoinAck");
-    const observerAfterJoin = await nextMessage(observer, 5000, "observerAfterJoin");
     assert.equal(leaverJoinAck.type, "table_state");
-    assert.equal(observerAfterJoin.type, "table_state");
     assert.deepEqual(leaverJoinAck.payload.members.map((entry) => entry.userId), ["user_leaver"]);
+
+    sendFrame(observer, {
+      version: "1.0",
+      type: "table_state_sub",
+      roomId: "table_leave_implicit",
+      requestId: "req-sub-observer-leave-after-join",
+      ts: "2026-02-28T00:12:01Z",
+      payload: {}
+    });
+
+    const observerAfterJoin = await nextMessage(observer, 5000, "observerAfterJoin");
+    assert.equal(observerAfterJoin.type, "table_state");
     assert.deepEqual(observerAfterJoin.payload.members.map((entry) => entry.userId), ["user_leaver"]);
 
     sendFrame(leaver, {
@@ -706,8 +714,8 @@ test("missing requestId on join is rejected with INVALID_COMMAND and does not mu
     });
 
     const stateAfterRejectedJoin = await nextMessage(client, 5000, "stateAfterRejectedJoin");
-    assert.equal(stateAfterRejectedJoin.type, "table_state");
-    assert.deepEqual(stateAfterRejectedJoin.payload.members, []);
+    assert.equal(stateAfterRejectedJoin.type, "error");
+    assert.equal(stateAfterRejectedJoin.payload.code, "TABLE_BOOTSTRAP_UNAVAILABLE");
 
     client.close();
   } finally {

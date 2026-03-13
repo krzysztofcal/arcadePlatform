@@ -264,6 +264,18 @@ function resolveRoomId(frame, { allowMissing = false } = {}) {
 }
 
 
+
+function mapEnsureTableLoadedError(ensured) {
+  const code = typeof ensured?.code === "string" ? ensured.code.trim().toLowerCase() : "";
+  if (code === "table_bootstrap_unavailable") {
+    return { code: "TABLE_BOOTSTRAP_UNAVAILABLE", message: "table_bootstrap_unavailable" };
+  }
+  if (code === "table_not_found") {
+    return { code: "TABLE_NOT_FOUND", message: "table_not_found" };
+  }
+  return { code: "TABLE_BOOTSTRAP_FAILED", message: ensured?.message || ensured?.code || "table_bootstrap_failed" };
+}
+
 function requiresRequestId(frameType) {
   return REQUEST_ID_REQUIRED_TYPES.has(frameType);
 }
@@ -753,11 +765,12 @@ wss.on("connection", (ws) => {
       }
       const tableId = resolvedRoomId.roomId;
 
-      const ensured = await tableManager.ensureTableLoaded(tableId);
+      const ensured = await tableManager.ensureTableLoaded(tableId, { allowCreate: true });
       if (!ensured.ok) {
+        const loadError = mapEnsureTableLoadedError(ensured);
         sendError(ws, connState, {
-          code: "INVALID_COMMAND",
-          message: ensured.message,
+          code: loadError.code,
+          message: loadError.message,
           requestId: frame.requestId ?? null
         });
         return;
@@ -823,9 +836,10 @@ wss.on("connection", (ws) => {
       if (frame.type === "resync") {
         const ensured = await tableManager.ensureTableLoaded(tableId);
         if (!ensured.ok) {
+          const loadError = mapEnsureTableLoadedError(ensured);
           sendError(ws, connState, {
-            code: "INVALID_COMMAND",
-            message: ensured.message,
+            code: loadError.code,
+            message: loadError.message,
             requestId: frame.requestId ?? null
           });
           return;
@@ -1023,9 +1037,10 @@ wss.on("connection", (ws) => {
       if (wantsSnapshot) {
         const ensured = await tableManager.ensureTableLoaded(tableId);
         if (!ensured.ok) {
+          const loadError = mapEnsureTableLoadedError(ensured);
           sendError(ws, connState, {
-            code: "INVALID_COMMAND",
-            message: ensured.message,
+            code: loadError.code,
+            message: loadError.message,
             requestId: frame.requestId ?? null
           });
           return;
@@ -1038,9 +1053,10 @@ wss.on("connection", (ws) => {
 
       const ensured = await tableManager.ensureTableLoaded(tableId);
       if (!ensured.ok) {
+        const loadError = mapEnsureTableLoadedError(ensured);
         sendError(ws, connState, {
-          code: "INVALID_COMMAND",
-          message: ensured.message,
+          code: loadError.code,
+          message: loadError.message,
           requestId: frame.requestId ?? null
         });
         return;

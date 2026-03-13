@@ -1544,6 +1544,17 @@ test("applyAction replay for rejected requestId stays deterministic and non-muta
   assert.deepEqual(after, before);
 });
 
+
+
+test("bootstrap requires loader and does not synthesize empty table", async () => {
+  const tableManager = createTableManager();
+
+  const ensured = await tableManager.ensureTableLoaded("table_without_loader");
+  assert.equal(ensured.ok, false);
+  assert.equal(ensured.code, "table_bootstrap_unavailable");
+  assert.deepEqual(tableManager.tableState("table_without_loader").members, []);
+  assert.equal(tableManager.tableSnapshot("table_without_loader", "user_1").stateVersion, 0);
+});
 test("bootstraps table from persisted poker state and reuses cache without writes", async () => {
   const calls = { reads: 0, writes: 0 };
   const tableManager = createTableManager({

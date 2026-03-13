@@ -501,9 +501,20 @@ test("table_state_sub snapshot view requires auth and does not leak stateSnapsho
 
 test("snapshot-view subscription is one-shot and does not receive later legacy table_state broadcasts", async () => {
   const secret = "test-secret";
+  const tableId = "table_oneshot";
   const snapshotToken = makeHs256Jwt({ secret, sub: "snapshot_user" });
   const actorToken = makeHs256Jwt({ secret, sub: "actor_user" });
-  const { port, child } = await createServer({ env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret } });
+  const fixtures = {
+    [tableId]: {
+      tableRow: { id: tableId, max_players: 6, status: "active" },
+      seatRows: [
+        { user_id: "snapshot_user", seat_no: 1, status: "ACTIVE", is_bot: false },
+        { user_id: "actor_user", seat_no: 2, status: "ACTIVE", is_bot: false }
+      ],
+      stateRow: { version: 9, state: { handId: "h9", phase: "PREFLOP" } }
+    }
+  };
+  const { port, child } = await createServer({ env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret, SUPABASE_DB_URL: "", ...persistedBootstrapFixturesEnv(fixtures) } });
 
   try {
     await waitForListening(child, 5000);
@@ -520,7 +531,7 @@ test("snapshot-view subscription is one-shot and does not receive later legacy t
       type: "table_state_sub",
       requestId: "req-sub-snapshot-oneshot",
       ts: "2026-02-28T00:00:05Z",
-      payload: { tableId: "table_oneshot", view: "snapshot" }
+      payload: { tableId, view: "snapshot" }
     });
     const snapshot = await nextMessage(snapshotClient);
     assert.equal(snapshot.type, "stateSnapshot");
@@ -530,7 +541,7 @@ test("snapshot-view subscription is one-shot and does not receive later legacy t
       type: "table_join",
       requestId: "req-join-actor-oneshot",
       ts: "2026-02-28T00:00:06Z",
-      payload: { tableId: "table_oneshot" }
+      payload: { tableId }
     });
     const actorJoin = await nextMessage(actorClient);
     assert.equal(actorJoin.type, "table_state");
@@ -566,7 +577,8 @@ test("table_leave non-override path does not fabricate accepted success from WS 
     await auth(other, otherToken, "auth-leave-non-override-other");
 
     sendFrame(actor, { version: "1.0", type: "table_join", requestId: "join-leave-non-override-actor", ts: "2026-02-28T00:00:01Z", payload: { tableId } });
-    await nextMessage(actor);
+    const actorBroadcast = await attemptMessage(actor, 500);
+    if (actorBroadcast) assert.equal(actorBroadcast.type, "table_state");
     sendFrame(other, { version: "1.0", type: "table_join", requestId: "join-leave-non-override-other", ts: "2026-02-28T00:00:02Z", payload: { tableId } });
     await nextMessage(other);
     await nextMessage(actor);
@@ -1678,7 +1690,7 @@ test("WS table_join missing persisted table returns protocol-safe error and late
 
     sendFrame(ws, { version: "1.0", type: "table_join", requestId: "req-missing", ts: "2026-02-28T00:00:02Z", payload: { tableId: "missing_table" } });
     const missingErr = await nextMessageOfType(ws, "error");
-    assert.equal(missingErr.payload.code, "INVALID_COMMAND");
+    assert.equal(missingErr.payload.code, "TABLE_NOT_FOUND");
 
     sendFrame(ws, { version: "1.0", type: "table_join", requestId: "req-valid", ts: "2026-02-28T00:00:03Z", payload: { tableId: validTableId } });
     const tableState = await nextMessageOfType(ws, "table_state");
@@ -1690,6 +1702,58 @@ test("WS table_join missing persisted table returns protocol-safe error and late
     await waitForExit(child);
   }
 });
+
+test("read-only bootstrap errors map to protocol-specific codes", async () => {
+  const secret = "test-secret";
+  const token = makeHs256Jwt({ secret, sub: "user_bootstrap_codes" });
+
+  const unavailable = await createServer({ env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret, SUPABASE_DB_URL: "", WS_PERSISTED_BOOTSTRAP_FIXTURES_JSON: "" } });
+  try {
+    await waitForListening(unavailable.child, 5000);
+    const ws = await connectClient(unavailable.port);
+    await hello(ws);
+    await auth(ws, token);
+
+    sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "req-sub-unavailable", ts: "2026-02-28T00:00:04Z", payload: { tableId: "missing_unavailable" } });
+    const subErr = await nextMessageOfType(ws, "error");
+    assert.equal(subErr.payload.code, "TABLE_BOOTSTRAP_UNAVAILABLE");
+    assert.equal(await attemptMessage(ws, 250), null);
+
+    sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "req-snap-unavailable", ts: "2026-02-28T00:00:05Z", payload: { tableId: "missing_unavailable", view: "snapshot" } });
+    const snapErr = await nextMessageOfType(ws, "error");
+    assert.equal(snapErr.payload.code, "TABLE_BOOTSTRAP_UNAVAILABLE");
+    assert.equal(await attemptMessage(ws, 250), null);
+
+    ws.close();
+  } finally {
+    unavailable.child.kill("SIGTERM");
+    await waitForExit(unavailable.child);
+  }
+
+  const notFound = await createServer({ env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret, SUPABASE_DB_URL: "", ...persistedBootstrapFixturesEnv({}) } });
+  try {
+    await waitForListening(notFound.child, 5000);
+    const ws = await connectClient(notFound.port);
+    await hello(ws);
+    await auth(ws, token);
+
+    sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "req-sub-not-found", ts: "2026-02-28T00:00:06Z", payload: { tableId: "missing_not_found" } });
+    const subErr = await nextMessageOfType(ws, "error");
+    assert.equal(subErr.payload.code, "TABLE_NOT_FOUND");
+    assert.equal(await attemptMessage(ws, 250), null);
+
+    sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "req-snap-not-found", ts: "2026-02-28T00:00:07Z", payload: { tableId: "missing_not_found", view: "snapshot" } });
+    const snapErr = await nextMessageOfType(ws, "error");
+    assert.equal(snapErr.payload.code, "TABLE_NOT_FOUND");
+    assert.equal(await attemptMessage(ws, 250), null);
+
+    ws.close();
+  } finally {
+    notFound.child.kill("SIGTERM");
+    await waitForExit(notFound.child);
+  }
+});
+
 
 test("act does not create synthetic table when bootstrap fails", async () => {
   const secret = "test-secret";
