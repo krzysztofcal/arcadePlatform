@@ -149,7 +149,7 @@ export function createTableManager({
     return tables.get(tableId);
   }
 
-  async function ensureTableLoaded(tableId) {
+  async function ensureTableLoaded(tableId, { allowCreate = false } = {}) {
     if (tables.has(tableId)) {
       return { ok: true, table: tables.get(tableId), cached: true };
     }
@@ -160,6 +160,13 @@ export function createTableManager({
 
     const bootstrapPromise = (async () => {
       if (typeof tableBootstrapLoader !== "function") {
+        if (!allowCreate) {
+          return {
+            ok: false,
+            code: "table_bootstrap_unavailable",
+            message: "table_bootstrap_unavailable"
+          };
+        }
         const table = ensureTable(tableId);
         return { ok: true, table, cached: false };
       }
