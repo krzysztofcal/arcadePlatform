@@ -969,7 +969,7 @@
 
     function mapTableStateToSeatUpdates(snapshotPayload){
       var payload = snapshotPayload && typeof snapshotPayload === 'object' ? snapshotPayload : {};
-      var members = Array.isArray(payload.members) ? payload.members : [];
+      var members = Array.isArray(payload.authoritativeMembers) ? payload.authoritativeMembers : [];
       var seats = members.map(function(member){
         return {
           userId: member && member.userId ? member.userId : null,

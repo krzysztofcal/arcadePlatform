@@ -705,7 +705,7 @@ test("tableSnapshot memberCount matches authoritative members after disconnect c
   assert.deepEqual(after, before);
 });
 
-test("subscribe returns authoritative members loaded from persisted bootstrap even with empty presence", async () => {
+test("subscribe keeps tableState.members presence-based while tableSnapshot.members remains authoritative", async () => {
   const tableId = "table_subscribe_authoritative";
   const wsObserver = fakeWs("ws-subscribe-authoritative");
   const tableManager = createTableManager({
@@ -739,11 +739,11 @@ test("subscribe returns authoritative members loaded from persisted bootstrap ev
   const second = tableManager.subscribe({ ws: wsObserver, tableId });
   assert.equal(first.ok, true);
   assert.equal(second.ok, true);
-  assert.deepEqual(memberPairs(first.tableState.members), [
-    ["seed_user_a", 1],
-    ["seed_user_b", 3]
-  ]);
-  assert.deepEqual(memberPairs(second.tableState.members), [
+  assert.deepEqual(memberPairs(first.tableState.members), []);
+  assert.deepEqual(memberPairs(second.tableState.members), []);
+
+  const snapshot = tableManager.tableSnapshot(tableId, "observer_user");
+  assert.deepEqual(memberPairs(snapshot.members), [
     ["seed_user_a", 1],
     ["seed_user_b", 3]
   ]);

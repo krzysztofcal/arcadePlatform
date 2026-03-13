@@ -63,7 +63,7 @@ test("stopWsClient reset allows second bootstrap snapshot apply", () => {
     _actionConstraints: { toCall: 6, minRaiseTo: 12, maxRaiseTo: 120, maxBetAmount: 120 }
   });
 
-  h.applyWsSnapshot({ type: "table_state", payload: { tableId: "table_race", stateVersion: 2, members: [{ userId: "u1", seat: 1 }], hand: { status: "FLOP" } } });
+  h.applyWsSnapshot({ type: "table_state", payload: { tableId: "table_race", stateVersion: 2, members: [{ userId: "live_presence", seat: 0 }], authoritativeMembers: [{ userId: "u1", seat: 1 }], hand: { status: "FLOP" } } });
   assert.equal(h.getSeen(), true);
   assert.equal(h.getRenderCount(), 1);
   assert.equal(h.getLastRendered().seats[1].userId, "u1");
@@ -76,7 +76,7 @@ test("stopWsClient reset allows second bootstrap snapshot apply", () => {
   assert.equal(h.getPending(), null);
   assert.equal(h.hasClient(), false);
 
-  h.applyWsSnapshot({ type: "table_state", payload: { tableId: "table_race", stateVersion: 3, members: [{ userId: "u2", seat: 0 }] } });
+  h.applyWsSnapshot({ type: "table_state", payload: { tableId: "table_race", stateVersion: 3, members: [{ userId: "live_presence", seat: 1 }], authoritativeMembers: [{ userId: "u2", seat: 0 }] } });
   assert.equal(h.getSeen(), true);
   assert.equal(h.getRenderCount(), 2);
   assert.equal(h.getLastRendered().seats[0].userId, "u2");
@@ -91,7 +91,8 @@ test("deferred snapshot apply preserves baseline constraints when WS omits them"
     payload: {
       tableId: "table_race",
       stateVersion: 9,
-      members: [{ userId: "new_u", seat: 0 }],
+      members: [{ userId: "live_presence", seat: 1 }],
+      authoritativeMembers: [{ userId: "new_u", seat: 0 }],
       hand: { status: "TURN" },
       legalActions: { actions: ["CALL", "RAISE"] }
     }

@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 
-test("buildTableStatePayload includes actionConstraints when present and keeps public fields", () => {
+test("buildTableStatePayload keeps live members and emits authoritativeMembers from snapshot", () => {
   const source = fs.readFileSync(new URL("../ws-server/server.mjs", import.meta.url), "utf8");
   const start = source.indexOf("function buildTableStatePayload({ tableState, tableSnapshot }) {");
   assert.ok(start >= 0, "buildTableStatePayload should exist");
@@ -24,6 +24,7 @@ test("buildTableStatePayload includes actionConstraints when present and keeps p
       turn: { userId: "u1", seat: 0, deadlineAt: 123 },
       legalActions: { seat: 0, actions: ["CHECK", "BET"] },
       actionConstraints: { toCall: 0, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: 500 },
+      members: [{ userId: "seed_user", seat: 2 }],
       private: { shouldNotBeIncluded: true }
     }
   });
@@ -33,6 +34,7 @@ test("buildTableStatePayload includes actionConstraints when present and keeps p
   assert.equal(withConstraints.stateVersion, 22);
   assert.deepEqual(withConstraints.legalActions, { seat: 0, actions: ["CHECK", "BET"] });
   assert.deepEqual(withConstraints.actionConstraints, { toCall: 0, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: 500 });
+  assert.deepEqual(withConstraints.authoritativeMembers, [{ userId: "seed_user", seat: 2 }]);
   assert.equal(Object.prototype.hasOwnProperty.call(withConstraints, "private"), false);
 
   const noConstraints = buildTableStatePayload({
@@ -40,4 +42,5 @@ test("buildTableStatePayload includes actionConstraints when present and keeps p
     tableSnapshot: { roomId: "table_1", stateVersion: 23, legalActions: { seat: 0, actions: ["CHECK"] } }
   });
   assert.equal(Object.prototype.hasOwnProperty.call(noConstraints, "actionConstraints"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(noConstraints, "authoritativeMembers"), false);
 });

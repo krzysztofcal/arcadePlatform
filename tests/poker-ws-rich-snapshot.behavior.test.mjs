@@ -38,7 +38,8 @@ test("rich ws snapshot merge updates public fields and preserves constraints whe
   const noConstraintPayload = {
     tableId: "table_rich",
     stateVersion: 7,
-    members: [{ userId: "u0", seat: 0 }, { userId: "u1", seat: 1 }],
+    members: [{ userId: "live_presence_u0", seat: 0 }],
+    authoritativeMembers: [{ userId: "u0", seat: 0 }, { userId: "u1", seat: 1 }],
     hand: { handId: "h_7", status: "TURN", round: "TURN" },
     board: { cards: ["Ah", "Kd", "Qc", "2s"] },
     pot: { total: 123, sidePots: [] },

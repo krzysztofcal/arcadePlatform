@@ -39,7 +39,8 @@ test("poker ws merge preserves baseline constraints when WS omits them and updat
   const wsNoConstraints = {
     tableId: "table_1",
     stateVersion: 42,
-    members: [{ userId: "u1", seat: 1 }],
+    members: [{ userId: "live_presence_user", seat: 0 }],
+    authoritativeMembers: [{ userId: "u1", seat: 1 }],
     hand: { status: "TURN", handId: "h1" },
     board: { cards: ["As", "Kd", "2h", "9c"] },
     pot: { total: 77, sidePots: [{ total: 10 }] },
@@ -63,7 +64,8 @@ test("poker ws merge preserves baseline constraints when WS omits them and updat
   const wsWithConstraints = {
     tableId: "table_1",
     stateVersion: 43,
-    members: [{ userId: "u1", seat: 1 }],
+    members: [{ userId: "live_presence_user", seat: 0 }],
+    authoritativeMembers: [{ userId: "u1", seat: 1 }],
     hand: { status: "RIVER", handId: "h2" },
     legalActions: { seat: 1, actions: ["CALL", "RAISE"] },
     actionConstraints: { toCall: 11, minRaiseTo: 22, maxRaiseTo: 333, maxBetAmount: 333 }

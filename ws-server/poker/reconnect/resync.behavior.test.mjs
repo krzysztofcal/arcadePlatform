@@ -571,7 +571,7 @@ test("table-associated socket keeps presence for the table", async () => {
 });
 
 
-test("disconnect with ttl>0 keeps authoritative members visible to existing subscribers", async () => {
+test("disconnect with ttl>0 keeps live members empty while authoritative members remain visible", async () => {
   const secret = "test-secret";
   const token1 = makeHs256Jwt({ secret, sub: "user_1" });
   const token2 = makeHs256Jwt({ secret, sub: "user_2" });
@@ -619,7 +619,8 @@ test("disconnect with ttl>0 keeps authoritative members visible to existing subs
     const disconnectUpdate = await disconnectUpdatePromise;
     assert.equal(disconnectUpdate.type, "table_state");
     assert.equal(disconnectUpdate.payload.tableId, "table_broadcast_ttl");
-    assert.deepEqual(disconnectUpdate.payload.members, [{ userId: "user_1", seat: initialState.payload.members[0].seat }]);
+    assert.deepEqual(disconnectUpdate.payload.members, []);
+    assert.deepEqual(disconnectUpdate.payload.authoritativeMembers, [{ userId: "user_1", seat: initialState.payload.members[0].seat }]);
 
     observer.close();
   } finally {

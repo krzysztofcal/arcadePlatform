@@ -300,6 +300,7 @@ function buildTableStatePayload({ tableState, tableSnapshot }) {
   if (tableSnapshot.turn && typeof tableSnapshot.turn === "object") payload.turn = tableSnapshot.turn;
   if (tableSnapshot.legalActions && typeof tableSnapshot.legalActions === "object") payload.legalActions = tableSnapshot.legalActions;
   if (tableSnapshot.actionConstraints && typeof tableSnapshot.actionConstraints === "object") payload.actionConstraints = tableSnapshot.actionConstraints;
+  if (Array.isArray(tableSnapshot.members)) payload.authoritativeMembers = tableSnapshot.members;
   if (tableSnapshot.showdown && typeof tableSnapshot.showdown === "object") payload.showdown = tableSnapshot.showdown;
   if (tableSnapshot.handSettlement && typeof tableSnapshot.handSettlement === "object") payload.handSettlement = tableSnapshot.handSettlement;
 
@@ -779,7 +780,8 @@ wss.on("connection", (ws) => {
         return;
       }
 
-      sendTableState(ws, connState, { requestId: frame.requestId ?? null, tableState: joined.tableState });
+      const joinedSnapshot = tableManager.tableSnapshot(tableId, connState.session.userId);
+      sendTableState(ws, connState, { requestId: frame.requestId ?? null, tableState: joined.tableState, tableSnapshot: joinedSnapshot });
 
       const bootstrapped = tableManager.bootstrapHand(tableId, { nowMs: Date.now() });
       if (joined.changed) {
@@ -840,7 +842,8 @@ wss.on("connection", (ws) => {
           return;
         }
 
-        sendTableState(ws, connState, { requestId: frame.requestId ?? null, tableState: resynced.tableState });
+        const resyncedSnapshot = tableManager.tableSnapshot(tableId, connState.session.userId);
+        sendTableState(ws, connState, { requestId: frame.requestId ?? null, tableState: resynced.tableState, tableSnapshot: resyncedSnapshot });
         return;
       }
 

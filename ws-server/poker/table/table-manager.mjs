@@ -31,6 +31,27 @@ function normalizeMembers(table) {
       const userId = typeof member?.userId === "string" ? member.userId.trim() : "";
       const seat = Number.isInteger(member?.seat) ? member.seat : null;
       if (!userId || !Number.isInteger(seat)) return null;
+      const presence = table?.presenceByUserId instanceof Map ? table.presenceByUserId.get(userId) : null;
+      if (!presence || presence.connected === false) return null;
+      return { userId, seat };
+    })
+    .filter(Boolean);
+
+  return members.sort((a, b) => {
+    if (a.seat !== b.seat) {
+      return a.seat - b.seat;
+    }
+    return a.userId.localeCompare(b.userId);
+  });
+}
+
+function normalizeAuthoritativeMembers(table) {
+  const sourceMembers = Array.isArray(table?.coreState?.members) ? table.coreState.members : [];
+  const members = sourceMembers
+    .map((member) => {
+      const userId = typeof member?.userId === "string" ? member.userId.trim() : "";
+      const seat = Number.isInteger(member?.seat) ? member.seat : null;
+      if (!userId || !Number.isInteger(seat)) return null;
       return { userId, seat };
     })
     .filter(Boolean);
@@ -190,7 +211,7 @@ export function createTableManager({
 
   function tableSnapshot(tableId, userId) {
     const table = tables.get(tableId);
-    const members = table ? normalizeMembers(table) : [];
+    const members = table ? normalizeAuthoritativeMembers(table) : [];
     const roomId = table?.coreState?.roomId || tableId;
     const youSeatValue = table?.coreState?.seats?.[userId];
     const youSeat = Number.isInteger(youSeatValue) ? youSeatValue : null;
