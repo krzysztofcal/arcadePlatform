@@ -6,6 +6,9 @@ on:
     paths:
       - "ws-server/**"
       - "ws-tests/**"
+      - "poker/**"
+      - "tests/**"
+      - "scripts/test-all.mjs"
       - ".github/workflows/ws-deploy.yml"
 
 jobs:
@@ -144,6 +147,9 @@ jobs:
 
       - name: Run ws-deploy trigger-surface guard test
         run: node --test ws-tests/ws-deploy.trigger-surface.guard.test.mjs
+
+      - name: Run ws-workflow trigger-surface behavior test
+        run: node --test ws-tests/ws-workflow-trigger-surface.behavior.test.mjs
 
       - name: Run ws-server deploy scp-contract behavior test
         run: node --test ws-tests/ws-server-deploy.scp-contract.behavior.test.mjs

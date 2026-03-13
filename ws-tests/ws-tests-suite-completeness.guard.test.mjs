@@ -90,6 +90,32 @@ test("required ws tests are wired into PR and deploy workflows", () => {
   }
 });
 
+
+const REQUIRED_WS_TRIGGER_PATHS = [
+  "ws-server/**",
+  "ws-tests/**",
+  "poker/**",
+  "tests/**",
+  "scripts/test-all.mjs"
+];
+
+test("WS PR/deploy workflows include required literal trigger paths", () => {
+  const workflows = [
+    ".github/workflows/ws-pr-checks.yml",
+    ".github/workflows/ws-deploy.yml"
+  ];
+
+  for (const workflow of workflows) {
+    const text = workflowText(workflow);
+    for (const triggerPath of REQUIRED_WS_TRIGGER_PATHS) {
+      assert.ok(
+        text.includes(`- "${triggerPath}"`),
+        `Missing trigger path in ${workflow}: ${triggerPath}`
+      );
+    }
+  }
+});
+
 test("workflow wiring check uses literal matching (no dynamic RegExp)", () => {
   const text = workflowText("ws-tests/ws-tests-suite-completeness.guard.test.mjs");
   assert.doesNotMatch(text, /\bnew RegExp\b/);
