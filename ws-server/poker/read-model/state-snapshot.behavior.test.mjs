@@ -70,7 +70,7 @@ test("buildStateSnapshotPayload missing table snapshot returns canonical empty r
   assert.equal("private" in payload, false);
 });
 
-test("buildStateSnapshotPayload keeps memberCount aligned with connected-only members after disconnect", () => {
+test("buildStateSnapshotPayload keeps authoritative seated members after disconnect cleanup", () => {
   const tableManager = createTableManager({ maxSeats: 6, presenceTtlMs: 10 });
   const wsA = {};
   const wsB = {};
@@ -82,10 +82,16 @@ test("buildStateSnapshotPayload keeps memberCount aligned with connected-only me
   const updates = tableManager.cleanupConnection({ ws: wsB, userId: "user_b", nowTs: 101, activeSockets: [] });
   assert.equal(updates.length, 1);
 
+  const tableState = tableManager.tableState(tableId);
+  assert.deepEqual(tableState.members, [{ userId: "user_a", seat: 1 }]);
+
   const tableSnapshot = tableManager.tableSnapshot(tableId, "observer_user");
   const payload = buildStateSnapshotPayload({ tableSnapshot, userId: "observer_user" });
 
-  assert.deepEqual(payload.table.members, [{ userId: "user_a", seat: 1 }]);
+  assert.deepEqual(payload.table.members, [
+    { userId: "user_a", seat: 1 },
+    { userId: "user_b", seat: 2 }
+  ]);
   assert.equal(payload.table.memberCount, payload.table.members.length);
 });
 
