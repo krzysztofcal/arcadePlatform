@@ -6,6 +6,9 @@ on:
     paths:
       - "ws-server/**"
       - "ws-tests/**"
+      - "poker/**"
+      - "tests/**"
+      - "scripts/test-all.mjs"
       - ".github/workflows/ws-deploy.yml"
 
 jobs:
@@ -145,6 +148,9 @@ jobs:
       - name: Run ws-deploy trigger-surface guard test
         run: node --test ws-tests/ws-deploy.trigger-surface.guard.test.mjs
 
+      - name: Run ws-workflow trigger-surface behavior test
+        run: node --test ws-tests/ws-workflow-trigger-surface.behavior.test.mjs
+
       - name: Run ws-server deploy scp-contract behavior test
         run: node --test ws-tests/ws-server-deploy.scp-contract.behavior.test.mjs
 
@@ -162,6 +168,12 @@ jobs:
 
       - name: Run ws mint-token behavior test
         run: node --test ws-tests/ws-mint-token.behavior.test.mjs
+
+      - name: Run ws mint-token test
+        run: node --test ws-tests/ws-mint-token.test.mjs
+
+      - name: Run ws table state payload test
+        run: node --test ws-tests/ws-table-state-payload.test.mjs
 
       - name: Run ws tests location guard
         run: node --test ws-tests/ws-tests-location.guard.test.mjs
@@ -219,4 +231,3 @@ jobs:
 
       - name: WS poker protocol compliance test
         run: node --test ws-tests/ws-poker-protocol-compliance.test.mjs
-

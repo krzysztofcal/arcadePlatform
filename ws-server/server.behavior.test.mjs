@@ -1894,7 +1894,7 @@ test("rapid same-socket join then snapshot remains ordered with slow bootstrap",
 
 
 
-test("observer table_join returns table_state without creating seated membership", async () => {
+test("observer table_join keeps live members empty without creating seated membership", async () => {
   const secret = "test-secret";
   const token = makeHs256Jwt({ secret, sub: "observer_only_user" });
   const tableId = "table_observer_join_only";
@@ -1920,10 +1920,18 @@ test("observer table_join returns table_state without creating seated membership
     sendFrame(ws, { version: "1.0", type: "table_join", requestId: "observer-join-1", ts: "2026-02-28T00:31:00Z", payload: { tableId } });
     const firstJoin = await nextMessageOfType(ws, "table_state");
     assert.deepEqual(firstJoin.payload.members, []);
+    assert.deepEqual(firstJoin.payload.authoritativeMembers, [
+      { userId: "seed_user_a", seat: 2 },
+      { userId: "seed_user_b", seat: 4 }
+    ]);
 
     sendFrame(ws, { version: "1.0", type: "table_join", requestId: "observer-join-2", ts: "2026-02-28T00:31:01Z", payload: { tableId } });
     const secondJoin = await nextMessageOfType(ws, "table_state");
     assert.deepEqual(secondJoin.payload.members, []);
+    assert.deepEqual(secondJoin.payload.authoritativeMembers, [
+      { userId: "seed_user_a", seat: 2 },
+      { userId: "seed_user_b", seat: 4 }
+    ]);
 
     sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "observer-snapshot", ts: "2026-02-28T00:31:02Z", payload: { tableId, view: "snapshot" } });
     const snapshot = await nextMessageOfType(ws, "stateSnapshot");
@@ -1972,7 +1980,7 @@ test("seated persisted user remains seated across repeated table_join", async ()
   }
 });
 
-test("observer join then resync keeps observer unseated", async () => {
+test("observer join then resync keeps observer unseated with live members empty", async () => {
   const secret = "test-secret";
   const token = makeHs256Jwt({ secret, sub: "observer_resync_user" });
   const tableId = "table_observer_resync";
@@ -1995,15 +2003,55 @@ test("observer join then resync keeps observer unseated", async () => {
     sendFrame(ws, { version: "1.0", type: "table_join", requestId: "observer-resync-join", ts: "2026-02-28T00:33:00Z", payload: { tableId } });
     const joinState = await nextMessageOfType(ws, "table_state");
     assert.deepEqual(joinState.payload.members, []);
+    assert.deepEqual(joinState.payload.authoritativeMembers, [{ userId: "seed_user_a", seat: 1 }]);
 
     sendFrame(ws, { version: "1.0", type: "resync", requestId: "observer-resync", ts: "2026-02-28T00:33:01Z", payload: { tableId } });
     const resyncState = await nextMessageOfType(ws, "table_state");
     assert.deepEqual(resyncState.payload.members, []);
+    assert.deepEqual(resyncState.payload.authoritativeMembers, [{ userId: "seed_user_a", seat: 1 }]);
 
     sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "observer-resync-snapshot", ts: "2026-02-28T00:33:02Z", payload: { tableId, mode: "snapshot" } });
     const snapshot = await nextMessageOfType(ws, "stateSnapshot");
     assert.equal(snapshot.payload.you.userId, "observer_resync_user");
     assert.equal(snapshot.payload.you.seat, null);
+
+    ws.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
+test("fresh hello->auth->table_state_sub keeps live members empty but includes authoritativeMembers", async () => {
+  const secret = "test-secret";
+  const token = makeHs256Jwt({ secret, sub: "observer_sub_user" });
+  const tableId = "table_state_sub_authoritative";
+  const fixtures = {
+    [tableId]: {
+      tableRow: { id: tableId, max_players: 6, status: "active" },
+      seatRows: [
+        { user_id: "seed_user_a", seat_no: 1, status: "ACTIVE", is_bot: false },
+        { user_id: "seed_user_b", seat_no: 3, status: "ACTIVE", is_bot: false }
+      ],
+      stateRow: { version: 8, state: { handId: "h8", phase: "TURN", turnUserId: "seed_user_a" } }
+    }
+  };
+
+  const { port, child } = await createServer({ env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret, SUPABASE_DB_URL: "", ...observeOnlyJoinEnv(), ...persistedBootstrapFixturesEnv(fixtures) } });
+
+  try {
+    await waitForListening(child, 5000);
+    const ws = await connectClient(port);
+    await hello(ws);
+    await auth(ws, token);
+
+    sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "observer-sub-only", ts: "2026-02-28T00:34:00Z", payload: { tableId } });
+    const subState = await nextMessageOfType(ws, "table_state");
+    assert.deepEqual(subState.payload.members, []);
+    assert.deepEqual(subState.payload.authoritativeMembers, [
+      { userId: "seed_user_a", seat: 1 },
+      { userId: "seed_user_b", seat: 3 }
+    ]);
 
     ws.close();
   } finally {

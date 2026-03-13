@@ -681,7 +681,7 @@ test("tableSnapshot for missing table returns canonical placeholders", () => {
   assert.equal(tableManager.__debugCore("missing_table"), null);
 });
 
-test("tableSnapshot memberCount matches connected-only members after disconnect cleanup", () => {
+test("tableSnapshot memberCount matches authoritative members after disconnect cleanup", () => {
   const tableManager = createTableManager({ maxSeats: 4, presenceTtlMs: 10, enableDebugCore: true, nodeEnv: "test" });
   const wsA = fakeWs("disc-a");
   const wsB = fakeWs("disc-b");
@@ -697,9 +697,56 @@ test("tableSnapshot memberCount matches connected-only members after disconnect 
   const snapshot = tableManager.tableSnapshot(tableId, "observer_user");
   const after = tableManager.__debugCore(tableId);
 
-  assert.deepEqual(snapshot.members, [{ userId: "user_a", seat: 1 }]);
+  assert.deepEqual(snapshot.members, [
+    { userId: "user_a", seat: 1 },
+    { userId: "user_b", seat: 2 }
+  ]);
   assert.equal(snapshot.memberCount, snapshot.members.length);
   assert.deepEqual(after, before);
+});
+
+test("subscribe keeps tableState.members presence-based while tableSnapshot.members remains authoritative", async () => {
+  const tableId = "table_subscribe_authoritative";
+  const wsObserver = fakeWs("ws-subscribe-authoritative");
+  const tableManager = createTableManager({
+    maxSeats: 6,
+    tableBootstrapLoader: async ({ tableId: loadedTableId }) => ({
+      ok: true,
+      table: {
+        tableId: loadedTableId,
+        coreState: {
+          roomId: loadedTableId,
+          version: 11,
+          members: [
+            { userId: "seed_user_a", seat: 1 },
+            { userId: "seed_user_b", seat: 3 }
+          ],
+          seats: { seed_user_a: 1, seed_user_b: 3 },
+          pokerState: { tableId: loadedTableId, phase: "TURN", turnUserId: "seed_user_a" },
+          appliedRequestIds: []
+        },
+        presenceByUserId: new Map(),
+        subscribers: new Set(),
+        actionResultsByRequestId: new Map()
+      }
+    })
+  });
+
+  const ensured = await tableManager.ensureTableLoaded(tableId);
+  assert.equal(ensured.ok, true);
+
+  const first = tableManager.subscribe({ ws: wsObserver, tableId });
+  const second = tableManager.subscribe({ ws: wsObserver, tableId });
+  assert.equal(first.ok, true);
+  assert.equal(second.ok, true);
+  assert.deepEqual(memberPairs(first.tableState.members), []);
+  assert.deepEqual(memberPairs(second.tableState.members), []);
+
+  const snapshot = tableManager.tableSnapshot(tableId, "observer_user");
+  assert.deepEqual(memberPairs(snapshot.members), [
+    ["seed_user_a", 1],
+    ["seed_user_b", 3]
+  ]);
 });
 
 
