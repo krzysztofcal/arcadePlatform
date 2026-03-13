@@ -127,3 +127,36 @@ test("deferred snapshot apply preserves baseline constraints when WS omits them"
   assert.equal(h.getSeen(), false);
   assert.equal(h.getPending(), null);
 });
+
+
+test("version gating applies higher version and rejects stale/equal/unversioned over versioned baseline", () => {
+  const h = buildHarness();
+  h.setTableData({
+    table: { id: "table_race" },
+    seats: [
+      { seatNo: 0, userId: "u0", status: "ACTIVE", stack: 100 },
+      { seatNo: 1, userId: null, status: "EMPTY", stack: 150 }
+    ],
+    state: { version: 5, state: { phase: "FLOP" } },
+    actionConstraints: { toCall: 4, minRaiseTo: 8, maxRaiseTo: 88, maxBetAmount: 88 },
+    _actionConstraints: { toCall: 4, minRaiseTo: 8, maxRaiseTo: 88, maxBetAmount: 88 }
+  });
+
+  h.applyWsSnapshot({ type: "table_state", payload: { tableId: "table_race", stateVersion: 6, authoritativeMembers: [{ userId: "u1", seat: 1 }], hand: { status: "TURN" } } });
+  assert.equal(h.getTableData().state.version, 6);
+  assert.equal(h.getRenderCount(), 1);
+
+  h.applyWsSnapshot({ type: "table_state", payload: { tableId: "table_race", stateVersion: 6, authoritativeMembers: [{ userId: "stale", seat: 0 }], hand: { status: "RIVER" } } });
+  assert.equal(h.getTableData().state.version, 6);
+  assert.equal(h.getTableData().seats[0].userId, "u0");
+  assert.equal(h.getRenderCount(), 1);
+
+  h.applyWsSnapshot({ type: "table_state", payload: { tableId: "table_race", stateVersion: 3, authoritativeMembers: [{ userId: "older", seat: 0 }] } });
+  assert.equal(h.getTableData().state.version, 6);
+  assert.equal(h.getRenderCount(), 1);
+
+  h.applyWsSnapshot({ type: "table_state", payload: { tableId: "table_race", authoritativeMembers: [{ userId: "nover", seat: 0 }] } });
+  assert.equal(h.getTableData().state.version, 6);
+  assert.equal(h.getTableData().seats[0].userId, "u0");
+  assert.equal(h.getRenderCount(), 1);
+});

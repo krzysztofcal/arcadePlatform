@@ -65,10 +65,10 @@
       return true;
     }
 
-    function normalizeSnapshot(frame){
+    function normalizeSnapshot(frame, initial){
       if (!frame || typeof frame !== 'object') return null;
       if (frame.type === 'table_state'){
-        return { kind: 'table_state', payload: frame.payload || {}, rawType: frame.type, initial: true };
+        return { kind: 'table_state', payload: frame.payload || {}, rawType: frame.type, initial: initial === true };
       }
       return null;
     }
@@ -127,10 +127,10 @@
         return;
       }
       if (frame.type === 'table_state'){
-        if (initialSnapshotDelivered) return;
+        var isInitialSnapshot = !initialSnapshotDelivered;
         initialSnapshotDelivered = true;
         emitStatus('snapshot', { type: frame.type });
-        var normalized = normalizeSnapshot(frame);
+        var normalized = normalizeSnapshot(frame, isInitialSnapshot);
         if (normalized) onSnapshot(normalized);
         return;
       }

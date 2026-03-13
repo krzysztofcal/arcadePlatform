@@ -86,6 +86,10 @@ test("buildStateSnapshotPayload keeps authoritative seated members after disconn
   assert.deepEqual(tableState.members, [{ userId: "user_a", seat: 1 }]);
 
   const tableSnapshot = tableManager.tableSnapshot(tableId, "observer_user");
+  assert.deepEqual(tableSnapshot.members, [
+    { userId: "user_a", seat: 1 },
+    { userId: "user_b", seat: 2 }
+  ]);
   const payload = buildStateSnapshotPayload({ tableSnapshot, userId: "observer_user" });
 
   assert.deepEqual(payload.table.members, [

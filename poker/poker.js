@@ -1045,8 +1045,36 @@
       return merged;
     }
 
-    function applyWsSnapshotNow(snapshotPayload){
+    function resolveSnapshotVersion(snapshotPayload){
+      if (!snapshotPayload || typeof snapshotPayload !== 'object') return null;
+      return Number.isInteger(snapshotPayload.stateVersion) ? snapshotPayload.stateVersion : null;
+    }
+
+    function resolveTableDataVersion(data){
+      if (!data || typeof data !== 'object') return null;
+      var state = data.state && typeof data.state === 'object' ? data.state : null;
+      return state && Number.isInteger(state.version) ? state.version : null;
+    }
+
+    function shouldApplyWsSnapshot(snapshotPayload, options){
+      var opts = options && typeof options === 'object' ? options : {};
       if (!snapshotPayload || typeof snapshotPayload !== 'object') return false;
+      if (!tableData || typeof tableData !== 'object'){
+        return opts.allowWhenNoBaseline === true;
+      }
+      var incomingVersion = resolveSnapshotVersion(snapshotPayload);
+      var currentVersion = resolveTableDataVersion(tableData);
+      if (incomingVersion == null){
+        if (currentVersion != null) return false;
+        return opts.allowUnversionedUpgrade === true;
+      }
+      if (currentVersion == null) return true;
+      return incomingVersion > currentVersion;
+    }
+
+    function applyWsSnapshotNow(snapshotPayload, options){
+      if (!snapshotPayload || typeof snapshotPayload !== 'object') return false;
+      if (!shouldApplyWsSnapshot(snapshotPayload, options)) return false;
       if (!tableData || typeof tableData !== 'object') return false;
       var mergedData = mergeWsStateIntoTableData(tableData, snapshotPayload);
       if (!mergedData) return false;
@@ -1061,22 +1089,40 @@
 
     function applyWsSnapshot(snapshot){
       if (!snapshot || !snapshot.payload) return;
-      if (wsSnapshotSeen) return;
       var payload = snapshot.payload || {};
+      var incomingVersion = resolveSnapshotVersion(payload);
+      var currentVersion = resolveTableDataVersion(tableData);
       klog('poker_ws_snapshot_received', {
         tableId: tableId,
         kind: snapshot.kind || snapshot.rawType || null,
+        initial: snapshot.initial === true,
         members: Array.isArray(payload.members) ? payload.members.length : 0,
-        stateVersion: Number.isInteger(payload.stateVersion) ? payload.stateVersion : null
+        stateVersion: incomingVersion
       });
-      if (!applyWsSnapshotNow(payload)){
+
+      if (applyWsSnapshotNow(payload, {
+        allowWhenNoBaseline: false,
+        allowUnversionedUpgrade: false
+      })) return;
+
+      if (!tableData || typeof tableData !== 'object'){
         pendingWsSnapshot = payload;
         klog('poker_ws_snapshot_deferred', {
           tableId: tableId,
-          hasTableData: !!tableData,
-          members: Array.isArray(payload.members) ? payload.members.length : 0
+          hasTableData: false,
+          members: Array.isArray(payload.members) ? payload.members.length : 0,
+          stateVersion: incomingVersion
         });
+        return;
       }
+
+      klog('poker_ws_snapshot_ignored', {
+        tableId: tableId,
+        members: Array.isArray(payload.members) ? payload.members.length : 0,
+        incomingStateVersion: incomingVersion,
+        currentStateVersion: currentVersion,
+        reason: incomingVersion == null ? 'unversioned_over_versioned_or_disallowed' : 'stale_or_equal_version'
+      });
     }
 
 
@@ -1831,7 +1877,10 @@
         isSeated = isCurrentUserSeated(tableData);
         var wsApplied = false;
         if (pendingWsSnapshot && !wsSnapshotSeen){
-          wsApplied = applyWsSnapshotNow(pendingWsSnapshot);
+          wsApplied = applyWsSnapshotNow(pendingWsSnapshot, {
+            allowWhenNoBaseline: false,
+            allowUnversionedUpgrade: true
+          });
         }
         if (!wsApplied){
           renderTable(tableData);
