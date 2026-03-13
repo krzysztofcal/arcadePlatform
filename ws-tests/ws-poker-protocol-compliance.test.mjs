@@ -54,6 +54,13 @@ function observeOnlyJoinEnv() {
   return { WS_OBSERVE_ONLY_JOIN: "1" };
 }
 
+function persistedBootstrapFixturesEnv(fixtures) {
+  return {
+    SUPABASE_DB_URL: "",
+    WS_PERSISTED_BOOTSTRAP_FIXTURES_JSON: JSON.stringify(fixtures)
+  };
+}
+
 function wsOn(ws, eventName, handler, { once = false } = {}) {
   if (typeof ws.addEventListener === "function") {
     ws.addEventListener(eventName, handler, once ? { once: true } : undefined);
@@ -479,6 +486,7 @@ test("server shutdown is bounded after SIGTERM", async () => runSerial(async () 
 
 test("default runtime keeps legacy table_join membership mutation semantics", async () => runSerial(async () => {
   const secret = "test-secret";
+  const tableId = "table_default_join";
   const { port, child } = await createServer({
     env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret, WS_PRESENCE_TTL_MS: "0", WS_MAX_SEATS: "3" }
   });
@@ -498,26 +506,33 @@ test("default runtime keeps legacy table_join membership mutation semantics", as
       type: "table_state_sub",
       requestId: "req-sub-default",
       ts: "2026-02-28T00:00:00Z",
-      payload: { tableId: "table_default_join" }
+      payload: { tableId }
     });
     const initial = await nextMessage(subscriber, 5000, "defaultInitial");
-    assert.equal(initial.type, "table_state");
-    assert.deepEqual(initial.payload.members, []);
+    assert.equal(initial.type, "error");
+    assert.equal(initial.payload.code, "TABLE_BOOTSTRAP_UNAVAILABLE");
 
     sendFrame(actor, {
       version: "1.0",
       type: "table_join",
       requestId: "req-join-default",
       ts: "2026-02-28T00:00:01Z",
-      payload: { tableId: "table_default_join" }
+      payload: { tableId }
     });
     const joined = await nextMessage(actor, 5000, "defaultJoined");
     assert.equal(joined.type, "table_state");
     assert.deepEqual(joined.payload.members, [{ userId: "default_actor", seat: 1 }]);
 
-    const broadcast = await nextMessage(subscriber, 5000, "defaultBroadcast");
-    assert.equal(broadcast.type, "table_state");
-    assert.deepEqual(broadcast.payload.members, [{ userId: "default_actor", seat: 1 }]);
+    sendFrame(subscriber, {
+      version: "1.0",
+      type: "table_state_sub",
+      requestId: "req-sub-default-after-join",
+      ts: "2026-02-28T00:00:02Z",
+      payload: { tableId }
+    });
+    const afterJoin = await nextMessage(subscriber, 5000, "defaultAfterJoin");
+    assert.equal(afterJoin.type, "table_state");
+    assert.deepEqual(afterJoin.payload.members, [{ userId: "default_actor", seat: 1 }]);
 
     subscriber.close();
     actor.close();
@@ -529,8 +544,15 @@ test("default runtime keeps legacy table_join membership mutation semantics", as
 
 test("table_join is observe-only and does not emit membership mutation broadcasts", async () => runSerial(async () => {
   const secret = "test-secret";
+  const fixtures = {
+    table_A: {
+      tableRow: { id: "table_A", max_players: 2, status: "active" },
+      seatRows: [{ user_id: "seed_user", seat_no: 1, status: "ACTIVE", is_bot: false }],
+      stateRow: { version: 1, state: { handId: "h1", phase: "PREFLOP" } }
+    }
+  };
   const { port, child } = await createServer({
-    env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret, ...observeOnlyJoinEnv(), WS_PRESENCE_TTL_MS: "0", WS_MAX_SEATS: "2" }
+    env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret, ...observeOnlyJoinEnv(), WS_PRESENCE_TTL_MS: "0", WS_MAX_SEATS: "2", ...persistedBootstrapFixturesEnv(fixtures) }
   });
 
   try {
@@ -971,8 +993,15 @@ test("timeout sweep emits at most one immediate transition for a single due turn
 
 test("table_state_sub observer stream stays stable across observe-only join/leave", async () => runSerial(async () => {
   const secret = "test-secret";
+  const fixtures = {
+    table_contract: {
+      tableRow: { id: "table_contract", max_players: 3, status: "active" },
+      seatRows: [{ user_id: "seed_contract_user", seat_no: 1, status: "ACTIVE", is_bot: false }],
+      stateRow: { version: 1, state: { handId: "h1", phase: "PREFLOP" } }
+    }
+  };
   const { port, child } = await createServer({
-    env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret, ...observeOnlyJoinEnv(), WS_PRESENCE_TTL_MS: "0", WS_MAX_SEATS: "3" }
+    env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret, ...observeOnlyJoinEnv(), WS_PRESENCE_TTL_MS: "0", WS_MAX_SEATS: "3", ...persistedBootstrapFixturesEnv(fixtures) }
   });
 
   try {
@@ -995,6 +1024,7 @@ test("table_state_sub observer stream stays stable across observe-only join/leav
       payload: { tableId: "table_contract" }
     });
     const initialState = await nextMessage(observer, 5000, "initialContractState");
+    assert.equal(initialState.type, "table_state");
     assert.deepEqual(initialState.payload.members, []);
 
     sendFrame(actor, {
@@ -1181,8 +1211,15 @@ test("observe-only table_leave without tableId resolves subscribed context", asy
 test("default non-override leave path does not fabricate success from WS membership", async () => runSerial(async () => {
   const secret = "test-secret";
   const tableId = "table_no_fabricated_leave_success";
+  const fixtures = {
+    [tableId]: {
+      tableRow: { id: tableId, max_players: 6, status: "active" },
+      seatRows: [{ user_id: "seed_leave_user", seat_no: 2, status: "ACTIVE", is_bot: false }],
+      stateRow: { version: 1, state: { handId: "h1", phase: "PREFLOP" } }
+    }
+  };
   const { port, child } = await createServer({
-    env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret }
+    env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret, ...persistedBootstrapFixturesEnv(fixtures) }
   });
 
   try {
