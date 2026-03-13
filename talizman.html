@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Talizman | Arcade Hub</title>
+  <link rel="icon" type="image/png" href="img/logo.png" />
+  <link rel="stylesheet" href="css/site.css" />
+  <link rel="stylesheet" href="css/portal.css" />
+  <link rel="stylesheet" href="css/xp.css" />
+  <link rel="stylesheet" href="css/xp-badge.css" />
+  <link rel="stylesheet" href="css/talizman.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-left">
+      <button class="hamburger" id="sbToggle" aria-label="Toggle navigation" aria-expanded="false">
+        <span></span><span></span><span></span>
+      </button>
+      <a class="brand" href="index.html">
+        <img src="img/logo.png" alt="Arcade Hub" class="logo" />
+        <span>Arcade Hub</span>
+      </a>
+    </div>
+    <div class="topbar-right">
+      <a id="xpBadge" class="xp-badge xp-badge--loading" aria-live="polite" aria-busy="true" href="xp.html">XP: 0</a>
+      <button id="searchBtn" class="search-btn" type="button" aria-label="Search" title="Search">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15.5 14h-.79l-.28-.27A6.5 6.5 0 1 0 14 15.5l.27.28v.79L20 21.5 21.5 20l-6-6Zm-5 0A4.5 4.5 0 1 1 10.5 5a4.5 4.5 0 0 1 0 9Z"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <div class="shell">
+    <aside class="sidebar collapsed" id="sidebar" aria-label="Main navigation">
+      <nav class="sb-nav">
+        <ul class="sb-list">
+          <li class="sb-item"><a href="index.html" class="sb-link sb-home" aria-label="Home" tabindex="0"><span class="sb-ico" aria-hidden="true"><svg class="sb-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 10.5 12 4l9 6.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1v-9.5Z"/></svg></span><span class="sb-label">Home</span></a></li>
+          <li class="sb-item"><a href="recently-played.html" class="sb-link" aria-label="Recently played" tabindex="0"><span class="sb-ico" aria-hidden="true"></span><span class="sb-label" data-i18n="recentlyPlayed">Recently played</span></a></li>
+          <li class="sb-item"><a href="favorites.html" class="sb-link" aria-label="Favorites" tabindex="0"><span class="sb-ico" aria-hidden="true"><svg class="sb-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg></span><span class="sb-label" data-i18n="favorites">Favorites</span></a></li>
+          <li class="sb-item"><a href="about.en.html" class="sb-link" tabindex="0" data-href-en="about.en.html" data-href-pl="about.pl.html"><span class="sb-ico" aria-hidden="true"></span><span class="sb-label" data-i18n="about">About</span></a></li>
+          <li class="sb-item"><a href="/poker/" class="sb-link" tabindex="0"><span class="sb-ico" aria-hidden="true"><svg class="sb-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-1-13h2v6h-2zm0 8h2v2h-2z"/></svg></span><span class="sb-label" data-i18n="poker">Poker</span></a></li>
+          <li class="sb-item"><a href="talizman.html" class="sb-link is-active" tabindex="0"><span class="sb-ico" aria-hidden="true">✦</span><span class="sb-label" data-i18n="talisman">Talizman</span></a></li>
+        </ul>
+      </nav>
+    </aside>
+
+    <main class="talisman-page">
+      <section class="talisman-hero">
+        <p class="talisman-kicker" data-i18n="talismanKicker">Astro konfigurator energii</p>
+        <h1 data-i18n="talismanTitle">Twój osobisty talizman</h1>
+        <p data-i18n="talismanLead">Wybierz swoje dane i obszary Feng Shui, a dobierzemy kamień mocy oraz kamień ochronny.</p>
+      </section>
+
+      <section class="talisman-card">
+        <form id="talismanForm" class="talisman-form">
+          <label><span data-i18n="talismanBirthDate">Data urodzenia</span><input id="birthDate" name="birthDate" type="date" required /></label>
+          <label><span data-i18n="talismanBirthYear">Rok urodzenia</span><input id="birthYear" name="birthYear" type="number" min="1900" max="2100" required /></label>
+          <label><span data-i18n="talismanZodiac">Znak zodiaku</span><select id="zodiacSign" name="zodiacSign" required></select></label>
+          <label><span data-i18n="talismanChinese">Chiński znak</span><select id="chineseSign" name="chineseSign" required></select></label>
+          <fieldset class="gender-box">
+            <legend data-i18n="talismanGender">Płeć</legend>
+            <label class="inline"><input type="radio" name="gender" value="kobieta" required /><span data-i18n="talismanGenderF">Kobieta</span></label>
+            <label class="inline"><input type="radio" name="gender" value="mężczyzna" /><span data-i18n="talismanGenderM">Mężczyzna</span></label>
+            <label class="inline"><input type="radio" name="gender" value="obie" /><span data-i18n="talismanGenderBoth">Obie</span></label>
+          </fieldset>
+          <fieldset class="skills-box">
+            <legend data-i18n="talismanAreas">Wybierz obszary Feng Shui</legend>
+            <label class="inline"><input type="checkbox" name="area" value="wealth" /><span data-i18n="areaWealth">Bogactwo</span></label>
+            <label class="inline"><input type="checkbox" name="area" value="career" /><span data-i18n="areaCareer">Kariera</span></label>
+            <label class="inline"><input type="checkbox" name="area" value="health" /><span data-i18n="areaHealth">Zdrowie</span></label>
+            <label class="inline"><input type="checkbox" name="area" value="family" /><span data-i18n="areaFamily">Rodzina</span></label>
+            <label class="inline"><input type="checkbox" name="area" value="woman" /><span data-i18n="areaWoman">Kobieta</span></label>
+            <label class="inline"><input type="checkbox" name="area" value="man" /><span data-i18n="areaMan">Mężczyzna</span></label>
+          </fieldset>
+          <button type="submit" class="talisman-btn" data-i18n="talismanButton">Dobierz talizman</button>
+        </form>
+      </section>
+
+      <section id="talismanResult" class="talisman-result" aria-live="polite" hidden></section>
+    </main>
+  </div>
+
+  <script src="js/xpClient.js" defer></script>
+  <script src="/js/ui/xp-overlay.js" defer></script>
+  <script src="js/debug.js" defer></script>
+  <script src="js/xp/combo.js" defer></script>
+  <script src="js/xp/scoring.js" defer></script>
+  <script src="js/xp/core.js" defer></script>
+  <script src="js/xp.js" defer></script>
+  <script src="js/i18n.js" defer></script>
+  <script src="js/core/sidebar-model.js" defer></script>
+  <script src="js/sidebar.js" defer></script>
+  <script src="js/search-popup.js" defer></script>
+  <script src="js/search-popup-bootstrap.js" defer></script>
+  <script src="js/talizman-page.js" defer></script>
+</body>
+</html>
