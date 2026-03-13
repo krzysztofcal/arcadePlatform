@@ -25,13 +25,15 @@ export const __testOnly = {
 };
 
 function normalizeMembers(table) {
-  const members = [];
-  for (const coreMember of table.coreState.members) {
-    const presence = table.presenceByUserId.get(coreMember.userId);
-    if (presence && presence.connected !== false) {
-      members.push({ userId: coreMember.userId, seat: coreMember.seat });
-    }
-  }
+  const sourceMembers = Array.isArray(table?.coreState?.members) ? table.coreState.members : [];
+  const members = sourceMembers
+    .map((member) => {
+      const userId = typeof member?.userId === "string" ? member.userId.trim() : "";
+      const seat = Number.isInteger(member?.seat) ? member.seat : null;
+      if (!userId || !Number.isInteger(seat)) return null;
+      return { userId, seat };
+    })
+    .filter(Boolean);
 
   return members.sort((a, b) => {
     if (a.seat !== b.seat) {
