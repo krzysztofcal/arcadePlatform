@@ -5,6 +5,7 @@ import fs from "node:fs";
 const REQUIRED_TRIGGER_PATHS = [
   "ws-server/**",
   "ws-tests/**",
+  "shared/**",
   "poker/**",
   "tests/**",
   "scripts/test-all.mjs"
@@ -62,4 +63,15 @@ test("ws-deploy push trigger paths include required literal coverage", () => {
       `Missing trigger path in .github/workflows/ws-deploy.yml: ${triggerPath}`
     );
   }
+});
+
+
+test("literal shared/** trigger coverage in both ws workflows", () => {
+  const pr = read(".github/workflows/ws-pr-checks.yml");
+  const deploy = read(".github/workflows/ws-deploy.yml");
+  const prBlock = pullRequestPathsBlock(pr);
+  const deployBlock = pushPathsBlock(deploy);
+
+  assert.ok(prBlock.includes(`- "shared/**"`), "PR workflow must include literal shared/** trigger");
+  assert.ok(deployBlock.includes(`- "shared/**"`), "Deploy workflow must include literal shared/** trigger");
 });

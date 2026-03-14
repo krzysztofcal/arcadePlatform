@@ -88,6 +88,8 @@ function resolveObserveOnlyJoin(rawValue) {
 
 const persistedBootstrapEnabled = Boolean(process.env.SUPABASE_DB_URL || process.env.WS_PERSISTED_BOOTSTRAP_FIXTURES_JSON || process.env.WS_PERSISTED_STATE_FILE);
 const persistedStateWriteEnabled = Boolean(process.env.SUPABASE_DB_URL || process.env.WS_PERSISTED_STATE_FILE);
+const observeOnlyJoinEnabled = resolveObserveOnlyJoin(process.env.WS_OBSERVE_ONLY_JOIN);
+const authoritativeJoinEnabled = String(process.env.WS_AUTHORITATIVE_JOIN_ENABLED || "").trim() === "1";
 
 function createPersistedBootstrapLoader({ env = process.env } = {}) {
   let repositoryPromise = null;
@@ -119,7 +121,7 @@ const tableManager = createTableManager({
   maxSeats: resolveMaxSeats(process.env.WS_MAX_SEATS),
   actionResultCacheMax: resolveActionResultCacheMax(process.env.WS_ACTION_RESULT_CACHE_MAX),
   tableBootstrapLoader: loadPersistedTableBootstrap,
-  observeOnlyJoin: resolveObserveOnlyJoin(process.env.WS_OBSERVE_ONLY_JOIN)
+  observeOnlyJoin: observeOnlyJoinEnabled
 });
 const sessionStore = createSessionStore({
   sessionTtlMs: resolveSessionTtlMs(process.env.WS_SESSION_TTL_MS)
@@ -135,6 +137,7 @@ function snapshotCacheKey(sessionId, tableId) {
 
 
 let authoritativeLeaveExecutorPromise = null;
+let authoritativeJoinExecutorPromise = null;
 
 async function loadAuthoritativeLeaveExecutor() {
   if (!authoritativeLeaveExecutorPromise) {
@@ -142,6 +145,14 @@ async function loadAuthoritativeLeaveExecutor() {
       .then((module) => module.createAuthoritativeLeaveExecutor({ env: process.env, klog: klogSafe }));
   }
   return authoritativeLeaveExecutorPromise;
+}
+
+async function loadAuthoritativeJoinExecutor() {
+  if (!authoritativeJoinExecutorPromise) {
+    authoritativeJoinExecutorPromise = import("./poker/persistence/authoritative-join-adapter.mjs")
+      .then((module) => module.createAuthoritativeJoinExecutor({ env: process.env, klog: klogSafe }));
+  }
+  return authoritativeJoinExecutorPromise;
 }
 
 function klog(kind, data) {
@@ -765,6 +776,26 @@ wss.on("connection", (ws) => {
       }
       const tableId = resolvedRoomId.roomId;
 
+      if (authoritativeJoinEnabled && !observeOnlyJoinEnabled && persistedBootstrapEnabled) {
+        const authoritativeJoinExecutor = await loadAuthoritativeJoinExecutor();
+        const authoritativeJoin = await authoritativeJoinExecutor({
+          tableId,
+          userId: connState.session.userId,
+          requestId: frame.requestId ?? null
+        });
+        if (!authoritativeJoin?.ok) {
+          const joinCode = authoritativeJoin?.code;
+          const isKnownError = typeof joinCode === "string"
+            && (joinCode === "table_not_found" || joinCode === "table_closed" || joinCode === "table_not_open" || joinCode === "seat_taken" || joinCode === "table_full" || joinCode === "state_missing" || joinCode === "state_invalid");
+          sendError(ws, connState, {
+            code: isKnownError ? joinCode : "INTERNAL_ERROR",
+            message: isKnownError ? joinCode : "authoritative_join_failed",
+            requestId: frame.requestId ?? null
+          });
+          return;
+        }
+      }
+
       const ensured = await tableManager.ensureTableLoaded(tableId, { allowCreate: true });
       if (!ensured.ok) {
         const loadError = mapEnsureTableLoadedError(ensured);
@@ -776,8 +807,19 @@ wss.on("connection", (ws) => {
         return;
       }
 
+      if (authoritativeJoinEnabled && !observeOnlyJoinEnabled && persistedBootstrapEnabled) {
+        const restored = await restoreTableFromPersisted(tableId);
+        if (!restored.ok) {
+          sendError(ws, connState, {
+            code: "INTERNAL_ERROR",
+            message: "authoritative_join_rehydrate_failed",
+            requestId: frame.requestId ?? null
+          });
+          return;
+        }
+      }
+
       sessionStore.trackConnection({ ws, userId: connState.session.userId, sessionId: connState.session.sessionId });
-      const preJoinPersistedVersion = tableManager.persistedStateVersion(tableId);
       const joined = tableManager.join({
         ws,
         userId: connState.session.userId,
@@ -798,30 +840,6 @@ wss.on("connection", (ws) => {
       sendTableState(ws, connState, { requestId: frame.requestId ?? null, tableState: joined.tableState, tableSnapshot: joinedSnapshot });
 
       if (joined.changed) {
-        const joinExpectedVersion = preJoinPersistedVersion;
-        if (!Number.isInteger(joinExpectedVersion) || joinExpectedVersion < 0) {
-          sendError(ws, connState, {
-            code: "INTERNAL_ERROR",
-            message: "state_persist_failed",
-            requestId: frame.requestId ?? null
-          });
-          return;
-        }
-        const joinPersisted = await persistMutatedState({
-          tableId,
-          expectedVersion: joinExpectedVersion,
-          mutationKind: "join"
-        });
-        if (!joinPersisted?.ok) {
-          await restoreTableFromPersisted(tableId);
-          broadcastResyncRequired(tableId, "persistence_conflict");
-          sendError(ws, connState, {
-            code: "INTERNAL_ERROR",
-            message: "state_persist_failed",
-            requestId: frame.requestId ?? null
-          });
-          return;
-        }
         broadcastTableState(tableId, { excludeWs: ws });
       }
 

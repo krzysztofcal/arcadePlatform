@@ -6,6 +6,9 @@ import { createRequire } from "node:module";
 import net from "node:net";
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 
 
 const require = createRequire(import.meta.url);
@@ -59,6 +62,23 @@ function persistedBootstrapFixturesEnv(fixtures) {
     SUPABASE_DB_URL: "",
     WS_PERSISTED_BOOTSTRAP_FIXTURES_JSON: JSON.stringify(fixtures)
   };
+}
+
+
+async function writePersistedStateFile(fixtures) {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "ws-protocol-persist-"));
+  const filePath = path.join(dir, "persisted-state.json");
+  const tables = {};
+  for (const [tableId, fixture] of Object.entries(fixtures || {})) {
+    tables[tableId] = {
+      tableRow: fixture.tableRow,
+      seatRows: fixture.seatRows || [],
+      stateRow: fixture.stateRow || null,
+    };
+  }
+  await fs.writeFile(filePath, `${JSON.stringify({ tables })}
+`, "utf8");
+  return { dir, filePath };
 }
 
 function wsOn(ws, eventName, handler, { once = false } = {}) {
@@ -1510,5 +1530,152 @@ test("persisted bootstrap accepts legacy stringified poker_state for table_state
   } finally {
     child.kill("SIGTERM");
     await waitForExit(child);
+  }
+}));
+
+
+test("real authoritative join path stays stable without override shortcuts", async () => runSerial(async () => {
+  const secret = "real-auth-join-protocol-secret";
+  const tableId = "table_protocol_real_auth_join";
+  const fixtures = {
+    [tableId]: {
+      tableRow: { id: tableId, max_players: 6, status: "OPEN" },
+      seatRows: [{ user_id: "seed_other", seat_no: 2, status: "ACTIVE", is_bot: false }],
+      stateRow: { version: 3, state: { tableId, seats: [{ userId: "seed_other", seatNo: 2 }], stacks: { seed_other: 100 } } }
+    }
+  };
+  const { dir, filePath } = await writePersistedStateFile(fixtures);
+  const { port, child } = await createServer({
+    env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret, WS_PERSISTED_STATE_FILE: filePath, WS_AUTHORITATIVE_JOIN_ENABLED: "1" }
+  });
+
+  try {
+    await waitForListening(child, 5000);
+    const ws = await connectClient(port);
+    await hello(ws, "hello-real-auth");
+    await auth(ws, secret, "real_auth_actor", "auth-real-auth");
+
+    sendFrame(ws, { version: "1.0", type: "table_join", requestId: "real-auth-join-1", ts: "2026-02-28T05:10:00Z", payload: { tableId } });
+    const joined = await nextMessageOfType(ws, "table_state", 5000, "realAuthJoined");
+    assert.equal(joined.payload.members.some((m) => m.userId === "real_auth_actor" && m.seat === 1), true);
+    await expectNoFrameOfType(ws, ["resync", "error"], 800);
+
+    sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "real-auth-snap", ts: "2026-02-28T05:10:01Z", payload: { tableId, view: "snapshot" } });
+    const snap = await nextMessageOfType(ws, "stateSnapshot", 5000, "realAuthSnap");
+    assert.equal(snap.payload.you.userId, "real_auth_actor");
+    assert.equal(snap.payload.you.seat, 1);
+
+    ws.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+}));
+
+
+test("real authoritative join missing state row maps to state_missing error", async () => runSerial(async () => {
+  const secret = "real-auth-missing-state-secret";
+  const tableId = "table_protocol_real_auth_missing_state";
+  const fixtures = {
+    [tableId]: {
+      tableRow: { id: tableId, max_players: 6, status: "OPEN" },
+      seatRows: []
+    }
+  };
+  const { dir, filePath } = await writePersistedStateFile(fixtures);
+  const { port, child } = await createServer({
+    env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret, WS_PERSISTED_STATE_FILE: filePath, WS_AUTHORITATIVE_JOIN_ENABLED: "1" }
+  });
+
+  try {
+    await waitForListening(child, 5000);
+    const ws = await connectClient(port);
+    await hello(ws, "hello-real-auth-missing-state");
+    await auth(ws, secret, "real_auth_missing_state_actor", "auth-real-auth-missing-state");
+
+    sendFrame(ws, { version: "1.0", type: "table_join", requestId: "real-auth-missing-state-join", ts: "2026-02-28T05:40:00Z", payload: { tableId } });
+    const error = await nextMessageOfType(ws, "error", 5000, "realAuthMissingStateError");
+    assert.equal(error.payload.code, "state_missing");
+    assert.equal(error.payload.message, "state_missing");
+
+    ws.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+}));
+
+
+test("real authoritative join generic insert failure is not mislabeled seat_taken", async () => runSerial(async () => {
+  const secret = "real-auth-insert-fail-secret";
+  const tableId = "table_protocol_real_auth_insert_fail";
+  const fixtures = {
+    [tableId]: {
+      tableRow: { id: tableId, max_players: 6, status: "OPEN" },
+      seatRows: [],
+      stateRow: { version: 1, state: { tableId, seats: [], stacks: {} } }
+    }
+  };
+  const { dir, filePath } = await writePersistedStateFile(fixtures);
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      WS_PERSISTED_STATE_FILE: filePath,
+      WS_AUTHORITATIVE_JOIN_ENABLED: "1",
+      WS_TEST_JOIN_INSERT_FAIL_MODE: "generic"
+    }
+  });
+
+  try {
+    await waitForListening(child, 5000);
+    const ws = await connectClient(port);
+    await hello(ws, "hello-real-auth-insert-fail");
+    await auth(ws, secret, "real_auth_insert_fail_actor", "auth-real-auth-insert-fail");
+
+    sendFrame(ws, { version: "1.0", type: "table_join", requestId: "real-auth-insert-fail-join", ts: "2026-02-28T05:55:00Z", payload: { tableId } });
+    const error = await nextMessageOfType(ws, "error", 5000, "realAuthInsertFailError");
+    assert.equal(error.payload.code, "INTERNAL_ERROR");
+    assert.notEqual(error.payload.message, "seat_taken");
+
+    ws.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+}));
+
+test("real authoritative join does not auto-rejoin historical non-ACTIVE seat", async () => runSerial(async () => {
+  const secret = "real-auth-historical-seat-secret";
+  const tableId = "table_protocol_real_auth_historical_non_active";
+  const fixtures = {
+    [tableId]: {
+      tableRow: { id: tableId, max_players: 6, status: "OPEN" },
+      seatRows: [{ user_id: "historical_proto_user", seat_no: 1, status: "INACTIVE", is_bot: false }]
+    }
+  };
+  const { dir, filePath } = await writePersistedStateFile(fixtures);
+  const { port, child } = await createServer({
+    env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret, WS_PERSISTED_STATE_FILE: filePath, WS_AUTHORITATIVE_JOIN_ENABLED: "1" }
+  });
+
+  try {
+    await waitForListening(child, 5000);
+    const ws = await connectClient(port);
+    await hello(ws, "hello-real-auth-historical-seat");
+    await auth(ws, secret, "historical_proto_user", "auth-real-auth-historical-seat");
+
+    sendFrame(ws, { version: "1.0", type: "table_join", requestId: "real-auth-historical-seat-join", ts: "2026-02-28T05:56:00Z", payload: { tableId } });
+    const error = await nextMessageOfType(ws, "error", 5000, "realAuthHistoricalSeatError");
+    assert.equal(error.payload.code, "seat_taken");
+
+    ws.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+    await fs.rm(dir, { recursive: true, force: true });
   }
 }));

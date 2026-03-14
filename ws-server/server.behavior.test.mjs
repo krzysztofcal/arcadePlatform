@@ -3157,3 +3157,128 @@ test("table_state_sub and snapshot bootstrap succeed with legacy stringified per
     await fs.rm(dir, { recursive: true, force: true });
   }
 });
+
+test("authoritative join branch rehydrates from persisted source before attach", async () => {
+  const secret = "auth-join-branch-secret";
+  const tableId = "table_auth_join_branch";
+  const store = {
+    tables: {
+      [tableId]: {
+        tableRow: { id: tableId, max_players: 6, status: "OPEN" },
+        seatRows: [
+          { user_id: "branch_user", seat_no: 1, status: "ACTIVE", is_bot: false }
+        ],
+        stateRow: { version: 0, state: JSON.stringify({ tableId, seats: [{ userId: "branch_user", seatNo: 1 }], stacks: { branch_user: 25 } }) }
+      }
+    }
+  };
+  const { dir, filePath } = await writePersistedFile(store);
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      WS_PERSISTED_STATE_FILE: filePath,
+      WS_AUTHORITATIVE_JOIN_ENABLED: "1"
+    }
+  });
+
+  try {
+    await waitForListening(child, 5000);
+    const ws = await connectClient(port);
+    await hello(ws);
+    await auth(ws, makeHs256Jwt({ secret, sub: "branch_user" }), "auth-join-branch");
+
+    sendFrame(ws, { version: "1.0", type: "table_join", requestId: "join-branch", ts: "2026-02-28T05:00:00Z", payload: { tableId } });
+    const joined = await nextMessageOfType(ws, "table_state");
+    assert.deepEqual(joined.payload.members, [{ userId: "branch_user", seat: 1 }]);
+
+    sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "snap-branch", ts: "2026-02-28T05:00:01Z", payload: { tableId, view: "snapshot" } });
+    const snapshot = await nextMessageOfType(ws, "stateSnapshot");
+    assert.equal(snapshot.payload.you.userId, "branch_user");
+    ws.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+
+test("authoritative join missing state row returns protocol-safe state_missing", async () => {
+  const secret = "auth-join-missing-state-secret";
+  const tableId = "table_auth_join_missing_state";
+  const store = {
+    tables: {
+      [tableId]: {
+        tableRow: { id: tableId, max_players: 6, status: "OPEN" },
+        seatRows: []
+      }
+    }
+  };
+  const { dir, filePath } = await writePersistedFile(store);
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      WS_PERSISTED_STATE_FILE: filePath,
+      WS_AUTHORITATIVE_JOIN_ENABLED: "1"
+    }
+  });
+
+  try {
+    await waitForListening(child, 5000);
+    const ws = await connectClient(port);
+    await hello(ws);
+    await auth(ws, makeHs256Jwt({ secret, sub: "missing_state_user" }), "auth-join-missing-state");
+
+    sendFrame(ws, { version: "1.0", type: "table_join", requestId: "join-missing-state", ts: "2026-02-28T05:30:00Z", payload: { tableId } });
+    const error = await nextMessageOfType(ws, "error");
+    assert.equal(error.payload.code, "state_missing");
+    assert.equal(error.payload.message, "state_missing");
+    assert.notEqual(error.payload.code, "INTERNAL_ERROR");
+    ws.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+
+test("authoritative join with historical non-ACTIVE seat does not rejoin shortcut", async () => {
+  const secret = "auth-join-historical-seat-secret";
+  const tableId = "table_auth_join_historical_non_active";
+  const store = {
+    tables: {
+      [tableId]: {
+        tableRow: { id: tableId, max_players: 6, status: "OPEN" },
+        seatRows: [{ user_id: "historical_user", seat_no: 1, status: "INACTIVE", is_bot: false }]
+      }
+    }
+  };
+  const { dir, filePath } = await writePersistedFile(store);
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      WS_PERSISTED_STATE_FILE: filePath,
+      WS_AUTHORITATIVE_JOIN_ENABLED: "1"
+    }
+  });
+
+  try {
+    await waitForListening(child, 5000);
+    const ws = await connectClient(port);
+    await hello(ws);
+    await auth(ws, makeHs256Jwt({ secret, sub: "historical_user" }), "auth-join-historical");
+
+    sendFrame(ws, { version: "1.0", type: "table_join", requestId: "join-historical", ts: "2026-02-28T05:50:00Z", payload: { tableId } });
+    const error = await nextMessageOfType(ws, "error");
+    assert.equal(error.payload.code, "seat_taken");
+    ws.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
