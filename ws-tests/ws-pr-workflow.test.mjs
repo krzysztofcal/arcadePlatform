@@ -55,6 +55,7 @@ function assertRequiredOrder(text) {
   const install = block.indexOf("npm ci --prefix ws-server");
   const rootInstall = block.indexOf("\n        run: npm ci\n");
   const runtimeDepsGuard = block.indexOf("node --test ws-tests/ws-server-package-runtime-deps.guard.test.mjs");
+  const sharedJoinBehavior = block.indexOf("node --test shared/poker-domain/join.behavior.test.mjs");
   const behavior = block.indexOf("node --test ws-server/server.behavior.test.mjs");
   const locationGuard = block.indexOf("node --test ws-tests/ws-tests-location.guard.test.mjs");
   const suiteGuard = block.indexOf("node --test ws-tests/ws-tests-suite-completeness.guard.test.mjs");
@@ -79,6 +80,7 @@ function assertRequiredOrder(text) {
   assert.equal(rootInstall, -1);
   assert.notEqual(install, -1);
   assert.notEqual(runtimeDepsGuard, -1);
+  assert.notEqual(sharedJoinBehavior, -1);
   assert.notEqual(behavior, -1);
   assert.notEqual(locationGuard, -1);
   assert.notEqual(suiteGuard, -1);
@@ -86,7 +88,8 @@ function assertRequiredOrder(text) {
   assert.notEqual(imageCheck, -1);
   assert.notEqual(containerCheck, -1);
   assert.equal(install < runtimeDepsGuard, true);
-  assert.equal(runtimeDepsGuard < behavior, true);
+  assert.equal(runtimeDepsGuard < sharedJoinBehavior, true);
+  assert.equal(sharedJoinBehavior < behavior, true);
   assert.equal(behavior < locationGuard, true);
   assert.equal(locationGuard < suiteGuard, true);
   assert.equal(suiteGuard < protocolDoc, true);
@@ -99,6 +102,7 @@ test("ws pr workflow is pull_request-only with ws-related path filters", () => {
   assert.match(text, /on:\s*\n\s*pull_request:/);
   assert.match(text, /paths:\s*\n\s*-\s*"ws-server\/\*\*"/);
   assert.match(text, /"ws-tests\/\*\*"/);
+  assert.match(text, /"shared\/\*\*"/);
   assert.doesNotMatch(text, /push:/);
 });
 

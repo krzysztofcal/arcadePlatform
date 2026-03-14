@@ -10,11 +10,13 @@ test("ws-deploy keeps ws-tests trigger surface and runs harness checks", () => {
   const text = workflowText();
 
   assert.match(text, /"ws-tests\/\*\*"/);
+  assert.match(text, /"shared\/\*\*"/);
   assert.match(text, /"\.github\/workflows\/ws-deploy\.yml"/);
 
   const pushBlockMatch = text.match(/on:\n[\s\S]*?push:\n([\s\S]*?)\njobs:/);
   const pushBlock = pushBlockMatch ? pushBlockMatch[1] : "";
   assert.match(pushBlock, /"ws-server\/\*\*"/);
+  assert.match(pushBlock, /"shared\/\*\*"/);
 
   assert.match(text, /node --test ws-tests\/ws-deploy-workflow\.test\.mjs/);
   assert.match(text, /node --test ws-tests\/ws-tests-suite-completeness\.guard\.test\.mjs/);
@@ -23,6 +25,7 @@ test("ws-deploy keeps ws-tests trigger surface and runs harness checks", () => {
   assert.match(text, /node --test ws-tests\/ws-server-deploy-artifact-path\.test\.mjs/);
   assert.match(text, /node --test ws-tests\/ws-server-deploy-rollout\.test\.mjs/);
   assert.match(text, /node --test ws-tests\/ws-docker-leave-runtime\.guard\.test\.mjs/);
+  assert.match(text, /node --test shared\/poker-domain\/join\.behavior\.test\.mjs/);
   assert.match(text, /Validate ws Dockerfile build contract \(repo-root context\)/);
   assert.match(text, /docker build -t arcadeplatform-ws-contract:\$\{\{ github\.sha \}\} -f ws-server\/Dockerfile \./);
   assert.doesNotMatch(text, /docker build[^\n]*-f ws-server\/Dockerfile \.\/ws-server/);
@@ -86,6 +89,7 @@ test("ws-deploy trigger surface includes ws-server runtime changes", () => {
   const pushBlockMatch = text.match(/on:\n[\s\S]*?push:\n([\s\S]*?)\njobs:/);
   const pushBlock = pushBlockMatch ? pushBlockMatch[1] : "";
   assert.match(pushBlock, /"ws-server\/\*\*"/);
+  assert.match(pushBlock, /"shared\/\*\*"/);
 });
 
 
@@ -104,11 +108,26 @@ test("ws-deploy keeps Docker artifact contract parity with repo-root context", (
 });
 
 
-test("ws-deploy runs runtime deps guard test before ws behavior test", () => {
+test("ws-deploy runs runtime deps guard test and shared join behavior test before ws behavior test", () => {
   const text = workflowText();
   const guardIndex = text.indexOf("node --test ws-tests/ws-server-package-runtime-deps.guard.test.mjs");
+  const sharedJoinBehaviorIndex = text.indexOf("node --test shared/poker-domain/join.behavior.test.mjs");
   const behaviorIndex = text.indexOf("node --test ws-server/server.behavior.test.mjs");
   assert.notEqual(guardIndex, -1);
+  assert.notEqual(sharedJoinBehaviorIndex, -1);
   assert.notEqual(behaviorIndex, -1);
-  assert.equal(guardIndex < behaviorIndex, true);
+  assert.equal(guardIndex < sharedJoinBehaviorIndex, true);
+  assert.equal(sharedJoinBehaviorIndex < behaviorIndex, true);
+});
+
+
+test("ws-deploy shared authoritative join dependency is trigger-covered and artifact-covered", () => {
+  const text = workflowText();
+  const pushBlockMatch = text.match(/on:\n[\s\S]*?push:\n([\s\S]*?)\njobs:/);
+  const pushBlock = pushBlockMatch ? pushBlockMatch[1] : "";
+
+  assert.match(pushBlock, /"shared\/\*\*"/);
+  assert.match(text, /docker build -t arcadeplatform-ws-contract:\$\{\{ github\.sha \}\} -f ws-server\/Dockerfile \./);
+  assert.match(text, /node --test shared\/poker-domain\/join\.behavior\.test\.mjs/);
+  assert.match(text, /node --test ws-tests\/ws-image-contains-protocol\.behavior\.test\.mjs/);
 });
