@@ -2,6 +2,53 @@ function asPlainObject(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : null;
 }
 
+function looksLikeJsonString(value) {
+  if (typeof value !== "string") {
+    return false;
+  }
+  const trimmed = value.trim();
+  return (trimmed.startsWith("{") && trimmed.endsWith("}")) || (trimmed.startsWith("[") && trimmed.endsWith("]"));
+}
+
+function normalizeJsonDeep(value) {
+  if (value == null) {
+    return value;
+  }
+
+  if (typeof value === "string" && looksLikeJsonString(value)) {
+    try {
+      return normalizeJsonDeep(JSON.parse(value.trim()));
+    } catch {
+      return value;
+    }
+  }
+
+  if (Array.isArray(value)) {
+    return value.map(normalizeJsonDeep);
+  }
+
+  if (typeof value === "object") {
+    const out = {};
+    for (const [key, nestedValue] of Object.entries(value)) {
+      out[key] = normalizeJsonDeep(nestedValue);
+    }
+    return out;
+  }
+
+  return value;
+}
+
+function normalizeRow(row) {
+  if (!row || typeof row !== "object") {
+    return row;
+  }
+  const out = {};
+  for (const [key, value] of Object.entries(row)) {
+    out[key] = normalizeJsonDeep(value);
+  }
+  return out;
+}
+
 function normalizeMaxSeats(rawMaxSeats) {
   const parsed = Number(rawMaxSeats);
   if (!Number.isInteger(parsed) || parsed < 1 || parsed > 10) {
@@ -67,8 +114,9 @@ export function adaptPersistedBootstrap({ tableId, tableRow, seatRows, stateRow 
     return { ok: false, code: "invalid_persisted_state", message: "invalid_persisted_state" };
   }
 
-  const stateVersion = normalizeStateVersion(stateRow.version);
-  const pokerState = asPlainObject(stateRow.state);
+  const normalizedStateRow = normalizeRow(stateRow);
+  const stateVersion = normalizeStateVersion(normalizedStateRow.version);
+  const pokerState = asPlainObject(normalizedStateRow.state);
   if (stateVersion === null || !pokerState) {
     return { ok: false, code: "invalid_persisted_state", message: "invalid_persisted_state" };
   }

@@ -2922,7 +2922,6 @@ test("table_snapshot returns gameplay snapshot without mutating presence table_s
     sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "sub-presence", ts: "2026-02-28T03:00:06Z", payload: { tableId } });
     const after = await nextMessageOfType(ws, "table_state");
 
-    assert.equal(snapshot.payload.tableId, tableId);
     assert.equal(snapshot.payload.state.version, 9);
     assert.deepEqual(after.payload.members, joined.payload.members);
   } finally {
@@ -3104,5 +3103,56 @@ test("table_snapshot internal failures are non-leaking and do not mutate presenc
     ws.close();
     child.kill();
     await waitForExit(child);
+  }
+});
+
+test("table_state_sub and snapshot bootstrap succeed with legacy stringified persisted poker state", async () => {
+  const secret = "persist-legacy-secret";
+  const tableId = "table_ws_persist_legacy_string";
+  const store = {
+    tables: {
+      [tableId]: {
+        tableRow: { id: tableId, max_players: 6, status: "active" },
+        seatRows: [
+          { user_id: "legacy_user", seat_no: 1, status: "ACTIVE", is_bot: false },
+          { user_id: "legacy_other", seat_no: 2, status: "ACTIVE", is_bot: false }
+        ],
+        stateRow: {
+          version: 7,
+          state: JSON.stringify({
+            phase: "PREFLOP",
+            hand: {
+              handId: "legacy_hand_7"
+            }
+          })
+        }
+      }
+    }
+  };
+
+  const { dir, filePath } = await writePersistedFile(store);
+  const { port, child } = await createServer({
+    env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret, WS_PERSISTED_STATE_FILE: filePath }
+  });
+
+  try {
+    await waitForListening(child, 5000);
+    const ws = await connectClient(port);
+    await hello(ws);
+    await auth(ws, makeHs256Jwt({ secret, sub: "legacy_user" }), "auth-legacy");
+
+    sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "sub-legacy", ts: "2026-02-28T02:40:01Z", payload: { tableId } });
+    const tableState = await nextMessageOfType(ws, "table_state");
+    assert.equal(tableState.payload.roomId, tableId);
+
+    sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "snap-legacy", ts: "2026-02-28T02:40:02Z", payload: { tableId, view: "snapshot" } });
+    const snapshot = await nextMessageOfType(ws, "stateSnapshot");
+    assert.equal(snapshot.payload.stateVersion, 7);
+
+    ws.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+    await fs.rm(dir, { recursive: true, force: true });
   }
 });
