@@ -34,3 +34,50 @@ test("adapter rejects malformed persisted state", () => {
   assert.equal(result.ok, false);
   assert.equal(result.code, "invalid_persisted_state");
 });
+
+test("adapter accepts legacy stringified persisted poker state JSON", () => {
+  const result = adaptPersistedBootstrap({
+    tableId: "table_legacy",
+    tableRow: { id: "table_legacy", max_players: 6 },
+    seatRows: [{ user_id: "user_a", seat_no: 1, status: "ACTIVE" }],
+    stateRow: {
+      version: 4,
+      state: JSON.stringify({
+        phase: "PREFLOP",
+        hand: { handId: "h_legacy", pots: JSON.stringify([{ amount: 120 }]) }
+      })
+    }
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.table.coreState.version, 4);
+  assert.equal(result.table.coreState.pokerState.phase, "PREFLOP");
+  assert.deepEqual(result.table.coreState.pokerState.hand, {
+    handId: "h_legacy",
+    pots: [{ amount: 120 }]
+  });
+});
+
+test("adapter still rejects scalar string persisted poker state", () => {
+  const result = adaptPersistedBootstrap({
+    tableId: "table_scalar",
+    tableRow: { id: "table_scalar", max_players: 6 },
+    seatRows: [{ user_id: "user_a", seat_no: 1, status: "ACTIVE" }],
+    stateRow: { version: 2, state: "legacy-scalar" }
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, "invalid_persisted_state");
+});
+
+test("adapter still rejects malformed stringified persisted poker state", () => {
+  const result = adaptPersistedBootstrap({
+    tableId: "table_bad_json",
+    tableRow: { id: "table_bad_json", max_players: 6 },
+    seatRows: [{ user_id: "user_a", seat_no: 1, status: "ACTIVE" }],
+    stateRow: { version: 2, state: "{\"phase\":" }
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, "invalid_persisted_state");
+});

@@ -1386,3 +1386,58 @@ test("authoritative invalid-success-shape leave (actor still in seats) is reject
     await waitForExit(child);
   }
 }));
+
+test("persisted bootstrap accepts legacy stringified poker_state for table_state_sub and snapshot", async () => runSerial(async () => {
+  const secret = "test-secret";
+  const tableId = "table_legacy_stringified_state";
+  const fixtures = {
+    [tableId]: {
+      tableRow: { id: tableId, max_players: 2, status: "active" },
+      seatRows: [
+        { user_id: "seed_user", seat_no: 1, status: "ACTIVE", is_bot: false }
+      ],
+      stateRow: {
+        version: 5,
+        state: JSON.stringify({ phase: "PREFLOP", hand: { handId: "legacy_protocol_hand" } })
+      }
+    }
+  };
+
+  const { port, child } = await createServer({
+    env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret, ...observeOnlyJoinEnv(), ...persistedBootstrapFixturesEnv(fixtures) }
+  });
+
+  try {
+    await waitForListening(child, 5000);
+    const ws = await connectClient(port);
+
+    await hello(ws, "req-hello-legacy-string");
+    assert.equal((await auth(ws, secret, "legacy_seed_user", "req-auth-legacy-string")).type, "authOk");
+
+    sendFrame(ws, {
+      version: "1.0",
+      type: "table_state_sub",
+      requestId: "req-sub-legacy-string",
+      ts: "2026-02-28T00:10:01Z",
+      payload: { tableId }
+    });
+    const state = await nextMessage(ws, 5000, "legacyStringState");
+    assert.equal(state.type, "table_state");
+
+    sendFrame(ws, {
+      version: "1.0",
+      type: "table_state_sub",
+      requestId: "req-snap-legacy-string",
+      ts: "2026-02-28T00:10:02Z",
+      payload: { tableId, view: "snapshot" }
+    });
+    const snapshot = await nextMessage(ws, 5000, "legacyStringSnapshot");
+    assert.equal(snapshot.type, "stateSnapshot");
+    assert.equal(snapshot.payload.stateVersion, 5);
+
+    ws.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+}));
