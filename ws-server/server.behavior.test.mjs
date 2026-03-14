@@ -241,6 +241,7 @@ function attemptMessage(ws, timeoutMs = 300) {
   });
 }
 
+
 function sendFrame(ws, frame) {
   ws.send(JSON.stringify(frame));
 }
