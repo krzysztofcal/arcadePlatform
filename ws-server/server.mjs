@@ -777,6 +777,7 @@ wss.on("connection", (ws) => {
       }
 
       sessionStore.trackConnection({ ws, userId: connState.session.userId, sessionId: connState.session.sessionId });
+      const preJoinPersistedVersion = tableManager.persistedStateVersion(tableId);
       const joined = tableManager.join({
         ws,
         userId: connState.session.userId,
@@ -796,14 +797,40 @@ wss.on("connection", (ws) => {
       const joinedSnapshot = tableManager.tableSnapshot(tableId, connState.session.userId);
       sendTableState(ws, connState, { requestId: frame.requestId ?? null, tableState: joined.tableState, tableSnapshot: joinedSnapshot });
 
-      const bootstrapped = tableManager.bootstrapHand(tableId, { nowMs: Date.now() });
       if (joined.changed) {
+        const joinExpectedVersion = preJoinPersistedVersion;
+        if (!Number.isInteger(joinExpectedVersion) || joinExpectedVersion < 0) {
+          sendError(ws, connState, {
+            code: "INTERNAL_ERROR",
+            message: "state_persist_failed",
+            requestId: frame.requestId ?? null
+          });
+          return;
+        }
+        const joinPersisted = await persistMutatedState({
+          tableId,
+          expectedVersion: joinExpectedVersion,
+          mutationKind: "join"
+        });
+        if (!joinPersisted?.ok) {
+          await restoreTableFromPersisted(tableId);
+          broadcastResyncRequired(tableId, "persistence_conflict");
+          sendError(ws, connState, {
+            code: "INTERNAL_ERROR",
+            message: "state_persist_failed",
+            requestId: frame.requestId ?? null
+          });
+          return;
+        }
         broadcastTableState(tableId, { excludeWs: ws });
       }
+
+      const bootstrapExpectedVersion = tableManager.persistedStateVersion(tableId);
+      const bootstrapped = tableManager.bootstrapHand(tableId, { nowMs: Date.now() });
       if (bootstrapped?.changed) {
         const persisted = await persistMutatedState({
           tableId,
-          expectedVersion: Number(bootstrapped.stateVersion) - 1,
+          expectedVersion: bootstrapExpectedVersion,
           mutationKind: "bootstrap"
         });
         if (!persisted?.ok) {

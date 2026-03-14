@@ -1387,6 +1387,77 @@ test("authoritative invalid-success-shape leave (actor still in seats) is reject
   }
 }));
 
+test("persisted table_join does not immediately resync due to false bootstrap conflict and repeat join is idempotent", async () => runSerial(async () => {
+  const secret = "persisted-join-chain-secret";
+  const tableId = "table_protocol_persisted_join_chain";
+  const fixtures = {
+    [tableId]: {
+      tableRow: { id: tableId, max_players: 6, status: "active" },
+      seatRows: [{ user_id: "seed_other", seat_no: 2, status: "ACTIVE", is_bot: false }],
+      stateRow: { version: 12, state: {} }
+    }
+  };
+
+  const { port, child } = await createServer({
+    env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret, ...persistedBootstrapFixturesEnv(fixtures) }
+  });
+
+  try {
+    await waitForListening(child, 5000);
+    const ws = await connectClient(port);
+    await hello(ws, "hello-persisted-join-chain");
+    await auth(ws, secret, "join_chain_actor", "auth-persisted-join-chain");
+
+    sendFrame(ws, {
+      version: "1.0",
+      type: "table_join",
+      requestId: "join-chain-1",
+      ts: "2026-02-28T05:00:00Z",
+      payload: { tableId }
+    });
+    const joined = await nextMessageOfType(ws, "table_state", 5000, "joinedChain1");
+    assert.deepEqual(joined.payload.members, [{ userId: "join_chain_actor", seat: 1 }]);
+    await expectNoFrameOfType(ws, ["resync", "error"], 800);
+
+    sendFrame(ws, {
+      version: "1.0",
+      type: "table_state_sub",
+      requestId: "join-chain-snap-1",
+      ts: "2026-02-28T05:00:01Z",
+      payload: { tableId, view: "snapshot" }
+    });
+    const snap1 = await nextMessageOfType(ws, "stateSnapshot", 5000, "snapChain1");
+    assert.equal(snap1.payload.you.userId, "join_chain_actor");
+    assert.equal(snap1.payload.you.seat, 1);
+
+    sendFrame(ws, {
+      version: "1.0",
+      type: "table_join",
+      requestId: "join-chain-2",
+      ts: "2026-02-28T05:00:02Z",
+      payload: { tableId }
+    });
+    const joinedRepeat = await nextMessageOfType(ws, "table_state", 5000, "joinedChain2");
+    assert.deepEqual(joinedRepeat.payload.members, joined.payload.members);
+
+    sendFrame(ws, {
+      version: "1.0",
+      type: "table_state_sub",
+      requestId: "join-chain-snap-2",
+      ts: "2026-02-28T05:00:03Z",
+      payload: { tableId, view: "snapshot" }
+    });
+    const snap2 = await nextMessageOfType(ws, "stateSnapshot", 5000, "snapChain2");
+    assert.equal(snap2.payload.you.seat, 1);
+    assert.equal(snap2.payload.stateVersion >= snap1.payload.stateVersion, true);
+
+    ws.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+}));
+
 test("persisted bootstrap accepts legacy stringified poker_state for table_state_sub and snapshot", async () => runSerial(async () => {
   const secret = "test-secret";
   const tableId = "table_legacy_stringified_state";

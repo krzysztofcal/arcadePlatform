@@ -138,9 +138,11 @@ export function createTableManager({
 
   function ensureTable(tableId) {
     if (!tables.has(tableId)) {
+      const initialCoreState = createInitialCoreState({ roomId: tableId, maxSeats });
       tables.set(tableId, {
         tableId,
-        coreState: createInitialCoreState({ roomId: tableId, maxSeats }),
+        coreState: initialCoreState,
+        persistedStateVersion: Number.isInteger(initialCoreState.version) ? initialCoreState.version : 0,
         presenceByUserId: new Map(),
         subscribers: new Set(),
         actionResultsByRequestId: new Map()
@@ -180,8 +182,11 @@ export function createTableManager({
         };
       }
 
-      tables.set(tableId, loaded.table);
-      return { ok: true, table: loaded.table, cached: false };
+      const loadedTable = loaded.table;
+      const loadedVersion = Number(loadedTable?.coreState?.version);
+      loadedTable.persistedStateVersion = Number.isInteger(loadedVersion) && loadedVersion >= 0 ? loadedVersion : 0;
+      tables.set(tableId, loadedTable);
+      return { ok: true, table: loadedTable, cached: false };
     })();
 
     pendingBootstrapByTableId.set(tableId, bootstrapPromise);
@@ -849,8 +854,17 @@ export function createTableManager({
     if (!table || !Number.isInteger(stateVersion) || stateVersion < 0) {
       return { ok: false };
     }
-    table.coreState.version = stateVersion;
+    table.persistedStateVersion = stateVersion;
     return { ok: true };
+  }
+
+  function persistedStateVersion(tableId) {
+    const table = tables.get(tableId);
+    const stateVersion = Number(table?.persistedStateVersion);
+    if (!Number.isInteger(stateVersion) || stateVersion < 0) {
+      return null;
+    }
+    return stateVersion;
   }
 
   function restoreTableFromPersisted(tableId, restoredTable) {
@@ -877,6 +891,9 @@ export function createTableManager({
     }
 
     table.coreState = restoredCoreState;
+    table.persistedStateVersion = Number.isInteger(restoredCoreState.version) && restoredCoreState.version >= 0
+      ? restoredCoreState.version
+      : table.persistedStateVersion;
     table.presenceByUserId = nextPresenceByUserId;
     table.actionResultsByRequestId.clear();
     return { ok: true };
@@ -967,6 +984,7 @@ export function createTableManager({
     resolveImplicitLeaveTableId,
     sweepExpiredPresence,
     persistedPokerState,
+    persistedStateVersion,
     setPersistedStateVersion,
     restoreTableFromPersisted
   };
