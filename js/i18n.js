@@ -115,7 +115,12 @@
     pokerCopyLog: { en: 'Copy hand log', pl: 'Kopiuj log rozdania' },
     pokerCopyLogPending: { en: 'Copying...', pl: 'Kopiowanie...' },
     pokerCopyLogOk: { en: 'Log copied', pl: 'Log skopiowany' },
-    pokerCopyLogFail: { en: 'Failed to export log', pl: 'Nie udało się wyeksportować logu' }
+    pokerCopyLogFail: { en: 'Failed to export log', pl: 'Nie udało się wyeksportować logu' },
+    pokerDumpLogs: { en: 'Dump logs', pl: 'Zrzut logów' },
+    pokerDumpLogsPending: { en: 'Dumping...', pl: 'Zrzucanie...' },
+    pokerDumpLogsOk: { en: 'Poker logs copied', pl: 'Logi pokera skopiowane' },
+    pokerDumpLogsFail: { en: 'Failed to copy logs', pl: 'Nie udało się skopiować logów' },
+    pokerDumpLogsEmpty: { en: 'No poker client logs to copy', pl: 'Brak logów klienta pokera do skopiowania' }
   };
 
   let currentLang = 'en';
