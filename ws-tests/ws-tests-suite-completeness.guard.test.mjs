@@ -31,6 +31,11 @@ const REQUIRED_PERSISTED_BOOTSTRAP_BEHAVIOR_TESTS = [
   "ws-server/poker/bootstrap/persisted-bootstrap-adapter.behavior.test.mjs",
   "ws-server/poker/bootstrap/persisted-bootstrap-repository.behavior.test.mjs"
 ];
+
+const REQUIRED_WS_ACT_HANDLER_BEHAVIOR_TESTS = [
+  "ws-server/poker/handlers/act.behavior.test.mjs",
+  "ws-server/poker/handlers/act.invalid.behavior.test.mjs"
+];
 const EXCLUDED_FROM_PR = new Set([
   "ws-tests/ws-deploy-workflow.test.mjs",
   "ws-tests/ws-lockfile-integrity.test.mjs",
@@ -196,5 +201,16 @@ test("persisted bootstrap behavior tests are wired in both PR and deploy workflo
     const command = `node --test ${file}`;
     assert.ok(prWorkflow.includes(command), `Missing persisted bootstrap test in PR workflow: ${file}`);
     assert.ok(deployWorkflow.includes(command), `Missing persisted bootstrap test in deploy workflow: ${file}`);
+  }
+});
+
+test("WS act handler behavior tests are wired in both PR and deploy workflows", () => {
+  const prWorkflow = workflowText(".github/workflows/ws-pr-checks.yml");
+  const deployWorkflow = workflowText(".github/workflows/ws-deploy.yml");
+
+  for (const file of REQUIRED_WS_ACT_HANDLER_BEHAVIOR_TESTS) {
+    const command = `node --test ${file}`;
+    assert.ok(prWorkflow.includes(command), `Missing WS act handler test in PR workflow: ${file}`);
+    assert.ok(deployWorkflow.includes(command), `Missing WS act handler test in deploy workflow: ${file}`);
   }
 });

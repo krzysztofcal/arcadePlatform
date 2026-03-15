@@ -53,6 +53,13 @@ jobs:
 
       - name: Run ws table manager behavior test
         run: node --test ws-server/poker/table/table-manager.behavior.test.mjs
+
+      - name: Run ws act handler behavior test
+        run: node --test ws-server/poker/handlers/act.behavior.test.mjs
+
+      - name: Run ws act handler invalid behavior test
+        run: node --test ws-server/poker/handlers/act.invalid.behavior.test.mjs
+
       - name: Run authoritative leave adapter behavior test
         run: node --test ws-server/poker/persistence/authoritative-leave-adapter.behavior.test.mjs
 

@@ -40,6 +40,10 @@ test("ws-deploy keeps ws-tests trigger surface and runs harness checks", () => {
   assert.match(text, /Run ws poker engine bootstrap behavior test/);
   assert.match(text, /node --test ws-server\/poker\/engine\/engine-bootstrap\.behavior\.test\.mjs/);
   assert.match(text, /Run ws poker engine act behavior test/);
+  assert.match(text, /Run ws act handler behavior test/);
+  assert.match(text, /node --test ws-server\/poker\/handlers\/act\.behavior\.test\.mjs/);
+  assert.match(text, /Run ws act handler invalid behavior test/);
+  assert.match(text, /node --test ws-server\/poker\/handlers\/act\.invalid\.behavior\.test\.mjs/);
   assert.match(text, /node --test ws-server\/poker\/engine\/engine-act\.behavior\.test\.mjs/);
   assert.match(text, /Run ws poker engine rollover behavior test/);
   assert.match(text, /node --test ws-server\/poker\/engine\/engine-rollover\.behavior\.test\.mjs/);

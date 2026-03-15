@@ -41,6 +41,7 @@
     var started = false;
     var authOk = false;
     var initialSnapshotDelivered = false;
+    var pendingCommandsByRequestId = new Map();
 
     function emitStatus(status, data){
       try { onStatus(status, data || {}); } catch (_err){}
@@ -50,19 +51,69 @@
       try { onProtocolError({ code: code, detail: detail || null }); } catch (_err){}
     }
 
-    function send(type, payload){
+    function send(type, payload, requestIdOverride){
       if (!ws || ws.readyState !== 1) return false;
       var roomId = tableId ? tableId : null;
+      var requestId = typeof requestIdOverride === 'string' && requestIdOverride.trim() ? requestIdOverride.trim() : buildRequestId();
       var envelope = {
         version: '1.0',
         type: type,
-        requestId: buildRequestId(),
+        requestId: requestId,
         ts: new Date().toISOString(),
         payload: payload || {}
       };
       if (roomId) envelope.roomId = roomId;
       ws.send(JSON.stringify(envelope));
-      return true;
+      return requestId;
+    }
+
+    function rejectPendingCommands(reasonCode){
+      var code = reasonCode || 'connection_closed';
+      pendingCommandsByRequestId.forEach(function(entry){
+        if (!entry || typeof entry.reject !== 'function') return;
+        var err = new Error(code);
+        err.code = code;
+        entry.reject(err);
+      });
+      pendingCommandsByRequestId.clear();
+    }
+
+    function sendAct(command){
+      var payload = command && typeof command === 'object' ? command : {};
+      var handId = typeof payload.handId === 'string' ? payload.handId.trim() : '';
+      var action = typeof payload.action === 'string' ? payload.action.trim().toUpperCase() : '';
+      var requestId = typeof payload.requestId === 'string' ? payload.requestId.trim() : '';
+      if (!authOk || !ws || ws.readyState !== 1){
+        var notReadyErr = new Error('ws_unavailable');
+        notReadyErr.code = 'ws_unavailable';
+        return Promise.reject(notReadyErr);
+      }
+      if (!requestId || !handId || !action){
+        var invalidErr = new Error('invalid_command');
+        invalidErr.code = 'invalid_command';
+        return Promise.reject(invalidErr);
+      }
+
+      return new Promise(function(resolve, reject){
+        var sentRequestId = send('act', {
+          tableId: tableId,
+          handId: handId,
+          action: action,
+          amount: payload.amount
+        }, requestId);
+
+        if (!sentRequestId){
+          var sendErr = new Error('ws_unavailable');
+          sendErr.code = 'ws_unavailable';
+          reject(sendErr);
+          return;
+        }
+
+        pendingCommandsByRequestId.set(sentRequestId, {
+          resolve: resolve,
+          reject: reject
+        });
+      });
     }
 
     function normalizeSnapshot(frame, initial){
@@ -135,6 +186,19 @@
         return;
       }
       if (frame.type === 'commandResult'){
+        var commandRequestId = typeof frame.requestId === 'string' && frame.requestId.trim() ? frame.requestId.trim() : (frame.payload && typeof frame.payload.requestId === 'string' ? frame.payload.requestId.trim() : '');
+        if (commandRequestId && pendingCommandsByRequestId.has(commandRequestId)){
+          var pending = pendingCommandsByRequestId.get(commandRequestId);
+          pendingCommandsByRequestId.delete(commandRequestId);
+          if (frame.payload && frame.payload.status === 'accepted'){
+            pending.resolve({ ok: true, status: 'accepted', reason: null, requestId: commandRequestId });
+          } else {
+            var rejectedCode = frame.payload && frame.payload.reason ? frame.payload.reason : 'command_rejected';
+            var rejectedErr = new Error(rejectedCode);
+            rejectedErr.code = rejectedCode;
+            pending.reject(rejectedErr);
+          }
+        }
         emitStatus('command_result', {
           status: frame.payload && frame.payload.status ? frame.payload.status : null,
           reason: frame.payload && frame.payload.reason ? frame.payload.reason : null
@@ -152,6 +216,14 @@
       }
       if (frame.type === 'error'){
         var code = frame.payload && frame.payload.code ? frame.payload.code : 'ws_error';
+        var errorRequestId = typeof frame.requestId === 'string' && frame.requestId.trim() ? frame.requestId.trim() : '';
+        if (errorRequestId && pendingCommandsByRequestId.has(errorRequestId)){
+          var pendingError = pendingCommandsByRequestId.get(errorRequestId);
+          pendingCommandsByRequestId.delete(errorRequestId);
+          var commandErr = new Error(code);
+          commandErr.code = code;
+          pendingError.reject(commandErr);
+        }
         emitStatus('error', { code: code });
         emitProtocolError(code, frame.payload && frame.payload.message ? frame.payload.message : null);
       }
@@ -192,6 +264,7 @@
         emitStatus('failed', { stage: 'socket', code: 'socket_error' });
       };
       ws.onclose = function(evt){
+        rejectPendingCommands('connection_closed');
         emitStatus('closed', { code: evt && evt.code ? evt.code : null });
       };
     }
@@ -200,6 +273,7 @@
       destroyed = true;
       started = false;
       authOk = false;
+      rejectPendingCommands('client_shutdown');
       if (ws && ws.readyState <= 1){
         try { ws.close(1000, 'client_shutdown'); } catch (_err){}
       }
@@ -208,7 +282,8 @@
 
     return {
       start: start,
-      destroy: destroy
+      destroy: destroy,
+      sendAct: sendAct
     };
   }
 
