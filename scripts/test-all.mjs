@@ -151,6 +151,12 @@ run("node", ["tests/poker-get-table.me-isSeated.db-shape.behavior.test.mjs"], "p
 run("node", ["tests/poker-get-table.me-notSeated.db-shape.behavior.test.mjs"], "poker-get-table-me-notseated-db-shape-behavior");
 run("node", ["tests/poker-materialize-settlement.payouts.test.mjs"], "poker-materialize-settlement-payouts");
 
+run("node", ["tests/poker-ui.behavior.test.mjs"], "poker-ui-behavior");
+run("node", ["tests/i18n.behavior.test.mjs"], "i18n-behavior");
+run("node", ["tests/static-html.behavior.test.mjs"], "static-html-behavior");
+run("node", ["tests/poker-ui-stopPendingAll.guard.test.mjs"], "poker-ui-stopPendingAll-guard");
+run("node", ["tests/test-all.runner-registration.guard.test.mjs"], "test-all-runner-registration-guard");
+
 try { run("npm", ["run", "-s", "lint:games"], "unit"); } catch { /* optional */ }
 
 if (has("CLI")) {

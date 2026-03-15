@@ -1854,6 +1854,7 @@
       clearStartHandPending();
       clearActPending();
       clearCopyLogPending();
+      clearDumpLogsPending();
     }
 
     function pauseJoinPending(){
