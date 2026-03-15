@@ -87,8 +87,10 @@ test("ws snapshot gating upgrades on higher version and ignores stale payloads",
     var pendingWsSnapshot = null;
     var tableId = 'table_rich';
     var renderCount = 0;
+    var stopPollingCalls = 0;
     function klog(){}
     function renderTable(){ renderCount++; }
+    function stopPolling(){ stopPollingCalls++; }
     function isCurrentUserSeated(){ return false; }
     function isPlainObject(value){ return !!(value && typeof value === 'object' && !Array.isArray(value)); }
     function toFiniteOrNull(value){ var n = Number(value); if (!Number.isFinite(n) || Math.floor(n) !== n || n < 0) return null; return n; }
@@ -99,7 +101,8 @@ test("ws snapshot gating upgrades on higher version and ignores stale payloads",
       applyWsSnapshot,
       setTableData: function(v){ tableData = v; },
       getTableData: function(){ return tableData; },
-      getRenderCount: function(){ return renderCount; }
+      getRenderCount: function(){ return renderCount; },
+      getStopPollingCalls: function(){ return stopPollingCalls; }
     };
   `);
 
@@ -115,9 +118,11 @@ test("ws snapshot gating upgrades on higher version and ignores stale payloads",
   h.applyWsSnapshot({ type: "table_state", payload: { tableId: "table_rich", stateVersion: 11, authoritativeMembers: [{ userId: "u1", seat: 0 }], hand: { status: "RIVER" } } });
   assert.equal(h.getTableData().state.version, 11);
   assert.equal(h.getRenderCount(), 1);
+  assert.equal(h.getStopPollingCalls(), 1);
 
   h.applyWsSnapshot({ type: "table_state", payload: { tableId: "table_rich", stateVersion: 9, authoritativeMembers: [{ userId: "stale", seat: 0 }] } });
   assert.equal(h.getTableData().state.version, 11);
   assert.equal(h.getTableData().seats[0].userId, "u1");
   assert.equal(h.getRenderCount(), 1);
+  assert.equal(h.getStopPollingCalls(), 1);
 });

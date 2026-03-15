@@ -1164,6 +1164,7 @@
     function shouldApplyWsSnapshot(snapshotPayload, options){
       var opts = options && typeof options === 'object' ? options : {};
       if (!snapshotPayload || typeof snapshotPayload !== 'object') return false;
+      if (snapshotPayload.tableId && snapshotPayload.tableId !== tableId) return false;
       if (!tableData || typeof tableData !== 'object'){
         return opts.allowWhenNoBaseline === true;
       }
@@ -1187,6 +1188,7 @@
       tableData = mergedData;
       isSeated = isCurrentUserSeated(tableData);
       renderTable(tableData);
+      stopPolling();
       wsSnapshotSeen = true;
       pendingWsSnapshot = null;
       return true;
@@ -1226,15 +1228,30 @@
         members: Array.isArray(payload.members) ? payload.members.length : 0,
         incomingStateVersion: incomingVersion,
         currentStateVersion: currentVersion,
-        reason: incomingVersion == null ? 'unversioned_over_versioned_or_disallowed' : 'stale_or_equal_version'
+        reason: (payload.tableId && payload.tableId !== tableId) ? 'table_mismatch' : (incomingVersion == null ? 'unversioned_over_versioned_or_disallowed' : 'stale_or_equal_version')
       });
     }
 
 
+    function startPollingFallback(reason){
+      if (state.polling) return;
+      if (!isPageActive()) return;
+      if (reason){
+        klog('poker_http_fallback_start', {
+          tableId: tableId,
+          reason: reason
+        });
+      }
+      startPolling();
+    }
+
     function startWsBootstrap(){
       if (wsStarted) return;
       if (!tableId || !currentUserId) return;
-      if (!window.PokerWsClient || typeof window.PokerWsClient.create !== 'function') return;
+      if (!window.PokerWsClient || typeof window.PokerWsClient.create !== 'function'){
+        startPollingFallback('ws_client_missing');
+        return;
+      }
       wsStarted = true;
       wsClient = window.PokerWsClient.create({
         tableId: tableId,
@@ -1254,16 +1271,21 @@
         },
         onProtocolError: function(info){
           wsStarted = false;
-          klog('poker_ws_protocol_error', {
+              klog('poker_ws_protocol_error', {
             tableId: tableId,
             code: info && info.code ? info.code : 'unknown_error',
             detail: info && info.detail ? info.detail : null
           });
+          startPollingFallback(info && info.code ? info.code : 'protocol_error');
+          loadTable(false);
         }
       });
       if (wsClient && typeof wsClient.start === 'function'){
         klog('poker_ws_bootstrap_start', { tableId: tableId });
         wsClient.start();
+      } else {
+        wsStarted = false;
+          startPollingFallback('ws_client_start_missing');
       }
     }
 
@@ -1274,13 +1296,7 @@
           if (authed){
             stopAuthWatch();
             loadTable(false);
-            startPolling();
-            try {
-              startRealtime();
-            } catch (_err){
-              startPolling();
-              loadTable(false);
-            }
+            startWsBootstrap();
           }
         });
       }, 3000);
@@ -1308,7 +1324,6 @@
       setDevActionsEnabled(true);
       setDevActionsAuthStatus(true);
       stopAuthWatch();
-      startRealtime();
       startWsBootstrap();
       return true;
     }
@@ -2903,16 +2918,16 @@
         }
         state.pollInterval = POLL_INTERVAL_BASE;
         state.pollErrors = 0;
-        startPolling();
-        if (isSeated) startHeartbeat();
+          if (isSeated) startHeartbeat();
         if (currentUserId){
           try {
-            startRealtime();
             startWsBootstrap();
           } catch (_err){
-            startPolling();
+            startPollingFallback('ws_bootstrap_exception');
             loadTable(false);
           }
+        } else {
+          startPollingFallback('auth_missing');
         }
         if (pendingJoinRequestId) schedulePendingRetry('join', retryJoin);
         if (pendingLeaveRequestId) schedulePendingRetry('leave', retryLeave);
@@ -3079,6 +3094,7 @@
 
     document.addEventListener('visibilitychange', handleVisibility); // xp-lifecycle-allow:poker-table(2026-01-01)
     window.addEventListener('pagehide', stopRealtime); // xp-lifecycle-allow:poker-table-pagehide(2026-01-01)
+    window.addEventListener('pagehide', stopWsClient); // xp-lifecycle-allow:poker-table-pagehide-ws(2026-01-01)
     window.addEventListener('beforeunload', stopPolling); // xp-lifecycle-allow:poker-table(2026-01-01)
     window.addEventListener('beforeunload', stopHeartbeat); // xp-lifecycle-allow:poker-table-heartbeat(2026-01-01)
     window.addEventListener('beforeunload', clearDeadlineNudge); // xp-lifecycle-allow:poker-table-deadline-nudge(2026-01-01)
@@ -3093,12 +3109,10 @@
     checkAuth().then(function(authed){
       if (authed){
         loadTable(false);
-        startPolling();
         try {
-          startRealtime();
           startWsBootstrap();
         } catch (_err){
-          startPolling();
+          startPollingFallback('ws_bootstrap_exception');
           loadTable(false);
         }
       }

@@ -17,12 +17,14 @@ test("ws bootstrap can hydrate occupied seats from authoritativeMembers when liv
     var renderCount = 0;
     var lastRendered = null;
     var isSeated = false;
+    var stopPollingCalls = 0;
     function isPlainObject(value){ return !!(value && typeof value === 'object' && !Array.isArray(value)); }
     function toFiniteOrNull(value){ var n = Number(value); if (!Number.isFinite(n) || Math.floor(n) !== n || n < 0) return null; return n; }
     function getConstraintsFromResponse(data){ if (data && isPlainObject(data.actionConstraints)) return data.actionConstraints; var gameState = data && data.state && data.state.state; if (gameState && isPlainObject(gameState.actionConstraints)) return gameState.actionConstraints; return null; }
     function getSafeConstraints(data){ var constraints = getConstraintsFromResponse(data); return { toCall: toFiniteOrNull(constraints ? constraints.toCall : null), minRaiseTo: toFiniteOrNull(constraints ? constraints.minRaiseTo : null), maxRaiseTo: toFiniteOrNull(constraints ? constraints.maxRaiseTo : null), maxBetAmount: toFiniteOrNull(constraints ? constraints.maxBetAmount : null) }; }
     function isCurrentUserSeated(){ return false; }
     function renderTable(data){ renderCount++; lastRendered = data; }
+    function stopPolling(){ stopPollingCalls++; }
     function klog(){}
     ${wsFns}
     return {
@@ -32,7 +34,8 @@ test("ws bootstrap can hydrate occupied seats from authoritativeMembers when liv
       getPending: function(){ return pendingWsSnapshot; },
       getSeen: function(){ return wsSnapshotSeen; },
       getRenderCount: function(){ return renderCount; },
-      getLastRendered: function(){ return lastRendered; }
+      getLastRendered: function(){ return lastRendered; },
+      getStopPollingCalls: function(){ return stopPollingCalls; }
     };
   `);
 
@@ -69,4 +72,16 @@ test("ws bootstrap can hydrate occupied seats from authoritativeMembers when liv
   assert.equal(h.getRenderCount(), 1);
   assert.equal(h.getLastRendered().seats[0].userId, "uA");
   assert.equal(h.getLastRendered().seats[1].userId, "uB");
+  assert.equal(h.getStopPollingCalls(), 1);
+
+  h.applyWsSnapshot({
+    type: "table_state",
+    payload: {
+      tableId: "table_boot",
+      members: [],
+      authoritativeMembers: [{ userId: "stale", seat: 0 }],
+      stateVersion: 2
+    }
+  });
+  assert.equal(h.getStopPollingCalls(), 1);
 });

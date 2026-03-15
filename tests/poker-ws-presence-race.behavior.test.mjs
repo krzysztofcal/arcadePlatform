@@ -22,9 +22,11 @@ function buildHarness(){
     var renderCount = 0;
     var lastRendered = null;
     var isSeated = false;
+    var stopPollingCalls = 0;
     function klog(){}
     function isCurrentUserSeated(){ return false; }
     function renderTable(data){ renderCount++; lastRendered = data; }
+    function stopPolling(){ stopPollingCalls++; }
     function isPlainObject(value){ return !!(value && typeof value === 'object' && !Array.isArray(value)); }
     function toFiniteOrNull(value){ var n = Number(value); if (!Number.isFinite(n) || Math.floor(n) !== n || n < 0) return null; return n; }
     function getConstraintsFromResponse(data){ if (data && isPlainObject(data.actionConstraints)) return data.actionConstraints; var gameState = data && data.state && data.state.state; if (gameState && isPlainObject(gameState.actionConstraints)) return gameState.actionConstraints; return null; }
@@ -43,7 +45,8 @@ function buildHarness(){
       getRenderCount: function(){ return renderCount; },
       getLastRendered: function(){ return lastRendered; },
       getWsStarted: function(){ return wsStarted; },
-      hasClient: function(){ return !!wsClient; }
+      hasClient: function(){ return !!wsClient; },
+      getStopPollingCalls: function(){ return stopPollingCalls; }
     };
   `);
   return factory();
@@ -68,6 +71,7 @@ test("stopWsClient reset allows second bootstrap snapshot apply", () => {
   assert.equal(h.getRenderCount(), 1);
   assert.equal(h.getLastRendered().seats[1].userId, "u1");
   assert.equal(h.getLastRendered().state.version, 2);
+  assert.equal(h.getStopPollingCalls(), 1);
 
   h.setWsStarted(true);
   h.stopWsClient();
@@ -81,6 +85,7 @@ test("stopWsClient reset allows second bootstrap snapshot apply", () => {
   assert.equal(h.getRenderCount(), 2);
   assert.equal(h.getLastRendered().seats[0].userId, "u2");
   assert.equal(h.getLastRendered().state.version, 3);
+  assert.equal(h.getStopPollingCalls(), 2);
 });
 
 test("deferred snapshot apply preserves baseline constraints when WS omits them", () => {
@@ -117,6 +122,7 @@ test("deferred snapshot apply preserves baseline constraints when WS omits them"
   assert.equal(h.getSeen(), true);
   assert.equal(h.getPending(), null);
   assert.equal(h.getRenderCount(), 1);
+  assert.equal(h.getStopPollingCalls(), 1);
   const merged = h.getTableData();
   assert.equal(merged.state.version, 9);
   assert.deepEqual(merged.legalActions, ["CALL", "RAISE"]);
@@ -145,18 +151,22 @@ test("version gating applies higher version and rejects stale/equal/unversioned 
   h.applyWsSnapshot({ type: "table_state", payload: { tableId: "table_race", stateVersion: 6, authoritativeMembers: [{ userId: "u1", seat: 1 }], hand: { status: "TURN" } } });
   assert.equal(h.getTableData().state.version, 6);
   assert.equal(h.getRenderCount(), 1);
+  assert.equal(h.getStopPollingCalls(), 1);
 
   h.applyWsSnapshot({ type: "table_state", payload: { tableId: "table_race", stateVersion: 6, authoritativeMembers: [{ userId: "stale", seat: 0 }], hand: { status: "RIVER" } } });
   assert.equal(h.getTableData().state.version, 6);
+  assert.equal(h.getStopPollingCalls(), 1);
   assert.equal(h.getTableData().seats[0].userId, "u0");
   assert.equal(h.getRenderCount(), 1);
 
   h.applyWsSnapshot({ type: "table_state", payload: { tableId: "table_race", stateVersion: 3, authoritativeMembers: [{ userId: "older", seat: 0 }] } });
   assert.equal(h.getTableData().state.version, 6);
+  assert.equal(h.getStopPollingCalls(), 1);
   assert.equal(h.getRenderCount(), 1);
 
   h.applyWsSnapshot({ type: "table_state", payload: { tableId: "table_race", authoritativeMembers: [{ userId: "nover", seat: 0 }] } });
   assert.equal(h.getTableData().state.version, 6);
+  assert.equal(h.getStopPollingCalls(), 1);
   assert.equal(h.getTableData().seats[0].userId, "u0");
   assert.equal(h.getRenderCount(), 1);
 });
