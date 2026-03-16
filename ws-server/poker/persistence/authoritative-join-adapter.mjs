@@ -35,7 +35,18 @@ function normalizeJoinError(error) {
   return { ok: false, code: "authoritative_join_failed" };
 }
 
+function shouldUseLedgerFallback(env = process.env) {
+  const hasFileStore = Boolean(typeof env?.WS_PERSISTED_STATE_FILE === "string" && env.WS_PERSISTED_STATE_FILE.trim());
+  const hasSupabaseDb = Boolean(typeof env?.SUPABASE_DB_URL === "string" && env.SUPABASE_DB_URL.trim());
+  return hasFileStore && !hasSupabaseDb;
+}
+
+function noopPostTransaction() {
+  return { ok: true };
+}
+
 function normalizeSuccess(result, { tableId, userId, requestId, klog }) {
+
   if (!result?.ok) return result;
   const seatNo = Number(result?.seatNo);
   if (!Number.isInteger(seatNo) || seatNo < 1) {
@@ -90,13 +101,23 @@ export function createAuthoritativeJoinExecutor({
     try {
       postTransactionFn = await loadPostTransactionFn();
     } catch (error) {
-      klog("ws_join_authoritative_unavailable", {
-        tableId,
-        userId,
-        requestId: requestId || null,
-        message: error?.message || "post_transaction_unavailable",
-      });
-      return { ok: false, code: "temporarily_unavailable" };
+      if (shouldUseLedgerFallback(env)) {
+        klog("ws_join_authoritative_ledger_fallback", {
+          tableId,
+          userId,
+          requestId: requestId || null,
+          message: error?.message || "post_transaction_unavailable",
+        });
+        postTransactionFn = noopPostTransaction;
+      } else {
+        klog("ws_join_authoritative_unavailable", {
+          tableId,
+          userId,
+          requestId: requestId || null,
+          message: error?.message || "post_transaction_unavailable",
+        });
+        return { ok: false, code: "temporarily_unavailable" };
+      }
     }
 
     try {

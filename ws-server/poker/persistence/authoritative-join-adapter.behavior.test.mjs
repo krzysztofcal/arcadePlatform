@@ -164,3 +164,41 @@ test("authoritative join adapter preserves seat_taken as protocol-safe known cod
   const result = await execute({ tableId: "t1", userId: "u1", requestId: "r7", buyIn: 100 });
   assert.deepEqual(result, { ok: false, code: "seat_taken" });
 });
+
+
+test("authoritative join adapter uses file-store ledger fallback and preserves classified errors", async () => {
+  const execute = createAuthoritativeJoinExecutor({
+    env: { WS_PERSISTED_STATE_FILE: "/tmp/ws-persist.json" },
+    klog: () => {},
+    beginSql: async (fn) => fn({ ok: true }),
+    loadPostTransactionFn: async () => {
+      throw new Error("missing_post_transaction");
+    },
+    loadJoinModule: async () => ({
+      executePokerJoinAuthoritative: async () => {
+        const err = new Error("poker_state_missing");
+        err.code = "poker_state_missing";
+        throw err;
+      }
+    })
+  });
+
+  const result = await execute({ tableId: "t1", userId: "u1", requestId: "r8", buyIn: 100 });
+  assert.deepEqual(result, { ok: false, code: "poker_state_missing" });
+});
+
+test("authoritative join adapter keeps runtime unavailable when not in file-store fallback mode", async () => {
+  const execute = createAuthoritativeJoinExecutor({
+    env: { SUPABASE_DB_URL: "postgres://example" },
+    klog: () => {},
+    loadPostTransactionFn: async () => {
+      throw new Error("missing_post_transaction");
+    },
+    loadJoinModule: async () => ({
+      executePokerJoinAuthoritative: async () => ({ ok: true, seatNo: 2, rejoin: false, stack: 100 })
+    })
+  });
+
+  const result = await execute({ tableId: "t1", userId: "u1", requestId: "r9", buyIn: 100 });
+  assert.deepEqual(result, { ok: false, code: "temporarily_unavailable" });
+});
