@@ -1,6 +1,24 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { executePokerJoinAuthoritative } from "./join.mjs";
+
+test("shared join module imports without Netlify adapter dependency at module load", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "join-import-"));
+  const stagedDir = path.join(tempDir, "shared", "poker-domain");
+  const stagedJoin = path.join(stagedDir, "join.mjs");
+  try {
+    await fs.mkdir(stagedDir, { recursive: true });
+    await fs.copyFile("shared/poker-domain/join.mjs", stagedJoin);
+    const module = await import(pathToFileURL(stagedJoin).href);
+    assert.equal(typeof module.executePokerJoinAuthoritative, "function");
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
 
 test("rejects malformed stringified state with state_invalid", async () => {
   await assert.rejects(

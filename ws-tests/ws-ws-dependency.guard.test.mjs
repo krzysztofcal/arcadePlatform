@@ -83,6 +83,12 @@ test("persisted bootstrap repository stays within ws-server runtime boundary", (
   assert.match(repositoryText, /import\("\.\/persisted-bootstrap-db\.mjs"\)/);
 });
 
+test("shared authoritative join core avoids static netlify adapter imports", () => {
+  const joinText = fs.readFileSync("shared/poker-domain/join.mjs", "utf8");
+  assert.doesNotMatch(joinText, /from\s+["']\.\.\/\.\.\/netlify\/functions\/_shared\//);
+  assert.match(joinText, /await\s+import\(["']\.\.\/\.\.\/netlify\/functions\/_shared\/chips-ledger\.mjs["']\)/);
+});
+
 test("ws-server package declares postgres dependency for db-backed bootstrap runtime", () => {
   const packageJson = JSON.parse(fs.readFileSync("ws-server/package.json", "utf8"));
   assert.equal(packageJson.dependencies?.postgres, "^3.4.5");

@@ -6,6 +6,7 @@ test("authoritative join adapter returns unavailable when join core is missing",
   const execute = createAuthoritativeJoinExecutor({
     env: {},
     klog: () => {},
+    loadPostTransactionFn: async () => async () => ({ ok: true }),
     loadJoinModule: async () => ({})
   });
   const result = await execute({ tableId: "t1", userId: "u1", requestId: "r1" });
@@ -16,6 +17,7 @@ test("authoritative join adapter maps unknown thrown errors", async () => {
   const execute = createAuthoritativeJoinExecutor({
     env: {},
     klog: () => {},
+    loadPostTransactionFn: async () => async () => ({ ok: true }),
     loadJoinModule: async () => ({
       executePokerJoinAuthoritative: async () => {
         throw new Error("boom");
@@ -32,6 +34,7 @@ test("authoritative join adapter forwards only shared-core supported args", asyn
     env: { WS_DEFAULT_BUYIN: "25" },
     klog: () => {},
     beginSql: async (fn) => fn({ ok: true }),
+    loadPostTransactionFn: async () => async () => ({ ok: true }),
     loadJoinModule: async () => ({
       executePokerJoinAuthoritative: async (args) => {
         captured = args;
@@ -45,7 +48,7 @@ test("authoritative join adapter forwards only shared-core supported args", asyn
   assert.equal(result.seatNo, 2);
   assert.equal(result.rejoin, false);
   assert.equal(result.stack, 100);
-  assert.deepEqual(Object.keys(captured || {}).sort(), ["beginSql", "klog", "requestId", "tableId", "userId"]);
+  assert.deepEqual(Object.keys(captured || {}).sort(), ["beginSql", "klog", "postTransactionFn", "requestId", "tableId", "userId"]);
   assert.equal(Object.hasOwn(captured, "buyIn"), false);
   assert.equal(Object.hasOwn(captured, "autoSeat"), false);
   assert.equal(Object.hasOwn(captured, "preferredSeatNo"), false);
@@ -58,6 +61,7 @@ test("authoritative join adapter preserves explicit rejoin semantics", async () 
     env: {},
     klog: () => {},
     beginSql: async (fn) => fn({ ok: true }),
+    loadPostTransactionFn: async () => async () => ({ ok: true }),
     loadJoinModule: async () => ({
       executePokerJoinAuthoritative: async () => ({ ok: true, seatNo: 3, rejoin: true, stack: 120 })
     })
@@ -75,6 +79,7 @@ test("authoritative join adapter rejects malformed success payload", async () =>
     env: {},
     klog: () => {},
     beginSql: async (fn) => fn({ ok: true }),
+    loadPostTransactionFn: async () => async () => ({ ok: true }),
     loadJoinModule: async () => ({
       executePokerJoinAuthoritative: async () => ({ ok: true, seatNo: 2, rejoin: false, stack: 0 })
     })
@@ -90,6 +95,7 @@ test("authoritative join adapter surfaces financial mutation failure codes", asy
     env: {},
     klog: () => {},
     beginSql: async (fn) => fn({ ok: true }),
+    loadPostTransactionFn: async () => async () => ({ ok: true }),
     loadJoinModule: async () => ({
       executePokerJoinAuthoritative: async () => {
         const err = new Error("insufficient_funds");
@@ -101,4 +107,20 @@ test("authoritative join adapter surfaces financial mutation failure codes", asy
 
   const result = await execute({ tableId: "t1", userId: "u1", requestId: "r4", buyIn: 100 });
   assert.deepEqual(result, { ok: false, code: "insufficient_funds" });
+});
+
+test("authoritative join adapter returns unavailable when postTransaction loader fails", async () => {
+  const execute = createAuthoritativeJoinExecutor({
+    env: {},
+    klog: () => {},
+    loadPostTransactionFn: async () => {
+      throw new Error("missing_post_transaction");
+    },
+    loadJoinModule: async () => ({
+      executePokerJoinAuthoritative: async () => ({ ok: true, seatNo: 2, rejoin: false, stack: 100 })
+    })
+  });
+
+  const result = await execute({ tableId: "t1", userId: "u1", requestId: "r5", buyIn: 100 });
+  assert.deepEqual(result, { ok: false, code: "temporarily_unavailable" });
 });

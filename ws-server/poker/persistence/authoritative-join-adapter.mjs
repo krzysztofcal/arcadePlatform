@@ -8,6 +8,14 @@ async function loadHttpAuthoritativeJoinModule() {
   return import("../../../shared/poker-domain/join.mjs");
 }
 
+async function loadLedgerPostTransaction() {
+  const ledgerModule = await import("../../../netlify/functions/_shared/chips-ledger.mjs");
+  if (typeof ledgerModule?.postTransaction !== "function") {
+    throw new Error("missing_post_transaction");
+  }
+  return ledgerModule.postTransaction;
+}
+
 function resolveJoinTestOverride(env = process.env) {
   const raw = env.WS_TEST_AUTHORITATIVE_JOIN_RESULT_JSON;
   if (!raw) return null;
@@ -47,6 +55,7 @@ export function createAuthoritativeJoinExecutor({
   klog = () => {},
   beginSql = beginSqlDefault,
   loadJoinModule = loadHttpAuthoritativeJoinModule,
+  loadPostTransactionFn = loadLedgerPostTransaction,
 } = {}) {
   return async function executeAuthoritativeJoin({ tableId, userId, requestId, seatNo = null, autoSeat = false, preferredSeatNo = null, buyIn = null }) {
     const override = resolveJoinTestOverride(env);
@@ -77,6 +86,19 @@ export function createAuthoritativeJoinExecutor({
       return { ok: false, code: "temporarily_unavailable" };
     }
 
+    let postTransactionFn;
+    try {
+      postTransactionFn = await loadPostTransactionFn();
+    } catch (error) {
+      klog("ws_join_authoritative_unavailable", {
+        tableId,
+        userId,
+        requestId: requestId || null,
+        message: error?.message || "post_transaction_unavailable",
+      });
+      return { ok: false, code: "temporarily_unavailable" };
+    }
+
     try {
       const sharedArgs = {
         beginSql: (fn) => beginSql(fn, { env }),
@@ -84,6 +106,7 @@ export function createAuthoritativeJoinExecutor({
         userId,
         requestId,
         klog,
+        postTransactionFn,
       };
       if (seatNo !== null && seatNo !== undefined) sharedArgs.seatNo = seatNo;
       if (autoSeat === true) sharedArgs.autoSeat = true;

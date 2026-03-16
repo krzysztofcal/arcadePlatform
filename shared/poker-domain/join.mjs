@@ -1,6 +1,13 @@
-import { postTransaction } from "../../netlify/functions/_shared/chips-ledger.mjs";
-
 const BUY_IN_IDEMPOTENCY_CONSTRAINT = "chips_transactions_idempotency_key_unique";
+
+async function resolvePostTransactionFn(postTransactionFn) {
+  if (typeof postTransactionFn === "function") return postTransactionFn;
+  const ledgerModule = await import("../../netlify/functions/_shared/chips-ledger.mjs");
+  if (typeof ledgerModule?.postTransaction !== "function") {
+    throw makeError("temporarily_unavailable");
+  }
+  return ledgerModule.postTransaction;
+}
 
 function parseStateValue(value) {
   if (value == null) return {};
@@ -78,7 +85,8 @@ async function readPersistedSeatStack({ tx, tableId, userId }) {
   return { seatNo, stack };
 }
 
-export async function executePokerJoinAuthoritative({ beginSql, tableId, userId, requestId, seatNo = null, autoSeat = false, preferredSeatNo = null, buyIn = null, klog = () => {}, postTransactionFn = postTransaction }) {
+export async function executePokerJoinAuthoritative({ beginSql, tableId, userId, requestId, seatNo = null, autoSeat = false, preferredSeatNo = null, buyIn = null, klog = () => {}, postTransactionFn = null }) {
+  const runPostTransaction = await resolvePostTransactionFn(postTransactionFn);
   return beginSql(async (tx) => {
     const resolvedBuyIn = normalizePositiveInt(buyIn);
     if (!resolvedBuyIn) throw makeError("invalid_buy_in");
@@ -159,7 +167,7 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
 
     let buyInDuplicated = false;
     try {
-      await postTransactionFn({
+      await runPostTransaction({
         userId,
         txType: "TABLE_BUY_IN",
         idempotencyKey,
