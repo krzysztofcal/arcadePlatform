@@ -3,10 +3,11 @@ export async function handleStartHandCommand({ frame, ws, connState, tableManage
   const ensured = await tableManager.ensureTableLoaded(tableId);
   if (!ensured.ok) {
     const loadError = ensureTableLoadedErrorMapper(ensured);
-    sendError(ws, connState, {
-      code: loadError.code,
-      message: loadError.message,
-      requestId: frame.requestId ?? null
+    sendCommandResult(ws, connState, {
+      requestId: frame.requestId ?? null,
+      tableId,
+      status: "rejected",
+      reason: loadError.code || "table_load_failed"
     });
     return;
   }

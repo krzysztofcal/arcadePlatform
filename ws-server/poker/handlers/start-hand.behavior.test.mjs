@@ -53,3 +53,33 @@ test('handleStartHandCommand rejects non-seated caller without persist or broadc
   assert.equal(calls.persist, 0);
   assert.equal(calls.snapshots, 0);
 });
+
+
+test('handleStartHandCommand rejects ensureTableLoaded failure with stable commandResult code', async () => {
+  const calls = { command: [], snapshots: 0, persist: 0, sendError: 0 };
+  await handleStartHandCommand({
+    frame: { __resolvedTableId: 't_missing', requestId: 'r3' },
+    ws: {},
+    connState: { session: { userId: 'u1' } },
+    tableManager: {
+      ensureTableLoaded: async () => ({ ok: false, code: 'table_not_found' }),
+      tableSnapshot: () => ({ youSeat: 1 }),
+      persistedStateVersion: () => 2,
+      bootstrapHand: () => ({ ok: true, changed: true, bootstrap: 'started' })
+    },
+    ensureTableLoadedErrorMapper: () => ({ code: 'table_not_found', message: 'human text not for protocol' }),
+    sendError: () => { calls.sendError += 1; },
+    sendCommandResult: (_ws, _cs, payload) => calls.command.push(payload),
+    persistMutatedState: async () => { calls.persist += 1; return { ok: true }; },
+    restoreTableFromPersisted: async () => ({ ok: true }),
+    broadcastResyncRequired: () => {},
+    broadcastStateSnapshots: () => { calls.snapshots += 1; }
+  });
+
+  assert.equal(calls.command.length, 1);
+  assert.equal(calls.command[0].status, 'rejected');
+  assert.equal(calls.command[0].reason, 'table_not_found');
+  assert.equal(calls.sendError, 0);
+  assert.equal(calls.persist, 0);
+  assert.equal(calls.snapshots, 0);
+});

@@ -75,10 +75,11 @@ export async function handleJoinCommand({ frame, ws, connState, sessionStore, ta
   const ensured = await tableManager.ensureTableLoaded(tableId, { allowCreate: true });
   if (!ensured.ok) {
     const loadError = ensureTableLoadedErrorMapper(ensured);
-    sendError(ws, connState, {
-      code: loadError.code,
-      message: loadError.message,
-      requestId: frame.requestId ?? null
+    sendCommandResult(ws, connState, {
+      requestId: frame.requestId ?? null,
+      tableId,
+      status: "rejected",
+      reason: loadError.code || "table_load_failed"
     });
     return;
   }
@@ -113,7 +114,7 @@ export async function handleJoinCommand({ frame, ws, connState, sessionStore, ta
       requestId: frame.requestId ?? null,
       tableId,
       status: "rejected",
-      reason: joined.code === "bounds_exceeded" ? "bounds_exceeded" : joined.message
+      reason: joined.code || "join_failed"
     });
     return;
   }

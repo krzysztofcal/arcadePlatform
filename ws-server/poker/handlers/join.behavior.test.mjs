@@ -128,3 +128,45 @@ test('handleJoinCommand rejects malformed authoritative success contract', async
   assert.equal(calls.table, 0);
   assert.equal(calls.snapshots, 0);
 });
+
+
+test('handleJoinCommand rejects ensureTableLoaded failure with stable commandResult code', async () => {
+  const { ctx, calls } = baseCtx({ seatNo: 2, buyIn: 100 });
+  ctx.frame.__resolvedTableId = 't_missing';
+  ctx.tableManager.ensureTableLoaded = async () => ({ ok: false, code: 'table_not_found' });
+  ctx.ensureTableLoadedErrorMapper = () => ({ code: 'table_not_found', message: 'human text not for protocol' });
+  await handleJoinCommand(ctx);
+
+  assert.equal(calls.command.length, 1);
+  assert.equal(calls.command[0].status, 'rejected');
+  assert.equal(calls.command[0].reason, 'table_not_found');
+  assert.equal(calls.sendError, 0);
+  assert.equal(calls.table, 0);
+  assert.equal(calls.snapshots, 0);
+});
+
+test('handleJoinCommand rejects join failure with stable code instead of message text', async () => {
+  const { ctx, calls } = baseCtx({ seatNo: 2, buyIn: 100 });
+  ctx.tableManager.join = () => ({ ok: false, code: 'seat_taken', message: 'Seat already occupied by user X' });
+  await handleJoinCommand(ctx);
+
+  assert.equal(calls.command.length, 1);
+  assert.equal(calls.command[0].status, 'rejected');
+  assert.equal(calls.command[0].reason, 'seat_taken');
+  assert.notEqual(calls.command[0].reason, 'Seat already occupied by user X');
+  assert.equal(calls.table, 0);
+  assert.equal(calls.snapshots, 0);
+});
+
+test('handleJoinCommand falls back to join_failed when join failure has no code', async () => {
+  const { ctx, calls } = baseCtx({ seatNo: 2, buyIn: 100 });
+  ctx.tableManager.join = () => ({ ok: false, message: 'arbitrary failure text' });
+  await handleJoinCommand(ctx);
+
+  assert.equal(calls.command.length, 1);
+  assert.equal(calls.command[0].status, 'rejected');
+  assert.equal(calls.command[0].reason, 'join_failed');
+  assert.notEqual(calls.command[0].reason, 'arbitrary failure text');
+  assert.equal(calls.table, 0);
+  assert.equal(calls.snapshots, 0);
+});
