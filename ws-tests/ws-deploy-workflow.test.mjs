@@ -35,6 +35,10 @@ test("ws-deploy keeps ws-tests trigger surface and runs harness checks", () => {
   assert.match(text, /node --test ws-tests\/ws-server-deploy-rollout\.test\.mjs/);
   assert.match(text, /node --test ws-tests\/ws-docker-leave-runtime\.guard\.test\.mjs/);
   assert.match(text, /node --test shared\/poker-domain\/join\.behavior\.test\.mjs/);
+  assert.match(text, /Run poker ws client behavior test/);
+  assert.match(text, /node --test tests\/poker-ws-client\.test\.mjs/);
+  assert.match(text, /Run poker UI ws authoritative join behavior test/);
+  assert.match(text, /node --test tests\/poker-ui-ws-join-authoritative\.behavior\.test\.mjs/);
   assert.match(text, /Validate ws Dockerfile build contract \(repo-root context\)/);
   assert.match(text, /docker build -t arcadeplatform-ws-contract:\$\{\{ github\.sha \}\} -f ws-server\/Dockerfile \./);
   assert.doesNotMatch(text, /docker build[^\n]*-f ws-server\/Dockerfile \.\/ws-server/);
@@ -148,5 +152,9 @@ test("ws-deploy shared authoritative join dependency is trigger-covered and arti
   assert.match(pushBlock, /"shared\/\*\*"/);
   assert.match(text, /docker build -t arcadeplatform-ws-contract:\$\{\{ github\.sha \}\} -f ws-server\/Dockerfile \./);
   assert.match(text, /node --test shared\/poker-domain\/join\.behavior\.test\.mjs/);
+  assert.match(text, /Run poker ws client behavior test/);
+  assert.match(text, /node --test tests\/poker-ws-client\.test\.mjs/);
+  assert.match(text, /Run poker UI ws authoritative join behavior test/);
+  assert.match(text, /node --test tests\/poker-ui-ws-join-authoritative\.behavior\.test\.mjs/);
   assert.match(text, /node --test ws-tests\/ws-image-contains-protocol\.behavior\.test\.mjs/);
 });

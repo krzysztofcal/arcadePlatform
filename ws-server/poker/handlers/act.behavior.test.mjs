@@ -39,3 +39,27 @@ test('handleActCommand persists and broadcasts only for accepted fresh action', 
   assert.equal(calls.persisted, 1);
   assert.equal(calls.snaps, 1);
 });
+
+
+test('handleActCommand rejects ensureTableLoaded failure with mapped stable code', async () => {
+  const calls = [];
+  let sendErrorCalls = 0;
+  await handleActCommand({
+    frame: { __resolvedTableId: 't_missing', requestId: 'r3', ts: new Date().toISOString(), payload: { handId: 'h1', action: 'CHECK' } },
+    ws: {},
+    connState: { session: { userId: 'u1' } },
+    tableManager: { ensureTableLoaded: async () => ({ ok: false, code: 'table_not_found' }), applyAction: () => ({ accepted: true }) },
+    ensureTableLoadedErrorMapper: () => ({ code: 'table_not_found', message: 'human text not for protocol' }),
+    sendError: () => { sendErrorCalls += 1; },
+    sendCommandResult: (_ws, _cs, payload) => calls.push(payload),
+    persistMutatedState: async () => ({ ok: true }),
+    restoreTableFromPersisted: async () => ({ ok: true }),
+    broadcastResyncRequired: () => {},
+    broadcastStateSnapshots: () => {}
+  });
+
+  assert.equal(sendErrorCalls, 0);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].status, 'rejected');
+  assert.equal(calls[0].reason, 'table_not_found');
+});

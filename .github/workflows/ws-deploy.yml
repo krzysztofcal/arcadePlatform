@@ -39,6 +39,12 @@ jobs:
       - name: Run shared poker join behavior test
         run: node --test shared/poker-domain/join.behavior.test.mjs
 
+      - name: Run poker ws client behavior test
+        run: node --test tests/poker-ws-client.test.mjs
+
+      - name: Run poker UI ws authoritative join behavior test
+        run: node --test tests/poker-ui-ws-join-authoritative.behavior.test.mjs
+
 
       - name: Validate ws Dockerfile build contract (repo-root context)
         run: |

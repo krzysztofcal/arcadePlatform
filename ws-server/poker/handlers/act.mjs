@@ -45,7 +45,7 @@ export async function handleActCommand({ frame, ws, connState, tableManager, ens
       requestId: frame.requestId ?? null,
       tableId,
       status: "rejected",
-      reason: loadError.message
+      reason: loadError.code || "table_load_failed"
     });
     return;
   }
