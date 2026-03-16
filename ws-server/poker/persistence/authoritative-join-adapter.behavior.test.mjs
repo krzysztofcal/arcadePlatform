@@ -144,3 +144,23 @@ test("authoritative join adapter preserves poker_state_missing as protocol-safe 
   const result = await execute({ tableId: "t1", userId: "u1", requestId: "r6", buyIn: 100 });
   assert.deepEqual(result, { ok: false, code: "poker_state_missing" });
 });
+
+
+test("authoritative join adapter preserves seat_taken as protocol-safe known code", async () => {
+  const execute = createAuthoritativeJoinExecutor({
+    env: {},
+    klog: () => {},
+    beginSql: async (fn) => fn({ ok: true }),
+    loadPostTransactionFn: async () => async () => ({ ok: true }),
+    loadJoinModule: async () => ({
+      executePokerJoinAuthoritative: async () => {
+        const err = new Error("seat_taken");
+        err.code = "seat_taken";
+        throw err;
+      }
+    })
+  });
+
+  const result = await execute({ tableId: "t1", userId: "u1", requestId: "r7", buyIn: 100 });
+  assert.deepEqual(result, { ok: false, code: "seat_taken" });
+});

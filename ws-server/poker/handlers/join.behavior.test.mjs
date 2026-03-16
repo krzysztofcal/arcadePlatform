@@ -262,3 +262,20 @@ test('handleJoinCommand maps authoritative_join_failed + restore missing-state s
   assert.equal(calls.sendError, 0);
   assert.equal(calls.actorTableState, 0);
 });
+
+
+test('handleJoinCommand preserves temporarily_unavailable for runtime authoritative failures', async () => {
+  const { ctx, calls } = baseCtx({ seatNo: 2, buyIn: 100 });
+  ctx.authoritativeJoinEnabled = true;
+  ctx.persistedBootstrapEnabled = true;
+  ctx.loadAuthoritativeJoinExecutor = async () => async () => ({ ok: false, code: 'temporarily_unavailable' });
+
+  await handleJoinCommand(ctx);
+
+  assert.equal(calls.command.length, 1);
+  assert.equal(calls.command[0].status, 'rejected');
+  assert.equal(calls.command[0].reason, 'temporarily_unavailable');
+  assert.equal(calls.actorTableState, 0);
+  assert.equal(calls.table, 0);
+  assert.equal(calls.snapshots, 0);
+});
