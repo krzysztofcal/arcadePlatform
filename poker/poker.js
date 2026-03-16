@@ -2511,7 +2511,13 @@
         } else {
           joinPayload.seatNo = seatNo;
         }
-        var joinResult = await apiPost(JOIN_URL, joinPayload);
+        var joinResult = null;
+        if (wsClient && typeof wsClient.isReady === 'function' && wsClient.isReady() && typeof wsClient.sendJoin === 'function'){
+          await wsClient.sendJoin(joinPayload, joinRequestId);
+          joinResult = { ok: true };
+        } else {
+          joinResult = await apiPost(JOIN_URL, joinPayload);
+        }
         if (isPendingResponse(joinResult)){
           schedulePendingRetry('join', retryJoin);
           return;
@@ -2580,7 +2586,13 @@
           pendingStartHandRequestId = normalizeRequestId(resolved.requestId);
         }
         var startRequestId = normalizeRequestId(resolved.requestId);
-        var result = await apiPost(START_HAND_URL, { tableId: tableId, requestId: startRequestId });
+        var result = null;
+        if (wsClient && typeof wsClient.isReady === 'function' && wsClient.isReady() && typeof wsClient.sendStartHand === 'function'){
+          await wsClient.sendStartHand({ tableId: tableId }, startRequestId);
+          result = { ok: true };
+        } else {
+          result = await apiPost(START_HAND_URL, { tableId: tableId, requestId: startRequestId });
+        }
         if (isPendingResponse(result)){
           schedulePendingRetry('startHand', retryStartHand);
           return { ok: false, code: 'request_pending', pending: true };
@@ -2703,11 +2715,19 @@
           pendingActType = normalized;
         }
         var actRequestId = normalizeRequestId(resolved.requestId);
-        var result = await apiPost(ACT_URL, {
-          tableId: tableId,
-          requestId: actRequestId,
-          action: actionResult.action
-        });
+        var result = null;
+        if (wsClient && typeof wsClient.isReady === 'function' && wsClient.isReady() && typeof wsClient.sendAct === 'function'){
+          var wsActPayload = { handId: resolveCurrentHandId(), action: normalized };
+          if (actionResult.action && Number.isFinite(Number(actionResult.action.amount))) wsActPayload.amount = Number(actionResult.action.amount);
+          await wsClient.sendAct(wsActPayload, actRequestId);
+          result = { ok: true };
+        } else {
+          result = await apiPost(ACT_URL, {
+            tableId: tableId,
+            requestId: actRequestId,
+            action: actionResult.action
+          });
+        }
         if (isPendingResponse(result)){
           scheduleDevPendingRetry('act', retryAct);
           return;
@@ -2723,6 +2743,8 @@
           } else if (result.error === 'state_invalid'){
             setInlineStatus(actStatusEl, t('pokerErrStateChanged', 'State changed. Refreshing...'), 'error');
             if (isPageActive()) loadTable(false);
+          } else if (result.error === 'hand_not_live'){
+            setInlineStatus(actStatusEl, t('pokerErrHandNotLive', 'Hand is not live'), 'error');
           } else {
             setInlineStatus(actStatusEl, t('pokerErrAct', 'Failed to send action'), 'error');
           }
@@ -2767,6 +2789,10 @@
         if (err && err.code === 'state_invalid'){
           setInlineStatus(actStatusEl, t('pokerErrStateChanged', 'State changed. Refreshing...'), 'error');
           if (isPageActive()) loadTable(false);
+          return;
+        }
+        if (err && err.code === 'hand_not_live'){
+          setInlineStatus(actStatusEl, t('pokerErrHandNotLive', 'Hand is not live'), 'error');
           return;
         }
         klog('poker_act_error', { tableId: tableId, error: err.message || err.code });

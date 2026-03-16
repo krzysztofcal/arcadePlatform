@@ -103,6 +103,15 @@ jobs:
       - name: Run ws resync behavior test
         run: node --test ws-server/poker/reconnect/resync.behavior.test.mjs
 
+      - name: Run ws join handler behavior test
+        run: node --test ws-server/poker/handlers/join.behavior.test.mjs
+
+      - name: Run ws start-hand handler behavior test
+        run: node --test ws-server/poker/handlers/start-hand.behavior.test.mjs
+
+      - name: Run ws act handler behavior test
+        run: node --test ws-server/poker/handlers/act.behavior.test.mjs
+
       - name: Run WS PR workflow guard test
         run: node --test ws-tests/ws-pr-workflow.test.mjs
 

@@ -18,6 +18,9 @@ import { buildStatePatch } from "./poker/read-model/state-patch.mjs";
 import { createStreamLog } from "./poker/runtime/stream-log.mjs";
 import { createPersistedStateWriter } from "./poker/persistence/persisted-state-writer.mjs";
 import { createTableSnapshotLoader } from "./poker/table/table-snapshot.mjs";
+import { handleJoinCommand } from "./poker/handlers/join.mjs";
+import { handleActCommand } from "./poker/handlers/act.mjs";
+import { handleStartHandCommand } from "./poker/handlers/start-hand.mjs";
 
 const PORT = Number(process.env.PORT || 3000);
 const PROTECTED_MESSAGE_TYPES = new Set([
@@ -29,11 +32,12 @@ const PROTECTED_MESSAGE_TYPES = new Set([
   "table_state_sub",
   "table_snapshot",
   "act",
+  "start_hand",
   "resync",
   "resume",
   "ack"
 ]);
-const REQUEST_ID_REQUIRED_TYPES = new Set(["join", "leave", "table_join", "table_leave", "table_state_sub", "table_snapshot", "act", "resync", "resume"]);
+const REQUEST_ID_REQUIRED_TYPES = new Set(["join", "leave", "table_join", "table_leave", "table_state_sub", "table_snapshot", "act", "start_hand", "resync", "resume"]);
 const TABLE_SNAPSHOT_KNOWN_FAILURE_CODES = new Set([
   "invalid_table_id",
   "table_not_found",
@@ -774,95 +778,26 @@ wss.on("connection", (ws) => {
         });
         return;
       }
-      const tableId = resolvedRoomId.roomId;
-
-      if (authoritativeJoinEnabled && !observeOnlyJoinEnabled && persistedBootstrapEnabled) {
-        const authoritativeJoinExecutor = await loadAuthoritativeJoinExecutor();
-        const authoritativeJoin = await authoritativeJoinExecutor({
-          tableId,
-          userId: connState.session.userId,
-          requestId: frame.requestId ?? null
-        });
-        if (!authoritativeJoin?.ok) {
-          const joinCode = authoritativeJoin?.code;
-          const isKnownError = typeof joinCode === "string"
-            && (joinCode === "table_not_found" || joinCode === "table_closed" || joinCode === "table_not_open" || joinCode === "seat_taken" || joinCode === "table_full" || joinCode === "state_missing" || joinCode === "state_invalid");
-          sendError(ws, connState, {
-            code: isKnownError ? joinCode : "INTERNAL_ERROR",
-            message: isKnownError ? joinCode : "authoritative_join_failed",
-            requestId: frame.requestId ?? null
-          });
-          return;
-        }
-      }
-
-      const ensured = await tableManager.ensureTableLoaded(tableId, { allowCreate: true });
-      if (!ensured.ok) {
-        const loadError = mapEnsureTableLoadedError(ensured);
-        sendError(ws, connState, {
-          code: loadError.code,
-          message: loadError.message,
-          requestId: frame.requestId ?? null
-        });
-        return;
-      }
-
-      if (authoritativeJoinEnabled && !observeOnlyJoinEnabled && persistedBootstrapEnabled) {
-        const restored = await restoreTableFromPersisted(tableId);
-        if (!restored.ok) {
-          sendError(ws, connState, {
-            code: "INTERNAL_ERROR",
-            message: "authoritative_join_rehydrate_failed",
-            requestId: frame.requestId ?? null
-          });
-          return;
-        }
-      }
-
-      sessionStore.trackConnection({ ws, userId: connState.session.userId, sessionId: connState.session.sessionId });
-      const joined = tableManager.join({
+      frame.__resolvedTableId = resolvedRoomId.roomId;
+      await handleJoinCommand({
+        frame,
         ws,
-        userId: connState.session.userId,
-        tableId,
-        requestId: frame.requestId,
-        nowTs: Date.now()
+        connState,
+        sessionStore,
+        tableManager,
+        ensureTableLoadedErrorMapper: mapEnsureTableLoadedError,
+        restoreTableFromPersisted,
+        persistMutatedState,
+        broadcastResyncRequired,
+        broadcastStateSnapshots,
+        broadcastTableState,
+        sendError,
+        sendCommandResult,
+        authoritativeJoinEnabled,
+        observeOnlyJoinEnabled,
+        persistedBootstrapEnabled,
+        loadAuthoritativeJoinExecutor
       });
-      if (!joined.ok) {
-        sendError(ws, connState, {
-          code: joined.code === "bounds_exceeded" ? "bounds_exceeded" : "INVALID_COMMAND",
-          message: joined.message,
-          requestId: frame.requestId ?? null
-        });
-        return;
-      }
-
-      const joinedSnapshot = tableManager.tableSnapshot(tableId, connState.session.userId);
-      sendTableState(ws, connState, { requestId: frame.requestId ?? null, tableState: joined.tableState, tableSnapshot: joinedSnapshot });
-
-      if (joined.changed) {
-        broadcastTableState(tableId, { excludeWs: ws });
-      }
-
-      const bootstrapExpectedVersion = tableManager.persistedStateVersion(tableId);
-      const bootstrapped = tableManager.bootstrapHand(tableId, { nowMs: Date.now() });
-      if (bootstrapped?.changed) {
-        const persisted = await persistMutatedState({
-          tableId,
-          expectedVersion: bootstrapExpectedVersion,
-          mutationKind: "bootstrap"
-        });
-        if (!persisted?.ok) {
-          await restoreTableFromPersisted(tableId);
-          broadcastResyncRequired(tableId, "persistence_conflict");
-          sendError(ws, connState, {
-            code: "INTERNAL_ERROR",
-            message: "state_persist_failed",
-            requestId: frame.requestId ?? null
-          });
-          return;
-        }
-        klogSafe("ws_hand_bootstrap_started", { tableId, handId: bootstrapped.handId, stateVersion: persisted.newVersion });
-      }
       return;
     }
 
@@ -1157,89 +1092,47 @@ wss.on("connection", (ws) => {
         });
         return;
       }
-
-      const tableId = resolvedRoomId.roomId;
-      const handId = typeof frame.payload?.handId === "string" ? frame.payload.handId.trim() : "";
-      const action = typeof frame.payload?.action === "string" ? frame.payload.action.trim().toUpperCase() : "";
-      const amount = frame.payload?.amount;
-
-      if (!handId) {
-        sendError(ws, connState, {
-          code: "INVALID_COMMAND",
-          message: "act requires payload.handId",
-          requestId: frame.requestId ?? null
-        });
-        return;
-      }
-
-      if (!["FOLD", "CHECK", "CALL", "BET", "RAISE"].includes(action)) {
-        sendError(ws, connState, {
-          code: "INVALID_COMMAND",
-          message: "act requires payload.action of fold/check/call/bet/raise",
-          requestId: frame.requestId ?? null
-        });
-        return;
-      }
-
-      if ((action === "BET" || action === "RAISE") && !Number.isFinite(amount)) {
-        sendError(ws, connState, {
-          code: "INVALID_COMMAND",
-          message: "act requires numeric payload.amount for bet/raise",
-          requestId: frame.requestId ?? null
-        });
-        return;
-      }
-
-      const ensured = await tableManager.ensureTableLoaded(tableId);
-      if (!ensured.ok) {
-        sendCommandResult(ws, connState, {
-          requestId: frame.requestId ?? null,
-          tableId,
-          status: "rejected",
-          reason: ensured.code
-        });
-        return;
-      }
-
-      const result = tableManager.applyAction({
-        tableId,
-        handId,
-        userId: connState.session.userId,
-        requestId: frame.requestId,
-        action,
-        amount,
-        nowIso: frame.ts
+      frame.__resolvedTableId = resolvedRoomId.roomId;
+      await handleActCommand({
+        frame,
+        ws,
+        connState,
+        tableManager,
+        ensureTableLoadedErrorMapper: mapEnsureTableLoadedError,
+        sendError,
+        sendCommandResult,
+        persistMutatedState,
+        restoreTableFromPersisted,
+        broadcastResyncRequired,
+        broadcastStateSnapshots
       });
+      return;
+    }
 
-      if (result.accepted && !result.replayed && result.changed) {
-        const persisted = await persistMutatedState({
-          tableId,
-          expectedVersion: Number(result.stateVersion) - 1,
-          mutationKind: "act"
+    if (frame.type === "start_hand") {
+      const resolvedRoomId = resolveRoomId(frame);
+      if (!resolvedRoomId.ok) {
+        sendError(ws, connState, {
+          code: resolvedRoomId.code,
+          message: resolvedRoomId.message,
+          requestId: frame.requestId ?? null
         });
-        if (!persisted?.ok) {
-          await restoreTableFromPersisted(tableId);
-          sendCommandResult(ws, connState, {
-            requestId: frame.requestId ?? null,
-            tableId,
-            status: "rejected",
-            reason: persisted?.reason || "persist_failed"
-          });
-          broadcastResyncRequired(tableId, "persistence_conflict");
-          return;
-        }
+        return;
       }
-
-      sendCommandResult(ws, connState, {
-        requestId: frame.requestId ?? null,
-        tableId,
-        status: result.accepted ? "accepted" : "rejected",
-        reason: result.reason
+      frame.__resolvedTableId = resolvedRoomId.roomId;
+      await handleStartHandCommand({
+        frame,
+        ws,
+        connState,
+        tableManager,
+        ensureTableLoadedErrorMapper: mapEnsureTableLoadedError,
+        sendError,
+        sendCommandResult,
+        persistMutatedState,
+        restoreTableFromPersisted,
+        broadcastResyncRequired,
+        broadcastStateSnapshots
       });
-
-      if (result.accepted && !result.replayed && result.changed) {
-        broadcastStateSnapshots(tableId);
-      }
       return;
     }
 

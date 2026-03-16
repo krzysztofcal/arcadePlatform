@@ -27,6 +27,12 @@ const REQUIRED_PR16_WS_SERVER_BEHAVIOR_TESTS = [
 ];
 
 
+const REQUIRED_AUTHORITATIVE_HANDLER_BEHAVIOR_TESTS = [
+  "ws-server/poker/handlers/join.behavior.test.mjs",
+  "ws-server/poker/handlers/start-hand.behavior.test.mjs",
+  "ws-server/poker/handlers/act.behavior.test.mjs"
+];
+
 const REQUIRED_PERSISTED_BOOTSTRAP_BEHAVIOR_TESTS = [
   "ws-server/poker/bootstrap/persisted-bootstrap-adapter.behavior.test.mjs",
   "ws-server/poker/bootstrap/persisted-bootstrap-repository.behavior.test.mjs"
@@ -196,5 +202,17 @@ test("persisted bootstrap behavior tests are wired in both PR and deploy workflo
     const command = `node --test ${file}`;
     assert.ok(prWorkflow.includes(command), `Missing persisted bootstrap test in PR workflow: ${file}`);
     assert.ok(deployWorkflow.includes(command), `Missing persisted bootstrap test in deploy workflow: ${file}`);
+  }
+});
+
+
+test("authoritative handler behavior tests are wired in both PR and deploy workflows", () => {
+  const prWorkflow = workflowText(".github/workflows/ws-pr-checks.yml");
+  const deployWorkflow = workflowText(".github/workflows/ws-deploy.yml");
+
+  for (const file of REQUIRED_AUTHORITATIVE_HANDLER_BEHAVIOR_TESTS) {
+    const command = `node --test ${file}`;
+    assert.ok(prWorkflow.includes(command), `Missing authoritative handler test in PR workflow: ${file}`);
+    assert.ok(deployWorkflow.includes(command), `Missing authoritative handler test in deploy workflow: ${file}`);
   }
 });

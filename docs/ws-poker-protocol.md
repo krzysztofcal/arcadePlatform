@@ -326,3 +326,31 @@ PR15 resume/ack behavior (implemented):
 - `stateSnapshot` remains canonical fallback/resync truth path.
 
 Durability note: replay buffer is process-local and bounded; server restarts or long gaps may require full snapshot recovery.
+
+## Authoritative gameplay write contract (join/start/act)
+
+Gameplay write commands are authoritative over WS and return `commandResult` for the same `requestId`.
+
+- `join` / `table_join` payload: `{ tableId, seatNo?, autoSeat?, preferredSeatNo?, buyIn }` (`buyIn` required for gameplay-equivalent authoritative joins)
+- `start_hand` payload: `{ tableId }`
+- `act` payload: `{ handId, action, amount? }`
+
+Success contract:
+
+1. server validates payload + session/table binding
+2. server applies mutation once for `(userId, requestId)` idempotency key
+3. server persists authoritative state once
+4. server emits `commandResult.status = "accepted"` only after required post-mutation persistence/restore checks complete (no early accept + later reject for the same requestId)
+5. server emits/broadcasts authoritative snapshot updates
+
+Rejection contract:
+
+- malformed command uses `error.code = "INVALID_COMMAND"`
+- domain/persistence rejection uses `commandResult.status = "rejected"` with stable reason codes such as `not_your_turn`, `action_not_allowed`, `invalid_amount`, `state_invalid`, `hand_not_live`, `already_live`, `not_enough_players`
+- rejection MUST NOT emit success snapshot broadcasts
+- on persistence conflicts server restores authoritative state and emits `resync` with reason `persistence_conflict`
+
+Client resync expectation:
+
+- UI must treat WS snapshots as source-of-truth after accepted gameplay writes
+- client must not replay rejected WS gameplay writes over HTTP fallback for the same operation

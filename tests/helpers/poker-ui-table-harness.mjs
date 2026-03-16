@@ -24,11 +24,16 @@ function makeElement(id){
     removeChild(child){ this.children = this.children.filter((it) => it !== child); },
     setAttribute(){},
     removeAttribute(){},
-    addEventListener(){},
-    removeEventListener(){},
+    _listeners: {},
+    addEventListener(type, fn){ this._listeners[type] = this._listeners[type] || []; this._listeners[type].push(fn); },
+    removeEventListener(type, fn){ if (!this._listeners[type]) return; this._listeners[type] = this._listeners[type].filter((h) => h !== fn); },
     querySelector(){ return null; },
     focus(){},
     blur(){},
+    click(){
+      var handlers = this._listeners.click || [];
+      handlers.forEach((fn) => fn({ preventDefault(){}, stopPropagation(){}, target: this }));
+    },
   };
 }
 
@@ -39,6 +44,9 @@ export function createPokerTableHarness(options = {}){
   const fetchState = {
     getCalls: 0,
     heartbeatCalls: 0,
+    joinCalls: 0,
+    startHandCalls: 0,
+    actCalls: 0,
     responses: options.responses || [
       {
         tableId,
@@ -85,7 +93,7 @@ export function createPokerTableHarness(options = {}){
 
   const sandbox = {
     window: {
-      location: { pathname: '/poker/table.html', search: '?tableId=' + encodeURIComponent(tableId), href: '' },
+      location: { pathname: '/poker/table.html', search: typeof options.search === 'string' ? options.search : ('?tableId=' + encodeURIComponent(tableId)), href: '' },
       addEventListener(type, fn){ windowEvents[type] = windowEvents[type] || []; windowEvents[type].push(fn); },
       removeEventListener(){},
       KLog: { log: () => {} },
@@ -121,6 +129,18 @@ export function createPokerTableHarness(options = {}){
       }
       if (text.includes('/poker-heartbeat')){
         fetchState.heartbeatCalls += 1;
+        return { ok: true, json: async () => ({ ok: true }) };
+      }
+      if (text.includes('/poker-join')){
+        fetchState.joinCalls += 1;
+        return { ok: true, json: async () => ({ ok: true }) };
+      }
+      if (text.includes('/poker-start-hand')){
+        fetchState.startHandCalls += 1;
+        return { ok: true, json: async () => ({ ok: true }) };
+      }
+      if (text.includes('/poker-act')){
+        fetchState.actCalls += 1;
         return { ok: true, json: async () => ({ ok: true }) };
       }
       if (text.includes('/ws-mint-token')){

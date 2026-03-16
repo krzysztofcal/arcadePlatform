@@ -45,6 +45,12 @@ test("ws-deploy keeps ws-tests trigger surface and runs harness checks", () => {
   assert.match(text, /node --test ws-server\/poker\/engine\/engine-rollover\.behavior\.test\.mjs/);
   assert.match(text, /Run ws poker engine timeout behavior test/);
   assert.match(text, /node --test ws-server\/poker\/engine\/engine-timeout\.behavior\.test\.mjs/);
+  assert.match(text, /Run ws join handler behavior test/);
+  assert.match(text, /node --test ws-server\/poker\/handlers\/join\.behavior\.test\.mjs/);
+  assert.match(text, /Run ws start-hand handler behavior test/);
+  assert.match(text, /node --test ws-server\/poker\/handlers\/start-hand\.behavior\.test\.mjs/);
+  assert.match(text, /Run ws act handler behavior test/);
+  assert.match(text, /node --test ws-server\/poker\/handlers\/act\.behavior\.test\.mjs/);
 
   assert.match(text, /npm ci --prefix ws-server/);
   assert.doesNotMatch(text, /\n\s*run:\s*npm ci\n/);
