@@ -158,15 +158,15 @@ export async function handleJoinCommand({ frame, ws, connState, sessionStore, ta
     }
   }
 
-  const tableSnapshot = tableManager.tableSnapshot(tableId, connState.session.userId);
-  sendTableState(ws, connState, { requestId: frame.requestId ?? null, tableState: joined.tableState, tableSnapshot });
-
   sendCommandResult(ws, connState, {
     requestId: frame.requestId ?? null,
     tableId,
     status: "accepted",
     reason: joined.changed ? null : "already_joined"
   });
+
+  const tableSnapshot = tableManager.tableSnapshot(tableId, connState.session.userId);
+  sendTableState(ws, connState, { requestId: frame.requestId ?? null, tableState: joined.tableState, tableSnapshot });
 
   if (joined.changed) {
     broadcastTableState(tableId, { excludeWs: ws });

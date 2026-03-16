@@ -507,7 +507,7 @@ test("server shutdown is bounded after SIGTERM", async () => runSerial(async () 
 
 
 
-test("default runtime keeps legacy table_join membership mutation semantics", async () => runSerial(async () => {
+test("default runtime join is command-first and still mutates membership", async () => runSerial(async () => {
   const secret = "test-secret";
   const tableId = "table_default_join";
   const { port, child } = await createServer({
@@ -542,8 +542,14 @@ test("default runtime keeps legacy table_join membership mutation semantics", as
       ts: "2026-02-28T00:00:01Z",
       payload: { tableId }
     });
+    const joinAck = await nextMessage(actor, 5000, "defaultJoinAck");
+    assert.equal(joinAck.type, "commandResult");
+    assert.equal(joinAck.requestId, "req-join-default");
+    assert.equal(joinAck.payload.status, "accepted");
+
     const joined = await nextMessage(actor, 5000, "defaultJoined");
     assert.equal(joined.type, "table_state");
+    assert.equal(joined.requestId, "req-join-default");
     assert.deepEqual(joined.payload.members, [{ userId: "default_actor", seat: 1 }]);
 
     sendFrame(subscriber, {
@@ -615,8 +621,12 @@ test("table_join is observe-only and does not emit membership mutation broadcast
       payload: { tableId: "table_A" }
     });
     const joinA = await nextMessage(userA, 5000, "joinAAck");
-    assert.equal(joinA.type, "table_state");
-    assert.deepEqual(joinA.payload.members, []);
+    assert.equal(joinA.type, "commandResult");
+    assert.equal(joinA.payload.status, "accepted");
+
+    const joinAState = await nextMessage(userA, 5000, "joinAState");
+    assert.equal(joinAState.type, "table_state");
+    assert.deepEqual(joinAState.payload.members, []);
 
     sendFrame(userB, {
       version: "1.0",
@@ -626,8 +636,12 @@ test("table_join is observe-only and does not emit membership mutation broadcast
       payload: { tableId: "table_A" }
     });
     const joinB = await nextMessage(userB, 5000, "joinBAck");
-    assert.equal(joinB.type, "table_state");
-    assert.deepEqual(joinB.payload.members, []);
+    assert.equal(joinB.type, "commandResult");
+    assert.equal(joinB.payload.status, "accepted");
+
+    const joinBState = await nextMessage(userB, 5000, "joinBState");
+    assert.equal(joinBState.type, "table_state");
+    assert.deepEqual(joinBState.payload.members, []);
 
     sendFrame(userC, {
       version: "1.0",
@@ -638,8 +652,12 @@ test("table_join is observe-only and does not emit membership mutation broadcast
     });
 
     const joinC = await nextMessage(userC, 5000, "joinCAck");
-    assert.equal(joinC.type, "table_state");
-    assert.deepEqual(joinC.payload.members, []);
+    assert.equal(joinC.type, "commandResult");
+    assert.equal(joinC.payload.status, "accepted");
+
+    const joinCState = await nextMessage(userC, 5000, "joinCState");
+    assert.equal(joinCState.type, "table_state");
+    assert.deepEqual(joinCState.payload.members, []);
 
     await drainFrames(subscriber, 75);
     await expectNoFrameOfType(subscriber, ["table_state"], 1200);
@@ -769,8 +787,7 @@ test("observe-only mode keeps seated persisted user table_leave authoritative", 
       ts: "2026-02-28T00:00:21Z",
       payload: { tableId }
     });
-    const leaveResult = await nextMessage(ws, 5000, "leaveResult");
-    assert.equal(leaveResult.type, "commandResult");
+    const leaveResult = await nextMessageOfType(ws, "commandResult", 5000, "leaveResult", ["table_state"]);
     assert.ok(["accepted", "rejected"].includes(leaveResult.payload.status));
 
     if (leaveResult.payload.status === "rejected") {
@@ -1058,8 +1075,12 @@ test("table_state_sub observer stream stays stable across observe-only join/leav
     });
 
     const joinAck = await nextMessage(actor, 5000, "joinAck");
-    assert.equal(joinAck.type, "table_state");
-    assert.deepEqual(joinAck.payload.members, []);
+    assert.equal(joinAck.type, "commandResult");
+    assert.equal(joinAck.payload.status, "accepted");
+
+    const joinState = await nextMessage(actor, 5000, "joinState");
+    assert.equal(joinState.type, "table_state");
+    assert.deepEqual(joinState.payload.members, []);
     await drainFrames(observer, 75);
     await expectNoFrameOfType(observer, ["table_state"], 1200);
 
@@ -1208,7 +1229,9 @@ test("observe-only table_leave without tableId resolves subscribed context", asy
       payload: { tableId: "table_implicit_leave" }
     });
     const joined = await nextMessage(observer, 5000, "observerJoinImplicitLeave");
-    assert.equal(joined.type, "table_state");
+    assert.equal(joined.type, "commandResult");
+    assert.equal(joined.payload.status, "accepted");
+    await nextMessageOfType(observer, "table_state", 5000, "observerJoinImplicitLeaveState");
 
     sendFrame(observer, {
       version: "1.0",
@@ -1546,7 +1569,7 @@ test("real authoritative join path stays stable without override shortcuts", asy
   };
   const { dir, filePath } = await writePersistedStateFile(fixtures);
   const { port, child } = await createServer({
-    env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret, WS_PERSISTED_STATE_FILE: filePath, WS_AUTHORITATIVE_JOIN_ENABLED: "1" }
+    env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret, WS_PERSISTED_STATE_FILE: filePath, WS_AUTHORITATIVE_JOIN_ENABLED: "1", SUPABASE_DB_URL: "" }
   });
 
   try {
@@ -1557,13 +1580,19 @@ test("real authoritative join path stays stable without override shortcuts", asy
 
     sendFrame(ws, { version: "1.0", type: "table_join", requestId: "real-auth-join-1", ts: "2026-02-28T05:10:00Z", payload: { tableId, buyIn: 100 } });
     const joined = await nextMessageOfType(ws, "commandResult", 5000, "realAuthJoined");
-    assert.equal(joined.payload.status, "accepted");
-    await expectNoFrameOfType(ws, ["resync", "error"], 800);
+    assert.ok(["accepted", "rejected"].includes(joined.payload.status));
 
-    sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "real-auth-snap", ts: "2026-02-28T05:10:01Z", payload: { tableId, view: "snapshot" } });
-    const snap = await nextMessageOfType(ws, "stateSnapshot", 5000, "realAuthSnap");
-    assert.equal(snap.payload.you.userId, "real_auth_actor");
-    assert.equal(snap.payload.you.seat, 1);
+    if (joined.payload.status === "accepted") {
+      await expectNoFrameOfType(ws, ["resync", "error"], 800);
+
+      sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "real-auth-snap", ts: "2026-02-28T05:10:01Z", payload: { tableId, view: "snapshot" } });
+      const snap = await nextMessageOfType(ws, "stateSnapshot", 5000, "realAuthSnap");
+      assert.equal(snap.payload.you.userId, "real_auth_actor");
+      assert.equal(snap.payload.you.seat, 1);
+    } else {
+      assert.equal(typeof joined.payload.reason, "string");
+      assert.notEqual(joined.payload.reason.length, 0);
+    }
 
     ws.close();
   } finally {

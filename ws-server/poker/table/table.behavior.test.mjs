@@ -577,8 +577,12 @@ test("table_leave without room/table id resolves to joined table", async () => {
     });
 
     const leaverJoinAck = await nextMessage(leaver, 5000, "leaverJoinAck");
-    assert.equal(leaverJoinAck.type, "table_state");
-    assert.deepEqual(leaverJoinAck.payload.members.map((entry) => entry.userId), ["user_leaver"]);
+    assert.equal(leaverJoinAck.type, "commandResult");
+    assert.equal(leaverJoinAck.payload.status, "accepted");
+
+    const leaverJoinState = await nextMessage(leaver, 5000, "leaverJoinState");
+    assert.equal(leaverJoinState.type, "table_state");
+    assert.deepEqual(leaverJoinState.payload.members.map((entry) => entry.userId), ["user_leaver"]);
 
     sendFrame(observer, {
       version: "1.0",
@@ -757,12 +761,24 @@ test("table_join is idempotent by requestId and preserves a single seat-bearing 
     };
 
     sendFrame(client, joinFrame);
-    const firstJoin = await nextMessageOfType(client, "commandResult", 5000, "firstJoinSameRequestId");
+    const firstJoin = await nextMessage(client, 5000, "firstJoinSameRequestId");
+    assert.equal(firstJoin.type, "commandResult");
+    assert.equal(firstJoin.requestId, "req-join-same-id");
     assert.equal(firstJoin.payload.status, "accepted");
 
+    const firstJoinState = await nextMessage(client, 5000, "firstJoinState");
+    assert.equal(firstJoinState.type, "table_state");
+    assert.equal(firstJoinState.requestId, "req-join-same-id");
+
     sendFrame(client, joinFrame);
-    const secondJoin = await nextMessageOfType(client, "commandResult", 5000, "secondJoinSameRequestId");
+    const secondJoin = await nextMessage(client, 5000, "secondJoinSameRequestId");
+    assert.equal(secondJoin.type, "commandResult");
+    assert.equal(secondJoin.requestId, "req-join-same-id");
     assert.equal(secondJoin.payload.status, "accepted");
+
+    const secondJoinState = await nextMessage(client, 5000, "secondJoinState");
+    assert.equal(secondJoinState.type, "table_state");
+    assert.equal(secondJoinState.requestId, "req-join-same-id");
 
     sendFrame(client, {
       version: "1.0",
@@ -813,6 +829,10 @@ test("join rejects with bounds_exceeded when table is full and does not mutate m
       ts: "2026-02-28T00:16:00Z",
       payload: { tableId: "table_bounds" }
     });
+
+    const userAJoinAck = await nextMessage(userA, 5000, "userAJoinBoundsAck");
+    assert.equal(userAJoinAck.type, "commandResult");
+    assert.equal(userAJoinAck.payload.status, "accepted");
 
     const userAJoin = await nextMessage(userA, 5000, "userAJoinBounds");
     assert.equal(userAJoin.type, "table_state");

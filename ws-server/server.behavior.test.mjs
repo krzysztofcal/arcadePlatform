@@ -568,11 +568,11 @@ test("snapshot-view subscription is one-shot and does not receive later legacy t
       ts: "2026-02-28T00:00:06Z",
       payload: { tableId }
     });
-    const actorJoinState = await nextMessageOfType(actorClient, "table_state");
-    assert.equal(actorJoinState.requestId, "req-join-actor-oneshot");
     const actorJoin = await nextMessageOfType(actorClient, "commandResult");
     assert.equal(actorJoin.payload.requestId, "req-join-actor-oneshot");
     assert.equal(actorJoin.payload.status, "accepted");
+    const actorJoinState = await nextMessageOfType(actorClient, "table_state");
+    assert.equal(actorJoinState.requestId, "req-join-actor-oneshot");
 
     const snapshotFollowup = await attemptMessage(snapshotClient, 350);
     assert.equal(snapshotFollowup, null);
@@ -605,12 +605,12 @@ test("table_leave non-override path does not fabricate accepted success from WS 
     await auth(other, otherToken, "auth-leave-non-override-other");
 
     sendFrame(actor, { version: "1.0", type: "table_join", requestId: "join-leave-non-override-actor", ts: "2026-02-28T00:00:01Z", payload: { tableId } });
-    await nextMessageOfType(actor, "table_state");
     const actorJoinAck = await nextMessageOfType(actor, "commandResult");
+    await nextMessageOfType(actor, "table_state");
     assert.equal(actorJoinAck.payload.status, "accepted");
     sendFrame(other, { version: "1.0", type: "table_join", requestId: "join-leave-non-override-other", ts: "2026-02-28T00:00:02Z", payload: { tableId } });
-    await nextMessageOfType(other, "table_state");
     const otherJoinAck = await nextMessageOfType(other, "commandResult");
+    await nextMessageOfType(other, "table_state");
     assert.equal(otherJoinAck.payload.status, "accepted");
 
     sendFrame(actor, {
@@ -826,8 +826,8 @@ test("table_leave rejects when authoritative executor returns invalid state cont
     await auth(actor, actorToken, "auth-leave-invalid-state");
 
     sendFrame(actor, { version: "1.0", type: "table_join", requestId: "join-leave-invalid-state", ts: "2026-02-28T00:00:01Z", payload: { tableId } });
-    await nextMessageOfType(actor, "table_state");
     await nextMessageOfType(actor, "commandResult");
+    await nextMessageOfType(actor, "table_state");
 
     sendFrame(actor, { version: "1.0", type: "table_leave", requestId: "leave-invalid-state", ts: "2026-02-28T00:00:02Z", payload: { tableId } });
     const first = await nextMessageOfType(actor, "commandResult");
@@ -932,11 +932,11 @@ test("table_leave rejects when authoritative success state still contains actor 
     await auth(other, keepToken, "auth-leave-still-present-keep");
 
     sendFrame(actor, { version: "1.0", type: "table_join", requestId: "join-leave-still-present-actor", ts: "2026-02-28T00:00:01Z", payload: { tableId } });
-    await nextMessageOfType(actor, "table_state");
     await nextMessageOfType(actor, "commandResult");
+    await nextMessageOfType(actor, "table_state");
     sendFrame(other, { version: "1.0", type: "table_join", requestId: "join-leave-still-present-keep", ts: "2026-02-28T00:00:02Z", payload: { tableId } });
-    await nextMessageOfType(other, "table_state");
     const otherJoinAck = await nextMessageOfType(other, "commandResult");
+    await nextMessageOfType(other, "table_state");
     assert.equal(otherJoinAck.payload.status, "accepted");
 
     sendFrame(actor, { version: "1.0", type: "table_leave", requestId: "leave-still-present", ts: "2026-02-28T00:00:03Z", payload: { tableId } });
@@ -990,11 +990,11 @@ test("table_leave preserves remaining subscriber when authoritative state uses s
     await auth(other, keepToken, "auth-leave-keep-seatno");
 
     sendFrame(actor, { version: "1.0", type: "table_join", requestId: "join-leave-actor-seatno", ts: "2026-02-28T00:00:01Z", payload: { tableId } });
-    await nextMessageOfType(actor, "table_state");
     await nextMessageOfType(actor, "commandResult");
+    await nextMessageOfType(actor, "table_state");
     sendFrame(other, { version: "1.0", type: "table_join", requestId: "join-leave-keep-seatno", ts: "2026-02-28T00:00:02Z", payload: { tableId } });
-    await nextMessageOfType(other, "table_state");
     const otherJoinAck = await nextMessageOfType(other, "commandResult");
+    await nextMessageOfType(other, "table_state");
     assert.equal(otherJoinAck.payload.status, "accepted");
 
     sendFrame(actor, { version: "1.0", type: "table_leave", requestId: "leave-preserve-seatno", ts: "2026-02-28T00:00:03Z", payload: { tableId } });
@@ -1450,8 +1450,8 @@ test("ack is receiver-local no-op for poker state", async () => {
     await auth(ws, makeHs256Jwt({ secret, sub: "user_ack" }));
 
     sendFrame(ws, { version: "1.0", type: "table_join", requestId: "join-ack", ts: "2026-02-28T00:00:01Z", payload: { tableId: "table_ack" } });
-    const joined = await nextMessageOfType(ws, "table_state");
     await nextMessageOfType(ws, "commandResult");
+    const joined = await nextMessageOfType(ws, "table_state");
 
     sendFrame(ws, { version: "1.0", type: "ack", requestId: "ack-1", roomId: "table_ack", ts: "2026-02-28T00:00:02Z", payload: { tableId: "table_ack", seq: joined.seq } });
     sendFrame(ws, { version: "1.0", type: "ack", requestId: "ack-2", roomId: "table_ack", ts: "2026-02-28T00:00:03Z", payload: { tableId: "table_ack", seq: joined.seq } });
@@ -1911,8 +1911,8 @@ test("same-socket frame ordering is preserved when bootstrap load is slow", asyn
 
     const [first, second] = await twoMessages;
 
-    assert.equal(first.type, "table_state");
-    assert.equal(second.type, "commandResult");
+    assert.equal(first.type, "commandResult");
+    assert.equal(second.type, "table_state");
     ws.close();
   } finally {
     child.kill("SIGTERM");
@@ -1959,9 +1959,9 @@ test("slow bootstrap on one socket does not block another socket", async () => {
     const echoResponse = await nextMessageOfType(wsB, "protectedEchoOk", 2000);
     assert.equal(echoResponse.payload.echo, "B");
 
+    const joinAckA = await nextMessageOfType(wsA, "commandResult", 3000);
     const joinStateA = await nextMessageOfType(wsA, "table_state", 3000);
     assert.equal(joinStateA.requestId, "join-a-slow");
-    const joinAckA = await nextMessageOfType(wsA, "commandResult", 3000);
     assert.equal(joinAckA.payload.requestId, "join-a-slow");
     assert.equal(joinAckA.payload.status, "accepted");
 
@@ -1997,12 +1997,12 @@ test("rapid same-socket join then snapshot remains ordered with slow bootstrap",
     sendFrame(ws, { version: "1.0", type: "table_join", requestId: "join-ordered", ts: "2026-02-28T00:23:00Z", payload: { tableId } });
     sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "snap-ordered", ts: "2026-02-28T00:23:01Z", payload: { tableId, view: "snapshot" } });
 
+    const joinAck = await nextCommandResultForRequest(ws, "join-ordered", 4000);
     const first = await nextMessageMatching(
       ws,
       (frame) => frame?.type === "table_state" && frame?.requestId === "join-ordered",
       4000
     );
-    const joinAck = await nextCommandResultForRequest(ws, "join-ordered", 4000);
     const second = await nextMessageMatching(
       ws,
       (frame) => frame?.type === "stateSnapshot" && frame?.requestId === "snap-ordered",
@@ -2047,9 +2047,9 @@ test("observer table_join keeps live members empty without creating seated membe
     await auth(ws, token);
 
     sendFrame(ws, { version: "1.0", type: "table_join", requestId: "observer-join-1", ts: "2026-02-28T00:31:00Z", payload: { tableId } });
+    const firstJoinAck = await nextCommandResultForRequest(ws, "observer-join-1");
     const firstJoinState = await nextMessageOfType(ws, "table_state");
     assert.equal(firstJoinState.requestId, "observer-join-1");
-    const firstJoinAck = await nextCommandResultForRequest(ws, "observer-join-1");
     assert.equal(firstJoinAck.payload.status, "accepted");
 
     sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "observer-state-1", ts: "2026-02-28T00:31:00Z", payload: { tableId } });
@@ -2061,9 +2061,9 @@ test("observer table_join keeps live members empty without creating seated membe
     ]);
 
     sendFrame(ws, { version: "1.0", type: "table_join", requestId: "observer-join-2", ts: "2026-02-28T00:31:01Z", payload: { tableId } });
+    const secondJoinAck = await nextCommandResultForRequest(ws, "observer-join-2");
     const secondJoinState = await nextMessageOfType(ws, "table_state");
     assert.equal(secondJoinState.requestId, "observer-join-2");
-    const secondJoinAck = await nextCommandResultForRequest(ws, "observer-join-2");
     assert.equal(secondJoinAck.payload.status, "accepted");
 
     sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "observer-state-2", ts: "2026-02-28T00:31:01Z", payload: { tableId } });
@@ -2107,18 +2107,18 @@ test("seated persisted user remains seated across repeated table_join", async ()
     await auth(ws, token);
 
     sendFrame(ws, { version: "1.0", type: "table_join", requestId: "seated-join-1", ts: "2026-02-28T00:32:00Z", payload: { tableId } });
+    const firstAck = await nextMessageOfType(ws, "commandResult");
     const firstState = await nextMessageOfType(ws, "table_state");
     assert.equal(firstState.requestId, "seated-join-1");
-    const firstAck = await nextMessageOfType(ws, "commandResult");
     assert.equal(firstAck.payload.status, "accepted");
     sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "seated-sub-1", ts: "2026-02-28T00:32:00Z", payload: { tableId } });
     const firstJoin = await nextMessageOfType(ws, "table_state");
     assert.deepEqual(firstJoin.payload.members, [{ userId: "seed_user_a", seat: 3 }]);
 
     sendFrame(ws, { version: "1.0", type: "table_join", requestId: "seated-join-2", ts: "2026-02-28T00:32:01Z", payload: { tableId } });
+    const secondAck = await nextMessageOfType(ws, "commandResult");
     const secondState = await nextMessageOfType(ws, "table_state");
     assert.equal(secondState.requestId, "seated-join-2");
-    const secondAck = await nextMessageOfType(ws, "commandResult");
     assert.equal(secondAck.payload.status, "accepted");
     sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "seated-sub-2", ts: "2026-02-28T00:32:01Z", payload: { tableId } });
     const secondJoin = await nextMessageOfType(ws, "table_state");
@@ -2355,10 +2355,12 @@ test("active replacement: observe-only snapshot privacy for seated and observer 
     const joinAck_join_seat_repl = await nextMessageOfType(seated, "commandResult");
     assert.equal(joinAck_join_seat_repl.payload.requestId, "join-seat-repl");
     assert.equal(joinAck_join_seat_repl.payload.status, "accepted");
+    await nextMessageOfType(seated, "table_state");
     sendFrame(observer, { version: "1.0", type: "table_join", requestId: "join-observer-repl", ts: "2026-02-28T01:00:01Z", payload: { tableId } });
     const joinAck_join_observer_repl = await nextMessageOfType(observer, "commandResult");
     assert.equal(joinAck_join_observer_repl.payload.requestId, "join-observer-repl");
     assert.equal(joinAck_join_observer_repl.payload.status, "accepted");
+    await nextMessageOfType(observer, "table_state");
 
     sendFrame(seated, { version: "1.0", type: "table_state_sub", requestId: "snap-seat-repl", ts: "2026-02-28T01:00:02Z", payload: { tableId, view: "snapshot" } });
     sendFrame(observer, { version: "1.0", type: "table_state_sub", requestId: "snap-observer-repl", ts: "2026-02-28T01:00:03Z", payload: { tableId, view: "snapshot" } });
@@ -2682,8 +2684,8 @@ test("WS act persists state to file-backed optimistic store", async () => {
     await auth(ws, makeHs256Jwt({ secret, sub: "seat_actor" }), "auth-persist");
 
     sendFrame(ws, { version: "1.0", type: "table_join", requestId: "join-persist", ts: "2026-02-28T02:00:00Z", payload: { tableId } });
-    await nextMessageOfType(ws, "table_state");
     const joinAck_join_persist = await nextMessageOfType(ws, "commandResult");
+    await nextMessageOfType(ws, "table_state");
     assert.equal(joinAck_join_persist.payload.requestId, "join-persist");
     assert.equal(joinAck_join_persist.payload.status, "accepted");
 
@@ -2735,8 +2737,8 @@ test("WS act optimistic conflict returns deterministic rejection and resync", as
     await hello(ws);
     await auth(ws, makeHs256Jwt({ secret, sub: "seat_actor" }), "auth-conflict");
     sendFrame(ws, { version: "1.0", type: "table_join", requestId: "join-conflict", ts: "2026-02-28T02:10:00Z", payload: { tableId } });
-    await nextMessageOfType(ws, "table_state");
     const joinAck_join_conflict = await nextMessageOfType(ws, "commandResult");
+    await nextMessageOfType(ws, "table_state");
     assert.equal(joinAck_join_conflict.payload.requestId, "join-conflict");
     assert.equal(joinAck_join_conflict.payload.status, "accepted");
     sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "snap-conflict", ts: "2026-02-28T02:10:01Z", payload: { tableId, view: "snapshot" } });
@@ -3129,8 +3131,8 @@ test("table_snapshot rejects missing requestId deterministically and does not mu
     await auth(ws, token, "snapshot-auth-noreqid");
 
     sendFrame(ws, { version: "1.0", type: "table_join", requestId: "join-noreqid", ts: "2026-02-28T03:11:00Z", payload: { tableId } });
-    const before = await nextMessageOfType(ws, "table_state");
     await nextMessageOfType(ws, "commandResult");
+    const before = await nextMessageOfType(ws, "table_state");
 
     sendFrame(ws, { version: "1.0", type: "table_snapshot", ts: "2026-02-28T03:11:01Z", payload: { tableId } });
     const rejected = await nextMessage(ws);
@@ -3169,8 +3171,8 @@ test("table_snapshot rejects invalid gameplay snapshot state deterministically",
     await auth(ws, token, "snapshot-auth-invalid-state");
 
     sendFrame(ws, { version: "1.0", type: "table_join", requestId: "join-invalid-state", ts: "2026-02-28T03:12:00Z", payload: { tableId } });
-    const before = await nextMessageOfType(ws, "table_state");
     await nextMessageOfType(ws, "commandResult");
+    const before = await nextMessageOfType(ws, "table_state");
 
     sendFrame(ws, { version: "1.0", type: "table_snapshot", requestId: "snapshot-invalid-state", ts: "2026-02-28T03:12:01Z", payload: { tableId } });
     const rejected = await nextMessage(ws);
@@ -3208,8 +3210,8 @@ test("table_snapshot internal failures are non-leaking and do not mutate presenc
     await auth(ws, token, "snapshot-auth-internal-failure");
 
     sendFrame(ws, { version: "1.0", type: "table_join", requestId: "join-internal-failure", ts: "2026-02-28T03:12:00Z", payload: { tableId } });
-    const before = await nextMessageOfType(ws, "table_state");
     await nextMessageOfType(ws, "commandResult");
+    const before = await nextMessageOfType(ws, "table_state");
 
     sendFrame(ws, { version: "1.0", type: "table_snapshot", requestId: "snapshot-internal-failure", ts: "2026-02-28T03:12:01Z", payload: { tableId } });
     const rejected = await nextMessage(ws);
