@@ -64,6 +64,20 @@ test('handleJoinCommand forwards join intent to authoritative executor when enab
   assert.equal(calls.authoritativeArgs.autoSeat, true);
   assert.equal(calls.authoritativeArgs.preferredSeatNo, 4);
   assert.equal(calls.authoritativeArgs.buyIn, 250);
+  assert.equal(calls.joinArgs.authoritativeSeatNo, 2);
+});
+
+test('handleJoinCommand authoritative rehydrate failure does not emit accepted success state', async () => {
+  const { ctx, calls } = baseCtx({ seatNo: 3, buyIn: 200 });
+  ctx.authoritativeJoinEnabled = true;
+  ctx.persistedBootstrapEnabled = true;
+  ctx.restoreTableFromPersisted = async () => ({ ok: false, reason: 'restore_error' });
+  await handleJoinCommand(ctx);
+
+  assert.equal(calls.sendError, 1);
+  assert.equal(calls.command.length, 0);
+  assert.equal(calls.actorTableState, 0);
+  assert.equal(calls.table, 0);
 });
 
 test('handleJoinCommand rejects invalid buyIn without broadcast', async () => {

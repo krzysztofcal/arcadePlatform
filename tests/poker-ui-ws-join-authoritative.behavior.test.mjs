@@ -212,3 +212,27 @@ test('poker UI uses WS join result payload fields when present', async () => {
   assert.equal(harness.elements.pokerSeatNo.value, '5');
   assert.equal(harness.fetchState.joinCalls, 0);
 });
+
+test('poker UI auto-seat accepted result keeps 1-based seat value', async () => {
+  const harness = createPokerTableHarness({
+    wsFactory(){
+      return {
+        start(){},
+        destroy(){},
+        isReady(){ return true; },
+        sendJoin(){
+          return Promise.resolve({ ok: true, seatNo: 2 });
+        }
+      };
+    }
+  });
+
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  harness.elements.pokerSeatNo.value = '1';
+  harness.elements.pokerJoin.click();
+  await harness.flush();
+
+  assert.equal(harness.elements.pokerSeatNo.value, '2');
+});

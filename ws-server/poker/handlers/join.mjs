@@ -48,6 +48,7 @@ export async function handleJoinCommand({ frame, ws, connState, sessionStore, ta
     return;
   }
   const joinIntent = parsedJoinIntent.intent;
+  let authoritativeJoinResult = null;
 
   if (authoritativeJoinEnabled && !observeOnlyJoinEnabled && persistedBootstrapEnabled) {
     const authoritativeJoinExecutor = await loadAuthoritativeJoinExecutor();
@@ -69,6 +70,7 @@ export async function handleJoinCommand({ frame, ws, connState, sessionStore, ta
       });
       return;
     }
+    authoritativeJoinResult = authoritativeJoin;
   }
 
   const ensured = await tableManager.ensureTableLoaded(tableId, { allowCreate: true });
@@ -104,7 +106,8 @@ export async function handleJoinCommand({ frame, ws, connState, sessionStore, ta
     seatNo: joinIntent.seatNo,
     autoSeat: joinIntent.autoSeat,
     preferredSeatNo: joinIntent.preferredSeatNo,
-    buyIn: joinIntent.buyIn
+    buyIn: joinIntent.buyIn,
+    authoritativeSeatNo: authoritativeJoinResult?.seatNo ?? null
   });
   if (!joined.ok) {
     sendCommandResult(ws, connState, {
