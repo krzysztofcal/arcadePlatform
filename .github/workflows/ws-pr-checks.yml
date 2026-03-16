@@ -8,6 +8,8 @@ on:
       - "shared/**"
       - "poker/**"
       - "tests/**"
+      - "netlify/functions/_shared/**"
+      - "docs/ws-poker-protocol.md"
       - "scripts/test-all.mjs"
       - ".github/workflows/ws-pr-checks.yml"
       - ".github/workflows/ws-deploy.yml"

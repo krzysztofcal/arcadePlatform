@@ -279,3 +279,15 @@ test("ws dependency guard detects forbidden bridge import", async () => {
     await fsp.rm(forbiddenFile, { force: true });
   }
 });
+
+
+test("workflow trigger boundary includes shared join and netlify helper surfaces", () => {
+  const prWorkflow = fs.readFileSync(".github/workflows/ws-pr-checks.yml", "utf8");
+  const deployWorkflow = fs.readFileSync(".github/workflows/ws-deploy.yml", "utf8");
+
+  for (const text of [prWorkflow, deployWorkflow]) {
+    assert.match(text, /"shared\/\*\*"/);
+    assert.match(text, /"netlify\/functions\/_shared\/\*\*"/);
+    assert.match(text, /"docs\/ws-poker-protocol\.md"/);
+  }
+});

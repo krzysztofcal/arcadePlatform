@@ -102,6 +102,8 @@ const REQUIRED_WS_TRIGGER_PATHS = [
   "ws-tests/**",
   "poker/**",
   "tests/**",
+  "netlify/functions/_shared/**",
+  "docs/ws-poker-protocol.md",
   "scripts/test-all.mjs"
 ];
 
@@ -133,6 +135,12 @@ test("PR workflow must self-trigger and trigger on deploy workflow changes", () 
     prWorkflow.includes('- ".github/workflows/ws-deploy.yml"'),
     'Missing trigger path in .github/workflows/ws-pr-checks.yml: .github/workflows/ws-deploy.yml'
   );
+  const deployWorkflow = workflowText(".github/workflows/ws-deploy.yml");
+  assert.ok(
+    deployWorkflow.includes('- ".github/workflows/ws-pr-checks.yml"'),
+    "Missing trigger path in .github/workflows/ws-deploy.yml: .github/workflows/ws-pr-checks.yml"
+  );
+
 });
 
 test("workflow wiring check uses literal matching (no dynamic RegExp)", () => {

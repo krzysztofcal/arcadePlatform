@@ -11,12 +11,21 @@ test("ws-deploy keeps ws-tests trigger surface and runs harness checks", () => {
 
   assert.match(text, /"ws-tests\/\*\*"/);
   assert.match(text, /"shared\/\*\*"/);
+  assert.match(text, /"poker\/\*\*"/);
+  assert.match(text, /"tests\/\*\*"/);
+  assert.match(text, /"netlify\/functions\/_shared\/\*\*"/);
+  assert.match(text, /"docs\/ws-poker-protocol\.md"/);
+  assert.match(text, /"\.github\/workflows\/ws-pr-checks\.yml"/);
   assert.match(text, /"\.github\/workflows\/ws-deploy\.yml"/);
 
   const pushBlockMatch = text.match(/on:\n[\s\S]*?push:\n([\s\S]*?)\njobs:/);
   const pushBlock = pushBlockMatch ? pushBlockMatch[1] : "";
   assert.match(pushBlock, /"ws-server\/\*\*"/);
   assert.match(pushBlock, /"shared\/\*\*"/);
+  assert.match(pushBlock, /"poker\/\*\*"/);
+  assert.match(pushBlock, /"tests\/\*\*"/);
+  assert.match(pushBlock, /"netlify\/functions\/_shared\/\*\*"/);
+  assert.match(pushBlock, /"docs\/ws-poker-protocol\.md"/);
 
   assert.match(text, /node --test ws-tests\/ws-deploy-workflow\.test\.mjs/);
   assert.match(text, /node --test ws-tests\/ws-tests-suite-completeness\.guard\.test\.mjs/);
@@ -96,6 +105,10 @@ test("ws-deploy trigger surface includes ws-server runtime changes", () => {
   const pushBlock = pushBlockMatch ? pushBlockMatch[1] : "";
   assert.match(pushBlock, /"ws-server\/\*\*"/);
   assert.match(pushBlock, /"shared\/\*\*"/);
+  assert.match(pushBlock, /"poker\/\*\*"/);
+  assert.match(pushBlock, /"tests\/\*\*"/);
+  assert.match(pushBlock, /"netlify\/functions\/_shared\/\*\*"/);
+  assert.match(pushBlock, /"docs\/ws-poker-protocol\.md"/);
 });
 
 
