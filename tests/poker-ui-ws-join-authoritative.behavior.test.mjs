@@ -60,6 +60,40 @@ test('poker UI explicit join never sends seatNo 0', async () => {
   assert.notEqual(sent[0].seatNo, 0);
 });
 
+test('poker UI explicit seat has parity between WS-ready and HTTP fallback payloads', async () => {
+  const wsSent = [];
+  const wsHarness = createPokerTableHarness({
+    wsFactory(){
+      return {
+        start(){},
+        destroy(){},
+        isReady(){ return true; },
+        sendJoin(payload){
+          wsSent.push(payload);
+          return Promise.resolve({ ok: true });
+        }
+      };
+    }
+  });
+  wsHarness.fireDomContentLoaded();
+  await wsHarness.flush();
+  wsHarness.elements.pokerSeatNo.value = '4';
+  wsHarness.elements.pokerJoin.click();
+  await wsHarness.flush();
+
+  const httpHarness = createPokerTableHarness({ disableWsClient: true });
+  httpHarness.fireDomContentLoaded();
+  await httpHarness.flush();
+  httpHarness.elements.pokerSeatNo.value = '4';
+  httpHarness.elements.pokerJoin.click();
+  await httpHarness.flush();
+
+  assert.equal(wsSent.length, 1);
+  assert.equal(httpHarness.fetchState.joinBodies.length, 1);
+  assert.equal(wsSent[0].seatNo, 4);
+  assert.equal(httpHarness.fetchState.joinBodies[0].seatNo, 4);
+});
+
 test('poker UI autoJoin sends WS join payload with autoSeat + preferredSeatNo semantics', async () => {
   const sent = [];
   const harness = createPokerTableHarness({
@@ -87,6 +121,42 @@ test('poker UI autoJoin sends WS join payload with autoSeat + preferredSeatNo se
   assert.equal(sent[0].payload.preferredSeatNo, 2);
   assert.equal(sent[0].payload.buyIn, 300);
   assert.equal(harness.fetchState.joinCalls, 0);
+});
+
+test('poker UI autoJoin preferred seat has parity between WS-ready and HTTP fallback payloads', async () => {
+  const wsSent = [];
+  const wsHarness = createPokerTableHarness({
+    search: '?tableId=table-1&autoJoin=1&seatNo=3',
+    wsFactory(){
+      return {
+        start(){},
+        destroy(){},
+        isReady(){ return true; },
+        sendJoin(payload){
+          wsSent.push(payload);
+          return Promise.resolve({ ok: true });
+        }
+      };
+    }
+  });
+  wsHarness.fireDomContentLoaded();
+  await wsHarness.flush();
+  await wsHarness.flush();
+
+  const httpHarness = createPokerTableHarness({
+    search: '?tableId=table-1&autoJoin=1&seatNo=3',
+    disableWsClient: true
+  });
+  httpHarness.fireDomContentLoaded();
+  await httpHarness.flush();
+  await httpHarness.flush();
+
+  assert.equal(wsSent.length >= 1, true);
+  assert.equal(httpHarness.fetchState.joinBodies.length >= 1, true);
+  assert.equal(wsSent[0].autoSeat, true);
+  assert.equal(httpHarness.fetchState.joinBodies[0].autoSeat, true);
+  assert.equal(wsSent[0].preferredSeatNo, 3);
+  assert.equal(httpHarness.fetchState.joinBodies[0].preferredSeatNo, 3);
 });
 
 

@@ -45,6 +45,7 @@ export function createPokerTableHarness(options = {}){
     getCalls: 0,
     heartbeatCalls: 0,
     joinCalls: 0,
+    joinBodies: [],
     startHandCalls: 0,
     actCalls: 0,
     responses: options.responses || [
@@ -120,7 +121,7 @@ export function createPokerTableHarness(options = {}){
     clearTimeout(id){ clearTimeoutCalls.push(id); timeouts.delete(id); },
     setInterval(){ return 999; },
     clearInterval(){},
-    fetch: async (url) => {
+    fetch: async (url, opts) => {
       const text = String(url || '');
       if (text.includes('/poker-get-table')){
         fetchState.getCalls += 1;
@@ -133,6 +134,12 @@ export function createPokerTableHarness(options = {}){
       }
       if (text.includes('/poker-join')){
         fetchState.joinCalls += 1;
+        const bodyRaw = opts && opts.body;
+        if (typeof bodyRaw === 'string') {
+          try { fetchState.joinBodies.push(JSON.parse(bodyRaw)); } catch (_err) { fetchState.joinBodies.push(null); }
+        } else {
+          fetchState.joinBodies.push(null);
+        }
         return { ok: true, json: async () => ({ ok: true }) };
       }
       if (text.includes('/poker-start-hand')){
