@@ -29,7 +29,7 @@ function resolveJoinTestOverride(env = process.env) {
 
 function normalizeJoinError(error) {
   const code = typeof error?.code === "string" ? error.code : "authoritative_join_failed";
-  if (["table_not_found", "table_closed", "table_not_open", "seat_taken", "table_full", "table_full_bot_leaving", "state_missing", "state_invalid", "duplicate_seat", "invalid_seat_no", "invalid_buy_in", "request_pending", "insufficient_funds", "system_account_missing", "chips_apply_failed", "chips_apply_mismatch", "missing_idempotency_key", "invalid_escrow_only_entries"].includes(code)) {
+  if (["table_not_found", "table_closed", "table_not_open", "seat_taken", "table_full", "table_full_bot_leaving", "state_missing", "poker_state_missing", "state_invalid", "duplicate_seat", "invalid_seat_no", "invalid_buy_in", "request_pending", "insufficient_funds", "system_account_missing", "chips_apply_failed", "chips_apply_mismatch", "missing_idempotency_key", "invalid_escrow_only_entries"].includes(code)) {
     return { ok: false, code };
   }
   return { ok: false, code: "authoritative_join_failed" };

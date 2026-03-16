@@ -36,6 +36,17 @@ function parseJoinIntent(payload) {
   };
 }
 
+
+function normalizeAuthoritativeJoinReason(code) {
+  if (code === "poker_state_missing" || code === "state_missing") return "state_missing";
+  if (code === "duplicate_seat" || code === "seat_taken") return "seat_taken";
+  return code || "authoritative_join_failed";
+}
+
+function classifyRestoreFailureAsMissingState(reason) {
+  return ["state_missing", "poker_state_missing", "invalid_persisted_state"].includes(String(reason || ""));
+}
+
 export async function handleJoinCommand({ frame, ws, connState, sessionStore, tableManager, ensureTableLoadedErrorMapper, restoreTableFromPersisted, persistMutatedState, broadcastResyncRequired, broadcastStateSnapshots, broadcastTableState, sendError, sendCommandResult, sendTableState, authoritativeJoinEnabled, observeOnlyJoinEnabled, persistedBootstrapEnabled, loadAuthoritativeJoinExecutor }) {
   const tableId = frame.__resolvedTableId;
   const parsedJoinIntent = parseJoinIntent(frame.payload);
@@ -62,11 +73,18 @@ export async function handleJoinCommand({ frame, ws, connState, sessionStore, ta
       buyIn: joinIntent.buyIn
     });
     if (!authoritativeJoin?.ok) {
+      let reason = normalizeAuthoritativeJoinReason(authoritativeJoin?.code);
+      if (reason === "authoritative_join_failed") {
+        const restored = await restoreTableFromPersisted(tableId);
+        if (!restored?.ok && classifyRestoreFailureAsMissingState(restored?.reason || restored?.code)) {
+          reason = "state_missing";
+        }
+      }
       sendCommandResult(ws, connState, {
         requestId: frame.requestId ?? null,
         tableId,
         status: "rejected",
-        reason: authoritativeJoin?.code || "authoritative_join_failed"
+        reason
       });
       return;
     }

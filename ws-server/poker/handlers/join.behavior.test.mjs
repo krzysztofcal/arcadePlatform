@@ -207,3 +207,58 @@ test('handleJoinCommand falls back to join_failed when join failure has no code'
   assert.equal(calls.table, 0);
   assert.equal(calls.snapshots, 0);
 });
+
+
+test('handleJoinCommand maps authoritative missing-state aliases to stable state_missing rejection', async () => {
+  for (const code of ['state_missing', 'poker_state_missing']) {
+    const { ctx, calls } = baseCtx({ seatNo: 2, buyIn: 100 });
+    ctx.authoritativeJoinEnabled = true;
+    ctx.persistedBootstrapEnabled = true;
+    ctx.loadAuthoritativeJoinExecutor = async () => async () => ({ ok: false, code });
+
+    await handleJoinCommand(ctx);
+
+    assert.equal(calls.command.length, 1);
+    assert.equal(calls.command[0].status, 'rejected');
+    assert.equal(calls.command[0].reason, 'state_missing');
+    assert.equal(calls.actorTableState, 0);
+    assert.equal(calls.table, 0);
+    assert.equal(calls.snapshots, 0);
+  }
+});
+
+test('handleJoinCommand maps authoritative historical seat conflicts to seat_taken', async () => {
+  for (const code of ['seat_taken', 'duplicate_seat']) {
+    const { ctx, calls } = baseCtx({ seatNo: 1, buyIn: 100 });
+    ctx.authoritativeJoinEnabled = true;
+    ctx.persistedBootstrapEnabled = true;
+    ctx.loadAuthoritativeJoinExecutor = async () => async () => ({ ok: false, code });
+
+    await handleJoinCommand(ctx);
+
+    assert.equal(calls.command.length, 1);
+    assert.equal(calls.command[0].status, 'rejected');
+    assert.equal(calls.command[0].reason, 'seat_taken');
+    assert.notEqual(calls.command[0].reason, 'temporarily_unavailable');
+    assert.equal(calls.actorTableState, 0);
+    assert.equal(calls.table, 0);
+    assert.equal(calls.snapshots, 0);
+  }
+});
+
+
+test('handleJoinCommand maps authoritative_join_failed + restore missing-state signal to state_missing', async () => {
+  const { ctx, calls } = baseCtx({ seatNo: 2, buyIn: 100 });
+  ctx.authoritativeJoinEnabled = true;
+  ctx.persistedBootstrapEnabled = true;
+  ctx.loadAuthoritativeJoinExecutor = async () => async () => ({ ok: false, code: 'authoritative_join_failed' });
+  ctx.restoreTableFromPersisted = async () => ({ ok: false, reason: 'invalid_persisted_state' });
+
+  await handleJoinCommand(ctx);
+
+  assert.equal(calls.command.length, 1);
+  assert.equal(calls.command[0].status, 'rejected');
+  assert.equal(calls.command[0].reason, 'state_missing');
+  assert.equal(calls.sendError, 0);
+  assert.equal(calls.actorTableState, 0);
+});

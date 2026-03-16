@@ -3355,7 +3355,8 @@ test("authoritative join missing state row returns protocol-safe state_missing",
     sendFrame(ws, { version: "1.0", type: "table_join", requestId: "join-missing-state", ts: "2026-02-28T05:30:00Z", payload: { tableId, buyIn: 100 } });
     const error = await nextMessageOfType(ws, "commandResult");
     assert.equal(error.payload.status, "rejected");
-    assert.ok(["state_missing", "authoritative_join_failed"].includes(error.payload.reason));
+    assert.ok(["state_missing", "poker_state_missing"].includes(error.payload.reason));
+    assert.notEqual(error.payload.reason, "temporarily_unavailable");
     ws.close();
   } finally {
     child.kill("SIGTERM");

@@ -124,3 +124,23 @@ test("authoritative join adapter returns unavailable when postTransaction loader
   const result = await execute({ tableId: "t1", userId: "u1", requestId: "r5", buyIn: 100 });
   assert.deepEqual(result, { ok: false, code: "temporarily_unavailable" });
 });
+
+
+test("authoritative join adapter preserves poker_state_missing as protocol-safe known code", async () => {
+  const execute = createAuthoritativeJoinExecutor({
+    env: {},
+    klog: () => {},
+    beginSql: async (fn) => fn({ ok: true }),
+    loadPostTransactionFn: async () => async () => ({ ok: true }),
+    loadJoinModule: async () => ({
+      executePokerJoinAuthoritative: async () => {
+        const err = new Error("poker_state_missing");
+        err.code = "poker_state_missing";
+        throw err;
+      }
+    })
+  });
+
+  const result = await execute({ tableId: "t1", userId: "u1", requestId: "r6", buyIn: 100 });
+  assert.deepEqual(result, { ok: false, code: "poker_state_missing" });
+});
