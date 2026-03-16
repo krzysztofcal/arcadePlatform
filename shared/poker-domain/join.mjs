@@ -130,6 +130,9 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
     const requestedSeatNo = seatNo === null || seatNo === undefined ? null : (Number.isInteger(Number(seatNo)) ? Number(seatNo) : null);
     const preferredSeatNoRequested = preferredSeatNo === null || preferredSeatNo === undefined ? null : (Number.isInteger(Number(preferredSeatNo)) ? Number(preferredSeatNo) : null);
 
+    if (requestedSeatNo !== null && requestedSeatNo < 1) throw makeError("invalid_seat_no");
+    if (preferredSeatNoRequested !== null && preferredSeatNoRequested < 1) throw makeError("invalid_seat_no");
+
     let resolvedSeatNo = null;
     if (requestedSeatNo !== null && !autoSeat) {
       if (requestedSeatNo < 1 || requestedSeatNo > maxPlayers) throw makeError("invalid_seat_no");

@@ -33,6 +33,33 @@ test('poker UI join sends WS join payload with seatNo + buyIn semantics', async 
   assert.equal(harness.fetchState.joinCalls, 0);
 });
 
+test('poker UI explicit join never sends seatNo 0', async () => {
+  const sent = [];
+  const harness = createPokerTableHarness({
+    wsFactory(){
+      return {
+        start(){},
+        destroy(){},
+        isReady(){ return true; },
+        sendJoin(payload){
+          sent.push(payload);
+          return Promise.resolve({ ok: true });
+        }
+      };
+    }
+  });
+
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  harness.elements.pokerSeatNo.value = '0';
+  harness.elements.pokerJoin.click();
+  await harness.flush();
+
+  assert.equal(sent.length, 1);
+  assert.notEqual(sent[0].seatNo, 0);
+});
+
 test('poker UI autoJoin sends WS join payload with autoSeat + preferredSeatNo semantics', async () => {
   const sent = [];
   const harness = createPokerTableHarness({
@@ -89,4 +116,29 @@ test('poker UI keeps join failed state on rejected WS join and does not fallback
   assert.equal(harness.fetchState.joinCalls, 0);
   assert.equal(typeof harness.elements.pokerError.textContent, 'string');
   assert.equal(harness.elements.pokerError.textContent.length > 0, true);
+});
+
+test('poker UI uses WS join result payload fields when present', async () => {
+  const harness = createPokerTableHarness({
+    wsFactory(){
+      return {
+        start(){},
+        destroy(){},
+        isReady(){ return true; },
+        sendJoin(){
+          return Promise.resolve({ ok: true, seatNo: 5 });
+        }
+      };
+    }
+  });
+
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  harness.elements.pokerSeatNo.value = '2';
+  harness.elements.pokerJoin.click();
+  await harness.flush();
+
+  assert.equal(harness.elements.pokerSeatNo.value, '5');
+  assert.equal(harness.fetchState.joinCalls, 0);
 });

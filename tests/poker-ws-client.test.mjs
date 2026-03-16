@@ -124,9 +124,11 @@ test('poker ws client sendJoin/sendStartHand/sendAct resolve and reject by comma
   ws.message({ type: 'authOk', payload: { roomId: 'table_test_1' } });
 
   const joinPromise = h.client.sendJoin({ tableId: 'table_test_1' }, 'join_req_1');
-  ws.message({ type: 'commandResult', requestId: 'join_req_1', payload: { requestId: 'join_req_1', status: 'accepted', reason: null } });
+  ws.message({ type: 'commandResult', requestId: 'join_req_1', payload: { requestId: 'join_req_1', status: 'accepted', reason: null, seatNo: 3, tableId: 'table_test_1' } });
   const joinResult = await joinPromise;
   assert.equal(joinResult.ok, true);
+  assert.equal(joinResult.seatNo, 3);
+  assert.equal(joinResult.tableId, 'table_test_1');
 
   const startPromise = h.client.sendStartHand({ tableId: 'table_test_1' }, 'start_req_1');
   ws.message({ type: 'commandResult', requestId: 'start_req_1', payload: { requestId: 'start_req_1', status: 'rejected', reason: 'not_enough_players' } });

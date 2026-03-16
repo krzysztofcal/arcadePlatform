@@ -239,3 +239,46 @@ test("duplicate buyin idempotency without funded persisted stack fails closed", 
   assert.equal(writes.seatStackUpdate, 0);
   assert.equal(writes.state, 0);
 });
+
+test("authoritative join rejects explicit and preferred seat numbers below 1", async () => {
+  await assert.rejects(
+    () => executePokerJoinAuthoritative({
+      beginSql: async (fn) => fn({
+        unsafe: async (sql) => {
+          if (sql.includes("from public.poker_tables")) return [{ id: "t1", status: "OPEN", max_players: 6 }];
+          if (sql.includes("from public.poker_seats") && sql.includes("status = 'ACTIVE'") && sql.includes("user_id = $2")) return [];
+          if (sql.includes("status = 'ACTIVE'") && sql.includes("order by seat_no asc")) return [];
+          return [];
+        }
+      }),
+      tableId: "t1",
+      userId: "u3",
+      requestId: "r10",
+      seatNo: 0,
+      buyIn: 100,
+      postTransactionFn: async () => ({ ok: true })
+    }),
+    (error) => error?.code === "invalid_seat_no"
+  );
+
+  await assert.rejects(
+    () => executePokerJoinAuthoritative({
+      beginSql: async (fn) => fn({
+        unsafe: async (sql) => {
+          if (sql.includes("from public.poker_tables")) return [{ id: "t1", status: "OPEN", max_players: 6 }];
+          if (sql.includes("from public.poker_seats") && sql.includes("status = 'ACTIVE'") && sql.includes("user_id = $2")) return [];
+          if (sql.includes("status = 'ACTIVE'") && sql.includes("order by seat_no asc")) return [];
+          return [];
+        }
+      }),
+      tableId: "t1",
+      userId: "u3",
+      requestId: "r11",
+      autoSeat: true,
+      preferredSeatNo: 0,
+      buyIn: 100,
+      postTransactionFn: async () => ({ ok: true })
+    }),
+    (error) => error?.code === "invalid_seat_no"
+  );
+});

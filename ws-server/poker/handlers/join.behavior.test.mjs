@@ -3,12 +3,13 @@ import assert from 'node:assert/strict';
 import { handleJoinCommand } from './join.mjs';
 
 function baseCtx(payload = {}){
-  const calls = { command: [], table: 0, snapshots: 0, joinArgs: null, authoritativeArgs: null, sendError: 0, resync: 0 };
+  const calls = { command: [], table: 0, snapshots: 0, joinArgs: null, authoritativeArgs: null, sendError: 0, sentErrors: [], actorTableState: 0, resync: 0 };
   const tableManager = {
     ensureTableLoaded: async () => ({ ok: true }),
-    join: (args) => { calls.joinArgs = args; return { ok: true, changed: true }; },
+    join: (args) => { calls.joinArgs = args; return { ok: true, changed: true, tableState: { tableId: 't1', members: [] } }; },
     persistedStateVersion: () => 1,
-    bootstrapHand: () => ({ ok: true, changed: false })
+    bootstrapHand: () => ({ ok: true, changed: false }),
+    tableSnapshot: () => ({ tableId: 't1' })
   };
   return {
     calls,
@@ -24,8 +25,9 @@ function baseCtx(payload = {}){
       broadcastResyncRequired: () => { calls.resync += 1; },
       broadcastStateSnapshots: () => { calls.snapshots += 1; },
       broadcastTableState: () => { calls.table += 1; },
-      sendError: () => { calls.sendError += 1; },
+      sendError: (_ws, _cs, payload) => { calls.sendError += 1; calls.sentErrors.push(payload); },
       sendCommandResult: (_ws, _cs, payload) => calls.command.push(payload),
+      sendTableState: () => { calls.actorTableState += 1; },
       authoritativeJoinEnabled: false,
       observeOnlyJoinEnabled: false,
       persistedBootstrapEnabled: false,
@@ -37,6 +39,7 @@ function baseCtx(payload = {}){
 test('handleJoinCommand forwards explicit seat + buyIn intent', async () => {
   const { ctx, calls } = baseCtx({ seatNo: 3, buyIn: 200 });
   await handleJoinCommand(ctx);
+  assert.equal(calls.actorTableState, 1);
   assert.equal(calls.command.length, 1);
   assert.equal(calls.command[0].status, 'accepted');
   assert.equal(calls.joinArgs.seatNo, 3);
@@ -66,12 +69,32 @@ test('handleJoinCommand forwards join intent to authoritative executor when enab
 test('handleJoinCommand rejects invalid buyIn without broadcast', async () => {
   const { ctx, calls } = baseCtx({ buyIn: -1 });
   await handleJoinCommand(ctx);
-  assert.equal(calls.command.length, 1);
-  assert.equal(calls.command[0].status, 'rejected');
-  assert.equal(calls.command[0].reason, 'invalid_buy_in');
+  assert.equal(calls.command.length, 0);
+  assert.equal(calls.sendError, 1);
+  assert.equal(calls.sentErrors[0].code, 'INVALID_COMMAND');
+  assert.equal(calls.sentErrors[0].message, 'invalid_buy_in');
   assert.equal(calls.table, 0);
   assert.equal(calls.snapshots, 0);
-  assert.equal(calls.sendError, 0);
+});
+
+test('handleJoinCommand rejects seatNo 0 and preferredSeatNo 0 deterministically', async () => {
+  {
+    const { ctx, calls } = baseCtx({ seatNo: 0, buyIn: 100 });
+    await handleJoinCommand(ctx);
+    assert.equal(calls.command.length, 0);
+    assert.equal(calls.sendError, 1);
+    assert.equal(calls.sentErrors[0].code, 'INVALID_COMMAND');
+    assert.equal(calls.sentErrors[0].message, 'invalid_seat_no');
+  }
+
+  {
+    const { ctx, calls } = baseCtx({ autoSeat: true, preferredSeatNo: 0, buyIn: 100 });
+    await handleJoinCommand(ctx);
+    assert.equal(calls.command.length, 0);
+    assert.equal(calls.sendError, 1);
+    assert.equal(calls.sentErrors[0].code, 'INVALID_COMMAND');
+    assert.equal(calls.sentErrors[0].message, 'invalid_seat_no');
+  }
 });
 
 test('handleJoinCommand emits one rejected result when bootstrap persist fails', async () => {
@@ -96,6 +119,7 @@ test('handleJoinCommand emits one accepted result only after full success', asyn
 
   assert.equal(calls.command.length, 1);
   assert.equal(calls.command[0].status, 'accepted');
+  assert.equal(calls.actorTableState, 1);
   assert.equal(calls.table, 1);
   assert.equal(calls.snapshots, 1);
 });
@@ -137,10 +161,9 @@ test('handleJoinCommand rejects ensureTableLoaded failure with stable commandRes
   ctx.ensureTableLoadedErrorMapper = () => ({ code: 'table_not_found', message: 'human text not for protocol' });
   await handleJoinCommand(ctx);
 
-  assert.equal(calls.command.length, 1);
-  assert.equal(calls.command[0].status, 'rejected');
-  assert.equal(calls.command[0].reason, 'table_not_found');
-  assert.equal(calls.sendError, 0);
+  assert.equal(calls.command.length, 0);
+  assert.equal(calls.sendError, 1);
+  assert.equal(calls.sentErrors[0].code, 'table_not_found');
   assert.equal(calls.table, 0);
   assert.equal(calls.snapshots, 0);
 });

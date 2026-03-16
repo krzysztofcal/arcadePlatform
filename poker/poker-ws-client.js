@@ -105,7 +105,15 @@
       var entry = pending.get(rid);
       pending.delete(rid);
       clearTimeout(entry.timer);
-      if (payload.status === 'accepted') { entry.resolve({ ok: true, requestId: rid, reason: payload.reason || null }); return; }
+      if (payload.status === 'accepted') {
+        var resolved = { ok: true, requestId: rid, reason: payload.reason || null };
+        Object.keys(payload).forEach(function(key){
+          if (key === 'status') return;
+          resolved[key] = payload[key];
+        });
+        entry.resolve(resolved);
+        return;
+      }
       entry.reject(createError(payload.reason || 'rejected'));
     }
 

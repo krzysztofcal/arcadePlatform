@@ -1926,17 +1926,17 @@
     }
 
     function getPreferredSeatNo(preferredSeatNoOverride){
-      var maxUi = Number.isInteger(tableMaxPlayers) && tableMaxPlayers >= 2 ? tableMaxPlayers - 1 : 0;
-      var preferredSeatNo = 0;
+      var maxUi = Number.isInteger(tableMaxPlayers) && tableMaxPlayers >= 2 ? tableMaxPlayers : 1;
+      var preferredSeatNo = 1;
       if (Number.isInteger(preferredSeatNoOverride)){
         preferredSeatNo = preferredSeatNoOverride;
       } else if (Number.isInteger(suggestedSeatNoParam)){
         preferredSeatNo = suggestedSeatNoParam;
       } else {
-        var inputSeatNo = parseInt(seatNoInput ? seatNoInput.value : 0, 10);
-        preferredSeatNo = isNaN(inputSeatNo) ? 0 : inputSeatNo;
+        var inputSeatNo = parseInt(seatNoInput ? seatNoInput.value : 1, 10);
+        preferredSeatNo = isNaN(inputSeatNo) ? 1 : inputSeatNo;
       }
-      if (preferredSeatNo < 0) preferredSeatNo = 0;
+      if (preferredSeatNo < 1) preferredSeatNo = 1;
       if (preferredSeatNo > maxUi) preferredSeatNo = maxUi;
       return preferredSeatNo;
     }
@@ -1986,26 +1986,26 @@
 
     function applySeatInputBounds(){
       if (!seatNoInput) return;
-      var maxUi = Number.isInteger(tableMaxPlayers) && tableMaxPlayers >= 2 ? tableMaxPlayers - 1 : 0;
-      seatNoInput.min = '0';
+      var maxUi = Number.isInteger(tableMaxPlayers) && tableMaxPlayers >= 2 ? tableMaxPlayers : 1;
+      seatNoInput.min = '1';
       seatNoInput.max = String(maxUi);
       seatNoInput.step = '1';
       var seatNo = parseInt(seatNoInput.value, 10);
-      if (isNaN(seatNo)) seatNo = 0;
-      if (seatNo < 0) seatNo = 0;
+      if (isNaN(seatNo)) seatNo = 1;
+      if (seatNo < 1) seatNo = 1;
       if (seatNo > maxUi) seatNo = maxUi;
       seatNoInput.value = String(seatNo);
     }
 
     async function autoJoinWithRetries(){
-      var maxUi = Number.isInteger(tableMaxPlayers) && tableMaxPlayers >= 2 ? tableMaxPlayers - 1 : 0;
+      var maxUi = Number.isInteger(tableMaxPlayers) && tableMaxPlayers >= 2 ? tableMaxPlayers : 1;
       var startSeat = getPreferredSeatNo();
-      if (startSeat < 0) startSeat = 0;
+      if (startSeat < 1) startSeat = 1;
       if (startSeat > maxUi) startSeat = maxUi;
       var attempts = Math.min(3, tableMaxPlayers);
       for (var i = 0; i < attempts; i++){
         var candidateSeat = startSeat + i;
-        if (candidateSeat > maxUi) candidateSeat = candidateSeat - (maxUi + 1);
+        if (candidateSeat > maxUi) candidateSeat = candidateSeat - maxUi;
         seatNoInput.value = candidateSeat;
         try {
           await joinTable(null, { propagateError: true, autoSeat: true, preferredSeatNoOverride: candidateSeat });
@@ -2469,11 +2469,11 @@
     }
 
     async function joinTable(requestIdOverride, options){
-      var seatNo = parseInt(seatNoInput ? seatNoInput.value : 0, 10);
+      var seatNo = parseInt(seatNoInput ? seatNoInput.value : 1, 10);
       var buyIn = parseInt(buyInInput ? buyInInput.value : 100, 10) || 100;
-      if (isNaN(seatNo)) seatNo = 0;
-      var maxSeatNo = Math.max(0, tableMaxPlayers - 1);
-      if (seatNo < 0) seatNo = 0;
+      if (isNaN(seatNo)) seatNo = 1;
+      var maxSeatNo = Math.max(1, tableMaxPlayers);
+      if (seatNo < 1) seatNo = 1;
       if (seatNo > maxSeatNo) seatNo = maxSeatNo;
       if (seatNoInput) seatNoInput.value = seatNo;
       var preferredSeatNo = getPreferredSeatNo(options && options.preferredSeatNoOverride);
@@ -2513,8 +2513,7 @@
         }
         var joinResult = null;
         if (wsClient && typeof wsClient.isReady === 'function' && wsClient.isReady() && typeof wsClient.sendJoin === 'function'){
-          await wsClient.sendJoin(joinPayload, joinRequestId);
-          joinResult = { ok: true };
+          joinResult = await wsClient.sendJoin(joinPayload, joinRequestId);
         } else {
           joinResult = await apiPost(JOIN_URL, joinPayload);
         }

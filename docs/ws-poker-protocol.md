@@ -329,7 +329,7 @@ Durability note: replay buffer is process-local and bounded; server restarts or 
 
 ## Authoritative gameplay write contract (join/start/act)
 
-Gameplay write commands are authoritative over WS and return `commandResult` for the same `requestId`.
+Gameplay write commands are authoritative over WS. `start_hand` and `act` use `commandResult` as the primary command ack. `join` / `table_join` preserves legacy actor-visible `table_state` first-frame behavior and may additionally emit `commandResult` for deterministic client ack.
 
 - `join` / `table_join` payload: `{ tableId, seatNo?, autoSeat?, preferredSeatNo?, buyIn }` (`buyIn` required for gameplay-equivalent authoritative joins)
 - `start_hand` payload: `{ tableId }`
@@ -340,12 +340,14 @@ Success contract:
 1. server validates payload + session/table binding
 2. server applies mutation once for `(userId, requestId)` idempotency key
 3. server persists authoritative state once
-4. server emits `commandResult.status = "accepted"` only after required post-mutation persistence/restore checks complete (no early accept + later reject for the same requestId)
-5. server emits/broadcasts authoritative snapshot updates
+4. for `join`/`table_join`, server emits actor-targeted `table_state` deterministically on success before follow-up fanout
+5. server emits `commandResult.status = "accepted"` only after required post-mutation persistence/restore checks complete (no early accept + later reject for the same requestId)
+6. server emits/broadcasts authoritative snapshot updates
 
 Rejection contract:
 
 - malformed command uses `error.code = "INVALID_COMMAND"`
+- join/bootstrap/load validation failures that were historically protocol errors remain `error` frames (for example `TABLE_NOT_FOUND`, `TABLE_BOOTSTRAP_FAILED`)
 - domain/persistence rejection uses `commandResult.status = "rejected"` with stable reason codes such as `not_your_turn`, `action_not_allowed`, `invalid_amount`, `state_invalid`, `hand_not_live`, `already_live`, `not_enough_players`
 - rejection MUST NOT emit success snapshot broadcasts
 - on persistence conflicts server restores authoritative state and emits `resync` with reason `persistence_conflict`

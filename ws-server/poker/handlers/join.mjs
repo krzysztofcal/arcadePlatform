@@ -4,13 +4,13 @@ function parseJoinIntent(payload) {
 
   const seatNoRaw = body.seatNo;
   const seatNoNum = Number(seatNoRaw);
-  const seatNo = seatNoRaw === undefined || seatNoRaw === null ? null : (Number.isInteger(seatNoNum) && seatNoNum >= 0 ? seatNoNum : null);
+  const seatNo = seatNoRaw === undefined || seatNoRaw === null ? null : (Number.isInteger(seatNoNum) && seatNoNum >= 1 ? seatNoNum : null);
 
   const preferredSeatRaw = body.preferredSeatNo;
   const preferredSeatNum = Number(preferredSeatRaw);
   const preferredSeatNo = preferredSeatRaw === undefined || preferredSeatRaw === null
     ? null
-    : (Number.isInteger(preferredSeatNum) && preferredSeatNum >= 0 ? preferredSeatNum : null);
+    : (Number.isInteger(preferredSeatNum) && preferredSeatNum >= 1 ? preferredSeatNum : null);
 
   const buyInRaw = body.buyIn;
   const buyInNum = Number(buyInRaw);
@@ -36,15 +36,14 @@ function parseJoinIntent(payload) {
   };
 }
 
-export async function handleJoinCommand({ frame, ws, connState, sessionStore, tableManager, ensureTableLoadedErrorMapper, restoreTableFromPersisted, persistMutatedState, broadcastResyncRequired, broadcastStateSnapshots, broadcastTableState, sendError, sendCommandResult, authoritativeJoinEnabled, observeOnlyJoinEnabled, persistedBootstrapEnabled, loadAuthoritativeJoinExecutor }) {
+export async function handleJoinCommand({ frame, ws, connState, sessionStore, tableManager, ensureTableLoadedErrorMapper, restoreTableFromPersisted, persistMutatedState, broadcastResyncRequired, broadcastStateSnapshots, broadcastTableState, sendError, sendCommandResult, sendTableState, authoritativeJoinEnabled, observeOnlyJoinEnabled, persistedBootstrapEnabled, loadAuthoritativeJoinExecutor }) {
   const tableId = frame.__resolvedTableId;
   const parsedJoinIntent = parseJoinIntent(frame.payload);
   if (!parsedJoinIntent.ok) {
-    sendCommandResult(ws, connState, {
-      requestId: frame.requestId ?? null,
-      tableId,
-      status: "rejected",
-      reason: parsedJoinIntent.code
+    sendError(ws, connState, {
+      code: "INVALID_COMMAND",
+      message: parsedJoinIntent.code,
+      requestId: frame.requestId ?? null
     });
     return;
   }
@@ -75,11 +74,10 @@ export async function handleJoinCommand({ frame, ws, connState, sessionStore, ta
   const ensured = await tableManager.ensureTableLoaded(tableId, { allowCreate: true });
   if (!ensured.ok) {
     const loadError = ensureTableLoadedErrorMapper(ensured);
-    sendCommandResult(ws, connState, {
+    sendError(ws, connState, {
+      code: loadError.code || "TABLE_BOOTSTRAP_FAILED",
+      message: loadError.message || "table_load_failed",
       requestId: frame.requestId ?? null,
-      tableId,
-      status: "rejected",
-      reason: loadError.code || "table_load_failed"
     });
     return;
   }
@@ -87,11 +85,10 @@ export async function handleJoinCommand({ frame, ws, connState, sessionStore, ta
   if (authoritativeJoinEnabled && !observeOnlyJoinEnabled && persistedBootstrapEnabled) {
     const restored = await restoreTableFromPersisted(tableId);
     if (!restored.ok) {
-      sendCommandResult(ws, connState, {
+      sendError(ws, connState, {
+        code: "TABLE_BOOTSTRAP_FAILED",
+        message: "authoritative_join_rehydrate_failed",
         requestId: frame.requestId ?? null,
-        tableId,
-        status: "rejected",
-        reason: "authoritative_join_rehydrate_failed"
       });
       return;
     }
@@ -140,6 +137,9 @@ export async function handleJoinCommand({ frame, ws, connState, sessionStore, ta
     }
   }
 
+  const tableSnapshot = tableManager.tableSnapshot(tableId, connState.session.userId);
+  sendTableState(ws, connState, { requestId: frame.requestId ?? null, tableState: joined.tableState, tableSnapshot });
+
   sendCommandResult(ws, connState, {
     requestId: frame.requestId ?? null,
     tableId,
@@ -148,7 +148,7 @@ export async function handleJoinCommand({ frame, ws, connState, sessionStore, ta
   });
 
   if (joined.changed) {
-    broadcastTableState(tableId);
+    broadcastTableState(tableId, { excludeWs: ws });
   }
   if (bootstrapped?.changed) {
     broadcastStateSnapshots(tableId);

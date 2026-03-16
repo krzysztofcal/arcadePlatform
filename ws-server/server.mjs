@@ -793,6 +793,7 @@ wss.on("connection", (ws) => {
         broadcastTableState,
         sendError,
         sendCommandResult,
+        sendTableState,
         authoritativeJoinEnabled,
         observeOnlyJoinEnabled,
         persistedBootstrapEnabled,
