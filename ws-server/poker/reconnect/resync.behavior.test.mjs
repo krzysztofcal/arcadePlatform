@@ -286,8 +286,9 @@ test("resync restores presence and seat without duplicates", async () => {
       payload: { tableId: "table_reconnect" }
     });
 
-    const joined = await nextMessage(client1, 5000, "joinAck");
-    assert.equal(joined.type, "table_state");
+    const joinAck = await nextMessageOfType(client1, "commandResult");
+    assert.equal(joinAck.payload.status, "accepted");
+    const joined = await nextMessageOfType(client1, "table_state");
     assert.equal(joined.payload.members.length, 1);
     const beforeSeat = joined.payload.members[0].seat;
 
@@ -323,6 +324,50 @@ test("resync restores presence and seat without duplicates", async () => {
   }
 });
 
+
+
+test("resync join flow is command-first for actor-visible frames", async () => {
+  const secret = "resync-join-order-secret";
+  const token = makeHs256Jwt({ secret, sub: "join_order_user" });
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      WS_PRESENCE_TTL_MS: "10000"
+    }
+  });
+
+  try {
+    await waitForListening(child, 5000);
+    const ws = await connectClient(port);
+    await hello(ws, "req-hello-join-order");
+    const authOk = await auth(ws, token, "req-auth-join-order");
+    assert.equal(authOk.type, "authOk");
+
+    sendFrame(ws, {
+      version: "1.0",
+      type: "table_join",
+      requestId: "req-join-order",
+      ts: "2026-02-28T00:00:10Z",
+      payload: { tableId: "table_join_order" }
+    });
+
+    const first = await nextMessage(ws, 5000, "join-order-first");
+    assert.equal(first.type, "commandResult");
+    assert.equal(first.payload.requestId, "req-join-order");
+    assert.equal(first.payload.status, "accepted");
+
+    const second = await nextMessage(ws, 5000, "join-order-second");
+    assert.equal(second.type, "table_state");
+    assert.equal(second.requestId, "req-join-order");
+    assert.equal(Array.isArray(second.payload.members), true);
+
+    ws.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
 test("resync accepts roomId without payload.tableId", async () => {
   const secret = "test-secret";
   const token = makeHs256Jwt({ secret, sub: "user_roomid" });
@@ -350,8 +395,9 @@ test("resync accepts roomId without payload.tableId", async () => {
       ts: "2026-02-28T00:00:20Z",
       payload: {}
     });
-    const joined = await nextMessage(client1, 5000, "join-roomid-c1");
-    assert.equal(joined.type, "table_state");
+    const joinAck = await nextMessageOfType(client1, "commandResult");
+    assert.equal(joinAck.payload.status, "accepted");
+    const joined = await nextMessageOfType(client1, "table_state");
     assert.equal(joined.payload.tableId, "table_roomid_resync");
 
     client1.close();
@@ -543,7 +589,9 @@ test("table-associated socket keeps presence for the table", async () => {
       ts: "2026-02-28T00:02:00Z",
       payload: { tableId: "table_multi" }
     });
-    const joinA = await nextMessage(socketA, 5000, "joinA2");
+    const joinAAck = await nextMessageOfType(socketA, "commandResult");
+    assert.equal(joinAAck.payload.status, "accepted");
+    const joinA = await nextMessageOfType(socketA, "table_state");
     const originalSeat = joinA.payload.members[0].seat;
 
     const socketB = await connectClient(port);
@@ -1296,6 +1344,7 @@ test("resync preserves presence contract and gameplay snapshot is explicit table
     await auth(ws, token, "auth-resync-snapshot");
 
     sendFrame(ws, { version: "1.0", type: "table_join", requestId: "join-resync-snapshot", ts: "2026-02-28T04:00:00Z", payload: { tableId } });
+    await nextMessageOfType(ws, "commandResult", { skipTypes: ["stateSnapshot", "statePatch"] });
     await nextMessageOfType(ws, "table_state", { skipTypes: ["stateSnapshot", "statePatch"] });
 
     sendFrame(ws, { version: "1.0", type: "resync", requestId: "resync-presence", ts: "2026-02-28T04:00:01Z", payload: { tableId } });
