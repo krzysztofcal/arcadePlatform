@@ -276,6 +276,30 @@ async function nextMessageOfType(ws, type, timeoutMs = 10000) {
   throw new Error(`Timed out waiting for message type: ${type}`);
 }
 
+async function nextMessageMatching(ws, predicate, timeoutMs = 10000) {
+  const started = Date.now();
+  while (true) {
+    const elapsed = Date.now() - started;
+    const remainingMs = timeoutMs - elapsed;
+    if (remainingMs <= 0) {
+      break;
+    }
+    const frame = await nextMessage(ws, remainingMs);
+    if (predicate(frame)) {
+      return frame;
+    }
+  }
+  throw new Error("Timed out waiting for matching websocket message");
+}
+
+function nextCommandResultForRequest(ws, requestId, timeoutMs = 10000) {
+  return nextMessageMatching(
+    ws,
+    (frame) => frame?.type === "commandResult" && frame?.payload?.requestId === requestId,
+    timeoutMs
+  );
+}
+
 
 
 async function nextStateUpdate(ws, { baseline = null, timeoutMs = 10000 } = {}) {
@@ -1530,8 +1554,7 @@ test("resume replay is isolated by session stream for same authenticated user", 
     const helloA = await hello(wsA);
     await auth(wsA, token, "auth-a");
     sendFrame(wsA, { version: "1.0", type: "table_join", requestId: "join-a", ts: "2026-02-28T00:11:01Z", payload: { tableId: "table_same_user" } });
-    const joinAck_join_a = await nextMessageOfType(wsA, "commandResult");
-    assert.equal(joinAck_join_a.payload.requestId, "join-a");
+    const joinAck_join_a = await nextCommandResultForRequest(wsA, "join-a");
     assert.equal(joinAck_join_a.payload.status, "accepted");
     sendFrame(wsA, { version: "1.0", type: "table_state_sub", requestId: "snap-a", ts: "2026-02-28T00:11:02Z", payload: { tableId: "table_same_user", view: "snapshot" } });
     const aSnapshot = await nextMessageOfType(wsA, "stateSnapshot");
@@ -1540,8 +1563,7 @@ test("resume replay is isolated by session stream for same authenticated user", 
     await hello(wsB);
     await auth(wsB, token, "auth-b");
     sendFrame(wsB, { version: "1.0", type: "table_join", requestId: "join-b", ts: "2026-02-28T00:11:03Z", payload: { tableId: "table_same_user" } });
-    const joinAck_join_b = await nextMessageOfType(wsB, "commandResult");
-    assert.equal(joinAck_join_b.payload.requestId, "join-b");
+    const joinAck_join_b = await nextCommandResultForRequest(wsB, "join-b");
     assert.equal(joinAck_join_b.payload.status, "accepted");
     sendFrame(wsB, { version: "1.0", type: "table_state_sub", requestId: "snap-b", ts: "2026-02-28T00:11:04Z", payload: { tableId: "table_same_user", view: "snapshot" } });
     const bSnapshot = await nextMessageOfType(wsB, "stateSnapshot");
@@ -1563,7 +1585,7 @@ test("resume replay is isolated by session stream for same authenticated user", 
       payload: { tableId: "table_same_user", sessionId: helloA.payload.sessionId, lastSeq: aSnapshot.seq }
     });
 
-    const resumed = await nextMessageOfType(wsAResume, "commandResult");
+    const resumed = await nextCommandResultForRequest(wsAResume, "resume-a");
     assert.equal(resumed.payload.status, "accepted");
     const unexpected = await attemptMessage(wsAResume, 300);
     assert.equal(unexpected, null);
@@ -1972,15 +1994,24 @@ test("rapid same-socket join then snapshot remains ordered with slow bootstrap",
     await hello(ws);
     await auth(ws, token);
 
-    const twoMessages = nextNMessages(ws, 2, 4000);
-
     sendFrame(ws, { version: "1.0", type: "table_join", requestId: "join-ordered", ts: "2026-02-28T00:23:00Z", payload: { tableId } });
     sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "snap-ordered", ts: "2026-02-28T00:23:01Z", payload: { tableId, view: "snapshot" } });
 
-    const [first, second] = await twoMessages;
+    const first = await nextMessageMatching(
+      ws,
+      (frame) => frame?.type === "table_state" && frame?.requestId === "join-ordered",
+      4000
+    );
+    const joinAck = await nextCommandResultForRequest(ws, "join-ordered", 4000);
+    const second = await nextMessageMatching(
+      ws,
+      (frame) => frame?.type === "stateSnapshot" && frame?.requestId === "snap-ordered",
+      4000
+    );
 
     assert.equal(first.type, "table_state");
     assert.equal(first.requestId, "join-ordered");
+    assert.equal(joinAck.payload.status, "accepted");
     assert.equal(second.type, "stateSnapshot");
     assert.equal(second.roomId, tableId);
     ws.close();
@@ -2018,7 +2049,7 @@ test("observer table_join keeps live members empty without creating seated membe
     sendFrame(ws, { version: "1.0", type: "table_join", requestId: "observer-join-1", ts: "2026-02-28T00:31:00Z", payload: { tableId } });
     const firstJoinState = await nextMessageOfType(ws, "table_state");
     assert.equal(firstJoinState.requestId, "observer-join-1");
-    const firstJoinAck = await nextMessageOfType(ws, "commandResult");
+    const firstJoinAck = await nextCommandResultForRequest(ws, "observer-join-1");
     assert.equal(firstJoinAck.payload.status, "accepted");
 
     sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "observer-state-1", ts: "2026-02-28T00:31:00Z", payload: { tableId } });
@@ -2032,7 +2063,7 @@ test("observer table_join keeps live members empty without creating seated membe
     sendFrame(ws, { version: "1.0", type: "table_join", requestId: "observer-join-2", ts: "2026-02-28T00:31:01Z", payload: { tableId } });
     const secondJoinState = await nextMessageOfType(ws, "table_state");
     assert.equal(secondJoinState.requestId, "observer-join-2");
-    const secondJoinAck = await nextMessageOfType(ws, "commandResult");
+    const secondJoinAck = await nextCommandResultForRequest(ws, "observer-join-2");
     assert.equal(secondJoinAck.payload.status, "accepted");
 
     sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "observer-state-2", ts: "2026-02-28T00:31:01Z", payload: { tableId } });
