@@ -150,7 +150,7 @@ const run = async () => {
       path: "/.netlify/functions/poker-join",
       method: "POST",
       token: u1Token,
-      body: { tableId, seatNo: 0, buyIn: 100, requestId: requestId("join-u1") },
+      body: { tableId, seatNo: 1, buyIn: 100, requestId: requestId("join-u1") },
     });
     assertResponse(joinU1.status, joinU1.text, 200, "poker-join u1");
     if (joinU1.status === 200) users[0].joined = true;
@@ -161,7 +161,7 @@ const run = async () => {
       path: "/.netlify/functions/poker-join",
       method: "POST",
       token: u2Token,
-      body: { tableId, seatNo: 1, buyIn: 100, requestId: requestId("join-u2") },
+      body: { tableId, seatNo: 2, buyIn: 100, requestId: requestId("join-u2") },
     });
     assertResponse(joinU2.status, joinU2.text, 200, "poker-join u2");
     if (joinU2.status === 200) users[1].joined = true;

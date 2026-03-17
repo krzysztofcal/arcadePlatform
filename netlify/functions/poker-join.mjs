@@ -59,7 +59,7 @@ const makeError = (status, code) => {
 const parseSeatNo = (value) => {
   if (value == null) return null;
   const num = Number(value);
-  if (!Number.isFinite(num) || !Number.isInteger(num) || num < 0) return null;
+  if (!Number.isFinite(num) || !Number.isInteger(num) || num < 1) return null;
   return num;
 };
 
@@ -131,19 +131,19 @@ const toDbSeatNo = (seatNoUi, maxPlayers) => {
   if (!Number.isInteger(maxPlayers) || maxPlayers < 2) return null;
   if (!Number.isInteger(seatNoUi)) return null;
   let clampedUi = seatNoUi;
-  if (clampedUi < 0) clampedUi = 0;
-  if (clampedUi > maxPlayers - 1) clampedUi = maxPlayers - 1;
-  const seatNoDb = clampedUi + 1;
+  if (clampedUi < 1) clampedUi = 1;
+  if (clampedUi > maxPlayers) clampedUi = maxPlayers;
+  const seatNoDb = clampedUi;
   if (seatNoDb < 1) return 1;
   if (seatNoDb > maxPlayers) return maxPlayers;
   return seatNoDb;
 };
 
 const toUiSeatNo = (seatNoDb, maxPlayers) => {
-  const maxUi = Number.isInteger(maxPlayers) && maxPlayers >= 2 ? maxPlayers - 1 : 0;
-  if (!Number.isInteger(seatNoDb)) return 0;
-  const seatNoUi = seatNoDb - 1;
-  if (seatNoUi < 0) return 0;
+  const maxUi = Number.isInteger(maxPlayers) && maxPlayers >= 2 ? maxPlayers : 1;
+  if (!Number.isInteger(seatNoDb)) return 1;
+  const seatNoUi = seatNoDb;
+  if (seatNoUi < 1) return 1;
   if (seatNoUi > maxUi) return maxUi;
   return seatNoUi;
 };
@@ -558,7 +558,7 @@ export async function handler(event) {
           throw makeError(409, "table_not_open");
         }
 
-        const preferredSeatNoUi = preferredSeatNo == null ? 0 : preferredSeatNo;
+        const preferredSeatNoUi = preferredSeatNo == null ? 1 : preferredSeatNo;
         const seatNoDbInitial = toDbSeatNo(autoSeat ? preferredSeatNoUi : seatNoUi, Number(table.max_players));
         if (!Number.isInteger(seatNoDbInitial)) {
           throw makeError(400, "invalid_seat_no");

@@ -24,11 +24,16 @@ function makeElement(id){
     removeChild(child){ this.children = this.children.filter((it) => it !== child); },
     setAttribute(){},
     removeAttribute(){},
-    addEventListener(){},
-    removeEventListener(){},
+    _listeners: {},
+    addEventListener(type, fn){ this._listeners[type] = this._listeners[type] || []; this._listeners[type].push(fn); },
+    removeEventListener(type, fn){ if (!this._listeners[type]) return; this._listeners[type] = this._listeners[type].filter((h) => h !== fn); },
     querySelector(){ return null; },
     focus(){},
     blur(){},
+    click(){
+      var handlers = this._listeners.click || [];
+      handlers.forEach((fn) => fn({ preventDefault(){}, stopPropagation(){}, target: this }));
+    },
   };
 }
 
@@ -39,6 +44,10 @@ export function createPokerTableHarness(options = {}){
   const fetchState = {
     getCalls: 0,
     heartbeatCalls: 0,
+    joinCalls: 0,
+    joinBodies: [],
+    startHandCalls: 0,
+    actCalls: 0,
     responses: options.responses || [
       {
         tableId,
@@ -85,7 +94,7 @@ export function createPokerTableHarness(options = {}){
 
   const sandbox = {
     window: {
-      location: { pathname: '/poker/table.html', search: '?tableId=' + encodeURIComponent(tableId), href: '' },
+      location: { pathname: '/poker/table.html', search: typeof options.search === 'string' ? options.search : ('?tableId=' + encodeURIComponent(tableId)), href: '' },
       addEventListener(type, fn){ windowEvents[type] = windowEvents[type] || []; windowEvents[type].push(fn); },
       removeEventListener(){},
       KLog: { log: () => {} },
@@ -112,7 +121,7 @@ export function createPokerTableHarness(options = {}){
     clearTimeout(id){ clearTimeoutCalls.push(id); timeouts.delete(id); },
     setInterval(){ return 999; },
     clearInterval(){},
-    fetch: async (url) => {
+    fetch: async (url, opts) => {
       const text = String(url || '');
       if (text.includes('/poker-get-table')){
         fetchState.getCalls += 1;
@@ -121,6 +130,24 @@ export function createPokerTableHarness(options = {}){
       }
       if (text.includes('/poker-heartbeat')){
         fetchState.heartbeatCalls += 1;
+        return { ok: true, json: async () => ({ ok: true }) };
+      }
+      if (text.includes('/poker-join')){
+        fetchState.joinCalls += 1;
+        const bodyRaw = opts && opts.body;
+        if (typeof bodyRaw === 'string') {
+          try { fetchState.joinBodies.push(JSON.parse(bodyRaw)); } catch (_err) { fetchState.joinBodies.push(null); }
+        } else {
+          fetchState.joinBodies.push(null);
+        }
+        return { ok: true, json: async () => ({ ok: true }) };
+      }
+      if (text.includes('/poker-start-hand')){
+        fetchState.startHandCalls += 1;
+        return { ok: true, json: async () => ({ ok: true }) };
+      }
+      if (text.includes('/poker-act')){
+        fetchState.actCalls += 1;
         return { ok: true, json: async () => ({ ok: true }) };
       }
       if (text.includes('/ws-mint-token')){
