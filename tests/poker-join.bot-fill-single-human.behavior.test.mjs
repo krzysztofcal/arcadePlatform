@@ -124,7 +124,7 @@ const run = async () => {
   const first = await ctx.handler({
     httpMethod: "POST",
     headers: { origin: "https://example.test", authorization: "Bearer token" },
-    body: JSON.stringify({ tableId, seatNo: 0, buyIn: 100, requestId: "join-1" }),
+    body: JSON.stringify({ tableId, seatNo: 1, buyIn: 100, requestId: "join-1" }),
   });
   assert.equal(first.statusCode, 200);
   assert.equal(ctx.seats.filter((seat) => !seat.is_bot && seat.status === "ACTIVE").length, 1);
@@ -140,7 +140,7 @@ const run = async () => {
   const second = await ctx.handler({
     httpMethod: "POST",
     headers: { origin: "https://example.test", authorization: "Bearer token" },
-    body: JSON.stringify({ tableId, seatNo: 0, buyIn: 100, requestId: "join-1" }),
+    body: JSON.stringify({ tableId, seatNo: 1, buyIn: 100, requestId: "join-1" }),
   });
   assert.equal(second.statusCode, 200);
   assert.equal(ctx.botInsertCalls.length, 2);

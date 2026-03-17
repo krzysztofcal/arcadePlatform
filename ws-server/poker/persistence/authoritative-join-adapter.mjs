@@ -8,6 +8,14 @@ async function loadHttpAuthoritativeJoinModule() {
   return import("../../../shared/poker-domain/join.mjs");
 }
 
+async function loadLedgerPostTransaction() {
+  const ledgerModule = await import("../../../netlify/functions/_shared/chips-ledger.mjs");
+  if (typeof ledgerModule?.postTransaction !== "function") {
+    throw new Error("missing_post_transaction");
+  }
+  return ledgerModule.postTransaction;
+}
+
 function resolveJoinTestOverride(env = process.env) {
   const raw = env.WS_TEST_AUTHORITATIVE_JOIN_RESULT_JSON;
   if (!raw) return null;
@@ -21,20 +29,36 @@ function resolveJoinTestOverride(env = process.env) {
 
 function normalizeJoinError(error) {
   const code = typeof error?.code === "string" ? error.code : "authoritative_join_failed";
-  if (["table_not_found", "table_closed", "table_not_open", "seat_taken", "table_full", "table_full_bot_leaving", "state_missing", "state_invalid", "duplicate_seat", "invalid_seat_no", "invalid_buy_in", "request_pending"].includes(code)) {
+  if (["table_not_found", "table_closed", "table_not_open", "seat_taken", "table_full", "table_full_bot_leaving", "state_missing", "poker_state_missing", "state_invalid", "duplicate_seat", "invalid_seat_no", "invalid_buy_in", "request_pending", "insufficient_funds", "system_account_missing", "chips_apply_failed", "chips_apply_mismatch", "missing_idempotency_key", "invalid_escrow_only_entries"].includes(code)) {
     return { ok: false, code };
   }
   return { ok: false, code: "authoritative_join_failed" };
 }
 
+function shouldUseLedgerFallback(env = process.env) {
+  const hasFileStore = Boolean(typeof env?.WS_PERSISTED_STATE_FILE === "string" && env.WS_PERSISTED_STATE_FILE.trim());
+  const hasSupabaseDb = Boolean(typeof env?.SUPABASE_DB_URL === "string" && env.SUPABASE_DB_URL.trim());
+  return hasFileStore && !hasSupabaseDb;
+}
+
+function noopPostTransaction() {
+  return { ok: true };
+}
+
 function normalizeSuccess(result, { tableId, userId, requestId, klog }) {
+
   if (!result?.ok) return result;
   const seatNo = Number(result?.seatNo);
   if (!Number.isInteger(seatNo) || seatNo < 1) {
     klog("ws_join_authoritative_failed", { tableId, userId, requestId: requestId || null, code: "authoritative_state_invalid", message: "invalid_seat" });
     return { ok: false, code: "authoritative_state_invalid" };
   }
-  return { ok: true, tableId, userId, seatNo, rejoin: result?.rejoin === true, requestId: requestId || null };
+  const stack = Number(result?.stack);
+  if (!Number.isInteger(stack) || stack <= 0) {
+    klog("ws_join_authoritative_failed", { tableId, userId, requestId: requestId || null, code: "authoritative_state_invalid", message: "invalid_stack" });
+    return { ok: false, code: "authoritative_state_invalid" };
+  }
+  return { ok: true, tableId, userId, seatNo, stack, rejoin: result?.rejoin === true, requestId: requestId || null };
 }
 
 export function createAuthoritativeJoinExecutor({
@@ -42,8 +66,9 @@ export function createAuthoritativeJoinExecutor({
   klog = () => {},
   beginSql = beginSqlDefault,
   loadJoinModule = loadHttpAuthoritativeJoinModule,
+  loadPostTransactionFn = loadLedgerPostTransaction,
 } = {}) {
-  return async function executeAuthoritativeJoin({ tableId, userId, requestId }) {
+  return async function executeAuthoritativeJoin({ tableId, userId, requestId, seatNo = null, autoSeat = false, preferredSeatNo = null, buyIn = null }) {
     const override = resolveJoinTestOverride(env);
     if (override) {
       return override;
@@ -72,14 +97,44 @@ export function createAuthoritativeJoinExecutor({
       return { ok: false, code: "temporarily_unavailable" };
     }
 
+    let postTransactionFn;
     try {
-      const result = await joinModule.executePokerJoinAuthoritative({
+      postTransactionFn = await loadPostTransactionFn();
+    } catch (error) {
+      if (shouldUseLedgerFallback(env)) {
+        klog("ws_join_authoritative_ledger_fallback", {
+          tableId,
+          userId,
+          requestId: requestId || null,
+          message: error?.message || "post_transaction_unavailable",
+        });
+        postTransactionFn = noopPostTransaction;
+      } else {
+        klog("ws_join_authoritative_unavailable", {
+          tableId,
+          userId,
+          requestId: requestId || null,
+          message: error?.message || "post_transaction_unavailable",
+        });
+        return { ok: false, code: "temporarily_unavailable" };
+      }
+    }
+
+    try {
+      const sharedArgs = {
         beginSql: (fn) => beginSql(fn, { env }),
         tableId,
         userId,
         requestId,
         klog,
-      });
+        postTransactionFn,
+      };
+      if (seatNo !== null && seatNo !== undefined) sharedArgs.seatNo = seatNo;
+      if (autoSeat === true) sharedArgs.autoSeat = true;
+      if (preferredSeatNo !== null && preferredSeatNo !== undefined) sharedArgs.preferredSeatNo = preferredSeatNo;
+      if (buyIn !== null && buyIn !== undefined) sharedArgs.buyIn = buyIn;
+
+      const result = await joinModule.executePokerJoinAuthoritative(sharedArgs);
       return normalizeSuccess(result, { tableId, userId, requestId, klog });
     } catch (error) {
       klog("ws_join_authoritative_failed", {

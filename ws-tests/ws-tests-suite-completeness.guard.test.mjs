@@ -27,6 +27,18 @@ const REQUIRED_PR16_WS_SERVER_BEHAVIOR_TESTS = [
 ];
 
 
+const REQUIRED_AUTHORITATIVE_HANDLER_BEHAVIOR_TESTS = [
+  "ws-server/poker/handlers/join.behavior.test.mjs",
+  "ws-server/poker/handlers/start-hand.behavior.test.mjs",
+  "ws-server/poker/handlers/act.behavior.test.mjs"
+];
+
+
+const REQUIRED_CLIENT_AUTHORITATIVE_BEHAVIOR_TESTS = [
+  "tests/poker-ws-client.test.mjs",
+  "tests/poker-ui-ws-join-authoritative.behavior.test.mjs"
+];
+
 const REQUIRED_PERSISTED_BOOTSTRAP_BEHAVIOR_TESTS = [
   "ws-server/poker/bootstrap/persisted-bootstrap-adapter.behavior.test.mjs",
   "ws-server/poker/bootstrap/persisted-bootstrap-repository.behavior.test.mjs"
@@ -94,8 +106,11 @@ test("required ws tests are wired into PR and deploy workflows", () => {
 const REQUIRED_WS_TRIGGER_PATHS = [
   "ws-server/**",
   "ws-tests/**",
+  "shared/**",
   "poker/**",
   "tests/**",
+  "netlify/functions/_shared/**",
+  "docs/ws-poker-protocol.md",
   "scripts/test-all.mjs"
 ];
 
@@ -127,6 +142,12 @@ test("PR workflow must self-trigger and trigger on deploy workflow changes", () 
     prWorkflow.includes('- ".github/workflows/ws-deploy.yml"'),
     'Missing trigger path in .github/workflows/ws-pr-checks.yml: .github/workflows/ws-deploy.yml'
   );
+  const deployWorkflow = workflowText(".github/workflows/ws-deploy.yml");
+  assert.ok(
+    deployWorkflow.includes('- ".github/workflows/ws-pr-checks.yml"'),
+    "Missing trigger path in .github/workflows/ws-deploy.yml: .github/workflows/ws-pr-checks.yml"
+  );
+
 });
 
 test("workflow wiring check uses literal matching (no dynamic RegExp)", () => {
@@ -196,5 +217,29 @@ test("persisted bootstrap behavior tests are wired in both PR and deploy workflo
     const command = `node --test ${file}`;
     assert.ok(prWorkflow.includes(command), `Missing persisted bootstrap test in PR workflow: ${file}`);
     assert.ok(deployWorkflow.includes(command), `Missing persisted bootstrap test in deploy workflow: ${file}`);
+  }
+});
+
+
+test("authoritative handler behavior tests are wired in both PR and deploy workflows", () => {
+  const prWorkflow = workflowText(".github/workflows/ws-pr-checks.yml");
+  const deployWorkflow = workflowText(".github/workflows/ws-deploy.yml");
+
+  for (const file of REQUIRED_AUTHORITATIVE_HANDLER_BEHAVIOR_TESTS) {
+    const command = `node --test ${file}`;
+    assert.ok(prWorkflow.includes(command), `Missing authoritative handler test in PR workflow: ${file}`);
+    assert.ok(deployWorkflow.includes(command), `Missing authoritative handler test in deploy workflow: ${file}`);
+  }
+});
+
+
+test("client authoritative behavior tests are wired in both PR and deploy workflows", () => {
+  const prWorkflow = workflowText(".github/workflows/ws-pr-checks.yml");
+  const deployWorkflow = workflowText(".github/workflows/ws-deploy.yml");
+
+  for (const file of REQUIRED_CLIENT_AUTHORITATIVE_BEHAVIOR_TESTS) {
+    const command = `node --test ${file}`;
+    assert.ok(prWorkflow.includes(command), `Missing client authoritative test in PR workflow: ${file}`);
+    assert.ok(deployWorkflow.includes(command), `Missing client authoritative test in deploy workflow: ${file}`);
   }
 });
