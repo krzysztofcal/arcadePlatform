@@ -1298,14 +1298,27 @@
       });
     }
 
+    async function bootstrapWsAfterBaseline(phase){
+      var loaded = await loadTable(false);
+      if (!loaded || !tableData || typeof tableData !== 'object') return false;
+      try {
+        startWsBootstrap();
+      } catch (_err){
+        logWsBootstrapException(_err, phase || 'ws_bootstrap');
+        startPollingFallback('ws_bootstrap_exception');
+        loadTable(false);
+        return false;
+      }
+      return true;
+    }
+
     function startAuthWatch(){
       if (authTimer) return;
       authTimer = setInterval(function(){
         checkAuth().then(function(authed){
           if (authed){
             stopAuthWatch();
-            loadTable(false);
-            startWsBootstrap();
+            bootstrapWsAfterBaseline('auth_watch');
           }
         });
       }, 3000);
@@ -1333,12 +1346,6 @@
       setDevActionsEnabled(true);
       setDevActionsAuthStatus(true);
       stopAuthWatch();
-      try {
-        startWsBootstrap();
-      } catch (_err){
-        logWsBootstrapException(_err, 'check_auth');
-        startPollingFallback('ws_bootstrap_exception');
-      }
       return true;
     }
 
@@ -2958,22 +2965,16 @@
         state.pollInterval = POLL_INTERVAL_BASE;
         state.pollErrors = 0;
           if (isSeated) startHeartbeat();
-        if (currentUserId){
-          try {
-            startWsBootstrap();
-          } catch (_err){
-            logWsBootstrapException(_err, 'visibility_resume');
-            startPollingFallback('ws_bootstrap_exception');
-            loadTable(false);
-          }
-        } else {
+        var canRefreshBaseline = !pendingJoinRequestId && !pendingLeaveRequestId;
+        if (currentUserId && canRefreshBaseline){
+          bootstrapWsAfterBaseline('visibility_resume');
+        } else if (!currentUserId) {
           startPollingFallback('auth_missing');
         }
         if (pendingJoinRequestId) schedulePendingRetry('join', retryJoin);
         if (pendingLeaveRequestId) schedulePendingRetry('leave', retryLeave);
         if (pendingStartHandRequestId) schedulePendingRetry('startHand', retryStartHand);
         if (pendingActRequestId) scheduleDevPendingRetry('act', retryAct);
-        if (!pendingJoinRequestId && !pendingLeaveRequestId) loadTable(false);
       }
     }
 
@@ -3148,14 +3149,7 @@
 
     checkAuth().then(function(authed){
       if (authed){
-        loadTable(false);
-        try {
-          startWsBootstrap();
-        } catch (_err){
-          logWsBootstrapException(_err, 'table_init');
-          startPollingFallback('ws_bootstrap_exception');
-          loadTable(false);
-        }
+        bootstrapWsAfterBaseline('table_init');
       }
     });
   }
