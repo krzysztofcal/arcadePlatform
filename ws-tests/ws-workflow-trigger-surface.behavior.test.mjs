@@ -8,7 +8,10 @@ const REQUIRED_TRIGGER_PATHS = [
   "shared/**",
   "poker/**",
   "tests/**",
-  "scripts/test-all.mjs"
+  "scripts/test-all.mjs",
+  "scripts/generate-build-info.js",
+  "tests/poker-ws-client.test.mjs",
+  "docs/poker-deployment.md"
 ];
 
 const REQUIRED_PR_WORKFLOW_FILE_TRIGGERS = [

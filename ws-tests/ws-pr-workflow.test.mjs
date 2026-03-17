@@ -117,6 +117,9 @@ test("ws pr workflow is pull_request-only with ws-related path filters", () => {
   assert.match(text, /"tests\/\*\*"/);
   assert.match(text, /"netlify\/functions\/_shared\/\*\*"/);
   assert.match(text, /"docs\/ws-poker-protocol\.md"/);
+  assert.match(text, /"docs\/poker-deployment\.md"/);
+  assert.match(text, /"scripts\/generate-build-info\.js"/);
+  assert.match(text, /"tests\/poker-ws-client\.test\.mjs"/);
   assert.match(text, /"\.github\/workflows\/ws-pr-checks\.yml"/);
   assert.match(text, /"\.github\/workflows\/ws-deploy\.yml"/);
   assert.doesNotMatch(text, /push:/);

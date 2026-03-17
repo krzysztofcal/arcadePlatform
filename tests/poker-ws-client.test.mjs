@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 
-function loadClientHarness(){
+function loadClientHarness(opts = {}){
   const source = fs.readFileSync(new URL('../poker/poker-ws-client.js', import.meta.url), 'utf8');
   const sentFrames = [];
   const logs = [];
@@ -43,6 +43,8 @@ function loadClientHarness(){
     window: {
       KLog: { log: (kind, data) => logs.push({ kind, data }) },
       WebSocket: FakeWebSocket,
+      __POKER_WS_URL: opts.pokerWsUrl || undefined,
+      BUILD_INFO: opts.buildInfo || undefined,
       fetch: async (...args) => {
         fetchCalls.push(args);
         return {
@@ -71,6 +73,36 @@ function loadClientHarness(){
 
   return { client, FakeWebSocket, sentFrames, logs, statuses, snapshots, protocolErrors, getFetchCalls: () => fetchCalls };
 }
+
+
+
+test('poker ws client uses preview ws url for deploy-preview build info', () => {
+  const h = loadClientHarness({
+    pokerWsUrl: 'wss://ws.kcswh.pl/ws',
+    buildInfo: {
+      isPreview: true,
+      pokerWsUrl: 'wss://ws.kcswh.pl/ws',
+      pokerWsPreviewUrl: 'wss://ws-preview.kcswh.pl/ws'
+    }
+  });
+  h.client.start();
+  assert.equal(h.FakeWebSocket.instances.length, 1);
+  assert.equal(h.FakeWebSocket.instances[0].url, 'wss://ws-preview.kcswh.pl/ws');
+});
+
+test('poker ws client uses production ws url outside preview builds', () => {
+  const h = loadClientHarness({
+    pokerWsUrl: 'wss://ws.kcswh.pl/ws',
+    buildInfo: {
+      isPreview: false,
+      pokerWsUrl: 'wss://ws.kcswh.pl/ws',
+      pokerWsPreviewUrl: 'wss://ws-preview.kcswh.pl/ws'
+    }
+  });
+  h.client.start();
+  assert.equal(h.FakeWebSocket.instances.length, 1);
+  assert.equal(h.FakeWebSocket.instances[0].url, 'wss://ws.kcswh.pl/ws');
+});
 
 test('poker ws client bootstraps hello -> auth -> snapshot once', async () => {
   const h = loadClientHarness();

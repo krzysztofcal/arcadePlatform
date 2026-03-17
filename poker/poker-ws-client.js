@@ -15,10 +15,15 @@
     return 'ws_' + Date.now().toString(16) + '_' + rand;
   }
 
+  function nonEmptyString(value){
+    return typeof value === 'string' && value.trim() ? value.trim() : '';
+  }
+
   function resolveWsUrl(){
-    if (typeof window.__POKER_WS_URL === 'string' && window.__POKER_WS_URL.trim()) return window.__POKER_WS_URL.trim();
-    if (typeof window.__POKER_WS_ENDPOINT === 'string' && window.__POKER_WS_ENDPOINT.trim()) return window.__POKER_WS_ENDPOINT.trim();
-    return 'wss://ws.kcswh.pl/ws';
+    var buildInfo = window.BUILD_INFO && typeof window.BUILD_INFO === 'object' ? window.BUILD_INFO : null;
+    var defaultUrl = nonEmptyString(window.__POKER_WS_URL) || nonEmptyString(window.__POKER_WS_ENDPOINT) || (buildInfo ? nonEmptyString(buildInfo.pokerWsUrl) : '') || 'wss://ws.kcswh.pl/ws';
+    if (!buildInfo || buildInfo.isPreview !== true) return defaultUrl;
+    return nonEmptyString(buildInfo.pokerWsPreviewUrl) || defaultUrl;
   }
 
   function safeErrorCode(err){ return err && (err.code || err.message) ? (err.code || err.message) : 'unknown_error'; }

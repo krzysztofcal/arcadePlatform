@@ -103,3 +103,42 @@ What you’re looking for:
 - CSP should have `script-src 'self' ...` (or no CSP at all).
 - If you use nonces/hashes and inline scripts, CSP must allow them; otherwise the poker JS may not run.
 - For network calls, CSP uses `connect-src`. It should include `'self'` (or explicitly `https://play.kcswh.pl`).
+
+
+## Deploy preview WS routing (shared preview runtime)
+
+Production WS stays unchanged. For Netlify deploy previews, set a separate WS URL so preview pages do not talk to production WS.
+
+### Netlify env variables
+
+Set these in Netlify UI for the frontend site:
+
+- `POKER_WS_URL` (production/default), example: `wss://ws.kcswh.pl/ws`
+- `POKER_WS_PREVIEW_URL` (deploy-preview only), example: `wss://ws-preview.kcswh.pl/ws`
+
+Frontend routing behavior:
+
+- `window.BUILD_INFO.isPreview === true` and `POKER_WS_PREVIEW_URL` present → use preview WS URL.
+- Otherwise → use production/default WS URL.
+
+### VPS preview service examples
+
+Examples are committed as templates:
+
+- systemd unit: `infra/vps/ws-server-preview.service.example`
+- env template: `infra/vps/ws-preview.env.example`
+- Caddy reverse proxy snippet: `infra/vps/Caddyfile.preview.example`
+
+Suggested quick setup path:
+
+1. Create preview checkout, for example `/opt/arcade-ws-preview`.
+2. Install dependencies for `ws-server` in that checkout.
+3. Create `/opt/arcade-ws-preview/.env.preview` from the template and fill real values.
+4. Install/enable `ws-server-preview.service` so WS listens on `127.0.0.1:3100`.
+   - The example unit runs the existing `ws-server/server.mjs` entrypoint from that preview checkout.
+5. Add DNS + Caddy host `ws-preview.kcswh.pl` proxying `/ws` to `127.0.0.1:3100`.
+
+Notes:
+
+- This is a single shared preview runtime for manual E2E, not per-PR isolation.
+- If `POKER_WS_PREVIEW_URL` is missing, preview deploys safely fall back to `POKER_WS_URL`.
