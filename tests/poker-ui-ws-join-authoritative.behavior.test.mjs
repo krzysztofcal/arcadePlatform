@@ -107,26 +107,6 @@ test('poker UI autoJoin sends join payload with autoSeat + preferredSeatNo seman
   const sent = [];
   const harness = createPokerTableHarness({
     search: '?tableId=table-1&autoJoin=1&seatNo=2',
-    responses: [
-      {
-        tableId: 'table-1',
-        status: 'OPEN',
-        maxPlayers: 1,
-        seats: [],
-        legalActions: [],
-        actionConstraints: {},
-        state: { version: 1, state: { phase: 'PREFLOP', pot: 10, community: [] } },
-      },
-      {
-        tableId: 'table-1',
-        status: 'OPEN',
-        maxPlayers: 6,
-        seats: [],
-        legalActions: [],
-        actionConstraints: {},
-        state: { version: 2, state: { phase: 'PREFLOP', pot: 10, community: [] } },
-      },
-    ],
     wsFactory(createOptions){
       return {
         start(){
@@ -164,26 +144,6 @@ test('poker UI autoJoin preferred seat has parity between authenticated startup 
   const wsSent = [];
   const wsHarness = createPokerTableHarness({
     search: '?tableId=table-1&autoJoin=1&seatNo=3',
-    responses: [
-      {
-        tableId: 'table-1',
-        status: 'OPEN',
-        maxPlayers: 1,
-        seats: [],
-        legalActions: [],
-        actionConstraints: {},
-        state: { version: 1, state: { phase: 'PREFLOP', pot: 10, community: [] } },
-      },
-      {
-        tableId: 'table-1',
-        status: 'OPEN',
-        maxPlayers: 6,
-        seats: [],
-        legalActions: [],
-        actionConstraints: {},
-        state: { version: 2, state: { phase: 'PREFLOP', pot: 10, community: [] } },
-      },
-    ],
     wsFactory(createOptions){
       return {
         start(){
@@ -205,26 +165,6 @@ test('poker UI autoJoin preferred seat has parity between authenticated startup 
 
   const httpHarness = createPokerTableHarness({
     search: '?tableId=table-1&autoJoin=1&seatNo=3',
-    responses: [
-      {
-        tableId: 'table-1',
-        status: 'OPEN',
-        maxPlayers: 1,
-        seats: [],
-        legalActions: [],
-        actionConstraints: {},
-        state: { version: 1, state: { phase: 'PREFLOP', pot: 10, community: [] } },
-      },
-      {
-        tableId: 'table-1',
-        status: 'OPEN',
-        maxPlayers: 6,
-        seats: [],
-        legalActions: [],
-        actionConstraints: {},
-        state: { version: 2, state: { phase: 'PREFLOP', pot: 10, community: [] } },
-      },
-    ],
     disableWsClient: true
   });
   httpHarness.fireDomContentLoaded();
