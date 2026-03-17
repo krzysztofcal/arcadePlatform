@@ -10,6 +10,8 @@ harness.fireDomContentLoaded();
 await harness.flush();
 
 assert.equal(harness.fetchState.getCalls, 1, 'bootstrap loadTable(false) should still run when WS client is unavailable');
+const baselineDoneIndex = harness.timeline.findIndex((entry) => entry.kind === 'load_table_fetch_done');
+assert.ok(baselineDoneIndex >= 0, 'baseline table fetch should complete before fallback polling starts');
 assert.ok(harness.getScheduledTimeoutCount() > 0, 'polling fallback should schedule an HTTP polling timer when WS is unavailable');
 
 const throwingHarness = createPokerTableHarness({

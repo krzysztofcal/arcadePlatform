@@ -1038,6 +1038,7 @@
     var realtimeUnavailableLogged = false;
     var wsClient = null;
     var wsStarted = false;
+    var httpFallbackActive = false;
     var wsSnapshotSeen = false;
     var pendingWsSnapshot = null;
 
@@ -1234,6 +1235,7 @@
 
 
     function startPollingFallback(reason){
+      httpFallbackActive = true;
       if (state.polling) return;
       if (!isPageActive()) return;
       if (reason){
@@ -1252,6 +1254,7 @@
         startPollingFallback('ws_client_missing');
         return;
       }
+      httpFallbackActive = false;
       wsStarted = true;
       wsClient = window.PokerWsClient.create({
         tableId: tableId,
@@ -1265,6 +1268,9 @@
             code: data && data.code ? data.code : null,
             reason: data && data.reason ? data.reason : null
           });
+          if (status === 'auth_ok'){
+            maybeAutoJoin();
+          }
         },
         onSnapshot: function(snapshot){
           applyWsSnapshot(snapshot);
@@ -1298,14 +1304,28 @@
       });
     }
 
+    async function bootstrapWsAfterBaseline(phase){
+      httpFallbackActive = false;
+      var loaded = await loadTable(false);
+      if (!loaded || !tableData || typeof tableData !== 'object') return false;
+      try {
+        startWsBootstrap();
+      } catch (_err){
+        logWsBootstrapException(_err, phase || 'ws_bootstrap');
+        startPollingFallback('ws_bootstrap_exception');
+        loadTable(false);
+        return false;
+      }
+      return true;
+    }
+
     function startAuthWatch(){
       if (authTimer) return;
       authTimer = setInterval(function(){
         checkAuth().then(function(authed){
           if (authed){
             stopAuthWatch();
-            loadTable(false);
-            startWsBootstrap();
+            bootstrapWsAfterBaseline('auth_watch');
           }
         });
       }, 3000);
@@ -1333,12 +1353,6 @@
       setDevActionsEnabled(true);
       setDevActionsAuthStatus(true);
       stopAuthWatch();
-      try {
-        startWsBootstrap();
-      } catch (_err){
-        logWsBootstrapException(_err, 'check_auth');
-        startPollingFallback('ws_bootstrap_exception');
-      }
       return true;
     }
 
@@ -2085,7 +2099,11 @@
           lastAutoStartSeatCount = seatedCount;
           maybeAutoStartHand();
         }
-        maybeAutoJoin();
+        var wsClientConfigured = !!(window.PokerWsClient && typeof window.PokerWsClient.create === 'function');
+        var wsReady = !!(wsClient && typeof wsClient.isReady === 'function' && wsClient.isReady());
+        if (!wsClientConfigured || wsReady || httpFallbackActive){
+          maybeAutoJoin();
+        }
         if (isPolling){ resetPollBackoff(); }
         return true;
       } catch (err){
@@ -2958,22 +2976,16 @@
         state.pollInterval = POLL_INTERVAL_BASE;
         state.pollErrors = 0;
           if (isSeated) startHeartbeat();
-        if (currentUserId){
-          try {
-            startWsBootstrap();
-          } catch (_err){
-            logWsBootstrapException(_err, 'visibility_resume');
-            startPollingFallback('ws_bootstrap_exception');
-            loadTable(false);
-          }
-        } else {
+        var canRefreshBaseline = !pendingJoinRequestId && !pendingLeaveRequestId;
+        if (currentUserId && canRefreshBaseline){
+          bootstrapWsAfterBaseline('visibility_resume');
+        } else if (!currentUserId) {
           startPollingFallback('auth_missing');
         }
         if (pendingJoinRequestId) schedulePendingRetry('join', retryJoin);
         if (pendingLeaveRequestId) schedulePendingRetry('leave', retryLeave);
         if (pendingStartHandRequestId) schedulePendingRetry('startHand', retryStartHand);
         if (pendingActRequestId) scheduleDevPendingRetry('act', retryAct);
-        if (!pendingJoinRequestId && !pendingLeaveRequestId) loadTable(false);
       }
     }
 
@@ -3148,14 +3160,7 @@
 
     checkAuth().then(function(authed){
       if (authed){
-        loadTable(false);
-        try {
-          startWsBootstrap();
-        } catch (_err){
-          logWsBootstrapException(_err, 'table_init');
-          startPollingFallback('ws_bootstrap_exception');
-          loadTable(false);
-        }
+        bootstrapWsAfterBaseline('table_init');
       }
     });
   }

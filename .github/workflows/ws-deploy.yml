@@ -12,6 +12,7 @@ on:
       - "netlify/functions/_shared/**"
       - "docs/ws-poker-protocol.md"
       - "scripts/test-all.mjs"
+      - "tests/test-all.runner-registration.guard.test.mjs"
       - ".github/workflows/ws-pr-checks.yml"
       - ".github/workflows/ws-deploy.yml"
 
@@ -41,6 +42,18 @@ jobs:
 
       - name: Run poker ws client behavior test
         run: node --test tests/poker-ws-client.test.mjs
+
+      - name: Run poker UI ws health fallback behavior test
+        run: node --test tests/poker-ui-ws-health-fallback.behavior.test.mjs
+
+      - name: Run poker UI ws startup order behavior test
+        run: node --test tests/poker-ui-ws-startup-order.behavior.test.mjs
+
+      - name: Run poker UI ws auth-watch order behavior test
+        run: node --test tests/poker-ui-ws-auth-watch-order.behavior.test.mjs
+
+      - name: Run poker UI ws visibility behavior test
+        run: node --test tests/poker-ui-ws-visibility.behavior.test.mjs
 
       - name: Run poker UI ws authoritative join behavior test
         run: node --test tests/poker-ui-ws-join-authoritative.behavior.test.mjs

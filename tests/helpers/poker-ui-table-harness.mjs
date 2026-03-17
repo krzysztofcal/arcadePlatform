@@ -83,10 +83,22 @@ export function createPokerTableHarness(options = {}){
   const wsCreates = [];
   const wsDestroys = [];
   const logs = [];
+  const timeline = [];
+  let intervalSeq = 1;
+  const intervals = new Map();
+
+  const tokenState = {
+    value: Object.prototype.hasOwnProperty.call(options, 'initialToken') ? options.initialToken : ('aaa.' + Buffer.from(JSON.stringify({ sub: 'user-1' })).toString('base64') + '.zzz')
+  };
+
+  const deferredGet = {
+    pendingResolve: null,
+    pendingReject: null,
+  };
 
   const wsFactory = options.wsFactory || function wsFactoryDefault(createOptions){
     const client = {
-      start(){},
+      start(){ timeline.push({ kind: 'ws_start' }); },
       destroy(){ wsDestroys.push(createOptions); },
     };
     wsCreates.push({ options: createOptions, client });
@@ -100,7 +112,7 @@ export function createPokerTableHarness(options = {}){
       removeEventListener(){},
       KLog: { log: (kind, data) => logs.push({ kind, data: data || {} }) },
       __RUNNING_POKER_UI_TESTS__: false,
-      SupabaseAuthBridge: { getAccessToken: async () => 'aaa.' + Buffer.from(JSON.stringify({ sub: 'user-1' })).toString('base64') + '.zzz' },
+      SupabaseAuthBridge: { getAccessToken: async () => tokenState.value },
       PokerWsClient: options.disableWsClient ? null : { create: (createOptions) => wsFactory(createOptions) },
       PokerRealtime: { subscribeToTableActions: () => ({ stop(){} }) },
     },
@@ -120,13 +132,23 @@ export function createPokerTableHarness(options = {}){
     Buffer,
     setTimeout(fn){ const id = timeoutSeq++; timeouts.set(id, fn); return id; },
     clearTimeout(id){ clearTimeoutCalls.push(id); timeouts.delete(id); },
-    setInterval(){ return 999; },
-    clearInterval(){},
+    setInterval(fn){ const id = intervalSeq++; intervals.set(id, fn); return id; },
+    clearInterval(id){ intervals.delete(id); },
     fetch: async (url, opts) => {
       const text = String(url || '');
       if (text.includes('/poker-get-table')){
+        timeline.push({ kind: 'load_table_fetch_start' });
         fetchState.getCalls += 1;
+        if (options.deferGetTableResponse){
+          const pending = await new Promise((resolve, reject) => {
+            deferredGet.pendingResolve = resolve;
+            deferredGet.pendingReject = reject;
+          });
+          timeline.push({ kind: 'load_table_fetch_done' });
+          return { ok: true, json: async () => pending };
+        }
         const index = Math.min(fetchState.getCalls - 1, fetchState.responses.length - 1);
+        timeline.push({ kind: 'load_table_fetch_done' });
         return { ok: true, json: async () => fetchState.responses[index] };
       }
       if (text.includes('/poker-heartbeat')){
@@ -196,12 +218,17 @@ export function createPokerTableHarness(options = {}){
     wsCreates,
     wsDestroys,
     logs,
+    timeline,
     clearTimeoutCalls,
     getScheduledTimeoutCount(){ return timeouts.size; },
     fireDomContentLoaded,
     fireWindowEvent,
     fireDocumentEvent,
+    runIntervals(){ Array.from(intervals.values()).forEach((fn) => fn()); },
     setVisibility(state){ sandbox.document.visibilityState = state; },
+    setAccessToken(value){ tokenState.value = value; },
+    resolveDeferredGet(value){ if (deferredGet.pendingResolve) deferredGet.pendingResolve(value); },
+    rejectDeferredGet(error){ if (deferredGet.pendingReject) deferredGet.pendingReject(error || new Error('deferred_get_failed')); },
     flush,
   };
 }

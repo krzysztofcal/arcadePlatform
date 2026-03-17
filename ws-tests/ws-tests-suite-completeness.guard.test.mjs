@@ -36,6 +36,10 @@ const REQUIRED_AUTHORITATIVE_HANDLER_BEHAVIOR_TESTS = [
 
 const REQUIRED_CLIENT_AUTHORITATIVE_BEHAVIOR_TESTS = [
   "tests/poker-ws-client.test.mjs",
+  "tests/poker-ui-ws-health-fallback.behavior.test.mjs",
+  "tests/poker-ui-ws-startup-order.behavior.test.mjs",
+  "tests/poker-ui-ws-auth-watch-order.behavior.test.mjs",
+  "tests/poker-ui-ws-visibility.behavior.test.mjs",
   "tests/poker-ui-ws-join-authoritative.behavior.test.mjs"
 ];
 
@@ -111,7 +115,8 @@ const REQUIRED_WS_TRIGGER_PATHS = [
   "tests/**",
   "netlify/functions/_shared/**",
   "docs/ws-poker-protocol.md",
-  "scripts/test-all.mjs"
+  "scripts/test-all.mjs",
+  "tests/test-all.runner-registration.guard.test.mjs"
 ];
 
 test("WS PR/deploy workflows include required literal trigger paths", () => {

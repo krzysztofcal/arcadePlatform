@@ -152,6 +152,11 @@ run("node", ["tests/poker-get-table.me-notSeated.db-shape.behavior.test.mjs"], "
 run("node", ["tests/poker-materialize-settlement.payouts.test.mjs"], "poker-materialize-settlement-payouts");
 
 run("node", ["tests/poker-ui.behavior.test.mjs"], "poker-ui-behavior");
+run("node", ["tests/poker-ui-ws-health-fallback.behavior.test.mjs"], "poker-ui-ws-health-fallback-behavior");
+run("node", ["tests/poker-ui-ws-startup-order.behavior.test.mjs"], "poker-ui-ws-startup-order-behavior");
+run("node", ["tests/poker-ui-ws-auth-watch-order.behavior.test.mjs"], "poker-ui-ws-auth-watch-order-behavior");
+run("node", ["tests/poker-ui-ws-visibility.behavior.test.mjs"], "poker-ui-ws-visibility-behavior");
+run("node", ["tests/poker-ui-ws-join-authoritative.behavior.test.mjs"], "poker-ui-ws-join-authoritative-behavior");
 run("node", ["tests/i18n.behavior.test.mjs"], "i18n-behavior");
 run("node", ["tests/static-html.behavior.test.mjs"], "static-html-behavior");
 run("node", ["tests/poker-ui-stopPendingAll.guard.test.mjs"], "poker-ui-stopPendingAll-guard");
