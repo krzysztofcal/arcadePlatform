@@ -114,13 +114,13 @@ const callJoin = (handler, { requestId, seatNo }) =>
 const run = async () => {
   const harness = makeJoinHarness();
 
-  const joinU1 = await callJoin(harness.makeHandler("u1"), { requestId: "join-u1", seatNo: 0 });
-  const joinU2 = await callJoin(harness.makeHandler("u2"), { requestId: "join-u2", seatNo: 1 });
+  const joinU1 = await callJoin(harness.makeHandler("u1"), { requestId: "join-u1", seatNo: 1 });
+  const joinU2 = await callJoin(harness.makeHandler("u2"), { requestId: "join-u2", seatNo: 2 });
 
   assert.equal(joinU1.statusCode, 200);
   assert.equal(joinU2.statusCode, 200);
-  assert.equal(JSON.parse(joinU1.body).seatNo, 0);
-  assert.equal(JSON.parse(joinU2.body).seatNo, 1);
+  assert.equal(JSON.parse(joinU1.body).seatNo, 1);
+  assert.equal(JSON.parse(joinU2.body).seatNo, 2);
 
   assert.deepEqual(
     harness.inserts.map((entry) => ({ userId: entry.userId, seatNoDb: entry.seatNoDb })),
@@ -131,7 +131,7 @@ const run = async () => {
     "join should map UI seat domain to DB seat_no domain consistently"
   );
 
-  const taken = await callJoin(harness.makeHandler("u3"), { requestId: "join-u3", seatNo: 0 });
+  const taken = await callJoin(harness.makeHandler("u3"), { requestId: "join-u3", seatNo: 1 });
   assert.equal(taken.statusCode, 409);
   assert.deepEqual(JSON.parse(taken.body), { error: "seat_taken" });
   assert.equal(harness.seatRowsByUserId.size, 2, "seat conflict should not create an extra seat row");

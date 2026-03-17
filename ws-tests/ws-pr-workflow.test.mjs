@@ -76,6 +76,16 @@ function assertRequiredOrder(text) {
   assert.match(block, /node --test ws-server\/poker\/engine\/engine-rollover\.behavior\.test\.mjs/);
   assert.match(block, /Run ws poker engine timeout behavior test/);
   assert.match(block, /node --test ws-server\/poker\/engine\/engine-timeout\.behavior\.test\.mjs/);
+  assert.match(block, /Run poker ws client behavior test/);
+  assert.match(block, /node --test tests\/poker-ws-client\.test\.mjs/);
+  assert.match(block, /Run poker UI ws authoritative join behavior test/);
+  assert.match(block, /node --test tests\/poker-ui-ws-join-authoritative\.behavior\.test\.mjs/);
+  assert.match(block, /Run ws join handler behavior test/);
+  assert.match(block, /node --test ws-server\/poker\/handlers\/join\.behavior\.test\.mjs/);
+  assert.match(block, /Run ws start-hand handler behavior test/);
+  assert.match(block, /node --test ws-server\/poker\/handlers\/start-hand\.behavior\.test\.mjs/);
+  assert.match(block, /Run ws act handler behavior test/);
+  assert.match(block, /node --test ws-server\/poker\/handlers\/act\.behavior\.test\.mjs/);
 
   assert.equal(rootInstall, -1);
   assert.notEqual(install, -1);
@@ -103,6 +113,15 @@ test("ws pr workflow is pull_request-only with ws-related path filters", () => {
   assert.match(text, /paths:\s*\n\s*-\s*"ws-server\/\*\*"/);
   assert.match(text, /"ws-tests\/\*\*"/);
   assert.match(text, /"shared\/\*\*"/);
+  assert.match(text, /"poker\/\*\*"/);
+  assert.match(text, /"tests\/\*\*"/);
+  assert.match(text, /"netlify\/functions\/_shared\/\*\*"/);
+  assert.match(text, /"docs\/ws-poker-protocol\.md"/);
+  assert.match(text, /"docs\/poker-deployment\.md"/);
+  assert.match(text, /"scripts\/generate-build-info\.js"/);
+  assert.match(text, /"tests\/poker-ws-client\.test\.mjs"/);
+  assert.match(text, /"\.github\/workflows\/ws-pr-checks\.yml"/);
+  assert.match(text, /"\.github\/workflows\/ws-deploy\.yml"/);
   assert.doesNotMatch(text, /push:/);
 });
 

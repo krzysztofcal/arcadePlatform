@@ -422,7 +422,7 @@ export function createTableManager({
     member.expiresAt = nowMs + presenceTtlMs;
   }
 
-  function join({ ws, userId, tableId, requestId, nowTs = Date.now() }) {
+  function join({ ws, userId, tableId, requestId, nowTs = Date.now(), authoritativeSeatNo = null }) {
     const conn = ensureConn(ws);
     const activeTableId = conn.joinedTableId || conn.subscribedTableId;
     if (activeTableId && activeTableId !== tableId) {
@@ -431,9 +431,61 @@ export function createTableManager({
 
     const table = ensureTable(tableId);
     const isAuthoritativeMember = table.coreState.members.some((member) => member.userId === userId);
+    const authoritativeSeat = Number.isInteger(authoritativeSeatNo) && authoritativeSeatNo >= 1 ? authoritativeSeatNo : null;
     const shouldMutateMembership = !observeOnlyJoin;
 
     if (isAuthoritativeMember || shouldMutateMembership) {
+      if (shouldMutateMembership && Number.isInteger(authoritativeSeat)) {
+        if (authoritativeSeat > table.coreState.maxSeats) {
+          return { ok: false, code: "invalid_seat_no", message: "invalid_seat_no", tableState: tableState(tableId) };
+        }
+
+        const seatOwnedByOther = table.coreState.members.some((member) => member.userId !== userId && member.seat === authoritativeSeat);
+        if (seatOwnedByOther) {
+          return { ok: false, code: "seat_taken", message: "seat_taken", tableState: tableState(tableId) };
+        }
+
+        const existingMember = table.coreState.members.find((member) => member.userId === userId) ?? null;
+        const nextMembers = table.coreState.members
+          .filter((member) => member.userId !== userId)
+          .concat({ userId, seat: authoritativeSeat })
+          .sort((a, b) => a.seat - b.seat || a.userId.localeCompare(b.userId));
+        const nextSeats = { ...table.coreState.seats, [userId]: authoritativeSeat };
+        table.coreState = {
+          ...table.coreState,
+          members: nextMembers,
+          seats: nextSeats
+        };
+
+        const changed = !existingMember || existingMember.seat !== authoritativeSeat;
+        const seat = authoritativeSeat;
+        if (!table.presenceByUserId.has(userId)) {
+          table.presenceByUserId.set(userId, {
+            userId,
+            seat,
+            connected: true,
+            lastSeenAt: nowTs,
+            expiresAt: null
+          });
+        } else {
+          const existingPresence = table.presenceByUserId.get(userId);
+          existingPresence.seat = seat;
+          markConnected(existingPresence, nowTs);
+        }
+
+        table.subscribers.add(ws);
+        conn.joinedTableId = tableId;
+        conn.subscribedTableId = tableId;
+        return {
+          ok: true,
+          changed,
+          effects: changed
+            ? [{ type: existingMember ? "member_reseated" : "member_joined", userId, seat }]
+            : [{ type: "presence_connected" }],
+          tableState: tableState(tableId)
+        };
+      }
+
       if (shouldMutateMembership && !isAuthoritativeMember) {
         const joinResult = applyCoreEvent(table.coreState, {
           type: CORE_EVENT_TYPES.JOIN,

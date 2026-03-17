@@ -1,7 +1,7 @@
 const joinUrl = process.env.POKER_JOIN_URL;
 const authToken = process.env.POKER_AUTH_TOKEN;
 const tableId = process.env.POKER_TABLE_ID;
-const seatNo = Number.parseInt(process.env.POKER_SEAT_NO ?? "0", 10);
+const seatNo = Number.parseInt(process.env.POKER_SEAT_NO ?? "1", 10);
 const buyIn = Number.parseInt(process.env.POKER_BUY_IN ?? "100", 10);
 const count = Number.parseInt(process.env.POKER_JOIN_COUNT ?? "20", 10);
 
@@ -10,8 +10,8 @@ if (!joinUrl || !authToken || !tableId) {
   process.exit(1);
 }
 
-if (!Number.isFinite(seatNo) || seatNo < 0) {
-  console.error("POKER_SEAT_NO must be a non-negative integer");
+if (!Number.isInteger(seatNo) || seatNo < 1) {
+  console.error("POKER_SEAT_NO must be a positive integer (>= 1)");
   process.exit(1);
 }
 

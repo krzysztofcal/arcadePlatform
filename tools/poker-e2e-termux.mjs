@@ -128,7 +128,7 @@ async function main() {
       "POST",
       "/.netlify/functions/poker-join",
       t1,
-      { tableId, seatNo: 0, buyIn: 100, requestId: rid("join1") },
+      { tableId, seatNo: 1, buyIn: 100, requestId: rid("join1") },
       { label: "join-u1" }
     );
     console.log("join1:", join1.status, join1.json || join1.text);
@@ -140,7 +140,7 @@ async function main() {
       "POST",
       "/.netlify/functions/poker-join",
       t2,
-      { tableId, seatNo: 1, buyIn: 100, requestId: rid("join2") },
+      { tableId, seatNo: 2, buyIn: 100, requestId: rid("join2") },
       { label: "join-u2" }
     );
     console.log("join2:", join2.status, join2.json || join2.text);

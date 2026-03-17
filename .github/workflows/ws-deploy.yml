@@ -9,7 +9,13 @@ on:
       - "shared/**"
       - "poker/**"
       - "tests/**"
+      - "tests/poker-ws-client.test.mjs"
+      - "netlify/functions/_shared/**"
+      - "docs/ws-poker-protocol.md"
+      - "docs/poker-deployment.md"
       - "scripts/test-all.mjs"
+      - "scripts/generate-build-info.js"
+      - ".github/workflows/ws-pr-checks.yml"
       - ".github/workflows/ws-deploy.yml"
 
 jobs:
@@ -35,6 +41,12 @@ jobs:
 
       - name: Run shared poker join behavior test
         run: node --test shared/poker-domain/join.behavior.test.mjs
+
+      - name: Run poker ws client behavior test
+        run: node --test tests/poker-ws-client.test.mjs
+
+      - name: Run poker UI ws authoritative join behavior test
+        run: node --test tests/poker-ui-ws-join-authoritative.behavior.test.mjs
 
 
       - name: Validate ws Dockerfile build contract (repo-root context)
@@ -109,6 +121,15 @@ jobs:
 
       - name: Run ws resync behavior test
         run: node --test ws-server/poker/reconnect/resync.behavior.test.mjs
+
+      - name: Run ws join handler behavior test
+        run: node --test ws-server/poker/handlers/join.behavior.test.mjs
+
+      - name: Run ws start-hand handler behavior test
+        run: node --test ws-server/poker/handlers/start-hand.behavior.test.mjs
+
+      - name: Run ws act handler behavior test
+        run: node --test ws-server/poker/handlers/act.behavior.test.mjs
 
       - name: Run workflow-content test
         run: node --test ws-tests/ws-deploy-workflow.test.mjs
