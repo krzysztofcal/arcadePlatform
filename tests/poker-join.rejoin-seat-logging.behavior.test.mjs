@@ -74,19 +74,19 @@ const run = async () => {
   const response = await handler({
     httpMethod: "POST",
     headers: { origin: "https://example.test", authorization: "Bearer token" },
-    body: JSON.stringify({ tableId, seatNo: 0, buyIn: 100, requestId: "rejoin-log" }),
+    body: JSON.stringify({ tableId, seatNo: 1, buyIn: 100, requestId: "rejoin-log" }),
   });
 
   assert.equal(response.statusCode, 200);
-  assert.equal(JSON.parse(response.body).seatNo, 2);
+  assert.equal(JSON.parse(response.body).seatNo, 3);
 
   const stackLog = logs.find((entry) => entry?.event === "poker_join_stack_persisted");
   assert.ok(stackLog, "rejoin should emit poker_join_stack_persisted");
-  assert.equal(stackLog.payload?.seatNoUi, 2);
+  assert.equal(stackLog.payload?.seatNoUi, 3);
 
   const okLog = logs.find((entry) => entry?.event === "poker_join_ok");
   assert.ok(okLog, "rejoin should emit poker_join_ok");
-  assert.equal(okLog.payload?.seatNoUi, 2);
+  assert.equal(okLog.payload?.seatNoUi, 3);
 
   const firstBody = JSON.parse(response.body);
   const firstQueryCount = queries.length;
@@ -94,7 +94,7 @@ const run = async () => {
   const replay = await handler({
     httpMethod: "POST",
     headers: { origin: "https://example.test", authorization: "Bearer token" },
-    body: JSON.stringify({ tableId, seatNo: 0, buyIn: 100, requestId: "rejoin-log" }),
+    body: JSON.stringify({ tableId, seatNo: 1, buyIn: 100, requestId: "rejoin-log" }),
   });
   assert.equal(replay.statusCode, 200);
   assert.deepEqual(JSON.parse(replay.body), firstBody, "same requestId should return stored JOIN result");

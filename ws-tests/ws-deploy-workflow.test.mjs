@@ -11,12 +11,21 @@ test("ws-deploy keeps ws-tests trigger surface and runs harness checks", () => {
 
   assert.match(text, /"ws-tests\/\*\*"/);
   assert.match(text, /"shared\/\*\*"/);
+  assert.match(text, /"poker\/\*\*"/);
+  assert.match(text, /"tests\/\*\*"/);
+  assert.match(text, /"netlify\/functions\/_shared\/\*\*"/);
+  assert.match(text, /"docs\/ws-poker-protocol\.md"/);
+  assert.match(text, /"\.github\/workflows\/ws-pr-checks\.yml"/);
   assert.match(text, /"\.github\/workflows\/ws-deploy\.yml"/);
 
   const pushBlockMatch = text.match(/on:\n[\s\S]*?push:\n([\s\S]*?)\njobs:/);
   const pushBlock = pushBlockMatch ? pushBlockMatch[1] : "";
   assert.match(pushBlock, /"ws-server\/\*\*"/);
   assert.match(pushBlock, /"shared\/\*\*"/);
+  assert.match(pushBlock, /"poker\/\*\*"/);
+  assert.match(pushBlock, /"tests\/\*\*"/);
+  assert.match(pushBlock, /"netlify\/functions\/_shared\/\*\*"/);
+  assert.match(pushBlock, /"docs\/ws-poker-protocol\.md"/);
 
   assert.match(text, /node --test ws-tests\/ws-deploy-workflow\.test\.mjs/);
   assert.match(text, /node --test ws-tests\/ws-tests-suite-completeness\.guard\.test\.mjs/);
@@ -26,6 +35,10 @@ test("ws-deploy keeps ws-tests trigger surface and runs harness checks", () => {
   assert.match(text, /node --test ws-tests\/ws-server-deploy-rollout\.test\.mjs/);
   assert.match(text, /node --test ws-tests\/ws-docker-leave-runtime\.guard\.test\.mjs/);
   assert.match(text, /node --test shared\/poker-domain\/join\.behavior\.test\.mjs/);
+  assert.match(text, /Run poker ws client behavior test/);
+  assert.match(text, /node --test tests\/poker-ws-client\.test\.mjs/);
+  assert.match(text, /Run poker UI ws authoritative join behavior test/);
+  assert.match(text, /node --test tests\/poker-ui-ws-join-authoritative\.behavior\.test\.mjs/);
   assert.match(text, /Validate ws Dockerfile build contract \(repo-root context\)/);
   assert.match(text, /docker build -t arcadeplatform-ws-contract:\$\{\{ github\.sha \}\} -f ws-server\/Dockerfile \./);
   assert.doesNotMatch(text, /docker build[^\n]*-f ws-server\/Dockerfile \.\/ws-server/);
@@ -45,6 +58,12 @@ test("ws-deploy keeps ws-tests trigger surface and runs harness checks", () => {
   assert.match(text, /node --test ws-server\/poker\/engine\/engine-rollover\.behavior\.test\.mjs/);
   assert.match(text, /Run ws poker engine timeout behavior test/);
   assert.match(text, /node --test ws-server\/poker\/engine\/engine-timeout\.behavior\.test\.mjs/);
+  assert.match(text, /Run ws join handler behavior test/);
+  assert.match(text, /node --test ws-server\/poker\/handlers\/join\.behavior\.test\.mjs/);
+  assert.match(text, /Run ws start-hand handler behavior test/);
+  assert.match(text, /node --test ws-server\/poker\/handlers\/start-hand\.behavior\.test\.mjs/);
+  assert.match(text, /Run ws act handler behavior test/);
+  assert.match(text, /node --test ws-server\/poker\/handlers\/act\.behavior\.test\.mjs/);
 
   assert.match(text, /npm ci --prefix ws-server/);
   assert.doesNotMatch(text, /\n\s*run:\s*npm ci\n/);
@@ -90,6 +109,10 @@ test("ws-deploy trigger surface includes ws-server runtime changes", () => {
   const pushBlock = pushBlockMatch ? pushBlockMatch[1] : "";
   assert.match(pushBlock, /"ws-server\/\*\*"/);
   assert.match(pushBlock, /"shared\/\*\*"/);
+  assert.match(pushBlock, /"poker\/\*\*"/);
+  assert.match(pushBlock, /"tests\/\*\*"/);
+  assert.match(pushBlock, /"netlify\/functions\/_shared\/\*\*"/);
+  assert.match(pushBlock, /"docs\/ws-poker-protocol\.md"/);
 });
 
 
@@ -129,5 +152,9 @@ test("ws-deploy shared authoritative join dependency is trigger-covered and arti
   assert.match(pushBlock, /"shared\/\*\*"/);
   assert.match(text, /docker build -t arcadeplatform-ws-contract:\$\{\{ github\.sha \}\} -f ws-server\/Dockerfile \./);
   assert.match(text, /node --test shared\/poker-domain\/join\.behavior\.test\.mjs/);
+  assert.match(text, /Run poker ws client behavior test/);
+  assert.match(text, /node --test tests\/poker-ws-client\.test\.mjs/);
+  assert.match(text, /Run poker UI ws authoritative join behavior test/);
+  assert.match(text, /node --test tests\/poker-ui-ws-join-authoritative\.behavior\.test\.mjs/);
   assert.match(text, /node --test ws-tests\/ws-image-contains-protocol\.behavior\.test\.mjs/);
 });

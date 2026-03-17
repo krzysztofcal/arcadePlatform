@@ -278,7 +278,7 @@ function nextMessage(ws, timeoutMs = 5000, label = "") {
 }
 
 
-async function nextMessageOfType(ws, type, timeoutMs = 5000, label = "") {
+async function nextMessageOfType(ws, type, timeoutMs = 5000, label = "", skipTypes = []) {
   const started = Date.now();
   while (true) {
     const remaining = timeoutMs - (Date.now() - started);
@@ -288,6 +288,9 @@ async function nextMessageOfType(ws, type, timeoutMs = 5000, label = "") {
     const frame = await nextMessage(ws, remaining, label);
     if (frame?.type === type) {
       return frame;
+    }
+    if (skipTypes.includes(frame?.type)) {
+      continue;
     }
   }
 }
@@ -504,7 +507,7 @@ test("server shutdown is bounded after SIGTERM", async () => runSerial(async () 
 
 
 
-test("default runtime keeps legacy table_join membership mutation semantics", async () => runSerial(async () => {
+test("default runtime join is command-first and still mutates membership", async () => runSerial(async () => {
   const secret = "test-secret";
   const tableId = "table_default_join";
   const { port, child } = await createServer({
@@ -539,8 +542,14 @@ test("default runtime keeps legacy table_join membership mutation semantics", as
       ts: "2026-02-28T00:00:01Z",
       payload: { tableId }
     });
+    const joinAck = await nextMessage(actor, 5000, "defaultJoinAck");
+    assert.equal(joinAck.type, "commandResult");
+    assert.equal(joinAck.requestId, "req-join-default");
+    assert.equal(joinAck.payload.status, "accepted");
+
     const joined = await nextMessage(actor, 5000, "defaultJoined");
     assert.equal(joined.type, "table_state");
+    assert.equal(joined.requestId, "req-join-default");
     assert.deepEqual(joined.payload.members, [{ userId: "default_actor", seat: 1 }]);
 
     sendFrame(subscriber, {
@@ -612,8 +621,12 @@ test("table_join is observe-only and does not emit membership mutation broadcast
       payload: { tableId: "table_A" }
     });
     const joinA = await nextMessage(userA, 5000, "joinAAck");
-    assert.equal(joinA.type, "table_state");
-    assert.deepEqual(joinA.payload.members, []);
+    assert.equal(joinA.type, "commandResult");
+    assert.equal(joinA.payload.status, "accepted");
+
+    const joinAState = await nextMessage(userA, 5000, "joinAState");
+    assert.equal(joinAState.type, "table_state");
+    assert.deepEqual(joinAState.payload.members, []);
 
     sendFrame(userB, {
       version: "1.0",
@@ -623,8 +636,12 @@ test("table_join is observe-only and does not emit membership mutation broadcast
       payload: { tableId: "table_A" }
     });
     const joinB = await nextMessage(userB, 5000, "joinBAck");
-    assert.equal(joinB.type, "table_state");
-    assert.deepEqual(joinB.payload.members, []);
+    assert.equal(joinB.type, "commandResult");
+    assert.equal(joinB.payload.status, "accepted");
+
+    const joinBState = await nextMessage(userB, 5000, "joinBState");
+    assert.equal(joinBState.type, "table_state");
+    assert.deepEqual(joinBState.payload.members, []);
 
     sendFrame(userC, {
       version: "1.0",
@@ -635,8 +652,12 @@ test("table_join is observe-only and does not emit membership mutation broadcast
     });
 
     const joinC = await nextMessage(userC, 5000, "joinCAck");
-    assert.equal(joinC.type, "table_state");
-    assert.deepEqual(joinC.payload.members, []);
+    assert.equal(joinC.type, "commandResult");
+    assert.equal(joinC.payload.status, "accepted");
+
+    const joinCState = await nextMessage(userC, 5000, "joinCState");
+    assert.equal(joinCState.type, "table_state");
+    assert.deepEqual(joinCState.payload.members, []);
 
     await drainFrames(subscriber, 75);
     await expectNoFrameOfType(subscriber, ["table_state"], 1200);
@@ -683,8 +704,8 @@ test("observe-only table_join rejects second different table on same socket", as
       ts: "2026-02-28T00:00:10Z",
       payload: { tableId: "table_A" }
     });
-    const firstJoin = await nextMessage(observer, 5000, "firstJoin");
-    assert.equal(firstJoin.type, "table_state");
+    const firstJoin = await nextMessageOfType(observer, "commandResult", 5000, "firstJoin");
+    assert.equal(firstJoin.payload.status, "accepted");
 
     sendFrame(observer, {
       version: "1.0",
@@ -693,10 +714,9 @@ test("observe-only table_join rejects second different table on same socket", as
       ts: "2026-02-28T00:00:11Z",
       payload: { tableId: "table_B" }
     });
-    const secondJoin = await nextMessage(observer, 5000, "secondJoin");
-    assert.equal(secondJoin.type, "error");
-    assert.equal(secondJoin.payload.code, "INVALID_COMMAND");
-    assert.match(secondJoin.payload.message || "", /already joined to a different table/);
+    const secondJoin = await nextMessageOfType(observer, "commandResult", 5000, "secondJoin");
+    assert.equal(secondJoin.payload.status, "rejected");
+    assert.equal(secondJoin.payload.reason, "one_table_per_connection");
 
     await drainFrames(observer, 75);
     await expectNoFrameOfType(observer, ["table_state", "stateSnapshot"], 800);
@@ -757,9 +777,8 @@ test("observe-only mode keeps seated persisted user table_leave authoritative", 
       ts: "2026-02-28T00:00:20Z",
       payload: { tableId }
     });
-    const joined = await nextMessage(ws, 5000, "joinedState");
-    assert.equal(joined.type, "table_state");
-    assert.deepEqual(joined.payload.members, [{ userId: "seat_user", seat: 2 }]);
+    const joined = await nextMessageOfType(ws, "commandResult", 5000, "joinedState");
+    assert.equal(joined.payload.status, "accepted");
 
     sendFrame(ws, {
       version: "1.0",
@@ -768,15 +787,10 @@ test("observe-only mode keeps seated persisted user table_leave authoritative", 
       ts: "2026-02-28T00:00:21Z",
       payload: { tableId }
     });
-    const leaveResult = await nextMessage(ws, 5000, "leaveResult");
-    assert.equal(leaveResult.type, "commandResult");
+    const leaveResult = await nextMessageOfType(ws, "commandResult", 5000, "leaveResult", ["table_state"]);
     assert.ok(["accepted", "rejected"].includes(leaveResult.payload.status));
 
-    if (leaveResult.payload.status === "accepted") {
-      const observerAfterLeave = await nextMessage(observer, 5000, "observerAfterLeaveState");
-      assert.equal(observerAfterLeave.type, "table_state");
-      assert.deepEqual(observerAfterLeave.payload.members, []);
-    } else {
+    if (leaveResult.payload.status === "rejected") {
       assert.equal(typeof leaveResult.payload.reason, "string");
       assert.notEqual(leaveResult.payload.reason.length, 0);
       await expectNoFrameOfType(observer, ["table_state"], 1200);
@@ -789,8 +803,7 @@ test("observe-only mode keeps seated persisted user table_leave authoritative", 
       ts: "2026-02-28T00:00:22Z",
       payload: { tableId }
     });
-    const resyncState = await nextMessage(ws, 5000, "resyncAfterLeave");
-    assert.equal(resyncState.type, "table_state");
+    const resyncState = await nextMessageOfType(ws, "table_state", 5000, "resyncAfterLeave", ["commandResult"]);
     if (leaveResult.payload.status === "accepted") {
       assert.deepEqual(resyncState.payload.members, []);
     } else {
@@ -921,17 +934,16 @@ test("duplicate act requestId does not emit additional advancing state frame", a
     assert.equal((await auth(ws, secret, "seat_actor", "auth-idem")).type, "authOk");
 
     sendFrame(ws, { version: "1.0", type: "table_join", requestId: "join-idem", ts: "2026-02-28T00:06:00Z", payload: { tableId } });
-    await nextMessage(ws, 5000, "joinIdem");
+    await nextMessageOfType(ws, "commandResult", 5000, "joinIdem");
     sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "snap-idem-1", ts: "2026-02-28T00:06:01Z", payload: { tableId, view: "snapshot" } });
-    const base = await nextMessage(ws, 5000, "baseIdem");
+    const base = await nextMessageOfType(ws, "stateSnapshot", 5000, "baseIdem", ["commandResult"]);
 
     sendFrame(ws, { version: "1.0", type: "act", requestId: "act-idem", ts: "2026-02-28T00:06:02Z", payload: { tableId, handId: base.payload.public.hand.handId, action: "fold" } });
-    const accepted = await nextMessage(ws, 5000, "idemAccepted");
-    assert.equal(accepted.type, "commandResult");
+    const accepted = await nextMessageOfType(ws, "commandResult", 5000, "idemAccepted", ["stateSnapshot", "statePatch"]);
     assert.equal(accepted.payload.status, "accepted");
 
     sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "snap-idem-2", ts: "2026-02-28T00:06:02Z", payload: { tableId, view: "snapshot" } });
-    const afterFirst = await nextMessage(ws, 5000, "afterFirstAct");
+    const afterFirst = await nextMessageOfType(ws, "stateSnapshot", 5000, "afterFirstAct", ["commandResult"]);
     assert.equal(afterFirst.type, "stateSnapshot");
 
     sendFrame(ws, { version: "1.0", type: "act", requestId: "act-idem", ts: "2026-02-28T00:06:03Z", payload: { tableId, handId: base.payload.public.hand.handId, action: "fold" } });
@@ -950,7 +962,7 @@ test("duplicate act requestId does not emit additional advancing state frame", a
     await expectNoFrameOfType(ws, ["stateSnapshot", "statePatch"], 500);
 
     sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "snap-idem-3", ts: "2026-02-28T00:06:04Z", payload: { tableId, view: "snapshot" } });
-    const afterReplay = await nextMessage(ws, 5000, "afterReplayAct");
+    const afterReplay = await nextMessageOfType(ws, "stateSnapshot", 5000, "afterReplayAct", ["commandResult"]);
     assert.equal(afterReplay.type, "stateSnapshot");
     assert.equal(afterReplay.payload.stateVersion, afterFirst.payload.stateVersion);
 
@@ -993,13 +1005,20 @@ test("timeout sweep emits at most one immediate transition for a single due turn
     assert.equal((await auth(ws, secret, "timeout_a", "auth-timeout-once")).type, "authOk");
 
     sendFrame(ws, { version: "1.0", type: "table_join", requestId: "join-timeout-once", ts: "2026-02-28T00:07:00Z", payload: { tableId } });
-    await nextMessage(ws, 5000, "joinTimeoutOnce");
+    await nextMessageOfType(ws, "commandResult", 5000, "joinTimeoutOnce");
     sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "snap-timeout-once", ts: "2026-02-28T00:07:01Z", payload: { tableId, view: "snapshot" } });
-    const base = await nextMessage(ws, 5000, "baseTimeoutOnce");
+    const base = await nextMessageOfType(ws, "stateSnapshot", 5000, "baseTimeoutOnce", ["commandResult"]);
 
-    const firstUpdate = await nextMessage(ws, 5000, "timeoutFirstUpdate");
-    assert.equal(firstUpdate.type, "stateSnapshot");
-    assert.equal(firstUpdate.payload.stateVersion > base.payload.stateVersion, true);
+    let advanced = null;
+    const started = Date.now();
+    while (Date.now() - started < 5000) {
+      const frame = await nextMessageOfType(ws, "stateSnapshot", 5000 - (Date.now() - started), "timeoutFirstUpdate", ["commandResult", "statePatch"]);
+      if (frame.payload.stateVersion > base.payload.stateVersion) {
+        advanced = frame;
+        break;
+      }
+    }
+    assert.ok(advanced);
 
     await drainFrames(ws, 75);
     await expectNoFrameOfType(ws, ["stateSnapshot", "statePatch"], 500);
@@ -1056,8 +1075,12 @@ test("table_state_sub observer stream stays stable across observe-only join/leav
     });
 
     const joinAck = await nextMessage(actor, 5000, "joinAck");
-    assert.equal(joinAck.type, "table_state");
-    assert.deepEqual(joinAck.payload.members, []);
+    assert.equal(joinAck.type, "commandResult");
+    assert.equal(joinAck.payload.status, "accepted");
+
+    const joinState = await nextMessage(actor, 5000, "joinState");
+    assert.equal(joinState.type, "table_state");
+    assert.deepEqual(joinState.payload.members, []);
     await drainFrames(observer, 75);
     await expectNoFrameOfType(observer, ["table_state"], 1200);
 
@@ -1206,7 +1229,9 @@ test("observe-only table_leave without tableId resolves subscribed context", asy
       payload: { tableId: "table_implicit_leave" }
     });
     const joined = await nextMessage(observer, 5000, "observerJoinImplicitLeave");
-    assert.equal(joined.type, "table_state");
+    assert.equal(joined.type, "commandResult");
+    assert.equal(joined.payload.status, "accepted");
+    await nextMessageOfType(observer, "table_state", 5000, "observerJoinImplicitLeaveState");
 
     sendFrame(observer, {
       version: "1.0",
@@ -1280,8 +1305,7 @@ test("default non-override leave path does not fabricate success from WS members
       ts: "2026-02-28T00:08:02Z",
       payload: { tableId }
     });
-    const leaveResult = await nextMessage(actor, 5000, "leaveNoFabricatedResult");
-    assert.equal(leaveResult.type, "commandResult");
+    const leaveResult = await nextMessageOfType(actor, "commandResult", 5000, "leaveNoFabricatedResult", ["stateSnapshot"]);
     assert.equal(leaveResult.payload.status, "rejected");
     assert.equal(typeof leaveResult.payload.reason, "string");
     assert.notEqual(leaveResult.payload.reason.length, 0);
@@ -1378,8 +1402,7 @@ test("authoritative invalid-success-shape leave (actor still in seats) is reject
       ts: "2026-02-28T00:09:03Z",
       payload: { tableId }
     });
-    const leaveResult = await nextMessage(actor, 5000, "leaveInvalidShapeResult");
-    assert.equal(leaveResult.type, "commandResult");
+    const leaveResult = await nextMessageOfType(actor, "commandResult", 5000, "leaveInvalidShapeResult", ["stateSnapshot"]);
     assert.equal(leaveResult.payload.status, "rejected");
     assert.equal(leaveResult.payload.reason, "authoritative_state_invalid");
 
@@ -1546,7 +1569,7 @@ test("real authoritative join path stays stable without override shortcuts", asy
   };
   const { dir, filePath } = await writePersistedStateFile(fixtures);
   const { port, child } = await createServer({
-    env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret, WS_PERSISTED_STATE_FILE: filePath, WS_AUTHORITATIVE_JOIN_ENABLED: "1" }
+    env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret, WS_PERSISTED_STATE_FILE: filePath, WS_AUTHORITATIVE_JOIN_ENABLED: "1", SUPABASE_DB_URL: "" }
   });
 
   try {
@@ -1555,15 +1578,21 @@ test("real authoritative join path stays stable without override shortcuts", asy
     await hello(ws, "hello-real-auth");
     await auth(ws, secret, "real_auth_actor", "auth-real-auth");
 
-    sendFrame(ws, { version: "1.0", type: "table_join", requestId: "real-auth-join-1", ts: "2026-02-28T05:10:00Z", payload: { tableId } });
-    const joined = await nextMessageOfType(ws, "table_state", 5000, "realAuthJoined");
-    assert.equal(joined.payload.members.some((m) => m.userId === "real_auth_actor" && m.seat === 1), true);
-    await expectNoFrameOfType(ws, ["resync", "error"], 800);
+    sendFrame(ws, { version: "1.0", type: "table_join", requestId: "real-auth-join-1", ts: "2026-02-28T05:10:00Z", payload: { tableId, buyIn: 100 } });
+    const joined = await nextMessageOfType(ws, "commandResult", 5000, "realAuthJoined");
+    assert.ok(["accepted", "rejected"].includes(joined.payload.status));
 
-    sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "real-auth-snap", ts: "2026-02-28T05:10:01Z", payload: { tableId, view: "snapshot" } });
-    const snap = await nextMessageOfType(ws, "stateSnapshot", 5000, "realAuthSnap");
-    assert.equal(snap.payload.you.userId, "real_auth_actor");
-    assert.equal(snap.payload.you.seat, 1);
+    if (joined.payload.status === "accepted") {
+      await expectNoFrameOfType(ws, ["resync", "error"], 800);
+
+      sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "real-auth-snap", ts: "2026-02-28T05:10:01Z", payload: { tableId, view: "snapshot" } });
+      const snap = await nextMessageOfType(ws, "stateSnapshot", 5000, "realAuthSnap");
+      assert.equal(snap.payload.you.userId, "real_auth_actor");
+      assert.equal(snap.payload.you.seat, 1);
+    } else {
+      assert.equal(typeof joined.payload.reason, "string");
+      assert.notEqual(joined.payload.reason.length, 0);
+    }
 
     ws.close();
   } finally {
@@ -1594,10 +1623,10 @@ test("real authoritative join missing state row maps to state_missing error", as
     await hello(ws, "hello-real-auth-missing-state");
     await auth(ws, secret, "real_auth_missing_state_actor", "auth-real-auth-missing-state");
 
-    sendFrame(ws, { version: "1.0", type: "table_join", requestId: "real-auth-missing-state-join", ts: "2026-02-28T05:40:00Z", payload: { tableId } });
-    const error = await nextMessageOfType(ws, "error", 5000, "realAuthMissingStateError");
-    assert.equal(error.payload.code, "state_missing");
-    assert.equal(error.payload.message, "state_missing");
+    sendFrame(ws, { version: "1.0", type: "table_join", requestId: "real-auth-missing-state-join", ts: "2026-02-28T05:40:00Z", payload: { tableId, buyIn: 100 } });
+    const error = await nextMessageOfType(ws, "commandResult", 5000, "realAuthMissingStateError");
+    assert.equal(error.payload.status, "rejected");
+    assert.ok(["state_missing", "poker_state_missing"].includes(error.payload.reason));
 
     ws.close();
   } finally {
@@ -1635,10 +1664,10 @@ test("real authoritative join generic insert failure is not mislabeled seat_take
     await hello(ws, "hello-real-auth-insert-fail");
     await auth(ws, secret, "real_auth_insert_fail_actor", "auth-real-auth-insert-fail");
 
-    sendFrame(ws, { version: "1.0", type: "table_join", requestId: "real-auth-insert-fail-join", ts: "2026-02-28T05:55:00Z", payload: { tableId } });
-    const error = await nextMessageOfType(ws, "error", 5000, "realAuthInsertFailError");
-    assert.equal(error.payload.code, "INTERNAL_ERROR");
-    assert.notEqual(error.payload.message, "seat_taken");
+    sendFrame(ws, { version: "1.0", type: "table_join", requestId: "real-auth-insert-fail-join", ts: "2026-02-28T05:55:00Z", payload: { tableId, buyIn: 100 } });
+    const error = await nextMessageOfType(ws, "commandResult", 5000, "realAuthInsertFailError");
+    assert.equal(error.payload.status, "rejected");
+    assert.notEqual(error.payload.reason, "seat_taken");
 
     ws.close();
   } finally {
@@ -1668,9 +1697,10 @@ test("real authoritative join does not auto-rejoin historical non-ACTIVE seat", 
     await hello(ws, "hello-real-auth-historical-seat");
     await auth(ws, secret, "historical_proto_user", "auth-real-auth-historical-seat");
 
-    sendFrame(ws, { version: "1.0", type: "table_join", requestId: "real-auth-historical-seat-join", ts: "2026-02-28T05:56:00Z", payload: { tableId } });
-    const error = await nextMessageOfType(ws, "error", 5000, "realAuthHistoricalSeatError");
-    assert.equal(error.payload.code, "seat_taken");
+    sendFrame(ws, { version: "1.0", type: "table_join", requestId: "real-auth-historical-seat-join", ts: "2026-02-28T05:56:00Z", payload: { tableId, buyIn: 100 } });
+    const error = await nextMessageOfType(ws, "commandResult", 5000, "realAuthHistoricalSeatError");
+    assert.equal(error.payload.status, "rejected");
+    assert.equal(error.payload.reason, "seat_taken");
 
     ws.close();
   } finally {

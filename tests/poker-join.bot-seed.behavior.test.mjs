@@ -153,7 +153,7 @@ const callJoin = (handler, requestId = "join-1") =>
   handler({
     httpMethod: "POST",
     headers: { origin: "https://example.test", authorization: "Bearer token" },
-    body: JSON.stringify({ tableId, seatNo: 0, buyIn: 100, requestId }),
+    body: JSON.stringify({ tableId, seatNo: 1, buyIn: 100, requestId }),
   });
 
 const run = async () => {

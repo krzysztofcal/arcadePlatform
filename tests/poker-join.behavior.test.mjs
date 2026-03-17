@@ -238,10 +238,10 @@ const run = async () => {
     existingSeatNo: 4,
     logs: rejoinLogs,
   });
-  const requestedSeatNo = 0;
+  const requestedSeatNo = 1;
   const rejoin = await callJoin(rejoinHandler, "join-rejoin", { seatNo: requestedSeatNo });
   assert.equal(rejoin.statusCode, 200);
-  assert.equal(JSON.parse(rejoin.body).seatNo, 3);
+  assert.equal(JSON.parse(rejoin.body).seatNo, 4);
   assert.equal(rejoinSideEffects.seatInsert, 0);
   assert.equal(rejoinSideEffects.ledgerSucceeded, 0);
   const rejoinStateWrites = rejoinQueries.filter((entry) => entry.query.toLowerCase().includes("update public.poker_state"));
@@ -266,7 +266,7 @@ const run = async () => {
 
   const rejoinOkLog = rejoinLogs.find((entry) => entry?.event === "poker_join_ok");
   assert.ok(rejoinOkLog, "rejoin should emit poker_join_ok log");
-  assert.equal(rejoinOkLog.payload?.seatNoUi, 3);
+  assert.equal(rejoinOkLog.payload?.seatNoUi, 4);
   assert.notEqual(rejoinOkLog.payload?.seatNoUi, requestedSeatNo);
 
   const conflictQueries = [];
@@ -302,7 +302,7 @@ const run = async () => {
   assert.equal(autoSeatJoin.statusCode, 200);
   const autoSeatBody = JSON.parse(autoSeatJoin.body);
   assert.equal(autoSeatBody.ok, true);
-  assert.equal(autoSeatBody.seatNo, 2, "autoSeat join should wrap to next free seat when preferred seat is taken");
+  assert.equal(autoSeatBody.seatNo, 3, "autoSeat join should wrap to next free seat when preferred seat is taken");
 
   const autoSeatJoinStr = await callJoin(autoSeatHandler, "join-auto-seat-str", {
     seatNo: undefined,
@@ -338,8 +338,8 @@ const run = async () => {
   assert.ok(activeSeatQueryCount >= 1, "autoSeat retry should query ACTIVE seats");
   assert.equal(
     JSON.parse(activeSeatIsOccupiedJoin.body).seatNo,
-    2,
-    "autoSeat should skip ACTIVE seats during retries and choose DB seat 3 (UI seat 2)"
+    3,
+    "autoSeat should skip ACTIVE seats during retries and choose seat 3"
   );
 
 
@@ -377,7 +377,7 @@ const run = async () => {
     occupiedSeatRows: [{ seat_no: 1 }, { seat_no: 2 }],
     alwaysSeatConflict: true,
   });
-  const fullJoin = await callJoin(fullHandler, "join-table-full", { autoSeat: true, preferredSeatNo: 0 });
+  const fullJoin = await callJoin(fullHandler, "join-table-full", { autoSeat: true, preferredSeatNo: 1 });
   assert.equal(fullJoin.statusCode, 409);
   assert.deepEqual(JSON.parse(fullJoin.body), { error: "table_full" });
 
