@@ -8,7 +8,8 @@ const REQUIRED_TRIGGER_PATHS = [
   "shared/**",
   "poker/**",
   "tests/**",
-  "scripts/test-all.mjs"
+  "scripts/test-all.mjs",
+  "tests/test-all.runner-registration.guard.test.mjs"
 ];
 
 const REQUIRED_PR_WORKFLOW_FILE_TRIGGERS = [
