@@ -36,6 +36,30 @@
 
   function safeErrorCode(err){ return err && (err.code || err.message) ? (err.code || err.message) : 'unknown_error'; }
   function createError(code, message){ var e = new Error(message || code || 'ws_error'); e.code = code || 'ws_error'; return e; }
+  function sanitizeText(value){
+    if (value == null) return null;
+    var text = String(value);
+    if (!text) return null;
+    return text.length > 240 ? text.slice(0, 240) : text;
+  }
+  function safeReadyState(socket){
+    return socket && typeof socket.readyState === 'number' ? socket.readyState : null;
+  }
+  function summarizeFrame(type, payload, requestId, roomId, tableId){
+    var summary = {
+      type: typeof type === 'string' ? type : null,
+      requestId: requestId || null,
+      roomId: roomId || null,
+      tableId: tableId || null
+    };
+    if (payload && typeof payload === 'object' && !Array.isArray(payload)){
+      var keys = Object.keys(payload);
+      summary.payloadKeys = keys.slice(0, 12);
+      summary.payloadKeyCount = keys.length;
+    }
+    if (summary.type === 'auth') summary.payloadKeys = ['token_redacted'];
+    return summary;
+  }
 
   function createClient(opts){
     var options = opts || {};
@@ -61,6 +85,7 @@
       var rid = requestId || buildRequestId();
       var envelope = { version: '1.0', type: type, requestId: rid, ts: new Date().toISOString(), payload: payload || {} };
       if (tableId) envelope.roomId = tableId;
+      log('poker_ws_send', summarizeFrame(envelope.type, envelope.payload, envelope.requestId, envelope.roomId || null, tableId || null));
       ws.send(JSON.stringify(envelope));
       return rid;
     }
@@ -132,6 +157,7 @@
 
     function handleMessage(frame){
       if (!frame || typeof frame !== 'object' || !frame.type) return;
+      log('poker_ws_recv', summarizeFrame(frame.type, frame.payload || null, frame.requestId || null, frame.roomId || null, tableId || null));
       if (frame.type === 'helloAck') { emitStatus('hello_ack', {}); mintAndAuth().catch(function(err){ var code = safeErrorCode(err); log('poker_ws_auth_error', { tableId: tableId, code: code }); emitStatus('failed', { stage: 'auth', code: code }); emitProtocolError(code, 'auth_failed'); destroy(); }); return; }
       if (frame.type === 'authOk') { authOk = true; emitStatus('auth_ok', { roomId: frame.payload && frame.payload.roomId ? frame.payload.roomId : null }); requestSnapshot(); return; }
       if (frame.type === 'table_state' || frame.type === 'stateSnapshot') { var initial = !initialSnapshotDelivered; initialSnapshotDelivered = true; var normalized = normalizeSnapshot(frame, initial); if (normalized) onSnapshot(normalized); return; }
@@ -150,15 +176,30 @@
       if (destroyed || started) return;
       if (!tableId){ emitProtocolError('missing_table_id'); return; }
       if (typeof window.WebSocket !== 'function'){ emitProtocolError('ws_unavailable'); return; }
+      log('poker_ws_bootstrap_begin', { tableId: tableId });
+      var wsUrl = resolveWsUrl();
+      log('poker_ws_url_resolved', { tableId: tableId, url: wsUrl });
       started = true;
-      ws = new window.WebSocket(resolveWsUrl());
-      ws.onopen = function(){ send('hello', { supportedVersions: ['1.0'], client: { name: 'poker-ui', build: 'ws-authoritative' } }); };
+      log('poker_ws_ctor', { tableId: tableId, url: wsUrl });
+      try {
+        ws = new window.WebSocket(wsUrl);
+      } catch (err) {
+        started = false;
+        log('poker_ws_exception', {
+          tableId: tableId,
+          phase: 'ws_ctor',
+          message: sanitizeText(err && (err.message || err.code)),
+          stack: sanitizeText(err && err.stack)
+        });
+        throw err;
+      }
+      ws.onopen = function(){ log('poker_ws_open', { tableId: tableId, readyState: safeReadyState(ws) }); send('hello', { supportedVersions: ['1.0'], client: { name: 'poker-ui', build: 'ws-authoritative' } }); };
       ws.onmessage = function(evt){ var frame = null; try { frame = JSON.parse(evt && evt.data ? evt.data : '{}'); } catch (_err){ emitProtocolError('invalid_json'); return; } handleMessage(frame); };
-      ws.onerror = function(){ emitStatus('failed', { stage: 'socket', code: 'socket_error' }); };
-      ws.onclose = function(evt){ authOk = false; rejectAllPending('ws_closed'); emitStatus('closed', { code: evt && evt.code ? evt.code : null }); };
+      ws.onerror = function(evt){ log('poker_ws_error', { tableId: tableId, readyState: safeReadyState(ws), message: sanitizeText(evt && evt.message) }); emitStatus('failed', { stage: 'socket', code: 'socket_error' }); };
+      ws.onclose = function(evt){ authOk = false; rejectAllPending('ws_closed'); log('poker_ws_close', { tableId: tableId, readyState: safeReadyState(ws), code: evt && typeof evt.code === 'number' ? evt.code : null, reason: sanitizeText(evt && evt.reason), wasClean: !!(evt && evt.wasClean) }); emitStatus('closed', { code: evt && evt.code ? evt.code : null }); };
     }
 
-    function destroy(){ destroyed = true; started = false; authOk = false; rejectAllPending('ws_closed'); if (ws && ws.readyState <= 1){ try { ws.close(1000, 'client_shutdown'); } catch (_err){} } ws = null; }
+    function destroy(){ log('poker_ws_destroy', { tableId: tableId, readyState: safeReadyState(ws) }); destroyed = true; started = false; authOk = false; rejectAllPending('ws_closed'); if (ws && ws.readyState <= 1){ try { ws.close(1000, 'client_shutdown'); } catch (_err){} } ws = null; }
 
     return {
       start: start,

@@ -1289,6 +1289,15 @@
       }
     }
 
+    function logWsBootstrapException(err, phase){
+      klog('poker_ws_exception', {
+        tableId: tableId,
+        phase: phase || 'ws_bootstrap',
+        message: err && (err.message || err.code) ? err.message || err.code : 'unknown_error',
+        stack: err && err.stack ? String(err.stack).slice(0, 600) : null
+      });
+    }
+
     function startAuthWatch(){
       if (authTimer) return;
       authTimer = setInterval(function(){
@@ -1324,7 +1333,12 @@
       setDevActionsEnabled(true);
       setDevActionsAuthStatus(true);
       stopAuthWatch();
-      startWsBootstrap();
+      try {
+        startWsBootstrap();
+      } catch (_err){
+        logWsBootstrapException(_err, 'check_auth');
+        startPollingFallback('ws_bootstrap_exception');
+      }
       return true;
     }
 
@@ -2948,6 +2962,7 @@
           try {
             startWsBootstrap();
           } catch (_err){
+            logWsBootstrapException(_err, 'visibility_resume');
             startPollingFallback('ws_bootstrap_exception');
             loadTable(false);
           }
@@ -3137,6 +3152,7 @@
         try {
           startWsBootstrap();
         } catch (_err){
+          logWsBootstrapException(_err, 'table_init');
           startPollingFallback('ws_bootstrap_exception');
           loadTable(false);
         }

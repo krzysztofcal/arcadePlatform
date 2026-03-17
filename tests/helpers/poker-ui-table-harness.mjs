@@ -82,6 +82,7 @@ export function createPokerTableHarness(options = {}){
   const clearTimeoutCalls = [];
   const wsCreates = [];
   const wsDestroys = [];
+  const logs = [];
 
   const wsFactory = options.wsFactory || function wsFactoryDefault(createOptions){
     const client = {
@@ -97,7 +98,7 @@ export function createPokerTableHarness(options = {}){
       location: { pathname: '/poker/table.html', search: typeof options.search === 'string' ? options.search : ('?tableId=' + encodeURIComponent(tableId)), href: '' },
       addEventListener(type, fn){ windowEvents[type] = windowEvents[type] || []; windowEvents[type].push(fn); },
       removeEventListener(){},
-      KLog: { log: () => {} },
+      KLog: { log: (kind, data) => logs.push({ kind, data: data || {} }) },
       __RUNNING_POKER_UI_TESTS__: false,
       SupabaseAuthBridge: { getAccessToken: async () => 'aaa.' + Buffer.from(JSON.stringify({ sub: 'user-1' })).toString('base64') + '.zzz' },
       PokerWsClient: options.disableWsClient ? null : { create: (createOptions) => wsFactory(createOptions) },
@@ -194,6 +195,7 @@ export function createPokerTableHarness(options = {}){
     fetchState,
     wsCreates,
     wsDestroys,
+    logs,
     clearTimeoutCalls,
     getScheduledTimeoutCount(){ return timeouts.size; },
     fireDomContentLoaded,

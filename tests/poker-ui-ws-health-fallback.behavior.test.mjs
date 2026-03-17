@@ -11,3 +11,17 @@ await harness.flush();
 
 assert.equal(harness.fetchState.getCalls, 1, 'bootstrap loadTable(false) should still run when WS client is unavailable');
 assert.ok(harness.getScheduledTimeoutCount() > 0, 'polling fallback should schedule an HTTP polling timer when WS is unavailable');
+
+const throwingHarness = createPokerTableHarness({
+  wsFactory(){
+    throw new Error('ws_ctor_sync_fail');
+  }
+});
+throwingHarness.fireDomContentLoaded();
+await throwingHarness.flush();
+
+const wsExceptionIndex = throwingHarness.logs.findIndex((entry) => entry.kind === 'poker_ws_exception');
+const fallbackIndex = throwingHarness.logs.findIndex((entry) => entry.kind === 'poker_http_fallback_start');
+assert.ok(wsExceptionIndex >= 0, 'sync WS bootstrap exception should be logged');
+assert.ok(fallbackIndex >= 0, 'fallback start should be logged');
+assert.ok(wsExceptionIndex < fallbackIndex, 'exception log must appear before fallback start');
