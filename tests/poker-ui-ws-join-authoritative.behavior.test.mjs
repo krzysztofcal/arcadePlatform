@@ -277,6 +277,43 @@ test('poker UI does not autoJoin before WS readiness and then joins via WS on au
   assert.equal(harness.fetchState.joinBodies.length, 0, 'ws-ready auto-join must not emit http join body');
 });
 
+test('poker UI protocol-error fallback activates HTTP autoJoin when WS stays not-ready', async () => {
+  const wsSent = [];
+  let wsHooks = null;
+  const harness = createPokerTableHarness({
+    search: '?tableId=table-1&autoJoin=1&seatNo=5',
+    wsFactory(createOptions){
+      wsHooks = createOptions;
+      return {
+        start(){},
+        destroy(){},
+        isReady(){ return false; },
+        sendJoin(payload){
+          wsSent.push(payload);
+          return Promise.resolve({ ok: true });
+        }
+      };
+    }
+  });
+
+  harness.fireDomContentLoaded();
+  var started = await flushUntil(harness, function(){
+    return harness.fetchState.getCalls >= 1 && !!wsHooks && harness.logs.some(function(entry){ return entry.kind === 'poker_ws_bootstrap_start'; });
+  }, 30);
+  assert.equal(started, true, 'startup should reach baseline-loaded + ws-created state before fallback test assertions');
+  assert.equal(wsSent.length, 0, 'pre-fallback ws-not-ready startup must not auto-join via ws');
+  assert.equal(harness.fetchState.joinBodies.length, 0, 'pre-fallback ws-not-ready startup must not auto-join via http');
+
+  wsHooks.onProtocolError({ code: 'socket_error', detail: 'forced_test_fallback' });
+  const joined = await flushUntil(harness, function(){ return harness.fetchState.joinBodies.length > 0 || wsSent.length > 0; });
+
+  assert.equal(joined, true, 'fallback load should eventually emit auto-join payload');
+  assert.equal(wsSent.length, 0, 'protocol-error fallback path should not emit ws join payload');
+  assert.equal(harness.fetchState.joinBodies.length >= 1, true, 'protocol-error fallback path should emit http join body');
+  assert.equal(harness.fetchState.joinBodies[0].autoSeat, true);
+  assert.equal(harness.fetchState.joinBodies[0].preferredSeatNo, 5);
+});
+
 
 test('poker UI keeps join failed state on rejected WS join and does not fallback to HTTP join', async () => {
   const harness = createPokerTableHarness({

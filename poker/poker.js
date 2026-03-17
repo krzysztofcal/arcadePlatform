@@ -1038,6 +1038,7 @@
     var realtimeUnavailableLogged = false;
     var wsClient = null;
     var wsStarted = false;
+    var httpFallbackActive = false;
     var wsSnapshotSeen = false;
     var pendingWsSnapshot = null;
 
@@ -1234,6 +1235,7 @@
 
 
     function startPollingFallback(reason){
+      httpFallbackActive = true;
       if (state.polling) return;
       if (!isPageActive()) return;
       if (reason){
@@ -1252,6 +1254,7 @@
         startPollingFallback('ws_client_missing');
         return;
       }
+      httpFallbackActive = false;
       wsStarted = true;
       wsClient = window.PokerWsClient.create({
         tableId: tableId,
@@ -1302,6 +1305,7 @@
     }
 
     async function bootstrapWsAfterBaseline(phase){
+      httpFallbackActive = false;
       var loaded = await loadTable(false);
       if (!loaded || !tableData || typeof tableData !== 'object') return false;
       try {
@@ -2097,7 +2101,7 @@
         }
         var wsClientConfigured = !!(window.PokerWsClient && typeof window.PokerWsClient.create === 'function');
         var wsReady = !!(wsClient && typeof wsClient.isReady === 'function' && wsClient.isReady());
-        if (!wsClientConfigured || wsReady){
+        if (!wsClientConfigured || wsReady || httpFallbackActive){
           maybeAutoJoin();
         }
         if (isPolling){ resetPollBackoff(); }
