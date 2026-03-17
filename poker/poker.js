@@ -2097,7 +2097,7 @@
         }
         var wsClientConfigured = !!(window.PokerWsClient && typeof window.PokerWsClient.create === 'function');
         var wsReady = !!(wsClient && typeof wsClient.isReady === 'function' && wsClient.isReady());
-        if (!wsClientConfigured || wsReady || state.polling){
+        if (!wsClientConfigured || wsReady){
           maybeAutoJoin();
         }
         if (isPolling){ resetPollBackoff(); }

@@ -242,6 +242,41 @@ test('poker UI autoJoin preferred seat has parity between authenticated startup 
   assert.equal(httpHarness.fetchState.joinBodies[0].preferredSeatNo, 3);
 });
 
+test('poker UI does not autoJoin before WS readiness and then joins via WS on auth_ok', async () => {
+  const wsSent = [];
+  let wsReady = false;
+  let emitStatus = null;
+  const harness = createPokerTableHarness({
+    search: '?tableId=table-1&autoJoin=1&seatNo=4',
+    wsFactory(createOptions){
+      emitStatus = createOptions.onStatus;
+      return {
+        start(){},
+        destroy(){},
+        isReady(){ return wsReady; },
+        sendJoin(payload){
+          wsSent.push(payload);
+          return Promise.resolve({ ok: true });
+        }
+      };
+    }
+  });
+
+  harness.fireDomContentLoaded();
+  await flushUntil(harness, function(){ return harness.fetchState.getCalls >= 1 && harness.wsCreates.length >= 1; });
+  assert.equal(wsSent.length, 0, 'baseline load with ws not-ready must not auto-join');
+  assert.equal(harness.fetchState.joinBodies.length, 0, 'ws-configured startup must not fallback to http before ws readiness');
+
+  wsReady = true;
+  emitStatus('auth_ok', { roomId: 'table-1' });
+  const joined = await flushUntil(harness, function(){ return wsSent.length > 0 || harness.fetchState.joinBodies.length > 0; });
+
+  assert.equal(joined, true, 'join should occur after ws readiness signal');
+  assert.equal(wsSent.length >= 1, true, 'ws readiness should trigger ws join payload');
+  assert.equal(harness.fetchState.joinCalls, 0, 'ws-ready auto-join must not call http join');
+  assert.equal(harness.fetchState.joinBodies.length, 0, 'ws-ready auto-join must not emit http join body');
+});
+
 
 test('poker UI keeps join failed state on rejected WS join and does not fallback to HTTP join', async () => {
   const harness = createPokerTableHarness({
