@@ -32,7 +32,7 @@ async function beginSqlFileStore(fn, { env = process.env } = {}) {
           if (!requiresActive) return true;
           return String(r?.status || "ACTIVE").toUpperCase() === "ACTIVE";
         });
-        return row ? [{ seat_no: row.seat_no }] : [];
+        return row ? [{ seat_no: row.seat_no, stack: row.stack }] : [];
       }
 
       if (sql.includes("from public.poker_seats") && sql.includes("status = 'active'") && sql.includes("order by seat_no asc")) {
@@ -55,7 +55,7 @@ async function beginSqlFileStore(fn, { env = process.env } = {}) {
         if (seatRows.some((r) => Number(r?.seat_no) === seatNo)) {
           throw Object.assign(new Error("seat_taken"), { code: "seat_taken" });
         }
-        seatRows.push({ user_id: userId, seat_no: seatNo, status: "ACTIVE", is_bot: false });
+        seatRows.push({ user_id: userId, seat_no: seatNo, status: "ACTIVE", is_bot: false, stack: 0 });
         table.seatRows = seatRows;
         return [];
       }
@@ -69,6 +69,16 @@ async function beginSqlFileStore(fn, { env = process.env } = {}) {
         if (!table?.stateRow) throw Object.assign(new Error("state_missing"), { code: "state_missing" });
         table.stateRow.state = params?.[1];
         return [{ version: table.stateRow.version }];
+      }
+
+
+      if (sql.includes("update public.poker_seats set stack")) {
+        const userId = params?.[1];
+        const seatNo = Number(params?.[2]);
+        const stack = Number(params?.[3]);
+        const row = (table?.seatRows || []).find((r) => r?.user_id === userId && Number(r?.seat_no) === seatNo);
+        if (row) row.stack = stack;
+        return [];
       }
 
       if (sql.includes("update public.poker_tables set last_activity_at")) {

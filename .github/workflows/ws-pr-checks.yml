@@ -8,6 +8,8 @@ on:
       - "shared/**"
       - "poker/**"
       - "tests/**"
+      - "netlify/functions/_shared/**"
+      - "docs/ws-poker-protocol.md"
       - "scripts/test-all.mjs"
       - ".github/workflows/ws-pr-checks.yml"
       - ".github/workflows/ws-deploy.yml"
@@ -35,6 +37,12 @@ jobs:
 
       - name: Run shared poker join behavior test
         run: node --test shared/poker-domain/join.behavior.test.mjs
+
+      - name: Run poker ws client behavior test
+        run: node --test tests/poker-ws-client.test.mjs
+
+      - name: Run poker UI ws authoritative join behavior test
+        run: node --test tests/poker-ui-ws-join-authoritative.behavior.test.mjs
 
       - name: Run WS behavior test
         run: node --test ws-server/server.behavior.test.mjs
@@ -102,6 +110,15 @@ jobs:
 
       - name: Run ws resync behavior test
         run: node --test ws-server/poker/reconnect/resync.behavior.test.mjs
+
+      - name: Run ws join handler behavior test
+        run: node --test ws-server/poker/handlers/join.behavior.test.mjs
+
+      - name: Run ws start-hand handler behavior test
+        run: node --test ws-server/poker/handlers/start-hand.behavior.test.mjs
+
+      - name: Run ws act handler behavior test
+        run: node --test ws-server/poker/handlers/act.behavior.test.mjs
 
       - name: Run WS PR workflow guard test
         run: node --test ws-tests/ws-pr-workflow.test.mjs

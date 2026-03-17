@@ -143,7 +143,7 @@ const assertStatus = (status, text, want, label) => {
       path: "/.netlify/functions/poker-join",
       method: "POST",
       token: u1Token,
-      body: { tableId, seatNo: 0, buyIn: 100, requestId: requestId("join1") },
+      body: { tableId, seatNo: 1, buyIn: 100, requestId: requestId("join1") },
     });
     users[0].joined = join1.status === 200;
     users[1].attempted = true;
@@ -152,7 +152,7 @@ const assertStatus = (status, text, want, label) => {
       path: "/.netlify/functions/poker-join",
       method: "POST",
       token: u2Token,
-      body: { tableId, seatNo: 1, buyIn: 100, requestId: requestId("join2") },
+      body: { tableId, seatNo: 2, buyIn: 100, requestId: requestId("join2") },
     });
     users[1].joined = join2.status === 200;
 

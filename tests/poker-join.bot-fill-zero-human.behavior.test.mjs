@@ -41,7 +41,7 @@ const run = async () => {
     const res = await ctx.handler({
       httpMethod: "POST",
       headers: { origin: "https://example.test", authorization: "Bearer token" },
-      body: JSON.stringify({ tableId, seatNo: 0, buyIn: 100, requestId: "join-closed" }),
+      body: JSON.stringify({ tableId, seatNo: 1, buyIn: 100, requestId: "join-closed" }),
     });
     assert.equal(res.statusCode, 409);
     assert.equal(JSON.parse(res.body).error, "table_closed");
@@ -53,7 +53,7 @@ const run = async () => {
     const res = await ctx.handler({
       httpMethod: "POST",
       headers: { origin: "https://example.test", authorization: "Bearer token" },
-      body: JSON.stringify({ tableId, seatNo: 0, buyIn: 100, requestId: "join-open-invalid" }),
+      body: JSON.stringify({ tableId, seatNo: 1, buyIn: 100, requestId: "join-open-invalid" }),
     });
     assert.equal(res.statusCode >= 400, true);
     assert.equal(ctx.botInsertCalls.length, 0);

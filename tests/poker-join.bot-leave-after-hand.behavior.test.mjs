@@ -68,7 +68,7 @@ const callJoin = (handler, requestId, overrides) =>
   handler({
     httpMethod: "POST",
     headers: { origin: "https://example.test", authorization: "Bearer token" },
-    body: JSON.stringify({ tableId, seatNo: 0, autoSeat: true, preferredSeatNo: 0, buyIn: 100, requestId, ...(overrides || {}) }),
+    body: JSON.stringify({ tableId, seatNo: 1, autoSeat: true, preferredSeatNo: 1, buyIn: 100, requestId, ...(overrides || {}) }),
   });
 
 const run = async () => {

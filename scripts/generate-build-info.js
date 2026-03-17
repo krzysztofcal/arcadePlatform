@@ -176,6 +176,10 @@ function generateBuildInfo() {
     siteUrl: env.URL || null,
     siteName: env.SITE_NAME || null,
 
+    // Runtime endpoint hints for poker WS client
+    pokerWsUrl: env.POKER_WS_URL || 'wss://ws.kcswh.pl/ws',
+    pokerWsPreviewUrl: env.POKER_WS_PREVIEW_URL || 'wss://ws-preview.kcswh.pl/ws',
+
     // Node version used for build
     nodeVersion: process.version,
   };

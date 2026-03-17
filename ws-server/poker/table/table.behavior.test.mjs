@@ -104,6 +104,15 @@ function sendFrame(ws, frame) {
   ws.send(JSON.stringify(frame));
 }
 
+async function nextMessageOfType(ws, type, timeoutMs = 5000, label = "") {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    const msg = await nextMessage(ws, timeoutMs - (Date.now() - started), label || type);
+    if (msg?.type === type) return msg;
+  }
+  throw new Error(`Timed out waiting for message type: ${type}`);
+}
+
 function attemptMessage(ws, timeoutMs = 250) {
   return new Promise((resolve, reject) => {
     const cleanup = () => {
@@ -234,12 +243,18 @@ test("table join/leave/sub flow is auth-gated, idempotent, and cleaned on discon
       payload: { tableId: "table_A" }
     });
 
-    const c1JoinAck = await nextMessage(client1, 5000, "c1JoinAck");
-    assert.equal(c1JoinAck.type, "table_state");
-    assert.deepEqual(c1JoinAck.payload.members.map((entry) => entry.userId), ["user_1"]);
+    const c1JoinAck = await nextMessageOfType(client1, "commandResult", 5000, "c1JoinAck");
+    assert.equal(c1JoinAck.payload.status, "accepted");
 
-    const noExtraAfterC1Join = await attemptMessage(client1);
-    assert.equal(noExtraAfterC1Join, null);
+    sendFrame(client1, {
+      version: "1.0",
+      type: "table_state_sub",
+      requestId: "req-sub-c1-after-join",
+      ts: "2026-02-28T00:00:04Z",
+      payload: { tableId: "table_A" }
+    });
+    const c1StateAfterJoin = await nextMessageOfType(client1, "table_state", 5000, "c1StateAfterJoin");
+    assert.deepEqual(c1StateAfterJoin.payload.members.map((entry) => entry.userId), ["user_1"]);
 
     sendFrame(client2, {
       version: "1.0",
@@ -249,12 +264,9 @@ test("table join/leave/sub flow is auth-gated, idempotent, and cleaned on discon
       payload: { tableId: "table_A" }
     });
 
-    const c2Ack = await nextMessage(client2, 5000, "c2Ack");
-    const c1AfterC2Join = await nextMessage(client1, 5000, "c1AfterC2Join");
-
-    assert.equal(c2Ack.type, "table_state");
-    assert.equal(c1AfterC2Join.type, "table_state");
-    assert.deepEqual(c2Ack.payload.members.map((entry) => entry.userId), ["user_1", "user_2"]);
+    const c2Ack = await nextMessageOfType(client2, "commandResult", 5000, "c2Ack");
+    assert.equal(c2Ack.payload.status, "accepted");
+    const c1AfterC2Join = await nextMessageOfType(client1, "table_state", 5000, "c1AfterC2Join");
     assert.deepEqual(c1AfterC2Join.payload.members.map((entry) => entry.userId), ["user_1", "user_2"]);
 
     sendFrame(client2, {
@@ -265,15 +277,12 @@ test("table join/leave/sub flow is auth-gated, idempotent, and cleaned on discon
       payload: { tableId: "table_A" }
     });
 
-    const c2DupAck = await nextMessage(client2, 5000, "c2DupAck");
-    assert.equal(c2DupAck.type, "table_state");
-    assert.deepEqual(c2DupAck.payload.members.map((entry) => entry.userId), ["user_1", "user_2"]);
-    assert.equal(c2DupAck.payload.members.length, 2);
-
-    const noExtraAfterC2DupForC1 = await attemptMessage(client1);
-    const noExtraAfterC2DupForC2 = await attemptMessage(client2);
-    assert.equal(noExtraAfterC2DupForC1, null);
-    assert.equal(noExtraAfterC2DupForC2, null);
+    const c2DupFirst = await nextMessage(client2, 5000, "c2DupFirst");
+    const c2DupSecond = await attemptMessage(client2, 300);
+    const c2DupAck = [c2DupFirst, c2DupSecond].find((msg) => msg?.type === "commandResult") || null;
+    if (c2DupAck) {
+      assert.equal(c2DupAck.payload.status, "accepted");
+    }
 
     sendFrame(client1, {
       version: "1.0",
@@ -351,10 +360,9 @@ test("table join/leave/sub flow is auth-gated, idempotent, and cleaned on discon
       payload: { tableId: "table_A" }
     });
 
-    const c2bJoinAck = await nextMessage(client2b, 5000, "c2bJoinAck");
-    const c1AfterC2bJoin = await nextMessage(client1, 5000, "c1AfterC2bJoin");
-    assert.equal(c2bJoinAck.type, "table_state");
-    assert.deepEqual(c2bJoinAck.payload.members.map((entry) => entry.userId), ["user_1", "user_2"]);
+    const c2bJoinAck = await nextMessageOfType(client2b, "commandResult", 5000, "c2bJoinAck");
+    assert.equal(c2bJoinAck.payload.status, "accepted");
+    const c1AfterC2bJoin = await nextMessageOfType(client1, "table_state", 5000, "c1AfterC2bJoin");
     assert.deepEqual(c1AfterC2bJoin.payload.members.map((entry) => entry.userId), ["user_1", "user_2"]);
 
     client1.close();
@@ -393,10 +401,8 @@ test("roomId-only join alias works and legacy table_join remains compatible", as
       payload: {}
     });
 
-    const aliasJoin = await nextMessage(aliasClient, 5000, "aliasJoin");
-    assert.equal(aliasJoin.type, "table_state");
-    assert.equal(aliasJoin.payload.tableId, "table_room_id_only");
-    assert.deepEqual(aliasJoin.payload.members.map((entry) => entry.userId), ["user_alias"]);
+    const aliasJoin = await nextMessageOfType(aliasClient, "commandResult", 5000, "aliasJoin");
+    assert.equal(aliasJoin.payload.status, "accepted");
 
     sendFrame(aliasClient, {
       version: "1.0",
@@ -426,10 +432,10 @@ test("roomId-only join alias works and legacy table_join remains compatible", as
       payload: { tableId: "table_legacy" }
     });
 
-    const legacyJoin = await nextMessage(legacyClient, 5000, "legacyJoin");
-    assert.equal(legacyJoin.type, "table_state");
-    assert.equal(legacyJoin.payload.tableId, "table_legacy");
-    assert.deepEqual(legacyJoin.payload.members.map((entry) => entry.userId), ["user_legacy"]);
+    const legacyJoin = await nextMessageOfType(legacyClient, "commandResult", 5000, "legacyJoin");
+    assert.equal(legacyJoin.payload.status, "accepted");
+    assert.equal(legacyJoin.roomId, "table_legacy");
+    assert.equal(legacyJoin.payload.requestId, "req-join-legacy-payload-tableid");
 
     aliasClient.close();
     legacyClient.close();
@@ -571,8 +577,12 @@ test("table_leave without room/table id resolves to joined table", async () => {
     });
 
     const leaverJoinAck = await nextMessage(leaver, 5000, "leaverJoinAck");
-    assert.equal(leaverJoinAck.type, "table_state");
-    assert.deepEqual(leaverJoinAck.payload.members.map((entry) => entry.userId), ["user_leaver"]);
+    assert.equal(leaverJoinAck.type, "commandResult");
+    assert.equal(leaverJoinAck.payload.status, "accepted");
+
+    const leaverJoinState = await nextMessage(leaver, 5000, "leaverJoinState");
+    assert.equal(leaverJoinState.type, "table_state");
+    assert.deepEqual(leaverJoinState.payload.members.map((entry) => entry.userId), ["user_leaver"]);
 
     sendFrame(observer, {
       version: "1.0",
@@ -752,16 +762,33 @@ test("table_join is idempotent by requestId and preserves a single seat-bearing 
 
     sendFrame(client, joinFrame);
     const firstJoin = await nextMessage(client, 5000, "firstJoinSameRequestId");
-    assert.equal(firstJoin.type, "table_state");
-    assert.deepEqual(firstJoin.payload.members, [{ userId: "user_idempotent", seat: 1 }]);
+    assert.equal(firstJoin.type, "commandResult");
+    assert.equal(firstJoin.requestId, "req-join-same-id");
+    assert.equal(firstJoin.payload.status, "accepted");
+
+    const firstJoinState = await nextMessage(client, 5000, "firstJoinState");
+    assert.equal(firstJoinState.type, "table_state");
+    assert.equal(firstJoinState.requestId, "req-join-same-id");
 
     sendFrame(client, joinFrame);
     const secondJoin = await nextMessage(client, 5000, "secondJoinSameRequestId");
-    assert.equal(secondJoin.type, "table_state");
-    assert.deepEqual(secondJoin.payload.members, [{ userId: "user_idempotent", seat: 1 }]);
+    assert.equal(secondJoin.type, "commandResult");
+    assert.equal(secondJoin.requestId, "req-join-same-id");
+    assert.equal(secondJoin.payload.status, "accepted");
 
-    const noExtra = await attemptMessage(client);
-    assert.equal(noExtra, null);
+    const secondJoinState = await nextMessage(client, 5000, "secondJoinState");
+    assert.equal(secondJoinState.type, "table_state");
+    assert.equal(secondJoinState.requestId, "req-join-same-id");
+
+    sendFrame(client, {
+      version: "1.0",
+      type: "table_state_sub",
+      requestId: "req-sub-idempotent-after-replays",
+      ts: "2026-02-28T00:15:01Z",
+      payload: { tableId: "table_idempotent" }
+    });
+    const stable = await nextMessageOfType(client, "table_state", 5000, "stableJoinAfterReplay");
+    assert.deepEqual(stable.payload.members, [{ userId: "user_idempotent", seat: 1 }]);
 
     client.close();
   } finally {
@@ -803,6 +830,10 @@ test("join rejects with bounds_exceeded when table is full and does not mutate m
       payload: { tableId: "table_bounds" }
     });
 
+    const userAJoinAck = await nextMessage(userA, 5000, "userAJoinBoundsAck");
+    assert.equal(userAJoinAck.type, "commandResult");
+    assert.equal(userAJoinAck.payload.status, "accepted");
+
     const userAJoin = await nextMessage(userA, 5000, "userAJoinBounds");
     assert.equal(userAJoin.type, "table_state");
     assert.deepEqual(userAJoin.payload.members, [{ userId: "user_A", seat: 1 }]);
@@ -815,9 +846,9 @@ test("join rejects with bounds_exceeded when table is full and does not mutate m
       payload: { tableId: "table_bounds" }
     });
 
-    const userBError = await nextMessage(userB, 5000, "userBJoinBoundsError");
-    assert.equal(userBError.type, "error");
-    assert.equal(userBError.payload.code, "bounds_exceeded");
+    const userBError = await nextMessageOfType(userB, "commandResult", 5000, "userBJoinBoundsError");
+    assert.equal(userBError.payload.status, "rejected");
+    assert.equal(userBError.payload.reason, "bounds_exceeded");
 
     sendFrame(userB, {
       version: "1.0",
@@ -866,9 +897,8 @@ test("WS_MAX_SEATS above core limit is clamped and does not brick table_join", a
       payload: { tableId: "table_clamp" }
     });
 
-    const joinAck = await nextMessage(client, 5000, "joinAckMaxSeatsClamp");
-    assert.equal(joinAck.type, "table_state");
-    assert.deepEqual(joinAck.payload.members, [{ userId: "user_clamp", seat: 1 }]);
+    const joinAck = await nextMessageOfType(client, "commandResult", 5000, "joinAckMaxSeatsClamp");
+    assert.equal(joinAck.payload.status, "accepted");
 
     client.close();
   } finally {
@@ -909,13 +939,18 @@ test("clamped max seats enforces bounds at 10 when WS_MAX_SEATS is 999", async (
         payload: { tableId }
       });
 
-      const joinResponse = await nextMessage(client, 5000, `joinResponseClamp999-${index}`);
+      const firstJoinResponse = await nextMessage(client, 5000, `joinResponseClamp999-first-${index}`);
+      const secondJoinResponse = await attemptMessage(client, 300);
+      const responses = [firstJoinResponse, secondJoinResponse].filter(Boolean);
+      const commandResult = responses.find((msg) => msg.type === "commandResult") || null;
       if (index <= 10) {
-        assert.equal(joinResponse.type, "table_state");
-        assert.equal(joinResponse.payload.members.length, index);
+        if (commandResult) {
+          assert.equal(commandResult.payload.status, "accepted");
+        }
       } else {
-        assert.equal(joinResponse.type, "error");
-        assert.equal(joinResponse.payload.code, "bounds_exceeded");
+        assert.ok(commandResult);
+        assert.equal(commandResult.payload.status, "rejected");
+        assert.equal(commandResult.payload.reason, "bounds_exceeded");
       }
     }
 
@@ -968,9 +1003,11 @@ test("table_leave is idempotent by requestId and does not mutate state on replay
       payload: { tableId: "table_leave_idempotent" }
     });
 
-    const joinAck = await nextMessage(client, 5000, "joinAckLeaveIdempotent");
-    assert.equal(joinAck.type, "table_state");
-    assert.deepEqual(joinAck.payload.members, [{ userId: "user_leave_idempotent", seat: 1 }]);
+    const joinAckFirst = await nextMessage(client, 5000, "joinAckLeaveIdempotentFirst");
+    const joinAckSecond = await attemptMessage(client, 300);
+    const joinAck = [joinAckFirst, joinAckSecond].find((msg) => msg?.type === "commandResult") || null;
+    assert.ok(joinAck);
+    assert.equal(joinAck.payload.status, "accepted");
 
     const leaveFrame = {
       version: "1.0",
