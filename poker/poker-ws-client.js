@@ -15,25 +15,23 @@
     return 'ws_' + Date.now().toString(16) + '_' + rand;
   }
 
+  function nonEmptyString(value){
+    return typeof value === 'string' && value.trim() ? value.trim() : null;
+  }
+
   function resolveWsUrl(){
     var buildInfo = window.BUILD_INFO && typeof window.BUILD_INFO === 'object' ? window.BUILD_INFO : null;
-    var productionUrl = null;
+    var defaultUrl = nonEmptyString(window.__POKER_WS_URL)
+      || nonEmptyString(window.__POKER_WS_ENDPOINT)
+      || nonEmptyString(buildInfo && buildInfo.pokerWsUrl)
+      || 'wss://ws.kcswh.pl/ws';
+    var previewUrl = nonEmptyString(buildInfo && buildInfo.pokerWsPreviewUrl);
 
-    if (typeof window.__POKER_WS_URL === 'string' && window.__POKER_WS_URL.trim()) {
-      productionUrl = window.__POKER_WS_URL.trim();
-    } else if (typeof window.__POKER_WS_ENDPOINT === 'string' && window.__POKER_WS_ENDPOINT.trim()) {
-      productionUrl = window.__POKER_WS_ENDPOINT.trim();
-    } else if (buildInfo && typeof buildInfo.pokerWsUrl === 'string' && buildInfo.pokerWsUrl.trim()) {
-      productionUrl = buildInfo.pokerWsUrl.trim();
-    } else {
-      productionUrl = 'wss://ws.kcswh.pl/ws';
+    if (buildInfo && buildInfo.isPreview === true && previewUrl) {
+      return previewUrl;
     }
 
-    if (buildInfo && buildInfo.isPreview === true && typeof buildInfo.pokerWsPreviewUrl === 'string' && buildInfo.pokerWsPreviewUrl.trim()) {
-      return buildInfo.pokerWsPreviewUrl.trim();
-    }
-
-    return productionUrl;
+    return defaultUrl;
   }
 
   function safeErrorCode(err){ return err && (err.code || err.message) ? (err.code || err.message) : 'unknown_error'; }
