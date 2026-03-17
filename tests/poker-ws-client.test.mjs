@@ -29,9 +29,9 @@ function loadClientHarness(options = {}){
     send(text){
       sentFrames.push(JSON.parse(text));
     }
-    close(code){
+    close(code, reason){
       this.readyState = 3;
-      if (this.onclose) this.onclose({ code: code || 1000 });
+      if (this.onclose) this.onclose({ code: code || 1000, reason: reason || '', wasClean: (code || 1000) === 1000 });
     }
     open(){
       this.readyState = 1;
@@ -79,6 +79,10 @@ function loadClientHarness(options = {}){
   return { client, FakeWebSocket, sentFrames, logs, statuses, snapshots, protocolErrors, getFetchCalls: () => fetchCalls };
 }
 
+function getLogEntries(logs, kind){
+  return logs.filter((entry) => entry.kind === kind);
+}
+
 test('poker ws client bootstraps hello -> auth -> snapshot once', async () => {
   const h = loadClientHarness();
   h.client.start();
@@ -114,6 +118,20 @@ test('poker ws client bootstraps hello -> auth -> snapshot once', async () => {
   assert.equal(h.snapshots[1].initial, false);
   assert.equal(h.snapshots[1].payload.members[0].userId, 'u2');
   assert.equal(h.protocolErrors.length, 0);
+
+  const lifecycleKinds = h.logs.map((entry) => entry.kind);
+  assert.ok(lifecycleKinds.includes('poker_ws_bootstrap_begin'));
+  assert.ok(lifecycleKinds.includes('poker_ws_url_resolved'));
+  assert.ok(lifecycleKinds.includes('poker_ws_ctor'));
+  assert.ok(lifecycleKinds.includes('poker_ws_open'));
+
+  const sendLogs = getLogEntries(h.logs, 'poker_ws_send');
+  const recvLogs = getLogEntries(h.logs, 'poker_ws_recv');
+  assert.deepEqual(sendLogs.slice(0, 3).map((entry) => entry.data.type), ['hello', 'auth', 'table_state_sub']);
+  assert.deepEqual(recvLogs.slice(0, 4).map((entry) => entry.data.type), ['helloAck', 'authOk', 'table_state', 'table_state']);
+  const authSend = sendLogs.find((entry) => entry.data && entry.data.type === 'auth');
+  assert.equal(Array.isArray(authSend.data.payloadKeys), true);
+  assert.equal(authSend.data.payloadKeys[0], 'token_redacted');
 
   const logDump = JSON.stringify(h.logs);
   assert.equal(logDump.includes('minted_token_value'), false);
@@ -156,8 +174,51 @@ test('poker ws client rejects pending commands on close', async () => {
   ws.message({ type: 'authOk', payload: { roomId: 'table_test_1' } });
 
   const actPromise = h.client.sendAct({ handId: 'h1', action: 'CHECK' }, 'act_req_close');
-  ws.close(1006);
+  ws.close(1006, 'abnormal_close');
   await assert.rejects(actPromise, (err) => err && err.code === 'ws_closed');
+  const closeLogs = getLogEntries(h.logs, 'poker_ws_close');
+  assert.equal(closeLogs.length > 0, true);
+  assert.equal(closeLogs[0].data.code, 1006);
+  assert.equal(closeLogs[0].data.reason, 'abnormal_close');
+});
+
+test('poker ws client logs socket error and destroy', () => {
+  const h = loadClientHarness();
+  h.client.start();
+  const ws = h.FakeWebSocket.instances[0];
+  ws.open();
+  if (ws.onerror) ws.onerror({ message: 'network_down' });
+  h.client.destroy();
+  const errLog = getLogEntries(h.logs, 'poker_ws_error')[0];
+  assert.equal(errLog.data.message, 'network_down');
+  const destroyLog = getLogEntries(h.logs, 'poker_ws_destroy')[0];
+  assert.equal(!!destroyLog, true);
+});
+
+test('poker ws client logs constructor exceptions', () => {
+  const source = fs.readFileSync(new URL('../poker/poker-ws-client.js', import.meta.url), 'utf8');
+  const logs = [];
+  function ThrowingWebSocket(){
+    throw new Error('ctor_failed_for_test');
+  }
+  const context = {
+    window: {
+      KLog: { log: (kind, data) => logs.push({ kind, data }) },
+      WebSocket: ThrowingWebSocket
+    },
+    Date,
+    Math,
+    JSON,
+    setTimeout,
+    clearTimeout
+  };
+  context.window.window = context.window;
+  vm.runInNewContext(source, context);
+  const client = context.window.PokerWsClient.create({ tableId: 'table_test_1' });
+  assert.throws(() => client.start(), /ctor_failed_for_test/);
+  const exceptionLogs = getLogEntries(logs, 'poker_ws_exception');
+  assert.equal(exceptionLogs.length, 1);
+  assert.equal(exceptionLogs[0].data.phase, 'ws_ctor');
 });
 
 
