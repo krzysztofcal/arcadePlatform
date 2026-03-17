@@ -9,9 +9,12 @@ on:
       - "shared/**"
       - "poker/**"
       - "tests/**"
+      - "tests/poker-ws-client.test.mjs"
       - "netlify/functions/_shared/**"
       - "docs/ws-poker-protocol.md"
+      - "docs/poker-deployment.md"
       - "scripts/test-all.mjs"
+      - "scripts/generate-build-info.js"
       - ".github/workflows/ws-pr-checks.yml"
       - ".github/workflows/ws-deploy.yml"
 

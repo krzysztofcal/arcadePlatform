@@ -176,6 +176,10 @@ function generateBuildInfo() {
     siteUrl: env.URL || null,
     siteName: env.SITE_NAME || null,
 
+    // WS routing
+    pokerWsUrl: env.POKER_WS_URL || null,
+    pokerWsPreviewUrl: env.POKER_WS_PREVIEW_URL || null,
+
     // Node version used for build
     nodeVersion: process.version,
   };

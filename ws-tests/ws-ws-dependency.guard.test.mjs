@@ -289,5 +289,8 @@ test("workflow trigger boundary includes shared join and netlify helper surfaces
     assert.match(text, /"shared\/\*\*"/);
     assert.match(text, /"netlify\/functions\/_shared\/\*\*"/);
     assert.match(text, /"docs\/ws-poker-protocol\.md"/);
+    assert.match(text, /"docs\/poker-deployment\.md"/);
+    assert.match(text, /"scripts\/generate-build-info\.js"/);
+    assert.match(text, /"tests\/poker-ws-client\.test\.mjs"/);
   }
 });

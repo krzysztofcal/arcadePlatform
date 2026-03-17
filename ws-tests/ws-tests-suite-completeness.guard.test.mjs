@@ -111,7 +111,10 @@ const REQUIRED_WS_TRIGGER_PATHS = [
   "tests/**",
   "netlify/functions/_shared/**",
   "docs/ws-poker-protocol.md",
-  "scripts/test-all.mjs"
+  "docs/poker-deployment.md",
+  "scripts/test-all.mjs",
+  "scripts/generate-build-info.js",
+  "tests/poker-ws-client.test.mjs"
 ];
 
 test("WS PR/deploy workflows include required literal trigger paths", () => {
