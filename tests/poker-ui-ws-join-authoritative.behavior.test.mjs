@@ -107,6 +107,26 @@ test('poker UI autoJoin sends join payload with autoSeat + preferredSeatNo seman
   const sent = [];
   const harness = createPokerTableHarness({
     search: '?tableId=table-1&autoJoin=1&seatNo=2',
+    responses: [
+      {
+        tableId: 'table-1',
+        status: 'OPEN',
+        maxPlayers: 1,
+        seats: [],
+        legalActions: [],
+        actionConstraints: {},
+        state: { version: 1, state: { phase: 'PREFLOP', pot: 10, community: [] } },
+      },
+      {
+        tableId: 'table-1',
+        status: 'OPEN',
+        maxPlayers: 6,
+        seats: [],
+        legalActions: [],
+        actionConstraints: {},
+        state: { version: 2, state: { phase: 'PREFLOP', pot: 10, community: [] } },
+      },
+    ],
     wsFactory(){
       return {
         start(){},
@@ -122,12 +142,17 @@ test('poker UI autoJoin sends join payload with autoSeat + preferredSeatNo seman
 
   harness.elements.pokerBuyIn.value = '300';
   harness.fireDomContentLoaded();
+  await flushUntil(harness, function(){ return harness.wsCreates.length > 0; });
+  harness.fireDocumentEvent('visibilitychange');
   const joined = await flushUntil(harness, function(){ return sent.length > 0 || harness.fetchState.joinBodies.length > 0; });
 
   assert.equal(joined, true, 'auto-join should emit a join payload once baseline startup completes');
   const baselineDoneIndex = harness.timeline.findIndex((entry) => entry.kind === 'load_table_fetch_done');
   assert.ok(baselineDoneIndex >= 0, 'baseline fetch completion should be observable');
-  const payload = sent.length > 0 ? sent[0].payload : harness.fetchState.joinBodies[0];
+  assert.equal(sent.length >= 1, true, 'ws-ready auto-join must send WS join payload');
+  assert.equal(harness.fetchState.joinCalls, 0, 'ws-ready auto-join must not use HTTP join fallback');
+  assert.equal(harness.fetchState.joinBodies.length, 0, 'ws-ready auto-join must not emit HTTP join body');
+  const payload = sent[0].payload;
   assert.equal(payload.autoSeat, true);
   assert.equal(payload.preferredSeatNo, 2);
   assert.equal(payload.buyIn, 300);
@@ -137,6 +162,26 @@ test('poker UI autoJoin preferred seat has parity between authenticated startup 
   const wsSent = [];
   const wsHarness = createPokerTableHarness({
     search: '?tableId=table-1&autoJoin=1&seatNo=3',
+    responses: [
+      {
+        tableId: 'table-1',
+        status: 'OPEN',
+        maxPlayers: 1,
+        seats: [],
+        legalActions: [],
+        actionConstraints: {},
+        state: { version: 1, state: { phase: 'PREFLOP', pot: 10, community: [] } },
+      },
+      {
+        tableId: 'table-1',
+        status: 'OPEN',
+        maxPlayers: 6,
+        seats: [],
+        legalActions: [],
+        actionConstraints: {},
+        state: { version: 2, state: { phase: 'PREFLOP', pot: 10, community: [] } },
+      },
+    ],
     wsFactory(){
       return {
         start(){},
@@ -150,18 +195,44 @@ test('poker UI autoJoin preferred seat has parity between authenticated startup 
     }
   });
   wsHarness.fireDomContentLoaded();
+  await flushUntil(wsHarness, function(){ return wsHarness.wsCreates.length > 0; });
+  wsHarness.fireDocumentEvent('visibilitychange');
   const wsJoined = await flushUntil(wsHarness, function(){ return wsSent.length > 0 || wsHarness.fetchState.joinBodies.length > 0; });
 
   const httpHarness = createPokerTableHarness({
     search: '?tableId=table-1&autoJoin=1&seatNo=3',
+    responses: [
+      {
+        tableId: 'table-1',
+        status: 'OPEN',
+        maxPlayers: 1,
+        seats: [],
+        legalActions: [],
+        actionConstraints: {},
+        state: { version: 1, state: { phase: 'PREFLOP', pot: 10, community: [] } },
+      },
+      {
+        tableId: 'table-1',
+        status: 'OPEN',
+        maxPlayers: 6,
+        seats: [],
+        legalActions: [],
+        actionConstraints: {},
+        state: { version: 2, state: { phase: 'PREFLOP', pot: 10, community: [] } },
+      },
+    ],
     disableWsClient: true
   });
   httpHarness.fireDomContentLoaded();
+  httpHarness.fireDocumentEvent('visibilitychange');
   const httpJoined = await flushUntil(httpHarness, function(){ return httpHarness.fetchState.joinBodies.length > 0; });
 
   assert.equal(wsJoined, true, 'authenticated startup auto-join should emit a join payload');
   assert.equal(httpJoined, true, 'http fallback auto-join should emit a join payload');
-  const startupPayload = wsSent.length > 0 ? wsSent[0] : wsHarness.fetchState.joinBodies[0];
+  assert.equal(wsSent.length >= 1, true, 'ws-ready auto-join must produce WS payload');
+  assert.equal(wsHarness.fetchState.joinCalls, 0, 'ws-ready auto-join must not call HTTP join');
+  assert.equal(wsHarness.fetchState.joinBodies.length, 0, 'ws-ready auto-join must not produce HTTP join body');
+  const startupPayload = wsSent[0];
   assert.equal(startupPayload.autoSeat, true);
   assert.equal(httpHarness.fetchState.joinBodies[0].autoSeat, true);
   assert.equal(startupPayload.preferredSeatNo, 3);

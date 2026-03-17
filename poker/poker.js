@@ -1303,6 +1303,7 @@
       if (!loaded || !tableData || typeof tableData !== 'object') return false;
       try {
         startWsBootstrap();
+        maybeAutoJoin();
       } catch (_err){
         logWsBootstrapException(_err, phase || 'ws_bootstrap');
         startPollingFallback('ws_bootstrap_exception');
@@ -2092,7 +2093,10 @@
           lastAutoStartSeatCount = seatedCount;
           maybeAutoStartHand();
         }
-        maybeAutoJoin();
+        var wsClientConfigured = !!(window.PokerWsClient && typeof window.PokerWsClient.create === 'function');
+        if (!wsClientConfigured || wsStarted){
+          maybeAutoJoin();
+        }
         if (isPolling){ resetPollBackoff(); }
         return true;
       } catch (err){
