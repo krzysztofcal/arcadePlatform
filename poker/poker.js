@@ -1265,6 +1265,9 @@
             code: data && data.code ? data.code : null,
             reason: data && data.reason ? data.reason : null
           });
+          if (status === 'auth_ok'){
+            maybeAutoJoin();
+          }
         },
         onSnapshot: function(snapshot){
           applyWsSnapshot(snapshot);
@@ -1303,7 +1306,6 @@
       if (!loaded || !tableData || typeof tableData !== 'object') return false;
       try {
         startWsBootstrap();
-        maybeAutoJoin();
       } catch (_err){
         logWsBootstrapException(_err, phase || 'ws_bootstrap');
         startPollingFallback('ws_bootstrap_exception');
@@ -2094,7 +2096,8 @@
           maybeAutoStartHand();
         }
         var wsClientConfigured = !!(window.PokerWsClient && typeof window.PokerWsClient.create === 'function');
-        if (!wsClientConfigured || wsStarted){
+        var wsReady = !!(wsClient && typeof wsClient.isReady === 'function' && wsClient.isReady());
+        if (!wsClientConfigured || wsReady || state.polling){
           maybeAutoJoin();
         }
         if (isPolling){ resetPollBackoff(); }

@@ -127,9 +127,13 @@ test('poker UI autoJoin sends join payload with autoSeat + preferredSeatNo seman
         state: { version: 2, state: { phase: 'PREFLOP', pot: 10, community: [] } },
       },
     ],
-    wsFactory(){
+    wsFactory(createOptions){
       return {
-        start(){},
+        start(){
+          Promise.resolve().then(function(){
+            if (typeof createOptions.onStatus === 'function') createOptions.onStatus('auth_ok', { roomId: 'table-1' });
+          });
+        },
         destroy(){},
         isReady(){ return true; },
         sendJoin(payload, requestId){
@@ -142,8 +146,6 @@ test('poker UI autoJoin sends join payload with autoSeat + preferredSeatNo seman
 
   harness.elements.pokerBuyIn.value = '300';
   harness.fireDomContentLoaded();
-  await flushUntil(harness, function(){ return harness.wsCreates.length > 0; });
-  harness.fireDocumentEvent('visibilitychange');
   const joined = await flushUntil(harness, function(){ return sent.length > 0 || harness.fetchState.joinBodies.length > 0; });
 
   assert.equal(joined, true, 'auto-join should emit a join payload once baseline startup completes');
@@ -182,9 +184,13 @@ test('poker UI autoJoin preferred seat has parity between authenticated startup 
         state: { version: 2, state: { phase: 'PREFLOP', pot: 10, community: [] } },
       },
     ],
-    wsFactory(){
+    wsFactory(createOptions){
       return {
-        start(){},
+        start(){
+          Promise.resolve().then(function(){
+            if (typeof createOptions.onStatus === 'function') createOptions.onStatus('auth_ok', { roomId: 'table-1' });
+          });
+        },
         destroy(){},
         isReady(){ return true; },
         sendJoin(payload){
@@ -195,8 +201,6 @@ test('poker UI autoJoin preferred seat has parity between authenticated startup 
     }
   });
   wsHarness.fireDomContentLoaded();
-  await flushUntil(wsHarness, function(){ return wsHarness.wsCreates.length > 0; });
-  wsHarness.fireDocumentEvent('visibilitychange');
   const wsJoined = await flushUntil(wsHarness, function(){ return wsSent.length > 0 || wsHarness.fetchState.joinBodies.length > 0; });
 
   const httpHarness = createPokerTableHarness({
@@ -224,7 +228,6 @@ test('poker UI autoJoin preferred seat has parity between authenticated startup 
     disableWsClient: true
   });
   httpHarness.fireDomContentLoaded();
-  httpHarness.fireDocumentEvent('visibilitychange');
   const httpJoined = await flushUntil(httpHarness, function(){ return httpHarness.fetchState.joinBodies.length > 0; });
 
   assert.equal(wsJoined, true, 'authenticated startup auto-join should emit a join payload');
