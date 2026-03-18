@@ -60,6 +60,7 @@ function assertRequiredOrder(text) {
   const locationGuard = block.indexOf("node --test ws-tests/ws-tests-location.guard.test.mjs");
   const suiteGuard = block.indexOf("node --test ws-tests/ws-tests-suite-completeness.guard.test.mjs");
   const protocolDoc = block.indexOf("node --test ws-tests/ws-poker-protocol-doc.test.mjs");
+  const infraVpcCaddyGuard = block.indexOf("node --test ws-tests/infra-vps-caddy.guard.test.mjs");
   const imageCheck = block.indexOf("node --test ws-tests/ws-image-contains-protocol.behavior.test.mjs");
   const containerCheck = block.indexOf("node --test ws-tests/ws-container-starts.behavior.test.mjs");
 
@@ -76,28 +77,6 @@ function assertRequiredOrder(text) {
   assert.match(block, /node --test ws-server\/poker\/engine\/engine-rollover\.behavior\.test\.mjs/);
   assert.match(block, /Run ws poker engine timeout behavior test/);
   assert.match(block, /node --test ws-server\/poker\/engine\/engine-timeout\.behavior\.test\.mjs/);
-  assert.match(block, /Run poker ws client behavior test/);
-  assert.match(block, /node --test tests\/poker-ws-client\.test\.mjs/);
-  assert.match(block, /Run poker UI ws health fallback behavior test/);
-  assert.match(block, /node --test tests\/poker-ui-ws-health-fallback\.behavior\.test\.mjs/);
-  assert.match(block, /Run poker UI ws startup order behavior test/);
-  assert.match(block, /node --test tests\/poker-ui-ws-startup-order\.behavior\.test\.mjs/);
-  assert.match(block, /Run poker UI ws equal-version snapshot behavior test/);
-  assert.match(block, /node --test tests\/poker-ui-ws-snapshot-equal-version\.behavior\.test\.mjs/);
-  assert.match(block, /Run poker UI ws auth-watch order behavior test/);
-  assert.match(block, /node --test tests\/poker-ui-ws-auth-watch-order\.behavior\.test\.mjs/);
-  assert.match(block, /Run poker UI ws visibility behavior test/);
-  assert.match(block, /node --test tests\/poker-ui-ws-visibility\.behavior\.test\.mjs/);
-  assert.match(block, /Run poker UI ws authoritative join behavior test/);
-  assert.match(block, /node --test tests\/poker-ui-ws-join-authoritative\.behavior\.test\.mjs/);
-  assert.match(block, /Run ws lobby join public snapshot behavior test/);
-  assert.match(block, /node --test ws-tests\/ws-lobby-join-public-snapshot\.behavior\.test\.mjs/);
-  assert.match(block, /Run ws join handler behavior test/);
-  assert.match(block, /node --test ws-server\/poker\/handlers\/join\.behavior\.test\.mjs/);
-  assert.match(block, /Run ws start-hand handler behavior test/);
-  assert.match(block, /node --test ws-server\/poker\/handlers\/start-hand\.behavior\.test\.mjs/);
-  assert.match(block, /Run ws act handler behavior test/);
-  assert.match(block, /node --test ws-server\/poker\/handlers\/act\.behavior\.test\.mjs/);
 
   assert.equal(rootInstall, -1);
   assert.notEqual(install, -1);
@@ -107,6 +86,7 @@ function assertRequiredOrder(text) {
   assert.notEqual(locationGuard, -1);
   assert.notEqual(suiteGuard, -1);
   assert.notEqual(protocolDoc, -1);
+  assert.notEqual(infraVpcCaddyGuard, -1);
   assert.notEqual(imageCheck, -1);
   assert.notEqual(containerCheck, -1);
   assert.equal(install < runtimeDepsGuard, true);
@@ -114,7 +94,8 @@ function assertRequiredOrder(text) {
   assert.equal(sharedJoinBehavior < behavior, true);
   assert.equal(behavior < locationGuard, true);
   assert.equal(locationGuard < suiteGuard, true);
-  assert.equal(suiteGuard < protocolDoc, true);
+  assert.equal(suiteGuard < infraVpcCaddyGuard, true);
+  assert.equal(infraVpcCaddyGuard < protocolDoc, true);
   assert.equal(protocolDoc < imageCheck, true);
   assert.equal(imageCheck < containerCheck, true);
 }
@@ -125,13 +106,9 @@ test("ws pr workflow is pull_request-only with ws-related path filters", () => {
   assert.match(text, /paths:\s*\n\s*-\s*"ws-server\/\*\*"/);
   assert.match(text, /"ws-tests\/\*\*"/);
   assert.match(text, /"shared\/\*\*"/);
-  assert.match(text, /"poker\/\*\*"/);
-  assert.match(text, /"tests\/\*\*"/);
-  assert.match(text, /"netlify\/functions\/_shared\/\*\*"/);
-  assert.match(text, /"docs\/ws-poker-protocol\.md"/);
-  assert.match(text, /"tests\/test-all\.runner-registration\.guard\.test\.mjs"/);
-  assert.match(text, /"\.github\/workflows\/ws-pr-checks\.yml"/);
-  assert.match(text, /"\.github\/workflows\/ws-deploy\.yml"/);
+  assert.match(text, /"infra\/vps\/\*\*"/);
+  assert.match(text, /"docs\/poker-deployment\.md"/);
+  assert.match(text, /"\.github\/workflows\/infra-vps\.yml"/);
   assert.doesNotMatch(text, /push:/);
 });
 

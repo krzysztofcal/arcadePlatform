@@ -1,0 +1,238 @@
+name: WS Preview Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Git ref to deploy to the preview WS host
+        required: true
+        type: string
+
+concurrency:
+  group: ws-preview-deploy-${{ inputs.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout workflow ref
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Validate preview dispatch inputs and secrets
+        env:
+          PREVIEW_WS_HOST: ${{ secrets.WS_PREVIEW_HOST }}
+          PREVIEW_WS_USER: ${{ secrets.WS_PREVIEW_USER }}
+          PREVIEW_WS_SSH_KEY: ${{ secrets.WS_PREVIEW_SSH_KEY }}
+        run: |
+          set -euo pipefail
+
+          test -n "${{ inputs.ref }}"
+          test -n "$PREVIEW_WS_HOST"
+          test -n "$PREVIEW_WS_USER"
+          test -n "$PREVIEW_WS_SSH_KEY"
+
+      - name: Run preview workflow guard tests
+        run: |
+          set -euo pipefail
+          node --test ws-tests/ws-preview-deploy.workflow.guard.test.mjs
+          node --test ws-tests/ws-preview-deploy.remote-shape.guard.test.mjs
+
+  deploy:
+    needs: validate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      PREVIEW_ARTIFACT_DIR: ${{ github.workspace }}/.artifacts/ws-preview
+      PREVIEW_ARTIFACT_FILE: ${{ github.workspace }}/.artifacts/ws-preview/ws-preview-dist.tgz
+      PREVIEW_STAGE_DIR: ${{ github.workspace }}/.artifacts/ws-preview/stage
+      PREVIEW_REMOTE_TMP_DIR: /tmp/arcadeplatform-ws-preview
+      PREVIEW_BASE_DIR: /opt/arcade-ws-preview
+      PREVIEW_APP_DIR: /opt/arcade-ws-preview/ws-server
+      PREVIEW_ENV_FILE: /opt/arcade-ws-preview/.env.preview
+      PREVIEW_HOST: ws-preview.kcswh.pl
+      PREVIEW_LOCAL_HEALTHZ_URL: http://127.0.0.1:3001/healthz
+      PREVIEW_PUBLIC_HEALTHZ_URL: https://ws-preview.kcswh.pl/healthz
+      PREVIEW_SERVICE_NAME: ws-server-preview.service
+      PREVIEW_PORT: '3001'
+    steps:
+      - name: Checkout deploy target ref
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Resolve selected ref SHA
+        id: selected_ref
+        run: |
+          set -euo pipefail
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Build and package preview ws-server artifact
+        run: |
+          set -euo pipefail
+
+          rm -rf "$PREVIEW_ARTIFACT_DIR"
+          mkdir -p "$PREVIEW_STAGE_DIR"
+
+          npm ci --prefix ws-server
+          npm run --prefix ws-server build --if-present
+
+          rm -rf ws-server/node_modules
+          npm ci --prefix ws-server --omit=dev
+
+          cp ws-server/package.json "$PREVIEW_STAGE_DIR"/
+          cp ws-server/package-lock.json "$PREVIEW_STAGE_DIR"/
+          cp -R ws-server/node_modules "$PREVIEW_STAGE_DIR"/node_modules
+
+          if [ -d ws-server/dist ]; then
+            cp -R ws-server/dist "$PREVIEW_STAGE_DIR"/dist
+          fi
+
+          if [ -f ws-server/server.mjs ]; then
+            cp ws-server/server.mjs "$PREVIEW_STAGE_DIR"/
+          fi
+
+          if [ -d ws-server/poker ]; then
+            cp -R ws-server/poker "$PREVIEW_STAGE_DIR"/poker
+          fi
+
+          if [ -d shared/poker-domain ]; then
+            mkdir -p "$PREVIEW_STAGE_DIR"/shared
+            cp -R shared/poker-domain "$PREVIEW_STAGE_DIR"/shared/poker-domain
+          fi
+
+          if [ -d netlify/functions/_shared ]; then
+            mkdir -p "$PREVIEW_STAGE_DIR"/netlify/functions/_shared
+            cp netlify/functions/_shared/chips-ledger.mjs "$PREVIEW_STAGE_DIR"/netlify/functions/_shared/
+            cp netlify/functions/_shared/poker-*.mjs "$PREVIEW_STAGE_DIR"/netlify/functions/_shared/
+            cp netlify/functions/_shared/supabase-admin.mjs "$PREVIEW_STAGE_DIR"/netlify/functions/_shared/
+          fi
+
+          tar \
+            --sort=name \
+            --mtime='UTC 1970-01-01' \
+            --owner=0 \
+            --group=0 \
+            --numeric-owner \
+            -czf "$PREVIEW_ARTIFACT_FILE" \
+            -C "$PREVIEW_STAGE_DIR" \
+            .
+
+      - name: Upload preview artifact to preview VPS
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.WS_PREVIEW_HOST }}
+          username: ${{ secrets.WS_PREVIEW_USER }}
+          key: ${{ secrets.WS_PREVIEW_SSH_KEY }}
+          source: .artifacts/ws-preview/ws-preview-dist.tgz
+          target: /tmp/arcadeplatform-ws-preview
+
+      - name: Atomic preview release switch + restart + health gates on preview VPS
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          RELEASE_SHA: ${{ steps.selected_ref.outputs.sha }}
+          DEPLOY_REF: ${{ inputs.ref }}
+          PREVIEW_BASE_DIR: ${{ env.PREVIEW_BASE_DIR }}
+          PREVIEW_APP_DIR: ${{ env.PREVIEW_APP_DIR }}
+          PREVIEW_ENV_FILE: ${{ env.PREVIEW_ENV_FILE }}
+          PREVIEW_HOST: ${{ env.PREVIEW_HOST }}
+          PREVIEW_LOCAL_HEALTHZ_URL: ${{ env.PREVIEW_LOCAL_HEALTHZ_URL }}
+          PREVIEW_PUBLIC_HEALTHZ_URL: ${{ env.PREVIEW_PUBLIC_HEALTHZ_URL }}
+          PREVIEW_SERVICE_NAME: ${{ env.PREVIEW_SERVICE_NAME }}
+          PREVIEW_REMOTE_TMP_DIR: ${{ env.PREVIEW_REMOTE_TMP_DIR }}
+          PREVIEW_PORT: ${{ env.PREVIEW_PORT }}
+        with:
+          host: ${{ secrets.WS_PREVIEW_HOST }}
+          username: ${{ secrets.WS_PREVIEW_USER }}
+          key: ${{ secrets.WS_PREVIEW_SSH_KEY }}
+          timeout: 2m
+          command_timeout: 20m
+          envs: RELEASE_SHA,DEPLOY_REF,PREVIEW_BASE_DIR,PREVIEW_APP_DIR,PREVIEW_ENV_FILE,PREVIEW_HOST,PREVIEW_LOCAL_HEALTHZ_URL,PREVIEW_PUBLIC_HEALTHZ_URL,PREVIEW_SERVICE_NAME,PREVIEW_REMOTE_TMP_DIR,PREVIEW_PORT
+          script: |
+            set -eu
+            if ! command -v bash >/dev/null 2>&1; then
+              echo "bash is required on preview VPS"
+              exit 1
+            fi
+
+            bash <<'BASH'
+            set -Eeuo pipefail
+
+            TMP_ARCHIVE="$PREVIEW_REMOTE_TMP_DIR/.artifacts/ws-preview/ws-preview-dist.tgz"
+            TMP_EXTRACT_DIR="$PREVIEW_REMOTE_TMP_DIR/extract-$RELEASE_SHA"
+            HEALTH_RETRIES=30
+            HEALTH_SLEEP_SEC=1
+
+            command -v node >/dev/null 2>&1 || { echo "preview VPS missing nodejs"; exit 1; }
+            command -v systemctl >/dev/null 2>&1 || { echo "preview VPS missing systemctl"; exit 1; }
+            command -v curl >/dev/null 2>&1 || { echo "preview VPS missing curl"; exit 1; }
+            command -v tar >/dev/null 2>&1 || { echo "preview VPS missing tar"; exit 1; }
+            command -v rsync >/dev/null 2>&1 || { echo "preview VPS missing rsync"; exit 1; }
+
+            sudo -n systemctl cat "$PREVIEW_SERVICE_NAME" >/dev/null 2>&1 || { echo "missing preview systemd unit: $PREVIEW_SERVICE_NAME"; exit 1; }
+            sudo -n test -d "$PREVIEW_BASE_DIR" || { echo "missing preview base dir: $PREVIEW_BASE_DIR"; exit 1; }
+            sudo -n test -d "$PREVIEW_APP_DIR" || { echo "missing preview app dir: $PREVIEW_APP_DIR"; exit 1; }
+            sudo -n test -f "$PREVIEW_ENV_FILE" || { echo "missing preview env file: $PREVIEW_ENV_FILE"; exit 1; }
+            sudo -n grep -Eq '^PORT=3001$' "$PREVIEW_ENV_FILE" || { echo "preview env file must define PORT=3001"; exit 1; }
+
+            test -f "$TMP_ARCHIVE"
+
+            cleanup() {
+              sudo -n rm -rf "$TMP_EXTRACT_DIR"
+            }
+
+            trap cleanup EXIT
+
+            sudo -n rm -rf "$TMP_EXTRACT_DIR"
+            sudo -n mkdir -p "$TMP_EXTRACT_DIR"
+            sudo -n tar -xzf "$TMP_ARCHIVE" -C "$TMP_EXTRACT_DIR"
+            sudo -n test -f "$TMP_EXTRACT_DIR/server.mjs"
+
+            sudo -n rsync -a --delete "$TMP_EXTRACT_DIR"/ "$PREVIEW_APP_DIR"/
+
+            sudo -n systemctl restart "$PREVIEW_SERVICE_NAME"
+
+            LOCAL_HEALTHZ_BODY=""
+            for i in $(seq 1 "$HEALTH_RETRIES"); do
+              if LOCAL_HEALTHZ_BODY="$(curl -fsS "$PREVIEW_LOCAL_HEALTHZ_URL" 2>/dev/null | tr -d '\r\n')" && [ "$LOCAL_HEALTHZ_BODY" = "ok" ]; then
+                break
+              fi
+              if [ "$i" -eq "$HEALTH_RETRIES" ]; then
+                echo "preview local healthz failed for $DEPLOY_REF on port $PREVIEW_PORT"
+                false
+              fi
+              sleep "$HEALTH_SLEEP_SEC"
+            done
+
+            PUBLIC_HEALTHZ_BODY=""
+            for i in $(seq 1 "$HEALTH_RETRIES"); do
+              if PUBLIC_HEALTHZ_BODY="$(curl -fsS "$PREVIEW_PUBLIC_HEALTHZ_URL" 2>/dev/null | tr -d '\r\n')" && [ "$PUBLIC_HEALTHZ_BODY" = "ok" ]; then
+                break
+              fi
+              if [ "$i" -eq "$HEALTH_RETRIES" ]; then
+                echo "preview public healthz failed for $PREVIEW_HOST"
+                false
+              fi
+              sleep "$HEALTH_SLEEP_SEC"
+            done
+
+            trap - EXIT
+            cleanup
+            BASH
+            rc=$?
+            if [ "$rc" != "0" ]; then
+              exit "$rc"
+            fi

@@ -1,0 +1,15 @@
+[Unit]
+Description=ArcadePlatform WS Preview Server
+After=network.target
+
+[Service]
+Type=simple
+User=arcade
+WorkingDirectory=/opt/arcade-ws-preview/ws-server
+EnvironmentFile=/opt/arcade-ws-preview/.env.preview
+ExecStart=/usr/bin/node server.mjs
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

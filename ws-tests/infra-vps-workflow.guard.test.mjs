@@ -23,6 +23,14 @@ test("infra VPS workflow keeps infra/vps path filters", () => {
   assert.ok(text.includes('"infra/vps/**"'));
 });
 
+test("infra VPS guard coverage includes the unified Caddy contract test", () => {
+  const prWorkflow = fs.readFileSync(".github/workflows/ws-pr-checks.yml", "utf8");
+  assert.ok(prWorkflow.includes('"infra/vps/**"'));
+  assert.ok(prWorkflow.includes('"docs/poker-deployment.md"'));
+  assert.ok(prWorkflow.includes('".github/workflows/infra-vps.yml"'));
+  assert.ok(prWorkflow.includes("node --test ws-tests/infra-vps-caddy.guard.test.mjs"));
+});
+
 test("infra VPS workflow keeps contents: read permissions", () => {
   const text = workflowText();
   const validateBlock = text.slice(text.indexOf("  validate:"), text.indexOf("  apply:"));

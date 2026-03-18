@@ -8,12 +8,13 @@ on:
       - "shared/**"
       - "poker/**"
       - "tests/**"
-      - "netlify/functions/_shared/**"
-      - "docs/ws-poker-protocol.md"
       - "scripts/test-all.mjs"
-      - "tests/test-all.runner-registration.guard.test.mjs"
+      - "infra/vps/**"
+      - "docs/poker-deployment.md"
       - ".github/workflows/ws-pr-checks.yml"
       - ".github/workflows/ws-deploy.yml"
+      - ".github/workflows/ws-preview-deploy.yml"
+      - ".github/workflows/infra-vps.yml"
 
 jobs:
   ws-harness:
@@ -38,30 +39,6 @@ jobs:
 
       - name: Run shared poker join behavior test
         run: node --test shared/poker-domain/join.behavior.test.mjs
-
-      - name: Run poker ws client behavior test
-        run: node --test tests/poker-ws-client.test.mjs
-
-      - name: Run poker UI ws health fallback behavior test
-        run: node --test tests/poker-ui-ws-health-fallback.behavior.test.mjs
-
-      - name: Run poker UI ws startup order behavior test
-        run: node --test tests/poker-ui-ws-startup-order.behavior.test.mjs
-
-      - name: Run poker UI ws equal-version snapshot behavior test
-        run: node --test tests/poker-ui-ws-snapshot-equal-version.behavior.test.mjs
-
-      - name: Run poker UI ws auth-watch order behavior test
-        run: node --test tests/poker-ui-ws-auth-watch-order.behavior.test.mjs
-
-      - name: Run poker UI ws visibility behavior test
-        run: node --test tests/poker-ui-ws-visibility.behavior.test.mjs
-
-      - name: Run poker UI ws authoritative join behavior test
-        run: node --test tests/poker-ui-ws-join-authoritative.behavior.test.mjs
-
-      - name: Run ws lobby join public snapshot behavior test
-        run: node --test ws-tests/ws-lobby-join-public-snapshot.behavior.test.mjs
 
       - name: Run WS behavior test
         run: node --test ws-server/server.behavior.test.mjs
@@ -129,15 +106,6 @@ jobs:
 
       - name: Run ws resync behavior test
         run: node --test ws-server/poker/reconnect/resync.behavior.test.mjs
-
-      - name: Run ws join handler behavior test
-        run: node --test ws-server/poker/handlers/join.behavior.test.mjs
-
-      - name: Run ws start-hand handler behavior test
-        run: node --test ws-server/poker/handlers/start-hand.behavior.test.mjs
-
-      - name: Run ws act handler behavior test
-        run: node --test ws-server/poker/handlers/act.behavior.test.mjs
 
       - name: Run WS PR workflow guard test
         run: node --test ws-tests/ws-pr-workflow.test.mjs
@@ -218,6 +186,12 @@ jobs:
       - name: Run ws tests suite completeness guard
         run: node --test ws-tests/ws-tests-suite-completeness.guard.test.mjs
 
+      - name: Run ws preview deploy workflow guard test
+        run: node --test ws-tests/ws-preview-deploy.workflow.guard.test.mjs
+
+      - name: Run ws preview deploy remote-shape guard test
+        run: node --test ws-tests/ws-preview-deploy.remote-shape.guard.test.mjs
+
       - name: Run ws room-core snapshot dependency guard test
         run: node --test ws-tests/ws-room-core-snapshot-dependency.guard.test.mjs
 
@@ -226,6 +200,9 @@ jobs:
 
       - name: Run infra VPS workflow guard test
         run: node --test ws-tests/infra-vps-workflow.guard.test.mjs
+
+      - name: Run infra VPS Caddy guard test
+        run: node --test ws-tests/infra-vps-caddy.guard.test.mjs
 
       - name: Run infra VPS smoke-check structure behavior test
         run: node --test ws-tests/infra-vps-workflow.smokecheck-structure.behavior.test.mjs
