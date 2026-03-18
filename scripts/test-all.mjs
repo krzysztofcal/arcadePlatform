@@ -158,6 +158,7 @@ run("node", ["tests/poker-ui-ws-snapshot-equal-version.behavior.test.mjs"], "pok
 run("node", ["tests/poker-ui-ws-auth-watch-order.behavior.test.mjs"], "poker-ui-ws-auth-watch-order-behavior");
 run("node", ["tests/poker-ui-ws-visibility.behavior.test.mjs"], "poker-ui-ws-visibility-behavior");
 run("node", ["tests/poker-ui-ws-join-authoritative.behavior.test.mjs"], "poker-ui-ws-join-authoritative-behavior");
+run("node", ["ws-tests/ws-lobby-join-public-snapshot.behavior.test.mjs"], "ws-lobby-join-public-snapshot-behavior");
 run("node", ["tests/i18n.behavior.test.mjs"], "i18n-behavior");
 run("node", ["tests/static-html.behavior.test.mjs"], "static-html-behavior");
 run("node", ["tests/poker-ui-stopPendingAll.guard.test.mjs"], "poker-ui-stopPendingAll-guard");

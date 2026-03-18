@@ -11,6 +11,12 @@ async function flushUntil(harness, predicate, maxCycles){
   return predicate();
 }
 
+
+function findRenderedSeatByUserId(harness, userId){
+  return harness.elements.pokerSeatsGrid.children.find(function(seat){
+    return !!(seat && seat.children && seat.children[1] && seat.children[1].textContent === userId);
+  }) || null;
+}
 test('poker UI join sends WS join payload with seatNo + buyIn semantics', async () => {
   const sent = [];
   const harness = createPokerTableHarness({
@@ -332,6 +338,142 @@ test('poker UI auto-seat accepted result keeps 1-based seat value', async () => 
   assert.equal(harness.elements.pokerSeatNo.value, '2');
 });
 
+
+
+test('poker UI healthy WS join success does not trigger post-success HTTP reload', async () => {
+  let snapshotHandler = null;
+  let resolveJoin = null;
+  const harness = createPokerTableHarness({
+    responses: [
+      {
+        tableId: 'table-1',
+        status: 'OPEN',
+        maxPlayers: 6,
+        seats: [
+          { seatNo: 0, userId: null, status: 'EMPTY', stack: 100 },
+          { seatNo: 1, userId: null, status: 'EMPTY', stack: 100 }
+        ],
+        legalActions: [],
+        actionConstraints: {},
+        state: { version: 0, state: {} },
+      }
+    ],
+    wsFactory(createOptions){
+      snapshotHandler = createOptions.onSnapshot;
+      return {
+        start(){
+          Promise.resolve().then(function(){
+            if (typeof createOptions.onStatus === 'function') createOptions.onStatus('auth_ok', { roomId: 'table-1' });
+          });
+        },
+        destroy(){},
+        isReady(){ return true; },
+        sendJoin(){
+          return new Promise(function(resolve){
+            resolveJoin = resolve;
+          });
+        }
+      };
+    }
+  });
+
+  harness.fireDomContentLoaded();
+  await flushUntil(harness, function(){ return typeof snapshotHandler === 'function' && harness.fetchState.getCalls === 1; });
+  harness.elements.pokerSeatNo.value = '2';
+  harness.elements.pokerBuyIn.value = '220';
+  harness.elements.pokerJoin.click();
+  await harness.flush();
+
+  snapshotHandler({
+    kind: 'table_state',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 1,
+      memberCount: 1,
+      maxSeats: 6,
+      youSeat: 1,
+      seats: [{ seatNo: 1, userId: 'user-1', status: 'ACTIVE' }],
+      stacks: { 'user-1': 220 },
+      authoritativeMembers: [{ userId: 'user-1', seat: 1 }],
+      hand: { status: 'LOBBY' }
+    }
+  });
+  resolveJoin({ ok: true, seatNo: 2 });
+  await harness.flush();
+  await harness.flush();
+
+  assert.equal(harness.fetchState.joinCalls, 0, 'healthy ws join should not fall back to HTTP join');
+  assert.equal(String(harness.elements.pokerVersion.textContent), '1', 'fresh ws join should render the bumped authoritative version');
+  assert.equal(harness.fetchState.getCalls, 1, 'healthy ws join should not trigger an extra loadTable(false) after join success');
+  assert.ok(findRenderedSeatByUserId(harness, 'user-1'), 'healthy ws join should keep the current user rendered as seated');
+  assert.equal(harness.elements.pokerYourStack.textContent, '220', 'healthy ws join should render stack from authoritative ws snapshot');
+});
+
+test('poker UI healthy WS join keeps seated render stable after async completion', async () => {
+  let snapshotHandler = null;
+  const harness = createPokerTableHarness({
+    responses: [
+      {
+        tableId: 'table-1',
+        status: 'OPEN',
+        maxPlayers: 6,
+        seats: [
+          { seatNo: 0, userId: null, status: 'EMPTY', stack: 100 },
+          { seatNo: 1, userId: null, status: 'EMPTY', stack: 100 }
+        ],
+        legalActions: [],
+        actionConstraints: {},
+        state: { version: 0, state: {} },
+      }
+    ],
+    wsFactory(createOptions){
+      snapshotHandler = createOptions.onSnapshot;
+      return {
+        start(){
+          Promise.resolve().then(function(){
+            if (typeof createOptions.onStatus === 'function') createOptions.onStatus('auth_ok', { roomId: 'table-1' });
+          });
+        },
+        destroy(){},
+        isReady(){ return true; },
+        sendJoin(){
+          return Promise.resolve({ ok: true, seatNo: 2 });
+        }
+      };
+    }
+  });
+
+  harness.fireDomContentLoaded();
+  await flushUntil(harness, function(){ return typeof snapshotHandler === 'function' && harness.fetchState.getCalls === 1; });
+  harness.elements.pokerSeatNo.value = '2';
+  harness.elements.pokerBuyIn.value = '175';
+  harness.elements.pokerJoin.click();
+  await harness.flush();
+
+  snapshotHandler({
+    kind: 'table_state',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 1,
+      memberCount: 1,
+      maxSeats: 6,
+      youSeat: 1,
+      seats: [{ seatNo: 1, userId: 'user-1', status: 'ACTIVE' }],
+      stacks: { 'user-1': 175 },
+      authoritativeMembers: [{ userId: 'user-1', seat: 1 }],
+      hand: { status: 'LOBBY' }
+    }
+  });
+  await harness.flush();
+  await harness.flush();
+
+  assert.equal(String(harness.elements.pokerVersion.textContent), '1', 'fresh ws join should converge on a newer authoritative version');
+  assert.ok(findRenderedSeatByUserId(harness, 'user-1'), 'joined user should stay rendered after ws join settles');
+  assert.equal(harness.elements.pokerYourStack.textContent, '175', 'joined user stack should come from ws public stack data');
+  assert.equal(harness.logs.some((entry) => entry.kind === 'poker_stack_missing_for_seated_user'), false, 'healthy ws join should not log missing stack diagnostics');
+  assert.equal(harness.fetchState.getCalls, 1, 'healthy ws join should stay on the ws-authoritative path after async completion');
+});
+
 test('poker UI accepts same-version authoritative reconnect snapshot for joined seat state without HTTP fallback', async () => {
   let snapshotHandler = null;
   const harness = createPokerTableHarness({
@@ -346,7 +488,7 @@ test('poker UI accepts same-version authoritative reconnect snapshot for joined 
         ],
         legalActions: [],
         actionConstraints: {},
-        state: { version: 1, state: { phase: 'PREFLOP', pot: 10, community: [] } },
+        state: { version: 0, state: {} },
       }
     ],
     wsFactory(createOptions){
@@ -373,17 +515,21 @@ test('poker UI accepts same-version authoritative reconnect snapshot for joined 
     kind: 'table_state',
     payload: {
       tableId: 'table-1',
-      stateVersion: 1,
+      stateVersion: 0,
+      memberCount: 1,
+      maxSeats: 6,
       youSeat: 1,
+      seats: [{ seatNo: 1, userId: 'user-1', status: 'ACTIVE' }],
+      stacks: { 'user-1': 100 },
       authoritativeMembers: [{ userId: 'user-1', seat: 1 }],
-      hand: { status: 'PREFLOP' }
+      hand: { status: 'LOBBY' }
     }
   });
   await harness.flush();
 
-  assert.equal(String(harness.elements.pokerVersion.textContent), '1');
-  assert.equal(harness.elements.pokerYourStack.textContent, '0');
+  assert.equal(String(harness.elements.pokerVersion.textContent), '0');
+  assert.equal(harness.elements.pokerYourStack.textContent, '100');
   assert.equal(harness.fetchState.joinCalls, 0, 'healthy ws reconnect snapshot must not trigger HTTP join fallback');
   assert.equal(harness.logs.some((entry) => entry.kind === 'poker_http_fallback_start'), false, 'healthy ws reconnect snapshot must not activate fallback');
-  assert.equal(harness.logs.some((entry) => entry.kind === 'poker_ws_snapshot_ignored' && entry.data && entry.data.incomingStateVersion === 1 && entry.data.currentStateVersion === 1), false, 'material same-version reconnect snapshot must not be ignored as stale');
+  assert.equal(harness.logs.some((entry) => entry.kind === 'poker_ws_snapshot_ignored' && entry.data && entry.data.incomingStateVersion === 0 && entry.data.currentStateVersion === 0), false, 'material same-version reconnect snapshot must not be ignored as stale');
 });

@@ -19,7 +19,7 @@ function makeBaselineResponse(seats){
     seats: Array.isArray(seats) ? seats : [],
     legalActions: [],
     actionConstraints: {},
-    state: { version: 1, state: { phase: 'PREFLOP', pot: 10, community: [] } }
+    state: { version: 0, state: {} }
   };
 }
 
@@ -73,15 +73,20 @@ test('equal-version snapshot that improves joined seat render is accepted and re
 
   setup.emitSnapshot({
     tableId: 'table-1',
-    stateVersion: 1,
+    stateVersion: 0,
+    memberCount: 1,
+    maxSeats: 6,
     youSeat: 1,
+    seats: [{ seatNo: 1, userId: 'user-1', status: 'ACTIVE' }],
+    stacks: { 'user-1': 100 },
     authoritativeMembers: [{ userId: 'user-1', seat: 1 }],
-    hand: { status: 'PREFLOP' }
+    hand: { status: 'LOBBY' }
   });
   await harness.flush();
 
-  assert.equal(Number(harness.elements.pokerVersion.textContent), 1);
+  assert.equal(Number(harness.elements.pokerVersion.textContent), 0);
   assert.ok(findRenderedSeatByUserId(harness, 'user-1'), 'expected joined seat row to render from same-version snapshot');
+  assert.equal(harness.elements.pokerYourStack.textContent, '100', 'material same-version snapshot should merge stack data for the seated user');
   assert.equal(harness.elements.pokerSeatsGrid.children.length, baselineSeatRenderCount + 6, 'accepted snapshot should produce one additional table render');
   assert.equal(harness.fetchState.joinCalls, 0, 'healthy WS snapshot must not trigger HTTP join fallback');
   assert.equal(harness.logs.some((entry) => entry.kind === 'poker_http_fallback_start'), false, 'healthy WS snapshot must not activate HTTP fallback');
@@ -100,16 +105,20 @@ test('equal-version snapshot without joined seat improvement is ignored', async 
 
   setup.emitSnapshot({
     tableId: 'table-1',
-    stateVersion: 1,
+    stateVersion: 0,
+    memberCount: 1,
+    maxSeats: 6,
     youSeat: 1,
+    seats: [{ seatNo: 1, userId: 'user-1', status: 'ACTIVE' }],
+    stacks: { 'user-1': 100 },
     authoritativeMembers: [{ userId: 'user-1', seat: 1 }],
-    hand: { status: 'PREFLOP' }
+    hand: { status: 'LOBBY' }
   });
   await harness.flush();
 
   assert.equal(harness.elements.pokerSeatsGrid.children.length, baselineSeatRenderCount, 'ignored same-version snapshot must not re-render the table');
   assert.equal(harness.fetchState.joinCalls, 0, 'ignored same-version snapshot must not trigger HTTP join fallback');
-  assert.ok(harness.logs.some((entry) => entry.kind === 'poker_ws_snapshot_ignored' && entry.data && entry.data.reason === 'stale_or_equal_version' && entry.data.incomingStateVersion === 1 && entry.data.currentStateVersion === 1), 'ignored equal-version snapshot should log stale/equal protection');
+  assert.ok(harness.logs.some((entry) => entry.kind === 'poker_ws_snapshot_ignored' && entry.data && entry.data.reason === 'stale_or_equal_version' && entry.data.incomingStateVersion === 0 && entry.data.currentStateVersion === 0), 'ignored equal-version snapshot should log stale/equal protection');
 });
 
 test('repeated equal-version authoritative snapshot remains idempotent after the first apply', async () => {
@@ -120,10 +129,14 @@ test('repeated equal-version authoritative snapshot remains idempotent after the
   var harness = setup.harness;
   var snapshotPayload = {
     tableId: 'table-1',
-    stateVersion: 1,
+    stateVersion: 0,
+    memberCount: 1,
+    maxSeats: 6,
     youSeat: 1,
+    seats: [{ seatNo: 1, userId: 'user-1', status: 'ACTIVE' }],
+    stacks: { 'user-1': 100 },
     authoritativeMembers: [{ userId: 'user-1', seat: 1 }],
-    hand: { status: 'PREFLOP' }
+    hand: { status: 'LOBBY' }
   };
 
   var baselineSeatRenderCount = harness.elements.pokerSeatsGrid.children.length;
@@ -137,7 +150,7 @@ test('repeated equal-version authoritative snapshot remains idempotent after the
   assert.equal(afterFirstSeatRenderCount, baselineSeatRenderCount + 6, 'first same-version authoritative snapshot should render once');
   assert.equal(harness.elements.pokerSeatsGrid.children.length, afterFirstSeatRenderCount, 'replayed same-version authoritative snapshot should be ignored after convergence');
   assert.ok(findRenderedSeatByUserId(harness, 'user-1'), 'idempotent replay should keep the joined seat rendered');
-  var ignoredLogs = harness.logs.filter((entry) => entry.kind === 'poker_ws_snapshot_ignored' && entry.data && entry.data.reason === 'stale_or_equal_version' && entry.data.incomingStateVersion === 1 && entry.data.currentStateVersion === 1);
+  var ignoredLogs = harness.logs.filter((entry) => entry.kind === 'poker_ws_snapshot_ignored' && entry.data && entry.data.reason === 'stale_or_equal_version' && entry.data.incomingStateVersion === 0 && entry.data.currentStateVersion === 0);
   assert.equal(ignoredLogs.length, 1, 'only the replayed equal-version snapshot should be ignored');
   assert.equal(harness.fetchState.joinCalls, 0, 'idempotent same-version snapshot replay must not trigger HTTP fallback');
   assert.equal(harness.logs.some((entry) => entry.kind === 'poker_http_fallback_start'), false, 'idempotent same-version snapshot replay must stay on healthy WS path');

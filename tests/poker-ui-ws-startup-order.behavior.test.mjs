@@ -11,7 +11,7 @@ const harness = createPokerTableHarness({
       seats: [],
       legalActions: [],
       actionConstraints: {},
-      state: { version: 1, state: { phase: 'PREFLOP', pot: 10, community: [] } },
+      state: { version: 1, state: { phase: 'PREFLOP', pot: 10, community: [], stacks: {} } },
     },
   ],
 });
@@ -28,7 +28,7 @@ harness.resolveDeferredGet({
   seats: [],
   legalActions: [],
   actionConstraints: {},
-  state: { version: 1, state: { phase: 'PREFLOP', pot: 10, community: [] } },
+  state: { version: 1, state: { phase: 'PREFLOP', pot: 10, community: [], stacks: {} } },
 });
 await harness.flush();
 
@@ -47,6 +47,7 @@ ws.onSnapshot({
     tableId: 'table-1',
     stateVersion: 1,
     seats: [{ seatNo: 1, userId: 'user-1', status: 'ACTIVE' }],
+    stacks: { 'user-1': 100 },
     hand: { status: 'TURN' },
     state: { phase: 'TURN', pot: 42, community: ['As', 'Kd', '3h', '2c'] },
     authoritativeMembers: [{ userId: 'user-1', seat: 1 }],

@@ -61,6 +61,9 @@ jobs:
       - name: Run poker UI ws authoritative join behavior test
         run: node --test tests/poker-ui-ws-join-authoritative.behavior.test.mjs
 
+      - name: Run ws lobby join public snapshot behavior test
+        run: node --test ws-tests/ws-lobby-join-public-snapshot.behavior.test.mjs
+
 
       - name: Validate ws Dockerfile build contract (repo-root context)
         run: |

@@ -40,7 +40,7 @@ const healthyHarness = createPokerTableHarness({
       ],
       legalActions: [],
       actionConstraints: {},
-      state: { version: 1, state: { phase: 'PREFLOP', pot: 10, community: [] } },
+      state: { version: 1, state: { phase: 'PREFLOP', pot: 10, community: [], stacks: {} } },
     }
   ],
   wsFactory(createOptions){
@@ -56,6 +56,8 @@ const healthyHarness = createPokerTableHarness({
                 stateVersion: 1,
                 authoritativeMembers: [{ userId: 'user-1', seat: 1 }],
                 youSeat: 1,
+                seats: [{ seatNo: 1, userId: 'user-1', status: 'ACTIVE' }],
+                stacks: { 'user-1': 100 },
                 hand: { status: 'PREFLOP' }
               }
             });
@@ -72,4 +74,4 @@ await healthyHarness.flush();
 await healthyHarness.flush();
 assert.equal(healthyHarness.fetchState.joinCalls, 0, 'healthy same-version WS snapshot should not trigger HTTP join fallback');
 assert.equal(healthyHarness.logs.some((entry) => entry.kind === 'poker_http_fallback_start'), false, 'healthy same-version WS snapshot should not activate HTTP fallback');
-assert.equal(healthyHarness.elements.pokerYourStack.textContent, '0', 'healthy same-version WS snapshot should still render joined state');
+assert.equal(healthyHarness.elements.pokerYourStack.textContent, '100', 'healthy same-version WS snapshot should still render joined state from WS stack data');

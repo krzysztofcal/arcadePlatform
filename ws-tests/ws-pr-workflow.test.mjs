@@ -90,6 +90,8 @@ function assertRequiredOrder(text) {
   assert.match(block, /node --test tests\/poker-ui-ws-visibility\.behavior\.test\.mjs/);
   assert.match(block, /Run poker UI ws authoritative join behavior test/);
   assert.match(block, /node --test tests\/poker-ui-ws-join-authoritative\.behavior\.test\.mjs/);
+  assert.match(block, /Run ws lobby join public snapshot behavior test/);
+  assert.match(block, /node --test ws-tests\/ws-lobby-join-public-snapshot\.behavior\.test\.mjs/);
   assert.match(block, /Run ws join handler behavior test/);
   assert.match(block, /node --test ws-server\/poker\/handlers\/join\.behavior\.test\.mjs/);
   assert.match(block, /Run ws start-hand handler behavior test/);

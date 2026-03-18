@@ -1160,19 +1160,29 @@
       var merged = Object.assign({}, existingData);
       var baselineState = isPlainObject(merged.state) ? merged.state : {};
       var baselineInner = isPlainObject(baselineState.state) ? baselineState.state : {};
+      var nextState = Object.assign({}, baselineInner);
       if (Number.isInteger(payload.stateVersion)) baselineState.version = payload.stateVersion;
       if (payload.hand && typeof payload.hand === 'object'){
-        baselineState.state = Object.assign({}, baselineInner, {
-          handId: payload.hand.handId || baselineInner.handId || null,
-          phase: payload.hand.status || baselineInner.phase || null,
-          turnUserId: payload.turn && payload.turn.userId ? payload.turn.userId : baselineInner.turnUserId,
-          turnDeadlineAt: payload.turn && payload.turn.deadlineAt != null ? payload.turn.deadlineAt : baselineInner.turnDeadlineAt,
-          community: payload.board && Array.isArray(payload.board.cards) ? payload.board.cards.slice() : baselineInner.community,
-          pot: payload.pot && Number.isFinite(Number(payload.pot.total)) ? Number(payload.pot.total) : baselineInner.pot,
-          potTotal: payload.pot && Number.isFinite(Number(payload.pot.total)) ? Number(payload.pot.total) : baselineInner.potTotal,
-          sidePots: payload.pot && Array.isArray(payload.pot.sidePots) ? payload.pot.sidePots.slice() : baselineInner.sidePots
-        });
+        nextState.handId = payload.hand.handId || nextState.handId || null;
+        nextState.phase = payload.hand.status || nextState.phase || null;
       }
+      if (payload.turn && typeof payload.turn === 'object'){
+        nextState.turnUserId = payload.turn.userId ? payload.turn.userId : nextState.turnUserId;
+        nextState.turnDeadlineAt = payload.turn.deadlineAt != null ? payload.turn.deadlineAt : nextState.turnDeadlineAt;
+        nextState.turnStartedAt = payload.turn.startedAt != null ? payload.turn.startedAt : nextState.turnStartedAt;
+      }
+      if (payload.board && Array.isArray(payload.board.cards)) nextState.community = payload.board.cards.slice();
+      if (payload.pot && typeof payload.pot === 'object'){
+        if (Number.isFinite(Number(payload.pot.total))) {
+          nextState.pot = Number(payload.pot.total);
+          nextState.potTotal = Number(payload.pot.total);
+        }
+        if (Array.isArray(payload.pot.sidePots)) nextState.sidePots = payload.pot.sidePots.slice();
+      }
+      if (payload.stacks && typeof payload.stacks === 'object' && !Array.isArray(payload.stacks)){
+        nextState.stacks = Object.assign({}, baselineInner.stacks && typeof baselineInner.stacks === 'object' ? baselineInner.stacks : {}, payload.stacks);
+      }
+      baselineState.state = nextState;
       merged.state = baselineState;
       if (payload.legalActions && typeof payload.legalActions === 'object'){
         var wsActions = Array.isArray(payload.legalActions.actions) ? payload.legalActions.actions.slice() : null;
@@ -1209,9 +1219,16 @@
         hasCurrentUserSeat: false,
         seatNo: null,
         status: null,
-        hasRenderableSeatRow: false
+        hasRenderableSeatRow: false,
+        hasCurrentUserStack: false
       };
       var activeCurrentUserId = typeof currentUserId === 'string' && currentUserId ? currentUserId : null;
+      var stateObj = data && typeof data.state === 'object' ? data.state : null;
+      var gameState = stateObj && typeof stateObj.state === 'object' ? stateObj.state : null;
+      var stacks = gameState && typeof gameState.stacks === 'object' && !Array.isArray(gameState.stacks) ? gameState.stacks : null;
+      if (activeCurrentUserId && stacks && stacks[activeCurrentUserId] != null){
+        facts.hasCurrentUserStack = true;
+      }
       if (!activeCurrentUserId || !data || !Array.isArray(data.seats)) return facts;
       for (var i = 0; i < data.seats.length; i++){
         var seat = data.seats[i];
@@ -1237,6 +1254,7 @@
       if (currentFacts.hasCurrentUserSeat !== true) return true;
       if (incomingFacts.seatNo != null && currentFacts.seatNo == null) return true;
       if (incomingFacts.hasRenderableSeatRow === true && currentFacts.hasRenderableSeatRow !== true) return true;
+      if (incomingFacts.hasCurrentUserStack === true && currentFacts.hasCurrentUserStack !== true) return true;
       if (incomingFacts.status && currentFacts.status !== incomingFacts.status && (!currentFacts.status || String(currentFacts.status).toUpperCase() === 'EMPTY')) return true;
       return false;
     }
@@ -2625,7 +2643,8 @@
           joinPayload.seatNo = seatNo;
         }
         var joinResult = null;
-        if (wsClient && typeof wsClient.isReady === 'function' && wsClient.isReady() && typeof wsClient.sendJoin === 'function'){
+        var usedWsJoin = !!(wsClient && typeof wsClient.isReady === 'function' && wsClient.isReady() && typeof wsClient.sendJoin === 'function');
+        if (usedWsJoin){
           joinResult = await wsClient.sendJoin(joinPayload, joinRequestId);
         } else {
           joinResult = await apiPost(JOIN_URL, joinPayload);
@@ -2651,6 +2670,7 @@
           klog('poker_auto_join_success', { tableId: tableId, seatNo: joinResult.seatNo });
         }
         if (!isPageActive()) return;
+        if (usedWsJoin) return;
         var loaded = await loadTable(false);
         if (!loaded) return;
         maybeAutoStartHand();
