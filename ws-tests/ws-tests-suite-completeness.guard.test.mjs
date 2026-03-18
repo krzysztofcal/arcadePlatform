@@ -38,7 +38,9 @@ const EXCLUDED_FROM_PR = new Set([
 ]);
 
 const EXCLUDED_FROM_DEPLOY = new Set([
-  "ws-tests/ws-pr-workflow.test.mjs"
+  "ws-tests/ws-pr-workflow.test.mjs",
+  "ws-tests/ws-preview-deploy.remote-shape.guard.test.mjs",
+  "ws-tests/ws-preview-deploy.workflow.guard.test.mjs"
 ]);
 
 const EXCLUDED_FROM_BOTH = new Set([

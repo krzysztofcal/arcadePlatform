@@ -11,6 +11,7 @@ on:
       - "scripts/test-all.mjs"
       - ".github/workflows/ws-pr-checks.yml"
       - ".github/workflows/ws-deploy.yml"
+      - ".github/workflows/ws-preview-deploy.yml"
 
 jobs:
   ws-harness:
@@ -181,6 +182,12 @@ jobs:
 
       - name: Run ws tests suite completeness guard
         run: node --test ws-tests/ws-tests-suite-completeness.guard.test.mjs
+
+      - name: Run ws preview deploy workflow guard test
+        run: node --test ws-tests/ws-preview-deploy.workflow.guard.test.mjs
+
+      - name: Run ws preview deploy remote-shape guard test
+        run: node --test ws-tests/ws-preview-deploy.remote-shape.guard.test.mjs
 
       - name: Run ws room-core snapshot dependency guard test
         run: node --test ws-tests/ws-room-core-snapshot-dependency.guard.test.mjs
