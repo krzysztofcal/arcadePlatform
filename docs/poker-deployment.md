@@ -103,3 +103,54 @@ What you’re looking for:
 - CSP should have `script-src 'self' ...` (or no CSP at all).
 - If you use nonces/hashes and inline scripts, CSP must allow them; otherwise the poker JS may not run.
 - For network calls, CSP uses `connect-src`. It should include `'self'` (or explicitly `https://play.kcswh.pl`).
+
+## WS preview deploy
+
+The preview WS deploy is manual-only and isolated from the production WS workflows.
+It targets only the preview host, preview filesystem root, preview service, preview env file, and preview health checks.
+
+### Dispatch a preview deploy for a selected ref
+
+Run the workflow from GitHub CLI and pass the target ref explicitly:
+
+```sh
+gh workflow run ws-preview-deploy.yml --ref main -f ref=<branch-or-sha>
+```
+
+Examples:
+
+```sh
+gh workflow run ws-preview-deploy.yml --ref main -f ref=feature/ws-preview-health-fix
+gh workflow run ws-preview-deploy.yml --ref main -f ref=3b6f2d4
+```
+
+- `--ref main` selects the branch that contains `.github/workflows/ws-preview-deploy.yml`.
+- `-f ref=...` is the application ref that the workflow checks out and deploys.
+- The workflow remains `workflow_dispatch`-only and is not wired into the existing WS PR or production deploy workflows.
+
+### Preview runtime contract
+
+The preview VPS contract is:
+
+- Host: `ws-preview.kcswh.pl`
+- Base root: `/opt/arcade-ws-preview`
+- Active app dir: `/opt/arcade-ws-preview/ws-server`
+- Env file: `/opt/arcade-ws-preview/.env.preview`
+- Systemd unit: `ws-server-preview.service`
+- Local health endpoint: `http://127.0.0.1:3001/healthz`
+- Public health endpoint: `https://ws-preview.kcswh.pl/healthz`
+- Preview port: `3001`
+- Remote upload staging directory: `/tmp/arcadeplatform-ws-preview`
+
+Preview deploys unpack into a temporary directory under `/tmp/arcadeplatform-ws-preview` and then sync the extracted files into `/opt/arcade-ws-preview/ws-server`.
+The workflow fails fast before mutating preview app contents when the preview base root, app dir, env file, service, Node.js, `tar`, `rsync`, `curl`, or required `PORT=3001` setting is missing.
+
+### Preview secrets
+
+Configure these GitHub Actions secrets for preview access only:
+
+- `WS_PREVIEW_HOST`
+- `WS_PREVIEW_USER`
+- `WS_PREVIEW_SSH_KEY`
+
+These secrets are intentionally separate from the production WS deploy credentials so preview runs cannot mutate production WS resources.
