@@ -39,28 +39,6 @@ jobs:
           test -n "$PREVIEW_WS_USER"
           test -n "$PREVIEW_WS_SSH_KEY"
 
-      - name: Validate preview-only workflow contract literals
-        run: |
-          set -euo pipefail
-          workflow=.github/workflows/ws-preview-deploy.yml
-          deploy_section="$(awk 'BEGIN{flag=0} /^  deploy:/{flag=1} flag{print}' "$workflow")"
-
-          printf '%s\n' "$deploy_section" | grep -Fq 'ref: ${{ inputs.ref }}'
-          printf '%s\n' "$deploy_section" | grep -Fq 'WS_PREVIEW_HOST'
-          printf '%s\n' "$deploy_section" | grep -Fq 'WS_PREVIEW_USER'
-          printf '%s\n' "$deploy_section" | grep -Fq 'WS_PREVIEW_SSH_KEY'
-          printf '%s\n' "$deploy_section" | grep -Fq 'ws-preview.kcswh.pl'
-          printf '%s\n' "$deploy_section" | grep -Fq '/opt/arcade-ws-preview'
-          printf '%s\n' "$deploy_section" | grep -Fq '/opt/arcade-ws-preview/ws-server'
-          printf '%s\n' "$deploy_section" | grep -Fq '/opt/arcade-ws-preview/.env.preview'
-          printf '%s\n' "$deploy_section" | grep -Fq 'ws-server-preview.service'
-          printf '%s\n' "$deploy_section" | grep -Fq 'http://127.0.0.1:3001/healthz'
-          printf '%s\n' "$deploy_section" | grep -Fq 'https://ws-preview.kcswh.pl/healthz'
-
-          ! grep -Eq '^\s+push:' "$workflow"
-          ! grep -Eq '^\s+pull_request:' "$workflow"
-          ! printf '%s\n' "$deploy_section" | grep -Eq 'ws\.kcswh\.pl|/opt/ws-server|ws-server\.service|/etc/arcadeplatform/ws-preview\.env|http://127\.0\.0\.1:3000/healthz'
-
       - name: Run preview workflow guard tests
         run: |
           set -euo pipefail

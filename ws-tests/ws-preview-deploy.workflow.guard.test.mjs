@@ -65,4 +65,5 @@ test("ws preview deploy validates workflow files from workflow ref and builds ap
   assert.match(deployCheckout, /ref: \$\{\{ inputs\.ref \}\}/);
   assert.match(validateSection, /node --test ws-tests\/ws-preview-deploy\.workflow\.guard\.test\.mjs/);
   assert.match(validateSection, /node --test ws-tests\/ws-preview-deploy\.remote-shape\.guard\.test\.mjs/);
+  assert.doesNotMatch(validateSection, /Validate preview-only workflow contract literals/);
 });
