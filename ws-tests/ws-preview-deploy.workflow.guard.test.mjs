@@ -67,3 +67,31 @@ test("ws preview deploy validates workflow files from workflow ref and builds ap
   assert.match(validateSection, /node --test ws-tests\/ws-preview-deploy\.remote-shape\.guard\.test\.mjs/);
   assert.doesNotMatch(validateSection, /Validate preview-only workflow contract literals/);
 });
+
+
+test("ws preview deploy workflow keeps preview runtime contract and does not manage Caddy", () => {
+  const text = workflowText();
+
+  assert.match(text, /ws-preview\.kcswh\.pl/);
+  assert.match(text, /\/opt\/arcade-ws-preview\/ws-server/);
+  assert.match(text, /\/opt\/arcade-ws-preview\/\.env\.preview/);
+  assert.match(text, /ws-server-preview\.service/);
+  assert.match(text, /http:\/\/127\.0\.0\.1:3001\/healthz/);
+  assert.doesNotMatch(text, /\/etc\/caddy\/Caddyfile/);
+  assert.doesNotMatch(text, /infra\/vps\/Caddyfile/);
+  assert.doesNotMatch(text, /Caddyfile\.preview\.example/);
+});
+
+test("poker deployment doc states the unified preview Caddy ownership model", () => {
+  const text = fs.readFileSync("docs/poker-deployment.md", "utf8");
+
+  assert.match(text, /manual-only/i);
+  assert.match(text, /does not manage Caddy/i);
+  assert.match(text, /infra\/vps\/Caddyfile` is the single source of truth for both production and preview WS routing/i);
+  assert.match(text, /ws-preview\.kcswh\.pl/);
+  assert.match(text, /\/opt\/arcade-ws-preview\/ws-server/);
+  assert.match(text, /\/opt\/arcade-ws-preview\/\.env\.preview/);
+  assert.match(text, /ws-server-preview\.service/);
+  assert.match(text, /http:\/\/127\.0\.0\.1:3001\/healthz/);
+  assert.doesNotMatch(text, /Caddyfile\.preview\.example/);
+});

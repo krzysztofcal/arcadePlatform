@@ -9,9 +9,12 @@ on:
       - "poker/**"
       - "tests/**"
       - "scripts/test-all.mjs"
+      - "infra/vps/**"
+      - "docs/poker-deployment.md"
       - ".github/workflows/ws-pr-checks.yml"
       - ".github/workflows/ws-deploy.yml"
       - ".github/workflows/ws-preview-deploy.yml"
+      - ".github/workflows/infra-vps.yml"
 
 jobs:
   ws-harness:
@@ -197,6 +200,9 @@ jobs:
 
       - name: Run infra VPS workflow guard test
         run: node --test ws-tests/infra-vps-workflow.guard.test.mjs
+
+      - name: Run infra VPS Caddy guard test
+        run: node --test ws-tests/infra-vps-caddy.guard.test.mjs
 
       - name: Run infra VPS smoke-check structure behavior test
         run: node --test ws-tests/infra-vps-workflow.smokecheck-structure.behavior.test.mjs
