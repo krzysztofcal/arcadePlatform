@@ -108,6 +108,8 @@ What you’re looking for:
 
 The preview WS deploy is manual-only and isolated from the production WS workflows.
 It targets only the preview host, preview filesystem root, preview service, preview env file, and preview health checks.
+It does not manage Caddy.
+Repo-side Caddy ownership is unified: `infra/vps/Caddyfile` is the single source of truth for both production and preview WS routing, so any Caddy change for either host must be made in that file.
 
 ### Dispatch a preview deploy for a selected ref
 
@@ -127,6 +129,7 @@ gh workflow run ws-preview-deploy.yml --ref main -f ref=3b6f2d4
 - `--ref main` selects the branch that contains `.github/workflows/ws-preview-deploy.yml`.
 - `-f ref=...` is the application ref that the workflow checks out and deploys.
 - The workflow remains `workflow_dispatch`-only and is not wired into the existing WS PR or production deploy workflows.
+- The workflow does not write `/etc/caddy/Caddyfile`; infra applies Caddy and uses `infra/vps/Caddyfile` for both `ws.kcswh.pl` and `ws-preview.kcswh.pl`.
 
 ### Preview runtime contract
 
@@ -144,6 +147,7 @@ The preview VPS contract is:
 
 Preview deploys unpack into a temporary directory under `/tmp/arcadeplatform-ws-preview` and then sync the extracted files into `/opt/arcade-ws-preview/ws-server`.
 The workflow fails fast before mutating preview app contents when the preview base root, app dir, env file, service, Node.js, `tar`, `rsync`, `curl`, or required `PORT=3001` setting is missing.
+Preview routing stays in `infra/vps/Caddyfile`, which must continue to define both the `ws.kcswh.pl -> 127.0.0.1:3000` and `ws-preview.kcswh.pl -> 127.0.0.1:3001` site blocks.
 
 ### Preview secrets
 
