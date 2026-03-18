@@ -65,6 +65,26 @@ function normalizeStateVersion(rawVersion) {
   return parsed;
 }
 
+function normalizePublicStacks(seatRows) {
+  if (!Array.isArray(seatRows)) {
+    return {};
+  }
+  const entries = [];
+  for (const seatRow of seatRows) {
+    const status = typeof seatRow?.status === "string" ? seatRow.status.trim().toUpperCase() : "ACTIVE";
+    if (status !== "ACTIVE") {
+      continue;
+    }
+    const userId = typeof seatRow?.user_id === "string" ? seatRow.user_id.trim() : "";
+    const stack = Number(seatRow?.stack);
+    if (!userId || !Number.isFinite(stack)) {
+      continue;
+    }
+    entries.push([userId, stack]);
+  }
+  return Object.fromEntries(entries);
+}
+
 function normalizeSeatRows(seatRows, maxSeats) {
   if (!Array.isArray(seatRows)) {
     return null;
@@ -127,6 +147,7 @@ export function adaptPersistedBootstrap({ tableId, tableRow, seatRows, stateRow 
   }
 
   const members = seats.map((seat) => ({ userId: seat.userId, seat: seat.seat }));
+  const publicStacks = normalizePublicStacks(seatRows);
   const seatByUserId = {};
   const presenceByUserId = new Map();
   for (const seat of seats) {
@@ -150,6 +171,7 @@ export function adaptPersistedBootstrap({ tableId, tableRow, seatRows, stateRow 
         version: stateVersion,
         members,
         seats: seatByUserId,
+        publicStacks,
         appliedRequestIds: [],
         pokerState: { ...pokerState }
       },

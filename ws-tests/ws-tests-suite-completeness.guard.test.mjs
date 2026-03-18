@@ -41,7 +41,8 @@ const REQUIRED_CLIENT_AUTHORITATIVE_BEHAVIOR_TESTS = [
   "tests/poker-ui-ws-snapshot-equal-version.behavior.test.mjs",
   "tests/poker-ui-ws-auth-watch-order.behavior.test.mjs",
   "tests/poker-ui-ws-visibility.behavior.test.mjs",
-  "tests/poker-ui-ws-join-authoritative.behavior.test.mjs"
+  "tests/poker-ui-ws-join-authoritative.behavior.test.mjs",
+  "ws-tests/ws-lobby-join-public-snapshot.behavior.test.mjs"
 ];
 
 const REQUIRED_PERSISTED_BOOTSTRAP_BEHAVIOR_TESTS = [

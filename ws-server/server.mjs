@@ -321,6 +321,8 @@ function buildTableStatePayload({ tableState, tableSnapshot }) {
   if (Number.isInteger(tableSnapshot.memberCount)) payload.memberCount = tableSnapshot.memberCount;
   if (Number.isInteger(tableSnapshot.maxSeats)) payload.maxSeats = tableSnapshot.maxSeats;
   if (Number.isInteger(tableSnapshot.youSeat)) payload.youSeat = tableSnapshot.youSeat;
+  if (Array.isArray(tableSnapshot.seats)) payload.seats = tableSnapshot.seats;
+  if (tableSnapshot.stacks && typeof tableSnapshot.stacks === "object" && !Array.isArray(tableSnapshot.stacks)) payload.stacks = tableSnapshot.stacks;
   if (tableSnapshot.hand && typeof tableSnapshot.hand === "object") payload.hand = tableSnapshot.hand;
   if (tableSnapshot.board && typeof tableSnapshot.board === "object") payload.board = tableSnapshot.board;
   if (tableSnapshot.pot && typeof tableSnapshot.pot === "object") payload.pot = tableSnapshot.pot;

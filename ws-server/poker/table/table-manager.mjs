@@ -422,7 +422,7 @@ export function createTableManager({
     member.expiresAt = nowMs + presenceTtlMs;
   }
 
-  function join({ ws, userId, tableId, requestId, nowTs = Date.now(), authoritativeSeatNo = null }) {
+  function join({ ws, userId, tableId, requestId, nowTs = Date.now(), authoritativeSeatNo = null, buyIn = null }) {
     const conn = ensureConn(ws);
     const activeTableId = conn.joinedTableId || conn.subscribedTableId;
     if (activeTableId && activeTableId !== tableId) {
@@ -451,13 +451,25 @@ export function createTableManager({
           .concat({ userId, seat: authoritativeSeat })
           .sort((a, b) => a.seat - b.seat || a.userId.localeCompare(b.userId));
         const nextSeats = { ...table.coreState.seats, [userId]: authoritativeSeat };
+        const currentPublicStacks = table.coreState.publicStacks && typeof table.coreState.publicStacks === "object" && !Array.isArray(table.coreState.publicStacks)
+          ? table.coreState.publicStacks
+          : {};
+        const nextPublicStacks = { ...currentPublicStacks };
+        const nextBuyIn = Number.isFinite(Number(buyIn)) && Number(buyIn) > 0 ? Number(buyIn) : null;
+        const membershipChanged = !existingMember || existingMember.seat !== authoritativeSeat;
+        const stackChanged = nextBuyIn !== null && currentPublicStacks[userId] !== nextBuyIn;
+        if (stackChanged) {
+          nextPublicStacks[userId] = nextBuyIn;
+        }
+        const changed = membershipChanged || stackChanged;
         table.coreState = {
           ...table.coreState,
+          version: changed ? Number(table.coreState.version || 0) + 1 : table.coreState.version,
           members: nextMembers,
-          seats: nextSeats
+          seats: nextSeats,
+          publicStacks: nextPublicStacks
         };
 
-        const changed = !existingMember || existingMember.seat !== authoritativeSeat;
         const seat = authoritativeSeat;
         if (!table.presenceByUserId.has(userId)) {
           table.presenceByUserId.set(userId, {
@@ -480,7 +492,7 @@ export function createTableManager({
           ok: true,
           changed,
           effects: changed
-            ? [{ type: existingMember ? "member_reseated" : "member_joined", userId, seat }]
+            ? [{ type: membershipChanged ? (existingMember ? "member_reseated" : "member_joined") : "public_stack_updated", userId, seat }]
             : [{ type: "presence_connected" }],
           tableState: tableState(tableId)
         };
