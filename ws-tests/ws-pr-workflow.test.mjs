@@ -82,6 +82,8 @@ function assertRequiredOrder(text) {
   assert.match(block, /node --test tests\/poker-ui-ws-health-fallback\.behavior\.test\.mjs/);
   assert.match(block, /Run poker UI ws startup order behavior test/);
   assert.match(block, /node --test tests\/poker-ui-ws-startup-order\.behavior\.test\.mjs/);
+  assert.match(block, /Run poker UI ws equal-version snapshot behavior test/);
+  assert.match(block, /node --test tests\/poker-ui-ws-snapshot-equal-version\.behavior\.test\.mjs/);
   assert.match(block, /Run poker UI ws auth-watch order behavior test/);
   assert.match(block, /node --test tests\/poker-ui-ws-auth-watch-order\.behavior\.test\.mjs/);
   assert.match(block, /Run poker UI ws visibility behavior test/);

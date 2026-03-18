@@ -38,6 +38,7 @@ const REQUIRED_CLIENT_AUTHORITATIVE_BEHAVIOR_TESTS = [
   "tests/poker-ws-client.test.mjs",
   "tests/poker-ui-ws-health-fallback.behavior.test.mjs",
   "tests/poker-ui-ws-startup-order.behavior.test.mjs",
+  "tests/poker-ui-ws-snapshot-equal-version.behavior.test.mjs",
   "tests/poker-ui-ws-auth-watch-order.behavior.test.mjs",
   "tests/poker-ui-ws-visibility.behavior.test.mjs",
   "tests/poker-ui-ws-join-authoritative.behavior.test.mjs"

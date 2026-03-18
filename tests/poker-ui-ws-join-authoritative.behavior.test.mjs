@@ -331,3 +331,59 @@ test('poker UI auto-seat accepted result keeps 1-based seat value', async () => 
 
   assert.equal(harness.elements.pokerSeatNo.value, '2');
 });
+
+test('poker UI accepts same-version authoritative reconnect snapshot for joined seat state without HTTP fallback', async () => {
+  let snapshotHandler = null;
+  const harness = createPokerTableHarness({
+    responses: [
+      {
+        tableId: 'table-1',
+        status: 'OPEN',
+        maxPlayers: 6,
+        seats: [
+          { seatNo: 0, userId: null, status: 'EMPTY', stack: 100 },
+          { seatNo: 1, userId: null, status: 'EMPTY', stack: 100 }
+        ],
+        legalActions: [],
+        actionConstraints: {},
+        state: { version: 1, state: { phase: 'PREFLOP', pot: 10, community: [] } },
+      }
+    ],
+    wsFactory(createOptions){
+      snapshotHandler = createOptions.onSnapshot;
+      return {
+        start(){
+          Promise.resolve().then(function(){
+            if (typeof createOptions.onStatus === 'function') createOptions.onStatus('auth_ok', { roomId: 'table-1' });
+          });
+        },
+        destroy(){},
+        isReady(){ return true; },
+        sendJoin(){
+          return Promise.resolve({ ok: true });
+        }
+      };
+    }
+  });
+
+  harness.fireDomContentLoaded();
+  await flushUntil(harness, function(){ return typeof snapshotHandler === 'function' && harness.fetchState.getCalls >= 1; });
+
+  snapshotHandler({
+    kind: 'table_state',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 1,
+      youSeat: 1,
+      authoritativeMembers: [{ userId: 'user-1', seat: 1 }],
+      hand: { status: 'PREFLOP' }
+    }
+  });
+  await harness.flush();
+
+  assert.equal(String(harness.elements.pokerVersion.textContent), '1');
+  assert.equal(harness.elements.pokerYourStack.textContent, '0');
+  assert.equal(harness.fetchState.joinCalls, 0, 'healthy ws reconnect snapshot must not trigger HTTP join fallback');
+  assert.equal(harness.logs.some((entry) => entry.kind === 'poker_http_fallback_start'), false, 'healthy ws reconnect snapshot must not activate fallback');
+  assert.equal(harness.logs.some((entry) => entry.kind === 'poker_ws_snapshot_ignored' && entry.data && entry.data.incomingStateVersion === 1 && entry.data.currentStateVersion === 1), false, 'material same-version reconnect snapshot must not be ignored as stale');
+});

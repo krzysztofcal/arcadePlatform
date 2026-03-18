@@ -27,3 +27,49 @@ const fallbackIndex = throwingHarness.logs.findIndex((entry) => entry.kind === '
 assert.ok(wsExceptionIndex >= 0, 'sync WS bootstrap exception should be logged');
 assert.ok(fallbackIndex >= 0, 'fallback start should be logged');
 assert.ok(wsExceptionIndex < fallbackIndex, 'exception log must appear before fallback start');
+
+const healthyHarness = createPokerTableHarness({
+  responses: [
+    {
+      tableId: 'table-1',
+      status: 'OPEN',
+      maxPlayers: 6,
+      seats: [
+        { seatNo: 0, userId: null, status: 'EMPTY', stack: 100 },
+        { seatNo: 1, userId: null, status: 'EMPTY', stack: 100 }
+      ],
+      legalActions: [],
+      actionConstraints: {},
+      state: { version: 1, state: { phase: 'PREFLOP', pot: 10, community: [] } },
+    }
+  ],
+  wsFactory(createOptions){
+    return {
+      start(){
+        Promise.resolve().then(function(){
+          if (typeof createOptions.onStatus === 'function') createOptions.onStatus('auth_ok', { roomId: 'table-1' });
+          if (typeof createOptions.onSnapshot === 'function') {
+            createOptions.onSnapshot({
+              kind: 'table_state',
+              payload: {
+                tableId: 'table-1',
+                stateVersion: 1,
+                authoritativeMembers: [{ userId: 'user-1', seat: 1 }],
+                youSeat: 1,
+                hand: { status: 'PREFLOP' }
+              }
+            });
+          }
+        });
+      },
+      destroy(){},
+      isReady(){ return true; }
+    };
+  }
+});
+healthyHarness.fireDomContentLoaded();
+await healthyHarness.flush();
+await healthyHarness.flush();
+assert.equal(healthyHarness.fetchState.joinCalls, 0, 'healthy same-version WS snapshot should not trigger HTTP join fallback');
+assert.equal(healthyHarness.logs.some((entry) => entry.kind === 'poker_http_fallback_start'), false, 'healthy same-version WS snapshot should not activate HTTP fallback');
+assert.equal(healthyHarness.elements.pokerYourStack.textContent, '0', 'healthy same-version WS snapshot should still render joined state');
