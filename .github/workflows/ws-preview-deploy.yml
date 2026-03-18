@@ -1,0 +1,245 @@
+name: WS Preview Deploy
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: ws-preview-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install WS server dependencies
+        run: npm ci --prefix ws-server
+
+      - name: Run WS preview deploy workflow guards
+        run: |
+          set -euo pipefail
+          node --test ws-tests/ws-preview-deploy.workflow.guard.test.mjs
+          node --test ws-tests/ws-server-package-runtime-deps.guard.test.mjs
+          node --test shared/poker-domain/join.behavior.test.mjs
+          node --test ws-server/server.behavior.test.mjs
+
+  deploy:
+    needs: validate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      PREVIEW_PUBLIC_HOST: ${{ secrets.WS_PREVIEW_HOST }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Build and package ws-server preview deploy artifact
+        run: |
+          set -euo pipefail
+          ARTIFACT_DIR="$GITHUB_WORKSPACE/.artifacts/ws-server-preview"
+          STAGE_DIR="$ARTIFACT_DIR/stage"
+          ARTIFACT_FILE="$ARTIFACT_DIR/ws-server-preview-dist.tgz"
+
+          rm -rf "$ARTIFACT_DIR"
+          mkdir -p "$STAGE_DIR"
+
+          npm ci --prefix ws-server
+          npm run --prefix ws-server build --if-present
+
+          rm -rf ws-server/node_modules
+          npm ci --prefix ws-server --omit=dev
+
+          cp ws-server/package.json "$STAGE_DIR"/
+          cp ws-server/package-lock.json "$STAGE_DIR"/
+          cp -R ws-server/node_modules "$STAGE_DIR"/node_modules
+
+          if [ -d ws-server/dist ]; then
+            cp -R ws-server/dist "$STAGE_DIR"/dist
+          fi
+
+          if [ -f ws-server/server.mjs ]; then
+            cp ws-server/server.mjs "$STAGE_DIR"/
+          fi
+
+          if [ -d ws-server/poker ]; then
+            cp -R ws-server/poker "$STAGE_DIR"/poker
+          fi
+
+          if [ -d shared/poker-domain ]; then
+            mkdir -p "$STAGE_DIR"/shared
+            cp -R shared/poker-domain "$STAGE_DIR"/shared/poker-domain
+          fi
+
+          if [ -d netlify/functions/_shared ]; then
+            mkdir -p "$STAGE_DIR"/netlify/functions/_shared
+            cp netlify/functions/_shared/chips-ledger.mjs "$STAGE_DIR"/netlify/functions/_shared/
+            cp netlify/functions/_shared/poker-*.mjs "$STAGE_DIR"/netlify/functions/_shared/
+            cp netlify/functions/_shared/supabase-admin.mjs "$STAGE_DIR"/netlify/functions/_shared/
+          fi
+
+          tar \
+            --sort=name \
+            --mtime='UTC 1970-01-01' \
+            --owner=0 \
+            --group=0 \
+            --numeric-owner \
+            -czf "$ARTIFACT_FILE" \
+            -C "$STAGE_DIR" \
+            .
+
+      - name: Upload ws-server preview artifact to VPS
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.WS_HOST }}
+          username: ${{ secrets.WS_USER }}
+          key: ${{ secrets.WS_SSH_KEY }}
+          source: .artifacts/ws-server-preview/ws-server-preview-dist.tgz
+          target: /tmp/arcadeplatform-ws-preview
+
+      - name: Atomic preview release switch + restart + local health gate on VPS
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          RELEASE_SHA: ${{ github.sha }}
+        with:
+          host: ${{ secrets.WS_HOST }}
+          username: ${{ secrets.WS_USER }}
+          key: ${{ secrets.WS_SSH_KEY }}
+          timeout: 2m
+          command_timeout: 20m
+          envs: RELEASE_SHA
+          script: |
+            set -eu
+            if ! command -v bash >/dev/null 2>&1; then
+              echo "bash is required on VPS"
+              exit 1
+            fi
+
+            bash <<'BASH'
+            set -Eeuo pipefail
+
+            BASE_DIR="/opt/arcade-ws-preview"
+            RELEASES_DIR="$BASE_DIR/releases"
+            CURRENT_LINK="$BASE_DIR/ws-server"
+            ENV_FILE="$BASE_DIR/.env.preview"
+            TMP_ARCHIVE="/tmp/arcadeplatform-ws-preview/.artifacts/ws-server-preview/ws-server-preview-dist.tgz"
+            RELEASE_ID="$RELEASE_SHA"
+            NEW_RELEASE_DIR="$RELEASES_DIR/$RELEASE_ID"
+            NEW_APP_DIR="$NEW_RELEASE_DIR/ws-server"
+            PREVIOUS_TARGET=""
+            HAVE_SWITCHED=0
+            HEALTH_RETRIES=30
+            HEALTH_SLEEP_SEC=1
+
+            if ! command -v node >/dev/null 2>&1; then
+              echo "install nodejs"
+              exit 1
+            fi
+
+            if ! command -v systemctl >/dev/null 2>&1; then
+              echo "provision unit first"
+              exit 1
+            fi
+
+            if ! sudo -n systemctl cat ws-server-preview.service >/dev/null 2>&1; then
+              echo "configure /etc/sudoers.d/ws-server-preview-deploy"
+              exit 1
+            fi
+
+            if ! sudo -n test -d "$RELEASES_DIR"; then
+              echo "provision /opt/arcade-ws-preview/releases first"
+              exit 1
+            fi
+
+            if ! sudo -n test -f "$ENV_FILE"; then
+              echo "provision /opt/arcade-ws-preview/.env.preview first"
+              exit 1
+            fi
+
+            rollback() {
+              if [ "$HAVE_SWITCHED" != "1" ] || [ -z "$PREVIOUS_TARGET" ]; then
+                return 0
+              fi
+              sudo -n ln -sfn "$PREVIOUS_TARGET" "$CURRENT_LINK.tmp"
+              sudo -n mv -Tf "$CURRENT_LINK.tmp" "$CURRENT_LINK"
+              sudo -n systemctl restart ws-server-preview.service || true
+            }
+
+            on_error() {
+              rc=$?
+              rollback
+              exit "$rc"
+            }
+
+            trap 'on_error' ERR
+
+            test -f "$TMP_ARCHIVE"
+
+            if [ -L "$CURRENT_LINK" ] || [ -e "$CURRENT_LINK" ]; then
+              PREVIOUS_TARGET="$(readlink -f "$CURRENT_LINK" || true)"
+            fi
+
+            sudo -n rm -rf "$NEW_RELEASE_DIR"
+            sudo -n mkdir -p "$NEW_APP_DIR"
+            sudo -n tar -xzf "$TMP_ARCHIVE" -C "$NEW_APP_DIR"
+
+            sudo -n ln -sfn "$NEW_APP_DIR" "$CURRENT_LINK.tmp"
+            sudo -n mv -Tf "$CURRENT_LINK.tmp" "$CURRENT_LINK"
+            HAVE_SWITCHED=1
+
+            sudo -n systemctl restart ws-server-preview.service
+
+            LOCAL_HEALTHZ_BODY=""
+            for i in $(seq 1 "$HEALTH_RETRIES"); do
+              if LOCAL_HEALTHZ_BODY="$(curl -fsS http://127.0.0.1:3100/healthz 2>/dev/null | tr -d '\r\n')" && [ "$LOCAL_HEALTHZ_BODY" = "ok" ]; then
+                break
+              fi
+              if [ "$i" -eq "$HEALTH_RETRIES" ]; then
+                echo "local preview healthz failed after retries"
+                false
+              fi
+              sleep "$HEALTH_SLEEP_SEC"
+            done
+
+            trap - ERR
+            BASH
+
+      - name: Verify public preview healthz
+        run: |
+          set -euo pipefail
+          if [ -z "$PREVIEW_PUBLIC_HOST" ]; then
+            echo "WS_PREVIEW_HOST secret is required"
+            exit 1
+          fi
+
+          HEALTH_RETRIES=30
+          HEALTH_SLEEP_SEC=1
+          HEALTHZ_BODY=""
+          for i in $(seq 1 "$HEALTH_RETRIES"); do
+            if HEALTHZ_BODY="$(curl -fsS "https://$PREVIEW_PUBLIC_HOST/healthz" 2>/dev/null | tr -d '\r\n')" && [ "$HEALTHZ_BODY" = "ok" ]; then
+              exit 0
+            fi
+            if [ "$i" -eq "$HEALTH_RETRIES" ]; then
+              echo "public preview healthz failed after retries"
+              exit 1
+            fi
+            sleep "$HEALTH_SLEEP_SEC"
+          done

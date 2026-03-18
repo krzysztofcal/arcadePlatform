@@ -17,6 +17,7 @@ test("ws-deploy keeps ws-tests trigger surface and runs harness checks", () => {
   assert.match(text, /"docs\/ws-poker-protocol\.md"/);
   assert.match(text, /"\.github\/workflows\/ws-pr-checks\.yml"/);
   assert.match(text, /"\.github\/workflows\/ws-deploy\.yml"/);
+  assert.match(text, /"\.github\/workflows\/ws-preview-deploy\.yml"/);
 
   const pushBlockMatch = text.match(/on:\n[\s\S]*?push:\n([\s\S]*?)\njobs:/);
   const pushBlock = pushBlockMatch ? pushBlockMatch[1] : "";
@@ -33,6 +34,7 @@ test("ws-deploy keeps ws-tests trigger surface and runs harness checks", () => {
   assert.match(text, /node --test ws-tests\/ws-deploy\.no-prod-mutation-on-ws-tests\.guard\.test\.mjs/);
   assert.match(text, /node --test ws-tests\/ws-server-deploy-artifact-path\.test\.mjs/);
   assert.match(text, /node --test ws-tests\/ws-server-deploy-rollout\.test\.mjs/);
+  assert.match(text, /node --test ws-tests\/ws-preview-deploy\.workflow\.guard\.test\.mjs/);
   assert.match(text, /node --test ws-tests\/ws-docker-leave-runtime\.guard\.test\.mjs/);
   assert.match(text, /node --test shared\/poker-domain\/join\.behavior\.test\.mjs/);
   assert.match(text, /Run poker ws client behavior test/);

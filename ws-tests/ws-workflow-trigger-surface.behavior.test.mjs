@@ -14,7 +14,8 @@ const REQUIRED_TRIGGER_PATHS = [
 
 const REQUIRED_PR_WORKFLOW_FILE_TRIGGERS = [
   ".github/workflows/ws-pr-checks.yml",
-  ".github/workflows/ws-deploy.yml"
+  ".github/workflows/ws-deploy.yml",
+  ".github/workflows/ws-preview-deploy.yml"
 ];
 
 function read(file) {

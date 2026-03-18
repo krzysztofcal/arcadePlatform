@@ -15,6 +15,7 @@ on:
       - "tests/test-all.runner-registration.guard.test.mjs"
       - ".github/workflows/ws-pr-checks.yml"
       - ".github/workflows/ws-deploy.yml"
+      - ".github/workflows/ws-preview-deploy.yml"
 
 jobs:
   ws-harness-main:
@@ -164,6 +165,9 @@ jobs:
 
       - name: Run ws-server deploy workflow guard test
         run: node --test ws-tests/ws-server-deploy.workflow.guard.test.mjs
+
+      - name: Run ws-preview deploy workflow guard test
+        run: node --test ws-tests/ws-preview-deploy.workflow.guard.test.mjs
 
       - name: Run ws-server deploy remote-script behavior test
         run: node --test ws-tests/ws-server-deploy.remote-script.behavior.test.mjs

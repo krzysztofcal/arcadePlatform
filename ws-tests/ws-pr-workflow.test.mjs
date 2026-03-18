@@ -132,6 +132,7 @@ test("ws pr workflow is pull_request-only with ws-related path filters", () => {
   assert.match(text, /"tests\/test-all\.runner-registration\.guard\.test\.mjs"/);
   assert.match(text, /"\.github\/workflows\/ws-pr-checks\.yml"/);
   assert.match(text, /"\.github\/workflows\/ws-deploy\.yml"/);
+  assert.match(text, /"\.github\/workflows\/ws-preview-deploy\.yml"/);
   assert.doesNotMatch(text, /push:/);
 });
 
@@ -176,4 +177,5 @@ test("ws pr workflow runs ws-server deploy harness tests", () => {
   const text = workflowText();
   assert.match(text, /node --test ws-tests\/ws-server-deploy-artifact-path\.test\.mjs/);
   assert.match(text, /node --test ws-tests\/ws-server-deploy-rollout\.test\.mjs/);
+  assert.match(text, /node --test ws-tests\/ws-preview-deploy\.workflow\.guard\.test\.mjs/);
 });

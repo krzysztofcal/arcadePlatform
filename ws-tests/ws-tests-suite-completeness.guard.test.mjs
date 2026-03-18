@@ -121,6 +121,12 @@ const REQUIRED_WS_TRIGGER_PATHS = [
   "tests/test-all.runner-registration.guard.test.mjs"
 ];
 
+const REQUIRED_WS_WORKFLOW_FILE_TRIGGERS = [
+  ".github/workflows/ws-pr-checks.yml",
+  ".github/workflows/ws-deploy.yml",
+  ".github/workflows/ws-preview-deploy.yml"
+];
+
 test("WS PR/deploy workflows include required literal trigger paths", () => {
   const workflows = [
     ".github/workflows/ws-pr-checks.yml",
@@ -139,22 +145,20 @@ test("WS PR/deploy workflows include required literal trigger paths", () => {
 });
 
 
-test("PR workflow must self-trigger and trigger on deploy workflow changes", () => {
+test("PR and deploy workflows keep required workflow-file trigger coverage", () => {
   const prWorkflow = workflowText(".github/workflows/ws-pr-checks.yml");
-  assert.ok(
-    prWorkflow.includes('- ".github/workflows/ws-pr-checks.yml"'),
-    'Missing trigger path in .github/workflows/ws-pr-checks.yml: .github/workflows/ws-pr-checks.yml'
-  );
-  assert.ok(
-    prWorkflow.includes('- ".github/workflows/ws-deploy.yml"'),
-    'Missing trigger path in .github/workflows/ws-pr-checks.yml: .github/workflows/ws-deploy.yml'
-  );
   const deployWorkflow = workflowText(".github/workflows/ws-deploy.yml");
-  assert.ok(
-    deployWorkflow.includes('- ".github/workflows/ws-pr-checks.yml"'),
-    "Missing trigger path in .github/workflows/ws-deploy.yml: .github/workflows/ws-pr-checks.yml"
-  );
 
+  for (const workflowPath of REQUIRED_WS_WORKFLOW_FILE_TRIGGERS) {
+    assert.ok(
+      prWorkflow.includes(`- "${workflowPath}"`),
+      `Missing trigger path in .github/workflows/ws-pr-checks.yml: ${workflowPath}`
+    );
+    assert.ok(
+      deployWorkflow.includes(`- "${workflowPath}"`),
+      `Missing trigger path in .github/workflows/ws-deploy.yml: ${workflowPath}`
+    );
+  }
 });
 
 test("workflow wiring check uses literal matching (no dynamic RegExp)", () => {
@@ -170,6 +174,16 @@ test("protocol doc gate is present in both workflows", () => {
 
   assert.match(prWorkflow, /node --test ws-tests\/ws-poker-protocol-doc\.test\.mjs/);
   assert.match(deployWorkflow, /node --test ws-tests\/ws-poker-protocol-doc\.test\.mjs/);
+});
+
+
+test("preview deploy guard is wired into PR and deploy workflows", () => {
+  const command = "node --test ws-tests/ws-preview-deploy.workflow.guard.test.mjs";
+  const prWorkflow = workflowText(".github/workflows/ws-pr-checks.yml");
+  const deployWorkflow = workflowText(".github/workflows/ws-deploy.yml");
+
+  assert.ok(prWorkflow.includes(command), `Missing in PR workflow: ${command}`);
+  assert.ok(deployWorkflow.includes(command), `Missing in deploy workflow: ${command}`);
 });
 
 test("no workflow references legacy tests/ws-* harness paths", () => {

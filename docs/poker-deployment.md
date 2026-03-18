@@ -63,6 +63,24 @@ Operational notes:
 - Deployed environments should use Netlify environment variables.
 - Keep naming consistent between docs and code: Netlify environment variables read through `process.env`.
 
+## WS preview manual deploy
+
+Preview WS deploys are isolated from production and are dispatched manually with GitHub CLI:
+
+```sh
+gh workflow run ws-preview-deploy.yml --ref <feature-branch>
+```
+
+Preview runtime assumptions:
+- systemd service: `ws-server-preview.service`
+- release root: `/opt/arcade-ws-preview`
+- working directory: `/opt/arcade-ws-preview/ws-server`
+- environment file: `/opt/arcade-ws-preview/.env.preview`
+- local health check: `http://127.0.0.1:3100/healthz`
+- public preview host: configured through the `WS_PREVIEW_HOST` GitHub secret (for example `ws-preview.kcswh.pl`)
+
+Example VPS assets live in `infra/vps/Caddyfile.preview.example`, `infra/vps/ws-preview.env.example`, and `infra/vps/ws-server-preview.service.example`.
+
 ## Acceptance
 
 ### Browser acceptance (primary)
