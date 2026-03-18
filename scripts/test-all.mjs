@@ -154,6 +154,7 @@ run("node", ["tests/poker-materialize-settlement.payouts.test.mjs"], "poker-mate
 run("node", ["tests/poker-ui.behavior.test.mjs"], "poker-ui-behavior");
 run("node", ["tests/poker-ui-ws-health-fallback.behavior.test.mjs"], "poker-ui-ws-health-fallback-behavior");
 run("node", ["tests/poker-ui-ws-startup-order.behavior.test.mjs"], "poker-ui-ws-startup-order-behavior");
+run("node", ["tests/poker-ui-ws-snapshot-equal-version.behavior.test.mjs"], "poker-ui-ws-snapshot-equal-version-behavior");
 run("node", ["tests/poker-ui-ws-auth-watch-order.behavior.test.mjs"], "poker-ui-ws-auth-watch-order-behavior");
 run("node", ["tests/poker-ui-ws-visibility.behavior.test.mjs"], "poker-ui-ws-visibility-behavior");
 run("node", ["tests/poker-ui-ws-join-authoritative.behavior.test.mjs"], "poker-ui-ws-join-authoritative-behavior");

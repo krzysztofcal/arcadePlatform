@@ -1075,15 +1075,43 @@
 
     function mapTableStateToSeatUpdates(snapshotPayload){
       var payload = snapshotPayload && typeof snapshotPayload === 'object' ? snapshotPayload : {};
+      var seatMap = {};
       var members = Array.isArray(payload.authoritativeMembers) ? payload.authoritativeMembers : [];
-      var seats = members.map(function(member){
-        return {
-          userId: member && member.userId ? member.userId : null,
-          seatNo: member && member.seat != null ? member.seat : null,
+      members.forEach(function(member){
+        var seatNo = member && member.seat != null ? member.seat : null;
+        var userId = member && member.userId ? member.userId : null;
+        if (!Number.isInteger(seatNo) || seatNo < 0) return;
+        if (typeof userId !== 'string' || !userId) return;
+        seatMap[seatNo] = {
+          userId: userId,
+          seatNo: seatNo,
           status: 'ACTIVE'
         };
-      }).filter(function(seat){
-        return typeof seat.userId === 'string' && seat.userId && Number.isInteger(seat.seatNo) && seat.seatNo >= 0;
+      });
+      if (Array.isArray(payload.seats)){
+        payload.seats.forEach(function(seat){
+          var seatNo = seat && Number.isInteger(seat.seatNo) ? seat.seatNo : null;
+          var userId = seat && typeof seat.userId === 'string' ? seat.userId : null;
+          if (!Number.isInteger(seatNo) || seatNo < 0) return;
+          if (typeof userId !== 'string' || !userId) return;
+          if (seatMap[seatNo]) return;
+          seatMap[seatNo] = {
+            userId: userId,
+            seatNo: seatNo,
+            status: typeof seat.status === 'string' ? seat.status : 'ACTIVE'
+          };
+        });
+      }
+      var currentSeatUserId = typeof currentUserId === 'string' && currentUserId ? currentUserId : null;
+      if (currentSeatUserId && Number.isInteger(payload.youSeat) && payload.youSeat >= 0 && !seatMap[payload.youSeat]){
+        seatMap[payload.youSeat] = {
+          userId: currentSeatUserId,
+          seatNo: payload.youSeat,
+          status: 'ACTIVE'
+        };
+      }
+      var seats = Object.keys(seatMap).map(function(key){
+        return seatMap[key];
       });
       return {
         tableId: payload.tableId || null,
@@ -1092,16 +1120,24 @@
     }
 
     function mergePresenceIntoSeats(existingSeats, seatUpdates){
-      if (!Array.isArray(existingSeats) || existingSeats.length === 0) return null;
-      if (!Array.isArray(seatUpdates) || seatUpdates.length === 0) return existingSeats.slice();
+      if (!Array.isArray(seatUpdates) || seatUpdates.length === 0){
+        return Array.isArray(existingSeats) ? existingSeats.slice() : null;
+      }
       var bySeatNo = {};
       seatUpdates.forEach(function(updateSeat){
         if (!updateSeat || !Number.isInteger(updateSeat.seatNo) || updateSeat.seatNo < 0) return;
         if (typeof updateSeat.userId !== 'string' || !updateSeat.userId) return;
         bySeatNo[updateSeat.seatNo] = updateSeat;
       });
-      return existingSeats.map(function(existing){
+      if (!Array.isArray(existingSeats) || existingSeats.length === 0){
+        return Object.keys(bySeatNo).map(function(key){
+          return bySeatNo[key];
+        });
+      }
+      var seenSeatNos = {};
+      var mergedSeats = existingSeats.map(function(existing){
         if (!existing || !Number.isInteger(existing.seatNo)) return existing;
+        seenSeatNos[existing.seatNo] = true;
         var nextSeat = bySeatNo[existing.seatNo];
         if (!nextSeat) return existing;
         return Object.assign({}, existing, {
@@ -1109,6 +1145,12 @@
           status: nextSeat.status || existing.status || 'ACTIVE'
         });
       });
+      Object.keys(bySeatNo).forEach(function(key){
+        var seatNo = Number(key);
+        if (seenSeatNos[seatNo]) return;
+        mergedSeats.push(bySeatNo[key]);
+      });
+      return mergedSeats;
     }
 
     function mergeWsStateIntoTableData(existingData, snapshotPayload){
@@ -1162,6 +1204,43 @@
       return state && Number.isInteger(state.version) ? state.version : null;
     }
 
+    function findCurrentUserSeatFacts(data){
+      var facts = {
+        hasCurrentUserSeat: false,
+        seatNo: null,
+        status: null,
+        hasRenderableSeatRow: false
+      };
+      var activeCurrentUserId = typeof currentUserId === 'string' && currentUserId ? currentUserId : null;
+      if (!activeCurrentUserId || !data || !Array.isArray(data.seats)) return facts;
+      for (var i = 0; i < data.seats.length; i++){
+        var seat = data.seats[i];
+        if (!seat || typeof seat.userId !== 'string') continue;
+        if (seat.userId.trim() !== activeCurrentUserId) continue;
+        facts.hasCurrentUserSeat = true;
+        facts.seatNo = Number.isInteger(seat.seatNo) ? seat.seatNo : null;
+        facts.status = typeof seat.status === 'string' ? seat.status : null;
+        facts.hasRenderableSeatRow = true;
+        return facts;
+      }
+      return facts;
+    }
+
+    function materiallyImprovesJoinedSeatRender(currentData, snapshotPayload){
+      if (!currentData || typeof currentData !== 'object') return false;
+      if (!snapshotPayload || typeof snapshotPayload !== 'object') return false;
+      var mergedData = mergeWsStateIntoTableData(currentData, snapshotPayload);
+      if (!mergedData) return false;
+      var currentFacts = findCurrentUserSeatFacts(currentData);
+      var incomingFacts = findCurrentUserSeatFacts(mergedData);
+      if (incomingFacts.hasCurrentUserSeat !== true) return false;
+      if (currentFacts.hasCurrentUserSeat !== true) return true;
+      if (incomingFacts.seatNo != null && currentFacts.seatNo == null) return true;
+      if (incomingFacts.hasRenderableSeatRow === true && currentFacts.hasRenderableSeatRow !== true) return true;
+      if (incomingFacts.status && currentFacts.status !== incomingFacts.status && (!currentFacts.status || String(currentFacts.status).toUpperCase() === 'EMPTY')) return true;
+      return false;
+    }
+
     function shouldApplyWsSnapshot(snapshotPayload, options){
       var opts = options && typeof options === 'object' ? options : {};
       if (!snapshotPayload || typeof snapshotPayload !== 'object') return false;
@@ -1176,7 +1255,9 @@
         return opts.allowUnversionedUpgrade === true;
       }
       if (currentVersion == null) return true;
-      return incomingVersion > currentVersion;
+      if (incomingVersion > currentVersion) return true;
+      if (incomingVersion < currentVersion) return false;
+      return materiallyImprovesJoinedSeatRender(tableData, snapshotPayload);
     }
 
     function applyWsSnapshotNow(snapshotPayload, options){

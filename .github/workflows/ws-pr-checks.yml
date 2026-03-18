@@ -48,6 +48,9 @@ jobs:
       - name: Run poker UI ws startup order behavior test
         run: node --test tests/poker-ui-ws-startup-order.behavior.test.mjs
 
+      - name: Run poker UI ws equal-version snapshot behavior test
+        run: node --test tests/poker-ui-ws-snapshot-equal-version.behavior.test.mjs
+
       - name: Run poker UI ws auth-watch order behavior test
         run: node --test tests/poker-ui-ws-auth-watch-order.behavior.test.mjs
 
