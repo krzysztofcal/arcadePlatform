@@ -9,6 +9,7 @@ on:
       - "poker/**"
       - "tests/**"
       - "scripts/test-all.mjs"
+      - "tests/test-all.runner-registration.guard.test.mjs"
       - "infra/vps/**"
       - "docs/poker-deployment.md"
       - ".github/workflows/ws-pr-checks.yml"
