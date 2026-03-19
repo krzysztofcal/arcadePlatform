@@ -67,8 +67,15 @@ test("ws-deploy keeps ws-tests trigger surface and runs harness checks", () => {
   assert.match(text, /node --test shared\/poker-domain\/join\.behavior\.test\.mjs/);
   assert.match(text, /Run poker ws client behavior test/);
   assert.match(text, /node --test tests\/poker-ws-client\.test\.mjs/);
-  assert.match(text, /Run poker UI ws authoritative join behavior test/);
-  assert.match(text, /node --test tests\/poker-ui-ws-join-authoritative\.behavior\.test\.mjs/);
+  assert.match(text, /Run poker UI ws join smoke test/);
+  assert.match(text, /node --test tests\/poker-ui-ws-join-smoke\.behavior\.test\.mjs/);
+  assert.match(text, /Run poker UI ws act smoke test/);
+  assert.match(text, /node --test tests\/poker-ui-ws-act-smoke\.behavior\.test\.mjs/);
+  assert.doesNotMatch(text, /node --test tests\/poker-ui-ws-health-fallback\.behavior\.test\.mjs/);
+  assert.doesNotMatch(text, /node --test tests\/poker-ui-ws-startup-order\.behavior\.test\.mjs/);
+  assert.doesNotMatch(text, /node --test tests\/poker-ui-ws-snapshot-equal-version\.behavior\.test\.mjs/);
+  assert.doesNotMatch(text, /node --test tests\/poker-ui-ws-auth-watch-order\.behavior\.test\.mjs/);
+  assert.doesNotMatch(text, /node --test tests\/poker-ui-ws-visibility\.behavior\.test\.mjs/);
   assert.match(text, /Run ws join runtime behavior test/);
   assert.match(text, /node --test ws-tests\/ws-join-runtime\.behavior\.test\.mjs/);
   assertHarnessBuildContract(text);
@@ -178,8 +185,15 @@ test("ws-deploy shared authoritative join dependency is trigger-covered and arti
   assert.match(text, /node --test shared\/poker-domain\/join\.behavior\.test\.mjs/);
   assert.match(text, /Run poker ws client behavior test/);
   assert.match(text, /node --test tests\/poker-ws-client\.test\.mjs/);
-  assert.match(text, /Run poker UI ws authoritative join behavior test/);
-  assert.match(text, /node --test tests\/poker-ui-ws-join-authoritative\.behavior\.test\.mjs/);
+  assert.match(text, /Run poker UI ws join smoke test/);
+  assert.match(text, /node --test tests\/poker-ui-ws-join-smoke\.behavior\.test\.mjs/);
+  assert.match(text, /Run poker UI ws act smoke test/);
+  assert.match(text, /node --test tests\/poker-ui-ws-act-smoke\.behavior\.test\.mjs/);
+  assert.doesNotMatch(text, /node --test tests\/poker-ui-ws-health-fallback\.behavior\.test\.mjs/);
+  assert.doesNotMatch(text, /node --test tests\/poker-ui-ws-startup-order\.behavior\.test\.mjs/);
+  assert.doesNotMatch(text, /node --test tests\/poker-ui-ws-snapshot-equal-version\.behavior\.test\.mjs/);
+  assert.doesNotMatch(text, /node --test tests\/poker-ui-ws-auth-watch-order\.behavior\.test\.mjs/);
+  assert.doesNotMatch(text, /node --test tests\/poker-ui-ws-visibility\.behavior\.test\.mjs/);
   assert.match(text, /node --test ws-tests\/ws-image-contains-protocol\.behavior\.test\.mjs/);
 });
 
