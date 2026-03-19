@@ -8,6 +8,7 @@ import os from "node:os";
 import path from "node:path";
 import net from "node:net";
 import WebSocket from "ws";
+import { makeBotUserId } from "../shared/poker-domain/bots.mjs";
 
 function getFreePort() {
   return new Promise((resolve, reject) => {
@@ -3399,6 +3400,106 @@ test("authoritative join with historical non-ACTIVE seat does not rejoin shortcu
     const error = await nextMessageOfType(ws, "commandResult");
     assert.equal(error.payload.status, "rejected");
     assert.equal(error.payload.reason, "seat_taken");
+    ws.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("authoritative WS table_join seeds two bots once and returns authoritative bot seat snapshot", async () => {
+  const secret = "auth-join-bots-secret";
+  const tableId = "table_auth_join_bots";
+  const store = {
+    tables: {
+      [tableId]: {
+        tableRow: { id: tableId, max_players: 6, status: "OPEN", stakes: '{"sb":1,"bb":2}' },
+        seatRows: [],
+        stateRow: { version: 1, state: { tableId, seats: [], stacks: {}, phase: "INIT", pot: 0 } }
+      }
+    }
+  };
+  const { dir, filePath } = await writePersistedFile(store);
+  const botSeat2 = makeBotUserId(tableId, 2);
+  const botSeat3 = makeBotUserId(tableId, 3);
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      WS_PERSISTED_STATE_FILE: filePath,
+      WS_AUTHORITATIVE_JOIN_ENABLED: "1",
+      POKER_BOTS_ENABLED: "1",
+      POKER_BOTS_MAX_PER_TABLE: "2",
+      POKER_BOT_BUYIN_BB: "100",
+      POKER_BOT_PROFILE_DEFAULT: "TRIVIAL"
+    }
+  });
+
+  try {
+    await waitForListening(child, 5000);
+    const ws = await connectClient(port);
+    await hello(ws);
+    await auth(ws, makeHs256Jwt({ secret, sub: "bot_seed_human" }), "auth-join-bots");
+
+    sendFrame(ws, {
+      version: "1.0",
+      type: "table_join",
+      requestId: "join-bots-1",
+      ts: "2026-02-28T06:00:00Z",
+      payload: { tableId, seatNo: 1, buyIn: 150 }
+    });
+    const firstAck = await nextCommandResultForRequest(ws, "join-bots-1");
+    sendFrame(ws, {
+      version: "1.0",
+      type: "table_state_sub",
+      requestId: "join-bots-sub-1",
+      ts: "2026-02-28T06:00:00Z",
+      payload: { tableId }
+    });
+    const firstState = await nextMessageOfType(ws, "table_state");
+    assert.equal(firstAck.payload.status, "accepted");
+    assert.deepEqual(firstState.payload.authoritativeMembers, [
+      { userId: "bot_seed_human", seat: 1 },
+      { userId: botSeat2, seat: 2 },
+      { userId: botSeat3, seat: 3 }
+    ]);
+    assert.equal(firstState.payload.members.some((entry) => entry.userId === "bot_seed_human"), true);
+    assert.equal(firstState.payload.members.some((entry) => entry.userId === botSeat2), false);
+    assert.deepEqual(firstState.payload.seats, [
+      { userId: "bot_seed_human", seatNo: 1, status: "ACTIVE" },
+      { userId: botSeat2, seatNo: 2, status: "ACTIVE", isBot: true, botProfile: "TRIVIAL" },
+      { userId: botSeat3, seatNo: 3, status: "ACTIVE", isBot: true, botProfile: "TRIVIAL" }
+    ]);
+    assert.equal(typeof firstState.payload.stacks.bot_seed_human, "number");
+    assert.equal(typeof firstState.payload.stacks[botSeat2], "number");
+    assert.equal(typeof firstState.payload.stacks[botSeat3], "number");
+
+    sendFrame(ws, {
+      version: "1.0",
+      type: "table_join",
+      requestId: "join-bots-1",
+      ts: "2026-02-28T06:00:01Z",
+      payload: { tableId, seatNo: 1, buyIn: 150 }
+    });
+    const secondAck = await nextCommandResultForRequest(ws, "join-bots-1");
+    sendFrame(ws, {
+      version: "1.0",
+      type: "table_state_sub",
+      requestId: "join-bots-sub-2",
+      ts: "2026-02-28T06:00:01Z",
+      payload: { tableId }
+    });
+    const secondState = await nextMessageOfType(ws, "table_state");
+    assert.equal(secondAck.payload.status, "accepted");
+    assert.deepEqual(secondState.payload.authoritativeMembers, firstState.payload.authoritativeMembers);
+    assert.deepEqual(secondState.payload.seats, firstState.payload.seats);
+
+    const persisted = await readPersistedFile(filePath);
+    const persistedSeats = persisted.tables[tableId].seatRows.filter((seat) => seat.status === "ACTIVE");
+    assert.equal(persistedSeats.length, 3);
+    assert.equal(persistedSeats.filter((seat) => seat.is_bot).length, 2);
+
     ws.close();
   } finally {
     child.kill("SIGTERM");

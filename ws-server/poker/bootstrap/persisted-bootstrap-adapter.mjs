@@ -113,11 +113,52 @@ function normalizeSeatRows(seatRows, maxSeats) {
 
     seenSeatNos.add(seatNo);
     seenUserIds.add(userId);
-    activeSeats.push({ seat: seatNo, userId, isBot: Boolean(seatRow?.is_bot) });
+    const normalizedSeat = { seat: seatNo, userId, isBot: Boolean(seatRow?.is_bot) };
+    const botProfile = typeof seatRow?.bot_profile === "string" ? seatRow.bot_profile.trim() : "";
+    if (botProfile) {
+      normalizedSeat.botProfile = botProfile;
+    }
+    if (seatRow?.leave_after_hand === true) {
+      normalizedSeat.leaveAfterHand = true;
+    }
+    activeSeats.push(normalizedSeat);
   }
 
   activeSeats.sort((left, right) => left.seat - right.seat || left.userId.localeCompare(right.userId));
   return activeSeats;
+}
+
+function mergeStateSeatsWithSeatRows(stateSeats, normalizedSeatRows) {
+  const seatRows = Array.isArray(normalizedSeatRows) ? normalizedSeatRows : [];
+  const metadataByUserId = new Map(seatRows.map((seat) => [seat.userId, seat]));
+  const mergedStateSeats = Array.isArray(stateSeats)
+    ? stateSeats
+        .filter((seat) => seat && typeof seat.userId === "string")
+        .map((seat) => {
+          const metadata = metadataByUserId.get(seat.userId) || null;
+          const mergedSeat = { ...seat };
+          if (metadata?.isBot) mergedSeat.isBot = true;
+          if (metadata?.botProfile) mergedSeat.botProfile = metadata.botProfile;
+          if (metadata?.leaveAfterHand) mergedSeat.leaveAfterHand = true;
+          return mergedSeat;
+        })
+    : [];
+
+  if (mergedStateSeats.length > 0) {
+    return mergedStateSeats;
+  }
+
+  return seatRows.map((seat) => {
+    const snapshot = {
+      userId: seat.userId,
+      seatNo: seat.seat,
+      status: "ACTIVE"
+    };
+    if (seat.isBot) snapshot.isBot = true;
+    if (seat.botProfile) snapshot.botProfile = seat.botProfile;
+    if (seat.leaveAfterHand) snapshot.leaveAfterHand = true;
+    return snapshot;
+  });
 }
 
 export function adaptPersistedBootstrap({ tableId, tableRow, seatRows, stateRow }) {
@@ -148,6 +189,15 @@ export function adaptPersistedBootstrap({ tableId, tableRow, seatRows, stateRow 
 
   const members = seats.map((seat) => ({ userId: seat.userId, seat: seat.seat }));
   const publicStacks = normalizePublicStacks(seatRows);
+  const stateSeats = mergeStateSeatsWithSeatRows(pokerState.seats, seats);
+  const seatDetailsByUserId = {};
+  for (const seat of seats) {
+    seatDetailsByUserId[seat.userId] = {
+      isBot: seat.isBot === true,
+      botProfile: seat.botProfile || null,
+      leaveAfterHand: seat.leaveAfterHand === true
+    };
+  }
   const seatByUserId = {};
   const presenceByUserId = new Map();
   for (const seat of seats) {
@@ -171,9 +221,10 @@ export function adaptPersistedBootstrap({ tableId, tableRow, seatRows, stateRow 
         version: stateVersion,
         members,
         seats: seatByUserId,
+        seatDetailsByUserId,
         publicStacks,
         appliedRequestIds: [],
-        pokerState: { ...pokerState }
+        pokerState: { ...pokerState, seats: stateSeats }
       },
       presenceByUserId,
       subscribers: new Set(),

@@ -7,8 +7,10 @@ Poker bots are implemented in the current runtime.
 - Runtime modules:
   - `netlify/functions/_shared/poker-bots.mjs`
   - `netlify/functions/_shared/poker-bot-cashout.mjs`
+  - `shared/poker-domain/bots.mjs` (neutral join/bot-seed helper used by WS authoritative join and HTTP join paths)
 - Runtime integration points:
   - `netlify/functions/poker-join.mjs` (bot seeding and bot `TABLE_BUY_IN`)
+  - `shared/poker-domain/join.mjs` (neutral authoritative join + bot seed core)
   - `netlify/functions/poker-start-hand.mjs` and `netlify/functions/poker-act.mjs` (bot autoplay paths)
   - `netlify/functions/poker-sweep.mjs` (bot timeout/close cash-out paths)
 - Behavior coverage in tests includes seed/autoplay/sweep, for example:

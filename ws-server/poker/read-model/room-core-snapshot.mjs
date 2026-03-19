@@ -33,11 +33,31 @@ function normalizeSeatRows(value) {
   }
   return value
     .filter((seat) => seat && typeof seat.userId === "string" && Number.isInteger(seat.seatNo))
-    .map((seat) => ({
-      userId: seat.userId,
-      seatNo: seat.seatNo,
-      status: typeof seat.status === "string" ? seat.status : "ACTIVE"
-    }));
+    .map((seat) => {
+      const normalized = {
+        userId: seat.userId,
+        seatNo: seat.seatNo,
+        status: typeof seat.status === "string" ? seat.status : "ACTIVE"
+      };
+      if (seat.isBot === true) normalized.isBot = true;
+      if (typeof seat.botProfile === "string" && seat.botProfile) normalized.botProfile = seat.botProfile;
+      if (seat.leaveAfterHand === true) normalized.leaveAfterHand = true;
+      return normalized;
+    });
+}
+
+function normalizeSeatDetails(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+  const entries = Object.entries(value)
+    .filter(([userId]) => typeof userId === "string" && userId)
+    .map(([userId, details]) => [userId, {
+      isBot: details?.isBot === true,
+      botProfile: typeof details?.botProfile === "string" ? details.botProfile : null,
+      leaveAfterHand: details?.leaveAfterHand === true
+    }]);
+  return Object.fromEntries(entries);
 }
 
 function normalizeStacks(value) {
@@ -57,10 +77,19 @@ function normalizeMemberSeatRows(value) {
     .map((member) => ({ userId: member.userId, seatNo: member.seat, status: "ACTIVE" }));
 }
 
-function resolvePublicSeats({ statePublic, members }) {
+function resolvePublicSeats({ statePublic, members, coreState }) {
   const stateSeats = normalizeSeatRows(statePublic?.seats);
+  const seatDetailsByUserId = normalizeSeatDetails(coreState?.seatDetailsByUserId);
   if (stateSeats.length > 0) {
-    return stateSeats;
+    return stateSeats.map((seat) => {
+      const details = seatDetailsByUserId[seat.userId] || null;
+      if (!details) return seat;
+      const merged = { ...seat };
+      if (details.isBot) merged.isBot = true;
+      if (details.botProfile) merged.botProfile = details.botProfile;
+      if (details.leaveAfterHand) merged.leaveAfterHand = true;
+      return merged;
+    });
   }
   return normalizeMemberSeatRows(members);
 }
@@ -174,7 +203,7 @@ function resolvePrivateBranch({ state, userId, youSeat }) {
 export function projectRoomCoreSnapshot({ tableId, roomId, coreState, members, userId, youSeat }) {
   const state = asObject(coreState?.pokerState) || asObject(coreState?.state);
   const statePublic = state ? withoutPrivateState(state) : null;
-  const publicSeats = resolvePublicSeats({ statePublic, members });
+  const publicSeats = resolvePublicSeats({ statePublic, members, coreState });
   const publicStacks = resolvePublicStacks({ statePublic, coreState, seats: publicSeats });
 
   if (!statePublic) {
