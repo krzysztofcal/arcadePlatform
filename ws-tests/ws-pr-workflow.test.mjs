@@ -56,6 +56,7 @@ function assertRequiredOrder(text) {
   const rootInstall = block.indexOf("\n        run: npm ci\n");
   const runtimeDepsGuard = block.indexOf("node --test ws-tests/ws-server-package-runtime-deps.guard.test.mjs");
   const sharedJoinBehavior = block.indexOf("node --test shared/poker-domain/join.behavior.test.mjs");
+  const joinRuntimeBehavior = block.indexOf("node --test ws-tests/ws-join-runtime.behavior.test.mjs");
   const behavior = block.indexOf("node --test ws-server/server.behavior.test.mjs");
   const locationGuard = block.indexOf("node --test ws-tests/ws-tests-location.guard.test.mjs");
   const suiteGuard = block.indexOf("node --test ws-tests/ws-tests-suite-completeness.guard.test.mjs");
@@ -82,6 +83,7 @@ function assertRequiredOrder(text) {
   assert.notEqual(install, -1);
   assert.notEqual(runtimeDepsGuard, -1);
   assert.notEqual(sharedJoinBehavior, -1);
+  assert.notEqual(joinRuntimeBehavior, -1);
   assert.notEqual(behavior, -1);
   assert.notEqual(locationGuard, -1);
   assert.notEqual(suiteGuard, -1);
@@ -91,7 +93,8 @@ function assertRequiredOrder(text) {
   assert.notEqual(containerCheck, -1);
   assert.equal(install < runtimeDepsGuard, true);
   assert.equal(runtimeDepsGuard < sharedJoinBehavior, true);
-  assert.equal(sharedJoinBehavior < behavior, true);
+  assert.equal(sharedJoinBehavior < joinRuntimeBehavior, true);
+  assert.equal(joinRuntimeBehavior < behavior, true);
   assert.equal(behavior < locationGuard, true);
   assert.equal(locationGuard < suiteGuard, true);
   assert.equal(suiteGuard < infraVpcCaddyGuard, true);
@@ -151,6 +154,8 @@ test("ws pr workflow uses read-only token permissions", () => {
 
 test("ws pr workflow runs ws-server deploy harness tests", () => {
   const text = workflowText();
+  assert.match(text, /Run ws join runtime behavior test/);
+  assert.match(text, /node --test ws-tests\/ws-join-runtime\.behavior\.test\.mjs/);
   assert.match(text, /node --test ws-tests\/ws-server-deploy-artifact-path\.test\.mjs/);
   assert.match(text, /node --test ws-tests\/ws-server-deploy-rollout\.test\.mjs/);
 });
