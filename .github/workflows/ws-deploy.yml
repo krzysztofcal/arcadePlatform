@@ -16,6 +16,10 @@ on:
       - ".github/workflows/ws-pr-checks.yml"
       - ".github/workflows/ws-deploy.yml"
 
+env:
+  WS_DOCKER_BUILD_CONTEXT: "."
+  WS_DOCKERFILE_PATH: "ws-server/Dockerfile"
+
 jobs:
   ws-harness-main:
     runs-on: ubuntu-latest
@@ -65,10 +69,11 @@ jobs:
         run: node --test ws-tests/ws-lobby-join-public-snapshot.behavior.test.mjs
 
 
-      - name: Validate ws Dockerfile build contract (repo-root context)
+      - name: Validate shared WS Docker build contract (repo-root context)
         run: |
           set -euo pipefail
-          docker build -t arcadeplatform-ws-contract:${{ github.sha }} -f ws-server/Dockerfile .
+          # Must stay aligned with ws-tests/ws-docker-build-contract.mjs and any real image build/push path in this workflow.
+          docker build -t arcadeplatform-ws-contract:${{ github.sha }} -f "$WS_DOCKERFILE_PATH" "$WS_DOCKER_BUILD_CONTEXT"
           docker image rm -f arcadeplatform-ws-contract:${{ github.sha }}
 
       - name: Run WS behavior test

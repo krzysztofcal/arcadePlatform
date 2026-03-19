@@ -8,9 +8,8 @@ import { patchLeftTableByUserId } from "./_shared/poker-left-flag.mjs";
 import { clearMissedTurns } from "./_shared/poker-missed-turns.mjs";
 import { patchSitOutByUserId } from "./_shared/poker-sitout-flag.mjs";
 import { loadPokerStateForUpdate, updatePokerStateLocked } from "./_shared/poker-state-write-locked.mjs";
-import { computeTargetBotCount, getBotConfig, makeBotSystemKey, makeBotUserId } from "./_shared/poker-bots.mjs";
+import { applySeatsAndStacksToState, getBotConfig, seedBotsForJoin } from "../../shared/poker-domain/bots.mjs";
 import { parseStakes } from "./_shared/poker-stakes.mjs";
-import { shouldSeedBotsOnJoin } from "./_shared/poker-table-lifecycle.mjs";
 
 const REQUEST_PENDING_STALE_SEC = 30;
 const UNIQUE_VIOLATION = "23505";
@@ -226,92 +225,6 @@ const resolveFullTableJoinError = async (tx, { tableId, userId }) => {
     return "table_full_bot_leaving";
   }
   return "table_full";
-};
-
-const seedBotsAfterHumanJoin = async (tx, { tableId, maxPlayers, bb, cfg, humanUserId }) => {
-  if (!cfg?.enabled) return [];
-  const countRows = await tx.unsafe(
-    "select count(*)::int as count from public.poker_seats where table_id = $1 and status = 'ACTIVE' and coalesce(is_bot, false) = false;",
-    [tableId]
-  );
-  const humanCount = Number(countRows?.[0]?.count || 0);
-  if (!shouldSeedBotsOnJoin({ humanCount })) return [];
-  const targetBots = computeTargetBotCount({ maxPlayers, humanCount, maxBots: cfg.maxPerTable });
-  if (!Number.isInteger(targetBots) || targetBots <= 0) return [];
-
-  const existingBotRows = await tx.unsafe(
-    "select count(*)::int as count from public.poker_seats where table_id = $1 and status = 'ACTIVE' and coalesce(is_bot, false) = true;",
-    [tableId]
-  );
-  const existingBotCount = Number(existingBotRows?.[0]?.count || 0);
-  const toSeed = Math.max(0, targetBots - existingBotCount);
-  if (toSeed <= 0) return [];
-
-  const existingRows = await tx.unsafe(
-    "select seat_no from public.poker_seats where table_id = $1 order by seat_no asc;",
-    [tableId]
-  );
-  const occupied = new Set();
-  for (const row of existingRows || []) {
-    if (Number.isInteger(row?.seat_no)) occupied.add(row.seat_no);
-  }
-
-  const selectedSeats = [];
-  for (let seatNo = 1; seatNo <= maxPlayers && selectedSeats.length < toSeed; seatNo += 1) {
-    if (!occupied.has(seatNo)) selectedSeats.push(seatNo);
-  }
-  if (!selectedSeats.length) return [];
-
-  const buyInChips = Math.max(1, Math.trunc(Number(cfg.buyInBB) * Number(bb)));
-  const escrowSystemKey = `POKER_TABLE:${tableId}`;
-  const seededBots = [];
-
-  for (const seatNo of selectedSeats) {
-    const botUserId = makeBotUserId(tableId, seatNo);
-    const botSystemKey = makeBotSystemKey(tableId, seatNo);
-    const insertRows = await tx.unsafe(
-      `
-insert into public.poker_seats (table_id, user_id, seat_no, status, is_bot, bot_profile, leave_after_hand, stack, last_seen_at, joined_at)
-values ($1, $2, $3, 'ACTIVE', true, $4, false, $5, now(), now())
-on conflict do nothing
-returning seat_no;
-      `,
-      [tableId, botUserId, seatNo, cfg.defaultProfile, buyInChips]
-    );
-    if (!insertRows?.length) continue;
-
-    try {
-      await postTransaction({
-        userId: null,
-        txType: "TABLE_BUY_IN",
-        idempotencyKey: `bot-seed-buyin:${tableId}:${seatNo}`,
-        metadata: {
-          actor: "BOT",
-          botUserId,
-          botSystemKey,
-          tableId,
-          seatNo,
-          botProfile: cfg.defaultProfile,
-          reason: "BOT_SEED_BUY_IN",
-        },
-        entries: [
-          { accountType: "SYSTEM", systemKey: cfg.bankrollSystemKey, amount: -buyInChips },
-          { accountType: "ESCROW", systemKey: escrowSystemKey, amount: buyInChips },
-        ],
-        createdBy: humanUserId,
-        tx,
-      });
-      seededBots.push({ userId: botUserId, seatNo, stack: buyInChips });
-    } catch (error) {
-      await tx.unsafe(
-        "delete from public.poker_seats where table_id = $1 and user_id = $2 and seat_no = $3 and coalesce(is_bot, false) = true;",
-        [tableId, botUserId, seatNo]
-      );
-      klog("poker_join_bot_seed_failed", { tableId, seatNo, botUserId, reason: error?.code || error?.message || "unknown_error" });
-    }
-  }
-
-  return seededBots;
 };
 
 const ensureStateSeatEntry = (state, userId, seatNoDb) => {
@@ -710,12 +623,15 @@ values ($1, $2, $3, 'ACTIVE', now(), now(), $4);
         if (botCfg.enabled) {
           const stakesParsed = parseStakes(table?.stakes);
           if (stakesParsed?.ok) {
-            seededBots = await seedBotsAfterHumanJoin(tx, {
+            seededBots = await seedBotsForJoin({
+              tx,
               tableId,
               maxPlayers: Number(table.max_players),
-              bb: stakesParsed.value.bb,
+              tableStakes: table?.stakes,
               cfg: botCfg,
               humanUserId: auth.userId,
+              postTransaction,
+              klog
             });
           } else {
             klog("poker_join_bot_seed_skip_invalid_stakes", { tableId, stakes: table?.stakes ?? null });
@@ -732,17 +648,6 @@ values ($1, $2, $3, 'ACTIVE', now(), now(), $4);
         }
 
         const currentState = loadResult.state;
-        const seats = parseSeats(currentState.seats).filter((seat) => seat?.userId !== auth.userId);
-        seats.push({ userId: auth.userId, seatNo: seatNoDbToUse });
-        for (const bot of seededBots) {
-          if (!seats.some((seat) => seat?.userId === bot.userId)) {
-            seats.push({ userId: bot.userId, seatNo: bot.seatNo });
-          }
-        }
-        const stacks = { ...parseStacks(currentState.stacks), [auth.userId]: buyIn };
-        for (const bot of seededBots) {
-          stacks[bot.userId] = bot.stack;
-        }
         const preserveLeftDuringActiveHand = !!currentState?.leftTableByUserId?.[auth.userId] && isHandInProgress(currentState?.phase);
         let nextBaseState = currentState;
         if (preserveLeftDuringActiveHand) {
@@ -756,10 +661,11 @@ values ($1, $2, $3, 'ACTIVE', now(), now(), $4);
         }
 
         const updatedState = {
-          ...nextBaseState,
-          tableId: currentState.tableId || tableId,
-          seats,
-          stacks,
+          ...applySeatsAndStacksToState(nextBaseState, {
+            tableId,
+            seatEntries: [{ userId: auth.userId, seatNo: seatNoDbToUse, status: "ACTIVE" }, ...seededBots],
+            stackEntries: [[auth.userId, buyIn], ...seededBots.map((bot) => [bot.userId, bot.stack])]
+          }),
           pot: Number.isFinite(currentState.pot) ? currentState.pot : 0,
           phase: currentState.phase || "INIT",
         };

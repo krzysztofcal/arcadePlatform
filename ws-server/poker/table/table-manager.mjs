@@ -451,6 +451,10 @@ export function createTableManager({
           .concat({ userId, seat: authoritativeSeat })
           .sort((a, b) => a.seat - b.seat || a.userId.localeCompare(b.userId));
         const nextSeats = { ...table.coreState.seats, [userId]: authoritativeSeat };
+        const currentSeatDetails = table.coreState.seatDetailsByUserId && typeof table.coreState.seatDetailsByUserId === "object" && !Array.isArray(table.coreState.seatDetailsByUserId)
+          ? table.coreState.seatDetailsByUserId
+          : {};
+        const nextSeatDetails = { ...currentSeatDetails, [userId]: currentSeatDetails[userId] || { isBot: false, botProfile: null, leaveAfterHand: false } };
         const currentPublicStacks = table.coreState.publicStacks && typeof table.coreState.publicStacks === "object" && !Array.isArray(table.coreState.publicStacks)
           ? table.coreState.publicStacks
           : {};
@@ -467,6 +471,7 @@ export function createTableManager({
           version: changed ? Number(table.coreState.version || 0) + 1 : table.coreState.version,
           members: nextMembers,
           seats: nextSeats,
+          seatDetailsByUserId: nextSeatDetails,
           publicStacks: nextPublicStacks
         };
 

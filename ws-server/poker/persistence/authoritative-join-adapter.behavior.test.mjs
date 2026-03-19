@@ -1,11 +1,22 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { isStateStorageValid } from "../../../netlify/functions/_shared/poker-state-utils.mjs";
 import { createAuthoritativeJoinExecutor } from "./authoritative-join-adapter.mjs";
+
+const validateStateForStorage = (state) =>
+  isStateStorageValid(state, { requireNoDeck: true, requireHandSeed: false, requireCommunityDealt: false });
+
+const lockedStateHelpers = async () => ({
+  loadStateForUpdate: async () => ({ ok: true, version: 0, state: {} }),
+  updateStateLocked: async () => ({ ok: true, newVersion: 1 }),
+  validateStateForStorage
+});
 
 test("authoritative join adapter returns unavailable when join core is missing", async () => {
   const execute = createAuthoritativeJoinExecutor({
     env: {},
     klog: () => {},
+    loadLockedStateHelpersFn: lockedStateHelpers,
     loadPostTransactionFn: async () => async () => ({ ok: true }),
     loadJoinModule: async () => ({})
   });
@@ -17,6 +28,7 @@ test("authoritative join adapter maps unknown thrown errors", async () => {
   const execute = createAuthoritativeJoinExecutor({
     env: {},
     klog: () => {},
+    loadLockedStateHelpersFn: lockedStateHelpers,
     loadPostTransactionFn: async () => async () => ({ ok: true }),
     loadJoinModule: async () => ({
       executePokerJoinAuthoritative: async () => {
@@ -28,12 +40,31 @@ test("authoritative join adapter maps unknown thrown errors", async () => {
   assert.deepEqual(result, { ok: false, code: "authoritative_join_failed" });
 });
 
+test("authoritative join adapter returns unavailable when locked-state validator helper is missing", async () => {
+  const execute = createAuthoritativeJoinExecutor({
+    env: {},
+    klog: () => {},
+    loadLockedStateHelpersFn: async () => ({
+      loadStateForUpdate: async () => ({ ok: true, version: 0, state: {} }),
+      updateStateLocked: async () => ({ ok: true, newVersion: 1 })
+    }),
+    loadPostTransactionFn: async () => async () => ({ ok: true }),
+    loadJoinModule: async () => ({
+      executePokerJoinAuthoritative: async () => ({ ok: true, seatNo: 2, rejoin: false, stack: 100 })
+    })
+  });
+
+  const result = await execute({ tableId: "t1", userId: "u1", requestId: "r-missing-validator" });
+  assert.deepEqual(result, { ok: false, code: "temporarily_unavailable" });
+});
+
 test("authoritative join adapter forwards only shared-core supported args", async () => {
   let captured = null;
   const execute = createAuthoritativeJoinExecutor({
     env: { WS_DEFAULT_BUYIN: "25" },
     klog: () => {},
     beginSql: async (fn) => fn({ ok: true }),
+    loadLockedStateHelpersFn: lockedStateHelpers,
     loadPostTransactionFn: async () => async () => ({ ok: true }),
     loadJoinModule: async () => ({
       executePokerJoinAuthoritative: async (args) => {
@@ -48,7 +79,8 @@ test("authoritative join adapter forwards only shared-core supported args", asyn
   assert.equal(result.seatNo, 2);
   assert.equal(result.rejoin, false);
   assert.equal(result.stack, 100);
-  assert.deepEqual(Object.keys(captured || {}).sort(), ["beginSql", "klog", "postTransactionFn", "requestId", "tableId", "userId"]);
+  assert.deepEqual(Object.keys(captured || {}).sort(), ["beginSql", "klog", "loadStateForUpdate", "postTransactionFn", "requestId", "tableId", "updateStateLocked", "userId", "validateStateForStorage"]);
+  assert.equal(captured.validateStateForStorage, validateStateForStorage);
   assert.equal(Object.hasOwn(captured, "buyIn"), false);
   assert.equal(Object.hasOwn(captured, "autoSeat"), false);
   assert.equal(Object.hasOwn(captured, "preferredSeatNo"), false);
@@ -61,6 +93,7 @@ test("authoritative join adapter preserves explicit rejoin semantics", async () 
     env: {},
     klog: () => {},
     beginSql: async (fn) => fn({ ok: true }),
+    loadLockedStateHelpersFn: lockedStateHelpers,
     loadPostTransactionFn: async () => async () => ({ ok: true }),
     loadJoinModule: async () => ({
       executePokerJoinAuthoritative: async () => ({ ok: true, seatNo: 3, rejoin: true, stack: 120 })
@@ -79,6 +112,7 @@ test("authoritative join adapter rejects malformed success payload", async () =>
     env: {},
     klog: () => {},
     beginSql: async (fn) => fn({ ok: true }),
+    loadLockedStateHelpersFn: lockedStateHelpers,
     loadPostTransactionFn: async () => async () => ({ ok: true }),
     loadJoinModule: async () => ({
       executePokerJoinAuthoritative: async () => ({ ok: true, seatNo: 2, rejoin: false, stack: 0 })
@@ -95,6 +129,7 @@ test("authoritative join adapter surfaces financial mutation failure codes", asy
     env: {},
     klog: () => {},
     beginSql: async (fn) => fn({ ok: true }),
+    loadLockedStateHelpersFn: lockedStateHelpers,
     loadPostTransactionFn: async () => async () => ({ ok: true }),
     loadJoinModule: async () => ({
       executePokerJoinAuthoritative: async () => {
@@ -113,6 +148,7 @@ test("authoritative join adapter returns unavailable when postTransaction loader
   const execute = createAuthoritativeJoinExecutor({
     env: {},
     klog: () => {},
+    loadLockedStateHelpersFn: lockedStateHelpers,
     loadPostTransactionFn: async () => {
       throw new Error("missing_post_transaction");
     },
@@ -131,6 +167,7 @@ test("authoritative join adapter preserves poker_state_missing as protocol-safe 
     env: {},
     klog: () => {},
     beginSql: async (fn) => fn({ ok: true }),
+    loadLockedStateHelpersFn: lockedStateHelpers,
     loadPostTransactionFn: async () => async () => ({ ok: true }),
     loadJoinModule: async () => ({
       executePokerJoinAuthoritative: async () => {
@@ -151,6 +188,7 @@ test("authoritative join adapter preserves seat_taken as protocol-safe known cod
     env: {},
     klog: () => {},
     beginSql: async (fn) => fn({ ok: true }),
+    loadLockedStateHelpersFn: lockedStateHelpers,
     loadPostTransactionFn: async () => async () => ({ ok: true }),
     loadJoinModule: async () => ({
       executePokerJoinAuthoritative: async () => {
@@ -171,6 +209,7 @@ test("authoritative join adapter uses file-store ledger fallback and preserves c
     env: { WS_PERSISTED_STATE_FILE: "/tmp/ws-persist.json" },
     klog: () => {},
     beginSql: async (fn) => fn({ ok: true }),
+    loadLockedStateHelpersFn: lockedStateHelpers,
     loadPostTransactionFn: async () => {
       throw new Error("missing_post_transaction");
     },
@@ -191,6 +230,7 @@ test("authoritative join adapter keeps runtime unavailable when not in file-stor
   const execute = createAuthoritativeJoinExecutor({
     env: { SUPABASE_DB_URL: "postgres://example" },
     klog: () => {},
+    loadLockedStateHelpersFn: lockedStateHelpers,
     loadPostTransactionFn: async () => {
       throw new Error("missing_post_transaction");
     },

@@ -16,6 +16,27 @@ async function loadLedgerPostTransaction() {
   return ledgerModule.postTransaction;
 }
 
+const DEFAULT_STORAGE_STATE_OPTIONS = Object.freeze({
+  requireNoDeck: true,
+  requireHandSeed: false,
+  requireCommunityDealt: false
+});
+
+async function loadLockedStateHelpers() {
+  const [lockedModule, stateUtilsModule] = await Promise.all([
+    import("../../../netlify/functions/_shared/poker-state-write-locked.mjs"),
+    import("../../../netlify/functions/_shared/poker-state-utils.mjs")
+  ]);
+  if (typeof lockedModule?.loadPokerStateForUpdate !== "function" || typeof lockedModule?.updatePokerStateLocked !== "function" || typeof stateUtilsModule?.isStateStorageValid !== "function") {
+    throw new Error("missing_locked_state_helpers");
+  }
+  return {
+    loadStateForUpdate: lockedModule.loadPokerStateForUpdate,
+    updateStateLocked: lockedModule.updatePokerStateLocked,
+    validateStateForStorage: (state) => stateUtilsModule.isStateStorageValid(state, DEFAULT_STORAGE_STATE_OPTIONS)
+  };
+}
+
 function resolveJoinTestOverride(env = process.env) {
   const raw = env.WS_TEST_AUTHORITATIVE_JOIN_RESULT_JSON;
   if (!raw) return null;
@@ -58,7 +79,17 @@ function normalizeSuccess(result, { tableId, userId, requestId, klog }) {
     klog("ws_join_authoritative_failed", { tableId, userId, requestId: requestId || null, code: "authoritative_state_invalid", message: "invalid_stack" });
     return { ok: false, code: "authoritative_state_invalid" };
   }
-  return { ok: true, tableId, userId, seatNo, stack, rejoin: result?.rejoin === true, requestId: requestId || null };
+  return {
+    ok: true,
+    tableId,
+    userId,
+    seatNo,
+    stack,
+    rejoin: result?.rejoin === true,
+    requestId: requestId || null,
+    seededBots: Array.isArray(result?.seededBots) ? result.seededBots : [],
+    snapshot: result?.snapshot && typeof result.snapshot === "object" ? result.snapshot : null
+  };
 }
 
 export function createAuthoritativeJoinExecutor({
@@ -67,6 +98,7 @@ export function createAuthoritativeJoinExecutor({
   beginSql = beginSqlDefault,
   loadJoinModule = loadHttpAuthoritativeJoinModule,
   loadPostTransactionFn = loadLedgerPostTransaction,
+  loadLockedStateHelpersFn = loadLockedStateHelpers,
 } = {}) {
   return async function executeAuthoritativeJoin({ tableId, userId, requestId, seatNo = null, autoSeat = false, preferredSeatNo = null, buyIn = null }) {
     const override = resolveJoinTestOverride(env);
@@ -98,18 +130,18 @@ export function createAuthoritativeJoinExecutor({
     }
 
     let postTransactionFn;
-    try {
-      postTransactionFn = await loadPostTransactionFn();
-    } catch (error) {
-      if (shouldUseLedgerFallback(env)) {
-        klog("ws_join_authoritative_ledger_fallback", {
-          tableId,
-          userId,
-          requestId: requestId || null,
-          message: error?.message || "post_transaction_unavailable",
-        });
-        postTransactionFn = noopPostTransaction;
-      } else {
+    if (shouldUseLedgerFallback(env)) {
+      klog("ws_join_authoritative_ledger_fallback", {
+        tableId,
+        userId,
+        requestId: requestId || null,
+        message: "file_store_no_ledger"
+      });
+      postTransactionFn = noopPostTransaction;
+    } else {
+      try {
+        postTransactionFn = await loadPostTransactionFn();
+      } catch (error) {
         klog("ws_join_authoritative_unavailable", {
           tableId,
           userId,
@@ -120,6 +152,22 @@ export function createAuthoritativeJoinExecutor({
       }
     }
 
+    let lockedStateHelpers;
+    try {
+      lockedStateHelpers = await loadLockedStateHelpersFn();
+      if (typeof lockedStateHelpers?.loadStateForUpdate !== "function" || typeof lockedStateHelpers?.updateStateLocked !== "function" || typeof lockedStateHelpers?.validateStateForStorage !== "function") {
+        throw new Error("missing_locked_state_helpers");
+      }
+    } catch (error) {
+      klog("ws_join_authoritative_unavailable", {
+        tableId,
+        userId,
+        requestId: requestId || null,
+        message: error?.message || "locked_state_helpers_unavailable"
+      });
+      return { ok: false, code: "temporarily_unavailable" };
+    }
+
     try {
       const sharedArgs = {
         beginSql: (fn) => beginSql(fn, { env }),
@@ -128,6 +176,9 @@ export function createAuthoritativeJoinExecutor({
         requestId,
         klog,
         postTransactionFn,
+        loadStateForUpdate: lockedStateHelpers.loadStateForUpdate,
+        updateStateLocked: lockedStateHelpers.updateStateLocked,
+        validateStateForStorage: lockedStateHelpers.validateStateForStorage
       };
       if (seatNo !== null && seatNo !== undefined) sharedArgs.seatNo = seatNo;
       if (autoSeat === true) sharedArgs.autoSeat = true;

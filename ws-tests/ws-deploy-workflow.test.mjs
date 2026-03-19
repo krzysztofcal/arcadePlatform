@@ -6,6 +6,36 @@ function workflowText() {
   return fs.readFileSync(".github/workflows/ws-deploy.yml", "utf8");
 }
 
+function fileText(filePath) {
+  return fs.readFileSync(filePath, "utf8");
+}
+
+const repoRootDockerArgsPattern = /wsDockerBuildArgs\(imageTag\)/;
+
+function requiredStep(text, stepName) {
+  const marker = `- name: ${stepName}`;
+  const start = text.indexOf(marker);
+  assert.notEqual(start, -1, `Missing required workflow step: ${stepName}`);
+  const remainder = text.slice(start);
+  const next = remainder.indexOf("\n      - name:", marker.length);
+  return next === -1 ? remainder : remainder.slice(0, next);
+}
+
+function assertHarnessBuildContract(text) {
+  assert.match(text, /WS_DOCKER_BUILD_CONTEXT: "\."/);
+  assert.match(text, /WS_DOCKERFILE_PATH: "ws-server\/Dockerfile"/);
+  assert.doesNotMatch(text, /context:\s*\.\/ws-server/);
+
+  const stepText = requiredStep(text, "Validate shared WS Docker build contract (repo-root context)");
+  assert.match(stepText, /docker build[^\n]*arcadeplatform-ws-contract:\$\{\{ github\.sha \}\}[^\n]*-f "\$WS_DOCKERFILE_PATH" "\$WS_DOCKER_BUILD_CONTEXT"/);
+  assert.doesNotMatch(stepText, /docker build[^\n]*-f ws-server\/Dockerfile \.\/ws-server/);
+}
+
+function assertNoSyntheticProductionImageStep(text) {
+  assert.doesNotMatch(text, /- name: Build & Push Docker Image/);
+  assert.doesNotMatch(text, /docker build[^\n]*arcadeplatform-ws-prod:/);
+}
+
 test("ws-deploy keeps ws-tests trigger surface and runs harness checks", () => {
   const text = workflowText();
 
@@ -39,9 +69,8 @@ test("ws-deploy keeps ws-tests trigger surface and runs harness checks", () => {
   assert.match(text, /node --test tests\/poker-ws-client\.test\.mjs/);
   assert.match(text, /Run poker UI ws authoritative join behavior test/);
   assert.match(text, /node --test tests\/poker-ui-ws-join-authoritative\.behavior\.test\.mjs/);
-  assert.match(text, /Validate ws Dockerfile build contract \(repo-root context\)/);
-  assert.match(text, /docker build -t arcadeplatform-ws-contract:\$\{\{ github\.sha \}\} -f ws-server\/Dockerfile \./);
-  assert.doesNotMatch(text, /docker build[^\n]*-f ws-server\/Dockerfile \.\/ws-server/);
+  assertHarnessBuildContract(text);
+  assertNoSyntheticProductionImageStep(text);
   assert.match(text, /Run state-patch behavior test/);
   assert.match(text, /node --test ws-server\/poker\/read-model\/state-patch\.behavior\.test\.mjs/);
   assert.match(text, /Run stream-log behavior test/);
@@ -95,7 +124,6 @@ test("ws Dockerfile keeps ws-server deploy context-compatible copy contract", ()
   assert.doesNotMatch(dockerfile, /npm ci --omit=dev --ignore-scripts/);
 });
 
-
 test("repo-root docker build contract excludes host ws-server/node_modules artifacts", () => {
   const dockerignore = fs.readFileSync(".dockerignore", "utf8");
   assert.match(dockerignore, /ws-server\/node_modules/);
@@ -119,15 +147,8 @@ test("ws-deploy trigger surface includes ws-server runtime changes", () => {
 test("ws-deploy keeps Docker artifact contract parity with repo-root context", () => {
   const text = workflowText();
 
-  assert.match(text, /Validate ws Dockerfile build contract \(repo-root context\)/);
-  assert.match(text, /docker build -t arcadeplatform-ws-contract:\$\{\{ github\.sha \}\} -f ws-server\/Dockerfile \./);
-  assert.doesNotMatch(text, /context:\s*\.\/ws-server/);
-
-  const usesBuildPush = /docker\/build-push-action@v6/.test(text);
-  if (usesBuildPush) {
-    assert.match(text, /docker\/build-push-action@v6[\s\S]*context:\s*\./);
-    assert.match(text, /docker\/build-push-action@v6[\s\S]*file:\s*ws-server\/Dockerfile/);
-  }
+  assertHarnessBuildContract(text);
+  assertNoSyntheticProductionImageStep(text);
 });
 
 
@@ -150,11 +171,31 @@ test("ws-deploy shared authoritative join dependency is trigger-covered and arti
   const pushBlock = pushBlockMatch ? pushBlockMatch[1] : "";
 
   assert.match(pushBlock, /"shared\/\*\*"/);
-  assert.match(text, /docker build -t arcadeplatform-ws-contract:\$\{\{ github\.sha \}\} -f ws-server\/Dockerfile \./);
+  assertHarnessBuildContract(text);
+  assertNoSyntheticProductionImageStep(text);
   assert.match(text, /node --test shared\/poker-domain\/join\.behavior\.test\.mjs/);
   assert.match(text, /Run poker ws client behavior test/);
   assert.match(text, /node --test tests\/poker-ws-client\.test\.mjs/);
   assert.match(text, /Run poker UI ws authoritative join behavior test/);
   assert.match(text, /node --test tests\/poker-ui-ws-join-authoritative\.behavior\.test\.mjs/);
   assert.match(text, /node --test ws-tests\/ws-image-contains-protocol\.behavior\.test\.mjs/);
+});
+
+test("ws image tests and deploy workflow use the same repo-root Docker build contract", () => {
+  const workflow = workflowText();
+  const imageTest = fileText("ws-tests/ws-image-contains-protocol.behavior.test.mjs");
+  const containerStartsTest = fileText("ws-tests/ws-container-starts.behavior.test.mjs");
+  const helper = fileText("ws-tests/ws-docker-build-contract.mjs");
+
+  assertHarnessBuildContract(workflow);
+  assertNoSyntheticProductionImageStep(workflow);
+  assert.match(helper, /const WS_DOCKERFILE_PATH = "ws-server\/Dockerfile"/);
+  assert.match(helper, /const WS_DOCKER_BUILD_CONTEXT = "\."/);
+  assert.match(helper, /function wsDockerBuildArgs\(imageTag\)/);
+  assert.match(imageTest, /import \{ wsDockerBuildArgs \} from "\.\/ws-docker-build-contract\.mjs"/);
+  assert.match(containerStartsTest, /import \{ wsDockerBuildArgs \} from "\.\/ws-docker-build-contract\.mjs"/);
+  assert.match(imageTest, repoRootDockerArgsPattern);
+  assert.match(containerStartsTest, repoRootDockerArgsPattern);
+  assert.doesNotMatch(imageTest, /docker", \["build", "-t", imageTag, "-f", "ws-server\/Dockerfile", "\.\/ws-server"\]/);
+  assert.doesNotMatch(containerStartsTest, /docker", \["build", "-t", imageTag, "-f", "ws-server\/Dockerfile", "\.\/ws-server"\]/);
 });

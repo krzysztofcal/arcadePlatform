@@ -112,6 +112,23 @@ const makeJoinHandler = ({
             seats.push({ table_id: tableId, user_id: userId, seat_no: params?.[2], status: "ACTIVE", is_bot: false, stack: params?.[3] });
             return [];
           }
+          if (
+            sqlNormalized.includes("select user_id, seat_no, status, is_bot, bot_profile, leave_after_hand, stack") &&
+            sqlNormalized.includes("from public.poker_seats") &&
+            sqlNormalized.includes("order by seat_no asc")
+          ) {
+            return seats
+              .map((seat) => ({
+                user_id: seat.user_id,
+                seat_no: seat.seat_no,
+                status: seat.status,
+                is_bot: !!seat.is_bot,
+                bot_profile: seat.bot_profile ?? null,
+                leave_after_hand: !!seat.leave_after_hand,
+                stack: seat.stack,
+              }))
+              .sort((a, b) => a.seat_no - b.seat_no);
+          }
           if (sqlNormalized.includes("select count(*)::int as count from public.poker_seats") && sqlNormalized.includes("coalesce(is_bot, false) = false")) {
             const humans = seats.filter((seat) => seat.status === "ACTIVE" && !seat.is_bot).length;
             return [{ count: humans }];
