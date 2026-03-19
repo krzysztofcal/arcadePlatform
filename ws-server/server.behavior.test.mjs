@@ -3458,7 +3458,9 @@ test("authoritative WS table_join seeds two bots once and returns authoritative 
       payload: { tableId }
     });
     const firstState = await nextMessageOfType(ws, "table_state");
-    assert.equal(firstAck.payload.status, "accepted");
+    if (firstAck.payload.status !== "accepted") {
+      assert.fail(`first authoritative join ack payload: ${JSON.stringify(firstAck.payload)}`);
+    }
     assert.deepEqual(firstState.payload.authoritativeMembers, [
       { userId: "bot_seed_human", seat: 1 },
       { userId: botSeat2, seat: 2 },
@@ -3491,7 +3493,9 @@ test("authoritative WS table_join seeds two bots once and returns authoritative 
       payload: { tableId }
     });
     const secondState = await nextMessageOfType(ws, "table_state");
-    assert.equal(secondAck.payload.status, "accepted");
+    if (secondAck.payload.status !== "accepted") {
+      assert.fail(`second authoritative join ack payload: ${JSON.stringify(secondAck.payload)}`);
+    }
     assert.deepEqual(secondState.payload.authoritativeMembers, firstState.payload.authoritativeMembers);
     assert.deepEqual(secondState.payload.seats, firstState.payload.seats);
 

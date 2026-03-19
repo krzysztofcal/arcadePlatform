@@ -82,6 +82,36 @@ function writeLockedStateResult(result) {
   };
 }
 
+function stateAlreadyRepresentsActiveSeatRows(state, seatRows, userId) {
+  const stateSeats = Array.isArray(state?.seats) ? state.seats : [];
+  const activeSeatRows = Array.isArray(seatRows)
+    ? seatRows.filter((row) => String(row?.status || "ACTIVE").toUpperCase() === "ACTIVE")
+    : [];
+  const currentStacks = state?.stacks && typeof state.stacks === "object" && !Array.isArray(state.stacks)
+    ? state.stacks
+    : {};
+
+  if (!Object.prototype.hasOwnProperty.call(currentStacks, userId)) {
+    return false;
+  }
+
+  const stateSeatKeySet = new Set(
+    stateSeats
+      .map((seat) => {
+        const seatUserId = typeof seat?.userId === "string" ? seat.userId.trim() : "";
+        const seatNo = Number(seat?.seatNo);
+        return seatUserId && Number.isInteger(seatNo) && seatNo >= 1 ? `${seatUserId}:${seatNo}` : null;
+      })
+      .filter(Boolean)
+  );
+
+  return activeSeatRows.every((row) => {
+    const seatUserId = typeof row?.user_id === "string" ? row.user_id.trim() : "";
+    const seatNo = Number(row?.seat_no);
+    return seatUserId && Number.isInteger(seatNo) && seatNo >= 1 && stateSeatKeySet.has(`${seatUserId}:${seatNo}`);
+  });
+}
+
 async function syncStateSeatAndStack({ tx, tableId, userId, seatNo, stack, seededBots = [], loadStateForUpdate, updateStateLocked, validateStateForStorage }) {
   const stateRow = normalizeLockedStateResult(await loadStateForUpdate(tx, tableId));
   const nextState = applySeatsAndStacksToState(stateRow.state, {
@@ -142,6 +172,24 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
       const persisted = await readPersistedSeatStack({ tx, tableId, userId });
       const stateRow = normalizeLockedStateResult(await loadStateForUpdate(tx, tableId));
       const seatRows = await loadSeatRows(tx, tableId);
+      if (stateAlreadyRepresentsActiveSeatRows(stateRow.state, seatRows, userId)) {
+        await tx.unsafe("update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1;", [tableId]);
+        return {
+          ok: true,
+          tableId,
+          userId,
+          seatNo: persisted.seatNo,
+          stack: persisted.stack,
+          rejoin: true,
+          requestId: requestId || null,
+          me: { seated: true },
+          snapshot: {
+            stateVersion: stateRow.version,
+            seats: Array.isArray(stateRow.state?.seats) ? stateRow.state.seats : [],
+            stacks: stateRow.state?.stacks && typeof stateRow.state.stacks === "object" ? stateRow.state.stacks : {}
+          }
+        };
+      }
       const currentStacks = stateRow.state?.stacks && typeof stateRow.state.stacks === "object" && !Array.isArray(stateRow.state.stacks)
         ? stateRow.state.stacks
         : {};
