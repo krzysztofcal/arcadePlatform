@@ -68,6 +68,9 @@ jobs:
       - name: Run ws lobby join public snapshot behavior test
         run: node --test ws-tests/ws-lobby-join-public-snapshot.behavior.test.mjs
 
+      - name: Run ws join runtime behavior test
+        run: node --test ws-tests/ws-join-runtime.behavior.test.mjs
+
 
       - name: Validate shared WS Docker build contract (repo-root context)
         run: |

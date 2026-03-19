@@ -69,6 +69,8 @@ test("ws-deploy keeps ws-tests trigger surface and runs harness checks", () => {
   assert.match(text, /node --test tests\/poker-ws-client\.test\.mjs/);
   assert.match(text, /Run poker UI ws authoritative join behavior test/);
   assert.match(text, /node --test tests\/poker-ui-ws-join-authoritative\.behavior\.test\.mjs/);
+  assert.match(text, /Run ws join runtime behavior test/);
+  assert.match(text, /node --test ws-tests\/ws-join-runtime\.behavior\.test\.mjs/);
   assertHarnessBuildContract(text);
   assertNoSyntheticProductionImageStep(text);
   assert.match(text, /Run state-patch behavior test/);
