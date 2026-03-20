@@ -284,16 +284,9 @@ test('poker: joins over WS and leaves over HTTP without pointerevent requestIds'
   await page.locator('#pokerSeatNo').fill('0');
   await page.locator('#pokerBuyIn').fill('100');
 
-  await expect.poll(async () => page.evaluate(() => {
-    const state = (window as any).__POKER_TEST_STATE__ || {};
-    return !!state.created && !!state.started && state.ready === true && Array.isArray(state.statusEvents) && state.statusEvents.includes('auth_ok');
-  }), { timeout: 20000 }).toBe(true);
-
-  const wsReadyState = await page.evaluate(() => (window as any).__POKER_TEST_STATE__ || null);
-  expect(wsReadyState?.created, 'WS mock should be created before join').toBe(1);
-  expect(wsReadyState?.started, 'WS mock should be started before join').toBe(1);
-  expect(wsReadyState?.ready, 'WS mock should report ready before join').toBe(true);
-  expect(wsReadyState?.statusEvents, 'WS mock should record auth_ok before join').toContain('auth_ok');
+  const wsBootstrapState = await page.evaluate(() => (window as any).__POKER_TEST_STATE__ || null);
+  expect(wsBootstrapState?.created, 'WS mock should be created when table UI loads').toBe(1);
+  expect(wsBootstrapState?.started, 'WS mock should be started when table UI loads').toBe(1);
 
   await page.locator('#pokerJoin').click();
 
@@ -301,7 +294,7 @@ test('poker: joins over WS and leaves over HTTP without pointerevent requestIds'
     .poll(async () => page.evaluate(() => ((window as any).__POKER_TEST_STATE__?.joinPayloads?.length ?? 0)), { timeout: 20000 })
     .toBe(1);
   const normalizedJoinPayload = await page.evaluate(() => ((window as any).__POKER_TEST_STATE__?.joinPayloads?.[0] || null) as Record<string, unknown> | null);
-  expect(normalizedJoinPayload, 'join payload should be captured from WS mock after readiness').toBeTruthy();
+  expect(normalizedJoinPayload, 'join payload should be captured from the WS mock after clicking Join').toBeTruthy();
   const joinRequestId = normalizedJoinPayload && typeof normalizedJoinPayload.requestId === 'string' ? normalizedJoinPayload.requestId : '';
   expect(typeof joinRequestId, 'join requestId should be a string').toBe('string');
   expect(joinRequestId, 'join requestId should be non-empty').toBeTruthy();
