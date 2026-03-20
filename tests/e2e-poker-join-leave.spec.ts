@@ -75,7 +75,16 @@ test('poker: joins over WS and leaves over HTTP without pointerevent requestIds'
 
   await page.addInitScript(({ tokenValue, tableIdValue, userIdValue }) => {
     window.SupabaseAuthBridge = window.SupabaseAuthBridge || {};
-    (window as any).__POKER_TEST_STATE__ = { joinPayloads: [] };
+    const testState = {
+      created: 0,
+      started: 0,
+      ready: false,
+      readyChecks: 0,
+      statusEvents: [],
+      joinPayloads: [],
+      snapshotsEmitted: 0
+    };
+    (window as any).__POKER_TEST_STATE__ = testState;
     try {
       Object.defineProperty(window.SupabaseAuthBridge, 'getAccessToken', {
         value: () => Promise.resolve(tokenValue),
@@ -88,21 +97,29 @@ test('poker: joins over WS and leaves over HTTP without pointerevent requestIds'
 
     window.PokerWsClient = {
       create(createOptions) {
+        testState.created += 1;
         return {
           start() {
+            testState.started += 1;
             Promise.resolve().then(() => {
+              testState.statusEvents.push('auth_ok');
+              testState.ready = true;
               if (typeof createOptions.onStatus === 'function') {
                 createOptions.onStatus('auth_ok', { roomId: tableIdValue });
               }
             });
           },
           destroy() {},
-          isReady() { return true; },
+          isReady() {
+            testState.readyChecks += 1;
+            return testState.ready === true;
+          },
           sendJoin(payload) {
-            (window as any).__POKER_TEST_STATE__.joinPayloads.push(payload);
+            testState.joinPayloads.push(payload);
             const nextSeatNo = Number.isFinite(Number(payload?.seatNo)) ? Number(payload.seatNo) : 1;
             const nextBuyIn = Number.isFinite(Number(payload?.buyIn)) ? Number(payload.buyIn) : 100;
             Promise.resolve().then(() => {
+              testState.snapshotsEmitted += 1;
               if (typeof createOptions.onSnapshot === 'function') {
                 createOptions.onSnapshot({
                   kind: 'table_state',
@@ -257,19 +274,33 @@ test('poker: joins over WS and leaves over HTTP without pointerevent requestIds'
   await page.locator('#pokerSeatNo').fill('0');
   await page.locator('#pokerBuyIn').fill('100');
 
+  await expect.poll(async () => page.evaluate(() => {
+    const state = (window as any).__POKER_TEST_STATE__ || {};
+    return !!state.created && !!state.started && state.ready === true && Array.isArray(state.statusEvents) && state.statusEvents.includes('auth_ok');
+  }), { timeout: 20000 }).toBe(true);
+
+  const wsReadyState = await page.evaluate(() => (window as any).__POKER_TEST_STATE__ || null);
+  expect(wsReadyState?.created, 'WS mock should be created before join').toBe(1);
+  expect(wsReadyState?.started, 'WS mock should be started before join').toBe(1);
+  expect(wsReadyState?.ready, 'WS mock should report ready before join').toBe(true);
+  expect(wsReadyState?.statusEvents, 'WS mock should record auth_ok before join').toContain('auth_ok');
+
   await page.locator('#pokerJoin').click();
 
   await expect
-    .poll(async () => page.evaluate(() => (window as any).__POKER_TEST_STATE__?.joinPayloads?.[0] || null), { timeout: 20000 })
-    .not.toBeNull();
+    .poll(async () => page.evaluate(() => ((window as any).__POKER_TEST_STATE__?.joinPayloads?.length ?? 0)), { timeout: 20000 })
+    .toBe(1);
   const normalizedJoinPayload = await page.evaluate(() => ((window as any).__POKER_TEST_STATE__?.joinPayloads?.[0] || null) as Record<string, unknown> | null);
-  expect(normalizedJoinPayload, 'join payload should be captured from WS mock').toBeTruthy();
+  expect(normalizedJoinPayload, 'join payload should be captured from WS mock after readiness').toBeTruthy();
   const joinRequestId = normalizedJoinPayload && typeof normalizedJoinPayload.requestId === 'string' ? normalizedJoinPayload.requestId : '';
   expect(typeof joinRequestId, 'join requestId should be a string').toBe('string');
   expect(joinRequestId, 'join requestId should be non-empty').toBeTruthy();
   expect(joinRequestId, 'join requestId should not be a pointer event').not.toBe('[object PointerEvent]');
   expect(joinRequestId.length, 'join requestId should be <= 200 chars').toBeLessThanOrEqual(200);
   expect(joinPostCalls, 'join should stay on the WS-only browser write path').toBe(0);
+
+  const postJoinState = await page.evaluate(() => (window as any).__POKER_TEST_STATE__ || null);
+  expect(postJoinState?.snapshotsEmitted, 'WS mock should emit exactly one join snapshot').toBe(1);
 
   const seatUser = page.locator('#pokerSeatsGrid .poker-seat-user', { hasText: shortUserId });
 
