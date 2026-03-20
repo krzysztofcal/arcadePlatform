@@ -2,6 +2,8 @@ import { test, expect } from '@playwright/test';
 
 const REQUEST_ID_MAX_LEN = 200;
 const POKER_TEST_STATE_KEY = '__POKER_TEST_STATE__';
+const POKER_WS_CREATE_MARKER_KEY = '__pokerE2eMockMarker';
+const POKER_WS_CREATE_MARKER_VALUE = 'poker-e2e-ws-client-mock';
 
 const makeBase64Url = (value: string) =>
   Buffer.from(value)
@@ -32,6 +34,12 @@ const readPokerTestState = (page) =>
     const state = (window as any)[stateKey];
     return state && typeof state === 'object' ? state : null;
   }, POKER_TEST_STATE_KEY);
+
+const readPokerWsCreateMarker = (page) =>
+  page.evaluate((markerKey) => {
+    const client = (window as any).PokerWsClient;
+    return client && typeof client.create === 'function' ? client.create[markerKey] || null : null;
+  }, POKER_WS_CREATE_MARKER_KEY);
 
 test('poker: joins over WS and leaves over HTTP without pointerevent requestIds', async ({ page }) => {
   const userId = 'd2b72e4b-cc87-4c61-9b06-7b8d6f1d2c3e';
@@ -80,7 +88,7 @@ test('poker: joins over WS and leaves over HTTP without pointerevent requestIds'
     ],
   });
 
-  await page.addInitScript(({ tokenValue, tableIdValue, userIdValue, stateKeyValue }) => {
+  await page.addInitScript(({ tokenValue, tableIdValue, userIdValue, stateKeyValue, markerKeyValue, markerValue }) => {
     window.SupabaseAuthBridge = window.SupabaseAuthBridge || {};
     const testState = {
       created: 0,
@@ -102,52 +110,61 @@ test('poker: joins over WS and leaves over HTTP without pointerevent requestIds'
       window.SupabaseAuthBridge.getAccessToken = () => Promise.resolve(tokenValue);
     }
 
-    const pokerWsClientMock = {
-      create(createOptions) {
-        testState.created += 1;
-        return {
-          start() {
-            testState.started += 1;
-            Promise.resolve().then(() => {
-              testState.statusEvents.push('auth_ok');
-              testState.ready = true;
-              if (typeof createOptions.onStatus === 'function') {
-                createOptions.onStatus('auth_ok', { roomId: tableIdValue });
-              }
-            });
-          },
-          destroy() {},
-          isReady() {
-            testState.readyChecks += 1;
-            return testState.ready === true;
-          },
-          sendJoin(payload) {
-            testState.joinPayloads.push(payload);
-            const nextSeatNo = Number.isFinite(Number(payload?.seatNo)) ? Number(payload.seatNo) : 1;
-            const nextBuyIn = Number.isFinite(Number(payload?.buyIn)) ? Number(payload.buyIn) : 100;
-            Promise.resolve().then(() => {
-              testState.snapshotsEmitted += 1;
-              if (typeof createOptions.onSnapshot === 'function') {
-                createOptions.onSnapshot({
-                  kind: 'table_state',
-                  payload: {
-                    tableId: tableIdValue,
-                    stateVersion: 2,
-                    youSeat: nextSeatNo,
-                    seats: [{ seatNo: nextSeatNo, userId: userIdValue, status: 'ACTIVE' }],
-                    stacks: { [userIdValue]: nextBuyIn },
-                    authoritativeMembers: [{ userId: userIdValue, seat: nextSeatNo }],
-                    hand: { status: 'PREFLOP', handId: 'hand-1' },
-                    legalActions: { actions: [] }
-                  }
-                });
-              }
-            });
-            return Promise.resolve({ ok: true, seatNo: nextSeatNo });
-          }
-        };
-      }
+    const createPokerWsClientMock = function(createOptions) {
+      testState.created += 1;
+      return {
+        start() {
+          testState.started += 1;
+          Promise.resolve().then(() => {
+            testState.statusEvents.push('auth_ok');
+            testState.ready = true;
+            if (typeof createOptions.onStatus === 'function') {
+              createOptions.onStatus('auth_ok', { roomId: tableIdValue });
+            }
+          });
+        },
+        destroy() {},
+        isReady() {
+          testState.readyChecks += 1;
+          return testState.ready === true;
+        },
+        sendJoin(payload) {
+          testState.joinPayloads.push(payload);
+          const nextSeatNo = Number.isFinite(Number(payload?.seatNo)) ? Number(payload.seatNo) : 1;
+          const nextBuyIn = Number.isFinite(Number(payload?.buyIn)) ? Number(payload.buyIn) : 100;
+          Promise.resolve().then(() => {
+            testState.snapshotsEmitted += 1;
+            if (typeof createOptions.onSnapshot === 'function') {
+              createOptions.onSnapshot({
+                kind: 'table_state',
+                payload: {
+                  tableId: tableIdValue,
+                  stateVersion: 2,
+                  youSeat: nextSeatNo,
+                  seats: [{ seatNo: nextSeatNo, userId: userIdValue, status: 'ACTIVE' }],
+                  stacks: { [userIdValue]: nextBuyIn },
+                  authoritativeMembers: [{ userId: userIdValue, seat: nextSeatNo }],
+                  hand: { status: 'PREFLOP', handId: 'hand-1' },
+                  legalActions: { actions: [] }
+                }
+              });
+            }
+          });
+          return Promise.resolve({ ok: true, seatNo: nextSeatNo });
+        }
+      };
     };
+    Object.defineProperty(createPokerWsClientMock, markerKeyValue, {
+      value: markerValue,
+      configurable: false,
+      writable: false,
+    });
+    const pokerWsClientMock = {};
+    Object.defineProperty(pokerWsClientMock, 'create', {
+      value: createPokerWsClientMock,
+      configurable: false,
+      writable: false,
+    });
 
     try {
       Object.defineProperty(window, 'PokerWsClient', {
@@ -158,7 +175,7 @@ test('poker: joins over WS and leaves over HTTP without pointerevent requestIds'
     } catch (_err) {
       window.PokerWsClient = pokerWsClientMock;
     }
-  }, { tokenValue: token, tableIdValue: tableId, userIdValue: userId, stateKeyValue: POKER_TEST_STATE_KEY });
+  }, { tokenValue: token, tableIdValue: tableId, userIdValue: userId, stateKeyValue: POKER_TEST_STATE_KEY, markerKeyValue: POKER_WS_CREATE_MARKER_KEY, markerValue: POKER_WS_CREATE_MARKER_VALUE });
 
   await page.route('**/.netlify/functions/poker-*', async (route, request) => {
     const url = new URL(request.url());
@@ -287,6 +304,8 @@ test('poker: joins over WS and leaves over HTTP without pointerevent requestIds'
   ]);
 
   await expect(page.locator('#pokerTableContent')).toBeVisible();
+
+  await expect(readPokerWsCreateMarker(page), 'WS mock create marker should survive table bootstrap').resolves.toBe(POKER_WS_CREATE_MARKER_VALUE);
 
   await page.locator('#pokerSeatNo').fill('0');
   await page.locator('#pokerBuyIn').fill('100');
