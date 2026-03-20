@@ -55,6 +55,9 @@ jobs:
       - name: Run poker UI ws write-path guard test
         run: node --test tests/poker-ui-ws-write-path.guard.test.mjs
 
+      - name: Run e2e poker join/leave guard test
+        run: node --test tests/e2e-poker-join-leave.guard.test.mjs
+
       - name: Run ws lobby join public snapshot behavior test
         run: node --test ws-tests/ws-lobby-join-public-snapshot.behavior.test.mjs
 

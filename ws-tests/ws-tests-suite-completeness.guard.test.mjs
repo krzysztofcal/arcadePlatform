@@ -39,6 +39,7 @@ const REQUIRED_CLIENT_AUTHORITATIVE_BEHAVIOR_TESTS = [
   "tests/poker-ui-ws-join-smoke.behavior.test.mjs",
   "tests/poker-ui-ws-act-smoke.behavior.test.mjs",
   "tests/poker-ui-ws-write-path.guard.test.mjs",
+  "tests/e2e-poker-join-leave.guard.test.mjs",
   "ws-tests/ws-lobby-join-public-snapshot.behavior.test.mjs"
 ];
 
