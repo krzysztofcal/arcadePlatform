@@ -60,6 +60,7 @@ test('poker UI WS smoke renders joined player plus two bots from authoritative p
 
   assert.equal(joinPayloads.length, 1, 'smoke join should use the WS path once');
   assert.equal(harness.fetchState.joinCalls, 0, 'smoke join should not use HTTP fallback');
+  assert.equal(harness.fetchState.getCalls, 1, 'smoke join should not trigger an extra HTTP table reload after the WS write');
 
   snapshotHandler({
     kind: 'table_state',

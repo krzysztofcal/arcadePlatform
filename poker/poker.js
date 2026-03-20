@@ -5,11 +5,11 @@
   var CREATE_URL = '/.netlify/functions/poker-create-table';
   var QUICK_SEAT_URL = '/.netlify/functions/poker-quick-seat';
   var GET_URL = '/.netlify/functions/poker-get-table';
-  var JOIN_URL = '/.netlify/functions/poker-join';
+  var WS_JOIN_ENDPOINT = 'ws:join';
   var LEAVE_URL = '/.netlify/functions/poker-leave';
   var HEARTBEAT_URL = '/.netlify/functions/poker-heartbeat';
-  var START_HAND_URL = '/.netlify/functions/poker-start-hand';
-  var ACT_URL = '/.netlify/functions/poker-act';
+  var WS_START_HAND_ENDPOINT = 'ws:start_hand';
+  var WS_ACT_ENDPOINT = 'ws:act';
   var EXPORT_LOG_URL = '/.netlify/functions/poker-export-log';
   var POLL_INTERVAL_BASE = 2000;
   var POLL_INTERVAL_MAX = 10000;
@@ -422,6 +422,28 @@
   function normalizeRequestId(value){
     var trimmed = getValidRequestId(value);
     return trimmed || String(generateRequestId());
+  }
+
+  function buildWsUnavailableError(action, fallbackMessage){
+    var message = fallbackMessage || t('pokerErrWsUnavailable', 'Live table connection unavailable. Please wait for WebSocket reconnect and try again.');
+    var err = new Error(message);
+    err.code = 'ws_unavailable';
+    err.action = action || null;
+    return err;
+  }
+
+  function getGameplayWsSender(client, methodName, action, fallbackMessage){
+    if (!client || typeof client.isReady !== 'function' || !client.isReady()) return null;
+    if (typeof client[methodName] !== 'function') return null;
+    return function(payload, requestId){
+      return client[methodName](payload, requestId);
+    };
+  }
+
+  function resolveGameplayWsSender(client, methodName, action, fallbackMessage){
+    var sender = getGameplayWsSender(client, methodName, action, fallbackMessage);
+    if (sender) return sender;
+    throw buildWsUnavailableError(action, fallbackMessage);
   }
 
   function resolveRequestId(pendingValue, overrideValue){
@@ -1288,6 +1310,11 @@
       tableData = mergedData;
       isSeated = isCurrentUserSeated(tableData);
       renderTable(tableData);
+      var seatedCount = getSeatedCount(tableData);
+      if (isSeated && seatedCount !== lastAutoStartSeatCount){
+        lastAutoStartSeatCount = seatedCount;
+        maybeAutoStartHand();
+      }
       stopPolling();
       wsSnapshotSeen = true;
       pendingWsSnapshot = null;
@@ -1900,7 +1927,7 @@
         return;
       }
       var message = action === 'join' ? t('pokerErrJoinPending', 'Join still pending. Please try again.') : t('pokerErrLeavePending', 'Leave still pending. Please try again.');
-      var endpoint = action === 'join' ? JOIN_URL : LEAVE_URL;
+      var endpoint = action === 'join' ? WS_JOIN_ENDPOINT : LEAVE_URL;
       var retries = action === 'join' ? pendingJoinRetries : pendingLeaveRetries;
       klog('poker_pending_timeout', { action: action, tableId: tableId, retries: retries, budgetMs: PENDING_RETRY_BUDGET_MS });
       if (action === 'join'){
@@ -2085,6 +2112,7 @@
       if (!currentUserId || !isSeated || !tableData) return;
       if (startHandPending || joinPending || leavePending || actPending) return;
       if (pendingStartHandRequestId) return;
+      if (!getGameplayWsSender(wsClient, 'sendStartHand', 'start_hand')) return;
       var table = tableData.table || {};
       var stateObj = tableData.state || {};
       var gameState = stateObj.state || {};
@@ -2156,6 +2184,7 @@
       if (!seatNoInput) return;
       if (!Number.isInteger(tableMaxPlayers) || tableMaxPlayers < 2) return;
       if (isSeated) return;
+      if (!getGameplayWsSender(wsClient, 'sendJoin', 'join')) return;
       autoJoinAttempted = true;
       var preferredSeatNo = getPreferredSeatNo();
       klog('poker_auto_join_attempt', { tableId: tableId, preferredSeatNo: preferredSeatNo, autoSeat: true });
@@ -2167,7 +2196,7 @@
         clearJoinPending();
         var code = err && err.code ? err.code : (err && err.message ? err.message : 'unknown_error');
         klog('poker_auto_join_error', { tableId: tableId, code: code, message: err && err.message ? err.message : code });
-        setActionError('join', JOIN_URL, err && err.code ? err.code : 'request_failed', err && (err.message || err.code) ? err.message || err.code : t('pokerErrJoin', 'Failed to join'));
+        setActionError('join', WS_JOIN_ENDPOINT, err && err.code ? err.code : 'request_failed', err && (err.message || err.code) ? err.message || err.code : t('pokerErrJoin', 'Failed to join'));
       });
     }
 
@@ -2198,9 +2227,7 @@
           lastAutoStartSeatCount = seatedCount;
           maybeAutoStartHand();
         }
-        var wsClientConfigured = !!(window.PokerWsClient && typeof window.PokerWsClient.create === 'function');
-        var wsReady = !!(wsClient && typeof wsClient.isReady === 'function' && wsClient.isReady());
-        if (!wsClientConfigured || wsReady || httpFallbackActive){
+        if (getGameplayWsSender(wsClient, 'sendJoin', 'join')){
           maybeAutoJoin();
         }
         if (isPolling){ resetPollBackoff(); }
@@ -2642,13 +2669,8 @@
         } else {
           joinPayload.seatNo = seatNo;
         }
-        var joinResult = null;
-        var usedWsJoin = !!(wsClient && typeof wsClient.isReady === 'function' && wsClient.isReady() && typeof wsClient.sendJoin === 'function');
-        if (usedWsJoin){
-          joinResult = await wsClient.sendJoin(joinPayload, joinRequestId);
-        } else {
-          joinResult = await apiPost(JOIN_URL, joinPayload);
-        }
+        var joinSender = resolveGameplayWsSender(wsClient, 'sendJoin', 'join', t('pokerErrJoinWsUnavailable', 'Cannot join while the live table connection is offline.'));
+        var joinResult = await joinSender(joinPayload, joinRequestId);
         if (isPendingResponse(joinResult)){
           schedulePendingRetry('join', retryJoin);
           return;
@@ -2657,7 +2679,7 @@
           clearJoinPending();
           var joinErr = new Error(joinResult.error || 'request_failed');
           joinErr.code = joinResult.error || 'request_failed';
-          setActionError('join', JOIN_URL, joinErr.code, t('pokerErrJoin', 'Failed to join'));
+          setActionError('join', WS_JOIN_ENDPOINT, joinErr.code, t('pokerErrJoin', 'Failed to join'));
           if (propagateError) throw joinErr;
           return;
         }
@@ -2670,10 +2692,6 @@
           klog('poker_auto_join_success', { tableId: tableId, seatNo: joinResult.seatNo });
         }
         if (!isPageActive()) return;
-        if (usedWsJoin) return;
-        var loaded = await loadTable(false);
-        if (!loaded) return;
-        maybeAutoStartHand();
       } catch (err){
         if (isAbortError(err)){
           pauseJoinPending();
@@ -2693,7 +2711,7 @@
         }
         clearJoinPending();
         klog('poker_join_error', { tableId: tableId, error: err.message || err.code });
-        setActionError('join', JOIN_URL, err.code || 'request_failed', err.message || t('pokerErrJoin', 'Failed to join'));
+        setActionError('join', WS_JOIN_ENDPOINT, err.code || 'request_failed', err.message || t('pokerErrJoin', 'Failed to join'));
         if (propagateError) throw err;
       }
     }
@@ -2718,13 +2736,8 @@
           pendingStartHandRequestId = normalizeRequestId(resolved.requestId);
         }
         var startRequestId = normalizeRequestId(resolved.requestId);
-        var result = null;
-        if (wsClient && typeof wsClient.isReady === 'function' && wsClient.isReady() && typeof wsClient.sendStartHand === 'function'){
-          await wsClient.sendStartHand({ tableId: tableId }, startRequestId);
-          result = { ok: true };
-        } else {
-          result = await apiPost(START_HAND_URL, { tableId: tableId, requestId: startRequestId });
-        }
+        var startHandSender = resolveGameplayWsSender(wsClient, 'sendStartHand', 'start_hand', t('pokerErrStartHandWsUnavailable', 'Cannot start a hand while the live table connection is offline.'));
+        var result = await startHandSender({ tableId: tableId }, startRequestId);
         if (isPendingResponse(result)){
           schedulePendingRetry('startHand', retryStartHand);
           return { ok: false, code: 'request_pending', pending: true };
@@ -2745,8 +2758,6 @@
         }
         clearStartHandPending();
         setInlineStatus(startHandStatusEl, t('pokerStartHandOk', 'Hand started'), 'success');
-        if (!isPageActive()) return { ok: true, code: 'ok' };
-        loadTable(false);
         return { ok: true, code: 'ok' };
       } catch (err){
         if (isAbortError(err)){
@@ -2847,19 +2858,10 @@
           pendingActType = normalized;
         }
         var actRequestId = normalizeRequestId(resolved.requestId);
-        var result = null;
-        if (wsClient && typeof wsClient.isReady === 'function' && wsClient.isReady() && typeof wsClient.sendAct === 'function'){
-          var wsActPayload = { handId: resolveCurrentHandId(), action: normalized };
-          if (actionResult.action && Number.isFinite(Number(actionResult.action.amount))) wsActPayload.amount = Number(actionResult.action.amount);
-          await wsClient.sendAct(wsActPayload, actRequestId);
-          result = { ok: true };
-        } else {
-          result = await apiPost(ACT_URL, {
-            tableId: tableId,
-            requestId: actRequestId,
-            action: actionResult.action
-          });
-        }
+        var wsActPayload = { handId: resolveCurrentHandId(), action: normalized };
+        if (actionResult.action && Number.isFinite(Number(actionResult.action.amount))) wsActPayload.amount = Number(actionResult.action.amount);
+        var actSender = resolveGameplayWsSender(wsClient, 'sendAct', 'act', t('pokerErrActWsUnavailable', 'Cannot send an action while the live table connection is offline.'));
+        var result = await actSender(wsActPayload, actRequestId);
         if (isPendingResponse(result)){
           scheduleDevPendingRetry('act', retryAct);
           return;
@@ -2884,8 +2886,6 @@
         }
         clearActPending();
         setInlineStatus(actStatusEl, t('pokerActOk', 'Action sent'), 'success');
-        if (!isPageActive()) return;
-        loadTable(false);
       } catch (err){
         if (isAbortError(err)){
           pauseActPending();
@@ -3105,7 +3105,7 @@
         }
         clearJoinPending();
         klog('poker_join_click_error', { message: err && (err.message || err.code) ? err.message || err.code : 'unknown_error' });
-        setActionError('join', JOIN_URL, err && err.code ? err.code : 'request_failed', err && (err.message || err.code) ? err.message || err.code : t('pokerErrJoin', 'Failed to join'));
+        setActionError('join', WS_JOIN_ENDPOINT, err && err.code ? err.code : 'request_failed', err && (err.message || err.code) ? err.message || err.code : t('pokerErrJoin', 'Failed to join'));
       });
     }
 
