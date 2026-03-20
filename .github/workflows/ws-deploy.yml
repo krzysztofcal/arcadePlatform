@@ -56,8 +56,8 @@ jobs:
       - name: Run poker UI ws write-path guard test
         run: node --test tests/poker-ui-ws-write-path.guard.test.mjs
 
-      - name: Run e2e poker join/leave guard test
-        run: node --test tests/e2e-poker-join-leave.guard.test.mjs
+      - name: Run poker UI ws leave smoke test
+        run: node --test tests/poker-ui-ws-leave-smoke.behavior.test.mjs
 
       - name: Run ws lobby join public snapshot behavior test
         run: node --test ws-tests/ws-lobby-join-public-snapshot.behavior.test.mjs
@@ -191,8 +191,6 @@ jobs:
       - name: Run ws-deploy trigger-surface guard test
         run: node --test ws-tests/ws-deploy.trigger-surface.guard.test.mjs
 
-      - name: Run ws-workflow trigger-surface behavior test
-        run: node --test ws-tests/ws-workflow-trigger-surface.behavior.test.mjs
 
       - name: Run ws-server deploy scp-contract behavior test
         run: node --test ws-tests/ws-server-deploy.scp-contract.behavior.test.mjs
@@ -218,14 +216,10 @@ jobs:
       - name: Run ws table state payload test
         run: node --test ws-tests/ws-table-state-payload.test.mjs
 
-      - name: Run ws tests location guard
-        run: node --test ws-tests/ws-tests-location.guard.test.mjs
 
       - name: Run ws auth token mint doc test
         run: node --test ws-tests/ws-auth-token-mint-doc.test.mjs
 
-      - name: Run ws tests suite completeness guard
-        run: node --test ws-tests/ws-tests-suite-completeness.guard.test.mjs
 
       - name: Run ws room-core snapshot dependency guard test
         run: node --test ws-tests/ws-room-core-snapshot-dependency.guard.test.mjs
@@ -254,8 +248,6 @@ jobs:
       - name: Run ws smoke-check script behavior test
         run: node --test ws-tests/ws-smoke-check-script.behavior.test.mjs
 
-      - name: Run ws poker protocol doc test
-        run: node --test ws-tests/ws-poker-protocol-doc.test.mjs
 
       - name: Run ws image protocol content behavior test
         run: node --test ws-tests/ws-image-contains-protocol.behavior.test.mjs

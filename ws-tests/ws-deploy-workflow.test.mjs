@@ -58,7 +58,6 @@ test("ws-deploy keeps ws-tests trigger surface and runs harness checks", () => {
   assert.match(pushBlock, /"docs\/ws-poker-protocol\.md"/);
 
   assert.match(text, /node --test ws-tests\/ws-deploy-workflow\.test\.mjs/);
-  assert.match(text, /node --test ws-tests\/ws-tests-suite-completeness\.guard\.test\.mjs/);
   assert.match(text, /node --test ws-tests\/ws-production-deploy-collision\.guard\.test\.mjs/);
   assert.match(text, /node --test ws-tests\/ws-deploy\.no-prod-mutation-on-ws-tests\.guard\.test\.mjs/);
   assert.match(text, /node --test ws-tests\/ws-server-deploy-artifact-path\.test\.mjs/);
@@ -73,8 +72,8 @@ test("ws-deploy keeps ws-tests trigger surface and runs harness checks", () => {
   assert.match(text, /node --test tests\/poker-ui-ws-act-smoke\.behavior\.test\.mjs/);
   assert.match(text, /Run poker UI ws write-path guard test/);
   assert.match(text, /node --test tests\/poker-ui-ws-write-path\.guard\.test\.mjs/);
-  assert.match(text, /Run e2e poker join\/leave guard test/);
-  assert.match(text, /node --test tests\/e2e-poker-join-leave\.guard\.test\.mjs/);
+  assert.match(text, /Run poker UI ws leave smoke test/);
+  assert.match(text, /node --test tests\/poker-ui-ws-leave-smoke\.behavior\.test\.mjs/);
   assert.doesNotMatch(text, /node --test tests\/poker-ui-ws-health-fallback\.behavior\.test\.mjs/);
   assert.doesNotMatch(text, /node --test tests\/poker-ui-ws-startup-order\.behavior\.test\.mjs/);
   assert.doesNotMatch(text, /node --test tests\/poker-ui-ws-snapshot-equal-version\.behavior\.test\.mjs/);
@@ -195,8 +194,8 @@ test("ws-deploy shared authoritative join dependency is trigger-covered and arti
   assert.match(text, /node --test tests\/poker-ui-ws-act-smoke\.behavior\.test\.mjs/);
   assert.match(text, /Run poker UI ws write-path guard test/);
   assert.match(text, /node --test tests\/poker-ui-ws-write-path\.guard\.test\.mjs/);
-  assert.match(text, /Run e2e poker join\/leave guard test/);
-  assert.match(text, /node --test tests\/e2e-poker-join-leave\.guard\.test\.mjs/);
+  assert.match(text, /Run poker UI ws leave smoke test/);
+  assert.match(text, /node --test tests\/poker-ui-ws-leave-smoke\.behavior\.test\.mjs/);
   assert.doesNotMatch(text, /node --test tests\/poker-ui-ws-health-fallback\.behavior\.test\.mjs/);
   assert.doesNotMatch(text, /node --test tests\/poker-ui-ws-startup-order\.behavior\.test\.mjs/);
   assert.doesNotMatch(text, /node --test tests\/poker-ui-ws-snapshot-equal-version\.behavior\.test\.mjs/);

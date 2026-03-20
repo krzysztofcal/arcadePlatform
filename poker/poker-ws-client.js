@@ -207,6 +207,7 @@
       isReady: function(){ return !!authOk && !!ws && ws.readyState === 1; },
       sendAct: function(payload, requestId){ return sendCommand('act', payload || {}, requestId); },
       sendJoin: function(payload, requestId){ return sendCommand('join', payload || { tableId: tableId }, requestId); },
+      sendLeave: function(payload, requestId){ return sendCommand('leave', payload || { tableId: tableId }, requestId); },
       sendStartHand: function(payload, requestId){ return sendCommand('start_hand', payload || { tableId: tableId }, requestId); }
     };
   }

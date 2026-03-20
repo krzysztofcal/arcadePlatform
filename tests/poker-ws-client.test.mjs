@@ -139,7 +139,7 @@ test('poker ws client bootstraps hello -> auth -> snapshot once', async () => {
 });
 
 
-test('poker ws client sendJoin/sendStartHand/sendAct resolve and reject by commandResult', async () => {
+test('poker ws client sendJoin/sendLeave/sendStartHand/sendAct resolve and reject by commandResult', async () => {
   const h = loadClientHarness();
   h.client.start();
   const ws = h.FakeWebSocket.instances[0];
@@ -154,6 +154,11 @@ test('poker ws client sendJoin/sendStartHand/sendAct resolve and reject by comma
   assert.equal(joinResult.ok, true);
   assert.equal(joinResult.seatNo, 3);
   assert.equal(joinResult.tableId, 'table_test_1');
+
+  const leavePromise = h.client.sendLeave({ tableId: 'table_test_1' }, 'leave_req_1');
+  ws.message({ type: 'commandResult', requestId: 'leave_req_1', payload: { requestId: 'leave_req_1', status: 'accepted', reason: null } });
+  const leaveResult = await leavePromise;
+  assert.equal(leaveResult.ok, true);
 
   const startPromise = h.client.sendStartHand({ tableId: 'table_test_1' }, 'start_req_1');
   ws.message({ type: 'commandResult', requestId: 'start_req_1', payload: { requestId: 'start_req_1', status: 'rejected', reason: 'not_enough_players' } });

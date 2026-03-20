@@ -127,7 +127,7 @@ Examples:
 
 Optional runtime mode: deployments may explicitly enable observe-only `table_join` via server config (`WS_OBSERVE_ONLY_JOIN=1`). In that mode, `table_join` is transport-level connect/observe/resync for non-seated users and does not allocate seats.
 
-Authoritative seat acquisition/buy-in remains server-authoritative, but the normal browser gameplay runtime MUST use WS as the only write path for `table_join`/`join`, `start_hand`, and `act`. Legacy HTTP handlers (currently `netlify/functions/poker-join.mjs`, `netlify/functions/poker-start-hand.mjs`, `netlify/functions/poker-act.mjs`) remain legacy/admin/operational paths and MUST NOT be used as client gameplay fallback for the same command.
+Authoritative seat acquisition/buy-in remains server-authoritative, and the normal browser gameplay runtime MUST use WS as the only write path for `table_join`/`join`, `leave`, `start_hand`, and `act`. The retired `netlify/functions/poker-join.mjs` endpoint is no longer a supported gameplay/runtime integration point. Existing HTTP handlers such as `netlify/functions/poker-start-hand.mjs`, `netlify/functions/poker-act.mjs`, and `netlify/functions/poker-leave.mjs` remain legacy/admin/operational paths and MUST NOT be used as client gameplay fallback for the same commands.
 
 `leave` remains authoritative for already-seated users: when the authenticated user is an authoritative table member, WS `leave` executes authoritative member removal/cashout semantics in both default and observe-only runtime modes.
 

@@ -7,12 +7,12 @@ Poker bots are implemented in the current runtime.
 - Runtime modules:
   - `netlify/functions/_shared/poker-bots.mjs`
   - `netlify/functions/_shared/poker-bot-cashout.mjs`
-  - `shared/poker-domain/bots.mjs` (neutral join/bot-seed helper used by WS authoritative join and HTTP join paths)
+  - `shared/poker-domain/bots.mjs` (neutral join/bot-seed helper used by WS authoritative join flows)
 - Runtime integration points:
-  - `netlify/functions/poker-join.mjs` (legacy/admin HTTP path for bot seeding and bot `TABLE_BUY_IN`; not normal browser gameplay runtime)
-  - `shared/poker-domain/join.mjs` (neutral authoritative join + bot seed core shared by WS-authoritative gameplay and legacy HTTP join)
-  - `netlify/functions/poker-start-hand.mjs` and `netlify/functions/poker-act.mjs` (legacy/admin HTTP bot autoplay paths; browser gameplay runtime uses WS write flow instead)
-  - `netlify/functions/poker-sweep.mjs` (bot timeout/close cash-out paths)
+  - `shared/poker-domain/join.mjs` (neutral authoritative join + bot seed core shared by the WS gameplay runtime and any temporary legacy/admin adapters)
+  - `netlify/functions/poker-start-hand.mjs`, `netlify/functions/poker-act.mjs`, and `netlify/functions/poker-leave.mjs` (legacy/admin HTTP paths kept for ops/bot workflows; browser gameplay runtime uses WS write flow instead)
+  - `netlify/functions/poker-heartbeat.mjs` (active inactivity/cleanup heartbeat lifecycle path)
+  - `netlify/functions/poker-sweep.mjs` (active bot timeout/close cash-out path)
 - Behavior coverage in tests includes seed/autoplay/sweep, for example:
   - `tests/poker-join.bot-seed.behavior.test.mjs`
   - `tests/poker-start-hand.bot-autoplay.behavior.test.mjs`
@@ -26,7 +26,7 @@ Poker bots are implemented in the current runtime.
   - Max bots per table is enforced by `POKER_BOTS_MAX_PER_TABLE` (default `2`) and seat-capacity logic keeps at least one seat available for humans.
 - Autoplay:
   - Bots act automatically when it is a bot turn, using runtime helpers (`isBotTurn`, `chooseBotActionTrivial`) and bounded action limits (`POKER_BOTS_MAX_ACTIONS_PER_REQUEST` / poll limits).
-  - Browser gameplay writes now converge on the WS-authoritative path; the HTTP handlers remain for legacy/admin/operational runtime needs, not for normal client fallback.
+  - Browser gameplay writes stay WS-authoritative for join, leave, start-hand, and act; HTTP handlers remain only for legacy/admin/operational runtime needs, not for normal client fallback.
   - Behavior is server-side in Netlify Functions runtime (authoritative state transitions; no client bot script).
 - Cash-out / sweep:
   - Bot chip movements use the same ledger primitives as seat flows: `TABLE_BUY_IN` into table escrow and `TABLE_CASH_OUT` from escrow.

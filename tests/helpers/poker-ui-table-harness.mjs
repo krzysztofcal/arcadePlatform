@@ -48,6 +48,7 @@ export function createPokerTableHarness(options = {}){
     joinBodies: [],
     startHandCalls: 0,
     actCalls: 0,
+    leaveCalls: 0,
     responses: options.responses || [
       {
         tableId,
@@ -167,6 +168,10 @@ export function createPokerTableHarness(options = {}){
       }
       if (text.includes('/poker-start-hand')){
         fetchState.startHandCalls += 1;
+        return { ok: true, json: async () => ({ ok: true }) };
+      }
+      if (text.includes('/poker-leave')){
+        fetchState.leaveCalls += 1;
         return { ok: true, json: async () => ({ ok: true }) };
       }
       if (text.includes('/poker-act')){
