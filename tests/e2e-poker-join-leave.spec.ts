@@ -26,7 +26,7 @@ const safeJsonParse = (value?: string | null) => {
   }
 };
 
-test('poker: can join and leave table (no pointerevent requestId)', async ({ page }) => {
+test('poker: joins over WS and leaves over HTTP without pointerevent requestIds', async ({ page }) => {
   const userId = 'd2b72e4b-cc87-4c61-9b06-7b8d6f1d2c3e';
   const shortUserId = userId.substring(0, 8);
   const tableId = '11111111-1111-4111-8111-111111111111';
@@ -38,6 +38,8 @@ test('poker: can join and leave table (no pointerevent requestId)', async ({ pag
     buyIn: 100,
     version: 1,
   };
+  let getTableCalls = 0;
+  let joinPostCalls = 0;
 
   const buildTablePayload = () => ({
     table: {
@@ -71,8 +73,9 @@ test('poker: can join and leave table (no pointerevent requestId)', async ({ pag
     ],
   });
 
-  await page.addInitScript((tokenValue) => {
+  await page.addInitScript(({ tokenValue, tableIdValue, userIdValue }) => {
     window.SupabaseAuthBridge = window.SupabaseAuthBridge || {};
+    (window as any).__POKER_TEST_STATE__ = { joinPayloads: [] };
     try {
       Object.defineProperty(window.SupabaseAuthBridge, 'getAccessToken', {
         value: () => Promise.resolve(tokenValue),
@@ -82,7 +85,46 @@ test('poker: can join and leave table (no pointerevent requestId)', async ({ pag
     } catch (_err) {
       window.SupabaseAuthBridge.getAccessToken = () => Promise.resolve(tokenValue);
     }
-  }, token);
+
+    window.PokerWsClient = {
+      create(createOptions) {
+        return {
+          start() {
+            Promise.resolve().then(() => {
+              if (typeof createOptions.onStatus === 'function') {
+                createOptions.onStatus('auth_ok', { roomId: tableIdValue });
+              }
+            });
+          },
+          destroy() {},
+          isReady() { return true; },
+          sendJoin(payload) {
+            (window as any).__POKER_TEST_STATE__.joinPayloads.push(payload);
+            const nextSeatNo = Number.isFinite(Number(payload?.seatNo)) ? Number(payload.seatNo) : 1;
+            const nextBuyIn = Number.isFinite(Number(payload?.buyIn)) ? Number(payload.buyIn) : 100;
+            Promise.resolve().then(() => {
+              if (typeof createOptions.onSnapshot === 'function') {
+                createOptions.onSnapshot({
+                  kind: 'table_state',
+                  payload: {
+                    tableId: tableIdValue,
+                    stateVersion: 2,
+                    youSeat: nextSeatNo,
+                    seats: [{ seatNo: nextSeatNo, userId: userIdValue, status: 'ACTIVE' }],
+                    stacks: { [userIdValue]: nextBuyIn },
+                    authoritativeMembers: [{ userId: userIdValue, seat: nextSeatNo }],
+                    hand: { status: 'PREFLOP', handId: 'hand-1' },
+                    legalActions: { actions: [] }
+                  }
+                });
+              }
+            });
+            return Promise.resolve({ ok: true, seatNo: nextSeatNo });
+          }
+        };
+      }
+    };
+  }, { tokenValue: token, tableIdValue: tableId, userIdValue: userId });
 
   await page.route('**/.netlify/functions/poker-*', async (route, request) => {
     const url = new URL(request.url());
@@ -107,6 +149,7 @@ test('poker: can join and leave table (no pointerevent requestId)', async ({ pag
     }
 
     if (pathname.endsWith('/poker-get-table') && request.method() === 'GET') {
+      getTableCalls += 1;
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -116,6 +159,7 @@ test('poker: can join and leave table (no pointerevent requestId)', async ({ pag
     }
 
     if (pathname.endsWith('/poker-join') && request.method() === 'POST') {
+      joinPostCalls += 1;
       let payload = {};
       const rawPayload = request.postData();
       if (rawPayload) {
@@ -213,31 +257,24 @@ test('poker: can join and leave table (no pointerevent requestId)', async ({ pag
   await page.locator('#pokerSeatNo').fill('0');
   await page.locator('#pokerBuyIn').fill('100');
 
-  const joinRequestPromise = page.waitForRequest(
-    (req) => req.url().includes('/.netlify/functions/poker-join') && req.method() === 'POST',
-    { timeout: 20000 }
-  );
-  const joinResponsePromise = page.waitForResponse(
-    (res) => res.url().includes('/.netlify/functions/poker-join') && res.request().method() === 'POST',
-    { timeout: 20000 }
-  );
-
   await page.locator('#pokerJoin').click();
 
-  const joinRequest = await joinRequestPromise;
-  const joinResponse = await joinResponsePromise;
-  expect(joinResponse.status()).toBe(200);
-
-  const joinPayload = safeJsonParse(joinRequest.postData()) || {};
-  const joinRequestId = joinPayload.requestId;
+  await expect
+    .poll(async () => page.evaluate(() => (window as any).__POKER_TEST_STATE__?.joinPayloads?.[0] || null), { timeout: 20000 })
+    .not.toBeNull();
+  const normalizedJoinPayload = await page.evaluate(() => ((window as any).__POKER_TEST_STATE__?.joinPayloads?.[0] || null) as Record<string, unknown> | null);
+  expect(normalizedJoinPayload, 'join payload should be captured from WS mock').toBeTruthy();
+  const joinRequestId = normalizedJoinPayload && typeof normalizedJoinPayload.requestId === 'string' ? normalizedJoinPayload.requestId : '';
   expect(typeof joinRequestId, 'join requestId should be a string').toBe('string');
   expect(joinRequestId, 'join requestId should be non-empty').toBeTruthy();
   expect(joinRequestId, 'join requestId should not be a pointer event').not.toBe('[object PointerEvent]');
   expect(joinRequestId.length, 'join requestId should be <= 200 chars').toBeLessThanOrEqual(200);
+  expect(joinPostCalls, 'join should stay on the WS-only browser write path').toBe(0);
 
   const seatUser = page.locator('#pokerSeatsGrid .poker-seat-user', { hasText: shortUserId });
 
   await expect(seatUser).toContainText(shortUserId, { timeout: 20000 });
+  await expect.poll(() => getTableCalls, { timeout: 20000 }).toBe(1);
 
   await expect(page.locator('#pokerYourStack')).toHaveText('100', { timeout: 20000 });
 
