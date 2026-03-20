@@ -77,6 +77,10 @@ function assertRequiredOrder(text) {
   assert.match(block, /node --test ws-server\/poker\/engine\/engine-rollover\.behavior\.test\.mjs/);
   assert.match(block, /Run ws poker engine timeout behavior test/);
   assert.match(block, /node --test ws-server\/poker\/engine\/engine-timeout\.behavior\.test\.mjs/);
+  assert.match(block, /Run ws act handler behavior test/);
+  assert.match(block, /node --test ws-server\/poker\/handlers\/act\.behavior\.test\.mjs/);
+  assert.match(block, /Run ws act handler invalid behavior test/);
+  assert.match(block, /node --test ws-server\/poker\/handlers\/act\.invalid\.behavior\.test\.mjs/);
 
   assert.equal(rootInstall, -1);
   assert.notEqual(install, -1);

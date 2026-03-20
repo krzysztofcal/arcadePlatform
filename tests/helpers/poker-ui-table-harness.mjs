@@ -3,6 +3,7 @@ import path from 'node:path';
 import vm from 'node:vm';
 
 function makeElement(id){
+  const listeners = new Map();
   return {
     id,
     hidden: false,
@@ -24,9 +25,25 @@ function makeElement(id){
     removeChild(child){ this.children = this.children.filter((it) => it !== child); },
     setAttribute(){},
     removeAttribute(){},
-    addEventListener(){},
-    removeEventListener(){},
+    addEventListener(type, handler){
+      if (!listeners.has(type)) listeners.set(type, []);
+      listeners.get(type).push(handler);
+    },
+    removeEventListener(type, handler){
+      if (!listeners.has(type)) return;
+      if (!handler){ listeners.delete(type); return; }
+      listeners.set(type, listeners.get(type).filter((entry) => entry !== handler));
+    },
     querySelector(){ return null; },
+    click(){
+      const handlers = listeners.get('click') || [];
+      handlers.forEach((handler) => handler({
+        type: 'click',
+        target: this,
+        preventDefault(){},
+        stopPropagation(){}
+      }));
+    },
     focus(){},
     blur(){},
   };
@@ -39,6 +56,9 @@ export function createPokerTableHarness(options = {}){
   const fetchState = {
     getCalls: 0,
     heartbeatCalls: 0,
+    actCalls: 0,
+    actBodies: [],
+    urls: [],
     responses: options.responses || [
       {
         tableId,
@@ -112,8 +132,9 @@ export function createPokerTableHarness(options = {}){
     clearTimeout(id){ clearTimeoutCalls.push(id); timeouts.delete(id); },
     setInterval(){ return 999; },
     clearInterval(){},
-    fetch: async (url) => {
+    fetch: async (url, init) => {
       const text = String(url || '');
+      fetchState.urls.push(text);
       if (text.includes('/poker-get-table')){
         fetchState.getCalls += 1;
         const index = Math.min(fetchState.getCalls - 1, fetchState.responses.length - 1);
@@ -122,6 +143,16 @@ export function createPokerTableHarness(options = {}){
       if (text.includes('/poker-heartbeat')){
         fetchState.heartbeatCalls += 1;
         return { ok: true, json: async () => ({ ok: true }) };
+      }
+      if (text.includes('/poker-act')){
+        fetchState.actCalls += 1;
+        if (init && typeof init.body === 'string' && init.body){
+          try {
+            fetchState.actBodies.push(JSON.parse(init.body));
+          } catch (_err) {
+            fetchState.actBodies.push(null);
+          }
+        }
       }
       if (text.includes('/ws-mint-token')){
         return { ok: true, json: async () => ({ ok: true, token: 'mint' }) };
