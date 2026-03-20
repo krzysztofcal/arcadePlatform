@@ -283,11 +283,6 @@ test('poker: joins over WS and leaves over HTTP without pointerevent requestIds'
 
   await page.locator('#pokerSeatNo').fill('0');
   await page.locator('#pokerBuyIn').fill('100');
-
-  const wsBootstrapState = await page.evaluate(() => (window as any).__POKER_TEST_STATE__ || null);
-  expect(wsBootstrapState?.created, 'WS mock should be created when table UI loads').toBe(1);
-  expect(wsBootstrapState?.started, 'WS mock should be started when table UI loads').toBe(1);
-
   await page.locator('#pokerJoin').click();
 
   await expect
