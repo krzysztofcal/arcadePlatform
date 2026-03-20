@@ -56,6 +56,9 @@ function assertRequiredOrder(text) {
   const rootInstall = block.indexOf("\n        run: npm ci\n");
   const runtimeDepsGuard = block.indexOf("node --test ws-tests/ws-server-package-runtime-deps.guard.test.mjs");
   const sharedJoinBehavior = block.indexOf("node --test shared/poker-domain/join.behavior.test.mjs");
+  const wsClientBehavior = block.indexOf("node --test tests/poker-ws-client.test.mjs");
+  const joinSmoke = block.indexOf("node --test tests/poker-ui-ws-join-smoke.behavior.test.mjs");
+  const actSmoke = block.indexOf("node --test tests/poker-ui-ws-act-smoke.behavior.test.mjs");
   const joinRuntimeBehavior = block.indexOf("node --test ws-tests/ws-join-runtime.behavior.test.mjs");
   const behavior = block.indexOf("node --test ws-server/server.behavior.test.mjs");
   const locationGuard = block.indexOf("node --test ws-tests/ws-tests-location.guard.test.mjs");
@@ -83,6 +86,9 @@ function assertRequiredOrder(text) {
   assert.notEqual(install, -1);
   assert.notEqual(runtimeDepsGuard, -1);
   assert.notEqual(sharedJoinBehavior, -1);
+  assert.notEqual(wsClientBehavior, -1);
+  assert.notEqual(joinSmoke, -1);
+  assert.notEqual(actSmoke, -1);
   assert.notEqual(joinRuntimeBehavior, -1);
   assert.notEqual(behavior, -1);
   assert.notEqual(locationGuard, -1);
@@ -93,7 +99,10 @@ function assertRequiredOrder(text) {
   assert.notEqual(containerCheck, -1);
   assert.equal(install < runtimeDepsGuard, true);
   assert.equal(runtimeDepsGuard < sharedJoinBehavior, true);
-  assert.equal(sharedJoinBehavior < joinRuntimeBehavior, true);
+  assert.equal(sharedJoinBehavior < wsClientBehavior, true);
+  assert.equal(wsClientBehavior < joinSmoke, true);
+  assert.equal(joinSmoke < actSmoke, true);
+  assert.equal(actSmoke < joinRuntimeBehavior, true);
   assert.equal(joinRuntimeBehavior < behavior, true);
   assert.equal(behavior < locationGuard, true);
   assert.equal(locationGuard < suiteGuard, true);
@@ -150,6 +159,20 @@ test("ws pr workflow does not deploy or use secrets", () => {
 test("ws pr workflow uses read-only token permissions", () => {
   const text = workflowText();
   assert.match(text, /permissions:\s*\n\s*contents:\s*read/);
+});
+
+test("ws pr workflow wires only the two poker UI smoke tests", () => {
+  const text = workflowText();
+  assert.match(text, /Run poker UI ws join smoke test/);
+  assert.match(text, /node --test tests\/poker-ui-ws-join-smoke\.behavior\.test\.mjs/);
+  assert.match(text, /Run poker UI ws act smoke test/);
+  assert.match(text, /node --test tests\/poker-ui-ws-act-smoke\.behavior\.test\.mjs/);
+  assert.doesNotMatch(text, /node --test tests\/poker-ui-ws-health-fallback\.behavior\.test\.mjs/);
+  assert.doesNotMatch(text, /node --test tests\/poker-ui-ws-startup-order\.behavior\.test\.mjs/);
+  assert.doesNotMatch(text, /node --test tests\/poker-ui-ws-snapshot-equal-version\.behavior\.test\.mjs/);
+  assert.doesNotMatch(text, /node --test tests\/poker-ui-ws-auth-watch-order\.behavior\.test\.mjs/);
+  assert.doesNotMatch(text, /node --test tests\/poker-ui-ws-visibility\.behavior\.test\.mjs/);
+  assert.doesNotMatch(text, /node --test tests\/poker-ui-ws-join-authoritative\.behavior\.test\.mjs/);
 });
 
 test("ws pr workflow runs ws-server deploy harness tests", () => {

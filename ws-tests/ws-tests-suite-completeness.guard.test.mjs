@@ -36,12 +36,8 @@ const REQUIRED_AUTHORITATIVE_HANDLER_BEHAVIOR_TESTS = [
 
 const REQUIRED_CLIENT_AUTHORITATIVE_BEHAVIOR_TESTS = [
   "tests/poker-ws-client.test.mjs",
-  "tests/poker-ui-ws-health-fallback.behavior.test.mjs",
-  "tests/poker-ui-ws-startup-order.behavior.test.mjs",
-  "tests/poker-ui-ws-snapshot-equal-version.behavior.test.mjs",
-  "tests/poker-ui-ws-auth-watch-order.behavior.test.mjs",
-  "tests/poker-ui-ws-visibility.behavior.test.mjs",
-  "tests/poker-ui-ws-join-authoritative.behavior.test.mjs",
+  "tests/poker-ui-ws-join-smoke.behavior.test.mjs",
+  "tests/poker-ui-ws-act-smoke.behavior.test.mjs",
   "ws-tests/ws-lobby-join-public-snapshot.behavior.test.mjs"
 ];
 
@@ -180,6 +176,26 @@ test("no workflow references legacy tests/ws-* harness paths", () => {
 
   assert.doesNotMatch(prWorkflow, /node --test tests\/ws-/);
   assert.doesNotMatch(deployWorkflow, /node --test tests\/ws-/);
+});
+
+test("legacy poker UI ws harness tests are absent from workflows and required client authoritative list", () => {
+  const prWorkflow = workflowText(".github/workflows/ws-pr-checks.yml");
+  const deployWorkflow = workflowText(".github/workflows/ws-deploy.yml");
+  const legacyUiTests = [
+    "tests/poker-ui-ws-health-fallback.behavior.test.mjs",
+    "tests/poker-ui-ws-startup-order.behavior.test.mjs",
+    "tests/poker-ui-ws-snapshot-equal-version.behavior.test.mjs",
+    "tests/poker-ui-ws-auth-watch-order.behavior.test.mjs",
+    "tests/poker-ui-ws-visibility.behavior.test.mjs",
+    "tests/poker-ui-ws-join-authoritative.behavior.test.mjs"
+  ];
+
+  for (const file of legacyUiTests) {
+    const command = `node --test ${file}`;
+    assert.equal(REQUIRED_CLIENT_AUTHORITATIVE_BEHAVIOR_TESTS.includes(file), false, `Legacy UI smoke entry still required: ${file}`);
+    assert.equal(prWorkflow.includes(command), false, `Legacy UI harness test still wired in PR workflow: ${file}`);
+    assert.equal(deployWorkflow.includes(command), false, `Legacy UI harness test still wired in deploy workflow: ${file}`);
+  }
 });
 
 

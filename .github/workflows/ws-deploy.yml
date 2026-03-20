@@ -47,23 +47,11 @@ jobs:
       - name: Run poker ws client behavior test
         run: node --test tests/poker-ws-client.test.mjs
 
-      - name: Run poker UI ws health fallback behavior test
-        run: node --test tests/poker-ui-ws-health-fallback.behavior.test.mjs
+      - name: Run poker UI ws join smoke test
+        run: node --test tests/poker-ui-ws-join-smoke.behavior.test.mjs
 
-      - name: Run poker UI ws startup order behavior test
-        run: node --test tests/poker-ui-ws-startup-order.behavior.test.mjs
-
-      - name: Run poker UI ws equal-version snapshot behavior test
-        run: node --test tests/poker-ui-ws-snapshot-equal-version.behavior.test.mjs
-
-      - name: Run poker UI ws auth-watch order behavior test
-        run: node --test tests/poker-ui-ws-auth-watch-order.behavior.test.mjs
-
-      - name: Run poker UI ws visibility behavior test
-        run: node --test tests/poker-ui-ws-visibility.behavior.test.mjs
-
-      - name: Run poker UI ws authoritative join behavior test
-        run: node --test tests/poker-ui-ws-join-authoritative.behavior.test.mjs
+      - name: Run poker UI ws act smoke test
+        run: node --test tests/poker-ui-ws-act-smoke.behavior.test.mjs
 
       - name: Run ws lobby join public snapshot behavior test
         run: node --test ws-tests/ws-lobby-join-public-snapshot.behavior.test.mjs
