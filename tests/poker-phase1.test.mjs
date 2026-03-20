@@ -8,6 +8,7 @@ const read = (filePath) => fs.readFileSync(path.join(root, filePath), "utf8");
 const getTableSrc = read("netlify/functions/poker-get-table.mjs");
 const sweepSrc = read("netlify/functions/poker-sweep.mjs");
 const joinSrc = read("netlify/functions/poker-join.mjs");
+const wsClientSrc = read("poker/poker-ws-client.js");
 const leaveSrc = read("netlify/functions/poker-leave.mjs");
 const leaveDomainSrc = read("shared/poker-domain/leave.mjs");
 const heartbeatSrc = read("netlify/functions/poker-heartbeat.mjs");
@@ -44,7 +45,6 @@ const assertRequestIdNormalizerUsage = (label, src) => {
   );
 };
 
-assertRequestIdNormalizerUsage("join", joinSrc);
 assertRequestIdNormalizerUsage("leave", leaveSrc);
 assertRequestIdNormalizerUsage("heartbeat", heartbeatSrc);
 
@@ -55,8 +55,8 @@ assert.ok(/event\.httpMethod\s*!==\s*\"POST\"/.test(sweepSrc), "sweep should enf
 
 assert.ok(/isValidUuid/.test(heartbeatSrc), "heartbeat should validate tableId with UUID check");
 assert.ok(!sweepSrc.includes("forbidden_origin"), "sweep should not reject missing origin");
-assert.ok(joinSrc.includes("table_not_open"), "join should return table_not_open when table is not OPEN");
-assert.ok(/table\.status\s*!==?\s*['"]OPEN['"]/.test(joinSrc), "join should guard new seats behind OPEN status");
+assert.ok(joinSrc.includes("join_http_retired"), "join endpoint should return explicit retired code");
+assert.ok(joinSrc.includes("WS-only"), "join endpoint should explain browser gameplay join is WS-only");
 assert.ok(!leaveSrc.includes("not_seated"), "leave should treat not seated as idempotent success");
 // Funds safety invariant: leave should not block when stack is missing; it returns ok with cashedOut: 0.
 assert.ok(!leaveSrc.includes("nothing_to_cash_out"), "leave should not error when stack is missing");
@@ -104,8 +104,10 @@ assert.ok(
   /if\s*\(\s*pending\s*\)\s*return\s*\{[\s\S]*?requestId\s*:\s*pending[\s\S]*?nextPending\s*:\s*pending[\s\S]*?\}/.test(pokerUiSrc),
   "poker UI should keep pending requestId during retries"
 );
-assert.ok(pokerUiSrc.includes("apiPost(JOIN_URL"), "poker UI should retry join via apiPost");
-assert.ok(pokerUiSrc.includes("apiPost(LEAVE_URL"), "poker UI should retry leave via apiPost");
+assert.ok(!pokerUiSrc.includes("apiPost(JOIN_URL"), "poker UI should not retry join via HTTP apiPost");
+assert.ok(!/apiPost\(\s*LEAVE_URL/.test(pokerUiSrc), "poker UI should not send leave via HTTP apiPost");
+assert.ok(wsClientSrc.includes("sendJoin"), "poker WS client should expose sendJoin");
+assert.ok(wsClientSrc.includes("sendLeave"), "poker WS client should expose sendLeave");
 assert.ok(pokerUiSrc.includes("poker_leave_bind"), "poker UI should log leave bind state");
 assert.ok(pokerUiSrc.includes("poker_leave_click"), "poker UI should log leave click");
 const heartbeatCallRegex =
@@ -115,15 +117,12 @@ assert.ok(!/tbl\.max_players/.test(pokerUiSrc), "poker UI should not read tbl.ma
 assert.ok(!/table\.max_players/.test(pokerUiSrc), "poker UI should not read table.max_players");
 assert.ok(!/tbl\.seat_count/.test(pokerUiSrc), "poker UI should not read tbl.seat_count");
 assert.ok(!/table\.seat_count/.test(pokerUiSrc), "poker UI should not read table.seat_count");
-assert.ok(!joinSrc.includes("RUNNING"), "join should not set status to RUNNING");
 assert.ok(!leaveSrc.includes("RUNNING"), "leave should not set status to RUNNING");
-assert.ok(joinSrc.includes("REQUEST_PENDING_STALE_SEC"), "join should guard stale pending requests");
 assert.ok(leaveDomainSrc.includes("REQUEST_PENDING_STALE_SEC"), "leave should guard stale pending requests");
 assert.ok(heartbeatSrc.includes("REQUEST_PENDING_STALE_SEC"), "heartbeat should guard stale pending requests");
 assert.ok(leaveSrc.includes("poker_leave_start"), "leave should log poker_leave_start");
 assert.ok(leaveDomainSrc.includes("poker_leave_ok"), "leave should log poker_leave_ok");
 assert.ok(leaveSrc.includes("poker_leave_error"), "leave should log poker_leave_error");
-assert.ok(joinSrc.includes("poker_request_id_invalid"), "join should log invalid requestId inputs");
 assert.ok(leaveSrc.includes("poker_request_id_invalid"), "leave should log invalid requestId inputs");
 assert.ok(heartbeatSrc.includes("poker_request_id_invalid"), "heartbeat should log invalid requestId inputs");
 assert.ok(
@@ -137,10 +136,6 @@ assert.ok(
 assert.ok(
   /table_id = \$1 and user_id = \$2 and request_id = \$3 and kind = \$4/.test(idempotencyHelperSrc),
   "idempotency helper should scope request queries by table_id, user_id, request_id, and kind"
-);
-assert.ok(
-  joinSrc.includes("ensurePokerRequest") && joinSrc.includes("storePokerRequestResult"),
-  "join should use shared poker idempotency helper"
 );
 assert.ok(
   leaveDomainSrc.includes("ensurePokerRequest") && leaveDomainSrc.includes("storePokerRequestResult"),
@@ -167,9 +162,7 @@ assert.ok(
   "poker UI leaveTable should resolve requestId using pendingLeaveRequestId"
 );
 assert.ok(
-  /apiPost\(\s*JOIN_URL[\s\S]*?requestId\s*:\s*joinRequestId/.test(pokerUiSrc) ||
-    (/var\s+joinPayload\s*=\s*\{[\s\S]*?requestId\s*:\s*joinRequestId[\s\S]*?\}\s*;/.test(pokerUiSrc) &&
-      /apiPost\(\s*JOIN_URL\s*,\s*joinPayload\s*\)/.test(pokerUiSrc)),
+  /var\s+joinPayload\s*=\s*\{[\s\S]*?requestId\s*:\s*joinRequestId[\s\S]*?\}\s*;/.test(pokerUiSrc),
   "poker UI join should send joinRequestId as requestId"
 );
 assert.ok(/var\s+pendingJoinAutoSeat\s*=\s*false;/.test(pokerUiSrc), "poker UI should track pendingJoinAutoSeat mode");
@@ -179,8 +172,8 @@ assert.ok(
 );
 assert.ok(!/String\(\s*joinRequestId\s*\)/.test(pokerUiSrc), "poker UI join should not stringify joinRequestId");
 assert.ok(
-  /apiPost\(\s*LEAVE_URL[\s\S]*?requestId\s*:\s*leaveRequestId/.test(pokerUiSrc),
-  "poker UI leave should send leaveRequestId as requestId"
+  /leaveSender\(\{ tableId: tableId, requestId: leaveRequestId \}, leaveRequestId\)/.test(pokerUiSrc),
+  "poker UI leave should send leaveRequestId as requestId over WS"
 );
 assert.ok(!/String\(\s*leaveRequestId\s*\)/.test(pokerUiSrc), "poker UI leave should not stringify leaveRequestId");
 assert.ok(

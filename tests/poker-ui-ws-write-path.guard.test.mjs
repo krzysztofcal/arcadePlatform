@@ -9,10 +9,13 @@ test('poker UI gameplay writes keep WS-only runtime path', () => {
   assert.doesNotMatch(source, /apiPost\([^\n]*poker-join/);
   assert.doesNotMatch(source, /apiPost\([^\n]*poker-start-hand/);
   assert.doesNotMatch(source, /apiPost\([^\n]*poker-act/);
+  assert.doesNotMatch(source, /apiPost\([^\n]*poker-leave/);
   assert.doesNotMatch(source, /fetch\([^\n]*poker-join/);
   assert.doesNotMatch(source, /fetch\([^\n]*poker-start-hand/);
   assert.doesNotMatch(source, /fetch\([^\n]*poker-act/);
+  assert.doesNotMatch(source, /fetch\([^\n]*poker-leave/);
   assert.match(source, /resolveGameplayWsSender\(wsClient, 'sendJoin', 'join'/);
+  assert.match(source, /resolveGameplayWsSender\(wsClient, 'sendLeave', 'leave'/);
   assert.match(source, /resolveGameplayWsSender\(wsClient, 'sendStartHand', 'start_hand'/);
   assert.match(source, /resolveGameplayWsSender\(wsClient, 'sendAct', 'act'/);
   assert.match(source, /var GET_URL = '\/.netlify\/functions\/poker-get-table'/);

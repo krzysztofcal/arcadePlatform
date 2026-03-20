@@ -3011,8 +3011,9 @@
           pendingLeaveRequestId = normalizeRequestId(resolved.requestId);
         }
         var leaveRequestId = normalizeRequestId(resolved.requestId);
-        klog('poker_leave_request', { tableId: tableId, requestId: leaveRequestId, url: LEAVE_URL });
-        var leaveResult = await apiPost(LEAVE_URL, { tableId: tableId, requestId: leaveRequestId });
+        klog('poker_leave_request', { tableId: tableId, requestId: leaveRequestId, url: 'ws:leave' });
+        var leaveSender = resolveGameplayWsSender(wsClient, 'sendLeave', 'leave', t('pokerErrLeaveWsUnavailable', 'Cannot leave while the live table connection is offline.'));
+        var leaveResult = await leaveSender({ tableId: tableId, requestId: leaveRequestId }, leaveRequestId);
         var pendingResponse = isPendingResponse(leaveResult);
         klog('poker_leave_response', {
           ok: !!(leaveResult && leaveResult.ok),
@@ -3033,8 +3034,6 @@
         if (!isPageActive()) return;
         isSeated = false;
         stopHeartbeat();
-        stopRealtime();
-        loadTable(false);
       } catch (err){
         if (isAbortError(err)){
           pauseLeavePending();
