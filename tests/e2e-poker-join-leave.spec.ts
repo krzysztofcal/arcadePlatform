@@ -145,7 +145,7 @@ test('poker: joins over WS and leaves over HTTP without pointerevent requestIds'
     try {
       Object.defineProperty(window, 'PokerWsClient', {
         value: pokerWsClientMock,
-        configurable: true,
+        configurable: false,
         writable: false,
       });
     } catch (_err) {
