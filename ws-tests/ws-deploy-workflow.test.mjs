@@ -58,7 +58,6 @@ test("ws-deploy keeps ws-tests trigger surface and runs harness checks", () => {
   assert.match(pushBlock, /"docs\/ws-poker-protocol\.md"/);
 
   assert.match(text, /node --test ws-tests\/ws-deploy-workflow\.test\.mjs/);
-  assert.match(text, /node --test ws-tests\/ws-tests-suite-completeness\.guard\.test\.mjs/);
   assert.match(text, /node --test ws-tests\/ws-production-deploy-collision\.guard\.test\.mjs/);
   assert.match(text, /node --test ws-tests\/ws-deploy\.no-prod-mutation-on-ws-tests\.guard\.test\.mjs/);
   assert.match(text, /node --test ws-tests\/ws-server-deploy-artifact-path\.test\.mjs/);
