@@ -127,6 +127,13 @@ test("ws poker protocol document keeps legacy default join mutation and marks ob
   assert.match(text, /`leave` remains authoritative for already-seated users/);
 });
 
+test("ws poker protocol document states WS-only gameplay write path for browser runtime", () => {
+  const text = docText();
+  assert.match(text, /browser gameplay runtime MUST use WS as the only write path for `table_join`\/`join`, `start_hand`, and `act`/);
+  assert.match(text, /Legacy HTTP handlers[\s\S]*MUST NOT be used as client gameplay fallback/);
+  assert.match(text, /accepted gameplay writes must converge UI from WS `table_state` \/ `stateSnapshot` \/ `table_snapshot` data, not from HTTP write responses/);
+});
+
 test("ws poker protocol document fallback wording matches PR7 defaults", () => {
   const text = docText();
   assert.match(text, /`public\.hand\.status` resolves to `"LOBBY"` \(members present\) or `"EMPTY"` \(no members\)/);

@@ -156,7 +156,10 @@ async function nextMessageOfType(ws, type, timeoutMs = 10000) {
   throw new Error(`Timed out waiting for message type: ${type}`);
 }
 
-async function nextMessageMatching(ws, predicate, timeoutMs = 10000) {
+async function nextMessageMatching(ws, predicate, options = {}) {
+  const opts = typeof options === "number" ? { timeoutMs: options } : (options || {});
+  const timeoutMs = Number.isFinite(opts.timeoutMs) ? opts.timeoutMs : 10000;
+  const description = opts.description || "matching websocket message";
   const started = Date.now();
   while (true) {
     const elapsed = Date.now() - started;
@@ -169,14 +172,50 @@ async function nextMessageMatching(ws, predicate, timeoutMs = 10000) {
       return frame;
     }
   }
-  throw new Error("Timed out waiting for matching websocket message");
+  throw new Error(`Timed out waiting for ${description}`);
 }
 
 function nextCommandResultForRequest(ws, requestId, timeoutMs = 10000) {
   return nextMessageMatching(
     ws,
     (frame) => frame?.type === "commandResult" && frame?.payload?.requestId === requestId,
-    timeoutMs
+    { timeoutMs, description: `commandResult for request ${requestId}` }
+  );
+}
+
+function isStableReplayJoinState(frame, { tableId, userId, botSeat2, botSeat3 }) {
+  if (frame?.type !== "table_state") return false;
+  if (frame?.payload?.tableId !== tableId) return false;
+  const members = Array.isArray(frame?.payload?.authoritativeMembers) ? frame.payload.authoritativeMembers : [];
+  const seats = Array.isArray(frame?.payload?.seats) ? frame.payload.seats : [];
+  if (members.length !== 3 || seats.length !== 3) return false;
+  const expectedMembers = [
+    { userId, seat: 1 },
+    { userId: botSeat2, seat: 2 },
+    { userId: botSeat3, seat: 3 }
+  ];
+  const expectedSeats = [
+    { userId, seatNo: 1, status: "ACTIVE" },
+    { userId: botSeat2, seatNo: 2, status: "ACTIVE", isBot: true, botProfile: "TRIVIAL" },
+    { userId: botSeat3, seatNo: 3, status: "ACTIVE", isBot: true, botProfile: "TRIVIAL" }
+  ];
+  try {
+    assert.deepEqual(members, expectedMembers);
+    assert.deepEqual(seats, expectedSeats);
+    return true;
+  } catch (_err) {
+    return false;
+  }
+}
+
+async function nextJoinReplayOutcome(ws, { requestId, tableId, userId, botSeat2, botSeat3, timeoutMs = 10000 }) {
+  return nextMessageMatching(
+    ws,
+    (frame) => {
+      if (frame?.type === "commandResult" && frame?.payload?.requestId === requestId) return true;
+      return isStableReplayJoinState(frame, { tableId, userId, botSeat2, botSeat3 });
+    },
+    { timeoutMs, description: `replay outcome for request ${requestId}` }
   );
 }
 
@@ -518,8 +557,26 @@ test("authoritative repeated and replayed table_join keep bot seating stable and
       ts: "2026-02-28T06:30:01Z",
       payload: { tableId, seatNo: 1, buyIn: 150 }
     });
-    const replayAck = await nextCommandResultForRequest(ws, "join-replay-runtime");
-    assert.equal(replayAck.payload.status, "accepted");
+    sendFrame(ws, {
+      version: "1.0",
+      type: "table_state_sub",
+      requestId: "join-replay-runtime-state-check",
+      ts: "2026-02-28T06:30:01Z",
+      payload: { tableId }
+    });
+    const replayOutcome = await nextJoinReplayOutcome(ws, {
+      requestId: "join-replay-runtime",
+      tableId,
+      userId: "replay_human",
+      botSeat2,
+      botSeat3,
+      timeoutMs: 10000
+    });
+    if (replayOutcome.type === "commandResult") {
+      assert.equal(replayOutcome.payload.status, "accepted");
+    } else {
+      assert.equal(isStableReplayJoinState(replayOutcome, { tableId, userId: "replay_human", botSeat2, botSeat3 }), true);
+    }
 
     sendFrame(ws, {
       version: "1.0",

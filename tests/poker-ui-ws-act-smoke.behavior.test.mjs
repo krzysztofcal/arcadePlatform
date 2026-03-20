@@ -62,6 +62,7 @@ test('poker UI WS smoke sends one action and refreshes public table state withou
   assert.equal(actPayloads[0].handId, 'hand-1', 'smoke act should send the current hand id');
   assert.equal(actPayloads[0].action, 'CHECK', 'smoke act should send the normalized WS action');
   assert.equal(harness.fetchState.actCalls, 0, 'smoke act should stay on the WS action path');
+  assert.equal(harness.fetchState.getCalls, 1, 'smoke act should not trigger an extra HTTP table reload after the WS write');
 
   snapshotHandler({
     kind: 'table_state',
