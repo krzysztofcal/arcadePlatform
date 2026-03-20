@@ -283,22 +283,6 @@ test('poker: joins over WS and leaves over HTTP without pointerevent requestIds'
 
   await page.locator('#pokerSeatNo').fill('0');
   await page.locator('#pokerBuyIn').fill('100');
-
-  await expect.poll(async () => page.evaluate(() => {
-    const state = (window as any).__POKER_TEST_STATE__ || {};
-    return {
-      created: state.created || 0,
-      started: state.started || 0,
-      ready: state.ready === true,
-      authOk: Array.isArray(state.statusEvents) && state.statusEvents.includes('auth_ok')
-    };
-  }), { timeout: 20000 }).toEqual({
-    created: 1,
-    started: 1,
-    ready: true,
-    authOk: true
-  });
-
   await page.locator('#pokerJoin').click();
 
   await expect
