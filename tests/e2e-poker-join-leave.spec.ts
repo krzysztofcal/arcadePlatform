@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 
 const REQUEST_ID_MAX_LEN = 200;
+const POKER_TEST_STATE_KEY = '__POKER_TEST_STATE__';
 
 const makeBase64Url = (value: string) =>
   Buffer.from(value)
@@ -25,6 +26,12 @@ const safeJsonParse = (value?: string | null) => {
     return null;
   }
 };
+
+const readPokerTestState = (page) =>
+  page.evaluate((stateKey) => {
+    const state = (window as any)[stateKey];
+    return state && typeof state === 'object' ? state : null;
+  }, POKER_TEST_STATE_KEY);
 
 test('poker: joins over WS and leaves over HTTP without pointerevent requestIds', async ({ page }) => {
   const userId = 'd2b72e4b-cc87-4c61-9b06-7b8d6f1d2c3e';
@@ -73,7 +80,7 @@ test('poker: joins over WS and leaves over HTTP without pointerevent requestIds'
     ],
   });
 
-  await page.addInitScript(({ tokenValue, tableIdValue, userIdValue }) => {
+  await page.addInitScript(({ tokenValue, tableIdValue, userIdValue, stateKeyValue }) => {
     window.SupabaseAuthBridge = window.SupabaseAuthBridge || {};
     const testState = {
       created: 0,
@@ -84,7 +91,7 @@ test('poker: joins over WS and leaves over HTTP without pointerevent requestIds'
       joinPayloads: [],
       snapshotsEmitted: 0
     };
-    (window as any).__POKER_TEST_STATE__ = testState;
+    window[stateKeyValue] = testState;
     try {
       Object.defineProperty(window.SupabaseAuthBridge, 'getAccessToken', {
         value: () => Promise.resolve(tokenValue),
@@ -151,7 +158,7 @@ test('poker: joins over WS and leaves over HTTP without pointerevent requestIds'
     } catch (_err) {
       window.PokerWsClient = pokerWsClientMock;
     }
-  }, { tokenValue: token, tableIdValue: tableId, userIdValue: userId });
+  }, { tokenValue: token, tableIdValue: tableId, userIdValue: userId, stateKeyValue: POKER_TEST_STATE_KEY });
 
   await page.route('**/.netlify/functions/poker-*', async (route, request) => {
     const url = new URL(request.url());
@@ -283,12 +290,28 @@ test('poker: joins over WS and leaves over HTTP without pointerevent requestIds'
 
   await page.locator('#pokerSeatNo').fill('0');
   await page.locator('#pokerBuyIn').fill('100');
+
+  await expect.poll(async () => {
+    const state = await readPokerTestState(page);
+    return {
+      created: state?.created || 0,
+      started: state?.started || 0,
+      ready: state?.ready === true,
+      authOk: Array.isArray(state?.statusEvents) && state.statusEvents.includes('auth_ok')
+    };
+  }, { timeout: 20000 }).toEqual({
+    created: 1,
+    started: 1,
+    ready: true,
+    authOk: true
+  });
+
   await page.locator('#pokerJoin').click();
 
   await expect
-    .poll(async () => page.evaluate(() => ((window as any).__POKER_TEST_STATE__?.joinPayloads?.length ?? 0)), { timeout: 20000 })
+    .poll(async () => ((await readPokerTestState(page))?.joinPayloads?.length ?? 0), { timeout: 20000 })
     .toBe(1);
-  const normalizedJoinPayload = await page.evaluate(() => ((window as any).__POKER_TEST_STATE__?.joinPayloads?.[0] || null) as Record<string, unknown> | null);
+  const normalizedJoinPayload = (((await readPokerTestState(page))?.joinPayloads?.[0]) || null) as Record<string, unknown> | null;
   expect(normalizedJoinPayload, 'join payload should be captured from the WS mock after clicking Join').toBeTruthy();
   const joinRequestId = normalizedJoinPayload && typeof normalizedJoinPayload.requestId === 'string' ? normalizedJoinPayload.requestId : '';
   expect(typeof joinRequestId, 'join requestId should be a string').toBe('string');
@@ -297,7 +320,7 @@ test('poker: joins over WS and leaves over HTTP without pointerevent requestIds'
   expect(joinRequestId.length, 'join requestId should be <= 200 chars').toBeLessThanOrEqual(200);
   expect(joinPostCalls, 'join should stay on the WS-only browser write path').toBe(0);
 
-  const postJoinState = await page.evaluate(() => (window as any).__POKER_TEST_STATE__ || null);
+  const postJoinState = await readPokerTestState(page);
   expect(postJoinState?.snapshotsEmitted, 'WS mock should emit exactly one join snapshot').toBe(1);
 
   const seatUser = page.locator('#pokerSeatsGrid .poker-seat-user', { hasText: shortUserId });

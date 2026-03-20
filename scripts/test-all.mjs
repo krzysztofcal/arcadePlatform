@@ -155,6 +155,7 @@ run("node", ["tests/poker-ui.behavior.test.mjs"], "poker-ui-behavior");
 run("node", ["tests/poker-ui-ws-join-smoke.behavior.test.mjs"], "poker-ui-ws-join-smoke-behavior");
 run("node", ["tests/poker-ui-ws-act-smoke.behavior.test.mjs"], "poker-ui-ws-act-smoke-behavior");
 run("node", ["tests/poker-ui-ws-write-path.guard.test.mjs"], "poker-ui-ws-write-path-guard");
+run("node", ["tests/e2e-poker-join-leave.guard.test.mjs"], "e2e-poker-join-leave-guard");
 run("node", ["ws-tests/ws-lobby-join-public-snapshot.behavior.test.mjs"], "ws-lobby-join-public-snapshot-behavior");
 run("node", ["tests/i18n.behavior.test.mjs"], "i18n-behavior");
 run("node", ["tests/static-html.behavior.test.mjs"], "static-html-behavior");
