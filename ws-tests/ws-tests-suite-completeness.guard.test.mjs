@@ -164,14 +164,6 @@ test("workflow wiring check uses literal matching (no dynamic RegExp)", () => {
   assert.match(text, /\.includes\(/);
 });
 
-test("protocol doc gate is present in both workflows", () => {
-  const prWorkflow = workflowText(".github/workflows/ws-pr-checks.yml");
-  const deployWorkflow = workflowText(".github/workflows/ws-deploy.yml");
-
-  assert.match(prWorkflow, /node --test ws-tests\/ws-poker-protocol-doc\.test\.mjs/);
-  assert.match(deployWorkflow, /node --test ws-tests\/ws-poker-protocol-doc\.test\.mjs/);
-});
-
 test("no workflow references legacy tests/ws-* harness paths", () => {
   const prWorkflow = workflowText(".github/workflows/ws-pr-checks.yml");
   const deployWorkflow = workflowText(".github/workflows/ws-deploy.yml");

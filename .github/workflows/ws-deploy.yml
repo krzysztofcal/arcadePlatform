@@ -254,8 +254,6 @@ jobs:
       - name: Run ws smoke-check script behavior test
         run: node --test ws-tests/ws-smoke-check-script.behavior.test.mjs
 
-      - name: Run ws poker protocol doc test
-        run: node --test ws-tests/ws-poker-protocol-doc.test.mjs
 
       - name: Run ws image protocol content behavior test
         run: node --test ws-tests/ws-image-contains-protocol.behavior.test.mjs

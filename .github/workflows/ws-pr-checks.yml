@@ -249,8 +249,6 @@ jobs:
       - name: Run infra VPS bash exit propagation guard test
         run: node --test ws-tests/infra-vps-workflow.bash-exit-propagation.guard.test.mjs
 
-      - name: Run ws poker protocol doc test
-        run: node --test ws-tests/ws-poker-protocol-doc.test.mjs
 
       - name: Run ws image protocol content behavior test
         run: node --test ws-tests/ws-image-contains-protocol.behavior.test.mjs

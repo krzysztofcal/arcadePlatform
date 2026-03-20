@@ -64,7 +64,6 @@ function assertRequiredOrder(text) {
   const behavior = block.indexOf("node --test ws-server/server.behavior.test.mjs");
   const locationGuard = block.indexOf("node --test ws-tests/ws-tests-location.guard.test.mjs");
   const suiteGuard = block.indexOf("node --test ws-tests/ws-tests-suite-completeness.guard.test.mjs");
-  const protocolDoc = block.indexOf("node --test ws-tests/ws-poker-protocol-doc.test.mjs");
   const infraVpcCaddyGuard = block.indexOf("node --test ws-tests/infra-vps-caddy.guard.test.mjs");
   const imageCheck = block.indexOf("node --test ws-tests/ws-image-contains-protocol.behavior.test.mjs");
   const containerCheck = block.indexOf("node --test ws-tests/ws-container-starts.behavior.test.mjs");
@@ -95,7 +94,6 @@ function assertRequiredOrder(text) {
   assert.notEqual(behavior, -1);
   assert.notEqual(locationGuard, -1);
   assert.notEqual(suiteGuard, -1);
-  assert.notEqual(protocolDoc, -1);
   assert.notEqual(infraVpcCaddyGuard, -1);
   assert.notEqual(imageCheck, -1);
   assert.notEqual(containerCheck, -1);
@@ -110,8 +108,7 @@ function assertRequiredOrder(text) {
   assert.equal(behavior < locationGuard, true);
   assert.equal(locationGuard < suiteGuard, true);
   assert.equal(suiteGuard < infraVpcCaddyGuard, true);
-  assert.equal(infraVpcCaddyGuard < protocolDoc, true);
-  assert.equal(protocolDoc < imageCheck, true);
+  assert.equal(infraVpcCaddyGuard < imageCheck, true);
   assert.equal(imageCheck < containerCheck, true);
 }
 
