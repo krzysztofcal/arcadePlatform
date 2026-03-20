@@ -95,7 +95,7 @@ test('poker: joins over WS and leaves over HTTP without pointerevent requestIds'
       window.SupabaseAuthBridge.getAccessToken = () => Promise.resolve(tokenValue);
     }
 
-    window.PokerWsClient = {
+    const pokerWsClientMock = {
       create(createOptions) {
         testState.created += 1;
         return {
@@ -141,6 +141,16 @@ test('poker: joins over WS and leaves over HTTP without pointerevent requestIds'
         };
       }
     };
+
+    try {
+      Object.defineProperty(window, 'PokerWsClient', {
+        value: pokerWsClientMock,
+        configurable: true,
+        writable: false,
+      });
+    } catch (_err) {
+      window.PokerWsClient = pokerWsClientMock;
+    }
   }, { tokenValue: token, tableIdValue: tableId, userIdValue: userId });
 
   await page.route('**/.netlify/functions/poker-*', async (route, request) => {
