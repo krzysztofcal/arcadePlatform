@@ -386,6 +386,9 @@ test("authoritative WS table_join returns a fully seated stacked snapshot and ke
     ]);
     assert.equal(joinedState.payload.members.some((entry) => entry.userId === "runtime_human"), true);
     assert.equal(joinedState.payload.members.some((entry) => entry.userId === botSeat2), false);
+    assert.equal(joinedState.payload.members.some((entry) => entry.userId === botSeat3), false);
+    assert.equal(joinedState.payload.members.length < joinedState.payload.seats.length, true);
+    assert.equal(joinedState.payload.authoritativeMembers.length, joinedState.payload.seats.length);
     assert.equal(joinedState.payload.hand.status, "PREFLOP");
     assert.equal(typeof joinedState.payload.hand.handId, "string");
     assert.deepEqual(joinedState.payload.seats, [

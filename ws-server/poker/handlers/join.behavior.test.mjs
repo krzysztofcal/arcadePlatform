@@ -26,7 +26,16 @@ function baseCtx(payload = {}){
       sessionStore: { trackConnection: () => {} },
       tableManager,
       ensureTableLoadedErrorMapper: (x) => x,
-      restoreTableFromPersisted: async () => ({ ok: true }),
+      restoreTableFromPersisted: async () => ({
+        ok: true,
+        restoredTable: {
+          coreState: {
+            version: 1,
+            seats: { u1: 2 },
+            publicStacks: { u1: 100 }
+          }
+        }
+      }),
       persistMutatedState: async () => ({ ok: true }),
       broadcastResyncRequired: () => { calls.resync += 1; },
       broadcastStateSnapshots: () => { calls.snapshots += 1; },
@@ -114,13 +123,20 @@ test('handleJoinCommand rejects restored human-only authoritative state instead 
       { userId: 'bot_3', seatNo: 3, stack: 200 }
     ]
   });
-  ctx.tableManager.tableSnapshot = () => ({
-    tableId: 't1',
-    stateVersion: 0,
-    members: [{ userId: 'u1', seat: 1 }],
-    seats: [{ userId: 'u1', seatNo: 1, status: 'ACTIVE' }],
-    stacks: { u1: 200 }
+  ctx.restoreTableFromPersisted = async () => ({
+    ok: true,
+    restoredTable: {
+      coreState: {
+        version: 2,
+        members: [],
+        seats: { u1: 1 },
+        publicStacks: { u1: 200 }
+      }
+    }
   });
+  ctx.tableManager.tableSnapshot = () => {
+    throw new Error('pre_attach_snapshot_should_not_be_used');
+  };
 
   await handleJoinCommand(ctx);
 
@@ -133,7 +149,7 @@ test('handleJoinCommand rejects restored human-only authoritative state instead 
   assert.equal(calls.snapshots, 0);
 });
 
-test('handleJoinCommand accepts restored authoritative state when bots are only projected through seats and stacks', async () => {
+test('handleJoinCommand accepts restored authoritative state before live members attach', async () => {
   const { ctx, calls } = baseCtx({ seatNo: 1, buyIn: 200 });
   ctx.authoritativeJoinEnabled = true;
   ctx.persistedBootstrapEnabled = true;
@@ -146,17 +162,33 @@ test('handleJoinCommand accepts restored authoritative state when bots are only 
       { userId: 'bot_3', seatNo: 3, stack: 200 }
     ]
   });
-  ctx.tableManager.tableSnapshot = () => ({
-    tableId: 't1',
-    stateVersion: 2,
-    members: [{ userId: 'u1', seat: 1 }],
-    seats: [
-      { userId: 'u1', seatNo: 1, status: 'ACTIVE' },
-      { userId: 'bot_2', seatNo: 2, status: 'ACTIVE', isBot: true },
-      { userId: 'bot_3', seatNo: 3, status: 'ACTIVE', isBot: true }
-    ],
-    stacks: { u1: 200, bot_2: 200, bot_3: 200 }
+  ctx.restoreTableFromPersisted = async () => ({
+    ok: true,
+    restoredTable: {
+      coreState: {
+        version: 2,
+        members: [],
+        seats: { u1: 1, bot_2: 2, bot_3: 3 },
+        publicStacks: { u1: 200, bot_2: 200, bot_3: 200 }
+      }
+    }
   });
+  ctx.tableManager.tableSnapshot = () => {
+    if (!calls.joinArgs) {
+      throw new Error('pre_attach_snapshot_should_not_be_used');
+    }
+    return {
+      tableId: 't1',
+      stateVersion: 2,
+      members: [{ userId: 'u1', seat: 1 }],
+      seats: [
+        { userId: 'u1', seatNo: 1, status: 'ACTIVE' },
+        { userId: 'bot_2', seatNo: 2, status: 'ACTIVE', isBot: true },
+        { userId: 'bot_3', seatNo: 3, status: 'ACTIVE', isBot: true }
+      ],
+      stacks: { u1: 200, bot_2: 200, bot_3: 200 }
+    };
+  };
 
   await handleJoinCommand(ctx);
 
@@ -166,6 +198,7 @@ test('handleJoinCommand accepts restored authoritative state when bots are only 
   assert.equal(calls.joinArgs.authoritativeSeatNo, 1);
   assert.equal(calls.actorTableState, 1);
   assert.equal(calls.table, 1);
+  assert.equal(calls.snapshots, 0);
 });
 
 test('handleJoinCommand rejects invalid buyIn without broadcast', async () => {

@@ -96,6 +96,47 @@ test("authoritative join adapter forwards only shared-core supported args", asyn
   assert.equal(Object.hasOwn(captured, "env"), false);
 });
 
+
+
+test("authoritative join adapter accepts complete authoritative snapshot without live members projection", async () => {
+  const execute = createAuthoritativeJoinExecutor({
+    env: {},
+    klog: () => {},
+    beginSql: async (fn) => fn({ ok: true }),
+    loadLockedStateHelpersFn: lockedStateHelpers,
+    loadPostTransactionFn: async () => async () => ({ ok: true }),
+    loadJoinModule: async () => ({
+      executePokerJoinAuthoritative: async () => ({
+        ok: true,
+        seatNo: 1,
+        rejoin: false,
+        stack: 200,
+        seededBots: [
+          { userId: "bot_2", seatNo: 2, stack: 200 },
+          { userId: "bot_3", seatNo: 3, stack: 200 }
+        ],
+        snapshot: {
+          ...makeSuccessSnapshot({
+            userId: "u1",
+            seatNo: 1,
+            stack: 200,
+            seededBots: [
+              { userId: "bot_2", seatNo: 2, stack: 200 },
+              { userId: "bot_3", seatNo: 3, stack: 200 }
+            ]
+          }),
+          members: []
+        }
+      })
+    })
+  });
+
+  const result = await execute({ tableId: "t1", userId: "u1", requestId: "r-complete" });
+  assert.equal(result.ok, true);
+  assert.equal(result.seatNo, 1);
+  assert.equal(result.stack, 200);
+});
+
 test("authoritative join adapter preserves explicit rejoin semantics", async () => {
   const execute = createAuthoritativeJoinExecutor({
     env: {},
