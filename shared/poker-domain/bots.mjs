@@ -97,7 +97,7 @@ function makeBotSystemKey(tableId, seatNo) {
   return `POKER_BOT:${tableId}:${seatNo}`;
 }
 
-function computeTargetBotCount({ maxPlayers, humanCount, maxBots } = {}) {
+export function computeTargetBotCount({ maxPlayers, humanCount, maxBots } = {}) {
   const totalSeats = Number.isFinite(Number(maxPlayers)) ? Math.trunc(Number(maxPlayers)) : 0;
   const humans = Number.isFinite(Number(humanCount)) ? Math.trunc(Number(humanCount)) : 0;
   const limit = Number.isFinite(Number(maxBots)) ? Math.trunc(Number(maxBots)) : 0;
@@ -105,7 +105,7 @@ function computeTargetBotCount({ maxPlayers, humanCount, maxBots } = {}) {
   return Math.max(0, Math.min(Math.max(0, limit), Math.max(0, (totalSeats - humans) - 1)));
 }
 
-function shouldSeedBotsOnJoin({ humanCount } = {}) {
+export function shouldSeedBotsOnJoin({ humanCount } = {}) {
   return Number(humanCount) === 1;
 }
 
@@ -263,12 +263,10 @@ returning seat_no;
 export {
   applySeatsAndStacksToState,
   asSeatSnapshot,
-  computeTargetBotCount,
   getBotConfig,
   loadSeatRows,
   makeBotSystemKey,
   makeBotUserId,
   parseStakes,
-  seedBotsForJoin,
-  shouldSeedBotsOnJoin
+  seedBotsForJoin
 };

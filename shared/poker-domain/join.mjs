@@ -1,4 +1,4 @@
-import { applySeatsAndStacksToState, asSeatSnapshot, getBotConfig, loadSeatRows, seedBotsForJoin } from "./bots.mjs";
+import { applySeatsAndStacksToState, asSeatSnapshot, computeTargetBotCount, getBotConfig, loadSeatRows, seedBotsForJoin, shouldSeedBotsOnJoin } from "./bots.mjs";
 
 const BUY_IN_IDEMPOTENCY_CONSTRAINT = "chips_transactions_idempotency_key_unique";
 
@@ -108,25 +108,87 @@ function stateAlreadyRepresentsActiveSeatRows(state, seatRows, userId) {
   return activeSeatRows.every((row) => {
     const seatUserId = typeof row?.user_id === "string" ? row.user_id.trim() : "";
     const seatNo = Number(row?.seat_no);
-    return seatUserId && Number.isInteger(seatNo) && seatNo >= 1 && stateSeatKeySet.has(`${seatUserId}:${seatNo}`);
+    return seatUserId
+      && Number.isInteger(seatNo)
+      && seatNo >= 1
+      && stateSeatKeySet.has(`${seatUserId}:${seatNo}`)
+      && Number.isInteger(Number(currentStacks[seatUserId]))
+      && Number(currentStacks[seatUserId]) > 0;
   });
 }
 
-async function syncStateSeatAndStack({ tx, tableId, userId, seatNo, stack, seededBots = [], loadStateForUpdate, updateStateLocked, validateStateForStorage }) {
+function activeSeatRows(rows) {
+  return Array.isArray(rows)
+    ? rows.filter((row) => String(row?.status || "ACTIVE").toUpperCase() === "ACTIVE")
+    : [];
+}
+
+function activeStackEntries(rows) {
+  return activeSeatRows(rows)
+    .map((row) => {
+      const rowUserId = typeof row?.user_id === "string" ? row.user_id.trim() : "";
+      const rowStack = Number(row?.stack);
+      return rowUserId && Number.isInteger(rowStack) && rowStack > 0 ? [rowUserId, rowStack] : null;
+    })
+    .filter(Boolean);
+}
+
+function assertAuthoritativeJoinStateComplete({ seatRows, state, version, userId, seatNo, stack, maxPlayers, botCfg }) {
+  const persistedSeatKeys = new Set(
+    activeSeatRows(seatRows)
+      .map((row) => {
+        const rowUserId = typeof row?.user_id === "string" ? row.user_id.trim() : "";
+        const rowSeatNo = Number(row?.seat_no);
+        return rowUserId && Number.isInteger(rowSeatNo) && rowSeatNo >= 1 ? `${rowUserId}:${rowSeatNo}` : null;
+      })
+      .filter(Boolean)
+  );
+  const stateSeatKeys = new Set(
+    (Array.isArray(state?.seats) ? state.seats : [])
+      .map((entry) => {
+        const entryUserId = typeof entry?.userId === "string" ? entry.userId.trim() : "";
+        const entrySeatNo = Number(entry?.seatNo);
+        return entryUserId && Number.isInteger(entrySeatNo) && entrySeatNo >= 1 ? `${entryUserId}:${entrySeatNo}` : null;
+      })
+      .filter(Boolean)
+  );
+  const stateStacks = state?.stacks && typeof state.stacks === "object" && !Array.isArray(state.stacks) ? state.stacks : {};
+
+  if (!Number.isInteger(version) || version <= 0) throw makeError("authoritative_state_invalid");
+  if (!persistedSeatKeys.has(`${userId}:${seatNo}`) || Number(stateStacks[userId]) !== Number(stack)) {
+    throw makeError("authoritative_state_invalid");
+  }
+  for (const persistedSeatKey of persistedSeatKeys) {
+    if (!stateSeatKeys.has(persistedSeatKey)) throw makeError("authoritative_state_invalid");
+  }
+  for (const [stackUserId, persistedStack] of activeStackEntries(seatRows)) {
+    if (Number(stateStacks[stackUserId]) !== persistedStack) throw makeError("authoritative_state_invalid");
+  }
+
+  const activeRows = activeSeatRows(seatRows);
+  const humanCount = activeRows.filter((row) => !row?.is_bot).length;
+  const expectedBotCount = botCfg?.enabled && shouldSeedBotsOnJoin({ humanCount })
+    ? computeTargetBotCount({ maxPlayers, humanCount, maxBots: botCfg.maxPerTable })
+    : 0;
+  const activeBotCount = activeRows.filter((row) => row?.is_bot).length;
+  if (activeBotCount < expectedBotCount) throw makeError("authoritative_state_invalid");
+}
+
+async function syncStateSeatAndStack({ tx, tableId, userId, seatNo, stack, loadStateForUpdate, updateStateLocked, validateStateForStorage, maxPlayers, botCfg }) {
   const stateRow = normalizeLockedStateResult(await loadStateForUpdate(tx, tableId));
+  const seatRows = await loadSeatRows(tx, tableId);
   const nextState = applySeatsAndStacksToState(stateRow.state, {
     tableId,
-    seatEntries: [
-      { userId, seatNo, status: "ACTIVE" },
-      ...seededBots
-    ],
-    stackEntries: [[userId, stack], ...seededBots.map((bot) => [bot.userId, bot.stack])]
+    seatEntries: activeSeatRows(seatRows).map(asSeatSnapshot).filter(Boolean),
+    stackEntries: activeStackEntries(seatRows)
   });
   if (!validateStateForStorage(nextState)) {
     throw makeError("state_invalid");
   }
   const updated = writeLockedStateResult(await updateStateLocked(tx, { tableId, nextState }));
-  return { version: updated.version ?? stateRow.version, state: nextState };
+  const version = updated.version ?? stateRow.version;
+  assertAuthoritativeJoinStateComplete({ seatRows, state: nextState, version, userId, seatNo, stack, maxPlayers, botCfg });
+  return { version, state: nextState };
 }
 
 async function readPersistedSeatStack({ tx, tableId, userId }) {
@@ -190,13 +252,10 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
           }
         };
       }
-      const currentStacks = stateRow.state?.stacks && typeof stateRow.state.stacks === "object" && !Array.isArray(stateRow.state.stacks)
-        ? stateRow.state.stacks
-        : {};
       const nextState = applySeatsAndStacksToState(stateRow.state, {
         tableId,
         seatEntries: seatRows.map(asSeatSnapshot).filter(Boolean),
-        stackEntries: Object.prototype.hasOwnProperty.call(currentStacks, userId) ? [] : [[userId, persisted.stack]]
+        stackEntries: activeStackEntries(seatRows)
       });
       if (!validateStateForStorage(nextState)) {
         throw makeError("state_invalid");
@@ -323,10 +382,11 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
       userId,
       seatNo: resolvedSeatNo,
       stack: fundedStack,
-      seededBots,
       loadStateForUpdate,
       updateStateLocked,
-      validateStateForStorage
+      validateStateForStorage,
+      maxPlayers,
+      botCfg
     });
     await tx.unsafe("update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1;", [tableId]);
     klog("ws_join_authoritative_persisted", { tableId, userId, seatNo: resolvedSeatNo, autoSeat: autoSeat === true, preferredSeatNo: preferredSeatNoRequested, buyIn: resolvedBuyIn, fundedStack });

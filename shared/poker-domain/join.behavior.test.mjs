@@ -27,6 +27,27 @@ function withBotEnv(fn) {
     });
 }
 
+function withBotsDisabled(fn) {
+  const previous = {
+    POKER_BOTS_ENABLED: process.env.POKER_BOTS_ENABLED,
+    POKER_BOTS_MAX_PER_TABLE: process.env.POKER_BOTS_MAX_PER_TABLE,
+    POKER_BOT_BUYIN_BB: process.env.POKER_BOT_BUYIN_BB,
+    POKER_BOT_PROFILE_DEFAULT: process.env.POKER_BOT_PROFILE_DEFAULT
+  };
+  delete process.env.POKER_BOTS_ENABLED;
+  delete process.env.POKER_BOTS_MAX_PER_TABLE;
+  delete process.env.POKER_BOT_BUYIN_BB;
+  delete process.env.POKER_BOT_PROFILE_DEFAULT;
+  return Promise.resolve()
+    .then(fn)
+    .finally(() => {
+      for (const [key, value] of Object.entries(previous)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    });
+}
+
 function withLockedState(args, { validateStateForStorage = () => true } = {}) {
   return {
     ...args,
@@ -39,7 +60,8 @@ function withLockedState(args, { validateStateForStorage = () => true } = {}) {
     updateStateLocked: async (tx, { tableId, nextState }) => {
       const rows = await tx.unsafe("update public.poker_state set state = $2::jsonb where table_id = $1;", [tableId, JSON.stringify(nextState)]);
       if (!Array.isArray(rows) || rows.length === 0) return { ok: true, newVersion: null };
-      return { ok: true, newVersion: rows?.[0]?.version ?? null };
+      const nextVersion = Number(rows?.[0]?.version);
+      return { ok: true, newVersion: Number.isInteger(nextVersion) ? nextVersion + 1 : null };
     },
     validateStateForStorage
   };
@@ -181,18 +203,30 @@ test("authoritative join rejects when financial mutation fails", async () => {
   assert.equal(writes.length, 0);
 });
 
-test("authoritative join funds stack only after financial mutation succeeds", async () => {
+test("authoritative join funds stack only after financial mutation succeeds", async () => withBotsDisabled(async () => {
   const sequence = [];
+  const seatRows = [];
   const result = await executePokerJoinAuthoritative(withLockedState({
     beginSql: async (fn) => fn({
       unsafe: async (sql, params) => {
         if (sql.includes("from public.poker_tables")) return [{ id: "t1", status: "OPEN", max_players: 6 }];
         if (sql.includes("from public.poker_seats") && sql.includes("status = 'ACTIVE'") && sql.includes("user_id = $2")) return [];
-        if (sql.includes("status = 'ACTIVE'") && sql.includes("order by seat_no asc")) return [{ seat_no: 1 }];
-        if (sql.includes("insert into public.poker_seats")) { sequence.push('insert_seat'); return [{ seat_no: 3 }]; }
-        if (sql.includes("update public.poker_seats set stack")) { sequence.push('update_stack'); return [{ ok: true }]; }
+        if (sql.includes("from public.poker_seats") && sql.includes("order by seat_no asc;")) {
+          if (sql.includes("status = 'ACTIVE'")) return [{ seat_no: 1 }, ...seatRows.map((seat) => ({ seat_no: seat.seat_no }))];
+          return seatRows.map((seat) => ({ ...seat }));
+        }
+        if (sql.includes("insert into public.poker_seats")) {
+          sequence.push('insert_seat');
+          seatRows.push({ user_id: params[1], seat_no: params[2], status: 'ACTIVE', stack: 0, is_bot: false, bot_profile: null, leave_after_hand: false });
+          return [{ seat_no: 3 }];
+        }
+        if (sql.includes("update public.poker_seats set stack")) {
+          sequence.push('update_stack');
+          seatRows[0].stack = params[3];
+          return [{ ok: true }];
+        }
         if (sql.includes("select version, state from public.poker_state")) return [{ version: 1, state: { tableId: 't1', seats: [], stacks: {} } }];
-        if (sql.includes("update public.poker_state set state")) { sequence.push('update_state'); return [{ ok: true }]; }
+        if (sql.includes("update public.poker_state set state")) { sequence.push('update_state'); return [{ version: 1 }]; }
         return [];
       }
     }),
@@ -207,18 +241,28 @@ test("authoritative join funds stack only after financial mutation succeeds", as
   assert.equal(result.ok, true);
   assert.equal(result.stack, 250);
   assert.deepEqual(sequence, ['insert_seat', 'ledger_buyin', 'update_stack', 'update_state']);
-});
+}));
 
-test("authoritative auto-seat respects preferred seat and initializes stack from buyIn", async () => {
+test("authoritative auto-seat respects preferred seat and initializes stack from buyIn", async () => withBotsDisabled(async () => {
   const writes = [];
+  const seatRows = [];
   const result = await executePokerJoinAuthoritative(withLockedState({
     beginSql: async (fn) => fn({
       unsafe: async (sql, params) => {
         if (sql.includes("from public.poker_tables")) return [{ id: "t1", status: "OPEN", max_players: 6 }];
         if (sql.includes("status = 'ACTIVE'") && sql.includes("user_id = $2")) return [];
         if (sql.includes("status = 'ACTIVE'") && sql.includes("order by seat_no asc")) return [{ seat_no: 1 }, { seat_no: 2 }, { seat_no: 5 }];
+        if (sql.includes("from public.poker_seats") && sql.includes("order by seat_no asc;") && !sql.includes("status = 'ACTIVE'")) return seatRows.map((seat) => ({ ...seat }));
+        if (sql.includes("insert into public.poker_seats")) {
+          seatRows.push({ user_id: params[1], seat_no: params[2], status: 'ACTIVE', stack: 0, is_bot: false, bot_profile: null, leave_after_hand: false });
+          return [{ seat_no: params[2] }];
+        }
+        if (sql.includes("update public.poker_seats set stack")) {
+          seatRows[0].stack = params[3];
+          return [{ ok: true }];
+        }
         if (sql.includes("select version, state from public.poker_state")) return [{ version: 1, state: { tableId: 't1', seats: [], stacks: {} } }];
-        if (sql.includes("update public.poker_state set state")) { writes.push(JSON.parse(params[1])); return [{ ok: true }]; }
+        if (sql.includes("update public.poker_state set state")) { writes.push(JSON.parse(params[1])); return [{ version: 1 }]; }
         return [];
       }
     }),
@@ -236,7 +280,7 @@ test("authoritative auto-seat respects preferred seat and initializes stack from
   assert.equal(result.stack, 180);
   assert.equal(writes.length, 1);
   assert.equal(writes[0].stacks.u2, 180);
-});
+}));
 
 
 test("rejoin with invalid persisted stack fails closed and does not write state", async () => {
@@ -378,7 +422,8 @@ test("first human authoritative join seeds exactly two bots and persists bot sea
         if (sql.includes("select version, state from public.poker_state")) return [store.stateRow];
         if (sql.includes("update public.poker_state set state")) {
           store.stateRow.state = JSON.parse(params[1]);
-          return [{ version: store.stateRow.version }];
+          store.stateRow.version += 1;
+          return [{ version: store.stateRow.version - 1 }];
         }
         if (sql.includes("update public.poker_seats set stack")) {
           const row = store.seatRows.find((seat) => seat.user_id === params[1] && seat.seat_no === params[2]);
@@ -414,6 +459,9 @@ test("first human authoritative join seeds exactly two bots and persists bot sea
   ]);
   assert.equal(result.snapshot.stacks.human_1, 150);
   assert.equal(Object.values(result.snapshot.stacks).filter((stack) => stack === 200).length, 2);
+  assert.equal(result.snapshot.stateVersion, 4);
+  assert.equal(store.stateRow.version, 4);
+  assert.equal(store.seatRows.filter((seat) => seat.is_bot).length, 2);
   assert.equal(store.ledgerCalls.length, 3);
 }));
 
@@ -465,7 +513,8 @@ test("authoritative join replay does not duplicate bots and only fills missing b
         if (sql.includes("select version, state from public.poker_state")) return [state.stateRow];
         if (sql.includes("update public.poker_state set state")) {
           state.stateRow.state = JSON.parse(params[1]);
-          return [{ version: state.stateRow.version }];
+          state.stateRow.version += 1;
+          return [{ version: state.stateRow.version - 1 }];
         }
         if (sql.includes("update public.poker_seats set stack")) {
           const row = state.seatRows.find((seat) => seat.user_id === params[1] && seat.seat_no === params[2]);
@@ -491,10 +540,12 @@ test("authoritative join replay does not duplicate bots and only fills missing b
   const first = await runJoin("join-replay-1");
   assert.equal(first.seededBots.length, 1);
   assert.equal(first.snapshot.seats.filter((seat) => seat.isBot).length, 2);
+  assert.equal(first.snapshot.stateVersion, 5);
 
   const second = await runJoin("join-replay-2");
   assert.equal(second.rejoin, true);
   assert.equal(second.snapshot.seats.filter((seat) => seat.isBot).length, 2);
+  assert.equal(second.snapshot.stacks.existing_bot, 200);
   assert.equal(state.seatRows.filter((seat) => seat.is_bot).length, 2);
   assert.equal(state.ledgerCalls.filter((payload) => payload.txType === "TABLE_BUY_IN").length, 2);
 }));

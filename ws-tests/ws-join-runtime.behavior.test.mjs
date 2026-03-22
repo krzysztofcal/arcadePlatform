@@ -378,6 +378,7 @@ test("authoritative WS table_join returns a fully seated stacked snapshot and ke
       payload: { tableId }
     });
     const joinedState = await nextMessageOfType(ws, "table_state");
+    assert.equal(joinedState.payload.stateVersion > 1, true);
     assert.deepEqual(joinedState.payload.authoritativeMembers, [
       { userId: "runtime_human", seat: 1 },
       { userId: botSeat2, seat: 2 },
@@ -397,6 +398,9 @@ test("authoritative WS table_join returns a fully seated stacked snapshot and ke
     assert.equal(typeof joinedState.payload.stacks[botSeat2], "number");
     assert.equal(typeof joinedState.payload.stacks[botSeat3], "number");
     assert.equal(Object.keys(joinedState.payload.stacks || {}).length >= 3, true);
+    const persistedAfterJoin = await readPersistedFile(filePath);
+    assert.equal(persistedAfterJoin.tables[tableId].stateRow.version, joinedState.payload.stateVersion);
+    assert.equal(persistedAfterJoin.tables[tableId].seatRows.filter((seat) => seat.status === "ACTIVE").length >= 3, true);
 
     sendFrame(ws, {
       version: "1.0",
@@ -704,7 +708,19 @@ test("authoritative join adapter resolves in ws artifact layout without netlify 
       env: { SUPABASE_DB_URL: "postgres://db.example.local/app" },
       beginSql: async (fn) => fn({}),
       klog: () => {},
-      loadJoinModule: async () => ({ executePokerJoinAuthoritative: async () => ({ ok: true, seatNo: 1, stack: 150, seededBots: [] }) })
+      loadJoinModule: async () => ({
+        executePokerJoinAuthoritative: async () => ({
+          ok: true,
+          seatNo: 1,
+          stack: 150,
+          seededBots: [],
+          snapshot: {
+            stateVersion: 1,
+            seats: [{ userId: "u1", seatNo: 1, status: "ACTIVE" }],
+            stacks: { u1: 150 }
+          }
+        })
+      })
     });
 
     const result = await execute({ tableId: "t1", userId: "u1", requestId: "r1", buyIn: 150 });

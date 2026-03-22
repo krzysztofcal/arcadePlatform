@@ -6,6 +6,14 @@ import { createAuthoritativeJoinExecutor } from "./authoritative-join-adapter.mj
 const validateStateForStorage = (state) =>
   isStateStorageValid(state, { requireNoDeck: true, requireHandSeed: false, requireCommunityDealt: false });
 
+function makeSuccessSnapshot({ userId = "u1", seatNo = 2, stack = 100, seededBots = [], stateVersion = 1 } = {}) {
+  return {
+    stateVersion,
+    seats: [{ userId, seatNo, status: "ACTIVE" }, ...seededBots.map((bot) => ({ userId: bot.userId, seatNo: bot.seatNo, status: "ACTIVE", isBot: true }))],
+    stacks: Object.fromEntries([[userId, stack], ...seededBots.map((bot) => [bot.userId, bot.stack])])
+  };
+}
+
 const lockedStateHelpers = async () => ({
   loadStateForUpdate: async () => ({ ok: true, version: 0, state: {} }),
   updateStateLocked: async () => ({ ok: true, newVersion: 1 }),
@@ -69,7 +77,7 @@ test("authoritative join adapter forwards only shared-core supported args", asyn
     loadJoinModule: async () => ({
       executePokerJoinAuthoritative: async (args) => {
         captured = args;
-        return { ok: true, seatNo: 2, rejoin: false, stack: 100 };
+        return { ok: true, seatNo: 2, rejoin: false, stack: 100, snapshot: makeSuccessSnapshot() };
       }
     })
   });
@@ -96,7 +104,7 @@ test("authoritative join adapter preserves explicit rejoin semantics", async () 
     loadLockedStateHelpersFn: lockedStateHelpers,
     loadPostTransactionFn: async () => async () => ({ ok: true }),
     loadJoinModule: async () => ({
-      executePokerJoinAuthoritative: async () => ({ ok: true, seatNo: 3, rejoin: true, stack: 120 })
+      executePokerJoinAuthoritative: async () => ({ ok: true, seatNo: 3, rejoin: true, stack: 120, snapshot: makeSuccessSnapshot({ seatNo: 3, stack: 120 }) })
     })
   });
   const result = await execute({ tableId: "t1", userId: "u1", requestId: "r2" });
@@ -120,6 +128,36 @@ test("authoritative join adapter rejects malformed success payload", async () =>
   });
 
   const result = await execute({ tableId: "t1", userId: "u1", requestId: "r3", buyIn: 100 });
+  assert.deepEqual(result, { ok: false, code: "authoritative_state_invalid" });
+});
+
+test("authoritative join adapter rejects partial human-only success snapshot", async () => {
+  const execute = createAuthoritativeJoinExecutor({
+    env: {},
+    klog: () => {},
+    beginSql: async (fn) => fn({ ok: true }),
+    loadLockedStateHelpersFn: lockedStateHelpers,
+    loadPostTransactionFn: async () => async () => ({ ok: true }),
+    loadJoinModule: async () => ({
+      executePokerJoinAuthoritative: async () => ({
+        ok: true,
+        seatNo: 1,
+        rejoin: false,
+        stack: 100,
+        seededBots: [
+          { userId: "bot_2", seatNo: 2, stack: 200 },
+          { userId: "bot_3", seatNo: 3, stack: 200 }
+        ],
+        snapshot: {
+          stateVersion: 0,
+          seats: [{ userId: "u1", seatNo: 1, status: "ACTIVE" }],
+          stacks: { u1: 100 }
+        }
+      })
+    })
+  });
+
+  const result = await execute({ tableId: "t1", userId: "u1", requestId: "r-partial" });
   assert.deepEqual(result, { ok: false, code: "authoritative_state_invalid" });
 });
 
