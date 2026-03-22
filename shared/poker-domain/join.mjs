@@ -77,9 +77,21 @@ function writeLockedStateResult(result) {
     if (result?.reason === "not_found") throw makeError("state_missing");
     throw makeError("state_invalid");
   }
-  return {
-    version: Number.isInteger(Number(result.newVersion)) ? Number(result.newVersion) : null
-  };
+  const version = Number(result.newVersion);
+  if (!Number.isInteger(version) || version <= 0) {
+    throw makeError("authoritative_state_invalid");
+  }
+  return { version };
+}
+
+function requirePostMutationVersion({ previousVersion, nextVersion }) {
+  if (!Number.isInteger(nextVersion) || nextVersion <= 0) {
+    throw makeError("authoritative_state_invalid");
+  }
+  if (Number.isInteger(previousVersion) && nextVersion <= previousVersion) {
+    throw makeError("authoritative_state_invalid");
+  }
+  return nextVersion;
 }
 
 function stateAlreadyRepresentsActiveSeatRows(state, seatRows, userId) {
@@ -186,7 +198,7 @@ async function syncStateSeatAndStack({ tx, tableId, userId, seatNo, stack, loadS
     throw makeError("state_invalid");
   }
   const updated = writeLockedStateResult(await updateStateLocked(tx, { tableId, nextState }));
-  const version = updated.version ?? stateRow.version;
+  const version = requirePostMutationVersion({ previousVersion: stateRow.version, nextVersion: updated.version });
   assertAuthoritativeJoinStateComplete({ seatRows, state: nextState, version, userId, seatNo, stack, maxPlayers, botCfg });
   return { version, state: nextState };
 }
@@ -235,6 +247,9 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
       const stateRow = normalizeLockedStateResult(await loadStateForUpdate(tx, tableId));
       const seatRows = await loadSeatRows(tx, tableId);
       if (stateAlreadyRepresentsActiveSeatRows(stateRow.state, seatRows, userId)) {
+        if (!Number.isInteger(stateRow.version) || stateRow.version <= 0) {
+          throw makeError("authoritative_state_invalid");
+        }
         await tx.unsafe("update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1;", [tableId]);
         return {
           ok: true,
@@ -261,6 +276,7 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
         throw makeError("state_invalid");
       }
       const updatedState = writeLockedStateResult(await updateStateLocked(tx, { tableId, nextState }));
+      const snapshotVersion = requirePostMutationVersion({ previousVersion: stateRow.version, nextVersion: updatedState.version });
       await tx.unsafe("update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1;", [tableId]);
       return {
         ok: true,
@@ -272,7 +288,7 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
         requestId: requestId || null,
         me: { seated: true },
         snapshot: {
-          stateVersion: updatedState.version ?? stateRow.version,
+          stateVersion: snapshotVersion,
           seats: Array.isArray(nextState.seats) ? nextState.seats : [],
           stacks: nextState.stacks && typeof nextState.stacks === "object" ? nextState.stacks : {}
         }

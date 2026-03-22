@@ -47,11 +47,13 @@ function classifyRestoreFailureAsMissingState(reason) {
   return ["state_missing", "poker_state_missing", "invalid_persisted_state"].includes(String(reason || ""));
 }
 
-function restoredAuthoritativeStateLooksComplete({ restoredTable, userId, seatNo, seededBots = [] }) {
+function restoredAuthoritativeStateLooksComplete({ restoredTable, userId, seatNo, seededBots = [], expectedStateVersion = null }) {
   const coreState = restoredTable?.coreState && typeof restoredTable.coreState === "object" ? restoredTable.coreState : null;
   const seats = coreState?.seats && typeof coreState.seats === "object" && !Array.isArray(coreState.seats) ? coreState.seats : {};
   const stacks = coreState?.publicStacks && typeof coreState.publicStacks === "object" && !Array.isArray(coreState.publicStacks) ? coreState.publicStacks : {};
-  if (!Number.isInteger(Number(coreState?.version)) || Number(coreState.version) <= 0) return false;
+  const restoredVersion = Number(coreState?.version);
+  if (!Number.isInteger(restoredVersion) || restoredVersion <= 0) return false;
+  if (expectedStateVersion !== null && restoredVersion !== Number(expectedStateVersion)) return false;
   if (Number(seats[userId]) !== Number(seatNo) || Number(stacks[userId]) <= 0) return false;
   for (const bot of seededBots) {
     const botUserId = typeof bot?.userId === "string" ? bot.userId : "";
@@ -142,7 +144,8 @@ export async function handleJoinCommand({ frame, ws, connState, sessionStore, ta
       restoredTable: restored?.restoredTable,
       userId: connState.session.userId,
       seatNo: authoritativeJoinResult?.seatNo,
-      seededBots: authoritativeJoinResult?.seededBots || []
+      seededBots: authoritativeJoinResult?.seededBots || [],
+      expectedStateVersion: authoritativeJoinResult?.snapshot?.stateVersion ?? null
     })) {
       sendCommandResult(ws, connState, {
         requestId: frame.requestId ?? null,

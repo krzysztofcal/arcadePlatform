@@ -345,7 +345,7 @@ test("authoritative WS table_join returns a fully seated stacked snapshot and ke
       [tableId]: {
         tableRow: { id: tableId, max_players: 6, status: "OPEN", stakes: '{"sb":1,"bb":2}' },
         seatRows: [],
-        stateRow: { version: 1, state: { tableId, seats: [], stacks: {}, phase: "INIT", pot: 0 } }
+        stateRow: { version: 0, state: { tableId, seats: [], stacks: {}, phase: "INIT", pot: 0 } }
       }
     }
   };
@@ -378,7 +378,7 @@ test("authoritative WS table_join returns a fully seated stacked snapshot and ke
       payload: { tableId }
     });
     const joinedState = await nextMessageOfType(ws, "table_state");
-    assert.equal(joinedState.payload.stateVersion > 1, true);
+    assert.equal(joinedState.payload.stateVersion > 0, true);
     assert.deepEqual(joinedState.payload.authoritativeMembers, [
       { userId: "runtime_human", seat: 1 },
       { userId: botSeat2, seat: 2 },
