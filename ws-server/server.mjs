@@ -542,7 +542,14 @@ async function restoreTableFromPersisted(tableId) {
     if (!restored?.ok || !restored?.table) {
       return { ok: false, reason: restored?.code || "restore_failed" };
     }
-    return tableManager.restoreTableFromPersisted(tableId, restored.table);
+    const applied = tableManager.restoreTableFromPersisted(tableId, restored.table);
+    if (!applied?.ok) {
+      return applied;
+    }
+    return {
+      ...applied,
+      restoredTable: restored.table
+    };
   } catch (error) {
     klogSafe("ws_state_restore_failed", { tableId, message: error?.message || "unknown" });
     return { ok: false, reason: "restore_error" };
