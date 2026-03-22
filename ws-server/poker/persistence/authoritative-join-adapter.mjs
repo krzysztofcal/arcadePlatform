@@ -50,7 +50,7 @@ function resolveJoinTestOverride(env = process.env) {
 
 function normalizeJoinError(error) {
   const code = typeof error?.code === "string" ? error.code : "authoritative_join_failed";
-  if (["table_not_found", "table_closed", "table_not_open", "seat_taken", "table_full", "table_full_bot_leaving", "state_missing", "poker_state_missing", "state_invalid", "duplicate_seat", "invalid_seat_no", "invalid_buy_in", "request_pending", "insufficient_funds", "system_account_missing", "chips_apply_failed", "chips_apply_mismatch", "missing_idempotency_key", "invalid_escrow_only_entries"].includes(code)) {
+  if (["table_not_found", "table_closed", "table_not_open", "seat_taken", "table_full", "table_full_bot_leaving", "state_missing", "poker_state_missing", "state_invalid", "duplicate_seat", "invalid_seat_no", "invalid_buy_in", "request_pending", "insufficient_funds", "system_account_missing", "chips_apply_failed", "chips_apply_mismatch", "missing_idempotency_key", "invalid_escrow_only_entries", "authoritative_state_invalid"].includes(code)) {
     return { ok: false, code };
   }
   return { ok: false, code: "authoritative_join_failed" };
@@ -67,7 +67,6 @@ function noopPostTransaction() {
 }
 
 function normalizeSuccess(result, { tableId, userId, requestId, klog }) {
-
   if (!result?.ok) return result;
   const seatNo = Number(result?.seatNo);
   if (!Number.isInteger(seatNo) || seatNo < 1) {
@@ -75,9 +74,41 @@ function normalizeSuccess(result, { tableId, userId, requestId, klog }) {
     return { ok: false, code: "authoritative_state_invalid" };
   }
   const stack = Number(result?.stack);
+  const rejoin = result?.rejoin === true;
   if (!Number.isInteger(stack) || stack <= 0) {
     klog("ws_join_authoritative_failed", { tableId, userId, requestId: requestId || null, code: "authoritative_state_invalid", message: "invalid_stack" });
     return { ok: false, code: "authoritative_state_invalid" };
+  }
+  const seededBots = Array.isArray(result?.seededBots) ? result.seededBots : [];
+  const snapshot = result?.snapshot && typeof result.snapshot === "object" ? result.snapshot : null;
+  const snapshotVersion = Number(snapshot?.stateVersion);
+  const snapshotSeats = Array.isArray(snapshot?.seats) ? snapshot.seats : [];
+  const snapshotStacks = snapshot?.stacks && typeof snapshot.stacks === "object" && !Array.isArray(snapshot.stacks) ? snapshot.stacks : {};
+  const snapshotSeatKeys = new Set(
+    snapshotSeats
+      .map((seat) => {
+        const seatUserId = typeof seat?.userId === "string" ? seat.userId.trim() : "";
+        const snapshotSeatNo = Number(seat?.seatNo);
+        return seatUserId && Number.isInteger(snapshotSeatNo) && snapshotSeatNo >= 1 ? `${seatUserId}:${snapshotSeatNo}` : null;
+      })
+      .filter(Boolean)
+  );
+  if (!snapshot || !Number.isInteger(snapshotVersion) || snapshotVersion <= 0) {
+    klog("ws_join_authoritative_failed", { tableId, userId, requestId: requestId || null, code: "authoritative_state_invalid", message: "invalid_snapshot_version" });
+    return { ok: false, code: "authoritative_state_invalid" };
+  }
+  if (!snapshotSeatKeys.has(`${userId}:${seatNo}`) || Number(snapshotStacks[userId]) <= 0 || (!rejoin && Number(snapshotStacks[userId]) !== stack)) {
+    klog("ws_join_authoritative_failed", { tableId, userId, requestId: requestId || null, code: "authoritative_state_invalid", message: "missing_human_snapshot_state" });
+    return { ok: false, code: "authoritative_state_invalid" };
+  }
+  for (const bot of seededBots) {
+    const botUserId = typeof bot?.userId === "string" ? bot.userId : "";
+    const botSeatNo = Number(bot?.seatNo);
+    const botStack = Number(bot?.stack);
+    if (!botUserId || !Number.isInteger(botSeatNo) || botSeatNo < 1 || !snapshotSeatKeys.has(`${botUserId}:${botSeatNo}`) || Number(snapshotStacks[botUserId]) !== botStack) {
+      klog("ws_join_authoritative_failed", { tableId, userId, requestId: requestId || null, code: "authoritative_state_invalid", message: "missing_seeded_bot_snapshot_state" });
+      return { ok: false, code: "authoritative_state_invalid" };
+    }
   }
   return {
     ok: true,
@@ -85,10 +116,10 @@ function normalizeSuccess(result, { tableId, userId, requestId, klog }) {
     userId,
     seatNo,
     stack,
-    rejoin: result?.rejoin === true,
+    rejoin,
     requestId: requestId || null,
-    seededBots: Array.isArray(result?.seededBots) ? result.seededBots : [],
-    snapshot: result?.snapshot && typeof result.snapshot === "object" ? result.snapshot : null
+    seededBots,
+    snapshot
   };
 }
 

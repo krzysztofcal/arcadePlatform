@@ -9,7 +9,13 @@ function baseCtx(payload = {}){
     join: (args) => { calls.joinArgs = args; return { ok: true, changed: true, tableState: { tableId: 't1', members: [] } }; },
     persistedStateVersion: () => 1,
     bootstrapHand: () => ({ ok: true, changed: false }),
-    tableSnapshot: () => ({ tableId: 't1' })
+    tableSnapshot: () => ({
+      tableId: 't1',
+      stateVersion: 1,
+      members: [{ userId: 'u1', seat: 2 }],
+      seats: [{ userId: 'u1', seatNo: 2, status: 'ACTIVE' }],
+      stacks: { u1: 100 }
+    })
   };
   return {
     calls,
@@ -93,6 +99,73 @@ test('handleJoinCommand authoritative rehydrate failure does not emit accepted s
   assert.equal(calls.command.length, 0);
   assert.equal(calls.actorTableState, 0);
   assert.equal(calls.table, 0);
+});
+
+test('handleJoinCommand rejects restored human-only authoritative state instead of broadcasting success', async () => {
+  const { ctx, calls } = baseCtx({ seatNo: 1, buyIn: 200 });
+  ctx.authoritativeJoinEnabled = true;
+  ctx.persistedBootstrapEnabled = true;
+  ctx.loadAuthoritativeJoinExecutor = async () => async () => ({
+    ok: true,
+    seatNo: 1,
+    stack: 200,
+    seededBots: [
+      { userId: 'bot_2', seatNo: 2, stack: 200 },
+      { userId: 'bot_3', seatNo: 3, stack: 200 }
+    ]
+  });
+  ctx.tableManager.tableSnapshot = () => ({
+    tableId: 't1',
+    stateVersion: 0,
+    members: [{ userId: 'u1', seat: 1 }],
+    seats: [{ userId: 'u1', seatNo: 1, status: 'ACTIVE' }],
+    stacks: { u1: 200 }
+  });
+
+  await handleJoinCommand(ctx);
+
+  assert.equal(calls.command.length, 1);
+  assert.equal(calls.command[0].status, 'rejected');
+  assert.equal(calls.command[0].reason, 'authoritative_state_invalid');
+  assert.equal(calls.joinArgs, null);
+  assert.equal(calls.actorTableState, 0);
+  assert.equal(calls.table, 0);
+  assert.equal(calls.snapshots, 0);
+});
+
+test('handleJoinCommand accepts restored authoritative state when bots are only projected through seats and stacks', async () => {
+  const { ctx, calls } = baseCtx({ seatNo: 1, buyIn: 200 });
+  ctx.authoritativeJoinEnabled = true;
+  ctx.persistedBootstrapEnabled = true;
+  ctx.loadAuthoritativeJoinExecutor = async () => async () => ({
+    ok: true,
+    seatNo: 1,
+    stack: 200,
+    seededBots: [
+      { userId: 'bot_2', seatNo: 2, stack: 200 },
+      { userId: 'bot_3', seatNo: 3, stack: 200 }
+    ]
+  });
+  ctx.tableManager.tableSnapshot = () => ({
+    tableId: 't1',
+    stateVersion: 2,
+    members: [{ userId: 'u1', seat: 1 }],
+    seats: [
+      { userId: 'u1', seatNo: 1, status: 'ACTIVE' },
+      { userId: 'bot_2', seatNo: 2, status: 'ACTIVE', isBot: true },
+      { userId: 'bot_3', seatNo: 3, status: 'ACTIVE', isBot: true }
+    ],
+    stacks: { u1: 200, bot_2: 200, bot_3: 200 }
+  });
+
+  await handleJoinCommand(ctx);
+
+  assert.equal(calls.command.length, 1);
+  assert.equal(calls.command[0].status, 'accepted');
+  assert.equal(calls.command[0].reason, null);
+  assert.equal(calls.joinArgs.authoritativeSeatNo, 1);
+  assert.equal(calls.actorTableState, 1);
+  assert.equal(calls.table, 1);
 });
 
 test('handleJoinCommand rejects invalid buyIn without broadcast', async () => {

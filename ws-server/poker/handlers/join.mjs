@@ -47,6 +47,32 @@ function classifyRestoreFailureAsMissingState(reason) {
   return ["state_missing", "poker_state_missing", "invalid_persisted_state"].includes(String(reason || ""));
 }
 
+function restoredAuthoritativeJoinLooksComplete({ tableManager, tableId, userId, seatNo, seededBots = [] }) {
+  const snapshot = tableManager.tableSnapshot(tableId, userId);
+  const members = Array.isArray(snapshot?.members) ? snapshot.members : [];
+  const seats = Array.isArray(snapshot?.seats) ? snapshot.seats : [];
+  const stacks = snapshot?.stacks && typeof snapshot.stacks === "object" && !Array.isArray(snapshot.stacks) ? snapshot.stacks : {};
+  const memberKeys = new Set(members.map((member) => {
+    const memberUserId = typeof member?.userId === "string" ? member.userId.trim() : "";
+    const memberSeat = Number(member?.seat);
+    return memberUserId && Number.isInteger(memberSeat) && memberSeat >= 1 ? `${memberUserId}:${memberSeat}` : null;
+  }).filter(Boolean));
+  const seatKeys = new Set(seats.map((seat) => {
+    const seatUserId = typeof seat?.userId === "string" ? seat.userId.trim() : "";
+    const seatValue = Number(seat?.seatNo);
+    return seatUserId && Number.isInteger(seatValue) && seatValue >= 1 ? `${seatUserId}:${seatValue}` : null;
+  }).filter(Boolean));
+  if (!Number.isInteger(Number(snapshot?.stateVersion)) || Number(snapshot.stateVersion) <= 0) return false;
+  if (!memberKeys.has(`${userId}:${seatNo}`) || !seatKeys.has(`${userId}:${seatNo}`) || Number(stacks[userId]) <= 0) return false;
+  for (const bot of seededBots) {
+    const botUserId = typeof bot?.userId === "string" ? bot.userId : "";
+    const botSeatNo = Number(bot?.seatNo);
+    if (!botUserId || !Number.isInteger(botSeatNo) || botSeatNo < 1) return false;
+    if (!seatKeys.has(`${botUserId}:${botSeatNo}`) || Number(stacks[botUserId]) <= 0) return false;
+  }
+  return true;
+}
+
 export async function handleJoinCommand({ frame, ws, connState, sessionStore, tableManager, ensureTableLoadedErrorMapper, restoreTableFromPersisted, persistMutatedState, broadcastResyncRequired, broadcastStateSnapshots, broadcastTableState, sendError, sendCommandResult, sendTableState, authoritativeJoinEnabled, observeOnlyJoinEnabled, persistedBootstrapEnabled, loadAuthoritativeJoinExecutor }) {
   const tableId = frame.__resolvedTableId;
   const authoritativeJoinRequired = authoritativeJoinEnabled && !observeOnlyJoinEnabled;
@@ -120,6 +146,21 @@ export async function handleJoinCommand({ frame, ws, connState, sessionStore, ta
         code: "TABLE_BOOTSTRAP_FAILED",
         message: "authoritative_join_rehydrate_failed",
         requestId: frame.requestId ?? null,
+      });
+      return;
+    }
+    if (!restoredAuthoritativeJoinLooksComplete({
+      tableManager,
+      tableId,
+      userId: connState.session.userId,
+      seatNo: authoritativeJoinResult?.seatNo,
+      seededBots: authoritativeJoinResult?.seededBots || []
+    })) {
+      sendCommandResult(ws, connState, {
+        requestId: frame.requestId ?? null,
+        tableId,
+        status: "rejected",
+        reason: "authoritative_state_invalid"
       });
       return;
     }
