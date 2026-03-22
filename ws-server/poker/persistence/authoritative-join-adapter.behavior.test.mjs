@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { isStateStorageValid } from "../../../netlify/functions/_shared/poker-state-utils.mjs";
+import { isStateStorageValid } from "../snapshot-runtime/poker-state-utils.mjs";
 import { createAuthoritativeJoinExecutor } from "./authoritative-join-adapter.mjs";
 
 const validateStateForStorage = (state) =>

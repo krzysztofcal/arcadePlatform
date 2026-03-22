@@ -667,3 +667,50 @@ test("authoritative repeated and replayed table_join keep bot seating stable and
     await fs.rm(dir, { recursive: true, force: true });
   }
 });
+
+
+test("authoritative join adapter resolves in ws artifact layout without netlify supabase-admin packaging", async () => {
+  const { mkdtemp, mkdir, copyFile, rm, writeFile } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { dirname, join } = await import("node:path");
+  const { pathToFileURL } = await import("node:url");
+
+  const stageDir = await mkdtemp(join(tmpdir(), "ws-join-artifact-"));
+  try {
+    const files = [
+      ["ws-server/poker/persistence/authoritative-join-adapter.mjs", "poker/persistence/authoritative-join-adapter.mjs"],
+      ["ws-server/poker/persistence/chips-ledger.mjs", "poker/persistence/chips-ledger.mjs"],
+      ["ws-server/poker/persistence/sql-admin.mjs", "poker/persistence/sql-admin.mjs"],
+      ["ws-server/poker/persistence/poker-state-write-locked.mjs", "poker/persistence/poker-state-write-locked.mjs"],
+      ["ws-server/poker/snapshot-runtime/poker-state-utils.mjs", "poker/snapshot-runtime/poker-state-utils.mjs"],
+      ["ws-server/poker/bootstrap/persisted-bootstrap-db.mjs", "poker/bootstrap/persisted-bootstrap-db.mjs"],
+      ["shared/poker-domain/join.mjs", "shared/poker-domain/join.mjs"],
+      ["shared/poker-domain/bots.mjs", "shared/poker-domain/bots.mjs"]
+    ];
+
+    for (const [src, dest] of files) {
+      const target = join(stageDir, dest);
+      await mkdir(dirname(target), { recursive: true });
+      await copyFile(src, target);
+    }
+
+    await writeFile(join(stageDir, "package.json"), '{"type":"module"}\n', "utf8");
+    await mkdir(join(stageDir, "node_modules/postgres"), { recursive: true });
+    await writeFile(join(stageDir, "node_modules/postgres/package.json"), '{"name":"postgres","type":"module","exports":"./index.js"}\n', "utf8");
+    await writeFile(join(stageDir, "node_modules/postgres/index.js"), 'export default function postgres() { return { begin: async (fn) => fn({ unsafe: async () => [] }) }; }\n', "utf8");
+
+    const adapterModule = await import(pathToFileURL(join(stageDir, "poker/persistence/authoritative-join-adapter.mjs")).href);
+    const execute = adapterModule.createAuthoritativeJoinExecutor({
+      env: { SUPABASE_DB_URL: "postgres://db.example.local/app" },
+      beginSql: async (fn) => fn({}),
+      klog: () => {},
+      loadJoinModule: async () => ({ executePokerJoinAuthoritative: async () => ({ ok: true, seatNo: 1, stack: 150, seededBots: [] }) })
+    });
+
+    const result = await execute({ tableId: "t1", userId: "u1", requestId: "r1", buyIn: 150 });
+    assert.equal(result.ok, true);
+    assert.equal(result.code, undefined);
+  } finally {
+    await rm(stageDir, { recursive: true, force: true });
+  }
+});

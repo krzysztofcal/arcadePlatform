@@ -146,7 +146,7 @@ The preview VPS contract is:
 - Remote upload staging directory: `/tmp/arcadeplatform-ws-preview`
 
 Preview deploys unpack into a temporary directory under `/tmp/arcadeplatform-ws-preview` and then sync the extracted files into `/opt/arcade-ws-preview/ws-server`.
-The workflow fails fast before mutating preview app contents when the preview base root, app dir, env file, service, Node.js, `tar`, `rsync`, `curl`, or required `PORT=3001` and `WS_AUTHORITATIVE_JOIN_ENABLED=1` settings are missing.
+The workflow fails fast before mutating preview app contents when the preview base root, app dir, env file, service, Node.js, `tar`, `rsync`, `curl`, or required `PORT=3001`, `WS_AUTHORITATIVE_JOIN_ENABLED=1`, and non-empty `SUPABASE_DB_URL` settings are missing.
 Preview routing stays in `infra/vps/Caddyfile`, which must continue to define both the `ws.kcswh.pl -> 127.0.0.1:3000` and `ws-preview.kcswh.pl -> 127.0.0.1:3001` site blocks.
 
 ### Preview secrets

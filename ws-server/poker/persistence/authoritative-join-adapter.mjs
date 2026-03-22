@@ -9,7 +9,7 @@ async function loadHttpAuthoritativeJoinModule() {
 }
 
 async function loadLedgerPostTransaction() {
-  const ledgerModule = await import("../../../netlify/functions/_shared/chips-ledger.mjs");
+  const ledgerModule = await import("./chips-ledger.mjs");
   if (typeof ledgerModule?.postTransaction !== "function") {
     throw new Error("missing_post_transaction");
   }
@@ -24,8 +24,8 @@ const DEFAULT_STORAGE_STATE_OPTIONS = Object.freeze({
 
 async function loadLockedStateHelpers() {
   const [lockedModule, stateUtilsModule] = await Promise.all([
-    import("../../../netlify/functions/_shared/poker-state-write-locked.mjs"),
-    import("../../../netlify/functions/_shared/poker-state-utils.mjs")
+    import("./poker-state-write-locked.mjs"),
+    import("../snapshot-runtime/poker-state-utils.mjs")
   ]);
   if (typeof lockedModule?.loadPokerStateForUpdate !== "function" || typeof lockedModule?.updatePokerStateLocked !== "function" || typeof stateUtilsModule?.isStateStorageValid !== "function") {
     throw new Error("missing_locked_state_helpers");
