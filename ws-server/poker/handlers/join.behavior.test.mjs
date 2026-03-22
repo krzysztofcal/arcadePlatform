@@ -201,6 +201,40 @@ test('handleJoinCommand accepts restored authoritative state before live members
   assert.equal(calls.snapshots, 0);
 });
 
+test('handleJoinCommand rejects restored authoritative state when restore version diverges from join snapshot version', async () => {
+  const { ctx, calls } = baseCtx({ seatNo: 1, buyIn: 200 });
+  ctx.authoritativeJoinEnabled = true;
+  ctx.persistedBootstrapEnabled = true;
+  ctx.loadAuthoritativeJoinExecutor = async () => async () => ({
+    ok: true,
+    seatNo: 1,
+    stack: 200,
+    snapshot: {
+      stateVersion: 3,
+      seats: [{ userId: 'u1', seatNo: 1, status: 'ACTIVE' }],
+      stacks: { u1: 200 }
+    }
+  });
+  ctx.restoreTableFromPersisted = async () => ({
+    ok: true,
+    restoredTable: {
+      coreState: {
+        version: 2,
+        seats: { u1: 1 },
+        publicStacks: { u1: 200 }
+      }
+    }
+  });
+
+  await handleJoinCommand(ctx);
+
+  assert.equal(calls.command.length, 1);
+  assert.equal(calls.command[0].status, 'rejected');
+  assert.equal(calls.command[0].reason, 'authoritative_state_invalid');
+  assert.equal(calls.joinArgs, null);
+  assert.equal(calls.actorTableState, 0);
+});
+
 test('handleJoinCommand rejects invalid buyIn without broadcast', async () => {
   const { ctx, calls } = baseCtx({ buyIn: -1 });
   await handleJoinCommand(ctx);

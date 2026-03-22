@@ -16,7 +16,9 @@ export async function updatePokerStateLocked(tx, { tableId, nextState }) {
     [tableId, payload]
   );
   const newVersion = Number(rows?.[0]?.version);
-  if (!Number.isFinite(newVersion)) return { ok: false, reason: "not_found" };
+  if (!Number.isInteger(newVersion) || newVersion <= 0) {
+    return { ok: false, reason: rows?.length ? "invalid" : "not_found" };
+  }
   return { ok: true, newVersion };
 }
 

@@ -202,6 +202,64 @@ test("authoritative join adapter rejects partial human-only success snapshot", a
   assert.deepEqual(result, { ok: false, code: "authoritative_state_invalid" });
 });
 
+test("authoritative join adapter rejects successful fresh-join snapshot when stateVersion stays at 0", async () => {
+  const execute = createAuthoritativeJoinExecutor({
+    env: {},
+    klog: () => {},
+    beginSql: async (fn) => fn({ ok: true }),
+    loadLockedStateHelpersFn: lockedStateHelpers,
+    loadPostTransactionFn: async () => async () => ({ ok: true }),
+    loadJoinModule: async () => ({
+      executePokerJoinAuthoritative: async () => ({
+        ok: true,
+        seatNo: 1,
+        rejoin: false,
+        stack: 150,
+        snapshot: makeSuccessSnapshot({ userId: "u1", seatNo: 1, stack: 150, stateVersion: 0 })
+      })
+    })
+  });
+
+  const result = await execute({ tableId: "t1", userId: "u1", requestId: "r-version-zero" });
+  assert.deepEqual(result, { ok: false, code: "authoritative_state_invalid" });
+});
+
+test("authoritative join adapter accepts successful fresh-join snapshot once stateVersion moves positive", async () => {
+  const execute = createAuthoritativeJoinExecutor({
+    env: {},
+    klog: () => {},
+    beginSql: async (fn) => fn({ ok: true }),
+    loadLockedStateHelpersFn: lockedStateHelpers,
+    loadPostTransactionFn: async () => async () => ({ ok: true }),
+    loadJoinModule: async () => ({
+      executePokerJoinAuthoritative: async () => ({
+        ok: true,
+        seatNo: 1,
+        rejoin: false,
+        stack: 150,
+        seededBots: [
+          { userId: "bot_2", seatNo: 2, stack: 200 },
+          { userId: "bot_3", seatNo: 3, stack: 200 }
+        ],
+        snapshot: makeSuccessSnapshot({
+          userId: "u1",
+          seatNo: 1,
+          stack: 150,
+          stateVersion: 1,
+          seededBots: [
+            { userId: "bot_2", seatNo: 2, stack: 200 },
+            { userId: "bot_3", seatNo: 3, stack: 200 }
+          ]
+        })
+      })
+    })
+  });
+
+  const result = await execute({ tableId: "t1", userId: "u1", requestId: "r-version-one" });
+  assert.equal(result.ok, true);
+  assert.equal(result.snapshot.stateVersion, 1);
+});
+
 
 test("authoritative join adapter surfaces financial mutation failure codes", async () => {
   const execute = createAuthoritativeJoinExecutor({
