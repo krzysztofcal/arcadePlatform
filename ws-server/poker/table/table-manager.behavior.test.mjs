@@ -87,6 +87,99 @@ test("table manager exposes connected members as sorted {userId, seat} and reuse
   ]);
 });
 
+test("table manager authoritative join bumps version only for material membership/public stack changes", () => {
+  const tableManager = createTableManager({ maxSeats: 6 });
+  const ws = fakeWs("ws-authoritative-version");
+  const tableId = "table_authoritative_version";
+
+  assert.equal(tableManager.tableSnapshot(tableId, "user_authoritative").stateVersion, 0);
+
+  const firstJoin = tableManager.join({
+    ws,
+    userId: "user_authoritative",
+    tableId,
+    requestId: "join-authoritative-1",
+    nowTs: 100,
+    authoritativeSeatNo: 4,
+    buyIn: 175
+  });
+
+  assert.equal(firstJoin.ok, true);
+  assert.equal(firstJoin.changed, true);
+  assert.equal(tableManager.tableSnapshot(tableId, "user_authoritative").stateVersion, 1);
+  assert.deepEqual(tableManager.tableSnapshot(tableId, "user_authoritative").stacks, { user_authoritative: 175 });
+
+  const replayJoin = tableManager.join({
+    ws,
+    userId: "user_authoritative",
+    tableId,
+    requestId: "join-authoritative-2",
+    nowTs: 101,
+    authoritativeSeatNo: 4,
+    buyIn: 175
+  });
+
+  assert.equal(replayJoin.ok, true);
+  assert.equal(replayJoin.changed, false);
+  assert.equal(tableManager.tableSnapshot(tableId, "user_authoritative").stateVersion, 1);
+
+  const stackRefresh = tableManager.join({
+    ws,
+    userId: "user_authoritative",
+    tableId,
+    requestId: "join-authoritative-3",
+    nowTs: 102,
+    authoritativeSeatNo: 4,
+    buyIn: 220
+  });
+
+  assert.equal(stackRefresh.ok, true);
+  assert.equal(stackRefresh.changed, true);
+  assert.equal(tableManager.tableSnapshot(tableId, "user_authoritative").stateVersion, 2);
+  assert.deepEqual(tableManager.tableSnapshot(tableId, "user_authoritative").stacks, { user_authoritative: 220 });
+});
+
+test("table manager authoritative attach uses provided authoritativeSeatNo without local recompute", () => {
+  const tableManager = createTableManager({ maxSeats: 6 });
+  const ws = fakeWs("ws-authoritative-attach");
+
+  const joined = tableManager.join({
+    ws,
+    userId: "user_authoritative",
+    tableId: "table_authoritative_attach",
+    requestId: "join-authoritative",
+    nowTs: 100,
+    authoritativeSeatNo: 4
+  });
+
+  assert.equal(joined.ok, true);
+  assert.deepEqual(memberPairs(joined.tableState.members), [["user_authoritative", 4]]);
+  assert.deepEqual(memberPairs(tableManager.tableState("table_authoritative_attach").members), [["user_authoritative", 4]]);
+});
+
+test("table manager authoritative attach normalizes existing in-memory seat to authoritative seat", () => {
+  const tableManager = createTableManager({ maxSeats: 6 });
+  const ws = fakeWs("ws-authoritative-normalize");
+
+  const initial = tableManager.join({ ws, userId: "user_norm", tableId: "table_authoritative_normalize", requestId: "join-local", nowTs: 1 });
+  assert.equal(initial.ok, true);
+  assert.deepEqual(memberPairs(tableManager.tableState("table_authoritative_normalize").members), [["user_norm", 1]]);
+
+  const normalized = tableManager.join({
+    ws,
+    userId: "user_norm",
+    tableId: "table_authoritative_normalize",
+    requestId: "join-authoritative-norm",
+    nowTs: 2,
+    authoritativeSeatNo: 2
+  });
+
+  assert.equal(normalized.ok, true);
+  assert.equal(normalized.changed, true);
+  assert.deepEqual(memberPairs(normalized.tableState.members), [["user_norm", 2]]);
+  assert.deepEqual(memberPairs(tableManager.tableState("table_authoritative_normalize").members), [["user_norm", 2]]);
+});
+
 
 
 

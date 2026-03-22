@@ -56,10 +56,12 @@ function assertRequiredOrder(text) {
   const rootInstall = block.indexOf("\n        run: npm ci\n");
   const runtimeDepsGuard = block.indexOf("node --test ws-tests/ws-server-package-runtime-deps.guard.test.mjs");
   const sharedJoinBehavior = block.indexOf("node --test shared/poker-domain/join.behavior.test.mjs");
+  const wsClientBehavior = block.indexOf("node --test tests/poker-ws-client.test.mjs");
+  const joinSmoke = block.indexOf("node --test tests/poker-ui-ws-join-smoke.behavior.test.mjs");
+  const actSmoke = block.indexOf("node --test tests/poker-ui-ws-act-smoke.behavior.test.mjs");
+  const leaveSmoke = block.indexOf("node --test tests/poker-ui-ws-leave-smoke.behavior.test.mjs");
+  const joinRuntimeBehavior = block.indexOf("node --test ws-tests/ws-join-runtime.behavior.test.mjs");
   const behavior = block.indexOf("node --test ws-server/server.behavior.test.mjs");
-  const locationGuard = block.indexOf("node --test ws-tests/ws-tests-location.guard.test.mjs");
-  const suiteGuard = block.indexOf("node --test ws-tests/ws-tests-suite-completeness.guard.test.mjs");
-  const protocolDoc = block.indexOf("node --test ws-tests/ws-poker-protocol-doc.test.mjs");
   const infraVpcCaddyGuard = block.indexOf("node --test ws-tests/infra-vps-caddy.guard.test.mjs");
   const imageCheck = block.indexOf("node --test ws-tests/ws-image-contains-protocol.behavior.test.mjs");
   const containerCheck = block.indexOf("node --test ws-tests/ws-container-starts.behavior.test.mjs");
@@ -82,21 +84,25 @@ function assertRequiredOrder(text) {
   assert.notEqual(install, -1);
   assert.notEqual(runtimeDepsGuard, -1);
   assert.notEqual(sharedJoinBehavior, -1);
+  assert.notEqual(wsClientBehavior, -1);
+  assert.notEqual(joinSmoke, -1);
+  assert.notEqual(actSmoke, -1);
+  assert.notEqual(leaveSmoke, -1);
+  assert.notEqual(joinRuntimeBehavior, -1);
   assert.notEqual(behavior, -1);
-  assert.notEqual(locationGuard, -1);
-  assert.notEqual(suiteGuard, -1);
-  assert.notEqual(protocolDoc, -1);
   assert.notEqual(infraVpcCaddyGuard, -1);
   assert.notEqual(imageCheck, -1);
   assert.notEqual(containerCheck, -1);
   assert.equal(install < runtimeDepsGuard, true);
   assert.equal(runtimeDepsGuard < sharedJoinBehavior, true);
-  assert.equal(sharedJoinBehavior < behavior, true);
-  assert.equal(behavior < locationGuard, true);
-  assert.equal(locationGuard < suiteGuard, true);
-  assert.equal(suiteGuard < infraVpcCaddyGuard, true);
-  assert.equal(infraVpcCaddyGuard < protocolDoc, true);
-  assert.equal(protocolDoc < imageCheck, true);
+  assert.equal(sharedJoinBehavior < wsClientBehavior, true);
+  assert.equal(wsClientBehavior < joinSmoke, true);
+  assert.equal(joinSmoke < actSmoke, true);
+  assert.equal(actSmoke < leaveSmoke, true);
+  assert.equal(leaveSmoke < joinRuntimeBehavior, true);
+  assert.equal(joinRuntimeBehavior < behavior, true);
+  assert.equal(behavior < infraVpcCaddyGuard, true);
+  assert.equal(infraVpcCaddyGuard < imageCheck, true);
   assert.equal(imageCheck < containerCheck, true);
 }
 
@@ -149,8 +155,28 @@ test("ws pr workflow uses read-only token permissions", () => {
   assert.match(text, /permissions:\s*\n\s*contents:\s*read/);
 });
 
+test("ws pr workflow wires poker UI smoke tests and join/leave guards", () => {
+  const text = workflowText();
+  assert.match(text, /Run poker UI ws join smoke test/);
+  assert.match(text, /node --test tests\/poker-ui-ws-join-smoke\.behavior\.test\.mjs/);
+  assert.match(text, /Run poker UI ws act smoke test/);
+  assert.match(text, /node --test tests\/poker-ui-ws-act-smoke\.behavior\.test\.mjs/);
+  assert.match(text, /Run poker UI ws write-path guard test/);
+  assert.match(text, /node --test tests\/poker-ui-ws-write-path\.guard\.test\.mjs/);
+  assert.match(text, /Run poker UI ws leave smoke test/);
+  assert.match(text, /node --test tests\/poker-ui-ws-leave-smoke\.behavior\.test\.mjs/);
+  assert.doesNotMatch(text, /node --test tests\/poker-ui-ws-health-fallback\.behavior\.test\.mjs/);
+  assert.doesNotMatch(text, /node --test tests\/poker-ui-ws-startup-order\.behavior\.test\.mjs/);
+  assert.doesNotMatch(text, /node --test tests\/poker-ui-ws-snapshot-equal-version\.behavior\.test\.mjs/);
+  assert.doesNotMatch(text, /node --test tests\/poker-ui-ws-auth-watch-order\.behavior\.test\.mjs/);
+  assert.doesNotMatch(text, /node --test tests\/poker-ui-ws-visibility\.behavior\.test\.mjs/);
+  assert.doesNotMatch(text, /node --test tests\/poker-ui-ws-join-authoritative\.behavior\.test\.mjs/);
+});
+
 test("ws pr workflow runs ws-server deploy harness tests", () => {
   const text = workflowText();
+  assert.match(text, /Run ws join runtime behavior test/);
+  assert.match(text, /node --test ws-tests\/ws-join-runtime\.behavior\.test\.mjs/);
   assert.match(text, /node --test ws-tests\/ws-server-deploy-artifact-path\.test\.mjs/);
   assert.match(text, /node --test ws-tests\/ws-server-deploy-rollout\.test\.mjs/);
 });

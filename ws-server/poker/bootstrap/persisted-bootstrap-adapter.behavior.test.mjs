@@ -7,8 +7,8 @@ test("adapter maps persisted rows into deterministic ws table/core state", () =>
     tableId: "table_1",
     tableRow: { id: "table_1", max_players: 6 },
     seatRows: [
-      { user_id: "user_b", seat_no: 4, status: "ACTIVE", is_bot: false },
-      { user_id: "user_a", seat_no: 2, status: "ACTIVE", is_bot: false },
+      { user_id: "user_b", seat_no: 4, status: "ACTIVE", is_bot: false, stack: 80 },
+      { user_id: "user_a", seat_no: 2, status: "ACTIVE", is_bot: false, stack: 120 },
       { user_id: "user_x", seat_no: 3, status: "LEFT", is_bot: false }
     ],
     stateRow: { version: 12, state: { phase: "PREFLOP", handId: "h1" } }
@@ -21,6 +21,7 @@ test("adapter maps persisted rows into deterministic ws table/core state", () =>
     { userId: "user_b", seat: 4 }
   ]);
   assert.deepEqual(result.table.coreState.seats, { user_a: 2, user_b: 4 });
+  assert.deepEqual(result.table.coreState.publicStacks, { user_a: 120, user_b: 80 });
 });
 
 test("adapter rejects malformed persisted state", () => {

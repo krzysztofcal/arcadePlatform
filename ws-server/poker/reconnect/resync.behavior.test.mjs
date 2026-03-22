@@ -286,8 +286,9 @@ test("resync restores presence and seat without duplicates", async () => {
       payload: { tableId: "table_reconnect" }
     });
 
-    const joined = await nextMessage(client1, 5000, "joinAck");
-    assert.equal(joined.type, "table_state");
+    const joinAck = await nextMessageOfType(client1, "commandResult");
+    assert.equal(joinAck.payload.status, "accepted");
+    const joined = await nextMessageOfType(client1, "table_state");
     assert.equal(joined.payload.members.length, 1);
     const beforeSeat = joined.payload.members[0].seat;
 
@@ -323,6 +324,50 @@ test("resync restores presence and seat without duplicates", async () => {
   }
 });
 
+
+
+test("resync join flow is command-first for actor-visible frames", async () => {
+  const secret = "resync-join-order-secret";
+  const token = makeHs256Jwt({ secret, sub: "join_order_user" });
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      WS_PRESENCE_TTL_MS: "10000"
+    }
+  });
+
+  try {
+    await waitForListening(child, 5000);
+    const ws = await connectClient(port);
+    await hello(ws, "req-hello-join-order");
+    const authOk = await auth(ws, token, "req-auth-join-order");
+    assert.equal(authOk.type, "authOk");
+
+    sendFrame(ws, {
+      version: "1.0",
+      type: "table_join",
+      requestId: "req-join-order",
+      ts: "2026-02-28T00:00:10Z",
+      payload: { tableId: "table_join_order" }
+    });
+
+    const first = await nextMessage(ws, 5000, "join-order-first");
+    assert.equal(first.type, "commandResult");
+    assert.equal(first.payload.requestId, "req-join-order");
+    assert.equal(first.payload.status, "accepted");
+
+    const second = await nextMessage(ws, 5000, "join-order-second");
+    assert.equal(second.type, "table_state");
+    assert.equal(second.requestId, "req-join-order");
+    assert.equal(Array.isArray(second.payload.members), true);
+
+    ws.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
 test("resync accepts roomId without payload.tableId", async () => {
   const secret = "test-secret";
   const token = makeHs256Jwt({ secret, sub: "user_roomid" });
@@ -350,8 +395,9 @@ test("resync accepts roomId without payload.tableId", async () => {
       ts: "2026-02-28T00:00:20Z",
       payload: {}
     });
-    const joined = await nextMessage(client1, 5000, "join-roomid-c1");
-    assert.equal(joined.type, "table_state");
+    const joinAck = await nextMessageOfType(client1, "commandResult");
+    assert.equal(joinAck.payload.status, "accepted");
+    const joined = await nextMessageOfType(client1, "table_state");
     assert.equal(joined.payload.tableId, "table_roomid_resync");
 
     client1.close();
@@ -543,7 +589,9 @@ test("table-associated socket keeps presence for the table", async () => {
       ts: "2026-02-28T00:02:00Z",
       payload: { tableId: "table_multi" }
     });
-    const joinA = await nextMessage(socketA, 5000, "joinA2");
+    const joinAAck = await nextMessageOfType(socketA, "commandResult");
+    assert.equal(joinAAck.payload.status, "accepted");
+    const joinA = await nextMessageOfType(socketA, "table_state");
     const originalSeat = joinA.payload.members[0].seat;
 
     const socketB = await connectClient(port);
@@ -822,8 +870,7 @@ test("resume replays only missing frames when lastSeq is in window", async () =>
       ts: "2026-02-28T00:05:00Z",
       payload: { tableId: "table_resume_ok" }
     });
-    const seq1 = await nextMessage(client1, 5000, "resume-ok-seq1");
-    assert.equal(seq1.type, "table_state");
+    const seq1 = await nextMessageOfType(client1, "table_state", { skipTypes: ["commandResult"] });
     assert.equal(typeof seq1.seq, "number");
 
     sendFrame(client1, {
@@ -833,8 +880,7 @@ test("resume replays only missing frames when lastSeq is in window", async () =>
       ts: "2026-02-28T00:05:01Z",
       payload: { tableId: "table_resume_ok" }
     });
-    const seq2 = await nextMessage(client1, 5000, "resume-ok-seq2");
-    assert.equal(seq2.type, "table_state");
+    const seq2 = await nextMessageOfType(client1, "table_state", { skipTypes: ["commandResult"] });
     assert.equal(seq2.seq, seq1.seq + 1);
 
     client1.close();
@@ -854,8 +900,7 @@ test("resume replays only missing frames when lastSeq is in window", async () =>
       payload: { tableId: "table_resume_ok", sessionId, lastSeq: seq1.seq }
     });
 
-    const replayed = await nextMessage(client2, 5000, "resume-ok-replayed");
-    assert.equal(replayed.type, "table_state");
+    const replayed = await nextMessageOfType(client2, "table_state", { skipTypes: ["commandResult"] });
     assert.equal(replayed.seq, seq2.seq);
     assert.equal(replayed.payload.tableId, "table_resume_ok");
 
@@ -895,7 +940,7 @@ test("resume with lastSeq at head returns explicit deterministic success", async
       ts: "2026-02-28T00:05:30Z",
       payload: { tableId: "table_resume_head" }
     });
-    const seq1 = await nextMessage(client1, 5000, "resume-head-seq1");
+    const seq1 = await nextMessageOfType(client1, "table_state", { skipTypes: ["commandResult"] });
 
     sendFrame(client1, {
       version: "1.0",
@@ -904,7 +949,7 @@ test("resume with lastSeq at head returns explicit deterministic success", async
       ts: "2026-02-28T00:05:31Z",
       payload: { tableId: "table_resume_head" }
     });
-    const seq2 = await nextMessage(client1, 5000, "resume-head-seq2");
+    const seq2 = await nextMessageOfType(client1, "table_state", { skipTypes: ["commandResult"] });
     assert.equal(seq2.seq, seq1.seq + 1);
 
     client1.close();
@@ -1180,12 +1225,12 @@ test("restart and resync hydrate latest persisted WS mutation", async () => {
     await hello(ws, "hello-restart-1");
     await auth(ws, token, "auth-restart-1");
     sendFrame(ws, { version: "1.0", type: "table_join", requestId: "join-restart-1", ts: "2026-02-28T02:20:00Z", payload: { tableId } });
-    await nextMessageOfType(ws, "table_state");
+    await nextMessageOfType(ws, "table_state", { skipTypes: ["commandResult"] });
     sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "snap-restart-1", ts: "2026-02-28T02:20:01Z", payload: { tableId, view: "snapshot" } });
-    const baseline = await nextMessageOfType(ws, "stateSnapshot");
+    const baseline = await nextMessageOfType(ws, "stateSnapshot", { skipTypes: ["commandResult"] });
     const handId = baseline.payload.public.hand.handId;
     sendFrame(ws, { version: "1.0", type: "act", requestId: "act-restart-1", ts: "2026-02-28T02:20:02Z", payload: { tableId, handId, action: "fold" } });
-    await nextMessageOfType(ws, "commandResult");
+    await nextMessageOfType(ws, "commandResult", { skipTypes: ["stateSnapshot", "statePatch"] });
     const advanced = await nextMessageOfType(ws, "stateSnapshot", { skipTypes: ["statePatch"] });
     assert.equal(advanced.payload.stateVersion > baseline.payload.stateVersion, true);
     ws.close();
@@ -1201,9 +1246,9 @@ test("restart and resync hydrate latest persisted WS mutation", async () => {
     await hello(ws2, "hello-restart-2");
     await auth(ws2, token, "auth-restart-2");
     sendFrame(ws2, { version: "1.0", type: "resync", requestId: "resync-restart-2", ts: "2026-02-28T02:20:03Z", payload: { tableId } });
-    await nextMessageOfType(ws2, "table_state");
+    await nextMessageOfType(ws2, "table_state", { skipTypes: ["commandResult"] });
     sendFrame(ws2, { version: "1.0", type: "table_state_sub", requestId: "snap-restart-2", ts: "2026-02-28T02:20:04Z", payload: { tableId, view: "snapshot" } });
-    const rehydrated = await nextMessageOfType(ws2, "stateSnapshot");
+    const rehydrated = await nextMessageOfType(ws2, "stateSnapshot", { skipTypes: ["commandResult"] });
     assert.equal(rehydrated.payload.stateVersion > 0, true);
     ws2.close();
   } finally {
@@ -1244,9 +1289,9 @@ test("resync after persistence conflict rehydrates persisted source of truth", a
     await hello(ws, "hello-conflict-resync");
     await auth(ws, token, "auth-conflict-resync");
     sendFrame(ws, { version: "1.0", type: "table_join", requestId: "join-conflict-resync", ts: "2026-02-28T03:00:00Z", payload: { tableId } });
-    await nextMessageOfType(ws, "table_state");
+    await nextMessageOfType(ws, "table_state", { skipTypes: ["commandResult"] });
     sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "snap-conflict-resync", ts: "2026-02-28T03:00:01Z", payload: { tableId, view: "snapshot" } });
-    const baseline = await nextMessageOfType(ws, "stateSnapshot");
+    const baseline = await nextMessageOfType(ws, "stateSnapshot", { skipTypes: ["commandResult"] });
     const handId = baseline.payload.public.hand.handId;
 
     const forcedRaw = JSON.parse(await fs.readFile(filePath, "utf8"));
@@ -1254,15 +1299,15 @@ test("resync after persistence conflict rehydrates persisted source of truth", a
     await fs.writeFile(filePath, `${JSON.stringify(forcedRaw)}\n`, "utf8");
 
     sendFrame(ws, { version: "1.0", type: "act", requestId: "act-conflict-resync", ts: "2026-02-28T03:00:02Z", payload: { tableId, handId, action: "fold" } });
-    const rejected = await nextMessageOfType(ws, "commandResult");
+    const rejected = await nextMessageOfType(ws, "commandResult", { skipTypes: ["stateSnapshot", "statePatch"] });
     assert.equal(rejected.payload.status, "rejected");
     const resyncReq = await nextMessageOfType(ws, "resync");
     assert.equal(resyncReq.payload.reason, "persistence_conflict");
 
     sendFrame(ws, { version: "1.0", type: "resync", requestId: "resync-after-conflict", ts: "2026-02-28T03:00:03Z", payload: { tableId } });
-    await nextMessageOfType(ws, "table_state");
+    await nextMessageOfType(ws, "table_state", { skipTypes: ["commandResult"] });
     sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "snap-after-conflict", ts: "2026-02-28T03:00:04Z", payload: { tableId, view: "snapshot" } });
-    const hydrated = await nextMessageOfType(ws, "stateSnapshot");
+    const hydrated = await nextMessageOfType(ws, "stateSnapshot", { skipTypes: ["commandResult"] });
     assert.equal(hydrated.payload.stateVersion, forcedRaw.tables[tableId].stateRow.version);
     ws.close();
   } finally {
@@ -1299,10 +1344,11 @@ test("resync preserves presence contract and gameplay snapshot is explicit table
     await auth(ws, token, "auth-resync-snapshot");
 
     sendFrame(ws, { version: "1.0", type: "table_join", requestId: "join-resync-snapshot", ts: "2026-02-28T04:00:00Z", payload: { tableId } });
+    await nextMessageOfType(ws, "commandResult", { skipTypes: ["stateSnapshot", "statePatch"] });
     await nextMessageOfType(ws, "table_state", { skipTypes: ["stateSnapshot", "statePatch"] });
 
     sendFrame(ws, { version: "1.0", type: "resync", requestId: "resync-presence", ts: "2026-02-28T04:00:01Z", payload: { tableId } });
-    const resyncState = await nextMessageOfType(ws, "table_state");
+    const resyncState = await nextMessageOfType(ws, "table_state", { skipTypes: ["commandResult"] });
     assert.equal(resyncState.payload.tableId, tableId);
     assert.ok(Array.isArray(resyncState.payload.members));
 

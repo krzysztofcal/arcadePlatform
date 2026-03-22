@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { wsDockerBuildArgs } from "./ws-docker-build-contract.mjs";
 
 function run(cmd, args, options = {}) {
   return spawnSync(cmd, args, { encoding: "utf8", ...options });
@@ -49,7 +50,7 @@ async function probeHealthz(hostPort, timeoutMs) {
 }
 
 function startWsContainer(imageTag, containerName) {
-  const build = run("docker", ["build", "-t", imageTag, "-f", "ws-server/Dockerfile", "."]);
+  const build = run("docker", wsDockerBuildArgs(imageTag));
   assert.equal(build.status, 0, `docker build failed:\n${build.stderr || build.stdout}`);
 
   const runOut = run("docker", [
