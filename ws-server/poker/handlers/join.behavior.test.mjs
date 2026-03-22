@@ -67,6 +67,21 @@ test('handleJoinCommand forwards join intent to authoritative executor when enab
   assert.equal(calls.joinArgs.authoritativeSeatNo, 2);
 });
 
+test('handleJoinCommand rejects instead of degrading when authoritative join is required but unavailable', async () => {
+  const { ctx, calls } = baseCtx({ seatNo: 1, buyIn: 100 });
+  ctx.authoritativeJoinEnabled = true;
+
+  await handleJoinCommand(ctx);
+
+  assert.equal(calls.command.length, 1);
+  assert.equal(calls.command[0].status, 'rejected');
+  assert.equal(calls.command[0].reason, 'temporarily_unavailable');
+  assert.equal(calls.joinArgs, null);
+  assert.equal(calls.actorTableState, 0);
+  assert.equal(calls.table, 0);
+  assert.equal(calls.snapshots, 0);
+});
+
 test('handleJoinCommand authoritative rehydrate failure does not emit accepted success state', async () => {
   const { ctx, calls } = baseCtx({ seatNo: 3, buyIn: 200 });
   ctx.authoritativeJoinEnabled = true;

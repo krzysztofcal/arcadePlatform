@@ -337,7 +337,7 @@ function runtimeJoinEnv({ secret, filePath }) {
   };
 }
 
-test("authoritative WS table_join rehydrates a live runtime snapshot and resync keeps authoritative seats aligned", async () => {
+test("authoritative WS table_join returns a fully seated stacked snapshot and keeps start_hand/resync authoritative", async () => {
   const secret = "auth-join-runtime-secret";
   const tableId = "table_auth_join_runtime";
   const store = {
@@ -392,9 +392,22 @@ test("authoritative WS table_join rehydrates a live runtime snapshot and resync 
       { userId: botSeat2, seatNo: 2, status: "ACTIVE", isBot: true, botProfile: "TRIVIAL" },
       { userId: botSeat3, seatNo: 3, status: "ACTIVE", isBot: true, botProfile: "TRIVIAL" }
     ]);
+    assert.equal(joinedState.payload.seats.filter((seat) => seat?.status === "ACTIVE").length >= 3, true);
     assert.equal(typeof joinedState.payload.stacks.runtime_human, "number");
     assert.equal(typeof joinedState.payload.stacks[botSeat2], "number");
     assert.equal(typeof joinedState.payload.stacks[botSeat3], "number");
+    assert.equal(Object.keys(joinedState.payload.stacks || {}).length >= 3, true);
+
+    sendFrame(ws, {
+      version: "1.0",
+      type: "start_hand",
+      requestId: "join-runtime-start",
+      ts: "2026-02-28T06:10:01Z",
+      payload: { tableId }
+    });
+    const startAck = await nextCommandResultForRequest(ws, "join-runtime-start");
+    assert.equal(startAck.payload.status, "rejected");
+    assert.notEqual(startAck.payload.reason, "not_enough_players");
 
     sendFrame(ws, {
       version: "1.0",

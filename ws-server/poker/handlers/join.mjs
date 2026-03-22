@@ -49,6 +49,7 @@ function classifyRestoreFailureAsMissingState(reason) {
 
 export async function handleJoinCommand({ frame, ws, connState, sessionStore, tableManager, ensureTableLoadedErrorMapper, restoreTableFromPersisted, persistMutatedState, broadcastResyncRequired, broadcastStateSnapshots, broadcastTableState, sendError, sendCommandResult, sendTableState, authoritativeJoinEnabled, observeOnlyJoinEnabled, persistedBootstrapEnabled, loadAuthoritativeJoinExecutor }) {
   const tableId = frame.__resolvedTableId;
+  const authoritativeJoinRequired = authoritativeJoinEnabled && !observeOnlyJoinEnabled;
   const parsedJoinIntent = parseJoinIntent(frame.payload);
   if (!parsedJoinIntent.ok) {
     sendError(ws, connState, {
@@ -61,7 +62,17 @@ export async function handleJoinCommand({ frame, ws, connState, sessionStore, ta
   const joinIntent = parsedJoinIntent.intent;
   let authoritativeJoinResult = null;
 
-  if (authoritativeJoinEnabled && !observeOnlyJoinEnabled && persistedBootstrapEnabled) {
+  if (authoritativeJoinRequired && !persistedBootstrapEnabled) {
+    sendCommandResult(ws, connState, {
+      requestId: frame.requestId ?? null,
+      tableId,
+      status: "rejected",
+      reason: "temporarily_unavailable"
+    });
+    return;
+  }
+
+  if (authoritativeJoinRequired && persistedBootstrapEnabled) {
     const authoritativeJoinExecutor = await loadAuthoritativeJoinExecutor();
     const authoritativeJoin = await authoritativeJoinExecutor({
       tableId,
@@ -102,7 +113,7 @@ export async function handleJoinCommand({ frame, ws, connState, sessionStore, ta
     return;
   }
 
-  if (authoritativeJoinEnabled && !observeOnlyJoinEnabled && persistedBootstrapEnabled) {
+  if (authoritativeJoinRequired && persistedBootstrapEnabled) {
     const restored = await restoreTableFromPersisted(tableId);
     if (!restored.ok) {
       sendError(ws, connState, {

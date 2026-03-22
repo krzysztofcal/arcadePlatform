@@ -39,6 +39,7 @@ test("ws preview deploy workflow keeps the preview-only manual contract", () => 
   assert.match(text, /ws-server-preview\.service/);
   assert.match(text, /http:\/\/127\.0\.0\.1:3001\/healthz/);
   assert.match(text, /https:\/\/ws-preview\.kcswh\.pl\/healthz/);
+  assert.match(text, /WS_AUTHORITATIVE_JOIN_ENABLED=1/);
   assert.match(text, /node --test ws-tests\/ws-preview-deploy\.workflow\.guard\.test\.mjs/);
   assert.match(text, /node --test ws-tests\/ws-preview-deploy\.remote-shape\.guard\.test\.mjs/);
 
@@ -77,6 +78,7 @@ test("ws preview deploy workflow keeps preview runtime contract and does not man
   assert.match(text, /\/opt\/arcade-ws-preview\/\.env\.preview/);
   assert.match(text, /ws-server-preview\.service/);
   assert.match(text, /http:\/\/127\.0\.0\.1:3001\/healthz/);
+  assert.match(text, /preview env file must define WS_AUTHORITATIVE_JOIN_ENABLED=1/);
   assert.doesNotMatch(text, /\/etc\/caddy\/Caddyfile/);
   assert.doesNotMatch(text, /infra\/vps\/Caddyfile/);
   assert.doesNotMatch(text, /Caddyfile\.preview\.example/);
@@ -93,5 +95,6 @@ test("poker deployment doc states the unified preview Caddy ownership model", ()
   assert.match(text, /\/opt\/arcade-ws-preview\/\.env\.preview/);
   assert.match(text, /ws-server-preview\.service/);
   assert.match(text, /http:\/\/127\.0\.0\.1:3001\/healthz/);
+  assert.match(text, /WS_AUTHORITATIVE_JOIN_ENABLED=1/);
   assert.doesNotMatch(text, /Caddyfile\.preview\.example/);
 });
