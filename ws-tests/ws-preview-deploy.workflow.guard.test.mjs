@@ -86,6 +86,20 @@ test("ws preview deploy workflow keeps preview runtime contract and does not man
   assert.doesNotMatch(text, /Caddyfile\.preview\.example/);
 });
 
+test("ws preview deploy workflow packages and validates shared runtime files", () => {
+  const text = workflowText();
+
+  assert.match(text, /PREVIEW_STAGE_WS_DIR:/);
+  assert.match(text, /mkdir -p "\$PREVIEW_STAGE_WS_DIR"/);
+  assert.match(text, /cp -R shared "\$PREVIEW_STAGE_DIR"\/shared/);
+  assert.match(text, /sudo -n test -f "\$TMP_EXTRACT_DIR\/shared\/poker-domain\/join\.mjs"/);
+  assert.match(text, /sudo -n test -f "\$TMP_EXTRACT_DIR\/ws-server\/server\.mjs"/);
+  assert.match(text, /sudo -n rsync -a --delete "\$TMP_EXTRACT_DIR\/ws-server\/" "\$PREVIEW_APP_DIR"\//);
+  assert.match(text, /sudo -n mkdir -p "\$PREVIEW_BASE_DIR\/shared"/);
+  assert.match(text, /sudo -n rsync -a --delete "\$TMP_EXTRACT_DIR\/shared\/" "\$PREVIEW_BASE_DIR\/shared"\//);
+  assert.doesNotMatch(text, /sudo -n rsync -a --delete "\$TMP_EXTRACT_DIR"\/ "\$PREVIEW_BASE_DIR"\//);
+});
+
 test("poker deployment doc states the unified preview Caddy ownership model", () => {
   const text = fs.readFileSync("docs/poker-deployment.md", "utf8");
 
