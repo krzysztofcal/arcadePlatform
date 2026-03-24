@@ -8,7 +8,7 @@ function buildHarness(){
   const stopEnd = source.indexOf("\n\n    function mapTableStateToSeatUpdates", stopStart);
   const stopFn = source.slice(stopStart, stopEnd);
 
-  const wsStart = source.indexOf("function mapTableStateToSeatUpdates(snapshotPayload)");
+  const wsStart = source.indexOf("function isRichGameplaySnapshot(snapshotPayload, snapshotKind)");
   const wsEnd = source.indexOf("\n\n    function startWsBootstrap(){", wsStart);
   const wsFns = source.slice(wsStart, wsEnd);
 
