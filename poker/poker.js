@@ -1095,6 +1095,89 @@
       wsClient = null;
     }
 
+    function isRichGameplaySnapshot(snapshotPayload, snapshotKind){
+      var payload = snapshotPayload && typeof snapshotPayload === 'object' ? snapshotPayload : {};
+      if (snapshotKind === 'stateSnapshot') return true;
+      if (isPlainObject(payload.public) || isPlainObject(payload.private) || isPlainObject(payload.you)) return true;
+      return isPlainObject(payload.table);
+    }
+
+    function normalizeCardForRender(card){
+      if (!card) return null;
+      var rank = null;
+      var suit = null;
+      if (typeof card === 'string'){
+        var text = card.trim();
+        if (!text || text.length < 2) return null;
+        suit = text.slice(-1).toUpperCase();
+        rank = text.slice(0, -1).toUpperCase();
+      } else if (isPlainObject(card)){
+        rank = card.r != null ? String(card.r).trim().toUpperCase() : '';
+        suit = card.s != null ? String(card.s).trim().toUpperCase() : '';
+      } else {
+        return null;
+      }
+      if (rank === 'T') rank = '10';
+      if (!(suit === 'S' || suit === 'H' || suit === 'D' || suit === 'C')) return null;
+      if (!(rank === 'A' || rank === 'K' || rank === 'Q' || rank === 'J' || rank === '10' || rank === '9' || rank === '8' || rank === '7' || rank === '6' || rank === '5' || rank === '4' || rank === '3' || rank === '2')) return null;
+      return {
+        r: rank === '10' ? 10 : rank,
+        s: suit
+      };
+    }
+
+    function normalizeCardsForRender(cards){
+      if (!Array.isArray(cards)) return [];
+      var out = [];
+      for (var i = 0; i < cards.length; i++){
+        var normalized = normalizeCardForRender(cards[i]);
+        if (normalized) out.push(normalized);
+      }
+      return out;
+    }
+
+    function normalizeWsSnapshotPayload(snapshot){
+      var input = snapshot && typeof snapshot === 'object' ? snapshot : {};
+      var payload = input.payload && typeof input.payload === 'object' ? input.payload : {};
+      var kind = typeof input.kind === 'string' && input.kind ? input.kind : (typeof input.rawType === 'string' ? input.rawType : null);
+      var normalized = Object.assign({}, payload);
+      var rich = isRichGameplaySnapshot(payload, kind);
+      if (!rich) return { kind: kind, payload: normalized };
+
+      var table = isPlainObject(payload.table) ? payload.table : {};
+      var pub = isPlainObject(payload.public) ? payload.public : {};
+      var priv = isPlainObject(payload.private) ? payload.private : {};
+      var you = isPlainObject(payload.you) ? payload.you : {};
+
+      if (!normalized.tableId && typeof table.tableId === 'string' && table.tableId) normalized.tableId = table.tableId;
+      if (!Array.isArray(normalized.authoritativeMembers) && Array.isArray(table.members)) normalized.authoritativeMembers = table.members.slice();
+      if (!Array.isArray(normalized.members) && Array.isArray(table.members)) normalized.members = table.members.slice();
+      if (!Number.isInteger(normalized.youSeat) && Number.isInteger(you.seat)) normalized.youSeat = you.seat;
+      if (!Number.isInteger(normalized.stateVersion) && Number.isInteger(payload.version)) normalized.stateVersion = payload.version;
+      if (normalized.myHoleCards == null && Array.isArray(priv.holeCards)) normalized.myHoleCards = normalizeCardsForRender(priv.holeCards);
+      if (!normalized.hand && isPlainObject(pub.hand)) normalized.hand = pub.hand;
+      if (!normalized.pot && isPlainObject(pub.pot)) normalized.pot = pub.pot;
+      if (!normalized.turn && isPlainObject(pub.turn)) normalized.turn = pub.turn;
+      if (!normalized.legalActions && pub.legalActions != null) normalized.legalActions = pub.legalActions;
+      if (!normalized.actionConstraints && isPlainObject(pub.actionConstraints)) normalized.actionConstraints = pub.actionConstraints;
+      if (!normalized.board && pub.board != null){
+        if (Array.isArray(pub.board)){
+          var normalizedPublicBoard = normalizeCardsForRender(pub.board);
+          if (normalizedPublicBoard.length || pub.board.length === 0){
+            normalized.board = { cards: normalizedPublicBoard };
+          }
+        } else if (isPlainObject(pub.board) && Array.isArray(pub.board.cards)){
+          var normalizedPublicBoardCards = normalizeCardsForRender(pub.board.cards);
+          if (normalizedPublicBoardCards.length || pub.board.cards.length === 0){
+            normalized.board = { cards: normalizedPublicBoardCards };
+          }
+        } else {
+          normalized.board = pub.board;
+        }
+      }
+      return { kind: kind, payload: normalized };
+    }
+
     function mapTableStateToSeatUpdates(snapshotPayload){
       var payload = snapshotPayload && typeof snapshotPayload === 'object' ? snapshotPayload : {};
       var seatMap = {};
@@ -1193,7 +1276,14 @@
         nextState.turnDeadlineAt = payload.turn.deadlineAt != null ? payload.turn.deadlineAt : nextState.turnDeadlineAt;
         nextState.turnStartedAt = payload.turn.startedAt != null ? payload.turn.startedAt : nextState.turnStartedAt;
       }
-      if (payload.board && Array.isArray(payload.board.cards)) nextState.community = payload.board.cards.slice();
+      if (payload.board && Array.isArray(payload.board.cards)){
+        var normalizedBoardCards = normalizeCardsForRender(payload.board.cards);
+        if (normalizedBoardCards.length || payload.board.cards.length === 0) nextState.community = normalizedBoardCards;
+      }
+      if (!Array.isArray(nextState.community) && Array.isArray(payload.board)){
+        var normalizedBoardList = normalizeCardsForRender(payload.board);
+        if (normalizedBoardList.length || payload.board.length === 0) nextState.community = normalizedBoardList;
+      }
       if (payload.pot && typeof payload.pot === 'object'){
         if (Number.isFinite(Number(payload.pot.total))) {
           nextState.pot = Number(payload.pot.total);
@@ -1206,20 +1296,24 @@
       }
       baselineState.state = nextState;
       merged.state = baselineState;
-      if (payload.legalActions && typeof payload.legalActions === 'object'){
-        var wsActions = Array.isArray(payload.legalActions.actions) ? payload.legalActions.actions.slice() : null;
-        if (wsActions){
-          merged.legalActions = wsActions;
-          var wsConstraints = null;
-          if (isPlainObject(payload.actionConstraints)) wsConstraints = payload.actionConstraints;
-          else if (isPlainObject(payload.legalActions.actionConstraints)) wsConstraints = payload.legalActions.actionConstraints;
-          if (wsConstraints){
-            var safeConstraints = getSafeConstraints({ actionConstraints: wsConstraints });
-            merged.actionConstraints = safeConstraints;
-            merged._actionConstraints = safeConstraints;
-          }
-        }
+      var wsActions = null;
+      var wsConstraints = null;
+      if (Array.isArray(payload.legalActions)){
+        wsActions = payload.legalActions.slice();
+      } else if (payload.legalActions && typeof payload.legalActions === 'object'){
+        if (Array.isArray(payload.legalActions.actions)) wsActions = payload.legalActions.actions.slice();
+        if (isPlainObject(payload.legalActions.actionConstraints)) wsConstraints = payload.legalActions.actionConstraints;
       }
+      if (wsActions){
+        merged.legalActions = wsActions;
+      }
+      if (isPlainObject(payload.actionConstraints)) wsConstraints = payload.actionConstraints;
+      if (wsConstraints){
+        var safeConstraints = getSafeConstraints({ actionConstraints: wsConstraints });
+        merged.actionConstraints = safeConstraints;
+        merged._actionConstraints = safeConstraints;
+      }
+      if (Array.isArray(payload.myHoleCards)) merged.myHoleCards = normalizeCardsForRender(payload.myHoleCards);
       var mergedSeats = mergePresenceIntoSeats(merged.seats, update.seats);
       if (mergedSeats) merged.seats = mergedSeats;
       return merged;
@@ -1265,19 +1359,36 @@
       return facts;
     }
 
-    function materiallyImprovesJoinedSeatRender(currentData, snapshotPayload){
+    function hasTurnMetadata(state){
+      if (!state || typeof state !== 'object') return false;
+      return !!(state.turnUserId || state.turnDeadlineAt != null || state.turnStartedAt != null);
+    }
+
+    function hasConstraintsData(constraints){
+      if (!constraints || typeof constraints !== 'object') return false;
+      return constraints.toCall != null || constraints.minRaiseTo != null || constraints.maxRaiseTo != null || constraints.maxBetAmount != null;
+    }
+
+    function materiallyImprovesRichSnapshot(currentData, snapshotPayload){
       if (!currentData || typeof currentData !== 'object') return false;
       if (!snapshotPayload || typeof snapshotPayload !== 'object') return false;
       var mergedData = mergeWsStateIntoTableData(currentData, snapshotPayload);
       if (!mergedData) return false;
-      var currentFacts = findCurrentUserSeatFacts(currentData);
-      var incomingFacts = findCurrentUserSeatFacts(mergedData);
-      if (incomingFacts.hasCurrentUserSeat !== true) return false;
-      if (currentFacts.hasCurrentUserSeat !== true) return true;
-      if (incomingFacts.seatNo != null && currentFacts.seatNo == null) return true;
-      if (incomingFacts.hasRenderableSeatRow === true && currentFacts.hasRenderableSeatRow !== true) return true;
-      if (incomingFacts.hasCurrentUserStack === true && currentFacts.hasCurrentUserStack !== true) return true;
-      if (incomingFacts.status && currentFacts.status !== incomingFacts.status && (!currentFacts.status || String(currentFacts.status).toUpperCase() === 'EMPTY')) return true;
+      var currentState = currentData.state && currentData.state.state && typeof currentData.state.state === 'object' ? currentData.state.state : {};
+      var mergedState = mergedData.state && mergedData.state.state && typeof mergedData.state.state === 'object' ? mergedData.state.state : {};
+      var hadHoleCards = Array.isArray(currentData.myHoleCards) && currentData.myHoleCards.length > 0;
+      var hasHoleCards = Array.isArray(mergedData.myHoleCards) && mergedData.myHoleCards.length > 0;
+      if (!hadHoleCards && hasHoleCards) return true;
+      var hadCommunity = Array.isArray(currentState.community) && currentState.community.length > 0;
+      var hasCommunity = Array.isArray(mergedState.community) && mergedState.community.length > 0;
+      if (!hadCommunity && hasCommunity) return true;
+      var hadLegalActions = Array.isArray(currentData.legalActions) && currentData.legalActions.length > 0;
+      var hasLegalActions = Array.isArray(mergedData.legalActions) && mergedData.legalActions.length > 0;
+      if (!hadLegalActions && hasLegalActions) return true;
+      var hadConstraints = hasConstraintsData(currentData.actionConstraints);
+      var hasConstraints = hasConstraintsData(mergedData.actionConstraints);
+      if (!hadConstraints && hasConstraints) return true;
+      if (!hasTurnMetadata(currentState) && hasTurnMetadata(mergedState)) return true;
       return false;
     }
 
@@ -1297,7 +1408,8 @@
       if (currentVersion == null) return true;
       if (incomingVersion > currentVersion) return true;
       if (incomingVersion < currentVersion) return false;
-      return materiallyImprovesJoinedSeatRender(tableData, snapshotPayload);
+      if (!isRichGameplaySnapshot(snapshotPayload, opts.snapshotKind)) return false;
+      return materiallyImprovesRichSnapshot(tableData, snapshotPayload);
     }
 
     function applyWsSnapshotNow(snapshotPayload, options){
@@ -1323,12 +1435,14 @@
 
     function applyWsSnapshot(snapshot){
       if (!snapshot || !snapshot.payload) return;
-      var payload = snapshot.payload || {};
+      var normalized = normalizeWsSnapshotPayload(snapshot);
+      var payload = normalized.payload || {};
+      var snapshotKind = normalized.kind || snapshot.kind || snapshot.rawType || null;
       var incomingVersion = resolveSnapshotVersion(payload);
       var currentVersion = resolveTableDataVersion(tableData);
       klog('poker_ws_snapshot_received', {
         tableId: tableId,
-        kind: snapshot.kind || snapshot.rawType || null,
+        kind: snapshotKind,
         initial: snapshot.initial === true,
         members: Array.isArray(payload.members) ? payload.members.length : 0,
         stateVersion: incomingVersion
@@ -1336,7 +1450,8 @@
 
       if (applyWsSnapshotNow(payload, {
         allowWhenNoBaseline: false,
-        allowUnversionedUpgrade: false
+        allowUnversionedUpgrade: false,
+        snapshotKind: snapshotKind
       })) return;
 
       if (!tableData || typeof tableData !== 'object'){
