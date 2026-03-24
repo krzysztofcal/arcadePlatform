@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { handleJoinCommand } from './join.mjs';
 
 function baseCtx(payload = {}){
-  const calls = { command: [], table: 0, snapshots: 0, joinArgs: null, authoritativeArgs: null, sendError: 0, sentErrors: [], actorTableState: 0, resync: 0 };
+  const calls = { command: [], table: 0, snapshots: 0, joinArgs: null, authoritativeArgs: null, sendError: 0, sentErrors: [], actorTableState: 0, resync: 0, logs: [] };
   const tableManager = {
     ensureTableLoaded: async () => ({ ok: true }),
     join: (args) => { calls.joinArgs = args; return { ok: true, changed: true, tableState: { tableId: 't1', members: [] } }; },
@@ -46,7 +46,8 @@ function baseCtx(payload = {}){
       authoritativeJoinEnabled: false,
       observeOnlyJoinEnabled: false,
       persistedBootstrapEnabled: false,
-      loadAuthoritativeJoinExecutor: async () => async (args) => { calls.authoritativeArgs = args; return { ok: true, seatNo: 2, stack: 100 }; }
+      loadAuthoritativeJoinExecutor: async () => async (args) => { calls.authoritativeArgs = args; return { ok: true, seatNo: 2, stack: 100 }; },
+      klog: (event, payload) => { calls.logs.push({ event, payload }); }
     }
   };
 }
@@ -433,4 +434,39 @@ test('handleJoinCommand preserves temporarily_unavailable for runtime authoritat
   assert.equal(calls.actorTableState, 0);
   assert.equal(calls.table, 0);
   assert.equal(calls.snapshots, 0);
+});
+
+test('logs authoritative join lifecycle for debugging', async () => {
+  const { ctx, calls } = baseCtx({ seatNo: 1, buyIn: 100 });
+  ctx.authoritativeJoinEnabled = true;
+  ctx.persistedBootstrapEnabled = true;
+  ctx.loadAuthoritativeJoinExecutor = async () => async () => ({
+    ok: true,
+    seatNo: 1,
+    stack: 100,
+    snapshot: {
+      stateVersion: 1,
+      seats: [{ userId: 'u1', seatNo: 1 }],
+      stacks: { u1: 100 }
+    }
+  });
+  ctx.restoreTableFromPersisted = async () => ({
+    ok: true,
+    restoredTable: {
+      coreState: {
+        version: 1,
+        seats: { u1: 1 },
+        publicStacks: { u1: 100 }
+      }
+    }
+  });
+
+  await handleJoinCommand(ctx);
+
+  const eventNames = calls.logs.map((entry) => entry.event);
+  assert.equal(eventNames.includes('ws_join_authoritative_start'), true);
+  assert.equal(eventNames.includes('ws_join_authoritative_result'), true);
+  assert.equal(eventNames.includes('ws_join_restore_result'), true);
+  assert.equal(eventNames.includes('ws_join_restore_validate'), true);
+  assert.equal(calls.command[0].status, 'accepted');
 });

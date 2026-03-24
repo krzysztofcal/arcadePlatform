@@ -517,6 +517,7 @@ async function persistMutatedState({ tableId, expectedVersion, mutationKind }) {
   if (!nextState) {
     return { ok: false, reason: "invalid_state" };
   }
+  klogSafe("ws_state_persist_start", { tableId, expectedVersion, mutationKind });
   const persisted = await persistedStateWriter.writeMutation({
     tableId,
     expectedVersion,
@@ -529,6 +530,7 @@ async function persistMutatedState({ tableId, expectedVersion, mutationKind }) {
     klogSafe("ws_state_persist_failed", { tableId, expectedVersion, mutationKind, reason: persisted?.reason || "unknown" });
     return persisted;
   }
+  klogSafe("ws_state_persist_result", { ok: true, newVersion: persisted.newVersion ?? null });
   tableManager.setPersistedStateVersion(tableId, persisted.newVersion);
   return persisted;
 }
@@ -538,11 +540,18 @@ async function restoreTableFromPersisted(tableId) {
     return { ok: false, reason: "persisted_bootstrap_disabled" };
   }
   try {
+    klogSafe("ws_restore_load_start", { tableId });
     const restored = await loadPersistedTableBootstrap({ tableId });
+    klogSafe("ws_restore_load_result", {
+      ok: restored?.ok === true,
+      hasTable: Boolean(restored?.table),
+      version: restored?.table?.coreState?.version ?? null
+    });
     if (!restored?.ok || !restored?.table) {
       return { ok: false, reason: restored?.code || "restore_failed" };
     }
     const applied = tableManager.restoreTableFromPersisted(tableId, restored.table);
+    klogSafe("ws_restore_apply_result", { ok: applied?.ok === true });
     if (!applied?.ok) {
       return applied;
     }
@@ -806,7 +815,8 @@ wss.on("connection", (ws) => {
         authoritativeJoinEnabled,
         observeOnlyJoinEnabled,
         persistedBootstrapEnabled,
-        loadAuthoritativeJoinExecutor
+        loadAuthoritativeJoinExecutor,
+        klog: klogSafe
       });
       return;
     }

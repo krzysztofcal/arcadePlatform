@@ -1,14 +1,18 @@
 import { normalizeJsonState } from "../snapshot-runtime/poker-state-utils.mjs";
 
 export async function updatePokerStateLocked(tx, { tableId, nextState }) {
+  const klog = typeof tx?.klog === "function" ? tx.klog : () => {};
   if (!tableId) return { ok: false, reason: "invalid" };
   if (!nextState || typeof nextState !== "object" || Array.isArray(nextState)) {
+    klog("ws_state_update_invalid", { reason: "invalid_state_payload" });
     return { ok: false, reason: "invalid" };
   }
+  klog("ws_state_update_start", { tableId });
   let payload;
   try {
     payload = JSON.stringify(nextState);
   } catch {
+    klog("ws_state_update_invalid", { reason: "state_not_serializable" });
     return { ok: false, reason: "invalid" };
   }
   const rows = await tx.unsafe(
@@ -17,8 +21,10 @@ export async function updatePokerStateLocked(tx, { tableId, nextState }) {
   );
   const newVersion = Number(rows?.[0]?.version);
   if (!Number.isInteger(newVersion) || newVersion <= 0) {
+    klog("ws_state_update_invalid", { reason: rows?.length ? "invalid_version" : "not_found" });
     return { ok: false, reason: rows?.length ? "invalid" : "not_found" };
   }
+  klog("ws_state_update_result", { newVersion });
   return { ok: true, newVersion };
 }
 
