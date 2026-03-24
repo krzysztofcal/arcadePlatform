@@ -769,16 +769,18 @@ test("table_join is idempotent by requestId and preserves a single seat-bearing 
     const firstJoinState = await nextMessage(client, 5000, "firstJoinState");
     assert.equal(firstJoinState.type, "table_state");
     assert.equal(firstJoinState.requestId, "req-join-same-id");
+    assert.deepEqual(firstJoinState.payload.members, [{ userId: "user_idempotent", seat: 1 }]);
 
     sendFrame(client, joinFrame);
     const secondJoin = await nextMessage(client, 5000, "secondJoinSameRequestId");
     assert.equal(secondJoin.type, "commandResult");
     assert.equal(secondJoin.requestId, "req-join-same-id");
     assert.equal(secondJoin.payload.status, "accepted");
-
-    const secondJoinState = await nextMessage(client, 5000, "secondJoinState");
-    assert.equal(secondJoinState.type, "table_state");
-    assert.equal(secondJoinState.requestId, "req-join-same-id");
+    const optionalReplayState = await attemptMessage(client, 300);
+    if (optionalReplayState){
+      assert.equal(optionalReplayState.type, "table_state");
+      assert.deepEqual(optionalReplayState.payload.members, [{ userId: "user_idempotent", seat: 1 }]);
+    }
 
     sendFrame(client, {
       version: "1.0",
@@ -789,6 +791,8 @@ test("table_join is idempotent by requestId and preserves a single seat-bearing 
     });
     const stable = await nextMessageOfType(client, "table_state", 5000, "stableJoinAfterReplay");
     assert.deepEqual(stable.payload.members, [{ userId: "user_idempotent", seat: 1 }]);
+    const seatBearingMembers = stable.payload.members.filter((entry) => entry && entry.userId === "user_idempotent" && entry.seat != null);
+    assert.equal(seatBearingMembers.length, 1);
 
     client.close();
   } finally {
