@@ -17,6 +17,15 @@ function countRenderedOccupiedSeats(harness){
   return seen.size;
 }
 
+function readRenderedCards(container){
+  var nodes = container && Array.isArray(container.children) ? container.children : [];
+  return nodes.map(function(card){
+    var rank = card && card.children && card.children[0] ? String(card.children[0].textContent || '') : '';
+    var suit = card && card.children && card.children[1] ? String(card.children[1].textContent || '') : '';
+    return (rank + suit).trim();
+  }).filter(Boolean);
+}
+
 test('poker UI WS smoke renders joined player plus two bots from authoritative public snapshot', async () => {
   var joinPayloads = [];
   var snapshotHandler = null;
@@ -91,4 +100,23 @@ test('poker UI WS smoke renders joined player plus two bots from authoritative p
   assert.equal(String(harness.elements.pokerVersion.textContent), '1', 'smoke join should render the public snapshot version');
   assert.equal(harness.elements.pokerPhase.textContent, 'PREFLOP', 'smoke join should render the public hand phase');
   assert.equal(harness.elements.pokerYourStack.textContent, '150', 'smoke join should render the user stack from public state');
+
+  snapshotHandler({
+    kind: 'stateSnapshot',
+    payload: {
+      table: { tableId: 'table-1', members: [{ userId: 'user-1', seat: 1 }, { userId: 'bot-2', seat: 2 }, { userId: 'bot-3', seat: 3 }] },
+      version: 1,
+      you: { seat: 1 },
+      private: { holeCards: [{ r: 'A', s: 'S' }, { r: 'K', s: 'D' }] },
+      public: {
+        hand: { handId: 'hand-1', status: 'FLOP' },
+        board: [{ r: '2', s: 'C' }, { r: '7', s: 'H' }, { r: 'Q', s: 'S' }]
+      }
+    }
+  });
+  await harness.flush();
+
+  assert.deepEqual(readRenderedCards(harness.elements.pokerMyCards).slice(-2), ['A♠', 'K♦'], 'smoke join should render private hole cards with expected values');
+  assert.deepEqual(readRenderedCards(harness.elements.pokerBoard).slice(-3), ['2♣', '7♥', 'Q♠'], 'smoke join should render community cards with expected values');
+  assert.ok(findRenderedSeatByUserId(harness, 'user-1'), 'smoke join should keep seat rendering after rich snapshot');
 });
