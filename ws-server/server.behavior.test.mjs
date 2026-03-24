@@ -336,14 +336,17 @@ async function collectMatchingFrames(ws, { expectations, timeoutMs = 10000, labe
     }
 
     const frame = await nextMessage(ws, remainingMs);
-    observed.push(frame);
+    const normalizedFrame = (frame !== null && typeof frame === "object")
+      ? frame
+      : { payload: frame };
+    observed.push(normalizedFrame);
 
     for (const expectation of expectations) {
       if (!remaining.has(expectation.name)) {
         continue;
       }
-      if (expectation.match(frame)) {
-        matched.set(expectation.name, frame);
+      if (expectation.match(normalizedFrame)) {
+        matched.set(expectation.name, normalizedFrame);
         remaining.delete(expectation.name);
       }
     }
