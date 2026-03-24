@@ -4,7 +4,7 @@ import fs from "node:fs";
 
 test("ws bootstrap can hydrate occupied seats from authoritativeMembers when live members are empty", () => {
   const source = fs.readFileSync(new URL("../poker/poker.js", import.meta.url), "utf8");
-  const wsStart = source.indexOf("function mapTableStateToSeatUpdates(snapshotPayload)");
+  const wsStart = source.indexOf("function isRichGameplaySnapshot(snapshotPayload, snapshotKind)");
   const wsEnd = source.indexOf("\n\n    function startWsBootstrap(){", wsStart);
   assert.ok(wsStart >= 0 && wsEnd > wsStart);
   const wsFns = source.slice(wsStart, wsEnd);

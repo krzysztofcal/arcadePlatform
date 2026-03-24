@@ -4,10 +4,10 @@ import fs from "node:fs";
 
 test("poker ws merge preserves baseline constraints when WS omits them and updates when provided", () => {
   const source = fs.readFileSync(new URL("../poker/poker.js", import.meta.url), "utf8");
-  const marker = "function mapTableStateToSeatUpdates(snapshotPayload)";
+  const marker = "function isRichGameplaySnapshot(snapshotPayload, snapshotKind)";
   const start = source.indexOf(marker);
   assert.ok(start >= 0, "ws mapping helpers should exist");
-  const end = source.indexOf("\n\n    function applyWsSnapshotNow", start);
+  const end = source.indexOf("\n\n    function startWsBootstrap(){", start);
   assert.ok(end > start, "merge helper boundaries should exist");
   const fnSource = source.slice(start, end).trim();
   const factory = new Function(`
