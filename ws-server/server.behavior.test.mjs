@@ -301,6 +301,25 @@ function nextCommandResultForRequest(ws, requestId, timeoutMs = 10000) {
   );
 }
 
+function nextMessageForRequest(ws, { type, requestId, timeoutMs = 10000 }) {
+  return nextMessageMatching(
+    ws,
+    (frame) => frame?.type === type && frame?.requestId === requestId,
+    timeoutMs
+  );
+}
+
+function nextJoinTableState(ws, { requestId, tableId, timeoutMs = 10000 }) {
+  return nextMessageMatching(
+    ws,
+    (frame) =>
+      frame?.type === "table_state" &&
+      frame?.roomId === tableId &&
+      (frame?.requestId === requestId || frame?.requestId == null),
+    timeoutMs
+  );
+}
+
 
 
 async function nextStateUpdate(ws, { baseline = null, timeoutMs = 10000 } = {}) {
@@ -2353,21 +2372,21 @@ test("active replacement: observe-only snapshot privacy for seated and observer 
     await auth(observer, observerToken, "auth-observer-repl");
 
     sendFrame(seated, { version: "1.0", type: "table_join", requestId: "join-seat-repl", ts: "2026-02-28T01:00:00Z", payload: { tableId } });
-    const joinAck_join_seat_repl = await nextMessageOfType(seated, "commandResult");
+    const joinAck_join_seat_repl = await nextCommandResultForRequest(seated, "join-seat-repl");
     assert.equal(joinAck_join_seat_repl.payload.requestId, "join-seat-repl");
     assert.equal(joinAck_join_seat_repl.payload.status, "accepted");
-    await nextMessageOfType(seated, "table_state");
+    await nextJoinTableState(seated, { requestId: "join-seat-repl", tableId });
     sendFrame(observer, { version: "1.0", type: "table_join", requestId: "join-observer-repl", ts: "2026-02-28T01:00:01Z", payload: { tableId } });
-    const joinAck_join_observer_repl = await nextMessageOfType(observer, "commandResult");
+    const joinAck_join_observer_repl = await nextCommandResultForRequest(observer, "join-observer-repl");
     assert.equal(joinAck_join_observer_repl.payload.requestId, "join-observer-repl");
     assert.equal(joinAck_join_observer_repl.payload.status, "accepted");
-    await nextMessageOfType(observer, "table_state");
+    await nextJoinTableState(observer, { requestId: "join-observer-repl", tableId });
 
     sendFrame(seated, { version: "1.0", type: "table_state_sub", requestId: "snap-seat-repl", ts: "2026-02-28T01:00:02Z", payload: { tableId, view: "snapshot" } });
     sendFrame(observer, { version: "1.0", type: "table_state_sub", requestId: "snap-observer-repl", ts: "2026-02-28T01:00:03Z", payload: { tableId, view: "snapshot" } });
 
-    const seatedSnapshot = await nextMessageOfType(seated, "stateSnapshot");
-    const observerSnapshot = await nextMessageOfType(observer, "stateSnapshot");
+    const seatedSnapshot = await nextMessageForRequest(seated, { type: "stateSnapshot", requestId: "snap-seat-repl" });
+    const observerSnapshot = await nextMessageForRequest(observer, { type: "stateSnapshot", requestId: "snap-observer-repl" });
     assert.equal(seatedSnapshot.payload.you.seat, 1);
     assert.equal(observerSnapshot.payload.you.seat, null);
     assert.equal("private" in observerSnapshot.payload, false);
