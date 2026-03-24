@@ -320,6 +320,38 @@ function nextJoinTableState(ws, { requestId, tableId, timeoutMs = 10000 }) {
   );
 }
 
+async function collectMatchingFrames(ws, { expectations, timeoutMs = 10000, label = "websocket frame collection" }) {
+  const started = Date.now();
+  const remaining = new Set(expectations.map((entry) => entry.name));
+  const matched = new Map();
+  const observed = [];
+
+  while (remaining.size > 0) {
+    const elapsed = Date.now() - started;
+    const remainingMs = timeoutMs - elapsed;
+    if (remainingMs <= 0) {
+      const missing = [...remaining].join(", ");
+      const recent = observed.slice(-5).map((frame) => frame?.type || "<unknown>").join(", ");
+      throw new Error(`Timed out waiting for ${label}. Missing: ${missing}. Recent frame types: ${recent || "<none>"}`);
+    }
+
+    const frame = await nextMessage(ws, remainingMs);
+    observed.push(frame);
+
+    for (const expectation of expectations) {
+      if (!remaining.has(expectation.name)) {
+        continue;
+      }
+      if (expectation.match(frame)) {
+        matched.set(expectation.name, frame);
+        remaining.delete(expectation.name);
+      }
+    }
+  }
+
+  return Object.fromEntries(expectations.map((entry) => [entry.name, matched.get(entry.name)]));
+}
+
 
 
 async function nextStateUpdate(ws, { baseline = null, timeoutMs = 10000 } = {}) {
@@ -2372,21 +2404,70 @@ test("active replacement: observe-only snapshot privacy for seated and observer 
     await auth(observer, observerToken, "auth-observer-repl");
 
     sendFrame(seated, { version: "1.0", type: "table_join", requestId: "join-seat-repl", ts: "2026-02-28T01:00:00Z", payload: { tableId } });
-    const joinAck_join_seat_repl = await nextCommandResultForRequest(seated, "join-seat-repl");
-    assert.equal(joinAck_join_seat_repl.payload.requestId, "join-seat-repl");
-    assert.equal(joinAck_join_seat_repl.payload.status, "accepted");
-    await nextJoinTableState(seated, { requestId: "join-seat-repl", tableId });
+    const seatedJoinFrames = await collectMatchingFrames(seated, {
+      label: "seated join frames",
+      expectations: [
+        {
+          name: "joinAck",
+          match: (frame) => frame?.type === "commandResult" && frame?.payload?.requestId === "join-seat-repl"
+        },
+        {
+          name: "joinState",
+          match: (frame) =>
+            frame?.type === "table_state" &&
+            frame?.roomId === tableId &&
+            (frame?.requestId === "join-seat-repl" || frame?.requestId == null)
+        }
+      ]
+    });
+    assert.equal(seatedJoinFrames.joinAck.payload.requestId, "join-seat-repl");
+    assert.equal(seatedJoinFrames.joinAck.payload.status, "accepted");
+    assert.equal(seatedJoinFrames.joinState.type, "table_state");
+
     sendFrame(observer, { version: "1.0", type: "table_join", requestId: "join-observer-repl", ts: "2026-02-28T01:00:01Z", payload: { tableId } });
-    const joinAck_join_observer_repl = await nextCommandResultForRequest(observer, "join-observer-repl");
-    assert.equal(joinAck_join_observer_repl.payload.requestId, "join-observer-repl");
-    assert.equal(joinAck_join_observer_repl.payload.status, "accepted");
-    await nextJoinTableState(observer, { requestId: "join-observer-repl", tableId });
+    const observerJoinFrames = await collectMatchingFrames(observer, {
+      label: "observer join frames",
+      expectations: [
+        {
+          name: "joinAck",
+          match: (frame) => frame?.type === "commandResult" && frame?.payload?.requestId === "join-observer-repl"
+        },
+        {
+          name: "joinState",
+          match: (frame) =>
+            frame?.type === "table_state" &&
+            frame?.roomId === tableId &&
+            (frame?.requestId === "join-observer-repl" || frame?.requestId == null)
+        }
+      ]
+    });
+    assert.equal(observerJoinFrames.joinAck.payload.requestId, "join-observer-repl");
+    assert.equal(observerJoinFrames.joinAck.payload.status, "accepted");
+    assert.equal(observerJoinFrames.joinState.type, "table_state");
 
     sendFrame(seated, { version: "1.0", type: "table_state_sub", requestId: "snap-seat-repl", ts: "2026-02-28T01:00:02Z", payload: { tableId, view: "snapshot" } });
     sendFrame(observer, { version: "1.0", type: "table_state_sub", requestId: "snap-observer-repl", ts: "2026-02-28T01:00:03Z", payload: { tableId, view: "snapshot" } });
 
-    const seatedSnapshot = await nextMessageForRequest(seated, { type: "stateSnapshot", requestId: "snap-seat-repl" });
-    const observerSnapshot = await nextMessageForRequest(observer, { type: "stateSnapshot", requestId: "snap-observer-repl" });
+    const seatedSnapshots = await collectMatchingFrames(seated, {
+      label: "seated snapshot frame",
+      expectations: [
+        {
+          name: "snapshot",
+          match: (frame) => frame?.type === "stateSnapshot" && frame?.requestId === "snap-seat-repl"
+        }
+      ]
+    });
+    const observerSnapshots = await collectMatchingFrames(observer, {
+      label: "observer snapshot frame",
+      expectations: [
+        {
+          name: "snapshot",
+          match: (frame) => frame?.type === "stateSnapshot" && frame?.requestId === "snap-observer-repl"
+        }
+      ]
+    });
+    const seatedSnapshot = seatedSnapshots.snapshot;
+    const observerSnapshot = observerSnapshots.snapshot;
     assert.equal(seatedSnapshot.payload.you.seat, 1);
     assert.equal(observerSnapshot.payload.you.seat, null);
     assert.equal("private" in observerSnapshot.payload, false);
