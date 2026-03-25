@@ -21,6 +21,7 @@ assert.match(source, /run\("node", \["ws-server\/poker\/persistence\/inactive-cl
 assert.match(source, /run\("node", \["ws-server\/poker\/runtime\/disconnect-cleanup\.behavior\.test\.mjs"\],/, "runner should include ws disconnect cleanup runtime behavior test");
 assert.doesNotMatch(source, /poker-heartbeat\.behavior\.test\.mjs/, "runner should not include removed heartbeat behavior tests");
 assert.doesNotMatch(source, /tests\/poker-sweep\.behavior\.test\.mjs/, "runner should not include removed legacy sweep behavior test");
+assert.doesNotMatch(source, /tests\/poker-sweep\..*\.behavior\.test\.mjs/, "runner should not include removed sweep behavior tests");
 assert.doesNotMatch(
   source,
   /tests\/poker-sweep\.timeout-zero-amount-inactivates-seat\.behavior\.test\.mjs/,

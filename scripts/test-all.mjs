@@ -122,17 +122,6 @@ run("node", ["tests/poker-act.bot-autoplay.compile.behavior.test.mjs"], "poker-a
 run("node", ["tests/poker-act.bot-autoplay-stop-reason.behavior.test.mjs"], "poker-act-bot-autoplay-stop-reason-behavior");
 run("node", ["tests/poker-bots.leave-after-hand-evicted-on-settle.behavior.test.mjs"], "poker-bots-leave-after-hand-evicted-on-settle");
 run("node", ["tests/poker-act.init-phase.test.mjs"], "poker-act-init-phase");
-run("node", ["tests/poker-sweep.bot-cashout-on-timeout.behavior.test.mjs"], "poker-sweep-bot-cashout-on-timeout-behavior");
-run("node", ["tests/poker-sweep.bot-timeout-forces-inactive-even-if-helper-noop.behavior.test.mjs"], "poker-sweep-bot-timeout-force-inactive-helper-noop");
-run("node", ["tests/poker-sweep.bot-timeout-skips-when-actor-missing.behavior.test.mjs"], "poker-sweep-bot-timeout-skips-when-actor-missing");
-run("node", ["tests/poker-sweep.bot-timeout-invalid-botUserId-does-not-crash.behavior.test.mjs"], "poker-sweep-bot-timeout-invalid-botuserid-no-crash");
-run("node", ["tests/poker-sweep.bot-cashout-on-close.behavior.test.mjs"], "poker-sweep-bot-cashout-on-close-behavior");
-run("node", ["tests/poker-sweep.bot-close-cashes-out-using-state-when-seat-zero.behavior.test.mjs"], "poker-sweep-bot-close-cashout-state-when-seat-zero");
-run("node", ["tests/poker-sweep.bot-close-rechecks-status-after-inactivate.behavior.test.mjs"], "poker-sweep-bot-close-recheck-status-after-inactivate");
-run("node", ["tests/poker-sweep.bot-close-skips-when-actor-missing.behavior.test.mjs"], "poker-sweep-bot-close-skips-when-actor-missing");
-run("node", ["tests/poker-sweep.bot-close-invalid-tableId-skips.behavior.test.mjs"], "poker-sweep-bot-close-invalid-tableid-skips");
-run("node", ["tests/poker-sweep.bot-close-does-not-clear-state-when-not-safe.behavior.test.mjs"], "poker-sweep-bot-close-no-clear-when-not-safe");
-run("node", ["tests/poker-sweep.close-empty-table-counts-skipped.behavior.test.mjs"], "poker-sweep-close-empty-table-counts-skipped");
 run("node", ["tests/poker-get-table.behavior.test.mjs"], "poker-get-table-behavior");
 run("node", ["tests/poker-get-table.bot-fields.behavior.test.mjs"], "poker-get-table-bot-fields-behavior");
 run("node", ["tests/poker-get-table.me-left-consistent.behavior.test.mjs"], "poker-get-table-me-left-consistent-behavior");
