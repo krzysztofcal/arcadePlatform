@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { handleStartHandCommand } from './start-hand.mjs';
 
 test('handleStartHandCommand accepts and broadcasts on persisted change', async () => {
-  const calls = { command: [], snapshots: 0, persist: 0 };
+  const calls = { command: [], snapshots: 0, persist: 0, autoplay: 0 };
   await handleStartHandCommand({
     frame: { __resolvedTableId: 't1', requestId: 'r1' },
     ws: {},
@@ -16,15 +16,63 @@ test('handleStartHandCommand accepts and broadcasts on persisted change', async 
     },
     ensureTableLoadedErrorMapper: (x) => x,
     sendError: () => assert.fail('unexpected sendError'),
-    sendCommandResult: (_ws, _cs, payload) => calls.command.push(payload),
+    sendCommandResult: (_ws, _cs, payload) => { calls.command.push(payload); },
     persistMutatedState: async () => { calls.persist += 1; return { ok: true }; },
     restoreTableFromPersisted: async () => ({ ok: true }),
     broadcastResyncRequired: () => {},
-    broadcastStateSnapshots: () => { calls.snapshots += 1; }
+    broadcastStateSnapshots: () => { calls.snapshots += 1; },
+    runAcceptedBotAutoplay: async () => { calls.autoplay += 1; return { ok: true, changed: true }; }
   });
   assert.equal(calls.command[0].status, 'accepted');
   assert.equal(calls.snapshots, 1);
   assert.equal(calls.persist, 1);
+  assert.equal(calls.autoplay, 1);
+});
+
+test('handleStartHandCommand does not autoplay on rejected or persist-conflict outcomes', async () => {
+  const autoplayCalls = [];
+
+  await handleStartHandCommand({
+    frame: { __resolvedTableId: 't1', requestId: 'r4' },
+    ws: {},
+    connState: { session: { userId: 'observer_u' } },
+    tableManager: {
+      ensureTableLoaded: async () => ({ ok: true }),
+      tableSnapshot: () => ({ youSeat: null }),
+      persistedStateVersion: () => 2,
+      bootstrapHand: () => ({ ok: true, changed: true, bootstrap: 'started' })
+    },
+    ensureTableLoadedErrorMapper: (x) => x,
+    sendError: () => assert.fail('unexpected sendError'),
+    sendCommandResult: () => {},
+    persistMutatedState: async () => ({ ok: true }),
+    restoreTableFromPersisted: async () => ({ ok: true }),
+    broadcastResyncRequired: () => {},
+    broadcastStateSnapshots: () => {},
+    runAcceptedBotAutoplay: async () => { autoplayCalls.push('rejected'); }
+  });
+
+  await handleStartHandCommand({
+    frame: { __resolvedTableId: 't1', requestId: 'r5' },
+    ws: {},
+    connState: { session: { userId: 'u1' } },
+    tableManager: {
+      ensureTableLoaded: async () => ({ ok: true }),
+      tableSnapshot: () => ({ youSeat: 1 }),
+      persistedStateVersion: () => 2,
+      bootstrapHand: () => ({ ok: true, changed: true, bootstrap: 'started' })
+    },
+    ensureTableLoadedErrorMapper: (x) => x,
+    sendError: () => assert.fail('unexpected sendError'),
+    sendCommandResult: () => {},
+    persistMutatedState: async () => ({ ok: false, reason: 'persistence_conflict' }),
+    restoreTableFromPersisted: async () => ({ ok: true }),
+    broadcastResyncRequired: () => {},
+    broadcastStateSnapshots: () => {},
+    runAcceptedBotAutoplay: async () => { autoplayCalls.push('conflict'); }
+  });
+
+  assert.deepEqual(autoplayCalls, []);
 });
 
 test('handleStartHandCommand rejects non-seated caller without persist or broadcast', async () => {

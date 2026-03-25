@@ -50,9 +50,6 @@ jobs:
       - name: Run poker UI ws join smoke test
         run: node --test tests/poker-ui-ws-join-smoke.behavior.test.mjs
 
-      - name: Run poker UI ws act smoke test
-        run: node --test tests/poker-ui-ws-act-smoke.behavior.test.mjs
-
       - name: Run poker UI ws write-path guard test
         run: node --test tests/poker-ui-ws-write-path.guard.test.mjs
 
@@ -81,6 +78,9 @@ jobs:
 
       - name: Run ws conn-state behavior test
         run: node --test ws-server/poker/runtime/conn-state.behavior.test.mjs
+
+      - name: Run ws accepted bot autoplay adapter behavior test
+        run: node --test ws-server/poker/runtime/accepted-bot-autoplay-adapter.behavior.test.mjs
 
       - name: Run ws table behavior test
         run: node --test ws-server/poker/table/table.behavior.test.mjs

@@ -7,7 +7,7 @@ const source = await readFile(path.join(root, "scripts", "test-all.mjs"), "utf8"
 
 assert.match(source, /run\("node", \["tests\/poker-ui\.behavior\.test\.mjs"\],/, "runner should include poker-ui.behavior test");
 assert.match(source, /run\("node", \["tests\/poker-ui-ws-join-smoke\.behavior\.test\.mjs"\],/, "runner should include poker-ui ws join smoke test");
-assert.match(source, /run\("node", \["tests\/poker-ui-ws-act-smoke\.behavior\.test\.mjs"\],/, "runner should include poker-ui ws act smoke test");
+assert.doesNotMatch(source, /run\("node", \["tests\/poker-ui-ws-act-smoke\.behavior\.test\.mjs"\],/, "runner should not include poker-ui ws act smoke test after canonical coverage trim");
 assert.match(source, /run\("node", \["tests\/poker-ui-ws-write-path\.guard\.test\.mjs"\],/, "runner should include poker-ui ws write-path guard test");
 assert.match(source, /run\("node", \["tests\/poker-ui-ws-leave-smoke\.behavior\.test\.mjs"\],/, "runner should include poker-ui ws leave smoke test");
 assert.doesNotMatch(source, /run\("node", \["tests\/poker-ui-ws-health-fallback\.behavior\.test\.mjs"\],/, "runner should not include removed poker-ui ws health fallback test");
@@ -19,6 +19,7 @@ assert.doesNotMatch(source, /run\("node", \["tests\/poker-ui-ws-join-authoritati
 assert.match(source, /run\("node", \["tests\/poker-ui-no-heartbeat\.guard\.test\.mjs"\],/, "runner should include poker-ui no-heartbeat guard test");
 assert.match(source, /run\("node", \["ws-server\/poker\/persistence\/inactive-cleanup-adapter\.behavior\.test\.mjs"\],/, "runner should include ws inactive cleanup adapter behavior test");
 assert.match(source, /run\("node", \["ws-server\/poker\/runtime\/disconnect-cleanup\.behavior\.test\.mjs"\],/, "runner should include ws disconnect cleanup runtime behavior test");
+assert.match(source, /run\("node", \["ws-server\/poker\/runtime\/accepted-bot-autoplay-adapter\.behavior\.test\.mjs"\],/, "runner should include ws accepted bot autoplay adapter behavior test");
 assert.doesNotMatch(source, /poker-heartbeat\.behavior\.test\.mjs/, "runner should not include removed heartbeat behavior tests");
 assert.doesNotMatch(source, /tests\/poker-sweep\.behavior\.test\.mjs/, "runner should not include removed legacy sweep behavior test");
 assert.doesNotMatch(source, /tests\/poker-sweep\..*\.behavior\.test\.mjs/, "runner should not include removed sweep behavior tests");

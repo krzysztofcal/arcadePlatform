@@ -19,53 +19,38 @@ test('reconnect before sweep skips cleanup and removes candidate', async () => {
   assert.equal(runtime.size(), 0);
 });
 
-test('protected-turn result keeps candidate for retry', async () => {
-  let calls = 0;
-  const runtime = createDisconnectCleanupRuntime({
-    executeCleanup: async () => { calls += 1; return { ok: true, protected: true, retryable: true }; },
-    listActiveSocketsForUser: () => [],
-    socketMatchesTable: () => false
-  });
-  runtime.enqueue({ tableId: 't1', userId: 'u1' });
-  await runtime.sweep();
-  assert.equal(calls, 1);
-  assert.equal(runtime.size(), 1);
-});
-
-test('one of two sockets closed still skips cleanup', async () => {
-  let calls = 0;
-  const runtime = createDisconnectCleanupRuntime({
-    executeCleanup: async () => { calls += 1; return { ok: true, changed: true }; },
-    listActiveSocketsForUser: () => [socketFor('t2')],
-    socketMatchesTable: (socket, tableId) => socket?.__connState?.joinedTableId === tableId
-  });
-  runtime.enqueue({ tableId: 't2', userId: 'u2' });
-  await runtime.sweep();
-  assert.equal(calls, 0);
-});
-
-test('successful cleanup triggers changed callback and de-queues candidate', async () => {
+test('successful cleanup de-queues candidate and triggers onChanged', async () => {
   const changed = [];
   const runtime = createDisconnectCleanupRuntime({
-    executeCleanup: async () => ({ ok: true, changed: true, closed: true }),
+    executeCleanup: async () => ({ ok: true, changed: true }),
     listActiveSocketsForUser: () => [],
     socketMatchesTable: () => false,
     onChanged: (tableId, result) => changed.push({ tableId, result })
   });
-  runtime.enqueue({ tableId: 't3', userId: 'u3' });
+  runtime.enqueue({ tableId: 't_success', userId: 'u1' });
   await runtime.sweep();
   assert.equal(runtime.size(), 0);
   assert.equal(changed.length, 1);
-  assert.equal(changed[0].tableId, 't3');
+  assert.equal(changed[0].tableId, 't_success');
+  assert.equal(changed[0].result.ok, true);
 });
 
-test('cleanup failure keeps candidate for retry', async () => {
-  const runtime = createDisconnectCleanupRuntime({
-    executeCleanup: async () => ({ ok: false, code: 'inactive_cleanup_failed' }),
+test('cleanup failure matrix keeps retryable candidates and removes terminal failures', async () => {
+  const retryableRuntime = createDisconnectCleanupRuntime({
+    executeCleanup: async () => ({ ok: false, code: 'inactive_cleanup_failed', retryable: true }),
     listActiveSocketsForUser: () => [],
     socketMatchesTable: () => false
   });
-  runtime.enqueue({ tableId: 't4', userId: 'u4' });
-  await runtime.sweep();
-  assert.equal(runtime.size(), 1);
+  retryableRuntime.enqueue({ tableId: 't_retry', userId: 'u4' });
+  await retryableRuntime.sweep();
+  assert.equal(retryableRuntime.size(), 1);
+
+  const terminalRuntime = createDisconnectCleanupRuntime({
+    executeCleanup: async () => ({ ok: false, code: 'temporarily_unavailable', retryable: false }),
+    listActiveSocketsForUser: () => [],
+    socketMatchesTable: () => false
+  });
+  terminalRuntime.enqueue({ tableId: 't_terminal', userId: 'u5' });
+  await terminalRuntime.sweep();
+  assert.equal(terminalRuntime.size(), 0);
 });

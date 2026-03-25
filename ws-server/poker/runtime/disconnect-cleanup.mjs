@@ -44,6 +44,10 @@ export function createDisconnectCleanupRuntime({
         onChanged(candidate.tableId, result);
         continue;
       }
+      if (result?.retryable === false) {
+        candidates.delete(key(candidate.tableId, candidate.userId));
+        continue;
+      }
       klog('ws_disconnect_cleanup_retry', {
         tableId: candidate.tableId,
         userId: candidate.userId,

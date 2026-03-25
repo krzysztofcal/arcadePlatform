@@ -144,6 +144,8 @@ function snapshotCacheKey(sessionId, tableId) {
 let authoritativeLeaveExecutorPromise = null;
 let authoritativeJoinExecutorPromise = null;
 let inactiveCleanupExecutorPromise = null;
+let acceptedBotAutoplayExecutorPromise = null;
+const DEFAULT_ACCEPTED_BOT_AUTOPLAY_ADAPTER_URL = new URL("./poker/runtime/accepted-bot-autoplay-adapter.mjs", import.meta.url).href;
 
 async function loadAuthoritativeLeaveExecutor() {
   if (!authoritativeLeaveExecutorPromise) {
@@ -167,6 +169,42 @@ async function loadInactiveCleanupExecutor() {
       .then((module) => module.createInactiveCleanupExecutor({ env: process.env, klog: klogSafe }));
   }
   return inactiveCleanupExecutorPromise;
+}
+
+async function loadAcceptedBotAutoplayExecutor() {
+  if (!acceptedBotAutoplayExecutorPromise) {
+    acceptedBotAutoplayExecutorPromise = (async () => {
+      const configured = typeof process.env.WS_ACCEPTED_BOT_AUTOPLAY_ADAPTER_MODULE_PATH === "string"
+        ? process.env.WS_ACCEPTED_BOT_AUTOPLAY_ADAPTER_MODULE_PATH.trim()
+        : "";
+      const adapterModulePath = configured || DEFAULT_ACCEPTED_BOT_AUTOPLAY_ADAPTER_URL;
+
+      try {
+        const module = await import(adapterModulePath);
+        return module.createAcceptedBotAutoplayExecutor({
+          tableManager,
+          persistMutatedState,
+          restoreTableFromPersisted,
+          broadcastResyncRequired,
+          env: process.env,
+          klog: klogSafe
+        });
+      } catch (error) {
+        klogSafe("ws_bot_autoplay_executor_unavailable", {
+          modulePath: adapterModulePath,
+          message: error?.message || "unknown"
+        });
+        return async () => ({
+          ok: true,
+          changed: false,
+          actionCount: 0,
+          noop: true,
+          reason: "autoplay_unavailable"
+        });
+      }
+    })();
+  }
+  return acceptedBotAutoplayExecutorPromise;
 }
 
 function klog(kind, data) {
@@ -1147,6 +1185,7 @@ wss.on("connection", (ws) => {
         return;
       }
       frame.__resolvedTableId = resolvedRoomId.roomId;
+      const runAcceptedBotAutoplay = await loadAcceptedBotAutoplayExecutor();
       await handleActCommand({
         frame,
         ws,
@@ -1158,7 +1197,9 @@ wss.on("connection", (ws) => {
         persistMutatedState,
         restoreTableFromPersisted,
         broadcastResyncRequired,
-        broadcastStateSnapshots
+        broadcastStateSnapshots,
+        runAcceptedBotAutoplay,
+        klog: klogSafe
       });
       return;
     }
@@ -1174,6 +1215,7 @@ wss.on("connection", (ws) => {
         return;
       }
       frame.__resolvedTableId = resolvedRoomId.roomId;
+      const runAcceptedBotAutoplay = await loadAcceptedBotAutoplayExecutor();
       await handleStartHandCommand({
         frame,
         ws,
@@ -1185,7 +1227,9 @@ wss.on("connection", (ws) => {
         persistMutatedState,
         restoreTableFromPersisted,
         broadcastResyncRequired,
-        broadcastStateSnapshots
+        broadcastStateSnapshots,
+        runAcceptedBotAutoplay,
+        klog: klogSafe
       });
       return;
     }
