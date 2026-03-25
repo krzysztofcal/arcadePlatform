@@ -57,3 +57,53 @@ test("ws table snapshot runtime stays inside ws-server package boundary", () => 
     "WS runtime boundary: table-snapshot must import ws-server local sql-admin helper"
   );
 });
+
+
+test("ws authoritative join runtime stays inside ws-server package boundary", () => {
+  const adapter = read("ws-server/poker/persistence/authoritative-join-adapter.mjs");
+  const ledger = read("ws-server/poker/persistence/chips-ledger.mjs");
+  const locked = read("ws-server/poker/persistence/poker-state-write-locked.mjs");
+
+  assert.doesNotMatch(
+    adapter,
+    /netlify\/functions\/_shared\//,
+    "WS runtime boundary: authoritative join adapter must not import repo-root netlify/functions/_shared modules"
+  );
+  assert.match(
+    adapter,
+    /import\("\.\/chips-ledger\.mjs"\)/,
+    "WS runtime boundary: authoritative join adapter must use the ws-server local chips ledger helper"
+  );
+  assert.match(
+    adapter,
+    /import\("\.\/poker-state-write-locked\.mjs"\)/,
+    "WS runtime boundary: authoritative join adapter must use the ws-server local locked-state helper"
+  );
+  assert.match(
+    adapter,
+    /import\("\.\.\/snapshot-runtime\/poker-state-utils\.mjs"\)/,
+    "WS runtime boundary: authoritative join adapter must use the ws-server local state-utils helper"
+  );
+
+  assert.doesNotMatch(
+    ledger,
+    /netlify\/functions\/_shared\//,
+    "WS runtime boundary: ws local chips ledger helper must not import repo-root netlify/functions/_shared modules"
+  );
+  assert.match(
+    ledger,
+    /from "\.\/sql-admin\.mjs"/,
+    "WS runtime boundary: ws local chips ledger helper must import ws-server local sql-admin helper"
+  );
+
+  assert.doesNotMatch(
+    locked,
+    /netlify\/functions\/_shared\//,
+    "WS runtime boundary: ws local locked-state helper must not import repo-root netlify/functions/_shared modules"
+  );
+  assert.match(
+    locked,
+    /from "\.\.\/snapshot-runtime\/poker-state-utils\.mjs"/,
+    "WS runtime boundary: ws local locked-state helper must import ws-server local state utils helper"
+  );
+});

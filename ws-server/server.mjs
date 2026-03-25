@@ -13,11 +13,15 @@ import { recordProtocolViolation, shouldClose } from "./poker/runtime/conn-guard
 import { createTableManager } from "./poker/table/table-manager.mjs";
 import { adaptPersistedBootstrap } from "./poker/bootstrap/persisted-bootstrap-adapter.mjs";
 import { createSessionStore } from "./poker/runtime/session-store.mjs";
+import { createDisconnectCleanupRuntime } from "./poker/runtime/disconnect-cleanup.mjs";
 import { buildStateSnapshotPayload } from "./poker/read-model/state-snapshot.mjs";
 import { buildStatePatch } from "./poker/read-model/state-patch.mjs";
 import { createStreamLog } from "./poker/runtime/stream-log.mjs";
 import { createPersistedStateWriter } from "./poker/persistence/persisted-state-writer.mjs";
 import { createTableSnapshotLoader } from "./poker/table/table-snapshot.mjs";
+import { handleJoinCommand } from "./poker/handlers/join.mjs";
+import { handleActCommand } from "./poker/handlers/act.mjs";
+import { handleStartHandCommand } from "./poker/handlers/start-hand.mjs";
 
 const PORT = Number(process.env.PORT || 3000);
 const PROTECTED_MESSAGE_TYPES = new Set([
@@ -29,11 +33,12 @@ const PROTECTED_MESSAGE_TYPES = new Set([
   "table_state_sub",
   "table_snapshot",
   "act",
+  "start_hand",
   "resync",
   "resume",
   "ack"
 ]);
-const REQUEST_ID_REQUIRED_TYPES = new Set(["join", "leave", "table_join", "table_leave", "table_state_sub", "table_snapshot", "act", "resync", "resume"]);
+const REQUEST_ID_REQUIRED_TYPES = new Set(["join", "leave", "table_join", "table_leave", "table_state_sub", "table_snapshot", "act", "start_hand", "resync", "resume"]);
 const TABLE_SNAPSHOT_KNOWN_FAILURE_CODES = new Set([
   "invalid_table_id",
   "table_not_found",
@@ -138,6 +143,9 @@ function snapshotCacheKey(sessionId, tableId) {
 
 let authoritativeLeaveExecutorPromise = null;
 let authoritativeJoinExecutorPromise = null;
+let inactiveCleanupExecutorPromise = null;
+let acceptedBotAutoplayExecutorPromise = null;
+const DEFAULT_ACCEPTED_BOT_AUTOPLAY_ADAPTER_URL = new URL("./poker/runtime/accepted-bot-autoplay-adapter.mjs", import.meta.url).href;
 
 async function loadAuthoritativeLeaveExecutor() {
   if (!authoritativeLeaveExecutorPromise) {
@@ -153,6 +161,50 @@ async function loadAuthoritativeJoinExecutor() {
       .then((module) => module.createAuthoritativeJoinExecutor({ env: process.env, klog: klogSafe }));
   }
   return authoritativeJoinExecutorPromise;
+}
+
+async function loadInactiveCleanupExecutor() {
+  if (!inactiveCleanupExecutorPromise) {
+    inactiveCleanupExecutorPromise = import("./poker/persistence/inactive-cleanup-adapter.mjs")
+      .then((module) => module.createInactiveCleanupExecutor({ env: process.env, klog: klogSafe }));
+  }
+  return inactiveCleanupExecutorPromise;
+}
+
+async function loadAcceptedBotAutoplayExecutor() {
+  if (!acceptedBotAutoplayExecutorPromise) {
+    acceptedBotAutoplayExecutorPromise = (async () => {
+      const configured = typeof process.env.WS_ACCEPTED_BOT_AUTOPLAY_ADAPTER_MODULE_PATH === "string"
+        ? process.env.WS_ACCEPTED_BOT_AUTOPLAY_ADAPTER_MODULE_PATH.trim()
+        : "";
+      const adapterModulePath = configured || DEFAULT_ACCEPTED_BOT_AUTOPLAY_ADAPTER_URL;
+
+      try {
+        const module = await import(adapterModulePath);
+        return module.createAcceptedBotAutoplayExecutor({
+          tableManager,
+          persistMutatedState,
+          restoreTableFromPersisted,
+          broadcastResyncRequired,
+          env: process.env,
+          klog: klogSafe
+        });
+      } catch (error) {
+        klogSafe("ws_bot_autoplay_executor_unavailable", {
+          modulePath: adapterModulePath,
+          message: error?.message || "unknown"
+        });
+        return async () => ({
+          ok: true,
+          changed: false,
+          actionCount: 0,
+          noop: true,
+          reason: "autoplay_unavailable"
+        });
+      }
+    })();
+  }
+  return acceptedBotAutoplayExecutorPromise;
 }
 
 function klog(kind, data) {
@@ -317,6 +369,8 @@ function buildTableStatePayload({ tableState, tableSnapshot }) {
   if (Number.isInteger(tableSnapshot.memberCount)) payload.memberCount = tableSnapshot.memberCount;
   if (Number.isInteger(tableSnapshot.maxSeats)) payload.maxSeats = tableSnapshot.maxSeats;
   if (Number.isInteger(tableSnapshot.youSeat)) payload.youSeat = tableSnapshot.youSeat;
+  if (Array.isArray(tableSnapshot.seats)) payload.seats = tableSnapshot.seats;
+  if (tableSnapshot.stacks && typeof tableSnapshot.stacks === "object" && !Array.isArray(tableSnapshot.stacks)) payload.stacks = tableSnapshot.stacks;
   if (tableSnapshot.hand && typeof tableSnapshot.hand === "object") payload.hand = tableSnapshot.hand;
   if (tableSnapshot.board && typeof tableSnapshot.board === "object") payload.board = tableSnapshot.board;
   if (tableSnapshot.pot && typeof tableSnapshot.pot === "object") payload.pot = tableSnapshot.pot;
@@ -511,6 +565,7 @@ async function persistMutatedState({ tableId, expectedVersion, mutationKind }) {
   if (!nextState) {
     return { ok: false, reason: "invalid_state" };
   }
+  klogSafe("ws_state_persist_start", { tableId, expectedVersion, mutationKind });
   const persisted = await persistedStateWriter.writeMutation({
     tableId,
     expectedVersion,
@@ -523,6 +578,7 @@ async function persistMutatedState({ tableId, expectedVersion, mutationKind }) {
     klogSafe("ws_state_persist_failed", { tableId, expectedVersion, mutationKind, reason: persisted?.reason || "unknown" });
     return persisted;
   }
+  klogSafe("ws_state_persist_result", { ok: true, newVersion: persisted.newVersion ?? null });
   tableManager.setPersistedStateVersion(tableId, persisted.newVersion);
   return persisted;
 }
@@ -532,11 +588,25 @@ async function restoreTableFromPersisted(tableId) {
     return { ok: false, reason: "persisted_bootstrap_disabled" };
   }
   try {
+    klogSafe("ws_restore_load_start", { tableId });
     const restored = await loadPersistedTableBootstrap({ tableId });
+    klogSafe("ws_restore_load_result", {
+      ok: restored?.ok === true,
+      hasTable: Boolean(restored?.table),
+      version: restored?.table?.coreState?.version ?? null
+    });
     if (!restored?.ok || !restored?.table) {
       return { ok: false, reason: restored?.code || "restore_failed" };
     }
-    return tableManager.restoreTableFromPersisted(tableId, restored.table);
+    const applied = tableManager.restoreTableFromPersisted(tableId, restored.table);
+    klogSafe("ws_restore_apply_result", { ok: applied?.ok === true });
+    if (!applied?.ok) {
+      return applied;
+    }
+    return {
+      ...applied,
+      restoredTable: restored.table
+    };
   } catch (error) {
     klogSafe("ws_state_restore_failed", { tableId, message: error?.message || "unknown" });
     return { ok: false, reason: "restore_error" };
@@ -564,7 +634,7 @@ function broadcastStateSnapshots(tableId) {
   }
 }
 
-function sweepAndBroadcastExpiredPresence() {
+function sweepExpiredSessionsOnly() {
   const nowMs = Date.now();
   const expiredSessionIds = sessionStore.sweepExpiredSessions({ nowMs });
   for (const sessionId of expiredSessionIds) {
@@ -574,10 +644,33 @@ function sweepAndBroadcastExpiredPresence() {
       }
     }
   }
-  const sweepUpdates = tableManager.sweepExpiredPresence({ nowTs: nowMs });
-  for (const update of sweepUpdates) {
-    broadcastTableState(update.tableId);
-  }
+}
+
+const disconnectCleanupRuntime = createDisconnectCleanupRuntime({
+  executeCleanup: async ({ tableId, userId, requestId }) => {
+    const executor = await loadInactiveCleanupExecutor();
+    return executor({ tableId, userId, requestId });
+  },
+  listActiveSocketsForUser: (userId) => sessionStore.connectionsForUser(userId),
+  socketMatchesTable: (socket, tableId) => {
+    const conn = socket && socket.__connState;
+    const joined = conn?.joinedTableId || null;
+    const subscribed = conn?.subscribedTableId || null;
+    return joined === tableId || subscribed === tableId;
+  },
+  onChanged: (tableId) => {
+    broadcastStateSnapshots(tableId);
+    broadcastTableState(tableId);
+  },
+  klog: klogSafe
+});
+
+function enqueueDisconnectCleanupCandidate({ tableId, userId }) {
+  disconnectCleanupRuntime.enqueue({ tableId, userId });
+}
+
+async function sweepDisconnectCleanupAndBroadcast() {
+  await disconnectCleanupRuntime.sweep();
 }
 
 async function sweepTurnTimeoutsAndBroadcast() {
@@ -619,7 +712,8 @@ wss.on("connection", (ws) => {
   let messageQueue = Promise.resolve();
 
   async function processMessage(msg, isBinary) {
-    sweepAndBroadcastExpiredPresence();
+    sweepExpiredSessionsOnly();
+    void sweepDisconnectCleanupAndBroadcast();
     await sweepTurnTimeoutsAndBroadcast();
     if (isBinary) {
       sendError(ws, connState, {
@@ -774,95 +868,28 @@ wss.on("connection", (ws) => {
         });
         return;
       }
-      const tableId = resolvedRoomId.roomId;
-
-      if (authoritativeJoinEnabled && !observeOnlyJoinEnabled && persistedBootstrapEnabled) {
-        const authoritativeJoinExecutor = await loadAuthoritativeJoinExecutor();
-        const authoritativeJoin = await authoritativeJoinExecutor({
-          tableId,
-          userId: connState.session.userId,
-          requestId: frame.requestId ?? null
-        });
-        if (!authoritativeJoin?.ok) {
-          const joinCode = authoritativeJoin?.code;
-          const isKnownError = typeof joinCode === "string"
-            && (joinCode === "table_not_found" || joinCode === "table_closed" || joinCode === "table_not_open" || joinCode === "seat_taken" || joinCode === "table_full" || joinCode === "state_missing" || joinCode === "state_invalid");
-          sendError(ws, connState, {
-            code: isKnownError ? joinCode : "INTERNAL_ERROR",
-            message: isKnownError ? joinCode : "authoritative_join_failed",
-            requestId: frame.requestId ?? null
-          });
-          return;
-        }
-      }
-
-      const ensured = await tableManager.ensureTableLoaded(tableId, { allowCreate: true });
-      if (!ensured.ok) {
-        const loadError = mapEnsureTableLoadedError(ensured);
-        sendError(ws, connState, {
-          code: loadError.code,
-          message: loadError.message,
-          requestId: frame.requestId ?? null
-        });
-        return;
-      }
-
-      if (authoritativeJoinEnabled && !observeOnlyJoinEnabled && persistedBootstrapEnabled) {
-        const restored = await restoreTableFromPersisted(tableId);
-        if (!restored.ok) {
-          sendError(ws, connState, {
-            code: "INTERNAL_ERROR",
-            message: "authoritative_join_rehydrate_failed",
-            requestId: frame.requestId ?? null
-          });
-          return;
-        }
-      }
-
-      sessionStore.trackConnection({ ws, userId: connState.session.userId, sessionId: connState.session.sessionId });
-      const joined = tableManager.join({
+      frame.__resolvedTableId = resolvedRoomId.roomId;
+      await handleJoinCommand({
+        frame,
         ws,
-        userId: connState.session.userId,
-        tableId,
-        requestId: frame.requestId,
-        nowTs: Date.now()
+        connState,
+        sessionStore,
+        tableManager,
+        ensureTableLoadedErrorMapper: mapEnsureTableLoadedError,
+        restoreTableFromPersisted,
+        persistMutatedState,
+        broadcastResyncRequired,
+        broadcastStateSnapshots,
+        broadcastTableState,
+        sendError,
+        sendCommandResult,
+        sendTableState,
+        authoritativeJoinEnabled,
+        observeOnlyJoinEnabled,
+        persistedBootstrapEnabled,
+        loadAuthoritativeJoinExecutor,
+        klog: klogSafe
       });
-      if (!joined.ok) {
-        sendError(ws, connState, {
-          code: joined.code === "bounds_exceeded" ? "bounds_exceeded" : "INVALID_COMMAND",
-          message: joined.message,
-          requestId: frame.requestId ?? null
-        });
-        return;
-      }
-
-      const joinedSnapshot = tableManager.tableSnapshot(tableId, connState.session.userId);
-      sendTableState(ws, connState, { requestId: frame.requestId ?? null, tableState: joined.tableState, tableSnapshot: joinedSnapshot });
-
-      if (joined.changed) {
-        broadcastTableState(tableId, { excludeWs: ws });
-      }
-
-      const bootstrapExpectedVersion = tableManager.persistedStateVersion(tableId);
-      const bootstrapped = tableManager.bootstrapHand(tableId, { nowMs: Date.now() });
-      if (bootstrapped?.changed) {
-        const persisted = await persistMutatedState({
-          tableId,
-          expectedVersion: bootstrapExpectedVersion,
-          mutationKind: "bootstrap"
-        });
-        if (!persisted?.ok) {
-          await restoreTableFromPersisted(tableId);
-          broadcastResyncRequired(tableId, "persistence_conflict");
-          sendError(ws, connState, {
-            code: "INTERNAL_ERROR",
-            message: "state_persist_failed",
-            requestId: frame.requestId ?? null
-          });
-          return;
-        }
-        klogSafe("ws_hand_bootstrap_started", { tableId, handId: bootstrapped.handId, stateVersion: persisted.newVersion });
-      }
       return;
     }
 
@@ -1157,89 +1184,53 @@ wss.on("connection", (ws) => {
         });
         return;
       }
-
-      const tableId = resolvedRoomId.roomId;
-      const handId = typeof frame.payload?.handId === "string" ? frame.payload.handId.trim() : "";
-      const action = typeof frame.payload?.action === "string" ? frame.payload.action.trim().toUpperCase() : "";
-      const amount = frame.payload?.amount;
-
-      if (!handId) {
-        sendError(ws, connState, {
-          code: "INVALID_COMMAND",
-          message: "act requires payload.handId",
-          requestId: frame.requestId ?? null
-        });
-        return;
-      }
-
-      if (!["FOLD", "CHECK", "CALL", "BET", "RAISE"].includes(action)) {
-        sendError(ws, connState, {
-          code: "INVALID_COMMAND",
-          message: "act requires payload.action of fold/check/call/bet/raise",
-          requestId: frame.requestId ?? null
-        });
-        return;
-      }
-
-      if ((action === "BET" || action === "RAISE") && !Number.isFinite(amount)) {
-        sendError(ws, connState, {
-          code: "INVALID_COMMAND",
-          message: "act requires numeric payload.amount for bet/raise",
-          requestId: frame.requestId ?? null
-        });
-        return;
-      }
-
-      const ensured = await tableManager.ensureTableLoaded(tableId);
-      if (!ensured.ok) {
-        sendCommandResult(ws, connState, {
-          requestId: frame.requestId ?? null,
-          tableId,
-          status: "rejected",
-          reason: ensured.code
-        });
-        return;
-      }
-
-      const result = tableManager.applyAction({
-        tableId,
-        handId,
-        userId: connState.session.userId,
-        requestId: frame.requestId,
-        action,
-        amount,
-        nowIso: frame.ts
+      frame.__resolvedTableId = resolvedRoomId.roomId;
+      const runAcceptedBotAutoplay = await loadAcceptedBotAutoplayExecutor();
+      await handleActCommand({
+        frame,
+        ws,
+        connState,
+        tableManager,
+        ensureTableLoadedErrorMapper: mapEnsureTableLoadedError,
+        sendError,
+        sendCommandResult,
+        persistMutatedState,
+        restoreTableFromPersisted,
+        broadcastResyncRequired,
+        broadcastStateSnapshots,
+        runAcceptedBotAutoplay,
+        klog: klogSafe
       });
+      return;
+    }
 
-      if (result.accepted && !result.replayed && result.changed) {
-        const persisted = await persistMutatedState({
-          tableId,
-          expectedVersion: Number(result.stateVersion) - 1,
-          mutationKind: "act"
+    if (frame.type === "start_hand") {
+      const resolvedRoomId = resolveRoomId(frame);
+      if (!resolvedRoomId.ok) {
+        sendError(ws, connState, {
+          code: resolvedRoomId.code,
+          message: resolvedRoomId.message,
+          requestId: frame.requestId ?? null
         });
-        if (!persisted?.ok) {
-          await restoreTableFromPersisted(tableId);
-          sendCommandResult(ws, connState, {
-            requestId: frame.requestId ?? null,
-            tableId,
-            status: "rejected",
-            reason: persisted?.reason || "persist_failed"
-          });
-          broadcastResyncRequired(tableId, "persistence_conflict");
-          return;
-        }
+        return;
       }
-
-      sendCommandResult(ws, connState, {
-        requestId: frame.requestId ?? null,
-        tableId,
-        status: result.accepted ? "accepted" : "rejected",
-        reason: result.reason
+      frame.__resolvedTableId = resolvedRoomId.roomId;
+      const runAcceptedBotAutoplay = await loadAcceptedBotAutoplayExecutor();
+      await handleStartHandCommand({
+        frame,
+        ws,
+        connState,
+        tableManager,
+        ensureTableLoadedErrorMapper: mapEnsureTableLoadedError,
+        sendError,
+        sendCommandResult,
+        persistMutatedState,
+        restoreTableFromPersisted,
+        broadcastResyncRequired,
+        broadcastStateSnapshots,
+        runAcceptedBotAutoplay,
+        klog: klogSafe
       });
-
-      if (result.accepted && !result.replayed && result.changed) {
-        broadcastStateSnapshots(tableId);
-      }
       return;
     }
 
@@ -1287,8 +1278,12 @@ wss.on("connection", (ws) => {
     });
     for (const update of cleanupUpdates) {
       broadcastTableState(update.tableId);
+      if (update && update.disconnectedUserId) {
+        enqueueDisconnectCleanupCandidate({ tableId: update.tableId, userId: update.disconnectedUserId });
+      }
     }
-    sweepAndBroadcastExpiredPresence();
+    sweepExpiredSessionsOnly();
+    void sweepDisconnectCleanupAndBroadcast();
     klogSafe("ws_error", { message: err.message });
   });
 
@@ -1302,8 +1297,12 @@ wss.on("connection", (ws) => {
     });
     for (const update of cleanupUpdates) {
       broadcastTableState(update.tableId);
+      if (update && update.disconnectedUserId) {
+        enqueueDisconnectCleanupCandidate({ tableId: update.tableId, userId: update.disconnectedUserId });
+      }
     }
-    sweepAndBroadcastExpiredPresence();
+    sweepExpiredSessionsOnly();
+    void sweepDisconnectCleanupAndBroadcast();
   });
 });
 
@@ -1314,6 +1313,12 @@ const timeoutSweepTimer = setInterval(() => {
 }, Number.isFinite(timeoutSweepIntervalMs) && timeoutSweepIntervalMs > 0 ? timeoutSweepIntervalMs : 250);
 
 timeoutSweepTimer.unref();
+
+const disconnectCleanupSweepMs = Number(process.env.WS_DISCONNECT_CLEANUP_SWEEP_MS || 500);
+const disconnectCleanupTimer = setInterval(() => {
+  void sweepDisconnectCleanupAndBroadcast();
+}, Number.isFinite(disconnectCleanupSweepMs) && disconnectCleanupSweepMs > 0 ? disconnectCleanupSweepMs : 500);
+disconnectCleanupTimer.unref();
 
 server.listen(PORT, "0.0.0.0", () => {
   klogSafe("ws_listening", { message: `WS listening on ${PORT}`, port: PORT });

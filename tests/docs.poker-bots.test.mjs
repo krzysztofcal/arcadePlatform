@@ -22,9 +22,11 @@ for (const token of [
 }
 
 for (const token of [
-  "netlify/functions/poker-join.mjs",
+  "shared/poker-domain/join.mjs",
   "netlify/functions/poker-start-hand.mjs",
   "netlify/functions/poker-act.mjs",
+  "netlify/functions/poker-leave.mjs",
+  "ws-server/server.mjs",
   "netlify/functions/poker-sweep.mjs",
 ]) {
   assert.equal(

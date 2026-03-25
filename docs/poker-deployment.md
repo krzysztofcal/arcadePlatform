@@ -146,7 +146,7 @@ The preview VPS contract is:
 - Remote upload staging directory: `/tmp/arcadeplatform-ws-preview`
 
 Preview deploys unpack into a temporary directory under `/tmp/arcadeplatform-ws-preview` and then sync the extracted files into `/opt/arcade-ws-preview/ws-server`.
-The workflow fails fast before mutating preview app contents when the preview base root, app dir, env file, service, Node.js, `tar`, `rsync`, `curl`, or required `PORT=3001` setting is missing.
+The workflow fails fast before mutating preview app contents when the preview base root, app dir, env file, service, Node.js, `tar`, `rsync`, `curl`, or required `PORT=3001`, `WS_AUTHORITATIVE_JOIN_ENABLED=1`, and non-empty `SUPABASE_DB_URL` settings are missing.
 Preview routing stays in `infra/vps/Caddyfile`, which must continue to define both the `ws.kcswh.pl -> 127.0.0.1:3000` and `ws-preview.kcswh.pl -> 127.0.0.1:3001` site blocks.
 
 ### Preview secrets
@@ -158,3 +158,21 @@ Configure these GitHub Actions secrets for preview access only:
 - `WS_PREVIEW_SSH_KEY`
 
 These secrets are intentionally separate from the production WS deploy credentials so preview runs cannot mutate production WS resources.
+
+
+## Post-deploy one-time zombie cleanup
+Run one manual sweep after deploy to close pre-migration stale open tables and return remaining human stacks safely via application logic (no raw SQL).
+
+Required contract (matches `netlify/functions/poker-sweep.mjs`):
+- Method: `POST`
+- Header: `x-sweep-secret: <POKER_SWEEP_SECRET>`
+- Environment: `POKER_SWEEP_SECRET` must be configured in Netlify for the target site.
+
+Example:
+```sh
+curl -X POST \
+  -H "x-sweep-secret: $POKER_SWEEP_SECRET" \
+  https://<your-site>/.netlify/functions/poker-sweep
+```
+
+Run this once post-deploy, then monitor logs for `poker_sweep_summary` / close-cashout events.

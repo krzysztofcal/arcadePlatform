@@ -5,15 +5,13 @@
   var CREATE_URL = '/.netlify/functions/poker-create-table';
   var QUICK_SEAT_URL = '/.netlify/functions/poker-quick-seat';
   var GET_URL = '/.netlify/functions/poker-get-table';
-  var JOIN_URL = '/.netlify/functions/poker-join';
+  var WS_JOIN_ENDPOINT = 'ws:join';
   var LEAVE_URL = '/.netlify/functions/poker-leave';
-  var HEARTBEAT_URL = '/.netlify/functions/poker-heartbeat';
-  var START_HAND_URL = '/.netlify/functions/poker-start-hand';
-  var ACT_URL = '/.netlify/functions/poker-act';
+  var WS_START_HAND_ENDPOINT = 'ws:start_hand';
+  var WS_ACT_ENDPOINT = 'ws:act';
   var EXPORT_LOG_URL = '/.netlify/functions/poker-export-log';
   var POLL_INTERVAL_BASE = 2000;
   var POLL_INTERVAL_MAX = 10000;
-  var HEARTBEAT_INTERVAL_MS = 5000;
   var PENDING_RETRY_DELAYS = [150, 300, 600, 900];
   var PENDING_RETRY_BUDGET_MS = 2000;
   var UI_VERSION = '2025-02-19';
@@ -422,6 +420,28 @@
   function normalizeRequestId(value){
     var trimmed = getValidRequestId(value);
     return trimmed || String(generateRequestId());
+  }
+
+  function buildWsUnavailableError(action, fallbackMessage){
+    var message = fallbackMessage || t('pokerErrWsUnavailable', 'Live table connection unavailable. Please wait for WebSocket reconnect and try again.');
+    var err = new Error(message);
+    err.code = 'ws_unavailable';
+    err.action = action || null;
+    return err;
+  }
+
+  function getGameplayWsSender(client, methodName, action, fallbackMessage){
+    if (!client || typeof client.isReady !== 'function' || !client.isReady()) return null;
+    if (typeof client[methodName] !== 'function') return null;
+    return function(payload, requestId){
+      return client[methodName](payload, requestId);
+    };
+  }
+
+  function resolveGameplayWsSender(client, methodName, action, fallbackMessage){
+    var sender = getGameplayWsSender(client, methodName, action, fallbackMessage);
+    if (sender) return sender;
+    throw buildWsUnavailableError(action, fallbackMessage);
   }
 
   function resolveRequestId(pendingValue, overrideValue){
@@ -991,8 +1011,6 @@
     var stakesValid = true;
     var devActionsEnabled = false;
     var authTimer = null;
-    var heartbeatTimer = null;
-    var pendingHeartbeatRequestId = null;
     var pendingJoinRequestId = null;
     var pendingJoinAutoSeat = false;
     var pendingLeaveRequestId = null;
@@ -1018,8 +1036,6 @@
     var copyLogPending = false;
     var dumpLogsPending = false;
     var pendingHiddenAt = null;
-    var heartbeatPendingRetries = 0;
-    var heartbeatInFlight = false;
     var isSeated = false;
     var suggestedSeatNoParam = parseInt(params.get('seatNo'), 10);
     var shouldAutoJoin = params.get('autoJoin') === '1';
@@ -1032,12 +1048,12 @@
     var turnTimerInterval = null;
     var deadlineNudgeTimer = null;
     var deadlineNudgeTargetMs = null;
-    var HEARTBEAT_PENDING_MAX_RETRIES = 8;
     var realtimeSub = null;
     var realtimeDisabled = false;
     var realtimeUnavailableLogged = false;
     var wsClient = null;
     var wsStarted = false;
+    var httpFallbackActive = false;
     var wsSnapshotSeen = false;
     var pendingWsSnapshot = null;
 
@@ -1072,17 +1088,128 @@
       wsClient = null;
     }
 
+    function isRichGameplaySnapshot(snapshotPayload, snapshotKind){
+      var payload = snapshotPayload && typeof snapshotPayload === 'object' ? snapshotPayload : {};
+      if (snapshotKind === 'stateSnapshot') return true;
+      if (isPlainObject(payload.public) || isPlainObject(payload.private) || isPlainObject(payload.you)) return true;
+      return isPlainObject(payload.table);
+    }
+
+    function normalizeCardForRender(card){
+      if (!card) return null;
+      var rank = null;
+      var suit = null;
+      if (typeof card === 'string'){
+        var text = card.trim();
+        if (!text || text.length < 2) return null;
+        suit = text.slice(-1).toUpperCase();
+        rank = text.slice(0, -1).toUpperCase();
+      } else if (isPlainObject(card)){
+        rank = card.r != null ? String(card.r).trim().toUpperCase() : '';
+        suit = card.s != null ? String(card.s).trim().toUpperCase() : '';
+      } else {
+        return null;
+      }
+      if (rank === 'T') rank = '10';
+      if (!(suit === 'S' || suit === 'H' || suit === 'D' || suit === 'C')) return null;
+      if (!(rank === 'A' || rank === 'K' || rank === 'Q' || rank === 'J' || rank === '10' || rank === '9' || rank === '8' || rank === '7' || rank === '6' || rank === '5' || rank === '4' || rank === '3' || rank === '2')) return null;
+      return {
+        r: rank === '10' ? 10 : rank,
+        s: suit
+      };
+    }
+
+    function normalizeCardsForRender(cards){
+      if (!Array.isArray(cards)) return [];
+      var out = [];
+      for (var i = 0; i < cards.length; i++){
+        var normalized = normalizeCardForRender(cards[i]);
+        if (normalized) out.push(normalized);
+      }
+      return out;
+    }
+
+    function normalizeWsSnapshotPayload(snapshot){
+      var input = snapshot && typeof snapshot === 'object' ? snapshot : {};
+      var payload = input.payload && typeof input.payload === 'object' ? input.payload : {};
+      var kind = typeof input.kind === 'string' && input.kind ? input.kind : (typeof input.rawType === 'string' ? input.rawType : null);
+      var normalized = Object.assign({}, payload);
+      var rich = isRichGameplaySnapshot(payload, kind);
+      if (!rich) return { kind: kind, payload: normalized };
+
+      var table = isPlainObject(payload.table) ? payload.table : {};
+      var pub = isPlainObject(payload.public) ? payload.public : {};
+      var priv = isPlainObject(payload.private) ? payload.private : {};
+      var you = isPlainObject(payload.you) ? payload.you : {};
+
+      if (!normalized.tableId && typeof table.tableId === 'string' && table.tableId) normalized.tableId = table.tableId;
+      if (!Array.isArray(normalized.authoritativeMembers) && Array.isArray(table.members)) normalized.authoritativeMembers = table.members.slice();
+      if (!Array.isArray(normalized.members) && Array.isArray(table.members)) normalized.members = table.members.slice();
+      if (!Number.isInteger(normalized.youSeat) && Number.isInteger(you.seat)) normalized.youSeat = you.seat;
+      if (!Number.isInteger(normalized.stateVersion) && Number.isInteger(payload.version)) normalized.stateVersion = payload.version;
+      if (normalized.myHoleCards == null && Array.isArray(priv.holeCards)) normalized.myHoleCards = normalizeCardsForRender(priv.holeCards);
+      if (!normalized.hand && isPlainObject(pub.hand)) normalized.hand = pub.hand;
+      if (!normalized.pot && isPlainObject(pub.pot)) normalized.pot = pub.pot;
+      if (!normalized.turn && isPlainObject(pub.turn)) normalized.turn = pub.turn;
+      if (!normalized.legalActions && pub.legalActions != null) normalized.legalActions = pub.legalActions;
+      if (!normalized.actionConstraints && isPlainObject(pub.actionConstraints)) normalized.actionConstraints = pub.actionConstraints;
+      if (!normalized.board && pub.board != null){
+        if (Array.isArray(pub.board)){
+          var normalizedPublicBoard = normalizeCardsForRender(pub.board);
+          if (normalizedPublicBoard.length || pub.board.length === 0){
+            normalized.board = { cards: normalizedPublicBoard };
+          }
+        } else if (isPlainObject(pub.board) && Array.isArray(pub.board.cards)){
+          var normalizedPublicBoardCards = normalizeCardsForRender(pub.board.cards);
+          if (normalizedPublicBoardCards.length || pub.board.cards.length === 0){
+            normalized.board = { cards: normalizedPublicBoardCards };
+          }
+        } else {
+          normalized.board = pub.board;
+        }
+      }
+      return { kind: kind, payload: normalized };
+    }
+
     function mapTableStateToSeatUpdates(snapshotPayload){
       var payload = snapshotPayload && typeof snapshotPayload === 'object' ? snapshotPayload : {};
+      var seatMap = {};
       var members = Array.isArray(payload.authoritativeMembers) ? payload.authoritativeMembers : [];
-      var seats = members.map(function(member){
-        return {
-          userId: member && member.userId ? member.userId : null,
-          seatNo: member && member.seat != null ? member.seat : null,
+      members.forEach(function(member){
+        var seatNo = member && member.seat != null ? member.seat : null;
+        var userId = member && member.userId ? member.userId : null;
+        if (!Number.isInteger(seatNo) || seatNo < 0) return;
+        if (typeof userId !== 'string' || !userId) return;
+        seatMap[seatNo] = {
+          userId: userId,
+          seatNo: seatNo,
           status: 'ACTIVE'
         };
-      }).filter(function(seat){
-        return typeof seat.userId === 'string' && seat.userId && Number.isInteger(seat.seatNo) && seat.seatNo >= 0;
+      });
+      if (Array.isArray(payload.seats)){
+        payload.seats.forEach(function(seat){
+          var seatNo = seat && Number.isInteger(seat.seatNo) ? seat.seatNo : null;
+          var userId = seat && typeof seat.userId === 'string' ? seat.userId : null;
+          if (!Number.isInteger(seatNo) || seatNo < 0) return;
+          if (typeof userId !== 'string' || !userId) return;
+          if (seatMap[seatNo]) return;
+          seatMap[seatNo] = {
+            userId: userId,
+            seatNo: seatNo,
+            status: typeof seat.status === 'string' ? seat.status : 'ACTIVE'
+          };
+        });
+      }
+      var currentSeatUserId = typeof currentUserId === 'string' && currentUserId ? currentUserId : null;
+      if (currentSeatUserId && Number.isInteger(payload.youSeat) && payload.youSeat >= 0 && !seatMap[payload.youSeat]){
+        seatMap[payload.youSeat] = {
+          userId: currentSeatUserId,
+          seatNo: payload.youSeat,
+          status: 'ACTIVE'
+        };
+      }
+      var seats = Object.keys(seatMap).map(function(key){
+        return seatMap[key];
       });
       return {
         tableId: payload.tableId || null,
@@ -1091,16 +1218,24 @@
     }
 
     function mergePresenceIntoSeats(existingSeats, seatUpdates){
-      if (!Array.isArray(existingSeats) || existingSeats.length === 0) return null;
-      if (!Array.isArray(seatUpdates) || seatUpdates.length === 0) return existingSeats.slice();
+      if (!Array.isArray(seatUpdates) || seatUpdates.length === 0){
+        return Array.isArray(existingSeats) ? existingSeats.slice() : null;
+      }
       var bySeatNo = {};
       seatUpdates.forEach(function(updateSeat){
         if (!updateSeat || !Number.isInteger(updateSeat.seatNo) || updateSeat.seatNo < 0) return;
         if (typeof updateSeat.userId !== 'string' || !updateSeat.userId) return;
         bySeatNo[updateSeat.seatNo] = updateSeat;
       });
-      return existingSeats.map(function(existing){
+      if (!Array.isArray(existingSeats) || existingSeats.length === 0){
+        return Object.keys(bySeatNo).map(function(key){
+          return bySeatNo[key];
+        });
+      }
+      var seenSeatNos = {};
+      var mergedSeats = existingSeats.map(function(existing){
         if (!existing || !Number.isInteger(existing.seatNo)) return existing;
+        seenSeatNos[existing.seatNo] = true;
         var nextSeat = bySeatNo[existing.seatNo];
         if (!nextSeat) return existing;
         return Object.assign({}, existing, {
@@ -1108,6 +1243,12 @@
           status: nextSeat.status || existing.status || 'ACTIVE'
         });
       });
+      Object.keys(bySeatNo).forEach(function(key){
+        var seatNo = Number(key);
+        if (seenSeatNos[seatNo]) return;
+        mergedSeats.push(bySeatNo[key]);
+      });
+      return mergedSeats;
     }
 
     function mergeWsStateIntoTableData(existingData, snapshotPayload){
@@ -1117,34 +1258,55 @@
       var merged = Object.assign({}, existingData);
       var baselineState = isPlainObject(merged.state) ? merged.state : {};
       var baselineInner = isPlainObject(baselineState.state) ? baselineState.state : {};
+      var nextState = Object.assign({}, baselineInner);
       if (Number.isInteger(payload.stateVersion)) baselineState.version = payload.stateVersion;
       if (payload.hand && typeof payload.hand === 'object'){
-        baselineState.state = Object.assign({}, baselineInner, {
-          handId: payload.hand.handId || baselineInner.handId || null,
-          phase: payload.hand.status || baselineInner.phase || null,
-          turnUserId: payload.turn && payload.turn.userId ? payload.turn.userId : baselineInner.turnUserId,
-          turnDeadlineAt: payload.turn && payload.turn.deadlineAt != null ? payload.turn.deadlineAt : baselineInner.turnDeadlineAt,
-          community: payload.board && Array.isArray(payload.board.cards) ? payload.board.cards.slice() : baselineInner.community,
-          pot: payload.pot && Number.isFinite(Number(payload.pot.total)) ? Number(payload.pot.total) : baselineInner.pot,
-          potTotal: payload.pot && Number.isFinite(Number(payload.pot.total)) ? Number(payload.pot.total) : baselineInner.potTotal,
-          sidePots: payload.pot && Array.isArray(payload.pot.sidePots) ? payload.pot.sidePots.slice() : baselineInner.sidePots
-        });
+        nextState.handId = payload.hand.handId || nextState.handId || null;
+        nextState.phase = payload.hand.status || nextState.phase || null;
       }
-      merged.state = baselineState;
-      if (payload.legalActions && typeof payload.legalActions === 'object'){
-        var wsActions = Array.isArray(payload.legalActions.actions) ? payload.legalActions.actions.slice() : null;
-        if (wsActions){
-          merged.legalActions = wsActions;
-          var wsConstraints = null;
-          if (isPlainObject(payload.actionConstraints)) wsConstraints = payload.actionConstraints;
-          else if (isPlainObject(payload.legalActions.actionConstraints)) wsConstraints = payload.legalActions.actionConstraints;
-          if (wsConstraints){
-            var safeConstraints = getSafeConstraints({ actionConstraints: wsConstraints });
-            merged.actionConstraints = safeConstraints;
-            merged._actionConstraints = safeConstraints;
-          }
+      if (payload.turn && typeof payload.turn === 'object'){
+        nextState.turnUserId = payload.turn.userId ? payload.turn.userId : nextState.turnUserId;
+        nextState.turnDeadlineAt = payload.turn.deadlineAt != null ? payload.turn.deadlineAt : nextState.turnDeadlineAt;
+        nextState.turnStartedAt = payload.turn.startedAt != null ? payload.turn.startedAt : nextState.turnStartedAt;
+      }
+      if (payload.board && Array.isArray(payload.board.cards)){
+        var normalizedBoardCards = normalizeCardsForRender(payload.board.cards);
+        if (normalizedBoardCards.length || payload.board.cards.length === 0) nextState.community = normalizedBoardCards;
+      }
+      if (!Array.isArray(nextState.community) && Array.isArray(payload.board)){
+        var normalizedBoardList = normalizeCardsForRender(payload.board);
+        if (normalizedBoardList.length || payload.board.length === 0) nextState.community = normalizedBoardList;
+      }
+      if (payload.pot && typeof payload.pot === 'object'){
+        if (Number.isFinite(Number(payload.pot.total))) {
+          nextState.pot = Number(payload.pot.total);
+          nextState.potTotal = Number(payload.pot.total);
         }
+        if (Array.isArray(payload.pot.sidePots)) nextState.sidePots = payload.pot.sidePots.slice();
       }
+      if (payload.stacks && typeof payload.stacks === 'object' && !Array.isArray(payload.stacks)){
+        nextState.stacks = Object.assign({}, baselineInner.stacks && typeof baselineInner.stacks === 'object' ? baselineInner.stacks : {}, payload.stacks);
+      }
+      baselineState.state = nextState;
+      merged.state = baselineState;
+      var wsActions = null;
+      var wsConstraints = null;
+      if (Array.isArray(payload.legalActions)){
+        wsActions = payload.legalActions.slice();
+      } else if (payload.legalActions && typeof payload.legalActions === 'object'){
+        if (Array.isArray(payload.legalActions.actions)) wsActions = payload.legalActions.actions.slice();
+        if (isPlainObject(payload.legalActions.actionConstraints)) wsConstraints = payload.legalActions.actionConstraints;
+      }
+      if (wsActions){
+        merged.legalActions = wsActions;
+      }
+      if (isPlainObject(payload.actionConstraints)) wsConstraints = payload.actionConstraints;
+      if (wsConstraints){
+        var safeConstraints = getSafeConstraints({ actionConstraints: wsConstraints });
+        merged.actionConstraints = safeConstraints;
+        merged._actionConstraints = safeConstraints;
+      }
+      if (Array.isArray(payload.myHoleCards)) merged.myHoleCards = normalizeCardsForRender(payload.myHoleCards);
       var mergedSeats = mergePresenceIntoSeats(merged.seats, update.seats);
       if (mergedSeats) merged.seats = mergedSeats;
       return merged;
@@ -1161,6 +1323,68 @@
       return state && Number.isInteger(state.version) ? state.version : null;
     }
 
+    function findCurrentUserSeatFacts(data){
+      var facts = {
+        hasCurrentUserSeat: false,
+        seatNo: null,
+        status: null,
+        hasRenderableSeatRow: false,
+        hasCurrentUserStack: false
+      };
+      var activeCurrentUserId = typeof currentUserId === 'string' && currentUserId ? currentUserId : null;
+      var stateObj = data && typeof data.state === 'object' ? data.state : null;
+      var gameState = stateObj && typeof stateObj.state === 'object' ? stateObj.state : null;
+      var stacks = gameState && typeof gameState.stacks === 'object' && !Array.isArray(gameState.stacks) ? gameState.stacks : null;
+      if (activeCurrentUserId && stacks && stacks[activeCurrentUserId] != null){
+        facts.hasCurrentUserStack = true;
+      }
+      if (!activeCurrentUserId || !data || !Array.isArray(data.seats)) return facts;
+      for (var i = 0; i < data.seats.length; i++){
+        var seat = data.seats[i];
+        if (!seat || typeof seat.userId !== 'string') continue;
+        if (seat.userId.trim() !== activeCurrentUserId) continue;
+        facts.hasCurrentUserSeat = true;
+        facts.seatNo = Number.isInteger(seat.seatNo) ? seat.seatNo : null;
+        facts.status = typeof seat.status === 'string' ? seat.status : null;
+        facts.hasRenderableSeatRow = true;
+        return facts;
+      }
+      return facts;
+    }
+
+    function hasTurnMetadata(state){
+      if (!state || typeof state !== 'object') return false;
+      return !!(state.turnUserId || state.turnDeadlineAt != null || state.turnStartedAt != null);
+    }
+
+    function hasConstraintsData(constraints){
+      if (!constraints || typeof constraints !== 'object') return false;
+      return constraints.toCall != null || constraints.minRaiseTo != null || constraints.maxRaiseTo != null || constraints.maxBetAmount != null;
+    }
+
+    function materiallyImprovesRichSnapshot(currentData, snapshotPayload){
+      if (!currentData || typeof currentData !== 'object') return false;
+      if (!snapshotPayload || typeof snapshotPayload !== 'object') return false;
+      var mergedData = mergeWsStateIntoTableData(currentData, snapshotPayload);
+      if (!mergedData) return false;
+      var currentState = currentData.state && currentData.state.state && typeof currentData.state.state === 'object' ? currentData.state.state : {};
+      var mergedState = mergedData.state && mergedData.state.state && typeof mergedData.state.state === 'object' ? mergedData.state.state : {};
+      var hadHoleCards = Array.isArray(currentData.myHoleCards) && currentData.myHoleCards.length > 0;
+      var hasHoleCards = Array.isArray(mergedData.myHoleCards) && mergedData.myHoleCards.length > 0;
+      if (!hadHoleCards && hasHoleCards) return true;
+      var hadCommunity = Array.isArray(currentState.community) && currentState.community.length > 0;
+      var hasCommunity = Array.isArray(mergedState.community) && mergedState.community.length > 0;
+      if (!hadCommunity && hasCommunity) return true;
+      var hadLegalActions = Array.isArray(currentData.legalActions) && currentData.legalActions.length > 0;
+      var hasLegalActions = Array.isArray(mergedData.legalActions) && mergedData.legalActions.length > 0;
+      if (!hadLegalActions && hasLegalActions) return true;
+      var hadConstraints = hasConstraintsData(currentData.actionConstraints);
+      var hasConstraints = hasConstraintsData(mergedData.actionConstraints);
+      if (!hadConstraints && hasConstraints) return true;
+      if (!hasTurnMetadata(currentState) && hasTurnMetadata(mergedState)) return true;
+      return false;
+    }
+
     function shouldApplyWsSnapshot(snapshotPayload, options){
       var opts = options && typeof options === 'object' ? options : {};
       if (!snapshotPayload || typeof snapshotPayload !== 'object') return false;
@@ -1175,7 +1399,10 @@
         return opts.allowUnversionedUpgrade === true;
       }
       if (currentVersion == null) return true;
-      return incomingVersion > currentVersion;
+      if (incomingVersion > currentVersion) return true;
+      if (incomingVersion < currentVersion) return false;
+      if (!isRichGameplaySnapshot(snapshotPayload, opts.snapshotKind)) return false;
+      return materiallyImprovesRichSnapshot(tableData, snapshotPayload);
     }
 
     function applyWsSnapshotNow(snapshotPayload, options){
@@ -1188,6 +1415,11 @@
       tableData = mergedData;
       isSeated = isCurrentUserSeated(tableData);
       renderTable(tableData);
+      var seatedCount = getSeatedCount(tableData);
+      if (isSeated && seatedCount !== lastAutoStartSeatCount){
+        lastAutoStartSeatCount = seatedCount;
+        maybeAutoStartHand();
+      }
       stopPolling();
       wsSnapshotSeen = true;
       pendingWsSnapshot = null;
@@ -1196,12 +1428,14 @@
 
     function applyWsSnapshot(snapshot){
       if (!snapshot || !snapshot.payload) return;
-      var payload = snapshot.payload || {};
+      var normalized = normalizeWsSnapshotPayload(snapshot);
+      var payload = normalized.payload || {};
+      var snapshotKind = normalized.kind || snapshot.kind || snapshot.rawType || null;
       var incomingVersion = resolveSnapshotVersion(payload);
       var currentVersion = resolveTableDataVersion(tableData);
       klog('poker_ws_snapshot_received', {
         tableId: tableId,
-        kind: snapshot.kind || snapshot.rawType || null,
+        kind: snapshotKind,
         initial: snapshot.initial === true,
         members: Array.isArray(payload.members) ? payload.members.length : 0,
         stateVersion: incomingVersion
@@ -1209,7 +1443,8 @@
 
       if (applyWsSnapshotNow(payload, {
         allowWhenNoBaseline: false,
-        allowUnversionedUpgrade: false
+        allowUnversionedUpgrade: false,
+        snapshotKind: snapshotKind
       })) return;
 
       if (!tableData || typeof tableData !== 'object'){
@@ -1234,6 +1469,7 @@
 
 
     function startPollingFallback(reason){
+      httpFallbackActive = true;
       if (state.polling) return;
       if (!isPageActive()) return;
       if (reason){
@@ -1252,6 +1488,7 @@
         startPollingFallback('ws_client_missing');
         return;
       }
+      httpFallbackActive = false;
       wsStarted = true;
       wsClient = window.PokerWsClient.create({
         tableId: tableId,
@@ -1265,6 +1502,9 @@
             code: data && data.code ? data.code : null,
             reason: data && data.reason ? data.reason : null
           });
+          if (status === 'auth_ok'){
+            maybeAutoJoin();
+          }
         },
         onSnapshot: function(snapshot){
           applyWsSnapshot(snapshot);
@@ -1289,14 +1529,37 @@
       }
     }
 
+    function logWsBootstrapException(err, phase){
+      klog('poker_ws_exception', {
+        tableId: tableId,
+        phase: phase || 'ws_bootstrap',
+        message: err && (err.message || err.code) ? err.message || err.code : 'unknown_error',
+        stack: err && err.stack ? String(err.stack).slice(0, 600) : null
+      });
+    }
+
+    async function bootstrapWsAfterBaseline(phase){
+      httpFallbackActive = false;
+      var loaded = await loadTable(false);
+      if (!loaded || !tableData || typeof tableData !== 'object') return false;
+      try {
+        startWsBootstrap();
+      } catch (_err){
+        logWsBootstrapException(_err, phase || 'ws_bootstrap');
+        startPollingFallback('ws_bootstrap_exception');
+        loadTable(false);
+        return false;
+      }
+      return true;
+    }
+
     function startAuthWatch(){
       if (authTimer) return;
       authTimer = setInterval(function(){
         checkAuth().then(function(authed){
           if (authed){
             stopAuthWatch();
-            loadTable(false);
-            startWsBootstrap();
+            bootstrapWsAfterBaseline('auth_watch');
           }
         });
       }, 3000);
@@ -1307,7 +1570,7 @@
       if (!token){
         currentUserId = null;
         isSeated = false;
-        stopHeartbeat();
+        clearDeadlineNudge();
         stopRealtime();
         stopWsClient();
         if (authMsg) authMsg.hidden = false;
@@ -1324,14 +1587,13 @@
       setDevActionsEnabled(true);
       setDevActionsAuthStatus(true);
       stopAuthWatch();
-      startWsBootstrap();
       return true;
     }
 
     function handleTableAuthExpired(opts){
       currentUserId = null;
       isSeated = false;
-      stopHeartbeat();
+      clearDeadlineNudge();
       setDevActionsEnabled(false);
       setDevActionsAuthStatus(false);
       renderHoleCards(null);
@@ -1773,7 +2035,7 @@
         return;
       }
       var message = action === 'join' ? t('pokerErrJoinPending', 'Join still pending. Please try again.') : t('pokerErrLeavePending', 'Leave still pending. Please try again.');
-      var endpoint = action === 'join' ? JOIN_URL : LEAVE_URL;
+      var endpoint = action === 'join' ? WS_JOIN_ENDPOINT : LEAVE_URL;
       var retries = action === 'join' ? pendingJoinRetries : pendingLeaveRetries;
       klog('poker_pending_timeout', { action: action, tableId: tableId, retries: retries, budgetMs: PENDING_RETRY_BUDGET_MS });
       if (action === 'join'){
@@ -1926,17 +2188,17 @@
     }
 
     function getPreferredSeatNo(preferredSeatNoOverride){
-      var maxUi = Number.isInteger(tableMaxPlayers) && tableMaxPlayers >= 2 ? tableMaxPlayers - 1 : 0;
-      var preferredSeatNo = 0;
+      var maxUi = Number.isInteger(tableMaxPlayers) && tableMaxPlayers >= 2 ? tableMaxPlayers : 1;
+      var preferredSeatNo = 1;
       if (Number.isInteger(preferredSeatNoOverride)){
         preferredSeatNo = preferredSeatNoOverride;
       } else if (Number.isInteger(suggestedSeatNoParam)){
         preferredSeatNo = suggestedSeatNoParam;
       } else {
-        var inputSeatNo = parseInt(seatNoInput ? seatNoInput.value : 0, 10);
-        preferredSeatNo = isNaN(inputSeatNo) ? 0 : inputSeatNo;
+        var inputSeatNo = parseInt(seatNoInput ? seatNoInput.value : 1, 10);
+        preferredSeatNo = isNaN(inputSeatNo) ? 1 : inputSeatNo;
       }
-      if (preferredSeatNo < 0) preferredSeatNo = 0;
+      if (preferredSeatNo < 1) preferredSeatNo = 1;
       if (preferredSeatNo > maxUi) preferredSeatNo = maxUi;
       return preferredSeatNo;
     }
@@ -1958,6 +2220,7 @@
       if (!currentUserId || !isSeated || !tableData) return;
       if (startHandPending || joinPending || leavePending || actPending) return;
       if (pendingStartHandRequestId) return;
+      if (!getGameplayWsSender(wsClient, 'sendStartHand', 'start_hand')) return;
       var table = tableData.table || {};
       var stateObj = tableData.state || {};
       var gameState = stateObj.state || {};
@@ -1986,26 +2249,26 @@
 
     function applySeatInputBounds(){
       if (!seatNoInput) return;
-      var maxUi = Number.isInteger(tableMaxPlayers) && tableMaxPlayers >= 2 ? tableMaxPlayers - 1 : 0;
-      seatNoInput.min = '0';
+      var maxUi = Number.isInteger(tableMaxPlayers) && tableMaxPlayers >= 2 ? tableMaxPlayers : 1;
+      seatNoInput.min = '1';
       seatNoInput.max = String(maxUi);
       seatNoInput.step = '1';
       var seatNo = parseInt(seatNoInput.value, 10);
-      if (isNaN(seatNo)) seatNo = 0;
-      if (seatNo < 0) seatNo = 0;
+      if (isNaN(seatNo)) seatNo = 1;
+      if (seatNo < 1) seatNo = 1;
       if (seatNo > maxUi) seatNo = maxUi;
       seatNoInput.value = String(seatNo);
     }
 
     async function autoJoinWithRetries(){
-      var maxUi = Number.isInteger(tableMaxPlayers) && tableMaxPlayers >= 2 ? tableMaxPlayers - 1 : 0;
+      var maxUi = Number.isInteger(tableMaxPlayers) && tableMaxPlayers >= 2 ? tableMaxPlayers : 1;
       var startSeat = getPreferredSeatNo();
-      if (startSeat < 0) startSeat = 0;
+      if (startSeat < 1) startSeat = 1;
       if (startSeat > maxUi) startSeat = maxUi;
       var attempts = Math.min(3, tableMaxPlayers);
       for (var i = 0; i < attempts; i++){
         var candidateSeat = startSeat + i;
-        if (candidateSeat > maxUi) candidateSeat = candidateSeat - (maxUi + 1);
+        if (candidateSeat > maxUi) candidateSeat = candidateSeat - maxUi;
         seatNoInput.value = candidateSeat;
         try {
           await joinTable(null, { propagateError: true, autoSeat: true, preferredSeatNoOverride: candidateSeat });
@@ -2029,6 +2292,7 @@
       if (!seatNoInput) return;
       if (!Number.isInteger(tableMaxPlayers) || tableMaxPlayers < 2) return;
       if (isSeated) return;
+      if (!getGameplayWsSender(wsClient, 'sendJoin', 'join')) return;
       autoJoinAttempted = true;
       var preferredSeatNo = getPreferredSeatNo();
       klog('poker_auto_join_attempt', { tableId: tableId, preferredSeatNo: preferredSeatNo, autoSeat: true });
@@ -2040,7 +2304,7 @@
         clearJoinPending();
         var code = err && err.code ? err.code : (err && err.message ? err.message : 'unknown_error');
         klog('poker_auto_join_error', { tableId: tableId, code: code, message: err && err.message ? err.message : code });
-        setActionError('join', JOIN_URL, err && err.code ? err.code : 'request_failed', err && (err.message || err.code) ? err.message || err.code : t('pokerErrJoin', 'Failed to join'));
+        setActionError('join', WS_JOIN_ENDPOINT, err && err.code ? err.code : 'request_failed', err && (err.message || err.code) ? err.message || err.code : t('pokerErrJoin', 'Failed to join'));
       });
     }
 
@@ -2062,16 +2326,17 @@
           renderTable(tableData);
         }
         if (isSeated){
-          startHeartbeat();
-        } else {
-          stopHeartbeat();
+            } else {
+          clearDeadlineNudge();
         }
         var seatedCount = getSeatedCount(tableData);
         if (isSeated && seatedCount !== lastAutoStartSeatCount){
           lastAutoStartSeatCount = seatedCount;
           maybeAutoStartHand();
         }
-        maybeAutoJoin();
+        if (getGameplayWsSender(wsClient, 'sendJoin', 'join')){
+          maybeAutoJoin();
+        }
         if (isPolling){ resetPollBackoff(); }
         return true;
       } catch (err){
@@ -2143,10 +2408,6 @@
     }
 
     function stopHeartbeat(){
-      if (heartbeatTimer){
-        clearInterval(heartbeatTimer);
-        heartbeatTimer = null;
-      }
       clearDeadlineNudge();
     }
 
@@ -2173,8 +2434,7 @@
         deadlineNudgeTargetMs = null;
         if (!isPageActive()) return;
         if (joinPending || leavePending || startHandPending || actPending) return;
-        if (heartbeatInFlight) return;
-        sendHeartbeat();
+        loadTable(false);
       }, delayMs);
     }
 
@@ -2227,75 +2487,11 @@
     }
 
     function stopRealtime(){
-      stopHeartbeat();
+      clearDeadlineNudge();
       if (realtimeSub && typeof realtimeSub.stop === 'function'){
         realtimeSub.stop();
       }
       realtimeSub = null;
-    }
-
-    function startHeartbeat(){
-      if (heartbeatTimer) return;
-      if (!isSeated) return;
-      if (!isPageActive()) return;
-      if (document.visibilityState === 'hidden') return;
-      heartbeatTimer = setInterval(sendHeartbeat, HEARTBEAT_INTERVAL_MS);
-      sendHeartbeat();
-    }
-
-    function getHeartbeatPendingDelay(retries){
-      var delay = 600 * Math.pow(2, retries - 1);
-      return Math.min(delay, 5000);
-    }
-
-    async function sendHeartbeat(){
-      if (!isSeated) return;
-      if (document.visibilityState === 'hidden') return;
-      if (heartbeatInFlight) return;
-      heartbeatInFlight = true;
-      var shouldReturn = false;
-      try {
-        if (!getValidRequestId(pendingHeartbeatRequestId)){
-          pendingHeartbeatRequestId = normalizeRequestId(generateRequestId());
-        }
-        var requestId = pendingHeartbeatRequestId;
-        var data = await apiPost(HEARTBEAT_URL, { tableId: tableId, requestId: requestId });
-        if (isPendingResponse(data)){
-          heartbeatPendingRetries++;
-          if (heartbeatPendingRetries <= HEARTBEAT_PENDING_MAX_RETRIES){
-            scheduleRetry(sendHeartbeat, getHeartbeatPendingDelay(heartbeatPendingRetries));
-          }
-          shouldReturn = true;
-        }
-        if (!shouldReturn){
-          heartbeatPendingRetries = 0;
-          pendingHeartbeatRequestId = null;
-          if (data && data.closed){
-            stopPolling();
-            stopHeartbeat();
-            loadTable(false);
-            shouldReturn = true;
-          }
-        }
-      } catch (err){
-        if (isAuthError(err)){
-          handleTableAuthExpired({
-            authMsg: authMsg,
-            content: tableContent,
-            errorEl: errorEl,
-            stopPolling: stopPolling,
-            stopHeartbeat: stopHeartbeat,
-            onAuthExpired: startAuthWatch
-          });
-          stopHeartbeat();
-          shouldReturn = true;
-        } else {
-          klog('poker_heartbeat_error', { tableId: tableId, error: err.message || err.code });
-        }
-      } finally {
-        heartbeatInFlight = false;
-      }
-      if (shouldReturn) return;
     }
 
     function renderTable(data){
@@ -2469,11 +2665,11 @@
     }
 
     async function joinTable(requestIdOverride, options){
-      var seatNo = parseInt(seatNoInput ? seatNoInput.value : 0, 10);
+      var seatNo = parseInt(seatNoInput ? seatNoInput.value : 1, 10);
       var buyIn = parseInt(buyInInput ? buyInInput.value : 100, 10) || 100;
-      if (isNaN(seatNo)) seatNo = 0;
-      var maxSeatNo = Math.max(0, tableMaxPlayers - 1);
-      if (seatNo < 0) seatNo = 0;
+      if (isNaN(seatNo)) seatNo = 1;
+      var maxSeatNo = Math.max(1, tableMaxPlayers);
+      if (seatNo < 1) seatNo = 1;
       if (seatNo > maxSeatNo) seatNo = maxSeatNo;
       if (seatNoInput) seatNoInput.value = seatNo;
       var preferredSeatNo = getPreferredSeatNo(options && options.preferredSeatNoOverride);
@@ -2511,7 +2707,8 @@
         } else {
           joinPayload.seatNo = seatNo;
         }
-        var joinResult = await apiPost(JOIN_URL, joinPayload);
+        var joinSender = resolveGameplayWsSender(wsClient, 'sendJoin', 'join', t('pokerErrJoinWsUnavailable', 'Cannot join while the live table connection is offline.'));
+        var joinResult = await joinSender(joinPayload, joinRequestId);
         if (isPendingResponse(joinResult)){
           schedulePendingRetry('join', retryJoin);
           return;
@@ -2520,7 +2717,7 @@
           clearJoinPending();
           var joinErr = new Error(joinResult.error || 'request_failed');
           joinErr.code = joinResult.error || 'request_failed';
-          setActionError('join', JOIN_URL, joinErr.code, t('pokerErrJoin', 'Failed to join'));
+          setActionError('join', WS_JOIN_ENDPOINT, joinErr.code, t('pokerErrJoin', 'Failed to join'));
           if (propagateError) throw joinErr;
           return;
         }
@@ -2533,9 +2730,6 @@
           klog('poker_auto_join_success', { tableId: tableId, seatNo: joinResult.seatNo });
         }
         if (!isPageActive()) return;
-        var loaded = await loadTable(false);
-        if (!loaded) return;
-        maybeAutoStartHand();
       } catch (err){
         if (isAbortError(err)){
           pauseJoinPending();
@@ -2555,7 +2749,7 @@
         }
         clearJoinPending();
         klog('poker_join_error', { tableId: tableId, error: err.message || err.code });
-        setActionError('join', JOIN_URL, err.code || 'request_failed', err.message || t('pokerErrJoin', 'Failed to join'));
+        setActionError('join', WS_JOIN_ENDPOINT, err.code || 'request_failed', err.message || t('pokerErrJoin', 'Failed to join'));
         if (propagateError) throw err;
       }
     }
@@ -2580,7 +2774,8 @@
           pendingStartHandRequestId = normalizeRequestId(resolved.requestId);
         }
         var startRequestId = normalizeRequestId(resolved.requestId);
-        var result = await apiPost(START_HAND_URL, { tableId: tableId, requestId: startRequestId });
+        var startHandSender = resolveGameplayWsSender(wsClient, 'sendStartHand', 'start_hand', t('pokerErrStartHandWsUnavailable', 'Cannot start a hand while the live table connection is offline.'));
+        var result = await startHandSender({ tableId: tableId }, startRequestId);
         if (isPendingResponse(result)){
           schedulePendingRetry('startHand', retryStartHand);
           return { ok: false, code: 'request_pending', pending: true };
@@ -2601,8 +2796,6 @@
         }
         clearStartHandPending();
         setInlineStatus(startHandStatusEl, t('pokerStartHandOk', 'Hand started'), 'success');
-        if (!isPageActive()) return { ok: true, code: 'ok' };
-        loadTable(false);
         return { ok: true, code: 'ok' };
       } catch (err){
         if (isAbortError(err)){
@@ -2703,11 +2896,10 @@
           pendingActType = normalized;
         }
         var actRequestId = normalizeRequestId(resolved.requestId);
-        var result = await apiPost(ACT_URL, {
-          tableId: tableId,
-          requestId: actRequestId,
-          action: actionResult.action
-        });
+        var wsActPayload = { handId: resolveCurrentHandId(), action: normalized };
+        if (actionResult.action && Number.isFinite(Number(actionResult.action.amount))) wsActPayload.amount = Number(actionResult.action.amount);
+        var actSender = resolveGameplayWsSender(wsClient, 'sendAct', 'act', t('pokerErrActWsUnavailable', 'Cannot send an action while the live table connection is offline.'));
+        var result = await actSender(wsActPayload, actRequestId);
         if (isPendingResponse(result)){
           scheduleDevPendingRetry('act', retryAct);
           return;
@@ -2723,6 +2915,8 @@
           } else if (result.error === 'state_invalid'){
             setInlineStatus(actStatusEl, t('pokerErrStateChanged', 'State changed. Refreshing...'), 'error');
             if (isPageActive()) loadTable(false);
+          } else if (result.error === 'hand_not_live'){
+            setInlineStatus(actStatusEl, t('pokerErrHandNotLive', 'Hand is not live'), 'error');
           } else {
             setInlineStatus(actStatusEl, t('pokerErrAct', 'Failed to send action'), 'error');
           }
@@ -2730,8 +2924,6 @@
         }
         clearActPending();
         setInlineStatus(actStatusEl, t('pokerActOk', 'Action sent'), 'success');
-        if (!isPageActive()) return;
-        loadTable(false);
       } catch (err){
         if (isAbortError(err)){
           pauseActPending();
@@ -2767,6 +2959,10 @@
         if (err && err.code === 'state_invalid'){
           setInlineStatus(actStatusEl, t('pokerErrStateChanged', 'State changed. Refreshing...'), 'error');
           if (isPageActive()) loadTable(false);
+          return;
+        }
+        if (err && err.code === 'hand_not_live'){
+          setInlineStatus(actStatusEl, t('pokerErrHandNotLive', 'Hand is not live'), 'error');
           return;
         }
         klog('poker_act_error', { tableId: tableId, error: err.message || err.code });
@@ -2853,8 +3049,9 @@
           pendingLeaveRequestId = normalizeRequestId(resolved.requestId);
         }
         var leaveRequestId = normalizeRequestId(resolved.requestId);
-        klog('poker_leave_request', { tableId: tableId, requestId: leaveRequestId, url: LEAVE_URL });
-        var leaveResult = await apiPost(LEAVE_URL, { tableId: tableId, requestId: leaveRequestId });
+        klog('poker_leave_request', { tableId: tableId, requestId: leaveRequestId, url: 'ws:leave' });
+        var leaveSender = resolveGameplayWsSender(wsClient, 'sendLeave', 'leave', t('pokerErrLeaveWsUnavailable', 'Cannot leave while the live table connection is offline.'));
+        var leaveResult = await leaveSender({ tableId: tableId, requestId: leaveRequestId }, leaveRequestId);
         var pendingResponse = isPendingResponse(leaveResult);
         klog('poker_leave_response', {
           ok: !!(leaveResult && leaveResult.ok),
@@ -2874,9 +3071,7 @@
         setError(errorEl, null);
         if (!isPageActive()) return;
         isSeated = false;
-        stopHeartbeat();
-        stopRealtime();
-        loadTable(false);
+        clearDeadlineNudge();
       } catch (err){
         if (isAbortError(err)){
           pauseLeavePending();
@@ -2918,22 +3113,16 @@
         }
         state.pollInterval = POLL_INTERVAL_BASE;
         state.pollErrors = 0;
-          if (isSeated) startHeartbeat();
-        if (currentUserId){
-          try {
-            startWsBootstrap();
-          } catch (_err){
-            startPollingFallback('ws_bootstrap_exception');
-            loadTable(false);
-          }
-        } else {
+        var canRefreshBaseline = !pendingJoinRequestId && !pendingLeaveRequestId;
+        if (currentUserId && canRefreshBaseline){
+          bootstrapWsAfterBaseline('visibility_resume');
+        } else if (!currentUserId) {
           startPollingFallback('auth_missing');
         }
         if (pendingJoinRequestId) schedulePendingRetry('join', retryJoin);
         if (pendingLeaveRequestId) schedulePendingRetry('leave', retryLeave);
         if (pendingStartHandRequestId) schedulePendingRetry('startHand', retryStartHand);
         if (pendingActRequestId) scheduleDevPendingRetry('act', retryAct);
-        if (!pendingJoinRequestId && !pendingLeaveRequestId) loadTable(false);
       }
     }
 
@@ -2952,7 +3141,7 @@
         }
         clearJoinPending();
         klog('poker_join_click_error', { message: err && (err.message || err.code) ? err.message || err.code : 'unknown_error' });
-        setActionError('join', JOIN_URL, err && err.code ? err.code : 'request_failed', err && (err.message || err.code) ? err.message || err.code : t('pokerErrJoin', 'Failed to join'));
+        setActionError('join', WS_JOIN_ENDPOINT, err && err.code ? err.code : 'request_failed', err && (err.message || err.code) ? err.message || err.code : t('pokerErrJoin', 'Failed to join'));
       });
     }
 
@@ -3096,7 +3285,6 @@
     window.addEventListener('pagehide', stopRealtime); // xp-lifecycle-allow:poker-table-pagehide(2026-01-01)
     window.addEventListener('pagehide', stopWsClient); // xp-lifecycle-allow:poker-table-pagehide-ws(2026-01-01)
     window.addEventListener('beforeunload', stopPolling); // xp-lifecycle-allow:poker-table(2026-01-01)
-    window.addEventListener('beforeunload', stopHeartbeat); // xp-lifecycle-allow:poker-table-heartbeat(2026-01-01)
     window.addEventListener('beforeunload', clearDeadlineNudge); // xp-lifecycle-allow:poker-table-deadline-nudge(2026-01-01)
     window.addEventListener('beforeunload', stopRealtime); // xp-lifecycle-allow:poker-table-realtime(2026-01-01)
     window.addEventListener('beforeunload', stopWsClient); // xp-lifecycle-allow:poker-table-ws(2026-01-01)
@@ -3108,13 +3296,7 @@
 
     checkAuth().then(function(authed){
       if (authed){
-        loadTable(false);
-        try {
-          startWsBootstrap();
-        } catch (_err){
-          startPollingFallback('ws_bootstrap_exception');
-          loadTable(false);
-        }
+        bootstrapWsAfterBaseline('table_init');
       }
     });
   }

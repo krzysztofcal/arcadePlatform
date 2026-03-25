@@ -20,5 +20,6 @@ test("ws-deploy push trigger surface includes WS browser/server contract coverag
   assert.match(push, /"poker\/\*\*"/);
   assert.match(push, /"tests\/\*\*"/);
   assert.match(push, /"scripts\/test-all\.mjs"/);
+  assert.match(push, /"tests\/test-all\.runner-registration\.guard\.test\.mjs"/);
   assert.match(push, /paths:[\s\S]*-\s*"\.github\/workflows\/ws-deploy\.yml"/);
 });

@@ -24,7 +24,7 @@ function extractFunctionBlock(code, functionName){
 const scheduleBlock = extractFunctionBlock(source, "scheduleDeadlineNudge");
 
 assert.match(scheduleBlock, /setTimeout\s*\(/, "Expected deadline nudge to use setTimeout");
-assert.match(scheduleBlock, /sendHeartbeat\s*\(/, "Expected deadline nudge callback to trigger sendHeartbeat()");
+assert.match(scheduleBlock, /loadTable\s*\(\s*false\s*\)/, "Expected deadline nudge callback to trigger refresh loadTable(false)");
 assert.ok(
   /clearDeadlineNudge\s*\(/.test(scheduleBlock) || /clearTimeout\s*\(\s*deadlineNudgeTimer\s*\)/.test(scheduleBlock),
   "Expected deadline nudge scheduling path to include timer cleanup"
@@ -35,4 +35,3 @@ assert.match(
   /(joinPending|leavePending|startHandPending|actPending)/,
   "Expected deadline nudge callback to guard when a mutation request is pending"
 );
-assert.match(scheduleBlock, /heartbeatInFlight/, "Expected deadline nudge callback to guard heartbeat in-flight state");

@@ -21,7 +21,25 @@ async function beginSqlFileStore(fn, { env = process.env } = {}) {
       if (sql.includes("from public.poker_tables")) {
         if (!table?.tableRow) return [];
         const row = table.tableRow;
-        return [{ id: row.id || tableId, status: row.status || "OPEN", max_players: row.max_players || row.maxPlayers || 6 }];
+        return [{ id: row.id || tableId, status: row.status || "OPEN", max_players: row.max_players || row.maxPlayers || 6, stakes: row.stakes ?? '{"sb":1,"bb":2}' }];
+      }
+
+      if (sql.includes("from public.poker_seats") && sql.includes("order by seat_no asc;")) {
+        const rows = (table?.seatRows || []).slice().sort((a, b) => Number(a.seat_no) - Number(b.seat_no));
+        if (sql.includes("status = 'active'")) {
+          return rows
+            .filter((r) => String(r?.status || "ACTIVE").toUpperCase() === "ACTIVE")
+            .map((r) => ({ seat_no: r.seat_no }));
+        }
+        return rows.map((r) => ({
+          user_id: r.user_id,
+          seat_no: r.seat_no,
+          status: r.status || "ACTIVE",
+          is_bot: !!r.is_bot,
+          bot_profile: r.bot_profile ?? null,
+          leave_after_hand: !!r.leave_after_hand,
+          stack: r.stack ?? 0
+        }));
       }
 
       if (sql.includes("from public.poker_seats") && sql.includes("user_id = $2") && sql.includes("limit 1")) {
@@ -32,14 +50,7 @@ async function beginSqlFileStore(fn, { env = process.env } = {}) {
           if (!requiresActive) return true;
           return String(r?.status || "ACTIVE").toUpperCase() === "ACTIVE";
         });
-        return row ? [{ seat_no: row.seat_no }] : [];
-      }
-
-      if (sql.includes("from public.poker_seats") && sql.includes("status = 'active'") && sql.includes("order by seat_no asc")) {
-        const rows = (table?.seatRows || [])
-          .filter((r) => String(r?.status || "ACTIVE").toUpperCase() === "ACTIVE")
-          .sort((a, b) => Number(a.seat_no) - Number(b.seat_no));
-        return rows.map((r) => ({ seat_no: r.seat_no }));
+        return row ? [{ seat_no: row.seat_no, stack: row.stack }] : [];
       }
 
       if (sql.includes("insert into public.poker_seats")) {
@@ -55,9 +66,18 @@ async function beginSqlFileStore(fn, { env = process.env } = {}) {
         if (seatRows.some((r) => Number(r?.seat_no) === seatNo)) {
           throw Object.assign(new Error("seat_taken"), { code: "seat_taken" });
         }
-        seatRows.push({ user_id: userId, seat_no: seatNo, status: "ACTIVE", is_bot: false });
+        const isBot = sql.includes("is_bot");
+        seatRows.push({
+          user_id: userId,
+          seat_no: seatNo,
+          status: "ACTIVE",
+          is_bot: isBot,
+          bot_profile: isBot ? params?.[3] ?? "TRIVIAL" : null,
+          leave_after_hand: false,
+          stack: isBot ? Number(params?.[4]) || 0 : 0
+        });
         table.seatRows = seatRows;
-        return [];
+        return [{ seat_no: seatNo }];
       }
 
       if (sql.includes("select version, state from public.poker_state")) {
@@ -65,10 +85,31 @@ async function beginSqlFileStore(fn, { env = process.env } = {}) {
         return [{ version: table.stateRow.version, state: table.stateRow.state }];
       }
 
-      if (sql.includes("update public.poker_state set state")) {
+      if (sql.includes("update public.poker_state") && sql.includes("state")) {
         if (!table?.stateRow) throw Object.assign(new Error("state_missing"), { code: "state_missing" });
         table.stateRow.state = params?.[1];
+        const currentVersion = Number(table.stateRow.version);
+        if (sql.includes("version = version + 1")) {
+          table.stateRow.version = Number.isInteger(currentVersion) ? currentVersion + 1 : 1;
+        }
         return [{ version: table.stateRow.version }];
+      }
+
+
+      if (sql.includes("update public.poker_seats set stack")) {
+        const userId = params?.[1];
+        const seatNo = Number(params?.[2]);
+        const stack = Number(params?.[3]);
+        const row = (table?.seatRows || []).find((r) => r?.user_id === userId && Number(r?.seat_no) === seatNo);
+        if (row) row.stack = stack;
+        return [];
+      }
+
+      if (sql.includes("delete from public.poker_seats")) {
+        const userId = params?.[1];
+        const seatNo = Number(params?.[2]);
+        table.seatRows = (table?.seatRows || []).filter((row) => !(row?.user_id === userId && Number(row?.seat_no) === seatNo));
+        return [];
       }
 
       if (sql.includes("update public.poker_tables set last_activity_at")) {

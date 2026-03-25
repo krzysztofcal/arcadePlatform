@@ -77,24 +77,16 @@ run("node", ["tests/poker-handSeats-reset.behavior.test.mjs"], "poker-handseats-
 run("node", ["tests/poker-legal-actions.left-player.invalid-player.behavior.test.mjs"], "poker-legal-actions-left-player-invalid-player-behavior");
 run("node", ["tests/poker-leave.test.mjs"], "poker-leave");
 run("node", ["shared/poker-domain/leave.behavior.test.mjs"], "poker-domain-leave-behavior");
+run("node", ["tests/poker-join-http-retired.test.mjs"], "poker-join-http-retired");
 run("node", ["tests/poker-leave.instant-detach.midhand.behavior.test.mjs"], "poker-leave-instant-detach-midhand-behavior");
 run("node", ["tests/poker-leave.instant-detach.replay-preserves-left-flag.behavior.test.mjs"], "poker-leave-instant-detach-replay-preserves-left-flag-behavior");
 run("node", ["tests/poker-leave.instant-detach.no-resurrection.behavior.test.mjs"], "poker-leave-instant-detach-no-resurrection-behavior");
-run("node", ["tests/poker-join.after-midhand-leave.seat-available.behavior.test.mjs"], "poker-join-after-midhand-leave-seat-available-behavior");
-run("node", ["tests/poker-join.left-player.no-resurrection.behavior.test.mjs"], "poker-join-left-player-no-resurrection-behavior");
-run("node", ["tests/poker-join.left-player.prune-clears-turnUserId.behavior.test.mjs"], "poker-join-left-player-prune-clears-turnuserid-behavior");
 run("node", ["tests/poker-leave.cashout-only-uncommitted.behavior.test.mjs"], "poker-leave-cashout-only-uncommitted-behavior");
 run("node", ["tests/poker-leave.active-hand.instant-detach.idempotent-replay.behavior.test.mjs"], "poker-leave-active-hand-instant-detach-idempotent-replay-behavior");
-run("node", ["tests/poker-join.test.mjs"], "poker-join");
 run("node", ["tests/poker-sweep.test.mjs"], "poker-sweep");
 run("node", ["tests/poker-invariants.test.mjs"], "poker-invariants");
 run("node", ["tests/poker-leave.behavior.test.mjs"], "poker-leave-behavior");
-run("node", ["tests/poker-join.behavior.test.mjs"], "poker-join-behavior");
-run("node", ["tests/poker-join.seat-domain.behavior.test.mjs"], "poker-join-seat-domain-behavior");
-run("node", ["tests/poker-join.rejoin-seat-logging.behavior.test.mjs"], "poker-join-rejoin-seat-logging-behavior");
-run("node", ["tests/poker-join.bot-seed.behavior.test.mjs"], "poker-join-bot-seed");
-run("node", ["tests/poker-join.bot-leave-after-hand.behavior.test.mjs"], "poker-join-bot-leave-after-hand");
-run("node", ["tests/poker-heartbeat.behavior.test.mjs"], "poker-heartbeat-behavior");
+run("node", ["tests/poker-inactive-cleanup.behavior.test.mjs"], "poker-inactive-cleanup-behavior");
 run("node", ["tests/poker-start-hand.behavior.test.mjs"], "poker-start-hand-behavior");
 run("node", ["tests/poker-start-hand.bots.behavior.test.mjs"], "poker-start-hand-bots-behavior");
 run("node", ["tests/poker-start-hand.bot-autoplay.behavior.test.mjs"], "poker-start-hand-bot-autoplay-behavior");
@@ -130,20 +122,6 @@ run("node", ["tests/poker-act.bot-autoplay.compile.behavior.test.mjs"], "poker-a
 run("node", ["tests/poker-act.bot-autoplay-stop-reason.behavior.test.mjs"], "poker-act-bot-autoplay-stop-reason-behavior");
 run("node", ["tests/poker-bots.leave-after-hand-evicted-on-settle.behavior.test.mjs"], "poker-bots-leave-after-hand-evicted-on-settle");
 run("node", ["tests/poker-act.init-phase.test.mjs"], "poker-act-init-phase");
-run("node", ["tests/poker-sweep.behavior.test.mjs"], "poker-sweep-behavior");
-run("node", ["tests/poker-sweep.timeout-zero-amount-inactivates-seat.behavior.test.mjs"], "poker-sweep-timeout-zero-inactivate");
-run("node", ["tests/poker-sweep.bot-cashout-on-timeout.behavior.test.mjs"], "poker-sweep-bot-cashout-on-timeout-behavior");
-run("node", ["tests/poker-sweep.bot-timeout-forces-inactive-even-if-helper-noop.behavior.test.mjs"], "poker-sweep-bot-timeout-force-inactive-helper-noop");
-run("node", ["tests/poker-sweep.bot-timeout-skips-when-actor-missing.behavior.test.mjs"], "poker-sweep-bot-timeout-skips-when-actor-missing");
-run("node", ["tests/poker-sweep.bot-timeout-invalid-botUserId-does-not-crash.behavior.test.mjs"], "poker-sweep-bot-timeout-invalid-botuserid-no-crash");
-run("node", ["tests/poker-sweep.bot-cashout-on-close.behavior.test.mjs"], "poker-sweep-bot-cashout-on-close-behavior");
-run("node", ["tests/poker-sweep.bot-close-cashes-out-using-state-when-seat-zero.behavior.test.mjs"], "poker-sweep-bot-close-cashout-state-when-seat-zero");
-run("node", ["tests/poker-sweep.bot-close-rechecks-status-after-inactivate.behavior.test.mjs"], "poker-sweep-bot-close-recheck-status-after-inactivate");
-run("node", ["tests/poker-sweep.bot-close-skips-when-actor-missing.behavior.test.mjs"], "poker-sweep-bot-close-skips-when-actor-missing");
-run("node", ["tests/poker-sweep.bot-close-invalid-tableId-skips.behavior.test.mjs"], "poker-sweep-bot-close-invalid-tableid-skips");
-run("node", ["tests/poker-sweep.bot-close-does-not-clear-state-when-not-safe.behavior.test.mjs"], "poker-sweep-bot-close-no-clear-when-not-safe");
-run("node", ["tests/poker-sweep.close-empty-table-counts-skipped.behavior.test.mjs"], "poker-sweep-close-empty-table-counts-skipped");
-run("node", ["tests/poker-sweep.cashout-authoritative.behavior.test.mjs"], "poker-sweep-cashout-authoritative");
 run("node", ["tests/poker-get-table.behavior.test.mjs"], "poker-get-table-behavior");
 run("node", ["tests/poker-get-table.bot-fields.behavior.test.mjs"], "poker-get-table-bot-fields-behavior");
 run("node", ["tests/poker-get-table.me-left-consistent.behavior.test.mjs"], "poker-get-table-me-left-consistent-behavior");
@@ -152,10 +130,25 @@ run("node", ["tests/poker-get-table.me-notSeated.db-shape.behavior.test.mjs"], "
 run("node", ["tests/poker-materialize-settlement.payouts.test.mjs"], "poker-materialize-settlement-payouts");
 
 run("node", ["tests/poker-ui.behavior.test.mjs"], "poker-ui-behavior");
+run("node", ["tests/poker-ui-ws-join-smoke.behavior.test.mjs"], "poker-ui-ws-join-smoke-behavior");
+run("node", ["tests/poker-ui-ws-write-path.guard.test.mjs"], "poker-ui-ws-write-path-guard");
+run("node", ["tests/poker-ui-no-heartbeat.guard.test.mjs"], "poker-ui-no-heartbeat-guard");
+run("node", ["ws-server/poker/persistence/inactive-cleanup-adapter.behavior.test.mjs"], "ws-inactive-cleanup-adapter-behavior");
+run("node", ["ws-server/poker/runtime/disconnect-cleanup.behavior.test.mjs"], "ws-disconnect-cleanup-runtime-behavior");
+run("node", ["ws-server/poker/runtime/accepted-bot-autoplay-adapter.behavior.test.mjs"], "ws-accepted-bot-autoplay-adapter-behavior");
+run("node", ["tests/poker-ui-ws-leave-smoke.behavior.test.mjs"], "poker-ui-ws-leave-smoke-behavior");
+run("node", ["ws-tests/ws-lobby-join-public-snapshot.behavior.test.mjs"], "ws-lobby-join-public-snapshot-behavior");
 run("node", ["tests/i18n.behavior.test.mjs"], "i18n-behavior");
 run("node", ["tests/static-html.behavior.test.mjs"], "static-html-behavior");
 run("node", ["tests/poker-ui-stopPendingAll.guard.test.mjs"], "poker-ui-stopPendingAll-guard");
 run("node", ["tests/test-all.runner-registration.guard.test.mjs"], "test-all-runner-registration-guard");
+run("node", ["tests/poker-runtime-docs.behavior.test.mjs"], "poker-runtime-docs-behavior");
+run("node", ["tests/poker-ui-requestid-retry.guard.test.mjs"], "poker-ui-requestid-retry-guard");
+run("node", ["tests/poker-requestid-helper.guard.test.mjs"], "poker-requestid-helper-guard");
+run("node", ["tests/poker-idempotency-scope.guard.test.mjs"], "poker-idempotency-scope-guard");
+run("node", ["tests/poker-get-table-nonmutation.guard.test.mjs"], "poker-get-table-nonmutation-guard");
+run("node", ["tests/poker-start-hand-storage.guard.test.mjs"], "poker-start-hand-storage-guard");
+run("node", ["tests/poker-workflows.playwright-install.guard.test.mjs"], "poker-workflows-playwright-install-guard");
 
 try { run("npm", ["run", "-s", "lint:games"], "unit"); } catch { /* optional */ }
 
