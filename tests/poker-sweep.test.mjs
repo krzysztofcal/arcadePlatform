@@ -8,13 +8,25 @@ const read = (filePath) => fs.readFileSync(path.join(root, filePath), "utf8");
 const sweepSrc = read("netlify/functions/poker-sweep.mjs");
 
 assert.ok(
-  /select seat_no, status, stack, last_seen_at, is_bot from public\.poker_seats[\s\S]*?for update;/.test(sweepSrc),
-  "sweep should lock seat rows before timeout cash-out"
+  sweepSrc.includes("STALE_PENDING_CUTOFF_MINUTES") &&
+    sweepSrc.includes("STALE_PENDING_LIMIT") &&
+    sweepSrc.includes("OLD_REQUESTS_LIMIT"),
+  "sweep should define request cleanup limits"
 );
-assert.ok(sweepSrc.includes("EXPIRED_SEATS_LIMIT"), "sweep should define EXPIRED_SEATS_LIMIT");
 assert.ok(
-  /order by last_seen_at asc[\s\S]*limit \$2/.test(sweepSrc),
-  "sweep should cap expired seat scan"
+  sweepSrc.includes("delete from public.poker_requests") &&
+    sweepSrc.includes("result_json is null") &&
+    sweepSrc.includes("created_at < now() - ($1::int * interval '1 minute')"),
+  "sweep should clean stale pending requests"
+);
+assert.ok(
+  sweepSrc.includes("delete from public.poker_requests") &&
+    sweepSrc.includes("created_at < now() - interval '24 hours'"),
+  "sweep should clean old requests"
+);
+assert.ok(
+  sweepSrc.includes("poker_requests_cleanup"),
+  "sweep should log poker request cleanup"
 );
 assert.ok(
   sweepSrc.includes("const normalizeNonNegativeInt ="),
