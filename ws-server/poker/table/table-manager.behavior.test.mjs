@@ -613,7 +613,7 @@ test("repeated maintenance with identical nowTs does not bump core version or ap
   assert.equal(disconnected.length, 1);
 
   const firstSweep = tableManager.sweepExpiredPresence({ nowTs: 25 });
-  assert.equal(firstSweep.length, 1);
+  assert.equal(firstSweep.length, 0);
   const afterFirstSweep = tableManager.__debugCore("table_B");
   assert.ok(afterFirstSweep);
 
@@ -637,7 +637,7 @@ test("maintenance requestIds are collision-safe under identical nowTs", () => {
   assert.equal(firstDisconnect.length, 1);
 
   const firstSweep = tableManager.sweepExpiredPresence({ nowTs: 105 });
-  assert.equal(firstSweep.length, 1);
+  assert.equal(firstSweep.length, 0);
   assert.deepEqual(tableManager.tableState("table_C").members, []);
 
   const secondJoin = tableManager.join({ ws: wsCycle2, userId: "user_1", tableId: "table_C", requestId: "join-2", nowTs: 100 });
@@ -647,7 +647,7 @@ test("maintenance requestIds are collision-safe under identical nowTs", () => {
   assert.equal(secondDisconnect.length, 1);
 
   const secondSweep = tableManager.sweepExpiredPresence({ nowTs: 105 });
-  assert.equal(secondSweep.length, 1);
+  assert.equal(secondSweep.length, 0);
   assert.deepEqual(tableManager.tableState("table_C").members, []);
 
   const thirdSweep = tableManager.sweepExpiredPresence({ nowTs: 105 });
@@ -655,6 +655,20 @@ test("maintenance requestIds are collision-safe under identical nowTs", () => {
   assert.deepEqual(tableManager.tableState("table_C").members, []);
 });
 
+
+
+test("sweepExpiredPresence only prunes local presence and never emits authoritative leave updates", () => {
+  const tableManager = createTableManager({ maxSeats: 3, presenceTtlMs: 5 });
+  const ws = fakeWs("ws-local-prune");
+  const joined = tableManager.join({ ws, userId: "user_local", tableId: "table_local", requestId: "join-local", nowTs: 10 });
+  assert.equal(joined.ok, true);
+  const cleanupUpdates = tableManager.cleanupConnection({ ws, userId: "user_local", nowTs: 20, activeSockets: [] });
+  assert.equal(cleanupUpdates.length, 1, "disconnect scheduling remains server-owned");
+
+  const sweepUpdates = tableManager.sweepExpiredPresence({ nowTs: 30 });
+  assert.deepEqual(sweepUpdates, [], "sweepExpiredPresence should not perform authoritative leave updates");
+  assert.deepEqual(tableManager.tableState("table_local").members, [], "local presence should still be pruned");
+});
 test("join on full table is side-effect free and repeatable", () => {
   const tableManager = createTableManager({ maxSeats: 2, presenceTtlMs: 5, enableDebugCore: true, nodeEnv: "test" });
   const ws1 = fakeWs("ws-1");

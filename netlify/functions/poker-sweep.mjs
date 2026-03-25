@@ -285,16 +285,7 @@ export async function handler(event) {
       );
       const cleanupCount = Array.isArray(cleanupRows) ? cleanupRows.length : 0;
 
-      const expiredRows = await tx.unsafe(
-        `select table_id, user_id, seat_no, stack, last_seen_at
-         from public.poker_seats
-         where status = 'ACTIVE'
-           and last_seen_at < now() - ($1::int * interval '1 second')
-         order by last_seen_at asc
-         limit $2;`,
-        [PRESENCE_TTL_SEC, EXPIRED_SEATS_LIMIT]
-      );
-
+      const expiredRows = [];
       await tx.unsafe(
         `with candidates as (
           select ctid

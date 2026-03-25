@@ -62,7 +62,7 @@ Example envelope:
 
 | Type | Payload schema (required fields) | Semantics |
 |---|---|---|
-| `helloAck` | `{ "version": "1.0", "sessionId": string, "heartbeatMs": integer }` | Confirms negotiated version and returns initial session id. |
+| `helloAck` | `{ "version": "1.0", "sessionId": string, "heartbeatMs": integer }` | Confirms negotiated version and returns initial session id. Activity lifecycle is WS connection driven; HTTP poker heartbeat is retired. |
 | `authOk` | `{ "userId": string, "roomId": string, "permissions": string[] }` | Auth success event. |
 | `pong` | `{ "clientTime": string, "serverTime": string }` | Ping response. |
 | `stateSnapshot` | `{ "stateVersion": integer, "table": object, "you": object, "public": object, "private"?: object }` | One-shot room-core snapshot for `table_state_sub` snapshot mode; does not subscribe socket to legacy `table_state` broadcasts. |

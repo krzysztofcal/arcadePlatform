@@ -839,7 +839,7 @@ export function createTableManager({
         table.subscribers.delete(ws);
 
         if (membershipChanged) {
-          updates.push({ tableId: joinedTableId, tableState: tableState(joinedTableId) });
+          updates.push({ tableId: joinedTableId, tableState: tableState(joinedTableId), disconnectedUserId: userId });
         }
 
         if (table.coreState.members.length === 0 && table.subscribers.size === 0) {
@@ -871,39 +871,20 @@ export function createTableManager({
 
   function sweepExpiredPresence({ nowTs = Date.now() } = {}) {
     const updates = [];
-
     for (const [tableId, table] of tables.entries()) {
-      let changed = false;
       const expiredUserIds = [];
-
       for (const [userId, member] of table.presenceByUserId.entries()) {
         if (!member.connected && typeof member.expiresAt === "number" && member.expiresAt <= nowTs) {
           expiredUserIds.push(userId);
         }
       }
-
       for (const userId of expiredUserIds) {
-        const leaveResult = applyCoreEvent(table.coreState, {
-          type: CORE_EVENT_TYPES.LEAVE,
-          requestId: nextSyntheticRequestId("sweep", tableId, userId, nowTs, table.coreState.version),
-          userId
-        });
-        if (leaveResult.ok) {
-          table.coreState = leaveResult.state;
-          table.presenceByUserId.delete(userId);
-          changed = changed || leaveResult.effects.some((effect) => effect.type === "member_left");
-        }
+        table.presenceByUserId.delete(userId);
       }
-
-      if (changed) {
-        updates.push({ tableId, tableState: tableState(tableId) });
-      }
-
       if (table.coreState.members.length === 0 && table.subscribers.size === 0) {
         tables.delete(tableId);
       }
     }
-
     return updates;
   }
 

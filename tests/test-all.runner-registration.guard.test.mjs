@@ -16,6 +16,19 @@ assert.doesNotMatch(source, /run\("node", \["tests\/poker-ui-ws-snapshot-equal-v
 assert.doesNotMatch(source, /run\("node", \["tests\/poker-ui-ws-auth-watch-order\.behavior\.test\.mjs"\],/, "runner should not include removed poker-ui ws auth-watch order test");
 assert.doesNotMatch(source, /run\("node", \["tests\/poker-ui-ws-visibility\.behavior\.test\.mjs"\],/, "runner should not include removed poker-ui ws visibility test");
 assert.doesNotMatch(source, /run\("node", \["tests\/poker-ui-ws-join-authoritative\.behavior\.test\.mjs"\],/, "runner should not include removed poker-ui ws join-authoritative test");
+assert.match(source, /run\("node", \["tests\/poker-ui-no-heartbeat\.guard\.test\.mjs"\],/, "runner should include poker-ui no-heartbeat guard test");
+assert.match(source, /run\("node", \["ws-server\/poker\/persistence\/inactive-cleanup-adapter\.behavior\.test\.mjs"\],/, "runner should include ws inactive cleanup adapter behavior test");
+assert.match(source, /run\("node", \["ws-server\/poker\/runtime\/disconnect-cleanup\.behavior\.test\.mjs"\],/, "runner should include ws disconnect cleanup runtime behavior test");
+assert.doesNotMatch(source, /poker-heartbeat\.behavior\.test\.mjs/, "runner should not include removed heartbeat behavior tests");
 assert.match(source, /run\("node", \["ws-tests\/ws-lobby-join-public-snapshot\.behavior\.test\.mjs"\],/, "runner should include ws lobby join public snapshot test");
 assert.match(source, /run\("node", \["tests\/i18n\.behavior\.test\.mjs"\],/, "runner should include i18n.behavior test");
 assert.match(source, /run\("node", \["tests\/static-html\.behavior\.test\.mjs"\],/, "runner should include static-html.behavior test");
+
+assert.match(source, /run\("node", \["tests\/poker-runtime-docs\.behavior\.test\.mjs"\],/, "runner should include poker runtime docs behavior test");
+
+assert.match(source, /run\("node", \["tests\/poker-ui-requestid-retry\.guard\.test\.mjs"\],/, "runner should include poker ui requestid retry guard test");
+assert.match(source, /run\("node", \["tests\/poker-requestid-helper\.guard\.test\.mjs"\],/, "runner should include poker requestid helper guard test");
+assert.match(source, /run\("node", \["tests\/poker-idempotency-scope\.guard\.test\.mjs"\],/, "runner should include poker idempotency scope guard test");
+assert.match(source, /run\("node", \["tests\/poker-get-table-nonmutation\.guard\.test\.mjs"\],/, "runner should include poker get-table nonmutation guard test");
+assert.match(source, /run\("node", \["tests\/poker-start-hand-storage\.guard\.test\.mjs"\],/, "runner should include poker start-hand storage guard test");
+assert.match(source, /run\("node", \["tests\/poker-workflows\.playwright-install\.guard\.test\.mjs"\],/, "runner should include poker workflow playwright-install guard test");

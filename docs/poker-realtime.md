@@ -5,7 +5,7 @@ This document gives a concise map of the poker realtime pieces in Arcade Portal 
 ## What it covers
 - Browser poker entry points live in `poker/index.html` (lobby) and `poker/table.html` (table view).
 - Browser client logic lives under `poker/`, including the realtime client files such as `poker-ws-client.js` and `poker-realtime.js`.
-- Serverless poker actions live in `netlify/functions/`, including table listing, create/join/leave, hand start, heartbeat, actions, quick seat, log export, and table sweep flows.
+- Serverless poker actions live in `netlify/functions/`, including table listing, create/join/leave, hand start, actions, quick seat, log export, and poker sweep manual/ops flows. Active disconnect cleanup ownership is in WS runtime (`ws-server/server.mjs`).
 - The realtime transport lives in `ws-server/`, which provides the WebSocket server used by poker clients.
 - Bot support is part of the poker flow and is covered by the poker tests and supporting docs already in `docs/`.
 

@@ -7,13 +7,11 @@
   var GET_URL = '/.netlify/functions/poker-get-table';
   var WS_JOIN_ENDPOINT = 'ws:join';
   var LEAVE_URL = '/.netlify/functions/poker-leave';
-  var HEARTBEAT_URL = '/.netlify/functions/poker-heartbeat';
   var WS_START_HAND_ENDPOINT = 'ws:start_hand';
   var WS_ACT_ENDPOINT = 'ws:act';
   var EXPORT_LOG_URL = '/.netlify/functions/poker-export-log';
   var POLL_INTERVAL_BASE = 2000;
   var POLL_INTERVAL_MAX = 10000;
-  var HEARTBEAT_INTERVAL_MS = 5000;
   var PENDING_RETRY_DELAYS = [150, 300, 600, 900];
   var PENDING_RETRY_BUDGET_MS = 2000;
   var UI_VERSION = '2025-02-19';
@@ -1013,8 +1011,6 @@
     var stakesValid = true;
     var devActionsEnabled = false;
     var authTimer = null;
-    var heartbeatTimer = null;
-    var pendingHeartbeatRequestId = null;
     var pendingJoinRequestId = null;
     var pendingJoinAutoSeat = false;
     var pendingLeaveRequestId = null;
@@ -1040,8 +1036,6 @@
     var copyLogPending = false;
     var dumpLogsPending = false;
     var pendingHiddenAt = null;
-    var heartbeatPendingRetries = 0;
-    var heartbeatInFlight = false;
     var isSeated = false;
     var suggestedSeatNoParam = parseInt(params.get('seatNo'), 10);
     var shouldAutoJoin = params.get('autoJoin') === '1';
@@ -1054,7 +1048,6 @@
     var turnTimerInterval = null;
     var deadlineNudgeTimer = null;
     var deadlineNudgeTargetMs = null;
-    var HEARTBEAT_PENDING_MAX_RETRIES = 8;
     var realtimeSub = null;
     var realtimeDisabled = false;
     var realtimeUnavailableLogged = false;
@@ -1577,7 +1570,7 @@
       if (!token){
         currentUserId = null;
         isSeated = false;
-        stopHeartbeat();
+        clearDeadlineNudge();
         stopRealtime();
         stopWsClient();
         if (authMsg) authMsg.hidden = false;
@@ -1600,7 +1593,7 @@
     function handleTableAuthExpired(opts){
       currentUserId = null;
       isSeated = false;
-      stopHeartbeat();
+      clearDeadlineNudge();
       setDevActionsEnabled(false);
       setDevActionsAuthStatus(false);
       renderHoleCards(null);
@@ -2333,9 +2326,8 @@
           renderTable(tableData);
         }
         if (isSeated){
-          startHeartbeat();
-        } else {
-          stopHeartbeat();
+            } else {
+          clearDeadlineNudge();
         }
         var seatedCount = getSeatedCount(tableData);
         if (isSeated && seatedCount !== lastAutoStartSeatCount){
@@ -2416,10 +2408,6 @@
     }
 
     function stopHeartbeat(){
-      if (heartbeatTimer){
-        clearInterval(heartbeatTimer);
-        heartbeatTimer = null;
-      }
       clearDeadlineNudge();
     }
 
@@ -2446,8 +2434,7 @@
         deadlineNudgeTargetMs = null;
         if (!isPageActive()) return;
         if (joinPending || leavePending || startHandPending || actPending) return;
-        if (heartbeatInFlight) return;
-        sendHeartbeat();
+        loadTable(false);
       }, delayMs);
     }
 
@@ -2500,75 +2487,11 @@
     }
 
     function stopRealtime(){
-      stopHeartbeat();
+      clearDeadlineNudge();
       if (realtimeSub && typeof realtimeSub.stop === 'function'){
         realtimeSub.stop();
       }
       realtimeSub = null;
-    }
-
-    function startHeartbeat(){
-      if (heartbeatTimer) return;
-      if (!isSeated) return;
-      if (!isPageActive()) return;
-      if (document.visibilityState === 'hidden') return;
-      heartbeatTimer = setInterval(sendHeartbeat, HEARTBEAT_INTERVAL_MS);
-      sendHeartbeat();
-    }
-
-    function getHeartbeatPendingDelay(retries){
-      var delay = 600 * Math.pow(2, retries - 1);
-      return Math.min(delay, 5000);
-    }
-
-    async function sendHeartbeat(){
-      if (!isSeated) return;
-      if (document.visibilityState === 'hidden') return;
-      if (heartbeatInFlight) return;
-      heartbeatInFlight = true;
-      var shouldReturn = false;
-      try {
-        if (!getValidRequestId(pendingHeartbeatRequestId)){
-          pendingHeartbeatRequestId = normalizeRequestId(generateRequestId());
-        }
-        var requestId = pendingHeartbeatRequestId;
-        var data = await apiPost(HEARTBEAT_URL, { tableId: tableId, requestId: requestId });
-        if (isPendingResponse(data)){
-          heartbeatPendingRetries++;
-          if (heartbeatPendingRetries <= HEARTBEAT_PENDING_MAX_RETRIES){
-            scheduleRetry(sendHeartbeat, getHeartbeatPendingDelay(heartbeatPendingRetries));
-          }
-          shouldReturn = true;
-        }
-        if (!shouldReturn){
-          heartbeatPendingRetries = 0;
-          pendingHeartbeatRequestId = null;
-          if (data && data.closed){
-            stopPolling();
-            stopHeartbeat();
-            loadTable(false);
-            shouldReturn = true;
-          }
-        }
-      } catch (err){
-        if (isAuthError(err)){
-          handleTableAuthExpired({
-            authMsg: authMsg,
-            content: tableContent,
-            errorEl: errorEl,
-            stopPolling: stopPolling,
-            stopHeartbeat: stopHeartbeat,
-            onAuthExpired: startAuthWatch
-          });
-          stopHeartbeat();
-          shouldReturn = true;
-        } else {
-          klog('poker_heartbeat_error', { tableId: tableId, error: err.message || err.code });
-        }
-      } finally {
-        heartbeatInFlight = false;
-      }
-      if (shouldReturn) return;
     }
 
     function renderTable(data){
@@ -3148,7 +3071,7 @@
         setError(errorEl, null);
         if (!isPageActive()) return;
         isSeated = false;
-        stopHeartbeat();
+        clearDeadlineNudge();
       } catch (err){
         if (isAbortError(err)){
           pauseLeavePending();
@@ -3190,7 +3113,6 @@
         }
         state.pollInterval = POLL_INTERVAL_BASE;
         state.pollErrors = 0;
-          if (isSeated) startHeartbeat();
         var canRefreshBaseline = !pendingJoinRequestId && !pendingLeaveRequestId;
         if (currentUserId && canRefreshBaseline){
           bootstrapWsAfterBaseline('visibility_resume');
@@ -3363,7 +3285,6 @@
     window.addEventListener('pagehide', stopRealtime); // xp-lifecycle-allow:poker-table-pagehide(2026-01-01)
     window.addEventListener('pagehide', stopWsClient); // xp-lifecycle-allow:poker-table-pagehide-ws(2026-01-01)
     window.addEventListener('beforeunload', stopPolling); // xp-lifecycle-allow:poker-table(2026-01-01)
-    window.addEventListener('beforeunload', stopHeartbeat); // xp-lifecycle-allow:poker-table-heartbeat(2026-01-01)
     window.addEventListener('beforeunload', clearDeadlineNudge); // xp-lifecycle-allow:poker-table-deadline-nudge(2026-01-01)
     window.addEventListener('beforeunload', stopRealtime); // xp-lifecycle-allow:poker-table-realtime(2026-01-01)
     window.addEventListener('beforeunload', stopWsClient); // xp-lifecycle-allow:poker-table-ws(2026-01-01)

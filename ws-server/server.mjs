@@ -13,6 +13,7 @@ import { recordProtocolViolation, shouldClose } from "./poker/runtime/conn-guard
 import { createTableManager } from "./poker/table/table-manager.mjs";
 import { adaptPersistedBootstrap } from "./poker/bootstrap/persisted-bootstrap-adapter.mjs";
 import { createSessionStore } from "./poker/runtime/session-store.mjs";
+import { createDisconnectCleanupRuntime } from "./poker/runtime/disconnect-cleanup.mjs";
 import { buildStateSnapshotPayload } from "./poker/read-model/state-snapshot.mjs";
 import { buildStatePatch } from "./poker/read-model/state-patch.mjs";
 import { createStreamLog } from "./poker/runtime/stream-log.mjs";
@@ -142,6 +143,7 @@ function snapshotCacheKey(sessionId, tableId) {
 
 let authoritativeLeaveExecutorPromise = null;
 let authoritativeJoinExecutorPromise = null;
+let inactiveCleanupExecutorPromise = null;
 
 async function loadAuthoritativeLeaveExecutor() {
   if (!authoritativeLeaveExecutorPromise) {
@@ -157,6 +159,14 @@ async function loadAuthoritativeJoinExecutor() {
       .then((module) => module.createAuthoritativeJoinExecutor({ env: process.env, klog: klogSafe }));
   }
   return authoritativeJoinExecutorPromise;
+}
+
+async function loadInactiveCleanupExecutor() {
+  if (!inactiveCleanupExecutorPromise) {
+    inactiveCleanupExecutorPromise = import("./poker/persistence/inactive-cleanup-adapter.mjs")
+      .then((module) => module.createInactiveCleanupExecutor({ env: process.env, klog: klogSafe }));
+  }
+  return inactiveCleanupExecutorPromise;
 }
 
 function klog(kind, data) {
@@ -586,7 +596,7 @@ function broadcastStateSnapshots(tableId) {
   }
 }
 
-function sweepAndBroadcastExpiredPresence() {
+function sweepExpiredSessionsOnly() {
   const nowMs = Date.now();
   const expiredSessionIds = sessionStore.sweepExpiredSessions({ nowMs });
   for (const sessionId of expiredSessionIds) {
@@ -596,10 +606,33 @@ function sweepAndBroadcastExpiredPresence() {
       }
     }
   }
-  const sweepUpdates = tableManager.sweepExpiredPresence({ nowTs: nowMs });
-  for (const update of sweepUpdates) {
-    broadcastTableState(update.tableId);
-  }
+}
+
+const disconnectCleanupRuntime = createDisconnectCleanupRuntime({
+  executeCleanup: async ({ tableId, userId, requestId }) => {
+    const executor = await loadInactiveCleanupExecutor();
+    return executor({ tableId, userId, requestId });
+  },
+  listActiveSocketsForUser: (userId) => sessionStore.connectionsForUser(userId),
+  socketMatchesTable: (socket, tableId) => {
+    const conn = socket && socket.__connState;
+    const joined = conn?.joinedTableId || null;
+    const subscribed = conn?.subscribedTableId || null;
+    return joined === tableId || subscribed === tableId;
+  },
+  onChanged: (tableId) => {
+    broadcastStateSnapshots(tableId);
+    broadcastTableState(tableId);
+  },
+  klog: klogSafe
+});
+
+function enqueueDisconnectCleanupCandidate({ tableId, userId }) {
+  disconnectCleanupRuntime.enqueue({ tableId, userId });
+}
+
+async function sweepDisconnectCleanupAndBroadcast() {
+  await disconnectCleanupRuntime.sweep();
 }
 
 async function sweepTurnTimeoutsAndBroadcast() {
@@ -641,7 +674,8 @@ wss.on("connection", (ws) => {
   let messageQueue = Promise.resolve();
 
   async function processMessage(msg, isBinary) {
-    sweepAndBroadcastExpiredPresence();
+    sweepExpiredSessionsOnly();
+    void sweepDisconnectCleanupAndBroadcast();
     await sweepTurnTimeoutsAndBroadcast();
     if (isBinary) {
       sendError(ws, connState, {
@@ -1200,8 +1234,12 @@ wss.on("connection", (ws) => {
     });
     for (const update of cleanupUpdates) {
       broadcastTableState(update.tableId);
+      if (update && update.disconnectedUserId) {
+        enqueueDisconnectCleanupCandidate({ tableId: update.tableId, userId: update.disconnectedUserId });
+      }
     }
-    sweepAndBroadcastExpiredPresence();
+    sweepExpiredSessionsOnly();
+    void sweepDisconnectCleanupAndBroadcast();
     klogSafe("ws_error", { message: err.message });
   });
 
@@ -1215,8 +1253,12 @@ wss.on("connection", (ws) => {
     });
     for (const update of cleanupUpdates) {
       broadcastTableState(update.tableId);
+      if (update && update.disconnectedUserId) {
+        enqueueDisconnectCleanupCandidate({ tableId: update.tableId, userId: update.disconnectedUserId });
+      }
     }
-    sweepAndBroadcastExpiredPresence();
+    sweepExpiredSessionsOnly();
+    void sweepDisconnectCleanupAndBroadcast();
   });
 });
 
@@ -1227,6 +1269,12 @@ const timeoutSweepTimer = setInterval(() => {
 }, Number.isFinite(timeoutSweepIntervalMs) && timeoutSweepIntervalMs > 0 ? timeoutSweepIntervalMs : 250);
 
 timeoutSweepTimer.unref();
+
+const disconnectCleanupSweepMs = Number(process.env.WS_DISCONNECT_CLEANUP_SWEEP_MS || 500);
+const disconnectCleanupTimer = setInterval(() => {
+  void sweepDisconnectCleanupAndBroadcast();
+}, Number.isFinite(disconnectCleanupSweepMs) && disconnectCleanupSweepMs > 0 ? disconnectCleanupSweepMs : 500);
+disconnectCleanupTimer.unref();
 
 server.listen(PORT, "0.0.0.0", () => {
   klogSafe("ws_listening", { message: `WS listening on ${PORT}`, port: PORT });

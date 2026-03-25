@@ -26,7 +26,7 @@ for (const token of [
   "netlify/functions/poker-start-hand.mjs",
   "netlify/functions/poker-act.mjs",
   "netlify/functions/poker-leave.mjs",
-  "netlify/functions/poker-heartbeat.mjs",
+  "ws-server/server.mjs",
   "netlify/functions/poker-sweep.mjs",
 ]) {
   assert.equal(
