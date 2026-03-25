@@ -20,6 +20,13 @@ assert.match(source, /run\("node", \["tests\/poker-ui-no-heartbeat\.guard\.test\
 assert.match(source, /run\("node", \["ws-server\/poker\/persistence\/inactive-cleanup-adapter\.behavior\.test\.mjs"\],/, "runner should include ws inactive cleanup adapter behavior test");
 assert.match(source, /run\("node", \["ws-server\/poker\/runtime\/disconnect-cleanup\.behavior\.test\.mjs"\],/, "runner should include ws disconnect cleanup runtime behavior test");
 assert.doesNotMatch(source, /poker-heartbeat\.behavior\.test\.mjs/, "runner should not include removed heartbeat behavior tests");
+assert.doesNotMatch(source, /tests\/poker-sweep\.behavior\.test\.mjs/, "runner should not include removed legacy sweep behavior test");
+assert.doesNotMatch(
+  source,
+  /tests\/poker-sweep\.timeout-zero-amount-inactivates-seat\.behavior\.test\.mjs/,
+  "runner should not include removed legacy human timeout sweep test"
+);
+assert.doesNotMatch(source, /tests\/poker-sweep\.cashout-authoritative\.behavior\.test\.mjs/, "runner should not include removed legacy authoritative timeout sweep test");
 assert.match(source, /run\("node", \["ws-tests\/ws-lobby-join-public-snapshot\.behavior\.test\.mjs"\],/, "runner should include ws lobby join public snapshot test");
 assert.match(source, /run\("node", \["tests\/i18n\.behavior\.test\.mjs"\],/, "runner should include i18n.behavior test");
 assert.match(source, /run\("node", \["tests\/static-html\.behavior\.test\.mjs"\],/, "runner should include static-html.behavior test");
