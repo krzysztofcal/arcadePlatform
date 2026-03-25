@@ -61,11 +61,22 @@ test('successful cleanup triggers changed callback and de-queues candidate', asy
 
 test('cleanup failure keeps candidate for retry', async () => {
   const runtime = createDisconnectCleanupRuntime({
-    executeCleanup: async () => ({ ok: false, code: 'inactive_cleanup_failed' }),
+    executeCleanup: async () => ({ ok: false, code: 'inactive_cleanup_failed', retryable: true }),
     listActiveSocketsForUser: () => [],
     socketMatchesTable: () => false
   });
   runtime.enqueue({ tableId: 't4', userId: 'u4' });
   await runtime.sweep();
   assert.equal(runtime.size(), 1);
+});
+
+test('non-retryable cleanup failure de-queues candidate', async () => {
+  const runtime = createDisconnectCleanupRuntime({
+    executeCleanup: async () => ({ ok: false, code: 'temporarily_unavailable', retryable: false }),
+    listActiveSocketsForUser: () => [],
+    socketMatchesTable: () => false
+  });
+  runtime.enqueue({ tableId: 't5', userId: 'u5' });
+  await runtime.sweep();
+  assert.equal(runtime.size(), 0);
 });

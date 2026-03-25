@@ -6,10 +6,9 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { createAuthoritativeLeaveExecutor } from "./authoritative-leave-adapter.mjs";
 
-test("default loader uses single explicit artifact-relative path", () => {
-  const source = createAuthoritativeLeaveExecutor.toString();
-  assert.match(source, /\.\.\/\.\.\/shared\/poker-domain\/leave\.mjs/);
-  assert.doesNotMatch(source, /\.\.\/\.\.\/\.\.\/shared\/poker-domain\/leave\.mjs/);
+test("default loader uses module-relative shared contract path", () => {
+  const source = String.raw`${createAuthoritativeLeaveExecutor}`;
+  assert.match(source, /configuredPath\s*\|\|\s*DEFAULT_AUTHORITATIVE_LEAVE_MODULE_URL/);
 });
 
 test("ws-local authoritative leave module bridges to repo-root authoritative contract", async () => {
@@ -23,8 +22,8 @@ test("ws-local authoritative leave module bridges to repo-root authoritative con
 test("default loader resolves in artifact-shaped layout without loader-unavailable taxonomy", async () => {
   const stageDir = await fs.mkdtemp(path.join(os.tmpdir(), "ws-adapter-default-loader-"));
   try {
-    const stagedAdapter = path.join(stageDir, "poker/persistence/authoritative-leave-adapter.mjs");
-    const stagedBootstrap = path.join(stageDir, "poker/bootstrap/persisted-bootstrap-db.mjs");
+    const stagedAdapter = path.join(stageDir, "ws-server/poker/persistence/authoritative-leave-adapter.mjs");
+    const stagedBootstrap = path.join(stageDir, "ws-server/poker/bootstrap/persisted-bootstrap-db.mjs");
     const stagedLeave = path.join(stageDir, "shared/poker-domain/leave.mjs");
 
     await fs.mkdir(path.dirname(stagedAdapter), { recursive: true });

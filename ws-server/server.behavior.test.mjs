@@ -2751,6 +2751,157 @@ test("WS act persists state to file-backed optimistic store", async () => {
   }
 });
 
+test("autoplay adapter loader failure does not break accepted start_hand/act command flow", async () => {
+  const secret = "autoplay-loader-fallback-secret";
+  const tableId = "table_ws_autoplay_loader_fallback";
+  const store = {
+    tables: {
+      [tableId]: {
+        tableRow: { id: tableId, max_players: 6, status: "active" },
+        seatRows: [
+          { user_id: "seat_actor", seat_no: 1, status: "ACTIVE", is_bot: false },
+          { user_id: "seat_other", seat_no: 2, status: "ACTIVE", is_bot: false }
+        ],
+        stateRow: { version: 0, state: {} }
+      }
+    }
+  };
+  const { dir, filePath } = await writePersistedFile(store);
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      WS_PERSISTED_STATE_FILE: filePath,
+      WS_ACCEPTED_BOT_AUTOPLAY_ADAPTER_MODULE_PATH: "./missing-ws-autoplay-adapter-for-test.mjs"
+    }
+  });
+
+  try {
+    await waitForListening(child, 5000);
+    const actorWs = await connectClient(port);
+    const otherWs = await connectClient(port);
+    await hello(actorWs);
+    await hello(otherWs);
+    await auth(actorWs, makeHs256Jwt({ secret, sub: "seat_actor" }), "auth-autoplay-loader-fallback-actor");
+    await auth(otherWs, makeHs256Jwt({ secret, sub: "seat_other" }), "auth-autoplay-loader-fallback-other");
+
+    sendFrame(actorWs, { version: "1.0", type: "table_state_sub", requestId: "baseline-loader-fallback", ts: "2026-02-28T02:20:00Z", payload: { tableId, view: "snapshot" } });
+    const baseline = await nextMessageOfType(actorWs, "stateSnapshot");
+
+    sendFrame(actorWs, { version: "1.0", type: "start_hand", requestId: "start-loader-fallback", ts: "2026-02-28T02:20:01Z", payload: { tableId } });
+    const startResult = await nextCommandResultForRequest(actorWs, "start-loader-fallback");
+    assert.equal(startResult.payload.status, "accepted");
+    sendFrame(actorWs, { version: "1.0", type: "table_state_sub", requestId: "post-start-loader-fallback", ts: "2026-02-28T02:20:02Z", payload: { tableId, view: "snapshot" } });
+    const postStart = await nextMessageOfType(actorWs, "stateSnapshot");
+    assert.equal(postStart.payload.stateVersion > baseline.payload.stateVersion, true);
+    const handId = postStart.payload?.public?.hand?.handId;
+    assert.equal(typeof handId, "string");
+    assert.equal(handId.length > 0, true);
+
+    const turnUserId = postStart.payload?.public?.turn?.userId;
+    assert.equal(typeof turnUserId, "string");
+    assert.equal(turnUserId.length > 0, true);
+    assert.equal(["seat_actor", "seat_other"].includes(turnUserId), true);
+
+    const actingWs = turnUserId === "seat_other" ? otherWs : actorWs;
+    if (turnUserId === "seat_other") {
+      sendFrame(otherWs, { version: "1.0", type: "table_join", requestId: "join-loader-fallback-other", ts: "2026-02-28T02:20:02Z", payload: { tableId } });
+      await nextCommandResultForRequest(otherWs, "join-loader-fallback-other");
+      await nextMessageOfType(otherWs, "table_state");
+    }
+    sendFrame(actingWs, { version: "1.0", type: "table_state_sub", requestId: "acting-snapshot-loader-fallback", ts: "2026-02-28T02:20:02Z", payload: { tableId, view: "snapshot" } });
+    const actingSnapshot = await nextMessageOfType(actingWs, "stateSnapshot");
+    const legalActions = Array.isArray(actingSnapshot.payload?.public?.legalActions?.actions)
+      ? actingSnapshot.payload.public.legalActions.actions
+      : [];
+    assert.equal(Array.isArray(legalActions), true);
+    assert.equal(legalActions.length > 0, true);
+
+    const action = legalActions.includes("CHECK") ? "check" : legalActions.includes("CALL") ? "call" : "fold";
+    sendFrame(actingWs, { version: "1.0", type: "act", requestId: "act-loader-fallback", ts: "2026-02-28T02:20:03Z", payload: { tableId, handId, action } });
+    const actResult = await nextCommandResultForRequest(actingWs, "act-loader-fallback");
+    assert.equal(actResult.payload.status, "accepted");
+
+    sendFrame(actorWs, { version: "1.0", type: "table_state_sub", requestId: "post-act-loader-fallback", ts: "2026-02-28T02:20:04Z", payload: { tableId, view: "snapshot" } });
+    const postAct = await nextMessageOfType(actorWs, "stateSnapshot");
+    assert.equal(postAct.payload.stateVersion > postStart.payload.stateVersion, true);
+
+    assert.equal(actorWs.readyState, WebSocket.OPEN);
+    assert.equal(otherWs.readyState, WebSocket.OPEN);
+    actorWs.close();
+    otherWs.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("WS start_hand/act progression advances beyond human boundary when bot follow-up is eligible", async () => {
+  const secret = "persist-bot-progress-secret";
+  const tableId = "table_ws_bot_progress";
+  const store = {
+    tables: {
+      [tableId]: {
+        tableRow: { id: tableId, max_players: 6, status: "active" },
+        seatRows: [
+          { user_id: "seat_actor", seat_no: 1, status: "ACTIVE", is_bot: false },
+          { user_id: "bot_seat", seat_no: 2, status: "ACTIVE", is_bot: true }
+        ],
+        stateRow: { version: 0, state: {} }
+      }
+    }
+  };
+  const { dir, filePath } = await writePersistedFile(store);
+  const { port, child } = await createServer({
+    env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret, WS_PERSISTED_STATE_FILE: filePath }
+  });
+
+  try {
+    await waitForListening(child, 5000);
+    const ws = await connectClient(port);
+    await hello(ws);
+    await auth(ws, makeHs256Jwt({ secret, sub: "seat_actor" }), "auth-bot-progress");
+
+    sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "snap-bot-progress", ts: "2026-02-28T02:30:01Z", payload: { tableId, view: "snapshot" } });
+    const baseline = await nextMessageOfType(ws, "stateSnapshot");
+
+    sendFrame(ws, { version: "1.0", type: "start_hand", requestId: "start-bot-progress", ts: "2026-02-28T02:30:02Z", payload: { tableId } });
+    const startResult = await nextCommandResultForRequest(ws, "start-bot-progress");
+    assert.equal(startResult.payload.status, "accepted");
+    sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "post-start-bot-progress", ts: "2026-02-28T02:30:02Z", payload: { tableId, view: "snapshot" } });
+    const postStart = await nextMessageOfType(ws, "stateSnapshot");
+    assert.equal(postStart.payload.stateVersion > baseline.payload.stateVersion, true);
+
+    const handId = postStart.payload?.public?.hand?.handId;
+    const turnUserId = postStart.payload?.public?.turn?.userId;
+    const legalActions = Array.isArray(postStart.payload?.public?.legalActions?.actions)
+      ? postStart.payload.public.legalActions.actions
+      : [];
+
+    assert.equal(typeof handId, "string");
+    assert.equal(handId.length > 0, true);
+    assert.equal(turnUserId, "seat_actor");
+    assert.equal(Array.isArray(legalActions), true);
+    assert.equal(legalActions.length > 0, true);
+
+    const action = legalActions.includes("CHECK") ? "check" : legalActions.includes("CALL") ? "call" : "fold";
+    sendFrame(ws, { version: "1.0", type: "act", requestId: "act-bot-progress", ts: "2026-02-28T02:30:03Z", payload: { tableId, handId, action } });
+    const actResult = await nextCommandResultForRequest(ws, "act-bot-progress");
+    assert.equal(actResult.payload.status, "accepted");
+
+    sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "post-act-bot-progress", ts: "2026-02-28T02:30:04Z", payload: { tableId, view: "snapshot" } });
+    const postAct = await nextMessageOfType(ws, "stateSnapshot");
+    assert.equal(postAct.payload.stateVersion > postStart.payload.stateVersion, true);
+
+    ws.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("WS act optimistic conflict returns deterministic rejection and resync", async () => {
   const secret = "persist-conflict-secret";
   const tableId = "table_ws_persist_conflict";

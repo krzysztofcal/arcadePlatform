@@ -3,6 +3,8 @@ async function beginSqlDefault(fn, { env = process.env } = {}) {
   return bootstrapDb.beginSqlWs(fn, { env });
 }
 
+const DEFAULT_AUTHORITATIVE_LEAVE_MODULE_URL = new URL("../../../shared/poker-domain/leave.mjs", import.meta.url).href;
+
 function resolveLeaveTestOverride(env = process.env) {
   const raw = env.WS_TEST_LEAVE_RESULT_JSON;
   if (!raw) {
@@ -97,7 +99,7 @@ export function createAuthoritativeLeaveExecutor({
     const configuredPath = typeof env?.WS_AUTHORITATIVE_LEAVE_MODULE_PATH === "string"
       ? env.WS_AUTHORITATIVE_LEAVE_MODULE_PATH.trim()
       : "";
-    const modulePath = configuredPath || "../../shared/poker-domain/leave.mjs";
+    const modulePath = configuredPath || DEFAULT_AUTHORITATIVE_LEAVE_MODULE_URL;
     return import(modulePath);
   },
   beginSql = beginSqlDefault
