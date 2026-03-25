@@ -86,7 +86,7 @@ run("node", ["tests/poker-leave.active-hand.instant-detach.idempotent-replay.beh
 run("node", ["tests/poker-sweep.test.mjs"], "poker-sweep");
 run("node", ["tests/poker-invariants.test.mjs"], "poker-invariants");
 run("node", ["tests/poker-leave.behavior.test.mjs"], "poker-leave-behavior");
-run("node", ["tests/poker-heartbeat.behavior.test.mjs"], "poker-heartbeat-behavior");
+run("node", ["tests/poker-inactive-cleanup.behavior.test.mjs"], "poker-inactive-cleanup-behavior");
 run("node", ["tests/poker-start-hand.behavior.test.mjs"], "poker-start-hand-behavior");
 run("node", ["tests/poker-start-hand.bots.behavior.test.mjs"], "poker-start-hand-bots-behavior");
 run("node", ["tests/poker-start-hand.bot-autoplay.behavior.test.mjs"], "poker-start-hand-bot-autoplay-behavior");
@@ -147,12 +147,22 @@ run("node", ["tests/poker-ui.behavior.test.mjs"], "poker-ui-behavior");
 run("node", ["tests/poker-ui-ws-join-smoke.behavior.test.mjs"], "poker-ui-ws-join-smoke-behavior");
 run("node", ["tests/poker-ui-ws-act-smoke.behavior.test.mjs"], "poker-ui-ws-act-smoke-behavior");
 run("node", ["tests/poker-ui-ws-write-path.guard.test.mjs"], "poker-ui-ws-write-path-guard");
+run("node", ["tests/poker-ui-no-heartbeat.guard.test.mjs"], "poker-ui-no-heartbeat-guard");
+run("node", ["ws-server/poker/persistence/inactive-cleanup-adapter.behavior.test.mjs"], "ws-inactive-cleanup-adapter-behavior");
+run("node", ["ws-server/poker/runtime/disconnect-cleanup.behavior.test.mjs"], "ws-disconnect-cleanup-runtime-behavior");
 run("node", ["tests/poker-ui-ws-leave-smoke.behavior.test.mjs"], "poker-ui-ws-leave-smoke-behavior");
 run("node", ["ws-tests/ws-lobby-join-public-snapshot.behavior.test.mjs"], "ws-lobby-join-public-snapshot-behavior");
 run("node", ["tests/i18n.behavior.test.mjs"], "i18n-behavior");
 run("node", ["tests/static-html.behavior.test.mjs"], "static-html-behavior");
 run("node", ["tests/poker-ui-stopPendingAll.guard.test.mjs"], "poker-ui-stopPendingAll-guard");
 run("node", ["tests/test-all.runner-registration.guard.test.mjs"], "test-all-runner-registration-guard");
+run("node", ["tests/poker-runtime-docs.behavior.test.mjs"], "poker-runtime-docs-behavior");
+run("node", ["tests/poker-ui-requestid-retry.guard.test.mjs"], "poker-ui-requestid-retry-guard");
+run("node", ["tests/poker-requestid-helper.guard.test.mjs"], "poker-requestid-helper-guard");
+run("node", ["tests/poker-idempotency-scope.guard.test.mjs"], "poker-idempotency-scope-guard");
+run("node", ["tests/poker-get-table-nonmutation.guard.test.mjs"], "poker-get-table-nonmutation-guard");
+run("node", ["tests/poker-start-hand-storage.guard.test.mjs"], "poker-start-hand-storage-guard");
+run("node", ["tests/poker-workflows.playwright-install.guard.test.mjs"], "poker-workflows-playwright-install-guard");
 
 try { run("npm", ["run", "-s", "lint:games"], "unit"); } catch { /* optional */ }
 

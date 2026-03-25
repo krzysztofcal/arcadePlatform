@@ -11,7 +11,7 @@ Poker bots are implemented in the current runtime.
 - Runtime integration points:
   - `shared/poker-domain/join.mjs` (neutral authoritative join + bot seed core shared by the WS gameplay runtime and any temporary legacy/admin adapters)
   - `netlify/functions/poker-start-hand.mjs`, `netlify/functions/poker-act.mjs`, and `netlify/functions/poker-leave.mjs` (legacy/admin HTTP paths kept for ops/bot workflows; browser gameplay runtime uses WS write flow instead)
-  - `netlify/functions/poker-heartbeat.mjs` (active inactivity/cleanup heartbeat lifecycle path)
+  - `ws-server/server.mjs` (active WS disconnect cleanup lifecycle owner)
   - `netlify/functions/poker-sweep.mjs` (active bot timeout/close cash-out path)
 - Behavior coverage in tests includes seed/autoplay/sweep, for example:
   - `tests/poker-join.bot-seed.behavior.test.mjs`
