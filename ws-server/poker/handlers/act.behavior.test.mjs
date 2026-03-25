@@ -21,8 +21,8 @@ test('handleActCommand maps rejection reasons', async () => {
 });
 
 
-test('handleActCommand persists and broadcasts only for accepted fresh action', async () => {
-  const calls = { persisted: 0, snaps: 0 };
+test('handleActCommand persists and triggers autoplay only for accepted fresh action', async () => {
+  const calls = { persisted: 0, snaps: 0, autoplay: 0 };
   await handleActCommand({
     frame: { __resolvedTableId: 't1', requestId: 'r2', ts: new Date().toISOString(), payload: { handId: 'h1', action: 'CHECK' } },
     ws: {},
@@ -34,10 +34,63 @@ test('handleActCommand persists and broadcasts only for accepted fresh action', 
     persistMutatedState: async () => { calls.persisted += 1; return { ok: true }; },
     restoreTableFromPersisted: async () => ({ ok: true }),
     broadcastResyncRequired: () => {},
-    broadcastStateSnapshots: () => { calls.snaps += 1; }
+    broadcastStateSnapshots: () => { calls.snaps += 1; },
+    runAcceptedBotAutoplay: async () => { calls.autoplay += 1; return { ok: true, changed: true }; }
   });
   assert.equal(calls.persisted, 1);
   assert.equal(calls.snaps, 1);
+  assert.equal(calls.autoplay, 1);
+});
+
+test('handleActCommand does not autoplay for replayed, rejected, or conflicted actions', async () => {
+  const autoplayCalls = [];
+
+  await handleActCommand({
+    frame: { __resolvedTableId: 't1', requestId: 'r4', ts: new Date().toISOString(), payload: { handId: 'h1', action: 'CHECK' } },
+    ws: {},
+    connState: { session: { userId: 'u1' } },
+    tableManager: { ensureTableLoaded: async () => ({ ok: true }), applyAction: () => ({ accepted: false, reason: 'illegal_action' }) },
+    ensureTableLoadedErrorMapper: (x) => x,
+    sendError: () => assert.fail('unexpected sendError'),
+    sendCommandResult: () => {},
+    persistMutatedState: async () => ({ ok: true }),
+    restoreTableFromPersisted: async () => ({ ok: true }),
+    broadcastResyncRequired: () => {},
+    broadcastStateSnapshots: () => {},
+    runAcceptedBotAutoplay: async () => { autoplayCalls.push('rejected'); }
+  });
+
+  await handleActCommand({
+    frame: { __resolvedTableId: 't1', requestId: 'r5', ts: new Date().toISOString(), payload: { handId: 'h1', action: 'CHECK' } },
+    ws: {},
+    connState: { session: { userId: 'u1' } },
+    tableManager: { ensureTableLoaded: async () => ({ ok: true }), applyAction: () => ({ accepted: true, replayed: true, changed: false, stateVersion: 2, reason: null }) },
+    ensureTableLoadedErrorMapper: (x) => x,
+    sendError: () => assert.fail('unexpected sendError'),
+    sendCommandResult: () => {},
+    persistMutatedState: async () => ({ ok: true }),
+    restoreTableFromPersisted: async () => ({ ok: true }),
+    broadcastResyncRequired: () => {},
+    broadcastStateSnapshots: () => {},
+    runAcceptedBotAutoplay: async () => { autoplayCalls.push('replayed'); }
+  });
+
+  await handleActCommand({
+    frame: { __resolvedTableId: 't1', requestId: 'r6', ts: new Date().toISOString(), payload: { handId: 'h1', action: 'CHECK' } },
+    ws: {},
+    connState: { session: { userId: 'u1' } },
+    tableManager: { ensureTableLoaded: async () => ({ ok: true }), applyAction: () => ({ accepted: true, replayed: false, changed: true, stateVersion: 2, reason: null }) },
+    ensureTableLoadedErrorMapper: (x) => x,
+    sendError: () => assert.fail('unexpected sendError'),
+    sendCommandResult: () => {},
+    persistMutatedState: async () => ({ ok: false, reason: 'persistence_conflict' }),
+    restoreTableFromPersisted: async () => ({ ok: true }),
+    broadcastResyncRequired: () => {},
+    broadcastStateSnapshots: () => {},
+    runAcceptedBotAutoplay: async () => { autoplayCalls.push('conflict'); }
+  });
+
+  assert.deepEqual(autoplayCalls, []);
 });
 
 

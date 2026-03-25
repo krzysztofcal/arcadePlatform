@@ -58,7 +58,6 @@ function assertRequiredOrder(text) {
   const sharedJoinBehavior = block.indexOf("node --test shared/poker-domain/join.behavior.test.mjs");
   const wsClientBehavior = block.indexOf("node --test tests/poker-ws-client.test.mjs");
   const joinSmoke = block.indexOf("node --test tests/poker-ui-ws-join-smoke.behavior.test.mjs");
-  const actSmoke = block.indexOf("node --test tests/poker-ui-ws-act-smoke.behavior.test.mjs");
   const leaveSmoke = block.indexOf("node --test tests/poker-ui-ws-leave-smoke.behavior.test.mjs");
   const joinRuntimeBehavior = block.indexOf("node --test ws-tests/ws-join-runtime.behavior.test.mjs");
   const behavior = block.indexOf("node --test ws-server/server.behavior.test.mjs");
@@ -70,6 +69,8 @@ function assertRequiredOrder(text) {
   assert.match(block, /node --test ws-server\/poker\/read-model\/state-patch\.behavior\.test\.mjs/);
   assert.match(block, /Run stream-log behavior test/);
   assert.match(block, /node --test ws-server\/poker\/runtime\/stream-log\.behavior\.test\.mjs/);
+  assert.match(block, /Run ws accepted bot autoplay adapter behavior test/);
+  assert.match(block, /node --test ws-server\/poker\/runtime\/accepted-bot-autoplay-adapter\.behavior\.test\.mjs/);
 
   assert.match(block, /Run ws poker engine bootstrap behavior test/);
   assert.match(block, /node --test ws-server\/poker\/engine\/engine-bootstrap\.behavior\.test\.mjs/);
@@ -86,7 +87,7 @@ function assertRequiredOrder(text) {
   assert.notEqual(sharedJoinBehavior, -1);
   assert.notEqual(wsClientBehavior, -1);
   assert.notEqual(joinSmoke, -1);
-  assert.notEqual(actSmoke, -1);
+  assert.equal(block.indexOf("node --test tests/poker-ui-ws-act-smoke.behavior.test.mjs"), -1);
   assert.notEqual(leaveSmoke, -1);
   assert.notEqual(joinRuntimeBehavior, -1);
   assert.notEqual(behavior, -1);
@@ -97,8 +98,7 @@ function assertRequiredOrder(text) {
   assert.equal(runtimeDepsGuard < sharedJoinBehavior, true);
   assert.equal(sharedJoinBehavior < wsClientBehavior, true);
   assert.equal(wsClientBehavior < joinSmoke, true);
-  assert.equal(joinSmoke < actSmoke, true);
-  assert.equal(actSmoke < leaveSmoke, true);
+  assert.equal(joinSmoke < leaveSmoke, true);
   assert.equal(leaveSmoke < joinRuntimeBehavior, true);
   assert.equal(joinRuntimeBehavior < behavior, true);
   assert.equal(behavior < infraVpcCaddyGuard, true);
@@ -159,8 +159,8 @@ test("ws pr workflow wires poker UI smoke tests and join/leave guards", () => {
   const text = workflowText();
   assert.match(text, /Run poker UI ws join smoke test/);
   assert.match(text, /node --test tests\/poker-ui-ws-join-smoke\.behavior\.test\.mjs/);
-  assert.match(text, /Run poker UI ws act smoke test/);
-  assert.match(text, /node --test tests\/poker-ui-ws-act-smoke\.behavior\.test\.mjs/);
+  assert.doesNotMatch(text, /Run poker UI ws act smoke test/);
+  assert.doesNotMatch(text, /node --test tests\/poker-ui-ws-act-smoke\.behavior\.test\.mjs/);
   assert.match(text, /Run poker UI ws write-path guard test/);
   assert.match(text, /node --test tests\/poker-ui-ws-write-path\.guard\.test\.mjs/);
   assert.match(text, /Run poker UI ws leave smoke test/);

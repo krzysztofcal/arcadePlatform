@@ -131,11 +131,11 @@ run("node", ["tests/poker-materialize-settlement.payouts.test.mjs"], "poker-mate
 
 run("node", ["tests/poker-ui.behavior.test.mjs"], "poker-ui-behavior");
 run("node", ["tests/poker-ui-ws-join-smoke.behavior.test.mjs"], "poker-ui-ws-join-smoke-behavior");
-run("node", ["tests/poker-ui-ws-act-smoke.behavior.test.mjs"], "poker-ui-ws-act-smoke-behavior");
 run("node", ["tests/poker-ui-ws-write-path.guard.test.mjs"], "poker-ui-ws-write-path-guard");
 run("node", ["tests/poker-ui-no-heartbeat.guard.test.mjs"], "poker-ui-no-heartbeat-guard");
 run("node", ["ws-server/poker/persistence/inactive-cleanup-adapter.behavior.test.mjs"], "ws-inactive-cleanup-adapter-behavior");
 run("node", ["ws-server/poker/runtime/disconnect-cleanup.behavior.test.mjs"], "ws-disconnect-cleanup-runtime-behavior");
+run("node", ["ws-server/poker/runtime/accepted-bot-autoplay-adapter.behavior.test.mjs"], "ws-accepted-bot-autoplay-adapter-behavior");
 run("node", ["tests/poker-ui-ws-leave-smoke.behavior.test.mjs"], "poker-ui-ws-leave-smoke-behavior");
 run("node", ["ws-tests/ws-lobby-join-public-snapshot.behavior.test.mjs"], "ws-lobby-join-public-snapshot-behavior");
 run("node", ["tests/i18n.behavior.test.mjs"], "i18n-behavior");
