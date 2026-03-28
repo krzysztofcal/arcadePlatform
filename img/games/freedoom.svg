@@ -1,0 +1,44 @@
+<svg width="180" height="180" viewBox="0 0 180 180" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background -->
+  <rect width="180" height="180" rx="28" fill="#0c1c34"/>
+
+  <!-- Floor/perspective lines -->
+  <polygon points="0,180 180,180 140,110 40,110" fill="#1a2940"/>
+  <line x1="90" y1="110" x2="90" y2="180" stroke="#2a3950" stroke-width="1"/>
+  <line x1="60" y1="110" x2="30" y2="180" stroke="#2a3950" stroke-width="1"/>
+  <line x1="120" y1="110" x2="150" y2="180" stroke="#2a3950" stroke-width="1"/>
+
+  <!-- Demon/enemy silhouette -->
+  <ellipse cx="90" cy="70" rx="28" ry="24" fill="#ef4444"/>
+  <ellipse cx="90" cy="68" rx="22" ry="18" fill="#dc2626"/>
+  <!-- Demon eyes -->
+  <ellipse cx="80" cy="65" rx="6" ry="4" fill="#fbbf24"/>
+  <ellipse cx="100" cy="65" rx="6" ry="4" fill="#fbbf24"/>
+  <ellipse cx="80" cy="65" rx="3" ry="2" fill="#0c1c34"/>
+  <ellipse cx="100" cy="65" rx="3" ry="2" fill="#0c1c34"/>
+  <!-- Demon horns -->
+  <polygon points="68,52 62,38 72,48" fill="#ef4444"/>
+  <polygon points="112,52 118,38 108,48" fill="#ef4444"/>
+  <!-- Demon mouth -->
+  <path d="M78 78 Q90 88 102 78" stroke="#0c1c34" stroke-width="3" fill="none"/>
+
+  <!-- Gun/weapon viewmodel at bottom -->
+  <rect x="75" y="130" width="30" height="45" rx="4" fill="#6b7280"/>
+  <rect x="80" y="125" width="20" height="10" rx="2" fill="#9ca3af"/>
+  <rect x="85" y="115" width="10" height="12" fill="#4b5563"/>
+  <!-- Gun barrel -->
+  <rect x="87" y="105" width="6" height="12" fill="#374151"/>
+  <!-- Muzzle flash hint -->
+  <circle cx="90" cy="102" r="4" fill="#fbbf24" opacity="0.6"/>
+
+  <!-- HUD elements -->
+  <rect x="12" y="150" width="40" height="18" rx="3" fill="#1f2937"/>
+  <text x="16" y="163" fill="#4ade80" font-size="11" font-family="monospace">100%</text>
+
+  <rect x="128" y="150" width="40" height="18" rx="3" fill="#1f2937"/>
+  <text x="132" y="163" fill="#ef4444" font-size="11" font-family="monospace">100%</text>
+
+  <!-- Crosshair -->
+  <line x1="85" y1="90" x2="95" y2="90" stroke="#6ee7e7" stroke-width="2"/>
+  <line x1="90" y1="85" x2="90" y2="95" stroke="#6ee7e7" stroke-width="2"/>
+</svg>
