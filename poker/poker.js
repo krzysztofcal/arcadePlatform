@@ -2703,11 +2703,40 @@
           pendingActType = normalized;
         }
         var actRequestId = normalizeRequestId(resolved.requestId);
-        var result = await apiPost(ACT_URL, {
-          tableId: tableId,
-          requestId: actRequestId,
-          action: actionResult.action
-        });
+        var useWsAct = !!(wsStarted && wsClient && typeof wsClient.sendAct === 'function');
+        var completedTransport = useWsAct ? 'ws' : 'http';
+        var result = null;
+        if (useWsAct){
+          try {
+            await wsClient.sendAct({
+              tableId: tableId,
+              requestId: actRequestId,
+              handId: resolveCurrentHandId(),
+              action: actionResult.action.type,
+              amount: actionResult.action.amount
+            });
+            result = { ok: true };
+          } catch (wsErr){
+            var wsErrCode = wsErr && (wsErr.code || wsErr.message) ? String(wsErr.code || wsErr.message) : 'ws_unavailable';
+            if (wsErrCode === 'ws_unavailable' || wsErrCode === 'connection_closed' || wsErrCode === 'client_shutdown'){
+              klog('poker_ws_act_unavailable_fallback_http', { tableId: tableId, requestId: actRequestId, reason: wsErrCode });
+              result = await apiPost(ACT_URL, {
+                tableId: tableId,
+                requestId: actRequestId,
+                action: actionResult.action
+              });
+              completedTransport = 'http';
+            } else {
+              throw wsErr;
+            }
+          }
+        } else {
+          result = await apiPost(ACT_URL, {
+            tableId: tableId,
+            requestId: actRequestId,
+            action: actionResult.action
+          });
+        }
         if (isPendingResponse(result)){
           scheduleDevPendingRetry('act', retryAct);
           return;
@@ -2731,7 +2760,7 @@
         clearActPending();
         setInlineStatus(actStatusEl, t('pokerActOk', 'Action sent'), 'success');
         if (!isPageActive()) return;
-        loadTable(false);
+        if (completedTransport === 'http') loadTable(false);
       } catch (err){
         if (isAbortError(err)){
           pauseActPending();
@@ -2750,21 +2779,22 @@
           return;
         }
         clearActPending();
+        var errCode = err && (err.code || err.error || err.message) ? String(err.code || err.error || err.message) : '';
         var errMessage = err && (err.message || err.code) ? String(err.message || err.code) : '';
         var loweredMessage = errMessage.toLowerCase();
-        if (err && (err.status === 403 || err.code === 'not_your_turn' || loweredMessage.indexOf('not your turn') !== -1)){
+        if (err && (err.status === 403 || errCode === 'not_your_turn' || loweredMessage.indexOf('not your turn') !== -1)){
           setInlineStatus(actStatusEl, t('pokerErrNotYourTurn', 'Not your turn'), 'error');
           return;
         }
-        if (err && err.code === 'action_not_allowed'){
+        if (errCode === 'action_not_allowed'){
           setInlineStatus(actStatusEl, t('pokerErrActionNotAllowed', 'Action not allowed right now'), 'error');
           return;
         }
-        if (err && err.code === 'invalid_amount'){
+        if (errCode === 'invalid_amount'){
           setInlineStatus(actStatusEl, t('pokerErrActAmount', 'Invalid amount'), 'error');
           return;
         }
-        if (err && err.code === 'state_invalid'){
+        if (errCode === 'state_invalid'){
           setInlineStatus(actStatusEl, t('pokerErrStateChanged', 'State changed. Refreshing...'), 'error');
           if (isPageActive()) loadTable(false);
           return;

@@ -964,6 +964,18 @@ export function createTableManager({
     return matches.length === 1 ? matches[0] : null;
   }
 
+  function resolveConnectionTableId({ ws }) {
+    const conn = connStateBySocket.get(ws);
+    if (!conn) return null;
+    if (typeof conn.joinedTableId === "string" && conn.joinedTableId) {
+      return conn.joinedTableId;
+    }
+    if (typeof conn.subscribedTableId === "string" && conn.subscribedTableId) {
+      return conn.subscribedTableId;
+    }
+    return null;
+  }
+
   const manager = {
     ensureTableLoaded,
     join,
@@ -981,6 +993,7 @@ export function createTableManager({
     cleanupConnection,
     orderedSubscribers,
     orderedConnectionsForTable,
+    resolveConnectionTableId,
     resolveImplicitLeaveTableId,
     sweepExpiredPresence,
     persistedPokerState,

@@ -6,6 +6,7 @@ import { handleHello } from "./poker/handlers/hello.mjs";
 import { handlePing } from "./poker/handlers/ping.mjs";
 import { handleAuth } from "./poker/handlers/auth.mjs";
 import { handleProtectedEcho } from "./poker/handlers/protected-echo.mjs";
+import { handleAct } from "./poker/handlers/act.mjs";
 import { verifyToken } from "./poker/auth/verify-token.mjs";
 import { createConnState } from "./poker/runtime/conn-state.mjs";
 import { ackSessionSeq, touchSession } from "./poker/runtime/session.mjs";
@@ -1158,88 +1159,19 @@ wss.on("connection", (ws) => {
         return;
       }
 
-      const tableId = resolvedRoomId.roomId;
-      const handId = typeof frame.payload?.handId === "string" ? frame.payload.handId.trim() : "";
-      const action = typeof frame.payload?.action === "string" ? frame.payload.action.trim().toUpperCase() : "";
-      const amount = frame.payload?.amount;
-
-      if (!handId) {
-        sendError(ws, connState, {
-          code: "INVALID_COMMAND",
-          message: "act requires payload.handId",
-          requestId: frame.requestId ?? null
-        });
-        return;
-      }
-
-      if (!["FOLD", "CHECK", "CALL", "BET", "RAISE"].includes(action)) {
-        sendError(ws, connState, {
-          code: "INVALID_COMMAND",
-          message: "act requires payload.action of fold/check/call/bet/raise",
-          requestId: frame.requestId ?? null
-        });
-        return;
-      }
-
-      if ((action === "BET" || action === "RAISE") && !Number.isFinite(amount)) {
-        sendError(ws, connState, {
-          code: "INVALID_COMMAND",
-          message: "act requires numeric payload.amount for bet/raise",
-          requestId: frame.requestId ?? null
-        });
-        return;
-      }
-
-      const ensured = await tableManager.ensureTableLoaded(tableId);
-      if (!ensured.ok) {
-        sendCommandResult(ws, connState, {
-          requestId: frame.requestId ?? null,
-          tableId,
-          status: "rejected",
-          reason: ensured.code
-        });
-        return;
-      }
-
-      const result = tableManager.applyAction({
-        tableId,
-        handId,
-        userId: connState.session.userId,
-        requestId: frame.requestId,
-        action,
-        amount,
-        nowIso: frame.ts
+      await handleAct({
+        frame,
+        ws,
+        connState,
+        tableId: resolvedRoomId.roomId,
+        tableManager,
+        sendError,
+        sendCommandResult,
+        persistMutatedState,
+        restoreTableFromPersisted,
+        broadcastResyncRequired,
+        broadcastStateSnapshots
       });
-
-      if (result.accepted && !result.replayed && result.changed) {
-        const persisted = await persistMutatedState({
-          tableId,
-          expectedVersion: Number(result.stateVersion) - 1,
-          mutationKind: "act"
-        });
-        if (!persisted?.ok) {
-          await restoreTableFromPersisted(tableId);
-          sendCommandResult(ws, connState, {
-            requestId: frame.requestId ?? null,
-            tableId,
-            status: "rejected",
-            reason: persisted?.reason || "persist_failed"
-          });
-          broadcastResyncRequired(tableId, "persistence_conflict");
-          return;
-        }
-      }
-
-      sendCommandResult(ws, connState, {
-        requestId: frame.requestId ?? null,
-        tableId,
-        status: result.accepted ? "accepted" : "rejected",
-        reason: result.reason
-      });
-
-      if (result.accepted && !result.replayed && result.changed) {
-        broadcastStateSnapshots(tableId);
-      }
       return;
     }
 
