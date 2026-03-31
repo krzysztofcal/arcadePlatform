@@ -2844,6 +2844,123 @@ export function createInactiveCleanupExecutor({ env }) {
   }
 });
 
+test("disconnect cleanup close rewrite restores inert state and blocks repeated timeout sweeps", async () => {
+  const secret = "disconnect-cleanup-closed-inert";
+  const tableId = "table_disconnect_closed_inert";
+  const store = {
+    tables: {
+      [tableId]: {
+        tableRow: { id: tableId, max_players: 6, status: "active" },
+        seatRows: [{ user_id: "seat_user_closed", seat_no: 1, status: "ACTIVE", is_bot: false, stack: 500 }],
+        stateRow: {
+          version: 17,
+          state: {
+            handId: "h17",
+            phase: "PREFLOP",
+            turnUserId: "seat_user_closed",
+            turnStartedAt: Date.now() - 30_000,
+            turnDeadlineAt: Date.now() - 20_000,
+            stacks: { seat_user_closed: 500 }
+          }
+        }
+      }
+    }
+  };
+  const { dir, filePath } = await writePersistedFile(store);
+  const cleanupModule = await writeTestModule(`
+import fs from "node:fs/promises";
+export function createInactiveCleanupExecutor({ env }) {
+  return async ({ tableId, userId }) => {
+    const raw = await fs.readFile(env.WS_PERSISTED_STATE_FILE, "utf8");
+    const doc = JSON.parse(raw || "{}");
+    const table = doc?.tables?.[tableId];
+    if (!table) return { ok: true, changed: false, status: "seat_missing", retryable: false };
+    table.tableRow = { ...(table.tableRow || {}), status: "CLOSED" };
+    table.seatRows = (Array.isArray(table.seatRows) ? table.seatRows : []).map((row) =>
+      row?.user_id === userId ? { ...row, status: "INACTIVE", stack: 0 } : row
+    );
+    const state = table?.stateRow?.state && typeof table.stateRow.state === "object" ? table.stateRow.state : {};
+    const nextStacks = { ...(state.stacks || {}) };
+    delete nextStacks[userId];
+    table.stateRow = {
+      ...(table.stateRow || { version: 0 }),
+      state: {
+        ...state,
+        phase: "HAND_DONE",
+        handId: "",
+        handSeed: "",
+        showdown: null,
+        community: [],
+        communityDealt: 0,
+        pot: 0,
+        potTotal: 0,
+        sidePots: [],
+        turnUserId: null,
+        turnStartedAt: null,
+        turnDeadlineAt: null,
+        currentBet: 0,
+        toCallByUserId: {},
+        betThisRoundByUserId: {},
+        actedThisRoundByUserId: {},
+        stacks: nextStacks
+      }
+    };
+    await fs.writeFile(env.WS_PERSISTED_STATE_FILE, JSON.stringify(doc) + "\\n", "utf8");
+    return { ok: true, changed: true, status: "cleaned_closed", closed: true, retryable: false };
+  };
+}
+`, "inactive-cleanup-test-adapter-closed.mjs");
+
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      WS_PERSISTED_STATE_FILE: filePath,
+      WS_DISCONNECT_CLEANUP_SWEEP_MS: "25",
+      WS_TIMEOUT_SWEEP_MS: "20",
+      WS_INACTIVE_CLEANUP_ADAPTER_MODULE_PATH: `file://${cleanupModule.filePath}`
+    }
+  });
+
+  try {
+    await waitForListening(child, 5000);
+    const seated = await connectClient(port);
+    const observer = await connectClient(port);
+    await hello(seated);
+    await hello(observer);
+    await auth(seated, makeHs256Jwt({ secret, sub: "seat_user_closed" }), "auth-seat-cleanup-closed");
+    await auth(observer, makeHs256Jwt({ secret, sub: "observer_user_closed" }), "auth-observer-cleanup-closed");
+
+    sendFrame(seated, { version: "1.0", type: "table_join", requestId: "join-cleanup-closed-seat", ts: "2026-03-01T00:05:01Z", payload: { tableId } });
+    await nextMessageOfType(seated, "commandResult");
+    await nextMessageOfType(seated, "table_state");
+
+    sendFrame(observer, { version: "1.0", type: "table_state_sub", requestId: "sub-cleanup-closed-observer", ts: "2026-03-01T00:05:02Z", payload: { tableId, view: "snapshot" } });
+    await nextMessageOfType(observer, "stateSnapshot");
+
+    seated.close();
+    await waitForStdoutLine(child, "ws_disconnect_cleanup_restore_success", 5000);
+    sendFrame(observer, { version: "1.0", type: "table_state_sub", requestId: "sub-cleanup-closed-observer-post", ts: "2026-03-01T00:05:03Z", payload: { tableId, view: "snapshot" } });
+    const afterCleanup = await nextMessageOfType(observer, "stateSnapshot");
+    assert.equal(afterCleanup.payload.public.turn.userId, null);
+
+    const versionAfterCleanup = afterCleanup.payload.stateVersion;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    const persistedAfterSweep = await readPersistedFile(filePath);
+    assert.equal(persistedAfterSweep.tables[tableId].stateRow.state.phase, "HAND_DONE");
+    assert.equal(persistedAfterSweep.tables[tableId].stateRow.version, versionAfterCleanup);
+    sendFrame(observer, { version: "1.0", type: "table_state_sub", requestId: "sub-cleanup-closed-observer-final", ts: "2026-03-01T00:05:04Z", payload: { tableId, view: "snapshot" } });
+    const finalSnapshot = await nextMessageOfType(observer, "stateSnapshot");
+    assert.equal(finalSnapshot.payload.public.turn.userId, null);
+    assert.equal(finalSnapshot.payload.stateVersion, versionAfterCleanup);
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+    await fs.rm(dir, { recursive: true, force: true });
+    await fs.rm(cleanupModule.dir, { recursive: true, force: true });
+  }
+});
+
 test("disconnect cleanup restore failure does not broadcast stale success", async () => {
   const secret = "disconnect-cleanup-failure";
   const tableId = "table_disconnect_restore_fail";

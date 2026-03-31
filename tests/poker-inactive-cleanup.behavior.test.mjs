@@ -108,6 +108,24 @@ test('singleton human disconnect closes table, ignores bots keep-alive, and clos
   assert.equal(closeUser4.idempotencyKey, 'poker:inactive_cleanup_close:table-3:user-4');
   const holeCardDelete = ctx.updates.find((u) => String(u.query).includes('delete from public.poker_hole_cards'));
   assert.ok(holeCardDelete, 'close path should clear hole cards');
+  const closedState = ctx.updates.filter((u) => u.kind === 'state').at(-1)?.value;
+  assert.ok(closedState, 'close path should persist closed inert state');
+  assert.equal(closedState.phase, 'HAND_DONE');
+  assert.equal(closedState.handId, '');
+  assert.equal(closedState.handSeed, '');
+  assert.equal(closedState.showdown, null);
+  assert.deepEqual(closedState.community, []);
+  assert.equal(closedState.communityDealt, 0);
+  assert.equal(closedState.pot, 0);
+  assert.equal(closedState.potTotal, 0);
+  assert.deepEqual(closedState.sidePots, []);
+  assert.equal(closedState.turnUserId, null);
+  assert.equal(closedState.turnStartedAt, null);
+  assert.equal(closedState.turnDeadlineAt, null);
+  assert.equal(closedState.currentBet, 0);
+  assert.deepEqual(closedState.toCallByUserId, {});
+  assert.deepEqual(closedState.betThisRoundByUserId, {});
+  assert.deepEqual(closedState.actedThisRoundByUserId, {});
 });
 
 test('idempotent no-op when seat is already inactive', async () => {
@@ -129,5 +147,49 @@ test('idempotent no-op when seat is already inactive', async () => {
   });
 
   assert.equal(result.ok, true);
+  assert.equal(ctx.ledgerCalls.length, 0);
+});
+
+test('repeated cleanup against already closed inert table remains stable and no-op', async () => {
+  const inertState = {
+    phase: 'HAND_DONE',
+    handId: '',
+    handSeed: '',
+    showdown: null,
+    community: [],
+    communityDealt: 0,
+    pot: 0,
+    potTotal: 0,
+    sidePots: [],
+    turnUserId: null,
+    turnStartedAt: null,
+    turnDeadlineAt: null,
+    stacks: {}
+  };
+  const ctx = makeTx({
+    seat: { table_id: 'table-5', user_id: 'user-5', seat_no: 5, status: 'INACTIVE', is_bot: false, stack: 0 },
+    state: inertState,
+    allSeats: [{ user_id: 'user-5', status: 'INACTIVE', is_bot: false, stack: 0 }],
+    tableStatus: 'CLOSED'
+  });
+
+  const result = await executeInactiveCleanup({
+    tableId: 'table-5',
+    userId: 'user-5',
+    requestId: 'req-5',
+    env: {},
+    beginSql: async (fn) => fn(ctx.tx),
+    postTransaction: async (payload) => ctx.ledgerCalls.push(payload),
+    isHoleCardsTableMissing: () => false
+  });
+
+  assert.equal(result.status, 'already_closed');
+  assert.equal(result.changed, false);
+  const finalState = ctx.updates.filter((u) => u.kind === 'state').at(-1)?.value;
+  assert.equal(finalState.phase, inertState.phase);
+  assert.equal(finalState.turnUserId, inertState.turnUserId);
+  assert.equal(finalState.turnStartedAt, inertState.turnStartedAt);
+  assert.equal(finalState.turnDeadlineAt, inertState.turnDeadlineAt);
+  assert.deepEqual(finalState.stacks, inertState.stacks);
   assert.equal(ctx.ledgerCalls.length, 0);
 });
