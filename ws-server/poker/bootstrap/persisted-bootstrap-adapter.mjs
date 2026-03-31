@@ -65,6 +65,14 @@ function normalizeStateVersion(rawVersion) {
   return parsed;
 }
 
+function normalizeTableStatus(rawStatus) {
+  if (typeof rawStatus !== "string") {
+    return "OPEN";
+  }
+  const normalized = rawStatus.trim().toUpperCase();
+  return normalized || "OPEN";
+}
+
 function normalizePublicStacks(seatRows) {
   if (!Array.isArray(seatRows)) {
     return {};
@@ -215,6 +223,7 @@ export function adaptPersistedBootstrap({ tableId, tableRow, seatRows, stateRow 
     ok: true,
     table: {
       tableId,
+      tableStatus: normalizeTableStatus(tableRow.status),
       coreState: {
         roomId: tableId,
         maxSeats,

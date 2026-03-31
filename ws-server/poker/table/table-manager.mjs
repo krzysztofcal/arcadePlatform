@@ -64,6 +64,12 @@ function normalizeAuthoritativeMembers(table) {
   });
 }
 
+function normalizeTableStatus(value) {
+  if (typeof value !== "string") return "OPEN";
+  const normalized = value.trim().toUpperCase();
+  return normalized || "OPEN";
+}
+
 export function createTableManager({
   presenceTtlMs = DEFAULT_PRESENCE_TTL_MS,
   maxSeats = DEFAULT_MAX_SEATS,
@@ -141,6 +147,7 @@ export function createTableManager({
       const initialCoreState = createInitialCoreState({ roomId: tableId, maxSeats });
       tables.set(tableId, {
         tableId,
+        tableStatus: "OPEN",
         coreState: initialCoreState,
         persistedStateVersion: Number.isInteger(initialCoreState.version) ? initialCoreState.version : 0,
         presenceByUserId: new Map(),
@@ -183,6 +190,7 @@ export function createTableManager({
       }
 
       const loadedTable = loaded.table;
+      loadedTable.tableStatus = normalizeTableStatus(loadedTable.tableStatus);
       const loadedVersion = Number(loadedTable?.coreState?.version);
       loadedTable.persistedStateVersion = Number.isInteger(loadedVersion) && loadedVersion >= 0 ? loadedVersion : 0;
       tables.set(tableId, loadedTable);
@@ -399,9 +407,12 @@ export function createTableManager({
     };
   }
 
-  function sweepTurnTimeouts({ nowMs = Date.now() } = {}) {
+  function sweepTurnTimeouts({ nowMs = Date.now(), shouldProcessTable = null } = {}) {
     const updates = [];
     for (const [tableId] of tables.entries()) {
+      if (typeof shouldProcessTable === "function" && shouldProcessTable(tableId) !== true) {
+        continue;
+      }
       const timeoutResult = maybeApplyTurnTimeout({ tableId, nowMs });
       if (timeoutResult.ok && timeoutResult.changed) {
         updates.push({ tableId, stateVersion: timeoutResult.stateVersion });
@@ -941,6 +952,7 @@ export function createTableManager({
     }
 
     table.coreState = restoredCoreState;
+    table.tableStatus = normalizeTableStatus(restoredTable?.tableStatus);
     table.persistedStateVersion = Number.isInteger(restoredCoreState.version) && restoredCoreState.version >= 0
       ? restoredCoreState.version
       : table.persistedStateVersion;
@@ -960,6 +972,11 @@ export function createTableManager({
     }
 
     return { ...table.coreState.pokerState };
+  }
+
+  function isTableClosed(tableId) {
+    const table = tables.get(tableId);
+    return normalizeTableStatus(table?.tableStatus) === "CLOSED";
   }
 
   function __debugCore(tableId) {
@@ -1036,7 +1053,8 @@ export function createTableManager({
     persistedPokerState,
     persistedStateVersion,
     setPersistedStateVersion,
-    restoreTableFromPersisted
+    restoreTableFromPersisted,
+    isTableClosed
   };
 
   if (enableDebugCore && nodeEnv !== "production") {

@@ -697,7 +697,10 @@ async function sweepDisconnectCleanupAndBroadcast() {
 
 async function sweepTurnTimeoutsAndBroadcast() {
   const nowMs = Date.now();
-  const timeoutUpdates = tableManager.sweepTurnTimeouts({ nowMs });
+  const timeoutUpdates = tableManager.sweepTurnTimeouts({
+    nowMs,
+    shouldProcessTable: (tableId) => tableManager.isTableClosed(tableId) !== true
+  });
   for (const update of timeoutUpdates) {
     const persisted = await persistMutatedState({
       tableId: update.tableId,

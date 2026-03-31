@@ -43,6 +43,30 @@ function hasAnyActiveHuman(seats) {
   return (seats || []).some((row) => row?.is_bot !== true && row?.status === "ACTIVE");
 }
 
+function toClosedInertState({ state, stacks }) {
+  return {
+    ...state,
+    phase: "HAND_DONE",
+    handId: "",
+    handSeed: "",
+    showdown: null,
+    community: [],
+    communityDealt: 0,
+    pot: 0,
+    potTotal: 0,
+    sidePots: [],
+    turnUserId: null,
+    turnStartedAt: null,
+    turnDeadlineAt: null,
+    lastAggressorUserId: null,
+    currentBet: 0,
+    toCallByUserId: {},
+    betThisRoundByUserId: {},
+    actedThisRoundByUserId: {},
+    stacks
+  };
+}
+
 async function postCashout({ postTransaction, tx, tableId, userId, amount, idempotencyKey, createdBy, reason }) {
   if (!postTransaction || typeof postTransaction !== "function") {
     throw new Error("post_transaction_missing");
@@ -143,7 +167,7 @@ export async function executeInactiveCleanup({
     }
 
     if (stateRow) {
-      const finalState = { ...state, stacks };
+      const finalState = toClosedInertState({ state, stacks });
       await tx.unsafe("update public.poker_state set state = $2 where table_id = $1;", [tableId, JSON.stringify(finalState)]);
     }
 
