@@ -54,6 +54,9 @@ vm.runInContext(source, sandbox, { filename: 'poker/poker.js' });
 
 const hooks = sandbox.window.__POKER_UI_TEST_HOOKS__;
 assert.ok(hooks, 'poker UI should expose test hooks when explicitly enabled');
+assert.equal(typeof hooks.sanitizeAllowedActions, 'function', 'sanitizeAllowedActions hook should be exposed');
+assert.equal(typeof hooks.validateAmountActionPayload, 'function', 'validateAmountActionPayload hook should be exposed');
+assert.equal(typeof hooks.resolveTurnActionUiState, 'function', 'resolveTurnActionUiState hook should be exposed');
 
 const countdown = hooks.computeRemainingTurnSeconds(Date.now() + 30000, Date.now());
 assert.ok(countdown > 0, 'countdown should be positive for future deadline in ms');
