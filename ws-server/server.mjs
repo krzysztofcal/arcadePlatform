@@ -145,6 +145,7 @@ let authoritativeLeaveExecutorPromise = null;
 let authoritativeJoinExecutorPromise = null;
 let inactiveCleanupExecutorPromise = null;
 let acceptedBotAutoplayExecutorPromise = null;
+const DEFAULT_INACTIVE_CLEANUP_ADAPTER_URL = new URL("./poker/persistence/inactive-cleanup-adapter.mjs", import.meta.url).href;
 const DEFAULT_ACCEPTED_BOT_AUTOPLAY_ADAPTER_URL = new URL("./poker/runtime/accepted-bot-autoplay-adapter.mjs", import.meta.url).href;
 
 async function loadAuthoritativeLeaveExecutor() {
@@ -165,8 +166,14 @@ async function loadAuthoritativeJoinExecutor() {
 
 async function loadInactiveCleanupExecutor() {
   if (!inactiveCleanupExecutorPromise) {
-    inactiveCleanupExecutorPromise = import("./poker/persistence/inactive-cleanup-adapter.mjs")
-      .then((module) => module.createInactiveCleanupExecutor({ env: process.env, klog: klogSafe }));
+    inactiveCleanupExecutorPromise = (async () => {
+      const configured = typeof process.env.WS_INACTIVE_CLEANUP_ADAPTER_MODULE_PATH === "string"
+        ? process.env.WS_INACTIVE_CLEANUP_ADAPTER_MODULE_PATH.trim()
+        : "";
+      const adapterModulePath = configured || DEFAULT_INACTIVE_CLEANUP_ADAPTER_URL;
+      const module = await import(adapterModulePath);
+      return module.createInactiveCleanupExecutor({ env: process.env, klog: klogSafe });
+    })();
   }
   return inactiveCleanupExecutorPromise;
 }
@@ -658,9 +665,24 @@ const disconnectCleanupRuntime = createDisconnectCleanupRuntime({
     const subscribed = conn?.subscribedTableId || null;
     return joined === tableId || subscribed === tableId;
   },
-  onChanged: (tableId) => {
-    broadcastStateSnapshots(tableId);
-    broadcastTableState(tableId);
+  onChanged: async (tableId, result) => {
+    if (result?.ok !== true) {
+      return;
+    }
+    if (result?.changed === true) {
+      klogSafe("ws_disconnect_cleanup_restore_start", { tableId, status: result?.status || null });
+      const restored = await restoreTableFromPersisted(tableId);
+      if (!restored?.ok) {
+        klogSafe("ws_disconnect_cleanup_restore_failed", { tableId, reason: restored?.reason || "unknown" });
+        return;
+      }
+      klogSafe("ws_disconnect_cleanup_restore_success", { tableId });
+      broadcastStateSnapshots(tableId);
+      broadcastTableState(tableId);
+      klogSafe("ws_disconnect_cleanup_broadcast_after_restore", { tableId });
+      return;
+    }
+    klogSafe("ws_disconnect_cleanup_noop", { tableId, status: result?.status || null });
   },
   klog: klogSafe
 });

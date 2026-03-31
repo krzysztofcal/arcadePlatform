@@ -37,11 +37,16 @@ export function createDisconnectCleanupRuntime({
       });
 
       if (result?.ok && result?.protected) {
+        klog('ws_disconnect_cleanup_protected', {
+          tableId: candidate.tableId,
+          userId: candidate.userId,
+          status: result?.status || 'turn_protected'
+        });
         continue;
       }
       if (result?.ok) {
         candidates.delete(key(candidate.tableId, candidate.userId));
-        onChanged(candidate.tableId, result);
+        await onChanged(candidate.tableId, result);
         continue;
       }
       if (result?.retryable === false) {

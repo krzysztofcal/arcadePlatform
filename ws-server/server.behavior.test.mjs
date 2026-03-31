@@ -9,6 +9,7 @@ import path from "node:path";
 import net from "node:net";
 import WebSocket from "ws";
 import { makeBotUserId } from "../shared/poker-domain/bots.mjs";
+import { createDisconnectCleanupRuntime } from "./poker/runtime/disconnect-cleanup.mjs";
 
 function getFreePort() {
   return new Promise((resolve, reject) => {
@@ -258,6 +259,13 @@ async function writePersistedFile(fixture) {
 async function readPersistedFile(filePath) {
   const raw = await fs.readFile(filePath, "utf8");
   return JSON.parse(raw);
+}
+
+async function writeTestModule(source, filename = "ws-test-module.mjs") {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "ws-module-"));
+  const filePath = path.join(dir, filename);
+  await fs.writeFile(filePath, source, "utf8");
+  return { dir, filePath };
 }
 
 async function nextMessageOfType(ws, type, timeoutMs = 10000) {
@@ -2749,6 +2757,245 @@ test("WS act persists state to file-backed optimistic store", async () => {
     await waitForExit(child);
     await fs.rm(dir, { recursive: true, force: true });
   }
+});
+
+test("disconnect cleanup changed restores runtime from persisted state before broadcast", async () => {
+  const secret = "disconnect-cleanup-secret";
+  const tableId = "table_disconnect_restore";
+  const store = {
+    tables: {
+      [tableId]: {
+        tableRow: { id: tableId, max_players: 6, status: "active" },
+        seatRows: [{ user_id: "seat_user", seat_no: 1, status: "ACTIVE", is_bot: false, stack: 500 }],
+        stateRow: { version: 7, state: { handId: "h7", phase: "PREFLOP", turnUserId: "seat_user", stacks: { seat_user: 500 } } }
+      }
+    }
+  };
+  const { dir, filePath } = await writePersistedFile(store);
+  const cleanupModule = await writeTestModule(`
+import fs from "node:fs/promises";
+export function createInactiveCleanupExecutor({ env }) {
+  return async ({ tableId, userId }) => {
+    const raw = await fs.readFile(env.WS_PERSISTED_STATE_FILE, "utf8");
+    const doc = JSON.parse(raw || "{}");
+    const table = doc?.tables?.[tableId];
+    if (!table) return { ok: true, changed: false, status: "seat_missing", retryable: false };
+    const seatRows = Array.isArray(table.seatRows) ? table.seatRows : [];
+    let changed = false;
+    table.seatRows = seatRows.map((row) => {
+      if (row?.user_id !== userId || String(row?.status || "ACTIVE").toUpperCase() !== "ACTIVE") return row;
+      changed = true;
+      return { ...row, status: "INACTIVE", stack: 0 };
+    });
+    const state = table?.stateRow?.state && typeof table.stateRow.state === "object" ? table.stateRow.state : {};
+    const nextStacks = { ...(state.stacks || {}) };
+    delete nextStacks[userId];
+    table.stateRow = { ...(table.stateRow || { version: 0 }), state: { ...state, turnUserId: null, stacks: nextStacks } };
+    await fs.writeFile(env.WS_PERSISTED_STATE_FILE, JSON.stringify(doc) + "\\n", "utf8");
+    return { ok: true, changed, status: changed ? "cleaned" : "already_inactive", retryable: false };
+  };
+}
+`, "inactive-cleanup-test-adapter.mjs");
+
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      WS_PERSISTED_STATE_FILE: filePath,
+      WS_DISCONNECT_CLEANUP_SWEEP_MS: "25",
+      WS_TIMEOUT_SWEEP_MS: "999999",
+      WS_INACTIVE_CLEANUP_ADAPTER_MODULE_PATH: `file://${cleanupModule.filePath}`
+    }
+  });
+
+  try {
+    await waitForListening(child, 5000);
+    const seated = await connectClient(port);
+    const observer = await connectClient(port);
+    await hello(seated);
+    await hello(observer);
+    await auth(seated, makeHs256Jwt({ secret, sub: "seat_user" }), "auth-seat-cleanup");
+    await auth(observer, makeHs256Jwt({ secret, sub: "observer_user" }), "auth-observer-cleanup");
+
+    sendFrame(seated, { version: "1.0", type: "table_join", requestId: "join-cleanup-seat", ts: "2026-03-01T00:00:01Z", payload: { tableId } });
+    await nextMessageOfType(seated, "commandResult");
+    await nextMessageOfType(seated, "table_state");
+
+    sendFrame(observer, { version: "1.0", type: "table_state_sub", requestId: "sub-cleanup-observer", ts: "2026-03-01T00:00:02Z", payload: { tableId } });
+    const baseline = await nextMessageOfType(observer, "table_state");
+    assert.equal(baseline.payload.members.some((member) => member.userId === "seat_user"), true);
+
+    seated.close();
+    const afterCleanup = await nextMessageMatching(
+      observer,
+      (frame) => frame?.type === "table_state" && frame?.roomId === tableId && frame?.payload?.members?.every((member) => member.userId !== "seat_user"),
+      5000
+    );
+    assert.equal(afterCleanup.payload.members.some((member) => member.userId === "seat_user"), false);
+    await waitForStdoutLine(child, "ws_disconnect_cleanup_broadcast_after_restore", 5000);
+    sendFrame(observer, { version: "1.0", type: "table_state_sub", requestId: "sub-cleanup-observer-snapshot", ts: "2026-03-01T00:00:03Z", payload: { tableId, view: "snapshot" } });
+    const snapshot = await nextMessageOfType(observer, "stateSnapshot");
+    assert.equal(snapshot.payload.public.turn.userId, null);
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+    await fs.rm(dir, { recursive: true, force: true });
+    await fs.rm(cleanupModule.dir, { recursive: true, force: true });
+  }
+});
+
+test("disconnect cleanup restore failure does not broadcast stale success", async () => {
+  const secret = "disconnect-cleanup-failure";
+  const tableId = "table_disconnect_restore_fail";
+  const store = {
+    tables: {
+      [tableId]: {
+        tableRow: { id: tableId, max_players: 6, status: "active" },
+        seatRows: [{ user_id: "seat_user_fail", seat_no: 2, status: "ACTIVE", is_bot: false, stack: 500 }],
+        stateRow: { version: 3, state: { handId: "h3", phase: "PREFLOP", turnUserId: "seat_user_fail", stacks: { seat_user_fail: 500 } } }
+      }
+    }
+  };
+  const { dir, filePath } = await writePersistedFile(store);
+  const cleanupModule = await writeTestModule(`
+import fs from "node:fs/promises";
+export function createInactiveCleanupExecutor({ env }) {
+  return async ({ tableId, userId }) => {
+    const raw = await fs.readFile(env.WS_PERSISTED_STATE_FILE, "utf8");
+    const doc = JSON.parse(raw || "{}");
+    const table = doc?.tables?.[tableId];
+    if (!table) return { ok: true, changed: false, status: "seat_missing", retryable: false };
+    table.seatRows = (table.seatRows || []).map((row) => row?.user_id === userId ? { ...row, status: "INACTIVE", stack: 0 } : row);
+    table.stateRow = null;
+    await fs.writeFile(env.WS_PERSISTED_STATE_FILE, JSON.stringify(doc) + "\\n", "utf8");
+    return { ok: true, changed: true, status: "cleaned", retryable: false };
+  };
+}
+`, "inactive-cleanup-test-adapter-fail.mjs");
+
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      WS_PERSISTED_STATE_FILE: filePath,
+      WS_DISCONNECT_CLEANUP_SWEEP_MS: "25",
+      WS_TIMEOUT_SWEEP_MS: "999999",
+      WS_INACTIVE_CLEANUP_ADAPTER_MODULE_PATH: `file://${cleanupModule.filePath}`
+    }
+  });
+
+  try {
+    await waitForListening(child, 5000);
+    const seated = await connectClient(port);
+    const observer = await connectClient(port);
+    await hello(seated);
+    await hello(observer);
+    await auth(seated, makeHs256Jwt({ secret, sub: "seat_user_fail" }), "auth-seat-fail");
+    await auth(observer, makeHs256Jwt({ secret, sub: "observer_user_fail" }), "auth-observer-fail");
+
+    sendFrame(seated, { version: "1.0", type: "table_join", requestId: "join-cleanup-fail-seat", ts: "2026-03-01T00:10:01Z", payload: { tableId } });
+    await nextMessageOfType(seated, "commandResult");
+    await nextMessageOfType(seated, "table_state");
+
+    sendFrame(observer, { version: "1.0", type: "table_state_sub", requestId: "sub-cleanup-fail-observer", ts: "2026-03-01T00:10:02Z", payload: { tableId } });
+    await nextMessageOfType(observer, "table_state");
+
+    seated.close();
+    await waitForStdoutLine(child, "ws_disconnect_cleanup_restore_failed", 5000);
+    assert.equal(await attemptMessage(observer, 1200), null);
+    sendFrame(observer, { version: "1.0", type: "table_state_sub", requestId: "sub-cleanup-fail-observer-snapshot", ts: "2026-03-01T00:10:03Z", payload: { tableId, view: "snapshot" } });
+    const snapshot = await nextMessageOfType(observer, "stateSnapshot");
+    assert.equal(snapshot.payload.public.turn.userId, "seat_user_fail");
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+    await fs.rm(dir, { recursive: true, force: true });
+    await fs.rm(cleanupModule.dir, { recursive: true, force: true });
+  }
+});
+
+test("disconnect cleanup turn_protected path keeps semantics unchanged", async () => {
+  const secret = "disconnect-cleanup-protected";
+  const tableId = "table_disconnect_turn_protected";
+  const store = {
+    tables: {
+      [tableId]: {
+        tableRow: { id: tableId, max_players: 6, status: "active" },
+        seatRows: [{ user_id: "seat_user_protected", seat_no: 1, status: "ACTIVE", is_bot: false, stack: 500 }],
+        stateRow: { version: 11, state: { handId: "h11", phase: "PREFLOP", turnUserId: "seat_user_protected", stacks: { seat_user_protected: 500 } } }
+      }
+    }
+  };
+  const { dir, filePath } = await writePersistedFile(store);
+  const cleanupModule = await writeTestModule(`
+export function createInactiveCleanupExecutor() {
+  return async () => ({ ok: true, changed: false, protected: true, status: "turn_protected", retryable: true });
+}
+`, "inactive-cleanup-test-adapter-protected.mjs");
+
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      WS_PERSISTED_STATE_FILE: filePath,
+      WS_DISCONNECT_CLEANUP_SWEEP_MS: "25",
+      WS_TIMEOUT_SWEEP_MS: "999999",
+      WS_INACTIVE_CLEANUP_ADAPTER_MODULE_PATH: `file://${cleanupModule.filePath}`
+    }
+  });
+
+  try {
+    await waitForListening(child, 5000);
+    const seated = await connectClient(port);
+    const observer = await connectClient(port);
+    await hello(seated);
+    await hello(observer);
+    await auth(seated, makeHs256Jwt({ secret, sub: "seat_user_protected" }), "auth-seat-protected");
+    await auth(observer, makeHs256Jwt({ secret, sub: "observer_user_protected" }), "auth-observer-protected");
+
+    sendFrame(seated, { version: "1.0", type: "table_join", requestId: "join-cleanup-protected-seat", ts: "2026-03-01T00:20:01Z", payload: { tableId } });
+    await nextMessageOfType(seated, "commandResult");
+    await nextMessageOfType(seated, "table_state");
+
+    sendFrame(observer, { version: "1.0", type: "table_state_sub", requestId: "sub-cleanup-protected-observer", ts: "2026-03-01T00:20:02Z", payload: { tableId } });
+    const baseline = await nextMessageOfType(observer, "table_state");
+    assert.equal(baseline.payload.members.some((member) => member.userId === "seat_user_protected"), true);
+
+    seated.close();
+    await waitForStdoutLine(child, "ws_disconnect_cleanup_protected", 5000);
+    assert.equal(await attemptMessage(observer, 1000), null);
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+    await fs.rm(dir, { recursive: true, force: true });
+    await fs.rm(cleanupModule.dir, { recursive: true, force: true });
+  }
+});
+
+test("disconnect cleanup runtime idempotency: changed first pass, no-op second pass on already-cleaned state", async () => {
+  const onChangedCalls = [];
+  let cleanupCallCount = 0;
+  const runtime = createDisconnectCleanupRuntime({
+    executeCleanup: async () => {
+      cleanupCallCount += 1;
+      if (cleanupCallCount === 1) return { ok: true, changed: true, status: "cleaned" };
+      return { ok: true, changed: false, status: "already_inactive" };
+    },
+    listActiveSocketsForUser: () => [],
+    socketMatchesTable: () => false,
+    onChanged: async (tableId, result) => onChangedCalls.push({ tableId, result })
+  });
+
+  runtime.enqueue({ tableId: "table_cleanup_idem", userId: "user_cleanup_idem" });
+  await runtime.sweep();
+  runtime.enqueue({ tableId: "table_cleanup_idem", userId: "user_cleanup_idem" });
+  await runtime.sweep();
+
+  assert.equal(runtime.size(), 0);
+  assert.equal(onChangedCalls.length, 2);
+  assert.equal(onChangedCalls[0].result.changed, true);
+  assert.equal(onChangedCalls[1].result.changed, false);
+  assert.equal(onChangedCalls[1].result.status, "already_inactive");
 });
 
 test("autoplay adapter loader failure does not break accepted start_hand/act command flow", async () => {
