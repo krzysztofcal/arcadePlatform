@@ -110,6 +110,11 @@ jobs:
             cp -R ws-server/poker "$PREVIEW_STAGE_WS_DIR"/poker
           fi
 
+          if [ -d ws-server/shared/poker-domain ]; then
+            mkdir -p "$PREVIEW_STAGE_WS_DIR"/shared
+            cp -R ws-server/shared/poker-domain "$PREVIEW_STAGE_WS_DIR"/shared/poker-domain
+          fi
+
           if [ -d shared ]; then
             cp -R shared "$PREVIEW_STAGE_DIR"/shared
           fi
@@ -203,6 +208,7 @@ jobs:
             sudo -n tar -xzf "$TMP_ARCHIVE" -C "$TMP_EXTRACT_DIR"
             sudo -n test -f "$TMP_EXTRACT_DIR/ws-server/server.mjs"
             sudo -n test -f "$TMP_EXTRACT_DIR/shared/poker-domain/join.mjs"
+            sudo -n test -f "$TMP_EXTRACT_DIR/ws-server/shared/poker-domain/inactive-cleanup-deps.mjs"
 
             sudo -n rsync -a --delete "$TMP_EXTRACT_DIR/ws-server/" "$PREVIEW_APP_DIR"/
             sudo -n mkdir -p "$PREVIEW_BASE_DIR/shared"
