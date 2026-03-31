@@ -97,6 +97,7 @@ jobs:
           cp ws-server/package.json "$PREVIEW_STAGE_WS_DIR"/
           cp ws-server/package-lock.json "$PREVIEW_STAGE_WS_DIR"/
           cp -R ws-server/node_modules "$PREVIEW_STAGE_WS_DIR"/node_modules
+          cp -R ws-server/node_modules "$PREVIEW_STAGE_DIR"/node_modules
 
           if [ -d ws-server/dist ]; then
             cp -R ws-server/dist "$PREVIEW_STAGE_WS_DIR"/dist
@@ -207,10 +208,13 @@ jobs:
             sudo -n test -f "$TMP_EXTRACT_DIR/ws-server/server.mjs"
             sudo -n test -f "$TMP_EXTRACT_DIR/shared/poker-domain/join.mjs"
             sudo -n test -f "$TMP_EXTRACT_DIR/ws-server/shared/poker-domain/inactive-cleanup-deps.mjs"
+            sudo -n test -d "$TMP_EXTRACT_DIR/node_modules/postgres"
 
             sudo -n rsync -a --delete "$TMP_EXTRACT_DIR/ws-server/" "$PREVIEW_APP_DIR"/
             sudo -n mkdir -p "$PREVIEW_BASE_DIR/shared"
             sudo -n rsync -a --delete "$TMP_EXTRACT_DIR/shared/" "$PREVIEW_BASE_DIR/shared"/
+            sudo -n mkdir -p "$PREVIEW_BASE_DIR/node_modules"
+            sudo -n rsync -a --delete "$TMP_EXTRACT_DIR/node_modules/" "$PREVIEW_BASE_DIR/node_modules"/
 
             sudo -n systemctl restart "$PREVIEW_SERVICE_NAME"
 

@@ -89,13 +89,18 @@ test("ws preview deploy workflow packages and validates shared runtime files", (
   assert.match(text, /mkdir -p "\$PREVIEW_STAGE_WS_DIR"/);
   assert.match(text, /cp -R ws-server\/poker "\$PREVIEW_STAGE_WS_DIR"\/poker/);
   assert.match(text, /cp -R ws-server\/shared\/poker-domain "\$PREVIEW_STAGE_WS_DIR"\/shared\/poker-domain/);
+  assert.match(text, /cp -R ws-server\/node_modules "\$PREVIEW_STAGE_WS_DIR"\/node_modules/);
+  assert.match(text, /cp -R ws-server\/node_modules "\$PREVIEW_STAGE_DIR"\/node_modules/);
   assert.match(text, /cp -R shared "\$PREVIEW_STAGE_DIR"\/shared/);
   assert.match(text, /sudo -n test -f "\$TMP_EXTRACT_DIR\/shared\/poker-domain\/join\.mjs"/);
   assert.match(text, /sudo -n test -f "\$TMP_EXTRACT_DIR\/ws-server\/server\.mjs"/);
   assert.match(text, /sudo -n test -f "\$TMP_EXTRACT_DIR\/ws-server\/shared\/poker-domain\/inactive-cleanup-deps\.mjs"/);
+  assert.match(text, /sudo -n test -d "\$TMP_EXTRACT_DIR\/node_modules\/postgres"/);
   assert.match(text, /sudo -n rsync -a --delete "\$TMP_EXTRACT_DIR\/ws-server\/" "\$PREVIEW_APP_DIR"\//);
   assert.match(text, /sudo -n mkdir -p "\$PREVIEW_BASE_DIR\/shared"/);
   assert.match(text, /sudo -n rsync -a --delete "\$TMP_EXTRACT_DIR\/shared\/" "\$PREVIEW_BASE_DIR\/shared"\//);
+  assert.match(text, /sudo -n mkdir -p "\$PREVIEW_BASE_DIR\/node_modules"/);
+  assert.match(text, /sudo -n rsync -a --delete "\$TMP_EXTRACT_DIR\/node_modules\/" "\$PREVIEW_BASE_DIR\/node_modules"\//);
   assert.doesNotMatch(text, /sudo -n rsync -a --delete "\$TMP_EXTRACT_DIR"\/ "\$PREVIEW_BASE_DIR"\//);
 });
 
