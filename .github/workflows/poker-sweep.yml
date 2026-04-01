@@ -10,9 +10,6 @@ jobs:
   sweep:
     runs-on: ubuntu-latest
     steps:
-      - name: Call sweep
-        env:
-          SWEEP_SECRET: ${{ secrets.POKER_SWEEP_SECRET }}
+      - name: Sweep endpoint retired
         run: |
-          curl -fsS -X POST "https://play.kcswh.pl/.netlify/functions/poker-sweep" \
-            -H "x-sweep-secret: ${SWEEP_SECRET}" | cat
+          echo "HTTP poker-sweep endpoint is retired (410); gameplay cleanup is WS-owned."

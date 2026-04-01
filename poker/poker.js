@@ -4,20 +4,17 @@
   var LIST_URL = '/.netlify/functions/poker-list-tables';
   var CREATE_URL = '/.netlify/functions/poker-create-table';
   var QUICK_SEAT_URL = '/.netlify/functions/poker-quick-seat';
-  var GET_URL = '/.netlify/functions/poker-get-table';
   var WS_JOIN_ENDPOINT = 'ws:join';
-  var LEAVE_URL = '/.netlify/functions/poker-leave';
+  var WS_LEAVE_ENDPOINT = 'ws:leave';
   var WS_START_HAND_ENDPOINT = 'ws:start_hand';
   var WS_ACT_ENDPOINT = 'ws:act';
   var EXPORT_LOG_URL = '/.netlify/functions/poker-export-log';
-  var POLL_INTERVAL_BASE = 2000;
-  var POLL_INTERVAL_MAX = 10000;
   var PENDING_RETRY_DELAYS = [150, 300, 600, 900];
   var PENDING_RETRY_BUDGET_MS = 2000;
   var UI_VERSION = '2025-02-19';
   var POKER_DUMP_PATTERNS = [/\bpoker_[a-z0-9_]+\b/i, /\bpoker_rt_[a-z0-9_]+\b/i, /\bpoker_ws_[a-z0-9_]+\b/i, /\bws_[a-z0-9_]+\b/i, /\"\/.netlify\/functions\/poker-[^\"\s]+/i, /\/poker\//i];
 
-  var state = { token: null, polling: false, pollTimer: null, pollInterval: POLL_INTERVAL_BASE, pollErrors: 0 };
+  var state = { token: null };
 
   function klog(kind, data){
     try {
@@ -1613,16 +1610,11 @@
 
 
     function startPollingFallback(reason){
-      httpFallbackActive = true;
-      if (state.polling) return;
-      if (!isPageActive()) return;
-      if (reason){
-        klog('poker_http_fallback_start', {
-          tableId: tableId,
-          reason: reason
-        });
-      }
-      startPolling();
+      httpFallbackActive = false;
+      klog('poker_http_fallback_retired', {
+        tableId: tableId,
+        reason: reason || null
+      });
     }
 
     function startWsBootstrap(){
@@ -1661,7 +1653,6 @@
             detail: info && info.detail ? info.detail : null
           });
           startPollingFallback(info && info.code ? info.code : 'protocol_error');
-          loadTable(false);
         }
       });
       if (wsClient && typeof wsClient.start === 'function'){
@@ -1684,14 +1675,11 @@
 
     async function bootstrapWsAfterBaseline(phase){
       httpFallbackActive = false;
-      var loaded = await loadTable(false);
-      if (!loaded || !tableData || typeof tableData !== 'object') return false;
       try {
         startWsBootstrap();
       } catch (_err){
         logWsBootstrapException(_err, phase || 'ws_bootstrap');
         startPollingFallback('ws_bootstrap_exception');
-        loadTable(false);
         return false;
       }
       return true;
@@ -2170,7 +2158,7 @@
         return;
       }
       var message = action === 'join' ? t('pokerErrJoinPending', 'Join still pending. Please try again.') : t('pokerErrLeavePending', 'Leave still pending. Please try again.');
-      var endpoint = action === 'join' ? WS_JOIN_ENDPOINT : LEAVE_URL;
+      var endpoint = action === 'join' ? WS_JOIN_ENDPOINT : WS_LEAVE_ENDPOINT;
       var retries = action === 'join' ? pendingJoinRetries : pendingLeaveRetries;
       klog('poker_pending_timeout', { action: action, tableId: tableId, retries: retries, budgetMs: PENDING_RETRY_BUDGET_MS });
       if (action === 'join'){
@@ -2443,102 +2431,7 @@
       });
     }
 
-    async function loadTable(isPolling){
-      setError(errorEl, null);
-      try {
-        var data = await apiGet(GET_URL + '?tableId=' + encodeURIComponent(tableId));
-        tableData = data || {};
-        tableData._actionConstraints = getSafeConstraints(tableData);
-        isSeated = isCurrentUserSeated(tableData);
-        var wsApplied = false;
-        if (pendingWsSnapshot && !wsSnapshotSeen){
-          wsApplied = applyWsSnapshotNow(pendingWsSnapshot, {
-            allowWhenNoBaseline: false,
-            allowUnversionedUpgrade: true
-          });
-        }
-        if (!wsApplied){
-          renderTable(tableData);
-        }
-        if (isSeated){
-            } else {
-          clearDeadlineNudge();
-        }
-        var seatedCount = getSeatedCount(tableData);
-        if (isSeated && seatedCount !== lastAutoStartSeatCount){
-          lastAutoStartSeatCount = seatedCount;
-          maybeAutoStartHand();
-        }
-        if (getGameplayWsSender(wsClient, 'sendJoin', 'join')){
-          maybeAutoJoin();
-        }
-        if (isPolling){ resetPollBackoff(); }
-        return true;
-      } catch (err){
-        if (isAuthError(err)){
-          stopPendingAll();
-          handleTableAuthExpired({
-            authMsg: authMsg,
-            content: tableContent,
-            errorEl: errorEl,
-            stopPolling: stopPolling,
-            stopHeartbeat: stopHeartbeat,
-            onAuthExpired: startAuthWatch
-          });
-          return false;
-        }
-        if (err && err.code === 'state_invalid'){
-          setError(errorEl, t('pokerErrStateChanged', 'State changed. Refreshing...'));
-          scheduleRetry(function(){ loadTable(false); }, 300);
-          return false;
-        }
-        klog('poker_table_load_error', { tableId: tableId, error: err.message || err.code });
-        setError(errorEl, err.message || t('pokerErrLoadTable', 'Failed to load table'));
-        if (isPolling){ increasePollBackoff(); }
-        return false;
-      }
-    }
-
-    function resetPollBackoff(){
-      state.pollErrors = 0;
-      state.pollInterval = POLL_INTERVAL_BASE;
-    }
-
-    function increasePollBackoff(){
-      state.pollErrors++;
-      if (state.pollErrors >= 2){
-        state.pollInterval = Math.min(state.pollInterval * 2, POLL_INTERVAL_MAX);
-      }
-    }
-
-    function scheduleNextPoll(){
-      if (!state.polling || document.visibilityState === 'hidden') return;
-      if (state.pollTimer){ clearTimeout(state.pollTimer); }
-      state.pollTimer = setTimeout(pollOnce, state.pollInterval);
-    }
-
-    async function pollOnce(){
-      if (!state.polling || document.visibilityState === 'hidden') return;
-      await loadTable(true);
-      scheduleNextPoll();
-    }
-
-    function startPolling(){
-      if (state.polling) return;
-      state.polling = true;
-      scheduleNextPoll();
-    }
-
     function stopPolling(){
-      state.polling = false;
-      if (state.pollTimer){
-        clearTimeout(state.pollTimer);
-        state.pollTimer = null;
-      }
-      if (turnTimerInterval){
-        clearInterval(turnTimerInterval);
-        turnTimerInterval = null;
-      }
       clearDeadlineNudge();
     }
 
@@ -2567,10 +2460,16 @@
       deadlineNudgeTimer = setTimeout(function(){
         deadlineNudgeTimer = null;
         deadlineNudgeTargetMs = null;
-        if (!isPageActive()) return;
-        if (joinPending || leavePending || startHandPending || actPending) return;
-        loadTable(false);
+        klog('poker_deadline_nudge_retired', { tableId: tableId });
       }, delayMs);
+    }
+
+    function requestWsResync(reason){
+      if (!isPageActive()) return;
+      if (joinPending || leavePending || startHandPending || actPending) return;
+      if (wsClient && typeof wsClient.requestResync === 'function'){
+        wsClient.requestResync({ reason: reason || 'resync' });
+      }
     }
 
 
@@ -2585,10 +2484,7 @@
     }
 
     function handleRealtimeEvent(_payload){
-      if (!isPageActive()) return;
-      if (!tableId) return;
-      if (joinPending || leavePending || startHandPending || actPending) return;
-      loadTable(false);
+      requestWsResync('realtime_event');
     }
 
     function startRealtime(){
@@ -2616,8 +2512,7 @@
             tableId: tableId
           });
         }
-        startPolling();
-        loadTable(false);
+        startPollingFallback('realtime_unavailable');
       }
     }
 
@@ -2920,7 +2815,7 @@
           clearStartHandPending();
           if (resultCode === 'state_invalid') {
             setInlineStatus(startHandStatusEl, t('pokerErrStateChanged', 'State changed. Refreshing...'), 'error');
-            if (isPageActive()) loadTable(false);
+            requestWsResync('state_invalid');
             return { ok: false, code: resultCode };
           }
           if (suppressNeutralErrors && isNeutralAutoStartCode(resultCode)) {
@@ -3031,7 +2926,7 @@
             setInlineStatus(actStatusEl, t('pokerErrActAmount', 'Invalid amount'), 'error');
           } else if (result.error === 'state_invalid'){
             setInlineStatus(actStatusEl, t('pokerErrStateChanged', 'State changed. Refreshing...'), 'error');
-            if (isPageActive()) loadTable(false);
+            requestWsResync('state_invalid');
           } else if (result.error === 'hand_not_live'){
             setInlineStatus(actStatusEl, t('pokerErrHandNotLive', 'Hand is not live'), 'error');
           } else {
@@ -3076,7 +2971,7 @@
         }
         if (err && err.code === 'state_invalid'){
           setInlineStatus(actStatusEl, t('pokerErrStateChanged', 'State changed. Refreshing...'), 'error');
-          if (isPageActive()) loadTable(false);
+          requestWsResync('state_invalid');
           return { ok: false, code: 'state_invalid' };
         }
         if (err && err.code === 'hand_not_live'){
@@ -3183,7 +3078,7 @@
         }
         if (leaveResult && leaveResult.ok === false){
           clearLeavePending();
-          setActionError('leave', LEAVE_URL, leaveResult.error || 'request_failed', t('pokerErrLeave', 'Failed to leave'));
+          setActionError('leave', WS_LEAVE_ENDPOINT, leaveResult.error || 'request_failed', t('pokerErrLeave', 'Failed to leave'));
           return;
         }
         clearLeavePending();
@@ -3210,7 +3105,7 @@
         }
         clearLeavePending();
         klog('poker_leave_error', { tableId: tableId, error: err.message || err.code });
-        setActionError('leave', LEAVE_URL, err.code || 'request_failed', err.message || t('pokerErrLeave', 'Failed to leave'));
+        setActionError('leave', WS_LEAVE_ENDPOINT, err.code || 'request_failed', err.message || t('pokerErrLeave', 'Failed to leave'));
       }
     }
 
@@ -3230,13 +3125,9 @@
           if (pendingActStartedAt) pendingActStartedAt += hiddenDuration;
           pendingHiddenAt = null;
         }
-        state.pollInterval = POLL_INTERVAL_BASE;
-        state.pollErrors = 0;
-        var canRefreshBaseline = !pendingJoinRequestId && !pendingLeaveRequestId;
+                var canRefreshBaseline = !pendingJoinRequestId && !pendingLeaveRequestId;
         if (currentUserId && canRefreshBaseline){
           bootstrapWsAfterBaseline('visibility_resume');
-        } else if (!currentUserId) {
-          startPollingFallback('auth_missing');
         }
         if (pendingJoinRequestId) schedulePendingRetry('join', retryJoin);
         if (pendingLeaveRequestId) schedulePendingRetry('leave', retryLeave);
@@ -3279,7 +3170,7 @@
         }
         clearLeavePending();
         klog('poker_leave_click_error', { message: err && (err.message || err.code) ? err.message || err.code : 'unknown_error' });
-        setActionError('leave', LEAVE_URL, err && err.code ? err.code : 'request_failed', err && (err.message || err.code) ? err.message || err.code : t('pokerErrLeave', 'Failed to leave'));
+        setActionError('leave', WS_LEAVE_ENDPOINT, err && err.code ? err.code : 'request_failed', err && (err.message || err.code) ? err.message || err.code : t('pokerErrLeave', 'Failed to leave'));
       });
     }
 

@@ -18,6 +18,8 @@ test('poker UI gameplay writes keep WS-only runtime path', () => {
   assert.match(source, /resolveGameplayWsSender\(wsClient, 'sendLeave', 'leave'/);
   assert.match(source, /resolveGameplayWsSender\(wsClient, 'sendStartHand', 'start_hand'/);
   assert.match(source, /resolveGameplayWsSender\(wsClient, 'sendAct', 'act'/);
-  assert.match(source, /var GET_URL = '\/.netlify\/functions\/poker-get-table'/);
-  assert.match(source, /var LEAVE_URL = '\/.netlify\/functions\/poker-leave'/);
+  assert.doesNotMatch(source, /poker-get-table/);
+  assert.doesNotMatch(source, /poker-leave/);
+  assert.doesNotMatch(source, /state\.polling/);
+  assert.doesNotMatch(source, /poker_http_fallback_start/);
 });
