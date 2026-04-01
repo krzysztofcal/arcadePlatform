@@ -114,7 +114,7 @@ Examples:
 
 - `table_state` remains the **presence-only** WS membership frame with payload `{ tableId, members }`.
 - New `table_snapshot` is the gameplay snapshot command/response path and MUST NOT overload `table_state`.
-- `table_snapshot` reuses HTTP `poker-get-table` read semantics: state normalization, timeout application path, private-state stripping, and viewer-scoped `myHoleCards`.
+- `table_snapshot` is WS-native snapshot/resync payload shaping (state normalization + private-state stripping + viewer-scoped `myHoleCards`) and does not depend on HTTP `poker-get-table`.
 - `table_snapshot` deterministic error messages are limited to known contract/state codes (`table_not_found`, `state_missing`, `state_invalid`, `contract_mismatch_empty_legal_actions`); unknown backend/storage failures collapse to `snapshot_failed`.
 
 ### table_join / join contract (authoritative seat lifecycle boundary)
@@ -127,7 +127,7 @@ Examples:
 
 Optional runtime mode: deployments may explicitly enable observe-only `table_join` via server config (`WS_OBSERVE_ONLY_JOIN=1`). In that mode, `table_join` is transport-level connect/observe/resync for non-seated users and does not allocate seats.
 
-Authoritative seat acquisition/buy-in remains server-authoritative, and the normal browser gameplay runtime MUST use WS as the only write path for `table_join`/`join`, `leave`, `start_hand`, and `act`. The retired `netlify/functions/poker-join.mjs` endpoint is no longer a supported gameplay/runtime integration point. Existing HTTP handlers such as `netlify/functions/poker-start-hand.mjs`, `netlify/functions/poker-act.mjs`, and `netlify/functions/poker-leave.mjs` remain legacy/admin/operational paths and MUST NOT be used as client gameplay fallback for the same commands.
+Authoritative seat acquisition/buy-in remains server-authoritative, and browser gameplay runtime MUST use WS as the only write path for `table_join`/`join`, `leave`, `start_hand`, and `act`. The HTTP gameplay endpoints (`poker-join`, `poker-heartbeat`, `poker-get-table`, `poker-start-hand`, `poker-act`, `poker-leave`, `poker-sweep`) are retired and return explicit non-authoritative errors (`410`) instead of mutating live gameplay state.
 
 `leave` remains authoritative for already-seated users: when the authenticated user is an authoritative table member, WS `leave` executes authoritative member removal/cashout semantics in both default and observe-only runtime modes.
 
