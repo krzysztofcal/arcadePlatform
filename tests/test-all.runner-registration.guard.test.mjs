@@ -47,3 +47,4 @@ assert.match(source, /run\("node", \["tests\/poker-http-retired-contract\.guard\
 assert.doesNotMatch(source, /tests\/poker-get-table-nonmutation\.guard\.test\.mjs/, "runner should not include legacy get-table nonmutation guard after retirement");
 assert.doesNotMatch(source, /tests\/poker-start-hand-storage\.guard\.test\.mjs/, "runner should not include legacy start-hand storage guard after retirement");
 assert.match(source, /run\("node", \["tests\/poker-workflows\.playwright-install\.guard\.test\.mjs"\],/, "runner should include poker workflow playwright-install guard test");
+assert.match(source, /run\("node", \["tests\/poker-workflows\.no-http-sweep\.guard\.test\.mjs"\],/, "runner should include poker workflow no-http-sweep guard test");

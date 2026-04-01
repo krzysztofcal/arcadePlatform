@@ -103,6 +103,7 @@ run("node", ["tests/poker-ui-requestid-retry.guard.test.mjs"], "poker-ui-request
 run("node", ["tests/poker-requestid-helper.guard.test.mjs"], "poker-requestid-helper-guard");
 run("node", ["tests/poker-idempotency-scope.guard.test.mjs"], "poker-idempotency-scope-guard");
 run("node", ["tests/poker-workflows.playwright-install.guard.test.mjs"], "poker-workflows-playwright-install-guard");
+run("node", ["tests/poker-workflows.no-http-sweep.guard.test.mjs"], "poker-workflows-no-http-sweep-guard");
 
 try { run("npm", ["run", "-s", "lint:games"], "unit"); } catch { /* optional */ }
 
