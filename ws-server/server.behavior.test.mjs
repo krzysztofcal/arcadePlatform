@@ -2719,12 +2719,18 @@ export function createInactiveCleanupExecutor({ env }) {
     assert.equal(afterCleanup.payload.members.some((member) => member.userId === "seat_user"), false);
 
     let restoredSnapshot = null;
+    const extractSeatUserIds = (snapshot) => {
+      const seats = Array.isArray(snapshot?.payload?.public?.seats) ? snapshot.payload.public.seats : [];
+      return seats
+        .map((seat) => (typeof seat?.userId === "string" ? seat.userId : (typeof seat?.user_id === "string" ? seat.user_id : null)))
+        .filter((id) => typeof id === "string" && id.length > 0);
+    };
     const snapshotDeadline = Date.now() + 5000;
     while (Date.now() < snapshotDeadline) {
       sendFrame(observer, { version: "1.0", type: "table_state_sub", requestId: `sub-cleanup-observer-snapshot-${Date.now()}`, ts: "2026-03-01T00:00:03Z", payload: { tableId, view: "snapshot" } });
       restoredSnapshot = await nextMessageOfType(observer, "stateSnapshot");
       const restoredTurnUserId = restoredSnapshot?.payload?.public?.turn?.userId ?? null;
-      const restoredSeatUserIds = Object.keys(restoredSnapshot?.payload?.public?.seats || {});
+      const restoredSeatUserIds = extractSeatUserIds(restoredSnapshot);
       const seatRemoved = restoredSeatUserIds.includes("seat_user") === false;
       const validTurn = restoredTurnUserId === null || restoredSeatUserIds.includes(restoredTurnUserId);
       if (seatRemoved && validTurn) {
@@ -2732,7 +2738,7 @@ export function createInactiveCleanupExecutor({ env }) {
       }
     }
     const restoredTurnUserId = restoredSnapshot?.payload?.public?.turn?.userId ?? null;
-    const restoredSeatUserIds = Object.keys(restoredSnapshot?.payload?.public?.seats || {});
+    const restoredSeatUserIds = extractSeatUserIds(restoredSnapshot);
     assert.equal(restoredSeatUserIds.includes("seat_user"), false);
     assert.equal(restoredTurnUserId === null || restoredSeatUserIds.includes(restoredTurnUserId), true);
   } finally {
