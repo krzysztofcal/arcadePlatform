@@ -79,3 +79,23 @@ const hideActions = hooks.shouldShowTurnActions({
   legalActions: ['FOLD', 'CALL'],
 });
 assert.equal(hideActions, false, 'actions should be hidden for the non-acting player');
+
+const betUiState = hooks.resolveTurnActionUiState({
+  isUsersTurn: true,
+  phase: 'TURN',
+  turnUserId: 'user-1',
+  currentUserId: 'user-1',
+  rawLegalActions: ['BET'],
+  availableActions: ['BET'],
+});
+assert.equal(betUiState.showActions, true, 'turn actions should remain visible when raw legal actions include BET');
+
+const raiseUiState = hooks.resolveTurnActionUiState({
+  isUsersTurn: true,
+  phase: 'RIVER',
+  turnUserId: 'user-1',
+  currentUserId: 'user-1',
+  rawLegalActions: ['RAISE', 'CALL', 'FOLD'],
+  availableActions: ['RAISE', 'CALL', 'FOLD'],
+});
+assert.equal(raiseUiState.showActions, true, 'turn actions should remain visible when raw legal actions include RAISE');
