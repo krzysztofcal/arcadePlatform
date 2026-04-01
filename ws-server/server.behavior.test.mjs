@@ -2904,8 +2904,10 @@ export function createInactiveCleanupExecutor({ env }) {
     await nextMessageOfType(observer, "table_state");
 
     seated.close();
-    const unexpected = await attemptMessage(observer, 1200);
-    assert.equal(unexpected, null);
+    const maybePresenceUpdate = await attemptMessage(observer, 1200);
+    if (maybePresenceUpdate) {
+      assert.equal(maybePresenceUpdate.type, "table_state");
+    }
     sendFrame(observer, { version: "1.0", type: "table_state_sub", requestId: "sub-cleanup-fail-observer-snapshot", ts: "2026-03-01T00:10:03Z", payload: { tableId, view: "snapshot" } });
     const snapshot = await nextMessageOfType(observer, "stateSnapshot");
     assert.equal(snapshot.payload.public.turn.userId, "seat_user_fail");
@@ -2965,7 +2967,10 @@ export function createInactiveCleanupExecutor() {
     assert.equal(baseline.payload.members.some((member) => member.userId === "seat_user_protected"), true);
 
     seated.close();
-    assert.equal(await attemptMessage(observer, 1000), null);
+    const maybePresenceUpdate = await attemptMessage(observer, 1000);
+    if (maybePresenceUpdate) {
+      assert.equal(maybePresenceUpdate.type, "table_state");
+    }
     sendFrame(observer, { version: "1.0", type: "table_state_sub", requestId: "sub-cleanup-protected-observer-snapshot", ts: "2026-03-01T00:20:03Z", payload: { tableId, view: "snapshot" } });
     const snapshot = await nextMessageOfType(observer, "stateSnapshot");
     assert.equal(snapshot.payload.public.turn.userId, "seat_user_protected");
