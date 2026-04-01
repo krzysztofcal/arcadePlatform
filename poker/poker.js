@@ -347,23 +347,10 @@
         if (normalizedType) sanitized.add(normalizedType);
       });
     }
-    var normalizedConstraints = normalizeActionConstraints(constraints);
-    var betMax = normalizedConstraints.maxBetAmount;
-    var betAllowed = betMax != null && betMax >= 1;
-    if (sanitized.has('BET') && !betAllowed){
-      sanitized.delete('BET');
-    }
-    var raiseMin = normalizedConstraints.minRaiseTo;
-    var raiseMax = normalizedConstraints.maxRaiseTo;
-    var raiseRangeValid = raiseMin != null && raiseMax != null && raiseMax >= raiseMin;
-    var raiseActionable = raiseRangeValid && raiseMax >= 1;
-    if (sanitized.has('RAISE') && !raiseActionable){
-      sanitized.delete('RAISE');
-    }
     return {
       allowed: sanitized,
       needsAmount: sanitized.has('BET') || sanitized.has('RAISE'),
-      constraints: normalizedConstraints
+      constraints: normalizeActionConstraints(constraints)
     };
   }
 
@@ -381,16 +368,14 @@
     }
     var constraints = normalizeActionConstraints(allowedInfo.constraints);
     if (normalizedType === 'BET'){
-      if (constraints.maxBetAmount == null || constraints.maxBetAmount < 1 || amount > constraints.maxBetAmount){
+      if (constraints.maxBetAmount != null && constraints.maxBetAmount >= 1 && amount > constraints.maxBetAmount){
         return { error: t('pokerErrActAmount', 'Invalid amount') };
       }
     } else if (normalizedType === 'RAISE'){
       var raiseMin = constraints.minRaiseTo;
       var raiseMax = constraints.maxRaiseTo;
-      if (raiseMin == null || raiseMax == null || raiseMax < raiseMin || raiseMax < 1){
-        return { error: t('pokerErrActAmount', 'Invalid amount') };
-      }
-      if (amount < raiseMin || amount > raiseMax){
+      var hasValidRaiseRange = raiseMin != null && raiseMax != null && raiseMax >= raiseMin && raiseMax >= 1;
+      if (hasValidRaiseRange && (amount < raiseMin || amount > raiseMax)){
         return { error: t('pokerErrActAmount', 'Invalid amount') };
       }
     }
@@ -437,17 +422,17 @@
 
   function resolveTurnActionUiState(params){
     var info = params || {};
-    var sanitizedAllowedActions = Array.isArray(info.sanitizedAllowedActions) ? info.sanitizedAllowedActions : [];
+    var availableActions = Array.isArray(info.availableActions) ? info.availableActions : [];
     var rawLegalActions = Array.isArray(info.rawLegalActions) ? info.rawLegalActions : [];
     var showActions = shouldShowTurnActions({
       phase: info.phase,
       turnUserId: info.turnUserId,
       currentUserId: info.currentUserId,
-      legalActions: sanitizedAllowedActions
+      legalActions: availableActions
     });
     var isUsersTurn = !!info.isUsersTurn;
     var status = null;
-    if (isUsersTurn && sanitizedAllowedActions.length === 0){
+    if (isUsersTurn && availableActions.length === 0){
       status = rawLegalActions.length > 0 ? 'no_actionable_moves' : 'contract_mismatch';
     }
     return { showActions: showActions, status: status };
@@ -1856,10 +1841,9 @@
         if (type) allowed.add(type);
       }
       var sourceConstraints = data && data._actionConstraints ? data._actionConstraints : getConstraintsFromResponse(data);
-      var sanitized = sanitizeAllowedActions(allowed, sourceConstraints);
-      info.allowed = sanitized.allowed;
-      info.needsAmount = sanitized.needsAmount;
-      info.constraints = sanitized.constraints;
+      info.allowed = allowed;
+      info.needsAmount = allowed.has('BET') || allowed.has('RAISE');
+      info.constraints = normalizeActionConstraints(sourceConstraints);
       return info;
     }
 
@@ -1873,17 +1857,18 @@
         currentUserId: currentUserId,
         isUsersTurn: allowedInfo.isUsersTurn,
         rawLegalActions: allowedInfo.legalActions,
-        sanitizedAllowedActions: Array.from(allowedInfo.allowed)
+        availableActions: Array.from(allowedInfo.allowed)
       });
       var hasActions = uiState.showActions;
       toggleHidden(actRow, !hasActions);
-      toggleHidden(actAmountWrap, !hasActions || !allowedInfo.needsAmount);
       if (pendingActType && !allowed.has(pendingActType)){
         pendingActType = null;
         if (actAmountInput){
           actAmountInput.value = '';
         }
       }
+      var selectedNeedsAmount = pendingActType === 'BET' || pendingActType === 'RAISE';
+      toggleHidden(actAmountWrap, !hasActions || !selectedNeedsAmount);
       var actions = [
         { type: 'CHECK', el: actCheckBtn },
         { type: 'CALL', el: actCallBtn },
@@ -1912,7 +1897,7 @@
         }
       }
       if (actAmountInput){
-        setDisabled(actAmountInput, !enabled || actPending || !allowedInfo.needsAmount);
+        setDisabled(actAmountInput, !enabled || actPending || !selectedNeedsAmount);
         updateActAmountConstraints(allowedInfo, pendingActType);
       }
       updateActAmountHint(allowedInfo, pendingActType);

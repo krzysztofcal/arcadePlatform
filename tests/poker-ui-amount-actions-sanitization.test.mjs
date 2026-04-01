@@ -49,111 +49,63 @@ vm.createContext(sandbox);
 vm.runInContext(source, sandbox, { filename: 'poker/poker.js' });
 const hooks = sandbox.window.__POKER_UI_TEST_HOOKS__;
 
-assert.ok(hooks && hooks.sanitizeAllowedActions && hooks.validateAmountActionPayload && hooks.resolveTurnActionUiState, 'expected poker UI sanitization hooks');
+assert.ok(hooks && hooks.sanitizeAllowedActions && hooks.validateAmountActionPayload && hooks.resolveTurnActionUiState, 'expected poker UI amount-action hooks');
 
-// Test case 1 — BET hidden when numeric max is zero.
+// Contract: legalActions availability is server-authoritative even when constraints are missing.
 {
-  const sanitized = hooks.sanitizeAllowedActions(new Set(['BET', 'CHECK']), { maxBetAmount: 0, toCall: 0 });
-  assert.equal(sanitized.allowed.has('BET'), false, 'BET should be removed when maxBetAmount is zero');
-  const showActions = hooks.shouldShowTurnActions({
-    phase: 'PREFLOP',
-    turnUserId: 'user-1',
-    currentUserId: 'user-1',
-    legalActions: Array.from(sanitized.allowed)
-  });
-  assert.equal(showActions, true, 'row should stay visible when a sanitized non-amount action (CHECK) remains');
-  assert.equal(sanitized.needsAmount, false, 'amount input should not be required when impossible amount action is removed');
+  const allowedInfo = hooks.sanitizeAllowedActions(new Set(['BET']), null);
+  assert.equal(allowedInfo.allowed.has('BET'), true, 'BET should remain available when constraints are missing');
+  const payload = hooks.validateAmountActionPayload('BET', '20', allowedInfo);
+  assert.equal(payload.error, undefined, 'positive BET should pass local validation when maxBetAmount is absent');
+  assert.equal(payload.amount, 20, 'validated payload amount should be normalized to integer');
 }
 
-// Test case 2 — BET shown when numeric max is valid.
 {
-  const sanitized = hooks.sanitizeAllowedActions(new Set(['BET']), { maxBetAmount: 20, toCall: 0 });
-  assert.equal(sanitized.allowed.has('BET'), true, 'BET should remain available with positive maxBetAmount');
-  const payload = hooks.validateAmountActionPayload('BET', '12', sanitized);
-  assert.equal(payload.error, undefined, 'valid bet amount should pass payload validation');
-  assert.equal(payload.amount, 12, 'validated payload amount should be normalized to integer');
+  const allowedInfo = hooks.sanitizeAllowedActions(new Set(['RAISE']), { minRaiseTo: null, maxRaiseTo: null });
+  assert.equal(allowedInfo.allowed.has('RAISE'), true, 'RAISE should remain available when raise range constraints are absent');
+  const payload = hooks.validateAmountActionPayload('RAISE', '20', allowedInfo);
+  assert.equal(payload.error, undefined, 'positive RAISE should pass local validation when raise range is absent');
+  assert.equal(payload.amount, 20, 'validated raise payload should normalize to integer');
 }
 
-// Test case 3 — RAISE hidden when raise range is impossible.
+// Invalid non-positive amount is still rejected.
 {
-  const sanitized = hooks.sanitizeAllowedActions(new Set(['RAISE']), { minRaiseTo: 10, maxRaiseTo: 5 });
-  assert.equal(sanitized.allowed.has('RAISE'), false, 'RAISE should be removed when minRaiseTo exceeds maxRaiseTo');
-  assert.equal(sanitized.needsAmount, false, 'amount input should not remain required when impossible raise is removed');
-  const showActions = hooks.shouldShowTurnActions({
-    phase: 'TURN',
-    turnUserId: 'user-1',
-    currentUserId: 'user-1',
-    legalActions: Array.from(sanitized.allowed)
-  });
-  assert.equal(showActions, false, 'row should be hidden when sanitization removes all actions');
+  const allowedInfo = hooks.sanitizeAllowedActions(new Set(['BET']), null);
+  const zeroPayload = hooks.validateAmountActionPayload('BET', '0', allowedInfo);
+  assert.equal(zeroPayload.error, 'Enter an amount for bet/raise', 'zero bet amount should fail local validation');
+  const negativePayload = hooks.validateAmountActionPayload('RAISE', '-4', hooks.sanitizeAllowedActions(new Set(['RAISE']), null));
+  assert.equal(negativePayload.error, 'Enter an amount for bet/raise', 'negative raise amount should fail local validation');
 }
 
-// Test case 4 — stale selected BET cleared after snapshot update (modeled via validation).
+// When constraints are present and valid they still enforce ranges.
 {
-  const initial = hooks.sanitizeAllowedActions(new Set(['BET']), { maxBetAmount: 15 });
-  assert.equal(initial.allowed.has('BET'), true, 'BET is initially allowed');
-  const updated = hooks.sanitizeAllowedActions(new Set(['BET']), { maxBetAmount: 0 });
-  assert.equal(updated.allowed.has('BET'), false, 'BET is removed after constraints update');
-  const payload = hooks.validateAmountActionPayload('BET', '5', updated);
-  assert.equal(payload.error, 'Action not allowed right now', 'stale BET selection should fail as not allowed after sanitization update');
+  const allowedInfo = hooks.sanitizeAllowedActions(new Set(['BET']), { maxBetAmount: 20 });
+  const payload = hooks.validateAmountActionPayload('BET', '21', allowedInfo);
+  assert.equal(payload.error, 'Invalid amount', 'BET should enforce maxBetAmount when present');
 }
 
-// Test case 5 — submission path uses sanitized action availability.
 {
-  const rawLegalButImpossible = hooks.sanitizeAllowedActions(new Set(['BET', 'CALL']), { maxBetAmount: 0, toCall: 0 });
-  const payload = hooks.validateAmountActionPayload('BET', '1', rawLegalButImpossible);
-  assert.equal(payload.error, 'Action not allowed right now', 'payload validation should reject impossible BET even if legalActions included BET');
+  const allowedInfo = hooks.sanitizeAllowedActions(new Set(['RAISE']), { minRaiseTo: 10, maxRaiseTo: 20 });
+  const low = hooks.validateAmountActionPayload('RAISE', '9', allowedInfo);
+  assert.equal(low.error, 'Invalid amount', 'RAISE should enforce minRaiseTo when valid range is present');
+  const inRange = hooks.validateAmountActionPayload('RAISE', '15', allowedInfo);
+  assert.equal(inRange.error, undefined, 'RAISE should accept value inside valid range');
 }
 
-// Regression — sanitized-empty actions hide turn actions row when driven by sanitized model.
+// Turn actions visibility is computed from available legal actions.
 {
-  const sanitized = hooks.sanitizeAllowedActions(new Set(['BET']), { maxBetAmount: 0, toCall: 0 });
-  assert.equal(sanitized.allowed.has('BET'), false, 'sanitization should remove impossible BET');
-  const showActions = hooks.shouldShowTurnActions({
-    phase: 'RIVER',
-    turnUserId: 'user-1',
-    currentUserId: 'user-1',
-    legalActions: Array.from(sanitized.allowed)
-  });
-  assert.equal(showActions, false, 'turn actions should be hidden when sanitized actions are empty');
   const uiState = hooks.resolveTurnActionUiState({
     isUsersTurn: true,
     phase: 'RIVER',
     turnUserId: 'user-1',
     currentUserId: 'user-1',
     rawLegalActions: ['BET'],
-    sanitizedAllowedActions: Array.from(sanitized.allowed)
+    availableActions: ['BET']
   });
-  assert.equal(uiState.showActions, false, 'resolved UI state should hide row when sanitized actions are empty');
-  assert.equal(uiState.status, 'no_actionable_moves', 'resolved UI state should indicate non-mismatch no-actionable state');
-  const payload = hooks.validateAmountActionPayload('BET', '1', sanitized);
-  assert.equal(payload.error, 'Action not allowed right now', 'sanitized-empty state should block impossible BET submission');
+  assert.equal(uiState.showActions, true, 'BET should keep action row visible');
+  assert.equal(uiState.status, null, 'status should be clear when available legal actions exist');
 }
 
-// Regression happy path — valid positive BET keeps turn actions visible.
-{
-  const sanitized = hooks.sanitizeAllowedActions(new Set(['BET']), { maxBetAmount: 20, toCall: 0 });
-  assert.equal(sanitized.allowed.has('BET'), true, 'BET should remain allowed when maxBetAmount is positive');
-  const showActions = hooks.shouldShowTurnActions({
-    phase: 'FLOP',
-    turnUserId: 'user-1',
-    currentUserId: 'user-1',
-    legalActions: Array.from(sanitized.allowed)
-  });
-  assert.equal(showActions, true, 'turn actions should stay visible for valid sanitized BET');
-  const uiState = hooks.resolveTurnActionUiState({
-    isUsersTurn: true,
-    phase: 'FLOP',
-    turnUserId: 'user-1',
-    currentUserId: 'user-1',
-    rawLegalActions: ['BET'],
-    sanitizedAllowedActions: Array.from(sanitized.allowed)
-  });
-  assert.equal(uiState.showActions, true, 'resolved UI state should keep row visible for valid sanitized BET');
-  assert.equal(uiState.status, null, 'resolved UI state should not show empty-state status when sanitized action exists');
-}
-
-// Regression — raw-empty user-turn state remains contract mismatch.
 {
   const uiState = hooks.resolveTurnActionUiState({
     isUsersTurn: true,
@@ -161,8 +113,7 @@ assert.ok(hooks && hooks.sanitizeAllowedActions && hooks.validateAmountActionPay
     turnUserId: 'user-1',
     currentUserId: 'user-1',
     rawLegalActions: [],
-    sanitizedAllowedActions: []
+    availableActions: []
   });
-  assert.equal(uiState.showActions, false, 'resolved UI state should hide row when no raw/sanitized actions exist');
-  assert.equal(uiState.status, 'contract_mismatch', 'raw-empty user-turn state should preserve contract mismatch status');
+  assert.equal(uiState.status, 'contract_mismatch', 'empty raw legal actions on user turn should still report contract mismatch');
 }
