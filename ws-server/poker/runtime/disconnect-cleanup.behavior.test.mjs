@@ -19,7 +19,7 @@ test('reconnect before sweep skips cleanup and removes candidate', async () => {
   assert.equal(runtime.size(), 0);
 });
 
-test('successful cleanup de-queues candidate and triggers onChanged', async () => {
+test('success cleanup triggers onChanged', async () => {
   const changed = [];
   const runtime = createDisconnectCleanupRuntime({
     executeCleanup: async () => ({ ok: true, changed: true }),
@@ -35,7 +35,7 @@ test('successful cleanup de-queues candidate and triggers onChanged', async () =
   assert.equal(changed[0].result.ok, true);
 });
 
-test('cleanup failure matrix keeps retryable candidates and removes terminal failures', async () => {
+test('retryable vs terminal cleanup failure', async () => {
   const retryableRuntime = createDisconnectCleanupRuntime({
     executeCleanup: async () => ({ ok: false, code: 'inactive_cleanup_failed', retryable: true }),
     listActiveSocketsForUser: () => [],
@@ -53,4 +53,77 @@ test('cleanup failure matrix keeps retryable candidates and removes terminal fai
   terminalRuntime.enqueue({ tableId: 't_terminal', userId: 'u5' });
   await terminalRuntime.sweep();
   assert.equal(terminalRuntime.size(), 0);
+});
+
+test('protected cleanup keeps candidate queued and skips onChanged', async () => {
+  const changed = [];
+  const runtime = createDisconnectCleanupRuntime({
+    executeCleanup: async () => ({ ok: true, changed: false, protected: true, status: 'turn_protected', retryable: true }),
+    listActiveSocketsForUser: () => [],
+    socketMatchesTable: () => false,
+    onChanged: (tableId, result) => changed.push({ tableId, result })
+  });
+
+  runtime.enqueue({ tableId: 't_protected', userId: 'u9' });
+  await runtime.sweep();
+
+  assert.equal(runtime.size(), 1);
+  assert.equal(changed.length, 0);
+});
+
+test('repeated cleanup idempotency', async () => {
+  let cleanupCalls = 0;
+  const changed = [];
+  const runtime = createDisconnectCleanupRuntime({
+    executeCleanup: async () => {
+      cleanupCalls += 1;
+      return cleanupCalls === 1
+        ? { ok: true, changed: true, status: 'cleaned' }
+        : { ok: true, changed: false, status: 'already_inactive' };
+    },
+    listActiveSocketsForUser: () => [],
+    socketMatchesTable: () => false,
+    onChanged: (tableId, result) => changed.push({ tableId, result })
+  });
+
+  runtime.enqueue({ tableId: 't_idem', userId: 'u6' });
+  await runtime.sweep();
+  runtime.enqueue({ tableId: 't_idem', userId: 'u6' });
+  await runtime.sweep();
+
+  assert.equal(runtime.size(), 0);
+  assert.equal(changed.length, 2);
+  assert.equal(changed[0].result.changed, true);
+  assert.equal(changed[1].result.changed, false);
+  assert.equal(changed[1].result.status, 'already_inactive');
+});
+
+test('awaited async onChanged', async () => {
+  const order = [];
+  const runtime = createDisconnectCleanupRuntime({
+    executeCleanup: async ({ userId }) => {
+      order.push(`cleanup:${userId}`);
+      return { ok: true, changed: true };
+    },
+    listActiveSocketsForUser: () => [],
+    socketMatchesTable: () => false,
+    onChanged: async (_tableId, result) => {
+      order.push(`onChanged:start:${result.ok}`);
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      order.push('onChanged:end');
+    }
+  });
+
+  runtime.enqueue({ tableId: 't_async_1', userId: 'u7' });
+  runtime.enqueue({ tableId: 't_async_2', userId: 'u8' });
+  await runtime.sweep();
+
+  assert.deepEqual(order, [
+    'cleanup:u7',
+    'onChanged:start:true',
+    'onChanged:end',
+    'cleanup:u8',
+    'onChanged:start:true',
+    'onChanged:end'
+  ]);
 });
