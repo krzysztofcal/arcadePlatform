@@ -43,6 +43,17 @@ function hasAnyActiveHuman(seats) {
   return (seats || []).some((row) => row?.is_bot !== true && row?.status === "ACTIVE");
 }
 
+function activeSeatUserIdSet(seats) {
+  const ids = new Set();
+  for (const row of seats || []) {
+    if (row?.status !== "ACTIVE") continue;
+    if (typeof row?.user_id === "string" && row.user_id.length > 0) {
+      ids.add(row.user_id);
+    }
+  }
+  return ids;
+}
+
 function toClosedInertState({ state, stacks }) {
   return {
     ...state,
@@ -133,15 +144,19 @@ export async function executeInactiveCleanup({
       await tx.unsafe("update public.poker_seats set status = 'INACTIVE', stack = 0 where table_id = $1 and user_id = $2;", [tableId, userId]);
     }
 
-    if (stateRow) {
-      const nextState = { ...state, stacks };
-      await tx.unsafe("update public.poker_state set state = $2 where table_id = $1;", [tableId, JSON.stringify(nextState)]);
-    }
-
     const allSeatRows = await tx.unsafe(
       "select user_id, status, is_bot, stack from public.poker_seats where table_id = $1 for update;",
       [tableId]
     );
+
+    if (stateRow) {
+      const nextState = { ...state, stacks };
+      const turnUserId = typeof nextState.turnUserId === "string" ? nextState.turnUserId : null;
+      if (turnUserId && !activeSeatUserIdSet(allSeatRows).has(turnUserId)) {
+        nextState.turnUserId = null;
+      }
+      await tx.unsafe("update public.poker_state set state = $2 where table_id = $1;", [tableId, JSON.stringify(nextState)]);
+    }
 
     if (hasAnyActiveHuman(allSeatRows)) {
       return { ok: true, changed: seatWasActive, status: seatWasActive ? "cleaned" : "already_inactive", closed: false, retryable: false };

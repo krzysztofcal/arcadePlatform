@@ -77,6 +77,7 @@ run("node", ["tests/poker-handSeats-reset.behavior.test.mjs"], "poker-handseats-
 run("node", ["tests/poker-legal-actions.left-player.invalid-player.behavior.test.mjs"], "poker-legal-actions-left-player-invalid-player-behavior");
 run("node", ["tests/poker-leave.test.mjs"], "poker-leave");
 run("node", ["shared/poker-domain/leave.behavior.test.mjs"], "poker-domain-leave-behavior");
+run("node", ["shared/poker-domain/inactive-cleanup.behavior.test.mjs"], "poker-domain-inactive-cleanup-behavior");
 run("node", ["tests/poker-join-http-retired.test.mjs"], "poker-join-http-retired");
 run("node", ["tests/poker-leave.instant-detach.midhand.behavior.test.mjs"], "poker-leave-instant-detach-midhand-behavior");
 run("node", ["tests/poker-leave.instant-detach.replay-preserves-left-flag.behavior.test.mjs"], "poker-leave-instant-detach-replay-preserves-left-flag-behavior");
