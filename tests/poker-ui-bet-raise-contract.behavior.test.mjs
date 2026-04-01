@@ -65,6 +65,8 @@ assert.ok(hooks, 'expected poker UI test hooks');
     availableActions: ['CHECK', 'BET'],
   });
   assert.equal(uiState.showActions, true, 'action row should be visible with CHECK/BET legal actions');
+  const invalidZero = hooks.validateAmountActionPayload('BET', '0', allowedInfo);
+  assert.equal(typeof invalidZero.error, 'string', 'BET amount should reject zero');
 }
 
 {
@@ -82,4 +84,18 @@ assert.ok(hooks, 'expected poker UI test hooks');
     availableActions: ['CALL', 'RAISE', 'FOLD'],
   });
   assert.equal(uiState.showActions, true, 'action row should be visible with CALL/RAISE/FOLD legal actions');
+  const invalidNegative = hooks.validateAmountActionPayload('RAISE', '-3', allowedInfo);
+  assert.equal(typeof invalidNegative.error, 'string', 'RAISE amount should reject negatives');
+}
+
+{
+  const allowedInfo = hooks.sanitizeAllowedActions(new Set(['BET', 'RAISE']), { maxBetAmount: 25, minRaiseTo: 20, maxRaiseTo: 40 });
+  const betTooHigh = hooks.validateAmountActionPayload('BET', '26', allowedInfo);
+  assert.equal(typeof betTooHigh.error, 'string', 'BET should reject values above valid max');
+  const betInRange = hooks.validateAmountActionPayload('BET', '25', allowedInfo);
+  assert.equal(betInRange.error, undefined, 'BET should accept values at valid max');
+  const raiseTooLow = hooks.validateAmountActionPayload('RAISE', '19', allowedInfo);
+  assert.equal(typeof raiseTooLow.error, 'string', 'RAISE should reject values below valid min');
+  const raiseInRange = hooks.validateAmountActionPayload('RAISE', '32', allowedInfo);
+  assert.equal(raiseInRange.error, undefined, 'RAISE should accept values inside valid bounds');
 }
