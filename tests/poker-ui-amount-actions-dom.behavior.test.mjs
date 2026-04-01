@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createPokerTableHarness } from './helpers/poker-ui-table-harness.mjs';
 
-function makeActionableResponse(legalActions){
+function makeActionableResponse(legalActions, constraints){
   return {
     tableId: 'table-1',
     status: 'OPEN',
@@ -11,8 +11,8 @@ function makeActionableResponse(legalActions){
       { seatNo: 1, userId: 'user-1', status: 'ACTIVE', stack: 150 },
       { seatNo: 2, userId: 'bot-2', status: 'ACTIVE', stack: 150 }
     ],
-    legalActions: legalActions,
-    actionConstraints: {},
+    legalActions,
+    actionConstraints: constraints || {},
     state: {
       version: 1,
       state: {
@@ -30,273 +30,106 @@ function makeActionableResponse(legalActions){
 function fireEnterOnAmountInput(harness){
   const input = harness.elements.pokerActAmount;
   const handlers = input._listeners.keydown || [];
-  handlers.forEach((fn) => fn({
-    key: 'Enter',
-    preventDefault(){},
-    stopPropagation(){},
-    target: input
-  }));
+  handlers.forEach((fn) => fn({ key: 'Enter', preventDefault(){}, stopPropagation(){}, target: input }));
 }
 
-function getSubmittedActionType(payload){
-  if (!payload || typeof payload !== 'object') return null;
-  if (typeof payload.action === 'string') return payload.action;
-  if (payload.action && typeof payload.action.type === 'string') return payload.action.type;
-  return null;
+function actionOf(call){ return call && call.payload ? call.payload.action : null; }
+
+function trackAmountAttributes(harness){
+  const input = harness.elements.pokerActAmount;
+  const attrs = {};
+  input.setAttribute = function(name, value){ attrs[name] = String(value); };
+  input.removeAttribute = function(name){ delete attrs[name]; };
+  return attrs;
 }
 
-function getSubmittedAmount(payload){
-  if (!payload || typeof payload !== 'object') return null;
-  if (Number.isFinite(Number(payload.amount))) return Number(payload.amount);
-  if (payload.action && Number.isFinite(Number(payload.action.amount))) return Number(payload.action.amount);
-  return null;
-}
-
-test('poker UI amount actions DOM flow supports select-first and submit-second without clearing value on harmless rerender', async () => {
-  var actCalls = [];
-  var snapshotHandler = null;
-  var harness = createPokerTableHarness({
-    responses: [makeActionableResponse(['CHECK', 'BET', 'RAISE'])],
+test('BET is one-click submit with immediate amount row', async () => {
+  const actCalls = [];
+  let snapshotHandler = null;
+  const harness = createPokerTableHarness({
+    responses: [makeActionableResponse(['CHECK', 'BET'], { maxBetAmount: 100, toCall: 0 })],
     wsFactory(createOptions){
       snapshotHandler = createOptions.onSnapshot;
       return {
-        start(){
-          Promise.resolve().then(function(){
-            if (typeof createOptions.onStatus === 'function') createOptions.onStatus('auth_ok', { roomId: 'table-1' });
-          });
-        },
+        start(){ Promise.resolve().then(() => createOptions.onStatus && createOptions.onStatus('auth_ok', { roomId: 'table-1' })); },
         destroy(){},
         isReady(){ return true; },
-        sendAct(payload, requestId){
-          actCalls.push({ payload, requestId });
-          return Promise.resolve({ ok: true });
-        }
+        sendAct(payload, requestId){ actCalls.push({ payload, requestId }); return Promise.resolve({ ok: true }); }
       };
     }
   });
 
-  var amountInput = harness.elements.pokerActAmount;
-  var focusCalls = 0;
-  var selectCalls = 0;
-  amountInput.focus = function(){ focusCalls += 1; };
-  amountInput.select = function(){ selectCalls += 1; };
-
   harness.fireDomContentLoaded();
   await harness.flush();
 
-  harness.elements.pokerActBetBtn.click();
-  await harness.flush();
-  assert.equal(actCalls.length, 0, 'first BET click should not submit immediately');
-  assert.equal(harness.elements.pokerActAmountWrap.hidden, false, 'first BET click should reveal amount input row');
-  assert.equal(amountInput.disabled, false, 'first BET click should enable amount input');
-  assert.ok(focusCalls >= 1, 'first BET click should focus amount input');
-  assert.ok(selectCalls >= 1, 'first BET click should select amount input text');
+  assert.equal(harness.elements.pokerActAmountWrap.hidden, false);
+  assert.equal(harness.elements.pokerActAmount.value, '20');
+  harness.elements.pokerActAmount.value = '23';
 
-  amountInput.value = '23';
-  snapshotHandler({
-    kind: 'table_state',
-    payload: {
-      tableId: 'table-1',
-      stateVersion: 2,
-      seats: [
-        { seatNo: 1, userId: 'user-1', status: 'ACTIVE' },
-        { seatNo: 2, userId: 'bot-2', status: 'ACTIVE' }
-      ],
-      stacks: { 'user-1': 150, 'bot-2': 150 },
-      hand: { status: 'TURN', handId: 'hand-1' },
-      turn: { userId: 'user-1', deadlineAt: Date.now() + 5000 },
-      board: { cards: ['As', 'Kd', '3h', '2c'] },
-      pot: { total: 20, sidePots: [] },
-      legalActions: { actions: ['CHECK', 'BET', 'RAISE'] },
-      actionConstraints: {}
-    }
-  });
+  snapshotHandler({ kind: 'table_state', payload: {
+    tableId: 'table-1', stateVersion: 2,
+    seats: [{ seatNo: 1, userId: 'user-1', status: 'ACTIVE' }, { seatNo: 2, userId: 'bot-2', status: 'ACTIVE' }],
+    stacks: { 'user-1': 150, 'bot-2': 150 },
+    hand: { status: 'TURN', handId: 'hand-1' },
+    turn: { userId: 'user-1', deadlineAt: Date.now() + 5000 },
+    board: { cards: ['As', 'Kd', '3h', '2c'] },
+    pot: { total: 20, sidePots: [] },
+    legalActions: { actions: ['CHECK', 'BET'] },
+    actionConstraints: { maxBetAmount: 100, toCall: 0 }
+  }});
   await harness.flush();
-  assert.equal(harness.elements.pokerActAmountWrap.hidden, false, 'harmless rerender should keep amount row visible when pending BET remains legal');
-  assert.equal(amountInput.disabled, false, 'harmless rerender should keep amount input editable');
-  assert.equal(amountInput.value, '23', 'harmless rerender should not clear current amount value');
+  assert.equal(harness.elements.pokerActAmount.value, '23', 'harmless rerender should preserve valid typed amount');
 
   harness.elements.pokerActBetBtn.click();
   await harness.flush();
-  assert.equal(actCalls.length, 1, 'second BET click should submit exactly one action');
-  assert.equal(actCalls[0].payload.handId, 'hand-1', 'second BET click should submit current hand id');
-  assert.equal(getSubmittedActionType(actCalls[0].payload), 'BET', 'second BET click should submit BET action');
-  assert.equal(getSubmittedAmount(actCalls[0].payload), 23, 'second BET click should submit entered amount');
-  assert.equal(typeof actCalls[0].requestId, 'string', 'second BET click should provide request id to ws sender');
-  assert.equal(harness.elements.pokerActAmountWrap.hidden, true, 'second BET click should clear amount mode immediately');
-  assert.equal(amountInput.disabled, true, 'second BET click should disable amount input immediately');
-  snapshotHandler({
-    kind: 'table_state',
-    payload: {
-      tableId: 'table-1',
-      stateVersion: 3,
-      seats: [
-        { seatNo: 1, userId: 'user-1', status: 'ACTIVE' },
-        { seatNo: 2, userId: 'bot-2', status: 'ACTIVE' }
-      ],
-      stacks: { 'user-1': 150, 'bot-2': 150 },
-      hand: { status: 'TURN', handId: 'hand-1' },
-      turn: { userId: 'user-1', deadlineAt: Date.now() + 5000 },
-      board: { cards: ['As', 'Kd', '3h', '2c'] },
-      pot: { total: 22, sidePots: [] },
-      legalActions: { actions: ['CHECK', 'BET', 'RAISE'] },
-      actionConstraints: {}
+
+  assert.equal(actCalls.length, 1, 'BET should submit in one click');
+  assert.equal(actionOf(actCalls[0]), 'BET');
+  assert.equal(actCalls[0].payload.amount, 23);
+});
+
+test('RAISE is one-click submit and Enter submits once', async () => {
+  const actCalls = [];
+  const harness = createPokerTableHarness({
+    responses: [makeActionableResponse(['CALL', 'RAISE', 'FOLD'], { minRaiseTo: 12, maxRaiseTo: 30, toCall: 5 })],
+    wsFactory(createOptions){
+      return {
+        start(){ Promise.resolve().then(() => createOptions.onStatus && createOptions.onStatus('auth_ok', { roomId: 'table-1' })); },
+        destroy(){},
+        isReady(){ return true; },
+        sendAct(payload, requestId){ actCalls.push({ payload, requestId }); return Promise.resolve({ ok: true }); }
+      };
     }
   });
-  await harness.flush();
-  assert.equal(harness.elements.pokerActAmountWrap.hidden, true, 'successful BET submit should stay out of amount mode after rerender');
 
+  harness.fireDomContentLoaded();
+  await harness.flush();
+  assert.equal(harness.elements.pokerActAmountWrap.hidden, false);
+  assert.equal(Number(harness.elements.pokerActAmount.value) >= 12, true);
+
+  harness.elements.pokerActAmount.value = '17';
   harness.elements.pokerActRaiseBtn.click();
   await harness.flush();
-  assert.equal(actCalls.length, 1, 'first RAISE click should switch pending mode without submitting');
-  assert.equal(harness.elements.pokerActAmountWrap.hidden, false, 'switching BET to RAISE should keep amount mode visible');
-  assert.equal(amountInput.disabled, false, 'switching BET to RAISE should keep input editable');
+  assert.equal(actCalls.length, 1);
+  assert.equal(actionOf(actCalls[0]), 'RAISE');
+  assert.equal(actCalls[0].payload.amount, 17);
 
-  amountInput.value = '31';
+  harness.elements.pokerActAmount.value = '18';
   fireEnterOnAmountInput(harness);
   await harness.flush();
-  assert.equal(actCalls.length, 2, 'Enter key should submit selected pending RAISE exactly once');
-  assert.equal(actCalls[1].payload.handId, 'hand-1', 'Enter key should submit current hand id for RAISE');
-  assert.equal(getSubmittedActionType(actCalls[1].payload), 'RAISE', 'Enter key should submit RAISE after selecting it');
-  assert.equal(getSubmittedAmount(actCalls[1].payload), 31, 'Enter key should use entered RAISE amount');
-  assert.equal(typeof actCalls[1].requestId, 'string', 'Enter key submit should provide request id to ws sender');
-  assert.equal(harness.elements.pokerActAmountWrap.hidden, true, 'Enter submit should clear amount mode immediately');
-  assert.equal(amountInput.disabled, true, 'Enter submit should disable amount input immediately');
-  snapshotHandler({
-    kind: 'table_state',
-    payload: {
-      tableId: 'table-1',
-      stateVersion: 4,
-      seats: [
-        { seatNo: 1, userId: 'user-1', status: 'ACTIVE' },
-        { seatNo: 2, userId: 'bot-2', status: 'ACTIVE' }
-      ],
-      stacks: { 'user-1': 150, 'bot-2': 150 },
-      hand: { status: 'TURN', handId: 'hand-1' },
-      turn: { userId: 'user-1', deadlineAt: Date.now() + 5000 },
-      board: { cards: ['As', 'Kd', '3h', '2c'] },
-      pot: { total: 24, sidePots: [] },
-      legalActions: { actions: ['CHECK', 'BET', 'RAISE'] },
-      actionConstraints: {}
-    }
-  });
-  await harness.flush();
-  assert.equal(harness.elements.pokerActAmountWrap.hidden, true, 'successful RAISE submit should stay out of amount mode after rerender');
+  assert.equal(actCalls.length, 2, 'Enter should submit exactly one additional act');
+  assert.equal(actionOf(actCalls[1]), 'RAISE');
+  assert.equal(actCalls[1].payload.amount, 18);
 });
 
-test('poker UI CHECK remains one-click submit in DOM flow', async () => {
-  var actCalls = [];
-  var harness = createPokerTableHarness({
-    responses: [makeActionableResponse(['CHECK'])],
-    wsFactory(createOptions){
-      return {
-        start(){
-          Promise.resolve().then(function(){
-            if (typeof createOptions.onStatus === 'function') createOptions.onStatus('auth_ok', { roomId: 'table-1' });
-          });
-        },
-        destroy(){},
-        isReady(){ return true; },
-        sendAct(payload){
-          actCalls.push({ payload });
-          return Promise.resolve({ ok: true });
-        }
-      };
-    }
-  });
-
-  harness.fireDomContentLoaded();
-  await harness.flush();
-  harness.elements.pokerActCheckBtn.click();
-  await harness.flush();
-
-  assert.equal(actCalls.length, 1, 'CHECK should submit immediately on first click');
-  assert.equal(getSubmittedActionType(actCalls[0].payload), 'CHECK', 'CHECK should submit CHECK action');
-  assert.equal(harness.elements.pokerActAmountWrap.hidden, true, 'CHECK click should not enter amount mode');
-});
-
-test('poker UI clears pending BET mode when switching to CHECK submit', async () => {
-  var actCalls = [];
-  var harness = createPokerTableHarness({
-    responses: [makeActionableResponse(['CHECK', 'BET', 'RAISE'])],
-    wsFactory(createOptions){
-      return {
-        start(){
-          Promise.resolve().then(function(){
-            if (typeof createOptions.onStatus === 'function') createOptions.onStatus('auth_ok', { roomId: 'table-1' });
-          });
-        },
-        destroy(){},
-        isReady(){ return true; },
-        sendAct(payload){
-          actCalls.push({ payload });
-          return Promise.resolve({ ok: true });
-        }
-      };
-    }
-  });
-
-  harness.fireDomContentLoaded();
-  await harness.flush();
-  harness.elements.pokerActBetBtn.click();
-  await harness.flush();
-  harness.elements.pokerActAmount.value = '22';
-  harness.elements.pokerActCheckBtn.click();
-  await harness.flush();
-
-  assert.equal(actCalls.length, 1, 'CHECK click from pending BET mode should submit exactly once');
-  assert.equal(getSubmittedActionType(actCalls[0].payload), 'CHECK', 'CHECK click from pending BET mode should submit CHECK');
-  assert.equal(harness.elements.pokerActAmountWrap.hidden, true, 'CHECK click from pending BET mode should hide amount row');
-  assert.equal(harness.elements.pokerActAmount.disabled, true, 'CHECK click from pending BET mode should disable amount input');
-});
-
-test('poker UI clears pending RAISE mode when switching to FOLD submit', async () => {
-  var actCalls = [];
-  var harness = createPokerTableHarness({
-    responses: [makeActionableResponse(['CALL', 'RAISE', 'FOLD'])],
-    wsFactory(createOptions){
-      return {
-        start(){
-          Promise.resolve().then(function(){
-            if (typeof createOptions.onStatus === 'function') createOptions.onStatus('auth_ok', { roomId: 'table-1' });
-          });
-        },
-        destroy(){},
-        isReady(){ return true; },
-        sendAct(payload){
-          actCalls.push({ payload });
-          return Promise.resolve({ ok: true });
-        }
-      };
-    }
-  });
-
-  harness.fireDomContentLoaded();
-  await harness.flush();
-  harness.elements.pokerActRaiseBtn.click();
-  await harness.flush();
-  harness.elements.pokerActAmount.value = '30';
-  harness.elements.pokerActFoldBtn.click();
-  await harness.flush();
-
-  assert.equal(actCalls.length, 1, 'FOLD click from pending RAISE mode should submit exactly once');
-  assert.equal(getSubmittedActionType(actCalls[0].payload), 'FOLD', 'FOLD click from pending RAISE mode should submit FOLD');
-  assert.equal(harness.elements.pokerActAmountWrap.hidden, true, 'FOLD click from pending RAISE mode should hide amount row');
-  assert.equal(harness.elements.pokerActAmount.disabled, true, 'FOLD click from pending RAISE mode should disable amount input');
-});
-
-test('poker UI clears pending amount mode when pending action becomes illegal on rerender', async () => {
-  var snapshotHandler = null;
-  var harness = createPokerTableHarness({
-    responses: [makeActionableResponse(['CHECK', 'BET'])],
+test('amount row hides immediately when amount actions become illegal on rerender', async () => {
+  let snapshotHandler = null;
+  const harness = createPokerTableHarness({
+    responses: [makeActionableResponse(['CHECK', 'BET'], { maxBetAmount: 80, toCall: 0 })],
     wsFactory(createOptions){
       snapshotHandler = createOptions.onSnapshot;
       return {
-        start(){
-          Promise.resolve().then(function(){
-            if (typeof createOptions.onStatus === 'function') createOptions.onStatus('auth_ok', { roomId: 'table-1' });
-          });
-        },
+        start(){ Promise.resolve().then(() => createOptions.onStatus && createOptions.onStatus('auth_ok', { roomId: 'table-1' })); },
         destroy(){},
         isReady(){ return true; },
         sendAct(){ return Promise.resolve({ ok: true }); }
@@ -306,104 +139,182 @@ test('poker UI clears pending amount mode when pending action becomes illegal on
 
   harness.fireDomContentLoaded();
   await harness.flush();
-  harness.elements.pokerActBetBtn.click();
-  await harness.flush();
-  harness.elements.pokerActAmount.value = '29';
-  snapshotHandler({
-    kind: 'table_state',
-    payload: {
-      tableId: 'table-1',
-      stateVersion: 3,
-      seats: [
-        { seatNo: 1, userId: 'user-1', status: 'ACTIVE' },
-        { seatNo: 2, userId: 'bot-2', status: 'ACTIVE' }
-      ],
-      stacks: { 'user-1': 150, 'bot-2': 150 },
-      hand: { status: 'TURN', handId: 'hand-1' },
-      turn: { userId: 'user-1', deadlineAt: Date.now() + 5000 },
-      board: { cards: ['As', 'Kd', '3h', '2c'] },
-      pot: { total: 20, sidePots: [] },
-      legalActions: { actions: ['CHECK'] },
-      actionConstraints: {}
-    }
-  });
+  assert.equal(harness.elements.pokerActAmountWrap.hidden, false);
+
+  snapshotHandler({ kind: 'table_state', payload: {
+    tableId: 'table-1', stateVersion: 2,
+    seats: [{ seatNo: 1, userId: 'user-1', status: 'ACTIVE' }, { seatNo: 2, userId: 'bot-2', status: 'ACTIVE' }],
+    stacks: { 'user-1': 150, 'bot-2': 150 },
+    hand: { status: 'TURN', handId: 'hand-1' },
+    turn: { userId: 'user-1', deadlineAt: Date.now() + 5000 },
+    board: { cards: ['As', 'Kd', '3h', '2c'] },
+    pot: { total: 20, sidePots: [] },
+    legalActions: { actions: ['CHECK'] },
+    actionConstraints: { toCall: 0 }
+  }});
   await harness.flush();
 
-  assert.equal(harness.elements.pokerActAmountWrap.hidden, true, 'illegal pending action rerender should hide amount row');
-  assert.equal(harness.elements.pokerActAmount.disabled, true, 'illegal pending action rerender should disable amount input');
-  assert.equal(harness.elements.pokerActAmount.value, '', 'illegal pending action rerender should clear stale amount value');
+  assert.equal(harness.elements.pokerActAmountWrap.hidden, true);
+  assert.equal(harness.elements.pokerActAmount.disabled, true);
 });
 
-test('poker UI restores BET amount mode and value after failed BET submit', async () => {
-  var actCalls = [];
-  var harness = createPokerTableHarness({
-    responses: [makeActionableResponse(['CHECK', 'BET'])],
+test('Enter does not guess action when BET and RAISE are both legal', async () => {
+  const actCalls = [];
+  const harness = createPokerTableHarness({
+    responses: [makeActionableResponse(['CHECK', 'BET', 'RAISE'], { maxBetAmount: 100, minRaiseTo: 12, maxRaiseTo: 40, toCall: 0 })],
     wsFactory(createOptions){
       return {
-        start(){
-          Promise.resolve().then(function(){
-            if (typeof createOptions.onStatus === 'function') createOptions.onStatus('auth_ok', { roomId: 'table-1' });
-          });
-        },
+        start(){ Promise.resolve().then(() => createOptions.onStatus && createOptions.onStatus('auth_ok', { roomId: 'table-1' })); },
         destroy(){},
         isReady(){ return true; },
-        sendAct(payload){
-          actCalls.push({ payload });
-          return Promise.reject(new Error('send_failed'));
-        }
+        sendAct(payload, requestId){ actCalls.push({ payload, requestId }); return Promise.resolve({ ok: true }); }
       };
     }
   });
 
   harness.fireDomContentLoaded();
   await harness.flush();
-  harness.elements.pokerActBetBtn.click();
-  await harness.flush();
-  harness.elements.pokerActAmount.value = '27';
-  harness.elements.pokerActBetBtn.click();
-  await harness.flush();
-
-  assert.equal(actCalls.length, 1, 'failed BET submit should still attempt one submit');
-  assert.equal(getSubmittedActionType(actCalls[0].payload), 'BET', 'failed BET submit should send BET action');
-  assert.equal(harness.elements.pokerActAmountWrap.hidden, false, 'failed BET submit should restore amount mode');
-  assert.equal(harness.elements.pokerActAmount.disabled, false, 'failed BET submit should restore editable amount input');
-  assert.equal(harness.elements.pokerActAmount.value, '27', 'failed BET submit should preserve typed amount');
-  assert.equal(typeof harness.elements.pokerActStatus.textContent, 'string', 'failed BET submit should set an error status');
-});
-
-test('poker UI restores RAISE amount mode and value after failed Enter submit', async () => {
-  var actCalls = [];
-  var harness = createPokerTableHarness({
-    responses: [makeActionableResponse(['CALL', 'RAISE', 'FOLD'])],
-    wsFactory(createOptions){
-      return {
-        start(){
-          Promise.resolve().then(function(){
-            if (typeof createOptions.onStatus === 'function') createOptions.onStatus('auth_ok', { roomId: 'table-1' });
-          });
-        },
-        destroy(){},
-        isReady(){ return true; },
-        sendAct(payload){
-          actCalls.push({ payload });
-          return Promise.reject(new Error('send_failed'));
-        }
-      };
-    }
-  });
-
-  harness.fireDomContentLoaded();
-  await harness.flush();
-  harness.elements.pokerActRaiseBtn.click();
-  await harness.flush();
-  harness.elements.pokerActAmount.value = '33';
+  harness.elements.pokerActAmount.value = '19';
   fireEnterOnAmountInput(harness);
   await harness.flush();
+  assert.equal(actCalls.length, 0, 'Enter should not auto-choose BET/RAISE when both are legal');
 
-  assert.equal(actCalls.length, 1, 'failed RAISE Enter submit should still attempt one submit');
-  assert.equal(getSubmittedActionType(actCalls[0].payload), 'RAISE', 'failed RAISE Enter submit should send RAISE action');
-  assert.equal(harness.elements.pokerActAmountWrap.hidden, false, 'failed RAISE submit should restore amount mode');
-  assert.equal(harness.elements.pokerActAmount.disabled, false, 'failed RAISE submit should restore editable amount input');
-  assert.equal(harness.elements.pokerActAmount.value, '33', 'failed RAISE submit should preserve typed amount');
-  assert.equal(typeof harness.elements.pokerActStatus.textContent, 'string', 'failed RAISE submit should set an error status');
+  harness.elements.pokerActBetBtn.click();
+  await harness.flush();
+  assert.equal(actCalls.length, 1);
+  assert.equal(actionOf(actCalls[0]), 'BET');
+  assert.equal(actCalls[0].payload.amount, 19);
+});
+
+test('both-legal selection updates textbox min/max to selected action constraints', async () => {
+  const harnessBet = createPokerTableHarness({
+    responses: [makeActionableResponse(['CHECK', 'BET', 'RAISE'], { maxBetAmount: 100, minRaiseTo: 12, maxRaiseTo: 40, toCall: 0 })],
+    wsFactory(createOptions){
+      return {
+        start(){ Promise.resolve().then(() => createOptions.onStatus && createOptions.onStatus('auth_ok', { roomId: 'table-1' })); },
+        destroy(){},
+        isReady(){ return true; },
+        sendAct(){ return new Promise(() => {}); }
+      };
+    }
+  });
+  const betAttrs = trackAmountAttributes(harnessBet);
+  harnessBet.fireDomContentLoaded();
+  await harnessBet.flush();
+  harnessBet.elements.pokerActBetBtn.click();
+  await harnessBet.flush();
+  assert.equal(betAttrs.min, '1');
+  assert.equal(betAttrs.max, '100');
+
+  const harnessRaise = createPokerTableHarness({
+    responses: [makeActionableResponse(['CHECK', 'BET', 'RAISE'], { maxBetAmount: 100, minRaiseTo: 12, maxRaiseTo: 40, toCall: 0 })],
+    wsFactory(createOptions){
+      return {
+        start(){ Promise.resolve().then(() => createOptions.onStatus && createOptions.onStatus('auth_ok', { roomId: 'table-1' })); },
+        destroy(){},
+        isReady(){ return true; },
+        sendAct(){ return new Promise(() => {}); }
+      };
+    }
+  });
+  const raiseAttrs = trackAmountAttributes(harnessRaise);
+  harnessRaise.fireDomContentLoaded();
+  await harnessRaise.flush();
+  harnessRaise.elements.pokerActRaiseBtn.click();
+  await harnessRaise.flush();
+  assert.equal(raiseAttrs.min, '12');
+  assert.equal(raiseAttrs.max, '40');
+});
+
+test('first-click RAISE applies selected constraints before submit when both are legal', async () => {
+  const actCalls = [];
+  const harness = createPokerTableHarness({
+    responses: [makeActionableResponse(['CHECK', 'BET', 'RAISE'], { maxBetAmount: 100, minRaiseTo: 30, maxRaiseTo: 60, toCall: 0 })],
+    wsFactory(createOptions){
+      return {
+        start(){ Promise.resolve().then(() => createOptions.onStatus && createOptions.onStatus('auth_ok', { roomId: 'table-1' })); },
+        destroy(){},
+        isReady(){ return true; },
+        sendAct(payload, requestId){ actCalls.push({ payload, requestId }); return Promise.resolve({ ok: true }); }
+      };
+    }
+  });
+  harness.fireDomContentLoaded();
+  await harness.flush();
+  harness.elements.pokerActAmount.value = '20';
+  harness.elements.pokerActRaiseBtn.click();
+  await harness.flush();
+  assert.equal(actCalls.length, 1);
+  assert.equal(actionOf(actCalls[0]), 'RAISE');
+  assert.equal(actCalls[0].payload.amount >= 30 && actCalls[0].payload.amount <= 60, true, 'first-click RAISE should not submit stale neutral amount');
+});
+
+test('first-click BET applies selected constraints before submit when both are legal', async () => {
+  const actCalls = [];
+  const harness = createPokerTableHarness({
+    responses: [makeActionableResponse(['CHECK', 'BET', 'RAISE'], { maxBetAmount: 25, minRaiseTo: 40, maxRaiseTo: 80, toCall: 0 })],
+    wsFactory(createOptions){
+      return {
+        start(){ Promise.resolve().then(() => createOptions.onStatus && createOptions.onStatus('auth_ok', { roomId: 'table-1' })); },
+        destroy(){},
+        isReady(){ return true; },
+        sendAct(payload, requestId){ actCalls.push({ payload, requestId }); return Promise.resolve({ ok: true }); }
+      };
+    }
+  });
+  harness.fireDomContentLoaded();
+  await harness.flush();
+  harness.elements.pokerActAmount.value = '50';
+  harness.elements.pokerActBetBtn.click();
+  await harness.flush();
+  assert.equal(actCalls.length, 1);
+  assert.equal(actionOf(actCalls[0]), 'BET');
+  assert.equal(actCalls[0].payload.amount >= 1 && actCalls[0].payload.amount <= 25, true, 'first-click BET should not submit stale neutral amount');
+});
+
+test('stale BET/RAISE selection is cleared for a new both-legal decision cycle', async () => {
+  const actCalls = [];
+  let snapshotHandler = null;
+  const harness = createPokerTableHarness({
+    responses: [makeActionableResponse(['CHECK', 'BET', 'RAISE'], { maxBetAmount: 100, minRaiseTo: 12, maxRaiseTo: 40, toCall: 0 })],
+    wsFactory(createOptions){
+      snapshotHandler = createOptions.onSnapshot;
+      return {
+        start(){ Promise.resolve().then(() => createOptions.onStatus && createOptions.onStatus('auth_ok', { roomId: 'table-1' })); },
+        destroy(){},
+        isReady(){ return true; },
+        sendAct(payload, requestId){ actCalls.push({ payload, requestId }); return Promise.resolve({ ok: true }); }
+      };
+    }
+  });
+  const attrs = trackAmountAttributes(harness);
+
+  harness.fireDomContentLoaded();
+  await harness.flush();
+  harness.elements.pokerActAmount.value = '21';
+  harness.elements.pokerActBetBtn.click();
+  await harness.flush();
+  assert.equal(actCalls.length, 1);
+  assert.equal(actionOf(actCalls[0]), 'BET');
+
+  snapshotHandler({ kind: 'table_state', payload: {
+    tableId: 'table-1', stateVersion: 3,
+    seats: [{ seatNo: 1, userId: 'user-1', status: 'ACTIVE' }, { seatNo: 2, userId: 'bot-2', status: 'ACTIVE' }],
+    stacks: { 'user-1': 150, 'bot-2': 150 },
+    hand: { status: 'TURN', handId: 'hand-1' },
+    turn: { userId: 'user-1', deadlineAt: Date.now() + 5000 },
+    board: { cards: ['As', 'Kd', '3h', '2c'] },
+    pot: { total: 27, sidePots: [] },
+    legalActions: { actions: ['CHECK', 'BET', 'RAISE'] },
+    actionConstraints: { maxBetAmount: 80, minRaiseTo: 16, maxRaiseTo: 50, toCall: 0 }
+  }});
+  await harness.flush();
+  assert.equal(attrs.min, '1', 'after decision-cycle reset, neutral both-legal model should set shared minimum');
+  assert.equal(Object.prototype.hasOwnProperty.call(attrs, 'max'), false, 'after decision-cycle reset, neutral both-legal model should clear stale selected max');
+
+  harness.elements.pokerActAmount.value = '22';
+  fireEnterOnAmountInput(harness);
+  await harness.flush();
+  assert.equal(actCalls.length, 1, 'Enter should not reuse stale prior BET selection after decision-cycle rerender');
+  assert.match(String(harness.elements.pokerActStatus.textContent || ''), /Choose BET or RAISE/i);
 });

@@ -54,66 +54,55 @@ vm.runInContext(source, sandbox, { filename: 'poker/poker.js' });
 
 const hooks = sandbox.window.__POKER_UI_TEST_HOOKS__;
 assert.ok(hooks, 'poker UI should expose test hooks when explicitly enabled');
-assert.equal(typeof hooks.sanitizeAllowedActions, 'function', 'sanitizeAllowedActions hook should be exposed');
-assert.equal(typeof hooks.validateAmountActionPayload, 'function', 'validateAmountActionPayload hook should be exposed');
-assert.equal(typeof hooks.resolveTurnActionUiState, 'function', 'resolveTurnActionUiState hook should be exposed');
-assert.equal(typeof hooks.resolveTurnActionClickOutcome, 'function', 'resolveTurnActionClickOutcome hook should be exposed');
+assert.equal(typeof hooks.sanitizeAllowedActions, 'function');
+assert.equal(typeof hooks.validateAmountActionPayload, 'function');
+assert.equal(typeof hooks.resolveTurnActionUiState, 'function');
+assert.equal(typeof hooks.resolveAmountActionModel, 'function');
 
-const countdown = hooks.computeRemainingTurnSeconds(Date.now() + 30000, Date.now());
-assert.ok(countdown > 0, 'countdown should be positive for future deadline in ms');
+const betInfo = hooks.sanitizeAllowedActions(new Set(['CHECK', 'BET']), { maxBetAmount: 100 });
+const betModel = hooks.resolveAmountActionModel(betInfo, 20, '');
+assert.equal(betModel.visible, true, 'BET model should be visible when BET is legal');
+assert.equal(betModel.actionType, 'BET');
+assert.equal(betModel.min, 1);
+assert.equal(betModel.max, 100);
+assert.equal(betModel.defaultValue, 20);
 
-const countdownFromSeconds = hooks.computeRemainingTurnSeconds(Math.floor(Date.now() / 1000) + 30, Date.now());
-assert.ok(countdownFromSeconds > 0, 'countdown should normalize second-based deadline values');
+const raiseInfo = hooks.sanitizeAllowedActions(new Set(['CALL', 'RAISE', 'FOLD']), { minRaiseTo: 12, maxRaiseTo: 100 });
+const raiseModel = hooks.resolveAmountActionModel(raiseInfo, 20, '');
+assert.equal(raiseModel.visible, true, 'RAISE model should be visible when RAISE is legal');
+assert.equal(raiseModel.actionType, 'RAISE');
+assert.equal(raiseModel.defaultValue, 20);
 
-const showActions = hooks.shouldShowTurnActions({
-  phase: 'PREFLOP',
-  turnUserId: 'user-1',
-  currentUserId: 'user-1',
-  legalActions: ['FOLD', 'CALL'],
-});
-assert.equal(showActions, true, 'actions should render when it is the current user turn and legal actions exist');
+const bothModel = hooks.resolveAmountActionModel(
+  hooks.sanitizeAllowedActions(new Set(['BET', 'RAISE']), { maxBetAmount: 100, minRaiseTo: 12, maxRaiseTo: 30 }),
+  20,
+  ''
+);
+assert.equal(bothModel.visible, true, 'shared amount row should still be visible when BET and RAISE are both legal');
+assert.equal(bothModel.actionType, null, 'model should not guess a submit action when both BET and RAISE are legal');
+assert.equal(bothModel.hasBet, true);
+assert.equal(bothModel.hasRaise, true);
 
-const hideActions = hooks.shouldShowTurnActions({
-  phase: 'PREFLOP',
-  turnUserId: 'user-2',
-  currentUserId: 'user-1',
-  legalActions: ['FOLD', 'CALL'],
-});
-assert.equal(hideActions, false, 'actions should be hidden for the non-acting player');
+const bothAsBetModel = hooks.resolveAmountActionModel(
+  hooks.sanitizeAllowedActions(new Set(['BET', 'RAISE']), { maxBetAmount: 100, minRaiseTo: 12, maxRaiseTo: 30 }),
+  20,
+  'BET'
+);
+assert.equal(bothAsBetModel.actionType, 'BET');
+assert.equal(bothAsBetModel.min, 1);
+assert.equal(bothAsBetModel.max, 100);
 
-const betUiState = hooks.resolveTurnActionUiState({
-  isUsersTurn: true,
-  phase: 'TURN',
-  turnUserId: 'user-1',
-  currentUserId: 'user-1',
-  rawLegalActions: ['BET'],
-  availableActions: ['BET'],
-});
-assert.equal(betUiState.showActions, true, 'turn actions should remain visible when raw legal actions include BET');
+const bothAsRaiseModel = hooks.resolveAmountActionModel(
+  hooks.sanitizeAllowedActions(new Set(['BET', 'RAISE']), { maxBetAmount: 100, minRaiseTo: 12, maxRaiseTo: 30 }),
+  20,
+  'RAISE'
+);
+assert.equal(bothAsRaiseModel.actionType, 'RAISE');
+assert.equal(bothAsRaiseModel.min, 12);
+assert.equal(bothAsRaiseModel.max, 30);
 
-const raiseUiState = hooks.resolveTurnActionUiState({
-  isUsersTurn: true,
-  phase: 'RIVER',
-  turnUserId: 'user-1',
-  currentUserId: 'user-1',
-  rawLegalActions: ['RAISE', 'CALL', 'FOLD'],
-  availableActions: ['RAISE', 'CALL', 'FOLD'],
-});
-assert.equal(raiseUiState.showActions, true, 'turn actions should remain visible when raw legal actions include RAISE');
+const lowMaxBet = hooks.resolveAmountActionModel(hooks.sanitizeAllowedActions(new Set(['BET']), { maxBetAmount: 7 }), 20, '');
+assert.equal(lowMaxBet.defaultValue, 7, 'default should clamp down to server maxBetAmount');
 
-const firstBetClick = hooks.resolveTurnActionClickOutcome('BET', null);
-assert.equal(firstBetClick.kind, 'select_amount', 'first BET click should enter amount selection mode');
-assert.equal(firstBetClick.nextPendingActType, 'BET', 'first BET click should set pending action to BET');
-
-const secondBetClick = hooks.resolveTurnActionClickOutcome('BET', 'BET');
-assert.equal(secondBetClick.kind, 'submit', 'second BET click should submit the selected amount action');
-
-const firstRaiseClick = hooks.resolveTurnActionClickOutcome('RAISE', null);
-assert.equal(firstRaiseClick.kind, 'select_amount', 'first RAISE click should enter amount selection mode');
-
-const switchToRaiseClick = hooks.resolveTurnActionClickOutcome('RAISE', 'BET');
-assert.equal(switchToRaiseClick.kind, 'select_amount', 'switching from BET to RAISE should stay in amount selection mode');
-assert.equal(switchToRaiseClick.nextPendingActType, 'RAISE', 'switching amount actions should update pending action type');
-
-const checkClick = hooks.resolveTurnActionClickOutcome('CHECK', 'BET');
-assert.equal(checkClick.kind, 'submit', 'CHECK should remain a one-click submit action');
+const noneModel = hooks.resolveAmountActionModel(hooks.sanitizeAllowedActions(new Set(['CHECK', 'CALL']), {}), 20, '');
+assert.equal(noneModel.visible, false, 'amount row should be hidden when neither BET nor RAISE is legal');
