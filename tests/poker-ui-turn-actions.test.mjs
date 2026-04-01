@@ -57,6 +57,7 @@ assert.ok(hooks, 'poker UI should expose test hooks when explicitly enabled');
 assert.equal(typeof hooks.sanitizeAllowedActions, 'function', 'sanitizeAllowedActions hook should be exposed');
 assert.equal(typeof hooks.validateAmountActionPayload, 'function', 'validateAmountActionPayload hook should be exposed');
 assert.equal(typeof hooks.resolveTurnActionUiState, 'function', 'resolveTurnActionUiState hook should be exposed');
+assert.equal(typeof hooks.resolveTurnActionClickOutcome, 'function', 'resolveTurnActionClickOutcome hook should be exposed');
 
 const countdown = hooks.computeRemainingTurnSeconds(Date.now() + 30000, Date.now());
 assert.ok(countdown > 0, 'countdown should be positive for future deadline in ms');
@@ -99,3 +100,20 @@ const raiseUiState = hooks.resolveTurnActionUiState({
   availableActions: ['RAISE', 'CALL', 'FOLD'],
 });
 assert.equal(raiseUiState.showActions, true, 'turn actions should remain visible when raw legal actions include RAISE');
+
+const firstBetClick = hooks.resolveTurnActionClickOutcome('BET', null);
+assert.equal(firstBetClick.kind, 'select_amount', 'first BET click should enter amount selection mode');
+assert.equal(firstBetClick.nextPendingActType, 'BET', 'first BET click should set pending action to BET');
+
+const secondBetClick = hooks.resolveTurnActionClickOutcome('BET', 'BET');
+assert.equal(secondBetClick.kind, 'submit', 'second BET click should submit the selected amount action');
+
+const firstRaiseClick = hooks.resolveTurnActionClickOutcome('RAISE', null);
+assert.equal(firstRaiseClick.kind, 'select_amount', 'first RAISE click should enter amount selection mode');
+
+const switchToRaiseClick = hooks.resolveTurnActionClickOutcome('RAISE', 'BET');
+assert.equal(switchToRaiseClick.kind, 'select_amount', 'switching from BET to RAISE should stay in amount selection mode');
+assert.equal(switchToRaiseClick.nextPendingActType, 'RAISE', 'switching amount actions should update pending action type');
+
+const checkClick = hooks.resolveTurnActionClickOutcome('CHECK', 'BET');
+assert.equal(checkClick.kind, 'submit', 'CHECK should remain a one-click submit action');

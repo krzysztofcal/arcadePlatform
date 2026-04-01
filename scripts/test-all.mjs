@@ -130,6 +130,7 @@ run("node", ["tests/poker-get-table.me-notSeated.db-shape.behavior.test.mjs"], "
 run("node", ["tests/poker-materialize-settlement.payouts.test.mjs"], "poker-materialize-settlement-payouts");
 
 run("node", ["tests/poker-ui.behavior.test.mjs"], "poker-ui-behavior");
+run("node", ["tests/poker-ui-amount-actions-dom.behavior.test.mjs"], "poker-ui-amount-actions-dom-behavior");
 run("node", ["tests/poker-ui-ws-join-smoke.behavior.test.mjs"], "poker-ui-ws-join-smoke-behavior");
 run("node", ["tests/poker-ui-ws-write-path.guard.test.mjs"], "poker-ui-ws-write-path-guard");
 run("node", ["tests/poker-ui-no-heartbeat.guard.test.mjs"], "poker-ui-no-heartbeat-guard");

@@ -438,6 +438,19 @@
     return { showActions: showActions, status: status };
   }
 
+  function resolveTurnActionClickOutcome(actionType, pendingType){
+    var normalized = normalizeActionTypeValue(actionType);
+    if (!normalized) return { kind: 'invalid', actionType: null, nextPendingActType: null };
+    if (normalized !== 'BET' && normalized !== 'RAISE'){
+      return { kind: 'submit', actionType: normalized, nextPendingActType: pendingType || null };
+    }
+    var normalizedPending = normalizeActionTypeValue(pendingType);
+    if (normalizedPending === normalized){
+      return { kind: 'submit', actionType: normalized, nextPendingActType: normalized };
+    }
+    return { kind: 'select_amount', actionType: normalized, nextPendingActType: normalized };
+  }
+
 
   if (window.__RUNNING_POKER_UI_TESTS__ === true){
     window.__POKER_UI_TEST_HOOKS__ = {
@@ -449,6 +462,7 @@
       sanitizeAllowedActions: sanitizeAllowedActions,
       validateAmountActionPayload: validateAmountActionPayload,
       resolveTurnActionUiState: resolveTurnActionUiState,
+      resolveTurnActionClickOutcome: resolveTurnActionClickOutcome,
       ensurePokerRecorder: ensurePokerRecorder,
       getPokerDumpText: getPokerDumpText,
       copyTextToClipboard: copyTextToClipboard,
@@ -2942,18 +2956,25 @@
     }
 
     async function sendAct(actionType, requestIdOverride){
-      if (!shouldEnableDevActions()) return;
+      if (!shouldEnableDevActions()) return { ok: false, code: 'disabled' };
       var normalized = normalizeActionType(actionType);
-      if (!normalized) return;
+      if (!normalized) return { ok: false, code: 'invalid_action' };
+      function restoreAmountModeOnFailure(){
+        if (normalized !== 'BET' && normalized !== 'RAISE') return;
+        pendingActType = normalized;
+        renderAllowedActionButtons();
+      }
       var allowedInfo = getAllowedActionsForUser(tableData, currentUserId);
       if (!allowedInfo.allowed.has(normalized)){
         setInlineStatus(actStatusEl, t('pokerErrActionNotAllowed', 'Action not allowed right now'), 'error');
-        return;
+        restoreAmountModeOnFailure();
+        return { ok: false, code: 'action_not_allowed' };
       }
       var actionResult = getActPayload(normalized);
       if (actionResult.error){
         setInlineStatus(actStatusEl, actionResult.error, 'error');
-        return;
+        restoreAmountModeOnFailure();
+        return { ok: false, code: 'invalid_amount' };
       }
       setInlineStatus(actStatusEl, null, null);
       setDevPendingState('act', true);
@@ -2961,14 +2982,10 @@
         var resolved = resolveRequestId(pendingActRequestId, requestIdOverride);
         if (resolved.nextPending){
           pendingActRequestId = normalizeRequestId(resolved.nextPending);
-          pendingActType = normalized;
           pendingActRetries = 0;
           pendingActStartedAt = null;
         } else if (!pendingActRequestId){
           pendingActRequestId = normalizeRequestId(resolved.requestId);
-          pendingActType = normalized;
-        } else if (!pendingActType){
-          pendingActType = normalized;
         }
         var actRequestId = normalizeRequestId(resolved.requestId);
         var wsActPayload = { handId: resolveCurrentHandId(), action: normalized };
@@ -2977,10 +2994,11 @@
         var result = await actSender(wsActPayload, actRequestId);
         if (isPendingResponse(result)){
           scheduleDevPendingRetry('act', retryAct);
-          return;
+          return { ok: false, code: 'pending' };
         }
         if (result && result.ok === false){
           clearActPending();
+          restoreAmountModeOnFailure();
           if (result.error === 'not_your_turn'){
             setInlineStatus(actStatusEl, t('pokerErrNotYourTurn', 'Not your turn'), 'error');
           } else if (result.error === 'action_not_allowed'){
@@ -2995,16 +3013,19 @@
           } else {
             setInlineStatus(actStatusEl, t('pokerErrAct', 'Failed to send action'), 'error');
           }
-          return;
+          return { ok: false, code: result.error || 'failed' };
         }
         clearActPending();
         setInlineStatus(actStatusEl, t('pokerActOk', 'Action sent'), 'success');
+        return { ok: true, code: 'ok' };
       } catch (err){
         if (isAbortError(err)){
+          restoreAmountModeOnFailure();
           pauseActPending();
-          return;
+          return { ok: false, code: 'aborted' };
         }
         if (isAuthError(err)){
+          restoreAmountModeOnFailure();
           stopPendingAll();
           handleTableAuthExpired({
             authMsg: authMsg,
@@ -3014,34 +3035,36 @@
             stopHeartbeat: stopHeartbeat,
             onAuthExpired: startAuthWatch
           });
-          return;
+          return { ok: false, code: 'unauthorized' };
         }
         clearActPending();
+        restoreAmountModeOnFailure();
         var errMessage = err && (err.message || err.code) ? String(err.message || err.code) : '';
         var loweredMessage = errMessage.toLowerCase();
         if (err && (err.status === 403 || err.code === 'not_your_turn' || loweredMessage.indexOf('not your turn') !== -1)){
           setInlineStatus(actStatusEl, t('pokerErrNotYourTurn', 'Not your turn'), 'error');
-          return;
+          return { ok: false, code: 'not_your_turn' };
         }
         if (err && err.code === 'action_not_allowed'){
           setInlineStatus(actStatusEl, t('pokerErrActionNotAllowed', 'Action not allowed right now'), 'error');
-          return;
+          return { ok: false, code: 'action_not_allowed' };
         }
         if (err && err.code === 'invalid_amount'){
           setInlineStatus(actStatusEl, t('pokerErrActAmount', 'Invalid amount'), 'error');
-          return;
+          return { ok: false, code: 'invalid_amount' };
         }
         if (err && err.code === 'state_invalid'){
           setInlineStatus(actStatusEl, t('pokerErrStateChanged', 'State changed. Refreshing...'), 'error');
           if (isPageActive()) loadTable(false);
-          return;
+          return { ok: false, code: 'state_invalid' };
         }
         if (err && err.code === 'hand_not_live'){
           setInlineStatus(actStatusEl, t('pokerErrHandNotLive', 'Hand is not live'), 'error');
-          return;
+          return { ok: false, code: 'hand_not_live' };
         }
         klog('poker_act_error', { tableId: tableId, error: err.message || err.code });
         setInlineStatus(actStatusEl, err.message || t('pokerErrAct', 'Failed to send action'), 'error');
+        return { ok: false, code: err && (err.code || err.message) ? err.code || err.message : 'failed' };
       }
     }
 
@@ -3301,20 +3324,40 @@
         setInlineStatus(actStatusEl, t('pokerErrActionNotAllowed', 'Action not allowed right now'), 'error');
         return;
       }
-      pendingActType = normalized;
-      updateActAmountConstraints(allowedInfo, pendingActType);
-      updateActAmountHint(allowedInfo, pendingActType);
+      var clickOutcome = resolveTurnActionClickOutcome(normalized, pendingActType);
+      if (clickOutcome.kind === 'select_amount'){
+        pendingActType = clickOutcome.nextPendingActType;
+        setInlineStatus(actStatusEl, null, null);
+        renderAllowedActionButtons();
+        if (actAmountInput && !actAmountInput.disabled){
+          try {
+            actAmountInput.focus();
+            if (typeof actAmountInput.select === 'function') actAmountInput.select();
+          } catch (_focusErr){}
+        }
+        return;
+      }
+      if (clickOutcome.kind === 'submit'){
+        pendingActType = null;
+        renderAllowedActionButtons();
+      }
       klog('poker_act_click', { tableId: tableId, hasToken: !!state.token, type: normalized });
       setInlineStatus(actStatusEl, null, null);
-      sendAct(normalized).catch(function(err){
-        if (isAbortError(err)){
-          pauseActPending();
-          return;
-        }
-        clearActPending();
-        klog('poker_act_click_error', { message: err && (err.message || err.code) ? err.message || err.code : 'unknown_error' });
-        setInlineStatus(actStatusEl, err && (err.message || err.code) ? err.message || err.code : t('pokerErrAct', 'Failed to send action'), 'error');
+      sendAct(normalized).then(function(_result){
+      }).catch(function(err){
+        klog('poker_act_click_unexpected_error', { message: err && (err.message || err.code) ? err.message || err.code : 'unknown_error' });
+        setInlineStatus(actStatusEl, t('pokerErrAct', 'Failed to send action'), 'error');
       });
+    }
+
+    function handleActAmountKeyDown(event){
+      if (!event || event.key !== 'Enter') return;
+      if (event.preventDefault) event.preventDefault();
+      if (event.stopPropagation) event.stopPropagation();
+      if (!pendingActType || actPending || !shouldEnableDevActions()) return;
+      var normalized = normalizeActionType(pendingActType);
+      if (normalized !== 'BET' && normalized !== 'RAISE') return;
+      handleActionClick(normalized, event);
     }
 
     function handleActCheckClick(event){
@@ -3347,6 +3390,7 @@
     if (actFoldBtn) actFoldBtn.addEventListener('click', handleActFoldClick);
     if (actBetBtn) actBetBtn.addEventListener('click', handleActBetClick);
     if (actRaiseBtn) actRaiseBtn.addEventListener('click', handleActRaiseClick);
+    if (actAmountInput) actAmountInput.addEventListener('keydown', handleActAmountKeyDown);
     if (jsonToggle){
       jsonToggle.addEventListener('click', function(){
         if (jsonBox) jsonBox.hidden = !jsonBox.hidden;
