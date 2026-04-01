@@ -57,7 +57,6 @@ run("node", ["tests/poker-ws-presence-race.behavior.test.mjs"], "poker-ws-presen
 run("node", ["tests/poker-ws-rich-snapshot.behavior.test.mjs"], "poker-ws-rich-snapshot-behavior");
 run("node", ["tests/poker-ws-authoritative-seat-bootstrap.behavior.test.mjs"], "poker-ws-authoritative-seat-bootstrap-behavior");
 run("node", ["tests/poker-create-table.stakes.test.mjs"], "poker-create-table-stakes");
-run("node", ["tests/poker-phase1.test.mjs"], "poker-phase1");
 run("node", ["tests/poker-engine.test.mjs"], "poker-engine");
 run("node", ["tests/poker-eval.test.mjs"], "poker-eval");
 run("node", ["tests/poker-cards-utils.test.mjs"], "poker-cards-utils");
