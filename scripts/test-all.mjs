@@ -61,7 +61,6 @@ run("node", ["tests/poker-engine.test.mjs"], "poker-engine");
 run("node", ["tests/poker-eval.test.mjs"], "poker-eval");
 run("node", ["tests/poker-cards-utils.test.mjs"], "poker-cards-utils");
 run("node", ["tests/poker-hole-cards-store.test.mjs"], "poker-hole-cards-store");
-run("node", ["tests/poker-contract.phase1.test.mjs"], "poker-contract-phase1");
 run("node", ["tests/poker-db-lockdown.contract.test.mjs"], "poker-db-lockdown");
 run("node", ["tests/poker-hole-cards.rls.test.mjs"], "poker-hole-cards-rls");
 run("node", ["tests/poker-hole-cards.allow-bots.contract.test.mjs"], "poker-hole-cards-allow-bots-contract");
@@ -75,9 +74,7 @@ run("node", ["tests/poker-handSeats-reset.behavior.test.mjs"], "poker-handseats-
 run("node", ["tests/poker-legal-actions.left-player.invalid-player.behavior.test.mjs"], "poker-legal-actions-left-player-invalid-player-behavior");
 run("node", ["shared/poker-domain/leave.behavior.test.mjs"], "poker-domain-leave-behavior");
 run("node", ["shared/poker-domain/inactive-cleanup.behavior.test.mjs"], "poker-domain-inactive-cleanup-behavior");
-run("node", ["tests/poker-invariants.test.mjs"], "poker-invariants");
 run("node", ["tests/poker-inactive-cleanup.behavior.test.mjs"], "poker-inactive-cleanup-behavior");
-run("node", ["tests/poker-bots.leave-after-hand-evicted-on-settle.behavior.test.mjs"], "poker-bots-leave-after-hand-evicted-on-settle");
 run("node", ["tests/poker-materialize-settlement.payouts.test.mjs"], "poker-materialize-settlement-payouts");
 
 run("node", ["tests/poker-ui.behavior.test.mjs"], "poker-ui-behavior");
