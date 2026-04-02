@@ -7,7 +7,11 @@ const source = await readFile(path.join(root, "scripts", "test-all.mjs"), "utf8"
 
 assert.match(source, /run\("node", \["tests\/poker-ui\.behavior\.test\.mjs"\],/, "runner should include poker-ui.behavior test");
 assert.match(source, /run\("node", \["tests\/poker-ui-turn-actions\.test\.mjs"\],/, "runner should include poker-ui turn-actions test");
-assert.match(source, /run\("node", \["tests\/poker-ui-amount-actions-dom\.behavior\.test\.mjs"\],/, "runner should include poker-ui amount-actions DOM behavior test");
+assert.doesNotMatch(
+  source,
+  /tests\/poker-ui-amount-actions-dom\.behavior\.test\.mjs/,
+  "runner should not include legacy poker-ui amount-actions DOM behavior test"
+);
 assert.doesNotMatch(source, /run\("node", \["tests\/poker-ui-bet-raise-contract\.behavior\.test\.mjs"\],/, "runner should not include redundant poker-ui bet/raise contract behavior test");
 assert.doesNotMatch(source, /run\("node", \["tests\/poker-ui-amount-actions-sanitization\.test\.mjs"\],/, "runner should not include redundant poker-ui amount-actions sanitization test");
 assert.match(source, /run\("node", \["tests\/poker-ui-ws-join-smoke\.behavior\.test\.mjs"\],/, "runner should include poker-ui ws join smoke test");
