@@ -34,6 +34,13 @@ assert.doesNotMatch(
   "runner should not include removed legacy human timeout sweep test"
 );
 assert.doesNotMatch(source, /tests\/poker-sweep\.cashout-authoritative\.behavior\.test\.mjs/, "runner should not include removed legacy authoritative timeout sweep test");
+assert.doesNotMatch(source, /tests\/poker-contract\.phase1\.test\.mjs/, "runner should not include legacy phase1 contract test");
+assert.doesNotMatch(source, /tests\/poker-bots\.leave-after-hand-evicted-on-settle\.behavior\.test\.mjs/, "runner should not include legacy HTTP poker-act settle flow test");
+assert.doesNotMatch(source, /tests\/poker-invariants\.test\.mjs/, "runner should not include retired HTTP sweep invariant source checks");
+assert.doesNotMatch(source, /tests\/poker-lifecycle\.invariants\.sweep-guards\.behavior\.test\.mjs/, "runner should not include retired HTTP sweep guard behavior test");
+assert.doesNotMatch(source, /tests\/poker-lifecycle\.invariants\.sweep-idle-cutoff\.behavior\.test\.mjs/, "runner should not include retired HTTP sweep idle cutoff behavior test");
+assert.doesNotMatch(source, /tests\/poker-realtime-fallback\.behavior\.test\.mjs/, "runner should not include legacy HTTP table reload fallback behavior test");
+assert.doesNotMatch(source, /tests\/poker-showdown-eligibility-sitout\.test\.mjs/, "runner should not include retired HTTP poker-act source contract test");
 assert.match(source, /run\("node", \["ws-tests\/ws-lobby-join-public-snapshot\.behavior\.test\.mjs"\],/, "runner should include ws lobby join public snapshot test");
 assert.match(source, /run\("node", \["tests\/i18n\.behavior\.test\.mjs"\],/, "runner should include i18n.behavior test");
 assert.match(source, /run\("node", \["tests\/static-html\.behavior\.test\.mjs"\],/, "runner should include static-html.behavior test");
