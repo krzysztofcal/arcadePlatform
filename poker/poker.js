@@ -1724,6 +1724,7 @@
     function applyWsSnapshot(snapshot){
       if (!snapshot || !snapshot.payload) return;
       var activeCurrentUserId = typeof currentUserId === 'string' && currentUserId ? currentUserId : '';
+      var activeIsSeated = typeof isSeated !== 'undefined' && isSeated === true;
       var normalized = normalizeWsSnapshotPayload(snapshot);
       var payload = normalized.payload || {};
       var snapshotKind = normalized.kind || snapshot.kind || snapshot.rawType || null;
@@ -1745,7 +1746,7 @@
         snapshotKind: snapshotKind,
         stateVersion: incomingVersion,
         currentUserId: activeCurrentUserId || null,
-        isSeated: isSeated === true,
+        isSeated: activeIsSeated,
         youSeat: Number.isInteger(payload.youSeat) ? payload.youSeat : null,
         currentUserSeatNo: Number.isInteger(currentUserSeatNo) ? currentUserSeatNo : null,
         stacksKeys: Object.keys(rawStacks),
