@@ -6,37 +6,39 @@ test('poker UI WS smoke sends one action and refreshes public table state withou
   var actPayloads = [];
   var snapshotHandler = null;
   var harness = createPokerTableHarness({
-    responses: [
-      {
-        tableId: 'table-1',
-        status: 'OPEN',
-        maxPlayers: 6,
-        seats: [
-          { seatNo: 1, userId: 'user-1', status: 'ACTIVE', stack: 150 },
-          { seatNo: 2, userId: 'bot-2', status: 'ACTIVE', stack: 150 },
-          { seatNo: 3, userId: 'bot-3', status: 'ACTIVE', stack: 150 }
-        ],
-        legalActions: ['CHECK'],
-        actionConstraints: {},
-        state: {
-          version: 1,
-          state: {
-            phase: 'PREFLOP',
-            pot: 15,
-            community: [],
-            stacks: { 'user-1': 150, 'bot-2': 150, 'bot-3': 150 },
-            turnUserId: 'user-1',
-            handId: 'hand-1'
-          }
-        }
-      }
-    ],
     wsFactory(createOptions){
       snapshotHandler = createOptions.onSnapshot;
       return {
         start(){
           Promise.resolve().then(function(){
             if (typeof createOptions.onStatus === 'function') createOptions.onStatus('auth_ok', { roomId: 'table-1' });
+            if (typeof createOptions.onSnapshot === 'function'){
+              createOptions.onSnapshot({
+                kind: 'stateSnapshot',
+                payload: {
+                  tableId: 'table-1',
+                  stateVersion: 1,
+                  table: {
+                    tableId: 'table-1',
+                    status: 'OPEN',
+                    maxPlayers: 6,
+                    members: [
+                      { userId: 'user-1', seat: 1 },
+                      { userId: 'bot-2', seat: 2 },
+                      { userId: 'bot-3', seat: 3 }
+                    ]
+                  },
+                  public: {
+                    hand: { handId: 'hand-1', status: 'PREFLOP' },
+                    turn: { userId: 'user-1', deadlineAt: Date.now() + 5000 },
+                    board: [],
+                    pot: { total: 15, sidePots: [] },
+                    legalActions: ['CHECK']
+                  },
+                  stacks: { 'user-1': 150, 'bot-2': 150, 'bot-3': 150 }
+                }
+              });
+            }
           });
         },
         destroy(){},
@@ -62,7 +64,7 @@ test('poker UI WS smoke sends one action and refreshes public table state withou
   assert.equal(actPayloads[0].handId, 'hand-1', 'smoke act should send the current hand id');
   assert.equal(actPayloads[0].action, 'CHECK', 'smoke act should send the normalized WS action');
   assert.equal(harness.fetchState.actCalls, 0, 'smoke act should stay on the WS action path');
-  assert.equal(harness.fetchState.getCalls, 1, 'smoke act should not trigger an extra HTTP table reload after the WS write');
+  assert.equal(harness.fetchState.getCalls, 0, 'smoke act should stay off the retired HTTP table reload path');
 
   snapshotHandler({
     kind: 'table_state',

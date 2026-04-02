@@ -27,34 +27,8 @@
 - Behavior test validates `poker-get-table` succeeds when all hole cards are stringified JSON arrays.
 - Negative test validates `poker-get-table` returns `409 state_invalid` when any user’s cards are a malformed string.
 
-## How to run the smoke test
+## Smoke flow status
 
-This smoke test hits real infra and is **manual by default**. It is intentionally **not** part of default CI.
-If you want CI coverage, add a workflow that only runs via `workflow_dispatch` (or an explicit flag) and requires the Supabase secrets.
+The old `npm run poker:smoke` path is retired. Poker table runtime is WS-only, and HTTP gameplay read/write flows (`poker-get-table`, `poker-heartbeat`, legacy HTTP gameplay commands) are non-authoritative/retired (`410`).
 
-Prereqs: Node 18+ (global `fetch`).
-
-1. Add env vars to `./.local/poker-test.env`:
-   - `BASE`, `ORIGIN`, `SUPABASE_URL`, `SUPABASE_ANON_KEY`
-   - `U1_EMAIL`, `U1_PASS`, `U2_EMAIL`, `U2_PASS`
-2. Load env:
-
-   ```bash
-   set -a
-   . ./.local/poker-test.env
-   set +a
-   ```
-
-3. Run:
-
-   ```bash
-   npm run poker:smoke
-   ```
-
-   If `BASE` points to production, run with an explicit opt-in:
-
-   ```bash
-   POKER_SMOKE_ALLOW_PROD=1 npm run poker:smoke
-   ```
-
-The script creates a table, seats two users, starts a hand, validates `poker-get-table`, performs one `CHECK`, and prints a UI link plus the final table ID for manual inspection.
+Use WS behavior coverage (`tests/poker-ui-ws-*.behavior.test.mjs`, WS guard tests, and `ws-tests/*`) for runtime verification.

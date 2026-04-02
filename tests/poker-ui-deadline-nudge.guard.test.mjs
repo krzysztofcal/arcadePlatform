@@ -24,7 +24,8 @@ function extractFunctionBlock(code, functionName){
 const scheduleBlock = extractFunctionBlock(source, "scheduleDeadlineNudge");
 
 assert.match(scheduleBlock, /setTimeout\s*\(/, "Expected deadline nudge to use setTimeout");
-assert.match(scheduleBlock, /loadTable\s*\(\s*false\s*\)/, "Expected deadline nudge callback to trigger refresh loadTable(false)");
+assert.doesNotMatch(scheduleBlock, /loadTable\s*\(\s*false\s*\)/, "Deadline nudge must not call retired loadTable(false)");
+assert.match(scheduleBlock, /requestWsResync\s*\(/, "Expected deadline nudge callback to nudge WS resync only");
 assert.ok(
   /clearDeadlineNudge\s*\(/.test(scheduleBlock) || /clearTimeout\s*\(\s*deadlineNudgeTimer\s*\)/.test(scheduleBlock),
   "Expected deadline nudge scheduling path to include timer cleanup"

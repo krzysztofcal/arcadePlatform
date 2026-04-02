@@ -25,6 +25,9 @@ assert.doesNotMatch(source, /run\("node", \["tests\/poker-ui-ws-auth-watch-order
 assert.doesNotMatch(source, /run\("node", \["tests\/poker-ui-ws-visibility\.behavior\.test\.mjs"\],/, "runner should not include removed poker-ui ws visibility test");
 assert.doesNotMatch(source, /run\("node", \["tests\/poker-ui-ws-join-authoritative\.behavior\.test\.mjs"\],/, "runner should not include removed poker-ui ws join-authoritative test");
 assert.match(source, /run\("node", \["tests\/poker-ui-no-heartbeat\.guard\.test\.mjs"\],/, "runner should include poker-ui no-heartbeat guard test");
+assert.match(source, /run\("node", \["tests\/poker-ui-ws-live-state-page\.behavior\.test\.mjs"\],/, "runner should include poker-ui ws live-state page behavior test");
+assert.match(source, /run\("node", \["tests\/poker-ui-deadline-nudge\.guard\.test\.mjs"\],/, "runner should include poker-ui deadline nudge guard test");
+assert.match(source, /run\("node", \["tests\/poker-ui-stopPolling-clears-nudge\.guard\.test\.mjs"\],/, "runner should include poker-ui stopPolling clears nudge guard test");
 assert.match(source, /run\("node", \["ws-server\/poker\/persistence\/inactive-cleanup-adapter\.behavior\.test\.mjs"\],/, "runner should include ws inactive cleanup adapter behavior test");
 assert.match(source, /run\("node", \["ws-server\/poker\/runtime\/disconnect-cleanup\.behavior\.test\.mjs"\],/, "runner should include ws disconnect cleanup runtime behavior test");
 assert.match(source, /run\("node", \["ws-server\/poker\/runtime\/accepted-bot-autoplay-adapter\.behavior\.test\.mjs"\],/, "runner should include ws accepted bot autoplay adapter behavior test");
