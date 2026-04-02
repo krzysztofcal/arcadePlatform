@@ -5,7 +5,9 @@ This document gives a concise map of the poker realtime pieces in Arcade Portal 
 ## What it covers
 - Browser poker entry points live in `poker/index.html` (lobby) and `poker/table.html` (table view).
 - Browser client logic lives under `poker/`, including the realtime client files such as `poker-ws-client.js` and `poker-realtime.js`.
-- Active gameplay runtime ownership is WS-only in `ws-server/` (join/start/act/leave/timeout/autoplay/next-hand/disconnect cleanup). Netlify HTTP gameplay endpoints are retired (`410`) and non-authoritative.
+- Active gameplay runtime ownership is WS-only in `ws-server/` (join/start/act/leave/timeout/autoplay/next-hand/disconnect cleanup).
+- Table page runtime (`/poker/table.html`) is strictly WS-only for active game state: no HTTP bootstrap, no HTTP refresh path, no gameplay HTTP fallback, and no heartbeat/polling gameplay read path.
+- Netlify HTTP gameplay endpoints are retired (`410`) and non-authoritative for runtime gameplay (including `poker-get-table`).
 - The realtime transport lives in `ws-server/`, which provides the WebSocket server used by poker clients.
 - Bot support is part of the poker flow and is covered by the poker tests and supporting docs already in `docs/`.
 
@@ -24,3 +26,5 @@ This document gives a concise map of the poker realtime pieces in Arcade Portal 
 
 ## Operational note
 Treat poker state as server-authoritative. Realtime updates improve responsiveness, but sensitive state and game transitions must remain controlled by the backend services.
+
+HTTP remains allowed only for non-gameplay runtime concerns (for example lobby/list/create/admin/ops endpoints), not for active table gameplay runtime.

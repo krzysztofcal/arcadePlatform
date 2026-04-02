@@ -127,7 +127,11 @@ Examples:
 
 Optional runtime mode: deployments may explicitly enable observe-only `table_join` via server config (`WS_OBSERVE_ONLY_JOIN=1`). In that mode, `table_join` is transport-level connect/observe/resync for non-seated users and does not allocate seats.
 
-Authoritative seat acquisition/buy-in remains server-authoritative, and browser gameplay runtime MUST use WS as the only write path for `table_join`/`join`, `leave`, `start_hand`, and `act`. The HTTP gameplay endpoints (`poker-join`, `poker-heartbeat`, `poker-get-table`, `poker-start-hand`, `poker-act`, `poker-leave`, `poker-sweep`) are retired and return explicit non-authoritative errors (`410`) instead of mutating live gameplay state.
+Authoritative seat acquisition/buy-in remains server-authoritative, and browser gameplay runtime MUST use WS as the only write path for `table_join`/`join`, `leave`, `start_hand`, and `act`.
+
+Table runtime policy is strict: `/poker/table.html` MUST be 100% WS-only for active gameplay state (bootstrap + refresh + resync). The browser runtime MUST NOT use `poker-get-table`, `poker-heartbeat`, or any gameplay HTTP read fallback.
+
+The HTTP gameplay endpoints (`poker-join`, `poker-heartbeat`, `poker-get-table`, `poker-start-hand`, `poker-act`, `poker-leave`, `poker-sweep`) are retired and return explicit non-authoritative errors (`410`) instead of mutating or sourcing live gameplay state.
 
 `leave` remains authoritative for already-seated users: when the authenticated user is an authoritative table member, WS `leave` executes authoritative member removal/cashout semantics in both default and observe-only runtime modes.
 

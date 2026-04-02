@@ -48,7 +48,6 @@ Arcade Portal is a browser-based gaming hub that combines quick arcade games wit
 - Useful commands:
   - `npm run test`
   - `npm run check:all`
-  - `npm run poker:smoke`
 
 ## Testing
 - Open `tests/index.html` for browser-based checks.

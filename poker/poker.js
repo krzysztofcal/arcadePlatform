@@ -1392,6 +1392,78 @@
       return mergedSeats;
     }
 
+
+    function createWsBaselineTableData(snapshotPayload){
+      var payload = snapshotPayload && typeof snapshotPayload === 'object' ? snapshotPayload : {};
+      var tablePayload = isPlainObject(payload.table) ? payload.table : {};
+      var handPayload = isPlainObject(payload.hand) ? payload.hand : {};
+      var turnPayload = isPlainObject(payload.turn) ? payload.turn : {};
+      var potPayload = isPlainObject(payload.pot) ? payload.pot : {};
+      var boardPayload = isPlainObject(payload.board) ? payload.board : null;
+      var seatUpdates = mapTableStateToSeatUpdates(payload);
+      var stateVersion = Number.isInteger(payload.stateVersion) ? payload.stateVersion : 0;
+      var communityCards = [];
+      if (boardPayload && Array.isArray(boardPayload.cards)){
+        communityCards = normalizeCardsForRender(boardPayload.cards);
+      } else if (Array.isArray(payload.board)) {
+        communityCards = normalizeCardsForRender(payload.board);
+      }
+      var legalActions = [];
+      var actionConstraints = null;
+      if (Array.isArray(payload.legalActions)){
+        legalActions = payload.legalActions.slice();
+      } else if (isPlainObject(payload.legalActions)){
+        if (Array.isArray(payload.legalActions.actions)) legalActions = payload.legalActions.actions.slice();
+        if (isPlainObject(payload.legalActions.actionConstraints)) actionConstraints = getSafeConstraints({ actionConstraints: payload.legalActions.actionConstraints });
+      }
+      if (!actionConstraints && isPlainObject(payload.actionConstraints)){
+        actionConstraints = getSafeConstraints({ actionConstraints: payload.actionConstraints });
+      }
+      if (!actionConstraints) actionConstraints = {};
+      var stateObj = {
+        phase: typeof handPayload.status === 'string' ? handPayload.status : null,
+        handId: typeof handPayload.handId === 'string' ? handPayload.handId : null,
+        turnUserId: typeof turnPayload.userId === 'string' ? turnPayload.userId : null,
+        turnDeadlineAt: turnPayload.deadlineAt != null ? turnPayload.deadlineAt : null,
+        turnStartedAt: turnPayload.startedAt != null ? turnPayload.startedAt : null,
+        pot: Number.isFinite(Number(potPayload.total)) ? Number(potPayload.total) : 0,
+        potTotal: Number.isFinite(Number(potPayload.total)) ? Number(potPayload.total) : 0,
+        sidePots: Array.isArray(potPayload.sidePots) ? potPayload.sidePots.slice() : [],
+        community: communityCards,
+        stacks: isPlainObject(payload.stacks) ? Object.assign({}, payload.stacks) : {}
+      };
+      var resolvedMaxPlayers = null;
+      if (Number.isInteger(tablePayload.maxPlayers) && tablePayload.maxPlayers > 1){
+        resolvedMaxPlayers = tablePayload.maxPlayers;
+      } else if (Number.isInteger(tablePayload.maxSeats) && tablePayload.maxSeats > 1){
+        resolvedMaxPlayers = tablePayload.maxSeats;
+      } else {
+        var snakeMaxPlayers = parseInt(tablePayload.max_players, 10);
+        if (Number.isInteger(snakeMaxPlayers) && snakeMaxPlayers > 1){
+          resolvedMaxPlayers = snakeMaxPlayers;
+        }
+      }
+      var baseline = {
+        tableId: payload.tableId || tableId,
+        table: {
+          id: payload.tableId || tableId,
+          status: typeof tablePayload.status === 'string' ? tablePayload.status : 'OPEN',
+          maxPlayers: resolvedMaxPlayers || 6,
+          stakes: tablePayload.stakes || null
+        },
+        seats: Array.isArray(seatUpdates.seats) ? seatUpdates.seats.slice() : [],
+        legalActions: legalActions,
+        actionConstraints: actionConstraints,
+        _actionConstraints: actionConstraints,
+        state: {
+          version: stateVersion,
+          state: stateObj
+        },
+        myHoleCards: Array.isArray(payload.myHoleCards) ? normalizeCardsForRender(payload.myHoleCards) : []
+      };
+      return baseline;
+    }
+
     function mergeWsStateIntoTableData(existingData, snapshotPayload){
       if (!existingData || typeof existingData !== 'object') return null;
       var payload = snapshotPayload && typeof snapshotPayload === 'object' ? snapshotPayload : {};
@@ -1531,7 +1603,7 @@
       if (!snapshotPayload || typeof snapshotPayload !== 'object') return false;
       if (snapshotPayload.tableId && snapshotPayload.tableId !== tableId) return false;
       if (!tableData || typeof tableData !== 'object'){
-        return opts.allowWhenNoBaseline === true;
+        return opts.allowWhenNoBaseline === true && isRichGameplaySnapshot(snapshotPayload, opts.snapshotKind);
       }
       var incomingVersion = resolveSnapshotVersion(snapshotPayload);
       var currentVersion = resolveTableDataVersion(tableData);
@@ -1548,12 +1620,17 @@
 
     function applyWsSnapshotNow(snapshotPayload, options){
       if (!snapshotPayload || typeof snapshotPayload !== 'object') return false;
-      if (!shouldApplyWsSnapshot(snapshotPayload, options)) return false;
-      if (!tableData || typeof tableData !== 'object') return false;
-      var mergedData = mergeWsStateIntoTableData(tableData, snapshotPayload);
-      if (!mergedData) return false;
-      mergedData._actionConstraints = getSafeConstraints(mergedData);
-      tableData = mergedData;
+      var opts = options && typeof options === 'object' ? options : {};
+      if (!shouldApplyWsSnapshot(snapshotPayload, opts)) return false;
+      if (!tableData || typeof tableData !== 'object'){
+        if (!opts.allowWhenNoBaseline) return false;
+        tableData = createWsBaselineTableData(snapshotPayload);
+      } else {
+        var mergedData = mergeWsStateIntoTableData(tableData, snapshotPayload);
+        if (!mergedData) return false;
+        mergedData._actionConstraints = getSafeConstraints(mergedData);
+        tableData = mergedData;
+      }
       isSeated = isCurrentUserSeated(tableData);
       renderTable(tableData);
       var seatedCount = getSeatedCount(tableData);
@@ -1583,7 +1660,7 @@
       });
 
       if (applyWsSnapshotNow(payload, {
-        allowWhenNoBaseline: false,
+        allowWhenNoBaseline: true,
         allowUnversionedUpgrade: false,
         snapshotKind: snapshotKind
       })) return;
@@ -2460,7 +2537,10 @@
       deadlineNudgeTimer = setTimeout(function(){
         deadlineNudgeTimer = null;
         deadlineNudgeTargetMs = null;
-        klog('poker_deadline_nudge_retired', { tableId: tableId });
+        if (!isPageActive()) return;
+        if (joinPending || leavePending || startHandPending || actPending) return;
+        klog('poker_deadline_nudge_ws_resync', { tableId: tableId });
+        requestWsResync('turn_deadline_nudge');
       }, delayMs);
     }
 
