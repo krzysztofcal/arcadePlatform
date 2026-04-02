@@ -14,12 +14,18 @@ test("ws preview deploy remote script matches fixed preview app-dir contract", (
   assert.match(text, /PREVIEW_BASE_DIR: \/opt\/arcade-ws-preview/);
   assert.match(text, /PREVIEW_APP_DIR: \/opt\/arcade-ws-preview\/ws-server/);
   assert.match(text, /sudo -n test -d "\$PREVIEW_APP_DIR"/);
+  assert.match(text, /cp -R ws-server\/shared\/poker-domain "\$PREVIEW_STAGE_WS_DIR"\/shared\/poker-domain/);
   assert.match(text, /sudo -n test -f "\$TMP_EXTRACT_DIR\/ws-server\/server\.mjs"/);
   assert.match(text, /sudo -n test -f "\$TMP_EXTRACT_DIR\/shared\/poker-domain\/join\.mjs"/);
+  assert.match(text, /sudo -n test -f "\$TMP_EXTRACT_DIR\/ws-server\/shared\/poker-domain\/inactive-cleanup-deps\.mjs"/);
+  assert.match(text, /sudo -n test -d "\$TMP_EXTRACT_DIR\/node_modules\/postgres"/);
   assert.match(text, /sudo -n rsync -a --delete "\$TMP_EXTRACT_DIR\/ws-server\/" "\$PREVIEW_APP_DIR"\//);
   assert.match(text, /sudo -n mkdir -p "\$PREVIEW_BASE_DIR\/shared"/);
   assert.match(text, /sudo -n rsync -a --delete "\$TMP_EXTRACT_DIR\/shared\/" "\$PREVIEW_BASE_DIR\/shared"\//);
+  assert.match(text, /sudo -n mkdir -p "\$PREVIEW_BASE_DIR\/node_modules"/);
+  assert.match(text, /sudo -n rsync -a --delete "\$TMP_EXTRACT_DIR\/node_modules\/" "\$PREVIEW_BASE_DIR\/node_modules"\//);
   assert.doesNotMatch(text, /sudo -n rsync -a --delete "\$TMP_EXTRACT_DIR"\/ "\$PREVIEW_BASE_DIR"\//);
+  assert.doesNotMatch(text, /sudo -n rsync -a --delete "\$TMP_EXTRACT_DIR\/node_modules"\/ "\$PREVIEW_BASE_DIR\/node_modules"\//);
   assert.doesNotMatch(text, /sudo -n rsync -a --delete "\$TMP_EXTRACT_DIR\/ws-server"\/ "\$PREVIEW_APP_DIR"\//);
   assert.doesNotMatch(text, /sudo -n rsync -a --delete "\$TMP_EXTRACT_DIR\/shared"\/ "\$PREVIEW_BASE_DIR\/shared"\//);
   assert.match(text, /sudo -n systemctl restart "\$PREVIEW_SERVICE_NAME"/);
