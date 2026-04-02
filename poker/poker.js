@@ -1233,9 +1233,6 @@
       var payload = snapshotPayload && typeof snapshotPayload === 'object' ? snapshotPayload : {};
       if (snapshotKind === 'stateSnapshot') return true;
       if (isPlainObject(payload.public) || isPlainObject(payload.private) || isPlainObject(payload.you)) return true;
-      if (isPlainObject(payload.hand) || isPlainObject(payload.turn) || isPlainObject(payload.pot) || isPlainObject(payload.board)) return true;
-      if (isPlainObject(payload.stacks) || (isPlainObject(payload.public) && isPlainObject(payload.public.stacks))) return true;
-      if (Array.isArray(payload.seats) || Array.isArray(payload.authoritativeMembers)) return true;
       return isPlainObject(payload.table);
     }
 
@@ -1727,6 +1724,7 @@
     function applyWsSnapshot(snapshot){
       if (!snapshot || !snapshot.payload) return;
       var activeCurrentUserId = typeof currentUserId === 'string' && currentUserId ? currentUserId : '';
+      var activeIsSeated = typeof isSeated !== 'undefined' && isSeated === true;
       var normalized = normalizeWsSnapshotPayload(snapshot);
       var payload = normalized.payload || {};
       var snapshotKind = normalized.kind || snapshot.kind || snapshot.rawType || null;
@@ -1748,7 +1746,7 @@
         snapshotKind: snapshotKind,
         stateVersion: incomingVersion,
         currentUserId: activeCurrentUserId || null,
-        isSeated: isSeated === true,
+        isSeated: activeIsSeated,
         youSeat: Number.isInteger(payload.youSeat) ? payload.youSeat : null,
         currentUserSeatNo: Number.isInteger(currentUserSeatNo) ? currentUserSeatNo : null,
         stacksKeys: Object.keys(rawStacks),
