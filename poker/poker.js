@@ -1233,9 +1233,6 @@
       var payload = snapshotPayload && typeof snapshotPayload === 'object' ? snapshotPayload : {};
       if (snapshotKind === 'stateSnapshot') return true;
       if (isPlainObject(payload.public) || isPlainObject(payload.private) || isPlainObject(payload.you)) return true;
-      if (isPlainObject(payload.hand) || isPlainObject(payload.turn) || isPlainObject(payload.pot) || isPlainObject(payload.board)) return true;
-      if (isPlainObject(payload.stacks) || (isPlainObject(payload.public) && isPlainObject(payload.public.stacks))) return true;
-      if (Array.isArray(payload.seats) || Array.isArray(payload.authoritativeMembers)) return true;
       return isPlainObject(payload.table);
     }
 
