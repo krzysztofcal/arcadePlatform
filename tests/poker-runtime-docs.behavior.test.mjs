@@ -17,6 +17,8 @@ test('protocol docs forbid poker HTTP runtime on table page', () => {
   assert.match(protocolDoc, /MUST be 100% WS-only/i);
   assert.match(protocolDoc, /MUST NOT use `poker-get-table`/i);
   assert.match(protocolDoc, /MUST NOT use `poker-get-table`, `poker-heartbeat`/i);
+  assert.match(protocolDoc, /retired and return .*410/i);
+  assert.doesNotMatch(protocolDoc, /read-only API/i);
 });
 
 test('deployment docs describe retired HTTP gameplay endpoints', () => {
@@ -25,4 +27,14 @@ test('deployment docs describe retired HTTP gameplay endpoints', () => {
   assert.match(deploymentDoc, /\.netlify\/functions\/poker-heartbeat/);
   assert.match(deploymentDoc, /\.netlify\/functions\/poker-get-table/);
   assert.match(deploymentDoc, /\.netlify\/functions\/poker-sweep/);
+});
+
+const holeCardsDoc = fs.readFileSync('docs/poker-hole-cards-normalization.md', 'utf8');
+
+test('hole-cards doc is explicit that poker-get-table is retired 410 stub', () => {
+  assert.match(holeCardsDoc, /historical/i);
+  assert.match(holeCardsDoc, /WS-only/i);
+  assert.match(holeCardsDoc, /retired HTTP stub/i);
+  assert.match(holeCardsDoc, /returns `410`/i);
+  assert.doesNotMatch(holeCardsDoc, /migrat(e|ion)|read-only API/i);
 });

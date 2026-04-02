@@ -1,34 +1,21 @@
-# Poker hole-cards normalization (state_invalid)
+# Poker hole-cards normalization (historical note)
 
-## Symptoms
+## Status
 
-- `poker-get-table` can return HTTP 409 `state_invalid` during action phases (typically right after `poker-start-hand`).
-- The state row and `handId` exist, but the response still fails before returning hole cards.
+This document is kept only as historical context for a former HTTP `poker-get-table` implementation detail.
 
-## Diagnosis
+Current runtime policy is unambiguous:
 
-- SQL inspection showed `public.poker_hole_cards.cards` sometimes stored or returned as a **stringified JSON array** (text type or driver string coercion).
-- When `poker-get-table` loads hole cards, the action-phase state was valid but `cards` arrived as a string.
+- Active table gameplay runtime is **WS-only**.
+- `poker-get-table` is a **retired HTTP stub** that returns `410` and is not a gameplay read model.
+- HTTP gameplay endpoints are retired contract shims and must not be used for runtime bootstrap, refresh, or resync.
 
-## Root cause
+## Historical context (retired path)
 
-`loadHoleCardsByUserId()` assumed `cards` was an array. When it received a string, validation failed (`isValidTwoCards(cards)`), which surfaced as `state_invalid`.
+In the retired HTTP path, `poker-get-table` could fail with `state_invalid` when hole cards were stored as stringified JSON arrays and not normalized to arrays before validation.
 
-## Fix summary
+That behavior no longer defines active runtime semantics and is intentionally not an active fallback path.
 
-- Normalize `cards` inside `loadHoleCardsByUserId()`:
-  - Arrays pass through unchanged.
-  - Strings are `JSON.parse`d; only parsed arrays are accepted.
-  - Unparsable strings or non-array results still fail validation.
-- Validation remains strict: invalid card shapes or counts still yield `state_invalid`.
+## Verification path (active)
 
-## Regression test summary
-
-- Behavior test validates `poker-get-table` succeeds when all hole cards are stringified JSON arrays.
-- Negative test validates `poker-get-table` returns `409 state_invalid` when any user’s cards are a malformed string.
-
-## Smoke flow status
-
-The old `npm run poker:smoke` path is retired. Poker table runtime is WS-only, and HTTP gameplay read/write flows (`poker-get-table`, `poker-heartbeat`, legacy HTTP gameplay commands) are non-authoritative/retired (`410`).
-
-Use WS behavior coverage (`tests/poker-ui-ws-*.behavior.test.mjs`, WS guard tests, and `ws-tests/*`) for runtime verification.
+Use WS-focused coverage for runtime verification (`tests/poker-ui-ws-*.behavior.test.mjs`, WS guard tests, and `ws-tests/*`).
