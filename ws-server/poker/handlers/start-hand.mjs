@@ -74,19 +74,25 @@ export async function handleStartHandCommand({ frame, ws, connState, tableManage
     reason: null
   });
 
+  let autoplayResult = { ok: true };
   try {
-    await runAcceptedBotAutoplay({
+    autoplayResult = await runAcceptedBotAutoplay({
       tableId,
       trigger: "start_hand",
       requestId: frame.requestId ?? null,
       frameTs: frame.ts
     });
   } catch (error) {
+    autoplayResult = { ok: false, reason: error?.message || "autoplay_failed" };
     klog("ws_start_hand_bot_autoplay_failed", {
       tableId,
       requestId: frame.requestId ?? null,
       message: error?.message || "unknown"
     });
+  }
+
+  if (autoplayResult?.ok === false) {
+    return;
   }
 
   broadcastStateSnapshots(tableId);

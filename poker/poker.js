@@ -1233,6 +1233,9 @@
       var payload = snapshotPayload && typeof snapshotPayload === 'object' ? snapshotPayload : {};
       if (snapshotKind === 'stateSnapshot') return true;
       if (isPlainObject(payload.public) || isPlainObject(payload.private) || isPlainObject(payload.you)) return true;
+      if (isPlainObject(payload.hand) || isPlainObject(payload.turn) || isPlainObject(payload.pot) || isPlainObject(payload.board)) return true;
+      if (isPlainObject(payload.stacks) || (isPlainObject(payload.public) && isPlainObject(payload.public.stacks))) return true;
+      if (Array.isArray(payload.seats) || Array.isArray(payload.authoritativeMembers)) return true;
       return isPlainObject(payload.table);
     }
 
@@ -1292,6 +1295,10 @@
       if (!normalized.hand && isPlainObject(pub.hand)) normalized.hand = pub.hand;
       if (!normalized.pot && isPlainObject(pub.pot)) normalized.pot = pub.pot;
       if (!normalized.turn && isPlainObject(pub.turn)) normalized.turn = pub.turn;
+      if (!normalized.stacks || typeof normalized.stacks !== 'object' || Array.isArray(normalized.stacks)){
+        var normalizedStacks = normalizeSnapshotStacks(payload);
+        if (normalizedStacks) normalized.stacks = normalizedStacks;
+      }
       if (!normalized.legalActions && pub.legalActions != null) normalized.legalActions = pub.legalActions;
       if (!normalized.actionConstraints && isPlainObject(pub.actionConstraints)) normalized.actionConstraints = pub.actionConstraints;
       if (!normalized.board && pub.board != null){
@@ -1310,6 +1317,15 @@
         }
       }
       return { kind: kind, payload: normalized };
+    }
+
+    function normalizeSnapshotStacks(payload){
+      var safePayload = payload && typeof payload === 'object' ? payload : {};
+      if (isPlainObject(safePayload.stacks)) return Object.assign({}, safePayload.stacks);
+      var publicPayload = isPlainObject(safePayload.public) ? safePayload.public : {};
+      if (isPlainObject(publicPayload.stacks)) return Object.assign({}, publicPayload.stacks);
+      if (isPlainObject(safePayload.state) && isPlainObject(safePayload.state.stacks)) return Object.assign({}, safePayload.state.stacks);
+      return null;
     }
 
     function mapTableStateToSeatUpdates(snapshotPayload){
@@ -1430,7 +1446,7 @@
         potTotal: Number.isFinite(Number(potPayload.total)) ? Number(potPayload.total) : 0,
         sidePots: Array.isArray(potPayload.sidePots) ? potPayload.sidePots.slice() : [],
         community: communityCards,
-        stacks: isPlainObject(payload.stacks) ? Object.assign({}, payload.stacks) : {}
+        stacks: normalizeSnapshotStacks(payload) || {}
       };
       var resolvedMaxPlayers = null;
       if (Number.isInteger(tablePayload.maxPlayers) && tablePayload.maxPlayers > 1){
@@ -1497,8 +1513,9 @@
         }
         if (Array.isArray(payload.pot.sidePots)) nextState.sidePots = payload.pot.sidePots.slice();
       }
-      if (payload.stacks && typeof payload.stacks === 'object' && !Array.isArray(payload.stacks)){
-        nextState.stacks = Object.assign({}, baselineInner.stacks && typeof baselineInner.stacks === 'object' ? baselineInner.stacks : {}, payload.stacks);
+      var normalizedStacks = normalizeSnapshotStacks(payload);
+      if (normalizedStacks){
+        nextState.stacks = Object.assign({}, baselineInner.stacks && typeof baselineInner.stacks === 'object' ? baselineInner.stacks : {}, normalizedStacks);
       }
       baselineState.state = nextState;
       merged.state = baselineState;
@@ -1563,6 +1580,51 @@
         return facts;
       }
       return facts;
+    }
+
+    function buildSeatUserSeatMap(seats){
+      var map = {};
+      if (!Array.isArray(seats)) return map;
+      for (var i = 0; i < seats.length; i++){
+        var seat = seats[i];
+        if (!seat || typeof seat.userId !== 'string') continue;
+        var userId = seat.userId.trim();
+        if (!userId) continue;
+        map[userId] = Number.isInteger(seat.seatNo) ? seat.seatNo : null;
+      }
+      return map;
+    }
+
+    function buildWsPayloadSeatSnapshot(payload){
+      var seatMap = {};
+      var seatRows = [];
+      if (Array.isArray(payload.authoritativeMembers)){
+        for (var i = 0; i < payload.authoritativeMembers.length; i++){
+          var member = payload.authoritativeMembers[i];
+          if (!member || typeof member.userId !== 'string') continue;
+          var memberUserId = member.userId.trim();
+          if (!memberUserId) continue;
+          var memberSeatNo = Number.isInteger(member.seat) ? member.seat : null;
+          seatMap[memberUserId] = memberSeatNo;
+          seatRows.push(memberUserId + ':' + (memberSeatNo != null ? memberSeatNo : 'null'));
+        }
+      }
+      if (Array.isArray(payload.seats)){
+        for (var j = 0; j < payload.seats.length; j++){
+          var seat = payload.seats[j];
+          if (!seat || typeof seat.userId !== 'string') continue;
+          var seatUserId = seat.userId.trim();
+          if (!seatUserId) continue;
+          if (seatMap[seatUserId] != null) continue;
+          var seatNo = Number.isInteger(seat.seatNo) ? seat.seatNo : null;
+          seatMap[seatUserId] = seatNo;
+          seatRows.push(seatUserId + ':' + (seatNo != null ? seatNo : 'null'));
+        }
+      }
+      return {
+        seatMap: seatMap,
+        seatRows: seatRows
+      };
     }
 
     function hasTurnMetadata(state){
@@ -1632,6 +1694,23 @@
         tableData = mergedData;
       }
       isSeated = isCurrentUserSeated(tableData);
+      var stateObj = tableData && typeof tableData.state === 'object' ? tableData.state : {};
+      var gameState = stateObj && typeof stateObj.state === 'object' ? stateObj.state : {};
+      var stacks = gameState && typeof gameState.stacks === 'object' && !Array.isArray(gameState.stacks) ? gameState.stacks : {};
+      var seatFacts = findCurrentUserSeatFacts(tableData);
+      klog('poker_ws_snapshot_runtime_normalized', {
+        tableId: tableId,
+        snapshotKind: opts.snapshotKind || null,
+        stateVersion: resolveTableDataVersion(tableData),
+        currentUserId: currentUserId || null,
+        isSeated: isSeated === true,
+        youSeat: Number.isInteger(snapshotPayload.youSeat) ? snapshotPayload.youSeat : null,
+        currentUserSeatNo: seatFacts.seatNo,
+        stacksKeys: Object.keys(stacks),
+        currentUserStackValue: currentUserId ? stacks[currentUserId] : null,
+        seatsCount: Array.isArray(tableData.seats) ? tableData.seats.length : 0,
+        seatUserSeatMap: buildSeatUserSeatMap(tableData.seats || [])
+      });
       renderTable(tableData);
       var seatedCount = getSeatedCount(tableData);
       if (isSeated && seatedCount !== lastAutoStartSeatCount){
@@ -1651,12 +1730,31 @@
       var snapshotKind = normalized.kind || snapshot.kind || snapshot.rawType || null;
       var incomingVersion = resolveSnapshotVersion(payload);
       var currentVersion = resolveTableDataVersion(tableData);
+      var rawStacks = normalizeSnapshotStacks(payload) || {};
+      var payloadSeatSnapshot = buildWsPayloadSeatSnapshot(payload);
+      var currentUserSeatNo = payloadSeatSnapshot.seatMap[currentUserId || ''];
+      var youSeatPresent = Number.isInteger(payload.youSeat);
       klog('poker_ws_snapshot_received', {
         tableId: tableId,
         kind: snapshotKind,
         initial: snapshot.initial === true,
         members: Array.isArray(payload.members) ? payload.members.length : 0,
         stateVersion: incomingVersion
+      });
+      klog('poker_ws_snapshot_apply_input', {
+        tableId: tableId,
+        snapshotKind: snapshotKind,
+        stateVersion: incomingVersion,
+        currentUserId: currentUserId || null,
+        isSeated: isSeated === true,
+        youSeat: Number.isInteger(payload.youSeat) ? payload.youSeat : null,
+        currentUserSeatNo: Number.isInteger(currentUserSeatNo) ? currentUserSeatNo : null,
+        stacksKeys: Object.keys(rawStacks),
+        currentUserStackValue: currentUserId ? rawStacks[currentUserId] : null,
+        seatsCount: payloadSeatSnapshot.seatRows.length,
+        seatUserSeatMap: payloadSeatSnapshot.seatMap,
+        seatUserIds: payloadSeatSnapshot.seatRows,
+        youSeatPresent: youSeatPresent
       });
 
       if (applyWsSnapshotNow(payload, {
@@ -2665,7 +2763,7 @@
           } else {
             seatStatusEl.className += ' poker-seat-status--active';
             seatStatusEl.textContent = t('pokerSeatActive', 'Active');
-            var activeStack = seat.userId && stacks[seat.userId] != null ? formatChips(stacks[seat.userId]) : '0';
+            var activeStack = seat.userId && stacks[seat.userId] != null ? formatChips(stacks[seat.userId]) : '-';
             seatStackEl.textContent = t('pokerSeatStack', 'Stack') + ': ' + activeStack;
           }
           div.appendChild(seatNoEl);
@@ -2678,12 +2776,30 @@
 
       var hasCurrentUserStack = !!(currentUserId && stacks[currentUserId] != null);
       var yourStack = hasCurrentUserStack ? formatChips(stacks[currentUserId]) : '-';
+      var seatFacts = findCurrentUserSeatFacts(data);
+      klog('poker_render_your_stack_pre', {
+        tableId: tableId,
+        stateVersion: Number.isInteger(stateObj.version) ? stateObj.version : null,
+        currentUserId: currentUserId || null,
+        isSeated: isSeated === true,
+        currentUserSeatNo: seatFacts.seatNo,
+        hasCurrentUserStack: hasCurrentUserStack,
+        rawCurrentUserStack: currentUserId ? stacks[currentUserId] : null,
+        stacksKeys: Object.keys(stacks || {})
+      });
       if (isSeated && currentUserId && !hasCurrentUserStack){
-        yourStack = '0';
         klog('poker_stack_missing_for_seated_user', {
           tableId: tableId,
-          userId: currentUserId,
-          stacksKeys: Object.keys(stacks || {})
+          stateVersion: Number.isInteger(stateObj.version) ? stateObj.version : null,
+          snapshotKind: wsSnapshotSeen ? 'ws_runtime' : 'non_ws_or_initial',
+          currentUserId: currentUserId,
+          isSeated: isSeated === true,
+          currentUserSeatNo: seatFacts.seatNo,
+          stacksKeys: Object.keys(stacks || {}),
+          hasCurrentUserStack: hasCurrentUserStack,
+          rawCurrentUserStack: currentUserId ? stacks[currentUserId] : null,
+          seatUserIds: Array.isArray(data.seats) ? data.seats.filter(function(seat){ return seat && typeof seat.userId === 'string' && seat.userId; }).map(function(seat){ return seat.userId; }) : [],
+          youSeatPresent: Number.isInteger(seatFacts.seatNo)
         });
       }
       if (yourStackEl) yourStackEl.textContent = yourStack;
