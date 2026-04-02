@@ -87,23 +87,25 @@ export async function handleActCommand({ frame, ws, connState, tableManager, ens
   });
 
   if (result.accepted && !result.replayed && result.changed) {
+    let autoplayResult = { ok: true };
     try {
-      await runAcceptedBotAutoplay({
+      autoplayResult = await runAcceptedBotAutoplay({
         tableId,
         trigger: "act",
         requestId: frame.requestId ?? null,
         frameTs: frame.ts
       });
     } catch (error) {
+      autoplayResult = { ok: false, reason: error?.message || "autoplay_failed" };
       klog("ws_act_bot_autoplay_failed", {
         tableId,
         requestId: frame.requestId ?? null,
         message: error?.message || "unknown"
       });
     }
-  }
-
-  if (result.accepted && !result.replayed && result.changed) {
+    if (autoplayResult?.ok === false) {
+      return;
+    }
     broadcastStateSnapshots(tableId);
   }
 }

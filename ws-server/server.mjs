@@ -249,6 +249,16 @@ function nowTs() {
   return new Date().toISOString();
 }
 
+function buildAutoplayStartSnapshot(tableId) {
+  const state = tableManager.persistedPokerState(tableId);
+  const stateVersion = Number(tableManager.persistedStateVersion(tableId) || 0);
+  return {
+    stateVersionBeforeAutoplay: stateVersion || null,
+    turnUserIdBeforeAutoplay: typeof state?.turnUserId === "string" ? state.turnUserId : null,
+    phaseBeforeAutoplay: typeof state?.phase === "string" ? state.phase : null
+  };
+}
+
 function sendFrame(ws, frame) {
   if (ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify(frame));
@@ -1210,7 +1220,19 @@ wss.on("connection", (ws) => {
         return;
       }
       frame.__resolvedTableId = resolvedRoomId.roomId;
-      const runAcceptedBotAutoplay = await loadAcceptedBotAutoplayExecutor();
+      const acceptedBotAutoplayExecutor = await loadAcceptedBotAutoplayExecutor();
+      const runAcceptedBotAutoplay = async ({ tableId, trigger, requestId, frameTs }) => {
+        const startSnapshot = buildAutoplayStartSnapshot(tableId);
+        klogSafe("ws_bot_autoplay_start", {
+          tableId,
+          requestId: requestId || null,
+          trigger: trigger || null,
+          stateVersion_before_autoplay: startSnapshot.stateVersionBeforeAutoplay,
+          turnUserId_before_autoplay: startSnapshot.turnUserIdBeforeAutoplay,
+          phase_before_autoplay: startSnapshot.phaseBeforeAutoplay
+        });
+        return acceptedBotAutoplayExecutor({ tableId, trigger, requestId, frameTs });
+      };
       await handleActCommand({
         frame,
         ws,
@@ -1240,7 +1262,19 @@ wss.on("connection", (ws) => {
         return;
       }
       frame.__resolvedTableId = resolvedRoomId.roomId;
-      const runAcceptedBotAutoplay = await loadAcceptedBotAutoplayExecutor();
+      const acceptedBotAutoplayExecutor = await loadAcceptedBotAutoplayExecutor();
+      const runAcceptedBotAutoplay = async ({ tableId, trigger, requestId, frameTs }) => {
+        const startSnapshot = buildAutoplayStartSnapshot(tableId);
+        klogSafe("ws_bot_autoplay_start", {
+          tableId,
+          requestId: requestId || null,
+          trigger: trigger || null,
+          stateVersion_before_autoplay: startSnapshot.stateVersionBeforeAutoplay,
+          turnUserId_before_autoplay: startSnapshot.turnUserIdBeforeAutoplay,
+          phase_before_autoplay: startSnapshot.phaseBeforeAutoplay
+        });
+        return acceptedBotAutoplayExecutor({ tableId, trigger, requestId, frameTs });
+      };
       await handleStartHandCommand({
         frame,
         ws,

@@ -93,6 +93,28 @@ test('handleActCommand does not autoplay for replayed, rejected, or conflicted a
   assert.deepEqual(autoplayCalls, []);
 });
 
+test('handleActCommand skips broadcast when autoplay returns failure but still sends accepted commandResult', async () => {
+  const calls = { command: [], snapshots: 0 };
+  await handleActCommand({
+    frame: { __resolvedTableId: 't1', requestId: 'r7', ts: new Date().toISOString(), payload: { handId: 'h1', action: 'CHECK' } },
+    ws: {},
+    connState: { session: { userId: 'u1' } },
+    tableManager: { ensureTableLoaded: async () => ({ ok: true }), applyAction: () => ({ accepted: true, replayed: false, changed: true, stateVersion: 2, reason: null }) },
+    ensureTableLoadedErrorMapper: (x) => x,
+    sendError: () => assert.fail('unexpected sendError'),
+    sendCommandResult: (_ws, _cs, payload) => calls.command.push(payload),
+    persistMutatedState: async () => ({ ok: true }),
+    restoreTableFromPersisted: async () => ({ ok: true }),
+    broadcastResyncRequired: () => {},
+    broadcastStateSnapshots: () => { calls.snapshots += 1; },
+    runAcceptedBotAutoplay: async () => ({ ok: false, reason: 'invalid_state' })
+  });
+
+  assert.equal(calls.command.length, 1);
+  assert.equal(calls.command[0].status, 'accepted');
+  assert.equal(calls.snapshots, 0);
+});
+
 
 test('handleActCommand rejects ensureTableLoaded failure with mapped stable code', async () => {
   const calls = [];
