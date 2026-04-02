@@ -96,6 +96,8 @@ run("node", ["tests/poker-ui-stopPendingAll.guard.test.mjs"], "poker-ui-stopPend
 run("node", ["tests/test-all.runner-registration.guard.test.mjs"], "test-all-runner-registration-guard");
 run("node", ["tests/poker-runtime-docs.behavior.test.mjs"], "poker-runtime-docs-behavior");
 run("node", ["tests/poker-http-retired-contract.guard.test.mjs"], "poker-http-retired-contract-guard");
+run("node", ["tests/poker-get-table-retired-implementation.guard.test.mjs"], "poker-get-table-retired-implementation-guard");
+run("node", ["tests/poker-http-tooling-retired.guard.test.mjs"], "poker-http-tooling-retired-guard");
 run("node", ["tests/poker-ui-requestid-retry.guard.test.mjs"], "poker-ui-requestid-retry-guard");
 run("node", ["tests/poker-requestid-helper.guard.test.mjs"], "poker-requestid-helper-guard");
 run("node", ["tests/poker-idempotency-scope.guard.test.mjs"], "poker-idempotency-scope-guard");

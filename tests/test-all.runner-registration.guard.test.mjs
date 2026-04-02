@@ -58,6 +58,8 @@ assert.match(source, /run\("node", \["tests\/poker-ui-requestid-retry\.guard\.te
 assert.match(source, /run\("node", \["tests\/poker-requestid-helper\.guard\.test\.mjs"\],/, "runner should include poker requestid helper guard test");
 assert.match(source, /run\("node", \["tests\/poker-idempotency-scope\.guard\.test\.mjs"\],/, "runner should include poker idempotency scope guard test");
 assert.match(source, /run\("node", \["tests\/poker-http-retired-contract\.guard\.test\.mjs"\],/, "runner should include retired HTTP gameplay contract guard test");
+assert.match(source, /run\("node", \["tests\/poker-get-table-retired-implementation\.guard\.test\.mjs"\],/, "runner should include poker-get-table retired implementation guard test");
+assert.match(source, /run\("node", \["tests\/poker-http-tooling-retired\.guard\.test\.mjs"\],/, "runner should include retired HTTP tooling guard test");
 assert.doesNotMatch(source, /tests\/poker-get-table-nonmutation\.guard\.test\.mjs/, "runner should not include legacy get-table nonmutation guard after retirement");
 assert.doesNotMatch(source, /tests\/poker-start-hand-storage\.guard\.test\.mjs/, "runner should not include legacy start-hand storage guard after retirement");
 assert.match(source, /run\("node", \["tests\/poker-workflows\.playwright-install\.guard\.test\.mjs"\],/, "runner should include poker workflow playwright-install guard test");
