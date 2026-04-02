@@ -1683,6 +1683,7 @@
     function applyWsSnapshotNow(snapshotPayload, options){
       if (!snapshotPayload || typeof snapshotPayload !== 'object') return false;
       var opts = options && typeof options === 'object' ? options : {};
+      var activeCurrentUserId = typeof currentUserId === 'string' && currentUserId ? currentUserId : '';
       if (!shouldApplyWsSnapshot(snapshotPayload, opts)) return false;
       if (!tableData || typeof tableData !== 'object'){
         if (!opts.allowWhenNoBaseline) return false;
@@ -1702,12 +1703,12 @@
         tableId: tableId,
         snapshotKind: opts.snapshotKind || null,
         stateVersion: resolveTableDataVersion(tableData),
-        currentUserId: currentUserId || null,
+        currentUserId: activeCurrentUserId || null,
         isSeated: isSeated === true,
         youSeat: Number.isInteger(snapshotPayload.youSeat) ? snapshotPayload.youSeat : null,
         currentUserSeatNo: seatFacts.seatNo,
         stacksKeys: Object.keys(stacks),
-        currentUserStackValue: currentUserId ? stacks[currentUserId] : null,
+        currentUserStackValue: activeCurrentUserId ? stacks[activeCurrentUserId] : null,
         seatsCount: Array.isArray(tableData.seats) ? tableData.seats.length : 0,
         seatUserSeatMap: buildSeatUserSeatMap(tableData.seats || [])
       });
@@ -1725,6 +1726,7 @@
 
     function applyWsSnapshot(snapshot){
       if (!snapshot || !snapshot.payload) return;
+      var activeCurrentUserId = typeof currentUserId === 'string' && currentUserId ? currentUserId : '';
       var normalized = normalizeWsSnapshotPayload(snapshot);
       var payload = normalized.payload || {};
       var snapshotKind = normalized.kind || snapshot.kind || snapshot.rawType || null;
@@ -1732,7 +1734,7 @@
       var currentVersion = resolveTableDataVersion(tableData);
       var rawStacks = normalizeSnapshotStacks(payload) || {};
       var payloadSeatSnapshot = buildWsPayloadSeatSnapshot(payload);
-      var currentUserSeatNo = payloadSeatSnapshot.seatMap[currentUserId || ''];
+      var currentUserSeatNo = payloadSeatSnapshot.seatMap[activeCurrentUserId];
       var youSeatPresent = Number.isInteger(payload.youSeat);
       klog('poker_ws_snapshot_received', {
         tableId: tableId,
@@ -1745,12 +1747,12 @@
         tableId: tableId,
         snapshotKind: snapshotKind,
         stateVersion: incomingVersion,
-        currentUserId: currentUserId || null,
+        currentUserId: activeCurrentUserId || null,
         isSeated: isSeated === true,
         youSeat: Number.isInteger(payload.youSeat) ? payload.youSeat : null,
         currentUserSeatNo: Number.isInteger(currentUserSeatNo) ? currentUserSeatNo : null,
         stacksKeys: Object.keys(rawStacks),
-        currentUserStackValue: currentUserId ? rawStacks[currentUserId] : null,
+        currentUserStackValue: activeCurrentUserId ? rawStacks[activeCurrentUserId] : null,
         seatsCount: payloadSeatSnapshot.seatRows.length,
         seatUserSeatMap: payloadSeatSnapshot.seatMap,
         seatUserIds: payloadSeatSnapshot.seatRows,
