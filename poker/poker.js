@@ -1232,6 +1232,18 @@
     function isRichGameplaySnapshot(snapshotPayload, snapshotKind){
       var payload = snapshotPayload && typeof snapshotPayload === 'object' ? snapshotPayload : {};
       if (snapshotKind === 'stateSnapshot') return true;
+      if (snapshotKind === 'table_state'){
+        return !!(
+          isPlainObject(payload.stacks)
+          || Array.isArray(payload.authoritativeMembers)
+          || Array.isArray(payload.seats)
+          || isPlainObject(payload.hand)
+          || isPlainObject(payload.turn)
+          || isPlainObject(payload.pot)
+          || isPlainObject(payload.board)
+          || Array.isArray(payload.board)
+        );
+      }
       if (isPlainObject(payload.public) || isPlainObject(payload.private) || isPlainObject(payload.you)) return true;
       return isPlainObject(payload.table);
     }
@@ -1634,26 +1646,61 @@
       return constraints.toCall != null || constraints.minRaiseTo != null || constraints.maxRaiseTo != null || constraints.maxBetAmount != null;
     }
 
+    function hasStackEntries(stacks){
+      return !!(stacks && typeof stacks === 'object' && !Array.isArray(stacks) && Object.keys(stacks).length > 0);
+    }
+
+    function resolveCurrentUserStackStatus(data){
+      var status = {
+        currentUserId: null,
+        seated: false,
+        hasStack: false,
+        stackValue: null
+      };
+      var activeCurrentUserId = typeof currentUserId === 'string' && currentUserId ? currentUserId : null;
+      if (!activeCurrentUserId) return status;
+      status.currentUserId = activeCurrentUserId;
+      var seatFacts = findCurrentUserSeatFacts(data);
+      status.seated = seatFacts.hasCurrentUserSeat === true;
+      status.hasStack = seatFacts.hasCurrentUserStack === true;
+      var stateObj = data && typeof data.state === 'object' ? data.state : null;
+      var gameState = stateObj && typeof stateObj.state === 'object' ? stateObj.state : null;
+      var stacks = gameState && typeof gameState.stacks === 'object' && !Array.isArray(gameState.stacks) ? gameState.stacks : null;
+      if (status.currentUserId && stacks && stacks[status.currentUserId] != null) status.stackValue = stacks[status.currentUserId];
+      return status;
+    }
+
     function materiallyImprovesRichSnapshot(currentData, snapshotPayload){
       if (!currentData || typeof currentData !== 'object') return false;
       if (!snapshotPayload || typeof snapshotPayload !== 'object') return false;
+      var currentStateBeforeMerge = currentData.state && currentData.state.state && typeof currentData.state.state === 'object' ? currentData.state.state : {};
+      var hadHoleCards = Array.isArray(currentData.myHoleCards) && currentData.myHoleCards.length > 0;
+      var hadCommunity = Array.isArray(currentStateBeforeMerge.community) && currentStateBeforeMerge.community.length > 0;
+      var hadLegalActions = Array.isArray(currentData.legalActions) && currentData.legalActions.length > 0;
+      var hadConstraints = hasConstraintsData(currentData.actionConstraints);
+      var hadTurnMetadata = hasTurnMetadata(currentStateBeforeMerge);
+      var hadStacks = hasStackEntries(currentStateBeforeMerge.stacks);
+      var currentStackKeys = hadStacks ? Object.keys(currentStateBeforeMerge.stacks) : [];
+      var currentUserStackStatusBefore = resolveCurrentUserStackStatus(currentData);
       var mergedData = mergeWsStateIntoTableData(currentData, snapshotPayload);
       if (!mergedData) return false;
-      var currentState = currentData.state && currentData.state.state && typeof currentData.state.state === 'object' ? currentData.state.state : {};
       var mergedState = mergedData.state && mergedData.state.state && typeof mergedData.state.state === 'object' ? mergedData.state.state : {};
-      var hadHoleCards = Array.isArray(currentData.myHoleCards) && currentData.myHoleCards.length > 0;
       var hasHoleCards = Array.isArray(mergedData.myHoleCards) && mergedData.myHoleCards.length > 0;
       if (!hadHoleCards && hasHoleCards) return true;
-      var hadCommunity = Array.isArray(currentState.community) && currentState.community.length > 0;
       var hasCommunity = Array.isArray(mergedState.community) && mergedState.community.length > 0;
       if (!hadCommunity && hasCommunity) return true;
-      var hadLegalActions = Array.isArray(currentData.legalActions) && currentData.legalActions.length > 0;
       var hasLegalActions = Array.isArray(mergedData.legalActions) && mergedData.legalActions.length > 0;
       if (!hadLegalActions && hasLegalActions) return true;
-      var hadConstraints = hasConstraintsData(currentData.actionConstraints);
       var hasConstraints = hasConstraintsData(mergedData.actionConstraints);
       if (!hadConstraints && hasConstraints) return true;
-      if (!hasTurnMetadata(currentState) && hasTurnMetadata(mergedState)) return true;
+      if (!hadTurnMetadata && hasTurnMetadata(mergedState)) return true;
+      var hasStacks = hasStackEntries(mergedState.stacks);
+      if (!hadStacks && hasStacks) return true;
+      var mergedStackKeys = hasStackEntries(mergedState.stacks) ? Object.keys(mergedState.stacks) : [];
+      if (mergedStackKeys.length > currentStackKeys.length) return true;
+      var currentUserStackStatusAfter = resolveCurrentUserStackStatus(mergedData);
+      if (currentUserStackStatusBefore.seated && !currentUserStackStatusBefore.hasStack && currentUserStackStatusAfter.hasStack) return true;
+      if (currentUserStackStatusBefore.seated && currentUserStackStatusBefore.hasStack && currentUserStackStatusAfter.hasStack && currentUserStackStatusBefore.stackValue !== currentUserStackStatusAfter.stackValue) return true;
       return false;
     }
 
