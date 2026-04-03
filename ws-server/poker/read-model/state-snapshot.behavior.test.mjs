@@ -115,6 +115,7 @@ test("buildStateSnapshotPayload projects bootstrapped PREFLOP state from table m
 
   assert.equal(seatedPayload.public.hand.status, "PREFLOP");
   assert.equal(typeof seatedPayload.public.hand.handId, "string");
+  assert.deepEqual(seatedPayload.public.stacks, { user_a: 99, user_b: 98 });
   assert.deepEqual(seatedPayload.public.pot, { total: 3, sidePots: [] });
   assert.deepEqual(seatedPayload.public.legalActions, { seat: 1, actions: ["FOLD", "CALL", "RAISE"] });
   assert.equal(Array.isArray(seatedPayload.private.holeCards), true);
