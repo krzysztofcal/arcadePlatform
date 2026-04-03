@@ -124,34 +124,180 @@ function resolveTrustedHoleCardsByUserId({
   return Object.keys(out).length > 0 ? out : null;
 }
 
+function hasTrustedRuntimeShape(state) {
+  if (!state || typeof state !== "object") return false;
+  const isPlainMap = (value) => !!(value && typeof value === "object" && !Array.isArray(value));
+  const hasEntries = (value) => isPlainMap(value) && Object.keys(value).length > 0;
+  const community = Array.isArray(state.community) ? state.community : [];
+  if (community.length !== 5) return false;
+  const seats = Array.isArray(state.seats) ? state.seats : [];
+  if (seats.length < 2) return false;
+  if (!hasEntries(state.stacks)) return false;
+  if (!hasEntries(state.contributionsByUserId)) return false;
+  if (!hasEntries(state.holeCardsByUserId)) return false;
+  if (!isPlainMap(state.foldedByUserId) || !isPlainMap(state.leftTableByUserId) || !isPlainMap(state.sitOutByUserId)) return false;
+  return true;
+}
+
+function resolveTrustedStateToMaterialize({
+  primaryState,
+  fallbackState,
+  trustedHoleCardsByUserId
+}) {
+  const isPlainMap = (value) => !!(value && typeof value === "object" && !Array.isArray(value));
+  const mapSize = (value) => (isPlainMap(value) ? Object.keys(value).length : 0);
+  const mergeMap = (primaryMap, fallbackMap) => {
+    const safePrimary = isPlainMap(primaryMap) ? primaryMap : {};
+    const safeFallback = isPlainMap(fallbackMap) ? fallbackMap : {};
+    return { ...safeFallback, ...safePrimary };
+  };
+  const toArrayOrNull = (value) => (Array.isArray(value) ? value : null);
+  const mergeTrustedSupplementState = (primary, fallback, resolvedHoleCards) => {
+    const base = primary && typeof primary === "object" ? { ...primary } : {};
+    const fb = fallback && typeof fallback === "object" ? fallback : {};
+    const baseCommunity = toArrayOrNull(base.community);
+    const fallbackCommunity = toArrayOrNull(fb.community);
+    if ((!baseCommunity || baseCommunity.length < 5) && fallbackCommunity && fallbackCommunity.length === 5) {
+      base.community = fallbackCommunity.slice();
+    }
+    if (!Number.isFinite(Number(base.pot)) && Number.isFinite(Number(fb.pot))) {
+      base.pot = Number(fb.pot);
+    }
+    if ((!Array.isArray(base.sidePots) || (Array.isArray(base.sidePots) && base.sidePots.some((pot) => !pot || typeof pot !== "object"))) && Array.isArray(fb.sidePots)) {
+      base.sidePots = fb.sidePots.slice();
+    }
+    if ((!Array.isArray(base.seats) || base.seats.length < 2) && Array.isArray(fb.seats) && fb.seats.length >= 2) {
+      base.seats = fb.seats.slice();
+    }
+    if (Array.isArray(base.seats) && Array.isArray(fb.seats) && base.seats.length >= 2 && fb.seats.length >= 2) {
+      const byUserId = {};
+      for (const seat of fb.seats) {
+        const userId = typeof seat?.userId === "string" ? seat.userId.trim() : "";
+        if (!userId) continue;
+        byUserId[userId] = seat;
+      }
+      base.seats = base.seats.map((seat) => {
+        const userId = typeof seat?.userId === "string" ? seat.userId.trim() : "";
+        const fallbackSeat = userId ? byUserId[userId] : null;
+        if (!fallbackSeat) return seat;
+        return {
+          ...fallbackSeat,
+          ...seat
+        };
+      });
+    }
+    if (mapSize(base.stacks) > 0 || mapSize(fb.stacks) > 0) base.stacks = mergeMap(base.stacks, fb.stacks);
+    if (mapSize(base.contributionsByUserId) > 0 || mapSize(fb.contributionsByUserId) > 0) base.contributionsByUserId = mergeMap(base.contributionsByUserId, fb.contributionsByUserId);
+    if (mapSize(base.foldedByUserId) > 0 || mapSize(fb.foldedByUserId) > 0) base.foldedByUserId = mergeMap(base.foldedByUserId, fb.foldedByUserId);
+    if (mapSize(base.leftTableByUserId) > 0 || mapSize(fb.leftTableByUserId) > 0) base.leftTableByUserId = mergeMap(base.leftTableByUserId, fb.leftTableByUserId);
+    if (mapSize(base.sitOutByUserId) > 0 || mapSize(fb.sitOutByUserId) > 0) base.sitOutByUserId = mergeMap(base.sitOutByUserId, fb.sitOutByUserId);
+    if ((typeof base.handId !== "string" || !base.handId.trim()) && typeof fb.handId === "string" && fb.handId.trim()) {
+      base.handId = fb.handId.trim();
+    }
+    if ((!base.showdown || typeof base.showdown !== "object") && fb.showdown && typeof fb.showdown === "object") {
+      base.showdown = { ...fb.showdown };
+    }
+    if (resolvedHoleCards && typeof resolvedHoleCards === "object") {
+      base.holeCardsByUserId = resolvedHoleCards;
+    } else if (mapSize(base.holeCardsByUserId) === 0 && mapSize(fb.holeCardsByUserId) > 0) {
+      base.holeCardsByUserId = { ...fb.holeCardsByUserId };
+    }
+    return base;
+  };
+  const readHandId = (state) => (typeof state?.handId === "string" && state.handId.trim() ? state.handId.trim() : "");
+  const primary = primaryState && typeof primaryState === "object" ? primaryState : null;
+  const fallback = fallbackState && typeof fallbackState === "object" ? fallbackState : null;
+  const primaryTrusted = hasTrustedRuntimeShape(primary);
+  const fallbackTrusted = hasTrustedRuntimeShape(fallback);
+  const primaryComparableHandId = readHandId(primary);
+  const fallbackComparableHandId = fallbackTrusted ? readHandId(fallback) : "";
+  const sameHand = !!primaryComparableHandId && !!fallbackComparableHandId && primaryComparableHandId === fallbackComparableHandId;
+  const trustedMismatch = !!primaryComparableHandId && !!fallbackComparableHandId && primaryComparableHandId !== fallbackComparableHandId;
+  let selectedState = null;
+  let trustedStateSource = "runtime_public_like_rejected";
+  if (primaryTrusted) {
+    selectedState = mergeTrustedSupplementState(primary, null, trustedHoleCardsByUserId);
+    trustedStateSource = "runtime_private";
+  } else if (fallbackTrusted && trustedMismatch) {
+    trustedStateSource = "fallback_private_hand_mismatch_rejected";
+  } else if (fallbackTrusted && sameHand) {
+    selectedState = mergeTrustedSupplementState(primary, fallback, trustedHoleCardsByUserId);
+    trustedStateSource = "fallback_private_same_hand";
+  } else if (fallbackTrusted) {
+    trustedStateSource = "fallback_private_primary_identity_unknown_rejected";
+  } else if (fallback && !fallbackTrusted) {
+    trustedStateSource = "fallback_private_untrusted_rejected";
+  }
+  return {
+    state: selectedState,
+    trustedStateSource,
+    sameHand,
+    trustedMismatch,
+    primaryTrusted,
+    fallbackTrusted
+  };
+}
+
 function validateTrustedShowdownInputs({
   stateToMaterialize,
   seatOrder,
-  holeCardsByUserId
+  holeCardsByUserId,
+  trustedStateSource = "trusted_private"
 }) {
   const community = Array.isArray(stateToMaterialize?.community) ? stateToMaterialize.community : [];
   const seats = Array.isArray(seatOrder) ? seatOrder : [];
-  const eligibleUserIds = seats.filter((userId) =>
-    typeof userId === "string"
-    && !stateToMaterialize?.foldedByUserId?.[userId]
-    && !stateToMaterialize?.leftTableByUserId?.[userId]
-    && !stateToMaterialize?.sitOutByUserId?.[userId]
-  );
   const trustedHoleCards = holeCardsByUserId && typeof holeCardsByUserId === "object" && !Array.isArray(holeCardsByUserId)
     ? holeCardsByUserId
     : {};
+  const validSeatUserIds = [];
+  const invalidSeatUserIds = [];
+  for (const userId of seats) {
+    if (typeof userId !== "string" || !userId.trim()) {
+      invalidSeatUserIds.push(userId ?? null);
+      continue;
+    }
+    validSeatUserIds.push(userId.trim());
+  }
+  const eligibleUserIds = validSeatUserIds.filter((userId) =>
+    !stateToMaterialize?.foldedByUserId?.[userId]
+    && !stateToMaterialize?.leftTableByUserId?.[userId]
+    && !stateToMaterialize?.sitOutByUserId?.[userId]
+  );
   const missingHoleCardsUserIds = [];
+  const invalidHoleCardsUserIds = [];
+  const showdownComparedUserIds = [];
   for (const userId of eligibleUserIds) {
     const cards = trustedHoleCards?.[userId];
-    if (!Array.isArray(cards) || cards.length !== 2) {
+    if (!Array.isArray(cards)) {
       missingHoleCardsUserIds.push(userId);
+      continue;
     }
+    if (cards.length !== 2) {
+      invalidHoleCardsUserIds.push(userId);
+      continue;
+    }
+    showdownComparedUserIds.push(userId);
   }
+  const eligibleMissingFromShowdownUserIds = eligibleUserIds.filter((userId) => !showdownComparedUserIds.includes(userId));
+  const hasInvalidInput = (
+    community.length !== 5
+    || eligibleUserIds.length < 2
+    || invalidSeatUserIds.length > 0
+    || eligibleMissingFromShowdownUserIds.length > 0
+    || invalidHoleCardsUserIds.length > 0
+  );
   return {
+    trustedStateSource,
     communityLen: community.length,
     eligibleUserIds,
+    showdownComparedUserIds,
     eligibleCount: eligibleUserIds.length,
-    missingHoleCardsUserIds
+    showdownComparedCount: showdownComparedUserIds.length,
+    invalidSeatUserIds,
+    missingHoleCardsUserIds,
+    invalidHoleCardsUserIds,
+    eligibleMissingFromShowdownUserIds,
+    hasInvalidInput
   };
 }
 
@@ -160,9 +306,24 @@ function materializeShowdownState(stateToMaterialize, seatOrder, holeCardsByUser
     const showdownInputs = validateTrustedShowdownInputs({
       stateToMaterialize,
       seatOrder,
-      holeCardsByUserId
+      holeCardsByUserId,
+      trustedStateSource: typeof options?.trustedStateSource === "string" ? options.trustedStateSource : "trusted_private"
     });
-    if (showdownInputs.communityLen !== 5 || showdownInputs.missingHoleCardsUserIds.length > 0) {
+    if (typeof klog === "function") {
+      klog("ws_bot_autoplay_showdown_preflight", {
+        handId: typeof stateToMaterialize?.handId === "string" ? stateToMaterialize.handId : null,
+        phase: typeof stateToMaterialize?.phase === "string" ? stateToMaterialize.phase : null,
+        communityLen: showdownInputs.communityLen,
+        eligibleUserIds: showdownInputs.eligibleUserIds,
+        showdownComparedUserIds: showdownInputs.showdownComparedUserIds,
+        missingHoleCardsUserIds: showdownInputs.missingHoleCardsUserIds,
+        invalidHoleCardsUserIds: showdownInputs.invalidHoleCardsUserIds,
+        invalidSeatUserIds: showdownInputs.invalidSeatUserIds,
+        eligibleMissingFromShowdownUserIds: showdownInputs.eligibleMissingFromShowdownUserIds,
+        trustedStateSource: showdownInputs.trustedStateSource
+      });
+    }
+    if (showdownInputs.hasInvalidInput) {
       const error = new Error("showdown_missing_private_inputs");
       error.code = "showdown_missing_private_inputs";
       if (typeof klog === "function") {
@@ -171,7 +332,14 @@ function materializeShowdownState(stateToMaterialize, seatOrder, holeCardsByUser
           phase: typeof stateToMaterialize?.phase === "string" ? stateToMaterialize.phase : null,
           communityLen: showdownInputs.communityLen,
           eligibleCount: showdownInputs.eligibleCount,
-          missingHoleCardsUserIds: showdownInputs.missingHoleCardsUserIds
+          showdownComparedCount: showdownInputs.showdownComparedCount,
+          eligibleUserIds: showdownInputs.eligibleUserIds,
+          showdownComparedUserIds: showdownInputs.showdownComparedUserIds,
+          missingHoleCardsUserIds: showdownInputs.missingHoleCardsUserIds,
+          invalidHoleCardsUserIds: showdownInputs.invalidHoleCardsUserIds,
+          invalidSeatUserIds: showdownInputs.invalidSeatUserIds,
+          eligibleMissingFromShowdownUserIds: showdownInputs.eligibleMissingFromShowdownUserIds,
+          trustedStateSource: showdownInputs.trustedStateSource
         });
       }
       throw error;
@@ -300,19 +468,34 @@ export function createAcceptedBotAutoplayExecutor({
         advanceIfNeeded,
         buildPersistedFromPrivateState,
         materializeShowdownState: (nextState, seatOrder, loopPrivateHoleCardsByUserId, options = {}) => {
-          const trustedHoleCardsByUserId = options?.requiresShowdownComparison === true
+          const requiresShowdownComparison = options?.requiresShowdownComparison === true;
+          const trustedHoleCardsByUserId = requiresShowdownComparison
             ? resolveTrustedHoleCardsByUserId({
                 primaryState: { holeCardsByUserId: loopPrivateHoleCardsByUserId },
                 fallbackState: tableManager.persistedPokerState(tableId)
               })
             : null;
+          let stateToMaterialize = nextState;
+          let trustedStateSource = "runtime_state_no_showdown_compare";
+          if (requiresShowdownComparison) {
+            const trustedStateResolution = resolveTrustedStateToMaterialize({
+              primaryState: nextState,
+              fallbackState: tableManager.persistedPokerState(tableId),
+              trustedHoleCardsByUserId
+            });
+            stateToMaterialize = trustedStateResolution.state;
+            trustedStateSource = trustedStateResolution.trustedStateSource;
+          }
           return materializeShowdownState(
-            nextState,
+            stateToMaterialize,
             seatOrder,
             trustedHoleCardsByUserId,
             frameTs || new Date().toISOString(),
             klog,
-            options
+            {
+              ...options,
+              trustedStateSource
+            }
           );
         },
         computeLegalActions: ({ statePublic, userId }) => {

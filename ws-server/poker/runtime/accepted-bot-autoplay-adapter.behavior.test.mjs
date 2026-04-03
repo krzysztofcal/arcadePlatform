@@ -224,12 +224,131 @@ test("accepted bot autoplay showdown uses trusted private hole cards even for pu
     env: { WS_BOT_AUTOPLAY_MODULE_PATH: moduleUrl },
     klog: (event, payload) => logs.push({ event, payload })
   });
-
   const result = await run({ tableId: "t-showdown", trigger: "act", requestId: "r-showdown" });
   assert.equal(result.ok, true);
   assert.equal(calls.persist, 1);
   assert.equal(calls.restore, 0);
   assert.equal(logs.some((entry) => entry.event === "ws_bot_autoplay_showdown_input_missing"), false);
+  const preflightLog = logs.find((entry) => entry.event === "ws_bot_autoplay_showdown_preflight");
+  assert.ok(preflightLog);
+  assert.equal(preflightLog.payload.trustedStateSource, "fallback_private_same_hand");
+});
+
+test("accepted bot autoplay rejects fallback when primary showdown hand identity is missing", async () => {
+  const logs = [];
+  const calls = { persist: 0, restore: 0, resync: 0 };
+  const privateState = {
+    tableId: "t-missing-handid",
+    handId: "h-missing-handid-1",
+    phase: "PREFLOP",
+    turnUserId: "bot_2",
+    seats: [{ userId: "human_1", seatNo: 1 }, { userId: "bot_2", seatNo: 2, isBot: true }],
+    community: [{ r: "A", s: "S" }, { r: "K", s: "S" }, { r: "Q", s: "S" }, { r: "J", s: "S" }, { r: "2", s: "D" }],
+    stacks: { human_1: 100, bot_2: 100 },
+    foldedByUserId: { human_1: false, bot_2: false },
+    sitOutByUserId: {},
+    leftTableByUserId: {},
+    pot: 40,
+    sidePots: [],
+    contributionsByUserId: { human_1: 20, bot_2: 20 },
+    holeCardsByUserId: {
+      human_1: [{ r: "9", s: "S" }, { r: "8", s: "S" }],
+      bot_2: [{ r: "A", s: "H" }, { r: "A", s: "D" }]
+    }
+  };
+  const tableManager = {
+    persistedPokerState: () => ({ ...privateState }),
+    persistedStateVersion: () => 19,
+    tableSnapshot: () => ({ seats: [{ userId: "human_1", seatNo: 1 }, { userId: "bot_2", seatNo: 2, isBot: true }] }),
+    applyAction: () => ({ accepted: true, changed: true, replayed: false, stateVersion: 20 })
+  };
+  const moduleUrl = new URL("./fixtures/autoplay-showdown-public-state-missing-handid-fixture.mjs", import.meta.url).href;
+  const run = createAcceptedBotAutoplayExecutor({
+    tableManager,
+    persistMutatedState: async () => {
+      calls.persist += 1;
+      return { ok: true };
+    },
+    restoreTableFromPersisted: async () => {
+      calls.restore += 1;
+      return { ok: true };
+    },
+    broadcastResyncRequired: () => {
+      calls.resync += 1;
+    },
+    env: { WS_BOT_AUTOPLAY_MODULE_PATH: moduleUrl },
+    klog: (event, payload) => logs.push({ event, payload })
+  });
+
+  const result = await run({ tableId: "t-missing-handid", trigger: "act", requestId: "r-missing-handid" });
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "showdown_missing_private_inputs");
+  assert.equal(calls.persist, 0);
+  assert.equal(calls.restore, 1);
+  assert.equal(calls.resync, 1);
+  const preflightLog = logs.find((entry) => entry.event === "ws_bot_autoplay_showdown_preflight");
+  assert.ok(preflightLog);
+  assert.equal(preflightLog.payload.trustedStateSource, "fallback_private_primary_identity_unknown_rejected");
+});
+
+test("accepted bot autoplay preserves fresh showdown gameplay fields when fallback is stale", async () => {
+  const logs = [];
+  const calls = { persist: 0, restore: 0, resync: 0 };
+  const stalePersisted = {
+    tableId: "t-stale-overlay",
+    handId: "h-stale-overlay-1",
+    phase: "PREFLOP",
+    turnUserId: "bot_2",
+    seats: [{ userId: "human_1", seatNo: 1 }, { userId: "bot_2", seatNo: 2, isBot: true }],
+    community: [{ r: "A", s: "S" }, { r: "K", s: "S" }, { r: "Q", s: "S" }, { r: "J", s: "S" }, { r: "2", s: "D" }],
+    stacks: { human_1: 100, bot_2: 100 },
+    foldedByUserId: { human_1: false, bot_2: false },
+    sitOutByUserId: {},
+    leftTableByUserId: {},
+    pot: 40,
+    sidePots: [],
+    contributionsByUserId: { human_1: 20, bot_2: 20 },
+    holeCardsByUserId: {
+      human_1: [{ r: "9", s: "S" }, { r: "8", s: "S" }],
+      bot_2: [{ r: "A", s: "H" }, { r: "A", s: "D" }]
+    }
+  };
+  const tableManager = {
+    persistedPokerState: () => ({ ...stalePersisted }),
+    persistedStateVersion: () => 21,
+    tableSnapshot: () => ({ seats: [{ userId: "human_1", seatNo: 1 }, { userId: "bot_2", seatNo: 2, isBot: true }] }),
+    applyAction: () => ({ accepted: true, changed: true, replayed: false, stateVersion: 22 })
+  };
+  const moduleUrl = new URL("./fixtures/autoplay-showdown-stale-fallback-overlay-fixture.mjs", import.meta.url).href;
+  const run = createAcceptedBotAutoplayExecutor({
+    tableManager,
+    persistMutatedState: async () => {
+      calls.persist += 1;
+      return { ok: true };
+    },
+    restoreTableFromPersisted: async () => {
+      calls.restore += 1;
+      return { ok: true };
+    },
+    broadcastResyncRequired: () => {
+      calls.resync += 1;
+    },
+    env: { WS_BOT_AUTOPLAY_MODULE_PATH: moduleUrl },
+    klog: (event, payload) => logs.push({ event, payload })
+  });
+
+  const result = await run({ tableId: "t-stale-overlay", trigger: "act", requestId: "r-stale-overlay" });
+  assert.equal(result.ok, true);
+  assert.equal(calls.persist, 1);
+  assert.equal(calls.restore, 0);
+  assert.equal(calls.resync, 0);
+  const preflightLog = logs.find((entry) => entry.event === "ws_bot_autoplay_showdown_preflight");
+  assert.ok(preflightLog);
+  assert.equal(preflightLog.payload.trustedStateSource, "fallback_private_same_hand");
+  const overlayLog = logs.find((entry) => entry.event === "ws_bot_autoplay_fixture_overlay_materialized");
+  assert.ok(overlayLog);
+  assert.equal(overlayLog.payload.bot2Contribution, 45);
+  assert.equal(overlayLog.payload.humanContribution, 20);
 });
 
 test("accepted bot autoplay reloads trusted private showdown hole cards after boundary", async () => {
@@ -441,6 +560,108 @@ test("accepted bot autoplay emits focused showdown-input log and restores on mis
   const focusedLog = logs.find((entry) => entry.event === "ws_bot_autoplay_showdown_input_missing");
   assert.ok(focusedLog);
   assert.deepEqual(focusedLog.payload.missingHoleCardsUserIds, ["human_1"]);
+  const preflightLog = logs.find((entry) => entry.event === "ws_bot_autoplay_showdown_preflight");
+  assert.ok(preflightLog);
+  assert.deepEqual(preflightLog.payload.eligibleUserIds, ["human_1", "bot_2"]);
+  assert.deepEqual(preflightLog.payload.showdownComparedUserIds, ["bot_2"]);
+  assert.equal(preflightLog.payload.communityLen, 5);
+});
+
+test("accepted bot autoplay rejects cross-hand fallback for degraded showdown runtime state", async () => {
+  const logs = [];
+  const calls = { restore: 0, resync: 0 };
+  const privateState = {
+    tableId: "t-mismatch",
+    handId: "h-current-1",
+    phase: "PREFLOP",
+    turnUserId: "bot_2",
+    seats: [{ userId: "human_1", seatNo: 1 }, { userId: "bot_2", seatNo: 2, isBot: true }],
+    community: [{ r: "A", s: "S" }, { r: "K", s: "S" }, { r: "Q", s: "S" }, { r: "J", s: "S" }, { r: "2", s: "D" }],
+    stacks: { human_1: 100, bot_2: 100 },
+    foldedByUserId: { human_1: false, bot_2: false },
+    sitOutByUserId: {},
+    leftTableByUserId: {},
+    pot: 30,
+    sidePots: [],
+    contributionsByUserId: { human_1: 15, bot_2: 15 },
+    holeCardsByUserId: {
+      human_1: [{ r: "9", s: "S" }, { r: "8", s: "S" }],
+      bot_2: [{ r: "A", s: "H" }, { r: "A", s: "D" }]
+    }
+  };
+  const tableManager = {
+    persistedPokerState: () => ({ ...privateState, handId: "h-fallback-other-hand" }),
+    persistedStateVersion: () => 15,
+    tableSnapshot: () => ({ seats: [{ userId: "human_1", seatNo: 1 }, { userId: "bot_2", seatNo: 2, isBot: true }] }),
+    applyAction: () => ({ accepted: true, changed: true, replayed: false, stateVersion: 16 })
+  };
+  const moduleUrl = new URL("./fixtures/autoplay-showdown-public-state-mismatch-fixture.mjs", import.meta.url).href;
+  const run = createAcceptedBotAutoplayExecutor({
+    tableManager,
+    persistMutatedState: async () => ({ ok: true }),
+    restoreTableFromPersisted: async () => {
+      calls.restore += 1;
+      return { ok: true };
+    },
+    broadcastResyncRequired: () => {
+      calls.resync += 1;
+    },
+    env: { WS_BOT_AUTOPLAY_MODULE_PATH: moduleUrl },
+    klog: (event, payload) => logs.push({ event, payload })
+  });
+
+  const result = await run({ tableId: "t-mismatch", trigger: "act", requestId: "r-mismatch" });
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "showdown_missing_private_inputs");
+  assert.equal(calls.restore, 1);
+  assert.equal(calls.resync, 1);
+  const preflightLog = logs.find((entry) => entry.event === "ws_bot_autoplay_showdown_preflight");
+  assert.ok(preflightLog);
+  assert.equal(preflightLog.payload.trustedStateSource, "fallback_private_hand_mismatch_rejected");
+});
+
+test("accepted bot autoplay prefers trusted runtime private showdown source when available", async () => {
+  const logs = [];
+  const privateState = {
+    tableId: "t-runtime-source",
+    handId: "h-runtime-source-1",
+    phase: "PREFLOP",
+    turnUserId: "bot_2",
+    seats: [{ userId: "human_1", seatNo: 1 }, { userId: "bot_2", seatNo: 2, isBot: true }],
+    community: [{ r: "A", s: "S" }, { r: "K", s: "S" }, { r: "Q", s: "S" }, { r: "J", s: "S" }, { r: "2", s: "D" }],
+    stacks: { human_1: 100, bot_2: 100 },
+    foldedByUserId: { human_1: false, bot_2: false },
+    sitOutByUserId: {},
+    leftTableByUserId: {},
+    pot: 40,
+    sidePots: [],
+    contributionsByUserId: { human_1: 20, bot_2: 20 },
+    holeCardsByUserId: {
+      human_1: [{ r: "9", s: "S" }, { r: "8", s: "S" }],
+      bot_2: [{ r: "A", s: "H" }, { r: "A", s: "D" }]
+    }
+  };
+  const tableManager = {
+    persistedPokerState: () => ({ ...privateState }),
+    persistedStateVersion: () => 17,
+    tableSnapshot: () => ({ seats: [{ userId: "human_1", seatNo: 1 }, { userId: "bot_2", seatNo: 2, isBot: true }] }),
+    applyAction: () => ({ accepted: true, changed: true, replayed: false, stateVersion: 18 })
+  };
+  const moduleUrl = new URL("./fixtures/autoplay-showdown-runtime-private-fixture.mjs", import.meta.url).href;
+  const run = createAcceptedBotAutoplayExecutor({
+    tableManager,
+    persistMutatedState: async () => ({ ok: true }),
+    restoreTableFromPersisted: async () => ({ ok: true }),
+    broadcastResyncRequired: () => {},
+    env: { WS_BOT_AUTOPLAY_MODULE_PATH: moduleUrl },
+    klog: (event, payload) => logs.push({ event, payload })
+  });
+
+  const result = await run({ tableId: "t-runtime-source", trigger: "act", requestId: "r-runtime-source" });
+  assert.equal(result.ok, true);
+  const preflightLog = logs.find((entry) => entry.event === "ws_bot_autoplay_showdown_preflight");
+  assert.ok(preflightLog);
+  assert.equal(preflightLog.payload.trustedStateSource, "runtime_private");
 });
 
 test("accepted bot autoplay resolves single-winner terminal hands without showdown-only input validation", async () => {
@@ -494,6 +715,98 @@ test("accepted bot autoplay resolves single-winner terminal hands without showdo
   assert.equal(calls.restore, 0);
   assert.equal(calls.resync, 0);
   assert.equal(logs.some((entry) => entry.event === "ws_bot_autoplay_showdown_input_missing"), false);
+});
+
+test("accepted bot autoplay handles mixed human+bot runtime path through showdown and next hand", async () => {
+  const seats = [
+    { userId: "bot_2", seatNo: 1, isBot: true },
+    { userId: "human_1", seatNo: 2, isBot: false }
+  ];
+  const stacks = { human_1: 100, bot_2: 100 };
+  let persistedState = initHandState({ tableId: "t-mixed-runtime", seats, stacks }).state;
+  persistedState = { ...persistedState, handId: "h-mixed-runtime-1" };
+  let persistedVersion = 40;
+  const calls = { persist: 0, restore: 0, resync: 0 };
+
+  const logs = [];
+  const seatOrder = seats.slice().sort((a, b) => a.seatNo - b.seatNo).map((seat) => seat.userId);
+  const maybeMaterialize = (privateState) => {
+    const eligible = seatOrder.filter((userId) => !privateState.foldedByUserId?.[userId] && !privateState.leftTableByUserId?.[userId] && !privateState.sitOutByUserId?.[userId]);
+    const handId = typeof privateState.handId === "string" ? privateState.handId : "";
+    const showdownHandId = typeof privateState.showdown?.handId === "string" ? privateState.showdown.handId : "";
+    const alreadyMaterialized = !!handId && !!showdownHandId && handId === showdownHandId;
+    if (alreadyMaterialized || (eligible.length > 1 && privateState.phase !== "SHOWDOWN")) return privateState;
+    return materializeShowdownAndPayout({
+      state: privateState,
+      seatUserIdsInOrder: seatOrder,
+      holeCardsByUserId: privateState.holeCardsByUserId,
+      computeShowdown,
+      awardPotsAtShowdown,
+      klog: () => {}
+    }).nextState;
+  };
+
+  const tableManager = {
+    persistedPokerState: () => persistedState,
+    persistedStateVersion: () => persistedVersion,
+    tableSnapshot: () => ({ seats }),
+    applyAction: ({ userId, action, amount }) => {
+      const applied = applyRuntimeAction(persistedState, { type: action, userId, amount });
+      const advanced = runAdvanceLoop(applied.state, [], [], advanceIfNeeded);
+      persistedState = maybeMaterialize(advanced.nextState);
+      persistedVersion += 1;
+      return { accepted: true, changed: true, replayed: false, stateVersion: persistedVersion };
+    }
+  };
+
+  const run = createAcceptedBotAutoplayExecutor({
+    tableManager,
+    persistMutatedState: async () => {
+      calls.persist += 1;
+      return { ok: true };
+    },
+    restoreTableFromPersisted: async () => {
+      calls.restore += 1;
+      return { ok: true };
+    },
+    broadcastResyncRequired: () => {
+      calls.resync += 1;
+    },
+    klog: (event, payload) => logs.push({ event, payload })
+  });
+  let guard = 0;
+  while (persistedState.phase !== "SETTLED" && guard < 40) {
+    if (persistedState.phase === "PREFLOP" || persistedState.phase === "FLOP" || persistedState.phase === "TURN" || persistedState.phase === "RIVER") {
+      if (persistedState.turnUserId === "human_1") {
+        tableManager.applyAction({ userId: "human_1", action: "CHECK" });
+      } else {
+        const result = await run({ tableId: "t-mixed-runtime", trigger: "act", requestId: "r-mixed-runtime-" + guard });
+        assert.equal(result.ok, true);
+      }
+    } else {
+      persistedState = advanceIfNeeded(persistedState).state;
+      persistedVersion += 1;
+    }
+    guard += 1;
+  }
+
+  assert.equal(persistedState.phase, "SETTLED");
+  assert.ok(persistedState.showdown);
+  assert.equal(calls.restore, 0);
+  assert.equal(calls.resync, 0);
+  assert.equal(logs.some((entry) => entry.event === "ws_bot_autoplay_showdown_preflight"), true);
+
+  persistedState = advanceIfNeeded(persistedState).state;
+  persistedVersion += 1;
+  for (let i = 0; i < 6 && !["PREFLOP", "FLOP", "TURN", "RIVER"].includes(persistedState.phase); i += 1) {
+    persistedState = advanceIfNeeded(persistedState).state;
+    persistedVersion += 1;
+  }
+
+  const nextHandResult = await run({ tableId: "t-mixed-runtime", trigger: "act", requestId: "r-mixed-runtime-next" });
+  assert.equal(nextHandResult.ok, true);
+  assert.equal(calls.restore, 0);
+  assert.equal(calls.resync, 0);
 });
 
 test("accepted bot autoplay settles showdown and allows next hand to continue", async () => {
