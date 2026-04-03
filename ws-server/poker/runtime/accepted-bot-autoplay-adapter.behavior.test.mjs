@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import { createAcceptedBotAutoplayExecutor } from "./accepted-bot-autoplay-adapter.mjs";
 import { initHandState, applyAction as applyRuntimeAction, advanceIfNeeded } from "../snapshot-runtime/poker-reducer.mjs";
+import { buildBootstrappedPokerState, applyCoreStateAction } from "../engine/poker-engine.mjs";
+import { computeSharedLegalActions } from "../shared/poker-primitives.mjs";
 import { runAdvanceLoop } from "../../../shared/poker-domain/poker-autoplay.mjs";
 import { materializeShowdownAndPayout } from "../snapshot-runtime/poker-materialize-showdown.mjs";
 import { computeShowdown } from "../snapshot-runtime/poker-showdown.mjs";
@@ -859,6 +861,127 @@ test("accepted bot autoplay handles mixed human+bot runtime path through showdow
   assert.equal(nextHandResult.ok, true);
   assert.equal(calls.restore, 0);
   assert.equal(calls.resync, 0);
+});
+
+test("accepted bot autoplay handles engine poker state through river showdown without resync", async () => {
+  const tableId = "t-engine-runtime";
+  let coreState = {
+    roomId: tableId,
+    version: 14,
+    maxSeats: 6,
+    members: [
+      { userId: "bot_1", seat: 1 },
+      { userId: "bot_2", seat: 2 }
+    ],
+    seats: {
+      bot_1: 1,
+      bot_2: 2
+    },
+    seatDetailsByUserId: {
+      bot_1: { isBot: true, botProfile: null, leaveAfterHand: false },
+      bot_2: { isBot: true, botProfile: null, leaveAfterHand: false }
+    },
+    publicStacks: {
+      bot_1: 100,
+      bot_2: 100
+    },
+    pokerState: null
+  };
+  coreState = {
+    ...coreState,
+    pokerState: buildBootstrappedPokerState({
+      tableId,
+      coreState,
+      startingStacks: { bot_1: 100, bot_2: 100 },
+      handVersion: coreState.version
+    })
+  };
+
+  let prepGuard = 0;
+  while (coreState.pokerState?.phase !== "RIVER" && prepGuard < 30) {
+    const liveState = coreState.pokerState;
+    const legal = computeSharedLegalActions({ statePublic: liveState, userId: liveState.turnUserId });
+    const action = legal.actions.includes("CHECK")
+      ? "CHECK"
+      : legal.actions.includes("CALL")
+        ? "CALL"
+        : "FOLD";
+    const applied = applyCoreStateAction({
+      tableId,
+      coreState,
+      handId: liveState.handId,
+      userId: liveState.turnUserId,
+      requestId: `engine-prep-${prepGuard}`,
+      action,
+      amount: null,
+      nowIso: new Date().toISOString(),
+      nowMs: Date.now()
+    });
+    assert.equal(applied.accepted, true);
+    coreState = applied.coreState;
+    prepGuard += 1;
+  }
+
+  assert.equal(coreState.pokerState?.phase, "RIVER");
+  const previousHandId = coreState.pokerState.handId;
+  const previousVersion = coreState.version;
+  const calls = { persist: 0, restore: 0, resync: 0 };
+
+  const tableManager = {
+    persistedPokerState: () => ({ ...coreState.pokerState }),
+    persistedStateVersion: () => coreState.version,
+    tableSnapshot: () => ({
+      seats: (coreState.pokerState?.seats || []).map((seat) => ({ ...seat, isBot: true }))
+    }),
+    applyAction: ({ handId, userId, requestId, action, amount, nowIso }) => {
+      const applied = applyCoreStateAction({
+        tableId,
+        coreState,
+        handId,
+        userId,
+        requestId,
+        action,
+        amount,
+        nowIso,
+        nowMs: Date.now()
+      });
+      if (applied.accepted && applied.changed) {
+        coreState = applied.coreState;
+      }
+      return {
+        accepted: applied.accepted,
+        changed: applied.changed,
+        replayed: false,
+        stateVersion: applied.stateVersion,
+        reason: applied.reason || null
+      };
+    }
+  };
+
+  const run = createAcceptedBotAutoplayExecutor({
+    tableManager,
+    persistMutatedState: async () => {
+      calls.persist += 1;
+      return { ok: true };
+    },
+    restoreTableFromPersisted: async () => {
+      calls.restore += 1;
+      return { ok: true };
+    },
+    broadcastResyncRequired: () => {
+      calls.resync += 1;
+    },
+    klog: () => {}
+  });
+
+  const result = await run({ tableId, trigger: "act", requestId: "engine-runtime-river", frameTs: new Date().toISOString() });
+  assert.equal(result.ok, true);
+  assert.equal(calls.restore, 0);
+  assert.equal(calls.resync, 0);
+  assert.ok(calls.persist > 0);
+  assert.ok(coreState.version > previousVersion);
+  assert.notEqual(coreState.pokerState?.handId, previousHandId);
+  assert.equal(["PREFLOP", "FLOP", "TURN", "RIVER"].includes(coreState.pokerState?.phase), true);
 });
 
 test("accepted bot autoplay settles showdown and allows next hand to continue", async () => {

@@ -169,6 +169,30 @@ test('poker ws client sendJoin/sendLeave/sendStartHand/sendAct resolve and rejec
   await assert.rejects(actPromise, (err) => err && err.code === 'hand_not_live');
 });
 
+test('poker ws client auto-requests resync when server marks session stale', async () => {
+  const h = loadClientHarness();
+  h.client.start();
+  const ws = h.FakeWebSocket.instances[0];
+  ws.open();
+  ws.message({ type: 'helloAck', payload: { version: '1.0' } });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  ws.message({ type: 'authOk', payload: { roomId: 'table_test_1' } });
+
+  const sentBefore = h.sentFrames.length;
+  ws.message({ type: 'resync', payload: { mode: 'required', reason: 'persistence_conflict', expectedSeq: 0 } });
+
+  assert.equal(h.sentFrames.length, sentBefore + 1);
+  assert.equal(h.sentFrames[sentBefore].type, 'resync');
+  assert.equal(h.sentFrames[sentBefore].payload.tableId, 'table_test_1');
+  assert.equal(h.sentFrames[sentBefore].payload.reason, 'persistence_conflict');
+  assert.equal(h.protocolErrors.length, 0);
+
+  const resyncStatus = h.statuses.find((entry) => entry.status === 'resync');
+  assert.equal(!!resyncStatus, true);
+  assert.equal(resyncStatus.data.reason, 'persistence_conflict');
+  assert.equal(resyncStatus.data.mode, 'required');
+});
+
 test('poker ws client rejects pending commands on close', async () => {
   const h = loadClientHarness();
   h.client.start();
