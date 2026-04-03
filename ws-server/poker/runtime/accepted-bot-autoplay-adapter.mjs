@@ -128,14 +128,12 @@ function hasTrustedRuntimeShape(state) {
   if (!state || typeof state !== "object") return false;
   const isPlainMap = (value) => !!(value && typeof value === "object" && !Array.isArray(value));
   const hasEntries = (value) => isPlainMap(value) && Object.keys(value).length > 0;
-  const community = Array.isArray(state.community) ? state.community : [];
-  if (community.length !== 5) return false;
   const seats = Array.isArray(state.seats) ? state.seats : [];
   if (seats.length < 2) return false;
-  if (!hasEntries(state.stacks)) return false;
-  if (!hasEntries(state.contributionsByUserId)) return false;
   if (!hasEntries(state.holeCardsByUserId)) return false;
   if (!isPlainMap(state.foldedByUserId) || !isPlainMap(state.leftTableByUserId) || !isPlainMap(state.sitOutByUserId)) return false;
+  if (!isPlainMap(state.stacks) || !isPlainMap(state.contributionsByUserId)) return false;
+  if (state.community != null && !Array.isArray(state.community)) return false;
   return true;
 }
 
@@ -145,62 +143,65 @@ function resolveTrustedStateToMaterialize({
   trustedHoleCardsByUserId
 }) {
   const isPlainMap = (value) => !!(value && typeof value === "object" && !Array.isArray(value));
-  const mapSize = (value) => (isPlainMap(value) ? Object.keys(value).length : 0);
-  const mergeMap = (primaryMap, fallbackMap) => {
-    const safePrimary = isPlainMap(primaryMap) ? primaryMap : {};
-    const safeFallback = isPlainMap(fallbackMap) ? fallbackMap : {};
-    return { ...safeFallback, ...safePrimary };
+  const hasEntries = (value) => isPlainMap(value) && Object.keys(value).length > 0;
+  const mergeMapPrimaryFirst = (primaryMap, fallbackMap) => {
+    const primary = isPlainMap(primaryMap) ? primaryMap : {};
+    const fallback = isPlainMap(fallbackMap) ? fallbackMap : {};
+    if (!hasEntries(primary) && !hasEntries(fallback)) return undefined;
+    return { ...fallback, ...primary };
   };
-  const toArrayOrNull = (value) => (Array.isArray(value) ? value : null);
-  const mergeTrustedSupplementState = (primary, fallback, resolvedHoleCards) => {
+  const mergeSeatsPrimaryFirst = (primarySeats, fallbackSeats) => {
+    const primary = Array.isArray(primarySeats) ? primarySeats : [];
+    const fallback = Array.isArray(fallbackSeats) ? fallbackSeats : [];
+    if (primary.length === 0) return fallback.length > 0 ? fallback.slice() : undefined;
+    if (fallback.length === 0) return primary.slice();
+    const fallbackByUserId = new Map();
+    const fallbackBySeatNo = new Map();
+    for (const seat of fallback) {
+      const userId = typeof seat?.userId === "string" ? seat.userId.trim() : "";
+      if (userId) fallbackByUserId.set(userId, seat);
+      if (Number.isInteger(Number(seat?.seatNo))) fallbackBySeatNo.set(Number(seat.seatNo), seat);
+    }
+    return primary.map((seat) => {
+      const userId = typeof seat?.userId === "string" ? seat.userId.trim() : "";
+      const seatNo = Number.isInteger(Number(seat?.seatNo)) ? Number(seat.seatNo) : null;
+      const fallbackSeat = (userId && fallbackByUserId.get(userId)) || (seatNo != null ? fallbackBySeatNo.get(seatNo) : null);
+      return fallbackSeat ? { ...fallbackSeat, ...seat } : seat;
+    });
+  };
+  const mergePrimaryWithFallbackSupplement = (primary, fallback, resolvedHoleCards) => {
     const base = primary && typeof primary === "object" ? { ...primary } : {};
     const fb = fallback && typeof fallback === "object" ? fallback : {};
-    const baseCommunity = toArrayOrNull(base.community);
-    const fallbackCommunity = toArrayOrNull(fb.community);
-    if ((!baseCommunity || baseCommunity.length < 5) && fallbackCommunity && fallbackCommunity.length === 5) {
+    const primaryCommunity = Array.isArray(base.community) ? base.community : null;
+    const fallbackCommunity = Array.isArray(fb.community) ? fb.community : null;
+    if ((!primaryCommunity || primaryCommunity.length === 0) && fallbackCommunity && fallbackCommunity.length > 0) {
       base.community = fallbackCommunity.slice();
     }
-    if (!Number.isFinite(Number(base.pot)) && Number.isFinite(Number(fb.pot))) {
-      base.pot = Number(fb.pot);
+    if (!Array.isArray(base.seats) || base.seats.length === 0) {
+      if (Array.isArray(fb.seats) && fb.seats.length > 0) base.seats = fb.seats.slice();
+    } else {
+      const mergedSeats = mergeSeatsPrimaryFirst(base.seats, fb.seats);
+      if (Array.isArray(mergedSeats)) base.seats = mergedSeats;
     }
-    if ((!Array.isArray(base.sidePots) || (Array.isArray(base.sidePots) && base.sidePots.some((pot) => !pot || typeof pot !== "object"))) && Array.isArray(fb.sidePots)) {
-      base.sidePots = fb.sidePots.slice();
+    if (!Number.isFinite(Number(base.pot)) && Number.isFinite(Number(fb.pot))) base.pot = Number(fb.pot);
+    if (!Array.isArray(base.sidePots) && Array.isArray(fb.sidePots)) base.sidePots = fb.sidePots.slice();
+    const mapFields = ["stacks", "contributionsByUserId", "foldedByUserId", "leftTableByUserId", "sitOutByUserId"];
+    for (const key of mapFields) {
+      const merged = mergeMapPrimaryFirst(base[key], fb[key]);
+      if (merged) base[key] = merged;
     }
-    if ((!Array.isArray(base.seats) || base.seats.length < 2) && Array.isArray(fb.seats) && fb.seats.length >= 2) {
-      base.seats = fb.seats.slice();
-    }
-    if (Array.isArray(base.seats) && Array.isArray(fb.seats) && base.seats.length >= 2 && fb.seats.length >= 2) {
-      const byUserId = {};
-      for (const seat of fb.seats) {
-        const userId = typeof seat?.userId === "string" ? seat.userId.trim() : "";
-        if (!userId) continue;
-        byUserId[userId] = seat;
-      }
-      base.seats = base.seats.map((seat) => {
-        const userId = typeof seat?.userId === "string" ? seat.userId.trim() : "";
-        const fallbackSeat = userId ? byUserId[userId] : null;
-        if (!fallbackSeat) return seat;
-        return {
-          ...fallbackSeat,
-          ...seat
-        };
-      });
-    }
-    if (mapSize(base.stacks) > 0 || mapSize(fb.stacks) > 0) base.stacks = mergeMap(base.stacks, fb.stacks);
-    if (mapSize(base.contributionsByUserId) > 0 || mapSize(fb.contributionsByUserId) > 0) base.contributionsByUserId = mergeMap(base.contributionsByUserId, fb.contributionsByUserId);
-    if (mapSize(base.foldedByUserId) > 0 || mapSize(fb.foldedByUserId) > 0) base.foldedByUserId = mergeMap(base.foldedByUserId, fb.foldedByUserId);
-    if (mapSize(base.leftTableByUserId) > 0 || mapSize(fb.leftTableByUserId) > 0) base.leftTableByUserId = mergeMap(base.leftTableByUserId, fb.leftTableByUserId);
-    if (mapSize(base.sitOutByUserId) > 0 || mapSize(fb.sitOutByUserId) > 0) base.sitOutByUserId = mergeMap(base.sitOutByUserId, fb.sitOutByUserId);
     if ((typeof base.handId !== "string" || !base.handId.trim()) && typeof fb.handId === "string" && fb.handId.trim()) {
       base.handId = fb.handId.trim();
     }
     if ((!base.showdown || typeof base.showdown !== "object") && fb.showdown && typeof fb.showdown === "object") {
       base.showdown = { ...fb.showdown };
     }
-    if (resolvedHoleCards && typeof resolvedHoleCards === "object") {
-      base.holeCardsByUserId = resolvedHoleCards;
-    } else if (mapSize(base.holeCardsByUserId) === 0 && mapSize(fb.holeCardsByUserId) > 0) {
-      base.holeCardsByUserId = { ...fb.holeCardsByUserId };
+    if (resolvedHoleCards && isPlainMap(resolvedHoleCards) && Object.keys(resolvedHoleCards).length > 0) {
+      const merged = mergeMapPrimaryFirst(resolvedHoleCards, base.holeCardsByUserId);
+      if (merged) base.holeCardsByUserId = merged;
+    } else {
+      const merged = mergeMapPrimaryFirst(base.holeCardsByUserId, fb.holeCardsByUserId);
+      if (merged) base.holeCardsByUserId = merged;
     }
     return base;
   };
@@ -215,16 +216,14 @@ function resolveTrustedStateToMaterialize({
   const trustedMismatch = !!primaryComparableHandId && !!fallbackComparableHandId && primaryComparableHandId !== fallbackComparableHandId;
   let selectedState = null;
   let trustedStateSource = "runtime_public_like_rejected";
-  if (primaryTrusted) {
-    selectedState = mergeTrustedSupplementState(primary, null, trustedHoleCardsByUserId);
-    trustedStateSource = "runtime_private";
-  } else if (fallbackTrusted && trustedMismatch) {
+  if (trustedMismatch) {
     trustedStateSource = "fallback_private_hand_mismatch_rejected";
-  } else if (fallbackTrusted && sameHand) {
-    selectedState = mergeTrustedSupplementState(primary, fallback, trustedHoleCardsByUserId);
-    trustedStateSource = "fallback_private_same_hand";
+  } else if (primaryTrusted) {
+    selectedState = mergePrimaryWithFallbackSupplement(primary, fallbackTrusted ? fallback : null, trustedHoleCardsByUserId);
+    trustedStateSource = "runtime_private";
   } else if (fallbackTrusted) {
-    trustedStateSource = "fallback_private_primary_identity_unknown_rejected";
+    selectedState = mergePrimaryWithFallbackSupplement(primary, fallback, trustedHoleCardsByUserId);
+    trustedStateSource = sameHand ? "fallback_private_same_hand" : "fallback_private_primary_identity_unknown";
   } else if (fallback && !fallbackTrusted) {
     trustedStateSource = "fallback_private_untrusted_rejected";
   }
