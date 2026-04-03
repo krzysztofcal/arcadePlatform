@@ -135,6 +135,14 @@
     }
 
     function requestSnapshot(){ if (authOk) send('table_state_sub', { tableId: tableId }); }
+    function requestResync(payload){
+      if (!authOk || !ws || ws.readyState !== 1) return null;
+      var body = payload && typeof payload === 'object' ? payload : {};
+      return send('resync', {
+        tableId: tableId,
+        reason: typeof body.reason === 'string' && body.reason ? body.reason : null
+      });
+    }
 
     function handleCommandResult(frame){
       var payload = frame && frame.payload ? frame.payload : {};
@@ -162,7 +170,16 @@
       if (frame.type === 'authOk') { authOk = true; emitStatus('auth_ok', { roomId: frame.payload && frame.payload.roomId ? frame.payload.roomId : null }); requestSnapshot(); return; }
       if (frame.type === 'table_state' || frame.type === 'stateSnapshot') { var initial = !initialSnapshotDelivered; initialSnapshotDelivered = true; var normalized = normalizeSnapshot(frame, initial); if (normalized) onSnapshot(normalized); return; }
       if (frame.type === 'commandResult') { handleCommandResult(frame); emitStatus('command_result', { status: frame.payload && frame.payload.status ? frame.payload.status : null, reason: frame.payload && frame.payload.reason ? frame.payload.reason : null }); return; }
-      if (frame.type === 'resync') { emitStatus('resync', { reason: frame.payload && frame.payload.reason ? frame.payload.reason : null }); emitProtocolError('resync_required', frame.payload && frame.payload.reason ? frame.payload.reason : null); return; }
+      if (frame.type === 'resync') {
+        emitStatus('resync', {
+          reason: frame.payload && frame.payload.reason ? frame.payload.reason : null,
+          mode: frame.payload && frame.payload.mode ? frame.payload.mode : null
+        });
+        if (!requestResync({ reason: frame.payload && frame.payload.reason ? frame.payload.reason : null })) {
+          emitProtocolError('resync_required', frame.payload && frame.payload.reason ? frame.payload.reason : null);
+        }
+        return;
+      }
       if (frame.type === 'error') {
         var rid = frame.requestId || (frame.payload && frame.payload.requestId) || null;
         if (rid && pending.has(rid)) {
@@ -205,6 +222,7 @@
       start: start,
       destroy: destroy,
       isReady: function(){ return !!authOk && !!ws && ws.readyState === 1; },
+      requestResync: requestResync,
       sendAct: function(payload, requestId){ return sendCommand('act', payload || {}, requestId); },
       sendJoin: function(payload, requestId){ return sendCommand('join', payload || { tableId: tableId }, requestId); },
       sendLeave: function(payload, requestId){ return sendCommand('leave', payload || { tableId: tableId }, requestId); },

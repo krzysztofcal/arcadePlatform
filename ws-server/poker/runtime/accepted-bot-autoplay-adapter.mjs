@@ -1,15 +1,74 @@
-import { advanceIfNeeded, TURN_MS } from "../snapshot-runtime/poker-reducer.mjs";
-import { applyAction as applyRuntimeAction } from "../snapshot-runtime/poker-reducer.mjs";
-import { materializeShowdownAndPayout } from "../snapshot-runtime/poker-materialize-showdown.mjs";
-import { computeShowdown } from "../snapshot-runtime/poker-showdown.mjs";
-import { awardPotsAtShowdown } from "../snapshot-runtime/poker-payout.mjs";
-import { withoutPrivateState } from "../snapshot-runtime/poker-state-utils.mjs";
-import { computeLegalActions } from "../snapshot-runtime/poker-legal-actions.mjs";
+import { TURN_MS } from "../shared/poker-turn-timeout.mjs";
+import { applyAction as applySharedAction } from "../shared/poker-action-reducer.mjs";
+import { materializeShowdownAndPayout as materializeSharedShowdownAndPayout } from "../shared/settlement/poker-materialize-showdown.mjs";
+import { computeShowdown as computeSharedShowdown } from "../shared/settlement/poker-showdown.mjs";
+import { awardPotsAtShowdown as awardSharedPotsAtShowdown } from "../shared/settlement/poker-payout.mjs";
+import { withoutPrivateState as withoutSharedPrivateState } from "../shared/settlement/poker-state-utils.mjs";
+import { computeSharedLegalActions } from "../shared/poker-primitives.mjs";
+import { advanceIfNeeded as advanceLegacyIfNeeded, applyAction as applyLegacyRuntimeAction } from "../snapshot-runtime/poker-reducer.mjs";
+import { materializeShowdownAndPayout as materializeLegacyShowdownAndPayout } from "../snapshot-runtime/poker-materialize-showdown.mjs";
+import { computeShowdown as computeLegacyShowdown } from "../snapshot-runtime/poker-showdown.mjs";
+import { awardPotsAtShowdown as awardLegacyPotsAtShowdown } from "../snapshot-runtime/poker-payout.mjs";
+import { withoutPrivateState as withoutLegacyPrivateState } from "../snapshot-runtime/poker-state-utils.mjs";
+import { computeLegalActions as computeLegacyLegalActions } from "../snapshot-runtime/poker-legal-actions.mjs";
 
 const DEFAULT_SHARED_AUTOPLAY_MODULE_URL = new URL("../../../shared/poker-domain/poker-autoplay.mjs", import.meta.url).href;
 const sharedAutoplayModulePromiseByUrl = new Map();
 
 const isActionPhase = (phase) => phase === "PREFLOP" || phase === "FLOP" || phase === "TURN" || phase === "RIVER";
+const noopAdvanceIfNeeded = (state) => ({ state, events: [] });
+
+function isPlainObject(value) {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function normalizeCardForSharedSettlement(card) {
+  if (typeof card === "string") {
+    const match = /^(10|[2-9TJQKA])([CDHS])$/i.exec(card.trim());
+    if (!match) return null;
+    return { r: match[1].toUpperCase(), s: match[2].toUpperCase() };
+  }
+  if (!isPlainObject(card)) return null;
+  const suit = typeof card.s === "string" ? card.s.trim().toUpperCase() : "";
+  if (!suit) return null;
+  if (typeof card.r === "number" && Number.isInteger(card.r) && card.r >= 2 && card.r <= 14) {
+    return { r: card.r, s: suit };
+  }
+  if (typeof card.r === "string" && card.r.trim()) {
+    return { r: card.r.trim().toUpperCase(), s: suit };
+  }
+  return null;
+}
+
+function normalizeCardsForSharedSettlement(cards) {
+  if (!Array.isArray(cards)) return [];
+  return cards.map(normalizeCardForSharedSettlement).filter(Boolean);
+}
+
+function normalizeHoleCardsMapForSharedSettlement(holeCardsByUserId) {
+  if (!isPlainObject(holeCardsByUserId)) return {};
+  const out = {};
+  for (const [userId, cards] of Object.entries(holeCardsByUserId)) {
+    if (typeof userId !== "string" || !userId.trim()) continue;
+    const normalizedCards = normalizeCardsForSharedSettlement(cards);
+    if (normalizedCards.length === 2) {
+      out[userId] = normalizedCards;
+    }
+  }
+  return out;
+}
+
+function hasStringCards(cards) {
+  return Array.isArray(cards) && cards.some((card) => typeof card === "string");
+}
+
+function isEngineStateShape(state) {
+  if (!isPlainObject(state)) return false;
+  if (Number.isFinite(Number(state.potTotal))) return true;
+  if (hasStringCards(state.community) || hasStringCards(state.deck)) return true;
+  if (!isPlainObject(state.holeCardsByUserId)) return false;
+  return Object.values(state.holeCardsByUserId).some((cards) => hasStringCards(cards));
+}
 
 function resolveSharedAutoplayModule(moduleUrl) {
   if (!sharedAutoplayModulePromiseByUrl.has(moduleUrl)) {
@@ -71,8 +130,8 @@ function getBotAutoplayConfig(env = process.env) {
   return { maxActionsPerRequest, botsOnlyHandCompletionHardCap, policyVersion: "WS_SHARED_AUTOPLAY" };
 }
 
-function buildPersistedFromPrivateState(privateStateInput, actorUserId, actionRequestId) {
-  const persistedState = withoutPrivateState(privateStateInput);
+function buildPersistedFromPrivateState(privateStateInput, actorUserId, actionRequestId, withoutPrivateStateImpl = withoutLegacyPrivateState) {
+  const persistedState = withoutPrivateStateImpl(privateStateInput);
   const actionUserId = typeof actorUserId === "string" ? actorUserId.trim() : "";
   const requestId = typeof actionRequestId === "string" ? actionRequestId.trim() : "";
   const baseLastActionRequestIdByUserId = persistedState?.lastActionRequestIdByUserId && typeof persistedState.lastActionRequestIdByUserId === "object" && !Array.isArray(persistedState.lastActionRequestIdByUserId)
@@ -183,6 +242,7 @@ function resolveTrustedStateToMaterialize({
       const mergedSeats = mergeSeatsPrimaryFirst(base.seats, fb.seats);
       if (Array.isArray(mergedSeats)) base.seats = mergedSeats;
     }
+    if (!Number.isFinite(Number(base.potTotal)) && Number.isFinite(Number(fb.potTotal))) base.potTotal = Number(fb.potTotal);
     if (!Number.isFinite(Number(base.pot)) && Number.isFinite(Number(fb.pot))) base.pot = Number(fb.pot);
     if (!Array.isArray(base.sidePots) && Array.isArray(fb.sidePots)) base.sidePots = fb.sidePots.slice();
     const mapFields = ["stacks", "contributionsByUserId", "foldedByUserId", "leftTableByUserId", "sitOutByUserId"];
@@ -344,15 +404,43 @@ function materializeShowdownState(stateToMaterialize, seatOrder, holeCardsByUser
       throw error;
     }
   }
-  return materializeShowdownAndPayout({
-    state: stateToMaterialize,
+  const runtimeFlavor = options?.runtimeFlavor === "engine" ? "engine" : "legacy";
+  const useSharedSettlement = runtimeFlavor === "engine";
+  const nextState = (useSharedSettlement ? materializeSharedShowdownAndPayout : materializeLegacyShowdownAndPayout)({
+    state: useSharedSettlement
+      ? {
+          ...stateToMaterialize,
+          pot: Number.isFinite(Number(stateToMaterialize?.potTotal))
+            ? Number(stateToMaterialize.potTotal)
+            : Number.isFinite(Number(stateToMaterialize?.pot))
+              ? Number(stateToMaterialize.pot)
+              : 0,
+          community: normalizeCardsForSharedSettlement(stateToMaterialize?.community)
+        }
+      : stateToMaterialize,
     seatUserIdsInOrder: seatOrder,
-    holeCardsByUserId,
-    computeShowdown,
-    awardPotsAtShowdown,
+    holeCardsByUserId: useSharedSettlement ? normalizeHoleCardsMapForSharedSettlement(holeCardsByUserId) : holeCardsByUserId,
+    computeShowdown: useSharedSettlement ? computeSharedShowdown : computeLegacyShowdown,
+    awardPotsAtShowdown: useSharedSettlement ? awardSharedPotsAtShowdown : awardLegacyPotsAtShowdown,
     klog,
     nowIso
   }).nextState;
+  if (!useSharedSettlement) {
+    return nextState;
+  }
+  return {
+    ...stateToMaterialize,
+    ...nextState,
+    phase: "SETTLED",
+    turnUserId: null,
+    turnStartedAt: null,
+    turnDeadlineAt: null,
+    community: Array.isArray(stateToMaterialize?.community) ? stateToMaterialize.community.slice() : [],
+    holeCardsByUserId: isPlainObject(stateToMaterialize?.holeCardsByUserId) ? { ...stateToMaterialize.holeCardsByUserId } : {},
+    deck: Array.isArray(stateToMaterialize?.deck) ? stateToMaterialize.deck.slice() : [],
+    potTotal: Number(nextState?.pot ?? stateToMaterialize?.potTotal ?? stateToMaterialize?.pot ?? 0),
+    sidePots: []
+  };
 }
 
 function buildDiagnosticSnapshot(state) {
@@ -367,8 +455,12 @@ function buildDiagnosticSnapshot(state) {
     phase: typeof state?.phase === "string" ? state.phase : null,
     handId: typeof state?.handId === "string" ? state.handId : null,
     turnUserId: typeof state?.turnUserId === "string" ? state.turnUserId : null,
-    pot: Number.isFinite(Number(state?.pot)) ? Number(state.pot) : 0,
-    communityDealt: state?.communityDealt === true || state?.communityDealt === false ? state.communityDealt : (communityCards.length > 0),
+    pot: Number.isFinite(Number(state?.potTotal))
+      ? Number(state.potTotal)
+      : Number.isFinite(Number(state?.pot))
+        ? Number(state.pot)
+        : 0,
+    communityDealt: Number.isFinite(Number(state?.communityDealt)) ? Number(state.communityDealt) : communityCards.length,
     communityLen: communityCards.length,
     seatsCount: seats.length,
     seatUserIds,
@@ -419,6 +511,27 @@ export function createAcceptedBotAutoplayExecutor({
       return { ok: true, changed: false, actionCount: 0, reason: "missing_state" };
     }
 
+    const runtimeFlavor = isEngineStateShape(privateState) ? "engine" : "legacy";
+    const withoutPrivateState = runtimeFlavor === "engine" ? withoutSharedPrivateState : withoutLegacyPrivateState;
+    const advanceIfNeeded = runtimeFlavor === "engine" ? noopAdvanceIfNeeded : advanceLegacyIfNeeded;
+    const computeLegalActions = runtimeFlavor === "engine"
+      ? ({ statePublic, userId }) => computeSharedLegalActions({ statePublic, userId })
+      : ({ statePublic, userId }) => computeLegacyLegalActions({ statePublic, userId });
+    const applyRuntimeAction = runtimeFlavor === "engine"
+      ? (loopPrivateState, botAction) => {
+          const applied = applySharedAction({
+            pokerState: loopPrivateState,
+            userId: botAction?.userId,
+            action: botAction?.type,
+            amount: botAction?.amount,
+            nowIso: frameTs || new Date().toISOString()
+          });
+          if (!applied?.ok || !applied?.state) {
+            throw new Error(applied?.reason || "invalid_state");
+          }
+          return { state: applied.state, events: [] };
+        }
+      : (loopPrivateState, botAction) => applyLegacyRuntimeAction(loopPrivateState, botAction);
     const state = withoutPrivateState(privateState);
     lastKnown.state = state;
     if (!isActionPhase(state?.phase) || !state?.turnUserId) {
@@ -446,6 +559,7 @@ export function createAcceptedBotAutoplayExecutor({
     const cfg = getBotAutoplayConfig(env);
     klog("ws_bot_autoplay_loop_start", {
       ...baseLog,
+      runtimeFlavor,
       ...buildDiagnosticSnapshot(state),
       stateVersion: Number(tableManager.persistedStateVersion(tableId) || 0),
       maxActions: cfg.maxActionsPerRequest
@@ -465,7 +579,8 @@ export function createAcceptedBotAutoplayExecutor({
         klog,
         isActionPhase,
         advanceIfNeeded,
-        buildPersistedFromPrivateState,
+        buildPersistedFromPrivateState: (loopPrivateState, actorUserId, actionRequestId) =>
+          buildPersistedFromPrivateState(loopPrivateState, actorUserId, actionRequestId, withoutPrivateState),
         materializeShowdownState: (nextState, seatOrder, loopPrivateHoleCardsByUserId, options = {}) => {
           const requiresShowdownComparison = options?.requiresShowdownComparison === true;
           const trustedHoleCardsByUserId = requiresShowdownComparison
@@ -493,6 +608,7 @@ export function createAcceptedBotAutoplayExecutor({
             klog,
             {
               ...options,
+              runtimeFlavor,
               trustedStateSource
             }
           );
