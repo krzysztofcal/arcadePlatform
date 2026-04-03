@@ -234,7 +234,7 @@ test("accepted bot autoplay showdown uses trusted private hole cards even for pu
   assert.equal(preflightLog.payload.trustedStateSource, "fallback_private_same_hand");
 });
 
-test("accepted bot autoplay rejects fallback when primary showdown hand identity is missing", async () => {
+test("accepted bot autoplay accepts fallback supplement when primary showdown hand identity is missing", async () => {
   const logs = [];
   const calls = { persist: 0, restore: 0, resync: 0 };
   const privateState = {
@@ -281,14 +281,13 @@ test("accepted bot autoplay rejects fallback when primary showdown hand identity
   });
 
   const result = await run({ tableId: "t-missing-handid", trigger: "act", requestId: "r-missing-handid" });
-  assert.equal(result.ok, false);
-  assert.equal(result.reason, "showdown_missing_private_inputs");
-  assert.equal(calls.persist, 0);
-  assert.equal(calls.restore, 1);
-  assert.equal(calls.resync, 1);
+  assert.equal(result.ok, true);
+  assert.equal(calls.persist, 1);
+  assert.equal(calls.restore, 0);
+  assert.equal(calls.resync, 0);
   const preflightLog = logs.find((entry) => entry.event === "ws_bot_autoplay_showdown_preflight");
   assert.ok(preflightLog);
-  assert.equal(preflightLog.payload.trustedStateSource, "fallback_private_primary_identity_unknown_rejected");
+  assert.equal(preflightLog.payload.trustedStateSource, "fallback_private_primary_identity_unknown");
 });
 
 test("accepted bot autoplay preserves fresh showdown gameplay fields when fallback is stale", async () => {
@@ -618,6 +617,59 @@ test("accepted bot autoplay rejects cross-hand fallback for degraded showdown ru
   const preflightLog = logs.find((entry) => entry.event === "ws_bot_autoplay_showdown_preflight");
   assert.ok(preflightLog);
   assert.equal(preflightLog.payload.trustedStateSource, "fallback_private_hand_mismatch_rejected");
+});
+
+test("accepted bot autoplay does not treat untrusted fallback handId drift as trusted mismatch", async () => {
+  const logs = [];
+  const calls = { restore: 0, resync: 0 };
+  const privateState = {
+    tableId: "t-untrusted-fallback-mismatch",
+    handId: "h-current-1",
+    phase: "PREFLOP",
+    turnUserId: "bot_2",
+    seats: [{ userId: "human_1", seatNo: 1 }, { userId: "bot_2", seatNo: 2, isBot: true }],
+    community: [{ r: "A", s: "S" }, { r: "K", s: "S" }, { r: "Q", s: "S" }, { r: "J", s: "S" }, { r: "2", s: "D" }],
+    stacks: { human_1: 100, bot_2: 100 },
+    foldedByUserId: [],
+    sitOutByUserId: {},
+    leftTableByUserId: {},
+    pot: 30,
+    sidePots: [],
+    contributionsByUserId: { human_1: 15, bot_2: 15 },
+    holeCardsByUserId: {
+      human_1: [{ r: "9", s: "S" }, { r: "8", s: "S" }],
+      bot_2: [{ r: "A", s: "H" }, { r: "A", s: "D" }]
+    }
+  };
+  const tableManager = {
+    persistedPokerState: () => ({ ...privateState, handId: "h-fallback-other-hand" }),
+    persistedStateVersion: () => 25,
+    tableSnapshot: () => ({ seats: [{ userId: "human_1", seatNo: 1 }, { userId: "bot_2", seatNo: 2, isBot: true }] }),
+    applyAction: () => ({ accepted: true, changed: true, replayed: false, stateVersion: 26 })
+  };
+  const moduleUrl = new URL("./fixtures/autoplay-showdown-public-state-mismatch-fixture.mjs", import.meta.url).href;
+  const run = createAcceptedBotAutoplayExecutor({
+    tableManager,
+    persistMutatedState: async () => ({ ok: true }),
+    restoreTableFromPersisted: async () => {
+      calls.restore += 1;
+      return { ok: true };
+    },
+    broadcastResyncRequired: () => {
+      calls.resync += 1;
+    },
+    env: { WS_BOT_AUTOPLAY_MODULE_PATH: moduleUrl },
+    klog: (event, payload) => logs.push({ event, payload })
+  });
+
+  const result = await run({ tableId: "t-untrusted-fallback-mismatch", trigger: "act", requestId: "r-untrusted-fallback-mismatch" });
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "showdown_missing_private_inputs");
+  assert.equal(calls.restore, 1);
+  assert.equal(calls.resync, 1);
+  const preflightLog = logs.find((entry) => entry.event === "ws_bot_autoplay_showdown_preflight");
+  assert.ok(preflightLog);
+  assert.equal(preflightLog.payload.trustedStateSource, "fallback_private_untrusted_rejected");
 });
 
 test("accepted bot autoplay prefers trusted runtime private showdown source when available", async () => {

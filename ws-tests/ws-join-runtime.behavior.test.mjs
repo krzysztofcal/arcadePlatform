@@ -528,6 +528,46 @@ test("authoritative WS table_join can progress through human act and bot timeout
       timeoutMs: 5000
     });
     assert.equal(afterBotAutoplay.payload.stateVersion > afterHumanAction.payload.stateVersion, true);
+    sendFrame(ws, {
+      version: "1.0",
+      type: "table_state_sub",
+      requestId: "join-act-snapshot-after-bot",
+      ts: "2026-02-28T06:20:03Z",
+      payload: { tableId, view: "snapshot" }
+    });
+    const postAutoplaySnapshot = await nextMessageOfType(ws, "stateSnapshot");
+    assert.equal(postAutoplaySnapshot.payload.stateVersion >= afterBotAutoplay.payload.stateVersion, true);
+    assert.equal(typeof postAutoplaySnapshot.payload.public.hand.handId, "string");
+    const postAutoplayHumanTurn = await waitForHumanTurn(ws, {
+      userId: "act_human",
+      baseline: postAutoplaySnapshot.payload,
+      timeoutMs: 6000
+    });
+    const followupAction = pickNonTerminalHumanAction(postAutoplayHumanTurn);
+    assert.ok(followupAction, "expected a legal human action after autoplay progression");
+    const followupActFrame = {
+      version: "1.0",
+      type: "act",
+      requestId: "act-runtime-human-followup",
+      ts: "2026-02-28T06:20:04Z",
+      payload: {
+        tableId,
+        handId: postAutoplayHumanTurn.public.hand.handId,
+        action: followupAction.action
+      }
+    };
+    if (Number.isFinite(followupAction.amount)) {
+      followupActFrame.payload.amount = followupAction.amount;
+    }
+    sendFrame(ws, followupActFrame);
+    const followupAck = await nextCommandResultForRequest(ws, "act-runtime-human-followup");
+    assert.equal(followupAck.payload.status, "accepted");
+    const afterFollowupAction = await nextStateUpdate(ws, {
+      baseline: postAutoplayHumanTurn,
+      timeoutMs: 5000
+    });
+    assert.equal(afterFollowupAction.payload.stateVersion > postAutoplayHumanTurn.stateVersion, true);
+    assert.equal(typeof afterFollowupAction.payload.public.hand.handId, "string");
 
     ws.close();
   } finally {
