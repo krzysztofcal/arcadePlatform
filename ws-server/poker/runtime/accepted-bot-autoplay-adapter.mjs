@@ -98,11 +98,89 @@ function buildPersistedFromPrivateState(privateStateInput, actorUserId, actionRe
   return { ...withActionMap, turnStartedAt: null, turnDeadlineAt: null };
 }
 
-function materializeShowdownState(stateToMaterialize, seatOrder, nowIso, klog) {
+function resolveTrustedHoleCardsByUserId({
+  primaryState,
+  fallbackState
+}) {
+  const primary = primaryState?.holeCardsByUserId && typeof primaryState.holeCardsByUserId === "object" && !Array.isArray(primaryState.holeCardsByUserId)
+    ? primaryState.holeCardsByUserId
+    : {};
+  const fallback = fallbackState?.holeCardsByUserId && typeof fallbackState.holeCardsByUserId === "object" && !Array.isArray(fallbackState.holeCardsByUserId)
+    ? fallbackState.holeCardsByUserId
+    : {};
+  const out = {};
+  const userIds = new Set([...Object.keys(fallback), ...Object.keys(primary)]);
+  for (const userId of userIds) {
+    const primaryCards = primary[userId];
+    const fallbackCards = fallback[userId];
+    if (Array.isArray(primaryCards) && primaryCards.length === 2) {
+      out[userId] = primaryCards;
+      continue;
+    }
+    if (Array.isArray(fallbackCards) && fallbackCards.length === 2) {
+      out[userId] = fallbackCards;
+    }
+  }
+  return Object.keys(out).length > 0 ? out : null;
+}
+
+function validateTrustedShowdownInputs({
+  stateToMaterialize,
+  seatOrder,
+  holeCardsByUserId
+}) {
+  const community = Array.isArray(stateToMaterialize?.community) ? stateToMaterialize.community : [];
+  const seats = Array.isArray(seatOrder) ? seatOrder : [];
+  const eligibleUserIds = seats.filter((userId) =>
+    typeof userId === "string"
+    && !stateToMaterialize?.foldedByUserId?.[userId]
+    && !stateToMaterialize?.leftTableByUserId?.[userId]
+    && !stateToMaterialize?.sitOutByUserId?.[userId]
+  );
+  const trustedHoleCards = holeCardsByUserId && typeof holeCardsByUserId === "object" && !Array.isArray(holeCardsByUserId)
+    ? holeCardsByUserId
+    : {};
+  const missingHoleCardsUserIds = [];
+  for (const userId of eligibleUserIds) {
+    const cards = trustedHoleCards?.[userId];
+    if (!Array.isArray(cards) || cards.length !== 2) {
+      missingHoleCardsUserIds.push(userId);
+    }
+  }
+  return {
+    communityLen: community.length,
+    eligibleUserIds,
+    eligibleCount: eligibleUserIds.length,
+    missingHoleCardsUserIds
+  };
+}
+
+function materializeShowdownState(stateToMaterialize, seatOrder, holeCardsByUserId, nowIso, klog, options = {}) {
+  if (options?.requiresShowdownComparison === true) {
+    const showdownInputs = validateTrustedShowdownInputs({
+      stateToMaterialize,
+      seatOrder,
+      holeCardsByUserId
+    });
+    if (showdownInputs.communityLen !== 5 || showdownInputs.missingHoleCardsUserIds.length > 0) {
+      const error = new Error("showdown_missing_private_inputs");
+      error.code = "showdown_missing_private_inputs";
+      if (typeof klog === "function") {
+        klog("ws_bot_autoplay_showdown_input_missing", {
+          handId: typeof stateToMaterialize?.handId === "string" ? stateToMaterialize.handId : null,
+          phase: typeof stateToMaterialize?.phase === "string" ? stateToMaterialize.phase : null,
+          communityLen: showdownInputs.communityLen,
+          eligibleCount: showdownInputs.eligibleCount,
+          missingHoleCardsUserIds: showdownInputs.missingHoleCardsUserIds
+        });
+      }
+      throw error;
+    }
+  }
   return materializeShowdownAndPayout({
     state: stateToMaterialize,
     seatUserIdsInOrder: seatOrder,
-    holeCardsByUserId: stateToMaterialize?.holeCardsByUserId,
+    holeCardsByUserId,
     computeShowdown,
     awardPotsAtShowdown,
     klog,
@@ -221,7 +299,22 @@ export function createAcceptedBotAutoplayExecutor({
         isActionPhase,
         advanceIfNeeded,
         buildPersistedFromPrivateState,
-        materializeShowdownState: (nextState, seatOrder) => materializeShowdownState(nextState, seatOrder, frameTs || new Date().toISOString(), klog),
+        materializeShowdownState: (nextState, seatOrder, loopPrivateHoleCardsByUserId, options = {}) => {
+          const trustedHoleCardsByUserId = options?.requiresShowdownComparison === true
+            ? resolveTrustedHoleCardsByUserId({
+                primaryState: { holeCardsByUserId: loopPrivateHoleCardsByUserId },
+                fallbackState: tableManager.persistedPokerState(tableId)
+              })
+            : null;
+          return materializeShowdownState(
+            nextState,
+            seatOrder,
+            trustedHoleCardsByUserId,
+            frameTs || new Date().toISOString(),
+            klog,
+            options
+          );
+        },
         computeLegalActions: ({ statePublic, userId }) => {
           const legal = computeLegalActions({ statePublic, userId });
           const legalSummary = summarizeLegalActions(legal?.actions);
