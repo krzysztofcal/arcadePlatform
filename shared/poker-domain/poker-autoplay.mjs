@@ -120,9 +120,15 @@ export const runBotAutoplayLoop = async ({
         ? botNextState.showdown.handId.trim()
         : "";
     const botShowdownMaterialized = !!botHandId && !!botShowdownHandId && botShowdownHandId === botHandId;
-    const botNeedsShowdown = !botShowdownMaterialized && (botEligibleUserIds.length <= 1 || botNextState.phase === "SHOWDOWN");
-    if (botNeedsShowdown && typeof materializeShowdownState === "function") {
-      botNextState = materializeShowdownState(botNextState, seatUserIdsInOrder);
+    const botNeedsSingleWinnerResolution = !botShowdownMaterialized && botEligibleUserIds.length <= 1;
+    const botNeedsFullShowdownResolution = !botShowdownMaterialized && botEligibleUserIds.length > 1 && botNextState.phase === "SHOWDOWN";
+    if ((botNeedsSingleWinnerResolution || botNeedsFullShowdownResolution) && typeof materializeShowdownState === "function") {
+      botNextState = materializeShowdownState(
+        botNextState,
+        seatUserIdsInOrder,
+        loopPrivateState?.holeCardsByUserId,
+        { requiresShowdownComparison: botNeedsFullShowdownResolution }
+      );
     }
 
     const botPersistedState = buildPersistedFromPrivateState(botNextState, botTurnUserId, botRequestId);
