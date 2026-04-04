@@ -14,12 +14,16 @@ test("lookup by sessionId works and rebind moves active ownership", () => {
 
   store.trackConnection({ ws: socketA, userId: "user_1", sessionId: "sess_1" });
   assert.equal(store.connectionsForUser("user_1").length, 1);
+  assert.equal(store.socketOwnsSession({ ws: socketA, sessionId: "sess_1" }), true);
 
   const rebound = store.rebindSession({ sessionId: "sess_1", userId: "user_1", ws: socketB });
   assert.equal(rebound.ok, true);
+  assert.equal(rebound.priorSocket, socketA);
   assert.equal(store.connectionsForUser("user_1").length, 1);
   assert.equal(store.connectionsForUser("user_1")[0], socketB);
   assert.equal(store.sessionForId("sess_1"), session);
+  assert.equal(store.socketOwnsSession({ ws: socketA, sessionId: "sess_1" }), false);
+  assert.equal(store.socketOwnsSession({ ws: socketB, sessionId: "sess_1" }), true);
 });
 
 test("unknown sessionId and cross-user attempts fail safely", () => {

@@ -8,6 +8,7 @@ export function createSessionStore({ sessionTtlMs = 60_000 } = {}) {
   const socketsByUserId = new Map();
   const sessionById = new Map();
   const sessionIdBySocket = new Map();
+  const socketBySessionId = new Map();
 
   function registerSession({ session }) {
     sessionById.set(session.sessionId, session);
@@ -23,6 +24,12 @@ export function createSessionStore({ sessionTtlMs = 60_000 } = {}) {
       untrackConnection({ ws, userId: priorUserId });
     }
 
+    const priorSessionId = sessionIdBySocket.get(ws) ?? null;
+    if (priorSessionId && priorSessionId !== sessionId && socketBySessionId.get(priorSessionId) === ws) {
+      socketBySessionId.delete(priorSessionId);
+      sessionIdBySocket.delete(ws);
+    }
+
     userBySocket.set(ws, userId);
     if (!socketsByUserId.has(userId)) {
       socketsByUserId.set(userId, new Set());
@@ -33,11 +40,13 @@ export function createSessionStore({ sessionTtlMs = 60_000 } = {}) {
       const session = sessionForId(sessionId);
       if (session) {
         sessionIdBySocket.set(ws, sessionId);
+        socketBySessionId.set(sessionId, ws);
       }
     }
   }
 
   function untrackConnection({ ws, userId }) {
+    const trackedSessionId = sessionIdBySocket.get(ws) ?? null;
     const resolvedUserId = userBySocket.get(ws) || userId;
     if (resolvedUserId) {
       userBySocket.delete(ws);
@@ -51,6 +60,9 @@ export function createSessionStore({ sessionTtlMs = 60_000 } = {}) {
     }
 
     sessionIdBySocket.delete(ws);
+    if (trackedSessionId && socketBySessionId.get(trackedSessionId) === ws) {
+      socketBySessionId.delete(trackedSessionId);
+    }
   }
 
   function hasActiveConnection(userId) {
@@ -72,13 +84,20 @@ export function createSessionStore({ sessionTtlMs = 60_000 } = {}) {
       return { ok: false, reason: "session_user_mismatch" };
     }
 
-    const priorSocket = [...sessionIdBySocket.entries()].find(([, sid]) => sid === sessionId)?.[0] ?? null;
+    const priorSocket = socketBySessionId.get(sessionId) ?? null;
     if (priorSocket && priorSocket !== ws) {
       untrackConnection({ ws: priorSocket, userId });
     }
 
     trackConnection({ ws, userId, sessionId });
-    return { ok: true, session };
+    return { ok: true, session, priorSocket };
+  }
+
+  function socketOwnsSession({ ws, sessionId }) {
+    if (!ws || typeof sessionId !== "string" || sessionId.trim() === "") {
+      return false;
+    }
+    return socketBySessionId.get(sessionId) === ws;
   }
 
   function sweepExpiredSessions({ nowMs = Date.now() } = {}) {
@@ -108,6 +127,7 @@ export function createSessionStore({ sessionTtlMs = 60_000 } = {}) {
     hasActiveConnection,
     connectionsForUser,
     rebindSession,
+    socketOwnsSession,
     sweepExpiredSessions
   };
 }

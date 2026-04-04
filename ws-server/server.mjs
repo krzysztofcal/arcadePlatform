@@ -46,6 +46,7 @@ const TABLE_SNAPSHOT_KNOWN_FAILURE_CODES = new Set([
   "state_invalid",
   "contract_mismatch_empty_legal_actions"
 ]);
+const SESSION_REBOUND_CLOSE_CODE = 4001;
 
 function resolvePresenceTtlMs(rawValue) {
   const parsed = Number(rawValue);
@@ -262,6 +263,25 @@ function buildAutoplayStartSnapshot(tableId) {
 function sendFrame(ws, frame) {
   if (ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify(frame));
+  }
+}
+
+function invalidateSocketSession(ws, { reason = "session_rebound", closeCode = SESSION_REBOUND_CLOSE_CODE } = {}) {
+  if (!ws) {
+    return;
+  }
+  const staleConnState = ws.__connState;
+  if (staleConnState && typeof staleConnState === "object") {
+    staleConnState.sessionInvalidated = true;
+    staleConnState.sessionInvalidatedReason = reason;
+  }
+
+  try {
+    if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+      ws.close(closeCode, reason);
+    }
+  } catch {
+    // Socket invalidation is best-effort and must not throw into command handling.
   }
 }
 
@@ -791,6 +811,19 @@ wss.on("connection", (ws) => {
     }
 
     const frame = validation.value;
+    if (
+      PROTECTED_MESSAGE_TYPES.has(frame.type)
+      && connState.session.userId
+      && !sessionStore.socketOwnsSession({ ws, sessionId: connState.session.sessionId })
+    ) {
+      klogSafe("ws_stale_session_socket_rejected", {
+        frameType: frame.type,
+        sessionId: connState.session.sessionId,
+        userId: connState.session.userId
+      });
+      invalidateSocketSession(ws, { reason: "session_rebound" });
+      return;
+    }
     touchSession(connState.session, nowTs);
 
     if (process.env.WS_TEST_THROW_ON_FRAME_TYPE && process.env.WS_TEST_THROW_ON_FRAME_TYPE === frame.type) {
@@ -995,6 +1028,9 @@ wss.on("connection", (ws) => {
       }
 
       const replay = streamLog.eventsAfter({ tableId, lastSeq: resumeLastSeq, receiverKey: resumeSessionId });
+      if (rebound.priorSocket && rebound.priorSocket !== ws) {
+        invalidateSocketSession(rebound.priorSocket, { reason: "session_rebound" });
+      }
 
       connState.session = rebound.session;
       connState.sessionId = rebound.session.sessionId;

@@ -984,6 +984,59 @@ test("resume with lastSeq at head returns explicit deterministic success", async
   }
 });
 
+test("resume invalidates and closes the prior socket for the session", async () => {
+  const secret = "test-secret";
+  const token = makeHs256Jwt({ secret, sub: "user_resume_takeover" });
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      WS_PRESENCE_TTL_MS: "10000"
+    }
+  });
+
+  try {
+    await waitForListening(child, 5000);
+
+    const client1 = await connectClient(port);
+    await hello(client1, "req-hello-resume-takeover-c1");
+    const auth1 = await auth(client1, token, "req-auth-resume-takeover-c1");
+    const sessionId = auth1.payload.sessionId;
+
+    sendFrame(client1, {
+      version: "1.0",
+      type: "table_join",
+      requestId: "req-join-resume-takeover-c1",
+      ts: "2026-02-28T00:05:45Z",
+      payload: { tableId: "table_resume_takeover" }
+    });
+    const joined = await nextMessageOfType(client1, "table_state", { skipTypes: ["commandResult"] });
+
+    const client2 = await connectClient(port);
+    await hello(client2, "req-hello-resume-takeover-c2");
+    await auth(client2, token, "req-auth-resume-takeover-c2");
+
+    sendFrame(client2, {
+      version: "1.0",
+      type: "resume",
+      roomId: "table_resume_takeover",
+      requestId: "req-resume-takeover-c2",
+      ts: "2026-02-28T00:05:46Z",
+      payload: { tableId: "table_resume_takeover", sessionId, lastSeq: joined.seq }
+    });
+
+    const ack = await nextMessage(client2, 5000, "resume-takeover-ack");
+    assert.equal(ack.type, "commandResult");
+    assert.equal(ack.payload.status, "accepted");
+    await waitSocketClose(client1, 5000);
+
+    client2.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
 test("resume with unknown sessionId returns explicit resync outcome", async () => {
   const secret = "test-secret";
   const token = makeHs256Jwt({ secret, sub: "user_resume_unknown" });
