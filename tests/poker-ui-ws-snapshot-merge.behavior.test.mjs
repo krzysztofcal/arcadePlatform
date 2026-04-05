@@ -65,3 +65,47 @@ test("same-version snapshots preserve and upgrade stack maps instead of dropping
   const seatedStackMissingLogs = harness.logs.filter((entry) => entry.kind === "poker_stack_missing_for_seated_user");
   assert.equal(seatedStackMissingLogs.length, 0, "no seated-user stack-missing warning expected after same-version merge");
 });
+
+test("same-version snapshots refresh legal actions and hide poker actions that no longer fit the street state", async () => {
+  const harness = createPokerTableHarness();
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  const ws = harness.wsCreates[0].options;
+  ws.onSnapshot({
+    kind: "table_state",
+    payload: {
+      tableId: "table-1",
+      stateVersion: 12,
+      hand: { handId: "h12", status: "TURN" },
+      turn: { userId: "user-1" },
+      legalActions: ["CHECK", "BET"],
+      actionConstraints: { toCall: 0, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: 50 },
+      authoritativeMembers: []
+    }
+  });
+  await harness.flush();
+
+  assert.equal(harness.elements.pokerActBetBtn.hidden, false, "BET should render when the pot is unopened");
+  assert.equal(harness.elements.pokerActRaiseBtn.hidden, true, "RAISE should stay hidden when there is nothing to call");
+  assert.equal(harness.elements.pokerActCallBtn.hidden, true, "CALL should stay hidden when there is nothing to call");
+
+  ws.onSnapshot({
+    kind: "stateSnapshot",
+    payload: {
+      table: { tableId: "table-1", members: [] },
+      version: 12,
+      public: {
+        hand: { handId: "h12", status: "TURN" },
+        turn: { userId: "user-1" },
+        legalActions: { actions: ["FOLD", "CALL", "RAISE", "BET"] },
+        actionConstraints: { toCall: 10, minRaiseTo: 20, maxRaiseTo: 90, maxBetAmount: 50 }
+      }
+    }
+  });
+  await harness.flush();
+
+  assert.equal(harness.elements.pokerActBetBtn.hidden, true, "BET must hide once the player is facing a bet");
+  assert.equal(harness.elements.pokerActCallBtn.hidden, false, "CALL should render when there is a bet to call");
+  assert.equal(harness.elements.pokerActRaiseBtn.hidden, false, "RAISE should render when the player may legally raise");
+});

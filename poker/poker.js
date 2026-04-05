@@ -272,6 +272,8 @@
   }
 
   function toFiniteOrNull(value){
+    if (value == null) return null;
+    if (typeof value === 'string' && !value.trim()) return null;
     var n = Number(value);
     if (!Number.isFinite(n)) return null;
     if (Math.floor(n) !== n) return null;
@@ -344,10 +346,26 @@
         if (normalizedType) sanitized.add(normalizedType);
       });
     }
+    var safeConstraints = normalizeActionConstraints(constraints);
+    if (safeConstraints.toCall != null){
+      if (safeConstraints.toCall > 0){
+        sanitized.delete('CHECK');
+        sanitized.delete('BET');
+      } else {
+        sanitized.delete('CALL');
+        sanitized.delete('RAISE');
+      }
+    }
+    if (safeConstraints.maxBetAmount != null && safeConstraints.maxBetAmount < 1){
+      sanitized.delete('BET');
+    }
+    if (safeConstraints.maxRaiseTo != null && safeConstraints.maxRaiseTo < 1){
+      sanitized.delete('RAISE');
+    }
     return {
       allowed: sanitized,
       needsAmount: sanitized.has('BET') || sanitized.has('RAISE'),
-      constraints: normalizeActionConstraints(constraints)
+      constraints: safeConstraints
     };
   }
 
@@ -1650,6 +1668,48 @@
       return !!(stacks && typeof stacks === 'object' && !Array.isArray(stacks) && Object.keys(stacks).length > 0);
     }
 
+    function normalizeActionListForCompare(actions){
+      if (!Array.isArray(actions)) return [];
+      var seen = {};
+      var out = [];
+      for (var i = 0; i < actions.length; i++){
+        var type = normalizeActionTypeValue(actions[i]);
+        if (!type || seen[type]) continue;
+        seen[type] = true;
+        out.push(type);
+      }
+      out.sort();
+      return out;
+    }
+
+    function haveActionListsChanged(left, right){
+      var a = normalizeActionListForCompare(left);
+      var b = normalizeActionListForCompare(right);
+      if (a.length !== b.length) return true;
+      for (var i = 0; i < a.length; i++){
+        if (a[i] !== b[i]) return true;
+      }
+      return false;
+    }
+
+    function haveActionConstraintsChanged(left, right){
+      var a = normalizeActionConstraints(left);
+      var b = normalizeActionConstraints(right);
+      return a.toCall !== b.toCall
+        || a.minRaiseTo !== b.minRaiseTo
+        || a.maxRaiseTo !== b.maxRaiseTo
+        || a.maxBetAmount !== b.maxBetAmount;
+    }
+
+    function hasTurnMetadataChanged(left, right){
+      var leftState = left && typeof left === 'object' ? left : {};
+      var rightState = right && typeof right === 'object' ? right : {};
+      return leftState.phase !== rightState.phase
+        || leftState.turnUserId !== rightState.turnUserId
+        || normalizeDeadlineMs(leftState.turnStartedAt) !== normalizeDeadlineMs(rightState.turnStartedAt)
+        || normalizeDeadlineMs(leftState.turnDeadlineAt) !== normalizeDeadlineMs(rightState.turnDeadlineAt);
+    }
+
     function resolveCurrentUserStackStatus(data){
       var status = {
         currentUserId: null,
@@ -1691,9 +1751,12 @@
       if (!hadCommunity && hasCommunity) return true;
       var hasLegalActions = Array.isArray(mergedData.legalActions) && mergedData.legalActions.length > 0;
       if (!hadLegalActions && hasLegalActions) return true;
+      if (haveActionListsChanged(currentData.legalActions, mergedData.legalActions)) return true;
       var hasConstraints = hasConstraintsData(mergedData.actionConstraints);
       if (!hadConstraints && hasConstraints) return true;
+      if (haveActionConstraintsChanged(currentData.actionConstraints, mergedData.actionConstraints)) return true;
       if (!hadTurnMetadata && hasTurnMetadata(mergedState)) return true;
+      if (hasTurnMetadataChanged(currentStateBeforeMerge, mergedState)) return true;
       var hasStacks = hasStackEntries(mergedState.stacks);
       if (!hadStacks && hasStacks) return true;
       var mergedStackKeys = hasStackEntries(mergedState.stacks) ? Object.keys(mergedState.stacks) : [];
@@ -2116,9 +2179,10 @@
         if (type) allowed.add(type);
       }
       var sourceConstraints = data && data._actionConstraints ? data._actionConstraints : getConstraintsFromResponse(data);
-      info.allowed = allowed;
-      info.needsAmount = allowed.has('BET') || allowed.has('RAISE');
-      info.constraints = normalizeActionConstraints(sourceConstraints);
+      var sanitized = sanitizeAllowedActions(allowed, sourceConstraints);
+      info.allowed = sanitized.allowed;
+      info.needsAmount = sanitized.needsAmount;
+      info.constraints = sanitized.constraints;
       return info;
     }
 

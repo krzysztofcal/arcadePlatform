@@ -106,3 +106,12 @@ assert.equal(lowMaxBet.defaultValue, 7, 'default should clamp down to server max
 
 const noneModel = hooks.resolveAmountActionModel(hooks.sanitizeAllowedActions(new Set(['CHECK', 'CALL']), {}), 20, '');
 assert.equal(noneModel.visible, false, 'amount row should be hidden when neither BET nor RAISE is legal');
+
+const facingBetInfo = hooks.sanitizeAllowedActions(new Set(['CALL', 'BET', 'RAISE', 'FOLD']), { toCall: 10, minRaiseTo: 20, maxRaiseTo: 100, maxBetAmount: 100 });
+assert.equal(facingBetInfo.allowed.has('BET'), false, 'BET should be hidden when there is a bet to call');
+assert.equal(facingBetInfo.allowed.has('RAISE'), true, 'RAISE should remain when facing a bet and raising is legal');
+
+const unopenedPotInfo = hooks.sanitizeAllowedActions(new Set(['CHECK', 'CALL', 'BET', 'RAISE']), { toCall: 0, maxBetAmount: 100, minRaiseTo: 20, maxRaiseTo: 100 });
+assert.equal(unopenedPotInfo.allowed.has('CALL'), false, 'CALL should be hidden when there is nothing to call');
+assert.equal(unopenedPotInfo.allowed.has('RAISE'), false, 'RAISE should be hidden when the pot is unopened');
+assert.equal(unopenedPotInfo.allowed.has('BET'), true, 'BET should remain when the acting player may open the betting');
