@@ -27,6 +27,86 @@ function normalizeActions(value) {
   return value.filter((action) => typeof action === "string");
 }
 
+function normalizeSeatRows(value) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .filter((seat) => seat && typeof seat.userId === "string" && Number.isInteger(seat.seatNo))
+    .map((seat) => {
+      const normalized = {
+        userId: seat.userId,
+        seatNo: seat.seatNo,
+        status: typeof seat.status === "string" ? seat.status : "ACTIVE"
+      };
+      if (seat.isBot === true) normalized.isBot = true;
+      if (typeof seat.botProfile === "string" && seat.botProfile) normalized.botProfile = seat.botProfile;
+      if (seat.leaveAfterHand === true) normalized.leaveAfterHand = true;
+      return normalized;
+    });
+}
+
+function normalizeSeatDetails(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+  const entries = Object.entries(value)
+    .filter(([userId]) => typeof userId === "string" && userId)
+    .map(([userId, details]) => [userId, {
+      isBot: details?.isBot === true,
+      botProfile: typeof details?.botProfile === "string" ? details.botProfile : null,
+      leaveAfterHand: details?.leaveAfterHand === true
+    }]);
+  return Object.fromEntries(entries);
+}
+
+function normalizeStacks(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+  const entries = Object.entries(value).filter(([userId, amount]) => typeof userId === "string" && userId && Number.isFinite(Number(amount)));
+  return Object.fromEntries(entries.map(([userId, amount]) => [userId, Number(amount)]));
+}
+
+function normalizeMemberSeatRows(value) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .filter((member) => member && typeof member.userId === "string" && Number.isInteger(member.seat))
+    .map((member) => ({ userId: member.userId, seatNo: member.seat, status: "ACTIVE" }));
+}
+
+function resolvePublicSeats({ statePublic, members, coreState }) {
+  const stateSeats = normalizeSeatRows(statePublic?.seats);
+  const seatDetailsByUserId = normalizeSeatDetails(coreState?.seatDetailsByUserId);
+  if (stateSeats.length > 0) {
+    return stateSeats.map((seat) => {
+      const details = seatDetailsByUserId[seat.userId] || null;
+      if (!details) return seat;
+      const merged = { ...seat };
+      if (details.isBot) merged.isBot = true;
+      if (details.botProfile) merged.botProfile = details.botProfile;
+      if (details.leaveAfterHand) merged.leaveAfterHand = true;
+      return merged;
+    });
+  }
+  return normalizeMemberSeatRows(members);
+}
+
+function resolvePublicStacks({ statePublic, coreState, seats }) {
+  const stateStacks = normalizeStacks(statePublic?.stacks);
+  const fallbackStacks = Object.keys(stateStacks).length > 0 ? stateStacks : normalizeStacks(coreState?.publicStacks);
+  if (Object.keys(fallbackStacks).length <= 0) {
+    return {};
+  }
+  if (!Array.isArray(seats) || seats.length <= 0) {
+    return fallbackStacks;
+  }
+  const allowedUserIds = new Set(seats.map((seat) => seat.userId));
+  return Object.fromEntries(Object.entries(fallbackStacks).filter(([userId]) => allowedUserIds.has(userId)));
+}
+
 function resolvePotTotal(statePublic) {
   if (Number.isFinite(statePublic?.potTotal)) {
     return statePublic.potTotal;
@@ -123,10 +203,14 @@ function resolvePrivateBranch({ state, userId, youSeat }) {
 export function projectRoomCoreSnapshot({ tableId, roomId, coreState, members, userId, youSeat }) {
   const state = asObject(coreState?.pokerState) || asObject(coreState?.state);
   const statePublic = state ? withoutPrivateState(state) : null;
+  const publicSeats = resolvePublicSeats({ statePublic, members, coreState });
+  const publicStacks = resolvePublicStacks({ statePublic, coreState, seats: publicSeats });
 
   if (!statePublic) {
     return {
       roomId,
+      seats: publicSeats,
+      stacks: publicStacks,
       hand: {
         handId: null,
         status: members.length > 0 ? "LOBBY" : "EMPTY",
@@ -168,6 +252,8 @@ export function projectRoomCoreSnapshot({ tableId, roomId, coreState, members, u
 
   const snapshot = {
     roomId: typeof statePublic.roomId === "string" ? statePublic.roomId : roomId || tableId,
+    seats: publicSeats,
+    stacks: publicStacks,
     hand: {
       handId: typeof statePublic.handId === "string" && statePublic.handId.trim() ? statePublic.handId : null,
       status: typeof statePublic.phase === "string" ? statePublic.phase : null,

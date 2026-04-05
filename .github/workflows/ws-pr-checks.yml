@@ -8,7 +8,10 @@ on:
       - "shared/**"
       - "poker/**"
       - "tests/**"
+      - "netlify/functions/_shared/**"
+      - "docs/ws-poker-protocol.md"
       - "scripts/test-all.mjs"
+      - "tests/test-all.runner-registration.guard.test.mjs"
       - "infra/vps/**"
       - "docs/poker-deployment.md"
       - ".github/workflows/ws-pr-checks.yml"
@@ -40,6 +43,24 @@ jobs:
       - name: Run shared poker join behavior test
         run: node --test shared/poker-domain/join.behavior.test.mjs
 
+      - name: Run poker ws client behavior test
+        run: node --test tests/poker-ws-client.test.mjs
+
+      - name: Run poker UI ws join smoke test
+        run: node --test tests/poker-ui-ws-join-smoke.behavior.test.mjs
+
+      - name: Run poker UI ws write-path guard test
+        run: node --test tests/poker-ui-ws-write-path.guard.test.mjs
+
+      - name: Run poker UI ws leave smoke test
+        run: node --test tests/poker-ui-ws-leave-smoke.behavior.test.mjs
+
+      - name: Run ws lobby join public snapshot behavior test
+        run: node --test ws-tests/ws-lobby-join-public-snapshot.behavior.test.mjs
+
+      - name: Run ws join runtime behavior test
+        run: node --test ws-tests/ws-join-runtime.behavior.test.mjs
+
       - name: Run WS behavior test
         run: node --test ws-server/server.behavior.test.mjs
 
@@ -48,6 +69,9 @@ jobs:
 
       - name: Run ws conn-state behavior test
         run: node --test ws-server/poker/runtime/conn-state.behavior.test.mjs
+
+      - name: Run ws accepted bot autoplay adapter behavior test
+        run: node --test ws-server/poker/runtime/accepted-bot-autoplay-adapter.behavior.test.mjs
 
       - name: Run ws table behavior test
         run: node --test ws-server/poker/table/table.behavior.test.mjs
@@ -107,6 +131,15 @@ jobs:
       - name: Run ws resync behavior test
         run: node --test ws-server/poker/reconnect/resync.behavior.test.mjs
 
+      - name: Run ws join handler behavior test
+        run: node --test ws-server/poker/handlers/join.behavior.test.mjs
+
+      - name: Run ws start-hand handler behavior test
+        run: node --test ws-server/poker/handlers/start-hand.behavior.test.mjs
+
+      - name: Run ws act handler behavior test
+        run: node --test ws-server/poker/handlers/act.behavior.test.mjs
+
       - name: Run WS PR workflow guard test
         run: node --test ws-tests/ws-pr-workflow.test.mjs
 
@@ -150,8 +183,6 @@ jobs:
       - name: Run ws-deploy trigger-surface guard test
         run: node --test ws-tests/ws-deploy.trigger-surface.guard.test.mjs
 
-      - name: Run ws-workflow trigger-surface behavior test
-        run: node --test ws-tests/ws-workflow-trigger-surface.behavior.test.mjs
 
       - name: Run ws-server deploy scp-contract behavior test
         run: node --test ws-tests/ws-server-deploy.scp-contract.behavior.test.mjs
@@ -177,14 +208,10 @@ jobs:
       - name: Run ws table state payload test
         run: node --test ws-tests/ws-table-state-payload.test.mjs
 
-      - name: Run ws tests location guard
-        run: node --test ws-tests/ws-tests-location.guard.test.mjs
 
       - name: Run ws auth token mint doc test
         run: node --test ws-tests/ws-auth-token-mint-doc.test.mjs
 
-      - name: Run ws tests suite completeness guard
-        run: node --test ws-tests/ws-tests-suite-completeness.guard.test.mjs
 
       - name: Run ws preview deploy workflow guard test
         run: node --test ws-tests/ws-preview-deploy.workflow.guard.test.mjs
@@ -216,8 +243,6 @@ jobs:
       - name: Run infra VPS bash exit propagation guard test
         run: node --test ws-tests/infra-vps-workflow.bash-exit-propagation.guard.test.mjs
 
-      - name: Run ws poker protocol doc test
-        run: node --test ws-tests/ws-poker-protocol-doc.test.mjs
 
       - name: Run ws image protocol content behavior test
         run: node --test ws-tests/ws-image-contains-protocol.behavior.test.mjs

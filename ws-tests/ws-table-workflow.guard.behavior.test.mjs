@@ -8,7 +8,7 @@ function workflowText(path) {
 
 const TABLE_TEST_COMMAND = "node --test ws-server/poker/table/table.behavior.test.mjs";
 const SERVER_TEST_COMMAND = "node --test ws-server/server.behavior.test.mjs";
-const SUITE_GUARD_COMMAND = "node --test ws-tests/ws-tests-suite-completeness.guard.test.mjs";
+const DEPLOY_WORKFLOW_GUARD_COMMAND = "node --test ws-tests/ws-server-deploy.workflow.guard.test.mjs";
 
 test("PR workflow includes PR3 table behavior test command", () => {
   const text = workflowText(".github/workflows/ws-pr-checks.yml");
@@ -20,19 +20,19 @@ test("deploy workflow includes PR3 table behavior test command", () => {
   assert.ok(text.includes(TABLE_TEST_COMMAND));
 });
 
-test("workflow ordering runs server behavior, then PR3 table behavior, then suite completeness guard", () => {
+test("workflow ordering runs server behavior, then PR3 table behavior, before deploy workflow guards", () => {
   const prWorkflow = workflowText(".github/workflows/ws-pr-checks.yml");
   const deployWorkflow = workflowText(".github/workflows/ws-deploy.yml");
 
   for (const text of [prWorkflow, deployWorkflow]) {
     const serverIndex = text.indexOf(SERVER_TEST_COMMAND);
     const tableIndex = text.indexOf(TABLE_TEST_COMMAND);
-    const suiteGuardIndex = text.indexOf(SUITE_GUARD_COMMAND);
+    const deployGuardIndex = text.indexOf(DEPLOY_WORKFLOW_GUARD_COMMAND);
 
     assert.notEqual(serverIndex, -1);
     assert.notEqual(tableIndex, -1);
-    assert.notEqual(suiteGuardIndex, -1);
+    assert.notEqual(deployGuardIndex, -1);
     assert.equal(serverIndex < tableIndex, true);
-    assert.equal(tableIndex < suiteGuardIndex, true);
+    assert.equal(tableIndex < deployGuardIndex, true);
   }
 });

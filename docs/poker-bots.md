@@ -7,14 +7,11 @@ Poker bots are implemented in the current runtime.
 - Runtime modules:
   - `netlify/functions/_shared/poker-bots.mjs`
   - `netlify/functions/_shared/poker-bot-cashout.mjs`
+  - `shared/poker-domain/bots.mjs` (neutral join/bot-seed helper used by WS authoritative join flows)
 - Runtime integration points:
-  - `netlify/functions/poker-join.mjs` (bot seeding and bot `TABLE_BUY_IN`)
-  - `netlify/functions/poker-start-hand.mjs` and `netlify/functions/poker-act.mjs` (bot autoplay paths)
-  - `netlify/functions/poker-sweep.mjs` (bot timeout/close cash-out paths)
-- Behavior coverage in tests includes seed/autoplay/sweep, for example:
-  - `tests/poker-join.bot-seed.behavior.test.mjs`
-  - `tests/poker-start-hand.bot-autoplay.behavior.test.mjs`
-  - `tests/poker-sweep.bot-cashout-on-timeout.behavior.test.mjs`
+  - `shared/poker-domain/join.mjs` (neutral authoritative join + bot seed core shared by the WS gameplay runtime and any temporary legacy/admin adapters)
+  - `ws-server/server.mjs` (active WS gameplay, timeout, autoplay, and disconnect cleanup lifecycle owner)
+- Behavior coverage is maintained in WS runtime behavior suites and guard tests.
 
 ## Runtime behavior summary
 
@@ -24,7 +21,9 @@ Poker bots are implemented in the current runtime.
   - Max bots per table is enforced by `POKER_BOTS_MAX_PER_TABLE` (default `2`) and seat-capacity logic keeps at least one seat available for humans.
 - Autoplay:
   - Bots act automatically when it is a bot turn, using runtime helpers (`isBotTurn`, `chooseBotActionTrivial`) and bounded action limits (`POKER_BOTS_MAX_ACTIONS_PER_REQUEST` / poll limits).
-  - Behavior is server-side in Netlify Functions runtime (authoritative state transitions; no client bot script).
+  - Browser gameplay writes stay WS-authoritative for join, leave, start-hand, and act.
+  - Legacy HTTP gameplay handlers (`poker-join`, `poker-start-hand`, `poker-act`, `poker-leave`, `poker-sweep`) are retired and return `410`.
+  - Behavior is server-side in WS runtime (authoritative state transitions; no client bot script).
 - Cash-out / sweep:
   - Bot chip movements use the same ledger primitives as seat flows: `TABLE_BUY_IN` into table escrow and `TABLE_CASH_OUT` from escrow.
   - Sweep/timeout and close flows may force bot seat inactive and cash out via bot cash-out helper logic.

@@ -62,7 +62,7 @@ Example envelope:
 
 | Type | Payload schema (required fields) | Semantics |
 |---|---|---|
-| `helloAck` | `{ "version": "1.0", "sessionId": string, "heartbeatMs": integer }` | Confirms negotiated version and returns initial session id. |
+| `helloAck` | `{ "version": "1.0", "sessionId": string, "heartbeatMs": integer }` | Confirms negotiated version and returns initial session id. Activity lifecycle is WS connection driven; HTTP poker heartbeat is retired. |
 | `authOk` | `{ "userId": string, "roomId": string, "permissions": string[] }` | Auth success event. |
 | `pong` | `{ "clientTime": string, "serverTime": string }` | Ping response. |
 | `stateSnapshot` | `{ "stateVersion": integer, "table": object, "you": object, "public": object, "private"?: object }` | One-shot room-core snapshot for `table_state_sub` snapshot mode; does not subscribe socket to legacy `table_state` broadcasts. |
@@ -114,7 +114,7 @@ Examples:
 
 - `table_state` remains the **presence-only** WS membership frame with payload `{ tableId, members }`.
 - New `table_snapshot` is the gameplay snapshot command/response path and MUST NOT overload `table_state`.
-- `table_snapshot` reuses HTTP `poker-get-table` read semantics: state normalization, timeout application path, private-state stripping, and viewer-scoped `myHoleCards`.
+- `table_snapshot` is WS-native snapshot/resync payload shaping (state normalization + private-state stripping + viewer-scoped `myHoleCards`) and does not depend on HTTP `poker-get-table`.
 - `table_snapshot` deterministic error messages are limited to known contract/state codes (`table_not_found`, `state_missing`, `state_invalid`, `contract_mismatch_empty_legal_actions`); unknown backend/storage failures collapse to `snapshot_failed`.
 
 ### table_join / join contract (authoritative seat lifecycle boundary)
@@ -127,7 +127,11 @@ Examples:
 
 Optional runtime mode: deployments may explicitly enable observe-only `table_join` via server config (`WS_OBSERVE_ONLY_JOIN=1`). In that mode, `table_join` is transport-level connect/observe/resync for non-seated users and does not allocate seats.
 
-Authoritative seat acquisition/buy-in remains server-authoritative. HTTP authority paths (currently `netlify/functions/poker-join.mjs`, persisted in `public.poker_seats`) are still valid for persistent seat lifecycle management.
+Authoritative seat acquisition/buy-in remains server-authoritative, and browser gameplay runtime MUST use WS as the only write path for `table_join`/`join`, `leave`, `start_hand`, and `act`.
+
+Table runtime policy is strict: `/poker/table.html` MUST be 100% WS-only for active gameplay state (bootstrap + refresh + resync). The browser runtime MUST NOT use `poker-get-table`, `poker-heartbeat`, or any gameplay HTTP read fallback.
+
+The HTTP gameplay endpoints (`poker-join`, `poker-heartbeat`, `poker-get-table`, `poker-start-hand`, `poker-act`, `poker-leave`, `poker-sweep`) are retired and return explicit non-authoritative errors (`410`) instead of mutating or sourcing live gameplay state.
 
 `leave` remains authoritative for already-seated users: when the authenticated user is an authoritative table member, WS `leave` executes authoritative member removal/cashout semantics in both default and observe-only runtime modes.
 
@@ -326,3 +330,35 @@ PR15 resume/ack behavior (implemented):
 - `stateSnapshot` remains canonical fallback/resync truth path.
 
 Durability note: replay buffer is process-local and bounded; server restarts or long gaps may require full snapshot recovery.
+
+## Authoritative gameplay write contract (join/start/act)
+
+Gameplay write commands are authoritative over WS. `start_hand` and `act` use `commandResult` as the primary command ack. `join` / `table_join` preserves legacy actor-visible `table_state` first-frame behavior and may additionally emit `commandResult` for deterministic client ack.
+
+- `join` / `table_join` payload: `{ tableId, seatNo?, autoSeat?, preferredSeatNo?, buyIn }` (`buyIn` required for gameplay-equivalent authoritative joins)
+- `start_hand` payload: `{ tableId }`
+- `act` payload: `{ handId, action, amount? }`
+
+Success contract:
+
+1. server validates payload + session/table binding
+2. server applies mutation once for `(userId, requestId)` idempotency key
+3. server persists authoritative state once
+4. for `join`/`table_join`, server emits actor-targeted `table_state` deterministically on success before follow-up fanout
+5. server emits `commandResult.status = "accepted"` only after required post-mutation persistence/restore checks complete (no early accept + later reject for the same requestId)
+6. server emits/broadcasts authoritative snapshot updates
+
+Rejection contract:
+
+- malformed command uses `error.code = "INVALID_COMMAND"`
+- join/bootstrap/load validation failures that were historically protocol errors remain `error` frames (for example `TABLE_NOT_FOUND`, `TABLE_BOOTSTRAP_FAILED`)
+- domain/persistence rejection uses `commandResult.status = "rejected"` with stable reason codes such as `not_your_turn`, `action_not_allowed`, `invalid_amount`, `state_invalid`, `hand_not_live`, `already_live`, `not_enough_players`
+- rejection MUST NOT emit success snapshot broadcasts
+- on persistence conflicts server restores authoritative state and emits `resync` with reason `persistence_conflict`
+
+Client resync expectation:
+
+- UI must treat WS snapshots as source-of-truth after accepted gameplay writes
+- `table_join`/`join`, `start_hand`, and `act` are WS-only gameplay writes for browser runtime
+- client must not replay rejected or failed WS gameplay writes over HTTP fallback for the same operation
+- accepted gameplay writes must converge UI from WS `table_state` / `stateSnapshot` / `table_snapshot` data, not from HTTP write responses

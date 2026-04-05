@@ -8,7 +8,7 @@ function buildHarness(){
   const stopEnd = source.indexOf("\n\n    function mapTableStateToSeatUpdates", stopStart);
   const stopFn = source.slice(stopStart, stopEnd);
 
-  const wsStart = source.indexOf("function mapTableStateToSeatUpdates(snapshotPayload)");
+  const wsStart = source.indexOf("function isRichGameplaySnapshot(snapshotPayload, snapshotKind)");
   const wsEnd = source.indexOf("\n\n    function startWsBootstrap(){", wsStart);
   const wsFns = source.slice(wsStart, wsEnd);
 
@@ -31,6 +31,7 @@ function buildHarness(){
     function toFiniteOrNull(value){ var n = Number(value); if (!Number.isFinite(n) || Math.floor(n) !== n || n < 0) return null; return n; }
     function getConstraintsFromResponse(data){ if (data && isPlainObject(data.actionConstraints)) return data.actionConstraints; var gameState = data && data.state && data.state.state; if (gameState && isPlainObject(gameState.actionConstraints)) return gameState.actionConstraints; return null; }
     function getSafeConstraints(data){ var constraints = getConstraintsFromResponse(data); return { toCall: toFiniteOrNull(constraints ? constraints.toCall : null), minRaiseTo: toFiniteOrNull(constraints ? constraints.minRaiseTo : null), maxRaiseTo: toFiniteOrNull(constraints ? constraints.maxRaiseTo : null), maxBetAmount: toFiniteOrNull(constraints ? constraints.maxBetAmount : null) }; }
+    function getSeatedCount(data){ var seats = data && Array.isArray(data.seats) ? data.seats : []; var activeCount = 0; for (var i = 0; i < seats.length; i++){ var seat = seats[i]; if (!seat || !seat.userId) continue; var status = typeof seat.status === 'string' ? seat.status.toUpperCase() : ''; if (!status || status === 'ACTIVE' || status === 'SEATED') activeCount++; } return activeCount; }
     ${stopFn}
     ${wsFns}
     return {

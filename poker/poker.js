@@ -4,22 +4,17 @@
   var LIST_URL = '/.netlify/functions/poker-list-tables';
   var CREATE_URL = '/.netlify/functions/poker-create-table';
   var QUICK_SEAT_URL = '/.netlify/functions/poker-quick-seat';
-  var GET_URL = '/.netlify/functions/poker-get-table';
-  var JOIN_URL = '/.netlify/functions/poker-join';
-  var LEAVE_URL = '/.netlify/functions/poker-leave';
-  var HEARTBEAT_URL = '/.netlify/functions/poker-heartbeat';
-  var START_HAND_URL = '/.netlify/functions/poker-start-hand';
-  var ACT_URL = '/.netlify/functions/poker-act';
+  var WS_JOIN_ENDPOINT = 'ws:join';
+  var WS_LEAVE_ENDPOINT = 'ws:leave';
+  var WS_START_HAND_ENDPOINT = 'ws:start_hand';
+  var WS_ACT_ENDPOINT = 'ws:act';
   var EXPORT_LOG_URL = '/.netlify/functions/poker-export-log';
-  var POLL_INTERVAL_BASE = 2000;
-  var POLL_INTERVAL_MAX = 10000;
-  var HEARTBEAT_INTERVAL_MS = 5000;
   var PENDING_RETRY_DELAYS = [150, 300, 600, 900];
   var PENDING_RETRY_BUDGET_MS = 2000;
   var UI_VERSION = '2025-02-19';
   var POKER_DUMP_PATTERNS = [/\bpoker_[a-z0-9_]+\b/i, /\bpoker_rt_[a-z0-9_]+\b/i, /\bpoker_ws_[a-z0-9_]+\b/i, /\bws_[a-z0-9_]+\b/i, /\"\/.netlify\/functions\/poker-[^\"\s]+/i, /\/poker\//i];
 
-  var state = { token: null, polling: false, pollTimer: null, pollInterval: POLL_INTERVAL_BASE, pollErrors: 0 };
+  var state = { token: null };
 
   function klog(kind, data){
     try {
@@ -277,11 +272,18 @@
   }
 
   function toFiniteOrNull(value){
+    if (value == null) return null;
+    if (typeof value === 'string' && !value.trim()) return null;
     var n = Number(value);
     if (!Number.isFinite(n)) return null;
     if (Math.floor(n) !== n) return null;
     if (n < 0) return null;
     return n;
+  }
+
+  function normalizeActionTypeValue(value){
+    if (typeof value !== 'string') return '';
+    return value.trim().toUpperCase();
   }
 
   function normalizeDeadlineMs(deadline){
@@ -326,6 +328,137 @@
     };
   }
 
+  function normalizeActionConstraints(constraints){
+    var source = isPlainObject(constraints) ? constraints : null;
+    return {
+      toCall: toFiniteOrNull(source ? source.toCall : null),
+      minRaiseTo: toFiniteOrNull(source ? source.minRaiseTo : null),
+      maxRaiseTo: toFiniteOrNull(source ? source.maxRaiseTo : null),
+      maxBetAmount: toFiniteOrNull(source ? source.maxBetAmount : null)
+    };
+  }
+
+  function sanitizeAllowedActions(allowedSet, constraints){
+    var sanitized = new Set();
+    if (allowedSet && typeof allowedSet.forEach === 'function'){
+      allowedSet.forEach(function(type){
+        var normalizedType = normalizeActionTypeValue(type);
+        if (normalizedType) sanitized.add(normalizedType);
+      });
+    }
+    var safeConstraints = normalizeActionConstraints(constraints);
+    if (safeConstraints.toCall != null){
+      if (safeConstraints.toCall > 0){
+        sanitized.delete('CHECK');
+        sanitized.delete('BET');
+      } else {
+        sanitized.delete('CALL');
+        sanitized.delete('RAISE');
+      }
+    }
+    if (safeConstraints.maxBetAmount != null && safeConstraints.maxBetAmount < 1){
+      sanitized.delete('BET');
+    }
+    if (safeConstraints.maxRaiseTo != null && safeConstraints.maxRaiseTo < 1){
+      sanitized.delete('RAISE');
+    }
+    return {
+      allowed: sanitized,
+      needsAmount: sanitized.has('BET') || sanitized.has('RAISE'),
+      constraints: safeConstraints
+    };
+  }
+
+  function validateAmountActionPayload(actionType, amountValue, allowedInfo){
+    var normalizedType = normalizeActionTypeValue(actionType);
+    if (normalizedType !== 'BET' && normalizedType !== 'RAISE'){
+      return { ok: true, amount: null };
+    }
+    if (!allowedInfo || !allowedInfo.allowed || !allowedInfo.allowed.has(normalizedType)){
+      return { error: t('pokerErrActionNotAllowed', 'Action not allowed right now') };
+    }
+    var amount = parseInt(amountValue, 10);
+    if (!isFinite(amount) || amount <= 0){
+      return { error: t('pokerActAmountRequired', 'Enter an amount for bet/raise') };
+    }
+    var constraints = normalizeActionConstraints(allowedInfo.constraints);
+    if (normalizedType === 'BET'){
+      if (constraints.maxBetAmount != null && constraints.maxBetAmount >= 1 && amount > constraints.maxBetAmount){
+        return { error: t('pokerErrActAmount', 'Invalid amount') };
+      }
+    } else if (normalizedType === 'RAISE'){
+      var raiseMin = constraints.minRaiseTo;
+      var raiseMax = constraints.maxRaiseTo;
+      var hasValidRaiseRange = raiseMin != null && raiseMax != null && raiseMax >= raiseMin && raiseMax >= 1;
+      if (hasValidRaiseRange && (amount < raiseMin || amount > raiseMax)){
+        return { error: t('pokerErrActAmount', 'Invalid amount') };
+      }
+    }
+    return { ok: true, amount: Math.trunc(amount) };
+  }
+
+  function clampAmountValue(value, min, max){
+    var num = parseInt(value, 10);
+    if (!isFinite(num)) num = min;
+    num = Math.trunc(num);
+    if (num < min) num = min;
+    if (max != null && num > max) num = max;
+    return num;
+  }
+
+  function resolveAmountActionModel(allowedInfo, preferredAmount, selectedActionType){
+    var info = allowedInfo || {};
+    var allowed = info.allowed;
+    var constraints = normalizeActionConstraints(info.constraints);
+    var hasBet = !!(allowed && allowed.has('BET'));
+    var hasRaise = !!(allowed && allowed.has('RAISE'));
+    var selected = normalizeActionTypeValue(selectedActionType);
+    var actionType = null;
+    var min = 1;
+    var max = null;
+    if (hasRaise && !hasBet){
+      actionType = 'RAISE';
+      min = constraints.minRaiseTo != null && constraints.minRaiseTo >= 1 ? constraints.minRaiseTo : 1;
+      max = constraints.maxRaiseTo != null && constraints.maxRaiseTo >= min ? constraints.maxRaiseTo : null;
+    } else if (hasBet && !hasRaise){
+      actionType = 'BET';
+      max = constraints.maxBetAmount != null && constraints.maxBetAmount >= 1 ? constraints.maxBetAmount : null;
+    } else if (hasBet && hasRaise){
+      if (selected === 'BET'){
+        actionType = 'BET';
+        max = constraints.maxBetAmount != null && constraints.maxBetAmount >= 1 ? constraints.maxBetAmount : null;
+      } else if (selected === 'RAISE'){
+        actionType = 'RAISE';
+        min = constraints.minRaiseTo != null && constraints.minRaiseTo >= 1 ? constraints.minRaiseTo : 1;
+        max = constraints.maxRaiseTo != null && constraints.maxRaiseTo >= min ? constraints.maxRaiseTo : null;
+      } else {
+        min = 1;
+        max = null;
+      }
+    }
+    if (!hasBet && !hasRaise) return { visible: false, actionType: null, hasBet: false, hasRaise: false, min: null, max: null, defaultValue: null, hintLabel: '' };
+    var preferred = parseInt(preferredAmount, 10);
+    if (!isFinite(preferred)) preferred = 20;
+    preferred = Math.trunc(preferred);
+    var defaultValue = clampAmountValue(preferred, min, max);
+    var hint = '';
+    if (actionType === 'RAISE'){
+      var raiseRangeLabel = max == null ? String(min) + '+' : String(min) + '-' + String(max);
+      hint = t('pokerRaiseRangeCompact', 'RAISE: {range}').replace('{range}', raiseRangeLabel);
+    } else if (actionType === 'BET'){
+      var betRangeLabel = max == null ? '1+' : '1-' + String(max);
+      hint = t('pokerBetRangeCompact', 'BET: {range}').replace('{range}', betRangeLabel);
+    } else {
+      var betMax = constraints.maxBetAmount != null && constraints.maxBetAmount >= 1 ? constraints.maxBetAmount : null;
+      var betLabel = betMax == null ? '1+' : '1-' + String(betMax);
+      var raiseMin = constraints.minRaiseTo != null && constraints.minRaiseTo >= 1 ? constraints.minRaiseTo : 1;
+      var raiseMax = constraints.maxRaiseTo != null && constraints.maxRaiseTo >= raiseMin ? constraints.maxRaiseTo : null;
+      var raiseLabel = raiseMax == null ? String(raiseMin) + '+' : String(raiseMin) + '-' + String(raiseMax);
+      hint = t('pokerAmountActionPickHint', 'BET: {bet} • RAISE: {raise} • Click BET or RAISE').replace('{bet}', betLabel).replace('{raise}', raiseLabel);
+    }
+    return { visible: true, actionType: actionType, hasBet: hasBet, hasRaise: hasRaise, min: min, max: max, defaultValue: defaultValue, hintLabel: hint };
+  }
+
   function getSeatDisplayName(seat){
     if (!seat) return '';
     return seat.displayName || seat.name || seat.username || seat.userName || seat.handle || '';
@@ -364,6 +497,23 @@
     };
   }
 
+  function resolveTurnActionUiState(params){
+    var info = params || {};
+    var availableActions = Array.isArray(info.availableActions) ? info.availableActions : [];
+    var rawLegalActions = Array.isArray(info.rawLegalActions) ? info.rawLegalActions : [];
+    var showActions = shouldShowTurnActions({
+      phase: info.phase,
+      turnUserId: info.turnUserId,
+      currentUserId: info.currentUserId,
+      legalActions: availableActions
+    });
+    var isUsersTurn = !!info.isUsersTurn;
+    var status = null;
+    if (isUsersTurn && availableActions.length === 0){
+      status = rawLegalActions.length > 0 ? 'no_actionable_moves' : 'contract_mismatch';
+    }
+    return { showActions: showActions, status: status };
+  }
 
   if (window.__RUNNING_POKER_UI_TESTS__ === true){
     window.__POKER_UI_TEST_HOOKS__ = {
@@ -372,6 +522,10 @@
       shouldShowTurnActions: shouldShowTurnActions,
       getConstraintsFromResponse: getConstraintsFromResponse,
       getLegalActionsFromResponse: getLegalActionsFromResponse,
+      sanitizeAllowedActions: sanitizeAllowedActions,
+      validateAmountActionPayload: validateAmountActionPayload,
+      resolveAmountActionModel: resolveAmountActionModel,
+      resolveTurnActionUiState: resolveTurnActionUiState,
       ensurePokerRecorder: ensurePokerRecorder,
       getPokerDumpText: getPokerDumpText,
       copyTextToClipboard: copyTextToClipboard,
@@ -422,6 +576,28 @@
   function normalizeRequestId(value){
     var trimmed = getValidRequestId(value);
     return trimmed || String(generateRequestId());
+  }
+
+  function buildWsUnavailableError(action, fallbackMessage){
+    var message = fallbackMessage || t('pokerErrWsUnavailable', 'Live table connection unavailable. Please wait for WebSocket reconnect and try again.');
+    var err = new Error(message);
+    err.code = 'ws_unavailable';
+    err.action = action || null;
+    return err;
+  }
+
+  function getGameplayWsSender(client, methodName, action, fallbackMessage){
+    if (!client || typeof client.isReady !== 'function' || !client.isReady()) return null;
+    if (typeof client[methodName] !== 'function') return null;
+    return function(payload, requestId){
+      return client[methodName](payload, requestId);
+    };
+  }
+
+  function resolveGameplayWsSender(client, methodName, action, fallbackMessage){
+    var sender = getGameplayWsSender(client, methodName, action, fallbackMessage);
+    if (sender) return sender;
+    throw buildWsUnavailableError(action, fallbackMessage);
   }
 
   function resolveRequestId(pendingValue, overrideValue){
@@ -991,14 +1167,14 @@
     var stakesValid = true;
     var devActionsEnabled = false;
     var authTimer = null;
-    var heartbeatTimer = null;
-    var pendingHeartbeatRequestId = null;
     var pendingJoinRequestId = null;
     var pendingJoinAutoSeat = false;
     var pendingLeaveRequestId = null;
     var pendingStartHandRequestId = null;
     var pendingActRequestId = null;
-    var pendingActType = null;
+    var pendingActActionType = null;
+    var selectedAmountActionType = null;
+    var amountDecisionSignature = '';
     var pendingJoinRetries = 0;
     var pendingLeaveRetries = 0;
     var pendingStartHandRetries = 0;
@@ -1018,8 +1194,6 @@
     var copyLogPending = false;
     var dumpLogsPending = false;
     var pendingHiddenAt = null;
-    var heartbeatPendingRetries = 0;
-    var heartbeatInFlight = false;
     var isSeated = false;
     var suggestedSeatNoParam = parseInt(params.get('seatNo'), 10);
     var shouldAutoJoin = params.get('autoJoin') === '1';
@@ -1032,14 +1206,15 @@
     var turnTimerInterval = null;
     var deadlineNudgeTimer = null;
     var deadlineNudgeTargetMs = null;
-    var HEARTBEAT_PENDING_MAX_RETRIES = 8;
     var realtimeSub = null;
     var realtimeDisabled = false;
     var realtimeUnavailableLogged = false;
     var wsClient = null;
     var wsStarted = false;
+    var httpFallbackActive = false;
     var wsSnapshotSeen = false;
     var pendingWsSnapshot = null;
+    var amountRowWasVisible = false;
 
     if (joinBtn){
       klog('poker_join_bind', { found: true, selector: joinSelector, page: 'table' });
@@ -1072,17 +1247,153 @@
       wsClient = null;
     }
 
+    function isRichGameplaySnapshot(snapshotPayload, snapshotKind){
+      var payload = snapshotPayload && typeof snapshotPayload === 'object' ? snapshotPayload : {};
+      if (snapshotKind === 'stateSnapshot') return true;
+      if (snapshotKind === 'table_state'){
+        return !!(
+          isPlainObject(payload.stacks)
+          || Array.isArray(payload.authoritativeMembers)
+          || Array.isArray(payload.seats)
+          || isPlainObject(payload.hand)
+          || isPlainObject(payload.turn)
+          || isPlainObject(payload.pot)
+          || isPlainObject(payload.board)
+          || Array.isArray(payload.board)
+        );
+      }
+      if (isPlainObject(payload.public) || isPlainObject(payload.private) || isPlainObject(payload.you)) return true;
+      return isPlainObject(payload.table);
+    }
+
+    function normalizeCardForRender(card){
+      if (!card) return null;
+      var rank = null;
+      var suit = null;
+      if (typeof card === 'string'){
+        var text = card.trim();
+        if (!text || text.length < 2) return null;
+        suit = text.slice(-1).toUpperCase();
+        rank = text.slice(0, -1).toUpperCase();
+      } else if (isPlainObject(card)){
+        rank = card.r != null ? String(card.r).trim().toUpperCase() : '';
+        suit = card.s != null ? String(card.s).trim().toUpperCase() : '';
+      } else {
+        return null;
+      }
+      if (rank === 'T') rank = '10';
+      if (!(suit === 'S' || suit === 'H' || suit === 'D' || suit === 'C')) return null;
+      if (!(rank === 'A' || rank === 'K' || rank === 'Q' || rank === 'J' || rank === '10' || rank === '9' || rank === '8' || rank === '7' || rank === '6' || rank === '5' || rank === '4' || rank === '3' || rank === '2')) return null;
+      return {
+        r: rank === '10' ? 10 : rank,
+        s: suit
+      };
+    }
+
+    function normalizeCardsForRender(cards){
+      if (!Array.isArray(cards)) return [];
+      var out = [];
+      for (var i = 0; i < cards.length; i++){
+        var normalized = normalizeCardForRender(cards[i]);
+        if (normalized) out.push(normalized);
+      }
+      return out;
+    }
+
+    function normalizeWsSnapshotPayload(snapshot){
+      var input = snapshot && typeof snapshot === 'object' ? snapshot : {};
+      var payload = input.payload && typeof input.payload === 'object' ? input.payload : {};
+      var kind = typeof input.kind === 'string' && input.kind ? input.kind : (typeof input.rawType === 'string' ? input.rawType : null);
+      var normalized = Object.assign({}, payload);
+      var rich = isRichGameplaySnapshot(payload, kind);
+      if (!rich) return { kind: kind, payload: normalized };
+
+      var table = isPlainObject(payload.table) ? payload.table : {};
+      var pub = isPlainObject(payload.public) ? payload.public : {};
+      var priv = isPlainObject(payload.private) ? payload.private : {};
+      var you = isPlainObject(payload.you) ? payload.you : {};
+
+      if (!normalized.tableId && typeof table.tableId === 'string' && table.tableId) normalized.tableId = table.tableId;
+      if (!Array.isArray(normalized.authoritativeMembers) && Array.isArray(table.members)) normalized.authoritativeMembers = table.members.slice();
+      if (!Array.isArray(normalized.members) && Array.isArray(table.members)) normalized.members = table.members.slice();
+      if (!Number.isInteger(normalized.youSeat) && Number.isInteger(you.seat)) normalized.youSeat = you.seat;
+      if (!Number.isInteger(normalized.stateVersion) && Number.isInteger(payload.version)) normalized.stateVersion = payload.version;
+      if (normalized.myHoleCards == null && Array.isArray(priv.holeCards)) normalized.myHoleCards = normalizeCardsForRender(priv.holeCards);
+      if (!normalized.hand && isPlainObject(pub.hand)) normalized.hand = pub.hand;
+      if (!normalized.pot && isPlainObject(pub.pot)) normalized.pot = pub.pot;
+      if (!normalized.turn && isPlainObject(pub.turn)) normalized.turn = pub.turn;
+      if (!normalized.stacks || typeof normalized.stacks !== 'object' || Array.isArray(normalized.stacks)){
+        var normalizedStacks = normalizeSnapshotStacks(payload);
+        if (normalizedStacks) normalized.stacks = normalizedStacks;
+      }
+      if (!normalized.legalActions && pub.legalActions != null) normalized.legalActions = pub.legalActions;
+      if (!normalized.actionConstraints && isPlainObject(pub.actionConstraints)) normalized.actionConstraints = pub.actionConstraints;
+      if (!normalized.board && pub.board != null){
+        if (Array.isArray(pub.board)){
+          var normalizedPublicBoard = normalizeCardsForRender(pub.board);
+          if (normalizedPublicBoard.length || pub.board.length === 0){
+            normalized.board = { cards: normalizedPublicBoard };
+          }
+        } else if (isPlainObject(pub.board) && Array.isArray(pub.board.cards)){
+          var normalizedPublicBoardCards = normalizeCardsForRender(pub.board.cards);
+          if (normalizedPublicBoardCards.length || pub.board.cards.length === 0){
+            normalized.board = { cards: normalizedPublicBoardCards };
+          }
+        } else {
+          normalized.board = pub.board;
+        }
+      }
+      return { kind: kind, payload: normalized };
+    }
+
+    function normalizeSnapshotStacks(payload){
+      var safePayload = payload && typeof payload === 'object' ? payload : {};
+      if (isPlainObject(safePayload.stacks)) return Object.assign({}, safePayload.stacks);
+      var publicPayload = isPlainObject(safePayload.public) ? safePayload.public : {};
+      if (isPlainObject(publicPayload.stacks)) return Object.assign({}, publicPayload.stacks);
+      if (isPlainObject(safePayload.state) && isPlainObject(safePayload.state.stacks)) return Object.assign({}, safePayload.state.stacks);
+      return null;
+    }
+
     function mapTableStateToSeatUpdates(snapshotPayload){
       var payload = snapshotPayload && typeof snapshotPayload === 'object' ? snapshotPayload : {};
+      var seatMap = {};
       var members = Array.isArray(payload.authoritativeMembers) ? payload.authoritativeMembers : [];
-      var seats = members.map(function(member){
-        return {
-          userId: member && member.userId ? member.userId : null,
-          seatNo: member && member.seat != null ? member.seat : null,
+      members.forEach(function(member){
+        var seatNo = member && member.seat != null ? member.seat : null;
+        var userId = member && member.userId ? member.userId : null;
+        if (!Number.isInteger(seatNo) || seatNo < 0) return;
+        if (typeof userId !== 'string' || !userId) return;
+        seatMap[seatNo] = {
+          userId: userId,
+          seatNo: seatNo,
           status: 'ACTIVE'
         };
-      }).filter(function(seat){
-        return typeof seat.userId === 'string' && seat.userId && Number.isInteger(seat.seatNo) && seat.seatNo >= 0;
+      });
+      if (Array.isArray(payload.seats)){
+        payload.seats.forEach(function(seat){
+          var seatNo = seat && Number.isInteger(seat.seatNo) ? seat.seatNo : null;
+          var userId = seat && typeof seat.userId === 'string' ? seat.userId : null;
+          if (!Number.isInteger(seatNo) || seatNo < 0) return;
+          if (typeof userId !== 'string' || !userId) return;
+          if (seatMap[seatNo]) return;
+          seatMap[seatNo] = {
+            userId: userId,
+            seatNo: seatNo,
+            status: typeof seat.status === 'string' ? seat.status : 'ACTIVE'
+          };
+        });
+      }
+      var currentSeatUserId = typeof currentUserId === 'string' && currentUserId ? currentUserId : null;
+      if (currentSeatUserId && Number.isInteger(payload.youSeat) && payload.youSeat >= 0 && !seatMap[payload.youSeat]){
+        seatMap[payload.youSeat] = {
+          userId: currentSeatUserId,
+          seatNo: payload.youSeat,
+          status: 'ACTIVE'
+        };
+      }
+      var seats = Object.keys(seatMap).map(function(key){
+        return seatMap[key];
       });
       return {
         tableId: payload.tableId || null,
@@ -1091,16 +1402,24 @@
     }
 
     function mergePresenceIntoSeats(existingSeats, seatUpdates){
-      if (!Array.isArray(existingSeats) || existingSeats.length === 0) return null;
-      if (!Array.isArray(seatUpdates) || seatUpdates.length === 0) return existingSeats.slice();
+      if (!Array.isArray(seatUpdates) || seatUpdates.length === 0){
+        return Array.isArray(existingSeats) ? existingSeats.slice() : null;
+      }
       var bySeatNo = {};
       seatUpdates.forEach(function(updateSeat){
         if (!updateSeat || !Number.isInteger(updateSeat.seatNo) || updateSeat.seatNo < 0) return;
         if (typeof updateSeat.userId !== 'string' || !updateSeat.userId) return;
         bySeatNo[updateSeat.seatNo] = updateSeat;
       });
-      return existingSeats.map(function(existing){
+      if (!Array.isArray(existingSeats) || existingSeats.length === 0){
+        return Object.keys(bySeatNo).map(function(key){
+          return bySeatNo[key];
+        });
+      }
+      var seenSeatNos = {};
+      var mergedSeats = existingSeats.map(function(existing){
         if (!existing || !Number.isInteger(existing.seatNo)) return existing;
+        seenSeatNos[existing.seatNo] = true;
         var nextSeat = bySeatNo[existing.seatNo];
         if (!nextSeat) return existing;
         return Object.assign({}, existing, {
@@ -1108,6 +1427,84 @@
           status: nextSeat.status || existing.status || 'ACTIVE'
         });
       });
+      Object.keys(bySeatNo).forEach(function(key){
+        var seatNo = Number(key);
+        if (seenSeatNos[seatNo]) return;
+        mergedSeats.push(bySeatNo[key]);
+      });
+      return mergedSeats;
+    }
+
+
+    function createWsBaselineTableData(snapshotPayload){
+      var payload = snapshotPayload && typeof snapshotPayload === 'object' ? snapshotPayload : {};
+      var tablePayload = isPlainObject(payload.table) ? payload.table : {};
+      var handPayload = isPlainObject(payload.hand) ? payload.hand : {};
+      var turnPayload = isPlainObject(payload.turn) ? payload.turn : {};
+      var potPayload = isPlainObject(payload.pot) ? payload.pot : {};
+      var boardPayload = isPlainObject(payload.board) ? payload.board : null;
+      var seatUpdates = mapTableStateToSeatUpdates(payload);
+      var stateVersion = Number.isInteger(payload.stateVersion) ? payload.stateVersion : 0;
+      var communityCards = [];
+      if (boardPayload && Array.isArray(boardPayload.cards)){
+        communityCards = normalizeCardsForRender(boardPayload.cards);
+      } else if (Array.isArray(payload.board)) {
+        communityCards = normalizeCardsForRender(payload.board);
+      }
+      var legalActions = [];
+      var actionConstraints = null;
+      if (Array.isArray(payload.legalActions)){
+        legalActions = payload.legalActions.slice();
+      } else if (isPlainObject(payload.legalActions)){
+        if (Array.isArray(payload.legalActions.actions)) legalActions = payload.legalActions.actions.slice();
+        if (isPlainObject(payload.legalActions.actionConstraints)) actionConstraints = getSafeConstraints({ actionConstraints: payload.legalActions.actionConstraints });
+      }
+      if (!actionConstraints && isPlainObject(payload.actionConstraints)){
+        actionConstraints = getSafeConstraints({ actionConstraints: payload.actionConstraints });
+      }
+      if (!actionConstraints) actionConstraints = {};
+      var stateObj = {
+        phase: typeof handPayload.status === 'string' ? handPayload.status : null,
+        handId: typeof handPayload.handId === 'string' ? handPayload.handId : null,
+        turnUserId: typeof turnPayload.userId === 'string' ? turnPayload.userId : null,
+        turnDeadlineAt: turnPayload.deadlineAt != null ? turnPayload.deadlineAt : null,
+        turnStartedAt: turnPayload.startedAt != null ? turnPayload.startedAt : null,
+        pot: Number.isFinite(Number(potPayload.total)) ? Number(potPayload.total) : 0,
+        potTotal: Number.isFinite(Number(potPayload.total)) ? Number(potPayload.total) : 0,
+        sidePots: Array.isArray(potPayload.sidePots) ? potPayload.sidePots.slice() : [],
+        community: communityCards,
+        stacks: normalizeSnapshotStacks(payload) || {}
+      };
+      var resolvedMaxPlayers = null;
+      if (Number.isInteger(tablePayload.maxPlayers) && tablePayload.maxPlayers > 1){
+        resolvedMaxPlayers = tablePayload.maxPlayers;
+      } else if (Number.isInteger(tablePayload.maxSeats) && tablePayload.maxSeats > 1){
+        resolvedMaxPlayers = tablePayload.maxSeats;
+      } else {
+        var snakeMaxPlayers = parseInt(tablePayload.max_players, 10);
+        if (Number.isInteger(snakeMaxPlayers) && snakeMaxPlayers > 1){
+          resolvedMaxPlayers = snakeMaxPlayers;
+        }
+      }
+      var baseline = {
+        tableId: payload.tableId || tableId,
+        table: {
+          id: payload.tableId || tableId,
+          status: typeof tablePayload.status === 'string' ? tablePayload.status : 'OPEN',
+          maxPlayers: resolvedMaxPlayers || 6,
+          stakes: tablePayload.stakes || null
+        },
+        seats: Array.isArray(seatUpdates.seats) ? seatUpdates.seats.slice() : [],
+        legalActions: legalActions,
+        actionConstraints: actionConstraints,
+        _actionConstraints: actionConstraints,
+        state: {
+          version: stateVersion,
+          state: stateObj
+        },
+        myHoleCards: Array.isArray(payload.myHoleCards) ? normalizeCardsForRender(payload.myHoleCards) : []
+      };
+      return baseline;
     }
 
     function mergeWsStateIntoTableData(existingData, snapshotPayload){
@@ -1117,34 +1514,56 @@
       var merged = Object.assign({}, existingData);
       var baselineState = isPlainObject(merged.state) ? merged.state : {};
       var baselineInner = isPlainObject(baselineState.state) ? baselineState.state : {};
+      var nextState = Object.assign({}, baselineInner);
       if (Number.isInteger(payload.stateVersion)) baselineState.version = payload.stateVersion;
       if (payload.hand && typeof payload.hand === 'object'){
-        baselineState.state = Object.assign({}, baselineInner, {
-          handId: payload.hand.handId || baselineInner.handId || null,
-          phase: payload.hand.status || baselineInner.phase || null,
-          turnUserId: payload.turn && payload.turn.userId ? payload.turn.userId : baselineInner.turnUserId,
-          turnDeadlineAt: payload.turn && payload.turn.deadlineAt != null ? payload.turn.deadlineAt : baselineInner.turnDeadlineAt,
-          community: payload.board && Array.isArray(payload.board.cards) ? payload.board.cards.slice() : baselineInner.community,
-          pot: payload.pot && Number.isFinite(Number(payload.pot.total)) ? Number(payload.pot.total) : baselineInner.pot,
-          potTotal: payload.pot && Number.isFinite(Number(payload.pot.total)) ? Number(payload.pot.total) : baselineInner.potTotal,
-          sidePots: payload.pot && Array.isArray(payload.pot.sidePots) ? payload.pot.sidePots.slice() : baselineInner.sidePots
-        });
+        nextState.handId = payload.hand.handId || nextState.handId || null;
+        nextState.phase = payload.hand.status || nextState.phase || null;
       }
-      merged.state = baselineState;
-      if (payload.legalActions && typeof payload.legalActions === 'object'){
-        var wsActions = Array.isArray(payload.legalActions.actions) ? payload.legalActions.actions.slice() : null;
-        if (wsActions){
-          merged.legalActions = wsActions;
-          var wsConstraints = null;
-          if (isPlainObject(payload.actionConstraints)) wsConstraints = payload.actionConstraints;
-          else if (isPlainObject(payload.legalActions.actionConstraints)) wsConstraints = payload.legalActions.actionConstraints;
-          if (wsConstraints){
-            var safeConstraints = getSafeConstraints({ actionConstraints: wsConstraints });
-            merged.actionConstraints = safeConstraints;
-            merged._actionConstraints = safeConstraints;
-          }
+      if (payload.turn && typeof payload.turn === 'object'){
+        nextState.turnUserId = payload.turn.userId ? payload.turn.userId : nextState.turnUserId;
+        nextState.turnDeadlineAt = payload.turn.deadlineAt != null ? payload.turn.deadlineAt : nextState.turnDeadlineAt;
+        nextState.turnStartedAt = payload.turn.startedAt != null ? payload.turn.startedAt : nextState.turnStartedAt;
+      }
+      if (payload.board && Array.isArray(payload.board.cards)){
+        var normalizedBoardCards = normalizeCardsForRender(payload.board.cards);
+        if (normalizedBoardCards.length || payload.board.cards.length === 0) nextState.community = normalizedBoardCards;
+      }
+      if (!Array.isArray(nextState.community) && Array.isArray(payload.board)){
+        var normalizedBoardList = normalizeCardsForRender(payload.board);
+        if (normalizedBoardList.length || payload.board.length === 0) nextState.community = normalizedBoardList;
+      }
+      if (payload.pot && typeof payload.pot === 'object'){
+        if (Number.isFinite(Number(payload.pot.total))) {
+          nextState.pot = Number(payload.pot.total);
+          nextState.potTotal = Number(payload.pot.total);
         }
+        if (Array.isArray(payload.pot.sidePots)) nextState.sidePots = payload.pot.sidePots.slice();
       }
+      var normalizedStacks = normalizeSnapshotStacks(payload);
+      if (normalizedStacks){
+        nextState.stacks = Object.assign({}, baselineInner.stacks && typeof baselineInner.stacks === 'object' ? baselineInner.stacks : {}, normalizedStacks);
+      }
+      baselineState.state = nextState;
+      merged.state = baselineState;
+      var wsActions = null;
+      var wsConstraints = null;
+      if (Array.isArray(payload.legalActions)){
+        wsActions = payload.legalActions.slice();
+      } else if (payload.legalActions && typeof payload.legalActions === 'object'){
+        if (Array.isArray(payload.legalActions.actions)) wsActions = payload.legalActions.actions.slice();
+        if (isPlainObject(payload.legalActions.actionConstraints)) wsConstraints = payload.legalActions.actionConstraints;
+      }
+      if (wsActions){
+        merged.legalActions = wsActions;
+      }
+      if (isPlainObject(payload.actionConstraints)) wsConstraints = payload.actionConstraints;
+      if (wsConstraints){
+        var safeConstraints = getSafeConstraints({ actionConstraints: wsConstraints });
+        merged.actionConstraints = safeConstraints;
+        merged._actionConstraints = safeConstraints;
+      }
+      if (Array.isArray(payload.myHoleCards)) merged.myHoleCards = normalizeCardsForRender(payload.myHoleCards);
       var mergedSeats = mergePresenceIntoSeats(merged.seats, update.seats);
       if (mergedSeats) merged.seats = mergedSeats;
       return merged;
@@ -1161,12 +1580,199 @@
       return state && Number.isInteger(state.version) ? state.version : null;
     }
 
+    function findCurrentUserSeatFacts(data){
+      var facts = {
+        hasCurrentUserSeat: false,
+        seatNo: null,
+        status: null,
+        hasRenderableSeatRow: false,
+        hasCurrentUserStack: false
+      };
+      var activeCurrentUserId = typeof currentUserId === 'string' && currentUserId ? currentUserId : null;
+      var stateObj = data && typeof data.state === 'object' ? data.state : null;
+      var gameState = stateObj && typeof stateObj.state === 'object' ? stateObj.state : null;
+      var stacks = gameState && typeof gameState.stacks === 'object' && !Array.isArray(gameState.stacks) ? gameState.stacks : null;
+      if (activeCurrentUserId && stacks && stacks[activeCurrentUserId] != null){
+        facts.hasCurrentUserStack = true;
+      }
+      if (!activeCurrentUserId || !data || !Array.isArray(data.seats)) return facts;
+      for (var i = 0; i < data.seats.length; i++){
+        var seat = data.seats[i];
+        if (!seat || typeof seat.userId !== 'string') continue;
+        if (seat.userId.trim() !== activeCurrentUserId) continue;
+        facts.hasCurrentUserSeat = true;
+        facts.seatNo = Number.isInteger(seat.seatNo) ? seat.seatNo : null;
+        facts.status = typeof seat.status === 'string' ? seat.status : null;
+        facts.hasRenderableSeatRow = true;
+        return facts;
+      }
+      return facts;
+    }
+
+    function buildSeatUserSeatMap(seats){
+      var map = {};
+      if (!Array.isArray(seats)) return map;
+      for (var i = 0; i < seats.length; i++){
+        var seat = seats[i];
+        if (!seat || typeof seat.userId !== 'string') continue;
+        var userId = seat.userId.trim();
+        if (!userId) continue;
+        map[userId] = Number.isInteger(seat.seatNo) ? seat.seatNo : null;
+      }
+      return map;
+    }
+
+    function buildWsPayloadSeatSnapshot(payload){
+      var seatMap = {};
+      var seatRows = [];
+      if (Array.isArray(payload.authoritativeMembers)){
+        for (var i = 0; i < payload.authoritativeMembers.length; i++){
+          var member = payload.authoritativeMembers[i];
+          if (!member || typeof member.userId !== 'string') continue;
+          var memberUserId = member.userId.trim();
+          if (!memberUserId) continue;
+          var memberSeatNo = Number.isInteger(member.seat) ? member.seat : null;
+          seatMap[memberUserId] = memberSeatNo;
+          seatRows.push(memberUserId + ':' + (memberSeatNo != null ? memberSeatNo : 'null'));
+        }
+      }
+      if (Array.isArray(payload.seats)){
+        for (var j = 0; j < payload.seats.length; j++){
+          var seat = payload.seats[j];
+          if (!seat || typeof seat.userId !== 'string') continue;
+          var seatUserId = seat.userId.trim();
+          if (!seatUserId) continue;
+          if (seatMap[seatUserId] != null) continue;
+          var seatNo = Number.isInteger(seat.seatNo) ? seat.seatNo : null;
+          seatMap[seatUserId] = seatNo;
+          seatRows.push(seatUserId + ':' + (seatNo != null ? seatNo : 'null'));
+        }
+      }
+      return {
+        seatMap: seatMap,
+        seatRows: seatRows
+      };
+    }
+
+    function hasTurnMetadata(state){
+      if (!state || typeof state !== 'object') return false;
+      return !!(state.turnUserId || state.turnDeadlineAt != null || state.turnStartedAt != null);
+    }
+
+    function hasConstraintsData(constraints){
+      if (!constraints || typeof constraints !== 'object') return false;
+      return constraints.toCall != null || constraints.minRaiseTo != null || constraints.maxRaiseTo != null || constraints.maxBetAmount != null;
+    }
+
+    function hasStackEntries(stacks){
+      return !!(stacks && typeof stacks === 'object' && !Array.isArray(stacks) && Object.keys(stacks).length > 0);
+    }
+
+    function normalizeActionListForCompare(actions){
+      if (!Array.isArray(actions)) return [];
+      var seen = {};
+      var out = [];
+      for (var i = 0; i < actions.length; i++){
+        var type = normalizeActionTypeValue(actions[i]);
+        if (!type || seen[type]) continue;
+        seen[type] = true;
+        out.push(type);
+      }
+      out.sort();
+      return out;
+    }
+
+    function haveActionListsChanged(left, right){
+      var a = normalizeActionListForCompare(left);
+      var b = normalizeActionListForCompare(right);
+      if (a.length !== b.length) return true;
+      for (var i = 0; i < a.length; i++){
+        if (a[i] !== b[i]) return true;
+      }
+      return false;
+    }
+
+    function haveActionConstraintsChanged(left, right){
+      var a = normalizeActionConstraints(left);
+      var b = normalizeActionConstraints(right);
+      return a.toCall !== b.toCall
+        || a.minRaiseTo !== b.minRaiseTo
+        || a.maxRaiseTo !== b.maxRaiseTo
+        || a.maxBetAmount !== b.maxBetAmount;
+    }
+
+    function hasTurnMetadataChanged(left, right){
+      var leftState = left && typeof left === 'object' ? left : {};
+      var rightState = right && typeof right === 'object' ? right : {};
+      return leftState.phase !== rightState.phase
+        || leftState.turnUserId !== rightState.turnUserId
+        || normalizeDeadlineMs(leftState.turnStartedAt) !== normalizeDeadlineMs(rightState.turnStartedAt)
+        || normalizeDeadlineMs(leftState.turnDeadlineAt) !== normalizeDeadlineMs(rightState.turnDeadlineAt);
+    }
+
+    function resolveCurrentUserStackStatus(data){
+      var status = {
+        currentUserId: null,
+        seated: false,
+        hasStack: false,
+        stackValue: null
+      };
+      var activeCurrentUserId = typeof currentUserId === 'string' && currentUserId ? currentUserId : null;
+      if (!activeCurrentUserId) return status;
+      status.currentUserId = activeCurrentUserId;
+      var seatFacts = findCurrentUserSeatFacts(data);
+      status.seated = seatFacts.hasCurrentUserSeat === true;
+      status.hasStack = seatFacts.hasCurrentUserStack === true;
+      var stateObj = data && typeof data.state === 'object' ? data.state : null;
+      var gameState = stateObj && typeof stateObj.state === 'object' ? stateObj.state : null;
+      var stacks = gameState && typeof gameState.stacks === 'object' && !Array.isArray(gameState.stacks) ? gameState.stacks : null;
+      if (status.currentUserId && stacks && stacks[status.currentUserId] != null) status.stackValue = stacks[status.currentUserId];
+      return status;
+    }
+
+    function materiallyImprovesRichSnapshot(currentData, snapshotPayload){
+      if (!currentData || typeof currentData !== 'object') return false;
+      if (!snapshotPayload || typeof snapshotPayload !== 'object') return false;
+      var currentStateBeforeMerge = currentData.state && currentData.state.state && typeof currentData.state.state === 'object' ? currentData.state.state : {};
+      var hadHoleCards = Array.isArray(currentData.myHoleCards) && currentData.myHoleCards.length > 0;
+      var hadCommunity = Array.isArray(currentStateBeforeMerge.community) && currentStateBeforeMerge.community.length > 0;
+      var hadLegalActions = Array.isArray(currentData.legalActions) && currentData.legalActions.length > 0;
+      var hadConstraints = hasConstraintsData(currentData.actionConstraints);
+      var hadTurnMetadata = hasTurnMetadata(currentStateBeforeMerge);
+      var hadStacks = hasStackEntries(currentStateBeforeMerge.stacks);
+      var currentStackKeys = hadStacks ? Object.keys(currentStateBeforeMerge.stacks) : [];
+      var currentUserStackStatusBefore = resolveCurrentUserStackStatus(currentData);
+      var mergedData = mergeWsStateIntoTableData(currentData, snapshotPayload);
+      if (!mergedData) return false;
+      var mergedState = mergedData.state && mergedData.state.state && typeof mergedData.state.state === 'object' ? mergedData.state.state : {};
+      var hasHoleCards = Array.isArray(mergedData.myHoleCards) && mergedData.myHoleCards.length > 0;
+      if (!hadHoleCards && hasHoleCards) return true;
+      var hasCommunity = Array.isArray(mergedState.community) && mergedState.community.length > 0;
+      if (!hadCommunity && hasCommunity) return true;
+      var hasLegalActions = Array.isArray(mergedData.legalActions) && mergedData.legalActions.length > 0;
+      if (!hadLegalActions && hasLegalActions) return true;
+      if (haveActionListsChanged(currentData.legalActions, mergedData.legalActions)) return true;
+      var hasConstraints = hasConstraintsData(mergedData.actionConstraints);
+      if (!hadConstraints && hasConstraints) return true;
+      if (haveActionConstraintsChanged(currentData.actionConstraints, mergedData.actionConstraints)) return true;
+      if (!hadTurnMetadata && hasTurnMetadata(mergedState)) return true;
+      if (hasTurnMetadataChanged(currentStateBeforeMerge, mergedState)) return true;
+      var hasStacks = hasStackEntries(mergedState.stacks);
+      if (!hadStacks && hasStacks) return true;
+      var mergedStackKeys = hasStackEntries(mergedState.stacks) ? Object.keys(mergedState.stacks) : [];
+      if (mergedStackKeys.length > currentStackKeys.length) return true;
+      var currentUserStackStatusAfter = resolveCurrentUserStackStatus(mergedData);
+      if (currentUserStackStatusBefore.seated && !currentUserStackStatusBefore.hasStack && currentUserStackStatusAfter.hasStack) return true;
+      if (currentUserStackStatusBefore.seated && currentUserStackStatusBefore.hasStack && currentUserStackStatusAfter.hasStack && currentUserStackStatusBefore.stackValue !== currentUserStackStatusAfter.stackValue) return true;
+      return false;
+    }
+
     function shouldApplyWsSnapshot(snapshotPayload, options){
       var opts = options && typeof options === 'object' ? options : {};
       if (!snapshotPayload || typeof snapshotPayload !== 'object') return false;
       if (snapshotPayload.tableId && snapshotPayload.tableId !== tableId) return false;
       if (!tableData || typeof tableData !== 'object'){
-        return opts.allowWhenNoBaseline === true;
+        return opts.allowWhenNoBaseline === true && isRichGameplaySnapshot(snapshotPayload, opts.snapshotKind);
       }
       var incomingVersion = resolveSnapshotVersion(snapshotPayload);
       var currentVersion = resolveTableDataVersion(tableData);
@@ -1175,19 +1781,50 @@
         return opts.allowUnversionedUpgrade === true;
       }
       if (currentVersion == null) return true;
-      return incomingVersion > currentVersion;
+      if (incomingVersion > currentVersion) return true;
+      if (incomingVersion < currentVersion) return false;
+      if (!isRichGameplaySnapshot(snapshotPayload, opts.snapshotKind)) return false;
+      return materiallyImprovesRichSnapshot(tableData, snapshotPayload);
     }
 
     function applyWsSnapshotNow(snapshotPayload, options){
       if (!snapshotPayload || typeof snapshotPayload !== 'object') return false;
-      if (!shouldApplyWsSnapshot(snapshotPayload, options)) return false;
-      if (!tableData || typeof tableData !== 'object') return false;
-      var mergedData = mergeWsStateIntoTableData(tableData, snapshotPayload);
-      if (!mergedData) return false;
-      mergedData._actionConstraints = getSafeConstraints(mergedData);
-      tableData = mergedData;
+      var opts = options && typeof options === 'object' ? options : {};
+      var activeCurrentUserId = typeof currentUserId === 'string' && currentUserId ? currentUserId : '';
+      if (!shouldApplyWsSnapshot(snapshotPayload, opts)) return false;
+      if (!tableData || typeof tableData !== 'object'){
+        if (!opts.allowWhenNoBaseline) return false;
+        tableData = createWsBaselineTableData(snapshotPayload);
+      } else {
+        var mergedData = mergeWsStateIntoTableData(tableData, snapshotPayload);
+        if (!mergedData) return false;
+        mergedData._actionConstraints = getSafeConstraints(mergedData);
+        tableData = mergedData;
+      }
       isSeated = isCurrentUserSeated(tableData);
+      var stateObj = tableData && typeof tableData.state === 'object' ? tableData.state : {};
+      var gameState = stateObj && typeof stateObj.state === 'object' ? stateObj.state : {};
+      var stacks = gameState && typeof gameState.stacks === 'object' && !Array.isArray(gameState.stacks) ? gameState.stacks : {};
+      var seatFacts = findCurrentUserSeatFacts(tableData);
+      klog('poker_ws_snapshot_runtime_normalized', {
+        tableId: tableId,
+        snapshotKind: opts.snapshotKind || null,
+        stateVersion: resolveTableDataVersion(tableData),
+        currentUserId: activeCurrentUserId || null,
+        isSeated: isSeated === true,
+        youSeat: Number.isInteger(snapshotPayload.youSeat) ? snapshotPayload.youSeat : null,
+        currentUserSeatNo: seatFacts.seatNo,
+        stacksKeys: Object.keys(stacks),
+        currentUserStackValue: activeCurrentUserId ? stacks[activeCurrentUserId] : null,
+        seatsCount: Array.isArray(tableData.seats) ? tableData.seats.length : 0,
+        seatUserSeatMap: buildSeatUserSeatMap(tableData.seats || [])
+      });
       renderTable(tableData);
+      var seatedCount = getSeatedCount(tableData);
+      if (isSeated && seatedCount !== lastAutoStartSeatCount){
+        lastAutoStartSeatCount = seatedCount;
+        maybeAutoStartHand();
+      }
       stopPolling();
       wsSnapshotSeen = true;
       pendingWsSnapshot = null;
@@ -1196,20 +1833,44 @@
 
     function applyWsSnapshot(snapshot){
       if (!snapshot || !snapshot.payload) return;
-      var payload = snapshot.payload || {};
+      var activeCurrentUserId = typeof currentUserId === 'string' && currentUserId ? currentUserId : '';
+      var activeIsSeated = typeof isSeated !== 'undefined' && isSeated === true;
+      var normalized = normalizeWsSnapshotPayload(snapshot);
+      var payload = normalized.payload || {};
+      var snapshotKind = normalized.kind || snapshot.kind || snapshot.rawType || null;
       var incomingVersion = resolveSnapshotVersion(payload);
       var currentVersion = resolveTableDataVersion(tableData);
+      var rawStacks = normalizeSnapshotStacks(payload) || {};
+      var payloadSeatSnapshot = buildWsPayloadSeatSnapshot(payload);
+      var currentUserSeatNo = payloadSeatSnapshot.seatMap[activeCurrentUserId];
+      var youSeatPresent = Number.isInteger(payload.youSeat);
       klog('poker_ws_snapshot_received', {
         tableId: tableId,
-        kind: snapshot.kind || snapshot.rawType || null,
+        kind: snapshotKind,
         initial: snapshot.initial === true,
         members: Array.isArray(payload.members) ? payload.members.length : 0,
         stateVersion: incomingVersion
       });
+      klog('poker_ws_snapshot_apply_input', {
+        tableId: tableId,
+        snapshotKind: snapshotKind,
+        stateVersion: incomingVersion,
+        currentUserId: activeCurrentUserId || null,
+        isSeated: activeIsSeated,
+        youSeat: Number.isInteger(payload.youSeat) ? payload.youSeat : null,
+        currentUserSeatNo: Number.isInteger(currentUserSeatNo) ? currentUserSeatNo : null,
+        stacksKeys: Object.keys(rawStacks),
+        currentUserStackValue: activeCurrentUserId ? rawStacks[activeCurrentUserId] : null,
+        seatsCount: payloadSeatSnapshot.seatRows.length,
+        seatUserSeatMap: payloadSeatSnapshot.seatMap,
+        seatUserIds: payloadSeatSnapshot.seatRows,
+        youSeatPresent: youSeatPresent
+      });
 
       if (applyWsSnapshotNow(payload, {
-        allowWhenNoBaseline: false,
-        allowUnversionedUpgrade: false
+        allowWhenNoBaseline: true,
+        allowUnversionedUpgrade: false,
+        snapshotKind: snapshotKind
       })) return;
 
       if (!tableData || typeof tableData !== 'object'){
@@ -1234,15 +1895,11 @@
 
 
     function startPollingFallback(reason){
-      if (state.polling) return;
-      if (!isPageActive()) return;
-      if (reason){
-        klog('poker_http_fallback_start', {
-          tableId: tableId,
-          reason: reason
-        });
-      }
-      startPolling();
+      httpFallbackActive = false;
+      klog('poker_http_fallback_retired', {
+        tableId: tableId,
+        reason: reason || null
+      });
     }
 
     function startWsBootstrap(){
@@ -1252,6 +1909,7 @@
         startPollingFallback('ws_client_missing');
         return;
       }
+      httpFallbackActive = false;
       wsStarted = true;
       wsClient = window.PokerWsClient.create({
         tableId: tableId,
@@ -1265,6 +1923,9 @@
             code: data && data.code ? data.code : null,
             reason: data && data.reason ? data.reason : null
           });
+          if (status === 'auth_ok'){
+            maybeAutoJoin();
+          }
         },
         onSnapshot: function(snapshot){
           applyWsSnapshot(snapshot);
@@ -1277,7 +1938,6 @@
             detail: info && info.detail ? info.detail : null
           });
           startPollingFallback(info && info.code ? info.code : 'protocol_error');
-          loadTable(false);
         }
       });
       if (wsClient && typeof wsClient.start === 'function'){
@@ -1289,14 +1949,34 @@
       }
     }
 
+    function logWsBootstrapException(err, phase){
+      klog('poker_ws_exception', {
+        tableId: tableId,
+        phase: phase || 'ws_bootstrap',
+        message: err && (err.message || err.code) ? err.message || err.code : 'unknown_error',
+        stack: err && err.stack ? String(err.stack).slice(0, 600) : null
+      });
+    }
+
+    async function bootstrapWsAfterBaseline(phase){
+      httpFallbackActive = false;
+      try {
+        startWsBootstrap();
+      } catch (_err){
+        logWsBootstrapException(_err, phase || 'ws_bootstrap');
+        startPollingFallback('ws_bootstrap_exception');
+        return false;
+      }
+      return true;
+    }
+
     function startAuthWatch(){
       if (authTimer) return;
       authTimer = setInterval(function(){
         checkAuth().then(function(authed){
           if (authed){
             stopAuthWatch();
-            loadTable(false);
-            startWsBootstrap();
+            bootstrapWsAfterBaseline('auth_watch');
           }
         });
       }, 3000);
@@ -1307,7 +1987,7 @@
       if (!token){
         currentUserId = null;
         isSeated = false;
-        stopHeartbeat();
+        clearDeadlineNudge();
         stopRealtime();
         stopWsClient();
         if (authMsg) authMsg.hidden = false;
@@ -1324,14 +2004,13 @@
       setDevActionsEnabled(true);
       setDevActionsAuthStatus(true);
       stopAuthWatch();
-      startWsBootstrap();
       return true;
     }
 
     function handleTableAuthExpired(opts){
       currentUserId = null;
       isSeated = false;
-      stopHeartbeat();
+      clearDeadlineNudge();
       setDevActionsEnabled(false);
       setDevActionsAuthStatus(false);
       renderHoleCards(null);
@@ -1485,7 +2164,7 @@
     }
 
     function getAllowedActionsForUser(data, userId){
-      var info = { allowed: new Set(), needsAmount: false, phase: null, turnUserId: null, isUsersTurn: false, legalActions: [] };
+      var info = { allowed: new Set(), needsAmount: false, phase: null, turnUserId: null, isUsersTurn: false, legalActions: [], constraints: normalizeActionConstraints(null) };
       if (!data || !userId) return info;
       var stateObj = data && data.state ? data.state : null;
       var gameState = stateObj && stateObj.state ? stateObj.state : {};
@@ -1499,24 +2178,56 @@
         var type = normalizeActionType(list[i]);
         if (type) allowed.add(type);
       }
-      info.needsAmount = allowed.has('BET') || allowed.has('RAISE');
+      var sourceConstraints = data && data._actionConstraints ? data._actionConstraints : getConstraintsFromResponse(data);
+      var sanitized = sanitizeAllowedActions(allowed, sourceConstraints);
+      info.allowed = sanitized.allowed;
+      info.needsAmount = sanitized.needsAmount;
+      info.constraints = sanitized.constraints;
       return info;
+    }
+
+    function buildAmountDecisionSignature(allowedInfo){
+      var info = allowedInfo || {};
+      var actions = info.allowed && typeof info.allowed.forEach === 'function' ? Array.from(info.allowed).sort().join(',') : '';
+      var constraints = info.constraints || {};
+      var handId = resolveCurrentHandId();
+      return [
+        handId || '',
+        info.turnUserId || '',
+        info.phase || '',
+        actions,
+        constraints.toCall == null ? '' : String(constraints.toCall),
+        constraints.minRaiseTo == null ? '' : String(constraints.minRaiseTo),
+        constraints.maxRaiseTo == null ? '' : String(constraints.maxRaiseTo),
+        constraints.maxBetAmount == null ? '' : String(constraints.maxBetAmount)
+      ].join('|');
     }
 
     function renderAllowedActionButtons(){
       var allowedInfo = getAllowedActionsForUser(tableData, currentUserId);
       var allowed = allowedInfo.allowed;
       var enabled = shouldEnableDevActions();
-      var dumpEnabled = shouldEnableDumpLogs();
-      var copyEnabled = shouldEnableCopyLog();
-      var hasActions = shouldShowTurnActions({
+      var uiState = resolveTurnActionUiState({
         phase: allowedInfo.phase,
         turnUserId: allowedInfo.turnUserId,
         currentUserId: currentUserId,
-        legalActions: allowedInfo.legalActions
+        isUsersTurn: allowedInfo.isUsersTurn,
+        rawLegalActions: allowedInfo.legalActions,
+        availableActions: Array.from(allowedInfo.allowed)
       });
+      var hasActions = uiState.showActions;
+      var nextDecisionSignature = hasActions && allowedInfo.needsAmount ? buildAmountDecisionSignature(allowedInfo) : '';
+      if (nextDecisionSignature !== amountDecisionSignature){
+        selectedAmountActionType = null;
+      }
+      amountDecisionSignature = nextDecisionSignature;
+      var amountModel = resolveAmountActionModel(allowedInfo, 20, selectedAmountActionType);
+      var showAmountRow = hasActions && amountModel.visible;
+      var selectedAmountType = normalizeActionType(selectedAmountActionType);
+      if (!amountModel.hasBet && selectedAmountType === 'BET') selectedAmountActionType = null;
+      if (!amountModel.hasRaise && selectedAmountType === 'RAISE') selectedAmountActionType = null;
       toggleHidden(actRow, !hasActions);
-      toggleHidden(actAmountWrap, !hasActions || !allowedInfo.needsAmount);
+      toggleHidden(actAmountWrap, !showAmountRow);
       var actions = [
         { type: 'CHECK', el: actCheckBtn },
         { type: 'CALL', el: actCallBtn },
@@ -1535,8 +2246,7 @@
           actCallBtn.dataset.baseLabel = actCallBtn.textContent || t('pokerActCall', 'CALL');
         }
         var baseLabel = actCallBtn.dataset.baseLabel || t('pokerActCall', 'CALL');
-        var constraints = tableData && tableData._actionConstraints ? tableData._actionConstraints : null;
-        var toCall = constraints ? toFiniteOrNull(constraints.toCall) : null;
+        var toCall = allowedInfo.constraints ? allowedInfo.constraints.toCall : null;
         var callAllowed = allowed.has('CALL');
         if (callAllowed && toCall != null && toCall > 0){
           var callTemplate = t('pokerCallWithAmount', 'CALL ({amount})');
@@ -1546,13 +2256,25 @@
         }
       }
       if (actAmountInput){
-        setDisabled(actAmountInput, !enabled || actPending || !allowedInfo.needsAmount);
-        updateActAmountConstraints(allowedInfo, pendingActType);
+        if (showAmountRow){
+          var currentAmount = parseInt(actAmountInput.value, 10);
+          var hasCurrentInt = isFinite(currentAmount);
+          var isCurrentValid = hasCurrentInt && Math.trunc(currentAmount) >= amountModel.min && (amountModel.max == null || Math.trunc(currentAmount) <= amountModel.max);
+          var shouldResetAmount = !amountRowWasVisible || !isCurrentValid;
+          if (shouldResetAmount){
+            actAmountInput.value = String(amountModel.defaultValue);
+          }
+        }
+        setDisabled(actAmountInput, !enabled || actPending || !showAmountRow);
+        updateActAmountConstraints(amountModel);
       }
-      updateActAmountHint(allowedInfo, pendingActType);
+      amountRowWasVisible = showAmountRow;
+      updateActAmountHint(amountModel, showAmountRow);
       if (actStatusEl){
-        if (allowedInfo.isUsersTurn && allowed.size === 0){
+        if (uiState.status === 'contract_mismatch'){
           setInlineStatus(actStatusEl, t('pokerContractMismatch', 'No legal actions computed. Client/server contract mismatch.'), 'error');
+        } else if (uiState.status === 'no_actionable_moves'){
+          setInlineStatus(actStatusEl, t('pokerNoActionableMoves', 'No actionable moves available right now'), null);
         } else if (!allowedInfo.isUsersTurn && isActionablePhase(allowedInfo.phase) && !!allowedInfo.turnUserId){
           setInlineStatus(actStatusEl, t('pokerWaitingForOpponent', 'Waiting for opponent'), null);
         } else if (actStatusEl.dataset.authRequired !== '1') {
@@ -1561,76 +2283,24 @@
       }
     }
 
-    function updateActAmountConstraints(allowedInfo, selectedType){
+    function updateActAmountConstraints(amountModel){
       if (!actAmountInput) return;
       actAmountInput.removeAttribute('min');
       actAmountInput.removeAttribute('max');
-      var constraints = tableData && tableData._actionConstraints ? tableData._actionConstraints : null;
-      if (!constraints || !selectedType || !allowedInfo || !allowedInfo.allowed) return;
-      var normalized = normalizeActionType(selectedType);
-      if (!normalized) return;
-      if (!allowedInfo.allowed.has(normalized)) return;
-      if (normalized === 'RAISE'){
-        if (constraints.minRaiseTo != null){
-          actAmountInput.setAttribute('min', String(constraints.minRaiseTo));
-        }
-        if (constraints.maxRaiseTo != null){
-          actAmountInput.setAttribute('max', String(constraints.maxRaiseTo));
-        }
-        return;
-      }
-      if (normalized === 'BET' && constraints.maxBetAmount != null){
-        actAmountInput.setAttribute('max', String(constraints.maxBetAmount));
-      }
+      if (!amountModel || !amountModel.visible) return;
+      if (amountModel.min != null && amountModel.min >= 1) actAmountInput.setAttribute('min', String(amountModel.min));
+      if (amountModel.max != null && amountModel.max >= amountModel.min) actAmountInput.setAttribute('max', String(amountModel.max));
     }
 
-    function updateActAmountHint(allowedInfo, selectedType){
+    function updateActAmountHint(amountModel, showAmountRow){
       if (!actAmountHintEl) return;
-      if (!allowedInfo || !allowedInfo.needsAmount || !shouldEnableDevActions() || !selectedType){
+      if (!showAmountRow || !amountModel || !amountModel.visible || !shouldEnableDevActions()){
         actAmountHintEl.textContent = '';
         actAmountHintEl.hidden = true;
         return;
       }
-      var constraints = tableData && tableData._actionConstraints ? tableData._actionConstraints : null;
-      var normalized = normalizeActionType(selectedType);
-      if (!constraints || !normalized || !allowedInfo.allowed){
-        actAmountHintEl.textContent = '';
-        actAmountHintEl.hidden = true;
-        return;
-      }
-      if (!allowedInfo.allowed.has(normalized)){
-        actAmountHintEl.textContent = '';
-        actAmountHintEl.hidden = true;
-        return;
-      }
-      var hint = '';
-      if (normalized === 'RAISE'){
-        var minRaiseTo = toFiniteOrNull(constraints.minRaiseTo);
-        var maxRaiseTo = toFiniteOrNull(constraints.maxRaiseTo);
-        if (minRaiseTo != null && maxRaiseTo != null){
-          var rangeTemplate = t('pokerRaiseRange', 'Raise-to range: {min}–{max}');
-          hint = rangeTemplate.replace('{min}', String(minRaiseTo)).replace('{max}', String(maxRaiseTo));
-        } else if (minRaiseTo != null){
-          var minTemplate = t('pokerRaiseMin', 'Raise-to min: {min}');
-          hint = minTemplate.replace('{min}', String(minRaiseTo));
-        } else if (maxRaiseTo != null){
-          var maxTemplate = t('pokerRaiseMax', 'Raise-to max: {max}');
-          hint = maxTemplate.replace('{max}', String(maxRaiseTo));
-        }
-      } else if (normalized === 'BET'){
-        var maxBetAmount = toFiniteOrNull(constraints.maxBetAmount);
-        if (maxBetAmount != null){
-          var betTemplate = t('pokerBetMax', 'Bet max: {max}');
-          hint = betTemplate.replace('{max}', String(maxBetAmount));
-        }
-      }
-      if (hint){
-        actAmountHintEl.textContent = hint;
-        actAmountHintEl.hidden = false;
-      } else {
-        actAmountHintEl.textContent = '';
-        actAmountHintEl.hidden = true;
-      }
+      actAmountHintEl.textContent = amountModel.hintLabel || t('pokerActAmountHint', 'Use a positive integer amount');
+      actAmountHintEl.hidden = false;
     }
 
     function updateDevActionsUi(){
@@ -1746,7 +2416,8 @@
 
     function clearActPending(){
       pendingActRequestId = null;
-      pendingActType = null;
+      pendingActActionType = null;
+      selectedAmountActionType = null;
       pendingActRetries = 0;
       pendingActStartedAt = null;
       if (pendingActTimer){
@@ -1773,7 +2444,7 @@
         return;
       }
       var message = action === 'join' ? t('pokerErrJoinPending', 'Join still pending. Please try again.') : t('pokerErrLeavePending', 'Leave still pending. Please try again.');
-      var endpoint = action === 'join' ? JOIN_URL : LEAVE_URL;
+      var endpoint = action === 'join' ? WS_JOIN_ENDPOINT : WS_LEAVE_ENDPOINT;
       var retries = action === 'join' ? pendingJoinRetries : pendingLeaveRetries;
       klog('poker_pending_timeout', { action: action, tableId: tableId, retries: retries, budgetMs: PENDING_RETRY_BUDGET_MS });
       if (action === 'join'){
@@ -1926,17 +2597,17 @@
     }
 
     function getPreferredSeatNo(preferredSeatNoOverride){
-      var maxUi = Number.isInteger(tableMaxPlayers) && tableMaxPlayers >= 2 ? tableMaxPlayers - 1 : 0;
-      var preferredSeatNo = 0;
+      var maxUi = Number.isInteger(tableMaxPlayers) && tableMaxPlayers >= 2 ? tableMaxPlayers : 1;
+      var preferredSeatNo = 1;
       if (Number.isInteger(preferredSeatNoOverride)){
         preferredSeatNo = preferredSeatNoOverride;
       } else if (Number.isInteger(suggestedSeatNoParam)){
         preferredSeatNo = suggestedSeatNoParam;
       } else {
-        var inputSeatNo = parseInt(seatNoInput ? seatNoInput.value : 0, 10);
-        preferredSeatNo = isNaN(inputSeatNo) ? 0 : inputSeatNo;
+        var inputSeatNo = parseInt(seatNoInput ? seatNoInput.value : 1, 10);
+        preferredSeatNo = isNaN(inputSeatNo) ? 1 : inputSeatNo;
       }
-      if (preferredSeatNo < 0) preferredSeatNo = 0;
+      if (preferredSeatNo < 1) preferredSeatNo = 1;
       if (preferredSeatNo > maxUi) preferredSeatNo = maxUi;
       return preferredSeatNo;
     }
@@ -1958,6 +2629,7 @@
       if (!currentUserId || !isSeated || !tableData) return;
       if (startHandPending || joinPending || leavePending || actPending) return;
       if (pendingStartHandRequestId) return;
+      if (!getGameplayWsSender(wsClient, 'sendStartHand', 'start_hand')) return;
       var table = tableData.table || {};
       var stateObj = tableData.state || {};
       var gameState = stateObj.state || {};
@@ -1986,26 +2658,26 @@
 
     function applySeatInputBounds(){
       if (!seatNoInput) return;
-      var maxUi = Number.isInteger(tableMaxPlayers) && tableMaxPlayers >= 2 ? tableMaxPlayers - 1 : 0;
-      seatNoInput.min = '0';
+      var maxUi = Number.isInteger(tableMaxPlayers) && tableMaxPlayers >= 2 ? tableMaxPlayers : 1;
+      seatNoInput.min = '1';
       seatNoInput.max = String(maxUi);
       seatNoInput.step = '1';
       var seatNo = parseInt(seatNoInput.value, 10);
-      if (isNaN(seatNo)) seatNo = 0;
-      if (seatNo < 0) seatNo = 0;
+      if (isNaN(seatNo)) seatNo = 1;
+      if (seatNo < 1) seatNo = 1;
       if (seatNo > maxUi) seatNo = maxUi;
       seatNoInput.value = String(seatNo);
     }
 
     async function autoJoinWithRetries(){
-      var maxUi = Number.isInteger(tableMaxPlayers) && tableMaxPlayers >= 2 ? tableMaxPlayers - 1 : 0;
+      var maxUi = Number.isInteger(tableMaxPlayers) && tableMaxPlayers >= 2 ? tableMaxPlayers : 1;
       var startSeat = getPreferredSeatNo();
-      if (startSeat < 0) startSeat = 0;
+      if (startSeat < 1) startSeat = 1;
       if (startSeat > maxUi) startSeat = maxUi;
       var attempts = Math.min(3, tableMaxPlayers);
       for (var i = 0; i < attempts; i++){
         var candidateSeat = startSeat + i;
-        if (candidateSeat > maxUi) candidateSeat = candidateSeat - (maxUi + 1);
+        if (candidateSeat > maxUi) candidateSeat = candidateSeat - maxUi;
         seatNoInput.value = candidateSeat;
         try {
           await joinTable(null, { propagateError: true, autoSeat: true, preferredSeatNoOverride: candidateSeat });
@@ -2029,6 +2701,7 @@
       if (!seatNoInput) return;
       if (!Number.isInteger(tableMaxPlayers) || tableMaxPlayers < 2) return;
       if (isSeated) return;
+      if (!getGameplayWsSender(wsClient, 'sendJoin', 'join')) return;
       autoJoinAttempted = true;
       var preferredSeatNo = getPreferredSeatNo();
       klog('poker_auto_join_attempt', { tableId: tableId, preferredSeatNo: preferredSeatNo, autoSeat: true });
@@ -2040,113 +2713,15 @@
         clearJoinPending();
         var code = err && err.code ? err.code : (err && err.message ? err.message : 'unknown_error');
         klog('poker_auto_join_error', { tableId: tableId, code: code, message: err && err.message ? err.message : code });
-        setActionError('join', JOIN_URL, err && err.code ? err.code : 'request_failed', err && (err.message || err.code) ? err.message || err.code : t('pokerErrJoin', 'Failed to join'));
+        setActionError('join', WS_JOIN_ENDPOINT, err && err.code ? err.code : 'request_failed', err && (err.message || err.code) ? err.message || err.code : t('pokerErrJoin', 'Failed to join'));
       });
     }
 
-    async function loadTable(isPolling){
-      setError(errorEl, null);
-      try {
-        var data = await apiGet(GET_URL + '?tableId=' + encodeURIComponent(tableId));
-        tableData = data || {};
-        tableData._actionConstraints = getSafeConstraints(tableData);
-        isSeated = isCurrentUserSeated(tableData);
-        var wsApplied = false;
-        if (pendingWsSnapshot && !wsSnapshotSeen){
-          wsApplied = applyWsSnapshotNow(pendingWsSnapshot, {
-            allowWhenNoBaseline: false,
-            allowUnversionedUpgrade: true
-          });
-        }
-        if (!wsApplied){
-          renderTable(tableData);
-        }
-        if (isSeated){
-          startHeartbeat();
-        } else {
-          stopHeartbeat();
-        }
-        var seatedCount = getSeatedCount(tableData);
-        if (isSeated && seatedCount !== lastAutoStartSeatCount){
-          lastAutoStartSeatCount = seatedCount;
-          maybeAutoStartHand();
-        }
-        maybeAutoJoin();
-        if (isPolling){ resetPollBackoff(); }
-        return true;
-      } catch (err){
-        if (isAuthError(err)){
-          stopPendingAll();
-          handleTableAuthExpired({
-            authMsg: authMsg,
-            content: tableContent,
-            errorEl: errorEl,
-            stopPolling: stopPolling,
-            stopHeartbeat: stopHeartbeat,
-            onAuthExpired: startAuthWatch
-          });
-          return false;
-        }
-        if (err && err.code === 'state_invalid'){
-          setError(errorEl, t('pokerErrStateChanged', 'State changed. Refreshing...'));
-          scheduleRetry(function(){ loadTable(false); }, 300);
-          return false;
-        }
-        klog('poker_table_load_error', { tableId: tableId, error: err.message || err.code });
-        setError(errorEl, err.message || t('pokerErrLoadTable', 'Failed to load table'));
-        if (isPolling){ increasePollBackoff(); }
-        return false;
-      }
-    }
-
-    function resetPollBackoff(){
-      state.pollErrors = 0;
-      state.pollInterval = POLL_INTERVAL_BASE;
-    }
-
-    function increasePollBackoff(){
-      state.pollErrors++;
-      if (state.pollErrors >= 2){
-        state.pollInterval = Math.min(state.pollInterval * 2, POLL_INTERVAL_MAX);
-      }
-    }
-
-    function scheduleNextPoll(){
-      if (!state.polling || document.visibilityState === 'hidden') return;
-      if (state.pollTimer){ clearTimeout(state.pollTimer); }
-      state.pollTimer = setTimeout(pollOnce, state.pollInterval);
-    }
-
-    async function pollOnce(){
-      if (!state.polling || document.visibilityState === 'hidden') return;
-      await loadTable(true);
-      scheduleNextPoll();
-    }
-
-    function startPolling(){
-      if (state.polling) return;
-      state.polling = true;
-      scheduleNextPoll();
-    }
-
     function stopPolling(){
-      state.polling = false;
-      if (state.pollTimer){
-        clearTimeout(state.pollTimer);
-        state.pollTimer = null;
-      }
-      if (turnTimerInterval){
-        clearInterval(turnTimerInterval);
-        turnTimerInterval = null;
-      }
       clearDeadlineNudge();
     }
 
     function stopHeartbeat(){
-      if (heartbeatTimer){
-        clearInterval(heartbeatTimer);
-        heartbeatTimer = null;
-      }
       clearDeadlineNudge();
     }
 
@@ -2173,9 +2748,17 @@
         deadlineNudgeTargetMs = null;
         if (!isPageActive()) return;
         if (joinPending || leavePending || startHandPending || actPending) return;
-        if (heartbeatInFlight) return;
-        sendHeartbeat();
+        klog('poker_deadline_nudge_ws_resync', { tableId: tableId });
+        requestWsResync('turn_deadline_nudge');
       }, delayMs);
+    }
+
+    function requestWsResync(reason){
+      if (!isPageActive()) return;
+      if (joinPending || leavePending || startHandPending || actPending) return;
+      if (wsClient && typeof wsClient.requestResync === 'function'){
+        wsClient.requestResync({ reason: reason || 'resync' });
+      }
     }
 
 
@@ -2190,10 +2773,7 @@
     }
 
     function handleRealtimeEvent(_payload){
-      if (!isPageActive()) return;
-      if (!tableId) return;
-      if (joinPending || leavePending || startHandPending || actPending) return;
-      loadTable(false);
+      requestWsResync('realtime_event');
     }
 
     function startRealtime(){
@@ -2221,81 +2801,16 @@
             tableId: tableId
           });
         }
-        startPolling();
-        loadTable(false);
+        startPollingFallback('realtime_unavailable');
       }
     }
 
     function stopRealtime(){
-      stopHeartbeat();
+      clearDeadlineNudge();
       if (realtimeSub && typeof realtimeSub.stop === 'function'){
         realtimeSub.stop();
       }
       realtimeSub = null;
-    }
-
-    function startHeartbeat(){
-      if (heartbeatTimer) return;
-      if (!isSeated) return;
-      if (!isPageActive()) return;
-      if (document.visibilityState === 'hidden') return;
-      heartbeatTimer = setInterval(sendHeartbeat, HEARTBEAT_INTERVAL_MS);
-      sendHeartbeat();
-    }
-
-    function getHeartbeatPendingDelay(retries){
-      var delay = 600 * Math.pow(2, retries - 1);
-      return Math.min(delay, 5000);
-    }
-
-    async function sendHeartbeat(){
-      if (!isSeated) return;
-      if (document.visibilityState === 'hidden') return;
-      if (heartbeatInFlight) return;
-      heartbeatInFlight = true;
-      var shouldReturn = false;
-      try {
-        if (!getValidRequestId(pendingHeartbeatRequestId)){
-          pendingHeartbeatRequestId = normalizeRequestId(generateRequestId());
-        }
-        var requestId = pendingHeartbeatRequestId;
-        var data = await apiPost(HEARTBEAT_URL, { tableId: tableId, requestId: requestId });
-        if (isPendingResponse(data)){
-          heartbeatPendingRetries++;
-          if (heartbeatPendingRetries <= HEARTBEAT_PENDING_MAX_RETRIES){
-            scheduleRetry(sendHeartbeat, getHeartbeatPendingDelay(heartbeatPendingRetries));
-          }
-          shouldReturn = true;
-        }
-        if (!shouldReturn){
-          heartbeatPendingRetries = 0;
-          pendingHeartbeatRequestId = null;
-          if (data && data.closed){
-            stopPolling();
-            stopHeartbeat();
-            loadTable(false);
-            shouldReturn = true;
-          }
-        }
-      } catch (err){
-        if (isAuthError(err)){
-          handleTableAuthExpired({
-            authMsg: authMsg,
-            content: tableContent,
-            errorEl: errorEl,
-            stopPolling: stopPolling,
-            stopHeartbeat: stopHeartbeat,
-            onAuthExpired: startAuthWatch
-          });
-          stopHeartbeat();
-          shouldReturn = true;
-        } else {
-          klog('poker_heartbeat_error', { tableId: tableId, error: err.message || err.code });
-        }
-      } finally {
-        heartbeatInFlight = false;
-      }
-      if (shouldReturn) return;
     }
 
     function renderTable(data){
@@ -2359,7 +2874,7 @@
           } else {
             seatStatusEl.className += ' poker-seat-status--active';
             seatStatusEl.textContent = t('pokerSeatActive', 'Active');
-            var activeStack = seat.userId && stacks[seat.userId] != null ? formatChips(stacks[seat.userId]) : '0';
+            var activeStack = seat.userId && stacks[seat.userId] != null ? formatChips(stacks[seat.userId]) : '-';
             seatStackEl.textContent = t('pokerSeatStack', 'Stack') + ': ' + activeStack;
           }
           div.appendChild(seatNoEl);
@@ -2372,12 +2887,30 @@
 
       var hasCurrentUserStack = !!(currentUserId && stacks[currentUserId] != null);
       var yourStack = hasCurrentUserStack ? formatChips(stacks[currentUserId]) : '-';
+      var seatFacts = findCurrentUserSeatFacts(data);
+      klog('poker_render_your_stack_pre', {
+        tableId: tableId,
+        stateVersion: Number.isInteger(stateObj.version) ? stateObj.version : null,
+        currentUserId: currentUserId || null,
+        isSeated: isSeated === true,
+        currentUserSeatNo: seatFacts.seatNo,
+        hasCurrentUserStack: hasCurrentUserStack,
+        rawCurrentUserStack: currentUserId ? stacks[currentUserId] : null,
+        stacksKeys: Object.keys(stacks || {})
+      });
       if (isSeated && currentUserId && !hasCurrentUserStack){
-        yourStack = '0';
         klog('poker_stack_missing_for_seated_user', {
           tableId: tableId,
-          userId: currentUserId,
-          stacksKeys: Object.keys(stacks || {})
+          stateVersion: Number.isInteger(stateObj.version) ? stateObj.version : null,
+          snapshotKind: wsSnapshotSeen ? 'ws_runtime' : 'non_ws_or_initial',
+          currentUserId: currentUserId,
+          isSeated: isSeated === true,
+          currentUserSeatNo: seatFacts.seatNo,
+          stacksKeys: Object.keys(stacks || {}),
+          hasCurrentUserStack: hasCurrentUserStack,
+          rawCurrentUserStack: currentUserId ? stacks[currentUserId] : null,
+          seatUserIds: Array.isArray(data.seats) ? data.seats.filter(function(seat){ return seat && typeof seat.userId === 'string' && seat.userId; }).map(function(seat){ return seat.userId; }) : [],
+          youSeatPresent: Number.isInteger(seatFacts.seatNo)
         });
       }
       if (yourStackEl) yourStackEl.textContent = yourStack;
@@ -2464,16 +2997,16 @@
 
     async function retryAct(){
       if (!isPageActive()) return;
-      if (!pendingActRequestId || !pendingActType) return;
-      await sendAct(pendingActType, pendingActRequestId);
+      if (!pendingActRequestId || !pendingActActionType) return;
+      await sendAct(pendingActActionType, pendingActRequestId);
     }
 
     async function joinTable(requestIdOverride, options){
-      var seatNo = parseInt(seatNoInput ? seatNoInput.value : 0, 10);
+      var seatNo = parseInt(seatNoInput ? seatNoInput.value : 1, 10);
       var buyIn = parseInt(buyInInput ? buyInInput.value : 100, 10) || 100;
-      if (isNaN(seatNo)) seatNo = 0;
-      var maxSeatNo = Math.max(0, tableMaxPlayers - 1);
-      if (seatNo < 0) seatNo = 0;
+      if (isNaN(seatNo)) seatNo = 1;
+      var maxSeatNo = Math.max(1, tableMaxPlayers);
+      if (seatNo < 1) seatNo = 1;
       if (seatNo > maxSeatNo) seatNo = maxSeatNo;
       if (seatNoInput) seatNoInput.value = seatNo;
       var preferredSeatNo = getPreferredSeatNo(options && options.preferredSeatNoOverride);
@@ -2511,7 +3044,8 @@
         } else {
           joinPayload.seatNo = seatNo;
         }
-        var joinResult = await apiPost(JOIN_URL, joinPayload);
+        var joinSender = resolveGameplayWsSender(wsClient, 'sendJoin', 'join', t('pokerErrJoinWsUnavailable', 'Cannot join while the live table connection is offline.'));
+        var joinResult = await joinSender(joinPayload, joinRequestId);
         if (isPendingResponse(joinResult)){
           schedulePendingRetry('join', retryJoin);
           return;
@@ -2520,7 +3054,7 @@
           clearJoinPending();
           var joinErr = new Error(joinResult.error || 'request_failed');
           joinErr.code = joinResult.error || 'request_failed';
-          setActionError('join', JOIN_URL, joinErr.code, t('pokerErrJoin', 'Failed to join'));
+          setActionError('join', WS_JOIN_ENDPOINT, joinErr.code, t('pokerErrJoin', 'Failed to join'));
           if (propagateError) throw joinErr;
           return;
         }
@@ -2533,9 +3067,6 @@
           klog('poker_auto_join_success', { tableId: tableId, seatNo: joinResult.seatNo });
         }
         if (!isPageActive()) return;
-        var loaded = await loadTable(false);
-        if (!loaded) return;
-        maybeAutoStartHand();
       } catch (err){
         if (isAbortError(err)){
           pauseJoinPending();
@@ -2555,7 +3086,7 @@
         }
         clearJoinPending();
         klog('poker_join_error', { tableId: tableId, error: err.message || err.code });
-        setActionError('join', JOIN_URL, err.code || 'request_failed', err.message || t('pokerErrJoin', 'Failed to join'));
+        setActionError('join', WS_JOIN_ENDPOINT, err.code || 'request_failed', err.message || t('pokerErrJoin', 'Failed to join'));
         if (propagateError) throw err;
       }
     }
@@ -2580,7 +3111,8 @@
           pendingStartHandRequestId = normalizeRequestId(resolved.requestId);
         }
         var startRequestId = normalizeRequestId(resolved.requestId);
-        var result = await apiPost(START_HAND_URL, { tableId: tableId, requestId: startRequestId });
+        var startHandSender = resolveGameplayWsSender(wsClient, 'sendStartHand', 'start_hand', t('pokerErrStartHandWsUnavailable', 'Cannot start a hand while the live table connection is offline.'));
+        var result = await startHandSender({ tableId: tableId }, startRequestId);
         if (isPendingResponse(result)){
           schedulePendingRetry('startHand', retryStartHand);
           return { ok: false, code: 'request_pending', pending: true };
@@ -2590,7 +3122,7 @@
           clearStartHandPending();
           if (resultCode === 'state_invalid') {
             setInlineStatus(startHandStatusEl, t('pokerErrStateChanged', 'State changed. Refreshing...'), 'error');
-            if (isPageActive()) loadTable(false);
+            requestWsResync('state_invalid');
             return { ok: false, code: resultCode };
           }
           if (suppressNeutralErrors && isNeutralAutoStartCode(resultCode)) {
@@ -2601,8 +3133,6 @@
         }
         clearStartHandPending();
         setInlineStatus(startHandStatusEl, t('pokerStartHandOk', 'Hand started'), 'success');
-        if (!isPageActive()) return { ok: true, code: 'ok' };
-        loadTable(false);
         return { ok: true, code: 'ok' };
       } catch (err){
         if (isAbortError(err)){
@@ -2634,25 +3164,10 @@
     function getActPayload(actionType){
       var payload = { type: actionType };
       if (actionType === 'BET' || actionType === 'RAISE'){
-        var amount = parseInt(actAmountInput ? actAmountInput.value : '', 10);
-        if (!isFinite(amount) || amount <= 0){
-          return { error: t('pokerActAmountRequired', 'Enter an amount for bet/raise') };
-        }
-        var constraints = tableData && tableData._actionConstraints ? tableData._actionConstraints : null;
-        if (constraints){
-          if (actionType === 'BET' && constraints.maxBetAmount != null && amount > constraints.maxBetAmount){
-            return { error: t('pokerErrActAmount', 'Invalid amount') };
-          }
-          if (actionType === 'RAISE'){
-            if (constraints.minRaiseTo != null && amount < constraints.minRaiseTo){
-              return { error: t('pokerErrActAmount', 'Invalid amount') };
-            }
-            if (constraints.maxRaiseTo != null && amount > constraints.maxRaiseTo){
-              return { error: t('pokerErrActAmount', 'Invalid amount') };
-            }
-          }
-        }
-        payload.amount = Math.trunc(amount);
+        var allowedInfo = getAllowedActionsForUser(tableData, currentUserId);
+        var validation = validateAmountActionPayload(actionType, actAmountInput ? actAmountInput.value : '', allowedInfo);
+        if (validation.error) return { error: validation.error };
+        payload.amount = validation.amount;
       }
       return { action: payload };
     }
@@ -2674,18 +3189,18 @@
     }
 
     async function sendAct(actionType, requestIdOverride){
-      if (!shouldEnableDevActions()) return;
+      if (!shouldEnableDevActions()) return { ok: false, code: 'disabled' };
       var normalized = normalizeActionType(actionType);
-      if (!normalized) return;
+      if (!normalized) return { ok: false, code: 'invalid_action' };
       var allowedInfo = getAllowedActionsForUser(tableData, currentUserId);
       if (!allowedInfo.allowed.has(normalized)){
         setInlineStatus(actStatusEl, t('pokerErrActionNotAllowed', 'Action not allowed right now'), 'error');
-        return;
+        return { ok: false, code: 'action_not_allowed' };
       }
       var actionResult = getActPayload(normalized);
       if (actionResult.error){
         setInlineStatus(actStatusEl, actionResult.error, 'error');
-        return;
+        return { ok: false, code: 'invalid_amount' };
       }
       setInlineStatus(actStatusEl, null, null);
       setDevPendingState('act', true);
@@ -2693,24 +3208,20 @@
         var resolved = resolveRequestId(pendingActRequestId, requestIdOverride);
         if (resolved.nextPending){
           pendingActRequestId = normalizeRequestId(resolved.nextPending);
-          pendingActType = normalized;
           pendingActRetries = 0;
           pendingActStartedAt = null;
         } else if (!pendingActRequestId){
           pendingActRequestId = normalizeRequestId(resolved.requestId);
-          pendingActType = normalized;
-        } else if (!pendingActType){
-          pendingActType = normalized;
         }
+        pendingActActionType = normalized;
         var actRequestId = normalizeRequestId(resolved.requestId);
-        var result = await apiPost(ACT_URL, {
-          tableId: tableId,
-          requestId: actRequestId,
-          action: actionResult.action
-        });
+        var wsActPayload = { handId: resolveCurrentHandId(), action: normalized };
+        if (actionResult.action && Number.isFinite(Number(actionResult.action.amount))) wsActPayload.amount = Number(actionResult.action.amount);
+        var actSender = resolveGameplayWsSender(wsClient, 'sendAct', 'act', t('pokerErrActWsUnavailable', 'Cannot send an action while the live table connection is offline.'));
+        var result = await actSender(wsActPayload, actRequestId);
         if (isPendingResponse(result)){
           scheduleDevPendingRetry('act', retryAct);
-          return;
+          return { ok: false, code: 'pending' };
         }
         if (result && result.ok === false){
           clearActPending();
@@ -2722,20 +3233,21 @@
             setInlineStatus(actStatusEl, t('pokerErrActAmount', 'Invalid amount'), 'error');
           } else if (result.error === 'state_invalid'){
             setInlineStatus(actStatusEl, t('pokerErrStateChanged', 'State changed. Refreshing...'), 'error');
-            if (isPageActive()) loadTable(false);
+            requestWsResync('state_invalid');
+          } else if (result.error === 'hand_not_live'){
+            setInlineStatus(actStatusEl, t('pokerErrHandNotLive', 'Hand is not live'), 'error');
           } else {
             setInlineStatus(actStatusEl, t('pokerErrAct', 'Failed to send action'), 'error');
           }
-          return;
+          return { ok: false, code: result.error || 'failed' };
         }
         clearActPending();
         setInlineStatus(actStatusEl, t('pokerActOk', 'Action sent'), 'success');
-        if (!isPageActive()) return;
-        loadTable(false);
+        return { ok: true, code: 'ok' };
       } catch (err){
         if (isAbortError(err)){
           pauseActPending();
-          return;
+          return { ok: false, code: 'aborted' };
         }
         if (isAuthError(err)){
           stopPendingAll();
@@ -2747,30 +3259,35 @@
             stopHeartbeat: stopHeartbeat,
             onAuthExpired: startAuthWatch
           });
-          return;
+          return { ok: false, code: 'unauthorized' };
         }
         clearActPending();
         var errMessage = err && (err.message || err.code) ? String(err.message || err.code) : '';
         var loweredMessage = errMessage.toLowerCase();
         if (err && (err.status === 403 || err.code === 'not_your_turn' || loweredMessage.indexOf('not your turn') !== -1)){
           setInlineStatus(actStatusEl, t('pokerErrNotYourTurn', 'Not your turn'), 'error');
-          return;
+          return { ok: false, code: 'not_your_turn' };
         }
         if (err && err.code === 'action_not_allowed'){
           setInlineStatus(actStatusEl, t('pokerErrActionNotAllowed', 'Action not allowed right now'), 'error');
-          return;
+          return { ok: false, code: 'action_not_allowed' };
         }
         if (err && err.code === 'invalid_amount'){
           setInlineStatus(actStatusEl, t('pokerErrActAmount', 'Invalid amount'), 'error');
-          return;
+          return { ok: false, code: 'invalid_amount' };
         }
         if (err && err.code === 'state_invalid'){
           setInlineStatus(actStatusEl, t('pokerErrStateChanged', 'State changed. Refreshing...'), 'error');
-          if (isPageActive()) loadTable(false);
-          return;
+          requestWsResync('state_invalid');
+          return { ok: false, code: 'state_invalid' };
+        }
+        if (err && err.code === 'hand_not_live'){
+          setInlineStatus(actStatusEl, t('pokerErrHandNotLive', 'Hand is not live'), 'error');
+          return { ok: false, code: 'hand_not_live' };
         }
         klog('poker_act_error', { tableId: tableId, error: err.message || err.code });
         setInlineStatus(actStatusEl, err.message || t('pokerErrAct', 'Failed to send action'), 'error');
+        return { ok: false, code: err && (err.code || err.message) ? err.code || err.message : 'failed' };
       }
     }
 
@@ -2853,8 +3370,9 @@
           pendingLeaveRequestId = normalizeRequestId(resolved.requestId);
         }
         var leaveRequestId = normalizeRequestId(resolved.requestId);
-        klog('poker_leave_request', { tableId: tableId, requestId: leaveRequestId, url: LEAVE_URL });
-        var leaveResult = await apiPost(LEAVE_URL, { tableId: tableId, requestId: leaveRequestId });
+        klog('poker_leave_request', { tableId: tableId, requestId: leaveRequestId, url: 'ws:leave' });
+        var leaveSender = resolveGameplayWsSender(wsClient, 'sendLeave', 'leave', t('pokerErrLeaveWsUnavailable', 'Cannot leave while the live table connection is offline.'));
+        var leaveResult = await leaveSender({ tableId: tableId, requestId: leaveRequestId }, leaveRequestId);
         var pendingResponse = isPendingResponse(leaveResult);
         klog('poker_leave_response', {
           ok: !!(leaveResult && leaveResult.ok),
@@ -2867,16 +3385,14 @@
         }
         if (leaveResult && leaveResult.ok === false){
           clearLeavePending();
-          setActionError('leave', LEAVE_URL, leaveResult.error || 'request_failed', t('pokerErrLeave', 'Failed to leave'));
+          setActionError('leave', WS_LEAVE_ENDPOINT, leaveResult.error || 'request_failed', t('pokerErrLeave', 'Failed to leave'));
           return;
         }
         clearLeavePending();
         setError(errorEl, null);
         if (!isPageActive()) return;
         isSeated = false;
-        stopHeartbeat();
-        stopRealtime();
-        loadTable(false);
+        clearDeadlineNudge();
       } catch (err){
         if (isAbortError(err)){
           pauseLeavePending();
@@ -2896,7 +3412,7 @@
         }
         clearLeavePending();
         klog('poker_leave_error', { tableId: tableId, error: err.message || err.code });
-        setActionError('leave', LEAVE_URL, err.code || 'request_failed', err.message || t('pokerErrLeave', 'Failed to leave'));
+        setActionError('leave', WS_LEAVE_ENDPOINT, err.code || 'request_failed', err.message || t('pokerErrLeave', 'Failed to leave'));
       }
     }
 
@@ -2916,24 +3432,14 @@
           if (pendingActStartedAt) pendingActStartedAt += hiddenDuration;
           pendingHiddenAt = null;
         }
-        state.pollInterval = POLL_INTERVAL_BASE;
-        state.pollErrors = 0;
-          if (isSeated) startHeartbeat();
-        if (currentUserId){
-          try {
-            startWsBootstrap();
-          } catch (_err){
-            startPollingFallback('ws_bootstrap_exception');
-            loadTable(false);
-          }
-        } else {
-          startPollingFallback('auth_missing');
+                var canRefreshBaseline = !pendingJoinRequestId && !pendingLeaveRequestId;
+        if (currentUserId && canRefreshBaseline){
+          bootstrapWsAfterBaseline('visibility_resume');
         }
         if (pendingJoinRequestId) schedulePendingRetry('join', retryJoin);
         if (pendingLeaveRequestId) schedulePendingRetry('leave', retryLeave);
         if (pendingStartHandRequestId) schedulePendingRetry('startHand', retryStartHand);
         if (pendingActRequestId) scheduleDevPendingRetry('act', retryAct);
-        if (!pendingJoinRequestId && !pendingLeaveRequestId) loadTable(false);
       }
     }
 
@@ -2952,7 +3458,7 @@
         }
         clearJoinPending();
         klog('poker_join_click_error', { message: err && (err.message || err.code) ? err.message || err.code : 'unknown_error' });
-        setActionError('join', JOIN_URL, err && err.code ? err.code : 'request_failed', err && (err.message || err.code) ? err.message || err.code : t('pokerErrJoin', 'Failed to join'));
+        setActionError('join', WS_JOIN_ENDPOINT, err && err.code ? err.code : 'request_failed', err && (err.message || err.code) ? err.message || err.code : t('pokerErrJoin', 'Failed to join'));
       });
     }
 
@@ -2971,7 +3477,7 @@
         }
         clearLeavePending();
         klog('poker_leave_click_error', { message: err && (err.message || err.code) ? err.message || err.code : 'unknown_error' });
-        setActionError('leave', LEAVE_URL, err && err.code ? err.code : 'request_failed', err && (err.message || err.code) ? err.message || err.code : t('pokerErrLeave', 'Failed to leave'));
+        setActionError('leave', WS_LEAVE_ENDPOINT, err && err.code ? err.code : 'request_failed', err && (err.message || err.code) ? err.message || err.code : t('pokerErrLeave', 'Failed to leave'));
       });
     }
 
@@ -3037,20 +3543,45 @@
         setInlineStatus(actStatusEl, t('pokerErrActionNotAllowed', 'Action not allowed right now'), 'error');
         return;
       }
-      pendingActType = normalized;
-      updateActAmountConstraints(allowedInfo, pendingActType);
-      updateActAmountHint(allowedInfo, pendingActType);
+      if (normalized !== 'BET' && normalized !== 'RAISE'){
+        selectedAmountActionType = null;
+      } else {
+        renderAllowedActionButtons();
+      }
       klog('poker_act_click', { tableId: tableId, hasToken: !!state.token, type: normalized });
       setInlineStatus(actStatusEl, null, null);
-      sendAct(normalized).catch(function(err){
-        if (isAbortError(err)){
-          pauseActPending();
-          return;
-        }
-        clearActPending();
-        klog('poker_act_click_error', { message: err && (err.message || err.code) ? err.message || err.code : 'unknown_error' });
-        setInlineStatus(actStatusEl, err && (err.message || err.code) ? err.message || err.code : t('pokerErrAct', 'Failed to send action'), 'error');
+      sendAct(normalized).then(function(_result){
+      }).catch(function(err){
+        klog('poker_act_click_unexpected_error', { message: err && (err.message || err.code) ? err.message || err.code : 'unknown_error' });
+        setInlineStatus(actStatusEl, t('pokerErrAct', 'Failed to send action'), 'error');
       });
+    }
+
+    function resolveEnterAmountActionType(allowedInfo){
+      var amountModel = resolveAmountActionModel(allowedInfo, 20, selectedAmountActionType);
+      if (!amountModel || !amountModel.visible) return null;
+      if (amountModel.actionType) return amountModel.actionType;
+      var selected = normalizeActionType(selectedAmountActionType);
+      if (selected === 'BET' && allowedInfo.allowed && allowedInfo.allowed.has('BET')) return 'BET';
+      if (selected === 'RAISE' && allowedInfo.allowed && allowedInfo.allowed.has('RAISE')) return 'RAISE';
+      return null;
+    }
+
+    function handleActAmountKeyDown(event){
+      if (!event || event.key !== 'Enter') return;
+      if (event.preventDefault) event.preventDefault();
+      if (event.stopPropagation) event.stopPropagation();
+      if (actPending || !shouldEnableDevActions()) return;
+      var allowedInfo = getAllowedActionsForUser(tableData, currentUserId);
+      var amountType = resolveEnterAmountActionType(allowedInfo);
+      if (!amountType){
+        var amountModel = resolveAmountActionModel(allowedInfo, 20, selectedAmountActionType);
+        if (amountModel && amountModel.visible && amountModel.hasBet && amountModel.hasRaise){
+          setInlineStatus(actStatusEl, t('pokerPickBetOrRaise', 'Choose BET or RAISE, then press Enter again'), 'error');
+        }
+        return;
+      }
+      handleActionClick(amountType, event);
     }
 
     function handleActCheckClick(event){
@@ -3066,10 +3597,12 @@
     }
 
     function handleActBetClick(event){
+      selectedAmountActionType = 'BET';
       handleActionClick('BET', event);
     }
 
     function handleActRaiseClick(event){
+      selectedAmountActionType = 'RAISE';
       handleActionClick('RAISE', event);
     }
 
@@ -3083,6 +3616,7 @@
     if (actFoldBtn) actFoldBtn.addEventListener('click', handleActFoldClick);
     if (actBetBtn) actBetBtn.addEventListener('click', handleActBetClick);
     if (actRaiseBtn) actRaiseBtn.addEventListener('click', handleActRaiseClick);
+    if (actAmountInput) actAmountInput.addEventListener('keydown', handleActAmountKeyDown);
     if (jsonToggle){
       jsonToggle.addEventListener('click', function(){
         if (jsonBox) jsonBox.hidden = !jsonBox.hidden;
@@ -3096,7 +3630,6 @@
     window.addEventListener('pagehide', stopRealtime); // xp-lifecycle-allow:poker-table-pagehide(2026-01-01)
     window.addEventListener('pagehide', stopWsClient); // xp-lifecycle-allow:poker-table-pagehide-ws(2026-01-01)
     window.addEventListener('beforeunload', stopPolling); // xp-lifecycle-allow:poker-table(2026-01-01)
-    window.addEventListener('beforeunload', stopHeartbeat); // xp-lifecycle-allow:poker-table-heartbeat(2026-01-01)
     window.addEventListener('beforeunload', clearDeadlineNudge); // xp-lifecycle-allow:poker-table-deadline-nudge(2026-01-01)
     window.addEventListener('beforeunload', stopRealtime); // xp-lifecycle-allow:poker-table-realtime(2026-01-01)
     window.addEventListener('beforeunload', stopWsClient); // xp-lifecycle-allow:poker-table-ws(2026-01-01)
@@ -3108,13 +3641,7 @@
 
     checkAuth().then(function(authed){
       if (authed){
-        loadTable(false);
-        try {
-          startWsBootstrap();
-        } catch (_err){
-          startPollingFallback('ws_bootstrap_exception');
-          loadTable(false);
-        }
+        bootstrapWsAfterBaseline('table_init');
       }
     });
   }
