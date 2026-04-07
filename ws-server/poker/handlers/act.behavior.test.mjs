@@ -35,7 +35,7 @@ test('handleActCommand persists and triggers autoplay only for accepted fresh ac
     restoreTableFromPersisted: async () => ({ ok: true }),
     broadcastResyncRequired: () => {},
     broadcastStateSnapshots: () => { calls.snaps += 1; },
-    runAcceptedBotAutoplay: async () => { calls.autoplay += 1; return { ok: true, changed: true }; }
+    scheduleBotStep: () => { calls.autoplay += 1; }
   });
   assert.equal(calls.persisted, 1);
   assert.equal(calls.snaps, 1);
@@ -57,7 +57,7 @@ test('handleActCommand does not autoplay for replayed, rejected, or conflicted a
     restoreTableFromPersisted: async () => ({ ok: true }),
     broadcastResyncRequired: () => {},
     broadcastStateSnapshots: () => {},
-    runAcceptedBotAutoplay: async () => { autoplayCalls.push('rejected'); }
+    scheduleBotStep: () => { autoplayCalls.push('rejected'); }
   });
 
   await handleActCommand({
@@ -72,7 +72,7 @@ test('handleActCommand does not autoplay for replayed, rejected, or conflicted a
     restoreTableFromPersisted: async () => ({ ok: true }),
     broadcastResyncRequired: () => {},
     broadcastStateSnapshots: () => {},
-    runAcceptedBotAutoplay: async () => { autoplayCalls.push('replayed'); }
+    scheduleBotStep: () => { autoplayCalls.push('replayed'); }
   });
 
   await handleActCommand({
@@ -87,13 +87,13 @@ test('handleActCommand does not autoplay for replayed, rejected, or conflicted a
     restoreTableFromPersisted: async () => ({ ok: true }),
     broadcastResyncRequired: () => {},
     broadcastStateSnapshots: () => {},
-    runAcceptedBotAutoplay: async () => { autoplayCalls.push('conflict'); }
+    scheduleBotStep: () => { autoplayCalls.push('conflict'); }
   });
 
   assert.deepEqual(autoplayCalls, []);
 });
 
-test('handleActCommand still broadcasts fresh state when autoplay returns failure', async () => {
+test('handleActCommand still broadcasts fresh state before queued autoplay runs', async () => {
   const calls = { command: [], snapshots: 0 };
   await handleActCommand({
     frame: { __resolvedTableId: 't1', requestId: 'r7', ts: new Date().toISOString(), payload: { handId: 'h1', action: 'CHECK' } },
@@ -107,7 +107,8 @@ test('handleActCommand still broadcasts fresh state when autoplay returns failur
     restoreTableFromPersisted: async () => ({ ok: true }),
     broadcastResyncRequired: () => {},
     broadcastStateSnapshots: () => { calls.snapshots += 1; },
-    runAcceptedBotAutoplay: async () => ({ ok: false, reason: 'invalid_state' })
+    scheduleBotStep: () => { throw new Error('scheduler_failed'); },
+    klog: () => {}
   });
 
   assert.equal(calls.command.length, 1);

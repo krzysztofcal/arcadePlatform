@@ -21,7 +21,7 @@ test('handleStartHandCommand accepts and broadcasts on persisted change', async 
     restoreTableFromPersisted: async () => ({ ok: true }),
     broadcastResyncRequired: () => {},
     broadcastStateSnapshots: () => { calls.snapshots += 1; },
-    runAcceptedBotAutoplay: async () => { calls.autoplay += 1; return { ok: true, changed: true }; }
+    scheduleBotStep: () => { calls.autoplay += 1; }
   });
   assert.equal(calls.command[0].status, 'accepted');
   assert.equal(calls.snapshots, 1);
@@ -49,7 +49,7 @@ test('handleStartHandCommand does not autoplay on rejected or persist-conflict o
     restoreTableFromPersisted: async () => ({ ok: true }),
     broadcastResyncRequired: () => {},
     broadcastStateSnapshots: () => {},
-    runAcceptedBotAutoplay: async () => { autoplayCalls.push('rejected'); }
+    scheduleBotStep: () => { autoplayCalls.push('rejected'); }
   });
 
   await handleStartHandCommand({
@@ -69,7 +69,7 @@ test('handleStartHandCommand does not autoplay on rejected or persist-conflict o
     restoreTableFromPersisted: async () => ({ ok: true }),
     broadcastResyncRequired: () => {},
     broadcastStateSnapshots: () => {},
-    runAcceptedBotAutoplay: async () => { autoplayCalls.push('conflict'); }
+    scheduleBotStep: () => { autoplayCalls.push('conflict'); }
   });
 
   assert.deepEqual(autoplayCalls, []);
@@ -132,7 +132,7 @@ test('handleStartHandCommand rejects ensureTableLoaded failure with stable comma
   assert.equal(calls.snapshots, 0);
 });
 
-test('handleStartHandCommand still broadcasts fresh state when autoplay returns failure', async () => {
+test('handleStartHandCommand still broadcasts fresh state before queued autoplay runs', async () => {
   const calls = { command: [], snapshots: 0, persist: 0 };
   await handleStartHandCommand({
     frame: { __resolvedTableId: 't1', requestId: 'r6' },
@@ -151,11 +151,12 @@ test('handleStartHandCommand still broadcasts fresh state when autoplay returns 
     restoreTableFromPersisted: async () => ({ ok: true }),
     broadcastResyncRequired: () => {},
     broadcastStateSnapshots: () => { calls.snapshots += 1; },
-    runAcceptedBotAutoplay: async () => ({ ok: false, reason: 'invalid_state' })
+    scheduleBotStep: () => { throw new Error('scheduler_failed'); },
+    klog: () => {}
   });
 
   assert.equal(calls.command.length, 1);
-  assert.equal(calls.command[0].status, 'accepted');
-  assert.equal(calls.persist, 1);
-  assert.equal(calls.snapshots, 1);
+    assert.equal(calls.command[0].status, 'accepted');
+    assert.equal(calls.persist, 1);
+    assert.equal(calls.snapshots, 1);
 });

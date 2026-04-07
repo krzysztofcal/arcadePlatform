@@ -22,6 +22,10 @@ import { createTableSnapshotLoader } from "./poker/table/table-snapshot.mjs";
 import { handleJoinCommand } from "./poker/handlers/join.mjs";
 import { handleActCommand } from "./poker/handlers/act.mjs";
 import { handleStartHandCommand } from "./poker/handlers/start-hand.mjs";
+import { handleTurnTimeoutCommand } from "./poker/handlers/turn-timeout.mjs";
+import { handleBotStepCommand } from "./poker/handlers/bot-autoplay.mjs";
+import { handleLeaveCommand } from "./poker/handlers/leave.mjs";
+import { createTableCommandQueue } from "./poker/runtime/table-command-queue.mjs";
 
 const PORT = Number(process.env.PORT || 3000);
 const PROTECTED_MESSAGE_TYPES = new Set([
@@ -129,6 +133,15 @@ const tableManager = createTableManager({
   tableBootstrapLoader: loadPersistedTableBootstrap,
   observeOnlyJoin: observeOnlyJoinEnabled
 });
+const tableCommandQueue = createTableCommandQueue({
+  onError: (error, meta) => {
+    klogSafe("ws_table_command_queue_unhandled", {
+      tableId: meta?.tableId || null,
+      dedupeKey: meta?.dedupeKey || null,
+      message: error?.message || "unknown"
+    });
+  }
+});
 const sessionStore = createSessionStore({
   sessionTtlMs: resolveSessionTtlMs(process.env.WS_SESSION_TTL_MS)
 });
@@ -189,7 +202,13 @@ async function loadAcceptedBotAutoplayExecutor() {
 
       try {
         const module = await import(adapterModulePath);
-        return module.createAcceptedBotAutoplayExecutor({
+        const createExecutor = typeof module.createAcceptedBotStepExecutor === "function"
+          ? module.createAcceptedBotStepExecutor
+          : module.createAcceptedBotAutoplayExecutor;
+        if (typeof createExecutor !== "function") {
+          throw new Error("accepted_bot_step_executor_missing");
+        }
+        return createExecutor({
           tableManager,
           persistMutatedState,
           restoreTableFromPersisted,
@@ -250,6 +269,10 @@ function nowTs() {
   return new Date().toISOString();
 }
 
+function nextEventLoopTurn() {
+  return new Promise((resolve) => setImmediate(resolve));
+}
+
 function buildAutoplayStartSnapshot(tableId) {
   const state = tableManager.persistedPokerState(tableId);
   const stateVersion = Number(tableManager.persistedStateVersion(tableId) || 0);
@@ -258,6 +281,70 @@ function buildAutoplayStartSnapshot(tableId) {
     turnUserIdBeforeAutoplay: typeof state?.turnUserId === "string" ? state.turnUserId : null,
     phaseBeforeAutoplay: typeof state?.phase === "string" ? state.phase : null
   };
+}
+
+async function runBotStep({ tableId, trigger, requestId, frameTs }) {
+  const acceptedBotAutoplayExecutor = await loadAcceptedBotAutoplayExecutor();
+  const startSnapshot = buildAutoplayStartSnapshot(tableId);
+  klogSafe("ws_bot_autoplay_start", {
+    tableId,
+    requestId: requestId || null,
+    trigger: trigger || null,
+    stateVersion_before_autoplay: startSnapshot.stateVersionBeforeAutoplay,
+    turnUserId_before_autoplay: startSnapshot.turnUserIdBeforeAutoplay,
+    phase_before_autoplay: startSnapshot.phaseBeforeAutoplay
+  });
+  return acceptedBotAutoplayExecutor({ tableId, trigger, requestId, frameTs });
+}
+
+function scheduleBotStep({ tableId, trigger, requestId, frameTs }) {
+  const enqueueStep = () => enqueueTableCommand({
+    tableId,
+    commandName: "bot_step",
+    dedupeKey: "bot_step",
+    run: async () => handleBotStepCommand({
+      tableId,
+      trigger,
+      requestId,
+      frameTs,
+      runBotStep,
+      broadcastStateSnapshots,
+      klog: klogSafe
+    })
+  });
+
+  const runCascade = () => {
+    const queued = enqueueStep();
+    void queued
+      .then((result) => {
+        if (result?.ok === true && result?.shouldContinue === true) {
+          runCascade();
+        }
+      })
+      .catch(() => {});
+    return queued;
+  };
+  return runCascade();
+}
+
+function enqueueTableCommand({ tableId, commandName, dedupeKey = null, run }) {
+  return tableCommandQueue.enqueue({
+    tableId,
+    dedupeKey,
+    run: async () => {
+      try {
+        return await run();
+      } catch (error) {
+        klogSafe("ws_table_command_failed", {
+          tableId,
+          commandName,
+          dedupeKey,
+          message: error?.message || "unknown"
+        });
+        throw error;
+      }
+    }
+  });
 }
 
 function sendFrame(ws, frame) {
@@ -685,8 +772,36 @@ function sweepExpiredSessionsOnly() {
 
 const disconnectCleanupRuntime = createDisconnectCleanupRuntime({
   executeCleanup: async ({ tableId, userId, requestId }) => {
-    const executor = await loadInactiveCleanupExecutor();
-    return executor({ tableId, userId, requestId });
+    return enqueueTableCommand({
+      tableId,
+      commandName: "disconnect_cleanup",
+      dedupeKey: `disconnect_cleanup:${userId}`,
+      run: async () => {
+        const executor = await loadInactiveCleanupExecutor();
+        const result = await executor({ tableId, userId, requestId });
+        if (result?.ok !== true) {
+          return result;
+        }
+        if (result?.protected === true) {
+          return result;
+        }
+        if (result?.changed === true) {
+          klogSafe("ws_disconnect_cleanup_restore_start", { tableId, status: result?.status || null });
+          const restored = await restoreTableFromPersisted(tableId);
+          if (!restored?.ok) {
+            klogSafe("ws_disconnect_cleanup_restore_failed", { tableId, reason: restored?.reason || "unknown" });
+            return result;
+          }
+          klogSafe("ws_disconnect_cleanup_restore_success", { tableId });
+          broadcastStateSnapshots(tableId);
+          broadcastTableState(tableId);
+          klogSafe("ws_disconnect_cleanup_broadcast_after_restore", { tableId });
+          return result;
+        }
+        klogSafe("ws_disconnect_cleanup_noop", { tableId, status: result?.status || null });
+        return result;
+      }
+    });
   },
   listActiveSocketsForUser: (userId) => sessionStore.connectionsForUser(userId),
   socketMatchesTable: (socket, tableId) => {
@@ -695,25 +810,7 @@ const disconnectCleanupRuntime = createDisconnectCleanupRuntime({
     const subscribed = conn?.subscribedTableId || null;
     return joined === tableId || subscribed === tableId;
   },
-  onChanged: async (tableId, result) => {
-    if (result?.ok !== true) {
-      return;
-    }
-    if (result?.changed === true) {
-      klogSafe("ws_disconnect_cleanup_restore_start", { tableId, status: result?.status || null });
-      const restored = await restoreTableFromPersisted(tableId);
-      if (!restored?.ok) {
-        klogSafe("ws_disconnect_cleanup_restore_failed", { tableId, reason: restored?.reason || "unknown" });
-        return;
-      }
-      klogSafe("ws_disconnect_cleanup_restore_success", { tableId });
-      broadcastStateSnapshots(tableId);
-      broadcastTableState(tableId);
-      klogSafe("ws_disconnect_cleanup_broadcast_after_restore", { tableId });
-      return;
-    }
-    klogSafe("ws_disconnect_cleanup_noop", { tableId, status: result?.status || null });
-  },
+  onChanged: async () => {},
   klog: klogSafe
 });
 
@@ -727,23 +824,26 @@ async function sweepDisconnectCleanupAndBroadcast() {
 
 async function sweepTurnTimeoutsAndBroadcast() {
   const nowMs = Date.now();
-  const timeoutUpdates = tableManager.sweepTurnTimeouts({
+  const timeoutUpdates = tableManager.listDueTurnTimeouts({
     nowMs,
     shouldProcessTable: (tableId) => tableManager.isTableClosed(tableId) !== true
   });
-  for (const update of timeoutUpdates) {
-    const persisted = await persistMutatedState({
+  await Promise.allSettled(timeoutUpdates.map((update) => enqueueTableCommand({
+    tableId: update.tableId,
+    commandName: "turn_timeout",
+    dedupeKey: "turn_timeout",
+    run: async () => handleTurnTimeoutCommand({
       tableId: update.tableId,
-      expectedVersion: Number(update.stateVersion) - 1,
-      mutationKind: "timeout"
-    });
-    if (!persisted?.ok) {
-      await restoreTableFromPersisted(update.tableId);
-      broadcastResyncRequired(update.tableId, "persistence_conflict");
-      continue;
-    }
-    broadcastStateSnapshots(update.tableId);
-  }
+      nowMs,
+      tableManager,
+      persistMutatedState,
+      restoreTableFromPersisted,
+      broadcastResyncRequired,
+      broadcastStateSnapshots,
+      scheduleBotStep,
+      klog: klogSafe
+    })
+  })));
 }
 
 const server = http.createServer((req, res) => {
@@ -937,26 +1037,30 @@ wss.on("connection", (ws) => {
         return;
       }
       frame.__resolvedTableId = resolvedRoomId.roomId;
-      await handleJoinCommand({
-        frame,
-        ws,
-        connState,
-        sessionStore,
-        tableManager,
-        ensureTableLoadedErrorMapper: mapEnsureTableLoadedError,
-        restoreTableFromPersisted,
-        persistMutatedState,
-        broadcastResyncRequired,
-        broadcastStateSnapshots,
-        broadcastTableState,
-        sendError,
-        sendCommandResult,
-        sendTableState,
-        authoritativeJoinEnabled,
-        observeOnlyJoinEnabled,
-        persistedBootstrapEnabled,
-        loadAuthoritativeJoinExecutor,
-        klog: klogSafe
+      await enqueueTableCommand({
+        tableId: frame.__resolvedTableId,
+        commandName: "join",
+        run: async () => handleJoinCommand({
+          frame,
+          ws,
+          connState,
+          sessionStore,
+          tableManager,
+          ensureTableLoadedErrorMapper: mapEnsureTableLoadedError,
+          restoreTableFromPersisted,
+          persistMutatedState,
+          broadcastResyncRequired,
+          broadcastStateSnapshots,
+          broadcastTableState,
+          sendError,
+          sendCommandResult,
+          sendTableState,
+          authoritativeJoinEnabled,
+          observeOnlyJoinEnabled,
+          persistedBootstrapEnabled,
+          loadAuthoritativeJoinExecutor,
+          klog: klogSafe
+        })
       });
       return;
     }
@@ -1054,6 +1158,7 @@ wss.on("connection", (ws) => {
           expectedSeq: replay.latestSeq ?? 0
         });
         const tableSnapshot = tableManager.tableSnapshot(tableId, connState.session.userId);
+        await nextEventLoopTurn();
         sendStateSnapshot(ws, connState, { tableSnapshot, reason: replay.reason });
         return;
       }
@@ -1092,76 +1197,22 @@ wss.on("connection", (ws) => {
         });
         return;
       }
-
-      try {
-        const executeAuthoritativeLeave = await loadAuthoritativeLeaveExecutor();
-        const left = await executeAuthoritativeLeave({
-          tableId,
-          userId: connState.session.userId,
-          requestId: frame.requestId
-        });
-
-        if (!left?.ok) {
-          if (left?.pending) {
-            sendCommandResult(ws, connState, {
-              requestId: frame.requestId ?? null,
-              tableId,
-              status: "rejected",
-              reason: "request_pending"
-            });
-            return;
-          }
-
-          sendCommandResult(ws, connState, {
-            requestId: frame.requestId ?? null,
-            tableId,
-            status: "rejected",
-            reason: left?.code || left?.reason || "state_invalid"
-          });
-          return;
-        }
-
-        const leaveState = left?.state?.state && typeof left.state.state === "object" ? left.state.state : null;
-        const synced = tableManager.syncAuthoritativeLeave({
+      await enqueueTableCommand({
+        tableId,
+        commandName: "leave",
+        run: async () => handleLeaveCommand({
+          frame,
           ws,
-          userId: connState.session.userId,
+          connState,
           tableId,
-          stateVersion: left?.state?.version ?? null,
-          pokerState: leaveState
-        });
-
-        if (!synced || synced.ok !== true) {
-          sendCommandResult(ws, connState, {
-            requestId: frame.requestId ?? null,
-            tableId,
-            status: "rejected",
-            reason: synced?.code || "authoritative_state_invalid"
-          });
-          return;
-        }
-
-        sendCommandResult(ws, connState, {
-          requestId: frame.requestId ?? null,
-          tableId,
-          status: "accepted",
-          reason: left?.status === "already_left" ? "already_left" : null
-        });
-
-        if (synced.changed) {
-          broadcastStateSnapshots(tableId);
-          broadcastTableState(tableId);
-        }
-        return;
-      } catch (error) {
-        const reason = typeof error?.code === "string" ? error.code : "state_invalid";
-        sendCommandResult(ws, connState, {
-          requestId: frame.requestId ?? null,
-          tableId,
-          status: "rejected",
-          reason
-        });
-        return;
-      }
+          tableManager,
+          loadAuthoritativeLeaveExecutor,
+          sendCommandResult,
+          broadcastStateSnapshots,
+          broadcastTableState
+        })
+      });
+      return;
     }
 
     if (frame.type === "table_state_sub") {
@@ -1256,33 +1307,24 @@ wss.on("connection", (ws) => {
         return;
       }
       frame.__resolvedTableId = resolvedRoomId.roomId;
-      const acceptedBotAutoplayExecutor = await loadAcceptedBotAutoplayExecutor();
-      const runAcceptedBotAutoplay = async ({ tableId, trigger, requestId, frameTs }) => {
-        const startSnapshot = buildAutoplayStartSnapshot(tableId);
-        klogSafe("ws_bot_autoplay_start", {
-          tableId,
-          requestId: requestId || null,
-          trigger: trigger || null,
-          stateVersion_before_autoplay: startSnapshot.stateVersionBeforeAutoplay,
-          turnUserId_before_autoplay: startSnapshot.turnUserIdBeforeAutoplay,
-          phase_before_autoplay: startSnapshot.phaseBeforeAutoplay
-        });
-        return acceptedBotAutoplayExecutor({ tableId, trigger, requestId, frameTs });
-      };
-      await handleActCommand({
-        frame,
-        ws,
-        connState,
-        tableManager,
-        ensureTableLoadedErrorMapper: mapEnsureTableLoadedError,
-        sendError,
-        sendCommandResult,
-        persistMutatedState,
-        restoreTableFromPersisted,
-        broadcastResyncRequired,
-        broadcastStateSnapshots,
-        runAcceptedBotAutoplay,
-        klog: klogSafe
+      await enqueueTableCommand({
+        tableId: frame.__resolvedTableId,
+        commandName: "act",
+        run: async () => handleActCommand({
+          frame,
+          ws,
+          connState,
+          tableManager,
+          ensureTableLoadedErrorMapper: mapEnsureTableLoadedError,
+          sendError,
+          sendCommandResult,
+          persistMutatedState,
+          restoreTableFromPersisted,
+          broadcastResyncRequired,
+          broadcastStateSnapshots,
+          scheduleBotStep,
+          klog: klogSafe
+        })
       });
       return;
     }
@@ -1298,33 +1340,24 @@ wss.on("connection", (ws) => {
         return;
       }
       frame.__resolvedTableId = resolvedRoomId.roomId;
-      const acceptedBotAutoplayExecutor = await loadAcceptedBotAutoplayExecutor();
-      const runAcceptedBotAutoplay = async ({ tableId, trigger, requestId, frameTs }) => {
-        const startSnapshot = buildAutoplayStartSnapshot(tableId);
-        klogSafe("ws_bot_autoplay_start", {
-          tableId,
-          requestId: requestId || null,
-          trigger: trigger || null,
-          stateVersion_before_autoplay: startSnapshot.stateVersionBeforeAutoplay,
-          turnUserId_before_autoplay: startSnapshot.turnUserIdBeforeAutoplay,
-          phase_before_autoplay: startSnapshot.phaseBeforeAutoplay
-        });
-        return acceptedBotAutoplayExecutor({ tableId, trigger, requestId, frameTs });
-      };
-      await handleStartHandCommand({
-        frame,
-        ws,
-        connState,
-        tableManager,
-        ensureTableLoadedErrorMapper: mapEnsureTableLoadedError,
-        sendError,
-        sendCommandResult,
-        persistMutatedState,
-        restoreTableFromPersisted,
-        broadcastResyncRequired,
-        broadcastStateSnapshots,
-        runAcceptedBotAutoplay,
-        klog: klogSafe
+      await enqueueTableCommand({
+        tableId: frame.__resolvedTableId,
+        commandName: "start_hand",
+        run: async () => handleStartHandCommand({
+          frame,
+          ws,
+          connState,
+          tableManager,
+          ensureTableLoadedErrorMapper: mapEnsureTableLoadedError,
+          sendError,
+          sendCommandResult,
+          persistMutatedState,
+          restoreTableFromPersisted,
+          broadcastResyncRequired,
+          broadcastStateSnapshots,
+          scheduleBotStep,
+          klog: klogSafe
+        })
       });
       return;
     }

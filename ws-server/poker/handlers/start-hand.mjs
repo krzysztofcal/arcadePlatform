@@ -1,4 +1,4 @@
-export async function handleStartHandCommand({ frame, ws, connState, tableManager, ensureTableLoadedErrorMapper, sendError, sendCommandResult, persistMutatedState, restoreTableFromPersisted, broadcastResyncRequired, broadcastStateSnapshots, runAcceptedBotAutoplay = async () => ({ ok: true, changed: false }), klog = () => {} }) {
+export async function handleStartHandCommand({ frame, ws, connState, tableManager, ensureTableLoadedErrorMapper, sendError, sendCommandResult, persistMutatedState, restoreTableFromPersisted, broadcastResyncRequired, broadcastStateSnapshots, scheduleBotStep = () => {}, klog = () => {} }) {
   const tableId = frame.__resolvedTableId;
   const ensured = await tableManager.ensureTableLoaded(tableId);
   if (!ensured.ok) {
@@ -74,27 +74,19 @@ export async function handleStartHandCommand({ frame, ws, connState, tableManage
     reason: null
   });
 
-  let autoplayResult = { ok: true };
+  broadcastStateSnapshots(tableId);
   try {
-    autoplayResult = await runAcceptedBotAutoplay({
+    scheduleBotStep({
       tableId,
       trigger: "start_hand",
       requestId: frame.requestId ?? null,
       frameTs: frame.ts
     });
   } catch (error) {
-    autoplayResult = { ok: false, reason: error?.message || "autoplay_failed" };
     klog("ws_start_hand_bot_autoplay_failed", {
       tableId,
       requestId: frame.requestId ?? null,
       message: error?.message || "unknown"
     });
   }
-
-  if (autoplayResult?.ok === false) {
-    broadcastStateSnapshots(tableId);
-    return;
-  }
-
-  broadcastStateSnapshots(tableId);
 }

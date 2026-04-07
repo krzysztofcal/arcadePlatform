@@ -2533,6 +2533,108 @@ test("timeout sweep advances seated persisted table state under observe-only run
   }
 });
 
+test("timeout sweep plus queued bot step returns actionable human snapshot without state drift", async () => {
+  const secret = "timeout-bot-secret";
+  const humanUserId = "timeout_human";
+  const botUserId = makeBotUserId("timeout_bot");
+  const tableId = "table_timeout_bot_step_runtime";
+  const fixtures = {
+    [tableId]: {
+      tableRow: { id: tableId, max_players: 6, status: "active" },
+      seatRows: [
+        { user_id: humanUserId, seat_no: 1, status: "ACTIVE", is_bot: false },
+        { user_id: botUserId, seat_no: 2, status: "ACTIVE", is_bot: true }
+      ],
+      stateRow: { version: 0, state: {} }
+    }
+  };
+
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      WS_POKER_TURN_MS: "350",
+      WS_TIMEOUT_SWEEP_MS: "20",
+      SUPABASE_DB_URL: "",
+      ...observeOnlyJoinEnv(),
+      ...persistedBootstrapFixturesEnv(fixtures)
+    }
+  });
+
+  const isActionableHumanSnapshot = (payload) => {
+    const turnUserId = payload?.public?.turn?.userId;
+    const legalActions = Array.isArray(payload?.public?.legalActions?.actions)
+      ? payload.public.legalActions.actions
+      : [];
+    return turnUserId === humanUserId && legalActions.length > 0;
+  };
+
+  try {
+    await waitForListening(child, 5000);
+    const humanWs = await connectClient(port);
+    await hello(humanWs);
+    await auth(humanWs, makeHs256Jwt({ secret, sub: humanUserId }), "auth-timeout-human");
+
+    sendFrame(humanWs, { version: "1.0", type: "table_join", requestId: "join-timeout-human", ts: "2026-02-28T00:50:01Z", payload: { tableId } });
+    const joinAck = await nextMessageOfType(humanWs, "commandResult");
+    assert.equal(joinAck.payload.status, "accepted");
+    await nextMessageOfType(humanWs, "table_state");
+
+    sendFrame(humanWs, { version: "1.0", type: "table_state_sub", requestId: "snap-timeout-human-initial", ts: "2026-02-28T00:50:02Z", payload: { tableId, view: "snapshot" } });
+    let current = await nextMessageOfType(humanWs, "stateSnapshot");
+    let baseline = current.payload;
+
+    if (!isActionableHumanSnapshot(baseline)) {
+      const humanTurn = await nextMessageMatching(
+        humanWs,
+        (frame) => frame?.type === "stateSnapshot" && isActionableHumanSnapshot(frame.payload),
+        7000
+      );
+      current = humanTurn;
+      baseline = humanTurn.payload;
+    }
+
+    const beforeTimeoutVersion = Number(baseline.stateVersion || 0);
+    const beforeTimeoutHandId = baseline?.public?.hand?.handId || null;
+    assert.equal(isActionableHumanSnapshot(baseline), true);
+    assert.equal(typeof beforeTimeoutHandId, "string");
+    assert.equal(beforeTimeoutHandId.length > 0, true);
+
+    const afterTimeoutAndBotStep = await nextMessageMatching(
+      humanWs,
+      (frame) => {
+        if (frame?.type !== "stateSnapshot") {
+          return false;
+        }
+        const payload = frame.payload;
+        const nextVersion = Number(payload?.stateVersion || 0);
+        const nextHandId = payload?.public?.hand?.handId || null;
+        return isActionableHumanSnapshot(payload)
+          && nextVersion >= beforeTimeoutVersion + 2
+          && typeof nextHandId === "string"
+          && nextHandId !== beforeTimeoutHandId;
+      },
+      9000
+    );
+
+    const finalPayload = afterTimeoutAndBotStep.payload;
+    const finalLegalActions = Array.isArray(finalPayload?.public?.legalActions?.actions)
+      ? finalPayload.public.legalActions.actions
+      : [];
+    assert.equal(finalPayload.public.turn.userId, humanUserId);
+    assert.equal(finalPayload.public.hand.handId !== beforeTimeoutHandId, true);
+    assert.equal(Number(finalPayload.stateVersion) >= beforeTimeoutVersion + 2, true);
+    assert.equal(finalPayload.public.legalActions.seat, 1);
+    assert.equal(finalLegalActions.length > 0, true);
+    assert.equal(Object.prototype.hasOwnProperty.call(finalPayload.public, "holeCardsByUserId"), false);
+
+    humanWs.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
 test("active replacement: observe-only semantics in bootstrap-disabled mode keep observer unseated", async () => {
   const secret = "test-secret";
   const token = makeHs256Jwt({ secret, sub: "plain_observer" });

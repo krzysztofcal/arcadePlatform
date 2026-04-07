@@ -123,11 +123,9 @@ function buildSeatUserIdsInOrder(state) {
 }
 
 function getBotAutoplayConfig(env = process.env) {
-  const raw = Number(env?.POKER_BOTS_MAX_ACTIONS_PER_REQUEST);
-  const maxActionsPerRequest = Number.isInteger(raw) && raw > 0 ? raw : 5;
   const hardCapRaw = Number(env?.POKER_BOTS_BOTS_ONLY_HAND_HARD_CAP);
   const botsOnlyHandCompletionHardCap = Number.isInteger(hardCapRaw) && hardCapRaw > 0 ? hardCapRaw : 80;
-  return { maxActionsPerRequest, botsOnlyHandCompletionHardCap, policyVersion: "WS_SHARED_AUTOPLAY" };
+  return { botsOnlyHandCompletionHardCap, policyVersion: "WS_SHARED_AUTOPLAY" };
 }
 
 function buildPersistedFromPrivateState(privateStateInput, actorUserId, actionRequestId, withoutPrivateStateImpl = withoutLegacyPrivateState) {
@@ -485,7 +483,7 @@ function summarizeLegalActions(legalActions) {
   };
 }
 
-export function createAcceptedBotAutoplayExecutor({
+export function createAcceptedBotStepExecutor({
   tableManager,
   persistMutatedState,
   restoreTableFromPersisted,
@@ -493,7 +491,7 @@ export function createAcceptedBotAutoplayExecutor({
   env = process.env,
   klog = () => {}
 } = {}) {
-  return async function runAcceptedBotAutoplay({ tableId, trigger, requestId, frameTs }) {
+  return async function runAcceptedBotStep({ tableId, trigger, requestId, frameTs }) {
     const baseLog = {
       tableId,
       trigger: trigger || null,
@@ -562,7 +560,7 @@ export function createAcceptedBotAutoplayExecutor({
       runtimeFlavor,
       ...buildDiagnosticSnapshot(state),
       stateVersion: Number(tableManager.persistedStateVersion(tableId) || 0),
-      maxActions: cfg.maxActionsPerRequest
+      maxActions: 1
     });
     try {
       const botLoop = await runBotAutoplayLoop({
@@ -573,7 +571,7 @@ export function createAcceptedBotAutoplayExecutor({
         initialVersion: Number(tableManager.persistedStateVersion(tableId) || 0),
         seatBotMap,
         seatUserIdsInOrder,
-        maxActions: cfg.maxActionsPerRequest,
+        maxActions: 1,
         botsOnlyHandCompletionHardCap: cfg.botsOnlyHandCompletionHardCap,
         policyVersion: cfg.policyVersion,
         klog,
@@ -756,11 +754,26 @@ export function createAcceptedBotAutoplayExecutor({
         });
       }
 
+      const finalPrivateState = tableManager.persistedPokerState(tableId);
+      const finalPublicState = finalPrivateState ? withoutPrivateState(finalPrivateState) : null;
+      const finalTurnUserId = typeof finalPublicState?.turnUserId === "string" ? finalPublicState.turnUserId : null;
+      const finalTurnSnapshot = finalTurnUserId
+        ? tableManager.tableSnapshot(tableId, finalTurnUserId)
+        : tableManager.tableSnapshot(tableId, state.turnUserId || "");
+      const finalSeatBotMap = buildSeatBotMap(finalTurnSnapshot?.seats);
+      const pendingBotTurn = !!finalPublicState
+        && isActionPhase(finalPublicState.phase)
+        && isBotTurn(finalTurnUserId, finalSeatBotMap);
+
       return {
         ok: true,
         changed: (botLoop?.botActionCount || 0) > 0,
         actionCount: botLoop?.botActionCount || 0,
-        reason: botLoop?.botStopReason || "not_attempted"
+        reason: botLoop?.botStopReason || "not_attempted",
+        pendingBotTurn,
+        phase: typeof finalPublicState?.phase === "string" ? finalPublicState.phase : null,
+        turnUserId: finalTurnUserId,
+        shouldContinue: (botLoop?.botActionCount || 0) > 0 && pendingBotTurn === true
       };
     } catch (error) {
       const lastState = lastKnown.state;
@@ -801,3 +814,5 @@ export function createAcceptedBotAutoplayExecutor({
     }
   };
 }
+
+export const createAcceptedBotAutoplayExecutor = createAcceptedBotStepExecutor;

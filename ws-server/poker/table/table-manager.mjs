@@ -421,6 +421,20 @@ export function createTableManager({
     return updates;
   }
 
+  function listDueTurnTimeouts({ nowMs = Date.now(), shouldProcessTable = null } = {}) {
+    const due = [];
+    for (const [tableId, table] of tables.entries()) {
+      if (typeof shouldProcessTable === "function" && shouldProcessTable(tableId) !== true) {
+        continue;
+      }
+      const timeoutDecision = decideCoreStateTurnTimeout({ coreState: table?.coreState, nowMs });
+      if (timeoutDecision?.due === true) {
+        due.push({ tableId, stateVersion: timeoutDecision.stateVersion });
+      }
+    }
+    return due;
+  }
+
   function markConnected(member, nowMs) {
     member.connected = true;
     member.lastSeenAt = nowMs;
@@ -1045,6 +1059,7 @@ export function createTableManager({
     applyAction,
     maybeApplyTurnTimeout,
     sweepTurnTimeouts,
+    listDueTurnTimeouts,
     cleanupConnection,
     orderedSubscribers,
     orderedConnectionsForTable,
