@@ -108,8 +108,9 @@ test('poker ws client bootstraps hello -> auth -> snapshot once', async () => {
 
   ws.message({ type: 'table_state', payload: { tableId: 'table_test_1', members: [{ userId: 'u1', seat: 1 }], hand: { status: 'FLOP' }, pot: { total: 12 }, turn: { userId: 'u1' }, legalActions: { seat: 1, actions: ['CHECK'] }, actionConstraints: { toCall: 0, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: 500 } } });
   ws.message({ type: 'table_state', payload: { tableId: 'table_test_1', members: [{ userId: 'u2', seat: 2 }] } });
+  ws.message({ type: 'statePatch', payload: { stateVersion: 2, public: { turn: { userId: 'u2' }, legalActions: { seat: 2, actions: ['CHECK', 'BET'] } } } });
 
-  assert.equal(h.snapshots.length, 2);
+  assert.equal(h.snapshots.length, 3);
   assert.equal(h.snapshots[0].kind, 'table_state');
   assert.equal(h.snapshots[0].initial, true);
   assert.equal(h.snapshots[0].payload.hand.status, 'FLOP');
@@ -117,6 +118,10 @@ test('poker ws client bootstraps hello -> auth -> snapshot once', async () => {
   assert.equal(h.snapshots[1].kind, 'table_state');
   assert.equal(h.snapshots[1].initial, false);
   assert.equal(h.snapshots[1].payload.members[0].userId, 'u2');
+  assert.equal(h.snapshots[2].kind, 'statePatch');
+  assert.equal(h.snapshots[2].initial, false);
+  assert.equal(h.snapshots[2].payload.public.turn.userId, 'u2');
+  assert.deepEqual(h.snapshots[2].payload.public.legalActions.actions, ['CHECK', 'BET']);
   assert.equal(h.protocolErrors.length, 0);
 
   const lifecycleKinds = h.logs.map((entry) => entry.kind);
@@ -128,7 +133,7 @@ test('poker ws client bootstraps hello -> auth -> snapshot once', async () => {
   const sendLogs = getLogEntries(h.logs, 'poker_ws_send');
   const recvLogs = getLogEntries(h.logs, 'poker_ws_recv');
   assert.deepEqual(sendLogs.slice(0, 3).map((entry) => entry.data.type), ['hello', 'auth', 'table_state_sub']);
-  assert.deepEqual(recvLogs.slice(0, 4).map((entry) => entry.data.type), ['helloAck', 'authOk', 'table_state', 'table_state']);
+  assert.deepEqual(recvLogs.slice(0, 5).map((entry) => entry.data.type), ['helloAck', 'authOk', 'table_state', 'table_state', 'statePatch']);
   const authSend = sendLogs.find((entry) => entry.data && entry.data.type === 'auth');
   assert.equal(Array.isArray(authSend.data.payloadKeys), true);
   assert.equal(authSend.data.payloadKeys[0], 'token_redacted');

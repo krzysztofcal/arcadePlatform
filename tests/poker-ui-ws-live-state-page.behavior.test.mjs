@@ -90,3 +90,57 @@ assert.equal(
   true,
   'active seat with missing stack should render placeholder, not zero'
 );
+
+const patchHarness = createPokerTableHarness();
+patchHarness.fireDomContentLoaded();
+await patchHarness.flush();
+
+const patchWs = patchHarness.wsCreates[0].options;
+patchWs.onSnapshot({
+  kind: 'stateSnapshot',
+  payload: {
+    tableId: 'table-1',
+    stateVersion: 4,
+    table: {
+      tableId: 'table-1',
+      status: 'OPEN',
+      maxSeats: 9,
+      members: [
+        { userId: 'user-1', seat: 1 },
+        { userId: 'bot-2', seat: 2 },
+        { userId: 'bot-3', seat: 3 }
+      ]
+    },
+    public: {
+      hand: { handId: 'h-4', status: 'FLOP' },
+      turn: { userId: 'bot-2', deadlineAt: Date.now() + 5000 },
+      board: ['As', 'Kd', '3h'],
+      pot: { total: 20, sidePots: [] },
+      legalActions: { seat: null, actions: [] },
+      stacks: { 'user-1': 245, 'bot-2': 240, 'bot-3': 240 }
+    },
+    you: { seat: 1 }
+  },
+});
+await patchHarness.flush();
+
+assert.equal(patchHarness.elements.pokerActionsRow.hidden, true, 'baseline snapshot should keep actions hidden when it is not the current user turn');
+
+patchWs.onSnapshot({
+  kind: 'statePatch',
+  payload: {
+    stateVersion: 5,
+    public: {
+      turn: { userId: 'user-1', deadlineAt: Date.now() + 5000 },
+      legalActions: { seat: 1, actions: ['CHECK', 'BET'] },
+      actionConstraints: { toCall: 0, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: 120 }
+    }
+  }
+});
+await patchHarness.flush();
+
+assert.equal(Number(patchHarness.elements.pokerVersion.textContent), 5, 'statePatch should advance the rendered version');
+assert.equal(patchHarness.elements.pokerActionsRow.hidden, false, 'statePatch should surface action controls when the turn returns to the current user');
+assert.equal(patchHarness.elements.pokerActCheckBtn.hidden, false, 'statePatch should expose CHECK when it is legal');
+assert.equal(patchHarness.elements.pokerActBetBtn.hidden, false, 'statePatch should expose BET when opening the action is legal');
+assert.equal(patchHarness.elements.pokerActRaiseBtn.hidden, true, 'statePatch should keep RAISE hidden when there is nothing to call');

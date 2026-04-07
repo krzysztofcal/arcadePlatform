@@ -111,9 +111,13 @@
       });
     }
 
+    function isSnapshotFrameType(type){
+      return type === 'table_state' || type === 'stateSnapshot' || type === 'statePatch';
+    }
+
     function normalizeSnapshot(frame, initial){
       if (!frame || typeof frame !== 'object') return null;
-      if (frame.type === 'table_state' || frame.type === 'stateSnapshot') return { kind: frame.type, payload: frame.payload || {}, rawType: frame.type, initial: initial === true };
+      if (isSnapshotFrameType(frame.type)) return { kind: frame.type, payload: frame.payload || {}, rawType: frame.type, initial: initial === true };
       return null;
     }
 
@@ -168,7 +172,7 @@
       log('poker_ws_recv', summarizeFrame(frame.type, frame.payload || null, frame.requestId || null, frame.roomId || null, tableId || null));
       if (frame.type === 'helloAck') { emitStatus('hello_ack', {}); mintAndAuth().catch(function(err){ var code = safeErrorCode(err); log('poker_ws_auth_error', { tableId: tableId, code: code }); emitStatus('failed', { stage: 'auth', code: code }); emitProtocolError(code, 'auth_failed'); destroy(); }); return; }
       if (frame.type === 'authOk') { authOk = true; emitStatus('auth_ok', { roomId: frame.payload && frame.payload.roomId ? frame.payload.roomId : null }); requestSnapshot(); return; }
-      if (frame.type === 'table_state' || frame.type === 'stateSnapshot') { var initial = !initialSnapshotDelivered; initialSnapshotDelivered = true; var normalized = normalizeSnapshot(frame, initial); if (normalized) onSnapshot(normalized); return; }
+      if (isSnapshotFrameType(frame.type)) { var initial = !initialSnapshotDelivered; initialSnapshotDelivered = true; var normalized = normalizeSnapshot(frame, initial); if (normalized) onSnapshot(normalized); return; }
       if (frame.type === 'commandResult') { handleCommandResult(frame); emitStatus('command_result', { status: frame.payload && frame.payload.status ? frame.payload.status : null, reason: frame.payload && frame.payload.reason ? frame.payload.reason : null }); return; }
       if (frame.type === 'resync') {
         emitStatus('resync', {
