@@ -318,7 +318,9 @@ function scheduleBotStep({ tableId, trigger, requestId, frameTs }) {
     void queued
       .then((result) => {
         if (result?.ok === true && result?.shouldContinue === true) {
-          runCascade();
+          setImmediate(() => {
+            void runCascade();
+          });
         }
       })
       .catch(() => {});

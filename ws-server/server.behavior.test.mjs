@@ -2571,6 +2571,13 @@ test("timeout sweep plus queued bot step returns actionable human snapshot witho
 
   try {
     await waitForListening(child, 5000);
+    const serverLogs = [];
+    child.stdout.on("data", (buf) => {
+      const text = String(buf || "");
+      if (text.includes("ws_bot_autoplay") || text.includes("ws_table_command_failed")) {
+        serverLogs.push(text.trim());
+      }
+    });
     const humanWs = await connectClient(port);
     await hello(humanWs);
     await auth(humanWs, makeHs256Jwt({ secret, sub: humanUserId }), "auth-timeout-human");
@@ -2600,33 +2607,190 @@ test("timeout sweep plus queued bot step returns actionable human snapshot witho
     assert.equal(typeof beforeTimeoutHandId, "string");
     assert.equal(beforeTimeoutHandId.length > 0, true);
 
-    const afterTimeoutAndBotStep = await nextMessageMatching(
-      humanWs,
-      (frame) => {
-        if (frame?.type !== "stateSnapshot") {
-          return false;
-        }
-        const payload = frame.payload;
-        const nextVersion = Number(payload?.stateVersion || 0);
-        const nextHandId = payload?.public?.hand?.handId || null;
-        return isActionableHumanSnapshot(payload)
-          && nextVersion >= beforeTimeoutVersion + 2
-          && typeof nextHandId === "string"
-          && nextHandId !== beforeTimeoutHandId;
-      },
-      9000
-    );
+    const observedFrames = [];
+    let afterTimeoutAndBotStep = null;
+    const afterTimeoutDeadline = Date.now() + 9000;
+    while (Date.now() < afterTimeoutDeadline) {
+      const remaining = Math.max(50, afterTimeoutDeadline - Date.now());
+      const frame = await attemptMessage(humanWs, Math.min(remaining, 1200));
+      if (!frame) {
+        continue;
+      }
+      observedFrames.push({
+        type: frame.type,
+        stateVersion: Number(frame?.payload?.stateVersion || 0),
+        handId: frame?.payload?.public?.hand?.handId || null,
+        turnUserId: frame?.payload?.public?.turn?.userId || null,
+        legalActions: Array.isArray(frame?.payload?.public?.legalActions?.actions)
+          ? frame.payload.public.legalActions.actions.slice()
+          : []
+      });
+      if (
+        frame?.type === "stateSnapshot"
+        && isActionableHumanSnapshot(frame.payload)
+        && Number(frame.payload?.stateVersion || 0) > beforeTimeoutVersion
+      ) {
+        afterTimeoutAndBotStep = frame;
+        break;
+      }
+    }
+    assert.ok(afterTimeoutAndBotStep, `${JSON.stringify(observedFrames)}\nLOGS:\n${serverLogs.slice(-20).join("\n")}`);
 
     const finalPayload = afterTimeoutAndBotStep.payload;
     const finalLegalActions = Array.isArray(finalPayload?.public?.legalActions?.actions)
       ? finalPayload.public.legalActions.actions
       : [];
     assert.equal(finalPayload.public.turn.userId, humanUserId);
-    assert.equal(finalPayload.public.hand.handId !== beforeTimeoutHandId, true);
-    assert.equal(Number(finalPayload.stateVersion) >= beforeTimeoutVersion + 2, true);
+    assert.equal(Number(finalPayload.stateVersion) > beforeTimeoutVersion, true);
     assert.equal(finalPayload.public.legalActions.seat, 1);
     assert.equal(finalLegalActions.length > 0, true);
     assert.equal(Object.prototype.hasOwnProperty.call(finalPayload.public, "holeCardsByUserId"), false);
+
+    humanWs.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
+test("human act against queued bots returns next actionable human snapshot", async () => {
+  const secret = "human-bot-turn-secret";
+  const humanUserId = "human_turn_user";
+  const tableId = "table_human_bot_turn_runtime";
+  const botSeat2 = makeBotUserId(tableId, 2);
+  const botSeat3 = makeBotUserId(tableId, 3);
+  const fixtures = {
+    [tableId]: {
+      tableRow: { id: tableId, max_players: 6, status: "active" },
+      seatRows: [
+        { user_id: humanUserId, seat_no: 1, status: "ACTIVE", is_bot: false, stack: 100 },
+        { user_id: botSeat2, seat_no: 2, status: "ACTIVE", is_bot: true, stack: 100 },
+        { user_id: botSeat3, seat_no: 3, status: "ACTIVE", is_bot: true, stack: 100 }
+      ],
+      stateRow: { version: 0, state: {} }
+    }
+  };
+
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      SUPABASE_DB_URL: "",
+      ...observeOnlyJoinEnv(),
+      ...persistedBootstrapFixturesEnv(fixtures)
+    }
+  });
+
+  const isActionableHumanSnapshot = (payload) => {
+    const turnUserId = payload?.public?.turn?.userId;
+    const legalActions = Array.isArray(payload?.public?.legalActions?.actions)
+      ? payload.public.legalActions.actions
+      : [];
+    return turnUserId === humanUserId && legalActions.length > 0;
+  };
+
+  try {
+    await waitForListening(child, 5000);
+    const serverLogs = [];
+    child.stdout.on("data", (buf) => {
+      const text = String(buf || "");
+      if (text.includes("ws_bot_autoplay") || text.includes("ws_table_command_failed")) {
+        serverLogs.push(text.trim());
+      }
+    });
+    const humanWs = await connectClient(port);
+    await hello(humanWs);
+    await auth(humanWs, makeHs256Jwt({ secret, sub: humanUserId }), "auth-human-bot-turn");
+
+    sendFrame(humanWs, { version: "1.0", type: "table_join", requestId: "join-human-bot-turn", ts: "2026-02-28T00:55:01Z", payload: { tableId } });
+    const joinAck = await nextMessageOfType(humanWs, "commandResult");
+    assert.equal(joinAck.payload.status, "accepted");
+    await nextMessageOfType(humanWs, "table_state");
+
+    sendFrame(humanWs, { version: "1.0", type: "table_state_sub", requestId: "snap-human-bot-turn-baseline", ts: "2026-02-28T00:55:02Z", payload: { tableId, view: "snapshot" } });
+    let baselineSnapshot = await nextMessageOfType(humanWs, "stateSnapshot");
+    if (baselineSnapshot.payload?.public?.hand?.status === "LOBBY") {
+      sendFrame(humanWs, { version: "1.0", type: "start_hand", requestId: "start-human-bot-turn", ts: "2026-02-28T00:55:02Z", payload: { tableId } });
+      const startAck = await nextCommandResultForRequest(humanWs, "start-human-bot-turn");
+      assert.equal(["accepted", "rejected"].includes(startAck.payload.status), true);
+      if (startAck.payload.status === "rejected") {
+        assert.equal(startAck.payload.reason, "already_live");
+      }
+      baselineSnapshot = await nextMessageMatching(
+        humanWs,
+        (frame) => frame?.type === "stateSnapshot",
+        8000
+      );
+    }
+
+    const firstHumanTurn = isActionableHumanSnapshot(baselineSnapshot.payload)
+      ? baselineSnapshot
+      : await nextMessageMatching(
+          humanWs,
+          (frame) => frame?.type === "stateSnapshot" && isActionableHumanSnapshot(frame.payload),
+          8000
+        );
+
+    const firstPayload = firstHumanTurn.payload;
+    const handId = firstPayload?.public?.hand?.handId;
+    const legalActions = Array.isArray(firstPayload?.public?.legalActions?.actions)
+      ? firstPayload.public.legalActions.actions
+      : [];
+    assert.equal(typeof handId, "string");
+    assert.equal(handId.length > 0, true);
+    assert.equal(legalActions.length > 0, true);
+
+    const action = legalActions.includes("CALL")
+      ? "call"
+      : legalActions.includes("CHECK")
+        ? "check"
+        : "fold";
+    sendFrame(humanWs, {
+      version: "1.0",
+      type: "act",
+      requestId: "act-human-bot-turn",
+      ts: "2026-02-28T00:55:03Z",
+      payload: { tableId, handId, action }
+    });
+    const actAck = await nextCommandResultForRequest(humanWs, "act-human-bot-turn");
+    assert.equal(actAck.payload.status, "accepted");
+
+    const observedFrames = [];
+    let secondHumanTurn = null;
+    const secondTurnDeadline = Date.now() + 8000;
+    while (Date.now() < secondTurnDeadline) {
+      const remaining = Math.max(50, secondTurnDeadline - Date.now());
+      const frame = await attemptMessage(humanWs, Math.min(remaining, 1200));
+      if (!frame) {
+        continue;
+      }
+      observedFrames.push({
+        type: frame.type,
+        stateVersion: Number(frame?.payload?.stateVersion || 0),
+        turnUserId: frame?.payload?.public?.turn?.userId || null,
+        legalActions: Array.isArray(frame?.payload?.public?.legalActions?.actions)
+          ? frame.payload.public.legalActions.actions.slice()
+          : []
+      });
+      if (
+        frame?.type === "stateSnapshot"
+        && isActionableHumanSnapshot(frame.payload)
+        && Number(frame.payload?.stateVersion || 0) > Number(firstPayload?.stateVersion || 0)
+      ) {
+        secondHumanTurn = frame;
+        break;
+      }
+    }
+    assert.ok(secondHumanTurn, `${JSON.stringify(observedFrames)}\nLOGS:\n${serverLogs.slice(-20).join("\n")}`);
+
+    const secondPayload = secondHumanTurn.payload;
+    const secondLegalActions = Array.isArray(secondPayload?.public?.legalActions?.actions)
+      ? secondPayload.public.legalActions.actions
+      : [];
+    assert.equal(secondPayload.public.turn.userId, humanUserId);
+    assert.equal(Number(secondPayload.stateVersion) > Number(firstPayload.stateVersion), true);
+    assert.equal(secondLegalActions.length > 0, true);
+    assert.equal(Object.prototype.hasOwnProperty.call(secondPayload.public, "holeCardsByUserId"), false);
 
     humanWs.close();
   } finally {

@@ -91,6 +91,13 @@ function isBotTurn(turnUserId, seatBotMap) {
   return !!seatBotMap?.[turnUserId];
 }
 
+function isBotTurnAuthoritatively(tableManager, tableId, turnUserId, seatBotMap) {
+  if (typeof tableManager?.isBotUser === "function") {
+    return tableManager.isBotUser(tableId, turnUserId) === true;
+  }
+  return isBotTurn(turnUserId, seatBotMap);
+}
+
 function chooseBotActionTrivial(legalActions) {
   const actions = Array.isArray(legalActions) ? legalActions : [];
   if (actions.includes("CHECK")) return { type: "CHECK" };
@@ -763,7 +770,7 @@ export function createAcceptedBotStepExecutor({
       const finalSeatBotMap = buildSeatBotMap(finalTurnSnapshot?.seats);
       const pendingBotTurn = !!finalPublicState
         && isActionPhase(finalPublicState.phase)
-        && isBotTurn(finalTurnUserId, finalSeatBotMap);
+        && isBotTurnAuthoritatively(tableManager, tableId, finalTurnUserId, finalSeatBotMap);
 
       return {
         ok: true,

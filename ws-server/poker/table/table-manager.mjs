@@ -993,6 +993,19 @@ export function createTableManager({
     return normalizeTableStatus(table?.tableStatus) === "CLOSED";
   }
 
+  function isBotUser(tableId, userId) {
+    const normalizedUserId = typeof userId === "string" ? userId.trim() : "";
+    if (!normalizedUserId) {
+      return false;
+    }
+    const table = tables.get(tableId);
+    const seatDetails = table?.coreState?.seatDetailsByUserId;
+    if (!seatDetails || typeof seatDetails !== "object" || Array.isArray(seatDetails)) {
+      return false;
+    }
+    return seatDetails?.[normalizedUserId]?.isBot === true;
+  }
+
   function __debugCore(tableId) {
     const table = tables.get(tableId);
     if (!table) {
@@ -1069,7 +1082,8 @@ export function createTableManager({
     persistedStateVersion,
     setPersistedStateVersion,
     restoreTableFromPersisted,
-    isTableClosed
+    isTableClosed,
+    isBotUser
   };
 
   if (enableDebugCore && nodeEnv !== "production") {
