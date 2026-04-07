@@ -146,6 +146,12 @@ export function buildStateSnapshotPayload({ tableSnapshot, userId }) {
       legalActions: {
         seat: normalizeSeat(tableSnapshot?.legalActions?.seat),
         actions: normalizeActionList(tableSnapshot?.legalActions?.actions)
+      },
+      actionConstraints: {
+        toCall: Number.isFinite(tableSnapshot?.actionConstraints?.toCall) ? Number(tableSnapshot.actionConstraints.toCall) : null,
+        minRaiseTo: Number.isFinite(tableSnapshot?.actionConstraints?.minRaiseTo) ? Number(tableSnapshot.actionConstraints.minRaiseTo) : null,
+        maxRaiseTo: Number.isFinite(tableSnapshot?.actionConstraints?.maxRaiseTo) ? Number(tableSnapshot.actionConstraints.maxRaiseTo) : null,
+        maxBetAmount: Number.isFinite(tableSnapshot?.actionConstraints?.maxBetAmount) ? Number(tableSnapshot.actionConstraints.maxBetAmount) : null
       }
     }
   };

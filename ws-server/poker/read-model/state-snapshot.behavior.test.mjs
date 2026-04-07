@@ -118,12 +118,14 @@ test("buildStateSnapshotPayload projects bootstrapped PREFLOP state from table m
   assert.deepEqual(seatedPayload.public.stacks, { user_a: 99, user_b: 98 });
   assert.deepEqual(seatedPayload.public.pot, { total: 3, sidePots: [] });
   assert.deepEqual(seatedPayload.public.legalActions, { seat: 1, actions: ["FOLD", "CALL", "RAISE"] });
+  assert.deepEqual(seatedPayload.public.actionConstraints, { toCall: 1, minRaiseTo: 4, maxRaiseTo: 100, maxBetAmount: null });
   assert.equal(Array.isArray(seatedPayload.private.holeCards), true);
   assert.equal(seatedPayload.private.holeCards.length, 2);
   assert.equal("private" in observerPayload, false);
   assert.deepEqual(observerPayload.public, {
     ...seatedPayload.public,
-    legalActions: { seat: null, actions: [] }
+    legalActions: { seat: null, actions: [] },
+    actionConstraints: { toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null }
   });
   assert.equal(seatedPayload.table.memberCount, seatedPayload.table.members.length);
 });
@@ -143,6 +145,7 @@ test("buildStateSnapshotPayload includes terminal showdown/settlement fields whe
       pot: { total: 0, sidePots: [] },
       turn: { userId: null, seat: null, startedAt: null, deadlineAt: null },
       legalActions: { seat: 1, actions: [] },
+      actionConstraints: { toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null },
       private: { holeCards: ["AS", "AD"] },
       showdown: {
         handId: "h_terminal",
@@ -162,6 +165,7 @@ test("buildStateSnapshotPayload includes terminal showdown/settlement fields whe
   assert.deepEqual(payload.public.showdown.winners, ["user_a"]);
   assert.equal(payload.public.showdown.potAwardedTotal, 5);
   assert.deepEqual(payload.public.turn, { userId: null, seat: null, startedAt: null, deadlineAt: null });
+  assert.deepEqual(payload.public.actionConstraints, { toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null });
   assert.deepEqual(payload.public.handSettlement.payouts, { user_a: 5 });
   assert.deepEqual(payload.private, { userId: "user_a", seat: 1, holeCards: ["AS", "AD"] });
 });
