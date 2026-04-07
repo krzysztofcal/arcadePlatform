@@ -109,3 +109,47 @@ test("same-version snapshots refresh legal actions and hide poker actions that n
   assert.equal(harness.elements.pokerActCallBtn.hidden, false, "CALL should render when there is a bet to call");
   assert.equal(harness.elements.pokerActRaiseBtn.hidden, false, "RAISE should render when the player may legally raise");
 });
+
+test("stateSnapshot legal actions stay visible on user turn when stale baseline constraints disagree", async () => {
+  const harness = createPokerTableHarness();
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  const ws = harness.wsCreates[0].options;
+  ws.onSnapshot({
+    kind: "table_state",
+    payload: {
+      tableId: "table-1",
+      stateVersion: 20,
+      hand: { handId: "h20", status: "PREFLOP" },
+      turn: { userId: "user-1" },
+      legalActions: ["FOLD", "CALL", "RAISE"],
+      actionConstraints: { toCall: 2, minRaiseTo: 4, maxRaiseTo: 80, maxBetAmount: null },
+      authoritativeMembers: []
+    }
+  });
+  await harness.flush();
+
+  assert.equal(harness.elements.pokerActCallBtn.hidden, false, "baseline PREFLOP should expose CALL");
+  assert.equal(harness.elements.pokerActRaiseBtn.hidden, false, "baseline PREFLOP should expose RAISE");
+
+  ws.onSnapshot({
+    kind: "stateSnapshot",
+    payload: {
+      table: { tableId: "table-1", members: [] },
+      version: 21,
+      public: {
+        hand: { handId: "h20", status: "FLOP" },
+        turn: { userId: "user-1" },
+        legalActions: { actions: ["CHECK", "BET"] }
+      }
+    }
+  });
+  await harness.flush();
+
+  assert.equal(harness.elements.pokerActionsRow.hidden, false, "action row should remain visible when server keeps the turn on the user");
+  assert.equal(harness.elements.pokerActCheckBtn.hidden, false, "CHECK should render even if baseline constraints still say there was money to call");
+  assert.equal(harness.elements.pokerActBetBtn.hidden, false, "BET should render even if baseline constraints still say there was money to call");
+  assert.equal(harness.elements.pokerActCallBtn.hidden, true, "CALL should hide once server switches legal actions to CHECK/BET");
+  assert.equal(harness.elements.pokerActRaiseBtn.hidden, true, "RAISE should hide once server switches legal actions to CHECK/BET");
+});

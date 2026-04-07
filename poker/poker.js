@@ -369,6 +369,16 @@
     };
   }
 
+  function buildNormalizedAllowedActions(actions){
+    var normalized = new Set();
+    if (!Array.isArray(actions)) return normalized;
+    for (var i = 0; i < actions.length; i++){
+      var type = normalizeActionTypeValue(actions[i]);
+      if (type) normalized.add(type);
+    }
+    return normalized;
+  }
+
   function validateAmountActionPayload(actionType, amountValue, allowedInfo){
     var normalizedType = normalizeActionTypeValue(actionType);
     if (normalizedType !== 'BET' && normalizedType !== 'RAISE'){
@@ -2200,6 +2210,10 @@
       }
       var sourceConstraints = data && data._actionConstraints ? data._actionConstraints : getConstraintsFromResponse(data);
       var sanitized = sanitizeAllowedActions(allowed, sourceConstraints);
+      if (info.isUsersTurn && sanitized.allowed.size === 0 && list.length > 0){
+        sanitized.allowed = buildNormalizedAllowedActions(list);
+        sanitized.needsAmount = sanitized.allowed.has('BET') || sanitized.allowed.has('RAISE');
+      }
       info.allowed = sanitized.allowed;
       info.needsAmount = sanitized.needsAmount;
       info.constraints = sanitized.constraints;
