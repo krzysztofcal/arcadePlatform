@@ -97,3 +97,104 @@ test('poker UI WS smoke sends one action and refreshes public table state withou
   assert.equal(harness.elements.pokerActionsRow.hidden, true, 'smoke act should move the UI out of the acting state after the refresh');
   assert.notEqual(harness.elements.pokerActStatus.textContent, 'Sending...', 'smoke act should clear the pending action status after the refresh');
 });
+
+test('poker UI requests a gameplay snapshot after act acceptance when push state does not arrive', async () => {
+  var actPayloads = [];
+  var gameplaySnapshotRequests = 0;
+  var snapshotHandler = null;
+  var harness = createPokerTableHarness({
+    wsFactory(createOptions){
+      snapshotHandler = createOptions.onSnapshot;
+      return {
+        start(){
+          Promise.resolve().then(function(){
+            if (typeof createOptions.onStatus === 'function') createOptions.onStatus('auth_ok', { roomId: 'table-1' });
+            if (typeof createOptions.onSnapshot === 'function'){
+              createOptions.onSnapshot({
+                kind: 'stateSnapshot',
+                payload: {
+                  tableId: 'table-1',
+                  stateVersion: 1,
+                  table: {
+                    tableId: 'table-1',
+                    status: 'OPEN',
+                    maxPlayers: 6,
+                    members: [
+                      { userId: 'user-1', seat: 1 },
+                      { userId: 'bot-2', seat: 2 },
+                      { userId: 'bot-3', seat: 3 }
+                    ]
+                  },
+                  public: {
+                    hand: { handId: 'hand-1', status: 'PREFLOP' },
+                    turn: { userId: 'user-1', deadlineAt: Date.now() + 5000 },
+                    board: [],
+                    pot: { total: 15, sidePots: [] },
+                    legalActions: ['CHECK']
+                  },
+                  stacks: { 'user-1': 150, 'bot-2': 150, 'bot-3': 150 }
+                }
+              });
+            }
+          });
+        },
+        destroy(){},
+        isReady(){ return true; },
+        sendAct(payload){
+          actPayloads.push(payload);
+          return Promise.resolve({ ok: true });
+        },
+        requestGameplaySnapshot(){
+          gameplaySnapshotRequests += 1;
+          if (typeof snapshotHandler === 'function'){
+            snapshotHandler({
+              kind: 'stateSnapshot',
+              payload: {
+                tableId: 'table-1',
+                stateVersion: 4,
+                table: {
+                  tableId: 'table-1',
+                  status: 'OPEN',
+                  maxPlayers: 6,
+                  members: [
+                    { userId: 'user-1', seat: 1 },
+                    { userId: 'bot-2', seat: 2 },
+                    { userId: 'bot-3', seat: 3 }
+                  ]
+                },
+                you: { seat: 1 },
+                public: {
+                  hand: { handId: 'hand-1', status: 'FLOP' },
+                  turn: { userId: 'user-1', deadlineAt: Date.now() + 5000 },
+                  board: ['As', 'Kd', '3h'],
+                  pot: { total: 20, sidePots: [] },
+                  legalActions: { seat: 1, actions: ['CHECK', 'BET'] },
+                  actionConstraints: { toCall: 0, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: 120 },
+                  stacks: { 'user-1': 145, 'bot-2': 150, 'bot-3': 150 }
+                }
+              }
+            });
+          }
+          return 'snapshot-refresh-1';
+        }
+      };
+    }
+  });
+
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  harness.elements.pokerActCheckBtn.click();
+  await harness.flush();
+
+  assert.equal(actPayloads.length, 1, 'fallback smoke should still send the original WS act');
+  assert.equal(gameplaySnapshotRequests, 0, 'fallback snapshot should not fire before the timer elapses');
+
+  harness.runTimeouts();
+  await harness.flush();
+
+  assert.equal(gameplaySnapshotRequests, 1, 'fallback smoke should request one gameplay snapshot after accepted act');
+  assert.equal(harness.elements.pokerActionsRow.hidden, false, 'fallback gameplay snapshot should restore the action controls');
+  assert.equal(harness.elements.pokerActCheckBtn.hidden, false, 'fallback gameplay snapshot should restore CHECK');
+  assert.equal(harness.elements.pokerActBetBtn.hidden, false, 'fallback gameplay snapshot should restore BET');
+});

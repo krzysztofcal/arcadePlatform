@@ -138,7 +138,11 @@
       send('auth', { token: mintBody.token });
     }
 
-    function requestSnapshot(){ if (authOk) send('table_state_sub', { tableId: tableId }); }
+    function requestLiveState(){ if (authOk) send('table_state_sub', { tableId: tableId }); }
+    function requestGameplaySnapshot(){
+      if (!authOk || !ws || ws.readyState !== 1) return null;
+      return send('table_state_sub', { tableId: tableId, view: 'snapshot' });
+    }
     function requestResync(payload){
       if (!authOk || !ws || ws.readyState !== 1) return null;
       var body = payload && typeof payload === 'object' ? payload : {};
@@ -171,7 +175,7 @@
       if (!frame || typeof frame !== 'object' || !frame.type) return;
       log('poker_ws_recv', summarizeFrame(frame.type, frame.payload || null, frame.requestId || null, frame.roomId || null, tableId || null));
       if (frame.type === 'helloAck') { emitStatus('hello_ack', {}); mintAndAuth().catch(function(err){ var code = safeErrorCode(err); log('poker_ws_auth_error', { tableId: tableId, code: code }); emitStatus('failed', { stage: 'auth', code: code }); emitProtocolError(code, 'auth_failed'); destroy(); }); return; }
-      if (frame.type === 'authOk') { authOk = true; emitStatus('auth_ok', { roomId: frame.payload && frame.payload.roomId ? frame.payload.roomId : null }); requestSnapshot(); return; }
+      if (frame.type === 'authOk') { authOk = true; emitStatus('auth_ok', { roomId: frame.payload && frame.payload.roomId ? frame.payload.roomId : null }); requestLiveState(); return; }
       if (isSnapshotFrameType(frame.type)) { var initial = !initialSnapshotDelivered; initialSnapshotDelivered = true; var normalized = normalizeSnapshot(frame, initial); if (normalized) onSnapshot(normalized); return; }
       if (frame.type === 'commandResult') { handleCommandResult(frame); emitStatus('command_result', { status: frame.payload && frame.payload.status ? frame.payload.status : null, reason: frame.payload && frame.payload.reason ? frame.payload.reason : null }); return; }
       if (frame.type === 'resync') {
@@ -226,6 +230,7 @@
       start: start,
       destroy: destroy,
       isReady: function(){ return !!authOk && !!ws && ws.readyState === 1; },
+      requestGameplaySnapshot: requestGameplaySnapshot,
       requestResync: requestResync,
       sendAct: function(payload, requestId){ return sendCommand('act', payload || {}, requestId); },
       sendJoin: function(payload, requestId){ return sendCommand('join', payload || { tableId: tableId }, requestId); },

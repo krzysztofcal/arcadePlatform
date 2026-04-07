@@ -226,6 +226,7 @@ export function createPokerTableHarness(options = {}){
     timeline,
     clearTimeoutCalls,
     getScheduledTimeoutCount(){ return timeouts.size; },
+    runTimeouts(){ Array.from(timeouts.values()).forEach((fn) => fn()); timeouts.clear(); },
     fireDomContentLoaded,
     fireWindowEvent,
     fireDocumentEvent,

@@ -198,6 +198,25 @@ test('poker ws client auto-requests resync when server marks session stale', asy
   assert.equal(resyncStatus.data.mode, 'required');
 });
 
+test('poker ws client can request an explicit gameplay snapshot over the live socket', async () => {
+  const h = loadClientHarness();
+  h.client.start();
+  const ws = h.FakeWebSocket.instances[0];
+  ws.open();
+  ws.message({ type: 'helloAck', payload: { version: '1.0' } });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  ws.message({ type: 'authOk', payload: { roomId: 'table_test_1' } });
+
+  const sentBefore = h.sentFrames.length;
+  const requestId = h.client.requestGameplaySnapshot();
+
+  assert.equal(typeof requestId, 'string');
+  assert.equal(h.sentFrames.length, sentBefore + 1);
+  assert.equal(h.sentFrames[sentBefore].type, 'table_state_sub');
+  assert.equal(h.sentFrames[sentBefore].payload.tableId, 'table_test_1');
+  assert.equal(h.sentFrames[sentBefore].payload.view, 'snapshot');
+});
+
 test('poker ws client rejects pending commands on close', async () => {
   const h = loadClientHarness();
   h.client.start();

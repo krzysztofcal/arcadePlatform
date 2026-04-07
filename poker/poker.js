@@ -1187,6 +1187,7 @@
     var pendingLeaveTimer = null;
     var pendingStartHandTimer = null;
     var pendingActTimer = null;
+    var postActSnapshotTimer = null;
     var joinPending = false;
     var leavePending = false;
     var startHandPending = false;
@@ -1792,6 +1793,7 @@
       var opts = options && typeof options === 'object' ? options : {};
       var activeCurrentUserId = typeof currentUserId === 'string' && currentUserId ? currentUserId : '';
       if (!shouldApplyWsSnapshot(snapshotPayload, opts)) return false;
+      clearPostActSnapshotRefresh();
       if (!tableData || typeof tableData !== 'object'){
         if (!opts.allowWhenNoBaseline) return false;
         tableData = createWsBaselineTableData(snapshotPayload);
@@ -2427,6 +2429,25 @@
       setDevPendingState('act', false);
     }
 
+    function clearPostActSnapshotRefresh(){
+      if (postActSnapshotTimer){
+        clearTimeout(postActSnapshotTimer);
+        postActSnapshotTimer = null;
+      }
+    }
+
+    function schedulePostActSnapshotRefresh(){
+      clearPostActSnapshotRefresh();
+      postActSnapshotTimer = setTimeout(function(){
+        postActSnapshotTimer = null;
+        if (!isPageActive()) return;
+        if (joinPending || leavePending || startHandPending || actPending) return;
+        if (!wsClient || typeof wsClient.requestGameplaySnapshot !== 'function') return;
+        klog('poker_post_act_snapshot_refresh', { tableId: tableId });
+        wsClient.requestGameplaySnapshot();
+      }, 250);
+    }
+
     function clearCopyLogPending(){
       setDevPendingState('copyLog', false);
     }
@@ -2539,6 +2560,7 @@
       clearLeavePending();
       clearStartHandPending();
       clearActPending();
+      clearPostActSnapshotRefresh();
       clearCopyLogPending();
       clearDumpLogsPending();
     }
@@ -3243,6 +3265,7 @@
         }
         clearActPending();
         setInlineStatus(actStatusEl, t('pokerActOk', 'Action sent'), 'success');
+        schedulePostActSnapshotRefresh();
         return { ok: true, code: 'ok' };
       } catch (err){
         if (isAbortError(err)){
