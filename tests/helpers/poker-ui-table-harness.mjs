@@ -3,11 +3,10 @@ import path from 'node:path';
 import vm from 'node:vm';
 
 function makeElement(id){
-  return {
+  const element = {
     id,
     hidden: false,
     textContent: '',
-    innerHTML: '',
     value: '0',
     className: '',
     classList: {
@@ -35,6 +34,15 @@ function makeElement(id){
       handlers.forEach((fn) => fn({ preventDefault(){}, stopPropagation(){}, target: this }));
     },
   };
+  var innerHtmlValue = '';
+  Object.defineProperty(element, 'innerHTML', {
+    get(){ return innerHtmlValue; },
+    set(value){
+      innerHtmlValue = String(value == null ? '' : value);
+      if (innerHtmlValue === '') this.children = [];
+    }
+  });
+  return element;
 }
 
 export function createPokerTableHarness(options = {}){

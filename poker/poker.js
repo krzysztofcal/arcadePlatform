@@ -1804,6 +1804,51 @@
       postActSnapshotTimer = null;
     }
 
+    function applyOptimisticLeaveCleanup(){
+      var activeCurrentUserId = typeof currentUserId === 'string' && currentUserId ? currentUserId : '';
+      if (!activeCurrentUserId) return;
+      if (!tableData || typeof tableData !== 'object') return;
+
+      var nextData = Object.assign({}, tableData);
+      if (Array.isArray(nextData.seats)){
+        nextData.seats = nextData.seats.filter(function(seat){
+          return !(seat && typeof seat.userId === 'string' && seat.userId.trim() === activeCurrentUserId);
+        });
+      }
+      nextData.youSeat = null;
+      nextData.legalActions = [];
+      nextData.actionConstraints = {};
+      nextData._actionConstraints = {};
+      nextData.myHoleCards = [];
+
+      var stateObj = nextData.state && typeof nextData.state === 'object' ? Object.assign({}, nextData.state) : {};
+      var gameState = stateObj.state && typeof stateObj.state === 'object' ? Object.assign({}, stateObj.state) : {};
+      var nextStacks = gameState.stacks && typeof gameState.stacks === 'object' && !Array.isArray(gameState.stacks)
+        ? Object.assign({}, gameState.stacks)
+        : {};
+      delete nextStacks[activeCurrentUserId];
+      gameState.stacks = nextStacks;
+
+      var nextLeftTableByUserId = gameState.leftTableByUserId && typeof gameState.leftTableByUserId === 'object' && !Array.isArray(gameState.leftTableByUserId)
+        ? Object.assign({}, gameState.leftTableByUserId)
+        : {};
+      nextLeftTableByUserId[activeCurrentUserId] = true;
+      gameState.leftTableByUserId = nextLeftTableByUserId;
+
+      if (gameState.turnUserId === activeCurrentUserId){
+        gameState.turnUserId = null;
+        gameState.turnStartedAt = null;
+        gameState.turnDeadlineAt = null;
+      }
+
+      stateObj.state = gameState;
+      nextData.state = stateObj;
+      tableData = nextData;
+      isSeated = false;
+      clearDeadlineNudge();
+      renderTable(tableData);
+    }
+
     function schedulePostActSnapshotRefresh(){
       clearPostActSnapshotRefresh();
       postActSnapshotTimer = setTimeout(function(){
@@ -3427,8 +3472,7 @@
         clearLeavePending();
         setError(errorEl, null);
         if (!isPageActive()) return;
-        isSeated = false;
-        clearDeadlineNudge();
+        applyOptimisticLeaveCleanup();
       } catch (err){
         if (isAbortError(err)){
           pauseLeavePending();
