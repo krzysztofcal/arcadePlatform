@@ -1788,6 +1788,24 @@
       return materiallyImprovesRichSnapshot(tableData, snapshotPayload);
     }
 
+    function clearPostActSnapshotRefresh(){
+      if (typeof postActSnapshotTimer === 'undefined' || !postActSnapshotTimer) return;
+      clearTimeout(postActSnapshotTimer);
+      postActSnapshotTimer = null;
+    }
+
+    function schedulePostActSnapshotRefresh(){
+      clearPostActSnapshotRefresh();
+      postActSnapshotTimer = setTimeout(function(){
+        postActSnapshotTimer = null;
+        if (!isPageActive()) return;
+        if (joinPending || leavePending || startHandPending || actPending) return;
+        if (!wsClient || typeof wsClient.requestGameplaySnapshot !== 'function') return;
+        klog('poker_post_act_snapshot_refresh', { tableId: tableId });
+        wsClient.requestGameplaySnapshot();
+      }, 250);
+    }
+
     function applyWsSnapshotNow(snapshotPayload, options){
       if (!snapshotPayload || typeof snapshotPayload !== 'object') return false;
       var opts = options && typeof options === 'object' ? options : {};
@@ -2427,25 +2445,6 @@
         pendingActTimer = null;
       }
       setDevPendingState('act', false);
-    }
-
-    function clearPostActSnapshotRefresh(){
-      if (postActSnapshotTimer){
-        clearTimeout(postActSnapshotTimer);
-        postActSnapshotTimer = null;
-      }
-    }
-
-    function schedulePostActSnapshotRefresh(){
-      clearPostActSnapshotRefresh();
-      postActSnapshotTimer = setTimeout(function(){
-        postActSnapshotTimer = null;
-        if (!isPageActive()) return;
-        if (joinPending || leavePending || startHandPending || actPending) return;
-        if (!wsClient || typeof wsClient.requestGameplaySnapshot !== 'function') return;
-        klog('poker_post_act_snapshot_refresh', { tableId: tableId });
-        wsClient.requestGameplaySnapshot();
-      }, 250);
     }
 
     function clearCopyLogPending(){
