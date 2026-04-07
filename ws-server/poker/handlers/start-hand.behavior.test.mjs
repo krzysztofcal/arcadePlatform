@@ -132,7 +132,7 @@ test('handleStartHandCommand rejects ensureTableLoaded failure with stable comma
   assert.equal(calls.snapshots, 0);
 });
 
-test('handleStartHandCommand skips broadcast when autoplay returns failure but still sends accepted commandResult', async () => {
+test('handleStartHandCommand still broadcasts fresh state when autoplay returns failure', async () => {
   const calls = { command: [], snapshots: 0, persist: 0 };
   await handleStartHandCommand({
     frame: { __resolvedTableId: 't1', requestId: 'r6' },
@@ -157,5 +157,5 @@ test('handleStartHandCommand skips broadcast when autoplay returns failure but s
   assert.equal(calls.command.length, 1);
   assert.equal(calls.command[0].status, 'accepted');
   assert.equal(calls.persist, 1);
-  assert.equal(calls.snapshots, 0);
+  assert.equal(calls.snapshots, 1);
 });

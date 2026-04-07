@@ -80,18 +80,16 @@ function normalizeMemberSeatRows(value) {
 function resolvePublicSeats({ statePublic, members, coreState }) {
   const stateSeats = normalizeSeatRows(statePublic?.seats);
   const seatDetailsByUserId = normalizeSeatDetails(coreState?.seatDetailsByUserId);
-  if (stateSeats.length > 0) {
-    return stateSeats.map((seat) => {
-      const details = seatDetailsByUserId[seat.userId] || null;
-      if (!details) return seat;
-      const merged = { ...seat };
-      if (details.isBot) merged.isBot = true;
-      if (details.botProfile) merged.botProfile = details.botProfile;
-      if (details.leaveAfterHand) merged.leaveAfterHand = true;
-      return merged;
-    });
-  }
-  return normalizeMemberSeatRows(members);
+  const baseSeats = stateSeats.length > 0 ? stateSeats : normalizeMemberSeatRows(members);
+  return baseSeats.map((seat) => {
+    const details = seatDetailsByUserId[seat.userId] || null;
+    if (!details) return seat;
+    const merged = { ...seat };
+    if (details.isBot) merged.isBot = true;
+    if (details.botProfile) merged.botProfile = details.botProfile;
+    if (details.leaveAfterHand) merged.leaveAfterHand = true;
+    return merged;
+  });
 }
 
 function resolvePublicStacks({ statePublic, coreState, seats }) {

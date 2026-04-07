@@ -56,6 +56,33 @@ test("projectRoomCoreSnapshot falls back to authoritative lobby seats/stacks whe
   assert.equal(observer.private, null);
 });
 
+test("projectRoomCoreSnapshot preserves bot seat metadata when public seats fall back to members", () => {
+  const snapshot = projectRoomCoreSnapshot({
+    tableId: "table_lobby_bots",
+    roomId: "table_lobby_bots",
+    coreState: {
+      seats: { human_user: 1, bot_user: 2 },
+      publicStacks: { human_user: 120, bot_user: 120 },
+      seatDetailsByUserId: {
+        human_user: { isBot: false, botProfile: null, leaveAfterHand: false },
+        bot_user: { isBot: true, botProfile: "TRIVIAL", leaveAfterHand: false }
+      },
+      pokerState: {}
+    },
+    members: [
+      { userId: "human_user", seat: 1 },
+      { userId: "bot_user", seat: 2 }
+    ],
+    userId: "human_user",
+    youSeat: 1
+  });
+
+  assert.deepEqual(snapshot.seats, [
+    { userId: "human_user", seatNo: 1, status: "ACTIVE" },
+    { userId: "bot_user", seatNo: 2, status: "ACTIVE", isBot: true, botProfile: "TRIVIAL" }
+  ]);
+});
+
 test("projectRoomCoreSnapshot reuses poker legal-actions/public stripping semantics", () => {
   const coreState = {
     seats: { seated_user: 2, other_user: 1 },

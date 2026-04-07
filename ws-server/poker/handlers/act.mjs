@@ -104,6 +104,7 @@ export async function handleActCommand({ frame, ws, connState, tableManager, ens
       });
     }
     if (autoplayResult?.ok === false) {
+      broadcastStateSnapshots(tableId);
       return;
     }
     broadcastStateSnapshots(tableId);

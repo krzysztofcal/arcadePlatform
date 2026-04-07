@@ -93,7 +93,7 @@ test('handleActCommand does not autoplay for replayed, rejected, or conflicted a
   assert.deepEqual(autoplayCalls, []);
 });
 
-test('handleActCommand skips broadcast when autoplay returns failure but still sends accepted commandResult', async () => {
+test('handleActCommand still broadcasts fresh state when autoplay returns failure', async () => {
   const calls = { command: [], snapshots: 0 };
   await handleActCommand({
     frame: { __resolvedTableId: 't1', requestId: 'r7', ts: new Date().toISOString(), payload: { handId: 'h1', action: 'CHECK' } },
@@ -112,7 +112,7 @@ test('handleActCommand skips broadcast when autoplay returns failure but still s
 
   assert.equal(calls.command.length, 1);
   assert.equal(calls.command[0].status, 'accepted');
-  assert.equal(calls.snapshots, 0);
+  assert.equal(calls.snapshots, 1);
 });
 
 

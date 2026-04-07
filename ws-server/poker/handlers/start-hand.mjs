@@ -92,6 +92,7 @@ export async function handleStartHandCommand({ frame, ws, connState, tableManage
   }
 
   if (autoplayResult?.ok === false) {
+    broadcastStateSnapshots(tableId);
     return;
   }
 
