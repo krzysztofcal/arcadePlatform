@@ -140,6 +140,53 @@ test("engine action accounting parity: PREFLOP raise/call updates fields exactly
   assert.equal(called.coreState.pokerState.turnUserId, "user_b");
 });
 
+test("engine accepts flop bet when action is unopened on the street", () => {
+  let coreState = bootstrapCoreStateHand({ tableId: "table_engine_act", coreState: initialCore(), nowMs: 6_000 }).coreState;
+
+  const preflopCall = applyCoreStateAction({
+    tableId: "table_engine_act",
+    coreState,
+    handId: coreState.pokerState.handId,
+    userId: "user_a",
+    action: "CALL",
+    nowIso: new Date(6_001).toISOString(),
+    nowMs: 6_001
+  });
+  assert.equal(preflopCall.accepted, true);
+  coreState = preflopCall.coreState;
+
+  const preflopCheck = applyCoreStateAction({
+    tableId: "table_engine_act",
+    coreState,
+    handId: coreState.pokerState.handId,
+    userId: "user_b",
+    action: "CHECK",
+    nowIso: new Date(6_002).toISOString(),
+    nowMs: 6_002
+  });
+  assert.equal(preflopCheck.accepted, true);
+  coreState = preflopCheck.coreState;
+  assert.equal(coreState.pokerState.phase, "FLOP");
+
+  const bettor = coreState.pokerState.turnUserId;
+  const betApplied = applyCoreStateAction({
+    tableId: "table_engine_act",
+    coreState,
+    handId: coreState.pokerState.handId,
+    userId: bettor,
+    action: "BET",
+    amount: 12,
+    nowIso: new Date(6_003).toISOString(),
+    nowMs: 6_003
+  });
+
+  assert.equal(betApplied.accepted, true);
+  assert.equal(betApplied.reason, null);
+  assert.equal(betApplied.coreState.pokerState.currentBet, 12);
+  assert.equal(betApplied.coreState.pokerState.betThisRoundByUserId[bettor], 12);
+  assert.notEqual(betApplied.coreState.pokerState.turnUserId, bettor);
+});
+
 test("engine action application is deterministic for identical pre-state/action/timestamp", () => {
   const boot = bootstrapCoreStateHand({ tableId: "table_engine_act", coreState: initialCore(), nowMs: 3_000 });
   const preState = boot.coreState;
@@ -259,4 +306,47 @@ test("engine legality gate rejects illegal check/missing raise/too-small raise w
   assert.equal(tooSmallRaise.reason, "invalid_amount");
   assert.equal(tooSmallRaise.stateVersion, coreState.version);
   assert.equal(tooSmallRaise.coreState, coreState);
+});
+
+test("engine legality gate rejects invalid bet amount with no mutation", () => {
+  let coreState = bootstrapCoreStateHand({ tableId: "table_engine_act", coreState: initialCore(), nowMs: 7_000 }).coreState;
+
+  const preflopCall = applyCoreStateAction({
+    tableId: "table_engine_act",
+    coreState,
+    handId: coreState.pokerState.handId,
+    userId: "user_a",
+    action: "CALL",
+    nowIso: new Date(7_001).toISOString(),
+    nowMs: 7_001
+  });
+  assert.equal(preflopCall.accepted, true);
+  coreState = preflopCall.coreState;
+
+  const preflopCheck = applyCoreStateAction({
+    tableId: "table_engine_act",
+    coreState,
+    handId: coreState.pokerState.handId,
+    userId: "user_b",
+    action: "CHECK",
+    nowIso: new Date(7_002).toISOString(),
+    nowMs: 7_002
+  });
+  assert.equal(preflopCheck.accepted, true);
+  coreState = preflopCheck.coreState;
+
+  const invalidBet = applyCoreStateAction({
+    tableId: "table_engine_act",
+    coreState,
+    handId: coreState.pokerState.handId,
+    userId: coreState.pokerState.turnUserId,
+    action: "BET",
+    amount: 0,
+    nowIso: new Date(7_003).toISOString(),
+    nowMs: 7_003
+  });
+  assert.equal(invalidBet.accepted, false);
+  assert.equal(invalidBet.reason, "invalid_amount");
+  assert.equal(invalidBet.stateVersion, coreState.version);
+  assert.equal(invalidBet.coreState, coreState);
 });

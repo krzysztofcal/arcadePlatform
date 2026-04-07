@@ -9,7 +9,7 @@ import { applyAction as applyPokerAction } from "../shared/poker-action-reducer.
 import { decideTurnTimeout, stampTurnDeadline } from "../shared/poker-turn-timeout.mjs";
 
 const MIN_PLAYERS_TO_BOOTSTRAP = 2;
-const ENGINE_ACTIONS = new Set(["FOLD", "CHECK", "CALL", "RAISE"]);
+const ENGINE_ACTIONS = new Set(["FOLD", "CHECK", "CALL", "BET", "RAISE"]);
 
 function toInt(value) {
   if (!Number.isFinite(value)) {
@@ -259,6 +259,17 @@ export function applyCoreStateAction({ tableId, coreState, handId, userId, actio
       return { ok: true, accepted: false, changed: false, reason: "invalid_amount", stateVersion: coreState.version, coreState };
     }
     if (!Number.isFinite(stack) || raiseTo > stack + Number(liveState.betThisRoundByUserId?.[userId] ?? 0)) {
+      return { ok: true, accepted: false, changed: false, reason: "invalid_amount", stateVersion: coreState.version, coreState };
+    }
+  }
+
+  if (normalizedAction === "BET") {
+    const betAmount = toInt(amount);
+    const maxBetAmount = Number(legalInfo.maxBetAmount ?? 0);
+    if (!Number.isInteger(betAmount) || betAmount < 1 || betAmount > maxBetAmount) {
+      return { ok: true, accepted: false, changed: false, reason: "invalid_amount", stateVersion: coreState.version, coreState };
+    }
+    if (!Number.isFinite(stack) || betAmount > stack) {
       return { ok: true, accepted: false, changed: false, reason: "invalid_amount", stateVersion: coreState.version, coreState };
     }
   }
