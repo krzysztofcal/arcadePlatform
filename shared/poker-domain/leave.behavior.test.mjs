@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
+import { isStateStorageValid as realIsStateStorageValid } from "../../netlify/functions/_shared/poker-state-utils.mjs";
 
 const root = process.cwd();
 const loadExecutePokerLeave = (mocks) => {
@@ -92,6 +93,43 @@ const makeMocks = () => {
   ctx.mocks.updatePokerStateOptimistic = async () => ({ ok: false, reason: "conflict" });
   const executePokerLeave = loadExecutePokerLeave(ctx.mocks);
   await assert.rejects(() => executePokerLeave({ beginSql: ctx.beginSql, tableId, userId, requestId: "r4", klog: () => {} }), /state_conflict/);
+}
+
+{
+  const ctx = makeMocks();
+  ctx.state.value = {
+    tableId,
+    phase: "FLOP",
+    handId: "hand-flop-leave",
+    handSeed: "seed-flop-leave",
+    seats: [{ userId, seatNo: 1 }, { userId: "other-user", seatNo: 2 }],
+    stacks: { [userId]: 48, "other-user": 52 },
+    leftTableByUserId: {},
+    foldedByUserId: { [userId]: false, "other-user": false },
+    actedThisRoundByUserId: { [userId]: false, "other-user": false },
+    betThisRoundByUserId: { [userId]: 2, "other-user": 2 },
+    toCallByUserId: { [userId]: 0, "other-user": 0 },
+    contributionsByUserId: { [userId]: 2, "other-user": 2 },
+    communityDealt: 3,
+    community: ["3H", "AH", "7S"],
+  };
+  ctx.mocks.isStateStorageValid = realIsStateStorageValid;
+  ctx.mocks.applyLeaveTable = (s) => ({
+    state: {
+      ...s,
+      seats: s.seats.filter((seat) => seat.userId !== userId),
+      stacks: { "other-user": 52 },
+      leftTableByUserId: { ...s.leftTableByUserId, [userId]: true },
+      foldedByUserId: { ...s.foldedByUserId, [userId]: true },
+      actedThisRoundByUserId: { ...s.actedThisRoundByUserId, [userId]: true },
+    }
+  });
+  const executePokerLeave = loadExecutePokerLeave(ctx.mocks);
+  const result = await executePokerLeave({ beginSql: ctx.beginSql, tableId, userId, requestId: "r5", includeState: true, klog: () => {} });
+  assert.equal(result.ok, true);
+  assert.equal(result.cashedOut, 48);
+  assert.equal(result.state.state.communityDealt, 3);
+  assert.deepEqual(result.state.state.community, ["3H", "AH", "7S"]);
 }
 
 console.log("poker-domain leave behavior test passed");

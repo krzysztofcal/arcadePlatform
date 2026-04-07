@@ -47,6 +47,37 @@ const sanitizePersistedState = (stateInput) => {
   return sanitizePerHandArtifacts(rest);
 };
 
+const normalizeCardCodeForValidation = (cardCode) => {
+  if (typeof cardCode !== "string") return null;
+  const code = cardCode.trim().toUpperCase();
+  if (!/^(10|[2-9TJQKA])[CDHS]$/.test(code)) return null;
+  const suit = code.slice(-1);
+  const rankCode = code.slice(0, -1);
+  const rank = rankCode === "A"
+    ? 14
+    : rankCode === "K"
+      ? 13
+      : rankCode === "Q"
+        ? 12
+        : rankCode === "J"
+          ? 11
+          : rankCode === "T"
+            ? 10
+            : Number(rankCode);
+  if (!Number.isInteger(rank) || rank < 2 || rank > 14) return null;
+  return { r: rank, s: suit };
+};
+
+const normalizeStateForStorageValidation = (stateInput) => {
+  if (!isPlainObjectValue(stateInput)) return stateInput;
+  if (!Array.isArray(stateInput.community)) return stateInput;
+  const normalizedCommunity = stateInput.community.map((card) =>
+    typeof card === "string" ? normalizeCardCodeForValidation(card) : card
+  );
+  if (normalizedCommunity.some((card) => !card)) return stateInput;
+  return { ...stateInput, community: normalizedCommunity };
+};
+
 const isHandScopedForStorageValidation = (state) => {
   const handId = typeof state?.handId === "string" ? state.handId.trim() : "";
   if (handId) return true;
@@ -54,8 +85,9 @@ const isHandScopedForStorageValidation = (state) => {
 };
 
 const validatePersistedStateOrThrow = (state, makeErrorFn) => {
+  const normalizedState = normalizeStateForStorageValidation(state);
   const requireHandScopedData = isHandScopedForStorageValidation(state);
-  if (!isStateStorageValid(state, {
+  if (!isStateStorageValid(normalizedState, {
     requireNoDeck: true,
     requireHandSeed: requireHandScopedData,
     requireCommunityDealt: requireHandScopedData,
