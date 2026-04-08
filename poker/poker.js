@@ -741,7 +741,7 @@
       payoutUserIds.forEach(function(userId){
         var payoutRow = document.createElement('div');
         payoutRow.className = 'poker-showdown-flyout__row';
-        payoutRow.textContent = resolveUserLabel(userId, playersById) + ': +' + formatChips(winnerPayouts[userId]);
+        payoutRow.textContent = '+' + formatChips(winnerPayouts[userId]);
         payoutsListEl.appendChild(payoutRow);
       });
     }
