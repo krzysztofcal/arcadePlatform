@@ -500,6 +500,12 @@ export function createAcceptedBotStepExecutor({
   env = process.env,
   klog = () => {}
 } = {}) {
+  const verboseAutoplayLogs = env?.WS_BOT_AUTOPLAY_VERBOSE_LOGS === "1";
+  const logVerbose = (kind, payload) => {
+    if (!verboseAutoplayLogs) return;
+    klog(kind, payload);
+  };
+
   return async function runAcceptedBotStep({ tableId, trigger, requestId, frameTs }) {
     const baseLog = {
       tableId,
@@ -564,7 +570,7 @@ export function createAcceptedBotStepExecutor({
     const seatBotMap = buildSeatBotMap(turnSnapshot?.seats);
     const seatUserIdsInOrder = buildSeatUserIdsInOrder(privateState);
     const cfg = getBotAutoplayConfig(env);
-    klog("ws_bot_autoplay_loop_start", {
+    logVerbose("ws_bot_autoplay_loop_start", {
       ...baseLog,
       runtimeFlavor,
       ...buildDiagnosticSnapshot(state),
@@ -624,7 +630,7 @@ export function createAcceptedBotStepExecutor({
           const legal = computeLegalActions({ statePublic, userId });
           const legalSummary = summarizeLegalActions(legal?.actions);
           lastKnown = { ...lastKnown, stage: "turn_snapshot", state: statePublic, legalActionSummary: legalSummary };
-          klog("ws_bot_autoplay_turn_snapshot", {
+          logVerbose("ws_bot_autoplay_turn_snapshot", {
             ...baseLog,
             botTurnUserId: userId || null,
             legalActionSummary: legalSummary,
@@ -637,7 +643,7 @@ export function createAcceptedBotStepExecutor({
         chooseBotActionTrivial: (legalActions) => {
           const action = chooseBotActionTrivial(legalActions);
           lastKnown = { ...lastKnown, stage: "action_chosen", actionType: action?.type || null, actionAmount: action?.amount ?? null };
-          klog("ws_bot_autoplay_action_chosen", {
+          logVerbose("ws_bot_autoplay_action_chosen", {
             ...baseLog,
             botTurnUserId: typeof lastKnown?.state?.turnUserId === "string" ? lastKnown.state.turnUserId : null,
             actionType: action?.type || null,
@@ -649,7 +655,7 @@ export function createAcceptedBotStepExecutor({
         applyAction: (loopPrivateState, botAction) => {
           const safeState = withoutPrivateState(loopPrivateState);
           lastKnown = { ...lastKnown, stage: "apply_start", state: safeState, actionType: botAction?.type || null, actionAmount: botAction?.amount ?? null };
-          klog("ws_bot_autoplay_apply_start", {
+          logVerbose("ws_bot_autoplay_apply_start", {
             ...baseLog,
             botTurnUserId: typeof safeState?.turnUserId === "string" ? safeState.turnUserId : null,
             actionType: botAction?.type || null,
@@ -661,7 +667,7 @@ export function createAcceptedBotStepExecutor({
           const applied = applyRuntimeAction(loopPrivateState, botAction);
           const nextState = withoutPrivateState(applied?.state);
           lastKnown = { ...lastKnown, stage: "apply_result", state: nextState };
-          klog("ws_bot_autoplay_apply_result", {
+          logVerbose("ws_bot_autoplay_apply_result", {
             ...baseLog,
             botTurnUserId: typeof safeState?.turnUserId === "string" ? safeState.turnUserId : null,
             actionType: botAction?.type || null,
@@ -673,7 +679,7 @@ export function createAcceptedBotStepExecutor({
           return applied;
         },
         persistStep: async ({ botTurnUserId, botAction, botRequestId, fromState }) => {
-          klog("ws_bot_autoplay_persist_start", {
+          logVerbose("ws_bot_autoplay_persist_start", {
             ...baseLog,
             botTurnUserId: botTurnUserId || null,
             actionType: botAction?.type || null,
@@ -693,7 +699,7 @@ export function createAcceptedBotStepExecutor({
           });
 
           if (!applied?.accepted || applied?.replayed || !applied?.changed) {
-            klog("ws_bot_autoplay_persist_result", {
+            logVerbose("ws_bot_autoplay_persist_result", {
               ...baseLog,
               botTurnUserId: botTurnUserId || null,
               actionType: botAction?.type || null,
@@ -716,7 +722,7 @@ export function createAcceptedBotStepExecutor({
               restoreTableFromPersisted,
               broadcastResyncRequired
             });
-            klog("ws_bot_autoplay_persist_result", {
+            logVerbose("ws_bot_autoplay_persist_result", {
               ...baseLog,
               botTurnUserId: botTurnUserId || null,
               actionType: botAction?.type || null,
@@ -730,7 +736,7 @@ export function createAcceptedBotStepExecutor({
           const latestPrivateState = tableManager.persistedPokerState(tableId);
           const latestState = withoutPrivateState(latestPrivateState);
           lastKnown = { ...lastKnown, stage: "state_after_step", state: latestState };
-          klog("ws_bot_autoplay_persist_result", {
+          logVerbose("ws_bot_autoplay_persist_result", {
             ...baseLog,
             botTurnUserId: botTurnUserId || null,
             actionType: botAction?.type || null,
@@ -738,7 +744,7 @@ export function createAcceptedBotStepExecutor({
             ok: true,
             stateVersion: Number(applied.stateVersion)
           });
-          klog("ws_bot_autoplay_state_after_step", {
+          logVerbose("ws_bot_autoplay_state_after_step", {
             ...baseLog,
             botTurnUserId: botTurnUserId || null,
             actionType: botAction?.type || null,
@@ -757,7 +763,7 @@ export function createAcceptedBotStepExecutor({
       });
 
       if (botLoop?.botActionCount > 0 || botLoop?.botStopReason) {
-        klog("ws_bot_autoplay_loop_stop", {
+        logVerbose("ws_bot_autoplay_loop_stop", {
           ...baseLog,
           botActionCount: botLoop?.botActionCount || 0,
           reason: botLoop?.botStopReason || "not_attempted",

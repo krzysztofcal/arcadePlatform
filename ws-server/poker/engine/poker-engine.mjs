@@ -10,6 +10,7 @@ import { decideTurnTimeout, stampTurnDeadline } from "../shared/poker-turn-timeo
 
 const MIN_PLAYERS_TO_BOOTSTRAP = 2;
 const ENGINE_ACTIONS = new Set(["FOLD", "CHECK", "CALL", "BET", "RAISE"]);
+const BOT_REPLACEMENT_STACK = 100;
 
 function toInt(value) {
   if (!Number.isFinite(value)) {
@@ -177,6 +178,100 @@ export function buildNextHandStateFromSettled({ tableId, coreState, settledState
   });
 }
 
+function nextBotReplacementUserId({ seatNo, version, existingUserIds }) {
+  const base = `bot_auto_${Number(seatNo)}_${Number(version)}`;
+  let candidate = base;
+  let suffix = 1;
+  while (existingUserIds.has(candidate)) {
+    candidate = `${base}_${suffix}`;
+    suffix += 1;
+  }
+  existingUserIds.add(candidate);
+  return candidate;
+}
+
+export function replaceBrokeBotsForNextHand({ coreState, settledState, nextVersion }) {
+  if (!coreState || typeof coreState !== "object" || Array.isArray(coreState)) {
+    return { coreState, settledState };
+  }
+  if (!settledState || typeof settledState !== "object" || Array.isArray(settledState)) {
+    return { coreState, settledState };
+  }
+
+  const currentMembers = orderedSeatMembers(coreState);
+  const currentSeatDetails = coreState.seatDetailsByUserId && typeof coreState.seatDetailsByUserId === "object" && !Array.isArray(coreState.seatDetailsByUserId)
+    ? coreState.seatDetailsByUserId
+    : {};
+  const currentStacks = settledState.stacks && typeof settledState.stacks === "object" && !Array.isArray(settledState.stacks)
+    ? settledState.stacks
+    : {};
+
+  let changed = false;
+  let nextMembers = currentMembers.slice();
+  const nextSeats = { ...(coreState.seats || {}) };
+  const nextSeatDetails = { ...currentSeatDetails };
+  const nextStacks = { ...currentStacks };
+  const nextPublicStacks = coreState.publicStacks && typeof coreState.publicStacks === "object" && !Array.isArray(coreState.publicStacks)
+    ? { ...coreState.publicStacks }
+    : null;
+  const existingUserIds = new Set(nextMembers.map((member) => member.userId));
+
+  for (const member of currentMembers) {
+    const userId = member.userId;
+    if (nextSeatDetails?.[userId]?.isBot !== true) continue;
+    const stack = Number(nextStacks[userId] ?? 0);
+    if (!Number.isFinite(stack) || stack > 0) continue;
+
+    const replacementUserId = nextBotReplacementUserId({
+      seatNo: member.seat,
+      version: nextVersion,
+      existingUserIds
+    });
+
+    changed = true;
+    nextMembers = nextMembers.filter((entry) => entry.userId !== userId);
+    nextMembers.push({ userId: replacementUserId, seat: member.seat });
+    delete nextSeats[userId];
+    nextSeats[replacementUserId] = member.seat;
+
+    const oldDetails = nextSeatDetails[userId] && typeof nextSeatDetails[userId] === "object"
+      ? nextSeatDetails[userId]
+      : { isBot: true, botProfile: null, leaveAfterHand: false };
+    delete nextSeatDetails[userId];
+    nextSeatDetails[replacementUserId] = {
+      ...oldDetails,
+      isBot: true,
+      leaveAfterHand: false
+    };
+
+    delete nextStacks[userId];
+    nextStacks[replacementUserId] = BOT_REPLACEMENT_STACK;
+    if (nextPublicStacks) {
+      delete nextPublicStacks[userId];
+      nextPublicStacks[replacementUserId] = BOT_REPLACEMENT_STACK;
+    }
+  }
+
+  if (!changed) {
+    return { coreState, settledState };
+  }
+
+  nextMembers.sort((a, b) => a.seat - b.seat || a.userId.localeCompare(b.userId));
+  return {
+    coreState: {
+      ...coreState,
+      members: nextMembers,
+      seats: nextSeats,
+      seatDetailsByUserId: nextSeatDetails,
+      ...(nextPublicStacks ? { publicStacks: nextPublicStacks } : {})
+    },
+    settledState: {
+      ...settledState,
+      stacks: nextStacks
+    }
+  };
+}
+
 export function bootstrapCoreStateHand({ tableId, coreState, nowMs = Date.now() }) {
   const existingLiveState = asLiveHandState(coreState?.pokerState);
   if (existingLiveState) {
@@ -294,13 +389,29 @@ export function applyCoreStateAction({ tableId, coreState, handId, userId, actio
   }
 
   const nextVersion = coreState.version + 1;
+  let rolloverCoreState = coreState;
+  let rolloverSettledState = applied.state;
+  if (applied.state?.phase === "SETTLED") {
+    const recycled = replaceBrokeBotsForNextHand({
+      coreState,
+      settledState: applied.state,
+      nextVersion
+    });
+    rolloverCoreState = recycled.coreState;
+    rolloverSettledState = recycled.settledState;
+  }
   const rawNextPokerState = applied.state?.phase === "SETTLED"
-    ? buildNextHandStateFromSettled({ tableId, coreState, settledState: applied.state, nextVersion }) || applied.state
+    ? buildNextHandStateFromSettled({
+      tableId,
+      coreState: rolloverCoreState,
+      settledState: rolloverSettledState,
+      nextVersion
+    }) || rolloverSettledState
     : applied.state;
   const nextPokerState = stampTurnDeadline(rawNextPokerState, nowMs);
 
   const nextCoreState = {
-    ...coreState,
+    ...rolloverCoreState,
     version: nextVersion,
     pokerState: nextPokerState
   };
