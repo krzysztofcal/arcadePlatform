@@ -12,9 +12,12 @@
   var PENDING_RETRY_DELAYS = [150, 300, 600, 900];
   var PENDING_RETRY_BUDGET_MS = 2000;
   var UI_VERSION = '2025-02-19';
+  var SHOWDOWN_FLYOUT_VISIBLE_MS = 4500;
   var POKER_DUMP_PATTERNS = [/\bpoker_[a-z0-9_]+\b/i, /\bpoker_rt_[a-z0-9_]+\b/i, /\bpoker_ws_[a-z0-9_]+\b/i, /\bws_[a-z0-9_]+\b/i, /\"\/.netlify\/functions\/poker-[^\"\s]+/i, /\/poker\//i];
 
   var state = { token: null };
+  var showdownFlyoutHideTimer = null;
+  var lastShowdownFlyoutKey = '';
 
   function klog(kind, data){
     try {
@@ -612,6 +615,170 @@
     return labels.length ? labels.join(', ') : '—';
   }
 
+  function resolveWinnerUserId(entry){
+    var userId = null;
+    if (typeof entry === 'string'){
+      userId = entry.trim();
+    } else if (entry && typeof entry === 'object'){
+      userId = entry.userId || entry.id || entry.uid || '';
+      if (typeof userId === 'string') userId = userId.trim();
+    }
+    return userId || '';
+  }
+
+  function buildShowdownWinnerPayoutMap(showdown, handSettlement){
+    var payouts = {};
+    var winnerSet = new Set();
+    var winners = showdown && Array.isArray(showdown.winners) ? showdown.winners : [];
+    winners.forEach(function(winner){
+      var winnerUserId = resolveWinnerUserId(winner);
+      if (winnerUserId) winnerSet.add(winnerUserId);
+    });
+
+    if (handSettlement && isPlainObject(handSettlement.payouts)){
+      Object.keys(handSettlement.payouts).forEach(function(userId){
+        var normalizedUserId = typeof userId === 'string' ? userId.trim() : '';
+        if (!normalizedUserId || (winnerSet.size > 0 && !winnerSet.has(normalizedUserId))) return;
+        var amount = toFiniteOrNull(handSettlement.payouts[userId]);
+        if (amount == null || amount <= 0) return;
+        payouts[normalizedUserId] = (payouts[normalizedUserId] || 0) + amount;
+      });
+      if (Object.keys(payouts).length > 0){
+        return payouts;
+      }
+    }
+
+    var pots = showdown && Array.isArray(showdown.potsAwarded) ? showdown.potsAwarded : [];
+    pots.forEach(function(pot){
+      var amount = toFiniteOrNull(pot && pot.amount);
+      if (amount == null || amount <= 0) return;
+      var potWinnersRaw = pot && Array.isArray(pot.winners) ? pot.winners : [];
+      var potWinners = [];
+      var seenWinnerIds = new Set();
+      potWinnersRaw.forEach(function(entry){
+        var winnerUserId = resolveWinnerUserId(entry);
+        if (!winnerUserId || seenWinnerIds.has(winnerUserId)) return;
+        seenWinnerIds.add(winnerUserId);
+        potWinners.push(winnerUserId);
+      });
+      if (!potWinners.length) return;
+      var baseShare = Math.floor(amount / potWinners.length);
+      var remainder = amount - (baseShare * potWinners.length);
+      potWinners.forEach(function(userId, idx){
+        var share = baseShare + (idx < remainder ? 1 : 0);
+        if (share <= 0) return;
+        payouts[userId] = (payouts[userId] || 0) + share;
+      });
+    });
+    return payouts;
+  }
+
+  function hideShowdownFlyout(){
+    var flyoutEl = document.getElementById('pokerShowdownFlyout');
+    if (!flyoutEl) return;
+    if (showdownFlyoutHideTimer){
+      clearTimeout(showdownFlyoutHideTimer);
+      showdownFlyoutHideTimer = null;
+    }
+    flyoutEl.classList.remove('poker-showdown-flyout--visible');
+    flyoutEl.hidden = true;
+  }
+
+  function renderShowdownFlyout(opts){
+    var flyoutEl = document.getElementById('pokerShowdownFlyout');
+    if (!flyoutEl) return;
+    var viewState = opts && opts.state ? opts.state : {};
+    var showdown = viewState && isPlainObject(viewState.showdown) ? viewState.showdown : null;
+    if (!showdown){
+      hideShowdownFlyout();
+      return;
+    }
+
+    var winners = Array.isArray(showdown.winners) ? showdown.winners : [];
+    var winnersSignature = winners.map(function(entry){ return resolveWinnerUserId(entry) || '?'; }).join(',');
+    var handId = typeof showdown.handId === 'string' ? showdown.handId.trim() : '';
+    var awardedAt = typeof showdown.awardedAt === 'string' ? showdown.awardedAt.trim() : '';
+    var tableIdValue = opts && typeof opts.tableId === 'string' ? opts.tableId.trim() : '';
+    var dedupeCore = handId || (awardedAt + '|' + winnersSignature + '|' + String(showdown.reason || ''));
+    var dedupeKey = (tableIdValue || '-') + '|' + dedupeCore;
+    if (!dedupeCore) return;
+    if (lastShowdownFlyoutKey && lastShowdownFlyoutKey === dedupeKey) return;
+    lastShowdownFlyoutKey = dedupeKey;
+
+    var playersById = opts && opts.playersById ? opts.playersById : {};
+    var winnerPayouts = buildShowdownWinnerPayoutMap(showdown, viewState && isPlainObject(viewState.handSettlement) ? viewState.handSettlement : null);
+    flyoutEl.textContent = '';
+
+    var titleEl = document.createElement('div');
+    titleEl.className = 'poker-showdown-flyout__title';
+    titleEl.textContent = t('pokerShowdownFlyoutTitle', 'Hand settled');
+    flyoutEl.appendChild(titleEl);
+
+    var winnersLabelEl = document.createElement('div');
+    winnersLabelEl.className = 'poker-showdown-flyout__label';
+    winnersLabelEl.textContent = t('pokerShowdownWinnersLabel', 'Winners');
+    flyoutEl.appendChild(winnersLabelEl);
+
+    var winnersValueEl = document.createElement('div');
+    winnersValueEl.className = 'poker-showdown-flyout__value';
+    winnersValueEl.textContent = formatWinnerList(winners, playersById);
+    flyoutEl.appendChild(winnersValueEl);
+
+    var payoutsLabelEl = document.createElement('div');
+    payoutsLabelEl.className = 'poker-showdown-flyout__label';
+    payoutsLabelEl.textContent = t('pokerShowdownFlyoutPayouts', 'Payouts');
+    flyoutEl.appendChild(payoutsLabelEl);
+
+    var payoutsListEl = document.createElement('div');
+    payoutsListEl.className = 'poker-showdown-flyout__list';
+    var payoutUserIds = Object.keys(winnerPayouts);
+    if (!payoutUserIds.length){
+      var emptyPayoutEl = document.createElement('div');
+      emptyPayoutEl.className = 'poker-showdown-flyout__row';
+      emptyPayoutEl.textContent = t('pokerShowdownNoPots', 'No pot award data');
+      payoutsListEl.appendChild(emptyPayoutEl);
+    } else {
+      payoutUserIds.forEach(function(userId){
+        var payoutRow = document.createElement('div');
+        payoutRow.className = 'poker-showdown-flyout__row';
+        payoutRow.textContent = resolveUserLabel(userId, playersById) + ': +' + formatChips(winnerPayouts[userId]);
+        payoutsListEl.appendChild(payoutRow);
+      });
+    }
+    flyoutEl.appendChild(payoutsListEl);
+
+    var reason = typeof showdown.reason === 'string' ? showdown.reason.trim().toLowerCase() : '';
+    var canShowCards = reason !== 'all_folded';
+    var viewerHoleCards = opts && Array.isArray(opts.viewerHoleCards) ? opts.viewerHoleCards.slice(0, 2) : [];
+    var viewerId = opts && typeof opts.currentUserId === 'string' ? opts.currentUserId.trim() : '';
+    var viewerWon = !!(viewerId && winners.some(function(entry){ return resolveWinnerUserId(entry) === viewerId; }));
+    if (canShowCards && viewerWon && viewerHoleCards.length === 2){
+      var cardsLabelEl = document.createElement('div');
+      cardsLabelEl.className = 'poker-showdown-flyout__label';
+      cardsLabelEl.textContent = t('pokerShowdownFlyoutCards', 'Winner cards');
+      flyoutEl.appendChild(cardsLabelEl);
+
+      var cardsWrapEl = document.createElement('div');
+      cardsWrapEl.className = 'poker-showdown-flyout__cards';
+      cardsWrapEl.appendChild(buildCardElement(viewerHoleCards[0] || {}));
+      cardsWrapEl.appendChild(buildCardElement(viewerHoleCards[1] || {}));
+      flyoutEl.appendChild(cardsWrapEl);
+    }
+
+    if (showdownFlyoutHideTimer){
+      clearTimeout(showdownFlyoutHideTimer);
+      showdownFlyoutHideTimer = null;
+    }
+    flyoutEl.hidden = false;
+    void flyoutEl.offsetWidth;
+    flyoutEl.classList.add('poker-showdown-flyout--visible');
+    showdownFlyoutHideTimer = setTimeout(function(){
+      flyoutEl.classList.remove('poker-showdown-flyout--visible');
+      flyoutEl.hidden = true;
+      showdownFlyoutHideTimer = null;
+    }, SHOWDOWN_FLYOUT_VISIBLE_MS);
+  }
+
   function generateRequestId(){
     return 'ui-' + Date.now() + '-' + Math.random().toString(36).substring(2, 8);
   }
@@ -1043,8 +1210,10 @@
       if (totalRowEl) totalRowEl.hidden = true;
       if (metaEl) metaEl.hidden = true;
       if (metaEl) metaEl.textContent = '';
+      hideShowdownFlyout();
       return;
     }
+    renderShowdownFlyout(opts || {});
     panel.hidden = false;
 
     if (winnersEl){
@@ -3347,7 +3516,13 @@
       renderCommunityBoard(gameState);
       renderHoleCards(data.myHoleCards);
       renderBestViewerHand(data.myHoleCards, gameState && Array.isArray(gameState.community) ? gameState.community : []);
-      renderShowdownPanel({ state: gameState, playersById: buildPlayersById(seats) });
+      renderShowdownPanel({
+        state: gameState,
+        playersById: buildPlayersById(seats),
+        tableId: tableId,
+        currentUserId: currentUserId,
+        viewerHoleCards: data.myHoleCards
+      });
       renderTurnTimer(gameState);
       if (versionEl) versionEl.textContent = stateObj.version != null ? stateObj.version : '-';
       if (jsonBox) jsonBox.textContent = JSON.stringify(gameState, null, 2);
