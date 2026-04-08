@@ -1311,7 +1311,7 @@ test("restart and resync hydrate latest persisted WS mutation", async () => {
   }
 });
 
-test("resync after persistence conflict rehydrates persisted source of truth", async () => {
+test("recoverable persistence conflict does not force resync and explicit resync rehydrates persisted source of truth", async () => {
   const secret = "conflict-resync-secret";
   const tableId = "table_resync_after_conflict";
   const persisted = {
@@ -1354,8 +1354,8 @@ test("resync after persistence conflict rehydrates persisted source of truth", a
     sendFrame(ws, { version: "1.0", type: "act", requestId: "act-conflict-resync", ts: "2026-02-28T03:00:02Z", payload: { tableId, handId, action: "fold" } });
     const rejected = await nextMessageOfType(ws, "commandResult", { skipTypes: ["stateSnapshot", "statePatch"] });
     assert.equal(rejected.payload.status, "rejected");
-    const resyncReq = await nextMessageOfType(ws, "resync");
-    assert.equal(resyncReq.payload.reason, "persistence_conflict");
+    const maybeImmediateRecovery = await attemptMessage(ws, 400);
+    assert.notEqual(maybeImmediateRecovery?.type, "resync");
 
     sendFrame(ws, { version: "1.0", type: "resync", requestId: "resync-after-conflict", ts: "2026-02-28T03:00:03Z", payload: { tableId } });
     await nextMessageOfType(ws, "table_state", { skipTypes: ["commandResult"] });
