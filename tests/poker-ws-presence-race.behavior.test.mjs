@@ -23,6 +23,7 @@ function buildHarness(){
     var lastRendered = null;
     var isSeated = false;
     var stopPollingCalls = 0;
+    var wsAppliedSnapshotSeq = 0;
     function klog(){}
     function isCurrentUserSeated(){ return false; }
     function renderTable(data){ renderCount++; lastRendered = data; }
