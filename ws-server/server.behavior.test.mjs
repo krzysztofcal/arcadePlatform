@@ -3392,6 +3392,7 @@ test("WS act optimistic conflict returns deterministic rejection and restored sn
     sendFrame(ws, { version: "1.0", type: "act", requestId: "act-conflict", ts: "2026-02-28T02:10:02Z", payload: { tableId, handId, action: "fold" } });
     let rejected = null;
     let restored = null;
+    let highestSnapshotVersion = 0;
     const conflictDeadline = Date.now() + 10000;
     while ((!rejected || !restored) && Date.now() < conflictDeadline) {
       const remaining = Math.max(50, conflictDeadline - Date.now());
@@ -3400,12 +3401,16 @@ test("WS act optimistic conflict returns deterministic rejection and restored sn
         rejected = frame;
         continue;
       }
-      if (!restored && frame?.type === "stateSnapshot") {
-        restored = frame;
+      if (frame?.type === "stateSnapshot") {
+        const version = Number(frame?.payload?.stateVersion || 0);
+        if (version > highestSnapshotVersion) highestSnapshotVersion = version;
+        if (!restored && version === forced.tables[tableId].stateRow.version) {
+          restored = frame;
+        }
       }
     }
     assert.ok(rejected, "expected commandResult after optimistic conflict");
-    assert.ok(restored, "expected restored stateSnapshot after optimistic conflict");
+    assert.ok(restored, `expected restored stateSnapshot after optimistic conflict (max_seen=${highestSnapshotVersion})`);
     assert.equal(rejected.payload.status, "rejected");
     assert.equal(rejected.payload.reason, "conflict");
     assert.equal(restored.type, "stateSnapshot");
