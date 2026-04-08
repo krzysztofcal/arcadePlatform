@@ -1211,7 +1211,8 @@ wss.on("connection", (ws) => {
           loadAuthoritativeLeaveExecutor,
           sendCommandResult,
           broadcastStateSnapshots,
-          broadcastTableState
+          broadcastTableState,
+          klog: klogSafe
         })
       });
       return;

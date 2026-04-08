@@ -31,6 +31,7 @@ test('handleStartHandCommand accepts and broadcasts on persisted change', async 
 
 test('handleStartHandCommand does not autoplay on rejected or persist-conflict outcomes', async () => {
   const autoplayCalls = [];
+  const conflictCalls = { snapshots: 0, resync: 0 };
 
   await handleStartHandCommand({
     frame: { __resolvedTableId: 't1', requestId: 'r4' },
@@ -67,12 +68,40 @@ test('handleStartHandCommand does not autoplay on rejected or persist-conflict o
     sendCommandResult: () => {},
     persistMutatedState: async () => ({ ok: false, reason: 'persistence_conflict' }),
     restoreTableFromPersisted: async () => ({ ok: true }),
-    broadcastResyncRequired: () => {},
-    broadcastStateSnapshots: () => {},
+    broadcastResyncRequired: () => { conflictCalls.resync += 1; },
+    broadcastStateSnapshots: () => { conflictCalls.snapshots += 1; },
     scheduleBotStep: () => { autoplayCalls.push('conflict'); }
   });
 
   assert.deepEqual(autoplayCalls, []);
+  assert.equal(conflictCalls.snapshots, 1);
+  assert.equal(conflictCalls.resync, 0);
+});
+
+test('handleStartHandCommand emits resync only when restore fails after persist conflict', async () => {
+  const calls = { snapshots: 0, resync: 0 };
+  await handleStartHandCommand({
+    frame: { __resolvedTableId: 't1', requestId: 'r5b' },
+    ws: {},
+    connState: { session: { userId: 'u1' } },
+    tableManager: {
+      ensureTableLoaded: async () => ({ ok: true }),
+      tableSnapshot: () => ({ youSeat: 1 }),
+      persistedStateVersion: () => 2,
+      bootstrapHand: () => ({ ok: true, changed: true, bootstrap: 'started' })
+    },
+    ensureTableLoadedErrorMapper: (x) => x,
+    sendError: () => assert.fail('unexpected sendError'),
+    sendCommandResult: () => {},
+    persistMutatedState: async () => ({ ok: false, reason: 'persistence_conflict' }),
+    restoreTableFromPersisted: async () => ({ ok: false, reason: 'restore_failed' }),
+    broadcastResyncRequired: () => { calls.resync += 1; },
+    broadcastStateSnapshots: () => { calls.snapshots += 1; },
+    scheduleBotStep: () => assert.fail('unexpected autoplay')
+  });
+
+  assert.equal(calls.snapshots, 0);
+  assert.equal(calls.resync, 1);
 });
 
 test('handleStartHandCommand rejects non-seated caller without persist or broadcast', async () => {

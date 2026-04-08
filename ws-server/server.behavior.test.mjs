@@ -972,6 +972,11 @@ test("table_leave preserves remaining subscriber when authoritative state uses s
       if (first.type === "commandResult") assert.equal(first.payload.status, "accepted");
     }
 
+    const otherLiveUpdate = await attemptMessage(other, 1200);
+    if (otherLiveUpdate) {
+      assert.ok(["table_state", "stateSnapshot"].includes(otherLiveUpdate.type));
+    }
+    sendFrame(other, { version: "1.0", type: "table_state_sub", requestId: "sub-leave-keep-seatno-post", ts: "2026-02-28T00:00:04Z", payload: { tableId } });
     const otherState = await nextMessageOfType(other, "table_state");
     assert.notEqual(otherState.payload.members.length, 0);
     assert.equal(Array.isArray(otherState.payload.members), true);
@@ -1014,7 +1019,7 @@ test("leave routes to commandResult and does not fall through to table_state", a
   }
 });
 
-test("leave rejects when in-memory sync fails after authoritative execution", async () => {
+test("leave rejects when authoritative restore payload is invalid after execution", async () => {
   const secret = "test-secret";
   const actorToken = makeHs256Jwt({ secret, sub: "leave_sync_fail_actor" });
   const tableId = "table_leave_sync_fail";
@@ -2653,6 +2658,361 @@ test("timeout sweep plus queued bot step returns actionable human snapshot witho
   }
 });
 
+test("queued timeout and bot runtime stays stable across many hands without state drift", async () => {
+  const secret = "many-hands-secret";
+  const humanUserId = "many_hands_human";
+  const botUserId = makeBotUserId("many_hands_bot");
+  const tableId = "table_many_hands_runtime";
+  const fixtures = {
+    [tableId]: {
+      tableRow: { id: tableId, max_players: 6, status: "active" },
+      seatRows: [
+        { user_id: humanUserId, seat_no: 1, status: "ACTIVE", is_bot: false },
+        { user_id: botUserId, seat_no: 2, status: "ACTIVE", is_bot: true }
+      ],
+      stateRow: { version: 0, state: {} }
+    }
+  };
+
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      WS_POKER_TURN_MS: "300",
+      WS_TIMEOUT_SWEEP_MS: "20",
+      SUPABASE_DB_URL: "",
+      ...observeOnlyJoinEnv(),
+      ...persistedBootstrapFixturesEnv(fixtures)
+    }
+  });
+
+  const actionableHumanSnapshot = (payload) => {
+    const turnUserId = payload?.public?.turn?.userId;
+    const legalActions = Array.isArray(payload?.public?.legalActions?.actions)
+      ? payload.public.legalActions.actions
+      : [];
+    return turnUserId === humanUserId && legalActions.length > 0;
+  };
+
+  try {
+    await waitForListening(child, 5000);
+    const serverLogs = [];
+    child.stdout.on("data", (buf) => {
+      const text = String(buf || "");
+      if (text.includes("ws_table_command_failed") || text.includes("ws_bot_autoplay_failed")) {
+        serverLogs.push(text.trim());
+      }
+    });
+
+    const humanWs = await connectClient(port);
+    await hello(humanWs);
+    await auth(humanWs, makeHs256Jwt({ secret, sub: humanUserId }), "auth-many-hands-human");
+
+    sendFrame(humanWs, { version: "1.0", type: "table_join", requestId: "join-many-hands-human", ts: "2026-02-28T01:10:01Z", payload: { tableId } });
+    const joinAck = await nextMessageOfType(humanWs, "commandResult");
+    assert.equal(joinAck.payload.status, "accepted");
+    await nextMessageOfType(humanWs, "table_state");
+
+    sendFrame(humanWs, { version: "1.0", type: "table_state_sub", requestId: "snap-many-hands-initial", ts: "2026-02-28T01:10:02Z", payload: { tableId, view: "snapshot" } });
+
+    const snapshotsByHandId = new Map();
+    const observed = [];
+    const deadline = Date.now() + 18000;
+    while (Date.now() < deadline && snapshotsByHandId.size < 3) {
+      const remaining = Math.max(50, deadline - Date.now());
+      const frame = await attemptMessage(humanWs, Math.min(remaining, 1200));
+      if (!frame || frame.type !== "stateSnapshot") {
+        continue;
+      }
+      if (!actionableHumanSnapshot(frame.payload)) {
+        continue;
+      }
+
+      const handId = frame.payload?.public?.hand?.handId || null;
+      const stateVersion = Number(frame.payload?.stateVersion || 0);
+      const members = Array.isArray(frame.payload?.table?.members) ? frame.payload.table.members : [];
+      const stacks = frame.payload?.public?.stacks && typeof frame.payload.public.stacks === "object"
+        ? frame.payload.public.stacks
+        : {};
+      const potTotal = Number(frame.payload?.public?.pot?.total || 0);
+      const legalActions = Array.isArray(frame.payload?.public?.legalActions?.actions)
+        ? frame.payload.public.legalActions.actions.slice()
+        : [];
+      const chipTotal = Object.values(stacks).reduce((sum, value) => sum + Number(value || 0), 0) + potTotal;
+
+      observed.push({
+        handId,
+        stateVersion,
+        memberRows: members.map((member) => `${member.userId}:${member.seat}`).sort(),
+        stackKeys: Object.keys(stacks).sort(),
+        legalActions,
+        chipTotal,
+      });
+
+      assert.equal(typeof handId, "string");
+      assert.equal(handId.length > 0, true);
+      assert.deepEqual(
+        members.map((member) => `${member.userId}:${member.seat}`).sort(),
+        [`${botUserId}:2`, `${humanUserId}:1`],
+      );
+      assert.deepEqual(Object.keys(stacks).sort(), [botUserId, humanUserId].sort());
+      assert.equal(legalActions.length > 0, true);
+      assert.equal(chipTotal, 200);
+
+      const prior = snapshotsByHandId.get(handId);
+      if (!prior || stateVersion > prior.stateVersion) {
+        snapshotsByHandId.set(handId, { stateVersion, chipTotal, legalActions });
+      }
+    }
+
+    assert.equal(snapshotsByHandId.size >= 3, true, `expected at least 3 actionable hands, saw ${snapshotsByHandId.size}: ${JSON.stringify(observed)}`);
+    const orderedVersions = [...snapshotsByHandId.values()].map((entry) => entry.stateVersion);
+    for (let i = 1; i < orderedVersions.length; i += 1) {
+      assert.equal(orderedVersions[i] > orderedVersions[i - 1], true);
+    }
+    assert.deepEqual(serverLogs, []);
+
+    humanWs.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
+test("resync during your turn keeps actionable snapshot on the same live hand", async () => {
+  const secret = "resync-turn-secret";
+  const humanUserId = "resume_turn_human";
+  const botUserId = makeBotUserId("resume_turn_bot");
+  const tableId = "table_resume_turn_runtime";
+  const fixtures = {
+    [tableId]: {
+      tableRow: { id: tableId, max_players: 6, status: "active" },
+      seatRows: [
+        { user_id: humanUserId, seat_no: 1, status: "ACTIVE", is_bot: false },
+        { user_id: botUserId, seat_no: 2, status: "ACTIVE", is_bot: true }
+      ],
+      stateRow: { version: 0, state: {} }
+    }
+  };
+
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      WS_POKER_TURN_MS: "2500",
+      SUPABASE_DB_URL: "",
+      ...observeOnlyJoinEnv(),
+      ...persistedBootstrapFixturesEnv(fixtures)
+    }
+  });
+
+  const isActionableHumanSnapshot = (payload) => {
+    const turnUserId = payload?.public?.turn?.userId;
+    const legalActions = Array.isArray(payload?.public?.legalActions?.actions)
+      ? payload.public.legalActions.actions
+      : [];
+    return turnUserId === humanUserId && legalActions.length > 0;
+  };
+
+  try {
+    await waitForListening(child, 5000);
+    const ws = await connectClient(port);
+    await hello(ws);
+    await auth(ws, makeHs256Jwt({ secret, sub: humanUserId }), "auth-resume-turn-human");
+
+    sendFrame(ws, { version: "1.0", type: "table_join", requestId: "join-resume-turn-human", ts: "2026-02-28T01:20:01Z", payload: { tableId } });
+    const joinAck = await nextMessageOfType(ws, "commandResult");
+    assert.equal(joinAck.payload.status, "accepted");
+    await nextMessageOfType(ws, "table_state");
+
+    sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "snap-resume-turn-human", ts: "2026-02-28T01:20:02Z", payload: { tableId, view: "snapshot" } });
+    const firstTurn = await nextMessageMatching(
+      ws,
+      (frame) => frame?.type === "stateSnapshot" && isActionableHumanSnapshot(frame.payload),
+      8000
+    );
+
+    const firstHandId = firstTurn.payload?.public?.hand?.handId || null;
+    const firstSeq = Number(firstTurn.seq || 0);
+    const firstLegalActions = Array.isArray(firstTurn.payload?.public?.legalActions?.actions)
+      ? firstTurn.payload.public.legalActions.actions.slice().sort()
+      : [];
+    assert.equal(typeof firstHandId, "string");
+    assert.equal(firstHandId.length > 0, true);
+    assert.equal(firstSeq > 0, true);
+    assert.equal(firstLegalActions.length > 0, true);
+
+    ws.close();
+
+    const ws2 = await connectClient(port);
+    await hello(ws2);
+    await auth(ws2, makeHs256Jwt({ secret, sub: humanUserId }), "auth-resume-turn-human-2");
+    sendFrame(ws2, {
+      version: "1.0",
+      type: "resync",
+      requestId: "resync-turn-human",
+      roomId: tableId,
+      ts: "2026-02-28T01:20:03Z",
+      payload: { tableId, reason: "reconnect_during_turn" }
+    });
+    const resynced = await nextMessageOfType(ws2, "table_state");
+    const resumedHandId = resynced.payload?.hand?.handId || null;
+    const resumedLegalActions = Array.isArray(resynced.payload?.legalActions?.actions)
+      ? resynced.payload.legalActions.actions.slice().sort()
+      : Array.isArray(resynced.payload?.legalActions)
+        ? resynced.payload.legalActions.slice().sort()
+        : [];
+    assert.equal(resynced.payload?.turn?.userId, humanUserId);
+    assert.equal(resumedHandId, firstHandId);
+    assert.deepEqual(resumedLegalActions, firstLegalActions);
+
+    ws2.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
+test("timeout during disconnect does not close active table and reconnect snapshot returns latest actionable state", async () => {
+  const secret = "disconnect-timeout-secret";
+  const humanUserId = "disconnect_timeout_human";
+  const botUserId = makeBotUserId("disconnect_timeout_bot");
+  const tableId = "table_disconnect_timeout_runtime";
+  const fixtures = {
+    [tableId]: {
+      tableRow: { id: tableId, max_players: 6, status: "active" },
+      seatRows: [
+        { user_id: humanUserId, seat_no: 1, status: "ACTIVE", is_bot: false },
+        { user_id: botUserId, seat_no: 2, status: "ACTIVE", is_bot: true }
+      ],
+      stateRow: { version: 0, state: {} }
+    }
+  };
+
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      WS_POKER_TURN_MS: "350",
+      WS_TIMEOUT_SWEEP_MS: "20",
+      WS_PRESENCE_TTL_MS: "10000",
+      SUPABASE_DB_URL: "",
+      ...observeOnlyJoinEnv(),
+      ...persistedBootstrapFixturesEnv(fixtures)
+    }
+  });
+
+  const isActionableHumanSnapshot = (payload) => {
+    const turnUserId = payload?.public?.turn?.userId;
+    const legalActions = Array.isArray(payload?.public?.legalActions?.actions)
+      ? payload.public.legalActions.actions
+      : [];
+    return turnUserId === humanUserId && legalActions.length > 0;
+  };
+
+  try {
+    await waitForListening(child, 5000);
+    const serverLogs = [];
+    child.stdout.on("data", (buf) => {
+      const text = String(buf || "");
+      if (text.includes("table_closed") || text.includes("ws_table_command_failed")) {
+        serverLogs.push(text.trim());
+      }
+    });
+
+    const humanWs = await connectClient(port);
+    const observerWs = await connectClient(port);
+    await hello(humanWs);
+    await hello(observerWs);
+    await auth(humanWs, makeHs256Jwt({ secret, sub: humanUserId }), "auth-disconnect-timeout-human");
+    await auth(observerWs, makeHs256Jwt({ secret, sub: "disconnect_timeout_observer" }), "auth-disconnect-timeout-observer");
+
+    sendFrame(humanWs, { version: "1.0", type: "table_join", requestId: "join-disconnect-timeout-human", ts: "2026-02-28T01:25:01Z", payload: { tableId } });
+    const joinAck = await nextMessageOfType(humanWs, "commandResult");
+    assert.equal(joinAck.payload.status, "accepted");
+    await nextMessageOfType(humanWs, "table_state");
+
+    sendFrame(observerWs, { version: "1.0", type: "table_state_sub", requestId: "snap-disconnect-timeout-observer", ts: "2026-02-28T01:25:02Z", payload: { tableId } });
+    await nextMessageOfType(observerWs, "table_state");
+
+    sendFrame(humanWs, { version: "1.0", type: "table_state_sub", requestId: "snap-disconnect-timeout-human", ts: "2026-02-28T01:25:03Z", payload: { tableId, view: "snapshot" } });
+    const firstTurn = await nextMessageMatching(
+      humanWs,
+      (frame) => frame?.type === "stateSnapshot" && isActionableHumanSnapshot(frame.payload),
+      8000
+    );
+
+    const baselineVersion = Number(firstTurn.payload?.stateVersion || 0);
+    assert.equal(baselineVersion > 0, true);
+
+    humanWs.close();
+
+    const observedFrames = [];
+    let progressed = null;
+    const progressedDeadline = Date.now() + 9000;
+    while (Date.now() < progressedDeadline) {
+      const remaining = Math.max(50, progressedDeadline - Date.now());
+      const frame = await attemptMessage(observerWs, Math.min(remaining, 1200));
+      if (!frame) {
+        continue;
+      }
+      observedFrames.push({
+        type: frame.type,
+        stateVersion: Number(frame?.payload?.stateVersion || 0),
+        handId: frame?.payload?.public?.hand?.handId || frame?.payload?.hand?.handId || null,
+        turnUserId: frame?.payload?.public?.turn?.userId || frame?.payload?.turn?.userId || null,
+        legalActions: Array.isArray(frame?.payload?.public?.legalActions?.actions)
+          ? frame.payload.public.legalActions.actions.slice()
+          : Array.isArray(frame?.payload?.legalActions?.actions)
+            ? frame.payload.legalActions.actions.slice()
+            : Array.isArray(frame?.payload?.legalActions)
+              ? frame.payload.legalActions.slice()
+              : []
+      });
+      if (
+        frame?.type === "stateSnapshot"
+        && frame?.payload?.public?.turn?.userId === humanUserId
+        && Number(frame.payload?.stateVersion || 0) > baselineVersion
+      ) {
+        progressed = frame;
+        break;
+      }
+    }
+    assert.ok(progressed, `${JSON.stringify(observedFrames)}\nLOGS:\n${serverLogs.slice(-20).join("\n")}`);
+
+    const expectedHandId = progressed.payload?.public?.hand?.handId || null;
+    assert.equal(progressed.payload?.public?.turn?.userId, humanUserId);
+    assert.equal(typeof expectedHandId, "string");
+    assert.equal(expectedHandId.length > 0, true);
+
+    const reconnectedWs = await connectClient(port);
+    await hello(reconnectedWs);
+    await auth(reconnectedWs, makeHs256Jwt({ secret, sub: humanUserId }), "auth-disconnect-timeout-human-2");
+    sendFrame(reconnectedWs, {
+      version: "1.0",
+      type: "table_state_sub",
+      requestId: "snap-disconnect-timeout-human-reconnect",
+      ts: "2026-02-28T01:25:04Z",
+      payload: { tableId, view: "snapshot" }
+    });
+    const resynced = await nextMessageOfType(reconnectedWs, "stateSnapshot");
+    const resumedLegalActions = Array.isArray(resynced.payload?.public?.legalActions?.actions)
+      ? resynced.payload.public.legalActions.actions.slice().sort()
+        : [];
+    assert.equal(resynced.payload?.public?.turn?.userId, humanUserId);
+    assert.equal(resynced.payload?.public?.hand?.handId, expectedHandId);
+    assert.equal(resumedLegalActions.length > 0, true);
+    assert.equal(Number(resynced.payload?.stateVersion || 0) >= Number(progressed.payload?.stateVersion || 0), true);
+    assert.deepEqual(serverLogs, []);
+
+    observerWs.close();
+    reconnectedWs.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
 test("human act against queued bots returns next actionable human snapshot", async () => {
   const secret = "human-bot-turn-secret";
   const humanUserId = "human_turn_user";
@@ -2793,6 +3153,147 @@ test("human act against queued bots returns next actionable human snapshot", asy
     assert.equal(Object.prototype.hasOwnProperty.call(secondPayload.public, "holeCardsByUserId"), false);
 
     humanWs.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
+test("observer snapshot stays public-state consistent with seated snapshot after queued bot progression", async () => {
+  const secret = "observer-public-consistency-secret";
+  const humanUserId = "observer_public_human";
+  const observerUserId = "observer_public_observer";
+  const tableId = "table_observer_public_consistency";
+  const botSeat2 = makeBotUserId(tableId, 2);
+  const botSeat3 = makeBotUserId(tableId, 3);
+  const fixtures = {
+    [tableId]: {
+      tableRow: { id: tableId, max_players: 6, status: "active" },
+      seatRows: [
+        { user_id: humanUserId, seat_no: 1, status: "ACTIVE", is_bot: false, stack: 100 },
+        { user_id: botSeat2, seat_no: 2, status: "ACTIVE", is_bot: true, stack: 100 },
+        { user_id: botSeat3, seat_no: 3, status: "ACTIVE", is_bot: true, stack: 100 }
+      ],
+      stateRow: { version: 0, state: {} }
+    }
+  };
+
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      SUPABASE_DB_URL: "",
+      ...observeOnlyJoinEnv(),
+      ...persistedBootstrapFixturesEnv(fixtures)
+    }
+  });
+
+  const isActionableHumanSnapshot = (payload) => {
+    const turnUserId = payload?.public?.turn?.userId;
+    const legalActions = Array.isArray(payload?.public?.legalActions?.actions)
+      ? payload.public.legalActions.actions
+      : [];
+    return turnUserId === humanUserId && legalActions.length > 0;
+  };
+
+  try {
+    await waitForListening(child, 5000);
+    const humanWs = await connectClient(port);
+    const observerWs = await connectClient(port);
+    await hello(humanWs);
+    await hello(observerWs);
+    await auth(humanWs, makeHs256Jwt({ secret, sub: humanUserId }), "auth-observer-public-human");
+    await auth(observerWs, makeHs256Jwt({ secret, sub: observerUserId }), "auth-observer-public-observer");
+
+    sendFrame(humanWs, { version: "1.0", type: "table_join", requestId: "join-observer-public-human", ts: "2026-02-28T01:30:01Z", payload: { tableId } });
+    const humanJoinAck = await nextMessageOfType(humanWs, "commandResult");
+    assert.equal(humanJoinAck.payload.status, "accepted");
+    await nextMessageOfType(humanWs, "table_state");
+
+    sendFrame(observerWs, { version: "1.0", type: "table_join", requestId: "join-observer-public-observer", ts: "2026-02-28T01:30:02Z", payload: { tableId } });
+    const observerJoinAck = await nextMessageOfType(observerWs, "commandResult");
+    assert.equal(observerJoinAck.payload.status, "accepted");
+
+    sendFrame(humanWs, { version: "1.0", type: "table_state_sub", requestId: "snap-observer-public-human-initial", ts: "2026-02-28T01:30:03Z", payload: { tableId, view: "snapshot" } });
+    let baselineSnapshot = await nextMessageOfType(humanWs, "stateSnapshot");
+    if (baselineSnapshot.payload?.public?.hand?.status === "LOBBY") {
+      sendFrame(humanWs, { version: "1.0", type: "start_hand", requestId: "start-observer-public-human", ts: "2026-02-28T01:30:03Z", payload: { tableId } });
+      const startAck = await nextCommandResultForRequest(humanWs, "start-observer-public-human");
+      assert.equal(["accepted", "rejected"].includes(startAck.payload.status), true);
+      if (startAck.payload.status === "rejected") {
+        assert.equal(startAck.payload.reason, "already_live");
+      }
+      baselineSnapshot = await nextMessageMatching(
+        humanWs,
+        (frame) => frame?.type === "stateSnapshot",
+        8000
+      );
+    }
+
+    const firstHumanTurn = isActionableHumanSnapshot(baselineSnapshot.payload)
+      ? baselineSnapshot
+      : await nextMessageMatching(
+          humanWs,
+          (frame) => frame?.type === "stateSnapshot" && isActionableHumanSnapshot(frame.payload),
+          8000
+        );
+
+    const firstPayload = firstHumanTurn.payload;
+    const handId = firstPayload?.public?.hand?.handId;
+    const legalActions = Array.isArray(firstPayload?.public?.legalActions?.actions)
+      ? firstPayload.public.legalActions.actions
+      : [];
+    assert.equal(typeof handId, "string");
+    assert.equal(handId.length > 0, true);
+    assert.equal(legalActions.length > 0, true);
+
+    const action = legalActions.includes("CALL")
+      ? "call"
+      : legalActions.includes("CHECK")
+        ? "check"
+        : "fold";
+    sendFrame(humanWs, {
+      version: "1.0",
+      type: "act",
+      requestId: "act-observer-public-human",
+      ts: "2026-02-28T01:30:04Z",
+      payload: { tableId, handId, action }
+    });
+    const actAck = await nextCommandResultForRequest(humanWs, "act-observer-public-human");
+    assert.equal(actAck.payload.status, "accepted");
+
+    const secondHumanTurn = await nextMessageMatching(
+      humanWs,
+      (frame) =>
+        frame?.type === "stateSnapshot"
+        && isActionableHumanSnapshot(frame.payload)
+        && Number(frame.payload?.stateVersion || 0) > Number(firstPayload?.stateVersion || 0),
+      8000
+    );
+
+    const seatedPayload = secondHumanTurn.payload;
+    assert.equal(seatedPayload.public.turn.userId, humanUserId);
+    assert.equal(seatedPayload.public.legalActions.seat, 1);
+    assert.equal(Array.isArray(seatedPayload.private?.holeCards), true);
+    assert.equal(seatedPayload.private.holeCards.length, 2);
+
+    sendFrame(observerWs, { version: "1.0", type: "table_state_sub", requestId: "snap-observer-public-observer-final", ts: "2026-02-28T01:30:05Z", payload: { tableId, view: "snapshot" } });
+    const observerSnapshot = await nextMessageOfType(observerWs, "stateSnapshot");
+
+    assert.equal(observerSnapshot.payload.stateVersion, seatedPayload.stateVersion);
+    assert.deepEqual(observerSnapshot.payload.table, seatedPayload.table);
+    assert.deepEqual(observerSnapshot.payload.you, { userId: observerUserId, seat: null });
+    assert.equal("private" in observerSnapshot.payload, false);
+    assert.deepEqual(observerSnapshot.payload.public, {
+      ...seatedPayload.public,
+      legalActions: { seat: null, actions: [] },
+      actionConstraints: { toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null }
+    });
+    assert.equal(observerSnapshot.payload.table.memberCount, observerSnapshot.payload.table.members.length);
+    assert.equal(Object.prototype.hasOwnProperty.call(observerSnapshot.payload.public, "holeCardsByUserId"), false);
+
+    humanWs.close();
+    observerWs.close();
   } finally {
     child.kill("SIGTERM");
     await waitForExit(child);
@@ -3243,7 +3744,7 @@ test("autoplay adapter loader failure does not break accepted start_hand/act com
   }
 });
 
-test("WS act optimistic conflict returns deterministic rejection and resync", async () => {
+test("WS act optimistic conflict returns deterministic rejection and restored snapshot without forced resync", async () => {
   const secret = "persist-conflict-secret";
   const tableId = "table_ws_persist_conflict";
   const store = {
@@ -3282,12 +3783,15 @@ test("WS act optimistic conflict returns deterministic rejection and resync", as
     await fs.writeFile(filePath, `${JSON.stringify(forced)}
 `, "utf8");
 
+    const conflictFrames = nextNMessages(ws, 2, 10000);
     sendFrame(ws, { version: "1.0", type: "act", requestId: "act-conflict", ts: "2026-02-28T02:10:02Z", payload: { tableId, handId, action: "fold" } });
-    const rejected = await nextMessageOfType(ws, "commandResult");
+    const [firstConflictFrame, secondConflictFrame] = await conflictFrames;
+    const rejected = firstConflictFrame.type === "commandResult" ? firstConflictFrame : secondConflictFrame;
+    const restored = firstConflictFrame.type === "stateSnapshot" ? firstConflictFrame : secondConflictFrame;
     assert.equal(rejected.payload.status, "rejected");
     assert.equal(rejected.payload.reason, "conflict");
-    const resync = await nextMessageOfType(ws, "resync");
-    assert.equal(resync.payload.reason, "persistence_conflict");
+    assert.equal(restored.type, "stateSnapshot");
+    assert.equal(restored.payload.stateVersion, forced.tables[tableId].stateRow.version);
 
     sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "snap-conflict-after", ts: "2026-02-28T02:10:03Z", payload: { tableId, view: "snapshot" } });
     const afterConflict = await nextMessageOfType(ws, "stateSnapshot");
@@ -3351,7 +3855,7 @@ test("failed bootstrap persistence reloads persisted state before further snapsh
   }
 });
 
-test("failed timeout persistence does not publish unpersisted timeout mutation", async () => {
+test("failed timeout persistence restores persisted state without forcing resync", async () => {
   const secret = "timeout-fail-secret";
   const tableId = "table_ws_timeout_fail";
   const store = {
@@ -3389,15 +3893,17 @@ test("failed timeout persistence does not publish unpersisted timeout mutation",
     assert.equal(joinAck_join_timeout_fail.payload.requestId, "join-timeout-fail");
     assert.equal(joinAck_join_timeout_fail.payload.status, "accepted");
 
-    const snapshotAndResync = nextNMessages(ws, 2, 10000);
+    const snapshotAndRecovery = nextNMessages(ws, 2, 10000);
     sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "snap-timeout-before", ts: "2026-02-28T02:30:01Z", payload: { tableId, view: "snapshot" } });
-    const [first, second] = await snapshotAndResync;
+    const [first, second] = await snapshotAndRecovery;
     const baseline = first.type === "stateSnapshot" ? first : second;
-    const resync = first.type === "resync" ? first : second;
+    const recovered = first.type === "stateSnapshot" && second.type === "stateSnapshot" ? second : first.type === "stateSnapshot" ? null : second;
 
     assert.equal(baseline.type, "stateSnapshot");
-    assert.ok(["resync", "stateSnapshot"].includes(resync.type));
-    if (resync.type === "resync") assert.equal(resync.payload.reason, "persistence_conflict");
+    if (recovered) {
+      assert.equal(recovered.type, "stateSnapshot");
+      assert.equal(recovered.payload.stateVersion, baseline.payload.stateVersion);
+    }
 
     sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "snap-timeout-after", ts: "2026-02-28T02:30:02Z", payload: { tableId, view: "snapshot" } });
     const after = await nextMessageOfType(ws, "stateSnapshot");

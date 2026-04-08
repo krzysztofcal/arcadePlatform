@@ -703,6 +703,109 @@ export function createTableManager({
     });
   }
 
+  function buildAuthoritativeLeaveRestore({ tableId, userId, stateVersion = null, pokerState = null }) {
+    const table = ensureTable(tableId);
+    const normalizedState = pokerState && typeof pokerState === "object" && !Array.isArray(pokerState) ? pokerState : null;
+    const stateTableId = typeof normalizedState?.tableId === "string" ? normalizedState.tableId : "";
+    const stateSeats = normalizedState?.seats;
+    const authoritativeStateValid = normalizedState
+      && stateTableId === tableId
+      && hasValidAuthoritativeSeats(stateSeats);
+
+    if (!authoritativeStateValid || authoritativeSeatsContainUser(stateSeats, userId)) {
+      return {
+        ok: false,
+        code: "authoritative_state_invalid"
+      };
+    }
+
+    const nextMembers = stateSeats
+      .map((seatEntry) => {
+        const rawSeatNo = seatEntry?.seatNo;
+        const rawSeatAlias = seatEntry?.seat;
+        const normalizedSeat = Number.isInteger(Number(rawSeatNo))
+          ? Number(rawSeatNo)
+          : Number.isInteger(Number(rawSeatAlias))
+            ? Number(rawSeatAlias)
+            : null;
+        const nextUserId = typeof seatEntry?.userId === "string" ? seatEntry.userId.trim() : "";
+        if (!Number.isInteger(normalizedSeat) || !nextUserId) {
+          return null;
+        }
+        return {
+          userId: nextUserId,
+          seat: normalizedSeat,
+          seatEntry
+        };
+      })
+      .filter(Boolean)
+      .sort((a, b) => a.seat - b.seat || a.userId.localeCompare(b.userId));
+
+    const nextSeats = {};
+    const currentSeatDetails = table.coreState.seatDetailsByUserId && typeof table.coreState.seatDetailsByUserId === "object" && !Array.isArray(table.coreState.seatDetailsByUserId)
+      ? table.coreState.seatDetailsByUserId
+      : {};
+    const nextSeatDetails = {};
+    for (const member of nextMembers) {
+      nextSeats[member.userId] = member.seat;
+      const previousSeatDetails = currentSeatDetails[member.userId];
+      nextSeatDetails[member.userId] = {
+        isBot: member.seatEntry?.isBot === true || previousSeatDetails?.isBot === true,
+        botProfile: typeof member.seatEntry?.botProfile === "string"
+          ? member.seatEntry.botProfile
+          : previousSeatDetails?.botProfile ?? null,
+        leaveAfterHand: member.seatEntry?.leaveAfterHand === true || previousSeatDetails?.leaveAfterHand === true
+      };
+    }
+
+    const authoritativeStacks = normalizedState?.stacks && typeof normalizedState.stacks === "object" && !Array.isArray(normalizedState.stacks)
+      ? normalizedState.stacks
+      : null;
+    const currentPublicStacks = table.coreState.publicStacks && typeof table.coreState.publicStacks === "object" && !Array.isArray(table.coreState.publicStacks)
+      ? table.coreState.publicStacks
+      : {};
+    const nextPublicStacks = {};
+    for (const member of nextMembers) {
+      const authoritativeAmount = authoritativeStacks?.[member.userId];
+      if (Number.isFinite(Number(authoritativeAmount))) {
+        nextPublicStacks[member.userId] = Number(authoritativeAmount);
+        continue;
+      }
+      if (Number.isFinite(Number(currentPublicStacks[member.userId]))) {
+        nextPublicStacks[member.userId] = Number(currentPublicStacks[member.userId]);
+      }
+    }
+
+    const nextPresenceByUserId = new Map();
+    for (const [presenceUserId, presence] of table.presenceByUserId.entries()) {
+      if (!Object.prototype.hasOwnProperty.call(nextSeats, presenceUserId)) {
+        continue;
+      }
+      nextPresenceByUserId.set(presenceUserId, {
+        ...presence,
+        seat: nextSeats[presenceUserId]
+      });
+    }
+
+    return {
+      ok: true,
+      restoredTable: {
+        tableId,
+        tableStatus: table.tableStatus,
+        coreState: {
+          ...table.coreState,
+          version: Number.isInteger(stateVersion) && stateVersion >= 0 ? stateVersion : table.coreState.version,
+          members: nextMembers.map(({ userId: nextUserId, seat }) => ({ userId: nextUserId, seat })),
+          seats: nextSeats,
+          seatDetailsByUserId: nextSeatDetails,
+          publicStacks: nextPublicStacks,
+          pokerState: { ...normalizedState }
+        },
+        presenceByUserId: nextPresenceByUserId
+      }
+    };
+  }
+
   function syncAuthoritativeLeave({ ws, userId, tableId, stateVersion = null, pokerState = null }) {
     const conn = ensureConn(ws);
     const resolvedTableId = tableId || conn.joinedTableId || conn.subscribedTableId;
@@ -725,60 +828,25 @@ export function createTableManager({
     const previousSeats = JSON.stringify(table.coreState.seats || {});
     const previousVersion = Number(table.coreState.version);
     const previousPokerState = JSON.stringify(table.coreState.pokerState ?? null);
-
-    const normalizedState = pokerState && typeof pokerState === "object" && !Array.isArray(pokerState) ? pokerState : null;
-    const stateTableId = typeof normalizedState?.tableId === "string" ? normalizedState.tableId : "";
-    const stateSeats = normalizedState?.seats;
-    const authoritativeStateValid = normalizedState
-      && stateTableId === resolvedTableId
-      && hasValidAuthoritativeSeats(stateSeats);
-
-    if (!authoritativeStateValid || authoritativeSeatsContainUser(stateSeats, userId)) {
+    const restored = buildAuthoritativeLeaveRestore({
+      tableId: resolvedTableId,
+      userId,
+      stateVersion,
+      pokerState
+    });
+    if (!restored?.ok || !restored?.restoredTable) {
       return {
         ok: false,
-        code: "authoritative_state_invalid",
+        code: restored?.code || "authoritative_state_invalid",
         changed: false,
         tableState: tableState(resolvedTableId)
       };
     }
-
-    const nextMembers = stateSeats
-      .map((seatEntry) => {
-        const rawSeatNo = seatEntry?.seatNo;
-        const rawSeatAlias = seatEntry?.seat;
-        const normalizedSeat = Number.isInteger(Number(rawSeatNo))
-          ? Number(rawSeatNo)
-          : Number.isInteger(Number(rawSeatAlias))
-            ? Number(rawSeatAlias)
-            : null;
-        const userId = typeof seatEntry?.userId === "string" ? seatEntry.userId.trim() : "";
-        if (!Number.isInteger(normalizedSeat) || !userId) {
-          return null;
-        }
-        return { userId, seat: normalizedSeat };
-      })
-      .filter(Boolean)
-      .sort((a, b) => a.seat - b.seat || a.userId.localeCompare(b.userId));
-    const nextSeats = {};
-    for (const member of nextMembers) {
-      nextSeats[member.userId] = member.seat;
-    }
-
-    table.coreState.members = nextMembers;
-    table.coreState.seats = nextSeats;
-    if (Number.isInteger(stateVersion) && stateVersion >= 0) {
-      table.coreState.version = stateVersion;
-    }
-    table.coreState.pokerState = { ...normalizedState };
-
-    for (const [presenceUserId, presence] of table.presenceByUserId.entries()) {
-      if (!Object.prototype.hasOwnProperty.call(nextSeats, presenceUserId)) {
-        table.presenceByUserId.delete(presenceUserId);
-        continue;
-      }
-      presence.seat = nextSeats[presenceUserId];
-    }
-    table.presenceByUserId.delete(userId);
+    const nextMembers = restored.restoredTable.coreState.members;
+    const nextSeats = restored.restoredTable.coreState.seats;
+    table.coreState = restored.restoredTable.coreState;
+    table.tableStatus = restored.restoredTable.tableStatus;
+    table.presenceByUserId = restored.restoredTable.presenceByUserId;
 
     table.subscribers.delete(ws);
     if (conn.joinedTableId === resolvedTableId) {
@@ -1082,6 +1150,7 @@ export function createTableManager({
     persistedStateVersion,
     setPersistedStateVersion,
     restoreTableFromPersisted,
+    buildAuthoritativeLeaveRestore,
     isTableClosed,
     isBotUser
   };

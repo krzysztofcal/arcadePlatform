@@ -1,3 +1,5 @@
+import { recoverFromPersistConflict } from "../runtime/persist-conflict-recovery.mjs";
+
 export async function handleTurnTimeoutCommand({
   tableId,
   nowMs = Date.now(),
@@ -20,8 +22,12 @@ export async function handleTurnTimeoutCommand({
     mutationKind: "timeout"
   });
   if (!persisted?.ok) {
-    await restoreTableFromPersisted(tableId);
-    broadcastResyncRequired(tableId, "persistence_conflict");
+    await recoverFromPersistConflict({
+      tableId,
+      restoreTableFromPersisted,
+      broadcastStateSnapshots,
+      broadcastResyncRequired
+    });
     return {
       ok: false,
       changed: false,

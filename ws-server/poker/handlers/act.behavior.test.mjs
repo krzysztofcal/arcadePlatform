@@ -44,6 +44,7 @@ test('handleActCommand persists and triggers autoplay only for accepted fresh ac
 
 test('handleActCommand does not autoplay for replayed, rejected, or conflicted actions', async () => {
   const autoplayCalls = [];
+  const conflictCalls = { snapshots: 0, resync: 0 };
 
   await handleActCommand({
     frame: { __resolvedTableId: 't1', requestId: 'r4', ts: new Date().toISOString(), payload: { handId: 'h1', action: 'CHECK' } },
@@ -85,12 +86,35 @@ test('handleActCommand does not autoplay for replayed, rejected, or conflicted a
     sendCommandResult: () => {},
     persistMutatedState: async () => ({ ok: false, reason: 'persistence_conflict' }),
     restoreTableFromPersisted: async () => ({ ok: true }),
-    broadcastResyncRequired: () => {},
-    broadcastStateSnapshots: () => {},
+    broadcastResyncRequired: () => { conflictCalls.resync += 1; },
+    broadcastStateSnapshots: () => { conflictCalls.snapshots += 1; },
     scheduleBotStep: () => { autoplayCalls.push('conflict'); }
   });
 
   assert.deepEqual(autoplayCalls, []);
+  assert.equal(conflictCalls.snapshots, 1);
+  assert.equal(conflictCalls.resync, 0);
+});
+
+test('handleActCommand emits resync only when restore fails after persistence conflict', async () => {
+  const calls = { snapshots: 0, resync: 0 };
+  await handleActCommand({
+    frame: { __resolvedTableId: 't1', requestId: 'r6b', ts: new Date().toISOString(), payload: { handId: 'h1', action: 'CHECK' } },
+    ws: {},
+    connState: { session: { userId: 'u1' } },
+    tableManager: { ensureTableLoaded: async () => ({ ok: true }), applyAction: () => ({ accepted: true, replayed: false, changed: true, stateVersion: 2, reason: null }) },
+    ensureTableLoadedErrorMapper: (x) => x,
+    sendError: () => assert.fail('unexpected sendError'),
+    sendCommandResult: () => {},
+    persistMutatedState: async () => ({ ok: false, reason: 'persistence_conflict' }),
+    restoreTableFromPersisted: async () => ({ ok: false, reason: 'restore_failed' }),
+    broadcastResyncRequired: () => { calls.resync += 1; },
+    broadcastStateSnapshots: () => { calls.snapshots += 1; },
+    scheduleBotStep: () => assert.fail('unexpected autoplay')
+  });
+
+  assert.equal(calls.snapshots, 0);
+  assert.equal(calls.resync, 1);
 });
 
 test('handleActCommand still broadcasts fresh state before queued autoplay runs', async () => {

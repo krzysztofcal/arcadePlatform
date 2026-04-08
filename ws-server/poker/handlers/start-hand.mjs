@@ -1,3 +1,5 @@
+import { recoverFromPersistConflict } from "../runtime/persist-conflict-recovery.mjs";
+
 export async function handleStartHandCommand({ frame, ws, connState, tableManager, ensureTableLoadedErrorMapper, sendError, sendCommandResult, persistMutatedState, restoreTableFromPersisted, broadcastResyncRequired, broadcastStateSnapshots, scheduleBotStep = () => {}, klog = () => {} }) {
   const tableId = frame.__resolvedTableId;
   const ensured = await tableManager.ensureTableLoaded(tableId);
@@ -56,14 +58,18 @@ export async function handleStartHandCommand({ frame, ws, connState, tableManage
     mutationKind: "start_hand"
   });
   if (!persisted?.ok) {
-    await restoreTableFromPersisted(tableId);
+    await recoverFromPersistConflict({
+      tableId,
+      restoreTableFromPersisted,
+      broadcastStateSnapshots,
+      broadcastResyncRequired
+    });
     sendCommandResult(ws, connState, {
       requestId: frame.requestId ?? null,
       tableId,
       status: "rejected",
       reason: persisted?.reason || "persist_failed"
     });
-    broadcastResyncRequired(tableId, "persistence_conflict");
     return;
   }
 

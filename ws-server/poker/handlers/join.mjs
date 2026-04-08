@@ -69,6 +69,8 @@ function restoredAuthoritativeStateLooksComplete({ restoredTable, userId, seatNo
   return true;
 }
 
+import { recoverFromPersistConflict } from "../runtime/persist-conflict-recovery.mjs";
+
 export async function handleJoinCommand({ frame, ws, connState, sessionStore, tableManager, ensureTableLoadedErrorMapper, restoreTableFromPersisted, persistMutatedState, broadcastResyncRequired, broadcastStateSnapshots, broadcastTableState, sendError, sendCommandResult, sendTableState, authoritativeJoinEnabled, observeOnlyJoinEnabled, persistedBootstrapEnabled, loadAuthoritativeJoinExecutor, klog = () => {} }) {
   const tableId = frame.__resolvedTableId;
   const authoritativeJoinRequired = authoritativeJoinEnabled && !observeOnlyJoinEnabled;
@@ -261,8 +263,12 @@ export async function handleJoinCommand({ frame, ws, connState, sessionStore, ta
       mutationKind: "bootstrap"
     });
     if (!persisted?.ok) {
-      await restoreTableFromPersisted(tableId);
-      broadcastResyncRequired(tableId, "persistence_conflict");
+      await recoverFromPersistConflict({
+        tableId,
+        restoreTableFromPersisted,
+        broadcastStateSnapshots,
+        broadcastResyncRequired
+      });
       sendCommandResult(ws, connState, {
         requestId: frame.requestId ?? null,
         tableId,

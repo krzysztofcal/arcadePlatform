@@ -198,3 +198,105 @@ test('poker UI requests a gameplay snapshot after act acceptance when push state
   assert.equal(harness.elements.pokerActCheckBtn.hidden, false, 'fallback gameplay snapshot should restore CHECK');
   assert.equal(harness.elements.pokerActBetBtn.hidden, false, 'fallback gameplay snapshot should restore BET');
 });
+
+test('poker UI does not request fallback gameplay snapshot when live WS state arrives before act promise resolves', async () => {
+  var actPayloads = [];
+  var gameplaySnapshotRequests = 0;
+  var snapshotHandler = null;
+  var resolveAct = null;
+  var harness = createPokerTableHarness({
+    wsFactory(createOptions){
+      snapshotHandler = createOptions.onSnapshot;
+      return {
+        start(){
+          Promise.resolve().then(function(){
+            if (typeof createOptions.onStatus === 'function') createOptions.onStatus('auth_ok', { roomId: 'table-1' });
+            if (typeof createOptions.onSnapshot === 'function'){
+              createOptions.onSnapshot({
+                kind: 'stateSnapshot',
+                payload: {
+                  tableId: 'table-1',
+                  stateVersion: 1,
+                  table: {
+                    tableId: 'table-1',
+                    status: 'OPEN',
+                    maxPlayers: 6,
+                    members: [
+                      { userId: 'user-1', seat: 1 },
+                      { userId: 'bot-2', seat: 2 },
+                      { userId: 'bot-3', seat: 3 }
+                    ]
+                  },
+                  public: {
+                    hand: { handId: 'hand-1', status: 'PREFLOP' },
+                    turn: { userId: 'user-1', deadlineAt: Date.now() + 5000 },
+                    board: [],
+                    pot: { total: 15, sidePots: [] },
+                    legalActions: ['CHECK']
+                  },
+                  stacks: { 'user-1': 150, 'bot-2': 150, 'bot-3': 150 }
+                }
+              });
+            }
+          });
+        },
+        destroy(){},
+        isReady(){ return true; },
+        sendAct(payload){
+          actPayloads.push(payload);
+          return new Promise(function(resolve){
+            resolveAct = resolve;
+          });
+        },
+        requestGameplaySnapshot(){
+          gameplaySnapshotRequests += 1;
+          return 'snapshot-refresh-2';
+        }
+      };
+    }
+  });
+
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  harness.elements.pokerActCheckBtn.click();
+  await harness.flush();
+
+  assert.equal(actPayloads.length, 1, 'pre-resolve smoke should send one WS act');
+  assert.equal(typeof resolveAct, 'function', 'act promise resolver should be captured');
+
+  snapshotHandler({
+    kind: 'table_state',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 2,
+      seats: [
+        { seatNo: 1, userId: 'user-1', status: 'ACTIVE' },
+        { seatNo: 2, userId: 'bot-2', status: 'ACTIVE' },
+        { seatNo: 3, userId: 'bot-3', status: 'ACTIVE' }
+      ],
+      stacks: { 'user-1': 145, 'bot-2': 150, 'bot-3': 150 },
+      authoritativeMembers: [
+        { userId: 'user-1', seat: 1 },
+        { userId: 'bot-2', seat: 2 },
+        { userId: 'bot-3', seat: 3 }
+      ],
+      hand: { status: 'FLOP', handId: 'hand-1' },
+      turn: { userId: 'bot-2', deadlineAt: Date.now() + 5000 },
+      board: { cards: ['As', 'Kd', '3h'] },
+      pot: { total: 20, sidePots: [] },
+      legalActions: { actions: [] }
+    }
+  });
+  await harness.flush();
+
+  resolveAct({ ok: true });
+  await harness.flush();
+
+  harness.runTimeouts();
+  await harness.flush();
+
+  assert.equal(gameplaySnapshotRequests, 0, 'live push before act resolution should suppress fallback gameplay snapshot');
+  assert.equal(String(harness.elements.pokerVersion.textContent), '2', 'live push should remain the rendered state after act resolution');
+  assert.equal(harness.elements.pokerActionsRow.hidden, true, 'live push should already move the UI out of acting state');
+});

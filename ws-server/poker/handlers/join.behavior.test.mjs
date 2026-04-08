@@ -276,6 +276,21 @@ test('handleJoinCommand emits one rejected result when bootstrap persist fails',
   assert.equal(calls.command.length, 1);
   assert.equal(calls.command[0].status, 'rejected');
   assert.equal(calls.command[0].reason, 'persist_failed');
+  assert.equal(calls.resync, 0);
+  assert.equal(calls.table, 0);
+  assert.equal(calls.snapshots, 1);
+});
+
+test('handleJoinCommand emits resync only when bootstrap restore fails after persist conflict', async () => {
+  const { ctx, calls } = baseCtx({ seatNo: 2, buyIn: 100 });
+  ctx.tableManager.bootstrapHand = () => ({ ok: true, changed: true });
+  ctx.persistMutatedState = async () => ({ ok: false, reason: 'persist_failed' });
+  ctx.restoreTableFromPersisted = async () => ({ ok: false, reason: 'restore_failed' });
+  await handleJoinCommand(ctx);
+
+  assert.equal(calls.command.length, 1);
+  assert.equal(calls.command[0].status, 'rejected');
+  assert.equal(calls.command[0].reason, 'persist_failed');
   assert.equal(calls.resync, 1);
   assert.equal(calls.table, 0);
   assert.equal(calls.snapshots, 0);

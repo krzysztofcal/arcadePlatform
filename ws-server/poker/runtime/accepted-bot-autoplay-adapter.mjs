@@ -1,3 +1,5 @@
+import { recoverFromPersistConflict } from "./persist-conflict-recovery.mjs";
+
 import { TURN_MS } from "../shared/poker-turn-timeout.mjs";
 import { applyAction as applySharedAction } from "../shared/poker-action-reducer.mjs";
 import { materializeShowdownAndPayout as materializeSharedShowdownAndPayout } from "../shared/settlement/poker-materialize-showdown.mjs";
@@ -709,8 +711,11 @@ export function createAcceptedBotStepExecutor({
           });
 
           if (!persisted?.ok) {
-            await restoreTableFromPersisted(tableId);
-            broadcastResyncRequired(tableId, "persistence_conflict");
+            await recoverFromPersistConflict({
+              tableId,
+              restoreTableFromPersisted,
+              broadcastResyncRequired
+            });
             klog("ws_bot_autoplay_persist_result", {
               ...baseLog,
               botTurnUserId: botTurnUserId || null,
@@ -786,17 +791,18 @@ export function createAcceptedBotStepExecutor({
       const lastState = lastKnown.state;
       const diagnostic = buildDiagnosticSnapshot(lastState);
       const failureReason = error?.code || error?.name || "autoplay_failed";
-      let restoreOk = false;
-      let restoreReason = null;
-      try {
-        await restoreTableFromPersisted(tableId);
-        restoreOk = true;
-      } catch (restoreError) {
-        restoreReason = restoreError?.message || "restore_failed";
-      }
-      try {
-        broadcastResyncRequired(tableId, restoreOk ? "autoplay_failed_resync" : "autoplay_restore_failed");
-      } catch (_broadcastError) {}
+      const recovery = await recoverFromPersistConflict({
+        tableId,
+        restoreTableFromPersisted,
+        broadcastResyncRequired,
+        resyncReason: "autoplay_restore_failed"
+      }).catch((restoreError) => ({
+        ok: false,
+        restored: false,
+        restoreReason: restoreError?.message || "restore_failed"
+      }));
+      const restoreOk = recovery?.ok === true;
+      const restoreReason = recovery?.restoreReason || null;
       klog("ws_bot_autoplay_failed", {
         ...baseLog,
         stage: lastKnown.stage,

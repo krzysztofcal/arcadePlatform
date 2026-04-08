@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { handleLeaveCommand } from "./leave.mjs";
 
 function createCtx() {
-  const calls = { command: [], snapshots: 0, tableState: 0, executorArgs: null, syncArgs: null };
+  const calls = { command: [], snapshots: 0, tableState: 0, executorArgs: null, buildArgs: null, restoreArgs: [], leaveArgs: [] };
   return {
     calls,
     ctx: {
@@ -12,9 +12,24 @@ function createCtx() {
       connState: { session: { userId: "u1" } },
       tableId: "t1",
       tableManager: {
-        syncAuthoritativeLeave(args) {
-          calls.syncArgs = args;
-          return { ok: true, changed: true };
+        leave(args) {
+          calls.leaveArgs.push(args);
+          return { ok: true, changed: false };
+        },
+        buildAuthoritativeLeaveRestore(args) {
+          calls.buildArgs = args;
+          return {
+            ok: true,
+            restoredTable: {
+              coreState: {
+                version: 3
+              }
+            }
+          };
+        },
+        restoreTableFromPersisted(tableId, restoredTable) {
+          calls.restoreArgs.push({ tableId, restoredTable });
+          return { ok: true };
         }
       },
       loadAuthoritativeLeaveExecutor: async () => async (args) => {
@@ -39,7 +54,9 @@ test("handleLeaveCommand accepts and broadcasts when authoritative leave changes
   await handleLeaveCommand(ctx);
 
   assert.equal(calls.executorArgs.tableId, "t1");
-  assert.equal(calls.syncArgs.tableId, "t1");
+  assert.equal(calls.buildArgs.tableId, "t1");
+  assert.equal(calls.restoreArgs[0].tableId, "t1");
+  assert.equal(calls.leaveArgs[0].tableId, "t1");
   assert.equal(calls.command.length, 1);
   assert.equal(calls.command[0].status, "accepted");
   assert.equal(calls.snapshots, 1);
@@ -57,9 +74,21 @@ test("handleLeaveCommand maps pending authoritative leave to rejected request_pe
   assert.equal(calls.tableState, 0);
 });
 
-test("handleLeaveCommand rejects invalid authoritative sync without broadcast", async () => {
+test("handleLeaveCommand rejects invalid authoritative restore shape without broadcast", async () => {
   const { ctx, calls } = createCtx();
-  ctx.tableManager.syncAuthoritativeLeave = () => ({ ok: false, code: "authoritative_state_invalid" });
+  ctx.tableManager.buildAuthoritativeLeaveRestore = () => ({ ok: false, code: "authoritative_state_invalid" });
+  await handleLeaveCommand(ctx);
+
+  assert.equal(calls.command.length, 1);
+  assert.equal(calls.command[0].status, "rejected");
+  assert.equal(calls.command[0].reason, "authoritative_state_invalid");
+  assert.equal(calls.snapshots, 0);
+  assert.equal(calls.tableState, 0);
+});
+
+test("handleLeaveCommand rejects when authoritative restore cannot be applied", async () => {
+  const { ctx, calls } = createCtx();
+  ctx.tableManager.restoreTableFromPersisted = () => ({ ok: false, reason: "authoritative_state_invalid" });
   await handleLeaveCommand(ctx);
 
   assert.equal(calls.command.length, 1);

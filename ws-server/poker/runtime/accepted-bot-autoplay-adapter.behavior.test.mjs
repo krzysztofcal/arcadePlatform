@@ -116,7 +116,7 @@ test("accepted bot autoplay no-ops on non-action phase boundary", async () => {
   assert.equal(result.reason, "not_action_phase");
 });
 
-test("accepted bot autoplay restores and resyncs on persistence conflict", async () => {
+test("accepted bot autoplay restores locally on persistence conflict without forced resync", async () => {
   const calls = { restore: 0, resync: 0 };
   const tableManager = {
     persistedPokerState: () => ({
@@ -147,6 +147,42 @@ test("accepted bot autoplay restores and resyncs on persistence conflict", async
   });
 
   const result = await run({ tableId: "t1", trigger: "act", requestId: "r3" });
+  assert.equal(result.ok, true);
+  assert.equal(calls.restore, 1);
+  assert.equal(calls.resync, 0);
+});
+
+test("accepted bot autoplay emits resync only when restore fails after persistence conflict", async () => {
+  const calls = { restore: 0, resync: 0 };
+  const tableManager = {
+    persistedPokerState: () => ({
+      version: 2,
+      tableId: "t1",
+      handId: "h1",
+      phase: "PREFLOP",
+      turnUserId: "bot_2",
+      seats: [{ userId: "human_1", seatNo: 1 }, { userId: "bot_2", seatNo: 2, isBot: true }],
+      stacks: { human_1: 100, bot_2: 100 }
+    }),
+    persistedStateVersion: () => 2,
+    tableSnapshot: () => ({ seats: [{ userId: "human_1", seatNo: 1 }, { userId: "bot_2", seatNo: 2, isBot: true }] }),
+    applyAction: () => ({ accepted: true, changed: true, replayed: false, stateVersion: 3 })
+  };
+
+  const run = createAcceptedBotAutoplayExecutor({
+    tableManager,
+    persistMutatedState: async () => ({ ok: false, reason: "persistence_conflict" }),
+    restoreTableFromPersisted: async () => {
+      calls.restore += 1;
+      return { ok: false, reason: "restore_failed" };
+    },
+    broadcastResyncRequired: () => {
+      calls.resync += 1;
+    },
+    klog: () => {}
+  });
+
+  const result = await run({ tableId: "t1", trigger: "act", requestId: "r3b" });
   assert.equal(result.ok, true);
   assert.equal(calls.restore, 1);
   assert.equal(calls.resync, 1);
@@ -504,7 +540,7 @@ test("accepted bot autoplay ignores malformed fallback showdown hole-card arrays
   assert.equal(result.ok, false);
   assert.equal(result.reason, "showdown_missing_private_inputs");
   assert.equal(calls.restore, 1);
-  assert.equal(calls.resync, 1);
+  assert.equal(calls.resync, 0);
   const focusedLog = logs.find((entry) => entry.event === "ws_bot_autoplay_showdown_input_missing");
   assert.ok(focusedLog);
   assert.deepEqual(focusedLog.payload.missingHoleCardsUserIds, ["human_1"]);
@@ -557,7 +593,7 @@ test("accepted bot autoplay emits focused showdown-input log and restores on mis
   assert.equal(result.ok, false);
   assert.equal(result.reason, "showdown_missing_private_inputs");
   assert.equal(calls.restore, 1);
-  assert.equal(calls.resync, 1);
+  assert.equal(calls.resync, 0);
   const focusedLog = logs.find((entry) => entry.event === "ws_bot_autoplay_showdown_input_missing");
   assert.ok(focusedLog);
   assert.deepEqual(focusedLog.payload.missingHoleCardsUserIds, ["human_1"]);
@@ -615,7 +651,7 @@ test("accepted bot autoplay rejects cross-hand fallback for degraded showdown ru
   assert.equal(result.ok, false);
   assert.equal(result.reason, "showdown_missing_private_inputs");
   assert.equal(calls.restore, 1);
-  assert.equal(calls.resync, 1);
+  assert.equal(calls.resync, 0);
   const preflightLog = logs.find((entry) => entry.event === "ws_bot_autoplay_showdown_preflight");
   assert.ok(preflightLog);
   assert.equal(preflightLog.payload.trustedStateSource, "fallback_private_hand_mismatch_rejected");
@@ -668,7 +704,7 @@ test("accepted bot autoplay does not treat untrusted fallback handId drift as tr
   assert.equal(result.ok, false);
   assert.equal(result.reason, "showdown_missing_private_inputs");
   assert.equal(calls.restore, 1);
-  assert.equal(calls.resync, 1);
+  assert.equal(calls.resync, 0);
   const preflightLog = logs.find((entry) => entry.event === "ws_bot_autoplay_showdown_preflight");
   assert.ok(preflightLog);
   assert.equal(preflightLog.payload.trustedStateSource, "fallback_private_untrusted_rejected");

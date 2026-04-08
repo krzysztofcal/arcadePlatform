@@ -1224,6 +1224,7 @@
     var wsStarted = false;
     var httpFallbackActive = false;
     var wsSnapshotSeen = false;
+    var wsAppliedSnapshotSeq = 0;
     var pendingWsSnapshot = null;
     var amountRowWasVisible = false;
 
@@ -1251,6 +1252,7 @@
     function stopWsClient(){
       wsStarted = false;
       wsSnapshotSeen = false;
+      wsAppliedSnapshotSeq = 0;
       pendingWsSnapshot = null;
       if (wsClient && typeof wsClient.destroy === 'function'){
         wsClient.destroy();
@@ -1849,12 +1851,25 @@
       renderTable(tableData);
     }
 
-    function schedulePostActSnapshotRefresh(){
+    function schedulePostActSnapshotRefresh(options){
+      var opts = options && typeof options === 'object' ? options : {};
+      var baselineApplySeq = Number.isInteger(opts.baselineApplySeq) ? opts.baselineApplySeq : null;
+      var baselineVersion = Number.isInteger(opts.baselineVersion) ? opts.baselineVersion : null;
+      if (baselineApplySeq != null && wsAppliedSnapshotSeq > baselineApplySeq) return;
+      if (baselineVersion != null){
+        var currentVersion = resolveTableDataVersion(tableData);
+        if (currentVersion != null && currentVersion > baselineVersion) return;
+      }
       clearPostActSnapshotRefresh();
       postActSnapshotTimer = setTimeout(function(){
         postActSnapshotTimer = null;
         if (!isPageActive()) return;
         if (joinPending || leavePending || startHandPending || actPending) return;
+        if (baselineApplySeq != null && wsAppliedSnapshotSeq > baselineApplySeq) return;
+        if (baselineVersion != null){
+          var currentVersion = resolveTableDataVersion(tableData);
+          if (currentVersion != null && currentVersion > baselineVersion) return;
+        }
         if (!wsClient || typeof wsClient.requestGameplaySnapshot !== 'function') return;
         klog('poker_post_act_snapshot_refresh', { tableId: tableId });
         wsClient.requestGameplaySnapshot();
@@ -1902,6 +1917,7 @@
       }
       stopPolling();
       wsSnapshotSeen = true;
+      wsAppliedSnapshotSeq += 1;
       pendingWsSnapshot = null;
       return true;
     }
@@ -3285,6 +3301,8 @@
       setInlineStatus(actStatusEl, null, null);
       setDevPendingState('act', true);
       try {
+        var wsApplySeqBeforeAct = wsAppliedSnapshotSeq;
+        var stateVersionBeforeAct = resolveTableDataVersion(tableData);
         var resolved = resolveRequestId(pendingActRequestId, requestIdOverride);
         if (resolved.nextPending){
           pendingActRequestId = normalizeRequestId(resolved.nextPending);
@@ -3323,7 +3341,10 @@
         }
         clearActPending();
         setInlineStatus(actStatusEl, t('pokerActOk', 'Action sent'), 'success');
-        schedulePostActSnapshotRefresh();
+        schedulePostActSnapshotRefresh({
+          baselineApplySeq: wsApplySeqBeforeAct,
+          baselineVersion: stateVersionBeforeAct
+        });
         return { ok: true, code: 'ok' };
       } catch (err){
         if (isAbortError(err)){

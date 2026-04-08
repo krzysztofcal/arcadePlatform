@@ -1,3 +1,5 @@
+import { recoverFromPersistConflict } from "../runtime/persist-conflict-recovery.mjs";
+
 function mapActReason(reason) {
   if (reason === "illegal_action") return "action_not_allowed";
   if (reason === "hand_mismatch") return "state_invalid";
@@ -67,14 +69,18 @@ export async function handleActCommand({ frame, ws, connState, tableManager, ens
       mutationKind: "act"
     });
     if (!persisted?.ok) {
-      await restoreTableFromPersisted(tableId);
+      await recoverFromPersistConflict({
+        tableId,
+        restoreTableFromPersisted,
+        broadcastStateSnapshots,
+        broadcastResyncRequired
+      });
       sendCommandResult(ws, connState, {
         requestId: frame.requestId ?? null,
         tableId,
         status: "rejected",
         reason: persisted?.reason || "persist_failed"
       });
-      broadcastResyncRequired(tableId, "persistence_conflict");
       return;
     }
   }
