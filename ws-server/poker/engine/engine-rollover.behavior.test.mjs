@@ -122,7 +122,7 @@ test("rollover does not bootstrap a live hand when fewer than two stack-eligible
   assert.equal(nextFromSettled, null);
 });
 
-test("replaceBrokeBotsForNextHand swaps broke bot only after settlement", () => {
+test("replaceBrokeBotsForNextHand swaps too-short bot only after settlement", () => {
   const coreState = {
     roomId: "table_engine_roll_bot_replace",
     version: 30,
@@ -137,7 +137,7 @@ test("replaceBrokeBotsForNextHand swaps broke bot only after settlement", () => 
       bot_old: { isBot: true, botProfile: "TRIVIAL", leaveAfterHand: false },
       human_b: { isBot: false, botProfile: null, leaveAfterHand: false }
     },
-    publicStacks: { human_a: 120, bot_old: 0, human_b: 120 },
+    publicStacks: { human_a: 120, bot_old: 1, human_b: 120 },
     pokerState: null
   };
 
@@ -145,7 +145,7 @@ test("replaceBrokeBotsForNextHand swaps broke bot only after settlement", () => 
     handId: "settled_bot_replace",
     phase: "SETTLED",
     dealerSeatNo: 1,
-    stacks: { human_a: 120, bot_old: 0, human_b: 120 }
+    stacks: { human_a: 120, bot_old: 1, human_b: 120 }
   };
 
   const recycled = replaceBrokeBotsForNextHand({

@@ -10,6 +10,7 @@ import { decideTurnTimeout, stampTurnDeadline } from "../shared/poker-turn-timeo
 
 const MIN_PLAYERS_TO_BOOTSTRAP = 2;
 const ENGINE_ACTIONS = new Set(["FOLD", "CHECK", "CALL", "BET", "RAISE"]);
+const MIN_STACK_TO_JOIN_HAND = 2;
 const BOT_REPLACEMENT_STACK = 100;
 
 function toInt(value) {
@@ -58,7 +59,7 @@ function orderedSeatMembers(coreState) {
 
 export function isContinuationEligibleByStack(userId, stacksByUserId) {
   const stack = Number(stacksByUserId?.[userId] ?? 0);
-  return Number.isFinite(stack) && stack > 0;
+  return Number.isFinite(stack) && stack >= MIN_STACK_TO_JOIN_HAND;
 }
 
 export function orderedEligibleSeatMembers(coreState, stacksByUserId = null) {
@@ -220,7 +221,7 @@ export function replaceBrokeBotsForNextHand({ coreState, settledState, nextVersi
     const userId = member.userId;
     if (nextSeatDetails?.[userId]?.isBot !== true) continue;
     const stack = Number(nextStacks[userId] ?? 0);
-    if (!Number.isFinite(stack) || stack > 0) continue;
+    if (!Number.isFinite(stack) || stack >= MIN_STACK_TO_JOIN_HAND) continue;
 
     const replacementUserId = nextBotReplacementUserId({
       seatNo: member.seat,
