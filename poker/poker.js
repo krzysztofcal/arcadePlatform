@@ -1647,6 +1647,7 @@
       var payload = snapshotPayload && typeof snapshotPayload === 'object' ? snapshotPayload : {};
       var seatMap = {};
       var members = Array.isArray(payload.authoritativeMembers) ? payload.authoritativeMembers : [];
+      var hasSeatSource = Array.isArray(payload.authoritativeMembers) || Array.isArray(payload.seats);
       members.forEach(function(member){
         var seatNo = member && member.seat != null ? member.seat : null;
         var userId = member && member.userId ? member.userId : null;
@@ -1685,13 +1686,17 @@
       });
       return {
         tableId: payload.tableId || null,
-        seats: seats
+        seats: seats,
+        hasSeatSource: hasSeatSource
       };
     }
 
-    function mergePresenceIntoSeats(existingSeats, seatUpdates){
-      if (!Array.isArray(seatUpdates) || seatUpdates.length === 0){
+    function mergePresenceIntoSeats(existingSeats, seatUpdates, hasSeatSource){
+      if (!hasSeatSource){
         return Array.isArray(existingSeats) ? existingSeats.slice() : null;
+      }
+      if (!Array.isArray(seatUpdates) || seatUpdates.length === 0){
+        return [];
       }
       var bySeatNo = {};
       seatUpdates.forEach(function(updateSeat){
@@ -1699,28 +1704,9 @@
         if (typeof updateSeat.userId !== 'string' || !updateSeat.userId) return;
         bySeatNo[updateSeat.seatNo] = updateSeat;
       });
-      if (!Array.isArray(existingSeats) || existingSeats.length === 0){
-        return Object.keys(bySeatNo).map(function(key){
-          return bySeatNo[key];
-        });
-      }
-      var seenSeatNos = {};
-      var mergedSeats = existingSeats.map(function(existing){
-        if (!existing || !Number.isInteger(existing.seatNo)) return existing;
-        seenSeatNos[existing.seatNo] = true;
-        var nextSeat = bySeatNo[existing.seatNo];
-        if (!nextSeat) return existing;
-        return Object.assign({}, existing, {
-          userId: nextSeat.userId,
-          status: nextSeat.status || existing.status || 'ACTIVE'
-        });
-      });
-      Object.keys(bySeatNo).forEach(function(key){
-        var seatNo = Number(key);
-        if (seenSeatNos[seatNo]) return;
-        mergedSeats.push(bySeatNo[key]);
-      });
-      return mergedSeats;
+      return Object.keys(bySeatNo)
+        .map(function(key){ return bySeatNo[key]; })
+        .sort(function(left, right){ return left.seatNo - right.seatNo; });
     }
 
 
@@ -1800,6 +1786,15 @@
       var payload = snapshotPayload && typeof snapshotPayload === 'object' ? snapshotPayload : {};
       var update = mapTableStateToSeatUpdates(payload);
       var merged = Object.assign({}, existingData);
+      var tablePayload = isPlainObject(payload.table) ? payload.table : null;
+      if (tablePayload || (typeof payload.status === 'string' && payload.status)){
+        merged.table = Object.assign({}, isPlainObject(merged.table) ? merged.table : {});
+        if (tablePayload && typeof tablePayload.status === 'string' && tablePayload.status){
+          merged.table.status = tablePayload.status;
+        } else if (typeof payload.status === 'string' && payload.status){
+          merged.table.status = payload.status;
+        }
+      }
       var baselineState = isPlainObject(merged.state) ? merged.state : {};
       var baselineInner = isPlainObject(baselineState.state) ? baselineState.state : {};
       var nextState = Object.assign({}, baselineInner);
@@ -1830,7 +1825,12 @@
       }
       var normalizedStacks = normalizeSnapshotStacks(payload);
       if (normalizedStacks){
-        nextState.stacks = Object.assign({}, baselineInner.stacks && typeof baselineInner.stacks === 'object' ? baselineInner.stacks : {}, normalizedStacks);
+        var incomingStackKeys = Object.keys(normalizedStacks);
+        if (incomingStackKeys.length > 0){
+          nextState.stacks = Object.assign({}, normalizedStacks);
+        } else {
+          nextState.stacks = Object.assign({}, baselineInner.stacks && typeof baselineInner.stacks === 'object' ? baselineInner.stacks : {});
+        }
       }
       baselineState.state = nextState;
       merged.state = baselineState;
@@ -1852,7 +1852,7 @@
         merged._actionConstraints = safeConstraints;
       }
       if (Array.isArray(payload.myHoleCards)) merged.myHoleCards = normalizeCardsForRender(payload.myHoleCards);
-      var mergedSeats = mergePresenceIntoSeats(merged.seats, update.seats);
+      var mergedSeats = mergePresenceIntoSeats(merged.seats, update.seats, update.hasSeatSource);
       if (mergedSeats) merged.seats = mergedSeats;
       return merged;
     }
@@ -2033,6 +2033,48 @@
       var mergedData = mergeWsStateIntoTableData(currentData, snapshotPayload);
       if (!mergedData) return false;
       var mergedState = mergedData.state && mergedData.state.state && typeof mergedData.state.state === 'object' ? mergedData.state.state : {};
+      var currentSeats = Array.isArray(currentData.seats) ? currentData.seats : [];
+      var mergedSeats = Array.isArray(mergedData.seats) ? mergedData.seats : [];
+      if (currentSeats.length !== mergedSeats.length) return true;
+      var currentSeatSignature = currentSeats
+        .map(function(seat){
+          var seatNo = seat && Number.isInteger(seat.seatNo) ? seat.seatNo : -1;
+          var userId = seat && typeof seat.userId === 'string' ? seat.userId : '';
+          var status = seat && typeof seat.status === 'string' ? seat.status.toUpperCase() : '';
+          return String(seatNo) + ':' + userId + ':' + status;
+        })
+        .sort()
+        .join('|');
+      var mergedSeatSignature = mergedSeats
+        .map(function(seat){
+          var seatNo = seat && Number.isInteger(seat.seatNo) ? seat.seatNo : -1;
+          var userId = seat && typeof seat.userId === 'string' ? seat.userId : '';
+          var status = seat && typeof seat.status === 'string' ? seat.status.toUpperCase() : '';
+          return String(seatNo) + ':' + userId + ':' + status;
+        })
+        .sort()
+        .join('|');
+      if (currentSeatSignature !== mergedSeatSignature) return true;
+
+      var currentTableStatus = currentData && currentData.table && typeof currentData.table.status === 'string' ? currentData.table.status : null;
+      var mergedTableStatus = mergedData && mergedData.table && typeof mergedData.table.status === 'string' ? mergedData.table.status : null;
+      if (currentTableStatus !== mergedTableStatus) return true;
+
+      var currentStacks = currentStateBeforeMerge && typeof currentStateBeforeMerge.stacks === 'object' && !Array.isArray(currentStateBeforeMerge.stacks)
+        ? currentStateBeforeMerge.stacks
+        : {};
+      var mergedStacks = mergedState && typeof mergedState.stacks === 'object' && !Array.isArray(mergedState.stacks)
+        ? mergedState.stacks
+        : {};
+      var currentStackKeysExact = Object.keys(currentStacks).sort();
+      var mergedStackKeysExact = Object.keys(mergedStacks).sort();
+      if (currentStackKeysExact.length !== mergedStackKeysExact.length) return true;
+      for (var stackKeyIndex = 0; stackKeyIndex < currentStackKeysExact.length; stackKeyIndex++){
+        var stackKey = currentStackKeysExact[stackKeyIndex];
+        if (stackKey !== mergedStackKeysExact[stackKeyIndex]) return true;
+        if (Number(currentStacks[stackKey]) !== Number(mergedStacks[stackKey])) return true;
+      }
+
       var hasHoleCards = Array.isArray(mergedData.myHoleCards) && mergedData.myHoleCards.length > 0;
       if (!hadHoleCards && hasHoleCards) return true;
       var hasCommunity = Array.isArray(mergedState.community) && mergedState.community.length > 0;
@@ -2157,6 +2199,7 @@
       var activeCurrentUserId = typeof currentUserId === 'string' && currentUserId ? currentUserId : '';
       if (!shouldApplyWsSnapshot(snapshotPayload, opts)) return false;
       clearPostActSnapshotRefresh();
+      var wasSeatedBefore = isSeated === true;
       if (!tableData || typeof tableData !== 'object'){
         if (!opts.allowWhenNoBaseline) return false;
         tableData = createWsBaselineTableData(snapshotPayload);
@@ -2185,6 +2228,15 @@
         seatUserSeatMap: buildSeatUserSeatMap(tableData.seats || [])
       });
       renderTable(tableData);
+      if (wasSeatedBefore && isSeated !== true){
+        var removalMessage = t('pokerRemovedFromTable', 'You were removed from the table and cashed out.');
+        setError(errorEl, removalMessage);
+        klog('poker_user_removed_from_table_snapshot', {
+          tableId: tableId,
+          stateVersion: resolveTableDataVersion(tableData),
+          snapshotKind: opts.snapshotKind || null
+        });
+      }
       var seatedCount = getSeatedCount(tableData);
       if (isSeated && seatedCount !== lastAutoStartSeatCount){
         lastAutoStartSeatCount = seatedCount;

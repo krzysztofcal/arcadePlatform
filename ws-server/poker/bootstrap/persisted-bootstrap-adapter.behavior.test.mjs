@@ -82,3 +82,29 @@ test("adapter still rejects malformed stringified persisted poker state", () => 
   assert.equal(result.ok, false);
   assert.equal(result.code, "invalid_persisted_state");
 });
+
+test("adapter drops stale state seats that are no longer ACTIVE in persisted seat rows", () => {
+  const result = adaptPersistedBootstrap({
+    tableId: "table_stale_state_seats",
+    tableRow: { id: "table_stale_state_seats", max_players: 6 },
+    seatRows: [
+      { user_id: "user_a", seat_no: 1, status: "ACTIVE", is_bot: false, stack: 120 },
+      { user_id: "user_b", seat_no: 2, status: "INACTIVE", is_bot: false, stack: 0 }
+    ],
+    stateRow: {
+      version: 10,
+      state: {
+        phase: "HAND_DONE",
+        seats: [
+          { userId: "user_a", seatNo: 1, status: "ACTIVE" },
+          { userId: "user_b", seatNo: 2, status: "ACTIVE" }
+        ]
+      }
+    }
+  });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.table.coreState.members, [{ userId: "user_a", seat: 1 }]);
+  assert.deepEqual(result.table.coreState.seats, { user_a: 1 });
+  assert.deepEqual(result.table.coreState.pokerState.seats, [{ userId: "user_a", seatNo: 1, status: "ACTIVE" }]);
+});

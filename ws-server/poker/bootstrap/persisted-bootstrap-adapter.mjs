@@ -141,7 +141,7 @@ function mergeStateSeatsWithSeatRows(stateSeats, normalizedSeatRows) {
   const metadataByUserId = new Map(seatRows.map((seat) => [seat.userId, seat]));
   const mergedStateSeats = Array.isArray(stateSeats)
     ? stateSeats
-        .filter((seat) => seat && typeof seat.userId === "string")
+        .filter((seat) => seat && typeof seat.userId === "string" && metadataByUserId.has(seat.userId))
         .map((seat) => {
           const metadata = metadataByUserId.get(seat.userId) || null;
           const mergedSeat = { ...seat };

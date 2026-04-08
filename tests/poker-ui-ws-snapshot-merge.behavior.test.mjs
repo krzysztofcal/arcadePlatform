@@ -153,3 +153,44 @@ test("stateSnapshot legal actions stay visible on user turn when stale baseline 
   assert.equal(harness.elements.pokerActCallBtn.hidden, true, "CALL should hide once server switches legal actions to CHECK/BET");
   assert.equal(harness.elements.pokerActRaiseBtn.hidden, true, "RAISE should hide once server switches legal actions to CHECK/BET");
 });
+
+test("same-version snapshot removes seat/stack immediately when user is no longer at the table", async () => {
+  const harness = createPokerTableHarness({
+    initialToken: "aaa." + Buffer.from(JSON.stringify({ sub: "u-seat" })).toString("base64") + ".zzz"
+  });
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  const ws = harness.wsCreates[0].options;
+  ws.onSnapshot({
+    kind: "table_state",
+    payload: {
+      tableId: "table-1",
+      stateVersion: 31,
+      hand: { handId: "h31", status: "HAND_DONE" },
+      authoritativeMembers: [{ userId: "u-seat", seat: 0 }, { userId: "u-bot", seat: 1 }],
+      stacks: { "u-seat": 120, "u-bot": 80 }
+    }
+  });
+  await harness.flush();
+  assert.match(harness.elements.pokerYourStack.textContent, /120/, "baseline should show seated user stack");
+
+  ws.onSnapshot({
+    kind: "table_state",
+    payload: {
+      tableId: "table-1",
+      stateVersion: 31,
+      hand: { handId: "h31", status: "HAND_DONE" },
+      authoritativeMembers: [{ userId: "u-bot", seat: 1 }],
+      stacks: { "u-bot": 80 }
+    }
+  });
+  await harness.flush();
+
+  assert.equal(harness.elements.pokerYourStack.textContent, "-", "user stack should disappear immediately after seat removal");
+  assert.match(
+    harness.elements.pokerError.textContent,
+    /removed from the table and cashed out/i,
+    "user should see explicit removal message"
+  );
+});
