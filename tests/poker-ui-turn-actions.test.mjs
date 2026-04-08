@@ -58,6 +58,7 @@ assert.equal(typeof hooks.sanitizeAllowedActions, 'function');
 assert.equal(typeof hooks.validateAmountActionPayload, 'function');
 assert.equal(typeof hooks.resolveTurnActionUiState, 'function');
 assert.equal(typeof hooks.resolveAmountActionModel, 'function');
+assert.equal(typeof hooks.resolveAllInPlan, 'function');
 
 const betInfo = hooks.sanitizeAllowedActions(new Set(['CHECK', 'BET']), { maxBetAmount: 100 });
 const betModel = hooks.resolveAmountActionModel(betInfo, 20, '');
@@ -115,3 +116,26 @@ const unopenedPotInfo = hooks.sanitizeAllowedActions(new Set(['CHECK', 'CALL', '
 assert.equal(unopenedPotInfo.allowed.has('CALL'), false, 'CALL should be hidden when there is nothing to call');
 assert.equal(unopenedPotInfo.allowed.has('RAISE'), false, 'RAISE should be hidden when the pot is unopened');
 assert.equal(unopenedPotInfo.allowed.has('BET'), true, 'BET should remain when the acting player may open the betting');
+
+const shortStackCallAllIn = hooks.resolveAllInPlan(
+  hooks.sanitizeAllowedActions(new Set(['CALL', 'FOLD']), { toCall: 20 }),
+  { state: { state: { stacks: { 'user-1': 8 } } } },
+  'user-1'
+);
+assert.equal(shortStackCallAllIn && shortStackCallAllIn.type, 'CALL', 'short stack facing bet should map ALL IN to CALL');
+assert.equal(shortStackCallAllIn && shortStackCallAllIn.amount, null, 'CALL all-in should not require explicit amount');
+
+const raiseAllIn = hooks.resolveAllInPlan(
+  hooks.sanitizeAllowedActions(new Set(['CALL', 'RAISE', 'FOLD']), { toCall: 10, minRaiseTo: 20, maxRaiseTo: 70 }),
+  { state: { state: { stacks: { 'user-1': 70 } } } },
+  'user-1'
+);
+assert.equal(raiseAllIn && raiseAllIn.type, 'RAISE', 'raise spot should map ALL IN to RAISE');
+assert.equal(raiseAllIn && raiseAllIn.amount, 70, 'raise spot should map ALL IN to maxRaiseTo');
+
+const noAllIn = hooks.resolveAllInPlan(
+  hooks.sanitizeAllowedActions(new Set(['CHECK', 'FOLD']), { toCall: 0 }),
+  { state: { state: { stacks: { 'user-1': 50 } } } },
+  'user-1'
+);
+assert.equal(noAllIn, null, 'no all-in button when only CHECK/FOLD are legal');

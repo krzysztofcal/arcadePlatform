@@ -469,6 +469,45 @@
     return { visible: true, actionType: actionType, hasBet: hasBet, hasRaise: hasRaise, min: min, max: max, defaultValue: defaultValue, hintLabel: hint };
   }
 
+  function resolveCurrentUserStackAmount(data, userId){
+    if (!data || !userId) return null;
+    var stateObj = data && data.state ? data.state : null;
+    var gameState = stateObj && stateObj.state ? stateObj.state : null;
+    var stacks = gameState && typeof gameState.stacks === 'object' && !Array.isArray(gameState.stacks) ? gameState.stacks : null;
+    if (!stacks || stacks[userId] == null) return null;
+    var stackAmount = parseInt(stacks[userId], 10);
+    if (!isFinite(stackAmount)) return null;
+    stackAmount = Math.trunc(stackAmount);
+    if (stackAmount < 0) return 0;
+    return stackAmount;
+  }
+
+  function resolveAllInPlan(allowedInfo, data, userId){
+    var info = allowedInfo || {};
+    var allowed = info.allowed;
+    if (!allowed || typeof allowed.has !== 'function') return null;
+    var stackAmount = resolveCurrentUserStackAmount(data, userId);
+    if (stackAmount == null || stackAmount < 1) return null;
+    var constraints = normalizeActionConstraints(info.constraints);
+    var toCall = constraints.toCall != null ? Math.max(0, Math.trunc(constraints.toCall)) : null;
+    if (allowed.has('CALL') && toCall != null && toCall > 0 && stackAmount <= toCall){
+      return { type: 'CALL', amount: null };
+    }
+    if (allowed.has('RAISE')){
+      var raiseTo = constraints.maxRaiseTo != null ? Math.trunc(constraints.maxRaiseTo) : null;
+      if (raiseTo != null && raiseTo >= 1){
+        return { type: 'RAISE', amount: raiseTo };
+      }
+    }
+    if (allowed.has('BET')){
+      var betAmount = constraints.maxBetAmount != null ? Math.trunc(constraints.maxBetAmount) : stackAmount;
+      if (betAmount >= 1){
+        return { type: 'BET', amount: betAmount };
+      }
+    }
+    return null;
+  }
+
   function getSeatDisplayName(seat){
     if (!seat) return '';
     return seat.displayName || seat.name || seat.username || seat.userName || seat.handle || '';
@@ -536,6 +575,7 @@
       validateAmountActionPayload: validateAmountActionPayload,
       resolveAmountActionModel: resolveAmountActionModel,
       resolveTurnActionUiState: resolveTurnActionUiState,
+      resolveAllInPlan: resolveAllInPlan,
       ensurePokerRecorder: ensurePokerRecorder,
       getPokerDumpText: getPokerDumpText,
       copyTextToClipboard: copyTextToClipboard,
@@ -1150,6 +1190,7 @@
     var actCheckBtn = document.getElementById('pokerActCheckBtn');
     var actCallBtn = document.getElementById('pokerActCallBtn');
     var actFoldBtn = document.getElementById('pokerActFoldBtn');
+    var actAllInBtn = document.getElementById('pokerActAllInBtn');
     var actBetBtn = document.getElementById('pokerActBetBtn');
     var actRaiseBtn = document.getElementById('pokerActRaiseBtn');
     var actStatusEl = document.getElementById('pokerActStatus');
@@ -2317,6 +2358,7 @@
       }
       amountDecisionSignature = nextDecisionSignature;
       var amountModel = resolveAmountActionModel(allowedInfo, 20, selectedAmountActionType);
+      var allInPlan = hasActions ? resolveAllInPlan(allowedInfo, tableData, currentUserId) : null;
       var showAmountRow = hasActions && amountModel.visible;
       var selectedAmountType = normalizeActionType(selectedAmountActionType);
       if (!amountModel.hasBet && selectedAmountType === 'BET') selectedAmountActionType = null;
@@ -2336,6 +2378,9 @@
         toggleHidden(item.el, !hasActions || !isAllowed);
         setDisabled(item.el, !enabled || actPending || !isAllowed);
       }
+      var showAllIn = hasActions && !!allInPlan;
+      toggleHidden(actAllInBtn, !showAllIn);
+      setDisabled(actAllInBtn, !enabled || actPending || !showAllIn);
       if (actCallBtn){
         if (!actCallBtn.dataset.baseLabel){
           actCallBtn.dataset.baseLabel = actCallBtn.textContent || t('pokerActCall', 'CALL');
@@ -3707,6 +3752,27 @@
       handleActionClick('RAISE', event);
     }
 
+    function handleActAllInClick(event){
+      if (event){
+        event.preventDefault();
+        event.stopPropagation();
+      }
+      if (actPending || !shouldEnableDevActions()) return;
+      var allowedInfo = getAllowedActionsForUser(tableData, currentUserId);
+      var allInPlan = resolveAllInPlan(allowedInfo, tableData, currentUserId);
+      if (!allInPlan || !allInPlan.type){
+        setInlineStatus(actStatusEl, t('pokerErrActionNotAllowed', 'Action not allowed right now'), 'error');
+        return;
+      }
+      if ((allInPlan.type === 'BET' || allInPlan.type === 'RAISE') && actAmountInput){
+        actAmountInput.value = String(allInPlan.amount);
+        selectedAmountActionType = allInPlan.type;
+      } else {
+        selectedAmountActionType = null;
+      }
+      handleActionClick(allInPlan.type, event);
+    }
+
     if (joinBtn) joinBtn.addEventListener('click', handleJoinClick);
     if (leaveBtn) leaveBtn.addEventListener('click', handleLeaveClick);
     if (startHandBtn) startHandBtn.addEventListener('click', handleStartHandClick);
@@ -3715,6 +3781,7 @@
     if (actCheckBtn) actCheckBtn.addEventListener('click', handleActCheckClick);
     if (actCallBtn) actCallBtn.addEventListener('click', handleActCallClick);
     if (actFoldBtn) actFoldBtn.addEventListener('click', handleActFoldClick);
+    if (actAllInBtn) actAllInBtn.addEventListener('click', handleActAllInClick);
     if (actBetBtn) actBetBtn.addEventListener('click', handleActBetClick);
     if (actRaiseBtn) actRaiseBtn.addEventListener('click', handleActRaiseClick);
     if (actAmountInput) actAmountInput.addEventListener('keydown', handleActAmountKeyDown);
