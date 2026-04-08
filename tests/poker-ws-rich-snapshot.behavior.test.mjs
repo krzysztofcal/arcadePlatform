@@ -115,6 +115,7 @@ test("ws snapshot gating upgrades on higher version and ignores stale payloads",
     var pendingWsSnapshot = null;
     var tableId = 'table_rich';
     var renderCount = 0;
+    var isSeated = false;
     var stopPollingCalls = 0;
     function klog(){}
     function renderTable(){ renderCount++; }
@@ -181,6 +182,7 @@ test("equal-version rich snapshot applies when it adds private hole cards", () =
     var wsSnapshotSeen = false;
     var pendingWsSnapshot = null;
     var tableId = 'table_rich';
+    var isSeated = false;
     function klog(){}
     function renderTable(){}
     function stopPolling(){}
@@ -237,6 +239,7 @@ test("rich snapshot public board maps into community cards", () => {
     var wsSnapshotSeen = false;
     var pendingWsSnapshot = null;
     var tableId = 'table_rich';
+    var isSeated = false;
     function klog(){}
     function renderTable(){}
     function stopPolling(){}
@@ -294,6 +297,7 @@ test("invalid rich board cards do not clobber existing valid community cards", (
     var wsSnapshotSeen = false;
     var pendingWsSnapshot = null;
     var tableId = 'table_rich';
+    var isSeated = false;
     function klog(){}
     function renderTable(){}
     function stopPolling(){}
