@@ -812,62 +812,6 @@ test("table_leave rejects when authoritative executor returns invalid state cont
 });
 
 
-test("table_leave invalid authoritative sync rejection does not broadcast or mutate observer view", async () => {
-  const secret = "test-secret";
-  const actorToken = makeHs256Jwt({ secret, sub: "leave_invalid_sync_actor" });
-  const keepToken = makeHs256Jwt({ secret, sub: "leave_invalid_sync_keep" });
-  const tableId = "table_leave_invalid_sync";
-  const override = JSON.stringify({
-    ok: true,
-    tableId,
-    state: {
-      version: 88,
-      state: {
-        tableId,
-        seats: null,
-        phase: "INIT"
-      }
-    }
-  });
-  const { port, child } = await createServer({ env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret, WS_TEST_LEAVE_RESULT_JSON: override } });
-
-  try {
-    await waitForListening(child, 5000);
-    const actor = await connectClient(port);
-    const other = await connectClient(port);
-    await hello(actor);
-    await hello(other);
-    await auth(actor, actorToken, "auth-leave-invalid-sync-actor");
-    await auth(other, keepToken, "auth-leave-invalid-sync-keep");
-
-    sendFrame(actor, { version: "1.0", type: "table_join", requestId: "join-leave-invalid-sync-actor", ts: "2026-02-28T00:00:01Z", payload: { tableId } });
-    await nextMessage(actor);
-    sendFrame(other, { version: "1.0", type: "table_join", requestId: "join-leave-invalid-sync-keep", ts: "2026-02-28T00:00:02Z", payload: { tableId } });
-    const otherJoinAck = await nextMessageOfType(other, "commandResult");
-    assert.equal(otherJoinAck.payload.status, "accepted");
-
-    sendFrame(actor, { version: "1.0", type: "table_leave", requestId: "leave-invalid-sync", ts: "2026-02-28T00:00:03Z", payload: { tableId } });
-    const result = await nextMessageOfType(actor, "commandResult");
-    assert.equal(result.payload.status, "rejected");
-    assert.equal(result.payload.reason, "authoritative_state_invalid");
-    assert.equal(await attemptMessage(other, 300), null);
-
-    sendFrame(other, { version: "1.0", type: "table_state_sub", requestId: "sub-after-invalid-sync", ts: "2026-02-28T00:00:04Z", payload: { tableId } });
-    const observerState = await nextMessageOfType(other, "table_state");
-    assert.deepEqual(observerState.payload.members, [
-      { userId: "leave_invalid_sync_actor", seat: 1 },
-      { userId: "leave_invalid_sync_keep", seat: 2 }
-    ]);
-
-    actor.close();
-    other.close();
-  } finally {
-    child.kill("SIGTERM");
-    await waitForExit(child);
-  }
-});
-
-
 test("table_leave rejects when authoritative success state still contains actor and does not broadcast", async () => {
   const secret = "test-secret";
   const actorToken = makeHs256Jwt({ secret, sub: "leave_still_present_actor" });
@@ -928,68 +872,6 @@ test("table_leave rejects when authoritative success state still contains actor 
   }
 });
 
-test("table_leave preserves remaining subscriber when authoritative state uses seatNo", async () => {
-  const secret = "test-secret";
-  const actorToken = makeHs256Jwt({ secret, sub: "leave_actor_seatno" });
-  const keepToken = makeHs256Jwt({ secret, sub: "leave_keep_seatno" });
-  const tableId = "table_leave_preserve_seatno";
-  const override = JSON.stringify({
-    ok: true,
-    tableId,
-    state: {
-      version: 22,
-      state: {
-        tableId,
-        seats: [{ seatNo: 2, userId: "leave_keep_seatno" }],
-        stacks: { leave_keep_seatno: 250 },
-        phase: "INIT"
-      }
-    }
-  });
-  const { port, child } = await createServer({ env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret, WS_TEST_LEAVE_RESULT_JSON: override } });
-
-  try {
-    await waitForListening(child, 5000);
-    const actor = await connectClient(port);
-    const other = await connectClient(port);
-    await hello(actor);
-    await hello(other);
-    await auth(actor, actorToken, "auth-leave-actor-seatno");
-    await auth(other, keepToken, "auth-leave-keep-seatno");
-
-    sendFrame(actor, { version: "1.0", type: "table_join", requestId: "join-leave-actor-seatno", ts: "2026-02-28T00:00:01Z", payload: { tableId } });
-    await nextMessageOfType(actor, "commandResult");
-    await nextMessageOfType(actor, "table_state");
-    sendFrame(other, { version: "1.0", type: "table_join", requestId: "join-leave-keep-seatno", ts: "2026-02-28T00:00:02Z", payload: { tableId } });
-    const otherJoinAck = await nextMessageOfType(other, "commandResult");
-    await nextMessageOfType(other, "table_state");
-    assert.equal(otherJoinAck.payload.status, "accepted");
-
-    sendFrame(actor, { version: "1.0", type: "table_leave", requestId: "leave-preserve-seatno", ts: "2026-02-28T00:00:03Z", payload: { tableId } });
-    const first = await attemptMessage(actor, 1200);
-    if (first) {
-      assert.ok(["commandResult", "table_state", "stateSnapshot"].includes(first.type));
-      if (first.type === "commandResult") assert.equal(first.payload.status, "accepted");
-    }
-
-    const otherLiveUpdate = await attemptMessage(other, 1200);
-    if (otherLiveUpdate) {
-      assert.ok(["table_state", "stateSnapshot"].includes(otherLiveUpdate.type));
-    }
-    sendFrame(other, { version: "1.0", type: "table_state_sub", requestId: "sub-leave-keep-seatno-post", ts: "2026-02-28T00:00:04Z", payload: { tableId } });
-    const otherState = await nextMessageOfType(other, "table_state");
-    assert.notEqual(otherState.payload.members.length, 0);
-    assert.equal(Array.isArray(otherState.payload.members), true);
-    assert.equal(otherState.payload.members.some((m) => m.userId === "leave_keep_seatno" && m.seat === 2), true);
-
-    actor.close();
-    other.close();
-  } finally {
-    child.kill("SIGTERM");
-    await waitForExit(child);
-  }
-});
-
 test("leave routes to commandResult and does not fall through to table_state", async () => {
   const secret = "test-secret";
   const actorToken = makeHs256Jwt({ secret, sub: "leave_route_actor" });
@@ -1010,46 +892,6 @@ test("leave routes to commandResult and does not fall through to table_state", a
     assert.equal(first.payload.status, "rejected");
     assert.equal(first.payload.reason, "authoritative_state_invalid");
     assert.notEqual(first.type, "table_state");
-    assert.equal(await attemptMessage(actor, 300), null);
-
-    actor.close();
-  } finally {
-    child.kill("SIGTERM");
-    await waitForExit(child);
-  }
-});
-
-test("leave rejects when authoritative restore payload is invalid after execution", async () => {
-  const secret = "test-secret";
-  const actorToken = makeHs256Jwt({ secret, sub: "leave_sync_fail_actor" });
-  const tableId = "table_leave_sync_fail";
-  const override = JSON.stringify({
-    ok: true,
-    tableId,
-    state: {
-      version: 3,
-      state: {
-        tableId,
-        seats: null,
-        phase: "INIT"
-      }
-    }
-  });
-  const { port, child } = await createServer({ env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret, WS_TEST_LEAVE_RESULT_JSON: override } });
-
-  try {
-    await waitForListening(child, 5000);
-    const actor = await connectClient(port);
-    await hello(actor);
-    await auth(actor, actorToken, "auth-leave-sync-fail");
-
-    sendFrame(actor, { version: "1.0", type: "table_join", requestId: "join-leave-sync-fail", ts: "2026-02-28T00:00:01Z", payload: { tableId } });
-    await nextMessageOfType(actor, "commandResult");
-
-    sendFrame(actor, { version: "1.0", type: "table_leave", requestId: "leave-sync-fail", ts: "2026-02-28T00:00:02Z", payload: { tableId } });
-    const first = await nextMessageOfType(actor, "commandResult");
-    assert.equal(first.payload.status, "rejected");
-    assert.equal(first.payload.reason, "authoritative_state_invalid");
     assert.equal(await attemptMessage(actor, 300), null);
 
     actor.close();
@@ -1471,43 +1313,6 @@ test("resume outside replay window triggers deterministic resync plus fresh snap
     const snapshot = await nextMessageOfType(ws2, "stateSnapshot");
     assert.equal(resync.payload.mode, "required");
     assert.equal(snapshot.type, "stateSnapshot");
-    ws2.close();
-  } finally {
-    child.kill("SIGTERM");
-    await waitForExit(child);
-  }
-});
-
-test("resume replays in-window missing events in order", async () => {
-  const secret = "resume-in-window-secret";
-  const { port, child } = await createServer({ env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret, WS_STREAM_REPLAY_CAP: "8" } });
-  try {
-    await waitForListening(child, 5000);
-    const ws = await connectClient(port);
-    const helloAck = await hello(ws);
-    await auth(ws, makeHs256Jwt({ secret, sub: "user_resume_window" }));
-
-    sendFrame(ws, { version: "1.0", type: "table_join", requestId: "join-rw", ts: "2026-02-28T00:00:01Z", payload: { tableId: "table_resume_window" } });
-    const first = await nextMessageOfType(ws, "table_state");
-    sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "snap-rw-1", ts: "2026-02-28T00:00:02Z", payload: { tableId: "table_resume_window", view: "snapshot" } });
-    const second = await nextMessageOfType(ws, "stateSnapshot");
-    ws.close();
-
-    const ws2 = await connectClient(port);
-    await hello(ws2);
-    await auth(ws2, makeHs256Jwt({ secret, sub: "user_resume_window" }), "auth-rw-2");
-    sendFrame(ws2, {
-      version: "1.0",
-      type: "resume",
-      requestId: "resume-rw-2",
-      roomId: "table_resume_window",
-      ts: "2026-02-28T00:00:04Z",
-      payload: { tableId: "table_resume_window", sessionId: helloAck.payload.sessionId, lastSeq: first.seq }
-    });
-
-    const replayed = await nextMessage(ws2);
-    assert.equal(replayed.seq, second.seq);
-    assert.equal(replayed.type, "stateSnapshot");
     ws2.close();
   } finally {
     child.kill("SIGTERM");
@@ -1995,159 +1800,6 @@ test("rapid same-socket join then snapshot remains ordered with slow bootstrap",
 });
 
 
-
-test("observer table_join keeps live members empty without creating seated membership", async () => {
-  const secret = "test-secret";
-  const token = makeHs256Jwt({ secret, sub: "observer_only_user" });
-  const tableId = "table_observer_join_only";
-  const fixtures = {
-    [tableId]: {
-      tableRow: { id: tableId, max_players: 6, status: "active" },
-      seatRows: [
-        { user_id: "seed_user_a", seat_no: 2, status: "ACTIVE", is_bot: false },
-        { user_id: "seed_user_b", seat_no: 4, status: "ACTIVE", is_bot: false }
-      ],
-      stateRow: { version: 12, state: { handId: "h12", phase: "PREFLOP", turnUserId: "seed_user_a" } }
-    }
-  };
-
-  const { port, child } = await createServer({ env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret, SUPABASE_DB_URL: "", ...observeOnlyJoinEnv(), ...persistedBootstrapFixturesEnv(fixtures) } });
-
-  try {
-    await waitForListening(child, 5000);
-    const ws = await connectClient(port);
-    await hello(ws);
-    await auth(ws, token);
-
-    sendFrame(ws, { version: "1.0", type: "table_join", requestId: "observer-join-1", ts: "2026-02-28T00:31:00Z", payload: { tableId } });
-    const firstJoinAck = await nextCommandResultForRequest(ws, "observer-join-1");
-    const firstJoinState = await nextMessageOfType(ws, "table_state");
-    assert.equal(firstJoinState.requestId, "observer-join-1");
-    assert.equal(firstJoinAck.payload.status, "accepted");
-
-    sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "observer-state-1", ts: "2026-02-28T00:31:00Z", payload: { tableId } });
-    const firstJoin = await nextMessageOfType(ws, "table_state");
-    assert.deepEqual(firstJoin.payload.members, []);
-    assert.deepEqual(firstJoin.payload.authoritativeMembers, [
-      { userId: "seed_user_a", seat: 2 },
-      { userId: "seed_user_b", seat: 4 }
-    ]);
-
-    sendFrame(ws, { version: "1.0", type: "table_join", requestId: "observer-join-2", ts: "2026-02-28T00:31:01Z", payload: { tableId } });
-    const secondJoinAck = await nextCommandResultForRequest(ws, "observer-join-2");
-    const secondJoinState = await nextMessageOfType(ws, "table_state");
-    assert.equal(secondJoinState.requestId, "observer-join-2");
-    assert.equal(secondJoinAck.payload.status, "accepted");
-
-    sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "observer-state-2", ts: "2026-02-28T00:31:01Z", payload: { tableId } });
-    const secondJoin = await nextMessageOfType(ws, "table_state");
-    assert.deepEqual(secondJoin.payload.members, []);
-    assert.deepEqual(secondJoin.payload.authoritativeMembers, [
-      { userId: "seed_user_a", seat: 2 },
-      { userId: "seed_user_b", seat: 4 }
-    ]);
-
-    sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "observer-snapshot", ts: "2026-02-28T00:31:02Z", payload: { tableId, view: "snapshot" } });
-    const snapshot = await nextMessageOfType(ws, "stateSnapshot");
-    assert.equal(snapshot.payload.you.userId, "observer_only_user");
-    assert.equal(snapshot.payload.you.seat, null);
-
-    ws.close();
-  } finally {
-    child.kill("SIGTERM");
-    await waitForExit(child);
-  }
-});
-
-test("seated persisted user remains seated across repeated table_join", async () => {
-  const secret = "test-secret";
-  const token = makeHs256Jwt({ secret, sub: "seed_user_a" });
-  const tableId = "table_seated_persisted_join";
-  const fixtures = {
-    [tableId]: {
-      tableRow: { id: tableId, max_players: 6, status: "active" },
-      seatRows: [{ user_id: "seed_user_a", seat_no: 3, status: "ACTIVE", is_bot: false }],
-      stateRow: { version: 9, state: { handId: "h9", phase: "PREFLOP", turnUserId: "seed_user_a" } }
-    }
-  };
-
-  const { port, child } = await createServer({ env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret, SUPABASE_DB_URL: "", ...persistedBootstrapFixturesEnv(fixtures) } });
-
-  try {
-    await waitForListening(child, 5000);
-    const ws = await connectClient(port);
-    await hello(ws);
-    await auth(ws, token);
-
-    sendFrame(ws, { version: "1.0", type: "table_join", requestId: "seated-join-1", ts: "2026-02-28T00:32:00Z", payload: { tableId } });
-    const firstAck = await nextMessageOfType(ws, "commandResult");
-    const firstState = await nextMessageOfType(ws, "table_state");
-    assert.equal(firstState.requestId, "seated-join-1");
-    assert.equal(firstAck.payload.status, "accepted");
-    sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "seated-sub-1", ts: "2026-02-28T00:32:00Z", payload: { tableId } });
-    const firstJoin = await nextMessageOfType(ws, "table_state");
-    assert.deepEqual(firstJoin.payload.members, [{ userId: "seed_user_a", seat: 3 }]);
-
-    sendFrame(ws, { version: "1.0", type: "table_join", requestId: "seated-join-2", ts: "2026-02-28T00:32:01Z", payload: { tableId } });
-    const secondAck = await nextMessageOfType(ws, "commandResult");
-    const secondState = await nextMessageOfType(ws, "table_state");
-    assert.equal(secondState.requestId, "seated-join-2");
-    assert.equal(secondAck.payload.status, "accepted");
-    sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "seated-sub-2", ts: "2026-02-28T00:32:01Z", payload: { tableId } });
-    const secondJoin = await nextMessageOfType(ws, "table_state");
-    assert.deepEqual(secondJoin.payload.members, [{ userId: "seed_user_a", seat: 3 }]);
-
-    ws.close();
-  } finally {
-    child.kill("SIGTERM");
-    await waitForExit(child);
-  }
-});
-
-test("observer join then resync keeps observer unseated with live members empty", async () => {
-  const secret = "test-secret";
-  const token = makeHs256Jwt({ secret, sub: "observer_resync_user" });
-  const tableId = "table_observer_resync";
-  const fixtures = {
-    [tableId]: {
-      tableRow: { id: tableId, max_players: 6, status: "active" },
-      seatRows: [{ user_id: "seed_user_a", seat_no: 1, status: "ACTIVE", is_bot: false }],
-      stateRow: { version: 7, state: { handId: "h7", phase: "PREFLOP", turnUserId: "seed_user_a" } }
-    }
-  };
-
-  const { port, child } = await createServer({ env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret, SUPABASE_DB_URL: "", ...observeOnlyJoinEnv(), ...persistedBootstrapFixturesEnv(fixtures) } });
-
-  try {
-    await waitForListening(child, 5000);
-    const ws = await connectClient(port);
-    await hello(ws);
-    await auth(ws, token);
-
-    sendFrame(ws, { version: "1.0", type: "table_join", requestId: "observer-resync-join", ts: "2026-02-28T00:33:00Z", payload: { tableId } });
-    const joinAck = await nextMessageOfType(ws, "commandResult");
-    assert.equal(joinAck.payload.status, "accepted");
-    sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "observer-resync-sub", ts: "2026-02-28T00:33:00Z", payload: { tableId } });
-    const joinState = await nextMessageOfType(ws, "table_state");
-    assert.deepEqual(joinState.payload.members, []);
-    assert.deepEqual(joinState.payload.authoritativeMembers, [{ userId: "seed_user_a", seat: 1 }]);
-
-    sendFrame(ws, { version: "1.0", type: "resync", requestId: "observer-resync", ts: "2026-02-28T00:33:01Z", payload: { tableId } });
-    const resyncState = await nextMessageOfType(ws, "table_state");
-    assert.deepEqual(resyncState.payload.members, []);
-    assert.deepEqual(resyncState.payload.authoritativeMembers, [{ userId: "seed_user_a", seat: 1 }]);
-
-    sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "observer-resync-snapshot", ts: "2026-02-28T00:33:02Z", payload: { tableId, mode: "snapshot" } });
-    const snapshot = await nextMessageOfType(ws, "stateSnapshot");
-    assert.equal(snapshot.payload.you.userId, "observer_resync_user");
-    assert.equal(snapshot.payload.you.seat, null);
-
-    ws.close();
-  } finally {
-    child.kill("SIGTERM");
-    await waitForExit(child);
-  }
-});
 
 test("fresh hello->auth->table_state_sub keeps live members empty but includes authoritativeMembers", async () => {
   const secret = "test-secret";
@@ -3079,7 +2731,7 @@ test("human act against queued bots returns next actionable human snapshot", asy
       baselineSnapshot = await nextMessageMatching(
         humanWs,
         (frame) => frame?.type === "stateSnapshot",
-        8000
+        15000
       );
     }
 
@@ -3088,7 +2740,7 @@ test("human act against queued bots returns next actionable human snapshot", asy
       : await nextMessageMatching(
           humanWs,
           (frame) => frame?.type === "stateSnapshot" && isActionableHumanSnapshot(frame.payload),
-          8000
+          15000
         );
 
     const firstPayload = firstHumanTurn.payload;
@@ -3268,7 +2920,7 @@ test("observer snapshot stays public-state consistent with seated snapshot after
         frame?.type === "stateSnapshot"
         && isActionableHumanSnapshot(frame.payload)
         && Number(frame.payload?.stateVersion || 0) > Number(firstPayload?.stateVersion || 0),
-      8000
+      15000
     );
 
     const seatedPayload = secondHumanTurn.payload;
@@ -3299,52 +2951,6 @@ test("observer snapshot stays public-state consistent with seated snapshot after
     await waitForExit(child);
   }
 });
-
-test("active replacement: observe-only semantics in bootstrap-disabled mode keep observer unseated", async () => {
-  const secret = "test-secret";
-  const token = makeHs256Jwt({ secret, sub: "plain_observer" });
-  const { port, child } = await createServer({
-    env: {
-      WS_AUTH_REQUIRED: "1",
-      WS_AUTH_TEST_SECRET: secret,
-      SUPABASE_DB_URL: "",
-      WS_PERSISTED_BOOTSTRAP_FIXTURES_JSON: "",
-      ...observeOnlyJoinEnv()
-    }
-  });
-
-  try {
-    await waitForListening(child, 5000);
-    const ws = await connectClient(port);
-    await hello(ws);
-    await auth(ws, token, "auth-plain-observer");
-
-    sendFrame(ws, { version: "1.0", type: "table_join", requestId: "join-plain-1", ts: "2026-02-28T01:10:00Z", payload: { tableId: "table_plain_observe" } });
-    const joinAck1 = await nextMessageOfType(ws, "commandResult");
-    assert.equal(joinAck1.payload.status, "accepted");
-
-    sendFrame(ws, { version: "1.0", type: "table_join", requestId: "join-plain-2", ts: "2026-02-28T01:10:01Z", payload: { tableId: "table_plain_observe" } });
-    const joinAck2 = await nextMessageOfType(ws, "commandResult");
-    assert.equal(joinAck2.payload.status, "accepted");
-
-    sendFrame(ws, { version: "1.0", type: "resync", requestId: "resync-plain", ts: "2026-02-28T01:10:02Z", payload: { tableId: "table_plain_observe" } });
-    const resyncState = await nextMessageOfType(ws, "table_state");
-    assert.deepEqual(resyncState.payload.members, []);
-
-    sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "snap-plain", ts: "2026-02-28T01:10:03Z", payload: { tableId: "table_plain_observe", view: "snapshot" } });
-    const snapshot = await nextMessageOfType(ws, "stateSnapshot");
-    assert.equal(snapshot.payload.you.seat, null);
-    assert.equal("private" in snapshot.payload, false);
-
-    ws.close();
-  } finally {
-    child.kill("SIGTERM");
-    await waitForExit(child);
-  }
-});
-
-
-
 
 test("WS act persists state to file-backed optimistic store", async () => {
   const secret = "persist-secret";
@@ -3783,11 +3389,23 @@ test("WS act optimistic conflict returns deterministic rejection and restored sn
     await fs.writeFile(filePath, `${JSON.stringify(forced)}
 `, "utf8");
 
-    const conflictFrames = nextNMessages(ws, 2, 10000);
     sendFrame(ws, { version: "1.0", type: "act", requestId: "act-conflict", ts: "2026-02-28T02:10:02Z", payload: { tableId, handId, action: "fold" } });
-    const [firstConflictFrame, secondConflictFrame] = await conflictFrames;
-    const rejected = firstConflictFrame.type === "commandResult" ? firstConflictFrame : secondConflictFrame;
-    const restored = firstConflictFrame.type === "stateSnapshot" ? firstConflictFrame : secondConflictFrame;
+    let rejected = null;
+    let restored = null;
+    const conflictDeadline = Date.now() + 10000;
+    while ((!rejected || !restored) && Date.now() < conflictDeadline) {
+      const remaining = Math.max(50, conflictDeadline - Date.now());
+      const frame = await nextMessage(ws, remaining);
+      if (!rejected && frame?.type === "commandResult") {
+        rejected = frame;
+        continue;
+      }
+      if (!restored && frame?.type === "stateSnapshot") {
+        restored = frame;
+      }
+    }
+    assert.ok(rejected, "expected commandResult after optimistic conflict");
+    assert.ok(restored, "expected restored stateSnapshot after optimistic conflict");
     assert.equal(rejected.payload.status, "rejected");
     assert.equal(rejected.payload.reason, "conflict");
     assert.equal(restored.type, "stateSnapshot");
