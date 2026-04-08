@@ -59,6 +59,8 @@ assert.equal(typeof hooks.validateAmountActionPayload, 'function');
 assert.equal(typeof hooks.resolveTurnActionUiState, 'function');
 assert.equal(typeof hooks.resolveAmountActionModel, 'function');
 assert.equal(typeof hooks.resolveAllInPlan, 'function');
+assert.equal(typeof hooks.evaluateViewerBestHand, 'function');
+assert.equal(typeof hooks.formatViewerHandCategory, 'function');
 
 const betInfo = hooks.sanitizeAllowedActions(new Set(['CHECK', 'BET']), { maxBetAmount: 100 });
 const betModel = hooks.resolveAmountActionModel(betInfo, 20, '');
@@ -139,3 +141,15 @@ const noAllIn = hooks.resolveAllInPlan(
   'user-1'
 );
 assert.equal(noAllIn, null, 'no all-in button when only CHECK/FOLD are legal');
+
+const flushEval = hooks.evaluateViewerBestHand([
+  { r: 'A', s: 'S' },
+  { r: 'K', s: 'S' },
+  { r: 'Q', s: 'S' },
+  { r: '8', s: 'S' },
+  { r: '2', s: 'S' },
+  { r: 'J', s: 'D' },
+  { r: '9', s: 'H' },
+]);
+assert.equal(flushEval && flushEval.category, 6, 'viewer best-hand helper should detect flush from 7 cards');
+assert.equal(hooks.formatViewerHandCategory(6), 'Flush', 'viewer category formatter should map known categories');

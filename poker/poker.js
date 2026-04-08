@@ -576,6 +576,8 @@
       resolveAmountActionModel: resolveAmountActionModel,
       resolveTurnActionUiState: resolveTurnActionUiState,
       resolveAllInPlan: resolveAllInPlan,
+      evaluateViewerBestHand: evaluateViewerBestHand,
+      formatViewerHandCategory: formatViewerHandCategory,
       ensurePokerRecorder: ensurePokerRecorder,
       getPokerDumpText: getPokerDumpText,
       copyTextToClipboard: copyTextToClipboard,
@@ -779,6 +781,235 @@
     cardEl.appendChild(rankEl);
     cardEl.appendChild(suitEl);
     return cardEl;
+  }
+
+  var VIEWER_HAND_CATEGORY = {
+    HIGH_CARD: 1,
+    PAIR: 2,
+    TWO_PAIR: 3,
+    TRIPS: 4,
+    STRAIGHT: 5,
+    FLUSH: 6,
+    FULL_HOUSE: 7,
+    QUADS: 8,
+    STRAIGHT_FLUSH: 9
+  };
+
+  function normalizeEvalRank(rank){
+    if (typeof rank === 'number' && Number.isInteger(rank) && rank >= 2 && rank <= 14) return rank;
+    if (typeof rank !== 'string') return null;
+    var value = rank.trim().toUpperCase();
+    if (value === 'A') return 14;
+    if (value === 'K') return 13;
+    if (value === 'Q') return 12;
+    if (value === 'J') return 11;
+    if (value === 'T') return 10;
+    if (/^\d+$/.test(value)) {
+      var numeric = Number(value);
+      if (Number.isInteger(numeric) && numeric >= 2 && numeric <= 10) return numeric;
+    }
+    return null;
+  }
+
+  function normalizeEvalSuit(suit){
+    if (typeof suit !== 'string') return null;
+    var value = suit.trim().toUpperCase();
+    if (!value) return null;
+    if (value !== 'S' && value !== 'H' && value !== 'D' && value !== 'C') return null;
+    return value;
+  }
+
+  function normalizeEvalCards(cards){
+    if (!Array.isArray(cards)) return null;
+    if (cards.length < 5) return null;
+    var out = [];
+    var seen = new Set();
+    for (var i = 0; i < cards.length; i++){
+      var card = cards[i];
+      if (!card || typeof card !== 'object') return null;
+      var rank = normalizeEvalRank(card.r);
+      var suit = normalizeEvalSuit(card.s);
+      if (!rank || !suit) return null;
+      var key = String(rank) + '-' + suit;
+      if (seen.has(key)) return null;
+      seen.add(key);
+      out.push({ rank: rank, suit: suit, raw: card });
+    }
+    return out;
+  }
+
+  function compareRankVectors(left, right){
+    var a = Array.isArray(left) ? left : [];
+    var b = Array.isArray(right) ? right : [];
+    var maxLen = Math.max(a.length, b.length);
+    for (var i = 0; i < maxLen; i++){
+      var diff = (a[i] || 0) - (b[i] || 0);
+      if (diff !== 0) return diff > 0 ? 1 : -1;
+    }
+    return 0;
+  }
+
+  function sortByRankDescThenSuit(left, right){
+    if (left.rank !== right.rank) return right.rank - left.rank;
+    return left.suit.localeCompare(right.suit);
+  }
+
+  function findStraightRanks(ranksDesc){
+    var rankSet = new Set(Array.isArray(ranksDesc) ? ranksDesc : []);
+    if (rankSet.has(14)) rankSet.add(1);
+    for (var high = 14; high >= 5; high--){
+      var ok = true;
+      for (var i = 0; i < 5; i++){
+        if (!rankSet.has(high - i)){
+          ok = false;
+          break;
+        }
+      }
+      if (ok){
+        var ranks = [];
+        for (var j = 0; j < 5; j++) ranks.push(high - j);
+        return { high: high, ranks: ranks };
+      }
+    }
+    return null;
+  }
+
+  function pickStraightCards(ranks, cardsByRank){
+    var result = [];
+    for (var i = 0; i < ranks.length; i++){
+      var current = ranks[i];
+      var actual = current === 1 ? 14 : current;
+      var list = cardsByRank.get(actual) || [];
+      result.push(list[0]);
+    }
+    return result;
+  }
+
+  function evaluateViewerBestHand(cards){
+    var normalized = normalizeEvalCards(cards);
+    if (!normalized) return null;
+    var allSorted = normalized.slice().sort(sortByRankDescThenSuit);
+    var cardsByRank = new Map();
+    var cardsBySuit = new Map();
+    for (var i = 0; i < normalized.length; i++){
+      var card = normalized[i];
+      if (!cardsByRank.has(card.rank)) cardsByRank.set(card.rank, []);
+      cardsByRank.get(card.rank).push(card);
+      if (!cardsBySuit.has(card.suit)) cardsBySuit.set(card.suit, []);
+      cardsBySuit.get(card.suit).push(card);
+    }
+    cardsByRank.forEach(function(list){ list.sort(function(a, b){ return a.suit.localeCompare(b.suit); }); });
+    cardsBySuit.forEach(function(list){ list.sort(sortByRankDescThenSuit); });
+
+    var uniqueRanksDesc = Array.from(cardsByRank.keys()).sort(function(a, b){ return b - a; });
+    var ranksByCount = { 1: [], 2: [], 3: [], 4: [] };
+    uniqueRanksDesc.forEach(function(rank){
+      var count = (cardsByRank.get(rank) || []).length;
+      if (!ranksByCount[count]) ranksByCount[count] = [];
+      ranksByCount[count].push(rank);
+    });
+
+    var bestStraightFlush = null;
+    var suitNames = Array.from(cardsBySuit.keys()).sort();
+    for (var suitIndex = 0; suitIndex < suitNames.length; suitIndex++){
+      var suitName = suitNames[suitIndex];
+      var suitedCards = cardsBySuit.get(suitName) || [];
+      if (suitedCards.length < 5) continue;
+      var suitRanks = Array.from(new Set(suitedCards.map(function(entry){ return entry.rank; }))).sort(function(a, b){ return b - a; });
+      var straightInSuit = findStraightRanks(suitRanks);
+      if (!straightInSuit) continue;
+      var cardsByRankSuit = new Map();
+      suitedCards.forEach(function(entry){
+        if (!cardsByRankSuit.has(entry.rank)) cardsByRankSuit.set(entry.rank, []);
+        cardsByRankSuit.get(entry.rank).push(entry);
+      });
+      cardsByRankSuit.forEach(function(list){ list.sort(function(a, b){ return a.suit.localeCompare(b.suit); }); });
+      var candidate = {
+        high: straightInSuit.high === 1 ? 5 : straightInSuit.high,
+        cards: pickStraightCards(straightInSuit.ranks, cardsByRankSuit)
+      };
+      if (!bestStraightFlush || candidate.high > bestStraightFlush.high){
+        bestStraightFlush = candidate;
+      }
+    }
+    if (bestStraightFlush){
+      return { category: VIEWER_HAND_CATEGORY.STRAIGHT_FLUSH, cards: bestStraightFlush.cards.map(function(entry){ return entry.raw; }) };
+    }
+
+    if (ranksByCount[4].length){
+      var quadRank = ranksByCount[4][0];
+      var quadCards = (cardsByRank.get(quadRank) || []).slice(0, 4);
+      var quadKicker = allSorted.find(function(entry){ return entry.rank !== quadRank; });
+      return { category: VIEWER_HAND_CATEGORY.QUADS, cards: quadCards.concat([quadKicker]).map(function(entry){ return entry.raw; }) };
+    }
+
+    if (ranksByCount[3].length){
+      var tripRank = ranksByCount[3][0];
+      var pairRank = ranksByCount[2].find(function(rank){ return rank !== tripRank; }) || ranksByCount[3][1];
+      if (pairRank){
+        var tripCards = (cardsByRank.get(tripRank) || []).slice(0, 3);
+        var pairCards = (cardsByRank.get(pairRank) || []).slice(0, 2);
+        return { category: VIEWER_HAND_CATEGORY.FULL_HOUSE, cards: tripCards.concat(pairCards).map(function(entry){ return entry.raw; }) };
+      }
+    }
+
+    var bestFlush = null;
+    for (var flushSuitIndex = 0; flushSuitIndex < suitNames.length; flushSuitIndex++){
+      var flushSuitName = suitNames[flushSuitIndex];
+      var flushCards = cardsBySuit.get(flushSuitName) || [];
+      if (flushCards.length < 5) continue;
+      var topFlush = flushCards.slice(0, 5);
+      var topFlushRanks = topFlush.map(function(entry){ return entry.rank; });
+      if (!bestFlush || compareRankVectors(topFlushRanks, bestFlush.ranks) > 0){
+        bestFlush = { ranks: topFlushRanks, cards: topFlush };
+      }
+    }
+    if (bestFlush){
+      return { category: VIEWER_HAND_CATEGORY.FLUSH, cards: bestFlush.cards.map(function(entry){ return entry.raw; }) };
+    }
+
+    var straight = findStraightRanks(uniqueRanksDesc);
+    if (straight){
+      return { category: VIEWER_HAND_CATEGORY.STRAIGHT, cards: pickStraightCards(straight.ranks, cardsByRank).map(function(entry){ return entry.raw; }) };
+    }
+
+    if (ranksByCount[3].length){
+      var tripsRank = ranksByCount[3][0];
+      var tripsCards = (cardsByRank.get(tripsRank) || []).slice(0, 3);
+      var tripsKickers = allSorted.filter(function(entry){ return entry.rank !== tripsRank; }).slice(0, 2);
+      return { category: VIEWER_HAND_CATEGORY.TRIPS, cards: tripsCards.concat(tripsKickers).map(function(entry){ return entry.raw; }) };
+    }
+
+    if (ranksByCount[2].length >= 2){
+      var highPair = ranksByCount[2][0];
+      var lowPair = ranksByCount[2][1];
+      var highPairCards = (cardsByRank.get(highPair) || []).slice(0, 2);
+      var lowPairCards = (cardsByRank.get(lowPair) || []).slice(0, 2);
+      var twoPairKicker = allSorted.find(function(entry){ return entry.rank !== highPair && entry.rank !== lowPair; });
+      return { category: VIEWER_HAND_CATEGORY.TWO_PAIR, cards: highPairCards.concat(lowPairCards).concat([twoPairKicker]).map(function(entry){ return entry.raw; }) };
+    }
+
+    if (ranksByCount[2].length){
+      var pairRankOnly = ranksByCount[2][0];
+      var pairOnlyCards = (cardsByRank.get(pairRankOnly) || []).slice(0, 2);
+      var pairOnlyKickers = allSorted.filter(function(entry){ return entry.rank !== pairRankOnly; }).slice(0, 3);
+      return { category: VIEWER_HAND_CATEGORY.PAIR, cards: pairOnlyCards.concat(pairOnlyKickers).map(function(entry){ return entry.raw; }) };
+    }
+
+    return { category: VIEWER_HAND_CATEGORY.HIGH_CARD, cards: allSorted.slice(0, 5).map(function(entry){ return entry.raw; }) };
+  }
+
+  function formatViewerHandCategory(category){
+    var key = Number(category);
+    if (key === VIEWER_HAND_CATEGORY.STRAIGHT_FLUSH) return t('pokerBestHandStraightFlush', 'Straight Flush');
+    if (key === VIEWER_HAND_CATEGORY.QUADS) return t('pokerBestHandQuads', 'Four of a Kind');
+    if (key === VIEWER_HAND_CATEGORY.FULL_HOUSE) return t('pokerBestHandFullHouse', 'Full House');
+    if (key === VIEWER_HAND_CATEGORY.FLUSH) return t('pokerBestHandFlush', 'Flush');
+    if (key === VIEWER_HAND_CATEGORY.STRAIGHT) return t('pokerBestHandStraight', 'Straight');
+    if (key === VIEWER_HAND_CATEGORY.TRIPS) return t('pokerBestHandTrips', 'Three of a Kind');
+    if (key === VIEWER_HAND_CATEGORY.TWO_PAIR) return t('pokerBestHandTwoPair', 'Two Pair');
+    if (key === VIEWER_HAND_CATEGORY.PAIR) return t('pokerBestHandPair', 'Pair');
+    return t('pokerBestHandHighCard', 'High Card');
   }
 
   function renderCommunityBoard(state){
@@ -1178,6 +1409,9 @@
     var versionEl = document.getElementById('pokerVersion');
     var myCardsEl = document.getElementById('pokerMyCards');
     var myCardsStatusEl = document.getElementById('pokerMyCardsStatus');
+    var bestHandWrapEl = document.getElementById('pokerBestHandWrap');
+    var bestHandNameEl = document.getElementById('pokerBestHandName');
+    var bestHandCardsEl = document.getElementById('pokerBestHandCards');
     var jsonToggle = document.getElementById('pokerJsonToggle');
     var jsonBox = document.getElementById('pokerJsonBox');
     var signInBtn = document.getElementById('pokerSignIn');
@@ -3060,6 +3294,7 @@
       renderPhaseLabel(gameState);
       renderCommunityBoard(gameState);
       renderHoleCards(data.myHoleCards);
+      renderBestViewerHand(data.myHoleCards, gameState && Array.isArray(gameState.community) ? gameState.community : []);
       renderShowdownPanel({ state: gameState, playersById: buildPlayersById(seats) });
       renderTurnTimer(gameState);
       if (versionEl) versionEl.textContent = stateObj.version != null ? stateObj.version : '-';
@@ -3079,6 +3314,32 @@
         myCardsEl.appendChild(buildCardElement(cards[i] || {}));
       }
       setInlineStatus(myCardsStatusEl, null, null);
+    }
+
+    function renderBestViewerHand(holeCards, communityCards){
+      if (!bestHandWrapEl || !bestHandNameEl || !bestHandCardsEl){
+        return;
+      }
+      bestHandCardsEl.innerHTML = '';
+      var ownCards = Array.isArray(holeCards) ? holeCards.slice(0, 2) : [];
+      var boardCards = Array.isArray(communityCards) ? communityCards.slice(0, 5) : [];
+      if (ownCards.length !== 2){
+        bestHandWrapEl.hidden = true;
+        bestHandNameEl.textContent = '-';
+        return;
+      }
+      var mergedCards = ownCards.concat(boardCards);
+      var best = evaluateViewerBestHand(mergedCards);
+      if (!best || !Array.isArray(best.cards) || best.cards.length !== 5){
+        bestHandWrapEl.hidden = true;
+        bestHandNameEl.textContent = '-';
+        return;
+      }
+      bestHandNameEl.textContent = formatViewerHandCategory(best.category);
+      for (var i = 0; i < best.cards.length; i++){
+        bestHandCardsEl.appendChild(buildCardElement(best.cards[i] || {}));
+      }
+      bestHandWrapEl.hidden = false;
     }
 
     function renderTurnTimer(gameState){
