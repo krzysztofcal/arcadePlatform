@@ -116,3 +116,75 @@ test("handleTurnTimeoutCommand emits resync only when restore itself fails", asy
   assert.equal(calls.autoplay, 0);
   assert.equal(calls.snapshots, 0);
 });
+
+test("handleTurnTimeoutCommand restores and snapshots when timeout apply returns invalid state", async () => {
+  const calls = { restore: 0, resync: 0, autoplay: 0, snapshots: 0, persist: 0 };
+  const result = await handleTurnTimeoutCommand({
+    tableId: "t1",
+    tableManager: {
+      maybeApplyTurnTimeout: () => ({ ok: false, changed: false, reason: "showdown_missing_hole_cards", stateVersion: 12 })
+    },
+    persistMutatedState: async () => {
+      calls.persist += 1;
+      return { ok: true };
+    },
+    restoreTableFromPersisted: async () => {
+      calls.restore += 1;
+      return { ok: true };
+    },
+    broadcastResyncRequired: () => {
+      calls.resync += 1;
+    },
+    broadcastStateSnapshots: () => {
+      calls.snapshots += 1;
+    },
+    scheduleBotStep: () => {
+      calls.autoplay += 1;
+    }
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "showdown_missing_hole_cards");
+  assert.equal(calls.restore, 1);
+  assert.equal(calls.resync, 0);
+  assert.equal(calls.persist, 0);
+  assert.equal(calls.autoplay, 0);
+  assert.equal(calls.snapshots, 1);
+});
+
+test("handleTurnTimeoutCommand restores and snapshots when timeout apply throws", async () => {
+  const calls = { restore: 0, resync: 0, autoplay: 0, snapshots: 0, persist: 0 };
+  const result = await handleTurnTimeoutCommand({
+    tableId: "t1",
+    tableManager: {
+      maybeApplyTurnTimeout: () => {
+        throw new Error("showdown_incomplete_community");
+      }
+    },
+    persistMutatedState: async () => {
+      calls.persist += 1;
+      return { ok: true };
+    },
+    restoreTableFromPersisted: async () => {
+      calls.restore += 1;
+      return { ok: true };
+    },
+    broadcastResyncRequired: () => {
+      calls.resync += 1;
+    },
+    broadcastStateSnapshots: () => {
+      calls.snapshots += 1;
+    },
+    scheduleBotStep: () => {
+      calls.autoplay += 1;
+    }
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "timeout_apply_failed");
+  assert.equal(calls.restore, 1);
+  assert.equal(calls.resync, 0);
+  assert.equal(calls.persist, 0);
+  assert.equal(calls.autoplay, 0);
+  assert.equal(calls.snapshots, 1);
+});

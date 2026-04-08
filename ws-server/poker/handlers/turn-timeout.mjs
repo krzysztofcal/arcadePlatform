@@ -11,8 +11,27 @@ export async function handleTurnTimeoutCommand({
   scheduleBotStep = () => {},
   klog = () => {}
 }) {
-  const result = tableManager.maybeApplyTurnTimeout({ tableId, nowMs });
-  if (!result?.ok || !result.changed) {
+  let result;
+  try {
+    result = tableManager.maybeApplyTurnTimeout({ tableId, nowMs });
+  } catch {
+    result = { ok: false, changed: false, reason: "timeout_apply_failed", stateVersion: 0 };
+  }
+  if (!result?.ok) {
+    await recoverFromPersistConflict({
+      tableId,
+      restoreTableFromPersisted,
+      broadcastStateSnapshots,
+      broadcastResyncRequired
+    });
+    return {
+      ok: false,
+      changed: false,
+      reason: result?.reason || "timeout_apply_failed",
+      stateVersion: result?.stateVersion ?? 0
+    };
+  }
+  if (!result.changed) {
     return result;
   }
 

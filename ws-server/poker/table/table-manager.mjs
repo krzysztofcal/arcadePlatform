@@ -369,7 +369,25 @@ export function createTableManager({
       };
     }
 
-    const timeoutApplied = applyCoreStateTurnTimeout({ tableId, coreState: table.coreState, nowMs });
+    let timeoutApplied;
+    try {
+      timeoutApplied = applyCoreStateTurnTimeout({ tableId, coreState: table.coreState, nowMs });
+    } catch (error) {
+      return {
+        ok: false,
+        changed: false,
+        reason: error?.message || "timeout_apply_failed",
+        stateVersion: table.coreState.version
+      };
+    }
+    if (timeoutApplied?.ok === false) {
+      return {
+        ok: false,
+        changed: false,
+        reason: timeoutApplied.reason || "timeout_apply_failed",
+        stateVersion: table.coreState.version
+      };
+    }
     if (!timeoutApplied.changed) {
       rememberActionResult(table, requestId, {
         ok: true,

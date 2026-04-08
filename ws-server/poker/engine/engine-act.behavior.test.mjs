@@ -140,6 +140,49 @@ test("engine action accounting parity: PREFLOP raise/call updates fields exactly
   assert.equal(called.coreState.pokerState.turnUserId, "user_b");
 });
 
+test("engine accepts short-stack CALL as all-in contribution", () => {
+  const boot = bootstrapCoreStateHand({ tableId: "table_engine_act", coreState: initialCore(), nowMs: 2_500 });
+  const initial = boot.coreState;
+
+  const raised = applyCoreStateAction({
+    tableId: "table_engine_act",
+    coreState: initial,
+    handId: initial.pokerState.handId,
+    userId: initial.pokerState.turnUserId,
+    action: "RAISE",
+    amount: 6,
+    nowIso: new Date(2_501).toISOString(),
+    nowMs: 2_501
+  });
+  assert.equal(raised.accepted, true);
+
+  const shortStackCore = {
+    ...raised.coreState,
+    pokerState: {
+      ...raised.coreState.pokerState,
+      stacks: {
+        ...raised.coreState.pokerState.stacks,
+        user_b: 3
+      }
+    }
+  };
+
+  const shortCall = applyCoreStateAction({
+    tableId: "table_engine_act",
+    coreState: shortStackCore,
+    handId: shortStackCore.pokerState.handId,
+    userId: "user_b",
+    action: "CALL",
+    nowIso: new Date(2_502).toISOString(),
+    nowMs: 2_502
+  });
+
+  assert.equal(shortCall.accepted, true);
+  assert.equal(shortCall.reason, null);
+  assert.equal(shortCall.coreState.pokerState.stacks.user_b, 0);
+  assert.equal(shortCall.coreState.pokerState.contributionsByUserId.user_b, 5);
+});
+
 test("engine accepts flop bet when action is unopened on the street", () => {
   let coreState = bootstrapCoreStateHand({ tableId: "table_engine_act", coreState: initialCore(), nowMs: 6_000 }).coreState;
 

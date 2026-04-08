@@ -242,13 +242,8 @@ export function applyCoreStateAction({ tableId, coreState, handId, userId, actio
 
   const stack = Number(liveState.stacks?.[userId] ?? 0);
   const toCall = Math.max(0, Number(legalInfo.toCall ?? 0));
-  if (normalizedAction === "CALL") {
-    if (toCall === 0) {
-      return { ok: true, accepted: false, changed: false, reason: "illegal_action", stateVersion: coreState.version, coreState };
-    }
-    if (!Number.isFinite(stack) || stack < toCall) {
-      return { ok: true, accepted: false, changed: false, reason: "unsupported_all_in", stateVersion: coreState.version, coreState };
-    }
+  if (normalizedAction === "CALL" && toCall === 0) {
+    return { ok: true, accepted: false, changed: false, reason: "illegal_action", stateVersion: coreState.version, coreState };
   }
 
   if (normalizedAction === "RAISE") {
@@ -274,7 +269,19 @@ export function applyCoreStateAction({ tableId, coreState, handId, userId, actio
     }
   }
 
-  const applied = applyPokerAction({ pokerState: liveState, userId, action: normalizedAction, amount, nowIso });
+  let applied;
+  try {
+    applied = applyPokerAction({ pokerState: liveState, userId, action: normalizedAction, amount, nowIso });
+  } catch (error) {
+    return {
+      ok: false,
+      accepted: false,
+      changed: false,
+      reason: error?.message || "state_invalid",
+      stateVersion: coreState.version,
+      coreState
+    };
+  }
   if (!applied.ok) {
     return {
       ok: true,
