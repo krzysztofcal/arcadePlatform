@@ -1683,6 +1683,7 @@
     var wsAppliedSnapshotSeq = 0;
     var pendingWsSnapshot = null;
     var amountRowWasVisible = false;
+    var lastRenderedHandForFlyout = null;
 
     if (joinBtn){
       klog('poker_join_bind', { found: true, selector: joinSelector, page: 'table' });
@@ -3394,6 +3395,78 @@
       return false;
     }
 
+    function sanitizeStacksForFlyout(stacks){
+      var safeStacks = stacks && typeof stacks === 'object' && !Array.isArray(stacks) ? stacks : {};
+      var out = {};
+      Object.keys(safeStacks).forEach(function(userId){
+        var normalizedUserId = typeof userId === 'string' ? userId.trim() : '';
+        if (!normalizedUserId) return;
+        var amount = toFiniteOrNull(safeStacks[userId]);
+        if (amount == null) return;
+        out[normalizedUserId] = amount;
+      });
+      return out;
+    }
+
+    function maybeRenderDerivedShowdownFlyout(params){
+      var info = params || {};
+      var gameState = info.gameState && typeof info.gameState === 'object' ? info.gameState : null;
+      if (!gameState) return;
+      var currentHandId = typeof gameState.handId === 'string' ? gameState.handId.trim() : '';
+      var currentPhase = typeof gameState.phase === 'string' ? gameState.phase.trim().toUpperCase() : '';
+      var currentStacks = sanitizeStacksForFlyout(gameState.stacks);
+      var currentViewerCards = Array.isArray(info.viewerHoleCards) ? info.viewerHoleCards.slice(0, 2) : [];
+
+      var previous = lastRenderedHandForFlyout;
+      var hasShowdownInSnapshot = !!(gameState.showdown && typeof gameState.showdown === 'object');
+      if (!hasShowdownInSnapshot && previous && previous.handId && currentHandId && previous.handId !== currentHandId){
+        var payouts = {};
+        Object.keys(currentStacks).forEach(function(userId){
+          var previousAmount = Number.isFinite(previous.stacks[userId]) ? previous.stacks[userId] : 0;
+          var delta = currentStacks[userId] - previousAmount;
+          if (delta > 0) payouts[userId] = delta;
+        });
+        var winnerUserIds = Object.keys(payouts);
+        if (winnerUserIds.length){
+          var derivedReason = previous.phase === 'SHOWDOWN' ? 'derived_showdown' : 'all_folded';
+          var syntheticState = {
+            showdown: {
+              handId: previous.handId,
+              winners: winnerUserIds,
+              potsAwarded: [],
+              potAwardedTotal: null,
+              reason: derivedReason
+            },
+            handSettlement: {
+              handId: previous.handId,
+              settledAt: null,
+              payouts: payouts
+            }
+          };
+          renderShowdownFlyout({
+            state: syntheticState,
+            playersById: info.playersById || {},
+            tableId: tableId,
+            currentUserId: currentUserId,
+            viewerHoleCards: previous.viewerHoleCards
+          });
+          klog('poker_showdown_flyout_show_derived', {
+            tableId: tableId,
+            handId: previous.handId,
+            winners: winnerUserIds,
+            reason: derivedReason
+          });
+        }
+      }
+
+      lastRenderedHandForFlyout = {
+        handId: currentHandId,
+        phase: currentPhase,
+        stacks: currentStacks,
+        viewerHoleCards: currentViewerCards
+      };
+    }
+
     function handleRealtimeEvent(_payload){
       requestWsResync('realtime_event');
     }
@@ -3542,9 +3615,15 @@
       renderCommunityBoard(gameState);
       renderHoleCards(data.myHoleCards);
       renderBestViewerHand(data.myHoleCards, gameState && Array.isArray(gameState.community) ? gameState.community : []);
+      var playersById = buildPlayersById(seats);
+      maybeRenderDerivedShowdownFlyout({
+        gameState: gameState,
+        playersById: playersById,
+        viewerHoleCards: data.myHoleCards
+      });
       renderShowdownPanel({
         state: gameState,
-        playersById: buildPlayersById(seats),
+        playersById: playersById,
         tableId: tableId,
         currentUserId: currentUserId,
         viewerHoleCards: data.myHoleCards
