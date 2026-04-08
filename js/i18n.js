@@ -122,6 +122,7 @@
     pokerDumpLogsFail: { en: 'Failed to copy logs', pl: 'Nie udało się skopiować logów' },
     pokerDumpLogsEmpty: { en: 'No poker client logs to copy', pl: 'Brak logów klienta pokera do skopiowania' },
     pokerShowdownFlyoutTitle: { en: 'Winning hand', pl: 'Wygrane rozdanie' },
+    pokerShowdownFlyoutTitleYouWon: { en: 'Congratulations, you won!', pl: 'Gratulacje, wygrałeś!' },
     pokerShowdownFlyoutPayouts: { en: 'Payouts', pl: 'Wygrane' },
     pokerShowdownFlyoutCards: { en: 'Winner cards', pl: 'Karty zwycięzcy' }
   };

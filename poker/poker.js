@@ -707,11 +707,17 @@
 
     var playersById = opts && opts.playersById ? opts.playersById : {};
     var winnerPayouts = buildShowdownWinnerPayoutMap(showdown, viewState && isPlainObject(viewState.handSettlement) ? viewState.handSettlement : null);
+    var viewerHoleCards = opts && Array.isArray(opts.viewerHoleCards) ? opts.viewerHoleCards.slice(0, 2) : [];
+    var viewerId = opts && typeof opts.currentUserId === 'string' ? opts.currentUserId.trim() : '';
+    var viewerWon = !!(viewerId && winners.some(function(entry){ return resolveWinnerUserId(entry) === viewerId; }));
     flyoutEl.textContent = '';
+    flyoutEl.classList.toggle('poker-showdown-flyout--won', viewerWon);
 
     var titleEl = document.createElement('div');
     titleEl.className = 'poker-showdown-flyout__title';
-    titleEl.textContent = t('pokerShowdownFlyoutTitle', 'Hand settled');
+    titleEl.textContent = viewerWon
+      ? t('pokerShowdownFlyoutTitleYouWon', 'Congratulations, you won!')
+      : t('pokerShowdownFlyoutTitle', 'Hand settled');
     flyoutEl.appendChild(titleEl);
 
     var winnersLabelEl = document.createElement('div');
@@ -749,9 +755,6 @@
 
     var reason = typeof showdown.reason === 'string' ? showdown.reason.trim().toLowerCase() : '';
     var canShowCards = reason !== 'all_folded';
-    var viewerHoleCards = opts && Array.isArray(opts.viewerHoleCards) ? opts.viewerHoleCards.slice(0, 2) : [];
-    var viewerId = opts && typeof opts.currentUserId === 'string' ? opts.currentUserId.trim() : '';
-    var viewerWon = !!(viewerId && winners.some(function(entry){ return resolveWinnerUserId(entry) === viewerId; }));
     if (canShowCards && viewerWon && viewerHoleCards.length === 2){
       var cardsLabelEl = document.createElement('div');
       cardsLabelEl.className = 'poker-showdown-flyout__label';
