@@ -181,7 +181,7 @@ test("handleTurnTimeoutCommand restores and snapshots when timeout apply throws"
   });
 
   assert.equal(result.ok, false);
-  assert.equal(result.reason, "timeout_apply_failed");
+  assert.equal(result.reason, "showdown_incomplete_community");
   assert.equal(calls.restore, 1);
   assert.equal(calls.resync, 0);
   assert.equal(calls.persist, 0);

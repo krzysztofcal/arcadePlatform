@@ -160,6 +160,9 @@ let authoritativeJoinExecutorPromise = null;
 let inactiveCleanupExecutorPromise = null;
 let acceptedBotAutoplayExecutorPromise = null;
 let beginSqlWsLoaderPromise = null;
+const timeoutFailureTrackerByTableId = new Map();
+const TURN_TIMEOUT_FATAL_PREFIXES = ["showdown_"];
+const TURN_TIMEOUT_FATAL_REASONS = new Set(["timeout_apply_failed"]);
 const DEFAULT_INACTIVE_CLEANUP_ADAPTER_URL = new URL("./poker/persistence/inactive-cleanup-adapter.mjs", import.meta.url).href;
 const DEFAULT_ACCEPTED_BOT_AUTOPLAY_ADAPTER_URL = new URL("./poker/runtime/accepted-bot-autoplay-adapter.mjs", import.meta.url).href;
 
@@ -242,6 +245,21 @@ async function loadBeginSqlWs() {
   }
   return beginSqlWsLoaderPromise;
 }
+
+function resolvePositiveInt(rawValue, fallback, { min = 1, max = Number.MAX_SAFE_INTEGER } = {}) {
+  const parsed = Number(rawValue);
+  if (!Number.isFinite(parsed)) return fallback;
+  const rounded = Math.floor(parsed);
+  if (rounded < min) return fallback;
+  if (rounded > max) return max;
+  return rounded;
+}
+
+const turnTimeoutFailureThreshold = resolvePositiveInt(process.env.WS_TIMEOUT_FAILURE_THRESHOLD, 5, { min: 1, max: 100 });
+const turnTimeoutQuarantineMs = resolvePositiveInt(process.env.WS_TIMEOUT_QUARANTINE_MS, 300_000, {
+  min: 5_000,
+  max: 86_400_000
+});
 
 function klog(kind, data) {
   const payload = data && typeof data === "object" ? ` ${JSON.stringify(data)}` : "";
@@ -829,6 +847,190 @@ function enqueueDisconnectCleanupCandidate({ tableId, userId }) {
   disconnectCleanupRuntime.enqueue({ tableId, userId });
 }
 
+function normalizeTurnTimeoutReason(reason) {
+  if (typeof reason !== "string") return "";
+  return reason.trim().toLowerCase();
+}
+
+function isFatalTurnTimeoutReason(reason) {
+  const normalized = normalizeTurnTimeoutReason(reason);
+  if (!normalized) return false;
+  if (TURN_TIMEOUT_FATAL_REASONS.has(normalized)) return true;
+  return TURN_TIMEOUT_FATAL_PREFIXES.some((prefix) => normalized.startsWith(prefix));
+}
+
+function isTurnTimeoutTableQuarantined(tableId, nowMs = Date.now()) {
+  const entry = timeoutFailureTrackerByTableId.get(tableId);
+  if (!entry || !Number.isFinite(Number(entry.quarantinedUntil))) return false;
+  if (nowMs >= Number(entry.quarantinedUntil)) {
+    timeoutFailureTrackerByTableId.delete(tableId);
+    return false;
+  }
+  return true;
+}
+
+function clearTurnTimeoutFailureTracker(tableId) {
+  if (timeoutFailureTrackerByTableId.has(tableId)) {
+    timeoutFailureTrackerByTableId.delete(tableId);
+  }
+}
+
+async function forceTableToHandDoneFromPersisted({ tableId, nowMs }) {
+  if (!persistedBootstrapEnabled) {
+    return { ok: false, reason: "persisted_bootstrap_disabled" };
+  }
+  if (!persistedStateWriter) {
+    return { ok: false, reason: "persisted_state_write_disabled" };
+  }
+  try {
+    const beginSqlWs = await loadBeginSqlWs();
+    const loaded = await beginSqlWs(async (tx) => {
+      const stateRows = await tx.unsafe("select version, state from public.poker_state where table_id = $1 limit 1;", [tableId]);
+      const stateRow = stateRows?.[0] || null;
+      if (!stateRow) {
+        return { ok: false, reason: "state_missing" };
+      }
+      const expectedVersion = Number(stateRow.version);
+      if (!Number.isInteger(expectedVersion) || expectedVersion < 0) {
+        return { ok: false, reason: "state_invalid" };
+      }
+
+      const rawState = stateRow.state;
+      let currentState;
+      if (typeof rawState === "string") {
+        try {
+          currentState = JSON.parse(rawState);
+        } catch {
+          return { ok: false, reason: "state_invalid" };
+        }
+      } else {
+        currentState = rawState;
+      }
+      if (!currentState || typeof currentState !== "object" || Array.isArray(currentState)) {
+        return { ok: false, reason: "state_invalid" };
+      }
+
+      const nextState = {
+        ...currentState,
+        phase: "HAND_DONE",
+        turnUserId: null,
+        turnStartedAt: null,
+        turnDeadlineAt: null,
+        pendingAutoStartAt: null
+      };
+      return { ok: true, expectedVersion, nextState };
+    }, { env: process.env });
+    if (!loaded?.ok) return loaded;
+
+    return persistedStateWriter.writeMutation({
+      tableId,
+      expectedVersion: loaded.expectedVersion,
+      nextState: loaded.nextState,
+      meta: { mutationKind: "quarantine_force_hand_done", nowMs }
+    });
+  } catch (error) {
+    klogSafe("ws_turn_timeout_quarantine_force_hand_done_failed", {
+      tableId,
+      nowMs,
+      message: error?.message || "unknown"
+    });
+    return { ok: false, reason: "db_error" };
+  }
+}
+
+async function quarantineTurnTimeoutTable({ tableId, reason, nowMs }) {
+  const existing = timeoutFailureTrackerByTableId.get(tableId) || {};
+  const quarantineUntil = nowMs + turnTimeoutQuarantineMs;
+  timeoutFailureTrackerByTableId.set(tableId, {
+    ...existing,
+    count: Number(existing.count) || 0,
+    lastReason: reason || null,
+    lastFailureAt: nowMs,
+    quarantinedUntil: quarantineUntil
+  });
+
+  klogSafe("ws_turn_timeout_table_quarantined", {
+    tableId,
+    reason: reason || "unknown",
+    quarantineMs: turnTimeoutQuarantineMs,
+    quarantineUntil
+  });
+
+  try {
+    const executor = await loadInactiveCleanupExecutor();
+    const cleanupResult = await executor({
+      tableId,
+      userId: null,
+      requestId: `ws-timeout-quarantine:${tableId}:${nowMs}`
+    });
+    if (cleanupResult?.ok === true && cleanupResult?.changed === true) {
+      const restored = await restoreTableFromPersisted(tableId);
+      if (restored?.ok) {
+        broadcastStateSnapshots(tableId);
+        broadcastTableState(tableId);
+        clearTurnTimeoutFailureTracker(tableId);
+        klogSafe("ws_turn_timeout_quarantine_recovered", { tableId, mode: "inactive_cleanup" });
+        return;
+      }
+    }
+  } catch (error) {
+    klogSafe("ws_turn_timeout_quarantine_cleanup_failed", {
+      tableId,
+      message: error?.message || "unknown"
+    });
+  }
+
+  const forced = await forceTableToHandDoneFromPersisted({ tableId, nowMs });
+  if (!forced?.ok) {
+    klogSafe("ws_turn_timeout_quarantine_force_hand_done_skipped", {
+      tableId,
+      reason: forced?.reason || "unknown"
+    });
+    return;
+  }
+  const restored = await restoreTableFromPersisted(tableId);
+  if (!restored?.ok) {
+    klogSafe("ws_turn_timeout_quarantine_restore_failed", { tableId, reason: restored?.reason || "unknown" });
+    return;
+  }
+  broadcastStateSnapshots(tableId);
+  broadcastTableState(tableId);
+  clearTurnTimeoutFailureTracker(tableId);
+  klogSafe("ws_turn_timeout_quarantine_recovered", { tableId, mode: "force_hand_done" });
+}
+
+async function recordTurnTimeoutOutcome({ tableId, result, nowMs }) {
+  const tableClosed = tableManager.isTableClosed(tableId) === true;
+  if (tableClosed) {
+    clearTurnTimeoutFailureTracker(tableId);
+    return;
+  }
+  if (result?.ok === true) {
+    clearTurnTimeoutFailureTracker(tableId);
+    return;
+  }
+  const reason = result?.reason || "timeout_apply_failed";
+  if (!isFatalTurnTimeoutReason(reason)) {
+    return;
+  }
+  const existing = timeoutFailureTrackerByTableId.get(tableId) || {};
+  const nextCount = (Number(existing.count) || 0) + 1;
+  timeoutFailureTrackerByTableId.set(tableId, {
+    ...existing,
+    count: nextCount,
+    lastReason: reason,
+    lastFailureAt: nowMs,
+    quarantinedUntil: Number(existing.quarantinedUntil) || null
+  });
+  if (nextCount < turnTimeoutFailureThreshold) {
+    return;
+  }
+  if (isTurnTimeoutTableQuarantined(tableId, nowMs)) {
+    return;
+  }
+  await quarantineTurnTimeoutTable({ tableId, reason, nowMs });
+}
+
 async function sweepDisconnectCleanupAndBroadcast() {
   await disconnectCleanupRuntime.sweep();
 }
@@ -907,23 +1109,34 @@ async function sweepTurnTimeoutsAndBroadcast() {
   const nowMs = Date.now();
   const timeoutUpdates = tableManager.listDueTurnTimeouts({
     nowMs,
-    shouldProcessTable: (tableId) => tableManager.isTableClosed(tableId) !== true
+    shouldProcessTable: (tableId) => (
+      tableManager.isTableClosed(tableId) !== true
+      && !isTurnTimeoutTableQuarantined(tableId, nowMs)
+    )
   });
   await Promise.allSettled(timeoutUpdates.map((update) => enqueueTableCommand({
     tableId: update.tableId,
     commandName: "turn_timeout",
     dedupeKey: "turn_timeout",
-    run: async () => handleTurnTimeoutCommand({
-      tableId: update.tableId,
-      nowMs,
-      tableManager,
-      persistMutatedState,
-      restoreTableFromPersisted,
-      broadcastResyncRequired,
-      broadcastStateSnapshots,
-      scheduleBotStep,
-      klog: klogSafe
-    })
+    run: async () => {
+      const result = await handleTurnTimeoutCommand({
+        tableId: update.tableId,
+        nowMs,
+        tableManager,
+        persistMutatedState,
+        restoreTableFromPersisted,
+        broadcastResyncRequired,
+        broadcastStateSnapshots,
+        scheduleBotStep,
+        klog: klogSafe
+      });
+      await recordTurnTimeoutOutcome({
+        tableId: update.tableId,
+        result,
+        nowMs
+      });
+      return result;
+    }
   })));
 }
 

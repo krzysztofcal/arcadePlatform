@@ -14,8 +14,13 @@ export async function handleTurnTimeoutCommand({
   let result;
   try {
     result = tableManager.maybeApplyTurnTimeout({ tableId, nowMs });
-  } catch {
-    result = { ok: false, changed: false, reason: "timeout_apply_failed", stateVersion: 0 };
+  } catch (error) {
+    result = {
+      ok: false,
+      changed: false,
+      reason: typeof error?.message === "string" && error.message.trim() ? error.message.trim() : "timeout_apply_failed",
+      stateVersion: 0
+    };
   }
   if (!result?.ok) {
     await recoverFromPersistConflict({
