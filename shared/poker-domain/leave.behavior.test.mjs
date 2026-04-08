@@ -16,19 +16,59 @@ const tableId = "77777777-7777-4777-8777-777777777777";
 const userId = "99999999-9999-4999-8999-999999999999";
 
 const makeMocks = () => {
-  const calls = { cashouts: 0, actions: 0, deleteSeat: 0, storeResult: 0, updates: 0 };
+  const calls = { cashouts: 0, actions: 0, deleteSeat: 0, storeResult: 0, updates: 0, closeTable: 0 };
   const state = { version: 2, value: { tableId, phase: "INIT", seats: [{ userId, seatNo: 1 }], stacks: { [userId]: 50 }, leftTableByUserId: {} } };
+  let tableStatus = "OPEN";
   const requests = new Map();
   const tx = { unsafe: async (query, params) => {
     const text = String(query).toLowerCase();
-    if (text.includes("from public.poker_tables")) return [{ id: tableId, status: "OPEN" }];
+    if (text.includes("select id, status from public.poker_tables")) return [{ id: tableId, status: tableStatus }];
     if (text.includes("from public.poker_state")) return [{ version: state.version, state: state.value }];
-    if (text.includes("from public.poker_seats") && text.includes("for update")) return [{ seat_no: 1, status: "ACTIVE", stack: 50 }];
+    if (text.includes("select seat_no, status, stack from public.poker_seats") && text.includes("for update")) {
+      const seat = Array.isArray(state.value?.seats)
+        ? state.value.seats.find((entry) => entry && entry.userId === params[1])
+        : null;
+      if (!seat) return [];
+      const stack = state.value?.stacks && state.value.stacks[params[1]] != null ? state.value.stacks[params[1]] : 0;
+      return [{ seat_no: seat.seatNo ?? 1, status: "ACTIVE", stack }];
+    }
+    if (text.includes("select user_id, seat_no, is_bot from public.poker_seats where table_id = $1 and status = 'active'")) {
+      const seats = Array.isArray(state.value?.seats) ? state.value.seats : [];
+      return seats.map((seat) => ({ user_id: seat.userId, seat_no: seat.seatNo, is_bot: !!seat.isBot }));
+    }
+    if (text.includes("select user_id, status, is_bot, stack from public.poker_seats where table_id = $1 for update")) {
+      const seats = Array.isArray(state.value?.seats) ? state.value.seats : [];
+      const stacks = state.value?.stacks && typeof state.value.stacks === "object" ? state.value.stacks : {};
+      return seats.map((seat) => ({
+        user_id: seat.userId,
+        status: "ACTIVE",
+        is_bot: !!seat.isBot,
+        stack: stacks[seat.userId] ?? 0,
+      }));
+    }
     if (text.includes("update public.poker_state") && text.includes("version = version + 1")) { state.version += 1; state.value = JSON.parse(params[2]); calls.updates += 1; return [{ version: state.version }]; }
     if (text.includes("insert into public.poker_actions")) { calls.actions += 1; return [{ id: 1 }]; }
-    if (text.includes("delete from public.poker_seats")) { calls.deleteSeat += 1; return []; }
+    if (text.includes("delete from public.poker_seats")) {
+      calls.deleteSeat += 1;
+      const targetUserId = params[1];
+      if (Array.isArray(state.value?.seats)) {
+        state.value.seats = state.value.seats.filter((seat) => seat && seat.userId !== targetUserId);
+      }
+      if (state.value?.stacks && typeof state.value.stacks === "object") {
+        delete state.value.stacks[targetUserId];
+      }
+      return [];
+    }
+    if (text.includes("update public.poker_seats set status = 'inactive', stack = 0 where table_id = $1;")) {
+      return [];
+    }
+    if (text.includes("update public.poker_tables set status = 'closed'")) {
+      tableStatus = "CLOSED";
+      calls.closeTable += 1;
+      return [];
+    }
+    if (text.includes("delete from public.poker_hole_cards where table_id = $1")) return [];
     if (text.includes("update public.poker_tables set last_activity_at")) return [];
-    if (text.includes("select user_id, seat_no, is_bot")) return [];
     return [];
   } };
   return {
@@ -130,6 +170,23 @@ const makeMocks = () => {
   assert.equal(result.cashedOut, 48);
   assert.equal(result.state.state.communityDealt, 3);
   assert.deepEqual(result.state.state.community, ["3H", "AH", "7S"]);
+}
+
+{
+  const ctx = makeMocks();
+  ctx.state.value = {
+    tableId,
+    phase: "INIT",
+    seats: [{ userId, seatNo: 1 }, { userId: "bot-1", seatNo: 2, isBot: true }],
+    stacks: { [userId]: 50, "bot-1": 100 },
+    leftTableByUserId: {},
+  };
+  const executePokerLeave = loadExecutePokerLeave(ctx.mocks);
+  const result = await executePokerLeave({ beginSql: ctx.beginSql, tableId, userId, requestId: "r6", includeState: true, klog: () => {} });
+  assert.equal(result.ok, true);
+  assert.equal(ctx.calls.closeTable, 1, "table should be closed when no active humans remain");
+  assert.equal(result.state.state.phase, "HAND_DONE");
+  assert.deepEqual(result.state.state.stacks, {});
 }
 
 console.log("poker-domain leave behavior test passed");

@@ -46,11 +46,9 @@ function createCleanupHarness({ seatRows, state, tableStatus = "OPEN" }) {
       if (sql.includes("delete from public.poker_hole_cards")) {
         return [];
       }
-      if (sql.includes("update public.poker_seats set status = 'INACTIVE', stack = 0 where table_id = $1 and is_bot = false")) {
+      if (sql.includes("update public.poker_seats set status = 'INACTIVE', stack = 0 where table_id = $1;")) {
         for (let i = 0; i < seatState.length; i += 1) {
-          if (seatState[i].is_bot !== true) {
-            seatState[i] = { ...seatState[i], status: "INACTIVE", stack: 0 };
-          }
+          seatState[i] = { ...seatState[i], status: "INACTIVE", stack: 0 };
         }
         return [];
       }
@@ -67,6 +65,16 @@ function createCleanupHarness({ seatRows, state, tableStatus = "OPEN" }) {
       tableId: "table_1",
       userId: "human_1",
       requestId: "req-1",
+      postTransaction: async (entry) => {
+        cashouts.push(entry);
+        return { ok: true };
+      }
+    }),
+    runSystemSweep: () => executeInactiveCleanup({
+      beginSql: async (fn) => fn(tx),
+      tableId: "table_1",
+      userId: null,
+      requestId: "req-system-sweep",
       postTransaction: async (entry) => {
         cashouts.push(entry);
         return { ok: true };
@@ -115,4 +123,29 @@ test("inactive cleanup clears removed disconnected turn holder", async () => {
   assert.equal(result.ok, true);
   assert.equal(harness.tableState.stateRow.state.turnUserId, null);
   assert.deepEqual(harness.tableState.stateRow.state.stacks, {});
+});
+
+test("inactive cleanup system sweep closes bots-only active table", async () => {
+  const harness = createCleanupHarness({
+    seatRows: [
+      { user_id: "bot_1", status: "ACTIVE", is_bot: true, stack: 200 },
+      { user_id: "human_inactive", status: "INACTIVE", is_bot: false, stack: 10 }
+    ],
+    state: {
+      phase: "FLOP",
+      handId: "h-1",
+      stacks: { bot_1: 200, human_inactive: 10 },
+      turnUserId: "bot_1"
+    }
+  });
+
+  const result = await harness.runSystemSweep();
+
+  assert.equal(result.ok, true);
+  assert.equal(result.closed, true);
+  assert.equal(harness.tableState.tableStatus, "CLOSED");
+  assert.equal(harness.seatState.every((row) => row.status === "INACTIVE"), true);
+  assert.equal(harness.tableState.stateRow.state.phase, "HAND_DONE");
+  assert.equal(harness.tableState.stateRow.state.turnUserId, null);
+  assert.deepEqual(harness.tableState.stateRow.state.stacks, { bot_1: 200 });
 });

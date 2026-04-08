@@ -143,6 +143,31 @@ const normalizeSeatStack = (value) => {
 const normalizeNonNegativeInt = (n) =>
   Number.isInteger(n) && n >= 0 && Math.abs(n) <= Number.MAX_SAFE_INTEGER ? n : null;
 
+const hasAnyActiveHuman = (seats) =>
+  Array.isArray(seats) && seats.some((row) => row?.is_bot !== true && row?.status === "ACTIVE");
+
+const toClosedInertState = (stateInput, stacks) => ({
+  ...stateInput,
+  phase: "HAND_DONE",
+  handId: "",
+  handSeed: "",
+  showdown: null,
+  community: [],
+  communityDealt: 0,
+  pot: 0,
+  potTotal: 0,
+  sidePots: [],
+  turnUserId: null,
+  turnStartedAt: null,
+  turnDeadlineAt: null,
+  lastAggressorUserId: null,
+  currentBet: 0,
+  toCallByUserId: {},
+  betThisRoundByUserId: {},
+  actedThisRoundByUserId: {},
+  stacks,
+});
+
 const isInvalidPlayerLeaveNoop = (error) => {
   const code = typeof error?.code === "string" ? error.code.trim().toLowerCase() : "";
   if (code === "invalid_player") return true;
@@ -733,6 +758,68 @@ export async function executePokerLeave({ beginSql, tableId, userId, requestId =
             tableId,
             userId,
           ]);
+        }
+
+        const allSeatRows = await tx.unsafe(
+          "select user_id, status, is_bot, stack from public.poker_seats where table_id = $1 for update;",
+          [tableId]
+        );
+        if (!hasAnyActiveHuman(allSeatRows)) {
+          const closedStacks = parseStacks(latestState.stacks);
+          for (const row of allSeatRows || []) {
+            if (row?.is_bot === true) continue;
+            const targetUserId = typeof row?.user_id === "string" ? row.user_id : null;
+            if (!targetUserId) continue;
+            const stateStackAmount = normalizeNonNegativeInt(Number(closedStacks[targetUserId]));
+            const seatStackAmount = normalizeNonNegativeInt(Number(row?.stack));
+            const closeCashoutAmount = stateStackAmount ?? seatStackAmount ?? 0;
+            if (closeCashoutAmount > 0) {
+              await postTransaction({
+                userId: targetUserId,
+                txType: "TABLE_CASH_OUT",
+                idempotencyKey: `poker:leave:table_close:${tableId}:${targetUserId}`,
+                entries: [
+                  { accountType: "ESCROW", systemKey: `POKER_TABLE:${tableId}`, amount: -closeCashoutAmount },
+                  { accountType: "USER", amount: closeCashoutAmount },
+                ],
+                createdBy: userId,
+                tx,
+              });
+            }
+            delete closedStacks[targetUserId];
+          }
+          const closedState = sanitizePersistedState(toClosedInertState(latestState, closedStacks));
+          validatePersistedStateOrThrow(closedState, makeError);
+          const closeUpdateResult = await updatePokerStateOptimistic(tx, {
+            tableId,
+            expectedVersion: latestVersion,
+            nextState: closedState,
+          });
+          if (!closeUpdateResult.ok) {
+            if (closeUpdateResult.reason === "conflict") throw makeError(409, "state_conflict");
+            throw makeError(409, "state_invalid");
+          }
+          latestVersion = closeUpdateResult.newVersion;
+          latestState = closedState;
+          mutated = true;
+
+          await tx.unsafe(
+            "update public.poker_seats set status = 'INACTIVE', stack = 0 where table_id = $1;",
+            [tableId]
+          );
+          if (table.status !== "CLOSED") {
+            await tx.unsafe(
+              "update public.poker_tables set status = 'CLOSED', updated_at = now(), last_activity_at = now() where id = $1;",
+              [tableId]
+            );
+            try {
+              await tx.unsafe("delete from public.poker_hole_cards where table_id = $1;", [tableId]);
+            } catch (error) {
+              if (!isHoleCardsTableMissing(error)) throw error;
+              klog("poker_hole_cards_missing", { tableId, error: error?.message || "unknown_error" });
+            }
+          }
+          klog("poker_leave_closed_table_no_active_humans", { tableId, userId: userId, remainingSeats: allSeatRows.length });
         }
 
         if (mutated) {

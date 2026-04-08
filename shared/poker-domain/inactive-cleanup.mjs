@@ -109,39 +109,43 @@ export async function executeInactiveCleanup({
   postTransaction,
   isHoleCardsTableMissing = () => false
 }) {
-  const sweepActorUserId = String(env?.POKER_SYSTEM_ACTOR_USER_ID || "").trim() || userId;
+  const normalizedUserId = typeof userId === "string" && userId.trim() ? userId.trim() : null;
+  const sweepActorUserId = String(env?.POKER_SYSTEM_ACTOR_USER_ID || "").trim() || normalizedUserId || "system";
   return beginSql(async (tx) => {
-    const seatRows = await tx.unsafe(
-      "select table_id, user_id, seat_no, status, is_bot, stack from public.poker_seats where table_id = $1 and user_id = $2 limit 1 for update;",
-      [tableId, userId]
-    );
-    const seat = seatRows?.[0] || null;
-    if (!seat) return { ok: true, changed: false, status: "seat_missing", retryable: false };
-    if (seat.is_bot === true) return { ok: true, changed: false, status: "bot_skipped", retryable: false };
+    let seat = null;
+    if (normalizedUserId) {
+      const seatRows = await tx.unsafe(
+        "select table_id, user_id, seat_no, status, is_bot, stack from public.poker_seats where table_id = $1 and user_id = $2 limit 1 for update;",
+        [tableId, normalizedUserId]
+      );
+      seat = seatRows?.[0] || null;
+      if (!seat) return { ok: true, changed: false, status: "seat_missing", retryable: false };
+      if (seat.is_bot === true) return { ok: true, changed: false, status: "bot_skipped", retryable: false };
+    }
 
     const stateRows = await tx.unsafe("select state from public.poker_state where table_id = $1 limit 1 for update;", [tableId]);
     const stateRow = stateRows?.[0] || null;
     const state = normalizeState(stateRow?.state);
-    if (isTurnProtected({ state, userId, nowMs: Date.now() })) {
+    if (normalizedUserId && isTurnProtected({ state, userId: normalizedUserId, nowMs: Date.now() })) {
       return { ok: true, changed: false, protected: true, status: "turn_protected", retryable: true };
     }
 
     const stacks = { ...resolveStateStacks(state) };
-    const seatWasActive = seat.status === "ACTIVE";
+    const seatWasActive = seat?.status === "ACTIVE";
     if (seatWasActive) {
-      const targetCashout = stateFirstStackAmount({ state, seat, userId });
+      const targetCashout = stateFirstStackAmount({ state, seat, userId: normalizedUserId });
       await postCashout({
         postTransaction,
         tx,
         tableId,
-        userId,
+        userId: normalizedUserId,
         amount: targetCashout.amount,
-        idempotencyKey: `poker:inactive_cleanup:${tableId}:${userId}`,
-        createdBy: userId,
+        idempotencyKey: `poker:inactive_cleanup:${tableId}:${normalizedUserId}`,
+        createdBy: normalizedUserId,
         reason: "ws_disconnect_inactive_cleanup"
       });
-      delete stacks[userId];
-      await tx.unsafe("update public.poker_seats set status = 'INACTIVE', stack = 0 where table_id = $1 and user_id = $2;", [tableId, userId]);
+      delete stacks[normalizedUserId];
+      await tx.unsafe("update public.poker_seats set status = 'INACTIVE', stack = 0 where table_id = $1 and user_id = $2;", [tableId, normalizedUserId]);
     }
 
     const allSeatRows = await tx.unsafe(
@@ -159,6 +163,9 @@ export async function executeInactiveCleanup({
     }
 
     if (hasAnyActiveHuman(allSeatRows)) {
+      if (!normalizedUserId) {
+        return { ok: true, changed: false, status: "active_human_present", closed: false, retryable: false };
+      }
       return { ok: true, changed: seatWasActive, status: seatWasActive ? "cleaned" : "already_inactive", closed: false, retryable: false };
     }
 
@@ -186,7 +193,7 @@ export async function executeInactiveCleanup({
       await tx.unsafe("update public.poker_state set state = $2 where table_id = $1;", [tableId, JSON.stringify(finalState)]);
     }
 
-    await tx.unsafe("update public.poker_seats set status = 'INACTIVE', stack = 0 where table_id = $1 and is_bot = false;", [tableId]);
+    await tx.unsafe("update public.poker_seats set status = 'INACTIVE', stack = 0 where table_id = $1;", [tableId]);
 
     let closed = false;
     if (tableStatus !== "CLOSED") {

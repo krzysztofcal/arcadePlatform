@@ -159,6 +159,7 @@ let authoritativeLeaveExecutorPromise = null;
 let authoritativeJoinExecutorPromise = null;
 let inactiveCleanupExecutorPromise = null;
 let acceptedBotAutoplayExecutorPromise = null;
+let beginSqlWsLoaderPromise = null;
 const DEFAULT_INACTIVE_CLEANUP_ADAPTER_URL = new URL("./poker/persistence/inactive-cleanup-adapter.mjs", import.meta.url).href;
 const DEFAULT_ACCEPTED_BOT_AUTOPLAY_ADAPTER_URL = new URL("./poker/runtime/accepted-bot-autoplay-adapter.mjs", import.meta.url).href;
 
@@ -232,6 +233,14 @@ async function loadAcceptedBotAutoplayExecutor() {
     })();
   }
   return acceptedBotAutoplayExecutorPromise;
+}
+
+async function loadBeginSqlWs() {
+  if (!beginSqlWsLoaderPromise) {
+    beginSqlWsLoaderPromise = import("./poker/bootstrap/persisted-bootstrap-db.mjs")
+      .then((module) => module.beginSqlWs);
+  }
+  return beginSqlWsLoaderPromise;
 }
 
 function klog(kind, data) {
@@ -822,6 +831,76 @@ function enqueueDisconnectCleanupCandidate({ tableId, userId }) {
 
 async function sweepDisconnectCleanupAndBroadcast() {
   await disconnectCleanupRuntime.sweep();
+}
+
+async function listZombieOpenTableIds({ limit = 25 } = {}) {
+  if (!persistedBootstrapEnabled) return [];
+  const boundedLimit = Number.isInteger(limit) && limit > 0 ? Math.min(limit, 100) : 25;
+  try {
+    const beginSqlWs = await loadBeginSqlWs();
+    return beginSqlWs(async (tx) => {
+      const rows = await tx.unsafe(
+        `select t.id
+         from public.poker_tables t
+         where t.status = 'OPEN'
+           and not exists (
+             select 1
+             from public.poker_seats s
+             where s.table_id = t.id
+               and s.status = 'ACTIVE'
+               and coalesce(s.is_bot, false) = false
+           )
+         order by t.updated_at asc
+         limit $1;`,
+        [boundedLimit]
+      );
+      if (!Array.isArray(rows)) return [];
+      return rows
+        .map((row) => (typeof row?.id === "string" ? row.id : ""))
+        .filter((id) => id);
+    }, { env: process.env });
+  } catch (error) {
+    klogSafe("ws_zombie_cleanup_list_failed", { message: error?.message || "unknown" });
+    return [];
+  }
+}
+
+async function sweepZombieTablesAndBroadcast() {
+  const zombieTableIds = await listZombieOpenTableIds({
+    limit: Number(process.env.WS_ZOMBIE_TABLE_SWEEP_BATCH || 25)
+  });
+  if (!Array.isArray(zombieTableIds) || zombieTableIds.length === 0) return;
+  await Promise.allSettled(zombieTableIds.map((tableId) => enqueueTableCommand({
+    tableId,
+    commandName: "zombie_cleanup",
+    dedupeKey: "zombie_cleanup",
+    run: async () => {
+      const executor = await loadInactiveCleanupExecutor();
+      const result = await executor({
+        tableId,
+        userId: null,
+        requestId: `ws-zombie-cleanup:${tableId}`
+      });
+      if (result?.ok !== true) {
+        if (result?.retryable !== false) {
+          klogSafe("ws_zombie_cleanup_retry", { tableId, code: result?.code || "unknown" });
+        }
+        return result;
+      }
+      if (result?.changed === true) {
+        klogSafe("ws_zombie_cleanup_restore_start", { tableId, status: result?.status || null });
+        const restored = await restoreTableFromPersisted(tableId);
+        if (!restored?.ok) {
+          klogSafe("ws_zombie_cleanup_restore_failed", { tableId, reason: restored?.reason || "unknown" });
+          return result;
+        }
+        klogSafe("ws_zombie_cleanup_restore_success", { tableId, status: result?.status || null });
+        broadcastStateSnapshots(tableId);
+        broadcastTableState(tableId);
+      }
+      return result;
+    }
+  })));
 }
 
 async function sweepTurnTimeoutsAndBroadcast() {
@@ -1450,6 +1529,12 @@ const disconnectCleanupTimer = setInterval(() => {
   void sweepDisconnectCleanupAndBroadcast();
 }, Number.isFinite(disconnectCleanupSweepMs) && disconnectCleanupSweepMs > 0 ? disconnectCleanupSweepMs : 500);
 disconnectCleanupTimer.unref();
+
+const zombieTableSweepMs = Number(process.env.WS_ZOMBIE_TABLE_SWEEP_MS || 30_000);
+const zombieTableSweepTimer = setInterval(() => {
+  void sweepZombieTablesAndBroadcast();
+}, Number.isFinite(zombieTableSweepMs) && zombieTableSweepMs > 0 ? zombieTableSweepMs : 30_000);
+zombieTableSweepTimer.unref();
 
 server.listen(PORT, "0.0.0.0", () => {
   klogSafe("ws_listening", { message: `WS listening on ${PORT}`, port: PORT });
