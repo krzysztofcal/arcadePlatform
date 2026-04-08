@@ -123,6 +123,8 @@
     pokerDumpLogsEmpty: { en: 'No poker client logs to copy', pl: 'Brak logów klienta pokera do skopiowania' },
     pokerShowdownFlyoutTitle: { en: 'Winning hand', pl: 'Wygrane rozdanie' },
     pokerShowdownFlyoutTitleYouWon: { en: 'Congratulations, you won!', pl: 'Gratulacje, wygrałeś!' },
+    pokerShowdownWinnerSingleSuffix: { en: 'won', pl: 'wygrał' },
+    pokerShowdownWinnerMultiPrefix: { en: 'Winners', pl: 'Wygrali' },
     pokerShowdownFlyoutPayouts: { en: 'Payouts', pl: 'Wygrane' },
     pokerShowdownFlyoutCards: { en: 'Winner cards', pl: 'Karty zwycięzcy' }
   };

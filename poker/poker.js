@@ -13,10 +13,12 @@
   var PENDING_RETRY_BUDGET_MS = 2000;
   var UI_VERSION = '2025-02-19';
   var SHOWDOWN_FLYOUT_VISIBLE_MS = 4500;
+  var SHOWDOWN_FLYOUT_EXIT_MS = 280;
   var POKER_DUMP_PATTERNS = [/\bpoker_[a-z0-9_]+\b/i, /\bpoker_rt_[a-z0-9_]+\b/i, /\bpoker_ws_[a-z0-9_]+\b/i, /\bws_[a-z0-9_]+\b/i, /\"\/.netlify\/functions\/poker-[^\"\s]+/i, /\/poker\//i];
 
   var state = { token: null };
   var showdownFlyoutHideTimer = null;
+  var showdownFlyoutExitTimer = null;
   var lastShowdownFlyoutKey = '';
 
   function klog(kind, data){
@@ -615,6 +617,15 @@
     return labels.length ? labels.join(', ') : '—';
   }
 
+  function formatWinnerHeadline(winners, playersById){
+    var labels = Array.isArray(winners)
+      ? winners.map(function(winner){ return resolveUserLabel(winner, playersById); }).filter(function(label){ return !!label; })
+      : [];
+    if (!labels.length) return t('pokerShowdownFlyoutTitle', 'Hand settled');
+    if (labels.length === 1) return labels[0] + ' ' + t('pokerShowdownWinnerSingleSuffix', 'won');
+    return t('pokerShowdownWinnerMultiPrefix', 'Winners') + ': ' + labels.join(', ');
+  }
+
   function resolveWinnerUserId(entry){
     var userId = null;
     if (typeof entry === 'string'){
@@ -680,8 +691,17 @@
       clearTimeout(showdownFlyoutHideTimer);
       showdownFlyoutHideTimer = null;
     }
+    if (showdownFlyoutExitTimer){
+      clearTimeout(showdownFlyoutExitTimer);
+      showdownFlyoutExitTimer = null;
+    }
     flyoutEl.classList.remove('poker-showdown-flyout--visible');
-    flyoutEl.hidden = true;
+    flyoutEl.classList.add('poker-showdown-flyout--exiting');
+    showdownFlyoutExitTimer = setTimeout(function(){
+      flyoutEl.classList.remove('poker-showdown-flyout--exiting');
+      flyoutEl.hidden = true;
+      showdownFlyoutExitTimer = null;
+    }, SHOWDOWN_FLYOUT_EXIT_MS);
   }
 
   function renderShowdownFlyout(opts){
@@ -717,7 +737,7 @@
     titleEl.className = 'poker-showdown-flyout__title';
     titleEl.textContent = viewerWon
       ? t('pokerShowdownFlyoutTitleYouWon', 'Congratulations, you won!')
-      : t('pokerShowdownFlyoutTitle', 'Hand settled');
+      : formatWinnerHeadline(winners, playersById);
     flyoutEl.appendChild(titleEl);
 
     var winnersLabelEl = document.createElement('div');
@@ -772,7 +792,12 @@
       clearTimeout(showdownFlyoutHideTimer);
       showdownFlyoutHideTimer = null;
     }
+    if (showdownFlyoutExitTimer){
+      clearTimeout(showdownFlyoutExitTimer);
+      showdownFlyoutExitTimer = null;
+    }
     flyoutEl.hidden = false;
+    flyoutEl.classList.remove('poker-showdown-flyout--exiting');
     void flyoutEl.offsetWidth;
     flyoutEl.classList.add('poker-showdown-flyout--visible');
     klog('poker_showdown_flyout_show', {
@@ -786,11 +811,19 @@
     });
     showdownFlyoutHideTimer = setTimeout(function(){
       flyoutEl.classList.remove('poker-showdown-flyout--visible');
-      flyoutEl.hidden = true;
+      flyoutEl.classList.add('poker-showdown-flyout--exiting');
       klog('poker_showdown_flyout_hide', {
         tableId: tableIdValue || null,
         handId: handId || null
       });
+      if (showdownFlyoutExitTimer){
+        clearTimeout(showdownFlyoutExitTimer);
+      }
+      showdownFlyoutExitTimer = setTimeout(function(){
+        flyoutEl.classList.remove('poker-showdown-flyout--exiting');
+        flyoutEl.hidden = true;
+        showdownFlyoutExitTimer = null;
+      }, SHOWDOWN_FLYOUT_EXIT_MS);
       showdownFlyoutHideTimer = null;
     }, SHOWDOWN_FLYOUT_VISIBLE_MS);
   }
