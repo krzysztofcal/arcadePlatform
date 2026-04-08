@@ -14,6 +14,7 @@ test("ws bootstrap can hydrate occupied seats from authoritativeMembers when liv
     var tableId = "table_boot";
     var wsSnapshotSeen = false;
     var pendingWsSnapshot = null;
+    var wsAppliedSnapshotSeq = 0;
     var renderCount = 0;
     var lastRendered = null;
     var isSeated = false;
