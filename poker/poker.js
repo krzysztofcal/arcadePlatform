@@ -1210,7 +1210,6 @@
       if (totalRowEl) totalRowEl.hidden = true;
       if (metaEl) metaEl.hidden = true;
       if (metaEl) metaEl.textContent = '';
-      hideShowdownFlyout();
       return;
     }
     renderShowdownFlyout(opts || {});
