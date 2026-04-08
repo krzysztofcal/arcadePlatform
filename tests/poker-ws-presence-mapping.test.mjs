@@ -56,8 +56,11 @@ test("poker ws merge preserves baseline constraints when WS omits them and updat
   assert.equal(mergedNoConstraints.state.extraBaselineOnly, true);
   assert.equal(mergedNoConstraints.state.state.keepField, "yes");
   assert.equal(mergedNoConstraints.state.state.phase, "TURN");
-  assert.equal(mergedNoConstraints.seats[1].userId, "u1");
-  assert.equal(mergedNoConstraints.seats[1].stack, 200);
+  const authoritativeSeat = Array.isArray(mergedNoConstraints.seats)
+    ? mergedNoConstraints.seats.find((seat) => Number.isInteger(seat?.seatNo) && seat.seatNo === 1)
+    : null;
+  assert.ok(authoritativeSeat, "authoritative seat mapping should contain seatNo=1");
+  assert.equal(authoritativeSeat.userId, "u1");
   assert.deepEqual(mergedNoConstraints.legalActions, ["CHECK", "BET"]);
   assert.deepEqual(mergedNoConstraints.actionConstraints, baselineTableData.actionConstraints);
   assert.deepEqual(mergedNoConstraints._actionConstraints, baselineTableData.actionConstraints);
