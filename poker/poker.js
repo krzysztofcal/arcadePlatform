@@ -772,9 +772,22 @@
     flyoutEl.hidden = false;
     void flyoutEl.offsetWidth;
     flyoutEl.classList.add('poker-showdown-flyout--visible');
+    klog('poker_showdown_flyout_show', {
+      tableId: tableIdValue || null,
+      handId: handId || null,
+      reason: reason || null,
+      winnersCount: winners.length,
+      payoutCount: payoutUserIds.length,
+      viewerWon: viewerWon,
+      cardsVisible: canShowCards && viewerWon && viewerHoleCards.length === 2
+    });
     showdownFlyoutHideTimer = setTimeout(function(){
       flyoutEl.classList.remove('poker-showdown-flyout--visible');
       flyoutEl.hidden = true;
+      klog('poker_showdown_flyout_hide', {
+        tableId: tableIdValue || null,
+        handId: handId || null
+      });
       showdownFlyoutHideTimer = null;
     }, SHOWDOWN_FLYOUT_VISIBLE_MS);
   }
@@ -1784,6 +1797,12 @@
       }
       if (!normalized.legalActions && pub.legalActions != null) normalized.legalActions = pub.legalActions;
       if (!normalized.actionConstraints && isPlainObject(pub.actionConstraints)) normalized.actionConstraints = pub.actionConstraints;
+      if (!Object.prototype.hasOwnProperty.call(normalized, 'showdown') && Object.prototype.hasOwnProperty.call(pub, 'showdown')){
+        normalized.showdown = isPlainObject(pub.showdown) ? pub.showdown : null;
+      }
+      if (!Object.prototype.hasOwnProperty.call(normalized, 'handSettlement') && Object.prototype.hasOwnProperty.call(pub, 'handSettlement')){
+        normalized.handSettlement = isPlainObject(pub.handSettlement) ? pub.handSettlement : null;
+      }
       if (!normalized.board && pub.board != null){
         if (Array.isArray(pub.board)){
           var normalizedPublicBoard = normalizeCardsForRender(pub.board);
@@ -1915,7 +1934,9 @@
         potTotal: Number.isFinite(Number(potPayload.total)) ? Number(potPayload.total) : 0,
         sidePots: Array.isArray(potPayload.sidePots) ? potPayload.sidePots.slice() : [],
         community: communityCards,
-        stacks: normalizeSnapshotStacks(payload) || {}
+        stacks: normalizeSnapshotStacks(payload) || {},
+        showdown: isPlainObject(payload.showdown) ? payload.showdown : null,
+        handSettlement: isPlainObject(payload.handSettlement) ? payload.handSettlement : null
       };
       var resolvedMaxPlayers = null;
       if (Number.isInteger(tablePayload.maxPlayers) && tablePayload.maxPlayers > 1){
@@ -1990,6 +2011,12 @@
           nextState.potTotal = Number(payload.pot.total);
         }
         if (Array.isArray(payload.pot.sidePots)) nextState.sidePots = payload.pot.sidePots.slice();
+      }
+      if (Object.prototype.hasOwnProperty.call(payload, 'showdown')){
+        nextState.showdown = isPlainObject(payload.showdown) ? payload.showdown : null;
+      }
+      if (Object.prototype.hasOwnProperty.call(payload, 'handSettlement')){
+        nextState.handSettlement = isPlainObject(payload.handSettlement) ? payload.handSettlement : null;
       }
       var normalizedStacks = normalizeSnapshotStacks(payload);
       if (normalizedStacks){
