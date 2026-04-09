@@ -40,6 +40,16 @@ function normalizeActionList(actions) {
   return actions.filter((action) => typeof action === "string");
 }
 
+function normalizeStacks(stacks) {
+  if (!stacks || typeof stacks !== "object" || Array.isArray(stacks)) {
+    return {};
+  }
+  return Object.fromEntries(
+    Object.entries(stacks).filter(([userId, amount]) => typeof userId === "string" && userId && Number.isFinite(Number(amount)))
+      .map(([userId, amount]) => [userId, Number(amount)])
+  );
+}
+
 function normalizeTurnTimerField(value) {
   return Number.isFinite(value) ? value : null;
 }
@@ -122,6 +132,7 @@ export function buildStateSnapshotPayload({ tableSnapshot, userId }) {
       board: {
         cards: normalizeCards(tableSnapshot?.board?.cards)
       },
+      stacks: normalizeStacks(tableSnapshot?.stacks),
       pot: {
         total: Number.isFinite(tableSnapshot?.pot?.total) ? tableSnapshot.pot.total : null,
         sidePots: Array.isArray(tableSnapshot?.pot?.sidePots) ? tableSnapshot.pot.sidePots : []
@@ -135,6 +146,12 @@ export function buildStateSnapshotPayload({ tableSnapshot, userId }) {
       legalActions: {
         seat: normalizeSeat(tableSnapshot?.legalActions?.seat),
         actions: normalizeActionList(tableSnapshot?.legalActions?.actions)
+      },
+      actionConstraints: {
+        toCall: Number.isFinite(tableSnapshot?.actionConstraints?.toCall) ? Number(tableSnapshot.actionConstraints.toCall) : null,
+        minRaiseTo: Number.isFinite(tableSnapshot?.actionConstraints?.minRaiseTo) ? Number(tableSnapshot.actionConstraints.minRaiseTo) : null,
+        maxRaiseTo: Number.isFinite(tableSnapshot?.actionConstraints?.maxRaiseTo) ? Number(tableSnapshot.actionConstraints.maxRaiseTo) : null,
+        maxBetAmount: Number.isFinite(tableSnapshot?.actionConstraints?.maxBetAmount) ? Number(tableSnapshot.actionConstraints.maxBetAmount) : null
       }
     }
   };

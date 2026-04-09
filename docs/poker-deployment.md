@@ -4,9 +4,7 @@
 
 Poker funds must always have a deterministic path back to the user. Each buy-in
 moves chips from USER → ESCROW using `TABLE_BUY_IN`, and each leave/timeout must
-cash those chips back from ESCROW → USER using `TABLE_CASH_OUT`. The sweep
-timeout path is required to cash out inactive seats so escrow balances cannot
-remain stranded.
+cash those chips back from ESCROW → USER using `TABLE_CASH_OUT`.
 
 Stack authority:
 - Authoritative (active gameplay): `poker_state.state.stacks`.
@@ -18,28 +16,27 @@ Stack synchronization is required at lifecycle boundaries:
 - successful join
 - hand end / settlement
 - leave / cash-out
-- sweep cleanup
 
 If both stack stores are present, `poker_state.state.stacks` drives gameplay
 decisions and `public.poker_seats.stack` must not contradict funds-safety
 outcomes. This prevents stranded escrow balances and avoids gameplay issues such
 as "stack = 0" with no legal actions.
 
-## Poker sweep endpoint
+## Retired HTTP gameplay endpoints
 
-The poker sweep function requires a shared secret to run cleanup safely.
-
-1. Set `POKER_SWEEP_SECRET` in the Netlify environment for the site.
-2. Call the sweep endpoint from server-to-server automation (cron/CI) with:
-   - `POST` method
-   - `x-sweep-secret: <POKER_SWEEP_SECRET>`
-
-Requests without the header (or with a mismatched value) are rejected with `401 unauthorized`.
+HTTP gameplay endpoints are intentionally retired and return `410 Gone`:
+- `/.netlify/functions/poker-join`
+- `/.netlify/functions/poker-heartbeat`
+- `/.netlify/functions/poker-get-table`
+- `/.netlify/functions/poker-start-hand`
+- `/.netlify/functions/poker-act`
+- `/.netlify/functions/poker-leave`
+- `/.netlify/functions/poker-sweep`
 
 
 ## Poker Bots (Phase 1)
 
-Runtime config should be read in code via `process.env.*` (Netlify Functions runtime style).
+Runtime config should be read in code via `process.env.*` (WS server runtime and supporting functions).
 
 Authoritative behavior reference: `docs/poker-bots.md`.
 
@@ -55,7 +52,7 @@ Set these as Netlify environment variables (Site settings -> Environment variabl
 Operational notes:
 - Bot runtime is guarded by `POKER_BOTS_ENABLED`.
 - Values above are Netlify runtime config env vars (not secrets unless explicitly sensitive).
-- Bot logic runs server-side in Netlify Functions runtime (no client-side bot scripts).
+- Bot/gameplay orchestration runs server-side in WS runtime (no client-side bot scripts).
 
 ### Local development
 
@@ -79,13 +76,14 @@ Operational notes:
      - `poker_leave_response` pending + retry logs + eventual terminal result, or
      - `poker_leave_click_error` with a visible UI error
 
-### Netlify function acceptance (secondary)
+### HTTP gameplay endpoint retirement check
 
-After clicking Leave once, Netlify logs must show:
-- `poker_leave_start`
-- then `poker_leave_ok` **or** `poker_leave_error`
-
-If you still don’t see `poker_leave_start`, the issue is client-side (no request sent / blocked / wrong URL).
+Gameplay HTTP endpoints are intentionally non-authoritative and must return `410 Gone`:
+- `/.netlify/functions/poker-join`
+- `/.netlify/functions/poker-start-hand`
+- `/.netlify/functions/poker-act`
+- `/.netlify/functions/poker-leave`
+- `/.netlify/functions/poker-sweep`
 
 ### Optional CSP check (only if client logs show request but server logs are empty)
 
@@ -95,7 +93,7 @@ Run these from Termux (or anywhere) and confirm headers look sane:
 # Poker page CSP (should allow self scripts)
 curl -sSI "https://play.kcswh.pl/poker/" | sed -n '1,120p' | grep -iE 'content-security-policy|x-content-type-options|x-frame-options'
 
-# Function call should be same-origin; CSP shouldn't block it (CSP is enforced by browser)
+# Legacy gameplay endpoint should be retired (410)
 curl -sSI "https://play.kcswh.pl/.netlify/functions/poker-leave" | sed -n '1,120p'
 ```
 
@@ -146,7 +144,7 @@ The preview VPS contract is:
 - Remote upload staging directory: `/tmp/arcadeplatform-ws-preview`
 
 Preview deploys unpack into a temporary directory under `/tmp/arcadeplatform-ws-preview` and then sync the extracted files into `/opt/arcade-ws-preview/ws-server`.
-The workflow fails fast before mutating preview app contents when the preview base root, app dir, env file, service, Node.js, `tar`, `rsync`, `curl`, or required `PORT=3001` setting is missing.
+The workflow fails fast before mutating preview app contents when the preview base root, app dir, env file, service, Node.js, `tar`, `rsync`, `curl`, or required `PORT=3001`, `WS_AUTHORITATIVE_JOIN_ENABLED=1`, and non-empty `SUPABASE_DB_URL` settings are missing.
 Preview routing stays in `infra/vps/Caddyfile`, which must continue to define both the `ws.kcswh.pl -> 127.0.0.1:3000` and `ws-preview.kcswh.pl -> 127.0.0.1:3001` site blocks.
 
 ### Preview secrets
@@ -158,3 +156,7 @@ Configure these GitHub Actions secrets for preview access only:
 - `WS_PREVIEW_SSH_KEY`
 
 These secrets are intentionally separate from the production WS deploy credentials so preview runs cannot mutate production WS resources.
+
+
+## Post-deploy migration note
+Legacy HTTP sweep is retired for gameplay authority. Any stale active gameplay cleanup must run from WS-owned runtime/ops flows, not from `/.netlify/functions/poker-sweep`.

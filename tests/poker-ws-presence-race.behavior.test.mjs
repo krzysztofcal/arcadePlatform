@@ -8,7 +8,7 @@ function buildHarness(){
   const stopEnd = source.indexOf("\n\n    function mapTableStateToSeatUpdates", stopStart);
   const stopFn = source.slice(stopStart, stopEnd);
 
-  const wsStart = source.indexOf("function mapTableStateToSeatUpdates(snapshotPayload)");
+  const wsStart = source.indexOf("function isRichGameplaySnapshot(snapshotPayload, snapshotKind)");
   const wsEnd = source.indexOf("\n\n    function startWsBootstrap(){", wsStart);
   const wsFns = source.slice(wsStart, wsEnd);
 
@@ -23,6 +23,7 @@ function buildHarness(){
     var lastRendered = null;
     var isSeated = false;
     var stopPollingCalls = 0;
+    var wsAppliedSnapshotSeq = 0;
     function klog(){}
     function isCurrentUserSeated(){ return false; }
     function renderTable(data){ renderCount++; lastRendered = data; }
@@ -31,6 +32,7 @@ function buildHarness(){
     function toFiniteOrNull(value){ var n = Number(value); if (!Number.isFinite(n) || Math.floor(n) !== n || n < 0) return null; return n; }
     function getConstraintsFromResponse(data){ if (data && isPlainObject(data.actionConstraints)) return data.actionConstraints; var gameState = data && data.state && data.state.state; if (gameState && isPlainObject(gameState.actionConstraints)) return gameState.actionConstraints; return null; }
     function getSafeConstraints(data){ var constraints = getConstraintsFromResponse(data); return { toCall: toFiniteOrNull(constraints ? constraints.toCall : null), minRaiseTo: toFiniteOrNull(constraints ? constraints.minRaiseTo : null), maxRaiseTo: toFiniteOrNull(constraints ? constraints.maxRaiseTo : null), maxBetAmount: toFiniteOrNull(constraints ? constraints.maxBetAmount : null) }; }
+    function getSeatedCount(data){ var seats = data && Array.isArray(data.seats) ? data.seats : []; var activeCount = 0; for (var i = 0; i < seats.length; i++){ var seat = seats[i]; if (!seat || !seat.userId) continue; var status = typeof seat.status === 'string' ? seat.status.toUpperCase() : ''; if (!status || status === 'ACTIVE' || status === 'SEATED') activeCount++; } return activeCount; }
     ${stopFn}
     ${wsFns}
     return {
@@ -52,6 +54,11 @@ function buildHarness(){
   return factory();
 }
 
+function findSeatByNo(data, seatNo){
+  const seats = Array.isArray(data?.seats) ? data.seats : [];
+  return seats.find((seat) => Number.isInteger(seat?.seatNo) && seat.seatNo === seatNo) || null;
+}
+
 test("stopWsClient reset allows second bootstrap snapshot apply", () => {
   const h = buildHarness();
 
@@ -66,10 +73,10 @@ test("stopWsClient reset allows second bootstrap snapshot apply", () => {
     _actionConstraints: { toCall: 6, minRaiseTo: 12, maxRaiseTo: 120, maxBetAmount: 120 }
   });
 
-  h.applyWsSnapshot({ type: "table_state", payload: { tableId: "table_race", stateVersion: 2, members: [{ userId: "live_presence", seat: 0 }], authoritativeMembers: [{ userId: "u1", seat: 1 }], hand: { status: "FLOP" } } });
+  h.applyWsSnapshot({ kind: "table_state", payload: { tableId: "table_race", stateVersion: 2, members: [{ userId: "live_presence", seat: 0 }], authoritativeMembers: [{ userId: "u1", seat: 1 }], hand: { status: "FLOP" } } });
   assert.equal(h.getSeen(), true);
   assert.equal(h.getRenderCount(), 1);
-  assert.equal(h.getLastRendered().seats[1].userId, "u1");
+  assert.equal(findSeatByNo(h.getLastRendered(), 1)?.userId, "u1");
   assert.equal(h.getLastRendered().state.version, 2);
   assert.equal(h.getStopPollingCalls(), 1);
 
@@ -80,10 +87,10 @@ test("stopWsClient reset allows second bootstrap snapshot apply", () => {
   assert.equal(h.getPending(), null);
   assert.equal(h.hasClient(), false);
 
-  h.applyWsSnapshot({ type: "table_state", payload: { tableId: "table_race", stateVersion: 3, members: [{ userId: "live_presence", seat: 1 }], authoritativeMembers: [{ userId: "u2", seat: 0 }] } });
+  h.applyWsSnapshot({ kind: "table_state", payload: { tableId: "table_race", stateVersion: 3, members: [{ userId: "live_presence", seat: 1 }], authoritativeMembers: [{ userId: "u2", seat: 0 }] } });
   assert.equal(h.getSeen(), true);
   assert.equal(h.getRenderCount(), 2);
-  assert.equal(h.getLastRendered().seats[0].userId, "u2");
+  assert.equal(findSeatByNo(h.getLastRendered(), 0)?.userId, "u2");
   assert.equal(h.getLastRendered().state.version, 3);
   assert.equal(h.getStopPollingCalls(), 2);
 });
@@ -135,7 +142,7 @@ test("deferred snapshot apply preserves baseline constraints when WS omits them"
 });
 
 
-test("version gating applies higher version and rejects stale/equal/unversioned over versioned baseline", () => {
+test("version gating applies higher version, allows equal-version material updates, and rejects stale/unversioned snapshots", () => {
   const h = buildHarness();
   h.setTableData({
     table: { id: "table_race" },
@@ -148,25 +155,27 @@ test("version gating applies higher version and rejects stale/equal/unversioned 
     _actionConstraints: { toCall: 4, minRaiseTo: 8, maxRaiseTo: 88, maxBetAmount: 88 }
   });
 
-  h.applyWsSnapshot({ type: "table_state", payload: { tableId: "table_race", stateVersion: 6, authoritativeMembers: [{ userId: "u1", seat: 1 }], hand: { status: "TURN" } } });
+  h.applyWsSnapshot({ kind: "table_state", payload: { tableId: "table_race", stateVersion: 6, authoritativeMembers: [{ userId: "u1", seat: 1 }], hand: { status: "TURN" } } });
   assert.equal(h.getTableData().state.version, 6);
   assert.equal(h.getRenderCount(), 1);
   assert.equal(h.getStopPollingCalls(), 1);
+  assert.equal(findSeatByNo(h.getTableData(), 1)?.userId, "u1");
 
-  h.applyWsSnapshot({ type: "table_state", payload: { tableId: "table_race", stateVersion: 6, authoritativeMembers: [{ userId: "stale", seat: 0 }], hand: { status: "RIVER" } } });
+  h.applyWsSnapshot({ kind: "table_state", payload: { tableId: "table_race", stateVersion: 6, authoritativeMembers: [{ userId: "eq_update", seat: 0 }], hand: { status: "RIVER" } } });
   assert.equal(h.getTableData().state.version, 6);
-  assert.equal(h.getStopPollingCalls(), 1);
-  assert.equal(h.getTableData().seats[0].userId, "u0");
-  assert.equal(h.getRenderCount(), 1);
+  assert.equal(h.getStopPollingCalls(), 2);
+  assert.equal(findSeatByNo(h.getTableData(), 0)?.userId, "eq_update");
+  assert.equal(h.getRenderCount(), 2);
 
-  h.applyWsSnapshot({ type: "table_state", payload: { tableId: "table_race", stateVersion: 3, authoritativeMembers: [{ userId: "older", seat: 0 }] } });
+  h.applyWsSnapshot({ kind: "table_state", payload: { tableId: "table_race", stateVersion: 3, authoritativeMembers: [{ userId: "older", seat: 0 }] } });
   assert.equal(h.getTableData().state.version, 6);
-  assert.equal(h.getStopPollingCalls(), 1);
-  assert.equal(h.getRenderCount(), 1);
+  assert.equal(h.getStopPollingCalls(), 2);
+  assert.equal(h.getRenderCount(), 2);
+  assert.equal(findSeatByNo(h.getTableData(), 0)?.userId, "eq_update");
 
-  h.applyWsSnapshot({ type: "table_state", payload: { tableId: "table_race", authoritativeMembers: [{ userId: "nover", seat: 0 }] } });
+  h.applyWsSnapshot({ kind: "table_state", payload: { tableId: "table_race", authoritativeMembers: [{ userId: "nover", seat: 0 }] } });
   assert.equal(h.getTableData().state.version, 6);
-  assert.equal(h.getStopPollingCalls(), 1);
-  assert.equal(h.getTableData().seats[0].userId, "u0");
-  assert.equal(h.getRenderCount(), 1);
+  assert.equal(h.getStopPollingCalls(), 2);
+  assert.equal(findSeatByNo(h.getTableData(), 0)?.userId, "eq_update");
+  assert.equal(h.getRenderCount(), 2);
 });

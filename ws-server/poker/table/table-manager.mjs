@@ -64,6 +64,12 @@ function normalizeAuthoritativeMembers(table) {
   });
 }
 
+function normalizeTableStatus(value) {
+  if (typeof value !== "string") return "OPEN";
+  const normalized = value.trim().toUpperCase();
+  return normalized || "OPEN";
+}
+
 export function createTableManager({
   presenceTtlMs = DEFAULT_PRESENCE_TTL_MS,
   maxSeats = DEFAULT_MAX_SEATS,
@@ -141,6 +147,7 @@ export function createTableManager({
       const initialCoreState = createInitialCoreState({ roomId: tableId, maxSeats });
       tables.set(tableId, {
         tableId,
+        tableStatus: "OPEN",
         coreState: initialCoreState,
         persistedStateVersion: Number.isInteger(initialCoreState.version) ? initialCoreState.version : 0,
         presenceByUserId: new Map(),
@@ -183,6 +190,7 @@ export function createTableManager({
       }
 
       const loadedTable = loaded.table;
+      loadedTable.tableStatus = normalizeTableStatus(loadedTable.tableStatus);
       const loadedVersion = Number(loadedTable?.coreState?.version);
       loadedTable.persistedStateVersion = Number.isInteger(loadedVersion) && loadedVersion >= 0 ? loadedVersion : 0;
       tables.set(tableId, loadedTable);
@@ -361,7 +369,25 @@ export function createTableManager({
       };
     }
 
-    const timeoutApplied = applyCoreStateTurnTimeout({ tableId, coreState: table.coreState, nowMs });
+    let timeoutApplied;
+    try {
+      timeoutApplied = applyCoreStateTurnTimeout({ tableId, coreState: table.coreState, nowMs });
+    } catch (error) {
+      return {
+        ok: false,
+        changed: false,
+        reason: error?.message || "timeout_apply_failed",
+        stateVersion: table.coreState.version
+      };
+    }
+    if (timeoutApplied?.ok === false) {
+      return {
+        ok: false,
+        changed: false,
+        reason: timeoutApplied.reason || "timeout_apply_failed",
+        stateVersion: table.coreState.version
+      };
+    }
     if (!timeoutApplied.changed) {
       rememberActionResult(table, requestId, {
         ok: true,
@@ -399,15 +425,32 @@ export function createTableManager({
     };
   }
 
-  function sweepTurnTimeouts({ nowMs = Date.now() } = {}) {
+  function sweepTurnTimeouts({ nowMs = Date.now(), shouldProcessTable = null } = {}) {
     const updates = [];
     for (const [tableId] of tables.entries()) {
+      if (typeof shouldProcessTable === "function" && shouldProcessTable(tableId) !== true) {
+        continue;
+      }
       const timeoutResult = maybeApplyTurnTimeout({ tableId, nowMs });
       if (timeoutResult.ok && timeoutResult.changed) {
         updates.push({ tableId, stateVersion: timeoutResult.stateVersion });
       }
     }
     return updates;
+  }
+
+  function listDueTurnTimeouts({ nowMs = Date.now(), shouldProcessTable = null } = {}) {
+    const due = [];
+    for (const [tableId, table] of tables.entries()) {
+      if (typeof shouldProcessTable === "function" && shouldProcessTable(tableId) !== true) {
+        continue;
+      }
+      const timeoutDecision = decideCoreStateTurnTimeout({ coreState: table?.coreState, nowMs });
+      if (timeoutDecision?.due === true) {
+        due.push({ tableId, stateVersion: timeoutDecision.stateVersion });
+      }
+    }
+    return due;
   }
 
   function markConnected(member, nowMs) {
@@ -422,7 +465,7 @@ export function createTableManager({
     member.expiresAt = nowMs + presenceTtlMs;
   }
 
-  function join({ ws, userId, tableId, requestId, nowTs = Date.now() }) {
+  function join({ ws, userId, tableId, requestId, nowTs = Date.now(), authoritativeSeatNo = null, buyIn = null }) {
     const conn = ensureConn(ws);
     const activeTableId = conn.joinedTableId || conn.subscribedTableId;
     if (activeTableId && activeTableId !== tableId) {
@@ -431,9 +474,78 @@ export function createTableManager({
 
     const table = ensureTable(tableId);
     const isAuthoritativeMember = table.coreState.members.some((member) => member.userId === userId);
+    const authoritativeSeat = Number.isInteger(authoritativeSeatNo) && authoritativeSeatNo >= 1 ? authoritativeSeatNo : null;
     const shouldMutateMembership = !observeOnlyJoin;
 
     if (isAuthoritativeMember || shouldMutateMembership) {
+      if (shouldMutateMembership && Number.isInteger(authoritativeSeat)) {
+        if (authoritativeSeat > table.coreState.maxSeats) {
+          return { ok: false, code: "invalid_seat_no", message: "invalid_seat_no", tableState: tableState(tableId) };
+        }
+
+        const seatOwnedByOther = table.coreState.members.some((member) => member.userId !== userId && member.seat === authoritativeSeat);
+        if (seatOwnedByOther) {
+          return { ok: false, code: "seat_taken", message: "seat_taken", tableState: tableState(tableId) };
+        }
+
+        const existingMember = table.coreState.members.find((member) => member.userId === userId) ?? null;
+        const nextMembers = table.coreState.members
+          .filter((member) => member.userId !== userId)
+          .concat({ userId, seat: authoritativeSeat })
+          .sort((a, b) => a.seat - b.seat || a.userId.localeCompare(b.userId));
+        const nextSeats = { ...table.coreState.seats, [userId]: authoritativeSeat };
+        const currentSeatDetails = table.coreState.seatDetailsByUserId && typeof table.coreState.seatDetailsByUserId === "object" && !Array.isArray(table.coreState.seatDetailsByUserId)
+          ? table.coreState.seatDetailsByUserId
+          : {};
+        const nextSeatDetails = { ...currentSeatDetails, [userId]: currentSeatDetails[userId] || { isBot: false, botProfile: null, leaveAfterHand: false } };
+        const currentPublicStacks = table.coreState.publicStacks && typeof table.coreState.publicStacks === "object" && !Array.isArray(table.coreState.publicStacks)
+          ? table.coreState.publicStacks
+          : {};
+        const nextPublicStacks = { ...currentPublicStacks };
+        const nextBuyIn = Number.isFinite(Number(buyIn)) && Number(buyIn) > 0 ? Number(buyIn) : null;
+        const membershipChanged = !existingMember || existingMember.seat !== authoritativeSeat;
+        const stackChanged = nextBuyIn !== null && currentPublicStacks[userId] !== nextBuyIn;
+        if (stackChanged) {
+          nextPublicStacks[userId] = nextBuyIn;
+        }
+        const changed = membershipChanged || stackChanged;
+        table.coreState = {
+          ...table.coreState,
+          version: changed ? Number(table.coreState.version || 0) + 1 : table.coreState.version,
+          members: nextMembers,
+          seats: nextSeats,
+          seatDetailsByUserId: nextSeatDetails,
+          publicStacks: nextPublicStacks
+        };
+
+        const seat = authoritativeSeat;
+        if (!table.presenceByUserId.has(userId)) {
+          table.presenceByUserId.set(userId, {
+            userId,
+            seat,
+            connected: true,
+            lastSeenAt: nowTs,
+            expiresAt: null
+          });
+        } else {
+          const existingPresence = table.presenceByUserId.get(userId);
+          existingPresence.seat = seat;
+          markConnected(existingPresence, nowTs);
+        }
+
+        table.subscribers.add(ws);
+        conn.joinedTableId = tableId;
+        conn.subscribedTableId = tableId;
+        return {
+          ok: true,
+          changed,
+          effects: changed
+            ? [{ type: membershipChanged ? (existingMember ? "member_reseated" : "member_joined") : "public_stack_updated", userId, seat }]
+            : [{ type: "presence_connected" }],
+          tableState: tableState(tableId)
+        };
+      }
+
       if (shouldMutateMembership && !isAuthoritativeMember) {
         const joinResult = applyCoreEvent(table.coreState, {
           type: CORE_EVENT_TYPES.JOIN,
@@ -609,6 +721,109 @@ export function createTableManager({
     });
   }
 
+  function buildAuthoritativeLeaveRestore({ tableId, userId, stateVersion = null, pokerState = null }) {
+    const table = ensureTable(tableId);
+    const normalizedState = pokerState && typeof pokerState === "object" && !Array.isArray(pokerState) ? pokerState : null;
+    const stateTableId = typeof normalizedState?.tableId === "string" ? normalizedState.tableId : "";
+    const stateSeats = normalizedState?.seats;
+    const authoritativeStateValid = normalizedState
+      && stateTableId === tableId
+      && hasValidAuthoritativeSeats(stateSeats);
+
+    if (!authoritativeStateValid || authoritativeSeatsContainUser(stateSeats, userId)) {
+      return {
+        ok: false,
+        code: "authoritative_state_invalid"
+      };
+    }
+
+    const nextMembers = stateSeats
+      .map((seatEntry) => {
+        const rawSeatNo = seatEntry?.seatNo;
+        const rawSeatAlias = seatEntry?.seat;
+        const normalizedSeat = Number.isInteger(Number(rawSeatNo))
+          ? Number(rawSeatNo)
+          : Number.isInteger(Number(rawSeatAlias))
+            ? Number(rawSeatAlias)
+            : null;
+        const nextUserId = typeof seatEntry?.userId === "string" ? seatEntry.userId.trim() : "";
+        if (!Number.isInteger(normalizedSeat) || !nextUserId) {
+          return null;
+        }
+        return {
+          userId: nextUserId,
+          seat: normalizedSeat,
+          seatEntry
+        };
+      })
+      .filter(Boolean)
+      .sort((a, b) => a.seat - b.seat || a.userId.localeCompare(b.userId));
+
+    const nextSeats = {};
+    const currentSeatDetails = table.coreState.seatDetailsByUserId && typeof table.coreState.seatDetailsByUserId === "object" && !Array.isArray(table.coreState.seatDetailsByUserId)
+      ? table.coreState.seatDetailsByUserId
+      : {};
+    const nextSeatDetails = {};
+    for (const member of nextMembers) {
+      nextSeats[member.userId] = member.seat;
+      const previousSeatDetails = currentSeatDetails[member.userId];
+      nextSeatDetails[member.userId] = {
+        isBot: member.seatEntry?.isBot === true || previousSeatDetails?.isBot === true,
+        botProfile: typeof member.seatEntry?.botProfile === "string"
+          ? member.seatEntry.botProfile
+          : previousSeatDetails?.botProfile ?? null,
+        leaveAfterHand: member.seatEntry?.leaveAfterHand === true || previousSeatDetails?.leaveAfterHand === true
+      };
+    }
+
+    const authoritativeStacks = normalizedState?.stacks && typeof normalizedState.stacks === "object" && !Array.isArray(normalizedState.stacks)
+      ? normalizedState.stacks
+      : null;
+    const currentPublicStacks = table.coreState.publicStacks && typeof table.coreState.publicStacks === "object" && !Array.isArray(table.coreState.publicStacks)
+      ? table.coreState.publicStacks
+      : {};
+    const nextPublicStacks = {};
+    for (const member of nextMembers) {
+      const authoritativeAmount = authoritativeStacks?.[member.userId];
+      if (Number.isFinite(Number(authoritativeAmount))) {
+        nextPublicStacks[member.userId] = Number(authoritativeAmount);
+        continue;
+      }
+      if (Number.isFinite(Number(currentPublicStacks[member.userId]))) {
+        nextPublicStacks[member.userId] = Number(currentPublicStacks[member.userId]);
+      }
+    }
+
+    const nextPresenceByUserId = new Map();
+    for (const [presenceUserId, presence] of table.presenceByUserId.entries()) {
+      if (!Object.prototype.hasOwnProperty.call(nextSeats, presenceUserId)) {
+        continue;
+      }
+      nextPresenceByUserId.set(presenceUserId, {
+        ...presence,
+        seat: nextSeats[presenceUserId]
+      });
+    }
+
+    return {
+      ok: true,
+      restoredTable: {
+        tableId,
+        tableStatus: table.tableStatus,
+        coreState: {
+          ...table.coreState,
+          version: Number.isInteger(stateVersion) && stateVersion >= 0 ? stateVersion : table.coreState.version,
+          members: nextMembers.map(({ userId: nextUserId, seat }) => ({ userId: nextUserId, seat })),
+          seats: nextSeats,
+          seatDetailsByUserId: nextSeatDetails,
+          publicStacks: nextPublicStacks,
+          pokerState: { ...normalizedState }
+        },
+        presenceByUserId: nextPresenceByUserId
+      }
+    };
+  }
+
   function syncAuthoritativeLeave({ ws, userId, tableId, stateVersion = null, pokerState = null }) {
     const conn = ensureConn(ws);
     const resolvedTableId = tableId || conn.joinedTableId || conn.subscribedTableId;
@@ -631,60 +846,25 @@ export function createTableManager({
     const previousSeats = JSON.stringify(table.coreState.seats || {});
     const previousVersion = Number(table.coreState.version);
     const previousPokerState = JSON.stringify(table.coreState.pokerState ?? null);
-
-    const normalizedState = pokerState && typeof pokerState === "object" && !Array.isArray(pokerState) ? pokerState : null;
-    const stateTableId = typeof normalizedState?.tableId === "string" ? normalizedState.tableId : "";
-    const stateSeats = normalizedState?.seats;
-    const authoritativeStateValid = normalizedState
-      && stateTableId === resolvedTableId
-      && hasValidAuthoritativeSeats(stateSeats);
-
-    if (!authoritativeStateValid || authoritativeSeatsContainUser(stateSeats, userId)) {
+    const restored = buildAuthoritativeLeaveRestore({
+      tableId: resolvedTableId,
+      userId,
+      stateVersion,
+      pokerState
+    });
+    if (!restored?.ok || !restored?.restoredTable) {
       return {
         ok: false,
-        code: "authoritative_state_invalid",
+        code: restored?.code || "authoritative_state_invalid",
         changed: false,
         tableState: tableState(resolvedTableId)
       };
     }
-
-    const nextMembers = stateSeats
-      .map((seatEntry) => {
-        const rawSeatNo = seatEntry?.seatNo;
-        const rawSeatAlias = seatEntry?.seat;
-        const normalizedSeat = Number.isInteger(Number(rawSeatNo))
-          ? Number(rawSeatNo)
-          : Number.isInteger(Number(rawSeatAlias))
-            ? Number(rawSeatAlias)
-            : null;
-        const userId = typeof seatEntry?.userId === "string" ? seatEntry.userId.trim() : "";
-        if (!Number.isInteger(normalizedSeat) || !userId) {
-          return null;
-        }
-        return { userId, seat: normalizedSeat };
-      })
-      .filter(Boolean)
-      .sort((a, b) => a.seat - b.seat || a.userId.localeCompare(b.userId));
-    const nextSeats = {};
-    for (const member of nextMembers) {
-      nextSeats[member.userId] = member.seat;
-    }
-
-    table.coreState.members = nextMembers;
-    table.coreState.seats = nextSeats;
-    if (Number.isInteger(stateVersion) && stateVersion >= 0) {
-      table.coreState.version = stateVersion;
-    }
-    table.coreState.pokerState = { ...normalizedState };
-
-    for (const [presenceUserId, presence] of table.presenceByUserId.entries()) {
-      if (!Object.prototype.hasOwnProperty.call(nextSeats, presenceUserId)) {
-        table.presenceByUserId.delete(presenceUserId);
-        continue;
-      }
-      presence.seat = nextSeats[presenceUserId];
-    }
-    table.presenceByUserId.delete(userId);
+    const nextMembers = restored.restoredTable.coreState.members;
+    const nextSeats = restored.restoredTable.coreState.seats;
+    table.coreState = restored.restoredTable.coreState;
+    table.tableStatus = restored.restoredTable.tableStatus;
+    table.presenceByUserId = restored.restoredTable.presenceByUserId;
 
     table.subscribers.delete(ws);
     if (conn.joinedTableId === resolvedTableId) {
@@ -770,7 +950,7 @@ export function createTableManager({
         table.subscribers.delete(ws);
 
         if (membershipChanged) {
-          updates.push({ tableId: joinedTableId, tableState: tableState(joinedTableId) });
+          updates.push({ tableId: joinedTableId, tableState: tableState(joinedTableId), disconnectedUserId: userId });
         }
 
         if (table.coreState.members.length === 0 && table.subscribers.size === 0) {
@@ -802,39 +982,20 @@ export function createTableManager({
 
   function sweepExpiredPresence({ nowTs = Date.now() } = {}) {
     const updates = [];
-
     for (const [tableId, table] of tables.entries()) {
-      let changed = false;
       const expiredUserIds = [];
-
       for (const [userId, member] of table.presenceByUserId.entries()) {
         if (!member.connected && typeof member.expiresAt === "number" && member.expiresAt <= nowTs) {
           expiredUserIds.push(userId);
         }
       }
-
       for (const userId of expiredUserIds) {
-        const leaveResult = applyCoreEvent(table.coreState, {
-          type: CORE_EVENT_TYPES.LEAVE,
-          requestId: nextSyntheticRequestId("sweep", tableId, userId, nowTs, table.coreState.version),
-          userId
-        });
-        if (leaveResult.ok) {
-          table.coreState = leaveResult.state;
-          table.presenceByUserId.delete(userId);
-          changed = changed || leaveResult.effects.some((effect) => effect.type === "member_left");
-        }
+        table.presenceByUserId.delete(userId);
       }
-
-      if (changed) {
-        updates.push({ tableId, tableState: tableState(tableId) });
-      }
-
       if (table.coreState.members.length === 0 && table.subscribers.size === 0) {
         tables.delete(tableId);
       }
     }
-
     return updates;
   }
 
@@ -891,6 +1052,7 @@ export function createTableManager({
     }
 
     table.coreState = restoredCoreState;
+    table.tableStatus = normalizeTableStatus(restoredTable?.tableStatus);
     table.persistedStateVersion = Number.isInteger(restoredCoreState.version) && restoredCoreState.version >= 0
       ? restoredCoreState.version
       : table.persistedStateVersion;
@@ -910,6 +1072,24 @@ export function createTableManager({
     }
 
     return { ...table.coreState.pokerState };
+  }
+
+  function isTableClosed(tableId) {
+    const table = tables.get(tableId);
+    return normalizeTableStatus(table?.tableStatus) === "CLOSED";
+  }
+
+  function isBotUser(tableId, userId) {
+    const normalizedUserId = typeof userId === "string" ? userId.trim() : "";
+    if (!normalizedUserId) {
+      return false;
+    }
+    const table = tables.get(tableId);
+    const seatDetails = table?.coreState?.seatDetailsByUserId;
+    if (!seatDetails || typeof seatDetails !== "object" || Array.isArray(seatDetails)) {
+      return false;
+    }
+    return seatDetails?.[normalizedUserId]?.isBot === true;
   }
 
   function __debugCore(tableId) {
@@ -978,6 +1158,7 @@ export function createTableManager({
     applyAction,
     maybeApplyTurnTimeout,
     sweepTurnTimeouts,
+    listDueTurnTimeouts,
     cleanupConnection,
     orderedSubscribers,
     orderedConnectionsForTable,
@@ -986,7 +1167,10 @@ export function createTableManager({
     persistedPokerState,
     persistedStateVersion,
     setPersistedStateVersion,
-    restoreTableFromPersisted
+    restoreTableFromPersisted,
+    buildAuthoritativeLeaveRestore,
+    isTableClosed,
+    isBotUser
   };
 
   if (enableDebugCore && nodeEnv !== "production") {

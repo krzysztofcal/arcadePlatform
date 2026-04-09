@@ -4,7 +4,8 @@ import {
   applyCoreStateAction,
   bootstrapCoreStateHand,
   buildBootstrappedPokerState,
-  buildNextHandStateFromSettled
+  buildNextHandStateFromSettled,
+  replaceBrokeBotsForNextHand
 } from "./poker-engine.mjs";
 
 function initialCore() {
@@ -119,4 +120,47 @@ test("rollover does not bootstrap a live hand when fewer than two stack-eligible
   });
 
   assert.equal(nextFromSettled, null);
+});
+
+test("replaceBrokeBotsForNextHand swaps too-short bot only after settlement", () => {
+  const coreState = {
+    roomId: "table_engine_roll_bot_replace",
+    version: 30,
+    seats: { human_a: 1, bot_old: 2, human_b: 3 },
+    members: [
+      { userId: "human_a", seat: 1 },
+      { userId: "bot_old", seat: 2 },
+      { userId: "human_b", seat: 3 }
+    ],
+    seatDetailsByUserId: {
+      human_a: { isBot: false, botProfile: null, leaveAfterHand: false },
+      bot_old: { isBot: true, botProfile: "TRIVIAL", leaveAfterHand: false },
+      human_b: { isBot: false, botProfile: null, leaveAfterHand: false }
+    },
+    publicStacks: { human_a: 120, bot_old: 1, human_b: 120 },
+    pokerState: null
+  };
+
+  const settledState = {
+    handId: "settled_bot_replace",
+    phase: "SETTLED",
+    dealerSeatNo: 1,
+    stacks: { human_a: 120, bot_old: 1, human_b: 120 }
+  };
+
+  const recycled = replaceBrokeBotsForNextHand({
+    coreState,
+    settledState,
+    nextVersion: 31
+  });
+
+  assert.notEqual(recycled.coreState, coreState);
+  assert.equal(recycled.coreState.members.some((member) => member.userId === "bot_old"), false);
+
+  const replacementBot = recycled.coreState.members.find((member) => member.seat === 2);
+  assert.ok(replacementBot);
+  assert.notEqual(replacementBot.userId, "bot_old");
+  assert.equal(recycled.coreState.seatDetailsByUserId[replacementBot.userId].isBot, true);
+  assert.equal(recycled.settledState.stacks[replacementBot.userId], 100);
+  assert.equal("bot_old" in recycled.settledState.stacks, false);
 });

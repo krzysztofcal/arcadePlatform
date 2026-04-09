@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
+import { wsDockerBuildArgs } from "./ws-docker-build-contract.mjs";
 
 function run(cmd, args, options = {}) {
   return spawnSync(cmd, args, { encoding: "utf8", ...options });
@@ -19,7 +20,7 @@ test("ws image contains required poker protocol/runtime modules", { timeout: 180
   fs.mkdirSync("ws-server/node_modules", { recursive: true });
   fs.writeFileSync(sentinelPath, "host-sentinel", "utf8");
   try {
-    const build = run("docker", ["build", "-t", imageTag, "-f", "ws-server/Dockerfile", "."]);
+    const build = run("docker", wsDockerBuildArgs(imageTag));
     assert.equal(build.status, 0, `docker build failed:\n${build.stderr || build.stdout}`);
 
     const check = run("docker", [
@@ -39,7 +40,7 @@ ${check.stderr || check.stdout}`);
       imageTag,
       "sh",
       "-lc",
-      "test -f /app/ws-server/poker/protocol/constants.mjs && test -f /app/ws-server/poker/protocol/envelope.mjs && test -f /app/ws-server/poker/handlers/hello.mjs && test -f /app/ws-server/poker/runtime/conn-state.mjs && test -f /app/ws-server/poker/table/table-snapshot.mjs && test -f /app/ws-server/poker/snapshot-runtime/poker-turn-timeout.mjs && test -f /app/ws-server/poker/snapshot-runtime/poker-state-utils.mjs && test -f /app/ws-server/poker/snapshot-runtime/poker-legal-actions.mjs && test -f /app/ws-server/poker/persistence/authoritative-join-adapter.mjs && test -f /app/netlify/functions/_shared/poker-turn-timeout.mjs && test -f /app/netlify/functions/_shared/supabase-admin.mjs && test -f /app/shared/poker-domain/leave.mjs && test -f /app/shared/poker-domain/join.mjs && test ! -f /app/netlify/functions/_shared/xp-cors.mjs"
+      "test -f /app/ws-server/poker/protocol/constants.mjs && test -f /app/ws-server/poker/protocol/envelope.mjs && test -f /app/ws-server/poker/handlers/hello.mjs && test -f /app/ws-server/poker/runtime/conn-state.mjs && test -f /app/ws-server/poker/table/table-snapshot.mjs && test -f /app/ws-server/poker/snapshot-runtime/poker-turn-timeout.mjs && test -f /app/ws-server/poker/snapshot-runtime/poker-state-utils.mjs && test -f /app/ws-server/poker/snapshot-runtime/poker-legal-actions.mjs && test -f /app/ws-server/poker/persistence/authoritative-join-adapter.mjs && test -f /app/netlify/functions/_shared/poker-turn-timeout.mjs && test -f /app/netlify/functions/_shared/supabase-admin.mjs && test -f /app/shared/poker-domain/leave.mjs && test -f /app/shared/poker-domain/join.mjs && test -f /app/shared/poker-domain/bots.mjs && test ! -f /app/netlify/functions/_shared/xp-cors.mjs"
     ]);
     assert.equal(runtimeCheck.status, 0, `required ws modules are missing in image:
 ${runtimeCheck.stderr || runtimeCheck.stdout}`);
@@ -59,7 +60,7 @@ test("docker runtime resolves authoritative join adapter dependency chain", { ti
 
   const imageTag = `arcadeplatform-ws-test:${Date.now()}-join-loader`;
   try {
-    const build = run("docker", ["build", "-t", imageTag, "-f", "ws-server/Dockerfile", "."]);
+    const build = run("docker", wsDockerBuildArgs(imageTag));
     assert.equal(build.status, 0, `docker build failed:
 ${build.stderr || build.stdout}`);
 

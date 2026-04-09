@@ -7,7 +7,7 @@ import { pathToFileURL } from "node:url";
 import { createAuthoritativeLeaveExecutor } from "./authoritative-leave-adapter.mjs";
 
 test("default loader uses single explicit artifact-relative path", () => {
-  const source = createAuthoritativeLeaveExecutor.toString();
+  const source = String.raw`${createAuthoritativeLeaveExecutor}`;
   assert.match(source, /\.\.\/\.\.\/shared\/poker-domain\/leave\.mjs/);
   assert.doesNotMatch(source, /\.\.\/\.\.\/\.\.\/shared\/poker-domain\/leave\.mjs/);
 });

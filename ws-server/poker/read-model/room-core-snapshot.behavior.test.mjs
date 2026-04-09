@@ -2,21 +2,85 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { projectRoomCoreSnapshot } from "./room-core-snapshot.mjs";
 
-test("projectRoomCoreSnapshot derives lobby snapshot when poker state is missing", () => {
-  const snapshot = projectRoomCoreSnapshot({
+test("projectRoomCoreSnapshot derives lobby snapshot public seats/stacks when poker state is missing", () => {
+  const baseInput = {
     tableId: "table_lobby",
     roomId: "table_lobby",
-    coreState: { seats: {} },
+    coreState: { seats: { user_a: 1 }, publicStacks: { user_a: 120 } },
     members: [{ userId: "user_a", seat: 1 }],
     userId: "user_a",
     youSeat: 1
-  });
+  };
+  const snapshot = projectRoomCoreSnapshot(baseInput);
+  const observer = projectRoomCoreSnapshot({ ...baseInput, userId: "observer", youSeat: null });
 
   assert.equal(snapshot.roomId, "table_lobby");
   assert.deepEqual(snapshot.hand, { handId: null, status: "LOBBY", round: null });
   assert.deepEqual(snapshot.turn, { userId: "user_a", seat: 1, startedAt: null, deadlineAt: null });
+  assert.deepEqual(snapshot.seats, [{ userId: "user_a", seatNo: 1, status: "ACTIVE" }]);
+  assert.deepEqual(snapshot.stacks, { user_a: 120 });
+  assert.deepEqual(observer.seats, snapshot.seats);
+  assert.deepEqual(observer.stacks, snapshot.stacks);
   assert.deepEqual(snapshot.pot, { total: 0, sidePots: [] });
   assert.deepEqual(snapshot.private, { userId: "user_a", seat: 1, holeCards: [] });
+  assert.equal(observer.private, null);
+});
+
+test("projectRoomCoreSnapshot falls back to authoritative lobby seats/stacks when poker state is empty", () => {
+  const baseInput = {
+    tableId: "table_lobby_empty_state",
+    roomId: "table_lobby_empty_state",
+    coreState: {
+      seats: { user_a: 1, user_b: 2 },
+      publicStacks: { user_a: 150, user_b: 90 },
+      pokerState: {}
+    },
+    members: [
+      { userId: "user_a", seat: 1 },
+      { userId: "user_b", seat: 2 }
+    ],
+    userId: "user_a",
+    youSeat: 1
+  };
+  const seated = projectRoomCoreSnapshot(baseInput);
+  const observer = projectRoomCoreSnapshot({ ...baseInput, userId: "observer", youSeat: null });
+
+  assert.deepEqual(seated.seats, [
+    { userId: "user_a", seatNo: 1, status: "ACTIVE" },
+    { userId: "user_b", seatNo: 2, status: "ACTIVE" }
+  ]);
+  assert.deepEqual(seated.stacks, { user_a: 150, user_b: 90 });
+  assert.equal(seated.hand.status, null);
+  assert.deepEqual(observer.seats, seated.seats);
+  assert.deepEqual(observer.stacks, seated.stacks);
+  assert.equal(observer.private, null);
+});
+
+test("projectRoomCoreSnapshot preserves bot seat metadata when public seats fall back to members", () => {
+  const snapshot = projectRoomCoreSnapshot({
+    tableId: "table_lobby_bots",
+    roomId: "table_lobby_bots",
+    coreState: {
+      seats: { human_user: 1, bot_user: 2 },
+      publicStacks: { human_user: 120, bot_user: 120 },
+      seatDetailsByUserId: {
+        human_user: { isBot: false, botProfile: null, leaveAfterHand: false },
+        bot_user: { isBot: true, botProfile: "TRIVIAL", leaveAfterHand: false }
+      },
+      pokerState: {}
+    },
+    members: [
+      { userId: "human_user", seat: 1 },
+      { userId: "bot_user", seat: 2 }
+    ],
+    userId: "human_user",
+    youSeat: 1
+  });
+
+  assert.deepEqual(snapshot.seats, [
+    { userId: "human_user", seatNo: 1, status: "ACTIVE" },
+    { userId: "bot_user", seatNo: 2, status: "ACTIVE", isBot: true, botProfile: "TRIVIAL" }
+  ]);
 });
 
 test("projectRoomCoreSnapshot reuses poker legal-actions/public stripping semantics", () => {
@@ -74,6 +138,8 @@ test("projectRoomCoreSnapshot reuses poker legal-actions/public stripping semant
   assert.deepEqual(observer.board, seated.board);
   assert.deepEqual(observer.turn, seated.turn);
   assert.deepEqual(observer.pot, seated.pot);
+  assert.deepEqual(observer.seats, seated.seats);
+  assert.deepEqual(observer.stacks, seated.stacks);
   assert.deepEqual(observer.legalActions, { seat: null, actions: [] });
   assert.equal(seated.turn.startedAt, null);
   assert.equal(seated.turn.deadlineAt, null);

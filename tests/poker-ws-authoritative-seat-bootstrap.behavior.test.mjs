@@ -4,7 +4,7 @@ import fs from "node:fs";
 
 test("ws bootstrap can hydrate occupied seats from authoritativeMembers when live members are empty", () => {
   const source = fs.readFileSync(new URL("../poker/poker.js", import.meta.url), "utf8");
-  const wsStart = source.indexOf("function mapTableStateToSeatUpdates(snapshotPayload)");
+  const wsStart = source.indexOf("function isRichGameplaySnapshot(snapshotPayload, snapshotKind)");
   const wsEnd = source.indexOf("\n\n    function startWsBootstrap(){", wsStart);
   assert.ok(wsStart >= 0 && wsEnd > wsStart);
   const wsFns = source.slice(wsStart, wsEnd);
@@ -14,6 +14,7 @@ test("ws bootstrap can hydrate occupied seats from authoritativeMembers when liv
     var tableId = "table_boot";
     var wsSnapshotSeen = false;
     var pendingWsSnapshot = null;
+    var wsAppliedSnapshotSeq = 0;
     var renderCount = 0;
     var lastRendered = null;
     var isSeated = false;
@@ -22,6 +23,7 @@ test("ws bootstrap can hydrate occupied seats from authoritativeMembers when liv
     function toFiniteOrNull(value){ var n = Number(value); if (!Number.isFinite(n) || Math.floor(n) !== n || n < 0) return null; return n; }
     function getConstraintsFromResponse(data){ if (data && isPlainObject(data.actionConstraints)) return data.actionConstraints; var gameState = data && data.state && data.state.state; if (gameState && isPlainObject(gameState.actionConstraints)) return gameState.actionConstraints; return null; }
     function getSafeConstraints(data){ var constraints = getConstraintsFromResponse(data); return { toCall: toFiniteOrNull(constraints ? constraints.toCall : null), minRaiseTo: toFiniteOrNull(constraints ? constraints.minRaiseTo : null), maxRaiseTo: toFiniteOrNull(constraints ? constraints.maxRaiseTo : null), maxBetAmount: toFiniteOrNull(constraints ? constraints.maxBetAmount : null) }; }
+    function getSeatedCount(data){ var seats = data && Array.isArray(data.seats) ? data.seats : []; var activeCount = 0; for (var i = 0; i < seats.length; i++){ var seat = seats[i]; if (!seat || !seat.userId) continue; var status = typeof seat.status === 'string' ? seat.status.toUpperCase() : ''; if (!status || status === 'ACTIVE' || status === 'SEATED') activeCount++; } return activeCount; }
     function isCurrentUserSeated(){ return false; }
     function renderTable(data){ renderCount++; lastRendered = data; }
     function stopPolling(){ stopPollingCalls++; }

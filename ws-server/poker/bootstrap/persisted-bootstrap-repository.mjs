@@ -41,7 +41,7 @@ export function createPersistedBootstrapRepository({ env = process.env } = {}) {
       }
 
       const seatRows = await tx.unsafe(
-        "select user_id, seat_no, status, is_bot from public.poker_seats where table_id = $1 order by seat_no asc;",
+        "select user_id, seat_no, status, is_bot, bot_profile, leave_after_hand, stack from public.poker_seats where table_id = $1 order by seat_no asc;",
         [tableId]
       );
 
