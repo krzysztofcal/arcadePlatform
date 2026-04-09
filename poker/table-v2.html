@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#06080f">
+  <title>Poker Table v2 - Arcade Hub</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap">
+  <link rel="stylesheet" href="/poker/poker-v2.css">
+  <script src="/poker/poker-v2.js" defer></script>
+</head>
+<body>
+  <div class="poker-table-screen" id="pokerTableScreen">
+    <a id="xpBadge" class="xp-badge xp-badge--loading poker-v2-xp-badge" aria-live="polite" aria-busy="true" href="/xp.html"><span class="xp-badge__label">XP</span></a>
+
+    <button type="button" class="poker-menu-toggle" id="pokerMenuToggle" aria-label="Toggle table menu" aria-expanded="false" aria-controls="pokerMenuPanel">
+      <span></span>
+      <span></span>
+      <span></span>
+    </button>
+
+    <nav class="poker-menu-panel" id="pokerMenuPanel" hidden>
+      <a href="/poker/table.html">Open Classic Table</a>
+      <a href="/poker/table-v2.html">Open Table v2</a>
+    </nav>
+
+    <div class="poker-scene">
+      <div class="poker-scene-bg"></div>
+
+      <div class="poker-table-shell">
+        <div class="poker-table-felt"></div>
+        <div class="poker-table-inner-ring"></div>
+      </div>
+
+      <div class="poker-seat-layer" id="pokerSeatLayer"></div>
+
+      <div class="poker-center-layer">
+        <div class="poker-pot-pill" id="pokerPotPill">Pot 1,350</div>
+        <div class="poker-community-cards" id="pokerCommunityCards"></div>
+        <div class="poker-dealer-chip" id="pokerDealerChip">D</div>
+      </div>
+
+      <div class="poker-hero-cards" id="pokerHeroCards"></div>
+    </div>
+
+    <div class="poker-action-bar" id="pokerActionBar">
+      <button type="button" class="poker-action-btn poker-action-btn--fold" data-action="fold">Fold</button>
+      <button type="button" class="poker-action-btn poker-action-btn--call" data-action="call">Call / Check</button>
+      <button type="button" class="poker-action-btn poker-action-btn--raise" data-action="raise">Raise</button>
+    </div>
+  </div>
+</body>
+</html>
