@@ -60,7 +60,8 @@
   var tableId = readTableId();
   var wsClient = null;
   var currentAccessToken = null;
-  var amountActionType = null;
+  var authWatchTimer = null;
+  var authUnsubscribe = null;
   var els = {};
 
   function cloneState(source){
@@ -95,6 +96,13 @@
     var bridge = window.SupabaseAuthBridge;
     if (!bridge || typeof bridge.getAccessToken !== 'function') return Promise.resolve(null);
     return Promise.resolve().then(function(){ return bridge.getAccessToken(); }).catch(function(){ return null; });
+  }
+
+  function getAuthApi(){
+    if (window.SupabaseAuth && typeof window.SupabaseAuth.onAuthChange === 'function'){
+      return window.SupabaseAuth;
+    }
+    return null;
   }
 
   function decodeBase64Url(str){
@@ -499,6 +507,10 @@
     els.v2Link.href = '/poker/table-v2.html' + suffix;
   }
 
+  function isWsReady(){
+    return !!(state.wsReady && wsClient && typeof wsClient.isReady === 'function' && wsClient.isReady());
+  }
+
   function renderInfoPanel(){
     if (els.liveStatus) els.liveStatus.textContent = state.statusText || '';
     if (els.tableMeta) {
@@ -556,7 +568,8 @@
   function renderControls(){
     var signedIn = isSignedIn();
     var seated = !!deriveCurrentSeat();
-    var allowed = isUsersTurn() ? getAllowedActions() : [];
+    var liveReady = isWsReady();
+    var allowed = liveReady && isUsersTurn() ? getAllowedActions() : [];
     var primary = resolvePrimaryAction(allowed);
     var amountAction = resolveAmountAction(allowed);
     var allInPlan = resolveAllInPlan(allowed);
@@ -564,29 +577,36 @@
 
     if (els.signInBtn) els.signInBtn.hidden = signedIn;
     if (els.joinBtn) els.joinBtn.hidden = !signedIn || seated || !state.tableId;
-    if (els.joinSeat) els.joinSeat.disabled = !signedIn || seated;
-    if (els.joinBuyIn) els.joinBuyIn.disabled = !signedIn || seated;
+    if (els.joinBtn) els.joinBtn.disabled = !signedIn || seated || !liveReady;
+    if (els.joinSeat) els.joinSeat.disabled = !signedIn || seated || !liveReady;
+    if (els.joinBuyIn) els.joinBuyIn.disabled = !signedIn || seated || !liveReady;
     if (els.startBtn) els.startBtn.hidden = !signedIn || !seated;
     if (els.leaveBtn) els.leaveBtn.hidden = !signedIn || !seated;
+    if (els.startBtn) els.startBtn.disabled = !liveReady;
+    if (els.leaveBtn) els.leaveBtn.disabled = !liveReady;
     if (els.stackText) els.stackText.textContent = stackAmount == null ? '—' : formatNumber(stackAmount);
 
     if (els.foldBtn){
       els.foldBtn.hidden = allowed.indexOf('FOLD') === -1;
       els.foldBtn.dataset.action = 'FOLD';
+      els.foldBtn.disabled = !liveReady;
     }
     if (els.primaryBtn){
       els.primaryBtn.hidden = !primary;
       els.primaryBtn.textContent = primary === 'CHECK' ? 'Check' : 'Call';
       els.primaryBtn.dataset.action = primary || '';
+      els.primaryBtn.disabled = !liveReady;
     }
     if (els.amountBtn){
       els.amountBtn.hidden = !amountAction;
       els.amountBtn.textContent = amountAction === 'RAISE' ? 'Raise' : 'Bet';
       els.amountBtn.dataset.action = amountAction || '';
+      els.amountBtn.disabled = !liveReady;
     }
     if (els.allInBtn){
       els.allInBtn.hidden = !allInPlan;
       els.allInBtn.dataset.action = allInPlan ? allInPlan.type : '';
+      els.allInBtn.disabled = !liveReady;
     }
     if (els.amountInputWrap){
       els.amountInputWrap.hidden = !amountAction;
@@ -606,6 +626,7 @@
         }
       }
     }
+    if (els.amountInput) els.amountInput.disabled = !liveReady || !amountAction;
     if (els.demoPill) els.demoPill.hidden = !!state.tableId;
   }
 
@@ -635,8 +656,8 @@
   }
 
   function sendCommand(methodName, payload){
-    if (!wsClient || typeof wsClient[methodName] !== 'function'){
-      setError('Live table connection is offline');
+    if (!wsClient || typeof wsClient[methodName] !== 'function' || !isWsReady()){
+      setError('Live table connection is still starting');
       return Promise.reject(new Error('ws_unavailable'));
     }
     return wsClient[methodName](payload || {});
@@ -655,6 +676,12 @@
     });
   }
 
+  function closeMenu(){
+    if (!els.menuToggle || !els.menuPanel) return;
+    els.menuPanel.setAttribute('hidden', 'hidden');
+    els.menuToggle.setAttribute('aria-expanded', 'false');
+  }
+
   function bindMenu(){
     if (!els.menuToggle || !els.menuPanel) return;
     els.menuToggle.addEventListener('click', function(){
@@ -662,6 +689,23 @@
       if (hidden) els.menuPanel.removeAttribute('hidden');
       else els.menuPanel.setAttribute('hidden', 'hidden');
       els.menuToggle.setAttribute('aria-expanded', hidden ? 'true' : 'false');
+    });
+    ['classicLink', 'v2Link'].forEach(function(key){
+      if (!els[key]) return;
+      els[key].addEventListener('click', function(){
+        closeMenu();
+      });
+    });
+    document.addEventListener('click', function(event){
+      var target = event && event.target;
+      if (!target) return;
+      if (target === els.menuToggle || target === els.menuPanel) return;
+      if (typeof els.menuToggle.contains === 'function' && els.menuToggle.contains(target)) return;
+      if (typeof els.menuPanel.contains === 'function' && els.menuPanel.contains(target)) return;
+      closeMenu();
+    });
+    document.addEventListener('keydown', function(event){
+      if (event && event.key === 'Escape') closeMenu();
     });
   }
 
@@ -743,7 +787,41 @@
 
   function startDemoMode(){
     state = cloneState(demoState);
+    state.wsReady = false;
     render();
+  }
+
+  function stopLiveMode(){
+    state.wsReady = false;
+    if (wsClient && typeof wsClient.destroy === 'function'){
+      try { wsClient.destroy(); } catch (_err){}
+    }
+    wsClient = null;
+  }
+
+  function applySignedOutState(){
+    stopLiveMode();
+    state = cloneState(demoState);
+    state.mode = 'live';
+    state.tableId = tableId;
+    state.currentUserId = null;
+    state.heroCards = [];
+    state.communityCards = [];
+    state.seats = [];
+    state.stacks = {};
+    state.potTotal = 0;
+    state.phase = 'LOBBY';
+    state.legalActions = [];
+    state.actionConstraints = {};
+    state.statusText = LIVE_STATUS_COPY.auth;
+    state.errorText = '';
+    render();
+  }
+
+  function restartLiveMode(token){
+    if (!tableId || !token) return;
+    currentAccessToken = token;
+    startLiveMode(token);
   }
 
   function startLiveMode(token){
@@ -753,25 +831,42 @@
       render();
       return;
     }
+    stopLiveMode();
     state.mode = 'live';
     state.tableId = tableId;
     state.currentUserId = getUserIdFromToken(token);
+    state.wsReady = false;
     state.statusText = LIVE_STATUS_COPY.connecting;
+    state.errorText = '';
     render();
     wsClient = window.PokerWsClient.create({
       tableId: tableId,
       getAccessToken: function(){ return Promise.resolve(currentAccessToken); },
       klog: klog,
       onStatus: function(status, info){
-        if (status === 'auth_ok'){
-          state.statusText = LIVE_STATUS_COPY.live;
+        if (status === 'hello_ack' || status === 'minting_token' || status === 'authenticating'){
+          state.wsReady = false;
+          state.statusText = LIVE_STATUS_COPY.connecting;
           renderInfoPanel();
+          renderControls();
+        } else if (status === 'auth_ok'){
+          state.wsReady = true;
+          state.statusText = LIVE_STATUS_COPY.live;
+          state.errorText = '';
+          render();
         } else if (status === 'failed'){
+          state.wsReady = false;
           state.statusText = LIVE_STATUS_COPY.error;
           setError(info && info.code ? info.code : 'Live connection failed');
+        } else if (status === 'error'){
+          state.wsReady = false;
+          state.statusText = LIVE_STATUS_COPY.error;
+          setError(info && info.code ? info.code : 'Live table unavailable');
         } else if (status === 'closed'){
+          state.wsReady = false;
           state.statusText = LIVE_STATUS_COPY.disconnected;
           renderInfoPanel();
+          renderControls();
         }
       },
       onSnapshot: function(snapshot){
@@ -779,17 +874,60 @@
         render();
       },
       onProtocolError: function(info){
+        state.wsReady = false;
         state.statusText = LIVE_STATUS_COPY.error;
+        if (info && info.code === 'missing_access_token'){
+          applySignedOutState();
+          return;
+        }
         setError(info && info.code ? info.code : 'Protocol error');
       }
     });
     wsClient.start();
   }
 
+  function startAuthWatch(){
+    if (authWatchTimer || !tableId) return;
+    authWatchTimer = window.setInterval(function(){
+      getAccessToken().then(function(token){
+        if (!token || token === currentAccessToken) return;
+        restartLiveMode(token);
+      }).catch(function(){});
+    }, 3000);
+  }
+
+  function stopAuthWatch(){
+    if (!authWatchTimer) return;
+    window.clearInterval(authWatchTimer);
+    authWatchTimer = null;
+  }
+
+  function bindAuthLifecycle(){
+    var authApi = getAuthApi();
+    if (!authApi || typeof authApi.onAuthChange !== 'function') return;
+    authUnsubscribe = authApi.onAuthChange(function(_event, user){
+      getAccessToken().then(function(token){
+        if (!user || !token){
+          currentAccessToken = null;
+          applySignedOutState();
+          startAuthWatch();
+          return;
+        }
+        stopAuthWatch();
+        if (token !== currentAccessToken || !isWsReady()) restartLiveMode(token);
+      }).catch(function(){
+        currentAccessToken = null;
+        applySignedOutState();
+        startAuthWatch();
+      });
+    });
+  }
+
   function init(){
     selectElements();
     bindMenu();
     bindControls();
+    bindAuthLifecycle();
     if (!tableId){
       startDemoMode();
       return;
@@ -797,27 +935,15 @@
     getAccessToken().then(function(token){
       currentAccessToken = token;
       if (!token){
-        state = cloneState(demoState);
-        state.mode = 'live';
-        state.tableId = tableId;
-        state.currentUserId = null;
-        state.heroCards = [];
-        state.communityCards = [];
-        state.seats = [];
-        state.stacks = {};
-        state.potTotal = 0;
-        state.phase = 'LOBBY';
-        state.legalActions = [];
-        state.actionConstraints = {};
-        state.statusText = LIVE_STATUS_COPY.auth;
-        state.errorText = '';
-        render();
+        applySignedOutState();
+        startAuthWatch();
         return;
       }
+      stopAuthWatch();
       startLiveMode(token);
     }).catch(function(){
-      state.statusText = LIVE_STATUS_COPY.auth;
-      render();
+      applySignedOutState();
+      startAuthWatch();
     });
   }
 

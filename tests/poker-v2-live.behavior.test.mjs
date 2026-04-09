@@ -8,6 +8,7 @@ function makeElement(id){
   const element = {
     id,
     hidden: false,
+    disabled: false,
     textContent: '',
     value: '',
     className: '',
@@ -24,6 +25,10 @@ function makeElement(id){
     _listeners: {},
     appendChild(child){ child.parentNode = this; this.children.push(child); return child; },
     removeChild(child){ this.children = this.children.filter((it) => it !== child); },
+    contains(target){
+      if (target === this) return true;
+      return this.children.includes(target);
+    },
     addEventListener(type, fn){ this._listeners[type] = this._listeners[type] || []; this._listeners[type].push(fn); },
     setAttribute(name, value){ this.attributes[name] = String(value); },
     removeAttribute(name){ delete this.attributes[name]; },
@@ -71,22 +76,28 @@ function createHarness(options = {}){
   const leavePayloads = [];
   let createOptions = null;
 
-  const token = options.token || ('aaa.' + Buffer.from(JSON.stringify({ sub: 'user-1' })).toString('base64') + '.zzz');
+  const token = Object.prototype.hasOwnProperty.call(options, 'token')
+    ? options.token
+    : ('aaa.' + Buffer.from(JSON.stringify({ sub: 'user-1' })).toString('base64') + '.zzz');
   const wsClient = {
+    _ready: false,
     start(){
       Promise.resolve().then(() => {
         if (createOptions && typeof createOptions.onStatus === 'function'){
+          this._ready = true;
           createOptions.onStatus('auth_ok', { roomId: 'table-1' });
         }
       });
     },
-    destroy(){},
+    destroy(){ this._ready = false; },
+    isReady(){ return this._ready; },
     sendJoin(payload){ joinPayloads.push(payload); return Promise.resolve({ ok: true, seatNo: payload.seatNo || 1 }); },
     sendAct(payload){ actPayloads.push(payload); return Promise.resolve({ ok: true }); },
     sendStartHand(payload){ startPayloads.push(payload); return Promise.resolve({ ok: true }); },
     sendLeave(payload){ leavePayloads.push(payload); return Promise.resolve({ ok: true }); }
   };
 
+  const intervalTimers = [];
   const sandbox = {
     window: {
       location: {
@@ -102,7 +113,14 @@ function createHarness(options = {}){
           createOptions = opts;
           return wsClient;
         }
-      }
+      },
+      setInterval(fn){
+        intervalTimers.push(fn);
+        return intervalTimers.length;
+      },
+      clearInterval(){},
+      clearTimeout(){},
+      setTimeout(fn){ fn(); return 1; }
     },
     document: {
       readyState: 'loading',
@@ -120,7 +138,7 @@ function createHarness(options = {}){
   vm.createContext(sandbox);
   vm.runInContext(source, sandbox, { filename: 'poker/poker-v2.js' });
 
-  async function flush(){
+async function flush(){
     await Promise.resolve();
     await Promise.resolve();
     await Promise.resolve();
@@ -132,6 +150,11 @@ function createHarness(options = {}){
     handlers.forEach((fn) => fn());
   }
 
+  function fireDocumentEvent(type, event){
+    const handlers = documentEvents[type] || [];
+    handlers.forEach((fn) => fn(event || {}));
+  }
+
   return {
     elements,
     logs,
@@ -140,9 +163,19 @@ function createHarness(options = {}){
     startPayloads,
     leavePayloads,
     fireDomContentLoaded,
+    fireDocumentEvent,
     flush,
-    getCreateOptions(){ return createOptions; }
+    getCreateOptions(){ return createOptions; },
+    getIntervalCount(){ return intervalTimers.length; }
   };
+}
+
+async function waitFor(predicate, attempts = 6){
+  for (let i = 0; i < attempts; i += 1){
+    if (predicate()) return;
+    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
 }
 
 test('poker v2 boots live mode, preserves table links, and sends WS commands', async () => {
@@ -152,6 +185,7 @@ test('poker v2 boots live mode, preserves table links, and sends WS commands', a
 
   const ws = harness.getCreateOptions();
   assert.ok(ws, 'v2 should bootstrap a WS client when tableId is present');
+  await waitFor(() => harness.elements.pokerV2JoinBtn.disabled === false);
 
   harness.elements.pokerV2SeatNo.value = '3';
   harness.elements.pokerV2BuyIn.value = '240';
@@ -189,6 +223,7 @@ test('poker v2 boots live mode, preserves table links, and sends WS commands', a
   assert.equal(harness.elements.pokerPotPill.textContent, 'Pot 42');
   assert.equal(harness.elements.pokerV2PrimaryBtn.hidden, false, 'v2 should surface the primary turn action');
   assert.equal(harness.elements.pokerV2AmountBtn.hidden, false, 'v2 should surface bet/raise when legal');
+  assert.equal(harness.elements.pokerV2JoinBtn.disabled, true, 'join should stay disabled once the user is seated');
 
   harness.elements.pokerV2AmountInput.value = '77';
   harness.elements.pokerV2AmountBtn.click();
@@ -216,4 +251,33 @@ test('poker v2 falls back to demo mode when tableId is missing', async () => {
   assert.equal(harness.elements.pokerV2DemoPill.hidden, false);
   assert.equal(harness.elements.pokerSeatLayer.children.length, 6);
   assert.match(harness.elements.pokerV2LiveStatus.textContent, /Demo mode/);
+});
+
+test('poker v2 closes menu on link click and outside click', async () => {
+  const harness = createHarness();
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  harness.elements.pokerMenuToggle.click();
+  assert.equal(harness.elements.pokerMenuToggle.attributes['aria-expanded'], 'true');
+  assert.equal(harness.elements.pokerMenuPanel.hasAttribute('hidden'), false);
+
+  harness.elements.pokerClassicLink.click();
+  assert.equal(harness.elements.pokerMenuToggle.attributes['aria-expanded'], 'false');
+  assert.equal(harness.elements.pokerMenuPanel.hasAttribute('hidden'), true);
+
+  harness.elements.pokerMenuToggle.click();
+  harness.fireDocumentEvent('click', { target: makeElement('outside') });
+  assert.equal(harness.elements.pokerMenuPanel.hasAttribute('hidden'), true);
+});
+
+test('poker v2 waits for auth before enabling join and starts auth watch when signed out', async () => {
+  const harness = createHarness({ token: null });
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  assert.equal(harness.getCreateOptions(), null, 'signed-out bootstrap should not start ws immediately');
+  assert.match(harness.elements.pokerV2LiveStatus.textContent, /Sign in to join this table/);
+  assert.equal(harness.elements.pokerV2JoinBtn.hidden, true);
+  assert.equal(harness.getIntervalCount(), 1, 'signed-out mode should start auth polling for later login');
 });
