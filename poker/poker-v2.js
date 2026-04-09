@@ -1,30 +1,15 @@
 (function(){
   if (typeof window === 'undefined' || typeof document === 'undefined') return;
 
-  var mockState = {
-    pot: 1350,
-    dealerSeat: 1,
-    communityCards: [
-      { rank: '10', suit: '♦' },
-      { rank: 'J', suit: '♣' },
-      { rank: 'Q', suit: '♥' },
-      { rank: '7', suit: '♠' },
-      { rank: '2', suit: '♥' }
-    ],
-    heroCards: [
-      { rank: 'A', suit: '♠' },
-      { rank: 'K', suit: '♥' }
-    ],
-    players: [
-      { seat: 0, name: 'Victor', stack: 875, status: 'Waiting', active: false, folded: false, hero: false, cardsFaceDown: true },
-      { seat: 1, name: 'Marcus', stack: 950, status: 'Thinking', active: false, folded: false, hero: false, cardsFaceDown: true },
-      { seat: 2, name: 'Elena', stack: 1100, status: 'Ready', active: false, folded: false, hero: false, cardsFaceDown: true },
-      { seat: 3, name: 'You', stack: 1560, status: 'Active', active: true, folded: false, hero: true, cardsFaceDown: false },
-      { seat: 4, name: 'Nico', stack: 780, status: 'Folded', active: false, folded: true, hero: false, cardsFaceDown: true },
-      { seat: 5, name: 'Mila', stack: 1250, status: 'Ready', active: false, folded: false, hero: false, cardsFaceDown: true }
-    ]
+  var SUIT_SYMBOLS = { S: '♠', H: '♥', D: '♦', C: '♣' };
+  var LIVE_STATUS_COPY = {
+    demo: 'Demo mode',
+    connecting: 'Connecting…',
+    auth: 'Sign in to join this table',
+    live: 'Live table connected',
+    disconnected: 'Live connection closed',
+    error: 'Live table unavailable'
   };
-
   var seatAnchors = [
     { x: 50, y: 10 },
     { x: 86, y: 28 },
@@ -33,204 +18,814 @@
     { x: 16, y: 67 },
     { x: 14, y: 28 }
   ];
+  var demoState = {
+    mode: 'demo',
+    tableId: null,
+    tableStatus: 'OPEN',
+    maxSeats: 6,
+    seats: [
+      { seatNo: 0, userId: 'victor', displayName: 'Victor', status: 'WAITING' },
+      { seatNo: 1, userId: 'marcus', displayName: 'Marcus', status: 'THINKING' },
+      { seatNo: 2, userId: 'elena', displayName: 'Elena', status: 'READY' },
+      { seatNo: 3, userId: 'hero', displayName: 'You', status: 'ACTIVE' },
+      { seatNo: 4, userId: 'nico', displayName: 'Nico', status: 'FOLDED' },
+      { seatNo: 5, userId: 'mila', displayName: 'Mila', status: 'READY' }
+    ],
+    stacks: { victor: 875, marcus: 950, elena: 1100, hero: 1560, nico: 780, mila: 1250 },
+    potTotal: 1350,
+    dealerSeat: 1,
+    communityCards: [
+      { r: '10', s: 'D' },
+      { r: 'J', s: 'C' },
+      { r: 'Q', s: 'H' },
+      { r: '7', s: 'S' },
+      { r: '2', s: 'H' }
+    ],
+    heroCards: [
+      { r: 'A', s: 'S' },
+      { r: 'K', s: 'H' }
+    ],
+    turnUserId: 'hero',
+    phase: 'TURN',
+    handId: 'demo-hand',
+    legalActions: ['FOLD', 'CHECK', 'BET'],
+    actionConstraints: { toCall: 0, maxBetAmount: 240, minRaiseTo: null, maxRaiseTo: null },
+    currentUserId: 'hero',
+    youSeat: 3,
+    statusText: LIVE_STATUS_COPY.demo,
+    errorText: ''
+  };
+
+  var state = cloneState(demoState);
+  var tableId = readTableId();
+  var wsClient = null;
+  var currentAccessToken = null;
+  var amountActionType = null;
+  var els = {};
+
+  function cloneState(source){
+    return JSON.parse(JSON.stringify(source));
+  }
+
+  function readTableId(){
+    try {
+      return new URLSearchParams(window.location.search || '').get('tableId');
+    } catch (_err){
+      return null;
+    }
+  }
 
   function klog(kind, data){
     try {
       if (window.KLog && typeof window.KLog.log === 'function') window.KLog.log(kind, data || {});
-    } catch (_err) {}
+    } catch (_err){}
   }
 
-  function init(){
-    renderTable(mockState);
-    bindMenu();
-    bindActions();
+  function t(key, fallback){
+    try {
+      if (window.I18N && typeof window.I18N.t === 'function'){
+        var translated = window.I18N.t(key);
+        if (translated) return translated;
+      }
+    } catch (_err){}
+    return fallback || key;
   }
 
-  function bindMenu(){
-    var toggle = document.getElementById('pokerMenuToggle');
-    var panel = document.getElementById('pokerMenuPanel');
-    if (!toggle || !panel) return;
-    toggle.addEventListener('click', function(){
-      var hidden = panel.hasAttribute('hidden');
-      if (hidden) panel.removeAttribute('hidden'); else panel.setAttribute('hidden', 'hidden');
-      toggle.setAttribute('aria-expanded', hidden ? 'true' : 'false');
+  function getAccessToken(){
+    var bridge = window.SupabaseAuthBridge;
+    if (!bridge || typeof bridge.getAccessToken !== 'function') return Promise.resolve(null);
+    return Promise.resolve().then(function(){ return bridge.getAccessToken(); }).catch(function(){ return null; });
+  }
+
+  function decodeBase64Url(str){
+    var base64 = String(str || '').replace(/-/g, '+').replace(/_/g, '/');
+    while (base64.length % 4) base64 += '=';
+    return atob(base64);
+  }
+
+  function getUserIdFromToken(token){
+    if (!token || typeof token !== 'string') return null;
+    var parts = token.split('.');
+    if (parts.length < 2) return null;
+    try {
+      var payload = JSON.parse(decodeBase64Url(parts[1]));
+      return payload && payload.sub ? payload.sub : null;
+    } catch (_err){
+      return null;
+    }
+  }
+
+  function openSignIn(){
+    var bridge = window.SupabaseAuthBridge;
+    var methods = ['signIn', 'openSignIn', 'showAuth', 'startLogin'];
+    if (bridge){
+      for (var i = 0; i < methods.length; i++){
+        if (typeof bridge[methods[i]] === 'function'){
+          try {
+            bridge[methods[i]]();
+            return;
+          } catch (_err){}
+        }
+      }
+    }
+    window.location.href = '/index.html';
+  }
+
+  function isObject(value){
+    return !!value && typeof value === 'object' && !Array.isArray(value);
+  }
+
+  function normalizeCard(card){
+    if (!card) return null;
+    var rank = '';
+    var suit = '';
+    if (typeof card === 'string'){
+      var trimmed = card.trim();
+      if (trimmed.length < 2) return null;
+      rank = trimmed.slice(0, -1).toUpperCase();
+      suit = trimmed.slice(-1).toUpperCase();
+    } else if (isObject(card)){
+      rank = String(card.r != null ? card.r : card.rank != null ? card.rank : '').trim().toUpperCase();
+      suit = String(card.s != null ? card.s : card.suit != null ? card.suit : '').trim().toUpperCase();
+    }
+    if (rank === 'T') rank = '10';
+    if (!SUIT_SYMBOLS[suit]) return null;
+    if (!/^(A|K|Q|J|10|9|8|7|6|5|4|3|2)$/.test(rank)) return null;
+    return { r: rank, s: suit };
+  }
+
+  function normalizeCards(cards){
+    if (!Array.isArray(cards)) return [];
+    var out = [];
+    for (var i = 0; i < cards.length; i++){
+      var normalized = normalizeCard(cards[i]);
+      if (normalized) out.push(normalized);
+    }
+    return out;
+  }
+
+  function normalizeSeatNumber(rawSeatNo){
+    var seatNo = Number(rawSeatNo);
+    if (!Number.isInteger(seatNo) || seatNo < 0) return null;
+    return seatNo;
+  }
+
+  function normalizeSeatRows(payload, previousSeats){
+    var seatMap = {};
+    var previousMap = {};
+    var sourceSeats = [];
+    if (Array.isArray(previousSeats)){
+      previousSeats.forEach(function(seat){
+        if (!seat || !Number.isInteger(seat.seatNo)) return;
+        previousMap[seat.seatNo] = seat;
+      });
+    }
+
+    if (Array.isArray(payload.seats)) sourceSeats = sourceSeats.concat(payload.seats);
+    var tableObj = isObject(payload.table) ? payload.table : {};
+    if (Array.isArray(tableObj.members)) sourceSeats = sourceSeats.concat(tableObj.members);
+    if (Array.isArray(payload.authoritativeMembers)) sourceSeats = sourceSeats.concat(payload.authoritativeMembers);
+
+    sourceSeats.forEach(function(rawSeat){
+      if (!rawSeat) return;
+      var seatNo = normalizeSeatNumber(
+        rawSeat.seatNo != null ? rawSeat.seatNo : rawSeat.seat != null ? rawSeat.seat : rawSeat.position
+      );
+      if (seatNo == null) return;
+      var previous = previousMap[seatNo] || {};
+      var userId = typeof rawSeat.userId === 'string' && rawSeat.userId ? rawSeat.userId : (typeof previous.userId === 'string' ? previous.userId : null);
+      var displayName = rawSeat.displayName || rawSeat.name || rawSeat.username || rawSeat.userName || rawSeat.handle || previous.displayName || null;
+      var status = typeof rawSeat.status === 'string' && rawSeat.status ? rawSeat.status.toUpperCase() : (previous.status || 'ACTIVE');
+      seatMap[seatNo] = {
+        seatNo: seatNo,
+        userId: userId,
+        displayName: displayName,
+        status: status,
+        isBot: rawSeat.isBot === true || /^bot[-_:]/i.test(userId || '')
+      };
     });
+
+    return Object.keys(seatMap)
+      .map(function(key){ return seatMap[key]; })
+      .sort(function(left, right){ return left.seatNo - right.seatNo; });
   }
 
-  function bindActions(){
-    var bar = document.getElementById('pokerActionBar');
-    if (!bar) return;
-    bar.addEventListener('click', function(event){
-      var target = event.target;
-      if (!target || !target.getAttribute) return;
-      var action = target.getAttribute('data-action');
-      if (!action) return;
-      setSelectedAction(action);
-      cycleActiveSeat(action);
-      klog('poker_v2_action', { action: action });
-    });
+  function normalizeStacks(payload){
+    if (isObject(payload.stacks)) return Object.assign({}, payload.stacks);
+    var publicObj = isObject(payload.public) ? payload.public : {};
+    if (isObject(publicObj.stacks)) return Object.assign({}, publicObj.stacks);
+    return null;
   }
 
-  function setSelectedAction(action){
-    var buttons = document.querySelectorAll('.poker-action-btn');
-    for (var i = 0; i < buttons.length; i++) buttons[i].classList.remove('is-selected');
-    var selected = document.querySelector('.poker-action-btn[data-action="' + action + '"]');
-    if (selected) selected.classList.add('is-selected');
+  function normalizeLegalActions(source){
+    var list = [];
+    var raw = source;
+    if (Array.isArray(raw)) list = raw;
+    else if (isObject(raw) && Array.isArray(raw.actions)) list = raw.actions;
+    return list
+      .map(function(entry){
+        if (typeof entry === 'string') return entry.trim().toUpperCase();
+        if (isObject(entry) && typeof entry.type === 'string') return entry.type.trim().toUpperCase();
+        return '';
+      })
+      .filter(Boolean);
   }
 
-  function cycleActiveSeat(action){
-    var i;
-    var nextSeat = -1;
-    for (i = 0; i < mockState.players.length; i++) if (mockState.players[i].active) mockState.players[i].active = false;
-    for (i = 0; i < mockState.players.length; i++) if (!mockState.players[i].folded) { nextSeat = i; break; }
-    if (nextSeat < 0) return;
-    if (action === 'fold') mockState.players[nextSeat].folded = true;
-    nextSeat = findNextAvailableSeat(nextSeat + 1);
-    if (nextSeat >= 0) {
-      mockState.players[nextSeat].active = true;
-      mockState.players[nextSeat].status = 'Active';
+  function normalizeConstraints(primary, secondary){
+    var raw = isObject(primary) ? primary : isObject(secondary) ? secondary : {};
+    return {
+      toCall: raw.toCall != null ? Number(raw.toCall) : null,
+      minRaiseTo: raw.minRaiseTo != null ? Number(raw.minRaiseTo) : null,
+      maxRaiseTo: raw.maxRaiseTo != null ? Number(raw.maxRaiseTo) : null,
+      maxBetAmount: raw.maxBetAmount != null ? Number(raw.maxBetAmount) : null
+    };
+  }
+
+  function mergeSnapshot(payload){
+    if (!isObject(payload)) return;
+    var snapshotTableId = typeof payload.tableId === 'string' && payload.tableId ? payload.tableId : null;
+    var publicObj = isObject(payload.public) ? payload.public : {};
+    var privateObj = isObject(payload.private) ? payload.private : {};
+    var youObj = isObject(payload.you) ? payload.you : {};
+    var tableObj = isObject(payload.table) ? payload.table : {};
+    var handObj = isObject(payload.hand) ? payload.hand : isObject(publicObj.hand) ? publicObj.hand : {};
+    var turnObj = isObject(payload.turn) ? payload.turn : isObject(publicObj.turn) ? publicObj.turn : {};
+    var potObj = isObject(payload.pot) ? payload.pot : isObject(publicObj.pot) ? publicObj.pot : {};
+    var legalSource = payload.legalActions != null ? payload.legalActions : publicObj.legalActions;
+    var constraintsPrimary = payload.actionConstraints != null ? payload.actionConstraints : publicObj.actionConstraints;
+
+    if (snapshotTableId && state.tableId && snapshotTableId !== state.tableId) return;
+    if (snapshotTableId) state.tableId = snapshotTableId;
+    else if (tableObj.tableId) state.tableId = tableObj.tableId;
+
+    if (typeof tableObj.status === 'string' && tableObj.status) state.tableStatus = tableObj.status.toUpperCase();
+    if (typeof payload.status === 'string' && payload.status) state.tableStatus = payload.status.toUpperCase();
+
+    var resolvedMaxSeats = null;
+    if (Number.isInteger(tableObj.maxSeats) && tableObj.maxSeats > 1) resolvedMaxSeats = tableObj.maxSeats;
+    else if (Number.isInteger(tableObj.maxPlayers) && tableObj.maxPlayers > 1) resolvedMaxSeats = tableObj.maxPlayers;
+    else if (Number.isInteger(payload.maxSeats) && payload.maxSeats > 1) resolvedMaxSeats = payload.maxSeats;
+    if (resolvedMaxSeats) state.maxSeats = resolvedMaxSeats;
+
+    var nextSeats = normalizeSeatRows(payload, state.seats);
+    if (nextSeats.length) state.seats = nextSeats;
+
+    var nextStacks = normalizeStacks(payload);
+    if (nextStacks) state.stacks = nextStacks;
+
+    if (typeof handObj.status === 'string' && handObj.status) state.phase = handObj.status.toUpperCase();
+    if (typeof handObj.handId === 'string' && handObj.handId) state.handId = handObj.handId;
+
+    if (typeof turnObj.userId === 'string' && turnObj.userId) state.turnUserId = turnObj.userId;
+    if (turnObj.deadlineAt != null) state.turnDeadlineAt = Number(turnObj.deadlineAt);
+
+    if (Number.isFinite(Number(potObj.total))) state.potTotal = Number(potObj.total);
+
+    var boardSource = null;
+    if (Array.isArray(payload.board)) boardSource = payload.board;
+    else if (isObject(payload.board) && Array.isArray(payload.board.cards)) boardSource = payload.board.cards;
+    else if (Array.isArray(publicObj.board)) boardSource = publicObj.board;
+    else if (isObject(publicObj.board) && Array.isArray(publicObj.board.cards)) boardSource = publicObj.board.cards;
+    if (boardSource) state.communityCards = normalizeCards(boardSource);
+
+    var nextHeroCards = null;
+    if (Array.isArray(payload.myHoleCards)) nextHeroCards = normalizeCards(payload.myHoleCards);
+    else if (Array.isArray(privateObj.holeCards)) nextHeroCards = normalizeCards(privateObj.holeCards);
+    if (nextHeroCards) state.heroCards = nextHeroCards;
+
+    if (Number.isInteger(payload.youSeat)) state.youSeat = payload.youSeat;
+    else if (Number.isInteger(youObj.seat)) state.youSeat = youObj.seat;
+
+    var legalActions = normalizeLegalActions(legalSource);
+    if (legalActions.length || Array.isArray(legalSource) || (isObject(legalSource) && Array.isArray(legalSource.actions))){
+      state.legalActions = legalActions;
     }
-    refreshStatuses();
-    renderSeats(mockState.players);
+    state.actionConstraints = normalizeConstraints(constraintsPrimary, legalSource && legalSource.actionConstraints);
+    state.statusText = LIVE_STATUS_COPY.live;
+    state.errorText = '';
   }
 
-  function findNextAvailableSeat(start){
-    var idx = start;
-    var count = 0;
-    while (count < mockState.players.length) {
-      var test = idx % mockState.players.length;
-      if (!mockState.players[test].folded) return test;
-      idx++;
-      count++;
+  function isSignedIn(){
+    return !!state.currentUserId;
+  }
+
+  function deriveCurrentSeat(){
+    var currentUserId = state.currentUserId;
+    if (!currentUserId) return null;
+    for (var i = 0; i < state.seats.length; i++){
+      if (state.seats[i] && state.seats[i].userId === currentUserId) return state.seats[i];
     }
-    return -1;
-  }
-
-  function refreshStatuses(){
-    var i;
-    for (i = 0; i < mockState.players.length; i++) {
-      if (mockState.players[i].folded) mockState.players[i].status = 'Folded';
-      else if (!mockState.players[i].active && mockState.players[i].status !== 'Waiting') mockState.players[i].status = 'Ready';
+    if (Number.isInteger(state.youSeat)){
+      return { seatNo: state.youSeat, userId: currentUserId, status: 'ACTIVE', displayName: 'You' };
     }
+    return null;
   }
 
-  function renderTable(state){
-    setPot(state.pot);
-    renderCommunityCards(state.communityCards);
-    renderHeroCards(state.heroCards);
-    renderSeats(state.players);
-    positionDealerChip(state.dealerSeat);
+  function resolveStack(userId){
+    if (!userId || !isObject(state.stacks)) return null;
+    var value = state.stacks[userId];
+    if (!Number.isFinite(Number(value))) return null;
+    return Math.max(0, Math.trunc(Number(value)));
   }
 
-  function setPot(amount){
-    var pot = document.getElementById('pokerPotPill');
-    if (pot) pot.textContent = 'Pot ' + formatNumber(amount);
+  function getAllowedActions(){
+    return Array.isArray(state.legalActions) ? state.legalActions.slice() : [];
   }
 
-  function renderCommunityCards(cards){
-    var layer = document.getElementById('pokerCommunityCards');
-    if (!layer) return;
-    layer.innerHTML = '';
-    for (var i = 0; i < cards.length; i++) layer.appendChild(createCard(cards[i]));
+  function isUsersTurn(){
+    return !!(state.currentUserId && state.turnUserId && state.currentUserId === state.turnUserId);
   }
 
-  function renderHeroCards(cards){
-    var layer = document.getElementById('pokerHeroCards');
-    if (!layer) return;
-    layer.innerHTML = '';
-    for (var i = 0; i < cards.length; i++) layer.appendChild(createCard(cards[i]));
-  }
-
-  function renderSeats(players){
-    var layer = document.getElementById('pokerSeatLayer');
-    if (!layer) return;
-    layer.innerHTML = '';
-    for (var i = 0; i < players.length; i++) layer.appendChild(createSeat(players[i]));
-  }
-
-  function createSeat(player){
-    var anchor = seatAnchors[player.seat] || { x: 50, y: 50 };
-    var seat = document.createElement('article');
-    seat.className = getSeatClass(player);
-    seat.style.left = anchor.x + '%';
-    seat.style.top = anchor.y + '%';
-
-    var avatar = document.createElement('div');
-    avatar.className = 'poker-seat-avatar';
-    avatar.textContent = initials(player.name);
-
-    var stack = document.createElement('div');
-    stack.className = 'poker-seat-stack';
-    stack.textContent = formatNumber(player.stack);
-
-    var cards = document.createElement('div');
-    cards.className = 'poker-seat-cards';
-    cards.appendChild(player.cardsFaceDown ? createBackCard() : createCard(mockState.heroCards[0]));
-    cards.appendChild(player.cardsFaceDown ? createBackCard() : createCard(mockState.heroCards[1]));
-
-    var name = document.createElement('div');
-    name.className = 'poker-seat-name';
-    name.textContent = player.name;
-
-    var status = document.createElement('div');
-    status.className = 'poker-seat-status';
-    status.textContent = player.status;
-
-    seat.appendChild(avatar);
-    seat.appendChild(stack);
-    seat.appendChild(cards);
-    seat.appendChild(name);
-    seat.appendChild(status);
-    return seat;
-  }
-
-  function createCard(cardData){
+  function createCard(cardData, opts){
     var card = document.createElement('div');
-    var isRed = cardData.suit === '♥' || cardData.suit === '♦';
+    var normalized = normalizeCard(cardData);
+    if (!normalized){
+      card.className = 'poker-card poker-card--back';
+      return card;
+    }
+    var suit = SUIT_SYMBOLS[normalized.s];
+    var isRed = normalized.s === 'H' || normalized.s === 'D';
     card.className = isRed ? 'poker-card poker-card--red' : 'poker-card';
     var rank = document.createElement('span');
-    rank.textContent = cardData.rank;
-    var suit = document.createElement('small');
-    suit.textContent = cardData.suit;
+    rank.textContent = normalized.r;
+    var suitEl = document.createElement('small');
+    suitEl.textContent = suit;
     card.appendChild(rank);
-    card.appendChild(suit);
+    card.appendChild(suitEl);
+    if (opts && opts.faceDown){
+      card.className = 'poker-card poker-card--back';
+      card.innerHTML = '';
+    }
     return card;
-  }
-
-  function createBackCard(){
-    var card = document.createElement('div');
-    card.className = 'poker-card poker-card--back';
-    return card;
-  }
-
-  function getSeatClass(player){
-    var cls = 'poker-seat';
-    if (player.hero) cls += ' poker-seat--hero';
-    if (player.active) cls += ' poker-seat--active';
-    if (player.folded) cls += ' poker-seat--folded';
-    return cls;
-  }
-
-  function positionDealerChip(seatIndex){
-    var dealer = document.getElementById('pokerDealerChip');
-    if (!dealer || !seatAnchors[seatIndex]) return;
-    dealer.style.left = seatAnchors[seatIndex].x + '%';
-    dealer.style.top = seatAnchors[seatIndex].y + '%';
   }
 
   function initials(name){
-    if (!name) return 'P';
-    var parts = String(name).split(' ');
-    var first = parts[0] ? parts[0].charAt(0) : '';
-    var second = parts[1] ? parts[1].charAt(0) : '';
-    return (first + second || first || 'P').toUpperCase();
+    var text = typeof name === 'string' ? name.trim() : '';
+    if (!text) return 'P';
+    var parts = text.split(/\s+/).filter(Boolean);
+    if (parts.length > 1) return (parts[0][0] + parts[1][0]).toUpperCase();
+    return text.slice(0, 2).toUpperCase();
   }
 
   function formatNumber(value){
     var num = Number(value || 0);
-    if (!isFinite(num)) return '0';
+    if (!Number.isFinite(num)) return '0';
     return Math.round(num).toLocaleString();
   }
 
-  init();
+  function getSeatNumberingOffset(){
+    for (var i = 0; i < state.seats.length; i++){
+      if (state.seats[i] && state.seats[i].seatNo === 0) return 0;
+    }
+    return 1;
+  }
+
+  function getSeatAnchor(index, total){
+    if (total === 6 && seatAnchors[index]) return seatAnchors[index];
+    var angle = (-90 + (360 / total) * index) * (Math.PI / 180);
+    var rx = 36;
+    var ry = 41;
+    return {
+      x: 50 + Math.cos(angle) * rx,
+      y: 51 + Math.sin(angle) * ry
+    };
+  }
+
+  function getDisplayName(seat){
+    if (!seat) return 'Open seat';
+    if (seat.userId && state.currentUserId && seat.userId === state.currentUserId) return 'You';
+    return seat.displayName || (seat.isBot ? 'Bot' : shortId(seat.userId)) || 'Player';
+  }
+
+  function shortId(value){
+    var text = typeof value === 'string' ? value.trim() : '';
+    if (!text) return '';
+    return text.length <= 8 ? text : text.slice(0, 8);
+  }
+
+  function renderSeats(){
+    if (!els.seatLayer) return;
+    els.seatLayer.innerHTML = '';
+    var offset = getSeatNumberingOffset();
+    var seatsByIndex = {};
+    state.seats.forEach(function(seat){
+      if (!seat || !Number.isInteger(seat.seatNo)) return;
+      var index = Math.max(0, seat.seatNo - offset);
+      seatsByIndex[index] = seat;
+    });
+    for (var i = 0; i < state.maxSeats; i++){
+      var seat = seatsByIndex[i] || null;
+      var anchor = getSeatAnchor(i, state.maxSeats);
+      var article = document.createElement('article');
+      var active = !!(seat && seat.userId && state.turnUserId && seat.userId === state.turnUserId);
+      var hero = !!(seat && seat.userId && state.currentUserId && seat.userId === state.currentUserId);
+      var folded = !!(seat && /FOLD/i.test(seat.status || ''));
+      article.className = 'poker-seat'
+        + (active ? ' poker-seat--active' : '')
+        + (folded ? ' poker-seat--folded' : '')
+        + (hero ? ' poker-seat--hero' : '')
+        + (!seat ? ' poker-seat--empty' : '');
+      article.style.left = anchor.x + '%';
+      article.style.top = anchor.y + '%';
+
+      var avatar = document.createElement('div');
+      avatar.className = 'poker-seat-avatar';
+      avatar.textContent = seat ? initials(getDisplayName(seat)) : '+';
+
+      var stack = document.createElement('div');
+      stack.className = 'poker-seat-stack';
+      stack.textContent = seat && seat.userId ? formatNumber(resolveStack(seat.userId)) : 'Open';
+
+      var cards = document.createElement('div');
+      cards.className = 'poker-seat-cards';
+      cards.appendChild(createCard(hero ? state.heroCards[0] : null, { faceDown: !hero }));
+      cards.appendChild(createCard(hero ? state.heroCards[1] : null, { faceDown: !hero }));
+
+      var name = document.createElement('div');
+      name.className = 'poker-seat-name';
+      name.textContent = seat ? getDisplayName(seat) : 'Seat ' + String(i + offset);
+
+      var status = document.createElement('div');
+      status.className = 'poker-seat-status';
+      status.textContent = seat ? String(seat.status || 'ACTIVE').replace(/_/g, ' ') : 'OPEN';
+
+      article.appendChild(avatar);
+      article.appendChild(stack);
+      article.appendChild(cards);
+      article.appendChild(name);
+      article.appendChild(status);
+      els.seatLayer.appendChild(article);
+    }
+  }
+
+  function renderCommunityCards(){
+    if (!els.communityCards) return;
+    els.communityCards.innerHTML = '';
+    state.communityCards.forEach(function(card){
+      els.communityCards.appendChild(createCard(card));
+    });
+  }
+
+  function renderHeroCards(){
+    if (!els.heroCards) return;
+    els.heroCards.innerHTML = '';
+    var cards = Array.isArray(state.heroCards) ? state.heroCards : [];
+    if (!cards.length){
+      els.heroCards.appendChild(createCard(null, { faceDown: true }));
+      els.heroCards.appendChild(createCard(null, { faceDown: true }));
+      return;
+    }
+    cards.slice(0, 2).forEach(function(card){
+      els.heroCards.appendChild(createCard(card));
+    });
+  }
+
+  function renderDealerChip(){
+    if (!els.dealerChip) return;
+    var offset = getSeatNumberingOffset();
+    var seatNo = Number.isInteger(state.youSeat) ? state.youSeat : 0;
+    var currentSeat = deriveCurrentSeat();
+    if (currentSeat && Number.isInteger(currentSeat.seatNo)) seatNo = currentSeat.seatNo;
+    var index = Math.max(0, seatNo - offset);
+    var anchor = getSeatAnchor(index % Math.max(state.maxSeats, 1), Math.max(state.maxSeats, 1));
+    els.dealerChip.style.left = anchor.x + '%';
+    els.dealerChip.style.top = anchor.y + '%';
+  }
+
+  function updateMenuLinks(){
+    if (!els.classicLink || !els.v2Link) return;
+    var suffix = state.tableId ? ('?tableId=' + encodeURIComponent(state.tableId)) : '';
+    els.classicLink.href = '/poker/table.html' + suffix;
+    els.v2Link.href = '/poker/table-v2.html' + suffix;
+  }
+
+  function renderInfoPanel(){
+    if (els.liveStatus) els.liveStatus.textContent = state.statusText || '';
+    if (els.tableMeta) {
+      var parts = [];
+      if (state.tableId) parts.push('Table ' + shortId(state.tableId));
+      parts.push(state.phase || state.tableStatus || 'LOBBY');
+      parts.push('Pot ' + formatNumber(state.potTotal || 0));
+      els.tableMeta.textContent = parts.join(' • ');
+    }
+    if (els.errorText){
+      els.errorText.textContent = state.errorText || '';
+      els.errorText.hidden = !state.errorText;
+    }
+    if (els.turnText){
+      if (isUsersTurn()){
+        els.turnText.textContent = 'Your turn';
+      } else if (state.turnUserId){
+        els.turnText.textContent = 'Acting: ' + shortId(state.turnUserId);
+      } else {
+        els.turnText.textContent = 'Waiting for action';
+      }
+    }
+  }
+
+  function resolvePrimaryAction(allowed){
+    if (allowed.indexOf('CHECK') !== -1) return 'CHECK';
+    if (allowed.indexOf('CALL') !== -1) return 'CALL';
+    return null;
+  }
+
+  function resolveAmountAction(allowed){
+    if (allowed.indexOf('RAISE') !== -1) return 'RAISE';
+    if (allowed.indexOf('BET') !== -1) return 'BET';
+    return null;
+  }
+
+  function resolveAllInPlan(allowed){
+    var stackAmount = resolveStack(state.currentUserId);
+    if (!stackAmount || stackAmount < 1) return null;
+    var constraints = state.actionConstraints || {};
+    var toCall = Number.isFinite(constraints.toCall) ? Math.max(0, Math.trunc(constraints.toCall)) : null;
+    if (allowed.indexOf('CALL') !== -1 && toCall != null && toCall > 0 && stackAmount <= toCall){
+      return { type: 'CALL', amount: null };
+    }
+    if (allowed.indexOf('RAISE') !== -1 && Number.isFinite(constraints.maxRaiseTo)){
+      return { type: 'RAISE', amount: Math.max(1, Math.trunc(constraints.maxRaiseTo)) };
+    }
+    if (allowed.indexOf('BET') !== -1){
+      var maxBet = Number.isFinite(constraints.maxBetAmount) ? Math.max(1, Math.trunc(constraints.maxBetAmount)) : stackAmount;
+      return { type: 'BET', amount: maxBet };
+    }
+    return null;
+  }
+
+  function renderControls(){
+    var signedIn = isSignedIn();
+    var seated = !!deriveCurrentSeat();
+    var allowed = isUsersTurn() ? getAllowedActions() : [];
+    var primary = resolvePrimaryAction(allowed);
+    var amountAction = resolveAmountAction(allowed);
+    var allInPlan = resolveAllInPlan(allowed);
+    var stackAmount = resolveStack(state.currentUserId);
+
+    if (els.signInBtn) els.signInBtn.hidden = signedIn;
+    if (els.joinBtn) els.joinBtn.hidden = !signedIn || seated || !state.tableId;
+    if (els.joinSeat) els.joinSeat.disabled = !signedIn || seated;
+    if (els.joinBuyIn) els.joinBuyIn.disabled = !signedIn || seated;
+    if (els.startBtn) els.startBtn.hidden = !signedIn || !seated;
+    if (els.leaveBtn) els.leaveBtn.hidden = !signedIn || !seated;
+    if (els.stackText) els.stackText.textContent = stackAmount == null ? '—' : formatNumber(stackAmount);
+
+    if (els.foldBtn){
+      els.foldBtn.hidden = allowed.indexOf('FOLD') === -1;
+      els.foldBtn.dataset.action = 'FOLD';
+    }
+    if (els.primaryBtn){
+      els.primaryBtn.hidden = !primary;
+      els.primaryBtn.textContent = primary === 'CHECK' ? 'Check' : 'Call';
+      els.primaryBtn.dataset.action = primary || '';
+    }
+    if (els.amountBtn){
+      els.amountBtn.hidden = !amountAction;
+      els.amountBtn.textContent = amountAction === 'RAISE' ? 'Raise' : 'Bet';
+      els.amountBtn.dataset.action = amountAction || '';
+    }
+    if (els.allInBtn){
+      els.allInBtn.hidden = !allInPlan;
+      els.allInBtn.dataset.action = allInPlan ? allInPlan.type : '';
+    }
+    if (els.amountInputWrap){
+      els.amountInputWrap.hidden = !amountAction;
+      if (amountAction){
+        var constraints = state.actionConstraints || {};
+        var min = amountAction === 'RAISE' && Number.isFinite(constraints.minRaiseTo) ? Math.max(1, Math.trunc(constraints.minRaiseTo)) : 1;
+        var max = amountAction === 'RAISE'
+          ? (Number.isFinite(constraints.maxRaiseTo) ? Math.max(min, Math.trunc(constraints.maxRaiseTo)) : null)
+          : (Number.isFinite(constraints.maxBetAmount) ? Math.max(1, Math.trunc(constraints.maxBetAmount)) : stackAmount);
+        if (els.amountInput){
+          els.amountInput.min = String(min);
+          if (max != null) els.amountInput.max = String(max);
+          else els.amountInput.removeAttribute('max');
+          if (!els.amountInput.value || Number(els.amountInput.value) < min || (max != null && Number(els.amountInput.value) > max)){
+            els.amountInput.value = String(max != null ? max : min);
+          }
+        }
+      }
+    }
+    if (els.demoPill) els.demoPill.hidden = !!state.tableId;
+  }
+
+  function render(){
+    if (els.potPill) els.potPill.textContent = 'Pot ' + formatNumber(state.potTotal || 0);
+    renderCommunityCards();
+    renderHeroCards();
+    renderSeats();
+    renderDealerChip();
+    updateMenuLinks();
+    renderInfoPanel();
+    renderControls();
+  }
+
+  function setError(message){
+    state.errorText = message || '';
+    renderInfoPanel();
+  }
+
+  function buildJoinPayload(){
+    var payload = { tableId: state.tableId };
+    var buyIn = els.joinBuyIn ? parseInt(els.joinBuyIn.value, 10) : 100;
+    if (Number.isFinite(buyIn) && buyIn > 0) payload.buyIn = buyIn;
+    var seatNo = els.joinSeat ? parseInt(els.joinSeat.value, 10) : NaN;
+    if (Number.isFinite(seatNo)) payload.seatNo = seatNo;
+    return payload;
+  }
+
+  function sendCommand(methodName, payload){
+    if (!wsClient || typeof wsClient[methodName] !== 'function'){
+      setError('Live table connection is offline');
+      return Promise.reject(new Error('ws_unavailable'));
+    }
+    return wsClient[methodName](payload || {});
+  }
+
+  function handleAction(actionType, amount){
+    if (!actionType) return Promise.resolve();
+    var payload = { handId: state.handId || null, action: actionType };
+    if (Number.isFinite(amount)) payload.amount = Math.trunc(amount);
+    setError('');
+    return sendCommand('sendAct', payload).then(function(){
+      state.statusText = 'Action sent';
+      renderInfoPanel();
+    }).catch(function(err){
+      setError(err && err.message ? err.message : 'Failed to send action');
+    });
+  }
+
+  function bindMenu(){
+    if (!els.menuToggle || !els.menuPanel) return;
+    els.menuToggle.addEventListener('click', function(){
+      var hidden = els.menuPanel.hasAttribute('hidden');
+      if (hidden) els.menuPanel.removeAttribute('hidden');
+      else els.menuPanel.setAttribute('hidden', 'hidden');
+      els.menuToggle.setAttribute('aria-expanded', hidden ? 'true' : 'false');
+    });
+  }
+
+  function bindControls(){
+    if (els.signInBtn) els.signInBtn.addEventListener('click', openSignIn);
+    if (els.foldBtn) els.foldBtn.addEventListener('click', function(){
+      handleAction('FOLD');
+    });
+    if (els.joinBtn) els.joinBtn.addEventListener('click', function(){
+      setError('');
+      sendCommand('sendJoin', buildJoinPayload()).then(function(result){
+        state.statusText = result && result.seatNo != null ? ('Joined seat ' + result.seatNo) : 'Join accepted';
+        renderInfoPanel();
+      }).catch(function(err){
+        setError(err && err.message ? err.message : 'Failed to join');
+      });
+    });
+    if (els.leaveBtn) els.leaveBtn.addEventListener('click', function(){
+      setError('');
+      sendCommand('sendLeave', { tableId: state.tableId }).then(function(){
+        state.statusText = 'Leave accepted';
+        renderInfoPanel();
+      }).catch(function(err){
+        setError(err && err.message ? err.message : 'Failed to leave');
+      });
+    });
+    if (els.startBtn) els.startBtn.addEventListener('click', function(){
+      setError('');
+      sendCommand('sendStartHand', { tableId: state.tableId }).then(function(){
+        state.statusText = 'Start hand accepted';
+        renderInfoPanel();
+      }).catch(function(err){
+        setError(err && err.message ? err.message : 'Failed to start hand');
+      });
+    });
+    if (els.primaryBtn) els.primaryBtn.addEventListener('click', function(){
+      handleAction(els.primaryBtn.dataset.action || '');
+    });
+    if (els.amountBtn) els.amountBtn.addEventListener('click', function(){
+      var value = els.amountInput ? parseInt(els.amountInput.value, 10) : NaN;
+      handleAction(els.amountBtn.dataset.action || '', Number.isFinite(value) ? value : undefined);
+    });
+    if (els.allInBtn) els.allInBtn.addEventListener('click', function(){
+      var plan = resolveAllInPlan(getAllowedActions());
+      if (!plan) return;
+      handleAction(plan.type, plan.amount == null ? undefined : plan.amount);
+    });
+  }
+
+  function selectElements(){
+    els.menuToggle = document.getElementById('pokerMenuToggle');
+    els.menuPanel = document.getElementById('pokerMenuPanel');
+    els.classicLink = document.getElementById('pokerClassicLink');
+    els.v2Link = document.getElementById('pokerV2Link');
+    els.seatLayer = document.getElementById('pokerSeatLayer');
+    els.potPill = document.getElementById('pokerPotPill');
+    els.communityCards = document.getElementById('pokerCommunityCards');
+    els.dealerChip = document.getElementById('pokerDealerChip');
+    els.heroCards = document.getElementById('pokerHeroCards');
+    els.liveStatus = document.getElementById('pokerV2LiveStatus');
+    els.tableMeta = document.getElementById('pokerV2TableMeta');
+    els.turnText = document.getElementById('pokerV2TurnText');
+    els.stackText = document.getElementById('pokerV2StackText');
+    els.errorText = document.getElementById('pokerV2ErrorText');
+    els.signInBtn = document.getElementById('pokerV2SignInBtn');
+    els.joinBtn = document.getElementById('pokerV2JoinBtn');
+    els.joinSeat = document.getElementById('pokerV2SeatNo');
+    els.joinBuyIn = document.getElementById('pokerV2BuyIn');
+    els.leaveBtn = document.getElementById('pokerV2LeaveBtn');
+    els.startBtn = document.getElementById('pokerV2StartBtn');
+    els.demoPill = document.getElementById('pokerV2DemoPill');
+    els.foldBtn = document.getElementById('pokerV2FoldBtn');
+    els.primaryBtn = document.getElementById('pokerV2PrimaryBtn');
+    els.amountBtn = document.getElementById('pokerV2AmountBtn');
+    els.allInBtn = document.getElementById('pokerV2AllInBtn');
+    els.amountInput = document.getElementById('pokerV2AmountInput');
+    els.amountInputWrap = document.getElementById('pokerV2AmountInputWrap');
+  }
+
+  function startDemoMode(){
+    state = cloneState(demoState);
+    render();
+  }
+
+  function startLiveMode(token){
+    if (!window.PokerWsClient || typeof window.PokerWsClient.create !== 'function'){
+      state.statusText = LIVE_STATUS_COPY.error;
+      setError('Poker WS client is unavailable');
+      render();
+      return;
+    }
+    state.mode = 'live';
+    state.tableId = tableId;
+    state.currentUserId = getUserIdFromToken(token);
+    state.statusText = LIVE_STATUS_COPY.connecting;
+    render();
+    wsClient = window.PokerWsClient.create({
+      tableId: tableId,
+      getAccessToken: function(){ return Promise.resolve(currentAccessToken); },
+      klog: klog,
+      onStatus: function(status, info){
+        if (status === 'auth_ok'){
+          state.statusText = LIVE_STATUS_COPY.live;
+          renderInfoPanel();
+        } else if (status === 'failed'){
+          state.statusText = LIVE_STATUS_COPY.error;
+          setError(info && info.code ? info.code : 'Live connection failed');
+        } else if (status === 'closed'){
+          state.statusText = LIVE_STATUS_COPY.disconnected;
+          renderInfoPanel();
+        }
+      },
+      onSnapshot: function(snapshot){
+        mergeSnapshot(snapshot && snapshot.payload ? snapshot.payload : null);
+        render();
+      },
+      onProtocolError: function(info){
+        state.statusText = LIVE_STATUS_COPY.error;
+        setError(info && info.code ? info.code : 'Protocol error');
+      }
+    });
+    wsClient.start();
+  }
+
+  function init(){
+    selectElements();
+    bindMenu();
+    bindControls();
+    if (!tableId){
+      startDemoMode();
+      return;
+    }
+    getAccessToken().then(function(token){
+      currentAccessToken = token;
+      if (!token){
+        state = cloneState(demoState);
+        state.mode = 'live';
+        state.tableId = tableId;
+        state.currentUserId = null;
+        state.heroCards = [];
+        state.communityCards = [];
+        state.seats = [];
+        state.stacks = {};
+        state.potTotal = 0;
+        state.phase = 'LOBBY';
+        state.legalActions = [];
+        state.actionConstraints = {};
+        state.statusText = LIVE_STATUS_COPY.auth;
+        state.errorText = '';
+        render();
+        return;
+      }
+      startLiveMode(token);
+    }).catch(function(){
+      state.statusText = LIVE_STATUS_COPY.auth;
+      render();
+    });
+  }
+
+  window.__PokerV2 = {
+    _mergeSnapshot: mergeSnapshot,
+    _resolveAllInPlan: resolveAllInPlan
+  };
+
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init, { once: true });
+  else init();
 })();

@@ -1,0 +1,219 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import vm from 'node:vm';
+
+function makeElement(id){
+  const element = {
+    id,
+    hidden: false,
+    textContent: '',
+    value: '',
+    className: '',
+    dataset: {},
+    style: {},
+    children: [],
+    parentNode: null,
+    attributes: {},
+    classList: {
+      add(){},
+      remove(){},
+      contains(){ return false; }
+    },
+    _listeners: {},
+    appendChild(child){ child.parentNode = this; this.children.push(child); return child; },
+    removeChild(child){ this.children = this.children.filter((it) => it !== child); },
+    addEventListener(type, fn){ this._listeners[type] = this._listeners[type] || []; this._listeners[type].push(fn); },
+    setAttribute(name, value){ this.attributes[name] = String(value); },
+    removeAttribute(name){ delete this.attributes[name]; },
+    hasAttribute(name){ return Object.prototype.hasOwnProperty.call(this.attributes, name); },
+    click(){
+      const handlers = this._listeners.click || [];
+      handlers.forEach((fn) => fn({ preventDefault(){}, stopPropagation(){} }));
+    }
+  };
+  let innerHTML = '';
+  Object.defineProperty(element, 'innerHTML', {
+    get(){ return innerHTML; },
+    set(value){
+      innerHTML = String(value == null ? '' : value);
+      if (innerHTML === '') this.children = [];
+    }
+  });
+  return element;
+}
+
+function createHarness(options = {}){
+  const source = fs.readFileSync(path.join(process.cwd(), 'poker', 'poker-v2.js'), 'utf8');
+  const elements = {};
+  [
+    'pokerMenuToggle', 'pokerMenuPanel', 'pokerClassicLink', 'pokerV2Link',
+    'pokerSeatLayer', 'pokerPotPill', 'pokerCommunityCards', 'pokerDealerChip',
+    'pokerHeroCards', 'pokerV2LiveStatus', 'pokerV2TableMeta', 'pokerV2TurnText',
+    'pokerV2StackText', 'pokerV2ErrorText', 'pokerV2SignInBtn', 'pokerV2SeatNo',
+    'pokerV2BuyIn', 'pokerV2JoinBtn', 'pokerV2StartBtn', 'pokerV2LeaveBtn',
+    'pokerV2DemoPill', 'pokerV2FoldBtn', 'pokerV2PrimaryBtn', 'pokerV2AmountBtn',
+    'pokerV2AllInBtn', 'pokerV2AmountInput', 'pokerV2AmountInputWrap'
+  ].forEach((id) => {
+    elements[id] = makeElement(id);
+  });
+  elements.pokerV2SeatNo.value = '1';
+  elements.pokerV2BuyIn.value = '100';
+  elements.pokerV2AmountInput.value = '20';
+  elements.pokerMenuPanel.setAttribute('hidden', 'hidden');
+
+  const documentEvents = {};
+  const logs = [];
+  const joinPayloads = [];
+  const actPayloads = [];
+  const startPayloads = [];
+  const leavePayloads = [];
+  let createOptions = null;
+
+  const token = options.token || ('aaa.' + Buffer.from(JSON.stringify({ sub: 'user-1' })).toString('base64') + '.zzz');
+  const wsClient = {
+    start(){
+      Promise.resolve().then(() => {
+        if (createOptions && typeof createOptions.onStatus === 'function'){
+          createOptions.onStatus('auth_ok', { roomId: 'table-1' });
+        }
+      });
+    },
+    destroy(){},
+    sendJoin(payload){ joinPayloads.push(payload); return Promise.resolve({ ok: true, seatNo: payload.seatNo || 1 }); },
+    sendAct(payload){ actPayloads.push(payload); return Promise.resolve({ ok: true }); },
+    sendStartHand(payload){ startPayloads.push(payload); return Promise.resolve({ ok: true }); },
+    sendLeave(payload){ leavePayloads.push(payload); return Promise.resolve({ ok: true }); }
+  };
+
+  const sandbox = {
+    window: {
+      location: {
+        search: typeof options.search === 'string' ? options.search : '?tableId=table-1',
+        href: ''
+      },
+      KLog: { log(kind, data){ logs.push({ kind, data }); } },
+      SupabaseAuthBridge: {
+        getAccessToken: async () => token
+      },
+      PokerWsClient: {
+        create(opts){
+          createOptions = opts;
+          return wsClient;
+        }
+      }
+    },
+    document: {
+      readyState: 'loading',
+      addEventListener(type, fn){ documentEvents[type] = documentEvents[type] || []; documentEvents[type].push(fn); },
+      getElementById(id){ return elements[id] || null; },
+      createElement(tag){ return makeElement(tag); }
+    },
+    URLSearchParams,
+    atob(value){ return Buffer.from(String(value), 'base64').toString('binary'); },
+    Buffer,
+    console
+  };
+  sandbox.window.document = sandbox.document;
+
+  vm.createContext(sandbox);
+  vm.runInContext(source, sandbox, { filename: 'poker/poker-v2.js' });
+
+  async function flush(){
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+  }
+
+  function fireDomContentLoaded(){
+    const handlers = documentEvents.DOMContentLoaded || [];
+    handlers.forEach((fn) => fn());
+  }
+
+  return {
+    elements,
+    logs,
+    joinPayloads,
+    actPayloads,
+    startPayloads,
+    leavePayloads,
+    fireDomContentLoaded,
+    flush,
+    getCreateOptions(){ return createOptions; }
+  };
+}
+
+test('poker v2 boots live mode, preserves table links, and sends WS commands', async () => {
+  const harness = createHarness();
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  const ws = harness.getCreateOptions();
+  assert.ok(ws, 'v2 should bootstrap a WS client when tableId is present');
+
+  harness.elements.pokerV2SeatNo.value = '3';
+  harness.elements.pokerV2BuyIn.value = '240';
+  harness.elements.pokerV2JoinBtn.click();
+  await harness.flush();
+
+  assert.equal(harness.joinPayloads.length, 1);
+  assert.equal(JSON.stringify(harness.joinPayloads[0]), JSON.stringify({ tableId: 'table-1', buyIn: 240, seatNo: 3 }));
+
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 2,
+      table: { tableId: 'table-1', status: 'OPEN', maxSeats: 6, members: [{ userId: 'user-1', seat: 1 }] },
+      public: {
+        hand: { handId: 'hand-1', status: 'TURN' },
+        turn: { userId: 'user-1', deadlineAt: Date.now() + 5000 },
+        board: ['As', 'Kd', '3h', '2c'],
+        pot: { total: 42, sidePots: [] },
+        legalActions: { seat: 1, actions: ['FOLD', 'CHECK', 'BET'] },
+        actionConstraints: { toCall: 0, maxBetAmount: 120 }
+      },
+      private: { holeCards: [{ r: 'A', s: 'S' }, { r: 'K', s: 'D' }] },
+      you: { seat: 1 }
+    }
+  });
+  await harness.flush();
+
+  assert.equal(harness.elements.pokerClassicLink.href, '/poker/table.html?tableId=table-1');
+  assert.equal(harness.elements.pokerV2Link.href, '/poker/table-v2.html?tableId=table-1');
+  assert.equal(harness.elements.pokerSeatLayer.children.length, 6, 'v2 should render all seats for the table');
+  assert.equal(harness.elements.pokerCommunityCards.children.length, 4, 'v2 should render live board cards');
+  assert.equal(harness.elements.pokerHeroCards.children.length, 2, 'v2 should render live hole cards');
+  assert.equal(harness.elements.pokerPotPill.textContent, 'Pot 42');
+  assert.equal(harness.elements.pokerV2PrimaryBtn.hidden, false, 'v2 should surface the primary turn action');
+  assert.equal(harness.elements.pokerV2AmountBtn.hidden, false, 'v2 should surface bet/raise when legal');
+
+  harness.elements.pokerV2AmountInput.value = '77';
+  harness.elements.pokerV2AmountBtn.click();
+  await harness.flush();
+
+  assert.equal(harness.actPayloads.length, 1);
+  assert.equal(JSON.stringify(harness.actPayloads[0]), JSON.stringify({ handId: 'hand-1', action: 'BET', amount: 77 }));
+
+  harness.elements.pokerV2StartBtn.click();
+  harness.elements.pokerV2LeaveBtn.click();
+  await harness.flush();
+
+  assert.equal(harness.startPayloads.length, 1);
+  assert.equal(JSON.stringify(harness.startPayloads[0]), JSON.stringify({ tableId: 'table-1' }));
+  assert.equal(harness.leavePayloads.length, 1);
+  assert.equal(JSON.stringify(harness.leavePayloads[0]), JSON.stringify({ tableId: 'table-1' }));
+});
+
+test('poker v2 falls back to demo mode when tableId is missing', async () => {
+  const harness = createHarness({ search: '' });
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  assert.equal(harness.getCreateOptions(), null, 'demo mode should not bootstrap WS');
+  assert.equal(harness.elements.pokerV2DemoPill.hidden, false);
+  assert.equal(harness.elements.pokerSeatLayer.children.length, 6);
+  assert.match(harness.elements.pokerV2LiveStatus.textContent, /Demo mode/);
+});

@@ -7,6 +7,7 @@ const source = await readFile(path.join(root, "scripts", "test-all.mjs"), "utf8"
 
 assert.match(source, /run\("node", \["tests\/poker-ui\.behavior\.test\.mjs"\],/, "runner should include poker-ui.behavior test");
 assert.match(source, /run\("node", \["tests\/poker-ui-turn-actions\.test\.mjs"\],/, "runner should include poker-ui turn-actions test");
+assert.match(source, /run\("node", \["tests\/poker-v2-live\.behavior\.test\.mjs"\],/, "runner should include poker v2 live behavior test");
 assert.doesNotMatch(
   source,
   /tests\/poker-ui-amount-actions-dom\.behavior\.test\.mjs/,

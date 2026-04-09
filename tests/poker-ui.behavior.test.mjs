@@ -149,6 +149,16 @@ const baseFlags = {
 };
 assert.equal(availability(baseFlags).canDumpLogs, true, 'dump logs should be enabled when no action is pending');
 assert.equal(availability(baseFlags).canCopyLog, true, 'copy log should be enabled when no action is pending');
+assert.equal(
+  base.hooks.buildPokerTableUrl('table-1', { useV2: true, seatNo: 3, autoJoin: true }),
+  '/poker/table-v2.html?tableId=table-1&seatNo=3&autoJoin=1',
+  'lobby routing helper should default user flows to v2 table url'
+);
+assert.equal(
+  base.hooks.buildPokerTableUrl('table-1', { useV2: false }),
+  '/poker/table.html?tableId=table-1',
+  'lobby routing helper should keep classic table url available for testing'
+);
 
 const dumpPendingFlags = Object.assign({}, baseFlags, { dumpLogsPending: true, copyLogPending: false });
 assert.equal(availability(dumpPendingFlags).canDumpLogs, false, 'dump logs should be disabled when dump action is pending');
