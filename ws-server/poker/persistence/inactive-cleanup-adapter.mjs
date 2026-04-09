@@ -3,8 +3,8 @@ async function beginSqlDefault(fn, { env = process.env } = {}) {
   return bootstrapDb.beginSqlWs(fn, { env });
 }
 
-const DEFAULT_INACTIVE_CLEANUP_MODULE_URL = new URL("../../../shared/poker-domain/inactive-cleanup.mjs", import.meta.url).href;
-const DEFAULT_INACTIVE_CLEANUP_DEPS_MODULE_URL = "../../shared/poker-domain/inactive-cleanup-deps.mjs";
+const DEFAULT_INACTIVE_CLEANUP_MODULE_URL = new URL("../../shared/poker-domain/inactive-cleanup.mjs", import.meta.url).href;
+const DEFAULT_INACTIVE_CLEANUP_DEPS_MODULE_URL = new URL("../../shared/poker-domain/inactive-cleanup-deps.mjs", import.meta.url);;.href;
 
 function isTerminalLoaderFailure(error) {
   const code = typeof error?.code === "string" ? error.code : "";
