@@ -19,6 +19,8 @@
   <script src="/js/core/number-format.js" defer></script>
   <script src="/js/build-info.js" defer></script>
   <script src="/js/topbar.js" defer></script>
+  <script src="/js/core/sidebar-model.js" defer></script>
+  <script src="/js/sidebar.js" defer></script>
   <script src="/poker/poker-stakes-ui.js" defer></script>
   <script src="/poker/poker-ws-client.js" defer></script>
   <script src="/poker/poker.js" defer></script>
@@ -26,6 +28,9 @@
 <body>
   <div class="topbar">
     <div class="topbar-left">
+      <button class="hamburger" id="sbToggle" aria-label="Toggle navigation" aria-expanded="false">
+        <span></span><span></span><span></span>
+      </button>
       <a href="/index.html" class="brand" aria-label="Arcade Hub home">
         <div class="logo" aria-hidden="true"></div>
         <h1>Arcade Hub</h1>
@@ -52,6 +57,9 @@
       </div>
     </div>
   </div>
+
+  <div class="shell">
+    <aside class="sidebar collapsed" id="sidebar" aria-label="Main navigation"></aside>
 
   <main class="poker-page">
     <div id="pokerError" class="poker-error" hidden></div>
@@ -94,5 +102,6 @@
       </div>
     </div>
   </main>
+  </div>
 </body>
 </html>
