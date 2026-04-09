@@ -5,10 +5,10 @@ import { createInactiveCleanupExecutor } from './inactive-cleanup-adapter.mjs';
 
 test('inactive cleanup adapter uses module-relative shared loader urls and executes shared executor', async () => {
   const adapterSrc = fs.readFileSync(new URL('./inactive-cleanup-adapter.mjs', import.meta.url), 'utf8');
-  assert.match(adapterSrc, /\.\.\/\.\.\/\.\.\/shared\/poker-domain\/inactive-cleanup\.mjs/);
+  assert.match(adapterSrc, /\.\.\/\.\.\/shared\/poker-domain\/inactive-cleanup\.mjs/);
   assert.match(adapterSrc, /\.\.\/\.\.\/shared\/poker-domain\/inactive-cleanup-deps\.mjs/);
 
-  const sharedSrc = fs.readFileSync(new URL('../../../shared/poker-domain/inactive-cleanup.mjs', import.meta.url), 'utf8');
+  const sharedSrc = fs.readFileSync(new URL('../../shared/poker-domain/inactive-cleanup.mjs', import.meta.url), 'utf8');
   assert.doesNotMatch(sharedSrc, /netlify\/functions\/_shared\//, 'shared executor must not statically import netlify _shared modules');
   const wsDepsSrc = fs.readFileSync(new URL('../../shared/poker-domain/inactive-cleanup-deps.mjs', import.meta.url), 'utf8');
   assert.match(wsDepsSrc, /netlify\/functions\/_shared\/chips-ledger\.mjs/);
