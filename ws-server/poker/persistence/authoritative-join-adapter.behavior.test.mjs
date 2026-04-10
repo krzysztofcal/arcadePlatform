@@ -1,5 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { isStateStorageValid } from "../snapshot-runtime/poker-state-utils.mjs";
 import { createAuthoritativeJoinExecutor } from "./authoritative-join-adapter.mjs";
 
@@ -378,4 +382,50 @@ test("authoritative join adapter keeps runtime unavailable when not in file-stor
 
   const result = await execute({ tableId: "t1", userId: "u1", requestId: "r9", buyIn: 100 });
   assert.deepEqual(result, { ok: false, code: "temporarily_unavailable" });
+});
+
+test("authoritative join adapter default loader resolves from release-shaped shared path", async () => {
+  const stageDir = await fs.mkdtemp(path.join(os.tmpdir(), "ws-join-adapter-"));
+
+  try {
+    const stagedAdapter = path.join(stageDir, "poker/persistence/authoritative-join-adapter.mjs");
+    const stagedBootstrap = path.join(stageDir, "poker/bootstrap/persisted-bootstrap-db.mjs");
+    const stagedLedger = path.join(stageDir, "poker/persistence/chips-ledger.mjs");
+    const stagedLocked = path.join(stageDir, "poker/persistence/poker-state-write-locked.mjs");
+    const stagedStateUtils = path.join(stageDir, "poker/snapshot-runtime/poker-state-utils.mjs");
+    const stagedJoin = path.join(stageDir, "shared/poker-domain/join.mjs");
+
+    await fs.mkdir(path.dirname(stagedAdapter), { recursive: true });
+    await fs.mkdir(path.dirname(stagedBootstrap), { recursive: true });
+    await fs.mkdir(path.dirname(stagedLedger), { recursive: true });
+    await fs.mkdir(path.dirname(stagedLocked), { recursive: true });
+    await fs.mkdir(path.dirname(stagedStateUtils), { recursive: true });
+    await fs.mkdir(path.dirname(stagedJoin), { recursive: true });
+
+    await fs.copyFile("ws-server/poker/persistence/authoritative-join-adapter.mjs", stagedAdapter);
+    await fs.writeFile(stagedBootstrap, "export async function beginSqlWs(fn) { return fn({}); }\n", "utf8");
+    await fs.writeFile(stagedLedger, "export async function postTransaction() { return { ok: true }; }\n", "utf8");
+    await fs.writeFile(
+      stagedLocked,
+      "export async function loadPokerStateForUpdate() { return { ok: true, version: 0, state: {} }; }\nexport async function updatePokerStateLocked() { return { ok: true, newVersion: 1 }; }\n",
+      "utf8"
+    );
+    await fs.writeFile(stagedStateUtils, "export function isStateStorageValid() { return true; }\n", "utf8");
+    await fs.writeFile(
+      stagedJoin,
+      "export async function executePokerJoinAuthoritative() { return { ok: true, seatNo: 2, stack: 150, rejoin: false, seededBots: [], snapshot: { stateVersion: 1, seats: [{ userId: 'u1', seatNo: 2, status: 'ACTIVE' }], stacks: { u1: 150 } } }; }\n",
+      "utf8"
+    );
+    await fs.writeFile(path.join(stageDir, "package.json"), "{\"type\":\"module\"}\n", "utf8");
+
+    const { createAuthoritativeJoinExecutor: createStagedExecutor } = await import(pathToFileURL(stagedAdapter).href);
+    const execute = createStagedExecutor({ env: {} });
+    const result = await execute({ tableId: "t1", userId: "u1", requestId: "r-default-loader", buyIn: 150 });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.seatNo, 2);
+    assert.equal(result.stack, 150);
+  } finally {
+    await fs.rm(stageDir, { recursive: true, force: true });
+  }
 });

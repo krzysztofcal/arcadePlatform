@@ -5,7 +5,7 @@ async function beginSqlDefault(fn, { env = process.env } = {}) {
 }
 
 async function loadHttpAuthoritativeJoinModule() {
-  return import("../../../shared/poker-domain/join.mjs");
+  return import("../../shared/poker-domain/join.mjs");
 }
 
 async function loadLedgerPostTransaction() {
