@@ -34,11 +34,11 @@ body{margin:0; min-height:100vh; font-family:Poppins, sans-serif; background:#06
 
 .poker-seat-status{display:inline-block; margin-top:5px; padding:2px 8px; border-radius:11px; font-size:0.62rem; font-weight:600; letter-spacing:0.03em; text-transform:uppercase; color:#d6def1; background:rgba(8,11,18,0.66); border:1px solid rgba(135,149,180,0.35);}
 
-.poker-seat-best-hand{display:flex; flex-wrap:wrap; align-items:center; justify-content:center; gap:4px; margin-top:7px;}
+.poker-seat-best-hand{position:absolute; left:100%; top:12px; display:flex; flex-direction:column; align-items:flex-start; gap:4px; margin-left:10px; width:72px;}
 
-.poker-seat-best-hand-label{padding:3px 8px; border-radius:999px; background:rgba(7,16,28,0.82); border:1px solid rgba(255,223,180,0.22); color:#f5e7c2; font-size:0.58rem; font-weight:700; letter-spacing:0.04em; text-transform:uppercase;}
+.poker-seat-best-hand-label{padding:3px 8px; border-radius:10px; background:rgba(7,16,28,0.82); border:1px solid rgba(255,223,180,0.22); color:#f5e7c2; font-size:0.54rem; font-weight:700; letter-spacing:0.03em; line-height:1.15; text-transform:uppercase; text-align:left;}
 
-.poker-seat-best-hand-card{display:inline-flex; align-items:center; justify-content:center; min-width:28px; height:22px; padding:0 6px; border-radius:999px; background:rgba(245,248,255,0.96); color:#0f172a; font-size:0.68rem; font-weight:700; box-shadow:0 4px 10px rgba(0,0,0,0.28);}
+.poker-seat-best-hand-card{display:flex; align-items:center; justify-content:center; width:34px; height:18px; padding:0 4px; border-radius:999px; background:rgba(245,248,255,0.96); color:#0f172a; font-size:0.62rem; font-weight:700; box-shadow:0 4px 10px rgba(0,0,0,0.28);}
 
 .poker-seat-best-hand-card--red{color:#b91c1c;}
 
@@ -55,6 +55,8 @@ body{margin:0; min-height:100vh; font-family:Poppins, sans-serif; background:#06
 .poker-seat--hero{width:124px; z-index:2;}
 
 .poker-seat--hero .poker-seat-avatar{width:96px; height:96px; font-size:0.9rem; border-color:rgba(92,251,156,0.88); box-shadow:0 0 0 4px rgba(99,247,166,0.2), 0 12px 24px rgba(0,0,0,0.54);}
+
+.poker-seat--hero .poker-seat-name{padding-right:78px;}
 
 .poker-center-layer{position:absolute; left:50%; top:42%; transform:translate(-50%, -50%); width:min(86%, 350px); text-align:center;}
 

@@ -728,7 +728,7 @@
       article.appendChild(stack);
       if (cards.children.length) article.appendChild(cards);
       article.appendChild(name);
-      article.appendChild(status);
+      if (!(hero && seat)) article.appendChild(status);
       if (hero && heroBestHand){
         var bestHand = document.createElement('div');
         bestHand.className = 'poker-seat-best-hand';
