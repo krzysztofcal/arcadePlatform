@@ -1641,6 +1641,7 @@
     var authMsg = document.getElementById('pokerAuthMsg');
     var tableContent = document.getElementById('pokerTableContent');
     var tableIdEl = document.getElementById('pokerTableId');
+    var openV2Link = document.getElementById('pokerOpenV2Link');
     var stakesEl = document.getElementById('pokerStakes');
     var statusEl = document.getElementById('pokerStatus');
     var seatsGrid = document.getElementById('pokerSeatsGrid');
@@ -3580,8 +3581,10 @@
       var seats = data.seats || [];
       var stateObj = data.state || {};
       var gameState = stateObj.state || {};
+      var resolvedTableId = table.id || tableId;
 
-      if (tableIdEl) tableIdEl.textContent = shortId(table.id || tableId);
+      if (tableIdEl) tableIdEl.textContent = shortId(resolvedTableId);
+      if (openV2Link) openV2Link.href = buildPokerTableUrl(resolvedTableId, { useV2: true });
       var stakes = table.stakes;
       var parsedStakes = parseStakesUi(stakes);
       stakesValid = !!parsedStakes;

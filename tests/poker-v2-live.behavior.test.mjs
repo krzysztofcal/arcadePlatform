@@ -278,6 +278,7 @@ test('poker v2 waits for auth before enabling join and starts auth watch when si
 
   assert.equal(harness.getCreateOptions(), null, 'signed-out bootstrap should not start ws immediately');
   assert.match(harness.elements.pokerV2LiveStatus.textContent, /Sign in to join this table/);
-  assert.equal(harness.elements.pokerV2JoinBtn.hidden, true);
+  assert.equal(harness.elements.pokerV2JoinBtn.hidden, false);
+  assert.equal(harness.elements.pokerV2JoinBtn.disabled, true);
   assert.equal(harness.getIntervalCount(), 1, 'signed-out mode should start auth polling for later login');
 });

@@ -574,10 +574,17 @@
     var amountAction = resolveAmountAction(allowed);
     var allInPlan = resolveAllInPlan(allowed);
     var stackAmount = resolveStack(state.currentUserId);
+    var joinDisabled = !signedIn || seated || !state.tableId || !liveReady;
 
     if (els.signInBtn) els.signInBtn.hidden = signedIn;
-    if (els.joinBtn) els.joinBtn.hidden = !signedIn || seated || !state.tableId;
-    if (els.joinBtn) els.joinBtn.disabled = !signedIn || seated || !liveReady;
+    if (els.joinBtn) els.joinBtn.hidden = false;
+    if (els.joinBtn) els.joinBtn.disabled = joinDisabled;
+    if (els.joinBtn) {
+      if (seated) els.joinBtn.textContent = 'Joined';
+      else if (!signedIn) els.joinBtn.textContent = 'Join';
+      else if (!liveReady) els.joinBtn.textContent = 'Connecting…';
+      else els.joinBtn.textContent = 'Join';
+    }
     if (els.joinSeat) els.joinSeat.disabled = !signedIn || seated || !liveReady;
     if (els.joinBuyIn) els.joinBuyIn.disabled = !signedIn || seated || !liveReady;
     if (els.startBtn) els.startBtn.hidden = !signedIn || !seated;
