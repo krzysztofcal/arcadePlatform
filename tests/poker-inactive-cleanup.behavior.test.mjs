@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { executeInactiveCleanup } from '../shared/poker-domain/inactive-cleanup.mjs';
 
-function makeTx({ seat, state, allSeats = [], tableStatus = 'OPEN' } = {}) {
+function makeTx({ seat, state, allSeats = [], tableStatus = 'OPEN', createdAt = '2026-03-01T00:00:00.000Z' } = {}) {
   const ledgerCalls = [];
   const updates = [];
   let mutableState = state || {};
@@ -15,7 +15,7 @@ function makeTx({ seat, state, allSeats = [], tableStatus = 'OPEN' } = {}) {
         if (q.includes('from public.poker_seats') && q.includes('user_id = $2')) return seat ? [seat] : [];
         if (q.includes('from public.poker_state')) return [{ state: mutableState }];
         if (q.includes('select user_id, status, is_bot, stack from public.poker_seats')) return allSeats;
-        if (q.includes('select status from public.poker_tables')) return [{ status: tableStatus }];
+        if (q.includes('select status, created_at from public.poker_tables')) return [{ status: tableStatus, created_at: createdAt }];
         if (q.startsWith('update public.poker_state set state')) {
           mutableState = JSON.parse(params[1]);
           updates.push({ kind: 'state', value: mutableState });
@@ -192,4 +192,34 @@ test('repeated cleanup against already closed inert table remains stable and no-
   assert.equal(finalState.turnDeadlineAt, inertState.turnDeadlineAt);
   assert.deepEqual(finalState.stacks, inertState.stacks);
   assert.equal(ctx.ledgerCalls.length, 0);
+});
+
+test('fresh empty table remains open during close grace period', async () => {
+  const ctx = makeTx({
+    seat: null,
+    state: { stacks: {} },
+    allSeats: [],
+    tableStatus: 'OPEN',
+    createdAt: '2026-03-01T00:01:30.000Z'
+  });
+  const originalDateNow = Date.now;
+  Date.now = () => Date.parse('2026-03-01T00:02:00.000Z');
+  try {
+    const result = await executeInactiveCleanup({
+      tableId: 'table-grace',
+      userId: null,
+      requestId: 'req-grace',
+      env: {},
+      beginSql: async (fn) => fn(ctx.tx),
+      postTransaction: async (payload) => ctx.ledgerCalls.push(payload),
+      isHoleCardsTableMissing: () => false
+    });
+
+    assert.equal(result.ok, false);
+    assert.equal(result.code, 'grace_period');
+    assert.equal(result.retryable, true);
+    assert.equal(ctx.ledgerCalls.length, 0);
+  } finally {
+    Date.now = originalDateNow;
+  }
 });

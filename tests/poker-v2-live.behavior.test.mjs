@@ -245,8 +245,8 @@ test('poker v2 boots live mode, preserves table links, and sends WS commands', a
   const bestHand = heroSeat.children.find((node) => node.className === 'poker-seat-best-hand');
   assert.ok(bestHand, 'hero seat should surface a best-hand summary');
   assert.equal(harness.elements.pokerDealerChip.hidden, false, 'dealer chip should be visible when the acting seat is known');
-  assert.match(harness.elements.pokerDealerChip.style.left, /^38\.48/, 'dealer chip should follow the acting hero seat');
-  assert.match(harness.elements.pokerDealerChip.style.top, /^77\.06/, 'dealer chip should sit on the table near the acting hero seat');
+  assert.equal(harness.elements.pokerDealerChip.style.left, '45%');
+  assert.equal(harness.elements.pokerDealerChip.style.top, '84%');
 
   harness.elements.pokerV2AmountInput.value = '77';
   harness.elements.pokerV2AmountBtn.click();
@@ -332,7 +332,8 @@ test('poker v2 aligns the right rail seats and moves the chip to the acting oppo
   assert.ok(rightBottomSeat);
   assert.equal(rightTopSeat.style.left, '80%');
   assert.equal(rightBottomSeat.style.left, '80%');
-  assert.equal(/^38\.48/.test(harness.elements.pokerDealerChip.style.left), false, 'chip should move away from hero when another player acts');
+  assert.equal(harness.elements.pokerDealerChip.style.left, '71%');
+  assert.equal(harness.elements.pokerDealerChip.style.top, '34%');
 });
 
 test('poker v2 falls back to demo mode when tableId is missing', async () => {

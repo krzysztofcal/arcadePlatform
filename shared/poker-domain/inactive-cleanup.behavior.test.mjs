@@ -2,13 +2,15 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { executeInactiveCleanup } from "./inactive-cleanup.mjs";
 
-function createCleanupHarness({ seatRows, state, tableStatus = "OPEN" }) {
+function createCleanupHarness({ seatRows, state, tableStatus = "OPEN", createdAt = "2026-03-01T00:00:00.000Z", nowMs = Date.parse("2026-03-01T00:02:00.000Z") }) {
   const seatState = seatRows.map((row) => ({ ...row }));
   const tableState = {
     stateRow: { state: { ...state } },
-    tableStatus
+    tableStatus,
+    createdAt
   };
   const cashouts = [];
+  const originalDateNow = Date.now;
 
   const tx = {
     unsafe: async (sql, params = []) => {
@@ -36,8 +38,8 @@ function createCleanupHarness({ seatRows, state, tableStatus = "OPEN" }) {
         tableState.stateRow = { state: JSON.parse(params[1]) };
         return [];
       }
-      if (sql.includes("select status from public.poker_tables")) {
-        return [{ status: tableState.tableStatus }];
+      if (sql.includes("select status, created_at from public.poker_tables")) {
+        return [{ status: tableState.tableStatus, created_at: tableState.createdAt }];
       }
       if (sql.includes("update public.poker_tables set status = 'CLOSED'")) {
         tableState.tableStatus = "CLOSED";
@@ -60,26 +62,40 @@ function createCleanupHarness({ seatRows, state, tableStatus = "OPEN" }) {
     seatState,
     tableState,
     cashouts,
-    run: () => executeInactiveCleanup({
-      beginSql: async (fn) => fn(tx),
-      tableId: "table_1",
-      userId: "human_1",
-      requestId: "req-1",
-      postTransaction: async (entry) => {
-        cashouts.push(entry);
-        return { ok: true };
+    run: async () => {
+      Date.now = () => nowMs;
+      try {
+        return await executeInactiveCleanup({
+          beginSql: async (fn) => fn(tx),
+          tableId: "table_1",
+          userId: "human_1",
+          requestId: "req-1",
+          postTransaction: async (entry) => {
+            cashouts.push(entry);
+            return { ok: true };
+          }
+        });
+      } finally {
+        Date.now = originalDateNow;
       }
-    }),
-    runSystemSweep: () => executeInactiveCleanup({
-      beginSql: async (fn) => fn(tx),
-      tableId: "table_1",
-      userId: null,
-      requestId: "req-system-sweep",
-      postTransaction: async (entry) => {
-        cashouts.push(entry);
-        return { ok: true };
+    },
+    runSystemSweep: async () => {
+      Date.now = () => nowMs;
+      try {
+        return await executeInactiveCleanup({
+          beginSql: async (fn) => fn(tx),
+          tableId: "table_1",
+          userId: null,
+          requestId: "req-system-sweep",
+          postTransaction: async (entry) => {
+            cashouts.push(entry);
+            return { ok: true };
+          }
+        });
+      } finally {
+        Date.now = originalDateNow;
       }
-    })
+    }
   };
 }
 
@@ -148,4 +164,20 @@ test("inactive cleanup system sweep closes bots-only active table", async () => 
   assert.equal(harness.tableState.stateRow.state.phase, "HAND_DONE");
   assert.equal(harness.tableState.stateRow.state.turnUserId, null);
   assert.deepEqual(harness.tableState.stateRow.state.stacks, { bot_1: 200 });
+});
+
+test("inactive cleanup keeps fresh table open during close grace period", async () => {
+  const harness = createCleanupHarness({
+    seatRows: [],
+    state: { phase: "LOBBY", stacks: {} },
+    createdAt: "2026-03-01T00:01:30.000Z",
+    nowMs: Date.parse("2026-03-01T00:02:00.000Z")
+  });
+
+  const result = await harness.runSystemSweep();
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, "grace_period");
+  assert.equal(result.retryable, true);
+  assert.equal(harness.tableState.tableStatus, "OPEN");
 });

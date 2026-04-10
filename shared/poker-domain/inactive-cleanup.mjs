@@ -17,6 +17,29 @@ const normalizeNonNegativeInt = (n) => {
   return value;
 };
 
+const DEFAULT_TABLE_CLOSE_GRACE_MS = 60_000;
+
+function normalizePositiveInt(n) {
+  const value = Number(n);
+  if (!Number.isInteger(value) || value <= 0 || Math.abs(value) > Number.MAX_SAFE_INTEGER) return null;
+  return value;
+}
+
+function parseTimestampMs(value) {
+  if (value instanceof Date) {
+    const time = value.getTime();
+    return Number.isFinite(time) ? time : null;
+  }
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value !== "string" || !value.trim()) return null;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function resolveCloseGraceMs(env) {
+  return normalizePositiveInt(env?.POKER_TABLE_CLOSE_GRACE_MS) ?? DEFAULT_TABLE_CLOSE_GRACE_MS;
+}
+
 function resolveStateStacks(state) {
   if (!state || typeof state !== "object" || Array.isArray(state)) return {};
   if (!state.stacks || typeof state.stacks !== "object" || Array.isArray(state.stacks)) return {};
@@ -111,6 +134,7 @@ export async function executeInactiveCleanup({
 }) {
   const normalizedUserId = typeof userId === "string" && userId.trim() ? userId.trim() : null;
   const sweepActorUserId = String(env?.POKER_SYSTEM_ACTOR_USER_ID || "").trim() || normalizedUserId || "system";
+  const closeGraceMs = resolveCloseGraceMs(env);
   return beginSql(async (tx) => {
     let seat = null;
     if (normalizedUserId) {
@@ -169,8 +193,13 @@ export async function executeInactiveCleanup({
       return { ok: true, changed: seatWasActive, status: seatWasActive ? "cleaned" : "already_inactive", closed: false, retryable: false };
     }
 
-    const tableRows = await tx.unsafe("select status from public.poker_tables where id = $1 limit 1 for update;", [tableId]);
+    const tableRows = await tx.unsafe("select status, created_at from public.poker_tables where id = $1 limit 1 for update;", [tableId]);
     const tableStatus = tableRows?.[0]?.status || null;
+    const tableCreatedAtMs = parseTimestampMs(tableRows?.[0]?.created_at);
+    const nowMs = Date.now();
+    if (tableCreatedAtMs != null && nowMs - tableCreatedAtMs < closeGraceMs) {
+      return { ok: false, code: "grace_period", retryable: true, status: "grace_period", closed: false };
+    }
 
     for (const row of allSeatRows || []) {
       if (row?.is_bot === true) continue;

@@ -74,6 +74,7 @@
   var authWatchTimer = null;
   var authUnsubscribe = null;
   var renderedSeatAnchors = {};
+  var renderedSeatSlots = {};
   var els = {};
 
   function cloneState(source){
@@ -691,6 +692,7 @@
     if (!els.seatLayer) return;
     els.seatLayer.innerHTML = '';
     renderedSeatAnchors = {};
+    renderedSeatSlots = {};
     var offset = getSeatNumberingOffset();
     var seatsByIndex = {};
     state.seats.forEach(function(seat){
@@ -718,7 +720,10 @@
         + (!seat ? ' poker-seat--empty' : '');
       article.style.left = anchor.x + '%';
       article.style.top = anchor.y + '%';
-      if (seat && Number.isInteger(seat.seatNo)) renderedSeatAnchors[seat.seatNo] = anchor;
+      if (seat && Number.isInteger(seat.seatNo)) {
+        renderedSeatAnchors[seat.seatNo] = anchor;
+        renderedSeatSlots[seat.seatNo] = rotatedIndex;
+      }
 
       var avatar = document.createElement('div');
       avatar.className = 'poker-seat-avatar';
@@ -809,24 +814,31 @@
       return;
     }
     var anchor = renderedSeatAnchors[targetSeatNo] || null;
-    if (!anchor){
+    var slotIndex = Number.isInteger(renderedSeatSlots[targetSeatNo]) ? renderedSeatSlots[targetSeatNo] : null;
+    if (!anchor || slotIndex == null){
       var offset = getSeatNumberingOffset();
       var index = Math.max(0, targetSeatNo - offset);
-      var rotatedIndex = rotateSeatIndex(index, Math.max(state.maxSeats, 1));
-      anchor = getSeatAnchor(rotatedIndex, Math.max(state.maxSeats, 1));
-      if (rotatedIndex === 1 && state.maxSeats >= 6) anchor = { x: 80, y: 29 };
-      else if (rotatedIndex === 2 && state.maxSeats >= 6) anchor = { x: 80, y: 58 };
-      else if (rotatedIndex === 3 && state.maxSeats >= 4) anchor = { x: 52, y: 82 };
+      slotIndex = rotateSeatIndex(index, Math.max(state.maxSeats, 1));
+      anchor = getSeatAnchor(slotIndex, Math.max(state.maxSeats, 1));
+      if (slotIndex === 1 && state.maxSeats >= 6) anchor = { x: 80, y: 29 };
+      else if (slotIndex === 2 && state.maxSeats >= 6) anchor = { x: 80, y: 58 };
+      else if (slotIndex === 3 && state.maxSeats >= 4) anchor = { x: 52, y: 82 };
       var heroSeat = deriveCurrentSeat();
       if (heroSeat && Number.isInteger(heroSeat.seatNo) && heroSeat.seatNo === targetSeatNo && state.maxSeats >= 4){
         anchor = { x: 34, y: 91 };
+        slotIndex = 3;
       }
     }
-    var tableX = anchor.x + (50 - anchor.x) * 0.28;
-    var tableY = anchor.y + (50 - anchor.y) * 0.34;
+    var chipOffset = { x: 0, y: -8 };
+    if (slotIndex === 0) chipOffset = { x: 0, y: 8 };
+    else if (slotIndex === 1) chipOffset = { x: -9, y: 5 };
+    else if (slotIndex === 2) chipOffset = { x: -9, y: -5 };
+    else if (slotIndex === 3) chipOffset = { x: 11, y: -7 };
+    else if (slotIndex === 4) chipOffset = { x: 9, y: -5 };
+    else if (slotIndex === 5) chipOffset = { x: 9, y: 5 };
     els.dealerChip.hidden = false;
-    els.dealerChip.style.left = tableX + '%';
-    els.dealerChip.style.top = tableY + '%';
+    els.dealerChip.style.left = (anchor.x + chipOffset.x) + '%';
+    els.dealerChip.style.top = (anchor.y + chipOffset.y) + '%';
   }
 
   function updateMenuLinks(){
