@@ -88,7 +88,13 @@ function waitForExit(proc) {
 function createServer({ env = {} } = {}) {
   return getFreePort().then((port) => {
     const child = spawn(process.execPath, ["ws-server/server.mjs"], {
-      env: { ...process.env, PORT: String(port), ...env },
+      env: {
+        ...process.env,
+        PORT: String(port),
+        WS_BOT_REACTION_MIN_MS: "0",
+        WS_BOT_REACTION_MAX_MS: "0",
+        ...env
+      },
       stdio: ["ignore", "pipe", "pipe"]
     });
     return { port, child };
