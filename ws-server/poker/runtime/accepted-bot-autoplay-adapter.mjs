@@ -16,6 +16,8 @@ import { computeLegalActions as computeLegacyLegalActions } from "../snapshot-ru
 
 const DEFAULT_SHARED_AUTOPLAY_MODULE_URL = new URL("../../shared/poker-domain/poker-autoplay.mjs", import.meta.url).href;
 const sharedAutoplayModulePromiseByUrl = new Map();
+const DEFAULT_BOT_REACTION_MIN_MS = 2_000;
+const DEFAULT_BOT_REACTION_MAX_MS = 4_000;
 
 const isActionPhase = (phase) => phase === "PREFLOP" || phase === "FLOP" || phase === "TURN" || phase === "RIVER";
 const noopAdvanceIfNeeded = (state) => ({ state, events: [] });
@@ -134,7 +136,38 @@ function buildSeatUserIdsInOrder(state) {
 function getBotAutoplayConfig(env = process.env) {
   const hardCapRaw = Number(env?.POKER_BOTS_BOTS_ONLY_HAND_HARD_CAP);
   const botsOnlyHandCompletionHardCap = Number.isInteger(hardCapRaw) && hardCapRaw > 0 ? hardCapRaw : 80;
-  return { botsOnlyHandCompletionHardCap, policyVersion: "WS_SHARED_AUTOPLAY" };
+  const configuredMinRaw = Number(env?.WS_BOT_REACTION_MIN_MS);
+  const configuredMaxRaw = Number(env?.WS_BOT_REACTION_MAX_MS);
+  const minReactionMs = Number.isFinite(configuredMinRaw) && configuredMinRaw >= 0
+    ? Math.trunc(configuredMinRaw)
+    : DEFAULT_BOT_REACTION_MIN_MS;
+  const maxReactionMs = Number.isFinite(configuredMaxRaw) && configuredMaxRaw >= 0
+    ? Math.trunc(configuredMaxRaw)
+    : DEFAULT_BOT_REACTION_MAX_MS;
+  return {
+    botsOnlyHandCompletionHardCap,
+    minReactionMs,
+    maxReactionMs,
+    policyVersion: "WS_SHARED_AUTOPLAY"
+  };
+}
+
+function resolveBotReactionDelayMs({ state, minReactionMs, maxReactionMs, random = Math.random, now = Date.now }) {
+  const minMs = Number.isFinite(minReactionMs) ? Math.max(0, Math.trunc(minReactionMs)) : DEFAULT_BOT_REACTION_MIN_MS;
+  const maxMs = Number.isFinite(maxReactionMs) ? Math.max(minMs, Math.trunc(maxReactionMs)) : Math.max(minMs, DEFAULT_BOT_REACTION_MAX_MS);
+  if (maxMs <= 0) return 0;
+  const rand = typeof random === "function" ? Number(random()) : 0;
+  const normalizedRandom = Number.isFinite(rand) ? Math.max(0, Math.min(0.999999, rand)) : 0;
+  const sampledDelayMs = minMs + Math.floor((maxMs - minMs + 1) * normalizedRandom);
+  const deadlineAt = Number(state?.turnDeadlineAt);
+  if (!Number.isFinite(deadlineAt)) return sampledDelayMs;
+  const nowMs = typeof now === "function" ? Number(now()) : Date.now();
+  const safeRemainingMs = Math.max(0, Math.trunc(deadlineAt - nowMs - 150));
+  return Math.min(sampledDelayMs, safeRemainingMs);
+}
+
+function sleepMs(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function buildPersistedFromPrivateState(privateStateInput, actorUserId, actionRequestId, withoutPrivateStateImpl = withoutLegacyPrivateState) {
@@ -498,6 +531,9 @@ export function createAcceptedBotStepExecutor({
   restoreTableFromPersisted,
   broadcastResyncRequired,
   env = process.env,
+  random = Math.random,
+  now = Date.now,
+  sleep = sleepMs,
   klog = () => {}
 } = {}) {
   const verboseAutoplayLogs = env?.WS_BOT_AUTOPLAY_VERBOSE_LOGS === "1";
@@ -570,6 +606,18 @@ export function createAcceptedBotStepExecutor({
     const seatBotMap = buildSeatBotMap(turnSnapshot?.seats);
     const seatUserIdsInOrder = buildSeatUserIdsInOrder(privateState);
     const cfg = getBotAutoplayConfig(env);
+    if (isBotTurnAuthoritatively(tableManager, tableId, state.turnUserId, seatBotMap)) {
+      const reactionDelayMs = resolveBotReactionDelayMs({
+        state,
+        minReactionMs: cfg.minReactionMs,
+        maxReactionMs: cfg.maxReactionMs,
+        random,
+        now
+      });
+      if (reactionDelayMs > 0) {
+        await sleep(reactionDelayMs);
+      }
+    }
     logVerbose("ws_bot_autoplay_loop_start", {
       ...baseLog,
       runtimeFlavor,
