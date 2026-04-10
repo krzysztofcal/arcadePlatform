@@ -6,6 +6,7 @@ const root = process.cwd();
 const tableHtml = await readFile(path.join(root, 'poker', 'table.html'), 'utf8');
 const indexHtml = await readFile(path.join(root, 'poker', 'index.html'), 'utf8');
 const tableV2Html = await readFile(path.join(root, 'poker', 'table-v2.html'), 'utf8');
+const tableV2Css = await readFile(path.join(root, 'poker', 'poker-v2.css'), 'utf8');
 
 assert.match(tableHtml, /src="\/js\/debug\.js"/, 'poker table should include shared debug recorder script');
 assert.match(tableHtml, /id="pokerDumpLogsBtn"/, 'poker table should include dump logs button');
@@ -20,3 +21,4 @@ assert.equal(indexHtml.indexOf('/js/build-info.js') < indexHtml.indexOf('/poker/
 assert.match(indexHtml, /id="pokerClassicEntry"/, 'poker lobby should keep a visible classic table entry for testing');
 assert.match(tableV2Html, /id="pokerV2JoinBtn"/, 'poker table v2 should include live join control');
 assert.match(tableV2Html, /src="\/poker\/poker-ws-client\.js" defer/, 'poker table v2 should bootstrap WS client for live runtime');
+assert.match(tableV2Css, /\.poker-menu-panel\[hidden\]\{display:none;\}/, 'poker table v2 menu should hard-hide when hidden attribute is present');
