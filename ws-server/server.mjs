@@ -231,6 +231,9 @@ async function loadAcceptedBotAutoplayExecutor() {
           persistMutatedState,
           restoreTableFromPersisted,
           broadcastResyncRequired,
+          onBotStepPersisted: ({ tableId }) => {
+            broadcastStateSnapshots(tableId);
+          },
           env: process.env,
           klog: klogSafe
         });

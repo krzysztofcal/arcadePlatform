@@ -30,7 +30,8 @@ export async function handleBotStepCommand({
     });
   }
 
-  if (botStepResult?.ok === false || botStepResult?.changed === true) {
+  const stepSnapshotsAlreadyBroadcast = Number(botStepResult?.broadcastedStepCount || 0) > 0;
+  if (botStepResult?.ok === false || (botStepResult?.changed === true && !stepSnapshotsAlreadyBroadcast)) {
     broadcastStateSnapshots(tableId);
   }
   return botStepResult;

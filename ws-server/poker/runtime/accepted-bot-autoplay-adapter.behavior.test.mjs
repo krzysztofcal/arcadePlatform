@@ -203,6 +203,7 @@ test("accepted bot autoplay waits before each bot action in bots-only hands", as
   let persistedState = { ...initHandState({ tableId: "t-delay-bots-only", seats, stacks }).state, handId: "h-delay-bots-only-1" };
   let persistedVersion = 20;
   const observedSleepMs = [];
+  let broadcastedStepCount = 0;
   const seatOrder = seats.slice().sort((a, b) => a.seatNo - b.seatNo).map((seat) => seat.userId);
   const maybeMaterialize = (privateState) => {
     const eligible = seatOrder.filter((userId) => !privateState.foldedByUserId?.[userId] && !privateState.leftTableByUserId?.[userId] && !privateState.sitOutByUserId?.[userId]);
@@ -238,6 +239,9 @@ test("accepted bot autoplay waits before each bot action in bots-only hands", as
     sleep: async (ms) => {
       observedSleepMs.push(ms);
     },
+    onBotStepPersisted: async () => {
+      broadcastedStepCount += 1;
+    },
     persistMutatedState: async () => ({ ok: true }),
     restoreTableFromPersisted: async () => ({ ok: true }),
     broadcastResyncRequired: () => {},
@@ -249,7 +253,9 @@ test("accepted bot autoplay waits before each bot action in bots-only hands", as
   assert.equal(result.reason, "non_action_phase");
   assert.equal(persistedState.phase, "SETTLED");
   assert.ok(result.actionCount > 1);
+  assert.equal(result.broadcastedStepCount, result.actionCount);
   assert.equal(result.actionCount, observedSleepMs.length);
+  assert.equal(broadcastedStepCount, result.actionCount);
   assert.deepEqual(observedSleepMs, Array(result.actionCount).fill(2000));
 });
 

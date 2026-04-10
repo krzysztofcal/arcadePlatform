@@ -23,6 +23,28 @@ test("handleBotStepCommand broadcasts when autoplay changes state", async () => 
   assert.equal(calls.snapshots, 1);
 });
 
+test("handleBotStepCommand skips duplicate final broadcast when steps already emitted snapshots", async () => {
+  const calls = { snapshots: 0 };
+  const result = await handleBotStepCommand({
+    tableId: "t1",
+    trigger: "act",
+    requestId: "r1b",
+    runBotStep: async () => ({
+      ok: true,
+      changed: true,
+      actionCount: 3,
+      reason: "non_action_phase",
+      broadcastedStepCount: 3
+    }),
+    broadcastStateSnapshots: () => {
+      calls.snapshots += 1;
+    }
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(calls.snapshots, 0);
+});
+
 test("handleBotStepCommand broadcasts when autoplay fails", async () => {
   const calls = { snapshots: 0 };
   const result = await handleBotStepCommand({
