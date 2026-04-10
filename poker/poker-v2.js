@@ -708,6 +708,7 @@
       var rotatedIndex = rotateSeatIndex(i, state.maxSeats);
       var anchor = getSeatAnchor(rotatedIndex, state.maxSeats);
       if (hero && state.maxSeats >= 4) anchor = { x: 34, y: 91 };
+      else if (rotatedIndex === 1 && state.maxSeats >= 6) anchor = { x: 80, y: 29 };
       else if (rotatedIndex === 2 && state.maxSeats >= 6) anchor = { x: 80, y: 58 };
       else if (rotatedIndex === 3 && state.maxSeats >= 4) anchor = { x: 52, y: 82 };
       article.className = 'poker-seat'
@@ -791,20 +792,33 @@
 
   function renderDealerChip(){
     if (!els.dealerChip) return;
-    if (!Number.isInteger(state.dealerSeat)){
+    var targetSeatNo = null;
+    for (var i = 0; i < state.seats.length; i++){
+      var seat = state.seats[i];
+      if (seat && seat.userId && state.turnUserId && seat.userId === state.turnUserId){
+        targetSeatNo = seat.seatNo;
+        break;
+      }
+    }
+    if (!Number.isInteger(targetSeatNo) && Number.isInteger(state.youSeat) && state.currentUserId && state.turnUserId === state.currentUserId){
+      targetSeatNo = state.youSeat;
+    }
+    if (!Number.isInteger(targetSeatNo) && Number.isInteger(state.dealerSeat)) targetSeatNo = state.dealerSeat;
+    if (!Number.isInteger(targetSeatNo)){
       els.dealerChip.hidden = true;
       return;
     }
-    var anchor = renderedSeatAnchors[state.dealerSeat] || null;
+    var anchor = renderedSeatAnchors[targetSeatNo] || null;
     if (!anchor){
       var offset = getSeatNumberingOffset();
-      var index = Math.max(0, state.dealerSeat - offset);
+      var index = Math.max(0, targetSeatNo - offset);
       var rotatedIndex = rotateSeatIndex(index, Math.max(state.maxSeats, 1));
       anchor = getSeatAnchor(rotatedIndex, Math.max(state.maxSeats, 1));
-      if (rotatedIndex === 2 && state.maxSeats >= 6) anchor = { x: 80, y: 58 };
+      if (rotatedIndex === 1 && state.maxSeats >= 6) anchor = { x: 80, y: 29 };
+      else if (rotatedIndex === 2 && state.maxSeats >= 6) anchor = { x: 80, y: 58 };
       else if (rotatedIndex === 3 && state.maxSeats >= 4) anchor = { x: 52, y: 82 };
       var heroSeat = deriveCurrentSeat();
-      if (heroSeat && Number.isInteger(heroSeat.seatNo) && heroSeat.seatNo === state.dealerSeat && state.maxSeats >= 4){
+      if (heroSeat && Number.isInteger(heroSeat.seatNo) && heroSeat.seatNo === targetSeatNo && state.maxSeats >= 4){
         anchor = { x: 34, y: 91 };
       }
     }

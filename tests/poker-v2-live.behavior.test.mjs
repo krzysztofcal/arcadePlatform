@@ -178,6 +178,12 @@ async function waitFor(predicate, attempts = 6){
   }
 }
 
+function findSeatByLabel(harness, label){
+  return harness.elements.pokerSeatLayer.children.find((node) => (
+    node.children || []
+  ).some((child) => child.className === 'poker-seat-name' && child.textContent === label));
+}
+
 test('poker v2 boots live mode, preserves table links, and sends WS commands', async () => {
   const harness = createHarness();
   harness.fireDomContentLoaded();
@@ -238,9 +244,9 @@ test('poker v2 boots live mode, preserves table links, and sends WS commands', a
   assert.equal(heroStatus, undefined, 'hero seat should not repeat the active status pill');
   const bestHand = heroSeat.children.find((node) => node.className === 'poker-seat-best-hand');
   assert.ok(bestHand, 'hero seat should surface a best-hand summary');
-  assert.equal(harness.elements.pokerDealerChip.hidden, false, 'dealer chip should be visible when dealer seat is known');
-  assert.notEqual(harness.elements.pokerDealerChip.style.left, '50%', 'dealer chip should not stay centered when dealer seat is known');
-  assert.notEqual(harness.elements.pokerDealerChip.style.top, '50%', 'dealer chip should be positioned near a rendered seat');
+  assert.equal(harness.elements.pokerDealerChip.hidden, false, 'dealer chip should be visible when the acting seat is known');
+  assert.match(harness.elements.pokerDealerChip.style.left, /^38\.48/, 'dealer chip should follow the acting hero seat');
+  assert.match(harness.elements.pokerDealerChip.style.top, /^77\.06/, 'dealer chip should sit on the table near the acting hero seat');
 
   harness.elements.pokerV2AmountInput.value = '77';
   harness.elements.pokerV2AmountBtn.click();
@@ -285,6 +291,48 @@ test('poker v2 shows compact call amount in the primary action label', async () 
   await harness.flush();
 
   assert.equal(harness.elements.pokerV2PrimaryBtn.textContent, 'Call (1k)');
+});
+
+test('poker v2 aligns the right rail seats and moves the chip to the acting opponent', async () => {
+  const harness = createHarness();
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  const ws = harness.getCreateOptions();
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 4,
+      table: {
+        tableId: 'table-1',
+        status: 'OPEN',
+        maxSeats: 6,
+        members: [
+          { userId: 'villain-1', seat: 1, displayName: 'Villain 1' },
+          { userId: 'villain-2', seat: 2, displayName: 'Villain 2' },
+          { userId: 'villain-3', seat: 3, displayName: 'Villain 3' },
+          { userId: 'user-1', seat: 4, displayName: 'Hero' }
+        ]
+      },
+      public: {
+        hand: { handId: 'hand-3', status: 'TURN', dealerSeatNo: 2 },
+        turn: { userId: 'villain-2', deadlineAt: Date.now() + 5000 },
+        pot: { total: 12, sidePots: [] },
+        legalActions: { seat: 4, actions: [] }
+      },
+      you: { seat: 4 }
+    }
+  });
+  await harness.flush();
+
+  const rightTopSeat = findSeatByLabel(harness, 'Villain 2');
+  const rightBottomSeat = findSeatByLabel(harness, 'Villain 3');
+  assert.ok(rightTopSeat);
+  assert.ok(rightBottomSeat);
+  assert.equal(rightTopSeat.style.left, '80%');
+  assert.equal(rightBottomSeat.style.left, '80%');
+  assert.equal(/^38\.48/.test(harness.elements.pokerDealerChip.style.left), false, 'chip should move away from hero when another player acts');
 });
 
 test('poker v2 falls back to demo mode when tableId is missing', async () => {
