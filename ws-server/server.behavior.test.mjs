@@ -245,11 +245,18 @@ async function writeTestModule(source, filename = "ws-test-module.mjs") {
 }
 
 async function nextMessageOfType(ws, type, timeoutMs = 10000) {
-  return nextMessageMatching(
-    ws,
-    (frame) => frame?.type === type,
-    timeoutMs
-  );
+  try {
+    return await nextMessageMatching(
+      ws,
+      (frame) => frame?.type === type,
+      timeoutMs
+    );
+  } catch (error) {
+    if (error instanceof Error && error.message === "Timed out waiting for matching websocket message") {
+      throw new Error(`Timed out waiting for message type: ${type}`);
+    }
+    throw error;
+  }
 }
 
 async function nextMessageMatching(ws, predicate, timeoutMs = 10000) {
