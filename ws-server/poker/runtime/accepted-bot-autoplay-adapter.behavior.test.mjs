@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { createAcceptedBotAutoplayExecutor } from "./accepted-bot-autoplay-adapter.mjs";
+import { createAcceptedBotAutoplayExecutor as createAcceptedBotAutoplayExecutorBase } from "./accepted-bot-autoplay-adapter.mjs";
 import { initHandState, applyAction as applyRuntimeAction, advanceIfNeeded } from "../snapshot-runtime/poker-reducer.mjs";
 import { buildBootstrappedPokerState, applyCoreStateAction } from "../engine/poker-engine.mjs";
 import { computeSharedLegalActions } from "../shared/poker-primitives.mjs";
@@ -9,6 +9,20 @@ import { runAdvanceLoop } from "../../shared/poker-domain/poker-autoplay.mjs";
 import { materializeShowdownAndPayout } from "../snapshot-runtime/poker-materialize-showdown.mjs";
 import { computeShowdown } from "../snapshot-runtime/poker-showdown.mjs";
 import { awardPotsAtShowdown } from "../snapshot-runtime/poker-payout.mjs";
+
+function createAcceptedBotAutoplayExecutor(options = {}) {
+  const mergedEnv = {
+    WS_BOT_REACTION_MIN_MS: "0",
+    WS_BOT_REACTION_MAX_MS: "0",
+    ...(options.env || {})
+  };
+  return createAcceptedBotAutoplayExecutorBase({
+    sleep: async () => {},
+    random: () => 0,
+    ...options,
+    env: mergedEnv
+  });
+}
 
 test("autoplay adapter resolves shared autoplay from neutral shared module path", () => {
   const source = fs.readFileSync(new URL("./accepted-bot-autoplay-adapter.mjs", import.meta.url), "utf8");
@@ -51,6 +65,136 @@ test("accepted bot autoplay executes and persists when bot is on turn", async ()
   const result = await run({ tableId: "t1", trigger: "act", requestId: "r1" });
   assert.equal(result.ok, true);
   assert.equal(calls.persist > 0, true);
+});
+
+test("accepted bot autoplay waits a human-like reaction delay before acting", async () => {
+  const observed = { sleepMs: [], persist: 0 };
+  const nowMs = Date.now();
+  const state = {
+    version: 2,
+    tableId: "t1",
+    handId: "h1",
+    phase: "PREFLOP",
+    turnUserId: "bot_2",
+    turnDeadlineAt: nowMs + 20_000,
+    seats: [{ userId: "human_1", seatNo: 1 }, { userId: "bot_2", seatNo: 2, isBot: true }],
+    stacks: { human_1: 100, bot_2: 100 }
+  };
+  const tableManager = {
+    persistedPokerState: () => ({ ...state }),
+    persistedStateVersion: () => 2,
+    tableSnapshot: () => ({ seats: [{ userId: "human_1", seatNo: 1 }, { userId: "bot_2", seatNo: 2, isBot: true }] }),
+    applyAction: () => ({ accepted: true, changed: true, replayed: false, stateVersion: 3 })
+  };
+
+  const run = createAcceptedBotAutoplayExecutor({
+    tableManager,
+    env: { WS_BOT_REACTION_MIN_MS: "2000", WS_BOT_REACTION_MAX_MS: "4000" },
+    now: () => nowMs,
+    random: () => 0.5,
+    sleep: async (ms) => {
+      observed.sleepMs.push(ms);
+    },
+    persistMutatedState: async () => {
+      observed.persist += 1;
+      return { ok: true };
+    },
+    restoreTableFromPersisted: async () => ({ ok: true }),
+    broadcastResyncRequired: () => {},
+    klog: () => {}
+  });
+
+  const result = await run({ tableId: "t1", trigger: "act", requestId: "r-delay" });
+  assert.equal(result.ok, true);
+  assert.deepEqual(observed.sleepMs, [3000]);
+  assert.equal(observed.persist, 1);
+});
+
+test("accepted bot autoplay clamps reaction delay to the remaining turn window", async () => {
+  const observed = [];
+  const nowMs = Date.now();
+  const state = {
+    version: 2,
+    tableId: "t1",
+    handId: "h1",
+    phase: "PREFLOP",
+    turnUserId: "bot_2",
+    turnDeadlineAt: nowMs + 900,
+    seats: [{ userId: "human_1", seatNo: 1 }, { userId: "bot_2", seatNo: 2, isBot: true }],
+    stacks: { human_1: 100, bot_2: 100 }
+  };
+  const tableManager = {
+    persistedPokerState: () => ({ ...state }),
+    persistedStateVersion: () => 2,
+    tableSnapshot: () => ({ seats: [{ userId: "human_1", seatNo: 1 }, { userId: "bot_2", seatNo: 2, isBot: true }] }),
+    applyAction: () => ({ accepted: true, changed: true, replayed: false, stateVersion: 3 })
+  };
+
+  const run = createAcceptedBotAutoplayExecutor({
+    tableManager,
+    env: { WS_BOT_REACTION_MIN_MS: "2000", WS_BOT_REACTION_MAX_MS: "4000" },
+    now: () => nowMs,
+    random: () => 0.99,
+    sleep: async (ms) => {
+      observed.push(ms);
+    },
+    persistMutatedState: async () => ({ ok: true }),
+    restoreTableFromPersisted: async () => ({ ok: true }),
+    broadcastResyncRequired: () => {},
+    klog: () => {}
+  });
+
+  const result = await run({ tableId: "t1", trigger: "act", requestId: "r-delay-clamp" });
+  assert.equal(result.ok, true);
+  assert.deepEqual(observed, [750]);
+});
+
+test("accepted bot autoplay aborts cleanly when turn changes during reaction delay", async () => {
+  const nowMs = Date.now();
+  let currentState = {
+    version: 2,
+    tableId: "t1",
+    handId: "h1",
+    phase: "PREFLOP",
+    turnUserId: "bot_2",
+    turnDeadlineAt: nowMs + 20_000,
+    seats: [{ userId: "human_1", seatNo: 1 }, { userId: "bot_2", seatNo: 2, isBot: true }],
+    stacks: { human_1: 100, bot_2: 100 }
+  };
+  const tableManager = {
+    persistedPokerState: () => ({ ...currentState }),
+    persistedStateVersion: () => 2,
+    tableSnapshot: (_tableId, turnUserId) => ({
+      seats: [
+        { userId: "human_1", seatNo: 1, isBot: false },
+        { userId: "bot_2", seatNo: 2, isBot: turnUserId === "bot_2" }
+      ]
+    }),
+    applyAction: () => {
+      throw new Error("unexpected_apply");
+    }
+  };
+
+  const run = createAcceptedBotAutoplayExecutor({
+    tableManager,
+    env: { WS_BOT_REACTION_MIN_MS: "2000", WS_BOT_REACTION_MAX_MS: "2000" },
+    now: () => nowMs,
+    sleep: async () => {
+      currentState = {
+        ...currentState,
+        turnUserId: "human_1"
+      };
+    },
+    persistMutatedState: async () => ({ ok: true }),
+    restoreTableFromPersisted: async () => ({ ok: true }),
+    broadcastResyncRequired: () => {},
+    klog: () => {}
+  });
+
+  const result = await run({ tableId: "t1", trigger: "act", requestId: "r-delay-turn-change" });
+  assert.equal(result.ok, true);
+  assert.equal(result.changed, false);
+  assert.equal(result.reason, "turn_changed_during_delay");
 });
 
 test("accepted bot autoplay no-ops when next turn is not a bot", async () => {
