@@ -249,9 +249,9 @@ test('poker v2 boots live mode, preserves table links, and sends WS commands', a
   assert.equal(heroStatus, undefined, 'hero seat should not repeat the active status pill');
   const bestHand = heroSeat.children.find((node) => node.className === 'poker-seat-best-hand');
   assert.ok(bestHand, 'hero seat should surface a best-hand summary');
-  assert.equal(harness.elements.pokerDealerChip.hidden, false, 'dealer chip should be visible when the acting seat is known');
-  assert.equal(harness.elements.pokerDealerChip.style.left, '45%');
-  assert.equal(harness.elements.pokerDealerChip.style.top, '84%');
+  assert.equal(harness.elements.pokerDealerChip.hidden, false, 'dealer chip should be visible when the dealer seat is known');
+  assert.equal(harness.elements.pokerDealerChip.style.left, '25%');
+  assert.equal(harness.elements.pokerDealerChip.style.top, '62%');
 
   harness.elements.pokerV2AmountInput.value = '77';
   harness.elements.pokerV2AmountBtn.click();
@@ -308,7 +308,7 @@ test('poker v2 auto-joins from query params after live auth', async () => {
   assert.equal(JSON.stringify(harness.joinPayloads[0]), JSON.stringify({ tableId: 'table-1', buyIn: 100, seatNo: 4 }));
 });
 
-test('poker v2 aligns the right rail seats and moves the chip to the acting opponent', async () => {
+test('poker v2 aligns the right rail seats and keeps the chip on the dealer seat', async () => {
   const harness = createHarness();
   harness.fireDomContentLoaded();
   await harness.flush();
@@ -349,6 +349,73 @@ test('poker v2 aligns the right rail seats and moves the chip to the acting oppo
   assert.equal(rightBottomSeat.style.left, '80%');
   assert.equal(harness.elements.pokerDealerChip.style.left, '71%');
   assert.equal(harness.elements.pokerDealerChip.style.top, '34%');
+});
+
+test('poker v2 keeps the dealer chip fixed while action moves between players', async () => {
+  const harness = createHarness();
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  const ws = harness.getCreateOptions();
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 5,
+      table: {
+        tableId: 'table-1',
+        status: 'OPEN',
+        maxSeats: 6,
+        members: [
+          { userId: 'user-1', seat: 1, displayName: 'Hero' },
+          { userId: 'villain-1', seat: 2, displayName: 'Villain 1' },
+          { userId: 'villain-2', seat: 3, displayName: 'Villain 2' }
+        ]
+      },
+      public: {
+        hand: { handId: 'hand-4', status: 'PREFLOP', dealerSeatNo: 2 },
+        turn: { userId: 'user-1', deadlineAt: Date.now() + 5000 },
+        pot: { total: 3, sidePots: [] },
+        legalActions: { seat: 1, actions: ['FOLD', 'CALL'] },
+        actionConstraints: { toCall: 1 }
+      },
+      you: { seat: 1 }
+    }
+  });
+  await harness.flush();
+
+  const initialLeft = harness.elements.pokerDealerChip.style.left;
+  const initialTop = harness.elements.pokerDealerChip.style.top;
+
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 6,
+      table: {
+        tableId: 'table-1',
+        status: 'OPEN',
+        maxSeats: 6,
+        members: [
+          { userId: 'user-1', seat: 1, displayName: 'Hero' },
+          { userId: 'villain-1', seat: 2, displayName: 'Villain 1' },
+          { userId: 'villain-2', seat: 3, displayName: 'Villain 2' }
+        ]
+      },
+      public: {
+        hand: { handId: 'hand-4', status: 'PREFLOP', dealerSeatNo: 2 },
+        turn: { userId: 'villain-2', deadlineAt: Date.now() + 5000 },
+        pot: { total: 3, sidePots: [] },
+        legalActions: { seat: 1, actions: [] },
+        actionConstraints: { toCall: 0 }
+      },
+      you: { seat: 1 }
+    }
+  });
+  await harness.flush();
+
+  assert.equal(harness.elements.pokerDealerChip.style.left, initialLeft);
+  assert.equal(harness.elements.pokerDealerChip.style.top, initialTop);
 });
 
 test('poker v2 falls back to demo mode when tableId is missing', async () => {
