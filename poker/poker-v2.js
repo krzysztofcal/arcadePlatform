@@ -68,6 +68,7 @@
   };
 
   var state = cloneState(demoState);
+  var searchParams = null;
   var tableId = readTableId();
   var wsClient = null;
   var currentAccessToken = null;
@@ -75,6 +76,10 @@
   var authUnsubscribe = null;
   var renderedSeatAnchors = {};
   var renderedSeatSlots = {};
+  var suggestedSeatNoParam = null;
+  var shouldAutoJoin = false;
+  var autoJoinAttempted = false;
+  var bootReady = false;
   var els = {};
 
   function cloneState(source){
@@ -109,8 +114,10 @@
 
   function readTableId(){
     try {
-      return new URLSearchParams(window.location.search || '').get('tableId');
+      searchParams = new URLSearchParams(window.location.search || '');
+      return searchParams.get('tableId');
     } catch (_err){
+      searchParams = null;
       return null;
     }
   }
@@ -658,6 +665,15 @@
     return String(Math.round(num / 1000000)) + 'M';
   }
 
+  function readSeatParam(){
+    var raw = searchParams && typeof searchParams.get === 'function' ? parseInt(searchParams.get('seatNo'), 10) : NaN;
+    return Number.isInteger(raw) && raw > 0 ? raw : null;
+  }
+
+  function readAutoJoinParam(){
+    return !!(searchParams && typeof searchParams.get === 'function' && searchParams.get('autoJoin') === '1');
+  }
+
   function getSeatNumberingOffset(){
     for (var i = 0; i < state.seats.length; i++){
       if (state.seats[i] && state.seats[i].seatNo === 0) return 0;
@@ -928,6 +944,9 @@
     }
     if (els.joinSeat) els.joinSeat.disabled = !signedIn || seated || !liveReady;
     if (els.joinBuyIn) els.joinBuyIn.disabled = !signedIn || seated || !liveReady;
+    if (els.joinSeat && suggestedSeatNoParam && !seated && !els.joinSeat.dataset.userEdited) {
+      els.joinSeat.value = String(suggestedSeatNoParam);
+    }
     if (els.startBtn) els.startBtn.hidden = !signedIn || !seated;
     if (els.leaveBtn) els.leaveBtn.hidden = !signedIn || !seated;
     if (els.startBtn) els.startBtn.disabled = !liveReady;
@@ -973,13 +992,18 @@
           els.amountInput.min = String(min);
           if (max != null) els.amountInput.max = String(max);
           else els.amountInput.removeAttribute('max');
+          var defaultAmount = Math.min(max != null ? max : 20, Math.max(min, 20));
           if (!els.amountInput.value || Number(els.amountInput.value) < min || (max != null && Number(els.amountInput.value) > max)){
-            els.amountInput.value = String(max != null ? max : min);
+            els.amountInput.value = String(defaultAmount);
           }
         }
+        if (els.amountValue) els.amountValue.textContent = formatCompactAmount(Number(els.amountInput && els.amountInput.value ? els.amountInput.value : min));
       }
     }
     if (els.amountInput) els.amountInput.disabled = !liveReady || !amountAction;
+    if (els.amountValue && (els.amountInputWrap.hidden || !amountAction)) {
+      els.amountValue.textContent = formatCompactAmount(parseInt(els.amountInput && els.amountInput.value ? els.amountInput.value : '20', 10) || 20);
+    }
   }
 
   function render(){
@@ -996,6 +1020,13 @@
   function setError(message){
     state.errorText = message || '';
     renderInfoPanel();
+  }
+
+  function markBootReady(){
+    if (bootReady) return;
+    bootReady = true;
+    if (els.screen) els.screen.setAttribute('data-boot-ready', '1');
+    if (els.bootSplash) els.bootSplash.hidden = true;
   }
 
   function buildJoinPayload(){
@@ -1025,6 +1056,26 @@
       renderInfoPanel();
     }).catch(function(err){
       setError(err && err.message ? err.message : 'Failed to send action');
+    });
+  }
+
+  function isSeatTakenError(error){
+    var message = error && error.message ? String(error.message) : '';
+    return /seat_taken/i.test(message);
+  }
+
+  function autoJoinSeat(){
+    if (!shouldAutoJoin || autoJoinAttempted) return;
+    if (!isSignedIn() || !isWsReady() || deriveCurrentSeat()) return;
+    autoJoinAttempted = true;
+    if (suggestedSeatNoParam && els.joinSeat) els.joinSeat.value = String(suggestedSeatNoParam);
+    setError('');
+    sendCommand('sendJoin', buildJoinPayload()).then(function(result){
+      state.statusText = result && result.seatNo != null ? ('Joined seat ' + result.seatNo) : 'Join accepted';
+      renderInfoPanel();
+    }).catch(function(err){
+      if (isSeatTakenError(err)) autoJoinAttempted = false;
+      setError(err && err.message ? err.message : 'Failed to auto-join');
     });
   }
 
@@ -1100,6 +1151,12 @@
       var value = els.amountInput ? parseInt(els.amountInput.value, 10) : NaN;
       handleAction(els.amountBtn.dataset.action || '', Number.isFinite(value) ? value : undefined);
     });
+    if (els.amountInput) els.amountInput.addEventListener('input', function(){
+      if (els.amountValue) els.amountValue.textContent = formatCompactAmount(parseInt(els.amountInput.value, 10) || 0);
+    });
+    if (els.joinSeat) els.joinSeat.addEventListener('input', function(){
+      els.joinSeat.dataset.userEdited = '1';
+    });
     if (els.allInBtn) els.allInBtn.addEventListener('click', function(){
       var plan = resolveAllInPlan(getAllowedActions());
       if (!plan) return;
@@ -1108,6 +1165,8 @@
   }
 
   function selectElements(){
+    els.screen = document.getElementById('pokerTableScreen');
+    els.bootSplash = document.getElementById('pokerBootSplash');
     els.menuToggle = document.getElementById('pokerMenuToggle');
     els.menuPanel = document.getElementById('pokerMenuPanel');
     els.lobbyLink = document.getElementById('pokerLobbyLink');
@@ -1134,6 +1193,7 @@
     els.amountBtn = document.getElementById('pokerV2AmountBtn');
     els.allInBtn = document.getElementById('pokerV2AllInBtn');
     els.amountInput = document.getElementById('pokerV2AmountInput');
+    els.amountValue = document.getElementById('pokerV2AmountValue');
     els.amountInputWrap = document.getElementById('pokerV2AmountInputWrap');
   }
 
@@ -1141,6 +1201,7 @@
     state = cloneState(demoState);
     state.wsReady = false;
     render();
+    markBootReady();
   }
 
   function stopLiveMode(){
@@ -1174,6 +1235,7 @@
     stopLiveMode();
     state = createEmptyLiveState(tableId, getUserIdFromToken(token));
     render();
+    markBootReady();
     wsClient = window.PokerWsClient.create({
       tableId: tableId,
       getAccessToken: function(){ return Promise.resolve(currentAccessToken); },
@@ -1189,6 +1251,7 @@
           state.statusText = LIVE_STATUS_COPY.live;
           state.errorText = '';
           render();
+          autoJoinSeat();
         } else if (status === 'failed'){
           state.wsReady = false;
           state.statusText = LIVE_STATUS_COPY.error;
@@ -1207,6 +1270,7 @@
       onSnapshot: function(snapshot){
         mergeSnapshot(snapshot && snapshot.payload ? snapshot.payload : null);
         render();
+        autoJoinSeat();
       },
       onProtocolError: function(info){
         state.wsReady = false;
@@ -1260,6 +1324,8 @@
 
   function init(){
     selectElements();
+    suggestedSeatNoParam = readSeatParam();
+    shouldAutoJoin = readAutoJoinParam();
     bindMenu();
     bindControls();
     bindAuthLifecycle();

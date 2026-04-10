@@ -59,7 +59,8 @@ function createHarness(options = {}){
     'pokerV2StackText', 'pokerV2ErrorText', 'pokerV2SignInBtn', 'pokerV2SeatNo',
     'pokerV2BuyIn', 'pokerV2JoinBtn', 'pokerV2StartBtn', 'pokerV2LeaveBtn',
     'pokerV2DemoPill', 'pokerV2FoldBtn', 'pokerV2PrimaryBtn', 'pokerV2AmountBtn',
-    'pokerV2AllInBtn', 'pokerV2AmountInput', 'pokerV2AmountInputWrap'
+    'pokerV2AllInBtn', 'pokerV2AmountInput', 'pokerV2AmountInputWrap', 'pokerV2AmountValue',
+    'pokerTableScreen', 'pokerBootSplash'
   ].forEach((id) => {
     elements[id] = makeElement(id);
   });
@@ -203,6 +204,8 @@ test('poker v2 boots live mode, preserves table links, and sends WS commands', a
 
   assert.equal(harness.joinPayloads.length, 1);
   assert.equal(JSON.stringify(harness.joinPayloads[0]), JSON.stringify({ tableId: 'table-1', buyIn: 240, seatNo: 3 }));
+  assert.equal(harness.elements.pokerTableScreen.attributes['data-boot-ready'], '1');
+  assert.equal(harness.elements.pokerBootSplash.hidden, true);
 
   ws.onSnapshot({
     kind: 'stateSnapshot',
@@ -291,6 +294,16 @@ test('poker v2 shows compact call amount in the primary action label', async () 
   await harness.flush();
 
   assert.equal(harness.elements.pokerV2PrimaryBtn.textContent, 'Call (1k)');
+  assert.equal(harness.elements.pokerV2AmountValue.textContent, '2k');
+});
+
+test('poker v2 auto-joins from query params after live auth', async () => {
+  const harness = createHarness({ search: '?tableId=table-1&seatNo=4&autoJoin=1' });
+  harness.fireDomContentLoaded();
+  await harness.flush();
+  await waitFor(() => harness.joinPayloads.length === 1);
+
+  assert.equal(JSON.stringify(harness.joinPayloads[0]), JSON.stringify({ tableId: 'table-1', buyIn: 100, seatNo: 4 }));
 });
 
 test('poker v2 aligns the right rail seats and moves the chip to the acting opponent', async () => {
