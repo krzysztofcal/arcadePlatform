@@ -87,8 +87,8 @@ const run = async () => {
     const body = JSON.parse(res.body);
     assert.equal(body.ok, true);
     assert.equal(body.tableId, "table-human");
-    assert.equal(body.seatNo, 2);
-    assert.ok(body.seatNo >= 0 && body.seatNo <= 5);
+    assert.equal(body.seatNo, 3);
+    assert.ok(body.seatNo >= 1 && body.seatNo <= 6);
     assert.ok(
       queries.some((entry) => entry.query.toLowerCase().includes("coalesce(hs.is_bot, false) = false")),
       "quick seat should prefer tables with at least one human"
@@ -112,8 +112,8 @@ const run = async () => {
     const body = JSON.parse(res.body);
     assert.equal(body.ok, true);
     assert.equal(body.tableId, "table-any");
-    assert.equal(body.seatNo, 1);
-    assert.ok(body.seatNo >= 0 && body.seatNo <= 5);
+    assert.equal(body.seatNo, 2);
+    assert.ok(body.seatNo >= 1 && body.seatNo <= 6);
     assertCanonicalLockKey(queries, "quickseat:6:1:2");
     assert.ok(
       queries.some((entry) => entry.query.toLowerCase().includes("where table_id = $1 and status = 'active' order by seat_no asc")),
@@ -133,7 +133,7 @@ const run = async () => {
     const body = JSON.parse(res.body);
     assert.equal(body.ok, true);
     assert.equal(body.tableId, "table-human");
-    assert.equal(body.seatNo, 1);
+    assert.equal(body.seatNo, 2);
     assertCanonicalLockKey(queries, "quickseat:6:1:2");
     assert.ok(
       queries.some((entry) => entry.query.toLowerCase().includes("where table_id = $1 and user_id = $2 limit 1")),
@@ -153,8 +153,8 @@ const run = async () => {
     const body = JSON.parse(res.body);
     assert.equal(body.ok, true);
     assert.equal(body.tableId, "table-new");
-    assert.equal(body.seatNo, 0);
-    assert.ok(body.seatNo >= 0 && body.seatNo <= 5);
+    assert.equal(body.seatNo, 1);
+    assert.ok(body.seatNo >= 1 && body.seatNo <= 6);
     assertCanonicalLockKey(queries, "quickseat:6:1:2");
     assert.ok(
       queries.some((entry) => entry.query.toLowerCase().includes("insert into public.poker_tables")),
