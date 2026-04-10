@@ -212,7 +212,7 @@ test('poker v2 boots live mode, preserves table links, and sends WS commands', a
         legalActions: { seat: 1, actions: ['FOLD', 'CHECK', 'BET'] },
         actionConstraints: { toCall: 0, maxBetAmount: 120 }
       },
-      private: { holeCards: [{ r: 'A', s: 'S' }, { r: 'K', s: 'D' }] },
+      private: { holeCards: [{ r: 'Q', s: 'S' }, { r: 'Q', s: 'D' }] },
       you: { seat: 1 }
     }
   });
@@ -227,6 +227,13 @@ test('poker v2 boots live mode, preserves table links, and sends WS commands', a
   assert.equal(harness.elements.pokerV2PrimaryBtn.hidden, false, 'v2 should surface the primary turn action');
   assert.equal(harness.elements.pokerV2AmountBtn.hidden, false, 'v2 should surface bet/raise when legal');
   assert.equal(harness.elements.pokerV2JoinBtn.disabled, true, 'join should stay disabled once the user is seated');
+  const heroSeat = harness.elements.pokerSeatLayer.children.find((node) => /poker-seat--hero/.test(node.className));
+  assert.ok(heroSeat, 'v2 should render a dedicated hero seat');
+  assert.equal(heroSeat.style.top, '92%', 'hero seat should always be rotated to the bottom anchor');
+  const seatCards = heroSeat.children.find((node) => node.className === 'poker-seat-cards');
+  assert.equal(seatCards, undefined, 'hero seat should not duplicate the bottom hole cards');
+  const bestHand = heroSeat.children.find((node) => node.className === 'poker-seat-best-hand');
+  assert.ok(bestHand, 'hero seat should surface a best-hand summary');
 
   harness.elements.pokerV2AmountInput.value = '77';
   harness.elements.pokerV2AmountBtn.click();

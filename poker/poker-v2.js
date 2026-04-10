@@ -2,6 +2,17 @@
   if (typeof window === 'undefined' || typeof document === 'undefined') return;
 
   var SUIT_SYMBOLS = { S: '♠', H: '♥', D: '♦', C: '♣' };
+  var HAND_CATEGORY = {
+    HIGH_CARD: 1,
+    PAIR: 2,
+    TWO_PAIR: 3,
+    TRIPS: 4,
+    STRAIGHT: 5,
+    FLUSH: 6,
+    FULL_HOUSE: 7,
+    QUADS: 8,
+    STRAIGHT_FLUSH: 9
+  };
   var LIVE_STATUS_COPY = {
     demo: 'Demo mode',
     connecting: 'Connecting…',
@@ -198,6 +209,210 @@
     return out;
   }
 
+  function normalizeEvalRank(rank){
+    if (typeof rank === 'number' && Number.isInteger(rank) && rank >= 2 && rank <= 14) return rank;
+    if (typeof rank !== 'string') return null;
+    var value = rank.trim().toUpperCase();
+    if (value === 'A') return 14;
+    if (value === 'K') return 13;
+    if (value === 'Q') return 12;
+    if (value === 'J') return 11;
+    if (value === 'T') return 10;
+    if (/^\d+$/.test(value)) {
+      var numeric = Number(value);
+      if (Number.isInteger(numeric) && numeric >= 2 && numeric <= 10) return numeric;
+    }
+    return null;
+  }
+
+  function normalizeEvalSuit(suit){
+    if (typeof suit !== 'string') return null;
+    var value = suit.trim().toUpperCase();
+    if (!SUIT_SYMBOLS[value]) return null;
+    return value;
+  }
+
+  function normalizeEvalCards(cards){
+    if (!Array.isArray(cards) || cards.length < 5) return null;
+    var out = [];
+    var seen = {};
+    for (var i = 0; i < cards.length; i++){
+      var card = cards[i];
+      if (!card || typeof card !== 'object') return null;
+      var rank = normalizeEvalRank(card.r);
+      var suit = normalizeEvalSuit(card.s);
+      if (!rank || !suit) return null;
+      var key = String(rank) + '-' + suit;
+      if (seen[key]) return null;
+      seen[key] = true;
+      out.push({ rank: rank, suit: suit, raw: { r: card.r, s: suit } });
+    }
+    return out;
+  }
+
+  function compareRankVectors(left, right){
+    var a = Array.isArray(left) ? left : [];
+    var b = Array.isArray(right) ? right : [];
+    var maxLen = Math.max(a.length, b.length);
+    for (var i = 0; i < maxLen; i++){
+      var diff = (a[i] || 0) - (b[i] || 0);
+      if (diff !== 0) return diff > 0 ? 1 : -1;
+    }
+    return 0;
+  }
+
+  function sortByRankDescThenSuit(left, right){
+    if (left.rank !== right.rank) return right.rank - left.rank;
+    return left.suit.localeCompare(right.suit);
+  }
+
+  function findStraightRanks(ranksDesc){
+    var rankMap = {};
+    (Array.isArray(ranksDesc) ? ranksDesc : []).forEach(function(rank){ rankMap[rank] = true; });
+    if (rankMap[14]) rankMap[1] = true;
+    for (var high = 14; high >= 5; high--){
+      var ok = true;
+      for (var i = 0; i < 5; i++){
+        if (!rankMap[high - i]) {
+          ok = false;
+          break;
+        }
+      }
+      if (ok){
+        var ranks = [];
+        for (var j = 0; j < 5; j++) ranks.push(high - j);
+        return { high: high, ranks: ranks };
+      }
+    }
+    return null;
+  }
+
+  function pickStraightCards(ranks, cardsByRank){
+    var result = [];
+    for (var i = 0; i < ranks.length; i++){
+      var actual = ranks[i] === 1 ? 14 : ranks[i];
+      var list = cardsByRank[actual] || [];
+      result.push(list[0]);
+    }
+    return result;
+  }
+
+  function evaluateViewerBestHand(cards){
+    var normalized = normalizeEvalCards(cards);
+    if (!normalized) return null;
+    var allSorted = normalized.slice().sort(sortByRankDescThenSuit);
+    var cardsByRank = {};
+    var cardsBySuit = {};
+    normalized.forEach(function(card){
+      if (!cardsByRank[card.rank]) cardsByRank[card.rank] = [];
+      cardsByRank[card.rank].push(card);
+      if (!cardsBySuit[card.suit]) cardsBySuit[card.suit] = [];
+      cardsBySuit[card.suit].push(card);
+    });
+    Object.keys(cardsByRank).forEach(function(rank){
+      cardsByRank[rank].sort(function(a, b){ return a.suit.localeCompare(b.suit); });
+    });
+    Object.keys(cardsBySuit).forEach(function(suit){
+      cardsBySuit[suit].sort(sortByRankDescThenSuit);
+    });
+
+    var uniqueRanksDesc = Object.keys(cardsByRank).map(Number).sort(function(a, b){ return b - a; });
+    var ranksByCount = { 1: [], 2: [], 3: [], 4: [] };
+    uniqueRanksDesc.forEach(function(rank){
+      ranksByCount[cardsByRank[rank].length].push(rank);
+    });
+
+    var bestStraightFlush = null;
+    Object.keys(cardsBySuit).sort().forEach(function(suit){
+      var suitedCards = cardsBySuit[suit];
+      if (suitedCards.length < 5) return;
+      var suitRanks = suitedCards.map(function(entry){ return entry.rank; }).filter(function(rank, index, list){
+        return list.indexOf(rank) === index;
+      }).sort(function(a, b){ return b - a; });
+      var straightInSuit = findStraightRanks(suitRanks);
+      if (!straightInSuit) return;
+      var cardsByRankSuit = {};
+      suitedCards.forEach(function(entry){
+        if (!cardsByRankSuit[entry.rank]) cardsByRankSuit[entry.rank] = [];
+        cardsByRankSuit[entry.rank].push(entry);
+      });
+      var candidate = {
+        high: straightInSuit.high === 1 ? 5 : straightInSuit.high,
+        cards: pickStraightCards(straightInSuit.ranks, cardsByRankSuit)
+      };
+      if (!bestStraightFlush || candidate.high > bestStraightFlush.high) bestStraightFlush = candidate;
+    });
+    if (bestStraightFlush) return { category: HAND_CATEGORY.STRAIGHT_FLUSH, cards: bestStraightFlush.cards.map(function(entry){ return entry.raw; }) };
+
+    if (ranksByCount[4].length){
+      var quadRank = ranksByCount[4][0];
+      var quadCards = cardsByRank[quadRank].slice(0, 4);
+      var quadKicker = allSorted.find(function(entry){ return entry.rank !== quadRank; });
+      return { category: HAND_CATEGORY.QUADS, cards: quadCards.concat([quadKicker]).map(function(entry){ return entry.raw; }) };
+    }
+
+    if (ranksByCount[3].length){
+      var tripRank = ranksByCount[3][0];
+      var pairRank = ranksByCount[2].find(function(rank){ return rank !== tripRank; }) || ranksByCount[3][1];
+      if (pairRank){
+        return { category: HAND_CATEGORY.FULL_HOUSE, cards: cardsByRank[tripRank].slice(0, 3).concat(cardsByRank[pairRank].slice(0, 2)).map(function(entry){ return entry.raw; }) };
+      }
+    }
+
+    var bestFlush = null;
+    Object.keys(cardsBySuit).sort().forEach(function(suit){
+      var flushCards = cardsBySuit[suit];
+      if (flushCards.length < 5) return;
+      var topFlush = flushCards.slice(0, 5);
+      var ranks = topFlush.map(function(entry){ return entry.rank; });
+      if (!bestFlush || compareRankVectors(ranks, bestFlush.ranks) > 0) bestFlush = { ranks: ranks, cards: topFlush };
+    });
+    if (bestFlush) return { category: HAND_CATEGORY.FLUSH, cards: bestFlush.cards.map(function(entry){ return entry.raw; }) };
+
+    var straight = findStraightRanks(uniqueRanksDesc);
+    if (straight) return { category: HAND_CATEGORY.STRAIGHT, cards: pickStraightCards(straight.ranks, cardsByRank).map(function(entry){ return entry.raw; }) };
+
+    if (ranksByCount[3].length){
+      var tripsRank = ranksByCount[3][0];
+      return {
+        category: HAND_CATEGORY.TRIPS,
+        cards: cardsByRank[tripsRank].slice(0, 3).concat(allSorted.filter(function(entry){ return entry.rank !== tripsRank; }).slice(0, 2)).map(function(entry){ return entry.raw; })
+      };
+    }
+
+    if (ranksByCount[2].length >= 2){
+      var highPair = ranksByCount[2][0];
+      var lowPair = ranksByCount[2][1];
+      var twoPairKicker = allSorted.find(function(entry){ return entry.rank !== highPair && entry.rank !== lowPair; });
+      return {
+        category: HAND_CATEGORY.TWO_PAIR,
+        cards: cardsByRank[highPair].slice(0, 2).concat(cardsByRank[lowPair].slice(0, 2)).concat([twoPairKicker]).map(function(entry){ return entry.raw; })
+      };
+    }
+
+    if (ranksByCount[2].length){
+      var pairRankOnly = ranksByCount[2][0];
+      return {
+        category: HAND_CATEGORY.PAIR,
+        cards: cardsByRank[pairRankOnly].slice(0, 2).concat(allSorted.filter(function(entry){ return entry.rank !== pairRankOnly; }).slice(0, 3)).map(function(entry){ return entry.raw; })
+      };
+    }
+
+    return { category: HAND_CATEGORY.HIGH_CARD, cards: allSorted.slice(0, 5).map(function(entry){ return entry.raw; }) };
+  }
+
+  function formatViewerHandCategory(category){
+    if (category === HAND_CATEGORY.STRAIGHT_FLUSH) return 'Straight Flush';
+    if (category === HAND_CATEGORY.QUADS) return 'Four of a Kind';
+    if (category === HAND_CATEGORY.FULL_HOUSE) return 'Full House';
+    if (category === HAND_CATEGORY.FLUSH) return 'Flush';
+    if (category === HAND_CATEGORY.STRAIGHT) return 'Straight';
+    if (category === HAND_CATEGORY.TRIPS) return 'Three of a Kind';
+    if (category === HAND_CATEGORY.TWO_PAIR) return 'Two Pair';
+    if (category === HAND_CATEGORY.PAIR) return 'Pair';
+    return 'High Card';
+  }
+
   function normalizeSeatNumber(rawSeatNo){
     var seatNo = Number(rawSeatNo);
     if (!Number.isInteger(seatNo) || seatNo < 0) return null;
@@ -355,6 +570,28 @@
     return null;
   }
 
+  function getHeroVisualIndex(){
+    var offset = getSeatNumberingOffset();
+    var currentSeat = deriveCurrentSeat();
+    if (!currentSeat || !Number.isInteger(currentSeat.seatNo)) return null;
+    return Math.max(0, currentSeat.seatNo - offset);
+  }
+
+  function rotateSeatIndex(index, total){
+    var heroIndex = getHeroVisualIndex();
+    var safeTotal = Math.max(1, total || 1);
+    if (heroIndex == null) return index % safeTotal;
+    var heroAnchorIndex = safeTotal >= 4 ? Math.floor(safeTotal / 2) : safeTotal - 1;
+    return (index - heroIndex + heroAnchorIndex + safeTotal) % safeTotal;
+  }
+
+  function getHeroBestHand(){
+    var mergedCards = (Array.isArray(state.heroCards) ? state.heroCards.slice(0, 2) : []).concat(Array.isArray(state.communityCards) ? state.communityCards.slice(0, 5) : []);
+    var best = evaluateViewerBestHand(mergedCards);
+    if (!best || !Array.isArray(best.cards) || best.cards.length !== 5) return null;
+    return best;
+  }
+
   function resolveStack(userId){
     if (!userId || !isObject(state.stacks)) return null;
     var value = state.stacks[userId];
@@ -447,9 +684,10 @@
       var index = Math.max(0, seat.seatNo - offset);
       seatsByIndex[index] = seat;
     });
+    var heroBestHand = getHeroBestHand();
     for (var i = 0; i < state.maxSeats; i++){
       var seat = seatsByIndex[i] || null;
-      var anchor = getSeatAnchor(i, state.maxSeats);
+      var anchor = getSeatAnchor(rotateSeatIndex(i, state.maxSeats), state.maxSeats);
       var article = document.createElement('article');
       var active = !!(seat && seat.userId && state.turnUserId && seat.userId === state.turnUserId);
       var hero = !!(seat && seat.userId && state.currentUserId && seat.userId === state.currentUserId);
@@ -472,8 +710,10 @@
 
       var cards = document.createElement('div');
       cards.className = 'poker-seat-cards';
-      cards.appendChild(createCard(hero ? state.heroCards[0] : null, { faceDown: !hero }));
-      cards.appendChild(createCard(hero ? state.heroCards[1] : null, { faceDown: !hero }));
+      if (!hero && seat && seat.userId){
+        cards.appendChild(createCard(null, { faceDown: true }));
+        cards.appendChild(createCard(null, { faceDown: true }));
+      }
 
       var name = document.createElement('div');
       name.className = 'poker-seat-name';
@@ -485,9 +725,25 @@
 
       article.appendChild(avatar);
       article.appendChild(stack);
-      article.appendChild(cards);
+      if (cards.children.length) article.appendChild(cards);
       article.appendChild(name);
       article.appendChild(status);
+      if (hero && heroBestHand){
+        var bestHand = document.createElement('div');
+        bestHand.className = 'poker-seat-best-hand';
+        var bestHandName = document.createElement('span');
+        bestHandName.className = 'poker-seat-best-hand-label';
+        bestHandName.textContent = formatViewerHandCategory(heroBestHand.category);
+        bestHand.appendChild(bestHandName);
+        heroBestHand.cards.forEach(function(card){
+          var chip = document.createElement('span');
+          var normalized = normalizeCard(card);
+          chip.className = 'poker-seat-best-hand-card' + (normalized && (normalized.s === 'H' || normalized.s === 'D') ? ' poker-seat-best-hand-card--red' : '');
+          chip.textContent = normalized ? (normalized.r + SUIT_SYMBOLS[normalized.s]) : '?';
+          bestHand.appendChild(chip);
+        });
+        article.appendChild(bestHand);
+      }
       els.seatLayer.appendChild(article);
     }
   }
@@ -521,7 +777,7 @@
     var currentSeat = deriveCurrentSeat();
     if (currentSeat && Number.isInteger(currentSeat.seatNo)) seatNo = currentSeat.seatNo;
     var index = Math.max(0, seatNo - offset);
-    var anchor = getSeatAnchor(index % Math.max(state.maxSeats, 1), Math.max(state.maxSeats, 1));
+    var anchor = getSeatAnchor(rotateSeatIndex(index, Math.max(state.maxSeats, 1)), Math.max(state.maxSeats, 1));
     els.dealerChip.style.left = anchor.x + '%';
     els.dealerChip.style.top = anchor.y + '%';
   }
