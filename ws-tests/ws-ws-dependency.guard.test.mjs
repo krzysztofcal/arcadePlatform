@@ -271,6 +271,22 @@ test("ws-local leave wrapper is the only allowed bridge to repo-root shared leav
   }
 });
 
+test("ws-local join wrapper is the only allowed bridge to repo-root shared join module", () => {
+  const wrapperFile = "ws-server/shared/poker-domain/join.mjs";
+  const wrapperText = fs.readFileSync(wrapperFile, "utf8");
+  assert.match(wrapperText, /export\s*\{\s*executePokerJoinAuthoritative\s*\}\s*from\s*["']\.\.\/\.\.\/\.\.\/shared\/poker-domain\/join\.mjs["']/);
+
+  const wsFiles = fs.readdirSync("ws-server", { recursive: true })
+    .filter((entry) => typeof entry === "string" && entry.endsWith('.mjs'))
+    .map((entry) => `ws-server/${entry.replaceAll('\\', '/')}`);
+
+  for (const file of wsFiles) {
+    if (file === wrapperFile) continue;
+    const text = fs.readFileSync(file, "utf8");
+    assert.doesNotMatch(text, /\.\.\/\.\.\/\.\.\/shared\/poker-domain\/join\.mjs/, `Only ${wrapperFile} may bridge to repo-root shared join module`);
+  }
+});
+
 
 test("ws dependency guard detects forbidden bridge import", async () => {
   const forbiddenFile = "ws-server/tmp-forbidden-import.mjs";
