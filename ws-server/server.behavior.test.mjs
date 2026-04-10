@@ -245,36 +245,55 @@ async function writeTestModule(source, filename = "ws-test-module.mjs") {
 }
 
 async function nextMessageOfType(ws, type, timeoutMs = 10000) {
-  const started = Date.now();
-  while (true) {
-    const elapsed = Date.now() - started;
-    const remainingMs = timeoutMs - elapsed;
-    if (remainingMs <= 0) {
-      break;
+  try {
+    return await nextMessageMatching(
+      ws,
+      (frame) => frame?.type === type,
+      timeoutMs
+    );
+  } catch (error) {
+    if (error instanceof Error && error.message === "Timed out waiting for matching websocket message") {
+      throw new Error(`Timed out waiting for message type: ${type}`);
     }
-
-    const frame = await nextMessage(ws, remainingMs);
-    if (frame?.type === type) {
-      return frame;
-    }
+    throw error;
   }
-  throw new Error(`Timed out waiting for message type: ${type}`);
 }
 
 async function nextMessageMatching(ws, predicate, timeoutMs = 10000) {
-  const started = Date.now();
-  while (true) {
-    const elapsed = Date.now() - started;
-    const remainingMs = timeoutMs - elapsed;
-    if (remainingMs <= 0) {
-      break;
-    }
-    const frame = await nextMessage(ws, remainingMs);
-    if (predicate(frame)) {
-      return frame;
-    }
-  }
-  throw new Error("Timed out waiting for matching websocket message");
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      clearTimeout(timer);
+      ws.off("message", onMessage);
+      ws.off("error", onError);
+      ws.off("close", onClose);
+    };
+
+    const onMessage = (data) => {
+      const frame = JSON.parse(String(data));
+      if (!predicate(frame)) return;
+      cleanup();
+      resolve(frame);
+    };
+
+    const onError = (error) => {
+      cleanup();
+      reject(error);
+    };
+
+    const onClose = (code) => {
+      cleanup();
+      reject(new Error(`Socket closed before matching message: ${code}`));
+    };
+
+    const timer = setTimeout(() => {
+      cleanup();
+      reject(new Error("Timed out waiting for matching websocket message"));
+    }, timeoutMs);
+
+    ws.on("message", onMessage);
+    ws.on("error", onError);
+    ws.on("close", onClose);
+  });
 }
 
 function nextCommandResultForRequest(ws, requestId, timeoutMs = 10000) {
