@@ -39,19 +39,18 @@ const pickSeatNo = (rows, maxPlayers) => {
 };
 
 const toUiSeatNo = (seatNoDb, maxPlayers) => {
-  const maxUi = Number.isInteger(maxPlayers) && maxPlayers >= 2 ? maxPlayers - 1 : 0;
-  if (!Number.isInteger(seatNoDb)) return 0;
-  const seatNoUi = seatNoDb - 1;
-  if (seatNoUi < 0) return 0;
-  if (seatNoUi > maxUi) return maxUi;
-  return seatNoUi;
+  const maxUi = Number.isInteger(maxPlayers) && maxPlayers >= 2 ? maxPlayers : DEFAULT_MAX_PLAYERS;
+  if (!Number.isInteger(seatNoDb)) return 1;
+  if (seatNoDb < 1) return 1;
+  if (seatNoDb > maxUi) return maxUi;
+  return seatNoDb;
 };
 
 const createAndRecommend = async (tx, { userId, maxPlayers, stakesJson }) => {
   const created = await createPokerTableWithState(tx, { userId, maxPlayers, stakesJson });
   const tableId = created.tableId;
   await tx.unsafe("update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1;", [tableId]);
-  const seatNoUi = 0;
+  const seatNoUi = 1;
   return { tableId, seatNo: seatNoUi, strategy: "create" };
 };
 
