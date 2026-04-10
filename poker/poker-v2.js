@@ -68,6 +68,32 @@
     return JSON.parse(JSON.stringify(source));
   }
 
+  function createEmptyLiveState(nextTableId, nextUserId){
+    return {
+      mode: 'live',
+      tableId: nextTableId || null,
+      tableStatus: 'OPEN',
+      maxSeats: 6,
+      seats: [],
+      stacks: {},
+      potTotal: 0,
+      dealerSeat: null,
+      communityCards: [],
+      heroCards: [],
+      turnUserId: null,
+      turnDeadlineAt: null,
+      phase: 'LOBBY',
+      handId: null,
+      legalActions: [],
+      actionConstraints: {},
+      currentUserId: nextUserId || null,
+      youSeat: null,
+      statusText: LIVE_STATUS_COPY.connecting,
+      errorText: '',
+      wsReady: false
+    };
+  }
+
   function readTableId(){
     try {
       return new URLSearchParams(window.location.search || '').get('tableId');
@@ -808,20 +834,8 @@
 
   function applySignedOutState(){
     stopLiveMode();
-    state = cloneState(demoState);
-    state.mode = 'live';
-    state.tableId = tableId;
-    state.currentUserId = null;
-    state.heroCards = [];
-    state.communityCards = [];
-    state.seats = [];
-    state.stacks = {};
-    state.potTotal = 0;
-    state.phase = 'LOBBY';
-    state.legalActions = [];
-    state.actionConstraints = {};
+    state = createEmptyLiveState(tableId, null);
     state.statusText = LIVE_STATUS_COPY.auth;
-    state.errorText = '';
     render();
   }
 
@@ -839,12 +853,7 @@
       return;
     }
     stopLiveMode();
-    state.mode = 'live';
-    state.tableId = tableId;
-    state.currentUserId = getUserIdFromToken(token);
-    state.wsReady = false;
-    state.statusText = LIVE_STATUS_COPY.connecting;
-    state.errorText = '';
+    state = createEmptyLiveState(tableId, getUserIdFromToken(token));
     render();
     wsClient = window.PokerWsClient.create({
       tableId: tableId,

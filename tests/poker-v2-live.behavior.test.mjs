@@ -186,6 +186,9 @@ test('poker v2 boots live mode, preserves table links, and sends WS commands', a
   const ws = harness.getCreateOptions();
   assert.ok(ws, 'v2 should bootstrap a WS client when tableId is present');
   await waitFor(() => harness.elements.pokerV2JoinBtn.disabled === false);
+  assert.equal(harness.elements.pokerV2JoinBtn.textContent, 'Join', 'v2 should not mark the user as seated before a live snapshot confirms it');
+  assert.equal(harness.elements.pokerV2StartBtn.hidden, true, 'start hand should stay hidden until a live seat is confirmed');
+  assert.equal(harness.elements.pokerV2StackText.textContent, '—', 'v2 should not show demo stack data before a live snapshot');
 
   harness.elements.pokerV2SeatNo.value = '3';
   harness.elements.pokerV2BuyIn.value = '240';
