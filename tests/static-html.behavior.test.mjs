@@ -23,3 +23,4 @@ assert.match(tableHtml, /id="pokerOpenV2Link"/, 'classic poker table should incl
 assert.match(tableV2Html, /id="pokerV2JoinBtn"/, 'poker table v2 should include live join control');
 assert.match(tableV2Html, /src="\/poker\/poker-ws-client\.js" defer/, 'poker table v2 should bootstrap WS client for live runtime');
 assert.match(tableV2Css, /\.poker-menu-panel\[hidden\]\{display:none;\}/, 'poker table v2 menu should hard-hide when hidden attribute is present');
+assert.match(tableV2Css, /\.poker-action-bar\{position:fixed; top:50%; right:max\(10px, env\(safe-area-inset-right\)\); transform:translateY\(-50%\); width:min\(33vw, 168px\); display:grid; grid-template-columns:minmax\(0, 1fr\);/, 'poker table v2 action rail should dock to the right in a single column');

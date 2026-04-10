@@ -687,11 +687,12 @@
     var heroBestHand = getHeroBestHand();
     for (var i = 0; i < state.maxSeats; i++){
       var seat = seatsByIndex[i] || null;
-      var anchor = getSeatAnchor(rotateSeatIndex(i, state.maxSeats), state.maxSeats);
       var article = document.createElement('article');
       var active = !!(seat && seat.userId && state.turnUserId && seat.userId === state.turnUserId);
       var hero = !!(seat && seat.userId && state.currentUserId && seat.userId === state.currentUserId);
       var folded = !!(seat && /FOLD/i.test(seat.status || ''));
+      var anchor = getSeatAnchor(rotateSeatIndex(i, state.maxSeats), state.maxSeats);
+      if (hero && state.maxSeats >= 4) anchor = { x: 34, y: 91 };
       article.className = 'poker-seat'
         + (active ? ' poker-seat--active' : '')
         + (folded ? ' poker-seat--folded' : '')

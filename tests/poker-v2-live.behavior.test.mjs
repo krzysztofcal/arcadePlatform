@@ -229,7 +229,8 @@ test('poker v2 boots live mode, preserves table links, and sends WS commands', a
   assert.equal(harness.elements.pokerV2JoinBtn.disabled, true, 'join should stay disabled once the user is seated');
   const heroSeat = harness.elements.pokerSeatLayer.children.find((node) => /poker-seat--hero/.test(node.className));
   assert.ok(heroSeat, 'v2 should render a dedicated hero seat');
-  assert.equal(heroSeat.style.top, '92%', 'hero seat should always be rotated to the bottom anchor');
+  assert.equal(heroSeat.style.left, '34%', 'hero seat should be shifted left to avoid the action rail');
+  assert.equal(heroSeat.style.top, '91%', 'hero seat should stay near the bottom edge');
   const seatCards = heroSeat.children.find((node) => node.className === 'poker-seat-cards');
   assert.equal(seatCards, undefined, 'hero seat should not duplicate the bottom hole cards');
   const bestHand = heroSeat.children.find((node) => node.className === 'poker-seat-best-hand');
