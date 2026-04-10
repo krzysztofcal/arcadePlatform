@@ -30,8 +30,13 @@ export async function handleBotStepCommand({
     });
   }
 
-  const stepSnapshotsAlreadyBroadcast = Number(botStepResult?.broadcastedStepCount || 0) > 0;
-  if (botStepResult?.ok === false || (botStepResult?.changed === true && !stepSnapshotsAlreadyBroadcast)) {
+  const lastBroadcastStateVersion = Number(botStepResult?.lastBroadcastStateVersion);
+  const finalStateVersion = Number(botStepResult?.finalStateVersion);
+  const finalStateAlreadyBroadcast =
+    Number.isFinite(lastBroadcastStateVersion)
+    && Number.isFinite(finalStateVersion)
+    && lastBroadcastStateVersion === finalStateVersion;
+  if (botStepResult?.ok === false || (botStepResult?.changed === true && !finalStateAlreadyBroadcast)) {
     broadcastStateSnapshots(tableId);
   }
   return botStepResult;

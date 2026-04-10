@@ -307,6 +307,66 @@ test("accepted bot autoplay aborts during a later delayed bot step when turn sto
   assert.equal(sleepCallCount, 2);
 });
 
+test("accepted bot autoplay exposes final state version when a later step broadcast fails", async () => {
+  const seats = [{ userId: "bot_1", seatNo: 1, isBot: true }, { userId: "bot_2", seatNo: 2, isBot: true }];
+  const stacks = { bot_1: 100, bot_2: 100 };
+  let persistedState = { ...initHandState({ tableId: "t-delay-broadcast-fail", seats, stacks }).state, handId: "h-delay-broadcast-fail-1" };
+  let persistedVersion = 40;
+  let stepBroadcastCalls = 0;
+  const seatOrder = seats.slice().sort((a, b) => a.seatNo - b.seatNo).map((seat) => seat.userId);
+  const maybeMaterialize = (privateState) => {
+    const eligible = seatOrder.filter((userId) => !privateState.foldedByUserId?.[userId] && !privateState.leftTableByUserId?.[userId] && !privateState.sitOutByUserId?.[userId]);
+    const handId = typeof privateState.handId === "string" ? privateState.handId : "";
+    const showdownHandId = typeof privateState.showdown?.handId === "string" ? privateState.showdown.handId : "";
+    const alreadyMaterialized = !!handId && !!showdownHandId && handId === showdownHandId;
+    if (alreadyMaterialized || (eligible.length > 1 && privateState.phase !== "SHOWDOWN")) return privateState;
+    return materializeShowdownAndPayout({
+      state: privateState,
+      seatUserIdsInOrder: seatOrder,
+      holeCardsByUserId: privateState.holeCardsByUserId,
+      computeShowdown,
+      awardPotsAtShowdown,
+      klog: () => {}
+    }).nextState;
+  };
+  const tableManager = {
+    persistedPokerState: () => persistedState,
+    persistedStateVersion: () => persistedVersion,
+    tableSnapshot: () => ({ seats }),
+    applyAction: ({ userId, action, amount }) => {
+      const applied = applyRuntimeAction(persistedState, { type: action, userId, amount });
+      const advanced = runAdvanceLoop(applied.state, [], [], advanceIfNeeded);
+      persistedState = maybeMaterialize(advanced.nextState);
+      persistedVersion += 1;
+      return { accepted: true, changed: true, replayed: false, stateVersion: persistedVersion };
+    }
+  };
+
+  const run = createAcceptedBotAutoplayExecutor({
+    tableManager,
+    env: { WS_BOT_REACTION_MIN_MS: "0", WS_BOT_REACTION_MAX_MS: "0" },
+    onBotStepPersisted: async () => {
+      stepBroadcastCalls += 1;
+      if (stepBroadcastCalls >= 2) {
+        throw new Error("snapshot_push_failed");
+      }
+    },
+    persistMutatedState: async () => ({ ok: true }),
+    restoreTableFromPersisted: async () => ({ ok: true }),
+    broadcastResyncRequired: () => {},
+    klog: () => {}
+  });
+
+  const result = await run({ tableId: "t-delay-broadcast-fail", trigger: "act", requestId: "r-delay-broadcast-fail" });
+  assert.equal(result.ok, true);
+  assert.ok(result.actionCount > 1);
+  assert.ok(result.broadcastedStepCount >= 1);
+  assert.ok(result.broadcastedStepCount < result.actionCount);
+  assert.ok(Number.isFinite(result.lastBroadcastStateVersion));
+  assert.equal(result.finalStateVersion, persistedVersion);
+  assert.ok(result.finalStateVersion > result.lastBroadcastStateVersion);
+});
+
 test("accepted bot autoplay no-ops when next turn is not a bot", async () => {
   const tableManager = {
     persistedPokerState: () => ({

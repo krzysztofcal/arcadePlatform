@@ -34,7 +34,9 @@ test("handleBotStepCommand skips duplicate final broadcast when steps already em
       changed: true,
       actionCount: 3,
       reason: "non_action_phase",
-      broadcastedStepCount: 3
+      broadcastedStepCount: 3,
+      lastBroadcastStateVersion: 18,
+      finalStateVersion: 18
     }),
     broadcastStateSnapshots: () => {
       calls.snapshots += 1;
@@ -43,6 +45,30 @@ test("handleBotStepCommand skips duplicate final broadcast when steps already em
 
   assert.equal(result.ok, true);
   assert.equal(calls.snapshots, 0);
+});
+
+test("handleBotStepCommand falls back to final broadcast when last step snapshot did not reach final version", async () => {
+  const calls = { snapshots: 0 };
+  const result = await handleBotStepCommand({
+    tableId: "t1",
+    trigger: "act",
+    requestId: "r1c",
+    runBotStep: async () => ({
+      ok: true,
+      changed: true,
+      actionCount: 3,
+      reason: "non_action_phase",
+      broadcastedStepCount: 2,
+      lastBroadcastStateVersion: 17,
+      finalStateVersion: 18
+    }),
+    broadcastStateSnapshots: () => {
+      calls.snapshots += 1;
+    }
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(calls.snapshots, 1);
 });
 
 test("handleBotStepCommand broadcasts when autoplay fails", async () => {
