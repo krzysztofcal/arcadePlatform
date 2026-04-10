@@ -24,6 +24,8 @@ body{margin:0; min-height:100vh; font-family:Poppins, sans-serif; background:#06
 
 .poker-seat{position:absolute; width:113px; transform:translate(-50%, -50%); text-align:center;}
 
+.poker-seat-winner-badge{position:absolute; left:50%; top:-12px; transform:translateX(-50%); padding:4px 10px; border-radius:999px; border:1px solid rgba(255,226,160,0.72); background:linear-gradient(180deg, rgba(86,57,16,0.96), rgba(24,16,8,0.94)); color:#fff4d2; font-size:0.62rem; font-weight:800; letter-spacing:0.08em; text-transform:uppercase; box-shadow:0 8px 18px rgba(0,0,0,0.34), inset 0 1px 1px rgba(255,244,208,0.24); z-index:3; pointer-events:none;}
+
 .poker-seat-avatar{position:relative; overflow:hidden; isolation:isolate; width:76px; height:76px; margin:0 auto 7px; border-radius:50%; border:2px solid rgba(255,202,127,0.6); background:radial-gradient(circle at 50% 24%, rgba(255,235,214,0.22), rgba(26,25,30,0.74) 42%, rgba(7,8,10,0.98) 78%), linear-gradient(155deg, rgba(23,26,34,0.95), rgba(8,9,13,0.99)); box-shadow:0 8px 18px rgba(0,0,0,0.48); display:flex; align-items:flex-end; justify-content:center; font-size:0.8rem; letter-spacing:0.04em; color:#ebf2ff; padding-bottom:8px;}
 
 .poker-seat-turn-clock{position:absolute; inset:-2px; border-radius:50%; pointer-events:none; z-index:1; opacity:0.88; background:conic-gradient(from -90deg, transparent 0turn, transparent calc((1 - var(--turn-progress, 0)) * 1turn), rgba(19,24,34,0.62) calc((1 - var(--turn-progress, 0)) * 1turn), rgba(19,24,34,0.62) 1turn); transform:scaleX(-1);}
@@ -53,6 +55,8 @@ body{margin:0; min-height:100vh; font-family:Poppins, sans-serif; background:#06
 .poker-seat--active .poker-seat-avatar{border-color:rgba(84,245,152,0.88); box-shadow:0 0 0 3px rgba(64,225,135,0.24), 0 12px 24px rgba(0,0,0,0.54);}
 
 .poker-seat--active .poker-seat-status{color:#8df8bf; border-color:rgba(97,241,163,0.72); background:rgba(19,58,39,0.72);}
+
+.poker-seat--winner .poker-seat-avatar{border-color:rgba(255,219,133,0.88); box-shadow:0 0 0 3px rgba(255,210,99,0.15), 0 12px 22px rgba(0,0,0,0.5);}
 
 .poker-seat--folded{opacity:0.62;}
 

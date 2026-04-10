@@ -390,29 +390,10 @@ export function applyCoreStateAction({ tableId, coreState, handId, userId, actio
   }
 
   const nextVersion = coreState.version + 1;
-  let rolloverCoreState = coreState;
-  let rolloverSettledState = applied.state;
-  if (applied.state?.phase === "SETTLED") {
-    const recycled = replaceBrokeBotsForNextHand({
-      coreState,
-      settledState: applied.state,
-      nextVersion
-    });
-    rolloverCoreState = recycled.coreState;
-    rolloverSettledState = recycled.settledState;
-  }
-  const rawNextPokerState = applied.state?.phase === "SETTLED"
-    ? buildNextHandStateFromSettled({
-      tableId,
-      coreState: rolloverCoreState,
-      settledState: rolloverSettledState,
-      nextVersion
-    }) || rolloverSettledState
-    : applied.state;
-  const nextPokerState = stampTurnDeadline(rawNextPokerState, nowMs);
+  const nextPokerState = stampTurnDeadline(applied.state, nowMs);
 
   const nextCoreState = {
-    ...rolloverCoreState,
+    ...coreState,
     version: nextVersion,
     pokerState: nextPokerState
   };

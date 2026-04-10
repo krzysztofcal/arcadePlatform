@@ -159,7 +159,7 @@ function normalizeShowdown(showdown) {
   if (!showdown || typeof showdown !== "object" || Array.isArray(showdown)) {
     return null;
   }
-  return {
+  const normalized = {
     winners: Array.isArray(showdown.winners) ? showdown.winners.filter((userId) => typeof userId === "string") : [],
     potsAwarded: Array.isArray(showdown.potsAwarded) ? showdown.potsAwarded : [],
     potAwardedTotal: Number.isFinite(showdown.potAwardedTotal)
@@ -170,6 +170,16 @@ function normalizeShowdown(showdown) {
     reason: typeof showdown.reason === "string" ? showdown.reason : null,
     handId: typeof showdown.handId === "string" ? showdown.handId : null
   };
+  if (Array.isArray(showdown.revealedWinners)) {
+    normalized.revealedWinners = showdown.revealedWinners
+      .filter((entry) => entry && typeof entry.userId === "string")
+      .map((entry) => ({
+        userId: entry.userId,
+        holeCards: normalizeCards(entry.holeCards)
+      }))
+      .filter((entry) => entry.holeCards.length === 2);
+  }
+  return normalized;
 }
 
 function normalizeHandSettlement(handSettlement) {
@@ -196,6 +206,28 @@ function resolvePrivateBranch({ state, userId, youSeat }) {
     seat: youSeat,
     holeCards
   };
+}
+
+function resolveRevealedWinners({ statePublic, state }) {
+  if (statePublic?.phase !== "SETTLED") {
+    return [];
+  }
+  if (statePublic?.showdown?.reason !== "computed") {
+    return [];
+  }
+  const winners = Array.isArray(statePublic?.showdown?.winners)
+    ? statePublic.showdown.winners.filter((value) => typeof value === "string" && value)
+    : [];
+  if (winners.length === 0) {
+    return [];
+  }
+  const holeCardsByUserId = asObject(state?.holeCardsByUserId) || {};
+  return winners
+    .map((userId) => ({
+      userId,
+      holeCards: normalizeCards(holeCardsByUserId[userId])
+    }))
+    .filter((entry) => entry.holeCards.length === 2);
 }
 
 export function projectRoomCoreSnapshot({ tableId, roomId, coreState, members, userId, youSeat }) {
@@ -287,6 +319,10 @@ export function projectRoomCoreSnapshot({ tableId, roomId, coreState, members, u
 
   const showdown = normalizeShowdown(statePublic.showdown);
   if (showdown) {
+    const revealedWinners = resolveRevealedWinners({ statePublic, state });
+    if (revealedWinners.length > 0) {
+      showdown.revealedWinners = revealedWinners;
+    }
     snapshot.showdown = showdown;
   }
 

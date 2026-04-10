@@ -58,7 +58,7 @@ function normalizeShowdown(showdown) {
   if (!showdown || typeof showdown !== "object" || Array.isArray(showdown)) {
     return null;
   }
-  return {
+  const normalized = {
     winners: Array.isArray(showdown.winners) ? showdown.winners.filter((userId) => typeof userId === "string") : [],
     potsAwarded: Array.isArray(showdown.potsAwarded) ? showdown.potsAwarded : [],
     potAwardedTotal: Number.isFinite(showdown.potAwardedTotal)
@@ -69,6 +69,16 @@ function normalizeShowdown(showdown) {
     reason: typeof showdown.reason === "string" ? showdown.reason : null,
     handId: typeof showdown.handId === "string" ? showdown.handId : null
   };
+  if (Array.isArray(showdown.revealedWinners)) {
+    normalized.revealedWinners = showdown.revealedWinners
+      .filter((entry) => entry && typeof entry.userId === "string")
+      .map((entry) => ({
+        userId: entry.userId,
+        holeCards: normalizeCards(entry.holeCards)
+      }))
+      .filter((entry) => entry.holeCards.length === 2);
+  }
+  return normalized;
 }
 
 function normalizeHandSettlement(handSettlement) {

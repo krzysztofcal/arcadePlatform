@@ -201,10 +201,49 @@ test("projectRoomCoreSnapshot projects settled showdown fields without leaking p
   assert.equal(seated.pot.total, 0);
   assert.deepEqual(seated.turn, { userId: null, seat: null, startedAt: null, deadlineAt: null });
   assert.deepEqual(seated.showdown.winners, ["other_user"]);
+  assert.deepEqual(seated.showdown.revealedWinners, [
+    { userId: "other_user", holeCards: ["2C", "2D"] }
+  ]);
   assert.deepEqual(seated.handSettlement.payouts, { other_user: 6 });
   assert.equal(observer.private, null);
   assert.equal(observer.showdown.potsAwarded[0].eligibleUserIds.includes("seated_user"), true);
   assert.deepEqual(seated.private, { userId: "seated_user", seat: 1, holeCards: ["AH", "AD"] });
+});
+
+test("projectRoomCoreSnapshot does not reveal winner cards when hand ends by folds", () => {
+  const snapshot = projectRoomCoreSnapshot({
+    tableId: "table_settled_folded",
+    roomId: "table_settled_folded",
+    coreState: {
+      seats: { user_a: 1, user_b: 2 },
+      pokerState: {
+        roomId: "table_settled_folded",
+        handId: "hand_settled_folded",
+        phase: "SETTLED",
+        showdown: {
+          handId: "hand_settled_folded",
+          winners: ["user_a"],
+          potsAwarded: [{ amount: 4, winners: ["user_a"] }],
+          potAwardedTotal: 4,
+          reason: "all_folded"
+        },
+        handSettlement: {
+          handId: "hand_settled_folded",
+          settledAt: "2026-03-01T00:00:00.000Z",
+          payouts: { user_a: 4 }
+        },
+        holeCardsByUserId: { user_a: ["AS", "KH"], user_b: ["2C", "2D"] }
+      }
+    },
+    members: [
+      { userId: "user_a", seat: 1 },
+      { userId: "user_b", seat: 2 }
+    ],
+    userId: "user_a",
+    youSeat: 1
+  });
+
+  assert.equal("revealedWinners" in snapshot.showdown, false);
 });
 
 test("projectRoomCoreSnapshot omits terminal fields for fresh next-hand PREFLOP state", () => {

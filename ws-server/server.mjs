@@ -26,6 +26,7 @@ import { handleTurnTimeoutCommand } from "./poker/handlers/turn-timeout.mjs";
 import { handleBotStepCommand } from "./poker/handlers/bot-autoplay.mjs";
 import { handleLeaveCommand } from "./poker/handlers/leave.mjs";
 import { createTableCommandQueue } from "./poker/runtime/table-command-queue.mjs";
+import { recoverFromPersistConflict } from "./poker/runtime/persist-conflict-recovery.mjs";
 
 const PORT = Number(process.env.PORT || 3000);
 const PROTECTED_MESSAGE_TYPES = new Set([
@@ -94,6 +95,14 @@ function resolveObserveOnlyJoin(rawValue) {
   }
   const normalized = String(rawValue).trim().toLowerCase();
   return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on";
+}
+
+function resolveSettledRevealMs(rawValue) {
+  const parsed = Number(rawValue);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return 2_000;
+  }
+  return Math.trunc(parsed);
 }
 
 function resolveAuthoritativeJoinEnabled(rawValue, { hasSupabaseDbUrl = false, observeOnlyJoinEnabled = false } = {}) {
@@ -175,10 +184,12 @@ let inactiveCleanupExecutorPromise = null;
 let acceptedBotAutoplayExecutorPromise = null;
 let beginSqlWsLoaderPromise = null;
 const timeoutFailureTrackerByTableId = new Map();
+const settledRolloverTimerByTableId = new Map();
 const TURN_TIMEOUT_FATAL_PREFIXES = ["showdown_"];
 const TURN_TIMEOUT_FATAL_REASONS = new Set(["timeout_apply_failed"]);
 const DEFAULT_INACTIVE_CLEANUP_ADAPTER_URL = new URL("./poker/persistence/inactive-cleanup-adapter.mjs", import.meta.url).href;
 const DEFAULT_ACCEPTED_BOT_AUTOPLAY_ADAPTER_URL = new URL("./poker/runtime/accepted-bot-autoplay-adapter.mjs", import.meta.url).href;
+const settledRevealMs = resolveSettledRevealMs(process.env.WS_POKER_SETTLED_REVEAL_MS);
 
 async function loadAuthoritativeLeaveExecutor() {
   if (!authoritativeLeaveExecutorPromise) {
@@ -798,7 +809,99 @@ function broadcastResyncRequired(tableId, reason) {
   }
 }
 
+function clearSettledRolloverTimer(tableId) {
+  const existing = settledRolloverTimerByTableId.get(tableId);
+  if (!existing) {
+    return;
+  }
+  clearTimeout(existing.timer);
+  settledRolloverTimerByTableId.delete(tableId);
+}
+
+function maybeScheduleSettledRollover(tableId) {
+  if (settledRevealMs <= 0) {
+    clearSettledRolloverTimer(tableId);
+    return;
+  }
+
+  const pokerState = tableManager.persistedPokerState(tableId);
+  if (!pokerState || pokerState.phase !== "SETTLED") {
+    clearSettledRolloverTimer(tableId);
+    return;
+  }
+
+  const settledAtMs = Date.parse(pokerState?.handSettlement?.settledAt || "");
+  const dueAt = Number.isFinite(settledAtMs)
+    ? settledAtMs + settledRevealMs
+    : Date.now() + settledRevealMs;
+  const existing = settledRolloverTimerByTableId.get(tableId);
+  if (existing && existing.dueAt === dueAt) {
+    return;
+  }
+
+  clearSettledRolloverTimer(tableId);
+  const delayMs = Math.max(0, dueAt - Date.now());
+  const timer = setTimeout(() => {
+    settledRolloverTimerByTableId.delete(tableId);
+    void enqueueTableCommand({
+      tableId,
+      commandName: "settled_rollover",
+      dedupeKey: "settled_rollover",
+      run: async () => {
+        const rollover = tableManager.rolloverSettledHand({ tableId, nowMs: Date.now() });
+        if (!rollover?.ok) {
+          return rollover;
+        }
+        if (!rollover.changed) {
+          return rollover;
+        }
+
+        const persisted = await persistMutatedState({
+          tableId,
+          expectedVersion: Number(rollover.stateVersion) - 1,
+          mutationKind: "settled_rollover"
+        });
+        if (!persisted?.ok) {
+          await recoverFromPersistConflict({
+            tableId,
+            restoreTableFromPersisted,
+            broadcastStateSnapshots,
+            broadcastResyncRequired
+          });
+          return {
+            ok: false,
+            changed: false,
+            reason: persisted?.reason || "persist_failed",
+            stateVersion: rollover.stateVersion
+          };
+        }
+
+        broadcastStateSnapshots(tableId);
+        try {
+          scheduleBotStep({
+            tableId,
+            trigger: "settled_rollover",
+            requestId: null,
+            frameTs: null
+          });
+        } catch (error) {
+          klogSafe("ws_settled_rollover_bot_autoplay_failed", {
+            tableId,
+            message: error?.message || "unknown"
+          });
+        }
+        return rollover;
+      }
+    });
+  }, delayMs);
+  if (typeof timer?.unref === "function") {
+    timer.unref();
+  }
+  settledRolloverTimerByTableId.set(tableId, { timer, dueAt });
+}
+
 function broadcastStateSnapshots(tableId) {
+  maybeScheduleSettledRollover(tableId);
   const recipients = tableManager.orderedConnectionsForTable(tableId, (socket) => socket.__connState?.sessionId ?? "");
   for (const recipient of recipients) {
     const recipientConnState = recipient.__connState;

@@ -10,8 +10,10 @@ import {
   buildNextHandStateFromSettled,
   isContinuationEligibleByStack,
   orderedEligibleSeatMembers,
+  replaceBrokeBotsForNextHand,
   resolveNextDealerSeatNo
 } from "../engine/poker-engine.mjs";
+import { stampTurnDeadline } from "../shared/poker-turn-timeout.mjs";
 
 const DEFAULT_PRESENCE_TTL_MS = 10_000;
 const DEFAULT_MAX_SEATS = 10;
@@ -422,6 +424,57 @@ export function createTableManager({
       action: timeoutApplied.action,
       actorUserId: timeoutApplied.actorUserId,
       stateVersion: timeoutApplied.stateVersion
+    };
+  }
+
+  function rolloverSettledHand({ tableId, nowMs = Date.now() } = {}) {
+    const table = tables.get(tableId);
+    if (!table) {
+      return { ok: false, changed: false, reason: "table_not_found", stateVersion: 0 };
+    }
+
+    const settledState = table.coreState?.pokerState;
+    if (!settledState || typeof settledState !== "object" || Array.isArray(settledState)) {
+      return { ok: true, changed: false, reason: "state_missing", stateVersion: table.coreState.version };
+    }
+    if (settledState.phase !== "SETTLED") {
+      return { ok: true, changed: false, reason: "hand_not_settled", stateVersion: table.coreState.version };
+    }
+
+    const nextVersion = Number(table.coreState.version || 0) + 1;
+    const recycled = replaceBrokeBotsForNextHand({
+      coreState: table.coreState,
+      settledState,
+      nextVersion
+    });
+    const nextHandState = buildNextHandStateFromSettled({
+      tableId,
+      coreState: recycled.coreState,
+      settledState: recycled.settledState,
+      nextVersion
+    });
+
+    if (!nextHandState) {
+      return {
+        ok: true,
+        changed: false,
+        reason: "not_enough_players",
+        stateVersion: table.coreState.version
+      };
+    }
+
+    table.coreState = {
+      ...recycled.coreState,
+      version: nextVersion,
+      pokerState: stampTurnDeadline(nextHandState, resolveNowMs({ nowMs }))
+    };
+
+    return {
+      ok: true,
+      changed: true,
+      reason: null,
+      stateVersion: table.coreState.version,
+      handId: table.coreState?.pokerState?.handId ?? null
     };
   }
 
@@ -1156,6 +1209,7 @@ export function createTableManager({
     tableSnapshot,
     bootstrapHand,
     applyAction,
+    rolloverSettledHand,
     maybeApplyTurnTimeout,
     sweepTurnTimeouts,
     listDueTurnTimeouts,
