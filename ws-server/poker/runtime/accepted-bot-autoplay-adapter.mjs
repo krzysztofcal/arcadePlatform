@@ -14,7 +14,7 @@ import { awardPotsAtShowdown as awardLegacyPotsAtShowdown } from "../snapshot-ru
 import { withoutPrivateState as withoutLegacyPrivateState } from "../snapshot-runtime/poker-state-utils.mjs";
 import { computeLegalActions as computeLegacyLegalActions } from "../snapshot-runtime/poker-legal-actions.mjs";
 
-const DEFAULT_SHARED_AUTOPLAY_MODULE_URL = new URL("../../../shared/poker-domain/poker-autoplay.mjs", import.meta.url).href;
+const DEFAULT_SHARED_AUTOPLAY_MODULE_URL = new URL("../../shared/poker-domain/poker-autoplay.mjs", import.meta.url).href;
 const sharedAutoplayModulePromiseByUrl = new Map();
 
 const isActionPhase = (phase) => phase === "PREFLOP" || phase === "FLOP" || phase === "TURN" || phase === "RIVER";

@@ -5,17 +5,17 @@ import { createAcceptedBotAutoplayExecutor } from "./accepted-bot-autoplay-adapt
 import { initHandState, applyAction as applyRuntimeAction, advanceIfNeeded } from "../snapshot-runtime/poker-reducer.mjs";
 import { buildBootstrappedPokerState, applyCoreStateAction } from "../engine/poker-engine.mjs";
 import { computeSharedLegalActions } from "../shared/poker-primitives.mjs";
-import { runAdvanceLoop } from "../../../shared/poker-domain/poker-autoplay.mjs";
+import { runAdvanceLoop } from "../../shared/poker-domain/poker-autoplay.mjs";
 import { materializeShowdownAndPayout } from "../snapshot-runtime/poker-materialize-showdown.mjs";
 import { computeShowdown } from "../snapshot-runtime/poker-showdown.mjs";
 import { awardPotsAtShowdown } from "../snapshot-runtime/poker-payout.mjs";
 
 test("autoplay adapter resolves shared autoplay from neutral shared module path", () => {
   const source = fs.readFileSync(new URL("./accepted-bot-autoplay-adapter.mjs", import.meta.url), "utf8");
-  assert.match(source, /\.\.\/\.\.\/\.\.\/shared\/poker-domain\/poker-autoplay\.mjs/);
+  assert.match(source, /\.\.\/\.\.\/shared\/poker-domain\/poker-autoplay\.mjs/);
   assert.doesNotMatch(source, /netlify\/functions\/_shared/);
 
-  const sharedSource = fs.readFileSync(new URL("../../../shared/poker-domain/poker-autoplay.mjs", import.meta.url), "utf8");
+  const sharedSource = fs.readFileSync(new URL("../../shared/poker-domain/poker-autoplay.mjs", import.meta.url), "utf8");
   assert.doesNotMatch(sharedSource, /netlify\/functions\/_shared/);
 });
 
