@@ -173,7 +173,7 @@
         }
       }
     }
-    window.location.href = '/index.html';
+    window.location.href = '/account.html';
   }
 
   function isObject(value){

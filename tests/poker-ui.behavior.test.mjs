@@ -159,6 +159,7 @@ assert.equal(
   '/poker/table.html?tableId=table-1',
   'lobby routing helper should keep classic table url available for testing'
 );
+assert.match(source, /window\.location\.href = '\/account\.html';/, 'poker auth fallback should route to account page on the current deploy');
 
 const dumpPendingFlags = Object.assign({}, baseFlags, { dumpLogsPending: true, copyLogPending: false });
 assert.equal(availability(dumpPendingFlags).canDumpLogs, false, 'dump logs should be disabled when dump action is pending');

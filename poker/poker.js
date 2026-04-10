@@ -169,7 +169,7 @@
         }
       }
     }
-    window.location.href = '/index.html';
+    window.location.href = '/account.html';
   }
 
   async function authedFetch(url, options){
