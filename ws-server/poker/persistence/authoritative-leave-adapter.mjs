@@ -90,6 +90,11 @@ function normalizeValidatedResult({ result, tableId, userId, requestId, klog }) 
   };
 }
 
+function isRetryableSqlFailure(error) {
+  const code = typeof error?.code === "string" ? error.code : "";
+  return code === "40P01" || code === "40001";
+}
+
 export function createAuthoritativeLeaveExecutor({
   env = process.env,
   klog = () => {},
@@ -102,6 +107,7 @@ export function createAuthoritativeLeaveExecutor({
   },
   beginSql = beginSqlDefault
 } = {}) {
+  const maxRetryAttempts = 2;
   return async function executeAuthoritativeLeave({ tableId, userId, requestId }) {
     const override = resolveLeaveTestOverride(env);
     if (override) {
@@ -124,28 +130,38 @@ export function createAuthoritativeLeaveExecutor({
       };
     }
 
-    try {
-      const result = await module.executePokerLeave({
-        beginSql: (fn) => beginSql(fn, { env }),
-        tableId,
-        userId,
-        requestId,
-        includeState: true,
-        klog
-      });
-      return normalizeValidatedResult({ result, tableId, userId, requestId, klog });
-    } catch (error) {
-      klog("ws_leave_authoritative_failed", {
-        tableId,
-        userId,
-        requestId: requestId || null,
-        message: error?.message || "unknown",
-        code: typeof error?.code === "string" ? error.code : null
-      });
-      return {
-        ok: false,
-        code: typeof error?.code === "string" ? error.code : "authoritative_leave_failed"
-      };
+    for (let attempt = 1; attempt <= maxRetryAttempts; attempt += 1) {
+      try {
+        const result = await module.executePokerLeave({
+          beginSql: (fn) => beginSql(fn, { env }),
+          tableId,
+          userId,
+          requestId,
+          includeState: true,
+          klog
+        });
+        return normalizeValidatedResult({ result, tableId, userId, requestId, klog });
+      } catch (error) {
+        const retryable = isRetryableSqlFailure(error);
+        const finalAttempt = attempt >= maxRetryAttempts;
+        klog("ws_leave_authoritative_failed", {
+          tableId,
+          userId,
+          requestId: requestId || null,
+          message: error?.message || "unknown",
+          code: typeof error?.code === "string" ? error.code : null,
+          attempt,
+          retryable,
+          finalAttempt
+        });
+        if (retryable && !finalAttempt) continue;
+        return {
+          ok: false,
+          code: retryable
+            ? "temporarily_unavailable"
+            : (typeof error?.code === "string" ? error.code : "authoritative_leave_failed")
+        };
+      }
     }
   };
 }
