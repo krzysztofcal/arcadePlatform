@@ -555,7 +555,7 @@ export function createAcceptedBotStepExecutor({
       actionAmount: null,
       legalActionSummary: null
     };
-    const privateState = tableManager.persistedPokerState(tableId);
+    let privateState = tableManager.persistedPokerState(tableId);
     if (!privateState || typeof privateState !== "object") {
       return { ok: true, changed: false, actionCount: 0, reason: "missing_state" };
     }
@@ -581,7 +581,7 @@ export function createAcceptedBotStepExecutor({
           return { state: applied.state, events: [] };
         }
       : (loopPrivateState, botAction) => applyLegacyRuntimeAction(loopPrivateState, botAction);
-    const state = withoutPrivateState(privateState);
+    let state = withoutPrivateState(privateState);
     lastKnown.state = state;
     if (!isActionPhase(state?.phase) || !state?.turnUserId) {
       return { ok: true, changed: false, actionCount: 0, reason: "not_action_phase" };
@@ -602,9 +602,9 @@ export function createAcceptedBotStepExecutor({
       return { ok: true, changed: false, actionCount: 0, reason: "autoplay_unavailable", noop: true };
     }
 
-    const turnSnapshot = tableManager.tableSnapshot(tableId, state.turnUserId);
-    const seatBotMap = buildSeatBotMap(turnSnapshot?.seats);
-    const seatUserIdsInOrder = buildSeatUserIdsInOrder(privateState);
+    let turnSnapshot = tableManager.tableSnapshot(tableId, state.turnUserId);
+    let seatBotMap = buildSeatBotMap(turnSnapshot?.seats);
+    let seatUserIdsInOrder = buildSeatUserIdsInOrder(privateState);
     const cfg = getBotAutoplayConfig(env);
     if (isBotTurnAuthoritatively(tableManager, tableId, state.turnUserId, seatBotMap)) {
       const reactionDelayMs = resolveBotReactionDelayMs({
@@ -616,6 +616,21 @@ export function createAcceptedBotStepExecutor({
       });
       if (reactionDelayMs > 0) {
         await sleep(reactionDelayMs);
+        privateState = tableManager.persistedPokerState(tableId);
+        if (!privateState || typeof privateState !== "object") {
+          return { ok: true, changed: false, actionCount: 0, reason: "missing_state_after_delay" };
+        }
+        state = withoutPrivateState(privateState);
+        lastKnown.state = state;
+        if (!isActionPhase(state?.phase) || !state?.turnUserId) {
+          return { ok: true, changed: false, actionCount: 0, reason: "turn_changed_during_delay" };
+        }
+        turnSnapshot = tableManager.tableSnapshot(tableId, state.turnUserId);
+        seatBotMap = buildSeatBotMap(turnSnapshot?.seats);
+        seatUserIdsInOrder = buildSeatUserIdsInOrder(privateState);
+        if (!isBotTurnAuthoritatively(tableManager, tableId, state.turnUserId, seatBotMap)) {
+          return { ok: true, changed: false, actionCount: 0, reason: "turn_changed_during_delay" };
+        }
       }
     }
     logVerbose("ws_bot_autoplay_loop_start", {
