@@ -73,6 +73,7 @@
   var wsClient = null;
   var currentAccessToken = null;
   var authWatchTimer = null;
+  var turnClockTimer = null;
   var authUnsubscribe = null;
   var renderedSeatAnchors = {};
   var renderedSeatSlots = {};
@@ -99,6 +100,7 @@
       communityCards: [],
       heroCards: [],
       turnUserId: null,
+      turnStartedAt: null,
       turnDeadlineAt: null,
       phase: 'LOBBY',
       handId: null,
@@ -539,7 +541,11 @@
     else if (Number.isInteger(handObj.dealerSeatNo)) state.dealerSeat = handObj.dealerSeatNo;
 
     if (typeof turnObj.userId === 'string' && turnObj.userId) state.turnUserId = turnObj.userId;
+    else if (turnObj.userId == null) state.turnUserId = null;
+    if (turnObj.startedAt != null) state.turnStartedAt = Number(turnObj.startedAt);
+    else if (turnObj.startedAt == null) state.turnStartedAt = null;
     if (turnObj.deadlineAt != null) state.turnDeadlineAt = Number(turnObj.deadlineAt);
+    else if (turnObj.deadlineAt == null) state.turnDeadlineAt = null;
 
     if (Number.isFinite(Number(potObj.total))) state.potTotal = Number(potObj.total);
 
@@ -704,6 +710,24 @@
     return text.length <= 8 ? text : text.slice(0, 8);
   }
 
+  function normalizeTimerMs(value){
+    var numeric = Number(value);
+    return Number.isFinite(numeric) && numeric > 0 ? Math.trunc(numeric) : null;
+  }
+
+  function getTurnClockState(){
+    var deadlineAt = normalizeTimerMs(state.turnDeadlineAt);
+    if (!deadlineAt || !state.turnUserId) return null;
+    var startedAt = normalizeTimerMs(state.turnStartedAt);
+    var totalMs = startedAt && deadlineAt > startedAt ? (deadlineAt - startedAt) : 20_000;
+    var remainingMs = Math.max(0, deadlineAt - Date.now());
+    return {
+      remainingMs: remainingMs,
+      remainingSeconds: Math.ceil(remainingMs / 1000),
+      ratio: totalMs > 0 ? Math.max(0, Math.min(1, remainingMs / totalMs)) : 0
+    };
+  }
+
   function renderSeats(){
     if (!els.seatLayer) return;
     els.seatLayer.innerHTML = '';
@@ -744,6 +768,16 @@
       var avatar = document.createElement('div');
       avatar.className = 'poker-seat-avatar';
       avatar.textContent = seat ? initials(getDisplayName(seat)) : '+';
+      if (active){
+        var turnClock = getTurnClockState();
+        if (turnClock){
+          var clock = document.createElement('div');
+          clock.className = 'poker-seat-turn-clock' + (turnClock.remainingSeconds <= 5 ? ' poker-seat-turn-clock--warning' : '');
+          clock.style.setProperty('--turn-progress', String(turnClock.ratio));
+          clock.setAttribute('aria-hidden', 'true');
+          avatar.appendChild(clock);
+        }
+      }
 
       var stack = document.createElement('div');
       stack.className = 'poker-seat-stack';
@@ -1190,6 +1224,7 @@
   }
 
   function startDemoMode(){
+    startTurnClock();
     state = cloneState(demoState);
     state.wsReady = false;
     render();
@@ -1197,6 +1232,7 @@
   }
 
   function stopLiveMode(){
+    stopTurnClock();
     state.wsReady = false;
     if (wsClient && typeof wsClient.destroy === 'function'){
       try { wsClient.destroy(); } catch (_err){}
@@ -1225,6 +1261,7 @@
       return;
     }
     stopLiveMode();
+    startTurnClock();
     state = createEmptyLiveState(tableId, getUserIdFromToken(token));
     render();
     markBootReady();
@@ -1291,6 +1328,20 @@
     if (!authWatchTimer) return;
     window.clearInterval(authWatchTimer);
     authWatchTimer = null;
+  }
+
+  function startTurnClock(){
+    if (turnClockTimer) return;
+    turnClockTimer = window.setInterval(function(){
+      if (!state.turnUserId || !state.turnDeadlineAt) return;
+      renderSeats();
+    }, 200);
+  }
+
+  function stopTurnClock(){
+    if (!turnClockTimer) return;
+    window.clearInterval(turnClockTimer);
+    turnClockTimer = null;
   }
 
   function bindAuthLifecycle(){
