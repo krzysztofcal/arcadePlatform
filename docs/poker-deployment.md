@@ -142,6 +142,7 @@ The preview VPS contract is:
 - Public health endpoint: `https://ws-preview.kcswh.pl/healthz`
 - Preview port: `3001`
 - Remote upload staging directory: `/tmp/arcadeplatform-ws-preview`
+- Optional close grace: `POKER_TABLE_CLOSE_GRACE_MS=60000` keeps newly created empty tables open for 60s before cleanup may close them
 
 Preview deploys unpack into a temporary directory under `/tmp/arcadeplatform-ws-preview` and then sync the extracted files into `/opt/arcade-ws-preview/ws-server`.
 The workflow fails fast before mutating preview app contents when the preview base root, app dir, env file, service, Node.js, `tar`, `rsync`, `curl`, or required `PORT=3001`, `WS_AUTHORITATIVE_JOIN_ENABLED=1`, and non-empty `SUPABASE_DB_URL` settings are missing.
