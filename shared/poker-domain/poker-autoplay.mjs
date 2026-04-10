@@ -58,16 +58,19 @@ export const runBotAutoplayLoop = async ({
   withoutPrivateState,
   chooseBotActionTrivial,
   isBotTurn,
-  applyAction
+  applyAction,
+  beforeBotActionStep
 }) => {
   let responseFinalState = initialState;
   let loopPrivateState = initialPrivateState;
   let loopVersion = initialVersion;
+  let loopSeatBotMap = seatBotMap;
+  let loopSeatUserIdsInOrder = Array.isArray(seatUserIdsInOrder) ? seatUserIdsInOrder.slice() : [];
   let botActionCount = 0;
   let botStopReason = "not_attempted";
   let lastBotActionSummary = null;
   let responseEvents = [];
-  const botsOnlyAtStart = !hasParticipatingHumanInHand(responseFinalState, seatBotMap);
+  const botsOnlyAtStart = !hasParticipatingHumanInHand(responseFinalState, loopSeatBotMap);
   const effectiveMaxBotActions = botsOnlyAtStart
     ? Math.max(maxActions, botsOnlyHandCompletionHardCap)
     : maxActions;
@@ -87,8 +90,49 @@ export const runBotAutoplayLoop = async ({
 
   while (botActionCount < effectiveMaxBotActions) {
     if (!isActionPhase(responseFinalState.phase)) { botStopReason = "non_action_phase"; break; }
-    const botTurnUserId = responseFinalState.turnUserId;
-    if (!isBotTurn(botTurnUserId, seatBotMap)) { botStopReason = "turn_not_bot"; break; }
+    let botTurnUserId = responseFinalState.turnUserId;
+    if (!isBotTurn(botTurnUserId, loopSeatBotMap)) { botStopReason = "turn_not_bot"; break; }
+
+    if (typeof beforeBotActionStep === "function") {
+      const delayedStep = await beforeBotActionStep({
+        responseFinalState,
+        loopPrivateState,
+        loopVersion,
+        seatBotMap: loopSeatBotMap,
+        seatUserIdsInOrder: loopSeatUserIdsInOrder,
+        botActionCount,
+        effectiveMaxBotActions,
+        botTurnUserId
+      });
+      if (!delayedStep?.ok) {
+        botStopReason = delayedStep?.reason || "before_step_failed";
+        break;
+      }
+      if (delayedStep.responseFinalState && typeof delayedStep.responseFinalState === "object") {
+        responseFinalState = delayedStep.responseFinalState;
+      }
+      if (delayedStep.loopPrivateState && typeof delayedStep.loopPrivateState === "object") {
+        loopPrivateState = delayedStep.loopPrivateState;
+      }
+      if (Number.isFinite(Number(delayedStep.loopVersion))) {
+        loopVersion = Number(delayedStep.loopVersion);
+      }
+      if (delayedStep.seatBotMap instanceof Map || delayedStep.seatBotMap) {
+        loopSeatBotMap = delayedStep.seatBotMap;
+      }
+      if (Array.isArray(delayedStep.seatUserIdsInOrder)) {
+        loopSeatUserIdsInOrder = delayedStep.seatUserIdsInOrder.slice();
+      }
+      if (!isActionPhase(responseFinalState.phase)) {
+        botStopReason = "non_action_phase";
+        break;
+      }
+      if (!isBotTurn(responseFinalState.turnUserId, loopSeatBotMap)) {
+        botStopReason = delayedStep?.reason || "turn_not_bot";
+        break;
+      }
+      botTurnUserId = responseFinalState.turnUserId;
+    }
 
     const botLegalInfo = computeLegalActions({ statePublic: withoutPrivateState(responseFinalState), userId: botTurnUserId });
     const botChoice = chooseBotActionTrivial(botLegalInfo.actions);
@@ -121,7 +165,7 @@ export const runBotAutoplayLoop = async ({
     const botAdvanced = runAdvanceLoop(botNextState, botEvents, botAdvanceEvents, advanceIfNeeded);
     botNextState = botAdvanced.nextState;
 
-    const botEligibleUserIds = seatUserIdsInOrder.filter((userId) =>
+    const botEligibleUserIds = loopSeatUserIdsInOrder.filter((userId) =>
       typeof userId === "string"
       && !botNextState.foldedByUserId?.[userId]
       && !botNextState.leftTableByUserId?.[userId]
@@ -138,7 +182,7 @@ export const runBotAutoplayLoop = async ({
     if ((botNeedsSingleWinnerResolution || botNeedsFullShowdownResolution) && typeof materializeShowdownState === "function") {
       botNextState = materializeShowdownState(
         botNextState,
-        seatUserIdsInOrder,
+        loopSeatUserIdsInOrder,
         loopPrivateState?.holeCardsByUserId,
         { requiresShowdownComparison: botNeedsFullShowdownResolution }
       );

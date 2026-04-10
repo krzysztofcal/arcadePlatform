@@ -606,33 +606,6 @@ export function createAcceptedBotStepExecutor({
     let seatBotMap = buildSeatBotMap(turnSnapshot?.seats);
     let seatUserIdsInOrder = buildSeatUserIdsInOrder(privateState);
     const cfg = getBotAutoplayConfig(env);
-    if (isBotTurnAuthoritatively(tableManager, tableId, state.turnUserId, seatBotMap)) {
-      const reactionDelayMs = resolveBotReactionDelayMs({
-        state,
-        minReactionMs: cfg.minReactionMs,
-        maxReactionMs: cfg.maxReactionMs,
-        random,
-        now
-      });
-      if (reactionDelayMs > 0) {
-        await sleep(reactionDelayMs);
-        privateState = tableManager.persistedPokerState(tableId);
-        if (!privateState || typeof privateState !== "object") {
-          return { ok: true, changed: false, actionCount: 0, reason: "missing_state_after_delay" };
-        }
-        state = withoutPrivateState(privateState);
-        lastKnown.state = state;
-        if (!isActionPhase(state?.phase) || !state?.turnUserId) {
-          return { ok: true, changed: false, actionCount: 0, reason: "turn_changed_during_delay" };
-        }
-        turnSnapshot = tableManager.tableSnapshot(tableId, state.turnUserId);
-        seatBotMap = buildSeatBotMap(turnSnapshot?.seats);
-        seatUserIdsInOrder = buildSeatUserIdsInOrder(privateState);
-        if (!isBotTurnAuthoritatively(tableManager, tableId, state.turnUserId, seatBotMap)) {
-          return { ok: true, changed: false, actionCount: 0, reason: "turn_changed_during_delay" };
-        }
-      }
-    }
     logVerbose("ws_bot_autoplay_loop_start", {
       ...baseLog,
       runtimeFlavor,
@@ -701,6 +674,61 @@ export function createAcceptedBotStepExecutor({
             stateVersion: Number(tableManager.persistedStateVersion(tableId) || 0)
           });
           return legal;
+        },
+        beforeBotActionStep: async ({
+          responseFinalState,
+          loopPrivateState,
+          loopVersion,
+          seatBotMap: loopSeatBotMap,
+          seatUserIdsInOrder: loopSeatOrder,
+          botActionCount,
+          botTurnUserId
+        }) => {
+          if (!isBotTurnAuthoritatively(tableManager, tableId, botTurnUserId, loopSeatBotMap)) {
+            return { ok: false, reason: "turn_not_bot" };
+          }
+          const reactionDelayMs = resolveBotReactionDelayMs({
+            state: responseFinalState,
+            minReactionMs: cfg.minReactionMs,
+            maxReactionMs: cfg.maxReactionMs,
+            random,
+            now
+          });
+          if (reactionDelayMs > 0) {
+            logVerbose("ws_bot_autoplay_reaction_delay", {
+              ...baseLog,
+              botTurnUserId: botTurnUserId || null,
+              botActionCount,
+              delayMs: reactionDelayMs,
+              ...buildDiagnosticSnapshot(responseFinalState),
+              stateVersion: Number(loopVersion || tableManager.persistedStateVersion(tableId) || 0)
+            });
+            await sleep(reactionDelayMs);
+          }
+
+          const refreshedPrivateState = tableManager.persistedPokerState(tableId);
+          if (!refreshedPrivateState || typeof refreshedPrivateState !== "object") {
+            return { ok: false, reason: "missing_state_after_delay" };
+          }
+          const refreshedState = withoutPrivateState(refreshedPrivateState);
+          lastKnown.state = refreshedState;
+          if (!isActionPhase(refreshedState?.phase) || !refreshedState?.turnUserId) {
+            return { ok: false, reason: "turn_changed_during_delay" };
+          }
+          const refreshedTurnSnapshot = tableManager.tableSnapshot(tableId, refreshedState.turnUserId);
+          const refreshedSeatBotMap = buildSeatBotMap(refreshedTurnSnapshot?.seats);
+          const refreshedSeatUserIdsInOrder = buildSeatUserIdsInOrder(refreshedPrivateState);
+          if (!isBotTurnAuthoritatively(tableManager, tableId, refreshedState.turnUserId, refreshedSeatBotMap)) {
+            return { ok: false, reason: "turn_changed_during_delay" };
+          }
+          return {
+            ok: true,
+            responseFinalState: refreshedState,
+            loopPrivateState: refreshedPrivateState,
+            loopVersion: Number(tableManager.persistedStateVersion(tableId) || loopVersion || 0),
+            seatBotMap: refreshedSeatBotMap,
+            seatUserIdsInOrder: refreshedSeatUserIdsInOrder.length > 0 ? refreshedSeatUserIdsInOrder : loopSeatOrder
+          };
         },
         withoutPrivateState,
         chooseBotActionTrivial: (legalActions) => {
