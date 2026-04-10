@@ -24,5 +24,7 @@ assert.match(tableV2Html, /id="pokerV2JoinBtn"/, 'poker table v2 should include 
 assert.match(tableV2Html, /id="pokerLobbyLink"/, 'poker table v2 should include a back-to-lobby link in the hamburger menu');
 assert.doesNotMatch(tableV2Html, /pokerV2DemoPill/, 'poker table v2 should not render the legacy demo pill');
 assert.match(tableV2Html, /src="\/poker\/poker-ws-client\.js" defer/, 'poker table v2 should bootstrap WS client for live runtime');
+assert.equal(tableV2Html.indexOf('id="pokerSeatLayer"') < tableV2Html.indexOf('id="pokerDealerChip"'), true, 'dealer chip should be positioned in the full scene after the seat layer');
+assert.equal(tableV2Html.indexOf('id="pokerDealerChip"') < tableV2Html.indexOf('class="poker-center-layer"'), true, 'dealer chip should not live inside the center layer');
 assert.match(tableV2Css, /\.poker-menu-panel\[hidden\]\{display:none;\}/, 'poker table v2 menu should hard-hide when hidden attribute is present');
 assert.match(tableV2Css, /\.poker-action-bar\{position:fixed; right:max\(10px, env\(safe-area-inset-right\)\); bottom:max\(10px, env\(safe-area-inset-bottom\)\); width:min\(33vw, 168px\); display:grid; grid-template-columns:minmax\(0, 1fr\);/, 'poker table v2 action rail should dock to the bottom-right in a single column');
