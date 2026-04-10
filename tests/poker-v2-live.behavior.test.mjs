@@ -5,6 +5,11 @@ import path from 'node:path';
 import vm from 'node:vm';
 
 function makeElement(id){
+  const style = {
+    setProperty(name, value){ this[name] = String(value); },
+    getPropertyValue(name){ return this[name] || ''; },
+    removeProperty(name){ delete this[name]; }
+  };
   const element = {
     id,
     hidden: false,
@@ -13,7 +18,7 @@ function makeElement(id){
     value: '',
     className: '',
     dataset: {},
-    style: {},
+    style: style,
     children: [],
     parentNode: null,
     attributes: {},
@@ -349,6 +354,87 @@ test('poker v2 aligns the right rail seats and keeps the chip on the dealer seat
   assert.equal(rightBottomSeat.style.left, '80%');
   assert.equal(harness.elements.pokerDealerChip.style.left, '71%');
   assert.equal(harness.elements.pokerDealerChip.style.top, '34%');
+});
+
+test('poker v2 shows a live turn clock only on the active seat avatar', async () => {
+  const nowMs = Date.now();
+  const harness = createHarness();
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  const ws = harness.getCreateOptions();
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 5,
+      table: {
+        tableId: 'table-1',
+        status: 'OPEN',
+        maxSeats: 6,
+        members: [
+          { userId: 'user-1', seat: 1, displayName: 'Hero' },
+          { userId: 'villain-1', seat: 2, displayName: 'Villain 1' }
+        ]
+      },
+      public: {
+        hand: { handId: 'hand-4', status: 'TURN', dealerSeatNo: 2 },
+        turn: { userId: 'villain-1', startedAt: nowMs - 10_000, deadlineAt: nowMs + 10_000 },
+        pot: { total: 12, sidePots: [] },
+        legalActions: { seat: 1, actions: [] }
+      },
+      you: { seat: 1 }
+    }
+  });
+  await harness.flush();
+
+  const activeSeat = findSeatByLabel(harness, 'Villain 1');
+  const heroSeat = harness.elements.pokerSeatLayer.children.find((node) => /poker-seat--hero/.test(node.className));
+  const activeAvatar = activeSeat.children.find((node) => node.className === 'poker-seat-avatar');
+  const heroAvatar = heroSeat.children.find((node) => node.className === 'poker-seat-avatar');
+  const activeClock = activeAvatar.children.find((node) => /poker-seat-turn-clock/.test(node.className));
+  const heroClock = heroAvatar.children.find((node) => /poker-seat-turn-clock/.test(node.className));
+
+  assert.ok(activeClock, 'active seat should show a turn clock overlay');
+  assert.equal(Math.abs(Number(activeClock.style['--turn-progress']) - 0.5) < 0.02, true);
+  assert.equal(heroClock, undefined, 'inactive seats should not show the turn clock overlay');
+});
+
+test('poker v2 turns the live clock red when five seconds remain', async () => {
+  const nowMs = Date.now();
+  const harness = createHarness();
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  const ws = harness.getCreateOptions();
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 6,
+      table: {
+        tableId: 'table-1',
+        status: 'OPEN',
+        maxSeats: 6,
+        members: [{ userId: 'user-1', seat: 1, displayName: 'Hero' }]
+      },
+      public: {
+        hand: { handId: 'hand-5', status: 'TURN', dealerSeatNo: 1 },
+        turn: { userId: 'user-1', startedAt: nowMs - 15_500, deadlineAt: nowMs + 4_500 },
+        pot: { total: 4, sidePots: [] },
+        legalActions: { seat: 1, actions: ['FOLD', 'CHECK'] }
+      },
+      you: { seat: 1 }
+    }
+  });
+  await harness.flush();
+
+  const heroSeat = harness.elements.pokerSeatLayer.children.find((node) => /poker-seat--hero/.test(node.className));
+  const heroAvatar = heroSeat.children.find((node) => node.className === 'poker-seat-avatar');
+  const heroClock = heroAvatar.children.find((node) => /poker-seat-turn-clock/.test(node.className));
+
+  assert.ok(heroClock);
+  assert.match(heroClock.className, /poker-seat-turn-clock--warning/);
 });
 
 test('poker v2 keeps the dealer chip fixed while action moves between players', async () => {
