@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#06080f">
+  <title>Poker Table v2 - Arcade Hub</title>
+  <style>
+    body{margin:0;background:#06080f;color:#e7edf8;font-family:Poppins,sans-serif}
+    #pokerTableScreen{visibility:hidden}
+    #pokerTableScreen[data-boot-ready="1"]{visibility:visible}
+    .poker-boot-splash{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:radial-gradient(circle at 50% 20%, rgba(235,176,91,0.22), rgba(8,9,14,0.92) 46%),radial-gradient(circle at 50% 120%, rgba(20,117,68,0.18), rgba(6,8,12,0.98) 46%),#05070c;color:#f8efd6;z-index:100}
+    .poker-boot-splash[hidden]{display:none}
+    .poker-boot-splash__card{padding:20px 24px;border-radius:20px;border:1px solid rgba(255,223,180,0.22);background:linear-gradient(180deg, rgba(10,15,24,0.88), rgba(4,6,11,0.96));box-shadow:0 16px 28px rgba(0,0,0,0.46), inset 0 1px 1px rgba(255,255,255,0.08);font-weight:700;letter-spacing:.04em;text-transform:uppercase}
+  </style>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap">
+  <script src="/js/i18n.js" defer></script>
+  <script src="/js/auth/supabase-config.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js" defer></script>
+  <script src="/js/auth/supabaseClient.js" defer></script>
+  <script src="/js/build-info.js" defer></script>
+  <script src="/poker/poker-ws-client.js" defer></script>
+  <link rel="stylesheet" href="/poker/poker-v2.css">
+  <script src="/poker/poker-v2.js" defer></script>
+</head>
+<body>
+  <div class="poker-boot-splash" id="pokerBootSplash" aria-live="polite">
+    <div class="poker-boot-splash__card">Loading table…</div>
+  </div>
+  <div class="poker-table-screen" id="pokerTableScreen">
+    <a id="xpBadge" class="xp-badge xp-badge--loading poker-v2-xp-badge" aria-live="polite" aria-busy="true" href="/xp.html"><span class="xp-badge__label">XP</span></a>
+
+    <button type="button" class="poker-menu-toggle" id="pokerMenuToggle" aria-label="Toggle table menu" aria-expanded="false" aria-controls="pokerMenuPanel">
+      <span></span>
+      <span></span>
+      <span></span>
+    </button>
+
+    <nav class="poker-menu-panel" id="pokerMenuPanel" hidden>
+      <a id="pokerLobbyLink" href="/poker/">Back to lobby</a>
+      <a id="pokerClassicLink" href="/poker/table.html">Open Classic Table</a>
+      <a id="pokerV2Link" href="/poker/table-v2.html">Open Table v2</a>
+    </nav>
+
+    <section class="poker-live-panel">
+      <div class="poker-live-meta">
+        <div class="poker-live-status" id="pokerV2LiveStatus">Connecting…</div>
+        <div class="poker-live-table-meta" id="pokerV2TableMeta">Table</div>
+        <div class="poker-live-turn" id="pokerV2TurnText">Waiting for action</div>
+      </div>
+      <div class="poker-live-actions">
+        <span class="poker-live-pill">Stack <strong id="pokerV2StackText">—</strong></span>
+        <button type="button" class="poker-live-btn" id="pokerV2SignInBtn">Sign in</button>
+        <label class="poker-live-input">
+          <span>Seat</span>
+          <input type="number" id="pokerV2SeatNo" value="1" min="1" step="1">
+        </label>
+        <label class="poker-live-input">
+          <span>Buy-in</span>
+          <input type="number" id="pokerV2BuyIn" value="100" min="1" step="1">
+        </label>
+        <button type="button" class="poker-live-btn poker-live-btn--accent" id="pokerV2JoinBtn">Join</button>
+        <button type="button" class="poker-live-btn" id="pokerV2StartBtn" hidden>Start hand</button>
+        <button type="button" class="poker-live-btn" id="pokerV2LeaveBtn" hidden>Leave</button>
+      </div>
+      <div class="poker-live-error" id="pokerV2ErrorText" hidden></div>
+    </section>
+
+    <div class="poker-scene">
+      <div class="poker-scene-bg"></div>
+
+      <div class="poker-table-shell">
+        <div class="poker-table-felt"></div>
+        <div class="poker-table-inner-ring"></div>
+      </div>
+
+      <div class="poker-seat-layer" id="pokerSeatLayer"></div>
+      <div class="poker-dealer-chip" id="pokerDealerChip">D</div>
+
+      <div class="poker-center-layer">
+        <div class="poker-pot-pill" id="pokerPotPill">Pot 1,350</div>
+        <div class="poker-community-cards" id="pokerCommunityCards"></div>
+      </div>
+
+      <div class="poker-hero-cards" id="pokerHeroCards"></div>
+    </div>
+
+    <div class="poker-action-bar" id="pokerActionBar">
+      <div class="poker-action-amount-input" id="pokerV2AmountInputWrap">
+        <strong id="pokerV2AmountValue">20</strong>
+        <input type="range" id="pokerV2AmountInput" value="20" min="1" max="20" step="1">
+      </div>
+      <div class="poker-action-buttons">
+        <button type="button" class="poker-action-btn poker-action-btn--fold" id="pokerV2FoldBtn" hidden>Fold</button>
+        <button type="button" class="poker-action-btn poker-action-btn--fold" id="pokerV2PrimaryBtn" hidden>Check</button>
+        <button type="button" class="poker-action-btn poker-action-btn--call" id="pokerV2AmountBtn" hidden>Bet</button>
+        <button type="button" class="poker-action-btn poker-action-btn--raise" id="pokerV2AllInBtn" hidden>All in</button>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

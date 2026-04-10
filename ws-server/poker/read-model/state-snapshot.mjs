@@ -127,7 +127,10 @@ export function buildStateSnapshotPayload({ tableSnapshot, userId }) {
       hand: {
         handId: typeof tableSnapshot?.hand?.handId === "string" ? tableSnapshot.hand.handId : null,
         status: typeof tableSnapshot?.hand?.status === "string" ? tableSnapshot.hand.status : null,
-        round: typeof tableSnapshot?.hand?.round === "string" ? tableSnapshot.hand.round : null
+        round: typeof tableSnapshot?.hand?.round === "string" ? tableSnapshot.hand.round : null,
+        dealerSeatNo: Number.isInteger(tableSnapshot?.hand?.dealerSeatNo)
+          ? tableSnapshot.hand.dealerSeatNo
+          : (Number.isInteger(tableSnapshot?.dealerSeatNo) ? tableSnapshot.dealerSeatNo : null)
       },
       board: {
         cards: normalizeCards(tableSnapshot?.board?.cards)

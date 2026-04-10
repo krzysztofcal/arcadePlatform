@@ -30,6 +30,8 @@ try {
 const gameHtml = await readFile(path.join(repoRoot, 'game.html'), 'utf8');
 const gameCatsHtml = await readFile(path.join(repoRoot, 'game_cats.html'), 'utf8');
 const gameTrexHtml = await readFile(path.join(repoRoot, 'game_trex.html'), 'utf8');
+const pokerIndexHtml = await readFile(path.join(repoRoot, 'poker', 'index.html'), 'utf8');
+const pokerTableHtml = await readFile(path.join(repoRoot, 'poker', 'table.html'), 'utf8');
 
 const rootPages = [
   accountHtml,
@@ -53,9 +55,16 @@ const nestedPages = [
   privacyPlHtml,
 ];
 
+const pokerPages = [
+  pokerIndexHtml,
+  pokerTableHtml,
+];
+
 test('sidebar model includes required entries', () => {
   assert.match(sidebarModelSource, /id:\s*['"]poker['"]/);
   assert.match(sidebarModelSource, /href:\s*['"]\/poker\//);
+  assert.match(sidebarModelSource, /id:\s*['"]pokerTableV2['"]/);
+  assert.match(sidebarModelSource, /href:\s*['"]\/poker\/table-v2\.html['"]/);
   assert.match(sidebarModelSource, /id:\s*['"]favorites['"]/);
   assert.match(sidebarModelSource, /id:\s*['"]recentlyPlayed['"]/);
 });
@@ -95,6 +104,15 @@ test('sidebar shell exists on all root and nested pages', () => {
   const pages = rootPages.concat(nestedPages);
   pages.forEach((content) => {
     if (!content) return;
+    assert.match(content, /id="sbToggle"/);
+    assert.match(content, /id="sidebar"/);
+  });
+});
+
+test('poker pages load sidebar scripts and shell', () => {
+  pokerPages.forEach((content) => {
+    assert.equal((content.match(/src="\/js\/core\/sidebar-model\.js"/g) || []).length, 1);
+    assert.equal((content.match(/src="\/js\/sidebar\.js"/g) || []).length, 1);
     assert.match(content, /id="sbToggle"/);
     assert.match(content, /id="sidebar"/);
   });

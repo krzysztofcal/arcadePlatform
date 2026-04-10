@@ -914,6 +914,7 @@ test("leave pending and conflict reject without success broadcasts", async () =>
     await auth(actor, actorToken, "auth-leave-pending");
     sendFrame(actor, { version: "1.0", type: "table_join", requestId: "join-leave-pending", ts: "2026-02-28T00:00:01Z", payload: { tableId } });
     await nextMessageOfType(actor, "commandResult");
+    await nextMessageOfType(actor, "table_state");
     sendFrame(actor, { version: "1.0", type: "table_leave", requestId: "leave-pending", ts: "2026-02-28T00:00:02Z", payload: { tableId } });
     const result = await nextMessageOfType(actor, "commandResult");
     assert.equal(result.payload.status, "rejected");
@@ -933,6 +934,7 @@ test("leave pending and conflict reject without success broadcasts", async () =>
     await auth(actor, actorToken, "auth-leave-conflict");
     sendFrame(actor, { version: "1.0", type: "table_join", requestId: "join-leave-conflict", ts: "2026-02-28T00:00:01Z", payload: { tableId } });
     await nextMessageOfType(actor, "commandResult");
+    await nextMessageOfType(actor, "table_state");
     sendFrame(actor, { version: "1.0", type: "table_leave", requestId: "leave-conflict", ts: "2026-02-28T00:00:02Z", payload: { tableId } });
     const result = await nextMessageOfType(actor, "commandResult");
     assert.equal(result.payload.status, "rejected");

@@ -169,7 +169,7 @@
         }
       }
     }
-    window.location.href = '/index.html';
+    window.location.href = '/account.html';
   }
 
   async function authedFetch(url, options){
@@ -569,6 +569,30 @@
     return { showActions: showActions, status: status };
   }
 
+  function buildPokerTableUrl(tableId, options){
+    var opts = options || {};
+    var useV2 = opts.useV2 !== false;
+    var path = useV2 ? '/poker/table-v2.html' : '/poker/table.html';
+    var query = [];
+    if (tableId){
+      query.push('tableId=' + encodeURIComponent(tableId));
+    }
+    if (opts.seatNo != null){
+      query.push('seatNo=' + encodeURIComponent(opts.seatNo));
+    }
+    if (opts.autoJoin === true){
+      query.push('autoJoin=1');
+    }
+    if (opts.autoStart === true){
+      query.push('autoStart=1');
+    }
+    return path + (query.length ? ('?' + query.join('&')) : '');
+  }
+
+  function navigateToPokerTable(tableId, options){
+    window.location.href = buildPokerTableUrl(tableId, options);
+  }
+
   if (window.__RUNNING_POKER_UI_TESTS__ === true){
     window.__POKER_UI_TEST_HOOKS__ = {
       normalizeDeadlineMs: normalizeDeadlineMs,
@@ -587,7 +611,8 @@
       getPokerDumpText: getPokerDumpText,
       copyTextToClipboard: copyTextToClipboard,
       isPokerLogLine: isPokerLogLine,
-      resolveDevLogActionAvailability: resolveDevLogActionAvailability
+      resolveDevLogActionAvailability: resolveDevLogActionAvailability,
+      buildPokerTableUrl: buildPokerTableUrl
     };
   }
 
@@ -1474,12 +1499,17 @@
         var openBtn = document.createElement('button');
         openBtn.className = 'poker-btn';
         openBtn.dataset.open = tbl.id;
-        openBtn.textContent = t('open', 'Open');
+        openBtn.textContent = t('open', 'Open V2');
+        var openClassicBtn = document.createElement('button');
+        openClassicBtn.className = 'poker-btn';
+        openClassicBtn.dataset.openClassic = tbl.id;
+        openClassicBtn.textContent = t('pokerOpenClassic', 'Open Classic');
         row.appendChild(tid);
         row.appendChild(stakesEl);
         row.appendChild(seatsEl);
         row.appendChild(statusEl);
         row.appendChild(openBtn);
+        row.appendChild(openClassicBtn);
         tableList.appendChild(row);
       });
     }
@@ -1498,12 +1528,11 @@
       try {
         var data = await apiPost(QUICK_SEAT_URL, payload);
         if (data && data.ok === true && data.tableId){
-          var nextUrl = '/poker/table.html?tableId=' + encodeURIComponent(data.tableId);
-          if (data.seatNo != null){
-            nextUrl += '&seatNo=' + encodeURIComponent(data.seatNo);
-          }
-          nextUrl += '&autoJoin=1';
-          window.location.href = nextUrl;
+          navigateToPokerTable(data.tableId, {
+            useV2: true,
+            seatNo: data.seatNo != null ? data.seatNo : null,
+            autoJoin: true
+          });
           return;
         }
         setError(errorEl, t('pokerErrNoTableId', 'Table created but no ID returned'));
@@ -1538,7 +1567,7 @@
       try {
         var data = await apiPost(CREATE_URL, { stakes: { sb: sb, bb: bb }, maxPlayers: maxPlayers });
         if (data.tableId){
-          window.location.href = '/poker/table.html?tableId=' + encodeURIComponent(data.tableId);
+          navigateToPokerTable(data.tableId, { useV2: true });
         } else {
           setError(errorEl, t('pokerErrNoTableId', 'Table created but no ID returned'));
         }
@@ -1562,7 +1591,9 @@
     function handleClick(e){
       var target = e.target;
       if (target.dataset && target.dataset.open){
-        window.location.href = '/poker/table.html?tableId=' + encodeURIComponent(target.dataset.open);
+        navigateToPokerTable(target.dataset.open, { useV2: true });
+      } else if (target.dataset && target.dataset.openClassic){
+        navigateToPokerTable(target.dataset.openClassic, { useV2: false });
       }
     }
 
@@ -1610,6 +1641,7 @@
     var authMsg = document.getElementById('pokerAuthMsg');
     var tableContent = document.getElementById('pokerTableContent');
     var tableIdEl = document.getElementById('pokerTableId');
+    var openV2Link = document.getElementById('pokerOpenV2Link');
     var stakesEl = document.getElementById('pokerStakes');
     var statusEl = document.getElementById('pokerStatus');
     var seatsGrid = document.getElementById('pokerSeatsGrid');
@@ -3549,8 +3581,10 @@
       var seats = data.seats || [];
       var stateObj = data.state || {};
       var gameState = stateObj.state || {};
+      var resolvedTableId = table.id || tableId;
 
-      if (tableIdEl) tableIdEl.textContent = shortId(table.id || tableId);
+      if (tableIdEl) tableIdEl.textContent = shortId(resolvedTableId);
+      if (openV2Link) openV2Link.href = buildPokerTableUrl(resolvedTableId, { useV2: true });
       var stakes = table.stakes;
       var parsedStakes = parseStakesUi(stakes);
       stakesValid = !!parsedStakes;

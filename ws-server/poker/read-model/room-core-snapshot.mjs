@@ -212,7 +212,8 @@ export function projectRoomCoreSnapshot({ tableId, roomId, coreState, members, u
       hand: {
         handId: null,
         status: members.length > 0 ? "LOBBY" : "EMPTY",
-        round: null
+        round: null,
+        dealerSeatNo: null
       },
       board: {
         cards: []
@@ -255,7 +256,8 @@ export function projectRoomCoreSnapshot({ tableId, roomId, coreState, members, u
     hand: {
       handId: typeof statePublic.handId === "string" && statePublic.handId.trim() ? statePublic.handId : null,
       status: typeof statePublic.phase === "string" ? statePublic.phase : null,
-      round: resolveRoundFromPhase(statePublic.phase)
+      round: resolveRoundFromPhase(statePublic.phase),
+      dealerSeatNo: Number.isInteger(statePublic.dealerSeatNo) ? statePublic.dealerSeatNo : null
     },
     board: {
       cards: normalizeCards(statePublic.community)

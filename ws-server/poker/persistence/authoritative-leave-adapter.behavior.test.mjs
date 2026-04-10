@@ -94,6 +94,57 @@ test("authoritative adapter taxonomy: execute failure with explicit code propaga
   assert.deepEqual(result, { ok: false, code: "state_conflict" });
 });
 
+test("authoritative adapter retries retryable SQL deadlock once before succeeding", async () => {
+  let attempts = 0;
+  const execute = createAuthoritativeLeaveExecutor({
+    env: {},
+    klog: () => {},
+    beginSql: async (fn) => fn({}),
+    loadAuthoritativeLeaveModule: async () => ({
+      executePokerLeave: async () => {
+        attempts += 1;
+        if (attempts === 1) {
+          throw Object.assign(new Error("deadlock"), { code: "40P01" });
+        }
+        return {
+          ok: true,
+          tableId: "t_retry",
+          state: {
+            version: 2,
+            state: {
+              tableId: "t_retry",
+              seats: [{ seatNo: 2, userId: "u2" }]
+            }
+          }
+        };
+      }
+    })
+  });
+
+  const result = await execute({ tableId: "t_retry", userId: "u1", requestId: "req_retry" });
+  assert.equal(attempts, 2);
+  assert.equal(result.ok, true);
+});
+
+test("authoritative adapter masks retryable SQL deadlock after final retry", async () => {
+  let attempts = 0;
+  const execute = createAuthoritativeLeaveExecutor({
+    env: {},
+    klog: () => {},
+    beginSql: async (fn) => fn({}),
+    loadAuthoritativeLeaveModule: async () => ({
+      executePokerLeave: async () => {
+        attempts += 1;
+        throw Object.assign(new Error("deadlock"), { code: "40P01" });
+      }
+    })
+  });
+
+  const result = await execute({ tableId: "t_retry_fail", userId: "u1", requestId: "req_retry_fail" });
+  assert.equal(attempts, 2);
+  assert.deepEqual(result, { ok: false, code: "temporarily_unavailable" });
+});
+
 
 
 
