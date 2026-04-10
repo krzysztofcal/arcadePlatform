@@ -530,6 +530,7 @@ export function createAcceptedBotStepExecutor({
   persistMutatedState,
   restoreTableFromPersisted,
   broadcastResyncRequired,
+  onBotStepPersisted = () => {},
   env = process.env,
   random = Math.random,
   now = Date.now,
@@ -614,6 +615,8 @@ export function createAcceptedBotStepExecutor({
       maxActions: 1
     });
     try {
+      let broadcastedStepCount = 0;
+      let lastBroadcastStateVersion = null;
       const botLoop = await runBotAutoplayLoop({
         tableId,
         requestId: `${trigger || "ws"}:${requestId || "no-request-id"}`,
@@ -844,6 +847,26 @@ export function createAcceptedBotStepExecutor({
             legalActionSummary: lastKnown.legalActionSummary,
             stateVersion: Number(applied.stateVersion)
           });
+          try {
+            await onBotStepPersisted({
+              tableId,
+              botTurnUserId,
+              botAction,
+              stateVersion: Number(applied.stateVersion),
+              latestState
+            });
+            broadcastedStepCount += 1;
+            lastBroadcastStateVersion = Number(applied.stateVersion);
+          } catch (error) {
+            klog("ws_bot_autoplay_step_broadcast_failed", {
+              ...baseLog,
+              botTurnUserId: botTurnUserId || null,
+              actionType: botAction?.type || null,
+              amount: botAction?.amount ?? null,
+              stateVersion: Number(applied.stateVersion),
+              message: error?.message || "unknown"
+            });
+          }
           return {
             ok: true,
             loopVersion: Number(applied.stateVersion),
@@ -870,6 +893,7 @@ export function createAcceptedBotStepExecutor({
         ? tableManager.tableSnapshot(tableId, finalTurnUserId)
         : tableManager.tableSnapshot(tableId, state.turnUserId || "");
       const finalSeatBotMap = buildSeatBotMap(finalTurnSnapshot?.seats);
+      const finalStateVersion = Number(tableManager.persistedStateVersion(tableId) || 0);
       const pendingBotTurn = !!finalPublicState
         && isActionPhase(finalPublicState.phase)
         && isBotTurnAuthoritatively(tableManager, tableId, finalTurnUserId, finalSeatBotMap);
@@ -879,6 +903,9 @@ export function createAcceptedBotStepExecutor({
         changed: (botLoop?.botActionCount || 0) > 0,
         actionCount: botLoop?.botActionCount || 0,
         reason: botLoop?.botStopReason || "not_attempted",
+        broadcastedStepCount,
+        lastBroadcastStateVersion,
+        finalStateVersion,
         pendingBotTurn,
         phase: typeof finalPublicState?.phase === "string" ? finalPublicState.phase : null,
         turnUserId: finalTurnUserId,
