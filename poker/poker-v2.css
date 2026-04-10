@@ -92,9 +92,7 @@ body{margin:0; min-height:100vh; font-family:Poppins, sans-serif; background:#06
 
 .poker-menu-panel a:active{background:rgba(65,91,138,0.42);}
 
-.poker-v2-back{position:absolute; top:70px; left:12px; z-index:20; display:inline-flex; align-items:center; min-height:38px; padding:0 12px; border-radius:12px; border:1px solid rgba(255,223,180,0.22); background:linear-gradient(180deg, rgba(16,24,37,0.88), rgba(7,10,15,0.96)); color:#e8eefb; text-decoration:none; font-size:0.88rem; font-weight:700; box-shadow:0 9px 17px rgba(0,0,0,0.38), inset 0 1px 1px rgba(255,255,255,0.14);}
-
-.poker-live-panel{position:relative; z-index:19; width:min(100%, 980px); margin:118px auto 0; padding:14px 16px; border-radius:22px; border:1px solid rgba(255,223,180,0.22); background:linear-gradient(180deg, rgba(10,15,24,0.88), rgba(4,6,11,0.96)); box-shadow:0 16px 28px rgba(0,0,0,0.46), inset 0 1px 1px rgba(255,255,255,0.08);}
+.poker-live-panel{position:relative; z-index:19; width:min(100%, 980px); margin:78px auto 0; padding:14px 16px; border-radius:22px; border:1px solid rgba(255,223,180,0.22); background:linear-gradient(180deg, rgba(10,15,24,0.88), rgba(4,6,11,0.96)); box-shadow:0 16px 28px rgba(0,0,0,0.46), inset 0 1px 1px rgba(255,255,255,0.08);}
 
 .poker-live-meta{display:flex; flex-wrap:wrap; gap:8px 14px; align-items:center; justify-content:space-between;}
 
@@ -138,6 +136,6 @@ body{margin:0; min-height:100vh; font-family:Poppins, sans-serif; background:#06
 
 @media (min-width:480px){.poker-scene{height:min(76vh, 860px);} .poker-seat{width:126px;} .poker-hero-cards{bottom:136px;} .poker-card{width:56px; height:76px;}}
 
-@media (max-width:640px){.poker-live-actions{align-items:stretch;} .poker-live-input{width:calc(50% - 5px);} .poker-live-input input{width:100%;} .poker-action-bar{width:min(33vw, 144px); right:8px; bottom:8px; gap:6px; padding:6px;} .poker-v2-back{top:68px;}}
+@media (max-width:640px){.poker-live-actions{align-items:stretch;} .poker-live-input{width:calc(50% - 5px);} .poker-live-input input{width:100%;} .poker-action-bar{width:min(33vw, 144px); right:8px; bottom:8px; gap:6px; padding:6px;}}
 
 .poker-v2-xp-badge{position:absolute; top:14px; right:12px; z-index:20; min-width:58px; padding:8px 10px; border-radius:14px; border:1px solid rgba(255,223,180,0.34); background:linear-gradient(180deg, rgba(16,24,37,0.88), rgba(7,10,15,0.96)); color:#e8eefb; text-decoration:none; font-size:0.88rem; font-weight:700; text-align:center; box-shadow:0 9px 17px rgba(0,0,0,0.48), inset 0 1px 1px rgba(255,255,255,0.2);} 

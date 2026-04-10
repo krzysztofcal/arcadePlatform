@@ -917,7 +917,6 @@
       }
     }
     if (els.amountInput) els.amountInput.disabled = !liveReady || !amountAction;
-    if (els.demoPill) els.demoPill.hidden = !!state.tableId;
   }
 
   function render(){
@@ -980,7 +979,7 @@
       else els.menuPanel.setAttribute('hidden', 'hidden');
       els.menuToggle.setAttribute('aria-expanded', hidden ? 'true' : 'false');
     });
-    ['classicLink', 'v2Link'].forEach(function(key){
+    ['lobbyLink', 'classicLink', 'v2Link'].forEach(function(key){
       if (!els[key]) return;
       els[key].addEventListener('click', function(){
         closeMenu();
@@ -1048,6 +1047,7 @@
   function selectElements(){
     els.menuToggle = document.getElementById('pokerMenuToggle');
     els.menuPanel = document.getElementById('pokerMenuPanel');
+    els.lobbyLink = document.getElementById('pokerLobbyLink');
     els.classicLink = document.getElementById('pokerClassicLink');
     els.v2Link = document.getElementById('pokerV2Link');
     els.seatLayer = document.getElementById('pokerSeatLayer');
@@ -1066,7 +1066,6 @@
     els.joinBuyIn = document.getElementById('pokerV2BuyIn');
     els.leaveBtn = document.getElementById('pokerV2LeaveBtn');
     els.startBtn = document.getElementById('pokerV2StartBtn');
-    els.demoPill = document.getElementById('pokerV2DemoPill');
     els.foldBtn = document.getElementById('pokerV2FoldBtn');
     els.primaryBtn = document.getElementById('pokerV2PrimaryBtn');
     els.amountBtn = document.getElementById('pokerV2AmountBtn');
