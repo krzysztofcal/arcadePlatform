@@ -28,7 +28,7 @@ test("buildStateSnapshotPayload returns canonical room-core payload for seated a
   assert.equal(payload.you.seat, 2);
   assert.deepEqual(payload.private, { userId: "user_a", seat: 2, holeCards: [] });
 
-  assert.deepEqual(payload.public.hand, { handId: null, status: "LOBBY", round: null });
+  assert.deepEqual(payload.public.hand, { handId: null, status: "LOBBY", round: null, dealerSeatNo: null });
   assert.deepEqual(payload.public.board, { cards: [] });
   assert.deepEqual(payload.public.pot, { total: 0, sidePots: [] });
   assert.deepEqual(payload.public.turn, { userId: "user_b", seat: 1, startedAt: null, deadlineAt: null });
@@ -114,6 +114,7 @@ test("buildStateSnapshotPayload projects bootstrapped PREFLOP state from table m
   const observerPayload = buildStateSnapshotPayload({ tableSnapshot: tableManager.tableSnapshot("table_live", "observer"), userId: "observer" });
 
   assert.equal(seatedPayload.public.hand.status, "PREFLOP");
+  assert.equal(seatedPayload.public.hand.dealerSeatNo, 1);
   assert.equal(typeof seatedPayload.public.hand.handId, "string");
   assert.deepEqual(seatedPayload.public.stacks, { user_a: 99, user_b: 98 });
   assert.deepEqual(seatedPayload.public.pot, { total: 3, sidePots: [] });
@@ -140,7 +141,7 @@ test("buildStateSnapshotPayload includes terminal showdown/settlement fields whe
       members: [{ userId: "user_a", seat: 1 }],
       memberCount: 1,
       youSeat: 1,
-      hand: { handId: "h_terminal", status: "SETTLED", round: null },
+      hand: { handId: "h_terminal", status: "SETTLED", round: null, dealerSeatNo: 1 },
       board: { cards: ["2H", "3H", "4H", "9C", "KD"] },
       pot: { total: 0, sidePots: [] },
       turn: { userId: null, seat: null, startedAt: null, deadlineAt: null },
@@ -183,7 +184,7 @@ test("buildStateSnapshotPayload serializes fresh next hand without stale termina
       ],
       memberCount: 2,
       youSeat: 1,
-      hand: { handId: "h_next", status: "PREFLOP", round: "PREFLOP" },
+      hand: { handId: "h_next", status: "PREFLOP", round: "PREFLOP", dealerSeatNo: 2 },
       board: { cards: [] },
       pot: { total: 3, sidePots: [] },
       turn: { userId: "user_a", seat: 1 },
@@ -193,6 +194,7 @@ test("buildStateSnapshotPayload serializes fresh next hand without stale termina
   });
 
   assert.equal(payload.public.hand.status, "PREFLOP");
+  assert.equal(payload.public.hand.dealerSeatNo, 2);
   assert.deepEqual(payload.public.board.cards, []);
   assert.equal("showdown" in payload.public, false);
   assert.equal("handSettlement" in payload.public, false);
@@ -213,7 +215,7 @@ test("buildStateSnapshotPayload serializes turn timer metadata for live hand", (
       ],
       memberCount: 2,
       youSeat: 1,
-      hand: { handId: "h_timer", status: "PREFLOP", round: "PREFLOP" },
+      hand: { handId: "h_timer", status: "PREFLOP", round: "PREFLOP", dealerSeatNo: 2 },
       board: { cards: [] },
       pot: { total: 3, sidePots: [] },
       turn: { userId: "user_a", seat: 1, startedAt: 1710000000000, deadlineAt: 1710000015000 },
@@ -239,7 +241,7 @@ test("buildStateSnapshotPayload keeps next-hand timer metadata and omits stale t
       ],
       memberCount: 2,
       youSeat: 1,
-      hand: { handId: "h_next_timer", status: "PREFLOP", round: "PREFLOP" },
+      hand: { handId: "h_next_timer", status: "PREFLOP", round: "PREFLOP", dealerSeatNo: 2 },
       board: { cards: [] },
       pot: { total: 3, sidePots: [] },
       turn: { userId: "user_a", seat: 1, startedAt: 1710000020000, deadlineAt: 1710000035000 },

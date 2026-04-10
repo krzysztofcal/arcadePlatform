@@ -15,7 +15,7 @@ test("projectRoomCoreSnapshot derives lobby snapshot public seats/stacks when po
   const observer = projectRoomCoreSnapshot({ ...baseInput, userId: "observer", youSeat: null });
 
   assert.equal(snapshot.roomId, "table_lobby");
-  assert.deepEqual(snapshot.hand, { handId: null, status: "LOBBY", round: null });
+  assert.deepEqual(snapshot.hand, { handId: null, status: "LOBBY", round: null, dealerSeatNo: null });
   assert.deepEqual(snapshot.turn, { userId: "user_a", seat: 1, startedAt: null, deadlineAt: null });
   assert.deepEqual(snapshot.seats, [{ userId: "user_a", seatNo: 1, status: "ACTIVE" }]);
   assert.deepEqual(snapshot.stacks, { user_a: 120 });
