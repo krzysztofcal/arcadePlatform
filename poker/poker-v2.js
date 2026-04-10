@@ -73,6 +73,7 @@
   var currentAccessToken = null;
   var authWatchTimer = null;
   var authUnsubscribe = null;
+  var renderedSeatAnchors = {};
   var els = {};
 
   function cloneState(source){
@@ -648,6 +649,14 @@
     return Math.round(num).toLocaleString();
   }
 
+  function formatCompactAmount(value){
+    var num = Number(value || 0);
+    if (!Number.isFinite(num) || num <= 0) return '0';
+    if (num < 1000) return String(Math.round(num));
+    if (num < 1000000) return String(Math.round(num / 1000)) + 'k';
+    return String(Math.round(num / 1000000)) + 'M';
+  }
+
   function getSeatNumberingOffset(){
     for (var i = 0; i < state.seats.length; i++){
       if (state.seats[i] && state.seats[i].seatNo === 0) return 0;
@@ -681,6 +690,7 @@
   function renderSeats(){
     if (!els.seatLayer) return;
     els.seatLayer.innerHTML = '';
+    renderedSeatAnchors = {};
     var offset = getSeatNumberingOffset();
     var seatsByIndex = {};
     state.seats.forEach(function(seat){
@@ -695,9 +705,11 @@
       var active = !!(seat && seat.userId && state.turnUserId && seat.userId === state.turnUserId);
       var hero = !!(seat && seat.userId && state.currentUserId && seat.userId === state.currentUserId);
       var folded = !!(seat && /FOLD/i.test(seat.status || ''));
-      var anchor = getSeatAnchor(rotateSeatIndex(i, state.maxSeats), state.maxSeats);
+      var rotatedIndex = rotateSeatIndex(i, state.maxSeats);
+      var anchor = getSeatAnchor(rotatedIndex, state.maxSeats);
       if (hero && state.maxSeats >= 4) anchor = { x: 34, y: 91 };
-      else if (rotateSeatIndex(i, state.maxSeats) === 3 && state.maxSeats >= 4) anchor = { x: 52, y: 84 };
+      else if (rotatedIndex === 2 && state.maxSeats >= 6) anchor = { x: 80, y: 58 };
+      else if (rotatedIndex === 3 && state.maxSeats >= 4) anchor = { x: 52, y: 82 };
       article.className = 'poker-seat'
         + (active ? ' poker-seat--active' : '')
         + (folded ? ' poker-seat--folded' : '')
@@ -705,6 +717,7 @@
         + (!seat ? ' poker-seat--empty' : '');
       article.style.left = anchor.x + '%';
       article.style.top = anchor.y + '%';
+      if (seat && Number.isInteger(seat.seatNo)) renderedSeatAnchors[seat.seatNo] = anchor;
 
       var avatar = document.createElement('div');
       avatar.className = 'poker-seat-avatar';
@@ -782,14 +795,18 @@
       els.dealerChip.hidden = true;
       return;
     }
-    var offset = getSeatNumberingOffset();
-    var heroSeat = deriveCurrentSeat();
-    var index = Math.max(0, state.dealerSeat - offset);
-    var rotatedIndex = rotateSeatIndex(index, Math.max(state.maxSeats, 1));
-    var anchor = getSeatAnchor(rotatedIndex, Math.max(state.maxSeats, 1));
-    if (rotatedIndex === 3 && state.maxSeats >= 4) anchor = { x: 52, y: 84 };
-    if (heroSeat && Number.isInteger(heroSeat.seatNo) && heroSeat.seatNo === state.dealerSeat && state.maxSeats >= 4){
-      anchor = { x: 34, y: 91 };
+    var anchor = renderedSeatAnchors[state.dealerSeat] || null;
+    if (!anchor){
+      var offset = getSeatNumberingOffset();
+      var index = Math.max(0, state.dealerSeat - offset);
+      var rotatedIndex = rotateSeatIndex(index, Math.max(state.maxSeats, 1));
+      anchor = getSeatAnchor(rotatedIndex, Math.max(state.maxSeats, 1));
+      if (rotatedIndex === 2 && state.maxSeats >= 6) anchor = { x: 80, y: 58 };
+      else if (rotatedIndex === 3 && state.maxSeats >= 4) anchor = { x: 52, y: 82 };
+      var heroSeat = deriveCurrentSeat();
+      if (heroSeat && Number.isInteger(heroSeat.seatNo) && heroSeat.seatNo === state.dealerSeat && state.maxSeats >= 4){
+        anchor = { x: 34, y: 91 };
+      }
     }
     var tableX = anchor.x + (50 - anchor.x) * 0.28;
     var tableY = anchor.y + (50 - anchor.y) * 0.34;
@@ -898,7 +915,12 @@
     }
     if (els.primaryBtn){
       els.primaryBtn.hidden = !primary;
-      els.primaryBtn.textContent = primary === 'CHECK' ? 'Check' : 'Call';
+      var toCall = Number.isFinite(state.actionConstraints && state.actionConstraints.toCall)
+        ? Math.max(0, Math.trunc(state.actionConstraints.toCall))
+        : null;
+      els.primaryBtn.textContent = primary === 'CHECK'
+        ? 'Check'
+        : ('Call (' + formatCompactAmount(toCall) + ')');
       els.primaryBtn.dataset.action = primary || '';
       els.primaryBtn.disabled = !liveReady;
     }

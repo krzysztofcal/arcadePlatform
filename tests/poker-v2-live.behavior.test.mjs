@@ -225,6 +225,7 @@ test('poker v2 boots live mode, preserves table links, and sends WS commands', a
   assert.equal(harness.elements.pokerHeroCards.children.length, 2, 'v2 should render live hole cards');
   assert.equal(harness.elements.pokerPotPill.textContent, 'Pot 42');
   assert.equal(harness.elements.pokerV2PrimaryBtn.hidden, false, 'v2 should surface the primary turn action');
+  assert.equal(harness.elements.pokerV2PrimaryBtn.textContent, 'Check', 'v2 should keep check compact when there is nothing to call');
   assert.equal(harness.elements.pokerV2AmountBtn.hidden, false, 'v2 should surface bet/raise when legal');
   assert.equal(harness.elements.pokerV2JoinBtn.disabled, true, 'join should stay disabled once the user is seated');
   const heroSeat = harness.elements.pokerSeatLayer.children.find((node) => /poker-seat--hero/.test(node.className));
@@ -239,6 +240,7 @@ test('poker v2 boots live mode, preserves table links, and sends WS commands', a
   assert.ok(bestHand, 'hero seat should surface a best-hand summary');
   assert.equal(harness.elements.pokerDealerChip.hidden, false, 'dealer chip should be visible when dealer seat is known');
   assert.notEqual(harness.elements.pokerDealerChip.style.left, '50%', 'dealer chip should not stay centered when dealer seat is known');
+  assert.notEqual(harness.elements.pokerDealerChip.style.top, '50%', 'dealer chip should be positioned near a rendered seat');
 
   harness.elements.pokerV2AmountInput.value = '77';
   harness.elements.pokerV2AmountBtn.click();
@@ -255,6 +257,34 @@ test('poker v2 boots live mode, preserves table links, and sends WS commands', a
   assert.equal(JSON.stringify(harness.startPayloads[0]), JSON.stringify({ tableId: 'table-1' }));
   assert.equal(harness.leavePayloads.length, 1);
   assert.equal(JSON.stringify(harness.leavePayloads[0]), JSON.stringify({ tableId: 'table-1' }));
+});
+
+test('poker v2 shows compact call amount in the primary action label', async () => {
+  const harness = createHarness();
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  const ws = harness.getCreateOptions();
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 3,
+      table: { tableId: 'table-1', status: 'OPEN', maxSeats: 6, members: [{ userId: 'user-1', seat: 1 }] },
+      public: {
+        hand: { handId: 'hand-2', status: 'TURN', dealerSeatNo: 4 },
+        turn: { userId: 'user-1', deadlineAt: Date.now() + 5000 },
+        pot: { total: 48, sidePots: [] },
+        legalActions: { seat: 1, actions: ['FOLD', 'CALL', 'RAISE'] },
+        actionConstraints: { toCall: 1260, minRaiseTo: 2400, maxRaiseTo: 9000 }
+      },
+      private: { holeCards: [{ r: 'A', s: 'S' }, { r: 'K', s: 'S' }] },
+      you: { seat: 1 }
+    }
+  });
+  await harness.flush();
+
+  assert.equal(harness.elements.pokerV2PrimaryBtn.textContent, 'Call (1k)');
 });
 
 test('poker v2 falls back to demo mode when tableId is missing', async () => {
