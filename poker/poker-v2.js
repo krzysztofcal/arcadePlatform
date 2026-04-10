@@ -813,18 +813,7 @@
 
   function renderDealerChip(){
     if (!els.dealerChip) return;
-    var targetSeatNo = null;
-    for (var i = 0; i < state.seats.length; i++){
-      var seat = state.seats[i];
-      if (seat && seat.userId && state.turnUserId && seat.userId === state.turnUserId){
-        targetSeatNo = seat.seatNo;
-        break;
-      }
-    }
-    if (!Number.isInteger(targetSeatNo) && Number.isInteger(state.youSeat) && state.currentUserId && state.turnUserId === state.currentUserId){
-      targetSeatNo = state.youSeat;
-    }
-    if (!Number.isInteger(targetSeatNo) && Number.isInteger(state.dealerSeat)) targetSeatNo = state.dealerSeat;
+    var targetSeatNo = Number.isInteger(state.dealerSeat) ? state.dealerSeat : null;
     if (!Number.isInteger(targetSeatNo)){
       els.dealerChip.hidden = true;
       return;
