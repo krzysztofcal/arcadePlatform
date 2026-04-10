@@ -981,7 +981,7 @@
       els.allInBtn.disabled = !liveReady;
     }
     if (els.amountInputWrap){
-      els.amountInputWrap.hidden = !amountAction;
+      els.amountInputWrap.hidden = false;
       if (amountAction){
         var constraints = state.actionConstraints || {};
         var min = amountAction === 'RAISE' && Number.isFinite(constraints.minRaiseTo) ? Math.max(1, Math.trunc(constraints.minRaiseTo)) : 1;
@@ -998,10 +998,13 @@
           }
         }
         if (els.amountValue) els.amountValue.textContent = formatCompactAmount(Number(els.amountInput && els.amountInput.value ? els.amountInput.value : min));
+        if (els.amountInputWrap.classList && typeof els.amountInputWrap.classList.remove === 'function') els.amountInputWrap.classList.remove('is-disabled');
+      } else if (els.amountInputWrap.classList && typeof els.amountInputWrap.classList.add === 'function') {
+        els.amountInputWrap.classList.add('is-disabled');
       }
     }
     if (els.amountInput) els.amountInput.disabled = !liveReady || !amountAction;
-    if (els.amountValue && (els.amountInputWrap.hidden || !amountAction)) {
+    if (els.amountValue && !amountAction) {
       els.amountValue.textContent = formatCompactAmount(parseInt(els.amountInput && els.amountInput.value ? els.amountInput.value : '20', 10) || 20);
     }
   }

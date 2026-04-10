@@ -196,6 +196,8 @@ test('poker v2 boots live mode, preserves table links, and sends WS commands', a
   assert.equal(harness.elements.pokerV2JoinBtn.textContent, 'Join', 'v2 should not mark the user as seated before a live snapshot confirms it');
   assert.equal(harness.elements.pokerV2StartBtn.hidden, true, 'start hand should stay hidden until a live seat is confirmed');
   assert.equal(harness.elements.pokerV2StackText.textContent, '—', 'v2 should not show demo stack data before a live snapshot');
+  assert.equal(harness.elements.pokerV2AmountInputWrap.hidden, false, 'amount rail should stay rendered even when betting is unavailable');
+  assert.equal(harness.elements.pokerV2AmountInput.disabled, true, 'amount rail should disable when bet/raise is unavailable');
 
   harness.elements.pokerV2SeatNo.value = '3';
   harness.elements.pokerV2BuyIn.value = '240';
