@@ -96,10 +96,24 @@ function resolveObserveOnlyJoin(rawValue) {
   return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on";
 }
 
-const persistedBootstrapEnabled = Boolean(process.env.SUPABASE_DB_URL || process.env.WS_PERSISTED_BOOTSTRAP_FIXTURES_JSON || process.env.WS_PERSISTED_STATE_FILE);
+function resolveAuthoritativeJoinEnabled(rawValue, { hasSupabaseDbUrl = false, observeOnlyJoinEnabled = false } = {}) {
+  if (rawValue === undefined || rawValue === null || String(rawValue).trim() === "") {
+    return Boolean(hasSupabaseDbUrl && !observeOnlyJoinEnabled);
+  }
+  const normalized = String(rawValue).trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) return true;
+  if (["0", "false", "no", "off"].includes(normalized)) return false;
+  return Boolean(hasSupabaseDbUrl && !observeOnlyJoinEnabled);
+}
+
+const hasSupabaseDbUrl = Boolean(process.env.SUPABASE_DB_URL);
+const persistedBootstrapEnabled = Boolean(hasSupabaseDbUrl || process.env.WS_PERSISTED_BOOTSTRAP_FIXTURES_JSON || process.env.WS_PERSISTED_STATE_FILE);
 const persistedStateWriteEnabled = Boolean(process.env.SUPABASE_DB_URL || process.env.WS_PERSISTED_STATE_FILE);
 const observeOnlyJoinEnabled = resolveObserveOnlyJoin(process.env.WS_OBSERVE_ONLY_JOIN);
-const authoritativeJoinEnabled = String(process.env.WS_AUTHORITATIVE_JOIN_ENABLED || "").trim() === "1";
+const authoritativeJoinEnabled = resolveAuthoritativeJoinEnabled(process.env.WS_AUTHORITATIVE_JOIN_ENABLED, {
+  hasSupabaseDbUrl,
+  observeOnlyJoinEnabled
+});
 
 function createPersistedBootstrapLoader({ env = process.env } = {}) {
   let repositoryPromise = null;
