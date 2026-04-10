@@ -205,7 +205,7 @@ test('poker v2 boots live mode, preserves table links, and sends WS commands', a
       stateVersion: 2,
       table: { tableId: 'table-1', status: 'OPEN', maxSeats: 6, members: [{ userId: 'user-1', seat: 1 }] },
       public: {
-        hand: { handId: 'hand-1', status: 'TURN' },
+        hand: { handId: 'hand-1', status: 'TURN', dealerSeatNo: 2 },
         turn: { userId: 'user-1', deadlineAt: Date.now() + 5000 },
         board: ['As', 'Kd', '3h', '2c'],
         pot: { total: 42, sidePots: [] },
@@ -237,6 +237,8 @@ test('poker v2 boots live mode, preserves table links, and sends WS commands', a
   assert.equal(heroStatus, undefined, 'hero seat should not repeat the active status pill');
   const bestHand = heroSeat.children.find((node) => node.className === 'poker-seat-best-hand');
   assert.ok(bestHand, 'hero seat should surface a best-hand summary');
+  assert.equal(harness.elements.pokerDealerChip.hidden, false, 'dealer chip should be visible when dealer seat is known');
+  assert.notEqual(harness.elements.pokerDealerChip.style.left, '50%', 'dealer chip should not stay centered when dealer seat is known');
 
   harness.elements.pokerV2AmountInput.value = '77';
   harness.elements.pokerV2AmountBtn.click();

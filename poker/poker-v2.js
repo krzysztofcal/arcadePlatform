@@ -524,6 +524,10 @@
 
     if (typeof handObj.status === 'string' && handObj.status) state.phase = handObj.status.toUpperCase();
     if (typeof handObj.handId === 'string' && handObj.handId) state.handId = handObj.handId;
+    if (Number.isInteger(payload.dealerSeat)) state.dealerSeat = payload.dealerSeat;
+    else if (Number.isInteger(payload.dealerSeatNo)) state.dealerSeat = payload.dealerSeatNo;
+    else if (Number.isInteger(handObj.dealerSeat)) state.dealerSeat = handObj.dealerSeat;
+    else if (Number.isInteger(handObj.dealerSeatNo)) state.dealerSeat = handObj.dealerSeatNo;
 
     if (typeof turnObj.userId === 'string' && turnObj.userId) state.turnUserId = turnObj.userId;
     if (turnObj.deadlineAt != null) state.turnDeadlineAt = Number(turnObj.deadlineAt);
@@ -693,6 +697,7 @@
       var folded = !!(seat && /FOLD/i.test(seat.status || ''));
       var anchor = getSeatAnchor(rotateSeatIndex(i, state.maxSeats), state.maxSeats);
       if (hero && state.maxSeats >= 4) anchor = { x: 34, y: 91 };
+      else if (rotateSeatIndex(i, state.maxSeats) === 3 && state.maxSeats >= 4) anchor = { x: 52, y: 84 };
       article.className = 'poker-seat'
         + (active ? ' poker-seat--active' : '')
         + (folded ? ' poker-seat--folded' : '')
@@ -773,14 +778,24 @@
 
   function renderDealerChip(){
     if (!els.dealerChip) return;
+    if (!Number.isInteger(state.dealerSeat)){
+      els.dealerChip.hidden = true;
+      return;
+    }
     var offset = getSeatNumberingOffset();
-    var seatNo = Number.isInteger(state.youSeat) ? state.youSeat : 0;
-    var currentSeat = deriveCurrentSeat();
-    if (currentSeat && Number.isInteger(currentSeat.seatNo)) seatNo = currentSeat.seatNo;
-    var index = Math.max(0, seatNo - offset);
-    var anchor = getSeatAnchor(rotateSeatIndex(index, Math.max(state.maxSeats, 1)), Math.max(state.maxSeats, 1));
-    els.dealerChip.style.left = anchor.x + '%';
-    els.dealerChip.style.top = anchor.y + '%';
+    var heroSeat = deriveCurrentSeat();
+    var index = Math.max(0, state.dealerSeat - offset);
+    var rotatedIndex = rotateSeatIndex(index, Math.max(state.maxSeats, 1));
+    var anchor = getSeatAnchor(rotatedIndex, Math.max(state.maxSeats, 1));
+    if (rotatedIndex === 3 && state.maxSeats >= 4) anchor = { x: 52, y: 84 };
+    if (heroSeat && Number.isInteger(heroSeat.seatNo) && heroSeat.seatNo === state.dealerSeat && state.maxSeats >= 4){
+      anchor = { x: 34, y: 91 };
+    }
+    var tableX = anchor.x + (50 - anchor.x) * 0.28;
+    var tableY = anchor.y + (50 - anchor.y) * 0.34;
+    els.dealerChip.hidden = false;
+    els.dealerChip.style.left = tableX + '%';
+    els.dealerChip.style.top = tableY + '%';
   }
 
   function updateMenuLinks(){
