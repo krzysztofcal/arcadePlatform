@@ -89,6 +89,18 @@ test("shared authoritative join core avoids static netlify adapter imports", () 
   assert.match(joinText, /await\s+import\(["']\.\.\/\.\.\/netlify\/functions\/_shared\/chips-ledger\.mjs["']\)/);
 });
 
+test("shared inactive cleanup deps wrapper exists for production ws release layout", () => {
+  const depsText = fs.readFileSync("shared/poker-domain/inactive-cleanup-deps.mjs", "utf8");
+  assert.match(depsText, /netlify\/functions\/_shared\/chips-ledger\.mjs/);
+  assert.match(depsText, /netlify\/functions\/_shared\/poker-hole-cards-store\.mjs/);
+});
+
+test("ws server defaults authoritative join only for db-backed runtime when env flag is missing", () => {
+  const serverText = fs.readFileSync("ws-server/server.mjs", "utf8");
+  assert.match(serverText, /const hasSupabaseDbUrl = Boolean\(process\.env\.SUPABASE_DB_URL\)/);
+  assert.match(serverText, /return Boolean\(hasSupabaseDbUrl && !observeOnlyJoinEnabled\)/);
+});
+
 test("ws-server package declares postgres dependency for db-backed bootstrap runtime", () => {
   const packageJson = JSON.parse(fs.readFileSync("ws-server/package.json", "utf8"));
   assert.equal(packageJson.dependencies?.postgres, "^3.4.5");
