@@ -925,7 +925,16 @@ test("duplicate act requestId does not emit additional advancing state frame", a
       stateRow: { version: 0, state: {} }
     }
   };
-  const { port, child } = await createServer({ env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret, ...observeOnlyJoinEnv(), SUPABASE_DB_URL: "", WS_PERSISTED_BOOTSTRAP_FIXTURES_JSON: JSON.stringify(fixtures) } });
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      WS_POKER_SETTLED_REVEAL_MS: "60000",
+      ...observeOnlyJoinEnv(),
+      SUPABASE_DB_URL: "",
+      WS_PERSISTED_BOOTSTRAP_FIXTURES_JSON: JSON.stringify(fixtures)
+    }
+  });
 
   try {
     await waitForListening(child, 5000);
@@ -945,6 +954,16 @@ test("duplicate act requestId does not emit additional advancing state frame", a
     sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "snap-idem-2", ts: "2026-02-28T00:06:02Z", payload: { tableId, view: "snapshot" } });
     const afterFirst = await nextMessageOfType(ws, "stateSnapshot", 5000, "afterFirstAct", ["commandResult"]);
     assert.equal(afterFirst.type, "stateSnapshot");
+    let latestVersion = afterFirst.payload.stateVersion;
+    for (;;) {
+      const frame = await attemptMessage(ws, 300);
+      if (!frame) {
+        break;
+      }
+      if (frame.type === "stateSnapshot") {
+        latestVersion = frame.payload.stateVersion;
+      }
+    }
 
     sendFrame(ws, { version: "1.0", type: "act", requestId: "act-idem", ts: "2026-02-28T00:06:03Z", payload: { tableId, handId: base.payload.public.hand.handId, action: "fold" } });
     let replay = null;
@@ -964,7 +983,7 @@ test("duplicate act requestId does not emit additional advancing state frame", a
     sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "snap-idem-3", ts: "2026-02-28T00:06:04Z", payload: { tableId, view: "snapshot" } });
     const afterReplay = await nextMessageOfType(ws, "stateSnapshot", 5000, "afterReplayAct", ["commandResult"]);
     assert.equal(afterReplay.type, "stateSnapshot");
-    assert.equal(afterReplay.payload.stateVersion, afterFirst.payload.stateVersion);
+    assert.equal(afterReplay.payload.stateVersion, latestVersion);
 
     ws.close();
   } finally {
