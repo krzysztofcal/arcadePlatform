@@ -259,8 +259,8 @@ test('poker v2 boots live mode, preserves table links, and sends WS commands', a
   const bestHand = heroSeat.children.find((node) => node.className === 'poker-seat-best-hand');
   assert.ok(bestHand, 'hero seat should surface a best-hand summary');
   assert.equal(harness.elements.pokerDealerChip.hidden, false, 'dealer chip should be visible when the dealer seat is known');
-  assert.equal(harness.elements.pokerDealerChip.style.left, '25%');
-  assert.equal(harness.elements.pokerDealerChip.style.top, '62%');
+  assert.equal(harness.elements.pokerDealerChip.style.left, '32%');
+  assert.equal(harness.elements.pokerDealerChip.style.top, '49%');
 
   harness.elements.pokerV2AmountInput.value = '77';
   harness.elements.pokerV2AmountBtn.click();
@@ -356,8 +356,8 @@ test('poker v2 aligns the right rail seats and keeps the chip on the dealer seat
   assert.ok(rightBottomSeat);
   assert.equal(rightTopSeat.style.left, '80%');
   assert.equal(rightBottomSeat.style.left, '80%');
-  assert.equal(harness.elements.pokerDealerChip.style.left, '68%');
-  assert.equal(harness.elements.pokerDealerChip.style.top, '27%');
+  assert.equal(harness.elements.pokerDealerChip.style.left, '64%');
+  assert.equal(harness.elements.pokerDealerChip.style.top, '14%');
 });
 
 test('poker v2 shows a live turn clock only on the active seat avatar', async () => {
@@ -560,10 +560,15 @@ test('poker v2 shows winner badges and reveals showdown winner cards during sett
   const villainBadge = findSeatChild(villainSeat, 'poker-seat-winner-badge');
   const heroBadge = findSeatChild(heroSeat, 'poker-seat-winner-badge');
   const villainCards = findSeatChild(villainSeat, 'poker-seat-cards');
+  const villainBadgeLabel = findSeatChild(villainBadge, 'poker-seat-winner-label');
+  const villainBadgeCards = findSeatChild(villainBadge, 'poker-seat-winner-cards');
 
   assert.ok(villainBadge);
-  assert.equal(villainBadge.textContent, 'Winner');
+  assert.equal(findSeatChild(villainBadge, 'poker-seat-winner-title').textContent, 'Winner');
   assert.ok(heroBadge);
+  assert.ok(villainBadgeLabel);
+  assert.equal(villainBadgeLabel.textContent.length > 0, true);
+  assert.equal(villainBadgeCards.children.length, 5);
   assert.equal(villainCards.children.length, 2);
   assert.equal(villainCards.children[0].className.includes('poker-card--back'), false);
   assert.equal(villainCards.children[1].className.includes('poker-card--back'), false);
@@ -646,7 +651,9 @@ test('poker v2 keeps winner badges and revealed cards visible through the local 
   const villainCards = findSeatChild(villainSeat, 'poker-seat-cards');
 
   assert.ok(villainBadge);
-  assert.equal(villainBadge.textContent, 'Winner');
+  assert.equal(findSeatChild(villainBadge, 'poker-seat-winner-title').textContent, 'Winner');
+  assert.ok(findSeatChild(villainBadge, 'poker-seat-winner-label'));
+  assert.equal(findSeatChild(villainBadge, 'poker-seat-winner-cards').children.length, 5);
   assert.equal(villainCards.children.length, 2);
   assert.equal(villainCards.children[0].className.includes('poker-card--back'), false);
   assert.equal(villainCards.children[1].className.includes('poker-card--back'), false);
@@ -699,6 +706,9 @@ test('poker v2 keeps winner cards hidden when the hand ends without showdown com
   const villainCards = findSeatChild(villainSeat, 'poker-seat-cards');
 
   assert.ok(villainBadge);
+  assert.equal(findSeatChild(villainBadge, 'poker-seat-winner-title').textContent, 'Winner');
+  assert.equal(findSeatChild(villainBadge, 'poker-seat-winner-label'), undefined);
+  assert.equal(findSeatChild(villainBadge, 'poker-seat-winner-cards'), undefined);
   assert.equal(villainCards.children[0].className, 'poker-card poker-card--back');
   assert.equal(villainCards.children[1].className, 'poker-card poker-card--back');
 });

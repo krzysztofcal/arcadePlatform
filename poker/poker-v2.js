@@ -709,10 +709,16 @@
   }
 
   function getHeroBestHand(){
-    var mergedCards = (Array.isArray(state.heroCards) ? state.heroCards.slice(0, 2) : []).concat(Array.isArray(state.communityCards) ? state.communityCards.slice(0, 5) : []);
+    var mergedCards = (Array.isArray(state.heroCards) ? state.heroCards.slice(0, 2) : []).concat(getDisplayCommunityCards());
     var best = evaluateViewerBestHand(mergedCards);
     if (!best || !Array.isArray(best.cards) || best.cards.length !== 5) return null;
     return best;
+  }
+
+  function getDisplayCommunityCards(){
+    if (Array.isArray(state.communityCards) && state.communityCards.length) return state.communityCards.slice(0, 5);
+    var sticky = getActiveWinnerReveal();
+    return sticky && Array.isArray(sticky.communityCards) ? sticky.communityCards.slice(0, 5) : [];
   }
 
   function resolveStack(userId){
@@ -846,6 +852,20 @@
     return Array.isArray(revealed) && revealed.length === 2 ? revealed : null;
   }
 
+  function getWinnerHandSummary(seat){
+    if (!seat || typeof seat.userId !== 'string') return null;
+    var revealCards = getSeatRevealCards(seat);
+    if (!Array.isArray(revealCards) || revealCards.length !== 2) return null;
+    var boardCards = getDisplayCommunityCards();
+    if (!Array.isArray(boardCards) || boardCards.length < 3) return null;
+    var best = evaluateViewerBestHand(revealCards.concat(boardCards));
+    if (!best || !Array.isArray(best.cards) || best.cards.length !== 5) return null;
+    return {
+      label: formatViewerHandCategory(best.category),
+      cards: best.cards.slice(0, 5)
+    };
+  }
+
   function renderSeats(){
     if (!els.seatLayer) return;
     els.seatLayer.innerHTML = '';
@@ -928,7 +948,27 @@
       if (seat && isWinnerSeat(seat)){
         var winnerBadge = document.createElement('div');
         winnerBadge.className = 'poker-seat-winner-badge';
-        winnerBadge.textContent = 'Winner';
+        var winnerTitle = document.createElement('div');
+        winnerTitle.className = 'poker-seat-winner-title';
+        winnerTitle.textContent = 'Winner';
+        winnerBadge.appendChild(winnerTitle);
+        var winnerSummary = getWinnerHandSummary(seat);
+        if (winnerSummary){
+          var winnerLabel = document.createElement('div');
+          winnerLabel.className = 'poker-seat-winner-label';
+          winnerLabel.textContent = winnerSummary.label;
+          winnerBadge.appendChild(winnerLabel);
+          var winnerCards = document.createElement('div');
+          winnerCards.className = 'poker-seat-winner-cards';
+          winnerSummary.cards.forEach(function(card){
+            var normalizedWinnerCard = normalizeCard(card);
+            var chip = document.createElement('span');
+            chip.className = 'poker-seat-winner-card' + (normalizedWinnerCard && (normalizedWinnerCard.s === 'H' || normalizedWinnerCard.s === 'D') ? ' poker-seat-winner-card--red' : '');
+            chip.textContent = normalizedWinnerCard ? (normalizedWinnerCard.r + SUIT_SYMBOLS[normalizedWinnerCard.s]) : '?';
+            winnerCards.appendChild(chip);
+          });
+          winnerBadge.appendChild(winnerCards);
+        }
         article.appendChild(winnerBadge);
       }
       article.appendChild(stack);
@@ -958,9 +998,7 @@
   function renderCommunityCards(){
     if (!els.communityCards) return;
     els.communityCards.innerHTML = '';
-    var cards = Array.isArray(state.communityCards) && state.communityCards.length
-      ? state.communityCards
-      : (getActiveWinnerReveal() ? stickyWinnerReveal.communityCards : []);
+    var cards = getDisplayCommunityCards();
     cards.forEach(function(card){
       els.communityCards.appendChild(createCard(card));
     });
@@ -1003,13 +1041,13 @@
         slotIndex = 3;
       }
     }
-    var chipOffset = { x: 0, y: -8 };
-    if (slotIndex === 0) chipOffset = { x: 0, y: 8 };
-    else if (slotIndex === 1) chipOffset = { x: -12, y: -2 };
-    else if (slotIndex === 2) chipOffset = { x: -12, y: -12 };
-    else if (slotIndex === 3) chipOffset = { x: 11, y: -7 };
-    else if (slotIndex === 4) chipOffset = { x: 9, y: -5 };
-    else if (slotIndex === 5) chipOffset = { x: 9, y: 5 };
+    var chipOffset = { x: 0, y: -14 };
+    if (slotIndex === 0) chipOffset = { x: 0, y: -16 };
+    else if (slotIndex === 1) chipOffset = { x: -16, y: -15 };
+    else if (slotIndex === 2) chipOffset = { x: -16, y: -18 };
+    else if (slotIndex === 3) chipOffset = { x: 14, y: -16 };
+    else if (slotIndex === 4) chipOffset = { x: 16, y: -18 };
+    else if (slotIndex === 5) chipOffset = { x: 16, y: -15 };
     els.dealerChip.hidden = false;
     els.dealerChip.style.left = (anchor.x + chipOffset.x) + '%';
     els.dealerChip.style.top = (anchor.y + chipOffset.y) + '%';
