@@ -561,7 +561,7 @@
     return revealed;
   }
 
-  function cloneRevealedWinnerCards(source){
+  function cloneRevealedShowdownCards(source){
     var next = {};
     if (!isObject(source)) return next;
     Object.keys(source).forEach(function(userId){
@@ -582,7 +582,7 @@
         handId: handId,
         visibleUntilMs: Date.now() + WINNER_REVEAL_MS,
         winners: winners.slice(),
-        revealedShowdownCardsByUserId: cloneRevealedWinnerCards(state.revealedShowdownCardsByUserId),
+        revealedShowdownCardsByUserId: cloneRevealedShowdownCards(state.revealedShowdownCardsByUserId),
         communityCards: Array.isArray(state.communityCards) ? state.communityCards.slice(0, 5) : []
       };
     }
