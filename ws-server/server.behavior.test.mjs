@@ -1347,6 +1347,102 @@ test("resume outside replay window triggers deterministic resync plus fresh snap
   }
 });
 
+test("resume fallback snapshot on settled table still schedules delayed rollover", async () => {
+  const secret = "resume-settled-secret";
+  const settledAt = new Date(Date.now()).toISOString();
+  const tableId = "table_resume_settled";
+  const fixtures = {
+    [tableId]: {
+      tableRow: { id: tableId, max_players: 6, status: "active" },
+      seatRows: [
+        { user_id: "user_resume", seat_no: 1, status: "ACTIVE", is_bot: false },
+        { user_id: "user_other", seat_no: 2, status: "ACTIVE", is_bot: false }
+      ],
+      stateRow: {
+        version: 21,
+        state: {
+          handId: "h21",
+          phase: "SETTLED",
+          dealerSeatNo: 1,
+          community: [],
+          communityDealt: 0,
+          turnUserId: null,
+          turnStartedAt: null,
+          turnDeadlineAt: null,
+          showdown: {
+            handId: "h21",
+            winners: ["user_resume"],
+            reason: "computed"
+          },
+          handSettlement: {
+            handId: "h21",
+            settledAt,
+            payouts: { user_resume: 12 }
+          },
+          stacks: {
+            user_resume: 112,
+            user_other: 88
+          }
+        }
+      }
+    }
+  };
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      WS_STREAM_REPLAY_CAP: "1",
+      WS_POKER_SETTLED_REVEAL_MS: "1000",
+      SUPABASE_DB_URL: "",
+      ...persistedBootstrapFixturesEnv(fixtures)
+    }
+  });
+  try {
+    await waitForListening(child, 5000);
+    const ws = await connectClient(port);
+    const helloAck = await hello(ws);
+    await auth(ws, makeHs256Jwt({ secret, sub: "user_resume" }));
+
+    sendFrame(ws, { version: "1.0", type: "table_join", requestId: "join-settled-r1", ts: "2026-02-28T00:00:01Z", payload: { tableId } });
+    await nextMessageOfType(ws, "commandResult");
+    sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "snap-settled-r1", ts: "2026-02-28T00:00:02Z", payload: { tableId, view: "snapshot" } });
+    await nextMessageOfType(ws, "stateSnapshot");
+    sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "snap-settled-r2", ts: "2026-02-28T00:00:03Z", payload: { tableId, view: "snapshot" } });
+    await nextMessageOfType(ws, "stateSnapshot");
+    ws.close();
+
+    const ws2 = await connectClient(port);
+    await hello(ws2);
+    await auth(ws2, makeHs256Jwt({ secret, sub: "user_resume" }), "auth-settled-r2");
+    sendFrame(ws2, {
+      version: "1.0",
+      type: "resume",
+      requestId: "resume-settled-r2",
+      roomId: tableId,
+      ts: "2026-02-28T00:00:04Z",
+      payload: { tableId, sessionId: helloAck.payload.sessionId, lastSeq: 0 }
+    });
+
+    const resync = await nextMessageOfType(ws2, "resync");
+    const resumedSnapshot = await nextMessageOfType(ws2, "stateSnapshot");
+    assert.equal(resync.payload.mode, "required");
+    assert.ok(["SETTLED", "PREFLOP"].includes(resumedSnapshot.payload.public.hand.status));
+    if (resumedSnapshot.payload.public.hand.status === "SETTLED") {
+      await new Promise((resolve) => setTimeout(resolve, 1100));
+      sendFrame(ws2, { version: "1.0", type: "table_state_sub", requestId: "snap-settled-r3", ts: "2026-02-28T00:00:05Z", payload: { tableId, view: "snapshot" } });
+      const rolledSnapshot = await nextMessageOfType(ws2, "stateSnapshot");
+      assert.equal(rolledSnapshot.payload.public.hand.status, "PREFLOP");
+      assert.equal(rolledSnapshot.payload.stateVersion > resumedSnapshot.payload.stateVersion, true);
+    } else {
+      assert.equal(resumedSnapshot.payload.stateVersion > 21, true);
+    }
+    ws2.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
 test("resume replay is isolated by session stream for same authenticated user", async () => {
   const secret = "same-user-session-isolation";
   const { port, child } = await createServer({ env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret, WS_STREAM_REPLAY_CAP: "16" } });
@@ -3540,6 +3636,84 @@ test("WS act optimistic conflict returns deterministic rejection and restored sn
     const afterConflict = await nextMessageOfType(ws, "stateSnapshot");
     assert.equal(afterConflict.payload.stateVersion, forced.tables[tableId].stateRow.version);
 
+    ws.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("optimistic conflict restore to settled state still schedules delayed rollover", async () => {
+  const secret = "persist-conflict-settled-secret";
+  const tableId = "table_ws_persist_conflict_settled";
+  const store = {
+    tables: {
+      [tableId]: {
+        tableRow: { id: tableId, max_players: 6, status: "active" },
+        seatRows: [
+          { user_id: "seat_actor", seat_no: 1, status: "ACTIVE", is_bot: false },
+          { user_id: "seat_other", seat_no: 2, status: "ACTIVE", is_bot: false }
+        ],
+        stateRow: { version: 0, state: {} }
+      }
+    }
+  };
+  const { dir, filePath } = await writePersistedFile(store);
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      WS_PERSISTED_STATE_FILE: filePath,
+      WS_POKER_SETTLED_REVEAL_MS: "50"
+    }
+  });
+
+  try {
+    await waitForListening(child, 5000);
+    const ws = await connectClient(port);
+    await hello(ws);
+    await auth(ws, makeHs256Jwt({ secret, sub: "seat_actor" }), "auth-conflict-settled");
+    sendFrame(ws, { version: "1.0", type: "table_join", requestId: "join-conflict-settled", ts: "2026-02-28T02:10:00Z", payload: { tableId } });
+    await nextMessageOfType(ws, "commandResult");
+    await nextMessageOfType(ws, "table_state");
+    sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "snap-conflict-settled", ts: "2026-02-28T02:10:01Z", payload: { tableId, view: "snapshot" } });
+    const baseline = await nextMessageOfType(ws, "stateSnapshot");
+    const handId = baseline.payload.public.hand.handId;
+
+    const forced = await readPersistedFile(filePath);
+    const nextVersion = baseline.payload.stateVersion + 7;
+    const settledState = {
+      ...forced.tables[tableId].stateRow.state,
+      phase: "SETTLED",
+      turnUserId: null,
+      turnStartedAt: null,
+      turnDeadlineAt: null,
+      showdown: {
+        handId,
+        winners: ["seat_actor"],
+        reason: "computed"
+      },
+      handSettlement: {
+        handId,
+        settledAt: new Date(Date.now()).toISOString(),
+        payouts: { seat_actor: 3 }
+      }
+    };
+    forced.tables[tableId].stateRow.version = nextVersion;
+    forced.tables[tableId].stateRow.state = settledState;
+    await fs.writeFile(filePath, `${JSON.stringify(forced)}\n`, "utf8");
+
+    sendFrame(ws, { version: "1.0", type: "act", requestId: "act-conflict-settled", ts: "2026-02-28T02:10:02Z", payload: { tableId, handId, action: "fold" } });
+    const rejected = await nextMessageOfType(ws, "commandResult");
+    assert.equal(rejected.payload.status, "rejected");
+    assert.equal(rejected.payload.reason, "conflict");
+
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "snap-conflict-settled-after", ts: "2026-02-28T02:10:03Z", payload: { tableId, view: "snapshot" } });
+    const rolledSnapshot = await nextMessageOfType(ws, "stateSnapshot");
+    assert.equal(rolledSnapshot.payload.public.hand.status, "PREFLOP");
+    assert.equal(rolledSnapshot.payload.stateVersion > nextVersion, true);
     ws.close();
   } finally {
     child.kill("SIGTERM");
