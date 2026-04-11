@@ -75,6 +75,7 @@
   var currentAccessToken = null;
   var authWatchTimer = null;
   var turnClockTimer = null;
+  var revealDismissTimer = null;
   var authUnsubscribe = null;
   var renderedSeatAnchors = {};
   var renderedSeatSlots = {};
@@ -90,6 +91,7 @@
     revealedWinnerCardsByUserId: {},
     communityCards: []
   };
+  var pendingPostRevealSnapshot = null;
   var els = {};
 
   function cloneState(source){
@@ -592,6 +594,45 @@
     return stickyWinnerReveal;
   }
 
+  function clearWinnerRevealTimer(){
+    if (!revealDismissTimer) return;
+    try { window.clearTimeout(revealDismissTimer); } catch (_err){}
+    revealDismissTimer = null;
+  }
+
+  function extractSnapshotHandId(payload){
+    if (!isObject(payload)) return null;
+    if (typeof payload.handId === 'string' && payload.handId) return payload.handId;
+    if (isObject(payload.hand) && typeof payload.hand.handId === 'string' && payload.hand.handId) return payload.hand.handId;
+    if (isObject(payload.public) && isObject(payload.public.hand) && typeof payload.public.hand.handId === 'string' && payload.public.hand.handId) return payload.public.hand.handId;
+    return null;
+  }
+
+  function scheduleRevealDismiss(){
+    var sticky = getActiveWinnerReveal();
+    clearWinnerRevealTimer();
+    if (!sticky) return;
+    var remainingMs = Math.max(0, sticky.visibleUntilMs - Date.now());
+    revealDismissTimer = window.setTimeout(function(){
+      revealDismissTimer = null;
+      stickyWinnerReveal.visibleUntilMs = 0;
+      if (pendingPostRevealSnapshot){
+        var nextPayload = pendingPostRevealSnapshot;
+        pendingPostRevealSnapshot = null;
+        mergeSnapshot(nextPayload);
+      }
+      render();
+      autoJoinSeat();
+    }, remainingMs);
+  }
+
+  function shouldDeferSnapshotUntilRevealEnds(payload){
+    var sticky = getActiveWinnerReveal();
+    if (!sticky) return false;
+    var nextHandId = extractSnapshotHandId(payload);
+    return !!(nextHandId && sticky.handId && nextHandId !== sticky.handId);
+  }
+
   function getDisplayWinnerUserIds(){
     if (state.showdown && Array.isArray(state.showdown.winners) && state.showdown.winners.length){
       return state.showdown.winners;
@@ -676,6 +717,7 @@
     state.handSettlement = normalizeHandSettlement(handSettlementObj);
     state.revealedWinnerCardsByUserId = mapRevealedWinnerCards(state.showdown);
     if (state.handId && previousHandId && state.handId !== previousHandId && (previousPhase === 'SETTLED' || stickyWinnerReveal.handId === previousHandId)){
+      clearWinnerRevealTimer();
       stickyWinnerReveal.visibleUntilMs = 0;
     }
     syncStickyWinnerReveal();
@@ -1447,6 +1489,8 @@
 
   function stopLiveMode(){
     stopTurnClock();
+    clearWinnerRevealTimer();
+    pendingPostRevealSnapshot = null;
     state.wsReady = false;
     if (wsClient && typeof wsClient.destroy === 'function'){
       try { wsClient.destroy(); } catch (_err){}
@@ -1511,7 +1555,13 @@
         }
       },
       onSnapshot: function(snapshot){
-        mergeSnapshot(snapshot && snapshot.payload ? snapshot.payload : null);
+        var payload = snapshot && snapshot.payload ? snapshot.payload : null;
+        if (shouldDeferSnapshotUntilRevealEnds(payload)){
+          pendingPostRevealSnapshot = payload;
+          scheduleRevealDismiss();
+          return;
+        }
+        mergeSnapshot(payload);
         render();
         autoJoinSeat();
       },

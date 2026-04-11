@@ -104,6 +104,18 @@ function createHarness(options = {}){
   };
 
   const intervalTimers = [];
+  const timeoutTimers = [];
+  let nextTimeoutId = 1;
+  let nowMs = Number.isFinite(options.nowMs) ? options.nowMs : 1_700_000_000_000;
+  const FakeDate = class extends Date {
+    constructor(...args){
+      if (args.length) super(...args);
+      else super(nowMs);
+    }
+    static now(){ return nowMs; }
+  };
+  FakeDate.parse = Date.parse;
+  FakeDate.UTC = Date.UTC;
   const sandbox = {
     window: {
       location: {
@@ -125,8 +137,15 @@ function createHarness(options = {}){
         return intervalTimers.length;
       },
       clearInterval(){},
-      clearTimeout(){},
-      setTimeout(fn){ fn(); return 1; }
+      clearTimeout(id){
+        const timer = timeoutTimers.find((entry) => entry.id === id);
+        if (timer) timer.cleared = true;
+      },
+      setTimeout(fn, delay){
+        const timer = { id: nextTimeoutId++, fn, at: nowMs + Math.max(0, Number(delay) || 0), cleared: false };
+        timeoutTimers.push(timer);
+        return timer.id;
+      }
     },
     document: {
       readyState: 'loading',
@@ -135,6 +154,7 @@ function createHarness(options = {}){
       createElement(tag){ return makeElement(tag); }
     },
     URLSearchParams,
+    Date: FakeDate,
     atob(value){ return Buffer.from(String(value), 'base64').toString('binary'); },
     Buffer,
     console
@@ -161,6 +181,17 @@ async function flush(){
     handlers.forEach((fn) => fn(event || {}));
   }
 
+  function advanceTime(ms){
+    nowMs += Math.max(0, Number(ms) || 0);
+    const due = timeoutTimers
+      .filter((timer) => !timer.cleared && timer.at <= nowMs)
+      .sort((left, right) => left.at - right.at);
+    due.forEach((timer) => {
+      timer.cleared = true;
+      timer.fn();
+    });
+  }
+
   return {
     elements,
     logs,
@@ -171,6 +202,7 @@ async function flush(){
     fireDomContentLoaded,
     fireDocumentEvent,
     flush,
+    advanceTime,
     getCreateOptions(){ return createOptions; },
     getIntervalCount(){ return intervalTimers.length; }
   };
@@ -361,8 +393,8 @@ test('poker v2 aligns the right rail seats and keeps the chip on the dealer seat
 });
 
 test('poker v2 shows a live turn clock only on the active seat avatar', async () => {
-  const nowMs = Date.now();
-  const harness = createHarness();
+  const nowMs = 1_700_000_100_000;
+  const harness = createHarness({ nowMs });
   harness.fireDomContentLoaded();
   await harness.flush();
 
@@ -405,8 +437,8 @@ test('poker v2 shows a live turn clock only on the active seat avatar', async ()
 });
 
 test('poker v2 turns the live clock red when five seconds remain', async () => {
-  const nowMs = Date.now();
-  const harness = createHarness();
+  const nowMs = 1_700_000_200_000;
+  const harness = createHarness({ nowMs });
   harness.fireDomContentLoaded();
   await harness.flush();
 
@@ -574,7 +606,7 @@ test('poker v2 shows winner badges and reveals showdown winner cards during sett
   assert.equal(villainCards.children[1].className.includes('poker-card--back'), false);
 });
 
-test('poker v2 clears the previous reveal immediately when the next hand starts', async () => {
+test('poker v2 keeps the previous reveal visible for the full local window before switching to the next hand', async () => {
   const harness = createHarness();
   harness.fireDomContentLoaded();
   await harness.flush();
@@ -647,17 +679,30 @@ test('poker v2 clears the previous reveal immediately when the next hand starts'
   await harness.flush();
 
   const villainSeat = findSeatByLabel(harness, 'Villain 1');
-  assert.equal(findSeatChild(villainSeat, 'poker-seat-winner-badge'), undefined);
+  assert.ok(findSeatChild(villainSeat, 'poker-seat-winner-badge'));
   const villainCards = findSeatChild(villainSeat, 'poker-seat-cards');
   assert.ok(villainCards);
   assert.equal(villainCards.children.length, 2);
-  assert.equal(villainCards.children[0].className.includes('poker-card--back'), true);
-  assert.equal(villainCards.children[1].className.includes('poker-card--back'), true);
+  assert.equal(villainCards.children[0].className.includes('poker-card--back'), false);
+  assert.equal(villainCards.children[1].className.includes('poker-card--back'), false);
+  assert.equal(harness.elements.pokerCommunityCards.children.length, 5);
+  assert.equal(harness.elements.pokerHeroCards.children.length, 2);
+
+  harness.advanceTime(4000);
+  await harness.flush();
+
+  const switchedVillainSeat = findSeatByLabel(harness, 'Villain 1');
+  assert.equal(findSeatChild(switchedVillainSeat, 'poker-seat-winner-badge'), undefined);
+  const switchedVillainCards = findSeatChild(switchedVillainSeat, 'poker-seat-cards');
+  assert.ok(switchedVillainCards);
+  assert.equal(switchedVillainCards.children.length, 2);
+  assert.equal(switchedVillainCards.children[0].className.includes('poker-card--back'), true);
+  assert.equal(switchedVillainCards.children[1].className.includes('poker-card--back'), true);
   assert.equal(harness.elements.pokerCommunityCards.children.length, 0);
   assert.equal(harness.elements.pokerHeroCards.children.length, 2);
 });
 
-test('poker v2 does not compute hero best hand from sticky winner reveal board after the next hand starts', async () => {
+test('poker v2 does not switch away from the settled reveal scene before the local window ends', async () => {
   const harness = createHarness();
   harness.fireDomContentLoaded();
   await harness.flush();
@@ -729,11 +774,13 @@ test('poker v2 does not compute hero best hand from sticky winner reveal board a
   });
   await harness.flush();
 
-  const heroSeat = harness.elements.pokerSeatLayer.children.find((node) => /poker-seat--hero/.test(node.className));
-  const bestHand = findSeatChild(heroSeat, 'poker-seat-best-hand');
-
-  assert.equal(harness.elements.pokerCommunityCards.children.length, 0, 'new hand should clear the previous board immediately');
-  assert.equal(bestHand, undefined, 'hero best hand should not use sticky reveal board from the previous hand');
+  assert.equal(harness.elements.pokerCommunityCards.children.length, 5, 'reveal board should stay visible until the local reveal window ends');
+  const villainSeat = findSeatByLabel(harness, 'Villain 1');
+  assert.ok(findSeatChild(villainSeat, 'poker-seat-winner-badge'));
+  const villainCards = findSeatChild(villainSeat, 'poker-seat-cards');
+  assert.ok(villainCards);
+  assert.equal(villainCards.children[0].className.includes('poker-card--back'), false);
+  assert.equal(villainCards.children[1].className.includes('poker-card--back'), false);
 });
 
 test('poker v2 keeps winner cards hidden when the hand ends without showdown comparison', async () => {
