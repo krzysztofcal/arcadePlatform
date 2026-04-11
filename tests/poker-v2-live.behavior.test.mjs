@@ -259,8 +259,8 @@ test('poker v2 boots live mode, preserves table links, and sends WS commands', a
   const bestHand = heroSeat.children.find((node) => node.className === 'poker-seat-best-hand');
   assert.ok(bestHand, 'hero seat should surface a best-hand summary');
   assert.equal(harness.elements.pokerDealerChip.hidden, false, 'dealer chip should be visible when the dealer seat is known');
-  assert.equal(harness.elements.pokerDealerChip.style.left, '32%');
-  assert.equal(harness.elements.pokerDealerChip.style.top, '49%');
+  assert.equal(harness.elements.pokerDealerChip.style.left, '24%');
+  assert.equal(harness.elements.pokerDealerChip.style.top, '74%');
 
   harness.elements.pokerV2AmountInput.value = '77';
   harness.elements.pokerV2AmountBtn.click();
@@ -356,8 +356,8 @@ test('poker v2 aligns the right rail seats and keeps the chip on the dealer seat
   assert.ok(rightBottomSeat);
   assert.equal(rightTopSeat.style.left, '80%');
   assert.equal(rightBottomSeat.style.left, '80%');
-  assert.equal(harness.elements.pokerDealerChip.style.left, '64%');
-  assert.equal(harness.elements.pokerDealerChip.style.top, '14%');
+  assert.equal(harness.elements.pokerDealerChip.style.left, '72%');
+  assert.equal(harness.elements.pokerDealerChip.style.top, '37%');
 });
 
 test('poker v2 shows a live turn clock only on the active seat avatar', async () => {

@@ -1043,13 +1043,13 @@
         slotIndex = 3;
       }
     }
-    var chipOffset = { x: 0, y: -14 };
-    if (slotIndex === 0) chipOffset = { x: 0, y: -16 };
-    else if (slotIndex === 1) chipOffset = { x: -16, y: -15 };
-    else if (slotIndex === 2) chipOffset = { x: -16, y: -18 };
-    else if (slotIndex === 3) chipOffset = { x: 14, y: -16 };
-    else if (slotIndex === 4) chipOffset = { x: 16, y: -18 };
-    else if (slotIndex === 5) chipOffset = { x: 16, y: -15 };
+    var chipOffset = { x: 0, y: 7 };
+    if (slotIndex === 0) chipOffset = { x: 8, y: 7 };
+    else if (slotIndex === 1) chipOffset = { x: -8, y: 8 };
+    else if (slotIndex === 2) chipOffset = { x: -8, y: 7 };
+    else if (slotIndex === 3) chipOffset = { x: -13, y: 3 };
+    else if (slotIndex === 4) chipOffset = { x: 8, y: 7 };
+    else if (slotIndex === 5) chipOffset = { x: 8, y: 8 };
     els.dealerChip.hidden = false;
     els.dealerChip.style.left = (anchor.x + chipOffset.x) + '%';
     els.dealerChip.style.top = (anchor.y + chipOffset.y) + '%';
