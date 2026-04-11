@@ -21,7 +21,7 @@ function initialCore() {
   };
 }
 
-test("engine rollover starts next preflop hand after settled terminal action", () => {
+test("engine terminal action settles hand before explicit rollover", () => {
   let coreState = bootstrapCoreStateHand({ tableId: "table_engine_roll", coreState: initialCore(), nowMs: 1000 }).coreState;
   const oldHandId = coreState.pokerState.handId;
 
@@ -37,11 +37,11 @@ test("engine rollover starts next preflop hand after settled terminal action", (
 
   assert.equal(folded.accepted, true);
   coreState = folded.coreState;
-  assert.equal(coreState.pokerState.phase, "PREFLOP");
-  assert.notEqual(coreState.pokerState.handId, oldHandId);
+  assert.equal(coreState.pokerState.phase, "SETTLED");
+  assert.equal(coreState.pokerState.handId, oldHandId);
   assert.deepEqual(coreState.pokerState.community, []);
   assert.equal(coreState.pokerState.communityDealt, 0);
-  assert.equal(coreState.pokerState.turnUserId !== null, true);
+  assert.equal(coreState.pokerState.turnUserId, null);
 });
 
 test("fold settlement carryover preserves stack-eligible members and deterministic dealer rotation", () => {
