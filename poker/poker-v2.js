@@ -1030,6 +1030,8 @@
       els.dealerChip.hidden = true;
       return;
     }
+    var heroSeat = deriveCurrentSeat();
+    var heroHasDealerChip = !!(heroSeat && Number.isInteger(heroSeat.seatNo) && heroSeat.seatNo === targetSeatNo);
     var scene = els.dealerChip.parentElement || null;
     var avatarEl = renderedSeatAvatars[targetSeatNo] || null;
     if (scene && avatarEl && typeof scene.getBoundingClientRect === 'function' && typeof avatarEl.getBoundingClientRect === 'function'){
@@ -1050,9 +1052,12 @@
           var avatarRadius = Math.min(avatarRect.width, avatarRect.height) / 2;
           var chipRadius = Math.min(chipRect.width || 38, chipRect.height || 38) / 2;
           var contactDistance = avatarRadius + chipRadius - 2;
+          var chipLeftPx = avatarCenterX + (unitX * contactDistance);
+          var chipTopPx = avatarCenterY + (unitY * contactDistance);
+          if (heroHasDealerChip) chipLeftPx -= chipRadius;
           els.dealerChip.hidden = false;
-          els.dealerChip.style.left = Math.round(avatarCenterX + (unitX * contactDistance)) + 'px';
-          els.dealerChip.style.top = Math.round(avatarCenterY + (unitY * contactDistance)) + 'px';
+          els.dealerChip.style.left = Math.round(chipLeftPx) + 'px';
+          els.dealerChip.style.top = Math.round(chipTopPx) + 'px';
           return;
         }
       }
@@ -1077,7 +1082,7 @@
     if (slotIndex === 0) chipOffset = { x: 8, y: 7 };
     else if (slotIndex === 1) chipOffset = { x: -8, y: 8 };
     else if (slotIndex === 2) chipOffset = { x: -8, y: 7 };
-    else if (slotIndex === 3) chipOffset = { x: -13, y: 3 };
+    else if (slotIndex === 3) chipOffset = { x: -32, y: 3 };
     else if (slotIndex === 4) chipOffset = { x: 8, y: 7 };
     else if (slotIndex === 5) chipOffset = { x: 8, y: 8 };
     els.dealerChip.hidden = false;
