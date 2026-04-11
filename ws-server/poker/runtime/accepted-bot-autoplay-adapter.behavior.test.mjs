@@ -1330,8 +1330,8 @@ test("accepted bot autoplay handles engine poker state through river showdown wi
   assert.equal(calls.resync, 0);
   assert.ok(calls.persist > 0);
   assert.ok(coreState.version > previousVersion);
-  assert.notEqual(coreState.pokerState?.handId, previousHandId);
-  assert.equal(["PREFLOP", "FLOP", "TURN", "RIVER"].includes(coreState.pokerState?.phase), true);
+  assert.equal(coreState.pokerState?.handId, previousHandId);
+  assert.equal(coreState.pokerState?.phase, "SETTLED");
 });
 
 test("accepted bot autoplay settles showdown and allows next hand to continue", async () => {

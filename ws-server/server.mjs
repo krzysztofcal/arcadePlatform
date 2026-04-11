@@ -830,17 +830,17 @@ function maybeScheduleSettledRollover(tableId) {
     return;
   }
 
+  const nowMs = Date.now();
   const settledAtMs = Date.parse(pokerState?.handSettlement?.settledAt || "");
-  const dueAt = Number.isFinite(settledAtMs)
-    ? settledAtMs + settledRevealMs
-    : Date.now() + settledRevealMs;
+  const effectiveSettledAtMs = Number.isFinite(settledAtMs) ? Math.max(settledAtMs, nowMs) : nowMs;
+  const dueAt = effectiveSettledAtMs + settledRevealMs;
   const existing = settledRolloverTimerByTableId.get(tableId);
   if (existing && existing.dueAt === dueAt) {
     return;
   }
 
   clearSettledRolloverTimer(tableId);
-  const delayMs = Math.max(0, dueAt - Date.now());
+  const delayMs = Math.max(0, dueAt - nowMs);
   const timer = setTimeout(() => {
     settledRolloverTimerByTableId.delete(tableId);
     void enqueueTableCommand({

@@ -1485,7 +1485,7 @@ test("WS table_join hydrates from persisted bootstrap fixture", async () => {
     }
   };
 
-  const { port, child } = await createServer({ env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret, SUPABASE_DB_URL: "", ...persistedBootstrapFixturesEnv(fixtures) } });
+  const { port, child } = await createServer({ env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret, WS_POKER_SETTLED_REVEAL_MS: "60000", SUPABASE_DB_URL: "", ...persistedBootstrapFixturesEnv(fixtures) } });
 
   try {
     await waitForListening(child, 5000);
@@ -2200,13 +2200,18 @@ test("timeout sweep advances seated persisted table state under observe-only run
     sendFrame(wsA, { version: "1.0", type: "table_state_sub", requestId: "snap-timeout-a", ts: "2026-02-28T00:40:03Z", payload: { tableId, view: "snapshot" } });
     const base = await nextMessageOfType(wsA, "stateSnapshot");
 
-    const timeoutUpdate = await nextStateUpdate(wsA, { baseline: base.payload, timeoutMs: 5000 });
-    assert.equal(timeoutUpdate.frame.type, "stateSnapshot");
-    assert.equal(timeoutUpdate.payload.stateVersion > base.payload.stateVersion, true);
-    assert.equal(Number.isFinite(timeoutUpdate.payload.public.turn.startedAt), true);
-    assert.equal(Number.isFinite(timeoutUpdate.payload.public.turn.deadlineAt), true);
-    assert.equal(timeoutUpdate.payload.public.turn.deadlineAt > timeoutUpdate.payload.public.turn.startedAt, true);
-    assert.equal(Object.prototype.hasOwnProperty.call(timeoutUpdate.payload.public, "holeCardsByUserId"), false);
+    const settledUpdate = await nextStateUpdate(wsA, { baseline: base.payload, timeoutMs: 5000 });
+    assert.equal(settledUpdate.frame.type, "stateSnapshot");
+    assert.equal(settledUpdate.payload.stateVersion > base.payload.stateVersion, true);
+    assert.equal(settledUpdate.payload.public.hand.status, "SETTLED");
+    assert.equal(Number.isFinite(settledUpdate.payload.public.turn.startedAt), false);
+    assert.equal(Number.isFinite(settledUpdate.payload.public.turn.deadlineAt), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(settledUpdate.payload.public, "holeCardsByUserId"), false);
+    const nextHandUpdate = await nextStateUpdate(wsA, { baseline: settledUpdate.payload, timeoutMs: 5000 });
+    assert.equal(nextHandUpdate.payload.public.hand.status, "PREFLOP");
+    assert.equal(Number.isFinite(nextHandUpdate.payload.public.turn.startedAt), true);
+    assert.equal(Number.isFinite(nextHandUpdate.payload.public.turn.deadlineAt), true);
+    assert.equal(nextHandUpdate.payload.public.turn.deadlineAt > nextHandUpdate.payload.public.turn.startedAt, true);
     assert.equal(await attemptMessage(wsA, 300), null);
 
     wsA.close();
