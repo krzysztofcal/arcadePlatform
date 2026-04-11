@@ -78,6 +78,7 @@
   var authUnsubscribe = null;
   var renderedSeatAnchors = {};
   var renderedSeatSlots = {};
+  var renderedSeatAvatars = {};
   var suggestedSeatNoParam = null;
   var shouldAutoJoin = false;
   var autoJoinAttempted = false;
@@ -873,6 +874,7 @@
     els.seatLayer.innerHTML = '';
     renderedSeatAnchors = {};
     renderedSeatSlots = {};
+    renderedSeatAvatars = {};
     var offset = getSeatNumberingOffset();
     var seatsByIndex = {};
     state.seats.forEach(function(seat){
@@ -909,6 +911,7 @@
       var avatar = document.createElement('div');
       avatar.className = 'poker-seat-avatar';
       avatar.textContent = seat ? initials(getDisplayName(seat)) : '+';
+      if (seat && Number.isInteger(seat.seatNo)) renderedSeatAvatars[seat.seatNo] = avatar;
       if (active){
         var turnClock = getTurnClockState();
         if (turnClock){
@@ -1026,6 +1029,33 @@
     if (!Number.isInteger(targetSeatNo)){
       els.dealerChip.hidden = true;
       return;
+    }
+    var scene = els.dealerChip.parentElement || null;
+    var avatarEl = renderedSeatAvatars[targetSeatNo] || null;
+    if (scene && avatarEl && typeof scene.getBoundingClientRect === 'function' && typeof avatarEl.getBoundingClientRect === 'function'){
+      var sceneRect = scene.getBoundingClientRect();
+      var avatarRect = avatarEl.getBoundingClientRect();
+      var chipRect = els.dealerChip.getBoundingClientRect();
+      if (sceneRect.width > 0 && sceneRect.height > 0 && avatarRect.width > 0 && avatarRect.height > 0){
+        var avatarCenterX = (avatarRect.left - sceneRect.left) + avatarRect.width / 2;
+        var avatarCenterY = (avatarRect.top - sceneRect.top) + avatarRect.height / 2;
+        var sceneCenterX = sceneRect.width / 2;
+        var sceneCenterY = sceneRect.height / 2;
+        var deltaX = sceneCenterX - avatarCenterX;
+        var deltaY = sceneCenterY - avatarCenterY;
+        var magnitude = Math.sqrt((deltaX * deltaX) + (deltaY * deltaY));
+        if (magnitude > 0){
+          var unitX = deltaX / magnitude;
+          var unitY = deltaY / magnitude;
+          var avatarRadius = Math.min(avatarRect.width, avatarRect.height) / 2;
+          var chipRadius = Math.min(chipRect.width || 38, chipRect.height || 38) / 2;
+          var contactDistance = avatarRadius + chipRadius - 2;
+          els.dealerChip.hidden = false;
+          els.dealerChip.style.left = Math.round(avatarCenterX + (unitX * contactDistance)) + 'px';
+          els.dealerChip.style.top = Math.round(avatarCenterY + (unitY * contactDistance)) + 'px';
+          return;
+        }
+      }
     }
     var anchor = renderedSeatAnchors[targetSeatNo] || null;
     var slotIndex = Number.isInteger(renderedSeatSlots[targetSeatNo]) ? renderedSeatSlots[targetSeatNo] : null;
