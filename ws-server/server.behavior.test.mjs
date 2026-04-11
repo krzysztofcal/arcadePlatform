@@ -1524,6 +1524,76 @@ test("WS table_join hydrates from persisted bootstrap fixture", async () => {
   }
 });
 
+test("snapshot-only settled bootstrap schedules rollover without prior broadcast subscription", async () => {
+  const secret = "test-secret";
+  const token = makeHs256Jwt({ secret, sub: "user_a" });
+  const tableId = "table_settled_snapshot_rollover";
+  const fixtures = {
+    [tableId]: {
+      tableRow: { id: tableId, max_players: 6, status: "active" },
+      seatRows: [
+        { user_id: "user_a", seat_no: 1, status: "ACTIVE", is_bot: false },
+        { user_id: "user_b", seat_no: 2, status: "ACTIVE", is_bot: false }
+      ],
+      stateRow: {
+        version: 21,
+        state: {
+          handId: "h21",
+          phase: "SETTLED",
+          dealerSeatNo: 1,
+          community: [],
+          communityDealt: 0,
+          turnUserId: null,
+          handSettlement: {
+            reason: "computed",
+            settledAt: new Date(Date.now()).toISOString(),
+            winners: [{ userId: "user_a", amount: 12 }]
+          },
+          showdown: {
+            reason: "computed",
+            winners: [{ userId: "user_a", amount: 12 }]
+          },
+          stacks: { user_a: 112, user_b: 88 }
+        }
+      }
+    }
+  };
+
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      WS_POKER_SETTLED_REVEAL_MS: "50",
+      SUPABASE_DB_URL: "",
+      ...persistedBootstrapFixturesEnv(fixtures)
+    }
+  });
+
+  try {
+    await waitForListening(child, 5000);
+    const ws = await connectClient(port);
+    await hello(ws);
+    const authOk = await auth(ws, token);
+    assert.equal(authOk.type, "authOk");
+
+    sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "req-snap-1", ts: "2026-02-28T00:00:03Z", payload: { tableId, view: "snapshot" } });
+    const initialSnapshot = await nextMessageOfType(ws, "stateSnapshot");
+    assert.equal(initialSnapshot.payload.public.hand.status, "SETTLED");
+
+    await new Promise((resolve) => setTimeout(resolve, 150));
+
+    sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "req-snap-2", ts: "2026-02-28T00:00:04Z", payload: { tableId, view: "snapshot" } });
+    const rolledSnapshot = await nextMessageOfType(ws, "stateSnapshot");
+    assert.equal(rolledSnapshot.payload.public.hand.status, "PREFLOP");
+    assert.equal(rolledSnapshot.payload.stateVersion > initialSnapshot.payload.stateVersion, true);
+
+    ws.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
 test("WS table_join missing persisted table returns protocol-safe error and later valid join works", async () => {
   const secret = "test-secret";
   const token = makeHs256Jwt({ secret, sub: "user_a" });

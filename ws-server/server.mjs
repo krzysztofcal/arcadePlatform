@@ -590,6 +590,7 @@ function sendTableState(ws, connState, { requestId = null, tableState, tableSnap
 }
 
 function sendStateSnapshot(ws, connState, { requestId = null, tableSnapshot, reason = null }) {
+  maybeScheduleSettledRollover(tableSnapshot.tableId);
   const payload = buildStateSnapshotPayload({
     tableSnapshot,
     userId: connState.session.userId
